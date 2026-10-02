@@ -3,18 +3,16 @@
 import json
 import sqlite3
 from pathlib import Path
-from typing import Any
 
-import jsonschema
 import pytest
-import yaml
+from ziyixi_proto.todofy.ui.v1 import history_pb
+from ziyixi_proto.wire_json import from_wire
 
-from todofy.core import metrics
+from todofy.core import metrics, owner_ui
 from todofy.core.metrics import Key, Step, StepPoint
 from todofy.core.sql import metrics as sql
 
 ROOT = Path(__file__).parents[2]
-SPEC: dict[str, Any] = yaml.safe_load((ROOT / "api" / "owner-api-v1.openapi.yaml").read_text())
 
 
 def test_data_point_fits_analytics_engine_limits():
@@ -117,8 +115,11 @@ def test_daily_series_is_dense_and_matches_the_contract():
     assert series[1]["mails_completed"] == 4 and series[1]["latency_p90_seconds"] == 40
     assert list(series[1]["gemini_tokens"].items()) == [("m1", 9), ("m2", 7)]
     assert series[2]["latency_p50_seconds"] is None and series[2]["gemini_tokens"] == {}
-    schema = {"$ref": "#/components/schemas/DailyMetrics"} | {"components": SPEC["components"]}
-    jsonschema.validate({"days": series}, schema)
+    # Every day is a todofy.ui.v1 MetricDay (ListMetricDays), read back strictly.
+    for day in series:
+        wire = json.loads(owner_ui.answer(owner_ui.metric_day(day)))
+        from_wire(history_pb.MetricDay, wire, strict=True)
+    assert json.loads(owner_ui.answer(owner_ui.metric_day(series[1])))["gemini_tokens"] == {"m1": 9, "m2": 7}
 
 
 def test_day_write_round_trips_through_json_each():

@@ -19,7 +19,7 @@ from tests.runtime.reports_support import (  # noqa: F401
     PUBLIC_HOST,
     Probe,
     clean_fixture,
-    component_errors,
+    idl_errors,
     probe_fixture,
 )
 from todofy.core import gtd
@@ -560,7 +560,6 @@ def test_the_owner_api_series(probe):
     seed_days(probe, TODAY, inbox_open=4, all_open=6)
     review(probe, SUNDAY)
     daily = probe.call("/gtd/daily", days=3, now=NOW)["daily"]
-    assert component_errors("GtdDaily", daily) == []
     assert [(day["day"], day["recorded"]) for day in daily["days"]] == [
         (gtd.shift(TODAY, -2), False),
         (YESTERDAY, False),
@@ -568,6 +567,28 @@ def test_the_owner_api_series(probe):
     ]
     assert daily["days"][-1]["inbox"]["open"] == 4
     assert daily["latest_review"]["week"] == "2026-W40" and daily["latest_review"]["state"] == "created"
+
+
+def test_the_owner_api_pages_newest_first(probe):
+    """todofy.ui.v1 ListGtdDays and ListGtdReviews: newest first, a page at a time, never past what is kept."""
+    seed_days(probe, TODAY, inbox_open=4, all_open=6)
+    first = probe.call("/gtd/days", size=2, now=NOW)
+    assert [(day["day"], day["recorded"]) for day in first["days"]] == [(TODAY, True), (YESTERDAY, False)]
+    assert first["before"] == YESTERDAY
+    assert all(idl_errors("GtdDay", day) == [] for day in first["days"])
+    second = probe.call("/gtd/days", size=2, before=first["before"], now=NOW)
+    assert [day["day"] for day in second["days"]] == [gtd.shift(TODAY, -2), gtd.shift(TODAY, -3)]
+    # The oldest page stops at the DAILY_DAYS kept and has no next page.
+    last = probe.call("/gtd/days", size=10, before=gtd.shift(TODAY, -115), now=NOW)
+    assert [day["day"] for day in last["days"]] == [gtd.shift(TODAY, -n) for n in range(116, 120)]
+    assert last["before"] is None
+    for sunday in (SUNDAY, SUNDAY + 7 * DAY, SUNDAY + 14 * DAY):
+        review(probe, sunday)
+    reviews = probe.call("/gtd/reviews", size=2, now=SUNDAY + 15 * DAY)
+    assert [row["week"] for row in reviews["reviews"]] == ["2026-W42", "2026-W41"] and reviews["last"] == "2026-W41"
+    assert all(idl_errors("GtdReview", row) == [] for row in reviews["reviews"])
+    rest = probe.call("/gtd/reviews", size=2, before=reviews["last"], now=SUNDAY + 15 * DAY)
+    assert ([row["week"] for row in rest["reviews"]], rest["last"]) == (["2026-W40"], None)
 
 
 # ---- retention and privacy -------------------------------------------------------------------

@@ -9,13 +9,14 @@ import uuid
 from collections.abc import Callable, Iterator
 
 import pytest
+from ziyixi_proto.todofy.ui.v1 import todofy_ui_service_pb as pb
 
 from tests.fakes.gemini_fake import GeminiFake
 from tests.fakes.todoist_fake import TodoistFake, stamp
 from tests.runtime.conftest import pipeline_vars
 from tests.runtime.harness import wait_until
 from tests.runtime.ops_support import OpsStack, start_ops_stack
-from tests.runtime.owner_support import assert_contract
+from tests.runtime.owner_support import assert_message
 from todofy.core import gtd
 
 NOW = int(time.time())
@@ -102,17 +103,23 @@ def test_status_carries_the_gtd_counters(stack: OpsStack) -> None:
 
 
 def test_the_owner_api_serves_the_series(stack: OpsStack) -> None:
-    body = assert_contract(stack.owner.get("/api/v1/gtd/daily", params={"days": "3"}), "/api/v1/gtd/daily")
-    assert [day["recorded"] for day in body["days"]] == [False, False, True]
-    assert body["days"][-1]["inbox"]["open"] == 2 and body["latest_review"] is None
+    body = assert_message(stack.owner.get("/api/v1/gtdDays", params={"page_size": "3"}), pb.ListGtdDaysResponse)
+    days = body["gtd_days"]
+    assert [day.get("recorded", False) for day in days] == [True, False, False]
+    assert days[0]["inbox"]["open_count"] == 2
+    reviews = assert_message(
+        stack.owner.get("/api/v1/gtdReviews", params={"page_size": "1"}), pb.ListGtdReviewsResponse
+    )
+    assert reviews == {}
     assert SENTINEL not in json.dumps(body)
-    for bad in ("0", "121", "x"):
-        assert stack.owner.get("/api/v1/gtd/daily", params={"days": bad}).status_code == 400
+    for bad in ("-1", "x"):
+        assert stack.owner.get("/api/v1/gtdDays", params={"page_size": bad}).status_code == 400
 
 
 def test_an_owner_recompute_carries_the_open_mail_task(stack: OpsStack, gemini: GeminiFake) -> None:
-    body = {"kind": "recommendation", "action_request_id": str(uuid.uuid4())}
-    report = assert_contract(stack.post_owner("/api/v1/reports/recompute", body), "/api/v1/reports/recompute", "post")
+    body = {"kind": "recommendation", "request_id": str(uuid.uuid4())}
+    answer = assert_message(stack.post_owner("/api/v1/latestReports:recompute", body), pb.RecomputeReportResponse)
+    report = answer["recommendation"]
     assert (report["new_count"], report["carryover_count"]) == (0, 1)
     [call] = gemini.calls_mentioning("三天前的提醒")
     assert "[3 天前] 三天前的提醒" in call.user and "已完成" not in call.user

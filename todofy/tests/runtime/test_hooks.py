@@ -32,7 +32,7 @@ def test_same_bytes_are_idempotent_and_different_bytes_conflict(worker: Worker) 
     assert worker.post_event(body).status_code == 204
     conflict = worker.post_event(changed)
     assert (conflict.status_code, error_code(conflict)) == (409, "event_conflict")
-    arrivals = [t for t in worker.event(event_id)["transitions"] if t["from_state"] is None]
+    arrivals = [t for t in worker.event(event_id)["transitions"] if t["prior_state"] is None]
     assert len(arrivals) == 1
 
 

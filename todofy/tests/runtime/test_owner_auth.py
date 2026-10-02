@@ -8,15 +8,16 @@ from collections.abc import Iterator
 
 import pytest
 from cryptography.hazmat.primitives.asymmetric import rsa
+from ziyixi_proto.todofy.ui.v1 import status_pb
 
 from tests.runtime.harness import GATEWAY_AUTH_CONFIG, OWNER, AccessIssuer, Worker, start_gateway
 from tests.runtime.owner_support import (
     CSRF_KEY,
     ORIGIN,
-    assert_contract,
+    assert_message,
     assert_private,
+    assert_status,
     csrf_headers,
-    error_code,
     issue_csrf,
     mint_csrf,
     token_claims,
@@ -24,17 +25,20 @@ from tests.runtime.owner_support import (
 
 ALIAS = "owner.alias@example.org"
 EVENT_ID = "f8c1e9a0-1a98-4fb8-8ca1-4c0a3e710001"
-READS = {
-    "/api/v1/csrf": "/api/v1/csrf",
-    "/api/v1/overview": "/api/v1/overview",
-    "/api/v1/events": "/api/v1/events",
-    "/api/v1/events/{event_id}": f"/api/v1/events/{EVENT_ID}",
-    "/api/v1/reminders": "/api/v1/reminders",
-    "/api/v1/reports/latest": "/api/v1/reports/latest",
-    "/api/v1/legacy_text/{event_id}": f"/api/v1/legacy_text/{EVENT_ID}",
-    "/api/v1/setup": "/api/v1/setup",
-}
-RECONCILE = f"/api/v1/events/{EVENT_ID}/reconcile"
+READS = [
+    "/api/csrf",
+    "/api/v1/serviceStatus",
+    "/api/v1/mailEvents",
+    f"/api/v1/mailEvents/{EVENT_ID}",
+    "/api/v1/dailyReminders",
+    "/api/v1/latestReports",
+    "/api/v1/metricDays",
+    "/api/v1/gtdDays",
+    "/api/v1/gtdReviews",
+    f"/api/v1/legacyTexts/{EVENT_ID}",
+    "/api/v1/integration",
+]
+RECONCILE = f"/api/v1/mailEvents/{EVENT_ID}:reconcile"
 
 
 @pytest.fixture(scope="module")
@@ -55,6 +59,7 @@ def _login(access: AccessIssuer, **claims: object) -> dict[str, str]:
     return {"cf-access-jwt-assertion": access.token(**claims)}
 
 
+@pytest.mark.reaches("UNAUTHORIZED")
 def test_every_owner_read_needs_a_valid_access_login(jwt_worker: Worker, access: AccessIssuer) -> None:
     rejected = {
         "missing": {},
@@ -66,40 +71,42 @@ def test_every_owner_read_needs_a_valid_access_login(jwt_worker: Worker, access:
             "cf-access-jwt-assertion": access.token(key=rsa.generate_private_key(public_exponent=65537, key_size=2048))
         },
     }
-    for template, path in READS.items():
+    for path in READS:
         for case, headers in rejected.items():
             response = jwt_worker.owner.get(path, headers=headers)
             assert response.status_code == 401, (path, case)
-            assert_contract(response, template)
-            assert error_code(response) == "unauthorized"
+            assert_status(response, 401, "UNAUTHORIZED")
             assert_private(response)
 
 
 def test_writes_check_access_before_csrf(jwt_worker: Worker) -> None:
     response = jwt_worker.owner.post(RECONCILE, headers=csrf_headers(mint_csrf()))
-    assert (response.status_code, error_code(response)) == (401, "unauthorized")
+    assert_status(response, 401, "UNAUTHORIZED")
     assert_private(response)
 
 
 def test_an_alias_login_acts_as_the_owner(jwt_worker: Worker, access: AccessIssuer) -> None:
     alias = _login(access, email=ALIAS)
-    setup = jwt_worker.owner.get("/api/v1/setup", headers=alias)
-    assert setup.status_code == 200
-    assert assert_contract(setup, "/api/v1/setup")["access_owner"] == OWNER
-    assert jwt_worker.owner.get("/api/v1/setup", headers=_login(access, email="Second@Example.NET")).status_code == 200
+    integration = jwt_worker.owner.get("/api/v1/integration", headers=alias)
+    assert assert_message(integration, status_pb.Integration)["access_owner"] == OWNER
+    second = jwt_worker.owner.get("/api/v1/integration", headers=_login(access, email="Second@Example.NET"))
+    assert second.status_code == 200
 
     # The CSRF token belongs to ACCESS_OWNER, so it works for any of the owner's logins.
     headers = issue_csrf(jwt_worker.owner, alias)
     assert token_claims(headers["x-csrf-token"])["owner"] == OWNER
     owner_post = headers | _login(access)
-    response = jwt_worker.owner.post(RECONCILE, headers=owner_post, content=b"{}")
-    # Past Access and CSRF: the empty object fails the ReconcileRequest schema.
-    assert (response.status_code, error_code(response)) == (400, "invalid_request")
+    response = jwt_worker.owner.post(
+        RECONCILE, headers=owner_post | {"content-type": "application/json"}, content=b"{}"
+    )
+    # Past Access and CSRF: the empty object lacks the REQUIRED action and etag.
+    assert_status(response, 400, "BAD_REQUEST")
 
 
 def test_csrf_token_is_issued_with_a_strict_cookie(jwt_worker: Worker, access: AccessIssuer) -> None:
-    response = jwt_worker.owner.get("/api/v1/csrf", headers=_login(access))
-    token = assert_contract(response, "/api/v1/csrf")["token"]
+    response = jwt_worker.owner.get("/api/csrf", headers=_login(access))
+    assert response.status_code == 200, response.text
+    token = response.json()["token"]
     cookie = response.headers["set-cookie"]
     assert cookie.startswith(f"todofy_csrf={token};")
     for attribute in ("Path=/", "HttpOnly", "SameSite=Strict", "Max-Age=43200"):
@@ -131,9 +138,11 @@ def test_cross_site_and_forged_writes_get_403(jwt_worker: Worker, access: Access
     }
     for case, headers in rejected.items():
         response = jwt_worker.owner.post(RECONCILE, headers=headers)
-        assert (response.status_code, error_code(response)) == (403, "csrf_failed"), case
-        assert_contract(response, "/api/v1/events/{event_id}/reconcile", "post")
+        assert response.status_code == 403, case
+        assert_status(response, 403, "CSRF_FAILED")
         assert_private(response)
 
-    accepted = jwt_worker.owner.post(RECONCILE, headers=good | {"origin": ORIGIN.upper()}, content=b"[]")
-    assert (accepted.status_code, error_code(accepted)) == (400, "invalid_request")
+    accepted = jwt_worker.owner.post(
+        RECONCILE, headers=good | {"origin": ORIGIN.upper(), "content-type": "application/json"}, content=b"[]"
+    )
+    assert_status(accepted, 400, "BAD_REQUEST")

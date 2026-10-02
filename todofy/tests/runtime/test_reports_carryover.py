@@ -20,7 +20,7 @@ from tests.runtime.reports_support import (  # noqa: F401
     NOW,
     Probe,
     clean_fixture,
-    component_errors,
+    idl_errors,
     probe_fixture,
 )
 from todofy.core import gtd, prompts
@@ -251,7 +251,7 @@ def test_the_newsletter_gets_the_counts_on_demand(probe):
     old = {key: value for key, value in body.items() if key not in ("new_count", "carryover_count")}
     assert list(jsonschema.Draft202012Validator(SCHEMA).iter_errors(old)) == []
     latest = probe.call("/reports/latest")["latest"]
-    assert component_errors("ReportsLatest", latest) == []
+    assert idl_errors("LatestReports", latest) == []
 
 
 # ---- the reminder's project ------------------------------------------------------------------

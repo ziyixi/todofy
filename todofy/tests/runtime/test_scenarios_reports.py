@@ -3,11 +3,13 @@
 import uuid
 
 import pytest
+from ziyixi_proto.todofy.ui.v1 import reports_pb
+from ziyixi_proto.todofy.ui.v1 import todofy_ui_service_pb as pb
 
 from tests.fakes.gemini_fake import GeminiFake, text_reply
 from tests.runtime.conftest import Launch
 from tests.runtime.harness import Worker, error_code, mail_event, wait_until
-from tests.runtime.owner_support import assert_contract
+from tests.runtime.owner_support import assert_contract, assert_message
 from todofy.core.prompts import SUMMARY_RANGE
 from todofy.core.report_schema import EMPTY_WINDOW_SUMMARY
 
@@ -19,9 +21,10 @@ def worker(launch: Launch) -> Worker:
 
 
 def _recompute(worker: Worker, kind: str, **fields: object) -> dict:
-    body = {"kind": kind, "action_request_id": str(uuid.uuid4())} | fields
-    response = worker.post_owner("/api/v1/reports/recompute", body)
-    return assert_contract(response, "/api/v1/reports/recompute", "post")
+    """RecomputeReport (todofy.ui.v1): the report it stored."""
+    body = {"kind": kind, "request_id": str(uuid.uuid4())} | fields
+    response = worker.post_owner("/api/v1/latestReports:recompute", body)
+    return assert_message(response, pb.RecomputeReportResponse)[kind]
 
 
 def _complete_one(worker: Worker) -> str:
@@ -35,8 +38,8 @@ def test_precompute_stores_todays_empty_reports_without_calling_gemini(worker: W
     assert worker.trigger_cron().status_code == 200
 
     def stored() -> dict | None:
-        latest = worker.owner.get("/api/v1/reports/latest").json()
-        return latest if latest["summary"] and latest["recommendations"] else None
+        latest = worker.owner.get("/api/v1/latestReports").json()
+        return latest if latest.get("summary") and latest.get("recommendations") else None
 
     latest = wait_until(stored, 30, "precomputed reports")
 
@@ -46,8 +49,9 @@ def test_precompute_stores_todays_empty_reports_without_calling_gemini(worker: W
     assert gemini.calls() == []
     summary = assert_contract(worker.report("/api/summary"), "/api/summary")
     recommendation = assert_contract(worker.report("/api/recommendation", {"top": "10"}), "/api/recommendation")
+    # The owner sees exactly what the newsletter gets.
     assert (summary, recommendation) == (latest["summary"], latest["recommendations"][0])
-    assert_contract(worker.owner.get("/api/v1/reports/latest"), "/api/v1/reports/latest")
+    assert_message(worker.owner.get("/api/v1/latestReports"), reports_pb.LatestReports)
 
 
 def test_owner_recompute_summarises_the_window_with_the_range_prompt(worker: Worker, fresh_gemini: GeminiFake) -> None:
@@ -62,7 +66,7 @@ def test_owner_recompute_summarises_the_window_with_the_range_prompt(worker: Wor
 
 
 def test_recommendation_asks_for_json_and_never_pads(worker: Worker, fresh_gemini: GeminiFake) -> None:
-    report = _recompute(worker, "recommendation", top=10)
+    report = _recompute(worker, "recommendation", top_n=10)
 
     [call] = [c for c in fresh_gemini.calls() if c.response_schema is not None]
     assert (call.response_mime_type, call.response_schema["maxItems"]) == ("application/json", 10)
@@ -72,7 +76,7 @@ def test_recommendation_asks_for_json_and_never_pads(worker: Worker, fresh_gemin
 def test_unusable_model_output_is_reported_not_passed_through(worker: Worker, fresh_gemini: GeminiFake) -> None:
     fresh_gemini.queue_generate(text_reply("Here are your tasks: 1. do it"))
 
-    report = _recompute(worker, "recommendation", top=2)
+    report = _recompute(worker, "recommendation", top_n=2)
 
     assert (report["status"], report["tasks"], report["top_n"]) == ("model_output_invalid", [], 2)
 
@@ -91,6 +95,7 @@ def test_top_accepts_what_the_go_service_accepted(worker: Worker, top: str, top_
     assert report["top_n"] == top_n
 
 
+@pytest.mark.reaches("invalid_request")
 @pytest.mark.parametrize("top", ["0", "11", "abc", "1.5"])
 def test_top_out_of_range_is_400(worker: Worker, top: str) -> None:
     response = worker.report("/api/recommendation", {"top": top})

@@ -12,7 +12,7 @@ from tests.fakes.gemini_fake import GeminiFake
 from tests.fakes.server import Reply
 from tests.fakes.todoist_fake import TASKS_PATH, TodoistFake
 from tests.runtime.conftest import Launch
-from tests.runtime.harness import AUTH, HOOKS_HOST, Worker, error_code, mail_event
+from tests.runtime.harness import AUTH, HOOKS_HOST, Worker, mail_event, reason
 
 # Long enough for several alarm cycles (each worked step re-arms after 1 s).
 QUIET_S = 4
@@ -43,7 +43,7 @@ def test_a_todoist_auth_failure_pauses_the_whole_task_stage(
     time.sleep(QUIET_S)
 
     assert blocked["state"] == "summarized"
-    until = _stamp(worker.overview()["todoist"]["blocked_until"])
+    until = _stamp(worker.overview()["todoist"]["block_expire_time"])
     assert abs(until - datetime.now(UTC) - timedelta(hours=6)) < timedelta(minutes=1)
     assert worker.event(second)["state"] == "summarized"
     assert len(fresh_todoist.creates()) == 1
@@ -58,14 +58,14 @@ def test_an_exhausted_token_budget_defers_every_event_to_the_next_day(launch: La
 
     tomorrow = (datetime.now(UTC) + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
     for event in deferred:
-        assert (event["state"], _stamp(event["next_attempt_at"])) == ("pending", tomorrow)
+        assert (event["state"], _stamp(event["next_attempt_time"])) == ("pending", tomorrow)
     assert fresh_gemini.calls() == []
     overview = worker.overview()
-    assert (overview["gemini"]["token_budget"], overview["counts"]["pending"]) == (100, 2)
-    assert overview["counts"]["failed_summary"] == 0
+    assert (overview["gemini"]["token_budget"], overview["active_counts"]["pending_count"]) == (100, 2)
+    assert overview["active_counts"]["failed_summary_count"] == 0
 
 
-@pytest.mark.reaches("maintenance")
+@pytest.mark.reaches("maintenance", "MAINTENANCE")
 def test_maintenance_refuses_mail_and_owner_writes_and_stops_the_alarm(
     launch: Launch, fresh_gemini: GeminiFake
 ) -> None:
@@ -84,9 +84,9 @@ def test_maintenance_refuses_mail_and_owner_writes_and_stops_the_alarm(
     time.sleep(QUIET_S)
 
     assert worker.event(event_id)["state"] == "pending" and fresh_gemini.calls() == []
-    assert worker.overview()["flags"]["maintenance_mode"] is True
+    assert worker.overview()["switches"]["maintenance_mode"] is True
     response = worker.reconcile(event_id, "dismiss")
-    assert (response.status_code, error_code(response)) == (503, "maintenance")
+    assert (response.status_code, reason(response)) == (503, "MAINTENANCE")
     assert int(response.headers["retry-after"]) > 0
 
 
@@ -99,7 +99,7 @@ def test_processing_paused_accepts_mail_but_does_no_work(launch: Launch, fresh_g
 
     assert worker.event(event_id)["state"] == "pending"
     assert fresh_gemini.calls() == []
-    assert worker.overview()["flags"]["processing_paused"] is True
+    assert worker.overview()["switches"]["processing_paused"] is True
 
 
 def test_force_pause_todoist_summarises_but_holds_tasks(
@@ -113,4 +113,4 @@ def test_force_pause_todoist_summarises_but_holds_tasks(
 
     assert worker.event(event_id)["state"] == "summarized"
     assert len(fresh_gemini.calls_mentioning(event_id)) == 1 and fresh_todoist.creates() == []
-    assert worker.overview()["flags"]["force_pause_todoist"] is True
+    assert worker.overview()["switches"]["force_pause_todoist"] is True

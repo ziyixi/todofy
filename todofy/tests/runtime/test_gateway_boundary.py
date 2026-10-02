@@ -14,6 +14,8 @@ from typing import Any
 
 import httpx
 import pytest
+from ziyixi_proto.todofy.ui.v1 import todofy_ui_service_pb as pb
+from ziyixi_proto.wire_json import from_wire
 
 from tests.fakes.gemini_fake import GeminiFake
 from tests.fakes.todoist_fake import TodoistFake
@@ -26,6 +28,7 @@ from tests.runtime.harness import (
     Worker,
     error_code,
     mail_event,
+    reason,
     start_gateway,
 )
 from tests.runtime.owner_support import PRIVATE_HEADERS, assert_private
@@ -114,9 +117,11 @@ FORMER_ROUTES = [
     ("POST", "/newsletter/auth-failure"),
     ("GET", "/api/v1/overview"),
     ("POST", "/api/v1/reports/recompute"),
+    ("GET", "/api/v1/serviceStatus"),
 ]
 
 
+@pytest.mark.reaches("not_found")
 @pytest.mark.parametrize(("method", "path"), FORMER_ROUTES)
 @pytest.mark.parametrize("marker", ["1", "0"])
 def test_the_object_has_no_http_routes(core: Worker, method: str, path: str, marker: str) -> None:
@@ -154,33 +159,60 @@ def test_fetch_changes_nothing_and_rpc_answers_results(core: Worker) -> None:
     assert set(setup) == {"mail_source_id", "configured"}
     assert set(setup["configured"]) == {"gemini_api_key", "todoist_api_key", "todoist_project"}
 
-    # A 200 carries the JSON text as the core serialised it (Python's separators).
-    page = _rpc(core, "owner_api", OWNER, "GET", "/api/v1/events", "limit=1", None, None)
-    assert (page["status"], page["error"], page["retry_after"]) == (200, None, None)
-    assert page["body"].startswith('{"items": [{"event_id": ')
-    assert json.loads(page["body"])["items"][0]["event_id"] == event_id
+    # todofy.ui.v1: the response message as wire JSON text, and the next page's cursor.
+    page = _rpc(core, "owner_ui", OWNER, "ListMailEvents", '{"page_size":1}', None)
+    assert set(page) == {"ok", "next_cursor"}
+    listed = from_wire(pb.ListMailEventsResponse, json.loads(page["ok"]), strict=True).message
+    assert [event.name for event in listed.mail_events] == [f"mailEvents/{event_id}"]
+
+    # The owner API before todofy.ui.v1, which only the previous gateway calls during this deploy (one release).
+    old = _rpc(core, "owner_api", OWNER, "GET", "/api/v1/events", "limit=1", None, None)
+    assert (old["status"], old["error"], old["retry_after"]) == (200, None, None)
+    assert json.loads(old["body"])["items"][0]["event_id"] == event_id
 
 
 @pytest.mark.parametrize("owner", ["", "owner.example.com", "a@" + "x" * 253])
 def test_owner_api_needs_a_usable_owner(core: Worker, owner: str) -> None:
-    result = _rpc(core, "owner_api", owner, "GET", "/api/v1/overview", "", None, None)
-    assert result == _error(401, ApiError.UNAUTHORIZED)
+    result = _rpc(core, "owner_ui", owner, "GetServiceStatus", '{"name":"serviceStatus"}', None)
+    assert result == {"error": "UNAUTHORIZED", "detail": None, "retry_after": None}
+    old = _rpc(core, "owner_api", owner, "GET", "/api/v1/overview", "", None, None)
+    assert old == _error(401, ApiError.UNAUTHORIZED)
+
+
+@pytest.mark.parametrize(
+    ("method", "request_json"),
+    [
+        ("ListMailEvents", '{"limit":1}'),
+        ("ListMailEvents", "not json"),
+        ("ReconcileMailEvent", '{"name":"mailEvents/x"}'),
+        ("GetServiceStatus", '{"name":"overview"}'),
+    ],
+)
+def test_owner_ui_reads_every_request_strictly(core: Worker, method: str, request_json: str) -> None:
+    assert _rpc(core, "owner_ui", OWNER, method, request_json, None) == {
+        "error": "BAD_REQUEST",
+        "detail": None,
+        "retry_after": None,
+    }
+    unknown = _rpc(core, "owner_ui", OWNER, "GetIntegration", '{"name":"integration"}', None)
+    assert unknown["error"] == "NOT_FOUND"  # the gateway's own rpc
 
 
 def test_client_internal_headers_never_reach_the_object(worker: Worker) -> None:
     forged = {"x-todofy-request-id": CLIENT_REQUEST_ID, "x-todofy-owner": INTRUDER, "x-todofy-internal": "0"}
 
-    # Owner host: the object answers with the gateway's request ID, not the client's.
-    missing = worker.owner.get(f"/api/v1/events/{uuid.uuid4()}", headers=forged)
-    assert (missing.status_code, error_code(missing)) == (404, "not_found")
-    assert _envelope_id(missing) != CLIENT_REQUEST_ID
+    # Owner host: the answer carries the gateway's request ID, not the client's.
+    missing = worker.owner.get(f"/api/v1/mailEvents/{uuid.uuid4()}", headers=forged)
+    assert (missing.status_code, reason(missing)) == (404, "NOT_FOUND")
+    [info] = [d for d in missing.json()["error"]["details"] if d["@type"].endswith("google.rpc.RequestInfo")]
+    assert REQUEST_ID.fullmatch(info["request_id"]) and info["request_id"] != CLIENT_REQUEST_ID
 
     # The owner the object records is the one from Access, whatever the client claims.
-    action_id = str(uuid.uuid4())
-    body = {"kind": "summary", "action_request_id": action_id}
-    recomputed = worker.post_owner("/api/v1/reports/recompute", body, headers=forged)
+    request_id = str(uuid.uuid4())
+    body = {"kind": "summary", "request_id": request_id}
+    recomputed = worker.post_owner("/api/v1/latestReports:recompute", body, headers=forged)
     assert recomputed.status_code == 200, recomputed.text
-    rows = worker.d1(f"SELECT owner FROM owner_actions WHERE action_request_id = '{action_id}'")
+    rows = worker.d1(f"SELECT owner FROM owner_actions WHERE action_request_id = '{request_id}'")
     assert rows == [{"owner": OWNER}]
 
     # Hooks host: a forged marker of "0" does not stop the gateway's own request.
@@ -234,6 +266,7 @@ def test_health_answers_without_the_object(gateway_alone: Worker) -> None:
         gateway_alone.post_event(event),
         gateway_alone.report("/api/summary", auth=(REPORT_USER, REPORT_PASSWORD)),
         gateway_alone.report("/api/summary", auth=("ci-probe", "wrong")),
-        gateway_alone.owner.get("/api/v1/overview"),
     ):
         assert (response.status_code, error_code(response)) == (503, "unavailable")
+    owner = gateway_alone.owner.get("/api/v1/serviceStatus")
+    assert (owner.status_code, reason(owner)) == (503, "UNAVAILABLE")

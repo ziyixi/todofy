@@ -8,7 +8,7 @@ import pytest
 
 from tests.fakes.gemini_fake import GeminiFake, error_reply
 from tests.runtime.conftest import Launch
-from tests.runtime.harness import Worker, error_code
+from tests.runtime.harness import Worker, error_code, reason
 from tests.runtime.owner_support import assert_contract
 
 DAY = 86400
@@ -88,15 +88,16 @@ def test_twenty_bad_passwords_lock_the_newsletter_endpoints_for_the_hour(limited
     assert limited.d1("SELECT count FROM auth_failures") == [{"count": LOCKOUT_FAILURES}]
 
 
+@pytest.mark.reaches("RATE_LIMITED")
 def test_report_computations_are_capped_per_hour(limited: Worker) -> None:
     _clear_of_the_hour_boundary(margin_s=60)
     statuses = []
     for _ in range(HOURLY_REPORT_CAP + 1):
-        body = {"kind": "summary", "action_request_id": str(uuid.uuid4())}
-        response = limited.post_owner("/api/v1/reports/recompute", body)
+        body = {"kind": "summary", "request_id": str(uuid.uuid4())}
+        response = limited.post_owner("/api/v1/latestReports:recompute", body)
         statuses.append(response.status_code)
         if response.status_code == 429:
-            assert error_code(response) == "rate_limited"
+            assert reason(response) == "RATE_LIMITED"
             assert 0 < int(response.headers["retry-after"]) <= 3600
             break
     assert statuses[-1] == 429 and set(statuses[:-1]) == {200} and len(statuses) <= HOURLY_REPORT_CAP + 1

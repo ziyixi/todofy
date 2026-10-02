@@ -11,15 +11,14 @@ import pytest
 from tests.runtime.harness import Worker, start_gateway
 from tests.runtime.owner_support import (
     CSRF_KEY,
-    assert_contract,
     assert_private,
+    assert_status,
     csrf_headers,
-    error_code,
     issue_csrf,
     mint_csrf,
 )
 
-RECONCILE = "/api/v1/events/f8c1e9a0-1a98-4fb8-8ca1-4c0a3e710001/reconcile"
+RECONCILE = "/api/v1/mailEvents/f8c1e9a0-1a98-4fb8-8ca1-4c0a3e710001:reconcile"
 
 
 @pytest.fixture(scope="module")
@@ -37,35 +36,30 @@ def unconfigured_worker(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Wo
 
 def test_maintenance_blocks_writes_after_the_csrf_check(maintenance_worker: Worker) -> None:
     headers = issue_csrf(maintenance_worker.owner)
-    for path in (RECONCILE, "/api/v1/reports/recompute"):
+    for path in (RECONCILE, "/api/v1/latestReports:recompute"):
         response = maintenance_worker.owner.post(path, headers=headers)
-        assert (response.status_code, error_code(response)) == (503, "maintenance"), path
-        assert response.headers["retry-after"].isdigit()
-        assert_contract(
-            response,
-            "/api/v1/reports/recompute" if "reports" in path else "/api/v1/events/{event_id}/reconcile",
-            "post",
-        )
+        assert response.status_code == 503, path
+        assert_status(response, 503, "MAINTENANCE")
+        assert response.headers["retry-after"] == "300"
         assert_private(response)
 
     forged = maintenance_worker.owner.post(RECONCILE, headers=headers | {"origin": "https://evil.example"})
-    assert (forged.status_code, error_code(forged)) == (403, "csrf_failed")
+    assert_status(forged, 403, "CSRF_FAILED")
 
 
 def test_maintenance_keeps_reads(maintenance_worker: Worker) -> None:
-    for path in ("/api/v1/setup", "/api/v1/events", "/api/v1/csrf"):
+    for path in ("/api/v1/integration", "/api/v1/mailEvents", "/api/csrf", "/api/v1/serviceStatus"):
         assert maintenance_worker.owner.get(path).status_code == 200, path
 
 
+@pytest.mark.reaches("NOT_CONFIGURED")
 def test_missing_signing_key_blocks_only_csrf_and_writes(unconfigured_worker: Worker) -> None:
-    issued = unconfigured_worker.owner.get("/api/v1/csrf")
-    assert (issued.status_code, error_code(issued)) == (503, "not_configured")
-    assert_contract(issued, "/api/v1/csrf")
+    issued = unconfigured_worker.owner.get("/api/csrf")
+    assert_status(issued, 503, "NOT_CONFIGURED")
     assert_private(issued)
 
     write = unconfigured_worker.owner.post(RECONCILE, headers=csrf_headers(mint_csrf()))
-    assert (write.status_code, error_code(write)) == (503, "not_configured")
-    assert_contract(write, "/api/v1/events/{event_id}/reconcile", "post")
+    assert_status(write, 503, "NOT_CONFIGURED")
 
-    assert unconfigured_worker.owner.get("/api/v1/setup").status_code == 200
-    assert unconfigured_worker.owner.get("/api/v1/events").status_code == 200
+    assert unconfigured_worker.owner.get("/api/v1/integration").status_code == 200
+    assert unconfigured_worker.owner.get("/api/v1/mailEvents").status_code == 200

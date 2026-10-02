@@ -2,6 +2,8 @@
 messages (proto/todofy/ui/v1), and the IDL's enums against core/vocab.py."""
 
 import json
+import re
+from pathlib import Path
 
 import pytest
 from ziyixi_proto.todofy.ui.v1 import history_pb, mail_event_pb, reports_pb, status_pb
@@ -48,6 +50,11 @@ class TestVocabulary:
 
     def test_review_states_are_the_reminder_states(self):
         assert names(history_pb.GtdReview_State) == set(ReminderState)
+
+    def test_transition_actors_match_the_migration_check(self):
+        migration = (Path(__file__).parents[2] / "migrations" / "0001_init.sql").read_text()
+        actors = re.search(r"CHECK \(actor IN \(([^)]*)\)\)", migration).group(1)
+        assert names(mail_event_pb.Transition_Actor) == set(re.findall(r"'([^']*)'", actors))
 
     def test_active_counts_name_every_active_state(self):
         fields = {name.removesuffix("_count") for name in status_pb.ActiveCounts.__dataclass_fields__}

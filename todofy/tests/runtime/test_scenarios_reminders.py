@@ -7,12 +7,13 @@ import time
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from ziyixi_proto.todofy.ui.v1 import todofy_ui_service_pb as pb
 
 from tests.fakes.server import Recorded, Reply
 from tests.fakes.todoist_fake import PROJECT_ID, TASKS_PATH, TodoistFake
 from tests.runtime.conftest import Launch
 from tests.runtime.harness import PUBLIC_HOST, Worker, mail_event, settled_reminder, wait_until
-from tests.runtime.owner_support import assert_contract
+from tests.runtime.owner_support import assert_message
 from todofy.core.reminder_text import SENDER, TITLE_PREFIX, reminder_title
 from todofy.core.request_id import todoist_request_id
 
@@ -53,8 +54,8 @@ def test_one_reminder_per_utc_day_lists_ids_but_no_mail_content(launch: Launch, 
     assert post.headers["x-request-id"] == todoist_request_id(task["content"], task["description"], SENDER)
     [created] = [t for t in fresh_todoist.tasks if t.content == task["content"]]
     assert (reminder["state"], reminder["task_id"], reminder["attention_count"]) == ("created", created.id, 1)
-    assert worker.overview()["latest_reminder"]["day"] == reminder["day"]
-    assert_contract(worker.owner.get("/api/v1/reminders"), "/api/v1/reminders")
+    assert worker.overview()["latest_reminder"]["name"] == reminder["name"]
+    assert_message(worker.owner.get("/api/v1/dailyReminders"), pb.ListDailyRemindersResponse)
 
     _attention(worker, subject="第二封")
     assert worker.trigger_cron().status_code == 200
@@ -70,8 +71,12 @@ def test_a_rejected_reminder_is_failed_and_retried_hourly(launch: Launch, fresh_
 
     reminder = _outcome(worker)
 
-    assert (reminder["state"], reminder["error_code"], reminder["attempts"]) == ("failed", "reminder_create_failed", 1)
-    retry_at = _stamp(reminder["next_attempt_at"]) - datetime.now(UTC)
+    assert (reminder["state"], reminder["error_code"], reminder["attempt_count"]) == (
+        "failed",
+        "reminder_create_failed",
+        1,
+    )
+    retry_at = _stamp(reminder["next_attempt_time"]) - datetime.now(UTC)
     assert timedelta(minutes=55) < retry_at <= timedelta(hours=1)
     assert len(_reminder_posts(fresh_todoist)) == 1
 
@@ -107,4 +112,4 @@ def test_no_reminder_without_attention_or_when_disabled(launch: Launch, fresh_to
     time.sleep(3)
 
     assert _reminder_posts(fresh_todoist) == []
-    assert disabled.overview()["flags"]["reminder_enabled"] is False
+    assert disabled.overview()["switches"]["reminder_enabled"] is False

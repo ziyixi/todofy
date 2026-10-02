@@ -5,7 +5,7 @@ around every computation, and ReportsLatest for the owner API."""
 import json
 
 from tests.fakes.gemini_fake import error_reply, text_reply
-from tests.runtime.reports_support import NOW, Probe, clean_fixture, component_errors, probe_fixture  # noqa: F401
+from tests.runtime.reports_support import NOW, Probe, clean_fixture, idl_errors, probe_fixture  # noqa: F401
 
 DAY = 86_400
 MIDNIGHT = NOW - NOW % DAY
@@ -161,4 +161,4 @@ def test_latest_lists_the_newest_rows_in_the_newsletter_shapes(probe):
         (3, "2026-09-28T15:00:00Z"),
         (10, "2026-09-28T15:00:00Z"),
     ]
-    assert component_errors("ReportsLatest", latest) == []
+    assert idl_errors("LatestReports", latest) == []

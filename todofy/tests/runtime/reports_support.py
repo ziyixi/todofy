@@ -11,16 +11,16 @@ from collections.abc import Iterator
 from datetime import UTC, datetime
 from typing import Any
 
-import jsonschema
 import pytest
+from ziyixi_proto.wire_json import WireJsonError
 
 from tests.fakes.gemini_fake import API_KEY as GEMINI_KEY
 from tests.fakes.gemini_fake import GeminiFake
 from tests.fakes.todoist_fake import PROJECT_ID, TodoistFake
 from tests.fakes.todoist_fake import TOKEN as TODOIST_TOKEN
 from tests.runtime.harness import Worker
-from tests.runtime.owner_support import DOCUMENT, REGISTRY
 from tests.runtime.reports_probe import start_probe
+from todofy.core import owner_ui
 
 MODEL = "gemini-probe"
 PUBLIC_HOST = "todofy.example"
@@ -86,8 +86,28 @@ def clean_fixture(probe: Probe) -> Probe:
     return probe
 
 
-def component_errors(name: str, instance: Any) -> list[str]:
-    """Validation errors of ``instance`` against an OpenAPI component schema."""
-    schema = {"$ref": f"{DOCUMENT}#/components/schemas/{name}"}
-    validator = jsonschema.Draft202012Validator(schema, registry=REGISTRY)
-    return [f"{list(error.absolute_path)}: {error.message}" for error in validator.iter_errors(instance)]
+def idl_errors(name: str, instance: Any) -> list[str]:
+    """What keeps a ledger reader's dict from being the todofy.ui.v1 message the owner API answers with it
+    (core/owner_ui.py maps it, and the codec checks every rule as it writes): DailyReminder, GtdDay, GtdReview or
+    LatestReports (whose stored reports must read as todofy.report.v1 messages)."""
+    try:
+        match name:
+            case "DailyReminder":
+                owner_ui.answer(owner_ui.daily_reminder(instance))
+            case "GtdDay":
+                owner_ui.answer(owner_ui.gtd_day(instance))
+            case "GtdReview":
+                owner_ui.answer(owner_ui.gtd_review(instance))
+            case "LatestReports":
+                if instance["summary"] is not None and owner_ui.summary_report(instance["summary"]) is None:
+                    return ["summary"]
+                return [
+                    f"recommendations[{index}]"
+                    for index, report in enumerate(instance["recommendations"])
+                    if owner_ui.recommendation_report(report) is None
+                ]
+            case _:
+                raise AssertionError(f"no todofy.ui.v1 mapping for {name}")
+    except (WireJsonError, KeyError, TypeError, ValueError) as error:
+        return [f"{type(error).__name__}: {error}"]
+    return []

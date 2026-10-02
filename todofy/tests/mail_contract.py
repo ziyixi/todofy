@@ -12,7 +12,7 @@ from urllib.parse import urljoin
 TODOFY = Path(__file__).resolve().parents[1]
 CONTRACT = TODOFY.parent / "contracts" / "mail-received-v1"
 SCHEMA = CONTRACT / "mail-received-v1.schema.json"
-# How api/owner-api-v1.openapi.yaml references the schema, relative to the api/ directory.
+# How api/machine-api-v1.openapi.yaml references the schema, relative to the api/ directory.
 SCHEMA_REF = "../../contracts/mail-received-v1/mail-received-v1.schema.json"
 
 

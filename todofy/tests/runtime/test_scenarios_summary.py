@@ -37,9 +37,9 @@ def test_summary_sends_the_go_prompt_and_fences_the_mail(
     [call] = fresh_gemini.calls_mentioning(event_id)
     assert (call.model, call.system, call.response_schema) == ("model-a", SUMMARY_EMAIL, None)
     assert call.user.index(f"\n{BEGIN}\n") < call.user.index(text) < call.user.rindex(f"\n{END}")
-    assert (event["error_code"], event["crashes"]) == (None, 0)
+    assert (event["error_code"], event["crash_count"]) == (None, 0)
     usage = worker.overview()["gemini"]
-    assert usage["calls"] >= 1 and usage["used_tokens"] > 0 and usage["models"] == ["model-a", "model-b"]
+    assert usage["call_count"] >= 1 and usage["used_tokens"] > 0 and usage["models"] == ["model-a", "model-b"]
 
 
 def test_truncated_mail_is_disclosed_to_the_model(worker: Worker, fresh_gemini: GeminiFake) -> None:
@@ -88,7 +88,7 @@ def test_quota_errors_wait_for_retry_after(
     event_id, _ = _arrive(worker)
 
     quota = worker.wait_event(event_id, lambda e: e["error_code"] == "llm_quota")
-    assert quota["state"] == "pending" and quota["next_attempt_at"] is not None
+    assert quota["state"] == "pending" and quota["next_attempt_time"] is not None
     event = worker.wait_event(event_id, {"complete"})
 
     first, second, third = fresh_gemini.calls_mentioning(event_id)

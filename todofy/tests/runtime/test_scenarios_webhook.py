@@ -18,7 +18,7 @@ def test_the_current_and_previous_token_both_deliver_to_one_ledger_row(worker: W
     assert worker.post_event(body, token=PREVIOUS_WEBHOOK_TOKEN).status_code == 204
     assert worker.post_event(body, token=WEBHOOK_TOKEN).status_code == 204
 
-    arrivals = [t for t in worker.wait_event(event_id, {"complete"})["transitions"] if t["from_state"] is None]
+    arrivals = [t for t in worker.wait_event(event_id, {"complete"})["transitions"] if t["prior_state"] is None]
     assert len(arrivals) == 1
     _, changed = mail_event(event_id, subject="changed")
     conflict = worker.post_event(changed, token=PREVIOUS_WEBHOOK_TOKEN)

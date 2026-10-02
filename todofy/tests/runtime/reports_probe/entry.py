@@ -265,6 +265,14 @@ class Default(WorkerEntrypoint):
                 data |= json.loads(await stub.run(json.dumps(args)))
             case "/gtd/daily":
                 data["daily"] = await gtd.daily(self.env.DB, args["days"], args["now"])
+            case "/gtd/days":
+                data["days"], data["before"] = await gtd.day_page(
+                    self.env.DB, args["size"], args.get("before"), args["now"]
+                )
+            case "/gtd/reviews":
+                data["reviews"], data["last"] = await gtd.review_page(
+                    self.env.DB, args["size"], args.get("before"), args["now"]
+                )
             case _:
                 return Response("not found", status=404)
         data["budget"] = budget.calls

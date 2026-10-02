@@ -14,12 +14,13 @@ import uuid
 from pathlib import Path
 
 import pytest
+from ziyixi_proto.todofy.ui.v1 import todofy_ui_service_pb as pb
 
 from tests import mail_contract
 from tests.fakes.gemini_fake import GeminiFake
 from tests.fakes.todoist_fake import TodoistFake
 from tests.runtime.harness import Worker, mail_event, transitions, wait_until
-from tests.runtime.owner_support import assert_contract, error_code
+from tests.runtime.owner_support import assert_message, assert_status
 
 DAY = 86_400
 
@@ -95,26 +96,28 @@ def test_a_finished_day_is_written_once_and_served(
         # Nothing of a written day is kept in the object; the next flush is after midnight.
         assert store.execute("SELECT count(*) FROM metric_counts WHERE day <= ?", (yesterday,)).fetchone() == (0,)
 
-    response = worker.owner.get("/api/v1/metrics/daily", params={"days": 3})
-    assert response.status_code == 200
-    days = assert_contract(response, "/api/v1/metrics/daily")["days"]
-    assert [day["day"] for day in days] == [_utc_day(-3), _utc_day(-2), yesterday]
-    assert [day["recorded"] for day in days] == [False, False, True]
-    assert days[2]["mails_completed"] == 2 and set(days[2]["gemini_tokens"]) == {"model-a"}
+    response = worker.owner.get("/api/v1/metricDays", params={"page_size": 3})
+    days = assert_message(response, pb.ListMetricDaysResponse)["metric_days"]
+    assert [day["name"] for day in days] == [f"metricDays/{day}" for day in (yesterday, _utc_day(-2), _utc_day(-3))]
+    assert [day.get("recorded", False) for day in days] == [True, False, False]
+    assert days[0]["completed_count"] == 2 and set(days[0]["gemini_tokens"]) == {"model-a"}
     assert "write_failed" not in (worker.persist_to / "dev.log").read_text()
 
 
-def test_default_range_and_invalid_days(worker: Worker) -> None:
-    response = worker.owner.get("/api/v1/metrics/daily")
-    assert len(assert_contract(response, "/api/v1/metrics/daily")["days"]) == 30
+def test_default_and_largest_pages_and_invalid_sizes(worker: Worker) -> None:
+    response = worker.owner.get("/api/v1/metricDays")
+    assert len(assert_message(response, pb.ListMetricDaysResponse)["metric_days"]) == 30
     assert response.headers["cache-control"] == "no-store"
-    for days in ("0", "91", "x", "1.5"):
-        response = worker.owner.get("/api/v1/metrics/daily", params={"days": days})
-        assert response.status_code == 400, days
-        assert error_code(response) == "invalid_request"
+    largest = assert_message(
+        worker.owner.get("/api/v1/metricDays", params={"page_size": 91}), pb.ListMetricDaysResponse
+    )
+    assert len(largest["metric_days"]) == 90 and largest["next_page_token"]
+    for size in ("-1", "x", "1.5"):
+        response = worker.owner.get("/api/v1/metricDays", params={"page_size": size})
+        assert_status(response, 400, "BAD_REQUEST")
 
 
-@pytest.mark.parametrize("path", ["/api/v1/metrics", "/api/v1/metrics/daily/extra"])
+@pytest.mark.parametrize("path", ["/api/v1/metricDays/2026-09-28", "/api/v1/metricDays:export", "/api/v1/metrics/x"])
 def test_neighbouring_paths_are_not_found(worker: Worker, path: str) -> None:
     assert worker.owner.get(path).status_code == 404
 
@@ -206,6 +209,6 @@ def test_a_restored_database_restarts_counting_instead_of_writing_zeros(
     # "not recorded" instead of being written with mails_received = 0.
     assert cursor == worker.d1("SELECT max(id) AS id FROM event_transitions")[0]["id"]
     assert _metric_rows(worker, _utc_day(-1)) == {}
-    response = worker.owner.get("/api/v1/metrics/daily", params={"days": 1})
-    assert assert_contract(response, "/api/v1/metrics/daily")["days"][0]["recorded"] is False
+    response = worker.owner.get("/api/v1/metricDays", params={"page_size": 1})
+    assert "recorded" not in assert_message(response, pb.ListMetricDaysResponse)["metric_days"][0]
     assert '"cursor_reset"' in (worker.persist_to / "dev.log").read_text()

@@ -20,9 +20,8 @@ from tests import mail_contract
 from tests.fakes.gemini_fake import GeminiFake, error_reply
 from tests.fakes.todoist_fake import TodoistFake
 from tests.runtime.conftest import pipeline_vars
-from tests.runtime.harness import error_code, mail_event, transitions, wait_until
+from tests.runtime.harness import error_code, mail_event, reason, transitions, wait_until
 from tests.runtime.ops_support import OpsStack, start_ops_stack
-from tests.runtime.owner_support import assert_contract
 from todofy.core import ops
 from todofy.core.prompts import SUMMARY_RANGE
 from todofy.core.reminder_text import reminder_body, reminder_title
@@ -138,7 +137,7 @@ def test_a_canary_is_summarised_and_ends_ok_without_any_side_effect(
     [call] = fresh_gemini.calls_mentioning(CANARY_TEXT)
     assert call.system.strip() and call.model == "model-a"
     assert fresh_todoist.creates() == [] and fresh_todoist.lists() == []
-    event = assert_contract(stack.owner.get(f"/api/v1/events/{CANARY_ID}"), "/api/v1/events/{event_id}")
+    event = stack.event(CANARY_ID)
     assert (event["state"], event["canary"], event["allowed_actions"], event["summary"]) == ("complete", True, [], None)
     assert transitions(event) == [
         (None, "pending", None, "worker"),
@@ -147,11 +146,14 @@ def test_a_canary_is_summarised_and_ends_ok_without_any_side_effect(
     ]
     assert stack.d1(f"SELECT count(*) AS n FROM summaries WHERE event_id = '{CANARY_ID}'") == [{"n": 0}]
     # Never listed or counted as mail.
-    for view in ("recent", "attention"):
-        page = stack.owner.get("/api/v1/events", params={"view": view, "limit": "100"}).json()
-        assert CANARY_ID not in [item["event_id"] for item in page["items"]]
+    for params in ({"page_size": "100"}, {"attention": "true", "page_size": "100"}):
+        page = stack.owner.get("/api/v1/mailEvents", params=params).json()
+        assert f"mailEvents/{CANARY_ID}" not in [item["name"] for item in page.get("mail_events", [])]
     after = stack.overview()
-    assert (after["received_24h"], after["counts"]) == (before["received_24h"], before["counts"])
+    assert (after["received_last_day_count"], after["active_counts"]) == (
+        before["received_last_day_count"],
+        before["active_counts"],
+    )
     # Not report input: the newsletter's reports read only summaries, which a canary never writes.
     fresh_gemini.reset()
     for path in ("/api/summary", "/api/recommendation"):
@@ -194,7 +196,7 @@ def test_a_canary_left_at_a_todoist_step_by_an_older_release_never_reaches_todoi
     seed(stack, unknown, "todo_unknown", body=body, created_at=now - 60, next_attempt_at=now - 1)
     seed(stack, created, "todo_created", body=body, created_at=now - 60, task_id="6Xolder")
     refused = stack.reconcile(unknown, "task_not_created")
-    assert (refused.status_code, error_code(refused)) == (409, "action_not_allowed")
+    assert (refused.status_code, reason(refused)) == (400, "ACTION_NOT_ALLOWED")
 
     real_id, real = mail_event()  # wakes the alarm loop
     assert stack.post_event(real).status_code == 204
@@ -202,7 +204,7 @@ def test_a_canary_left_at_a_todoist_step_by_an_older_release_never_reaches_todoi
 
     for event_id in (summarized, unknown):
         stack.wait_event(event_id, {"ignored"})
-        blocked = assert_contract(stack.owner.get(f"/api/v1/events/{event_id}"), "/api/v1/events/{event_id}")
+        blocked = stack.event(event_id)
         assert (blocked["error_code"], blocked["canary"]) == ("canary_side_effect_blocked", True)
         result = stack.ok("canaryResult", event_id, definition="CanaryResult")
         assert (result["state"], result["error_code"]) == ("failed", "canary_side_effect_blocked")

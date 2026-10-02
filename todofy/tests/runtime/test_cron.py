@@ -29,6 +29,6 @@ def test_cron_heals_an_alarm_lost_with_the_object_storage(slow_worker: Worker, f
 
     assert slow_worker.trigger_cron().status_code == 200
     event = slow_worker.wait_event(event_id, {"complete"})
-    assert event["crashes"] == 1
+    assert event["crash_count"] == 1
     assert any(step[:2] == ("summarizing", "pending") for step in transitions(event))
     assert len(fresh_gemini.calls_mentioning(event_id)) == 2

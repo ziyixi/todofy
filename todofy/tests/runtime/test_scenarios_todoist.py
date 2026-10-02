@@ -134,7 +134,7 @@ def test_an_unknown_result_is_looked_up_and_never_resent(
 
     assert len(fresh_todoist.creates_for(event_id)) == 1
     event = worker.event(event_id)
-    assert (event["state"], event["attention"], event["next_attempt_at"]) == ("todo_unknown", True, None)
+    assert (event["state"], event["attention"], event["next_attempt_time"]) == ("todo_unknown", True, None)
     assert event["allowed_actions"] == ["task_created", "task_not_created", "dismiss"]
     assert ("todo_sending", "todo_unknown", "todo_result_unknown", "worker") in transitions(event)
     lookups = fresh_todoist.lists()
@@ -174,7 +174,7 @@ def test_a_timeout_then_a_retryable_error_is_unknown_not_resent(
     time.sleep(SETTLE_S)
 
     event = worker.event(event_id)
-    assert (event["state"], event["next_attempt_at"]) == ("todo_unknown", None)
+    assert (event["state"], event["next_attempt_time"]) == ("todo_unknown", None)
     assert ("todo_sending", "todo_unknown", "todo_result_unknown", "worker") in transitions(event)
     posts = fresh_todoist.creates_for(event_id)
     assert 2 <= len(posts) <= 3

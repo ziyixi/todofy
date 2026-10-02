@@ -15,7 +15,7 @@ from tests.runtime.reports_support import (  # noqa: F401
     PUBLIC_HOST,
     Probe,
     clean_fixture,
-    component_errors,
+    idl_errors,
     probe_fixture,
 )
 from todofy.core import ops
@@ -193,7 +193,7 @@ def test_page_walks_days_newest_first(probe):
 
     items = first["items"] + second["items"]
     for item in items:
-        assert component_errors("Reminder", item) == []
+        assert idl_errors("DailyReminder", item) == []
     assert items[0] == {
         "day": "2026-09-28",
         "state": "unknown",

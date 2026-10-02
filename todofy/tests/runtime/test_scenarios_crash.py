@@ -42,13 +42,13 @@ def test_three_interrupted_summaries_stop_automatic_retries(worker: Worker, fres
         _restart_and_wake(worker)
 
     event = worker.wait_event(event_id, {"failed_summary"})
-    assert (event["error_code"], event["crashes"]) == ("processing_interrupted_limit", SUMMARY_CRASH_LIMIT)
+    assert (event["error_code"], event["crash_count"]) == ("processing_interrupted_limit", SUMMARY_CRASH_LIMIT)
     assert event["allowed_actions"] == ["retry_summary", "dismiss"]
     time.sleep(3)
     assert len(fresh_gemini.calls_mentioning(event_id)) == SUMMARY_CRASH_LIMIT
     # Each interrupted call's reservation is settled as spent, not left reserved all day.
     usage = worker.overview()["gemini"]
-    assert (usage["reserved_tokens"], usage["calls"]) == (0, SUMMARY_CRASH_LIMIT)
+    assert (usage["reserved_tokens"], usage["call_count"]) == (0, SUMMARY_CRASH_LIMIT)
     assert usage["used_tokens"] > 0
 
 

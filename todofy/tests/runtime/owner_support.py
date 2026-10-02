@@ -1,8 +1,10 @@
-"""Helpers for the owner API runtime tests (tests/runtime/test_owner_*.py).
+"""Helpers for the runtime tests of the owner API and the machine routes.
 
-Responses are checked against api/owner-api-v1.openapi.yaml: the schema for a
-status is looked up from the operation itself, so a test cannot pick a looser
-schema than the contract promises.
+Every answer of the owner API (todofy.ui.v1, proto/todofy/ui/v1) is read with the generated Python code, strictly:
+an unknown field, a wrong type or a broken value rule fails the test, so the bytes the gateway writes are the IDL's.
+Its errors are google.rpc.Status bodies whose ErrorInfo reason the tests compare. The machine routes' answers are
+checked against api/machine-api-v1.openapi.yaml: the schema for a status is looked up from the operation itself, so
+a test cannot pick a looser schema than the document promises.
 """
 
 import base64
@@ -18,14 +20,15 @@ import jsonschema
 import referencing
 import referencing.jsonschema
 import yaml
+from ziyixi_proto.wire_json import from_wire
 
 from tests.mail_contract import api_schemas
-from tests.runtime.harness import OWNER, PUBLIC_HOST, Worker
+from tests.runtime.harness import OWNER, PUBLIC_HOST, Worker, reason
 
 ROOT = Path(__file__).resolve().parents[2]
 BASE = "https://todofy.local/api/"
-DOCUMENT = BASE + "owner-api-v1.openapi.yaml"
-SPEC: dict[str, Any] = yaml.safe_load((ROOT / "api" / "owner-api-v1.openapi.yaml").read_text())
+DOCUMENT = BASE + "machine-api-v1.openapi.yaml"
+SPEC: dict[str, Any] = yaml.safe_load((ROOT / "api" / "machine-api-v1.openapi.yaml").read_text())
 
 CSRF_KEY = "5c" * 32
 ORIGIN = f"http://{PUBLIC_HOST}"
@@ -54,7 +57,7 @@ def _pointer(*parts: str) -> str:
 
 
 def assert_contract(response: httpx.Response, path: str, method: str = "get") -> Any:
-    """Assert the status is documented for the operation and the body matches its schema."""
+    """A machine route: assert the status is documented for the operation and the body matches its schema."""
     responses = SPEC["paths"][path][method]["responses"]
     status = str(response.status_code)
     assert status in responses, f"{method.upper()} {path} does not document {status}: {response.text}"
@@ -72,14 +75,28 @@ def assert_contract(response: httpx.Response, path: str, method: str = "get") ->
     return body
 
 
+def assert_message(response: httpx.Response, cls: type) -> dict[str, Any]:
+    """Assert a 200 whose body is a ``cls`` message in the wire JSON profile (read strictly); returns the JSON."""
+    assert response.status_code == 200, response.text
+    body = response.json()
+    from_wire(cls, body, strict=True)
+    return body
+
+
+def assert_status(response: httpx.Response, status: int, expected: str) -> dict[str, Any]:
+    """Assert a google.rpc.Status error with this HTTP status and ErrorInfo reason; returns the body's `error`."""
+    assert (response.status_code, reason(response)) == (status, expected), response.text
+    error = response.json()["error"]
+    assert error["code"] == status
+    [request] = [d for d in error["details"] if d["@type"] == "type.googleapis.com/google.rpc.RequestInfo"]
+    assert len(request["request_id"]) == 16
+    return error
+
+
 def assert_private(response: httpx.Response) -> None:
     for name, value in PRIVATE_HEADERS.items():
         assert response.headers.get(name) == value, (name, response.headers)
     assert "frame-ancestors 'none'" in response.headers["content-security-policy"]
-
-
-def error_code(response: httpx.Response) -> str:
-    return response.json()["error"]["code"]
 
 
 def _b64(data: bytes) -> str:
@@ -104,8 +121,8 @@ def csrf_headers(token: str, origin: str = ORIGIN) -> dict[str, str]:
 
 
 def issue_csrf(client: httpx.Client, headers: dict[str, str] | None = None) -> dict[str, str]:
-    """GET /api/v1/csrf and return the headers a same-origin browser POST would carry."""
-    response = client.get("/api/v1/csrf", headers=headers or {})
+    """GET /api/csrf and return the headers a same-origin browser POST would carry."""
+    response = client.get("/api/csrf", headers=headers or {})
     assert response.status_code == 200, response.text
     # Tests send the cookie explicitly; the client's jar would add it behind their back.
     client.cookies.clear()

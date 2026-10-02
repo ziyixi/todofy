@@ -39,6 +39,8 @@ import pytest
 import ziyixi_proto
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
+from ziyixi_proto.todofy.ui.v1 import mail_event_pb, status_pb
+from ziyixi_proto.wire_json import from_wire
 
 from tests.fakes.server import FakeServer, Reply
 
@@ -399,11 +401,12 @@ class Worker:
     # Owner side (DEV_AUTH_BYPASS, or an Access JWT in `headers`).
 
     def event(self, event_id: str) -> dict[str, Any] | None:
-        response = self.owner.get(f"/api/v1/events/{event_id}")
+        """GetMailEvent (todofy.ui.v1) as ``filled`` wire JSON, or None when there is no such event."""
+        response = self.owner.get(f"/api/v1/mailEvents/{event_id}")
         if response.status_code == 404:
             return None
         assert response.status_code == 200, response.text
-        return response.json()
+        return filled(mail_event_pb.MailEvent, response.json())
 
     def wait_event(
         self,
@@ -427,7 +430,7 @@ class Worker:
     def csrf_headers(self) -> dict[str, str]:
         """What a same-origin browser POST carries (cookie set by hand: it is Secure)."""
         if self._csrf is None:
-            response = self.owner.get("/api/v1/csrf")
+            response = self.owner.get("/api/csrf")
             assert response.status_code == 200, response.text
             token = response.json()["token"]
             self._csrf = {"origin": ORIGIN, "x-csrf-token": token, "cookie": f"todofy_csrf={token}"}
@@ -441,25 +444,23 @@ class Worker:
         event_id: str,
         action: str,
         *,
-        version: int | None = None,
+        etag: str | None = None,
         task_id: str | None = None,
-        action_request_id: str | None = None,
+        request_id: str | None = None,
     ) -> httpx.Response:
-        if version is None:
-            version = (self.event(event_id) or {}).get("version", 1)
-        body: dict[str, Any] = {
-            "action": action,
-            "version": version,
-            "action_request_id": action_request_id or str(uuid.uuid4()),
-        }
+        """ReconcileMailEvent with the event's current etag unless one is given."""
+        if etag is None:
+            etag = (self.event(event_id) or {}).get("etag", "1")
+        body: dict[str, Any] = {"action": action, "etag": etag, "request_id": request_id or str(uuid.uuid4())}
         if task_id is not None:
             body["task_id"] = task_id
-        return self.post_owner(f"/api/v1/events/{event_id}/reconcile", body)
+        return self.post_owner(f"/api/v1/mailEvents/{event_id}:reconcile", body)
 
     def overview(self) -> dict[str, Any]:
-        response = self.owner.get("/api/v1/overview")
+        """GetServiceStatus as ``filled`` wire JSON."""
+        response = self.owner.get("/api/v1/serviceStatus")
         assert response.status_code == 200, response.text
-        return response.json()
+        return filled(status_pb.ServiceStatus, response.json())
 
     # Newsletter side.
 
@@ -590,15 +591,42 @@ def mail_event(
 
 def settled_reminder(worker: Worker) -> dict[str, Any] | None:
     """Today's reminder row once its Todoist call has an outcome (newest day first)."""
-    response = worker.owner.get("/api/v1/reminders")
+    response = worker.owner.get("/api/v1/dailyReminders")
     assert response.status_code == 200, response.text
-    items = response.json()["items"]
-    today = datetime.now(UTC).date().isoformat()
-    return items[0] if items and items[0]["day"] == today and items[0]["state"] != "sending" else None
+    items = [filled(status_pb.DailyReminder, item) for item in response.json().get("daily_reminders", [])]
+    today = f"dailyReminders/{datetime.now(UTC).date().isoformat()}"
+    return items[0] if items and items[0]["name"] == today and items[0]["state"] != "sending" else None
 
 
 def transitions(event: dict[str, Any]) -> list[tuple[str | None, str, str | None, str]]:
-    return [(t["from_state"], t["to_state"], t["error_code"], t["actor"]) for t in event["transitions"]]
+    """An event's state changes as (prior state, state, error code, actor), None for what the wire omits."""
+    return [(t.get("prior_state"), t["state"], t.get("error_code"), t["actor"]) for t in event.get("transitions", [])]
+
+
+_UNSET = {"string": None, "enum": None, "timestamp": None, "fieldmask": None, "message": None, "bool": False}
+
+
+def filled(cls: type, wire: dict[str, Any]) -> dict[str, Any]:
+    """An answer of the owner API read strictly as ``cls`` (todofy.ui.v1), with every field the wire profile omits
+    when unset written out: None for a string, enum, time, message or optional number, 0, False, [] or {} otherwise.
+    A nested message is filled too. Tests then read every field by name, as they did before the wire omitted them.
+    """
+    from_wire(cls, wire, strict=True)
+    out: dict[str, Any] = {}
+    for field in sys.modules[cls.__module__].FIELDS[cls]:
+        value = wire.get(field.name)
+        if field.kind == "map":
+            out[field.name] = value or {}
+        elif field.repeated:
+            items = value or []
+            out[field.name] = [filled(field.ref, item) for item in items] if field.kind == "message" else items
+        elif value is not None and field.kind == "message":
+            out[field.name] = filled(field.ref, value)
+        elif value is not None or field.optional:
+            out[field.name] = value
+        else:
+            out[field.name] = _UNSET.get(field.kind, 0)
+    return out
 
 
 class AccessIssuer:
@@ -653,4 +681,13 @@ class AccessIssuer:
 
 
 def error_code(response: httpx.Response) -> str:
+    """The code of the hooks hosts' error envelope (and of the owner API's routes before todofy.ui.v1)."""
     return response.json()["error"]["code"]
+
+
+def reason(response: httpx.Response) -> str:
+    """The ErrorInfo reason of the owner API's google.rpc.Status body (todofy.ui.v1)."""
+    details = response.json()["error"]["details"]
+    [info] = [detail for detail in details if detail["@type"] == "type.googleapis.com/google.rpc.ErrorInfo"]
+    assert info["domain"] == "todofy.ziyixi.science", info
+    return info["reason"]

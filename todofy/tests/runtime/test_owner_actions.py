@@ -8,16 +8,19 @@ import json
 import time
 import uuid
 from collections.abc import Iterator
+from typing import Any
 
 import httpx
 import pytest
+from ziyixi_proto.todofy.ui.v1 import mail_event_pb
+from ziyixi_proto.todofy.ui.v1 import todofy_ui_service_pb as pb
 
 from tests.runtime.harness import Worker, start_gateway
 from tests.runtime.owner_support import (
     CSRF_KEY,
-    assert_contract,
+    assert_message,
     assert_private,
-    error_code,
+    assert_status,
     event_row,
     issue_csrf,
     seed,
@@ -26,8 +29,7 @@ from tests.runtime.owner_support import (
 NOW = int(time.time())
 UNKNOWN = "f8c1e9a0-1a98-4fb8-8ca1-4c0a3e720001"
 FAILED = "f8c1e9a0-1a98-4fb8-8ca1-4c0a3e720002"
-DETAIL = "/api/v1/events/{event_id}"
-RECONCILE = "/api/v1/events/{event_id}/reconcile"
+MAIL_EVENT_DETAIL = "type.googleapis.com/todofy.ui.v1.MailEvent"
 
 
 def _payload(event_id: str) -> str:
@@ -82,60 +84,73 @@ def _post(worker: Worker, path: str, body: dict[str, object]) -> httpx.Response:
     return worker.owner.post(path, headers=headers, content=json.dumps(body).encode())
 
 
+def _reconcile(event_id: str) -> str:
+    return f"/api/v1/mailEvents/{event_id}:reconcile"
+
+
+def _detail(error: dict[str, Any]) -> dict[str, Any]:
+    """The current MailEvent a refused reconcile carries."""
+    [event] = [detail for detail in error["details"] if detail["@type"] == MAIL_EVENT_DETAIL]
+    return event
+
+
 def test_event_detail_is_served_by_the_coordinator(actions_worker: Worker) -> None:
-    response = actions_worker.owner.get(f"/api/v1/events/{UNKNOWN}")
-    assert response.status_code == 200, response.text
-    detail = assert_contract(response, DETAIL)
-    assert (detail["state"], detail["version"]) == ("todo_unknown", 1)
+    response = actions_worker.owner.get(f"/api/v1/mailEvents/{UNKNOWN}")
+    detail = assert_message(response, mail_event_pb.MailEvent)
+    assert (detail["state"], detail["version"], detail["etag"]) == ("todo_unknown", 1, "1")
     assert detail["allowed_actions"] == ["task_created", "task_not_created", "dismiss"]
+    assert detail["sender"] == "sender@example.org" and detail["subject"] == "Synthetic reconcile fixture"
     assert_private(response)
 
 
 def test_reconcile_replays_the_stored_outcome_and_rejects_reuse(actions_worker: Worker) -> None:
-    path = f"/api/v1/events/{UNKNOWN}/reconcile"
-    request = {"action": "dismiss", "version": 1, "action_request_id": str(uuid.uuid4())}
+    path = _reconcile(UNKNOWN)
+    request = {"action": "dismiss", "etag": "1", "request_id": str(uuid.uuid4())}
     first = _post(actions_worker, path, request)
-    assert first.status_code == 200, first.text
-    detail = assert_contract(first, RECONCILE, "post")
-    assert (detail["state"], detail["version"], detail["allowed_actions"]) == ("ignored", 2, [])
+    detail = assert_message(first, mail_event_pb.MailEvent)
+    assert (detail["state"], detail["version"], detail["etag"], "allowed_actions" in detail) == (
+        "ignored",
+        2,
+        "2",
+        False,
+    )
     assert detail["transitions"][-1]["actor"] == "owner"
 
     replay = _post(actions_worker, path, request)
     assert (replay.status_code, replay.json()) == (200, detail)
 
     reused = _post(actions_worker, path, request | {"action": "task_created", "task_id": "123"})
-    assert (reused.status_code, error_code(reused)) == (409, "action_request_conflict")
-    assert_contract(reused, RECONCILE, "post")
+    assert_status(reused, 400, "REQUEST_ID_REUSED")
 
-    stale = _post(actions_worker, path, request | {"action_request_id": str(uuid.uuid4())})
-    assert (stale.status_code, error_code(stale)) == (409, "version_conflict")
+    stale = _post(actions_worker, path, request | {"request_id": str(uuid.uuid4())})
+    current = _detail(assert_status(stale, 409, "ETAG_MISMATCH"))
+    assert (current["name"], current["etag"], current["state"]) == (f"mailEvents/{UNKNOWN}", "2", "ignored")
+    malformed = _post(actions_worker, path, request | {"etag": "v1", "request_id": str(uuid.uuid4())})
+    assert _detail(assert_status(malformed, 409, "ETAG_MISMATCH"))["etag"] == "2"
 
-    not_allowed = _post(actions_worker, path, request | {"version": 2, "action_request_id": str(uuid.uuid4())})
-    assert (not_allowed.status_code, error_code(not_allowed)) == (409, "action_not_allowed")
+    not_allowed = _post(actions_worker, path, request | {"etag": "2", "request_id": str(uuid.uuid4())})
+    assert _detail(assert_status(not_allowed, 400, "ACTION_NOT_ALLOWED"))["state"] == "ignored"
 
 
-def test_reconcile_of_an_unknown_event_is_404(actions_worker: Worker) -> None:
+def test_reconcile_of_an_unknown_event_is_not_found(actions_worker: Worker) -> None:
     missing = "f8c1e9a0-1a98-4fb8-8ca1-4c0a3e72ffff"
-    request = {"action": "dismiss", "version": 1, "action_request_id": str(uuid.uuid4())}
-    response = _post(actions_worker, f"/api/v1/events/{missing}/reconcile", request)
-    assert (response.status_code, error_code(response)) == (404, "not_found")
-    assert_contract(response, RECONCILE, "post")
+    request = {"action": "dismiss", "etag": "1", "request_id": str(uuid.uuid4())}
+    assert_status(_post(actions_worker, _reconcile(missing), request), 404, "NOT_FOUND")
+    stale = _post(actions_worker, _reconcile(missing), request | {"etag": "x"})
+    assert_status(stale, 404, "NOT_FOUND")
 
 
 def test_retry_summary_moves_a_failed_summary_back_to_pending(actions_worker: Worker) -> None:
-    request = {"action": "retry_summary", "version": 1, "action_request_id": str(uuid.uuid4())}
-    response = _post(actions_worker, f"/api/v1/events/{FAILED}/reconcile", request)
-    assert response.status_code == 200, response.text
-    assert assert_contract(response, RECONCILE, "post")["state"] == "pending"
+    request = {"action": "retry_summary", "etag": "1", "request_id": str(uuid.uuid4())}
+    response = _post(actions_worker, _reconcile(FAILED), request)
+    assert assert_message(response, mail_event_pb.MailEvent)["state"] == "pending"
 
 
 @pytest.mark.parametrize(("kind", "top_n"), [("summary", None), ("recommendation", 10)])
 def test_recompute_with_an_empty_window_needs_no_model(actions_worker: Worker, kind: str, top_n: int | None) -> None:
-    response = _post(
-        actions_worker, "/api/v1/reports/recompute", {"kind": kind, "action_request_id": str(uuid.uuid4())}
-    )
-    assert response.status_code == 200, response.text
-    report = assert_contract(response, "/api/v1/reports/recompute", "post")
-    assert report["status"] == "empty_window"
+    response = _post(actions_worker, "/api/v1/latestReports:recompute", {"kind": kind, "request_id": str(uuid.uuid4())})
+    answer = assert_message(response, pb.RecomputeReportResponse)
+    [(field, report)] = answer.items()
+    assert field == kind and report["status"] == "empty_window"
     if top_n is not None:
         assert report["top_n"] == top_n  # the REPORT_DEFAULT_TOP default

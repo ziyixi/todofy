@@ -1,0 +1,240 @@
+openapi: 3.1.0
+info:
+  title: Todofy machine API
+  version: 1.0.0
+  summary: The machine endpoints of the Todofy Worker, which other systems call.
+  description: |
+    One Worker routes by `Host`; any other host gets 404 `not_found`.
+
+    - Machine hosts (each name in `TODOFY_HOOKS_HOSTS`): exactly `POST /hooks/mail`,
+      `GET /api/summary`, `GET /api/recommendation` and `GET /health`, outside Access. Their
+      callers are other systems (Mail Hero, the newsletter and its preflight), which keep these
+      paths, methods, credentials and bytes; this document describes them, and the bodies are the
+      IDL's (`mail-received-v1.schema.json` from proto/mailhero/webhook/v1, the reports' schemas
+      from proto/todofy/report/v1).
+    - Owner host (`TODOFY_PUBLIC_HOST`): the React UI and its owner API, todofy.ui.v1, which
+      proto/todofy/ui/v1 describes (google.api.http bindings under `/api/v1`, served by the shared
+      transcoder behind Cloudflare Access and CSRF). Its routes before todofy.ui.v1, which this
+      document listed until 2026-10-02, answer 410 `reload_required` for one release.
+
+    Timestamps are UTC RFC 3339 with whole seconds. Every error body is `Error`.
+jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
+servers:
+  - url: https://{hooksHost}
+    description: Any host listed in TODOFY_HOOKS_HOSTS.
+    variables:
+      hooksHost:
+        default: todofy-hooks.ziyixi.science
+        enum: [todofy-hooks.ziyixi.science, daily.ziyixi.science]
+tags:
+  - name: machine
+    description: Mail Hero webhook, newsletter reports and health on the machine hosts.
+
+paths:
+  /hooks/mail:
+    post:
+      operationId: receiveMail
+      tags: [machine]
+      summary: Accept one Mail Hero mail.received.v1 event.
+      description: |
+        204 is sent only after the event is committed to D1. Replaying the same bytes is
+        204 again without new work, even for ledger rows imported from the Go service;
+        the same `event_id` with different bytes is 409.
+      security:
+        - mailWebhook: []
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: Exactly one header, byte-equal to the body's `event_id`; otherwise 400.
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        description: |
+          At most 1 MiB. A declared `Content-Length` over 1 MiB is 413 before the body is read;
+          without `Content-Length` the body is read up to 1 MiB and anything longer is 413.
+        content:
+          application/json:
+            schema: {$ref: '../../contracts/mail-received-v1/mail-received-v1.schema.json'}
+      responses:
+        '204': {description: 'Stored, or already stored with identical bytes.'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '413': {$ref: '#/components/responses/PayloadTooLarge'}
+        '415': {$ref: '#/components/responses/UnsupportedMediaType'}
+        '503': {$ref: '#/components/responses/Unavailable'}
+
+  /api/summary:
+    get:
+      operationId: getDailySummary
+      tags: [machine]
+      summary: The daily summary for the newsletter.
+      security:
+        - reportBasic: []
+      responses:
+        '200':
+          description: The summary computed since the latest precompute time (REPORT_PRECOMPUTE_UTC), or computed on demand; any other case is 503, never an older report.
+          content:
+            application/json:
+              schema: {$ref: './summary-v1.schema.json'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+        '503': {$ref: '#/components/responses/Unavailable'}
+
+  /api/recommendation:
+    get:
+      operationId: getRecommendation
+      tags: [machine]
+      summary: The ranked tasks for the newsletter.
+      security:
+        - reportBasic: []
+      parameters:
+        - name: top
+          in: query
+          description: Absent or empty means 3. Like the Go service, a sign and leading zeros are accepted.
+          schema: {type: integer, minimum: 1, maximum: 10, default: 3}
+      responses:
+        '200':
+          description: The recommendation for `top` computed since the latest precompute time, or computed on demand; any other case (including unusable model output) is 503, never an older or empty-by-failure report.
+          content:
+            application/json:
+              schema: {$ref: './recommendation-v1.schema.json'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+        '503': {$ref: '#/components/responses/Unavailable'}
+
+  /health:
+    get:
+      operationId: getHealth
+      tags: [machine]
+      summary: The deployed build, for the post-deploy check.
+      security: []
+      responses:
+        '200':
+          description: The Worker is serving.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Health'}
+
+components:
+  securitySchemes:
+    mailWebhook:
+      type: http
+      scheme: bearer
+      description: Its SHA-256 must equal MAIL_WEBHOOK_TOKEN_SHA256 or, during rotation, MAIL_WEBHOOK_TOKEN_SHA256_PREVIOUS.
+    reportBasic:
+      type: http
+      scheme: basic
+      description: The SHA-256 of `user:password` must be one of REPORT_BASIC_AUTH_SHA256. After 20 failures in a UTC hour the rest of that hour is 429.
+
+  headers:
+    RetryAfter:
+      description: Seconds to wait before retrying.
+      schema: {type: integer, minimum: 0}
+
+  responses:
+    BadRequest:
+      description: '`invalid_request` (query or body) or `invalid_payload` (webhook contract or Idempotency-Key).'
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+    Unauthorized:
+      description: '`unauthorized`: missing or invalid Bearer token or Basic credentials.'
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+    Conflict:
+      description: '`event_conflict`: the same event ID with different bytes.'
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+    PayloadTooLarge:
+      description: '`payload_too_large`: over 1 MiB.'
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+    UnsupportedMediaType:
+      description: '`unsupported_media_type`: not application/json.'
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+    TooManyRequests:
+      description: '`rate_limited`.'
+      headers:
+        Retry-After: {$ref: '#/components/headers/RetryAfter'}
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+    Unavailable:
+      description: '`maintenance`, `not_configured` or `unavailable` (D1, the coordinator or a needed report is unavailable).'
+      headers:
+        Retry-After: {$ref: '#/components/headers/RetryAfter'}
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message, request_id]
+          properties:
+            code: {$ref: '#/components/schemas/ApiErrorCode'}
+            message:
+              type: string
+              description: Short Chinese text for the UI; never mail content or upstream response bodies.
+            request_id:
+              type: string
+              description: Quote it when reporting a problem; it appears in the Worker logs.
+      examples:
+        - error: {code: event_conflict, message: 同一事件 ID 已收到不同内容, request_id: 8c3f0e6d2a1b4c5d}
+
+    ApiErrorCode:
+      description: |
+        Every code of the error envelope (worker/todofy/core/api_errors.py). csrf_failed, version_conflict,
+        action_not_allowed, action_request_conflict and access_not_configured are the owner API's before
+        todofy.ui.v1; the machine routes never answer them.
+      type: string
+      enum:
+        - invalid_request
+        - invalid_payload
+        - unauthorized
+        - csrf_failed
+        - not_found
+        - event_conflict
+        - version_conflict
+        - action_not_allowed
+        - action_request_conflict
+        - payload_too_large
+        - unsupported_media_type
+        - rate_limited
+        - internal_error
+        - maintenance
+        - not_configured
+        - access_not_configured
+        - unavailable
+
+    Health:
+      type: object
+      required: [build, service, status, timestamp]
+      additionalProperties: false
+      properties:
+        build:
+          type: string
+          description: BUILD_SHA, the deployed commit.
+        service:
+          type: string
+          enum: [todofy]
+          description: Kept from the Go service; the newsletter preflight requires it.
+        status:
+          type: string
+          enum: [healthy]
+          description: Kept from the Go service; the newsletter preflight requires it.
+        timestamp:
+          type: string
+          format: date-time

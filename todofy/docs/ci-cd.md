@@ -5,7 +5,7 @@ Todofy lives in `todofy/` of a monorepo shared with Mail Hero (`mail-hero/`). On
 checks from its own directory, a `Shared packages` job for `packages/*` (each package's own typecheck and
 tests), a `Contracts` job for the shared contracts (`mail.received.v1` and
 `ops-v1`), and `CI gate`. For Todofy, `Contracts` runs `tests/unit/test_mail_hero_compat.py` (every
-fixture, the canary one included), `test_contract.py`, `test_openapi_vocab.py`, `test_ops_contract.py`
+fixture, the canary one included), `test_contract.py`, `test_machine_api.py` (the machine routes' OpenAPI document `api/machine-api-v1.openapi.yaml` against core and the shared schemas), `test_ops_contract.py`
 (ops-v1 fixtures with `jsonschema`), `test_ops_core.py` (the core's ops values against the schema) and the
 gateway's `test/ops.test.ts` (which also covers the task-intent-v1 methods); the workerd suites
 `tests/runtime/test_ops.py` and `tests/runtime/test_task_intents.py` run in the `Todofy runtime` shards.

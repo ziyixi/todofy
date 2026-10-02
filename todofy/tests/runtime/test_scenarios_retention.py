@@ -58,6 +58,6 @@ def test_first_sweep_removes_only_expired_rows(worker: Worker) -> None:
     assert set(row["s"].split(",")) == {ids["recent"], ids["imported"]}
     assert (row["r"], row["o"], row["a"], row["e"]) == (1, "recent", 1, 1)
     assert set(row["t"].split(",")) == {ids["forever"], ids["later"]}
-    assert worker.owner.get(f"/api/v1/legacy_text/{ids['gone']}").status_code == 404
-    kept = worker.owner.get(f"/api/v1/legacy_text/{ids['forever']}")
-    assert (kept.status_code, kept.json()["expires_at"]) == (200, None)
+    assert worker.owner.get(f"/api/v1/legacyTexts/{ids['gone']}").status_code == 404
+    kept = worker.owner.get(f"/api/v1/legacyTexts/{ids['forever']}")
+    assert (kept.status_code, kept.json().get("expire_time")) == (200, None)

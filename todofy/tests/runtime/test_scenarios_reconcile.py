@@ -8,7 +8,7 @@ from tests.fakes.gemini_fake import GeminiFake, error_reply
 from tests.fakes.server import Reply
 from tests.fakes.todoist_fake import TASKS_PATH, TodoistFake
 from tests.runtime.conftest import Launch
-from tests.runtime.harness import Worker, error_code, mail_event, transitions
+from tests.runtime.harness import Worker, mail_event, reason, transitions
 from todofy.core.backoff import SUMMARY_GIVE_UP_ATTEMPTS
 from todofy.core.render import FOOTER_PREFIX
 
@@ -29,7 +29,7 @@ def _unknown(worker: Worker, todoist: TodoistFake) -> str:
     """An event whose task creation failed with 500 and whose lookup found nothing."""
     todoist.queue("POST", TASKS_PATH, Reply(500, "boom"))
     event_id = _arrive(worker)
-    worker.wait_event(event_id, lambda e: e["error_code"] == "lookup_not_found")
+    worker.wait_event(event_id, lambda e: e.get("error_code") == "lookup_not_found")
     return event_id
 
 
@@ -47,11 +47,11 @@ def test_dismiss_ignores_the_event_without_calling_todoist(worker: Worker, fresh
 
     assert response.status_code == 200, response.text
     event = response.json()
-    assert (event["state"], event["error_code"], event["attention"], event["allowed_actions"]) == (
+    assert (event["state"], event["error_code"], event.get("attention"), event.get("allowed_actions")) == (
         "ignored",
         "dismissed_by_owner",
-        False,
-        [],
+        None,
+        None,
     )
     assert _owner_step(event, "ignored") == ("todo_unknown", "ignored", "dismissed_by_owner", "owner")
     [row] = worker.d1(f"SELECT payload IS NULL AS dropped FROM mail_events WHERE event_id = '{event_id}'")
@@ -120,25 +120,25 @@ def test_retry_summary_after_the_worker_gave_up(worker: Worker, fresh_gemini: Ge
     assert len(fresh_gemini.calls_mentioning(event_id)) == 1
 
 
-@pytest.mark.reaches("action_request_conflict", "version_conflict", "action_not_allowed", "not_found")
+@pytest.mark.reaches("REQUEST_ID_REUSED", "ETAG_MISMATCH", "ACTION_NOT_ALLOWED", "NOT_FOUND")
 def test_replays_and_conflicts(worker: Worker, fresh_todoist: TodoistFake) -> None:
     event_id = _unknown(worker, fresh_todoist)
-    version = worker.event(event_id)["version"]
-    action_id = str(uuid.uuid4())
+    etag = worker.event(event_id)["etag"]
+    request_id = str(uuid.uuid4())
 
-    first = worker.reconcile(event_id, "dismiss", version=version, action_request_id=action_id)
-    replay = worker.reconcile(event_id, "dismiss", version=version, action_request_id=action_id)
+    first = worker.reconcile(event_id, "dismiss", etag=etag, request_id=request_id)
+    replay = worker.reconcile(event_id, "dismiss", etag=etag, request_id=request_id)
     assert (first.status_code, replay.status_code) == (200, 200)
-    assert (replay.json()["state"], replay.json()["version"]) == (first.json()["state"], first.json()["version"])
+    assert (replay.json()["state"], replay.json()["etag"]) == (first.json()["state"], first.json()["etag"])
 
-    reused = worker.reconcile(event_id, "task_created", version=version, task_id="1", action_request_id=action_id)
-    assert (reused.status_code, error_code(reused)) == (409, "action_request_conflict")
-    stale = worker.reconcile(event_id, "dismiss", version=version)
-    assert (stale.status_code, error_code(stale)) == (409, "version_conflict")
+    reused = worker.reconcile(event_id, "task_created", etag=etag, task_id="1", request_id=request_id)
+    assert (reused.status_code, reason(reused)) == (400, "REQUEST_ID_REUSED")
+    stale = worker.reconcile(event_id, "dismiss", etag=etag)
+    assert (stale.status_code, reason(stale)) == (409, "ETAG_MISMATCH")
     not_allowed = worker.reconcile(event_id, "retry_summary")
-    assert (not_allowed.status_code, error_code(not_allowed)) == (409, "action_not_allowed")
-    missing = worker.reconcile(str(uuid.uuid4()), "dismiss", version=1)
-    assert (missing.status_code, error_code(missing)) == (404, "not_found")
+    assert (not_allowed.status_code, reason(not_allowed)) == (400, "ACTION_NOT_ALLOWED")
+    missing = worker.reconcile(str(uuid.uuid4()), "dismiss", etag="1")
+    assert (missing.status_code, reason(missing)) == (404, "NOT_FOUND")
 
 
 def test_review_flagged_mail_cannot_be_retried(worker: Worker) -> None:
@@ -147,30 +147,28 @@ def test_review_flagged_mail_cannot_be_retried(worker: Worker) -> None:
 
     response = worker.reconcile(event_id, "retry_summary")
 
-    assert (response.status_code, error_code(response)) == (409, "action_not_allowed")
+    assert (response.status_code, reason(response)) == (400, "ACTION_NOT_ALLOWED")
 
 
-@pytest.mark.reaches("invalid_request")
+@pytest.mark.reaches("BAD_REQUEST")
 @pytest.mark.parametrize(
     "body",
     [
-        {"action": "task_created", "version": 1},
-        {"action": "dismiss", "version": 1, "task_id": "1"},
-        {"action": "dismiss", "version": 0},
-        {"action": "explode", "version": 1},
-        {"action": "dismiss", "version": 1, "extra": True},
+        {"action": "task_created", "etag": "1"},
+        {"action": "dismiss", "etag": "1", "task_id": "1"},
+        {"action": "dismiss"},
+        {"action": "explode", "etag": "1"},
+        {"action": "dismiss", "etag": "1", "extra": True},
     ],
-    ids=["task_id_missing", "task_id_not_allowed", "version_zero", "unknown_action", "extra_field"],
+    ids=["task_id_missing", "task_id_not_allowed", "etag_missing", "unknown_action", "extra_field"],
 )
-def test_invalid_reconcile_bodies_are_400(worker: Worker, body: dict) -> None:
+def test_invalid_reconcile_bodies_are_bad_requests(worker: Worker, body: dict) -> None:
     event_id = _arrive(worker)
-    response = worker.post_owner(
-        f"/api/v1/events/{event_id}/reconcile", body | {"action_request_id": str(uuid.uuid4())}
-    )
-    assert (response.status_code, error_code(response)) == (400, "invalid_request")
+    response = worker.post_owner(f"/api/v1/mailEvents/{event_id}:reconcile", body | {"request_id": str(uuid.uuid4())})
+    assert (response.status_code, reason(response)) == (400, "BAD_REQUEST")
 
 
-@pytest.mark.reaches("csrf_failed")
+@pytest.mark.reaches("CSRF_FAILED")
 def test_mutations_need_the_same_origin_and_the_csrf_token(worker: Worker) -> None:
     event_id = _arrive(worker)
     good = worker.csrf_headers()
@@ -182,5 +180,5 @@ def test_mutations_need_the_same_origin_and_the_csrf_token(worker: Worker) -> No
         {k: v for k, v in good.items() if k != "x-csrf-token"},
         good | {"cookie": "todofy_csrf=other"},
     ):
-        response = worker.owner.post(f"/api/v1/events/{event_id}/reconcile", headers=headers)
-        assert (response.status_code, error_code(response)) == (403, "csrf_failed"), headers
+        response = worker.owner.post(f"/api/v1/mailEvents/{event_id}:reconcile", headers=headers)
+        assert (response.status_code, reason(response)) == (403, "CSRF_FAILED"), headers

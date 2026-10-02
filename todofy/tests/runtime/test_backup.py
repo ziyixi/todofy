@@ -28,7 +28,7 @@ from tests.runtime.harness import (
     WRANGLER,
     Worker,
     _run,
-    error_code,
+    reason,
     wait_until,
 )
 from todofy.core.sql import backup as sql
@@ -139,10 +139,10 @@ def backup_status(worker: Worker) -> dict[str, Any]:
 def wait_for_backup(worker: Worker) -> dict[str, Any]:
     def finished() -> dict[str, Any] | None:
         status = backup_status(worker)
-        return status if status["status"] in ("ok", "failed") else None
+        return status if status["state"] in ("ok", "failed") else None
 
     status = wait_until(finished, 120, "backup")
-    assert status["status"] == "ok", status
+    assert status["state"] == "ok", status
     return status
 
 
@@ -183,6 +183,7 @@ def download(worker: Worker, prefix: str, out: Path) -> str:
     return result.stdout
 
 
+@pytest.mark.reaches("UNAVAILABLE")
 def test_weekly_backup_restores_into_an_empty_database(backup_worker: Worker, tmp_path: Path) -> None:
     worker, now = backup_worker, int(time.time())
     today = datetime.now(UTC)
@@ -192,25 +193,25 @@ def test_weekly_backup_restores_into_an_empty_database(backup_worker: Worker, tm
 
     # The first alarm finds the backup due (new object storage) and holds owner writes while it runs.
     assert worker.trigger_cron().status_code == 200
-    wait_until(lambda: backup_status(worker)["status"] == "running" or None, 30, "backup start")
-    held = worker.post_owner("/api/v1/reports/recompute", {"kind": "summary", "action_request_id": str(uuid.uuid4())})
-    assert (held.status_code, error_code(held)) == (503, "unavailable")
+    wait_until(lambda: backup_status(worker)["state"] == "running" or None, 30, "backup start")
+    held = worker.post_owner("/api/v1/latestReports:recompute", {"kind": "summary", "request_id": str(uuid.uuid4())})
+    assert (held.status_code, reason(held)) == (503, "UNAVAILABLE")
 
     status = wait_for_backup(worker)
     prefix = status["last_backup_key"]
     assert re.fullmatch(rf"backups/{today:%Y-%m-%d}T\d{{6}}Z/", prefix), prefix  # the job's start second
     rows = EVENTS + TRANSITIONS + 1 + 1 + 1 + 1 + 1 + 1 + LEGACY_TEXTS
-    assert status | {"last_backup_at": None, "last_backup_bytes": 0} == {
-        "status": "ok",
-        "last_backup_at": None,
+    assert status | {"last_backup_time": None, "last_backup_size_bytes": 0} == {
+        "state": "ok",
+        "last_backup_time": None,
         "last_backup_key": prefix,
-        "last_backup_bytes": 0,
-        "last_backup_rows": rows,
-        "last_failure_at": None,
+        "last_backup_size_bytes": 0,
+        "last_backup_row_count": rows,
+        "last_failure_time": None,
         "last_error_code": None,
-        "next_backup_at": next_sunday_ten(today),
+        "next_backup_time": next_sunday_ten(today),
     }
-    assert status["last_backup_bytes"] > 0
+    assert status["last_backup_size_bytes"] > 0
 
     # Retention: today's and the five newest complete old ones stay; the oldest and the incomplete one go.
     for kept in OLD_COMPLETE[1:]:
@@ -248,7 +249,7 @@ def test_weekly_backup_restores_into_an_empty_database(backup_worker: Worker, tm
     assert worker.trigger_cron().status_code == 200
     again = wait_for_backup(worker)
     assert again["last_backup_key"] > prefix
-    assert again["last_backup_rows"] == rows - 1
+    assert again["last_backup_row_count"] == rows - 1
     assert f"PASS legacy_mail_text rows={LEGACY_TEXTS} " in download(worker, prefix, tmp_path / "first")
     assert (tmp_path / "first" / "manifest.json").read_bytes() == first_manifest
     assert f"PASS legacy_mail_text rows={LEGACY_TEXTS - 1} " in download(
