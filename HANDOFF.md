@@ -162,10 +162,18 @@ with synthetic data.
 
 ### `proto-todofy-ui` — Todofy owner API as `todofy.ui.v1`
 
-- State: built, rebased on `9e38624` and verified from a clean clone of its head (every check in the list
-  above, the runtime suite's 508 tests, the gateway's workerd CPU test, the dry runs and the smoke: all 12
-  rpcs through the UI's own client, the machine routes byte-identical to `main` apart from timestamps and
-  request IDs). Commits: `todofy.ui.v1` IDL, core RPC, gateway, tests, UI, docs. Reviews and fixes next.
+- State: built on `9e38624`; all 11 review findings fixed, with tests. Verified from a clean clone of its head:
+  every check in the list above, the runtime suite, the gateway's workerd CPU test, the dry runs and the smoke
+  (every rpc through the UI's own client; the machine routes byte-identical to `main` apart from timestamps
+  and request IDs). Commits: `todofy.ui.v1` IDL, core RPC, gateway, tests, UI, docs, then one per review fix.
+  Ready to land.
+- Review fixes: RecomputeReport stores only a computed report, so the same `request_id` computes again after
+  RATE_LIMITED or UNAVAILABLE (a stale unfinished claim is taken over after 120 s); a bug in TodofyCore is
+  INTERNAL, not UNAVAILABLE, and the UI retries only UNAVAILABLE and missing answers; ListMailEvents takes one
+  AIP-160 `filter` (`state = TODO_UNKNOWN` or `attention = true`) and an AIP-157 `view` (BASIC; GetMailEvent
+  FULL); a reused `request_id` is the common BAD_REQUEST (ErrorReason 3 reserved); IDs stay inside AIP-122
+  (`gtdReviews/2026-w40`; `legacyTexts/{event UUID}` only); a page token naming no real day is BAD_REQUEST;
+  `tools/workerd-cpu` replaces an isolate whose inspector timed out (tools only, deploys nothing).
 - What it does: `TodofyUiService` under `/api/v1` (mailEvents, dailyReminders, metricDays, gtdDays, gtdReviews,
   legacyTexts; singletons serviceStatus, latestReports, integration). The TS gateway transcodes and makes one
   `owner_ui` RPC to `TodofyCore`, which reads requests and writes answers with the generated Python code.
@@ -185,9 +193,6 @@ with synthetic data.
   "Todofy 已更新，请刷新页面". The newsletter's next run at 13:30 UTC still gets `/api/summary` and
   `/api/recommendation` (same bytes); Mail Hero's next delivery succeeds and the canary (mail → Todofy) passes
   on the dashboard; the gateway's CPU on the Workers dashboard stays well under 10 ms.
-- Known, not caused by it: the shared CPU meter's calibration step (`tools/workerd-cpu`, `Runtime.evaluate`)
-  sometimes gets no inspector answer within 30 s on a busy machine; seen in Todofy's (2 of 38 runs) and Lab's
-  (1 of 30, on `main`'s code) CPU tests. A rerun passes.
 
 ### Landing order
 
