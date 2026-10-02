@@ -1,6 +1,7 @@
 /**
- * Stub of Todofy's gateway entrypoint "Ops" for the workerd suite (test/runtime/harness.ts, `todofy: true`): only
- * proposeTasks, as the generated TaskIntentService declares it. Like Todofy it reads every input strictly with the wire
+ * Stub of Todofy's gateway entrypoint "Intents" for the workerd suite (test/runtime/harness.ts, `todofy: true`), bound
+ * as watch/wrangler.toml binds it (`props.source = "watch"`; like Todofy it refuses any other source with
+ * `invalid_input`): proposeTasks and taskIntentStatus, as the generated TaskIntentService declares them. Like Todofy it reads every input strictly with the wire
  * JSON profile and checks it against the contract schema (an invalid one rejects with `invalid_input` and is counted),
  * freezes recorded intents by their bytes (other bytes under the same ID are a conflict), and answers schema-valid
  * TaskIntentResults of source watch. POST /__scenario changes what it answers; GET /__state shows what arrived.
@@ -37,10 +38,15 @@ function result(id: string, state: string, isRecorded: boolean, total: number, e
   };
 }
 
-export class Ops extends WorkerEntrypoint implements Pick<WireService<typeof TaskIntentService>, 'proposeTasks'> {
+export class Intents extends WorkerEntrypoint<unknown, { source?: unknown }> implements Pick<WireService<typeof TaskIntentService>, 'proposeTasks'> {
   proposeTasks(input: WireObject): Promise<WireObject> {
     const id = typeof input['intent_id'] === 'string' ? input['intent_id'] : '';
     calls.push(id);
+    // Todofy's Intents: only the binding's own source (todofy/gateway/src/ops.ts).
+    if (this.ctx.props.source !== 'watch' || input['source'] !== this.ctx.props.source) {
+      invalid++;
+      return Promise.reject(new Error('invalid_input'));
+    }
     let total: number;
     try {
       const intent = fromWire(TaskIntentSchema, input, { strict: true }).message;

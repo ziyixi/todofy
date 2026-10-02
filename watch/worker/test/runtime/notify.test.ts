@@ -1,6 +1,6 @@
 /**
  * The notification sink in workerd (../../../docs/design.md §7, W3): WatchState with the TODOFY binding to a stub of
- * Todofy's Ops entrypoint (../stubs/todofy-stub.ts), which reads every intent as Todofy does (strictly, then the
+ * Todofy's Intents entrypoint (../stubs/todofy-stub.ts), which reads every intent as Todofy does (strictly, then the
  * contract schema) and records it by its bytes. Covered: an urgent change leaves in the alarm that confirms it; the
  * digest takes every other event (a BROKEN watch included) once, at the first alarm from 14:00 UTC, and the alarm is
  * armed for it; at most 9 urgent intents a UTC day, the next urgent change waits for the digest; a lost or refused

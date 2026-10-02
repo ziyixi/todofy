@@ -21,6 +21,15 @@
  * `TaskIntentService` (proto/todofy/taskintent/v1/task_intent.proto): wire JSON in, wire JSON out. The
  * core reads the input strictly and writes the result with the wire JSON profile (proto/README.md); this
  * class only passes both on, so the gateway bundles none of the generated code (types only).
+ *
+ * `Intents` is the least-privilege entrypoint for task intents: only `proposeTasks` and `taskIntentStatus`,
+ * and only for the one source its binding names in `props`:
+ *
+ *   [[services]]  binding = "TODOFY"  service = "todofy"  entrypoint = "Intents"  props = { source = "watch" }
+ *
+ * An input of any other source (or a binding without that prop) is `invalid_input` before the core wakes, so
+ * an app that parses untrusted pages (the watch app) can neither use another source's allow-list and daily
+ * quota nor reach status(), setGuard(), canaryResult() or reportOps(). Lab still binds `Ops`.
  */
 import { WorkerEntrypoint } from 'cloudflare:workers';
 import { OPS_LIMITS } from '../../../contracts/ops-v1/ops-v1.ts';
@@ -48,19 +57,37 @@ function json(value: unknown): string {
   }
 }
 
+/** One TodofyCore RPC call: its value, `new Error(code)` for its error, `unavailable` when the call itself fails. */
+async function callCore<T>(env: Env, method: (core: DurableObjectStub<Coordinator>) => Promise<OpsAnswer<T>>): Promise<T> {
+  let answer: OpsAnswer<T>;
+  try {
+    answer = await method(coordinator(env));
+  } catch {
+    throw fail('unavailable');
+  }
+  if (answer.error !== undefined) throw fail(answer.error);
+  return answer.ok;
+}
+
+/** proposeTasks: the contract's bound on the compact JSON the core parses, refused before waking the object. */
+async function proposeTasks(env: Env, intent: WireObject): Promise<WireObject> {
+  const text = json(intent);
+  if (encoder.encode(text).byteLength > TASK_INTENT_LIMITS.intentMaxBytes) throw fail('invalid_input');
+  return await callCore(env, (core) => core.task_intent_propose(text));
+}
+
+async function taskIntentStatus(env: Env, ref: WireObject): Promise<WireObject> {
+  const text = json(ref);
+  if (encoder.encode(text).byteLength > TASK_INTENT_LIMITS.intentMaxBytes) throw fail('invalid_input');
+  return await callCore(env, (core) => core.task_intent_status(text));
+}
+
 export class Ops
   extends WorkerEntrypoint<Env>
   implements ops.OpsService, ops.CanaryConsumerService, ops.OpsDigestService, WireService<typeof TaskIntentService>
 {
   private async call<T>(method: (core: DurableObjectStub<Coordinator>) => Promise<OpsAnswer<T>>): Promise<T> {
-    let answer: OpsAnswer<T>;
-    try {
-      answer = await method(coordinator(this.env));
-    } catch {
-      throw fail('unavailable');
-    }
-    if (answer.error !== undefined) throw fail(answer.error);
-    return answer.ok;
+    return await callCore(this.env, method);
   }
 
   async status(): Promise<ops.OpsStatus> {
@@ -85,15 +112,36 @@ export class Ops
   }
 
   async proposeTasks(intent: WireObject): Promise<WireObject> {
-    const text = json(intent);
-    // The bound of the contract, on the compact JSON the core parses; refused before waking the object.
-    if (encoder.encode(text).byteLength > TASK_INTENT_LIMITS.intentMaxBytes) throw fail('invalid_input');
-    return await this.call((core) => core.task_intent_propose(text));
+    return await proposeTasks(this.env, intent);
   }
 
   async taskIntentStatus(ref: WireObject): Promise<WireObject> {
-    const text = json(ref);
-    if (encoder.encode(text).byteLength > TASK_INTENT_LIMITS.intentMaxBytes) throw fail('invalid_input');
-    return await this.call((core) => core.task_intent_status(text));
+    return await taskIntentStatus(this.env, ref);
+  }
+}
+
+/** What a binding of `Intents` passes as `props`: the one source it may propose for. */
+export interface IntentProps {
+  readonly source?: unknown;
+}
+
+export class Intents extends WorkerEntrypoint<Env, IntentProps> implements WireService<typeof TaskIntentService> {
+  /** The input's `source` must be the binding's; anything else (no props, another source, no object) is refused. */
+  private bound(input: WireObject): void {
+    const allowed = (this.ctx.props as IntentProps | undefined)?.source;
+    // An RPC argument is whatever the caller sent, whatever its declared type.
+    const value: unknown = input;
+    const given = typeof value === 'object' && value !== null ? (value as Record<string, unknown>)['source'] : undefined;
+    if (typeof allowed !== 'string' || allowed === '' || given !== allowed) throw fail('invalid_input');
+  }
+
+  async proposeTasks(intent: WireObject): Promise<WireObject> {
+    this.bound(intent);
+    return await proposeTasks(this.env, intent);
+  }
+
+  async taskIntentStatus(ref: WireObject): Promise<WireObject> {
+    this.bound(ref);
+    return await taskIntentStatus(this.env, ref);
   }
 }

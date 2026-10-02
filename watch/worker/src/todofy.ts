@@ -1,6 +1,7 @@
 /**
  * The Todofy sink (../../docs/design.md §7, step W3; contracts/task-intent-v1): the outbox becomes Todoist tasks through
- * Todofy's "Ops" entrypoint (the TODOFY service binding), as task intents of source SOURCE_WATCH.
+ * Todofy's "Intents" entrypoint (the TODOFY service binding, `props.source = "watch"`: proposeTasks and
+ * taskIntentStatus of this source only), as task intents of source SOURCE_WATCH.
  *
  * - The digest: once a UTC day, at the first alarm from DIGEST_UTC_HOUR, every pending event (both policies) becomes
  *   one intent `digest-<day>` (subtasks mode): one item per watch.
@@ -56,7 +57,7 @@ import {
 import { urgentWaiting, type NotificationSink, type SinkWants, type WatchEvent } from './notify.ts';
 import type { Store } from './store.ts';
 
-/** Todofy's named entrypoint "Ops" as this app sees it: the generated TaskIntentService (wire JSON in and out). */
+/** Todofy's named entrypoint "Intents" as this app sees it: the generated TaskIntentService (wire JSON in and out). */
 export interface TodofyIntentEntrypoint extends Rpc.WorkerEntrypointBranded, WireService<typeof TaskIntentService> {}
 
 /** What the sink calls: proposeTasks only (it never polls; a recorded intent is Todofy's). */

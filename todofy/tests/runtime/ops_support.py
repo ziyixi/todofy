@@ -6,7 +6,9 @@ primary with the two service bindings a dashboard would have to the gateway, ``O
 (``entrypoint = "Ops"``, the ops-v1 RPC surface) and ``GATEWAY`` (the default entrypoint).
 ``POST /__ops/<method>`` with a JSON list of arguments calls the method over the binding and
 answers ``{"ok": value}`` or ``{"error": message}`` (a rejection's message, i.e. an
-OpsErrorCode); every other request goes on to the gateway unchanged, so the harness's
+OpsErrorCode); ``POST /__intents/<method>`` does the same over ``INTENTS``, the watch app's binding
+(``entrypoint = "Intents"``, ``props = { source = "watch" }``); every other request goes on to the
+gateway unchanged, so the harness's
 ``/health`` wait, the webhook and the owner API work as with ``start_gateway``.
 
 The primary owns ``--var``, so the gateway's test config is generated with its vars merged in
@@ -31,10 +33,12 @@ PROBE_SCRIPT = """\
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
-    if (!url.pathname.startsWith('/__ops/')) return env.GATEWAY.fetch(request);
+    const [, prefix, method] = url.pathname.split('/');
+    const binding = prefix === '__ops' ? env.OPS : prefix === '__intents' ? env.INTENTS : null;
+    if (binding === null) return env.GATEWAY.fetch(request);
     const args = JSON.parse((await request.text()) || '[]');
     try {
-      return Response.json({ ok: await env.OPS[url.pathname.slice(7)](...args) });
+      return Response.json({ ok: await binding[method](...args) });
     } catch (error) {
       return Response.json({ error: String(error && error.message), name: String(error && error.name) });
     }
@@ -54,6 +58,12 @@ service = "{gateway}"
 entrypoint = "Ops"
 
 [[services]]
+binding = "INTENTS"
+service = "{gateway}"
+entrypoint = "Intents"
+props = { source = "watch" }
+
+[[services]]
 binding = "GATEWAY"
 service = "{gateway}"
 """
@@ -70,6 +80,12 @@ class OpsStack(Worker):
 
     def ops(self, method: str, *args: Any) -> dict[str, Any]:
         response = self.hooks.post(f"/__ops/{method}", content=json.dumps(args))
+        assert response.status_code == 200, response.text
+        return response.json()
+
+    def intents(self, method: str, *args: Any) -> dict[str, Any]:
+        """The method over the watch app's binding: entrypoint ``Intents`` with ``props.source = "watch"``."""
+        response = self.hooks.post(f"/__intents/{method}", content=json.dumps(args))
         assert response.status_code == 200, response.text
         return response.json()
 

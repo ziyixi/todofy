@@ -13,8 +13,9 @@ import { errorResponse, newRequestId, type Context } from './http.ts';
 import { declaredBytes, recordRequest, routeOf, type HostKind } from './metrics.ts';
 import { handleOwner } from './owner.ts';
 
-// ops-v1: the named entrypoint a dashboard Worker binds (contracts/ops-v1); no public route.
-export { Ops } from './ops.ts';
+// ops-v1: the named entrypoint a dashboard Worker binds (contracts/ops-v1); no public route. Intents: task-intent-v1
+// only, for the one source its binding's props name (the watch app).
+export { Intents, Ops } from './ops.ts';
 
 /** The public host is matched before the hooks hosts. */
 function hostKind(ctx: Context): HostKind {

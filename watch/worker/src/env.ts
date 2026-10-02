@@ -21,7 +21,8 @@ export interface Env {
    */
   readonly BROWSER?: Fetcher;
   /**
-   * Service binding to the Worker "todofy", entrypoint "Ops" (contracts/task-intent-v1): the notification sink
+   * Service binding to the Worker "todofy", entrypoint "Intents" with `props.source = "watch"` (contracts/task-intent-v1;
+   * task intents of this source only, never Todofy's ops-v1 methods): the notification sink
    * (todofy.ts). Absent in local development and in most workerd tests: the outbox then only fills.
    */
   readonly TODOFY?: Service<TodofyIntentEntrypoint>;

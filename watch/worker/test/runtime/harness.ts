@@ -7,7 +7,7 @@
  *     synthetic websites, through ./fake-net.ts, which streams each body to the reader as it reads (never ahead of it);
  *     nothing leaves the process tree;
  *   - a fake ASSETS binding (the UI's page) and, when asked, a fake BROWSER binding (Browser Run's `content` action),
- *     through fake-net too, and the TODOFY binding to "todofy", a stub of Todofy's `Ops` entrypoint
+ *     through fake-net too, and the TODOFY binding to "todofy", a stub of Todofy's `Intents` entrypoint
  *     (../stubs/todofy-stub.ts).
  * DEV_MANUAL_ALARMS=true: no alarm is ever armed and the tests drive the scheduler with explicit clocks; the owner is
  * signed in over loopback http by the dev bypass. All data is synthetic.
@@ -93,7 +93,7 @@ export interface HarnessOptions {
   readonly bindings?: Record<string, string>;
   /** Bind a fake BROWSER (Browser Run's content action). */
   readonly browser?: boolean;
-  /** Bind TODOFY to the stub of Todofy's Ops entrypoint (the notification sink is then on). */
+  /** Bind TODOFY to the stub of Todofy's Intents entrypoint (the notification sink is then on). */
   readonly todofy?: boolean;
   /** Extra outbound routes by URL (the Access certs endpoint), before FakeSites. */
   readonly routes?: Map<string, () => Response>;
@@ -178,7 +178,8 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
           serviceBindings: {
             ASSETS: () => new Response(TEST_PAGE, { headers: { 'content-type': 'text/html; charset=utf-8' } }),
             ...(options.browser === true ? { BROWSER: FAKE_BROWSER_WORKER } : {}),
-            ...(options.todofy === true ? { TODOFY: { name: 'todofy', entrypoint: 'Ops' } } : {}),
+            // As watch/wrangler.toml binds it: Todofy's Intents entrypoint, for source watch only.
+            ...(options.todofy === true ? { TODOFY: { name: 'todofy', entrypoint: 'Intents', props: { source: 'watch' } } } : {}),
           },
           bindings,
           outboundService: FAKE_NET_WORKER,

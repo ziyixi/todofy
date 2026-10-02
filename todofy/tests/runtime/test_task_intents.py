@@ -268,6 +268,25 @@ def test_a_watch_digest_is_created_like_any_intent_and_links_only_to_the_app(
     assert propose(stack, doc)["state"] == "duplicate"
 
 
+def test_the_intents_entrypoint_takes_only_its_bindings_source(stack: OpsStack, fresh_todoist: TodoistFake) -> None:
+    """The watch app binds ``Intents`` with ``props.source = "watch"``: its own intents go through as over ``Ops``;
+    another source's (Lab's allow-list and daily quota) and the ops-v1 methods are not reachable through it."""
+    doc = new_intent("watch-urgent.json")
+    answer = stack.intents("proposeTasks", doc)
+    assert "ok" in answer, answer
+    assert schema_errors("TaskIntentResult", answer["ok"]) == []
+    assert (answer["ok"]["source"], answer["ok"]["state"], answer["ok"]["recorded"]) == ("watch", "pending", True)
+    assert wait_state(stack, doc, {"created", "failed"})["state"] == "created"
+    assert stack.intents("taskIntentStatus", ref(doc))["ok"]["state"] == "created"
+    lab = new_intent("minimal.json")
+    assert stack.intents("proposeTasks", lab) == {"error": "invalid_input", "name": "Error"}
+    assert stack.intents("taskIntentStatus", ref(lab)) == {"error": "invalid_input", "name": "Error"}
+    assert stack.d1(f"SELECT count(*) AS n FROM task_intents WHERE intent_id = '{lab['intent_id']}'") == [{"n": 0}]
+    for method in ("status", "setGuard", "canaryResult", "reportOps"):
+        assert "error" in stack.intents(method, {}), method
+    assert len(fresh_todoist.creates()) == 1
+
+
 def test_the_same_intent_id_with_other_content_is_a_conflict(stack: OpsStack, fresh_todoist: TodoistFake) -> None:
     doc = new_intent("minimal.json")
     propose(stack, doc)

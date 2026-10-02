@@ -45,8 +45,9 @@ test('one SQLite Durable Object, WatchState, and no D1, R2, KV, queue, browser o
   for (const key of ['d1_databases', 'r2_buckets', 'kv_namespaces', 'queues', 'browser', 'ai']) assert.equal(config[key], undefined, key)
 })
 
-test("one service binding: Todofy's Ops entrypoint, the notification sink (task-intent-v1)", () => {
-  assert.deepEqual(config.services, [{ binding: 'TODOFY', service: 'todofy', entrypoint: 'Ops' }])
+test("one service binding: Todofy's Intents entrypoint for source watch only, the notification sink (task-intent-v1)", () => {
+  // Never Ops: that entrypoint also sheds Todofy (setGuard), stores ops reports and accepts any source.
+  assert.deepEqual(config.services, [{ binding: 'TODOFY', service: 'todofy', entrypoint: 'Intents', props: { source: 'watch' } }])
 })
 
 test('vars: the public host, the Access issuer and the AUD; nothing injected, secret or for development', () => {

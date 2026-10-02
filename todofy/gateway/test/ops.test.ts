@@ -16,8 +16,9 @@ import subtasks from '../../../contracts/task-intent-v1/fixtures/TaskIntent/subt
 import labRef from '../../../contracts/task-intent-v1/fixtures/TaskIntentRef/lab.json';
 import pendingNew from '../../../contracts/task-intent-v1/fixtures/TaskIntentResult/pending-new.json';
 import created from '../../../contracts/task-intent-v1/fixtures/TaskIntentResult/created.json';
-import { Ops as Exported } from '../src/index.ts';
-import { Ops } from '../src/ops.ts';
+import watchDigest from '../../../contracts/task-intent-v1/fixtures/TaskIntent/watch-digest.json';
+import { Intents as ExportedIntents, Ops as Exported } from '../src/index.ts';
+import { Intents, Ops } from '../src/ops.ts';
 import { fakes, type CoreReply } from './helpers.ts';
 
 const INTENT_SCHEMA = intentSchema as { $defs: Record<string, unknown> };
@@ -166,4 +167,50 @@ describe('the task-intent-v1 methods of the Ops entrypoint (contracts/task-inten
     expect(await rejection(ops.taskIntentStatus(cyclic as never))).toBe('invalid_input');
     expect(core).toEqual([]);
   });
+});
+
+describe('the Intents entrypoint: task intents of the one source its binding names (contracts/task-intent-v1)', () => {
+  const watchIntent: WireObject = watchDigest;
+  const watchRef: WireObject = { version: 'task-intent-v1', source: 'watch', intent_id: 'digest-2026-10-01' };
+
+  function intents(props: unknown, reply: CoreReply = () => ({ ok: pendingNew })) {
+    const { env, core } = fakes({}, reply);
+    return { entry: new Intents({ props } as ExecutionContext<never>, env), core };
+  }
+
+  it('is exported, and has only the two task-intent-v1 methods', () => {
+    expect(ExportedIntents).toBe(Intents);
+    const methods = Object.getOwnPropertyNames(Intents.prototype).filter((name) => name !== 'constructor' && !name.startsWith('bound'));
+    expect(methods.sort()).toEqual(['proposeTasks', 'taskIntentStatus']);
+    const { entry } = intents({ source: 'watch' });
+    for (const name of ['status', 'setGuard', 'canaryResult', 'reportOps']) expect(name in entry).toBe(false);
+  });
+
+  it("forwards the binding's own source to the core, exactly as Ops does", async () => {
+    const { entry, core } = intents({ source: 'watch' });
+    expect(await entry.proposeTasks(watchIntent)).toEqual(pendingNew);
+    await entry.taskIntentStatus(watchRef);
+    expect(core.map((call) => [call.method, call.args])).toEqual([
+      ['task_intent_propose', [JSON.stringify(watchIntent)]],
+      ['task_intent_status', [JSON.stringify(watchRef)]],
+    ]);
+  });
+
+  it.each([
+    ['another source', { source: 'watch' }, intentOf('lab')],
+    ['no props', undefined, intentOf('watch')],
+    ['props without a source', {}, intentOf('watch')],
+    ['an empty source', { source: '' }, intentOf('')],
+    ['a source that is not text', { source: 1 }, intentOf('watch')],
+  ])('refuses %s with invalid_input before waking the core', async (_, props, input) => {
+    const { entry, core } = intents(props);
+    expect(await rejection(entry.proposeTasks(input))).toBe('invalid_input');
+    expect(await rejection(entry.taskIntentStatus({ ...watchRef, source: input['source'] ?? null }))).toBe('invalid_input');
+    expect(await rejection(entry.proposeTasks(undefined as unknown as WireObject))).toBe('invalid_input');
+    expect(core).toEqual([]);
+  });
+
+  function intentOf(source: string): WireObject {
+    return { ...watchDigest, source };
+  }
 });

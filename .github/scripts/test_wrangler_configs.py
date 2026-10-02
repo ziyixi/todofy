@@ -406,6 +406,14 @@ class Files(unittest.TestCase):
         self.assertEqual(
             [(s["binding"], s["service"]) for s in load(PRODUCTION["lab"])["services"]], [("TODOFY", "todofy")]
         )
+        # The watch app parses untrusted pages: it reaches Todofy only through the least-privilege Intents entrypoint,
+        # bound to its own source (proposeTasks and taskIntentStatus only), never through Ops.
+        gateway_exports = (REPO / "todofy/gateway/src/index.ts").read_text()
+        self.assertRegex(gateway_exports, r"export \{[^}]*\bIntents\b[^}]*\} from './ops\.ts'")
+        self.assertEqual(
+            load(PRODUCTION["watch"])["services"],
+            [{"binding": "TODOFY", "service": "todofy", "entrypoint": "Intents", "props": {"source": "watch"}}],
+        )
 
 
 class Undeployed(unittest.TestCase):

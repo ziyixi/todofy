@@ -60,12 +60,15 @@ class_name = "WatchState"
 tag = "v1"
 new_sqlite_classes = ["WatchState"]
 
-# Todofy's named entrypoint "Ops" (contracts/task-intent-v1, as Lab's binding): the notification sink. WatchState
-# proposes the daily digest and urgent changes as task intents of source SOURCE_WATCH (worker/src/todofy.ts, W3).
+# Todofy's named entrypoint "Intents" (contracts/task-intent-v1): the notification sink. WatchState proposes the daily
+# digest and urgent changes as task intents of source SOURCE_WATCH (worker/src/todofy.ts, W3). Least privilege: that
+# entrypoint has only proposeTasks and taskIntentStatus, and refuses any source but the one in `props`, so this app
+# (which parses untrusted pages) can neither propose as Lab nor reach Todofy's ops-v1 methods. Never "Ops".
 [[services]]
 binding = "TODOFY"
 service = "todofy"
-entrypoint = "Ops"
+entrypoint = "Intents"
+props = { source = "watch" }
 
 [vars]
 # The watch host: the only origin a mutation may come from (CSRF).

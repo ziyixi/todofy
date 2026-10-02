@@ -34,6 +34,23 @@ service = "todofy"
 entrypoint = "Ops"
 ```
 
+The same two methods are also on Todofy's least-privilege entrypoint `Intents` (the same file), which has
+nothing else and takes only the source its binding names in `props`. The watch app binds it (it parses
+untrusted pages, so it gets neither Todofy's ops-v1 methods nor another source's allow-list and daily quota):
+
+```toml
+# watch/wrangler.toml
+[[services]]
+binding = "TODOFY"
+service = "todofy"
+entrypoint = "Intents"
+props = { source = "watch" }
+```
+
+Through `Intents`, an input whose `source` is not the binding's (or a binding without that prop) rejects
+`invalid_input` before the core wakes; everything else is as through `Ops`. A new proposer binds `Intents`;
+moving Lab over is a later change of its own.
+
 ```ts
 import type { TaskIntentService } from '@ziyixi/proto/todofy/taskintent/v1/task_intent_pb';
 import type { WireService } from '@ziyixi/proto/wire-json';

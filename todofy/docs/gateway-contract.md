@@ -318,6 +318,13 @@ error codes, same trust boundary as §3.7.
 | `proposeTasks(intent)` | `task_intent_propose(json)` | input JSON-serialisable, compact JSON ≤ 64 KiB |
 | `taskIntentStatus(ref)` | `task_intent_status(json)` | input JSON-serialisable, compact JSON ≤ 64 KiB |
 
+The same two methods, and nothing else, are on a second named entrypoint, `Intents` (`gateway/src/ops.ts`,
+exported next to `Ops`). A binding names its one source in `props` (`entrypoint = "Intents"`, `props = { source =
+"watch" }`, the watch app's), and `Intents` rejects `invalid_input` before the object wakes when the input's
+`source` differs or the binding has no such prop. So a proposer bound to it can use only its own source's URL
+allow-list and daily quota and cannot reach `status()`, `setGuard()`, `canaryResult()` or `reportOps()`. Lab
+still binds `Ops`. The runtime suite's probe binds both (`tests/runtime/ops_support.py`).
+
 The object (`runtime/intents.py`, rules in `core/intents.py`) reads the input strictly with the wire JSON
 codec and checks the schema's value rules (`invalid_input` otherwise), records a new intent in D1 (`task_intents`, `task_intent_tasks`,
 migration `0005_task_intents.sql`) and answers `pending`; its alarm creates the tasks through the
