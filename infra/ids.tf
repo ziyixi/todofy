@@ -17,6 +17,9 @@ locals {
     "home"      = "f190b413-241d-428d-8680-53eebe7f672d"
     "lab"       = "208a0a3b-6654-4b1f-9b1d-821493171f4d"
     "links"     = "a6e2a6e3-b432-4093-ac20-0211ca180dce"
+    # Created by "Infra apply", not imported (README.md "Adding an app"). W2 FILL-IN: the id read in step 4, with the
+    # AUD in watch/wrangler.toml; .github/scripts/test_infra_config.py fails while it is the all-zeros placeholder.
+    "watch" = "00000000-0000-0000-0000-000000000000"
   }
   flowday_app_ids = {
     "flowday"        = "3d956afb-07ea-4b5e-802e-27fd29ca4587"

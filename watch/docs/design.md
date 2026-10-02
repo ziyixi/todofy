@@ -417,8 +417,13 @@ All hermetic: synthetic content only, the only network is loopback, clocks are i
   watch.ziyixi.science (W2)". As built: the Access probe covers `/`, `/api/v1/watches` and `/new` (the whole host is
   behind Access, `/health` too, so no anonymous request reaches the Worker); the dashboard's `WATCH` binding, its
   registry entry and the `WatchState` row (id after the deploy) arrived with W3's Ops entrypoint and this commit; the
-  alarm is checked by hand after the deploy (README "Deploy"). The AUD is the lead's fill-in in `wrangler.toml`
-  (`deploy/test/wrangler-config.test.mjs` fails while it is the placeholder):
+  alarm is checked by hand after the deploy (README "Deploy"). The lead fills in two values read after the apply
+  (`infra/README.md` "Adding an app" step 4) and commits them together: the AUD in `wrangler.toml`
+  (`deploy/test/wrangler-config.test.mjs` fails while it is the placeholder) and the application id in
+  `infra/ids.tf` `access_app_ids["watch"]` (`test_infra_config.py` fails while it is the all-zeros UUID). The push
+  changes `infra/`, so it runs "Infra drift": it must be green (`no-op: 19`, `output changes: 0`, no outputs problem)
+  before the deploy is trusted, since the Access probes pass whatever the AUD (Access answers before the Worker runs);
+  red with `vars.ACCESS_AUDIENCE differs` means a wrong AUD: fix it and push again:
   1. Resources: the Access application "watch" for the whole host `watch.ziyixi.science` (an `owner_apps` entry in
      `infra/access.tf`, session 24h as for the other owner apps, created by "Infra apply" before this commit:
      `infra/README.md` "Adding an app"), its AUD committed as `ACCESS_AUDIENCE`; the `production` GitHub secret `WATCH_CSRF_SIGNING_KEY` (64 hex); the owner inputs come from
@@ -432,7 +437,8 @@ All hermetic: synthetic content only, the only network is loopback, clocks are i
   4. `.github/scripts/ci_changes.py`: `watch` out of `CHECK_ONLY`, a `watch_deploy` output; `.github/workflows/ci.yml`:
      a `Watch deploy` job shaped like `Links deploy` (secrets file, dry run with the bundle budget, `tools/cf-guard`
      on the config, the wrapper's deploy, the production check of the live `BUILD_SHA`, an Access probe of `/`,
-     `/api/v1/watches` and `/new` answering Access's login redirect while `/health` answers the Worker); stubs in
+     `/api/v1/watches` and `/new` answering Access's login redirect; `/health` is behind Access too and not probed);
+     stubs in
      `test_ci_changes.py`.
   5. `tools/cf-guard/test/cf-guard.test.mjs`: `"watch/wrangler.toml": ["watch", ["watch.ziyixi.science"]]`.
   6. The drift check: `watch` in `.github/scripts/drift_desired.py` `WORKERS` and in `WRAPPERS` as `{"language":

@@ -77,6 +77,12 @@ then checks production:
   (the dashboard's probe). The whole host is behind the Access application "watch" (`infra/access.tf`), `/health`
   included.
 
+Those probes pass whatever the committed AUD is (Access answers before the Worker runs; a wrong AUD only shows as a 403
+for the owner). The check of the AUD is "Infra drift", which the W2 push runs because it changes `infra/`
+(`infra/ids.tf`): it must be green, `no-op: 19` and `output changes: 0` with no outputs problem. Red with
+`vars.ACCESS_AUDIENCE differs from access_aud` means the AUD is wrong: read it again (`infra/README.md` "Adding an
+app" step 4), fix it here and push; this job then ships the fix.
+
 The deploy token is `CF_API_TOKEN`, as for Lab, FlowDay and the links app. The wrapper writes three Worker secrets:
 
 | Worker secret | From the `production` environment secret | Why |
