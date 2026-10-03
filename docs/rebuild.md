@@ -10,7 +10,7 @@ complete disaster recovery. Read the boundary below before switching live traffi
 
 | Input | What changes for a new machine/account | Where it belongs |
 | --- | --- | --- |
-| `config/cloud.toml` | Access issuer; public Fleet/daemon hostnames; namespace/state directory/node alias | Committed public configuration |
+| `config/cloud.toml` | Access issuer; public Fleet/daemon hostnames; namespace/state directory/node alias, including generated Fleet `HOST_KEY` | Committed public configuration |
 | `config/resources.toml` | New account/zone IDs, Access AUDs, D1 IDs, DO namespaces; recorded Access/policy IDs | Committed provider identities; no credentials |
 | Application `wrangler.toml` | Materialized identity fields and generated `infra/platform-identity.tf` public DNS locals; existing bindings, routes, schema and Free budgets remain | Generated into the existing sole production config |
 | k3s manifests/bootstrap configuration | Immutable image digests, one node namespace, mounts, allowed workload/service accounts | Committed infrastructure configuration |
@@ -79,6 +79,36 @@ identities remain in protected infrastructure state and the private bootstrap ha
 not declare those fields. Export the platform machine credentials through the private bootstrap channel,
 then populate only the corresponding GitHub production secrets; the sealed bootstrap artifact has one-day retention and is not
 an application backup. Bootstrap the node and verify its dedicated namespace permissions and TLS trust.
+
+Before that reviewed `Infra apply`, prepare an owner-held RSA key and PEM X.509 certificate with OpenSSL 3
+in a private local directory outside Git and cloud sync. Set the **production environment variable**
+`VPS_BOOTSTRAP_CERT` to the certificate, not a raw public key; the private key never goes to GitHub.
+Without that variable the optional export is skipped. Replace the repository and reviewed apply run ID below:
+
+```sh
+umask 077
+bootstrap_repo="OWNER/REPOSITORY"
+bootstrap_dir="$(mktemp -d)"
+openssl req -x509 -newkey rsa:3072 -sha256 -noenc -days 2 \
+  -subj '/CN=Personal cloud bootstrap recipient' \
+  -keyout "$bootstrap_dir/recipient-key.pem" -out "$bootstrap_dir/recipient-cert.pem"
+gh variable set VPS_BOOTSTRAP_CERT --env production --repo "$bootstrap_repo" \
+  < "$bootstrap_dir/recipient-cert.pem"
+# Dispatch and verify the separately reviewed Infra apply before downloading its artifact.
+bootstrap_run_id="REVIEWED_APPLY_RUN_ID"
+gh run download "$bootstrap_run_id" --repo "$bootstrap_repo" \
+  --name "platform-bootstrap-$bootstrap_run_id" --dir "$bootstrap_dir/artifact"
+openssl cms -decrypt -binary -inform DER -in "$bootstrap_dir/artifact/platform-bootstrap.cms" \
+  -recip "$bootstrap_dir/recipient-cert.pem" -inkey "$bootstrap_dir/recipient-key.pem" \
+  -out "$bootstrap_dir/platform-bootstrap.json"
+```
+
+The existing [CMS export](../infra/scripts/platform_export.py) encrypts only the Access client ID/secret,
+Tunnel ID and connector token. Keep the decrypted JSON and key local with mode 600; transfer credentials
+through private file/stdin input into their matching stores, without printing them. The independent
+`PLATFORM_DEPLOY_TOKEN` is prepared separately. Once the handoff is securely saved, remove the temporary
+`VPS_BOOTSTRAP_CERT` variable; retain private recovery material according to the owner's backup policy.
+See [OpenSSL CMS](https://docs.openssl.org/3.6/man1/openssl-cms/) for the recipient/decryption format.
 
 In the prepared configuration commit, add the actual Fleet AUD to both its production Wrangler field and
 the public inventory, and record the owner app ID in `infra/ids.tf`. The identity generator replaces existing
@@ -188,6 +218,14 @@ file; disk observations concern the observer's own persistent filesystem, not ar
 See [runtime contract](../contracts/platform-runtime-v1/README.md) and the [platform deployment runbook](../platform/README.md) for
 exact bootstrap versions, local permissions, secret names and release commands.
 
+`vps.observer_node_key` supplies the daemon's `node_key`, observer `FLEET_HOST_KEY` and generated Fleet
+`HOST_KEY`; they must match. Before starting a replacement VPS against retained Fleet state, either restore
+the stopped observer's durable state directory (sequence and pending receipt), or deliberately choose a new
+matching epoch in Fleet's `HOST_EPOCH` and the observer manifest's `FLEET_HOST_EPOCH`. Apply that reviewed
+configuration on both sides before accepting new reports. A new VPS with an empty observer volume and the
+old epoch restarts at sequence 1, which retained Fleet rejects as replay. A new Fleet namespace has no old
+receipt and can use the initial epoch. Profile generation does not change epochs or reset durable state.
+
 For Newsletter, explicitly select `NEWSLETTER_CONFIG_REPOSITORY=ziyixi/todofy` and the existing Todo API URL;
 its historical defaults still point at the old standalone repository/domain. Pin the published image digest,
 retain the same exclusive SQLite/auth/content-config mounts, begin/freeze the durable deployment drain,
@@ -200,9 +238,13 @@ does not contain subscription credentials. Notion integration grants, Todoist/Ge
 recipient configuration also require independent private setup. Avoid using a real model call, private
 Notion write or mail send merely to prove that an infrastructure deployment works.
 
-Retire Compose only after replacement pods, persistent data, scheduled processing, backups, status reporting
-and shutdown behavior are verified. Keep a bounded rollback copy of old deployment configuration/data;
-do not run two Newsletter workers or backup schedulers against the same state.
+For the supported legacy migration, stop and verify the old runtime before copying its state. After that
+copy, the one-time installer disables/stops `docker.socket` and `docker.service` **before** applying K3s
+runtime resources. It preserves images, Compose configuration and source state; a failed bootstrap does
+not automatically restart them. Keep that bounded rollback copy until replacement pods, persistent data,
+scheduled processing, backups and status reporting are verified. Rollback requires an explicit reviewed
+stop of the replacement writers and reconciliation before restoring legacy services; never run two
+Newsletter workers or backup schedulers against the same state. A fresh VPS has no legacy runtime to retire.
 
 ## Secret inventory
 
@@ -225,7 +267,7 @@ The matching machine Basic/Bearer credentials, FlowDay sealing key, owner/aliase
 and independent daemon deployment Bearer must also be restored or deliberately rotated at all consumers.
 Fleet publishes only three dedicated inputs: `FLEET_ACCESS_OWNER`, `FLEET_ACCESS_OWNER_ALIASES` and
 `FLEET_REPORT_HMAC_KEY`. The gated infrastructure apply creates the platform Access service identity; its
-sensitive bootstrap output is sealed to the owner’s temporary public key before upload; only ciphertext
+sensitive bootstrap output is sealed to the owner-held X.509 certificate in `VPS_BOOTSTRAP_CERT` before upload; only ciphertext
 may enter the one-day bootstrap artifact, never plaintext values or Actions logs. New random keys are appropriate
 for a brand-new empty deployment; encrypted historical credentials require their original decryption key.
 
@@ -237,6 +279,7 @@ for a brand-new empty deployment; encrypted historical credentials require their
 | Todofy D1/DO | Verify backup manifest/parts/schema; retain paused Todoist processing until pending/unknown business effects are reconciled; a new DO has no old budgets/cursors |
 | FlowDay, Links, Lab D1 | Restore application SQL/schema; FlowDay needs the original sealing key for historical stored tokens |
 | Fleet DO SQLite | The current heartbeat/history is disposable observation state; a new namespace begins as never observed and must receive fresh signed reports |
+| Platform observer | Retained Fleet with the same epoch requires the observer's durable sequence/pending-receipt directory; otherwise coordinate a new epoch on both sides before starting the fresh observer |
 | Watch and Home DO SQLite | There is no unified account-to-account backup/restore here. A fresh namespace does not recover watches, intent ledger, canary/history or alarms |
 | Platform daemon | Restore durable release SQLite and reviewed target configuration; inspect interrupted/held operations before explicit etag-checked continuation, never blindly restart a deployment |
 | Newsletter | Restore exclusive SQLite, frozen run/config identities and dedicated auth; interrupted/unknown external operations are not automatically retried as new operations |

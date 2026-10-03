@@ -15,7 +15,7 @@ python3.12 -m unittest discover -s tools/cloud-config/tests
 ```
 
 `generate` changes only existing production `wrangler.toml` identity fields (`account_id`,
-`ACCOUNT_ID`, Access issuer/AUD, D1 IDs), Home's generated `resource-identities.ts` and the public DNS locals in
+`ACCOUNT_ID`, Access issuer/AUD, D1 IDs and Fleet's `HOST_KEY` from `vps.observer_node_key`), Home's generated `resource-identities.ts` and the public DNS locals in
 `infra/platform-identity.tf`. It preserves
 all other configuration bytes and comments. Every generated Worker file is still that application's
 sole top-level production config; there is no extra Wrangler file, environment or deploy-time override.
@@ -30,6 +30,7 @@ This tool does **not** update OpenTofu state, `infra/ids.tf`, frozen/app-scoped 
 identity providers, Tunnel configuration/state, Email Routing, Worker secrets or historical data. Home D1 matches are keyed
 as `<database name>-db`; the Durable Object map uses existing Home logical resource IDs. An unknown new
 DO stays `match: null` until its first deployment provides an ID.
+Fleet's `HOST_EPOCH` stays operator-managed; profile generation never resets observer sequence or provider state.
 
 The supported narrow case is moving the same owner/repository/domain to a new VPS or Cloudflare account.
 Changing a zone or repository validates new allowed public identities; it does not rename routes,

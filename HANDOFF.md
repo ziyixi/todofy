@@ -22,7 +22,8 @@ SDK repair at `c703378`; Actions then activated the first API release and verifi
 The subsequent `0f84d91` release installed its daemon but is held on a Kubernetes field-ownership
 conflict. Newsletter admission is frozen, with zero active work and all 32 historical unknown outcomes
 preserved. k3s and the dedicated connector are running; Docker is inactive and disabled. Fleet receives
-signed cluster/runtime reports. The guarded phase recovery and permanent ownership fix are in progress;
+signed cluster/runtime reports. The guarded phase recovery awaits owner execution; the tested permanent
+ownership fix and rebuild configuration corrections await publication;
 system-daemon observation still awaits a completed rollout and live acceptance below.
 Every app's owner API is on proto now (the dashboard
 `ca63675`, FlowDay `8d9100e`, Mail Hero `d1bde0e`, Todofy `b70856f`, all landed and verified on 2026-10-02). Nothing
@@ -311,7 +312,8 @@ The immutable old release first needs a guarded phase-only recovery of its two r
 an explicit original-ID resume. A reviewed owner-executed repair is prepared; execution is pending.
 Its running Platform digest is `sha256:150f970d33b337ef9021191322fa5d9f9c794768d31d59ce87576f2bd6124482`.
 
-The branch's permanent fix separates manifest ownership from the narrowly scoped phase/suspend
+The branch's permanent fix at `0adfb34` passed [CI gate 37115872382](https://github.com/ziyixi/todofy/actions/runs/37115872382).
+It separates manifest ownership from the narrowly scoped phase/suspend
 workflow; see [deployment ownership](platform/src/personal_cloud/deployment/README.md).
 The accompanying Fleet correction keeps the historical unknown-outcome warning while requiring actual
 process, admission, Pod and release identity evidence for readiness. Those historical business outcomes
@@ -323,6 +325,11 @@ Local candidate validation passed 182 Platform/build/release/bootstrap tests plu
 45 Fleet unit tests and eight real workerd SQLite tests. Fleet type checks and lint passed; all 71
 relevant Python files passed lint/format. The two-release ownership test uses the real SDK transport
 with a synthetic field-manager model; it is not production Kubernetes acceptance.
+The rebuild follow-up propagates the configured node alias to Fleet without changing epochs and documents
+observer-state recovery, the supported two-workload profile, actual Compose retirement, and the existing
+sealed bootstrap handoff. Nine cloud-config tests passed; all thirteen current-profile generated outputs
+remain unchanged. Profile/catalog checks and a synthetic certificate/CMS roundtrip also passed. The new
+configuration-only recovery instructions still need an empty-account/VPS exercise; no such live drill was run.
 
 ## Foundation completed (historical release evidence)
 

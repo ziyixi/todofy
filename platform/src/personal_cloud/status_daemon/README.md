@@ -42,10 +42,21 @@ through the application lifespan. Status and release authorization remain separa
       "container": "newsletter",
       "release_configmap": "newsletter-release",
       "adapter": "newsletter"
+    },
+    {
+      "workload_key": "platform-runtime",
+      "deployment": "platform-runtime",
+      "container": "platform-runtime",
+      "release_configmap": "platform-release",
+      "adapter": "personal-cloud"
     }
   ]
 }
 ```
+
+The current daemon starts its deployment controller with both workloads above. Bootstrap generates
+this profile from public configuration; the fixed application resource names and private service URLs
+remain part of the supported deployment boundary.
 
 Adapters are `newsletter`, `personal-cloud` or `deployment`. The generic deployment adapter reports
 unsupported business capabilities and cannot invent image provenance. Newsletter's URL is the fixed

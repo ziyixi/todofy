@@ -106,6 +106,29 @@ class CloudConfigurationTests(unittest.TestCase):
         self.assertNotIn('synthetic', infrastructure)
         self.assertIn('ACCESS_ISSUER = "https://new-team.cloudflareaccess.com"', outputs["demo/wrangler.toml"])
 
+    def test_fleet_host_key_follows_node_alias_without_resetting_epoch(self):
+        fleet = '''name = "fleet"
+account_id = "dddddddddddddddddddddddddddddddd"
+[vars]
+HOST_KEY = "vps" # public node alias
+HOST_EPOCH = "7" # operator-managed recovery epoch
+SAFETY_BUDGET = "10"
+'''
+        for node_key in ("vps", "replacement-vps"):
+            with self.subTest(node_key=node_key):
+                root = self.fixture()
+                (root / "config/cloud.toml").write_text(CLOUD.replace('observer_node_key = "vps"', f'observer_node_key = "{node_key}"'))
+                (root / "fleet").mkdir()
+                (root / "fleet/app.toml").write_text(MANIFEST.replace("demo", "fleet"))
+                (root / "fleet/wrangler.toml").write_text(fleet)
+                demo = CONFIG + 'HOST_KEY = "unrelated-host"\n'
+                (root / "demo/wrangler.toml").write_text(demo)
+                outputs = generate.generated_files(root)
+                expected = fleet.replace("d" * 32, "a" * 32).replace('HOST_KEY = "vps"', f'HOST_KEY = "{node_key}"')
+                self.assertEqual(outputs["fleet/wrangler.toml"], expected)
+                self.assertIn('HOST_KEY = "unrelated-host"', outputs["demo/wrangler.toml"])
+                self.assertEqual((root / "fleet/wrangler.toml").read_text(), fleet)
+
     def test_check_does_not_mutate_and_write_is_idempotent(self):
         root = self.fixture()
         outputs = generate.generated_files(root)

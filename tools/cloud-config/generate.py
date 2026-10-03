@@ -112,6 +112,8 @@ def generated_files(root: Path) -> dict[str, str]:
             require(name in resources["access_audiences"], "Access audience coverage")
             used_audiences.add(name)
             text = literal_field(text, "ACCESS_AUDIENCE", resources["access_audiences"][name], "vars")
+        if name == "fleet":
+            text = literal_field(text, "HOST_KEY", profile["vps"]["observer_node_key"], "vars")
         for database in config.get("d1_databases", []):
             used_databases.add(database.get("database_name"))
         text = d1_fields(text, resources)
