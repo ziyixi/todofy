@@ -80,10 +80,9 @@ regular, symlink-free, stopped, and outside SSH/GPG folders.
 ## Install
 
 Supported initial host: Ubuntu 24.04 Linux amd64 with its existing Python 3 stdlib,
-systemd, iptables/ip6tables restore commands, and an already installed cloudflared
-at `/usr/bin/cloudflared` or `/usr/local/bin/cloudflared`. No Python packages are
-installed on the VPS. Meet [K3s requirements](https://docs.k3s.io/installation/requirements)
-and provide outbound HTTPS for the pinned K3s binary and verified public images.
+systemd and iptables/ip6tables restore commands. A preinstalled cloudflared is not required.
+No Python packages are installed on the VPS. Meet [K3s requirements](https://docs.k3s.io/installation/requirements)
+and provide outbound HTTPS for the pinned official K3s/cloudflared binaries and verified public images.
 
 ```sh
 sudo python3 <bundle>/installer/install.py \
@@ -97,6 +96,15 @@ server-side apply with `field-manager=personal-cloud`, matching normal releases,
 without force takeover. Its own `PCLOUD-K3S` INPUT chain allows Kubernetes ports
 6443/10250 and VXLAN 8472 only on loopback or local cni0 Pod CIDR traffic. It does
 not flush other chains or change SSH. Its rules reload before K3s starts.
+
+Bootstrap downloads the official Linux amd64 cloudflared **2026.8.2**, pinned by SHA256 in
+[`platform/versions.json`](../../platform/versions.json), into
+`/usr/local/libexec/personal-cloud/cloudflared`. The checksum matches the
+[official release](https://github.com/cloudflare/cloudflared/releases/tag/2026.8.2).
+The private project path avoids replacing any global cloudflared binary used by SSH.
+Its directories and an existing matching binary must be root-owned and non-writable
+by group/others; unknown bytes or unsafe paths stop preflight. An incomplete retry
+reuses matching bytes without downloading or replacing them.
 
 The only new host connector is `cloudflared-platform.service`, with its own private
 token file. Its standard readiness notification must confirm a registered connection
@@ -124,7 +132,7 @@ is still held. A different bundle is refused: normal updates, including after
 release activation, always use the daemon API through Actions. The completion marker
 is never written for a failed install; retry that same incomplete bundle to continue.
 
-Foreign managed units, K3s binaries,
+Foreign managed units, K3s or project cloudflared binaries,
 configurations, firewall rules, credentials or nonempty state destinations are
 refused rather than merged. A crash during a copy may leave a staging directory or
 new destination before its final marker; retry then fails with a fixed review code.

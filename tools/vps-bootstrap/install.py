@@ -7,6 +7,7 @@ import platform
 import shutil
 from pathlib import Path
 
+import binaries
 import cluster
 import firewall
 import host
@@ -48,11 +49,8 @@ def preflight(bundle):
         "ip6tables-restore",
     ):
         require(shutil.which(binary) is not None, "SYSTEM_PREREQUISITE_MISSING")
-    cloudflared = shutil.which("cloudflared")
-    require(
-        cloudflared is not None
-        and cloudflared in {"/usr/bin/cloudflared", "/usr/local/bin/cloudflared"},
-        "CLOUDFLARED_PREREQUISITE_MISSING",
+    cloudflared = binaries.connector_preflight(
+        read_json(Path(bundle) / "versions.json")
     )
     for name in (
         "k3s.service",
@@ -93,6 +91,8 @@ def install(bundle, private_file):
     cloudflared = preflight(bundle)
     profile = public["profile"]
     event("inputs", "verified")
+    binaries.install_connector(read_json(Path(bundle) / "versions.json"))
+    event("connector_binary", "verified")
     host.migrate(profile["state_root"], private["old_paths"], public["source_sha"])
     event("state", "preserved")
     host.retire_legacy_runtime()

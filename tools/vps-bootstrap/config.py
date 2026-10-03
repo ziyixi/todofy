@@ -150,6 +150,24 @@ def load_bundle(directory):
         re.fullmatch(r"[0-9a-f]{64}", pinned.get("linux_amd64_sha256", "")),
         "VERSIONS_INVALID",
     )
+    connector = versions.get("cloudflared", {})
+    require(
+        isinstance(connector, dict)
+        and set(connector) == {"version", "linux_amd64_sha256"},
+        "VERSIONS_INVALID",
+    )
+    version = connector["version"]
+    require(
+        isinstance(version, str)
+        and re.fullmatch(r"20[0-9]{2}\.(?:[1-9]|1[0-2])\.[0-9]{1,2}", version),
+        "VERSIONS_INVALID",
+    )
+    require(tuple(map(int, version.split("."))) >= (2025, 4, 0), "VERSIONS_INVALID")
+    require(
+        isinstance(connector["linux_amd64_sha256"], str)
+        and re.fullmatch(r"[0-9a-f]{64}", connector["linux_amd64_sha256"]),
+        "VERSIONS_INVALID",
+    )
     return value
 
 

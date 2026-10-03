@@ -57,21 +57,26 @@ def write_file(path, content, *, mode=0o600, uid=0, gid=0, replace=False):
         require(path.is_file(), "HOST_FILE_INVALID")
         if not replace:
             require(path.read_bytes() == content, "MANAGED_FILE_CONFLICT")
-    with tempfile.NamedTemporaryFile(
-        dir=path.parent, prefix=".personal-cloud-", delete=False
-    ) as temporary:
-        os.fchmod(temporary.fileno(), mode)
-        os.fchown(temporary.fileno(), uid, gid)
-        temporary.write(content)
-        temporary.flush()
-        os.fsync(temporary.fileno())
-        name = temporary.name
-    os.replace(name, path)
-    directory = os.open(path.parent, os.O_DIRECTORY)
+    name = None
     try:
-        os.fsync(directory)
+        with tempfile.NamedTemporaryFile(
+            dir=path.parent, prefix=".personal-cloud-", delete=False
+        ) as temporary:
+            name = temporary.name
+            os.fchmod(temporary.fileno(), mode)
+            os.fchown(temporary.fileno(), uid, gid)
+            temporary.write(content)
+            temporary.flush()
+            os.fsync(temporary.fileno())
+        os.replace(name, path)
+        directory = os.open(path.parent, os.O_DIRECTORY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
     finally:
-        os.close(directory)
+        if name is not None:
+            Path(name).unlink(missing_ok=True)
 
 
 def directory(path, *, uid=0, gid=0, mode=0o700):

@@ -2,6 +2,7 @@
 // Never imported by the UI or served by the public registry.
 export const OWNER_ZONE = "ziyixi.science";
 export const RESOURCE_IDENTITIES: Readonly<Record<string, string | null>> = {
+  "fleet-state": "a3d3d60939e54b49951af9586232c50e",
   "flowday-db": "df104e83-7183-47e3-b2f9-638dc7502c13",
   "home-state": "acddddf88d624194a68af430fd1a90ff",
   "lab-db": "f20238dc-93a4-4d1a-91c4-c013f01cbdc9",

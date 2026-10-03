@@ -255,10 +255,11 @@ Newsletter workload may require more memory, depending on its content. Keep room
 both an old and a new image plus a preserved copy of the application state. The current
 node has substantially more capacity; these figures are prerequisites, not a benchmark.
 
-Install Cloudflare's official `cloudflared` package before bootstrap on a new machine
-([Linux packages](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/downloads/)).
-The installer requires `/usr/local/bin/cloudflared` or the documented installed path;
-it creates only a new dedicated connector unit. Existing SSH/cloudflared services stay
+Bootstrap installs the official Linux amd64 `cloudflared` release fixed in
+`platform/versions.json`, after checking its published SHA256, at
+`/usr/local/libexec/personal-cloud/cloudflared`. A fresh machine does not need to preinstall
+the global package. This dedicated binary supplies `--token-file` for the new connector unit;
+an existing global binary is neither replaced nor upgraded. Existing SSH/cloudflared services stay
 independent. Docker, Compose, application executables, host application Python packages and a new tailnet
 are not prerequisites. k3s/containerd runs the published Linux amd64 images, which include the locked
 application runtime and libraries. Other architectures require matching, tested images.

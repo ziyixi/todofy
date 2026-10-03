@@ -7,5 +7,9 @@
   "kubectl": {
     "version": "v1.36.1",
     "linux_amd64_sha256": "629d3f410e09bf49b64ae7079f7f0bda1191efed311f7d37fdbab0ad5b0ec2b7"
+  },
+  "cloudflared": {
+    "version": "2026.8.2",
+    "linux_amd64_sha256": "fcfb02b575a52ca1af2e3267af4e1517bcdeb30ac48c834c69abaed3c0576ad2"
   }
 }

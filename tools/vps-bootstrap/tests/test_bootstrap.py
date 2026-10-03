@@ -21,6 +21,7 @@ from ziyixi_proto.platform.runtime.v1 import runtime_pb as pb
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / "tools/vps-bootstrap"))
 
+import binaries
 import cluster
 import firewall
 import host
@@ -109,6 +110,11 @@ class BootstrapTests(unittest.TestCase):
         bundle = self.bundle()
         value = config.load_bundle(bundle)
         self.assertEqual(value["source_sha"], SHA)
+        self.assertIn("installer/binaries.py", value["files"])
+        self.assertEqual(
+            value["files"]["installer/binaries.py"],
+            config.checksum(bundle / "installer/binaries.py"),
+        )
         runtime = config.read_json(bundle / "runtime.json")
         self.assertTrue(runtime["items"][1]["spec"]["suspend"])
         env = runtime["items"][0]["spec"]["template"]["spec"]["containers"][0]["env"]
@@ -128,6 +134,35 @@ class BootstrapTests(unittest.TestCase):
             connector_unit,
         )
         self.assertIn("--token-file %d/connector-token", connector_unit)
+        self.assertNotIn("--token ", connector_unit)
+        self.assertEqual(
+            connector_unit.replace("@CLOUDFLARED@", str(binaries.CONNECTOR))
+            .split("ExecStart=", 1)[1]
+            .splitlines()[0],
+            str(binaries.CONNECTOR)
+            + " --no-autoupdate tunnel run --token-file %d/connector-token",
+        )
+
+    def test_unsupported_or_missing_connector_pin_is_refused(self):
+        bundle = self.bundle()
+        versions_path = bundle / "versions.json"
+        manifest_path = bundle / "manifest.json"
+        original = config.read_json(versions_path)
+        for connector in (
+            None,
+            {},
+            {"version": "2025.3.2", "linux_amd64_sha256": "a" * 64},
+            {"version": "2026.8.2", "linux_amd64_sha256": "not-a-checksum"},
+            {"version": "2026.8.2", "linux_amd64_sha256": "a" * 64, "url": "x"},
+        ):
+            with self.subTest(connector=connector):
+                versions = {**original, "cloudflared": connector}
+                versions_path.write_text(json.dumps(versions))
+                manifest = config.read_json(manifest_path)
+                manifest["files"]["versions.json"] = config.checksum(versions_path)
+                manifest_path.write_text(json.dumps(manifest))
+                with self.assertRaisesRegex(config.BootstrapError, "VERSIONS_INVALID"):
+                    config.load_bundle(bundle)
 
     def test_rendered_daily_trigger_passes_the_real_client_configuration_contract(self):
         runtime = prepare.render(ROOT, SHA, IMAGES)
@@ -484,7 +519,8 @@ with patch.object(socket, "socket", side_effect=AssertionError("Network use is f
         mocks = []
         functions = [
             (host, "bootstrap_completed", False),
-            (install, "preflight", "/usr/bin/cloudflared"),
+            (install, "preflight", str(binaries.CONNECTOR)),
+            (binaries, "install_connector", None),
             (host, "migrate", None),
             (host, "retire_legacy_runtime", None),
             (firewall, "install", None),
@@ -522,6 +558,7 @@ with patch.object(socket, "socket", side_effect=AssertionError("Network use is f
         mutations = (
             (install, "credentials"),
             (install, "preflight"),
+            (binaries, "install_connector"),
             (host, "migrate"),
             (host, "retire_legacy_runtime"),
             (firewall, "install"),
@@ -557,7 +594,8 @@ with patch.object(socket, "socket", side_effect=AssertionError("Network use is f
         bundle = self.bundle()
         private_path, _ = self.private()
         functions = (
-            (install, "preflight", "/usr/bin/cloudflared"),
+            (install, "preflight", str(binaries.CONNECTOR)),
+            (binaries, "install_connector", None),
             (host, "migrate", None),
             (host, "retire_legacy_runtime", None),
             (firewall, "install", None),
@@ -593,7 +631,8 @@ with patch.object(socket, "socket", side_effect=AssertionError("Network use is f
         connector_directory = self.base / "cloudflared"
         connector_directory.mkdir()
         functions = (
-            (install, "preflight", "/usr/bin/cloudflared"),
+            (install, "preflight", str(binaries.CONNECTOR)),
+            (binaries, "install_connector", None),
             (host, "migrate", None),
             (host, "retire_legacy_runtime", None),
             (firewall, "install", None),

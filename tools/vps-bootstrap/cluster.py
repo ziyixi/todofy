@@ -2,15 +2,14 @@
 
 import base64
 import json
-import tempfile
 import time
-import urllib.request
 from pathlib import Path
 
+import binaries
 from host import directory, write_file
 from runner import command
 
-from config import BootstrapError, checksum, read_json, require
+from config import BootstrapError, read_json, require
 
 BINARY = Path("/usr/local/bin/k3s")
 KUBECONFIG = "/etc/rancher/k3s/k3s.yaml"
@@ -26,45 +25,14 @@ def kubectl(args, *, data=None, timeout=60, check=True):
 
 
 def pinned_binary(versions):
-    expected = versions["k3s"]["linux_amd64_sha256"]
-    if BINARY.exists():
-        require(
-            BINARY.is_file()
-            and not BINARY.is_symlink()
-            and checksum(BINARY) == expected,
-            "FOREIGN_K3S_INSTALLATION",
-        )
-        return
-    require(
-        BINARY.parent.is_dir() and not BINARY.parent.is_symlink(),
-        "BINARY_DIRECTORY_INVALID",
-    )
     version = versions["k3s"]["version"].replace("+", "%2B")
     url = "https://github.com/k3s-io/k3s/releases/download/" + version + "/k3s"
-    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-    deadline = time.monotonic() + 600
-    with tempfile.NamedTemporaryFile(
-        dir=BINARY.parent, prefix=".personal-cloud-k3s-", delete=False
-    ) as target:
-        temporary = Path(target.name)
-        try:
-            with opener.open(url, timeout=30) as response:
-                require(
-                    response.geturl().startswith("https://"), "BINARY_SOURCE_INVALID"
-                )
-                length = 0
-                while chunk := response.read(65536):
-                    length += len(chunk)
-                    require(
-                        length <= 200 * 1024 * 1024 and time.monotonic() < deadline,
-                        "BINARY_DOWNLOAD_TOO_LARGE",
-                    )
-                    target.write(chunk)
-            target.flush()
-            require(checksum(temporary) == expected, "BINARY_CHECKSUM_MISMATCH")
-            write_file(BINARY, temporary.read_bytes(), mode=0o755)
-        finally:
-            temporary.unlink(missing_ok=True)
+    binaries.pinned_binary(
+        BINARY,
+        url,
+        versions["k3s"]["linux_amd64_sha256"],
+        "FOREIGN_K3S_INSTALLATION",
+    )
 
 
 def start(bundle):

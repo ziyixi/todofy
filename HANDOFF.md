@@ -16,9 +16,9 @@ Rules for this file:
   what is done, what is left, how to verify it and what to check after its deploy. Link to the app docs for
   design detail instead of copying it.
 
-Last updated: 2026-10-03 ~05:50 UTC. The verified foundation implementation is `8628e5e`; the k3s/Fleet
-implementation reached `main` at `ca10078`, but its VPS runtime is not installed. Six new managed Access
-objects exist; the dedicated Tunnel is still blocked by an undiagnosed provider request failure. Every app's owner API is on proto now (the dashboard
+Last updated: 2026-10-03 ~06:25 UTC. The verified foundation implementation is `8628e5e`; the k3s/Fleet
+corrections reached `main` at `95614de`, but its VPS runtime is not installed. Six new managed Access
+objects exist; the dedicated Tunnel is blocked by a confirmed provider authorization failure. Every app's owner API is on proto now (the dashboard
 `ca63675`, FlowDay `8d9100e`, Mail Hero `d1bde0e`, Todofy `b70856f`, all landed and verified on 2026-10-02). Nothing
 was in flight at that landing. The foundation evidence below describes that completed release.
 
@@ -33,12 +33,13 @@ was in flight at that landing. The foundation evidence below describes that comp
 | Watch | `watch` (+ `WatchState` DO) | `watch.ziyixi.science` | `Watch deploy` | Yes (`watch.ui.v1`) |
 | FlowDay | `flowday` | `flowday.ziyixi.science` | `FlowDay deploy` | Yes (`flowday.ui.v1`) |
 | Dashboard | `home` (+ `HomeState` DO) | `home.ziyixi.science` | `Dashboard deploy` | Yes (`dashboard.ui.v1`, since `ca63675`) |
+| Fleet | `fleet` (+ `FleetState` DO) | `fleet.ziyixi.science` | `Fleet deploy` | Yes (`fleet.ui.v1`; no VPS observations yet) |
 | Website | `ziyixi-website` (+ `ziyixi-notion-publish` relay) | `ziyixi.science`, `www.ziyixi.science` | `Website release` | n/a (static) |
 
 Newsletter source was imported on `main` from its deployed engine commit
 `c3d622d4771b1ca63ee4e3f785b79032cffc30e1`. Its independent image is `ghcr.io/ziyixi/todofy-newsletter`.
-The current `ca10078` publisher reused the exact Linux-tested image artifact and published
-`sha256:045f20ae0334ea9f8ce675ed93e31c6dfcd7192c69c641f112ea1aa53e7d3657`.
+The current `95614de` publisher reused the exact Linux-tested image artifact and published
+`sha256:2887c5b6f046374aa63b581a565c3d26a4f0c21a84c3f461011acd446ffac66f`.
 The package is public; anonymous manifest access and the manifest/config identity checks passed.
 `ghcr.io/ziyixi/newsletter` was the old VPS runtime. It is now stopped for the authorised migration,
 with its image and persistent state preserved. Image publication alone does not update that server. The application reads Todofy's
@@ -100,8 +101,9 @@ Local platform, image-context, release-client and bootstrap checks passed: 97 te
 all 53 relevant Python files passed lint and format. Profile/infrastructure checks passed 89 tests;
 Newsletter's changed drain/monitor behavior passed 45 synthetic tests. A real offline Kustomize/bootstrap
 bundle contained ten runtime resources, keeping Newsletter held and the observer enabled. Full branch
-and main CI passed at `ca10078`. No k3s/Fleet deployment or production
-business acceptance has happened yet. Do not claim the old process supports the new drain API.
+and main CI passed at `ca10078`. At that release neither k3s nor Fleet was deployed. The later Fleet
+publication is recorded below; VPS and production business acceptance remain pending. Do not claim the
+old process supports the new drain API.
 
 First branch run [37092747486](https://github.com/ziyixi/todofy/actions/runs/37092747486) at `b441e46`
 passed the actual Linux Platform image build/import/identity smoke and Fleet checks. The complete gate
@@ -207,10 +209,41 @@ samples and shifted their calibration pairing. The tests now pair samples with c
 check each run's complete sample count and keep the coordinator's maximum bound. Four recovery/negative
 controls passed; a single final full CPU run passed all seven real CPU cases and those four recovery
 checks. SendMessage measured 4.52 ms first and 2.87 ms warm; coordinator maxima remained below 16 ms
-against the unchanged 1000 ms bound. The shared meter is unchanged. These fixes await a fresh branch gate.
+against the unchanged 1000 ms bound. The shared meter is unchanged.
 
-Remaining sequence: gate and land these corrections with Fleet's verified Access identities; deploy
-Fleet/Home; resolve the dedicated Tunnel using the safe diagnostics; record the actual Fleet namespace;
+The final branch [37101662598](https://github.com/ziyixi/todofy/actions/runs/37101662598) passed all 22
+checks at `95614de`. Main [37102132805](https://github.com/ziyixi/todofy/actions/runs/37102132805) reused
+those exact-SHA checks and published both original Linux-tested image artifacts; Mail Hero, Fleet and
+Home deploy jobs passed. Fleet's deployed source SHA and the unauthenticated Fleet/Home Access probes
+passed. Fleet's actual namespace was read from that verified deployment and recorded in the public
+resource inventory; its generated Home identity and eight cloud-config tests passed. This does not
+prove owner UI behavior or live VPS telemetry. Mail Hero has no additional live-version probe in this
+release. VPS deployment remains disabled and was skipped.
+
+Anonymous registry manifest/config checks independently matched both image digests, their CI-tested
+image IDs and the exact source SHA. Platform published
+`sha256:f4b026388208d4289fa0a8e05dc54b049f72f3e468626d3466db9f4a8b4f9aa3`.
+These checks did not pull all layers or run the images on the VPS.
+
+The read-only [37102132807](https://github.com/ziyixi/todofy/actions/runs/37102132807) retained exactly
+three creates, twenty-five no-ops and one output change; its nonzero exit signals planned drift.
+Controlled apply [37102749784](https://github.com/ziyixi/todofy/actions/runs/37102749784) passed its saved
+plan gates, then returned HTTP 403 / Cloudflare code 10000 for the dedicated Tunnel. The owner was asked
+to restore the regular dashboard login and add only the missing Tunnel write permission to the existing
+deployment token, preserving all previous permissions. Do not retry until that barrier is resolved;
+then recheck the exact plan before applying. No secret or raw provider response was logged.
+
+The real VPS still has cloudflared `2024.8.3`, which cannot read `--token-file`. The bootstrap now pins
+official cloudflared `2026.8.2` and its linux/amd64 checksum alongside k3s, using the existing standard-library
+download pattern. Its separate project connector leaves the global binary and existing SSH services alone;
+fresh hosts no longer need a separate cloudflared installation. Download and verification precede state
+migration and Docker retirement. The public installer bundle includes this shared binary helper and its
+hash; application dependencies still live only in images. Thirty-four synthetic bootstrap tests and five
+platform bootstrap boundary tests passed, plus scoped lint/format. This fix awaits its branch gate; no
+new connector binary, system service or k3s runtime has been installed on the VPS.
+
+Remaining sequence: gate and land the actual Fleet namespace inventory and bootstrap prerequisite fix;
+resolve the dedicated Tunnel after the token permission is restored;
 prepare immutable images and a reviewed public bootstrap with private node credentials supplied
 separately; owner runs sudo once. The bootstrap preserves the old state, then disables the already
 stopped Docker runtime before starting k3s. Then enable the repository VPS release switch and verify

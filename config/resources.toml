@@ -22,6 +22,7 @@ zone_id = "39163aaaa9eba38eca58f3ea969710bf"
 "todofy" = "151c1306-3885-4679-9592-08887b30ae68"
 
 [durable_objects]
+"fleet-state" = "a3d3d60939e54b49951af9586232c50e"
 "home-state" = "acddddf88d624194a68af430fd1a90ff"
 "lab-state" = "d8b315160669429781ba6229123cb33c"
 "mail-coordinator" = "55c248f9d82c45f3a89d2de1d719d5db"
