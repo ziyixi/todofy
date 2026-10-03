@@ -16,9 +16,12 @@ Rules for this file:
   what is done, what is left, how to verify it and what to check after its deploy. Link to the app docs for
   design detail instead of copying it.
 
-Last updated: 2026-10-03 ~06:25 UTC. The verified foundation implementation is `8628e5e`; the k3s/Fleet
-corrections reached `main` at `95614de`, but its VPS runtime is not installed. Six new managed Access
-objects exist; the dedicated Tunnel is blocked by a confirmed provider authorization failure. Every app's owner API is on proto now (the dashboard
+Last updated: 2026-10-03. The verified foundation implementation is `8628e5e`; the k3s/Fleet
+implementation and pinned connector bootstrap reached `main` at `54861b2`. The owner ran the prepared
+bootstrap; k3s and the dedicated connector are running and Docker is retired. Fleet receives live signed
+reports, but runtime observations are unavailable because of pinned Kubernetes SDK compatibility bugs.
+The first API release remains disabled while the client is repaired; retained Newsletter admission stays held.
+Every app's owner API is on proto now (the dashboard
 `ca63675`, FlowDay `8d9100e`, Mail Hero `d1bde0e`, Todofy `b70856f`, all landed and verified on 2026-10-02). Nothing
 was in flight at that landing. The foundation evidence below describes that completed release.
 
@@ -33,13 +36,13 @@ was in flight at that landing. The foundation evidence below describes that comp
 | Watch | `watch` (+ `WatchState` DO) | `watch.ziyixi.science` | `Watch deploy` | Yes (`watch.ui.v1`) |
 | FlowDay | `flowday` | `flowday.ziyixi.science` | `FlowDay deploy` | Yes (`flowday.ui.v1`) |
 | Dashboard | `home` (+ `HomeState` DO) | `home.ziyixi.science` | `Dashboard deploy` | Yes (`dashboard.ui.v1`, since `ca63675`) |
-| Fleet | `fleet` (+ `FleetState` DO) | `fleet.ziyixi.science` | `Fleet deploy` | Yes (`fleet.ui.v1`; no VPS observations yet) |
+| Fleet | `fleet` (+ `FleetState` DO) | `fleet.ziyixi.science` | `Fleet deploy` | Yes (`fleet.ui.v1`; live receipts, runtime verification pending) |
 | Website | `ziyixi-website` (+ `ziyixi-notion-publish` relay) | `ziyixi.science`, `www.ziyixi.science` | `Website release` | n/a (static) |
 
 Newsletter source was imported on `main` from its deployed engine commit
 `c3d622d4771b1ca63ee4e3f785b79032cffc30e1`. Its independent image is `ghcr.io/ziyixi/todofy-newsletter`.
-The current `95614de` publisher reused the exact Linux-tested image artifact and published
-`sha256:2887c5b6f046374aa63b581a565c3d26a4f0c21a84c3f461011acd446ffac66f`.
+The current `54861b2` publisher reused the exact Linux-tested image artifact and published
+`sha256:146d926001d0d1252a4cc5f71cc63a38acaf11c76f92e0be6748b008b168ed9f`.
 The package is public; anonymous manifest access and the manifest/config identity checks passed.
 `ghcr.io/ziyixi/newsletter` was the old VPS runtime. It is now stopped for the authorised migration,
 with its image and persistent state preserved. Image publication alone does not update that server. The application reads Todofy's
@@ -242,12 +245,29 @@ hash; application dependencies still live only in images. Thirty-four synthetic 
 platform bootstrap boundary tests passed, plus scoped lint/format. This fix awaits its branch gate; no
 new connector binary, system service or k3s runtime has been installed on the VPS.
 
-Remaining sequence: gate and land the actual Fleet namespace inventory and bootstrap prerequisite fix;
-resolve the dedicated Tunnel after the token permission is restored;
-prepare immutable images and a reviewed public bootstrap with private node credentials supplied
-separately; owner runs sudo once. The bootstrap preserves the old state, then disables the already
-stopped Docker runtime before starting k3s. Then enable the repository VPS release switch and verify
-the pushed release, fresh Fleet/Home observations and inactive legacy runtime.
+The namespace inventory and connector fix passed branch [37103481732](https://github.com/ziyixi/todofy/actions/runs/37103481732)
+at `54861b2`; main [37103957207](https://github.com/ziyixi/todofy/actions/runs/37103957207) promoted its original
+tested image artifacts. After the owner approved only the missing Tunnel and scoped DNS permissions,
+[apply 37106269391](https://github.com/ziyixi/todofy/actions/runs/37106269391) created the three remaining
+transport resources and its post-apply plan was unchanged. Its encrypted one-time handoff was privately
+staged; the owner executed the exact public bootstrap. Read-only host checks confirm k3s and the
+dedicated connector are running and the old Docker runtime is inactive. The authenticated typed daemon
+API and Fleet's signed receipt path are reachable; no API release ledger exists yet. These facts do not
+prove successful release activation, provider operations or backup coverage.
+
+The pinned Kubernetes SDK 36 exposed two integration bugs hidden by the older call_api mock:
+it resolves the Bearer prefix by `BearerToken`, and accepts `response_types_map` rather than `response_type`.
+The narrow client fix uses the canonical identity key with its existing rotation hook and maps successful
+200/201 replies to objects. Real SDK tests replace only the final HTTP transport and verify outgoing
+authentication, rotation, physical field casing and creation response parsing. Six scoped tests and three
+subtests passed, plus lint/format. The installed image still contains the old client; a new source SHA must
+receive its own tested immutable image, without republishing different bytes under `54861b2`.
+
+Remaining sequence: complete the read-only in-Pod diagnosis and gate the client correction; prepare a
+bounded privileged repair of the unavailable daemon. Preserve the existing Newsletter gate and unknown
+business ledgers. The current API cannot replace its broken Kubernetes client remotely, and a different
+release cannot silently take over the bootstrap gate. Do not reopen admission, replace frozen targets,
+claim unknown outcomes succeeded or enable automatic VPS releases until a safe recovery is verified.
 
 ## Foundation completed (historical release evidence)
 

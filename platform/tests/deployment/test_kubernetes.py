@@ -1,4 +1,4 @@
-"""Official SDK boundaries tested at call_api, without a real network or pod credential."""
+"""Official SDK and HTTP boundaries, without a real network or pod credential."""
 
 import tempfile
 import unittest
@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 from kubernetes.client.exceptions import ApiException
 from personal_cloud.deployment.kubernetes import Client, DependencyUnavailable
+from urllib3.response import HTTPResponse
 
 
 class Kubernetes(unittest.TestCase):
@@ -23,7 +24,7 @@ class Kubernetes(unittest.TestCase):
                 inner.configuration = configuration
 
             def call_api(inner, path, method, **options):
-                identity = inner.configuration.get_api_key_with_prefix("authorization")
+                identity = inner.configuration.get_api_key_with_prefix("BearerToken")
                 owner.calls.append(
                     (path, method, options, identity, inner.configuration)
                 )
@@ -66,6 +67,7 @@ class Kubernetes(unittest.TestCase):
         self.assertEqual(first[3], "Bearer first-synthetic-token-value")
         self.assertEqual(last[3], "Bearer rotated-synthetic-token-value")
         self.assertEqual(last[2]["_request_timeout"], (1, 1))
+        self.assertEqual(first[2]["response_types_map"], {200: "object", 201: "object"})
         self.assertEqual(first[4].host, "https://kubernetes.default.svc")
         self.assertTrue(first[4].verify_ssl)
         self.assertEqual(first[4].ssl_ca_cert, "synthetic-ca")
@@ -148,6 +150,86 @@ class Kubernetes(unittest.TestCase):
                 self.client.get("ConfigMap", "newsletter-release")
             self.assertEqual(error.exception.missing, status == 404)
             self.assertEqual(str(error.exception), "KUBERNETES_UNAVAILABLE")
+
+
+class KubernetesTransport(unittest.TestCase):
+    def test_real_sdk_http_authorization_retains_prefix_after_token_rotation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            token = Path(directory) / "token"
+            token.write_text("first-synthetic-token-value")
+            calls = []
+
+            def request(manager, method, url, **options):
+                calls.append((method, url, options["headers"]["authorization"]))
+                return HTTPResponse(
+                    body=b'{"status":{"observedGeneration":7}}',
+                    status=200,
+                    headers={"Content-Type": "application/json"},
+                )
+
+            active = Client(
+                "personal-cloud", token_file=str(token), ca_file="synthetic-ca"
+            )
+            self.addCleanup(active.close)
+            with patch(
+                "kubernetes.client.rest.urllib3.PoolManager.request",
+                autospec=True,
+                side_effect=request,
+            ):
+                first = active.get("Deployment", "newsletter")
+                token.write_text("rotated-synthetic-token-value")
+                second = active.get("Deployment", "newsletter")
+
+            self.assertEqual(first["status"], {"observedGeneration": 7})
+            self.assertEqual(second, first)
+            self.assertEqual(
+                calls,
+                [
+                    (
+                        "GET",
+                        "https://kubernetes.default.svc/apis/apps/v1/namespaces/personal-cloud/deployments/newsletter",
+                        "Bearer first-synthetic-token-value",
+                    ),
+                    (
+                        "GET",
+                        "https://kubernetes.default.svc/apis/apps/v1/namespaces/personal-cloud/deployments/newsletter",
+                        "Bearer rotated-synthetic-token-value",
+                    ),
+                ],
+            )
+
+    def test_real_sdk_deserializes_created_apply_response(self):
+        with tempfile.TemporaryDirectory() as directory:
+            token = Path(directory) / "token"
+            token.write_text("first-synthetic-token-value")
+            active = Client(
+                "personal-cloud", token_file=str(token), ca_file="synthetic-ca"
+            )
+            self.addCleanup(active.close)
+            with patch(
+                "kubernetes.client.rest.urllib3.PoolManager.request",
+                autospec=True,
+                return_value=HTTPResponse(
+                    body=b'{"metadata":{"resourceVersion":"123"}}',
+                    status=201,
+                    headers={"Content-Type": "application/json"},
+                ),
+            ) as request:
+                active.apply(
+                    {
+                        "apiVersion": "apps/v1",
+                        "kind": "Deployment",
+                        "metadata": {
+                            "namespace": "personal-cloud",
+                            "name": "newsletter",
+                        },
+                    }
+                )
+            self.assertEqual(request.call_args.args[1], "PATCH")
+            self.assertEqual(
+                request.call_args.kwargs["headers"]["authorization"],
+                "Bearer first-synthetic-token-value",
+            )
 
 
 if __name__ == "__main__":

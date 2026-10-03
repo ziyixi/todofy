@@ -58,13 +58,13 @@ class Client:
         config.proxy = None
         config.retries = 0
         config.debug = False
-        config.api_key_prefix["authorization"] = "Bearer"
+        config.api_key_prefix["BearerToken"] = "Bearer"
 
         def refresh(configuration):
             token = self.token_file.read_text().strip()
             if not re.fullmatch(r"[A-Za-z0-9_.-]{24,16384}", token):
                 raise ValueError("invalid_projected_identity")
-            configuration.api_key["authorization"] = token
+            configuration.api_key["BearerToken"] = token
 
         config.refresh_api_key_hook = refresh
         refresh(config)
@@ -108,7 +108,7 @@ class Client:
                         "Accept": "application/json",
                     },
                     body=body,
-                    response_type="object",
+                    response_types_map={200: "object", 201: "object"},
                     auth_settings=["BearerToken"],
                     _return_http_data_only=True,
                     _request_timeout=(min(3, timeout), max(0.01, timeout)),
