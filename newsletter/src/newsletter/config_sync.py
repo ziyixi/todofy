@@ -263,14 +263,31 @@ class ConfigSync:
         with _writer_lock(self.root):
             if (self.root / "active.json").exists():
                 raise SyncError("CONFIG_ALREADY_INITIALIZED")
-            content_config.install_snapshot(
-                self.root, content_config.packaged_snapshot()
-            )
-            _atomic_json(
-                self.root / "sync-status.json",
-                {"error": None, "last_success": None},
-            )
+            return self._seed_locked()
+
+    def initialize(self) -> dict[str, Any]:
+        """Seed an empty volume or validate existing state without writes."""
+        if (
+            any(part.is_symlink() for part in (self.root, *self.root.parents))
+            or not self.root.is_dir()
+        ):
+            raise SyncError("CONFIG_DIRECTORY_REQUIRED")
+        if next(self.root.iterdir(), None) is not None:
             return self.status()
+        with _writer_lock(self.root):
+            if any(path.name != ".sync.lock" for path in self.root.iterdir()):
+                raise SyncError("CONFIG_INITIALIZATION_CONFLICT")
+            return self._seed_locked()
+
+    def _seed_locked(self) -> dict[str, Any]:
+        content_config.install_snapshot(
+            self.root, content_config.packaged_snapshot()
+        )
+        _atomic_json(
+            self.root / "sync-status.json",
+            {"error": None, "last_success": None},
+        )
+        return self.status()
 
     def pin(self, digest: str | None = None) -> dict[str, Any]:
         """Persist a cached release pin before activating it locally."""
@@ -346,7 +363,15 @@ def main() -> None:
     """Run the isolated configuration operator CLI or periodic poller."""
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
-    for command in ("seed", "once", "run", "status", "health", "unpin"):
+    for command in (
+        "seed",
+        "initialize",
+        "once",
+        "run",
+        "status",
+        "health",
+        "unpin",
+    ):
         commands.add_parser(command)
     commands.add_parser("pin").add_argument("digest", nargs="?")
     args = parser.parse_args()

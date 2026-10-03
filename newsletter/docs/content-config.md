@@ -102,6 +102,10 @@ macOS 上 `/tmp` 是符号链接时请用 `/private/tmp/newsletter-bundle.json`�
 不会偷偷切换旧资源。已有活动版本时 seed 不覆盖。之后网络、限流、下载损坏、模板错误或
 引擎不兼容只更新同步错误状态，保留最后可用版本。服务启动和每次新运行仍重新检查活动配置。
 
+本仓库的 K3s 配置同步 Deployment 在启动前，用同一固定 digest 的 Newsletter 镜像
+执行 `python -m newsletter.config_sync initialize`。它只在配置卷完全为空时 seed 包内基线；
+已有活动配置只校验且不改写。非空目录缺少基线或基线损坏时失败，不自动重置配置。
+
 ```sh
 docker compose exec -T newsletter-config-sync python -m newsletter.config_sync status
 docker compose exec -T newsletter-config-sync python -m newsletter.config_sync once

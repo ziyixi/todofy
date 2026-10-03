@@ -167,6 +167,16 @@ passed. Fleet's verified Access configuration and activation guards passed 220 r
 apply diagnostics passed ninety Infra checks and forty-four root Infra guards, with zero new legacy lint
 violations. No synthetic test proves a live Tunnel, bootstrap or successful application rollout.
 
+Final first-install review corrected two boundary failures before production: the Tunnel unit now uses
+cloudflared's standard connected notification, and a failed startup cannot write the completion marker.
+The ConfigSync Deployment initializes a truly empty volume with its existing packaged seed using the
+same Newsletter image; retained configurations are strictly validated without changed bytes/timestamps,
+and corrupt or partly initialized directories fail rather than being overwritten. Both renderers pin the
+init container to the same reviewed digest and profile. Seventy-nine Newsletter configuration tests,
+sixty-three deployment tests plus forty-nine subtests, scoped lint/format, Mypy and structure guards passed.
+The first API release must keep the bootstrap source SHA; do not enable normal VPS deployment or advance
+that first-release commit until its held admission is verified and activated.
+
 Remaining sequence: gate and land these corrections with Fleet's verified Access identities; deploy
 Fleet/Home; resolve the dedicated Tunnel using the safe diagnostics; record the actual Fleet namespace;
 prepare immutable images and a reviewed public bootstrap with private node credentials supplied

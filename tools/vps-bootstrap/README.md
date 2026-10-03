@@ -29,6 +29,9 @@ has a checksum; these establish bundle consistency, not an independent signature
 Initial Newsletter admission holds `release-<source_sha>` and its daily CronJob
 is suspended. The observer CronJob remains active every five minutes, with Forbid
 concurrency and its own persistent sequence/pending-receipt PVC.
+The first API release must use that same bootstrap source SHA. Keep normal VPS
+deployment disabled and avoid advancing the first-release commit until it is verified;
+a different SHA cannot silently replace the existing held admission operation.
 
 ## Private input
 
@@ -67,8 +70,11 @@ Editor and send must differ, monitor must differ from editor/send/platform, and
 platform must differ from send. These checks run before server changes.
 The renderer controls persistent paths, release/admission IDs, and service URLs.
 Private input cannot override those paths or inject PATH/HOME/PYTHONPATH,
-OPENAI_API_KEY or loader variables. A fresh VPS may use `old_paths: {}` and complete
-the application's normal provider setup. Existing source directories must be
+OPENAI_API_KEY or loader variables. A fresh VPS may use `old_paths: {}`; Newsletter's
+same-image init container seeds the packaged configuration only into a completely
+empty configuration volume. Existing active configuration is validated without
+rewriting it; nonempty missing or corrupt state stops startup for review. Complete
+the application's normal provider setup separately. Existing source directories must be
 regular, symlink-free, stopped, and outside SSH/GPG folders.
 
 ## Install
@@ -93,7 +99,8 @@ without force takeover. Its own `PCLOUD-K3S` INPUT chain allows Kubernetes ports
 not flush other chains or change SSH. Its rules reload before K3s starts.
 
 The only new host connector is `cloudflared-platform.service`, with its own private
-token file. Existing SSH/cloudflared services are untouched. After preserving the stopped legacy state,
+token file. Its standard readiness notification must confirm a registered connection
+before bootstrap can write a completion marker. Existing SSH/cloudflared services are untouched. After preserving the stopped legacy state,
 the installer disables and stops existing docker.socket/docker.service before applying
 its firewall rules. This authorized retirement does not uninstall Docker or delete
 images, Compose files, volumes or the preserved source directories. Daemon and

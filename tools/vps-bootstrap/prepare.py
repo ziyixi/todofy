@@ -145,6 +145,8 @@ Description=Personal cloud runtime Cloudflare Tunnel
 Wants=network-online.target
 After=network-online.target k3s.service
 [Service]
+Type=notify
+TimeoutStartSec=15
 DynamicUser=true
 LoadCredential=connector-token:/etc/cloudflared/platform-token
 ExecStart=@CLOUDFLARED@ --no-autoupdate tunnel run --token-file %d/connector-token

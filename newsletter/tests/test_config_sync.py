@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import copy
 import errno
 import json
@@ -293,6 +294,124 @@ def test_missing_baseline_requires_explicit_seed(tmp_path: pathlib.Path):
         config_sync.SyncError, match="CONFIG_ALREADY_INITIALIZED"
     ):
         sync.seed()
+
+
+def test_initialize_seeds_only_an_empty_volume_without_provider_calls(
+    tmp_path: pathlib.Path, monkeypatch
+):
+    denied = mock.Mock(side_effect=AssertionError("no service operations"))
+    monkeypatch.setattr(sqlite3, "connect", denied)
+    monkeypatch.setattr(subprocess, "Popen", denied)
+    monkeypatch.setattr(httpx.Client, "send", denied)
+    sync = config_sync.ConfigSync(config_sync.SyncSettings(tmp_path))
+    assert sync.initialize()["active_revision"] == "packaged"
+    assert (
+        content_config.load_active(tmp_path)
+        == content_config.packaged_snapshot()
+    )
+    denied.assert_not_called()
+
+
+def test_initialize_validates_an_existing_snapshot_without_any_writes(
+    seeded: config_sync.ConfigSync, monkeypatch
+):
+    pointer = seeded.root / "active.json"
+    pointer.write_text(
+        json.dumps(json.loads(pointer.read_text()), indent=2) + "\n"
+    )
+    for name in (".sync.lock", ".install.lock"):
+        (seeded.root / name).unlink()
+    before = {
+        path.relative_to(seeded.root): (
+            path.read_bytes(),
+            path.stat().st_mtime_ns,
+        )
+        for path in seeded.root.rglob("*")
+        if path.is_file()
+    }
+    denied = mock.Mock(side_effect=AssertionError("no initialization writes"))
+    monkeypatch.setattr(config_sync, "_writer_lock", denied)
+    monkeypatch.setattr(content_config, "install_snapshot", denied)
+    assert seeded.initialize()["active_revision"] == "packaged"
+    after = {
+        path.relative_to(seeded.root): (
+            path.read_bytes(),
+            path.stat().st_mtime_ns,
+        )
+        for path in seeded.root.rglob("*")
+        if path.is_file()
+    }
+    assert after == before
+    denied.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "filename", ["unrecognized", ".sync.lock", "active.json"]
+)
+def test_initialize_refuses_nonempty_missing_or_corrupt_state_without_writes(
+    tmp_path: pathlib.Path, monkeypatch, filename
+):
+    (tmp_path / filename).write_bytes(b"synthetic preserved bytes")
+    sync = config_sync.ConfigSync(config_sync.SyncSettings(tmp_path))
+    denied = mock.Mock(side_effect=AssertionError("no fallback seed"))
+    monkeypatch.setattr(content_config, "install_snapshot", denied)
+    before = {path.name: path.read_bytes() for path in tmp_path.iterdir()}
+    with pytest.raises(
+        config_sync.SyncError, match="CONFIG_BASELINE_MISSING_OR_INVALID"
+    ):
+        sync.initialize()
+    assert {
+        path.name: path.read_bytes() for path in tmp_path.iterdir()
+    } == before
+    denied.assert_not_called()
+
+
+def test_initialize_refuses_a_corrupt_existing_release_without_replacing_it(
+    seeded: config_sync.ConfigSync, monkeypatch
+):
+    snapshot = next(seeded.root.glob("releases/*/bundle.json"))
+    snapshot.write_text("{}")
+    denied = mock.Mock(side_effect=AssertionError("no fallback seed"))
+    monkeypatch.setattr(content_config, "install_snapshot", denied)
+    with pytest.raises(
+        config_sync.SyncError, match="CONFIG_BASELINE_MISSING_OR_INVALID"
+    ):
+        seeded.initialize()
+    assert snapshot.read_bytes() == b"{}"
+    denied.assert_not_called()
+
+
+def test_initialize_cli_uses_the_volume_boundary(
+    tmp_path: pathlib.Path, monkeypatch, capsys
+):
+    monkeypatch.setenv("NEWSLETTER_CONTENT_CONFIG_DIR", str(tmp_path))
+    monkeypatch.setattr(config_sync.sys, "argv", ["config-sync", "initialize"])
+    config_sync.main()
+    assert json.loads(capsys.readouterr().out)["active_revision"] == "packaged"
+
+
+def test_initialize_rechecks_empty_state_under_the_writer_lock(
+    tmp_path: pathlib.Path, monkeypatch
+):
+    original_lock = config_sync._writer_lock
+
+    @contextlib.contextmanager
+    def racing_writer(root):
+        with original_lock(root):
+            (root / "unexpected").write_bytes(b"preserve")
+            yield
+
+    monkeypatch.setattr(config_sync, "_writer_lock", racing_writer)
+    denied = mock.Mock(side_effect=AssertionError("no raced fallback seed"))
+    monkeypatch.setattr(content_config, "install_snapshot", denied)
+    sync = config_sync.ConfigSync(config_sync.SyncSettings(tmp_path))
+    with pytest.raises(
+        config_sync.SyncError, match="CONFIG_INITIALIZATION_CONFLICT"
+    ):
+        sync.initialize()
+    assert (tmp_path / "unexpected").read_bytes() == b"preserve"
+    assert not (tmp_path / "active.json").exists()
+    denied.assert_not_called()
 
 
 def test_status_is_read_only_and_does_not_call_providers(

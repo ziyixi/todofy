@@ -679,14 +679,18 @@ class Rendering(unittest.TestCase):
             if item["kind"] == "Deployment":
                 self.assertEqual(item["spec"]["strategy"], {"type": "Recreate"})
                 expected = (
-                    "ghcr.io/example/todofy-platform@"
+                    "ghcr.io/example/todofy-platform@" + TARGETS[1].image_digest
                     if item["metadata"]["name"] == "platform-runtime"
-                    else "ghcr.io/example/todofy-newsletter@"
+                    else "ghcr.io/example/todofy-newsletter@" + TARGETS[0].image_digest
                 )
+                pod = item["spec"]["template"]["spec"]
                 self.assertTrue(
                     all(
-                        container["image"].startswith(expected)
-                        for container in item["spec"]["template"]["spec"]["containers"]
+                        container["image"] == expected
+                        for container in (
+                            *pod.get("initContainers", []),
+                            *pod["containers"],
+                        )
                     )
                 )
         config = next(

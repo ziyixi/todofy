@@ -119,6 +119,8 @@ class BootstrapTests(unittest.TestCase):
         self.assertIn("ip6tables-restore --noflush", k3s_unit)
         self.assertNotIn("cloudflared.service", k3s_unit)
         connector_unit = (bundle / "units/cloudflared-platform.service").read_text()
+        self.assertIn("Type=notify\n", connector_unit)
+        self.assertIn("TimeoutStartSec=15\n", connector_unit)
         self.assertIn("DynamicUser=true", connector_unit)
         self.assertIn(
             "LoadCredential=connector-token:/etc/cloudflared/platform-token",
@@ -135,13 +137,18 @@ class BootstrapTests(unittest.TestCase):
             (ROOT / "config/cloud.toml")
             .read_text()
             .replace('state_root = "/srv/todofy"', 'state_root = "/srv/alternate"')
+            .replace('repository = "ziyixi/todofy"', 'repository = "example/project"')
         )
         (root / "config/cloud.toml").write_text(profile)
         for directory in ("platform", "newsletter"):
             (root / directory).symlink_to(ROOT / directory, target_is_directory=True)
-        normal = prepare.render(root, SHA, IMAGES)
+        images = {
+            name: value.replace("ghcr.io/ziyixi/", "ghcr.io/example/")
+            for name, value in IMAGES.items()
+        }
+        normal = prepare.render(root, SHA, images)
         bundle = self.base / "full-bundle"
-        prepare.prepare(root, SHA, IMAGES, bundle)
+        prepare.prepare(root, SHA, images, bundle)
         initial = config.read_json(bundle / "runtime.json")
         runtime_config = next(
             item["data"]["runtime.json"]
@@ -152,7 +159,7 @@ class BootstrapTests(unittest.TestCase):
             pb.ReleaseTarget(
                 workload_key="platform-runtime" if service == "platform" else service,
                 source_sha=SHA,
-                image_digest=IMAGES[service].split("@", 1)[1],
+                image_digest=images[service].split("@", 1)[1],
                 request_id=item["data"]["request_id"],
             )
             for service in ("newsletter", "platform")
@@ -185,6 +192,30 @@ class BootstrapTests(unittest.TestCase):
                         "auth": PATHS["NEWSLETTER_CODEX_HOME"],
                         "config": PATHS["NEWSLETTER_CONTENT_CONFIG_DIR"],
                     },
+                )
+                sync = next(
+                    item
+                    for item in runtime["items"]
+                    if item["metadata"]["name"] == "newsletter-config-sync"
+                )["spec"]["template"]["spec"]
+                initializer = sync["initContainers"][0]
+                self.assertEqual(initializer["image"], images["newsletter"])
+                self.assertEqual(sync["containers"][0]["image"], initializer["image"])
+                self.assertEqual(
+                    initializer["command"],
+                    ["python", "-m", "newsletter.config_sync", "initialize"],
+                )
+                self.assertEqual(
+                    {item["name"]: item["value"] for item in initializer["env"]},
+                    {
+                        "NEWSLETTER_CONFIG_REPOSITORY": "example/project",
+                        "NEWSLETTER_CONTENT_CONFIG_DIR": PATHS[
+                            "NEWSLETTER_CONTENT_CONFIG_DIR"
+                        ],
+                    },
+                )
+                self.assertEqual(
+                    initializer["volumeMounts"], sync["containers"][0]["volumeMounts"]
                 )
         foundation = config.read_json(bundle / "foundation.json")
         for item in foundation["items"]:
@@ -486,6 +517,60 @@ class BootstrapTests(unittest.TestCase):
             complete.assert_not_called()
             install.install(bundle, private_path)
         self.assertEqual(services.call_count, 2)
+        complete.assert_called_once_with(config.checksum(bundle / "manifest.json"))
+
+    def test_connector_ready_failure_prevents_marker_until_retry_succeeds(self):
+        bundle = self.bundle()
+        private_path, _ = self.private()
+        connector_directory = self.base / "cloudflared"
+        connector_directory.mkdir()
+        functions = (
+            (install, "preflight", "/usr/bin/cloudflared"),
+            (host, "migrate", None),
+            (host, "retire_legacy_runtime", None),
+            (firewall, "install", None),
+            (cluster, "start", None),
+            (cluster, "apply", None),
+            (cluster, "secrets", None),
+            (cluster, "held_runtime", None),
+        )
+
+        def path(value):
+            if value == "/etc/cloudflared":
+                return connector_directory
+            return Path(value)
+
+        with (
+            contextlib.ExitStack() as stack,
+            patch.object(os, "geteuid", return_value=0),
+            patch.object(host, "bootstrap_completed", return_value=False),
+            patch.object(host, "complete_bootstrap") as complete,
+            patch.object(cluster, "Path", side_effect=path),
+            patch.object(cluster, "write_file"),
+            patch.object(
+                cluster,
+                "command",
+                side_effect=[
+                    None,
+                    config.BootstrapError("SYSTEM_COMMAND_FAILED"),
+                    None,
+                    None,
+                ],
+            ) as command,
+            contextlib.redirect_stdout(io.StringIO()),
+        ):
+            for module, name, result in functions:
+                stack.enter_context(patch.object(module, name, return_value=result))
+            with self.assertRaisesRegex(config.BootstrapError, "SYSTEM_COMMAND_FAILED"):
+                install.install(bundle, private_path)
+            complete.assert_not_called()
+            startup = command.call_args_list[-1]
+            self.assertEqual(
+                startup.args[0],
+                ["systemctl", "enable", "--now", "cloudflared-platform.service"],
+            )
+            self.assertGreater(startup.kwargs["timeout"], 15)
+            install.install(bundle, private_path)
         complete.assert_called_once_with(config.checksum(bundle / "manifest.json"))
 
     def test_completion_marker_is_atomic_root_owned_and_rejects_other_bundles(self):

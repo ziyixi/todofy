@@ -180,7 +180,10 @@ class Renderer:
                         "app": workload.deployment
                     }
                     pod["metadata"]["labels"] = {"app": workload.deployment}
-                for container in pod["spec"]["containers"]:
+                for container in (
+                    *pod["spec"].get("initContainers", []),
+                    *pod["spec"]["containers"],
+                ):
                     container["image"] = image(
                         self.config, adapter, target.image_digest
                     )

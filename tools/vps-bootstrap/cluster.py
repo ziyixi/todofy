@@ -169,4 +169,7 @@ def services(bundle, private, cloudflared):
         )
         write_file(Path("/etc/systemd/system") / name, text.encode(), mode=0o644)
     command(["systemctl", "daemon-reload"])
-    command(["systemctl", "enable", "--now", "cloudflared-platform.service"])
+    command(
+        ["systemctl", "enable", "--now", "cloudflared-platform.service"],
+        timeout=45,
+    )

@@ -64,7 +64,10 @@ def render(root: Path, sha: str, images: dict[str, str]) -> dict:
                     "personal-cloud/request-id": identity,
                 }
             )
-            for container in pod["spec"]["containers"]:
+            for container in (
+                *pod["spec"].get("initContainers", []),
+                *pod["spec"]["containers"],
+            ):
                 container["image"] = images[service]
                 _variables(container.get("env", []), profile, sha, identity)
     return {"apiVersion": "v1", "kind": "List", "items": items}
