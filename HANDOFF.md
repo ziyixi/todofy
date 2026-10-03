@@ -16,7 +16,7 @@ Rules for this file:
   what is done, what is left, how to verify it and what to check after its deploy. Link to the app docs for
   design detail instead of copying it.
 
-Last updated: 2026-10-03 ~03:00 UTC. The verified foundation implementation is `8628e5e`; the k3s/Fleet
+Last updated: 2026-10-03 ~03:40 UTC. The verified foundation implementation is `8628e5e`; the k3s/Fleet
 implementation below is still in flight and has not been deployed. Every app's owner API is on proto now (the dashboard
 `ca63675`, FlowDay `8d9100e`, Mail Hero `d1bde0e`, Todofy `b70856f`, all landed and verified on 2026-10-02). Nothing
 was in flight at that landing. The foundation evidence below describes that completed release.
@@ -103,6 +103,14 @@ failed on stale integration expectations (new Ops apps/service bindings/private 
 structure/type guards, Infra format and a Lab fixture that aged outside its simulated retry window.
 Those narrow fixes passed locally, including Newsletter's complete 2478-test `make check`, before the
 next branch SHA. No publisher or production deployment ran from the failed gate.
+
+Second branch run [37093454362](https://github.com/ziyixi/todofy/actions/runs/37093454362) at `d0854a9`
+passed all nineteen other check jobs, including the complete Todofy runtime matrix, Proto, Mail Hero,
+Newsletter and both real Linux image checks. Only Dashboard's document-consistency assertion failed:
+the documented Cloudflare rows budget still said 28 while the actual budget is 30. The table and current
+view-budget prose were synchronized without weakening the implementation or assertions; all thirteen
+local view tests then passed. Historical measured verification records were retained. No publisher or
+production deployment ran from this failed gate either.
 
 Remaining sequence: push and pass branch CI; promote the identical green SHA;
 review and apply only the new managed Access/Tunnel/Fleet resources; record actual Access audiences and

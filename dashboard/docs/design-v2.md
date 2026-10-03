@@ -228,10 +228,10 @@ lost `version`.
 | --- | --- | --- |
 | `GET /api/v1/registry` (GetRegistry) | Worker, serialized once per isolate; `ETag: "<build>"` → 304 | 0 DO; ≤ 14 KiB |
 | `GET /api/csrf` | Worker (signed token + `home_csrf` cookie, design.md §6) | — |
-| `GET /api/v1/homeView` (GetHomeView) | DO `view('home')` | 1 DO call; ≤ 1 + N rows; ≤ 10 KiB |
-| `GET /api/v1/flowsView` (GetFlowsView) | DO | ≤ 20 rows; ≤ 20 KiB (16 KiB until the GTD loop and Paper Radar made six flows) |
-| `GET /api/v1/cloudflareView` (GetCloudflareView) | DO | 3–4 rows; ≤ 16 KiB |
-| `GET /api/v1/opsView` (GetOpsView) | DO | ≤ 10 rows; ≤ 24 KiB |
+| `GET /api/v1/homeView` (GetHomeView) | DO `view('home')` | 1 DO call; ≤ 28 rows read; ≤ 10 KiB |
+| `GET /api/v1/flowsView` (GetFlowsView) | DO | ≤ 28 rows read; ≤ 20 KiB (16 KiB until the GTD loop and Paper Radar made six flows) |
+| `GET /api/v1/cloudflareView` (GetCloudflareView) | DO | ≤ 30 rows read; ≤ 16 KiB |
+| `GET /api/v1/opsView` (GetOpsView) | DO | ≤ 28 rows read; ≤ 24 KiB |
 | `POST /api/v1/homeView:refresh`, `POST /api/v1/cloudflareView:refresh` (RefreshHomeView, RefreshCloudflareView; were `?refresh=1`) | DO `view(..., refresh)` | Origin + CSRF; each scope fetches at most once a minute |
 | `POST /api/v1/guard:override {level, request_id}` (OverrideGuard), `POST /api/v1/canaries/mail-todofy:run {request_id}` (RunCanary) | DO (`setGuardOverride`, `startCanary`) | Origin + CSRF; ≤ 1 KiB body |
 
@@ -276,14 +276,14 @@ Only the visible view polls, every 5 minutes; the registry is fetched once per l
 since the last attempt) and updates discovery. Both rebuild the digest items without sending them
 (only a tick sends a report). `refresh.next_refresh_at` is the earliest time the scope would fetch again.
 
-Measured (unit suite for bytes, workerd suite for rows; a full 14-run canary history, 20 Workers):
+Current bounds (unit suite for bytes, workerd suite for rows; a full 14-run canary history, 20 Workers):
 
 | View | Mockup day | Bad day (20 items, 16 signals/app, 14 failed runs) | Rows read |
 | --- | --- | --- | --- |
-| home | 4.7 KB (nine tiles; budget 10 KiB) | 9.1 KB | 26 (≤ 28) |
-| flows | 17.0 KB (seven flows; 17.8 KB in the workerd suite) | 23.8 KB | 26 (≤ 28) |
+| home | ≤ 10 KiB | ≤ 32 KiB | 28 (≤ 28) |
+| flows | ≤ 20 KiB | ≤ 32 KiB | 28 (≤ 28) |
 | cloudflare | ≤ 16 KiB, also with 20 Workers | under `VIEW_BODY_MAX` with 20 listed drift findings (tested) | 29 (≤ 30; Fleet/Newsletter status plus `drift`) |
-| ops | ≤ 24 KiB | 24.8 KB | 26 (≤ 28) |
+| ops | ≤ 24 KiB | ≤ 32 KiB | 28 (≤ 28) |
 
 `VIEW_BODY_BUDGET` holds for a normal day; `VIEW_BODY_MAX` (32 KiB) bounds the bad day. The Cloudflare view
 lists at most `CF_VIEW_WORKERS_MAX` (50) of the up to `CF_SCRIPTS_MAX` (100) remembered scripts —
@@ -294,8 +294,8 @@ every view shares (six documents for the attention strip and badges, plus what t
 the strip's observed items, §4) or the 14 canary rows, so the measured counts replace them (each probed or ops_v1 entry adds one row to every view: 23 / 23 / 24 / 23 before the FlowDay and links probes, 25 / 25 / 26 / 25 before the watch app's status); they are ~0.01 % of the DO's 5 M free rows a day at a few hundred views.
 A partial index (`canary_runs_active`) keeps the "run in progress" lookup at one row for ticks and views.
 
-Per tick: 4 `status()` (Mail Hero, Todofy, Lab, the watch app) + 3 probes (website, FlowDay, links) + 1 GraphQL +
-≤ 4 `setGuard` + ≤ 2 canary calls + ≤ 1 `reportOps` + ≤ 12 read-only drift calls (§10) = 27 outbound calls
+Per tick: 6 `status()` (Mail Hero, Todofy, Lab, the watch app, Fleet and Newsletter) + 3 probes (website, FlowDay, links) + 1 GraphQL +
+≤ 4 `setGuard` + ≤ 2 canary calls + ≤ 1 `reportOps` + ≤ 12 read-only drift calls (§10) = 29 outbound calls
 (`outboundPerTick`, tested ≤ 30 and asserted per tick in workerd; Free allows 50). The probes run in parallel with the
 status polls. GraphQL stays one query per tick (48/day) plus refreshes ≤ 1/min. DO rows written grow by ~4 per tick
 (`cf_scripts` and one `probe:<entry>` per probe). The FlowDay and links probes are each one request of that app's Worker per tick (≤ 144 a day with refreshes, no D1 query); the website's is a static asset. Everything else as in
@@ -414,4 +414,3 @@ category counts) while the last completed check has findings, and `drift_unavail
 **Token.** The same `CF_ANALYTICS_TOKEN` as the GraphQL query ([`setup.md`](setup.md) §4). A read-only
 replacement needs Account Analytics Read, Workers Scripts Read and, on the zone, Workers Routes Read;
 without them the check reports `http_403` and, after two days, `drift_unavailable`.
-

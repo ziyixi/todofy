@@ -26,14 +26,15 @@ bootstrap, which writes the state and only reads Cloudflare ([Bootstrap](#bootst
 ### Owner rule (2026-10-01)
 
 Only objects that belong to the monorepo apps go here: mail-hero, todofy and todofy-core, the dashboard
-`home`, `lab`, `flowday`, `links`, `watch`, the website `ziyixi-website` and the relay `ziyixi-notion-publish`.
+`home`, `lab`, `flowday`, `links`, `watch`, the website `ziyixi-website`, the relay `ziyixi-notion-publish`, Fleet and the dedicated VPS platform endpoint.
 Nothing unrelated is imported, declared, read or modelled, not even read-only.
 [`infra_guard.py`](../.github/scripts/infra_guard.py) enforces the boundary on every push (through
 [`test_infra_config.py`](../.github/scripts/test_infra_config.py) in `Changes`, and again in
 `Infra checks`). It reads the HCL block structure, so quoted and bare labels (`resource "a" "b"` and
 `resource a b`) and nested blocks are all seen, and anything it cannot read fails:
 
-- only four resource types, and every resource has its own `lifecycle { prevent_destroy = true }`;
+- only eight declared resource types, with the added service-token, tunnel, tunnel-config and DNS types
+  restricted to the exact platform addresses; every resource has its own `lifecycle { prevent_destroy = true }`;
 - no `moved` block names a `FROZEN` address (the backup app; [Apply](#apply-p4)), in `from` or `to`;
 - no output reads a variable (`var.*`, also inside a `"${...}"` template), so a personal value can never
   become an output;
@@ -65,6 +66,12 @@ configurations built to slip past it.
 | `cloudflare_zero_trust_access_application.owner["fleet"]` | Access app "Fleet" | Whole Fleet owner host; created before the Worker so its real AUD can be recorded |
 | `cloudflare_zero_trust_access_application.fleet_receipt` | Fleet machine receipt | Only the exact `/api/internal/fleet/v1/receipt` path; Worker independently validates signed POST receipts |
 | `cloudflare_zero_trust_access_policy.fleet_receipt` | Fleet signed receipt only | Bypass policy attached only to the exact receipt application; no owner API bypass |
+| `cloudflare_zero_trust_access_service_token.platform_deploy` | Deployment machine identity | Dedicated token in encrypted state and encrypted one-time handoff; never an owner identity |
+| `cloudflare_zero_trust_access_policy.platform_deploy` | Deployment machine policy | Includes only the dedicated service token |
+| `cloudflare_zero_trust_access_application.platform_machine["runtime"]` | Platform machine API | Whole runtime host; no browser owner access |
+| `cloudflare_zero_trust_tunnel_cloudflared.platform` | Platform connector | Dedicated tunnel; preserves the existing SSH tunnel |
+| `cloudflare_zero_trust_tunnel_cloudflared_config.platform` | Platform ingress | Loopback daemon HTTP only, then 404; never routes Kubernetes |
+| `cloudflare_dns_record.platform["runtime"]` | Runtime CNAME | Only this exact platform host; existing Worker and mailbox DNS remain with their current owners |
 | `cloudflare_zero_trust_access_application.mail_hero_backup` | Access app "Mail Hero backup API" | `mail-hero.ziyixi.science/api/internal/backup/*`. Used by the backup collector's machine identity (mail-hero/AGENTS.md §7). **Frozen**: an apply refuses any write to it ([Apply](#apply-p4)) |
 | `cloudflare_zero_trust_access_application.flowday["flowday"]` | Access app "flowday" | `flowday.ziyixi.science`, session 168h, FlowDay's own policy by id. See [FlowDay](#flowday) |
 | `cloudflare_zero_trust_access_application.flowday["flowday-bypass"]` | Access app "flowday-bypass" | `flowday.ziyixi.science/pwa/*` (and the staging host's), session 6h, FlowDay's own policy by id. See [FlowDay](#flowday) |
@@ -82,8 +89,8 @@ Every object has `prevent_destroy`, for two reasons:
 - **Storage.** A destroyed database or bucket means lost data. A recreated one gets an id that no
   `wrangler.toml` knows.
 
-**The two reusable policies are shared.** Each is attached to the six owner-facing monorepo apps
-(Mail Hero, Todofy, Home, Lab, links, watch), plus applications of self-hosted services outside the monorepo.
+**The two reusable policies are shared.** Each is attached to the seven owner-facing monorepo apps
+(Mail Hero, Todofy, Home, Lab, links, watch, Fleet), plus applications of self-hosted services outside the monorepo.
 The Mail Hero backup API uses only its own application-scoped policy, and FlowDay's two apps their own
 policies ([FlowDay](#flowday)). Changing a reusable policy here therefore also changes who can reach those
 outside services. This prototype never changes a policy's identity rules,
@@ -96,7 +103,7 @@ those other apps too.
 | What | Owner | Why not OpenTofu |
 | --- | --- | --- |
 | Worker scripts, bindings, vars/secrets, crons, Durable Object migrations, Custom Domains, routes, D1 schema migrations | each app's `wrangler.toml` and CI | When wrangler and OpenTofu both manage one object, each overwrites the other (provider issue #7382) |
-| DNS records of the apps' hostnames | wrangler (Custom Domains create read-only AAAA records) | They are read-only and wrangler-owned |
+| DNS records of the Worker hostnames | wrangler (Custom Domains create read-only AAAA records) | They are read-only and wrangler-owned; the dedicated platform CNAME is managed above |
 | Email Routing: settings, the Mail Hero rule, catch-all, and the receive subdomain's MX/DKIM/SPF records | Email Routing (set up once) | The enable/DNS resources would try to write apex MX/SPF records, which would split the owner's mailbox. The rule diffs on every plan (#7352). A plan's refresh section would print the receive address from the API |
 | The service token used by the backup collector, and the rules of the backup app's application-scoped policy | Cloudflare dashboard | A token created or replaced by OpenTofu would put its client secret in state, and replacing it breaks backups without any error. The policy is referenced only by id (see [Import notes](#import-notes)) |
 | The rules of FlowDay's two reusable policies (one per FlowDay application, attached to nothing else) | Cloudflare dashboard, until the follow-up in [FlowDay](#flowday) | Referenced only by id; adopting them would add identity values to `INFRA_TFVARS` for policies that the follow-up retires |
@@ -109,7 +116,7 @@ Listed by category only. These are neither declared nor read, and their values a
 
 - the Access applications of self-hosted services and their own policies (including bypass policies);
 - the Warp login application;
-- the tunnel and the tunnel hostnames of self-hosted services;
+- the pre-existing tunnel and tunnel hostnames of self-hosted services; the dedicated platform tunnel above is owned here;
 - the apex mailbox records (MX, TXT, DKIM, DMARC);
 - third-party verification TXT records;
 - zone-wide settings (SSL, rulesets, certificates);
@@ -158,21 +165,17 @@ Every change to these two applications goes through this directory, never the da
 
 ## DNS
 
-**No DNS record is managed, deliberately.** The live zone was checked on 2026-10-01 (category counts
-only, no values were copied). Every record that a monorepo app depends on already has another owner:
+Only the dedicated platform runtime CNAME is managed here, in [`platform.tf`](platform.tf).
+It points to the new platform tunnel and is restricted by the infrastructure guard to this exact address.
+The tunnel routes the authenticated daemon API, never the Kubernetes API. Existing SSH ingress is independent.
 
-- **App hostnames.** `mail-hero`, `todofy`, `todofy-hooks`, `daily`, `home`, `lab`, `www` and the apex
-  are Workers Custom Domains. Their AAAA records are created by wrangler and marked read-only
-  (`meta.read_only`, `origin_worker_id`).
-- **Mail Hero's receive subdomain.** Its MX and DKIM records are read-only Email Routing records. Its
-  SPF TXT record has no read-only flag but was created by Email Routing and belongs to it.
-- **Everything else in the zone** is outside the monorepo (see the list above).
+Worker hostnames remain Wrangler Custom Domains with read-only records. Mail Hero's receive subdomain
+MX, DKIM and SPF records remain Email Routing-owned. Apex mailbox records, third-party verification
+records and unrelated self-hosted hostnames remain outside this directory.
 
-So the set of records that a monorepo app needs and that neither wrangler nor Email Routing owns is
-**empty**. [`dns.tf`](dns.tf) explains this in comments only. Add a record here only when an app needs
-one that no one else owns, for example a future sending-domain DKIM record. Take its value from a
-variable, and add `cloudflare_dns_record` to `ALLOWED_TYPES` in
-[`infra_guard.py`](../.github/scripts/infra_guard.py) in the same change.
+Adding any other DNS or tunnel resource requires an explicit scope change in
+[`infra_guard.py`](../.github/scripts/infra_guard.py); the four added types are not general permission
+to manage the zone or replace an existing tunnel.
 
 ## Storage
 
@@ -203,7 +206,7 @@ All values come from a tfvars file **outside the repository** (locally) or from 
 | `account_id` | no | Kept out of `infra/` all the same. Several `wrangler.toml` files already contain it, but this directory adds no new copy |
 | `access_owner_emails` | **yes** | The live include list of "Mail Hero owner" |
 | `access_github_owner_emails` | **yes** | The live include list of "Mail Hero GitHub owner" |
-| `access_allowed_idp_ids` | no | Identity provider ids allowed on the six owner-facing apps (the links and watch apps have the same list as the others; FlowDay's apps allow every provider, `allowed_idps` unset) |
+| `access_allowed_idp_ids` | no | Identity provider ids allowed on the seven owner-facing apps (links, watch and Fleet have the same list as the others; FlowDay's apps allow every provider, `allowed_idps` unset) |
 | `access_github_idp_id` | no | The GitHub identity provider that "Mail Hero GitHub owner" requires |
 | `state_passphrase` | **yes** | Not a value of the infrastructure: the state and plan encryption passphrase, `INFRA_STATE_PASSPHRASE` ([Remote state](#remote-state)). Never in a values file |
 
@@ -807,12 +810,17 @@ Owner decision 2026-10-01: use the existing token now and do not wait for dedica
 
 ### Owner, later (about 10 minutes)
 
-Dedicated tokens, narrower than the deploy token. They need **no DNS, zone, tunnel or Email Routing
-permission**:
+The original P3/P4 storage and owner-Access scope needs these dedicated permissions:
 
 - **`CF_INFRA_READ_TOKEN`**: Account → Access: Apps and Policies → Read; Account → D1 → Read; Account →
   Workers R2 Storage → Read.
 - **`CF_INFRA_TOKEN`** (for P4): the same with Edit.
+
+The added platform resources also need Access service-token and Cloudflare Tunnel permissions, plus
+DNS access restricted to the configured zone. Use Read for planning and Edit for applying. Preserve
+existing Worker permissions when extending an existing token; Email Routing permissions are not needed
+for this change. The original import instructions and 19-object counts below describe the pre-platform
+baseline; the platform follow-up creates nine new objects and expects 28 no-op objects after apply.
 
 Store each from your own terminal (paste at the prompt, never in chat):
 `gh secret set CF_INFRA_READ_TOKEN --env production -R ziyixi/todofy`, likewise `CF_INFRA_TOKEN`. Then
