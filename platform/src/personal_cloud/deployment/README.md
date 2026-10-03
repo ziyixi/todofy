@@ -21,7 +21,8 @@ restart automatically.
 The durable checkpoints are:
 
 1. Suspend daily triggers, begin `release-<source SHA>` admission drain, wait for tracked work and
-   reject unresolved unknown operations, then freeze without a force option.
+   reject active or uncertain local activity, then freeze without a force option. Historical unknown
+   outcomes do not block a quiescent release; their records and degraded business health remain visible.
 2. Record `install_self` before updating the daemon. The new image's baked SHA and actual startup
    UUID determine when the new controller has taken over. The old controller's baked manifests
    cannot stand in for the new source version.

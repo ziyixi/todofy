@@ -145,6 +145,9 @@ namespace-scoped Kubernetes capabilities; neither it nor the observer needs a Gi
 Actions runner on the production node. The profile hostname does not prove Tunnel/DNS/Access deployment.
 Supply the connector and application credentials through private node state, not Git or images; populate
 only the matching GitHub production secrets via safe file/stdin input after bootstrap.
+An optional namespace reader kubeconfig permits routine metadata diagnosis on the VPS without sudo;
+it grants no Secret/log/exec or mutation access and never reaches Actions. Its setup and the bounded
+initial SDK-client recovery are documented in [bootstrap](../tools/vps-bootstrap/README.md).
 
 The shared release contract bounds requests to sixteen configured workload aliases. This implementation
 requires both configured Newsletter and personal-cloud workloads with the same source SHA and immutable

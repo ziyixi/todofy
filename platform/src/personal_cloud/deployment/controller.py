@@ -228,25 +228,19 @@ class Controller:
                     and actual.generation != wanted.generation
                 )
                 or value.process_state != "running"
-                or value.health_state
-                not in (
-                    {"healthy", "unsupported", "degraded"}
-                    if resumed
-                    else {"healthy", "unsupported"}
-                )
+                or value.health_state not in {"healthy", "unsupported", "degraded"}
             ):
                 return False
             newsletter = wanted.workload_key == self.workloads["newsletter"].key
             if value.health_state == "degraded" and (
                 not newsletter
                 or value.unknown_count is None
-                or value.unknown_count == 0
+                or value.unknown_count <= 0
             ):
                 return False
             if newsletter:
                 if value.admission_state != ("accepting" if resumed else "frozen") or (
-                    not resumed
-                    and (value.unknown_count is None or value.unknown_count != 0)
+                    not resumed and value.unknown_count is None
                 ):
                     return False
             elif value.admission_state != "unsupported":
@@ -304,19 +298,14 @@ class Controller:
             }:
                 self._hold(record, ErrorReason.RELEASE_HELD)
                 return False
-            if any(value["unknown"].values()):
-                self._hold(record, ErrorReason.RELEASE_HELD)
-                return False
+            # Historical unknown outcomes stay visible; tracked activity still blocks freezing.
             if value["busy"]:
                 if self._timed_out(record):
                     self._hold(record, ErrorReason.RELEASE_HELD)
                 return False
             self._next(record, "frozen", "freeze")
         elif checkpoint == "freeze":
-            value = self.admission.call("freeze", gate_key)
-            if any(value["unknown"].values()):
-                self._hold(record, ErrorReason.RELEASE_HELD)
-                return False
+            self.admission.call("freeze", gate_key)
             # Durable BEFORE replacing this process. The new image, not the old process, supplies new manifests.
             self._next(record, "applying", "install_self")
         elif checkpoint == "install_self":

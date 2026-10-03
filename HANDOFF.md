@@ -263,11 +263,24 @@ authentication, rotation, physical field casing and creation response parsing. S
 subtests passed, plus lint/format. The installed image still contains the old client; a new source SHA must
 receive its own tested immutable image, without republishing different bytes under `54861b2`.
 
-Remaining sequence: complete the read-only in-Pod diagnosis and gate the client correction; prepare a
-bounded privileged repair of the unavailable daemon. Preserve the existing Newsletter gate and unknown
-business ledgers. The current API cannot replace its broken Kubernetes client remotely, and a different
-release cannot silently take over the bootstrap gate. Do not reopen admission, replace frozen targets,
-claim unknown outcomes succeeded or enable automatic VPS releases until a safe recovery is verified.
+The owner completed in-Pod diagnosis: the old client omitted the Bearer prefix and Kubernetes returned
+401. [Branch CI 37107689599](https://github.com/ziyixi/todofy/actions/runs/37107689599) passed at `27bfca2`,
+including 125 Platform checks and the real Linux image; that intermediate artifact is not deployed.
+The new candidate adds a bounded privileged recovery of the unavailable daemon, optional namespace-only
+diagnosis without sudo, and the owner's approved historical-unknown policy. Actual local work must stop
+before replacement; every unknown record remains intact and visible, with no automatic replay.
+See [bootstrap recovery](tools/vps-bootstrap/README.md#initial-client-repair).
+Local validation passed 169 Platform/build/release/bootstrap tests plus 155 subtests, and 46 Newsletter
+drain tests. The latter execute the real Store/exclusive-lock repair entry point on synthetic SQLite.
+All 64 Platform/tool Python files and the changed Newsletter files passed lint/format. This candidate
+still needs its own exact-SHA branch gate and Linux images; none of these checks proves live repair.
+
+Remaining sequence: gate and publish this candidate, prepare its exact immutable bundle, then have the
+owner run the one-time repair. Verify the fixed SDK's real Kubernetes access and frozen new gate before
+enabling Actions. The first API operation is **CreateRelease** for the new SHA, not ResumeRelease for
+the old bootstrap (there is no API ledger to resume). Verify actual SHA/digest/UUID and fresh Fleet/Home
+observations before declaring deployment ready. Systemd observation remains unverified; no business
+provider/send or backup acceptance has been claimed.
 
 ## Foundation completed (historical release evidence)
 
@@ -353,8 +366,8 @@ with synthetic data.
 - Optional: Chrome site search `s` → `https://s.ziyixi.science/%s` (`links/README.md`).
 - Dedicated Cloudflare tokens (`CF_INFRA_READ_TOKEN`, `CF_INFRA_TOKEN`) and a fresh deploy token
   (`infra/README.md` "Replacing the token").
-- Run the prepared one-time k3s bootstrap after the implementation, transport and immutable images are
-  verified; no password should be sent to an agent. All Compose services already have permission to stop.
+- The owner completed the initial k3s bootstrap. Run the bounded SDK-client repair only after its
+  exact-SHA CI and immutable images are verified; no password should be sent to an agent.
 - The pages to watch for W4 (added by the owner at watch.ziyixi.science/new, or named to an agent privately).
 - Live Newsletter deployment and monitoring acceptance waits for the k3s/Fleet migration above;
   real model/provider/send acceptance remains distinct from deployment health.
@@ -404,5 +417,7 @@ with synthetic data.
 - Short links: owner-defined keys on `s.ziyixi.science`; no import from Slash.
 - Watch: rule-based change detection first (no AI); digests go to Todoist through Todofy's intents.
 - The newsletter stays on the VPS (it needs the Codex CLI).
+- The owner approved upgrading past the 32 historical Newsletter unknown outcomes. Preserve every
+  record, do not retry or mark success, wait for actual local work to stop, and retain dashboard alerts.
 - Agents keep going without asking for step approvals on these personal projects, as long as everything stays
   recoverable; anything touching the owner's mail, VPS writes or secrets still needs the owner.

@@ -152,7 +152,7 @@ class DeploymentDrain:
             return status
 
     def resume(self, key: str) -> dict[str, object]:
-        """Reopen the matching operation, rejecting stale operation keys."""
+        """Reopen matching admission without resolving interrupted history."""
         self._validate_key(key)
         with self.store.transaction():
             operation = self._operation(key)
@@ -170,10 +170,6 @@ class DeploymentDrain:
                 self.store.db.execute(
                     "UPDATE deployment_gate SET request_key=NULL "
                     "WHERE singleton=1"
-                )
-                self.store.db.execute(
-                    "DELETE FROM deployment_activities "
-                    "WHERE state='interrupted'"
                 )
             return self._status(key)
 

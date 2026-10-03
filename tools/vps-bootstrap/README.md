@@ -148,3 +148,47 @@ kubectl kustomize platform/k3s/bootstrap
 
 These are synthetic/offline checks, not proof of live firewall, Access/Tunnel,
 provider authentication, production recovery or delivery.
+
+## Initial client repair
+
+The installed `54861b2` client cannot authenticate with its pinned Kubernetes SDK.
+Until the daemon is repaired it cannot deploy its own replacement. The bounded
+`installer/repair.py` recovery path accepts only that completed original bundle,
+an empty API release ledger, and a new exact-SHA CI-verified bundle with unchanged
+host configuration and foundation resources. It is not a second general installer.
+
+```sh
+sudo python3 <fixed-bundle>/installer/repair.py \
+  --previous-bundle <original-54861b2-bundle> --bundle <fixed-bundle>
+```
+
+Repair keeps the daily trigger suspended, stops the daemon and both business Pods,
+then transfers admission while the application holds its existing exclusive store
+lock. A single unprivileged maintenance Job uses only the Newsletter data PVC and
+ordinary drain transitions; it starts no provider or worker. Queued work and every
+historical unknown record stay intact. A failure keeps business stopped; a matching
+retry uses its separate repair checkpoint. The original bootstrap marker remains.
+
+`complete_held` still requires a normal **CreateRelease** from Actions for the new
+source SHA. There is no old API release to resume. Keep VPS deployment disabled
+until the new daemon can read Kubernetes and the frozen admission is verified.
+
+## Diagnosis without sudo
+
+The optional `--grant-reader` flag on install or repair creates a separate namespace reader for
+the user who invoked sudo. It writes only `~/.kube/personal-cloud-reader.json`
+(mode 600); the user's default kubeconfig is untouched. The standard Kubernetes
+Role permits reading Pod, Service, Deployment, ReplicaSet, Job and CronJob metadata,
+plus the two public release ConfigMaps. It cannot read Secrets, logs, exec into Pods,
+write resources or manage the host. Actions never receives this credential.
+
+```sh
+k3s kubectl --kubeconfig "$HOME/.kube/personal-cloud-reader.json" \
+  -n personal-cloud get pods,deployments,cronjobs
+```
+
+The native TokenRequest asks for one year; the API server can shorten it. The
+command reports the actual expiry without printing the token. Renewal uses the
+same explicit reader operation; deleting its RoleBinding revokes namespace access.
+Deployment remains the daemon API's responsibility. Host service installation,
+firewall changes and disaster recovery still require administrator privileges.

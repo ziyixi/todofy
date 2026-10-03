@@ -113,9 +113,15 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--bundle", type=Path, required=True)
     parser.add_argument("--credentials", type=Path, required=True)
+    parser.add_argument("--grant-reader", action="store_true")
     args = parser.parse_args()
     try:
         install(args.bundle, args.credentials)
+        if args.grant_reader:
+            from reader import install_reader
+
+            expiry = install_reader(load_bundle(args.bundle)["profile"]["namespace"])
+            print(json.dumps({"event": "namespace_reader", "expires_at": expiry}))
     except BootstrapError as error:
         print(
             json.dumps(

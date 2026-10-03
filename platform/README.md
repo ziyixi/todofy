@@ -19,7 +19,8 @@ flowchart LR
 ```
 
 A release closes Newsletter admission and suspends its trigger. Its durable drain must be frozen and
-free of unknown work before replacing the engine. The daemon upgrades itself first, then uses the new
+free of active work before replacing the engine. Historical unknown outcomes remain unchanged and
+visible as degraded business health; they do not authorize a retry. The daemon upgrades itself first, then uses the new
 version's baked Kustomize resources. Checkpoints survive restart. Only physical Pod image IDs, observed
 Kubernetes generations and process-baked source SHA/request ID prove the running version. After those
 checks it resumes Newsletter and reports ready. A held release requires an explicit same-ID, current-etag

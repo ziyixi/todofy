@@ -6,8 +6,11 @@ import concurrent.futures as futures
 import contextlib
 import copy
 import importlib.resources as resources
+import importlib.util as util
 import io
 import json
+import pathlib
+import subprocess
 import threading
 import types
 import urllib.error as url_error
@@ -23,6 +26,7 @@ import newsletter.drain as drain
 import newsletter.editor as editor
 import newsletter.notion_journal as notion_journal
 import newsletter.notion_sync as notion_sync
+import newsletter.ownership as ownership
 import newsletter.settings as settings
 import newsletter.store as storage
 import newsletter.worker as worker
@@ -60,6 +64,33 @@ def service_worker(database, tmp_path):
         tmp_path / "jobs",
         30,
     )
+
+
+def drain_history(database):
+    return {
+        table: [
+            tuple(row)
+            for row in database.db.execute(f"SELECT * FROM {table} ORDER BY id")
+        ]
+        for table in ("deployment_activities", "packets", "editions")
+    }
+
+
+def repair_gate_at(tmp_path, monkeypatch):
+    path = pathlib.Path(__file__).resolve().parents[2]
+    path /= "tools/vps-bootstrap/repair_gate.py"
+    spec = util.spec_from_file_location("newsletter_test_repair_gate", path)
+    module = util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    monkeypatch.setattr(
+        module,
+        "Path",
+        lambda value: (
+            tmp_path if value == "/var/lib/newsletter" else pathlib.Path(value)
+        ),
+    )
+    monkeypatch.setattr(module.sys, "argv", ["repair-gate", "a" * 40, "b" * 40])
+    return module
 
 
 def test_duplicate_begin_freeze_resume_and_stale_key(store):
@@ -201,6 +232,119 @@ def test_cancel_requires_exclusive_restart_recovery(store):
     store.deployment.recover()
     frozen = store.deployment.freeze("release")
     assert frozen["unknown"]["interrupted_activities"] == 1
+
+
+def test_resume_preserves_interrupted_history_across_releases_and_restart(
+    tmp_path,
+):
+    path = tmp_path / "newsletter.sqlite3"
+    with contextlib.closing(storage.Store(path, "mock")) as database:
+        edition = queued(database)
+        database.finish(edition["id"], state="failed", delivery_state="unknown")
+        database.db.execute("UPDATE packets SET projection='unknown'")
+        database.db.executemany(
+            "INSERT INTO deployment_activities VALUES (?,?,'interrupted')",
+            [(f"historical-{index}", "model") for index in range(32)],
+        )
+        previous = drain_history(database)
+        gate = database.deployment
+        gate.begin("release-1")
+        frozen = gate.freeze("release-1")
+        assert frozen["busy"] is False
+        assert frozen["inflight"]["activities"] == 0
+        assert frozen["unknown"]["interrupted_activities"] == 32
+        assert frozen["unknown"]["delivery"] == 1
+        assert frozen["unknown"]["packets"] == 1
+
+        resumed = gate.resume("release-1")
+        assert resumed["state"] == "resumed"
+        assert resumed["unknown"] == frozen["unknown"]
+        assert drain_history(database) == previous
+        assert gate.resume("release-1") == resumed
+        assert gate.status()["state"] == "active"
+        # Admission allows new local work; no Worker or provider is invoked.
+        with gate.activity("new-local-work") as allowed:
+            assert allowed
+        assert drain_history(database) == previous
+
+        gate.begin("release-2")
+        following = gate.freeze("release-2")
+        assert following["busy"] is False
+        assert following["unknown"] == frozen["unknown"]
+        assert drain_history(database) == previous
+
+    with contextlib.closing(storage.Store(path, "mock")) as database:
+        database.recover()
+        database.deployment.recover()
+        assert drain_history(database) == previous
+        assert database.deployment.freeze("release-2") == following
+        resumed = database.deployment.resume("release-2")
+        assert resumed["unknown"] == frozen["unknown"]
+        assert drain_history(database) == previous
+
+
+def test_repair_gate_main_uses_real_store_without_replaying_history(
+    tmp_path, monkeypatch, capsys
+):
+    path = tmp_path / "newsletter.sqlite3"
+    with contextlib.closing(storage.Store(path, "live")) as database:
+        edition = queued(database, "historical")
+        database.finish(edition["id"], state="failed", delivery_state="unknown")
+        queued(database, "new-work")
+        database.db.execute("UPDATE packets SET projection='unknown'")
+        database.db.executemany(
+            "INSERT INTO deployment_activities VALUES (?,?,'interrupted')",
+            [(f"historical-{index}", "model") for index in range(32)],
+        )
+        database.deployment.begin("release-" + "a" * 40)
+        before = database.deployment.freeze("release-" + "a" * 40)
+        previous = drain_history(database)
+    repair = repair_gate_at(tmp_path, monkeypatch)
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("Repair must not spawn a provider or background worker")
+
+    monkeypatch.setattr(subprocess, "Popen", forbidden)
+    monkeypatch.setattr(asyncio, "create_task", forbidden)
+    repair.main()
+    receipt = json.loads(capsys.readouterr().out)
+    assert receipt == {
+        "version": 1,
+        "state": "frozen",
+        "request_key": "release-" + "b" * 40,
+        "unknown": before["unknown"],
+        "queued": before["queued"],
+    }
+    assert receipt["unknown"]["interrupted_activities"] == 32
+    assert receipt["queued"]["editions"] == 1
+    # The entry point closed its Store and released the actual service lock.
+    with (
+        ownership.exclusive_store(tmp_path),
+        contextlib.closing(storage.Store(path, "live")) as database,
+    ):
+        assert drain_history(database) == previous
+        assert database.deployment.status()["state"] == "frozen"
+    repair.main()
+    assert json.loads(capsys.readouterr().out) == receipt
+
+
+def test_repair_gate_main_refuses_an_existing_real_owner(
+    tmp_path, monkeypatch, capsys
+):
+    path = tmp_path / "newsletter.sqlite3"
+    with contextlib.closing(storage.Store(path, "live")) as database:
+        queued(database)
+        database.deployment.begin("release-" + "a" * 40)
+        before = database.deployment.freeze("release-" + "a" * 40)
+        previous = drain_history(database)
+    repair = repair_gate_at(tmp_path, monkeypatch)
+    with ownership.exclusive_store(tmp_path):
+        with pytest.raises(RuntimeError, match="Newsletter data is busy"):
+            repair.main()
+        assert capsys.readouterr().out == ""
+    with contextlib.closing(storage.Store(path, "live")) as database:
+        assert database.deployment.status() == before
+        assert drain_history(database) == previous
 
 
 def test_restart_keeps_gate_and_provider_ledgers_fail_closed(tmp_path):

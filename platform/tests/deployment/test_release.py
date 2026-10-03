@@ -169,8 +169,9 @@ class Fixture:
                     inner.state = "frozen"
                 if action == "resume":
                     inner.state = "active"
-                    return drain("resumed", key)
-                value = drain(inner.state, key if inner.state != "active" else None)
+                    value = drain("resumed", key)
+                else:
+                    value = drain(inner.state, key if inner.state != "active" else None)
                 value["unknown"]["packets"] = int(inner.unknown)
                 value["inflight"]["activities"] = int(inner.busy)
                 value["busy"] = inner.busy
@@ -225,7 +226,7 @@ class Fixture:
                     if newsletter
                     else "unsupported",
                     health_state=self.health if newsletter else "unsupported",
-                    unknown_count=0 if newsletter else None,
+                    unknown_count=int(self.admission.unknown) if newsletter else None,
                     observed_at=self.at.isoformat().replace("+00:00", "Z"),
                     release=pb.ReleaseStatus(
                         state="ready" if active else "pending",
@@ -239,7 +240,7 @@ class Fixture:
         return pb.NodeStatus(
             name="nodeStatus",
             node_key="vps",
-            state="ready",
+            state="degraded" if self.health == "degraded" else "ready",
             observed_at=self.at.isoformat().replace("+00:00", "Z"),
             workloads=tuple(values),
         )
@@ -306,10 +307,42 @@ class Reconciliation(Fixture, unittest.TestCase):
         self.assertFalse(self.controller.step())
         from_wire(pb.Release, to_wire(self.controller.release(final)), strict=True)
 
-    def test_unknown_business_work_never_gets_forced_frozen_or_applied(self):
+    def test_quiescent_historical_unknown_is_preserved_through_verified_release(self):
+        self.admission.unknown = 32
+        self.health = "degraded"
+        self.create()
+        self.until("done")
+        final = self.controller.release(self.store.get(IDENTITY))
+        newsletter = next(
+            value
+            for value in final.observed_workloads
+            if value.workload_key == "newsletter"
+        )
+        self.assertEqual(final.phase, "ready")
+        self.assertEqual(self.admission.unknown, 32)
+        self.assertEqual(newsletter.unknown_count, 32)
+        self.assertEqual(newsletter.health_state, "degraded")
+        self.assertEqual(newsletter.admission_state, "accepting")
+        self.assertEqual(newsletter.release.actual.source_sha, SHA)
+        self.assertEqual(
+            newsletter.release.actual.image_digest, TARGETS[0].image_digest
+        )
+        self.assertEqual(newsletter.release.actual.request_id, REQUEST)
+        self.assertEqual(newsletter.release.actual.generation, self.generation)
+        self.assertEqual(
+            [event[1] for event in self.events if event[0] == "admission"],
+            ["begin", "status", "freeze", "resume"],
+        )
+
+    def test_historical_unknown_does_not_allow_busy_drain_to_apply(self):
+        self.admission.unknown = 32
+        self.admission.busy = True
+        self.health = "degraded"
         self.create()
         self.until("drain")
-        self.admission.unknown = True
+        self.assertFalse(self.controller.step())
+        self.assertEqual(self.store.get(IDENTITY).phase, "draining")
+        self.at += timedelta(seconds=601)
         self.assertFalse(self.controller.step())
         self.assertEqual(self.store.get(IDENTITY).phase, "held")
         self.assertFalse(
@@ -339,23 +372,46 @@ class Reconciliation(Fixture, unittest.TestCase):
         self.assertEqual(env["NEWSLETTER_RELEASE_REQUEST_ID"], REQUEST)
         self.assertNotIn(("admission", "resume"), self.events)
 
-    def test_unknown_work_in_freeze_acknowledgement_holds_before_any_image_apply(self):
+    def test_work_becoming_busy_before_freeze_holds_without_any_image_apply(self):
+        self.admission.unknown = 32
+        self.health = "degraded"
         self.create()
         self.until("freeze")
-        self.admission.unknown = True
+        self.admission.busy = True
+        self.assertFalse(self.controller.step())
+        self.assertEqual(self.store.get(IDENTITY).phase, "frozen")
+        self.at += timedelta(seconds=601)
         self.assertFalse(self.controller.step())
         self.assertEqual(
             (self.store.get(IDENTITY).phase, self.store.get(IDENTITY).checkpoint),
             ("held", "freeze"),
         )
-        self.assertEqual(self.admission.state, "frozen")
+        self.assertEqual(self.admission.state, "draining")
         self.assertNotIn(("admission", "resume"), self.events)
         self.assertFalse(any(event[0] == "apply" for event in self.events))
+
+    def test_freeze_refusal_with_historical_unknown_holds_before_image_apply(self):
+        for refusal in (AdmissionConflict, AdmissionUnavailable):
+            with self.subTest(refusal=refusal):
+                self.initialize()
+                self.admission.unknown = 32
+                self.health = "degraded"
+                self.create()
+                self.until("freeze")
+                self.admission.call = Mock(side_effect=refusal("RELEASE_HELD"))
+                self.assertFalse(self.controller.step())
+                self.admission.call.assert_called_once_with("freeze", "release-" + SHA)
+                self.assertEqual(self.store.get(IDENTITY).phase, "held")
+                self.assertEqual(self.admission.state, "draining")
+                self.assertNotIn(("admission", "resume"), self.events)
+                self.assertFalse(any(event[0] == "apply" for event in self.events))
 
     def test_observed_generation_and_actual_digest_are_required_before_resume(self):
         for malformed in ("generation", "digest"):
             with self.subTest(malformed=malformed):
                 self.initialize()
+                self.admission.unknown = 32
+                self.health = "degraded"
                 self.create()
                 self.until("verify")
                 if malformed == "generation":
@@ -393,6 +449,68 @@ class Reconciliation(Fixture, unittest.TestCase):
         self.assertFalse(self.controller.step())
         self.assertNotIn(("admission", "resume"), self.events)
         self.assertEqual(self.store.get(IDENTITY).checkpoint, "verify")
+
+    def test_historical_unknown_does_not_relax_actual_identity_or_other_workload_health(
+        self,
+    ):
+        for malformed in (
+            "missing_actual",
+            "source_sha",
+            "request_id",
+            "stale",
+            "process",
+            "admission",
+            "other_workload_health",
+        ):
+            with self.subTest(malformed=malformed):
+                self.initialize()
+                self.admission.unknown = 32
+                self.health = "degraded"
+                self.create()
+                self.until("verify")
+                snapshot = self.snapshot()
+                newsletter, platform = snapshot.workloads
+                if malformed == "missing_actual":
+                    newsletter = replace(
+                        newsletter, release=replace(newsletter.release, actual=None)
+                    )
+                elif malformed in {"source_sha", "request_id"}:
+                    actual = replace(
+                        newsletter.release.actual,
+                        **{
+                            malformed: "f" * 40
+                            if malformed == "source_sha"
+                            else CONTINUE
+                        },
+                    )
+                    newsletter = replace(
+                        newsletter, release=replace(newsletter.release, actual=actual)
+                    )
+                elif malformed == "stale":
+                    newsletter = replace(
+                        newsletter,
+                        observed_at=(self.at - timedelta(seconds=61))
+                        .isoformat()
+                        .replace("+00:00", "Z"),
+                    )
+                elif malformed == "process":
+                    newsletter = replace(newsletter, process_state="stopped")
+                elif malformed == "admission":
+                    newsletter = replace(newsletter, admission_state="accepting")
+                else:
+                    platform = replace(
+                        platform, health_state="degraded", unknown_count=32
+                    )
+                self.reads.snapshot = Mock(
+                    return_value=replace(snapshot, workloads=(newsletter, platform))
+                )
+                self.assertFalse(self.controller.step())
+                self.assertEqual(self.store.get(IDENTITY).checkpoint, "verify")
+                self.assertNotIn(("admission", "resume"), self.events)
+                self.at += timedelta(seconds=601)
+                self.assertFalse(self.controller.step())
+                self.assertEqual(self.store.get(IDENTITY).phase, "held")
+                self.assertEqual(self.admission.unknown, 32)
 
     def test_conflicting_observed_target_never_activates_or_resumes(self):
         self.create()
