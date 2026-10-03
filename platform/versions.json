@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "k3s": {
+    "version": "v1.37.1+k3s1",
+    "linux_amd64_sha256": "92b94582eb7b34a8cf532e6006842b9ed215a6783cf56a3dd6271fd35243b2c0"
+  },
+  "kubectl": {
+    "version": "v1.36.1",
+    "linux_amd64_sha256": "629d3f410e09bf49b64ae7079f7f0bda1191efed311f7d37fdbab0ad5b0ec2b7"
+  }
+}

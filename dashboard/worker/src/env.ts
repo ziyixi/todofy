@@ -16,6 +16,8 @@ export interface Env {
   readonly TODOFY: Service<TodofyOpsEntrypoint>;
   readonly LAB: Service<LabOpsEntrypoint>;
   readonly WATCH: Service<WatchOpsEntrypoint>;
+  readonly FLEET: Service<WatchOpsEntrypoint>;
+  readonly NEWSLETTER: Service<WatchOpsEntrypoint>;
   readonly HOME: DurableObjectNamespace<HomeState>;
   readonly ASSETS: Fetcher;
 

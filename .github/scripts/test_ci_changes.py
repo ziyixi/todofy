@@ -48,6 +48,11 @@ def expect(
     watch_deploy=False,
     newsletter_check=False,
     newsletter_deploy=False,
+    fleet_check=False,
+    fleet_deploy=False,
+    platform_check=False,
+    platform_publish=False,
+    platform_deploy=False,
 ):
     return {
         "todofy_check": todofy_check,
@@ -59,6 +64,8 @@ def expect(
         "links_check": links_check,
         "watch_check": watch_check,
         "newsletter_check": newsletter_check,
+        "fleet_check": fleet_check,
+        "platform_check": platform_check,
         "contracts": contracts,
         "packages": packages,
         "infra": infra,
@@ -73,23 +80,30 @@ def expect(
         "links_deploy": links_deploy,
         "watch_deploy": watch_deploy,
         "newsletter_deploy": newsletter_deploy,
+        "fleet_deploy": fleet_deploy,
+        "platform_publish": platform_publish,
+        "platform_deploy": platform_deploy,
     }
 
 
 # Every app checked (a contracts/ or .github/ change, FlowDay, the links app and the watch app included); the dashboard
 # and Lab each checked and deployed; the edge-auth apps (the website compiles in no package) are todofy and mail-hero
 # plus EDGE_AUTH; every app with the website Worker (the relay Worker is added where a test expects it).
-ALL_CHECKED = {"dashboard_check": True, "website_check": True, "lab_check": True, "flowday_check": True, "links_check": True, "watch_check": True, "newsletter_check": True}
-DASH = {"dashboard_check": True, "dashboard_deploy": True}
+ALL_CHECKED = {"dashboard_check": True, "website_check": True, "lab_check": True, "flowday_check": True, "links_check": True, "watch_check": True, "newsletter_check": True, "fleet_check": True, "platform_check": True}
+# Home's newly added Fleet binding waits for Fleet's resource bootstrap too.
+DASH = {"dashboard_check": True, "dashboard_deploy": False}
 LAB = {"lab_check": True, "lab_deploy": True}
 FLOWDAY = {"flowday_check": True, "flowday_deploy": True}
 LINKS = {"links_check": True, "links_deploy": True}
 WATCH = {"watch_check": True, "watch_deploy": True}
+FLEET = {"fleet_check": True, "fleet_deploy": False}
+PLATFORM = {"platform_check": True, "platform_publish": True, "platform_deploy": True}
+VPS = {**PLATFORM, "newsletter_check": True, "newsletter_deploy": True}
 ALL = {**DASH, **LAB}
 # Every app that compiles in packages/edge-auth besides Todofy and Mail Hero: the dashboard, Lab, FlowDay, the links app
 # and the watch app, each checked and deployed.
-EDGE_AUTH = {**ALL, **FLOWDAY, **LINKS, **WATCH}
-EVERY = {**ALL, "website_check": True, "website_deploy": True, **FLOWDAY, **LINKS, **WATCH, "newsletter_check": True, "newsletter_deploy": True}
+EDGE_AUTH = {**ALL, **FLOWDAY, **LINKS, **WATCH, **FLEET}
+EVERY = {**ALL, "website_check": True, "website_deploy": True, **FLOWDAY, **LINKS, **WATCH, **FLEET, **PLATFORM, "newsletter_check": True, "newsletter_deploy": True}
 
 
 def push(paths, ref=MAIN, last_success=BASE, ancestor=True, merge_base=BASE):
@@ -100,20 +114,46 @@ def push(paths, ref=MAIN, last_success=BASE, ancestor=True, merge_base=BASE):
 
 class Classify(unittest.TestCase):
     def test_newsletter_is_an_independent_image_target(self):
-        self.assertEqual(push(["newsletter/src/newsletter/service.py"]), expect(F, F, F, F, F, newsletter_check=T, newsletter_deploy=T))
-        self.assertEqual(push(["newsletter/app.toml"]), expect(F, F, F, F, F, newsletter_check=T))
+        self.assertEqual(push(["newsletter/src/newsletter/service.py"]), expect(F, F, T, F, F, newsletter_check=T, newsletter_deploy=T, **PLATFORM))
+        self.assertEqual(push(["newsletter/app.toml"]), expect(F, F, T, F, F, newsletter_check=T, platform_check=T))
         self.assertEqual(push(["todofy/app.toml"]), expect(T, F, T, F, F))
         self.assertFalse(push(["proto/todofy/ui/v1/owner.proto"])["newsletter_deploy"])
+
+    def test_platform_release_changes_publish_its_independent_tested_image(self):
+        for path in ("platform/src/personal_cloud/deployment/controller.py", "platform/src/personal_cloud/status_daemon/reader.py", "platform/k3s/newsletter.yaml"):
+            with self.subTest(path=path):
+                self.assertEqual(push([path]), expect(F, F, T, F, F, **VPS))
+                self.assertEqual(push([path], ref=BRANCH), expect(F, F, T, F, F, **VPS))
+        self.assertEqual(push(["platform/README.md"]), expect(F, F, T, F, F, platform_check=T))
+        self.assertEqual(push(["newsletter/docs/monitoring.md"]), expect(F, F, T, F, F, newsletter_check=T, platform_check=T))
+        self.assertEqual(push(["platform/app.toml"]), expect(F, F, T, F, F, platform_check=T))
+        self.assertEqual(push(["platform-notes.md"]), expect(F, F, F, F, F))
+
+    def test_vps_build_and_release_tools_publish_both_same_sha_images_but_documents_do_not(self):
+        for directory in ("tools/container-release/", "tools/platform-build/", "tools/vps-release/"):
+            with self.subTest(directory=directory):
+                executable = push([directory + "build.py"])
+                self.assertTrue(executable["newsletter_check"])
+                self.assertTrue(executable["newsletter_deploy"])
+                self.assertTrue(executable["platform_check"])
+                self.assertTrue(executable["platform_publish"])
+                self.assertTrue(executable["platform_deploy"])
+                documentation = push([directory + "README.md"])
+                self.assertTrue(documentation["newsletter_check"])
+                self.assertTrue(documentation["platform_check"])
+                self.assertFalse(documentation["newsletter_deploy"])
+                self.assertFalse(documentation["platform_publish"])
+                self.assertFalse(documentation["platform_deploy"])
 
     def test_one_app_checks_and_deploys_only_itself_plus_contracts(self):
         self.assertEqual(push(["todofy/worker/todofy/core/render.py"]), expect(T, F, T, T, F))
         self.assertEqual(push(["mail-hero/cloudflare/src/native/pipeline.ts"]), expect(F, T, T, F, T))
 
-    def test_the_dashboard_checks_and_deploys_only_itself_plus_contracts(self):
-        """Its ops-v1 caller tests run in Contracts; the apps it calls are neither checked nor deployed."""
+    def test_the_dashboard_checks_only_itself_plus_contracts_until_fleet_bootstrap(self):
+        """Its ops-v1 caller tests run in Contracts; its new binding cannot deploy before Fleet exists."""
         for path in ("dashboard/worker/src/state.ts", "dashboard/web/src/App.tsx", "dashboard/docs/setup.md"):
             with self.subTest(path=path):
-                self.assertEqual(push([path]), expect(F, F, T, F, F, dashboard_check=T, dashboard_deploy=T))
+                self.assertEqual(push([path]), expect(F, F, T, F, F, **DASH))
 
     def test_both_apps(self):
         self.assertEqual(push(["todofy/README.md", "mail-hero/web/src/app/App.tsx"]), expect(T, T, T, T, T))
@@ -145,14 +185,40 @@ class Classify(unittest.TestCase):
                 self.assertEqual(push([path]), expect(F, F, F, F, F, **FLOWDAY))
                 self.assertEqual(push([path], ref=BRANCH), expect(F, F, F, F, F, **FLOWDAY))
 
-    def test_every_app_but_the_check_only_ones_has_a_deploy_output(self):
-        """Each app has a checks output; each but the CHECK_ONLY ones a deploy output. The watch app left CHECK_ONLY at
-        W2 (watch/docs/design.md section 11), as the links app did at L2 and FlowDay at F2: it is empty."""
-        self.assertEqual(ci_changes.CHECK_ONLY, set())
+    def test_every_app_has_stable_check_and_deploy_outputs_during_bootstrap(self):
+        """CHECK_ONLY suppresses deployment, never the output that the workflow consumes."""
+        self.assertEqual(ci_changes.CHECK_ONLY, {"fleet"})
         for app in ci_changes.APPS:
             with self.subTest(app=app):
                 self.assertIn(f"{ci_changes.PREFIX[app]}_check", ci_changes.KEYS)
-                self.assertEqual(f"{ci_changes.PREFIX[app]}_deploy" in ci_changes.KEYS, app not in ci_changes.CHECK_ONLY)
+                self.assertIn(f"{ci_changes.PREFIX[app]}_deploy", ci_changes.KEYS)
+
+    def test_fleet_changes_are_check_only_until_resources_are_ready(self):
+        for path in ("fleet/app.toml", "fleet/worker/src/report.ts", "fleet/web/src/App.tsx", "fleet/observer/collector.py", "fleet/wrangler.toml"):
+            with self.subTest(path=path):
+                self.assertEqual(push([path]), expect(F, F, T, F, F, **FLEET))
+                self.assertEqual(push([path], ref=BRANCH), expect(F, F, T, F, F, **FLEET))
+
+    def test_bootstrap_blocks_fleet_and_home_even_when_everything_runs(self):
+        result = ci_changes.everything()
+        self.assertTrue(result["fleet_check"])
+        self.assertTrue(result["dashboard_check"])
+        self.assertFalse(result["fleet_deploy"])
+        self.assertFalse(result["dashboard_deploy"])
+        self.assertEqual({key for key, value in result.items() if not value}, {"fleet_deploy", "dashboard_deploy"})
+
+    def test_removing_fleet_check_only_restores_both_deploy_decisions(self):
+        saved = ci_changes.CHECK_ONLY
+        try:
+            ci_changes.CHECK_ONLY = set()
+            for result in (ci_changes.everything(), ci_changes.dispatched("all"), push(["fleet/worker/src/index.ts", "dashboard/worker/src/index.ts"])):
+                with self.subTest(result=result):
+                    self.assertTrue(result["fleet_deploy"])
+                    self.assertTrue(result["dashboard_deploy"])
+            self.assertFalse(push(["fleet/app.toml"])["fleet_deploy"])
+            self.assertFalse(push(["dashboard/app.toml"])["dashboard_deploy"])
+        finally:
+            ci_changes.CHECK_ONLY = saved
 
     def test_links_checks_and_deploys_only_itself(self):
         """The links app uses no contract (NO_CONTRACTS): its changes run only its checks and, on main, its deploy
@@ -225,6 +291,8 @@ class Classify(unittest.TestCase):
             "contracts/mail-received-v1/fixtures/plain_text.json",
             "contracts/mail-received-v1/mail-received-v1.schema.json",
             "contracts/mail-received-v1/legacy/mail-received-v1.schema.json",
+            "contracts/fleet-report-v1/fleet-report-v1.schema.json",
+            "contracts/platform-runtime-v1/platform-runtime-v1.schema.json",
         ):
             with self.subTest(path=path):
                 self.assertTrue(push([path])["proto"])
@@ -237,12 +305,12 @@ class Classify(unittest.TestCase):
         self.assertEqual(push(["contracts/ops-v1/ops-v1.schema.json"]), expect(T, T, T, F, F, **ALL_CHECKED, proto=T))
         self.assertEqual(
             push(["contracts/ops-v1/validate.mjs"]),
-            expect(T, T, T, F, F, dashboard_check=T, **LAB, website_check=T, flowday_check=T, links_check=T, watch_check=T, newsletter_check=T, proto=T),
+            expect(T, T, T, F, F, dashboard_check=T, **LAB, website_check=T, flowday_check=T, links_check=T, watch_check=T, newsletter_check=T, fleet_check=T, platform_check=T, proto=T),
         )
 
     def test_contract_code_the_workers_bundle_deploys_every_app_that_bundles_it(self):
         """OPS_LIMITS and friends ship inside all three Workers, so a change must redeploy each."""
-        bundled = expect(T, T, T, T, T, **ALL, website_check=T, flowday_check=T, links_check=T, **WATCH, newsletter_check=T, proto=T)
+        bundled = expect(T, T, T, T, T, **ALL, website_check=T, flowday_check=T, links_check=T, **WATCH, newsletter_check=T, fleet_check=T, platform_check=T, proto=T)
         self.assertEqual(push(["contracts/ops-v1/ops-v1.ts"]), bundled)
         self.assertEqual(push(["contracts/ops-v1/ops-v1.ts", "todofy/gateway/src/ops.ts"]), bundled)
         self.assertEqual(push(["contracts/ops-v1/ops-v1.ts"], ref=BRANCH), bundled)
@@ -260,6 +328,8 @@ class Classify(unittest.TestCase):
             "links": [REPO / "links" / "worker" / "src", REPO / "links" / "web" / "src"],
             "watch": [REPO / "watch" / "worker" / "src", REPO / "watch" / "web" / "src"],
             "newsletter": [REPO / "newsletter" / "src"],
+            "fleet": [REPO / "fleet" / "worker" / "src", REPO / "fleet" / "web" / "src"],
+            "platform": [REPO / "platform" / "src"],
         }
         self.assertEqual(set(roots), set(ci_changes.APPS))
         importers = {}
@@ -282,6 +352,21 @@ class Classify(unittest.TestCase):
         self.assertEqual(
             push([".github/scripts/ci_changes.py"]), expect(T, T, T, F, F, packages=T, infra=T, proto=T, **ALL_CHECKED)
         )
+
+    def test_cloud_config_inputs_and_their_tools_check_without_publishing(self):
+        for path in ("config/cloud.toml", "config/resources.toml", "tools/cloud-config/generate.py"):
+            with self.subTest(path=path):
+                self.assertEqual(push([path]), expect(T, T, T, F, F, packages=T, proto=T, **ALL_CHECKED))
+                self.assertFalse(any(value for key, value in push([path]).items() if key.endswith(("_deploy", "_publish"))))
+        # The generated identity source is a real Home bundle dependency. During bootstrap it still cannot deploy.
+        self.assertEqual(push(["dashboard/worker/src/resource-identities.ts"]), expect(F, F, T, F, F, **DASH))
+        saved = ci_changes.CHECK_ONLY
+        try:
+            ci_changes.CHECK_ONLY = set()
+            self.assertTrue(push(["dashboard/worker/src/resource-identities.ts"])["dashboard_deploy"])
+            self.assertFalse(push(["config/cloud.toml"])["dashboard_deploy"])
+        finally:
+            ci_changes.CHECK_ONLY = saved
 
     def test_infra_runs_only_its_own_checks(self):
         """infra/ (plan-only OpenTofu) and its plan-summary tool check nothing else and deploy nothing."""
@@ -308,11 +393,13 @@ class Classify(unittest.TestCase):
                 "mail-hero": ("ts",),
                 "dashboard": ("ts",),
                 "watch": ("ts",),
+                "fleet": ("ts",),
+                "platform": ("python",),
             },
         )
         # Todofy is both: todofy-core vendors the Python package, its gateway and UI bundle the TypeScript
         # (todofy.ui.v1).
-        ts, python = {"lab", "mail-hero", "dashboard", "flowday", "links", "watch", "todofy"}, {"todofy"}
+        ts, python = {"lab", "mail-hero", "dashboard", "flowday", "links", "watch", "todofy", "fleet"}, {"todofy", "platform"}
         every, none = ts | python, set()
         cases = {
             # task-intent-v1, bundled by Lab's and the watch app's TypeScript and todofy-core's Python.
@@ -338,6 +425,10 @@ class Classify(unittest.TestCase):
             "proto/links/ui/v1/links_ui_service.proto": {"links"},
             # The watch app's UI API reaches only the watch app.
             "proto/watch/ui/v1/watch_ui_service.proto": {"watch"},
+            "proto/fleet/ui/v1/fleet_ui_service.proto": {"fleet"},
+            "proto/fleet/telemetry/v1/host_report.proto": {"fleet", "platform"},
+            "proto/platform/runtime/v1/runtime.proto": {"fleet", "platform"},
+            "proto/platform/runtime/v1/runtime_service.proto": {"fleet", "platform"},
             # Mail Hero's owner API reaches only Mail Hero (not Todofy, which shares the mailhero/webhook package).
             "proto/mailhero/ui/v2/mail_hero_ui_service.proto": {"mail-hero"},
             "proto/mailhero/ui/v2/errors.proto": {"mail-hero"},
@@ -359,7 +450,7 @@ class Classify(unittest.TestCase):
             # The runtimes' fixtures and a package imported as types only reach no bundle.
             "proto/prototest/v1/prototest.proto": none,
             "proto/prototest/v1/rules.proto": none,
-            "proto/common/errors/v1/errors.proto": none,
+            "proto/common/errors/v1/errors.proto": {"platform"},
             # What every generation depends on: every bundled user (fail safe).
             "proto/buf.yaml": every,
             "proto/buf.lock": every,
@@ -396,13 +487,20 @@ class Classify(unittest.TestCase):
                 lab_check=T,
                 lab_deploy="lab" in deployed,
                 dashboard_check=T,
-                dashboard_deploy="dashboard" in deployed,
+                dashboard_deploy=F,
                 flowday_check=T,
                 flowday_deploy="flowday" in deployed,
                 links_check=T,
                 links_deploy="links" in deployed,
                 watch_check=T,
                 watch_deploy="watch" in deployed,
+                fleet_check=T,
+                fleet_deploy=F,
+                platform_check=T,
+                platform_publish="platform" in deployed,
+                platform_deploy="platform" in deployed,
+                newsletter_check="platform" in deployed,
+                newsletter_deploy="platform" in deployed,
             )
 
         for path, deployed in cases.items():
@@ -412,12 +510,14 @@ class Classify(unittest.TestCase):
         # Paths add up: a Python runtime change with a UI API change deploys both.
         self.assertEqual(
             push(["proto/python/src/ziyixi_proto/wire_json.py", "proto/lab/ui/v1/home.proto"]),
-            checked_and({"todofy", "lab"}),
+            checked_and({"todofy", "lab", "platform"}),
         )
         self.assertEqual(ci_changes.proto_deploys("proto/ts/http-transcoder.ts"), ts)
         self.assertEqual(ci_changes.proto_deploys("proto/flowday/ui/v1/flow.proto"), {"flowday"})
         self.assertEqual(ci_changes.proto_deploys("proto/links/ui/v1/link.proto"), {"links"})
         self.assertEqual(ci_changes.proto_deploys("proto/watch/ui/v1/watch.proto"), {"watch"})
+        self.assertEqual(ci_changes.proto_deploys("proto/fleet/ui/v1/fleet_ui_service.proto"), {"fleet"})
+        self.assertEqual(ci_changes.proto_deploys("proto/fleet/telemetry/v1/host_report.proto"), {"fleet", "platform"})
         self.assertEqual(ci_changes.proto_deploys("proto/mailhero/ui/v2/message.proto"), {"mail-hero"})
 
     def test_every_proto_package_and_runtime_is_mapped(self):
@@ -457,6 +557,12 @@ class Classify(unittest.TestCase):
             with self.subTest(path=path):
                 self.assertEqual(push([path]), expect(T, T, T, F, F, packages=T, proto=T, **ALL_CHECKED))
 
+    def test_image_promotion_tool_changes_require_both_tested_publications(self):
+        for path in ("tools/container-release/image.py", "tools/container-release/test_image.py"):
+            with self.subTest(path=path):
+                self.assertEqual(push([path]), expect(T, T, T, F, F, packages=T, proto=T, **ALL_CHECKED, newsletter_deploy=T, platform_publish=T, platform_deploy=T))
+        self.assertEqual(push(["tools/container-release/README.md"]), expect(T, T, T, F, F, packages=T, proto=T, **ALL_CHECKED))
+
     def test_a_shared_package_checks_and_deploys_every_app_that_compiles_it_in(self):
         for path in (
             "packages/edge-auth/src/access.ts",
@@ -474,12 +580,12 @@ class Classify(unittest.TestCase):
             ["packages/edge-auth/docs/notes.md"],
         ):
             with self.subTest(paths=paths):
-                self.assertEqual(push(paths), expect(T, T, T, F, F, packages=T, dashboard_check=T, lab_check=T, flowday_check=T, links_check=T, watch_check=T))
+                self.assertEqual(push(paths), expect(T, T, T, F, F, packages=T, dashboard_check=T, lab_check=T, flowday_check=T, links_check=T, watch_check=T, fleet_check=T))
         # With the package's code, or with one app, the usual rules apply.
         paths = ["packages/edge-auth/SPEC.md", "packages/edge-auth/src/csrf.ts"]
         self.assertEqual(push(paths), expect(T, T, T, T, T, packages=T, **EDGE_AUTH))
         paths = ["packages/edge-auth/SPEC.md", "dashboard/docs/design.md"]
-        self.assertEqual(push(paths), expect(T, T, T, F, F, packages=T, **DASH, lab_check=T, flowday_check=T, links_check=T, watch_check=T))
+        self.assertEqual(push(paths), expect(T, T, T, F, F, packages=T, **DASH, lab_check=T, flowday_check=T, links_check=T, watch_check=T, fleet_check=T))
         # An unregistered package's documents are checked by every app, deployed by none.
         self.assertEqual(push(["packages/new-kit/README.md"]), expect(T, T, T, F, F, packages=T, **ALL_CHECKED))
 
@@ -498,7 +604,7 @@ class Classify(unittest.TestCase):
         ]
         self.assertEqual(
             push(paths),
-            expect(T, T, T, F, F, packages=T, infra=T, proto=T, **DASH, website_check=T, lab_check=T, flowday_check=T, links_check=T, watch_check=T, newsletter_check=T),
+            expect(T, T, T, F, F, packages=T, infra=T, proto=T, **DASH, website_check=T, lab_check=T, flowday_check=T, links_check=T, watch_check=T, newsletter_check=T, fleet_check=T, platform_check=T),
         )
 
     def test_a_package_change_with_one_app_still_deploys_every_user(self):
@@ -539,7 +645,7 @@ class Classify(unittest.TestCase):
                 self.assertEqual(push([path]), expect(T, F, T, T, F))
         for path in ("dashboard/wrangler.toml", "dashboard/deploy/deploy-vars.mjs"):
             with self.subTest(path=path):
-                self.assertEqual(push([path]), expect(F, F, T, F, F, dashboard_check=T, dashboard_deploy=T))
+                self.assertEqual(push([path]), expect(F, F, T, F, F, **DASH))
         for path in ("lab/wrangler.toml", "lab/deploy/deploy-vars.mjs"):
             with self.subTest(path=path):
                 self.assertEqual(push([path]), expect(F, F, T, F, F, **LAB))
@@ -675,6 +781,9 @@ class Dispatch(unittest.TestCase):
         self.assertEqual(self.dispatch("lab"), expect(F, F, T, F, F, packages=T, proto=T, **LAB))
         self.assertEqual(self.dispatch("flowday"), expect(F, F, T, F, F, packages=T, proto=T, **FLOWDAY))
         self.assertEqual(self.dispatch("links"), expect(F, F, T, F, F, packages=T, proto=T, **LINKS))
+        self.assertEqual(self.dispatch("fleet"), expect(F, F, T, F, F, packages=T, proto=T, **FLEET))
+        self.assertEqual(self.dispatch("platform"), expect(F, F, T, F, F, packages=T, proto=T, **VPS))
+        self.assertEqual(self.dispatch("newsletter"), expect(F, F, T, F, F, packages=T, proto=T, newsletter_check=T, newsletter_deploy=T, **PLATFORM))
         self.assertEqual(
             self.dispatch("website"),
             expect(
@@ -761,7 +870,7 @@ class RealGit(unittest.TestCase):
         expected = {**dict.fromkeys(ci_changes.KEYS, "true"), "packages": "false", "infra": "false", "proto": "false"}
         expected.update(dashboard_check="false", dashboard_deploy="false")
         expected.update(website_check="false", website_deploy="false", website_relay_deploy="false")
-        expected.update(lab_check="false", lab_deploy="false", flowday_check="false", flowday_deploy="false", links_check="false", links_deploy="false", watch_check="false", watch_deploy="false", newsletter_check="false", newsletter_deploy="false")
+        expected.update(lab_check="false", lab_deploy="false", flowday_check="false", flowday_deploy="false", links_check="false", links_deploy="false", watch_check="false", watch_deploy="false", newsletter_check="false", newsletter_deploy="false", fleet_check="false", fleet_deploy="false", platform_check="false", platform_publish="false", platform_deploy="false")
         self.assertEqual(outputs, expected)
 
     def test_a_failed_package_run_on_main_deploys_both_apps_next_time(self):
@@ -769,7 +878,7 @@ class RealGit(unittest.TestCase):
         self.commit("packages/edge-auth/src/access.ts")
         after = self.commit("README.md.orig")
         outputs = self.main_run(after, green)
-        unaffected = {"website_check", "website_deploy", "website_relay_deploy", "newsletter_check", "newsletter_deploy"}
+        unaffected = {"website_check", "website_deploy", "website_relay_deploy", "newsletter_check", "newsletter_deploy", "fleet_deploy", "dashboard_deploy", "platform_check", "platform_publish", "platform_deploy"}
         self.assertEqual({key for key in ci_changes.KEYS if outputs[key] == "false"}, unaffected | {"infra", "proto"})
 
     def test_a_failed_run_on_main_is_repeated(self):
@@ -808,15 +917,16 @@ class RealGit(unittest.TestCase):
 
     def test_a_branch_without_origin_main_runs_everything(self):
         head = self.commit("mail-hero/web/e.tsx")
-        self.assertEqual(set(self.main_run(head, "", ref=BRANCH).values()), {"true"})
+        self.assertEqual(self.main_run(head, "", ref=BRANCH), {key: str(value).lower() for key, value in ci_changes.everything().items()})
 
     def test_unknown_or_unrelated_base_runs_everything(self):
         first = self.commit("todofy/a.py")
         self.git("checkout", "-q", "--orphan", "other")
         unrelated = self.commit("mail-hero/b.ts")
-        self.assertEqual(set(self.main_run(unrelated, first).values()), {"true"})
-        self.assertEqual(set(self.main_run(unrelated, "c" * 40).values()), {"true"})
-        self.assertEqual(set(self.main_run(unrelated, "").values()), {"true"})
+        expected = {key: str(value).lower() for key, value in ci_changes.everything().items()}
+        self.assertEqual(self.main_run(unrelated, first), expected)
+        self.assertEqual(self.main_run(unrelated, "c" * 40), expected)
+        self.assertEqual(self.main_run(unrelated, ""), expected)
 
 
 class PackageUsers(unittest.TestCase):
@@ -1053,6 +1163,7 @@ class DeployConditions(unittest.TestCase):
         ("dashboard-deploy", "mail-hero-deploy"),
         ("dashboard-deploy", "lab-deploy"),
         ("dashboard-deploy", "watch-deploy"),
+        ("dashboard-deploy", "fleet-deploy"),
         ("lab-deploy", "todofy-deploy"),
         ("watch-deploy", "todofy-deploy"),
     }
@@ -1072,6 +1183,8 @@ class DeployConditions(unittest.TestCase):
         "watch-checks",
         "newsletter-checks",
         "newsletter-image",
+        "fleet-checks",
+        "platform-checks",
     }
 
     def jobs(self):
@@ -1101,6 +1214,9 @@ class DeployConditions(unittest.TestCase):
                 "links-deploy",
                 "watch-deploy",
                 "newsletter-deploy",
+                "fleet-deploy",
+                "platform-image",
+                "vps-deploy",
             },
         )
         for name, block in after_gate.items():
@@ -1128,7 +1244,7 @@ class DeployConditions(unittest.TestCase):
         self.assertLessEqual({"todofy-deploy"}, set(self.needs(self.jobs()["lab-deploy"])))
         self.assertLessEqual({"todofy-deploy"}, set(self.needs(self.jobs()["watch-deploy"])))
         block = self.jobs()["dashboard-deploy"]
-        self.assertLessEqual({"todofy-deploy", "mail-hero-deploy", "lab-deploy", "watch-deploy"}, set(self.needs(block)))
+        self.assertLessEqual({"todofy-deploy", "mail-hero-deploy", "lab-deploy", "watch-deploy", "fleet-deploy"}, set(self.needs(block)))
         self.assertIn("group: dashboard-production", block)
         # The only token: the one Todofy deploy uses; no other secret reaches wrangler's environment.
         # (the hostname guard's step and the deploy step).
@@ -1159,6 +1275,9 @@ class DeployConditions(unittest.TestCase):
                 "links-deploy": "links-production",
                 "watch-deploy": "watch-production",
                 "newsletter-deploy": "newsletter-production",
+                "fleet-deploy": "fleet-production",
+                "platform-image": "platform-image-production",
+                "vps-deploy": "vps-production",
             },
         )
 
@@ -1175,6 +1294,9 @@ class DeployConditions(unittest.TestCase):
             ("links-deploy", "links-checks", "links_deploy"),
             ("watch-deploy", "watch-checks", "watch_deploy"),
             ("newsletter-deploy", "newsletter-checks", "newsletter_deploy"),
+            ("fleet-deploy", "fleet-checks", "fleet_deploy"),
+            ("platform-image", "platform-checks", "platform_publish"),
+            ("vps-deploy", "platform-checks", "platform_deploy"),
         ):
             condition = self.condition(blocks[job])
             with self.subTest(job=job):
@@ -1227,7 +1349,7 @@ class DeployConditions(unittest.TestCase):
             if flag and flag.group(1) in ci_changes.CHECK_JOBS and "gate" not in self.needs(block):
                 named.setdefault(flag.group(1), set()).add(re.sub(r" \(\$\{\{ matrix\.shard \}\}/\d+\)$", " (*)", name))
         self.assertEqual(named, {key: set(names) for key, names in ci_changes.CHECK_JOBS.items()})
-        self.assertEqual(set(ci_changes.CHECK_JOBS), {key for key in ci_changes.KEYS if not key.endswith("_deploy")})
+        self.assertEqual(set(ci_changes.CHECK_JOBS), {key for key in ci_changes.KEYS if not key.endswith(("_deploy", "_publish"))})
         for always in ci_changes.ALWAYS_JOBS:
             self.assertIn(f"    name: {always}\n", WORKFLOW.read_text())
 
@@ -2361,7 +2483,7 @@ def fake_github(runs, jobs_by_run, artifacts_by_run=None):
             return {"total_count": len(jobs), "jobs": jobs}
         match = re.fullmatch(rf"/repos/{re.escape(REPOSITORY)}/actions/runs/(\d+)/artifacts\?per_page=100", path)
         if match:
-            artifacts = (artifacts_by_run or {}).get(int(match.group(1)), [{"name": f"newsletter-image-{SHA}", "expired": False}])
+            artifacts = (artifacts_by_run or {}).get(int(match.group(1)), [{"name": f"newsletter-image-{SHA}", "expired": False}, {"name": f"platform-image-{SHA}", "expired": False}])
             return {"artifacts": artifacts}
         raise AssertionError(f"unexpected read {path}")
 
@@ -2389,17 +2511,28 @@ class Reuse(unittest.TestCase):
         self.assertIn("checks reused", reason)
 
     def test_newsletter_reuse_requires_the_live_same_sha_tested_image_artifact(self):
-        needed = expect(F, F, F, F, F, newsletter_check=T, newsletter_deploy=T)
+        needed = push(["newsletter/src/newsletter/service.py"])
         for artifacts, reused in (([], False), ([{"name": f"newsletter-image-{SHA}", "expired": True}], False),
                                   ([{"name": "newsletter-image-other", "expired": False}], False),
                                   ([{"name": f"newsletter-image-{SHA}", "expired": False}], True)):
             with self.subTest(artifacts=artifacts):
-                get = fake_github([branch_run()], {800: green_jobs("Newsletter checks", "Newsletter image checks")}, {800: artifacts})
+                get = fake_github([branch_run()], {800: green_jobs("Newsletter checks", "Newsletter image checks", "Platform checks", "Contracts")}, {800: [*artifacts, {"name": f"platform-image-{SHA}", "expired": False}]})
                 result, extra, _ = ci_changes.try_reuse("push", MAIN, SHA, needed, ENV, get)
                 self.assertEqual(extra["checks_reused"], str(reused).lower())
                 self.assertEqual(result["newsletter_check"], not reused)
                 self.assertTrue(result["newsletter_deploy"])
                 self.assertEqual(extra["reused_run_id"], "800" if reused else "")
+
+    def test_platform_reuse_requires_its_live_same_sha_tested_image(self):
+        needed = push(["platform/src/personal_cloud/status_daemon/server.py"])
+        for artifacts, reused in (([], False), ([{"name": f"platform-image-{SHA}", "expired": True}], False), ([{"name": "platform-image-other", "expired": False}], False), ([{"name": f"platform-image-{SHA}", "expired": False}], True)):
+            with self.subTest(artifacts=artifacts):
+                get = fake_github([branch_run()], {800: green_jobs("Newsletter checks", "Newsletter image checks", "Platform checks", "Contracts")}, {800: [*artifacts, {"name": f"newsletter-image-{SHA}", "expired": False}]})
+                result, extra, _ = ci_changes.try_reuse("push", MAIN, SHA, needed, ENV, get)
+                self.assertEqual(extra["checks_reused"], str(reused).lower())
+                self.assertEqual(result["platform_check"], not reused)
+                self.assertTrue(result["platform_publish"])
+                self.assertTrue(result["platform_deploy"])
 
     def test_every_deploy_decision_survives_reuse(self):
         needed = ci_changes.everything()
@@ -2412,6 +2545,8 @@ class Reuse(unittest.TestCase):
             "FlowDay checks",
             "Links checks",
             "Watch checks",
+            "Fleet checks",
+            "Platform checks",
             "Newsletter checks",
             "Newsletter image checks",
             "Contracts",
@@ -2423,7 +2558,22 @@ class Reuse(unittest.TestCase):
         self.assertEqual(extra["checks_reused"], "true")
         for key in ci_changes.KEYS:
             with self.subTest(output=key):
-                self.assertEqual(result[key], key.endswith("_deploy"))
+                self.assertEqual(result[key], needed[key] if key.endswith(("_deploy", "_publish")) else False)
+
+    def test_fleet_reuse_requires_its_same_sha_check_and_keeps_bootstrap_blocks(self):
+        needed = push(["fleet/worker/src/report.ts", "dashboard/worker/src/index.ts"])
+        for fleet_job, succeeds in ((None, False), (job("Fleet checks", "skipped"), False), (job("Fleet checks", "failure"), False), (job("Fleet checks", None, "in_progress"), False), (job("Fleet checks"), True)):
+            with self.subTest(fleet_job=fleet_job):
+                jobs = green_jobs("Dashboard checks", "Contracts") + ([fleet_job] if fleet_job else [])
+                result, extra, _ = self.reuse(needed, [branch_run()], {800: jobs})
+                self.assertEqual(extra["checks_reused"], str(succeeds).lower())
+                self.assertEqual(result["fleet_check"], not succeeds)
+                self.assertFalse(result["fleet_deploy"])
+                self.assertFalse(result["dashboard_deploy"])
+        for overrides in ({"head_sha": "c" * 40}, {"head_repository": {"full_name": "someone/fork"}}, {"head_branch": "main"}):
+            with self.subTest(overrides=overrides):
+                result, extra, _ = self.reuse(needed, [branch_run(**overrides)], {800: green_jobs("Fleet checks", "Dashboard checks", "Contracts")})
+                self.assertEqual((result, extra["checks_reused"]), (needed, "false"))
 
     def test_infra_checks_are_reused_only_when_the_branch_run_passed_them(self):
         needed = expect(F, F, F, F, F, infra=T)  # infra/ changed: Infra checks only, no deploy
@@ -2578,6 +2728,7 @@ class HostnameGuard(unittest.TestCase):
             ("flowday-deploy", ["flowday/wrangler.toml"], "CF_API_TOKEN", "wrangler d1 migrations apply"),
             ("links-deploy", ["links/wrangler.toml"], "CF_API_TOKEN", "wrangler d1 migrations apply"),
             ("watch-deploy", ["watch/wrangler.toml"], "CF_API_TOKEN", "deploy-vars.mjs exec -- npx --no-install wrangler deploy --config"),
+            ("fleet-deploy", ["fleet/wrangler.toml"], "CF_API_TOKEN", "deploy-vars.mjs exec -- npx --no-install wrangler deploy --config"),
         ):
             block = blocks[job]
             with self.subTest(job=job):

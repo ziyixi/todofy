@@ -1,0 +1,24 @@
+{
+  "version": "ops-v1",
+  "app": "newsletter",
+  "generated_at": "2026-10-01T14:00:00Z",
+  "health": "ok",
+  "modes": {
+    "maintenance": false,
+    "notifications": true
+  },
+  "guard": {
+    "level": "normal",
+    "reason": null,
+    "until": null,
+    "set_at": null,
+    "deferred": []
+  },
+  "signals": [],
+  "counters": {
+    "heartbeat_age_seconds": 0
+  },
+  "last_backup_at": null,
+  "ui_url": "https://fleet.example.com/",
+  "capabilities": []
+}

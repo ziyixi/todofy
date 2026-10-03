@@ -1,0 +1,53 @@
+# Public account/resource identities. No credential, owner email or personal data.
+# Generated Worker configs remain the only files Wrangler deploys.
+version = 1
+account_id = "f57937bd1d93bf59e737b6d8445fb7a3"
+zone_id = "39163aaaa9eba38eca58f3ea969710bf"
+
+[access_audiences]
+"flowday" = "075c90c5544f87d71cfaec475fad0302d6b726156ff93f5c3a4a89f4ead7b22f"
+"home" = "7e0d033509e69a7f59c947ed4219b3898b79dffd24bfd4c1ea78e4d69269d5cc"
+"lab" = "3a8b5e31d3fb12e678198ea5e1c4231bc3f80665a9f9a5f18ecff8f6c19f4c8c"
+"links" = "cc7072526c75d5250e9e0ba274d795c632dee4554a707c41ce8fae26ebf5b0d1"
+"mail-hero" = "688d6408f95a046a74f94a7fbbbc0241f22553436fcae394bfabb92657614849"
+"todofy" = "16e87af7af751dc7205a6995cfe43eee133736ea2a254efdbeb9e4334790eddd"
+"watch" = "faa4baa704bba09670265053427cb88ba1047384cbc849b15dc7d3a732e3b576"
+
+[d1_databases]
+"flowday" = "df104e83-7183-47e3-b2f9-638dc7502c13"
+"lab" = "f20238dc-93a4-4d1a-91c4-c013f01cbdc9"
+"links" = "2f8c5331-06ce-4347-8c0a-90fe51c82260"
+"mail-hero" = "6c13e4c3-e239-42fb-a7a4-96810fa8d7dc"
+"todofy" = "151c1306-3885-4679-9592-08887b30ae68"
+
+[durable_objects]
+"home-state" = "acddddf88d624194a68af430fd1a90ff"
+"lab-state" = "d8b315160669429781ba6229123cb33c"
+"mail-coordinator" = "55c248f9d82c45f3a89d2de1d719d5db"
+"todofy-core-do" = "a013ef9fa45048d4b4f7bfcc641b57ea"
+"watch-state" = "d58e1bdabacb4d14bbba1887f169c8b4"
+
+[access_app_ids]
+"home" = "f190b413-241d-428d-8680-53eebe7f672d"
+"lab" = "208a0a3b-6654-4b1f-9b1d-821493171f4d"
+"links" = "a6e2a6e3-b432-4093-ac20-0211ca180dce"
+"mail-hero" = "ebd92116-4d51-4d90-923a-068b05b7e05a"
+"todofy" = "d4010b0b-c50e-487b-992e-6e30a392f603"
+"watch" = "7d5134ca-1362-4fa3-9c84-d2ee9afb656c"
+
+[standalone_access_app_ids]
+"mail-hero-backup" = "dafc6e08-7b1b-461f-8735-2cfa668a0ce0"
+
+[access_policy_ids]
+"owner" = "018f1a13-1a1b-4cf6-a470-c865c4577851"
+"github-owner" = "eea00ced-7de7-4094-a705-c9741d835b7c"
+
+[flowday_app_ids]
+"flowday" = "3d956afb-07ea-4b5e-802e-27fd29ca4587"
+"flowday-bypass" = "d63df372-28d1-4a88-a7b4-b31449d1592b"
+
+# Existing external/app-scoped policy references; NOT created or modified by this tool.
+[referenced_policy_ids]
+"mail-hero-backup" = "e97edddb-7b26-4712-b8ee-67483bc59e70"
+"flowday" = "841d2527-c836-4c76-a3dd-40e64247947d"
+"flowday-bypass" = "a8aa0aa2-d3dd-4d25-8b41-3b570a1ab83f"

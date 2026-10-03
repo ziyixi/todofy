@@ -1,0 +1,86 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: newsletter
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: newsletter
+  template:
+    metadata:
+      labels:
+        app: newsletter
+    spec:
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 120
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: newsletter
+          image: newsletter-release
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+              hostPort: 8765
+              hostIP: 127.0.0.1
+          envFrom:
+            - secretRef:
+                name: newsletter-settings
+          env:
+            - name: NEWSLETTER_BOOTSTRAP_DRAIN_KEY
+              value: bootstrap-pending
+            - name: NEWSLETTER_RELEASE_REQUEST_ID
+              value: pending
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: '3'
+              memory: 6Gi
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            periodSeconds: 30
+            failureThreshold: 5
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/newsletter
+            - name: auth
+              mountPath: /var/lib/newsletter-auth
+            - name: config
+              mountPath: /var/lib/newsletter-config
+              readOnly: true
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: newsletter-data
+        - name: auth
+          persistentVolumeClaim:
+            claimName: newsletter-auth
+        - name: config
+          persistentVolumeClaim:
+            claimName: newsletter-config

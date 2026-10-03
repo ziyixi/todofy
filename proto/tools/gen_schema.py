@@ -73,6 +73,21 @@ class Target:
 
 SCHEMAS = (
     Target(
+        "platform.runtime.v1",
+        "../contracts/platform-runtime-v1/platform-runtime-v1.schema.json",
+        "https://contracts.local/platform-runtime-v1/platform-runtime-v1.schema.json",
+        "Bounded personal-cloud runtime observations",
+        "Read-only configured workloads and independently verified desired/actual release identities. "
+        "No credentials, logs, raw provider objects or command surface.",
+    ),
+    Target(
+        "fleet.telemetry.v1",
+        "../contracts/fleet-report-v1/fleet-report-v1.schema.json",
+        "https://contracts.local/fleet-report-v1/fleet-report-v1.schema.json",
+        "Bounded host telemetry receipt",
+        root="HostReport",
+    ),
+    Target(
         "ops.v1",
         "../contracts/ops-v1/ops-v1.schema.json",
         "https://contracts.local/ops-v1/ops-v1.schema.json",
@@ -188,16 +203,32 @@ class Package:
         self.types: dict[str, tuple[dict[str, Any], dict[str, Any]]] = {}
         # $defs name of a message -> its comment, and (message, field) -> the field's (an image with source info).
         self.comments: dict[Any, str] = {}
-        for file in self.files:
+        # A self-contained schema may embed shared messages from directly imported packages.
+        # Index only the declared dependency closure, keep foreign names scoped, and inline their
+        # rules/formats; ordinary package documents retain their existing local $defs identity.
+        indexed = {file["name"]: file for file in self.files}
+        available = {file["name"]: file for file in image["file"]}
+        if self.inline:
+            pending = list(indexed.values())
+            while pending:
+                for dependency in pending.pop().get("dependency", []):
+                    if dependency in available and dependency not in indexed:
+                        indexed[dependency] = available[dependency]
+                        pending.append(available[dependency])
+        for file in indexed.values():
+            source_package = file.get("package", "")
+            prefix = "" if source_package == package else source_package + "."
             for enum in file.get("enumType", []):
-                self.names[f".{package}.{enum['name']}"] = enum["name"]
-                self.types[enum["name"]] = (file, enum)
+                name = prefix + enum["name"]
+                self.names[f".{source_package}.{enum['name']}"] = name
+                self.types[name] = (file, enum)
             for message in file.get("messageType", []):
-                self.names[f".{package}.{message['name']}"] = message["name"]
-                self.types[message["name"]] = (file, message)
+                name = prefix + message["name"]
+                self.names[f".{source_package}.{message['name']}"] = name
+                self.types[name] = (file, message)
                 for nested in message.get("enumType", []):
-                    name = f"{message['name']}_{nested['name']}"
-                    self.names[f".{package}.{message['name']}.{nested['name']}"] = name
+                    name = prefix + f"{message['name']}_{nested['name']}"
+                    self.names[f".{source_package}.{message['name']}.{nested['name']}"] = name
                     self.types[name] = (file, nested)
             messages = file.get("messageType", [])
             for location in file.get("sourceCodeInfo", {}).get("location", []):
@@ -205,7 +236,7 @@ class Package:
                 if not raw or path[:1] != [4] or len(path) not in (2, 4) or (len(path) == 4 and path[2] != 2):
                     continue
                 message = messages[path[1]]
-                key = message["name"] if len(path) == 2 else (message["name"], message["field"][path[3]]["name"])
+                key = prefix + message["name"] if len(path) == 2 else (prefix + message["name"], message["field"][path[3]]["name"])
                 self.comments[key] = comment_text(raw)
         # The messages being written in place, outermost first: a message that contains itself has no inline form.
         self.writing: list[str] = []
@@ -335,9 +366,10 @@ class Package:
     def message(self, file: dict[str, Any], message: dict[str, Any]) -> dict[str, Any]:
         variants = wire_rules.variants(file, message, self.enums)
         groups = wire_rules.any_matches(file, message)
+        name = message["name"] if file.get("package") == self.package else file["package"] + "." + message["name"]
         if variants[0].value is None:
-            return self.object(message["name"], variants[0].fields, groups)
-        return {"oneOf": [self.object(message["name"], variant.fields, groups) for variant in variants]}
+            return self.object(name, variants[0].fields, groups)
+        return {"oneOf": [self.object(name, variant.fields, groups) for variant in variants]}
 
     def schema(self, identity: str, title: str, description: str) -> dict[str, Any]:
         defs: dict[str, Any] = {}

@@ -1,0 +1,13 @@
+# Public deployment identity only. Credentials and personal values are forbidden.
+version = 1
+zone = "ziyixi.science"
+repository = "ziyixi/todofy"
+access_issuer = "https://ziyixi.cloudflareaccess.com"
+platform_hostname = "fleet.ziyixi.science"
+
+# Public node aliases and paths; never an IP, SSH login, token or certificate.
+[vps]
+platform_runtime_host = "platform-runtime.ziyixi.science"
+namespace = "personal-cloud"
+state_root = "/srv/todofy"
+observer_node_key = "vps"

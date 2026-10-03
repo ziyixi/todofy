@@ -110,7 +110,7 @@ class InfraApplyWorkflow(unittest.TestCase):
         runs = re.findall(r"run: (.+)", self.code)
         self.assertEqual(runs, ["python3 infra/scripts/infra_state.py apply --environment production"])
         for word in ("tofu apply", "auto-approve", "tofu import", "tofu state", "tofu show", "destroy", "taint",
-                     "force-unlock", "upload-artifact", "cache@", "GITHUB_OUTPUT", "set -x", "-target"):
+                     "force-unlock", "cache@", "GITHUB_OUTPUT", "set -x", "-target"):
             with self.subTest(word=word):
                 self.assertNotIn(word, self.code)
         self.assertIn("tofu_wrapper: false", self.code)
@@ -123,12 +123,17 @@ class InfraApplyWorkflow(unittest.TestCase):
         self.assertIn("INFRA_APPLY_EXPECT: ${{ inputs.expect }}\n", self.code)
         self.assertIn("INFRA_CONFIRM_DESTRUCTIVE: ${{ inputs.confirm_destructive }}\n", self.code)
         self.assertEqual(len(re.findall(r"inputs\.", self.code)), 2)
-        self.assertNotRegex(self.code, r"vars\.")
+        self.assertEqual(set(re.findall(r"vars\.([A-Z0-9_]+)", self.code)), {"VPS_BOOTSTRAP_CERT"})
         self.assertNotRegex(self.code, r"run: .*\$\{\{")
 
     def test_actions_are_pinned_by_sha_and_match_the_drift_workflow(self):
         uses = re.findall(r"uses: (\S+)", self.code)
-        self.assertEqual(uses, re.findall(r"uses: (\S+)", code(WORKFLOW.read_text())))
+        shared = re.findall(r"uses: (\S+)", code(WORKFLOW.read_text()))
+        self.assertEqual(uses[:len(shared)], shared)
+        self.assertEqual(uses[len(shared):], ["actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"])
+        self.assertIn("path: ${{ runner.temp }}/platform-bootstrap.cms", self.code)
+        self.assertIn("retention-days: 1", self.code)
+        self.assertIn("if: vars.VPS_BOOTSTRAP_CERT != ''", self.code)
         for action in uses:
             with self.subTest(action=action):
                 self.assertRegex(action, r"^[\w.-]+/[\w.-]+@[0-9a-f]{40}$")

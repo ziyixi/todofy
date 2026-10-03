@@ -1,0 +1,27 @@
+{
+  "name": "nodeStatus",
+  "node_key": "vps",
+  "state": "unknown",
+  "observed_at": "2026-10-03T00:00:00Z",
+  "workloads": [
+    {
+      "name": "workloads/newsletter",
+      "workload_key": "newsletter",
+      "process_state": "unknown",
+      "admission_state": "unknown",
+      "health_state": "unknown",
+      "release": {
+        "state": "unknown",
+        "desired": {
+          "workload_key": "newsletter",
+          "source_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "image_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "request_id": "11111111-2222-4333-8444-555555555555"
+        },
+        "actual": null,
+        "observed_at": "2026-10-03T00:00:00Z"
+      },
+      "observed_at": "2026-10-03T00:00:00Z"
+    }
+  ]
+}

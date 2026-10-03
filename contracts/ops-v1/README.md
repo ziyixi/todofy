@@ -1,4 +1,4 @@
-# `ops-v1`: the operations surface of Mail Hero, Todofy, Lab and the watch app
+# `ops-v1`: personal-cloud operations contracts
 
 A small, typed RPC surface on each app so that one dashboard Worker (`home`, in
 [`dashboard/`](../../dashboard/)) can show health, run a daily end-to-end canary, apply quota guardrails and hand a
@@ -54,6 +54,8 @@ next to its unchanged default handlers:
 | Todofy | `todofy` (the gateway) | `todofy/gateway/src/index.ts` | forwards to `TodofyCore` RPC methods in `todofy-core` |
 | Lab | `lab` | `lab/worker/src/index.ts` | in the Worker; state in the `LabState` object (its own SQLite only) |
 | the watch app | `watch` | `watch/worker/src/index.ts` | in the Worker; state in the `WatchState` object (its own SQLite only) |
+| Fleet | `fleet` | `fleet/worker/src/index.ts` (`Ops`) | read-only receipt projection in `FleetState` SQLite |
+| Newsletter | `fleet` | `fleet/worker/src/index.ts` (`NewsletterOps`) | independently observed VPS process/release metadata; no VPS command surface |
 
 The dashboard binds them with service bindings:
 
@@ -156,7 +158,7 @@ lost alarm; `IMPLEMENTATION.md` §3c). Poll it no more often than every 10 minut
 - `ui_url`: `https://<owner UI host>/`, or null when the Worker does not know its host.
 - `capabilities`: what this release supports. Mail Hero `canary_producer`, `guard`; Todofy
   `canary_consumer`, `guard`, `ops_digest`; Lab `guard`; the watch app `guard`. The dashboard checks them before
-  using a feature.
+  using a feature. Fleet and Newsletter monitoring expose no capabilities and never accept a quota guard mutation.
 
 Signal codes (severity):
 
@@ -167,6 +169,8 @@ Signal codes (severity):
 | Lab | `feed_stale` (warning, `hours`: no successful arXiv fetch for over 72 h), `neuron_cap_hit` (warning, `used`, `cap`: the daily Workers AI ceiling stopped AI work until 00:00 UTC), `send_unsettled` (warning, `count`: a send to Todofy failed or unknown for over 24 h) |
 | watch | `watches_broken` (warning, `count`: watches failing their third check in a row or more), `scheduler_stale` (warning, `hours`: no scheduler pass for over 12 h while a watch is to be checked; no metric when none ever ran), `notify_unsettled` (warning, `open`, `failed`: a task intent whose tasks do not all exist 24 h after it was frozen; one Todofy reports failed; or one given up or refused in the last 7 days) |
 | Todofy | `attention`, `due_backlog`, `processing_paused`, `todoist_paused`, `gemini_budget_80`, `backup_failed`, `reminder_failed`, `gtd_snapshot_stale` (warning, `age_hours`); `todoist_blocked`, `gemini_budget_95`, `backup_stale` (critical); `reminder_disabled`, `backup_disabled`, `backup_active`, `review_overdue` (info, `days`) |
+| Fleet | `host_never_seen`, `host_stale`, `host_missing`, `daemon_k3s_inactive`, `daemon_k3s_failed`, `daemon_k3s_missing`, `daemon_k3s_unknown`, `daemon_k3s_activating`, `daemon_k3s_deactivating`, `daemon_cloudflared_inactive`, `daemon_cloudflared_failed`, `daemon_cloudflared_missing`, `daemon_cloudflared_unknown`, `daemon_cloudflared_activating`, `daemon_cloudflared_deactivating`, `daemon_ssh_inactive`, `daemon_ssh_failed`, `daemon_ssh_missing`, `daemon_ssh_unknown`, `daemon_ssh_activating`, `daemon_ssh_deactivating`, `daemon_cloudflared_platform_inactive`, `daemon_cloudflared_platform_failed`, `daemon_cloudflared_platform_missing`, `daemon_cloudflared_platform_unknown`, `daemon_cloudflared_platform_activating`, `daemon_cloudflared_platform_deactivating`, `cluster_degraded`, `cluster_unavailable`, `cluster_unknown`, `disk_high`, `memory_high`, `deployment_pending`, `release_held`, `release_failed`, `release_in_progress` (daemon failures, missing heartbeat, held/failed release critical; in-progress release info; other readiness/capacity conditions warning) |
+| Newsletter | `host_never_seen`, `host_stale`, `host_missing`, `newsletter_unavailable` (critical), `newsletter_unknown` (warning), `newsletter_paused` (info), `deployment_pending` (warning) |
 
 Counter names are listed per app in `IMPLEMENTATION.md`. New codes and counters may be added in ops-v1;
 the dashboard shows unknown ones generically.

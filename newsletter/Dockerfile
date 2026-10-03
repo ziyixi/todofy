@@ -15,11 +15,15 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked --no-dev --extra codex --no-editable
 
 FROM base AS runtime
-LABEL org.opencontainers.image.source="https://github.com/ziyixi/todofy"
+ARG BUILD_SHA=""
+ARG SOURCE_REPOSITORY="https://github.com/ziyixi/todofy"
+LABEL org.opencontainers.image.source=$SOURCE_REPOSITORY
+LABEL org.opencontainers.image.revision=$BUILD_SHA
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates fonts-noto-cjk tzdata \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --create-home --uid 10001 newsletter
 WORKDIR /opt/newsletter
+RUN python -c 'import json, os; from pathlib import Path; Path("build-info.json").write_text(json.dumps({"source_sha": os.environ.get("BUILD_SHA", "")}))'
 COPY --from=builder /opt/newsletter/.venv /opt/newsletter/.venv
 RUN mkdir -p /var/lib/newsletter /var/lib/newsletter-auth \
     && chown newsletter:newsletter /var/lib/newsletter /var/lib/newsletter-auth

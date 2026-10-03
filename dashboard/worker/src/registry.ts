@@ -24,9 +24,10 @@
  */
 import { DRIFT_CALLS_PER_TICK, type EntryGroup, type FlowGroup, type Registry, type RegistryEntry, type Stage, type TileMetricDef } from './api-types.ts';
 import type { EntryDef, FlowDef, RegistryDef, ResourceDef, WorkerDef } from './registry-types.ts';
+import { OWNER_ZONE, RESOURCE_IDENTITIES } from './resource-identities.ts';
 
 /** Every registry host is this zone or one of its subdomains. */
-export const OWNER_ZONE = 'ziyixi.science';
+export { OWNER_ZONE };
 
 const ENTRY_GROUPS: readonly EntryGroup[] = [
   { id: 'apps', name: '应用', order: 1 },
@@ -180,13 +181,13 @@ const ENTRIES: readonly EntryDef[] = [
   {
     id: 'newsletter',
     name: 'Newsletter',
-    description: '家中服务器；每日读取 Todofy 报告写入 Notion',
+    description: 'VPS 后台任务；每日读取 Todofy 报告写入 Notion',
     group: 'services',
     icon: 'newspaper',
     accent: 'amber',
     url: null,
     access: false,
-    status: { type: 'none' },
+    status: { type: 'ops_v1', provider: 'fleet', binding: 'NEWSLETTER', guard: false },
     tile_metric: null,
     app_only_signals: [],
     order: 2,
@@ -204,6 +205,34 @@ const ENTRIES: readonly EntryDef[] = [
     tile_metric: null,
     app_only_signals: [],
     order: 1,
+  },
+  {
+    id: 'fleet',
+    name: '服务器监控',
+    description: 'k3s、系统 daemon 与后台服务状态',
+    group: 'apps',
+    icon: 'server',
+    accent: 'slate',
+    url: 'https://fleet.ziyixi.science/',
+    access: true,
+    status: { type: 'ops_v1', binding: 'FLEET', guard: false },
+    tile_metric: null,
+    app_only_signals: ['host_never_seen', 'host_stale', 'host_missing', 'daemon_k3s_inactive', 'daemon_k3s_failed', 'daemon_k3s_missing', 'daemon_k3s_unknown', 'daemon_k3s_activating', 'daemon_k3s_deactivating', 'daemon_cloudflared_inactive', 'daemon_cloudflared_failed', 'daemon_cloudflared_missing', 'daemon_cloudflared_unknown', 'daemon_cloudflared_activating', 'daemon_cloudflared_deactivating', 'daemon_ssh_inactive', 'daemon_ssh_failed', 'daemon_ssh_missing', 'daemon_ssh_unknown', 'daemon_ssh_activating', 'daemon_ssh_deactivating', 'daemon_cloudflared_platform_inactive', 'daemon_cloudflared_platform_failed', 'daemon_cloudflared_platform_missing', 'daemon_cloudflared_platform_unknown', 'daemon_cloudflared_platform_activating', 'daemon_cloudflared_platform_deactivating', 'cluster_degraded', 'cluster_unavailable', 'cluster_unknown', 'disk_high', 'memory_high', 'deployment_pending', 'release_held', 'release_failed', 'release_in_progress'],
+    order: 8,
+  },
+  {
+    id: 'platform-runtime',
+    name: '平台运行时',
+    description: 'k3s 发布与运行状态 API；由 Fleet 展示状态',
+    group: 'hidden',
+    icon: 'server',
+    accent: 'slate',
+    url: null,
+    access: false,
+    status: { type: 'none' },
+    tile_metric: null,
+    app_only_signals: [],
+    order: 3,
   },
   // END service-catalog entries
   {
@@ -237,25 +266,27 @@ const WORKERS: readonly WorkerDef[] = [
   { script: 'watch', entry: 'watch', role: '网页监视与 UI' },
   { script: 'ziyixi-notion-publish', entry: 'notion-publish', role: '发布 Worker' },
   { script: 'ziyixi-website', entry: 'website', role: '静态网站（仅静态资源）' },
+  { script: 'fleet', entry: 'fleet', role: 'VPS 与后台服务监控' },
   // END service-catalog workers
 ];
 
 const RESOURCES: readonly ResourceDef[] = [
-  { id: 'mail-hero-db', kind: 'd1', name: 'mail-hero 主库', entry: 'mail-hero', match: '6c13e4c3-e239-42fb-a7a4-96810fa8d7dc' },
-  { id: 'todofy-db', kind: 'd1', name: 'todofy 主库', entry: 'todofy', match: '151c1306-3885-4679-9592-08887b30ae68' },
-  { id: 'mail-coordinator', kind: 'do', name: 'MailCoordinator', entry: 'mail-hero', script: 'mail-hero', match: '55c248f9d82c45f3a89d2de1d719d5db' },
+  { id: 'fleet-state', kind: 'do', name: 'FleetState', entry: 'fleet', script: 'fleet', match: RESOURCE_IDENTITIES['fleet-state'] ?? null, todo: '首次 Fleet 发布后，记录 DO namespace 到 config/resources.toml' },
+  { id: 'mail-hero-db', kind: 'd1', name: 'mail-hero 主库', entry: 'mail-hero', match: RESOURCE_IDENTITIES['mail-hero-db'] ?? null },
+  { id: 'todofy-db', kind: 'd1', name: 'todofy 主库', entry: 'todofy', match: RESOURCE_IDENTITIES['todofy-db'] ?? null },
+  { id: 'mail-coordinator', kind: 'do', name: 'MailCoordinator', entry: 'mail-hero', script: 'mail-hero', match: RESOURCE_IDENTITIES['mail-coordinator'] ?? null },
   // Defined in todofy-core; the gateway `todofy` binds it by script_name.
-  { id: 'todofy-core-do', kind: 'do', name: 'TodofyCore', entry: 'todofy', script: 'todofy-core', match: 'a013ef9fa45048d4b4f7bfcc641b57ea' },
-  { id: 'home-state', kind: 'do', name: 'HomeState', entry: 'home', script: 'home', match: 'acddddf88d624194a68af430fd1a90ff' },
-  { id: 'lab-db', kind: 'd1', name: 'lab 论文库', entry: 'lab', match: 'f20238dc-93a4-4d1a-91c4-c013f01cbdc9' },
+  { id: 'todofy-core-do', kind: 'do', name: 'TodofyCore', entry: 'todofy', script: 'todofy-core', match: RESOURCE_IDENTITIES['todofy-core-do'] ?? null },
+  { id: 'home-state', kind: 'do', name: 'HomeState', entry: 'home', script: 'home', match: RESOURCE_IDENTITIES['home-state'] ?? null },
+  { id: 'lab-db', kind: 'd1', name: 'lab 论文库', entry: 'lab', match: RESOURCE_IDENTITIES['lab-db'] ?? null },
   // Created by Lab's first deploy (2026-09-30).
-  { id: 'lab-state', kind: 'do', name: 'LabState', entry: 'lab', script: 'lab', match: 'd8b315160669429781ba6229123cb33c' },
+  { id: 'lab-state', kind: 'do', name: 'LabState', entry: 'lab', script: 'lab', match: RESOURCE_IDENTITIES['lab-state'] ?? null },
   // Created for the links app's first deploy (L2, 2026-10-01).
-  { id: 'links-db', kind: 'd1', name: 'links 短链接库', entry: 'links', match: '2f8c5331-06ce-4347-8c0a-90fe51c82260' },
+  { id: 'links-db', kind: 'd1', name: 'links 短链接库', entry: 'links', match: RESOURCE_IDENTITIES['links-db'] ?? null },
   // FlowDay's database (flowday/wrangler.toml, managed by infra/ since IaC P4).
-  { id: 'flowday-db', kind: 'd1', name: 'flowday 主库', entry: 'flowday', match: 'df104e83-7183-47e3-b2f9-638dc7502c13' },
+  { id: 'flowday-db', kind: 'd1', name: 'flowday 主库', entry: 'flowday', match: RESOURCE_IDENTITIES['flowday-db'] ?? null },
   // Created by the watch app's first deploy (W2, 2026-10-02); id read from the account's Durable Object namespace list.
-  { id: 'watch-state', kind: 'do', name: 'WatchState', entry: 'watch', script: 'watch', match: 'd58e1bdabacb4d14bbba1887f169c8b4' },
+  { id: 'watch-state', kind: 'do', name: 'WatchState', entry: 'watch', script: 'watch', match: RESOURCE_IDENTITIES['watch-state'] ?? null },
   // IDs read from the account's D1, Durable Object namespace and R2 bucket lists (2026-09-30).
   { id: 'mail-hero-store', kind: 'r2', name: 'mail-hero 邮件存储', entry: 'mail-hero', match: 'mail-hero-store' },
   { id: 'mail-hero-backup', kind: 'r2', name: 'mail-hero 备份', entry: 'mail-hero', match: 'mail-hero-backups' },
@@ -382,12 +413,12 @@ const FLOWS: readonly FlowDef[] = [
     id: 'daily-newsletter',
     name: '每日 Newsletter',
     group: 'content',
-    description: '家中服务器每天读取 Todofy 报告并写入 Notion。',
+    description: 'VPS 上的 Newsletter 读取报告；进程与排空状态由主机报告，外部业务仍需单独核对。',
     order: 2,
     stages: [
       { id: 'report', name: 'Todofy 报告', entry: 'todofy', workers: ['todofy'], signals: [] },
-      { id: 'fetch', name: '读取报告', entry: 'newsletter', signals: [], note: '等 Todofy 提供“最近读取时间”计数后接入' },
-      { id: 'write', name: '写入 Notion', entry: null, signals: [], note: '在家中服务器和 Notion 上，面板看不到' },
+      { id: 'fetch', name: '后台进程', entry: 'newsletter', signals: ['host_never_seen', 'host_stale', 'host_missing', 'newsletter_unavailable', 'newsletter_unknown', 'newsletter_paused', 'deployment_pending'], hold_signals: ['newsletter_paused'], counters: ['queued_count', 'inflight_count', 'unknown_count'], note: '监督进程与发布排空，不证明采编或模型成功' },
+      { id: 'write', name: '写入 Notion', entry: null, signals: [], note: 'Notion 结果需要业务账本核对，进程健康不能代替业务验收' },
     ],
     canary: null,
   },

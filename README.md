@@ -18,15 +18,16 @@ Home is the daily starting point. Services run and release independently, sharin
 | Links | 私人短链接 / Personal short links | Cloudflare Worker + D1 | [links/](links/README.md) |
 | Watch | 网页变化收件箱 / Web change inbox | Cloudflare Worker + DO | [watch/](watch/README.md) |
 | Website | Notion 驱动的个人网站 / Personal website from Notion | Cloudflare static assets + relay | [website/](website/README.md) |
-| Newsletter | 生成并发送简报 / Build and send the newsletter | VPS container, separate image | [newsletter/](newsletter/README.md) |
+| Newsletter | 生成并发送简报 / Build and send the newsletter | VPS k3s, separate image | [newsletter/](newsletter/README.md) |
+| Fleet | VPS、daemon 与发布状态 / VPS, daemons and release status | Cloudflare Worker + DO | [fleet/](fleet/README.md) |
 
-八个 Cloudflare 应用，加一个仍在 VPS 上运行的 Newsletter。
-Newsletter 入仓后仍保留自己的运行环境与镜像发布，使用固定 image digest 更新。
-新的 CI 发布到 `ghcr.io/ziyixi/todofy-newsletter`；现有 VPS 继续使用原 `ghcr.io/ziyixi/newsletter`，本次没有升级服务器。
+Cloudflare 托管日常应用；VPS 的 k3s 运行 Newsletter 和独立的部署 daemon。
+GitHub Actions 主动通过鉴权 API 更新经测试的镜像，Fleet 和 Home 查看实际运行状态。
+发布状态、业务健康和观察数据的新鲜度分别显示。首次安装和数据恢复见 [重建说明](docs/rebuild.md)。
 
-Eight Cloudflare applications and a Newsletter service on the VPS.
-Newsletter keeps its own container runtime and image release; updates use an immutable image digest.
-New CI releases use `ghcr.io/ziyixi/todofy-newsletter`. The VPS still uses the original `ghcr.io/ziyixi/newsletter`; this change does not upgrade it.
+Cloudflare hosts the daily applications. VPS k3s runs Newsletter and an independent deployment daemon.
+Actions pushes tested images through an authenticated API; Fleet and Home show observed runtime state.
+Release progress, business health and observation freshness stay separate. See [rebuild](docs/rebuild.md).
 
 ## 从这里开始 · Getting started
 
@@ -38,7 +39,7 @@ New CI releases use `ghcr.io/ziyixi/todofy-newsletter`. The VPS still uses the o
    Work in the application's directory; follow its commands and use local bindings and synthetic data.
 
 ```sh
-cd mail-hero    # 或 / or todofy, dashboard, lab, flowday, links, watch, website, newsletter
+cd mail-hero    # 或 / or todofy, dashboard, lab, flowday, links, watch, website, newsletter, fleet, platform
 ```
 
 仓库没有“一条命令启动所有服务”的要求。Cloudflare TypeScript 应用安装时生成 proto；Todofy 的 Python 代码由 `uv` 构建时生成。
@@ -54,7 +55,9 @@ Todofy's Python build generates it through `uv`. Generated code is not committed
 | [proto/](proto/README.md) | 接口定义、固定工具链、JSON 编解码与 HTTP 客户端 / IDL, pinned tooling, JSON codecs and HTTP runtime |
 | [contracts/](contracts/README.md) | 跨服务语义、Schema、固定字节测试样本 / Cross-service semantics, schemas and golden payloads |
 | [packages/edge-auth/](packages/edge-auth/README.md) | 编译进应用的共享鉴权 / Shared authentication compiled into applications |
-| [infra/](infra/README.md) | Cloudflare Access、D1/R2 资源的声明与受控变更 / Declared Cloudflare Access and D1/R2 resources |
+| [infra/](infra/README.md) | Cloudflare 资源与权限 / Cloudflare resources and permissions |
+| [platform/](platform/README.md) | VPS 发布 daemon、k3s 清单和监控 / VPS deployment daemon, k3s manifests and monitoring |
+| [config/](config/README.md) | 可迁移的公开配置 / Portable public configuration |
 | [tools/](tools/) | 测试、构建和部署工具 / Test, build and deployment tools |
 | [.github/workflows/](.github/workflows/) | 检查、独立发布与基础设施流程 / Checks, independent releases and infrastructure workflows |
 

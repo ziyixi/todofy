@@ -5,6 +5,8 @@
 import mailHeroOk from '../../../contracts/ops-v1/fixtures/OpsStatus/mail-hero-ok.json';
 import todofyOk from '../../../contracts/ops-v1/fixtures/OpsStatus/todofy-ok.json';
 import labOk from '../../../contracts/ops-v1/fixtures/OpsStatus/lab-ok.json';
+import fleetOk from '../../../contracts/ops-v1/fixtures/OpsStatus/fleet-ok.json';
+import newsletterOk from '../../../contracts/ops-v1/fixtures/OpsStatus/newsletter-ok.json';
 import watchOk from '../../../contracts/ops-v1/fixtures/OpsStatus/watch-ok.json';
 import type { OpsApp, OpsSignal, OpsStatus } from '../src/api-types.ts';
 import type { Usage } from '../src/api-types.ts';
@@ -48,7 +50,7 @@ export function withLinkOnly(registry: RegistryDef = REGISTRY): RegistryDef {
 }
 
 export function status(app: OpsApp, patch: Partial<OpsStatus> = {}, at = NOW - 2 * MIN): StatusDoc {
-  const base = { 'mail-hero': mailHeroOk, todofy: todofyOk, lab: labOk, watch: watchOk }[app] as OpsStatus;
+  const base = { 'mail-hero': mailHeroOk, todofy: todofyOk, lab: labOk, watch: watchOk, fleet: fleetOk, newsletter: newsletterOk }[app] as OpsStatus;
   return { checked_at: at, ok: true, error: null, consecutive_failures: 0, status: { ...base, ...patch }, status_at: at };
 }
 
@@ -103,7 +105,7 @@ export function input(patch: Partial<EvalInput> = {}): EvalInput {
     now: NOW,
     lastTickAt: NOW,
     analyticsConfigured: true,
-    statuses: { 'mail-hero': status('mail-hero'), todofy: status('todofy'), lab: status('lab'), watch: status('watch') },
+    statuses: { 'mail-hero': status('mail-hero'), todofy: status('todofy'), lab: status('lab'), watch: status('watch'), fleet: status('fleet'), newsletter: status('newsletter') },
     probes: { website: probe(), flowday: probe({ latency_ms: 95 }), links: probe({ latency_ms: 40 }) },
     scripts: scripts(),
     digest: {

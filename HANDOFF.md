@@ -16,9 +16,10 @@ Rules for this file:
   what is done, what is left, how to verify it and what to check after its deploy. Link to the app docs for
   design detail instead of copying it.
 
-Last updated: 2026-10-03 ~00:03 UTC. The verified foundation implementation is `8628e5e`; subsequent commits may be documentation only. Every app's owner API is on proto now (the dashboard
+Last updated: 2026-10-03 ~03:00 UTC. The verified foundation implementation is `8628e5e`; the k3s/Fleet
+implementation below is still in flight and has not been deployed. Every app's owner API is on proto now (the dashboard
 `ca63675`, FlowDay `8d9100e`, Mail Hero `d1bde0e`, Todofy `b70856f`, all landed and verified on 2026-10-02). Nothing
-was in flight at that landing. The owner-authorised foundation work below is complete.
+was in flight at that landing. The foundation evidence below describes that completed release.
 
 ## What is live
 
@@ -34,12 +35,13 @@ was in flight at that landing. The owner-authorised foundation work below is com
 | Website | `ziyixi-website` (+ `ziyixi-notion-publish` relay) | `ziyixi.science`, `www.ziyixi.science` | `Website release` | n/a (static) |
 
 Newsletter source is now imported on `main` from its deployed engine commit
-`c3d622d4771b1ca63ee4e3f785b79032cffc30e1`. Its new independent image is `ghcr.io/ziyixi/todofy-newsletter`. The main publisher at `8628e5e` published it; the package is public, anonymous manifest access passed, and the credential-free configuration workflow pulled and validated the image. The pullable digest is `sha256:94c535ba8f2a64d887656e50a1571f42b31d18aad5472776e0762d69c20e5e51`. The existing VPS still runs
-`ghcr.io/ziyixi/newsletter`; image publication here does not update that server. It still reads Todofy's
+`c3d622d4771b1ca63ee4e3f785b79032cffc30e1`. Its new independent image is `ghcr.io/ziyixi/todofy-newsletter`. The main publisher at `8628e5e` published it; the package is public, anonymous manifest access passed, and the credential-free configuration workflow pulled and validated the image. The pullable digest is `sha256:94c535ba8f2a64d887656e50a1571f42b31d18aad5472776e0762d69c20e5e51`.
+`ghcr.io/ziyixi/newsletter` was the old VPS runtime. It is now stopped for the authorised migration,
+with its image and persistent state preserved. Image publication alone does not update that server. The application reads Todofy's
 `/api/summary` and `/api/recommendation` using its existing machine contract. See
 `newsletter/docs/import-source.md` and `newsletter/docs/deployment-drain.md` for the import and release boundaries.
-The self-hosted Slash and changedetection containers (to be retired, see "Waiting for the owner") and
-FlowDay's old container (rollback until 2026-10-08) remain outside this repository.
+The old Slash, changedetection and FlowDay containers are also stopped under the owner's subsequent
+instruction to stop every Compose service; retained state remains outside this repository.
 
 ## How work lands
 
@@ -75,15 +77,34 @@ subsequently clarified that **all existing Compose services should stop**, rathe
 apps. All 13 inventoried containers are stopped and their automatic restart is disabled; containers,
 volumes, private configurations and migration snapshots are retained. Do not restart legacy triggers.
 
-Work in progress: Flux pulls public, CI-verified desired manifests; Newsletter releases drain/freeze before
-changing the exclusive stateful process; an independent host observer reports bounded status to Fleet.
+Work in progress: GitHub Actions actively calls the shared-proto daemon API; the daemon applies its own
+CI-verified Kustomize resources. Actions holds only narrow HTTPS credentials, with no SSH key or Kubernetes
+credential. Newsletter releases drain/freeze before
+changing the exclusive stateful process; an observer CronJob using the platform image reports bounded
+status to Fleet. Application code and dependencies stay inside images; no host executable is deployed.
 Public deployment profiles and a rebuild runbook separate empty resource recreation from historical data
 recovery. Initial k3s/systemd setup requires one pinned bootstrap executed by the owner with sudo; routine
 reconciliation must need neither SSH nor a GitHub-held host credential. The owner accepted that one-time
-step. No k3s/Fleet deployment or production business acceptance has happened yet. Do not claim the old
-process supports the new drain API. Branch checks must pass before main and gated infrastructure apply.
+step. FastAPI, httpx, the official Kubernetes SDK and Jeepney provide the standard runtime integrations.
+No Shiv, standalone application binary, host Python dependency installation or observer systemd timer is
+part of the deployment. Loss of k3s scheduling produces stale/missing observations rather than an
+independent host diagnosis.
 
-## Foundation completed
+Local platform, image-context, release-client and bootstrap checks passed: 97 tests plus 79 subtests;
+all 53 relevant Python files passed lint and format. Profile/infrastructure checks passed 89 tests;
+Newsletter's changed drain/monitor behavior passed 45 synthetic tests. A real offline Kustomize/bootstrap
+bundle contained ten runtime resources, keeping Newsletter held and the observer enabled. Final branch
+CI is still pending. No k3s/Fleet deployment or production
+business acceptance has happened yet. Do not claim the old process supports the new drain API.
+
+Remaining sequence: push and pass branch CI; promote the identical green SHA;
+review and apply only the new managed Access/Tunnel/Fleet resources; record actual Access audiences and
+generated public identities; prepare immutable images and a reviewed public bootstrap with private node
+credentials supplied separately; owner runs sudo once. The bootstrap preserves the old state, then
+disables the already stopped Docker runtime before starting k3s. Then enable the repository VPS release
+switch and verify the pushed release, fresh Fleet/Home observations and inactive legacy runtime.
+
+## Foundation completed (historical release evidence)
 
 - Root README is concise and bilingual; docs, contracts and migration history have separate navigation. P5 uses nine `app.toml` files, generates Home/Access metadata, and validates ten Workers against their committed Wrangler configs. Existing Home public bytes and Access identities were preserved. The read-only Infra drift run reported `no-op 19`; no infrastructure apply was needed.
 - Changes: 360 tests (one intentional Watch/no-D1 skip); catalog: 18; infra driver: 75; Home unit: 249 and workerd: 73. Secretless OpenTofu fmt/validate and cross-config guards passed. Newsletter: 2476 tests, locked lint/type/structure, synthetic HTTP smoke, no-login Codex startup, build, isolated wheel and actual Linux Docker/configuration smoke passed.
@@ -164,11 +185,11 @@ with synthetic data.
 - Optional: Chrome site search `s` → `https://s.ziyixi.science/%s` (`links/README.md`).
 - Dedicated Cloudflare tokens (`CF_INFRA_READ_TOKEN`, `CF_INFRA_TOKEN`) and a fresh deploy token
   (`infra/README.md` "Replacing the token").
-- OK to retire the self-hosted Slash and changedetection containers (no data import is wanted).
-- OK for F6 after 2026-10-08 (above).
+- Run the prepared one-time k3s bootstrap after the implementation, transport and immutable images are
+  verified; no password should be sent to an agent. All Compose services already have permission to stop.
 - The pages to watch for W4 (added by the owner at watch.ziyixi.science/new, or named to an agent privately).
-- Optional: a Newsletter run receipt so the dashboard can show its health. Its source is now here;
-  the existing VPS runtime is unchanged and receipt deployment is a later phase.
+- Live Newsletter deployment and monitoring acceptance waits for the k3s/Fleet migration above;
+  real model/provider/send acceptance remains distinct from deployment health.
 
 ## Next, in order
 

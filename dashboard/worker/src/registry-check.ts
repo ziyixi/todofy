@@ -119,7 +119,7 @@ export function validateRegistry(registry: RegistryDef, options: ValidationOptio
         bindings.push(status.binding);
         // The type allows only the two bindings env.ts declares; the pattern guards a future widening.
         add(BINDING.test(status.binding), `${where}: binding name`);
-        add(scripts.length > 0, `${where}: ops_v1 needs a worker`);
+        add(scripts.length > 0 || (status.provider === 'fleet' && entry.id === 'newsletter' && status.binding === 'NEWSLETTER' && !status.guard), `${where}: ops_v1 needs a worker or explicit fleet provider`);
         break;
       case 'public_http':
         problems.push(...httpsProblems(`${where} probe`, status.url, 'path'));

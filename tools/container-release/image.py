@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
-"""Publish exactly the independent Newsletter image tested by the CI gate."""
+"""Publish exactly the independent service image tested by the CI gate."""
 
 import argparse
 import hashlib
 import json
+import os
 import re
 import subprocess
+import tomllib
 from pathlib import Path
 
 IMAGE = "ghcr.io/ziyixi/todofy-newsletter"
@@ -23,11 +25,11 @@ def inspect(image: str) -> str:
     return value
 
 
-def registry_digest(image: str) -> str:
+def registry_digest(image: str, repository: str = IMAGE) -> str:
     values = json.loads(subprocess.check_output(
         ["docker", "image", "inspect", "--format", "{{json .RepoDigests}}", image], text=True))
     matches = {value for value in values or [] if isinstance(value, str)
-               and re.fullmatch(re.escape(IMAGE) + r"@sha256:[0-9a-f]{64}", value)}
+               and re.fullmatch(re.escape(repository) + r"@sha256:[0-9a-f]{64}", value)}
     if len(matches) != 1:
         raise ValueError("Published registry digest is unavailable or ambiguous")
     return matches.pop()
@@ -57,7 +59,7 @@ def verify(sha: str, directory: Path) -> dict:
     return manifest
 
 
-def publish(sha: str, directory: Path) -> None:
+def publish(sha: str, directory: Path, repository: str = IMAGE) -> dict:
     manifest = verify(sha, directory)
     # There is no build in this job. Both the checked tar bytes and the loaded image ID must match.
     subprocess.run(["docker", "load", "--input", str(directory / "image.tar")], check=True)
@@ -65,12 +67,14 @@ def publish(sha: str, directory: Path) -> None:
     if inspect(image_id) != image_id:
         raise ValueError("Loaded image differs from the tested image")
     for tag in (f"service-{sha}", "service"):
-        target = f"{IMAGE}:{tag}"
+        target = f"{repository}:{tag}"
         subprocess.run(["docker", "tag", image_id, target], check=True)
         subprocess.run(["docker", "push", target], check=True)
     # Docker image IDs are not registry manifest digests. Promotion must pin this pullable identity.
-    print(json.dumps({"source_sha": sha, "tested_image_id": image_id,
-                      "image": registry_digest(f"{IMAGE}:service-{sha}")}, sort_keys=True))
+    receipt = {"source_sha": sha, "tested_image_id": image_id,
+               "image": registry_digest(f"{repository}:service-{sha}", repository)}
+    print(json.dumps(receipt, sort_keys=True))
+    return receipt
 
 
 def main() -> None:
@@ -79,6 +83,9 @@ def main() -> None:
     parser.add_argument("--sha", required=True)
     parser.add_argument("--directory", type=Path, required=True)
     parser.add_argument("--image")
+    parser.add_argument("--service", choices=("newsletter", "platform"), default="newsletter")
+    parser.add_argument("--receipt", type=Path)
+    parser.add_argument("--github-output", action="store_true")
     args = parser.parse_args()
     if not re.fullmatch(r"[0-9a-f]{40}", args.sha):
         parser.error("Expected a full source commit SHA")
@@ -87,7 +94,17 @@ def main() -> None:
             parser.error("save requires --image")
         save(args.image, args.sha, args.directory)
     else:
-        publish(args.sha, args.directory)
+        profile = tomllib.loads((Path(__file__).resolve().parents[2] / "config/cloud.toml").read_text())
+        owner = profile["repository"].split("/")[0]
+        receipt = publish(args.sha, args.directory, f"ghcr.io/{owner}/todofy-{args.service}")
+        if args.receipt:
+            args.receipt.write_text(json.dumps(receipt, sort_keys=True) + "\n")
+        if args.github_output:
+            output = os.environ.get("GITHUB_OUTPUT")
+            if not output:
+                raise ValueError("Missing Actions output file")
+            with open(output, "a") as handle:
+                handle.write("image=" + receipt["image"] + "\n")
 
 
 if __name__ == "__main__":

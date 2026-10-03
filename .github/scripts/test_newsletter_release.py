@@ -7,7 +7,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 REPO = Path(__file__).resolve().parents[2]
-spec = importlib.util.spec_from_file_location("newsletter_image", REPO / "tools/newsletter-release/image.py")
+spec = importlib.util.spec_from_file_location("newsletter_image", REPO / "tools/container-release/image.py")
 release = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(release)
 

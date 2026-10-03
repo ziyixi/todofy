@@ -40,6 +40,8 @@ class Settings:
     editor_backend: str = "mock"
     editor_token: str = dataclasses.field(default="", repr=False)
     send_token: str = dataclasses.field(default="", repr=False)
+    monitor_token: str = dataclasses.field(default="", repr=False)
+    bootstrap_drain_key: str = ""
     time_zone: str = "America/Los_Angeles"
     job_timeout_seconds: float = 900
     max_body_bytes: int = 1_048_576
@@ -89,6 +91,8 @@ class Settings:
             editor_backend=os.getenv("NEWSLETTER_EDITOR", "mock"),
             editor_token=os.getenv("NEWSLETTER_EDITOR_TOKEN", ""),
             send_token=os.getenv("NEWSLETTER_SEND_TOKEN", ""),
+            monitor_token=os.getenv("NEWSLETTER_MONITOR_TOKEN", ""),
+            bootstrap_drain_key=os.getenv("NEWSLETTER_BOOTSTRAP_DRAIN_KEY", ""),
             time_zone=os.getenv("NEWSLETTER_TIME_ZONE", "America/Los_Angeles"),
             job_timeout_seconds=_number_env(
                 "NEWSLETTER_JOB_TIMEOUT_SECONDS", "900", float
@@ -244,15 +248,19 @@ class Settings:
         if self.mail_backend not in {"fake", "resend"}:
             raise ValueError("NEWSLETTER_MAIL must be fake or resend")
         tokens = [self.editor_token, self.send_token]
-        if (
-            any(
-                len(t) < 24 or len(t) > 512 or any(c.isspace() for c in t)
-                for t in tokens
-            )
-            or len(set(tokens)) != 2
+        if self.bootstrap_drain_key and (
+            len(self.bootstrap_drain_key) > 128
+            or any(not 33 <= ord(c) <= 126 for c in self.bootstrap_drain_key)
         ):
+            raise ValueError("Invalid bootstrap drain identity")
+        if self.monitor_token:
+            tokens.append(self.monitor_token)
+        if any(
+            len(t) < 24 or len(t) > 512 or any(c.isspace() for c in t)
+            for t in tokens
+        ) or len(set(tokens)) != len(tokens):
             raise ValueError(
-                "Configure distinct editor/send tokens (24+ characters)"
+                "Configure distinct machine tokens (24+ characters)"
             )
         if self.mode == "mock" and (
             self.editor_backend != "mock"

@@ -53,7 +53,7 @@ describe('entry health (the tile: the entry\'s own health, Q2)', () => {
     expect(tiles.flowday).toMatchObject({ level: 'ok', reason: null, metric: { kind: 'latency', ms: 95 } });
     expect(tiles.links).toMatchObject({ level: 'ok', reason: null, metric: { kind: 'latency', ms: 40 } });
     expect(tiles['notion-publish']).toMatchObject({ level: 'ok', metric: { kind: 'last_active', hour: '2026-09-29T06:00:00.000Z' } });
-    expect(tiles.newsletter).toMatchObject({ level: 'unmonitored', reason: null, metric: null });
+    expect(tiles.newsletter).toMatchObject({ level: 'ok', reason: null, metric: null });
     expect(tiles.home).toMatchObject({ level: 'ok' });
   });
 
@@ -195,12 +195,12 @@ describe('flows (stage chains)', () => {
     expect(mail.freshness).toEqual({ kind: 'canary', at: '2026-09-29T09:06:00.000Z', ok_runs: 13, runs: 14 });
   });
 
-  it('marks the other flows as the mockup does: 网站发布 2/3, Newsletter partial, 运维摘要 by the digest', () => {
+  it('marks the other flows as the mockup does: 网站发布 2/3, Newsletter process observed, 运维摘要 by the digest', () => {
     const flows = Object.fromEntries(flowStates(input()).map((f) => [f.id, f]));
     expect(flows['site-publish']).toMatchObject({ level: 'ok', partial: false, coverage: { monitored: 2, total: 3 }, freshness: { kind: 'activity', at: '2026-09-29T06:00:00.000Z' } });
     expect(stage(flows['site-publish'] as FlowState, 'serve').probe).toEqual({ checked_at: new Date(NOW - MIN).toISOString(), ok: true, http_status: 200, latency_ms: 180 });
-    // 1 of 3 stages monitored: 部分接入, whatever the level.
-    expect(flows['daily-newsletter']).toMatchObject({ level: 'ok', partial: true, coverage: { monitored: 1, total: 3 }, freshness: { kind: 'none' } });
+    // Two of three stages observed; Notion business success remains unmonitored.
+    expect(flows['daily-newsletter']).toMatchObject({ level: 'ok', partial: false, coverage: { monitored: 2, total: 3 }, freshness: { kind: 'none' } });
     expect(flows['ops-digest']).toMatchObject({ level: 'ok', freshness: { kind: 'digest', at: '2026-09-29T07:00:00.000Z', accepted: true } });
     expect(flowSummaries(input()).map((f) => f.id)).toEqual(['mail-to-task', 'gtd', 'site-publish', 'daily-newsletter', 'web-watch', 'paper-radar', 'ops-digest']);
     // The watch app's flow: the watched sites are outside the dashboard; its three stages read its ops-v1 counters.
@@ -229,13 +229,13 @@ describe('flows (stage chains)', () => {
 
   it('shows a hold as 已暂停 on its stage, never as a fault', () => {
     const paused = withSignals('mail-hero', [signal('force_send_paused', 'warning')]);
-    const mail = flow('mail-to-task', { statuses: { 'mail-hero': paused, todofy: status('todofy'), lab: status('lab'), watch: status('watch') } });
+    const mail = flow('mail-to-task', { statuses: { 'mail-hero': paused, todofy: status('todofy'), lab: status('lab'), watch: status('watch'), newsletter: status('newsletter'), fleet: status('fleet') } });
     expect(stage(mail, 'deliver')).toMatchObject({ level: 'held', held: true, reason: 'force_send_paused' });
     expect(stage(mail, 'ingest')).toMatchObject({ level: 'ok', held: false });
     expect(mail.level).toBe('held');
     // Maintenance is claimed by the first stage of the app and stays critical.
     const maintenance = withSignals('mail-hero', [signal('maintenance_mode', 'critical')], 'down');
-    const down = flow('mail-to-task', { statuses: { 'mail-hero': maintenance, todofy: status('todofy'), lab: status('lab'), watch: status('watch') } });
+    const down = flow('mail-to-task', { statuses: { 'mail-hero': maintenance, todofy: status('todofy'), lab: status('lab'), watch: status('watch'), newsletter: status('newsletter'), fleet: status('fleet') } });
     expect(stage(down, 'ingest')).toMatchObject({ level: 'critical', reason: 'maintenance_mode' });
     // Later stages of the app see the app down through its health.
     expect(stage(down, 'parse')).toMatchObject({ level: 'critical', reason: 'maintenance_mode' });
@@ -271,7 +271,7 @@ describe('flows (stage chains)', () => {
 
   it('names the worst stage as the first issue, not an earlier lesser one', () => {
     const mailHero = withSignals('mail-hero', [signal('capacity_70', 'warning', { percent: 72 }), signal('endpoint_blocked', 'critical')]);
-    const mail = flow('mail-to-task', { statuses: { 'mail-hero': mailHero, todofy: status('todofy'), lab: status('lab'), watch: status('watch') } });
+    const mail = flow('mail-to-task', { statuses: { 'mail-hero': mailHero, todofy: status('todofy'), lab: status('lab'), watch: status('watch'), newsletter: status('newsletter'), fleet: status('fleet') } });
     expect(stage(mail, 'ingest').level).toBe('warning');
     expect(stage(mail, 'deliver').level).toBe('critical');
     expect(mail).toMatchObject({ level: 'critical', first_issue: { stage: 'deliver', code: 'endpoint_blocked' } });
@@ -279,9 +279,9 @@ describe('flows (stage chains)', () => {
 
   it('shows unmonitored stages as 未接入 and an unreachable app on every one of its stages', () => {
     const unreachable = failedStatus(status('todofy'), 2);
-    const f = flow('daily-newsletter', { statuses: { 'mail-hero': status('mail-hero'), todofy: unreachable, lab: status('lab'), watch: status('watch') } });
-    expect(f.stages.map((s) => s.level)).toEqual(['critical', 'unmonitored', 'unmonitored']);
-    expect(f).toMatchObject({ level: 'critical', partial: true, first_issue: { stage: 'report', code: 'unreachable' } });
+    const f = flow('daily-newsletter', { statuses: { 'mail-hero': status('mail-hero'), todofy: unreachable, lab: status('lab'), watch: status('watch'), newsletter: status('newsletter'), fleet: status('fleet') } });
+    expect(f.stages.map((s) => s.level)).toEqual(['critical', 'ok', 'unmonitored']);
+    expect(f).toMatchObject({ level: 'critical', partial: false, first_issue: { stage: 'report', code: 'unreachable' } });
   });
 });
 
@@ -387,7 +387,7 @@ describe('the attention strip', () => {
 
   it('shows an app that failed once as ◆ 未知 above the warnings, and counts it in the badges (F1)', () => {
     const down = failedStatus(status('todofy', {}, NOW - 2 * HOUR), 1);
-    const evaluation = input({ statuses: { 'mail-hero': status('mail-hero'), todofy: down, lab: status('lab'), watch: status('watch') } });
+    const evaluation = input({ statuses: { 'mail-hero': status('mail-hero'), todofy: down, lab: status('lab'), watch: status('watch'), newsletter: status('newsletter'), fleet: status('fleet') } });
     const gemini = item('mail-hero', 'backup_stale');
     const { attention, badges } = attentionView(base({ items: [gemini], statuses: evaluation.statuses, evaluation }));
     expect(attention.level).toBe('unknown');
@@ -399,7 +399,7 @@ describe('the attention strip', () => {
     expect(attention.items[0]?.target).toEqual({ view: 'home', entry: 'todofy' });
     expect(badges).toEqual({ home: 1, flows: 0, cloudflare: 0, ops: 1 });
     // Two failures: the digest's app_unreachable explains it; no observed duplicate.
-    const twice = input({ statuses: { 'mail-hero': status('mail-hero'), todofy: failedStatus(status('todofy'), 2), lab: status('lab'), watch: status('watch') } });
+    const twice = input({ statuses: { 'mail-hero': status('mail-hero'), todofy: failedStatus(status('todofy'), 2), lab: status('lab'), watch: status('watch'), newsletter: status('newsletter'), fleet: status('fleet') } });
     const digest = item('todofy', 'app_unreachable', 'critical');
     const critical = attentionView(base({ items: [digest], statuses: twice.statuses, evaluation: twice })).attention;
     expect(critical.level).toBe('critical');

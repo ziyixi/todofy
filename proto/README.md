@@ -181,7 +181,7 @@ bundle is unchanged (its types come from the OpenAPI document).
 | `ts/` | The TypeScript package `@ziyixi/proto`. Committed: `package.json` (its exports), `wire-json.ts`, `wire-rules.ts` and `field-mask.ts` (the codec and its value rules), `http-path.ts`, `http-rule.ts`, `http-transcoder.ts`, `http-client.ts` and `rpc-status.ts` (the HTTP runtime, [HTTP APIs](#http-apis)), `page-token.ts` and `filter.ts` (AIP-158 page tokens and the AIP-160 subset for list methods), `protobuf.ts` / `protobuf-wkt.ts` (the runtime re-exports). Generated: every directory (`ts/todofy/...`, `ts/lab/...`, `ts/ops/...`, `ts/common/...`, `ts/google/...`): protobuf-es's `*_pb.ts`, and for the packages of `WIRE_PACKAGES` the wire JSON types `*_wire.ts` |
 | `python/` | The Python package `ziyixi-proto`. Committed: `pyproject.toml` (static metadata, uv cache keys), `build_backend.py`, `src/ziyixi_proto/__init__.py` and `wire_json.py` (the codec and its value rules). Generated: every directory under `src/ziyixi_proto/`, for the packages `tools/gen_py.py` lists in `PYTHON_PACKAGES` only; the wheel leaves the test-only ones out (`TEST_ONLY_PACKAGES`) |
 | `tools/ensure.mjs` | Installs the pinned toolchain when `node_modules/` does not match the lockfile, and generates both languages when its stamp (`.generated.json`, ignored) does not match |
-| `tools/gen_py.py` | The stdlib-only Python generator (frozen dataclasses, `IntEnum`s, field tables; a field named like a Python keyword is the attribute `<name>_`, `from_`), for `PYTHON_PACKAGES` only: `todofy.taskintent.v1`, `todofy.report.v1`, `ops.v1`, `mailhero.webhook.v1` and `todofy.ui.v1` (todofy-core imports all five) and `prototest.v1` (this folder's Python tests). A package only TypeScript apps use (another app's UI API) is not generated, so it may use what the Python profile lacks |
+| `tools/gen_py.py` | The stdlib-only Python generator (frozen dataclasses, `IntEnum`s, field tables; a field named like a Python keyword is the attribute `<name>_`, `from_`), for `PYTHON_PACKAGES` only: `todofy.taskintent.v1`, `todofy.report.v1`, `ops.v1`, `mailhero.webhook.v1` and `todofy.ui.v1` (todofy-core imports all five); `platform.runtime.v1`, `fleet.telemetry.v1` and `common.errors.v1` (the VPS package); and `prototest.v1` (this folder's Python tests). A package only TypeScript apps use (another app's UI API) is not generated, so it may use what the Python profile lacks |
 | `tools/gen_wire_ts.py` | The TypeScript wire JSON types (`ts/<package>/<file>_wire.ts`, types only) of the packages in `WIRE_PACKAGES` (`ops.v1`, `todofy.report.v1` and `todofy.ui.v1` for Todofy's UI and the fixtures of its tests, and `dashboard.ui.v1`, whose views the dashboard's Worker builds and its UI renders as wire JSON): each message's JSON as a producer writes it, a union narrowed by its discriminator, a type of another file of these packages as a type-only import of that file's module, each service as a binding's methods (none for a service with `google.api.http` bindings: an HTTP API is called through the client), and the `WireTypes` entries that type `toWire`'s answer |
 | `tools/gen_schema.py`, `tools/schema.mjs` | A contract's JSON Schema from its IDL (`SCHEMAS`: `ops.v1` writes the `$defs` document `contracts/ops-v1/ops-v1.schema.json`, with `ALIASES` keeping the `$defs` names it had before; `todofy.report.v1` writes `todofy/api/summary-v1.schema.json` and `recommendation-v1.schema.json`, each the self-contained schema of one message, `Target.root`, described by the IDL's comments; a target marked
 `Target.open` is a consumer's schema, every object open to unknown properties as a lenient read is, and the relations
@@ -760,3 +760,31 @@ rules can move into its IDL the same way, generating its schema too. Shared type
 `common/<name>/v1` package. Each contract moves the way task-intent-v1 did: the IDL and tests first, then
 both sides on the generated code with every frozen v1 byte pinned by tests (Mail Hero's legacy fixtures are
 pinned by SHA-256; Todofy pins the canonical hashes of the task-intent fixtures, which D1 keeps for 400 days).
+
+## Personal-cloud Python runtime
+
+`platform/runtime/v1` is the bounded observation and deployment API of the independent `platform` VPS package. Its
+`NodeStatus` and configured `WorkloadStatus` observations embed one shared `ReleaseStatus` with distinct
+verified desired/actual identities. `fleet/telemetry/v1` embeds this `NodeStatus` directly in its bounded
+signed host receipt; it does not copy release fields. Both packages are shipped in the shared Python package,
+and both have generated TypeScript wire types. Contract and privacy/evidence semantics are in
+[platform-runtime-v1](../contracts/platform-runtime-v1/README.md).
+
+The VPS package depends on `ziyixi-proto` through the plain local `../proto/python` path, like the Python
+Worker. Its independently released OCI image includes generated code, the shared stdlib codec runtime
+and locked application libraries. Kubernetes runs the daemon and a five-minute observer CronJob; the
+production host needs no application Python packages, standalone executable, Node.js or `.proto` compiler.
+The Linux amd64 image supplies Python 3.12; its build runs this pinned toolchain first. A code/image change
+is separate from Newsletter's image/release.
+
+Python HTTP services get a generated `HTTP_BINDINGS` table in each `*_service_pb` module. Entries contain
+RPC identity, verb/path template and generated request/response classes. Shared `http_routes` matches and
+strictly decodes bounded GET and generated body/query mutation bindings; `decode_json_body` refuses
+duplicate JSON keys before the typed decoder. The server authenticates/rates/bounds its transport and dispatches
+the typed request. Shared `rpc_status` emits the same fixed Google HTTP JSON errors as the TypeScript
+runtime. This metadata and error transport are shared machinery, not application-maintained routes or
+DTOs. Profile tests pin generated routes, bounds/null behavior and both runtimes' Google error tables.
+
+Production dependency checks follow `.proto` import closure as well as direct generated-module imports:
+embedding a shared descriptor compiles its dependencies into the bundle. Changing platform runtime can
+therefore reach Fleet even when its source imports only `HostReport` or `FleetStatus`.

@@ -632,3 +632,28 @@ the newer variants). A rollback of any one Worker is safe in both directions for
 - Whether a service-binding call counts as a request of the callee on Workers Free is to be checked
   against Cloudflare's current pricing page when the dashboard is built (not verified here); at the
   documented polling rate it is under 400 calls a day per app either way.
+
+
+## Fleet and the VPS Newsletter monitor (2026-10-02, additive)
+
+Worker `fleet` exports `Ops` (app `fleet`) and `NewsletterOps` (app `newsletter`). Home binds
+`FLEET` and `NEWSLETTER` respectively; the second is an explicit external status provider for the
+VPS application, rather than a second Newsletter Worker. Both expose `status()` only for practical
+use, advertise no capabilities, and return `invalid_input` for `setGuard`. Home never forwards
+guard writes to either binding.
+
+`FleetState` reads a single latest signed host report. It computes freshness at read time and leaves
+never-seen, stale and missing observations degraded. Replaying identical latest bytes does not
+refresh the receive timestamp. Counters from stale business observations are omitted; unknown
+counts remain unknown rather than guessed as zero. A recent healthy process without current
+generic runtime evidence cannot make Newsletter or its release healthy.
+
+The generic runtime message comes from `proto/platform/runtime/v1`; it carries independent desired
+and actual release identities. Fleet imports that message rather than creating a second release
+DTO. `deployment_pending` includes an unverified/missing release daemon. Process health and a
+verified running image do not prove a model, Notion write or mail operation succeeded.
+
+Fleet counters: `heartbeat_age_seconds`, optional `disk_used_percent`, `memory_used_percent`.
+Newsletter counters: `heartbeat_age_seconds`, optional `queued_count`, `inflight_count`,
+`unknown_count`. Only fresh metadata is projected. `last_backup_at` stays null: no backup is
+inferred from a healthy heartbeat.

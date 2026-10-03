@@ -46,6 +46,7 @@ locals {
   owner_apps = {
     # BEGIN service-catalog owner
     "home"      = { name = "Home", domain = "home.ziyixi.science", more = [], session = "24h" }
+    "fleet"     = { name = "Fleet", domain = "fleet.ziyixi.science", more = [], session = "24h" }
     "lab"       = { name = "Lab", domain = "lab.ziyixi.science", more = [], session = "24h" }
     "links"     = { name = "links", domain = "s.ziyixi.science/_/*", more = ["s.ziyixi.science/_"], session = "168h" }
     "mail-hero" = { name = "Mail Hero", domain = "mail-hero.ziyixi.science", more = [], session = "24h" }
@@ -75,6 +76,40 @@ resource "cloudflare_zero_trust_access_application" "owner" {
     { id = cloudflare_zero_trust_access_policy.owner.id, precedence = 1 },
     { id = cloudflare_zero_trust_access_policy.github_owner.id, precedence = 2 },
   ]
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+# --- Fleet machine receipt ---------------------------------------------------------------------------
+# Only the exact receipt path bypasses interactive Access. The Worker independently verifies the
+# content-free signed POST receipt and rejects every other method/path; no owner API is bypassed.
+resource "cloudflare_zero_trust_access_policy" "fleet_receipt" {
+  account_id = var.account_id
+  name       = "Fleet signed receipt only"
+  decision   = "bypass"
+  include    = [{ everyone = {} }]
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+resource "cloudflare_zero_trust_access_application" "fleet_receipt" {
+  account_id                  = var.account_id
+  name                        = "Fleet machine receipt"
+  type                        = "self_hosted"
+  domain                      = "${local.fleet_hostname}/api/internal/fleet/v1/receipt"
+  destinations                = [{ type = "public", uri = "${local.fleet_hostname}/api/internal/fleet/v1/receipt" }]
+  allow_authenticate_via_warp = false
+  app_launcher_visible        = false
+  auto_redirect_to_identity   = false
+  enable_binding_cookie       = false
+  http_only_cookie_attribute  = true
+  options_preflight_bypass   = false
+  session_duration            = "24h"
+  policies                    = [{ id = cloudflare_zero_trust_access_policy.fleet_receipt.id, precedence = 1 }]
 
   lifecycle {
     prevent_destroy = true

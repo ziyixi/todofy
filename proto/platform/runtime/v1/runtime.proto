@@ -1,0 +1,369 @@
+// Content-free runtime observations of explicitly configured personal-cloud workloads.
+syntax = "proto3";
+package platform.runtime.v1;
+
+import "common/wire/v1/wire.proto";
+import "google/api/field_behavior.proto";
+import "google/api/field_info.proto";
+import "google/api/resource.proto";
+import "google/protobuf/timestamp.proto";
+
+option java_multiple_files = true;
+option java_outer_classname = "RuntimeProto";
+option java_package = "science.ziyixi.platform.runtime.v1";
+option (common.wire.v1.formats) = {
+  name: "WorkloadKey"
+  pattern: "[a-z][a-z0-9-]{0,31}"
+  description: "Stable configured workload alias, never a hostname, path or Kubernetes object name."
+};
+option (common.wire.v1.formats) = {
+  name: "SourceSha"
+  pattern: "[0-9a-f]{40}"
+  description: "Git source commit identity."
+};
+option (common.wire.v1.formats) = {
+  name: "ImageDigest"
+  pattern: "sha256:[0-9a-f]{64}"
+  description: "Immutable image digest, with no registry, repository or mutable tag."
+};
+option (common.wire.v1.formats) = {
+  name: "RequestId"
+  pattern: "[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}"
+  description: "UUID4 release request identity, unrelated to business run IDs."
+};
+option (common.wire.v1.formats) = {
+  name: "WorkloadName"
+  pattern: "workloads/[a-z][a-z0-9-]{0,31}"
+  description: "A configured workload resource name."
+};
+option (common.wire.v1.formats) = {
+  name: "ReleaseName"
+  pattern: "releases/[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}"
+  description: "Immutable UUID4 release resource name."
+};
+option (common.wire.v1.formats) = {
+  name: "ReleaseEtag"
+  pattern: "[A-Za-z0-9_-]{1,128}"
+  description: "Opaque bounded concurrency token."
+};
+option (common.wire.v1.formats) = {
+  name: "ReleaseErrorCode"
+  pattern: "[A-Z][A-Z0-9_]{0,63}"
+  description: "Safe fixed diagnostic code, never provider errors, paths or content."
+};
+
+// Source and physical image identity of a desired or independently verified actual release.
+message ReleaseTarget {
+  // Stable public workload alias.
+  string workload_key = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "WorkloadKey"
+  ];
+  // Source identity from the release target, or verified running-image provenance for actual.
+  string source_sha = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "SourceSha"
+  ];
+  // Immutable target digest, or independently observed physical running digest for actual.
+  string image_digest = 3 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "ImageDigest"
+  ];
+  // Identity of the specific release request.
+  string request_id = 4 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "RequestId",
+    (google.api.field_info).format = UUID4
+  ];
+  // Kubernetes desired generation when observed. Absent means unavailable; never a synthetic zero.
+  optional int32 generation = 5 [(common.wire.v1.field).minimum = 1];
+}
+
+// A live release observation. Desired identity alone never proves what is running.
+message ReleaseStatus {
+  // Missing means no configured target/object; unknown means evidence could not be verified.
+  string state = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field) = {
+      allowed: [
+        "missing",
+        "unknown",
+        "pending",
+        "ready",
+        "paused",
+        "degraded"
+      ]
+    }
+  ];
+  // Configuration-selected desired release. Null when no trustworthy target is available.
+  optional ReleaseTarget desired = 2 [(google.api.field_behavior) = REQUIRED];
+  // Actual identity, only after physical digest and running-image build provenance are verified.
+  // Null on missing, stale or inconsistent evidence. Never copied from desired spec or annotations.
+  optional ReleaseTarget actual = 3 [(google.api.field_behavior) = REQUIRED];
+  // Time this daemon observed or attempted to observe the release.
+  // (-- api-linter: core::0140::prepositions=disabled
+  //     aip.dev/not-precedent: The versioned runtime contract explicitly names attempted observation time observed_at. --)
+  // (-- api-linter: core::0142::time-field-names=disabled
+  //     aip.dev/not-precedent: Preserve the shared runtime observation field spelling across adapters. --)
+  google.protobuf.Timestamp observed_at = 4 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).non_null = true
+  ];
+  // Kubernetes status.observedGeneration, absent when missing, malformed or unavailable.
+  optional int32 observed_generation = 5 [(common.wire.v1.field).minimum = 1];
+}
+
+// One configured workload's process, admission and health observations are independent dimensions.
+message WorkloadStatus {
+  // (-- api-linter: core::0123::resource-singular=disabled
+  //     aip.dev/not-precedent: Stable workload addresses use workload aliases; this message explicitly names the observed status rather than a deployable workload object. --)
+  option (google.api.resource) = {
+    type: "platform.ziyixi.science/WorkloadStatus"
+    pattern: "workloads/{workload}"
+    singular: "workload"
+    plural: "workloads"
+  };
+  // Always workloads/{workload_key}.
+  string name = 1 [
+    (google.api.field_behavior) = IDENTIFIER,
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "WorkloadName"
+  ];
+  // Stable configured alias. An adapter maps it to private provider object names.
+  string workload_key = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "WorkloadKey"
+  ];
+  // Process existence and readiness, without claiming business success.
+  string process_state = 3 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field) = {
+      allowed: [
+        "running",
+        "starting",
+        "stopped",
+        "missing",
+        "unknown"
+      ]
+    }
+  ];
+  // Whether the workload admits new work. Unsupported is explicit for an adapter without this capability.
+  string admission_state = 4 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field) = {
+      allowed: [
+        "accepting",
+        "draining",
+        "frozen",
+        "unsupported",
+        "unknown"
+      ]
+    }
+  ];
+  // Application health from its configured adapter, independent of process/admission state.
+  string health_state = 5 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field) = {
+      allowed: [
+        "healthy",
+        "degraded",
+        "unhealthy",
+        "unsupported",
+        "unknown"
+      ]
+    }
+  ];
+  // Independently verified release observation, including explicit missing/unknown states.
+  ReleaseStatus release = 6 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).non_null = true
+  ];
+  // Time of the workload observation, including an unavailable adapter result.
+  // (-- api-linter: core::0140::prepositions=disabled
+  //     aip.dev/not-precedent: The versioned runtime contract explicitly names attempted observation time observed_at. --)
+  // (-- api-linter: core::0142::time-field-names=disabled
+  //     aip.dev/not-precedent: Preserve the shared runtime observation field spelling across adapters. --)
+  google.protobuf.Timestamp observed_at = 7 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).non_null = true
+  ];
+  // Work in progress, when supported. Omitted does not mean zero.
+  optional int32 active_count = 8 [(common.wire.v1.field) = {
+    minimum: 0
+    maximum: 1000
+  }];
+  // Unreconciled business operations, when supported. Omitted does not mean zero.
+  optional int32 unknown_count = 9 [(common.wire.v1.field) = {
+    minimum: 0
+    maximum: 1000
+  }];
+  // Next due business work, null or absent when the adapter cannot determine it.
+  // (-- api-linter: core::0140::prepositions=disabled
+  //     aip.dev/not-precedent: This adapter capability uses the existing workload due-time field spelling. --)
+  // (-- api-linter: core::0142::time-field-names=disabled
+  //     aip.dev/not-precedent: Preserve the shared adapter field spelling next_due_at. --)
+  google.protobuf.Timestamp next_due_at = 10 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// One durable asynchronous deployment. Only targets are accepted during creation; the daemon rejects
+// supplied output-only fields. Empty targets, duplicate keys and target/request identity mismatch are invalid.
+message Release {
+  option (google.api.resource) = {
+    type: "platform.ziyixi.science/Release"
+    pattern: "releases/{release}"
+    singular: "release"
+    plural: "releases"
+  };
+  // Server-assigned resource name from the caller-selected release UUID4.
+  string name = 1 [
+    (google.api.field_behavior) = IDENTIFIER,
+    (common.wire.v1.field).format = "ReleaseName"
+  ];
+  // Creation request UUID4. Every frozen target must carry this same identity.
+  string request_id = 2 [
+    (google.api.field_behavior) = OUTPUT_ONLY,
+    (google.api.field_info).format = UUID4,
+    (common.wire.v1.field).format = "RequestId"
+  ];
+  // One to sixteen unique configured aliases. The server resolves private manifests and repositories.
+  repeated ReleaseTarget targets = 3 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.field_behavior) = IMMUTABLE,
+    (common.wire.v1.field).max_items = 16
+  ];
+  // Persisted phase; held/failed never silently resume after a restart or repeated create request.
+  string phase = 4 [
+    (google.api.field_behavior) = OUTPUT_ONLY,
+    (common.wire.v1.field) = {
+      allowed: [
+        "accepted",
+        "draining",
+        "frozen",
+        "applying",
+        "verifying",
+        "ready",
+        "held",
+        "failed"
+      ]
+    }
+  ];
+  // Current concurrency token. A resume requires the exact current token.
+  string etag = 5 [
+    (google.api.field_behavior) = OUTPUT_ONLY,
+    (common.wire.v1.field).format = "ReleaseEtag"
+  ];
+  // Original acceptance time, preserved on idempotent create and explicit resume.
+  google.protobuf.Timestamp create_time = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Last persisted transition time, including held/failed.
+  google.protobuf.Timestamp update_time = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Bounded latest observations of only this operation's targets; unavailable evidence stays unknown.
+  // (-- api-linter: core::0122::embedded-resource=disabled
+  //     aip.dev/not-precedent: The operation returns a bounded atomic observation of its frozen target aliases. --)
+  repeated WorkloadStatus observed_workloads = 8 [
+    (google.api.field_behavior) = OUTPUT_ONLY,
+    (common.wire.v1.field).max_items = 16
+  ];
+  // Safe fixed reason for a held/failed release; raw exceptions and provider responses are forbidden.
+  optional string error_code = 9 [
+    (google.api.field_behavior) = OUTPUT_ONLY,
+    (common.wire.v1.field).format = "ReleaseErrorCode"
+  ];
+}
+
+// Lightweight operation identity in node observations. Targets and workload observations are not duplicated.
+// (-- api-linter: core::0123::resource-annotation=disabled
+//     aip.dev/not-precedent: A bounded summary references an existing Release; it is not a second resource. --)
+message ReleaseSummary {
+  // Current operation resource name.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "platform.ziyixi.science/Release",
+    (common.wire.v1.field).format = "ReleaseName"
+  ];
+  // Original creation request UUID4.
+  string request_id = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.field_info).format = UUID4,
+    (common.wire.v1.field).format = "RequestId"
+  ];
+  // Persisted operation phase, independent of process health or observation freshness.
+  string phase = 3 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field) = {
+      allowed: [
+        "accepted",
+        "draining",
+        "frozen",
+        "applying",
+        "verifying",
+        "ready",
+        "held",
+        "failed"
+      ]
+    }
+  ];
+  // Current operation concurrency token.
+  string etag = 4 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "ReleaseEtag"
+  ];
+  // Last persisted transition time.
+  google.protobuf.Timestamp update_time = 5 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).non_null = true
+  ];
+  // Safe fixed diagnostic alias; no exception or provider error string.
+  optional string error_code = 6 [(common.wire.v1.field).format = "ReleaseErrorCode"];
+}
+
+// A bounded singleton node snapshot. No hostname, IP, raw provider objects, credentials or logs.
+message NodeStatus {
+  option (google.api.resource) = {
+    type: "platform.ziyixi.science/NodeStatus"
+    pattern: "nodeStatus"
+    singular: "nodeStatus"
+    plural: "nodeStatuses"
+  };
+  // Always nodeStatus.
+  string name = 1 [
+    (google.api.field_behavior) = IDENTIFIER,
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).allowed = "nodeStatus"
+  ];
+  // Public configured node alias, unrelated to the machine's hostname.
+  string node_key = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "WorkloadKey"
+  ];
+  // Node availability based on the current bounded observation, not the receipt's transport success.
+  string state = 3 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field) = {
+      allowed: [
+        "ready",
+        "degraded",
+        "unavailable",
+        "unknown",
+        "missing"
+      ]
+    }
+  ];
+  // Snapshot observation time; consumer freshness is computed independently.
+  // (-- api-linter: core::0140::prepositions=disabled
+  //     aip.dev/not-precedent: The versioned runtime contract explicitly names attempted observation time observed_at. --)
+  // (-- api-linter: core::0142::time-field-names=disabled
+  //     aip.dev/not-precedent: Preserve the shared runtime observation field spelling across adapters. --)
+  google.protobuf.Timestamp observed_at = 4 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).non_null = true
+  ];
+  // Only explicitly configured workloads; unique keys, sorted by key. Maximum sixteen.
+  // (-- api-linter: core::0122::embedded-resource=disabled
+  //     aip.dev/not-precedent: A bounded atomic node observation intentionally embeds its selected workload snapshots. --)
+  repeated WorkloadStatus workloads = 5 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).max_items = 16
+  ];
+  // Current persisted operation summary, absent when no operation has been accepted.
+  ReleaseSummary current_release = 6;
+}

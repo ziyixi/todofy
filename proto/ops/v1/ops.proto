@@ -167,7 +167,9 @@ message OpsStatus {
         "mail-hero",
         "todofy",
         "lab",
-        "watch"
+        "watch",
+        "fleet",
+        "newsletter"
       ]
       open: true
     }

@@ -50,7 +50,7 @@ Nothing unrelated is imported, declared, read or modelled, not even read-only.
 [`test_infra_guard.py`](../.github/scripts/test_infra_guard.py) tests the guard itself against
 configurations built to slip past it.
 
-### Managed here (19 objects)
+### Managed here (28 objects)
 
 | Address | Object | Notes |
 | --- | --- | --- |
@@ -62,6 +62,9 @@ configurations built to slip past it.
 | `cloudflare_zero_trust_access_application.owner["lab"]` | Access app "Lab" | `lab.ziyixi.science` |
 | `cloudflare_zero_trust_access_application.owner["links"]` | Access app "links" | `s.ziyixi.science/_/*` and the exact `s.ziyixi.science/_` (the launcher and owner API), session 168h, the two shared policies. The rest of the host (the short links) is deliberately not behind Access (links/docs/design.md) |
 | `cloudflare_zero_trust_access_application.owner["watch"]` | Access app "watch" | `watch.ziyixi.science` (the whole host), session 24h, the two shared policies. **Created** here before the watch app's first deploy, not imported ([Adding an app](#adding-an-app)) |
+| `cloudflare_zero_trust_access_application.owner["fleet"]` | Access app "Fleet" | Whole Fleet owner host; created before the Worker so its real AUD can be recorded |
+| `cloudflare_zero_trust_access_application.fleet_receipt` | Fleet machine receipt | Only the exact `/api/internal/fleet/v1/receipt` path; Worker independently validates signed POST receipts |
+| `cloudflare_zero_trust_access_policy.fleet_receipt` | Fleet signed receipt only | Bypass policy attached only to the exact receipt application; no owner API bypass |
 | `cloudflare_zero_trust_access_application.mail_hero_backup` | Access app "Mail Hero backup API" | `mail-hero.ziyixi.science/api/internal/backup/*`. Used by the backup collector's machine identity (mail-hero/AGENTS.md §7). **Frozen**: an apply refuses any write to it ([Apply](#apply-p4)) |
 | `cloudflare_zero_trust_access_application.flowday["flowday"]` | Access app "flowday" | `flowday.ziyixi.science`, session 168h, FlowDay's own policy by id. See [FlowDay](#flowday) |
 | `cloudflare_zero_trust_access_application.flowday["flowday-bypass"]` | Access app "flowday-bypass" | `flowday.ziyixi.science/pwa/*` (and the staging host's), session 6h, FlowDay's own policy by id. See [FlowDay](#flowday) |

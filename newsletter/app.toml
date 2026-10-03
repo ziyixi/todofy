@@ -7,7 +7,7 @@ image = "ghcr.io/ziyixi/todofy-newsletter"
 [[entries]]
 id = "newsletter"
 name = "Newsletter"
-description = "家中服务器；每日读取 Todofy 报告写入 Notion"
+description = "VPS 后台任务；每日读取 Todofy 报告写入 Notion"
 group = "services"
 icon = "newspaper"
 accent = "amber"
@@ -16,4 +16,7 @@ app_only_signals = []
 order = 2
 position = 9
 [entries.status]
-type = "none"
+type = "ops_v1"
+provider = "fleet"
+binding = "NEWSLETTER"
+guard = false

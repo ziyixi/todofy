@@ -1,0 +1,37 @@
+{
+  "name": "nodeStatus",
+  "node_key": "vps",
+  "state": "ready",
+  "observed_at": "2026-10-03T00:00:00Z",
+  "workloads": [
+    {
+      "name": "workloads/newsletter",
+      "workload_key": "newsletter",
+      "process_state": "running",
+      "admission_state": "accepting",
+      "health_state": "healthy",
+      "release": {
+        "state": "ready",
+        "desired": {
+          "workload_key": "newsletter",
+          "source_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "image_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "request_id": "11111111-2222-4333-8444-555555555555",
+          "generation": 7
+        },
+        "actual": {
+          "workload_key": "newsletter",
+          "source_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "image_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "request_id": "11111111-2222-4333-8444-555555555555",
+          "generation": 7
+        },
+        "observed_at": "2026-10-03T00:00:00Z",
+        "observed_generation": 7
+      },
+      "observed_at": "2026-10-03T00:00:00Z",
+      "active_count": 0,
+      "unknown_count": 0
+    }
+  ]
+}

@@ -9,7 +9,7 @@ index of those files, not a runtime service or a second infrastructure controlle
 | The application's committed `wrangler.toml` | Worker name, Custom Domains, resources, bindings, ordinary configuration |
 | `infra/*.tf` outside the marked catalog regions | Resource identities, policy attachment, `prevent_destroy`, storage existence, outputs, encrypted state and provider configuration |
 | GitHub's production environment and application deploy wrappers | Secret values and operational switches |
-| Newsletter's release tooling | Tested image artifact, source SHA and published immutable digest; the catalog records only the image repository |
+| VPS image release tooling | Independently tested Newsletter/Platform artifacts, source SHA and immutable digests; the catalog records only each image repository |
 
 The catalog contains no email address, account or resource ID, IP address, credential, private endpoint,
 operational switch or production state. It never reads `.env`, private configuration, credentials or an
@@ -43,10 +43,10 @@ missing or ambiguous. Commit the manifests and generated literal regions togethe
 nothing and fails when either output is stale. Production code imports the generated TypeScript
 literals, never Python tooling or another application's package.
 
-The initial catalog covers eight Cloudflare applications and ten Workers, plus Newsletter as a VPS
-application. Tests compare every generated Home entry and Worker role with the public metadata from
-before this change, and retain the existing infrastructure and host guards. These checks prove source
-consistency; they do not verify live Cloudflare resources or a deployed VPS.
+The committed manifests are the inventory of Cloudflare and VPS applications; `--check` prints its
+derived application/Worker counts. Tests compare generated Home entries, Worker roles and Access
+destinations with those manifests and retain independent infrastructure/host guards. These checks
+prove source consistency, not live Cloudflare resources or a deployed VPS.
 
 ## Manifest shape
 
@@ -105,11 +105,11 @@ Each entry has one status kind:
 
 | Kind | Fields and meaning |
 | --- | --- |
-| `ops_v1` | `binding`, `guard`; binding must already name the same Worker and its `Ops` entrypoint in Home's Wrangler config |
+| `ops_v1` | `binding`, `guard`; binding must already name the same Worker's `Ops` entrypoint in Home's Wrangler config. The explicit Newsletter `provider = "fleet"` case requires `NEWSLETTER` to name Fleet's `NewsletterOps`. |
 | `public_http` | `path`, nonempty 2xx `expect`, boolean `enabled`; optional `content_type`, `outside_access`, `error_rate` |
 | `analytics` | `max_idle_hours`, an integer from 1 to 168; existing traffic-based activity signal |
 | `self` | Home's own status |
-| `none` | No collector exists; it must not imply health |
+| `none` | No direct Home status method for this entry; it must not imply health |
 
 Optional `tile_metric` is `counter` plus a counter `name`, `latency`, or `last_active`. `app_only_signals`
 lists existing public counter names that stay in the detail view. This metadata does not add a new
@@ -117,22 +117,31 @@ signal or collector. In particular, FlowDay's probe still reads its public PWA m
 manifest content type, and keeps the Worker error-rate signal. It does not probe the authenticated
 owner page or a retired staging hostname.
 
-Newsletter uses `target = "vps"`, `image = "ghcr.io/ziyixi/todofy-newsletter"`, no `workers` or `access`, and its
-existing Home entry with `status.type = "none"`. The image field identifies the repository, not a tag
-to run. Release and deployment status, heartbeat transport and Kubernetes manifests are separate
-contracts; this phase does not invent a scheduler or a second Newsletter state database.
+Newsletter uses `target = "vps"`, its image repository and no `workers` or `access`. Its Home entry uses
+`ops_v1` through the exact Fleet provider/binding above, with `guard = false`. This reports the latest
+bounded Newsletter business snapshot without Home reaching the VPS or storing a second business ledger.
+Platform is a separate VPS image application with a hidden `platform-runtime` entry and `status.type = "none"`;
+Fleet displays the shared runtime node/workload/release status. Both image fields identify repositories,
+never mutable deployment tags. Release targets, heartbeat transport and Kubernetes manifests belong to
+their [architecture/contracts](architecture.md), not to the catalog.
+
+Hostname and image-owner validation use the public profile in [`config/cloud.toml`](../config/cloud.toml).
+Personal settings and resource identities still do not belong in manifests. A provider field is not a
+general cross-application escape hatch: the schema allows only the explicit checked Newsletter/Fleet case.
 
 ## Generated outputs and consumers
 
 [`dashboard/worker/src/registry.ts`](../dashboard/worker/src/registry.ts) receives the catalog's Home
-entries and Worker-to-entry mapping. Its external self-hosted-services entry, resource identifiers,
-flows and runtime behavior remain explicitly maintained outside these regions.
+entries and Worker-to-entry mapping. Its external self-hosted-services entry, flows and runtime behavior
+remain explicitly maintained outside these regions. The independent cloud-config generator owns public
+[`resource-identities.ts`](../dashboard/worker/src/resource-identities.ts), consumed outside catalog regions.
 
-[`infra/access.tf`](../infra/access.tf) receives the existing owner application map, plus destinations
-and session durations for the two existing FlowDay applications. It preserves their Terraform
-addresses, policy IDs and `prevent_destroy`. It does not take over policy rules, the frozen Mail Hero
-backup application, identity providers or secret values. An actual Access change still requires the
-normal reviewed OpenTofu plan and gated apply; generation itself performs neither.
+[`infra/access.tf`](../infra/access.tf) receives the owner application map, including Fleet, plus destinations
+and session durations for the two FlowDay applications. It preserves Terraform addresses, policy attachments
+and `prevent_destroy`. Policy rules, Fleet's exact machine receipt bypass with independent HMAC authentication,
+the frozen Mail Hero backup application and Platform's separate machine/Tunnel objects stay explicitly
+maintained outside catalog regions. The catalog does not take over identity providers or secret values.
+An actual Access change requires the normal reviewed OpenTofu plan and gated apply; generation performs neither.
 
 The Wrangler safety checks, desired-drift comparison and infrastructure output check read the same
 Worker-config map from the catalog. Their independent host, secret, resource and provider guards
@@ -153,9 +162,11 @@ catalog.workers                # normalized Worker mapping, in position order
 catalog.access                 # public paths plus Wrangler-derived destinations
 ```
 
-CI may use `apps` to distinguish Cloudflare checks from VPS image checks. Newsletter must not enter
-Worker hostname guards, Wrangler deploy steps or the OpenTofu resource set. Its CI prefix is
-`newsletter`; existing output prefixes remain unchanged, including `mail_hero`.
+CI uses `apps` to distinguish Cloudflare checks from VPS image checks. Newsletter and Platform must not enter
+Worker hostname guards or Wrangler deploy steps. Platform's separately declared machine infrastructure is
+owned by infra, rather than inferred from its image manifest. CI prefixes are `newsletter` and `platform`;
+existing output prefixes remain unchanged, including `mail_hero`. A VPS release publishes both independently
+tested images of the same SHA; changing a catalog row alone does not start that release.
 
 ## Adding or changing a service
 

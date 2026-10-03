@@ -61,9 +61,9 @@ describe('the daily drift check', () => {
     expect(driftRequests(h)).toBe(12);
     expect((await view<CloudflareView>(h, 'cloudflare')).drift).toMatchObject({ status: 'never_checked', checked_at: null });
     await h.tick(start + 60 * MIN);
-    expect(driftRequests(h)).toBe(9);
+    expect(driftRequests(h)).toBe(12);
     const cloudflare = await view<CloudflareView>(h, 'cloudflare');
-    expect(cloudflare.drift).toMatchObject({ status: 'ok', in_progress: false, desired_workers: 10, findings: [], findings_omitted: 0, last_error: null });
+    expect(cloudflare.drift).toMatchObject({ status: 'ok', in_progress: false, desired_workers: 11, findings: [], findings_omitted: 0, last_error: null });
     expect(cloudflare.drift.checked_at).toBe(new Date(start + 60 * MIN).toISOString());
     const ops = await view<OpsView>(h, 'ops');
     expect(ops.digest.items.filter((item) => item.code === 'config_drift')).toEqual([]);

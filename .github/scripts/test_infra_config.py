@@ -74,13 +74,14 @@ PRODUCTION = {
     "flowday": "flowday/wrangler.toml",
     "links": "links/wrangler.toml",
     "watch": "watch/wrangler.toml",
+    "fleet": "fleet/wrangler.toml",
 }
-# Access applications created before their Worker's first deploy (infra/README.md "Adding an app"): Worker name -> the
-# whole host the application gates. The Worker's config is still test_wrangler_configs.py's UNDEPLOYED (no route, the
-# all-zeros AUD) and names that host as its PUBLIC_HOST. The commit of the first deploy commits the AUD and the Custom
-# Domain, moves the Worker to PRODUCTION and empties its entry here (test_ahead_of_deploy_is_exact). Empty since the
-# watch app's first deploy (W2).
-AHEAD_OF_DEPLOY: dict[str, str] = {}
+# Fleet's initial phase is explicit in ci_changes.CHECK_ONLY. Its sole production config already
+# describes the intended host, but carries no invented AUD and both Fleet/Home deploys stay disabled.
+# The activation commit records the real Access IDs/AUD and removes CHECK_ONLY in the same change.
+from cloud_profile import load_profile, load_resources  # noqa: E402
+AHEAD_OF_DEPLOY = ({"fleet": load_profile(REPO)["platform_hostname"]}
+                  if "fleet" in test_wrangler_configs.ci_changes.CHECK_ONLY else {})
 # Hosts an Access application may still list although no wrangler.toml declares them. Empty since FlowDay's F3
 # staging host left both FlowDay applications after the F4 cutover (README.md "FlowDay"); a rollback that adds a host
 # back to an application adds it here in the same commit (test_retiring_hosts_are_exact).
@@ -166,6 +167,12 @@ class Boundary(unittest.TestCase):
                 continue
             text = path.read_text(errors="replace")
             with self.subTest(path=path.relative_to(REPO).as_posix()):
+                if path.name == "platform-identity.tf":
+                    # The sole generated public zone identity is checked against its strict source;
+                    # account IDs still come only from var.account_id, and no other literal is allowed.
+                    from cloud_config_generate import platform_identity
+                    self.assertEqual(text, platform_identity(load_profile(REPO), load_resources(REPO)))
+                    text = text.replace(load_resources(REPO)["zone_id"], "ZONE_ID")
                 self.assertNotRegex(text, r"(?<![0-9a-f-])[0-9a-f]{32}(?![0-9a-f-])")
                 self.assertNotRegex(text, r"[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}")
         # State, plan and values files of any name: infra_guard.ALLOWED_FILES (test_the_guard_finds_nothing).
@@ -266,7 +273,7 @@ class MatchesTheApps(unittest.TestCase):
         flowday = self.flowday_apps(code)
         self.assertEqual(set(flowday), {"flowday", "flowday-bypass"})
         destinations.update({key: value for key, value in flowday.items()})
-        self.assertEqual(set(owner), {"mail-hero", "todofy", "home", "lab", "links", "watch", *AHEAD_OF_DEPLOY})
+        self.assertEqual(set(owner), {"mail-hero", "todofy", "home", "lab", "links", "watch", "fleet"})
         for key, uris in destinations.items():
             worker = "flowday" if key.startswith("flowday") else key
             if worker in AHEAD_OF_DEPLOY:
@@ -342,24 +349,36 @@ class MatchesTheApps(unittest.TestCase):
                 self.assertNotIn(host, code.split("# --- FlowDay")[0], "only FlowDay's applications may list it")
 
     def test_ahead_of_deploy_is_exact(self):
-        """An application created before its Worker's first deploy gates exactly that Worker's planned whole host: the
-        config is undeployed, has no route, names the host as PUBLIC_HOST and still carries the all-zeros AUD. Once the
-        first deploy's commit moves the Worker to PRODUCTION, its entry here is stale and fails."""
-        code = (INFRA / "access.tf").read_text()
-        owner = hcl_map(code, "owner_apps")
-        production_hosts = {route["pattern"] for worker in PRODUCTION for route in config(worker).get("routes", [])}
+        """First-phase Fleet has no fake AUD and cannot deploy before the gated Access creation."""
+        owner = hcl_map((INFRA / "access.tf").read_text(), "owner_apps")
+        self.assertEqual(set(AHEAD_OF_DEPLOY), set(test_wrangler_configs.ci_changes.CHECK_ONLY))
         for worker, host in AHEAD_OF_DEPLOY.items():
             with self.subTest(worker=worker):
-                self.assertNotIn(worker, PRODUCTION, "a stale entry: empty it in the first deploy's commit")
-                self.assertIn(worker, test_wrangler_configs.UNDEPLOYED)
-                with open(REPO / test_wrangler_configs.UNDEPLOYED[worker], "rb") as handle:
-                    undeployed = tomllib.load(handle)
-                self.assertEqual(undeployed["name"], worker)
-                self.assertFalse(undeployed.get("routes"))
-                self.assertEqual(undeployed["vars"]["PUBLIC_HOST"], host)
-                self.assertEqual(undeployed["vars"]["ACCESS_AUDIENCE"], "0" * 64)
-                self.assertIn(f'domain = "{host}", more = []', owner[worker], "the whole host, nothing more")
-                self.assertNotIn(host, production_hosts | RETIRING_HOSTS)
+                planned = config(worker)
+                self.assertEqual(worker, "fleet")
+                self.assertEqual(planned["name"], worker)
+                self.assertEqual(planned["vars"]["PUBLIC_HOST"], host)
+                self.assertNotIn("ACCESS_AUDIENCE", planned["vars"])
+                self.assertEqual(planned["routes"], [{"pattern": host, "custom_domain": True}])
+                self.assertIn(f'domain = "{host}", more = []', owner[worker])
+                for output in ("fleet_deploy", "dashboard_deploy"):
+                    self.assertFalse(test_wrangler_configs.ci_changes.everything()[output])
+
+    def test_fleet_receipt_bypasses_only_the_exact_signed_machine_path(self):
+        code = (INFRA / "access.tf").read_text()
+        application = re.search(r'resource "cloudflare_zero_trust_access_application" "fleet_receipt" \{(.*?)^\}',
+                                code, re.S | re.M).group(1)
+        policy = re.search(r'resource "cloudflare_zero_trust_access_policy" "fleet_receipt" \{(.*?)^\}',
+                           code, re.S | re.M).group(1)
+        exact = '${local.fleet_hostname}/api/internal/fleet/v1/receipt'
+        self.assertIn('domain                      = "' + exact + '"', application)
+        self.assertIn('uri = "' + exact + '"', application)
+        self.assertNotIn("*", application)
+        self.assertIn("cloudflare_zero_trust_access_policy.fleet_receipt.id", application)
+        self.assertIn('decision   = "bypass"', policy)
+        self.assertIn("include    = [{ everyone = {} }]", policy)
+        self.assertIn("app_launcher_visible        = false", application)
+        self.assertNotIn("fleet_receipt.id", code.split("# --- Fleet machine receipt")[0])
 
     def test_every_worker_that_checks_access_has_an_application_of_its_name(self):
         """The access_aud output is keyed by Worker name; a Worker whose ACCESS_AUDIENCE no application key matches

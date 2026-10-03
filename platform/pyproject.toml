@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools==84.0.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "todofy-personal-cloud"
+version = "0.1.0"
+description = "Bounded personal-cloud runtime observer and deployment daemon"
+requires-python = ">=3.12"
+dependencies = [
+  "ziyixi-proto",
+  "fastapi==0.141.1",
+  "uvicorn==0.52.4",
+  "httpx==0.28.1",
+  "kubernetes==36.0.3",
+  "jeepney==0.9.0",
+]
+
+[project.scripts]
+personal-cloud = "personal_cloud.__main__:main"
+
+[dependency-groups]
+dev = ["pytest==9.1.1", "ruff==0.16.6", "PyYAML==6.0.3"]
+
+[tool.uv.sources]
+ziyixi-proto = { path = "../proto/python" }
+
+[tool.setuptools.packages.find]
+where = ["src"]

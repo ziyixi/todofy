@@ -1,0 +1,6 @@
+.dev.vars
+.wrangler/
+web/dist/
+*.env
+!observer/observer.env.example
+node_modules/

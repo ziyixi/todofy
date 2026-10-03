@@ -38,7 +38,20 @@ ALLOWED_TYPES = frozenset({
     "cloudflare_zero_trust_access_policy",
     "cloudflare_d1_database",
     "cloudflare_r2_bucket",
+    "cloudflare_zero_trust_access_service_token",
+    "cloudflare_zero_trust_tunnel_cloudflared",
+    "cloudflare_zero_trust_tunnel_cloudflared_config",
+    "cloudflare_dns_record",
 })
+# New network resources are scoped by address as well as type. No unrelated DNS or tunnel is managed.
+PLATFORM_OBJECTS = frozenset({
+    "cloudflare_zero_trust_access_service_token.platform_deploy",
+    "cloudflare_zero_trust_tunnel_cloudflared.platform",
+    "cloudflare_zero_trust_tunnel_cloudflared_config.platform",
+    "cloudflare_dns_record.platform",
+})
+PLATFORM_TYPES = frozenset(address.split(".", 1)[0] for address in PLATFORM_OBJECTS)
+
 # Addresses an apply never writes to (infra_state.py FROZEN; test_infra_config.py keeps the two equal).
 FROZEN = frozenset({"cloudflare_zero_trust_access_application.mail_hero_backup"})
 TOP_LEVEL = frozenset({"terraform", "provider", "variable", "locals", "resource", "import", "output", "moved"})
@@ -293,11 +306,14 @@ def check(infra: Path) -> list[str]:
                 problems.append(f"{where}: only the cloudflare provider is configured here")
             elif block.type == "resource":
                 resources += 1
-                if len(block.labels) != 2 or block.labels[0] not in ALLOWED_TYPES:
+                if (len(block.labels) != 2 or block.labels[0] not in ALLOWED_TYPES
+                    or (block.labels[0] in PLATFORM_TYPES and ".".join(block.labels) not in PLATFORM_OBJECTS)):
                     problems.append(f"{where}: resource type outside the monorepo boundary (ALLOWED_TYPES)")
                 lifecycles = block.children("lifecycle")
                 if len(lifecycles) != 1 or not lifecycles[0].is_true("prevent_destroy"):
                     problems.append(f"{where}: resource without its own lifecycle {{ prevent_destroy = true }}")
+            if block.type == "output" and block.labels == ["platform_bootstrap"] and not block.is_true("sensitive"):
+                problems.append(f"{where}: platform bootstrap output must be sensitive")
             if block.type == "moved" and any(_reference(block.attrs.get(side, [])) in FROZEN for side in ("from", "to")):
                 problems.append(f"{where}: a moved block names a FROZEN address; it must never be renamed")
             if block.type == "output" and _reads_a_variable(block):

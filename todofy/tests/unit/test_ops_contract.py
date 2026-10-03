@@ -27,10 +27,10 @@ from tests import mail_contract
 ROOT = mail_contract.TODOFY.parent / "contracts" / "ops-v1"
 SCHEMA = json.loads((ROOT / "ops-v1.schema.json").read_text())
 LEGACY = json.loads((ROOT / "legacy" / "ops-v1.schema.json").read_text())
-# The apps that joined ops-v1 after the hand-written schema was frozen (OpsStatus.app is an open list): the watch app,
-# 2026-10-01. No dashboard that validates with the legacy schema binds one, so the legacy schema is compared with the
+# The apps that joined ops-v1 after the hand-written schema was frozen (OpsStatus.app is an open list): Watch,
+# Fleet and Newsletter. No dashboard that validates with the legacy schema binds one, so it is compared with the
 # generated one as if its App list had grown the same way; that is the only difference allowed.
-JOINED_APPS = ["watch"]
+JOINED_APPS = ["watch", "fleet", "newsletter"]
 LEGACY_GROWN = {
     **LEGACY,
     "$defs": {**LEGACY["$defs"], "App": {"enum": [*LEGACY["$defs"]["App"]["enum"], *JOINED_APPS]}},

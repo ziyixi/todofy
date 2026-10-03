@@ -35,6 +35,8 @@ function contractSignals(): Record<string, string[]> {
     todofy: [...every, ...row('Todofy')],
     lab: [...every, ...row('Lab')],
     watch: [...every, ...row('watch')],
+    fleet: row('Fleet'),
+    newsletter: row('Newsletter'),
   };
 }
 
@@ -74,10 +76,10 @@ describe('the registry', () => {
 
   it('registers the entries of the design, in their groups and order', () => {
     const byGroup = (group: string) => REGISTRY.entries.filter((e) => e.group === group).sort((a, b) => a.order - b.order).map((e) => e.id);
-    expect(byGroup('apps')).toEqual(['mail-hero', 'todofy', 'lab', 'flowday', 'links', 'watch']);
+    expect(byGroup('apps')).toEqual(['mail-hero', 'todofy', 'lab', 'flowday', 'links', 'watch', 'fleet']);
     expect(byGroup('sites')).toEqual(['website']);
     expect(byGroup('services')).toEqual(['notion-publish', 'newsletter']);
-    expect(byGroup('hidden')).toEqual(['home', 'self-hosted']);
+    expect(byGroup('hidden')).toEqual(['home', 'self-hosted', 'platform-runtime']);
     const status = Object.fromEntries(REGISTRY.entries.map((e) => [e.id, e.status.type]));
     expect(status).toEqual({
       'mail-hero': 'ops_v1',
@@ -88,9 +90,11 @@ describe('the registry', () => {
       watch: 'ops_v1',
       website: 'public_http',
       'notion-publish': 'analytics',
-      newsletter: 'none',
+      newsletter: 'ops_v1',
+      fleet: 'ops_v1',
       home: 'self',
       'self-hosted': 'none',
+      'platform-runtime': 'none',
     });
   });
 
@@ -139,16 +143,20 @@ describe('the registry', () => {
     expect(resourceByMatch('r2', 'vultr-backup')).toMatchObject({ id: 'vps-backup', name: 'VPS 备份', entry: 'self-hosted' });
     expect(REGISTRY.entries.find((e) => e.id === 'self-hosted')).toMatchObject({ group: 'hidden', url: null, status: { type: 'none' } });
     expect(REGISTRY.workers.filter((w) => w.entry === 'self-hosted')).toEqual([]);
-    // Every resource is matched by its id; none waits for a first deploy.
-    expect(REGISTRY.resources.filter((r) => r.match === null).map((r) => r.id)).toEqual([]);
+    // Fleet's new namespace is recorded in config/resources.toml after its first deploy.
+    const unmatched = REGISTRY.resources.filter((r) => r.match === null).map((r) => r.id);
+    expect(unmatched.filter((id) => id !== 'fleet-state')).toEqual([]);
+    expect(REGISTRY.resources.find((r) => r.id === 'fleet-state')).toMatchObject({
+      kind: 'do', entry: 'fleet', script: 'fleet',
+    });
     expect(resourceByMatch('do', 'd58e1bdabacb4d14bbba1887f169c8b4')).toMatchObject({ id: 'watch-state', entry: 'watch' });
   });
 
   it('keeps the tick within the Workers Free subrequest budget', () => {
-    // 4 status() + 3 probes (website, FlowDay, links) + 1 GraphQL + 4 setGuard + 2 canary calls + 1 reportOps + 12 drift calls.
-    expect(outboundPerTick()).toBe(27);
+    // 6 status() + 3 probes (website, FlowDay, links) + 1 GraphQL + 4 setGuard + 2 canary calls + 1 reportOps + 12 drift calls.
+    expect(outboundPerTick()).toBe(29);
     expect(outboundPerTick()).toBeLessThanOrEqual(MAX_OUTBOUND_PER_TICK);
-    expect(outboundPerRefresh()).toBe(7);
+    expect(outboundPerRefresh()).toBe(9);
   });
 
   it('serves a public view without bindings or probe URLs, within its budget', () => {

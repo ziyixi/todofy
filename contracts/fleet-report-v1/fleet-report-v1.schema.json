@@ -1,0 +1,494 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.local/fleet-report-v1/fleet-report-v1.schema.json",
+  "$comment": "Generated from proto/fleet/telemetry/v1/host_report.proto by proto/tools/gen_schema.py: do not edit. Self-contained on purpose (no $defs or $ref): Todofy's machine API document refers to it by path, and each consumer reads it without resolving references.",
+  "title": "Bounded host telemetry receipt",
+  "description": "One bounded, content-free observation, not proof of business success.",
+  "type": "object",
+  "required": [
+    "version",
+    "host_key",
+    "epoch",
+    "sequence",
+    "receipt_id",
+    "observation_time",
+    "daemons",
+    "cluster",
+    "newsletter",
+    "runtime",
+    "observer_source_sha"
+  ],
+  "properties": {
+    "version": {
+      "description": "Always fleet-report-v1.",
+      "const": "fleet-report-v1"
+    },
+    "host_key": {
+      "description": "Fixed configured alias, not the machine hostname.",
+      "type": "string",
+      "pattern": "^(?:[a-z][a-z0-9_-]{0,31})$(?!\\n)"
+    },
+    "epoch": {
+      "description": "Explicit deployment generation; changing it requires a newly configured credential.",
+      "type": "integer",
+      "minimum": 1
+    },
+    "sequence": {
+      "description": "Persisted and monotonically increasing within an epoch.",
+      "type": "integer",
+      "minimum": 1
+    },
+    "receipt_id": {
+      "description": "Frozen across retry of identical bytes.",
+      "type": "string",
+      "pattern": "^(?:[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$(?!\\n)"
+    },
+    "observation_time": {
+      "description": "Host observation time; server validates age and uses its own receipt time for freshness.",
+      "type": "string"
+    },
+    "daemons": {
+      "description": "Expected system daemons, three required aliases and an optional deployment transport daemon.",
+      "type": "object",
+      "required": [
+        "k3s",
+        "cloudflared",
+        "ssh"
+      ],
+      "maxProperties": 4,
+      "propertyNames": {
+        "type": "string",
+        "pattern": "^(?:(k3s|cloudflared|ssh|cloudflared_platform))$(?!\\n)"
+      },
+      "additionalProperties": {
+        "type": "object",
+        "required": [
+          "state"
+        ],
+        "properties": {
+          "state": {
+            "description": "active, inactive, failed, activating, deactivating, unknown or missing.",
+            "enum": [
+              "active",
+              "inactive",
+              "failed",
+              "activating",
+              "deactivating",
+              "unknown",
+              "missing"
+            ]
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "cluster": {
+      "description": "k3s readiness and only the configured Newsletter workload.",
+      "type": "object",
+      "required": [
+        "state"
+      ],
+      "properties": {
+        "state": {
+          "description": "ready, degraded, unavailable or unknown.",
+          "enum": [
+            "ready",
+            "degraded",
+            "unavailable",
+            "unknown"
+          ]
+        },
+        "ready_count": {
+          "description": "Newsletter ready replicas, null if Kubernetes could not be read.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "desired_count": {
+          "description": "Newsletter desired replicas; must be one in the personal deployment.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "restart_count": {
+          "description": "Total observed container restarts; does not imply a current failure.",
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "newsletter": {
+      "description": "Newsletter process/deployment metadata only.",
+      "type": "object",
+      "required": [
+        "state",
+        "drain_state"
+      ],
+      "properties": {
+        "state": {
+          "description": "healthy, unavailable, unknown or missing.",
+          "enum": [
+            "healthy",
+            "unavailable",
+            "unknown",
+            "missing"
+          ]
+        },
+        "worker_healthy": {
+          "description": "The worker Task is alive; this is not proof that a provider operation completed.",
+          "type": "boolean"
+        },
+        "drain_state": {
+          "description": "active, draining, frozen, resumed or unknown.",
+          "enum": [
+            "active",
+            "draining",
+            "frozen",
+            "resumed",
+            "unknown"
+          ]
+        },
+        "queued_count": {
+          "description": "Queued ledger entries, null if unknown.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "inflight_count": {
+          "description": "In-flight activities, null if unknown.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "unknown_count": {
+          "description": "Provider outcomes needing reconciliation, null if unknown.",
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "disk_used_percent": {
+      "description": "Root filesystem percentage, null if unknown.",
+      "type": "number",
+      "minimum": 0.0,
+      "maximum": 100.0
+    },
+    "memory_used_percent": {
+      "description": "Host memory percentage, null if unknown.",
+      "type": "number",
+      "minimum": 0.0,
+      "maximum": 100.0
+    },
+    "runtime": {
+      "description": "Generic, independently verified runtime snapshot; null when the local daemon cannot be read.",
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "name",
+            "node_key",
+            "state",
+            "observed_at",
+            "workloads"
+          ],
+          "properties": {
+            "name": {
+              "description": "Always nodeStatus.",
+              "const": "nodeStatus"
+            },
+            "node_key": {
+              "description": "Public configured node alias, unrelated to the machine's hostname.",
+              "type": "string",
+              "pattern": "^(?:[a-z][a-z0-9-]{0,31})$(?!\\n)"
+            },
+            "state": {
+              "description": "Node availability based on the current bounded observation, not the receipt's transport success.",
+              "enum": [
+                "ready",
+                "degraded",
+                "unavailable",
+                "unknown",
+                "missing"
+              ]
+            },
+            "observed_at": {
+              "description": "Snapshot observation time; consumer freshness is computed independently.",
+              "type": "string"
+            },
+            "workloads": {
+              "description": "Only explicitly configured workloads; unique keys, sorted by key. Maximum sixteen.",
+              "type": "array",
+              "maxItems": 16,
+              "items": {
+                "type": "object",
+                "required": [
+                  "name",
+                  "workload_key",
+                  "process_state",
+                  "admission_state",
+                  "health_state",
+                  "release",
+                  "observed_at"
+                ],
+                "properties": {
+                  "name": {
+                    "description": "Always workloads/{workload_key}.",
+                    "type": "string",
+                    "pattern": "^(?:workloads/[a-z][a-z0-9-]{0,31})$(?!\\n)"
+                  },
+                  "workload_key": {
+                    "description": "Stable configured alias. An adapter maps it to private provider object names.",
+                    "type": "string",
+                    "pattern": "^(?:[a-z][a-z0-9-]{0,31})$(?!\\n)"
+                  },
+                  "process_state": {
+                    "description": "Process existence and readiness, without claiming business success.",
+                    "enum": [
+                      "running",
+                      "starting",
+                      "stopped",
+                      "missing",
+                      "unknown"
+                    ]
+                  },
+                  "admission_state": {
+                    "description": "Whether the workload admits new work. Unsupported is explicit for an adapter without this capability.",
+                    "enum": [
+                      "accepting",
+                      "draining",
+                      "frozen",
+                      "unsupported",
+                      "unknown"
+                    ]
+                  },
+                  "health_state": {
+                    "description": "Application health from its configured adapter, independent of process/admission state.",
+                    "enum": [
+                      "healthy",
+                      "degraded",
+                      "unhealthy",
+                      "unsupported",
+                      "unknown"
+                    ]
+                  },
+                  "release": {
+                    "description": "Independently verified release observation, including explicit missing/unknown states.",
+                    "type": "object",
+                    "required": [
+                      "state",
+                      "desired",
+                      "actual",
+                      "observed_at"
+                    ],
+                    "properties": {
+                      "state": {
+                        "description": "Missing means no configured target/object; unknown means evidence could not be verified.",
+                        "enum": [
+                          "missing",
+                          "unknown",
+                          "pending",
+                          "ready",
+                          "paused",
+                          "degraded"
+                        ]
+                      },
+                      "desired": {
+                        "description": "Configuration-selected desired release. Null when no trustworthy target is available.",
+                        "oneOf": [
+                          {
+                            "type": "object",
+                            "required": [
+                              "workload_key",
+                              "source_sha",
+                              "image_digest",
+                              "request_id"
+                            ],
+                            "properties": {
+                              "workload_key": {
+                                "description": "Stable public workload alias.",
+                                "type": "string",
+                                "pattern": "^(?:[a-z][a-z0-9-]{0,31})$(?!\\n)"
+                              },
+                              "source_sha": {
+                                "description": "Source identity from the release target, or verified running-image provenance for actual.",
+                                "type": "string",
+                                "pattern": "^(?:[0-9a-f]{40})$(?!\\n)"
+                              },
+                              "image_digest": {
+                                "description": "Immutable target digest, or independently observed physical running digest for actual.",
+                                "type": "string",
+                                "pattern": "^(?:sha256:[0-9a-f]{64})$(?!\\n)"
+                              },
+                              "request_id": {
+                                "description": "Identity of the specific release request.",
+                                "type": "string",
+                                "pattern": "^(?:[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$(?!\\n)"
+                              },
+                              "generation": {
+                                "description": "Kubernetes desired generation when observed. Absent means unavailable; never a synthetic zero.",
+                                "type": "integer",
+                                "minimum": 1
+                              }
+                            },
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "actual": {
+                        "description": "Actual identity, only after physical digest and running-image build provenance are verified. Null on missing, stale or inconsistent evidence. Never copied from desired spec or annotations.",
+                        "oneOf": [
+                          {
+                            "type": "object",
+                            "required": [
+                              "workload_key",
+                              "source_sha",
+                              "image_digest",
+                              "request_id"
+                            ],
+                            "properties": {
+                              "workload_key": {
+                                "description": "Stable public workload alias.",
+                                "type": "string",
+                                "pattern": "^(?:[a-z][a-z0-9-]{0,31})$(?!\\n)"
+                              },
+                              "source_sha": {
+                                "description": "Source identity from the release target, or verified running-image provenance for actual.",
+                                "type": "string",
+                                "pattern": "^(?:[0-9a-f]{40})$(?!\\n)"
+                              },
+                              "image_digest": {
+                                "description": "Immutable target digest, or independently observed physical running digest for actual.",
+                                "type": "string",
+                                "pattern": "^(?:sha256:[0-9a-f]{64})$(?!\\n)"
+                              },
+                              "request_id": {
+                                "description": "Identity of the specific release request.",
+                                "type": "string",
+                                "pattern": "^(?:[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$(?!\\n)"
+                              },
+                              "generation": {
+                                "description": "Kubernetes desired generation when observed. Absent means unavailable; never a synthetic zero.",
+                                "type": "integer",
+                                "minimum": 1
+                              }
+                            },
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "observed_at": {
+                        "description": "Time this daemon observed or attempted to observe the release.",
+                        "type": "string"
+                      },
+                      "observed_generation": {
+                        "description": "Kubernetes status.observedGeneration, absent when missing, malformed or unavailable.",
+                        "type": "integer",
+                        "minimum": 1
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "observed_at": {
+                    "description": "Time of the workload observation, including an unavailable adapter result.",
+                    "type": "string"
+                  },
+                  "active_count": {
+                    "description": "Work in progress, when supported. Omitted does not mean zero.",
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 1000
+                  },
+                  "unknown_count": {
+                    "description": "Unreconciled business operations, when supported. Omitted does not mean zero.",
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 1000
+                  },
+                  "next_due_at": {
+                    "description": "Next due business work, null or absent when the adapter cannot determine it.",
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "current_release": {
+              "description": "Current persisted operation summary, absent when no operation has been accepted.",
+              "type": "object",
+              "required": [
+                "name",
+                "request_id",
+                "phase",
+                "etag",
+                "update_time"
+              ],
+              "properties": {
+                "name": {
+                  "description": "Current operation resource name.",
+                  "type": "string",
+                  "pattern": "^(?:releases/[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$(?!\\n)"
+                },
+                "request_id": {
+                  "description": "Original creation request UUID4.",
+                  "type": "string",
+                  "pattern": "^(?:[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$(?!\\n)"
+                },
+                "phase": {
+                  "description": "Persisted operation phase, independent of process health or observation freshness.",
+                  "enum": [
+                    "accepted",
+                    "draining",
+                    "frozen",
+                    "applying",
+                    "verifying",
+                    "ready",
+                    "held",
+                    "failed"
+                  ]
+                },
+                "etag": {
+                  "description": "Current operation concurrency token.",
+                  "type": "string",
+                  "pattern": "^(?:[A-Za-z0-9_-]{1,128})$(?!\\n)"
+                },
+                "update_time": {
+                  "description": "Last persisted transition time.",
+                  "type": "string"
+                },
+                "error_code": {
+                  "description": "Safe fixed diagnostic alias; no exception or provider error string.",
+                  "type": "string",
+                  "pattern": "^(?:[A-Z][A-Z0-9_]{0,63})$(?!\\n)"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "observer_source_sha": {
+      "description": "Source identity baked into the observer container image; null if unverified.",
+      "oneOf": [
+        {
+          "type": "string",
+          "pattern": "^(?:[0-9a-f]{40})$(?!\\n)"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "additionalProperties": false
+}

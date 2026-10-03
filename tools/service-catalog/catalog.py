@@ -21,6 +21,9 @@ except ModuleNotFoundError:
     tomllib = None
 
 REPO = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(REPO / "tools" / "cloud-config"))
+from cloud_profile import ProfileError, load_profile  # noqa: E402
+
 ID = re.compile(r"[a-z][a-z0-9-]{0,63}")
 SKIP_DIRS = {".git", ".venv", "node_modules", "dist", "out", "uiassets", ".next", ".wrangler"}
 
@@ -95,12 +98,12 @@ def production_configs(root: Path) -> set[str]:
     return found
 
 
-def primary_host(config: dict, field: str) -> str | None:
+def primary_host(config: dict, field: str, zone: str) -> str | None:
     routes = config.get("routes", [])
     require(isinstance(routes, list) and all(isinstance(route, dict) for route in routes), field)
     hosts = [route.get("pattern") for route in routes if route.get("custom_domain") is True]
     for host in hosts:
-        require(isinstance(host, str) and re.fullmatch(r"(?:[a-z0-9-]+\.)*ziyixi\.science", host) is not None, field)
+        require(isinstance(host, str) and re.fullmatch(r"(?:[a-z0-9-]+\.)*" + re.escape(zone), host) is not None, field)
     configured = config.get("vars", {}).get("PUBLIC_HOST")
     if configured is not None:
         require(configured in hosts, field)
@@ -122,6 +125,12 @@ class Catalog:
 
 def load_catalog(root: Path = REPO) -> Catalog:
     root = Path(root).resolve()
+    try:
+        profile = load_profile(root)
+    except ProfileError as error:
+        raise CatalogError(str(error)) from error
+    zone = profile["zone"]
+    image_owner = profile["repository"].split("/", 1)[0]
     manifests = sorted(root.glob("*/app.toml"))
     require(bool(manifests), "manifests")
     apps, configs, workers, entries, access = {}, {}, [], [], []
@@ -139,7 +148,7 @@ def load_catalog(root: Path = REPO) -> Catalog:
             require(isinstance(data.get(collection, []), list), f"{app}.{collection}")
         if data["target"] == "vps":
             require(not data.get("workers") and not data.get("access"), f"{app}.vps resources")
-            require(isinstance(data.get("image"), str) and re.fullmatch(r"ghcr\.io/ziyixi/[a-z0-9-]+", data["image"]) is not None,
+            require(isinstance(data.get("image"), str) and re.fullmatch(r"ghcr\.io/" + re.escape(image_owner) + r"/[a-z0-9-]+", data["image"]) is not None,
                     f"{app}.image")
         else:
             require("image" not in data and bool(data.get("workers")), f"{app}.workers")
@@ -154,7 +163,7 @@ def load_catalog(root: Path = REPO) -> Catalog:
             require(script not in configs, f"{app}.worker name")
             position = worker["position"]
             require(type(position) is int and position > 0 and position not in positions, f"{app}.worker position")
-            primary_host(config, f"{app}.host")
+            primary_host(config, f"{app}.host", zone)
             paths.add(worker["config"])
             positions.add(position)
             configs[script] = config
@@ -182,15 +191,15 @@ def load_catalog(root: Path = REPO) -> Catalog:
             if worker is not None:
                 identifier(worker, f"{app}.entry worker")
                 require(any(w["script"] == worker and w["app"] == app for w in workers), f"{app}.entry worker")
-            host = primary_host(configs[worker], f"{app}.entry host") if worker is not None else None
+            host = primary_host(configs[worker], f"{app}.entry host", zone) if worker is not None else None
             require("url_path" not in entry or host is not None, f"{app}.entry link")
             entry["url"] = f"https://{host}{route_path(entry['url_path'], f'{app}.url_path')}" if "url_path" in entry else None
-            status = fields(entry["status"], {"type", "binding", "guard", "path", "expect", "content_type", "outside_access", "error_rate", "enabled", "max_idle_hours"},
+            status = fields(entry["status"], {"type", "provider", "binding", "guard", "path", "expect", "content_type", "outside_access", "error_rate", "enabled", "max_idle_hours"},
                             {"type"}, f"{app}.status")
             status = dict(status)
             kind = status["type"]
             require(isinstance(kind, str) and kind in {"ops_v1", "public_http", "analytics", "self", "none"}, f"{app}.status type")
-            shapes = {"ops_v1": ({"type", "binding", "guard"}, {"type", "binding", "guard"}),
+            shapes = {"ops_v1": ({"type", "provider", "binding", "guard"}, {"type", "binding", "guard"}),
                       "public_http": ({"type", "path", "expect", "content_type", "outside_access", "error_rate", "enabled"}, {"type", "path", "expect", "enabled"}),
                       "analytics": ({"type", "max_idle_hours"}, {"type", "max_idle_hours"}), "self": ({"type"}, {"type"}), "none": ({"type"}, {"type"})}
             fields(status, *shapes[kind], f"{app}.status fields")
@@ -207,12 +216,20 @@ def load_catalog(root: Path = REPO) -> Catalog:
                 require(isinstance(status["binding"], str) and re.fullmatch(r"[A-Z][A-Z0-9_]*", status["binding"]) is not None,
                         f"{app}.ops binding")
                 require(type(status["guard"]) is bool, f"{app}.guard")
-                require(any(s.get("binding") == status["binding"] and s.get("service") == worker and s.get("entrypoint") == "Ops"
+                provider = status.get("provider")
+                if data["target"] == "vps":
+                    require(app == "newsletter" and provider == "fleet" and status["binding"] == "NEWSLETTER"
+                            and status["guard"] is False, f"{app}.VPS Ops provider")
+                    service, entrypoint = "fleet", "NewsletterOps"
+                else:
+                    require(provider is None, f"{app}.Ops provider")
+                    service, entrypoint = worker, "Ops"
+                require(any(s.get("binding") == status["binding"] and s.get("service") == service and s.get("entrypoint") == entrypoint
                             for s in read_toml(root / "dashboard/wrangler.toml").get("services", [])), f"{app}.ops binding")
             if kind == "analytics":
                 require(type(status["max_idle_hours"]) is int and 1 <= status["max_idle_hours"] <= 168, f"{app}.idle")
             if data["target"] == "vps":
-                require(kind == "none" and worker is None and entry["url"] is None and not entry["access"], f"{app}.vps status")
+                require(kind in {"none", "ops_v1"} and worker is None and entry["url"] is None and not entry["access"], f"{app}.vps status")
             metric = entry.get("tile_metric")
             if metric is not None:
                 fields(metric, {"kind", "name"}, {"kind"}, f"{app}.metric")
@@ -235,7 +252,7 @@ def load_catalog(root: Path = REPO) -> Catalog:
             require(isinstance(rule["session"], str) and rule["session"] in {"6h", "24h", "168h"}, f"{app}.access session")
             require(isinstance(rule["paths"], list) and bool(rule["paths"]) and all(isinstance(p, str) for p in rule["paths"])
                     and len(set(rule["paths"])) == len(rule["paths"]), f"{app}.access paths")
-            host = primary_host(configs[rule["worker"]], f"{app}.access host")
+            host = primary_host(configs[rule["worker"]], f"{app}.access host", zone)
             require(host is not None, f"{app}.access host")
             rule["destinations"] = [host + route_path(p, f"{app}.access path", wildcard=True) for p in rule["paths"]]
             access.append(rule)
@@ -247,7 +264,7 @@ def load_catalog(root: Path = REPO) -> Catalog:
         config = configs[worker["script"]]
         if config.get("vars", {}).get("ACCESS_AUDIENCE"):
             require(any(rule["worker"] == worker["script"] and rule["key"] == worker["script"] for rule in access), "Access application coverage")
-        host = primary_host(config, "worker host")
+        host = primary_host(config, "worker host", zone)
         if host is not None:
             entry = next(e for e in entries if e["id"] == worker["entry"])
             require(worker["script"] == "home" or (entry["group"] in {"apps", "sites"} and entry["url"] is not None), "visible entry coverage")

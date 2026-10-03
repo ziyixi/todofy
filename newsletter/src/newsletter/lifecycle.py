@@ -60,6 +60,14 @@ async def service_lifespan(
             )
             store.recover()
             store.deployment.recover()
+            # A newly bootstrapped process must stay closed until the release
+            # pipeline explicitly verifies/resumes it. A completed same-key
+            # receipt does not re-close admission on an ordinary restart.
+            if (
+                settings.bootstrap_drain_key
+                and store.deployment.status()["state"] == "active"
+            ):
+                store.deployment.begin(settings.bootstrap_drain_key)
             # A process must not advertise readiness with broken enabled
             # dependencies.
             app.state.preflight = await preflight.preflight(

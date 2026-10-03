@@ -21,7 +21,7 @@
  *
  * | Method                | HTTP                                  | Served by      | Budget per call                |
  * | --------------------- | ------------------------------------- | -------------- | ------------------------------ |
- * | GetRegistry           | GET  /api/v1/registry                 | Worker (no DO) | ≤ 12 KiB; ETag "<build>" → 304 |
+ * | GetRegistry           | GET  /api/v1/registry                 | Worker (no DO) | ≤ 14 KiB; ETag "<build>" → 304 |
  * | GetHomeView           | GET  /api/v1/homeView                 | DO, 1 call     | ≤ 10 KiB; ≤ 28 rows read       |
  * | GetFlowsView          | GET  /api/v1/flowsView                | DO, 1 call     | ≤ 20 KiB; ≤ 28 rows read       |
  * | GetCloudflareView     | GET  /api/v1/cloudflareView           | DO, 1 call     | ≤ 16 KiB; ≤ 28 rows read       |
@@ -226,7 +226,7 @@ export type CanaryState = Omit<CanaryView, 'id'>;
  * it; ops-client.test.ts holds the two equal). The list is open on the wire (an app may join within ops-v1), so the
  * generated type of `app` is a string; this dashboard knows exactly the apps it binds.
  */
-export type OpsApp = 'mail-hero' | 'todofy' | 'lab' | 'watch';
+export type OpsApp = 'mail-hero' | 'todofy' | 'lab' | 'watch' | 'fleet' | 'newsletter';
 
 // ---- transport outside the service --------------------------------------------------------------------------
 
@@ -303,7 +303,7 @@ export const BREAKDOWN_UNCLASSIFIED = 'unknown';
  */
 export const VIEW_BODY_MAX = 32 * 1024;
 export const VIEW_BODY_BUDGET = {
-  registry: 12 * 1024,
+  registry: 14 * 1024,
   home: 10 * 1024,
   // Six flows since the GTD loop and Paper Radar (2026-09-30): 16.1 KB on the mockup day, 17.4 KB in the
   // workerd suite's full canary history with 20 Workers.
@@ -317,12 +317,11 @@ export const VIEW_BODY_BUDGET = {
  * full 14-run canary history and 20 Workers). Every view reads the shared shell (meta, digest, the guard docs, one
  * status per ops_v1 entry) and, for the strip's observed items, what the evaluation reads (one probe document per
  * public_http entry, cf_scripts, the 14 recent canary runs); cloudflare adds the usage and drift documents. Each
- * document is read once per build (HomeState's read cache). Measured 26 / 26 / 27 / 26 (home / flows / cloudflare /
- * ops) with four ops_v1 apps (Mail Hero, Todofy, Lab and the watch app) and three probes (website, FlowDay, links;
- * 25 / 25 / 26 / 25 before the watch app, 23 / 23 / 24 / 23 with the website's probe alone); each new ops_v1 or
- * public_http entry adds one row to every view, so the budget leaves room for one more.
+ * document is read once per build (HomeState's read cache). Measured 28 / 28 / 29 / 28 (home / flows / cloudflare /
+ * ops) with six ops_v1 apps and three public probes. Each additional status entry adds a row; the real workerd
+ * regression test must continue to pass when the catalog grows.
  */
-export const VIEW_ROWS_READ: Readonly<Record<ViewId, number>> = { home: 28, flows: 28, cloudflare: 28, ops: 28 };
+export const VIEW_ROWS_READ: Readonly<Record<ViewId, number>> = { home: 28, flows: 28, cloudflare: 30, ops: 28 };
 
 /** Outbound calls one tick may make, computed from the registry (tested). Free: 50 subrequests. */
 export const MAX_OUTBOUND_PER_TICK = 30;

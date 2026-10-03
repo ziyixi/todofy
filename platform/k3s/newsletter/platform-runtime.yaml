@@ -1,0 +1,119 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: platform-runtime
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: platform-runtime
+  template:
+    metadata:
+      labels:
+        app: platform-runtime
+    spec:
+      serviceAccountName: platform-controller
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: platform-runtime
+          image: platform-release
+          ports:
+            - containerPort: 8080
+              hostPort: 18765
+              hostIP: 127.0.0.1
+          env:
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: PLATFORM_RUNTIME_CONFIG
+              value: /etc/personal-cloud/runtime.json
+            - name: PLATFORM_RELEASE_REQUEST_ID
+              value: pending
+            - name: PLATFORM_STATE_DIR
+              value: /var/lib/personal-cloud
+            - name: PLATFORM_DEPLOY_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: platform-settings
+                  key: PLATFORM_DEPLOY_TOKEN
+            - name: NEWSLETTER_SEND_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: newsletter-settings
+                  key: NEWSLETTER_SEND_TOKEN
+            - name: NEWSLETTER_MONITOR_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: newsletter-settings
+                  key: NEWSLETTER_MONITOR_TOKEN
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests:
+              cpu: 20m
+              memory: 64Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi
+          readinessProbe:
+            tcpSocket:
+              port: 8080
+            periodSeconds: 30
+          livenessProbe:
+            tcpSocket:
+              port: 8080
+            periodSeconds: 30
+            failureThreshold: 5
+          volumeMounts:
+            - name: config
+              mountPath: /etc/personal-cloud
+              readOnly: true
+            - name: state
+              mountPath: /var/lib/personal-cloud
+      volumes:
+        - name: config
+          configMap:
+            name: platform-runtime-config
+        - name: state
+          persistentVolumeClaim:
+            claimName: platform-state
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: platform-runtime
+spec:
+  selector:
+    app: platform-runtime
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: platform-runtime-config
+data:
+  runtime.json: '{}'
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: platform-release
+data:
+  request_id: pending
+  source_sha: pending
+  image: pending
+  phase: applying

@@ -226,7 +226,7 @@ lost `version`.
 
 | Route | Served by | Budget |
 | --- | --- | --- |
-| `GET /api/v1/registry` (GetRegistry) | Worker, serialized once per isolate; `ETag: "<build>"` → 304 | 0 DO; ≤ 12 KiB |
+| `GET /api/v1/registry` (GetRegistry) | Worker, serialized once per isolate; `ETag: "<build>"` → 304 | 0 DO; ≤ 14 KiB |
 | `GET /api/csrf` | Worker (signed token + `home_csrf` cookie, design.md §6) | — |
 | `GET /api/v1/homeView` (GetHomeView) | DO `view('home')` | 1 DO call; ≤ 1 + N rows; ≤ 10 KiB |
 | `GET /api/v1/flowsView` (GetFlowsView) | DO | ≤ 20 rows; ≤ 20 KiB (16 KiB until the GTD loop and Paper Radar made six flows) |
@@ -282,7 +282,7 @@ Measured (unit suite for bytes, workerd suite for rows; a full 14-run canary his
 | --- | --- | --- | --- |
 | home | 4.7 KB (nine tiles; budget 10 KiB) | 9.1 KB | 26 (≤ 28) |
 | flows | 17.0 KB (seven flows; 17.8 KB in the workerd suite) | 23.8 KB | 26 (≤ 28) |
-| cloudflare | ≤ 16 KiB, also with 20 Workers | under `VIEW_BODY_MAX` with 20 listed drift findings (tested) | 27 (≤ 28; one more document since §10: `drift`) |
+| cloudflare | ≤ 16 KiB, also with 20 Workers | under `VIEW_BODY_MAX` with 20 listed drift findings (tested) | 29 (≤ 30; Fleet/Newsletter status plus `drift`) |
 | ops | ≤ 24 KiB | 24.8 KB | 26 (≤ 28) |
 
 `VIEW_BODY_BUDGET` holds for a normal day; `VIEW_BODY_MAX` (32 KiB) bounds the bad day. The Cloudflare view

@@ -24,6 +24,7 @@ import newsletter.deployment_api as deployment_api
 import newsletter.drain as drain
 import newsletter.editor as newsletter_editor
 import newsletter.lifecycle as lifecycle
+import newsletter.monitoring_api as monitoring_api
 import newsletter.rendering as rendering
 import newsletter.settings as newsletter_settings
 import newsletter.store as store
@@ -204,6 +205,11 @@ def create_app(
         return _response(edition, editorial_pb2.Edition)
 
     deployment_api.register(app, _auth(settings, "send"))
+    monitoring_api.register(
+        app,
+        settings.monitor_token,
+        lambda: not start_worker or task_healthy(app),
+    )
     app.exception_handler(drain.DrainError)(deployment_api.known_error)
     app.middleware("http")(_private_responses)
     app.exception_handler(contracts.ContractError)(_known_error)

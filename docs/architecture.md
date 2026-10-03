@@ -1,8 +1,10 @@
 # Service boundaries
 
-The repository has eight independently released Cloudflare applications and a separately released Newsletter
-container service. [HANDOFF](../HANDOFF.md) records deployment evidence and what remains unverified; this page
-describes the architecture, not a fresh production check. Development entry points are in the [root README](../README.md).
+The repository manages Cloudflare applications and the VPS's k3s image workloads from one source tree.
+The [service catalog](service-catalog.md) is the application inventory; it also distinguishes Cloudflare
+Workers from VPS image repositories. [HANDOFF](../HANDOFF.md) records deployment evidence and what remains
+unverified. This page describes the committed architecture, not a fresh production check. Development
+entry points are in the [root README](../README.md).
 
 ## Data and communication
 
@@ -19,6 +21,11 @@ flowchart LR
   Home -->|Ops bindings| Todo
   Home -->|Ops bindings| Lab
   Home -->|Ops bindings| Watch
+  Home -->|Fleet and Newsletter Ops bindings| Fleet[Fleet]
+  Observer[Observer CronJob] -->|signed fleet.report.v1| Fleet
+  Actions[GitHub Actions] -->|Access and deploy Bearer, typed release API| Runtime[Platform runtime in k3s]
+  Runtime -->|bounded release reconciliation| News
+  Runtime -->|same Platform image| Observer
   Notion[Notion] -->|GitHub build and relay| Site[Static website]
 ```
 
@@ -33,8 +40,10 @@ No application imports another application's code, configuration or test tools. 
 
 `PACKAGE_USERS`, `PROTO_USERS`, `PROTO_PACKAGES` and `BUNDLED_BY` in
 [ci_changes.py](../.github/scripts/ci_changes.py) are checked against actual imports/dependencies.
-Seven Cloudflare applications use edge-auth and the TypeScript proto runtime; Todofy also uses the Python runtime.
-The website has neither shared contract nor shared runtime. Newsletter keeps its own container dependencies.
+`edge-auth` and each language's proto runtime are compiled into their checked consumers. Todofy uses both
+language runtimes; Platform uses the shared Python runtime for its API and observer reports, and Fleet
+uses the TypeScript descriptions of those reports. The website has neither shared contract nor shared
+runtime. Newsletter keeps its own locked container dependencies and existing external wire runtime.
 
 ## Interfaces and compatibility
 
@@ -47,10 +56,13 @@ The website has neither shared contract nor shared runtime. Newsletter keeps its
 | FlowDay | `flowday.ui.v1` | `/api/v1/` |
 | Links | `links.ui.v1` | `/_/api/v1/` |
 | Watch | `watch.ui.v1` | `/api/v1/` |
+| Fleet | `fleet.ui.v1` | `/api/v1/` |
 
 The [proto HTTP pattern](../proto/README.md#http-apis) owns route descriptors, request/response types and
-Google RPC errors. Access, Origin and CSRF stay before body reads. Lists are bounded, paged through indexes,
-and budgeted on the isolate's first request; FlowDay and Mail Hero warm up their heaviest codec/query paths.
+Google RPC errors. Browser owner APIs authenticate before body reads and require Origin/CSRF checks for
+mutations. Fleet's owner API is read-only; its separate exact receipt path accepts only authenticated
+machine reports. Lists are bounded, paged through indexes, and budgeted on the isolate's first request;
+FlowDay and Mail Hero warm up their heaviest codec/query paths.
 Todofy's gateway sends decoded wire JSON over `COORDINATOR.owner_ui` to the Python object, which reads it
 strictly and returns a generated response. The gateway reads that response and writes the wire JSON again.
 
@@ -58,6 +70,13 @@ Mail Hero's raw/attachment byte streams stay outside the transcoder under the sa
 `no-store`/`nosniff`/Content-Disposition headers. Its two heavy reads run the same transcoder in its DO.
 Its backup machine API is a separate surface. Todofy's webhook, reports and health retain their transport,
 paths and authentication in [machine-api-v1.openapi.yaml](../todofy/api/machine-api-v1.openapi.yaml).
+
+Platform's separate `platform.runtime.v1` machine API owns bounded node/workload reads and persisted
+Create/Get/Resume release operations under `/api/v1/`. Actions sends frozen workload keys, source SHA,
+image digests and request identity; it cannot send commands, YAML, paths or arbitrary URLs. Public
+deployment requests pass Cloudflare Access and an independent Bearer check before body decoding.
+Namespace, image repository and resource allowlists come from the daemon's mounted configuration.
+See the [runtime contract](../contracts/platform-runtime-v1/README.md).
 
 Schemas generated from IDL are consumer artifacts, not competing handwritten sources. Golden payloads pin
 published bytes, while legacy fixtures/schemas prove compatibility with persisted older events. `task-intent-v1`
@@ -67,8 +86,10 @@ the owner APIs moved to proto. Dated old-owner routes are listed in [history](hi
 ## Home
 
 Home is the owner launcher and operations console, not a second administrator of each application's storage.
-It calls only the generated Ops methods through `MAIL_HERO`, `TODOFY`, `LAB` and `WATCH` bindings. It does not
-read their D1, R2, private configuration or source. The four views are Home, Flows, Cloudflare and Ops.
+It calls only generated Ops methods through `MAIL_HERO`, `TODOFY`, `LAB`, `WATCH`, `FLEET` and `NEWSLETTER`
+bindings. `FLEET` targets Fleet's `Ops`; `NEWSLETTER` targets its `NewsletterOps` projection of the latest
+bounded host report. Home does not call the VPS directly or read an application's D1, R2, private
+configuration or source. The four views are Home, Flows, Cloudflare and Ops.
 
 Fetch/cron handlers authenticate, route and make one RPC; the SQLite `HomeState` owns the work. It serializes
 each view once and the Worker forwards `PreEncoded` bytes with ETag/304, avoiding another decode/encode under
@@ -95,10 +116,12 @@ The synthetic mail canary covers Mail Hero intake/delivery and Todofy model proc
 Todoist tasks, newsletters, summaries or reminders and does not count as real mail. Mail Hero's delivered state
 means consumer durable acceptance; Todofy's later task success is a separate stage.
 
-A future VPS/K3s collector must have a separate versioned machine contract and scoped authentication. Ops is
-service-binding-only, not a public ingest API. No administrative kubeconfig, raw Kubernetes objects, secrets
-or logs belong in Cloudflare. Fresh/stale/unknown, Git desired/applied revision, deployed build and business
-success must stay distinct. Declaring a collector or a cluster does not prove that it has been installed.
+Fleet's receipt API uses the versioned [fleet-report-v1 contract](../contracts/fleet-report-v1/README.md)
+and an independent HMAC key; its SQLite DO validates and persists bounded status snapshots. Ops remains
+service-binding-only. Reports contain stable workload/node aliases, counts and shared runtime release
+status, never administrative kubeconfig, raw Kubernetes objects, secrets, content or logs. Desired target,
+physical image/process provenance, fresh observation and business health remain distinct. Neither an
+accepted report nor a ready deployment receipt proves successful Newsletter delivery.
 
 ## Application detail
 
@@ -113,8 +136,8 @@ success must stay distinct. Declaring a collector or a cluster does not prove th
   `LAB_DAILY_NEURONS`. DO alarms do not consume cron slots. Only an explicit owner confirmation proposes tasks;
   personal choices and send records stay in D1/DO, not ops output or logs. See [design](../lab/docs/design.md).
 - **FlowDay:** read-only Todoist data plus local blocks/timers/reviews on D1. Keyset pages read about one page of
-  rows, and write budgets stay small. The old container remains only for the dated rollback window;
-  staging removal and Access changes go through infra, including F6 with owner approval.
+  rows, and write budgets stay small. Historical container rollback material and production retirement
+  evidence belong in HANDOFF/history; staging removal and Access changes go through reviewed infra.
   See [AGENTS](../flowday/AGENTS.md) and [rollout design](../flowday/docs/design.md).
 - **Links:** public short links and an owner launcher under `/_/`. A redirect does one primary-key D1 read,
   zero writes/logs, and uses 302 only. A private key and a nonexistent key give anonymous callers the same
@@ -124,12 +147,24 @@ success must stay distinct. Declaring a collector or a cluster does not prove th
   include only owner-created names, trigger types/counts and app links, and never include page text or watched
   URLs. One digest after 14:00 UTC plus at most nine urgent intents obey Todofy's source limit of ten/day.
   BROKEN and automatic pauses enter the digest; status/guard reach Home through Ops.
-- **Newsletter:** remains a VPS container because its workflow uses Codex CLI. It reads Todofy's machine reports
-  through existing HTTPS/Basic auth, keeps its own state and publishes its own image. It does not import Todofy's
-  implementation or share a release cycle. Its external `ziyixi-protos`/wire JSON runtime and machine HTTP model
-  stay intact; deployment drain has an app-owned versioned JSON contract. Its [README](../newsletter/README.md)
-  governs checks and updates. CI publishes the new `ghcr.io/ziyixi/todofy-newsletter` package; the existing VPS
-  continues to use `ghcr.io/ziyixi/newsletter`. This foundation change does not upgrade the VPS.
+- **Newsletter:** runs as an independent k3s image because its workflow uses Codex CLI. It reads Todofy's machine
+  reports through existing HTTPS/Basic auth and keeps its own persistent state. It does not import Todofy's
+  implementation. Its external `ziyixi-protos`/wire JSON runtime and private drain/monitor adapters stay intact.
+  A daily CronJob owns the schedule; config-sync independently downloads validated editorial bundles. Its
+  [README](../newsletter/README.md) governs business checks. CI publishes the catalog's immutable Newsletter
+  image, paired with an independently tested Platform image of the same source SHA for a VPS release.
+- **Platform:** the k3s Deployment exposes the shared-proto release/status API. A SQLite ledger persists frozen
+  release targets and drain/apply/verify/resume checkpoints across its own image replacement. It reconciles only
+  configured workloads through namespace-scoped Kubernetes permissions. API acceptance starts work; Actions
+  waits for ready and fresh physical/process evidence. Held releases require an explicit resume or recovery.
+- **Fleet:** an Access-protected, read-only Worker/UI and SQLite DO receive reports and expose k3s, release,
+  system-unit and Newsletter status. The observer is a `*/5` CronJob with `Forbid` concurrency, the same Platform
+  image, a separate state PVC and a projected read-only service account. It has no host PID/network, privileged
+  mode or Docker socket. Exact read-only mounts provide host meminfo and the system D-Bus socket; Jeepney reads
+  only fixed units' properties. A read-only socket mount does not restrict D-Bus method permissions: the
+  container UID must have no host polkit grant to manage units. Unreadable evidence is unknown. Since the
+  observer runs inside k3s, a cluster outage yields a stale/missing report rather than an independent live host
+  diagnosis. Fleet never proxies deployment commands.
 
 ## Website
 
@@ -151,11 +186,22 @@ See [release](../website/docs/release.md) and [architecture](../website/docs/arc
 
 ## Configuration and deployment ownership
 
-Wrangler is the sole committed production configuration for Workers. Deploy wrappers add only private values,
-operational switches and BUILD_SHA. The [service catalog](service-catalog.md) validates and references this
-configuration; it must not introduce a second source for hostnames, binding IDs or bucket names.
+Each Worker's committed `wrangler.toml` is its sole production config. The strict public profile and resource
+inventory under `config/` materialize only declared identity fields and Home resource identities; they do not
+generate secrets or change application logic. Deploy wrappers add private values, operational switches and
+BUILD_SHA. The [service catalog](service-catalog.md) references these configs rather than duplicating binding
+IDs or bucket names.
 
-`infra/` owns only its declared Cloudflare Access objects and D1/R2 existence, through reviewed plans and a gated
-apply. It does not own Worker code, routes, DNS, Email Routing or resources outside its scope. VPS/K3s definitions
-live separately under `clusters/vps/`. GitHub release, image publication, VPS update and business acceptance are
-separate operations. [CI/CD](ci-cd.md) holds the detailed release and production-setting reference.
+`infra/` owns only its declared Access/storage objects and the dedicated Platform HTTP Tunnel, configuration,
+machine identity and exact DNS record, through reviewed plans and a gated apply. Worker code/routes remain
+with Wrangler. Other tunnels/DNS, Email Routing, identity-provider bootstrap and the root mailbox remain
+outside that ownership. The Kubernetes API is not routed publicly.
+
+Standard namespace-scoped k3s manifests/Kustomize assets live under `platform/k3s/`. Mounted public/private
+configuration selects the namespace, state roots, provider identities and allowlisted images; a fresh account
+or VPS does not require changing business IDL. One reviewed host bootstrap installs k3s/cloudflared and imports
+private settings/state. Routine application and observer changes are image releases through the daemon API,
+with no app Python or packaged executable on the host. [Rebuild](rebuild.md) explains the remaining manual
+provider initialization and data restoration; it does not claim a fully automatic empty-account rebuild.
+GitHub publication, VPS rollout and business acceptance remain separate operations. [CI/CD](ci-cd.md)
+holds the release and production-setting reference.

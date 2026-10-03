@@ -15,24 +15,48 @@ spec = importlib.util.spec_from_file_location("local_tfvars", SCRIPT)
 local_tfvars = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(local_tfvars)
 
+ORIGINAL_IDENTITY_SOURCE = local_tfvars.identity_source
 ACCOUNT = "0" * 31 + "a"
 # Built at runtime so the "no email under infra/" guards (tests and CI) stay strict for committed text.
 AT = "@"
 EMAIL, OTHER = f"sentinel-a{AT}example.invalid", f"sentinel-b{AT}example.invalid"
 IDP, GITHUB = "idp-sentinel-1", "idp-sentinel-2"
+IDS = {"account_id": ACCOUNT, "owner_policy": "a" * 8 + "-" + "a" * 4 + "-" + "a" * 4 + "-" + "a" * 4 + "-" + "a" * 12,
+       "github_owner_policy": "b" * 8 + "-" + "b" * 4 + "-" + "b" * 4 + "-" + "b" * 4 + "-" + "b" * 12,
+       "mail_hero_app": "c" * 8 + "-" + "c" * 4 + "-" + "c" * 4 + "-" + "c" * 4 + "-" + "c" * 12}
 
 
 def fake(path):
-    if path.endswith(local_tfvars.OWNER_POLICY):
+    if path.endswith(IDS["owner_policy"]):
         return {"include": [{"email": {"email": EMAIL}}]}
-    if path.endswith(local_tfvars.GITHUB_OWNER_POLICY):
+    if path.endswith(IDS["github_owner_policy"]):
         return {"include": [{"email": {"email": OTHER}}], "require": [{"login_method": {"id": GITHUB}}]}
-    if path.endswith(local_tfvars.MAIL_HERO_APP):
+    if path.endswith(IDS["mail_hero_app"]):
         return {"allowed_idps": [IDP, GITHUB]}
     raise AssertionError(path)
 
 
 class LocalTfvars(unittest.TestCase):
+    def setUp(self):
+        self.identities = mock.patch.object(local_tfvars, "identity_source", return_value=IDS)
+        self.identities.start()
+        self.addCleanup(self.identities.stop)
+
+    def test_wrong_account_is_refused_before_any_get(self):
+        with self.assertRaises(local_tfvars.Refused):
+            local_tfvars.values("b" * 32, mock.Mock(side_effect=AssertionError("fetched")))
+
+    def test_identity_source_is_public_config_and_handles_missing_without_values(self):
+        resources = {"account_id": ACCOUNT, "access_policy_ids": {"owner": IDS["owner_policy"],
+                     "github-owner": IDS["github_owner_policy"]}, "access_app_ids": {"mail-hero": IDS["mail_hero_app"]}}
+        original = ORIGINAL_IDENTITY_SOURCE
+        with mock.patch.object(local_tfvars, "load_resources", return_value=resources):
+            self.assertEqual(original(), IDS)
+        with mock.patch.object(local_tfvars, "load_resources", return_value={}):
+            with self.assertRaises(local_tfvars.Refused) as caught:
+                original()
+        self.assertNotIn(ACCOUNT, str(caught.exception))
+
     def test_values_match_the_variables(self):
         result = local_tfvars.values(ACCOUNT, fake)
         self.assertEqual(
@@ -53,7 +77,7 @@ class LocalTfvars(unittest.TestCase):
     def test_rules_it_does_not_understand_are_refused_without_values(self):
         def odd(path):
             answer = fake(path)
-            if path.endswith(local_tfvars.OWNER_POLICY):
+            if path.endswith(IDS["owner_policy"]):
                 answer["include"].append({"everyone": {}})
             return answer
 

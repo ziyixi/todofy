@@ -1,0 +1,28 @@
+{
+  // Fleet Worker's flag set (lib ES2024, no DOM, Workers types, erasableSyntaxOnly), so the
+  // same sources also load under Node's type stripping and the contracts' .ts files stay importable.
+  "compilerOptions": {
+    "target": "ES2024",
+    "lib": ["ES2024"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "allowImportingTsExtensions": true,
+    "resolveJsonModule": true,
+    "types": ["@cloudflare/workers-types"],
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noImplicitOverride": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
+    "erasableSyntaxOnly": true,
+    "skipLibCheck": true,
+    "noEmit": true
+  },
+  "include": ["src", "test", "vitest.config.ts", "vitest.runtime.config.ts"],
+  // test/runtime runs in Node against Miniflare: its own tsconfig with Node types.
+  "exclude": ["test/runtime"]
+}

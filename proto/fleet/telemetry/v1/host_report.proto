@@ -1,0 +1,195 @@
+// Content-free host telemetry. Signed raw JSON bytes are authenticated before decoding.
+syntax = "proto3";
+package fleet.telemetry.v1;
+
+import "common/wire/v1/wire.proto";
+import "google/api/field_behavior.proto";
+import "google/protobuf/timestamp.proto";
+import "platform/runtime/v1/runtime.proto";
+
+option java_multiple_files = true;
+option java_outer_classname = "HostReportProto";
+option java_package = "science.ziyixi.fleet.telemetry.v1";
+option (common.wire.v1.formats) = {
+  name: "Code"
+  pattern: "[a-z][a-z0-9_-]{0,31}"
+  description: "Public configured alias. Never a hostname, path or free text."
+};
+option (common.wire.v1.formats) = {
+  name: "Sha"
+  pattern: "[0-9a-f]{40}"
+  description: "Git commit identity."
+};
+option (common.wire.v1.formats) = {
+  name: "Digest"
+  pattern: "sha256:[0-9a-f]{64}"
+  description: "Immutable container image identity."
+};
+option (common.wire.v1.formats) = {
+  name: "Receipt"
+  pattern: "[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}"
+  description: "UUID4 receipt identity."
+};
+option (common.wire.v1.formats) = {
+  name: "DaemonAlias"
+  pattern: "(k3s|cloudflared|ssh|cloudflared_platform)"
+  description: "Explicit host daemon allowlist."
+};
+// One bounded, content-free observation, not proof of business success.
+message HostReport {
+  // Always fleet-report-v1.
+  string version = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).allowed = "fleet-report-v1"
+  ];
+  // Fixed configured alias, not the machine hostname.
+  string host_key = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "Code"
+  ];
+  // Explicit deployment generation; changing it requires a newly configured credential.
+  int32 epoch = 3 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).minimum = 1
+  ];
+  // Persisted and monotonically increasing within an epoch.
+  int32 sequence = 4 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).minimum = 1
+  ];
+  // Frozen across retry of identical bytes.
+  string receipt_id = 5 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "Receipt"
+  ];
+  // Host observation time; server validates age and uses its own receipt time for freshness.
+  google.protobuf.Timestamp observation_time = 6 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).non_null = true
+  ];
+  // Expected system daemons, three required aliases and an optional deployment transport daemon.
+  map<string, Daemon> daemons = 7 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field) = {
+      key_format: "DaemonAlias"
+      max_items: 4
+      required_keys: [
+        "k3s",
+        "cloudflared",
+        "ssh"
+      ]
+    }
+  ];
+  // k3s readiness and only the configured Newsletter workload.
+  Cluster cluster = 8 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).non_null = true
+  ];
+  // Newsletter process/deployment metadata only.
+  Newsletter newsletter = 9 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).non_null = true
+  ];
+  // Root filesystem percentage, null if unknown.
+  optional double disk_used_percent = 10 [(common.wire.v1.field) = {
+    minimum: 0
+    maximum: 100
+  }];
+  // Host memory percentage, null if unknown.
+  optional double memory_used_percent = 11 [(common.wire.v1.field) = {
+    minimum: 0
+    maximum: 100
+  }];
+  // Generic, independently verified runtime snapshot; null when the local daemon cannot be read.
+  // (-- api-linter: core::0215::foreign-type-reference=disabled
+  //     aip.dev/not-precedent: directly embeds the shared versioned runtime contract instead of a duplicate DTO. --)
+  optional platform.runtime.v1.NodeStatus runtime = 14 [(google.api.field_behavior) = REQUIRED];
+  // Source identity baked into the observer container image; null if unverified.
+  optional string observer_source_sha = 15 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "Sha"
+  ];
+  reserved 12, 13;
+  reserved "desired_sha", "deployment_ready";
+}
+// A daemon's observed state. Logs and unit file contents are excluded.
+message Daemon {
+  // active, inactive, failed, activating, deactivating, unknown or missing.
+  string state = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field) = {
+      allowed: [
+        "active",
+        "inactive",
+        "failed",
+        "activating",
+        "deactivating",
+        "unknown",
+        "missing"
+      ]
+    }
+  ];
+}
+// Cluster status, not business status.
+message Cluster {
+  // ready, degraded, unavailable or unknown.
+  string state = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field) = {
+      allowed: [
+        "ready",
+        "degraded",
+        "unavailable",
+        "unknown"
+      ]
+    }
+  ];
+  // Newsletter ready replicas, null if Kubernetes could not be read.
+  optional int32 ready_count = 2 [(common.wire.v1.field) = {
+    minimum: 0
+    maximum: 100
+  }];
+  // Newsletter desired replicas; must be one in the personal deployment.
+  optional int32 desired_count = 3 [(common.wire.v1.field) = {
+    minimum: 0
+    maximum: 100
+  }];
+  // Total observed container restarts; does not imply a current failure.
+  optional int32 restart_count = 5 [(common.wire.v1.field).minimum = 0];
+}
+// Application observation with no mail, prompts, model output or provider bodies.
+message Newsletter {
+  // healthy, unavailable, unknown or missing.
+  string state = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field) = {
+      allowed: [
+        "healthy",
+        "unavailable",
+        "unknown",
+        "missing"
+      ]
+    }
+  ];
+  // The worker Task is alive; this is not proof that a provider operation completed.
+  optional bool worker_healthy = 2;
+  // active, draining, frozen, resumed or unknown.
+  string drain_state = 3 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field) = {
+      allowed: [
+        "active",
+        "draining",
+        "frozen",
+        "resumed",
+        "unknown"
+      ]
+    }
+  ];
+  // Queued ledger entries, null if unknown.
+  optional int32 queued_count = 4 [(common.wire.v1.field).minimum = 0];
+  // In-flight activities, null if unknown.
+  optional int32 inflight_count = 5 [(common.wire.v1.field).minimum = 0];
+  // Provider outcomes needing reconciliation, null if unknown.
+  optional int32 unknown_count = 6 [(common.wire.v1.field).minimum = 0];
+}

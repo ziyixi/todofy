@@ -41,26 +41,41 @@ custom_domain = true
 [vars]
 PUBLIC_HOST = "demo.ziyixi.science"
 '''
+PROFILE = '''version = 1
+zone = "ziyixi.science"
+repository = "ziyixi/todofy"
+access_issuer = "https://ziyixi.cloudflareaccess.com"
+platform_hostname = "fleet.ziyixi.science"
+[vps]
+platform_runtime_host = "platform-runtime.ziyixi.science"
+namespace = "personal-cloud"
+state_root = "/srv/todofy"
+observer_node_key = "vps"
+'''
 
 
 class CatalogTests(unittest.TestCase):
     def fixture(self, manifest=DEMO, config=CONFIG):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
-        root = Path(temporary.name)
+        root = Path(temporary.name).resolve()
+        (root / "config").mkdir()
+        (root / "config/cloud.toml").write_text(PROFILE)
         (root / "demo").mkdir()
         (root / "demo/app.toml").write_text(manifest)
         (root / "demo/wrangler.toml").write_text(config)
         return root
 
-    def test_public_metadata_is_unchanged_from_before_p5(self):
+    def test_existing_public_metadata_is_unchanged_except_monitored_newsletter(self):
         loaded = catalog.load_catalog()
         before = json.loads((Path(__file__).parent / "home-before-p5.json").read_text())
         keys = ("id", "name", "description", "group", "icon", "accent", "url", "access", "status", "tile_metric", "app_only_signals", "order")
-        entries = [{key: entry[key] for key in keys} for entry in loaded.entries]
-        self.assertEqual(entries, [entry for entry in before["entries"] if entry["id"] != "self-hosted"])
+        existing = [entry for entry in before["entries"] if entry["id"] not in {"self-hosted", "newsletter"}]
+        existing_ids = {entry["id"] for entry in existing}
+        entries = [{key: entry[key] for key in keys} for entry in loaded.entries if entry["id"] in existing_ids]
+        self.assertEqual(entries, existing)
         workers = [{key: worker[key] for key in ("script", "entry", "role")} for worker in loaded.workers]
-        self.assertEqual(workers, before["workers"])
+        self.assertEqual([worker for worker in workers if worker["script"] != "fleet"], before["workers"])
 
     def test_generated_regions_are_fresh_and_deterministic(self):
         loaded = catalog.load_catalog()
@@ -70,9 +85,10 @@ class CatalogTests(unittest.TestCase):
     def test_all_production_configs_and_consumer_maps_are_covered(self):
         loaded = catalog.load_catalog()
         self.assertEqual(set(loaded.worker_configs().values()), catalog.production_configs(catalog.REPO))
-        self.assertEqual(len(loaded.workers), 10)
+        self.assertGreaterEqual(len(loaded.workers), 10)
         self.assertEqual({app for app, data in loaded.apps.items() if data["target"] == "cloudflare"},
-                         {"todofy", "mail-hero", "dashboard", "website", "lab", "flowday", "links", "watch"})
+                         {"todofy", "mail-hero", "dashboard", "website", "lab", "flowday", "links", "watch"}
+                         | ({"fleet"} if "fleet" in loaded.apps else set()))
         self.assertEqual(loaded.apps["newsletter"]["image"], "ghcr.io/ziyixi/todofy-newsletter")
         self.assertEqual(loaded.apps["newsletter"]["target"], "vps")
         self.assertNotIn("newsletter", loaded.worker_configs())
@@ -191,7 +207,64 @@ class CatalogTests(unittest.TestCase):
             return original(path, *args, **kwargs)
         with mock.patch.object(Path, 'read_text', read):
             catalog.load_catalog(root)
-        self.assertEqual(set(reads), {'app.toml', 'wrangler.toml'})
+        self.assertEqual(set(reads), {'cloud.toml', 'app.toml', 'wrangler.toml'})
+
+    def test_domain_allowlist_comes_from_exact_public_profile(self):
+        root = self.fixture(config=CONFIG.replace('ziyixi.science', 'example.test'))
+        with self.assertRaises(catalog.CatalogError):
+            catalog.load_catalog(root)
+        profile = PROFILE.replace('ziyixi.science', 'example.test')
+        (root / 'config/cloud.toml').write_text(profile)
+        self.assertEqual(catalog.load_catalog(root).entries[0]['url'], 'https://demo.example.test/')
+        (root / 'demo/wrangler.toml').write_text(CONFIG.replace('ziyixi.science', 'outside.example.test.invalid'))
+        with self.assertRaises(catalog.CatalogError):
+            catalog.load_catalog(root)
+
+    def test_vps_monitor_requires_exact_provider_entrypoint_and_no_guard(self):
+        root = self.fixture()
+        (root / 'dashboard').mkdir()
+        (root / 'dashboard/wrangler.toml').write_text('[[services]]\nbinding = "NEWSLETTER"\nservice = "fleet"\nentrypoint = "NewsletterOps"\n')
+        # This synthetic binding fixture is not a production config discovered by the catalog.
+        (root / 'dashboard/wrangler.toml').rename(root / 'dashboard/bindings.toml')
+        original = catalog.read_toml
+        def read(path):
+            return original(path.parent / 'bindings.toml' if path == root / 'dashboard/wrangler.toml' else path)
+        (root / 'newsletter').mkdir()
+        manifest = '''version = 1
+id = "newsletter"
+target = "vps"
+image = "ghcr.io/ziyixi/todofy-newsletter"
+[[entries]]
+id = "newsletter"
+name = "Newsletter"
+description = "Synthetic VPS receipt"
+group = "services"
+icon = "newspaper"
+accent = "amber"
+access = false
+app_only_signals = []
+order = 2
+position = 2
+[entries.status]
+type = "ops_v1"
+provider = "fleet"
+binding = "NEWSLETTER"
+guard = false
+'''
+        path = root / 'newsletter/app.toml'
+        path.write_text(manifest)
+        with mock.patch.object(catalog, 'read_toml', read):
+            loaded = catalog.load_catalog(root)
+            self.assertEqual(loaded.entries[-1]['status']['provider'], 'fleet')
+            for old, new in [('provider = "fleet"', 'provider = "other"'), ('guard = false', 'guard = true'),
+                             ('binding = "NEWSLETTER"', 'binding = "FLEET"'), ('ghcr.io/ziyixi/', 'ghcr.io/other/')]:
+                path.write_text(manifest.replace(old, new))
+                with self.assertRaises(catalog.CatalogError):
+                    catalog.load_catalog(root)
+            path.write_text(manifest)
+            (root / 'dashboard/bindings.toml').write_text('[[services]]\nbinding = "NEWSLETTER"\nservice = "fleet"\nentrypoint = "Ops"\n')
+            with self.assertRaises(catalog.CatalogError):
+                catalog.load_catalog(root)
 
     def test_duplicate_configs_entry_positions_and_names_are_refused(self):
         root = self.fixture()

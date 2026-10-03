@@ -95,6 +95,18 @@ export const SEVERITY: Readonly<Record<OpsSeverity, { label: string; tone: Tone 
 
 const SIGNALS: Readonly<Record<string, string>> = {
   // both apps
+  host_never_seen: '主机尚未报告',
+  host_stale: '主机报告延迟',
+  host_missing: '主机报告中断',
+  newsletter_unavailable: 'Newsletter 进程或 Pod 不可用',
+  newsletter_paused: 'Newsletter 发布已排空或冻结',
+  newsletter_unknown: 'Newsletter 有结果待对账',
+  release_held: '发布暂停待处理',
+  release_failed: '发布失败',
+  release_in_progress: '发布进行中',
+  deployment_pending: 'VPS 发布尚未就绪',
+  disk_high: '服务器磁盘使用率偏高',
+  memory_high: '服务器内存使用率偏高',
   maintenance_mode: '维护模式已开启',
   guard_shed: '降载中',
   status_unavailable: '状态读取失败',
@@ -281,6 +293,7 @@ const MODES: Readonly<Record<string, { label: string; normal: boolean }>> = {
   forwarding: { label: '转发', normal: true },
   backup_active: { label: '备份进行中', normal: false },
   processing_paused: { label: '暂停处理', normal: false },
+  deployment_paused: { label: 'Newsletter 发布已排空或冻结', normal: false },
   force_pause_todoist: { label: '强制暂停 Todoist', normal: false },
   reminder_enabled: { label: '每日提醒', normal: true },
   ingest_paused: { label: '暂停抓取', normal: false },
@@ -294,8 +307,15 @@ export function modeInfo(name: string, value: boolean): { label: string; usual: 
   return { label: known ? known.label : name, usual: known ? known.normal === value : !value }
 }
 
-type CounterKind = 'count' | 'seconds' | 'bytes' | 'tokens' | 'days'
+type CounterKind = 'count' | 'seconds' | 'bytes' | 'tokens' | 'days' | 'percent'
 const COUNTERS: Readonly<Record<string, { label: string; kind: CounterKind }>> = {
+  // Fleet and Newsletter
+  heartbeat_age_seconds: { label: '距主机报告', kind: 'seconds' },
+  disk_used_percent: { label: '磁盘使用率', kind: 'percent' },
+  memory_used_percent: { label: '内存使用率', kind: 'percent' },
+  queued_count: { label: '排队', kind: 'count' },
+  inflight_count: { label: '进行中', kind: 'count' },
+  unknown_count: { label: '结果待对账', kind: 'count' },
   // Mail Hero
   jobs_pending: { label: '待处理任务', kind: 'count' },
   jobs_failed: { label: '失败任务', kind: 'count' },
@@ -363,6 +383,7 @@ export function counterValue(name: string, value: number): string {
   if (kind === 'bytes') return formatBytesBinary(value)
   if (kind === 'seconds') return value === 0 ? '无' : formatDuration(value * 1000)
   if (kind === 'days') return `${formatNumber(value)} 天`
+  if (kind === 'percent') return `${formatNumber(value)}%`
   return formatNumber(value)
 }
 

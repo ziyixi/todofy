@@ -115,7 +115,9 @@
             "mail-hero",
             "todofy",
             "lab",
-            "watch"
+            "watch",
+            "fleet",
+            "newsletter"
           ]
         },
         "generated_at": {
@@ -702,7 +704,9 @@
         "mail-hero",
         "todofy",
         "lab",
-        "watch"
+        "watch",
+        "fleet",
+        "newsletter"
       ]
     },
     "Counters": {

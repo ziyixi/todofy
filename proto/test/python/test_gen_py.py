@@ -83,6 +83,36 @@ class PackagesTest(unittest.TestCase):
         )
 
 
+class HttpBindingsTest(unittest.TestCase):
+    def image(self, rule):
+        source = file("platform/runtime/v1/service.proto", "platform.runtime.v1",
+                      {"name": "Input", "field": [STRING]}, {"name": "Output", "field": [STRING]})
+        source["service"] = [{"name": "RuntimeService", "method": [{"name": "CreateRelease",
+                              "inputType": ".platform.runtime.v1.Input", "outputType": ".platform.runtime.v1.Output",
+                              "options": {"[google.api.http]": rule}}]}]
+        return {"file": [source]}
+
+    def test_primary_and_additional_http_bindings_preserve_typed_body_metadata(self):
+        source = gen_py.generate(self.image({"post": "/api/v1/releases", "body": "release",
+                                            "additionalBindings": [{"post": "/api/v1/releases:resume", "body": "*"}]}))
+        module = source["platform/runtime/v1/service_pb.py"]
+        self.assertIn('HttpBinding("platform.runtime.v1.RuntimeService", "CreateRelease", "POST", "/api/v1/releases", Input, Output, "release")', module)
+        self.assertIn('"/api/v1/releases:resume", Input, Output, "*")', module)
+        self.assertIn("from ziyixi_proto.http_routes import HttpBinding", module)
+
+    def test_unsupported_or_ambiguous_http_shapes_fail_generation(self):
+        for rule in ({"get": "/one", "post": "/two"}, {"custom": {"kind": "HEAD", "path": "/one"}},
+                     {"get": "/one", "responseBody": "field"}):
+            with self.subTest(rule=rule), self.assertRaises(gen_py.GenerateError):
+                gen_py.generate(self.image(rule))
+
+    def test_existing_empty_rpc_response_needs_no_duplicate_generated_message(self):
+        image = self.image({"delete": "/api/v1/{id=*}"})
+        image["file"][0]["service"][0]["method"][0]["outputType"] = ".google.protobuf.Empty"
+        module = gen_py.generate(image)["platform/runtime/v1/service_pb.py"]
+        self.assertIn('Input, type(None), "")', module)
+
+
 class NamesAndLiteralsTest(unittest.TestCase):
     def test_a_keyword_field_is_an_attribute_with_an_underscore(self) -> None:
         keyword_field = {**STRING, "name": "from", "jsonName": "from"}

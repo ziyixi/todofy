@@ -69,4 +69,13 @@ jobs:
           INFRA_TFVARS: ${{ secrets.INFRA_TFVARS }}
           INFRA_APPLY_EXPECT: ${{ inputs.expect }}
           INFRA_CONFIRM_DESTRUCTIVE: ${{ inputs.confirm_destructive }}
+          VPS_BOOTSTRAP_CERT: ${{ vars.VPS_BOOTSTRAP_CERT }}
         run: python3 infra/scripts/infra_state.py apply --environment production
+      - name: Preserve only the encrypted one-time bootstrap handoff
+        if: vars.VPS_BOOTSTRAP_CERT != ''
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: platform-bootstrap-${{ github.run_id }}
+          path: ${{ runner.temp }}/platform-bootstrap.cms
+          retention-days: 1
+          if-no-files-found: error

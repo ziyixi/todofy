@@ -14,6 +14,8 @@ hand-written, checked against the codec on every fixture.
 | --- | --- | --- |
 | `mail-received-v1/` | Mail Hero → its webhook consumer (Todofy) | Mail Hero |
 | `ops-v1/` | Mail Hero, Todofy, Lab and Watch ↔ the ops dashboard `home` in [`dashboard/`](../dashboard/) (`Ops` entrypoints, canary, guard, digest) | Each service owns its answers; Lab and Watch expose `status()`/`setGuard()` only; see [`ops-v1/README.md`](ops-v1/README.md) |
+| `platform-runtime-v1/` | Independent platform daemon → deployment verifier/host observer; shared bounded runtime metadata | Platform; [contract](platform-runtime-v1/README.md) |
+| `fleet-report-v1/` | Platform host observer → Fleet; signed metadata with the shared runtime snapshot | Fleet; [contract](fleet-report-v1/README.md) |
 | `task-intent-v1/` | a proposing app (Lab, the watch app) → Todofy's `Ops` entrypoint: "create these Todoist tasks", idempotent per intent | Todofy; see [`task-intent-v1/README.md`](task-intent-v1/README.md) |
 
 ## `mail-received-v1/`

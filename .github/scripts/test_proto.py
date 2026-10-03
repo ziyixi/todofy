@@ -163,9 +163,45 @@ def production_sources(manifest: Path) -> list[Path]:
 
 
 def py_production_sources(pyproject: Path) -> list[Path]:
-    """The Python a Worker ships: its wrangler.toml base_dir."""
-    config = tomllib.loads((pyproject.parent / "wrangler.toml").read_text())
-    return sorted((pyproject.parent / config.get("base_dir", ".")).rglob("*.py"))
+    """Production Python: a Worker's base_dir, or the independent VPS package's src/."""
+    config_path = pyproject.parent / "wrangler.toml"
+    if config_path.is_file():
+        config = tomllib.loads(config_path.read_text())
+        root = pyproject.parent / config.get("base_dir", ".")
+    else:
+        root = pyproject.parent / "src"
+        if not root.is_dir():
+            raise AssertionError("a VPS Python proto user must have an explicit src/ package")
+    return sorted(root.rglob("*.py"))
+
+
+def proto_import_closure(paths: set[str], root: Path = PROTO) -> set[str]:
+    """Descriptors compile their imported message packages into a bundle, including shared runtime types."""
+    sources = {"proto/" + path.relative_to(root).as_posix(): path for path in root.rglob("*.proto")
+               if not {"node_modules", "ts", "python", ".generate"} & set(path.relative_to(root).parts)
+               and not any(part.startswith(".") for part in path.relative_to(root).parts)}
+    graph = {name: {"proto/" + imported for imported in re.findall(r'^\s*import(?:\s+(?:public|weak))?\s+"([^"\n]+)"',
+                                                               path.read_text(), re.M)}
+             for name, path in sources.items()}
+    pending = []
+    for imported in paths:
+        if not imported.startswith("proto/") or imported in {"proto/ts", "proto/python"}:
+            continue
+        stem = re.sub(r"_(?:pb|wire)(?:\.ts)?$", "", imported)
+        exact = stem + ".proto"
+        if exact in sources:
+            pending.append(exact)
+        else:
+            pending.extend(name for name in sources if name.startswith(imported.rstrip("/") + "/"))
+    result, visited = set(paths), set()
+    while pending:
+        current = pending.pop()
+        if current in visited:
+            continue
+        visited.add(current)
+        result.add(current)
+        pending.extend(dependency for dependency in graph.get(current, ()) if dependency in sources)
+    return result
 
 
 def value_importers() -> dict[str, set[str]]:
@@ -184,7 +220,7 @@ def value_importers() -> dict[str, set[str]]:
         for source in py_production_sources(pyproject):
             for module in re.findall(r"^\s*(?:from|import)\s+(ziyixi_proto(?:\.\w+)*)", source.read_text(), re.MULTILINE):
                 found.setdefault(app_of(pyproject), set()).update({"python", "proto/" + "/".join(module.split(".")[1:])})
-    return found
+    return {app: proto_import_closure(paths) for app, paths in found.items()}
 
 
 def py_bundled(data: dict) -> bool:
@@ -400,7 +436,8 @@ class Users(unittest.TestCase):
         """pywrangler vendors ziyixi-proto from proto/'s source tree inside Pyodide, which cannot generate,
         and uv may install the package from its wheel cache without regenerating that tree (after `git clean
         -fdX`, for example). The npm install every pywrangler command needs (wrangler) regenerates it."""
-        users = {path: data for path, data in py_users().items() if py_bundled(data)}
+        users = {path: data for path, data in py_users().items()
+                 if py_bundled(data) and (path.parent / "wrangler.toml").is_file()}
         self.assertTrue(users, "no Python Worker bundles ziyixi-proto")
         for pyproject in users:
             with self.subTest(pyproject=str(pyproject.relative_to(REPO))):
@@ -428,6 +465,30 @@ class Users(unittest.TestCase):
             with self.subTest(package=package):
                 actual = {app for app, paths in imports.items() if any(path.startswith(package) for path in paths)}
                 self.assertEqual(actual, set(importers))
+
+    def test_proto_dependencies_include_foreign_shared_message_packages(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for name, text in {"fleet/telemetry/v1/report.proto": 'import "platform/runtime/v1/runtime.proto";',
+                               "platform/runtime/v1/runtime.proto": 'import "common/wire/v1/wire.proto";',
+                               "common/wire/v1/wire.proto": ''}.items():
+                path = root / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(text)
+            closure = proto_import_closure({"ts", "proto/fleet/telemetry/v1/report_pb.ts"}, root)
+            self.assertIn("proto/platform/runtime/v1/runtime.proto", closure)
+            self.assertIn("proto/common/wire/v1/wire.proto", closure)
+            self.assertIn("ts", closure)
+
+    def test_vps_python_proto_user_has_independent_source_and_local_dependency(self):
+        platform = REPO / "platform/pyproject.toml"
+        data = tomllib.loads(platform.read_text())
+        self.assertTrue(py_bundled(data))
+        self.assertEqual(data["tool"]["uv"]["sources"][PY_PACKAGE], {"path": "../proto/python"})
+        self.assertEqual(data["project"]["scripts"]["personal-cloud"], "personal_cloud.__main__:main")
+        self.assertFalse((platform.parent / "wrangler.toml").exists())
+        self.assertTrue(all(source.is_relative_to(platform.parent / "src") for source in py_production_sources(platform)))
 
     def test_a_next_js_ui_is_read_from_its_source_directories(self):
         """FlowDay's UI (Next.js, no src/) imports flowday.ui.v1 from lib/: its production sources are found."""

@@ -98,7 +98,20 @@ ALLOWED_TYPES = frozenset({
     "cloudflare_zero_trust_access_policy",
     "cloudflare_d1_database",
     "cloudflare_r2_bucket",
+    "cloudflare_zero_trust_access_service_token",
+    "cloudflare_zero_trust_tunnel_cloudflared",
+    "cloudflare_zero_trust_tunnel_cloudflared_config",
+    "cloudflare_dns_record",
 })
+# New network resources are scoped by address as well as type. No unrelated DNS or tunnel is managed.
+PLATFORM_OBJECTS = frozenset({
+    "cloudflare_zero_trust_access_service_token.platform_deploy",
+    "cloudflare_zero_trust_tunnel_cloudflared.platform",
+    "cloudflare_zero_trust_tunnel_cloudflared_config.platform",
+    "cloudflare_dns_record.platform",
+})
+PLATFORM_TYPES = frozenset(address.split(".", 1)[0] for address in PLATFORM_OBJECTS)
+
 # Objects an apply must never write to (an import, which only reads, is allowed): address -> the object's id. The
 # backup app's only policy is application-scoped; whether Cloudflare accepts an application PUT that references it by
 # id is unproven (no dry run exists), and a refused or partial PUT would cut off the backup collector. README.md
@@ -128,7 +141,8 @@ from catalog import load_catalog  # noqa: E402
 
 # Preserve the existing older-Python local output-check behaviour; CI requires 3.11+.
 WRANGLER_CONFIGS = tuple(load_catalog(REPO).worker_configs().values()) if tomllib is not None else ()
-OUTPUTS = ("access_aud", "d1_database_ids", "r2_bucket_names")
+PUBLIC_OUTPUTS = ("access_aud", "d1_database_ids", "r2_bucket_names")
+OUTPUTS = (*PUBLIC_OUTPUTS, "platform_bootstrap")
 
 
 class Refused(Exception):
@@ -585,7 +599,7 @@ def read_wrangler_configs(repo: Path = REPO) -> dict[str, dict]:
 def output_problems(outputs: dict[str, Any], configs: dict[str, dict]) -> list[str]:
     """Every place where a wrangler.toml and the planned outputs disagree. Paths and field names only, no value."""
     problems = []
-    missing = [name for name in OUTPUTS if name not in outputs]
+    missing = [name for name in PUBLIC_OUTPUTS if name not in outputs]
     if missing:
         return [f"the plan has no output {name}" for name in missing]
     aud, d1, r2 = outputs["access_aud"], outputs["d1_database_ids"], outputs["r2_bucket_names"]
@@ -834,7 +848,11 @@ def type_violations(plan_json: Any) -> list[str]:
             continue
         if item.get("mode") != "managed":
             found.append(f"a {_type_name(item.get('type'))} data source")
-        elif item.get("type") not in ALLOWED_TYPES:
+        elif (item.get("type") not in ALLOWED_TYPES
+              or (item.get("type") in PLATFORM_TYPES and _base_address(item.get("address")) not in PLATFORM_OBJECTS)
+              or (item.get("type") == "cloudflare_dns_record" and item.get("address") not in {
+                  'cloudflare_dns_record.platform["runtime"]',
+              })):
             found.append(_type_name(item.get("type")))
     return sorted(set(found))
 
@@ -1011,6 +1029,7 @@ def command_apply(args: argparse.Namespace, env: dict[str, str]) -> int:
             if tofu_code != 0:
                 raise Refused("tofu reports changes that the summary does not classify; nothing was applied")
             print("apply: nothing to apply")
+            export_platform_credentials(session, env)
             return EXIT_OK
         print("apply: every gate passed; applying exactly the saved plan")
         session.tofu.apply(work / "apply.tfplan")
@@ -1020,6 +1039,7 @@ def command_apply(args: argparse.Namespace, env: dict[str, str]) -> int:
         if tofu_code != 0 or drift_exit(summary) != EXIT_OK or problems:
             raise Refused("applied, but the plan after the apply is not \"No changes\" with matching outputs")
         print("apply: done. The plan after the apply is \"No changes\".")
+        export_platform_credentials(session, env)
         return EXIT_OK
     except Refused as error:
         print(f"infra_state: {error}", file=sys.stderr)
@@ -1032,6 +1052,18 @@ def command_apply(args: argparse.Namespace, env: dict[str, str]) -> int:
             session.cleanup()
         if not args.keep_work_dir:
             shutil.rmtree(work, ignore_errors=True)
+
+
+def export_platform_credentials(session: "Session", env: dict[str, str]) -> None:
+    """Optional one-time encrypted handoff; never a public tofu output."""
+    if not env.get("VPS_BOOTSTRAP_CERT"):
+        return
+    from platform_export import ExportFailed, encrypted_export
+
+    try:
+        encrypted_export(session, env, lambda path: cloudflare_get(env["CLOUDFLARE_API_TOKEN"], path), INFRA)
+    except (ExportFailed, OSError, subprocess.SubprocessError):
+        raise Refused("platform credential export failed; retry a no-change apply with the same recipient") from None
 
 
 def committed_key_provider(versions: Optional[Path] = None) -> str:

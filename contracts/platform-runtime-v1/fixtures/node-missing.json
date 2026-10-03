@@ -1,0 +1,22 @@
+{
+  "name": "nodeStatus",
+  "node_key": "vps",
+  "state": "missing",
+  "observed_at": "2026-10-03T00:00:00Z",
+  "workloads": [
+    {
+      "name": "workloads/newsletter",
+      "workload_key": "newsletter",
+      "process_state": "missing",
+      "admission_state": "unsupported",
+      "health_state": "unknown",
+      "release": {
+        "state": "missing",
+        "desired": null,
+        "actual": null,
+        "observed_at": "2026-10-03T00:00:00Z"
+      },
+      "observed_at": "2026-10-03T00:00:00Z"
+    }
+  ]
+}

@@ -50,7 +50,9 @@ from catalog import load_catalog  # noqa: E402
 WORKERS = load_catalog(REPO).worker_configs()
 
 # The zones whose zone routes are compared (every Custom Domain and route of every Worker is in one of them).
-ZONES = ("ziyixi.science",)
+from cloud_profile import load_profile  # noqa: E402
+
+ZONES = (load_profile(REPO)["zone"],)
 
 # Each deploy-vars wrapper: language, file, and which Worker gets its vars and its secrets (per mode for Todofy).
 WRAPPERS = {
@@ -60,6 +62,7 @@ WRAPPERS = {
     "flowday": {"language": "js", "file": "flowday/deploy/deploy-vars.mjs", "vars": "flowday", "secrets": "flowday"},
     "links": {"language": "js", "file": "links/deploy/deploy-vars.mjs", "vars": "links", "secrets": "links"},
     "watch": {"language": "js", "file": "watch/deploy/deploy-vars.mjs", "vars": "watch", "secrets": "watch"},
+    "fleet": {"language": "js", "file": "fleet/deploy/deploy-vars.mjs", "vars": "fleet", "secrets": "fleet"},
     "todofy": {
         "language": "py",
         "file": "todofy/deploy/deploy_vars.py",

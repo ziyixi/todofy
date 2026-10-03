@@ -11,8 +11,8 @@ one ``IntEnum`` per enum, one frozen dataclass per message and a ``FIELDS`` tabl
 runtime ``ziyixi_proto.wire_json`` reads and writes. OUT_DIR is the ``ziyixi_proto`` package directory.
 An enum nested in a message is a top-level ``IntEnum`` named ``<Message>_<Enum>``, as protobuf-es names
 it (``Send_State``); a map field is a ``dict``; a field whose name is a Python keyword is the attribute
-``<name>_`` (PEP 8: mail.received.v1's ``from`` is ``from_``), its wire name unchanged. Services are not
-generated (the profile is about messages).
+``<name>_`` (PEP 8: mail.received.v1's ``from`` is ``from_``), its wire name unchanged. Services expose
+generated HTTP binding metadata with typed messages; network/server implementations remain application-owned.
 
 Only the packages a Python user imports are generated (PYTHON_PACKAGES): a package that only TypeScript
 apps use (an app's UI API) may use what this profile lacks without stopping generation for every app.
@@ -57,6 +57,9 @@ PYTHON_PACKAGES = {
     "ops.v1": True,
     "mailhero.webhook.v1": True,
     "todofy.ui.v1": True,
+    "platform.runtime.v1": True,
+    "fleet.telemetry.v1": True,
+    "common.errors.v1": True,
     "prototest.v1": False,
 }
 REQUIRED_OPTION = "[google.api.field_behavior]"
@@ -327,6 +330,29 @@ def generate_file(file: dict[str, Any], types: dict[str, tuple[str, str]], enums
             body.append("    pass")
         tables.append(f"    {name}: (\n" + "".join(f"        {f},\n" for f in fields) + "    ),")
 
+    # HTTP routes are metadata generated from google.api.http, not an application-maintained path table.
+    bindings = []
+    for service in file.get("service", []):
+        for method in service.get("method", []):
+            rule = method.get("options", {}).get("[google.api.http]")
+            if rule is None:
+                continue
+            request = ("type(None)" if method["inputType"] == ".google.protobuf.Empty"
+                       else ref(method["inputType"], service["name"] + "." + method["name"]))
+            response = ("type(None)" if method["outputType"] == ".google.protobuf.Empty"
+                        else ref(method["outputType"], service["name"] + "." + method["name"]))
+            for binding in [rule, *rule.get("additionalBindings", [])]:
+                verbs = [verb for verb in ("get", "post", "patch", "put", "delete") if verb in binding]
+                if len(verbs) != 1 or binding.get("responseBody"):
+                    raise GenerateError(f"{package}.{service['name']}.{method['name']}: unsupported HTTP binding")
+                verb = verbs[0]
+                values = [json.dumps(package + "." + service["name"]), json.dumps(method["name"]),
+                          json.dumps(verb.upper()), json.dumps(binding[verb]), request, response,
+                          json.dumps(binding.get("body", ""))]
+                bindings.append("    HttpBinding(" + ", ".join(values) + "),")
+    if bindings:
+        imports.add(f"from {PACKAGE}.http_routes import HttpBinding")
+
     lines = [
         HEADER.format(source=file["name"]).rstrip("\n"),
         f'"""{package} ({file["name"]}) in the wire JSON profile; read and write with {PACKAGE}.wire_json."""',
@@ -340,6 +366,11 @@ def generate_file(file: dict[str, Any], types: dict[str, tuple[str, str]], enums
         *sorted(imports),
         f"from {PACKAGE}.wire_json import {', '.join(sorted(runtime))}",
         *body,
+        "",
+        "# google.api.http route metadata; requests/responses are generated classes, never copied DTOs.",
+        "HTTP_BINDINGS = (",
+        *bindings,
+        ")",
         "",
         "",
         "# The file's named string formats (common.wire.v1.formats): wire_json.format_matches(FORMATS[name], value).",

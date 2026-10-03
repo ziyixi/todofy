@@ -1,0 +1,473 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.local/platform-runtime-v1/platform-runtime-v1.schema.json",
+  "title": "Bounded personal-cloud runtime observations",
+  "description": "Read-only configured workloads and independently verified desired/actual release identities. No credentials, logs, raw provider objects or command surface.",
+  "$defs": {
+    "WorkloadKey": {
+      "description": "Stable configured workload alias, never a hostname, path or Kubernetes object name.",
+      "type": "string",
+      "pattern": "^(?:[a-z][a-z0-9-]{0,31})$(?!\\n)"
+    },
+    "SourceSha": {
+      "description": "Git source commit identity.",
+      "type": "string",
+      "pattern": "^(?:[0-9a-f]{40})$(?!\\n)"
+    },
+    "ImageDigest": {
+      "description": "Immutable image digest, with no registry, repository or mutable tag.",
+      "type": "string",
+      "pattern": "^(?:sha256:[0-9a-f]{64})$(?!\\n)"
+    },
+    "RequestId": {
+      "description": "UUID4 release request identity, unrelated to business run IDs.",
+      "type": "string",
+      "pattern": "^(?:[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$(?!\\n)"
+    },
+    "WorkloadName": {
+      "description": "A configured workload resource name.",
+      "type": "string",
+      "pattern": "^(?:workloads/[a-z][a-z0-9-]{0,31})$(?!\\n)"
+    },
+    "ReleaseName": {
+      "description": "Immutable UUID4 release resource name.",
+      "type": "string",
+      "pattern": "^(?:releases/[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$(?!\\n)"
+    },
+    "ReleaseEtag": {
+      "description": "Opaque bounded concurrency token.",
+      "type": "string",
+      "pattern": "^(?:[A-Za-z0-9_-]{1,128})$(?!\\n)"
+    },
+    "ReleaseErrorCode": {
+      "description": "Safe fixed diagnostic code, never provider errors, paths or content.",
+      "type": "string",
+      "pattern": "^(?:[A-Z][A-Z0-9_]{0,63})$(?!\\n)"
+    },
+    "WorkloadResourceName": {
+      "description": "A configured workload resource name.",
+      "type": "string",
+      "pattern": "^(?:workloads/[a-z][a-z0-9-]{0,31})$(?!\\n)"
+    },
+    "PageToken": {
+      "description": "Bounded opaque collection cursor, empty when complete.",
+      "type": "string",
+      "maxLength": 128,
+      "pattern": "^(?:[A-Za-z0-9_-]*)$(?!\\n)"
+    },
+    "ReleaseUuid": {
+      "description": "UUID4 release or request identity.",
+      "type": "string",
+      "pattern": "^(?:[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$(?!\\n)"
+    },
+    "ReleaseResourceName": {
+      "description": "Immutable UUID4 release resource name.",
+      "type": "string",
+      "pattern": "^(?:releases/[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$(?!\\n)"
+    },
+    "ResumeEtag": {
+      "description": "Opaque bounded concurrency token from the persisted operation.",
+      "type": "string",
+      "pattern": "^(?:[A-Za-z0-9_-]{1,128})$(?!\\n)"
+    },
+    "ReleaseTarget": {
+      "type": "object",
+      "required": [
+        "workload_key",
+        "source_sha",
+        "image_digest",
+        "request_id"
+      ],
+      "properties": {
+        "workload_key": {
+          "$ref": "#/$defs/WorkloadKey"
+        },
+        "source_sha": {
+          "$ref": "#/$defs/SourceSha"
+        },
+        "image_digest": {
+          "$ref": "#/$defs/ImageDigest"
+        },
+        "request_id": {
+          "$ref": "#/$defs/RequestId"
+        },
+        "generation": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "ReleaseStatus": {
+      "type": "object",
+      "required": [
+        "state",
+        "desired",
+        "actual",
+        "observed_at"
+      ],
+      "properties": {
+        "state": {
+          "enum": [
+            "missing",
+            "unknown",
+            "pending",
+            "ready",
+            "paused",
+            "degraded"
+          ]
+        },
+        "desired": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/ReleaseTarget"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "actual": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/ReleaseTarget"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "observed_at": {
+          "type": "string"
+        },
+        "observed_generation": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "WorkloadStatus": {
+      "type": "object",
+      "required": [
+        "name",
+        "workload_key",
+        "process_state",
+        "admission_state",
+        "health_state",
+        "release",
+        "observed_at"
+      ],
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/WorkloadName"
+        },
+        "workload_key": {
+          "$ref": "#/$defs/WorkloadKey"
+        },
+        "process_state": {
+          "enum": [
+            "running",
+            "starting",
+            "stopped",
+            "missing",
+            "unknown"
+          ]
+        },
+        "admission_state": {
+          "enum": [
+            "accepting",
+            "draining",
+            "frozen",
+            "unsupported",
+            "unknown"
+          ]
+        },
+        "health_state": {
+          "enum": [
+            "healthy",
+            "degraded",
+            "unhealthy",
+            "unsupported",
+            "unknown"
+          ]
+        },
+        "release": {
+          "$ref": "#/$defs/ReleaseStatus"
+        },
+        "observed_at": {
+          "type": "string"
+        },
+        "active_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000
+        },
+        "unknown_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000
+        },
+        "next_due_at": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "Release": {
+      "type": "object",
+      "required": [
+        "targets"
+      ],
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/ReleaseName"
+        },
+        "request_id": {
+          "$ref": "#/$defs/RequestId"
+        },
+        "targets": {
+          "type": "array",
+          "maxItems": 16,
+          "items": {
+            "$ref": "#/$defs/ReleaseTarget"
+          }
+        },
+        "phase": {
+          "enum": [
+            "accepted",
+            "draining",
+            "frozen",
+            "applying",
+            "verifying",
+            "ready",
+            "held",
+            "failed"
+          ]
+        },
+        "etag": {
+          "$ref": "#/$defs/ReleaseEtag"
+        },
+        "create_time": {
+          "type": "string"
+        },
+        "update_time": {
+          "type": "string"
+        },
+        "observed_workloads": {
+          "type": "array",
+          "maxItems": 16,
+          "items": {
+            "$ref": "#/$defs/WorkloadStatus"
+          }
+        },
+        "error_code": {
+          "$ref": "#/$defs/ReleaseErrorCode"
+        }
+      },
+      "additionalProperties": false
+    },
+    "ReleaseSummary": {
+      "type": "object",
+      "required": [
+        "name",
+        "request_id",
+        "phase",
+        "etag",
+        "update_time"
+      ],
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/ReleaseName"
+        },
+        "request_id": {
+          "$ref": "#/$defs/RequestId"
+        },
+        "phase": {
+          "enum": [
+            "accepted",
+            "draining",
+            "frozen",
+            "applying",
+            "verifying",
+            "ready",
+            "held",
+            "failed"
+          ]
+        },
+        "etag": {
+          "$ref": "#/$defs/ReleaseEtag"
+        },
+        "update_time": {
+          "type": "string"
+        },
+        "error_code": {
+          "$ref": "#/$defs/ReleaseErrorCode"
+        }
+      },
+      "additionalProperties": false
+    },
+    "NodeStatus": {
+      "type": "object",
+      "required": [
+        "name",
+        "node_key",
+        "state",
+        "observed_at",
+        "workloads"
+      ],
+      "properties": {
+        "name": {
+          "const": "nodeStatus"
+        },
+        "node_key": {
+          "$ref": "#/$defs/WorkloadKey"
+        },
+        "state": {
+          "enum": [
+            "ready",
+            "degraded",
+            "unavailable",
+            "unknown",
+            "missing"
+          ]
+        },
+        "observed_at": {
+          "type": "string"
+        },
+        "workloads": {
+          "type": "array",
+          "maxItems": 16,
+          "items": {
+            "$ref": "#/$defs/WorkloadStatus"
+          }
+        },
+        "current_release": {
+          "$ref": "#/$defs/ReleaseSummary"
+        }
+      },
+      "additionalProperties": false
+    },
+    "ErrorReason": {
+      "enum": [
+        "workload_not_found",
+        "release_conflict",
+        "release_held",
+        "release_not_found",
+        "resume_conflict",
+        "etag_mismatch",
+        "release_not_held"
+      ]
+    },
+    "GetNodeStatusRequest": {
+      "type": "object",
+      "required": [
+        "name"
+      ],
+      "properties": {
+        "name": {
+          "const": "nodeStatus"
+        }
+      },
+      "additionalProperties": false
+    },
+    "ListWorkloadsRequest": {
+      "type": "object",
+      "properties": {
+        "page_size": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 16
+        },
+        "page_token": {
+          "$ref": "#/$defs/PageToken"
+        }
+      },
+      "additionalProperties": false
+    },
+    "ListWorkloadsResponse": {
+      "type": "object",
+      "required": [
+        "workloads",
+        "next_page_token"
+      ],
+      "properties": {
+        "workloads": {
+          "type": "array",
+          "maxItems": 16,
+          "items": {
+            "$ref": "#/$defs/WorkloadStatus"
+          }
+        },
+        "next_page_token": {
+          "$ref": "#/$defs/PageToken"
+        }
+      },
+      "additionalProperties": false
+    },
+    "GetWorkloadRequest": {
+      "type": "object",
+      "required": [
+        "name"
+      ],
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/WorkloadResourceName"
+        }
+      },
+      "additionalProperties": false
+    },
+    "CreateReleaseRequest": {
+      "type": "object",
+      "required": [
+        "release_id",
+        "request_id",
+        "release"
+      ],
+      "properties": {
+        "release_id": {
+          "$ref": "#/$defs/ReleaseUuid"
+        },
+        "request_id": {
+          "$ref": "#/$defs/ReleaseUuid"
+        },
+        "release": {
+          "$ref": "#/$defs/Release"
+        }
+      },
+      "additionalProperties": false
+    },
+    "GetReleaseRequest": {
+      "type": "object",
+      "required": [
+        "name"
+      ],
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/ReleaseResourceName"
+        }
+      },
+      "additionalProperties": false
+    },
+    "ResumeReleaseRequest": {
+      "type": "object",
+      "required": [
+        "name",
+        "request_id",
+        "etag"
+      ],
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/ReleaseResourceName"
+        },
+        "request_id": {
+          "$ref": "#/$defs/ReleaseUuid"
+        },
+        "etag": {
+          "$ref": "#/$defs/ResumeEtag"
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

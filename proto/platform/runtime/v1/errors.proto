@@ -1,0 +1,29 @@
+// RuntimeService domain reasons (AIP-193). Common transport reasons are common.errors.v1.CommonReason.
+// Both are emitted as google.rpc.ErrorInfo under platform.ziyixi.science, using the value's name
+// without ERROR_REASON_/COMMON_REASON_; never a second application error envelope.
+syntax = "proto3";
+package platform.runtime.v1;
+
+option java_multiple_files = true;
+option java_outer_classname = "ErrorsProto";
+option java_package = "science.ziyixi.platform.runtime.v1";
+
+// Stable safe reasons for the bounded configured workload and persisted deployment APIs.
+enum ErrorReason {
+  // Never sent.
+  ERROR_REASON_UNSPECIFIED = 0;
+  // NOT_FOUND (404): a valid workload alias is not in the daemon's explicit configuration.
+  ERROR_REASON_WORKLOAD_NOT_FOUND = 1;
+  // ALREADY_EXISTS (409): this release UUID4 already belongs to different frozen targets/request identity.
+  ERROR_REASON_RELEASE_CONFLICT = 2;
+  // FAILED_PRECONDITION (400): an existing incomplete release prevents a new operation.
+  ERROR_REASON_RELEASE_HELD = 3;
+  // NOT_FOUND (404): the exact persisted release resource does not exist.
+  ERROR_REASON_RELEASE_NOT_FOUND = 4;
+  // ALREADY_EXISTS (409): this resume request UUID4 already belongs to different continuation input.
+  ERROR_REASON_RESUME_CONFLICT = 5;
+  // ABORTED (409): a resume's etag is stale; read the current persisted operation before deciding again.
+  ERROR_REASON_ETAG_MISMATCH = 6;
+  // FAILED_PRECONDITION (400): explicit resume is allowed only for the documented held/failed phases.
+  ERROR_REASON_RELEASE_NOT_HELD = 7;
+}

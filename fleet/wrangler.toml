@@ -1,0 +1,32 @@
+# Top-level is the sole production source. Access AUD is added after gated IaC creation.
+# Owner identities and report signing key are Worker secrets; never put them here.
+name = "fleet"
+account_id = "f57937bd1d93bf59e737b6d8445fb7a3"
+main = "worker/src/index.ts"
+compatibility_date = "2026-09-29"
+workers_dev = false
+preview_urls = false
+routes = [{ pattern = "fleet.ziyixi.science", custom_domain = true }]
+
+[assets]
+directory = "web/dist"
+binding = "ASSETS"
+run_worker_first = true
+not_found_handling = "single-page-application"
+
+[[durable_objects.bindings]]
+name = "FLEET"
+class_name = "FleetState"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["FleetState"]
+
+[observability]
+enabled = true
+
+[vars]
+PUBLIC_HOST = "fleet.ziyixi.science"
+ACCESS_ISSUER = "https://ziyixi.cloudflareaccess.com"
+HOST_KEY = "vps"
+HOST_EPOCH = "1"

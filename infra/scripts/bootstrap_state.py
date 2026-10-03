@@ -57,7 +57,7 @@ ADMIN = REPO / "mail-hero" / "deploy" / "cloudflare-admin.py"
 WRANGLER = REPO / "mail-hero" / "cloudflare" / "node_modules" / ".bin" / "wrangler"
 # The objects infra/ manages (README.md "Managed here (19 objects)"; test_infra_config.py ties the two together and to
 # the keys of access.tf and storage.tf, so adding an object without raising this fails the Changes job).
-EXPECTED_OBJECTS = 19
+EXPECTED_OBJECTS = 28
 EXIT_NOT_IMPORT_ONLY = 4
 
 

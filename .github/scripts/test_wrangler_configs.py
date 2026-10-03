@@ -65,6 +65,7 @@ WRAPPERS = {
     "flowday": ("flowday/deploy/deploy-vars.mjs", r"deploy-vars\.mjs (exec|secrets)\b", ["flowday"]),
     "links": ("links/deploy/deploy-vars.mjs", r"deploy-vars\.mjs (exec|secrets)\b", ["links"]),
     "watch": ("watch/deploy/deploy-vars.mjs", r"deploy-vars\.mjs (exec|secrets)\b", ["watch"]),
+    "fleet": ("fleet/deploy/deploy-vars.mjs", r"deploy-vars\.mjs (exec|secrets)\b", ["fleet"]),
 }
 # Worker vars that must never be committed: personal values (GitHub environment secrets) ...
 PERSONAL_VARS = {
@@ -74,6 +75,7 @@ PERSONAL_VARS = {
     "TODOIST_DEFAULT_PROJECT_ID",
     "TODOIST_OPS_PROJECT_ID",
     "TODOIST_REVIEW_PROJECT_ID",
+    "REPORT_HMAC_KEY",
 }
 # ... and the GitHub names they come from. In ci.yml they are only ever secrets (or checks' placeholders).
 PERSONAL_INPUTS = {
@@ -95,6 +97,8 @@ PERSONAL_INPUTS = {
     "LINKS_ACCESS_OWNER_ALIASES",
     "WATCH_ACCESS_OWNER",
     "WATCH_ACCESS_OWNER_ALIASES",
+    "FLEET_ACCESS_OWNER",
+    "FLEET_ACCESS_OWNER_ALIASES",
 }
 # Personal inputs a deploy job reads from another app's secret: the owner of Lab, FlowDay, the links app and the watch
 # app is the dashboard's owner (one person, the same Access identities), so their deploys read the dashboard's secrets
@@ -120,7 +124,7 @@ TOGGLES = {
     "TODOFY_GTD_REVIEW_ENABLED",
     "DASHBOARD_CANARY_ENABLED",
 }
-DEPLOY_JOBS = ("todofy-deploy", "mail-hero-deploy", "dashboard-deploy", "lab-deploy", "flowday-deploy", "links-deploy", "watch-deploy")
+DEPLOY_JOBS = ("todofy-deploy", "mail-hero-deploy", "dashboard-deploy", "lab-deploy", "flowday-deploy", "links-deploy", "watch-deploy", "fleet-deploy")
 # The retired generators' required GitHub variables, still set in production: a revert of the committed-config
 # layout needs them (README "Rolling back the committed-config layout"), and nothing may read them now.
 LEGACY_VARIABLES = {
@@ -393,7 +397,10 @@ class Files(unittest.TestCase):
             for service in load(PRODUCTION[worker])["services"]:
                 with self.subTest(worker=worker, service=service["binding"]):
                     self.assertIn(service["service"], PRODUCTION)
-                    self.assertEqual(service["entrypoint"], "Ops")
+                    expected = "NewsletterOps" if worker == "home" and service["binding"] == "NEWSLETTER" else "Ops"
+                    self.assertEqual(service["entrypoint"], expected)
+                    if expected == "NewsletterOps":
+                        self.assertEqual(service["service"], "fleet")
         # Lab reaches Todofy only through the gateway's Ops entrypoint (contracts/task-intent-v1).
         self.assertEqual(
             [(s["binding"], s["service"]) for s in load(PRODUCTION["lab"])["services"]], [("TODOFY", "todofy")]
@@ -607,7 +614,10 @@ class Hosts(unittest.TestCase):
         it. That it also has a tile is the next test."""
         registry = (REPO / "dashboard" / "worker" / "src" / "registry.ts").read_text()
         scripts = registry_workers(registry)
-        d1 = set(re.findall(r"kind: 'd1',[^}]*?match: '([0-9a-f-]{36})'", registry))
+        identities = (REPO / "dashboard/worker/src/resource-identities.ts").read_text()
+        values = dict(re.findall(r'"([^"\n]+)": "([0-9a-f-]+)"', identities))
+        aliases = re.findall(r"kind: 'd1',[^}]*?RESOURCE_IDENTITIES\['([^']+)'\]", registry)
+        d1 = {values[key] for key in aliases}
         for worker, path in PRODUCTION.items():
             with self.subTest(worker=worker):
                 self.assertIn(worker, scripts)
@@ -829,7 +839,9 @@ class Workflow(unittest.TestCase):
 
     def test_github_variables_are_only_the_switches(self):
         used = set(re.findall(r"\bvars\.([A-Z0-9_]+)", WORKFLOW.read_text()))
-        self.assertEqual(used, TOGGLES)
+        self.assertEqual(used, TOGGLES | {"VPS_DEPLOY_ENABLED"})
+        # A repository gate cannot inject private runtime values into a Worker.
+        self.assertIn("&& vars.VPS_DEPLOY_ENABLED == 'true'", WORKFLOW.read_text())
 
     def test_personal_values_come_only_from_secrets_or_placeholders(self):
         for job_name, job in self.jobs.items():
@@ -1018,6 +1030,31 @@ class Workflow(unittest.TestCase):
                 self.assertIn('--outdir "$RUNNER_TEMP/watch-bundle"', dry["run"])
                 self.assertIn('node ../deploy/bundle-size.mjs "$RUNNER_TEMP/watch-bundle"', dry["run"])
                 self.assertLess(dry["run"].index("--outdir"), dry["run"].index("bundle-size.mjs"))
+
+    def test_fleet_has_dedicated_secrets_readonly_probes_and_guarded_deploy(self):
+        job = self.jobs["fleet-deploy"]
+        deploy_steps = steps(job)
+        [secret] = [step for step in deploy_steps if "deploy-vars.mjs secrets" in step["run"]]
+        self.assertEqual(secret["env"], {
+            "FLEET_ACCESS_OWNER": "${{ secrets.FLEET_ACCESS_OWNER }}",
+            "FLEET_ACCESS_OWNER_ALIASES": "${{ secrets.FLEET_ACCESS_OWNER_ALIASES }}",
+            "FLEET_REPORT_HMAC_KEY": "${{ secrets.FLEET_REPORT_HMAC_KEY }}",
+        })
+        runs = "\n".join(step["run"] for step in deploy_steps)
+        guard = runs.index("cf-guard.mjs --config fleet/wrangler.toml")
+        deploy = runs.index("wrangler deploy --config ../wrangler.toml")
+        version = runs.index("production.sh")
+        probe = runs.index("access.sh")
+        self.assertLess(guard, deploy)
+        self.assertLess(deploy, version)
+        self.assertLess(version, probe)
+        self.assertIn("access.sh\" / /api/v1/fleetStatus", runs)
+        self.assertNotIn("--remote", runs)
+        self.assertNotIn("--var", runs)
+        for name in ("fleet-checks", "fleet-deploy"):
+            [dry] = [step for step in steps(self.jobs[name]) if "--dry-run" in step["run"]]
+            self.assertIn('node ../deploy/bundle-size.mjs "$RUNNER_TEMP/fleet-bundle"', dry["run"])
+        self.assertIn("fleet-deploy", needs(self.jobs["dashboard-deploy"]))
 
     def test_lab_flowday_links_and_watch_accept_exactly_the_owner_values_the_dashboard_accepts(self):
         """The same secrets feed these wrappers: their owner and alias rules must be the same lines, or a valid

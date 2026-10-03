@@ -5,6 +5,9 @@
 # each address adopted, and .github/scripts/test_infra_config.py compares the D1 ids with the wrangler.toml files on
 # every push. README.md "Import notes" records each import.
 
+# Fleet's owner and exact receipt application/policy are created before its first Worker deploy.
+# Read their actual IDs after the gated apply and record them here and config/resources.toml.
+# Never invent placeholders; first deployment also commits ACCESS_AUDIENCE and removes CHECK_ONLY.
 locals {
   access_policy_ids = {
     "owner"        = "018f1a13-1a1b-4cf6-a470-c865c4577851"

@@ -1,0 +1,19 @@
+# Public metadata for the independently released personal-cloud runtime package.
+version = 1
+id = "platform"
+target = "vps"
+image = "ghcr.io/ziyixi/todofy-platform"
+
+[[entries]]
+id = "platform-runtime"
+name = "平台运行时"
+description = "k3s 发布与运行状态 API；由 Fleet 展示状态"
+group = "hidden"
+icon = "server"
+accent = "slate"
+access = false
+app_only_signals = []
+order = 3
+position = 13
+[entries.status]
+type = "none"

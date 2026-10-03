@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: newsletter-release
+data:
+  request_id: pending
+  source_sha: pending
+  image: pending
+  phase: applying

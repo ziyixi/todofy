@@ -21,8 +21,12 @@ on:
         description: App to check and (on main) deploy
         type: choice
         # both = Todofy and Mail Hero (as before the dashboard existed); all = every app.
-        options: [both, all, todofy, mail-hero, dashboard, website, lab, flowday, links, watch, newsletter]
+        options: [both, all, todofy, mail-hero, dashboard, website, lab, flowday, links, watch, newsletter, fleet, platform]
         default: both
+      resume_vps_release:
+        description: Explicitly resume this commit's held VPS release after investigating its safe error
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -54,6 +58,8 @@ jobs:
       links_check: ${{ steps.decide.outputs.links_check }}
       watch_check: ${{ steps.decide.outputs.watch_check }}
       newsletter_check: ${{ steps.decide.outputs.newsletter_check }}
+      fleet_check: ${{ steps.decide.outputs.fleet_check }}
+      platform_check: ${{ steps.decide.outputs.platform_check }}
       contracts: ${{ steps.decide.outputs.contracts }}
       packages: ${{ steps.decide.outputs.packages }}
       infra: ${{ steps.decide.outputs.infra }}
@@ -68,6 +74,9 @@ jobs:
       links_deploy: ${{ steps.decide.outputs.links_deploy }}
       watch_deploy: ${{ steps.decide.outputs.watch_deploy }}
       newsletter_deploy: ${{ steps.decide.outputs.newsletter_deploy }}
+      fleet_deploy: ${{ steps.decide.outputs.fleet_deploy }}
+      platform_publish: ${{ steps.decide.outputs.platform_publish }}
+      platform_deploy: ${{ steps.decide.outputs.platform_deploy }}
       # A push to main that reuses a green branch run of the same commit (all check outputs above are false).
       checks_reused: ${{ steps.decide.outputs.checks_reused }}
       reused_run_url: ${{ steps.decide.outputs.reused_run_url }}
@@ -82,8 +91,13 @@ jobs:
           # The full history of every branch: the base (last successful main run, or the merge base
           # with origin/main) must be in the clone.
           fetch-depth: 0
-      - name: Test the change detection and the Wrangler configs
-        run: python3 -m unittest discover -s .github/scripts
+      - name: Test the change detection, public configuration and Wrangler configs
+        run: |
+          python3 -m unittest discover -s .github/scripts
+          python3 -m unittest discover -s tools/cloud-config/tests
+          python3 tools/cloud-config/generate.py --check
+          python3 -m unittest discover -s tools/service-catalog/tests
+          python3 tools/service-catalog/catalog.py --check
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
           node-version: '26'
@@ -884,6 +898,75 @@ jobs:
         if: always()
         run: rm -f "$RUNNER_TEMP/watch-secrets.json"
 
+  fleet-checks:
+    name: Fleet checks
+    needs: changes
+    if: needs.changes.outputs.fleet_check == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: fleet
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: '26'
+          cache: npm
+          cache-dependency-path: |
+            fleet/worker/package-lock.json
+            fleet/web/package-lock.json
+            proto/package-lock.json
+      - name: Install locked dependencies
+        run: |
+          npm ci --prefix worker --no-audit --no-fund
+          npm ci --prefix web --no-audit --no-fund
+      # The config test reads wrangler.toml with the pinned wrangler (worker/node_modules), hence after npm ci.
+      - name: Test the production config and deploy values
+        run: node --test deploy/test/*.test.mjs
+      - name: Lint, typecheck and test the Worker
+        working-directory: fleet/worker
+        run: |
+          npm run lint
+          npm run typecheck
+          npm test
+      # A real SQLite FleetState with synthetic signed receipts; no server credentials or network.
+      - name: Runtime tests (workerd with a real Durable Object)
+        working-directory: fleet/worker
+        run: npm run test:runtime
+      # Builds web/dist, which the dry-run below serves as static assets, and holds its JavaScript to its budget.
+      - name: Lint, typecheck, test and build the UI
+        working-directory: fleet/web
+        run: |
+          npm run lint
+          npm run typecheck
+          npm test
+          npm run build
+      # Fleet communicates with services through contracts and generated proto types.
+      - name: No imports from other apps
+        run: |
+          if grep -rnE "(from|import)[[:space:]]*\(?[[:space:]]*['\"][^'\"]*(mail-hero|todofy|dashboard|website|lab|flowday|links|watch|newsletter)/" worker/src web/src \
+            | grep -v "['\"]@ziyixi/proto/"; then exit 1; fi
+      # The committed config, run exactly as the deploy runs it but with --dry-run and placeholder values for what the
+      # deploy adds (deploy/deploy-vars.mjs). No token is needed. The bundle it writes is held to the app's budget and
+      # the Workers Free limit (deploy/bundle-size.mjs).
+      - name: Dry-run the committed config and check the bundle size
+        working-directory: fleet/worker
+        env:
+          FLEET_ACCESS_OWNER: owner@example.com
+          FLEET_ACCESS_OWNER_ALIASES: ''
+          FLEET_REPORT_HMAC_KEY: '0000000000000000000000000000000000000000000000000000000000000000'
+        run: |
+          node ../deploy/deploy-vars.mjs secrets "$RUNNER_TEMP/fleet-secrets.json"
+          node ../deploy/deploy-vars.mjs exec -- npx --no-install wrangler deploy --dry-run --config ../wrangler.toml \
+            --secrets-file "$RUNNER_TEMP/fleet-secrets.json" --outdir "$RUNNER_TEMP/fleet-bundle"
+          node ../deploy/bundle-size.mjs "$RUNNER_TEMP/fleet-bundle"
+      - name: Remove the placeholder secrets file
+        if: always()
+        run: rm -f "$RUNNER_TEMP/fleet-secrets.json"
+
   contracts:
     name: Contracts
     needs: changes
@@ -904,6 +987,7 @@ jobs:
             dashboard/worker/package-lock.json
             lab/worker/package-lock.json
             watch/worker/package-lock.json
+            fleet/worker/package-lock.json
             proto/package-lock.json
       - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
@@ -984,6 +1068,14 @@ jobs:
         run: |
           npm ci --no-audit --no-fund
           npx --no-install vitest run test/todofy.test.ts test/ops-golden.test.ts
+
+      # Both ends of the signed content-free report validate the synthetic telemetry contract.
+      # Home's caller step above also checks Fleet and Newsletter ops-v1 values; runtime tests live in Fleet checks.
+      - name: Fleet accepts the telemetry contract
+        working-directory: fleet/worker
+        run: |
+          npm ci --no-audit --no-fund
+          npm test -- --run test/report.test.ts
 
   # The personal website (website/, docs in website/docs): a Next.js static export on the assets-only Worker
   # ziyixi-website (Custom Domains www and the apex), plus the Notion relay Worker ziyixi-notion-publish
@@ -1236,13 +1328,14 @@ jobs:
       - name: Test the independent image without credentials or external calls
         run: |
           python3 scripts/smoke_image.py --audit-source
-          docker build --platform linux/amd64 --tag "newsletter-ci:$GITHUB_SHA" .
+          docker build --platform linux/amd64 --build-arg BUILD_SHA="$GITHUB_SHA" \
+            --build-arg SOURCE_REPOSITORY="https://github.com/$GITHUB_REPOSITORY" --tag "newsletter-ci:$GITHUB_SHA" .
           tested_image=$(docker image inspect --format '{{.Id}}' "newsletter-ci:$GITHUB_SHA")
           python3 scripts/smoke_image.py --image "$tested_image" --platform linux/amd64
           python3 scripts/publish_content_config.py validate \
             --image "$tested_image" --engine-sha "$GITHUB_SHA" --revision "$GITHUB_SHA" \
             --source "$GITHUB_WORKSPACE/newsletter/content-config" --output "$RUNNER_TEMP/validated-content-config"
-          python3 ../tools/newsletter-release/image.py save --image "$tested_image" --sha "$GITHUB_SHA" \
+          python3 ../tools/container-release/image.py save --image "$tested_image" --sha "$GITHUB_SHA" \
             --directory "$RUNNER_TEMP/newsletter-image"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -1252,9 +1345,69 @@ jobs:
           retention-days: 1
           compression-level: 6
 
+  # The daemon and observer use the same verified OCI image; dependency calls are synthetic.
+  platform-checks:
+    name: Platform checks
+    needs: changes
+    if: needs.changes.outputs.platform_check == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: '26'
+          cache: npm
+          cache-dependency-path: proto/package-lock.json
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: '0.12.10'
+          working-directory: platform
+          enable-cache: true
+      - name: Install locked contracts and daemon dependencies
+        run: |
+          npm ci --prefix proto --no-audit --no-fund
+          node proto/tools/ensure.mjs
+          uv sync --project platform --locked
+      - name: Install the pinned manifest compiler
+        run: |
+          mkdir -p "$RUNNER_TEMP/kubectl-bin"
+          version=$(python3 -c 'import json; print(json.load(open("platform/versions.json"))["kubectl"]["version"])')
+          checksum=$(python3 -c 'import json; print(json.load(open("platform/versions.json"))["kubectl"]["linux_amd64_sha256"])')
+          curl --fail --silent --show-error --location "https://dl.k8s.io/release/$version/bin/linux/amd64/kubectl" --output "$RUNNER_TEMP/kubectl-bin/kubectl"
+          printf '%s  %s\n' "$checksum" "$RUNNER_TEMP/kubectl-bin/kubectl" | sha256sum --check --status
+          chmod 755 "$RUNNER_TEMP/kubectl-bin/kubectl"
+          echo "$RUNNER_TEMP/kubectl-bin" >> "$GITHUB_PATH"
+      - name: Check deployment, status and observer contracts
+        run: |
+          uv run --project platform --locked ruff check platform/src platform/tests tools/platform-build tools/vps-release tools/vps-bootstrap
+          uv run --project platform --locked ruff format --check platform/src platform/tests tools/platform-build tools/vps-release tools/vps-bootstrap
+          uv run --project platform --locked pytest platform/tests tools/platform-build/tests tools/vps-release/tests tools/vps-bootstrap/tests
+      - name: Build and verify the independent runtime image
+        run: |
+          uv run --project platform --locked python tools/platform-build/build.py --sha "$GITHUB_SHA" --output "$RUNNER_TEMP/platform-build"
+          docker build --platform linux/amd64 --build-arg BUILD_SHA="$GITHUB_SHA" \
+            --build-arg SOURCE_REPOSITORY="https://github.com/$GITHUB_REPOSITORY" \
+            --tag "platform-ci:$GITHUB_SHA" "$RUNNER_TEMP/platform-build"
+          tested_image=$(docker image inspect --format '{{.Id}}' "platform-ci:$GITHUB_SHA")
+          docker run --rm --network none "$tested_image" identity | python3 -c 'import json, os, sys; assert json.load(sys.stdin)["source_sha"] == os.environ["GITHUB_SHA"]'
+          docker run --rm --network none --entrypoint python "$tested_image" \
+            -c 'import personal_cloud.status_daemon.server, personal_cloud.observer.cli, pydantic_core'
+          python3 tools/container-release/image.py save --image "$tested_image" --sha "$GITHUB_SHA" \
+            --directory "$RUNNER_TEMP/platform-image"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: platform-image-${{ github.sha }}
+          path: ${{ runner.temp }}/platform-image/
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 6
+
   gate:
     name: CI gate
-    needs: [changes, shared-packages, todofy-static, todofy-runtime, todofy-checks, mail-hero-checks, dashboard-checks, website-checks, lab-checks, flowday-checks, links-checks, watch-checks, newsletter-checks, newsletter-image, contracts, infra-checks, proto-checks]
+    needs: [changes, shared-packages, todofy-static, todofy-runtime, todofy-checks, mail-hero-checks, dashboard-checks, website-checks, lab-checks, flowday-checks, links-checks, watch-checks, fleet-checks, newsletter-checks, newsletter-image, platform-checks, contracts, infra-checks, proto-checks]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -1273,8 +1426,10 @@ jobs:
           FLOWDAY: ${{ needs.flowday-checks.result }}
           LINKS: ${{ needs.links-checks.result }}
           WATCH: ${{ needs.watch-checks.result }}
+          FLEET: ${{ needs.fleet-checks.result }}
           NEWSLETTER: ${{ needs.newsletter-checks.result }}
           NEWSLETTER_IMAGE: ${{ needs.newsletter-image.result }}
+          PLATFORM: ${{ needs.platform-checks.result }}
           CONTRACTS: ${{ needs.contracts.result }}
           INFRA: ${{ needs.infra-checks.result }}
           PROTO: ${{ needs.proto-checks.result }}
@@ -1292,8 +1447,8 @@ jobs:
           failed=0
           for pair in "Changes=$CHANGES" "Shared packages=$PACKAGES" "Todofy static checks=$TODOFY_STATIC" \
             "Todofy runtime=$TODOFY_RUNTIME" "Todofy checks=$TODOFY" "Mail Hero checks=$MAIL_HERO" \
-            "Dashboard checks=$DASHBOARD" "Website checks=$WEBSITE" "Lab checks=$LAB" "FlowDay checks=$FLOWDAY" "Links checks=$LINKS" "Watch checks=$WATCH" \
-            "Newsletter checks=$NEWSLETTER" "Newsletter image checks=$NEWSLETTER_IMAGE" \
+            "Dashboard checks=$DASHBOARD" "Website checks=$WEBSITE" "Lab checks=$LAB" "FlowDay checks=$FLOWDAY" "Links checks=$LINKS" "Watch checks=$WATCH" "Fleet checks=$FLEET" \
+            "Newsletter checks=$NEWSLETTER" "Newsletter image checks=$NEWSLETTER_IMAGE" "Platform checks=$PLATFORM" \
             "Contracts=$CONTRACTS" "Infra checks=$INFRA" "Proto checks=$PROTO"; do
             echo "$pair"
             case "${pair#*=}" in
@@ -1305,9 +1460,11 @@ jobs:
           [ "$CHANGES" = success ] || failed=1
           exit "$failed"
 
-  # Publish the same checked artifact, including when main reuses a same-SHA branch run. This does not update VPS.
+  # Publish the same checked artifact; VPS deploy receives only its pullable registry digest.
   newsletter-deploy:
     name: Newsletter image publish
+    outputs:
+      image: ${{ steps.publish.outputs.image }}
     needs: [changes, newsletter-checks, newsletter-image, gate]
     if: >-
       ${{ !cancelled()
@@ -1343,10 +1500,106 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: printf '%s' "$GH_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
       - name: Verify and publish the tested image
-        run: python3 tools/newsletter-release/image.py publish --sha "$GITHUB_SHA" --directory "$RUNNER_TEMP/newsletter-image"
+        id: publish
+        run: python3 tools/container-release/image.py publish --sha "$GITHUB_SHA" --directory "$RUNNER_TEMP/newsletter-image" --github-output
       - name: Log out
         if: always()
         run: docker logout ghcr.io
+
+  platform-image:
+    name: Platform image
+    needs: [changes, platform-checks, gate]
+    if: >-
+      ${{ !cancelled()
+      && needs.changes.result == 'success'
+      && (needs.platform-checks.result == 'success' || (needs.changes.outputs.checks_reused == 'true' && needs.platform-checks.result == 'skipped'))
+      && needs.gate.result == 'success'
+      && github.ref == 'refs/heads/main'
+      && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+      && needs.changes.outputs.platform_publish == 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: read
+      packages: write
+    environment: production
+    concurrency:
+      group: platform-image-production
+      cancel-in-progress: false
+    outputs:
+      image: ${{ steps.publish.outputs.image }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: platform-image-${{ github.sha }}
+          path: ${{ runner.temp }}/platform-image
+          github-token: ${{ github.token }}
+          run-id: ${{ needs.changes.outputs.reused_run_id || github.run_id }}
+      - name: Log in for image publication
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: printf '%s' "$GH_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+      - name: Verify and publish the tested image
+        id: publish
+        run: python3 tools/container-release/image.py publish --service platform --sha "$GITHUB_SHA" --directory "$RUNNER_TEMP/platform-image" --github-output
+      - name: Log out
+        if: always()
+        run: docker logout ghcr.io
+
+  vps-deploy:
+    name: VPS deploy
+    needs: [changes, platform-checks, newsletter-deploy, platform-image, gate]
+    if: >-
+      ${{ !cancelled()
+      && needs.changes.result == 'success'
+      && (needs.platform-checks.result == 'success' || (needs.changes.outputs.checks_reused == 'true' && needs.platform-checks.result == 'skipped'))
+      && needs.newsletter-deploy.result == 'success'
+      && needs.platform-image.result == 'success'
+      && needs.gate.result == 'success'
+      && github.ref == 'refs/heads/main'
+      && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+      && needs.changes.outputs.platform_deploy == 'true'
+      && vars.VPS_DEPLOY_ENABLED == 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    environment: production
+    concurrency:
+      group: vps-production
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: '26'
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: '0.12.10'
+          working-directory: platform
+          enable-cache: true
+      - name: Install the locked release client
+        run: |
+          npm ci --prefix proto --no-audit --no-fund
+          node proto/tools/ensure.mjs
+          uv sync --project platform --locked
+      - name: Request deployment and verify the physical running versions
+        env:
+          PLATFORM_ACCESS_CLIENT_ID: ${{ secrets.PLATFORM_ACCESS_CLIENT_ID }}
+          PLATFORM_ACCESS_CLIENT_SECRET: ${{ secrets.PLATFORM_ACCESS_CLIENT_SECRET }}
+          PLATFORM_DEPLOY_TOKEN: ${{ secrets.PLATFORM_DEPLOY_TOKEN }}
+          NEWSLETTER_IMAGE: ${{ needs.newsletter-deploy.outputs.image }}
+          PLATFORM_IMAGE: ${{ needs.platform-image.outputs.image }}
+          RESUME_RELEASE: ${{ inputs.resume_vps_release && 'true' || 'false' }}
+        run: |
+          args=()
+          if [ "$RESUME_RELEASE" = true ]; then args+=(--resume); fi
+          uv run --project platform --locked python tools/vps-release/deploy.py \
+            --source-sha "$GITHUB_SHA" --newsletter-image "$NEWSLETTER_IMAGE" --platform-image "$PLATFORM_IMAGE" "${args[@]}"
 
   todofy-deploy:
     name: Todofy deploy
@@ -1619,7 +1872,7 @@ jobs:
     # After the app deploys: the service bindings MAIL_HERO, TODOFY, LAB and WATCH name their "Ops" entrypoints, which
     # must be live first. An app deploy that did not run (nothing of that app changed) is fine; one that
     # failed or was cancelled stops this job.
-    needs: [changes, dashboard-checks, gate, todofy-deploy, mail-hero-deploy, lab-deploy, watch-deploy]
+    needs: [changes, dashboard-checks, gate, todofy-deploy, mail-hero-deploy, lab-deploy, watch-deploy, fleet-deploy]
     # Explicit status function and results, as for Todofy deploy (implicit success() and skipped ancestors).
     if: >-
       ${{ !cancelled()
@@ -1630,6 +1883,7 @@ jobs:
       && (needs.mail-hero-deploy.result == 'success' || needs.mail-hero-deploy.result == 'skipped')
       && (needs.lab-deploy.result == 'success' || needs.lab-deploy.result == 'skipped')
       && (needs.watch-deploy.result == 'success' || needs.watch-deploy.result == 'skipped')
+      && (needs.fleet-deploy.result == 'success' || needs.fleet-deploy.result == 'skipped')
       && github.ref == 'refs/heads/main'
       && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
       && needs.changes.outputs.dashboard_deploy == 'true' }}
@@ -2326,6 +2580,118 @@ jobs:
       - name: Remove the secrets file
         if: always()
         run: rm -f "$RUNNER_TEMP/watch-secrets.json"
+
+  # Fleet deploy is disabled by the explicit classifier bootstrap phase until its Access AUD exists.
+  # The gate verifies this exact SHA; no VPS credentials or application data reach this job.
+  fleet-deploy:
+    name: Fleet deploy
+    needs: [changes, fleet-checks, gate]
+    # Explicit status function and results, as for Todofy deploy (implicit success() and skipped ancestors).
+    if: >-
+      ${{ !cancelled()
+      && needs.changes.result == 'success'
+      && (needs.fleet-checks.result == 'success' || (needs.changes.outputs.checks_reused == 'true' && needs.fleet-checks.result == 'skipped'))
+      && needs.gate.result == 'success'
+      && github.ref == 'refs/heads/main'
+      && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+      && needs.changes.outputs.fleet_deploy == 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment:
+      name: production
+      url: ${{ steps.config.outputs.url }}
+    concurrency:
+      group: fleet-production
+      cancel-in-progress: false
+    defaults:
+      run:
+        working-directory: fleet
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: '26'
+          cache: npm
+          cache-dependency-path: |
+            fleet/worker/package-lock.json
+            fleet/web/package-lock.json
+            proto/package-lock.json
+      # Every static production value (account, host, Access) is committed in fleet/wrangler.toml; the environment URL
+      # and the Access probe read it there.
+      - name: Read the host and the Access issuer from the committed config
+        id: config
+        run: |
+          python3 - >> "$GITHUB_OUTPUT" <<'EOF'
+          import tomllib
+          with open("wrangler.toml", "rb") as file:
+              variables = tomllib.load(file)["vars"]
+          print("url=https://" + variables["PUBLIC_HOST"])
+          print("host=" + variables["PUBLIC_HOST"])
+          print("access_issuer=" + variables["ACCESS_ISSUER"])
+          EOF
+      # The UI's build (web/dist) is the one that ships; its JavaScript budget is checked by the build.
+      - name: Build the verified revision
+        run: |
+          npm ci --prefix worker --no-audit --no-fund
+          npm ci --prefix web --no-audit --no-fund
+          npm run build --prefix web
+      # Owner identities and the receipt HMAC key are independent production secrets.
+      - name: Write the Worker secrets file
+        working-directory: fleet/worker
+        env:
+          FLEET_ACCESS_OWNER: ${{ secrets.FLEET_ACCESS_OWNER }}
+          FLEET_ACCESS_OWNER_ALIASES: ${{ secrets.FLEET_ACCESS_OWNER_ALIASES }}
+          FLEET_REPORT_HMAC_KEY: ${{ secrets.FLEET_REPORT_HMAC_KEY }}
+        run: node ../deploy/deploy-vars.mjs secrets "$RUNNER_TEMP/fleet-secrets.json"
+      # deploy-vars.mjs adds BUILD_SHA as --var and refuses the all-zeros Access AUD; the bundle that ships is held to
+      # the app's budget and the Workers Free limit (deploy/bundle-size.mjs).
+      - name: Validate the bundle before changing production
+        working-directory: fleet/worker
+        run: |
+          node ../deploy/deploy-vars.mjs exec -- npx --no-install wrangler deploy --dry-run --config ../wrangler.toml \
+            --secrets-file "$RUNNER_TEMP/fleet-secrets.json" --outdir "$RUNNER_TEMP/fleet-bundle"
+          node ../deploy/bundle-size.mjs "$RUNNER_TEMP/fleet-bundle"
+      # tools/cf-guard (read-only GETs; prints listed hostnames, counts, PASS/FAIL): wrangler applies a config's Custom
+      # Domains (or zone routes) as the Worker's complete set, so stop before any production change when a live
+      # hostname would be detached or another Worker's hostname or DNS record taken over. For an intentional
+      # change, set the exact hostnames here (space-separated) in the same commit that changes wrangler.toml.
+      - name: Check the hostnames against production
+        working-directory: .
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CF_GUARD_ALLOW_REMOVE: ''
+          CF_GUARD_ALLOW_CONFLICT: ''
+        run: node tools/cf-guard/cf-guard.mjs --config fleet/wrangler.toml
+      - name: Deploy the Worker fleet
+        working-directory: fleet/worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+        run: |
+          test -n "$CLOUDFLARE_API_TOKEN"
+          node ../deploy/deploy-vars.mjs exec -- npx --no-install wrangler deploy --config ../wrangler.toml \
+            --secrets-file "$RUNNER_TEMP/fleet-secrets.json"
+      # Nothing anonymous on the host shows BUILD_SHA (all of it is behind Access), so production is read through the
+      # API with the deploy token (GETs only): the Worker serves exactly one version at 100% and that version's
+      # BUILD_SHA is this commit. wrangler's JSON answers are parsed, never printed (they name the token's account
+      # email); only the version id and the result are. (FlowDay's and the links app's check without their D1 part.)
+      - name: Check that production runs this commit
+        working-directory: fleet/worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+        run: |
+          bash "$GITHUB_WORKSPACE/tools/deploy-probes/production.sh" fleet ../wrangler.toml
+      # The whole owner host stays behind Access; the sole receipt path uses independent HMAC authentication.
+      - name: Check that Access answers unauthenticated requests
+        env:
+          ACCESS_ISSUER: ${{ steps.config.outputs.access_issuer }}
+          PUBLIC_HOST: ${{ steps.config.outputs.host }}
+        run: |
+          bash "$GITHUB_WORKSPACE/tools/deploy-probes/access.sh" / /api/v1/fleetStatus
+      - name: Remove the secrets file
+        if: always()
+        run: rm -f "$RUNNER_TEMP/fleet-secrets.json"
 
   # The site release: dispatches website-release.yml (docs in website/docs/release.md), the same workflow the
   # Notion buttons and the relay's detector dispatch, and returns at once. The release's job holds the one

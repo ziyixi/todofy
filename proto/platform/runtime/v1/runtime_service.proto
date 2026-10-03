@@ -1,0 +1,199 @@
+// A bounded machine API; exact service authentication precedes all request-body decoding.
+syntax = "proto3";
+package platform.runtime.v1;
+
+import "common/wire/v1/wire.proto";
+import "google/api/annotations.proto";
+import "google/api/client.proto";
+import "google/api/field_behavior.proto";
+import "google/api/field_info.proto";
+import "google/api/resource.proto";
+import "platform/runtime/v1/runtime.proto";
+
+option java_multiple_files = true;
+option java_outer_classname = "RuntimeServiceProto";
+option java_package = "science.ziyixi.platform.runtime.v1";
+option (common.wire.v1.formats) = {
+  name: "WorkloadResourceName"
+  pattern: "workloads/[a-z][a-z0-9-]{0,31}"
+  description: "A configured workload resource name."
+};
+option (common.wire.v1.formats) = {
+  name: "PageToken"
+  pattern: "[A-Za-z0-9_-]*"
+  max_length: 128
+  description: "Bounded opaque collection cursor, empty when complete."
+};
+option (common.wire.v1.formats) = {
+  name: "ReleaseUuid"
+  pattern: "[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}"
+  description: "UUID4 release or request identity."
+};
+option (common.wire.v1.formats) = {
+  name: "ReleaseResourceName"
+  pattern: "releases/[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}"
+  description: "Immutable UUID4 release resource name."
+};
+option (common.wire.v1.formats) = {
+  name: "ResumeEtag"
+  pattern: "[A-Za-z0-9_-]{1,128}"
+  description: "Opaque bounded concurrency token from the persisted operation."
+};
+
+// Observes configured workloads and requests constrained deployments. No shell or provider proxy method.
+// (-- api-linter: core::0121::resource-must-support-list=disabled
+//     aip.dev/not-precedent: Callers inspect their exact release ID; this bounded machine API does not enumerate historical operations. --)
+service RuntimeService {
+  option (google.api.default_host) = "platform.ziyixi.science";
+  // Gets the singleton bounded node snapshot.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  rpc GetNodeStatus(GetNodeStatusRequest) returns (NodeStatus) {
+    option (google.api.http) = {get: "/api/v1/{name=nodeStatus}"};
+    option (google.api.method_signature) = "name";
+  }
+  // Lists at most sixteen configured workloads; a bounded cursor never includes private names.
+  rpc ListWorkloads(ListWorkloadsRequest) returns (ListWorkloadsResponse) {
+    option (google.api.http) = {get: "/api/v1/workloads"};
+    option (google.api.method_signature) = "";
+  }
+  // Gets one configured workload by its stable resource name.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // (-- api-linter: core::0131::response-message-name=disabled
+  //     aip.dev/not-precedent: WorkloadStatus is an observation of the configured workload, not the deployable workload object. --)
+  rpc GetWorkload(GetWorkloadRequest) returns (WorkloadStatus) {
+    option (google.api.http) = {get: "/api/v1/{name=workloads/*}"};
+    option (google.api.method_signature) = "name";
+  }
+  // Persists an immutable request and returns accepted immediately; the local daemon reconciles asynchronously.
+  // Same ID and exact frozen body is idempotent, changed body is ALREADY_EXISTS. Held/failed never auto-resume.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc CreateRelease(CreateReleaseRequest) returns (Release) {
+    option (google.api.http) = {
+      post: "/api/v1/releases"
+      body: "release"
+    };
+    // (-- api-linter: core::0133::method-signature=disabled
+    //     aip.dev/not-precedent: The mandatory durable idempotency request UUID4 is an explicit typed client argument. --)
+    option (google.api.method_signature) = "release,release_id,request_id";
+  }
+  // Gets one persisted operation, authenticated independently from read-only observation endpoints.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc GetRelease(GetReleaseRequest) returns (Release) {
+    option (google.api.http) = {get: "/api/v1/{name=releases/*}"};
+    option (google.api.method_signature) = "name";
+  }
+  // Explicitly continues a held/failed operation using its current etag and a fresh UUID4 request ID.
+  // The original frozen targets, creation identity and resource name never change.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc ResumeRelease(ResumeReleaseRequest) returns (Release) {
+    option (google.api.http) = {
+      post: "/api/v1/{name=releases/*}:resume"
+      body: "*"
+    };
+    option (google.api.method_signature) = "name,etag,request_id";
+  }
+}
+// The singleton node query.
+message GetNodeStatusRequest {
+  // Always nodeStatus.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "platform.ziyixi.science/NodeStatus",
+    (common.wire.v1.field).allowed = "nodeStatus"
+  ];
+}
+// The bounded configured workload query.
+message ListWorkloadsRequest {
+  // Maximum items to return. Zero selects the default sixteen; accepted range 0..16.
+  int32 page_size = 1 [
+    (google.api.field_behavior) = OPTIONAL,
+    (common.wire.v1.field) = {
+      minimum: 0
+      maximum: 16
+    }
+  ];
+  // Opaque bounded cursor from a previous response; validated before any provider access.
+  string page_token = 2 [
+    (google.api.field_behavior) = OPTIONAL,
+    (common.wire.v1.field).format = "PageToken"
+  ];
+}
+// A bounded page; no discovery of unconfigured workloads.
+message ListWorkloadsResponse {
+  // Workloads sorted by stable key, at most sixteen.
+  repeated WorkloadStatus workloads = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).max_items = 16
+  ];
+  // Empty when the configured bounded collection is complete.
+  string next_page_token = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "PageToken"
+  ];
+}
+// One configured workload query.
+message GetWorkloadRequest {
+  // workloads/{workload_key}; unknown keys return NOT_FOUND without provider discovery.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "platform.ziyixi.science/WorkloadStatus",
+    (common.wire.v1.field).format = "WorkloadResourceName"
+  ];
+}
+
+// A create request selects only configured workload aliases and immutable identities.
+message CreateReleaseRequest {
+  // Caller-selected UUID4 resource ID. It remains stable across network retries.
+  string release_id = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.field_info).format = UUID4,
+    (common.wire.v1.field).format = "ReleaseUuid"
+  ];
+  // Caller-selected UUID4 for this creation. Every target carries this same request identity.
+  // (-- api-linter: core::0133::request-required-fields=disabled
+  //     aip.dev/not-precedent: A stable mandatory UUID4 is the persisted deployment idempotency identity and must match every frozen target. --)
+  string request_id = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.field_info).format = UUID4,
+    (common.wire.v1.field).format = "ReleaseUuid"
+  ];
+  // Only nonempty targets are accepted. Supplying server output fields is INVALID_ARGUMENT.
+  Release release = 3 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).non_null = true
+  ];
+}
+
+// One persisted operation query; there is no enumeration of provider resources.
+message GetReleaseRequest {
+  // releases/{release_id}; unknown IDs return NOT_FOUND without Kubernetes discovery.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "platform.ziyixi.science/Release",
+    (common.wire.v1.field).format = "ReleaseResourceName"
+  ];
+}
+
+// A concurrency-checked explicit continuation of the same persisted operation.
+message ResumeReleaseRequest {
+  // Existing releases/{release_id}; targets cannot be supplied or changed.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "platform.ziyixi.science/Release",
+    (common.wire.v1.field).format = "ReleaseResourceName"
+  ];
+  // UUID4 continuation request identity, stable across retries of this particular resume.
+  string request_id = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.field_info).format = UUID4,
+    (common.wire.v1.field).format = "ReleaseUuid"
+  ];
+  // Exact latest token. A stale value returns ABORTED; it never restarts a newer operation state.
+  string etag = 3 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "ResumeEtag"
+  ];
+}

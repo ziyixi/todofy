@@ -6,7 +6,8 @@
 Reads (GET only) the two reusable Access policies and the Mail Hero application with a read-capable token
 from the environment, and writes account_id, the policies' include emails and the identity provider ids
 (variables.tf) with mode 0600. It refuses an output path inside this repository and never prints a value:
-only the names of the variables it wrote. Standard library only.
+only the names of the variables it wrote. IDs come from config/resources.toml, and --account-id must
+match that public configuration before any GET. Standard library only, Python 3.11+.
 """
 
 from __future__ import annotations
@@ -22,10 +23,9 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
 API = "https://api.cloudflare.com/client/v4"
-# The objects infra/ manages (ids.tf); only their identity rules are read.
-OWNER_POLICY = "018f1a13-1a1b-4cf6-a470-c865c4577851"
-GITHUB_OWNER_POLICY = "eea00ced-7de7-4094-a705-c9741d835b7c"
-MAIL_HERO_APP = "ebd92116-4d51-4d90-923a-068b05b7e05a"
+# Provider-issued IDs are public configuration. Never fetch one account's policy IDs in another.
+sys.path.insert(0, str(REPO / "tools/cloud-config"))
+from cloud_profile import ProfileError, load_resources  # noqa: E402
 
 
 class Refused(ValueError):
@@ -51,10 +51,26 @@ def emails(policy: dict) -> list[str]:
     return found
 
 
+def identity_source() -> dict:
+    try:
+        resources = load_resources(REPO)
+        return {
+            "account_id": resources["account_id"],
+            "owner_policy": resources["access_policy_ids"]["owner"],
+            "github_owner_policy": resources["access_policy_ids"]["github-owner"],
+            "mail_hero_app": resources["access_app_ids"]["mail-hero"],
+        }
+    except (ProfileError, KeyError):
+        raise Refused("public resource identities are missing or invalid; prepare config/resources.toml first") from None
+
+
 def values(account_id: str, fetch) -> dict:
-    owner = fetch(f"/accounts/{account_id}/access/policies/{OWNER_POLICY}")
-    github = fetch(f"/accounts/{account_id}/access/policies/{GITHUB_OWNER_POLICY}")
-    app = fetch(f"/accounts/{account_id}/access/apps/{MAIL_HERO_APP}")
+    source = identity_source()
+    if account_id != source["account_id"]:
+        raise Refused("--account-id must match config/resources.toml before any policy GET")
+    owner = fetch(f"/accounts/{account_id}/access/policies/{source['owner_policy']}")
+    github = fetch(f"/accounts/{account_id}/access/policies/{source['github_owner_policy']}")
+    app = fetch(f"/accounts/{account_id}/access/apps/{source['mail_hero_app']}")
     methods = [rule["login_method"]["id"] for rule in github.get("require", []) if "login_method" in rule]
     if len(methods) != 1:
         raise Refused("the GitHub owner policy does not require exactly one login method")

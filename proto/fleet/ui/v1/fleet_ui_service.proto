@@ -1,0 +1,64 @@
+// Read-only owner API. Access JWT is verified before the shared transcoder.
+syntax = "proto3";
+package fleet.ui.v1;
+
+import "fleet/telemetry/v1/host_report.proto";
+import "google/api/annotations.proto";
+import "google/api/client.proto";
+import "google/api/field_behavior.proto";
+import "google/api/resource.proto";
+import "google/protobuf/timestamp.proto";
+
+option java_multiple_files = true;
+option java_outer_classname = "FleetUiServiceProto";
+option java_package = "science.ziyixi.fleet.ui.v1";
+// A single personal host, with no remote command surface.
+service FleetUiService {
+  option (google.api.default_host) = "fleet.ziyixi.science";
+  // Snapshot with age computed at read time, and at most 32 latest state changes.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  rpc GetFleetStatus(GetFleetStatusRequest) returns (FleetStatus) {
+    option (google.api.http) = {get: "/api/v1/{name=fleetStatus}"};
+    option (google.api.method_signature) = "name";
+  }
+}
+// Request the singleton snapshot.
+message GetFleetStatusRequest {
+  // Always fleetStatus.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "fleet.ziyixi.science/FleetStatus"
+  ];
+}
+// Singleton Fleet status. Never exposes credentials or private server identities.
+message FleetStatus {
+  option (google.api.resource) = {
+    type: "fleet.ziyixi.science/FleetStatus"
+    pattern: "fleetStatus"
+    singular: "fleetStatus"
+    plural: "fleetStatuses"
+  };
+  // Always fleetStatus.
+  string name = 1 [(google.api.field_behavior) = IDENTIFIER];
+  // When this view was generated.
+  google.protobuf.Timestamp generate_time = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // never_seen, fresh, stale or missing. Missing is not a diagnosis of the host.
+  string freshness = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Server receipt time of the last new report, null before any observation.
+  google.protobuf.Timestamp receive_time = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Bounded content-free host report, absent before any observation.
+  // (-- api-linter: core::0215::foreign-type-reference=disabled
+  //     aip.dev/not-precedent: the owner view embeds the verified versioned telemetry contract directly. --)
+  fleet.telemetry.v1.HostReport report = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // At most 32 recent changes. Storage keeps at most 256.
+  repeated Change changes = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // This monitor's released code.
+  string build_sha = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+// An observed status transition, not a log entry.
+message Change {
+  // Server receipt time.
+  google.protobuf.Timestamp observation_time = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Safe vocabulary code, never an exception, log or provider message.
+  string code = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+}

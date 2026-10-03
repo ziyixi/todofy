@@ -2,7 +2,8 @@
 """Decide which apps a CI run checks and deploys. Standard library only (the runner's python3).
 
 Outputs (GITHUB_OUTPUT, "true"/"false"):
-  todofy_check, mail_hero_check, dashboard_check, website_check, lab_check, flowday_check, links_check, watch_check
+  todofy_check, mail_hero_check, dashboard_check, website_check, lab_check, flowday_check, links_check, watch_check,
+  newsletter_check, fleet_check, platform_check
                     run that app's full checks
   contracts         run the contract tests: both sides of mail.received.v1, ops-v1 and
                     task-intent-v1, and the dashboard's ops-v1 caller tests (also on a proto/ change: the
@@ -17,7 +18,7 @@ Outputs (GITHUB_OUTPUT, "true"/"false"):
   base              not a flag: the commit the diff started from (empty when everything runs), which
                     "Proto checks" compares the IDL with.
   todofy_deploy, mail_hero_deploy, dashboard_deploy, website_deploy, lab_deploy, flowday_deploy, links_deploy,
-  watch_deploy, newsletter_deploy
+  watch_deploy, newsletter_deploy, fleet_deploy, platform_publish, platform_deploy
                     the app, a shared package it compiles in, or a contract file it bundles changed
                     (deploy jobs also require refs/heads/main)
   website_relay_deploy
@@ -33,8 +34,8 @@ Outputs (GITHUB_OUTPUT, "true"/"false"):
   checked and deployed since W2 (watch/docs/design.md section 11). It proposes task-intent-v1 (its notification sink)
   and answers ops-v1 (its Ops entrypoint; Contracts runs both tests) and compiles in packages/edge-auth and the
   TypeScript proto runtime with proto/watch/ui/, proto/todofy/taskintent/ and proto/ops/, so a change to those checks
-  and deploys it too. CHECK_ONLY (apps checked but never deployed, with no "<prefix>_deploy" output) is where a new
-  app starts, until its first deploy job; it is empty since W2.
+  and deploys it too. CHECK_ONLY keeps a new app's deploy output false until its resources are ready. Fleet starts
+  there; Home's new Fleet binding also keeps dashboard_deploy false until Fleet can be deployed.
 
 proto/ (the protobuf IDL, proto/README.md) checks every app in PROTO_USERS (an app that depends on @ziyixi/proto or
 ziyixi-proto) and deploys only the apps whose bundle the changed path reaches (proto_deploys): PROTO_USERS[app] names
@@ -71,6 +72,8 @@ so a change whose run was cancelled or failed is checked (and deployed) again by
   directly under packages/ (a README) is root documentation: gate only.
 Newsletter remains an independent VPS image. newsletter_deploy publishes its tested image to GHCR; it does
 not upgrade the server. It still uses its locked external ziyixi-protos dependency, not the root proto runtime.
+platform/ checks and publishes its own independently tested daemon image; platform_deploy upgrades the VPS.
+Newsletter changes also check and publish Platform from the same source SHA before the VPS release.
 A push to main reuses a green branch run of the same commit (find_reusable): when a completed push run of
 this workflow on another branch has the same head SHA, concluded success, and its Changes, CI gate and
 every check job this push needs (CHECK_JOBS) succeeded, the check outputs are all false (those jobs are
@@ -105,10 +108,9 @@ from catalog import load_catalog  # noqa: E402
 APPS = tuple(load_catalog(Path(__file__).resolve().parents[2]).apps)
 # The output key prefix of each app ("<prefix>_check", "<prefix>_deploy").
 PREFIX = {app: app.replace("-", "_") for app in APPS}
-# Apps that are checked but never deployed by CI (no "<prefix>_deploy" output): a new app until its Worker has its
-# Cloudflare resources and a deploy job, as the watch app was until W2 (watch/docs/design.md section 11), the links app
-# until L2 and FlowDay until F2. Empty since W2.
-CHECK_ONLY: set[str] = set()
+# A new app is checked but its deploy output stays false until its Cloudflare resources are ready. Keep its output
+# present so the workflow and same-SHA reuse have one stable interface. The bootstrap commit removes Fleet here.
+CHECK_ONLY: set[str] = {"fleet"}
 KEYS = (
     "todofy_check",
     "mail_hero_check",
@@ -119,6 +121,8 @@ KEYS = (
     "links_check",
     "watch_check",
     "newsletter_check",
+    "fleet_check",
+    "platform_check",
     "contracts",
     "packages",
     "infra",
@@ -133,6 +137,9 @@ KEYS = (
     "links_deploy",
     "watch_deploy",
     "newsletter_deploy",
+    "fleet_deploy",
+    "platform_publish",
+    "platform_deploy",
 )
 DISPATCH = {
     "both": ("todofy", "mail-hero"),
@@ -146,6 +153,8 @@ DISPATCH = {
     "links": ("links",),
     "watch": ("watch",),
     "newsletter": ("newsletter",),
+    "fleet": ("fleet",),
+    "platform": ("platform",),
 }
 # The website's Notion relay Worker deploys on its own (website_relay_deploy).
 RELAY = "website/relay/"
@@ -154,8 +163,11 @@ NO_CONTRACTS = {"website", "flowday", "links", "newsletter"}
 # The OpenTofu configuration (infra/README.md) and its plan-summary tool: checked here without a token; only
 # .github/workflows/infra.yml plans it against Cloudflare, and only the manually dispatched infra-apply.yml applies it.
 INFRA = ("infra/", "tools/infra-plan-summary/")
+# These are source inputs to checked generators, not deployable Worker bundles. Generated app source changes are
+# classified through their own app directory; editing the central inputs alone cannot publish production.
+CLOUD_CONFIG = {"config/cloud.toml", "config/resources.toml"}
 # packages/<name>/ -> the apps whose Workers compile it in (a "file:../../packages/<name>" dependency).
-PACKAGE_USERS = {"edge-auth": ("todofy", "mail-hero", "dashboard", "lab", "flowday", "links", "watch")}
+PACKAGE_USERS = {"edge-auth": ("todofy", "mail-hero", "dashboard", "lab", "flowday", "links", "watch", "fleet")}
 # The protobuf IDL (proto/README.md): app -> the languages ("ts", "python") whose generated code and runtime
 # its production bundles compile in; () for a user whose bundles take nothing from it (types only, tests
 # only). test_proto.py derives this map from the apps' manifests and sources.
@@ -168,6 +180,8 @@ PROTO_USERS: dict[str, tuple[str, ...]] = {
     "mail-hero": ("ts",),
     "dashboard": ("ts",),
     "watch": ("ts",),
+    "fleet": ("ts",),
+    "platform": ("python",),
 }
 # The hand-written runtimes and generators: a change reaches every user of each language listed. The wire
 # profile's own options (common/wire/v1: value rules, map order, binding arguments) are part of both runtimes:
@@ -195,12 +209,15 @@ PROTO_PACKAGES: dict[str, tuple[str, ...]] = {
     "proto/flowday/ui/": ("flowday",),
     "proto/links/ui/": ("links",),
     "proto/watch/ui/": ("watch",),
+    "proto/fleet/ui/": ("fleet",),
+    "proto/fleet/telemetry/": ("fleet", "platform"),
+    "proto/platform/runtime/": ("fleet", "platform"),
     # dashboard.ui.v1, the dashboard's owner API: its Worker serves it, its UI calls it.
     "proto/dashboard/ui/": ("dashboard",),
     # Mail Hero's owner API (mailhero.ui.v2): its Worker serves it, its UI calls it.
     "proto/mailhero/ui/": ("mail-hero",),
-    # CommonReason: Lab reads its names as types only.
-    "proto/common/errors/": (),
+    # CommonReason: Platform bundles Python error aliases; Lab takes its names as types only.
+    "proto/common/errors/": ("platform",),
     # ops-v1 (contracts/ops-v1): every app's Ops entrypoint and the dashboard that calls them.
     "proto/ops/": ("mail-hero", "lab", "todofy", "dashboard", "watch"),
     # mail.received.v1 (contracts/mail-received-v1's schema is generated from it): Mail Hero builds every event,
@@ -214,7 +231,7 @@ PROTO_PACKAGES: dict[str, tuple[str, ...]] = {
 # mail-received-v1 event; the task-intent-v1 tests check both codecs against its schema; Proto checks also compares
 # ops-v1's and mail-received-v1's JSON Schemas with the ones the IDL generates): a change there runs Proto checks too,
 # so a fixture neither codec writes byte for byte, or one a strict read wrongly accepts, fails its push.
-PROTO_READS = ("contracts/ops-v1/", "contracts/task-intent-v1/", "contracts/mail-received-v1/")
+PROTO_READS = ("contracts/ops-v1/", "contracts/task-intent-v1/", "contracts/mail-received-v1/", "contracts/fleet-report-v1/", "contracts/platform-runtime-v1/")
 # proto/ paths that never reach a bundle: a change there checks the users but deploys none.
 PROTO_NOT_BUNDLED = (
     "proto/test/",
@@ -266,6 +283,8 @@ CHECK_JOBS = {
     "links_check": ("Links checks",),
     "watch_check": ("Watch checks",),
     "newsletter_check": ("Newsletter checks", "Newsletter image checks"),
+    "fleet_check": ("Fleet checks",),
+    "platform_check": ("Platform checks",),
     "contracts": ("Contracts",),
     "packages": ("Shared packages",),
     "infra": ("Infra checks",),
@@ -278,7 +297,7 @@ MAX_REUSE_CANDIDATES = 5
 
 
 def everything() -> dict[str, bool]:
-    return dict.fromkeys(KEYS, True)
+    return outputs(APPS, APPS, contracts=True, packages=True, relay=True, infra=True, proto=True)
 
 
 def outputs(
@@ -291,6 +310,11 @@ def outputs(
     proto: bool = False,
 ) -> dict[str, bool]:
     checked, deployed = set(checked), set(deployed)
+    # This release profile takes two independently tested images of the same source SHA. Any publication/VPS
+    # deployment input therefore publishes both; metadata-only inputs still check without publishing.
+    if deployed & {"newsletter", "platform"}:
+        checked.update({"newsletter", "platform"})
+        deployed.update({"newsletter", "platform"})
     result = {
         "contracts": contracts,
         "packages": packages,
@@ -300,8 +324,11 @@ def outputs(
     }
     for app in APPS:
         result[f"{PREFIX[app]}_check"] = app in checked
-        if app not in CHECK_ONLY:
-            result[f"{PREFIX[app]}_deploy"] = app in deployed
+        # Home binds Fleet's entrypoints. Until Fleet's bootstrap is complete, neither Worker can be published by
+        # full fallback, dispatch, a path diff or reused branch checks. No deployment decision bypasses this gate.
+        blocked = app in CHECK_ONLY or (app == "dashboard" and "fleet" in CHECK_ONLY)
+        result[f"{PREFIX[app]}_deploy"] = app in deployed and not blocked
+    result["platform_publish"] = result.get("platform_deploy", False)
     return {key: result[key] for key in KEYS}
 
 
@@ -335,8 +362,18 @@ def proto_users(paths: list[str]) -> tuple[set[str], set[str]]:
 def classify(paths: Iterable[str]) -> dict[str, bool]:
     paths = [path for path in paths if path]
     apps = {app for app in APPS if any(path.startswith(f"{app}/") for path in paths)}
+    # A Newsletter release also tests and publishes the independent monitor image from this source SHA.
+    if "newsletter" in apps:
+        apps.add("platform")
     # Catalog metadata is verified/generated before the gate; an app.toml itself is not bundled.
-    direct_deploys = {app for app in apps if any(path.startswith(f"{app}/") and path != f"{app}/app.toml" for path in paths)}
+    direct_deploys = {app for app in apps if any(path.startswith(f"{app}/") and path != f"{app}/app.toml"
+                       and not (app in {"newsletter", "platform"} and path.endswith(".md")) for path in paths)}
+    if "newsletter" in direct_deploys:
+        direct_deploys.add("platform")
+    # This shared promotion tool owns both tested-image publications. Its executable changes need fresh tested
+    # images and the gated VPS release; its Markdown remains ordinary tooling documentation (checks only).
+    if any(path.startswith(("tools/container-release/", "tools/platform-build/", "tools/vps-release/")) and not path.endswith(".md") for path in paths):
+        direct_deploys.update({"newsletter", "platform"})
     # packages/<name>/<file>: at least three components; packages/README.md is documentation.
     package_paths = [path for path in paths if path.startswith("packages/") and path.count("/") >= 2]
     package_names = {path.split("/")[1] for path in package_paths}
@@ -349,7 +386,7 @@ def classify(paths: Iterable[str]) -> dict[str, bool]:
     # tools/ is CI, test and build tooling (tools/cf-guard, tools/bundle-size, tools/workerd-cpu): like .github/, it
     # re-checks every app and deploys none.
     # tools/infra-plan-summary/ belongs to infra/ and runs only Infra checks.
-    ci = any(path.startswith((".github/", "tools/")) and not path.startswith(INFRA) for path in paths)
+    ci = any((path.startswith((".github/", "tools/")) and not path.startswith(INFRA)) or path in CLOUD_CONFIG for path in paths)
     shared = ci or any(path.startswith("contracts/") for path in paths)
     bundled = {app for path in paths for app in BUNDLED_BY.get(path, ())}
     # website/relay/ is its own Worker: it deploys itself, not the site (unless the site's own files, or a
@@ -377,6 +414,8 @@ def dispatched(app: str) -> dict[str, bool]:
     if app not in DISPATCH:
         raise ValueError(f"unknown app input {app!r}; expected one of {sorted(DISPATCH)}")
     apps = DISPATCH[app]
+    if "newsletter" in apps and "platform" not in apps:
+        apps = (*apps, "platform")
     website = "website" in apps
     return outputs(checked=apps, deployed=apps, contracts=True, packages=True, relay=website, proto=True)
 
@@ -469,12 +508,18 @@ def find_reusable(
         if int(jobs.get("total_count", 0)) > 100:
             continue
         if jobs_cover(jobs.get("jobs", []), names):
+            image_artifacts = []
             if result["newsletter_deploy"]:
+                image_artifacts.append(f"newsletter-image-{sha}")
+            if result["platform_publish"]:
+                image_artifacts.append(f"platform-image-{sha}")
+            if image_artifacts:
                 # Publishing must load the exact image this branch tested. An expired or missing
                 # artifact falls back to this main run's checks/build, never an untested rebuild.
                 artifacts = get(f"/repos/{repository}/actions/runs/{run['id']}/artifacts?per_page=100")
-                if not any(a.get("name") == f"newsletter-image-{sha}" and a.get("expired") is False
-                           for a in artifacts.get("artifacts", []) if isinstance(a, dict)):
+                available = {a.get("name") for a in artifacts.get("artifacts", [])
+                             if isinstance(a, dict) and a.get("expired") is False}
+                if not set(image_artifacts) <= available:
                     continue
             return run, names, f"reusing the green branch run {run.get('html_url', run['id'])} of this commit"
     if not candidates:

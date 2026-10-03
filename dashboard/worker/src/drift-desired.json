@@ -4,6 +4,69 @@
     "ziyixi.science"
   ],
   "workers": {
+    "fleet": {
+      "config": "fleet/wrangler.toml",
+      "workers_dev": false,
+      "preview_urls": false,
+      "custom_domains": [
+        "fleet.ziyixi.science"
+      ],
+      "routes": [],
+      "crons": [],
+      "bindings": [
+        {
+          "name": "ACCESS_ISSUER",
+          "type": "plain_text",
+          "source": "config"
+        },
+        {
+          "name": "ACCESS_OWNER",
+          "type": "secret_text",
+          "source": "deploy"
+        },
+        {
+          "name": "ACCESS_OWNER_ALIASES",
+          "type": "secret_text",
+          "source": "deploy"
+        },
+        {
+          "name": "ASSETS",
+          "type": "assets",
+          "source": "config"
+        },
+        {
+          "name": "BUILD_SHA",
+          "type": "plain_text",
+          "source": "deploy"
+        },
+        {
+          "name": "FLEET",
+          "type": "durable_object_namespace",
+          "source": "config"
+        },
+        {
+          "name": "HOST_EPOCH",
+          "type": "plain_text",
+          "source": "config"
+        },
+        {
+          "name": "HOST_KEY",
+          "type": "plain_text",
+          "source": "config"
+        },
+        {
+          "name": "PUBLIC_HOST",
+          "type": "plain_text",
+          "source": "config"
+        },
+        {
+          "name": "REPORT_HMAC_KEY",
+          "type": "secret_text",
+          "source": "deploy"
+        }
+      ],
+      "personal": []
+    },
     "flowday": {
       "config": "flowday/wrangler.toml",
       "workers_dev": false,
@@ -135,6 +198,11 @@
           "source": "deploy"
         },
         {
+          "name": "FLEET",
+          "type": "service",
+          "source": "config"
+        },
+        {
           "name": "HOME",
           "type": "durable_object_namespace",
           "source": "config"
@@ -146,6 +214,11 @@
         },
         {
           "name": "MAIL_HERO",
+          "type": "service",
+          "source": "config"
+        },
+        {
+          "name": "NEWSLETTER",
           "type": "service",
           "source": "config"
         },

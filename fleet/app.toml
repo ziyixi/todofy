@@ -1,0 +1,72 @@
+version = 1
+id = "fleet"
+target = "cloudflare"
+
+[[workers]]
+config = "fleet/wrangler.toml"
+entry = "fleet"
+role = "VPS 与后台服务监控"
+position = 11
+
+[[entries]]
+id = "fleet"
+name = "服务器监控"
+description = "k3s、系统 daemon 与后台服务状态"
+group = "apps"
+icon = "server"
+accent = "slate"
+access = true
+url_path = "/"
+app_only_signals = [
+  "host_never_seen",
+  "host_stale",
+  "host_missing",
+  "daemon_k3s_inactive",
+  "daemon_k3s_failed",
+  "daemon_k3s_missing",
+  "daemon_k3s_unknown",
+  "daemon_k3s_activating",
+  "daemon_k3s_deactivating",
+  "daemon_cloudflared_inactive",
+  "daemon_cloudflared_failed",
+  "daemon_cloudflared_missing",
+  "daemon_cloudflared_unknown",
+  "daemon_cloudflared_activating",
+  "daemon_cloudflared_deactivating",
+  "daemon_ssh_inactive",
+  "daemon_ssh_failed",
+  "daemon_ssh_missing",
+  "daemon_ssh_unknown",
+  "daemon_ssh_activating",
+  "daemon_ssh_deactivating",
+  "daemon_cloudflared_platform_inactive",
+  "daemon_cloudflared_platform_failed",
+  "daemon_cloudflared_platform_missing",
+  "daemon_cloudflared_platform_unknown",
+  "daemon_cloudflared_platform_activating",
+  "daemon_cloudflared_platform_deactivating",
+  "cluster_degraded",
+  "cluster_unavailable",
+  "cluster_unknown",
+  "disk_high",
+  "memory_high",
+  "deployment_pending",
+  "release_held",
+  "release_failed",
+  "release_in_progress",
+]
+order = 8
+worker = "fleet"
+position = 12
+[entries.status]
+type = "ops_v1"
+binding = "FLEET"
+guard = false
+
+[[access]]
+key = "fleet"
+kind = "owner"
+worker = "fleet"
+name = "Fleet"
+paths = [""]
+session = "24h"
