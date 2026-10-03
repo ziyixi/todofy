@@ -5,7 +5,9 @@ import argparse
 
 def main():
     parser = argparse.ArgumentParser(prog="personal-cloud")
-    parser.add_argument("command", choices=("observer", "status-daemon", "identity"))
+    parser.add_argument(
+        "command", choices=("observer", "observer-systemd", "status-daemon", "identity")
+    )
     args = parser.parse_args()
     if args.command == "identity":
         import json
@@ -19,6 +21,8 @@ def main():
         return 0
     if args.command == "observer":
         from .observer.cli import main as run
+    elif args.command == "observer-systemd":
+        from .observer.systemd_snapshot import main as run
     else:
         from .status_daemon.server import main as run
     return run()

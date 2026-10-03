@@ -265,7 +265,14 @@ class ObserverTests(unittest.TestCase):
                 return_value={"state": "unknown", "drain_state": "unknown"},
             ),
             patch.object(collector, "runtime_status", return_value=None),
-            patch.object(collector, "daemon", return_value={"state": "active"}),
+            patch.object(
+                collector,
+                "systemd_snapshot",
+                return_value={
+                    name: {"state": "active"}
+                    for name in ("k3s", "cloudflared", "ssh", "cloudflared_platform")
+                },
+            ),
         ):
             base = json.loads(collector.observe({}, 1))
             self.assertEqual(set(base["daemons"]), {"k3s", "cloudflared", "ssh"})

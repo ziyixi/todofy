@@ -165,8 +165,10 @@ class BootstrapBoundaries(unittest.TestCase):
         self.assertFalse(workload["spec"]["suspend"])
         pod = workload["spec"]["jobTemplate"]["spec"]["template"]["spec"]
         self.assertEqual(pod["serviceAccountName"], "platform-observer")
-        self.assertTrue(pod["automountServiceAccountToken"])
+        self.assertFalse(pod["automountServiceAccountToken"])
         self.assertEqual(pod["securityContext"]["runAsUser"], 10001)
+        self.assertEqual(pod["securityContext"]["runAsGroup"], 10001)
+        self.assertEqual(pod["securityContext"]["fsGroup"], 10001)
         self.assertTrue(pod["securityContext"]["runAsNonRoot"])
         self.assertNotIn("hostPID", pod)
         self.assertNotIn("hostNetwork", pod)
@@ -189,5 +191,99 @@ class BootstrapBoundaries(unittest.TestCase):
         self.assertEqual(
             volumes["state"]["persistentVolumeClaim"]["claimName"], "observer-state"
         )
+        main_mounts = {item["name"]: item for item in container["volumeMounts"]}
+        self.assertNotIn("system-bus", main_mounts)
+        self.assertEqual(
+            main_mounts["systemd-snapshot"]["mountPath"], "/run/observer-systemd"
+        )
+        self.assertTrue(main_mounts["systemd-snapshot"]["readOnly"])
+        self.assertEqual(
+            main_mounts["kubernetes-api"]["mountPath"],
+            "/var/run/secrets/kubernetes.io/serviceaccount",
+        )
+        self.assertTrue(main_mounts["kubernetes-api"]["readOnly"])
+        self.assertEqual(
+            volumes["systemd-snapshot"]["emptyDir"],
+            {"medium": "Memory", "sizeLimit": "64Ki"},
+        )
         self.assertFalse((ROOT / "systemd/todofy-fleet.service").exists())
         self.assertFalse((ROOT / "systemd/todofy-fleet.timer").exists())
+
+    def test_systemd_init_cannot_access_observer_identity_secrets_or_persistent_state(
+        self,
+    ):
+        workload = next(
+            yaml.safe_load_all((ROOT / "k3s/newsletter/observer.yaml").read_text())
+        )
+        pod = workload["spec"]["jobTemplate"]["spec"]["template"]["spec"]
+        self.assertEqual(len(pod["initContainers"]), 1)
+        init = pod["initContainers"][0]
+        self.assertEqual(init["image"], pod["containers"][0]["image"])
+        self.assertEqual(init["args"], ["observer-systemd"])
+        self.assertNotIn("env", init)
+        self.assertNotIn("envFrom", init)
+        self.assertEqual(
+            init["securityContext"],
+            {
+                "runAsNonRoot": True,
+                "runAsUser": 65534,
+                "runAsGroup": 10001,
+                "allowPrivilegeEscalation": False,
+                "readOnlyRootFilesystem": True,
+                "capabilities": {"drop": ["ALL"]},
+            },
+        )
+        self.assertEqual(
+            init["resources"],
+            {
+                "requests": {"cpu": "25m", "memory": "32Mi"},
+                "limits": {"cpu": "250m", "memory": "64Mi"},
+            },
+        )
+        mounts = {item["name"]: item for item in init["volumeMounts"]}
+        self.assertEqual(set(mounts), {"system-bus", "systemd-snapshot"})
+        self.assertTrue(mounts["system-bus"]["readOnly"])
+        self.assertNotIn("readOnly", mounts["systemd-snapshot"])
+        self.assertEqual(
+            mounts["systemd-snapshot"]["mountPath"], "/run/observer-systemd"
+        )
+
+    def test_rotating_api_identity_is_projected_only_into_main_observer(self):
+        workload = next(
+            yaml.safe_load_all((ROOT / "k3s/newsletter/observer.yaml").read_text())
+        )
+        pod = workload["spec"]["jobTemplate"]["spec"]["template"]["spec"]
+        self.assertFalse(pod["automountServiceAccountToken"])
+        volume = next(
+            item for item in pod["volumes"] if item["name"] == "kubernetes-api"
+        )
+        self.assertEqual(
+            volume["projected"]["sources"],
+            [
+                {"serviceAccountToken": {"path": "token", "expirationSeconds": 3600}},
+                {
+                    "configMap": {
+                        "name": "kube-root-ca.crt",
+                        "items": [{"key": "ca.crt", "path": "ca.crt"}],
+                    }
+                },
+                {
+                    "downwardAPI": {
+                        "items": [
+                            {
+                                "path": "namespace",
+                                "fieldRef": {"fieldPath": "metadata.namespace"},
+                            }
+                        ]
+                    }
+                },
+            ],
+        )
+        for init in pod["initContainers"]:
+            self.assertNotIn(
+                "kubernetes-api", {item["name"] for item in init["volumeMounts"]}
+            )
+        self.assertEqual(
+            {item["name"] for item in pod["containers"][0]["volumeMounts"]},
+            {"state", "systemd-snapshot", "kubernetes-api", "meminfo"},
+        )

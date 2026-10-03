@@ -141,13 +141,13 @@ class Renderer:
                 item["spec"]["selector"] = {"app": workload.deployment}
             elif kind == "CronJob":
                 item["spec"]["suspend"] = name == "newsletter-daily"
-                for container in item["spec"]["jobTemplate"]["spec"]["template"][
-                    "spec"
-                ]["containers"]:
+                pod = item["spec"]["jobTemplate"]["spec"]["template"]["spec"]
+                for container in (*pod.get("initContainers", []), *pod["containers"]):
                     container["image"] = image(
                         self.config, adapter, target.image_digest
                     )
-                    if name == "platform-observer":
+                if name == "platform-observer":
+                    for container in pod["containers"]:
                         runtime_url = (
                             "http://"
                             + self.workloads["personal-cloud"].deployment

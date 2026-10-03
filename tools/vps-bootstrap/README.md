@@ -183,7 +183,7 @@ plus the two public release ConfigMaps. It cannot read Secrets, logs, exec into 
 write resources or manage the host. Actions never receives this credential.
 
 ```sh
-k3s kubectl --kubeconfig "$HOME/.kube/personal-cloud-reader.json" \
+K3S_CONFIG_FILE=/dev/null k3s kubectl --kubeconfig "$HOME/.kube/personal-cloud-reader.json" \
   -n personal-cloud get pods,deployments,cronjobs
 ```
 

@@ -21,14 +21,40 @@ spec:
             app: platform-observer
         spec:
           serviceAccountName: platform-observer
-          automountServiceAccountToken: true
+          automountServiceAccountToken: false
           restartPolicy: Never
           securityContext:
             runAsNonRoot: true
             runAsUser: 10001
             runAsGroup: 10001
+            fsGroup: 10001
             seccompProfile:
               type: RuntimeDefault
+          initContainers:
+            - name: systemd-snapshot
+              image: ghcr.io/ziyixi/todofy-platform:bootstrap-required
+              args: [observer-systemd]
+              securityContext:
+                runAsNonRoot: true
+                runAsUser: 65534
+                runAsGroup: 10001
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: [ALL]
+              resources:
+                requests:
+                  cpu: 25m
+                  memory: 32Mi
+                limits:
+                  cpu: 250m
+                  memory: 64Mi
+              volumeMounts:
+                - name: system-bus
+                  mountPath: /host-system-bus/socket
+                  readOnly: true
+                - name: systemd-snapshot
+                  mountPath: /run/observer-systemd
           containers:
             - name: observer
               image: ghcr.io/ziyixi/todofy-platform:bootstrap-required
@@ -76,8 +102,11 @@ spec:
               volumeMounts:
                 - name: state
                   mountPath: /var/lib/observer
-                - name: system-bus
-                  mountPath: /host-system-bus/socket
+                - name: systemd-snapshot
+                  mountPath: /run/observer-systemd
+                  readOnly: true
+                - name: kubernetes-api
+                  mountPath: /var/run/secrets/kubernetes.io/serviceaccount
                   readOnly: true
                 - name: meminfo
                   mountPath: /host-meminfo
@@ -94,3 +123,23 @@ spec:
               hostPath:
                 path: /proc/meminfo
                 type: File
+            - name: systemd-snapshot
+              emptyDir:
+                medium: Memory
+                sizeLimit: 64Ki
+            - name: kubernetes-api
+              projected:
+                sources:
+                  - serviceAccountToken:
+                      path: token
+                      expirationSeconds: 3600
+                  - configMap:
+                      name: kube-root-ca.crt
+                      items:
+                        - key: ca.crt
+                          path: ca.crt
+                  - downwardAPI:
+                      items:
+                        - path: namespace
+                          fieldRef:
+                            fieldPath: metadata.namespace

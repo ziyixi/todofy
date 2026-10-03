@@ -17,10 +17,11 @@ Rules for this file:
   design detail instead of copying it.
 
 Last updated: 2026-10-03. The verified foundation implementation is `8628e5e`; the k3s/Fleet
-implementation and pinned connector bootstrap reached `main` at `54861b2`. The owner ran the prepared
-bootstrap; k3s and the dedicated connector are running and Docker is retired. Fleet receives live signed
-reports, but runtime observations are unavailable because of pinned Kubernetes SDK compatibility bugs.
-The first API release remains disabled while the client is repaired; retained Newsletter admission stays held.
+implementation and pinned connector bootstrap reached `main` at `54861b2`. The owner completed the bounded
+SDK repair at `c703378`; Actions then activated the first API release and verified the physical images.
+Newsletter admission is accepting, with all 32 historical unknown outcomes preserved. k3s and the dedicated
+connector are running; Docker is inactive and disabled. Fleet receives signed cluster/runtime reports.
+System-daemon observation still needs the rootless init-container fix and its live acceptance below.
 Every app's owner API is on proto now (the dashboard
 `ca63675`, FlowDay `8d9100e`, Mail Hero `d1bde0e`, Todofy `b70856f`, all landed and verified on 2026-10-02). Nothing
 was in flight at that landing. The foundation evidence below describes that completed release.
@@ -36,16 +37,17 @@ was in flight at that landing. The foundation evidence below describes that comp
 | Watch | `watch` (+ `WatchState` DO) | `watch.ziyixi.science` | `Watch deploy` | Yes (`watch.ui.v1`) |
 | FlowDay | `flowday` | `flowday.ziyixi.science` | `FlowDay deploy` | Yes (`flowday.ui.v1`) |
 | Dashboard | `home` (+ `HomeState` DO) | `home.ziyixi.science` | `Dashboard deploy` | Yes (`dashboard.ui.v1`, since `ca63675`) |
-| Fleet | `fleet` (+ `FleetState` DO) | `fleet.ziyixi.science` | `Fleet deploy` | Yes (`fleet.ui.v1`; live receipts, runtime verification pending) |
+| Fleet | `fleet` (+ `FleetState` DO) | `fleet.ziyixi.science` | `Fleet deploy` | Yes (`fleet.ui.v1`; live receipts and verified runtime) |
 | Website | `ziyixi-website` (+ `ziyixi-notion-publish` relay) | `ziyixi.science`, `www.ziyixi.science` | `Website release` | n/a (static) |
 
 Newsletter source was imported on `main` from its deployed engine commit
 `c3d622d4771b1ca63ee4e3f785b79032cffc30e1`. Its independent image is `ghcr.io/ziyixi/todofy-newsletter`.
-The current `54861b2` publisher reused the exact Linux-tested image artifact and published
-`sha256:146d926001d0d1252a4cc5f71cc63a38acaf11c76f92e0be6748b008b168ed9f`.
+The current `c703378` publisher reused the exact Linux-tested image artifact and published
+`sha256:63f5c907775c953d4d31629eeb2862fe1bf151eefa07e25cef630c419c834d19`.
 The package is public; anonymous manifest access and the manifest/config identity checks passed.
-`ghcr.io/ziyixi/newsletter` was the old VPS runtime. It is now stopped for the authorised migration,
-with its image and persistent state preserved. Image publication alone does not update that server. The application reads Todofy's
+`ghcr.io/ziyixi/newsletter` was the old VPS runtime. It is stopped, with its image and persistent state
+preserved. The new image is running in k3s and the daemon's release is ready; this does not prove an
+external business operation. The application reads Todofy's
 `/api/summary` and `/api/recommendation` using its existing machine contract. See
 `newsletter/docs/import-source.md` and `newsletter/docs/deployment-drain.md` for the import and release boundaries.
 The old Slash, changedetection and FlowDay containers are also stopped under the owner's subsequent
@@ -272,15 +274,30 @@ before replacement; every unknown record remains intact and visible, with no aut
 See [bootstrap recovery](tools/vps-bootstrap/README.md#initial-client-repair).
 Local validation passed 169 Platform/build/release/bootstrap tests plus 155 subtests, and 46 Newsletter
 drain tests. The latter execute the real Store/exclusive-lock repair entry point on synthetic SQLite.
-All 64 Platform/tool Python files and the changed Newsletter files passed lint/format. This candidate
-still needs its own exact-SHA branch gate and Linux images; none of these checks proves live repair.
+All 64 Platform/tool Python files and the changed Newsletter files passed lint/format. The exact candidate
+passed [branch 37110131910](https://github.com/ziyixi/todofy/actions/runs/37110131910) at `c703378`, including
+the real Linux image checks. [Main 37110576394](https://github.com/ziyixi/todofy/actions/runs/37110576394)
+promoted those artifacts; its second attempt enabled the first normal CreateRelease after the owner's
+completed repair. VPS deploy passed. Typed API and namespace metadata agree on ready/activated, actual
+source/digests/request identity, and accepting Newsletter admission with zero active work and all 32
+unknown outcomes retained. The Platform digest is
+`sha256:4fdfdb874bd717f8c2447692230ffa540dde39a6b93592b2406e43183f851441`.
+Optional namespace metadata diagnosis now works without sudo and rejects Secret/exec/write access.
+No real model/provider/send or backup acceptance has been claimed.
 
-Remaining sequence: gate and publish this candidate, prepare its exact immutable bundle, then have the
-owner run the one-time repair. Verify the fixed SDK's real Kubernetes access and frozen new gate before
-enabling Actions. The first API operation is **CreateRelease** for the new SHA, not ResumeRelease for
-the old bootstrap (there is no API ledger to resume). Verify actual SHA/digest/UUID and fresh Fleet/Home
-observations before declaring deployment ready. Systemd observation remains unverified; no business
-provider/send or backup acceptance has been claimed.
+The remaining systemd issue is before method calls: the UID10001 container's system-bus connection
+closes, and that UID is not registered on the host. A fixed non-root diagnostic reproduced it. The
+next candidate uses a standard same-image init container as the host's existing UID65534 (`nobody`),
+retains the non-mutating polkit denial checks, and writes only a bounded shared-proto daemon snapshot
+to an emptyDir. The main observer keeps its existing UID, durable state and receipt identity. The init
+receives no projected Kubernetes identity or application secret. Both images are pinned to the same
+tested digest. Gate, publish and verify live daemon states and fresh Fleet/Home receipts before closing
+this item; an unreadable probe must still report unknown, never assume health.
+Local validation passed 178 Platform/build/release/bootstrap checks and 166 subtests, including actual
+shared-codec snapshot bounds/freshness and offline Kustomize identity/permission checks. All 67 relevant
+Python files passed lint/format; proto lint, API lint, schema checks and breaking checks passed. The
+Linux image gate also exercises the probe CLI as UID65534 without capabilities, network, credentials or
+a host bus; that smoke only proves the image and unknown-state path, not live D-Bus authorization.
 
 ## Foundation completed (historical release evidence)
 
@@ -366,11 +383,9 @@ with synthetic data.
 - Optional: Chrome site search `s` → `https://s.ziyixi.science/%s` (`links/README.md`).
 - Dedicated Cloudflare tokens (`CF_INFRA_READ_TOKEN`, `CF_INFRA_TOKEN`) and a fresh deploy token
   (`infra/README.md` "Replacing the token").
-- The owner completed the initial k3s bootstrap. Run the bounded SDK-client repair only after its
-  exact-SHA CI and immutable images are verified; no password should be sent to an agent.
 - The pages to watch for W4 (added by the owner at watch.ziyixi.science/new, or named to an agent privately).
-- Live Newsletter deployment and monitoring acceptance waits for the k3s/Fleet migration above;
-  real model/provider/send acceptance remains distinct from deployment health.
+- Real Newsletter model/provider/send acceptance remains distinct from the verified deployment;
+  historical unknown outcomes require deliberate reconciliation, not automatic replay.
 
 ## Next, in order
 

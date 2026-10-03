@@ -173,10 +173,15 @@ workload configuration and credentials remain mounted configuration. Read-only o
 bounded and preserve unknown/missing evidence. Fleet displays only an operation summary and independently
 verified workload state; its UI does not proxy deployments. Application secrets should not be readable by
 the daemon's Kubernetes service account unless a narrowly reviewed operation requires it.
-The observer reads only fixed systemd unit states through the packaged Jeepney library and the reviewed
-system-bus socket mount. A read-only socket mount does **not** make D-Bus methods read-only: the observer
-runs as UID 10001 without capabilities or privilege, and the host must grant that identity no systemd
-management rights through polkit. Verify this denial and read availability on the actual node. An
+The observer's same-image init container reads fixed systemd unit states through Jeepney and the reviewed
+system-bus socket mount, using the supported host's existing UID65534 (`nobody`). D-Bus validates the host
+identity; adding an account inside the image does not register that identity on the host. A read-only
+socket mount does **not** make D-Bus methods read-only: the probe has no capabilities or privilege, and
+the host must grant it no systemd management rights through polkit. It checks those rights without
+interaction or mutation before reading states. A bounded, timestamped shared-proto snapshot passes
+through an emptyDir to the main observer; stale or invalid snapshots remain unknown. Only the main
+UID10001 observer receives the projected Kubernetes identity, application monitoring secrets and its
+unchanged persistent state. Verify denial and read availability on the actual node. An
 unreadable unit is unknown; if k3s cannot schedule the observer, Fleet shows a missing/stale receipt rather
 than claiming an independent current host diagnosis. Memory reads use only the exact `/proc/meminfo`
 file; disk observations concern the observer's own persistent filesystem, not arbitrary host mounts.
@@ -251,7 +256,8 @@ effects remain unreconciled. A profile generation test or green release is not a
 
 ## Supported VPS prerequisites
 
-The first installation targets Ubuntu 24.04 on Linux amd64, standard systemd, curl,
+The first installation targets Ubuntu 24.04 on Linux amd64, standard systemd and its existing
+UID65534 `nobody` account, curl,
 iptables/ip6tables and a supported k3s kernel. Reserve at least
 2 CPU cores, 4 GiB RAM and 20 GiB free disk for the node and image updates; the existing
 Newsletter workload may require more memory, depending on its content. Keep room for

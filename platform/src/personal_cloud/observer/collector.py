@@ -16,7 +16,8 @@ from ziyixi_proto.wire_json import from_wire, to_wire
 
 from ..deployment.kubernetes import Client, DependencyUnavailable
 from .provenance import source_sha
-from .systemd import UNITS, daemon
+from .systemd import UNITS
+from .systemd_snapshot import read as systemd_snapshot
 from .transport import ObserverError, _request
 
 
@@ -217,6 +218,7 @@ def resource_percentages() -> tuple[float | None, float | None]:
 def observe(env: dict[str, str], sequence: int) -> bytes:
     cluster = kube(env)
     disk, memory = resource_percentages()
+    daemons = systemd_snapshot()
     value = {
         "version": "fleet-report-v1",
         "host_key": env.get("FLEET_HOST_KEY", "vps"),
@@ -227,7 +229,7 @@ def observe(env: dict[str, str], sequence: int) -> bytes:
         .isoformat(timespec="seconds")
         .replace("+00:00", "Z"),
         "daemons": {
-            name: daemon(name)
+            name: daemons[name]
             for name in UNITS
             if name != "cloudflared_platform"
             or env.get("FLEET_EXPECT_PLATFORM_TUNNEL") == "true"

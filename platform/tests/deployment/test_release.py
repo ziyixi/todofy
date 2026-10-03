@@ -786,14 +786,22 @@ class Rendering(unittest.TestCase):
                     if observer
                     else "ghcr.io/example/todofy-newsletter@" + TARGETS[0].image_digest
                 )
+                pod = item["spec"]["jobTemplate"]["spec"]["template"]["spec"]
                 self.assertTrue(
                     all(
                         container["image"] == expected
-                        for container in item["spec"]["jobTemplate"]["spec"][
-                            "template"
-                        ]["spec"]["containers"]
+                        for container in (
+                            *pod.get("initContainers", []),
+                            *pod["containers"],
+                        )
                     )
                 )
+                if observer:
+                    self.assertEqual(
+                        pod["initContainers"][0]["args"], ["observer-systemd"]
+                    )
+                    self.assertNotIn("env", pod["initContainers"][0])
+                    self.assertFalse(pod["automountServiceAccountToken"])
             if item["kind"] == "Deployment":
                 self.assertEqual(item["spec"]["strategy"], {"type": "Recreate"})
                 expected = (

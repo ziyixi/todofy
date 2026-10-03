@@ -130,6 +130,27 @@ message Daemon {
     }
   ];
 }
+// A bounded, per-pod system-bus observation shared with the receipt writer.
+message SystemDaemonSnapshot {
+  // Time the non-root system-bus observation began.
+  google.protobuf.Timestamp observation_time = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).non_null = true
+  ];
+  // Fixed host daemon aliases; contains no logs, credentials or unit contents.
+  map<string, Daemon> daemons = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field) = {
+      key_format: "DaemonAlias"
+      max_items: 4
+      required_keys: [
+        "k3s",
+        "cloudflared",
+        "ssh"
+      ]
+    }
+  ];
+}
 // Cluster status, not business status.
 message Cluster {
   // ready, degraded, unavailable or unknown.

@@ -320,6 +320,26 @@ with patch.object(socket, "socket", side_effect=AssertionError("Network use is f
                 self.assertEqual(
                     initializer["volumeMounts"], sync["containers"][0]["volumeMounts"]
                 )
+                observer = next(
+                    item
+                    for item in runtime["items"]
+                    if item["metadata"]["name"] == "platform-observer"
+                )["spec"]["jobTemplate"]["spec"]["template"]["spec"]
+                self.assertEqual(
+                    [
+                        item["image"]
+                        for item in (
+                            *observer["initContainers"],
+                            *observer["containers"],
+                        )
+                    ],
+                    [images["platform"], images["platform"]],
+                )
+                self.assertEqual(
+                    observer["initContainers"][0]["securityContext"]["runAsUser"], 65534
+                )
+                self.assertNotIn("env", observer["initContainers"][0])
+                self.assertFalse(observer["automountServiceAccountToken"])
         foundation = config.read_json(bundle / "foundation.json")
         for item in foundation["items"]:
             if item["kind"] == "PersistentVolume":

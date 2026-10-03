@@ -1402,6 +1402,10 @@ jobs:
           docker run --rm --network none "$tested_image" identity | python3 -c 'import json, os, sys; assert json.load(sys.stdin)["source_sha"] == os.environ["GITHUB_SHA"]'
           docker run --rm --network none --entrypoint python "$tested_image" \
             -c 'import personal_cloud.status_daemon.server, personal_cloud.observer.cli, pydantic_core'
+          docker run --rm -i --network none --read-only --cap-drop ALL \
+            --security-opt no-new-privileges --user 65534:10001 \
+            --tmpfs /run/observer-systemd:rw,size=65536,uid=65534,gid=10001,mode=0770 \
+            --entrypoint python "$tested_image" - < tools/platform-build/smoke_systemd.py
           python3 tools/container-release/image.py save --image "$tested_image" --sha "$GITHUB_SHA" \
             --directory "$RUNNER_TEMP/platform-image"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
