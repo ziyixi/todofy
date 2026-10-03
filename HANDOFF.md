@@ -30,8 +30,9 @@ frozen targets verified. Its natural 19:05 UTC observer recorded `BUS/APPARMOR_D
 units, while the main container successfully read the snapshot and submitted its receipt. The exact
 official denial prefix is recognized in memory; no private error body is logged or stored. Direct
 bounded host observations find all four units active. The dedicated AppArmor profile candidate is on
-`codex/k3s-personal-cloud`, with no host policy change applied. Gate it, stage the public profile-only
-bundle, have the owner load the fixed profile once, then promote that same green SHA through main.
+`codex/k3s-personal-cloud`, with no host policy change applied. Candidate `4a2b725` passed the full
+branch gate in Actions `37147403600`; the public profile-only bundle is staged and hash-verified.
+Have the owner load the fixed profile once, then promote that same green SHA through main.
 Never publish its Localhost manifest before the profile is enforcing on the host. Live daemon-state
 acceptance still requires a natural observer and fresh Fleet/Home receipt. The temporary host-admin
 window has expired; normal typed deployments and metadata diagnosis continue without sudo.
@@ -385,6 +386,13 @@ loads only that profile and verifies exact enforce mode. Fresh VPS bootstrap inc
 Local candidate validation passed 200 tests and 192 subtests; 71 Python files passed lint/format.
 Actual Linux parser compilation, host load, successful Polkit guard and fresh daemon states remain
 separate checks; do not replace unknown with healthy or bypass confinement to finish the release.
+The complete `4a2b725` branch [37147403600](https://github.com/ziyixi/todofy/actions/runs/37147403600)
+passed its gate, including real Ubuntu parser compilation, all reached application checks and both image checks.
+The staged six-file public installer also passed exact hashes and the existing VPS parser with
+`--skip-kernel-load --skip-cache`; kernel loading remains pending. Final independent rebuild review
+found that the fixed daemon list assumes the old global `cloudflared.service`, which a fresh VPS without
+an SSH Tunnel will not have. This report/runbook caveat is separate from the existing-node repair;
+do not create an unused host service to silence it or claim the monitoring contract is already configurable.
 Local candidate validation passed 182 Platform/build/release/bootstrap tests plus 178 subtests,
 45 Fleet unit tests and eight real workerd SQLite tests. Fleet type checks and lint passed; all 71
 relevant Python files passed lint/format. The two-release ownership test uses the real SDK transport
@@ -495,7 +503,8 @@ with synthetic data.
 - The pages to watch for W4 (added by the owner at watch.ziyixi.science/new, or named to an agent privately).
 - Real Newsletter model/provider/send acceptance remains distinct from the verified deployment;
   historical unknown outcomes require deliberate reconciliation, not automatic replay.
-- One profile-only host installation after branch CI is green. The host-admin window expired;
+- One profile-only host installation; exact candidate `4a2b725` has a green full branch gate and a
+  staged, verified public bundle. The host-admin window expired;
   the owner must run the staged fixed-version command. Main stays at `c0dddd3` until exact enforce
   mode is confirmed, after which Actions deploys the candidate and normal observation verifies it.
 

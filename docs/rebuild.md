@@ -351,6 +351,14 @@ independent. Docker, Compose, application executables, host application Python p
 are not prerequisites. k3s/containerd runs the published Linux amd64 images, which include the locked
 application runtime and libraries. Other architectures require matching, tested images.
 
+One monitoring assumption still needs configuration work: the current observer and Fleet contract
+expect the old global `cloudflared.service`, alongside k3s, SSH and the dedicated connector. A fresh
+node with no SSH Tunnel does not have that global service; bootstrap intentionally does not install it.
+The existing node's four-active-unit acceptance therefore cannot be reused unchanged. Define the
+new node's required host services before that drill, then review bounded probe/contract/Fleet configuration.
+Do not install an unused service or label an unknown unit healthy merely to clear the alert.
+See the [audit](rebuild-audit.md#3-发现的具体缺口); this follow-up is not implemented here.
+
 Bootstrap restricts the k3s control-plane/agent ports with a dedicated persistent firewall
 chain, preserving other firewall rules and SSH. The only new public route is the daemon's
 HTTPS hostname through Cloudflare Access and Tunnel; the connector also validates the

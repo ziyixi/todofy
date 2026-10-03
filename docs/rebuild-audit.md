@@ -60,6 +60,7 @@ P1 表示会阻止重建或造成错误验收；P2 表示增加操作负担或�
 | P2 | 两份 profile 未覆盖全部 import/frozen/policy identity；仍须手工同步若干 infra 文件及 FROZEN_OBJECTS 的新采用对象身份 | [cloud-config README](../tools/cloud-config/README.md):28–32；[ids.tf](../infra/ids.tf):10–39；[access.tf](../infra/access.tf):144、169、176；[infra_state.py](../infra/scripts/infra_state.py):124–125 | 扩大 provider inventory 到完整采用清单，生成身份引用并守卫一致性，保留冻结地址与保护语义 |
 | P2（换仓库） | backup、content-config、website release 的 repo/image owner/canonical/dispatch 仍有固定配置 | [backup workflow](../.github/workflows/mail-hero-backup-image.yml):24、77；[content workflow](../.github/workflows/content-config.yml):72；[website workflow](../.github/workflows/website-release.yml):69、73 | 由 repo/host 的公开输入推导，保留镜像 owner 和 dispatch allowlist |
 | P2 | 首次部署才产生 DO namespace，Home 初始 identity 可能为 null；Watch 首次 Alarm 需受鉴权调用 | [registry.ts](../dashboard/worker/src/registry.ts):274–289；[Watch README](../watch/README.md):101–107 | 首次发布后有明确 discover → regenerate → Home 发布 → authenticated wake 阶段 |
+| P2（新 VPS） | observer 固定要求旧全局 `cloudflared.service`，但 fresh bootstrap 只创建专用 connector；没有旧 SSH Tunnel 的新机器会持续告警 | [systemd.py](../platform/src/personal_cloud/observer/systemd.py):16；[collector.py](../platform/src/personal_cloud/observer/collector.py):231；[report.ts](../fleet/worker/src/report.ts):56；[cluster.py](../tools/vps-bootstrap/cluster.py):134 | 先明确该节点实际必需的宿主服务，再以有界配置贯穿 probe/合同/Fleet；不为消除告警安装无用途服务 |
 
 本次合成验证实际发现：旧账户 relay URL 被 Watch 拒绝，而新账户合成 relay URL 会被允许。
 公开身份生成、服务清单与 drift 生成检查均通过；cloud-config 的 9 个测试通过。
@@ -160,6 +161,9 @@ systemd probe 使用宿主已有 UID65534。有冲突、ARM、其他发行版或
 从同一 green SHA 的两个 CI-tested image digests 准备 bundle，compiler 版本取 `platform/versions.json`。
 保留 Fleet 换 VPS 时，先停止旧 observer，再移交其 durable state 或配置两端新 epoch，随后启动新 observer；
 不能让两台机器并行使用同一 host key/epoch，也不能用旧 observer 继续推进后的过早副本。
+当前“四个daemon均active”的验收适用于现机拓扑。全新VPS若没有全局SSH Tunnel，
+`cloudflared.service`并不存在；当前observer仍要求它，Fleet会持续unknown告警。
+这属于需补的监控配置边界，不是启动业务失败，也不能通过伪造active或安装无用途服务隐藏。
 live Newsletter 先准备 dedicated Codex 登录。
 `old_paths: {}` 会创建空目录并 seed 内容配置，不会生成订阅登录，也不等于恢复业务库。
 
@@ -326,6 +330,10 @@ GitHub、daemon、Fleet/Home 要表达同一部署结果，但不能把它们合
   本地200tests、192subtests及71个Python文件lint/format通过；真实parser、宿主加载、Polkit结果与
   fresh Fleet/Home daemon状态尚待分别验收。临时宿主管理员窗口已过期，需要owner执行一次固定安装命令；
   main在加载前保持`c0dddd3`。当前没有应用主机策略变更，也没有用Unconfined替代修复。
+- 候选`4a2b725`的完整[branch CI](https://github.com/ziyixi/todofy/actions/runs/37147403600)已通过，
+  包括真实Ubuntu parser编译、各应用检查及两个镜像构建；VPS标准parser也完成
+  `--skip-kernel-load --skip-cache`编译，六个公开安装文件哈希一致。这些证据不等于kernel加载。
+  最后独立审查补出新VPS没有旧全局cloudflared时的固定监控假设，已加入上表和runbook；本轮不扩展监控合同。
 - 本报告和runbook修正文档导航/已有能力说明；没有实现上表新的provisioner、恢复工具或账户迁移。
 
 验收此报告时，可以直接问：输入是否齐全、每一步谁持有权限、失败能否继续、旧数据能否保留、
