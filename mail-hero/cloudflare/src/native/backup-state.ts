@@ -1,6 +1,7 @@
 import type { Env } from './types.ts';
 import { canonicalJSON, verifyBackupReceipt, type BackupReceipt } from './backup.ts';
 import { sha256 } from './security.ts';
+import type { NativeBackupMarker } from './native-backup-format.ts';
 
 type Row = Record<string, any>;
 interface Lease {
@@ -9,6 +10,8 @@ interface Lease {
   policy: Row | null; objects_done: boolean; object_cursor: string | null;
   control_sha256?: string; schema_sha256?: string; tables?: string[];
   manifest_sha256?: string; remote_locator?: string; verified_at?: string; receipt_sync_pending?: boolean;
+  executor?: 'native' | 'external'; verification?: 'native_readback_verified'; source_manifest_sha256?: string;
+  native_marker_pending?: boolean;
 }
 const activeStates = new Set(['draining', 'settling', 'ready']);
 const TABLE_NAME = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
@@ -68,10 +71,54 @@ export class BackupState {
   paused(): boolean { const lease = this.current(); return !!lease && activeStates.has(lease.state); }
   nextExpiry(): number | null { const lease = this.current(); return lease && activeStates.has(lease.state) ? lease.expires_at : null; }
   frozenPolicy(): Row | null { const lease = this.current(); return lease && activeStates.has(lease.state) ? lease.policy : null; }
+  /** Internal entry point, never selected by an HTTP request body. */
+  async beginNative(): Promise<string> {
+    const response = await this.fetch(new Request('https://coordinator/backup/begin', {
+      method: 'POST', body: JSON.stringify({ lease_seconds: 1800 }),
+    }), 'native');
+    if (!response?.ok) throw new Error('native_backup_begin_unavailable');
+    const value = await response.json() as Row;
+    const lease = this.current();
+    if (!lease || lease.id !== value.backup_id || !activeStates.has(lease.state)) throw new Error('native_backup_begin_unavailable');
+    lease.executor = 'native'; this.save(lease);
+    return lease.id;
+  }
+  nativeReady(id: string): boolean { return this.requireReady(id)?.executor === 'native'; }
+  async cancelNative(id: string): Promise<void> {
+    const lease = this.current();
+    if (lease?.id !== id || lease.executor !== 'native' || !activeStates.has(lease.state)) return;
+    lease.state = 'cancelled'; this.save(lease);
+  }
+  /** The native runner has copied and read-back verified every snapshot file.
+   * This is intentionally not exposed by fetch(): the external HMAC contract
+   * cannot be bypassed by setting a request's proof/type field. */
+  async commitNativeVerified(marker: NativeBackupMarker, sourceManifestHash: string): Promise<void> {
+    const completed = this.current();
+    if (completed?.id === marker.backup_id && completed.state === 'remote_verified' &&
+      completed.verification === 'native_readback_verified' && completed.manifest_sha256 === marker.manifest_sha256 &&
+      completed.source_manifest_sha256 === sourceManifestHash && completed.remote_locator === marker.key) return;
+    const lease = this.requireReady(marker.backup_id);
+    if (!lease || lease.executor !== 'native' || marker.proof !== 'native_readback_verified' ||
+      !/^[0-9a-f]{64}$/.test(marker.manifest_sha256) || !/^[0-9a-f]{64}$/.test(marker.sha256)) throw new Error('native_backup_not_ready');
+    const exported = await this.fetch(new Request(`https://coordinator/backup/manifest?backup_id=${lease.id}`));
+    if (!exported?.ok) throw new Error('native_backup_incomplete');
+    const manifest = await exported.json() as Row;
+    if (manifest.manifest_sha256 !== sourceManifestHash || !this.nativeReady(lease.id)) throw new Error('native_backup_manifest_changed');
+    lease.state = 'remote_verified'; lease.manifest_sha256 = marker.manifest_sha256;
+    lease.source_manifest_sha256 = sourceManifestHash; lease.remote_locator = marker.key;
+    lease.verified_at = marker.verified_at; lease.verification = marker.proof;
+    lease.receipt_sync_pending = true; lease.native_marker_pending = true; this.save(lease);
+  }
+  async finalizeNativeMarker(id: string): Promise<void> {
+    const lease = this.current();
+    if (lease?.id !== id || lease.state !== 'remote_verified' || lease.verification !== 'native_readback_verified') throw new Error('native_backup_not_committed');
+    lease.native_marker_pending = false; this.save(lease);
+    await this.syncReceipt();
+  }
   status(): Row {
     const lease = this.current();
     const writers = this.storage.sql.exec<{ count: number; oldest: number | null }>('SELECT count(*) count,min(created) oldest FROM mutation_leases').one();
-    return { ...(lease ?? { state: 'idle' }), backup_id: lease?.id ?? null, paused: this.paused(),
+    return { ...(lease ?? { state: 'idle' }), executor: lease?.executor ?? 'external', backup_id: lease?.id ?? null, paused: this.paused(),
       active_writers: writers.count, oldest_writer_at: writers.oldest,
       pending_uploads: lease?.cut_seq === null || !lease ? null : this.storage.sql.exec<{ count: number }>(
         "SELECT count(*) count FROM ingest_uploads WHERE seq<=? AND status='uploading'", lease.cut_seq).one().count };
@@ -105,7 +152,7 @@ export class BackupState {
   }
   async syncReceipt(): Promise<void> {
     const lease = this.current();
-    if (lease?.state !== 'remote_verified' || !lease.receipt_sync_pending || !lease.verified_at) return;
+    if (lease?.state !== 'remote_verified' || !lease.receipt_sync_pending || !lease.verified_at || lease.native_marker_pending) return;
     try {
       await this.env.DB.prepare('UPDATE app_settings SET last_backup_at=? WHERE id=1 AND (last_backup_at IS NULL OR last_backup_at<?)')
         .bind(lease.verified_at, lease.verified_at).run();
@@ -115,6 +162,17 @@ export class BackupState {
   }
   private requireReady(id: string | null): Lease | null {
     const lease = this.current(); return lease?.id === id && lease.state === 'ready' ? lease : null;
+  }
+  private nativeRunActive(): boolean {
+    // The native runner must durably finish its marker/index/rotation before an
+    // external begin may replace backup_control. Its progress is written before
+    // releasing this guard, so a crash cannot strand an old completion behind a
+    // new lease. Older objects/tests may not have initialized the runner yet.
+    if (!this.storage.sql.exec("SELECT name FROM sqlite_master WHERE type='table' AND name='native_backup_control'").toArray().length) return false;
+    const row = this.storage.sql.exec<{ value: string }>('SELECT value FROM native_backup_control WHERE id=1').toArray()[0];
+    if (!row) return false;
+    const value = JSON.parse(row.value) as { phase?: string };
+    return !!value.phase && !['idle', 'complete', 'failed'].includes(value.phase);
   }
   private block(lease: Lease, name: string, value: Row): void {
     this.storage.sql.exec('INSERT INTO backup_blocks VALUES(?,?,?) ON CONFLICT(backup_id,name) DO UPDATE SET value=excluded.value',
@@ -142,7 +200,7 @@ export class BackupState {
       cut_seq: lease.cut_seq, blocks, objects, credential_key_included: false };
     return { value, hash: await sha256(canonicalJSON(value)) };
   }
-  async fetch(request: Request): Promise<Response | null> {
+  async fetch(request: Request, executor: 'native' | 'external' = 'external'): Promise<Response | null> {
     const url = new URL(request.url), path = url.pathname;
     if (path === '/mutation/begin' && request.method === 'POST') {
       if (this.paused()) return responseError(503, 'backup_in_progress');
@@ -174,7 +232,9 @@ export class BackupState {
       await this.progress(); await this.syncReceipt(); const { policy: _policy, ...publicStatus } = this.status(); return Response.json(publicStatus);
     }
     if (path === '/backup/begin' && request.method === 'POST') {
+      if (executor === 'external' && this.env.NATIVE_BACKUP_ENABLED === 'true') return responseError(410, 'native_backup_runner_required');
       if (this.paused()) return responseError(409, 'backup_already_active');
+      if (executor === 'external' && this.nativeRunActive()) return responseError(409, 'native_backup_completion_pending');
       await this.syncReceipt();
       if (this.current()?.receipt_sync_pending) return responseError(503, 'backup_receipt_index_pending');
       const input = await request.json() as Row;
@@ -182,7 +242,7 @@ export class BackupState {
       if (!Number.isInteger(seconds) || seconds < 30 || seconds > 1800) return responseError(400, 'invalid_lease_duration');
       if (this.paused()) return responseError(409, 'backup_already_active');
       const lease: Lease = { id: crypto.randomUUID(), state: 'draining', created_at: new Date().toISOString(),
-        expires_at: Date.now() + seconds * 1000, cut_seq: null, cut_at: null, policy: null, objects_done: false, object_cursor: null };
+        expires_at: Date.now() + seconds * 1000, cut_seq: null, cut_at: null, policy: null, objects_done: false, object_cursor: null, executor };
       this.save(lease);
       // Previous inventories are backup-only metadata. Keep the last receipt in
       // the external verified backup instead of growing the live DO forever.
@@ -193,11 +253,13 @@ export class BackupState {
     }
     if (path === '/backup/cancel' && request.method === 'POST') {
       const input = await request.json() as Row, lease = this.current();
+      if (lease?.executor === 'native' && executor === 'external') return responseError(409, 'native_backup_owned');
       if (!lease || lease.id !== input.backup_id || !activeStates.has(lease.state)) return responseError(409, 'backup_not_active');
       lease.state = 'cancelled'; this.save(lease); return Response.json({ backup_id: lease.id, state: lease.state });
     }
     const input = request.method === 'POST' ? await request.json() as Row : null;
     const completed = this.current();
+    if (path === '/backup/finish' && completed?.executor === 'native' && executor === 'external') return responseError(409, 'native_backup_owned');
     if (path === '/backup/finish' && completed && completed.id === input?.backup_id && completed.state === 'remote_verified' && input?.manifest_sha256 === completed.manifest_sha256) {
       await this.syncReceipt(); return Response.json({ backup_id: completed.id, state: completed.state, manifest_sha256: completed.manifest_sha256, receipt_sync_pending: this.current()?.receipt_sync_pending ?? false });
     }

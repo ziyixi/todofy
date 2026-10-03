@@ -34,6 +34,8 @@ not_found_handling = "single-page-application"
 run_worker_first = true
 
 [vars]
+NATIVE_BACKUP_AT_UTC = "04:17"
+NATIVE_BACKUP_MAX_BYTES = "5368709120"
 ACCESS_ISSUER = "https://ziyixi.cloudflareaccess.com"
 ACCESS_AUDIENCE = "688d6408f95a046a74f94a7fbbbc0241f22553436fcae394bfabb92657614849"
 # Exact public HTTPS hosts a webhook target may use (comma-separated).

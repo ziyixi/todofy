@@ -29,13 +29,28 @@ The classifier release `c0dddd3` completed in Actions `37146439819`; the typed r
 frozen targets verified. Its natural 19:05 UTC observer recorded `BUS/APPARMOR_DENIED` for all four
 units, while the main container successfully read the snapshot and submitted its receipt. The exact
 official denial prefix is recognized in memory; no private error body is logged or stored. Direct
-bounded host observations find all four units active. The dedicated AppArmor profile candidate is on
-`codex/k3s-personal-cloud`, with no host policy change applied. Candidate `4a2b725` passed the full
-branch gate in Actions `37147403600`; the public profile-only bundle is staged and hash-verified.
-Have the owner load the fixed profile once, then promote that same green SHA through main.
-Never publish its Localhost manifest before the profile is enforcing on the host. Live daemon-state
-acceptance still requires a natural observer and fresh Fleet/Home receipt. The temporary host-admin
-window has expired; normal typed deployments and metadata diagnosis continue without sudo.
+bounded host observations found all four units active. The owner completed the pinned AppArmor
+installation, whose fixed file hash was rechecked. The full green `93b387c` follow-up reached main and
+[Actions 37151397315](https://github.com/ziyixi/todofy/actions/runs/37151397315) completed the active VPS deployment.
+Request `b663d6a9-30e0-44d4-90fc-13613ecb82d0` reports ready with frozen targets verified; both
+actual sources are `93b387c` and generation 9 matches. The natural 20:30 UTC observer reported
+`SYSTEMD_COMPLETE`, all four units active, and `OBSERVER_ACCEPTED/READ_OK`. Fresh Fleet/Home
+receipts clear all four daemon-unknown alerts. The 32 historical Newsletter unknowns remain unchanged.
+No new provider/send or fresh-account recovery claim follows from this acceptance. The temporary
+host-admin window is expired; routine typed deployment and bounded metadata diagnosis need no sudo.
+
+Current work on `codex/k3s-personal-cloud`: a simple native Mail Hero daily snapshot and actionable
+rebuild/transferable-configuration runbooks. The owner explicitly removed added encryption/key-management.
+The existing DO Alarm copies D1/schema, business DO control and complete R2 objects to private BACKUP_STORE;
+no VPS/k3s collector, new recovery key, encrypted segments or paid product is required. The old collector
+is stopped, its data and v1 recovery compatibility retained. Branch/main production publication and a
+successful real snapshot remain pending; do not report restored backup coverage before complete verification.
+Local checks: 204 Worker tests and 81 UI tests passed. Plain offline recovery's 11 new tests passed;
+its 40-test combined legacy suite has one local GnuPG skip, with real GnuPG required in Linux CI.
+1000 synthetic objects' second backup used 16,621 DO reads, 6,201 SQL writes and 466 Alarm writes;
+this includes prior inventory cleanup and same-day rotation, but is not a 10,000-file/full5GiB test.
+The snapshot ceiling is10,000 files/5GiB; account free quotas remain shared. The rebuild docs separately
+state today's commands and four P0 follow-ups; no fresh-account/VPS or whole-cloud restore drill was run.
 Every app's owner API is on proto now (the dashboard
 `ca63675`, FlowDay `8d9100e`, Mail Hero `d1bde0e`, Todofy `b70856f`, all landed and verified on 2026-10-02). Nothing
 was in flight at that landing. The foundation evidence below describes that completed release.
@@ -56,11 +71,11 @@ was in flight at that landing. The foundation evidence below describes that comp
 
 Newsletter source was imported on `main` from its deployed engine commit
 `c3d622d4771b1ca63ee4e3f785b79032cffc30e1`. Its independent image is `ghcr.io/ziyixi/todofy-newsletter`.
-The running Newsletter uses source `c0dddd3` and image artifact:
-`sha256:41e14597fcec6893dd2b481386eec1881dfbd62490587b0e95306b2b805ac9ac`.
+The running Newsletter uses source `93b387c` and image artifact:
+`sha256:5d1fa9d445c321b30fa040fead4ae77392d60c73c0aff2a8a876a80442af3b25`.
 The package is public; anonymous manifest access and the manifest/config identity checks passed.
 `ghcr.io/ziyixi/newsletter` was the old VPS runtime. It is stopped, with its image and persistent state
-preserved. Newsletter runs in k3s and the latest `c0dddd3` release is ready; this does not prove an
+preserved. Newsletter runs in k3s and the latest `93b387c` release is ready; this does not prove an
 external business operation. The application reads Todofy's
 `/api/summary` and `/api/recommendation` using its existing machine contract. See
 `newsletter/docs/import-source.md` and `newsletter/docs/deployment-drain.md` for the import and release boundaries.
@@ -413,7 +428,7 @@ secrets, documents Tunnel's outbound 7844 requirement and directs Newsletter to 
 Profile/catalog/drift checks remain current; nine profile tests, two migration-reference tests and a check
 of 113 relative document links passed. The owner phase repair, original-ID resume and normal second
 production release are now complete, with fresh Fleet/Home acceptance as recorded above. System-daemon
-still reports `unknown`; its live acceptance remains pending. No new-account/VPS rebuild or historical
+acceptance subsequently passed at `93b387c`, as recorded at the top of this handoff. No new-account/VPS rebuild or historical
 recovery drill was performed, and no new automatic VPS backup is running.
 
 ## Foundation completed (historical release evidence)
@@ -503,10 +518,7 @@ with synthetic data.
 - The pages to watch for W4 (added by the owner at watch.ziyixi.science/new, or named to an agent privately).
 - Real Newsletter model/provider/send acceptance remains distinct from the verified deployment;
   historical unknown outcomes require deliberate reconciliation, not automatic replay.
-- One profile-only host installation; exact candidate `4a2b725` has a green full branch gate and a
-  staged, verified public bundle. The host-admin window expired;
-  the owner must run the staged fixed-version command. Main stays at `c0dddd3` until exact enforce
-  mode is confirmed, after which Actions deploys the candidate and normal observation verifies it.
+- Historical whole-cloud recovery and external provider acceptance remain distinct from running backups.
 
 ## Next, in order
 

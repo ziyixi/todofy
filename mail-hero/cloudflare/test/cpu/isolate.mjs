@@ -44,7 +44,7 @@ export const DASHBOARD_WORKER = {
 /** The Worker's ESM bundle: of src/native/index.ts, or of an entry given as esbuild's `stdin`. */
 export async function bundle(stdin) {
   const input = stdin === undefined ? { entryPoints: [join(root, 'src/native/index.ts')] } : { stdin: { resolveDir: root, loader: 'ts', ...stdin } }
-  const { outputFiles } = await build({ ...input, bundle: true, format: 'esm', platform: 'neutral', external: ['cloudflare:workers'], write: false })
+  const { outputFiles } = await build({ ...input, bundle: true, format: 'esm', platform: 'neutral', conditions: ['browser'], external: ['cloudflare:workers'], write: false })
   return outputFiles[0].text
 }
 

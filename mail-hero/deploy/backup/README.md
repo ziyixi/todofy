@@ -1,82 +1,77 @@
-# Mail Hero backup collector and isolated restore
+# Mail Hero 原生备份与恢复
 
-The collector and its daily scheduler run in a single Docker Compose service. GitHub Actions (`.github/workflows/mail-hero-backup-image.yml` at the monorepo root) builds the Python/GPG image as `ghcr.io/ziyixi/mail-hero-backup-collector`; the existing server pulls its immutable GHCR digest. Images published before the monorepo are `ghcr.io/ziyixi/mail-hero-backup`, whose package stays linked to the old `ziyixi/mail-hero` repository: the server keeps that pinned digest until the next collector upgrade, which switches the Compose image to the new package's digest. The Mail Hero application and database remain on Cloudflare. Existing Vultr backups and their private environment files are not modified.
+Mail Hero 每天由自己的 Cloudflare Durable Object Alarm 备份到私有 `BACKUP_STORE`。**新备份直接保存文件，不再增加应用层加密或恢复密钥**；不需要 VPS、Docker、k3s 或额外的调度服务。桶不公开，下载仍须通过专用机器身份鉴权。
 
-The backup scope is **Mail Hero application data and recovery state only**. It does not back up the host OS, home directory, Docker volumes, or other services. The container runs as UID/GID 1000 with a read-only root filesystem and no Docker socket. No systemd unit, host cron or additional sudo installation is needed.
+备份包含 Mail Hero 的 D1 数据/schema、R2 原件/正文/附件/冻结 webhook payload 及 metadata、待处理与容量状态、删除清单。范围不包含服务器系统、其他应用、来源邮箱或 Worker secrets；恢复时仍需匹配的 Worker 配置。旧 v1 加密包保持可读。
 
-`collect` acquires a bounded Worker lease, verifies canonical D1 export pages and exact R2 object sizes/ETags, writes a private local archive, encrypts it to a pinned public key, uploads 16 MiB parts to the separate backup binding, and downloads the encrypted result to verify its full SHA-256. Only then does it sign the independent receipt and call `finish`. `finish` is the durable success point. D1 and R2 content, custom/HTTP metadata, intake/control state, snapshot boundary, and an optional already-encrypted key escrow are included. Post-boundary arrivals belong to the next snapshot.
+## 自动备份
 
-Each successful run keeps a local encrypted copy and a non-content receipt. After remote success, local and remote rotation keep the latest snapshot on 7 distinct UTC days and 4 distinct ISO weeks (at most 11 snapshots; overlap can reduce this). Failed/unverified local ciphertext is left for inspection and is not counted as a backup. Plaintext staging lives only in a private temporary directory and is removed on normal exit/failure; an abrupt host crash can leave `.snapshot-*` directories, which must be removed only after confirming no collector process is using them. The service's output directory must have mode 0700 and sufficient space for source bytes, a compressed archive, and encrypted output concurrently. No credentials or mail content are logged.
+`NATIVE_BACKUP_ENABLED` 控制是否启用；`NATIVE_BACKUP_AT_UTC` 默认每天 **04:17 UTC**。执行器分批复制，每个文件保存后完整读回并校验 SHA-256，全部通过后才登记成功。失败不会替换最近一次成功记录，重试与清理都有边界。
 
-## Compose deployment
+快照使用最长 30 分钟的 DO 租约，期间暂停解析、交付、清理和管理写入。新邮件仍能接收，切点之后的原件进入下一份快照；超时不能登记成功。只保留已验证快照，按最近 7 个不同 UTC 日和 4 个不同 ISO 周轮转，v1/v2 共用保留策略。
 
-Only these machine credentials are required: dedicated `BACKUP_TOKEN`, independent 64-hex `BACKUP_RECEIPT_KEY`, and an Access service token pair `CF_ACCESS_CLIENT_ID` / `CF_ACCESS_CLIENT_SECRET` restricted to `/api/internal/backup/*`. The collector does **not** need a Cloudflare admin API token, Wrangler login, D1 administrator key, R2 S3 key, `CREDENTIAL_KEY` plaintext, or the recovery private key. `BACKUP_STORE` is separate from `MAIL_STORE` and existing backup buckets. If Access is not used in an isolated development environment, omit both Access variables together.
+v2 路径为 `snapshots-v2/<日期>/<ID>/`。`manifest.json` 保存文件长度、SHA 和快照版本；`source-manifest.json` 保存原 R2 key、ETag、custom/HTTP metadata 及数据库块信息。`proof=native_readback_verified` 表示存储读回校验通过，独立恢复验收另行记录。
 
-The [self-host-on-vultr Compose service](https://github.com/ziyixi/self-host-on-vultr/tree/main/mailhero-backup) uses these existing directories, outside the other backup's `./data` and `./env` trees:
+主数据和备份位于同一 Cloudflare 账户；需要账户外副本时可下载到本机。R2 免费量由账户共享，容量保护不是账单硬上限。配置与发布规则见 [Cloudflare 设置](../../docs/cloudflare-setup.md)。
 
-| Host path | Container path | Access |
-| --- | --- | --- |
-| `/home/xiziyi/.config/mail-hero-backup` | `/run/mailhero-backup` | Read-only; mode 0700 directory, 0600 files |
-| `/home/xiziyi/mail-hero-backup` | `/var/lib/mailhero-backup` | Read/write; mode 0700 |
+## 下载到本机
 
-The config directory contains `credentials.env`, `recovery-public.asc`, and `credential-key.gpg`. The runtime reads the environment file as data, never executes it as shell code, and never prints its values. The public image contains only code and dependencies. Configuration and backup archives are mounted at runtime.
+通过本机安全配置提供专用 `BACKUP_TOKEN` 和 Access 机器身份 `CF_ACCESS_CLIENT_ID` / `CF_ACCESS_CLIENT_SECRET`，不要放进命令参数或日志。不需要 Cloudflare 管理 token、R2 S3 key、GPG 或新的密钥。
 
-Generate the recovery key on a separate trusted device, export **only the armored public key** to the server, and pin its full fingerprint in `BACKUP_RECIPIENT`. Keep the private key and an independent encrypted `CREDENTIAL_KEY` backup off the server. The collector creates a temporary public-only keyring and rejects private-key exports. The container includes the already public-key-encrypted `credential-key.gpg`; it neither decrypts nor generates the application key.
-
-Prepare the encrypted application-key escrow from an explicit input file, then decrypt it on the recovery device and compare it in memory with the original 64-hex key before copying the ciphertext to the server. GPG can successfully encrypt empty input; a successful GPG exit or a nonempty ciphertext does not prove that the key is present. Repeat the comparison against the escrow extracted from the completed backup during the real restore rehearsal. Never print the decrypted key or replace the live application key to make a recovery test pass.
-
-After synthetic tests, a supervised real collection and an isolated recovery rehearsal have passed, start only this service from the deployment repository:
+以下命令在本目录运行。父目录须为 owner-only `0700`，目标目录必须不存在；下载内容包含邮件正文，应放在自己的私有目录中。
 
 ```sh
-docker compose pull mailhero-backup
-docker compose up -d --no-deps mailhero-backup
-docker compose ps mailhero-backup
+python3 native_backup.py list --origin "$MAIL_HERO_ORIGIN"
+python3 native_backup.py download --origin "$MAIL_HERO_ORIGIN" \
+  --backup-id "$BACKUP_ID" --destination /private/recovery/mailhero-backup
 ```
 
-The scheduler runs daily at **04:17 UTC**, configurable with `BACKUP_AT_UTC=HH:MM`. On restart, it checks the local verified receipt and catches up if the latest scheduled backup was missed. Failures wait one hour before retrying, including across container restarts. A shared file lock prevents overlap with a manual run. Graceful shutdown cancels the active lease and cleans temporary plaintext; an abrupt host failure still requires checking abandoned staging directories.
+下载会核对文件数量、长度和 SHA，同时保存刚取得的 `latest-deletions.json`；全部成功后才发布本机目录。把输出的 `receipt_sha256` 独立保存，它用于恢复时检查整份下载是否改变；无需记住或保存新的密码。
 
-To request one backup or check the scheduler locally:
+## 隔离恢复
 
 ```sh
-docker compose run --rm --no-deps mailhero-backup once
-docker compose exec -T mailhero-backup python3 -I /app/container.py health
-docker compose logs --tail=20 mailhero-backup
+python3 native_backup.py restore \
+  --bundle /private/recovery/mailhero-backup \
+  --receipt-sha256 "$SAVED_RECEIPT_SHA256" \
+  --latest-deletions /private/recovery/mailhero-backup/latest-deletions.json \
+  --destination /private/recovery/new-isolated-mailhero
 ```
 
-The healthcheck uses local heartbeat and successful-backup freshness; it does not repeatedly query Cloudflare. A successful upload alone is not recovery proof. Actual collection, restore and deployment facts are recorded separately in [the verification record](../../docs/verification-native.md).
+恢复只操作新本机目录，不联网、不覆盖生产资源。它核对 receipt、全部文件、源 manifest、数据库引用及 metadata，然后复用原恢复器的 SQL 完整性、删除与暂停规则。原事件 ID 和冻结 payload 保留，进行中的投递标为待对账；不自动触发消费者业务。
 
-The maximum lease is 30 minutes. If export/encryption/upload/read-back cannot complete in that window, the run must fail; it cannot declare success after lease expiry or silently extend the consistency window. On errors it cancels the lease and aborts any incomplete multipart upload where possible. Network response bodies are not printed. The Worker independently expires abandoned leases. There is no automatic upgrade to a paid plan.
-
-Before collection can succeed, every live database reference to a raw message, parsed message, retained attachment or frozen webhook payload must exist in the checked inventory. Payload size and SHA-256 must match the frozen database record. Restore repeats these checks after applying deletion/expiry records. Missing referenced content fails closed; successfully hashing the files that happen to exist is not sufficient.
-
-## Restore on the recovery device
-
-Fetch the latest independently stored deletion ledger immediately before recovery, using the dedicated machine credentials. Keep its freshness separate from the old snapshot. If the live service is unavailable, retrieve the latest `deletion-journal/` objects from the independent backup bucket through a separately authorized recovery route and build the same version-1 document; do not substitute an old snapshot's journal and call it current.
+如果使用的是以前下载的备份，先刷新删除清单，再把新路径传给恢复命令：
 
 ```sh
 python3 mailhero_backup.py deletions --origin "$MAIL_HERO_ORIGIN" \
   --output /private/recovery/latest-deletions.json
-python3 mailhero_backup.py restore --archive /private/recovery/snapshot.tar.gz.gpg \
-  --archive-sha256 "$VERIFIED_ARCHIVE_SHA256" \
-  --destination /private/recovery/new-isolated-mailhero \
-  --latest-deletions /private/recovery/latest-deletions.json \
-  --gpg-home /private/recovery/keyring
 ```
 
-The destination must not exist. Obtain `VERIFIED_ARCHIVE_SHA256` from the independently saved successful receipt; public-key encryption by itself does not prove who created an archive. Restore validates archive paths, sizes, hashes, schema pages and object metadata; it creates a new local `database.sqlite`, a loadable `database.sql`, hashed object files plus `r2-objects.json` containing their original keys/metadata, and `coordinator-control.json`. Snapshot and current deletion entries are applied before exposing this isolated result, including attachment copies, search text and frozen payloads. Raw-only expiry keeps retained parsed content. The journal format is `{version:1,fetched_at:<ISO>,items:[{id:<message UUID>,scope:"raw"|"content",deleted_at:<ISO>}]}`. A provided journal must have been fetched after the snapshot cut; the operator must still establish that it is the latest independent journal.
+不要把快照内的旧删除记录当成当前清单。未提供最新清单时，结果明确标为 `quarantined_missing_latest_deletions`；提供后为 `isolated_requires_reconciliation`。两种情况都保持 **`activation_allowed=false`**。
 
-Without a latest journal, the output is explicitly `quarantined_missing_latest_deletions`. Even with one, `activation_allowed` stays false. The restored DB pauses the application and all webhook endpoints, and uncertain sending events become `failed / restore_reconciliation_required` while retaining event IDs and exact payload bytes. The tool does not reconstruct live DO alarms, publish a Worker, import into Cloudflare, or contact a consumer. These are deliberate separate recovery steps:
+恢复输出有 `database.sqlite`、`database.sql`、`r2/`、保留原 key/metadata 的 `r2-objects.json`、`coordinator-control.json`、`restore-state.json` 和 `native-backup-proof.json`。`build_sha` 用于定位仓库版本；包内不包含源码或 Worker secrets。
 
-1. Create new empty D1 and R2 resources; never overwrite the running source. Deploy the reviewed schema/code with `MAINTENANCE_MODE=true` and `FORCE_SEND_PAUSED=true`.
-2. Import the verified SQL and upload each surviving object to its original key with its original metadata; verify bytes/hashes again. Restore the original independently escrowed `CREDENTIAL_KEY`; do not generate a replacement and lose endpoint decryption.
-3. Rebuild DO intake/capacity/job state from the control snapshot while preserving failure-stop counts, sequence boundary and conservative quota state. Reconcile current object byte accounting. Merely importing D1 does not restore DO alarms.
-4. Compare unknown deliveries with the consumer by original event ID. Do not create fresh events or unpause them automatically. Confirm the latest external deletion journal once more before making mail content accessible.
-5. Only after these checks and a controlled synthetic test, explicitly activate intake/processing and decide which existing deliveries may resume. The local restore test is not evidence of a live Cloudflare disaster recovery or an established RPO/RTO.
+真正上线恢复仍需单独核对：导入新空 D1/R2、使用匹配的 Worker 配置、重建 DO 调度与容量状态、按原 event ID 对账未知交付，再明确解除暂停。离线检查通过不能当作已完成生产灾难恢复或已建立 RPO/RTO。
 
-## Tests
+## 旧 v1 加密包
+
+仅旧 `.tar.gz.gpg` 包仍需原恢复私钥和 GnuPG。旧工具、格式和已有备份不改动，也无需重启旧收集器：
+
+```sh
+python3 mailhero_backup.py restore \
+  --archive /private/recovery/legacy-snapshot.tar.gz.gpg \
+  --archive-sha256 "$SAVED_ARCHIVE_SHA256" \
+  --gpg-home /private/recovery/keyring \
+  --latest-deletions /private/recovery/latest-deletions.json \
+  --destination /private/recovery/new-isolated-legacy
+```
+
+## 合成验证
+
+在 `mail-hero/` 执行：
 
 ```sh
 python3 -m unittest discover -s deploy/backup -p 'test_*.py' -v
 ```
 
-Tests use only synthetic data and the real repository SQLite schema. They cover paginated collection, immutable payload bytes, metadata preservation, independent SQL reload, forced pause, content deletion and raw expiry, corrupt objects, traversal/symlink rejection, cancellation, rotation, and (when `gpg` is present) an ephemeral public-key encryption/decryption/restore round trip. No real mail or account credentials are fixtures.
+原生测试不依赖 GPG，覆盖原子下载、文件与清单损坏、重复/缺失/多余文件、路径穿越、符号链接、最新删除记录、冻结事件及缺少仍被数据库引用的对象。旧版 GPG 验证只属于旧格式。生产备份、独立恢复和部署证据见 [验收记录](../../docs/verification-native.md)。

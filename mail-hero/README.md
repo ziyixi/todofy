@@ -33,7 +33,7 @@ npm --prefix cloudflare test
 
 实际账户准备、D1/R2 创建、Access、唯一 Email Routing 规则、Wrangler 命令、验收和备份恢复步骤见 [Cloudflare 设置说明](docs/cloudflare-setup.md)。原生模块与配置合同见 [cloudflare/README.md](cloudflare/README.md)。
 
-正式发布使用单仓库根目录的 [GitHub Actions CI/CD](docs/ci-cd.md)：`main` 上 `mail-hero/` 或共享鉴权包 [`packages/edge-auth/`](../packages/edge-auth/) 有改动且 `CI gate` 通过后发布原生 Worker 和网页。应用无需自建服务器；独立的[备份工具](deploy/backup/README.md)由CI构建GHCR镜像，现有服务器通过Compose拉取固定digest运行。Todofy 位于同一仓库的 [`todofy/`](../todofy/)，是独立的 webhook 消费者，单独检查和发布。
+正式发布使用单仓库根目录的 [GitHub Actions CI/CD](docs/ci-cd.md)：`main` 上 `mail-hero/` 或共享鉴权包 [`packages/edge-auth/`](../packages/edge-auth/) 有改动且 `CI gate` 通过后发布原生 Worker 和网页。应用无需自建服务器；[原生备份](docs/native-backup.md)复用 Cloudflare DO/R2 执行；[离线恢复工具](deploy/backup/README.md)保留旧格式兼容，不依赖 VPS。Todofy 位于同一仓库的 [`todofy/`](../todofy/)，是独立的 webhook 消费者，单独检查和发布。
 
 本次部署的 UI 为 [mail-hero.ziyixi.science](https://mail-hero.ziyixi.science)，固定收件地址（`inbox` 子域上的专用地址，值只保存在 GitHub secret `MAIL_HERO_RECEIVE_ADDRESS`，公开仓库不写明）。GitHub 登录与单封真实纯文本收件已验证；Todofy 完整业务链路仍需用户测试信验收。实际资源和检查范围见 [部署验收记录](docs/verification-native.md)，验收完成后再由用户切换原邮箱自动转发。
 

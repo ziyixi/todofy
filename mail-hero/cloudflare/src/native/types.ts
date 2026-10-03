@@ -22,6 +22,9 @@ export interface Env {
   INGEST_DAILY_BYTE_LIMIT?: string;
   BACKUP_TOKEN?: string;
   BACKUP_RECEIPT_KEY?: string;
+  NATIVE_BACKUP_ENABLED?: string;
+  NATIVE_BACKUP_AT_UTC?: string;
+  NATIVE_BACKUP_MAX_BYTES?: string;
   DEV_AUTH_BYPASS?: string;
   ACCESS_SERVICE_ORIGIN?: string;
   ACCESS_CLIENT_ID?: string;

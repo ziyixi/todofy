@@ -74,7 +74,7 @@ message Settings {
   double logical_limit_bytes = 14 [(google.api.field_behavior) = OUTPUT_ONLY];
   // The D1 database's size as D1 reported it with this answer; unset when it did not.
   optional double database_bytes = 15 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // When the last independent backup was recorded; unset before the first one.
+  // When the last complete, read-back-verified backup was recorded; unset before the first one.
   google.protobuf.Timestamp last_backup_time = 16 [(google.api.field_behavior) = OUTPUT_ONLY];
   // AIP-154: changes with every change of the settings. UpdateSettings needs the current one.
   string etag = 17 [(google.api.field_behavior) = OPTIONAL];
@@ -159,7 +159,7 @@ message Overview {
   optional double database_bytes = 10 [(google.api.field_behavior) = OUTPUT_ONLY];
   // Deleted content whose objects still wait to be removed from R2.
   double pending_physical_delete_bytes = 11 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // When the last independent backup was recorded; unset before the first one.
+  // When the last complete, read-back-verified backup was recorded; unset before the first one.
   google.protobuf.Timestamp last_backup_time = 12 [(google.api.field_behavior) = OUTPUT_ONLY];
   // No delivery starts (Settings.effective_send_paused).
   bool send_paused = 13 [(google.api.field_behavior) = OUTPUT_ONLY];

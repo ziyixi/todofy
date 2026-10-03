@@ -31,7 +31,7 @@ test('workerd backup artifact: authenticated lease, streamed multipart, verified
         if(path==='/__test/deletion') {const x=await request.json();await recordDeletion(env,x.id,x.scope,x.deleted_at);return new Response(null,{status:204})}
         return await handleBackupAPI(request,env);
       } catch(error) {return Response.json({code:error instanceof HttpError?error.code:'internal'}, {status:error instanceof HttpError?error.status:503})}
-    }};`,resolveDir:root,sourcefile:'artifact-runtime.ts',loader:'ts'},bundle:true,format:'esm',platform:'neutral',external:['cloudflare:workers'],write:false})
+    }};`,resolveDir:root,sourcefile:'artifact-runtime.ts',loader:'ts'},bundle:true,format:'esm',platform:'neutral',conditions:['browser'],external:['cloudflare:workers'],write:false})
   const mf = new Miniflare(convertV4MiniflareOptions({name:'artifact-runtime',modules:true,script:bundle.outputFiles[0].text,
     compatibilityDate:'2026-09-07',host:'127.0.0.1',port:0,r2Buckets:['BACKUP_STORE'],r2Persist:join(temp,'r2'),
     durableObjects:{COORDINATOR:{className:'TestStatus',useSQLite:true}},durableObjectsPersist:join(temp,'do'),bindings:{BACKUP_TOKEN:token}}))

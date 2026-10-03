@@ -1,367 +1,227 @@
-# Rebuild the personal cloud
+# 个人云重建操作手册
 
-Most application source and the stable proto contracts can be reused on a fresh VPS and Cloudflare account.
-The current code still has account-specific workers.dev references in Watch and the relay acceptance check,
-and a first-account creation/adoption gap. A strictly configuration-only complete rebuild is therefore not
-yet supported. The [dated code audit](rebuild-audit.md) records those gaps and the smallest proposed fixes.
-Public profiles and private credentials change; deploying code does not move provider objects or historical
-data. The identity generator is neither a fresh-account provisioner nor a proven complete disaster recovery.
+**只换 VPS、保留现有 Cloudflare：已有可执行流程。全新 Cloudflare + VPS：还缺首次创建/采用和几处配置解耦，不能靠一次 `Infra apply` 完成。**
+本页是今天可执行的步骤；[改进计划](rebuild-audit.md)说明补哪些代码后才能做到“以后只改配置”。
+当前生产进展看 [HANDOFF](../HANDOFF.md)，不要从本页推断新账户演练已经通过。
 
-## Configuration entry points
+## 先选路径
 
-| Input | What changes for a new machine/account | Where it belongs |
+| 情况 | 从哪里开始 | 必须保留什么 |
 | --- | --- | --- |
-| `config/cloud.toml` | Access issuer; public Fleet/daemon hostnames; namespace/state directory/node alias, including generated Fleet `HOST_KEY` | Committed public configuration |
-| `config/resources.toml` | New account/zone IDs, Access AUDs, D1 IDs, DO namespaces; recorded Access/policy IDs | Committed provider identities; no credentials |
-| Application `wrangler.toml` | Materialized identity fields and generated `infra/platform-identity.tf` public DNS locals; existing bindings, routes, schema and Free budgets remain | Generated into the existing sole production config |
-| k3s manifests/bootstrap configuration | Immutable image digests, one node namespace, mounts, allowed workload/service accounts | Committed infrastructure configuration |
-| GitHub `production` secrets/variables | Deployment tokens, owner identity, operational switches, dedicated machine API credentials | GitHub's secret/variable UI or CLI through a private input file |
-| k3s application secrets and mounted auth | Newsletter integration tokens, dedicated Codex login, backup machine identity | Private node state/secret storage; never Git or image |
-| Recovery material | Encryption keys, verified data snapshots, deletion journal and side-effect reconciliation | Independent private storage |
+| 只换 VPS，账户/域名/仓库不变 | 第 1 步核对配置，再到第 4 步 | Newsletter data/auth/config；需要保留的 daemon ledger 和 observer sequence |
+| 新账户 + 新 VPS，空业务启动 | 第 1–5 步；第 2 步目前需要单独准备创建/采用方案 | 新账户身份与秘密；不能沿用旧 IDs/AUDs |
+| 新账户 + 新 VPS，恢复历史 | 同上，并先完成第 6 步恢复核对 | 原解密材料、冻结事件身份、未确定副作用；不能用空库绕过 |
 
-The currently verified VPS case keeps the same owner, repository, domain, Worker names and logical
-database names. It does not itself solve a new Cloudflare account's workers.dev identity or provisioning.
-For a different domain or repository, routes, image publication settings, website canonical origin and
-relay dispatch settings require additional configuration changes; Watch self-domain policy and Todofy's
-Watch link authorization currently also require implementation work. The profile generator does not
-silently rename them. API `ErrorInfo.domain`, proto resource types and locked external protobuf provenance
-are stable contract/supply-chain identities; do not globally replace strings in the source to move hosts.
+开始时关闭仓库变量 `VPS_DEPLOY_ENABLED`、Home canary，保持 Todofy 外部处理暂停、Mail Hero 强制停发。
+它不会取消 daemon 已持久接管的 release，先检查进行中的操作。换 VPS 时先停旧 observer，
+移交最新 sequence/pending 状态或协调两端新 epoch；不要并行运行相同 host key/epoch 的观察器。
 
-After preparing public identity configuration, run from a temporary clean checkout with Python 3.12:
+## 最少准备的输入
 
-```sh
-python3.12 tools/cloud-config/generate.py
-python3.12 tools/cloud-config/generate.py --check
-python3.12 tools/service-catalog/catalog.py
-python3.12 tools/service-catalog/catalog.py --check
-python3.12 .github/scripts/drift_desired.py
-python3.12 .github/scripts/drift_desired.py --check
-```
+| 输入 | 放在哪里 | 来源 |
+| --- | --- | --- |
+| 域名、仓库、Access team、Fleet/daemon hostname、namespace/state root/node alias | [config/cloud.toml](../config/cloud.toml) | Owner 选择；不放 IP、邮箱或秘密 |
+| Account/zone、D1、Access app/AUD/policy、DO namespace 等真实 ID | [config/resources.toml](../config/resources.toml) | 目标账户创建/盘点返回 |
+| 发布 token、应用秘密与开关 | GitHub `production` + Worker secret | [CI/CD 清单](ci-cd.md#production-environment)及下方 secret inventory |
+| Access machine client、daemon Bearer、connector token、Fleet HMAC | 对应 GitHub secret + VPS 私有 JSON | 创建时安全保存；管理员 Cloudflare token 不放 VPS |
+| 两个已测试 image digest + 完整 source SHA | 公开 bootstrap bundle | 同一成功 Actions run；不用 tag |
+| 原密钥、登录和状态（恢复时） | 独立私有恢复材料 | Owner；Git/镜像/CI artifact 都不替代备份 |
 
-Review the diff: identity generation must not alter safety switches, budgets, migrations, binding names,
-workers.dev/preview rules or existing endpoint contracts. No second Wrangler production config or `[env.*]`
-is introduced. The usual branch CI gate and exact tested-SHA main deployment remain mandatory.
+一次性人工项：zone/Zero Trust/R2 激活、GitHub OAuth 回调和登录同意、外部 provider 授权。
+沿用 Workers Free；R2 激活有超额计费，免费额度按账户共享，提醒不是硬消费上限。重建不自动升级 Paid。
+换域名/仓库还要改 routes、canonical origin、包发布权限和业务链接授权；当前 generator 没有包办它们。
+不全局替换 proto resource type 或 `ErrorInfo.domain`，它们是稳定合同身份。
 
-## First-time Cloudflare account preparation
+## 1. 准备并检查公开配置
 
-These prerequisites need owner/account access; application code cannot authorize itself:
-
-1. Activate the same domain zone in the new account and arrange registrar nameservers deliberately.
-   Preserve the root mailbox's MX/TXT/DKIM/DMARC and third-party records. DNSSEC/DS and mail routing need a
-   separate checked cutover; deploying a Worker does not migrate them.
-2. Keep Workers Free. Activate the R2 subscription checkout, including its free monthly usage; R2
-   overages are billed and this is not a hard spending cap. [R2 setup](https://developers.cloudflare.com/r2/get-started/).
-3. Initialize the Zero Trust team domain. Configure owner login and GitHub OAuth with the **new** team's
-   callback URI/client secret and normal consent. [GitHub identity provider](https://developers.cloudflare.com/cloudflare-one/integrations/identity-providers/github/).
-4. Create narrowly scoped deployment/infra tokens, owner policies and apps, the five named D1 databases,
-   the three application buckets and the separate encrypted infra-state bucket. Store credentials through
-   normal secret storage. Read-only inventory must verify the new account before any migration or deploy.
-5. Create the dedicated Mail Hero backup service identity/policy independently. The dedicated daemon Tunnel, its exact DNS
-   entry, Access machine application/service identity and Fleet owner/receipt applications are
-   managed by `infra/`. Identity providers, Mail Hero backup service identity/policy and Email Routing still
-   need their separate bootstrap. A new account receives new IDs and secrets; old IDs are not transferable.
-6. Set up only the dedicated Mail Hero receive subdomain and exact Email Routing rule after the target
-   Worker is deployed and checked. Do not replace the root domain's mailbox records. Original mailbox
-   forwarding rules live at their providers and require their own verification.
-
-### Prepare account identities before the first production release
-
-For a fresh account, create the required Access/storage resources in the separate reviewed bootstrap and
-adoption stage before the first main production release. Prepare the real IDs/AUDs and public profiles on
-a branch, regenerate the existing production configurations and pass their checks. The existing account's
-identities cannot be carried into another account. Rebuilding existing services does not require editing
-the CI classifier. `CHECK_ONLY` and its regressions protect development of a new application before its
-resources exist; they are not the migration configuration mechanism. Fleet's sole `wrangler.toml` must
-use the new actual AUD, never a synthetic one. Its deploy wrapper permits a credential-free dry run and
-refuses a real deployment without the actual AUD.
-
-Complete the separately reviewed creation/adoption stage first; the repository does not yet supply its
-complete fresh-account workflow. Do not dispatch the normal `Infra apply` as an empty-account creator.
-Read only the new owner app's public AUD/app ID
-and the exact receipt app/policy IDs into the supported public inventory fields. Tunnel and service-token
-identities remain in protected infrastructure state and the private bootstrap handoff; the inventory does
-not declare those fields. Export the platform machine credentials through the private bootstrap channel,
-then populate only the corresponding GitHub production secrets; the sealed bootstrap artifact has one-day retention and is not
-an application backup. Bootstrap the node and verify its dedicated namespace permissions and TLS trust.
-
-Before that reviewed `Infra apply`, prepare an owner-held RSA key and PEM X.509 certificate with OpenSSL 3
-in a private local directory outside Git and cloud sync. Set the **production environment variable**
-`VPS_BOOTSTRAP_CERT` to the certificate, not a raw public key; the private key never goes to GitHub.
-Without that variable the optional export is skipped. Replace the repository and reviewed apply run ID below:
-
-This CMS example applies only after adoption is complete and the new account's encrypted state actually
-contains the creation-time Access client secret. If import did not retain it, use the independent private
-handoff instead; do not recreate a working identity just to obtain an export. The normal `Infra apply`
-here is the post-adoption gated operation, not an empty-account creator.
+在独立干净 checkout 使用 Node 26、现有 uv 和 `platform/versions.json` 的 manifest compiler。
+先选择 Python 3.12，避免 macOS 的旧系统 Python 缺少 tomllib；后面的 `rebuild_python` 始终指向这个解释器。
+填好 profile/inventory 后：
 
 ```sh
-umask 077
-bootstrap_repo="OWNER/REPOSITORY"
-bootstrap_dir="$(mktemp -d)"
-openssl req -x509 -newkey rsa:3072 -sha256 -noenc -days 2 \
-  -subj '/CN=Personal cloud bootstrap recipient' \
-  -keyout "$bootstrap_dir/recipient-key.pem" -out "$bootstrap_dir/recipient-cert.pem"
-gh variable set VPS_BOOTSTRAP_CERT --env production --repo "$bootstrap_repo" \
-  < "$bootstrap_dir/recipient-cert.pem"
-# Dispatch and verify the separately reviewed Infra apply before downloading its artifact.
-bootstrap_run_id="REVIEWED_APPLY_RUN_ID"
-gh run download "$bootstrap_run_id" --repo "$bootstrap_repo" \
-  --name "platform-bootstrap-$bootstrap_run_id" --dir "$bootstrap_dir/artifact"
-openssl cms -decrypt -binary -inform DER -in "$bootstrap_dir/artifact/platform-bootstrap.cms" \
-  -recip "$bootstrap_dir/recipient-cert.pem" -inkey "$bootstrap_dir/recipient-key.pem" \
-  -out "$bootstrap_dir/platform-bootstrap.json"
+uv python install 3.12
+rebuild_python="$(uv python find 3.12)"
+"$rebuild_python" tools/cloud-config/generate.py
+"$rebuild_python" tools/cloud-config/generate.py --check
+"$rebuild_python" tools/service-catalog/catalog.py
+"$rebuild_python" tools/service-catalog/catalog.py --check
+"$rebuild_python" .github/scripts/drift_desired.py
+"$rebuild_python" .github/scripts/drift_desired.py --check
 ```
 
-The existing [CMS export](../infra/scripts/platform_export.py) encrypts only the Access client ID/secret,
-Tunnel ID and connector token. Keep the decrypted JSON and key local with mode 600; transfer credentials
-through private file/stdin input into their matching stores, without printing them. The independent
-`PLATFORM_DEPLOY_TOKEN` is prepared separately. Once the handoff is securely saved, remove the temporary
-`VPS_BOOTSTRAP_CERT` variable; retain private recovery material according to the owner's backup policy.
-See [OpenSSL CMS](https://docs.openssl.org/3.6/man1/openssl-cms/) for the recipient/decryption format.
+**放行：**生成文件一致；diff 只包含预期身份；binding、预算、暂停开关、迁移和鉴权没有意外变化。
+generator 更新已有生产字段、Home resource identities 和 infra DNS locals。
+Fleet route/PUBLIC_HOST、部分 infra references、workers.dev 自有域规则仍需核查，见改进计划。
+配置改动照常分支 CI，完全通过的同一 SHA 才能进入 main。
 
-Pre-created service identities need special care: Access displays the client secret only at creation.
-Importing the resource cannot be assumed to recover that secret for the CMS export. Preserve it in the
-creation-time encrypted state/sealed handoff or independently populate its corresponding private stores.
-See [Access service tokens](https://developers.cloudflare.com/cloudflare-one/access-controls/service-credentials/service-tokens/).
+## 2. 新账户：先创建/采用，再进入正式 infra
 
-In the prepared configuration commit, add the actual Fleet AUD to both its production Wrangler field and
-the public inventory, and record the owner app ID in `infra/ids.tf`. The identity generator replaces existing
-AUD fields; it does not insert a missing one or update the infrastructure import-ID map. Fleet deploys
-before Home. Record the provider-issued Fleet DO namespace in `config/resources.toml`, regenerate
-Home's resource identities and verify fresh signed observations. Keep `VPS_DEPLOY_ENABLED=false` until
-the daemon, dedicated Access credentials and independent deployment Bearer have been verified; enabling that
-variable activates subsequent main-branch releases. Do not confuse a skipped bootstrap job with a healthy
-server or a successful application rollout.
+保留现有账户时跳过。**今天没有完整自动 creator；此处是人工准备阶段，不是已经存在的一键命令。**
 
-### Existing OpenTofu protection is intentional
+1. 激活目标 zone、Workers Free、R2 和 Zero Trust，配置 owner/GitHub 登录。
+   保留根邮箱 MX/TXT/DKIM/DMARC；域名、nameserver、DNSSEC/DS 与邮件切换单独安排。
+2. 按 [infra scope](../infra/README.md#scope) 创建/盘点等价对象：五个 D1、三个应用 R2、owner Access，
+   特殊 FlowDay/backup 身份，专用 daemon Tunnel/DNS/Access machine 与 Fleet receipt。
+   先在**新账户**创建 `infra-state` 桶：当前缺桶分支仍调用旧账户 helper，不能拿它创建新账户桶。
+3. 创建时保存 Access client secret；import 不保证取回。记录 IDs/AUDs，更新 inventory、`infra/ids.tf`、
+   app-scoped policy references 和 `FROZEN_OBJECTS` 的新对象 ID，保留冻结语义；补齐完整 import inventory。
+4. 用新 token、独立 passphrase、私有 tfvars 做 import-only adoption。旧账户 state 仅作恢复证据。
 
-`infra/scripts/bootstrap_state.py` is an **import-only** state bootstrap, not the object creator in step 4.
-It refuses creates/updates/deletes and will not repair an already populated state. The regular `Infra apply`
-also rejects config/output mismatches: a production Wrangler naming an old AUD/D1 ID cannot be matched
-to an unknown new resource before creation. The Mail Hero backup Access app is frozen because its existing
-application-scoped policy cannot be rewritten safely by the pinned provider.
+仅在对象、引用和 imports 已审查完整后执行。下文 `rebuild_repo` 为目标仓库，`rebuild_private` 为仓库外
+mode 700 私有目录，`rebuild_import_count` 为本次审查的纯 import 数量；私有文件 mode 600：
 
-For a fresh account, object creation needs a separately reviewed bootstrap configuration/API procedure,
-or pre-created objects followed by explicit adoption. No such generic creation workflow is supplied by this
-change. Do not strip `prevent_destroy`, remove `FROZEN`, bypass output validation or run a plain unmanaged
-production `tofu apply` to make the first plan green.
+```sh
+"$rebuild_python" infra/scripts/bootstrap_state.py \
+  --var-file "$rebuild_private/local.tfvars" --token-file "$rebuild_private/cf-token" \
+  --passphrase-file "$rebuild_private/state-passphrase" --expect "$rebuild_import_count"
+"$rebuild_python" infra/scripts/infra_state.py values-json --var-file "$rebuild_private/local.tfvars" \
+  | gh secret set INFRA_TFVARS --env production -R "$rebuild_repo"
+gh secret set INFRA_STATE_PASSPHRASE --env production -R "$rebuild_repo" \
+  < "$rebuild_private/state-passphrase"
+```
 
-When adopting pre-created equivalents:
+**放行：**目标账户正确、encrypted state 存在、最终 no-op、outputs 与生产 Wrangler 一致，无旧账户写入。
+`bootstrap_state.py` 只允许 import/no-op；不要删 `prevent_destroy`/FROZEN 或绕过 outputs 检查。
+采用与 tfvars 格式见 [infra bootstrap](../infra/README.md#bootstrap-once)。
+之后的正式更新使用已有 workflow；`rebuild_expect` 必须取自最新 drift 的已审查动作/fingerprint：
 
-- Pre-create the infra-state bucket in the new account and supply its new private token file. The current
-  bootstrap's missing-bucket creation path invokes a legacy helper fixed to the old account; changing only
-  the profile/tfvars does not redirect that helper. Do not run that creation path for a new account.
-- Record their new IDs/AUDs in `config/resources.toml` and generate the production identities.
-- Update only reviewed infrastructure identity references (`infra/ids.tf`, backup/FlowDay policy references
-  in `infra/access.tf`, and the new adopted backup application's ID in `infra/scripts/infra_state.py`
-  `FROZEN_OBJECTS`). Keep the protected Terraform address and frozen semantics unchanged.
-  The read-only `infra/scripts/local_tfvars.py` helper reads its policy/app IDs
-  from `config/resources.toml` and refuses an account mismatch before any GET. Those inventory
-  references are not rewritten by `tools/cloud-config`; changing profiles alone does not migrate infra state.
-- Restore/update `import {}` blocks from the documented history, including later-added applications,
-  with new account/object IDs. A historical file is not a current complete import inventory.
-- Supply new sensitive identity rules as `INFRA_TFVARS`; keep them out of public configuration. The
-  local values helper can read equivalent pre-created policies after the public IDs are updated. Prepare
-  an explicit private values file when those policies do not exist yet.
-- Use the already-created new-account state bucket; supply a new independently saved state
-  encryption passphrase. Import-only plan counts/fingerprint must match the reviewed inventory. Check
-  that its final plan is no-op and outputs match production configs before resuming normal gated apply.
+```sh
+gh workflow run infra.yml --ref main -R "$rebuild_repo"
+gh workflow run infra-apply.yml --ref main -R "$rebuild_repo" -f expect="$rebuild_expect"
+```
 
-Never transplant the old account's encrypted Terraform state as if it described new resources. Keep it as
-recovery evidence only. Wrangler's automatic missing-resource provisioning is deliberately not a shortcut:
-it would change the existing ownership boundary (OpenTofu owns storage existence; Wrangler owns bindings)
-and hide unexpected resource creation. [Cloudflare provisioning behavior](https://developers.cloudflare.com/changelog/post/2025-10-24-automatic-resource-provisioning/).
+有陌生对象、删除/替换或意外更新先解决差异。`Infra apply` 是采用后的 reconcile，不能直接用于空账户。
+每次 dispatch 后等对应 run 完成再进入下一步；用 `gh run list --workflow <workflow-file> -R "$rebuild_repo"`
+找到本次 run，再用 `gh run watch <run-id> --exit-status -R "$rebuild_repo"` 核对完整结果。
 
-## Fresh VPS and subsequent code-driven deployment
+## 3. 初始化秘密并发布 Worker
 
-The first bootstrap installs the pinned single-node k3s service, containerd, independent daemon image and
-Cloudflare deployment connector through an existing trusted administrative channel or provider cloud-init.
-It needs host privileges once; GitHub cannot start a machine without an authorized management entry point.
-Workloads use standard Kubernetes manifests and Kustomize. The daemon resolves those reviewed manifests
-from its own release artifact and bounded configuration; an API request cannot supply commands, YAML,
-paths, URLs, namespaces, private object names or registry repositories. Preserve existing SSH connectivity
-and its `cloudflared` service/configuration. Use a separately named daemon connector service and one exact
-`platform_runtime_host`; never repurpose an existing tunnel or expose the raw Kubernetes API.
+按 [secret inventory](#secret-inventory)配置 GitHub/Worker 秘密。通过正常输入或 stdin 保存，例如：
 
-After bootstrap, deployment is **pushed by GitHub Actions**, not polled from Git by the node:
+```sh
+gh secret set CF_API_TOKEN --env production -R "$rebuild_repo" < "$rebuild_private/cf-token"
+gh variable set VPS_DEPLOY_ENABLED --body false -R "$rebuild_repo"
+gh workflow run ci.yml --ref main -R "$rebuild_repo" -f app=all
+```
 
-`green tested commit → production Actions → Cloudflare Access HTTPS → authenticated daemon release API → persisted drain/freeze/apply/verify/resume`.
+当前 wrapper 只上传它负责的秘密；旧 Worker 保留 secret **不等于新账户已初始化**。
+首次安全发布形成 Worker 后，保持暂停，再初始化 wrapper 外的 runtime secret。
+例如在 Mail Hero 的 `cloudflare/` 目录：
 
-Actions holds only the dedicated Access client ID/secret and independent daemon deployment Bearer.
-It has no Kubernetes token, cluster certificate/private key, SSH key or cluster-admin kubeconfig.
-The daemon authenticates before reading request bodies. Only the daemon has the necessary local,
-namespace-scoped Kubernetes capabilities; neither it nor the observer needs a GitHub PAT or a GitHub
-Actions runner on the production node. The profile hostname does not prove Tunnel/DNS/Access deployment.
-Supply the connector and application credentials through private node state, not Git or images; populate
-only the matching GitHub production secrets via safe file/stdin input after bootstrap.
-An optional namespace reader kubeconfig permits routine metadata diagnosis on the VPS without sudo;
-it grants no Secret/log/exec or mutation access and never reaches Actions. Its setup and the bounded
-initial SDK-client recovery are documented in [bootstrap](../tools/vps-bootstrap/README.md).
+```sh
+npx wrangler secret bulk "$rebuild_private/mail-hero-runtime-secrets.json" --config ../wrangler.toml
+```
 
-The shared release contract bounds requests to sixteen configured workload aliases. This implementation
-requires both configured Newsletter and personal-cloud workloads with the same source SHA and immutable
-digests, using stable UUID4 release/request IDs. The daemon persists an asynchronous operation before acknowledging it.
-Network retries keep exactly the same IDs and frozen targets. A mismatched body for an existing ID is a
-conflict; a held/failed operation needs an explicit resume with its current etag. A main dispatch for
-`platform` or `newsletter` must supply the original `resume_source_sha` and set `resume_vps_release=true`;
-it reads the existing frozen targets without rebuilding or publishing replacement images. A process restart must not
-silently re-admit work or create a different release. Keep `VPS_DEPLOY_ENABLED=false` until the dedicated
-transport/authentication, safe drain behavior and actual image provenance have been checked.
-After verifying bootstrap/authentication and the held runtime, keep main unchanged and enable that
-variable for the controlled first same-SHA Actions release; explicit resume also requires it. Normal
-release resumes Newsletter admission and its daily trigger before reaching ready, so provider setup and
-the restored unknown-outcome policy must be decided beforehand. There is no separate paused-rollout
-activation step. Disabling the GitHub variable does not cancel a persisted server operation.
+其他应用分别使用自己的锁定工具和唯一 production config，见各 setup。
+Website 独立发布还有 bootstrap approval/Notion 授权；`app=all` 不证明网站内容已恢复。
+首次部署取得真实 DO namespace ID 后补回 inventory、重新生成，再发布 Home 的准确资源身份。
+**放行：**各 deploy 成功、实际版本/绑定正确、Access 登录/拒绝路径正确、runtime secret 齐、暂停的合成流程通过。
+此时不切邮箱转发，不开放真实写入。
 
-The independently released `platform` OCI image supplies `personal-cloud`, the local release
-controller, status daemon and bounded observer. It embeds generated `platform.runtime.v1`/`fleet.telemetry.v1`
-types and codecs; it does not import Newsletter code or reuse its image. Kubernetes runs the daemon and
-observer as container workloads: the observer is the five-minute `platform-observer` CronJob with
-`concurrencyPolicy: Forbid`, a dedicated state PVC and a namespace-scoped read-only projected identity.
-It uses the same platform image and does not run a host systemd timer. The OCI build installs the locked dependencies, including `httpx` and the
-official Kubernetes SDK, and CI promotes the exact tested image by registry digest. The VPS installs no
-application Python packages or standalone application executables. Python 3.12 is provided inside the
-Linux amd64 image; other architectures need a matching image build and validation. Only source identity
-and reviewed manifest templates are baked into the image; account, domain,
-workload configuration and credentials remain mounted configuration. Read-only observations stay
-bounded and preserve unknown/missing evidence. Fleet displays only an operation summary and independently
-verified workload state; its UI does not proxy deployments. Application secrets should not be readable by
-the daemon's Kubernetes service account unless a narrowly reviewed operation requires it.
-The observer's same-image init container reads fixed systemd unit states through Jeepney and the reviewed
-system-bus socket mount, using the supported host's existing UID65534 (`nobody`). D-Bus validates the host
-identity; adding an account inside the image does not register that identity on the host. A read-only
-socket mount does **not** make D-Bus methods read-only: the probe has no capabilities or privilege, and
-the host must grant it no systemd management rights through polkit. It checks those rights without
-interaction or mutation before reading states. A bounded, timestamped shared-proto snapshot passes
-through an emptyDir to the main observer; stale or invalid snapshots remain unknown. Only the main
-UID10001 observer receives the projected Kubernetes identity, application monitoring secrets and its
-unchanged persistent state. Verify denial and read availability on the actual node. An
-unreadable unit is unknown; if k3s cannot schedule the observer, Fleet shows a missing/stale receipt rather
-than claiming an independent current host diagnosis. Memory reads use only the exact `/proc/meminfo`
-file; disk observations concern the observer's own persistent filesystem, not arbitrary host mounts.
-Initial bootstrap also loads the [pinned observer AppArmor profile](../platform/apparmor/README.md).
-Only the credential-free init container references it; the main observer remains RuntimeDefault.
-The profile retains the exact containerd baseline and adds fixed D-Bus sends. Method arguments are
-not inspected by AppArmor, so application selection and the non-mutating Polkit guard remain part
-of the boundary. An existing host must load the profile before the corresponding manifest is released.
-See [runtime contract](../contracts/platform-runtime-v1/README.md) and the [platform deployment runbook](../platform/README.md) for
-exact bootstrap versions, local permissions, secret names and release commands.
+## 4. 准备并安装新 VPS
 
-`vps.observer_node_key` supplies the daemon's `node_key`, observer `FLEET_HOST_KEY` and generated Fleet
-`HOST_KEY`; they must match. Before starting a replacement VPS against retained Fleet state, either restore
-the stopped observer's durable state directory (sequence and pending receipt), or deliberately choose a new
-matching epoch in Fleet's `HOST_EPOCH` and the observer manifest's `FLEET_HOST_EPOCH`. Apply that reviewed
-configuration on both sides before accepting new reports. A new VPS with an empty observer volume and the
-old epoch restarts at sequence 1, which retained Fleet rejects as replay. A new Fleet namespace has no old
-receipt and can use the initial epoch. Profile generation does not change epochs or reset durable state.
+支持 Ubuntu 24.04 Linux amd64、systemd、已有 UID65534、Python stdlib、iptables/ip6tables、启用的标准 AppArmor。
+2 CPU/4 GiB RAM/20 GiB 空余磁盘是准备起点，Newsletter 实际容量另核对。
+允许出站 HTTPS；Tunnel 另需 7844 UDP 或 TCP；固定 Pod CIDR/hostPorts 不得冲突。
+不需要 Docker/Compose、主机应用 Python 包或新 tailnet。
 
-For Newsletter, explicitly select `NEWSLETTER_CONFIG_REPOSITORY=ziyixi/todofy` and the existing Todo API URL;
-its historical defaults still point at the old standalone repository/domain. Pin the published image digest,
-retain the same exclusive SQLite/auth/content-config mounts, begin/freeze the durable deployment drain,
-and verify the new instance before resuming. An old engine that does not implement the drain API needs the
-documented first-upgrade stop/wait procedure. See [Newsletter drain](../newsletter/docs/deployment-drain.md)
-and [import boundaries](../newsletter/docs/import-source.md).
+从同一成功 SHA 取得两个 published digest，在该 SHA 的干净 checkout 生成公开 bundle。
+prepare 校验 image 的 owner/digest 形式，不代替 Actions artifact/source 核验：
 
-A fresh node needs a restored or normally authenticated dedicated Codex login directory. The code/image
-does not contain subscription credentials. Notion integration grants, Todoist/Gemini/Resend credentials and
-recipient configuration also require independent private setup. Avoid using a real model call, private
-Notion write or mail send merely to prove that an infrastructure deployment works.
+```sh
+npm ci --prefix proto --no-audit --no-fund
+node proto/tools/ensure.mjs
+uv sync --project platform --locked --python "$rebuild_python"
+test "$(git rev-parse HEAD)" = "$rebuild_sha"
+git diff --quiet
+git diff --cached --quiet
+platform/.venv/bin/python tools/vps-bootstrap/prepare.py \
+  --sha "$rebuild_sha" --newsletter-image "$rebuild_newsletter_image" \
+  --platform-image "$rebuild_platform_image" --output "$rebuild_bundle"
+```
 
-For the supported legacy migration, stop and verify the old runtime before copying its state. After that
-copy, the one-time installer disables/stops `docker.socket` and `docker.service` **before** applying K3s
-runtime resources. It preserves images, Compose configuration and source state; a failed bootstrap does
-not automatically restart them. Keep that bounded rollback copy until replacement pods, persistent data,
-scheduled processing, backups and status reporting are verified. Rollback requires an explicit reviewed
-stop of the replacement writers and reconciliation before restoring legacy services; never run two
-Newsletter workers or backup schedulers against the same state. A fresh VPS has no legacy runtime to retire.
+SHA 为完整 40 位；image 为目标 owner 的 `todofy-newsletter@sha256:…` 和 `todofy-platform@sha256:…`。
+通过可信管理通道把 bundle、私有 JSON 放 VPS；完整 JSON 格式见 [bootstrap private input](../tools/vps-bootstrap/README.md#private-input)。
+空启动可用 `old_paths: {}`；恢复填停止写入的 data/auth/config 原目录。它不会生成 Codex/provider 登录。
+保留旧 daemon ledger 时先按第 6 步核对，不能挂库就启动。
+
+在 VPS 重新设置 `rebuild_bundle`、`rebuild_private` 为传入文件所在位置，再一次执行：
+
+```sh
+sudo /usr/bin/python3 -E -s "$rebuild_bundle/installer/install.py" \
+  --bundle "$rebuild_bundle" --credentials "$rebuild_private/bootstrap.json" --grant-reader
+```
+
+首次 bootstrap 在应用资源前加载 pinned observer AppArmor policy。
+已有节点先运行 [profile-only installer](../platform/apparmor/README.md)，加载后才发布 Localhost manifest。
+宿主 policy 修改仍需管理员；日常镜像发布不用 sudo，也不能修改 kernel policy。
+**放行：**`complete_held`、专用 connector 注册、reader 能读 metadata、Newsletter 不接新工作、daily suspended。
+初始 gate 通常 draining；`complete_held` 不是 release ready，observer receipt 另验。
+新 VPS 无旧全局 `cloudflared.service` 时当前监督集合会告警；需要补配置边界，不装无用途服务或伪造 active。
+
+## 5. 第一轮发布、观测，再接真实业务
+
+先完成 provider 设置与历史 unknown 处理决定。**固定 main 在 bootstrap 同一 SHA**，然后：
+
+```sh
+gh variable set VPS_DEPLOY_ENABLED --body true -R "$rebuild_repo"
+gh workflow run ci.yml --ref main -R "$rebuild_repo" -f app=platform
+```
+
+正常 release 会 drain/freeze、apply/verify、resume admission 和 daily，最后 ready。
+当前没有独立“部署完成但继续暂停、另行激活”阶段，所以不能在 provider/对账尚未准备好时执行。
+
+| 放行门 | 必须看到 |
+| --- | --- |
+| Actions `VPS deploy` | ready；两个实际 digest/source/request/generation 与冻结 targets 一致；fresh status |
+| Newsletter | running/accepting；历史 unknown 保持告警，不自动当成功/重放 |
+| Fleet/observer | 自然新鲜签名回执、匹配 image/source；init 固定单元真实状态；主容器 `READ_OK`，不是仅 exit 0 |
+| Home | 正常刷新反映同一部署/业务状态；旧回执有 stale/missing 提示 |
+
+Held/failed 先查固定错误，再以原 SHA/身份继续，不换 targets、不清 ledger：
+
+```sh
+gh workflow run ci.yml --ref main -R "$rebuild_repo" -f app=platform \
+  -f resume_vps_release=true -f resume_source_sha="$rebuild_original_sha"
+```
+
+全部通过后继续 main、开放各应用处理，最后配置专用 Mail Hero Email Routing rule 和源邮箱转发。
+真实收信、摘要、Todoist/Notion/Newsletter 发送分别验收；部署绿灯不覆盖外部业务。
 
 ## Secret inventory
 
-GitHub production configuration is documented per app in [CI/CD](ci-cd.md),
-[Home setup](../dashboard/docs/setup.md), [Todofy setup](../todofy/docs/cloudflare-setup.md),
-[Mail Hero setup](../mail-hero/docs/cloudflare-setup.md), and each application's README. Read the actual
-`deploy-vars` wrapper and workflow before restoring settings; an unset operational switch must continue
-to fail closed. Never copy live secret values into this runbook or Actions logs.
+GitHub 名称/必选开关以 [CI/CD production table](ci-cd.md#production-environment)与实际 workflow 为准。
+下面是目前不由普通 wrapper 完整初始化的 runtime secret，只列名称：
 
-Additional Worker secrets currently set outside the deploy wrappers include:
-
-| Worker | Names; values remain private |
+| Worker | Runtime secret |
 | --- | --- |
-| Mail Hero | `CREDENTIAL_KEY`, `BACKUP_TOKEN`, `BACKUP_RECEIPT_KEY` |
-| Todofy gateway | `CSRF_SIGNING_KEY`, `MAIL_WEBHOOK_TOKEN_SHA256`, `REPORT_BASIC_AUTH_SHA256` |
-| Todofy core | `GEMINI_API_KEY`, `TODOIST_API_KEY` |
-| Website relay | `GITHUB_DISPATCH_TOKEN`, `NOTION_TOKEN`, `NOTION_DATA_SOURCE_ID`, `NOTION_WEBHOOK_SECRET` |
+| Mail Hero | `CREDENTIAL_KEY`、`BACKUP_TOKEN`、`BACKUP_RECEIPT_KEY`；启用能力另需消费者 Access/alert secret |
+| Todofy gateway | `CSRF_SIGNING_KEY`、`MAIL_WEBHOOK_TOKEN_SHA256`、`REPORT_BASIC_AUTH_SHA256`；已有轮换的 previous hash |
+| Todofy core | `GEMINI_API_KEY`、`TODOIST_API_KEY` |
+| Website relay | `GITHUB_DISPATCH_TOKEN`、`NOTION_TOKEN`、`NOTION_DATA_SOURCE_ID`、`NOTION_WEBHOOK_SECRET` |
 
-Conditional inputs must follow the original deployment's enabled capabilities: Mail Hero's consumer
-Access needs `ACCESS_CLIENT_ID`/`ACCESS_CLIENT_SECRET` plus matching `ACCESS_SERVICE_ORIGIN`; its alert
-webhook needs `ALERT_WEBHOOK_TOKEN` when enabled. Todofy's existing mail-token rotation window may also
-require `MAIL_WEBHOOK_TOKEN_SHA256_PREVIOUS`. Rebuilding does not itself enable these optional features.
+VPS 的三个 production secret 是 `PLATFORM_ACCESS_CLIENT_ID`、`PLATFORM_ACCESS_CLIENT_SECRET`、`PLATFORM_DEPLOY_TOKEN`。
+Fleet HMAC 与 Bearer 独立；owner/邮箱/project 等个人值也按秘密处理。
+空部署可生成新 key；历史 ciphertext 必须保留 Mail Hero/FlowDay 原解密 key及其绑定身份。
+[CMS exporter](../infra/scripts/platform_export.py)可用 production variable `VPS_BOOTSTRAP_CERT` 的 owner X.509 certificate
+密封 Access client/Tunnel handoff；private key 留 owner 端。这是一天交接 artifact，不是备份。
+创建时没保存 secret 就需要独立安全交接，不能假设 import/CMS 能找回。
 
-The matching machine Basic/Bearer credentials, FlowDay sealing key, owner/aliases, Fleet report HMAC key
-and independent daemon deployment Bearer must also be restored or deliberately rotated at all consumers.
-Fleet publishes only three dedicated inputs: `FLEET_ACCESS_OWNER`, `FLEET_ACCESS_OWNER_ALIASES` and
-`FLEET_REPORT_HMAC_KEY`. The gated infrastructure apply creates the platform Access service identity; its
-sensitive bootstrap output is sealed to the owner-held X.509 certificate in `VPS_BOOTSTRAP_CERT` before upload; only ciphertext
-may enter the one-day bootstrap artifact, never plaintext values or Actions logs. New random keys are appropriate
-for a brand-new empty deployment; encrypted historical credentials require their original decryption key.
+## 6. 历史恢复与备份：单独放行
 
-## Empty-cloud bring-up versus data recovery
-
-| State | Recovery boundary |
+| 对象 | 激活前核对 |
 | --- | --- |
-| Mail Hero D1/R2/DO | Restore SQL and exact object bytes/metadata plus fresh deletion journal and original `CREDENTIAL_KEY`; rebuild capacity/jobs/control and reconcile unknown deliveries by the original event IDs |
-| Todofy D1/DO | Verify backup manifest/parts/schema; retain paused Todoist processing until pending/unknown business effects are reconciled; a new DO has no old budgets/cursors |
-| FlowDay, Links, Lab D1 | Restore application SQL/schema; FlowDay needs the original sealing key for historical stored tokens |
-| Fleet DO SQLite | The current heartbeat/history is disposable observation state; a new namespace begins as never observed and must receive fresh signed reports |
-| Platform observer | Retained Fleet with the same epoch requires the observer's durable sequence/pending-receipt directory; otherwise coordinate a new epoch on both sides before starting the fresh observer |
-| Watch, Lab and Home DO SQLite | There is no unified account-to-account backup/restore here. A fresh namespace does not recover watches/intent ledger, Lab queue/vector/guard/budgets, Home settings/canary/history or alarms |
-| Platform daemon | Before startup, inspect durable release SQLite, frozen targets/phase/checkpoint and matching namespace/PVC/Newsletter gate. Nonterminal operations automatically continue; held/failed need explicit etag Resume. There is no unified read-only restore/quarantine entrypoint |
-| Newsletter | Restore exclusive SQLite, frozen run/config identities, original mode/delivery target and dedicated auth; interrupted/unknown external operations are not automatically retried as new operations |
-| Website | Rebuild content from authorized Notion sources, following release identity/bootstrap/recovery checks; preserve publication/release evidence deliberately |
-| Infra state | Import fresh-account identities into newly encrypted state; do not reuse old resource state as new |
+| Mail Hero | SQL、R2 bytes/customMetadata/hash、最新删除清单、原 event/payload；保持停发，重建 DO 调度并对账 |
+| Todofy、FlowDay、Links、Lab | SQL/schema/原密钥；Todofy 未确定外部副作用；DO 状态另核对 |
+| Watch/Lab/Home DO | 目前没有统一跨账户 export/import；空 namespace 不恢复 watches/queue/settings/ledger/budgets |
+| Newsletter | 一致 SQLite/config、冻结身份、原 mode/delivery target、专用 auth；保留 unknown，不以新身份重发 |
+| Platform/observer | ledger targets/checkpoint 与 namespace/PVC/gate 一致；observer 最新 sequence/pending 或协调新 epoch |
+| Infra | 新账户采用到新 encrypted state；旧 state 仅作证据 |
 
-Mail Hero's local restore output deliberately keeps `activation_allowed=false`; it does not import Cloudflare
-or rebuild live DO alarms. See [backup recovery](../mail-hero/deploy/backup/README.md) and
-[isolated recovery](../mail-hero/docs/cloudflare-setup.md#9-隔离恢复演练).
-Existing `vultr-backup` is outside the monorepo application's backup boundary and is not evidence that all
-listed state is independently recoverable.
-
-Before activation, record separate evidence for schema/build checks, paused synthetic application tests,
-deployed Access/TLS, k3s namespace permissions and rollout, observer freshness, backup read-back, and any
-explicitly authorized real-mail/business test. Keep mail/processing paused while restored unknown side
-effects remain unreconciled. A profile generation test or green release is not a full disaster-recovery drill.
-
-## Supported VPS prerequisites
-
-The first installation targets Ubuntu 24.04 on Linux amd64, standard systemd and its existing
-UID65534 `nobody` account, curl,
-iptables/ip6tables, enabled standard AppArmor with `/usr/sbin/apparmor_parser`,
-`abi/3.0`, `tunables/global` and `abstractions/base`, and a supported k3s kernel. Reserve at least
-2 CPU cores, 4 GiB RAM and 20 GiB free disk for the node and image updates; the existing
-Newsletter workload may require more memory, depending on its content. Keep room for
-both an old and a new image plus a preserved copy of the application state. The current
-node has substantially more capacity; these figures are prerequisites, not a benchmark.
-
-Bootstrap installs the official Linux amd64 `cloudflared` release fixed in
-`platform/versions.json`, after checking its published SHA256, at
-`/usr/local/libexec/personal-cloud/cloudflared`. A fresh machine does not need to preinstall
-the global package. This dedicated binary supplies `--token-file` for the new connector unit;
-an existing global binary is neither replaced nor upgraded. Existing SSH/cloudflared services stay
-independent. Docker, Compose, application executables, host application Python packages and a new tailnet
-are not prerequisites. k3s/containerd runs the published Linux amd64 images, which include the locked
-application runtime and libraries. Other architectures require matching, tested images.
-
-One monitoring assumption still needs configuration work: the current observer and Fleet contract
-expect the old global `cloudflared.service`, alongside k3s, SSH and the dedicated connector. A fresh
-node with no SSH Tunnel does not have that global service; bootstrap intentionally does not install it.
-The existing node's four-active-unit acceptance therefore cannot be reused unchanged. Define the
-new node's required host services before that drill, then review bounded probe/contract/Fleet configuration.
-Do not install an unused service or label an unknown unit healthy merely to clear the alert.
-See the [audit](rebuild-audit.md#3-发现的具体缺口); this follow-up is not implemented here.
-
-Bootstrap restricts the k3s control-plane/agent ports with a dedicated persistent firewall
-chain, preserving other firewall rules and SSH. The only new public route is the daemon's
-HTTPS hostname through Cloudflare Access and Tunnel; the connector also validates the
-exact Access audience. The bounded observer uses its reviewed read-only node/namespace permissions;
-unavailable node or host-daemon evidence remains unknown. Confirm public port exposure separately on a new provider rather than assuming
-its network is identical to the existing private node.
+Daemon 非终态 checkpoint 会自动继续，held/failed 才等待 Resume；启动前离线核对，当前没有统一 quarantine 入口。
+不复制正在写入的 SQLite 主文件而忽略 WAL；PVC Retain 不是离机备份。
+Mail Hero [现有隔离恢复](../mail-hero/deploy/backup/README.md)保持 `activation_allowed=false`，不自动导入新账户/重建 Alarm。
+Mail Hero 备份正在迁移到 Cloudflare 原生执行，**不增加 k3s/Compose backup collector**。
+旧 collector 已停；新备份上线、完整读回、隔离恢复各自验收，不拿 Platform 健康替代。
+其他 VPS/DO 持续备份仍需按应用补齐，见 [改进计划](rebuild-audit.md)。
+有独立备份、解密材料和真实隔离恢复证据后才记录 RPO/RTO；本文不宣称完整重建/恢复已经通过。

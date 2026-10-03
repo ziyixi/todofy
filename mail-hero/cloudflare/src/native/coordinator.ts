@@ -4,6 +4,7 @@ import { CapacityLedger, MAX_PARSE_EXTRA_BYTES } from './capacity.ts';
 import { BackupState, readIntakePolicy } from './backup-state.ts';
 import { OpsGuardStore } from './ops-guard.ts';
 import { DELEGATED_PREFIX, handleDelegated } from './api.ts';
+import { NativeBackupRunner } from './native-backup-runner.ts';
 
 const DAY=86400000;
 const WAIT=30_000;
@@ -23,8 +24,10 @@ export class MailCoordinator {
   private readonly state:DurableObjectState;
   private readonly env:Env;
   private running=false;
+  private businessRunning=false;
   private readonly capacity:CapacityLedger;
   private readonly backup:BackupState;
+  private readonly nativeBackup:NativeBackupRunner;
   private readonly ops:OpsGuardStore;
   constructor(state:DurableObjectState,env:Env) {
     this.state=state; this.env=env;
@@ -48,7 +51,8 @@ export class MailCoordinator {
     // not the whole intake history kept after a completed snapshot.
     state.storage.sql.exec('CREATE INDEX IF NOT EXISTS ingest_uploads_status ON ingest_uploads(status,seq)');
     this.capacity=new CapacityLedger(state.storage,env);
-    this.backup=new BackupState(state.storage,env,()=>this.running);
+    this.backup=new BackupState(state.storage,env,()=>this.businessRunning);
+    this.nativeBackup=new NativeBackupRunner(state.storage,env,this.backup);
     this.ops=new OpsGuardStore(state.storage.sql);
   }
   private insert(job:Job,time=Date.now()):void {
@@ -59,7 +63,10 @@ export class MailCoordinator {
     const job=this.state.storage.sql.exec<{due:number|null}>('SELECT min(due) due FROM jobs WHERE failed=0').one();
     const maintenance=this.state.storage.sql.exec<{value:number}>('SELECT value FROM control WHERE id=1').one().value;
     const receiptRetry=this.backup.current()?.receipt_sync_pending ? Date.now()+60_000 : Number.POSITIVE_INFINITY;
-    const due=this.backup.nextExpiry() ?? (this.env.MAINTENANCE_MODE==='true'?Date.now()+DAY:Math.min(job.due ?? maintenance,maintenance,receiptRetry));
+    const nativeDue=this.nativeBackup.nextWake() ?? Number.POSITIVE_INFINITY;
+    const due=this.env.MAINTENANCE_MODE==='true' ? Date.now()+DAY
+      : this.backup.paused() ? Math.min(this.backup.nextExpiry()!,nativeDue)
+        : Math.min(job.due ?? maintenance,maintenance,receiptRetry,nativeDue);
     await this.state.storage.setAlarm(Math.max(Date.now()+1000,due));
   }
   async fetch(request:Request):Promise<Response> {
@@ -69,8 +76,20 @@ export class MailCoordinator {
     if (path==='/mutation/begin' || path==='/backup/begin') {
       try { await this.capacity.initialize(); } catch { await this.state.storage.setAlarm(Date.now()+1000); return new Response(null,{status:503}); }
     }
+    if(path==='/backup/native/status' && request.method==='GET') return Response.json({version:2,...this.nativeBackup.status()});
+    if(path==='/backup/native/run' && request.method==='POST') {
+      const value=await request.json() as {version?:unknown;request_id?:unknown};
+      if(value.version!==2 || typeof value.request_id!=='string') return Response.json({error:{code:'invalid_native_backup_request'}},{status:400});
+      try {
+        const result=this.nativeBackup.requestRun(value.request_id); await this.schedule(); return Response.json(result,{status:202});
+      } catch { return Response.json({error:{code:'invalid_native_backup_request'}},{status:400}); }
+    }
     const backupResponse=await this.backup.fetch(request);
-    if(backupResponse) { await this.schedule(); return backupResponse; }
+    if(backupResponse) {
+      await this.schedule();
+      if(path==='/backup/status' && backupResponse.ok) return Response.json({...await backupResponse.json() as Record<string,unknown>,native:this.nativeBackup.status()});
+      return backupResponse;
+    }
     if(path.startsWith('/capacity/')) {
       try {
         await this.capacity.initialize();
@@ -197,8 +216,10 @@ export class MailCoordinator {
     try {
       try { await this.capacity.initialize(); } catch { await this.state.storage.setAlarm(Date.now()+5000); return; }
       await this.backup.syncReceipt();
+      if(await this.nativeBackup.tick()) { await this.schedule(); return; }
       if(this.backup.paused()) { await this.schedule(); return; }
       if(this.env.MAINTENANCE_MODE==='true') { await this.state.storage.setAlarm(Date.now()+DAY); return; }
+      this.businessRunning=true;
       // This watchdog is durable before any external call. Isolate termination
       // or an exhausted CPU budget cannot leave an accepted job unscheduled.
       await this.state.storage.setAlarm(Date.now()+60_000);
@@ -253,6 +274,6 @@ export class MailCoordinator {
         }
       }
       await this.schedule();
-    } finally { this.running=false; }
+    } finally { this.businessRunning=false; this.running=false; }
   }
 }

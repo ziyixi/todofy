@@ -1,8 +1,12 @@
 import type { Env } from './types.ts';
 import { backupStatus } from './backup.ts';
 import { HttpError } from './security.ts';
+import { isNativeBackupKey, retainedBackupKeys } from './backup-retention.ts';
+export { retainedBackupKeys } from './backup-retention.ts';
+import { validNativeMarker } from './native-backup-artifacts.ts';
+import { assertBackupArtifactCapacity } from './backup-artifact-capacity.ts';
 
-const PART_SIZE=16*1024*1024,MAX_SIZE=8*1024*1024*1024,MAX_BACKUP_BYTES=80*1024*1024*1024;
+const PART_SIZE=16*1024*1024,MAX_SIZE=8*1024*1024*1024;
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const KEY=/^snapshots\/\d{4}-\d{2}-\d{2}\/([0-9a-f-]{36})\.tar\.gz\.gpg$/;
 const HASH=/^[0-9a-f]{64}$/;
@@ -22,7 +26,7 @@ async function body(request:Request):Promise<Record<string,any>> {
   try {const value=JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(bytes));if(!value || Array.isArray(value) || typeof value!=='object') fail(400,'invalid_backup_request');return value;}
   catch {return fail(400,'invalid_backup_request')}
 }
-function validKey(key:unknown):string {if(typeof key!=='string' || !KEY.test(key) || !UUID.test(KEY.exec(key)![1])) fail(400,'invalid_backup_key');return key as string}
+function validKey(key:unknown):string {if(typeof key!=='string' || key.trim()!==key || !KEY.test(key) || !UUID.test(KEY.exec(key)![1])) fail(400,'invalid_backup_key');return key as string}
 interface Upload {key:string;upload_id:string;backup_id:string;size_bytes:number;sha256:string;manifest_sha256:string;created_at:string}
 async function upload(env:Env,key:unknown,uploadID:unknown):Promise<Upload> {
   const valid=validKey(key),record=await bucket(env).get(`uploads/${KEY.exec(valid)![1]}.json`);
@@ -34,6 +38,7 @@ async function upload(env:Env,key:unknown,uploadID:unknown):Promise<Upload> {
 async function ready(env:Env,id:string):Promise<void> {
   const value=await backupStatus(env);
   if(value.backup_id!==id || value.state!=='ready' || !value.paused) fail(409,'backup_not_ready_or_expired');
+  if(value.executor==='native') fail(409,'native_backup_owned');
 }
 function metadata(value:Upload):Record<string,string> {return {backup_id:value.backup_id,sha256:value.sha256,manifest_sha256:value.manifest_sha256,created_at:value.created_at}}
 /** The independently stored journal survives loss or rollback of the live D1.
@@ -42,19 +47,6 @@ export async function recordDeletion(env:Env,id:string,scope:'raw'|'content',del
   if(!env.BACKUP_STORE) return;
   if(!UUID.test(id) || !Number.isFinite(Date.parse(deletedAt))) throw new Error('invalid_deletion_record');
   await env.BACKUP_STORE.put(`deletion-journal/${id}/${scope}.json`,JSON.stringify({id,scope,deleted_at:deletedAt}),{httpMetadata:{contentType:'application/json'}});
-}
-export function retainedBackupKeys(objects:Array<{key:string;uploaded:Date;customMetadata?:Record<string,string>}>):Set<string> {
-  const sorted=objects.filter(o=>KEY.test(o.key) && HASH.test(o.customMetadata?.manifest_sha256 ?? '')).sort((a,b)=>b.uploaded.getTime()-a.uploaded.getTime());
-  const keep=new Set<string>(),days=new Set<string>(),weeks=new Set<string>();
-  for(const item of sorted) {
-    const date=new Date(item.uploaded),day=date.toISOString().slice(0,10);
-    // ISO week identity uses the Thursday belonging to this week.
-    date.setUTCHours(0,0,0,0);date.setUTCDate(date.getUTCDate()+4-(date.getUTCDay() || 7));
-    const week=`${date.getUTCFullYear()}-${Math.ceil((((date.getTime()-Date.UTC(date.getUTCFullYear(),0,1))/86400000)+1)/7)}`;
-    if(!days.has(day) && days.size<7) {days.add(day);keep.add(item.key)}
-    if(!weeks.has(week) && weeks.size<4) {weeks.add(week);keep.add(item.key)}
-  }
-  return keep;
 }
 /** Caller already authenticated the dedicated backup credential. These routes
  * cannot alter the application bucket or send mail. */
@@ -73,17 +65,8 @@ export async function handleBackupArtifactAPI(request:Request,env:Env):Promise<R
     }
     // Bound abandoned uploads and temporary storage. Recovery uses /abort;
     // normal failure cleanup does not touch completed snapshots.
-    const uploads=await store.list({prefix:'uploads/',limit:4});
-    if(uploads.objects.length>=4 || uploads.truncated) fail(409,'backup_upload_cleanup_required');
-    const completed=await store.list({prefix:'snapshots/',limit:100});
-    if(completed.truncated || completed.objects.length>=14) fail(409,'backup_inventory_requires_review');
-    let reserved=0;
-    for(const item of uploads.objects) {
-      const record=await store.get(item.key),value=record?await record.json<Upload>():null;
-      if(!value || !Number.isSafeInteger(value.size_bytes) || value.size_bytes<1 || value.size_bytes>MAX_SIZE) fail(409,'backup_upload_cleanup_required');
-      reserved+=value!.size_bytes;
-    }
-    if(completed.objects.reduce((bytes,object)=>bytes+object.size,0)+reserved+input.size_bytes>MAX_BACKUP_BYTES) fail(409,'backup_capacity_review_required');
+    try { await assertBackupArtifactCapacity(env,input.size_bytes); }
+    catch(error) { fail(409,error instanceof Error && /^backup_[a-z_]+$/.test(error.message)?error.message:'backup_capacity_unavailable'); }
     const created=new Date().toISOString(),key=`snapshots/${created.slice(0,10)}/${input.backup_id}.tar.gz.gpg`;
     if(await store.head(key)) fail(409,'backup_artifact_already_exists');
     const value:Upload={key,upload_id:'',backup_id:input.backup_id,size_bytes:input.size_bytes,sha256:input.sha256,manifest_sha256:input.manifest_sha256,created_at:created};
@@ -123,7 +106,7 @@ export async function handleBackupArtifactAPI(request:Request,env:Env):Promise<R
     await store.delete(`uploads/${value.backup_id}.json`);return respond({aborted:true});
   }
   if(action==='object' && ['GET','HEAD'].includes(request.method)) {
-    const key=validKey(url.searchParams.get('key'));
+    const requested=url.searchParams.get('key'),key=isNativeBackupKey(requested)?requested:validKey(requested);
     const object=request.method==='HEAD'?await store.head(key):await store.get(key);
     if(!object) return fail(404,'backup_artifact_missing');
     return new Response('body' in object?(object as R2ObjectBody).body:null,{headers:{'Content-Type':'application/octet-stream','Content-Length':String(object.size),'Cache-Control':'no-store','X-Content-Type-Options':'nosniff','X-Content-SHA256':object.customMetadata?.sha256 ?? '',ETag:object.httpEtag}});
@@ -131,6 +114,30 @@ export async function handleBackupArtifactAPI(request:Request,env:Env):Promise<R
   if(action==='list' && request.method==='GET') {
     const page=await store.list({prefix:'snapshots/',limit:100,cursor:url.searchParams.get('cursor') ?? undefined,include:['customMetadata']});
     return respond({objects:page.objects.map(o=>({key:o.key,size:o.size,uploaded:o.uploaded.toISOString(),customMetadata:o.customMetadata ?? {}})),truncated:page.truncated,cursor:page.truncated?page.cursor:null});
+  }
+  if(action==='list-v2' && request.method==='GET') {
+    const page=await store.list({prefix:'verified-v2/',limit:100,cursor:url.searchParams.get('cursor') ?? undefined,include:['customMetadata']});
+    const items=page.objects.map(o=>{
+      const m=o.customMetadata ?? {};
+      return {version:2 as const,backup_id:m.backup_id,key:m.key,sha256:m.sha256,manifest_sha256:m.manifest_sha256,
+        created_at:m.created_at,verified_at:m.verified_at,size_bytes:Number(m.size_bytes),object_count:Number(m.object_count),
+        proof:m.proof as 'native_readback_verified'};
+    }).filter(m=>validNativeMarker(m));
+    return respond({version:2,items,cursor:page.truncated?page.cursor:null,complete:!page.truncated});
+  }
+  if(action==='list-v2-objects' && request.method==='GET') {
+    const id=url.searchParams.get('backup_id') ?? '';
+    if(!UUID.test(id)) fail(400,'invalid_native_backup_identity');
+    const receipt=await store.get(`verified-v2/${id}.json`);
+    if(!receipt || receipt.size>4096) fail(404,'verified_native_backup_missing');
+    const marker=await receipt!.json<import('./native-backup-format.ts').NativeBackupMarker>();
+    if(!validNativeMarker(marker) || marker.backup_id!==id) fail(409,'native_backup_marker_invalid');
+    const prefix=marker.key.slice(0,-'manifest.json'.length);
+    const page=await store.list({prefix,limit:100,cursor:url.searchParams.get('cursor') ?? undefined,include:['customMetadata']});
+    if(page.objects.some(o=>!isNativeBackupKey(o.key) || !o.key.startsWith(prefix) ||
+      o.customMetadata?.backup_id!==id || !HASH.test(o.customMetadata?.sha256 ?? ''))) fail(409,'native_backup_inventory_invalid');
+    return respond({version:2,objects:page.objects.map(o=>({key:o.key,size:o.size,customMetadata:{
+      backup_id:id,sha256:o.customMetadata!.sha256}})),cursor:page.truncated?page.cursor:null,complete:!page.truncated});
   }
   if(action==='deletions' && request.method==='GET') {
     const page=await store.list({prefix:'deletion-journal/',limit:20,cursor:url.searchParams.get('cursor') ?? undefined});

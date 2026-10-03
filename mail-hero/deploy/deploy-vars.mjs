@@ -10,7 +10,7 @@
 //
 // Wrangler silently DELETES a var that a deploy does not send (the config has no keep_vars), so this
 // wrapper refuses to run unless every value is present and valid, and `exec` refuses a deploy without a
-// --secrets-file holding exactly the three personal values. Until 2026-10 these three were plain_text vars:
+// --secrets-file holding the three personal bindings. Until 2026-10 the three personal values were plain_text vars:
 // the first deploy through this version replaces each var by a secret of the same name in the same upload
 // (one upload carries the whole binding list with keep_bindings secret_text/secret_key, so the previous
 // plain_text bindings are dropped and there is no moment without the values). Never move them with
@@ -25,7 +25,7 @@
 //
 // .github/scripts/test_wrangler_configs.py reads the next lines: every CI step that runs `exec` or `secrets`
 // must set each input of that mode (Actions sets GITHUB_* itself).
-// deploy-vars-inputs exec: MAIL_HERO_FORCE_SEND_PAUSED MAIL_HERO_MAINTENANCE_MODE GITHUB_SHA
+// deploy-vars-inputs exec: MAIL_HERO_FORCE_SEND_PAUSED MAIL_HERO_MAINTENANCE_MODE MAIL_HERO_NATIVE_BACKUP_ENABLED GITHUB_SHA
 // deploy-vars-inputs secrets: MAIL_HERO_RECEIVE_ADDRESS MAIL_HERO_ACCESS_OWNER MAIL_HERO_ACCESS_OWNER_ALIASES
 import { spawnSync } from 'node:child_process'
 import { readFileSync, realpathSync, writeFileSync } from 'node:fs'
@@ -44,6 +44,7 @@ const MAX_LIST_CHARS = 2048
 // --secrets-file only adds or replaces secrets: an emptied alias list is uploaded as one space (packages/
 // edge-auth trims it to no aliases) rather than left out, which would keep the previous aliases working.
 const NO_ALIASES = ' '
+
 
 export class SettingError extends Error {
   constructor(name) {
@@ -65,6 +66,7 @@ function aliasList(value) {
 export const INJECTED = [
   { name: 'FORCE_SEND_PAUSED', from: 'MAIL_HERO_FORCE_SEND_PAUSED', kind: 'toggle', validate: matching(FLAG) },
   { name: 'MAINTENANCE_MODE', from: 'MAIL_HERO_MAINTENANCE_MODE', kind: 'toggle', validate: matching(FLAG) },
+  { name: 'NATIVE_BACKUP_ENABLED', from: 'MAIL_HERO_NATIVE_BACKUP_ENABLED', kind: 'toggle', validate: matching(FLAG) },
   { name: 'BUILD_SHA', from: 'GITHUB_SHA', kind: 'build', validate: matching(SHA) },
 ]
 export const SECRETS = [
@@ -72,6 +74,7 @@ export const SECRETS = [
   { name: 'ACCESS_OWNER', from: 'MAIL_HERO_ACCESS_OWNER', kind: 'personal', validate: matching(ACCESS_EMAIL) },
   // Up to 8 exact login emails that resolve to ACCESS_OWNER; empty is allowed (uploaded as one space).
   { name: 'ACCESS_OWNER_ALIASES', from: 'MAIL_HERO_ACCESS_OWNER_ALIASES', kind: 'personal', optional: true, validate: aliasList },
+
 ]
 
 function values(entries, env) {
@@ -110,8 +113,7 @@ export function writeSecrets(path, env) {
   writeFileSync(path, JSON.stringify(generateSecrets(env), null, 2) + '\n', { mode: 0o600, flag: 'wx' })
 }
 
-/** Why the secrets file at `path` must not be deployed, or null: it must hold exactly the three personal
- * values, each valid as `secrets` writes it (never printed). */
+/** Refuse unknown or incomplete personal bindings; values are never printed. */
 export function secretsFileProblem(path) {
   let content
   try { content = JSON.parse(readFileSync(path, 'utf8')) } catch { return 'the --secrets-file is missing or not JSON' }

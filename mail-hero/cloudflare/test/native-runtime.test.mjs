@@ -57,7 +57,7 @@ test('native workerd: durable archive, protected API, stable retry identity and 
         }
         return app.fetch(request, env, ctx);
       }};`, resolveDir: root, sourcefile: 'native-runtime-entry.ts', loader: 'ts' },
-    bundle: true, format: 'esm', platform: 'neutral', external: ['cloudflare:workers'], write: false,
+    bundle: true, format: 'esm', platform: 'neutral', conditions: ['browser'], external: ['cloudflare:workers'], write: false,
   });
   const mf = new Miniflare(convertV4MiniflareOptions({
     name: 'mail-hero-runtime-test', modules: true, script: bundle.outputFiles[0].text,
@@ -268,7 +268,7 @@ test('native workerd: durable archive, protected API, stable retry identity and 
 });
 
 test('native workerd: MAINTENANCE_MODE refuses a mutation before Access, with a Status on the owner API', { timeout: 60000 }, async () => {
-  const bundle = await build({ entryPoints: [join(root, 'src/native/index.ts')], bundle: true, format: 'esm', platform: 'neutral', external: ['cloudflare:workers'], write: false });
+  const bundle = await build({ entryPoints: [join(root, 'src/native/index.ts')], bundle: true, format: 'esm', platform: 'neutral', conditions: ['browser'], external: ['cloudflare:workers'], write: false });
   const mf = new Miniflare(convertV4MiniflareOptions({
     name: 'mail-hero-maintenance-test', modules: true, script: bundle.outputFiles[0].text, compatibilityDate: '2026-09-07', host: '127.0.0.1', port: 0,
     d1Databases: { DB: 'maintenance-test' }, r2Buckets: ['MAIL_STORE'], durableObjects: { COORDINATOR: { className: 'MailCoordinator', useSQLite: true } },

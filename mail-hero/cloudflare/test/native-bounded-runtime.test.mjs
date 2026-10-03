@@ -90,7 +90,7 @@ async function script() {
       }
       return app.fetch(request, env, ctx)
     }};`, resolveDir: root, sourcefile: 'native-bounded-entry.ts', loader: 'ts' },
-  bundle: true, format: 'esm', platform: 'neutral', external: ['cloudflare:workers'], write: false })).outputFiles[0].text
+  bundle: true, format: 'esm', platform: 'neutral', conditions: ['browser'], external: ['cloudflare:workers'], write: false })).outputFiles[0].text
   return bundled
 }
 async function runtime(t, bindings = {}) {

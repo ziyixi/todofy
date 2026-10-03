@@ -8,9 +8,7 @@ Mail Hero 位于单仓库的 `mail-hero/` 目录，与 `todofy/` 共用根目录
 
 这条流水线发布 Cloudflare Worker 和静态资源，使用现有D1、R2和SQLite DO资源。来源邮箱转发、Access策略及根域MX由各自设置管理；流水线不会创建新的Cloudflare收费计划。Todofy 在同一仓库的 `todofy/` 中，由独立的 `Todofy checks`/`Todofy deploy` job 发布；两者只共享 `contracts/` 与 `packages/`（目前是 `packages/edge-auth`，由各自Worker编译进去），互不导入代码；共享包改动会同时检查并发布两者，其余发布互不依赖。
 
-独立的根目录 `.github/workflows/mail-hero-backup-image.yml`（仅在 `mail-hero/deploy/backup/**`、`mail-hero/cloudflare/migrations/**` 或该文件变更时运行）发布新的 package `ghcr.io/ziyixi/mail-hero-backup-collector`。旧 package `ghcr.io/ziyixi/mail-hero-backup` 仍关联到原 `ziyixi/mail-hero` 仓库，不再更新；服务器继续使用 Compose 中已固定的旧 digest，直到下一次升级收集器时改为新 package 的 digest。它先运行合成备份/恢复及调度测试，再构建 `linux/amd64` 镜像；非 `main` 分支只构建，main发布使用当前工作流的 `GITHUB_TOKEN`，只有发布job获得 `packages: write`。镜像带源码revision标签、`sha-<完整提交>`标签及不可变digest。无需新增长期GitHub token，也不向构建过程提供邮件、备份凭据或Cloudflare管理密钥。新 package 首次发布后核对其为 public，服务器才可匿名拉取。
-
-服务器的 `self-host-on-vultr` Compose配置固定备份镜像digest，更新时只执行 `docker compose pull mailhero-backup` 和 `docker compose up -d --no-deps mailhero-backup`。容器自己负责每日调度和失败后的有界重试，使用原来的私有备份配置及状态目录，不安装systemd或主机cron。操作与恢复见[备份说明](../deploy/backup/README.md)。
+[原生备份](native-backup.md)随同一个 Mail Hero Worker 检查与发布。恢复工具测试使用 GnuPG 和合成数据；自动备份不构建镜像、不依赖 VPS。旧 `mail-hero-backup-image.yml` 仅供显式手工 dispatch 的 v1 兼容打包，不再由 push 自动发布收集器；现有旧密文保留。
 
 ## 仓库设置
 
@@ -18,13 +16,14 @@ Mail Hero 位于单仓库的 `mail-hero/` 目录，与 `todofy/` 共用根目录
 
 生产配置提交在 [`mail-hero/wrangler.toml`](../wrangler.toml)，顶层即生产（不用 `[env.*]`，不设 `keep_vars`）：account ID、D1（名称与 ID）、R2 桶 `MAIL_STORE` 与备份桶 `BACKUP_STORE`、自定义域名与 `PUBLIC_HOST`、Access issuer/AUD、`WEBHOOK_ALLOWED_HOSTS`、每日接收上限、兼容日期、Durable Object 绑定与迁移。改这些值就是改这个文件（公开提交，走同样的检查与发布）；CI 不再读取同名的旧 GitHub variables（`MAIL_HERO_D1_DATABASE_ID` 等仍保留在 production 环境，只作为回滚本次配置布局变更时旧生成器的输入，改它们没有效果；保留与删除时机见根目录 README“Rolling back the committed-config layout”）。值必须与现有资源一致，不要新建重复资源。换 D1 或桶（例如恢复到新资源）同样是在维护模式下提交这个文件。可选的 metadata 告警按 ops-v1 计划不配置；若将来启用，只把不含凭据的 `ALERT_WEBHOOK_URL` 与 `ALERT_WEBHOOK_ALLOWED_HOSTS` 提交进该文件，`ALERT_WEBHOOK_TOKEN` 仍是 Worker secret。
 
-部署时由 [`deploy/deploy-vars.mjs`](../deploy/deploy-vars.mjs) 校验后加入的值有两类：三个个人值（GitHub secrets `MAIL_HERO_RECEIVE_ADDRESS`、`MAIL_HERO_ACCESS_OWNER`、`MAIL_HERO_ACCESS_OWNER_ALIASES`）由 `secrets` 写进只属于本次运行的临时文件（0600，发布后删除），经同一次 `wrangler deploy --secrets-file` 成为 Worker secret（Cloudflare 控制台与 API 都不显示值）；两个运维开关（GitHub variables）和 `BUILD_SHA`（提交 SHA）以 `--var NAME:value` 加入（与 `[vars]` 相同的 plain_text var，Wrangler 输出里显示为 `(hidden)`）。缺少或非法时拒绝发布（未发送的 var 会被删除）；`exec` 也拒绝没有恰好一个含这三个值的 `--secrets-file` 的发布。三个个人值在 2026-10 之前是 plain_text var：第一次发布在同一次上传里把每个 var 换成同名 secret，不存在缺值的中间状态；不要改用 `wrangler secret put` 手工迁移。
+部署包装器分别注入三个运维开关/BUILD_SHA和秘密文件。秘密文件只含固定收件地址、owner和aliases，为0600，发布后删除；不打印值。原生备份不增加秘密，不需要公钥或密文封装。缺必选值时拒绝发布，不能绕过包装器。
 
 在 `production` environment 添加 variables（只有运维开关）：
 
 | Variable | 用途 |
 | --- | --- |
 | `MAIL_HERO_FORCE_SEND_PAUSED` | 明确设为 `true` 或 `false`，与当前运维状态一致；注入为 `FORCE_SEND_PAUSED` |
+| `MAIL_HERO_NATIVE_BACKUP_ENABLED` | 自动备份开关，明确 `true`/`false`；关闭不取消已开始的快照，显式机器请求仍可发起单次备份 |
 | `MAIL_HERO_MAINTENANCE_MODE` | 明确设为 `true` 或 `false`，正常运行是 `false`；注入为 `MAINTENANCE_MODE` |
 
 在 `production` environment 添加 secrets：
@@ -46,7 +45,7 @@ Mail Hero 位于单仓库的 `mail-hero/` 目录，与 `todofy/` 共用根目录
 2. Actions 的 `Mail Hero deploy` 成功后，记录提交 SHA 和 Wrangler 输出的 Worker version ID。
 3. 查看 Mail Hero 登录、收件与新测试事件的交付状态。部署成功仅证明发布步骤成功，不等于真实邮箱到 Todofy/Todoist 的业务链路通过。
 
-不再生成配置文件：部署的就是提交的 `mail-hero/wrangler.toml`，外加 `deploy/deploy-vars.mjs exec` 追加的三个 `--var` 和 `secrets` 写出的 secrets 文件。包装器只输出字段名，从不打印值；它拒绝 `--env`、`--keep-vars`、自带的 `--var`、其他配置文件以及缺少或内容不对的 `--secrets-file`。不得手动 `wrangler deploy`（会删除这三个 var，暂停解除）；应急手动发布在 `cloudflare/` 先运行 `node ../deploy/deploy-vars.mjs secrets <仓库外的临时文件>`，再运行 `node ../deploy/deploy-vars.mjs exec -- npx --no-install wrangler deploy --config ../wrangler.toml --secrets-file <同一文件>`，环境里给出与 CI 相同的值（`GITHUB_SHA` 为所发布的提交），完成后删除该文件。`deploy/cloudflare-admin.py wrangler` 拒绝 `deploy`。静态值的校验在 `deploy/test/wrangler-config.test.mjs`，跨应用的一致性（唯一配置文件、主机名、ci.yml 注入名）在根目录 `.github/scripts/test_wrangler_configs.py`。
+不再生成配置文件：部署的就是提交的 `mail-hero/wrangler.toml`，外加 `deploy/deploy-vars.mjs exec` 追加的四个 `--var` 和 `secrets` 写出的 secrets 文件。包装器只输出字段名，从不打印值；它拒绝 `--env`、`--keep-vars`、自带的 `--var`、其他配置文件以及缺少或内容不对的 `--secrets-file`。不得手动 `wrangler deploy`（会删除注入的 var，暂停解除）；应急手动发布在 `cloudflare/` 先运行 `node ../deploy/deploy-vars.mjs secrets <仓库外的临时文件>`，再运行 `node ../deploy/deploy-vars.mjs exec -- npx --no-install wrangler deploy --config ../wrangler.toml --secrets-file <同一文件>`，环境里给出与 CI 相同的值（`GITHUB_SHA` 为所发布的提交），完成后删除该文件。`deploy/cloudflare-admin.py wrangler` 拒绝 `deploy`。静态值的校验在 `deploy/test/wrangler-config.test.mjs`，跨应用的一致性（唯一配置文件、主机名、ci.yml 注入名）在根目录 `.github/scripts/test_wrangler_configs.py`。
 
 `FORCE_SEND_PAUSED` 与 `MAINTENANCE_MODE` 是部署配置来源的一部分，每次发布都从 GitHub variables 重新声明。紧急暂停后，应同步修改 GitHub variable，否则下一次部署会恢复 variable 的值；最快的途径是改 variable 后手工运行该应用的 workflow（Cloudflare 控制台直接改 var 立即生效，但下一次部署会覆盖，除非 variable 也改了）。数据库中的 archive/forward 模式、目标选择和目标暂停由应用 UI 管理，不随普通部署重置。
 

@@ -15,7 +15,7 @@
 ## 0. 范围、授权与隐私
 
 - 产品是个人版 CloudMailin：一个固定地址、每天约50–100封、完整收件UI、持久状态与可靠webhook。不是50–100QPS，不增加多地址CRUD或多租户平台。
-- Mail Hero应用全托管在Cloudflare，维护TypeScript Worker和React UI。业务数据库使用D1；SQLite DO负责持久调度。不添加Go、PostgreSQL或自建邮件服务入口。用户另行授权的备份收集器使用独立Docker Compose服务，不能与应用运行架构混淆。
+- Mail Hero应用全托管在Cloudflare，维护TypeScript Worker和React UI。业务数据库使用D1；SQLite DO负责持久调度。不添加Go、PostgreSQL或自建邮件服务入口。用户已要求备份执行也迁到 Cloudflare：复用 MailCoordinator Alarm，不再部署 VPS/Compose/k3s collector。旧工具只保留格式兼容与恢复用途。
 - 使用Workers Free，目标$0/月，低量预算$1–2/月；未经明确授权不升级Workers Paid或开启不需要的收费产品。R2需订阅且超额计费，预算提醒不是硬消费上限，免费量按账户共享。
 - 唯一地址由Worker `RECEIVE_ADDRESS`配置。Todofy是可选、独立的HTTPS webhook消费者。它现在位于同一单仓库的 `todofy/`（自己的Cloudflare Worker、D1与部署），但仍是独立消费者：Mail Hero不导入它的代码/包，不访问其数据库，不共享发布周期；两者之间只共享根目录 `contracts/` 中的 `mail.received.v1` 合同，以及编译进各自Worker的 `packages/` 共享代码（目前是鉴权包 `packages/edge-auth`，见§4、§8）。只有共享包改动会同时检查并发布两者。
 - 已授权的账户配置可继续；真实邮件内容、原邮箱自动转发、消费者真实业务副作用和根域现有邮箱不能被无声改动。专用子域设置若要求替换根域现有MX，停止核查，保护主邮箱。
@@ -106,11 +106,11 @@ UI与API验证Access JWT的签名、issuer、audience、过期和唯一owner。J
 
 D1 Time Travel Free7天只恢复D1，不恢复R2、DO或secrets。完整备份需要D1导出、R2字节及customMetadata清单、代码/schema/资源配置和独立密钥副本。维护窗口停止所有写入后生成配套快照；只暂停webhook不足以形成一致备份。
 
-恢复到新空D1/桶，保持维护+强制暂停，核对对象及metadata/hash，重建DO调度而非假定Alarm已在SQL备份里。旧备份可能含后来已交付事件，必须按原event_id与消费者核对，不能重建新事件自动发送。离机加密备份与真实恢复成功前不宣称RPO/RTO。
+恢复到新空D1/桶，保持维护+强制暂停，核对对象及metadata/hash，重建DO调度而非假定Alarm已在SQL备份里。旧备份可能含后来已交付事件，必须按原event_id与消费者核对，不能重建新事件自动发送。独立副本与真实恢复成功前不宣称RPO/RTO。
 
 应用5GiB容量、有限扫描、私有下载、精确路由、预算提醒及用量检查用于降低成本。R2 Class A免费量超额后按百万单位向上计费，不能承诺$2绝对封顶。不得无声升级到Paid来解决Free超限。
 
-## 7. storage-v1 与独立备份
+## 7. storage-v1 与 Cloudflare 原生备份
 
 本节替代上文旧的无自动过期、完整正文、维护窗口备份及每批一封清理描述。
 
@@ -118,18 +118,20 @@ D1 Time Travel Free7天只恢复D1，不恢复R2、DO或secrets。完整备份�
 - DO预留包含尚未索引的原件和解析放大空间；物理删除成功后释放。首次升级需排空旧版本写入并有界盘点R2。失败不确认接收。
 - 修复、清理、告警用三个独立Alarm调用，每阶段间约1秒，完整周期约10分钟；每次最多两个清理阶段，失败整封删除优先恢复。空闲原件扫描每天一次，每页100个key。
 - 备份使用最长30分钟DO租约，暂停解析、交付、清理与API写入；新邮件继续进入DO/R2并归入下一次快照。它不是MAINTENANCE_MODE。
-- 可选私有BACKUP_STORE保存加密包及最小删除清单。专用机器API `/api/internal/backup/*` 用独立Bearer和Access机器身份，不授权普通管理API。备份收集器使用既有服务器的独立Compose服务，Python/GPG封装在CI发布的镜像中；非root运行，无Docker socket或主机系统挂载，不安装systemd或主机cron。仅备份Mail Hero数据及恢复材料，不是整机备份。
-- 服务器不持有Cloudflare管理员token、R2 S3 key、应用密钥明文或恢复私钥。上传后完整读回SHA验证，独立HMAC receipt完成后才登记成功；轮转仅计入verified包，7每日+4每周。
+- 私有 BACKUP_STORE 保存普通 v2 数据副本、manifest、最小 verified marker 和删除清单。用户明确不需要新增备份加密；不添加PGP、恢复公钥、密文分块或相关secret。旧v1密文与GPG恢复保持兼容。
+- 复用 DO Alarm，有界导出 D1/DO 并流式复制原 R2 文件；最长30分钟一致性租约，过期释放业务暂停。完整大小/hash/引用检查后才登记成功与轮转7每日+4每周，失败只清理自己的未验证prefix。
+- 复制完成先做租约有效的内部 durable commit，再写完成marker、同步D1 freshness；中断续同ID。旧v1 HMAC finish不开放内部bypass，新旧执行器不能抢占同一个快照。
+- 快照不导出Worker secrets。恢复原应用密钥与机器凭据按原独立秘密清单处理；不为备份再造密钥管理流程。接口/操作见[每日备份](docs/native-backup.md)。
 - 恢复需独立归档校验值及最新删除清单。隔离恢复强制暂停并保留event ID/payload；新Cloudflare资源导入、DO重建和未知交付对账需单独验收。
 - API写入遗留租约不得按时间猜测完成。必须在维护模式核对旧调用已排空，再按精确ID清除至少15分钟前的租约。
 
 ## 8. 仓库与发布边界
 
-- 保留 `cloudflare/` 原生Worker/D1迁移与测试、`web/`、静态构建输出位置 `uiassets/dist/`、通用事件合同和部署/备份工具。不要恢复已经移除的Go服务、PostgreSQL schema、SMTP服务器或中转Worker。`deploy/backup/`中的Dockerfile只封装备份工具，Compose配置属于独立部署仓库。
+- 保留 `cloudflare/` 原生Worker/D1迁移与测试、`web/`、静态构建输出位置 `uiassets/dist/`、通用事件合同和部署/备份工具。不要恢复已经移除的Go服务、PostgreSQL schema、SMTP服务器或中转Worker。`deploy/backup/` 保留旧 v1 恢复兼容和 v2 离线下载/恢复工具；原生备份不依赖这里的 Dockerfile。
 - 正式发布从GitHub Actions的同一已验证提交构建UI、应用向后兼容的D1 migration并发布Worker。PR不使用生产密钥。`production` environment只用于授权的main发布；暂停和维护配置需同步GitHub variables，避免下次发布覆盖运维状态。其余静态配置只在 `mail-hero/wrangler.toml` 修改（公开提交）；不得手动 `wrangler deploy`（会删除注入的vars），应急手动发布只用 `deploy/deploy-vars.mjs exec`；不得添加 `[env.*]` 或 `keep_vars`。
 - Todofy在同一仓库的 `todofy/`，由根工作流的 `Todofy checks`/`Todofy deploy` 独立检查和发布。Mail Hero不构建、不部署Todofy，也不因Todofy改动而发布。
 - 应用之间互不导入；共享代码只在根目录 `contracts/` 与 `packages/`。`cloudflare/package.json` 以 `file:../../packages/edge-auth` 依赖共享鉴权包并由打包器编译进Worker；`packages/edge-auth/` 改动会重新检查并发布Mail Hero（及其他使用它的应用）。`jose` 仅作为测试签发合成JWT的devDependency。
-- 备份镜像由根目录 `.github/workflows/mail-hero-backup-image.yml` 测试并发布到GHCR新package `ghcr.io/ziyixi/mail-hero-backup-collector`（旧package `mail-hero-backup` 关联原仓库；服务器在下一次升级前继续使用已固定的旧digest），服务器只拉取固定digest，不手工构建。Worker和备份镜像各自发布；备份CI不接触生产凭据或真实邮件。
+- 原生备份随 Mail Hero Worker 的同一 green SHA 检查与发布；离线恢复测试只用合成数据。旧备份镜像和 retained ciphertext 不自动删除、不再作为运行依赖。
 - 仓库清理不删除任何生产数据库、桶、邮件、源邮箱转发设置或其他项目资源；不自动导入真实邮件。部署成功、HTTP接管和完整Todofy/Todoist业务验收分别记录。
 
 ## 9. ops-v1 运维入口

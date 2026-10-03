@@ -1,16 +1,9 @@
-# Mail Hero's backup collector image (mail-hero/deploy/backup). It is published as a NEW package,
-# ghcr.io/ziyixi/mail-hero-backup-collector, linked to this repository; the old package
-# ghcr.io/ziyixi/mail-hero-backup stays linked to the archived ziyixi/mail-hero. The server keeps
-# its pinned digest of the old package until the next collector upgrade switches the Compose image.
+# Legacy v1 collector packaging, available only by explicit manual dispatch.
+# Native v2 backups run inside Mail Hero's Cloudflare DO; no VPS collector or
+# automatic collector-image publication remains part of the deployment.
 name: Mail Hero backup collector image
 
 on:
-  push:
-    branches: ['**']
-    paths:
-      - .github/workflows/mail-hero-backup-image.yml
-      - mail-hero/deploy/backup/**
-      - mail-hero/cloudflare/migrations/**
   workflow_dispatch:
 
 permissions:

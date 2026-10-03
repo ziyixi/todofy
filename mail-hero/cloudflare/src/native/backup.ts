@@ -50,7 +50,7 @@ export async function handleBackupAPI(request: Request, env: Env): Promise<Respo
   await authenticateBackupRequest(request, env);
   const url = new URL(request.url), action = url.pathname.slice(BACKUP_PREFIX.length);
   if (action === '/artifacts' || action.startsWith('/artifacts/')) return handleBackupArtifactAPI(request, env);
-  if (!/^\/(begin|status|writers|reconcile-writer|control|database-schema|database|objects|object|manifest|finish|cancel)$/.test(action)) return new Response(null, { status: 404, headers });
+  if (!/^\/(begin|status|writers|reconcile-writer|control|database-schema|database|objects|object|manifest|finish|cancel|native\/run|native\/status)$/.test(action)) return new Response(null, { status: 404, headers });
   if (!['GET', 'POST'].includes(request.method)) return new Response(null, { status: 405, headers });
   if (request.method === 'POST' && Number(request.headers.get('Content-Length') ?? 0) > 16 * 1024) return new Response(null, { status: 413, headers });
   let body: string | undefined;

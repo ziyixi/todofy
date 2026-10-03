@@ -80,7 +80,7 @@ Worker 导出命名入口 `Ops`（`src/native/ops.ts`，`index.ts` 只加一行�
 | 解析任务、投递与重试、路由阻断复查 | 保持 | 已接管邮件的处理 |
 | 修复阶段重新登记待解析/未投递、到期投递、过期窗口标记、冷却修复 | 保持 | 完整性，不能让已接管邮件搁浅 |
 | 容量对账、中断的内容删除续做 | 保持 | 释放入站额度；已开始的删除不能复活 |
-| 提醒评估与发送、备份租约及回执、金丝雀本身 | 保持 | 监控、外部收集器与运维检查 |
+| 提醒评估与发送、备份租约及回执、金丝雀本身 | 保持 | 监控、原生备份与运维检查 |
 | `raw_reconcile`：R2 `raw/` 盘点与孤儿回收 | 推迟（48小时） | 任务在写 R2 前登记，盘点只是安全网；节省 R2 Class A |
 | `lifecycle_retention`：保留期清理、已处理异常清理、计时扫描 | 推迟（48小时） | 纯清理，稍后执行不丢数据；容量提醒仍可见 |
 | `canary_cleanup`：7天前金丝雀内容 | 推迟（48小时） | 合成内容清理 |
@@ -192,29 +192,16 @@ Cloudflare未明确承诺 `email()` 在R2写入前失败时的完整持久重投
 
 消费者必须先持久接管再回2xx，并按稳定来源+event_id去重。“已交付”不等于Todoist业务完成。先测合成事件，再解除 `FORCE_SEND_PAUSED` 并选择forward。CloudMailin与Mail Hero不能同时触发同一业务。
 
-## 8. 维护窗口备份
+## 8. Cloudflare 原生备份
 
-D1 Free Time Travel只有最近 **7天**，不包含R2、DO状态或secrets，不是独立备份。[Time Travel](https://developers.cloudflare.com/d1/reference/time-travel/)
+自动备份复用 Mail Hero 的 SQLite DO Alarm，输出到独立私有 BACKUP_STORE；不需要 VPS、Compose 或 k3s collector。
+新入站继续进入原件桶，快照以有界租约冻结解析/交付/清理/API 写入，最多30分钟。
+加密、逐块完整读回校验和 durable commit 在 DO 内执行，成功后才更新设置页/Home 的备份新鲜度并轮转。
+[配置、机器接口、预算和离线恢复说明](native-backup.md)是当前操作入口，旧 v1 密文仍可恢复。
 
-目前没有自动化的一致原生备份，也没有完成离机灾难恢复验收。以下是待执行并验证的维护窗口流程；不能把“导出 D1 并复制正在变化的桶”称为一致快照：
-
-1. 保留源邮箱副本，暂停来源转发，记录窗口和最后收件ID。
-2. 把 GitHub variables `MAIL_HERO_FORCE_SEND_PAUSED`、`MAIL_HERO_MAINTENANCE_MODE` 设为 `true` 并手工运行 workflow 部署（`FORCE_SEND_PAUSED=true`、`MAINTENANCE_MODE=true`）。维护模式拒绝新入站及管理写入，Alarm停止工作。等待在途任务结束，确认无解析、投递、删除、入站写入；外部已在途副作用仍需对账。
-3. 在仓库外的受限目录导出D1，例如在 `cloudflare/` 中：
-
-```sh
-umask 077
-mailhero_backup_dir="$HOME/mail-hero-backups/$(date -u +%Y%m%dT%H%M%SZ)"
-mkdir -p "$mailhero_backup_dir"
-npx wrangler d1 export DB --remote --config ../wrangler.toml --output "$mailhero_backup_dir/d1.sql"
-```
-
-4. 通过受限S3/R2工具复制整个私有桶，清单包含 **key、大小、内容校验值、自定义metadata** 并逐项校验。raw metadata中的envelope、received_at、raw_size、mode/revision对未索引邮件恢复有用。普通文件复制或丢metadata的rclone副本不能冒充完整备份。
-5. 保存代码/schema版本、非秘密配置、资源ID和DO任务恢复说明。独立安全保管 `CREDENTIAL_KEY` 及外部凭据恢复来源，不放进未加密备份目录。
-6. 完整快照加密复制到另一设备/账户，建议7份daily+4份weekly，定期验证解密。相同账户的另一个R2桶不解决账号不可用，副本也计入账户存储。
-7. 退出维护先恢复archive收件，确认调度恢复；消费者保持暂停直到未知交付完成核对，再恢复来源转发并检查窗口遗漏。
-
-导出或复制命令退出0不等于恢复成功；需要在隔离资源执行下一节的完整恢复验收。
+D1 Free Time Travel 只有最近7天，不包括 R2、DO 或秘密；同账户 R2 备份也不覆盖整个账户丢失。
+恢复私钥与独立保存的 receipt/密文副本在可信设备保管。[Time Travel](https://developers.cloudflare.com/d1/reference/time-travel/)
+备份成功、独立解密、隔离恢复和新 Cloudflare 资源恢复分别记录，不承诺未实测的 RPO/RTO。
 
 ## 9. 隔离恢复演练
 

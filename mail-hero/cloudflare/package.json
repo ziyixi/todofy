@@ -24,6 +24,7 @@
     "wrangler": "4.141.0"
   },
   "dependencies": {
+    "@noble/hashes": "2.4.0",
     "@ziyixi/edge-auth": "file:../../packages/edge-auth",
     "@ziyixi/proto": "file:../../proto/ts",
     "parse5": "8.0.1",

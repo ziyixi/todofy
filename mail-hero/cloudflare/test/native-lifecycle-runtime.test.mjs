@@ -28,7 +28,7 @@ test('workerd lifecycle: migrated D1, R2 expiry journal and durable capacity set
       const x=await request.json();
       if(x.action==='raw') return Response.json({changed:await expireRawContent(env,x.id,x.version,fn=>fn())});
       return Response.json(await runLifecycle(env,{withMutation:fn=>fn(),deleteContent:async()=>{throw new Error('unexpected full deletion')}}));
-    }};`, resolveDir: root, sourcefile: 'lifecycle-runtime.ts', loader: 'ts' }, bundle: true, format: 'esm', platform: 'neutral', external: ['cloudflare:workers'], write: false })
+    }};`, resolveDir: root, sourcefile: 'lifecycle-runtime.ts', loader: 'ts' }, bundle: true, format: 'esm', platform: 'neutral', conditions: ['browser'], external: ['cloudflare:workers'], write: false })
   const mf = new Miniflare(convertV4MiniflareOptions({ name: 'lifecycle-runtime', modules: true, script: bundle.outputFiles[0].text,
     compatibilityDate: '2026-09-07', host: '127.0.0.1', port: 0,
     d1Databases: { DB: 'lifecycle' }, d1Persist: join(temp, 'd1'), r2Buckets: ['MAIL_STORE','BACKUP_STORE'], r2Persist: join(temp,'r2'),

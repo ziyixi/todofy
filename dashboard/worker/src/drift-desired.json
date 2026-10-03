@@ -482,6 +482,21 @@
           "source": "deploy"
         },
         {
+          "name": "NATIVE_BACKUP_AT_UTC",
+          "type": "plain_text",
+          "source": "config"
+        },
+        {
+          "name": "NATIVE_BACKUP_ENABLED",
+          "type": "plain_text",
+          "source": "deploy"
+        },
+        {
+          "name": "NATIVE_BACKUP_MAX_BYTES",
+          "type": "plain_text",
+          "source": "config"
+        },
+        {
           "name": "PUBLIC_HOST",
           "type": "plain_text",
           "source": "config"

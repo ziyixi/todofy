@@ -488,6 +488,7 @@ jobs:
       - name: Validate deployment configuration
         run: |
           node --test deploy/test/*.test.mjs
+          gpg --version
           python3 -m unittest discover -s deploy/backup -p 'test_*.py'
       # Includes test/contract-fixtures.test.mjs: the golden mail.received.v1 payloads in contracts/.
       - name: Check and test the Worker, including workerd bindings
@@ -518,6 +519,7 @@ jobs:
           MAIL_HERO_ACCESS_OWNER_ALIASES: ''
           MAIL_HERO_FORCE_SEND_PAUSED: 'true'
           MAIL_HERO_MAINTENANCE_MODE: 'false'
+          MAIL_HERO_NATIVE_BACKUP_ENABLED: 'true'
         run: |
           node ../deploy/deploy-vars.mjs secrets "$RUNNER_TEMP/mail-hero-secrets.json"
           node ../deploy/deploy-vars.mjs exec -- npx --no-install wrangler deploy --dry-run --config ../wrangler.toml \
@@ -1862,6 +1864,7 @@ jobs:
         env:
           MAIL_HERO_FORCE_SEND_PAUSED: ${{ vars.MAIL_HERO_FORCE_SEND_PAUSED }}
           MAIL_HERO_MAINTENANCE_MODE: ${{ vars.MAIL_HERO_MAINTENANCE_MODE }}
+          MAIL_HERO_NATIVE_BACKUP_ENABLED: ${{ vars.MAIL_HERO_NATIVE_BACKUP_ENABLED }}
         run: |
           node ../deploy/deploy-vars.mjs exec -- npx --no-install wrangler deploy --dry-run --config ../wrangler.toml \
             --secrets-file "$RUNNER_TEMP/mail-hero-secrets.json" --outdir "$RUNNER_TEMP/mail-hero-bundle"
@@ -1884,6 +1887,7 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.MAIL_HERO_CF_API_TOKEN }}
           MAIL_HERO_FORCE_SEND_PAUSED: ${{ vars.MAIL_HERO_FORCE_SEND_PAUSED }}
           MAIL_HERO_MAINTENANCE_MODE: ${{ vars.MAIL_HERO_MAINTENANCE_MODE }}
+          MAIL_HERO_NATIVE_BACKUP_ENABLED: ${{ vars.MAIL_HERO_NATIVE_BACKUP_ENABLED }}
         run: |
           test -n "$CLOUDFLARE_API_TOKEN"
           npx --no-install wrangler d1 migrations apply DB --remote --config ../wrangler.toml

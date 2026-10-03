@@ -118,7 +118,7 @@ The workflow is authoritative for optional inputs and their exact wiring.
 | Job | Variables | Secrets |
 | --- | --- | --- |
 | `Todofy deploy` | `TODOFY_REMINDER_ENABLED`, `TODOFY_MAINTENANCE_MODE`, `TODOFY_PROCESSING_PAUSED`, `TODOFY_FORCE_PAUSE_TODOIST`, `TODOFY_GTD_REVIEW_ENABLED` | `CF_API_TOKEN`, `TODOFY_ACCESS_OWNER`, `TODOFY_ACCESS_OWNER_ALIASES`, `TODOFY_TODOIST_DEFAULT_PROJECT_ID`; optional `TODOFY_TODOIST_OPS_PROJECT_ID`, `TODOFY_TODOIST_REVIEW_PROJECT_ID` |
-| `Mail Hero deploy` | `MAIL_HERO_FORCE_SEND_PAUSED`, `MAIL_HERO_MAINTENANCE_MODE` | `MAIL_HERO_CF_API_TOKEN`, `MAIL_HERO_RECEIVE_ADDRESS`, `MAIL_HERO_ACCESS_OWNER`, `MAIL_HERO_ACCESS_OWNER_ALIASES` |
+| `Mail Hero deploy` | `MAIL_HERO_FORCE_SEND_PAUSED`, `MAIL_HERO_MAINTENANCE_MODE`, `MAIL_HERO_NATIVE_BACKUP_ENABLED` | `MAIL_HERO_CF_API_TOKEN`, `MAIL_HERO_RECEIVE_ADDRESS`, `MAIL_HERO_ACCESS_OWNER`, `MAIL_HERO_ACCESS_OWNER_ALIASES` |
 | Website release/relay | Website's settings stay in its workflow/config; optional `WEBSITE_BOOTSTRAP_APPROVAL` for an empty release registry | `CF_API_TOKEN`; release additionally uses `WEBSITE_NOTION_TOKEN`, `WEBSITE_NOTION_DATA_SOURCE_ID`; relay retains its existing Worker secrets |
 | Lab, FlowDay, Links, Watch deploys | Committed app configuration; owner pause settings remain app-owned | `CF_API_TOKEN`, `DASHBOARD_ACCESS_OWNER`, `DASHBOARD_ACCESS_OWNER_ALIASES`; respectively `LAB_CSRF_SIGNING_KEY`, `FLOWDAY_CSRF_SIGNING_KEY` + `FLOWDAY_CREDENTIAL_KEY`, `LINKS_CSRF_SIGNING_KEY`, `WATCH_CSRF_SIGNING_KEY` |
 | `Fleet deploy` | Committed config and `BUILD_SHA` from the release commit | `CF_API_TOKEN`, `FLEET_ACCESS_OWNER`, `FLEET_ACCESS_OWNER_ALIASES`, `FLEET_REPORT_HMAC_KEY` |
@@ -129,12 +129,11 @@ The workflow is authoritative for optional inputs and their exact wiring.
 concurrency and publication identity/rollback flow. CI dispatches it after the gate; relay buttons and
 scheduled reconciliation use that same path. Site publishing does not release unrelated applications.
 
-[Mail Hero backup image](../.github/workflows/mail-hero-backup-image.yml) independently builds on its
-collector/migration changes and publishes `ghcr.io/ziyixi/mail-hero-backup-collector` on main with the job's
-own `GITHUB_TOKEN`. The legacy `mail-hero-backup` package belongs to the previous repository. A published
-collector is not a running backup service: Docker Compose retirement and any backup pause/replacement
-must be recorded and verified separately in HANDOFF. Neither Newsletter nor the Platform observer claims
-to back up Mail Hero by merely becoming healthy.
+Mail Hero's [native backup](../mail-hero/docs/native-backup.md) executes in its existing Cloudflare DO/R2
+and ships through `Mail Hero checks/deploy`. Recovery tests require GnuPG and synthetic fixtures.
+The [legacy collector image workflow](../.github/workflows/mail-hero-backup-image.yml) is manual-only;
+no push automatically publishes a VPS collector. Existing v1 ciphertext and recovery tools remain compatible.
+Neither Newsletter nor the Platform observer claims backup coverage through process health.
 
 ## VPS releases and runtime verification
 

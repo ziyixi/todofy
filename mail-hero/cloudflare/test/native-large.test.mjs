@@ -14,7 +14,7 @@ test('workerd parses an exact 25 MiB synthetic MIME attachment without base64 JS
       let stored=0;
       const result=await parseMail(await request.arrayBuffer(),{MAIL_STORE:{async put(key,bytes) {stored+=bytes.byteLength;return {key};}}},'parsed/large/test');
       return Response.json({subject:result.mail.subject,text:result.mail.text,review:result.mail.needs_review,count:result.mail.attachments.length,stored,size:result.mail.attachments[0]?.size,status:result.mail.attachments[0]?.storage_status,reason:result.mail.attachments[0]?.omitted_reason});
-    }};`,resolveDir:fileURLToPath(new URL('..',import.meta.url)),sourcefile:'large-test.ts',loader:'ts'},bundle:true,format:'esm',platform:'neutral',write:false});
+    }};`,resolveDir:fileURLToPath(new URL('..',import.meta.url)),sourcefile:'large-test.ts',loader:'ts'},bundle:true,format:'esm',platform:'neutral',conditions:['browser'],write:false});
   const mf=new Miniflare(convertV4MiniflareOptions({modules:true,script:bundle.outputFiles[0].text,compatibilityDate:'2026-09-07',host:'127.0.0.1',port:0}));
   try {
     const header=Buffer.from('From: sender@example.org\r\nTo: inbox@mail.example.org\r\nSubject: Synthetic large attachment\r\nContent-Type: application/octet-stream; name="large.bin"\r\nContent-Disposition: attachment; filename="large.bin"\r\nContent-Transfer-Encoding: base64\r\n\r\n');

@@ -29,7 +29,7 @@ test('workerd snapshot cut preserves intake and verifies complete authenticated 
         return new Response(null,{status:204});
       }
       return app.fetch(request,env,ctx);
-    }};`,resolveDir:root,sourcefile:'native-backup-entry.ts',loader:'ts'},bundle:true,format:'esm',platform:'neutral',external:['cloudflare:workers'],write:false});
+    }};`,resolveDir:root,sourcefile:'native-backup-entry.ts',loader:'ts'},bundle:true,format:'esm',platform:'neutral',conditions:['browser'],external:['cloudflare:workers'],write:false});
   const mf=new Miniflare(convertV4MiniflareOptions({name:'mail-hero-backup-test',modules:true,script:bundle.outputFiles[0].text,compatibilityDate:'2026-09-07',host:'127.0.0.1',port:0,
     d1Databases:{DB:'backup-test'},d1Persist:join(temp,'d1'),r2Buckets:['MAIL_STORE','BACKUP_STORE'],r2Persist:join(temp,'r2'),
     durableObjects:{COORDINATOR:{className:'MailCoordinator',useSQLite:true}},durableObjectsPersist:join(temp,'do'),

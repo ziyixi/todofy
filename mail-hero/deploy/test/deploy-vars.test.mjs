@@ -23,6 +23,7 @@ function environment() {
     MAIL_HERO_ACCESS_OWNER_ALIASES: 'alias@example.org',
     MAIL_HERO_FORCE_SEND_PAUSED: 'false',
     MAIL_HERO_MAINTENANCE_MODE: 'false',
+    MAIL_HERO_NATIVE_BACKUP_ENABLED: 'true',
   }
 }
 
@@ -31,10 +32,11 @@ function withTemp(body) {
   try { return body(dir) } finally { rmSync(dir, { recursive: true, force: true }) }
 }
 
-test('two switches and the build are --var; the three personal values are Worker secrets', () => {
+test('operation switches and build are vars; personal values are secrets', () => {
   assert.deepEqual(INJECTED.map(({ name, from, kind }) => [name, from, kind]), [
     ['FORCE_SEND_PAUSED', 'MAIL_HERO_FORCE_SEND_PAUSED', 'toggle'],
     ['MAINTENANCE_MODE', 'MAIL_HERO_MAINTENANCE_MODE', 'toggle'],
+    ['NATIVE_BACKUP_ENABLED', 'MAIL_HERO_NATIVE_BACKUP_ENABLED', 'toggle'],
     ['BUILD_SHA', 'GITHUB_SHA', 'build'],
   ])
   assert.deepEqual(SECRETS.map(({ name, from, kind }) => [name, from, kind]), [
@@ -51,12 +53,12 @@ test('two switches and the build are --var; the three personal values are Worker
 })
 
 test('valid values become --var flags in order; no personal value is ever a --var', () => {
-  assert.deepEqual(injectedVars(environment()), { FORCE_SEND_PAUSED: 'false', MAINTENANCE_MODE: 'false', BUILD_SHA: SHA })
+  assert.deepEqual(injectedVars(environment()), { FORCE_SEND_PAUSED: 'false', MAINTENANCE_MODE: 'false', NATIVE_BACKUP_ENABLED: 'true', BUILD_SHA: SHA })
   assert.deepEqual(wranglerArgs({ ...environment(), MAIL_HERO_FORCE_SEND_PAUSED: 'true' }), [
-    '--var', 'FORCE_SEND_PAUSED:true', '--var', 'MAINTENANCE_MODE:false', '--var', `BUILD_SHA:${SHA}`,
+    '--var', 'FORCE_SEND_PAUSED:true', '--var', 'MAINTENANCE_MODE:false', '--var', 'NATIVE_BACKUP_ENABLED:true', '--var', `BUILD_SHA:${SHA}`,
   ])
   // The flags never depend on (or carry) the personal values: those may even be absent here.
-  const args = wranglerArgs({ GITHUB_SHA: SHA, MAIL_HERO_FORCE_SEND_PAUSED: 'false', MAIL_HERO_MAINTENANCE_MODE: 'true' }).join(' ')
+  const args = wranglerArgs({ GITHUB_SHA: SHA, MAIL_HERO_FORCE_SEND_PAUSED: 'false', MAIL_HERO_MAINTENANCE_MODE: 'true', MAIL_HERO_NATIVE_BACKUP_ENABLED: 'true' }).join(' ')
   for (const { name } of SECRETS) assert.ok(!args.includes(name), name)
 })
 
@@ -97,7 +99,7 @@ test('a missing or invalid value fails by name and never shows the value', () =>
   }
 })
 
-test('a secrets file must hold exactly the three valid personal values', () => withTemp((dir) => {
+test('a secrets file requires every allowed personal binding', () => withTemp((dir) => {
   const path = join(dir, 'secrets.json')
   const good = generateSecrets(environment())
   const problem = (content) => {
@@ -168,7 +170,7 @@ test('exec runs the command unchanged plus the --var flags, and exits with its s
   assert.match(again.stderr, /already exists/)
 
   // The exec step needs only the switches and the build: the personal values reach it in the file.
-  const execEnv = { GITHUB_SHA: SHA, MAIL_HERO_FORCE_SEND_PAUSED: 'false', MAIL_HERO_MAINTENANCE_MODE: 'false', STUB_STATUS: '3' }
+  const execEnv = { GITHUB_SHA: SHA, MAIL_HERO_FORCE_SEND_PAUSED: 'false', MAIL_HERO_MAINTENANCE_MODE: 'false', MAIL_HERO_NATIVE_BACKUP_ENABLED: 'true', STUB_STATUS: '3' }
   const command = ['exec', '--', process.execPath, stub, 'deploy', '--dry-run', '--config', config, '--secrets-file', secrets]
   const result = runWrapper(command, execEnv)
   assert.equal(result.status, 3, result.stderr)

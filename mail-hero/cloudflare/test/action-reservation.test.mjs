@@ -31,7 +31,7 @@ test('workerd action reservation rolls back on read failure and preserves retry,
             { status: error instanceof HttpError ? error.status : 503 });
         }
       }};`, resolveDir: root, sourcefile: 'action-reservation-entry.ts', loader: 'ts' },
-    bundle: true, format: 'esm', platform: 'neutral', external: ['cloudflare:workers'], write: false,
+    bundle: true, format: 'esm', platform: 'neutral', conditions: ['browser'], external: ['cloudflare:workers'], write: false,
   })
   const mf = new Miniflare(convertV4MiniflareOptions({
     name: 'action-reservation-test', modules: true, script: bundle.outputFiles[0].text,
