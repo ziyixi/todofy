@@ -34,6 +34,14 @@ spec:
             - secretRef:
                 name: newsletter-settings
           env:
+            - name: NEWSLETTER_DATA_DIR
+              value: /var/lib/newsletter
+            - name: CODEX_HOME
+              value: /var/lib/newsletter-auth
+            - name: NEWSLETTER_CODEX_HOME
+              value: /var/lib/newsletter-auth
+            - name: NEWSLETTER_CONTENT_CONFIG_DIR
+              value: /var/lib/newsletter-config
             - name: NEWSLETTER_BOOTSTRAP_DRAIN_KEY
               value: bootstrap-pending
             - name: NEWSLETTER_RELEASE_REQUEST_ID

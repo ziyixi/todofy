@@ -12,6 +12,11 @@ from pathlib import Path
 from subprocess import CompletedProcess
 from unittest.mock import patch
 
+import yaml
+from personal_cloud.deployment.resources import Renderer
+from personal_cloud.status_daemon.config import configuration
+from ziyixi_proto.platform.runtime.v1 import runtime_pb as pb
+
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / "tools/vps-bootstrap"))
 
@@ -28,6 +33,21 @@ IMAGES = {
     "newsletter": "ghcr.io/ziyixi/todofy-newsletter@sha256:" + "b" * 64,
     "platform": "ghcr.io/ziyixi/todofy-platform@sha256:" + "c" * 64,
 }
+PATHS = {
+    "NEWSLETTER_DATA_DIR": "/var/lib/newsletter",
+    "CODEX_HOME": "/var/lib/newsletter-auth",
+    "NEWSLETTER_CODEX_HOME": "/var/lib/newsletter-auth",
+    "NEWSLETTER_CONTENT_CONFIG_DIR": "/var/lib/newsletter-config",
+}
+
+
+def newsletter_container(runtime):
+    deployment = next(
+        item
+        for item in runtime["items"]
+        if item["kind"] == "Deployment" and item["metadata"]["name"] == "newsletter"
+    )
+    return deployment["spec"]["template"]["spec"]["containers"][0]
 
 
 class BootstrapTests(unittest.TestCase):
@@ -38,30 +58,17 @@ class BootstrapTests(unittest.TestCase):
 
     def bundle(self):
         output = self.base / "public-bundle"
+        deployment = yaml.safe_load(
+            (ROOT / "platform/k3s/newsletter/deployment.yaml").read_text()
+        )
+        for variable in deployment["spec"]["template"]["spec"]["containers"][0]["env"]:
+            if variable["name"] == "NEWSLETTER_BOOTSTRAP_DRAIN_KEY":
+                variable["value"] = "release-" + SHA
         runtime = {
             "apiVersion": "v1",
             "kind": "List",
             "items": [
-                {
-                    "kind": "Deployment",
-                    "metadata": {"name": "newsletter"},
-                    "spec": {
-                        "template": {
-                            "spec": {
-                                "containers": [
-                                    {
-                                        "env": [
-                                            {
-                                                "name": "NEWSLETTER_BOOTSTRAP_DRAIN_KEY",
-                                                "value": "release-" + SHA,
-                                            }
-                                        ]
-                                    }
-                                ]
-                            }
-                        }
-                    },
-                },
+                deployment,
                 {
                     "kind": "CronJob",
                     "metadata": {"name": "newsletter-daily"},
@@ -118,6 +125,73 @@ class BootstrapTests(unittest.TestCase):
             connector_unit,
         )
         self.assertIn("--token-file %d/connector-token", connector_unit)
+
+    def test_bootstrap_and_daemon_keep_canonical_paths_under_another_host_state_root(
+        self,
+    ):
+        root = self.base / "profile"
+        (root / "config").mkdir(parents=True)
+        profile = (
+            (ROOT / "config/cloud.toml")
+            .read_text()
+            .replace('state_root = "/srv/todofy"', 'state_root = "/srv/alternate"')
+        )
+        (root / "config/cloud.toml").write_text(profile)
+        for directory in ("platform", "newsletter"):
+            (root / directory).symlink_to(ROOT / directory, target_is_directory=True)
+        normal = prepare.render(root, SHA, IMAGES)
+        bundle = self.base / "full-bundle"
+        prepare.prepare(root, SHA, IMAGES, bundle)
+        initial = config.read_json(bundle / "runtime.json")
+        runtime_config = next(
+            item["data"]["runtime.json"]
+            for item in normal["items"]
+            if item["metadata"]["name"] == "platform-runtime-config"
+        )
+        targets = tuple(
+            pb.ReleaseTarget(
+                workload_key="platform-runtime" if service == "platform" else service,
+                source_sha=SHA,
+                image_digest=IMAGES[service].split("@", 1)[1],
+                request_id=item["data"]["request_id"],
+            )
+            for service in ("newsletter", "platform")
+            for item in normal["items"]
+            if item["kind"] == "ConfigMap"
+            and item["metadata"]["name"] == service + "-release"
+        )
+        applied = {
+            "items": Renderer(configuration(runtime_config), asset=normal).render(
+                targets, targets[0].request_id
+            )
+        }
+        for stage, runtime in (
+            ("normal", normal),
+            ("bootstrap", initial),
+            ("first_daemon_apply", applied),
+        ):
+            with self.subTest(stage=stage):
+                container = newsletter_container(runtime)
+                env = {item["name"]: item.get("value") for item in container["env"]}
+                self.assertEqual({key: env.get(key) for key in PATHS}, PATHS)
+                mounts = {
+                    item["name"]: item["mountPath"]
+                    for item in container["volumeMounts"]
+                }
+                self.assertEqual(
+                    mounts,
+                    {
+                        "data": PATHS["NEWSLETTER_DATA_DIR"],
+                        "auth": PATHS["NEWSLETTER_CODEX_HOME"],
+                        "config": PATHS["NEWSLETTER_CONTENT_CONFIG_DIR"],
+                    },
+                )
+        foundation = config.read_json(bundle / "foundation.json")
+        for item in foundation["items"]:
+            if item["kind"] == "PersistentVolume":
+                self.assertTrue(
+                    item["spec"]["hostPath"]["path"].startswith("/srv/alternate/")
+                )
 
     def test_unverified_image_is_refused_before_any_output_is_created(self):
         output = self.base / "rejected"
@@ -179,6 +253,34 @@ class BootstrapTests(unittest.TestCase):
             config.BootstrapError, "MONITOR_IDENTITY_NOT_DISTINCT"
         ):
             config.credentials(path, prepare.allowed_keys(ROOT))
+
+    def test_runtime_rejected_machine_credentials_fail_bootstrap_preflight(self):
+        cases = (
+            ("missing_editor", None, "NEWSLETTER_EDITOR_CREDENTIAL_INVALID"),
+            ("short_editor", "e" * 23, "NEWSLETTER_EDITOR_CREDENTIAL_INVALID"),
+            ("long_editor", "e" * 513, "NEWSLETTER_EDITOR_CREDENTIAL_INVALID"),
+            (
+                "editor_whitespace",
+                "e" * 24 + " ",
+                "NEWSLETTER_EDITOR_CREDENTIAL_INVALID",
+            ),
+            ("editor_equals_send", "s" * 40, "NEWSLETTER_EDITOR_IDENTITY_NOT_DISTINCT"),
+            ("platform_equals_send", "s" * 40, "PLATFORM_IDENTITY_NOT_DISTINCT"),
+        )
+        for case, invalid, code in cases:
+            with self.subTest(case=case):
+                path, value = self.private()
+                if case == "platform_equals_send":
+                    value["platform_env"]["PLATFORM_DEPLOY_TOKEN"] = invalid
+                elif invalid is None:
+                    value["newsletter_env"].pop("NEWSLETTER_EDITOR_TOKEN")
+                    value["trigger_env"].pop("NEWSLETTER_EDITOR_TOKEN")
+                else:
+                    value["newsletter_env"]["NEWSLETTER_EDITOR_TOKEN"] = invalid
+                    value["trigger_env"]["NEWSLETTER_EDITOR_TOKEN"] = invalid
+                path.write_text(json.dumps(value))
+                with self.assertRaisesRegex(config.BootstrapError, code):
+                    config.credentials(path, prepare.allowed_keys(ROOT))
 
     def test_migration_copies_opaque_state_without_deleting_source(self):
         source = self.base / "original"
@@ -282,6 +384,7 @@ class BootstrapTests(unittest.TestCase):
         order = []
         mocks = []
         functions = [
+            (host, "bootstrap_completed", False),
             (install, "preflight", "/usr/bin/cloudflared"),
             (host, "migrate", None),
             (host, "retire_legacy_runtime", None),
@@ -291,8 +394,10 @@ class BootstrapTests(unittest.TestCase):
             (cluster, "secrets", None),
             (cluster, "held_runtime", None),
             (cluster, "services", None),
+            (host, "complete_bootstrap", None),
         ]
         with contextlib.ExitStack() as stack:
+            stack.enter_context(patch.object(os, "geteuid", return_value=0))
             for module, name, result in functions:
 
                 def invoke(*args, _name=name, _result=result, **kwargs):
@@ -311,6 +416,119 @@ class BootstrapTests(unittest.TestCase):
         self.assertTrue(
             all(set(event) == {"event", "phase", "status"} for event in events)
         )
+
+    def test_completed_bootstrap_is_a_noop_after_release_activation(self):
+        bundle = self.bundle()
+        output = io.StringIO()
+        mutations = (
+            (install, "credentials"),
+            (install, "preflight"),
+            (host, "migrate"),
+            (host, "retire_legacy_runtime"),
+            (firewall, "install"),
+            (cluster, "start"),
+            (cluster, "apply"),
+            (cluster, "secrets"),
+            (cluster, "held_runtime"),
+            (cluster, "services"),
+            (host, "complete_bootstrap"),
+        )
+        with (
+            contextlib.ExitStack() as stack,
+            patch.object(os, "geteuid", return_value=0),
+            patch.object(host, "bootstrap_completed", return_value=True) as completed,
+            contextlib.redirect_stdout(output),
+        ):
+            for module, name in mutations:
+                stack.enter_context(
+                    patch.object(module, name, side_effect=AssertionError(name))
+                )
+            install.install(bundle, self.base / "removed-credentials.json")
+        completed.assert_called_once_with(config.checksum(bundle / "manifest.json"))
+        self.assertEqual(
+            json.loads(output.getvalue()),
+            {
+                "event": "vps_bootstrap",
+                "phase": "bootstrap",
+                "status": "already_initialized",
+            },
+        )
+
+    def test_services_failure_does_not_mark_success_and_same_bundle_can_retry(self):
+        bundle = self.bundle()
+        private_path, _ = self.private()
+        functions = (
+            (install, "preflight", "/usr/bin/cloudflared"),
+            (host, "migrate", None),
+            (host, "retire_legacy_runtime", None),
+            (firewall, "install", None),
+            (cluster, "start", None),
+            (cluster, "apply", None),
+            (cluster, "secrets", None),
+            (cluster, "held_runtime", None),
+        )
+        with (
+            contextlib.ExitStack() as stack,
+            patch.object(os, "geteuid", return_value=0),
+            patch.object(host, "bootstrap_completed", return_value=False),
+            patch.object(host, "complete_bootstrap") as complete,
+            patch.object(
+                cluster,
+                "services",
+                side_effect=[config.BootstrapError("SYNTHETIC_FAILURE"), None],
+            ) as services,
+            contextlib.redirect_stdout(io.StringIO()),
+        ):
+            for module, name, result in functions:
+                stack.enter_context(patch.object(module, name, return_value=result))
+            with self.assertRaisesRegex(config.BootstrapError, "SYNTHETIC_FAILURE"):
+                install.install(bundle, private_path)
+            complete.assert_not_called()
+            install.install(bundle, private_path)
+        self.assertEqual(services.call_count, 2)
+        complete.assert_called_once_with(config.checksum(bundle / "manifest.json"))
+
+    def test_completion_marker_is_atomic_root_owned_and_rejects_other_bundles(self):
+        marker = self.base / "completion.json"
+        original_stat = Path.stat
+        marker_owner = 0
+
+        def stat(path, *, follow_symlinks=True):
+            attributes = original_stat(path, follow_symlinks=follow_symlinks)
+            if path == marker:
+                values = list(attributes)
+                values[4] = marker_owner
+                return os.stat_result(values)
+            return attributes
+
+        with (
+            patch.object(host, "COMPLETION_MARKER", marker),
+            patch.object(os, "fchown") as ownership,
+        ):
+            self.assertFalse(host.bootstrap_completed("a" * 64))
+            host.complete_bootstrap("a" * 64)
+            ownership.assert_called_once()
+            self.assertEqual(ownership.call_args.args[1:], (0, 0))
+            self.assertEqual(marker.stat().st_mode & 0o777, 0o600)
+            self.assertFalse(list(self.base.glob(".personal-cloud-*")))
+            with patch.object(Path, "stat", stat):
+                self.assertTrue(host.bootstrap_completed("a" * 64))
+                with self.assertRaisesRegex(
+                    config.BootstrapError,
+                    "BOOTSTRAP_ALREADY_INITIALIZED_DIFFERENT_BUNDLE",
+                ):
+                    host.bootstrap_completed("b" * 64)
+                marker_owner = 10001
+                with self.assertRaisesRegex(
+                    config.BootstrapError, "BOOTSTRAP_COMPLETION_MARKER_INVALID"
+                ):
+                    host.bootstrap_completed("a" * 64)
+                marker_owner = 0
+                marker.chmod(0o644)
+                with self.assertRaisesRegex(
+                    config.BootstrapError, "BOOTSTRAP_COMPLETION_MARKER_INVALID"
+                ):
+                    host.bootstrap_completed("a" * 64)
 
     def test_legacy_units_are_disabled_after_preservation_without_removing_state(self):
         responses = [

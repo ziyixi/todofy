@@ -850,6 +850,9 @@ class RealGit(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory()
         self.root = self.temporary.name
         self.git("init", "-q")
+        # Background maintenance must not write objects after the fixture starts removing its repository.
+        self.git("config", "gc.auto", "0")
+        self.git("config", "maintenance.auto", "false")
 
     def tearDown(self):
         self.temporary.cleanup()
@@ -2827,6 +2830,8 @@ class HostnameGuard(unittest.TestCase):
                 return result.returncode, result.stdout, ran
 
             git_run("init", "-q")
+            git_run("config", "gc.auto", "0")
+            git_run("config", "maintenance.auto", "false")
             (repo / "website" / "index.txt").write_text("site\n")
             commit("site before the guard")
             code, out, ran = step()

@@ -11,7 +11,14 @@ import cluster
 import firewall
 import host
 
-from config import BootstrapError, credentials, load_bundle, read_json, require
+from config import (
+    BootstrapError,
+    checksum,
+    credentials,
+    load_bundle,
+    read_json,
+    require,
+)
 
 
 def event(phase, status):
@@ -76,6 +83,11 @@ def preflight(bundle):
 
 def install(bundle, private_file):
     public = load_bundle(bundle)
+    require(os.geteuid() == 0, "ROOT_REQUIRED_FOR_INITIAL_BOOTSTRAP")
+    bundle_sha256 = checksum(Path(bundle) / "manifest.json")
+    if host.bootstrap_completed(bundle_sha256):
+        event("bootstrap", "already_initialized")
+        return
     allowed = read_json(Path(bundle) / "allowedkeys.json")
     private = credentials(private_file, allowed)
     cloudflared = preflight(bundle)
@@ -93,6 +105,7 @@ def install(bundle, private_file):
     cluster.held_runtime(bundle, profile["namespace"])
     event("runtime", "held")
     cluster.services(bundle, private, cloudflared)
+    host.complete_bootstrap(bundle_sha256)
     event("bootstrap", "complete_held")
 
 

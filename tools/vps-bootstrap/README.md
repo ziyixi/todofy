@@ -61,7 +61,10 @@ it or send tokens through chat. Exact shape:
 
 Engine settings must appear in generated `allowedkeys.json`. Trigger accepts only
 shared editor/send tokens and optional time zone; platform accepts only its deploy
-token. Preserve existing editor/send values and use a distinct monitor identity.
+token. Preserve existing editor/send values; editor requires 24–512 characters,
+send/monitor/platform require 32–512, and tokens cannot contain whitespace.
+Editor and send must differ, monitor must differ from editor/send/platform, and
+platform must differ from send. These checks run before server changes.
 The renderer controls persistent paths, release/admission IDs, and service URLs.
 Private input cannot override those paths or inject PATH/HOME/PYTHONPATH,
 OPENAI_API_KEY or loader variables. A fresh VPS may use `old_paths: {}` and complete
@@ -107,7 +110,14 @@ polkit check described in [the observer boundary](../../platform/systemd/README.
 
 ## Failures and retries
 
-An exact completed bundle can be retried. Foreign managed units, K3s binaries,
+After the connector/services step succeeds, the installer atomically writes a
+root-owned completion marker for that exact public bundle. Running that same bundle
+again returns `already_initialized` and makes no changes, without claiming admission
+is still held. A different bundle is refused: normal updates, including after
+release activation, always use the daemon API through Actions. The completion marker
+is never written for a failed install; retry that same incomplete bundle to continue.
+
+Foreign managed units, K3s binaries,
 configurations, firewall rules, credentials or nonempty state destinations are
 refused rather than merged. A crash during a copy may leave a staging directory or
 new destination before its final marker; retry then fails with a fixed review code.

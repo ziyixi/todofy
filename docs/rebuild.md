@@ -69,14 +69,18 @@ Fleet and Home are checked, but neither deploys: Home's new service bindings mus
 that does not exist yet. Fleet's sole `wrangler.toml` declares the intended host with **no** fake AUD;
 its deploy wrapper permits a credential-free dry run and refuses a real deployment without the actual AUD.
 
-Run the separately gated infrastructure creation first. Read only the new owner app's public AUD/app ID,
-the exact receipt app/policy IDs, and the dedicated platform object identities into the public inventory.
-Export the platform machine credentials through the private bootstrap channel, then populate only the
-corresponding GitHub production secrets; the sealed bootstrap artifact has one-day retention and is not
+Run the separately gated infrastructure creation first. Read only the new owner app's public AUD/app ID
+and the exact receipt app/policy IDs into the supported public inventory fields. Tunnel and service-token
+identities remain in protected infrastructure state and the private bootstrap handoff; the inventory does
+not declare those fields. Export the platform machine credentials through the private bootstrap channel,
+then populate only the corresponding GitHub production secrets; the sealed bootstrap artifact has one-day retention and is not
 an application backup. Bootstrap the node and verify its dedicated namespace permissions and TLS trust.
 
-In one activation commit, materialize the actual Fleet AUD and remove its `CHECK_ONLY` entry; Fleet then
-deploys before Home. Record the provider-issued Fleet DO namespace in `config/resources.toml`, regenerate
+In one activation commit, add the actual Fleet AUD to both its production Wrangler field and the public
+profile, record the owner app ID in `infra/ids.tf`, and remove its `CHECK_ONLY` entry. Update the stage-specific
+CI expectations while retaining a regression for bootstrap blocking. The identity generator replaces existing
+AUD fields; it does not insert a missing one or update the infrastructure import-ID map. Fleet then deploys
+before Home. Record the provider-issued Fleet DO namespace in `config/resources.toml`, regenerate
 Home's resource identities and verify fresh signed observations. Keep `VPS_DEPLOY_ENABLED=false` until
 the daemon, dedicated Access credentials and independent deployment Bearer have been verified; enabling that
 variable activates subsequent main-branch releases. Do not confuse a skipped bootstrap job with a healthy

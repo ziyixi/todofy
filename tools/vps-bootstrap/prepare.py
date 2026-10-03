@@ -97,22 +97,6 @@ def prepare(root, sha, images, output):
     for item in runtime["items"]:
         if item["kind"] == "CronJob" and item["metadata"]["name"] == "newsletter-daily":
             item["spec"]["suspend"] = True
-        if item["kind"] == "Deployment" and item["metadata"]["name"] == "newsletter":
-            env = item["spec"]["template"]["spec"]["containers"][0].setdefault(
-                "env", []
-            )
-            current = {variable["name"]: variable for variable in env}
-            paths = {
-                "NEWSLETTER_DATA_DIR": "/var/lib/newsletter",
-                "CODEX_HOME": "/var/lib/newsletter-auth",
-                "NEWSLETTER_CODEX_HOME": "/var/lib/newsletter-auth",
-                "NEWSLETTER_CONTENT_CONFIG_DIR": "/var/lib/newsletter-config",
-            }
-            for key, value in paths.items():
-                if key in current:
-                    current[key]["value"] = value
-                else:
-                    env.append({"name": key, "value": value})
     output.mkdir(parents=True)
     (output / "units").mkdir()
 

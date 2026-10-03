@@ -10,6 +10,35 @@ from runner import command
 
 from config import BootstrapError, read_json, require
 
+COMPLETION_MARKER = Path("/etc/rancher/k3s/personal-cloud-bootstrap.json")
+
+
+def bootstrap_completed(bundle_sha256):
+    marker = real_path(COMPLETION_MARKER)
+    if not marker.exists():
+        return False
+    require(
+        marker.is_file()
+        and marker.stat().st_uid == 0
+        and marker.stat().st_mode & 0o777 == 0o600,
+        "BOOTSTRAP_COMPLETION_MARKER_INVALID",
+    )
+    require(
+        read_json(marker, private=True)
+        == {"schema_version": 1, "bundle_sha256": bundle_sha256},
+        "BOOTSTRAP_ALREADY_INITIALIZED_DIFFERENT_BUNDLE",
+    )
+    return True
+
+
+def complete_bootstrap(bundle_sha256):
+    write_file(
+        COMPLETION_MARKER,
+        json.dumps(
+            {"schema_version": 1, "bundle_sha256": bundle_sha256}, sort_keys=True
+        ).encode(),
+    )
+
 
 def real_path(path):
     path = Path(path)

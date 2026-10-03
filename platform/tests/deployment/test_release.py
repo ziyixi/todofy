@@ -320,6 +320,25 @@ class Reconciliation(Fixture, unittest.TestCase):
         )
         self.assertEqual(self.admission.state, "draining")
 
+    def test_first_release_apply_keeps_persistent_paths_from_the_canonical_manifest(
+        self,
+    ):
+        self.create()
+        self.until("verify")
+        deployment = self.resource_state[("Deployment", "newsletter")]
+        container = deployment["spec"]["template"]["spec"]["containers"][0]
+        env = {item["name"]: item.get("value") for item in container["env"]}
+        expected = {
+            "NEWSLETTER_DATA_DIR": "/var/lib/newsletter",
+            "CODEX_HOME": "/var/lib/newsletter-auth",
+            "NEWSLETTER_CODEX_HOME": "/var/lib/newsletter-auth",
+            "NEWSLETTER_CONTENT_CONFIG_DIR": "/var/lib/newsletter-config",
+        }
+        self.assertEqual({key: env.get(key) for key in expected}, expected)
+        self.assertEqual(env["NEWSLETTER_BOOTSTRAP_DRAIN_KEY"], "release-" + SHA)
+        self.assertEqual(env["NEWSLETTER_RELEASE_REQUEST_ID"], REQUEST)
+        self.assertNotIn(("admission", "resume"), self.events)
+
     def test_unknown_work_in_freeze_acknowledgement_holds_before_any_image_apply(self):
         self.create()
         self.until("freeze")

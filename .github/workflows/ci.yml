@@ -925,7 +925,7 @@ jobs:
           npm ci --prefix web --no-audit --no-fund
       # The config test reads wrangler.toml with the pinned wrangler (worker/node_modules), hence after npm ci.
       - name: Test the production config and deploy values
-        run: node --test deploy/test/*.test.mjs
+        run: node --test deploy/test/deploy-vars.test.mjs deploy/test/wrangler-config.test.mjs
       - name: Lint, typecheck and test the Worker
         working-directory: fleet/worker
         run: |

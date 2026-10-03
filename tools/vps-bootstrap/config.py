@@ -217,6 +217,13 @@ def credentials(path, allowed):
         32 <= len(send) <= 512 and not any(c.isspace() for c in send),
         "NEWSLETTER_SEND_CREDENTIAL_INVALID",
     )
+    editor = value["newsletter_env"].get("NEWSLETTER_EDITOR_TOKEN", "")
+    require(
+        24 <= len(editor) <= 512 and not any(c.isspace() for c in editor),
+        "NEWSLETTER_EDITOR_CREDENTIAL_INVALID",
+    )
+    require(editor != send, "NEWSLETTER_EDITOR_IDENTITY_NOT_DISTINCT")
+    require(token != send, "PLATFORM_IDENTITY_NOT_DISTINCT")
     require(
         value["trigger_env"].get("NEWSLETTER_SEND_TOKEN") == send
         and value["trigger_env"].get("NEWSLETTER_EDITOR_TOKEN")

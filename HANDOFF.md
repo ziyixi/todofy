@@ -16,7 +16,7 @@ Rules for this file:
   what is done, what is left, how to verify it and what to check after its deploy. Link to the app docs for
   design detail instead of copying it.
 
-Last updated: 2026-10-03 ~03:40 UTC. The verified foundation implementation is `8628e5e`; the k3s/Fleet
+Last updated: 2026-10-03 ~04:00 UTC. The verified foundation implementation is `8628e5e`; the k3s/Fleet
 implementation below is still in flight and has not been deployed. Every app's owner API is on proto now (the dashboard
 `ca63675`, FlowDay `8d9100e`, Mail Hero `d1bde0e`, Todofy `b70856f`, all landed and verified on 2026-10-02). Nothing
 was in flight at that landing. The foundation evidence below describes that completed release.
@@ -111,6 +111,24 @@ the documented Cloudflare rows budget still said 28 while the actual budget is 3
 view-budget prose were synchronized without weakening the implementation or assertions; all thirteen
 local view tests then passed. Historical measured verification records were retained. No publisher or
 production deployment ran from this failed gate either.
+
+Third branch run [37094119254](https://github.com/ziyixi/todofy/actions/runs/37094119254) at `242024b`
+stopped in Changes: a temporary Git repository's background maintenance raced strict directory cleanup.
+Only those two synthetic repositories now disable automatic GC/maintenance; cleanup stays strict and user
+Git configuration is untouched. All 375 root-script tests (one historical skip) passed locally. No image
+job ran for this SHA. The Fleet deployment-test glob was also found to admit zero tests on Node 26; actual
+deployment boundary tests replace that empty step before the next candidate. All eleven Fleet deployment
+boundary tests and 47 cross-config checks passed locally; the CI now names both actual files, and an
+explicit missing-file negative control fails. Final bootstrap review also found that its temporary env
+injection would disappear on the daemon's first normal apply. Fixed mounted data/auth/config paths now
+belong to the canonical Deployment. The real offline Kustomize/bootstrap/daemon-render regression and
+first-apply controller regression passed; scoped suites passed 70 Platform, fourteen bootstrap and thirteen
+release-client tests. A successful bootstrap now records a root-owned completion marker: exact retries
+return `already_initialized` without reapplying admission/CronJob state, different bundles must use the
+normal release API, and failure cannot write that marker. Private credential preflight now matches the
+actual editor/send/deployment identity requirements. Eighteen installer tests, five platform bootstrap
+boundary tests and thirteen release-client tests passed after these final corrections; retained host
+paths did not change.
 
 Remaining sequence: push and pass branch CI; promote the identical green SHA;
 review and apply only the new managed Access/Tunnel/Fleet resources; record actual Access audiences and
