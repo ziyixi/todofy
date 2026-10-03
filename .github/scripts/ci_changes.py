@@ -34,8 +34,8 @@ Outputs (GITHUB_OUTPUT, "true"/"false"):
   checked and deployed since W2 (watch/docs/design.md section 11). It proposes task-intent-v1 (its notification sink)
   and answers ops-v1 (its Ops entrypoint; Contracts runs both tests) and compiles in packages/edge-auth and the
   TypeScript proto runtime with proto/watch/ui/, proto/todofy/taskintent/ and proto/ops/, so a change to those checks
-  and deploys it too. CHECK_ONLY keeps a new app's deploy output false until its resources are ready. Fleet starts
-  there; Home's new Fleet binding also keeps dashboard_deploy false until Fleet can be deployed.
+  and deploys it too. CHECK_ONLY keeps a new app's deploy output false until its resources are ready. Fleet's
+  Access resources are registered; its deployment and Home's binding can now be published after the gate.
 
 proto/ (the protobuf IDL, proto/README.md) checks every app in PROTO_USERS (an app that depends on @ziyixi/proto or
 ziyixi-proto) and deploys only the apps whose bundle the changed path reaches (proto_deploys): PROTO_USERS[app] names
@@ -94,6 +94,7 @@ change does not run Contracts.
 
 import json
 import os
+import re
 import subprocess
 import sys
 import urllib.error
@@ -109,8 +110,8 @@ APPS = tuple(load_catalog(Path(__file__).resolve().parents[2]).apps)
 # The output key prefix of each app ("<prefix>_check", "<prefix>_deploy").
 PREFIX = {app: app.replace("-", "_") for app in APPS}
 # A new app is checked but its deploy output stays false until its Cloudflare resources are ready. Keep its output
-# present so the workflow and same-SHA reuse have one stable interface. The bootstrap commit removes Fleet here.
-CHECK_ONLY: set[str] = {"fleet"}
+# present so the workflow and same-SHA reuse have one stable interface.
+CHECK_ONLY: set[str] = set()
 KEYS = (
     "todofy_check",
     "mail_hero_check",
@@ -432,8 +433,23 @@ def decide(
     diff: Callable[[str, str], list[str]],
     is_ancestor: Callable[[str, str], bool],
     merge_base: Callable[[str], str],
+    *,
+    resume: bool = False,
+    resume_source_sha: str = "",
 ) -> tuple[dict[str, bool], str, str]:
     """(outputs, reason, diff base); the base is empty when there is no diff (everything runs)."""
+    if resume:
+        if event != "workflow_dispatch" or ref != MAIN or app not in {"platform", "newsletter"}:
+            raise ValueError("VPS resume requires a main dispatch for platform or newsletter")
+        if not re.fullmatch(r"[0-9a-f]{40}", resume_source_sha):
+            raise ValueError("VPS resume requires the original release's full source SHA")
+        result = outputs(checked={"platform", "newsletter"}, deployed=(), contracts=True, packages=True, proto=True)
+        # Continue the authenticated daemon's immutable targets. Publishing new images here
+        # could replace an existing source tag with different bytes under the same release ID.
+        result["platform_deploy"] = True
+        return result, "explicit VPS resume: checks only, no image build or publication", ""
+    if resume_source_sha:
+        raise ValueError("A resume source SHA is only allowed for an explicit VPS resume")
     if event == "workflow_dispatch":
         return dispatched(app or "both"), f"dispatched for {app or 'both'}", ""
     if event != "push":
@@ -599,6 +615,9 @@ def git_merge_base(after: str) -> str:
 def main(get: Callable[[str], dict] | None = None) -> int:
     event, ref = os.environ.get("EVENT_NAME", ""), os.environ.get("REF", "")
     after = os.environ.get("AFTER", "HEAD")
+    resume = os.environ.get("DISPATCH_RESUME", "false") or "false"
+    if resume not in {"true", "false"}:
+        raise ValueError("Invalid VPS resume selection")
     result, reason, base = decide(
         event,
         ref,
@@ -608,6 +627,8 @@ def main(get: Callable[[str], dict] | None = None) -> int:
         git_diff,
         git_is_ancestor,
         git_merge_base,
+        resume=resume == "true",
+        resume_source_sha=os.environ.get("RESUME_SOURCE_SHA", ""),
     )
     result, extra, reuse_reason = try_reuse(event, ref, after, result, dict(os.environ), get)
     if reuse_reason:

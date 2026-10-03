@@ -5,6 +5,7 @@ account_id = "f57937bd1d93bf59e737b6d8445fb7a3"
 zone_id = "39163aaaa9eba38eca58f3ea969710bf"
 
 [access_audiences]
+"fleet" = "43aba3693dea8e88a343446ce5c416f9c950e37a2b066c7dcfc1189d8ea0cb73"
 "flowday" = "075c90c5544f87d71cfaec475fad0302d6b726156ff93f5c3a4a89f4ead7b22f"
 "home" = "7e0d033509e69a7f59c947ed4219b3898b79dffd24bfd4c1ea78e4d69269d5cc"
 "lab" = "3a8b5e31d3fb12e678198ea5e1c4231bc3f80665a9f9a5f18ecff8f6c19f4c8c"
@@ -28,6 +29,7 @@ zone_id = "39163aaaa9eba38eca58f3ea969710bf"
 "watch-state" = "d58e1bdabacb4d14bbba1887f169c8b4"
 
 [access_app_ids]
+"fleet" = "03c9b2a9-05c5-49fa-9ffa-8ece99952894"
 "home" = "f190b413-241d-428d-8680-53eebe7f672d"
 "lab" = "208a0a3b-6654-4b1f-9b1d-821493171f4d"
 "links" = "a6e2a6e3-b432-4093-ac20-0211ca180dce"
@@ -36,9 +38,11 @@ zone_id = "39163aaaa9eba38eca58f3ea969710bf"
 "watch" = "7d5134ca-1362-4fa3-9c84-d2ee9afb656c"
 
 [standalone_access_app_ids]
+"fleet-receipt" = "e468db67-b8aa-4be4-9961-6965a5fced5d"
 "mail-hero-backup" = "dafc6e08-7b1b-461f-8735-2cfa668a0ce0"
 
 [access_policy_ids]
+"fleet-receipt" = "fb3608f4-bf0e-4db8-8983-5fb1340f20d5"
 "owner" = "018f1a13-1a1b-4cf6-a470-c865c4577851"
 "github-owner" = "eea00ced-7de7-4094-a705-c9741d835b7c"
 

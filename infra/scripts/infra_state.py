@@ -29,8 +29,9 @@ bootstrap_state.py (one-time import). It:
 
 Values come from --var-file (a tfvars file written by local_tfvars.py, or JSON) or from the INFRA_TFVARS
 environment variable (the GitHub secret, JSON). `values-json --var-file F | gh secret set INFRA_TFVARS ...`
-turns a local values file into that secret without showing it (it refuses to write to a terminal). Errors are fixed messages; a failed tofu step prints only
-its sanitised "Error:" headlines (no quoted strings, addresses, ids or long tokens).
+turns a local values file into that secret without showing it (it refuses to write to a terminal). Errors are fixed messages;
+an apply failure adds only its gated/redacted managed addresses, HTTP status and bounded API numeric codes from the
+private JSON UI log. Other failed tofu steps retain sanitised "Error:" headlines (no quoted strings, ids or long tokens).
 
 Exit codes: 0 no planned action (plan) or done (apply); 1 error or a refused apply; 2 planned actions (drift); 3 a
 delete, replace or forget; 5 an output differs from a wrangler.toml.
@@ -58,6 +59,8 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import Any, Callable, Optional
+
+from apply_diagnostics import MAX_CAPTURE_BYTES, diagnostics
 
 try:
     import tomllib
@@ -462,6 +465,8 @@ class Tofu:
 
     def __init__(self, env: dict[str, str], log: Path, binary: str = "tofu"):
         self.env, self.log, self.binary = env, log, binary
+        self.apply_diagnostic_addresses = None
+        self.apply_log_offset = 0
 
     def run(self, *args: str) -> int:
         with open(self.log, "a") as handle:
@@ -494,6 +499,17 @@ class Tofu:
         except OSError:
             return []
 
+    def apply_diagnostics(self) -> list[dict]:
+        if self.apply_diagnostic_addresses is None:
+            return []
+        try:
+            with self.log.open("rb") as handle:
+                handle.seek(self.apply_log_offset)
+                captured = handle.read(MAX_CAPTURE_BYTES).decode("utf-8", errors="replace")
+        except OSError:
+            return []
+        return diagnostics(captured.splitlines(), self.apply_diagnostic_addresses)
+
     def init(self, environment: str) -> None:
         code = self.run("init", "-input=false", "-no-color", "-reconfigure", "-lockfile=readonly",
                         f"-backend-config=key={state_key(environment)}")
@@ -507,8 +523,20 @@ class Tofu:
             raise Refused("tofu plan failed")
         return code
 
-    def apply(self, plan: Path) -> None:
-        if self.run("apply", "-input=false", "-no-color", str(plan)) != 0:
+    def apply(self, plan: Path, *, diagnostic_plan: Any = None) -> None:
+        flags = []
+        if diagnostic_plan is not None:
+            module = load_summary_module()
+            keys = module.Keys(module.config_keys(str(INFRA)))
+            self.apply_diagnostic_addresses = {
+                item["address"]: module.safe_address(item["address"], keys)
+                for item in diagnostic_plan.get("resource_changes", [])
+                if item.get("mode") == "managed" and item.get("type") in ALLOWED_TYPES
+                and module.safe_address(item.get("address"), keys) != module.WITHHELD
+            }
+            self.apply_log_offset = self.log.stat().st_size
+            flags = ["-json"]
+        if self.run("apply", "-input=false", "-no-color", *flags, str(plan)) != 0:
             raise Refused("tofu apply failed")
 
     def refresh_only_apply(self, values: Path) -> None:
@@ -1032,7 +1060,7 @@ def command_apply(args: argparse.Namespace, env: dict[str, str]) -> int:
             export_platform_credentials(session, env)
             return EXIT_OK
         print("apply: every gate passed; applying exactly the saved plan")
-        session.tofu.apply(work / "apply.tfplan")
+        session.tofu.apply(work / "apply.tfplan", diagnostic_plan=plan_json)
         tofu_code, summary, rendered, plan_json = session.plan_full("verify")
         report(rendered, env)
         problems = check_outputs(plan_json, env)
@@ -1044,8 +1072,12 @@ def command_apply(args: argparse.Namespace, env: dict[str, str]) -> int:
     except Refused as error:
         print(f"infra_state: {error}", file=sys.stderr)
         if session is not None:
-            for line in session.tofu.headlines():
-                print(f"infra_state: tofu {line}", file=sys.stderr)
+            if str(error) == "tofu apply failed":
+                for diagnostic in session.tofu.apply_diagnostics():
+                    print("infra_state: tofu diagnostic " + json.dumps(diagnostic, sort_keys=True), file=sys.stderr)
+            else:
+                for line in session.tofu.headlines():
+                    print(f"infra_state: tofu {line}", file=sys.stderr)
         return EXIT_DESTRUCTIVE if isinstance(error, Destructive) else EXIT_ERROR
     finally:
         if session is not None:

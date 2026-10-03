@@ -185,15 +185,151 @@ class ActionDeployment(unittest.TestCase):
                 return httpx.Response(200, json=to_wire(release()))
             return httpx.Response(200, json=to_wire(node()))
 
-        self.assertEqual(
-            self.client(handler).execute(SHA, DIGESTS, resume=True).name, NAME
-        )
+        self.assertEqual(self.client(handler).execute(SHA, resume=True).name, NAME)
         self.assertEqual(
             [request.method for request in requests], ["GET", "POST", "GET"]
         )
         self.assertNotEqual(
             resume_id(NAME, "revision-3"), resume_id(NAME, "revision-4")
         )
+
+    def test_resume_uses_original_targets_even_if_the_same_source_was_rebuilt(self):
+        rebuilt = replace(TARGETS[0], image_digest="sha256:" + "d" * 64)
+        for observed, succeeds in (
+            (node(), True),
+            (
+                replace(
+                    node(),
+                    workloads=(
+                        replace(
+                            node().workloads[0],
+                            release=replace(
+                                node().workloads[0].release,
+                                actual=replace(rebuilt, generation=3),
+                            ),
+                        ),
+                        node().workloads[1],
+                    ),
+                ),
+                False,
+            ),
+        ):
+            requests = []
+
+            def handler(request, requests=requests, observed=observed):
+                requests.append(request)
+                if request.url.path.endswith("nodeStatus"):
+                    return httpx.Response(200, json=to_wire(observed))
+                return httpx.Response(
+                    200,
+                    json=to_wire(release("held" if len(requests) == 1 else "ready")),
+                )
+
+            with self.subTest(succeeds=succeeds):
+                client = self.client(handler)
+                if succeeds:
+                    result = client.execute(SHA, resume=True, timeout=30)
+                    self.assertEqual(result.targets, TARGETS)
+                else:
+                    with self.assertRaisesRegex(
+                        ReleaseFailure, "RELEASE_OBSERVATION_TIMEOUT"
+                    ):
+                        client.execute(SHA, resume=True, timeout=30)
+                self.assertEqual(requests[0].method, "GET")
+                posts = [request for request in requests if request.method == "POST"]
+                self.assertEqual(len(posts), 1)
+                self.assertTrue(posts[0].url.path.endswith(":resume"))
+                self.assertNotIn("targets", json.loads(posts[0].content))
+
+    def test_resume_refuses_forged_frozen_targets_before_sending_a_mutation(self):
+        wrong_id = resume_id(NAME, "other-revision")
+        changes = (
+            replace(release("held"), name="releases/" + wrong_id),
+            replace(release("held"), request_id=wrong_id),
+            replace(release("held"), targets=(TARGETS[0], TARGETS[0])),
+            replace(
+                release("held"),
+                targets=(replace(TARGETS[0], workload_key="other"), TARGETS[1]),
+            ),
+            replace(
+                release("held"),
+                targets=(replace(TARGETS[0], source_sha="d" * 40), TARGETS[1]),
+            ),
+            replace(
+                release("held"),
+                targets=(replace(TARGETS[0], request_id=wrong_id), TARGETS[1]),
+            ),
+            replace(
+                release("held"), targets=(replace(TARGETS[0], generation=3), TARGETS[1])
+            ),
+        )
+        for response in changes:
+            requests = []
+
+            def handler(request, requests=requests, response=response):
+                requests.append(request)
+                return httpx.Response(200, json=to_wire(response))
+
+            with (
+                self.subTest(response=response),
+                self.assertRaisesRegex(
+                    ReleaseFailure, "RELEASE_ACKNOWLEDGEMENT_INVALID"
+                ),
+            ):
+                self.client(handler).execute(SHA, resume=True)
+            self.assertEqual([request.method for request in requests], ["GET"])
+
+        malformed = to_wire(release("held"))
+        malformed["targets"][0]["image_digest"] = "ghcr.io/other/image:latest"
+        with self.assertRaisesRegex(ReleaseFailure, "DEPLOYMENT_RESPONSE_INVALID"):
+            self.client(lambda _: httpx.Response(200, json=malformed)).execute(
+                SHA, resume=True
+            )
+
+    def test_resume_refuses_new_image_input_and_never_creates_missing_release(self):
+        requests = []
+
+        def handler(request):
+            requests.append(request)
+            return httpx.Response(
+                404,
+                json=status_body(
+                    RpcError(
+                        "NOT_FOUND",
+                        "RELEASE_NOT_FOUND",
+                        "Missing release.",
+                        domain="platform.ziyixi.science",
+                    )
+                ),
+            )
+
+        client = self.client(handler)
+        with self.assertRaisesRegex(ReleaseFailure, "INVALID_DEPLOYMENT_IMAGES"):
+            client.execute(SHA, DIGESTS, resume=True)
+        self.assertEqual(requests, [])
+        with self.assertRaisesRegex(ReleaseFailure, "RELEASE_NOT_FOUND"):
+            client.execute(SHA, resume=True)
+        self.assertEqual([request.method for request in requests], ["GET"])
+
+    def test_resume_never_adopts_replacement_targets_from_later_receipts(self):
+        requests = []
+        changed = replace(
+            release(),
+            targets=(
+                replace(TARGETS[0], image_digest="sha256:" + "d" * 64),
+                TARGETS[1],
+            ),
+        )
+
+        def handler(request):
+            requests.append(request)
+            return httpx.Response(
+                200, json=to_wire(release("held") if len(requests) == 1 else changed)
+            )
+
+        with self.assertRaisesRegex(ReleaseFailure, "RELEASE_ACKNOWLEDGEMENT_INVALID"):
+            self.client(handler).execute(SHA, resume=True)
+        self.assertEqual([request.method for request in requests], ["GET", "POST"])
 
     def test_self_restart_beyond_three_transient_requests_still_verifies(self):
         clock, failures = Clock(), {"release": 6, "node": 4}
@@ -235,7 +371,7 @@ class ActionDeployment(unittest.TestCase):
 
                 self.assertEqual(
                     self.client(handler, clock=clock)
-                    .execute(SHA, DIGESTS, resume=resume)
+                    .execute(SHA, None if resume else DIGESTS, resume=resume)
                     .phase,
                     "ready",
                 )

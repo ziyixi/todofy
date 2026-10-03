@@ -24,9 +24,13 @@ on:
         options: [both, all, todofy, mail-hero, dashboard, website, lab, flowday, links, watch, newsletter, fleet, platform]
         default: both
       resume_vps_release:
-        description: Explicitly resume this commit's held VPS release after investigating its safe error
+        description: Explicitly resume a held VPS release after investigating its safe error
         type: boolean
         default: false
+      resume_source_sha:
+        description: Original held release's full source SHA (required only for resume)
+        type: string
+        default: ''
 
 permissions:
   contents: read
@@ -142,6 +146,8 @@ jobs:
           REF: ${{ github.ref }}
           AFTER: ${{ github.sha }}
           DISPATCH_APP: ${{ inputs.app }}
+          DISPATCH_RESUME: ${{ inputs.resume_vps_release && 'true' || 'false' }}
+          RESUME_SOURCE_SHA: ${{ inputs.resume_source_sha }}
           LAST_SUCCESS: ${{ steps.last.outputs.sha }}
         run: python3 .github/scripts/ci_changes.py
 
@@ -1315,7 +1321,7 @@ jobs:
   newsletter-image:
     name: Newsletter image checks
     needs: [changes, newsletter-checks]
-    if: needs.changes.outputs.newsletter_check == 'true'
+    if: needs.changes.outputs.newsletter_check == 'true' && !(github.event_name == 'workflow_dispatch' && inputs.resume_vps_release)
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     defaults:
@@ -1386,6 +1392,7 @@ jobs:
           uv run --project platform --locked ruff format --check platform/src platform/tests tools/platform-build tools/vps-release tools/vps-bootstrap
           uv run --project platform --locked pytest platform/tests tools/platform-build/tests tools/vps-release/tests tools/vps-bootstrap/tests
       - name: Build and verify the independent runtime image
+        if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.resume_vps_release) }}
         run: |
           uv run --project platform --locked python tools/platform-build/build.py --sha "$GITHUB_SHA" --output "$RUNNER_TEMP/platform-build"
           docker build --platform linux/amd64 --build-arg BUILD_SHA="$GITHUB_SHA" \
@@ -1398,6 +1405,7 @@ jobs:
           python3 tools/container-release/image.py save --image "$tested_image" --sha "$GITHUB_SHA" \
             --directory "$RUNNER_TEMP/platform-image"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.resume_vps_release) }}
         with:
           name: platform-image-${{ github.sha }}
           path: ${{ runner.temp }}/platform-image/
@@ -1474,6 +1482,7 @@ jobs:
       && needs.gate.result == 'success'
       && github.ref == 'refs/heads/main'
       && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+      && !(github.event_name == 'workflow_dispatch' && inputs.resume_vps_release)
       && needs.changes.outputs.newsletter_deploy == 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -1516,6 +1525,7 @@ jobs:
       && needs.gate.result == 'success'
       && github.ref == 'refs/heads/main'
       && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+      && !(github.event_name == 'workflow_dispatch' && inputs.resume_vps_release)
       && needs.changes.outputs.platform_publish == 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -1557,8 +1567,10 @@ jobs:
       ${{ !cancelled()
       && needs.changes.result == 'success'
       && (needs.platform-checks.result == 'success' || (needs.changes.outputs.checks_reused == 'true' && needs.platform-checks.result == 'skipped'))
-      && needs.newsletter-deploy.result == 'success'
-      && needs.platform-image.result == 'success'
+      && ((github.event_name == 'workflow_dispatch' && inputs.resume_vps_release
+          && needs.newsletter-deploy.result == 'skipped' && needs.platform-image.result == 'skipped')
+        || (!(github.event_name == 'workflow_dispatch' && inputs.resume_vps_release)
+          && needs.newsletter-deploy.result == 'success' && needs.platform-image.result == 'success'))
       && needs.gate.result == 'success'
       && github.ref == 'refs/heads/main'
       && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
@@ -1595,11 +1607,16 @@ jobs:
           NEWSLETTER_IMAGE: ${{ needs.newsletter-deploy.outputs.image }}
           PLATFORM_IMAGE: ${{ needs.platform-image.outputs.image }}
           RESUME_RELEASE: ${{ inputs.resume_vps_release && 'true' || 'false' }}
+          RELEASE_SOURCE_SHA: ${{ inputs.resume_vps_release && inputs.resume_source_sha || github.sha }}
         run: |
           args=()
-          if [ "$RESUME_RELEASE" = true ]; then args+=(--resume); fi
+          if [ "$RESUME_RELEASE" = true ]; then
+            args+=(--resume)
+          else
+            args+=(--newsletter-image "$NEWSLETTER_IMAGE" --platform-image "$PLATFORM_IMAGE")
+          fi
           uv run --project platform --locked python tools/vps-release/deploy.py \
-            --source-sha "$GITHUB_SHA" --newsletter-image "$NEWSLETTER_IMAGE" --platform-image "$PLATFORM_IMAGE" "${args[@]}"
+            --source-sha "$RELEASE_SOURCE_SHA" "${args[@]}"
 
   todofy-deploy:
     name: Todofy deploy

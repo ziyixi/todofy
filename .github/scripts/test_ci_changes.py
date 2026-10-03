@@ -90,13 +90,12 @@ def expect(
 # and Lab each checked and deployed; the edge-auth apps (the website compiles in no package) are todofy and mail-hero
 # plus EDGE_AUTH; every app with the website Worker (the relay Worker is added where a test expects it).
 ALL_CHECKED = {"dashboard_check": True, "website_check": True, "lab_check": True, "flowday_check": True, "links_check": True, "watch_check": True, "newsletter_check": True, "fleet_check": True, "platform_check": True}
-# Home's newly added Fleet binding waits for Fleet's resource bootstrap too.
-DASH = {"dashboard_check": True, "dashboard_deploy": False}
+DASH = {"dashboard_check": True, "dashboard_deploy": True}
 LAB = {"lab_check": True, "lab_deploy": True}
 FLOWDAY = {"flowday_check": True, "flowday_deploy": True}
 LINKS = {"links_check": True, "links_deploy": True}
 WATCH = {"watch_check": True, "watch_deploy": True}
-FLEET = {"fleet_check": True, "fleet_deploy": False}
+FLEET = {"fleet_check": True, "fleet_deploy": True}
 PLATFORM = {"platform_check": True, "platform_publish": True, "platform_deploy": True}
 VPS = {**PLATFORM, "newsletter_check": True, "newsletter_deploy": True}
 ALL = {**DASH, **LAB}
@@ -149,8 +148,8 @@ class Classify(unittest.TestCase):
         self.assertEqual(push(["todofy/worker/todofy/core/render.py"]), expect(T, F, T, T, F))
         self.assertEqual(push(["mail-hero/cloudflare/src/native/pipeline.ts"]), expect(F, T, T, F, T))
 
-    def test_the_dashboard_checks_only_itself_plus_contracts_until_fleet_bootstrap(self):
-        """Its ops-v1 caller tests run in Contracts; its new binding cannot deploy before Fleet exists."""
+    def test_the_dashboard_checks_and_deploys_itself_plus_contracts(self):
+        """Its ops-v1 caller tests run in Contracts; the registered Fleet binding can be deployed."""
         for path in ("dashboard/worker/src/state.ts", "dashboard/web/src/App.tsx", "dashboard/docs/setup.md"):
             with self.subTest(path=path):
                 self.assertEqual(push([path]), expect(F, F, T, F, F, **DASH))
@@ -187,25 +186,32 @@ class Classify(unittest.TestCase):
 
     def test_every_app_has_stable_check_and_deploy_outputs_during_bootstrap(self):
         """CHECK_ONLY suppresses deployment, never the output that the workflow consumes."""
-        self.assertEqual(ci_changes.CHECK_ONLY, {"fleet"})
+        self.assertEqual(ci_changes.CHECK_ONLY, set())
         for app in ci_changes.APPS:
             with self.subTest(app=app):
                 self.assertIn(f"{ci_changes.PREFIX[app]}_check", ci_changes.KEYS)
                 self.assertIn(f"{ci_changes.PREFIX[app]}_deploy", ci_changes.KEYS)
 
-    def test_fleet_changes_are_check_only_until_resources_are_ready(self):
+    def test_fleet_publishes_bundle_changes_after_resource_bootstrap(self):
         for path in ("fleet/app.toml", "fleet/worker/src/report.ts", "fleet/web/src/App.tsx", "fleet/observer/collector.py", "fleet/wrangler.toml"):
             with self.subTest(path=path):
-                self.assertEqual(push([path]), expect(F, F, T, F, F, **FLEET))
-                self.assertEqual(push([path], ref=BRANCH), expect(F, F, T, F, F, **FLEET))
+                expected = {**FLEET, "fleet_deploy": path != "fleet/app.toml"}
+                self.assertEqual(push([path]), expect(F, F, T, F, F, **expected))
+                self.assertEqual(push([path], ref=BRANCH), expect(F, F, T, F, F, **expected))
 
     def test_bootstrap_blocks_fleet_and_home_even_when_everything_runs(self):
-        result = ci_changes.everything()
-        self.assertTrue(result["fleet_check"])
-        self.assertTrue(result["dashboard_check"])
-        self.assertFalse(result["fleet_deploy"])
-        self.assertFalse(result["dashboard_deploy"])
-        self.assertEqual({key for key, value in result.items() if not value}, {"fleet_deploy", "dashboard_deploy"})
+        saved = ci_changes.CHECK_ONLY
+        try:
+            ci_changes.CHECK_ONLY = {"fleet"}
+            result = ci_changes.everything()
+            self.assertEqual({key for key, value in result.items() if not value}, {"fleet_deploy", "dashboard_deploy"})
+            for result in (result, ci_changes.dispatched("all"), push(["fleet/worker/src/index.ts", "dashboard/worker/src/index.ts"])):
+                self.assertTrue(result["fleet_check"])
+                self.assertTrue(result["dashboard_check"])
+                self.assertFalse(result["fleet_deploy"])
+                self.assertFalse(result["dashboard_deploy"])
+        finally:
+            ci_changes.CHECK_ONLY = saved
 
     def test_removing_fleet_check_only_restores_both_deploy_decisions(self):
         saved = ci_changes.CHECK_ONLY
@@ -358,7 +364,7 @@ class Classify(unittest.TestCase):
             with self.subTest(path=path):
                 self.assertEqual(push([path]), expect(T, T, T, F, F, packages=T, proto=T, **ALL_CHECKED))
                 self.assertFalse(any(value for key, value in push([path]).items() if key.endswith(("_deploy", "_publish"))))
-        # The generated identity source is a real Home bundle dependency. During bootstrap it still cannot deploy.
+        # The generated identity source is a real Home bundle dependency; profile inputs alone remain checks only.
         self.assertEqual(push(["dashboard/worker/src/resource-identities.ts"]), expect(F, F, T, F, F, **DASH))
         saved = ci_changes.CHECK_ONLY
         try:
@@ -487,7 +493,7 @@ class Classify(unittest.TestCase):
                 lab_check=T,
                 lab_deploy="lab" in deployed,
                 dashboard_check=T,
-                dashboard_deploy=F,
+                dashboard_deploy="dashboard" in deployed,
                 flowday_check=T,
                 flowday_deploy="flowday" in deployed,
                 links_check=T,
@@ -495,7 +501,7 @@ class Classify(unittest.TestCase):
                 watch_check=T,
                 watch_deploy="watch" in deployed,
                 fleet_check=T,
-                fleet_deploy=F,
+                fleet_deploy="fleet" in deployed,
                 platform_check=T,
                 platform_publish="platform" in deployed,
                 platform_deploy="platform" in deployed,
@@ -762,9 +768,10 @@ class Base(unittest.TestCase):
 
 
 class Dispatch(unittest.TestCase):
-    def dispatch(self, app):
+    def dispatch(self, app, *, resume=False):
         return ci_changes.decide(
-            "workflow_dispatch", MAIN, SHA, app, "", lambda b, a: [], lambda b, a: True, lambda a: ""
+            "workflow_dispatch", MAIN, SHA, app, "", lambda b, a: [], lambda b, a: True, lambda a: "",
+            resume=resume, resume_source_sha=BASE if resume else ""
         )[0]
 
     def test_inputs_force_one_two_or_all_apps(self):
@@ -809,6 +816,38 @@ class Dispatch(unittest.TestCase):
     def test_unknown_input_fails(self):
         with self.assertRaises(ValueError):
             self.dispatch("everything")
+
+    def test_resume_checks_the_client_without_publishing_different_images(self):
+        expected = expect(F, F, T, F, F, packages=T, proto=T,
+                          newsletter_check=T, platform_check=T, platform_deploy=T)
+        for app in ("platform", "newsletter"):
+            with self.subTest(app=app):
+                self.assertEqual(self.dispatch(app, resume=True), expected)
+                ordinary = self.dispatch(app)
+                self.assertTrue(ordinary["newsletter_deploy"])
+                self.assertTrue(ordinary["platform_publish"])
+
+    def test_resume_refuses_non_dispatch_non_main_and_unrelated_apps(self):
+        for event, ref, app in (
+            ("push", MAIN, "platform"),
+            ("workflow_dispatch", BRANCH, "platform"),
+            *(("workflow_dispatch", MAIN, app) for app in ci_changes.DISPATCH
+              if app not in {"platform", "newsletter"}),
+        ):
+            with self.subTest(event=event, ref=ref, app=app), self.assertRaises(ValueError):
+                ci_changes.decide(event, ref, SHA, app, "", lambda b, a: [],
+                                  lambda b, a: True, lambda a: "", resume=True, resume_source_sha=BASE)
+
+    def test_resume_requires_original_full_source_and_normal_releases_refuse_it(self):
+        for resume, source in ((True, ""), (True, BASE[:12]), (True, "g" * 40), (True, BASE.upper()), (False, BASE)):
+            with self.subTest(resume=resume, source=source), self.assertRaises(ValueError):
+                ci_changes.decide("workflow_dispatch", MAIN, SHA, "platform", "", lambda b, a: [],
+                                  lambda b, a: True, lambda a: "", resume=resume, resume_source_sha=source)
+        # The original release may predate the currently checked-out client commit.
+        result, _, _ = ci_changes.decide("workflow_dispatch", MAIN, SHA, "platform", "", lambda b, a: [],
+                                        lambda b, a: True, lambda a: "", resume=True, resume_source_sha=BASE)
+        self.assertTrue(result["platform_deploy"])
+        self.assertFalse(result["platform_publish"])
 
 
 class RealGit(unittest.TestCase):
@@ -881,7 +920,7 @@ class RealGit(unittest.TestCase):
         self.commit("packages/edge-auth/src/access.ts")
         after = self.commit("README.md.orig")
         outputs = self.main_run(after, green)
-        unaffected = {"website_check", "website_deploy", "website_relay_deploy", "newsletter_check", "newsletter_deploy", "fleet_deploy", "dashboard_deploy", "platform_check", "platform_publish", "platform_deploy"}
+        unaffected = {"website_check", "website_deploy", "website_relay_deploy", "newsletter_check", "newsletter_deploy", "platform_check", "platform_publish", "platform_deploy"}
         self.assertEqual({key for key in ci_changes.KEYS if outputs[key] == "false"}, unaffected | {"infra", "proto"})
 
     def test_a_failed_run_on_main_is_repeated(self):
@@ -1240,8 +1279,28 @@ class DeployConditions(unittest.TestCase):
                         self.assertEqual(condition.count(f"needs.{need}.result == 'skipped'"), 1)
                     else:
                         self.assertIn(f"needs.{need}.result == 'success'", condition)
-                        self.assertNotIn(f"needs.{need}.result == 'skipped'", condition)
+                        if name == "vps-deploy" and need in {"newsletter-deploy", "platform-image"}:
+                            self.assertIn(f"needs.{need}.result == 'skipped'", condition)
+                            self.assertIn("github.event_name == 'workflow_dispatch' && inputs.resume_vps_release", condition)
+                            self.assertIn("!(github.event_name == 'workflow_dispatch' && inputs.resume_vps_release)", condition)
+                        else:
+                            self.assertNotIn(f"needs.{need}.result == 'skipped'", condition)
                 self.assertIn("github.ref == 'refs/heads/main'", condition)
+
+    def test_resume_skips_build_artifacts_and_publication_but_keeps_source_checks(self):
+        jobs = self.jobs()
+        guard = "!(github.event_name == 'workflow_dispatch' && inputs.resume_vps_release)"
+        for name in ("newsletter-image", "newsletter-deploy", "platform-image"):
+            with self.subTest(job=name):
+                self.assertIn(guard, self.condition(jobs[name]))
+        platform = jobs["platform-checks"]
+        self.assertEqual(platform.count("if: ${{ " + guard + " }}"), 2)
+        self.assertIn("pytest platform/tests tools/platform-build/tests tools/vps-release/tests", platform)
+        release = jobs["vps-deploy"]
+        self.assertIn('if [ "$RESUME_RELEASE" = true ]; then\n            args+=(--resume)\n          else', release)
+        self.assertIn('args+=(--newsletter-image "$NEWSLETTER_IMAGE" --platform-image "$PLATFORM_IMAGE")', release)
+        self.assertIn("RELEASE_SOURCE_SHA: ${{ inputs.resume_vps_release && inputs.resume_source_sha || github.sha }}", release)
+        self.assertIn('--source-sha "$RELEASE_SOURCE_SHA" "${args[@]}"', release)
 
     def test_the_dashboard_deploys_after_the_apps_and_lab_and_watch_after_todofy(self):
         self.assertLessEqual({"todofy-deploy"}, set(self.needs(self.jobs()["lab-deploy"])))
@@ -2564,15 +2623,22 @@ class Reuse(unittest.TestCase):
                 self.assertEqual(result[key], needed[key] if key.endswith(("_deploy", "_publish")) else False)
 
     def test_fleet_reuse_requires_its_same_sha_check_and_keeps_bootstrap_blocks(self):
+        saved = ci_changes.CHECK_ONLY
+        try:
+            for blocked in (False, True):
+                ci_changes.CHECK_ONLY = {"fleet"} if blocked else set()
+                needed = push(["fleet/worker/src/report.ts", "dashboard/worker/src/index.ts"])
+                for fleet_job, succeeds in ((None, False), (job("Fleet checks", "skipped"), False), (job("Fleet checks", "failure"), False), (job("Fleet checks", None, "in_progress"), False), (job("Fleet checks"), True)):
+                    with self.subTest(blocked=blocked, fleet_job=fleet_job):
+                        jobs = green_jobs("Dashboard checks", "Contracts") + ([fleet_job] if fleet_job else [])
+                        result, extra, _ = self.reuse(needed, [branch_run()], {800: jobs})
+                        self.assertEqual(extra["checks_reused"], str(succeeds).lower())
+                        self.assertEqual(result["fleet_check"], not succeeds)
+                        self.assertEqual(result["fleet_deploy"], not blocked)
+                        self.assertEqual(result["dashboard_deploy"], not blocked)
+        finally:
+            ci_changes.CHECK_ONLY = saved
         needed = push(["fleet/worker/src/report.ts", "dashboard/worker/src/index.ts"])
-        for fleet_job, succeeds in ((None, False), (job("Fleet checks", "skipped"), False), (job("Fleet checks", "failure"), False), (job("Fleet checks", None, "in_progress"), False), (job("Fleet checks"), True)):
-            with self.subTest(fleet_job=fleet_job):
-                jobs = green_jobs("Dashboard checks", "Contracts") + ([fleet_job] if fleet_job else [])
-                result, extra, _ = self.reuse(needed, [branch_run()], {800: jobs})
-                self.assertEqual(extra["checks_reused"], str(succeeds).lower())
-                self.assertEqual(result["fleet_check"], not succeeds)
-                self.assertFalse(result["fleet_deploy"])
-                self.assertFalse(result["dashboard_deploy"])
         for overrides in ({"head_sha": "c" * 40}, {"head_repository": {"full_name": "someone/fork"}}, {"head_branch": "main"}):
             with self.subTest(overrides=overrides):
                 result, extra, _ = self.reuse(needed, [branch_run(**overrides)], {800: green_jobs("Fleet checks", "Dashboard checks", "Contracts")})

@@ -1,4 +1,4 @@
-# Top-level is the sole production source. Access AUD is added after gated IaC creation.
+# Top-level is the sole production source. Access AUD was verified after gated IaC creation.
 # Owner identities and report signing key are Worker secrets; never put them here.
 name = "fleet"
 account_id = "f57937bd1d93bf59e737b6d8445fb7a3"
@@ -28,5 +28,6 @@ enabled = true
 [vars]
 PUBLIC_HOST = "fleet.ziyixi.science"
 ACCESS_ISSUER = "https://ziyixi.cloudflareaccess.com"
+ACCESS_AUDIENCE = "43aba3693dea8e88a343446ce5c416f9c950e37a2b066c7dcfc1189d8ea0cb73"
 HOST_KEY = "vps"
 HOST_EPOCH = "1"

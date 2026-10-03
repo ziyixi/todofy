@@ -7,7 +7,7 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path
 
-from release_identity import release_id, resume_id, verified_images
+from release_identity import release_id, release_profile, resume_id, verified_images
 from transport import ReleaseFailure, TransientFailure, Transport
 from ziyixi_proto.platform.runtime.v1 import runtime_pb as pb
 from ziyixi_proto.platform.runtime.v1 import runtime_service_pb as service
@@ -128,33 +128,26 @@ class Deployment:
     def execute(
         self,
         sha: str,
-        digests: dict[str, str],
+        digests: dict[str, str] | None = None,
         *,
         resume: bool = False,
         timeout: int = 1800,
     ) -> pb.Release:
-        if not 30 <= timeout <= 3600 or set(digests) != {
-            "newsletter",
-            "platform-runtime",
-        }:
+        if not 30 <= timeout <= 3600:
             raise ReleaseFailure("INVALID_DEPLOYMENT_TIMEOUT")
+        if (resume and digests is not None) or (
+            not resume
+            and (digests is None or set(digests) != {"newsletter", "platform-runtime"})
+        ):
+            raise ReleaseFailure("INVALID_DEPLOYMENT_IMAGES")
         deadline = self.monotonic() + timeout
         identity = release_id(sha)
         name = "releases/" + identity
-        targets = tuple(
-            pb.ReleaseTarget(
-                workload_key=key,
-                source_sha=sha,
-                image_digest=digest,
-                request_id=identity,
-            )
-            for key, digest in sorted(digests.items())
-        )
         if resume:
             release = self.call(
                 "GetRelease", service.GetReleaseRequest(name=name), deadline
             )
-            self.validate(release, name, targets)
+            targets = self.frozen_targets(release, sha, name)
             if release.phase in {"held", "failed"}:
                 release = self.call(
                     "ResumeRelease",
@@ -166,6 +159,15 @@ class Deployment:
                     deadline,
                 )
         else:
+            targets = tuple(
+                pb.ReleaseTarget(
+                    workload_key=key,
+                    source_sha=sha,
+                    image_digest=digest,
+                    request_id=identity,
+                )
+                for key, digest in sorted(digests.items())
+            )
             release = self.call(
                 "CreateRelease",
                 service.CreateReleaseRequest(
@@ -206,6 +208,28 @@ class Deployment:
             )
 
     @staticmethod
+    def frozen_targets(
+        release: pb.Release, sha: str, name: str
+    ) -> tuple[pb.ReleaseTarget, ...]:
+        """Adopt only this source's original configured, strictly decoded creation targets."""
+        identity = release_id(sha)
+        targets = release.targets
+        if (
+            len(targets) != 2
+            or {target.workload_key for target in targets}
+            != {"newsletter", "platform-runtime"}
+            or any(
+                target.source_sha != sha
+                or target.request_id != identity
+                or target.generation is not None
+                for target in targets
+            )
+        ):
+            raise ReleaseFailure("RELEASE_ACKNOWLEDGEMENT_INVALID")
+        Deployment.validate(release, name, targets)
+        return targets
+
+    @staticmethod
     def validate(
         release: pb.Release, name: str, targets: tuple[pb.ReleaseTarget, ...]
     ) -> None:
@@ -231,8 +255,8 @@ class Deployment:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source-sha", required=True)
-    parser.add_argument("--newsletter-image", required=True)
-    parser.add_argument("--platform-image", required=True)
+    parser.add_argument("--newsletter-image")
+    parser.add_argument("--platform-image")
     parser.add_argument(
         "--resume",
         action="store_true",
@@ -240,13 +264,24 @@ def main() -> int:
     )
     parser.add_argument("--timeout", type=int, default=1800)
     args = parser.parse_args()
+    if args.resume and (
+        args.newsletter_image is not None or args.platform_image is not None
+    ):
+        parser.error(
+            "--resume reads the original frozen images; do not supply new images"
+        )
+    if not args.resume and (not args.newsletter_image or not args.platform_image):
+        parser.error("a new release requires both verified images")
     transport = None
     try:
-        profile, digests = verified_images(
-            ROOT,
-            args.source_sha,
-            {"newsletter": args.newsletter_image, "platform": args.platform_image},
-        )
+        if args.resume:
+            profile, digests = release_profile(ROOT, args.source_sha), None
+        else:
+            profile, digests = verified_images(
+                ROOT,
+                args.source_sha,
+                {"newsletter": args.newsletter_image, "platform": args.platform_image},
+            )
         credentials = {
             name: os.environ.get(name, "")
             for name in (

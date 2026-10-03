@@ -151,6 +151,10 @@ FAKE_TOFU = textwrap.dedent('''\
         sys.stdout.write(open(fixture).read())
         sys.exit(0)
     if args[:1] == ["apply"]:
+        if "-json" in args:
+            print(json.dumps({{"@module": "tofu.ui", "type": "version", "ui": "1.2"}}))
+            for diagnostic in json.loads(os.environ.get("FAKE_APPLY_DIAGNOSTICS", "[]")):
+                print(json.dumps(diagnostic))
         sys.exit(int(os.environ.get("FAKE_APPLY_EXIT", "0")))
     sys.exit(9)
 ''')
@@ -871,6 +875,7 @@ class ApplyCommand(unittest.TestCase):
         self.assertEqual(code, 0, err)
         self.assertEqual([c["args"][0] for c in calls], ["init", "plan", "show", "apply", "plan", "show"])
         self.assertEqual(calls[3]["args"][-1].rsplit("/", 1)[-1], "apply.tfplan")
+        self.assertIn("-json", calls[3]["args"])
         [backup] = [key for key in bucket if key.startswith("backups/")]
         self.assertRegex(backup, r"^backups/production/terraform\.tfstate\.\d{8}T\d{6}Z-run42$")
         self.assertEqual(bucket[backup], ENCRYPTED_STATE)
@@ -892,6 +897,29 @@ class ApplyCommand(unittest.TestCase):
         self.assertIn("apply: done", out)
         self.assertNotIn("d" * 64, out + err)
         self.assert_clean(out + err)
+
+    def test_failed_apply_reports_only_gated_resource_and_numeric_provider_status(self):
+        diagnostic = {
+            "@module": "tofu.ui", "type": "diagnostic", "@message": TOKEN,
+            "diagnostic": {
+                "severity": "error", "summary": TOKEN, "address": ADDRESSES[0],
+                "detail": f'POST "{infra_state.API}/accounts/{ACCOUNT}/access/policies": '
+                          '403 Forbidden ' + json.dumps({"errors": [{"code": 10000, "message": SENTINEL_EMAIL}],
+                                                        "result": {"token": TOKEN}}),
+                "snippet": {"code": PASSPHRASE},
+            },
+        }
+        code, out, err, calls, _, _ = self.run_apply(
+            self.imports(), extra_env={"FAKE_APPLY_EXIT": "1", "FAKE_APPLY_DIAGNOSTICS": json.dumps([diagnostic])})
+        self.assertEqual(code, 1)
+        self.assertIn("tofu apply failed", err)
+        record = json.loads(next(line.split("tofu diagnostic ", 1)[1] for line in err.splitlines()
+                                 if "tofu diagnostic " in line))
+        self.assertEqual(record, {"resource": ADDRESSES[0], "http_status": 403, "api_codes": [10000]})
+        self.assertEqual([call["args"][0] for call in calls], ["init", "plan", "show", "apply"])
+        self.assertIn("-json", calls[-1]["args"])
+        self.assert_clean(out + err)
+        self.assertNotIn(infra_state.API, out + err)
 
     def test_refusals_never_apply(self):
         cases = {

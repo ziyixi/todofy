@@ -37,10 +37,25 @@ Newsletter can acquire unknown business operations after admission resumes. Its 
 identity and admission are verified; an unhealthy process, unknown evidence or degraded unrelated workload
 still cannot pass deployment verification.
 
-Held/failed operations stop the client immediately. Only an explicit approved dispatch adds `--resume`;
-it reads the current etag and derives a stable continuation UUID for that exact revision. Ordinary retries
-never resume automatically. Client timeout does not cancel the persisted server operation. Re-run with the
+Held/failed operations stop the client immediately. Only an explicit approved main dispatch for `platform`
+or `newsletter` sets `resume_vps_release=true` and supplies `resume_source_sha`, the original release's full
+source SHA. The checkout commit runs current source/contract checks, but no image is built, saved, uploaded
+or published. The client uses the original source SHA to fetch the authenticated release, validates its two
+configured aliases, source/request identity and strict digest fields, and retains those frozen targets.
+Digests alone contain no repository: the daemon maps the fixed aliases to the profile owner's allowlisted
+repositories. Resume accepts no replacement image input. It reads the current etag and derives a stable
+continuation UUID for that exact revision; all later receipts and physical running observations must match
+the original targets. Ordinary retries never resume automatically. Client timeout does not cancel the persisted server operation. Re-run with the
 same verified input to inspect progress; make a deliberate concurrency decision before continuing held work.
+
+```sh
+uv run --project platform --frozen python tools/vps-release/deploy.py \
+  --source-sha ORIGINAL_HELD_FULL_SHA --resume
+```
+
+Without explicit resume, `resume_source_sha` is forbidden and a new release still requires both images
+from the same tested artifact/source SHA. Missing or mismatched existing releases fail rather than being
+created or replaced by the resume path.
 The one overall timeout starts before Create/Get/Resume. Temporary network/429/5xx failures, including a
 daemon Recreate rollout lasting minutes, keep retrying the identical request inside that budget. Credentials,
 schema errors and held/failed results stop immediately; retries never extend the deadline.

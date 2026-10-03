@@ -16,8 +16,9 @@ Rules for this file:
   what is done, what is left, how to verify it and what to check after its deploy. Link to the app docs for
   design detail instead of copying it.
 
-Last updated: 2026-10-03 ~04:00 UTC. The verified foundation implementation is `8628e5e`; the k3s/Fleet
-implementation below is still in flight and has not been deployed. Every app's owner API is on proto now (the dashboard
+Last updated: 2026-10-03 ~04:40 UTC. The verified foundation implementation is `8628e5e`; the k3s/Fleet
+implementation reached `main` at `ca10078`, but its VPS runtime is not installed. Six new managed Access
+objects exist; the dedicated Tunnel is still blocked by an undiagnosed provider request failure. Every app's owner API is on proto now (the dashboard
 `ca63675`, FlowDay `8d9100e`, Mail Hero `d1bde0e`, Todofy `b70856f`, all landed and verified on 2026-10-02). Nothing
 was in flight at that landing. The foundation evidence below describes that completed release.
 
@@ -34,14 +35,19 @@ was in flight at that landing. The foundation evidence below describes that comp
 | Dashboard | `home` (+ `HomeState` DO) | `home.ziyixi.science` | `Dashboard deploy` | Yes (`dashboard.ui.v1`, since `ca63675`) |
 | Website | `ziyixi-website` (+ `ziyixi-notion-publish` relay) | `ziyixi.science`, `www.ziyixi.science` | `Website release` | n/a (static) |
 
-Newsletter source is now imported on `main` from its deployed engine commit
-`c3d622d4771b1ca63ee4e3f785b79032cffc30e1`. Its new independent image is `ghcr.io/ziyixi/todofy-newsletter`. The main publisher at `8628e5e` published it; the package is public, anonymous manifest access passed, and the credential-free configuration workflow pulled and validated the image. The pullable digest is `sha256:94c535ba8f2a64d887656e50a1571f42b31d18aad5472776e0762d69c20e5e51`.
+Newsletter source was imported on `main` from its deployed engine commit
+`c3d622d4771b1ca63ee4e3f785b79032cffc30e1`. Its independent image is `ghcr.io/ziyixi/todofy-newsletter`.
+The current `ca10078` publisher reused the exact Linux-tested image artifact and published
+`sha256:045f20ae0334ea9f8ce675ed93e31c6dfcd7192c69c641f112ea1aa53e7d3657`.
+The package is public; anonymous manifest access and the manifest/config identity checks passed.
 `ghcr.io/ziyixi/newsletter` was the old VPS runtime. It is now stopped for the authorised migration,
 with its image and persistent state preserved. Image publication alone does not update that server. The application reads Todofy's
 `/api/summary` and `/api/recommendation` using its existing machine contract. See
 `newsletter/docs/import-source.md` and `newsletter/docs/deployment-drain.md` for the import and release boundaries.
 The old Slash, changedetection and FlowDay containers are also stopped under the owner's subsequent
-instruction to stop every Compose service; retained state remains outside this repository.
+instruction to stop every Compose service; retained state remains outside this repository. This includes
+the old Mail Hero backup collector: its retained backups remain available, but no new automatic VPS
+backup is running. Platform/Newsletter health must not be reported as backup coverage.
 
 ## How work lands
 
@@ -77,7 +83,7 @@ subsequently clarified that **all existing Compose services should stop**, rathe
 apps. All 13 inventoried containers are stopped and their automatic restart is disabled; containers,
 volumes, private configurations and migration snapshots are retained. Do not restart legacy triggers.
 
-Work in progress: GitHub Actions actively calls the shared-proto daemon API; the daemon applies its own
+Implemented on `main`: GitHub Actions actively calls the shared-proto daemon API; the daemon applies its own
 CI-verified Kustomize resources. Actions holds only narrow HTTPS credentials, with no SSH key or Kubernetes
 credential. Newsletter releases drain/freeze before
 changing the exclusive stateful process; an observer CronJob using the platform image reports bounded
@@ -93,8 +99,8 @@ independent host diagnosis.
 Local platform, image-context, release-client and bootstrap checks passed: 97 tests plus 79 subtests;
 all 53 relevant Python files passed lint and format. Profile/infrastructure checks passed 89 tests;
 Newsletter's changed drain/monitor behavior passed 45 synthetic tests. A real offline Kustomize/bootstrap
-bundle contained ten runtime resources, keeping Newsletter held and the observer enabled. Final branch
-CI is still pending. No k3s/Fleet deployment or production
+bundle contained ten runtime resources, keeping Newsletter held and the observer enabled. Full branch
+and main CI passed at `ca10078`. No k3s/Fleet deployment or production
 business acceptance has happened yet. Do not claim the old process supports the new drain API.
 
 First branch run [37092747486](https://github.com/ziyixi/todofy/actions/runs/37092747486) at `b441e46`
@@ -130,12 +136,43 @@ actual editor/send/deployment identity requirements. Eighteen installer tests, f
 boundary tests and thirteen release-client tests passed after these final corrections; retained host
 paths did not change.
 
-Remaining sequence: push and pass branch CI; promote the identical green SHA;
-review and apply only the new managed Access/Tunnel/Fleet resources; record actual Access audiences and
-generated public identities; prepare immutable images and a reviewed public bootstrap with private node
-credentials supplied separately; owner runs sudo once. The bootstrap preserves the old state, then
-disables the already stopped Docker runtime before starting k3s. Then enable the repository VPS release
-switch and verify the pushed release, fresh Fleet/Home observations and inactive legacy runtime.
+Fourth branch run [37095413618](https://github.com/ziyixi/todofy/actions/runs/37095413618) passed all checks
+at `ca10078`; [main run 37095911161](https://github.com/ziyixi/todofy/actions/runs/37095911161) reused that
+same green SHA and both tested image artifacts. Platform's Linux job passed 103 tests plus actual
+network-disabled Docker imports and source identity checks. Newsletter's Docker job performed a
+no-login Codex startup and offline configuration validation. The public Platform image is
+`ghcr.io/ziyixi/todofy-platform@sha256:ed5bb253b3d94f2f3f62c2ca1abe595e2a8d5c2a1f45e132c7805092e3359d98`.
+Anonymous reads verified both published manifest digests and their tested image configuration identities.
+Fleet/Home remained deliberately frozen; VPS deploy remains disabled until bootstrap and machine access
+are ready. Image publication is not a live deployment test.
+
+Managed infrastructure is partially created. The reviewed initial plan contained nine creates and nineteen
+no-ops, with no update/delete/replace. [Apply 37096080218](https://github.com/ziyixi/todofy/actions/runs/37096080218)
+verified the encrypted state backup before applying, then failed with a generic provider HTTP headline.
+[Read-only drift 37096329221](https://github.com/ziyixi/todofy/actions/runs/37096329221) confirmed all six new
+Access objects persisted; only the dedicated Tunnel, its configuration and its DNS record remained
+three creates, with twenty-five no-ops. [Controlled retry 37096566266](https://github.com/ziyixi/todofy/actions/runs/37096566266)
+failed with the same insufficient diagnostic. Stop blind retries: the current branch adds bounded
+OpenTofu JSON diagnostics containing only managed resource aliases, HTTP status and numeric API codes.
+No permission failure is confirmed, and the old private logs were deleted normally. A fresh drift and
+reviewed fingerprint must precede the next diagnostic apply. Strict read-only lookups verified the newly
+created Fleet owner/receipt identities for the pending activation configuration.
+
+Pending branch corrections are implemented: explicit resume reuses the daemon's frozen images, never
+rebuilds/publishes replacements, and accepts only the original held source SHA when `main` has advanced.
+Current code is checked independently; the original etag/targets remain mandatory throughout physical
+verification. The daemon's immutable release ledger and proto are unchanged. All 379 root-script checks
+passed (one historical skip), seventeen synthetic HTTP client tests passed, and lint/format/diff checks
+passed. Fleet's verified Access configuration and activation guards passed 220 related checks. Safe
+apply diagnostics passed ninety Infra checks and forty-four root Infra guards, with zero new legacy lint
+violations. No synthetic test proves a live Tunnel, bootstrap or successful application rollout.
+
+Remaining sequence: gate and land these corrections with Fleet's verified Access identities; deploy
+Fleet/Home; resolve the dedicated Tunnel using the safe diagnostics; record the actual Fleet namespace;
+prepare immutable images and a reviewed public bootstrap with private node credentials supplied
+separately; owner runs sudo once. The bootstrap preserves the old state, then disables the already
+stopped Docker runtime before starting k3s. Then enable the repository VPS release switch and verify
+the pushed release, fresh Fleet/Home observations and inactive legacy runtime.
 
 ## Foundation completed (historical release evidence)
 
@@ -200,8 +237,10 @@ with synthetic data.
   answered 42 requests after 13:25 UTC, all successful, CPU p50 0.7 ms / p99 4.1 ms. The VPS side (the
   newsletter run itself) is not checked: an agent needs the owner's permission for the read-only ssh check,
   or the owner confirms the 2026-10-02 newsletter arrived.
-- Infra drift must stay `no-op 19` on its daily scheduled run (13:23 UTC; GitHub often starts it hours late). On
-  2026-10-02 the scheduled run had not started by 18:25 UTC; a dispatched run (read-only plan) then read `no-op 19`.
+- Infra drift's foundation baseline was `no-op 19` (2026-10-02). The k3s/Fleet extension contains 28 managed
+  objects; the current partial apply reads three creates and twenty-five no-ops. After its remaining
+  transport objects are created and verified, the new expected steady state is `no-op 28`. Daily drift
+  runs at 13:23 UTC, but GitHub may start it hours late.
 - FlowDay rollback window (F5) ends 2026-10-08: the old container stays untouched until then. F6 (retire the
   container, its tunnel ingress and the `flowday-bypass` Access app) needs the owner's OK and goes through
   `infra/` for the Access app (`flowday/docs/design.md` section 11).

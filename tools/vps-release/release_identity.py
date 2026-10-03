@@ -30,8 +30,7 @@ def verified_images(
     root: Path, sha: str, images: dict[str, str]
 ) -> tuple[dict, dict[str, str]]:
     """Accept only this profile owner's two fixed published images, both pinned by full SHA256."""
-    release_id(sha)
-    profile = load_profile(root)
+    profile = release_profile(root, sha)
     if set(images) != {"newsletter", "platform"}:
         raise ValueError("Invalid release images")
     owner = profile["repository"].split("/")[0]
@@ -46,3 +45,9 @@ def verified_images(
             "@", 1
         )[1]
     return profile, digests
+
+
+def release_profile(root: Path, sha: str) -> dict:
+    """Both create and resume use the same validated public origin and canonical source identity."""
+    release_id(sha)
+    return load_profile(root)

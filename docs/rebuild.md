@@ -62,12 +62,16 @@ These prerequisites need owner/account access; application code cannot authorize
    Worker is deployed and checked. Do not replace the root domain's mailbox records. Original mailbox
    forwarding rules live at their providers and require their own verification.
 
-### First Fleet/platform activation is two phases
+### Prepare account identities before the first production release
 
-The initial commit explicitly keeps `fleet` in `.github/scripts/ci_changes.py`'s `CHECK_ONLY` set.
-Fleet and Home are checked, but neither deploys: Home's new service bindings must not point at a Worker
-that does not exist yet. Fleet's sole `wrangler.toml` declares the intended host with **no** fake AUD;
-its deploy wrapper permits a credential-free dry run and refuses a real deployment without the actual AUD.
+For a fresh account, create the required Access/storage resources in the separate reviewed bootstrap and
+adoption stage before the first main production release. Prepare the real IDs/AUDs and public profiles on
+a branch, regenerate the existing production configurations and pass their checks. The existing account's
+identities cannot be carried into another account. Rebuilding existing services does not require editing
+the CI classifier. `CHECK_ONLY` and its regressions protect development of a new application before its
+resources exist; they are not the migration configuration mechanism. Fleet's sole `wrangler.toml` must
+use the new actual AUD, never a synthetic one. Its deploy wrapper permits a credential-free dry run and
+refuses a real deployment without the actual AUD.
 
 Run the separately gated infrastructure creation first. Read only the new owner app's public AUD/app ID
 and the exact receipt app/policy IDs into the supported public inventory fields. Tunnel and service-token
@@ -76,10 +80,9 @@ not declare those fields. Export the platform machine credentials through the pr
 then populate only the corresponding GitHub production secrets; the sealed bootstrap artifact has one-day retention and is not
 an application backup. Bootstrap the node and verify its dedicated namespace permissions and TLS trust.
 
-In one activation commit, add the actual Fleet AUD to both its production Wrangler field and the public
-profile, record the owner app ID in `infra/ids.tf`, and remove its `CHECK_ONLY` entry. Update the stage-specific
-CI expectations while retaining a regression for bootstrap blocking. The identity generator replaces existing
-AUD fields; it does not insert a missing one or update the infrastructure import-ID map. Fleet then deploys
+In the prepared configuration commit, add the actual Fleet AUD to both its production Wrangler field and
+the public inventory, and record the owner app ID in `infra/ids.tf`. The identity generator replaces existing
+AUD fields; it does not insert a missing one or update the infrastructure import-ID map. Fleet deploys
 before Home. Record the provider-issued Fleet DO namespace in `config/resources.toml`, regenerate
 Home's resource identities and verify fresh signed observations. Keep `VPS_DEPLOY_ENABLED=false` until
 the daemon, dedicated Access credentials and independent deployment Bearer have been verified; enabling that
@@ -147,7 +150,9 @@ The shared release contract bounds requests to sixteen configured workload alias
 requires both configured Newsletter and personal-cloud workloads with the same source SHA and immutable
 digests, using stable UUID4 release/request IDs. The daemon persists an asynchronous operation before acknowledging it.
 Network retries keep exactly the same IDs and frozen targets. A mismatched body for an existing ID is a
-conflict; a held/failed operation needs an explicit resume with its current etag. A process restart must not
+conflict; a held/failed operation needs an explicit resume with its current etag. A main dispatch for
+`platform` or `newsletter` must supply the original `resume_source_sha` and set `resume_vps_release=true`;
+it reads the existing frozen targets without rebuilding or publishing replacement images. A process restart must not
 silently re-admit work or create a different release. Keep `VPS_DEPLOY_ENABLED=false` until the dedicated
 transport/authentication, safe drain behavior and actual image provenance have been checked.
 

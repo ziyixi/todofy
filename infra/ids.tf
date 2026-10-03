@@ -5,16 +5,18 @@
 # each address adopted, and .github/scripts/test_infra_config.py compares the D1 ids with the wrangler.toml files on
 # every push. README.md "Import notes" records each import.
 
-# Fleet's owner and exact receipt application/policy are created before its first Worker deploy.
-# Read their actual IDs after the gated apply and record them here and config/resources.toml.
-# Never invent placeholders; first deployment also commits ACCESS_AUDIENCE and removes CHECK_ONLY.
+# Fleet's owner and exact receipt application/policy were created by gated IaC before its first Worker deploy.
+# Their actual IDs were verified with exact-name/domain Access reads and recorded in config/resources.toml.
 locals {
   access_policy_ids = {
-    "owner"        = "018f1a13-1a1b-4cf6-a470-c865c4577851"
-    "github_owner" = "eea00ced-7de7-4094-a705-c9741d835b7c"
+    "owner"         = "018f1a13-1a1b-4cf6-a470-c865c4577851"
+    "github_owner"  = "eea00ced-7de7-4094-a705-c9741d835b7c"
+    "fleet_receipt" = "fb3608f4-bf0e-4db8-8983-5fb1340f20d5"
   }
   mail_hero_backup_app_id = "dafc6e08-7b1b-461f-8735-2cfa668a0ce0"
+  fleet_receipt_app_id    = "e468db67-b8aa-4be4-9961-6965a5fced5d"
   access_app_ids = {
+    "fleet"     = "03c9b2a9-05c5-49fa-9ffa-8ece99952894"
     "mail-hero" = "ebd92116-4d51-4d90-923a-068b05b7e05a"
     "todofy"    = "d4010b0b-c50e-487b-992e-6e30a392f603"
     "home"      = "f190b413-241d-428d-8680-53eebe7f672d"
