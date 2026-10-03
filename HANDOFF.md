@@ -39,17 +39,28 @@ receipts clear all four daemon-unknown alerts. The 32 historical Newsletter unkn
 No new provider/send or fresh-account recovery claim follows from this acceptance. The temporary
 host-admin window is expired; routine typed deployment and bounded metadata diagnosis need no sudo.
 
-Current work on `codex/k3s-personal-cloud`: a simple native Mail Hero daily snapshot and actionable
+Completed at `5837c0c` on `main`: a simple native Mail Hero daily snapshot and actionable
 rebuild/transferable-configuration runbooks. The owner explicitly removed added encryption/key-management.
 The existing DO Alarm copies D1/schema, business DO control and complete R2 objects to private BACKUP_STORE;
 no VPS/k3s collector, new recovery key, encrypted segments or paid product is required. The old collector
-is stopped, its data and v1 recovery compatibility retained. Branch/main production publication and a
-successful real snapshot remain pending; do not report restored backup coverage before complete verification.
+is stopped, its data and v1 recovery compatibility retained. Full branch CI
+[37159139080](https://github.com/ziyixi/todofy/actions/runs/37159139080) and main
+[37159607595](https://github.com/ziyixi/todofy/actions/runs/37159607595) both succeeded;
+Mail Hero and Dashboard deploys passed. Other application/VPS releases were correctly skipped.
+The real snapshot `b009accd-8697-44c9-8fcb-392e862c7782` reached complete/native_readback_verified at
+2026-10-03 23:06:19 UTC: 1,031 files, 37,723,651 bytes, a verified R2 marker, and no pending D1 receipt sync.
+The next daily wake is 2026-10-04 04:17 UTC. A fresh Home status refresh cleared backup_stale and left
+only the owner-approved 32 historical Newsletter unknown outcomes. Typed VPS verification remains ready
+at `93b387c` with frozen targets and generation matching. No real mail/backup content was printed or
+used as a fixture; production proof is bounded status/marker metadata and Home acceptance.
+The owner Google Drive checkout still stalls reading Git objects: a bounded status check returned
+IO wait and only its own process was terminated. Remote main and this independent checkout are current;
+do not overwrite any owner/Claude changes or claim that local clone was fast-forwarded.
 Local checks: 204 Worker tests and 81 UI tests passed. Plain offline recovery's 11 new tests passed;
 its 40-test combined legacy suite has one local GnuPG skip, with real GnuPG required in Linux CI.
 1000 synthetic objects' second backup used 16,621 DO reads, 6,201 SQL writes and 466 Alarm writes;
 this includes prior inventory cleanup and same-day rotation, but is not a 10,000-file/full5GiB test.
-The snapshot ceiling is10,000 files/5GiB; account free quotas remain shared. The rebuild docs separately
+The snapshot ceiling is 10,000 files/5GiB; account free quotas remain shared. The rebuild docs separately
 state today's commands and four P0 follow-ups; no fresh-account/VPS or whole-cloud restore drill was run.
 Every app's owner API is on proto now (the dashboard
 `ca63675`, FlowDay `8d9100e`, Mail Hero `d1bde0e`, Todofy `b70856f`, all landed and verified on 2026-10-02). Nothing

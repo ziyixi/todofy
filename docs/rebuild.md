@@ -221,7 +221,7 @@ Fleet HMAC 与 Bearer 独立；owner/邮箱/project 等个人值也按秘密处�
 Daemon 非终态 checkpoint 会自动继续，held/failed 才等待 Resume；启动前离线核对，当前没有统一 quarantine 入口。
 不复制正在写入的 SQLite 主文件而忽略 WAL；PVC Retain 不是离机备份。
 Mail Hero [现有隔离恢复](../mail-hero/deploy/backup/README.md)保持 `activation_allowed=false`，不自动导入新账户/重建 Alarm。
-Mail Hero 备份正在迁移到 Cloudflare 原生执行，**不增加 k3s/Compose backup collector**。
-旧 collector 已停；新备份上线、完整读回、隔离恢复各自验收，不拿 Platform 健康替代。
+Mail Hero每日备份已在Cloudflare原生执行；D1/DO/R2普通副本直接进入私有R2，无新增加密或VPS collector。
+当前真实快照和Home恢复已验证；[每日备份](../mail-hero/docs/native-backup.md)给出三个设置，隔离新账户恢复仍单独验收。
 其他 VPS/DO 持续备份仍需按应用补齐，见 [改进计划](rebuild-audit.md)。
 有独立备份、解密材料和真实隔离恢复证据后才记录 RPO/RTO；本文不宣称完整重建/恢复已经通过。

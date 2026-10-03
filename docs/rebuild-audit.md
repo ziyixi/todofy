@@ -71,15 +71,13 @@ P0.4 不把 systemd probe 改成宿主业务 daemon；它仍是无凭据 init co
 
 ## P1：让“重建”同时能恢复数据
 
-### 先补正在迁移的 Mail Hero 原生备份
+### Mail Hero 的每日备份已恢复
 
-旧 Compose collector 已停。当前方向是 **Mail Hero 在 Cloudflare 原生执行备份，不再增加 k3s/Compose collector**。
-迁移仍在进行，不能将计划当成自动备份已恢复。验收必须分别记录：
-
-- 自动调度/一致性租约及恢复；新入站归属明确，不能无限阻塞业务。
-- D1/DO/R2 普通副本、对象 metadata/hash 和删除清单完整；原应用密钥仍按秘密清单独立保管。
-- 上传完整读回核验、有限轮转、免费预算/CPU/内存边界与失败状态可见。
-- 隔离恢复保留原 event/payload，默认停发；原消费者对账前不自动重放。
+旧 Compose collector 已停，Mail Hero 复用 Cloudflare DO Alarm，把 D1、DO业务状态与原R2文件复制到私有备份桶。
+用户选择普通副本，无新增加密或恢复公钥流程。`5837c0c` 的 main CI及真实快照已完成；Home过旧故障清除。
+该快照为1,031个文件、37,723,651字节，成功时间2026-10-03 23:06 UTC；详细证据看HANDOFF。
+本地普通备份恢复测试11项通过，Worker204/UI81项通过；Linux完整CI另覆盖旧GPG兼容。
+这证明当前规模的复制/记录/轮转执行，不能替代5GiB满量、空Cloudflare资源恢复或整云RPO/RTO验收。
 
 同账户 R2 备份能应对应用损坏/误删，不单独承担整个账户丢失。
 另做 owner 私有离机导出或独立存储副本；不因为迁移原生调度就丢掉这层恢复保证。
@@ -116,7 +114,7 @@ k3s 不能调度时 observer也会停，Fleet正确显示 stale/missing；它不
 
 ## 执行顺序
 
-1. k3s/AppArmor/Fleet/Home 实机验收已完成；完成普通私有 R2 备份的生产验收，更新 HANDOFF。
+1. k3s/AppArmor/Fleet/Home 和当前规模的普通私有 R2 备份已完成验收，证据见 HANDOFF。
 2. 实施 P0.1→P0.2→P0.3→P0.4；每项一个可审查改动，分支CI后同green SHA发布。
 3. 做空账户/空VPS演练；把人工步骤与耗时记录到重建手册，不切现有流量。
 4. 补齐 P1 后做历史恢复演练，再决定切换窗口和可承诺的恢复目标。
