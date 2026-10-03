@@ -156,7 +156,7 @@ it reads the existing frozen targets without rebuilding or publishing replacemen
 silently re-admit work or create a different release. Keep `VPS_DEPLOY_ENABLED=false` until the dedicated
 transport/authentication, safe drain behavior and actual image provenance have been checked.
 
-The independently released `platform` Python package/image supplies `personal-cloud`, the local release
+The independently released `platform` OCI image supplies `personal-cloud`, the local release
 controller, status daemon and bounded observer. It embeds generated `platform.runtime.v1`/`fleet.telemetry.v1`
 types and codecs; it does not import Newsletter code or reuse its image. Kubernetes runs the daemon and
 observer as container workloads: the observer is the five-minute `platform-observer` CronJob with

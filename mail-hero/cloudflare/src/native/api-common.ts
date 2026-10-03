@@ -49,9 +49,13 @@ export function paged(items: Row[], limit: number, timeField: string, idField: s
 export async function action(env: Env, owner: string, actionID: unknown, operation: string, resource: string, input: unknown): Promise<Row> {
   const id = uuid(actionID, 'action_request_id')
   const hash = await actionHash(env, [operation, resource, input])
-  await env.DB.prepare(`INSERT OR IGNORE INTO ui_actions(id,owner,action_request_id,operation,resource_id,request_hash,created_at) VALUES(?,?,?,?,?,?,?)`)
-    .bind(crypto.randomUUID(), owner, id, operation, resource || null, hash, now()).run()
-  const entry = await required(env, 'SELECT * FROM ui_actions WHERE owner=? AND action_request_id=?', owner, id)
+  // Reserve and read in one D1 call; a failed read rolls back the reservation before any side effect.
+  const [, selected] = await env.DB.batch<Row>([
+    env.DB.prepare(`INSERT OR IGNORE INTO ui_actions(id,owner,action_request_id,operation,resource_id,request_hash,created_at) VALUES(?,?,?,?,?,?,?)`)
+      .bind(crypto.randomUUID(), owner, id, operation, resource || null, hash, now()),
+    env.DB.prepare('SELECT * FROM ui_actions WHERE owner=? AND action_request_id=?').bind(owner, id),
+  ])
+  const entry = selected.results[0] || missing()
   if (entry.operation !== operation || entry.request_hash !== hash || (entry.resource_id || '') !== resource) {
     throw new HttpError(400, 'request_id_reused', '操作 ID 已用于不同请求')
   }

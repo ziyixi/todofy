@@ -43,8 +43,9 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { exportJWK, generateKeyPair, SignJWT } from 'jose'
-import { COLD_ISOLATES, CPU_TEST_TIMEOUT_MS, FREE_CPU_MS, measureInIsolates, median, scaleFor } from '../../../../tools/workerd-cpu/workerd-cpu.mts'
+import { COLD_ISOLATES, CPU_TEST_TIMEOUT_MS, FREE_CPU_MS, measureInIsolates, median } from '../../../../tools/workerd-cpu/workerd-cpu.mts'
 import { bundle, ENV, migrate, startIsolate } from './isolate.mjs'
+import { collectCoordinatorCpu } from './coordinator-samples.mjs'
 
 const RUNS = 6
 const MIB = 1024 * 1024
@@ -190,12 +191,8 @@ test('workerd: the owner API answers its heaviest requests within the Free CPU l
     assert.equal(url.href, `${ENV.ACCESS_ISSUER}/cdn-cgi/access/certs`, 'no outbound fetch but the Access certs')
     return Response.json({ keys: [jwk] })
   }
-  const coordinatorCpu = []
-  const { runs, reference } = await measureInIsolates(COLD_ISOLATES, () => start(script, outbound, keys), isolate => {
-    const numbers = []
-    coordinatorCpu.push(numbers)
-    return session(isolate, numbers)
-  })
+  const coordinatorCpu = collectCoordinatorCpu(session, 2 * RUNS)
+  const { runs, reference } = await measureInIsolates(COLD_ISOLATES, () => start(script, outbound, keys), coordinatorCpu.measure)
   console.log(`cpu bounds (reference ms, medians of ${COLD_ISOLATES} isolates): the isolate's first API request < ${COLD_BOUND_MS}, ` +
     `other first runs < ${FIRST_BOUND_MS}, warm medians < ${WARM_BOUND_MS}; the coordinator's slowest delegated read < ${COORDINATOR_BOUND_MS}`)
   assert.equal(reference.size, 16)
@@ -204,8 +201,7 @@ test('workerd: the owner API answers its heaviest requests within the Free CPU l
     if (label !== FIRST) assert.ok(warm < WARM_BOUND_MS, `${label}: warm median, the median of ${COLD_ISOLATES} isolates: ${warm.toFixed(2)} reference ms`)
   }
   // The coordinator runs on the same machine at the same moment: its numbers are divided by the Worker isolate's speed.
-  assert.equal(coordinatorCpu.length, runs.length)
-  const delegated = runs.flatMap((run, index) => coordinatorCpu[index].map(ms => ms / scaleFor(run.calibration.speed)))
+  const delegated = runs.flatMap(run => coordinatorCpu.referenceFor(run))
   console.log(`cpu coordinator per delegated read, reference ms, ${runs.length} isolate(s): median ${median(delegated).toFixed(2)}, max ${Math.max(...delegated).toFixed(2)}`)
   assert.ok(Math.max(...delegated) < COORDINATOR_BOUND_MS, `coordinator: the slowest delegated read ${Math.max(...delegated).toFixed(2)} reference ms`)
 })

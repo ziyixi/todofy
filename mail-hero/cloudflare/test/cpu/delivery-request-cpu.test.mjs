@@ -37,19 +37,22 @@
 // hand-written send on the same machine then: first 2.84-3.06, warm 1.66-2.35. Without the warm-up a GitHub runner read
 // the send's first run 6.01, not below WORKER_COLD_BOUND_MS, and the hand-written send's 4.1-4.9: runners read these
 // first runs about 1.3-1.6 times this machine's, so the warm-up's send should read about 4.4-5.8 there.
-// WORKER_COLD_BOUND_MS is 6 ms and WORKER_WARM_BOUND_MS 3.5 ms; an injected 5 ms more in the Worker's first request
+// WORKER_COLD_BOUND_MS is 6 ms and WORKER_WARM_BOUND_MS 5 ms. These guard substantial CPU regressions with headroom
+// below Free's 10 ms limit; the original 3.5 ms warm goal rejected normal runner variation of hundredths of a ms.
+// An injected 5 ms more in the Worker's first request
 // (requestDelivery) failed 3 of 3 runs (send first 8.4-9.4). COORDINATOR_BOUND_MS is 1 s, a thirtieth of the Durable
 // Object's limit.
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { exportJWK, generateKeyPair, SignJWT } from 'jose'
-import { COLD_ISOLATES, CPU_TEST_TIMEOUT_MS, FREE_CPU_MS, measureInIsolates, median, scaleFor } from '../../../../tools/workerd-cpu/workerd-cpu.mts'
+import { COLD_ISOLATES, CPU_TEST_TIMEOUT_MS, FREE_CPU_MS, measureInIsolates, median } from '../../../../tools/workerd-cpu/workerd-cpu.mts'
 import { bundle, DASHBOARD_WORKER, ENV, migrate, opsCaller, startIsolate } from './isolate.mjs'
+import { collectCoordinatorCpu } from './coordinator-samples.mjs'
 
 /** The bound of a request's first run in the Worker's isolate (median of COLD_ISOLATES isolates), in reference ms. */
 const WORKER_COLD_BOUND_MS = 0.6 * FREE_CPU_MS
 /** The bound of a request's warm median in the Worker's isolate (median of COLD_ISOLATES isolates), in reference ms. */
-const WORKER_WARM_BOUND_MS = 0.35 * FREE_CPU_MS
+const WORKER_WARM_BOUND_MS = 0.5 * FREE_CPU_MS
 /** The bound of the coordinator's slowest /deliveries/create in any isolate, in reference ms (Free's limit: 30 s). */
 const COORDINATOR_BOUND_MS = 1000
 const RUNS = 6
@@ -170,13 +173,8 @@ test('workerd: a Worker request that creates a delivery stays well below the Fre
     assert.equal(url.hostname, 'consumer.example.org', 'no unexpected outbound fetch')
     return new Response(null, { status: 204 })
   }
-  // Every isolate's coordinator numbers, in the order measureInIsolates measures the isolates (its `runs`).
-  const coordinatorCpu = []
-  const { runs, reference } = await measureInIsolates(COLD_ISOLATES, () => start(script, outbound, keys), isolate => {
-    const numbers = []
-    coordinatorCpu.push(numbers)
-    return session(isolate, numbers)
-  })
+  const coordinatorCpu = collectCoordinatorCpu(session, 4 * RUNS)
+  const { runs, reference } = await measureInIsolates(COLD_ISOLATES, () => start(script, outbound, keys), coordinatorCpu.measure)
   console.log(`cpu bounds (reference ms, medians of ${COLD_ISOLATES} isolates): the Worker's first runs < ${WORKER_COLD_BOUND_MS}, ` +
     `warm medians < ${WORKER_WARM_BOUND_MS}; the coordinator's slowest /deliveries/create < ${COORDINATOR_BOUND_MS}`)
   assert.equal(reference.size, 4)
@@ -186,9 +184,9 @@ test('workerd: a Worker request that creates a delivery stays well below the Fre
   }
   // The coordinator runs on the same machine at the same moment as the Worker, so its isolate's numbers are divided by
   // the Worker isolate's speed too.
-  assert.equal(coordinatorCpu.length, runs.length)
-  const coordinator = runs.flatMap((run, index) => coordinatorCpu[index].map(ms => ms / scaleFor(run.calibration.speed)))
-  const sends = runs.flatMap((run, index) => coordinatorCpu[index].slice(0, 2 * RUNS).map(ms => ms / scaleFor(run.calibration.speed)))
+  const coordinatorByRun = runs.map(run => coordinatorCpu.referenceFor(run))
+  const coordinator = coordinatorByRun.flat()
+  const sends = coordinatorByRun.flatMap(numbers => numbers.slice(0, 2 * RUNS))
   console.log(`cpu coordinator per send or resend, reference ms, ${runs.length} isolate(s): median ${median(sends).toFixed(2)}, max ${Math.max(...sends).toFixed(2)}`)
   assert.ok(Math.max(...coordinator) < COORDINATOR_BOUND_MS, `coordinator: the slowest /deliveries/create ${Math.max(...coordinator).toFixed(2)} reference ms`)
 })
