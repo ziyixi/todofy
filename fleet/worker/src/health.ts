@@ -2,7 +2,7 @@
 import type * as ops from '@ziyixi/proto/ops/v1/ops_wire';
 import type { Report } from './report.ts';
 import { freshness, reportCodes } from './report.ts';
-import { releaseReady, workload } from './runtime.ts';
+import { releaseReady, runtimeHealthReady, workload } from './runtime.ts';
 
 export function statusSnapshot(
   app: 'fleet' | 'newsletter', report: Report | null, receivedAt: number | null,
@@ -21,7 +21,8 @@ export function statusSnapshot(
     if (app === 'newsletter') {
       const runtime = workload(report, 'newsletter');
       const healthy = runtime?.process_state === 'running'
-        && runtime.health_state === 'healthy'
+        && runtime.health_state !== 'unsupported'
+        && runtimeHealthReady(runtime)
         && report.cluster.state === 'ready'
         && report.cluster.ready_count === 1
         && report.newsletter.state === 'healthy'

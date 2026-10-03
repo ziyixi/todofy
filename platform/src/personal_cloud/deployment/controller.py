@@ -340,6 +340,15 @@ class Controller:
                 ):
                     continue
                 self.kube.apply(item)
+                if item["kind"] == "ConfigMap" and item["metadata"]["name"] in {
+                    newsletter.release_configmap,
+                    platform.release_configmap,
+                }:
+                    self.kube.patch(
+                        "ConfigMap",
+                        item["metadata"]["name"],
+                        {"data": {"phase": "applying"}},
+                    )
             # A second recreation may be required when the new baked daemon pod template changed.
             self._next(record, "applying", "self_apply")
         elif checkpoint == "self_apply":

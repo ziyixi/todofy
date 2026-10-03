@@ -39,6 +39,15 @@ Active checkpoints recover after process replacement. Each effect is either idem
 through its durable upstream identity. Dependency failures are held, unexpected failures are failed,
 and both require explicit continuation. This is not an automatic rollback system.
 
+Baked manifests use the `personal-cloud` server-side apply manager without forced ownership takeover.
+They exclude release ConfigMap `data.phase` and only Newsletter daily CronJob `spec.suspend`.
+Those fields use the separate `personal-cloud-runtime-status` apply manager. Its forced requests are
+strictly limited to `phase=applying|activated` or the daily trigger's boolean `suspend`; callers cannot
+add another field. This also claims an unchanged bootstrap `suspend=true` before the manifest manager
+relinquishes it, preserving suspension throughout the first release. Each release ConfigMap receives
+`phase=applying` immediately after its new manifest; activation uses the same operational manager.
+The observer's enabled state remains in its canonical manifest.
+
 A lost resume response can mean the new service already accepts work. A late failure therefore
 tries to suspend further cron triggers, reports the actual admission state and remains held. It
 does not invent a closed gate, forcibly reopen a gate, or override another drain operation. Explicit
@@ -53,7 +62,9 @@ The daemon and observer run as Kubernetes workloads using the Platform container
 stored in the ledger, response or image. Token/schema/configuration
 errors fail startup. Dependency availability does not serve as a process liveness probe.
 
-Tests under `platform/tests/deployment` use fake SDK calls, synthetic ledgers and ASGI transport.
-They cover authenticated typed requests, conflict/retry/resume, self replacement, template provenance,
+Tests under `platform/tests/deployment` use synthetic ledgers, ASGI transport and SDK calls with fake
+HTTP responses. Two release cycles exercise real SDK serialization against a bounded ownership model,
+including bootstrap co-ownership, legacy operational ownership and conflicts from the old manifest policy.
+They also cover authenticated typed requests, conflict/retry/resume, self replacement, template provenance,
 real-evidence requirements, unknown work and a lost resume response. They do not prove a real K3s
 rollout, Access transport, container-runtime imageID format or business success.

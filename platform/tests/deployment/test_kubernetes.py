@@ -75,7 +75,7 @@ class Kubernetes(unittest.TestCase):
         self.assertEqual(first[4].retries, 0)
         self.assertFalse(first[4].debug)
 
-    def test_apply_and_patch_use_sdk_media_types_and_no_forced_field_takeover(self):
+    def test_manifests_and_operational_fields_use_separate_ssa_managers(self):
         self.client.apply(
             {
                 "apiVersion": "apps/v1",
@@ -95,7 +95,20 @@ class Kubernetes(unittest.TestCase):
         )
         self.assertEqual(
             self.calls[1][2]["header_params"]["Content-Type"],
-            "application/merge-patch+json",
+            "application/apply-patch+yaml",
+        )
+        self.assertEqual(
+            self.calls[1][2]["query_params"],
+            [("fieldManager", "personal-cloud-runtime-status"), ("force", "true")],
+        )
+        self.assertEqual(
+            self.calls[1][2]["body"],
+            {
+                "apiVersion": "batch/v1",
+                "kind": "CronJob",
+                "metadata": {"namespace": "personal-cloud", "name": "newsletter-daily"},
+                "spec": {"suspend": True},
+            },
         )
         with self.assertRaises(ValueError):
             self.client.apply(
@@ -106,6 +119,33 @@ class Kubernetes(unittest.TestCase):
                 {"kind": "Pod", "metadata": {"namespace": "personal-cloud"}}
             )
         self.assertEqual(len(self.calls), 2)
+
+    def test_forced_status_cannot_take_ownership_of_other_fields(self):
+        for kind, name, change in (
+            ("Deployment", "newsletter", {"spec": {"replicas": 0}}),
+            ("ConfigMap", "newsletter-release", {"data": {"phase": "ready"}}),
+            (
+                "ConfigMap",
+                "newsletter-release",
+                {"data": {"phase": "activated", "image": "other"}},
+            ),
+            (
+                "ConfigMap",
+                "newsletter-release",
+                {"metadata": {"labels": {}}, "data": {"phase": "applying"}},
+            ),
+            ("CronJob", "platform-observer", {"spec": {"suspend": True}}),
+            ("CronJob", "newsletter-daily", {"spec": {"suspend": 1}}),
+            (
+                "CronJob",
+                "newsletter-daily",
+                {"spec": {"suspend": True, "schedule": "* * * * *"}},
+            ),
+            ("CronJob", "newsletter-daily", {"spec": {"suspend": False}, "status": {}}),
+        ):
+            with self.subTest(kind=kind, change=change), self.assertRaises(ValueError):
+                self.client.patch(kind, name, change)
+        self.assertEqual(self.calls, [])
 
     def test_host_origin_and_nodes_are_fixed_readonly_sdk_operations(self):
         host = Client(

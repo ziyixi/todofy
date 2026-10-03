@@ -19,9 +19,11 @@ Rules for this file:
 Last updated: 2026-10-03. The verified foundation implementation is `8628e5e`; the k3s/Fleet
 implementation and pinned connector bootstrap reached `main` at `54861b2`. The owner completed the bounded
 SDK repair at `c703378`; Actions then activated the first API release and verified the physical images.
-Newsletter admission is accepting, with all 32 historical unknown outcomes preserved. k3s and the dedicated
-connector are running; Docker is inactive and disabled. Fleet receives signed cluster/runtime reports.
-System-daemon observation still needs the rootless init-container fix and its live acceptance below.
+The subsequent `0f84d91` release installed its daemon but is held on a Kubernetes field-ownership
+conflict. Newsletter admission is frozen, with zero active work and all 32 historical unknown outcomes
+preserved. k3s and the dedicated connector are running; Docker is inactive and disabled. Fleet receives
+signed cluster/runtime reports. The guarded phase recovery and permanent ownership fix are in progress;
+system-daemon observation still awaits a completed rollout and live acceptance below.
 Every app's owner API is on proto now (the dashboard
 `ca63675`, FlowDay `8d9100e`, Mail Hero `d1bde0e`, Todofy `b70856f`, all landed and verified on 2026-10-02). Nothing
 was in flight at that landing. The foundation evidence below describes that completed release.
@@ -42,11 +44,11 @@ was in flight at that landing. The foundation evidence below describes that comp
 
 Newsletter source was imported on `main` from its deployed engine commit
 `c3d622d4771b1ca63ee4e3f785b79032cffc30e1`. Its independent image is `ghcr.io/ziyixi/todofy-newsletter`.
-The current `c703378` publisher reused the exact Linux-tested image artifact and published
+The running Newsletter still uses the `c703378` Linux-tested image artifact:
 `sha256:63f5c907775c953d4d31629eeb2862fe1bf151eefa07e25cef630c419c834d19`.
 The package is public; anonymous manifest access and the manifest/config identity checks passed.
 `ghcr.io/ziyixi/newsletter` was the old VPS runtime. It is stopped, with its image and persistent state
-preserved. The new image is running in k3s and the daemon's release is ready; this does not prove an
+preserved. Newsletter runs in k3s, but the latest `0f84d91` release is held; this does not prove an
 external business operation. The application reads Todofy's
 `/api/summary` and `/api/recommendation` using its existing machine contract. See
 `newsletter/docs/import-source.md` and `newsletter/docs/deployment-drain.md` for the import and release boundaries.
@@ -287,7 +289,7 @@ No real model/provider/send or backup acceptance has been claimed.
 
 The remaining systemd issue is before method calls: the UID10001 container's system-bus connection
 closes, and that UID is not registered on the host. A fixed non-root diagnostic reproduced it. The
-next candidate uses a standard same-image init container as the host's existing UID65534 (`nobody`),
+`0f84d91` candidate uses a standard same-image init container as the host's existing UID65534 (`nobody`),
 retains the non-mutating polkit denial checks, and writes only a bounded shared-proto daemon snapshot
 to an emptyDir. The main observer keeps its existing UID, durable state and receipt identity. The init
 receives no projected Kubernetes identity or application secret. Both images are pinned to the same
@@ -298,6 +300,29 @@ shared-codec snapshot bounds/freshness and offline Kustomize identity/permission
 Python files passed lint/format; proto lint, API lint, schema checks and breaking checks passed. The
 Linux image gate also exercises the probe CLI as UID65534 without capabilities, network, credentials or
 a host bus; that smoke only proves the image and unknown-state path, not live D-Bus authorization.
+
+[Branch 37113613969](https://github.com/ziyixi/todofy/actions/runs/37113613969) passed the complete gate
+at `0f84d91`, including the real Linux probe smoke. [Main 37113997517](https://github.com/ziyixi/todofy/actions/runs/37113997517)
+published its images and Cloudflare Workers; VPS deploy held after daemon replacement. A same-ID resume
+in [37114292742](https://github.com/ziyixi/todofy/actions/runs/37114292742) also held. Metadata confirms
+that merge-patch activation transferred release `phase` to an Update manager, so the next manifest Apply
+conflicts while changing it back to `applying`. Do not repeatedly resume without repairing that cause.
+The immutable old release first needs a guarded phase-only recovery of its two release ConfigMaps, then
+an explicit original-ID resume. A reviewed owner-executed repair is prepared; execution is pending.
+Its running Platform digest is `sha256:150f970d33b337ef9021191322fa5d9f9c794768d31d59ce87576f2bd6124482`.
+
+The branch's permanent fix separates manifest ownership from the narrowly scoped phase/suspend
+workflow; see [deployment ownership](platform/src/personal_cloud/deployment/README.md).
+The accompanying Fleet correction keeps the historical unknown-outcome warning while requiring actual
+process, admission, Pod and release identity evidence for readiness. Those historical business outcomes
+alone must not produce a process failure or pending-release alert. Gate the candidate before landing,
+finish the original held release, then publish the candidate normally. Verify a second complete release,
+the rootless system-daemon snapshot and fresh Fleet/Home receipts. No live acceptance of those follow-ups
+has yet been claimed.
+Local candidate validation passed 182 Platform/build/release/bootstrap tests plus 178 subtests,
+45 Fleet unit tests and eight real workerd SQLite tests. Fleet type checks and lint passed; all 71
+relevant Python files passed lint/format. The two-release ownership test uses the real SDK transport
+with a synthetic field-manager model; it is not production Kubernetes acceptance.
 
 ## Foundation completed (historical release evidence)
 

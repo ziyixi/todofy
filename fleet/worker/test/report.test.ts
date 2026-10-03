@@ -1,9 +1,22 @@
 import { describe, expect, it } from 'vitest';
 import fixture from '../../../contracts/fleet-report-v1/fixtures/healthy.json';
+import { statusSnapshot } from '../src/health.ts';
 import { freshness, parseReport, reportCodes } from '../src/report.ts';
 
 const NOW = Date.parse('2026-10-03T00:00:00Z');
 const read = (value: unknown = fixture) => parseReport(JSON.stringify(value), 'vps', '1', NOW);
+
+const historicalUnknown = () => {
+  const report = structuredClone(fixture);
+  const item = report.runtime.workloads[0];
+  if (!item) throw new Error('missing fixture workload');
+  item.health_state = 'degraded';
+  item.unknown_count = 32;
+  report.newsletter.unknown_count = 32;
+  return { report, item };
+};
+
+const newsletterStatus = (report: unknown) => statusSnapshot('newsletter', read(report), NOW, NOW, 'fleet.example.test');
 
 describe('metadata report boundary', () => {
   it('accepts a synthetic typed report and three expected daemons', () => {
@@ -68,6 +81,86 @@ describe('metadata report boundary', () => {
   });
   it('rejects duplicate runtime workload aliases', () => {
     const report = { ...fixture, runtime: { ...fixture.runtime, workloads: [...fixture.runtime.workloads, ...fixture.runtime.workloads] } };
+    expect(() => read(report)).toThrow('invalid_report');
+  });
+});
+
+describe('Newsletter process and release projection', () => {
+  it('keeps historical unknown results as attention without a process fault or pending release', () => {
+    const { report } = historicalUnknown();
+    expect(newsletterStatus(report)).toMatchObject({
+      health: 'degraded',
+      signals: [{ code: 'newsletter_unknown', severity: 'warning', metrics: {} }],
+      counters: { unknown_count: 32 },
+    });
+    expect(reportCodes(read(report))).toEqual(['newsletter_unknown']);
+    expect(statusSnapshot('fleet', read(report), NOW, NOW, 'fleet.example.test')).toMatchObject({ health: 'ok', signals: [] });
+  });
+  it.each(['unknown', 'unhealthy', 'unsupported'] as const)('keeps %s runtime health unavailable despite unknown results', (health) => {
+    const { report, item } = historicalUnknown();
+    item.health_state = health;
+    expect(newsletterStatus(report).signals).toContainEqual({ code: 'newsletter_unavailable', severity: 'critical', metrics: {} });
+  });
+  it.each([0, undefined])('requires positive runtime unknown evidence, not just the separate process report: %s', (count) => {
+    const { report, item } = historicalUnknown();
+    Object.assign(item, { unknown_count: count });
+    const signals = newsletterStatus(report).signals;
+    expect(signals).toContainEqual({ code: 'newsletter_unavailable', severity: 'critical', metrics: {} });
+    expect(signals).toContainEqual({ code: 'deployment_pending', severity: 'warning', metrics: {} });
+  });
+  it('does not substitute the process report for missing runtime evidence', () => {
+    const { report } = historicalUnknown();
+    const signals = newsletterStatus({ ...report, runtime: null }).signals;
+    expect(signals).toContainEqual({ code: 'newsletter_unavailable', severity: 'critical', metrics: {} });
+    expect(signals).toContainEqual({ code: 'deployment_pending', severity: 'warning', metrics: {} });
+  });
+  it.each(['stopped', 'unknown'] as const)('keeps a %s process unavailable despite unknown results', (process) => {
+    const { report, item } = historicalUnknown();
+    item.process_state = process;
+    const signals = newsletterStatus(report).signals;
+    expect(signals).toContainEqual({ code: 'newsletter_unavailable', severity: 'critical', metrics: {} });
+    expect(signals).toContainEqual({ code: 'deployment_pending', severity: 'warning', metrics: {} });
+  });
+  it.each(['degraded', 'unavailable', 'unknown'] as const)('keeps a %s cluster unavailable', (state) => {
+    const { report } = historicalUnknown();
+    report.cluster.state = state;
+    expect(newsletterStatus(report).signals).toContainEqual({ code: 'newsletter_unavailable', severity: 'critical', metrics: {} });
+  });
+  it('keeps zero ready replicas unavailable', () => {
+    const { report } = historicalUnknown();
+    report.cluster.ready_count = 0;
+    expect(newsletterStatus(report).signals).toContainEqual({ code: 'newsletter_unavailable', severity: 'critical', metrics: {} });
+  });
+  it('keeps an unhealthy Newsletter worker unavailable', () => {
+    const { report } = historicalUnknown();
+    report.newsletter.worker_healthy = false;
+    expect(newsletterStatus(report).signals).toContainEqual({ code: 'newsletter_unavailable', severity: 'critical', metrics: {} });
+  });
+  it.each(['source_sha', 'image_digest', 'request_id', 'generation'] as const)('keeps mismatched actual %s pending despite historical unknown results', (field) => {
+    const { report, item } = historicalUnknown();
+    const actual = item.release.actual;
+    if (field === 'source_sha') actual.source_sha = '2'.repeat(40);
+    if (field === 'image_digest') actual.image_digest = `sha256:${'2'.repeat(64)}`;
+    if (field === 'request_id') actual.request_id = 'cfdd9a7b-3d46-4d2b-8983-6e99fb005a5b';
+    if (field === 'generation') actual.generation = 2;
+    const signals = newsletterStatus(report).signals;
+    expect(signals).toContainEqual({ code: 'deployment_pending', severity: 'warning', metrics: {} });
+    expect(signals).not.toContainEqual({ code: 'newsletter_unavailable', severity: 'critical', metrics: {} });
+  });
+  it('keeps frozen admission paused and the release pending', () => {
+    const { report, item } = historicalUnknown();
+    item.admission_state = 'frozen';
+    item.release.state = 'paused';
+    report.newsletter.drain_state = 'frozen';
+    expect(newsletterStatus(report).signals).toEqual([
+      { code: 'deployment_pending', severity: 'warning', metrics: {} },
+      { code: 'newsletter_unknown', severity: 'warning', metrics: {} },
+      { code: 'newsletter_paused', severity: 'info', metrics: {} },
+    ]);
+  });
+  it('still rejects a stale runtime observation with historical unknown results', () => {
+    const { report } = historicalUnknown();
+    report.runtime.observed_at = '2026-10-02T23:58:59Z';
     expect(() => read(report)).toThrow('invalid_report');
   });
 });

@@ -6,6 +6,12 @@ export function workload(report: HostReport, key: string): WorkloadStatus | null
   return report.runtime?.workloads.find((item) => item.workload_key === key) ?? null;
 }
 
+/** Unresolved business results need attention without invalidating healthy process evidence. */
+export function runtimeHealthReady(item: WorkloadStatus): boolean {
+  return ['healthy', 'unsupported'].includes(item.health_state)
+    || (item.health_state === 'degraded' && (item.unknown_count ?? 0) > 0);
+}
+
 export function releaseReady(item: WorkloadStatus): boolean {
   const { release } = item;
   const { desired, actual } = release;
@@ -21,7 +27,7 @@ export function releaseReady(item: WorkloadStatus): boolean {
     && release.observed_generation === desired.generation
     && item.process_state === 'running'
     && ['accepting', 'unsupported'].includes(item.admission_state)
-    && ['healthy', 'unsupported'].includes(item.health_state);
+    && runtimeHealthReady(item);
 }
 
 /** Relations not expressible in the generic wire profile: identity and time consistency. */

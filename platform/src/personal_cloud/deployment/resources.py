@@ -135,12 +135,14 @@ class Renderer:
                         "source_sha": target.source_sha,
                         "image": image(self.config, adapter, target.image_digest),
                         "request_id": target.request_id,
-                        "phase": "applying",
                     }
             elif kind == "Service":
                 item["spec"]["selector"] = {"app": workload.deployment}
             elif kind == "CronJob":
-                item["spec"]["suspend"] = name == "newsletter-daily"
+                if name == "newsletter-daily":
+                    item["spec"].pop("suspend", None)
+                else:
+                    item["spec"]["suspend"] = False
                 pod = item["spec"]["jobTemplate"]["spec"]["template"]["spec"]
                 for container in (*pod.get("initContainers", []), *pod["containers"]):
                     container["image"] = image(

@@ -334,6 +334,22 @@ class Reconciliation(Fixture, unittest.TestCase):
             ["begin", "status", "freeze", "resume"],
         )
 
+    def test_applying_status_follows_each_manifest_before_verification(self):
+        self.create()
+        self.until("verify")
+        for name in ("newsletter-release", "platform-release"):
+            manifest = next(
+                index
+                for index, event in enumerate(self.events)
+                if event[:3] == ("apply", "ConfigMap", name)
+            )
+            self.assertNotIn("phase", self.events[manifest][3]["data"])
+            self.assertEqual(
+                self.events[manifest + 1],
+                ("patch", "ConfigMap", name, {"data": {"phase": "applying"}}),
+            )
+        self.assertNotIn(("admission", "resume"), self.events)
+
     def test_historical_unknown_does_not_allow_busy_drain_to_apply(self):
         self.admission.unknown = 32
         self.admission.busy = True
@@ -723,6 +739,33 @@ class Reconciliation(Fixture, unittest.TestCase):
 
 
 class Rendering(unittest.TestCase):
+    def test_operational_fields_are_separate_and_bootstrap_defaults_are_preserved(self):
+        source = asset()
+        rendered = Renderer(CONFIG, asset=source).render(TARGETS, IDENTITY)
+        for items, primary in ((source["items"], False), (rendered, True)):
+            with self.subTest(primary=primary):
+                selected = {
+                    (item["kind"], item["metadata"]["name"]): item for item in items
+                }
+                for name in ("newsletter-release", "platform-release"):
+                    data = selected[("ConfigMap", name)]["data"]
+                    if primary:
+                        self.assertNotIn("phase", data)
+                        self.assertEqual(
+                            set(data), {"source_sha", "image", "request_id"}
+                        )
+                    else:
+                        self.assertEqual(data["phase"], "applying")
+                daily = selected[("CronJob", "newsletter-daily")]["spec"]
+                if primary:
+                    self.assertNotIn("suspend", daily)
+                else:
+                    self.assertIs(daily["suspend"], True)
+                self.assertIs(
+                    selected[("CronJob", "platform-observer")]["spec"]["suspend"],
+                    False,
+                )
+
     def test_observer_profile_identity_and_namespace_follow_the_cluster_configuration(
         self,
     ):
@@ -780,7 +823,10 @@ class Rendering(unittest.TestCase):
         for item in values:
             if item["kind"] == "CronJob":
                 observer = item["metadata"]["name"] == "platform-observer"
-                self.assertEqual(item["spec"]["suspend"], not observer)
+                if observer:
+                    self.assertIs(item["spec"]["suspend"], False)
+                else:
+                    self.assertNotIn("suspend", item["spec"])
                 expected = (
                     "ghcr.io/example/todofy-platform@" + TARGETS[1].image_digest
                     if observer

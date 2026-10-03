@@ -137,12 +137,43 @@ class Client:
         )
 
     def patch(self, kind: str, name: str, change: dict) -> None:
+        # This manager owns only release control fields, separate from the baked manifests.
+        # SSA also claims an unchanged value before the main manager relinquishes it.
+        if kind == "ConfigMap":
+            valid = change in (
+                {"data": {"phase": "applying"}},
+                {"data": {"phase": "activated"}},
+            )
+            api_version = "v1"
+        elif kind == "CronJob":
+            valid = (
+                name == "newsletter-daily"
+                and isinstance(change, dict)
+                and set(change) == {"spec"}
+                and isinstance(change["spec"], dict)
+                and set(change["spec"]) == {"suspend"}
+                and type(change["spec"]["suspend"]) is bool
+            )
+            api_version = "batch/v1"
+        else:
+            valid = False
+        if not valid:
+            raise ValueError("invalid_runtime_status")
         self._call(
             kind,
             "PATCH",
             name=name,
-            body=change,
-            content_type="application/merge-patch+json",
+            body={
+                "apiVersion": api_version,
+                "kind": kind,
+                "metadata": {"namespace": self.namespace, "name": name},
+                **change,
+            },
+            query=[
+                ("fieldManager", "personal-cloud-runtime-status"),
+                ("force", "true"),
+            ],
+            content_type="application/apply-patch+yaml",
         )
 
     def get(self, kind: str, name: str, *, timeout: float = 10) -> dict:
