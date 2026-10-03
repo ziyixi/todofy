@@ -44,7 +44,10 @@ make demo
 
 ## 部署自己的日报服务
 
-推荐按 [self-host-on-vultr 的部署指南](https://github.com/ziyixi/self-host-on-vultr/tree/main/newsletter) 运行：它提供 Linux/amd64 的 Docker Compose 配置、独立定时触发器，以及内容配置同步器。本仓库的 `compose.yaml` 仅供本地演示，不是生产配置。
+本 monorepo 的生产部署使用独立 Newsletter 镜像与 k3s，由 GitHub Actions 经 Platform daemon 发布。
+从[个人云重建指南](../docs/rebuild.md)和[一次性 VPS bootstrap](../tools/vps-bootstrap/README.md)开始；
+发布排空见[部署合同](docs/deployment-drain.md)。旧 self-host-on-vultr Compose 路径只作为迁移历史，
+本目录的 `compose.yaml` 仅供本地演示。
 
 首次部署需要准备：
 

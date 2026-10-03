@@ -1,8 +1,9 @@
 # One-time VPS bootstrap
 
 Edit public identity in `config/cloud.toml`, configure credentials, and use the same
-verified images on a new VPS. Application source does not change. The complete
-Cloudflare/GitHub rebuild sequence is in [`docs/rebuild.md`](../../docs/rebuild.md).
+verified images on a supported new VPS. The Cloudflare/GitHub sequence and remaining
+fresh-account gaps are in [`docs/rebuild.md`](../../docs/rebuild.md) and its
+[code audit](../../docs/rebuild-audit.md).
 
 The installer is a one-time root setup for standard K3s, retained storage, scoped
 RBAC and a dedicated Cloudflare connector. Normal releases use the platform API
@@ -26,12 +27,18 @@ platform/.venv/bin/python tools/vps-bootstrap/prepare.py \
 The public bundle contains rendered resources, pinned versions, allowed private
 setting names, standard K3s/Tunnel units and stdlib installer modules. Each file
 has a checksum; these establish bundle consistency, not an independent signature.
-Initial Newsletter admission holds `release-<source_sha>` and its daily CronJob
+Initial Newsletter admission holds `release-<source_sha>` with new work disabled;
+the initial gate is usually `draining`, not a verified `frozen` receipt. Its daily CronJob
 is suspended. The observer CronJob remains active every five minutes, with Forbid
 concurrency and its own persistent sequence/pending-receipt PVC.
 The first API release must use that same bootstrap source SHA. Keep normal VPS
 deployment disabled and avoid advancing the first-release commit until it is verified;
 a different SHA cannot silently replace the existing held admission operation.
+After bootstrap/authentication/held-state checks, enable `VPS_DEPLOY_ENABLED` for a controlled
+same-SHA Actions release while holding main changes. That normal release verifies drain/freeze,
+then resumes admission and unsuspends the daily trigger before reaching ready. Complete provider
+setup and decide the restored unknown-outcome policy before that release; it is not a paused rollout
+with a separate activation step. A failed operation requires its explicit original-ID continuation.
 
 ## Private input
 
@@ -83,6 +90,9 @@ Supported initial host: Ubuntu 24.04 Linux amd64 with its existing Python 3 stdl
 systemd and iptables/ip6tables restore commands. A preinstalled cloudflared is not required.
 No Python packages are installed on the VPS. Meet [K3s requirements](https://docs.k3s.io/installation/requirements)
 and provide outbound HTTPS for the pinned official K3s/cloudflared binaries and verified public images.
+Tunnel operation also requires outbound port **7844**, via UDP for QUIC or TCP for HTTP/2;
+HTTPS on 443 alone is insufficient. Allow the required Cloudflare destinations described in the
+[official firewall guide](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/configure-tunnels/tunnel-with-firewall/).
 
 ```sh
 sudo python3 <bundle>/installer/install.py \

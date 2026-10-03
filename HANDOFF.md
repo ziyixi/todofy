@@ -331,6 +331,18 @@ sealed bootstrap handoff. Nine cloud-config tests passed; all thirteen current-p
 remain unchanged. Profile/catalog checks and a synthetic certificate/CMS roundtrip also passed. The new
 configuration-only recovery instructions still need an empty-account/VPS exercise; no such live drill was run.
 
+The 2026-10-03 [rebuild audit](docs/rebuild-audit.md) reviews all eleven applications, deployment identities,
+infra adoption and VPS/state boundaries. A strictly configuration-only fresh-account rebuild is not yet
+supported: Watch and the relay acceptance check retain account-specific workers.dev references; normal
+infra apply and import-only bootstrap do not form an empty-account creator; hostname/inventory coverage and
+historical recovery have listed gaps. The report proposes bounded follow-ups without implementing a new
+provisioner or moving accounts/data. The runbook now states those limits, preserves creation-time machine
+secrets, documents Tunnel's outbound 7844 requirement and directs Newsletter to the current k3s flow.
+Profile/catalog/drift checks remain current; nine profile tests, two migration-reference tests and a check
+of 113 relative document links passed. This documentation does not resolve the held production
+release: its guarded owner phase-only recovery is still pending, followed by the original-ID resume,
+publication of the tested permanent fix and live second-release/system-daemon/Fleet/Home acceptance.
+
 ## Foundation completed (historical release evidence)
 
 - Root README is concise and bilingual; docs, contracts and migration history have separate navigation. P5 uses nine `app.toml` files, generates Home/Access metadata, and validates ten Workers against their committed Wrangler configs. Existing Home public bytes and Access identities were preserved. The read-only Infra drift run reported `no-op 19`; no infrastructure apply was needed.

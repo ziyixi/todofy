@@ -32,7 +32,10 @@ as `<database name>-db`; the Durable Object map uses existing Home logical resou
 DO stays `match: null` until its first deployment provides an ID.
 Fleet's `HOST_EPOCH` stays operator-managed; profile generation never resets observer sequence or provider state.
 
-The supported narrow case is moving the same owner/repository/domain to a new VPS or Cloudflare account.
+The existing profile covers the same owner/repository/domain when replacing a supported VPS and collecting
+new Cloudflare identities. It does not yet make a fresh-account rebuild fully configuration-only: account-specific
+workers.dev references, hostname consumers and initial creation/adoption still have gaps in the
+[code audit](../../docs/rebuild-audit.md).
 Changing a zone or repository validates new allowed public identities; it does not rename routes,
 images, website canonical content, immutable API identities or source provenance. See
 [the rebuild runbook](../../docs/rebuild.md) for prerequisites, configuration gaps and recovery boundaries.

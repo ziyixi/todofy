@@ -1,10 +1,11 @@
 # Rebuild the personal cloud
 
-The same application source and proto contracts can run on a fresh VPS and Cloudflare account.
-Public profiles and private credentials change; provider objects and historical data do not move merely
-because the code is deployed. The repository now generates repeated Worker/Home identities from two
-configuration files, but it does **not** provide a one-command fresh-account provisioner or a proven
-complete disaster recovery. Read the boundary below before switching live traffic.
+Most application source and the stable proto contracts can be reused on a fresh VPS and Cloudflare account.
+The current code still has account-specific workers.dev references in Watch and the relay acceptance check,
+and a first-account creation/adoption gap. A strictly configuration-only complete rebuild is therefore not
+yet supported. The [dated code audit](rebuild-audit.md) records those gaps and the smallest proposed fixes.
+Public profiles and private credentials change; deploying code does not move provider objects or historical
+data. The identity generator is neither a fresh-account provisioner nor a proven complete disaster recovery.
 
 ## Configuration entry points
 
@@ -18,10 +19,11 @@ complete disaster recovery. Read the boundary below before switching live traffi
 | k3s application secrets and mounted auth | Newsletter integration tokens, dedicated Codex login, backup machine identity | Private node state/secret storage; never Git or image |
 | Recovery material | Encryption keys, verified data snapshots, deletion journal and side-effect reconciliation | Independent private storage |
 
-The narrow supported target keeps the same owner, `ziyixi/todofy` repository, `ziyixi.science` domain,
-Worker names and logical database names. It changes no application logic or proto identity.
+The currently verified VPS case keeps the same owner, repository, domain, Worker names and logical
+database names. It does not itself solve a new Cloudflare account's workers.dev identity or provisioning.
 For a different domain or repository, routes, image publication settings, website canonical origin and
-relay dispatch settings require additional **configuration** changes. The profile generator does not
+relay dispatch settings require additional configuration changes; Watch self-domain policy and Todofy's
+Watch link authorization currently also require implementation work. The profile generator does not
 silently rename them. API `ErrorInfo.domain`, proto resource types and locked external protobuf provenance
 are stable contract/supply-chain identities; do not globally replace strings in the source to move hosts.
 
@@ -73,7 +75,9 @@ resources exist; they are not the migration configuration mechanism. Fleet's sol
 use the new actual AUD, never a synthetic one. Its deploy wrapper permits a credential-free dry run and
 refuses a real deployment without the actual AUD.
 
-Run the separately gated infrastructure creation first. Read only the new owner app's public AUD/app ID
+Complete the separately reviewed creation/adoption stage first; the repository does not yet supply its
+complete fresh-account workflow. Do not dispatch the normal `Infra apply` as an empty-account creator.
+Read only the new owner app's public AUD/app ID
 and the exact receipt app/policy IDs into the supported public inventory fields. Tunnel and service-token
 identities remain in protected infrastructure state and the private bootstrap handoff; the inventory does
 not declare those fields. Export the platform machine credentials through the private bootstrap channel,
@@ -84,6 +88,11 @@ Before that reviewed `Infra apply`, prepare an owner-held RSA key and PEM X.509 
 in a private local directory outside Git and cloud sync. Set the **production environment variable**
 `VPS_BOOTSTRAP_CERT` to the certificate, not a raw public key; the private key never goes to GitHub.
 Without that variable the optional export is skipped. Replace the repository and reviewed apply run ID below:
+
+This CMS example applies only after adoption is complete and the new account's encrypted state actually
+contains the creation-time Access client secret. If import did not retain it, use the independent private
+handoff instead; do not recreate a working identity just to obtain an export. The normal `Infra apply`
+here is the post-adoption gated operation, not an empty-account creator.
 
 ```sh
 umask 077
@@ -110,6 +119,11 @@ through private file/stdin input into their matching stores, without printing th
 `VPS_BOOTSTRAP_CERT` variable; retain private recovery material according to the owner's backup policy.
 See [OpenSSL CMS](https://docs.openssl.org/3.6/man1/openssl-cms/) for the recipient/decryption format.
 
+Pre-created service identities need special care: Access displays the client secret only at creation.
+Importing the resource cannot be assumed to recover that secret for the CMS export. Preserve it in the
+creation-time encrypted state/sealed handoff or independently populate its corresponding private stores.
+See [Access service tokens](https://developers.cloudflare.com/cloudflare-one/access-controls/service-credentials/service-tokens/).
+
 In the prepared configuration commit, add the actual Fleet AUD to both its production Wrangler field and
 the public inventory, and record the owner app ID in `infra/ids.tf`. The identity generator replaces existing
 AUD fields; it does not insert a missing one or update the infrastructure import-ID map. Fleet deploys
@@ -134,9 +148,14 @@ production `tofu apply` to make the first plan green.
 
 When adopting pre-created equivalents:
 
+- Pre-create the infra-state bucket in the new account and supply its new private token file. The current
+  bootstrap's missing-bucket creation path invokes a legacy helper fixed to the old account; changing only
+  the profile/tfvars does not redirect that helper. Do not run that creation path for a new account.
 - Record their new IDs/AUDs in `config/resources.toml` and generate the production identities.
 - Update only reviewed infrastructure identity references (`infra/ids.tf`, backup/FlowDay policy references
-  in `infra/access.tf`). The read-only `infra/scripts/local_tfvars.py` helper reads its policy/app IDs
+  in `infra/access.tf`, and the new adopted backup application's ID in `infra/scripts/infra_state.py`
+  `FROZEN_OBJECTS`). Keep the protected Terraform address and frozen semantics unchanged.
+  The read-only `infra/scripts/local_tfvars.py` helper reads its policy/app IDs
   from `config/resources.toml` and refuses an account mismatch before any GET. Those inventory
   references are not rewritten by `tools/cloud-config`; changing profiles alone does not migrate infra state.
 - Restore/update `import {}` blocks from the documented history, including later-added applications,
@@ -144,7 +163,7 @@ When adopting pre-created equivalents:
 - Supply new sensitive identity rules as `INFRA_TFVARS`; keep them out of public configuration. The
   local values helper can read equivalent pre-created policies after the public IDs are updated. Prepare
   an explicit private values file when those policies do not exist yet.
-- Create the state bucket with the authorized bootstrap path; supply a new independently saved state
+- Use the already-created new-account state bucket; supply a new independently saved state
   encryption passphrase. Import-only plan counts/fingerprint must match the reviewed inventory. Check
   that its final plan is no-op and outputs match production configs before resuming normal gated apply.
 
@@ -188,6 +207,11 @@ conflict; a held/failed operation needs an explicit resume with its current etag
 it reads the existing frozen targets without rebuilding or publishing replacement images. A process restart must not
 silently re-admit work or create a different release. Keep `VPS_DEPLOY_ENABLED=false` until the dedicated
 transport/authentication, safe drain behavior and actual image provenance have been checked.
+After verifying bootstrap/authentication and the held runtime, keep main unchanged and enable that
+variable for the controlled first same-SHA Actions release; explicit resume also requires it. Normal
+release resumes Newsletter admission and its daily trigger before reaching ready, so provider setup and
+the restored unknown-outcome policy must be decided beforehand. There is no separate paused-rollout
+activation step. Disabling the GitHub variable does not cancel a persisted server operation.
 
 The independently released `platform` OCI image supplies `personal-cloud`, the local release
 controller, status daemon and bounded observer. It embeds generated `platform.runtime.v1`/`fleet.telemetry.v1`
@@ -263,6 +287,11 @@ Additional Worker secrets currently set outside the deploy wrappers include:
 | Todofy core | `GEMINI_API_KEY`, `TODOIST_API_KEY` |
 | Website relay | `GITHUB_DISPATCH_TOKEN`, `NOTION_TOKEN`, `NOTION_DATA_SOURCE_ID`, `NOTION_WEBHOOK_SECRET` |
 
+Conditional inputs must follow the original deployment's enabled capabilities: Mail Hero's consumer
+Access needs `ACCESS_CLIENT_ID`/`ACCESS_CLIENT_SECRET` plus matching `ACCESS_SERVICE_ORIGIN`; its alert
+webhook needs `ALERT_WEBHOOK_TOKEN` when enabled. Todofy's existing mail-token rotation window may also
+require `MAIL_WEBHOOK_TOKEN_SHA256_PREVIOUS`. Rebuilding does not itself enable these optional features.
+
 The matching machine Basic/Bearer credentials, FlowDay sealing key, owner/aliases, Fleet report HMAC key
 and independent daemon deployment Bearer must also be restored or deliberately rotated at all consumers.
 Fleet publishes only three dedicated inputs: `FLEET_ACCESS_OWNER`, `FLEET_ACCESS_OWNER_ALIASES` and
@@ -280,9 +309,9 @@ for a brand-new empty deployment; encrypted historical credentials require their
 | FlowDay, Links, Lab D1 | Restore application SQL/schema; FlowDay needs the original sealing key for historical stored tokens |
 | Fleet DO SQLite | The current heartbeat/history is disposable observation state; a new namespace begins as never observed and must receive fresh signed reports |
 | Platform observer | Retained Fleet with the same epoch requires the observer's durable sequence/pending-receipt directory; otherwise coordinate a new epoch on both sides before starting the fresh observer |
-| Watch and Home DO SQLite | There is no unified account-to-account backup/restore here. A fresh namespace does not recover watches, intent ledger, canary/history or alarms |
-| Platform daemon | Restore durable release SQLite and reviewed target configuration; inspect interrupted/held operations before explicit etag-checked continuation, never blindly restart a deployment |
-| Newsletter | Restore exclusive SQLite, frozen run/config identities and dedicated auth; interrupted/unknown external operations are not automatically retried as new operations |
+| Watch, Lab and Home DO SQLite | There is no unified account-to-account backup/restore here. A fresh namespace does not recover watches/intent ledger, Lab queue/vector/guard/budgets, Home settings/canary/history or alarms |
+| Platform daemon | Before startup, inspect durable release SQLite, frozen targets/phase/checkpoint and matching namespace/PVC/Newsletter gate. Nonterminal operations automatically continue; held/failed need explicit etag Resume. There is no unified read-only restore/quarantine entrypoint |
+| Newsletter | Restore exclusive SQLite, frozen run/config identities, original mode/delivery target and dedicated auth; interrupted/unknown external operations are not automatically retried as new operations |
 | Website | Rebuild content from authorized Notion sources, following release identity/bootstrap/recovery checks; preserve publication/release evidence deliberately |
 | Infra state | Import fresh-account identities into newly encrypted state; do not reuse old resource state as new |
 

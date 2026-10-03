@@ -13,6 +13,7 @@ The documents below have different jobs; keep one authoritative home for each fa
 | Change auth behavior / 修改鉴权 | [edge-auth SPEC](../packages/edge-auth/SPEC.md) |
 | Check or release code / 检查与发布 | [CI/CD](ci-cd.md), then the application's runbook |
 | Change Cloudflare resources / 修改云资源 | [infra](../infra/README.md) |
+| Recreate or recover the cloud / 重建与恢复 | [Rebuild](rebuild.md): current steps; [code audit](rebuild-audit.md): portability gaps, state/secret inventory and proposed improvements |
 | Understand older layouts / 查迁移背景 | [History](history.md), including dated old-client compatibility |
 
 ## Where facts belong
