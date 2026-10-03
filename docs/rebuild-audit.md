@@ -263,7 +263,8 @@ GitHub、daemon、Fleet/Home 要表达同一部署结果，但不能把它们合
 
 本次 held release说明一个恢复边界：daemon自升级后，执行逻辑改变但原release targets仍冻结。
 不能修改旧release payload、清空ledger或自动用新SHA重建操作。正常Resume必须复用原身份和当前etag。
-目前修复路径需要一条有严格preflight/CAS的owner操作；它不等于日常部署需要sudo。
+此次恢复由owner完成严格preflight/CAS的phase修复，再以原身份Resume成功；冻结targets未被重写。
+随后的正常`7a66336`发布也已完成。这个历史恢复操作不等于日常部署需要sudo。
 
 后续可评估一个版本化、窄范围的维护/recovery API：只允许列明恢复动作、CAS与审计，保留安全gate，
 不接收shell/YAML/路径，也不把任意kubectl权限交给GitHub。必须解释旧版本不支持此API时的fallback。
@@ -273,7 +274,7 @@ GitHub、daemon、Fleet/Home 要表达同一部署结果，但不能把它们合
 
 | 阶段 | 改动 | 验收/边界 |
 | --- | --- | --- |
-| 先完成当前发布 | 恢复原held release，再正常发布已green的ownership/Fleet修复 | 原身份ready；第二次完整release；实际systemd/rootless probe；fresh Fleet/Home。当前仍有owner操作待完成 |
+| 当前发布收尾 | owner修复、原身份Resume及正常ownership/Fleet修复发布已完成 | 原身份恢复成功；`7a66336`完整release ready、targets verified；fresh Fleet/Home已核验。system-daemon仍unknown，实际daemon状态验收待完成 |
 | 1. 补公开身份 | workers.dev/relay origin、Fleet hostname消费者、Watch自有域与Todofy授权、仓库发布身份；沿用现有generator | 同源码在合成新account/team/domain/repo输入生成完整一致配置；旧域负例与历史payload兼容；不改proto身份 |
 | 2. 闭合首次创建 | 复用固定版本OpenTofu/provider、Wrangler/官方API，独立create-only与完整adoption inventory；去掉旧helper账户假设 | 空账户plan只有允许create；重复run no-op；部分失败可查/续；creation-time secret不丢；正式apply保护不削弱 |
 | 3. 统一准备清单 | required secret presence、rotation关系、bootstrap状态、renderer/compiler版本与host preflight | 输出只给缺失名称和步骤；不开provider调用验证真实业务，不读取/打印秘密 |
@@ -294,8 +295,20 @@ GitHub、daemon、Fleet/Home 要表达同一部署结果，但不能把它们合
   Watch运行时源文件的无网络合成URL-policy probe证实新workers.dev的排除缺口。
 - ownership永久修复在branch [37115872382](https://github.com/ziyixi/todofy/actions/runs/37115872382)通过gate；
   配置/说明跟进在 [37116764975](https://github.com/ziyixi/todofy/actions/runs/37116764975)通过gate。
-  这些checks不是新账户恢复或第二次生产rollout的证据。
-- 当前生产仍处于已记录的held release；最新候选未部署。报告不会把待owner恢复和待live acceptance写成完成。
+  这些branch checks本身不是新账户恢复或生产rollout的证据。
+- 当前发布状态单独更新：owner phase修复完成；原`0f84d91`发布以原身份在
+  [37142362209](https://github.com/ziyixi/todofy/actions/runs/37142362209)成功恢复；正常`7a66336`发布的
+  [37142838447](https://github.com/ziyixi/todofy/actions/runs/37142838447)完整workflow成功。
+  typed API为`ready`且`frozen_targets_verified=true`；两workload的actual source为`7a66336`、generation为6，
+  request为`9b00f775-b0df-4147-8660-33e50fc126f1`。实际镜像digest见[HANDOFF](../HANDOFF.md)。
+  Newsletter为accepting、0 active，32个历史unknown保持原样。
+- 18:15 UTC的新Fleet receipt匹配actual/desired source、digest和request，记录`resolved_deployment_pending`。
+  两release ConfigMap的phase均为activated，phase只由`personal-cloud-runtime-status`持有；
+  `newsletter-daily`及observer均为`suspend=false`。18:19 UTC Home正常刷新后Newsletter从故障变为需关注，
+  仅保留对应32个历史结果的`newsletter_unknown`警告，旧unavailable、deployment_pending、paused告警已清。
+  Todofy报告正常，Notion写入未接入。system-daemon仍为`unknown`，单独诊断和真实daemon状态验收待完成。
+  已完成的生产发布/Fleet/Home验收不证明真实provider/send业务、新账户/VPS重建或历史恢复；
+  没有运行新的自动VPS备份，保留的旧备份也不构成当前备份覆盖。
 - 本报告和runbook修正文档导航/已有能力说明；没有实现上表新的provisioner、恢复工具或账户迁移。
 
 验收此报告时，可以直接问：输入是否齐全、每一步谁持有权限、失败能否继续、旧数据能否保留、

@@ -19,12 +19,13 @@ Rules for this file:
 Last updated: 2026-10-03. The verified foundation implementation is `8628e5e`; the k3s/Fleet
 implementation and pinned connector bootstrap reached `main` at `54861b2`. The owner completed the bounded
 SDK repair at `c703378`; Actions then activated the first API release and verified the physical images.
-The subsequent `0f84d91` release installed its daemon but is held on a Kubernetes field-ownership
-conflict. Newsletter admission is frozen, with zero active work and all 32 historical unknown outcomes
-preserved. k3s and the dedicated connector are running; Docker is inactive and disabled. Fleet receives
-signed cluster/runtime reports. The guarded phase recovery awaits owner execution; the tested permanent
-ownership fix and rebuild configuration corrections await publication;
-system-daemon observation still awaits a completed rollout and live acceptance below.
+The subsequent `0f84d91` release encountered a Kubernetes field-ownership conflict. The owner completed
+the guarded phase repair, and the original-ID resume succeeded in Actions `37142362209`. The normal
+`7a66336` release then completed in Actions `37142838447`; its typed API reports `ready` with frozen
+targets verified. Newsletter admission is accepting, with zero active work and all 32 historical unknown
+outcomes preserved. k3s and the dedicated connector are running; Docker is inactive and disabled.
+Fresh Fleet/Home checks confirm the release identities and clear the old deployment/admission alerts.
+System-daemon observation still reports `unknown` and awaits a separate diagnostic and live acceptance.
 Every app's owner API is on proto now (the dashboard
 `ca63675`, FlowDay `8d9100e`, Mail Hero `d1bde0e`, Todofy `b70856f`, all landed and verified on 2026-10-02). Nothing
 was in flight at that landing. The foundation evidence below describes that completed release.
@@ -45,11 +46,11 @@ was in flight at that landing. The foundation evidence below describes that comp
 
 Newsletter source was imported on `main` from its deployed engine commit
 `c3d622d4771b1ca63ee4e3f785b79032cffc30e1`. Its independent image is `ghcr.io/ziyixi/todofy-newsletter`.
-The running Newsletter still uses the `c703378` Linux-tested image artifact:
-`sha256:63f5c907775c953d4d31629eeb2862fe1bf151eefa07e25cef630c419c834d19`.
+The running Newsletter uses source `7a66336` and image artifact:
+`sha256:0a12974b38ef5a3f35c4f38aec0f2366efe5d37250e38bdb9e60b34e25163afc`.
 The package is public; anonymous manifest access and the manifest/config identity checks passed.
 `ghcr.io/ziyixi/newsletter` was the old VPS runtime. It is stopped, with its image and persistent state
-preserved. Newsletter runs in k3s, but the latest `0f84d91` release is held; this does not prove an
+preserved. Newsletter runs in k3s and the latest `7a66336` release is ready; this does not prove an
 external business operation. The application reads Todofy's
 `/api/summary` and `/api/recommendation` using its existing machine contract. See
 `newsletter/docs/import-source.md` and `newsletter/docs/deployment-drain.md` for the import and release boundaries.
@@ -288,14 +289,15 @@ unknown outcomes retained. The Platform digest is
 Optional namespace metadata diagnosis now works without sudo and rejects Secret/exec/write access.
 No real model/provider/send or backup acceptance has been claimed.
 
-The remaining systemd issue is before method calls: the UID10001 container's system-bus connection
-closes, and that UID is not registered on the host. A fixed non-root diagnostic reproduced it. The
-`0f84d91` candidate uses a standard same-image init container as the host's existing UID65534 (`nobody`),
+The earlier systemd diagnostic failed before method calls: the UID10001 container's system-bus connection
+closed, and that UID was not registered on the host. A fixed non-root diagnostic reproduced it. The
+`0f84d91` candidate introduced a standard same-image init container as the host's existing UID65534 (`nobody`),
 retains the non-mutating polkit denial checks, and writes only a bounded shared-proto daemon snapshot
 to an emptyDir. The main observer keeps its existing UID, durable state and receipt identity. The init
 receives no projected Kubernetes identity or application secret. Both images are pinned to the same
-tested digest. Gate, publish and verify live daemon states and fresh Fleet/Home receipts before closing
-this item; an unreadable probe must still report unknown, never assume health.
+tested digest. The subsequent `7a66336` release completed and fresh Fleet/Home receipts were verified,
+but system-daemon still reports `unknown`. A separate bounded diagnostic is pending; live daemon-state
+acceptance has not passed. An unreadable probe must still report unknown, never assume health.
 Local validation passed 178 Platform/build/release/bootstrap checks and 166 subtests, including actual
 shared-codec snapshot bounds/freshness and offline Kustomize identity/permission checks. All 67 relevant
 Python files passed lint/format; proto lint, API lint, schema checks and breaking checks passed. The
@@ -307,20 +309,44 @@ at `0f84d91`, including the real Linux probe smoke. [Main 37113997517](https://g
 published its images and Cloudflare Workers; VPS deploy held after daemon replacement. A same-ID resume
 in [37114292742](https://github.com/ziyixi/todofy/actions/runs/37114292742) also held. Metadata confirms
 that merge-patch activation transferred release `phase` to an Update manager, so the next manifest Apply
-conflicts while changing it back to `applying`. Do not repeatedly resume without repairing that cause.
-The immutable old release first needs a guarded phase-only recovery of its two release ConfigMaps, then
-an explicit original-ID resume. A reviewed owner-executed repair is prepared; execution is pending.
-Its running Platform digest is `sha256:150f970d33b337ef9021191322fa5d9f9c794768d31d59ce87576f2bd6124482`.
+conflicted while changing it back to `applying`. The owner completed the guarded phase-only recovery of
+the two release ConfigMaps. The explicit original-ID resume in
+[37142362209](https://github.com/ziyixi/todofy/actions/runs/37142362209) then succeeded; the frozen release
+targets and identity were retained. The Platform digest at the earlier held checkpoint was
+`sha256:150f970d33b337ef9021191322fa5d9f9c794768d31d59ce87576f2bd6124482`.
 
 The branch's permanent fix at `0adfb34` passed [CI gate 37115872382](https://github.com/ziyixi/todofy/actions/runs/37115872382).
 It separates manifest ownership from the narrowly scoped phase/suspend
 workflow; see [deployment ownership](platform/src/personal_cloud/deployment/README.md).
 The accompanying Fleet correction keeps the historical unknown-outcome warning while requiring actual
 process, admission, Pod and release identity evidence for readiness. Those historical business outcomes
-alone must not produce a process failure or pending-release alert. Gate the candidate before landing,
-finish the original held release, then publish the candidate normally. Verify a second complete release,
-the rootless system-daemon snapshot and fresh Fleet/Home receipts. No live acceptance of those follow-ups
-has yet been claimed.
+alone must not produce a process failure or pending-release alert. After the original-ID resume, the normal
+`7a66336` release completed in [37142838447](https://github.com/ziyixi/todofy/actions/runs/37142838447).
+The typed API reports `ready` and `frozen_targets_verified=true`; both workloads have generation 6 and
+request `9b00f775-b0df-4147-8660-33e50fc126f1`. Actual Newsletter and Platform sources are `7a66336`.
+Platform's actual image is
+`sha256:15d6c8ad7f60f1bd1ca310ae3662721846754aae0dfbd39cfb59bc6c5e8bc60a`;
+Newsletter's actual image is recorded above. A fresh Fleet receipt at 18:15 UTC matched actual/desired
+source, digests and request identity and recorded `resolved_deployment_pending`. Both ConfigMap phases
+are `activated`; their only phase manager is `personal-cloud-runtime-status`, while the base
+`personal-cloud` manager does not own phase. `newsletter-daily` and the observer both have `suspend=false`.
+At 18:19 UTC, a normal Home refresh changed Newsletter from failure to attention: only
+`newsletter_unknown` remains for the 32 historical outcomes; `newsletter_unavailable`,
+`deployment_pending` and paused alerts cleared. Todofy reports normal; Notion writing remains unconnected.
+System-daemon remains `unknown`, so its diagnostic and live acceptance are still pending. These checks
+do not prove a real provider/send operation or backup coverage.
+
+The next bounded diagnostic uses Kubernetes' standard termination file in the existing observer image.
+Init records only fixed unit aliases, states, stages and safe error codes; the main observer records
+snapshot-read status. Both containers use `terminationMessagePolicy: File`, with no log fallback.
+Messages are at most 1 KiB and cannot contain exception text, D-Bus bodies, credentials or configuration.
+The existing namespace reader can inspect this Pod metadata without exec/log access or new host privileges.
+Unknown states and the non-mutating polkit authorization guard remain unchanged. Gate and publish this
+candidate normally, inspect a naturally scheduled observer's bounded metadata, then verify fresh Fleet/Home
+receipts. A successful init or accepted receipt alone does not prove the system daemons were observed.
+Local validation of this diagnostic candidate passed all 190 Platform/build/release/bootstrap tests;
+all 69 relevant Python files passed lint/format. Wire fixtures exercise the actual Jeepney serializer,
+private response/error text is excluded, snapshot expiry remains unknown, and termination output is bounded.
 Local candidate validation passed 182 Platform/build/release/bootstrap tests plus 178 subtests,
 45 Fleet unit tests and eight real workerd SQLite tests. Fleet type checks and lint passed; all 71
 relevant Python files passed lint/format. The two-release ownership test uses the real SDK transport
@@ -339,9 +365,10 @@ historical recovery have listed gaps. The report proposes bounded follow-ups wit
 provisioner or moving accounts/data. The runbook now states those limits, preserves creation-time machine
 secrets, documents Tunnel's outbound 7844 requirement and directs Newsletter to the current k3s flow.
 Profile/catalog/drift checks remain current; nine profile tests, two migration-reference tests and a check
-of 113 relative document links passed. This documentation does not resolve the held production
-release: its guarded owner phase-only recovery is still pending, followed by the original-ID resume,
-publication of the tested permanent fix and live second-release/system-daemon/Fleet/Home acceptance.
+of 113 relative document links passed. The owner phase repair, original-ID resume and normal second
+production release are now complete, with fresh Fleet/Home acceptance as recorded above. System-daemon
+still reports `unknown`; its live acceptance remains pending. No new-account/VPS rebuild or historical
+recovery drill was performed, and no new automatic VPS backup is running.
 
 ## Foundation completed (historical release evidence)
 

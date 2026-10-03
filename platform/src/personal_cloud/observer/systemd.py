@@ -8,6 +8,7 @@ from jeepney import (
     SizeLimitError,
     new_method_call,
 )
+from jeepney.io.common import RouterClosed
 from jeepney.io.threading import open_dbus_router
 
 from .transport import ObserverError
@@ -28,6 +29,38 @@ MANAGEMENT_ACTIONS = (
     "set-environment",
     "reload-daemon",
 )
+DIAGNOSTIC_STAGES = {"BUS", "POLKIT", "GET_UNIT", "LOAD_STATE", "ACTIVE_STATE"}
+DIAGNOSTIC_CODES = {
+    "OK",
+    "UNREADABLE",
+    "TIMEOUT",
+    "AUTH_FAILED",
+    "DBUS_DENIED",
+    "SERVICE_UNAVAILABLE",
+    "POLKIT_FAILED",
+    "NO_SUCH_UNIT",
+    "INVALID_REPLY",
+    "UNSUPPORTED_STATE",
+    "UNSAFE_AUTHORIZATION",
+    "CONNECTION_CLOSED",
+    "ERROR",
+}
+ERROR_NAMES = {
+    "org.freedesktop.DBus.Error.AccessDenied": "DBUS_DENIED",
+    "org.freedesktop.DBus.Error.AuthFailed": "AUTH_FAILED",
+    "org.freedesktop.DBus.Error.ServiceUnknown": "SERVICE_UNAVAILABLE",
+    "org.freedesktop.DBus.Error.NameHasNoOwner": "SERVICE_UNAVAILABLE",
+    "org.freedesktop.DBus.Error.NoReply": "TIMEOUT",
+    "org.freedesktop.DBus.Error.Timeout": "TIMEOUT",
+    "org.freedesktop.PolicyKit1.Error.Failed": "POLKIT_FAILED",
+    "org.freedesktop.PolicyKit1.Error.NotAuthorized": "DBUS_DENIED",
+    BUS_NAME + ".NoSuchUnit": "NO_SUCH_UNIT",
+}
+
+
+def check_error(reply):
+    if reply.header.message_type == MessageType.error:
+        raise DBusErrorResponse(reply)
 
 
 def readonly_authority(connection):
@@ -48,6 +81,7 @@ def readonly_authority(connection):
             ),
             timeout=2,
         )
+        check_error(reply)
         if (
             reply.header.message_type != MessageType.method_return
             or len(reply.body) != 1
@@ -76,6 +110,7 @@ def property_value(connection, path, name):
     reply = connection.send_and_get_reply(
         new_method_call(address, "Get", "ss", (UNIT_INTERFACE, name)), timeout=2
     )
+    check_error(reply)
     if reply.header.message_type != MessageType.method_return or len(reply.body) != 1:
         return None
     variant = reply.body[0]
@@ -84,54 +119,77 @@ def property_value(connection, path, name):
     return variant[1] if isinstance(variant[1], str) and len(variant[1]) <= 64 else None
 
 
-def daemon(name):
+def daemon(name, *, diagnostic=None):
     """Only GetUnit and Properties.Get. Management is denied by host polkit."""
+    stage = "BUS"
+
+    def result(state, code):
+        if diagnostic is not None:
+            diagnostic.update(unit=name, state=state, stage=stage, code=code)
+        return {"state": state}
+
     if name not in UNITS:
         return {"state": "unknown"}
     try:
         with open_dbus_router(BUS_ADDRESS, enable_fds=False) as connection:
+            stage = "POLKIT"
             if not readonly_authority(connection):
-                return {"state": "unknown"}
+                return result("unknown", "INVALID_REPLY")
             manager = DBusAddress(
                 "/org/freedesktop/systemd1",
                 bus_name=BUS_NAME,
                 interface=BUS_NAME + ".Manager",
             )
+            stage = "GET_UNIT"
             reply = connection.send_and_get_reply(
                 new_method_call(manager, "GetUnit", "s", (UNITS[name],)), timeout=2
             )
-            if reply.header.message_type == MessageType.error:
-                # GetUnit observes loaded units only. NoSuchUnit does not prove
-                # that its installed unit file is missing, so remain unknown.
-                return {"state": "unknown"}
+            # NoSuchUnit observes loaded units, not installed unit files.
+            check_error(reply)
             if (
                 reply.header.message_type != MessageType.method_return
                 or len(reply.body) != 1
             ):
-                return {"state": "unknown"}
+                return result("unknown", "INVALID_REPLY")
             path = reply.body[0]
             if (
                 not isinstance(path, str)
                 or len(path) > 512
                 or not path.startswith("/org/freedesktop/systemd1/unit/")
             ):
-                return {"state": "unknown"}
+                return result("unknown", "INVALID_REPLY")
+            stage = "LOAD_STATE"
             load_state = property_value(connection, path, "LoadState")
             if load_state == "not-found":
-                return {"state": "missing"}
+                return result("missing", "OK")
             if load_state is None:
-                return {"state": "unknown"}
+                return result("unknown", "INVALID_REPLY")
+            stage = "ACTIVE_STATE"
             state = property_value(connection, path, "ActiveState")
-            return {"state": state if state in ACTIVE_STATES else "unknown"}
+            if state is None:
+                return result("unknown", "INVALID_REPLY")
+            return (
+                result(state, "OK")
+                if state in ACTIVE_STATES
+                else result("unknown", "UNSUPPORTED_STATE")
+            )
+    except ObserverError:
+        result("unknown", "UNSAFE_AUTHORIZATION")
+        raise
+    except DBusErrorResponse as error:
+        return result("unknown", ERROR_NAMES.get(error.name, "ERROR"))
+    except TimeoutError:
+        return result("unknown", "TIMEOUT")
+    except AuthenticationError:
+        return result("unknown", "AUTH_FAILED")
+    except (EOFError, RouterClosed):
+        return result("unknown", "CONNECTION_CLOSED")
+    except OSError:
+        return result("unknown", "UNREADABLE")
     except (
-        OSError,
-        TimeoutError,
         ValueError,
         TypeError,
         AttributeError,
-        EOFError,
-        AuthenticationError,
-        DBusErrorResponse,
         SizeLimitError,
     ):
-        return {"state": "unknown"}
+        return result("unknown", "ERROR")

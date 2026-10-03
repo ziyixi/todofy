@@ -14,6 +14,15 @@ def documents(name):
 
 
 class BootstrapBoundaries(unittest.TestCase):
+    def test_observer_termination_metadata_never_falls_back_to_logs(self):
+        resource = yaml.safe_load((ROOT / "k3s/newsletter/observer.yaml").read_text())
+        pod = resource["spec"]["jobTemplate"]["spec"]["template"]["spec"]
+        for container in [*pod["initContainers"], *pod["containers"]]:
+            self.assertEqual(
+                container["terminationMessagePath"], "/dev/termination-log"
+            )
+            self.assertEqual(container["terminationMessagePolicy"], "File")
+
     def test_controller_writes_only_supported_namespace_resources(self):
         roles = {
             item["metadata"]["name"]: item

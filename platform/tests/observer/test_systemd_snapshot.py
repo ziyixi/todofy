@@ -71,10 +71,12 @@ class SnapshotTests(unittest.TestCase):
             path = Path(directory) / "snapshot.json"
             with patch.object(snapshot, "SNAPSHOT_PATH", path):
                 self.assertEqual(snapshot.read(), self.unknown())
-                for age in (121, -6):
+                self.assertEqual(snapshot.READ_CODE, "UNREADABLE")
+                for age, expected in ((121, "STALE"), (-6, "FUTURE")):
                     with self.subTest(age=age):
                         path.write_text(json.dumps(self.value(age)))
                         self.assertEqual(snapshot.read(), self.unknown())
+                        self.assertEqual(snapshot.READ_CODE, expected)
 
     def test_shared_contract_rejects_unknown_alias_state_and_private_fields(self):
         values = []
@@ -95,6 +97,7 @@ class SnapshotTests(unittest.TestCase):
                     with self.subTest(value=value):
                         path.write_text(json.dumps(value))
                         self.assertEqual(snapshot.read(), self.unknown())
+                        self.assertEqual(snapshot.READ_CODE, "INVALID")
 
     def test_oversized_duplicate_and_invalid_json_are_unknown(self):
         value = json.dumps(self.value())
@@ -135,8 +138,10 @@ class SnapshotTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "snapshot.json"
             output = io.StringIO()
+            termination = Path(directory) / "termination"
             with (
                 patch.object(snapshot, "SNAPSHOT_PATH", path),
+                patch.object(snapshot, "TERMINATION_PATH", termination),
                 patch.object(
                     snapshot,
                     "daemon",
@@ -147,6 +152,9 @@ class SnapshotTests(unittest.TestCase):
                 self.assertEqual(snapshot.main(), 1)
             self.assertFalse(path.exists())
             self.assertEqual(
+                json.loads(termination.read_bytes())["code"], "SYSTEMD_FAILED"
+            )
+            self.assertEqual(
                 json.loads(output.getvalue()),
                 {
                     "event": "systemd_observer",
@@ -154,6 +162,65 @@ class SnapshotTests(unittest.TestCase):
                     "code": "UNSAFE_SYSTEM_BUS_AUTHORIZATION",
                 },
             )
+
+    def test_successful_init_emits_only_bounded_fixed_unit_metadata(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "snapshot.json"
+            termination = Path(directory) / "termination"
+
+            def active(name, *, diagnostic):
+                diagnostic.update(
+                    unit=name, state="active", stage="ACTIVE_STATE", code="OK"
+                )
+                return {"state": "active"}
+
+            with (
+                patch.object(snapshot, "SNAPSHOT_PATH", path),
+                patch.object(snapshot, "TERMINATION_PATH", termination),
+                patch.object(snapshot, "daemon", side_effect=active),
+                contextlib.redirect_stdout(io.StringIO()),
+            ):
+                self.assertEqual(snapshot.main(), 0)
+                self.assertEqual(snapshot.read(), self.value()["daemons"])
+                self.assertEqual(snapshot.READ_CODE, "READ_OK")
+            value = json.loads(termination.read_bytes())
+            self.assertEqual(value["code"], "SYSTEMD_COMPLETE")
+            self.assertEqual(
+                {unit["unit"] for unit in value["units"]}, set(snapshot.UNITS)
+            )
+            self.assertLessEqual(termination.stat().st_size, 1024)
+
+    def test_termination_never_includes_untrusted_fields_or_unbounded_values(self):
+        with tempfile.TemporaryDirectory() as directory:
+            termination = Path(directory) / "termination"
+            valid = {
+                "unit": "k3s",
+                "state": "active",
+                "stage": "ACTIVE_STATE",
+                "code": "OK",
+            }
+            with patch.object(snapshot, "TERMINATION_PATH", termination):
+                snapshot.write_termination(
+                    "SYSTEMD_COMPLETE",
+                    units=[
+                        valid,
+                        {**valid, "body": "private fixture"},
+                        {**valid, "code": "private fixture"},
+                    ],
+                    snapshot="private fixture",
+                )
+                value = json.loads(termination.read_bytes())
+                self.assertEqual(value["units"], [valid])
+                self.assertNotIn(b"private", termination.read_bytes())
+                snapshot.write_termination("SYSTEMD_COMPLETE", units=[valid] * 30)
+                self.assertLessEqual(termination.stat().st_size, 1024)
+                self.assertEqual(
+                    json.loads(termination.read_bytes())["code"], "DIAGNOSTIC_TOO_LARGE"
+                )
+            with patch.object(
+                snapshot, "TERMINATION_PATH", Path(directory) / "absent" / "file"
+            ):
+                snapshot.write_termination("OBSERVER_FAILED", snapshot="NOT_READ")
 
 
 if __name__ == "__main__":
