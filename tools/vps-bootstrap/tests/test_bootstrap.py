@@ -5,6 +5,7 @@ import io
 import json
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -127,6 +128,73 @@ class BootstrapTests(unittest.TestCase):
             connector_unit,
         )
         self.assertIn("--token-file %d/connector-token", connector_unit)
+
+    def test_rendered_daily_trigger_passes_the_real_client_configuration_contract(self):
+        runtime = prepare.render(ROOT, SHA, IMAGES)
+        daily = next(
+            item
+            for item in runtime["items"]
+            if item["kind"] == "CronJob"
+            and item["metadata"]["name"] == "newsletter-daily"
+        )
+        trigger = daily["spec"]["jobTemplate"]["spec"]["template"]["spec"][
+            "containers"
+        ][0]
+        self.assertEqual(trigger["command"][0], "newsletter-trigger")
+        environment = {
+            "NEWSLETTER_EDITOR_TOKEN": "synthetic-editor-token-32-characters",
+            "NEWSLETTER_SEND_TOKEN": "synthetic-sender-token-32-characters",
+            "NEWSLETTER_ISSUE_DATE": "2026-09-05",
+            "PYTHONNOUSERSITE": "1",
+            **{item["name"]: item["value"] for item in trigger["env"]},
+        }
+        # The trigger is deliberately stdlib-only. Run its actual argument parser and
+        # Config.from_args in this locked Python environment, without importing an
+        # application into Platform. Check-only exits before any provider or send call;
+        # deny socket creation as an independent guard against accidental network use.
+        script = """
+import runpy
+import socket
+import sys
+from unittest.mock import patch
+trigger = runpy.run_path(sys.argv[1], run_name="newsletter_trigger_contract")
+with patch.object(socket, "socket", side_effect=AssertionError("Network use is forbidden")):
+    trigger["main"](sys.argv[2:])
+"""
+        command = [
+            sys.executable,
+            "-c",
+            script,
+            str(ROOT / "newsletter/src/newsletter/trigger.py"),
+            *trigger["command"][1:],
+            "--check-config",
+        ]
+        result = subprocess.run(
+            command,
+            env=environment,
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            json.loads(result.stdout), {"configuration": "valid", "send_enabled": True}
+        )
+        for invalid in ("true", "0"):
+            with self.subTest(internal_http=invalid):
+                result = subprocess.run(
+                    command,
+                    env={**environment, "NEWSLETTER_ALLOW_INTERNAL_HTTP": invalid},
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                    check=False,
+                )
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(
+                    "NEWSLETTER_SERVICE_URL must be a fixed HTTPS origin", result.stderr
+                )
 
     def test_bootstrap_and_daemon_keep_canonical_paths_under_another_host_state_root(
         self,

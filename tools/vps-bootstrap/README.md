@@ -49,7 +49,7 @@ it or send tokens through chat. Exact shape:
   "trigger_env": {
     "NEWSLETTER_EDITOR_TOKEN": "<same as engine>",
     "NEWSLETTER_SEND_TOKEN": "<same as engine>",
-    "NEWSLETTER_TIME_ZONE": "America/New_York"
+    "NEWSLETTER_TIME_ZONE": "America/Los_Angeles"
   },
   "platform_env": {"PLATFORM_DEPLOY_TOKEN": "<dedicated release API token>"},
   "fleet_key": "<64 hexadecimal characters, independent receipt HMAC>",

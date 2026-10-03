@@ -176,6 +176,11 @@ init container to the same reviewed digest and profile. Seventy-nine Newsletter 
 sixty-three deployment tests plus forty-nine subtests, scoped lint/format, Mypy and structure guards passed.
 The first API release must keep the bootstrap source SHA; do not enable normal VPS deployment or advance
 that first-release commit until its held admission is verified and activated.
+The rendered daily trigger now passes the real Newsletter CLI's check-only configuration contract,
+with an independent socket-denial guard; its explicit internal-HTTP switch is `1`, not `true`.
+The Kubernetes cadence retains the old public configuration's 07:00 America/Los_Angeles schedule.
+The optional GitHub preparation workflow has not been connected to this private k3s Service; the daemon
+Tunnel does not proxy its `/v1/runs` route. Do not assume an old public URL remains usable.
 
 Remaining sequence: gate and land these corrections with Fleet's verified Access identities; deploy
 Fleet/Home; resolve the dedicated Tunnel using the safe diagnostics; record the actual Fleet namespace;
@@ -221,7 +226,8 @@ with synthetic data.
   event, dailyReminders, latestReports, metricDays, gtdDays, gtdReviews, integration); old owner paths answer 410
   with "Todofy 已更新，请刷新页面"; the machine routes are unchanged (`/api/summary` and `/api/recommendation` 401
   with Basic realm "todofy" without credentials, `/health` 200). A manual canary at 20:06 UTC was delivered to
-  Todofy. Left: the newsletter's 2026-10-03 13:30 UTC run (reads `/api/summary` and `/api/recommendation`); remove
+  Todofy. Left: the next Newsletter run after the k3s release is verified and activated (configured daily
+  at 07:00 America/Los_Angeles, reading `/api/summary` and `/api/recommendation`); remove
   the old owner paths (`todofy/gateway/src/owner.ts`) and core's `owner_api` after 2026-11-02.
 - `mailhero.ui.v2` (landed `d1bde0e`, 2026-10-02 20:00 UTC): verified. Mail Hero's deploy succeeded; overview,
   setup status, settings, messages (list, one detail, its content), deliveries and endpoints answer 200; the raw

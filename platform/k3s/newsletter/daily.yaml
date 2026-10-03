@@ -35,7 +35,7 @@ spec:
                 - name: NEWSLETTER_SERVICE_URL
                   value: http://newsletter:8080
                 - name: NEWSLETTER_ALLOW_INTERNAL_HTTP
-                  value: 'true'
+                  value: '1'
               securityContext:
                 allowPrivilegeEscalation: false
                 capabilities:

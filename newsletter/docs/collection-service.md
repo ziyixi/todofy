@@ -76,4 +76,6 @@ Content-Type: application/json
 
 健康检查通过只说明服务可以接收任务，不证明后续模型额度充足、来源可读或邮件一定送达。需要实际调用模型检查输出格式时，使用另行授权的 [供应商兼容检查](provider-acceptance.md)，不把它当作普通启动步骤。
 
-GitHub 的 [手动触发工作流](../../.github/workflows/newsletter-daily.yml) 是另一种可选调用端：仅准备内容，不定时运行，也没有发信权限。使用它之前需要服务具有可访问的 HTTPS 地址；私有 Docker 部署无需启用它。
+GitHub 的 [手动触发工作流](../../.github/workflows/newsletter-daily.yml) 是另一种可选调用端：仅准备内容，不定时运行，也没有发信权限。它需要另行配置 Actions 可以访问的 HTTPS `NEWSLETTER_SERVICE_URL` 和 editor token。
+
+当前 k3s 配置只提供集群内的 `http://newsletter:8080`，专用 daemon Tunnel 暴露部署和运行状态 API，不代理采编接口。本次迁移没有接通或验收这个手动工作流，不能假设旧 URL 继续可用。配置中的定时路径是集群内 `newsletter-daily` CronJob；发布验证完成前保持暂停。私有部署无需启用 GitHub 手动采编入口。

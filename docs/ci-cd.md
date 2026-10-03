@@ -174,9 +174,13 @@ the owner; no raw provider output or plaintext credential is uploaded. See [rebu
 
 [content-config.yml](../.github/workflows/content-config.yml) publishes independently validated editorial
 bundles to `published`; the existing isolated config-sync process downloads those bundles. This is content
-configuration, separate from executable/infrastructure deployment. The k3s daily CronJob owns the existing
-cadence; [newsletter-daily.yml](../.github/workflows/newsletter-daily.yml) remains preparation-only, with no
-send schedule. Newsletter retains its locked external wire runtime and private drain/monitor JSON adapters;
+configuration, separate from executable/infrastructure deployment. The k3s daily CronJob is the configured
+scheduled path, suspended until release verification completes. [newsletter-daily.yml](../.github/workflows/newsletter-daily.yml)
+is an optional preparation-only caller, with no send schedule. It still requires a separately configured,
+Actions-reachable HTTPS `NEWSLETTER_SERVICE_URL` and editor token. This migration does not connect or
+verify that manual workflow: Newsletter's Service is internal ClusterIP, and the dedicated daemon Tunnel
+exposes the runtime/release API, not Newsletter's `/v1/runs`. An old URL cannot be assumed to keep working.
+Newsletter retains its locked external wire runtime and private drain/monitor JSON adapters;
 its generic runtime API uses the root proto. Service migration and live provider acceptance are recorded
 separately in HANDOFF, not inferred from a successful image build.
 
