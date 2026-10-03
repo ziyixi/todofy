@@ -16,7 +16,7 @@ Rules for this file:
   what is done, what is left, how to verify it and what to check after its deploy. Link to the app docs for
   design detail instead of copying it.
 
-Last updated: 2026-10-03 ~04:40 UTC. The verified foundation implementation is `8628e5e`; the k3s/Fleet
+Last updated: 2026-10-03 ~05:30 UTC. The verified foundation implementation is `8628e5e`; the k3s/Fleet
 implementation reached `main` at `ca10078`, but its VPS runtime is not installed. Six new managed Access
 objects exist; the dedicated Tunnel is still blocked by an undiagnosed provider request failure. Every app's owner API is on proto now (the dashboard
 `ca63675`, FlowDay `8d9100e`, Mail Hero `d1bde0e`, Todofy `b70856f`, all landed and verified on 2026-10-02). Nothing
@@ -181,6 +181,18 @@ with an independent socket-denial guard; its explicit internal-HTTP switch is `1
 The Kubernetes cadence retains the old public configuration's 07:00 America/Los_Angeles schedule.
 The optional GitHub preparation workflow has not been connected to this private k3s Service; the daemon
 Tunnel does not proxy its `/v1/runs` route. Do not assume an old public URL remains usable.
+
+The next full branch run [37098884977](https://github.com/ziyixi/todofy/actions/runs/37098884977) at `0b381c0`
+passed the other checks and both real Linux image jobs, but Mail Hero's unchanged delivery CPU test
+failed twice: SendMessage warm medians were 3.53 and 3.52 reference ms against the 3.5 bound. Calibration
+did not report a busy runner. No publisher or deployment ran. The branch now reuses one current
+non-extractable WebCrypto HMAC key instead of repeatedly deriving it in the same request. Rotation,
+invalid configuration and failed derivation are covered; the existing derivation parameters, signatures,
+frozen payloads and CPU budgets are unchanged. A valid local delivery CPU run measured 2.60 ms warm
+for SendMessage and 2.54 ms for ResendDelivery. The full seven-test CPU suite then passed, including
+delivery, owner routes, Ops and payload construction; SendMessage measured 3.80 ms first and 2.31 ms
+warm against the unchanged 6/3.5 bounds. All 190 Worker tests, type checks and 91 consumer contract
+tests passed locally; these results still require a complete green branch CI before landing.
 
 Remaining sequence: gate and land these corrections with Fleet's verified Access identities; deploy
 Fleet/Home; resolve the dedicated Tunnel using the safe diagnostics; record the actual Fleet namespace;

@@ -41,10 +41,20 @@ export async function decryptCredential(env: Env, revisionID: string, url: strin
     await encryptionKey(env), unhex(cipher));
   return new TextDecoder().decode(plaintext);
 }
+let currentSigningKey: { master: string; key: Promise<CryptoKey> } | undefined;
 async function signingKey(env: Env): Promise<CryptoKey> {
   // Domain separation: confirmation/CSRF tokens use a derived HMAC key. The
   // salt and info are fixed: CSRF cookies and preview tokens already issued stay valid.
-  return deriveHmacKeyHkdf(master(env), 'mail-hero', 'tokens-v1');
+  // Keep only the current key. Validate before a cache hit, replace on rotation,
+  // and let a failed derivation retry without evicting a newer key's promise.
+  const value = env.CREDENTIAL_KEY ?? '';
+  if (!/^[0-9a-f]{64}$/i.test(value)) throw new Error('credential_key_not_configured');
+  const normalized = value.toLowerCase();
+  if (currentSigningKey?.master === normalized) return currentSigningKey.key;
+  const entry = { master: normalized, key: deriveHmacKeyHkdf(unhex(normalized), 'mail-hero', 'tokens-v1') };
+  currentSigningKey = entry;
+  void entry.key.catch(() => { if (currentSigningKey === entry) currentSigningKey = undefined; });
+  return entry.key;
 }
 export async function actionHash(env: Env, value: unknown): Promise<string> {
   // Request deduplication can include a low-entropy password. A plain digest
