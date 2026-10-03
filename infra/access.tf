@@ -107,7 +107,7 @@ resource "cloudflare_zero_trust_access_application" "fleet_receipt" {
   auto_redirect_to_identity   = false
   enable_binding_cookie       = false
   http_only_cookie_attribute  = true
-  options_preflight_bypass   = false
+  options_preflight_bypass    = false
   session_duration            = "24h"
   policies                    = [{ id = cloudflare_zero_trust_access_policy.fleet_receipt.id, precedence = 1 }]
 

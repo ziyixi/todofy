@@ -2,15 +2,17 @@
 
 import json
 import os
-from pathlib import Path
+import pathlib
 import re
-from uuid import UUID
+import uuid
 
 
 def build_sha() -> str | None:
     """A missing development build has no production provenance."""
     try:
-        with Path("/opt/newsletter/build-info.json").open("rb") as stream:
+        with pathlib.Path("/opt/newsletter/build-info.json").open(
+            "rb"
+        ) as stream:
             body = stream.read(257)
         if len(body) > 256:
             return None
@@ -29,7 +31,7 @@ def release_request_id() -> str | None:
     """A process reports only the canonical UUID supplied when it started."""
     value = os.getenv("NEWSLETTER_RELEASE_REQUEST_ID", "")
     try:
-        identifier = UUID(value)
+        identifier = uuid.UUID(value)
     except ValueError:
         return None
     if identifier.version == 4 and str(identifier) == value:

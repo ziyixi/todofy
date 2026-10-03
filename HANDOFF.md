@@ -97,6 +97,13 @@ bundle contained ten runtime resources, keeping Newsletter held and the observer
 CI is still pending. No k3s/Fleet deployment or production
 business acceptance has happened yet. Do not claim the old process supports the new drain API.
 
+First branch run [37092747486](https://github.com/ziyixi/todofy/actions/runs/37092747486) at `b441e46`
+passed the actual Linux Platform image build/import/identity smoke and Fleet checks. The complete gate
+failed on stale integration expectations (new Ops apps/service bindings/private monitor route), Newsletter
+structure/type guards, Infra format and a Lab fixture that aged outside its simulated retry window.
+Those narrow fixes passed locally, including Newsletter's complete 2478-test `make check`, before the
+next branch SHA. No publisher or production deployment ran from the failed gate.
+
 Remaining sequence: push and pass branch CI; promote the identical green SHA;
 review and apply only the new managed Access/Tunnel/Fleet resources; record actual Access audiences and
 generated public identities; prepare immutable images and a reviewed public bootstrap with private node

@@ -462,6 +462,8 @@ DEPLOYMENT_MODES = {
     "todofy": ["maintenance", "processing_paused", "force_pause_todoist", "reminder_enabled"],
     "lab": ["maintenance"],
     "watch": ["maintenance", "notifications"],
+    "fleet": ["maintenance"],
+    "newsletter": ["maintenance"],
 }
 
 

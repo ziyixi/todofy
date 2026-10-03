@@ -38,9 +38,15 @@ def register(
                 "version": 1,
                 "worker_healthy": healthy(),
                 "drain_state": state["state"],
-                "queued_count": sum(state["queued"].values()),
-                "inflight_count": sum(state["inflight"].values()),
-                "unknown_count": sum(state["unknown"].values()),
+                "queued_count": sum(
+                    cast(dict[str, int], state["queued"]).values()
+                ),
+                "inflight_count": sum(
+                    cast(dict[str, int], state["inflight"]).values()
+                ),
+                "unknown_count": sum(
+                    cast(dict[str, int], state["unknown"]).values()
+                ),
                 "build_source_sha": source_sha,
                 "release_request_id": request_id,
             },

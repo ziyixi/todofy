@@ -148,6 +148,12 @@ class Renderer:
                         self.config, adapter, target.image_digest
                     )
                     if name == "platform-observer":
+                        runtime_url = (
+                            "http://"
+                            + self.workloads["personal-cloud"].deployment
+                            + ":8080/api/v1/nodeStatus"
+                        )
+                        runtime_configured = False
                         for env in container.get("env", []):
                             if env["name"] == "FLEET_HOST_KEY":
                                 env.pop("valueFrom", None)
@@ -157,6 +163,14 @@ class Renderer:
                                 env["valueFrom"] = {
                                     "fieldRef": {"fieldPath": "metadata.namespace"}
                                 }
+                            elif env["name"] == "FLEET_RUNTIME_URL":
+                                env.pop("valueFrom", None)
+                                env["value"] = runtime_url
+                                runtime_configured = True
+                        if not runtime_configured:
+                            container.setdefault("env", []).append(
+                                {"name": "FLEET_RUNTIME_URL", "value": runtime_url}
+                            )
             elif kind == "Deployment":
                 item["spec"]["strategy"] = {"type": "Recreate"}
                 item["spec"]["replicas"] = 1

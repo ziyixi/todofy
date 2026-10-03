@@ -589,7 +589,15 @@ class Rendering(unittest.TestCase):
     def test_observer_profile_identity_and_namespace_follow_the_cluster_configuration(
         self,
     ):
-        config = replace(CONFIG, node_key="second-node", namespace="isolated")
+        config = replace(
+            CONFIG,
+            node_key="second-node",
+            namespace="isolated",
+            workloads=(
+                CONFIG.workloads[0],
+                replace(CONFIG.workloads[1], deployment="alternate-platform"),
+            ),
+        )
         source = asset()
         observer_source = next(
             item
@@ -621,6 +629,10 @@ class Rendering(unittest.TestCase):
             {"fieldRef": {"fieldPath": "metadata.namespace"}},
         )
         self.assertEqual(env["FLEET_REPORT_URL"], source_env["FLEET_REPORT_URL"])
+        self.assertEqual(
+            env["FLEET_RUNTIME_URL"]["value"],
+            "http://alternate-platform:8080/api/v1/nodeStatus",
+        )
 
     def test_only_baked_resources_and_fixed_repository_images_can_be_rendered(self):
         values = Renderer(CONFIG, asset=asset()).render(TARGETS, IDENTITY)

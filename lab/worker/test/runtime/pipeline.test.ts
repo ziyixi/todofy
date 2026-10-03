@@ -126,14 +126,17 @@ describe('the neuron cap', () => {
   it('stops AI work mid-run and catches up the next UTC day', async () => {
     // 40 texts ≈ 40 × 30 tokens × 1075 / 1e6 ≈ 1.3 neurons per embed batch; a 20-card 简介 set ≈ 20 × 3.7.
     h = await startHarness({ bindings: { LAB_DAILY_NEURONS: '20' } });
-    h.arxiv.feed = { status: 200, body: rssFeed(dayItems('2609')) };
     const start = afterTodaysSlot(now());
+    // Catch-up only applies to recent announce days. Keep this feed aligned with the real-clock
+    // owner views instead of letting the fixed September fixture age out of the retry window.
+    const deckName = `decks/${utcDay(start)}`;
+    h.arxiv.feed = { status: 200, body: rssFeed(dayItems('2609'), new Date(start).toUTCString()) };
     await h.run(start);
     const today = await h.api.getToday({ name: 'today' });
     // The deck is shown with the 简介 written so far; the rest fall back to the abstract.
-    expect(today.deck?.deck).toBe(DECK);
+    expect(today.deck?.deck).toBe(deckName);
     expect(today.notice).toBe(Notice.CAP_HIT);
-    let deck = await h.api.getDeck({ name: DECK });
+    let deck = await h.api.getDeck({ name: deckName });
     const written = deck.cards.filter((c) => c.brief !== undefined).length;
     expect(written).toBeGreaterThan(0);
     expect(written).toBeLessThan(20);
@@ -144,10 +147,10 @@ describe('the neuron cap', () => {
 
     // Next UTC day, before the next fetch slot: the missing 简介 are written.
     await h.run(nextUtcDay(start));
-    deck = await h.api.getDeck({ name: DECK });
+    deck = await h.api.getDeck({ name: deckName });
     expect(deck.cards.filter((c) => c.brief !== undefined).length).toBeGreaterThan(written);
     // No new fetch before the slot; the ledger of the simulated day is its own (the notice follows the real clock).
-    expect((await h.api.getToday({ name: 'today' })).deck?.deck).toBe(DECK);
+    expect((await h.api.getToday({ name: 'today' })).deck?.deck).toBe(deckName);
     expect(h.requests).toHaveLength(1);
   });
 

@@ -36,6 +36,7 @@ def test_http_surface_matches_shared_proto(tmp_path):
         ("GET", "/v1/editions/{edition_id}/preview"),
         ("GET", "/internal/deployment/drain"),
         ("POST", "/internal/deployment/drain/{action}"),
+        ("GET", "/internal/monitoring/status"),
     }
     service = editorial_pb2.DESCRIPTOR.services_by_name["NewsletterService"]
     assert {method.name for method in service.methods} == set(
