@@ -86,6 +86,14 @@ regular, symlink-free, stopped, and outside SSH/GPG folders.
 
 ## Install
 
+The supported Ubuntu host must provide enabled AppArmor and its standard parser,
+ABI and includes. Bootstrap dry-compiles and loads the pinned
+[observer profile](../../platform/apparmor/README.md) before applying workloads.
+It adds one root-owned OS policy file, with no extra host application service.
+For an existing node, load that profile with the documented profile-only installer
+before publishing a manifest that references it; ordinary image releases cannot
+modify host kernel policy.
+
 Supported initial host: Ubuntu 24.04 Linux amd64 with its existing Python 3 stdlib,
 systemd and iptables/ip6tables restore commands. A preinstalled cloudflared is not required.
 No Python packages are installed on the VPS. Meet [K3s requirements](https://docs.k3s.io/installation/requirements)

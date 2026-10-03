@@ -25,12 +25,16 @@ the guarded phase repair, and the original-ID resume succeeded in Actions `37142
 targets verified. Newsletter admission is accepting, with zero active work and all 32 historical unknown
 outcomes preserved. k3s and the dedicated connector are running; Docker is inactive and disabled.
 Fresh Fleet/Home checks confirm the release identities and clear the old deployment/admission alerts.
-System-daemon observation still reports `unknown` and awaits a separate diagnostic and live acceptance.
-The bounded-diagnostic release `c2f0d09` also completed in Actions `37144825529`. Its natural 18:40 UTC
-observer read the shared snapshot successfully but recorded `BUS/DBUS_DENIED` for all four units;
-the refusal occurs before Polkit or unit queries. Direct bounded host observations find all four units
-active. The next diagnostic distinguishes the official AppArmor denial prefix in memory, emitting only
-a fixed enum. A dedicated host profile remains preparation work, with no policy or privilege change applied.
+The classifier release `c0dddd3` completed in Actions `37146439819`; the typed release is ready with
+frozen targets verified. Its natural 19:05 UTC observer recorded `BUS/APPARMOR_DENIED` for all four
+units, while the main container successfully read the snapshot and submitted its receipt. The exact
+official denial prefix is recognized in memory; no private error body is logged or stored. Direct
+bounded host observations find all four units active. The dedicated AppArmor profile candidate is on
+`codex/k3s-personal-cloud`, with no host policy change applied. Gate it, stage the public profile-only
+bundle, have the owner load the fixed profile once, then promote that same green SHA through main.
+Never publish its Localhost manifest before the profile is enforcing on the host. Live daemon-state
+acceptance still requires a natural observer and fresh Fleet/Home receipt. The temporary host-admin
+window has expired; normal typed deployments and metadata diagnosis continue without sudo.
 Every app's owner API is on proto now (the dashboard
 `ca63675`, FlowDay `8d9100e`, Mail Hero `d1bde0e`, Todofy `b70856f`, all landed and verified on 2026-10-02). Nothing
 was in flight at that landing. The foundation evidence below describes that completed release.
@@ -51,11 +55,11 @@ was in flight at that landing. The foundation evidence below describes that comp
 
 Newsletter source was imported on `main` from its deployed engine commit
 `c3d622d4771b1ca63ee4e3f785b79032cffc30e1`. Its independent image is `ghcr.io/ziyixi/todofy-newsletter`.
-The running Newsletter uses source `c2f0d09` and image artifact:
-`sha256:e238823d25e2abb6e234eea3600786a6427920060d3b8feb00e18333a9806a38`.
+The running Newsletter uses source `c0dddd3` and image artifact:
+`sha256:41e14597fcec6893dd2b481386eec1881dfbd62490587b0e95306b2b805ac9ac`.
 The package is public; anonymous manifest access and the manifest/config identity checks passed.
 `ghcr.io/ziyixi/newsletter` was the old VPS runtime. It is stopped, with its image and persistent state
-preserved. Newsletter runs in k3s and the latest `c2f0d09` release is ready; this does not prove an
+preserved. Newsletter runs in k3s and the latest `c0dddd3` release is ready; this does not prove an
 external business operation. The application reads Todofy's
 `/api/summary` and `/api/recommendation` using its existing machine contract. See
 `newsletter/docs/import-source.md` and `newsletter/docs/deployment-drain.md` for the import and release boundaries.
@@ -367,6 +371,20 @@ connection policy. The new fixed-prefix classifier must be verified before apply
 The classifier's local suite passed 193 tests and 190 subtests, with lint/format passing. Its fixtures
 decode actual Jeepney Hello errors, require the exact known error name and prefix, and keep arbitrary
 responses mapped to the existing safe enums without printing their bodies.
+Classifier branch [37146094974](https://github.com/ziyixi/todofy/actions/runs/37146094974) and main
+[37146439819](https://github.com/ziyixi/todofy/actions/runs/37146439819) succeeded. Request
+`264188c8-4238-45a6-bffb-62f0d548c6ad` is ready with both actual sources `c0dddd3` and frozen targets
+verified. Platform's actual digest is
+`sha256:f359484b0623448faac58a8d8f2ccdeb4457d4be321ada870b2776d49b0e5f76`.
+The natural 19:05 UTC observer used that image and reported `BUS/APPARMOR_DENIED` for each unit,
+with `OBSERVER_ACCEPTED/READ_OK` from its main container. AppArmor is therefore the confirmed
+connection blocker. The candidate preserves the pinned containerd baseline, adds seven fixed D-Bus
+send rules and selects the profile only for the credential-free init container. A profile-only CLI
+checks fixed bytes, supported host and safe paths, dry-compiles before writing one root-owned file,
+loads only that profile and verifies exact enforce mode. Fresh VPS bootstrap includes the same step.
+Local candidate validation passed 200 tests and 192 subtests; 71 Python files passed lint/format.
+Actual Linux parser compilation, host load, successful Polkit guard and fresh daemon states remain
+separate checks; do not replace unknown with healthy or bypass confinement to finish the release.
 Local candidate validation passed 182 Platform/build/release/bootstrap tests plus 178 subtests,
 45 Fleet unit tests and eight real workerd SQLite tests. Fleet type checks and lint passed; all 71
 relevant Python files passed lint/format. The two-release ownership test uses the real SDK transport
@@ -477,6 +495,9 @@ with synthetic data.
 - The pages to watch for W4 (added by the owner at watch.ziyixi.science/new, or named to an agent privately).
 - Real Newsletter model/provider/send acceptance remains distinct from the verified deployment;
   historical unknown outcomes require deliberate reconciliation, not automatic replay.
+- One profile-only host installation after branch CI is green. The host-admin window expired;
+  the owner must run the staged fixed-version command. Main stays at `c0dddd3` until exact enforce
+  mode is confirmed, after which Actions deploys the candidate and normal observation verifies it.
 
 ## Next, in order
 

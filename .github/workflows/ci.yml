@@ -1386,6 +1386,11 @@ jobs:
           printf '%s  %s\n' "$checksum" "$RUNNER_TEMP/kubectl-bin/kubectl" | sha256sum --check --status
           chmod 755 "$RUNNER_TEMP/kubectl-bin/kubectl"
           echo "$RUNNER_TEMP/kubectl-bin" >> "$GITHUB_PATH"
+      - name: Compile the pinned observer AppArmor policy without loading it
+        run: |
+          test -x /usr/sbin/apparmor_parser
+          /usr/sbin/apparmor_parser --skip-kernel-load --skip-cache --quiet \
+            platform/apparmor/personal-cloud-systemd-observer-v1
       - name: Check deployment, status and observer contracts
         run: |
           uv run --project platform --locked ruff check platform/src platform/tests tools/platform-build tools/vps-release tools/vps-bootstrap

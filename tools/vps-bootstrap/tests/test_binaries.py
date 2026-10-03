@@ -320,6 +320,7 @@ class BinaryTests(unittest.TestCase):
                 return_value={"ID": "ubuntu", "VERSION_ID": "24.04"},
             ),
             patch.object(install.shutil, "which", side_effect=which),
+            patch.object(install.observer_policy, "preflight"),
             patch.object(host, "real_path", side_effect=real_path),
         ):
             self.assertEqual(install.preflight(bundle), str(self.connector))

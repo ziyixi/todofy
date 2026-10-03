@@ -165,6 +165,9 @@ live Newsletter 先准备 dedicated Codex 登录。
 
 owner 一次 sudo 安装固定版本 k3s/专用 connector、持久目录和窄 RBAC。bootstrap 结束是 `complete_held`：
 Newsletter 已关闭接单/领取（初始 gate 通常为 `draining`）、daily CronJob suspended，而 observer 已启用。
+支持的 Ubuntu 主机还需标准 AppArmor/parser/includes；bootstrap 候选已纳入固定 observer profile，
+只供无凭据 init container 查询宿主状态，不安装第二个宿主应用服务。已有 VPS 必须先加载 profile，
+再发布引用它的 manifest；日常镜像发布不具备修改宿主内核策略的权限。
 这不等于取得 `frozen` 回执；首次 release 仍要实际 drain/freeze 核验。它必须使用同 bootstrap SHA。
 GitHub 凭据使用专用 Access machine identity 加独立 daemon Bearer；不上传 host/cluster-admin key。
 
@@ -313,7 +316,16 @@ GitHub、daemon、Fleet/Home 要表达同一部署结果，但不能把它们合
   typed release为ready且冻结targets核验通过。18:40 UTC自然observer的四个单位均记录`BUS/DBUS_DENIED`，
   main记录`READ_OK`并成功提交；直接有界宿主观察四个单位均active。这证明拒绝发生在连接阶段，
   不应通过扩大Reader、给GitHub SSH/root权限或将unknown改成healthy来掩盖。
-  具体拒绝策略仍须确认；后续profile/bootstrap工作保持单独验收，当前未应用主机策略变更。
+  随后`c0dddd3`的[37146439819](https://github.com/ziyixi/todofy/actions/runs/37146439819)完整成功，
+  typed release为ready且冻结targets核验通过。19:05 UTC自然observer匹配实际镜像，四个单位均为
+  `BUS/APPARMOR_DENIED`，main为`OBSERVER_ACCEPTED/READ_OK`；精确官方错误前缀只在内存分类，
+  原始错误不输出或保存。因此AppArmor已确认是连接阻碍，而不是快照传递问题。
+- 专用profile候选保留固定containerd默认防护，只增加七条固定D-Bus send规则，main保持RuntimeDefault。
+  AppArmor不检查方法参数，应用只查询四个unit的两项属性，非交互Polkit拒绝管理权限检查继续保留。
+  一次性profile-only安装器不读取秘密、不调用Kubernetes、不重启服务；首次bootstrap使用同一profile。
+  本地200tests、192subtests及71个Python文件lint/format通过；真实parser、宿主加载、Polkit结果与
+  fresh Fleet/Home daemon状态尚待分别验收。临时宿主管理员窗口已过期，需要owner执行一次固定安装命令；
+  main在加载前保持`c0dddd3`。当前没有应用主机策略变更，也没有用Unconfined替代修复。
 - 本报告和runbook修正文档导航/已有能力说明；没有实现上表新的provisioner、恢复工具或账户迁移。
 
 验收此报告时，可以直接问：输入是否齐全、每一步谁持有权限、失败能否继续、旧数据能否保留、

@@ -240,6 +240,10 @@ class BootstrapBoundaries(unittest.TestCase):
                 "allowPrivilegeEscalation": False,
                 "readOnlyRootFilesystem": True,
                 "capabilities": {"drop": ["ALL"]},
+                "appArmorProfile": {
+                    "type": "Localhost",
+                    "localhostProfile": "personal-cloud-systemd-observer-v1",
+                },
             },
         )
         self.assertEqual(

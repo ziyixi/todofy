@@ -11,6 +11,7 @@ import binaries
 import cluster
 import firewall
 import host
+import observer_policy
 
 from config import (
     BootstrapError,
@@ -76,6 +77,7 @@ def preflight(bundle):
             == (Path(bundle) / "units/k3s-config.yaml").read_bytes(),
             "K3S_CONFIGURATION_CONFLICT",
         )
+    observer_policy.preflight(bundle)
     return cloudflared
 
 
@@ -97,6 +99,8 @@ def install(bundle, private_file):
     event("state", "preserved")
     host.retire_legacy_runtime()
     event("legacy_runtime", "stopped")
+    observer_policy.install(bundle)
+    event("observer_policy", "enforcing")
     firewall.install()
     cluster.start(bundle)
     event("cluster", "ready")

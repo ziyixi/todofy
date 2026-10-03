@@ -17,7 +17,11 @@ The main container's only host metadata mount is `/proc/meminfo` (File, read-onl
 A standard init container from the same immutable image uses the host's existing UID65534 (`nobody`)
 and GID10001 to read `/run/dbus/system_bus_socket` (Socket, read-only). D-Bus authenticates the Unix
 identity on the host; a UID present only inside an image is insufficient for the host's user policy.
-The probe receives only that socket and a temporary emptyDir, with no ServiceAccount token,
+The probe uses the dedicated [AppArmor profile](../apparmor/README.md), loaded once by
+bootstrap. It preserves the pinned containerd baseline and permits only the fixed D-Bus
+methods needed by this probe. AppArmor does not inspect method arguments; the application
+selects the four unit aliases and two properties, and the Polkit guard remains mandatory.
+The main observer retains RuntimeDefault. The probe receives only that socket and a temporary emptyDir, with no ServiceAccount token,
 monitoring credentials or persistent volume. It writes a bounded `fleet.telemetry.v1.SystemDaemonSnapshot`
 using the shared codec; the main container mounts it read-only and rejects malformed snapshots,
 snapshots older than 120 seconds or timestamps more than five seconds in the future. The observer's

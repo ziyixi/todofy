@@ -1,0 +1,64 @@
+# Copyright The Docker Authors, The Moby Authors and The containerd Authors.
+# SPDX-License-Identifier: Apache-2.0
+# Derived from the pinned K3s v1.37.1+k3s1 dependency's defaultTemplate:
+# github.com/k3s-io/containerd/v2 v2.3.4-k3s1, contrib/apparmor/template.go.
+# https://github.com/k3s-io/containerd/blob/v2.3.4-k3s1/contrib/apparmor/template.go
+# Ubuntu's rootful containerd variant: daemon profile is unconfined; no RootlessKit.
+# The baseline is retained; only the fixed D-Bus send rules below are added.
+# Kubernetes UID, dropped capabilities, seccomp and read-only mounts remain enforced.
+abi <abi/3.0>,
+#include <tunables/global>
+
+profile personal-cloud-systemd-observer-v1 flags=(attach_disconnected,mediate_deleted) {
+  #include <abstractions/base>
+  network,
+  capability,
+  file,
+  umount,
+  signal (receive) peer=unconfined,
+  signal (receive) peer=runc,
+  signal (receive) peer=crun,
+  signal (send,receive) peer=personal-cloud-systemd-observer-v1,
+  deny @{PROC}/* w,
+  deny @{PROC}/{[^1-9/],[^1-9/][^0-9/],[^1-9s/][^0-9y/][^0-9s/],[^1-9/][^0-9/][^0-9/][^0-9/]*}/** w,
+  deny @{PROC}/sys/[^k]** w,
+  deny @{PROC}/sys/kernel/{?,??,[^s][^h][^m]**} w,
+  deny @{PROC}/sysrq-trigger rwklx,
+  deny @{PROC}/kcore rwklx,
+  deny mount,
+  deny /sys/[^f]*/** wklx,
+  deny /sys/f[^s]*/** wklx,
+  deny /sys/fs/[^c]*/** wklx,
+  deny /sys/fs/c[^g]*/** wklx,
+  deny /sys/fs/cg[^r]*/** wklx,
+  deny /sys/firmware/** rwklx,
+  deny /sys/devices/virtual/powercap/** rwklx,
+  deny /sys/kernel/security/** rwklx,
+  ptrace (trace,tracedby,read,readby) peer=personal-cloud-systemd-observer-v1,
+
+  # Requested replies are implicit; no receive, bind or eavesdrop permission.
+  dbus (send) bus=system path=/org/freedesktop/DBus
+    interface=org.freedesktop.DBus member=Hello
+    peer=(name=org.freedesktop.DBus),
+  dbus (send) bus=system path=/org/freedesktop/PolicyKit1/Authority
+    interface=org.freedesktop.PolicyKit1.Authority member=CheckAuthorization
+    peer=(name=org.freedesktop.PolicyKit1),
+  dbus (send) bus=system path=/org/freedesktop/systemd1
+    interface=org.freedesktop.systemd1.Manager member=GetUnit
+    peer=(name=org.freedesktop.systemd1),
+
+  # D-Bus mediation does not inspect method arguments. These rules allow Get
+  # for any property on exactly these four objects; code selects only two.
+  dbus (send) bus=system path=/org/freedesktop/systemd1/unit/k3s_2eservice
+    interface=org.freedesktop.DBus.Properties member=Get
+    peer=(name=org.freedesktop.systemd1),
+  dbus (send) bus=system path=/org/freedesktop/systemd1/unit/cloudflared_2eservice
+    interface=org.freedesktop.DBus.Properties member=Get
+    peer=(name=org.freedesktop.systemd1),
+  dbus (send) bus=system path=/org/freedesktop/systemd1/unit/ssh_2eservice
+    interface=org.freedesktop.DBus.Properties member=Get
+    peer=(name=org.freedesktop.systemd1),
+  dbus (send) bus=system path=/org/freedesktop/systemd1/unit/cloudflared_2dplatform_2eservice
+    interface=org.freedesktop.DBus.Properties member=Get
+    peer=(name=org.freedesktop.systemd1),
+}

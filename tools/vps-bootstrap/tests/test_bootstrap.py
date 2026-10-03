@@ -26,6 +26,7 @@ import cluster
 import firewall
 import host
 import install
+import observer_policy
 import prepare
 
 import config
@@ -543,6 +544,7 @@ with patch.object(socket, "socket", side_effect=AssertionError("Network use is f
             (binaries, "install_connector", None),
             (host, "migrate", None),
             (host, "retire_legacy_runtime", None),
+            (observer_policy, "install", None),
             (firewall, "install", None),
             (cluster, "start", None),
             (cluster, "apply", None),
@@ -581,6 +583,7 @@ with patch.object(socket, "socket", side_effect=AssertionError("Network use is f
             (binaries, "install_connector"),
             (host, "migrate"),
             (host, "retire_legacy_runtime"),
+            (observer_policy, "install"),
             (firewall, "install"),
             (cluster, "start"),
             (cluster, "apply"),
@@ -618,6 +621,7 @@ with patch.object(socket, "socket", side_effect=AssertionError("Network use is f
             (binaries, "install_connector", None),
             (host, "migrate", None),
             (host, "retire_legacy_runtime", None),
+            (observer_policy, "install", None),
             (firewall, "install", None),
             (cluster, "start", None),
             (cluster, "apply", None),
@@ -655,6 +659,7 @@ with patch.object(socket, "socket", side_effect=AssertionError("Network use is f
             (binaries, "install_connector", None),
             (host, "migrate", None),
             (host, "retire_legacy_runtime", None),
+            (observer_policy, "install", None),
             (firewall, "install", None),
             (cluster, "start", None),
             (cluster, "apply", None),

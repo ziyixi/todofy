@@ -239,6 +239,11 @@ unchanged persistent state. Verify denial and read availability on the actual no
 unreadable unit is unknown; if k3s cannot schedule the observer, Fleet shows a missing/stale receipt rather
 than claiming an independent current host diagnosis. Memory reads use only the exact `/proc/meminfo`
 file; disk observations concern the observer's own persistent filesystem, not arbitrary host mounts.
+Initial bootstrap also loads the [pinned observer AppArmor profile](../platform/apparmor/README.md).
+Only the credential-free init container references it; the main observer remains RuntimeDefault.
+The profile retains the exact containerd baseline and adds fixed D-Bus sends. Method arguments are
+not inspected by AppArmor, so application selection and the non-mutating Polkit guard remain part
+of the boundary. An existing host must load the profile before the corresponding manifest is released.
 See [runtime contract](../contracts/platform-runtime-v1/README.md) and the [platform deployment runbook](../platform/README.md) for
 exact bootstrap versions, local permissions, secret names and release commands.
 
@@ -330,7 +335,8 @@ effects remain unreconciled. A profile generation test or green release is not a
 
 The first installation targets Ubuntu 24.04 on Linux amd64, standard systemd and its existing
 UID65534 `nobody` account, curl,
-iptables/ip6tables and a supported k3s kernel. Reserve at least
+iptables/ip6tables, enabled standard AppArmor with `/usr/sbin/apparmor_parser`,
+`abi/3.0`, `tunables/global` and `abstractions/base`, and a supported k3s kernel. Reserve at least
 2 CPU cores, 4 GiB RAM and 20 GiB free disk for the node and image updates; the existing
 Newsletter workload may require more memory, depending on its content. Keep room for
 both an old and a new image plus a preserved copy of the application state. The current

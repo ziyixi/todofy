@@ -164,6 +164,14 @@ WantedBy=multi-user.target
         (output / "units" / name).write_text(text)
     for name, ipv6 in (("firewall.v4", False), ("firewall.v6", True)):
         (output / "units" / name).write_bytes(rules(ipv6, include_jump=True))
+    shutil.copyfile(
+        root / "platform/apparmor/personal-cloud-systemd-observer-v1",
+        output / "units/personal-cloud-systemd-observer-v1",
+    )
+    shutil.copyfile(
+        root / "platform/apparmor/LICENSE",
+        output / "units/observer-apparmor-license.txt",
+    )
     (output / "installer").mkdir()
     for path in Path(__file__).parent.glob("*.py"):
         if path.name != "prepare.py":
