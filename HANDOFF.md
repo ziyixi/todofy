@@ -26,6 +26,11 @@ targets verified. Newsletter admission is accepting, with zero active work and a
 outcomes preserved. k3s and the dedicated connector are running; Docker is inactive and disabled.
 Fresh Fleet/Home checks confirm the release identities and clear the old deployment/admission alerts.
 System-daemon observation still reports `unknown` and awaits a separate diagnostic and live acceptance.
+The bounded-diagnostic release `c2f0d09` also completed in Actions `37144825529`. Its natural 18:40 UTC
+observer read the shared snapshot successfully but recorded `BUS/DBUS_DENIED` for all four units;
+the refusal occurs before Polkit or unit queries. Direct bounded host observations find all four units
+active. The next diagnostic distinguishes the official AppArmor denial prefix in memory, emitting only
+a fixed enum. A dedicated host profile remains preparation work, with no policy or privilege change applied.
 Every app's owner API is on proto now (the dashboard
 `ca63675`, FlowDay `8d9100e`, Mail Hero `d1bde0e`, Todofy `b70856f`, all landed and verified on 2026-10-02). Nothing
 was in flight at that landing. The foundation evidence below describes that completed release.
@@ -46,11 +51,11 @@ was in flight at that landing. The foundation evidence below describes that comp
 
 Newsletter source was imported on `main` from its deployed engine commit
 `c3d622d4771b1ca63ee4e3f785b79032cffc30e1`. Its independent image is `ghcr.io/ziyixi/todofy-newsletter`.
-The running Newsletter uses source `7a66336` and image artifact:
-`sha256:0a12974b38ef5a3f35c4f38aec0f2366efe5d37250e38bdb9e60b34e25163afc`.
+The running Newsletter uses source `c2f0d09` and image artifact:
+`sha256:e238823d25e2abb6e234eea3600786a6427920060d3b8feb00e18333a9806a38`.
 The package is public; anonymous manifest access and the manifest/config identity checks passed.
 `ghcr.io/ziyixi/newsletter` was the old VPS runtime. It is stopped, with its image and persistent state
-preserved. Newsletter runs in k3s and the latest `7a66336` release is ready; this does not prove an
+preserved. Newsletter runs in k3s and the latest `c2f0d09` release is ready; this does not prove an
 external business operation. The application reads Todofy's
 `/api/summary` and `/api/recommendation` using its existing machine contract. See
 `newsletter/docs/import-source.md` and `newsletter/docs/deployment-drain.md` for the import and release boundaries.
@@ -326,7 +331,9 @@ The typed API reports `ready` and `frozen_targets_verified=true`; both workloads
 request `9b00f775-b0df-4147-8660-33e50fc126f1`. Actual Newsletter and Platform sources are `7a66336`.
 Platform's actual image is
 `sha256:15d6c8ad7f60f1bd1ca310ae3662721846754aae0dfbd39cfb59bc6c5e8bc60a`;
-Newsletter's actual image is recorded above. A fresh Fleet receipt at 18:15 UTC matched actual/desired
+Newsletter's actual image at that release was
+`sha256:0a12974b38ef5a3f35c4f38aec0f2366efe5d37250e38bdb9e60b34e25163afc`.
+A fresh Fleet receipt at 18:15 UTC matched actual/desired
 source, digests and request identity and recorded `resolved_deployment_pending`. Both ConfigMap phases
 are `activated`; their only phase manager is `personal-cloud-runtime-status`, while the base
 `personal-cloud` manager does not own phase. `newsletter-daily` and the observer both have `suspend=false`.
@@ -344,9 +351,22 @@ The existing namespace reader can inspect this Pod metadata without exec/log acc
 Unknown states and the non-mutating polkit authorization guard remain unchanged. Gate and publish this
 candidate normally, inspect a naturally scheduled observer's bounded metadata, then verify fresh Fleet/Home
 receipts. A successful init or accepted receipt alone does not prove the system daemons were observed.
-Local validation of this diagnostic candidate passed all 190 Platform/build/release/bootstrap tests;
+Local validation of the diagnostic candidate passed all 192 Platform/build/release/bootstrap tests
+and 186 subtests;
 all 69 relevant Python files passed lint/format. Wire fixtures exercise the actual Jeepney serializer,
 private response/error text is excluded, snapshot expiry remains unknown, and termination output is bounded.
+Branch [37144434050](https://github.com/ziyixi/todofy/actions/runs/37144434050) and main
+[37144825529](https://github.com/ziyixi/todofy/actions/runs/37144825529) succeeded. The typed release is
+ready with frozen targets verified; both workloads use request `994e94db-f8f7-41ee-b2fe-177fc34e2089`
+and source `c2f0d09`. Platform's actual digest is
+`sha256:c3f1d49825c171a88eff72f6676ab051a68160945b066d9c2026e3c20ac0e1f8`.
+The 18:40 UTC natural observer matched that image: each init unit returned unknown with
+`BUS/DBUS_DENIED`, while the main container returned `OBSERVER_ACCEPTED/READ_OK`.
+This rules out snapshot transfer/freshness as the current cause and does not yet confirm the specific
+connection policy. The new fixed-prefix classifier must be verified before applying a host policy fix.
+The classifier's local suite passed 193 tests and 190 subtests, with lint/format passing. Its fixtures
+decode actual Jeepney Hello errors, require the exact known error name and prefix, and keep arbitrary
+responses mapped to the existing safe enums without printing their bodies.
 Local candidate validation passed 182 Platform/build/release/bootstrap tests plus 178 subtests,
 45 Fleet unit tests and eight real workerd SQLite tests. Fleet type checks and lint passed; all 71
 relevant Python files passed lint/format. The two-release ownership test uses the real SDK transport

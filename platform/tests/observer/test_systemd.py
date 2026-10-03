@@ -7,6 +7,7 @@ from unittest.mock import Mock, patch
 from jeepney import (
     AuthenticationError,
     DBusAddress,
+    DBusErrorResponse,
     HeaderFields,
     Message,
     new_error,
@@ -18,7 +19,9 @@ from personal_cloud.observer import systemd
 from personal_cloud.observer.transport import ObserverError
 
 
-def response(body=(), *, signature=None, error=None):
+def response(
+    body=(), *, signature=None, error=None, error_body="private fixture response"
+):
     call = new_method_call(
         DBusAddress(
             "/fixture", bus_name="fixture.service", interface="fixture.Interface"
@@ -27,7 +30,7 @@ def response(body=(), *, signature=None, error=None):
     )
     call.header.serial = 1
     reply = (
-        new_error(call, error, "s", ("private fixture response",))
+        new_error(call, error, signature or "s", (error_body,))
         if error
         else new_method_return(call, signature, body)
     )
@@ -136,6 +139,32 @@ class SystemdTests(unittest.TestCase):
                 self.assertEqual(diagnostic["code"], expected)
                 self.assertNotIn("private", repr(diagnostic))
                 self.assertEqual(connection.send_and_get_reply.call_count, 1)
+
+    def test_real_hello_error_classifies_apparmor_without_disclosing_body(self):
+        denied = "org.freedesktop.DBus.Error.AccessDenied"
+        phrase = (
+            "An AppArmor policy prevents this sender from sending this message to this recipient;"
+            ' type="method_call", sender="private fixture"'
+        )
+        for name, body, signature, expected in (
+            (denied, phrase, "s", "APPARMOR_DENIED"),
+            (denied, "private ordinary policy denial", "s", "DBUS_DENIED"),
+            ("fixture.private.Error", phrase, "s", "ERROR"),
+            (denied, 42, "i", "DBUS_DENIED"),
+        ):
+            with self.subTest(expected=expected):
+                error = DBusErrorResponse(
+                    response(error=name, error_body=body, signature=signature)
+                )
+                diagnostic = {}
+                with patch.object(systemd, "open_dbus_router", side_effect=error):
+                    self.assertEqual(
+                        systemd.daemon("k3s", diagnostic=diagnostic),
+                        {"state": "unknown"},
+                    )
+                self.assertEqual(diagnostic["stage"], "BUS")
+                self.assertEqual(diagnostic["code"], expected)
+                self.assertNotIn("private", repr(diagnostic))
 
     def test_auth_timeout_and_closed_connection_do_not_include_exception_text(self):
         for error, expected in (

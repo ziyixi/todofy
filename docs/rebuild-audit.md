@@ -309,6 +309,11 @@ GitHub、daemon、Fleet/Home 要表达同一部署结果，但不能把它们合
   Todofy报告正常，Notion写入未接入。system-daemon仍为`unknown`，单独诊断和真实daemon状态验收待完成。
   已完成的生产发布/Fleet/Home验收不证明真实provider/send业务、新账户/VPS重建或历史恢复；
   没有运行新的自动VPS备份，保留的旧备份也不构成当前备份覆盖。
+- 后续诊断版本`c2f0d09`的[37144825529](https://github.com/ziyixi/todofy/actions/runs/37144825529)也完整成功，
+  typed release为ready且冻结targets核验通过。18:40 UTC自然observer的四个单位均记录`BUS/DBUS_DENIED`，
+  main记录`READ_OK`并成功提交；直接有界宿主观察四个单位均active。这证明拒绝发生在连接阶段，
+  不应通过扩大Reader、给GitHub SSH/root权限或将unknown改成healthy来掩盖。
+  具体拒绝策略仍须确认；后续profile/bootstrap工作保持单独验收，当前未应用主机策略变更。
 - 本报告和runbook修正文档导航/已有能力说明；没有实现上表新的provisioner、恢复工具或账户迁移。
 
 验收此报告时，可以直接问：输入是否齐全、每一步谁持有权限、失败能否继续、旧数据能否保留、

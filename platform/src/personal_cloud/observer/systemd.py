@@ -36,6 +36,7 @@ DIAGNOSTIC_CODES = {
     "TIMEOUT",
     "AUTH_FAILED",
     "DBUS_DENIED",
+    "APPARMOR_DENIED",
     "SERVICE_UNAVAILABLE",
     "POLKIT_FAILED",
     "NO_SUCH_UNIT",
@@ -56,6 +57,21 @@ ERROR_NAMES = {
     "org.freedesktop.PolicyKit1.Error.NotAuthorized": "DBUS_DENIED",
     BUS_NAME + ".NoSuchUnit": "NO_SUCH_UNIT",
 }
+# dbus upstream bus/apparmor.c: only classify this fixed prefix in memory.
+# https://gitlab.freedesktop.org/dbus/dbus/-/blob/dbus-1.14.10/bus/apparmor.c
+APPARMOR_PREFIX = "An AppArmor policy prevents this sender from sending this message to this recipient;"
+
+
+def error_code(error):
+    if (
+        error.name == "org.freedesktop.DBus.Error.AccessDenied"
+        and isinstance(error.data, tuple)
+        and len(error.data) == 1
+        and isinstance(error.data[0], str)
+        and error.data[0].startswith(APPARMOR_PREFIX)
+    ):
+        return "APPARMOR_DENIED"
+    return ERROR_NAMES.get(error.name, "ERROR")
 
 
 def check_error(reply):
@@ -177,7 +193,7 @@ def daemon(name, *, diagnostic=None):
         result("unknown", "UNSAFE_AUTHORIZATION")
         raise
     except DBusErrorResponse as error:
-        return result("unknown", ERROR_NAMES.get(error.name, "ERROR"))
+        return result("unknown", error_code(error))
     except TimeoutError:
         return result("unknown", "TIMEOUT")
     except AuthenticationError:
