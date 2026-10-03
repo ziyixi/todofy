@@ -16,9 +16,9 @@ Rules for this file:
   what is done, what is left, how to verify it and what to check after its deploy. Link to the app docs for
   design detail instead of copying it.
 
-Last updated: 2026-10-02 ~23:49 UTC. The source on `main` is `e8b3666`; the foundation code below has landed, with production verification still in progress. Every app's owner API is on proto now (the dashboard
+Last updated: 2026-10-03 ~00:03 UTC. The verified foundation implementation is `8628e5e`; subsequent commits may be documentation only. Every app's owner API is on proto now (the dashboard
 `ca63675`, FlowDay `8d9100e`, Mail Hero `d1bde0e`, Todofy `b70856f`, all landed and verified on 2026-10-02). Nothing
-was in flight at that landing. The owner has since authorised the foundation work below.
+was in flight at that landing. The owner-authorised foundation work below is complete.
 
 ## What is live
 
@@ -34,7 +34,7 @@ was in flight at that landing. The owner has since authorised the foundation wor
 | Website | `ziyixi-website` (+ `ziyixi-notion-publish` relay) | `ziyixi.science`, `www.ziyixi.science` | `Website release` | n/a (static) |
 
 Newsletter source is now imported on `main` from its deployed engine commit
-`c3d622d4771b1ca63ee4e3f785b79032cffc30e1`. Its new independent image is `ghcr.io/ziyixi/todofy-newsletter`. The main publisher at `e8b3666` published it; the package is public and anonymous manifest access was verified. The pullable digest is `sha256:5ee91bedec986608d2758213b66aa20d89881f188226d2d6fe3aa4d19701a886`. The existing VPS still runs
+`c3d622d4771b1ca63ee4e3f785b79032cffc30e1`. Its new independent image is `ghcr.io/ziyixi/todofy-newsletter`. The main publisher at `8628e5e` published it; the package is public, anonymous manifest access passed, and the credential-free configuration workflow pulled and validated the image. The pullable digest is `sha256:94c535ba8f2a64d887656e50a1571f42b31d18aad5472776e0762d69c20e5e51`. The existing VPS still runs
 `ghcr.io/ziyixi/newsletter`; image publication here does not update that server. It still reads Todofy's
 `/api/summary` and `/api/recommendation` using its existing machine contract. See
 `newsletter/docs/import-source.md` and `newsletter/docs/deployment-drain.md` for the import and release boundaries.
@@ -69,18 +69,19 @@ Practical notes learned the hard way:
 
 ## In flight
 
-| Branch | Scope | Remaining and verification |
-| --- | --- | --- |
-| `codex/personal-cloud-foundation` | Foundation landed on main as `e8b3666`: documentation, P5 catalog, shared CI probes, Newsletter import and durable drain. | Shared probe paths are corrected with workflow-directory and spaced-workspace regressions; full branch CI, then the exact green SHA to main. Complete Watch and Home release verification. No K3s, VPS upgrade or real newsletter send. |
+None. Foundation code landed as `8628e5e` and its release verification is complete. The existing VPS runtime
+remains unchanged; the next server upgrade is a separate operation using the imported release/drain contract.
 
-Foundation evidence and remaining checks:
+## Foundation completed
 
-- Root README is concise and bilingual; docs, contracts and migration history have separate navigation. P5 uses nine `app.toml` files, generates Home/Access metadata, and validates ten Workers against their committed Wrangler configs. Existing Home public bytes and Access identities were preserved.
+- Root README is concise and bilingual; docs, contracts and migration history have separate navigation. P5 uses nine `app.toml` files, generates Home/Access metadata, and validates ten Workers against their committed Wrangler configs. Existing Home public bytes and Access identities were preserved. The read-only Infra drift run reported `no-op 19`; no infrastructure apply was needed.
 - Changes: 360 tests (one intentional Watch/no-D1 skip); catalog: 18; infra driver: 75; Home unit: 249 and workerd: 73. Secretless OpenTofu fmt/validate and cross-config guards passed. Newsletter: 2476 tests, locked lint/type/structure, synthetic HTTP smoke, no-login Codex startup, build, isolated wheel and actual Linux Docker/configuration smoke passed.
-- The full branch run [37078220816](https://github.com/ziyixi/todofy/actions/runs/37078220816) passed at `e8b3666`. Earlier CI exposed shared unittest discovery state and a Node 26 Watch stub lifetime issue; isolated loaders and retained requests with a controlled clock cover both. Codex cleanup failure retains an uncertain activity and blocks freeze.
-- Main run [37078711967](https://github.com/ziyixi/todofy/actions/runs/37078711967) reused the exact tested image artifact and published the new package; Mail Hero deployment passed. Watch uploaded and verified its 100% version/BUILD_SHA, but its subsequent Access check could not find the shared script from `watch/worker`. Home was gated behind that failure. All nine shared helper calls now use the quoted workspace absolute path. Regression probes execute from the actual workflow directories and a workspace path containing spaces; the old Watch call fails the negative control with exit 127. The final corrected release is pending.
-- The owner approved a public code-only `todofy-newsletter` package; GitHub created it public, and anonymous registry access passed. The original Newsletter package permissions and existing VPS image/configuration are unchanged.
+- Full branch run [37079465314](https://github.com/ziyixi/todofy/actions/runs/37079465314) passed at `8628e5e`. Earlier CI exposed shared unittest discovery state and a Node 26 Watch stub lifetime issue; isolated loaders and retained requests with a controlled clock cover both. Codex cleanup failure retains an uncertain activity and blocks freeze.
+- Main run [37079972709](https://github.com/ziyixi/todofy/actions/runs/37079972709) reused the exact tested image artifact; Newsletter image publish, Mail Hero deploy, Watch deploy and Dashboard deploy all passed. All nine shared probe calls use a quoted workspace absolute path, with regressions from actual workflow directories and a workspace containing spaces; the old Watch call fails the negative control with exit 127.
+- Configuration run [37080121901](https://github.com/ziyixi/todofy/actions/runs/37080121901) pulled the public released image without a Docker login, validated the authored configuration and published its immutable bundle to the monorepo's `published` branch. This does not switch the VPS config-sync source or trigger a preparation/send. The root daily trigger's settings have not been migrated and its manual dispatch has not been exercised.
+- The owner approved a public code-only `todofy-newsletter` package; GitHub created it public. The original Newsletter package permissions and existing VPS image/configuration are unchanged. Source import and first-upgrade/rollback boundaries are documented in `newsletter/docs/import-source.md` and `newsletter/docs/deployment-drain.md`.
 - Four retired GHCR packages (`todofy`, `todofy-llm`, `todofy-todo`, `todofy-database`; 302 versions) were deleted after exact owner confirmation and verified absent. Current public server deployment configuration has no references; the older local deployment checkout is stale. Migration snapshots and unrelated images remain.
+- No K3s was installed, no VPS service was upgraded, and no real model call, Notion operation or newsletter send was used for this foundation's verification.
 
 
 The pattern every owner API followed (owner-approved, Google style, from Lab), for any new app or API: describe every route the app's UI
