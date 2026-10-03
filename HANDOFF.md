@@ -69,8 +69,19 @@ Practical notes learned the hard way:
 
 ## In flight
 
-None. Foundation code landed as `8628e5e` and its release verification is complete. The existing VPS runtime
-remains unchanged; the next server upgrade is a separate operation using the imported release/drain contract.
+`codex/k3s-personal-cloud` starts from `450110b`. The owner authorised GitHub-driven k3s reconciliation,
+a separate Cloudflare Fleet worker/UI, Newsletter monitoring in Home, and Compose retirement. The owner
+subsequently clarified that **all existing Compose services should stop**, rather than migrating unrelated
+apps. All 13 inventoried containers are stopped and their automatic restart is disabled; containers,
+volumes, private configurations and migration snapshots are retained. Do not restart legacy triggers.
+
+Work in progress: Flux pulls public, CI-verified desired manifests; Newsletter releases drain/freeze before
+changing the exclusive stateful process; an independent host observer reports bounded status to Fleet.
+Public deployment profiles and a rebuild runbook separate empty resource recreation from historical data
+recovery. Initial k3s/systemd setup requires one pinned bootstrap executed by the owner with sudo; routine
+reconciliation must need neither SSH nor a GitHub-held host credential. The owner accepted that one-time
+step. No k3s/Fleet deployment or production business acceptance has happened yet. Do not claim the old
+process supports the new drain API. Branch checks must pass before main and gated infrastructure apply.
 
 ## Foundation completed
 
