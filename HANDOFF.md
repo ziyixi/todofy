@@ -125,32 +125,34 @@ Practical notes learned the hard way:
 
 ## In flight
 
-On `codex/k3s-personal-cloud`, following green main `9fc80fc`: persistent owner reminder dismiss/restore.
-Home owns occurrence identities and dispositions in its existing SQLite DO; the source's health, counters
-and business results remain unchanged. The typed `dashboard.ui.v1` actions use occurrence etags and
-idempotent request IDs, with existing Access/Origin/CSRF checks. Dismissed occurrences leave attention
-badges and future digest messages, stay inspectable/restorable, and survive reload/restart. Meaningful
-count/severity changes or confirmed recovery followed by recurrence re-open a reminder; a disconnected
-source does not count as recovery. Fleet exposes Newsletter's unknown count as a signal metric, explains
-the aggregate and links to Home for reminder actions. No new VPS control or credential is required.
-Before merge: complete synthetic DO/IDL/UI tests, independent review and full branch CI; merge only the
-same green SHA. After deploy: use the owner's Home UI to dismiss the current Newsletter occurrence,
-reload and verify the saved state, cleared badges and accurate visible counters. No business replay or
-external report send is part of acceptance.
-Local implementation is ready: Home UI 146 tests, Fleet UI 5, seven new real DO cases and three SQLite
-capacity/prototype-key regressions passed; Worker typecheck/lint and buf/API lint passed. The full
-existing runtime suite and shared-consumer checks are delegated to branch CI. Ordinary view read budgets
-are 40 rows; a representative six-source stress case is guarded at 64KiB/320 reads. The UI applies the
-server-confirmed action response before refetch, with stable live feedback and neutral dismissed labels.
-Review fixes include newer-occurrence CAS, filtering before the outbound 20-item bound, retaining closed
-decisions through unavailable underlying telemetry, and independent drift-recovery evidence.
-The first branch run caught the generated drift inventory missing Fleet's new HOME_URL. Regeneration
-fixed that check; the 379-test Changes suite now passes locally (one existing skip). No production
-deployment occurred from the failed branch run.
-The next full run found cached-report/live-attention time semantics and old exact metadata assertions.
-The report view now filters the stored full raw digest, while live attention is evaluated separately;
-55 relevant runtime tests pass. DO cold-start CPU measured 16.57ms in Linux CI after the new projection;
-its regression budget is 20ms, with the warm and HTTP budgets unchanged. Both local CPU suites pass.
+### Completed: persistent reminder controls
+
+Live application source is `92b56447c77703fad7e01ee972d08ac7c18cd184`. Full branch
+[CI 37167497796](https://github.com/ziyixi/todofy/actions/runs/37167497796) passed; the same SHA
+reached main and [release 37167882939](https://github.com/ziyixi/todofy/actions/runs/37167882939)
+succeeded. Home and Fleet deployed; other application and VPS releases were correctly skipped.
+
+The owner clarified that the historical Newsletter reminder should be removable. Home now owns
+persistent dismiss/restore in its existing SQLite DO, through typed actions with Access/Origin/CSRF,
+occurrence/disposition etags and bounded idempotent receipts. Source health, counts and business results
+remain factual. Meaningful count/severity changes or confirmed recovery followed by recurrence reopen
+an alert; unavailable underlying telemetry does not count as recovery. Full raw explanations are built
+before applying dispositions; outgoing reports are filtered before their 20-item cap. Report history
+uses its stored snapshot, separate from live attention. Details: dashboard/docs/design-v2.md §11.
+
+Production acceptance on 2026-10-04 UTC: refreshed Fleet's count, dismissed the current 32-record
+Newsletter occurrence through Home, then reloaded. Home reports no pending reminders, zero tab badges
+and one restorable ignored reminder. Home service/flow labels are neutral; Fleet still shows healthy
+process, zero queued/active work and 32 unconfirmed records. Both live UI builds identify `92b5644`.
+A 375px browser viewport had no horizontal overflow and exposed the restore button; the viewport was
+reset. The natural 01:30 UTC scheduled digest received Todofy's stored receipt with zero items. No
+manual report send, business replay, ledger deletion, new credential or VPS update was used.
+
+Local checks: 253 Worker units, 146 Home UI tests, five Fleet UI tests, seven new real DO regressions,
+three SQLite capacity/prototype-key cases and 55 relevant existing runtime tests passed. Buf/API lint,
+types/lint, schema generation and both CPU suites passed; full platform validation passed in branch CI.
+The ordinary read budget is 40 rows; representative stress tests use 64KiB/320 reads. DO cold-start CI
+measured 16.57ms, covered by a 20ms regression budget; warm and HTTP budgets remain unchanged.
 
 `codex/k3s-personal-cloud` starts from `450110b`. The owner authorised GitHub-driven k3s reconciliation,
 a separate Cloudflare Fleet worker/UI, Newsletter monitoring in Home, and Compose retirement. The owner
