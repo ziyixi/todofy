@@ -46,7 +46,7 @@ function RunLink({ url }: { url: string | undefined }) {
 function RequestNotice({ request }: { request: WebsiteSyncRequestResult }) {
   switch (request.state) {
     case 'accepted':
-      return <Notice tone="info">请求已加入发布队列，尚未完成。 <RunLink url={request.run_url} /></Notice>
+      return <Notice tone="info">请求已加入发布队列。执行结果见上方状态或 Actions。 <RunLink url={request.run_url} /></Notice>
     case 'failed':
       return <Notice tone="danger">
         {errorGuidance(request.error_code, 'GitHub 未接受本次同步，请查看发布配置后重试。')}

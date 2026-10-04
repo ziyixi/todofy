@@ -19,17 +19,28 @@ Rules for this file:
 Last updated: 2026-10-04.
 <!-- Active work is separate from the production evidence below. -->
 
-## In progress: daily website content sync
+## Website content sync: deployed; natural daily tick pending
 
-Branch `codex/website-daily-sync` implements the owner-approved daily Worker trigger, complete Notion
-content checks, independent GitHub sync receipts and private Home status/manual sync. Notion keeps
-content fields and Draft/Published. Existing static release identity, route verification and rollback
-remain authoritative. No new storage service or paid product is introduced.
+`da35586e171f4eb8a9df93746f4b5948008ec8f3` passed branch CI and the same SHA passed the main release.
+The existing relay now triggers a full content check daily at 10:17 UTC. Home provides **立即同步**
+and monitors actual GitHub check/publication receipts through Ops. No new storage service or paid
+product was introduced. Existing static identity, route verification and rollback remain authoritative.
 
-Implementation and branch CI come first, then the same green SHA publishes the relay and Home.
-Retired Notion feedback jobs must finish before removing the managed operational fields, buttons and
-views. Manual sync and the next natural daily Cron need separate production evidence; the latter has
-not run for this change. Tests must prove explicit complete withdrawal before an automatic empty list.
+The configured Notion Blog now has one **内容** view, the eight original content fields and
+Draft/Published. Operational fields, buttons and summary were removed after the old writers drained;
+both article bodies, content values and media references were preserved. Legacy writer workflows
+were disabled, preserving their history. A subsequent full snapshot retained the same content hash.
+
+The first Home manual sync completed with `SYNC_UNCHANGED`; the check clock advanced while the
+verified publication clock and actual Worker version stayed unchanged. Additional requests were
+accepted into the existing queue. Full evidence and the remaining checks are in
+[docs/website-sync-verification.md](docs/website-sync-verification.md).
+
+The next natural Cron is `2026-10-05T10:17:00Z`. It has not run for this change; a thread follow-up
+is scheduled after that tick to verify its actual run, receipt and Home observation and update this
+record. Do not substitute a manual dispatch for this evidence. Complete withdrawal protection,
+provider failure, cancellation and rollback paths were tested with fixtures; no live articles were
+withdrawn or production deliberately interrupted for this acceptance.
 
 ## Current production evidence
 
