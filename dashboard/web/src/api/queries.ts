@@ -1,6 +1,7 @@
 import { QueryClient, useMutation, useQuery, useQueryClient, type Query } from '@tanstack/react-query'
-import type { CloudflareView, FlowsView, GuardLevel, HomeView, OpsView, ViewId } from '../../../worker/src/api-types.ts'
+import type { AttentionItem, CloudflareView, FlowsView, GuardLevel, HomeView, OpsView, ShellFields, ViewId } from '../../../worker/src/api-types.ts'
 import { ApiError, api } from './client'
+import { applyAttentionResult } from './attention-cache'
 
 /**
  * Only the visible view is read, every 5 minutes while the page is visible (the cron updates the data
@@ -103,6 +104,22 @@ export function useSetGuard() {
     onSuccess: ({ guard }) => {
       client.setQueryData<OpsView>(viewKey('ops'), (old) => (old ? { ...old, guard } : old))
       client.setQueryData<CloudflareView>(viewKey('cloudflare'), (old) => (old ? { ...old, guard } : old))
+    },
+    onSettled: () => client.invalidateQueries({ predicate: otherViews(null) }),
+  })
+}
+
+/** One owner action keeps its UUID across transport retries; every view reads the durable result. */
+export function useAttentionAction(onSaved: (item: AttentionItem) => void) {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: (action: { name: string; etag: string; requestId: string; restore: boolean }) =>
+      action.restore ? api.restoreAttention(action.name, action.etag, action.requestId)
+        : api.dismissAttention(action.name, action.etag, action.requestId),
+    onSuccess: (item, action) => {
+      onSaved(item)
+      client.setQueriesData<ShellFields>({ predicate: otherViews(null) }, old =>
+        old ? applyAttentionResult(old, action.etag, item) : old)
     },
     onSettled: () => client.invalidateQueries({ predicate: otherViews(null) }),
   })

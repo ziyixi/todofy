@@ -13,6 +13,7 @@
 import type { CommonReason } from '@ziyixi/proto/common/errors/v1/errors_pb';
 import { OverrideGuardResponseSchema, RunCanaryResponseSchema, type DashboardUiService } from '@ziyixi/proto/dashboard/ui/v1/dashboard_ui_service_pb';
 import type { ErrorReason } from '@ziyixi/proto/dashboard/ui/v1/errors_pb';
+import { AttentionItemSchema } from '@ziyixi/proto/dashboard/ui/v1/attention_pb';
 import { PreEncoded, type ServiceHandlers, type ShapeOf } from '@ziyixi/proto/http-transcoder';
 import { GuardLevel, GuardLevelSchema } from '@ziyixi/proto/ops/v1/ops_pb';
 import { Code, RpcError } from '@ziyixi/proto/rpc-status';
@@ -22,7 +23,7 @@ import type { ViewId } from './api-types.ts';
 import { buildSha } from './config.ts';
 import type { Env } from './env.ts';
 import { registryBody } from './registry.ts';
-import { HOME_OBJECT, type GuardOverrideOutcome, type HomeState, type StartCanaryOutcome } from './state.ts';
+import { HOME_OBJECT, type AttentionMutationOutcome, type GuardOverrideOutcome, type HomeState, type StartCanaryOutcome } from './state.ts';
 import { etagMatches, type ViewBody } from './view-body.ts';
 
 /** What every handler gets: src/http.ts authenticated the owner before routing. */
@@ -56,6 +57,7 @@ export const REASONS: Readonly<Record<Reason, { readonly code: Code; readonly me
   CANARY_ACTIVE: { code: Code.ABORTED, message: 'a canary run is in progress', zh: '已有金丝雀运行正在进行' },
   CANARY_DISABLED: { code: Code.FAILED_PRECONDITION, message: 'the canary is switched off', zh: '金丝雀已关闭（DASHBOARD_CANARY_ENABLED=false）' },
   CANARY_LIMIT: { code: Code.RESOURCE_EXHAUSTED, message: "today's manual canary runs are used", zh: '今天的手动金丝雀次数已用完' },
+  ATTENTION_CHANGED: { code: Code.ABORTED, message: 'the reminder occurrence or disposition changed; refresh before repeating', zh: '提醒或关闭状态已变化，请刷新后重新确认' },
 };
 
 export function dashboardError(reason: Reason, headers: Readonly<Record<string, string>> = {}): RpcError {
@@ -122,6 +124,17 @@ export const handlers: ServiceHandlers<ShapeOf<typeof DashboardUiService>, ApiCo
   getCloudflareView: (_request, ctx) => viewAnswer(ctx, 'cloudflare', false),
   refreshCloudflareView: (_request, ctx) => viewAnswer(ctx, 'cloudflare', true),
   getOpsView: (_request, ctx) => viewAnswer(ctx, 'ops', false),
+
+  async dismissAttention(request, ctx) {
+    const result = await callHome(() => home(ctx.env).dismissAttention(request.name, request.etag, request.requestId, ctx.at) as unknown as Promise<AttentionMutationOutcome>);
+    if (!result.ok) throw dashboardError(result.code === 'attention_changed' ? 'ATTENTION_CHANGED' : 'BAD_REQUEST');
+    return ownAnswer(AttentionItemSchema, result.item);
+  },
+  async restoreAttention(request, ctx) {
+    const result = await callHome(() => home(ctx.env).restoreAttention(request.name, request.etag, request.requestId, ctx.at) as unknown as Promise<AttentionMutationOutcome>);
+    if (!result.ok) throw dashboardError(result.code === 'attention_changed' ? 'ATTENTION_CHANGED' : 'BAD_REQUEST');
+    return ownAnswer(AttentionItemSchema, result.item);
+  },
 
   async overrideGuard(request, ctx) {
     // The strict read refused a level outside the enum; non_null refused the zero value.

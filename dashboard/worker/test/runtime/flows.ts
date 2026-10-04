@@ -271,9 +271,9 @@ export async function startFlows(
       await harness.scenario(app, scenarios[app]);
     },
     async redeploy(bindings) {
-      for (const app of ['mail-hero', 'todofy', 'lab'] as const) pending[app].push(...(await harness.calls(app)));
+      for (const app of Object.keys(scenarios) as StubApp[]) pending[app].push(...(await harness.calls(app)));
       await harness.rebind(bindings);
-      for (const app of ['mail-hero', 'todofy', 'lab'] as const) await harness.scenario(app, scenarios[app]);
+      for (const app of Object.keys(scenarios) as StubApp[]) await harness.scenario(app, scenarios[app]);
     },
   };
   return flows;

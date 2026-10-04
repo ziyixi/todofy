@@ -2,6 +2,7 @@ import { ChevronDown, ExternalLink } from 'lucide-react'
 import { useEffect, useId, useRef, useState } from 'react'
 import type { Flow as FlowDef, FlowState, FlowsView as FlowsViewData, Stage as StageDef, StageState } from '../../../worker/src/api-types.ts'
 import { CanaryDays, CanaryFacts, CanaryHistory, CanaryToday } from '../components/Canary'
+import { SignalActions, targetDismissed, useAttention, useTargetDismissed } from '../components/AttentionActions'
 import { LevelMark, LevelShape } from '../components/status'
 import { Metrics, Pill, Time } from '../components/ui'
 import { flowMark, freshnessText } from '../lib/flows'
@@ -53,12 +54,13 @@ function freshLine(state: FlowState, now: Date): string {
   return freshnessText(fresh, now) ?? ''
 }
 
-function StageDetail({ reg, stage, state, now }: { reg: Reg; stage: StageDef; state: StageState | undefined; now: Date }) {
+function StageDetail({ reg, flow, stage, state, now }: { reg: Reg; flow: string; stage: StageDef; state: StageState | undefined; now: Date }) {
   const headingId = useId()
   const entry = entryOf(reg, stage.entry)
   const scripts = stageScripts(reg, stage)
   const url = httpsUrl(entry?.url)
   const level = state?.level ?? 'unknown'
+  const dismissed = useTargetDismissed({ flow, stage: stage.id }) && level === 'warning'
   const unseen = level === 'unmonitored' || level === 'link'
   return (
     <section className="stage-detail" aria-labelledby={headingId}>
@@ -68,7 +70,7 @@ function StageDetail({ reg, stage, state, now }: { reg: Reg; stage: StageDef; st
           {' '}
           ·{' '}
         </span>
-        <LevelMark level={level} />
+        {dismissed ? <Pill tone="neutral">本批提醒已关闭</Pill> : <LevelMark level={level} />}
       </h4>
       {!state ? <p className="small">无法获取这一阶段的数据，其他内容不受影响。</p> : null}
       {unseen ? (
@@ -97,6 +99,7 @@ function StageDetail({ reg, stage, state, now }: { reg: Reg; stage: StageDef; st
                   </p>
                 ) : null}
                 <Metrics metrics={signal.metrics} />
+                {stage.entry ? <SignalActions source={stage.entry} code={signal.code} target={{ flow, stage: stage.id, entry: stage.entry }} /> : null}
               </li>
             )
           })}
@@ -190,6 +193,8 @@ function FlowCard({
 }) {
   const mark = state ? flowMark(state) : { level: 'unknown' as const, word: LEVEL.unknown.word }
   const level = mark.level
+  const attention = useAttention()
+  const dismissed = useTargetDismissed({ flow: flow.id }) && level === 'warning'
   const [open, setOpen] = useState(() => focused || ATTENTION.has(level))
   const routeStage = focused && focusStage !== undefined && flow.stages.some((stage) => stage.id === focusStage) ? focusStage : undefined
   const [selected, setSelected] = useState(() => routeStage ?? defaultStage(flow, state))
@@ -213,7 +218,7 @@ function FlowCard({
     <article ref={card} id={`flow-${flow.id}`} className={`flow-card${open ? ' flow-card-open' : ''}`} aria-labelledby={titleId}>
       <div className="flow-head">
         <h3 id={titleId}>{flow.name}</h3>
-        <LevelMark level={level} word={word} className="level-badge" />
+        {dismissed ? <Pill tone="neutral">本批提醒已关闭</Pill> : <LevelMark level={level} word={word} className="level-badge" />}
         {coverage ? <span className="flow-coverage small muted">{coverage}</span> : null}
         <button
           type="button"
@@ -237,6 +242,7 @@ function FlowCard({
             {flow.stages.map((stage, index) => {
               const item = stageState(stage.id)
               const stageLevel = item?.level ?? 'unknown'
+              const stageDismissed = targetDismissed(attention, { flow: flow.id, stage: stage.id }) && stageLevel === 'warning'
               const count = stageCount(stage, item, now)
               const badge = item?.canary ? CANARY_BADGE[item.canary] : null
               return (
@@ -248,16 +254,16 @@ function FlowCard({
                   ) : null}
                   <button
                     type="button"
-                    className={`stage-node stage-${stageLevel}`}
+                    className={`stage-node stage-${stageLevel}${stageDismissed ? ' stage-dismissed' : ''}`}
                     aria-pressed={selected === stage.id}
-                    aria-label={`阶段 ${index + 1} ${stage.name}：${LEVEL[stageLevel].word}，${count}${badge ? `，金丝雀${badge.label}` : ''}`}
+                    aria-label={`阶段 ${index + 1} ${stage.name}：${stageDismissed ? '本批提醒已关闭' : LEVEL[stageLevel].word}，${count}${badge ? `，金丝雀${badge.label}` : ''}`}
                     onClick={() => setSelected(stage.id)}
                   >
                     <span className="stage-name">
-                      <LevelShape level={stageLevel} />
+                      {stageDismissed ? null : <LevelShape level={stageLevel} />}
                       {stage.name}
                     </span>
-                    <span className={`level-word level-${LEVEL[stageLevel].tone}`}>{LEVEL[stageLevel].word}</span>
+                    <span className={`level-word level-${stageDismissed ? 'neutral' : LEVEL[stageLevel].tone}`}>{stageDismissed ? '提醒已关闭' : LEVEL[stageLevel].word}</span>
                     <span className="stage-count">{count}</span>
                     {badge ? <span className={`canary-badge canary-${item?.canary}`}>{badge.label}</span> : null}
                   </button>
@@ -266,7 +272,7 @@ function FlowCard({
             })}
           </ol>
           <div className={`flow-detail${state?.canary ? ' flow-detail-2' : ''}`}>
-            {current ? <StageDetail reg={reg} stage={current} state={stageState(current.id)} now={now} /> : null}
+            {current ? <StageDetail reg={reg} flow={flow.id} stage={current} state={stageState(current.id)} now={now} /> : null}
             {state ? <CanaryBlock flow={flow} state={state} now={now} /> : null}
           </div>
           {state && state.unclassified.length > 0 ? (
@@ -288,6 +294,7 @@ function FlowCard({
           <ol className="pill-chain" aria-label="阶段">
             {flow.stages.map((stage, index) => {
               const stageLevel = stageState(stage.id)?.level ?? 'unknown'
+              const stageDismissed = targetDismissed(attention, { flow: flow.id, stage: stage.id }) && stageLevel === 'warning'
               return (
                 <li key={stage.id}>
                   {index > 0 ? (
@@ -295,10 +302,10 @@ function FlowCard({
                       →
                     </span>
                   ) : null}
-                  <span className={`stage-pill stage-${stageLevel}`}>
-                    <LevelShape level={stageLevel} size={10} />
+                  <span className={`stage-pill stage-${stageLevel}${stageDismissed ? ' stage-dismissed' : ''}`}>
+                    {stageDismissed ? null : <LevelShape level={stageLevel} size={10} />}
                     {stage.name}
-                    <span className="visually-hidden">：{LEVEL[stageLevel].word}</span>
+                    <span className="visually-hidden">：{stageDismissed ? '本批提醒已关闭' : LEVEL[stageLevel].word}</span>
                   </span>
                 </li>
               )

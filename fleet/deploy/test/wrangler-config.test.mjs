@@ -6,6 +6,7 @@ import { createRequire } from 'node:module'
 import { pathToFileURL } from 'node:url'
 import { parseToml } from '../../../tools/cf-guard/toml.mjs'
 import { CONFIG, INJECTED, generateSecrets } from '../deploy-vars.mjs'
+import { homeURLFromConfig, validateHomeURL } from '../public-navigation.mjs'
 
 const APP = new URL('../../', import.meta.url)
 const require = createRequire(new URL('worker/package.json', APP))
@@ -41,7 +42,7 @@ test('Fleet owns only its SQLite observation object, with no scheduled or busine
 })
 
 test('public vars match the profile, and an activated AUD must be the recorded real identity', () => {
-  const keys = ['ACCESS_ISSUER', 'HOST_EPOCH', 'HOST_KEY', 'PUBLIC_HOST']
+  const keys = ['ACCESS_ISSUER', 'HOME_URL', 'HOST_EPOCH', 'HOST_KEY', 'PUBLIC_HOST']
   if (config.vars.ACCESS_AUDIENCE !== undefined) keys.push('ACCESS_AUDIENCE')
   assert.deepEqual(Object.keys(config.vars).sort(), keys.sort())
   assert.equal(config.vars.PUBLIC_HOST, profile.platform_hostname)
@@ -52,6 +53,14 @@ test('public vars match the profile, and an activated AUD must be the recorded r
   if (config.vars.ACCESS_AUDIENCE !== undefined) {
     assert.match(config.vars.ACCESS_AUDIENCE, /^[0-9a-f]{64}$/)
     assert.notEqual(config.vars.ACCESS_AUDIENCE, '0'.repeat(64))
+  }
+})
+
+test('the Home navigation link is a declared HTTPS origin, not UI source or observed host data', () => {
+  assert.equal(homeURLFromConfig(), config.vars.HOME_URL)
+  assert.equal(validateHomeURL('https://home.example.test/'), 'https://home.example.test/')
+  for (const value of [undefined, '', 'javascript:alert(1)', 'http://home.example.test/', 'https://127.0.0.1/', 'https://user:secret@home.example.test/', 'https://home.example.test/path', 'https://home.example.test/?token=x']) {
+    assert.throws(() => validateHomeURL(value), /Fleet HOME_URL/)
   }
 })
 

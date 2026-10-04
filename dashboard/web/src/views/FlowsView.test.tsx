@@ -15,6 +15,25 @@ async function showFlows(scenario: Scenario, hash = '#/flows') {
 const card = (name: string) => screen.getByRole('article', { name })
 
 describe('业务流程', () => {
+  it('shows a saved dismissal in open, collapsed and Home summaries without changing the underlying level', async () => {
+    const base = oneWarning()
+    const item = base.flows.attention.items[0]!
+    const attention = { level: 'ok' as const, items: [], info: [], held: [], dismissed_items: [{ ...item, dismissed_at: '2026-09-29T16:50:00Z' }] }
+    base.home = { ...base.home, attention, badges: { home: 0, flows: 0, cloudflare: 0, ops: 0 } }
+    base.flows = { ...base.flows, attention, badges: base.home.badges }
+    const user = await showFlows(base, '#/flows/mail-to-task')
+    const flow = card('邮件 → 任务')
+    const stage = within(flow).getByRole('button', { name: /Todofy 摘要：本批提醒已关闭/ })
+    expect(stage).toHaveClass('stage-dismissed')
+    expect(base.flows.flows.find(flow => flow.id === 'mail-to-task')?.level).toBe('warning')
+    await user.click(within(flow).getByRole('button', { name: '收起 邮件 → 任务' }))
+    expect(within(flow).getByText('Todofy 摘要', { selector: '.stage-pill' })).toHaveClass('stage-dismissed')
+    await user.click(screen.getByRole('link', { name: '首页' }))
+    const rows = await screen.findByRole('region', { name: '业务流程' })
+    expect(within(rows).getByRole('link', { name: /^邮件 → 任务：本批提醒已关闭，/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Todofy 状态：本批提醒已关闭，查看详情' })).toBeInTheDocument()
+  })
+
   it('groups the flows by business, each a chain of stages', async () => {
     await showFlows(healthy())
     const groups = screen.getAllByRole('heading', { level: 2 }).map((heading) => heading.textContent)

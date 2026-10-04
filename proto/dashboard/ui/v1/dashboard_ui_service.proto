@@ -53,6 +53,7 @@ syntax = "proto3";
 package dashboard.ui.v1;
 
 import "common/wire/v1/wire.proto";
+import "dashboard/ui/v1/attention.proto";
 import "dashboard/ui/v1/canary.proto";
 import "dashboard/ui/v1/cloudflare_view.proto";
 import "dashboard/ui/v1/flows_view.proto";
@@ -70,6 +71,16 @@ import "ops/v1/ops.proto";
 option java_multiple_files = true;
 option java_outer_classname = "DashboardUiServiceProto";
 option java_package = "science.ziyixi.dashboard.ui.v1";
+option (common.wire.v1.formats) = {
+  name: "AttentionName"
+  pattern: "attentionItems/[A-Za-z0-9_-]{1,512}"
+  description: "Opaque identity of one dashboard condition and its stable target."
+};
+option (common.wire.v1.formats) = {
+  name: "AttentionEtag"
+  pattern: "a1-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}"
+  description: "Identity of the current reminder occurrence, independent of the view revision."
+};
 // The guard (a singleton): what the dashboard wants every guarded app to do. Shown inside the cloudflare and ops
 // views (GuardView); OverrideGuard changes it.
 option (google.api.resource_definition) = {
@@ -180,6 +191,68 @@ service DashboardUiService {
     };
     option (google.api.method_signature) = "name";
   }
+
+  // Dismisses only the current reminder occurrence, never the source's business records.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc DismissAttention(DismissAttentionRequest) returns (AttentionItem) {
+    option (google.api.http) = {
+      post: "/api/v1/{name=attentionItems/*}:dismiss"
+      body: "*"
+    };
+    option (google.api.method_signature) = "name,etag,request_id";
+  }
+
+  // Restores reminders for the same current occurrence.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc RestoreAttention(RestoreAttentionRequest) returns (AttentionItem) {
+    option (google.api.http) = {
+      post: "/api/v1/{name=attentionItems/*}:restore"
+      body: "*"
+    };
+    option (google.api.method_signature) = "name,etag,request_id";
+  }
+}
+
+// Input of DismissAttention. A stale occurrence is ABORTED; refresh before trying again.
+message DismissAttentionRequest {
+  // The current condition resource from the owner's view.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "home.ziyixi.science/AttentionItem",
+    (common.wire.v1.field).format = "AttentionName"
+  ];
+  // The current occurrence and disposition revision; never a whole-view ETag.
+  string etag = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "AttentionEtag"
+  ];
+  // One UUID4 per owner action; retries keep the same body and ID.
+  string request_id = 3 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.field_info).format = UUID4
+  ];
+}
+
+// Input of RestoreAttention. A request ID cannot be reused for another body or action.
+message RestoreAttentionRequest {
+  // The current dismissed condition resource.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "home.ziyixi.science/AttentionItem",
+    (common.wire.v1.field).format = "AttentionName"
+  ];
+  // The revision returned by dismiss or the latest view.
+  string etag = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "AttentionEtag"
+  ];
+  // One UUID4 per owner action; reused for a different body is rejected.
+  string request_id = 3 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.field_info).format = UUID4
+  ];
 }
 
 // Input of GetRegistry.

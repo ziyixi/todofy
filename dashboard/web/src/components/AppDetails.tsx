@@ -16,6 +16,7 @@ import {
 } from '../lib/labels'
 import { httpsUrl } from '../lib/url'
 import { Card, Fact, Facts, Metrics, Notice, Pill, Time } from './ui'
+import { SignalActions } from './AttentionActions'
 
 /** A status older than this is marked as possibly outdated (the cron reads it every 30 minutes). */
 const STATUS_STALE_MS = 60 * 60_000
@@ -88,12 +89,12 @@ export function AppDetails({
         <Notice tone="warn">状态数据来自 {formatRelative(card.status_at, now)}，可能已过时。</Notice>
       ) : null}
 
-      {status ? <StatusDetails status={status} guard={guard} now={now} /> : null}
+      {status ? <StatusDetails status={status} source={card.entry} guard={guard} now={now} /> : null}
     </Card>
   )
 }
 
-function StatusDetails({ status, guard, now }: { status: OpsStatus; guard: GuardAppView | undefined; now: Date }) {
+function StatusDetails({ status, source, guard, now }: { status: OpsStatus; source: string; guard: GuardAppView | undefined; now: Date }) {
   const effective = guard?.state ?? status.guard
   const modes = Object.entries(status.modes)
   const all = Object.entries(status.counters)
@@ -158,6 +159,7 @@ function StatusDetails({ status, guard, now }: { status: OpsStatus; guard: Guard
                     </p>
                   ) : null}
                   <Metrics metrics={signal.metrics} />
+                  <SignalActions source={source} code={signal.code} target={{ entry: source }} />
                 </li>
               )
             })}

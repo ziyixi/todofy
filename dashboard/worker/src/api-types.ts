@@ -22,10 +22,10 @@
  * | Method                | HTTP                                  | Served by      | Budget per call                |
  * | --------------------- | ------------------------------------- | -------------- | ------------------------------ |
  * | GetRegistry           | GET  /api/v1/registry                 | Worker (no DO) | ≤ 14 KiB; ETag "<build>" → 304 |
- * | GetHomeView           | GET  /api/v1/homeView                 | DO, 1 call     | ≤ 10 KiB; ≤ 28 rows read       |
- * | GetFlowsView          | GET  /api/v1/flowsView                | DO, 1 call     | ≤ 20 KiB; ≤ 28 rows read       |
- * | GetCloudflareView     | GET  /api/v1/cloudflareView           | DO, 1 call     | ≤ 16 KiB; ≤ 30 rows read       |
- * | GetOpsView            | GET  /api/v1/opsView                  | DO, 1 call     | ≤ 24 KiB; ≤ 28 rows read       |
+ * | GetHomeView           | GET  /api/v1/homeView                 | DO, 1 call     | ≤ 10 KiB; ≤ 40 rows read       |
+ * | GetFlowsView          | GET  /api/v1/flowsView                | DO, 1 call     | ≤ 20 KiB; ≤ 40 rows read       |
+ * | GetCloudflareView     | GET  /api/v1/cloudflareView           | DO, 1 call     | ≤ 16 KiB; ≤ 40 rows read       |
+ * | GetOpsView            | GET  /api/v1/opsView                  | DO, 1 call     | ≤ 24 KiB; ≤ 40 rows read       |
  * | RefreshHomeView       | POST /api/v1/homeView:refresh         | DO             | CSRF + Origin; once a minute   |
  * | RefreshCloudflareView | POST /api/v1/cloudflareView:refresh   | DO             | CSRF + Origin; once a minute   |
  * | OverrideGuard         | POST /api/v1/guard:override           | DO             | CSRF + Origin; request_id      |
@@ -296,12 +296,12 @@ export const BREAKDOWN_UNCLASSIFIED = 'unknown';
 
 /**
  * Response size budgets (bytes of the JSON body) of a normal day (test/views.test.ts: the mockup day, and the
- * Cloudflare view with 20 Workers). A bad day may exceed them: the attention strip repeats up to 20 items in every
- * view and the canary strip can hold 14 failed runs; VIEW_BODY_MAX bounds that case (20 alarms, 16 signals per app,
- * 14 failed runs, and the Cloudflare view at its row cap of idl.ts CF_VIEW_WORKERS_MAX Workers out of CF_SCRIPTS_MAX
- * remembered; all tested). HomeState logs `over_budget` when a body passes its budget.
+ * Cloudflare view with 20 Workers). Reminder controls add opaque identities to the complete attention set;
+ * the outbound digest's 20-item cap does not limit the page. VIEW_BODY_MAX is the regression budget for the
+ * representative bad-day tests (six sources with 16 signals each, current and dismissed reminders, plus history).
+ * It is not a platform limit or proof of every possible combination. HomeState logs `over_budget` separately.
  */
-export const VIEW_BODY_MAX = 32 * 1024;
+export const VIEW_BODY_MAX = 64 * 1024;
 export const VIEW_BODY_BUDGET = {
   registry: 14 * 1024,
   home: 10 * 1024,
@@ -317,11 +317,13 @@ export const VIEW_BODY_BUDGET = {
  * full 14-run canary history and 20 Workers). Every view reads the shared shell (meta, digest, the guard docs, one
  * status per ops_v1 entry) and, for the strip's observed items, what the evaluation reads (one probe document per
  * public_http entry, cf_scripts, the 14 recent canary runs); cloudflare adds the usage and drift documents. Each
- * document is read once per build (HomeState's read cache). Measured 28 / 28 / 29 / 28 (home / flows / cloudflare /
- * ops) with six ops_v1 apps and three public probes. Each additional status entry adds a row; the real workerd
- * regression test must continue to pass when the catalog grows.
+ * document is read once per build (HomeState's read cache). The reminder ledger and episode index bring the
+ * representative ordinary case to 36 / 37 / 36 / 37 (home / flows / cloudflare / ops); budget 40 per view.
+ * Larger stress cases use VIEW_ROWS_READ_MAX, including up to 256 retained reminder decisions. These are
+ * per-build regression budgets, not Cloudflare billing limits; the runtime tests measure actual cursor reads.
  */
-export const VIEW_ROWS_READ: Readonly<Record<ViewId, number>> = { home: 28, flows: 28, cloudflare: 30, ops: 28 };
+export const VIEW_ROWS_READ: Readonly<Record<ViewId, number>> = { home: 40, flows: 40, cloudflare: 40, ops: 40 };
+export const VIEW_ROWS_READ_MAX = 320;
 
 /** Outbound calls one tick may make, computed from the registry (tested). Free: 50 subrequests. */
 export const MAX_OUTBOUND_PER_TICK = 30;

@@ -10,7 +10,7 @@
  * workerd).
  */
 import { DurableObject } from 'cloudflare:workers';
-import type { GuardLevel, GuardState, OpsStatus, SetGuardInput } from '@ziyixi/proto/ops/v1/ops_wire';
+import type { GuardLevel, GuardState, OpsReportItem, OpsStatus, SetGuardInput } from '@ziyixi/proto/ops/v1/ops_wire';
 import { OPS_LIMITS } from '../../../contracts/ops-v1/ops-v1.ts';
 import { CANARY_MANUAL_PER_DAY, GUARD_CLEAR_PERCENT, GUARD_SHED_PERCENT, REFRESH_MIN_INTERVAL_SECONDS, type AppErrorCode, type CanaryRun, type OpsApp, type CanaryState, type Digest, type GuardAppView, type GuardView, type Usage } from './api-types.ts';
 import { CLOUDFLARE_REFRESH_MIN_SECONDS, PROBE_MIN_INTERVAL_SECONDS, VIEW_BODY_BUDGET, type ShellFields, type ViewId } from './api-types.ts';
@@ -33,7 +33,7 @@ import {
   type CanaryRecord,
 } from './canary.ts';
 import { analyticsConfigured, buildSha, canaryEnabled, canaryHour, dashboardUrl } from './config.ts';
-import { buildReport, candidates, digestKey, finalizeItems, itemKey, shouldSend, withTickState, DIGEST_REFRESH_MS } from './digest.ts';
+import { buildReport, candidates, digestKey, finalizeItems, itemKey, shouldSend, DIGEST_REFRESH_MS, type Candidate } from './digest.ts';
 import { NO_DIGEST, NO_META, NO_STATUS, NO_USAGE, type DigestDoc, type MetaDoc, type ProbeDoc, type StatusDoc, type UsageDoc } from './docs.ts';
 import type { Env } from './env.ts';
 import {
@@ -52,7 +52,7 @@ import {
   type DesiredGuard,
   type GuardOverrideDoc,
 } from './guard.ts';
-import { mergeScripts, type CfScriptsDoc } from './discovery.ts';
+import { mergeScripts, workerRows, type CfScriptsDoc } from './discovery.ts';
 import {
   NO_DRIFT,
   advanceRun,
@@ -68,11 +68,13 @@ import {
   type DriftDoc,
   type DriftRunDoc,
 } from './drift.ts';
-import { attentionView, type EvalInput } from './evaluate.ts';
+import { attentionView, freshStatus, targetOf, type EvalInput } from './evaluate.ts';
+import { ATTENTION_ROW_LIMIT, ATTENTION_SCHEMA, AttentionState, type AttentionCondition } from './attention-state.ts';
+import type { Attention, AttentionItem, Badges } from './api-types.ts';
 import { OPS_APPS, opsCanaryDelivery, opsCanaryResult, opsReportOps, opsSetGuard, opsStartCanary, opsStatus } from './ops-client.ts';
 import { nextProbeDoc, probeDue, probeUrl, type ProbeTarget } from './probe.ts';
 import { REGISTRY } from './registry.ts';
-import { MINUTE_MS, iso, isoOrNull, utcDay, utcMonthStart } from './time.ts';
+import { HOUR_MS, MINUTE_MS, iso, isoOrNull, utcDay, utcMonthStart } from './time.ts';
 import { fetchUsage, type UsageErrorCode } from './usage.ts';
 import type { ViewBody } from './view-body.ts';
 import { cloudflareResponse, flowsResponse, homeResponse, opsResponse, serializeView, shell } from './views.ts';
@@ -170,6 +172,7 @@ const SCHEMA = [
   // The run in progress (at most one) without scanning the 60-day history (rows read by every tick and view).
   "CREATE INDEX IF NOT EXISTS canary_runs_active ON canary_runs (created_at) WHERE phase != 'done'",
   'CREATE TABLE IF NOT EXISTS item_since (key TEXT PRIMARY KEY, since INTEGER NOT NULL)',
+  ATTENTION_SCHEMA,
 ];
 
 /**
@@ -180,6 +183,8 @@ export type StartCanaryOutcome =
   | { readonly ok: true; readonly run: CanaryRun }
   | { readonly ok: false; readonly code: 'canary_disabled' | 'canary_active' | 'canary_limit' | 'request_id_reused' };
 export type GuardOverrideOutcome = { readonly ok: true; readonly guard: GuardView } | { readonly ok: false; readonly code: 'request_id_reused' };
+export type AttentionMutationOutcome = { readonly ok: true; readonly item: AttentionItem }
+  | { readonly ok: false; readonly code: 'request_id_reused' | 'attention_changed' };
 
 /**
  * AIP-155: the answers of the owner's mutations by request_id (RunCanary, OverrideGuard), so a repeated request
@@ -190,12 +195,13 @@ export type GuardOverrideOutcome = { readonly ok: true; readonly guard: GuardVie
 export const REQUEST_LOG_KEY = 'request_log';
 export const REQUEST_LOG_MAX = 16;
 export const REQUEST_LOG_TTL_MS = 24 * 60 * MINUTE_MS;
-type RequestMethod = 'run_canary' | 'override_guard';
+type RequestMethod = 'run_canary' | 'override_guard' | 'dismiss_attention' | 'restore_attention';
 interface RequestLogEntry {
   readonly id: string;
   readonly method: RequestMethod;
   readonly at: number;
   readonly answer: unknown;
+  readonly input_key?: string;
 }
 
 interface CanaryRow extends Record<string, SqlStorageValue> {
@@ -231,9 +237,11 @@ export class HomeState extends DurableObject<Env> {
   private rowsRead = 0;
   /** While a view is built: documents already read (each key once per build). */
   private readCache: Map<string, unknown> | null = null;
+  private readonly attentionState: AttentionState;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
+    this.attentionState = new AttentionState(ctx.storage, <T extends Record<string, SqlStorageValue>>(query: string, ...bindings: SqlStorageValue[]) => this.rows<T>(query, ...bindings));
     void ctx.blockConcurrencyWhile(() => {
       for (const statement of SCHEMA) ctx.storage.sql.exec(statement);
       // v2 (design-v2.md §6): runs belong to a canary of the registry; existing rows are mail-todofy.
@@ -389,18 +397,42 @@ export class HomeState extends DurableObject<Env> {
   }
 
   /** The first answer to `requestId` within 24 h, `reused` when another method answered it, else null. */
-  private replay(requestId: string | null, method: RequestMethod, now: number): unknown {
+  private replay(requestId: string | null, method: RequestMethod, now: number, inputKey?: string): unknown {
     if (requestId === null) return null;
     const entry = (this.doc<{ entries: RequestLogEntry[] }>(REQUEST_LOG_KEY)?.entries ?? []).find((e) => e.id === requestId && now - e.at < REQUEST_LOG_TTL_MS);
     if (entry === undefined) return null;
-    return entry.method === method ? entry.answer : 'reused';
+    return entry.method === method && (inputKey === undefined || entry.input_key === inputKey) ? entry.answer : 'reused';
   }
 
   /** Keeps a success's answer under its request_id: the newest REQUEST_LOG_MAX of the last 24 hours. */
-  private remember(requestId: string | null, method: RequestMethod, answer: unknown, now: number): void {
+  private remember(requestId: string | null, method: RequestMethod, answer: unknown, now: number, inputKey?: string): void {
     if (requestId === null) return;
     const kept = (this.doc<{ entries: RequestLogEntry[] }>(REQUEST_LOG_KEY)?.entries ?? []).filter((e) => e.id !== requestId && now - e.at < REQUEST_LOG_TTL_MS);
-    this.putDoc(REQUEST_LOG_KEY, { entries: [{ id: requestId, method, at: now, answer }, ...kept].slice(0, REQUEST_LOG_MAX) }, now);
+    this.putDoc(REQUEST_LOG_KEY, { entries: [{ id: requestId, method, at: now, answer, ...(inputKey === undefined ? {} : { input_key: inputKey }) }, ...kept].slice(0, REQUEST_LOG_MAX) }, now);
+  }
+
+  dismissAttention(name: string, etag: string, requestId: string, at: number | null = null): Promise<AttentionMutationOutcome> {
+    return this.changeAttention(name, etag, requestId, true, at);
+  }
+  restoreAttention(name: string, etag: string, requestId: string, at: number | null = null): Promise<AttentionMutationOutcome> {
+    return this.changeAttention(name, etag, requestId, false, at);
+  }
+  private changeAttention(name: string, etag: string, requestId: string, dismiss: boolean, at: number | null): Promise<AttentionMutationOutcome> {
+    return this.serialize((): Promise<AttentionMutationOutcome> => {
+      const now = at ?? Date.now(), method = dismiss ? 'dismiss_attention' : 'restore_attention';
+      const inputKey = JSON.stringify([name, etag]);
+      const replay = this.replay(requestId, method, now, inputKey);
+      if (replay === 'reused') return Promise.resolve({ ok: false, code: 'request_id_reused' });
+      if (replay !== null) return Promise.resolve({ ok: true, item: replay as AttentionItem });
+      this.projectAttention(now);
+      const item = this.attentionState.change(name, etag, dismiss, now);
+      if (item === null) return Promise.resolve({ ok: false, code: 'attention_changed' });
+      // Publish only from the next normal scheduled digest, never from an owner action.
+      this.putDoc('attention_report_pending', { at: now }, now);
+      this.bumpRev(now);
+      this.remember(requestId, method, item, now, inputKey);
+      return Promise.resolve({ ok: true, item });
+    });
   }
 
   // ---- the tick's steps -------------------------------------------------------------------------
@@ -596,10 +628,9 @@ export class HomeState extends DurableObject<Env> {
     }
   }
 
-  /** Builds this tick's items; on a tick, sends them when due (§5.5). */
-  private async runDigest(now: number, desired: DesiredGuard, send: boolean, lastTickAt: number | null): Promise<{ sent: string; items: number }> {
+  private digestCandidates(now: number, desired: DesiredGuard, lastTickAt: number | null): Candidate[] {
     const usage = this.doc<UsageDoc>('usage') ?? NO_USAGE;
-    const list = candidates({
+    return candidates({
       now,
       usage: {
         configured: analyticsConfigured(this.env),
@@ -616,13 +647,20 @@ export class HomeState extends DurableObject<Env> {
       apps: perApp((app) => this.statusDoc(app)),
       drift: { configured: analyticsConfigured(this.env), doc: this.doc<DriftDoc>('drift') ?? NO_DRIFT },
     });
+  }
+  /** Builds raw facts, then applies Home's reminder disposition before the scheduled report. */
+  private async runDigest(now: number, desired: DesiredGuard, send: boolean, lastTickAt: number | null): Promise<{ sent: string; items: number }> {
+    const list = this.digestCandidates(now, desired, lastTickAt);
     const firstSeen = this.syncSince(list.map(itemKey), now);
-    const items = finalizeItems(list, firstSeen, now);
+    const rawItems = finalizeItems(list, firstSeen, now, ATTENTION_ROW_LIMIT);
+    const projected = this.projectAttention(now, rawItems, lastTickAt);
+    const items = rawItems.filter((item) => !this.attentionState.isDismissed({ ...item, target: targetOf(item.source, item.code) }));
     const previous = this.doc<DigestDoc>('digest') ?? NO_DIGEST;
-    let doc: DigestDoc = { ...previous, items };
+    let doc: DigestDoc = { ...previous, items: finalizeItems(list, firstSeen, now) };
     let sent = 'none';
     const enabled = this.statusDoc('todofy').status?.capabilities.includes('ops_digest') === true;
-    const key = digestKey(items);
+    const identities = projected.attention.items.filter((item) => item.observed === undefined).map((item) => `${item.name ?? ''}:${item.etag ?? ''}`).sort().join(',');
+    const key = `${digestKey(items)}|${identities}`;
     if (send && enabled && shouldSend(key, previous, now)) {
       const report = buildReport(items, now, dashboardUrl(this.env));
       const result = await opsReportOps(this.env, report);
@@ -630,7 +668,9 @@ export class HomeState extends DurableObject<Env> {
         ? { ...doc, last_key: key, last_sent_at: now, last_generated_at: now, last_receipt: result.value, last_error: null, last_attempt_at: now }
         : { ...doc, last_error: result.code, last_attempt_at: now };
       sent = result.ok ? 'sent' : result.code;
+      if (result.ok) this.deleteDoc('attention_report_pending');
     }
+    if (send && key === previous.last_key) this.deleteDoc('attention_report_pending');
     this.putDoc('digest', doc, now);
     return { sent, items: items.length };
   }
@@ -715,6 +755,59 @@ export class HomeState extends DurableObject<Env> {
     return Object.fromEntries(OPS_APPS.map((app) => [app, this.statusDoc(app)]));
   }
 
+  /** Full cached conditions before the outbound report's 20-item bound. No provider call. */
+  private currentItems(now: number, lastTickAt: number | null): OpsReportItem[] {
+    const list = this.digestCandidates(now, this.currentDesired(now), lastTickAt);
+    const cached = this.readCache?.get('#attention_since') as Map<string, number> | undefined;
+    const since = cached ?? new Map(this.rows<{ key: string; since: number }>('SELECT key,since FROM item_since').map((row) => [row.key, row.since]));
+    this.readCache?.set('#attention_since', since);
+    return finalizeItems(list, since, now, ATTENTION_ROW_LIMIT);
+  }
+
+  /** Build all raw explanations first; filtering sooner would recreate a dismissed item as "observed". */
+  private projectAttention(now: number, supplied?: readonly OpsReportItem[], lastTickAt?: number | null, neverRan = false): { attention: Attention; badges: Badges } {
+    const tickAt = lastTickAt === undefined ? (this.doc<MetaDoc>('meta') ?? NO_META).last_tick_at : lastTickAt;
+    const items = neverRan ? [] : supplied ?? this.currentItems(now, tickAt);
+    const evaluation = this.evalInput(now);
+    const raw = attentionView({ now, neverRan, items, canaryEnabled: canaryEnabled(this.env), desired: this.currentDesired(now),
+      statuses: evaluation.statuses, ...(neverRan ? {} : { evaluation }) });
+    const candidatesNow = this.digestCandidates(now, this.currentDesired(now), tickAt);
+    const active = new Set([...candidatesNow.map(itemKey), ...raw.attention.items.map(itemKey)]);
+    const result = this.attentionState.project(raw.attention, now, (condition) => this.attentionResolved(condition, now, tickAt, active, evaluation));
+    return result;
+  }
+
+  /** A missing/unavailable source is not evidence that its prior business condition recovered. */
+  private attentionResolved(condition: AttentionCondition, now: number, tickAt: number | null, active: ReadonlySet<string>, evaluation: EvalInput): boolean {
+    const code = condition.code === 'unreachable' ? 'app_unreachable' : condition.code;
+    const scriptsFresh = evaluation.scripts !== null && usageFresh({ fetched_at: evaluation.scripts.observed_at, day: evaluation.scripts.day, rows: [] }, now);
+    if (condition.target.script !== undefined) {
+      return scriptsFresh && workerRows(evaluation.scripts, now).some((row) => row.script === condition.target.script && row.level === 'ok');
+    }
+    if (active.has(`${condition.source}:${code}`)) return false;
+    if (OPS_APPS.includes(condition.source as OpsApp)) {
+      const app = condition.source as OpsApp, doc = evaluation.statuses[app], status = freshStatus(doc, now);
+      if (doc?.ok !== true || status === null) return false;
+      if (condition.code === 'newsletter_unknown') return status.counters.unknown_count === 0;
+      if (condition.code === 'guard_apply_failed') return this.applied(app).last_call_at !== null && this.applied(app).consecutive_failures === 0;
+      if (status.health === 'down' || status.signals.some((signal) => signal.code.endsWith('_unavailable') || ['host_never_seen', 'host_stale', 'host_missing'].includes(signal.code))) return false;
+      return true;
+    }
+    if (condition.code === 'error_rate') return scriptsFresh;
+    if (condition.code.startsWith('drift_') || condition.code === 'config_drift') {
+      const drift = this.doc<DriftDoc>('drift') ?? NO_DRIFT;
+      const fresh = drift.checked_at !== null && now - drift.checked_at <= 48 * HOUR_MS && drift.last_error === null;
+      return fresh && (condition.code === 'config_drift' ? totalFindings(drift.counts) === 0 : drift.consecutive_failed_days === 0);
+    }
+    if (condition.source === 'cloudflare' || condition.code.startsWith('usage_')) {
+      const usage = this.doc<UsageDoc>('usage') ?? NO_USAGE;
+      return usage.consecutive_failures === 0 && usageFresh(usage, now);
+    }
+    if (condition.source === 'dashboard') return tickAt !== null && now - tickAt <= 75 * MINUTE_MS;
+    const probe = evaluation.probes[condition.source];
+    return probe?.ok === true && now - probe.checked_at <= 60 * MINUTE_MS;
+  }
+
   /** The shared part of every view: attention strip, badges, freshness and this scope's refresh times. */
   private shellFor(view: ViewId, now: number, refreshed: boolean): ShellFields {
     const meta = this.doc<MetaDoc>('meta') ?? NO_META;
@@ -722,15 +815,7 @@ export class HomeState extends DurableObject<Env> {
     const homeAt = meta.last_refresh_home_at ?? null;
     const cloudflareAt = meta.last_refresh_cloudflare_at ?? null;
     const neverRan = meta.last_tick_at === null && digest.last_attempt_at === null && meta.last_refresh_at === null && homeAt === null && cloudflareAt === null;
-    const { attention, badges } = attentionView({
-      now,
-      neverRan,
-      items: neverRan ? [] : withTickState(digest.items, meta.last_tick_at, now),
-      canaryEnabled: canaryEnabled(this.env),
-      desired: this.currentDesired(now),
-      statuses: this.statusDocs(),
-      ...(neverRan ? {} : { evaluation: this.evalInput(now) }),
-    });
+    const { attention, badges } = this.projectAttention(now, neverRan ? [] : undefined, meta.last_tick_at, neverRan);
     let lastRefreshAt: number | null;
     let nextRefreshAt: number;
     if (view === 'home') {
@@ -790,7 +875,7 @@ export class HomeState extends DurableObject<Env> {
         case 'ops': {
           const digest = this.doc<DigestDoc>('digest') ?? NO_DIGEST;
           const todofy = this.statusDoc('todofy');
-          return opsResponse(base, this.guardView(now), this.canaryView(now), this.digestView(digest, todofy.status?.capabilities.includes('ops_digest') === true), this.statusDocs());
+          return opsResponse(base, this.guardView(now), this.canaryView(now), this.digestView(digest, todofy.status?.capabilities.includes('ops_digest') === true, now), this.statusDocs());
         }
       }
     } finally {
@@ -863,9 +948,10 @@ export class HomeState extends DurableObject<Env> {
     };
   }
 
-  private digestView(digest: DigestDoc, enabled: boolean): Digest {
+  private digestView(digest: DigestDoc, enabled: boolean, now: number): Digest {
     return {
-      items: digest.items,
+      items: this.currentItems(now, (this.doc<MetaDoc>('meta') ?? NO_META).last_tick_at)
+        .filter((item) => !this.attentionState.isDismissed({ ...item, target: targetOf(item.source, item.code) })).slice(0, 20),
       enabled,
       last_sent_at: isoOrNull(digest.last_sent_at),
       last_generated_at: isoOrNull(digest.last_generated_at),

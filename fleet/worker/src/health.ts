@@ -10,8 +10,8 @@ export function statusSnapshot(
 ): ops.OpsStatus {
   const age = freshness(receivedAt, now);
   const signals: ops.Signal[] = [];
-  const add = (code: string, severity: ops.Severity = 'warning'): void => {
-    signals.push({ code, severity, metrics: {} });
+  const add = (code: string, severity: ops.Severity = 'warning', metrics: Record<string, number> = {}): void => {
+    signals.push({ code, severity, metrics });
   };
   if (age !== 'fresh') {
     const code = age === 'never_seen' ? 'host_never_seen' : age === 'stale' ? 'host_stale' : 'host_missing';
@@ -30,7 +30,8 @@ export function statusSnapshot(
       if (!healthy) add('newsletter_unavailable', 'critical');
       if (!runtime || !releaseReady(runtime)) add('deployment_pending');
       if (['draining', 'frozen'].includes(report.newsletter.drain_state)) add('newsletter_paused', 'info');
-      if ((report.newsletter.unknown_count ?? 0) > 0) add('newsletter_unknown');
+      const unknownCount = report.newsletter.unknown_count ?? 0;
+      if (unknownCount > 0) add('newsletter_unknown', 'warning', { unknown_count: unknownCount });
     } else {
       for (const code of reportCodes(report)) {
         if (code.startsWith('newsletter_')) continue;

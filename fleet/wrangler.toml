@@ -27,6 +27,9 @@ enabled = true
 
 [vars]
 PUBLIC_HOST = "fleet.ziyixi.science"
+# Public navigation only; web/vite.config.ts reads this at build time. Update
+# this URL with the Home hostname when transferring the public configuration.
+HOME_URL = "https://home.ziyixi.science/"
 ACCESS_ISSUER = "https://ziyixi.cloudflareaccess.com"
 ACCESS_AUDIENCE = "43aba3693dea8e88a343446ce5c416f9c950e37a2b066c7dcfc1189d8ea0cb73"
 HOST_KEY = "vps"

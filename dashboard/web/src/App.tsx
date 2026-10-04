@@ -4,6 +4,7 @@ import type { HomeView as HomeViewData, ShellFields, ViewId } from '../../worker
 import { ApiError } from './api/client'
 import { useRefreshHome, useRegistry, useView } from './api/queries'
 import { AttentionStrip } from './components/AttentionStrip'
+import { AttentionFeedback, AttentionProvider } from './components/AttentionActions'
 import { Button, Notice, useNow } from './components/ui'
 import { browserTimeZone, formatRelative, refreshDeclinedText, refreshWaitText } from './lib/format'
 import { routeHash, useRoute } from './router'
@@ -76,7 +77,7 @@ export function App() {
   }
 
   return (
-    <>
+    <AttentionProvider attention={shell?.attention}>
       <a className="skip-link" href="#main" onClick={skipToMain}>
         跳到主要内容
       </a>
@@ -117,6 +118,7 @@ export function App() {
         </div>
       </header>
 
+      <AttentionFeedback />
       <main id="main" ref={main} tabIndex={-1} aria-busy={active.isFetching}>
         {registry.isPending ? <ViewLoading /> : null}
         {registry.isError && !registry.data ? (
@@ -162,7 +164,7 @@ export function App() {
         {registry.data ? <span>构建 {registry.data.build.slice(0, 7)}</span> : null}
         <span>用量为整个 Cloudflare 账户</span>
       </footer>
-    </>
+    </AttentionProvider>
   )
 }
 

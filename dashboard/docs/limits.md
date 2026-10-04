@@ -102,7 +102,10 @@ Cloudflare's allowances), FlowDay's `/pwa/manifest.webmanifest` and the links ap
 request of that app's Worker (about 96 a day for both, under 0.3 % of the daily requests even at the refresh
 cap) and no D1 query (the manifest is a static asset the Worker passes on; `robots.txt` is a constant answered
 before any D1 read). Each tick writes about 10–40 SQLite rows in `HomeState` (v2 adds four: `cf_scripts` and
-one `probe:<entry>` per probe); a v2 view reads at most 28 (`V2_ROWS_READ`, measured in workerd: 26–27). Each owner page load
+one `probe:<entry>` per probe). With durable reminder controls, the ordinary workerd fixtures read
+36–37 rows per rebuilt view (40-row regression budget). A 101-item synthetic warning case reads 110–111;
+retained-decision stress cases use a separate 320-row test budget. These are measured examples and test
+budgets, not an account-wide or universal per-view limit; see [`design-v2.md`](design-v2.md) §5. Each owner page load
 counts one Worker request per fetched file (HTML, scripts, styles, icon: `run_worker_first`, §2) plus one
 per API call, and a DO request per API call. All of this is far below every allowance in §1.
 

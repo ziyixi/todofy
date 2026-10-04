@@ -90,11 +90,23 @@ describe('Newsletter process and release projection', () => {
     const { report } = historicalUnknown();
     expect(newsletterStatus(report)).toMatchObject({
       health: 'degraded',
-      signals: [{ code: 'newsletter_unknown', severity: 'warning', metrics: {} }],
+      signals: [{ code: 'newsletter_unknown', severity: 'warning', metrics: { unknown_count: 32 } }],
       counters: { unknown_count: 32 },
     });
     expect(reportCodes(read(report))).toEqual(['newsletter_unknown']);
     expect(statusSnapshot('fleet', read(report), NOW, NOW, 'fleet.example.test')).toMatchObject({ health: 'ok', signals: [] });
+  });
+  it('keeps an attention fingerprint stable as the heartbeat ages and changes it when the unknown count changes', () => {
+    const { report, item } = historicalUnknown();
+    const before = newsletterStatus(report);
+    const later = statusSnapshot('newsletter', read(report), NOW, NOW + 60_000, 'fleet.example.test');
+    expect(later.signals).toEqual(before.signals);
+    expect(later.counters.heartbeat_age_seconds).not.toBe(before.counters.heartbeat_age_seconds);
+    report.newsletter.unknown_count = 33;
+    item.unknown_count = 33;
+    const changed = newsletterStatus(report);
+    expect(changed.signals).toEqual([{ code: 'newsletter_unknown', severity: 'warning', metrics: { unknown_count: 33 } }]);
+    expect(changed.counters.unknown_count).toBe(33);
   });
   it.each(['unknown', 'unhealthy', 'unsupported'] as const)('keeps %s runtime health unavailable despite unknown results', (health) => {
     const { report, item } = historicalUnknown();
@@ -154,7 +166,7 @@ describe('Newsletter process and release projection', () => {
     report.newsletter.drain_state = 'frozen';
     expect(newsletterStatus(report).signals).toEqual([
       { code: 'deployment_pending', severity: 'warning', metrics: {} },
-      { code: 'newsletter_unknown', severity: 'warning', metrics: {} },
+      { code: 'newsletter_unknown', severity: 'warning', metrics: { unknown_count: 32 } },
       { code: 'newsletter_paused', severity: 'info', metrics: {} },
     ]);
   });

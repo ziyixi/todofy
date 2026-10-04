@@ -228,12 +228,13 @@ lost `version`.
 | --- | --- | --- |
 | `GET /api/v1/registry` (GetRegistry) | Worker, serialized once per isolate; `ETag: "<build>"` → 304 | 0 DO; ≤ 14 KiB |
 | `GET /api/csrf` | Worker (signed token + `home_csrf` cookie, design.md §6) | — |
-| `GET /api/v1/homeView` (GetHomeView) | DO `view('home')` | 1 DO call; ≤ 28 rows read; ≤ 10 KiB |
-| `GET /api/v1/flowsView` (GetFlowsView) | DO | ≤ 28 rows read; ≤ 20 KiB (16 KiB until the GTD loop and Paper Radar made six flows) |
-| `GET /api/v1/cloudflareView` (GetCloudflareView) | DO | ≤ 30 rows read; ≤ 16 KiB |
-| `GET /api/v1/opsView` (GetOpsView) | DO | ≤ 28 rows read; ≤ 24 KiB |
+| `GET /api/v1/homeView` (GetHomeView) | DO `view('home')` | 1 DO call; ordinary fixture ≤ 40 rows read; ≤ 10 KiB |
+| `GET /api/v1/flowsView` (GetFlowsView) | DO | ordinary fixture ≤ 40 rows read; ≤ 20 KiB |
+| `GET /api/v1/cloudflareView` (GetCloudflareView) | DO | ordinary fixture ≤ 40 rows read; ≤ 16 KiB |
+| `GET /api/v1/opsView` (GetOpsView) | DO | ordinary fixture ≤ 40 rows read; ≤ 24 KiB |
 | `POST /api/v1/homeView:refresh`, `POST /api/v1/cloudflareView:refresh` (RefreshHomeView, RefreshCloudflareView; were `?refresh=1`) | DO `view(..., refresh)` | Origin + CSRF; each scope fetches at most once a minute |
 | `POST /api/v1/guard:override {level, request_id}` (OverrideGuard), `POST /api/v1/canaries/mail-todofy:run {request_id}` (RunCanary) | DO (`setGuardOverride`, `startCanary`) | Origin + CSRF; ≤ 1 KiB body |
+| `POST /api/v1/attentionItems/{id}:dismiss`, `:restore` | DO reminder disposition | Access + Origin + CSRF; occurrence etag + UUID request_id; ≤ 1 KiB body |
 
 The old paths (`/api/v2/*`) answer 410 with the message 个人控制台已更新，请刷新页面 in the old error envelope until
 2026-11-02 (one release); then they answer NOT_FOUND like any unknown path. The code is `not_found`, not Lab's
@@ -276,22 +277,30 @@ Only the visible view polls, every 5 minutes; the registry is fetched once per l
 since the last attempt) and updates discovery. Both rebuild the digest items without sending them
 (only a tick sends a report). `refresh.next_refresh_at` is the earliest time the scope would fetch again.
 
-Current bounds (unit suite for bytes, workerd suite for rows; a full 14-run canary history, 20 Workers):
+Regression budgets (bytes and actual cursor reads in unit/workerd tests; ordinary fixtures retain a full
+14-run canary history and 20 Workers):
 
-| View | Mockup day | Bad day (20 items, 16 signals/app, 14 failed runs) | Rows read |
+| View | Mockup day | Representative bad day | Ordinary rows read |
 | --- | --- | --- | --- |
-| home | ≤ 10 KiB | ≤ 32 KiB | 28 (≤ 28) |
-| flows | ≤ 20 KiB | ≤ 32 KiB | 28 (≤ 28) |
-| cloudflare | ≤ 16 KiB, also with 20 Workers | under `VIEW_BODY_MAX` with 20 listed drift findings (tested) | 29 (≤ 30; Fleet/Newsletter status plus `drift`) |
-| ops | ≤ 24 KiB | ≤ 32 KiB | 28 (≤ 28) |
+| home | ≤ 10 KiB | ≤ 64 KiB | 36 (≤ 40) |
+| flows | ≤ 20 KiB | ≤ 64 KiB | 37 (≤ 40) |
+| cloudflare | ≤ 16 KiB, also with 20 Workers | ≤ 64 KiB | 36 (≤ 40) |
+| ops | ≤ 24 KiB | ≤ 64 KiB | 37 (≤ 40) |
 
-`VIEW_BODY_BUDGET` holds for a normal day; `VIEW_BODY_MAX` (32 KiB) bounds the bad day. The Cloudflare view
+`VIEW_BODY_BUDGET` holds for the ordinary fixtures. Complete reminders now include `name` and `etag`;
+they cannot be cut to the outbound report's 20 entries before applying dismissals. A synthetic case with
+six valid sources, 16 short warnings and one metric per source has 101 attention items: Home/Flows/Cloudflare/Ops
+measured 34,347/42,803/32,054/44,517 bytes and 110–111 reads. The 64 KiB bad-day regression budget leaves
+room for the defined stress fixtures; it is not a proof of every legal IDL value or every combined maximum.
+`VIEW_ROWS_READ_MAX` (320) separately guards larger retained-decision stress cases. These thresholds are
+test/logging budgets, not platform billing limits. The Cloudflare view
 lists at most `CF_VIEW_WORKERS_MAX` (50) of the up to `CF_SCRIPTS_MAX` (100) remembered scripts —
 every script active today first, then the most recently seen — and counts the rest in
-`workers_omitted` (shown as a note), so 100 remembered scripts stay under `VIEW_BODY_MAX` (tested); HomeState logs
+`workers_omitted` (shown as a note); the remembered-script scenario is tested separately. HomeState logs
 `over_budget` per response. The design's row estimates (1 + N, ≤ 20, 3–4, ≤ 10) did not count the shell
 every view shares (six documents for the attention strip and badges, plus what the evaluation reads for
-the strip's observed items, §4) or the 14 canary rows, so the measured counts replace them (each probed or ops_v1 entry adds one row to every view: 23 / 23 / 24 / 23 before the FlowDay and links probes, 25 / 25 / 26 / 25 before the watch app's status); they are ~0.01 % of the DO's 5 M free rows a day at a few hundred views.
+the strip's observed items, §4), the canary rows or the reminder ledger. The measured counts replace those
+older estimates; reads grow with retained decisions while views continue to poll every five minutes.
 A partial index (`canary_runs_active`) keeps the "run in progress" lookup at one row for ticks and views.
 
 Per tick: 6 `status()` (Mail Hero, Todofy, Lab, the watch app, Fleet and Newsletter) + 3 probes (website, FlowDay, links) + 1 GraphQL +
@@ -414,3 +423,32 @@ category counts) while the last completed check has findings, and `drift_unavail
 **Token.** The same `CF_ANALYTICS_TOKEN` as the GraphQL query ([`setup.md`](setup.md) §4). A read-only
 replacement needs Account Analytics Read, Workers Scripts Read and, on the zone, Workers Routes Read;
 without them the check reports `http_403` and, after two days, `drift_unavailable`.
+
+## 11. 可关闭的提醒
+
+每条待处理提醒都有“关闭本次提醒”；Newsletter 显示“不再提醒这批 N 条记录”。关闭后从顶部待处理列表、
+页签数字和后续运维摘要中移除，首页与流程卡片改为中性的“本批提醒已关闭”。“已忽略”折叠列表仍可查看和恢复。
+刷新、重新登录和 Worker 重启不会丢失已保存的关闭状态。写入成功后页面先应用服务端返回的结果，再重新读取；
+重新读取失败会提示数据更新失败，不会把已经关闭的提醒重新显示为待处理。
+
+关闭提醒不改变来源服务的健康、计数或业务账本，也不代表异常已修复。Newsletter 的 32 是多类未确认完成记录
+的合计，可能重叠，不是 32 封失败邮件；关闭不会重跑邮件、Notion 操作或工作流。Fleet 继续提供原始状态，
+通过自身公开 `HOME_URL` 链接到 Home 管理提醒，不获得 VPS 写入或额外凭据。
+
+Home 使用已有 SQLite DO 的 `attention_occurrences` 保存当前条件与关闭决定。`name` 由 source、code 和
+稳定 target 定位条件；`etag` 标识本次条件及管理状态，数量/严重性等有效变化、确认恢复后再次出现，或关闭/恢复
+操作都会换版本。旧页面的操作返回 `ATTENTION_CHANGED`（409），要求重新查看当前提醒。同 UUID 在有限回执窗口
+内重复同一操作返回原答案；换正文或动作拒绝。窗口外的旧 etag 不能覆盖后来的恢复状态。
+
+有效数量变化包括 Newsletter `unknown_count`、Mail Hero 解析/投递/策略错误的 `count`、Lab 未确认发送的
+`count`、Watch 未确认通知的 `open`/`failed` 和失效监视的 `count`；新的金丝雀失败使用运行身份。年龄、心跳、
+用量百分比的持续增加或抖动不会把同一问题当作新的提醒。其他条件按严重性及确认恢复后的再次出现区分。
+来源失联、状态过期或 Fleet 底层 `host_stale` 不构成恢复；drift 恢复依据自身观测，与用量 GraphQL 是否成功独立。
+
+管理动作只写 Home，并记录需要同步摘要；不即时发送外部消息。下一次正常 scheduled tick 应用关闭决定后再裁剪
+到报告的 20 项，避免已关闭的前 20 项挤掉后面的未处理项。UI 先保留完整的原始解释，再过滤关闭项，避免
+“已关闭业务信号”被重新生成为另一条 observed 警告。
+
+最多保留 256 条控制记录。容量紧张时先退休当前原始列表中缺席且未关闭的旧记录；尚未确认恢复的关闭决定保留。
+全部槽位仍被占用时，新异常的事实继续显示，`control_unavailable_count` 明确提示部分提醒暂不能管理，不令整个
+Home 返回 500。处理异常或精简监控范围释放条件后可再次尝试；容量回收不把来源服务描述为已经恢复。

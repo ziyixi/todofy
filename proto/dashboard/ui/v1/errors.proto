@@ -33,4 +33,6 @@ enum ErrorReason {
   ERROR_REASON_CANARY_DISABLED = 2;
   // RESOURCE_EXHAUSTED (429): RunCanary after today's manual runs (3 per UTC day) were used.
   ERROR_REASON_CANARY_LIMIT = 3;
+  // ABORTED (409): the condition resolved or its occurrence changed after the owner read it.
+  ERROR_REASON_ATTENTION_CHANGED = 4;
 }

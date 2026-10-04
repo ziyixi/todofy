@@ -714,6 +714,7 @@ main {
 
 .strip-item {
   display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
   gap: 8px;
   font-size: 0.8125rem;
@@ -735,6 +736,47 @@ main {
 .strip-link {
   white-space: nowrap;
 }
+
+.attention-help {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-top: 6px;
+}
+
+.strip-item > .attention-help {
+  flex-basis: 100%;
+  padding-left: 18px;
+  margin: 0 0 10px;
+}
+
+.attention-help p { margin: 0; }
+
+.attention-feedback { padding: 6px 14px; margin: 0; color: var(--fg-2); }
+
+.attention-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.attention-controls [role='alert'],
+.attention-controls [role='status'] { flex-basis: 100%; }
+
+.attention-dismissed {
+  color: var(--fg-2);
+  font-size: var(--text-s);
+  margin-top: 5px;
+}
+
+.attention-dismissed summary {
+  cursor: pointer;
+  width: fit-content;
+  min-height: 32px;
+}
+
+.attention-dismissed ul { display: grid; gap: 16px; padding: 8px 0; }
 
 .strip-more {
   align-self: flex-start;
@@ -2316,6 +2358,10 @@ main {
   border-color: var(--danger);
   background: var(--danger-bg);
 }
+
+.stage-node.stage-dismissed,
+.stage-node.stage-dismissed[aria-pressed='true'],
+.stage-pill.stage-dismissed { border-color: var(--border); background: var(--surface); }
 
 .stage-name {
   display: inline-flex;

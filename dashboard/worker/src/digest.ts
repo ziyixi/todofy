@@ -228,7 +228,7 @@ export function itemKey(item: { readonly source: string; readonly code: string }
  * Warning/critical only, deduplicated by source:code (highest severity wins), critical first then
  * source then code, at most 20. `since` is the app's own when it has one, else `firstSeen` of the key.
  */
-export function finalizeItems(list: readonly Candidate[], firstSeen: ReadonlyMap<string, number>, now: number): OpsReportItem[] {
+export function finalizeItems(list: readonly Candidate[], firstSeen: ReadonlyMap<string, number>, now: number, limit = REPORT_MAX_ITEMS): OpsReportItem[] {
   const byKey = new Map<string, Candidate>();
   for (const candidate of list) {
     if (candidate.severity === 'info' || !isOpsSource(candidate.source) || !isOpsCode(candidate.code)) continue;
@@ -238,7 +238,7 @@ export function finalizeItems(list: readonly Candidate[], firstSeen: ReadonlyMap
   }
   return [...byKey.values()]
     .sort((a, b) => RANK[a.severity] - RANK[b.severity] || a.source.localeCompare(b.source) || a.code.localeCompare(b.code))
-    .slice(0, REPORT_MAX_ITEMS)
+    .slice(0, limit)
     .map((c) => ({
       source: c.source,
       code: c.code,

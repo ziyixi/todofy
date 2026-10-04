@@ -100,7 +100,7 @@ const SIGNALS: Readonly<Record<string, string>> = {
   host_missing: '主机报告中断',
   newsletter_unavailable: 'Newsletter 进程或 Pod 不可用',
   newsletter_paused: 'Newsletter 发布已排空或冻结',
-  newsletter_unknown: 'Newsletter 有结果待对账',
+  newsletter_unknown: 'Newsletter 有操作缺少最终完成记录',
   release_held: '发布暂停待处理',
   release_failed: '发布失败',
   release_in_progress: '发布进行中',
@@ -315,7 +315,7 @@ const COUNTERS: Readonly<Record<string, { label: string; kind: CounterKind }>> =
   memory_used_percent: { label: '内存使用率', kind: 'percent' },
   queued_count: { label: '排队', kind: 'count' },
   inflight_count: { label: '进行中', kind: 'count' },
-  unknown_count: { label: '结果待对账', kind: 'count' },
+  unknown_count: { label: '未确认完成记录', kind: 'count' },
   // Mail Hero
   jobs_pending: { label: '待处理任务', kind: 'count' },
   jobs_failed: { label: '失败任务', kind: 'count' },
@@ -507,6 +507,7 @@ export const API_ERRORS: Readonly<Record<ApiErrorCode, string>> = {
   canary_active: '已有金丝雀正在运行',
   canary_disabled: CANARY_DISABLED_TEXT,
   canary_limit: '今天的手动运行次数已用完',
+  attention_changed: '这项提醒已发生变化，请刷新后重新查看',
   unavailable: '服务暂时不可用',
   internal: '服务出错了，请稍后刷新页面',
 }

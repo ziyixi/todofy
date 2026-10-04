@@ -15,6 +15,7 @@
  *   API_ERRORS, keyed by the ErrorInfo reason in lower case (`canary_active`).
  */
 import type { CommonReason } from '@ziyixi/proto/common/errors/v1/errors_pb'
+import { AttentionItemSchema } from '@ziyixi/proto/dashboard/ui/v1/attention_pb'
 import { CloudflareViewSchema } from '@ziyixi/proto/dashboard/ui/v1/cloudflare_view_pb'
 import { DashboardUiService, OverrideGuardResponseSchema, RunCanaryResponseSchema } from '@ziyixi/proto/dashboard/ui/v1/dashboard_ui_service_pb'
 import type { ErrorReason } from '@ziyixi/proto/dashboard/ui/v1/errors_pb'
@@ -29,6 +30,7 @@ import { parseStatus } from '@ziyixi/proto/rpc-status'
 import { toWire, WireJsonError, type WireOf } from '@ziyixi/proto/wire-json'
 import type {
   CloudflareView,
+  AttentionItem,
   CsrfResponse,
   FlowsView,
   GuardLevel,
@@ -202,6 +204,10 @@ export const api = {
     wire(RunCanaryResponseSchema, () => client.runCanary({ name: `canaries/${canaryId}`, requestId })),
   setGuard: (level: GuardLevel, requestId: string = newRequestId()): Promise<OverrideGuardResponse> =>
     wire(OverrideGuardResponseSchema, () => client.overrideGuard({ name: 'guard', level: GUARD_LEVELS[level], requestId })),
+  dismissAttention: (name: string, etag: string, requestId: string): Promise<AttentionItem> =>
+    wire(AttentionItemSchema, () => client.dismissAttention({ name, etag, requestId })),
+  restoreAttention: (name: string, etag: string, requestId: string): Promise<AttentionItem> =>
+    wire(AttentionItemSchema, () => client.restoreAttention({ name, etag, requestId })),
 }
 
 /** Test hook: forget the cached CSRF token and the views' ETags. */

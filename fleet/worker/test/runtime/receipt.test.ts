@@ -51,6 +51,30 @@ describe('real workerd SQLite receipt persistence', () => {
       ],
     });
   });
+  it('publishes the stable unknown count on the signal without claiming a process failure or resolving source records', async () => {
+    const h = await start();
+    const report = structuredClone(fixture);
+    const workload = report.runtime.workloads[0];
+    if (!workload) throw new Error('missing fixture workload');
+    workload.health_state = 'degraded';
+    workload.unknown_count = 32;
+    report.newsletter.unknown_count = 32;
+    expect((await h.send(report)).status).toBe(200);
+    expect(await h.status('newsletter', AT)).toMatchObject({
+      signals: [{ code: 'newsletter_unknown', severity: 'warning', metrics: { unknown_count: 32 } }],
+      counters: { unknown_count: 32 },
+    });
+    expect(await h.view()).toMatchObject({ report: { newsletter: { worker_healthy: true, unknown_count: 32 } } });
+    report.sequence = 2;
+    report.receipt_id = 'f47ab98a-3b34-4dd3-8924-2a1ead4da4dc';
+    report.newsletter.unknown_count = 33;
+    workload.unknown_count = 33;
+    expect((await h.send(report)).status).toBe(200);
+    expect(await h.status('newsletter', AT)).toMatchObject({
+      signals: [{ code: 'newsletter_unknown', severity: 'warning', metrics: { unknown_count: 33 } }],
+      counters: { unknown_count: 33 },
+    });
+  });
   it('keeps machine authentication independent of owner local bypass', async () => {
     const h = await start();
     expect((await h.send(fixture, '0'.repeat(64))).status).toBe(401);

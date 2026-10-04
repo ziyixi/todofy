@@ -1,9 +1,11 @@
 /// <reference types="vitest/config" />
 import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vite'
+import { homeURLFromConfig } from '../deploy/public-navigation.mjs'
 
 export default defineConfig({
   plugins: [react()],
+  define: { 'import.meta.env.VITE_HOME_URL': JSON.stringify(homeURLFromConfig()) },
   build: {
     // Served by the Worker "fleet" as static assets (../wrangler.toml [assets]).
     outDir: 'dist',

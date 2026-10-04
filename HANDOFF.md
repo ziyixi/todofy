@@ -50,7 +50,9 @@ Mail Hero and Dashboard deploys passed. Other application/VPS releases were corr
 The real snapshot `b009accd-8697-44c9-8fcb-392e862c7782` reached complete/native_readback_verified at
 2026-10-03 23:06:19 UTC: 1,031 files, 37,723,651 bytes, a verified R2 marker, and no pending D1 receipt sync.
 The next daily wake is 2026-10-04 04:17 UTC. A fresh Home status refresh cleared backup_stale and left
-only the owner-approved 32 historical Newsletter unknown outcomes. Typed VPS verification remains ready
+only the 32 historical Newsletter unknown outcomes. The owner subsequently asked to clear that reminder;
+the business ledger remains factual, while the Home-owned disposition described below is being added.
+Typed VPS verification remains ready
 at `93b387c` with frozen targets and generation matching. No real mail/backup content was printed or
 used as a fixture; production proof is bounded status/marker metadata and Home acceptance.
 The owner Google Drive checkout still stalls reading Git objects: a bounded status check returned
@@ -122,6 +124,26 @@ Practical notes learned the hard way:
   landing, only when it is clean and on `main`; never run installs there.
 
 ## In flight
+
+On `codex/k3s-personal-cloud`, following green main `9fc80fc`: persistent owner reminder dismiss/restore.
+Home owns occurrence identities and dispositions in its existing SQLite DO; the source's health, counters
+and business results remain unchanged. The typed `dashboard.ui.v1` actions use occurrence etags and
+idempotent request IDs, with existing Access/Origin/CSRF checks. Dismissed occurrences leave attention
+badges and future digest messages, stay inspectable/restorable, and survive reload/restart. Meaningful
+count/severity changes or confirmed recovery followed by recurrence re-open a reminder; a disconnected
+source does not count as recovery. Fleet exposes Newsletter's unknown count as a signal metric, explains
+the aggregate and links to Home for reminder actions. No new VPS control or credential is required.
+Before merge: complete synthetic DO/IDL/UI tests, independent review and full branch CI; merge only the
+same green SHA. After deploy: use the owner's Home UI to dismiss the current Newsletter occurrence,
+reload and verify the saved state, cleared badges and accurate visible counters. No business replay or
+external report send is part of acceptance.
+Local implementation is ready: Home UI 146 tests, Fleet UI 5, seven new real DO cases and three SQLite
+capacity/prototype-key regressions passed; Worker typecheck/lint and buf/API lint passed. The full
+existing runtime suite and shared-consumer checks are delegated to branch CI. Ordinary view read budgets
+are 40 rows; a representative six-source stress case is guarded at 64KiB/320 reads. The UI applies the
+server-confirmed action response before refetch, with stable live feedback and neutral dismissed labels.
+Review fixes include newer-occurrence CAS, filtering before the outbound 20-item bound, retaining closed
+decisions through unavailable underlying telemetry, and independent drift-recovery evidence.
 
 `codex/k3s-personal-cloud` starts from `450110b`. The owner authorised GitHub-driven k3s reconciliation,
 a separate Cloudflare Fleet worker/UI, Newsletter monitoring in Home, and Compose retirement. The owner

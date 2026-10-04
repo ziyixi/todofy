@@ -5,6 +5,8 @@ import { formatClock, formatDayTime, formatDuration, formatFullTime } from '../l
 import { reasonLabel, signalLabel } from '../lib/labels'
 import { flowOf, nameOf, stageOf, targetHash, targetLabel, type Reg } from '../lib/registry'
 import { LevelMark, LevelShape } from './status'
+import { AttentionActions } from './AttentionActions'
+import { Notice } from './ui'
 
 /**
  * "Gemini 预算超过 80%（82%）": the label, plus a rounded percent metric when the item has one. An
@@ -45,11 +47,26 @@ function stripLevel(item: AttentionItem): StripLevel {
 export function AttentionStrip({ reg, shell, now }: { reg: Reg; shell: ShellFields; now: Date }) {
   const [expanded, setExpanded] = useState(false)
   const { items, info, held } = shell.attention
+  const dismissed = shell.attention.dismissed_items ?? []
+  const unavailable = shell.attention.control_unavailable_count ?? 0
   const nextTick = formatClock(shell.refresh.next_tick_at)
   const ticksStopped = items.some((item) => item.code === 'tick_stale')
   const lastTick = shell.refresh.last_tick_at
   const shown = expanded ? items : items.slice(0, ATTENTION_SHOWN)
   const rest = items.length - shown.length
+  const dismissedList = dismissed.length ? (
+    <details className="attention-dismissed">
+      <summary>已忽略 {dismissed.length} 项提醒 · 可恢复</summary>
+      <ul>
+        {dismissed.map(item => (
+          <li key={item.name ?? `${item.source}:${item.code}`}>
+            <strong>{targetLabel(reg, item.target, item.source)}：{itemText(item)}</strong>
+            <AttentionActions item={item} />
+          </li>
+        ))}
+      </ul>
+    </details>
+  ) : null
 
   const extras =
     held.length > 0 || info.length > 0 ? (
@@ -83,10 +100,12 @@ export function AttentionStrip({ reg, shell, now }: { reg: Reg; shell: ShellFiel
     return (
       <section className="strip strip-quiet" aria-labelledby="strip-title">
         <h2 id="strip-title" className="strip-title">
-          {neverRan ? <LevelMark level="unknown" word="尚未完成巡检" /> : <LevelMark level="ok" word="全部正常" />}
+          {neverRan ? <LevelMark level="unknown" word="尚未完成巡检" /> : dismissed.length
+            ? <span>暂无未处理提醒</span> : <LevelMark level="ok" word="全部正常" />}
           <span className="strip-meta"> · 下次巡检 {nextTick}</span>
         </h2>
         {extras}
+        {dismissedList}
       </section>
     )
   }
@@ -106,6 +125,9 @@ export function AttentionStrip({ reg, shell, now }: { reg: Reg; shell: ShellFiel
           ：自动降载、金丝雀和运维摘要都已停止，页面数据可能过时。
         </p>
       ) : null}
+      {unavailable > 0 ? <Notice tone="warn">
+        {unavailable} 项提醒暂不能关闭：提醒控制存储已满。请先处理部分异常或精简监控范围，再刷新重试；现有关闭状态仍保留。
+      </Notice> : null}
       <ul className="strip-items" aria-label="需关注的项目">
         {shown.map((item) => {
           const where = targetLabel(reg, item.target, item.source)
@@ -128,6 +150,7 @@ export function AttentionStrip({ reg, shell, now }: { reg: Reg; shell: ShellFiel
                 查看<span className="visually-hidden">：{text}</span>
                 <span aria-hidden="true"> →</span>
               </a>
+              <AttentionActions item={item} />
             </li>
           )
         })}
@@ -138,7 +161,7 @@ export function AttentionStrip({ reg, shell, now }: { reg: Reg; shell: ShellFiel
         </button>
       ) : null}
       {extras}
+      {dismissedList}
     </section>
   )
 }
-

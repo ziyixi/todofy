@@ -1,6 +1,7 @@
 import { ChevronRight } from 'lucide-react'
 import type { FlowSummary, HomeView as HomeViewData } from '../../../worker/src/api-types.ts'
 import { Launcher } from '../components/Launcher'
+import { targetDismissed, useAttention } from '../components/AttentionActions'
 import { MiniQuota } from '../components/QuotaBars'
 import { LevelMark, LevelShape } from '../components/status'
 import { flowLine, flowMark } from '../lib/flows'
@@ -10,6 +11,7 @@ import { flowOf, type Reg } from '../lib/registry'
 import { routeHash } from '../router'
 
 function FlowRows({ reg, flows, now }: { reg: Reg; flows: readonly FlowSummary[]; now: Date }) {
+  const attention = useAttention()
   return (
     <section className="home-block" aria-labelledby="home-flows-title">
       <div className="block-head">
@@ -24,19 +26,20 @@ function FlowRows({ reg, flows, now }: { reg: Reg; flows: readonly FlowSummary[]
             const flow = flowOf(reg, summary.id)
             const line = flowLine(reg, summary, now)
             const { level } = flowMark(summary)
+            const dismissed = targetDismissed(attention, { flow: summary.id }) && level === 'warning'
             const name = flow?.name ?? summary.id
             return (
               <li key={summary.id}>
                 <a
                   className="flow-row"
                   href={routeHash({ view: 'flows', flow: summary.id })}
-                  aria-label={`${name}：${line.word}，${line.detail}${line.aside ? `，${line.aside}` : ''}`}
+                  aria-label={`${name}：${dismissed ? '本批提醒已关闭' : line.word}，${line.detail}${line.aside ? `，${line.aside}` : ''}`}
                 >
-                  <LevelShape level={level} size={12} />
+                  {dismissed ? null : <LevelShape level={level} size={12} />}
                   <span className="flow-row-main">
                     <span className="flow-row-title">
                       <span className="flow-row-name">{name}</span>
-                      <span className={`level-word level-${LEVEL[level].tone}`}>{line.word}</span>
+                      <span className={`level-word level-${dismissed ? 'neutral' : LEVEL[level].tone}`}>{dismissed ? '本批提醒已关闭' : line.word}</span>
                     </span>
                     <span className="flow-row-detail">{line.detail}</span>
                   </span>

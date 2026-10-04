@@ -63,4 +63,22 @@ describe('Fleet owner page', () => {
     expect(screen.getByText('BUSINESS_OUTCOME_UNKNOWN')).toBeVisible();
     expect(screen.getByText(/暂停待处理/)).toBeVisible();
   });
+  it('explains the unknown aggregate independently of process health and links reminder management to configured Home', async () => {
+    const report = structuredClone(fixture);
+    report.newsletter.unknown_count = 32;
+    show({ ...BASE, freshness: 'fresh', report, receive_time: '2026-10-03T00:00:00Z' });
+    expect(await screen.findByRole('heading', { name: 'Newsletter' })).toBeVisible();
+    expect(screen.getByText('未确认完成记录').nextElementSibling).toHaveTextContent('32');
+    expect(screen.getByText(/后台进程：健康/)).toBeVisible();
+    expect(screen.getByText(/六类记录；同一次工作可能重复计入，并非失败邮件数/)).toBeVisible();
+    expect(screen.getByRole('link', { name: '到 Home 管理/关闭提醒' })).toHaveAttribute('href', import.meta.env.VITE_HOME_URL);
+    expect(screen.getByText(/后续运维摘要，原记录仍保留/)).toBeVisible();
+  });
+  it('does not turn missing Newsletter observations into zero or a healthy process', async () => {
+    const report = { ...fixture, newsletter: { state: 'unavailable', drain_state: 'unknown' } };
+    show({ ...BASE, freshness: 'fresh', report, receive_time: '2026-10-03T00:00:00Z' });
+    expect(await screen.findByRole('heading', { name: 'Newsletter' })).toBeVisible();
+    expect(screen.getByText('未确认完成记录').nextElementSibling).toHaveTextContent('未知');
+    expect(screen.getByText(/后台进程：未知/)).toBeVisible();
+  });
 });

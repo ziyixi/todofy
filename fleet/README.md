@@ -3,6 +3,10 @@
 Fleet 保存 VPS 的有界状态报告，显示 k3s、系统 daemon、Newsletter 和 GitHub 发布回执。
 它没有 SSH、远程命令或 Kubernetes 修改权限。Newsletter 仍是独立 VPS 服务。
 
+Newsletter 的未确认数量是六类记录的合计，可能包含历史运行中断及重叠计数，不能当作失败邮件数。
+Fleet 保留只读；提醒的关闭与恢复在 Home 管理。导航地址由本应用 `wrangler.toml` 的公开 `HOME_URL` 声明，
+UI 构建时读取；迁移 Home 域名时同步更新这一项，不从观察报告或另一应用的配置推断地址。
+
 - `worker/src/`：独立 HMAC 机器入口、Access owner API、SQLite DO 状态与 Home service bindings。
 - `web/`：只读 owner UI；每分钟读取缓存观测，不探测服务器。
 - `platform/src/personal_cloud/observer/`：非 root k3s CronJob，使用平台镜像每五分钟发送状态；仅挂载系统 bus 和 meminfo 元数据。

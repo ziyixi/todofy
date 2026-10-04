@@ -225,7 +225,7 @@ describe('首页', () => {
     expect(screen.queryByText('全部正常')).toBeNull()
     const strip = screen.getByRole('region', { name: '1 项未知 · 1 项需关注' })
     const items = within(strip).getAllByRole('listitem')
-    expect(items.map((item) => item.textContent)).toEqual(['Todofy：无法连接查看：Todofy：无法连接 →', '个人网站：HTTP 状态异常查看：个人网站：HTTP 状态异常 →'])
+    expect(items.map((item) => item.querySelector('.strip-text')?.textContent)).toEqual(['Todofy：无法连接', '个人网站：HTTP 状态异常'])
     expect(within(items[0]!).getByRole('link')).toHaveAttribute('href', '#/')
     expect(screen.getByRole('link', { name: '首页，2 项需关注' })).toBeInTheDocument()
   })

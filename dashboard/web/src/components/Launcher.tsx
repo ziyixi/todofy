@@ -7,6 +7,7 @@ import { entryPageHash, flowsOfEntry, sortedByOrder, type Reg } from '../lib/reg
 import { routeHash } from '../router'
 import { httpsUrl } from '../lib/url'
 import { Modal } from './Modal'
+import { SignalActions, useSignalsDismissed } from './AttentionActions'
 import { AccessLock, EntryIcon, LevelMark } from './status'
 import { Fact, Facts, Pill, Time } from './ui'
 
@@ -69,6 +70,7 @@ function Tile({
 }) {
   const url = httpsUrl(entry.url)
   const line = loading ? null : statusLine(entry, state, now)
+  const dismissed = useSignalsDismissed(entry.id, state?.top_signals ?? []) && state?.level === 'warning'
   const head = (
     <>
       <EntryIcon icon={entry.icon} accent={entry.accent} />
@@ -96,10 +98,10 @@ function Tile({
         <button
           type="button"
           className="tile-status"
-          aria-label={`${entry.name} 状态：${line.word}，查看详情`}
+          aria-label={`${entry.name} 状态：${dismissed ? '本批提醒已关闭' : line.word}，查看详情`}
           onClick={() => onDetails(entry)}
         >
-          <LevelMark level={line.level} word={line.word} />
+          {dismissed ? <Pill tone="neutral">提醒已关闭</Pill> : <LevelMark level={line.level} word={line.word} />}
           {line.detail ? (
             <span className="tile-detail">
               <span className="tile-sep" aria-hidden="true">
@@ -118,8 +120,9 @@ function Tile({
 function ServiceRow({ reg, entry, state, loading, now }: { reg: Reg; entry: RegistryEntry; state: EntryState | undefined; loading: boolean; now: Date }) {
   const target = entryPageHash(reg, entry)
   const line = loading ? null : statusLine(entry, state, now)
+  const dismissed = useSignalsDismissed(entry.id, state?.top_signals ?? []) && state?.level === 'warning'
   const detail = line ? (line.level === 'ok' ? (line.detail ?? line.word) : line.detail ? `${line.word} · ${line.detail}` : line.word) : null
-  const label = line ? `${entry.name}：${line.word}${line.detail ? `，${line.detail}` : ''}，${target.what}` : `${entry.name}，${target.what}`
+  const label = line ? `${entry.name}：${dismissed ? '本批提醒已关闭' : line.word}${line.detail ? `，${line.detail}` : ''}，${target.what}` : `${entry.name}，${target.what}`
   return (
     <li>
       <a className="service-row" href={target.hash} aria-label={label}>
@@ -127,7 +130,8 @@ function ServiceRow({ reg, entry, state, loading, now }: { reg: Reg; entry: Regi
         <span className="service-text">
           <span className="service-name">{entry.name}</span>
           {line ? (
-            <LevelMark level={line.level} word={detail ?? line.word} size={10} className="service-status" />
+            dismissed ? <span className="service-status muted">本批提醒已关闭 · 查看记录</span>
+              : <LevelMark level={line.level} word={detail ?? line.word} size={10} className="service-status" />
           ) : (
             <span className="service-status skeleton-line" aria-hidden="true" />
           )}
@@ -178,6 +182,7 @@ function EntrySheet({ reg, entry, state, now, onClose }: { reg: Reg; entry: Regi
                       开始于 <Time iso={signal.since} now={now} />
                     </p>
                   ) : null}
+                  <SignalActions source={entry.id} code={signal.code} target={{ entry: entry.id }} />
                 </li>
               )
             })}
