@@ -362,12 +362,14 @@ class Classify(unittest.TestCase):
         )
 
     def test_cloud_config_inputs_and_their_tools_check_without_publishing(self):
-        for path in ("config/cloud.toml", "config/resources.toml", "tools/cloud-config/generate.py"):
+        for path in ("config/cloud.toml", "config/resources.toml", "config/account-resources.toml",
+                     "tools/cloud-config/generate.py", "tools/service-catalog/inventory.py"):
             with self.subTest(path=path):
                 self.assertEqual(push([path]), expect(T, T, T, F, F, packages=T, proto=T, **ALL_CHECKED))
                 self.assertFalse(any(value for key, value in push([path]).items() if key.endswith(("_deploy", "_publish"))))
         # The generated identity source is a real Home bundle dependency; profile inputs alone remain checks only.
         self.assertEqual(push(["dashboard/worker/src/resource-identities.ts"]), expect(F, F, T, F, F, **DASH))
+        self.assertEqual(push(["dashboard/worker/src/account-inventory.json"]), expect(F, F, T, F, F, **DASH))
         saved = ci_changes.CHECK_ONLY
         try:
             ci_changes.CHECK_ONLY = set()

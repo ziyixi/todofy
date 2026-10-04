@@ -44,8 +44,8 @@ describe('persistent occurrence controls', () => {
     h = await start();
     const observe = async (count: number, revision: number, step: number) => {
       await activeHarness().answer('newsletter', 'status', { value: await status('newsletter', {
-        health: 'ok', signals: [{ code: 'newsletter_unknown', severity: 'warning', metrics: { unknown_count: count, unknown_revision: revision } }],
-        counters: { unknown_count: count },
+        health: 'ok', signals: count === 0 ? [] : [{ code: 'newsletter_unknown', severity: 'warning', metrics: { unknown_count: count, unknown_revision: revision } }],
+        counters: { unknown_count: count, unknown_revision: revision },
       }) });
       await advance(step);
     };
@@ -55,7 +55,10 @@ describe('persistent occurrence controls', () => {
     expect((await change(item, 'dismiss')).status).toBe(200);
     await observe(32, 34, 1);
     expect((await home()).attention.items.some(item => item.code === 'newsletter_unknown')).toBe(false);
-    await observe(32, 35, 2);
+    await observe(0, 34, 2);
+    await observe(32, 34, 3);
+    expect((await home()).attention.items.some(item => item.code === 'newsletter_unknown')).toBe(false);
+    await observe(32, 35, 4);
     expect((await home()).attention.items.some(item => item.code === 'newsletter_unknown')).toBe(true);
   });
 

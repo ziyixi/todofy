@@ -166,7 +166,7 @@ NO_CONTRACTS = {"website", "flowday", "links", "newsletter"}
 INFRA = ("infra/", "tools/infra-plan-summary/")
 # These are source inputs to checked generators, not deployable Worker bundles. Generated app source changes are
 # classified through their own app directory; editing the central inputs alone cannot publish production.
-CLOUD_CONFIG = {"config/cloud.toml", "config/resources.toml"}
+CLOUD_CONFIG = {"config/cloud.toml", "config/resources.toml", "config/account-resources.toml"}
 # packages/<name>/ -> the apps whose Workers compile it in (a "file:../../packages/<name>" dependency).
 PACKAGE_USERS = {"edge-auth": ("todofy", "mail-hero", "dashboard", "lab", "flowday", "links", "watch", "fleet")}
 # The protobuf IDL (proto/README.md): app -> the languages ("ts", "python") whose generated code and runtime

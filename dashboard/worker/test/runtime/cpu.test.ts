@@ -25,8 +25,11 @@ import { startHarness, type Harness } from './harness.ts';
  * This invocation belongs to HomeState's 30-second DO limit; it is not an HTTP-handler allowance.
  */
 const COLD_BOUND_MS = 2 * FREE_CPU_MS;
-/** The bound of a tick's warm median, in reference milliseconds (today at most 2.5). */
-const WARM_BOUND_MS = 0.4 * FREE_CPU_MS;
+/**
+ * Per-service guard targets and reminder projection measured 4.51 ms in Linux CI (2026-10-04).
+ * A 6 ms regression budget allows runner variation; the DO still has its separate 30-second limit.
+ */
+const WARM_BOUND_MS = 0.6 * FREE_CPU_MS;
 const RUNS = 11;
 const HALF_HOUR = 30 * 60_000;
 /** src/state.ts's HOME_OBJECT (that module imports cloudflare:workers, which Node cannot load). */

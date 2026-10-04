@@ -59,6 +59,8 @@ python3 tools/service-catalog/inventory.py --check
 ```
 
 提交生成的 `dashboard/worker/src/account-inventory.json` 与对应配置变更。
+新增或改名资源时，同步 `dashboard/worker/src/registry.ts` 中的资源名称和归属；
+Home 的测试会逐项核对清单，遗漏会阻止 CI 通过。
 生成器拒绝未知归属、非法桶名和重复登记；CI 拒绝过期的生成清单。
 
 ## 检查实际账户

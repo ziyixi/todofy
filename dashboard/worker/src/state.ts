@@ -825,7 +825,8 @@ export class HomeState extends DurableObject<Env> {
     if (OPS_APPS.includes(condition.source as OpsApp)) {
       const app = condition.source as OpsApp, doc = evaluation.statuses[app], status = freshStatus(doc, now);
       if (doc?.ok !== true || status === null) return false;
-      if (condition.code === 'newsletter_unknown') return status.counters.unknown_count === 0;
+      // Stable batches retain their disposition even through a temporary zero count.
+      if (condition.code === 'newsletter_unknown') return status.counters.unknown_revision === undefined && status.counters.unknown_count === 0;
       if (condition.code === 'guard_apply_failed') return this.applied(app).last_call_at !== null && this.applied(app).consecutive_failures === 0;
       if (status.health === 'down' || status.signals.some((signal) => signal.code.endsWith('_unavailable') || ['host_never_seen', 'host_stale', 'host_missing'].includes(signal.code))) return false;
       return true;

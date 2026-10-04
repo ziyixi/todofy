@@ -49,7 +49,7 @@ export function statusSnapshot(
   if (age === 'fresh' && report) {
     if (app === 'newsletter') {
       for (const [key, count] of Object.entries(report.newsletter.unknown_by_kind ?? {})) counters[`unknown_${key}`] = count;
-      for (const key of ['queued_count', 'inflight_count', 'unknown_count'] as const) {
+      for (const key of ['queued_count', 'inflight_count', 'unknown_count', 'unknown_revision'] as const) {
         const value = report.newsletter[key];
         if (typeof value === 'number') counters[key] = value;
       }
