@@ -25,7 +25,8 @@ Notion permissions, a natural Cron invocation or live provider recovery after an
 | [Push release 37240089943](https://github.com/ziyixi/todofy/actions/runs/37240089943) | Successful run and `SYNC_PUBLISHED`; the live site and accepted release identity matched. |
 | [Home manual sync 37240413731](https://github.com/ziyixi/todofy/actions/runs/37240413731) | Successful run and `SYNC_UNCHANGED`; actual check time advanced to `2026-10-04T22:34:02.831Z`. |
 | Unchanged publication | Verified publication time remained `2026-10-04T22:30:18Z`; Worker version remained `0f0cb495-1c3e-43e4-bf60-4fe7800b6472`. |
-| Concurrent Home requests | [37240561083](https://github.com/ziyixi/todofy/actions/runs/37240561083) completed successfully with `SYNC_UNCHANGED` and check time `2026-10-04T22:36:55.356Z`. [37240589649](https://github.com/ziyixi/todofy/actions/runs/37240589649) moved from pending to in progress, demonstrating the real release queue; its completion remains pending below. |
+| Concurrent Home requests | [37240561083](https://github.com/ziyixi/todofy/actions/runs/37240561083) and [37240589649](https://github.com/ziyixi/todofy/actions/runs/37240589649) both completed successfully with `SYNC_UNCHANGED`, checked at `2026-10-04T22:36:55.356Z` and `2026-10-04T22:38:23.230Z`. The second moved from pending to in progress after the first, demonstrating the real release queue. |
+| Fresh Home observation | After refresh, Home showed unchanged content checked at 15:39 local / 22:39 UTC, the same version and code identity, publication at 15:30 local / 22:30 UTC, and the next check at 03:17 local / 10:17 UTC on October 5. |
 
 Accepted site identity:
 
@@ -41,6 +42,14 @@ Accepted site identity:
 The relay and Home report `BUILD_SHA=da35586`, and Home has the `WEBSITE_SYNC` Ops service binding.
 The relay's actual Cron is `17 10 * * *`; its only secret is `GITHUB_DISPATCH_TOKEN`.
 It does not hold Notion credentials.
+
+An additional cron-labelled [run 37240716771](https://github.com/ziyixi/todofy/actions/runs/37240716771)
+started at `2026-10-04T22:37:25Z`, about nine minutes after the relay Cron configuration changed at
+22:28:02 UTC. It succeeded with `SYNC_UNCHANGED`, checked at `2026-10-04T22:39:30.758Z`.
+[Cloudflare documents](https://developers.cloudflare.com/workers/configuration/cron-triggers/#2-update-configuration)
+up to 15 minutes for Cron changes to propagate. The timing is consistent with propagation of the
+previous schedule, but that is an inference; the exact event source was not established. This run
+does not verify the new daily 10:17 UTC schedule.
 
 ## Notion cleanup
 
@@ -71,7 +80,6 @@ An Actions success without its required receipt does not prove a content check o
 
 ## Pending production checks
 
-- Completion of manual run `37240589649` and a fresh Home Ops sample after completion.
 - Natural daily Cron invocation. The next configured invocation is `2026-10-05T10:17:00Z`;
   configuring the Cron and manually dispatching a run do not prove this invocation.
 - Live outage, cancellation and rollback exercises. Current evidence for these paths is synthetic;
