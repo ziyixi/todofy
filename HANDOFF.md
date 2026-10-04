@@ -154,7 +154,11 @@ exception retains independent actual-rule validation; see infra/README.md.
 The first branch run found a legacy Newsletter tooling test and an incompatible daemon-map rule change;
 the test now inspects the reusable release recipe, and optional configured-daemon fields retain the old wire rules.
 The actual buf/profile comparison against the base passed. Publishing also derives both image names from
-the complete configured repository. Pending: green follow-up CI, same-green-SHA landing, actual releases and Fleet/Home receipts.
+the complete configured repository. Follow-up branch CI 37191723503 passed; the same `adaa835` reached main.
+Full release 37192028704, independent Website release 37192071431 and post-release reconcile 37192262241 succeeded.
+Fleet confirms both actual digests/source SHA, generation 10, Newsletter 1/1 and all configured daemons running;
+Home confirms the new build and retained reminder dismissal. No-drift Worker deployment steps were skipped.
+The next branch gate adds an isolated official k3s API fixture to exercise real SSA/conflicts and Secret/PVC preservation.
 Routine auto-repair remains disabled until acceptance.
 No new-account creation, mail forwarding change, paid upgrade, data deletion, physical isolated
 drift drill or fresh-VPS acceptance has happened in this phase. See docs/rebuild-verification.md.
