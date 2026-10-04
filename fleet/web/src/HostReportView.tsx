@@ -12,7 +12,7 @@ export function HostReportView({ report }: { report: HostReport }) {
         <h2>系统 daemon</h2>
         <p>观察器版本：<code>{report.observer_source_sha ?? '未知'}</code></p>
         <div className="grid">
-          {Object.entries(report.daemons).map(([name, daemon]) => (
+          {Object.entries(report.configured_daemons ?? report.daemons).map(([name, daemon]) => (
             <article key={name}>
               <h3>{name}</h3>
               <strong>{label(daemon.state)}</strong>

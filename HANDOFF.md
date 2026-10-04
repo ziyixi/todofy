@@ -140,9 +140,9 @@ ownership conflicts and persistent-resource recovery require an explicit operato
 
 Implemented: generated deployment profile, private fresh/adopt bootstrap, scoped state imports,
 complete secret maps, per-app verified GitHub Deployment records, reusable release recipes, fixed
-VPS bundles, typed reconcile transactions and operator guidance. Local checks include 405 CI guards
-(one local skip), 229 platform/VPS tests with 197 subtests, 22 Worker-release tests, 98 infrastructure
-tests, 33 bootstrap tests and 19 complete-secret-map tests. Synthetic API/official Kubernetes SDK boundaries verify
+VPS bundles, typed reconcile transactions and operator guidance. Local checks include 407 CI guards
+(one local skip), 229 platform/VPS tests with 197 subtests, 22 Worker-release tests, 104 infrastructure
+tests, 34 bootstrap tests and 19 complete-secret-map tests. Synthetic API/official Kubernetes SDK boundaries verify
 repair/no-op, stale plans, pause protection and durable-ledger preservation.
 
 Existing-account adoption completed: five exact existing objects were imported into encrypted state;
@@ -151,7 +151,10 @@ was synchronised; existing application keys were retained. Fresh-create collisio
 same-name resources, with bounded complete pagination. The provider's FlowDay include compatibility
 exception retains independent actual-rule validation; see infra/README.md.
 
-Pending: full branch CI, same-green-SHA landing, actual releases and Fleet/Home receipts.
+The first branch run found a legacy Newsletter tooling test and an incompatible daemon-map rule change;
+the test now inspects the reusable release recipe, and optional configured-daemon fields retain the old wire rules.
+The actual buf/profile comparison against the base passed. Publishing also derives both image names from
+the complete configured repository. Pending: green follow-up CI, same-green-SHA landing, actual releases and Fleet/Home receipts.
 Routine auto-repair remains disabled until acceptance.
 No new-account creation, mail forwarding change, paid upgrade, data deletion, physical isolated
 drift drill or fresh-VPS acceptance has happened in this phase. See docs/rebuild-verification.md.

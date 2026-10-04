@@ -67,7 +67,7 @@ message HostReport {
     (google.api.field_behavior) = REQUIRED,
     (common.wire.v1.field).non_null = true
   ];
-  // Configured system daemons; SSH tunnel and runtime connector aliases are optional.
+  // Legacy system daemon map; unconfigured aliases remain unknown.
   map<string, Daemon> daemons = 7 [
     (google.api.field_behavior) = REQUIRED,
     (common.wire.v1.field) = {
@@ -75,6 +75,7 @@ message HostReport {
       max_items: 4
       required_keys: [
         "k3s",
+        "cloudflared",
         "ssh"
       ]
     }
@@ -108,6 +109,11 @@ message HostReport {
     (google.api.field_behavior) = REQUIRED,
     (common.wire.v1.field).format = "Sha"
   ];
+  // Only configured system daemons; absent for legacy producers.
+  map<string, Daemon> configured_daemons = 16 [(common.wire.v1.field) = {
+    key_format: "DaemonAlias"
+    max_items: 4
+  }];
   reserved 12, 13;
   reserved "desired_sha", "deployment_ready";
 }
@@ -144,10 +150,16 @@ message SystemDaemonSnapshot {
       max_items: 4
       required_keys: [
         "k3s",
+        "cloudflared",
         "ssh"
       ]
     }
   ];
+  // Only configured system daemons; absent for legacy snapshots.
+  map<string, Daemon> configured_daemons = 3 [(common.wire.v1.field) = {
+    key_format: "DaemonAlias"
+    max_items: 4
+  }];
 }
 // Cluster status, not business status.
 message Cluster {

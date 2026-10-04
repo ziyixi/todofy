@@ -7,8 +7,9 @@ import json
 import os
 import re
 import subprocess
-import tomllib
 from pathlib import Path
+
+import tomllib
 
 IMAGE = "ghcr.io/ziyixi/todofy-newsletter"
 
@@ -95,8 +96,8 @@ def main() -> None:
         save(args.image, args.sha, args.directory)
     else:
         profile = tomllib.loads((Path(__file__).resolve().parents[2] / "config/cloud.toml").read_text())
-        owner = profile["repository"].split("/")[0]
-        receipt = publish(args.sha, args.directory, f"ghcr.io/{owner}/todofy-{args.service}")
+        repository = profile["repository"].lower()
+        receipt = publish(args.sha, args.directory, f"ghcr.io/{repository}-{args.service}")
         if args.receipt:
             args.receipt.write_text(json.dumps(receipt, sort_keys=True) + "\n")
         if args.github_output:

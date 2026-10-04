@@ -1,7 +1,6 @@
 """Synthetic bootstrap checks: account scoping, secret reuse and read-only adoption."""
 
 import json
-import os
 import stat
 import sys
 import tempfile
@@ -238,6 +237,40 @@ class Cloud(unittest.TestCase):
                     "values": {"id": "public-id", "client_secret": "synthetic-hidden"}}]}}}
         previous = {"account_id": ACCOUNT, "zone_id": ZONE, "d1_databases": {}, "durable_objects": {}}
         self.assertNotIn("synthetic-hidden", json.dumps(inventory.exported_resources(previous, plan, fresh=True)))
+
+    def test_verify_refuses_live_flowday_drift_hidden_by_the_provider(self):
+        plan = {"resource_changes": [{"mode": "managed", "type": "cloudflare_zero_trust_access_policy",
+                "address": "cloudflare_zero_trust_access_policy.owner", "change": {"actions": ["no-op"]}}]}
+
+        class Session:
+            def __init__(self, **kwargs):
+                self.work = kwargs["work"]
+                self.tofu = SimpleNamespace(init=lambda environment: None)
+
+            def s3(self, method, key):
+                return 200, b""
+
+            def plan_full(self, name):
+                observed = dict(plan)
+                if name == "verify":
+                    observed["_flowday_include_errors"] = ["FLOWDAY_INCLUDE_MISMATCH:flowday"]
+                return 0, {"rows": [("no-op", "owner")], "outputs": []}, "", observed
+
+            def cleanup(self):
+                pass
+
+        values = {"account_id": ACCOUNT, "access_owner_emails": ["owner"], "access_github_owner_emails": ["owner"],
+                  "access_allowed_idp_ids": ["idp"], "access_github_idp_id": "idp"}
+        private = {"infra_values": values, "cloudflare_api_token": "synthetic", "infra_state_passphrase": "synthetic-passphrase"}
+        resources = {"account_id": ACCOUNT, "zone_id": ZONE, "managed_ids": {}, "standalone_access_app_ids": {}}
+        with tempfile.TemporaryDirectory() as directory, mock.patch.object(tofu_bootstrap, "verify_target"), \
+                mock.patch.object(tofu_bootstrap, "prepare"), mock.patch.object(tofu_bootstrap, "ensure_workers_subdomain"), \
+                mock.patch.object(tofu_bootstrap, "ensure_bucket"), mock.patch.object(tofu_bootstrap, "import_state"), \
+                mock.patch.object(tofu_bootstrap, "output") as credentials:
+            with self.assertRaisesRegex(BootstrapError, "BOOTSTRAP_FLOWDAY_INCLUDE_MISMATCH"):
+                tofu_bootstrap.run(private, {"zone": "example.invalid", "workers_dev_subdomain": "desired"},
+                                   resources, "adopt", Path(directory), session_factory=Session)
+            credentials.assert_not_called()
 
     def test_fresh_and_adopt_inventory_exclude_only_non_worker_audiences(self):
         audiences = {"flowday": "worker-audience", "mail-hero": "mail-audience",

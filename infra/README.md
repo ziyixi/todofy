@@ -843,8 +843,9 @@ The original P3/P4 storage and owner-Access scope needs these dedicated permissi
 
 The added platform resources also need Access service-token and Cloudflare Tunnel permissions, plus
 DNS access restricted to the configured zone. Use Read for planning and Edit for applying. Preserve
-existing Worker permissions when extending an existing token; Email Routing permissions are not needed
-for this change. The original import instructions and 19-object counts below describe the pre-platform
+existing Worker permissions when extending an existing token. The complete bootstrap also requires
+Identity Providers and Email Routing Rules Read/Write; see the [current permission list](../tools/cloud-bootstrap/README.md#cloudflare-token-权限).
+The original import instructions and 19-object counts below describe the pre-platform
 baseline; the platform follow-up creates nine new objects and expects 28 no-op objects after apply.
 
 Store each from your own terminal (paste at the prompt, never in chat):

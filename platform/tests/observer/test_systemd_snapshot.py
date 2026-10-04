@@ -84,7 +84,41 @@ class SnapshotTests(unittest.TestCase):
                 self.assertEqual(
                     [call.args[0] for call in daemon.call_args_list], aliases
                 )
-            self.assertNotIn("cloudflared", json.loads(path.read_bytes())["daemons"])
+            wire = json.loads(path.read_bytes())
+            self.assertNotIn("cloudflared", wire["configured_daemons"])
+            self.assertEqual(wire["daemons"]["cloudflared"], {"state": "unknown"})
+
+    def test_legacy_snapshot_remains_readable_after_fresh_configuration(self):
+        aliases = ["k3s", "ssh", "cloudflared_platform"]
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch.dict("os.environ", {"FLEET_EXPECTED_DAEMONS": json.dumps(aliases)}),
+        ):
+            path = Path(directory) / "snapshot.json"
+            path.write_text(json.dumps(self.value()))
+            with patch.object(snapshot, "SNAPSHOT_PATH", path):
+                self.assertEqual(
+                    snapshot.read(), {name: {"state": "active"} for name in aliases}
+                )
+
+    def test_configured_snapshot_cannot_hide_missing_keys_or_disagree_with_legacy_state(
+        self,
+    ):
+        values = []
+        for daemons in (
+            {},
+            {"k3s": {"state": "active"}},
+            {"k3s": {"state": "failed"}, "ssh": {"state": "active"}},
+        ):
+            values.append({**self.value(), "configured_daemons": daemons})
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "snapshot.json"
+            with patch.object(snapshot, "SNAPSHOT_PATH", path):
+                for value in values:
+                    with self.subTest(daemons=value["configured_daemons"]):
+                        path.write_text(json.dumps(value))
+                        self.assertEqual(snapshot.read(), self.unknown())
+                        self.assertEqual(snapshot.READ_CODE, "INVALID")
 
     def test_stale_future_and_missing_observations_cannot_appear_current(self):
         with tempfile.TemporaryDirectory() as directory:

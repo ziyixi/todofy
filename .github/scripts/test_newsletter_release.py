@@ -13,6 +13,14 @@ spec.loader.exec_module(release)
 
 
 class ImageRelease(unittest.TestCase):
+    def test_publish_uses_the_configured_repository_for_each_service(self):
+        for service in ("newsletter", "platform"):
+            with self.subTest(service=service), patch.object(release.tomllib, "loads", return_value={"repository": "Owner/Cloud"}), \
+                    patch.object(release, "publish", return_value={"image": "synthetic"}) as publish, \
+                    patch("sys.argv", ["image.py", "publish", "--sha", "a" * 40, "--directory", "/synthetic", "--service", service]):
+                release.main()
+            publish.assert_called_once_with("a" * 40, Path("/synthetic"), f"ghcr.io/owner/cloud-{service}")
+
     def fixture(self, root):
         root = Path(root)
         (root / "image.tar").write_bytes(b"synthetic docker archive")

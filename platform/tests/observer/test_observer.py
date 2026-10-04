@@ -281,6 +281,22 @@ class ObserverTests(unittest.TestCase):
             )
             self.assertIn("cloudflared_platform", enabled["daemons"])
 
+            aliases = ["k3s", "ssh", "cloudflared_platform"]
+            fresh = json.loads(
+                collector.observe(
+                    {
+                        "FLEET_EXPECTED_DAEMONS": json.dumps(aliases),
+                        "FLEET_EXPECT_PLATFORM_TUNNEL": "true",
+                    },
+                    1,
+                )
+            )
+            self.assertEqual(set(fresh["configured_daemons"]), set(aliases))
+            self.assertEqual(fresh["daemons"]["cloudflared"], {"state": "unknown"})
+            self.assertEqual(
+                fresh["configured_daemons"]["cloudflared_platform"], {"state": "active"}
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

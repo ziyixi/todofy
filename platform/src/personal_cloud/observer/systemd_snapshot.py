@@ -30,6 +30,14 @@ def configured_daemons(env=None):
     )
 
 
+def legacy_daemons(daemons):
+    """Keep the v1 map shape without claiming unconfigured daemons were observed."""
+    return {
+        **{name: {"state": "unknown"} for name in ("k3s", "cloudflared", "ssh")},
+        **daemons,
+    }
+
+
 def write_termination(code, *, units=None, snapshot=None):
     """Only fixed status metadata; never logs or D-Bus response contents."""
     if code not in {
@@ -72,10 +80,11 @@ def read() -> dict[str, dict[str, str]]:
         with SNAPSHOT_PATH.open("rb") as source:
             raw = source.read(MAX_BYTES + 1)
         READ_CODE = "INVALID"
+        input_value = decode_json_body(raw, max_bytes=MAX_BYTES)
         value = to_wire(
             from_wire(
                 SystemDaemonSnapshot,
-                decode_json_body(raw, max_bytes=MAX_BYTES),
+                input_value,
                 strict=True,
             ).message
         )
@@ -87,10 +96,23 @@ def read() -> dict[str, dict[str, str]]:
             READ_CODE = "STALE" if age > MAX_AGE_SECONDS else "FUTURE"
             return unknown
         READ_CODE = "READ_OK"
-        if not set(value["daemons"]) <= set(aliases):
+        if "configured_daemons" in input_value:
+            daemons = value.get("configured_daemons", {})
+            if not {"k3s", "ssh"} <= set(daemons):
+                READ_CODE = "INVALID"
+                return unknown
+        else:
+            daemons = {
+                name: value["daemons"][name]
+                for name in aliases
+                if name in value["daemons"]
+            }
+        if not set(daemons) <= set(aliases) or any(
+            value["daemons"].get(name) != daemon for name, daemon in daemons.items()
+        ):
             READ_CODE = "INVALID"
             return unknown
-        return {**unknown, **value["daemons"]}
+        return {**unknown, **daemons}
     except (OSError, KeyError, TypeError, ValueError):
         return unknown
 
@@ -102,12 +124,13 @@ def write(diagnostics=None) -> None:
         "observation_time": dt.datetime.now(dt.timezone.utc)
         .isoformat(timespec="seconds")
         .replace("+00:00", "Z"),
-        "daemons": {},
+        "configured_daemons": {},
     }
     for name in configured_daemons():
         detail = {}
         diagnostics.append(detail)
-        value["daemons"][name] = daemon(name, diagnostic=detail)
+        value["configured_daemons"][name] = daemon(name, diagnostic=detail)
+    value["daemons"] = legacy_daemons(value["configured_daemons"])
     message = from_wire(SystemDaemonSnapshot, value, strict=True).message
     raw = json.dumps(
         to_wire(message), separators=(",", ":"), ensure_ascii=True

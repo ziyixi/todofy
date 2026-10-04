@@ -22,8 +22,16 @@ export class ReceiptError extends Error {
 export function parseReport(text: string, host: string, epoch: string, now: number): Report {
   let report: Report;
   try {
-    const decoded = fromWire(HostReportSchema, JSON.parse(text), { strict: true });
+    const input: unknown = JSON.parse(text);
+    const decoded = fromWire(HostReportSchema, input, { strict: true });
     report = toWire(HostReportSchema, decoded.message);
+    if (typeof input === 'object' && input !== null && 'configured_daemons' in input) {
+      const daemons = report.configured_daemons;
+      if (!daemons?.k3s || !daemons.ssh
+        || Object.entries(daemons).some(([name, daemon]) => report.daemons[name]?.state !== daemon.state)) {
+        throw new Error('invalid_configured_daemons');
+      }
+    }
   } catch {
     throw new ReceiptError('invalid_report', 400);
   }
@@ -53,7 +61,7 @@ export function freshness(
 
 export function reportCodes(report: Report): string[] {
   const codes: string[] = [];
-  for (const [name, daemon] of Object.entries(report.daemons)) {
+  for (const [name, daemon] of Object.entries(report.configured_daemons ?? report.daemons)) {
     if (daemon.state !== 'active') codes.push(`daemon_${name}_${daemon.state}`);
   }
   if (report.cluster.state !== 'ready') codes.push(`cluster_${report.cluster.state}`);

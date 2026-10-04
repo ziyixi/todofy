@@ -16,7 +16,7 @@ from ziyixi_proto.wire_json import from_wire, to_wire
 
 from ..deployment.kubernetes import Client, DependencyUnavailable
 from .provenance import source_sha
-from .systemd_snapshot import configured_daemons
+from .systemd_snapshot import configured_daemons, legacy_daemons
 from .systemd_snapshot import read as systemd_snapshot
 from .transport import ObserverError, _request
 
@@ -219,6 +219,12 @@ def observe(env: dict[str, str], sequence: int) -> bytes:
     cluster = kube(env)
     disk, memory = resource_percentages()
     daemons = systemd_snapshot()
+    selected = {
+        name: daemons[name]
+        for name in configured_daemons(env)
+        if name != "cloudflared_platform"
+        or env.get("FLEET_EXPECT_PLATFORM_TUNNEL") == "true"
+    }
     value = {
         "version": "fleet-report-v1",
         "host_key": env.get("FLEET_HOST_KEY", "vps"),
@@ -228,12 +234,8 @@ def observe(env: dict[str, str], sequence: int) -> bytes:
         "observation_time": dt.datetime.now(dt.timezone.utc)
         .isoformat(timespec="seconds")
         .replace("+00:00", "Z"),
-        "daemons": {
-            name: daemons[name]
-            for name in configured_daemons(env)
-            if name != "cloudflared_platform"
-            or env.get("FLEET_EXPECT_PLATFORM_TUNNEL") == "true"
-        },
+        "daemons": legacy_daemons(selected),
+        "configured_daemons": selected,
         "cluster": cluster,
         "newsletter": newsletter(env),
         "disk_used_percent": disk,

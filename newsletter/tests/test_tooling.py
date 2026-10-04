@@ -199,9 +199,16 @@ def test_ci_uses_the_same_quality_gate_before_image_build():
         command in commands
         for command in ("make check", "make smoke", "make build")
     )
+    reusable = {job["uses"] for job in jobs.values() if "uses" in job}
+    assert reusable == {"./.github/workflows/worker-release.yml"}
+    assert all(
+        "steps" in job or job.get("uses") in reusable for job in jobs.values()
+    )
+    checked_jobs = [job for job in jobs.values() if "steps" in job]
+    checked_jobs.extend(workflows.load("worker-release.yml")["jobs"].values())
     assert all(
         "requirements.lock" not in command and "pip install" not in command
-        for job in jobs.values()
+        for job in checked_jobs
         for step in job["steps"]
         for command in [step.get("run", "")]
     )

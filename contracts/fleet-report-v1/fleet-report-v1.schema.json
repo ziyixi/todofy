@@ -48,10 +48,11 @@
       "type": "string"
     },
     "daemons": {
-      "description": "Configured system daemons; SSH tunnel and runtime connector aliases are optional.",
+      "description": "Legacy system daemon map; unconfigured aliases remain unknown.",
       "type": "object",
       "required": [
         "k3s",
+        "cloudflared",
         "ssh"
       ],
       "maxProperties": 4,
@@ -571,6 +572,36 @@
           "type": "null"
         }
       ]
+    },
+    "configured_daemons": {
+      "description": "Only configured system daemons; absent for legacy producers.",
+      "type": "object",
+      "maxProperties": 4,
+      "propertyNames": {
+        "type": "string",
+        "pattern": "^(?:(k3s|cloudflared|ssh|cloudflared_platform))$(?!\\n)"
+      },
+      "additionalProperties": {
+        "type": "object",
+        "required": [
+          "state"
+        ],
+        "properties": {
+          "state": {
+            "description": "active, inactive, failed, activating, deactivating, unknown or missing.",
+            "enum": [
+              "active",
+              "inactive",
+              "failed",
+              "activating",
+              "deactivating",
+              "unknown",
+              "missing"
+            ]
+          }
+        },
+        "additionalProperties": false
+      }
     }
   },
   "additionalProperties": false

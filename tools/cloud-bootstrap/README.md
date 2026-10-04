@@ -10,6 +10,29 @@
 
 API token 通过 `cloudflare_api_token_file` 读取现有正规凭据文件：该文件只含 token、位于仓库外、权限为 600。也支持把 `cloudflare_api_token` 直接放入同样受保护的私有 JSON；两个字段不能同时存在。密钥不进入命令参数、stdout、Git 或 PR。
 
+### Cloudflare token 权限
+
+在正规 token 页面创建自定义 token。账户权限只选目标账户，zone 权限只选目标域；网页中的 Edit 与 Write 是同类写权限名称。
+
+| 范围 | 权限 | 用途 |
+| --- | --- | --- |
+| Account | Account Settings Read | Wrangler 识别目标账户 |
+| Account | Workers Scripts Read / Write | 创建、部署并核对 Worker、DO 和 bindings |
+| Account | D1 Read / Write | 创建数据库、执行 migration、核对 ID |
+| Account | Workers R2 Storage Read / Write | 创建桶、读取身份、访问加密 IaC state |
+| Account | Access: Apps and Policies Read / Write | 应用与精确 policy |
+| Account | Access: Identity Providers Read / Write | GitHub 和一次性邮箱验证码 IdP |
+| Account | Access: Service Tokens Read / Write | 专用机器身份 |
+| Account | Cloudflare One Connector: cloudflared Read / Write | 专用 Tunnel 与 ingress |
+| Zone | Zone Read | 核对域名与所属账户 |
+| Zone | Workers Routes Read / Write | Worker 自定义域名与 routes |
+| Zone | DNS Read / Write | 专用 runtime DNS |
+| Zone | Email Routing Rules Read / Write | 精确收信地址规则 |
+
+名称依据 [Cloudflare 权限表](https://developers.cloudflare.com/fundamentals/api/reference/permissions/)。
+bootstrap 不启用 R2 计费或改收信子域 DNS；这些是主手册中的首次网页步骤。
+复用已有 token 时保留原权限、有效期和 IP 限制，只补缺项。无需 token 管理权限或 Global API key。
+
 | 字段 | 全新环境 | 已有环境收编 |
 | --- | --- | --- |
 | `version` | `1` | `1` |

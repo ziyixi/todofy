@@ -31,6 +31,21 @@ describe('metadata report boundary', () => {
     expect(() => read(unexpected)).toThrow('invalid_report');
     expect(() => read({ ...fixture, daemons: { k3s: { state: 'active' } } })).toThrow('invalid_report');
   });
+  it('preserves the legacy shape while monitoring only configured daemons', () => {
+    const configured = { k3s: { state: 'active' }, ssh: { state: 'active' }, cloudflared_platform: { state: 'active' } };
+    const fresh = { ...fixture, daemons: { ...configured, cloudflared: { state: 'unknown' } }, configured_daemons: configured };
+    expect(reportCodes(read(fresh))).toEqual([]);
+    expect(reportCodes(read({ ...fresh, daemons: { ...fresh.daemons, ssh: { state: 'failed' } },
+      configured_daemons: { ...configured, ssh: { state: 'failed' } } }))).toContain('daemon_ssh_failed');
+    expect(reportCodes(read({ ...fixture, daemons: { ...fixture.daemons, cloudflared: { state: 'failed' } } }))).toContain('daemon_cloudflared_failed');
+  });
+  it('refuses empty, incomplete, unknown or inconsistent configured daemon maps', () => {
+    for (const configured of [{}, { k3s: { state: 'active' } },
+      { k3s: { state: 'active' }, ssh: { state: 'failed' } },
+      { k3s: { state: 'active' }, ssh: { state: 'active' }, injected: { state: 'active' } }]) {
+      expect(() => read({ ...fixture, configured_daemons: configured })).toThrow('invalid_report');
+    }
+  });
   it.each([{ host_key: 'another' }, { epoch: 2 }])('requires configured identity %j', (change) => {
     expect(() => read({ ...fixture, ...change })).toThrow('wrong_host');
   });

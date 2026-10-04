@@ -11,11 +11,17 @@ from pathlib import Path
 import infra_state
 from adopt_metadata import prepare
 from bootstrap_state import ensure_bucket, state_exists
-from cloud_api import create_state_bucket, ensure_workers_subdomain, list_page, request, verify_target
+from cloud_api import (
+    create_state_bucket,
+    ensure_workers_subdomain,
+    list_page,
+    request,
+    verify_target,
+)
 from fresh_collisions import refuse_conflicts
+from generate import bootstrap_infra_files
 from inventory import exported_resources, import_hcl, known_imports
 from private_input import BootstrapError
-from generate import bootstrap_infra_files
 from state_imports import adopt as import_state
 
 
@@ -120,6 +126,7 @@ def run(private: dict, profile: dict, resources: dict, mode: str, parent: Path,
         code, summary, _, plan = session.plan_full("verify")
         if code or infra_state.drift_exit(summary):
             raise BootstrapError("BOOTSTRAP_VERIFY_NOT_IN_SYNC")
+        bootstrap_gate(plan, mode)
         status, state = session.s3("GET", infra_state.state_key("production"))
         if status != 200 or not infra_state.encrypted_state(state):
             raise BootstrapError("BOOTSTRAP_STATE_NOT_VERIFIED")
