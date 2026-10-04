@@ -52,7 +52,7 @@ describe('entry health (the tile: the entry\'s own health, Q2)', () => {
     expect(tiles.website).toMatchObject({ level: 'ok', metric: { kind: 'latency', ms: 180 } });
     expect(tiles.flowday).toMatchObject({ level: 'ok', reason: null, metric: { kind: 'latency', ms: 95 } });
     expect(tiles.links).toMatchObject({ level: 'ok', reason: null, metric: { kind: 'latency', ms: 40 } });
-    expect(tiles['notion-publish']).toMatchObject({ level: 'ok', metric: { kind: 'last_active', hour: '2026-09-29T06:00:00.000Z' } });
+    expect(tiles['notion-publish']).toMatchObject({ level: 'ok', metric: null });
     expect(tiles.newsletter).toMatchObject({ level: 'ok', reason: null, metric: null });
     expect(tiles.home).toMatchObject({ level: 'ok' });
   });
@@ -145,22 +145,12 @@ describe('entry health (the tile: the entry\'s own health, Q2)', () => {
     expect(state('website', { scripts: errors('ziyixi-website', 100, 30) })).toMatchObject({ level: 'ok' });
   });
 
-  it('judges Notion 发布 by its Worker analytics: idle after 26 h, unknown until discovery watched long enough', () => {
-    // Last request in the 06 hour today; 26 h after 07:00 it is idle.
-    const later = NOW + DAY;
-    const idleScripts = mergeScripts(scripts(), [], false, later);
-    expect(entryState(entry('notion-publish'), input({ now: later, lastTickAt: later, scripts: idleScripts }))).toMatchObject({ level: 'warning', reason: 'idle' });
-    expect(state('notion-publish', { scripts: null })).toMatchObject({ level: 'unknown', reason: 'never_checked' });
-    expect(state('notion-publish', { analyticsConfigured: false })).toMatchObject({ level: 'unknown', reason: 'never_checked' });
-    // The GraphQL answer is 2 hours old: nothing to say.
+  it('judges website content sync by Ops evidence independently of Worker activity', () => {
+    expect(state('notion-publish', { scripts: null, analyticsConfigured: false })).toMatchObject({ level: 'ok', metric: null });
+    expect(state('notion-publish', { statuses: {} })).toMatchObject({ level: 'unknown', reason: 'never_checked' });
     expect(state('notion-publish', { now: NOW + 2 * HOUR, lastTickAt: NOW + 2 * HOUR })).toMatchObject({ level: 'unknown', reason: 'stale' });
-    // Never seen: unknown for the first 26 h of discovery, idle after.
-    const fresh = mergeScripts(null, [], false, NOW);
-    expect(state('notion-publish', { scripts: fresh })).toMatchObject({ level: 'unknown', reason: 'never_seen' });
-    expect(state('notion-publish', { scripts: { ...fresh, since: NOW - 27 * HOUR } })).toMatchObject({ level: 'warning', reason: 'idle' });
-    // Enough requests with errors: the error rule.
-    const failing = mergeScripts(null, [{ script: 'ziyixi-notion-publish', requests: 40, errors: 10, subrequests: 0, cpu_p50_us: 1, cpu_p99_us: 2, do_requests: null, do_errors: null }], false, NOW);
-    expect(state('notion-publish', { scripts: failing })).toMatchObject({ level: 'critical', reason: 'error_rate' });
+    const stale = status('notion-publish', { health: 'degraded', signals: [signal('website_sync_stale', 'warning')] });
+    expect(state('notion-publish', { statuses: { ...input().statuses, 'notion-publish': stale } })).toMatchObject({ level: 'warning', reason: 'website_sync_stale' });
   });
 
   it('judges this dashboard by its own ticks', () => {
@@ -197,7 +187,7 @@ describe('flows (stage chains)', () => {
 
   it('marks the other flows as the mockup does: 网站发布 2/3, Newsletter process observed, 运维摘要 by the digest', () => {
     const flows = Object.fromEntries(flowStates(input()).map((f) => [f.id, f]));
-    expect(flows['site-publish']).toMatchObject({ level: 'ok', partial: false, coverage: { monitored: 2, total: 3 }, freshness: { kind: 'activity', at: '2026-09-29T06:00:00.000Z' } });
+    expect(flows['site-publish']).toMatchObject({ level: 'ok', partial: false, coverage: { monitored: 2, total: 3 }, freshness: { kind: 'content_check', at: new Date(NOW - 2 * MIN).toISOString() } });
     expect(stage(flows['site-publish'] as FlowState, 'serve').probe).toEqual({ checked_at: new Date(NOW - MIN).toISOString(), ok: true, http_status: 200, latency_ms: 180 });
     // Two of three stages observed; Notion business success remains unmonitored.
     expect(flows['daily-newsletter']).toMatchObject({ level: 'ok', partial: false, coverage: { monitored: 2, total: 3 }, freshness: { kind: 'none' } });
@@ -229,13 +219,13 @@ describe('flows (stage chains)', () => {
 
   it('shows a hold as 已暂停 on its stage, never as a fault', () => {
     const paused = withSignals('mail-hero', [signal('force_send_paused', 'warning')]);
-    const mail = flow('mail-to-task', { statuses: { 'mail-hero': paused, todofy: status('todofy'), lab: status('lab'), watch: status('watch'), newsletter: status('newsletter'), fleet: status('fleet') } });
+    const mail = flow('mail-to-task', { statuses: { 'mail-hero': paused, todofy: status('todofy'), lab: status('lab'), watch: status('watch'), newsletter: status('newsletter'), fleet: status('fleet'), 'notion-publish': status('notion-publish') } });
     expect(stage(mail, 'deliver')).toMatchObject({ level: 'held', held: true, reason: 'force_send_paused' });
     expect(stage(mail, 'ingest')).toMatchObject({ level: 'ok', held: false });
     expect(mail.level).toBe('held');
     // Maintenance is claimed by the first stage of the app and stays critical.
     const maintenance = withSignals('mail-hero', [signal('maintenance_mode', 'critical')], 'down');
-    const down = flow('mail-to-task', { statuses: { 'mail-hero': maintenance, todofy: status('todofy'), lab: status('lab'), watch: status('watch'), newsletter: status('newsletter'), fleet: status('fleet') } });
+    const down = flow('mail-to-task', { statuses: { 'mail-hero': maintenance, todofy: status('todofy'), lab: status('lab'), watch: status('watch'), newsletter: status('newsletter'), fleet: status('fleet'), 'notion-publish': status('notion-publish') } });
     expect(stage(down, 'ingest')).toMatchObject({ level: 'critical', reason: 'maintenance_mode' });
     // Later stages of the app see the app down through its health.
     expect(stage(down, 'parse')).toMatchObject({ level: 'critical', reason: 'maintenance_mode' });
@@ -271,7 +261,7 @@ describe('flows (stage chains)', () => {
 
   it('names the worst stage as the first issue, not an earlier lesser one', () => {
     const mailHero = withSignals('mail-hero', [signal('capacity_70', 'warning', { percent: 72 }), signal('endpoint_blocked', 'critical')]);
-    const mail = flow('mail-to-task', { statuses: { 'mail-hero': mailHero, todofy: status('todofy'), lab: status('lab'), watch: status('watch'), newsletter: status('newsletter'), fleet: status('fleet') } });
+    const mail = flow('mail-to-task', { statuses: { 'mail-hero': mailHero, todofy: status('todofy'), lab: status('lab'), watch: status('watch'), newsletter: status('newsletter'), fleet: status('fleet'), 'notion-publish': status('notion-publish') } });
     expect(stage(mail, 'ingest').level).toBe('warning');
     expect(stage(mail, 'deliver').level).toBe('critical');
     expect(mail).toMatchObject({ level: 'critical', first_issue: { stage: 'deliver', code: 'endpoint_blocked' } });
@@ -279,7 +269,7 @@ describe('flows (stage chains)', () => {
 
   it('shows unmonitored stages as 未接入 and an unreachable app on every one of its stages', () => {
     const unreachable = failedStatus(status('todofy'), 2);
-    const f = flow('daily-newsletter', { statuses: { 'mail-hero': status('mail-hero'), todofy: unreachable, lab: status('lab'), watch: status('watch'), newsletter: status('newsletter'), fleet: status('fleet') } });
+    const f = flow('daily-newsletter', { statuses: { 'mail-hero': status('mail-hero'), todofy: unreachable, lab: status('lab'), watch: status('watch'), newsletter: status('newsletter'), fleet: status('fleet'), 'notion-publish': status('notion-publish') } });
     expect(f.stages.map((s) => s.level)).toEqual(['critical', 'ok', 'unmonitored']);
     expect(f).toMatchObject({ level: 'critical', partial: false, first_issue: { stage: 'report', code: 'unreachable' } });
   });
@@ -387,7 +377,7 @@ describe('the attention strip', () => {
 
   it('shows an app that failed once as ◆ 未知 above the warnings, and counts it in the badges (F1)', () => {
     const down = failedStatus(status('todofy', {}, NOW - 2 * HOUR), 1);
-    const evaluation = input({ statuses: { 'mail-hero': status('mail-hero'), todofy: down, lab: status('lab'), watch: status('watch'), newsletter: status('newsletter'), fleet: status('fleet') } });
+    const evaluation = input({ statuses: { 'mail-hero': status('mail-hero'), todofy: down, lab: status('lab'), watch: status('watch'), newsletter: status('newsletter'), fleet: status('fleet'), 'notion-publish': status('notion-publish') } });
     const gemini = item('mail-hero', 'backup_stale');
     const { attention, badges } = attentionView(base({ items: [gemini], statuses: evaluation.statuses, evaluation }));
     expect(attention.level).toBe('unknown');
@@ -399,7 +389,7 @@ describe('the attention strip', () => {
     expect(attention.items[0]?.target).toEqual({ view: 'home', entry: 'todofy' });
     expect(badges).toEqual({ home: 1, flows: 0, cloudflare: 0, ops: 1 });
     // Two failures: the digest's app_unreachable explains it; no observed duplicate.
-    const twice = input({ statuses: { 'mail-hero': status('mail-hero'), todofy: failedStatus(status('todofy'), 2), lab: status('lab'), watch: status('watch'), newsletter: status('newsletter'), fleet: status('fleet') } });
+    const twice = input({ statuses: { 'mail-hero': status('mail-hero'), todofy: failedStatus(status('todofy'), 2), lab: status('lab'), watch: status('watch'), newsletter: status('newsletter'), fleet: status('fleet'), 'notion-publish': status('notion-publish') } });
     const digest = item('todofy', 'app_unreachable', 'critical');
     const critical = attentionView(base({ items: [digest], statuses: twice.statuses, evaluation: twice })).attention;
     expect(critical.level).toBe('critical');

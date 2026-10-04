@@ -66,11 +66,12 @@ class PrivateInput(unittest.TestCase):
             with self.assertRaisesRegex(BootstrapError, "PERMISSIONS_INVALID"):
                 private_input.read_private(source, ROOT)
 
-    def test_relay_notion_values_populate_website_release_inputs(self):
-        result = private_input.generated_secrets({"worker_secrets": {"ziyixi-notion-publish": {
-            "NOTION_TOKEN": "synthetic-notion", "NOTION_DATA_SOURCE_ID": "synthetic-source"}}}, generate=False)
+    def test_notion_read_credentials_belong_only_to_website_actions(self):
+        result = private_input.generated_secrets({"github_secrets": {
+            "WEBSITE_NOTION_TOKEN": "synthetic-notion", "WEBSITE_NOTION_DATA_SOURCE_ID": "synthetic-source"}}, generate=False)
         self.assertEqual(result["WEBSITE_NOTION_TOKEN"], "synthetic-notion")
         self.assertEqual(result["WEBSITE_NOTION_DATA_SOURCE_ID"], "synthetic-source")
+        self.assertNotIn("WEBSITE_RELAY_NOTION_WEBHOOK_SECRET", result)
 
 
 class GitHub(unittest.TestCase):

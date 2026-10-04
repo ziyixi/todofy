@@ -21,6 +21,30 @@ export async function queryAllDataSourcePages(
   );
 }
 
+export async function queryAllArchivedDataSourcePages(
+  client: NotionClientLike,
+  dataSourceId: string,
+): Promise<unknown[]> {
+  const request = client.request?.bind(client);
+  if (!request) {
+    throw new ContentError(
+      "NOTION_ARCHIVE_QUERY_UNAVAILABLE",
+      "The Notion client cannot verify archived articles.",
+    );
+  }
+  // SDK 5.26.0's dataSources.query whitelist omits the documented is_archived selector.
+  return collectCursorPages(
+    (cursor) =>
+      request({
+        path: `data_sources/${encodeURIComponent(dataSourceId)}/query`,
+        method: "post",
+        body: { page_size: 100, is_archived: true, ...(cursor ? { start_cursor: cursor } : {}) },
+      }),
+    DEFAULT_MAX_PAGES,
+    "archived data source query",
+  );
+}
+
 export async function fetchBlockTree(
   client: NotionClientLike,
   pageId: string,

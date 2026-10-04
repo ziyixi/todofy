@@ -8,6 +8,11 @@ export interface PaginatedResponse {
 }
 
 export interface NotionClientLike {
+  request?(args: {
+    path: string;
+    method: "post";
+    body: Record<string, unknown>;
+  }): Promise<PaginatedResponse>;
   dataSources: {
     retrieve(args: { data_source_id: string }): Promise<unknown>;
     query(args: {

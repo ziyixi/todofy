@@ -140,7 +140,6 @@ def generated_secrets(value: dict, *, generate: bool = True) -> dict:
         result.setdefault("TODOFY_MAIL_WEBHOOK_TOKEN_SHA256", hashlib.sha256(integration["mail_webhook_token"].encode()).hexdigest())
         result.setdefault("TODOFY_REPORT_BASIC_AUTH_SHA256", hashlib.sha256(
             (integration["report_user"] + ":" + integration["report_password"]).encode()).hexdigest())
-        result.setdefault("WEBSITE_RELAY_NOTION_WEBHOOK_SECRET", secrets.token_urlsafe(32))
     for name in ("PLATFORM_DEPLOY_TOKEN", "NEWSLETTER_EDITOR_TOKEN", "NEWSLETTER_SEND_TOKEN",
                  "NEWSLETTER_MONITOR_TOKEN", "MAIL_HERO_BACKUP_TOKEN"):
         if generate and not result.get(name):
@@ -156,10 +155,6 @@ def generated_secrets(value: dict, *, generate: bool = True) -> dict:
             result.setdefault(prefix + "_ACCESS_OWNER", owner[0])
             if len(owner) > 1:
                 result.setdefault(prefix + "_ACCESS_OWNER_ALIASES", ",".join(owner[1:]))
-    relay = worker_values.get("ziyixi-notion-publish", {})
-    for name in ("NOTION_TOKEN", "NOTION_DATA_SOURCE_ID"):
-        if relay.get(name):
-            result.setdefault("WEBSITE_" + name, relay[name])
     receive = value.get("infra_values", {}).get("mail_receive_address")
     if generate and receive:
         if result.get("MAIL_HERO_RECEIVE_ADDRESS", receive) != receive:

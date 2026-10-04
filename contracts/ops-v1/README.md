@@ -103,6 +103,19 @@ deploy there can already read the D1 databases). The default `fetch`, `email` an
 keep their exact behaviour. RPC arguments and results are structured-clone values; this contract uses
 only JSON values.
 
+Website synchronization (`notion-publish`) embeds optional `website_sync` evidence from
+`proto/website/sync/v1/sync.proto`: complete content checks, active Actions runs and verified publications
+have separate timestamps. Other apps omit this field. Its read-only Ops entrypoint also implements
+`WebsiteSyncService`; Home sends owner actions by UUID and persists their receipts before dispatch.
+`accepted` identifies an Actions run; it does not assert deployment success. Website request receipts do
+not expire. A repeated uncertain UUID looks up that exact run and never dispatches again.
+
+The website signals are `website_sync_stale`, `website_sync_failed`, `website_sync_blocked`,
+`website_sync_unconfirmed` and `website_sync_provider_unavailable`. Provider read failure leaves the
+last check and publication evidence intact and means observation is unknown; public website HTTP
+availability is monitored separately. Failed-run reminders use the stable attempt start time, so
+refreshes do not reopen a dismissed incident and a different failed run can alert again.
+
 ## Methods
 
 | Method | App | Input (`$defs`) | Output (`$defs`) | Writes |

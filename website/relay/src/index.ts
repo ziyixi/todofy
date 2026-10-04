@@ -1,33 +1,45 @@
-import { handleButton } from "./buttons";
-import { runDetector } from "./detector";
+/// <reference types="@cloudflare/workers-types" />
+import { WorkerEntrypoint } from "cloudflare:workers";
+import type * as sync from "@ziyixi/proto/website/sync/v1/sync_wire";
 import type { RelayEnv } from "./env";
+import { getSyncRequest, requestSync } from "./request";
+import { getSyncStatus, opsStatus } from "./status";
 
-interface ScheduledController {
-  scheduledTime: number;
-  cron: string;
+/** Same-account RPC only. The public HTTP path cannot request or inspect a sync. */
+export class Ops extends WorkerEntrypoint<RelayEnv> implements sync.WebsiteSyncService {
+  status() {
+    return opsStatus(this.env);
+  }
+  getSyncStatus() {
+    return getSyncStatus(this.env);
+  }
+  requestSync(input: sync.RequestSyncRequest) {
+    return requestSync(this.env, input);
+  }
+  getSyncRequest(input: sync.GetSyncRequestRequest) {
+    return getSyncRequest(this.env, input);
+  }
 }
-
-interface ExecutionContext {
-  waitUntil(promise: Promise<unknown>): void;
+async function runDailySync(env: RelayEnv): Promise<sync.WebsiteSyncRequestResult> {
+  return requestSync(env, { request_id: crypto.randomUUID() }, "cron");
 }
-
-/**
- * Worker ziyixi-notion-publish: the Notion buttons' relay (fetch) and the change detector
- * (scheduled, every 15 minutes). Both only dispatch website-release.yml in the monorepo with fixed
- * inputs. Logs carry codes and counts only, never tokens, headers or Notion content.
- */
 const worker = {
-  fetch(request: Request, env: RelayEnv): Promise<Response> {
-    return handleButton(request, env);
+  fetch(): Response {
+    return new Response("Not found", { status: 404, headers: { "Cache-Control": "no-store" } });
   },
-
-  scheduled(controller: ScheduledController, env: RelayEnv, context: ExecutionContext): void {
+  scheduled(_controller: ScheduledController, env: RelayEnv, context: ExecutionContext): void {
     context.waitUntil(
-      runDetector(env, new Date(controller.scheduledTime)).then((result) => {
-        console.log(JSON.stringify({ relay: "detector", ...result }));
+      runDailySync(env).then((result) => {
+        console.log(
+          JSON.stringify({
+            relay: "daily_sync",
+            state: result.state,
+            run_id: result.run_id ?? null,
+            error_code: result.error_code ?? null,
+          }),
+        );
       }),
     );
   },
 };
-
 export default worker;

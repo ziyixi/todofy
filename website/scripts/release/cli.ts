@@ -14,6 +14,13 @@ import { PublicationIdentitySchema } from "../../src/lib/content/publication-sta
 import { readContentBundle } from "../../src/lib/content/reader";
 import { ContentRegistrySchema } from "../../src/lib/content/schema";
 import { CloudflareApi, HostnameGuardCli, WranglerCli } from "./cloudflare";
+import {
+  ContentSyncCheckSchema,
+  ensureSyncRecord,
+  syncFinalStatus,
+  syncPayload,
+  syncRunContext,
+} from "./content-sync";
 import { GitHubClient } from "./github";
 import { optionsFromEnvironment, passedGate } from "./green-commit";
 import {
@@ -53,6 +60,8 @@ const files = {
   payload: path.join(stateDirectory, "payload.json"),
   contract: path.join(stateDirectory, "verification-contract.json"),
   previousBuildInfo: path.join(stateDirectory, "previous-build-info.json"),
+  syncCheck: path.join(stateDirectory, "content-sync-check.json"),
+  syncRecord: path.join(stateDirectory, "content-sync-record.json"),
 };
 
 function env(name: string): string {
@@ -114,7 +123,7 @@ function operation(): Operation {
   });
 }
 
-async function deps(): Promise<ReleaseDeps> {
+async function deps(): Promise<ReleaseDeps & { github: GitHubClient }> {
   const config = await readWorkerConfig(path.join(root, "wrangler.toml"));
   const cloudflareToken = process.env.CLOUDFLARE_API_TOKEN ?? "";
   return {
@@ -173,6 +182,7 @@ const commands: Record<string, () => Promise<void>> = {
   /** The operation, and the checked-out commit is one whose push run passed the CI gate. */
   async context() {
     const op = operation();
+    syncRunContext(process.env);
     const { stdout } = await execFileAsync("git", ["rev-parse", "HEAD"], { cwd: root });
     const sha = stdout.trim();
     if (!(await passedGate(optionsFromEnvironment(), sha))) {
@@ -193,11 +203,6 @@ const commands: Record<string, () => Promise<void>> = {
     if (!/^[0-9a-f]{40}$/.test(sha))
       throw new ReleaseError("Could not resolve the website commit.");
     await output("code_sha", sha);
-  },
-
-  async "live-origin"() {
-    const config = await readWorkerConfig(path.join(root, "wrangler.toml"));
-    await output("live_origin", liveOrigin(config, siteUrl()) ?? "");
   },
 
   async gate() {
@@ -254,7 +259,7 @@ const commands: Record<string, () => Promise<void>> = {
     await d.hostnames.check();
   },
 
-  /** The Notion snapshot for this release (the only step with Notion credentials besides feedback). */
+  /** The full Notion snapshot; this is the only step with Notion credentials. */
   async prepare() {
     siteUrl();
     if (siteConfig.blogSource !== "notion") {
@@ -304,6 +309,66 @@ const commands: Record<string, () => Promise<void>> = {
     });
     await output("deploy_required", String(result.deployRequired));
     await output("reason", result.reason);
+    await writeJson(
+      files.syncCheck,
+      ContentSyncCheckSchema.parse({
+        checked_at: new Date().toISOString(),
+        decision: result.deployRequired ? "changed" : "unchanged",
+        identity,
+      }),
+    );
+  },
+
+  async "sync-record"() {
+    const d = await deps();
+    const check = ContentSyncCheckSchema.parse(await readJson(files.syncCheck));
+    const payload = syncPayload(process.env, check);
+    const { stdout } = await execFileAsync("git", ["rev-parse", "HEAD"], { cwd: root });
+    const id = await ensureSyncRecord(d.github, payload, stdout.trim());
+    await writeJson(files.syncRecord, { id });
+    await d.github.setState(id, check.decision === "unchanged" ? "success" : "in_progress", {
+      description: check.decision === "unchanged" ? "SYNC_UNCHANGED" : "SYNC_DEPLOYING",
+      logUrl: workflowUrl(),
+    });
+  },
+
+  /** Runs after any release outcome; a failed check never changes the actual previous check time. */
+  async "sync-finalize"() {
+    const d = await deps();
+    let check = null;
+    try {
+      check = ContentSyncCheckSchema.parse(await readJson(files.syncCheck));
+    } catch (error) {
+      if (!(error instanceof Error) || !("code" in error) || error.code !== "ENOENT") throw error;
+    }
+    const payload = syncPayload(process.env, check);
+    let id: number;
+    try {
+      const saved = await readJson<{ id: number }>(files.syncRecord);
+      if (!Number.isSafeInteger(saved.id) || saved.id <= 0)
+        throw new ReleaseError("Invalid content-sync receipt ID.");
+      id = saved.id;
+    } catch (error) {
+      if (!(error instanceof Error) || !("code" in error) || error.code !== "ENOENT") throw error;
+      const { stdout } = await execFileAsync("git", ["rev-parse", "HEAD"], { cwd: root });
+      id = await ensureSyncRecord(d.github, payload, stdout.trim());
+    }
+    const result = syncFinalStatus(payload, {
+      job: env("SYNC_JOB_STATUS"),
+      gate: process.env.SYNC_GATE_OUTCOME ?? "skipped",
+      bootstrapRequired: flag("SYNC_BOOTSTRAP_REQUIRED"),
+      receipt: process.env.SYNC_RECORD_OUTCOME ?? "skipped",
+      build: process.env.SYNC_BUILD_OUTCOME ?? "skipped",
+      artifact: process.env.SYNC_ARTIFACT_OUTCOME ?? "skipped",
+      liveVerified: flag("SYNC_LIVE_VERIFIED"),
+      releaseMarked: process.env.SYNC_RELEASE_MARKED ?? "skipped",
+    });
+    await d.github.setState(id, result.state, {
+      description: result.description,
+      logUrl: workflowUrl(),
+    });
+    await summary(`Website content sync: \`${result.description}\`.`);
+    if (result.state !== "success") throw new ReleaseError(result.description);
   },
 
   /** The built out/ under `wrangler dev` with wrangler.toml: identity plus the route contract. */

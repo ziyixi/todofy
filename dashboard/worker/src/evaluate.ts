@@ -112,6 +112,9 @@ function reachability(doc: StatusDoc | undefined, now: number): Verdict {
   const status = freshStatus(doc, now);
   // No usable status: a failed last poll says more than "stale" (an app never read successfully has no old status at all).
   if (status === null) return worse(verdict, { level: 'unknown', reason: doc.consecutive_failures > 0 ? 'unreachable' : 'stale' });
+  if (status.app === 'notion-publish' && status.website_sync?.error_code) {
+    return worse(verdict, { level: 'unknown', reason: 'website_sync_provider_unavailable' });
+  }
   if (status.health === 'down') {
     const code = status.signals.find((signal) => signal.severity === 'critical')?.code ?? 'app_down';
     verdict = worse(verdict, { level: 'critical', reason: code });
@@ -430,6 +433,10 @@ function freshness(flow: FlowDef, stages: readonly StageState[], input: EvalInpu
     const at = isoOrNull(input.digest.last_sent_at);
     // `accepted` is left out before the first receipt (Freshness.accepted).
     return receipt === null ? { kind: 'digest', at } : { kind: 'digest', at, accepted: receipt.stored };
+  }
+  const website = flow.stages.find(stage => stage.entry === 'notion-publish');
+  if (website !== undefined) {
+    return { kind: 'content_check', at: input.statuses['notion-publish']?.status?.website_sync?.last_check?.checked_at ?? null };
   }
   let last: string | null = null;
   let any = false;

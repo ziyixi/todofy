@@ -16,7 +16,24 @@ Rules for this file:
   what is done, what is left, how to verify it and what to check after its deploy. Link to the app docs for
   design detail instead of copying it.
 
-Last updated: 2026-10-04. Dashboard state controls landed at
+Last updated: 2026-10-04.
+<!-- Active work is separate from the production evidence below. -->
+
+## In progress: daily website content sync
+
+Branch `codex/website-daily-sync` implements the owner-approved daily Worker trigger, complete Notion
+content checks, independent GitHub sync receipts and private Home status/manual sync. Notion keeps
+content fields and Draft/Published. Existing static release identity, route verification and rollback
+remain authoritative. No new storage service or paid product is introduced.
+
+Implementation and branch CI come first, then the same green SHA publishes the relay and Home.
+Retired Notion feedback jobs must finish before removing the managed operational fields, buttons and
+views. Manual sync and the next natural daily Cron need separate production evidence; the latter has
+not run for this change. Tests must prove explicit complete withdrawal before an automatic empty list.
+
+## Current production evidence
+
+Dashboard state controls landed at
 `8937e61c8b018d8c893356759f28cd9f2fd4ac57`: Newsletter process/outcome separation,
 stable reminder batches, independent service controls and exact account inventory checks.
 [Branch CI 37228587877](https://github.com/ziyixi/todofy/actions/runs/37228587877),

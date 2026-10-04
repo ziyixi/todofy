@@ -88,6 +88,9 @@ Website 首次需要内容身份初始化：设置 `WEBSITE_BOOTSTRAP_APPROVAL` 
 运行 **Website release**，选择 `operation=bootstrap`，confirmation 填 `bootstrap:<网站主机名>`。
 全新空内容集合可勾选 `allow_empty`，此时 confirmation 必须为 `bootstrap:<网站主机名>:allow-empty`。
 `WEBSITE_LEGACY_REPOSITORY` 仅恢复旧网站发布记录时填写，空环境留空。首次内容要求见 [Website 发布](../website/docs/release.md)。
+网站读取凭据只交给 Actions；网站同步 Worker 只需要目标仓库的 Actions 读写和 Deployments 只读令牌。
+每日同步在 `website/relay/wrangler.toml` 的 `triggers.crons` 与 `DAILY_SYNC_CRON` 中配置，默认两者均为 `17 10 * * *`（UTC）；无需 Notion 按钮或状态字段。
+Home 的“立即同步”与每日同步共享现有发布队列，真实检查和上线状态见 [网站同步运行说明](../website/relay/README.md)。
 
 全量运行：
 

@@ -160,7 +160,7 @@ DISPATCH = {
 # The website's Notion relay Worker deploys on its own (website_relay_deploy).
 RELAY = "website/relay/"
 # Apps that neither provide nor consume a contract: their own changes do not run Contracts.
-NO_CONTRACTS = {"website", "flowday", "links", "newsletter"}
+NO_CONTRACTS = {"flowday", "links", "newsletter"}
 # The OpenTofu configuration (infra/README.md) and its plan-summary tool: checked here without a token; only
 # .github/workflows/infra.yml plans it against Cloudflare, and only the manually dispatched infra-apply.yml applies it.
 INFRA = ("infra/", "tools/infra-plan-summary/")
@@ -183,6 +183,7 @@ PROTO_USERS: dict[str, tuple[str, ...]] = {
     "watch": ("ts",),
     "fleet": ("ts",),
     "platform": ("python",),
+    "website": ("ts",),
 }
 # The hand-written runtimes and generators: a change reaches every user of each language listed. The wire
 # profile's own options (common/wire/v1: value rules, map order, binding arguments) are part of both runtimes:
@@ -220,7 +221,8 @@ PROTO_PACKAGES: dict[str, tuple[str, ...]] = {
     # CommonReason: Platform bundles Python error aliases; Lab takes its names as types only.
     "proto/common/errors/": ("platform",),
     # ops-v1 (contracts/ops-v1): every app's Ops entrypoint and the dashboard that calls them.
-    "proto/ops/": ("mail-hero", "lab", "todofy", "dashboard", "watch"),
+    "proto/ops/": ("mail-hero", "lab", "todofy", "dashboard", "watch", "website"),
+    "proto/website/sync/": ("mail-hero", "lab", "todofy", "dashboard", "watch", "website"),
     # mail.received.v1 (contracts/mail-received-v1's schema is generated from it): Mail Hero builds every event,
     # todofy-core reads every webhook body.
     "proto/mailhero/webhook/": ("mail-hero", "todofy"),
@@ -398,6 +400,7 @@ def classify(paths: Iterable[str]) -> dict[str, bool]:
     proto_checked, proto_deployed = proto_users(paths)
     package_deploys = {app for name in compiled for app in PACKAGE_USERS.get(name, APPS)}
     deployed = direct_deploys | package_deploys | bundled | proto_deployed
+    relay |= "website" in proto_deployed
     if not site:
         deployed -= {"website"}
     return outputs(

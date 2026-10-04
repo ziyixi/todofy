@@ -116,11 +116,20 @@ export async function prepareContent(options: PrepareContentOptions): Promise<Co
       publicDirectory: stagedPublicDirectory,
       notion: options.notion,
       notionConfig: siteData.siteConfig.notion,
+      previousPublishedKeys: baseline.posts
+        .filter((post) => post.published)
+        .map((post) => post.sourceKey),
+      allowEmpty: options.allowEmpty ?? false,
     });
     const posts = prepared.posts
       .map((post) => PostSchema.parse(post))
       .sort(comparePostsNewestFirst);
-    if (baseline.articleCount > 0 && posts.length === 0 && !options.allowEmpty) {
+    if (
+      baseline.articleCount > 0 &&
+      posts.length === 0 &&
+      !options.allowEmpty &&
+      !(options.source === "notion" && prepared.emptyCollectionConfirmed)
+    ) {
       throw new ContentError(
         "UNCONFIRMED_EMPTY_COLLECTION",
         `The candidate removes all ${baseline.articleCount} public articles; pass --allow-empty only after review.`,
@@ -180,6 +189,8 @@ async function prepareSource(
     cutoff: Date;
     publicDirectory: string;
     notion?: PrepareContentOptions["notion"];
+    previousPublishedKeys: readonly string[];
+    allowEmpty: boolean;
     notionConfig: {
       apiVersion: string;
       propertyNames: {
@@ -209,6 +220,8 @@ async function prepareSource(
     dataSourceId: context.notion?.dataSourceId ?? "",
     apiVersion: context.notion?.apiVersion ?? context.notionConfig.apiVersion,
     propertyNames: { ...context.notionConfig.propertyNames },
+    previousPublishedKeys: context.previousPublishedKeys,
+    allowEmpty: context.allowEmpty,
     ...(context.notion?.allowedMediaHosts
       ? { allowedMediaHosts: context.notion.allowedMediaHosts }
       : {}),

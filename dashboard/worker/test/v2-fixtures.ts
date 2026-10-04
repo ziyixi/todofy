@@ -6,6 +6,7 @@ import mailHeroOk from '../../../contracts/ops-v1/fixtures/OpsStatus/mail-hero-o
 import todofyOk from '../../../contracts/ops-v1/fixtures/OpsStatus/todofy-ok.json';
 import labOk from '../../../contracts/ops-v1/fixtures/OpsStatus/lab-ok.json';
 import fleetOk from '../../../contracts/ops-v1/fixtures/OpsStatus/fleet-ok.json';
+import notionPublishOk from '../../../contracts/ops-v1/fixtures/OpsStatus/notion-publish-ok.json';
 import newsletterOk from '../../../contracts/ops-v1/fixtures/OpsStatus/newsletter-ok.json';
 import watchOk from '../../../contracts/ops-v1/fixtures/OpsStatus/watch-ok.json';
 import type { OpsApp, OpsSignal, OpsStatus } from '../src/api-types.ts';
@@ -50,8 +51,10 @@ export function withLinkOnly(registry: RegistryDef = REGISTRY): RegistryDef {
 }
 
 export function status(app: OpsApp, patch: Partial<OpsStatus> = {}, at = NOW - 2 * MIN): StatusDoc {
-  const base = { 'mail-hero': mailHeroOk, todofy: todofyOk, lab: labOk, watch: watchOk, fleet: fleetOk, newsletter: newsletterOk }[app] as OpsStatus;
-  return { checked_at: at, ok: true, error: null, consecutive_failures: 0, status: { ...base, ...patch }, status_at: at };
+  const base = { 'mail-hero': mailHeroOk, todofy: todofyOk, lab: labOk, watch: watchOk, fleet: fleetOk, newsletter: newsletterOk, 'notion-publish': notionPublishOk }[app] as OpsStatus;
+  const website = app === 'notion-publish' ? base.website_sync : undefined;
+  const evidence = website === undefined ? {} : { website_sync: { ...website, observed_at: new Date(at).toISOString(), next_check_at: new Date(at + DAY).toISOString(), ...(website.last_check === undefined ? {} : { last_check: { ...website.last_check, checked_at: new Date(at).toISOString() } }) } };
+  return { checked_at: at, ok: true, error: null, consecutive_failures: 0, status: { ...base, ...evidence, ...patch }, status_at: at };
 }
 
 export function signal(code: string, severity: OpsSignal['severity'], metrics: Record<string, number> = {}, since?: string): OpsSignal {
@@ -105,7 +108,7 @@ export function input(patch: Partial<EvalInput> = {}): EvalInput {
     now: NOW,
     lastTickAt: NOW,
     analyticsConfigured: true,
-    statuses: { 'mail-hero': status('mail-hero'), todofy: status('todofy'), lab: status('lab'), watch: status('watch'), fleet: status('fleet'), newsletter: status('newsletter') },
+    statuses: { 'mail-hero': status('mail-hero'), todofy: status('todofy'), lab: status('lab'), watch: status('watch'), fleet: status('fleet'), newsletter: status('newsletter'), 'notion-publish': status('notion-publish') },
     probes: { website: probe(), flowday: probe({ latency_ms: 95 }), links: probe({ latency_ms: 40 }) },
     scripts: scripts(),
     digest: {

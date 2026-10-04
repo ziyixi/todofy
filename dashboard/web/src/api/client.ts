@@ -17,7 +17,7 @@
 import type { CommonReason } from '@ziyixi/proto/common/errors/v1/errors_pb'
 import { AttentionItemSchema } from '@ziyixi/proto/dashboard/ui/v1/attention_pb'
 import { CloudflareViewSchema } from '@ziyixi/proto/dashboard/ui/v1/cloudflare_view_pb'
-import { DashboardUiService, OverrideGuardResponseSchema, RunCanaryResponseSchema } from '@ziyixi/proto/dashboard/ui/v1/dashboard_ui_service_pb'
+import { DashboardUiService, OverrideGuardResponseSchema, RequestWebsiteSyncResponseSchema, RunCanaryResponseSchema } from '@ziyixi/proto/dashboard/ui/v1/dashboard_ui_service_pb'
 import type { ErrorReason } from '@ziyixi/proto/dashboard/ui/v1/errors_pb'
 import { FlowsViewSchema } from '@ziyixi/proto/dashboard/ui/v1/flows_view_pb'
 import { HomeViewSchema } from '@ziyixi/proto/dashboard/ui/v1/home_view_pb'
@@ -39,6 +39,7 @@ import type {
   OverrideGuardResponse,
   Registry,
   RunCanaryResponse,
+  RequestWebsiteSyncResponse,
 } from '../../../worker/src/api-types.ts'
 import { API_ERRORS } from '../lib/labels'
 
@@ -204,6 +205,8 @@ export const api = {
     wire(RunCanaryResponseSchema, () => client.runCanary({ name: `canaries/${canaryId}`, requestId })),
   setGuard: (level: GuardLevel, app: string, requestId: string = newRequestId()): Promise<OverrideGuardResponse> =>
     wire(OverrideGuardResponseSchema, () => client.overrideGuard({ name: 'guard', level: GUARD_LEVELS[level], requestId, app })),
+  requestWebsiteSync: (requestId: string): Promise<RequestWebsiteSyncResponse> =>
+    wire(RequestWebsiteSyncResponseSchema, () => client.requestWebsiteSync({ name: 'websiteSync', requestId })),
   dismissAttention: (name: string, etag: string, requestId: string): Promise<AttentionItem> =>
     wire(AttentionItemSchema, () => client.dismissAttention({ name, etag, requestId })),
   restoreAttention: (name: string, etag: string, requestId: string): Promise<AttentionItem> =>

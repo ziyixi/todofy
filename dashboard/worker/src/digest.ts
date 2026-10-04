@@ -203,7 +203,7 @@ export function candidates(input: DigestInput): Candidate[] {
     }
     const status = health.status;
     if (status === null || health.status_at === null || now - health.status_at > STATUS_SIGNAL_MAX_AGE_MS) continue;
-    if (status.health === 'down') out.push({ source: app, code: 'app_down', severity: 'critical', metrics: {} });
+    if (status.health === 'down' && !(app === 'notion-publish' && status.website_sync?.error_code)) out.push({ source: app, code: 'app_down', severity: 'critical', metrics: {} });
     for (const signal of status.signals) {
       if (signal.severity === 'info' || !isOpsCode(signal.code)) continue;
       out.push({

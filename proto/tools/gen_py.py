@@ -55,6 +55,7 @@ PYTHON_PACKAGES = {
     "todofy.taskintent.v1": True,
     "todofy.report.v1": True,
     "ops.v1": True,
+    "website.sync.v1": True,
     "mailhero.webhook.v1": True,
     "todofy.ui.v1": True,
     "platform.runtime.v1": True,

@@ -22,6 +22,7 @@ import "dashboard/ui/v1/usage.proto";
 import "google/api/field_behavior.proto";
 import "google/api/resource.proto";
 import "ops/v1/ops.proto";
+import "website/sync/v1/sync.proto";
 
 option java_multiple_files = true;
 option java_outer_classname = "HomeViewProto";
@@ -81,6 +82,10 @@ message HomeView {
     (google.api.field_behavior) = REQUIRED,
     (common.wire.v1.field).non_null = true
   ];
+  // Website synchronization evidence from the relay, separate from public HTTP availability.
+  // (-- api-linter: core::0215::foreign-type-reference=disabled
+  //     aip.dev/not-precedent: embed the shared internal sync contract without duplicating fields. --)
+  optional website.sync.v1.WebsiteSyncStatus website_sync = 12;
 }
 
 // An entry's tile.
@@ -241,6 +246,8 @@ message Freshness {
     KIND_DIGEST = 3;
     // Nothing the dashboard sees.
     KIND_NONE = 4;
+    // The last complete Notion snapshot and identity comparison.
+    KIND_CONTENT_CHECK = 5;
   }
 
   // What proves it.

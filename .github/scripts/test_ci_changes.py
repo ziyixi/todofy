@@ -405,11 +405,12 @@ class Classify(unittest.TestCase):
                 "watch": ("ts",),
                 "fleet": ("ts",),
                 "platform": ("python",),
+                "website": ("ts",),
             },
         )
         # Todofy is both: todofy-core vendors the Python package, its gateway and UI bundle the TypeScript
         # (todofy.ui.v1).
-        ts, python = {"lab", "mail-hero", "dashboard", "flowday", "links", "watch", "todofy", "fleet"}, {"todofy", "platform"}
+        ts, python = {"lab", "mail-hero", "dashboard", "flowday", "links", "watch", "todofy", "fleet", "website"}, {"todofy", "platform"}
         every, none = ts | python, set()
         cases = {
             # task-intent-v1, bundled by Lab's and the watch app's TypeScript and todofy-core's Python.
@@ -422,7 +423,9 @@ class Classify(unittest.TestCase):
             "proto/todofy/ui/v1/mail_event.proto": {"todofy"},
             # ops-v1: the Ops entrypoints that bundle its generated code (Todofy's gateway takes its types only, its
             # core reads ops.v1 in Python).
-            "proto/ops/v1/ops.proto": {"mail-hero", "lab", "todofy", "dashboard", "watch"},
+            "proto/ops/v1/ops.proto": {"mail-hero", "lab", "todofy", "dashboard", "watch", "website"},
+            # OpsStatus embeds WebsiteSyncStatus; every Ops descriptor brings this package too.
+            "proto/website/sync/v1/sync.proto": {"mail-hero", "lab", "todofy", "dashboard", "watch", "website"},
             # mail.received.v1: Mail Hero builds every event, todofy-core reads every body.
             "proto/mailhero/webhook/v1/mail_received.proto": {"mail-hero", "todofy"},
             # Lab's UI API: only Lab imports it (Python does not even generate it).
@@ -494,6 +497,8 @@ class Classify(unittest.TestCase):
                 "todofy" in deployed,
                 "mail-hero" in deployed,
                 proto=T,
+                website_check=T,
+                website_relay_deploy="website" in deployed,
                 lab_check=T,
                 lab_deploy="lab" in deployed,
                 dashboard_check=T,
@@ -673,24 +678,24 @@ class Classify(unittest.TestCase):
         self.assertEqual(push(paths), expect(T, T, T, T, F, **ALL_CHECKED, proto=T))
 
     def test_the_website_checks_and_releases_only_itself(self):
-        """No contract and no package: a site change runs neither Contracts nor another app."""
+        """The relay shares proto/ and runs Contracts; a website change still releases only its own app."""
         for path in ("website/src/app/page.tsx", "website/wrangler.toml", "website/docs/release.md"):
             with self.subTest(path=path):
-                self.assertEqual(push([path]), expect(F, F, F, F, F, website_check=T, website_deploy=T))
+                self.assertEqual(push([path]), expect(F, F, T, F, F, website_check=T, website_deploy=T))
 
     def test_the_relay_deploys_without_releasing_the_site(self):
         """website/relay/ is the Notion relay Worker: its change deploys the relay only."""
         self.assertEqual(
-            push(["website/relay/src/detector.ts"]), expect(F, F, F, F, F, website_check=T, website_relay_deploy=T)
+            push(["website/relay/src/index.ts"]), expect(F, F, T, F, F, website_check=T, website_relay_deploy=T)
         )
-        both = expect(F, F, F, F, F, website_check=T, website_deploy=T, website_relay_deploy=T)
+        both = expect(F, F, T, F, F, website_check=T, website_deploy=T, website_relay_deploy=T)
         self.assertEqual(push(["website/relay/wrangler.toml", "website/package.json"]), both)
         # Not a prefix match on the folder name alone; a site change alone never redeploys the relay.
-        self.assertEqual(push(["website/relay.md"]), expect(F, F, F, F, F, website_check=T, website_deploy=T))
+        self.assertEqual(push(["website/relay.md"]), expect(F, F, T, F, F, website_check=T, website_deploy=T))
         self.assertEqual(push(["website/src/app/page.tsx"])["website_relay_deploy"], False)
         self.assertEqual(
             push(["website/relay/src/index.ts"], ref=BRANCH),
-            expect(F, F, F, F, F, website_check=T, website_relay_deploy=T),
+            expect(F, F, T, F, F, website_check=T, website_relay_deploy=T),
         )
 
     def test_the_retired_apex_worker_left_no_deploy_path(self):
@@ -701,10 +706,10 @@ class Classify(unittest.TestCase):
         self.assertFalse((REPO / "website" / "apex-redirect").exists())
         for path in ("website/apex-redirect/src/index.ts", "website/apex-redirect/wrangler.toml"):
             with self.subTest(path=path):
-                self.assertEqual(push([path]), expect(F, F, F, F, F, website_check=T, website_deploy=T))
+                self.assertEqual(push([path]), expect(F, F, T, F, F, website_check=T, website_deploy=T))
         self.assertEqual(
             push(["website/apex-redirect/src/index.ts", "website/relay/src/github.ts"]),
-            expect(F, F, F, F, F, website_check=T, website_deploy=T, website_relay_deploy=T),
+            expect(F, F, T, F, F, website_check=T, website_deploy=T, website_relay_deploy=T),
         )
         self.assertNotIn("website-apex-deploy", workflow_jobs())
         self.assertNotIn("apex-redirect", effective_ci())
@@ -1211,6 +1216,7 @@ class DeployConditions(unittest.TestCase):
         ("dashboard-deploy", "lab-deploy"),
         ("dashboard-deploy", "watch-deploy"),
         ("dashboard-deploy", "fleet-deploy"),
+        ("dashboard-deploy", "website-relay-deploy"),
         ("lab-deploy", "todofy-deploy"),
         ("watch-deploy", "todofy-deploy"),
     }
@@ -1463,10 +1469,7 @@ class InfraJob(unittest.TestCase):
 
 
 class WebsiteRelease(unittest.TestCase):
-    """Website deploy dispatches the one release workflow the Notion relay dispatches and returns at once;
-    the release's jobs hold the single concurrency group and the production environment, so a push release,
-    a button, the detector and a status refresh never overlap, every release is a run of that workflow (the
-    relay sees it), and a main CI run never waits for a queued release."""
+    """Daily dispatch, Home and code pushes use the same trusted release and rollback lock."""
 
     RELEASE = REPO / ".github" / "workflows" / "website-release.yml"
 
@@ -1480,8 +1483,7 @@ class WebsiteRelease(unittest.TestCase):
 
     def test_website_deploy_dispatches_the_release_workflow_with_fixed_inputs(self):
         block = workflow_jobs()["website-deploy"]
-        self.assertNotIn("uses: ./.github/workflows/website-release.yml", block)
-        self.assertIn("gh workflow run website-release.yml --repo \"$GITHUB_REPOSITORY\" --ref main", block)
+        self.assertIn('gh workflow run website-release.yml --repo "$GITHUB_REPOSITORY" --ref main', block)
         for flag in (
             "-f operation=release",
             '-f confirmation="release:${SITE_URL#https://}"',
@@ -1490,191 +1492,115 @@ class WebsiteRelease(unittest.TestCase):
             "-f trigger=push",
         ):
             self.assertIn(flag, block)
-        # Only the dispatch permission; no environment, secret or lock of its own.
         self.assertIn("      actions: write\n", block)
         self.assertIn("      contents: read\n", block)
-        self.assertIn("tools/cloud-config/outputs.py", block)
-        self.assertNotIn("deployments:", block)
-        self.assertNotIn("concurrency:", block)
-        self.assertNotIn("environment:", block)
-        self.assertNotIn("secrets.", block)
-        # Nothing calls the release inline any more.
+        for absent in ("deployments:", "concurrency:", "environment:", "secrets."):
+            self.assertNotIn(absent, block)
         self.assertNotIn("workflow_call:", self.RELEASE.read_text())
 
-    def test_every_release_builds_a_commit_that_passed_the_ci_gate(self):
+    def test_the_release_pins_a_green_main_commit_before_installing_dependencies(self):
         jobs = self.release_jobs()
-        for name, block in jobs.items():
-            if name == "scheduled":
-                continue
-            with self.subTest(job=name):
-                pin = block.index("- name: Check out the newest main commit that passed the CI gate\n")
-                install = block.index("- name: Install the pinned pnpm and locked dependencies\n")
-                self.assertLess(pin, install)
-                self.assertIn("scripts/release/green-commit.ts", block[pin:install])
-                self.assertIn('git -c advice.detachedHead=false checkout --detach "$sha"', block[pin:install])
-                self.assertIn("          fetch-depth: 0\n", block)
-        self.assertIn("run: pnpm release context", jobs["release"])
+        self.assertEqual(set(jobs), {"release"})
+        block = jobs["release"]
+        self.assertIn("    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'\n", block)
+        pin = block.index("- name: Check out the newest main commit that passed the CI gate\n")
+        install = block.index("- name: Install the pinned pnpm and locked dependencies\n")
+        toolchain = block.index("- name: Install the shared proto toolchain\n")
+        self.assertLess(pin, toolchain)
+        self.assertLess(toolchain, install)
+        self.assertIn("npm ci --prefix ../proto --no-audit --no-fund", block[toolchain:install])
+        self.assertNotIn("secrets.", block[toolchain:install])
+        self.assertNotIn("GITHUB_TOKEN:", block[toolchain:install])
+        self.assertIn("scripts/release/green-commit.ts", block[pin:install])
+        self.assertIn('git -c advice.detachedHead=false checkout --detach "$sha"', block[pin:install])
+        self.assertIn("          fetch-depth: 0\n", block)
+        self.assertIn("run: pnpm release context", block)
+        self.assertIn("      group: website-production\n", block)
+        self.assertIn("      queue: max\n", block)
+        self.assertIn("      cancel-in-progress: false\n", block)
+        self.assertIn("      name: production\n", block)
 
-    def test_every_release_job_shares_one_group_and_the_production_environment(self):
-        jobs = self.release_jobs()
-        self.assertEqual(set(jobs), {"scheduled", "scheduled-dispatch", "release", "status"})
-        for name, block in jobs.items():
-            if name in ("scheduled", "scheduled-dispatch"):
-                continue
-            with self.subTest(job=name):
-                self.assertIn("      group: website-production\n", block)
-                self.assertIn("      cancel-in-progress: false\n", block)
-                self.assertIn("      name: production\n", block)
-
-    def test_the_relay_and_the_workflow_agree_on_operations_and_triggers(self):
+    def test_the_dispatch_contract_correlates_a_request_uuid_and_keeps_push_compatibility(self):
         text = self.RELEASE.read_text()
-        # A dispatched run is "Website <operation> (<trigger>)", which the relay parses; a scheduled run has
-        # its own name, which the relay's parser does not match: it never releases, it dispatches
-        # "Website release (reconcile)".
-        self.assertIn(
-            "run-name: ${{ github.event_name == 'schedule' && 'Website scheduled reconcile' || "
-            "format('Website {0} ({1})', inputs.operation, inputs.trigger) }}",
-            text,
-        )
-        self.assertIn("        options: [release, status, bootstrap, recovery]", text)
-        self.assertIn("        options: [manual, button, cron, reconcile, pending, push]", text)
-        relay = (REPO / "website" / "relay" / "src" / "github.ts").read_text()
-        self.assertIn("(release|status|bootstrap|recovery) \\((manual|button|cron|reconcile|pending|push)\\)", relay)
-        # The scheduled check reads dispatched run names exactly as the relay does.
-        scheduled = (REPO / "website" / "scripts" / "release" / "scheduled-reconcile.ts").read_text()
-        self.assertIn("(release|status|bootstrap|recovery) \\((manual|button|cron|reconcile|pending|push)\\)", scheduled)
-        self.assertIn('export const SCHEDULED_RUN_NAME = "Website scheduled reconcile";', scheduled)
-        config = (REPO / "website" / "relay" / "wrangler.toml").read_text()
-        self.assertIn('RELEASE_WORKFLOW = "website-release.yml"', config)
-        self.assertIn('GITHUB_REPOSITORY = "ziyixi/todofy"', config)
+        self.assertIn("run-name: ${{ format('Website {0} ({1}) [{2}]', inputs.operation, inputs.trigger, inputs.request_id) }}", text)
+        self.assertIn("        options: [release, bootstrap, recovery]", text)
+        self.assertIn("        options: [manual, cron, push]", text)
+        self.assertIn("      request_id:\n", text)
+        self.assertIn("      RELEASE_REQUEST_ID: ${{ inputs.request_id }}\n", text)
+        self.assertNotIn("operation == 'status'", text)
+        self.assertNotIn("operation != 'status'", text)
 
-    def test_only_the_release_steps_see_credentials(self):
+    def test_only_the_snapshot_step_receives_notion_credentials(self):
         text = self.RELEASE.read_text()
-        self.assertNotIn("secrets.VERCEL", text)
-        # Notion credentials only for the snapshot and the feedback; the deploy token only for Cloudflare steps.
-        notion = [line for line in text.splitlines() if "secrets.WEBSITE_NOTION_TOKEN" in line]
-        self.assertEqual(len(notion), 4)
-        cloudflare = [line for line in text.splitlines() if "secrets.CF_API_TOKEN" in line]
-        self.assertEqual(len(cloudflare), 6)
-        # GITHUB_TOKEN never in a job or workflow env (install scripts, builds and tests would see it): only
-        # in the env of the steps that read the CI results or read and write the release records.
-        steps = [step for job in self.release_jobs().values() for step in job.split("\n      - ")[1:]]
+        self.assertEqual(text.count("secrets.WEBSITE_NOTION_TOKEN"), 1)
+        self.assertEqual(text.count("secrets.WEBSITE_NOTION_DATA_SOURCE_ID"), 1)
+        self.assertEqual(text.count("secrets.CF_API_TOKEN"), 6)
+        steps = self.release_jobs()["release"].split("\n      - ")[1:]
         with_token = sorted(
             step.split("\n", 1)[0].removeprefix("name: ")
             for step in steps
             if "GITHUB_TOKEN: ${{ github.token }}" in step
         )
-        self.assertEqual(
-            with_token,
-            sorted(
-                [
-                    "Check out the newest main commit that passed the CI gate",
-                    "Check out the newest main commit that passed the CI gate",
-                    "Check out the newest main commit that passed the CI gate",
-                    "Check out the newest main commit that passed the CI gate",
-                    "Decide whether today's reconcile release is due",
-                    "Dispatch the reconcile release unless the relay would hold it",
-                    "Assert the trusted release context and the pinned commit",
-                    "Enforce the GitHub Deployment state gate",
-                    "Reconcile a blocked release with what production serves",
-                    "Record the release in progress",
-                    "Mark the release successful",
-                    "Record the failure",
-                ]
-            ),
-        )
+        self.assertEqual(with_token, sorted([
+            "Check out the newest main commit that passed the CI gate",
+            "Assert the trusted release context and the pinned commit",
+            "Enforce the GitHub Deployment state gate",
+            "Reconcile a blocked release with what production serves",
+            "Record the completed content check",
+            "Record the release in progress",
+            "Mark the release successful",
+            "Record the failure",
+            "Finalize the content-sync receipt",
+        ]))
         self.assertEqual(text.count("GITHUB_TOKEN: ${{ github.token }}"), len(with_token))
         self.assertNotIn("GH_TOKEN", text)
+        self.assertNotIn("scripts/notion/", text)
+
+    def test_completed_checks_and_final_receipts_surround_the_existing_publish_and_rollback(self):
+        block = self.release_jobs()["release"]
+        prepare = block.index("- name: Prepare the Notion snapshot\n")
+        decide = block.index("- name: Decide whether the identity changed\n")
+        receipt = block.index("- name: Record the completed content check\n")
+        build = block.index("- name: Build the static export\n")
+        rollback = block.index("- name: Restore the recorded previous version\n")
+        finalize = block.index("- name: Finalize the content-sync receipt\n")
+        self.assertLess(prepare, decide)
+        self.assertLess(decide, receipt)
+        self.assertLess(receipt, build)
+        self.assertLess(rollback, finalize)
+        self.assertIn("        if: steps.decision.outcome == 'success'\n", block[receipt:build])
+        self.assertIn("        if: always()\n", block[finalize:])
+        for field in ("SYNC_JOB_STATUS", "SYNC_GATE_OUTCOME", "SYNC_BOOTSTRAP_REQUIRED", "SYNC_RECORD_OUTCOME", "SYNC_BUILD_OUTCOME", "SYNC_ARTIFACT_OUTCOME", "SYNC_LIVE_VERIFIED", "SYNC_RELEASE_MARKED"):
+            self.assertIn(field + ":", block[finalize:])
+        self.assertIn("steps.live.outputs.live_verified == 'true'", block[finalize:])
+        self.assertIn("run: pnpm release sync-finalize", block[finalize:])
+        self.assertIn("run: pnpm release check-baseline", block)
+        self.assertIn("run: pnpm release verify-artifact", block)
+        self.assertIn("run: pnpm release verify-live", block)
+        self.assertIn("run: pnpm release rollback", block)
+        self.assertIn("run: pnpm release mark-failure", block)
 
 
-class WebsiteScheduledReconcile(unittest.TestCase):
-    """The daily schedule of website-release.yml stands in for the relay's reconcile dispatch: a check job with no
-    environment, secret or install decides; a dispatch job checks again, holds during the relay's quiet period and
-    dispatches exactly the relay's reconcile release ("Website release (reconcile)", which the relay sees as its
-    own). A scheduled run never runs the release or status job itself."""
+class WebsiteDailySchedule(unittest.TestCase):
+    """The daily Worker owns the sole clock; Actions only accepts release dispatches."""
 
-    RELEASE = REPO / ".github" / "workflows" / "website-release.yml"
-
-    def jobs(self):
-        return WebsiteRelease().release_jobs()
-
-    def test_the_schedule_runs_hourly_after_the_relays_reconcile_hour(self):
-        text = self.RELEASE.read_text()
-        on = text.split("\non:\n", 1)[1].split("\npermissions:\n", 1)[0]
-        self.assertEqual(re.findall(r"^    - cron: '([^']+)'$", on, re.MULTILINE), ["30 10-15 * * *"])
-        relay = (REPO / "website" / "relay" / "wrangler.toml").read_text()
-        self.assertIn('RECONCILE_UTC_HOUR = "10"\n', relay)
-        self.assertNotIn("workflow_call:", text)
-
-    def test_the_check_job_has_no_environment_secret_or_install_and_reads_only(self):
-        block = self.jobs()["scheduled"]
-        self.assertIn("    if: github.event_name == 'schedule' && vars.WEBSITE_SCHEDULED_RECONCILE != 'false'\n", block)
-        for absent in ("environment:", "secrets.", "concurrency:", "pnpm", "npm ", "write"):
-            with self.subTest(absent=absent):
-                self.assertNotIn(absent, block)
-        # checks: read for green-commit.ts (the CI gate's check runs), as the workflow-level block grants it.
-        self.assertIn(
-            "    permissions:\n      contents: read\n      actions: read\n      checks: read\n      deployments: read\n",
-            block,
-        )
-        pin = block.index("- name: Check out the newest main commit that passed the CI gate\n")
-        decide = block.index("- name: Decide whether today's reconcile release is due\n")
-        self.assertLess(pin, decide)
-        self.assertIn('git -c advice.detachedHead=false checkout --detach "$sha"', block[pin:decide])
-        self.assertIn("node --disable-warning=ExperimentalWarning scripts/release/scheduled-reconcile.ts", block[decide:])
-        self.assertIn("due: ${{ steps.decide.outputs.due }}", block)
-        self.assertTrue((REPO / "website" / "scripts" / "release" / "scheduled-reconcile.ts").is_file())
-
-    def test_the_dispatch_job_runs_only_when_due_and_only_dispatches(self):
-        block = self.jobs()["scheduled-dispatch"]
-        self.assertIn("    needs: scheduled\n", block)
-        condition = " ".join(block.split("    if: >-\n", 1)[1].split("\n    runs-on:", 1)[0].split())
-        self.assertEqual(
-            condition,
-            "${{ !cancelled() && github.event_name == 'schedule' "
-            "&& needs.scheduled.result == 'success' && needs.scheduled.outputs.due == 'true' }}",
-        )
-        # Dispatch and read; no release record, no Cloudflare token, no lock of its own (the dispatched release
-        # takes the lock).
-        self.assertIn(
-            "    permissions:\n      contents: read\n      actions: write\n      checks: read\n      deployments: read\n",
-            block,
-        )
-        self.assertIn("      name: production\n", block)
-        self.assertNotIn("concurrency:", block)
-        self.assertNotIn("CF_API_TOKEN", block)
-        self.assertNotIn("wrangler", block)
-        self.assertNotIn("pnpm release", block)
-        # The Notion secrets only in the dispatch step, after the install.
-        install = block.index("- name: Install the pinned pnpm and locked dependencies\n")
-        dispatch = block.index("- name: Dispatch the reconcile release unless the relay would hold it\n")
-        self.assertLess(install, dispatch)
-        self.assertNotIn("secrets.", block[:dispatch])
-        self.assertIn("run: node --import tsx scripts/release/scheduled-dispatch.ts", block[dispatch:])
-        self.assertTrue((REPO / "website" / "scripts" / "release" / "scheduled-dispatch.ts").is_file())
-
-    def test_a_scheduled_run_never_runs_the_release_or_status_job(self):
-        jobs = self.jobs()
-        self.assertIn(
-            "    if: github.event_name == 'workflow_dispatch' && inputs.operation != 'status'\n", jobs["release"]
-        )
-        self.assertIn(
-            "    if: github.event_name == 'workflow_dispatch' && inputs.operation == 'status'\n", jobs["status"]
-        )
-        self.assertNotIn("needs:", jobs["release"])
-        self.assertNotIn("schedule", jobs["release"])
-        # The release reads only the dispatch inputs; the dispatch job sends the relay's (releaseInputs).
-        for line in (
-            "RELEASE_OPERATION: ${{ inputs.operation }}",
-            "RELEASE_CONFIRMATION: ${{ inputs.confirmation }}",
-            "ALLOW_EMPTY: ${{ inputs.allow_empty }}",
-            "FORCE_BUILD: ${{ inputs.force_build }}",
+    def test_github_has_no_second_scheduler_or_status_only_job(self):
+        text = WebsiteRelease.RELEASE.read_text()
+        events = text.split("\non:\n", 1)[1].split("\npermissions:\n", 1)[0]
+        self.assertIn("  workflow_dispatch:", events)
+        self.assertNotIn("  schedule:", events)
+        self.assertEqual(set(WebsiteRelease().release_jobs()), {"release"})
+        for retired in (
+            "website/scripts/release/scheduled-reconcile.ts",
+            "website/scripts/release/scheduled-dispatch.ts",
+            "website/scripts/notion/sync-status.ts",
+            "website/scripts/notion/update-site-summary.ts",
+            "website/scripts/notion/status.ts",
         ):
-            with self.subTest(line=line):
-                self.assertIn(f"      {line}\n", jobs["release"])
-        dispatch = (REPO / "website" / "scripts" / "release" / "scheduled-dispatch.ts").read_text()
-        self.assertIn('releaseInputs(env, "reconcile")', dispatch)
-        self.assertIn('export const RECONCILE_RUN_NAME = "Website release (reconcile)";', dispatch)
+            with self.subTest(retired=retired):
+                self.assertFalse((REPO / retired).exists())
+        self.assertNotIn("WEBSITE_SCHEDULED_RECONCILE", text)
+
 
 
 class WebsiteChecks(unittest.TestCase):
@@ -2858,7 +2784,7 @@ class HostnameGuard(unittest.TestCase):
         self.assertIn("if: steps.decision.outputs.deploy_required == 'true'", step)
         self.assertIn("CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}", step)
         deploy = release[release.index("- name: Deploy the version and the wrangler.toml hostnames\n") :].split("\n      - ", 1)[0]
-        self.assertIn("CF_GUARD_ALLOW_REMOVE: ''", deploy)
+        self.assertRegex(deploy, r'CF_GUARD_ALLOW_REMOVE: (?P<quote>[\"\'])\1')
         steps = (REPO / "website" / "scripts" / "release" / "steps.ts").read_text()
         self.assertLess(steps.index("await deps.hostnames.check()"), steps.index("await deps.wrangler.deployTriggers()"))
         cloudflare = (REPO / "website" / "scripts" / "release" / "cloudflare.ts").read_text()

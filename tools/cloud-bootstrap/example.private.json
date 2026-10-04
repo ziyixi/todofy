@@ -3,8 +3,12 @@
   "cloudflare_api_token_file": "/absolute/path/outside-repository/cloudflare-api-token",
   "infra_values": {
     "account_id": "<same account_id as config/resources.toml>",
-    "access_owner_emails": ["<verified owner email>"],
-    "access_github_owner_emails": ["<verified GitHub owner email>"],
+    "access_owner_emails": [
+      "<verified owner email>"
+    ],
+    "access_github_owner_emails": [
+      "<verified GitHub owner email>"
+    ],
     "access_github_oauth": {
       "client_id": "<GitHub OAuth app client id>",
       "client_secret": "<GitHub OAuth app client secret>"
@@ -21,9 +25,7 @@
       "TODOIST_DEFAULT_PROJECT_ID": "<Todoist project id>"
     },
     "ziyixi-notion-publish": {
-      "GITHUB_DISPATCH_TOKEN": "<GitHub token allowed to dispatch this repository's website workflow>",
-      "NOTION_TOKEN": "<Notion integration token>",
-      "NOTION_DATA_SOURCE_ID": "<Notion website data source id>"
+      "GITHUB_DISPATCH_TOKEN": "<GitHub token for this repository: Actions Read/Write and Deployments Read>"
     }
   },
   "vps": {
@@ -35,5 +37,9 @@
       "NEWSLETTER_NOTION": "disabled",
       "NEWSLETTER_TODOFY": "disabled"
     }
+  },
+  "github_secrets": {
+    "WEBSITE_NOTION_TOKEN": "<Notion content-read integration token>",
+    "WEBSITE_NOTION_DATA_SOURCE_ID": "<Notion Blog data source id>"
   }
 }

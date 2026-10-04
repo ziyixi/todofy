@@ -97,6 +97,14 @@ export function useStartCanary() {
   })
 }
 
+export function useRequestWebsiteSync() {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: (requestId: string) => api.requestWebsiteSync(requestId),
+    onSettled: () => client.invalidateQueries({ predicate: otherViews(null) }),
+  })
+}
+
 export function useSetGuard() {
   const client = useQueryClient()
   return useMutation({

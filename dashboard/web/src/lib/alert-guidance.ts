@@ -3,6 +3,14 @@ export interface AlertGuidance { explanation: string; next: string }
 /** Explain observable facts and a useful next step; never guess an outage's cause. */
 export function alertGuidance(code: string): AlertGuidance {
   switch (code) {
+    case 'website_sync_stale':
+      return { explanation: '超过 26 小时没有完整的 Notion 内容检查记录。网站可访问不能证明内容同步正常。', next: '在首页点击立即同步；查看本次 Actions，处理失败原因后刷新状态。' }
+    case 'website_sync_failed':
+    case 'website_sync_blocked':
+    case 'website_sync_unconfirmed':
+      return { explanation: '最近一次网站内容同步没有得到完整成功结果。上次验证发布保持不变。', next: '在网站同步卡片打开本次 Actions，处理具体错误后立即同步；可以关闭本次提醒。' }
+    case 'website_sync_provider_unavailable':
+      return { explanation: 'GitHub 同步记录当前不可读取，页面无法确认最新状态。', next: '查看 Actions 和发布凭据，恢复读取后刷新状态。' }
     case 'runtime_drift':
       return { explanation: 'VPS 的运行配置与已接受的发布有差异。', next: '打开 Fleet 查看具体资源；在 GitHub 的 Personal cloud reconcile 运行 repair，核对修复结果。' }
     case 'runtime_repair_manual':

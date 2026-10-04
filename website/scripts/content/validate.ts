@@ -89,7 +89,7 @@ async function validateOptionalCv(cvPath: string | undefined, publicDirectory: s
   }
   try {
     const bytes = await readFile(diskPath);
-    if (bytes.byteLength < 5 || bytes.subarray(0, 5).toString("ascii") !== "%PDF-") {
+    if (bytes.byteLength < 5 || new TextDecoder().decode(bytes.subarray(0, 5)) !== "%PDF-") {
       throw new ContentError("INVALID_CV_FILE", "Configured CV file is not a readable PDF.");
     }
   } catch (error) {

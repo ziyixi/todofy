@@ -43,9 +43,9 @@ describe('业务流程', () => {
     const site = card('网站发布')
     expect(within(site).getByRole('button', { name: '展开 网站发布' })).toHaveAttribute('aria-expanded', 'false')
     const pills = within(within(site).getByRole('list', { name: '阶段' })).getAllByRole('listitem')
-    expect(pills.map((pill) => pill.textContent)).toEqual(['Notion：未接入', '→发布：正常', '→网站可用：正常'])
+    expect(pills.map((pill) => pill.textContent)).toEqual(['Notion：未接入', '→内容同步：正常', '→网站可用：正常'])
     expect(within(site).getByText('已监测 2/3')).toBeInTheDocument()
-    expect(within(site).getByText('最近有请求 今天 00 时')).toBeInTheDocument()
+    expect(within(site).getByText('内容检查 今天 00:00')).toBeInTheDocument()
 
     // Fewer than half the stages seen: never a green dot.
     const newsletter = card('每日 Newsletter')
@@ -222,8 +222,9 @@ describe('业务流程', () => {
     await user.click(serve)
     const detail = within(site).getByRole('region', { name: /^网站可用/ })
     expect(within(detail).getByText(/HTTP 200 · 180 ms · 今天 00:30 检查/)).toBeInTheDocument()
-    await user.click(within(site).getByRole('button', { name: /^阶段 2 发布/ }))
-    expect(within(site).getByText(/16 · 错误 1（样本太少，不判定） · 最近有请求 今天 00 时/)).toBeInTheDocument()
+    await user.click(within(site).getByRole('button', { name: /^阶段 2 内容同步/ }))
+    expect(within(site).getByRole('region', { name: /^内容同步/ })).toBeInTheDocument()
+    expect(within(site).queryByText(/最近有请求/)).toBeNull()
   })
 
   it('shows unreachable stages as faults and keeps unclassified codes', async () => {

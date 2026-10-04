@@ -104,7 +104,13 @@ describe('the toolchain', () => {
       const copy = copyProto();
       expectOk(ensure(copy));
       unlinkSync(join(copy, 'node_modules')); // a monorepo-wide node_modules cleanup
-      const restored = ensure(copy);
+      // pnpm's app postinstall sets npm_execpath too; restoring the npm-locked toolchain must use npm.
+      const restored = spawnSync(process.execPath, [join(copy, 'tools', 'ensure.mjs')], {
+        cwd: copy,
+        env: { ...process.env, npm_execpath: join(copy, 'pnpm.cjs') },
+        encoding: 'utf8',
+        timeout: 60_000,
+      });
       expectOk(restored);
       expect(restored.stderr).toContain('installing the pinned toolchain');
       const lock = JSON.parse(readFileSync(join(copy, 'package-lock.json'), 'utf8')) as {
@@ -232,6 +238,20 @@ describe('tool commands', () => {
     });
     expect(commands.npm).toEqual(['/opt/node/bin/node', ['/elsewhere/npm/bin/npm-cli.js']]);
     expect(commands.python).toEqual(['/venv/bin/python', []]);
+  });
+
+  test.each([
+    {
+      platform: 'linux', execPath: '/opt/node/bin/node', npmExecPath: '/opt/pnpm/bin/pnpm.cjs',
+      expected: ['npm', []],
+    },
+    {
+      platform: 'win32', execPath: 'C:\\nodejs\\node.exe', npmExecPath: 'C:\\pnpm\\pnpm.cjs',
+      expected: ['C:\\nodejs\\node.exe', ['C:\\nodejs\\node_modules\\npm\\bin\\npm-cli.js']],
+    },
+  ])('does not run another package manager as npm on $platform', async ({ platform, execPath, npmExecPath, expected }) => {
+    const { toolCommands } = await load();
+    expect(toolCommands({ platform, execPath, env: { npm_execpath: npmExecPath } }).npm).toEqual(expected);
   });
 
   test('buf.gen.yaml starts each plugin on node, never through a node_modules/.bin shim', () => {

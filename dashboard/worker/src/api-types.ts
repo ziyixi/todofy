@@ -21,7 +21,7 @@
  *
  * | Method                | HTTP                                  | Served by      | Budget per call                |
  * | --------------------- | ------------------------------------- | -------------- | ------------------------------ |
- * | GetRegistry           | GET  /api/v1/registry                 | Worker (no DO) | ≤ 14 KiB; ETag "<build>" → 304 |
+ * | GetRegistry           | GET  /api/v1/registry                 | Worker (no DO) | ≤ 15 KiB; ETag "<build>" → 304 |
  * | GetHomeView           | GET  /api/v1/homeView                 | DO, 1 call     | ≤ 10 KiB; ≤ 40 rows read       |
  * | GetFlowsView          | GET  /api/v1/flowsView                | DO, 1 call     | ≤ 20 KiB; ≤ 40 rows read       |
  * | GetCloudflareView     | GET  /api/v1/cloudflareView           | DO, 1 call     | ≤ 24 KiB; ≤ 40 rows read       |
@@ -30,6 +30,7 @@
  * | RefreshCloudflareView | POST /api/v1/cloudflareView:refresh   | DO             | CSRF + Origin; once a minute   |
  * | OverrideGuard         | POST /api/v1/guard:override           | DO             | CSRF + Origin; request_id      |
  * | RunCanary             | POST /api/v1/canaries/mail-todofy:run | DO             | CSRF + Origin; request_id      |
+ * | RequestWebsiteSync    | POST /api/v1/websiteSync:request      | DO             | CSRF + Origin; request_id      |
  *
  * The views carry `ETag: "<rev>-<hash>"` (the hash covers the body except generated_at) and answer 304 to a matching
  * If-None-Match; sizes are a normal day's (VIEW_BODY_BUDGET, VIEW_BODY_MAX for a bad day), rows are VIEW_ROWS_READ
@@ -66,7 +67,7 @@ import type {
   ResourceRow,
   WorkerRow,
 } from '@ziyixi/proto/dashboard/ui/v1/cloudflare_view_wire';
-import type { OverrideGuardRequest, OverrideGuardResponse, RunCanaryRequest, RunCanaryResponse } from '@ziyixi/proto/dashboard/ui/v1/dashboard_ui_service_wire';
+import type { OverrideGuardRequest, OverrideGuardResponse, RequestWebsiteSyncResponse, RunCanaryRequest, RunCanaryResponse } from '@ziyixi/proto/dashboard/ui/v1/dashboard_ui_service_wire';
 import type {
   CanaryBadge,
   FlowState,
@@ -108,6 +109,7 @@ import type {
 } from '@ziyixi/proto/dashboard/ui/v1/registry_wire';
 import type { QuotaBreakdownItem, QuotaPeriod, QuotaResource, QuotaRow, QuotaUnit, StorageKind, Usage, Usage_State } from '@ziyixi/proto/dashboard/ui/v1/usage_wire';
 import type { GuardLevel, GuardState, OpsReportItem, OpsReportReceipt, OpsStatus, Severity, Signal } from '@ziyixi/proto/ops/v1/ops_wire';
+import type { WebsiteSyncRequestResult, WebsiteSyncStatus } from '@ziyixi/proto/website/sync/v1/sync_wire';
 
 // ---- the messages of dashboard.ui.v1 (generated) -------------------------------------------------------------
 
@@ -168,6 +170,7 @@ export type {
   RegistryEntry,
   RegistryResource,
   RegistryWorker,
+  RequestWebsiteSyncResponse,
   ResourceRow,
   RunCanaryRequest,
   RunCanaryResponse,
@@ -187,7 +190,7 @@ export type {
   Usage,
   WorkerRow,
 };
-export type { GuardLevel, GuardState, OpsReportItem, OpsReportReceipt, OpsStatus };
+export type { GuardLevel, GuardState, OpsReportItem, OpsReportReceipt, OpsStatus, WebsiteSyncRequestResult, WebsiteSyncStatus };
 
 /** The state of the usage read (Usage.State). */
 export type UsageState = Usage_State;
@@ -226,7 +229,7 @@ export type CanaryState = Omit<CanaryView, 'id'>;
  * it; ops-client.test.ts holds the two equal). The list is open on the wire (an app may join within ops-v1), so the
  * generated type of `app` is a string; this dashboard knows exactly the apps it binds.
  */
-export type OpsApp = 'mail-hero' | 'todofy' | 'lab' | 'watch' | 'fleet' | 'newsletter';
+export type OpsApp = 'mail-hero' | 'todofy' | 'lab' | 'watch' | 'fleet' | 'newsletter' | 'notion-publish';
 
 // ---- transport outside the service --------------------------------------------------------------------------
 
@@ -303,7 +306,7 @@ export const BREAKDOWN_UNCLASSIFIED = 'unknown';
  */
 export const VIEW_BODY_MAX = 64 * 1024;
 export const VIEW_BODY_BUDGET = {
-  registry: 14 * 1024,
+  registry: 15 * 1024,
   home: 10 * 1024,
   // Six flows since the GTD loop and Paper Radar (2026-09-30): 16.1 KB on the mockup day, 17.4 KB in the
   // workerd suite's full canary history with 20 Workers.

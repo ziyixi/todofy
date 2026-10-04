@@ -345,6 +345,78 @@ class DriftAcceptance(unittest.TestCase):
         self.assertEqual(fixture.values, before)
         self.assert_readonly(fixture)
 
+    def test_normal_relay_release_retires_only_the_exact_old_inputs(self):
+        fixture = self.fixture("website-relay")
+        retired = {
+            "NOTION_TOKEN": "secret_text",
+            "NOTION_DATA_SOURCE_ID": "secret_text",
+            "NOTION_WEBHOOK_SECRET": "secret_text",
+            "NOTION_API_VERSION": "plain_text",
+            "AUTO_PUBLISH": "plain_text",
+            "QUIET_MINUTES": "plain_text",
+            "MAX_AUTO_RELEASES_PER_DAY": "plain_text",
+            "RECONCILE_UTC_HOUR": "plain_text",
+            "IGNORED_EDITOR_IDS": "plain_text",
+        }
+        fixture.bindings().extend(
+            {"name": name, "type": kind, "text": "synthetic-private-input"}
+            for name, kind in retired.items()
+        )
+        output = io.StringIO()
+        with redirect_stdout(output):
+            required = preflight(
+                ROOT, fixture.app, SHA, False, fixture.cloud, fixture.github
+            )
+        result = json.loads(output.getvalue())
+        self.assertTrue(required)
+        self.assertEqual(result["state"], "repairable")
+        self.assertEqual({item["field"] for item in result["changes"]}, set(retired))
+        self.assertEqual(
+            {item["reason"] for item in result["changes"]},
+            {"LEGACY_WEBSITE_BINDING_RETIRED"},
+        )
+        self.assertNotIn("synthetic-private-input", output.getvalue())
+        self.assert_readonly(fixture)
+        self.assertEqual(fixture.binding("GITHUB_DISPATCH_TOKEN")["type"], "secret_text")
+
+    def test_relay_retirement_does_not_allow_unknown_bindings_or_repairs(self):
+        for app, repair, name in (
+            ("website-relay", False, "NOTION_TOKEN_EXTRA"),
+            ("website-relay", False, "notion_token"),
+            ("website-relay", True, "NOTION_TOKEN"),
+            ("watch", False, "NOTION_TOKEN"),
+        ):
+            with self.subTest(app=app, repair=repair, name=name):
+                fixture = self.fixture(app)
+                fixture.bindings().append({"name": name, "type": "secret_text"})
+                output = io.StringIO()
+                with (
+                    redirect_stdout(output),
+                    self.assertRaisesRegex(ReleaseError, "REPAIR_MANUAL_REQUIRED"),
+                ):
+                    preflight(ROOT, app, SHA, repair, fixture.cloud, fixture.github)
+                self.assertEqual(
+                    json.loads(output.getvalue())["changes"],
+                    [{"script": fixture.configs[0]["name"], "field": name,
+                      "reason": "BINDING_UNDECLARED"}],
+                )
+                self.assert_readonly(fixture)
+
+    def test_retirement_requires_the_new_daily_relay_configuration(self):
+        fixture = self.fixture("website-relay")
+        fixture.bindings().append({"name": "NOTION_TOKEN", "type": "secret_text"})
+        configs = deepcopy(fixture.configs)
+        del configs[0]["vars"]["DAILY_SYNC_CRON"]
+        with (
+            patch("control.release_inputs", return_value=(
+                fixture.profile, fixture.resources, configs, fixture.desired,
+            )),
+            redirect_stdout(io.StringIO()),
+            self.assertRaisesRegex(ReleaseError, "REPAIR_MANUAL_REQUIRED"),
+        ):
+            preflight(ROOT, fixture.app, SHA, False, fixture.cloud, fixture.github)
+        self.assert_readonly(fixture)
+
 
 if __name__ == "__main__":
     unittest.main()

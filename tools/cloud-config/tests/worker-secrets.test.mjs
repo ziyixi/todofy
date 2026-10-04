@@ -57,6 +57,29 @@ test('manual upstream keys are mandatory for a supplied Todofy core or Mail Hero
   }
 })
 
+test('the relay cutover strips exactly the three retired inputs and preserves its dispatch token', async () => {
+  const wrapper = await import('../../../website/relay/deploy/deploy-vars.mjs')
+  const legacy = {
+    GITHUB_DISPATCH_TOKEN: privateValue,
+    NOTION_TOKEN: 'synthetic-retired-token',
+    NOTION_DATA_SOURCE_ID: 'synthetic-retired-source',
+    NOTION_WEBHOOK_SECRET: 'synthetic-retired-webhook',
+  }
+  const env = { WEBSITE_RELAY_WORKER_SECRETS: JSON.stringify(legacy), REQUIRE_COMPLETE_WORKER_SECRETS: 'true' }
+  assert.deepEqual(wrapper.generateSecrets(env), { GITHUB_DISPATCH_TOKEN: privateValue })
+  assert.deepEqual(JSON.parse(env.WEBSITE_RELAY_WORKER_SECRETS), legacy)
+  for (const input of [
+    { ...legacy, NOTION_TOKEN_EXTRA: privateValue },
+    { ...legacy, notion_token: privateValue },
+    { ...legacy, GITHUB_DISPATCH_TOKEN: '' },
+    { ...legacy, GITHUB_DISPATCH_TOKEN: 7 },
+    { NOTION_TOKEN: privateValue },
+  ]) {
+    assert.throws(() => wrapper.generateSecrets({ ...env, WEBSITE_RELAY_WORKER_SECRETS: JSON.stringify(input) }),
+      error => error.setting === 'WEBSITE_RELAY_WORKER_SECRETS' && !error.message.includes(privateValue))
+  }
+})
+
 test('the relay CLI writes a complete private file without printing values or replacing an existing file', () => {
   const directory = mkdtempSync(join(tmpdir(), 'worker-secret-test-'))
   try {
@@ -90,7 +113,8 @@ test('the relay wrapper uploads one complete map and propagates the deployed sou
     const complete = Object.fromEntries(spec.required.map((name) => [name, privateValue]))
     const cli = fileURLToPath(new URL('../../../website/relay/deploy/deploy-vars.mjs', import.meta.url))
     const config = fileURLToPath(new URL('../../../website/relay/wrangler.toml', import.meta.url))
-    const env = { [spec.github_secret]: JSON.stringify(complete), REQUIRE_COMPLETE_WORKER_SECRETS: 'true',
+    const legacy = { ...complete, NOTION_TOKEN: privateValue, NOTION_DATA_SOURCE_ID: privateValue, NOTION_WEBHOOK_SECRET: privateValue }
+    const env = { [spec.github_secret]: JSON.stringify(legacy), REQUIRE_COMPLETE_WORKER_SECRETS: 'true',
       GITHUB_SHA: 'a'.repeat(40), BUILD_SOURCE_SHA: 'b'.repeat(40) }
     const prepare = spawnSync(process.execPath, [cli, 'secrets', path], { env, encoding: 'utf8' })
     assert.equal(prepare.status, 0, prepare.stderr)

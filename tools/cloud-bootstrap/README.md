@@ -49,7 +49,7 @@ bootstrap 不启用 R2 计费或改收信子域 DNS；这些是主手册中的�
 
 `prepare` 自动生成应用加密/CSRF/HMAC/共享认证 key，并把同一值用于相关消费者。Mail Hero webhook token、Newsletter 向 Todofy 报告的账号密码保存在私有 `integration_credentials`，对应 SHA256 写入 Todofy 配置。需要在各应用的首次接入设置中使用这些值时，只从本机私有文件读取。
 
-网站发布的 `WEBSITE_NOTION_TOKEN` / `WEBSITE_NOTION_DATA_SOURCE_ID` 自动复用 relay 的 Notion 输入。Relay 的 GitHub dispatch token 仍需正规 GitHub 授权；脚本不能生成具备账户权限的 token。
+网站内容读取凭据 `WEBSITE_NOTION_TOKEN` / `WEBSITE_NOTION_DATA_SOURCE_ID` 放在私有输入的 `github_secrets`，只交给 Actions。Relay 仅持有该仓库的 GitHub token，需 Actions Read/Write 和 Deployments Read；bootstrap 不代替正规授权。
 
 示例 Newsletter 使用 `mock`、禁真实发送。真实内容生成必须在它的专用 PVC 完成 Codex ChatGPT 登录；不是填写 API key。真实发送还需 Resend API key 和收发地址；Notion 集成可按需启用。相关步骤见主手册，mock 健康不代表真实内容生成或发信验收。
 

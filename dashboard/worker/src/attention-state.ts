@@ -37,7 +37,7 @@ function signature(item: AttentionItem): string {
   const fields = Object.hasOwn(CONDITION_METRICS, item.code) ? CONDITION_METRICS[item.code] ?? [] : [];
   const counts = item.code === 'newsletter_unknown' && item.metrics.unknown_revision !== undefined
     ? [item.metrics.unknown_revision] : fields.map((key) => item.metrics[key] ?? null);
-  const completedRun = (item.code.startsWith('canary_') || item.code === 'newsletter_delivery_rejected') ? item.since : null;
+  const completedRun = (item.code.startsWith('canary_') || item.code === 'newsletter_delivery_rejected' || item.source === 'notion-publish') ? item.since : null;
   return JSON.stringify([item.severity, item.observed ?? null, counts, completedRun]);
 }
 

@@ -281,7 +281,7 @@ function entries(patch: Record<string, Partial<EntryState>> = {}): EntryState[] 
     entry('flowday', { metric: { kind: 'latency', ms: 95 }, ...patch.flowday }),
     entry('links', { metric: { kind: 'latency', ms: 40 }, ...patch.links }),
     entry('website', { metric: { kind: 'latency', ms: 180 }, ...patch.website }),
-    entry('notion-publish', { metric: { kind: 'last_active', hour: '2026-09-29T16:00:00.000Z' }, ...patch['notion-publish'] }),
+    entry('notion-publish', { ...patch['notion-publish'] }),
     entry('newsletter', { level: 'unmonitored', checked_at: null, ...patch.newsletter }),
   ]
 }
@@ -446,10 +446,10 @@ function flowStates(options: { geminiWarning?: boolean; todofyDown?: boolean } =
       partial: false,
       coverage: { monitored: 2, total: 3 },
       first_issue: null,
-      freshness: { kind: 'activity', at: '2026-09-29T16:00:00.000Z' },
+      freshness: { kind: 'content_check', at: '2026-09-29T16:00:00.000Z' },
       stages: [
         stage('source', { level: 'unmonitored' }),
-        stage('publish', { analytics: { requests: 16, errors: 1, error_percent: null, last_active_hour: '2026-09-29T16:00:00.000Z' } }),
+        stage('publish', { checked_at: TICK }),
         stage('serve', { probe: { checked_at: TICK, ok: true, http_status: 200, latency_ms: 180 } }),
       ],
       unclassified: [],

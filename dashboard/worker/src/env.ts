@@ -4,12 +4,14 @@
  * proto/ops/v1 that each one implements; nothing here imports app code.
  */
 import type * as ops from '@ziyixi/proto/ops/v1/ops_wire';
+import type { WebsiteSyncService } from '@ziyixi/proto/website/sync/v1/sync_wire';
 import type { HomeState } from './state.ts';
 
 export interface MailHeroOpsEntrypoint extends Rpc.WorkerEntrypointBranded, ops.OpsService, ops.CanaryProducerService {}
 export interface TodofyOpsEntrypoint extends Rpc.WorkerEntrypointBranded, ops.OpsService, ops.CanaryConsumerService, ops.OpsDigestService {}
 export interface LabOpsEntrypoint extends Rpc.WorkerEntrypointBranded, ops.OpsService {}
 export interface WatchOpsEntrypoint extends Rpc.WorkerEntrypointBranded, ops.OpsService {}
+export interface WebsiteSyncEntrypoint extends Rpc.WorkerEntrypointBranded, ops.OpsService, WebsiteSyncService {}
 
 export interface Env {
   readonly MAIL_HERO: Service<MailHeroOpsEntrypoint>;
@@ -18,6 +20,7 @@ export interface Env {
   readonly WATCH: Service<WatchOpsEntrypoint>;
   readonly FLEET: Service<WatchOpsEntrypoint>;
   readonly NEWSLETTER: Service<WatchOpsEntrypoint>;
+  readonly WEBSITE_SYNC: Service<WebsiteSyncEntrypoint>;
   readonly HOME: DurableObjectNamespace<HomeState>;
   readonly ASSETS: Fetcher;
 

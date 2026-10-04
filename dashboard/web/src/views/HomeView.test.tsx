@@ -53,9 +53,9 @@ describe('首页', () => {
     expect(within(sites).getByRole('button', { name: '个人网站 状态：正常，查看详情' })).toHaveTextContent('响应 180 ms')
 
     const services = within(launcher()).getByRole('region', { name: '后台服务' })
-    expect(within(services).getByRole('link', { name: 'Notion 发布：正常，今天 00 时有请求，查看 Cloudflare 中的 Worker' })).toHaveAttribute(
+    expect(within(services).getByRole('link', { name: '网站同步：正常，查看操作与记录' })).toHaveAttribute(
       'href',
-      '#/cloudflare/worker/ziyixi-notion-publish',
+      '#/ops',
     )
     const newsletter = within(services).getByRole('link', { name: 'Newsletter：未接入监控，查看业务流程' })
     expect(newsletter).toHaveAttribute('href', '#/flows/daily-newsletter')
@@ -115,7 +115,7 @@ describe('首页', () => {
     const rows = within(flows).getAllByRole('link').filter((link) => link.getAttribute('href')?.startsWith('#/flows/'))
     expect(rows.map((row) => row.getAttribute('aria-label'))).toEqual([
       '邮件 → 任务：正常，端到端成功 今天 00:06，已监测 5/6',
-      '网站发布：正常，最近有请求 今天 00 时，已监测 2/3',
+      '网站发布：正常，内容检查 今天 00:00，已监测 2/3',
       '每日 Newsletter：部分接入，部分阶段尚未接入，已监测 1/3',
       '运维摘要：正常，上次摘要 昨天 23:00 · Todofy 已接收',
     ])

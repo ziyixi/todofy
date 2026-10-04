@@ -1109,12 +1109,14 @@ jobs:
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
           node-version-file: website/.nvmrc
+      - name: Install the shared proto toolchain
+        run: npm ci --prefix ../proto --no-audit --no-fund
       - name: Install the pinned pnpm and locked dependencies
         run: |
           corepack enable
           pnpm --version
           pnpm install --frozen-lockfile
-      - name: Format, lint, typecheck and unit tests (release, relay and detector included)
+      - name: Format, lint, typecheck and unit tests (release and daily sync included)
         run: |
           pnpm content:prepare:empty
           pnpm check
@@ -1164,7 +1166,7 @@ jobs:
         run: |
           pnpm exec wrangler deploy --dry-run --config wrangler.toml
           pnpm exec wrangler deploy --dry-run --config relay/wrangler.toml --outdir "$RUNNER_TEMP/relay-bundle"
-      # The website never imports another app, a package or a contract.
+      # The website may import shared proto; it never imports another app.
       - name: No imports from other apps
         run: |
           if grep -rnE "(from|import)[[:space:]]*\(?[[:space:]]*['\"][^'\"]*(mail-hero|todofy|dashboard|contracts|packages)/" \
@@ -1776,7 +1778,7 @@ jobs:
     # After the app deploys: the service bindings MAIL_HERO, TODOFY, LAB and WATCH name their "Ops" entrypoints, which
     # must be live first. An app deploy that did not run (nothing of that app changed) is fine; one that
     # failed or was cancelled stops this job.
-    needs: [changes, dashboard-checks, gate, todofy-deploy, mail-hero-deploy, lab-deploy, watch-deploy, fleet-deploy]
+    needs: [changes, dashboard-checks, gate, todofy-deploy, mail-hero-deploy, lab-deploy, watch-deploy, fleet-deploy, website-relay-deploy]
     # Explicit status function and results, as for Todofy deploy (implicit success() and skipped ancestors).
     if: >-
       ${{ !cancelled()
@@ -1788,6 +1790,7 @@ jobs:
       && (needs.lab-deploy.result == 'success' || needs.lab-deploy.result == 'skipped')
       && (needs.watch-deploy.result == 'success' || needs.watch-deploy.result == 'skipped')
       && (needs.fleet-deploy.result == 'success' || needs.fleet-deploy.result == 'skipped')
+      && (needs.website-relay-deploy.result == 'success' || needs.website-relay-deploy.result == 'skipped')
       && github.ref == 'refs/heads/main'
       && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
       && needs.changes.outputs.dashboard_deploy == 'true' }}

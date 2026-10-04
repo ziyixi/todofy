@@ -166,8 +166,8 @@ describe('the views', () => {
     expect(home.cloudflare.quota.every((q) => q.breakdown.length === 0)).toBe(true);
     expect(home.cloudflare).toMatchObject({ usage_status: 'ok', workers: 5, errors_today: 3, guard_level: 'normal' });
     expect(home.digest).toEqual({ last_sent_at: '2026-09-29T07:00:00.000Z', accepted: true });
-    // No URL or host in a dynamic view: those come from the registry only.
-    expect(JSON.stringify(home)).not.toMatch(/ziyixi\.science|https?:\/\/(?!developers\.cloudflare\.com)/);
+    // Application URLs come from the registry; the exact Actions run is status evidence. only.
+    expect(JSON.stringify(home)).not.toMatch(/ziyixi\.science|https?:\/\/(?!developers\.cloudflare\.com|github\.com\/example\/cloud\/actions\/runs\/[1-9][0-9]*)/);
   });
 
   it('flows: the canary only on the mail flow, with its last ok run', () => {
@@ -209,7 +209,7 @@ describe('the views', () => {
   it('ops: guard, the canary with its id, the digest and every ops-v1 app in registry order', () => {
     const ev = input();
     const ops = opsView(base(), GUARD, canaryView(ev), digestView([]), ev.statuses);
-    expect(ops.apps.map((a) => a.entry)).toEqual(['mail-hero', 'todofy', 'lab', 'watch', 'newsletter', 'fleet']);
+    expect(ops.apps.map((a) => a.entry)).toEqual(['mail-hero', 'todofy', 'lab', 'watch', 'notion-publish', 'newsletter', 'fleet']);
     expect(ops.apps[0]).toMatchObject({ reachable: true, error: null, consecutive_failures: 0, status: { app: 'mail-hero' } });
     expect(ops.canary.id).toBe('mail-todofy');
     expect(ops.guard.apps).toHaveProperty('todofy');

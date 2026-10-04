@@ -14,6 +14,7 @@ import { convertNotionBlocks } from "../notion/convert";
 import { createMediaResolver } from "../notion/media";
 import { fetchBlockTree, queryAllDataSourcePages } from "../notion/pagination";
 import type { NotionClientLike } from "../notion/types";
+import { emptyWithdrawalFingerprint, isWithdrawnPage } from "../notion/withdrawal";
 import type { PreparedSource, SourceContext } from "../types";
 
 const EXPECTED_PROPERTY_TYPES = {
@@ -44,6 +45,8 @@ export interface PrepareNotionOptions {
   propertyNames?: NotionPropertyNames;
   client?: NotionClientLike;
   allowedMediaHosts?: string[];
+  previousPublishedKeys?: readonly string[];
+  allowEmpty?: boolean;
 }
 
 const DEFAULT_PROPERTIES: NotionPropertyNames = {
@@ -106,7 +109,25 @@ export async function prepareNotionSource(
     const verification = publicMetadataFingerprint(
       collectPublicPages(verificationRows, propertyNames, context.cutoff).pages,
     );
-    if (verification === prepared.fingerprint) return prepared.result;
+    if (verification === prepared.fingerprint) {
+      if (prepared.withdrawalFingerprint !== undefined) {
+        const withdrawal = await emptyWithdrawalFingerprint({
+          client,
+          dataSourceId: options.dataSourceId,
+          source: await client.dataSources.retrieve({ data_source_id: options.dataSourceId }),
+          rows: verificationRows,
+          previousPublishedKeys: options.previousPublishedKeys ?? [],
+          statusProperty: propertyNames.status,
+        });
+        if (withdrawal !== prepared.withdrawalFingerprint) {
+          throw new ContentError(
+            "NOTION_CHANGED_DURING_SYNC",
+            "Article withdrawal evidence changed during synchronization.",
+          );
+        }
+      }
+      return prepared.result;
+    }
     if (previousFingerprint === verification) {
       throw new ContentError(
         "NOTION_CHANGED_DURING_SYNC",
@@ -128,7 +149,7 @@ async function syncOnce(
     propertyNames: NotionPropertyNames;
     resolveImage: ReturnType<typeof createMediaResolver>;
   },
-): Promise<{ result: PreparedSource; fingerprint: string }> {
+): Promise<{ result: PreparedSource; fingerprint: string; withdrawalFingerprint?: string }> {
   const schema = await client.dataSources.retrieve({ data_source_id: options.dataSourceId });
   validateDataSourceSchema(schema, options.propertyNames);
   const rows = await queryAllDataSourcePages(client, options.dataSourceId);
@@ -168,10 +189,25 @@ async function syncOnce(
   }
   posts.sort(comparePostsNewestFirst);
 
+  const previousPublishedKeys = options.previousPublishedKeys ?? [];
+  const withdrawalFingerprint =
+    posts.length === 0 && previousPublishedKeys.length > 0 && !options.allowEmpty
+      ? await emptyWithdrawalFingerprint({
+          client,
+          dataSourceId: options.dataSourceId,
+          source: schema,
+          rows,
+          previousPublishedKeys,
+          statusProperty: options.propertyNames.status,
+        })
+      : undefined;
+
   return {
     fingerprint: publicMetadataFingerprint(collected.pages),
+    ...(withdrawalFingerprint !== undefined ? { withdrawalFingerprint } : {}),
     result: {
       posts,
+      ...(withdrawalFingerprint !== undefined ? { emptyCollectionConfirmed: true as const } : {}),
       media: [...media.values()].sort((left, right) => left.path.localeCompare(right.path)),
       diagnostics: {
         draftCount: collected.draftCount,
@@ -283,7 +319,7 @@ export function collectPublicPages(
     if (!isRecord(row) || typeof row.id !== "string" || !isRecord(row.properties)) {
       throw new ContentError("INVALID_NOTION_PAGE", "Notion returned a malformed data source row.");
     }
-    if (row.in_trash === true || row.archived === true) continue;
+    if (isWithdrawnPage(row)) continue;
     const status = readStatus(row.properties, propertyNames.status);
     if (status !== "Draft" && status !== "Published") {
       throw new ContentError(

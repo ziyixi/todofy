@@ -246,6 +246,11 @@
           "name": "WATCH",
           "type": "service",
           "source": "config"
+        },
+        {
+          "name": "WEBSITE_SYNC",
+          "type": "service",
+          "source": "config"
         }
       ],
       "personal": []
@@ -836,19 +841,14 @@
     },
     "ziyixi-notion-publish": {
       "config": "website/relay/wrangler.toml",
-      "workers_dev": true,
+      "workers_dev": false,
       "preview_urls": false,
       "custom_domains": [],
       "routes": [],
       "crons": [
-        "7,22,37,52 * * * *"
+        "17 10 * * *"
       ],
       "bindings": [
-        {
-          "name": "AUTO_PUBLISH",
-          "type": "plain_text",
-          "source": "config"
-        },
         {
           "name": "BUILD_SHA",
           "type": "plain_text",
@@ -860,47 +860,17 @@
           "source": "config"
         },
         {
+          "name": "DAILY_SYNC_CRON",
+          "type": "plain_text",
+          "source": "config"
+        },
+        {
           "name": "GITHUB_DISPATCH_TOKEN",
           "type": "secret_text",
           "source": "manual"
         },
         {
           "name": "GITHUB_REPOSITORY",
-          "type": "plain_text",
-          "source": "config"
-        },
-        {
-          "name": "MAX_AUTO_RELEASES_PER_DAY",
-          "type": "plain_text",
-          "source": "config"
-        },
-        {
-          "name": "NOTION_API_VERSION",
-          "type": "plain_text",
-          "source": "config"
-        },
-        {
-          "name": "NOTION_DATA_SOURCE_ID",
-          "type": "secret_text",
-          "source": "manual"
-        },
-        {
-          "name": "NOTION_TOKEN",
-          "type": "secret_text",
-          "source": "manual"
-        },
-        {
-          "name": "NOTION_WEBHOOK_SECRET",
-          "type": "secret_text",
-          "source": "manual"
-        },
-        {
-          "name": "QUIET_MINUTES",
-          "type": "plain_text",
-          "source": "config"
-        },
-        {
-          "name": "RECONCILE_UTC_HOUR",
           "type": "plain_text",
           "source": "config"
         },

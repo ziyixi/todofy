@@ -86,8 +86,10 @@ class WorkerReleaseWorkflow(unittest.TestCase):
                 self.assertIn("RELEASE_SOURCE: ${{ steps.source.outputs.source_sha }}", preflight)
                 self.assertIn("--source-root .release-source", preflight)
                 self.assertLess(recipe.index(checkout), recipe.index(preflight))
-                if app in {"todofy", "website-relay"}:
+                if app == "todofy":
                     self.assertIn('"$BUILD_SOURCE_SHA"', block)
+                elif app == "website-relay":
+                    self.assertIn("BUILD_SOURCE_SHA", (ROOT / "website/relay/deploy/deploy-vars.mjs").read_text())
                 elif app == "dashboard":
                     self.assertIn('.release-source/tools/deploy-probes/access.sh"', block)
                 else:
@@ -118,7 +120,17 @@ class WorkerReleaseWorkflow(unittest.TestCase):
                 self.assertIn("RELEASE_SOURCE: ${{ steps.source.outputs.source_sha }}", record)
                 self.assertIn("--source-root .release-source", record)
                 probes = [step for step in recipe if "curl " in step or "tools/deploy-probes/" in step]
-                self.assertTrue(probes)
+                if app == "website-relay":
+                    # This binding-only Worker has no public liveness route. record() checks provider
+                    # identity/settings before persisting the successful deployment receipt.
+                    self.assertFalse(probes)
+                    control = (ROOT / "tools/cloud-release/control.py").read_text()
+                    self.assertIn("item = verify(", control)
+                    provider = (ROOT / "tools/cloud-release/cloudflare.py").read_text()
+                    self.assertIn('live.get("BUILD_SHA", {}).get("text") != sha', provider)
+                    self.assertIn("WORKER_CONFIGURATION_NOT_VERIFIED", provider)
+                else:
+                    self.assertTrue(probes)
                 for probe in probes:
                     self.assertLess(recipe.index(probe), recipe.index(record))
                     self.assertIsNone(field(probe, "continue-on-error"))

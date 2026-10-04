@@ -1,12 +1,12 @@
 import type { RelayEnv } from "./env";
 
-/** Fixed inputs of website-release.yml; the relay never forwards anything from a request. */
 export interface DispatchInputs {
-  operation: "release" | "status";
+  operation: "release";
   confirmation: string;
   force_build: false;
   allow_empty: false;
-  trigger: "button" | "cron" | "pending" | "reconcile";
+  trigger: "manual" | "cron";
+  request_id: string;
 }
 
 export const ACTIVE_STATUSES = new Set([
@@ -16,34 +16,22 @@ export const ACTIVE_STATUSES = new Set([
   "waiting",
   "pending",
 ]);
-
 export interface RunSummary {
   id: number;
+  attempt: number;
   status: string;
   conclusion: string | null;
-  createdAt: number;
-  startedAt: number;
-  updatedAt: number;
-  /** From the run name "Website <operation> (<trigger>)"; null for other names. */
-  operation: string | null;
-  trigger: string | null;
+  createdAt: string;
+  updatedAt: string;
+  requestId: string | null;
 }
-
-const RUN_NAME =
-  /^Website (release|status|bootstrap|recovery) \((manual|button|cron|reconcile|pending|push)\)$/;
 
 export function workflowApi(env: RelayEnv): string {
   return `https://api.github.com/repos/${env.GITHUB_REPOSITORY}/actions/workflows/${env.RELEASE_WORKFLOW}`;
 }
-
-export function workflowUrl(env: RelayEnv): string {
-  return `https://github.com/${env.GITHUB_REPOSITORY}/actions/workflows/${env.RELEASE_WORKFLOW}`;
-}
-
-export function runUrl(env: RelayEnv, id: number): string {
+export function runUrl(env: RelayEnv, id: number | string): string {
   return `https://github.com/${env.GITHUB_REPOSITORY}/actions/runs/${id}`;
 }
-
 export function githubHeaders(env: RelayEnv): Record<string, string> {
   return {
     Accept: "application/vnd.github+json",
@@ -52,50 +40,87 @@ export function githubHeaders(env: RelayEnv): Record<string, string> {
     "User-Agent": "ziyixi-notion-publish",
   };
 }
-
-function time(value: unknown): number {
-  const parsed = typeof value === "string" ? Date.parse(value) : Number.NaN;
-  return Number.isFinite(parsed) ? parsed : Number.NaN;
+export function object(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+export function utc(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$/.test(value) &&
+    Number.isFinite(Date.parse(value))
+  );
+}
+export function id(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
 }
 
-/** Parses GitHub's run listing; null when the shape is unexpected. */
-export function parseRuns(listing: unknown): RunSummary[] | null {
-  if (!listing || typeof listing !== "object") return null;
-  const runs = (listing as { workflow_runs?: unknown }).workflow_runs;
-  if (!Array.isArray(runs)) return null;
-  const parsed: RunSummary[] = [];
-  for (const run of runs) {
-    if (!run || typeof run !== "object") continue;
-    const value = run as Record<string, unknown>;
-    if (value.head_branch !== "main" || typeof value.id !== "number") continue;
-    const name =
-      typeof value.display_title === "string" ? RUN_NAME.exec(value.display_title) : null;
-    const createdAt = time(value.created_at);
-    parsed.push({
-      id: value.id,
-      status: typeof value.status === "string" ? value.status : "unknown",
-      conclusion: typeof value.conclusion === "string" ? value.conclusion : null,
-      createdAt,
-      startedAt: Number.isFinite(time(value.run_started_at))
-        ? time(value.run_started_at)
-        : createdAt,
-      updatedAt: Number.isFinite(time(value.updated_at)) ? time(value.updated_at) : createdAt,
-      operation: name?.[1] ?? null,
-      trigger: name?.[2] ?? null,
-    });
-  }
-  return parsed.sort((left, right) => right.createdAt - left.createdAt);
-}
-
-/** workerd supports redirect "manual"/"follow" only; manual plus a status check never forwards the token. */
-export async function listRuns(env: RelayEnv, signal: AbortSignal): Promise<Response> {
-  return fetch(`${workflowApi(env)}/runs?branch=main&per_page=50`, {
+/** Only bounded provider metadata is returned; never include a provider response in an error. */
+export async function githubJson(
+  env: RelayEnv,
+  path: string,
+  signal: AbortSignal,
+): Promise<unknown> {
+  const response = await fetch(`https://api.github.com/repos/${env.GITHUB_REPOSITORY}${path}`, {
     headers: githubHeaders(env),
     signal,
     redirect: "manual",
   });
+  if (!response.ok)
+    throw new Error(response.status === 403 ? "github_permission_denied" : "github_unavailable");
+  const text = await response.text();
+  if (text.length > 2_000_000) throw new Error("github_response_invalid");
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    throw new Error("github_response_invalid");
+  }
 }
-
+export function parseRuns(listing: unknown): RunSummary[] {
+  const rows = object(listing)?.workflow_runs;
+  if (!Array.isArray(rows)) throw new Error("github_response_invalid");
+  return rows
+    .flatMap((row) => {
+      const run = object(row);
+      if (
+        !run ||
+        run.head_branch !== "main" ||
+        !id(run.id) ||
+        !id(run.run_attempt) ||
+        !utc(run.created_at) ||
+        !utc(run.updated_at)
+      )
+        return [];
+      const requestId =
+        typeof run.display_title === "string"
+          ? (/\[([0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\]/.exec(
+              run.display_title,
+            )?.[1] ?? null)
+          : null;
+      return [
+        {
+          id: run.id,
+          attempt: run.run_attempt,
+          status: typeof run.status === "string" ? run.status : "unknown",
+          conclusion: typeof run.conclusion === "string" ? run.conclusion : null,
+          createdAt: run.created_at,
+          updatedAt: run.updated_at,
+          requestId,
+        },
+      ];
+    })
+    .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt) || b.id - a.id);
+}
+export async function listRuns(env: RelayEnv, signal: AbortSignal): Promise<RunSummary[]> {
+  return parseRuns(
+    await githubJson(
+      env,
+      `/actions/workflows/${env.RELEASE_WORKFLOW}/runs?branch=main&per_page=50`,
+      signal,
+    ),
+  );
+}
 export async function dispatch(
   env: RelayEnv,
   inputs: DispatchInputs,
@@ -109,23 +134,17 @@ export async function dispatch(
     body: JSON.stringify({ ref: "main", inputs }),
   });
 }
-
-export function releaseInputs(env: RelayEnv, trigger: DispatchInputs["trigger"]): DispatchInputs {
+export function releaseInputs(
+  env: RelayEnv,
+  trigger: DispatchInputs["trigger"],
+  requestId: string,
+): DispatchInputs {
   return {
     operation: "release",
     confirmation: `release:${env.CANONICAL_HOST}`,
     force_build: false,
     allow_empty: false,
     trigger,
-  };
-}
-
-export function statusInputs(env: RelayEnv): DispatchInputs {
-  return {
-    operation: "status",
-    confirmation: `status:${env.CANONICAL_HOST}`,
-    force_build: false,
-    allow_empty: false,
-    trigger: "button",
+    request_id: requestId,
   };
 }

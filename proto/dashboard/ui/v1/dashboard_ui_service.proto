@@ -67,6 +67,7 @@ import "google/api/field_behavior.proto";
 import "google/api/field_info.proto";
 import "google/api/resource.proto";
 import "ops/v1/ops.proto";
+import "website/sync/v1/sync.proto";
 
 option java_multiple_files = true;
 option java_outer_classname = "DashboardUiServiceProto";
@@ -170,6 +171,15 @@ service DashboardUiService {
     option (google.api.method_signature) = "name";
   }
 
+  // Requests a complete website content sync. Acceptance does not mean the website was published.
+  rpc RequestWebsiteSync(RequestWebsiteSyncRequest) returns (RequestWebsiteSyncResponse) {
+    option (google.api.http) = {
+      post: "/api/v1/{name=websiteSync}:request"
+      body: "*"
+    };
+    option (google.api.method_signature) = "name,request_id";
+  }
+
   // The owner's guard override (AIP-136): `shed` forces a shed on every guarded app for 24 hours (until cleared),
   // `normal` ends a forced shed and suppresses the automatic one until the next 00:00 UTC. Replaces
   // POST /api/v2/guard.
@@ -213,6 +223,31 @@ service DashboardUiService {
     };
     option (google.api.method_signature) = "name,etag,request_id";
   }
+}
+
+// Input of RequestWebsiteSync; one UUID per owner action, retained across transport retries.
+message RequestWebsiteSyncRequest {
+  // The fixed website synchronization operation.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).allowed = "websiteSync"
+  ];
+  // Stable ID; the same ID never dispatches another run.
+  string request_id = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.field_info).format = UUID4
+  ];
+}
+
+// Durable owner request receipt. It reports queued or uncertain acceptance, never publication success.
+message RequestWebsiteSyncResponse {
+  // Exact relay receipt for this UUID.
+  // (-- api-linter: core::0215::foreign-type-reference=disabled
+  //     aip.dev/not-precedent: embed the shared internal sync contract without duplicating fields. --)
+  website.sync.v1.WebsiteSyncRequestResult request = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).non_null = true
+  ];
 }
 
 // Input of DismissAttention. A stale occurrence is ABORTED; refresh before trying again.

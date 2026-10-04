@@ -1,5 +1,6 @@
 import { ChevronRight } from 'lucide-react'
 import type { FlowSummary, HomeView as HomeViewData } from '../../../worker/src/api-types.ts'
+import { WebsiteSyncPanel } from '../components/WebsiteSyncPanel'
 import { Launcher } from '../components/Launcher'
 import { targetDismissed, useAttention } from '../components/AttentionActions'
 import { MiniQuota } from '../components/QuotaBars'
@@ -106,6 +107,7 @@ export function HomeView({ registry, home, failed = false, now }: { registry: Re
     <div className="view view-home">
       <h1 className="visually-hidden">首页</h1>
       <Launcher reg={registry} entries={failed ? [] : home?.entries} now={now} />
+      {home ? <WebsiteSyncPanel status={home.website_sync} now={now} /> : null}
       {home ? (
         <div className="home-lower">
           <FlowRows reg={registry} flows={home.flows} now={now} />

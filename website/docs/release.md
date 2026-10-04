@@ -1,187 +1,135 @@
-# Release
+# Website release
 
-One workflow, [`.github/workflows/website-release.yml`](../../.github/workflows/website-release.yml), does
-every production change of the site. Its two production jobs (release and status) share the concurrency
-group `website-production` (`queue: max`, never cancelled) and the GitHub `production` environment, so
-releases, status refreshes and Notion writes never overlap, whoever started them. Two more jobs run only on
-its daily schedule and never release themselves: they dispatch the relay's reconcile release when it is due
-([Daily schedule](#daily-schedule)).
+Every production change uses [Website release](../../.github/workflows/website-release.yml). Daily
+Cloudflare dispatches, the Home **立即同步** action, code pushes and manual operations share the
+`website-production` lock (`queue: max`, `cancel-in-progress: false`). There is one release job and no
+GitHub schedule or Notion status write-back.
 
-| Started by               | How                                                                                           | Inputs                                              |
-| ------------------------ | --------------------------------------------------------------------------------------------- | --------------------------------------------------- |
-| A website push on `main` | `ci.yml` → `Website deploy` (after `Website checks` and the CI gate) dispatches it            | `release`, trigger `push`                           |
-| 发布网站 button          | relay `/publish`                                                                              | `release`, trigger `button`                         |
-| Change detector          | relay `scheduled()` ([`architecture.md`](architecture.md#automatic-releases))                 | `release`, trigger `cron`, `pending` or `reconcile` |
-| 刷新状态 button          | relay `/refresh-status`                                                                       | `status`, trigger `button`                          |
-| Daily schedule           | its own `schedule` (hourly 10:30–15:30 UTC) dispatches it when due ([below](#daily-schedule)) | `release`, trigger `reconcile` (the relay's inputs) |
-| You                      | Actions → Website release → Run workflow                                                      | any operation, trigger `manual`                     |
+| Start                     | Inputs                                                           |
+| ------------------------- | ---------------------------------------------------------------- |
+| Daily relay               | `operation=release`, `trigger=cron`, a request UUID              |
+| Home 立即同步             | `operation=release`, `trigger=manual`, a request UUID            |
+| Website code push on main | CI gate → `Website deploy` → `operation=release`, `trigger=push` |
+| Actions → Run workflow    | `release`, `bootstrap` or `recovery`, `trigger=manual`           |
 
-The confirmation input must be `<operation>:www.ziyixi.science` (plus `:allow-empty` when `allow_empty` is
-set). The relay, `Website deploy` and the daily schedule send fixed inputs; no request can choose a ref,
-recovery or `allow_empty`. `Website deploy` only dispatches (`gh workflow run` with its `actions: write` token) and
-returns: a main CI run never waits for a queued release, and every release is a run of this workflow, which
-is what the relay lists (running release, release window, failures).
+The confirmation is `<operation>:<configured website host>`. The relay supplies fixed release inputs;
+Home cannot select a ref, recovery, force-build or allow-empty. The optional `request_id` is a UUID,
+included in the run name `Website <operation> (<trigger>) [<request_id>]` so a dispatch whose HTTP
+response was lost can be matched to its actual run. Direct Actions and code-push dispatches may leave it
+blank.
 
-**Which commit is built.** Every run checks out `main` inside the lock, then
-[`scripts/release/green-commit.ts`](../scripts/release/green-commit.ts) (plain `node`, before any install)
-picks the newest first-parent commit of it whose **push** run of `ci.yml` on `main` has a successful
-`CI gate` check (the monorepo's single required check; `Changes` diffs push runs from the last successful
-one, so a passed gate covers every website change up to that commit) and checks it out. A newer commit that
-is red, still running or `[skip ci]` is never built; if none of the newest 50 passed, the run fails before
-the gate step, without a record. `context` checks the pinned commit again with the pinned code.
+## Release stages
 
-## What a release does
+The job checks out main inside the lock, then selects its newest first-parent commit with a successful
+main-push **CI gate**. Red, running and `[skip ci]` commits cannot be installed or built. If none of the
+newest 50 candidates is green, the job fails. `context` checks the pinned commit again.
 
-Each step is one `pnpm release <command>` ([`scripts/release/cli.ts`](../scripts/release/cli.ts)), run from
-`website/` on the pinned CI-green commit:
+Each stage is one `pnpm release <command>`, run from `website/`:
 
-1. `context`: only `main`, only a workflow dispatch (a scheduled run never gets here: it dispatches), the
-   exact confirmation, and the checked-out commit passed the CI gate.
-2. `code-sha`: the code identity is the newest commit at or before it that touched `website/` (so a
-   Todofy commit does not redeploy the site).
-3. `gate`: reads the `website-release` GitHub Deployment records of this repository. A `release` needs the
-   latest one to be `success` (it becomes the baseline); anything else needs `recovery`. With no record at
-   all a release stops with a notice asking for `bootstrap` (the job stays green).
-4. `recover` (recovery only) or `check-baseline` (release): production must serve the recorded Worker
-   version (Cloudflare API), and the recorded live hostname must serve the recorded identity.
-5. `pnpm check` on the empty snapshot (no secrets), then `prepare`: the Notion sync with the baseline
-   registry (`--for-release`; a non-empty → empty collection needs `allow_empty`).
-6. `decide`: identity = website commit + content hash + config hash + schema version. Unchanged →
-   no build and no deploy (`force_build` overrides); the Notion feedback still runs.
-7. `pnpm build:site`, then `verify-artifact`: `wrangler dev` serves `out/` with `wrangler.toml`; the
-   identity and the whole route contract ([`tests/e2e/deployment.spec.ts`](../tests/e2e/deployment.spec.ts):
-   every route and status, asset hashes, redirects, 404, segment payloads, a browser pass without console
-   errors) must pass before anything is uploaded.
-8. `hostnames`, then `upload`: [`tools/cf-guard`](../../tools/cf-guard/README.md) compares the routes in
-   `wrangler.toml` with the Worker's live Custom Domains (read-only) and stops the release, before anything
-   is uploaded or recorded, when a live hostname would be detached or another Worker's hostname or an
-   existing DNS record taken over (an intentional change sets `CF_GUARD_ALLOW_REMOVE` /
-   `CF_GUARD_ALLOW_CONFLICT`, the latter as `worker:<host>` or `dns:<host>`, on this step and on `deploy`). The workflow comes from `main` and the code from
-   the green commit, so a release dispatched before the first green CI gate after the guard merged builds a
-   commit without it: the step skips only a commit whose history never had `tools/cf-guard` (it deploys as
-   before), and runs the guard for every later commit, including one that deleted it. Then production must still serve the baseline version; `wrangler versions upload` creates a
-   version that serves nothing yet. (The very first release, `bootstrap`, uses `wrangler deploy` because a
-   version cannot be uploaded to a Worker that does not exist.)
-9. `record`: a GitHub Deployment (payload schema 3: identity, version, previous version, live hostname,
-   content registry, route contract), status `in_progress`. An interrupted run leaves this record blocking.
-10. `deploy`: runs the hostname guard again (a refusal changes nothing), refuses a production that changed meanwhile; `wrangler versions deploy <version>@100%`; confirms the active version; when `wrangler.toml` lists
-    hostnames, `wrangler triggers deploy` applies them: the Custom Domains `www.ziyixi.science` and
-    `ziyixi.science`, which wrangler treats as the Worker's complete set (it replaces the attached set with
-    the listed one, so with the file matching the live state nothing changes), and keeps workers.dev off.
-    Newer website code landing on `main` meanwhile is not a reason to stop: this build passed CI and the
-    release that push dispatched is queued behind this one and builds the newer code (refusing here would
-    record a failure that blocks the gate for that release too).
-11. `verify-live`: the live hostname (the canonical host `www` once attached, otherwise the first listed
-    hostname) must become reachable (a new hostname: up to 20 × 15 s), serve the identity 3 times in a row
-    (12 × 5 s) and pass the route contract; then every other listed hostname (the apex) must serve the
-    same identity the same way. With no hostname yet this step is skipped: the version was verified
-    locally.
-12. `mark-success`, then the **Notion feedback**: `sync-status.ts` compares every row with the live
-    `publication-state.json` (on the hostname above, `WEBSITE_LIVE_ORIGIN`) and writes `网站状态`,
-    `线上版本时间`, `检查时间` (the instant of that row's write), `网站链接`, `已上线指纹`; after a deploy `update-site-summary.ts` updates the
-    database description. A feedback failure is a warning, never a rollback. Without a hostname it is
-    skipped.
-13. On a failed deploy or live check: `rollback` deploys the recorded previous version again (only if
-    production serves this release's version), verifies it on the hostname where the baseline was
-    verified (the baseline record's live hostname, not a hostname this release was adding: if attaching
-    it failed, it still serves what answered before), and `mark-failure` records `failure` (restored and
-    verified) or `error`. The job fails; every later `release` (push, buttons, relay cron) stops at the
-    gate until someone dispatches `recovery`.
+1. `context` validates main, workflow dispatch, confirmation, request UUID and green commit.
+2. `code-sha` identifies the newest commit that touched `website/`; unrelated service changes do not
+   change the website's code identity.
+3. `gate` reads the existing `website-release` records. Ordinary release needs a successful baseline;
+   a failed/interrupted release needs recovery. No baseline requires bootstrap and produces a blocked
+   content-sync receipt.
+4. `recover` (recovery) or `check-baseline` (ordinary release) verifies the recorded Worker version and
+   live identity before reading content.
+5. Empty-snapshot checks run without secrets. `prepare` then reads the complete Notion snapshot and
+   media, using the baseline registry for slug history and feed GUIDs. A previously non-empty collection
+   becoming empty is automatic only when every previously public source identity is positively Draft
+   or archived in the configured data source, with complete pagination and a stable reread. Missing
+   records, permission errors and ambiguous identity keep the existing site. The explicit allow-empty
+   recovery operation remains available. Draft/Published and publication dates remain the content rules.
+6. `decide` compares code SHA, content hash, config hash and schema version. Only after both prepare and
+   decide complete is the actual `checked_at` saved. `sync-record` creates a content-sync receipt:
+   unchanged is successful with no build/deploy; changed is in progress.
+7. A changed identity builds the static export and verifies its identity and complete route contract under
+   `wrangler dev`. The hostname guard rejects unapproved hostname removal or takeover before upload.
+8. `upload` creates a Worker version after checking the baseline again. The first bootstrap uses
+   `wrangler deploy`, because the Worker may not exist yet. `record` writes the existing release ledger
+   entry with its rollback target and route contract.
+9. `deploy` rechecks hostnames and the active version, activates the new version, applies the configured
+   hostnames and confirms the active version. `verify-live` checks the live identity, route contract and
+   all other configured hostnames; `mark-success` completes the release ledger.
+10. A failed deploy or live verification restores and verifies the previous recorded version when
+    possible. The release record becomes failure/error and blocks ordinary releases until recovery.
+11. `sync-finalize` runs with `always()`. It records success only for an unchanged completed check or a
+    changed release verified on the live hostname and recorded successfully. A failed build/publish
+    preserves the earlier actual check time. A failed or skipped snapshot has `checked_at: null`.
 
-## Operations
+If the runner is terminated, dependency installation fails, or GitHub cannot accept a final record,
+there can be no final receipt. Home must combine the run conclusion with available receipts, display
+failure/cancellation or missing evidence, and keep the previous actual check time. A green workflow
+alone never proves that Notion was checked or that production changed.
 
-- **bootstrap** (once, before the first release): needs zero records in this repository. When
-  `WEBSITE_LEGACY_REPOSITORY` is configured, it continues that repository's last successful content registry,
-  preserving slug history and feed GUIDs. An empty registry instead needs the production variable
-  `WEBSITE_BOOTSTRAP_APPROVAL` to equal the configured canonical origin.
-- **recovery**: after a failed or interrupted release, or a manual rollback. If production serves the
-  latest record's version, it is verified again (live identity and route contract) and marked `success`;
-  if it serves the earlier successful record's version, that is verified; anything else stops for a human.
-  Then a full release runs (recovery always rebuilds).
-- **status**: the 刷新状态 button; only the Notion feedback, no build.
-- **force_build**: rebuild and redeploy an unchanged identity (for example to re-run the live checks or to
-  re-attach a hostname that was removed by hand; not the recorded live hostname: while that one does not
-  serve the Worker, the baseline check stops every release first, see
-  [`cutover.md`](cutover.md#rollback)).
-- **allow_empty**: one run may publish an empty collection after a non-empty one.
-  For a fresh site with no release record and an empty Notion collection, dispatch `operation=bootstrap`
-  with `allow_empty=true` and confirmation `bootstrap:<configured website host>:allow-empty`.
-  Leave `WEBSITE_LEGACY_REPOSITORY` unset and set the production variable `WEBSITE_BOOTSTRAP_APPROVAL`
-  to the configured canonical origin; Notion authorization and the no-record gate still apply.
+## Two separate GitHub ledgers
 
-## Daily schedule
+`website-release`, environment `production`, retains the existing payload schema 3: Worker version,
+predecessor, live hostname, identity, content registry and route contract. It remains the baseline,
+recovery and rollback ledger. Content-sync receipts do not alter it.
 
-The relay's change detector dispatches one reconcile release a day ([`architecture.md`](architecture.md#automatic-releases)),
-but only while its dispatch token (a fine-grained PAT that only the owner can grant access to
-`ziyixi/todofy`) works. So the workflow also has its own `schedule` (`30 10-15 * * *`: hourly from 10:30 to
-15:30 UTC, after the relay's `RECONCILE_UTC_HOUR` of 10) that dispatches that same reconcile release, with
-the run's `GITHUB_TOKEN` (a `workflow_dispatch` by `GITHUB_TOKEN` starts a run, as `Website deploy`'s does)
-and no new secret. A scheduled run is named `Website scheduled reconcile` and never builds or deploys:
+`website-content-sync`, environment `website-content-sync`, is a small schema 1 check receipt:
 
-1. **Website scheduled reconcile check** (no environment, no secret, no install; `contents`, `actions`,
-   `checks` and `deployments` read only) pins the newest CI-green `main` commit like a release and runs
-   [`scripts/release/scheduled-reconcile.ts`](../scripts/release/scheduled-reconcile.ts) with plain `node`.
-   It stops (`due=false`, a notice with the code) when a `Website release (reconcile)` run, the relay's or one
-   an earlier hour dispatched, was created today (UTC) (`RECONCILED_TODAY`); while another run of the
-   workflow is queued or running (`RELEASE_RUNNING`: its record may say `in_progress` until it finishes, so
-   that is not a gate; the next hour checks again); when there is no `website-release` record
-   (`NO_RELEASE_RECORD`) or the latest is not `success` with nothing running (`RECOVERY_GATE`: only
-   `recovery` may cross the gate, so no failing run is started); or after 3 failed releases today
-   (`FAILURES_TODAY`, the relay's failure stop).
-2. Only then **Website scheduled reconcile dispatch** (the `production` environment, for its Notion
-   secrets, used only in its last step; `actions: write` to dispatch, otherwise read only; no lock of its
-   own) pins the newest CI-green commit again, installs, and runs
-   [`scripts/release/scheduled-dispatch.ts`](../scripts/release/scheduled-dispatch.ts): it checks step 1
-   again with fresh data, reads Notion exactly as the relay's detector does (its `readNotionRows`,
-   `decide` and `relay/wrangler.toml` settings) and holds while the relay would (`QUIET_PERIOD`: an author
-   edit or a masked pending change newer than `QUIET_MINUTES`; or Notion did not answer:
-   `NOTION_UNAVAILABLE`); the next hour checks again. Otherwise it dispatches exactly the relay's reconcile
-   (`release`, `release:www.ziyixi.science`, no `force_build`, no `allow_empty`, trigger `reconcile`) and
-   waits until GitHub lists the new run.
+```json
+{
+  "schema_version": 1,
+  "task": "website-content-sync",
+  "run_id": 123,
+  "run_attempt": 1,
+  "request_id": "11111111-1111-4111-8111-111111111111",
+  "checked_at": "2026-10-04T10:31:02.000Z",
+  "decision": "unchanged",
+  "identity": {
+    "codeSha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "contentHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "configHash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "schemaVersion": 1
+  }
+}
+```
 
-The dispatched run is an ordinary `Website release (reconcile)`: every gate above applies, an unchanged
-identity deploys nothing and only refreshes the Notion feedback, and the relay sees it as its own (running
-release, release window, today's reconcile, failures), so a working relay neither reconciles again that day
-nor republishes the edits it already released. A scheduled run that stopped or held is invisible to the
-relay (its name does not parse), so it moves no edit window. With a working relay its reconcile comes
-first (the first tick after 10:00 UTC) and every scheduled hour stops at `RECONCILED_TODAY`. Two dispatches
-on one day need both to decide within the same few seconds (the relay holds while the scheduled run is
-listed as running, and the scheduled run ends only after its dispatched run is listed); the second is then
-queued behind the first and, unless Notion changed in between, deploys nothing.
+An uncompleted check uses `decision: not_checked`, `checked_at: null` and `identity: null`. There are no
+article titles, bodies or registries in this payload. Status descriptions are fixed codes:
 
-GitHub may start a scheduled run late or drop it under load (the next hour checks again), and disables
-schedules in a public repository after 60 days without activity. To turn it off, set the repository variable
-`WEBSITE_SCHEDULED_RECONCILE` to `false` (Settings → Secrets and variables → Actions → Variables; a
-repository variable, since the check job has no environment).
+| Status      | Description               | Meaning                                                                  |
+| ----------- | ------------------------- | ------------------------------------------------------------------------ |
+| in_progress | `SYNC_DEPLOYING`          | Snapshot checked; a changed identity is being published                  |
+| success     | `SYNC_UNCHANGED`          | Snapshot checked; identity unchanged                                     |
+| success     | `SYNC_PUBLISHED`          | Changed release verified live and release ledger completed               |
+| error       | `SYNC_BOOTSTRAP_REQUIRED` | No accepted baseline; run bootstrap                                      |
+| error       | `SYNC_GATE_BLOCKED`       | Context/baseline gate failed; inspect run, use recovery when appropriate |
+| failure     | `SYNC_CHECK_FAILED`       | Full snapshot and decision did not complete                              |
+| failure     | `SYNC_BUILD_FAILED`       | Checked identity failed to build or verify locally                       |
+| failure     | `SYNC_PUBLISH_FAILED`     | Upload, publication, live verification or release recording failed       |
+| failure     | `SYNC_RECEIPT_FAILED`     | A check completed, but its receipt write or unchanged run failed         |
+| error       | `SYNC_CANCELLED`          | Run cancelled; any already completed check remains recorded              |
 
-## Rollback by hand
+A rerun has a new `run_attempt`, with its own receipt. Lost create responses are recovered from at most
+25 recent content-sync records using run ID and attempt. Ambiguous or mismatched records fail closed.
 
-- A failed release rolls back by itself (step 13). To go back to an older version on purpose, prefer a
-  revert commit on `main` (a normal release). In an emergency, from a trusted machine:
-  `pnpm exec wrangler versions deploy <version-id>@100% --config wrangler.toml`, or Workers →
-  ziyixi-website → Deployments → Rollback in the dashboard. The next release then refuses to start
-  (production no longer serves the recorded version) until you dispatch `recovery`, which accepts only the
-  latest record's version or its predecessor: so roll back only to the latest record's
-  `previousWorkerVersionId`. Version IDs are in the Deployment records and in `wrangler versions list`.
-- To Vercel during the cutover window: [`cutover.md`](cutover.md#rollback).
+## Manual operations
 
-## Configuration
+- **bootstrap:** first release, with no release records in this repository. With
+  `WEBSITE_LEGACY_REPOSITORY`, import its last successful registry. Otherwise set the production variable
+  `WEBSITE_BOOTSTRAP_APPROVAL` to the canonical origin. For an intentionally empty first collection,
+  use `allow_empty=true` and confirmation `bootstrap:<configured website host>:allow-empty`.
+- **recovery:** verify that production serves the latest recorded version or its previous accepted
+  version; refuse any other identity. Then run a complete release, always rebuilding.
+- **force_build:** explicitly rebuild/redeploy an unchanged identity. Baseline checks still apply.
+- **allow_empty:** permit one non-empty → empty publication; confirmation must end in `:allow-empty`.
 
-Committed: `SITE_URL`, `NOTION_API_VERSION` and `WEBSITE_LEGACY_REPOSITORY` in the workflow's `env`; the
-Worker, account and hostnames in [`wrangler.toml`](../wrangler.toml). GitHub `production` environment:
+For a deliberate rollback, prefer a revert on main. An emergency rollback to the latest record's
+`previousWorkerVersionId` can use the Cloudflare console or
+`pnpm exec wrangler versions deploy <version-id>@100% --config wrangler.toml` from a trusted machine.
+The next ordinary release then stops until recovery reconciles the ledger with production.
 
-| Name                            | Kind                                          | Used by                                                                                                                          |
-| ------------------------------- | --------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| `WEBSITE_NOTION_TOKEN`          | secret                                        | the Notion sync and the feedback (needs Read and Update content)                                                                 |
-| `WEBSITE_NOTION_DATA_SOURCE_ID` | secret                                        | same                                                                                                                             |
-| `CF_API_TOKEN`                  | secret (shared with Todofy and the dashboard) | Cloudflare reads, `versions upload/deploy`, `triggers deploy` (Custom Domains), the relay deploy; it cannot edit DNS or rulesets |
-| `WEBSITE_BOOTSTRAP_APPROVAL`    | variable, optional                            | only an empty-registry bootstrap                                                                                                 |
-| `WEBSITE_SCHEDULED_RECONCILE`   | repository variable, optional                 | `false` turns the [daily schedule](#daily-schedule) off; unset or anything else keeps it on                                      |
+## Configuration and credentials
 
-The release job's `GITHUB_TOKEN` (`contents: read`, `deployments: write`, `checks: read`, `actions: read`)
-reads the CI results and writes the records; the scheduled jobs' tokens only read, and the dispatch job's
-may also dispatch workflows. It is in the `env` of only the steps that need it (pin the commit, `context`,
-`gate`, `recover`, `record`, `mark-success`, `mark-failure`, the scheduled check's decision and the
-scheduled dispatch), never of the install, build or test steps, so a dependency's install script cannot
-forge a release record. Logs print commit
-IDs, version IDs, status codes and counts only; never a token, a response body or Notion content.
+Public deployment values come from the generated cloud configuration, `wrangler.toml` and the pinned
+Notion API version. The GitHub `production` environment supplies `WEBSITE_NOTION_TOKEN`,
+`WEBSITE_NOTION_DATA_SOURCE_ID` and `CF_API_TOKEN`. Only `prepare` receives Notion credentials; it reads
+content and never writes status properties or the database description.
+
+The job's GitHub token has contents/checks/actions read and deployments write. Only the green gate and
+record-reading/writing steps receive it; dependency installation, builds and tests do not. Logs contain
+only IDs, counts and fixed errors. No Notion content or response bodies are logged.

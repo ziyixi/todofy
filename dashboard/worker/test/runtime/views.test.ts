@@ -156,8 +156,8 @@ describe('GetHomeView and RefreshHomeView', () => {
     // FlowDay's manifest and the links app's robots.txt, each answered by its own Worker.
     expect(tiles.flowday).toMatchObject({ level: 'ok', reason: null, metric: { kind: 'latency' } });
     expect(tiles.links).toMatchObject({ level: 'ok', reason: null, metric: { kind: 'latency' } });
-    // Notion 发布 had requests this hour (first answer of discovery).
-    expect(tiles['notion-publish']).toMatchObject({ level: 'ok', metric: { kind: 'last_active' } });
+    // Content sync is evaluated from its check evidence, with no activity metric.
+    expect(tiles['notion-publish']).toMatchObject({ level: 'ok', metric: null });
     expect(home.flows.map((f) => [f.id, f.level, f.partial])).toEqual([
       ['mail-to-task', 'ok', false],
       ['gtd', 'ok', false],
@@ -396,6 +396,7 @@ describe('GetFlowsView, GetOpsView and the mutations', () => {
       ['todofy', true, 'todofy'],
       ['lab', true, 'lab'],
       ['watch', true, 'watch'],
+      ['notion-publish', true, 'notion-publish'],
       ['newsletter', true, 'newsletter'],
       ['fleet', true, 'fleet'],
     ]);

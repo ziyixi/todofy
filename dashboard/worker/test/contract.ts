@@ -5,6 +5,7 @@
  * expose exactly those methods).
  */
 import type { DescMessage } from '@ziyixi/proto/protobuf';
+import { WebsiteSyncService } from '@ziyixi/proto/website/sync/v1/sync_pb';
 import * as ops from '@ziyixi/proto/ops/v1/ops_pb';
 import { fromWire, fromWireArguments, WireJsonError } from '@ziyixi/proto/wire-json';
 import type { OpsApp } from '../src/api-types.ts';
@@ -46,6 +47,7 @@ const SERVICES = {
   watch: [ops.OpsService],
   fleet: [ops.OpsService],
   newsletter: [ops.OpsService],
+  'notion-publish': [ops.OpsService, WebsiteSyncService],
 } as const;
 
 /** The methods of `app`'s Ops entrypoint, sorted: the dashboard calls only these, the stubs expose exactly these. */

@@ -1634,16 +1634,14 @@ jobs:
         if: steps.preflight.outputs.required == 'true'
         with:
           node-version-file: .release-source/website/.nvmrc
+      - name: Install the shared proto toolchain
+        if: steps.preflight.outputs.required == 'true'
+        run: npm ci --prefix ../proto --no-audit --no-fund
       - name: Install the pinned pnpm and locked dependencies
         if: steps.preflight.outputs.required == 'true'
         run: |
           corepack enable
           pnpm install --frozen-lockfile
-      - name: Read the configured relay URL
-        if: steps.preflight.outputs.required == 'true'
-        id: urls
-        working-directory: .release-source
-        run: python3 tools/cloud-config/outputs.py --github-output "$GITHUB_OUTPUT"
       - name: Write the Worker secrets file
         if: steps.preflight.outputs.required == 'true'
         env:
@@ -1659,19 +1657,11 @@ jobs:
         run: |
           test -n "$CLOUDFLARE_API_TOKEN"
           node relay/deploy/deploy-vars.mjs exec -- pnpm exec wrangler deploy --config relay/wrangler.toml --secrets-file "$RUNNER_TEMP/website-relay-secrets.json"
-      - name: Check the buttons' endpoint answers
+      - name: Retire the old Notion button and detector secrets
         if: steps.preflight.outputs.required == 'true'
         env:
-          RELAY_URL: ${{ steps.urls.outputs.relay_url }}
-        run: |
-          for attempt in $(seq 1 10); do
-            if curl -fsS --max-time 10 "$RELAY_URL/health" | jq -e --arg sha "$BUILD_SOURCE_SHA" '.status == "ok" and .build_sha == $sha' >/dev/null; then
-              exit 0
-            fi
-            sleep 6
-          done
-          echo "The relay's /health did not answer." >&2
-          exit 1
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+        run: python3 relay/deploy/retire-secrets.py
       - name: Remove the secrets file
         if: always()
         run: rm -f "$RUNNER_TEMP/website-relay-secrets.json"

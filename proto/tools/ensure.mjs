@@ -171,15 +171,16 @@ function run(command, args, options = {}) {
 
 /**
  * How to start npm, buf and Python without a shell on `platform`: [command, leading arguments]. buf's
- * bin script runs on `execPath` (this Node.js). npm is the one running this script when there is one
- * (npm_execpath: an app's postinstall); otherwise `npm` from PATH, except on Windows, where PATH has only
- * npm.cmd, which cannot be spawned without a shell: there it is the npm-cli.js installed next to node.exe
+ * bin script runs on `execPath` (this Node.js). Use npm_execpath only when it names npm-cli.js: pnpm
+ * also sets that variable for an app's postinstall. Otherwise use `npm` from PATH, except on Windows,
+ * where PATH has only npm.cmd, which cannot be spawned without a shell: there it is the npm-cli.js
+ * installed next to node.exe
  * (uv's build of ziyixi-proto). Exported for the tests.
  */
 export function toolCommands({ platform = process.platform, execPath = process.execPath, env = process.env } = {}) {
   const fromNpm = env.npm_execpath ?? '';
   let npm = ['npm', []];
-  if (/\.c?js$/.test(fromNpm)) npm = [execPath, [fromNpm]];
+  if (/(?:^|[\\/])npm-cli\.js$/.test(fromNpm)) npm = [execPath, [fromNpm]];
   else if (platform === 'win32') npm = [execPath, [win32.join(win32.dirname(execPath), 'node_modules', 'npm', 'bin', 'npm-cli.js')]];
   return {
     npm,

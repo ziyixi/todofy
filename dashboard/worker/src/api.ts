@@ -12,7 +12,7 @@ import type { OpsApp } from './api-types.ts';
  * a handler throws is a bug, answered INTERNAL by the transcoder.
  */
 import type { CommonReason } from '@ziyixi/proto/common/errors/v1/errors_pb';
-import { OverrideGuardResponseSchema, RunCanaryResponseSchema, type DashboardUiService } from '@ziyixi/proto/dashboard/ui/v1/dashboard_ui_service_pb';
+import { OverrideGuardResponseSchema, RequestWebsiteSyncResponseSchema, RunCanaryResponseSchema, type DashboardUiService } from '@ziyixi/proto/dashboard/ui/v1/dashboard_ui_service_pb';
 import type { ErrorReason } from '@ziyixi/proto/dashboard/ui/v1/errors_pb';
 import { AttentionItemSchema } from '@ziyixi/proto/dashboard/ui/v1/attention_pb';
 import { PreEncoded, type ServiceHandlers, type ShapeOf } from '@ziyixi/proto/http-transcoder';
@@ -24,7 +24,7 @@ import type { ViewId } from './api-types.ts';
 import { buildSha } from './config.ts';
 import type { Env } from './env.ts';
 import { registryBody } from './registry.ts';
-import { HOME_OBJECT, type AttentionMutationOutcome, type GuardOverrideOutcome, type HomeState, type StartCanaryOutcome } from './state.ts';
+import { HOME_OBJECT, type AttentionMutationOutcome, type GuardOverrideOutcome, type HomeState, type StartCanaryOutcome, type WebsiteSyncOutcome } from './state.ts';
 import { etagMatches, type ViewBody } from './view-body.ts';
 
 /** What every handler gets: src/http.ts authenticated the owner before routing. */
@@ -126,6 +126,13 @@ export const handlers: ServiceHandlers<ShapeOf<typeof DashboardUiService>, ApiCo
   getCloudflareView: (_request, ctx) => viewAnswer(ctx, 'cloudflare', false),
   refreshCloudflareView: (_request, ctx) => viewAnswer(ctx, 'cloudflare', true),
   getOpsView: (_request, ctx) => viewAnswer(ctx, 'ops', false),
+
+  async requestWebsiteSync(request, ctx) {
+    if (request.name !== 'websiteSync') throw dashboardError('NOT_FOUND');
+    const result = await callHome(() => home(ctx.env).requestWebsiteSync(request.requestId, ctx.at) as unknown as Promise<WebsiteSyncOutcome>);
+    if (!result.ok) throw dashboardError('BAD_REQUEST');
+    return ownAnswer(RequestWebsiteSyncResponseSchema, { request: result.request });
+  },
 
   async dismissAttention(request, ctx) {
     const result = await callHome(() => home(ctx.env).dismissAttention(request.name, request.etag, request.requestId, ctx.at) as unknown as Promise<AttentionMutationOutcome>);

@@ -12,7 +12,6 @@ import {
   renderRedirectsFile,
 } from "../../scripts/export/site-files";
 import { prepareImageVariants } from "../../scripts/images/prepare";
-import { productionOrigin } from "../../scripts/notion/status";
 import {
   ALL_IMAGE_WIDTHS,
   pickVariantWidth,
@@ -183,14 +182,5 @@ describe("build-time image variants", () => {
         generatedDirectory: path.join(root, ".generated"),
       }),
     ).rejects.toThrow(/plain root-relative/);
-  });
-});
-
-describe("Notion feedback origin", () => {
-  it("reads the canonical origin unless the release names the live hostname", () => {
-    expect(productionOrigin(undefined)).toBe("https://www.ziyixi.science");
-    expect(productionOrigin("https://ziyixi.science")).toBe("https://ziyixi.science");
-    expect(() => productionOrigin("https://example.com/path")).toThrow();
-    expect(() => productionOrigin("http://example.com")).toThrow();
   });
 });

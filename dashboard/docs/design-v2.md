@@ -230,7 +230,7 @@ lost `version`.
 
 | Route | Served by | Budget |
 | --- | --- | --- |
-| `GET /api/v1/registry` (GetRegistry) | Worker, serialized once per isolate; `ETag: "<build>"` → 304 | 0 DO; ≤ 14 KiB |
+| `GET /api/v1/registry` (GetRegistry) | Worker, serialized once per isolate; `ETag: "<build>"` → 304 | 0 DO; ≤ 15 KiB |
 | `GET /api/csrf` | Worker (signed token + `home_csrf` cookie, design.md §6) | — |
 | `GET /api/v1/homeView` (GetHomeView) | DO `view('home')` | 1 DO call; ordinary fixture ≤ 40 rows read; ≤ 10 KiB |
 | `GET /api/v1/flowsView` (GetFlowsView) | DO | ordinary fixture ≤ 40 rows read; ≤ 20 KiB |
@@ -239,6 +239,7 @@ lost `version`.
 | `POST /api/v1/homeView:refresh`, `POST /api/v1/cloudflareView:refresh` (RefreshHomeView, RefreshCloudflareView; were `?refresh=1`) | DO `view(..., refresh)` | Origin + CSRF; each scope fetches at most once a minute |
 | `POST /api/v1/guard:override {level, request_id}` (OverrideGuard), `POST /api/v1/canaries/mail-todofy:run {request_id}` (RunCanary) | DO (`setGuardOverride`, `startCanary`) | Origin + CSRF; ≤ 1 KiB body |
 | `POST /api/v1/attentionItems/{id}:dismiss`, `:restore` | DO reminder disposition | Access + Origin + CSRF; occurrence etag + UUID request_id; ≤ 1 KiB body |
+| `POST /api/v1/websiteSync:request` (RequestWebsiteSync) | DO permanent request receipt; relay dispatch or lookup | Origin + CSRF; UUID request_id; replay only looks up the same request |
 
 The old paths (`/api/v2/*`) answer 410 with the message 个人控制台已更新，请刷新页面 in the old error envelope until
 2026-11-02 (one release); then they answer NOT_FOUND like any unknown path. The code is `not_found`, not Lab's

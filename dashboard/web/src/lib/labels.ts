@@ -94,6 +94,11 @@ export const SEVERITY: Readonly<Record<OpsSeverity, { label: string; tone: Tone 
 }
 
 const SIGNALS: Readonly<Record<string, string>> = {
+  website_sync_stale: '网站内容检查已过期',
+  website_sync_failed: '网站内容同步失败',
+  website_sync_blocked: '网站内容同步被阻止',
+  website_sync_unconfirmed: '网站内容同步结果未确认',
+  website_sync_provider_unavailable: '无法读取网站同步记录',
   // both apps
   host_never_seen: '主机尚未报告',
   host_stale: '主机报告延迟',

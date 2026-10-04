@@ -9,7 +9,7 @@ import type { CanaryDef, EntryGroup, Flow, FlowGroup, RegistryEntry, RegistryRes
 /** Where an entry's own health comes from (docs/design-v2.md §3). Its `type` is RegistryEntry.status_type. */
 export type StatusSource =
   /** contracts/ops-v1 `Ops.status()` over the named service binding; guard: receives setGuard. */
-  | { readonly type: 'ops_v1'; readonly binding: 'MAIL_HERO' | 'TODOFY' | 'LAB' | 'WATCH' | 'FLEET' | 'NEWSLETTER'; readonly guard: boolean; readonly provider?: 'fleet' }
+  | { readonly type: 'ops_v1'; readonly binding: 'MAIL_HERO' | 'TODOFY' | 'LAB' | 'WATCH' | 'FLEET' | 'NEWSLETTER' | 'WEBSITE_SYNC'; readonly guard: boolean; readonly provider?: 'fleet' }
   /**
    * One GET per tick from the Durable Object to a public (not Access-protected) URL: status code, Content-Type
    * header and latency only, `redirect: 'manual'`, body cancelled unread. `enabled: false` shows 未接入 instead.

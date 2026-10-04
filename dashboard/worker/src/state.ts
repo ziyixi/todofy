@@ -4,7 +4,7 @@
  * query and Worker discovery, guard, canary, digest, and the v2 views assembled from its tables. The
  * fetch and scheduled handlers only call these RPC methods.
  *
- * Bounds: every tick makes at most outboundPerTick() = 27 outbound calls (4 status, 3 probes, 1 GraphQL,
+ * Bounds: every tick makes at most outboundPerTick() = 30 outbound calls (7 status, 3 probes, 1 GraphQL,
  * ≤ 4 setGuard, ≤ 2 canary calls, ≤ 1 reportOps, ≤ DRIFT_CALLS_PER_TICK = 12 read-only drift calls) and
  * writes a few dozen rows; a v2 view reads at most VIEW_ROWS_READ[view] rows (api-types.ts; tested in
  * workerd).
@@ -72,6 +72,8 @@ import { attentionView, freshStatus, targetOf, type EvalInput } from './evaluate
 import { ATTENTION_ROW_LIMIT, ATTENTION_SCHEMA, AttentionState, type AttentionCondition } from './attention-state.ts';
 import type { Attention, AttentionItem, Badges } from './api-types.ts';
 import { OPS_APPS, opsCanaryDelivery, opsCanaryResult, opsReportOps, opsSetGuard, opsStartCanary, opsStatus } from './ops-client.ts';
+import { callWebsiteRequest, unconfirmedWebsiteRequest } from './website-sync.ts';
+import type { WebsiteSyncRequestResult } from './api-types.ts';
 import { nextProbeDoc, probeDue, probeUrl, type ProbeTarget } from './probe.ts';
 import { REGISTRY } from './registry.ts';
 import { HOUR_MS, MINUTE_MS, iso, isoOrNull, utcDay, utcMonthStart } from './time.ts';
@@ -171,6 +173,11 @@ const SCHEMA = [
   'CREATE INDEX IF NOT EXISTS canary_runs_by_finished ON canary_runs (finished_at)',
   // The run in progress (at most one) without scanning the 60-day history (rows read by every tick and view).
   "CREATE INDEX IF NOT EXISTS canary_runs_active ON canary_runs (created_at) WHERE phase != 'done'",
+  `CREATE TABLE IF NOT EXISTS website_sync_requests (
+    request_id TEXT PRIMARY KEY,
+    at INTEGER NOT NULL,
+    answer TEXT NOT NULL CHECK (length(answer) <= 4096)
+  )`,
   'CREATE TABLE IF NOT EXISTS item_since (key TEXT PRIMARY KEY, since INTEGER NOT NULL)',
   ATTENTION_SCHEMA,
 ];
@@ -183,6 +190,7 @@ export type StartCanaryOutcome =
   | { readonly ok: true; readonly run: CanaryRun }
   | { readonly ok: false; readonly code: 'canary_disabled' | 'canary_active' | 'canary_limit' | 'request_id_reused' };
 export type GuardOverrideOutcome = { readonly ok: true; readonly guard: GuardView } | { readonly ok: false; readonly code: 'request_id_reused' | 'guard_unavailable' };
+export type WebsiteSyncOutcome = { readonly ok: true; readonly request: WebsiteSyncRequestResult } | { readonly ok: false; readonly code: 'request_id_reused' };
 export type AttentionMutationOutcome = { readonly ok: true; readonly item: AttentionItem }
   | { readonly ok: false; readonly code: 'request_id_reused' | 'attention_changed' };
 
@@ -190,12 +198,13 @@ export type AttentionMutationOutcome = { readonly ok: true; readonly item: Atten
  * AIP-155: the answers of the owner's mutations by request_id (RunCanary, OverrideGuard), so a repeated request
  * (the UI retries a lost response with the same ID) answers the first response and changes nothing. Kept 24 hours,
  * at most REQUEST_LOG_MAX entries (a few hundred bytes each), in one `state` document. Only a success is kept: a
- * refused request changed nothing, so its repeat is decided again.
+ * refused request changed nothing, so its repeat is decided again. Website dispatch receipts use a separate
+ * permanent SQLite row, including uncertain answers, because an expired receipt must never re-dispatch.
  */
 export const REQUEST_LOG_KEY = 'request_log';
 export const REQUEST_LOG_MAX = 16;
 export const REQUEST_LOG_TTL_MS = 24 * 60 * MINUTE_MS;
-type RequestMethod = 'run_canary' | 'override_guard' | 'dismiss_attention' | 'restore_attention';
+type RequestMethod = 'run_canary' | 'override_guard' | 'dismiss_attention' | 'restore_attention' | 'website_sync';
 interface RequestLogEntry {
   readonly id: string;
   readonly method: RequestMethod;
@@ -410,9 +419,11 @@ export class HomeState extends DurableObject<Env> {
     });
   }
 
-  /** The first answer to `requestId` within 24 h, `reused` when another method answered it, else null. */
+  /** Website receipts persist across all retries; other mutation answers expire after 24 h. */
   private replay(requestId: string | null, method: RequestMethod, now: number, inputKey?: string): unknown {
     if (requestId === null) return null;
+    const website = this.ctx.storage.sql.exec<{ answer: string }>('SELECT answer FROM website_sync_requests WHERE request_id = ?', requestId).toArray()[0];
+    if (website !== undefined) return method === 'website_sync' ? JSON.parse(website.answer) as WebsiteSyncRequestResult : 'reused';
     const entry = (this.doc<{ entries: RequestLogEntry[] }>(REQUEST_LOG_KEY)?.entries ?? []).find((e) => e.id === requestId && now - e.at < REQUEST_LOG_TTL_MS);
     if (entry === undefined) return null;
     return entry.method === method && (inputKey === undefined || entry.input_key === inputKey) ? entry.answer : 'reused';
@@ -421,8 +432,31 @@ export class HomeState extends DurableObject<Env> {
   /** Keeps a success's answer under its request_id: the newest REQUEST_LOG_MAX of the last 24 hours. */
   private remember(requestId: string | null, method: RequestMethod, answer: unknown, now: number, inputKey?: string): void {
     if (requestId === null) return;
+    if (method === 'website_sync') {
+      // Website receipts cannot be evicted by the ordinary mutation log's sixteen-entry bound.
+      this.ctx.storage.sql.exec('INSERT INTO website_sync_requests (request_id, at, answer) VALUES (?, ?, ?) ON CONFLICT (request_id) DO UPDATE SET answer = excluded.answer', requestId, now, JSON.stringify(answer));
+      return;
+    }
     const kept = (this.doc<{ entries: RequestLogEntry[] }>(REQUEST_LOG_KEY)?.entries ?? []).filter((e) => e.id !== requestId && now - e.at < REQUEST_LOG_TTL_MS);
     this.putDoc(REQUEST_LOG_KEY, { entries: [{ id: requestId, method, at: now, answer, ...(inputKey === undefined ? {} : { input_key: inputKey }) }, ...kept].slice(0, REQUEST_LOG_MAX) }, now);
+  }
+
+  /** Persist uncertainty before dispatch: loss of the external response can never cause a second POST. */
+  requestWebsiteSync(requestId: string, at: number | null = null): Promise<WebsiteSyncOutcome> {
+    return this.serialize(async () => {
+      const now = at ?? Date.now();
+      const replay = this.replay(requestId, 'website_sync', now);
+      if (replay === 'reused') return { ok: false, code: 'request_id_reused' };
+      if (replay !== null && (replay as WebsiteSyncRequestResult).state !== 'unconfirmed') {
+        return { ok: true, request: replay as WebsiteSyncRequestResult };
+      }
+      if (replay === null) this.remember(requestId, 'website_sync', unconfirmedWebsiteRequest(requestId), now);
+      const result = await callWebsiteRequest(this.env, requestId, replay !== null);
+      const request = result.ok ? result.value : (replay as WebsiteSyncRequestResult | null) ?? unconfirmedWebsiteRequest(requestId, result.code);
+      this.remember(requestId, 'website_sync', request, now);
+      this.bumpRev(now);
+      return { ok: true, request };
+    });
   }
 
   dismissAttention(name: string, etag: string, requestId: string, at: number | null = null): Promise<AttentionMutationOutcome> {

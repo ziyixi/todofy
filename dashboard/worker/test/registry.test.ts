@@ -90,7 +90,7 @@ describe('the registry', () => {
       links: 'public_http',
       watch: 'ops_v1',
       website: 'public_http',
-      'notion-publish': 'analytics',
+      'notion-publish': 'ops_v1',
       newsletter: 'ops_v1',
       fleet: 'ops_v1',
       home: 'self',
@@ -154,10 +154,10 @@ describe('the registry', () => {
   });
 
   it('keeps the tick within the Workers Free subrequest budget', () => {
-    // 6 status() + 3 probes (website, FlowDay, links) + 1 GraphQL + 4 setGuard + 2 canary calls + 1 reportOps + 12 drift calls.
-    expect(outboundPerTick()).toBe(29);
+    // 7 status() + 3 probes (website, FlowDay, links) + 1 GraphQL + 4 setGuard + 2 canary calls + 1 reportOps + 12 drift calls.
+    expect(outboundPerTick()).toBe(30);
     expect(outboundPerTick()).toBeLessThanOrEqual(MAX_OUTBOUND_PER_TICK);
-    expect(outboundPerRefresh()).toBe(9);
+    expect(outboundPerRefresh()).toBe(10);
   });
 
   it('serves a public view without bindings or probe URLs, within its budget', () => {
@@ -263,7 +263,7 @@ describe('validateRegistry', () => {
     // Declaring the path outside Access (and the rest of what that needs) is what allows it.
     const exempt = copy();
     entry(exempt, 'link-demo').status = { type: 'public_http', url: 'https://link-demo.ziyixi.science/robots.txt', expect: [200], content_type: 'text/plain', outside_access: true, enabled: true };
-    expect(problems(exempt)).toEqual([]);
+    expect(problems(exempt).filter(problem => !problem.startsWith('budget:'))).toEqual([]);
     const linkOnly = copy();
     entry(linkOnly, 'link-demo').tile_metric = { kind: 'latency' };
     expect(problems(linkOnly)).toContain('entry link-demo: tile_metric latency does not fit status link_only');
@@ -306,7 +306,7 @@ describe('validateRegistry', () => {
     tasks.workers = ['mail-hero'];
     tasks.hold_signals = ['not_a_signal_here'];
     delete forward.note;
-    flow(r, 'site-publish').stages[1] = { id: 'publish', name: '发布', entry: 'notion-publish', signals: ['parse_failed'] };
+    flow(r, 'site-publish').stages[1] = { id: 'publish', name: '发布', entry: 'website', signals: ['parse_failed'] };
     const found = problems(r);
     expect(found).toContain('flow mail-to-task: mail-hero:endpoint_blocked claimed twice');
     expect(found).toContain('flow mail-to-task stage tasks: worker mail-hero is not a worker of todofy');

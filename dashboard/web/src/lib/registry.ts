@@ -102,6 +102,7 @@ export function targetLabel(reg: Reg, target: Target, source: string): string {
  * flow it takes part in, else 操作与记录.
  */
 export function entryPageHash(reg: Reg, entry: RegistryEntry): { hash: string; what: string } {
+  if (entry.id === 'notion-publish') return { hash: routeHash({ view: 'ops' }), what: '查看操作与记录' }
   const script = entry.scripts[0]
   if (script !== undefined) return { hash: routeHash({ view: 'cloudflare', script }), what: '查看 Cloudflare 中的 Worker' }
   const flow = flowsOfEntry(reg, entry.id)[0]

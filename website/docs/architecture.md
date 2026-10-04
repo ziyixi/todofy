@@ -1,27 +1,20 @@
 # Architecture
 
-Two Cloudflare Workers on Workers Free, both deployed only from GitHub Actions, plus the build and the
-Notion write-back in GitHub Actions. No Worker ever renders a page or reads Notion content at request
-time.
+Two Cloudflare Workers on Workers Free, deployed from GitHub Actions. Visitor requests use static
+assets only. The relay dispatches a daily content sync and accepts the Home owner's manual sync through
+a private service binding; only Actions reads Notion and builds the website.
 
-```
-Notion Blog data source ──(read: sync)──────────────┐
-   ▲  │                                             │
-   │  └─(buttons: Send webhook + secret header)──►  Worker ziyixi-notion-publish (relay/)
-   │                                                   fetch(): /publish /refresh-status
-   │                                                   scheduled(): every 15 min, change detector
-   │                                                   │ workflow_dispatch, fixed inputs
-   │                                                   ▼
-   │                     .github/workflows/website-release.yml (concurrency group website-production)
-   │                        ◄── also dispatched by ci.yml "Website deploy" after a website push on main
-   │                        ◄── and by its own schedule (10:30–15:30 UTC): the relay's reconcile, when not yet run
-   │                        Notion sync → next build (export) → wrangler dev verify → versions upload
-   │                        → versions deploy → triggers deploy → live verify → rollback on failure
-   └──(write: feedback)──── Notion status properties + database description
-                                                       ▼
-                               Worker ziyixi-website (assets only, wrangler.toml)
-                               Custom Domains www.ziyixi.science (canonical) and ziyixi.science
-                               (one dedicated certificate for both; see Hostnames)
+```text
+Notion Blog (Draft / Published)
+  │ full snapshot read, once per release
+  ▼
+website-release.yml ◄── daily relay / Home 立即同步 / code push / manual recovery
+  │ green commit → snapshot → compare identity
+  │ unchanged: successful check receipt, no deploy
+  │ changed: build → verify → upload → deploy → live verify (rollback on failure)
+  ▼
+Website Worker (static assets only)
+  └── GitHub website-release ledger + website-content-sync check receipts → Home status
 ```
 
 ## Hostnames
@@ -83,7 +76,7 @@ zone routes and the preview Custom Domain `website-preview.ziyixi.science` were 
   `Strict-Transport-Security: max-age=63072000` (what Vercel sent; the zone's own HSTS is off; no
   includeSubDomains or preload, other subdomains are separate apps) and `Access-Control-Allow-Origin: *`
   (Vercel sent it on every static response; browser-based feed readers rely on it); `no-store` on `/build-info.json` and
-  `/publication-state.json` (the release verifier and the Notion status check read them and refuse cached
+  `/publication-state.json` (the release verifier and the Home status reader read them and refuse cached
   answers); `application/rss+xml; charset=utf-8` on `/feed.xml`; `immutable` on the content-addressed
   `/_next/static/*`, `/media/*` and `/_img/*`.
 - **Redirects** (`out/_redirects`): the snapshot's slug-change and configured redirects as literal 308
@@ -133,72 +126,24 @@ state between releases: the Worker version, its predecessor, the live hostname, 
 history and feed GUIDs, which drive automatic slug-change redirects and the non-empty → empty guard) and
 the route contract. See [`release.md`](release.md).
 
-## Automatic releases
+## Daily content sync
 
-The relay's `scheduled()` handler runs every 15 minutes (`7,22,37,52 * * * *`; the account's third of five
-Workers Free cron triggers, after `home` and `todofy`). Each tick normally makes three subrequests (at most
-five) and keeps no state of its own:
+The relay dispatches one ordinary release per day. Home offers **立即同步** for a quicker update. Both
+use the same release workflow and concurrency lock as code pushes. There is no Notion change detector,
+public webhook button, status-only workflow or GitHub fallback schedule. The relay does not need a
+Notion token; Draft/Published and content remain in the Actions snapshot pipeline.
 
-1. **GitHub**: list the newest 50 runs of `website-release.yml` on `main`. If one is queued or running,
-   stop (`RUN_ACTIVE`). The newest release run (any trigger, any outcome) defines the window: `since` = its
-   start, `finishedAt` = its last update. Its trigger is read from the run name
-   `Website <operation> (<trigger>)`.
-2. **Notion**: a data-source query (page size 100, newest edit first) for rows that were edited since
-   `since` − 1 minute (Notion reports edit times to the minute), or are `待定时发布` with `PublishedAt` ≤
-   **now** (an instant, not "today": a date-only date is due at UTC midnight, exactly as the build reads
-   it), or are `有修改待发布` / `待下线`. Only the rule fields are read. Every release's write-back edits
-   every row, so right after one every row matches: the detector reads a second result page if there is
-   one, and if still more rows match, one more query for only the due and pending rows (the newest edits,
-   the only ones that can be author edits, are already on the first pages).
-3. **Rules**:
-   - an _author edit_ is a row edited since `since` whose last edit is not the status write-back (the
-     write-back records each row's `检查时间` as the instant of that row's own write, so its edit lands
-     within seconds of it, however long the check's content read took; an edit between that minute and
-     three minutes later is the bot's; `IGNORED_EDITOR_IDS` can list more editors) and that is not a draft
-     that was never public;
-   - a _due post_ is `待定时发布` whose `PublishedAt` passed after `since` (a release that started after it
-     became due already published it);
-   - a _pending state_ is `有修改待发布`/`待下线` written by a check after `finishedAt`, i.e. a 刷新状态 run
-     that found changes a bot edit had masked;
-   - a _follow-up_ is such a state written by the newest release's own write-back (between `since` and
-     `finishedAt`): the author changed the row while that release ran, after its Notion snapshot, and the
-     write-back's edit masked the author's edit time. It dispatches one release with `trigger=pending`;
-     states written by a `pending` release never count, so a release that cannot converge re-triggers
-     itself at most once;
-   - **quiet period**: nothing is dispatched while the newest author edit (or pending check) is less than
-     25 minutes old (`QUIET_MINUTES`);
-   - **circuit breaker**: at most 6 automatic (`trigger=cron` or `pending`) releases per UTC day
-     (`MAX_AUTO_RELEASES_PER_DAY`), then `AUTO_CAP_REACHED`;
-   - **failure stop**: after 3 failed release runs in a UTC day (for example a blocked gate that needs
-     `recovery`), nothing more is dispatched that day (`FAILURES_TODAY`); each failure already sent
-     GitHub's notification;
-   - **daily reconcile**: the first tick at or after 10:00 UTC (`RECONCILE_UTC_HOUR`) without a
-     `reconcile` run today dispatches one release anyway. It catches what the rules cannot see: a failed
-     release's earlier edits, edits to synced blocks elsewhere, and child-block edits that do not move the
-     page's edit time.
-4. **Dispatch**: `operation=release`, `confirmation=release:www.ziyixi.science`, `force_build=false`,
-   `allow_empty=false`, `trigger=cron|pending|reconcile`. The release skips the deploy when the identity did not
-   change, so a reconcile on an unchanged day costs one short Actions run and refreshes the Notion feedback.
-
-**Without the relay.** `website-release.yml` also runs on a GitHub Actions schedule, hourly from 10:30 to
-15:30 UTC (after `RECONCILE_UTC_HOUR`). Its jobs dispatch the relay's own reconcile release
-(`Website release (reconcile)`, with the run's `GITHUB_TOKEN`) only if no reconcile run exists today, no
-other release is queued or running, the latest release record is `success` (never during a recovery gate),
-fewer than 3 releases failed today and the relay's quiet period has passed (the same `decide` on the same
-Notion rows). So the daily reconcile keeps happening while the relay cannot dispatch, and a working relay
-sees it as today's reconcile ([`release.md`](release.md#daily-schedule)). The scheduled run itself
-(`Website scheduled reconcile`) never releases and the relay ignores it.
-
-`AUTO_PUBLISH = "false"` in `relay/wrangler.toml` turns the detector off (buttons keep working; the daily
-schedule is separate, see above). Known limits: a failed release does not write feedback, so edits made before it wait for the reconcile (the
-failed run's GitHub notification is the alert); a dispatch PAT that expires makes every tick log
-`GITHUB_UNAVAILABLE`/`DISPATCH_FAILED` (Workers Logs) and the buttons answer 502.
+The complete snapshot is hashed on every release, including child blocks and media. A matching identity
+creates a successful content-check receipt and skips the build/deploy. A changed identity becomes
+successful only after the live hostname serves the verified release. GitHub run state, content-check
+receipts, the accepted release ledger and live identity are read together to show actual progress and
+failures in Home. See [release stages and receipt contract](release.md).
 
 ## Costs (Workers Free)
 
-Page views: static assets, free and unlimited (on `www` and the apex alike: no Worker script runs). Relay: 96 scheduled invocations and normally ~290 subrequests a
-day (at most 5 per tick) plus the button clicks, each far under 10 ms CPU for a blog of this size. GitHub
-Actions: public repository, standard runners (the schedule adds up to six short check jobs a day, and one
-dispatch job on the day's due hour).
+Static asset requests are free and do not run Worker code. The relay has one daily scheduled invocation
+plus owner actions/status reads. Notion content downloads and builds run in GitHub Actions on standard
+public-repository runners. No new Durable Object or paid scheduling service is required.
+
 The live site has no analytics beacon today (checked 2026-09-30: no `cloudflareinsights` in the HTML of any
 page); adding Cloudflare Web Analytics would be a separate owner decision, not part of the migration.

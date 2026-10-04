@@ -26,6 +26,21 @@ export function wranglerArgs(env) {
   return ["--var", `BUILD_SHA:${injectedVars(env).BUILD_SHA}`];
 }
 export function generateSecrets(env) {
+  // Accept the prior complete map during this content-only cutover; never upload retired inputs.
+  const source = env.WEBSITE_RELAY_WORKER_SECRETS;
+  if (source) {
+    let previous;
+    try {
+      previous = JSON.parse(source);
+    } catch {
+      throw new SettingError("WEBSITE_RELAY_WORKER_SECRETS");
+    }
+    if (previous && typeof previous === "object" && !Array.isArray(previous)) {
+      for (const name of ["NOTION_TOKEN", "NOTION_DATA_SOURCE_ID", "NOTION_WEBHOOK_SECRET"])
+        delete previous[name];
+      env = { ...env, WEBSITE_RELAY_WORKER_SECRETS: JSON.stringify(previous) };
+    }
+  }
   return mergeWorkerSecrets("ziyixi-notion-publish", env, {}, SettingError);
 }
 export function writeSecrets(path, env) {

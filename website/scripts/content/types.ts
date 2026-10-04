@@ -14,6 +14,8 @@ export interface PreparedSource {
   posts: Post[];
   media: MediaAsset[];
   diagnostics: SourceDiagnostics;
+  /** Internal Notion proof; never included in the public snapshot or manifest. */
+  emptyCollectionConfirmed?: true;
 }
 
 export interface SourceContext {

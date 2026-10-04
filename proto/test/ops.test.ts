@@ -128,7 +128,7 @@ describe('the services are each app’s entrypoint', () => {
     expect(fieldRules(ops.OpsStatusSchema.field.counters).maxItems).toBe(32);
     expect(fieldRules(ops.SignalSchema.field.metrics).maxItems).toBe(12);
     expect(fieldRules(ops.OpsReportSchema.field.items).maxItems).toBe(20);
-    expect(fieldRules(ops.OpsStatusSchema.field.app).allowed).toEqual(['mail-hero', 'todofy', 'lab', 'watch', 'fleet', 'newsletter']);
+    expect(fieldRules(ops.OpsStatusSchema.field.app).allowed).toEqual(['mail-hero', 'todofy', 'lab', 'watch', 'fleet', 'newsletter', 'notion-publish']);
     expect(wireEnum(ops.ErrorCodeSchema, ops.ErrorCode).names).toEqual(['invalid_input', 'busy', 'unavailable']);
     expect(wireEnum(ops.GuardLevelSchema, ops.GuardLevel).names).toEqual(['normal', 'shed']);
   });

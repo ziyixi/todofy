@@ -21,7 +21,7 @@ ifneq ($(LOCAL_NODE_BIN),)
 export PATH := $(LOCAL_NODE_BIN):$(PATH)
 endif
 
-.PHONY: help install sync preview dev build-export serve-export check notion-status check-runtime
+.PHONY: help install sync preview dev build-export serve-export check check-runtime
 
 help:
 	@printf '%s\n' \
@@ -32,7 +32,6 @@ help:
 	  'make build-export  Build the static export (out/) from the existing snapshot' \
 	  'make serve-export  Build out/ and serve it as production does (wrangler dev, port 4173)' \
 	  'make check    Run formatting, lint, type checks, and unit tests' \
-	  'make notion-status  Refresh Notion feedback from the live website (no deployment)' \
 	  'Preview URL: http://localhost:3000 (override with PORT=3001)' \
 	  'Deploys run only in GitHub Actions (docs/release.md); the relay deploys from CI too.'
 
@@ -86,6 +85,3 @@ serve-export: build-export
 
 check: check-runtime
 	$(PNPM) check
-
-notion-status: check-runtime
-	"$(NODE)" --env-file=.env.local --import tsx scripts/notion/sync-status.ts

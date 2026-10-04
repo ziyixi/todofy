@@ -9,6 +9,8 @@ export function freshnessText(freshness: Freshness, now: Date): string | null {
   switch (freshness.kind) {
     case 'canary':
       return freshness.at ? `端到端成功 ${formatDayTime(freshness.at, now)}` : '金丝雀还没有成功记录'
+    case 'content_check':
+      return freshness.at ? `内容检查 ${formatDayTime(freshness.at, now)}` : '还没有完整内容检查记录'
     case 'activity':
       return freshness.at ? `最近有请求 ${formatDayHour(freshness.at, now)}` : '还没有观察到活动'
     case 'digest':

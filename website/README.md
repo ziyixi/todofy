@@ -7,8 +7,8 @@ never reach Notion or any Worker code.
 | Part        | What it is                                                                                                                                                                                                                   | Docs                                           |
 | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
 | The site    | `next build` with `output: "export"` → `out/`, served by the assets-only Worker **`ziyixi-website`** ([`wrangler.toml`](wrangler.toml)) on its Custom Domains `www.ziyixi.science` (canonical) and the apex `ziyixi.science` | [`docs/architecture.md`](docs/architecture.md) |
-| The release | `.github/workflows/website-release.yml` (repository root): Notion sync, build, verify, Worker version upload/deploy, live check, rollback, Notion feedback; also a daily reconcile on its own schedule                       | [`docs/release.md`](docs/release.md)           |
-| The relay   | Worker **`ziyixi-notion-publish`** ([`relay/`](relay/)): the Notion buttons and the 15-minute change detector that publishes automatically                                                                                   | [`relay/README.md`](relay/README.md)           |
+| The release | `.github/workflows/website-release.yml` (repository root): Notion sync, build, verify, Worker version upload/deploy, live check, rollback and content-check receipts                                                         | [`docs/release.md`](docs/release.md)           |
+| The relay   | Worker **`ziyixi-notion-publish`** ([`relay/`](relay/)): daily content sync and Home manual sync, without reading Notion                                                                                                     | [`relay/README.md`](relay/README.md)           |
 | The cutover | Vercel → Cloudflare (2026-09-29/30), historical; the hostnames changed again on 2026-10-01                                                                                                                                   | [`docs/cutover.md`](docs/cutover.md)           |
 
 This directory is one app of the monorepo (root [`README.md`](../README.md), [`AGENTS.md`](../AGENTS.md)). It
@@ -28,15 +28,14 @@ For your real Notion articles, configure `NOTION_TOKEN` and `NOTION_DATA_SOURCE_
 make preview        # sync Notion, then the Next dev server on http://localhost:3000
 ```
 
-| Command              | What it does                                                                                   |
-| -------------------- | ---------------------------------------------------------------------------------------------- |
-| `make preview`       | Sync Notion, then start the development server                                                 |
-| `make sync`          | Sync Notion without starting a server                                                          |
-| `make dev`           | Start the development server on the existing snapshot                                          |
-| `make build-export`  | Build the static export `out/` from the existing snapshot                                      |
-| `make serve-export`  | Build `out/` and serve it exactly as production does (`wrangler dev`, <http://127.0.0.1:4173>) |
-| `make check`         | Formatting, lint, type checks and unit tests                                                   |
-| `make notion-status` | Compare Notion with the live site and write the feedback (writes to Notion)                    |
+| Command             | What it does                                                                                   |
+| ------------------- | ---------------------------------------------------------------------------------------------- |
+| `make preview`      | Sync Notion, then start the development server                                                 |
+| `make sync`         | Sync Notion without starting a server                                                          |
+| `make dev`          | Start the development server on the existing snapshot                                          |
+| `make build-export` | Build the static export `out/` from the existing snapshot                                      |
+| `make serve-export` | Build `out/` and serve it exactly as production does (`wrangler dev`, <http://127.0.0.1:4173>) |
+| `make check`        | Formatting, lint, type checks and unit tests                                                   |
 
 The content step (`make sync`, `pnpm content:prepare*`) writes `.generated/content/`, `public/media/` and the
 responsive image variants `public/_img/` with their map `.generated/images.json`. Every Next.js command
@@ -72,11 +71,11 @@ pnpm exec wrangler deploy --dry-run --config relay/wrangler.toml
 
 ## Production
 
-Deploys run only from GitHub Actions on `main` (never from a laptop): a website change on `main` runs
-`Website deploy` after the CI gate, which dispatches `website-release.yml` just as the Notion buttons and
-the relay's detector do (every release builds the newest `main` commit that passed the CI gate), and a
-`website/relay/` change runs `Website relay deploy`. The release workflow's own schedule (hourly 10:30–15:30 UTC)
-also dispatches the relay's daily reconcile release when the relay has not
-([`docs/release.md`](docs/release.md#daily-schedule)). The GitHub `production` environment
-holds `WEBSITE_NOTION_TOKEN`, `WEBSITE_NOTION_DATA_SOURCE_ID` and the monorepo's `CF_API_TOKEN`; every
-other production value is committed (`wrangler.toml`, `relay/wrangler.toml`, the workflow's `env`).
+Deploys run only from GitHub Actions on `main`. A website code push dispatches `website-release.yml`
+after the CI gate. The relay dispatches the same workflow daily, and Home offers **立即同步** for manual
+updates. Each release builds the newest main commit that passed the CI gate, checks the full Notion
+snapshot, and skips deployment when its identity is unchanged. GitHub receipts and live verification
+provide the status shown in Home ([release details](docs/release.md)).
+
+The GitHub `production` environment holds `WEBSITE_NOTION_TOKEN`, `WEBSITE_NOTION_DATA_SOURCE_ID` and
+`CF_API_TOKEN`. Notion is read only; the old publish buttons and status write-back are retired.

@@ -150,10 +150,12 @@ NEXT_SOURCE_DIRS = ("app", "components", "features", "lib")
 
 
 def production_sources(manifest: Path) -> list[Path]:
-    """The TypeScript a package ships: src/** (or a Next.js app's NEXT_SOURCE_DIRS), without tests (*.test.*) and test
-    helpers (a test/ or __tests__/ directory)."""
+    """The TypeScript a package ships: src/** (or Next.js sources) and its relay/src/** when the same manifest
+    builds both Workers, without tests (*.test.*) or helpers (test/ and __tests__/)."""
     base = manifest.parent
     roots = [base / "src"] if (base / "src").is_dir() else [base / name for name in NEXT_SOURCE_DIRS if (base / name).is_dir()]
+    if (base / "relay" / "src").is_dir():
+        roots.append(base / "relay" / "src")
     return [
         path
         for root in roots
@@ -340,11 +342,25 @@ class Users(unittest.TestCase):
                     match, f"postinstall must be exactly `node <...>/proto/tools/ensure.mjs`: {postinstall!r}"
                 )
                 self.assertEqual((manifest.parent / match.group(1)).resolve(), PROTO / "tools" / "ensure.mjs")
-                lock = json.loads((manifest.parent / "package-lock.json").read_text())
-                self.assertEqual(
-                    lock["packages"][f"node_modules/{TS_PACKAGE}"],
-                    {"resolved": spec.removeprefix("file:"), "link": True},
-                )
+                if data.get("packageManager", "").startswith("pnpm@"):
+                    # pnpm file: copies a package; the explicit native override must keep generated sources
+                    # and the one runtime in proto/'s canonical tree, as npm's file: symlink does.
+                    target = "link:" + spec.removeprefix("file:")
+                    workspace = (manifest.parent / "pnpm-workspace.yaml").read_text()
+                    self.assertRegex(workspace, rf"(?m)^overrides:\n  ['\"]?{re.escape(TS_PACKAGE)}['\"]?: ['\"]?{re.escape(target)}['\"]?$")
+                    lock = (manifest.parent / "pnpm-lock.yaml").read_text()
+                    importer = lock.split("\nimporters:\n", 1)[1].split("\npackages:\n", 1)[0]
+                    dependency = re.search(rf"(?m)^      ['\"]{re.escape(TS_PACKAGE)}['\"]:\n        specifier: ([^\n]+)\n        version: ([^\n]+)$", importer)
+                    self.assertIsNotNone(dependency, "the pnpm importer must lock the shared proto dependency")
+                    self.assertEqual(dependency.group(1), target)
+                    self.assertEqual(dependency.group(2), target)
+                    self.assertNotIn(f"{TS_PACKAGE}@file:", lock, "pnpm must not copy the canonical proto package")
+                else:
+                    lock = json.loads((manifest.parent / "package-lock.json").read_text())
+                    self.assertEqual(
+                        lock["packages"][f"node_modules/{TS_PACKAGE}"],
+                        {"resolved": spec.removeprefix("file:"), "link": True},
+                    )
 
     def test_jobs_that_install_a_user_key_their_npm_cache_on_the_proto_lockfile(self):
         """Installing a TypeScript user runs proto/tools/ensure.mjs, which installs proto/'s own packages: a job whose npm
@@ -499,6 +515,23 @@ class Users(unittest.TestCase):
         self.assertFalse([path for path in sources if "__tests__" in path.parts])
         values = {name for path in sources for name, type_only in ts_proto_imports(path.read_text()) if not type_only}
         self.assertIn("@ziyixi/proto/flowday/ui/v1/flowday_ui_service_pb", values)
+
+    def test_the_website_manifest_covers_its_separate_relay_bundle(self):
+        manifest = REPO / "website" / "package.json"
+        sources = production_sources(manifest)
+        self.assertIn(REPO / "website" / "relay" / "src" / "status.ts", sources)
+        self.assertFalse([path for path in sources if "tests" in path.parts or "node_modules" in path.parts])
+        values = {name for path in sources for name, type_only in ts_proto_imports(path.read_text()) if not type_only}
+        self.assertIn("@ziyixi/proto/website/sync/v1/sync_pb", values)
+        self.assertIn("@ziyixi/proto/ops/v1/ops_pb", values)
+
+    def test_ops_descriptors_include_the_embedded_website_sync_package(self):
+        imports = value_importers()
+        users = {app for app, paths in imports.items() if any(path.startswith("proto/ops/") for path in paths)}
+        self.assertEqual(users, {"mail-hero", "lab", "todofy", "dashboard", "watch", "website"})
+        for app in users:
+            with self.subTest(app=app):
+                self.assertIn("proto/website/sync/v1/sync.proto", imports[app])
 
     def test_type_only_imports_are_told_apart(self):
         text = (

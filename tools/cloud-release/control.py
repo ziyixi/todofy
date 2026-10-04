@@ -34,6 +34,17 @@ MANUAL = {
     "ROUTE_REMOVAL_REQUIRED",
     "ROUTE_OWNERSHIP_CONFLICT",
 }
+RETIRED_WEBSITE_BINDINGS = {
+    "NOTION_TOKEN",
+    "NOTION_DATA_SOURCE_ID",
+    "NOTION_WEBHOOK_SECRET",
+    "NOTION_API_VERSION",
+    "AUTO_PUBLISH",
+    "QUIET_MINUTES",
+    "MAX_AUTO_RELEASES_PER_DAY",
+    "RECONCILE_UTC_HOUR",
+    "IGNORED_EDITOR_IDS",
+}
 
 
 def read_toml(path):
@@ -161,6 +172,14 @@ def preflight(source, app, sha, repair, cloud, github, check_only=False):
         for change in changes:
             if change["reason"] == "OPERATIONAL_SWITCH_CHANGED":
                 change["reason"] = "OPERATIONAL_RELEASE_UPDATE"
+            if (
+                app == "website-relay"
+                and change["reason"] == "BINDING_UNDECLARED"
+                and change["field"] in RETIRED_WEBSITE_BINDINGS
+                and "DAILY_SYNC_CRON" in configs[0].get("vars", {})
+            ):
+                # Explicit owner-approved retirement; other undeclared bindings still stop release/repair.
+                change["reason"] = "LEGACY_WEBSITE_BINDING_RETIRED"
     if any(item["reason"] in MANUAL for item in changes):
         print(json.dumps({"state": "manual_required", "changes": changes}))
         raise ReleaseError("REPAIR_MANUAL_REQUIRED")

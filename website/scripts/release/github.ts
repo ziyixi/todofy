@@ -1,4 +1,9 @@
 import { RELEASE_ENVIRONMENT, RELEASE_TASK, type ReleasePayload } from "./payload";
+import {
+  CONTENT_SYNC_ENVIRONMENT,
+  CONTENT_SYNC_TASK,
+  type ContentSyncPayload,
+} from "./content-sync";
 
 export type Fetch = typeof fetch;
 
@@ -122,6 +127,34 @@ export class GitHubClient {
       description: "Verified website version awaiting deployment",
       transient_environment: false,
       production_environment: true,
+      payload,
+    });
+    if (!Number.isSafeInteger(created.id)) throw new Error("GitHub returned no deployment ID.");
+    return created.id;
+  }
+
+  /** The small content-check ledger is separate from the release/rollback state. */
+  async contentSyncRecords(): Promise<DeploymentRow[]> {
+    const rows = await this.request<DeploymentRow[]>(
+      "GET",
+      `/deployments?environment=${CONTENT_SYNC_ENVIRONMENT}&task=${CONTENT_SYNC_TASK}&per_page=25`,
+    );
+    if (!Array.isArray(rows)) throw new Error("GitHub returned a non-array content-sync page.");
+    return newestFirst(rows);
+  }
+
+  async createContentSyncRecord(payload: ContentSyncPayload, ref: string): Promise<number> {
+    if (!/^[0-9a-f]{40}$/.test(ref))
+      throw new Error("A content-sync record needs a full commit SHA.");
+    const created = await this.request<{ id: number }>("POST", "/deployments", {
+      ref,
+      task: CONTENT_SYNC_TASK,
+      auto_merge: false,
+      required_contexts: [],
+      environment: CONTENT_SYNC_ENVIRONMENT,
+      description: "Website content sync receipt",
+      transient_environment: false,
+      production_environment: false,
       payload,
     });
     if (!Number.isSafeInteger(created.id)) throw new Error("GitHub returned no deployment ID.");

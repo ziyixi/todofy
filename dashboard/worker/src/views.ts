@@ -84,6 +84,9 @@ export function homeResponse(
     return row === undefined ? [] : [{ ...row, breakdown: [] }];
   });
   const receipt = input.digest.last_receipt;
+  const website = input.statuses['notion-publish'];
+  const evidence = website?.status?.website_sync;
+  const websiteSync = evidence === undefined || website?.ok !== false ? evidence : { ...evidence, error_code: website.error ?? 'unavailable' };
   return {
     name: VIEW_NAMES.home,
     ...base,
@@ -98,6 +101,7 @@ export function homeResponse(
       guard_level: desired.level,
     },
     digest: { last_sent_at: isoOrNull(input.digest.last_sent_at), accepted: receipt === null ? null : receipt.stored },
+    ...(websiteSync === undefined ? {} : { website_sync: websiteSync }),
   };
 }
 

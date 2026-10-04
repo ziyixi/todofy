@@ -53,6 +53,7 @@ package ops.v1;
 
 import "common/wire/v1/wire.proto";
 import "google/api/field_behavior.proto";
+import "website/sync/v1/sync.proto";
 
 option java_multiple_files = true;
 option java_outer_classname = "OpsProto";
@@ -169,7 +170,8 @@ message OpsStatus {
         "lab",
         "watch",
         "fleet",
-        "newsletter"
+        "newsletter",
+        "notion-publish"
       ]
       open: true
     }
@@ -236,6 +238,10 @@ message OpsStatus {
       unique: true
     }
   ];
+  // Website-only content-sync evidence; absent on other apps and older Ops releases.
+  // (-- api-linter: core::0215::foreign-type-reference=disabled
+  //     aip.dev/not-precedent: embed the shared internal sync contract without duplicating fields. --)
+  optional website.sync.v1.WebsiteSyncStatus website_sync = 12;
 }
 
 // An app's health.

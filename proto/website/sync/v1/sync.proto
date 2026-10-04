@@ -1,0 +1,275 @@
+// Website content synchronization over a same-account Worker service binding. These messages contain
+// only operation IDs, times, fixed result codes and public release identities, never Notion content.
+// (-- api-linter: core::0127::http-annotation=disabled
+//     aip.dev/not-precedent: an internal service binding, not a public HTTP API. --)
+// (-- api-linter: core::0142::time-field-type=disabled
+//     aip.dev/not-precedent: string UTC times preserve the existing wire JSON profile. --)
+// (-- api-linter: core::0142::time-field-names=disabled
+//     aip.dev/not-precedent: the shared Ops wire uses observed_at and checked_at. --)
+// (-- api-linter: core::0216::state-field-output-only=disabled
+//     aip.dev/not-precedent: REQUIRED marks always-present output fields in the wire profile. --)
+
+// (-- api-linter: core::0131=disabled
+//     aip.dev/not-precedent: internal singleton and exact request lookup, not resource Get RPCs. --)
+// (-- api-linter: core::0136::response-message-name=disabled
+//     aip.dev/not-precedent: dispatch and lookup return the same receipt without wrapper messages. --)
+// (-- api-linter: core::0140::prepositions=disabled
+//     aip.dev/not-precedent: *_at timestamps match the shared Ops wire profile. --)
+
+syntax = "proto3";
+
+package website.sync.v1;
+
+import "common/wire/v1/wire.proto";
+import "google/api/field_behavior.proto";
+import "google/api/field_info.proto";
+
+option java_multiple_files = true;
+option java_outer_classname = "SyncProto";
+option java_package = "science.ziyixi.website.sync.v1";
+option (common.wire.v1.formats) = {
+  name: "Timestamp"
+  pattern: "[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,3})?Z"
+  description: "UTC RFC 3339 time."
+};
+option (common.wire.v1.formats) = {
+  name: "RunId"
+  pattern: "[1-9][0-9]{0,19}"
+  description: "GitHub Actions run identifier, represented as a string."
+};
+option (common.wire.v1.formats) = {
+  name: "RunUrl"
+  pattern: "https://github\\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/actions/runs/[1-9][0-9]{0,19}"
+  description: "Public repository Actions run URL without a query."
+};
+option (common.wire.v1.formats) = {
+  name: "Sha"
+  pattern: "[0-9a-f]{40}"
+  description: "Full source commit identity."
+};
+option (common.wire.v1.formats) = {
+  name: "VersionId"
+  pattern: "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+  description: "Cloudflare Worker version identity."
+};
+option (common.wire.v1.formats) = {
+  name: "ErrorCode"
+  pattern: "[a-z][a-z0-9_]{0,63}"
+  description: "Fixed safe diagnostic code."
+};
+
+// Internal relay operations. A request always selects the configured workflow and main branch.
+service WebsiteSyncService {
+  // Reads bounded GitHub evidence; workflow success alone is not a completed content check.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc GetSyncStatus(GetSyncStatusRequest) returns (WebsiteSyncStatus) {
+    option (common.wire.v1.method).positional = true;
+  }
+  // Sends one new owner request, including when another run is active. Actions serializes releases.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc RequestSync(RequestSyncRequest) returns (WebsiteSyncRequestResult);
+  // Looks up this exact UUID without dispatching; used after a lost acceptance response.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc GetSyncRequest(GetSyncRequestRequest) returns (WebsiteSyncRequestResult);
+}
+
+// No parameters: the relay has one configured website.
+message GetSyncStatusRequest {}
+
+// One owner request. Retries are resolved by GetSyncRequest, never by another dispatch.
+message RequestSyncRequest {
+  // Stable UUID of the Home owner action.
+  string request_id = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.field_info).format = UUID4
+  ];
+}
+
+// Exact request lookup, not a request to publish.
+message GetSyncRequestRequest {
+  // Stable UUID of the original Home owner action.
+  string request_id = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.field_info).format = UUID4
+  ];
+}
+
+// Result of one dispatch or exact lookup. Accepted means queued by GitHub, not published.
+message WebsiteSyncRequestResult {
+  // UUID of the owner action this result belongs to.
+  string request_id = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.field_info).format = UUID4
+  ];
+  // Whether the run is identified, remains uncertain or was definitively rejected.
+  RequestState state = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).non_null = true
+  ];
+  // Exact run ID; absent until GitHub identified it.
+  optional string run_id = 3 [(common.wire.v1.field).format = "RunId"];
+  // Link to the exact run, never another daily or push run.
+  optional string run_url = 4 [(common.wire.v1.field).format = "RunUrl"];
+  // Safe diagnostic; no response body or credential details.
+  optional string error_code = 5 [(common.wire.v1.field).format = "ErrorCode"];
+}
+
+// A fresh provider observation, independently describing checking and verified publication.
+message WebsiteSyncStatus {
+  // When the relay read the evidence.
+  string observed_at = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "Timestamp"
+  ];
+  // Next configured daily Cloudflare tick; it is a plan, not evidence that a check completed.
+  string next_check_at = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "Timestamp"
+  ];
+  // Latest attempt, including failed or blocked work.
+  optional WebsiteSyncAttempt latest_attempt = 3;
+  // Most recent complete content check, even if a later build failed.
+  optional WebsiteContentCheck last_check = 4;
+  // Most recent verified live publication. A no-op does not change it.
+  optional WebsitePublication last_publish = 5;
+  // Current queued or running work; absent when none is observed.
+  optional WebsiteSyncAttempt active_run = 6;
+  // Failure to observe the provider; old successful evidence must not be presented as fresh.
+  optional string error_code = 7 [(common.wire.v1.field).format = "ErrorCode"];
+}
+
+// One Actions attempt. Its state comes from bounded run and content-sync records.
+message WebsiteSyncAttempt {
+  // GitHub run identity.
+  string run_id = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "RunId"
+  ];
+  // Exact public Actions run.
+  string run_url = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "RunUrl"
+  ];
+  // Run attempt; a rerun must not inherit the previous attempt's success.
+  int32 run_attempt = 3 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).minimum = 1
+  ];
+  // Current phase or final result.
+  AttemptState state = 4 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).non_null = true
+  ];
+  // Actions start or queued creation time.
+  string started_at = 5 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "Timestamp"
+  ];
+  // Final completion time; absent while queued or running.
+  optional string completed_at = 6 [(common.wire.v1.field).format = "Timestamp"];
+  // Fixed failure reason or incomplete-evidence reason.
+  optional string error_code = 7 [(common.wire.v1.field).format = "ErrorCode"];
+}
+
+// An actual complete Notion snapshot and identity comparison.
+message WebsiteContentCheck {
+  // Time the complete snapshot comparison succeeded.
+  string checked_at = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "Timestamp"
+  ];
+  // Whether that identity required publication.
+  CheckDecision decision = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).non_null = true
+  ];
+  // Attempt that completed this check.
+  string run_id = 3 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "RunId"
+  ];
+  // Exact attempt's run URL.
+  string run_url = 4 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "RunUrl"
+  ];
+}
+
+// Last verified live website release, independently retained across no-op checks.
+message WebsitePublication {
+  // Time live verification was recorded successfully.
+  string verified_at = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "Timestamp"
+  ];
+  // Actually verified Cloudflare Worker version.
+  string worker_version_id = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "VersionId"
+  ];
+  // Verified website code identity, not merely latest repository HEAD.
+  string code_sha = 3 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "Sha"
+  ];
+  // Run that performed and verified that publication.
+  string run_id = 4 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "RunId"
+  ];
+  // Exact publication run.
+  string run_url = 5 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "RunUrl"
+  ];
+}
+
+// The current result of a dispatch.
+enum RequestState {
+  option (common.wire.v1.closed) = true;
+  // Never sent.
+  REQUEST_STATE_UNSPECIFIED = 0;
+  // GitHub returned or later listed the exact run.
+  REQUEST_STATE_ACCEPTED = 1;
+  // Dispatch may have reached GitHub; the same request must never be sent again.
+  REQUEST_STATE_UNCONFIRMED = 2;
+  // GitHub definitively rejected the dispatch.
+  REQUEST_STATE_FAILED = 3;
+}
+
+// A sync phase or final outcome.
+enum AttemptState {
+  option (common.wire.v1.closed) = true;
+  // Never sent.
+  ATTEMPT_STATE_UNSPECIFIED = 0;
+  // Queued behind the shared publication lock.
+  ATTEMPT_STATE_QUEUED = 1;
+  // Reading and comparing the complete content snapshot.
+  ATTEMPT_STATE_CHECKING = 2;
+  // A changed identity is being built, deployed or verified.
+  ATTEMPT_STATE_PUBLISHING = 3;
+  // Complete content check found the existing identity unchanged.
+  ATTEMPT_STATE_UNCHANGED = 4;
+  // Publication completed and the live identity was verified.
+  ATTEMPT_STATE_PUBLISHED = 5;
+  // A check or publish attempt failed or was cancelled.
+  ATTEMPT_STATE_FAILED = 6;
+  // An existing bootstrap or recovery gate stopped the attempt.
+  ATTEMPT_STATE_BLOCKED = 7;
+  // A finished run lacks sufficient completion evidence.
+  ATTEMPT_STATE_UNCONFIRMED = 8;
+}
+
+// Result of the existing publication identity comparison.
+enum CheckDecision {
+  option (common.wire.v1.closed) = true;
+  // Never sent.
+  CHECK_DECISION_UNSPECIFIED = 0;
+  // No build or deploy was needed.
+  CHECK_DECISION_UNCHANGED = 1;
+  // The existing release pipeline needed a deployment.
+  CHECK_DECISION_DEPLOYMENT_REQUIRED = 2;
+}

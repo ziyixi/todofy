@@ -6,7 +6,7 @@ target = "cloudflare"
 [[workers]]
 config = "website/relay/wrangler.toml"
 personal_secrets = []
-manual_secrets = ["GITHUB_DISPATCH_TOKEN", "NOTION_WEBHOOK_SECRET", "NOTION_TOKEN", "NOTION_DATA_SOURCE_ID"]
+manual_secrets = ["GITHUB_DISPATCH_TOKEN"]
 optional_secrets = []
 hosts = []
 entry = "notion-publish"
@@ -49,8 +49,8 @@ kind = "latency"
 
 [[entries]]
 id = "notion-publish"
-name = "Notion 发布"
-description = "把 Notion 内容发布到网站"
+name = "网站同步"
+description = "每日检查 Notion 内容并同步静态网站"
 group = "services"
 icon = "upload-cloud"
 accent = "slate"
@@ -60,8 +60,7 @@ order = 1
 worker = "ziyixi-notion-publish"
 position = 8
 [entries.status]
-# Existing Q13 rule: no request for 26 hours means attention, not a failed publish.
-type = "analytics"
-max_idle_hours = 26
-[entries.tile_metric]
-kind = "last_active"
+# Complete content checks and verified publication receipts, via a private binding.
+type = "ops_v1"
+binding = "WEBSITE_SYNC"
+guard = false

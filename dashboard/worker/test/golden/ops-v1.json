@@ -601,6 +601,37 @@
     "ui_url": "https://fleet.example.com/",
     "capabilities": []
   },
+  "read/OpsStatus/notion-publish-ok.json": {
+    "version": "ops-v1",
+    "app": "notion-publish",
+    "generated_at": "2026-10-01T14:00:00Z",
+    "health": "ok",
+    "modes": {
+      "maintenance": false
+    },
+    "guard": {
+      "level": "normal",
+      "reason": null,
+      "until": null,
+      "set_at": null,
+      "deferred": []
+    },
+    "signals": [],
+    "counters": {},
+    "last_backup_at": null,
+    "ui_url": "https://home.example.com/",
+    "capabilities": [],
+    "website_sync": {
+      "observed_at": "2026-10-01T14:00:00Z",
+      "next_check_at": "2026-10-02T14:00:00Z",
+      "last_check": {
+        "checked_at": "2026-10-01T14:00:00Z",
+        "decision": "unchanged",
+        "run_id": "12001",
+        "run_url": "https://github.com/example/cloud/actions/runs/12001"
+      }
+    }
+  },
   "read/OpsStatus/status-unavailable.json": {
     "version": "ops-v1",
     "app": "todofy",

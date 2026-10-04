@@ -189,6 +189,7 @@ class Package:
     """The schema of one package: its $defs document, or (``inline``) one of its messages written in place."""
 
     def __init__(self, image: dict[str, Any], package: str, inline: bool = False, open: bool = False) -> None:
+        self.image = image
         self.files = [f for f in image["file"] if f.get("package") == package]
         if not self.files:
             raise GenerateError(f"no file of package {package}")
@@ -203,18 +204,16 @@ class Package:
         self.types: dict[str, tuple[dict[str, Any], dict[str, Any]]] = {}
         # $defs name of a message -> its comment, and (message, field) -> the field's (an image with source info).
         self.comments: dict[Any, str] = {}
-        # A self-contained schema may embed shared messages from directly imported packages.
-        # Index only the declared dependency closure, keep foreign names scoped, and inline their
-        # rules/formats; ordinary package documents retain their existing local $defs identity.
+        # Embed only declared dependencies, with scoped names and formats. Package schemas keep
+        # their existing local $defs; a foreign field is written in place with its own package rules.
         indexed = {file["name"]: file for file in self.files}
         available = {file["name"]: file for file in image["file"]}
-        if self.inline:
-            pending = list(indexed.values())
-            while pending:
-                for dependency in pending.pop().get("dependency", []):
-                    if dependency in available and dependency not in indexed:
-                        indexed[dependency] = available[dependency]
-                        pending.append(available[dependency])
+        pending = list(indexed.values())
+        while pending:
+            for dependency in pending.pop().get("dependency", []):
+                if dependency in available and dependency not in indexed:
+                    indexed[dependency] = available[dependency]
+                    pending.append(available[dependency])
         for file in indexed.values():
             source_package = file.get("package", "")
             prefix = "" if source_package == package else source_package + "."
@@ -243,6 +242,11 @@ class Package:
 
     def ref(self, name: str) -> dict[str, Any]:
         if not self.inline:
+            if name in self.types:
+                file, _element = self.types[name]
+                foreign = file.get("package", "")
+                if foreign != self.package:
+                    return Package(self.image, foreign, inline=True, open=self.open).ref(name.removeprefix(foreign + "."))
             return {"$ref": f"#/$defs/{name}"}
         file, element = self.types[name]
         if "value" in element:  # an enum

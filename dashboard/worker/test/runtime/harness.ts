@@ -40,6 +40,7 @@ async function defaults(app: StubApp): Promise<Record<string, unknown>> {
   if (app === 'lab') {
     return { status: await fixture('OpsStatus/lab-ok.json'), setGuard: await fixture('GuardState/normal.json') };
   }
+  if (app === 'notion-publish') return { status: await fixture('OpsStatus/notion-publish-ok.json') };
   if (app === 'fleet' || app === 'newsletter') {
     return { status: await fixture(`OpsStatus/${app}-ok.json`), setGuard: await fixture('GuardState/normal.json') };
   }
@@ -132,7 +133,7 @@ export interface Harness {
 export async function startHarness(options: HarnessOptions = {}): Promise<Harness> {
   const temp = options.persist ?? (await mkdtemp(join(tmpdir(), 'home-dashboard-')));
   const outbound: Outbound = options.outbound ?? (() => new Response('no outbound fetch expected', { status: 599 }));
-  const scripts = { home: await bundle(), 'mail-hero': await stubScript('mail-hero'), todofy: await stubScript('todofy'), lab: await stubScript('lab'), watch: await stubScript('watch'), fleet: await stubScript('fleet'), newsletter: await stubScript('newsletter') };
+  const scripts = { home: await bundle(), 'mail-hero': await stubScript('mail-hero'), todofy: await stubScript('todofy'), lab: await stubScript('lab'), watch: await stubScript('watch'), fleet: await stubScript('fleet'), newsletter: await stubScript('newsletter'), 'notion-publish': await stubScript('notion-publish') };
   const configure = (bindings: Record<string, string>): ConstructorParameters<typeof Miniflare>[0] =>
     convertV4MiniflareOptions({
       host: '127.0.0.1',
@@ -154,6 +155,7 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
             WATCH: { name: 'watch', entrypoint: 'Ops' },
             FLEET: { name: 'fleet', entrypoint: 'Ops' },
             NEWSLETTER: { name: 'newsletter', entrypoint: 'Ops' },
+            WEBSITE_SYNC: { name: 'notion-publish', entrypoint: 'Ops' },
             ASSETS: () => new Response('<!doctype html><title>home</title>', { headers: { 'content-type': 'text/html' } }),
           },
           bindings,
@@ -165,6 +167,7 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
         { name: 'watch', modules: true, script: scripts.watch, compatibilityDate: '2026-09-08' },
         { name: 'fleet', modules: true, script: scripts.fleet, compatibilityDate: '2026-09-08' },
         { name: 'newsletter', modules: true, script: scripts.newsletter, compatibilityDate: '2026-09-08' },
+        { name: 'notion-publish', modules: true, script: scripts['notion-publish'], compatibilityDate: '2026-09-08' },
         // Calls a stub's Ops method over the same kind of binding "home" has (tests of the stubs).
         {
           name: 'ops-probe',
@@ -172,7 +175,7 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
           compatibilityDate: '2026-09-08',
           script: `export default { async fetch(request, env) {
             const { app, method, args } = await request.json()
-            const target = app === 'mail-hero' ? env.MAIL_HERO : app === 'lab' ? env.LAB : app === 'watch' ? env.WATCH : app === 'fleet' ? env.FLEET : app === 'newsletter' ? env.NEWSLETTER : env.TODOFY
+            const target = app === 'mail-hero' ? env.MAIL_HERO : app === 'lab' ? env.LAB : app === 'watch' ? env.WATCH : app === 'fleet' ? env.FLEET : app === 'newsletter' ? env.NEWSLETTER : app === 'notion-publish' ? env.WEBSITE_SYNC : env.TODOFY
             try { return Response.json({ ok: await target[method](...args) }) }
             catch (error) { return Response.json({ error: error instanceof Error ? error.message : 'not_an_error' }) }
           } }`,
@@ -183,6 +186,7 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
             WATCH: { name: 'watch', entrypoint: 'Ops' },
             FLEET: { name: 'fleet', entrypoint: 'Ops' },
             NEWSLETTER: { name: 'newsletter', entrypoint: 'Ops' },
+            WEBSITE_SYNC: { name: 'notion-publish', entrypoint: 'Ops' },
           },
         },
       ],

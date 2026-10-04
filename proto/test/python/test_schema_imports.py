@@ -41,10 +41,18 @@ class SharedSchemaImports(unittest.TestCase):
         self.assertIn("shared.v2.Leaf", package.types)
         self.assertNotIn("private.v1.Unrelated", package.types)
 
-    def test_unimported_or_noninline_foreign_messages_are_not_silently_adopted(self):
+    def test_package_schema_inlines_declared_foreign_fields_without_changing_local_defs(self):
+        package = gen_schema.Package(self.image(), "report.v1")
+        schema = package.schema("https://contracts.local/report", "Report", "Shared report")
+        self.assertEqual(set(schema["$defs"]), {"Report"})
+        value = schema["$defs"]["Report"]["properties"]["observation"]["properties"]["nested"]
+        self.assertEqual(value["properties"]["key"]["pattern"], r"^(?:[a-z]{1,8})$(?!\n)")
+        self.assertFalse(value["additionalProperties"])
+
+    def test_unimported_foreign_messages_are_not_silently_adopted(self):
         image = self.image()
         image["file"][0]["dependency"] = []
         for package in (gen_schema.Package(image, "report.v1", inline=True),
-                        gen_schema.Package(self.image(), "report.v1")):
+                        gen_schema.Package(image, "report.v1")):
             with self.assertRaises(gen_schema.GenerateError):
                 package.message(image["file"][0], image["file"][0]["messageType"][0])

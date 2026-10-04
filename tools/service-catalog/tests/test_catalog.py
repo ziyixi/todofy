@@ -69,14 +69,17 @@ class CatalogTests(unittest.TestCase):
         (root / "demo/wrangler.toml").write_text(config)
         return root
 
-    def test_existing_public_metadata_is_unchanged_except_monitored_newsletter(self):
+    def test_existing_public_metadata_is_unchanged_except_new_ops_monitors(self):
         loaded = catalog.load_catalog()
         before = json.loads((Path(__file__).parent / "home-before-p5.json").read_text())
         keys = ("id", "name", "description", "group", "icon", "accent", "url", "access", "status", "tile_metric", "app_only_signals", "order")
-        existing = [entry for entry in before["entries"] if entry["id"] not in {"self-hosted", "newsletter"}]
+        existing = [entry for entry in before["entries"] if entry["id"] not in {"self-hosted", "newsletter", "notion-publish"}]
         existing_ids = {entry["id"] for entry in existing}
         entries = [{key: entry[key] for key in keys} for entry in loaded.entries if entry["id"] in existing_ids]
         self.assertEqual(entries, existing)
+        sync = next(entry for entry in loaded.entries if entry["id"] == "notion-publish")
+        self.assertEqual(sync["name"], "网站同步")
+        self.assertEqual(sync["status"], {"type": "ops_v1", "binding": "WEBSITE_SYNC", "guard": False})
         workers = [{key: worker[key] for key in ("script", "entry", "role")} for worker in loaded.workers]
         self.assertEqual([worker for worker in workers if worker["script"] != "fleet"], before["workers"])
 

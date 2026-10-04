@@ -1,37 +1,18 @@
-# The personal website's release (website/docs/release.md). One workflow, one concurrency group:
-# - dispatched by the Notion relay (website/relay): the 发布网站 button (trigger button), the change
-#   detector (cron, reconcile) and the 刷新状态 button (operation status);
-# - dispatched by hand (manual): bootstrap once, recovery after a blocked release, force_build;
-# - dispatched by "Website deploy" in ci.yml after a website push on main passed the CI gate (push);
-# - dispatched by its own daily schedule (reconcile): the relay's reconcile release while the relay cannot
-#   dispatch (jobs scheduled and scheduled-dispatch below; a scheduled run never releases itself).
-# Every release is a run of this workflow named "Website <operation> (<trigger>)", so the relay sees all of
-# them (running, window, failures); a scheduled run is named "Website scheduled reconcile", which the
-# relay's run-name parser ignores, since it only checks and dispatches.
-# Every run builds the newest main commit whose push run passed the CI gate (green-commit.ts), never a
-# newer red, running or [skip ci] one. A release syncs Notion, builds the static export, verifies it under
-# wrangler dev, uploads a Worker version, deploys it only if production still serves the recorded version,
-# verifies the live hostname and rolls back on failure, then writes the Notion feedback. An unchanged
-# identity skips the deploy.
+# One release lock for the daily Worker dispatch, Home, code pushes and manual recovery.
+# Full Notion snapshot + identity comparison; unchanged content is checked without redeploying.
+# website-content-sync receipts report actual checks; website-release retains rollback state.
 name: Website release
-run-name: ${{ github.event_name == 'schedule' && 'Website scheduled reconcile' || format('Website {0} ({1})', inputs.operation, inputs.trigger) }}
+run-name: ${{ format('Website {0} ({1}) [{2}]', inputs.operation, inputs.trigger, inputs.request_id) }}
 
 on:
-  # The daily reconcile release even while the relay cannot dispatch (docs/release.md "Daily schedule"):
-  # hourly from 10:30 to 15:30 UTC, after the relay's reconcile hour (10). Each run dispatches the relay's
-  # reconcile release at most once a day: not after a reconcile run today (the relay's or one dispatched
-  # by an earlier hour), and the relay sees a dispatched one as today's reconcile. GitHub may start a
-  # scheduled run late or drop it under load; the next hour checks again.
-  schedule:
-    - cron: '30 10-15 * * *'
   workflow_dispatch:
     inputs:
       operation:
-        description: release, status (Notion feedback only), bootstrap (first release only) or recovery
+        description: release, bootstrap (first release only) or recovery
         required: true
         type: choice
         default: release
-        options: [release, status, bootstrap, recovery]
+        options: [release, bootstrap, recovery]
       confirmation:
         description: Type <operation>:<configured website host>; append :allow-empty when intentionally clearing Notion
         required: true
@@ -47,11 +28,16 @@ on:
         type: boolean
         default: false
       trigger:
-        description: Who asked (the relay sets button, cron, pending or reconcile; Website deploy sets push)
+        description: Who asked (Home sets manual, the daily relay sets cron, Website deploy sets push)
         required: true
         type: choice
         default: manual
-        options: [manual, button, cron, reconcile, pending, push]
+        options: [manual, cron, push]
+      request_id:
+        description: Optional UUID for Home or daily dispatch correlation
+        required: false
+        type: string
+        default: ""
 
 # GITHUB_TOKEN: read the CI gate results (checks, actions) and write the release records
 # (deployments). Only the steps that need it get it (step env), never install, build or test steps.
@@ -62,138 +48,24 @@ permissions:
   actions: read
 
 env:
-  CI: 'true'
-  WRANGLER_SEND_METRICS: 'false'
+  CI: "true"
+  WRANGLER_SEND_METRICS: "false"
   # Static, public production values (website/docs/release.md); secrets come from the production
   # environment: WEBSITE_NOTION_TOKEN, WEBSITE_NOTION_DATA_SOURCE_ID, CF_API_TOKEN.
-  NOTION_API_VERSION: '2026-03-11'
+  NOTION_API_VERSION: "2026-03-11"
   # The first release (operation bootstrap) continues this repository's last successful Vercel-era
   # release record: the content registry with slug history and feed GUIDs.
   WEBSITE_LEGACY_REPOSITORY: ${{ vars.WEBSITE_LEGACY_REPOSITORY }}
 
 jobs:
-  # A scheduled run, step 1 (scripts/release/scheduled-reconcile.ts): is today's reconcile due? Not after
-  # a reconcile run today, while another run of this workflow is queued or running, before a bootstrap,
-  # during a recovery gate, or after 3 failed releases today. Plain node on the newest CI-green main
-  # commit: no install, no environment, no secret; the token only reads. The repository variable
-  # WEBSITE_SCHEDULED_RECONCILE=false turns the schedule off.
-  scheduled:
-    name: Website scheduled reconcile check
-    if: github.event_name == 'schedule' && vars.WEBSITE_SCHEDULED_RECONCILE != 'false'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    permissions:
-      contents: read
-      actions: read
-      checks: read
-      deployments: read
-    outputs:
-      due: ${{ steps.decide.outputs.due }}
-    defaults:
-      run:
-        working-directory: website
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: refs/heads/main
-          fetch-depth: 0
-          persist-credentials: false
-      - name: Read the configured website URL
-        working-directory: .
-        run: |
-          python3 - >> "$GITHUB_ENV" <<'PYTHON'
-          import json, subprocess
-          result = json.loads(subprocess.check_output(["python3", "tools/cloud-config/outputs.py"]))
-          print("SITE_URL=" + result["website_url"])
-          PYTHON
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
-        with:
-          node-version-file: website/.nvmrc
-      - name: Check out the newest main commit that passed the CI gate
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        run: |
-          sha="$(node --disable-warning=ExperimentalWarning scripts/release/green-commit.ts)"
-          git -c advice.detachedHead=false checkout --detach "$sha"
-      # A CI-green commit from before the schedule existed has no decision code: nothing that hour.
-      - name: Decide whether today's reconcile release is due
-        id: decide
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        run: |
-          if [ ! -f scripts/release/scheduled-dispatch.ts ]; then
-            echo 'due=false' >> "$GITHUB_OUTPUT"
-            echo '::notice::The newest CI-green commit predates the scheduled reconcile; nothing was dispatched.'
-            exit 0
-          fi
-          node --disable-warning=ExperimentalWarning scripts/release/scheduled-reconcile.ts
-
-  # A scheduled run, step 2 (scripts/release/scheduled-dispatch.ts), only when step 1 found it due: check
-  # again, hold during the relay's quiet period (Notion read with the production environment's Notion
-  # secrets, only in that step), then dispatch exactly the relay's reconcile release ("Website release
-  # (reconcile)", the release job below with all its gates). The token may dispatch workflows and read,
-  # nothing else (no release record); no other secret is used.
-  scheduled-dispatch:
-    name: Website scheduled reconcile dispatch
-    needs: scheduled
-    if: >-
-      ${{ !cancelled() && github.event_name == 'schedule'
-      && needs.scheduled.result == 'success' && needs.scheduled.outputs.due == 'true' }}
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    environment:
-      name: production
-    permissions:
-      contents: read
-      actions: write
-      checks: read
-      deployments: read
-    defaults:
-      run:
-        working-directory: website
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: refs/heads/main
-          fetch-depth: 0
-          persist-credentials: false
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
-        with:
-          node-version-file: website/.nvmrc
-      - name: Check out the newest main commit that passed the CI gate
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        run: |
-          sha="$(node --disable-warning=ExperimentalWarning scripts/release/green-commit.ts)"
-          git -c advice.detachedHead=false checkout --detach "$sha"
-      - name: Read the configured website URL
-        working-directory: .
-        run: |
-          python3 - >> "$GITHUB_ENV" <<'PYTHON'
-          import json, subprocess
-          result = json.loads(subprocess.check_output(["python3", "tools/cloud-config/outputs.py"]))
-          print("SITE_URL=" + result["website_url"])
-          PYTHON
-      - name: Install the pinned pnpm and locked dependencies
-        run: |
-          corepack enable
-          pnpm install --frozen-lockfile
-      - name: Dispatch the reconcile release unless the relay would hold it
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-          NOTION_TOKEN: ${{ secrets.WEBSITE_NOTION_TOKEN }}
-          NOTION_DATA_SOURCE_ID: ${{ secrets.WEBSITE_NOTION_DATA_SOURCE_ID }}
-        run: node --import tsx scripts/release/scheduled-dispatch.ts
-
   release:
     name: Website release
-    if: github.event_name == 'workflow_dispatch' && inputs.operation != 'status'
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     environment:
       name: production
-    # Shared with the status job below and with every other run of this workflow, whoever started it:
-    # releases and Notion writes never overlap, and nothing is cancelled.
+    # Daily sync, Home, manual operations and code pushes share the release/rollback lock.
     concurrency:
       group: website-production
       queue: max
@@ -206,6 +78,7 @@ jobs:
       RELEASE_CONFIRMATION: ${{ inputs.confirmation }}
       ALLOW_EMPTY: ${{ inputs.allow_empty }}
       FORCE_BUILD: ${{ inputs.force_build }}
+      RELEASE_REQUEST_ID: ${{ inputs.request_id }}
     steps:
       # main inside the lock, whatever commit triggered this run; then the newest commit of it that
       # passed the CI gate. The code identity is the newest commit at or before it that touched website/.
@@ -232,6 +105,8 @@ jobs:
           result = json.loads(subprocess.check_output(["python3", "tools/cloud-config/outputs.py"]))
           print("SITE_URL=" + result["website_url"])
           PYTHON
+      - name: Install the shared proto toolchain
+        run: npm ci --prefix ../proto --no-audit --no-fund
       - name: Install the pinned pnpm and locked dependencies
         run: |
           corepack enable
@@ -289,6 +164,7 @@ jobs:
           pnpm content:prepare:empty
           pnpm check
       - name: Prepare the Notion snapshot
+        id: prepare
         if: steps.gate.outputs.bootstrap_required != 'true'
         env:
           NOTION_TOKEN: ${{ secrets.WEBSITE_NOTION_TOKEN }}
@@ -300,12 +176,20 @@ jobs:
         env:
           CODE_SHA: ${{ steps.code.outputs.code_sha }}
         run: pnpm release decide
+      - name: Record the completed content check
+        id: sync
+        if: steps.decision.outcome == 'success'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: pnpm release sync-record
       - name: Build the static export
+        id: build
         if: steps.decision.outputs.deploy_required == 'true'
         env:
           CODE_SHA: ${{ steps.code.outputs.code_sha }}
         run: pnpm build:site
       - name: Verify the export under wrangler dev
+        id: artifact
         if: steps.decision.outputs.deploy_required == 'true'
         run: pnpm release verify-artifact
       # tools/cf-guard before anything applies routes (a first upload is a `wrangler deploy`): fails when the
@@ -320,8 +204,8 @@ jobs:
         if: steps.decision.outputs.deploy_required == 'true'
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
-          CF_GUARD_ALLOW_REMOVE: ''
-          CF_GUARD_ALLOW_CONFLICT: ''
+          CF_GUARD_ALLOW_REMOVE: ""
+          CF_GUARD_ALLOW_CONFLICT: ""
         run: |
           guarded="$(git rev-list -1 HEAD -- ':(top)tools/cf-guard')"
           if [ -n "$guarded" ]; then
@@ -347,8 +231,8 @@ jobs:
         continue-on-error: true
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
-          CF_GUARD_ALLOW_REMOVE: ''
-          CF_GUARD_ALLOW_CONFLICT: ''
+          CF_GUARD_ALLOW_REMOVE: ""
+          CF_GUARD_ALLOW_CONFLICT: ""
         run: pnpm release deploy
       - name: Verify the live hostname
         id: live
@@ -356,34 +240,12 @@ jobs:
         continue-on-error: true
         run: pnpm release verify-live
       - name: Mark the release successful
+        id: published
         if: steps.deploy.outcome == 'success' && steps.live.outcome == 'success'
         env:
           GITHUB_TOKEN: ${{ github.token }}
           DEPLOYMENT_ID: ${{ steps.record.outputs.deployment_id }}
         run: pnpm release mark-success
-      # A feedback outage never rolls back a verified website. Without a hostname there is nothing live
-      # to compare Notion with yet.
-      - name: Write the Notion feedback
-        id: feedback
-        if: >-
-          success() && steps.gate.outputs.live_origin != '' &&
-          (steps.live.outcome == 'success' || steps.decision.outputs.deploy_required == 'false')
-        continue-on-error: true
-        env:
-          NOTION_TOKEN: ${{ secrets.WEBSITE_NOTION_TOKEN }}
-          NOTION_DATA_SOURCE_ID: ${{ secrets.WEBSITE_NOTION_DATA_SOURCE_ID }}
-          WEBSITE_LIVE_ORIGIN: ${{ steps.gate.outputs.live_origin }}
-          DEPLOY_REQUIRED: ${{ steps.decision.outputs.deploy_required }}
-        run: |
-          confirmed_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          node --import tsx scripts/notion/sync-status.ts --confirmed-at="$confirmed_at"
-          if [ "$DEPLOY_REQUIRED" = true ]; then
-            node --import tsx scripts/notion/update-site-summary.ts --confirmed-at="$confirmed_at"
-          fi
-      - name: Report a feedback failure without failing the release
-        if: always() && steps.feedback.outcome == 'failure'
-        run: |
-          echo '::warning::The website release succeeded, but the Notion feedback is stale. Use 刷新状态 after fixing the cause; do not roll back.'
       - name: Restore the recorded previous version
         id: rollback
         if: >-
@@ -410,67 +272,16 @@ jobs:
         run: |
           echo 'The website release failed; the latest release record now blocks ordinary releases. Use operation recovery (website/docs/release.md).' >&2
           exit 1
-
-  # 刷新状态: compare Notion with the live site and write the feedback; no build, no deploy.
-  status:
-    name: Website Notion status
-    if: github.event_name == 'workflow_dispatch' && inputs.operation == 'status'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    environment:
-      name: production
-    concurrency:
-      group: website-production
-      queue: max
-      cancel-in-progress: false
-    defaults:
-      run:
-        working-directory: website
-    steps:
-      - name: Assert the trusted status context
-        working-directory: .
-        env:
-          CONFIRMATION: ${{ inputs.confirmation }}
-        run: |
-          [ "$GITHUB_REF" = refs/heads/main ] || { echo 'Status refresh runs only on main.' >&2; exit 1; }
-          [ "$CONFIRMATION" = "status:${SITE_URL#https://}" ] || { echo "The confirmation must be status:${SITE_URL#https://}" >&2; exit 1; }
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: refs/heads/main
-          fetch-depth: 0
-          persist-credentials: false
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
-        with:
-          node-version-file: website/.nvmrc
-      # The Notion write-back runs only code that passed the CI gate, as a release does.
-      - name: Check out the newest main commit that passed the CI gate
+      - name: Finalize the content-sync receipt
+        if: always()
         env:
           GITHUB_TOKEN: ${{ github.token }}
-        run: |
-          sha="$(node --disable-warning=ExperimentalWarning scripts/release/green-commit.ts)"
-          git -c advice.detachedHead=false checkout --detach "$sha"
-      - name: Read the configured website URL
-        working-directory: .
-        run: |
-          python3 - >> "$GITHUB_ENV" <<'PYTHON'
-          import json, subprocess
-          result = json.loads(subprocess.check_output(["python3", "tools/cloud-config/outputs.py"]))
-          print("SITE_URL=" + result["website_url"])
-          PYTHON
-      - name: Install the pinned pnpm and locked dependencies
-        run: |
-          corepack enable
-          pnpm install --frozen-lockfile
-      - name: Find the live hostname
-        id: live
-        run: pnpm release live-origin
-      - name: Compare Notion with the live website and write the feedback
-        if: steps.live.outputs.live_origin != ''
-        env:
-          NOTION_TOKEN: ${{ secrets.WEBSITE_NOTION_TOKEN }}
-          NOTION_DATA_SOURCE_ID: ${{ secrets.WEBSITE_NOTION_DATA_SOURCE_ID }}
-          WEBSITE_LIVE_ORIGIN: ${{ steps.live.outputs.live_origin }}
-        run: node --import tsx scripts/notion/sync-status.ts
-      - name: Explain a skipped refresh
-        if: steps.live.outputs.live_origin == ''
-        run: echo '::notice::ziyixi-website has no hostname yet (website/wrangler.toml); nothing live to compare.'
+          SYNC_JOB_STATUS: ${{ job.status }}
+          SYNC_GATE_OUTCOME: ${{ steps.gate.outcome }}
+          SYNC_BOOTSTRAP_REQUIRED: ${{ steps.gate.outputs.bootstrap_required == 'true' }}
+          SYNC_RECORD_OUTCOME: ${{ steps.sync.outcome }}
+          SYNC_BUILD_OUTCOME: ${{ steps.build.outcome }}
+          SYNC_ARTIFACT_OUTCOME: ${{ steps.artifact.outcome }}
+          SYNC_LIVE_VERIFIED: ${{ steps.live.outputs.live_verified == 'true' }}
+          SYNC_RELEASE_MARKED: ${{ steps.published.outcome }}
+        run: pnpm release sync-finalize
