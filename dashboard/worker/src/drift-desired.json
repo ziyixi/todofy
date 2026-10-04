@@ -50,6 +50,11 @@
           "source": "config"
         },
         {
+          "name": "HOME_URL",
+          "type": "plain_text",
+          "source": "config"
+        },
+        {
           "name": "HOST_EPOCH",
           "type": "plain_text",
           "source": "config"

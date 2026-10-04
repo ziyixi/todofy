@@ -144,6 +144,9 @@ are 40 rows; a representative six-source stress case is guarded at 64KiB/320 rea
 server-confirmed action response before refetch, with stable live feedback and neutral dismissed labels.
 Review fixes include newer-occurrence CAS, filtering before the outbound 20-item bound, retaining closed
 decisions through unavailable underlying telemetry, and independent drift-recovery evidence.
+The first branch run caught the generated drift inventory missing Fleet's new HOME_URL. Regeneration
+fixed that check; the 379-test Changes suite now passes locally (one existing skip). No production
+deployment occurred from the failed branch run.
 
 `codex/k3s-personal-cloud` starts from `450110b`. The owner authorised GitHub-driven k3s reconciliation,
 a separate Cloudflare Fleet worker/UI, Newsletter monitoring in Home, and Compose retirement. The owner
