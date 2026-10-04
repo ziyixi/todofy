@@ -16,6 +16,8 @@ export function alertGuidance(code: string): AlertGuidance {
       }
     case 'newsletter_delivery_rejected':
       return { explanation: '最近一条投递记录显示邮件服务拒绝发送。后台进程健康并不代表这次投递成功。', next: '打开 Newsletter 查看投递错误并处理发信配置；需要重发时先核对该邮件的结果，避免重复发送。' }
+    case 'newsletter_delivery_accepted':
+      return { explanation: '最近一次邮件已被邮件服务接管。', next: '无需操作。' }
     case 'newsletter_paused':
       return { explanation: 'Newsletter 正在排空或已冻结，新任务暂时不会开始。', next: '打开 Fleet 查看发布阶段；确认发布完成或处理暂停原因后，通过对应发布操作恢复。' }
     case 'newsletter_unavailable':

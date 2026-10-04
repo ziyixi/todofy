@@ -372,7 +372,7 @@ function WorkersTable({ reg, data, focus, now }: { reg: Reg; data: CloudflareVie
       )}
       <p className="small muted">
         错误率在今日请求 ≥ {ERROR_RATE_MIN_REQUESTS} 时判定：≥ {ERROR_RATE_WARN_PERCENT}% 需关注，≥ {ERROR_RATE_CRITICAL_PERCENT}%
-        故障。CPU 条满格为 Free 的 10 ms，刻度线为 8 ms。新 Worker 第一次有请求就会出现在这里，未写进注册表的标为“未登记”。
+        故障。CPU 条满格为 Free 的 10 ms，刻度线为 8 ms。实际资源清单包含没有请求的 Worker；未写进注册表的当前资源标为“未登记”。
       </p>
     </section>
   )
@@ -616,7 +616,7 @@ export function CloudflareView({ registry, cloudflare, focus, now }: { registry:
 
       <WorkersTable reg={registry} data={cloudflare} focus={focus} now={now} />
 
-      {cloudflare.historical_workers?.length ? <section className="cf-section" aria-label="历史 Worker 用量"><h2>历史 Worker 用量</h2><p className="small muted">以下 Worker 已不在当前账户资源清单中；保留历史统计，不计入当前 Worker 数量。</p><ul>{cloudflare.historical_workers.map((worker) => <li key={worker.script}><code>{worker.script}</code> · 已退休 · 今日请求 {worker.requests}</li>)}</ul></section> : null}
+      {cloudflare.historical_workers?.length ? <section className="cf-section" aria-label="历史 Worker 用量"><h2>历史 Worker 用量</h2><p className="small muted">以下统计名称没有对应的当前账户资源；保留历史用量，不计入当前 Worker 数量。</p><ul>{cloudflare.historical_workers.map((worker) => <li key={worker.script}><code>{worker.script}</code> · 当前无对应资源 · 今日请求 {worker.requests}</li>)}</ul></section> : null}
 
       <DriftPanel drift={cloudflare.drift} now={now} />
 
