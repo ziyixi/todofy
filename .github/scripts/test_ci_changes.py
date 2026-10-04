@@ -1203,6 +1203,7 @@ class DeployConditions(unittest.TestCase):
     # deploys (its service bindings need their Ops entrypoints), and Lab and the watch app after Todofy's (their
     # TODOFY bindings name Todofy's Ops), which do not run when nothing of that app changed.
     SKIPPED_OK = {
+        ("vps-deploy", "fleet-deploy"),
         ("dashboard-deploy", "todofy-deploy"),
         ("dashboard-deploy", "mail-hero-deploy"),
         ("dashboard-deploy", "lab-deploy"),

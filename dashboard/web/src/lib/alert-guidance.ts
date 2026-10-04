@@ -14,6 +14,8 @@ export function alertGuidance(code: string): AlertGuidance {
         explanation: '一些操作记录缺少最终完成结果。计数可能包含中断活动、采编步骤、Notion 写入或发信记录，也可能重叠；它不等于失败邮件数。当前是否运行、是否有在途任务见下方计数。',
         next: '不打算核对这批旧记录时，可以关闭本次提醒；需要重跑时，先核对实际邮件和 Notion 结果。',
       }
+    case 'newsletter_delivery_rejected':
+      return { explanation: '最近一条投递记录显示邮件服务拒绝发送。后台进程健康并不代表这次投递成功。', next: '打开 Newsletter 查看投递错误并处理发信配置；需要重发时先核对该邮件的结果，避免重复发送。' }
     case 'newsletter_paused':
       return { explanation: 'Newsletter 正在排空或已冻结，新任务暂时不会开始。', next: '打开 Fleet 查看发布阶段；确认发布完成或处理暂停原因后，通过对应发布操作恢复。' }
     case 'newsletter_unavailable':

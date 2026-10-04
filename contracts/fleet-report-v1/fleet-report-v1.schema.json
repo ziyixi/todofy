@@ -163,6 +163,32 @@
           "description": "Provider outcomes needing reconciliation, null if unknown.",
           "type": "integer",
           "minimum": 0
+        },
+        "unknown_revision": {
+          "description": "Monotonic observation revision; only newly observed unknown identities advance it.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "unknown_by_kind": {
+          "description": "Counts by fixed operation category, absent for legacy observers.",
+          "type": "object",
+          "maxProperties": 6,
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "latest_delivery_state": {
+          "description": "Latest provider response, not proof of inbox delivery; absent for legacy observers.",
+          "enum": [
+            "provider_accepted",
+            "rejected",
+            "unknown"
+          ]
+        },
+        "latest_delivery_time": {
+          "description": "Update time of the latest delivery record, rather than proof of inbox arrival.",
+          "type": "string"
         }
       },
       "additionalProperties": false

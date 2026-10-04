@@ -320,6 +320,15 @@ message GetOpsViewRequest {
 
 // Input of OverrideGuard.
 message OverrideGuardRequest {
+  // One registry app with guard capability. Absent legacy input must request a page refresh.
+  optional string app = 4 [(common.wire.v1.field) = {
+    allowed: [
+      "mail-hero",
+      "todofy",
+      "lab",
+      "watch"
+    ]
+  }];
   // `guard`.
   string name = 1 [
     (google.api.field_behavior) = REQUIRED,

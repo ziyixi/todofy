@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { BREAKDOWN_UNCLASSIFIED } from '../src/api-types.ts';
 import { CF_SCRIPTS_MAX } from '../src/api-types.ts';
 import type { RegistryDef } from '../src/registry-types.ts';
-import { errorLevel, errorPercent, mergeScripts, resourceRows, withBreakdownResources, workerRows, type CfScriptsDoc } from '../src/discovery.ts';
+import { withLiveInventory, historicalWorkerRows, errorLevel, errorPercent, mergeScripts, resourceRows, withBreakdownResources, workerRows, type CfScriptsDoc } from '../src/discovery.ts';
 import { REGISTRY } from '../src/registry.ts';
 import { parseUsage, type ScriptUsage } from '../src/usage.ts';
 import { REALISTIC_USAGE, SYNTHETIC_D1, SYNTHETIC_NS, aiNeurons, graphqlBody, usageWithScripts } from './graphql-fixture.ts';
@@ -250,4 +250,36 @@ describe('the quota breakdowns', () => {
       kind: 'd1',
     });
   });
+});
+
+it('uses actual live inventory, keeps retired traffic as history and excludes missing dimensions', () => {
+  const doc = withLiveInventory(mergeScripts(null, [usage('retired', 4), usage(BREAKDOWN_UNCLASSIFIED, 0), usage('home', 8)], false, T0), ['home', 'idle-new'], T0);
+  expect(workerRows(doc, T0).map(row => row.script).sort()).toEqual(['home', 'idle-new']);
+  expect(historicalWorkerRows(doc, T0).map(row => row.script)).toEqual(['retired']);
+  expect(workerRows(doc, T0).find(row => row.script === 'idle-new')?.entry).toBeNull();
+});
+
+it('keeps an authoritative live Worker after thirty idle days without inventing recent traffic', () => {
+  const original = withLiveInventory(mergeScripts(null, [usage('idle', 5)], false, T0), ['idle'], T0);
+  const afterIdle = mergeScripts(original, [], false, T0 + 31 * DAY);
+  const row = workerRows(afterIdle, T0 + 31 * DAY).find((item) => item.script === 'idle');
+
+  expect(row).toMatchObject({ script: 'idle', requests: 0, first_seen_day: '2026-09-29', last_seen_day: '2026-09-29' });
+  expect(afterIdle.scripts[0]?.last_active_hour).toBe(original.scripts[0]?.last_active_hour);
+  expect(historicalWorkerRows(afterIdle, T0 + 31 * DAY)).toEqual([]);
+});
+
+it('bounds the combined live and historical set, retaining live identities before old analytics', () => {
+  const names = (prefix: string) => Array.from({ length: CF_SCRIPTS_MAX }, (_, i) => `${prefix}-${String(i).padStart(3, '0')}-${'x'.repeat(56)}`);
+  const retired = names('r').map((script) => usage(script, 100_000, {
+    errors: 1000, subrequests: 999_999, cpu_p50_us: 12_345, cpu_p99_us: 123_456,
+    do_requests: 100_000, do_errors: 99_999,
+  }));
+  const live = names('n');
+  const doc = withLiveInventory(mergeScripts(null, retired, false, T0), live, T0);
+
+  expect(doc.scripts).toHaveLength(CF_SCRIPTS_MAX);
+  expect(workerRows(doc, T0).map((row) => row.script).sort()).toEqual([...live].sort());
+  expect(historicalWorkerRows(doc, T0)).toEqual([]);
+  expect(JSON.stringify(doc).length).toBeLessThanOrEqual(65_536);
 });

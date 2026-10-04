@@ -52,7 +52,7 @@ import {
   type DesiredGuard,
   type GuardOverrideDoc,
 } from './guard.ts';
-import { mergeScripts, workerRows, type CfScriptsDoc } from './discovery.ts';
+import { mergeScripts, workerRows, withLiveInventory, type CfScriptsDoc } from './discovery.ts';
 import {
   NO_DRIFT,
   advanceRun,
@@ -182,7 +182,7 @@ const SCHEMA = [
 export type StartCanaryOutcome =
   | { readonly ok: true; readonly run: CanaryRun }
   | { readonly ok: false; readonly code: 'canary_disabled' | 'canary_active' | 'canary_limit' | 'request_id_reused' };
-export type GuardOverrideOutcome = { readonly ok: true; readonly guard: GuardView } | { readonly ok: false; readonly code: 'request_id_reused' };
+export type GuardOverrideOutcome = { readonly ok: true; readonly guard: GuardView } | { readonly ok: false; readonly code: 'request_id_reused' | 'guard_unavailable' };
 export type AttentionMutationOutcome = { readonly ok: true; readonly item: AttentionItem }
   | { readonly ok: false; readonly code: 'request_id_reused' | 'attention_changed' };
 
@@ -250,6 +250,17 @@ export class HomeState extends DurableObject<Env> {
         ctx.storage.sql.exec("ALTER TABLE canary_runs ADD COLUMN canary_id TEXT NOT NULL DEFAULT 'mail-todofy'");
       }
       migrateGuardApplied(ctx.storage);
+      const scripts = this.doc<CfScriptsDoc>('cf_scripts');
+      const drift = this.doc<DriftDoc>('drift');
+      if (scripts && scripts.live === undefined && drift?.last_run_day) this.putDoc('drift', { ...drift, last_run_day: null }, Date.now());
+      const legacy = this.doc<GuardOverrideDoc>('guard_override');
+      if (legacy !== null) {
+        for (const app of OPS_APPS) {
+          const entry = REGISTRY.entries.find((item) => item.id === app);
+          if (entry?.status.type === 'ops_v1' && entry.status.guard) this.putDoc(`guard_override:${app}`, legacy, Date.now());
+        }
+        this.deleteDoc('guard_override');
+      }
       return Promise.resolve();
     });
   }
@@ -283,7 +294,7 @@ export class HomeState extends DurableObject<Env> {
       });
       const guard = await this.runGuard(now, observed);
       const canary = await this.runCanary(now, true);
-      const digest = await this.runDigest(now, guard.desired, true, now);
+      const digest = await this.runDigest(now, true, now);
       this.ctx.storage.sql.exec('DELETE FROM canary_runs WHERE created_at < ?', now - CANARY_RETENTION_MS);
       this.dropOrphanProbes();
       this.putDoc('meta', { ...meta, last_tick_at: now, last_tick_scheduled: now, rev: (meta.rev ?? 0) + 1 }, now);
@@ -377,21 +388,24 @@ export class HomeState extends DurableObject<Env> {
    * OverrideGuard: force shed for 24 h, or clear and suppress the automatic shed until 00:00 UTC. With a `requestId`
    * already answered (AIP-155), the first answer again.
    */
-  setGuardOverride(level: GuardLevel, at: number | null = null, requestId: string | null = null): Promise<GuardOverrideOutcome> {
+  setGuardOverride(level: GuardLevel, at: number | null = null, requestId: string | null = null, app: OpsApp | null = null): Promise<GuardOverrideOutcome> {
     return this.serialize(async (): Promise<GuardOverrideOutcome> => {
       const now = at ?? Date.now();
-      const replay = this.replay(requestId, 'override_guard', now);
+      const inputKey = JSON.stringify([app, level]);
+      const replay = this.replay(requestId, 'override_guard', now, inputKey);
       if (replay === 'reused') return { ok: false, code: 'request_id_reused' };
       if (replay !== null) return { ok: true, guard: replay as GuardView };
-      this.putDoc('guard_override', ownerOverride(level, now), now);
+      if (app !== null && this.statusDoc(app).status?.capabilities.includes('guard') !== true) return { ok: false, code: 'guard_unavailable' };
+      this.putDoc(app === null ? 'guard_override' : `guard_override:${app}`, ownerOverride(level, now), now);
       // A cleared episode must not come back when the override ends (the auto shed's own until).
-      if (level === 'normal') this.putDoc('guard', AUTO_NORMAL, now);
+      if (level === 'normal' && app === null) this.putDoc('guard', AUTO_NORMAL, now);
       const desired = this.currentDesired(now);
-      const calls = await this.applyGuard(now, desired, perApp(() => null));
+      const calls = await this.applyGuard(now, desired, perApp((id) => this.statusDoc(id).status?.guard ?? null), app);
+      await this.runDigest(now, false, (this.doc<MetaDoc>('meta') ?? NO_META).last_tick_at);
       this.bumpRev(now);
       console.log(JSON.stringify({ event: 'guard_override', level, guard_calls: calls }));
       const guard = this.guardView(now);
-      this.remember(requestId, 'override_guard', guard, now);
+      this.remember(requestId, 'override_guard', guard, now, inputKey);
       return { ok: true, guard };
     });
   }
@@ -510,6 +524,9 @@ export class HomeState extends DurableObject<Env> {
     if (plan.kind !== 'start' && plan.kind !== 'continue') return { outcome: 'idle', calls: 0 };
     const run = plan.kind === 'start' ? newDriftRun(now) : plan.run;
     const result = await advanceRun(run, (this.env.CF_ANALYTICS_TOKEN ?? '').trim(), this.env.ACCOUNT_ID, (url, init) => globalThis.fetch(url, init));
+    if (result.run.account !== null && (run.account === null || runComplete(result.run))) {
+      this.putDoc('cf_scripts', withLiveInventory(this.doc<CfScriptsDoc>('cf_scripts'), result.run.account.scripts, now), now);
+    }
     let outcome: string;
     if (runComplete(result.run)) {
       doc = completedDoc(doc, result.run, now);
@@ -534,8 +551,21 @@ export class HomeState extends DurableObject<Env> {
     return { outcome, calls: result.calls };
   }
 
-  private currentDesired(now: number): DesiredGuard {
-    const override = activeOverride(this.doc<GuardOverrideDoc>('guard_override'), now);
+  /** Aggregate only the actual per-service targets; normal owner overrides can suppress every shed. */
+  private summaryDesired(now: number): DesiredGuard {
+    const targets = OPS_APPS.filter((app) => {
+      const entry = REGISTRY.entries.find(item => item.id === app);
+      return entry?.status.type === 'ops_v1' && entry.status.guard
+        && this.statusDoc(app).status?.capabilities.includes('guard') !== false;
+    }).map(app => this.currentDesired(now, app));
+    return targets.find(target => target.level === 'shed' && target.source === 'auto')
+      ?? targets.find(target => target.level === 'shed')
+      ?? { ...this.currentDesired(now), level: 'normal', until: null };
+  }
+
+  private currentDesired(now: number, app: OpsApp | null = null): DesiredGuard {
+    const override = activeOverride(this.doc<GuardOverrideDoc>(app === null ? 'guard_override' : `guard_override:${app}`), now)
+      ?? activeOverride(this.doc<GuardOverrideDoc>('guard_override'), now);
     return desiredGuard(now, this.doc<AutoGuard>('guard'), override);
   }
 
@@ -557,27 +587,27 @@ export class HomeState extends DurableObject<Env> {
   }
 
   /** setGuard on each app that supports it and needs it (§5.3 "Applying"), in parallel. */
-  private async applyGuard(now: number, desired: DesiredGuard, observed: Record<OpsApp, GuardState | null>): Promise<number> {
-    const input = guardInput(desired, now);
+  private async applyGuard(now: number, desired: DesiredGuard, observed: Record<OpsApp, GuardState | null>, only: OpsApp | null = null): Promise<number> {
+    const inputs = perApp((app) => guardInput(this.doc(`guard_override:${app}`) === null ? desired : this.currentDesired(now, app), now));
     const targets = OPS_APPS.filter((app) => {
       const status = this.statusDoc(app).status;
-      return status !== null && status.capabilities.includes('guard') && needsApply(input, this.applied(app), observed[app]);
+      return (only === null || only === app) && status !== null && status.capabilities.includes('guard') && needsApply(inputs[app], this.applied(app), observed[app]);
     });
     // An app that needs no call has nothing pending: earlier failures (for a level no longer wanted,
     // or already in place) stop counting.
     for (const app of OPS_APPS) {
-      if (targets.includes(app)) continue;
+      if (targets.includes(app) || (only !== null && app !== only)) continue;
       const applied = this.applied(app);
       const next = settled(applied);
       if (next !== applied) this.saveApplied(app, next);
     }
-    const results = await Promise.all(targets.map(async (app) => [app, await opsSetGuard(this.env, app, input)] as const));
+    const results = await Promise.all(targets.map(async (app) => [app, await opsSetGuard(this.env, app, inputs[app])] as const));
     for (const [app, result] of results) {
       const previous = this.applied(app);
       this.saveApplied(
         app,
         result.ok
-          ? { input, state: result.value, last_call_at: now, last_error: null, consecutive_failures: 0 }
+          ? { input: inputs[app], state: result.value, last_call_at: now, last_error: null, consecutive_failures: 0 }
           : { ...previous, last_call_at: now, last_error: result.code, consecutive_failures: previous.consecutive_failures + 1 },
       );
     }
@@ -628,7 +658,7 @@ export class HomeState extends DurableObject<Env> {
     }
   }
 
-  private digestCandidates(now: number, desired: DesiredGuard, lastTickAt: number | null): Candidate[] {
+  private digestCandidates(now: number, lastTickAt: number | null): Candidate[] {
     const usage = this.doc<UsageDoc>('usage') ?? NO_USAGE;
     return candidates({
       now,
@@ -640,7 +670,7 @@ export class HomeState extends DurableObject<Env> {
         consecutive_failures: usage.consecutive_failures,
         last_http_status: usage.last_http_status,
       },
-      desired,
+      desired: this.summaryDesired(now),
       guardFailures: perApp((app) => this.applied(app).consecutive_failures),
       latestFinished: this.latestFinished(),
       lastTickAt,
@@ -649,8 +679,8 @@ export class HomeState extends DurableObject<Env> {
     });
   }
   /** Builds raw facts, then applies Home's reminder disposition before the scheduled report. */
-  private async runDigest(now: number, desired: DesiredGuard, send: boolean, lastTickAt: number | null): Promise<{ sent: string; items: number }> {
-    const list = this.digestCandidates(now, desired, lastTickAt);
+  private async runDigest(now: number, send: boolean, lastTickAt: number | null): Promise<{ sent: string; items: number }> {
+    const list = this.digestCandidates(now, lastTickAt);
     const firstSeen = this.syncSince(list.map(itemKey), now);
     const rawItems = finalizeItems(list, firstSeen, now, ATTENTION_ROW_LIMIT);
     const projected = this.projectAttention(now, rawItems, lastTickAt);
@@ -723,7 +753,7 @@ export class HomeState extends DurableObject<Env> {
       if (!due) return false;
       await this.pollUsage(now);
     }
-    await this.runDigest(now, this.currentDesired(now), false, meta.last_tick_at);
+    await this.runDigest(now, false, meta.last_tick_at);
     const current = this.doc<MetaDoc>('meta') ?? NO_META;
     const stamp = scope === 'home' ? { last_refresh_home_at: now } : { last_refresh_cloudflare_at: now };
     this.putDoc('meta', { ...current, ...stamp, rev: (current.rev ?? 0) + 1 }, now);
@@ -757,7 +787,7 @@ export class HomeState extends DurableObject<Env> {
 
   /** Full cached conditions before the outbound report's 20-item bound. No provider call. */
   private currentItems(now: number, lastTickAt: number | null): OpsReportItem[] {
-    const list = this.digestCandidates(now, this.currentDesired(now), lastTickAt);
+    const list = this.digestCandidates(now, lastTickAt);
     const cached = this.readCache?.get('#attention_since') as Map<string, number> | undefined;
     const since = cached ?? new Map(this.rows<{ key: string; since: number }>('SELECT key,since FROM item_since').map((row) => [row.key, row.since]));
     this.readCache?.set('#attention_since', since);
@@ -769,9 +799,16 @@ export class HomeState extends DurableObject<Env> {
     const tickAt = lastTickAt === undefined ? (this.doc<MetaDoc>('meta') ?? NO_META).last_tick_at : lastTickAt;
     const items = neverRan ? [] : supplied ?? this.currentItems(now, tickAt);
     const evaluation = this.evalInput(now);
-    const raw = attentionView({ now, neverRan, items, canaryEnabled: canaryEnabled(this.env), desired: this.currentDesired(now),
+    const raw = attentionView({ now, neverRan, items, canaryEnabled: canaryEnabled(this.env), desired: this.summaryDesired(now),
+      ownerShedApps: OPS_APPS.filter(app => {
+        const entry = REGISTRY.entries.find(item => item.id === app);
+        const target = this.currentDesired(now, app);
+        return entry?.status.type === 'ops_v1' && entry.status.guard
+          && this.statusDoc(app).status?.capabilities.includes('guard') !== false
+          && target.level === 'shed' && target.source === 'owner';
+      }),
       statuses: evaluation.statuses, ...(neverRan ? {} : { evaluation }) });
-    const candidatesNow = this.digestCandidates(now, this.currentDesired(now), tickAt);
+    const candidatesNow = this.digestCandidates(now, tickAt);
     const active = new Set([...candidatesNow.map(itemKey), ...raw.attention.items.map(itemKey)]);
     const result = this.attentionState.project(raw.attention, now, (condition) => this.attentionResolved(condition, now, tickAt, active, evaluation));
     return result;
@@ -859,7 +896,7 @@ export class HomeState extends DurableObject<Env> {
       const base = this.shellFor(view, now, refreshed);
       switch (view) {
         case 'home':
-          return homeResponse(base, this.evalInput(now), this.usageView(now), this.currentDesired(now));
+          return homeResponse(base, this.evalInput(now), this.usageView(now), this.summaryDesired(now));
         case 'flows':
           return flowsResponse(base, this.evalInput(now), this.canaryView(now));
         case 'cloudflare':
@@ -915,17 +952,25 @@ export class HomeState extends DurableObject<Env> {
       const status = this.statusDoc(app);
       const seen = status.status;
       const fromStatus = seen !== null && status.status_at !== null && (applied.last_call_at === null || status.status_at > applied.last_call_at);
+      const owner = activeOverride(this.doc<GuardOverrideDoc>(`guard_override:${app}`), now);
+      const wanted = this.currentDesired(now, app);
       return {
         state: fromStatus ? seen.guard : applied.state,
         last_call_at: isoOrNull(applied.last_call_at),
         last_error: applied.last_error,
+        desired: { level: wanted.level, reason: wanted.reason, until: isoOrNull(wanted.until), source: wanted.source },
+        ...(owner === null ? {} : { override: { level: owner.level, until: iso(owner.until), set_at: iso(owner.set_at) } }),
       };
     };
     return {
       desired: { level: desired.level, reason: desired.reason, until: isoOrNull(desired.until), source: desired.source },
       override: override === null ? null : { level: override.level, until: iso(override.until), set_at: iso(override.set_at) },
       thresholds: { shed_percent: GUARD_SHED_PERCENT, clear_percent: GUARD_CLEAR_PERCENT },
-      apps: perApp(appView),
+      apps: Object.fromEntries(OPS_APPS.filter((app) => {
+        const entry = REGISTRY.entries.find((item) => item.id === app);
+        return entry?.status.type === 'ops_v1' && entry.status.guard
+          && this.statusDoc(app).status?.capabilities.includes('guard') !== false;
+      }).map((app) => [app, appView(app)])),
     };
   }
 

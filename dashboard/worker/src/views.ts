@@ -14,7 +14,7 @@ import type { CanaryState, Digest, GuardView, QuotaRow, Usage } from './api-type
 import { HOME_QUOTA_IDS, type AppDetail, type Attention, type Badges, type CloudflareView, type Drift, type FlowsView, type HomeView, type OpsView, type Refresh, type ShellFields, type WorkerRow } from './api-types.ts';
 import { CF_VIEW_WORKERS_MAX } from './idl.ts';
 import type { RegistryDef } from './registry-types.ts';
-import { resourceRows, withBreakdownResources, workerRows, type CfScriptsDoc } from './discovery.ts';
+import { resourceRows, withBreakdownResources, workerRows, historicalWorkerRows, type CfScriptsDoc } from './discovery.ts';
 import type { StatusDoc, UsageDoc } from './docs.ts';
 import { entryState, flowStates, flowSummaries, type EvalInput } from './evaluate.ts';
 import type { DesiredGuard } from './guard.ts';
@@ -142,6 +142,7 @@ export function cloudflareResponse(
   registry: RegistryDef = REGISTRY,
 ): CloudflareView {
   const listed = capWorkers(workerRows(scripts, now, registry));
+  const historical = capWorkers(historicalWorkerRows(scripts, now, registry)).rows.slice(0, 50 - listed.rows.length);
   return {
     name: VIEW_NAMES.cloudflare,
     ...base,
@@ -153,6 +154,7 @@ export function cloudflareResponse(
     resources: resourceRows(usageDoc.resources, scripts, now, registry),
     do_storage_bytes: usage.rows.find((row) => row.id === 'do_storage')?.used ?? null,
     guard,
+    ...(historical.length ? { historical_workers: historical } : {}),
   };
 }
 

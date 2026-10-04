@@ -547,8 +547,8 @@ function GuardLine({ reg, data }: { reg: Reg; data: CloudflareViewData }) {
     .sort((a, b) => (b.percent ?? 0) - (a.percent ?? 0))[0]
   return (
     <section className="panel guard-line" aria-labelledby="guard-title">
-      <h2 id="guard-title">降载</h2>
-      {desired.level === 'shed' ? <LevelMark level="held" word="降载中" /> : <LevelMark level="ok" word="未降载" />}
+      <h2 id="guard-title">非关键后台工作</h2>
+      {Object.values(data.guard.apps).some(app => (app.desired ?? desired).level === 'shed') ? <LevelMark level="held" word="降载中" /> : <LevelMark level="ok" word="未降载" />}
       {desired.reason ? <span>· {guardReasonLabel(desired.reason)}</span> : null}
       {top ? (
         <span>
@@ -560,7 +560,7 @@ function GuardLine({ reg, data }: { reg: Reg; data: CloudflareViewData }) {
       </span>
       {guardedEntries(reg, data.guard).map((id) => {
         const app = data.guard.apps[id]
-        const applied = app?.state ? (app.state.level === desired.level ? '已生效' : '未生效') : '状态未知'
+        const applied = app?.state ? (app.state.level === (app.desired ?? desired).level ? '已生效' : '未生效') : '状态未知'
         return (
           <span key={id}>
             · {nameOf(reg, id)} {applied}
@@ -569,7 +569,7 @@ function GuardLine({ reg, data }: { reg: Reg; data: CloudflareViewData }) {
         )
       })}
       <a className="guard-link" href={routeHash({ view: 'ops' })}>
-        降载操作 →
+        按服务调整 →
       </a>
     </section>
   )
@@ -615,6 +615,8 @@ export function CloudflareView({ registry, cloudflare, focus, now }: { registry:
       </section>
 
       <WorkersTable reg={registry} data={cloudflare} focus={focus} now={now} />
+
+      {cloudflare.historical_workers?.length ? <section className="cf-section" aria-label="历史 Worker 用量"><h2>历史 Worker 用量</h2><p className="small muted">以下 Worker 已不在当前账户资源清单中；保留历史统计，不计入当前 Worker 数量。</p><ul>{cloudflare.historical_workers.map((worker) => <li key={worker.script}><code>{worker.script}</code> · 已退休 · 今日请求 {worker.requests}</li>)}</ul></section> : null}
 
       <DriftPanel drift={cloudflare.drift} now={now} />
 

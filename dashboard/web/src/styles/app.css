@@ -1229,8 +1229,8 @@ main {
   }
 
   .service-row {
-    height: 48px;
-    padding: 0 10px;
+    min-height: 48px;
+    padding: 8px 10px;
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: var(--radius-m);
@@ -1249,6 +1249,8 @@ main {
   .service-status {
     margin: 0;
     font-size: 12px;
+    min-width: 0;
+    overflow-wrap: anywhere;
   }
 }
 

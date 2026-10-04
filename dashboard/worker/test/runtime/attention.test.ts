@@ -40,6 +40,25 @@ async function advance(step: number): Promise<void> {
 }
 
 describe('persistent occurrence controls', () => {
+  it('does not reopen a dismissed batch on count reduction or an equal-count replacement without a new revision', async () => {
+    h = await start();
+    const observe = async (count: number, revision: number, step: number) => {
+      await activeHarness().answer('newsletter', 'status', { value: await status('newsletter', {
+        health: 'ok', signals: [{ code: 'newsletter_unknown', severity: 'warning', metrics: { unknown_count: count, unknown_revision: revision } }],
+        counters: { unknown_count: count },
+      }) });
+      await advance(step);
+    };
+    await observe(34, 34, 0);
+    const item = (await home()).attention.items.find(item => item.code === 'newsletter_unknown');
+    if (!item) throw new Error('missing synthetic warning');
+    expect((await change(item, 'dismiss')).status).toBe(200);
+    await observe(32, 34, 1);
+    expect((await home()).attention.items.some(item => item.code === 'newsletter_unknown')).toBe(false);
+    await observe(32, 35, 2);
+    expect((await home()).attention.items.some(item => item.code === 'newsletter_unknown')).toBe(true);
+  });
+
   it('dismisses across restart/views without changing facts, and reports only on a later scheduled tick', async () => {
     h = await start();
     await h.answer('newsletter', 'status', { value: await newsletter(32) });

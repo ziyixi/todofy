@@ -102,10 +102,8 @@ describe('操作与记录', () => {
   it('shows an active guard with its reason, per-app results and deferred jobs', async () => {
     await showOps(guardShed())
     const actions = region('降载与操作')
-    expect(within(actions).getAllByText('降载中')).toHaveLength(2)
-    expect(within(actions).getByText('原因：配额：D1 读取行数')).toBeInTheDocument()
-    expect(within(actions).getByText('自动（按配额）')).toBeInTheDocument()
-    expect(within(actions).getByText('降载中（上次下发失败：超时）')).toBeInTheDocument()
+    expect(within(actions).getAllByText(/实际：非关键工作已延后/)).toHaveLength(2)
+    expect(within(actions).getByText('下发失败：超时')).toBeInTheDocument()
     const mail = within(region('应用详情')).getByRole('region', { name: 'Mail Hero' })
     expect(within(mail).getByText('推迟的任务：原件对账、保留期清理、金丝雀清理、告警历史清理')).toBeInTheDocument()
     expect(within(within(region('应用详情')).getByRole('region', { name: 'Todofy' })).getByText(/上次下发降载设置失败：超时/)).toBeInTheDocument()

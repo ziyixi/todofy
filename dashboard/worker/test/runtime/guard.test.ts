@@ -213,42 +213,34 @@ describe('automatic guard', () => {
 });
 
 describe('owner override', () => {
-  it('forces shed on every app, then clears and suppresses the automatic shed until 00:00 UTC', async () => {
+  it('isolates owner overrides and clear from the automatic policy on other apps', async () => {
     h = await startFlows({ bindings: { CANARY_UTC_HOUR: '23' }, usage: d1Reads(90) });
-    // Statuses first, so the capabilities are known.
     await h.tick(NOW - 20 * 60_000);
     await guardCalls(h);
-
-    const forced = await h.post(PATHS.guard, { level: 'shed' });
+    const forced = await h.post(PATHS.guard, { level: 'shed', app: 'mail-hero' });
     expect(forced.status).toBe(200);
-    const body = (await forced.json()) as OverrideGuardResponse;
-    expect(body.guard.desired).toMatchObject({ level: 'shed', reason: 'owner_shed', source: 'owner' });
-    expect(body.guard.override?.level).toBe('shed');
-    const shedCalls = await guardCalls(h);
-    expect(shedCalls['mail-hero']).toMatchObject([{ level: 'shed', reason: 'owner_shed' }]);
-    expect(shedCalls.todofy).toMatchObject([{ level: 'shed', reason: 'owner_shed' }]);
-    expect(shedCalls.lab).toMatchObject([{ level: 'shed', reason: 'owner_shed' }]);
-    // 24 h from the request (NOW).
-    expect(shedCalls['mail-hero']?.[0]?.until).toBe('2026-10-02T12:00:00.000Z');
-    expect(body.guard.override?.until).toBe('2026-10-02T12:00:00.000Z');
-
-    const cleared = await h.post(PATHS.guard, { level: 'normal' });
+    const body = await forced.json() as OverrideGuardResponse;
+    expect(body.guard.apps['mail-hero']?.desired).toMatchObject({ level: 'shed', source: 'owner' });
+    expect(body.guard.apps.todofy?.desired?.source).toBe('auto');
+    expect(await guardCalls(h)).toMatchObject({ todofy: [], lab: [] });
+    const cleared = await h.post(PATHS.guard, { level: 'normal', app: 'mail-hero' });
     expect(cleared.status).toBe(200);
-    const clearedBody = (await cleared.json()) as OverrideGuardResponse;
-    expect(clearedBody.guard.desired).toMatchObject({ level: 'normal', reason: 'owner_clear', source: 'owner' });
+    const clearBody = await cleared.json() as OverrideGuardResponse;
+    expect(clearBody.guard.apps['mail-hero']?.override).toMatchObject({ level: 'normal', until: '2026-10-02T00:00:00.000Z' });
     expect(await guardCalls(h)).toEqual({
-      'mail-hero': [{ level: 'normal', reason: 'owner_clear', until: null }],
-      todofy: [{ level: 'normal', reason: 'owner_clear', until: null }],
-      lab: [{ level: 'normal', reason: 'owner_clear', until: null }],
+      'mail-hero': [{ level: 'normal', reason: 'owner_clear', until: null }], todofy: [], lab: [],
     });
-
-    expect(clearedBody.guard.override).toMatchObject({ level: 'normal', until: '2026-10-02T00:00:00.000Z' });
-    // 90 % usage on the next tick: the automatic shed stays suppressed.
     await h.tick(NOW + 60_000);
-    expect(await guardCalls(h)).toEqual({ 'mail-hero': [], todofy: [], lab: [] });
-    // Until 00:00 UTC: the first tick of the next day sheds again.
+    expect((await guardCalls(h))['mail-hero']).toEqual([]);
     await h.tick('2026-10-02T00:00:00Z');
     expect((await guardCalls(h))['mail-hero']).toMatchObject([{ level: 'shed', reason: 'quota_d1_rows_read' }]);
+  });
+
+  it('requires old pages to refresh instead of silently changing multiple apps', async () => {
+    h = await startFlows();
+    const response = await h.post(PATHS.guard, { level: 'shed' });
+    expect(response.status).toBe(400);
+    expect(await h.called()).toEqual([]);
   });
 
   it('refuses the override without CSRF', async () => {

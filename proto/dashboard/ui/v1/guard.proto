@@ -103,6 +103,10 @@ message GuardThresholds {
 
 // One guarded app.
 message GuardAppView {
+  // This app's independently resolved desired state; absent from legacy views.
+  GuardDesired desired = 4;
+  // This app's owner override; absent when automatic or expired.
+  GuardOverride override = 5;
   // The app's effective guard as last seen (its setGuard answer, or its status's guard if newer).
   ops.v1.GuardState state = 1 [(google.api.field_behavior) = REQUIRED];
   // The last setGuard call.

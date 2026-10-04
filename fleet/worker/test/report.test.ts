@@ -17,6 +17,20 @@ const historicalUnknown = () => {
 };
 
 const newsletterStatus = (report: unknown) => statusSnapshot('newsletter', read(report), NOW, NOW, 'fleet.example.test');
+const classifiedReport = () => ({
+  ...fixture,
+  newsletter: {
+    ...fixture.newsletter,
+    unknown_count: 4,
+    unknown_revision: 7,
+    unknown_by_kind: {
+      interrupted_activities: 2, packets: 1, workflow_attempts: 0,
+      notion_entities: 0, notion_versions: 0, delivery: 1,
+    },
+    latest_delivery_state: 'provider_accepted',
+    latest_delivery_time: '2026-10-02T23:30:00.000Z',
+  },
+});
 
 describe('metadata report boundary', () => {
   it('accepts a synthetic typed report and three expected daemons', () => {
@@ -101,10 +115,41 @@ describe('metadata report boundary', () => {
 });
 
 describe('Newsletter process and release projection', () => {
+  it('projects accepted delivery separately from historical records and healthy execution', () => {
+    const view = newsletterStatus(classifiedReport());
+    expect(view.health).toBe('ok');
+    expect(view.signals).toContainEqual({
+      code: 'newsletter_delivery_accepted', severity: 'info',
+      since: '2026-10-02T23:30:00Z', metrics: {},
+    });
+    expect(view.signals).toContainEqual({
+      code: 'newsletter_unknown', severity: 'warning', metrics: { unknown_count: 4, unknown_revision: 7 },
+    });
+    expect(view.signals.map((item) => item.code)).not.toContain('newsletter_unavailable');
+    expect(view.counters).toMatchObject({ unknown_interrupted_activities: 2, unknown_delivery: 1 });
+  });
+  it('reports a latest provider rejection without inventing a stopped process', () => {
+    const report = classifiedReport();
+    report.newsletter.latest_delivery_state = 'rejected';
+    const view = newsletterStatus(report);
+    expect(view.signals).toContainEqual({
+      code: 'newsletter_delivery_rejected', severity: 'warning',
+      since: '2026-10-02T23:30:00Z', metrics: {},
+    });
+    expect(view.signals.map((item) => item.code)).not.toContain('newsletter_unavailable');
+    expect(view.signals.map((item) => item.code)).not.toContain('newsletter_delivery_accepted');
+  });
+  it('keeps a failed process unavailable even after an accepted provider response', () => {
+    const report = classifiedReport();
+    report.newsletter.worker_healthy = false;
+    expect(newsletterStatus(report).signals.map((item) => item.code)).toEqual([
+      'newsletter_unavailable', 'newsletter_unknown', 'newsletter_delivery_accepted',
+    ]);
+  });
   it('keeps historical unknown results as attention without a process fault or pending release', () => {
     const { report } = historicalUnknown();
     expect(newsletterStatus(report)).toMatchObject({
-      health: 'degraded',
+      health: 'ok',
       signals: [{ code: 'newsletter_unknown', severity: 'warning', metrics: { unknown_count: 32 } }],
       counters: { unknown_count: 32 },
     });
@@ -189,6 +234,33 @@ describe('Newsletter process and release projection', () => {
     const { report } = historicalUnknown();
     report.runtime.observed_at = '2026-10-02T23:58:59Z';
     expect(() => read(report)).toThrow('invalid_report');
+  });
+});
+
+describe('Newsletter outcome receipt boundary', () => {
+  it('accepts legacy reports without new outcome metadata', () => {
+    expect(read(fixture).newsletter.unknown_by_kind).toBeUndefined();
+    expect(read(classifiedReport()).newsletter.unknown_revision).toBe(7);
+  });
+  it('refuses inconsistent or unregistered category counts', () => {
+    const report = classifiedReport();
+    for (const counts of [
+      { ...report.newsletter.unknown_by_kind, delivery: 2 },
+      { ...report.newsletter.unknown_by_kind, delivery: -1 },
+      { ...report.newsletter.unknown_by_kind, delivery: true },
+      { ...report.newsletter.unknown_by_kind, unregistered: 0 },
+      { ...report.newsletter.unknown_by_kind, delivery: undefined, unregistered: 1 },
+      { delivery: 4 },
+    ]) {
+      expect(() => read({ ...report, newsletter: { ...report.newsletter, unknown_by_kind: counts } })).toThrow('invalid_report');
+    }
+  });
+  it('refuses incomplete classification and unpaired delivery metadata', () => {
+    const report = classifiedReport();
+    for (const field of ['unknown_revision', 'unknown_by_kind', 'latest_delivery_state', 'latest_delivery_time']) {
+      const newsletter = Object.fromEntries(Object.entries(report.newsletter).filter(([key]) => key !== field));
+      expect(() => read({ ...report, newsletter })).toThrow('invalid_report');
+    }
   });
 });
 

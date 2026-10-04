@@ -1,3 +1,4 @@
+import type { OpsApp } from './api-types.ts';
 /**
  * The owner API (proto/dashboard/ui/v1): one handler per rpc of DashboardUiService, served by the shared transcoder
  * (proto/ts/http-transcoder.ts) from src/http.ts after authentication. No business logic: every call is one RPC to
@@ -49,6 +50,7 @@ export const REASONS: Readonly<Record<Reason, { readonly code: Code; readonly me
   ACCESS_NOT_CONFIGURED: { code: Code.UNAVAILABLE, message: 'the Access settings are incomplete', zh: 'Cloudflare Access 配置不完整' },
   NOT_CONFIGURED: { code: Code.UNAVAILABLE, message: 'a required secret is missing', zh: '服务缺少必需的密钥配置' },
   CSRF_FAILED: { code: Code.PERMISSION_DENIED, message: 'the CSRF token or Origin is not valid', zh: '页面安全令牌已失效，请刷新后重试' },
+  REFRESH_REQUIRED: { code: Code.FAILED_PRECONDITION, message: 'refresh the page to select one app', zh: '请刷新页面并选择要操作的服务' },
   BAD_REQUEST: { code: Code.INVALID_ARGUMENT, message: 'the request is not valid', zh: '请求格式不正确' },
   NOT_FOUND: { code: Code.NOT_FOUND, message: 'no such resource', zh: '找不到该资源' },
   METHOD_NOT_ALLOWED: { code: Code.UNIMPLEMENTED, message: 'this method is not allowed on this path', zh: '不支持该请求方法' },
@@ -140,10 +142,11 @@ export const handlers: ServiceHandlers<ShapeOf<typeof DashboardUiService>, ApiCo
     // The strict read refused a level outside the enum; non_null refused the zero value.
     const level = GUARD_LEVELS.name(request.level);
     if (level === null) throw dashboardError('BAD_REQUEST');
+    if (!request.app) throw dashboardError('REFRESH_REQUIRED');
     const result = await callHome(
-      () => home(ctx.env).setGuardOverride(level, ctx.at, requestIdOf(request.requestId)) as unknown as Promise<GuardOverrideOutcome>,
+      () => home(ctx.env).setGuardOverride(level, ctx.at, requestIdOf(request.requestId), request.app as OpsApp) as unknown as Promise<GuardOverrideOutcome>,
     );
-    if (!result.ok) throw dashboardError('BAD_REQUEST');
+    if (!result.ok) throw dashboardError(result.code === 'guard_unavailable' ? 'UNAVAILABLE' : 'BAD_REQUEST');
     return ownAnswer(OverrideGuardResponseSchema, { guard: result.guard });
   },
 

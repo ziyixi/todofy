@@ -66,9 +66,10 @@ describe('Access end to end', () => {
       h?.fetch(PATHS.guard, {
         method: 'POST',
         headers: { 'cf-access-jwt-assertion': jwt, origin, 'x-csrf-token': token, cookie, 'content-type': 'application/json' },
-        body: '{"level":"shed"}',
+        body: '{"level":"shed","app":"mail-hero"}',
       });
     expect((await post('http://127.0.0.1'))?.status).toBe(403);
+    await h.tick(NOW); // Load the service capability before a guard mutation.
     const accepted = await post('https://home.example.com');
     expect(accepted?.status).toBe(200);
     await accepted?.arrayBuffer();

@@ -151,7 +151,7 @@ describe('Cloudflare 监控', () => {
     expect(within(item).getByText('超过 95%')).toBeInTheDocument()
     // Rounded down: 349.6 left reads 349, never more than there is.
     expect(within(item).getByText('剩余 349 neurons')).toBeInTheDocument()
-    const guard = section('降载')
+    const guard = section('非关键后台工作')
     expect(guard).toHaveTextContent('未降载')
     expect(guard).not.toHaveTextContent('Workers AI')
   })
@@ -366,13 +366,13 @@ describe('Cloudflare 监控', () => {
 
   it('shows the guard read-only with a link to its actions', async () => {
     await showCloudflare(guardShed())
-    const guard = section('降载')
+    const guard = section('非关键后台工作')
     expect(guard).toHaveTextContent('降载中')
     expect(guard).toHaveTextContent('配额：D1 读取行数')
     expect(guard).toHaveTextContent('80% 自动降载 / 70% 解除')
     expect(guard).toHaveTextContent('Mail Hero 已生效')
     expect(guard).toHaveTextContent('Todofy 已生效（上次下发失败）')
-    expect(within(guard).getByRole('link', { name: '降载操作 →' })).toHaveAttribute('href', '#/ops')
+    expect(within(guard).getByRole('link', { name: '按服务调整 →' })).toHaveAttribute('href', '#/ops')
     expect(within(guard).queryByRole('button')).toBeNull()
   })
 

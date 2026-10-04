@@ -224,7 +224,7 @@ class Evidence(unittest.TestCase):
                 result.active_count,
                 result.unknown_count,
             ),
-            ("ready", "degraded", 3, 2),
+            ("ready", "healthy", 3, 2),
         )
 
     def test_publisher_activation_is_a_separate_gate(self):

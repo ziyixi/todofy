@@ -92,7 +92,7 @@ async function session({ h, meter }: HomeIsolate): Promise<Measurement[]> {
     await meter.measure(
       'POST guard',
       async () => {
-        const response = await h.post(PATHS.guard, { level: 'normal' });
+        const response = await h.post(PATHS.guard, { level: 'normal', app: 'mail-hero' });
         await response.arrayBuffer();
         if (response.status !== 200) throw new Error(`POST guard: ${String(response.status)}`);
       },

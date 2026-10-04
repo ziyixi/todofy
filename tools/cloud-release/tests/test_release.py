@@ -1,3 +1,4 @@
+import io
 import json
 import os
 import sys
@@ -6,7 +7,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from api import ReleaseError
+from api import Api, ReleaseError
 from cloudflare import (
     binding_differences,
     deployment_version,
@@ -30,6 +31,27 @@ class FakeApi:
         if isinstance(result, Exception):
             raise result
         return result
+
+
+class ApiMetadataTests(unittest.TestCase):
+    def api(self, response):
+        class Opener:
+            def open(self, request, timeout):
+                return io.BytesIO(json.dumps(response).encode())
+        return Api("cloudflare", "synthetic-token", Opener())
+
+    def test_existing_callers_receive_result_without_metadata(self):
+        response = {"success": True, "result": [{"id": "demo"}], "result_info": {"total_count": 2}}
+        self.assertEqual(self.api(response).call("/accounts/demo/workers/scripts"), response["result"])
+
+    def test_inventory_can_request_full_pagination_envelope(self):
+        response = {"success": True, "result": {"buckets": []}, "result_info": {"cursor": "next"}}
+        self.assertEqual(self.api(response).call("/accounts/demo/r2/buckets", include_metadata=True), response)
+
+    def test_metadata_request_does_not_bypass_provider_success_validation(self):
+        for response in [{"success": False, "result": []}, [], {"result": []}]:
+            with self.subTest(response=response), self.assertRaisesRegex(ReleaseError, "CLOUDFLARE_RESPONSE_INVALID"):
+                self.api(response).call("/accounts/demo/r2/buckets", include_metadata=True)
 
 
 class ReleaseTests(unittest.TestCase):

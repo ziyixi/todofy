@@ -25,7 +25,20 @@ def test_monitor_is_separate_and_frozen_process_remains_healthy(tmp_path):
         headers = {"Authorization": "Bearer " + monitor}
         value = client.get(path, headers=headers).json()
         assert value == {
-            "version": 1,
+            "version": 2,
+            "unknown_by_kind": dict.fromkeys(
+                (
+                    "interrupted_activities",
+                    "packets",
+                    "workflow_attempts",
+                    "notion_entities",
+                    "notion_versions",
+                    "delivery",
+                ),
+                0,
+            ),
+            "unknown_revision": 0,
+            "latest_delivery": None,
             "worker_healthy": True,
             "drain_state": "draining",
             "queued_count": 0,

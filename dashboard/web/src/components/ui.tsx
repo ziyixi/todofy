@@ -1,7 +1,7 @@
 import { CircleAlert, CircleCheck, CircleDashed, Info, TriangleAlert } from 'lucide-react'
 import { useEffect, useState, type ButtonHTMLAttributes, type ReactNode } from 'react'
 import { formatFullTime, formatRelative, formatTime } from '../lib/format'
-import type { Tone } from '../lib/labels'
+import { counterInfo, type Tone } from '../lib/labels'
 import { Mark, toneShape } from './status'
 
 const NOTICE_ICON = {
@@ -112,7 +112,7 @@ export function Metrics({ metrics }: { metrics: Readonly<Record<string, number>>
     <ul className="metrics" aria-label="指标">
       {entries.map(([key, value]) => (
         <li key={key}>
-          <code>{key}</code> {metricNumber.format(value)}
+          <span title={key}>{counterInfo(key).label}</span> {metricNumber.format(value)}
         </li>
       ))}
     </ul>

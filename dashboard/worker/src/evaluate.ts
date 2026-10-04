@@ -539,6 +539,7 @@ export interface AttentionInput {
   readonly items: readonly AttentionSource[];
   readonly canaryEnabled: boolean;
   readonly desired: DesiredGuard;
+  readonly ownerShedApps?: readonly string[];
   readonly statuses: Readonly<Record<string, StatusDoc>>;
   /**
    * What the views evaluate (tiles, flow stages, Workers): levels worse than ok that no digest item
@@ -637,7 +638,11 @@ export function attentionView(input: AttentionInput, registry: RegistryDef = REG
     }
   }
   const ownerShed = input.desired.level === 'shed' && input.desired.source === 'owner';
-  if (ownerShed) addHeld('home', 'owner_shed', { view: 'ops' });
+  if (input.ownerShedApps === undefined) {
+    if (ownerShed) addHeld('home', 'owner_shed', { view: 'ops' });
+  } else {
+    for (const app of input.ownerShedApps) addHeld(app, 'owner_shed', { view: 'ops', entry: app });
+  }
 
   const items: AttentionItem[] = [];
   for (const item of input.items) {

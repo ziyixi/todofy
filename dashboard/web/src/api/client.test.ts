@@ -40,19 +40,19 @@ describe('api client', () => {
 
   it('fetches the CSRF token once and sends it on every mutation, with the request_id', async () => {
     const calls = installFetch((call) => (call.path === PATHS.csrf ? json({ token: 'tok' }) : json({ guard: scenario.ops.guard })))
-    expect(await api.setGuard('shed', REQUEST_ID)).toEqual({ guard: scenario.ops.guard })
-    await api.setGuard('normal', REQUEST_ID)
+    expect(await api.setGuard('shed', 'mail-hero', REQUEST_ID)).toEqual({ guard: scenario.ops.guard })
+    await api.setGuard('normal', 'mail-hero', REQUEST_ID)
     expect(calls.map((call) => `${call.method} ${call.path}`)).toEqual([`GET ${PATHS.csrf}`, `POST ${PATHS.guard}`, `POST ${PATHS.guard}`])
     expect(calls.slice(1).map((call) => [call.headers['x-csrf-token'], call.headers['content-type'], call.body])).toEqual([
-      ['tok', 'application/json', `{"level":"shed","request_id":"${REQUEST_ID}"}`],
-      ['tok', 'application/json', `{"level":"normal","request_id":"${REQUEST_ID}"}`],
+      ['tok', 'application/json', `{"level":"shed","request_id":"${REQUEST_ID}","app":"mail-hero"}`],
+      ['tok', 'application/json', `{"level":"normal","request_id":"${REQUEST_ID}","app":"mail-hero"}`],
     ])
   })
 
   it('makes a request_id per action unless the caller passes one', async () => {
     const calls = installFetch((call) => (call.path === PATHS.csrf ? json({ token: 'tok' }) : json({ guard: scenario.ops.guard })))
-    await api.setGuard('shed')
-    await api.setGuard('shed')
+    await api.setGuard('shed', 'mail-hero')
+    await api.setGuard('shed', 'mail-hero')
     const ids = calls.filter((call) => call.method === 'POST').map((call) => (JSON.parse(call.body ?? '{}') as { request_id: string }).request_id)
     expect(ids[0]).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/)
     expect(ids[1]).not.toBe(ids[0])
@@ -98,7 +98,7 @@ describe('api client', () => {
 
   it('names the token failure with the Worker’s reason', async () => {
     installFetch(() => apiError(401, 'unauthorized', '未登录或凭据无效'))
-    await expect(api.setGuard('shed')).rejects.toMatchObject({ status: 401, code: 'unauthorized', message: '未登录或凭据无效' })
+    await expect(api.setGuard('shed', 'mail-hero')).rejects.toMatchObject({ status: 401, code: 'unauthorized', message: '未登录或凭据无效' })
   })
 
   it('turns a failed fetch (network, or an Access redirect) into a login hint', async () => {

@@ -104,6 +104,7 @@ jobs:
           python3 tools/cloud-config/generate.py --check
           python3 -m unittest discover -s tools/service-catalog/tests
           python3 tools/service-catalog/catalog.py --check
+          python3 tools/service-catalog/inventory.py --check
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
           node-version: '26'
@@ -1655,7 +1656,7 @@ jobs:
 
   vps-deploy:
     name: VPS deploy
-    needs: [changes, platform-checks, newsletter-deploy, platform-image, vps-bootstrap-bundle, gate]
+    needs: [changes, platform-checks, newsletter-deploy, platform-image, vps-bootstrap-bundle, fleet-deploy, gate]
     if: >-
       ${{ !cancelled()
       && needs.changes.result == 'success'
@@ -1666,6 +1667,7 @@ jobs:
         || (!(github.event_name == 'workflow_dispatch' && inputs.resume_vps_release)
           && needs.newsletter-deploy.result == 'success' && needs.platform-image.result == 'success'
           && needs.vps-bootstrap-bundle.result == 'success'))
+      && (needs.fleet-deploy.result == 'success' || needs.fleet-deploy.result == 'skipped')
       && needs.gate.result == 'success'
       && github.ref == 'refs/heads/main'
       && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')

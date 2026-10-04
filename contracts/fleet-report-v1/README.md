@@ -33,3 +33,5 @@ Codex, Notion or email success. `unknown_count` means provider outcomes need rec
 
 Normal state snapshots overwrite one row. Only state transitions enter history (256 retained, 32 returned).
 No billing hard cap, remote control surface, cron or public health telemetry is created.
+
+Newsletter monitoring v2 adds optional category counts, a monotonic unknown-record revision, and the latest delivery record state/update time. Legacy receipts remain valid. Process health and provider outcomes are independent: `provider_accepted` means the provider accepted the send, without claiming inbox arrival. Historical records remain auditable; Home reminder dismissal uses the revision so a reduced count does not reopen a dismissed batch. See [Dashboard state](../../docs/dashboard-state.md).

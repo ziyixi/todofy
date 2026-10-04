@@ -4,7 +4,7 @@ import type { CanaryRun } from '../../../worker/src/api-types.ts'
 import type { GuardView } from '../../../worker/src/api-types.ts'
 import { canaryActive, canaryDisabled, guardShed, healthy, type Scenario } from '../test/fixtures'
 import { apiError, freezeClock, json, renderApp, serve, type Call, type Handler, PATHS } from '../test/harness'
-import { SHED_CONFIRM_TEXT, canaryConfirmText, clearConfirmText } from './ActionsSection'
+import { canaryConfirmText } from './ActionsSection'
 
 const STARTED: CanaryRun = {
   ...canaryActive().ops.canary.active!,
@@ -168,89 +168,45 @@ describe('actions', () => {
     expect(button).toHaveAccessibleDescription('本 UTC 日的 3 次手动运行已用完。')
   })
 
-  it('forces shed after confirmation and reports per-app failures', async () => {
+  it('targets only the selected service and shows its failed receipt', async () => {
     const guard: GuardView = guardShed().ops.guard
-    const shed: GuardView = {
-      ...guard,
-      desired: { level: 'shed', reason: 'owner_shed', until: '2026-09-30T17:00:00.000Z', source: 'owner' },
-      override: { level: 'shed', until: '2026-09-30T17:00:00.000Z', set_at: '2026-09-29T17:00:00.000Z' },
-    }
-    let current = healthy()
-    const { calls, actions, user } = await open(
-      () => current,
-      () => {
-        current = { ...current, ops: { ...current.ops, guard: shed } }
-        return json({ guard: shed })
-      },
-    )
-    await user.click(within(actions).getByRole('button', { name: '强制降载' }))
-
-    const dialog = screen.getByRole('dialog', { name: '强制降载？' })
-    expect(dialog).toHaveAccessibleDescription(SHED_CONFIRM_TEXT)
-    expect(SHED_CONFIRM_TEXT).toBe(
-      '立即让两个应用降载 24 小时：Mail Hero 推迟原件对账、保留期清理、金丝雀清理和告警历史清理（每项最多推迟 48 小时）；Todofy 推迟开始新一轮每周备份（上次完整备份超过 7.5 天仍会执行）、过期数据清理和趋势统计汇总（最多推迟 72 小时，之后补上）。收件、解析、投递、重试、已在进行的备份和真实邮件处理不受影响。可随时解除。',
-    )
-    await user.click(within(dialog).getByRole('button', { name: '确认降载' }))
-
-    await waitFor(() => expect(within(actions).getByRole('status')).toHaveTextContent('已要求两个应用降载'))
-    expect(within(actions).getByRole('status')).toHaveTextContent(
-      '已要求两个应用降载，直到 10月1日 01:00。Todofy 调用失败（超时），下次定时检查会重试。',
-    )
-    const [post] = posts(calls)
-    expect(post).toMatchObject({ path: PATHS.guard })
-    const sent = JSON.parse(post?.body ?? '{}') as { level?: string; request_id?: string }
-    expect(sent.level).toBe('shed')
-    expect(sent.request_id).toMatch(/^[0-9a-f-]{36}$/)
-    expect(post?.headers['x-csrf-token']).toBe('token-1')
-    expect(within(actions).getByText('手动')).toBeInTheDocument()
-    expect(within(actions).getByText(/强制降载，至/)).toBeInTheDocument()
+    const { calls, actions, user } = await open(healthy(), () => json({ guard }))
+    await user.click(within(actions).getByRole('button', { name: 'Todofy：延后 24 小时' }))
+    const dialog = screen.getByRole('dialog', { name: 'Todofy：延后非关键工作？' })
+    expect(dialog).toHaveTextContent('只对Todofy生效，24 小时后自动结束')
+    await user.click(within(dialog).getByRole('button', { name: '确认' }))
+    await waitFor(() => expect(within(actions).getAllByRole('alert').some(item => item.textContent?.includes('Todofy下发失败'))).toBe(true))
+    expect(posts(calls)).toHaveLength(1)
+    expect(JSON.parse(posts(calls)[0]?.body ?? '{}')).toMatchObject({ app: 'todofy', level: 'shed' })
   })
 
-  it('clears the guard after confirmation', async () => {
+  it('restores only Mail Hero and states the automatic override expiry', async () => {
     const scenario = guardShed()
-    const guard = scenario.ops.guard
-    const cleared: GuardView = {
-      ...guard,
-      desired: { level: 'normal', reason: 'owner_clear', until: null, source: 'owner' },
-      override: { level: 'normal', until: '2026-09-30T00:00:00.000Z', set_at: '2026-09-29T17:00:00.000Z' },
-      apps: {
-        'mail-hero': { ...guard.apps['mail-hero']!, last_error: null },
-        todofy: { ...guard.apps.todofy!, last_error: null },
-      },
-    }
-    const { calls, actions, user } = await open(scenario, () => json({ guard: cleared }))
-    await user.click(within(actions).getByRole('button', { name: '解除降载' }))
-
-    const dialog = screen.getByRole('dialog', { name: '解除降载？' })
-    // The fixed clock is 17:00 UTC; the next 00:00 UTC is 08:00 in Asia/Shanghai.
-    expect(dialog).toHaveAccessibleDescription(clearConfirmText('08:00'))
-    expect(clearConfirmText('08:00')).toBe(
-      '立即结束两个应用的降载，并在本 UTC 日剩余时间内暂停自动降载；次日 00:00 UTC（本地 08:00）起恢复自动判断。',
-    )
-    await user.click(within(dialog).getByRole('button', { name: '确认解除' }))
-
-    await waitFor(() =>
-      expect(within(actions).getByRole('status')).toHaveTextContent('已解除降载，本 UTC 日剩余时间内不会自动降载。'),
-    )
-    expect(posts(calls)[0]).toMatchObject({ path: PATHS.guard })
-    expect(JSON.parse(posts(calls)[0]?.body ?? '{}')).toMatchObject({ level: 'normal' })
+    const { calls, actions, user } = await open(scenario, () => json({ guard: healthy().ops.guard }))
+    await user.click(within(actions).getByRole('button', { name: 'Mail Hero：恢复' }))
+    const dialog = screen.getByRole('dialog', { name: 'Mail Hero：恢复正常执行？' })
+    expect(dialog).toHaveTextContent('其他服务保持原状态')
+    expect(dialog).toHaveTextContent('00:00 UTC')
+    await user.click(within(dialog).getByRole('button', { name: '确认' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(JSON.parse(posts(calls)[0]?.body ?? '{}')).toMatchObject({ app: 'mail-hero', level: 'normal' })
   })
 
   it('closes on Escape without sending and returns focus; Tab stays inside the dialog', async () => {
     const { calls, actions, user } = await open(healthy(), () => json({}))
-    const button = within(actions).getByRole('button', { name: '强制降载' })
+    const button = within(actions).getByRole('button', { name: 'Mail Hero：延后 24 小时' })
     button.focus()
     await user.keyboard('{Enter}')
 
-    const dialog = screen.getByRole('dialog', { name: '强制降载？' })
+    const dialog = screen.getByRole('dialog', { name: 'Mail Hero：延后非关键工作？' })
     const cancel = within(dialog).getByRole('button', { name: '取消' })
     expect(cancel).toHaveFocus()
     await user.tab()
-    expect(within(dialog).getByRole('button', { name: '确认降载' })).toHaveFocus()
+    expect(within(dialog).getByRole('button', { name: '确认' })).toHaveFocus()
     await user.tab()
     expect(within(dialog).getByRole('button', { name: '关闭' })).toHaveFocus()
     await user.tab({ shift: true })
-    expect(within(dialog).getByRole('button', { name: '确认降载' })).toHaveFocus()
+    expect(within(dialog).getByRole('button', { name: '确认' })).toHaveFocus()
 
     await user.keyboard('{Escape}')
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()

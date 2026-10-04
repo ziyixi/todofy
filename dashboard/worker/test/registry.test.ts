@@ -1,3 +1,4 @@
+import inventory from '../src/account-inventory.json';
 import opsReadme from '../../../contracts/ops-v1/README.md?raw';
 import { describe, expect, it } from 'vitest';
 import { MAX_OUTBOUND_PER_TICK, VIEW_BODY_BUDGET } from '../src/api-types.ts';
@@ -349,4 +350,9 @@ describe('validateRegistry', () => {
     }
     expect(problems(r).some((p) => p.startsWith('budget:'))).toBe(true);
   });
+});
+
+it('registers every configured account resource, including bootstrap state', () => {
+  for (const kind of ['d1', 'do', 'r2'] as const) expect(REGISTRY.resources.filter(r => r.kind === kind).map(r => r.match).sort()).toEqual(inventory[kind]);
+  expect(REGISTRY.workers.map(w => w.script).sort()).toEqual(inventory.workers);
 });

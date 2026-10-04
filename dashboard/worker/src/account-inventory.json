@@ -1,0 +1,37 @@
+{
+  "workers": [
+    "fleet",
+    "flowday",
+    "home",
+    "lab",
+    "links",
+    "mail-hero",
+    "todofy",
+    "todofy-core",
+    "watch",
+    "ziyixi-notion-publish",
+    "ziyixi-website"
+  ],
+  "d1": [
+    "151c1306-3885-4679-9592-08887b30ae68",
+    "2f8c5331-06ce-4347-8c0a-90fe51c82260",
+    "6c13e4c3-e239-42fb-a7a4-96810fa8d7dc",
+    "df104e83-7183-47e3-b2f9-638dc7502c13",
+    "f20238dc-93a4-4d1a-91c4-c013f01cbdc9"
+  ],
+  "do": [
+    "55c248f9d82c45f3a89d2de1d719d5db",
+    "a013ef9fa45048d4b4f7bfcc641b57ea",
+    "a3d3d60939e54b49951af9586232c50e",
+    "acddddf88d624194a68af430fd1a90ff",
+    "d58e1bdabacb4d14bbba1887f169c8b4",
+    "d8b315160669429781ba6229123cb33c"
+  ],
+  "r2": [
+    "infra-state",
+    "mail-hero-backups",
+    "mail-hero-store",
+    "todofy-backups",
+    "vultr-backup"
+  ]
+}

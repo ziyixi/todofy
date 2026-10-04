@@ -9,6 +9,19 @@ export const REPORT_PATH = '/api/internal/fleet/v1/receipt';
 export const REPORT_KEY_ID = 'primary';
 export const FRESH_MS = 10 * 60_000;
 export const MISSING_MS = 20 * 60_000;
+const UNKNOWN_CATEGORIES = ['interrupted_activities', 'packets', 'workflow_attempts', 'notion_entities', 'notion_versions', 'delivery'];
+
+function validNewsletter(report: Report['newsletter']): boolean {
+  const counts = report.unknown_by_kind;
+  if (counts !== undefined || report.unknown_revision != null) {
+    if (!counts || report.unknown_revision == null
+      || Object.keys(counts).length !== UNKNOWN_CATEGORIES.length
+      || UNKNOWN_CATEGORIES.some((key) => !Object.hasOwn(counts, key))
+      || Object.values(counts).some((count) => !Number.isInteger(count) || count < 0)
+      || Object.values(counts).reduce((sum, count) => sum + count, 0) !== report.unknown_count) return false;
+  }
+  return (report.latest_delivery_state != null) === (report.latest_delivery_time != null);
+}
 
 export class ReceiptError extends Error {
   readonly status: number;
@@ -25,6 +38,7 @@ export function parseReport(text: string, host: string, epoch: string, now: numb
     const input: unknown = JSON.parse(text);
     const decoded = fromWire(HostReportSchema, input, { strict: true });
     report = toWire(HostReportSchema, decoded.message);
+    if (!validNewsletter(report.newsletter)) throw new Error('invalid_newsletter_outcomes');
     if (typeof input === 'object' && input !== null && 'configured_daemons' in input) {
       const daemons = report.configured_daemons;
       if (!daemons?.k3s || !daemons.ssh

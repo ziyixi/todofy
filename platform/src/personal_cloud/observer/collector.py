@@ -15,6 +15,7 @@ from ziyixi_proto.platform.runtime.v1.runtime_pb import NodeStatus
 from ziyixi_proto.wire_json import from_wire, to_wire
 
 from ..deployment.kubernetes import Client, DependencyUnavailable
+from .newsletter_outcomes import outcomes
 from .provenance import source_sha
 from .systemd_snapshot import configured_daemons, legacy_daemons
 from .systemd_snapshot import read as systemd_snapshot
@@ -163,10 +164,19 @@ def newsletter(env: dict[str, str]) -> dict[str, object]:
         if (
             status != 200
             or not isinstance(value, dict)
-            or set(value) != keys
+            or set(value)
+            != (
+                keys
+                | (
+                    {"unknown_by_kind", "unknown_revision", "latest_delivery"}
+                    if value.get("version") == 2
+                    else set()
+                )
+            )
             or type(value["version"]) is not int
-            or value["version"] != 1
+            or value["version"] not in {1, 2}
             or type(value["worker_healthy"]) is not bool
+            or not isinstance(value["drain_state"], str)
             or value["drain_state"] not in {"active", "draining", "frozen"}
             or any(
                 type(value[name]) is not int or not 0 <= value[name] <= 2147483647
@@ -174,7 +184,11 @@ def newsletter(env: dict[str, str]) -> dict[str, object]:
             )
         ):
             return unknown
+        extra = {}
+        if value["version"] == 2:
+            extra = outcomes(value)
         return {
+            **extra,
             "state": "healthy" if value["worker_healthy"] else "unavailable",
             **{
                 key: value[key]

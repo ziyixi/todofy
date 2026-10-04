@@ -28,7 +28,7 @@ class Api:
         )
         self.opener = opener or urllib.request.build_opener(NoRedirect())
 
-    def call(self, path, *, method="GET", body=None):
+    def call(self, path, *, method="GET", body=None, include_metadata=False):
         if not path.startswith("/") or ".." in path or "\n" in path:
             raise ReleaseError("PROVIDER_PATH_INVALID")
         data = None if body is None else json.dumps(body).encode()
@@ -63,5 +63,5 @@ class Api:
         if self.provider == "cloudflare":
             if not isinstance(result, dict) or result.get("success") is not True:
                 raise ReleaseError("CLOUDFLARE_RESPONSE_INVALID")
-            return result.get("result")
+            return result if include_metadata else result.get("result")
         return result

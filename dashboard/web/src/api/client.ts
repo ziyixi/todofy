@@ -202,8 +202,8 @@ export const api = {
   refreshCloudflare: (): Promise<CloudflareView> => wire(CloudflareViewSchema, () => client.refreshCloudflareView({ name: 'cloudflareView' })),
   startCanary: (canaryId: string, requestId: string = newRequestId()): Promise<RunCanaryResponse> =>
     wire(RunCanaryResponseSchema, () => client.runCanary({ name: `canaries/${canaryId}`, requestId })),
-  setGuard: (level: GuardLevel, requestId: string = newRequestId()): Promise<OverrideGuardResponse> =>
-    wire(OverrideGuardResponseSchema, () => client.overrideGuard({ name: 'guard', level: GUARD_LEVELS[level], requestId })),
+  setGuard: (level: GuardLevel, app: string, requestId: string = newRequestId()): Promise<OverrideGuardResponse> =>
+    wire(OverrideGuardResponseSchema, () => client.overrideGuard({ name: 'guard', level: GUARD_LEVELS[level], requestId, app })),
   dismissAttention: (name: string, etag: string, requestId: string): Promise<AttentionItem> =>
     wire(AttentionItemSchema, () => client.dismissAttention({ name, etag, requestId })),
   restoreAttention: (name: string, etag: string, requestId: string): Promise<AttentionItem> =>

@@ -285,7 +285,7 @@ describe('Access', () => {
     const pinned = makeEnv({ DEV_AUTH_BYPASS: 'true', DEV_NOW: NOW });
     expect((await local(pinned.env, PATHS.refreshHome, {})).status).toBe(200);
     expect((await local(pinned.env, PATHS.canary, {})).status).toBe(200);
-    expect((await local(pinned.env, PATHS.guard, { level: 'shed' })).status).toBe(200);
+    expect((await local(pinned.env, PATHS.guard, { level: 'shed', app: 'mail-hero' })).status).toBe(200);
     expect(pinned.calls.at).toEqual([Date.parse(NOW), Date.parse(NOW), Date.parse(NOW)]);
 
     // Unset or not an RFC 3339 UTC instant: the object's own clock.
@@ -299,7 +299,7 @@ describe('Access', () => {
     const verified = makeEnv({ DEV_NOW: NOW });
     expect((await call(verified.env, PATHS.home)).status).toBe(200);
     expect((await mutate(verified.env, PATHS.canary, {})).status).toBe(200);
-    expect((await mutate(verified.env, PATHS.guard, { level: 'normal' })).status).toBe(200);
+    expect((await mutate(verified.env, PATHS.guard, { level: 'normal', app: 'mail-hero' })).status).toBe(200);
     expect(verified.calls.at).toEqual([null, null, null]);
     // And with the bypass switched on as well, the edge's requests are refused before the object is called.
     const both = makeEnv({ DEV_AUTH_BYPASS: 'true', DEV_NOW: NOW });
@@ -352,7 +352,7 @@ describe('CSRF and mutations', () => {
     }
     // A token minted with another key does not verify.
     const other = makeEnv({ CSRF_SIGNING_KEY: 'cd'.repeat(32) });
-    expect((await mutate(env, PATHS.guard, { level: 'shed' }, { csrf: await csrf(other.env) })).status).toBe(403);
+    expect((await mutate(env, PATHS.guard, { level: 'shed', app: 'mail-hero' }, { csrf: await csrf(other.env) })).status).toBe(403);
     expect(calls.startCanary).toEqual([]);
     expect(calls.guard).toEqual([]);
     expect(calls.views).toEqual([]);
@@ -361,7 +361,7 @@ describe('CSRF and mutations', () => {
   it('needs a signing key for the CSRF token and every mutation', async () => {
     const { env, calls } = makeEnv({ CSRF_SIGNING_KEY: 'short' });
     expect(await reasonOf(await call(env, PATHS.csrf))).toBe('NOT_CONFIGURED');
-    const response = await mutate(env, PATHS.guard, { level: 'shed' }, { csrf: { token: 'a.b', cookie: `${CSRF_COOKIE}=a.b` } });
+    const response = await mutate(env, PATHS.guard, { level: 'shed', app: 'mail-hero' }, { csrf: { token: 'a.b', cookie: `${CSRF_COOKIE}=a.b` } });
     expect(response.status).toBe(503);
     expect(await reasonOf(response)).toBe('NOT_CONFIGURED');
     expect(calls.guard).toEqual([]);
@@ -371,7 +371,7 @@ describe('CSRF and mutations', () => {
 
   it('sets the guard override from {level, request_id}', async () => {
     const { env, calls } = makeEnv();
-    const response = await mutate(env, PATHS.guard, { level: 'normal', request_id: REQUEST_ID });
+    const response = await mutate(env, PATHS.guard, { level: 'normal', app: 'mail-hero', request_id: REQUEST_ID });
     expect(response.status).toBe(200);
     const body = await response.json();
     expect(body).toEqual({ guard: guardOf('normal') });
@@ -388,7 +388,7 @@ describe('CSRF and mutations', () => {
       JSON.stringify({ level: 'panic' }),
       JSON.stringify({ level: null }),
       JSON.stringify({ level: 'shed', extra: 1 }),
-      JSON.stringify({ level: 'shed', request_id: 'not-a-uuid' }),
+      JSON.stringify({ level: 'shed', app: 'mail-hero', request_id: 'not-a-uuid' }),
       JSON.stringify({ level: 'shed', pad: 'x'.repeat(2000) }),
     ]) {
       const response = await mutate(env, PATHS.guard, body);
@@ -417,7 +417,7 @@ describe('CSRF and mutations', () => {
       expect(response.status).toBe(status);
       expect(await reasonOf(response)).toBe(reason);
     }
-    const reused = await mutate(makeEnv({}, { guard: { ok: false, code: 'request_id_reused' } }).env, PATHS.guard, { level: 'shed', request_id: REQUEST_ID });
+    const reused = await mutate(makeEnv({}, { guard: { ok: false, code: 'request_id_reused' } }).env, PATHS.guard, { level: 'shed', app: 'mail-hero', request_id: REQUEST_ID });
     expect(await reasonOf(reused)).toBe('BAD_REQUEST');
     // The switch names the variable that turns it back on.
     const disabled = await mutate(makeEnv({}, { startCanary: { ok: false, code: 'canary_disabled' } }).env, PATHS.canary, {});
@@ -429,7 +429,7 @@ describe('CSRF and mutations', () => {
     expect(calls.startCanary).toEqual([]);
     stub.startCanary = () => Promise.reject(new Error('object reset'));
     stub.setGuardOverride = () => Promise.reject(new Error('object reset'));
-    for (const [path, body] of [[PATHS.canary, {}], [PATHS.guard, { level: 'shed' }]] as const) {
+    for (const [path, body] of [[PATHS.canary, {}], [PATHS.guard, { level: 'shed', app: 'mail-hero' }]] as const) {
       const response = await mutate(env, path, body);
       expect(response.status).toBe(503);
       expect(await reasonOf(response)).toBe('UNAVAILABLE');
@@ -474,7 +474,7 @@ describe('CSRF and mutations', () => {
     const small = new ReadableStream<Uint8Array>({
       start(controller) {
         controller.enqueue(new TextEncoder().encode('{"level":'));
-        controller.enqueue(new TextEncoder().encode('"shed"}'));
+        controller.enqueue(new TextEncoder().encode('"shed","app":"mail-hero"}'));
         controller.close();
       },
     });
@@ -483,7 +483,7 @@ describe('CSRF and mutations', () => {
     expect(calls.guard).toEqual(['shed:null']);
     // A declared length above the limit or a malformed one is refused before reading.
     for (const length of ['1025', 'abc', '-1']) {
-      const refused = await mutate(env, PATHS.guard, { level: 'shed' }, { csrf: pair, headers: { 'content-length': length } });
+      const refused = await mutate(env, PATHS.guard, { level: 'shed', app: 'mail-hero' }, { csrf: pair, headers: { 'content-length': length } });
       expect(refused.status, length).toBe(400);
     }
     expect(calls.guard).toEqual(['shed:null']);

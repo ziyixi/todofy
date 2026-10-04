@@ -3,9 +3,10 @@
 // JavaScript against its size budget (js-budget.mjs).
 import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { join, relative } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { jsBudgetProblem, jsSize } from './js-budget.mjs'
 
-const dist = new URL('../dist/', import.meta.url).pathname
+const dist = fileURLToPath(new URL('../dist/', import.meta.url))
 
 // Strings that look like URLs but are never requested: XML namespace identifiers (React DOM, SVG)
 // and React's production error-decoder link, which only appears inside thrown error messages.

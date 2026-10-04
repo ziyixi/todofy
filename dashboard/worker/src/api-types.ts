@@ -24,7 +24,7 @@
  * | GetRegistry           | GET  /api/v1/registry                 | Worker (no DO) | ≤ 14 KiB; ETag "<build>" → 304 |
  * | GetHomeView           | GET  /api/v1/homeView                 | DO, 1 call     | ≤ 10 KiB; ≤ 40 rows read       |
  * | GetFlowsView          | GET  /api/v1/flowsView                | DO, 1 call     | ≤ 20 KiB; ≤ 40 rows read       |
- * | GetCloudflareView     | GET  /api/v1/cloudflareView           | DO, 1 call     | ≤ 16 KiB; ≤ 40 rows read       |
+ * | GetCloudflareView     | GET  /api/v1/cloudflareView           | DO, 1 call     | ≤ 24 KiB; ≤ 40 rows read       |
  * | GetOpsView            | GET  /api/v1/opsView                  | DO, 1 call     | ≤ 24 KiB; ≤ 40 rows read       |
  * | RefreshHomeView       | POST /api/v1/homeView:refresh         | DO             | CSRF + Origin; once a minute   |
  * | RefreshCloudflareView | POST /api/v1/cloudflareView:refresh   | DO             | CSRF + Origin; once a minute   |
@@ -308,7 +308,8 @@ export const VIEW_BODY_BUDGET = {
   // Six flows since the GTD loop and Paper Radar (2026-09-30): 16.1 KB on the mockup day, 17.4 KB in the
   // workerd suite's full canary history with 20 Workers.
   flows: 20 * 1024,
-  cloudflare: 16 * 1024,
+  // Current REST inventory plus separate bounded historical Analytics rows.
+  cloudflare: 24 * 1024,
   ops: 24 * 1024,
 } as const;
 

@@ -1,5 +1,9 @@
 # Dashboard v2: launcher, flows, Cloudflare monitoring
 
+Current outcome observations, per-service controls and exact account registration are described in
+[Dashboard state and operations](../../docs/dashboard-state.md). They replace the original global guard action
+and Analytics-only live resource discovery below.
+
 What v2 changes relative to [`design.md`](design.md) (which stays authoritative for storage, the tick,
 guard, canary, digest, Access/CSRF and the usage query). It condenses the owner-approved redesign
 proposal of 2026-09-29 (steps 1 and 2; every open question takes its recommended default, §8). Status:
@@ -230,7 +234,7 @@ lost `version`.
 | `GET /api/csrf` | Worker (signed token + `home_csrf` cookie, design.md §6) | — |
 | `GET /api/v1/homeView` (GetHomeView) | DO `view('home')` | 1 DO call; ordinary fixture ≤ 40 rows read; ≤ 10 KiB |
 | `GET /api/v1/flowsView` (GetFlowsView) | DO | ordinary fixture ≤ 40 rows read; ≤ 20 KiB |
-| `GET /api/v1/cloudflareView` (GetCloudflareView) | DO | ordinary fixture ≤ 40 rows read; ≤ 16 KiB |
+| `GET /api/v1/cloudflareView` (GetCloudflareView) | DO | ordinary fixture ≤ 40 rows read; ≤ 24 KiB |
 | `GET /api/v1/opsView` (GetOpsView) | DO | ordinary fixture ≤ 40 rows read; ≤ 24 KiB |
 | `POST /api/v1/homeView:refresh`, `POST /api/v1/cloudflareView:refresh` (RefreshHomeView, RefreshCloudflareView; were `?refresh=1`) | DO `view(..., refresh)` | Origin + CSRF; each scope fetches at most once a minute |
 | `POST /api/v1/guard:override {level, request_id}` (OverrideGuard), `POST /api/v1/canaries/mail-todofy:run {request_id}` (RunCanary) | DO (`setGuardOverride`, `startCanary`) | Origin + CSRF; ≤ 1 KiB body |

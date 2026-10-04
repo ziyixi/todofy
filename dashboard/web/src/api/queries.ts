@@ -100,7 +100,7 @@ export function useStartCanary() {
 export function useSetGuard() {
   const client = useQueryClient()
   return useMutation({
-    mutationFn: (level: GuardLevel) => api.setGuard(level),
+    mutationFn: ({ level, app }: { level: GuardLevel; app: string }) => api.setGuard(level, app),
     onSuccess: ({ guard }) => {
       client.setQueryData<OpsView>(viewKey('ops'), (old) => (old ? { ...old, guard } : old))
       client.setQueryData<CloudflareView>(viewKey('cloudflare'), (old) => (old ? { ...old, guard } : old))

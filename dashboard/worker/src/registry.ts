@@ -271,6 +271,7 @@ const WORKERS: readonly WorkerDef[] = [
 ];
 
 const RESOURCES: readonly ResourceDef[] = [
+  { id: 'infra-state', kind: 'r2', name: '基础设施状态存储', entry: 'home', match: 'infra-state' },
   { id: 'fleet-state', kind: 'do', name: 'FleetState', entry: 'fleet', script: 'fleet', match: RESOURCE_IDENTITIES['fleet-state'] ?? null, todo: '首次 Fleet 发布后，记录 DO namespace 到 config/resources.toml' },
   { id: 'mail-hero-db', kind: 'd1', name: 'mail-hero 主库', entry: 'mail-hero', match: RESOURCE_IDENTITIES['mail-hero-db'] ?? null },
   { id: 'todofy-db', kind: 'd1', name: 'todofy 主库', entry: 'todofy', match: RESOURCE_IDENTITIES['todofy-db'] ?? null },
@@ -417,7 +418,7 @@ const FLOWS: readonly FlowDef[] = [
     order: 2,
     stages: [
       { id: 'report', name: 'Todofy 报告', entry: 'todofy', workers: ['todofy'], signals: [] },
-      { id: 'fetch', name: '后台进程', entry: 'newsletter', signals: ['host_never_seen', 'host_stale', 'host_missing', 'newsletter_unavailable', 'newsletter_unknown', 'newsletter_paused', 'deployment_pending'], hold_signals: ['newsletter_paused'], counters: ['queued_count', 'inflight_count', 'unknown_count'], note: '监督进程与发布排空，不证明采编或模型成功' },
+      { id: 'fetch', name: '后台进程', entry: 'newsletter', signals: ['host_never_seen', 'host_stale', 'host_missing', 'newsletter_unavailable', 'newsletter_unknown', 'newsletter_delivery_rejected', 'newsletter_delivery_accepted', 'newsletter_paused', 'deployment_pending'], hold_signals: ['newsletter_paused'], counters: ['queued_count', 'inflight_count', 'unknown_count'], note: '监督进程与发布排空，不证明采编或模型成功' },
       { id: 'write', name: '写入 Notion', entry: null, signals: [], note: 'Notion 结果需要业务账本核对，进程健康不能代替业务验收' },
     ],
     canary: null,

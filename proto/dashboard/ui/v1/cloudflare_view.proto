@@ -39,6 +39,8 @@ option (common.wire.v1.formats) = {
 
 // The Cloudflare view. A singleton (AIP-156), built and serialized by HomeState on each read.
 message CloudflareView {
+  // Retired scripts observed in Analytics; never counted as current resources.
+  repeated WorkerRow historical_workers = 16 [(common.wire.v1.field).max_items = 100];
   option (google.api.resource) = {
     type: "home.ziyixi.science/CloudflareView"
     pattern: "cloudflareView"

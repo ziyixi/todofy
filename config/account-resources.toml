@@ -1,0 +1,10 @@
+# Account resources outside application bindings. Exact identities; no wildcard adoption.
+version = 1
+[[r2]]
+name = "infra-state"
+entry = "home"
+management = "bootstrap"
+[[r2]]
+name = "vultr-backup"
+entry = "self-hosted"
+management = "external"

@@ -16,6 +16,15 @@ Rules for this file:
   what is done, what is left, how to verify it and what to check after its deploy. Link to the app docs for
   design detail instead of copying it.
 
+In progress: `codex/dashboard-state-controls` implements Newsletter process/outcome separation,
+stable reminder batches, per-service guard controls and authoritative resource inventory. Local Home/Fleet
+unit and real workerd checks, Newsletter monitoring/mypy, observer/status tests, generated catalog and proto
+compatibility checks passed. The generic CI workflow's deployment-condition tests pass; its unrelated Links
+probe mocks fail in this Mac environment, so the complete branch CI remains the publication gate.
+No production writes yet. After the same green SHA is released, verify Home/Fleet receipts and current resources,
+then dismiss the current historical Newsletter reminder without replaying business work.
+Operational semantics and the exact account inventory command are in [docs/dashboard-state.md](docs/dashboard-state.md).
+
 Last updated: 2026-10-04. Current verified VPS source is `4f1306b`; main release
 [37193606971](https://github.com/ziyixi/todofy/actions/runs/37193606971), post-release check
 [37193806220](https://github.com/ziyixi/todofy/actions/runs/37193806220) and clean repair

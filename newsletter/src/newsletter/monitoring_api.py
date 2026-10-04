@@ -7,6 +7,7 @@ from typing import cast
 import fastapi
 import fastapi.responses as responses
 
+import newsletter.monitoring_status as monitoring
 import newsletter.provenance as provenance
 import newsletter.store as storage
 
@@ -35,7 +36,8 @@ def register(
         state = database.deployment.status()
         return responses.JSONResponse(
             {
-                "version": 1,
+                "version": 2,
+                **monitoring.snapshot(database),
                 "worker_healthy": healthy(),
                 "drain_state": state["state"],
                 "queued_count": sum(

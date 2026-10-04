@@ -81,4 +81,37 @@ describe('Fleet owner page', () => {
     expect(screen.getByText('未确认完成记录').nextElementSibling).toHaveTextContent('未知');
     expect(screen.getByText(/后台进程：未知/)).toBeVisible();
   });
+  it.each([
+    ['provider_accepted', '邮件服务已接收'],
+    ['rejected', '邮件服务拒绝'],
+    ['unknown', '结果尚未确认'],
+  ])('shows the latest %s outcome independently of a healthy process and historical records', async (state, outcome) => {
+    const report = {
+      ...fixture,
+      newsletter: {
+        ...fixture.newsletter,
+        unknown_count: 4,
+        unknown_revision: 7,
+        unknown_by_kind: {
+          interrupted_activities: 2, packets: 1, workflow_attempts: 0,
+          notion_entities: 0, notion_versions: 0, delivery: 1,
+        },
+        latest_delivery_state: state,
+        latest_delivery_time: '2026-10-02T23:30:00.000Z',
+      },
+    };
+    show({ ...BASE, freshness: 'fresh', report, receive_time: '2026-10-03T00:00:00Z' });
+    expect(await screen.findByRole('heading', { name: 'Newsletter' })).toBeVisible();
+    expect(screen.getByText(/后台进程：健康/)).toBeVisible();
+    expect(screen.getByText(new RegExp(`最近投递记录：${outcome}`))).toHaveTextContent('2026-10-02T23:30:00Z');
+    expect(screen.getByText('未确认完成记录').nextElementSibling).toHaveTextContent('4');
+    expect(screen.getByText('运行中断').nextElementSibling).toHaveTextContent('2');
+    expect(screen.getByText('邮件投递').nextElementSibling).toHaveTextContent('1');
+    expect(screen.getByRole('link', { name: '到 Home 管理/关闭提醒' })).toBeVisible();
+  });
+  it('keeps absent legacy delivery metadata visibly unobserved', async () => {
+    show({ ...BASE, freshness: 'fresh', report: fixture, receive_time: '2026-10-03T00:00:00Z' });
+    expect(await screen.findByText('最近投递记录：暂未取得')).toBeVisible();
+    expect(screen.queryByText('运行中断')).toBeNull();
+  });
 });

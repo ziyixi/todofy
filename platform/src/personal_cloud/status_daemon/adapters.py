@@ -47,9 +47,17 @@ def newsletter(value: dict) -> Business:
     }
     if (
         not isinstance(value, dict)
-        or set(value) != expected
+        or set(value)
+        != (
+            expected
+            | (
+                {"unknown_by_kind", "unknown_revision", "latest_delivery"}
+                if value.get("version") == 2
+                else set()
+            )
+        )
         or type(value["version"]) is not int
-        or value["version"] != 1
+        or value["version"] not in {1, 2}
         or type(value["worker_healthy"]) is not bool
     ):
         return Business()
@@ -65,11 +73,7 @@ def newsletter(value: dict) -> Business:
         admission={"active": "accepting", "draining": "draining", "frozen": "frozen"}[
             drain
         ],
-        health="unhealthy"
-        if not healthy
-        else "degraded"
-        if value["unknown_count"]
-        else "healthy",
+        health="unhealthy" if not healthy else "healthy",
         worker_healthy=healthy,
         source_sha=sha if _matches(pb.ReleaseTarget, "source_sha", sha) else None,
         request_id=request

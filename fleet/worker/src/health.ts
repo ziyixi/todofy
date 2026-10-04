@@ -31,7 +31,10 @@ export function statusSnapshot(
       if (!runtime || !releaseReady(runtime)) add('deployment_pending');
       if (['draining', 'frozen'].includes(report.newsletter.drain_state)) add('newsletter_paused', 'info');
       const unknownCount = report.newsletter.unknown_count ?? 0;
-      if (unknownCount > 0) add('newsletter_unknown', 'warning', { unknown_count: unknownCount });
+      const delivery = report.newsletter;
+      if (delivery.latest_delivery_state === 'provider_accepted') signals.push({ code: 'newsletter_delivery_accepted', severity: 'info', ...(delivery.latest_delivery_time === undefined ? {} : { since: delivery.latest_delivery_time }), metrics: {} });
+      if (delivery.latest_delivery_state === 'rejected') signals.push({ code: 'newsletter_delivery_rejected', severity: 'warning', ...(delivery.latest_delivery_time === undefined ? {} : { since: delivery.latest_delivery_time }), metrics: {} });
+      if (unknownCount > 0) add('newsletter_unknown', 'warning', { unknown_count: unknownCount, ...(report.newsletter.unknown_revision === undefined ? {} : { unknown_revision: report.newsletter.unknown_revision }) });
     } else {
       for (const code of reportCodes(report)) {
         if (code.startsWith('newsletter_')) continue;
@@ -45,6 +48,7 @@ export function statusSnapshot(
   if (receivedAt !== null) counters.heartbeat_age_seconds = Math.floor(Math.max(0, now - receivedAt) / 1000);
   if (age === 'fresh' && report) {
     if (app === 'newsletter') {
+      for (const [key, count] of Object.entries(report.newsletter.unknown_by_kind ?? {})) counters[`unknown_${key}`] = count;
       for (const key of ['queued_count', 'inflight_count', 'unknown_count'] as const) {
         const value = report.newsletter[key];
         if (typeof value === 'number') counters[key] = value;
@@ -62,7 +66,7 @@ export function statusSnapshot(
     version: 'ops-v1',
     app,
     generated_at: new Date(now).toISOString(),
-    health: signals.some((item) => item.severity !== 'info') ? 'degraded' : 'ok',
+    health: signals.some((item) => item.severity !== 'info' && item.code !== 'newsletter_unknown') ? 'degraded' : 'ok',
     modes,
     guard: { level: 'normal', reason: null, until: null, set_at: null, deferred: [] },
     signals,

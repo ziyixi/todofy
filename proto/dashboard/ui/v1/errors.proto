@@ -35,4 +35,6 @@ enum ErrorReason {
   ERROR_REASON_CANARY_LIMIT = 3;
   // ABORTED (409): the condition resolved or its occurrence changed after the owner read it.
   ERROR_REASON_ATTENTION_CHANGED = 4;
+  // FAILED_PRECONDITION (400): old UI requested a global guard mutation; refresh to select one app.
+  ERROR_REASON_REFRESH_REQUIRED = 5;
 }

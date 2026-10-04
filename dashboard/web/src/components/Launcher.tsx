@@ -121,7 +121,9 @@ function ServiceRow({ reg, entry, state, loading, now }: { reg: Reg; entry: Regi
   const target = entryPageHash(reg, entry)
   const line = loading ? null : statusLine(entry, state, now)
   const dismissed = useSignalsDismissed(entry.id, state?.top_signals ?? []) && state?.level === 'warning'
-  const detail = line ? (line.level === 'ok' ? (line.detail ?? line.word) : line.detail ? `${line.word} · ${line.detail}` : line.word) : null
+  let detail = line?.detail ?? line?.word ?? null
+  if (line && line.level !== 'ok' && line.detail) detail = `${line.word} · ${line.detail}`
+  if (line && entry.id === 'newsletter' && state?.reason === 'newsletter_unknown') detail = '运行正常 · 有待核对记录'
   const label = line ? `${entry.name}：${dismissed ? '本批提醒已关闭' : line.word}${line.detail ? `，${line.detail}` : ''}，${target.what}` : `${entry.name}，${target.what}`
   return (
     <li>

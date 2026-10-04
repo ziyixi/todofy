@@ -293,3 +293,20 @@ jobs:
           if [ -f "$RUNNER_TEMP/vps-release-evidence.json" ]; then
             python3 tools/cloud-release/vps_record.py --evidence-file "$RUNNER_TEMP/vps-release-evidence.json"
           fi
+
+  inventory:
+    name: Verify complete account resource registration
+    needs: context
+    if: needs.context.outputs.enabled == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    environment: production
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.context.outputs.source_sha }}
+          persist-credentials: false
+      - name: Compare actual Worker, D1, DO and R2 identities
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+        run: python3 tools/service-catalog/inventory.py

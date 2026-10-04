@@ -36,6 +36,8 @@ export interface ScriptRecord {
 
 /** State doc `cf_scripts` (≤ CF_SCRIPTS_MAX records, ~25 KiB at most, under the 64 KiB row cap). */
 export interface CfScriptsDoc {
+  /** Current script identities from the successful REST inventory, independent of traffic. */
+  readonly live?: readonly string[];
   /** When discovery started (the idle rule never judges a script seen for less time than this). */
   readonly since: number;
   /** The GraphQL answer the records describe. */
@@ -80,15 +82,16 @@ export function mergeScripts(previous: CfScriptsDoc | null, observed: readonly S
     });
   }
   const cutoff = utcDay(now - CF_SCRIPTS_RETENTION_DAYS * DAY_MS);
+  const live = new Set(previous?.live ?? []);
   const scripts = [...byScript.values()]
     // A script missing from today's answer keeps what it had today (a truncated answer may leave it
     // out); numbers of an earlier day are not today's.
     .map((record) => (seen.has(record.script) || record.day === day ? record : { ...record, day, today: NO_TRAFFIC }))
-    .filter((record) => record.last_seen_day > cutoff)
-    .sort((a, b) => b.last_seen_day.localeCompare(a.last_seen_day) || a.script.localeCompare(b.script))
+    .filter((record) => live.has(record.script) || record.last_seen_day > cutoff)
+    .sort((a, b) => Number(live.has(b.script)) - Number(live.has(a.script)) || b.last_seen_day.localeCompare(a.last_seen_day) || a.script.localeCompare(b.script))
     .slice(0, CF_SCRIPTS_MAX)
     .sort((a, b) => a.script.localeCompare(b.script));
-  return { since: previous?.since ?? now, observed_at: now, day, truncated, scripts };
+  return { ...(previous?.live === undefined ? {} : { live: previous.live }), since: previous?.since ?? now, observed_at: now, day, truncated, scripts };
 }
 
 /** A script's numbers for the UTC day of `now` (zero when the record describes an earlier day). */
@@ -114,6 +117,7 @@ export function errorLevel(requests: number, errors: number): 'ok' | 'warning' |
 export function workerRows(doc: CfScriptsDoc | null, now: number, registry: RegistryDef = REGISTRY): WorkerRow[] {
   if (doc === null) return [];
   return doc.scripts
+    .filter((record) => record.script !== UNKNOWN_DIMENSION && (doc.live === undefined || doc.live.includes(record.script)))
     .map((record): WorkerRow => {
       const today = todayOf(record, now);
       const level: Level = errorLevel(today.requests, today.errors);
@@ -198,4 +202,29 @@ export function withBreakdownResources(rows: readonly QuotaRow[], registry: Regi
       }),
     };
   });
+}
+
+/** Remember idle live Workers and keep retired analytics only as history. */
+export function withLiveInventory(doc: CfScriptsDoc | null, live: readonly string[], now: number): CfScriptsDoc {
+  const current = doc ?? mergeScripts(null, [], false, now);
+  const names = new Set(current.scripts.map((item) => item.script));
+  const idle = live.filter((script) => !names.has(script)).map((script): ScriptRecord => ({
+    script, first_seen_day: utcDay(now), last_seen_day: utcDay(now), last_active_hour: null,
+    day: utcDay(now), today: NO_TRAFFIC,
+  }));
+  const liveNames = new Set(live);
+  const records = [...current.scripts, ...idle].filter(item => item.script !== UNKNOWN_DIMENSION);
+  const scripts = [
+    ...records.filter(item => liveNames.has(item.script)),
+    ...records.filter(item => !liveNames.has(item.script)),
+  ].slice(0, CF_SCRIPTS_MAX);
+  return { ...current, live: [...live].slice(0, CF_SCRIPTS_MAX), scripts };
+}
+
+export function historicalWorkerRows(doc: CfScriptsDoc | null, now: number, registry: RegistryDef = REGISTRY): WorkerRow[] {
+  if (!doc?.live) return [];
+  const historical = doc.scripts.filter((item) => !doc.live?.includes(item.script));
+  const rest = { ...doc };
+  delete rest.live;
+  return workerRows({ ...rest, scripts: historical }, now, registry);
 }

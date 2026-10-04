@@ -88,10 +88,11 @@ describe('Access and CSRF on /api/v1', () => {
       h?.fetch(PATHS.guard, {
         method: 'POST',
         headers: { 'cf-access-jwt-assertion': jwt, origin, 'x-csrf-token': csrfToken, cookie, 'content-type': 'application/json' },
-        body: '{"level":"normal"}',
+        body: '{"level":"normal","app":"mail-hero"}',
       });
     expect((await guard('https://evil.example.com'))?.status).toBe(403);
     expect((await guard('https://home.example.com', 'forged.token'))?.status).toBe(403);
+    await h.tick(NOW); // Load the service capability before a guard mutation.
     const accepted = await guard('https://home.example.com');
     expect(accepted?.status).toBe(200);
     await accepted?.arrayBuffer();
@@ -166,7 +167,7 @@ describe('GetHomeView and RefreshHomeView', () => {
       ['paper-radar', 'ok', false],
       ['ops-digest', 'ok', false],
     ]);
-    expect(home.cloudflare).toMatchObject({ usage_status: 'ok', workers: 5, errors_today: 3, guard_level: 'normal' });
+    expect(home.cloudflare).toMatchObject({ usage_status: 'ok', workers: REGISTRY.workers.length, errors_today: 3, guard_level: 'normal' });
     expect(home.cloudflare.quota.map((q) => q.id)).toEqual(['workers_requests', 'd1_rows_read', 'ai_neurons', 'r2_storage']);
     expect(home.digest.accepted).toBe(true);
 
@@ -254,12 +255,13 @@ describe('GetCloudflareView and RefreshCloudflareView', () => {
     expect(answer.bytes).toBeLessThanOrEqual(VIEW_BODY_BUDGET.cloudflare);
     expect(await h.lastRowsRead()).toBeLessThanOrEqual(VIEW_ROWS_READ.cloudflare);
     expect(cf.usage.rows).toHaveLength(14);
-    expect(cf.workers).toHaveLength(count);
-    expect(cf.workers.filter((w) => w.entry === null)).toHaveLength(Math.max(0, count - 5));
+    expect(cf.workers).toHaveLength(REGISTRY.workers.length);
+    expect(cf.workers.filter((w) => w.entry === null)).toHaveLength(0);
+    expect(cf.historical_workers?.length ?? 0).toBe(Math.max(0, count - 5));
     expect(cf.workers_truncated).toBe(false);
     expect(cf.resources.map((r) => r.kind)).toEqual(['d1', 'd1', 'do', 'do', 'do', 'r2', 'r2']);
     expect(cf.resources.find((r) => r.id === 'mail-hero-store')).toMatchObject({ resource: 'mail-hero-store', entry: 'mail-hero' });
-    expect(Object.keys(cf.guard.apps).sort()).toEqual(['fleet', 'lab', 'mail-hero', 'newsletter', 'todofy', 'watch']);
+    expect(Object.keys(cf.guard.apps).sort()).toEqual(['lab', 'mail-hero', 'todofy', 'watch']);
     if (count >= 5) {
       expect(cf.workers.find((w) => w.script === 'todofy-core')).toMatchObject({ entry: 'todofy', requests: 96, do_requests: 632, cpu_p99_us: 6207 });
       // Errors first, then requests.
@@ -402,14 +404,13 @@ describe('GetFlowsView, GetOpsView and the mutations', () => {
     await h.called();
 
     // Force shed through v2: both apps get setGuard, the view changes, the strip shows a hold.
-    const shed = await h.post(PATHS.guard, { level: 'shed' });
+    const shed = await h.post(PATHS.guard, { level: 'shed', app: 'mail-hero' });
     expect(shed.status).toBe(200);
-    expect(((await shed.json()) as { guard: { desired: { level: string } } }).guard.desired.level).toBe('shed');
-    expect((await h.called()).sort()).toEqual(['mail-hero.setGuard', 'todofy.setGuard']);
+    expect(((await shed.json()) as { guard: OpsView['guard'] }).guard.apps['mail-hero']?.desired?.level).toBe('shed');
+    expect((await h.called()).sort()).toEqual(['mail-hero.setGuard']);
     const after = await h.view<OpsView>('ops', before.etag);
     expect(after.status).toBe(200);
-    expect(after.body?.guard.override?.level).toBe('shed');
-    expect(after.body?.attention.held).toContainEqual({ entry: 'home', code: 'owner_shed', target: { view: 'ops' } });
+    expect(after.body?.guard.apps['mail-hero']?.override?.level).toBe('shed');
 
     // A manual canary run with an AIP-155 request_id: its repeat answers the same run and starts nothing.
     const requestId = '6b1c2d3e-4f5a-4b6c-8d7e-9f0a1b2c3d4e';
@@ -420,7 +421,7 @@ describe('GetFlowsView, GetOpsView and the mutations', () => {
     expect(repeat.status).toBe(200);
     expect(await repeat.json()).toEqual(first);
     // The same request_id for another method is refused; another canary does not exist.
-    expect((await h.post(PATHS.guard, { level: 'normal', request_id: requestId })).status).toBe(400);
+    expect((await h.post(PATHS.guard, { level: 'normal', app: 'mail-hero', request_id: requestId })).status).toBe(400);
     expect((await h.post('/api/v1/canaries/other:run', {})).status).toBe(404);
     const active = await view<OpsView>(h, 'ops');
     expect(active.canary.manual_today).toBe(1);

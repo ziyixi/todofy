@@ -223,4 +223,23 @@ message Newsletter {
   optional int32 inflight_count = 5 [(common.wire.v1.field).minimum = 0];
   // Provider outcomes needing reconciliation, null if unknown.
   optional int32 unknown_count = 6 [(common.wire.v1.field).minimum = 0];
+  // Monotonic observation revision; only newly observed unknown identities advance it.
+  optional int32 unknown_revision = 7 [(common.wire.v1.field).minimum = 0];
+  // Counts by fixed operation category, absent for legacy observers.
+  // (-- api-linter: core::0140::prepositions=disabled
+  //     aip.dev/not-precedent: by_kind matches the versioned upstream category aggregation. --)
+  map<string, int32> unknown_by_kind = 8 [(common.wire.v1.field) = {
+    max_items: 6
+    minimum: 0
+  }];
+  // Latest provider response, not proof of inbox delivery; absent for legacy observers.
+  optional string latest_delivery_state = 9 [(common.wire.v1.field) = {
+    allowed: [
+      "provider_accepted",
+      "rejected",
+      "unknown"
+    ]
+  }];
+  // Update time of the latest delivery record, rather than proof of inbox arrival.
+  optional google.protobuf.Timestamp latest_delivery_time = 10;
 }
