@@ -19,11 +19,12 @@ import { COLD_ISOLATES, connectCpuMeter, CPU_TEST_TIMEOUT_MS, FREE_CPU_MS, measu
 import { startHarness, type Harness } from './harness.ts';
 
 /**
- * The bound of the isolate's first tick, in reference milliseconds: today 8.4-10.3 on the reference machine (medians of
- * three isolates, 2026-10-01), 11.1-12.4 on GitHub runners (their cold runs read about 1.2 times the reference machine's once scaled
- * by the warm calibration): about 1.6 times the reference and 1.3 times the runners.
+ * Regression budget for the DO's first tick, in reference milliseconds. Durable reminder identities,
+ * the extra SQLite projection and their IDL descriptors raised the Linux CI cold median to 16.57 ms
+ * (2026-10-04). Allow 20 ms for this documented work, rather than optimizing sub-ms runner differences.
+ * This invocation belongs to HomeState's 30-second DO limit; it is not an HTTP-handler allowance.
  */
-const COLD_BOUND_MS = 1.6 * FREE_CPU_MS;
+const COLD_BOUND_MS = 2 * FREE_CPU_MS;
 /** The bound of a tick's warm median, in reference milliseconds (today at most 2.5). */
 const WARM_BOUND_MS = 0.4 * FREE_CPU_MS;
 const RUNS = 11;

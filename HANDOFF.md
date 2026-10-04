@@ -147,6 +147,10 @@ decisions through unavailable underlying telemetry, and independent drift-recove
 The first branch run caught the generated drift inventory missing Fleet's new HOME_URL. Regeneration
 fixed that check; the 379-test Changes suite now passes locally (one existing skip). No production
 deployment occurred from the failed branch run.
+The next full run found cached-report/live-attention time semantics and old exact metadata assertions.
+The report view now filters the stored full raw digest, while live attention is evaluated separately;
+55 relevant runtime tests pass. DO cold-start CPU measured 16.57ms in Linux CI after the new projection;
+its regression budget is 20ms, with the warm and HTTP budgets unchanged. Both local CPU suites pass.
 
 `codex/k3s-personal-cloud` starts from `450110b`. The owner authorised GitHub-driven k3s reconciliation,
 a separate Cloudflare Fleet worker/UI, Newsletter monitoring in Home, and Compose retirement. The owner

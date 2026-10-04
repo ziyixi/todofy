@@ -656,7 +656,7 @@ export class HomeState extends DurableObject<Env> {
     const projected = this.projectAttention(now, rawItems, lastTickAt);
     const items = rawItems.filter((item) => !this.attentionState.isDismissed({ ...item, target: targetOf(item.source, item.code) }));
     const previous = this.doc<DigestDoc>('digest') ?? NO_DIGEST;
-    let doc: DigestDoc = { ...previous, items: finalizeItems(list, firstSeen, now) };
+    let doc: DigestDoc = { ...previous, items: rawItems };
     let sent = 'none';
     const enabled = this.statusDoc('todofy').status?.capabilities.includes('ops_digest') === true;
     const identities = projected.attention.items.filter((item) => item.observed === undefined).map((item) => `${item.name ?? ''}:${item.etag ?? ''}`).sort().join(',');
@@ -875,7 +875,7 @@ export class HomeState extends DurableObject<Env> {
         case 'ops': {
           const digest = this.doc<DigestDoc>('digest') ?? NO_DIGEST;
           const todofy = this.statusDoc('todofy');
-          return opsResponse(base, this.guardView(now), this.canaryView(now), this.digestView(digest, todofy.status?.capabilities.includes('ops_digest') === true, now), this.statusDocs());
+          return opsResponse(base, this.guardView(now), this.canaryView(now), this.digestView(digest, todofy.status?.capabilities.includes('ops_digest') === true), this.statusDocs());
         }
       }
     } finally {
@@ -948,9 +948,9 @@ export class HomeState extends DurableObject<Env> {
     };
   }
 
-  private digestView(digest: DigestDoc, enabled: boolean, now: number): Digest {
+  private digestView(digest: DigestDoc, enabled: boolean): Digest {
     return {
-      items: this.currentItems(now, (this.doc<MetaDoc>('meta') ?? NO_META).last_tick_at)
+      items: digest.items
         .filter((item) => !this.attentionState.isDismissed({ ...item, target: targetOf(item.source, item.code) })).slice(0, 20),
       enabled,
       last_sent_at: isoOrNull(digest.last_sent_at),

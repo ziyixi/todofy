@@ -6,7 +6,7 @@
  */
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { BREAKDOWN_UNCLASSIFIED } from '../../src/api-types.ts';
-import { VIEW_BODY_BUDGET, VIEW_ROWS_READ, type CloudflareView, type FlowsView, type HomeView, type OpsView, type Registry, type ViewId } from '../../src/api-types.ts';
+import { VIEW_BODY_BUDGET, VIEW_ROWS_READ, type AttentionItem, type CloudflareView, type FlowsView, type HomeView, type OpsView, type Registry, type ViewId } from '../../src/api-types.ts';
 import { REGISTRY, outboundPerTick } from '../../src/registry.ts';
 import { REALISTIC_USAGE, SYNTHETIC_D1, SYNTHETIC_NS, usageWithScripts } from '../graphql-fixture.ts';
 import { accessClaims, testIssuer, type TestIssuer } from '../jwt.ts';
@@ -23,6 +23,15 @@ afterEach(async () => {
 });
 
 const MIN = 60_000;
+/** Preserve strict fact assertions while separately validating optional owner-control metadata. */
+function attentionFacts(items: readonly AttentionItem[]) {
+  return items.map((item) => {
+    if (item.name !== undefined) expect(item.name).toMatch(/^attentionItems\/[A-Za-z0-9_-]+$/);
+    if (item.etag !== undefined) expect(item.etag).toMatch(/^a1-[0-9a-f-]{36}$/);
+    const facts = { ...item }; delete facts.name; delete facts.etag; delete facts.dismissed_at;
+    return facts;
+  });
+}
 
 /**
  * A harness on the mockup's account (REALISTIC_USAGE) whose probed apps answer as healthy. Its canary hour, 23, is
@@ -196,7 +205,7 @@ describe('GetHomeView and RefreshHomeView', () => {
     expect(home.flows.find((f) => f.id === 'site-publish')).toMatchObject({ level: 'critical', first_issue: { stage: 'serve', code: 'http_status' } });
     // The strip says what the tile says (F1): one observed item, not one per stage; the badge counts it.
     expect(home.attention.level).toBe('critical');
-    expect(home.attention.items).toEqual([
+    expect(attentionFacts(home.attention.items)).toEqual([
       { source: 'website', code: 'http_status', severity: 'critical', since: null, metrics: {}, target: { view: 'home', entry: 'website' }, observed: 'critical' },
     ]);
     expect(home.badges).toEqual({ home: 1, flows: 0, cloudflare: 0, ops: 0 });
@@ -224,7 +233,7 @@ describe('the FlowDay and links tiles', () => {
     const home = await view<HomeView>(h, 'home');
     expect(home.entries.find((e) => e.id === 'flowday')).toMatchObject({ level: 'critical', reason: 'http_status', consecutive_failures: 2, metric: null });
     expect(home.entries.find((e) => e.id === 'links')).toMatchObject({ level: 'critical', reason: 'content_type', consecutive_failures: 2, metric: null });
-    expect(home.attention.items).toEqual([
+    expect(attentionFacts(home.attention.items)).toEqual([
       { source: 'flowday', code: 'http_status', severity: 'critical', since: null, metrics: {}, target: { view: 'home', entry: 'flowday' }, observed: 'critical' },
       { source: 'links', code: 'content_type', severity: 'critical', since: null, metrics: {}, target: { view: 'home', entry: 'links' }, observed: 'critical' },
     ]);
