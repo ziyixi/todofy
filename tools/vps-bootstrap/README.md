@@ -19,8 +19,8 @@ Actions run for the exact commit; this tool rejects a mutable tag or foreign own
 ```sh
 platform/.venv/bin/python tools/vps-bootstrap/prepare.py \
   --sha <verified-40-character-source-sha> \
-  --newsletter-image ghcr.io/<owner>/todofy-newsletter@sha256:<digest> \
-  --platform-image ghcr.io/<owner>/todofy-platform@sha256:<digest> \
+  --newsletter-image ghcr.io/<owner>/<repository>-newsletter@sha256:<digest> \
+  --platform-image ghcr.io/<owner>/<repository>-platform@sha256:<digest> \
   --output <new-public-bundle-directory>
 ```
 

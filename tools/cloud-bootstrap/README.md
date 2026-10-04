@@ -76,7 +76,9 @@ python3 tools/cloud-bootstrap/bootstrap.py secrets --mode fresh \
 
 `secrets` 通过 `gh` 的 stdin 写 GitHub `production` secrets，输出 VPS bootstrap 使用的私有 JSON。仅创建缺失的 operation variables：Mail Hero 投递暂停、Todofy 处理暂停及 Todoist 写入暂停；VPS 自动发布、自动修复、网站定时更新初始关闭。已有暂停/维护值不覆盖。缺失 `production` 限定 main；缺失 `infra-review` 在个人仓库要求 owner 显式审核。已有环境保护不修改，组织仓库需自行选择审核人。
 
-随后按主手册执行一次 VPS bootstrap、提交公开配置并推送 main，Actions 构建和发布全部服务。首次发布后，DO namespace ID 和准确邮件 rule 才能完成；无需临时业务 Worker：
+随后按主手册提交公开配置，让同一通过分支检查的 SHA 进入 main，Actions 构建镜像和固定 bundle。
+将新镜像设为公开，再下载该 bundle 执行一次 VPS bootstrap，最后启动首次 VPS 发布。
+首次发布后，DO namespace ID 和准确邮件 rule 才能完成；无需临时业务 Worker：
 
 ```sh
 python3 tools/cloud-bootstrap/bootstrap.py finalize --mode fresh \

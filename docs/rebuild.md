@@ -74,6 +74,8 @@ cloud_private="$HOME/.config/todofy-cloud/prepared.json"
 state 桶先于 backend 初始化。收信 Worker 尚未存在时，精确收信规则留到第 6 步。
 
 沿用环境将 `--mode fresh` 换成 `--mode adopt`，提供示例中的精确 `adopt_ids`。
+通常只运行 `plan`、`cloud`，保留 GitHub 现有 secrets；只有掌握既有共享 key 和 VPS 私有配置时才运行 `secrets`。
+具体输入见 [已有账户收编](../tools/cloud-bootstrap/README.md#已有账户收编)。
 中断后重跑同一私有文件和模式。错误账户、陌生同名对象或既有资源变更会停止，先处理具体差异。
 
 ## 4. 推送并构建
@@ -100,6 +102,13 @@ gh run watch <本次 run ID> --exit-status -R "$cloud_repo"
 静态网站是异步发布，另确认 **Website release** 成功；CI 的 dispatch 成功只代表已启动它。
 
 网站或外部凭据错误在对应 job 处理，无需重建数据库。
+
+全新仓库首次创建的两个 GHCR 镜像默认私有。在 GitHub 的 **Packages** 分别打开
+`<仓库名>-newsletter` 和 `<仓库名>-platform`，进入 **Package settings → Change visibility → Public**。
+这一步每个包只做一次；已有公开包跳过。安装器和 k3s 使用匿名拉取，不配置 registry 密钥。
+公开前确认镜像只包含代码与依赖；私有文件由第 3 步单独传给 VPS。
+[GitHub 的默认可见性说明](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry#pushing-container-images)。
+如安装时镜像拉取报 `unauthorized`，先检查这两个包的可见性。
 
 ## 5. 一次性安装 VPS
 
@@ -146,6 +155,18 @@ gh workflow run ci.yml --ref main -R "$cloud_repo" -f app=platform
 核对 Access、Fleet/Home、Mail Hero 后，按应用开启初始暂停开关，最后设置源邮箱转发。
 真实收信、Todoist 写入、Newsletter 发送和网站内容分别验收。
 
+新环境的邮件链路准备好后，关闭 bootstrap 创建的三个暂停变量，并发布使其生效：
+
+```sh
+gh variable set MAIL_HERO_FORCE_SEND_PAUSED --body false -R "$cloud_repo"
+gh variable set TODOFY_PROCESSING_PAUSED --body false -R "$cloud_repo"
+gh variable set TODOFY_FORCE_PAUSE_TODOIST --body false -R "$cloud_repo"
+gh workflow run ci.yml --ref main -R "$cloud_repo" -f app=both
+```
+
+已有环境在变量原来的 repo/environment 范围修改；`production` 变量用 `--env production`。
+仅修改 GitHub 变量不会改变已运行 Worker。
+
 ## 检查与修复
 
 ```sh
@@ -163,11 +184,23 @@ gh workflow run personal-cloud-reconcile.yml --ref main -R "$cloud_repo" -f oper
 | repairable | 运行 repair，等待实际状态再次核验 |
 | Access/密钥/字段归属变化 | 核对差异；敏感 infra 计划需 `reviewed_apply=true` 和 infra-review 审批 |
 | 数据库、桶、DO 或 PVC 身份缺失/变化 | 进入恢复，普通 repair 不创建空资源替代 |
-| held/failed release | 处理错误后选择 resume，填写原 `releases/<UUID>` |
+| 修复事务 held/failed | 处理错误后运行下方修复 resume，填写该修复的原 `releases/<UUID>` |
+| 普通发布 held/failed | 处理错误后运行下方 CI resume，填写原发布的完整 SHA |
 | daemon、K3s 或 Tunnel 不可达 | 恢复宿主入口 |
 
 审批绑定这次实际计划和 SHA；等待期间 state 或目标变化会拒绝旧计划，重新运行后重新审核。
 人工暂停和运维开关保留，修复不自动开启业务。
+
+恢复同一次操作，保留其请求身份：
+
+```sh
+# Personal cloud reconcile 创建的修复事务
+gh workflow run personal-cloud-reconcile.yml --ref main -R "$cloud_repo" \
+  -f operation=resume -f 'resume_release=releases/<原修复UUID>'
+# CI and deploy 创建的普通发布，包括首次激活
+gh workflow run ci.yml --ref main -R "$cloud_repo" \
+  -f app=platform -f resume_vps_release=true -f 'resume_source_sha=<原发布完整SHA>'
+```
 
 ## Host recovery
 

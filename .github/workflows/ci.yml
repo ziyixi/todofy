@@ -1433,17 +1433,18 @@ jobs:
             --disable=traefik,servicelb,metrics-server,local-storage,coredns
           actual=$(docker exec k3s-acceptance k3s --version)
           case "$actual" in "k3s version $version ("*) ;; *) exit 1 ;; esac
+          # The image exposes kubectl via its direct multicall symlink.
           for attempt in $(seq 1 60); do
-            if docker exec k3s-acceptance k3s kubectl get --raw=/readyz >/dev/null 2>&1; then break; fi
+            if docker exec --env KUBECONFIG=/etc/rancher/k3s/k3s.yaml k3s-acceptance /bin/kubectl get --raw=/readyz >/dev/null 2>&1; then break; fi
             sleep 2
           done
-          docker exec k3s-acceptance k3s kubectl get --raw=/readyz >/dev/null
+          docker exec --env KUBECONFIG=/etc/rancher/k3s/k3s.yaml k3s-acceptance /bin/kubectl get --raw=/readyz >/dev/null
           docker cp platform/k3s/bootstrap/namespace.yaml k3s-acceptance:/tmp/namespace.yaml
           docker cp platform/k3s/bootstrap/rbac.yaml k3s-acceptance:/tmp/rbac.yaml
-          docker exec k3s-acceptance k3s kubectl apply -f /tmp/namespace.yaml -f /tmp/rbac.yaml
+          docker exec --env KUBECONFIG=/etc/rancher/k3s/k3s.yaml k3s-acceptance /bin/kubectl apply -f /tmp/namespace.yaml -f /tmp/rbac.yaml
           docker cp k3s-acceptance:/etc/rancher/k3s/k3s.yaml "$K3S_ACCEPTANCE_DIR/kubeconfig"
           docker cp k3s-acceptance:/var/lib/rancher/k3s/server/tls/server-ca.crt "$K3S_ACCEPTANCE_DIR/ca.crt"
-          docker exec k3s-acceptance k3s kubectl -n personal-cloud create token platform-controller \
+          docker exec --env KUBECONFIG=/etc/rancher/k3s/k3s.yaml k3s-acceptance /bin/kubectl -n personal-cloud create token platform-controller \
             --duration=10m > "$K3S_ACCEPTANCE_DIR/token"
           chmod 600 "$K3S_ACCEPTANCE_DIR/"*
           uv run --project platform --locked pytest -q platform/tests/deployment/test_k3s_acceptance.py
