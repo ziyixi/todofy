@@ -129,6 +129,9 @@ class Guard(unittest.TestCase):
                 self.assert_flags({"moved.tf": text}, "a moved block names a FROZEN address")
         ordinary = "moved {\n  from = cloudflare_r2_bucket.old\n  to   = cloudflare_r2_bucket.app\n}\n"
         self.assertEqual(run({"moved.tf": ordinary}), [])
+        counted = f"moved {{\n  from = {frozen}\n  to = {frozen}[0]\n}}\n"
+        self.assertEqual(run({"moved.tf": counted}), [])
+        self.assert_flags({"moved.tf": counted.replace("[0]", "[1]")}, "a moved block names a FROZEN address")
 
     def test_dynamic_provisioner(self):
         dynamic = """

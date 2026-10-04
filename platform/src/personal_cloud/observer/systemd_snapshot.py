@@ -10,6 +10,7 @@ from ziyixi_proto.fleet.telemetry.v1.host_report_pb import SystemDaemonSnapshot
 from ziyixi_proto.http_routes import decode_json_body
 from ziyixi_proto.wire_json import from_wire, to_wire
 
+from ..status_daemon.config import DAEMON_ALIASES, expected_daemons
 from .systemd import ACTIVE_STATES, DIAGNOSTIC_CODES, DIAGNOSTIC_STAGES, UNITS, daemon
 from .transport import ObserverError
 
@@ -20,6 +21,13 @@ FUTURE_TOLERANCE_SECONDS = 5
 TERMINATION_PATH = Path("/dev/termination-log")
 READ_CODES = {"NOT_READ", "READ_OK", "UNREADABLE", "INVALID", "STALE", "FUTURE"}
 READ_CODE = "NOT_READ"
+
+
+def configured_daemons(env=None):
+    env = os.environ if env is None else env
+    return expected_daemons(
+        json.loads(env.get("FLEET_EXPECTED_DAEMONS", json.dumps(DAEMON_ALIASES)))
+    )
 
 
 def write_termination(code, *, units=None, snapshot=None):
@@ -58,7 +66,8 @@ def read() -> dict[str, dict[str, str]]:
     """Unreadable, malformed and stale observations remain unknown."""
     global READ_CODE
     READ_CODE = "UNREADABLE"
-    unknown = {name: {"state": "unknown"} for name in UNITS}
+    aliases = configured_daemons()
+    unknown = {name: {"state": "unknown"} for name in aliases}
     try:
         with SNAPSHOT_PATH.open("rb") as source:
             raw = source.read(MAX_BYTES + 1)
@@ -78,6 +87,9 @@ def read() -> dict[str, dict[str, str]]:
             READ_CODE = "STALE" if age > MAX_AGE_SECONDS else "FUTURE"
             return unknown
         READ_CODE = "READ_OK"
+        if not set(value["daemons"]) <= set(aliases):
+            READ_CODE = "INVALID"
+            return unknown
         return {**unknown, **value["daemons"]}
     except (OSError, KeyError, TypeError, ValueError):
         return unknown
@@ -92,7 +104,7 @@ def write(diagnostics=None) -> None:
         .replace("+00:00", "Z"),
         "daemons": {},
     }
-    for name in UNITS:
+    for name in configured_daemons():
         detail = {}
         diagnostics.append(detail)
         value["daemons"][name] = daemon(name, diagnostic=detail)

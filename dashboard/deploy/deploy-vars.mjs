@@ -22,6 +22,7 @@
 // deploy-vars-inputs exec: DASHBOARD_CANARY_ENABLED GITHUB_SHA
 // deploy-vars-inputs secrets: DASHBOARD_ACCESS_OWNER DASHBOARD_ACCESS_OWNER_ALIASES DASHBOARD_CSRF_SIGNING_KEY
 // deploy-vars-inputs secrets: DASHBOARD_CF_ANALYTICS_TOKEN
+import { mergeWorkerSecrets } from '../../tools/cloud-config/worker-secrets.mjs'
 import { spawnSync } from 'node:child_process'
 import { realpathSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
@@ -51,13 +52,17 @@ export const INJECTED = [
 function checked(env, name, pattern) {
   // Absent means the CI step forgot the setting; empty, that the GitHub variable or secret is unset.
   const value = env[name]
-  if (typeof value !== 'string' || !pattern.test(value)) throw new SettingError(name)
+  if (typeof value !== 'string' || !pattern.test(value)
+    || (['GITHUB_SHA', 'BUILD_SOURCE_SHA'].includes(name) && value.length !== 40)) throw new SettingError(name)
   return value
 }
 
 /** {NAME: value} for every injected var. */
 export function injectedVars(env) {
-  return Object.fromEntries(INJECTED.map(({ name, from, pattern }) => [name, checked(env, from, pattern)]))
+  return Object.fromEntries(INJECTED.map(({ name, from, pattern }) => {
+    const source = from === 'GITHUB_SHA' && env.BUILD_SOURCE_SHA ? 'BUILD_SOURCE_SHA' : from
+    return [name, checked(env, source, pattern)]
+  }))
 }
 
 /** The flags appended to the wrangler command: --var NAME:value (wrangler splits at the first colon). */
@@ -81,7 +86,7 @@ function aliases(env) {
 /** Worker secrets for `wrangler deploy --secrets-file`. */
 export function generateSecrets(env) {
   const list = aliases(env)
-  return {
+  const personal = {
     ACCESS_OWNER: checked(env, 'DASHBOARD_ACCESS_OWNER', ACCESS_EMAIL),
     // --secrets-file only adds or replaces secrets: an emptied list is uploaded as one space (read as
     // no aliases) rather than left out, which would keep the previous aliases working.
@@ -90,6 +95,7 @@ export function generateSecrets(env) {
     // Used only for the GraphQL Analytics API; should be an "Account Analytics: Read" token (docs/setup.md §4).
     CF_ANALYTICS_TOKEN: checked(env, 'DASHBOARD_CF_ANALYTICS_TOKEN', /^[A-Za-z0-9_-]{20,200}$/),
   }
+  return mergeWorkerSecrets('home', env, personal, SettingError)
 }
 
 /** Whether the analytics token is the deploy token (CF_API_TOKEN, passed to the secrets step only for this

@@ -1,5 +1,7 @@
 /** Bindings of the Worker ziyixi-notion-publish (relay/wrangler.toml; secrets set with wrangler secret put). */
 export interface RelayEnv {
+  /** Exact CI build source SHA; absent on local previews. */
+  BUILD_SHA?: string;
   // Secrets.
   GITHUB_DISPATCH_TOKEN?: string;
   NOTION_WEBHOOK_SECRET?: string;

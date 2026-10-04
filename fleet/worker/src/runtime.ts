@@ -38,6 +38,7 @@ export function validRuntime(runtime: NodeStatus, host: string, observedAt: numb
     return false;
   }
   const timestamps = [runtime.observed_at];
+  if (runtime.reconcile_plan) timestamps.push(runtime.reconcile_plan.observed_at);
   for (const item of runtime.workloads) {
     if (item.name !== `workloads/${item.workload_key}`) return false;
     const { desired, actual } = item.release;

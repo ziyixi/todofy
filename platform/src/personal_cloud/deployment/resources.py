@@ -49,6 +49,7 @@ def configuration_wire(config: Configuration) -> dict:
         "repository": config.repository,
         "node_key": config.node_key,
         "namespace": config.namespace,
+        "expected_daemons": list(config.expected_daemons),
         "workloads": [
             {
                 "workload_key": item.key,
@@ -63,14 +64,14 @@ def configuration_wire(config: Configuration) -> dict:
 
 
 def image(config: Configuration, adapter: str, digest: str) -> str:
-    package = {"newsletter": "todofy-newsletter", "personal-cloud": "todofy-platform"}[
-        adapter
-    ]
+    suffix = {"newsletter": "newsletter", "personal-cloud": "platform"}[adapter]
     return (
         "ghcr.io/"
         + config.repository.split("/", 1)[0].lower()
         + "/"
-        + package
+        + config.repository.split("/", 1)[1].lower()
+        + "-"
+        + suffix
         + "@"
         + digest
     )
@@ -103,7 +104,11 @@ class Renderer:
             raise ValueError("invalid_resource_asset")
 
     def render(
-        self, targets: tuple[pb.ReleaseTarget, ...], release_id: str
+        self,
+        targets: tuple[pb.ReleaseTarget, ...],
+        release_id: str,
+        *,
+        gate_key: str | None = None,
     ) -> tuple[dict, ...]:
         selected = {target.workload_key: target for target in targets}
         output = []
@@ -149,6 +154,25 @@ class Renderer:
                         self.config, adapter, target.image_digest
                     )
                 if name == "platform-observer":
+                    for container in (
+                        *pod.get("initContainers", []),
+                        *pod["containers"],
+                    ):
+                        variables = container.setdefault("env", [])
+                        variables[:] = [
+                            value
+                            for value in variables
+                            if value["name"] != "FLEET_EXPECTED_DAEMONS"
+                        ]
+                        variables.append(
+                            {
+                                "name": "FLEET_EXPECTED_DAEMONS",
+                                "value": json.dumps(
+                                    list(self.config.expected_daemons),
+                                    separators=(",", ":"),
+                                ),
+                            }
+                        )
                     for container in pod["containers"]:
                         runtime_url = (
                             "http://"
@@ -197,8 +221,8 @@ class Renderer:
                         container["name"] = workload.container
                         values = (
                             {
-                                "NEWSLETTER_BOOTSTRAP_DRAIN_KEY": "release-"
-                                + target.source_sha,
+                                "NEWSLETTER_BOOTSTRAP_DRAIN_KEY": gate_key
+                                or "release-" + target.source_sha,
                                 "NEWSLETTER_RELEASE_REQUEST_ID": target.request_id,
                             }
                             if adapter == "newsletter"

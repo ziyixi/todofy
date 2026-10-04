@@ -1,10 +1,14 @@
-# Public metadata only. Hosts/resources remain in this app's committed Wrangler configs.
+# Public metadata and relative host labels. Generated Wrangler configs own production bindings.
 version = 1
 id = "website"
 target = "cloudflare"
 
 [[workers]]
 config = "website/relay/wrangler.toml"
+personal_secrets = []
+manual_secrets = ["GITHUB_DISPATCH_TOKEN", "NOTION_WEBHOOK_SECRET", "NOTION_TOKEN", "NOTION_DATA_SOURCE_ID"]
+optional_secrets = []
+hosts = []
 entry = "notion-publish"
 role = "发布 Worker"
 position = 9
@@ -12,6 +16,10 @@ position = 9
 [[workers]]
 # Assets-only requests are not Worker invocations; status comes from a public probe.
 config = "website/wrangler.toml"
+personal_secrets = []
+manual_secrets = []
+optional_secrets = []
+hosts = ["www", ""]
 entry = "website"
 role = "静态网站（仅静态资源）"
 position = 10
@@ -19,7 +27,7 @@ position = 10
 [[entries]]
 id = "website"
 name = "个人网站"
-description = "ziyixi.science，内容来自 Notion"
+description = "{zone}，内容来自 Notion"
 group = "sites"
 icon = "globe"
 accent = "violet"

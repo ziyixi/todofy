@@ -75,7 +75,11 @@ export async function handleButton(request: Request, env: RelayEnv): Promise<Res
   const { pathname } = new URL(request.url);
   if (pathname === "/health" && request.method === "GET") {
     // Liveness only: no credential or configuration disclosure and no authenticated API call.
-    return json({ status: "ok" });
+    const buildSha =
+      env.BUILD_SHA?.length === 40 && /^[a-f0-9]{40}$/.test(env.BUILD_SHA)
+        ? env.BUILD_SHA
+        : "unknown";
+    return json({ status: "ok", build_sha: buildSha });
   }
   const target = targets.get(pathname);
   if (!target) return error("not_found", 404);

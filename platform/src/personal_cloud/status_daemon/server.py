@@ -93,6 +93,7 @@ class Service:
     def __init__(self, cache: Cache, keys: tuple[str, ...]):
         self.cache, self.keys = cache, keys
         self.summary = None
+        self.plan = None
 
     def snapshot(self):
         return self.cache.get()
@@ -157,9 +158,11 @@ class Service:
                 )
             if binding.rpc == "GetNodeStatus":
                 value = self.snapshot()
+                if self.summary is not None:
+                    value = replace(value, current_release=self.summary())
                 return (
-                    replace(value, current_release=self.summary())
-                    if self.summary is not None
+                    replace(value, reconcile_plan=self.plan())
+                    if self.plan is not None
                     else value
                 )
             if binding.rpc == "ListWorkloads":
@@ -356,6 +359,7 @@ def main(controller_factory=None):
         reader.close()
         return 1
     service.summary = router.summary
+    service.plan = router.plan
     uvicorn.run(
         create_app(service, router),
         host="0.0.0.0",

@@ -26,4 +26,10 @@ enum ErrorReason {
   ERROR_REASON_ETAG_MISMATCH = 6;
   // FAILED_PRECONDITION (400): explicit resume is allowed only for the documented held/failed phases.
   ERROR_REASON_RELEASE_NOT_HELD = 7;
+  // ABORTED (409): the current release or bounded live comparison changed since planning.
+  ERROR_REASON_RECONCILE_PLAN_CHANGED = 8;
+  // FAILED_PRECONDITION (400): sensitive drift, an explicit pause or conflicting ownership requires owner action.
+  ERROR_REASON_RECONCILE_MANUAL_REQUIRED = 9;
+  // ALREADY_EXISTS (409): a reconciliation UUID has different frozen source/etag/fingerprint input.
+  ERROR_REASON_RECONCILE_CONFLICT = 10;
 }

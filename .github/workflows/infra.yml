@@ -1,7 +1,7 @@
 # Drift plan of infra/ against the encrypted remote state in R2 (infra/README.md "Drift plan"). Plan only: the apply
 # is the separate, manually dispatched .github/workflows/infra-apply.yml (P4). A separate workflow, not a job in
 # ci.yml, because:
-# - its triggers differ (a daily schedule, and pushes to main that touch infra/ only);
+# - it checks pushes to main that touch infra/; the daily full-cloud check is personal-cloud-reconcile.yml;
 # - Cloudflare drift is not a property of the commit: a red drift run must not fail "CI gate" and hold back the
 #   app deploys, and a green branch run must never be reused for it;
 # - it holds the production environment's token, which no check job in ci.yml does;
@@ -17,8 +17,6 @@ on:
       - infra/**
       - tools/infra-plan-summary/**
       - .github/workflows/infra.yml
-  schedule:
-    - cron: '23 13 * * *'
   workflow_dispatch:
 
 permissions:

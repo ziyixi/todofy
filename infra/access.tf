@@ -25,7 +25,7 @@ resource "cloudflare_zero_trust_access_policy" "github_owner" {
   name       = "Mail Hero GitHub owner"
   decision   = "allow"
   include    = [for email in var.access_github_owner_emails : { email = { email = email } }]
-  require    = [{ login_method = { id = var.access_github_idp_id } }]
+  require    = [{ login_method = { id = local.github_idp } }]
 
   lifecycle {
     prevent_destroy = true
@@ -64,7 +64,7 @@ resource "cloudflare_zero_trust_access_application" "owner" {
   type                       = "self_hosted"
   domain                     = each.value.domain
   destinations               = [for uri in concat([each.value.domain], each.value.more) : { type = "public", uri = uri }]
-  allowed_idps               = var.access_allowed_idp_ids
+  allowed_idps               = local.owner_idps
   app_launcher_visible       = true
   auto_redirect_to_identity  = false
   enable_binding_cookie      = false
@@ -123,6 +123,7 @@ resource "cloudflare_zero_trust_access_application" "fleet_receipt" {
 # replaced by OpenTofu would put its client secret in state, and replacing it silently breaks backups.
 
 resource "cloudflare_zero_trust_access_application" "mail_hero_backup" {
+  count                       = var.legacy_mail_hero_backup ? 1 : 0
   account_id                  = var.account_id
   name                        = "Mail Hero backup API"
   type                        = "self_hosted"
@@ -149,6 +150,12 @@ resource "cloudflare_zero_trust_access_application" "mail_hero_backup" {
   }
 }
 
+# A state-address change only. Existing account policy/credentials stay frozen.
+moved {
+  from = cloudflare_zero_trust_access_application.mail_hero_backup
+  to   = cloudflare_zero_trust_access_application.mail_hero_backup[0]
+}
+
 # --- FlowDay -----------------------------------------------------------------------------------------
 # The two Access applications FlowDay brought with it when it moved into the monorepo (flowday/docs/design.md): the
 # host, and its exact PWA files under /pwa/* (manifest, service worker, icons), which must load without a login. The
@@ -156,8 +163,8 @@ resource "cloudflare_zero_trust_access_application" "mail_hero_backup" {
 # README.md "FlowDay").
 #
 # Each application uses its own reusable policy that FlowDay created before the move and that no other application
-# uses. Those policies are referenced by id only and their rules are not managed here (README.md "FlowDay"), like the
-# backup app's policy above.
+# uses. Their exact existing rules are imported into the managed resources below; bootstrap refuses changes to
+# an existing policy. The legacy backup app remains separately frozen.
 
 locals {
   flowday_apps = {
@@ -166,15 +173,38 @@ locals {
       destinations = ["flowday.ziyixi.science"]
       session      = "168h"
       # END service-catalog flowday
-      policy_id = "841d2527-c836-4c76-a3dd-40e64247947d"
     }
     "flowday-bypass" = {
       # BEGIN service-catalog flowday-bypass
       destinations = ["flowday.ziyixi.science/pwa/*"]
       session      = "6h"
       # END service-catalog flowday-bypass
-      policy_id = "a8aa0aa2-d3dd-4d25-8b41-3b570a1ab83f"
     }
+  }
+}
+
+locals {
+  flowday_policies = {
+    "flowday"        = "allow"
+    "flowday-bypass" = "bypass"
+  }
+}
+
+resource "cloudflare_zero_trust_access_policy" "flowday" {
+  for_each         = local.flowday_policies
+  account_id       = var.account_id
+  name             = var.flowday_policy_names[each.key]
+  decision         = each.value
+  session_duration = var.flowday_policy_options[each.key].session_duration
+  connection_rules = var.flowday_policy_options[each.key].connection_rules
+  include = each.key == "flowday-bypass" ? [{ everyone = {} }] : concat(
+    [{ login_method = { id = local.github_idp } }],
+    [for email in var.access_owner_emails : { email = { email = email } }],
+  )
+  lifecycle {
+    prevent_destroy = true
+    # v5.25 imports an empty login_method beside email; actual rules are checked by flowday_policy_guard.py.
+    ignore_changes = [include]
   }
 }
 
@@ -194,7 +224,7 @@ resource "cloudflare_zero_trust_access_application" "flowday" {
   session_duration           = each.value.session
 
   policies = [
-    { id = each.value.policy_id, precedence = 1 },
+    { id = cloudflare_zero_trust_access_policy.flowday[each.key].id, precedence = 1 },
   ]
 
   lifecycle {

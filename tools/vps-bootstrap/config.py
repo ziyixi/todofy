@@ -101,7 +101,7 @@ def load_bundle(directory):
         "BUNDLE_PROFILE_INVALID",
     )
     files = value["files"]
-    require(isinstance(files, dict) and 10 <= len(files) <= 24, "BUNDLE_FILES_INVALID")
+    require(isinstance(files, dict) and 10 <= len(files) <= 32, "BUNDLE_FILES_INVALID")
     for relative, expected in files.items():
         require(
             isinstance(relative, str)

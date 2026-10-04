@@ -1,5 +1,7 @@
 """Unit tests for ci_changes.py: python3 -m unittest discover -s .github/scripts"""
 
+from workflow_sources import effective_ci
+
 import io
 import json
 import os
@@ -703,7 +705,7 @@ class Classify(unittest.TestCase):
             expect(F, F, F, F, F, website_check=T, website_deploy=T, website_relay_deploy=T),
         )
         self.assertNotIn("website-apex-deploy", workflow_jobs())
-        self.assertNotIn("apex-redirect", WORKFLOW.read_text())
+        self.assertNotIn("apex-redirect", effective_ci())
 
     def test_the_release_workflow_rechecks_every_app_but_deploys_none(self):
         self.assertEqual(
@@ -807,7 +809,7 @@ class Dispatch(unittest.TestCase):
         )
 
     def test_the_workflow_offers_exactly_the_dispatch_inputs(self):
-        text = WORKFLOW.read_text()
+        text = effective_ci()
         options = re.search(r"^        options: \[(.*)\]$", text, re.MULTILINE)
         self.assertIsNotNone(options)
         self.assertEqual({name.strip() for name in options.group(1).split(",")}, set(ci_changes.DISPATCH))
@@ -1099,7 +1101,7 @@ class ToolsImports(unittest.TestCase):
 
 
 def workflow_jobs():
-    text = WORKFLOW.read_text().split("\njobs:\n", 1)[1]
+    text = effective_ci().split("\njobs:\n", 1)[1]
     starts = [
         (match.start(), match.group(1)) for match in re.finditer(r"^  ([a-z][a-z0-9-]*):\n", text, re.MULTILINE)
     ]
@@ -1259,6 +1261,7 @@ class DeployConditions(unittest.TestCase):
                 "fleet-deploy",
                 "platform-image",
                 "vps-deploy",
+                "vps-bootstrap-bundle",
             },
         )
         for name, block in after_gate.items():
@@ -1279,7 +1282,7 @@ class DeployConditions(unittest.TestCase):
                         self.assertEqual(condition.count(f"needs.{need}.result == 'skipped'"), 1)
                     else:
                         self.assertIn(f"needs.{need}.result == 'success'", condition)
-                        if name == "vps-deploy" and need in {"newsletter-deploy", "platform-image"}:
+                        if name == "vps-deploy" and need in {"newsletter-deploy", "platform-image", "vps-bootstrap-bundle"}:
                             self.assertIn(f"needs.{need}.result == 'skipped'", condition)
                             self.assertIn("github.event_name == 'workflow_dispatch' && inputs.resume_vps_release", condition)
                             self.assertIn("!(github.event_name == 'workflow_dispatch' && inputs.resume_vps_release)", condition)
@@ -1300,7 +1303,7 @@ class DeployConditions(unittest.TestCase):
         self.assertIn('if [ "$RESUME_RELEASE" = true ]; then\n            args+=(--resume)\n          else', release)
         self.assertIn('args+=(--newsletter-image "$NEWSLETTER_IMAGE" --platform-image "$PLATFORM_IMAGE")', release)
         self.assertIn("RELEASE_SOURCE_SHA: ${{ inputs.resume_vps_release && inputs.resume_source_sha || github.sha }}", release)
-        self.assertIn('--source-sha "$RELEASE_SOURCE_SHA" "${args[@]}"', release)
+        self.assertIn('--source-sha "$RELEASE_SOURCE_SHA" --evidence-file "$RUNNER_TEMP/vps-release-evidence.json" "${args[@]}"', release)
 
     def test_the_dashboard_deploys_after_the_apps_and_lab_and_watch_after_todofy(self):
         self.assertLessEqual({"todofy-deploy"}, set(self.needs(self.jobs()["lab-deploy"])))
@@ -1311,8 +1314,8 @@ class DeployConditions(unittest.TestCase):
         # The only token: the one Todofy deploy uses; no other secret reaches wrangler's environment.
         # (the hostname guard's step and the deploy step).
         self.assertIn("CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}", block)
-        self.assertEqual(block.count("CLOUDFLARE_API_TOKEN:"), 2)
-        self.assertEqual(block.count("CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}"), 2)
+        self.assertEqual(block.count("CLOUDFLARE_API_TOKEN:"), 4)
+        self.assertEqual(block.count("CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}"), 4)
         # deploy-vars.mjs compares (never writes) the deploy token, to warn when it is the analytics token.
         secrets = block.split("- name: Write the Worker secrets file\n", 1)[1].split("\n      - ", 1)[0]
         self.assertIn("CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}", secrets)
@@ -1413,7 +1416,7 @@ class DeployConditions(unittest.TestCase):
         self.assertEqual(named, {key: set(names) for key, names in ci_changes.CHECK_JOBS.items()})
         self.assertEqual(set(ci_changes.CHECK_JOBS), {key for key in ci_changes.KEYS if not key.endswith(("_deploy", "_publish"))})
         for always in ci_changes.ALWAYS_JOBS:
-            self.assertIn(f"    name: {always}\n", WORKFLOW.read_text())
+            self.assertIn(f"    name: {always}\n", effective_ci())
 
     def test_shared_packages_run_only_when_flagged(self):
         self.assertEqual(self.condition(self.jobs()["shared-packages"]), "needs.changes.outputs.packages == 'true'")
@@ -1478,7 +1481,7 @@ class WebsiteRelease(unittest.TestCase):
         self.assertIn("gh workflow run website-release.yml --repo \"$GITHUB_REPOSITORY\" --ref main", block)
         for flag in (
             "-f operation=release",
-            "-f confirmation=release:www.ziyixi.science",
+            '-f confirmation="release:${SITE_URL#https://}"',
             "-f force_build=false",
             "-f allow_empty=false",
             "-f trigger=push",
@@ -1486,7 +1489,8 @@ class WebsiteRelease(unittest.TestCase):
             self.assertIn(flag, block)
         # Only the dispatch permission; no environment, secret or lock of its own.
         self.assertIn("      actions: write\n", block)
-        self.assertNotIn("contents:", block)
+        self.assertIn("      contents: read\n", block)
+        self.assertIn("tools/cloud-config/outputs.py", block)
         self.assertNotIn("deployments:", block)
         self.assertNotIn("concurrency:", block)
         self.assertNotIn("environment:", block)
@@ -2342,7 +2346,7 @@ class FlowDayProductionCheck(unittest.TestCase):
             bindings.append({"name": "BUILD_SHA", "type": "plain_text", "text": build})
         return {"id": self.VERSION, "metadata": {"author_email": self.EMAIL}, "resources": {"bindings": bindings}}
 
-    def check(self, deployment, version, migrations="\u2705 No migrations to apply!", token="synthetic-token", fail=""):
+    def check(self, deployment, version, migrations="\u2705 No migrations to apply!", token="synthetic-token", fail="", build_source=""):
         """Runs the step; the stub answers `deployments status`, `versions view` and `d1 migrations list`, or exits 1
         for the command named in `fail`. Returns (exit code, output, the commands npx was asked to run)."""
         if shutil.which("jq") is None and os.environ.get("GITHUB_ACTIONS") != "true":
@@ -2376,6 +2380,7 @@ class FlowDayProductionCheck(unittest.TestCase):
                 "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
                 "CLOUDFLARE_API_TOKEN": token,
                 "GITHUB_SHA": SHA,
+                "BUILD_SOURCE_SHA": build_source,
                 "GITHUB_WORKSPACE": str(workspace),
             }
             script, directory = workflow_run_step(self.JOB, "Check that production runs this commit")
@@ -2410,6 +2415,22 @@ class FlowDayProductionCheck(unittest.TestCase):
                 self.assertIn(f"was not built from {SHA}", output)
                 if build:
                     self.assertNotIn(build, output)
+
+    def test_repair_build_source_is_verified_and_reported(self):
+        repaired_sha = "d" * 40
+        code, output, _ = self.check(self.deployment((self.VERSION, 100)), self.version(repaired_sha),
+                                     build_source=repaired_sha)
+        self.assertEqual(code, 0, output)
+        self.assertIn(f"built from {repaired_sha}", output)
+        self.assertNotIn(SHA, output)
+
+    def test_repair_mismatch_reports_expected_build_source(self):
+        repaired_sha = "d" * 40
+        code, output, _ = self.check(self.deployment((self.VERSION, 100)), self.version(SHA),
+                                     build_source=repaired_sha)
+        self.assertEqual(code, 1, output)
+        self.assertIn(f"was not built from {repaired_sha}", output)
+        self.assertNotIn(SHA, output)
 
     def test_a_split_or_empty_deployment_fails(self):
         for versions in (((self.VERSION, 50), ("1" * 8 + "-0000-4000-8000-" + "1" * 12, 50)), ((self.VERSION, 90),), ()):
@@ -2813,7 +2834,7 @@ class HostnameGuard(unittest.TestCase):
                 self.assertTrue(any(self.has_routes(config) for config in configs))
 
     def test_every_production_config_with_routes_is_guarded(self):
-        text = WORKFLOW.read_text()
+        text = effective_ci()
         release = (REPO / ".github" / "workflows" / "website-release.yml").read_text()
         for config in sorted(REPO.glob("*/**/wrangler.toml")):
             relative = config.relative_to(REPO).as_posix()
@@ -2923,7 +2944,7 @@ class HostnameGuard(unittest.TestCase):
             self.assertEqual(ran, "")
 
     def test_the_changes_job_tests_the_guard(self):
-        self.assertIn("run: node --test tools/cf-guard/test/*.test.mjs\n", workflow_jobs()["changes"])
+        self.assertIn("run: node --test tools/cf-guard/test/*.test.mjs tools/cloud-config/tests/worker-secrets.test.mjs\n", workflow_jobs()["changes"])
 
     def test_website_jobs_cache_the_playwright_browser_by_its_locked_version(self):
         release = (REPO / ".github" / "workflows" / "website-release.yml").read_text()

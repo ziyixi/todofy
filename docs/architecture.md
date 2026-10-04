@@ -192,16 +192,30 @@ generate secrets or change application logic. Deploy wrappers add private values
 BUILD_SHA. The [service catalog](service-catalog.md) references these configs rather than duplicating binding
 IDs or bucket names.
 
-`infra/` owns only its declared Access/storage objects and the dedicated Platform HTTP Tunnel, configuration,
-machine identity and exact DNS record, through reviewed plans and a gated apply. Worker code/routes remain
-with Wrangler. Other tunnels/DNS, Email Routing, identity-provider bootstrap and the root mailbox remain
-outside that ownership. The Kubernetes API is not routed publicly.
+`infra/` owns its declared Access/storage objects, GitHub/OTP identity providers, the exact Mail Hero inbox
+rule, and the dedicated Platform HTTP Tunnel, configuration, machine identity and DNS record.
+Worker code/routes remain with Wrangler. Other tunnels/DNS and the root mailbox stay outside that scope.
+Account activation, the inbox subdomain and external OAuth registration are bootstrap prerequisites.
+The Kubernetes API is not routed publicly.
 
 Standard namespace-scoped k3s manifests/Kustomize assets live under `platform/k3s/`. Mounted public/private
 configuration selects the namespace, state roots, provider identities and allowlisted images; a fresh account
 or VPS does not require changing business IDL. One reviewed host bootstrap installs k3s/cloudflared and imports
 private settings/state. Routine application and observer changes are image releases through the daemon API,
-with no app Python or packaged executable on the host. [Rebuild](rebuild.md) explains the remaining manual
-provider initialization and data restoration; it does not claim a fully automatic empty-account rebuild.
+with no app Python or packaged executable on the host. [Rebuild](rebuild.md) gives the configuration,
+bootstrap and release sequence; [verification](rebuild-verification.md) distinguishes simulated checks,
+current-environment releases and the later fresh-account drill.
 GitHub publication, VPS rollout and business acceptance remain separate operations. [CI/CD](ci-cd.md)
 holds the release and production-setting reference.
+
+The normal Worker release and drift repair share one reusable workflow and each app's release lock.
+GitHub Deployments record the source/configuration and resource identities only after provider verification.
+A repair selects that app's last verified release, preserves operational switches, and stops on changed
+persistent identities or secrets. Infrastructure reconciliation automatically handles only its declared
+routine fields; a saved sensitive plan needs an owner review and is checked again before apply.
+
+The daemon's typed `GetReconcilePlan` describes bounded differences from the current accepted release.
+`ReconcileRelease` uses its ETag and plan fingerprint, creates a new release transaction with a separate
+drain key, and verifies actual workloads before success. Clean checks do not restart Pods. Pause, ledger,
+Secrets and PVCs are preserved. Host-entry failure uses the fixed bootstrap bundle's owner recovery;
+it does not broaden the daemon's API into SSH or cluster-admin access.

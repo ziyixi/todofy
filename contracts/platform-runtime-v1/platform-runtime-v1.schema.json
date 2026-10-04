@@ -44,6 +44,21 @@
       "type": "string",
       "pattern": "^(?:[A-Z][A-Z0-9_]{0,63})$(?!\\n)"
     },
+    "ReconcileFingerprint": {
+      "description": "Opaque digest of one bounded desired/live reconciliation plan.",
+      "type": "string",
+      "pattern": "^(?:[0-9a-f]{64})$(?!\\n)"
+    },
+    "ReconcileEtag": {
+      "description": "Persisted source release revision required by a reconciliation.",
+      "type": "string",
+      "pattern": "^(?:[A-Za-z0-9_-]{1,128})$(?!\\n)"
+    },
+    "RuntimeResourceKey": {
+      "description": "Fixed public runtime alias, never an arbitrary Kubernetes resource.",
+      "type": "string",
+      "pattern": "^(?:(newsletter|newsletter-config-sync|platform-runtime|newsletter-daily|platform-observer|newsletter-service|platform-service|newsletter-release|platform-release|platform-runtime-config))$(?!\\n)"
+    },
     "WorkloadResourceName": {
       "description": "A configured workload resource name.",
       "type": "string",
@@ -69,6 +84,11 @@
       "description": "Opaque bounded concurrency token from the persisted operation.",
       "type": "string",
       "pattern": "^(?:[A-Za-z0-9_-]{1,128})$(?!\\n)"
+    },
+    "ReconcileRequestFingerprint": {
+      "description": "Exact bounded comparison digest returned by GetReconcilePlan.",
+      "type": "string",
+      "pattern": "^(?:[0-9a-f]{64})$(?!\\n)"
     },
     "ReleaseTarget": {
       "type": "object",
@@ -263,6 +283,78 @@
         },
         "error_code": {
           "$ref": "#/$defs/ReleaseErrorCode"
+        },
+        "source_release": {
+          "$ref": "#/$defs/ReleaseName"
+        }
+      },
+      "additionalProperties": false
+    },
+    "ReconcilePlan": {
+      "type": "object",
+      "required": [
+        "name",
+        "state",
+        "observed_at",
+        "changes"
+      ],
+      "properties": {
+        "name": {
+          "const": "reconcilePlan"
+        },
+        "base_release": {
+          "$ref": "#/$defs/ReleaseName"
+        },
+        "base_etag": {
+          "$ref": "#/$defs/ReconcileEtag"
+        },
+        "state": {
+          "enum": [
+            "clean",
+            "repairable",
+            "manual_required",
+            "unavailable"
+          ]
+        },
+        "fingerprint": {
+          "$ref": "#/$defs/ReconcileFingerprint"
+        },
+        "observed_at": {
+          "type": "string"
+        },
+        "changes": {
+          "type": "array",
+          "maxItems": 10,
+          "items": {
+            "$ref": "#/$defs/ReconcileChange"
+          }
+        },
+        "reason_code": {
+          "$ref": "#/$defs/ReleaseErrorCode"
+        }
+      },
+      "additionalProperties": false
+    },
+    "ReconcileChange": {
+      "type": "object",
+      "required": [
+        "resource_key",
+        "action",
+        "reason_code"
+      ],
+      "properties": {
+        "resource_key": {
+          "$ref": "#/$defs/RuntimeResourceKey"
+        },
+        "action": {
+          "enum": [
+            "create",
+            "update",
+            "conflict"
+          ]
+        },
+        "reason_code": {
+          "$ref": "#/$defs/ReleaseErrorCode"
         }
       },
       "additionalProperties": false
@@ -344,6 +436,9 @@
         },
         "current_release": {
           "$ref": "#/$defs/ReleaseSummary"
+        },
+        "reconcile_plan": {
+          "$ref": "#/$defs/ReconcilePlan"
         }
       },
       "additionalProperties": false
@@ -356,7 +451,10 @@
         "release_not_found",
         "resume_conflict",
         "etag_mismatch",
-        "release_not_held"
+        "release_not_held",
+        "reconcile_plan_changed",
+        "reconcile_manual_required",
+        "reconcile_conflict"
       ]
     },
     "GetNodeStatusRequest": {
@@ -465,6 +563,42 @@
         },
         "etag": {
           "$ref": "#/$defs/ResumeEtag"
+        }
+      },
+      "additionalProperties": false
+    },
+    "GetReconcilePlanRequest": {
+      "type": "object",
+      "required": [
+        "name"
+      ],
+      "properties": {
+        "name": {
+          "const": "reconcilePlan"
+        }
+      },
+      "additionalProperties": false
+    },
+    "ReconcileReleaseRequest": {
+      "type": "object",
+      "required": [
+        "name",
+        "etag",
+        "fingerprint",
+        "request_id"
+      ],
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/ReleaseResourceName"
+        },
+        "etag": {
+          "$ref": "#/$defs/ResumeEtag"
+        },
+        "fingerprint": {
+          "$ref": "#/$defs/ReconcileRequestFingerprint"
+        },
+        "request_id": {
+          "$ref": "#/$defs/ReleaseUuid"
         }
       },
       "additionalProperties": false

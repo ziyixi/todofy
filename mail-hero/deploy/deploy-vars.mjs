@@ -27,6 +27,7 @@
 // must set each input of that mode (Actions sets GITHUB_* itself).
 // deploy-vars-inputs exec: MAIL_HERO_FORCE_SEND_PAUSED MAIL_HERO_MAINTENANCE_MODE MAIL_HERO_NATIVE_BACKUP_ENABLED GITHUB_SHA
 // deploy-vars-inputs secrets: MAIL_HERO_RECEIVE_ADDRESS MAIL_HERO_ACCESS_OWNER MAIL_HERO_ACCESS_OWNER_ALIASES
+import { mergeWorkerSecrets, validWorkerSecrets } from '../../tools/cloud-config/worker-secrets.mjs'
 import { spawnSync } from 'node:child_process'
 import { readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
@@ -80,13 +81,14 @@ export const SECRETS = [
 function values(entries, env) {
   const found = {}
   for (const { name, from, optional, validate } of entries) {
-    const value = env[from]
+    const source = from === 'GITHUB_SHA' && env.BUILD_SOURCE_SHA ? 'BUILD_SOURCE_SHA' : from
+    const value = env[source]
     // Absent means the CI step forgot the setting: always refused. Empty is refused unless optional.
     // Surrounding whitespace (a newline pasted into a secret) is refused; the alias list is normalized
     // item by item instead, as before.
-    if (typeof value !== 'string' || (value === '' && !optional) || (!optional && value !== value.trim())) throw new SettingError(from)
+    if (typeof value !== 'string' || (value === '' && !optional) || (!optional && value !== value.trim())) throw new SettingError(source)
     const checked = value.trim() === '' ? '' : validate(value)
-    if (checked === null) throw new SettingError(from)
+    if (checked === null || (from === 'GITHUB_SHA' && value.length !== 40)) throw new SettingError(source)
     found[name] = checked
   }
   return found
@@ -105,7 +107,7 @@ export function wranglerArgs(env) {
 /** Worker secrets for `wrangler deploy --secrets-file`. Throws SettingError naming the first bad setting. */
 export function generateSecrets(env) {
   const secrets = values(SECRETS, env)
-  return { ...secrets, ACCESS_OWNER_ALIASES: secrets.ACCESS_OWNER_ALIASES || NO_ALIASES }
+  return mergeWorkerSecrets('mail-hero', env, { ...secrets, ACCESS_OWNER_ALIASES: secrets.ACCESS_OWNER_ALIASES || NO_ALIASES }, SettingError)
 }
 
 /** Writes the secrets file owner-only, never over an existing file. */
@@ -119,7 +121,7 @@ export function secretsFileProblem(path) {
   try { content = JSON.parse(readFileSync(path, 'utf8')) } catch { return 'the --secrets-file is missing or not JSON' }
   if (!content || typeof content !== 'object' || Array.isArray(content)) return 'the --secrets-file is not a JSON object'
   const names = SECRETS.map(({ name }) => name)
-  if (Object.keys(content).sort().join(',') !== [...names].sort().join(',')) return `the --secrets-file must hold exactly ${names.join(', ')}`
+  if (!names.every((name) => Object.hasOwn(content, name)) || !validWorkerSecrets('mail-hero', content, false)) return `the --secrets-file must hold ${names.join(', ')} and only declared bindings`
   for (const { name, validate } of SECRETS) {
     const value = content[name]
     const valid = typeof value === 'string' && value !== '' && (name === 'ACCESS_OWNER_ALIASES'

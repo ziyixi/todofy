@@ -52,8 +52,6 @@ def _names(cls: type[IntEnum]) -> tuple[str, ...]:
 MODES = _names(pb.Mode)
 # The sources the contract knows (its Source enum); Todofy accepts those listed in TASK_INTENT_SOURCES.
 SOURCES = _names(pb.Source)
-# TASK_INTENT_URL_HOSTS of task-intent-v1.ts: the hosts each source may link to (exact match).
-URL_HOSTS: Mapping[str, tuple[str, ...]] = {"lab": ("arxiv.org",), "watch": ("watch.ziyixi.science",)}
 
 # TASK_INTENT_LIMITS of task-intent-v1.ts.
 ITEMS_MAX = 30
@@ -279,9 +277,14 @@ def url_host(url: str) -> str:
     return match.group(1)
 
 
-def urls_allowed(value: Intent) -> bool:
+def url_hosts(watch_host: str) -> Mapping[str, tuple[str, ...]]:
+    """Exact source hosts; deployment identity is supplied by Todofy's caller."""
+    return {"lab": ("arxiv.org",), "watch": (watch_host,)}
+
+
+def urls_allowed(value: Intent, *, watch_host: str) -> bool:
     """Every item URL's host is on the source's allow-list (Todofy never fetches them)."""
-    hosts = URL_HOSTS.get(value.source, ())
+    hosts = url_hosts(watch_host).get(value.source, ())
     return all(item.url is None or url_host(item.url) in hosts for item in value.items)
 
 

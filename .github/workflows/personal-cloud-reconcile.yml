@@ -1,0 +1,295 @@
+# Inspection is the default. Routine repair is opt-in; sensitive plans require a separate approval.
+name: Personal cloud reconcile
+
+on:
+  schedule:
+    - cron: '41 13 * * *'
+  workflow_run:
+    workflows: [CI and deploy]
+    branches: [main]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: Check drift, repair supported drift, or explicitly resume one held VPS repair
+        type: choice
+        options: [check, repair, resume]
+        default: check
+      resume_release:
+        description: Existing releases/UUID, required only for resume
+        type: string
+        default: ''
+      reviewed_apply:
+        description: Request an approval of this run's exact saved infrastructure plan
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+env:
+  CI: 'true'
+  WRANGLER_SEND_METRICS: 'false'
+
+jobs:
+  context:
+    name: Select current main and requested operation
+    if: >-
+      ${{ (github.event_name != 'workflow_run' && github.ref == 'refs/heads/main')
+      || (github.event_name == 'workflow_run'
+        && github.event.workflow_run.name == 'CI and deploy'
+        && github.event.workflow_run.conclusion == 'success'
+        && github.event.workflow_run.head_branch == 'main'
+        && github.event.workflow_run.head_repository.full_name == github.repository) }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      enabled: ${{ steps.context.outputs.enabled }}
+      source_sha: ${{ steps.context.outputs.source_sha }}
+      operation: ${{ steps.context.outputs.operation }}
+    steps:
+      - name: Require the triggering revision to still be current main
+        id: context
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_SOURCE: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
+          REQUESTED_OPERATION: ${{ inputs.operation }}
+          AUTO_REPAIR: ${{ vars.PERSONAL_CLOUD_AUTO_REPAIR }}
+        run: |
+          main_sha=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)
+          if [ "$EXPECTED_SOURCE" != "$main_sha" ]; then
+            echo 'enabled=false' >> "$GITHUB_OUTPUT"
+            echo 'A newer main revision exists; this event is skipped.' >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          operation=check
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
+            operation="$REQUESTED_OPERATION"
+          elif [ "$AUTO_REPAIR" = true ]; then
+            operation=repair
+          fi
+          case "$operation" in check|repair|resume) ;; *) exit 1 ;; esac
+          echo 'enabled=true' >> "$GITHUB_OUTPUT"
+          echo "source_sha=$main_sha" >> "$GITHUB_OUTPUT"
+          echo "operation=$operation" >> "$GITHUB_OUTPUT"
+
+  infra:
+    name: Infrastructure comparison and routine repair
+    needs: context
+    if: needs.context.outputs.enabled == 'true' && needs.context.outputs.operation != 'resume'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment: production
+    concurrency:
+      group: infra-production
+      cancel-in-progress: false
+    outputs:
+      state: ${{ steps.reconcile.outputs.state }}
+      expect: ${{ steps.reconcile.outputs.expect }}
+      plan_key: ${{ steps.reconcile.outputs.plan_key }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.context.outputs.source_sha }}
+          persist-credentials: false
+      - uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2.0.2
+        with:
+          tofu_version: 1.12.6
+          tofu_wrapper: false
+          github_token: ${{ github.token }}
+      - name: Recheck main under the infrastructure lock
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_SOURCE: ${{ needs.context.outputs.source_sha }}
+        run: test "$EXPECTED_SOURCE" = "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)"
+      - name: Classify drift without silently approving sensitive changes
+        id: reconcile
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          INFRA_STATE_PASSPHRASE: ${{ secrets.INFRA_STATE_PASSPHRASE }}
+          INFRA_TFVARS: ${{ secrets.INFRA_TFVARS }}
+          INFRA_RECONCILE_SOURCE_SHA: ${{ needs.context.outputs.source_sha }}
+          RECONCILE_OPERATION: ${{ needs.context.outputs.operation }}
+        run: |
+          args=()
+          if [ "$RECONCILE_OPERATION" = check ]; then args+=(--check-only); fi
+          status=0
+          python3 infra/scripts/infra_state.py reconcile --environment production \
+            --github-output "$GITHUB_OUTPUT" "${args[@]}" || status=$?
+          if [ "$status" != 0 ] && [ "$status" != 2 ]; then exit "$status"; fi
+      - name: Show the exact plan available for review
+        env:
+          PLAN_STATE: ${{ steps.reconcile.outputs.state }}
+          PLAN_EXPECT: ${{ steps.reconcile.outputs.expect }}
+          PLAN_KEY: ${{ steps.reconcile.outputs.plan_key }}
+          PLAN_SOURCE: ${{ needs.context.outputs.source_sha }}
+        run: |
+          printf 'Infrastructure: %s\n\nSource: `%s`\n\nExpected actions: `%s`\n\nSaved plan: `%s`\n' \
+            "$PLAN_STATE" "$PLAN_SOURCE" "$PLAN_EXPECT" "$PLAN_KEY" >> "$GITHUB_STEP_SUMMARY"
+
+  review-protection:
+    name: Require a protected review environment
+    needs: [context, infra]
+    if: >-
+      ${{ github.event_name == 'workflow_dispatch' && inputs.reviewed_apply
+      && needs.context.outputs.enabled == 'true'
+      && (needs.infra.outputs.state == 'needs_manual' || needs.infra.outputs.state == 'repairable') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Refuse an absent or unprotected infra-review environment
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          protected=$(gh api "repos/$GITHUB_REPOSITORY/environments/infra-review" \
+            --jq '[.protection_rules[] | select(.type == "required_reviewers") | .reviewers | length] | any(. > 0)')
+          test "$protected" = true
+
+  infra-review:
+    name: Approve the saved plan for ${{ needs.context.outputs.source_sha }}
+    needs: [context, infra, review-protection]
+    if: >-
+      ${{ github.event_name == 'workflow_dispatch' && inputs.reviewed_apply
+      && needs.context.outputs.enabled == 'true' && needs.review-protection.result == 'success'
+      && (needs.infra.outputs.state == 'needs_manual' || needs.infra.outputs.state == 'repairable') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    environment: infra-review
+    steps:
+      - name: Bind this approval to the detection job's exact saved plan
+        env:
+          REVIEWED_PLAN_KEY: ${{ needs.infra.outputs.plan_key }}
+          REVIEWED_EXPECT: ${{ needs.infra.outputs.expect }}
+        run: |
+          test -n "$REVIEWED_PLAN_KEY"
+          test -n "$REVIEWED_EXPECT"
+
+  infra-apply:
+    name: Apply the approved saved infrastructure plan
+    needs: [context, infra, infra-review]
+    if: >-
+      ${{ github.event_name == 'workflow_dispatch' && inputs.reviewed_apply
+      && needs.context.outputs.enabled == 'true' && needs.infra-review.result == 'success'
+      && (needs.infra.outputs.state == 'needs_manual' || needs.infra.outputs.state == 'repairable') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment: production
+    permissions:
+      contents: read
+      actions: read
+    concurrency:
+      group: infra-production
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.context.outputs.source_sha }}
+          persist-credentials: false
+      - uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2.0.2
+        with:
+          tofu_version: 1.12.6
+          tofu_wrapper: false
+          github_token: ${{ github.token }}
+      - name: Recheck main and review protection after taking the infrastructure lock
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_SOURCE: ${{ needs.context.outputs.source_sha }}
+        run: |
+          test "$EXPECTED_SOURCE" = "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)"
+          protected=$(gh api "repos/$GITHUB_REPOSITORY/environments/infra-review" \
+            --jq '[.protection_rules[] | select(.type == "required_reviewers") | .reviewers | length] | any(. > 0)')
+          test "$protected" = true
+      - name: Apply only the still-matching saved plan, then verify no remaining changes
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          INFRA_STATE_PASSPHRASE: ${{ secrets.INFRA_STATE_PASSPHRASE }}
+          INFRA_TFVARS: ${{ secrets.INFRA_TFVARS }}
+          INFRA_REVIEWED_APPLY: reviewed-plan
+          PLAN_KEY: ${{ needs.infra.outputs.plan_key }}
+          PLAN_EXPECT: ${{ needs.infra.outputs.expect }}
+        run: |
+          python3 infra/scripts/infra_state.py approved-apply --environment production \
+            --plan-key "$PLAN_KEY" --expect "$PLAN_EXPECT"
+
+  workers:
+    name: Compare or repair ${{ matrix.app }}
+    needs: context
+    if: needs.context.outputs.enabled == 'true' && needs.context.outputs.operation != 'resume'
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix:
+        app: [todofy, mail-hero, dashboard, lab, flowday, links, watch, fleet, website-relay]
+    permissions:
+      contents: read
+      deployments: write
+    uses: ./.github/workflows/worker-release.yml
+    with:
+      app: ${{ matrix.app }}
+      repair: true
+      check_only: ${{ needs.context.outputs.operation == 'check' }}
+      expected_main_sha: ${{ needs.context.outputs.source_sha }}
+    secrets: inherit
+
+  vps:
+    name: Compare, repair or explicitly resume the VPS runtime
+    needs: context
+    if: needs.context.outputs.enabled == 'true' && vars.VPS_DEPLOY_ENABLED == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    environment: production
+    permissions:
+      contents: read
+      deployments: write
+    concurrency:
+      group: vps-production
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.context.outputs.source_sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: '26'
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: '0.12.10'
+          working-directory: platform
+          enable-cache: true
+      - name: Install the locked typed client
+        run: |
+          npm ci --prefix proto --no-audit --no-fund
+          node proto/tools/ensure.mjs
+          uv sync --project platform --locked
+      - name: Recheck main under the VPS lock
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_SOURCE: ${{ needs.context.outputs.source_sha }}
+        run: test "$EXPECTED_SOURCE" = "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)"
+      - name: Call the daemon and verify actual running identities
+        env:
+          PLATFORM_ACCESS_CLIENT_ID: ${{ secrets.PLATFORM_ACCESS_CLIENT_ID }}
+          PLATFORM_ACCESS_CLIENT_SECRET: ${{ secrets.PLATFORM_ACCESS_CLIENT_SECRET }}
+          PLATFORM_DEPLOY_TOKEN: ${{ secrets.PLATFORM_DEPLOY_TOKEN }}
+          RECONCILE_OPERATION: ${{ needs.context.outputs.operation }}
+          RESUME_RELEASE: ${{ inputs.resume_release }}
+        run: |
+          request_id=$(PYTHONPATH=tools/vps-release python3 -c 'import os; from release_identity import reconcile_id; print(reconcile_id(os.environ["GITHUB_REPOSITORY"], os.environ["GITHUB_RUN_ID"], os.environ["GITHUB_RUN_ATTEMPT"]))')
+          operation="$RECONCILE_OPERATION"
+          args=()
+          if [ "$operation" = check ]; then operation=plan; fi
+          if [ "$operation" = resume ]; then args+=(--release-name "$RESUME_RELEASE"); fi
+          uv run --project platform --locked python tools/vps-release/reconcile.py \
+            --operation "$operation" --request-id "$request_id" \
+            --evidence-file "$RUNNER_TEMP/vps-release-evidence.json" "${args[@]}"
+      - name: Record only a physically verified changed or resumed VPS release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ -f "$RUNNER_TEMP/vps-release-evidence.json" ]; then
+            python3 tools/cloud-release/vps_record.py --evidence-file "$RUNNER_TEMP/vps-release-evidence.json"
+          fi

@@ -7,6 +7,7 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path
 
+from evidence import write_evidence
 from release_identity import release_id, release_profile, resume_id, verified_images
 from transport import ReleaseFailure, TransientFailure, Transport
 from ziyixi_proto.platform.runtime.v1 import runtime_pb as pb
@@ -187,7 +188,12 @@ class Deployment:
                     service.GetNodeStatusRequest(name="nodeStatus"),
                     deadline,
                 )
-                if verified_snapshot(node, targets, name, self.now()):
+                verified = verified_snapshot(node, targets, name, self.now())
+                if not verified:
+                    candidate = self.ready_repair(node, targets, name, deadline)
+                    if candidate is not None:
+                        release, verified = candidate, True
+                if verified:
                     self.business_state = {
                         item.workload_key: {
                             "health_state": item.health_state,
@@ -206,6 +212,34 @@ class Deployment:
             release = self.call(
                 "GetRelease", service.GetReleaseRequest(name=name), deadline
             )
+
+    def ready_repair(self, node, targets, original_name, deadline):
+        """Adopt a physically verified later repair of the same frozen images/source."""
+        summary = node.current_release
+        if summary is None or summary.phase != "ready" or summary.name == original_name:
+            return None
+        candidate = self.call(
+            "GetRelease", service.GetReleaseRequest(name=summary.name), deadline
+        )
+        expected = {(x.workload_key, x.source_sha, x.image_digest) for x in targets}
+        actual = {
+            (x.workload_key, x.source_sha, x.image_digest) for x in candidate.targets
+        }
+        if (
+            candidate.source_release is None
+            or candidate.phase != "ready"
+            or len(candidate.targets) != len(targets)
+            or expected != actual
+            or any(
+                x.request_id != candidate.request_id or x.generation is not None
+                for x in candidate.targets
+            )
+        ):
+            return None
+        self.validate(candidate, summary.name, candidate.targets)
+        if verified_snapshot(node, candidate.targets, candidate.name, self.now()):
+            return candidate
+        return None
 
     @staticmethod
     def frozen_targets(
@@ -263,6 +297,7 @@ def main() -> int:
         help="Explicitly continue the same held operation with its current etag",
     )
     parser.add_argument("--timeout", type=int, default=1800)
+    parser.add_argument("--evidence-file", type=Path)
     args = parser.parse_args()
     if args.resume and (
         args.newsletter_image is not None or args.platform_image is not None
@@ -295,6 +330,8 @@ def main() -> int:
         release = deployment.execute(
             args.source_sha, digests, resume=args.resume, timeout=args.timeout
         )
+        if args.evidence_file is not None:
+            write_evidence(args.evidence_file, release)
         print(
             json.dumps(
                 {

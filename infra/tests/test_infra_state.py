@@ -1198,8 +1198,10 @@ class Bootstrap(unittest.TestCase):
                 def credential(path):
                     return TOKEN
 
-            def create(token_file, args, work, log):
-                created.append(args)
+            def create(token, account):
+                self.assertEqual(token, TOKEN)
+                self.assertEqual(account, ACCOUNT)
+                created.append(["r2", "bucket", "create", "infra-state"])
                 bucket["exists"] = True
                 return 0
 
@@ -1208,7 +1210,7 @@ class Bootstrap(unittest.TestCase):
                     mock.patch.object(infra_state, "cloudflare_get", lambda token, path: fake_fetch(path)), \
                     mock.patch.object(infra_state, "s3_request", s3), \
                     mock.patch.object(bootstrap_state, "load_admin", lambda: Admin), \
-                    mock.patch.object(bootstrap_state, "run_admin_wrangler", create), \
+                    mock.patch.object(bootstrap_state, "create_bucket", create), \
                     contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
                 code = bootstrap_state.main(["--var-file", str(values), "--expect", "3", "--work-dir", str(parent)])
             # The bootstrap keeps its own new directory (the log) inside the parent and nothing else changes.

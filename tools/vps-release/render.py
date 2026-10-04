@@ -13,16 +13,14 @@ from release_identity import release_id
 def render(root: Path, sha: str, images: dict[str, str]) -> dict:
     """Only public identity fields change; resource definitions remain reviewable YAML."""
     profile = tomllib.loads((root / "config/cloud.toml").read_text())
-    owner = profile["repository"].split("/")[0]
+    repository = profile["repository"].lower()
     if not re.fullmatch(r"[0-9a-f]{40}", sha) or set(images) != {
         "newsletter",
         "platform",
     }:
         raise ValueError("Invalid release identity")
     for service, image in images.items():
-        expected = (
-            rf"ghcr\.io/{re.escape(owner)}/todofy-{service}@sha256:[0-9a-f]{{64}}"
-        )
+        expected = rf"ghcr\.io/{re.escape(repository)}-{service}@sha256:[0-9a-f]{{64}}"
         if not re.fullmatch(expected, image):
             raise ValueError("Invalid verified image")
     raw = subprocess.check_output(
@@ -70,6 +68,22 @@ def render(root: Path, sha: str, images: dict[str, str]) -> dict:
             ):
                 container["image"] = images[service]
                 _variables(container.get("env", []), profile, sha, identity)
+                if name == "platform-observer":
+                    variables = container.setdefault("env", [])
+                    variables[:] = [
+                        value
+                        for value in variables
+                        if value["name"] != "FLEET_EXPECTED_DAEMONS"
+                    ]
+                    variables.append(
+                        {
+                            "name": "FLEET_EXPECTED_DAEMONS",
+                            "value": json.dumps(
+                                profile["vps"]["expected_daemons"],
+                                separators=(",", ":"),
+                            ),
+                        }
+                    )
     return {"apiVersion": "v1", "kind": "List", "items": items}
 
 
@@ -102,6 +116,7 @@ def _config_map(
         "node_key": profile["vps"]["observer_node_key"],
         "namespace": profile["vps"]["namespace"],
         "repository": profile["repository"],
+        "expected_daemons": profile["vps"]["expected_daemons"],
         "workloads": [
             {
                 "workload_key": "newsletter",

@@ -6,6 +6,18 @@ The workflow and [ci_changes.py](../.github/scripts/ci_changes.py) own job names
 reachability. The [service catalog](service-catalog.md) supplies the application inventory; this document
 explains the release guarantees rather than maintaining another application or dependency map.
 
+[Rebuild](rebuild.md) covers a new account/VPS. The reusable [Worker release](../.github/workflows/worker-release.yml)
+keeps each application's checks, migration order, probes and release lock. A selected source checkout and
+`BUILD_SOURCE_SHA` let repair publish the app's last verified revision. GitHub deployment success is recorded
+after the actual provider version/configuration or VPS running identities pass verification.
+The static website retains its independent content registry, release and rollback workflow.
+
+[Personal cloud reconcile](../.github/workflows/personal-cloud-reconcile.yml) checks daily and after successful
+main CI. Dispatch `check`, `repair` or an explicit VPS `resume`. Automatic routine repair requires
+`PERSONAL_CLOUD_AUTO_REPAIR=true`. Sensitive infrastructure changes use a saved encrypted plan,
+an `infra-review` reviewer gate, and the existing production secrets; no secrets are copied to the review
+environment. The apply reacquires the infrastructure lock and refuses a changed SHA/state/plan.
+
 ## Before a release
 
 - The owner must have authorised publication/deployment in the task. A design request is not permission to deploy.
@@ -114,6 +126,12 @@ D1 `--local`, never `--remote`, with each application's own `.dev.vars`.
 Production jobs use the `production` environment, restricted to main. Owner identities, receive addresses
 and project IDs are secrets too: this public repository's Actions logs expose plain step variables.
 The workflow is authoritative for optional inputs and their exact wiring.
+
+Fresh bootstrap validates complete app secret maps from [worker-secrets.json](../tools/cloud-config/worker-secrets.json)
+and sets the corresponding `<APP>_WORKER_SECRETS` production secrets. Existing deployments keep the individual
+inputs below and preserve unreadable runtime secrets when no full map is supplied. A full map is an explicit
+replacement input and must contain every declared required secret. [Bootstrap](../tools/cloud-bootstrap/README.md)
+also initializes missing operational variables without overwriting existing pause or maintenance values.
 
 | Job | Variables | Secrets |
 | --- | --- | --- |

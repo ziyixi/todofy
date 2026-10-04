@@ -120,6 +120,26 @@ class Kubernetes(unittest.TestCase):
             )
         self.assertEqual(len(self.calls), 2)
 
+    def test_plan_uses_official_server_side_dry_run_without_force(self):
+        value = self.client.dry_run(
+            {
+                "apiVersion": "apps/v1",
+                "kind": "Deployment",
+                "metadata": {"namespace": "personal-cloud", "name": "newsletter"},
+            },
+            timeout=2,
+        )
+        self.assertEqual(value["metadata"]["resourceVersion"], "123")
+        self.assertEqual(
+            self.calls[0][2]["query_params"],
+            [
+                ("fieldManager", "personal-cloud"),
+                ("force", "false"),
+                ("dryRun", "All"),
+            ],
+        )
+        self.assertEqual(self.calls[0][2]["_request_timeout"], (2, 2))
+
     def test_forced_status_cannot_take_ownership_of_other_fields(self):
         for kind, name, change in (
             ("Deployment", "newsletter", {"spec": {"replicas": 0}}),

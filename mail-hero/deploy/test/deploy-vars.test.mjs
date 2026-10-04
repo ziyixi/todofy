@@ -108,11 +108,12 @@ test('a secrets file requires every allowed personal binding', () => withTemp((d
   }
   assert.equal(problem(good), null)
   assert.equal(problem({ ...good, ACCESS_OWNER_ALIASES: ' ' }), null)
+  assert.equal(problem({ ...good, CREDENTIAL_KEY: 'a'.repeat(64) }), null)
   assert.match(secretsFileProblem(join(dir, 'absent.json')), /missing/)
   for (const content of [
     'not json', '[]', 'null',
     { RECEIVE_ADDRESS: good.RECEIVE_ADDRESS, ACCESS_OWNER: good.ACCESS_OWNER },
-    { ...good, CREDENTIAL_KEY: '0'.repeat(64) },
+    { ...good, UNKNOWN_BINDING: 'synthetic-private' },
     { ...good, RECEIVE_ADDRESS: '' }, { ...good, RECEIVE_ADDRESS: 'nobody' }, { ...good, RECEIVE_ADDRESS: 7 },
     { ...good, ACCESS_OWNER: '\u212Aate@example.org' }, { ...good, ACCESS_OWNER_ALIASES: '' },
     { ...good, ACCESS_OWNER_ALIASES: ' alias@example.org' }, { ...good, ACCESS_OWNER_ALIASES: 'a@example.org, b@example.org' },

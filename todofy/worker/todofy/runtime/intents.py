@@ -30,6 +30,7 @@ from todofy.core.metrics import Step, StepPoint
 from todofy.core.ops import InvalidInput
 from todofy.core.sql import intents as sql
 from todofy.core.todoist_request import RequestTooLarge, build_task_request
+from todofy.deployment import WATCH_HOST
 from todofy.runtime import metrics, todoist
 from todofy.runtime.config import csv, var
 from todofy.runtime.interop import now_ms, now_s
@@ -63,7 +64,7 @@ async def propose(env: Any, core: Any, text: Any, now: int) -> dict[str, Any]:
         return await _replay(env, core, value, existing, now)
     if value.source not in accepted_sources(env):
         return _refused(value, ErrorCode.SOURCE_NOT_ALLOWED, now)
-    if not rules.urls_allowed(value):
+    if not rules.urls_allowed(value, watch_host=WATCH_HOST):
         return _refused(value, ErrorCode.URL_NOT_ALLOWED, now)
     if (held := core.intent_pause(now)) is not None:
         _log(intent="paused", source=value.source, intent_id=value.intent_id, code=code_name(held[0]))

@@ -84,14 +84,14 @@ same `intent_id` and the same content. Every expected outcome is a value.
  "items": [{"title": "…", "url": "https://arxiv.org/abs/2609.00001", "description": "…"}]}
 ```
 
-- `source` is a closed list (`lab`, `watch`). Each source has a URL host allow-list (`TASK_INTENT_URL_HOSTS`,
-  lab: `arxiv.org`; watch: `watch.ziyixi.science`, so a watch task links to the change in the app and never to a
-  watched page); any other host is `rejected`/`url_not_allowed`. Todofy never fetches a URL.
+- `source` is a closed list (`lab`, `watch`). Each source has a URL host allow-list (`taskIntentUrlHosts(watchHost)`,
+  lab: `arxiv.org`; watch: the exact Watch host supplied by the deployment profile, so a watch task links to
+  the change in the app and never to a watched page); any other host is `rejected`/`url_not_allowed`. Todofy never fetches a URL.
   `SOURCE_WATCH` was added on 2026-10-01 (an additive value: `buf breaking` and the profile rules pass, Lab keeps
   writing `lab` only, Todofy accepts both).
 - The watch app (`watch/worker/src/todofy.ts`) sends at most one digest a UTC day (`digest-<day>`, subtasks: one
   item per watch with only the owner's name for it, the trigger type and a count, linking to
-  `https://watch.ziyixi.science/watches/<id>`; never page text, a watched URL or a summary) and urgent changes at
+  `https://<watch host>/watches/<id>`; never page text, a watched URL or a summary) and urgent changes at
   once (`urgent-<change id>`, separate mode). Because Todofy counts the 10 per source by the day it records an
   intent, the app freezes an urgent intent only while its open intents (of any day) plus those recorded today plus
   one slot for a digest not yet frozen stay below 10, folds open intents Todofy surely never recorded into the next

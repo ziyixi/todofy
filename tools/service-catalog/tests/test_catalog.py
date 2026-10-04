@@ -15,6 +15,7 @@ id = "demo"
 target = "cloudflare"
 [[workers]]
 config = "demo/wrangler.toml"
+hosts = ["demo"]
 entry = "demo"
 role = "Synthetic Worker"
 position = 1
@@ -45,12 +46,14 @@ PROFILE = '''version = 1
 zone = "ziyixi.science"
 repository = "ziyixi/todofy"
 access_issuer = "https://ziyixi.cloudflareaccess.com"
+workers_dev_subdomain = "cloudflare-579"
 platform_hostname = "fleet.ziyixi.science"
 [vps]
 platform_runtime_host = "platform-runtime.ziyixi.science"
 namespace = "personal-cloud"
 state_root = "/srv/todofy"
 observer_node_key = "vps"
+expected_daemons = ["k3s", "ssh", "cloudflared_platform"]
 '''
 
 
@@ -173,7 +176,8 @@ class CatalogTests(unittest.TestCase):
                                  (DEMO, CONFIG.replace('demo.ziyixi.science', '127.0.0.1'))]:
             with self.assertRaises(catalog.CatalogError):
                 catalog.load_catalog(self.fixture(manifest, config))
-        root = self.fixture(config=CONFIG.replace('demo.ziyixi.science', 'new-demo.ziyixi.science'))
+        root = self.fixture(manifest=DEMO.replace('hosts = ["demo"]', 'hosts = ["new-demo"]'),
+                            config=CONFIG.replace('demo.ziyixi.science', 'new-demo.ziyixi.science'))
         self.assertEqual(catalog.load_catalog(root).entries[0]['url'], 'https://new-demo.ziyixi.science/')
 
     def test_query_traversal_and_network_path_probes_are_refused(self):

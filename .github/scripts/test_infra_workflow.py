@@ -39,10 +39,11 @@ class InfraWorkflow(unittest.TestCase):
         cls.text = WORKFLOW.read_text()
         cls.code = code(cls.text)
 
-    def test_triggers_are_main_pushes_to_infra_a_schedule_and_dispatch(self):
+    def test_triggers_are_main_pushes_to_infra_and_dispatch(self):
         on = self.code.split("\non:\n", 1)[1].split("\npermissions:", 1)[0]
         self.assertRegex(on, r"push:\n\s+branches: \[main\]\n\s+paths:\n\s+- infra/\*\*\n")
-        self.assertIn("schedule:\n    - cron: ", on)
+        self.assertNotIn("schedule:", on)
+        self.assertIn("schedule:", (REPO / ".github/workflows/personal-cloud-reconcile.yml").read_text())
         self.assertIn("workflow_dispatch:", on)
         for trigger in ("pull_request", "pull_request_target", "workflow_run", "issue_comment", "repository_dispatch"):
             with self.subTest(trigger=trigger):

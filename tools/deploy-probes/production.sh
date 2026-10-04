@@ -8,6 +8,7 @@ d1=${3:-}
 [[ -z "$d1" || "$d1" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]
 test -n "${CLOUDFLARE_API_TOKEN:-}"
 test -n "${GITHUB_SHA:-}"
+expected_build_sha=${BUILD_SOURCE_SHA:-$GITHUB_SHA}
 deployment=$(npx --no-install wrangler deployments status --json --config "$config" 2>/dev/null) || {
   echo "Could not read the deployment of the Worker $worker." >&2
   exit 1
@@ -23,11 +24,11 @@ details=$(npx --no-install wrangler versions view "$version" --json --config "$c
   exit 1
 }
 build=$(jq -er '[.resources.bindings[] | select(.name == "BUILD_SHA" and .type == "plain_text") | .text] | select(length == 1) | .[0]' <<<"$details" 2>/dev/null) || build=''
-if [ "$build" != "$GITHUB_SHA" ]; then
-  echo "The deployed version $version was not built from $GITHUB_SHA." >&2
+if [ "$build" != "$expected_build_sha" ]; then
+  echo "The deployed version $version was not built from $expected_build_sha." >&2
   exit 1
 fi
-echo "The Worker $worker serves version $version at 100%, built from $GITHUB_SHA."
+echo "The Worker $worker serves version $version at 100%, built from $expected_build_sha."
 if [ -n "$d1" ]; then
   pending=$(npx --no-install wrangler d1 migrations list "$d1" --remote --config "$config" 2>/dev/null) || {
     echo "Could not list the D1 migrations." >&2

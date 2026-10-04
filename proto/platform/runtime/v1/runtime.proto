@@ -51,6 +51,21 @@ option (common.wire.v1.formats) = {
   pattern: "[A-Z][A-Z0-9_]{0,63}"
   description: "Safe fixed diagnostic code, never provider errors, paths or content."
 };
+option (common.wire.v1.formats) = {
+  name: "ReconcileFingerprint"
+  pattern: "[0-9a-f]{64}"
+  description: "Opaque digest of one bounded desired/live reconciliation plan."
+};
+option (common.wire.v1.formats) = {
+  name: "ReconcileEtag"
+  pattern: "[A-Za-z0-9_-]{1,128}"
+  description: "Persisted source release revision required by a reconciliation."
+};
+option (common.wire.v1.formats) = {
+  name: "RuntimeResourceKey"
+  pattern: "(newsletter|newsletter-config-sync|platform-runtime|newsletter-daily|platform-observer|newsletter-service|platform-service|newsletter-release|platform-release|platform-runtime-config)"
+  description: "Fixed public runtime alias, never an arbitrary Kubernetes resource."
+};
 
 // Source and physical image identity of a desired or independently verified actual release.
 message ReleaseTarget {
@@ -268,6 +283,90 @@ message Release {
     (google.api.field_behavior) = OUTPUT_ONLY,
     (common.wire.v1.field).format = "ReleaseErrorCode"
   ];
+  // Original ready release whose frozen source/images were selected for this reconciliation.
+  optional string source_release = 10 [
+    (google.api.field_behavior) = OUTPUT_ONLY,
+    (google.api.resource_reference).type = "platform.ziyixi.science/Release",
+    (common.wire.v1.field).format = "ReleaseName"
+  ];
+}
+
+// A content-free comparison of the ten supported manifests with the current accepted release.
+message ReconcilePlan {
+  option (google.api.resource) = {
+    type: "platform.ziyixi.science/ReconcilePlan"
+    pattern: "reconcilePlan"
+    singular: "reconcilePlan"
+    plural: "reconcilePlans"
+  };
+  // Always reconcilePlan.
+  string name = 1 [
+    (google.api.field_behavior) = IDENTIFIER,
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).allowed = "reconcilePlan"
+  ];
+  // Latest persisted release selected as the comparison's immutable source.
+  optional string base_release = 2 [
+    (google.api.resource_reference).type = "platform.ziyixi.science/Release",
+    (common.wire.v1.field).format = "ReleaseName"
+  ];
+  // Revision of that source. A repair requires this token and the fingerprint together.
+  optional string base_etag = 3 [(common.wire.v1.field).format = "ReconcileEtag"];
+  // Clean is a no-op; sensitive fields/ownership/pause require owner action.
+  string state = 4 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field) = {
+      allowed: [
+        "clean",
+        "repairable",
+        "manual_required",
+        "unavailable"
+      ]
+    }
+  ];
+  // Covers desired identity, bounded live fields and pause state; never includes private contents.
+  optional string fingerprint = 5 [(common.wire.v1.field).format = "ReconcileFingerprint"];
+  // Time this comparison ran; an unavailable plan still reports its attempted observation.
+  // (-- api-linter: core::0142::time-field-names=disabled
+  //     aip.dev/not-precedent: Preserve the runtime observation field spelling observed_at. --)
+  // (-- api-linter: core::0140::prepositions=disabled
+  //     aip.dev/not-precedent: Runtime observations use the attempted observation time. --)
+  google.protobuf.Timestamp observed_at = 6 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).non_null = true
+  ];
+  // At most ten fixed aliases, without manifests, paths, secrets or provider errors.
+  repeated ReconcileChange changes = 7 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).max_items = 10
+  ];
+  // Safe reason why comparison/repair needs attention, independent of business health.
+  optional string reason_code = 8 [(common.wire.v1.field).format = "ReleaseErrorCode"];
+}
+
+// One declared runtime object whose bounded fields differ or cannot safely be adopted.
+message ReconcileChange {
+  // Fixed public alias, independent of private provider naming.
+  string resource_key = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "RuntimeResourceKey"
+  ];
+  // Create/update are ordinary manifest repair; conflict requires explicit owner action.
+  string action = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field) = {
+      allowed: [
+        "create",
+        "update",
+        "conflict"
+      ]
+    }
+  ];
+  // Safe diagnostic category, never raw provider text.
+  string reason_code = 3 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "ReleaseErrorCode"
+  ];
 }
 
 // Lightweight operation identity in node observations. Targets and workload observations are not duplicated.
@@ -366,4 +465,8 @@ message NodeStatus {
   ];
   // Current persisted operation summary, absent when no operation has been accepted.
   ReleaseSummary current_release = 6;
+  // Latest bounded drift comparison, absent for legacy producers or unavailable controllers.
+  // (-- api-linter: core::0122::embedded-resource=disabled
+  //     aip.dev/not-precedent: The signed observer receipt embeds this bounded atomic comparison without another provider call. --)
+  optional ReconcilePlan reconcile_plan = 7;
 }

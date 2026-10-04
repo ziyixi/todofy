@@ -56,6 +56,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 CONFIGS = {"core": ROOT / "wrangler.toml", "gateway": ROOT / "gateway" / "wrangler.toml"}
+WORKER_NAMES = {"core": "todofy-core", "gateway": "todofy"}
+SECRET_SPECS = json.loads((ROOT.parent / "tools/cloud-config/worker-secrets.json").read_text())
 
 # Printable ASCII only, as packages/edge-auth requires of the owner and aliases (SPEC.md #36).
 EMAIL = re.compile(r"(?=[\x21-\x7e]+\Z)[^\s@]+@[^\s@]+\.[^\s@]+")
@@ -153,7 +155,14 @@ def _aliases(env: Mapping[str, str]) -> str:
 
 def injected_vars(worker: str, env: Mapping[str, str]) -> dict[str, str]:
     """{NAME: value} for every --var `worker` ("core" or "gateway") gets at deploy."""
-    return {item.name: _required(env, item.source, item.pattern) for item in INJECTED[worker]}
+    return {
+        item.name: _required(
+            env,
+            "BUILD_SOURCE_SHA" if item.kind == "build" and env.get("BUILD_SOURCE_SHA") else item.source,
+            item.pattern,
+        )
+        for item in INJECTED[worker]
+    }
 
 
 def wrangler_args(worker: str, env: Mapping[str, str]) -> list[str]:
@@ -173,7 +182,43 @@ def generate_secrets(worker: str, env: Mapping[str, str]) -> dict[str, str]:
         else:
             value = _required(env, item.source, item.pattern)
         secrets[item.name] = value or UNSET
-    return secrets
+    return _merge_worker_secrets(worker, env, secrets)
+
+
+def _valid_worker_secrets(worker: str, content: object, *, complete: bool) -> bool:
+    spec = SECRET_SPECS[WORKER_NAMES[worker]]
+    allowed = set(spec["required"]) | set(spec["optional"])
+    return (
+        isinstance(content, dict)
+        and all(
+            name in allowed and isinstance(value, str) and 0 < len(value) <= 65536 and "\0" not in value
+            for name, value in content.items()
+        )
+        and (not complete or set(spec["required"]) <= content.keys())
+    )
+
+
+def _merge_worker_secrets(worker: str, env: Mapping[str, str], personal: dict[str, str]) -> dict[str, str]:
+    spec = SECRET_SPECS[WORKER_NAMES[worker]]
+    field = spec["github_secret"]
+    required = env.get("REQUIRE_COMPLETE_WORKER_SECRETS", "")
+    if required not in ("", "true", "false"):
+        raise SettingError("REQUIRE_COMPLETE_WORKER_SECRETS")
+    raw = env.get(field)
+    if not raw:
+        if required == "true":
+            raise SettingError(field)
+        return personal
+    try:
+        parsed = json.loads(raw)
+    except (ValueError, TypeError) as error:
+        raise SettingError(field) from error
+    if not _valid_worker_secrets(worker, parsed, complete=False):
+        raise SettingError(field)
+    merged = {**parsed, **personal}
+    if not _valid_worker_secrets(worker, merged, complete=True):
+        raise SettingError(field)
+    return merged
 
 
 def write_secrets(worker: str, path: Path, env: Mapping[str, str]) -> None:
@@ -205,8 +250,8 @@ def secrets_file_problem(worker: str, path: Path) -> str | None:
     except (OSError, UnicodeDecodeError, ValueError):
         return "the --secrets-file is missing or not JSON"
     names = [item.name for item in SECRETS[worker]]
-    if not isinstance(content, dict) or sorted(content) != sorted(names):
-        return f"the --secrets-file must hold exactly {', '.join(names)}"
+    if not _valid_worker_secrets(worker, content, complete=False) or not set(names) <= content.keys():
+        return f"the --secrets-file must hold {', '.join(names)} and only declared bindings"
     for item in SECRETS[worker]:
         if not _valid_secret(item, content[item.name]):
             return f"{item.name} in the --secrets-file is invalid"

@@ -11,7 +11,15 @@ import sys
 import tempfile
 from pathlib import Path, PurePosixPath
 
-from cloud_profile import ProfileError, load_profile, load_resources, read_public, require
+from cloud_profile import (
+    ProfileError,
+    image_repositories,
+    load_profile,
+    load_resources,
+    read_public,
+    require,
+    worker_secret_specs,
+)
 
 REPO = Path(__file__).resolve().parents[2]
 IDENTITY_MODULE = "dashboard/worker/src/resource-identities.ts"
@@ -50,8 +58,8 @@ def d1_fields(text: str, resources: dict) -> str:
     return pattern.sub(replace, text)
 
 
-def config_paths(root: Path) -> list[str]:
-    result = []
+def production_workers(root: Path) -> dict[str, list[str]]:
+    result = {}
     for manifest in sorted(root.glob("*/app.toml")):
         data = read_public(manifest)
         for worker in data.get("workers", []):
@@ -63,9 +71,30 @@ def config_paths(root: Path) -> list[str]:
                     and all(part and not part.startswith(".") for part in relative.split("/")),
                     "production config path")
             require(relative not in result, "production config path")
-            result.append(relative)
+            labels = worker.get("hosts")
+            require(isinstance(labels, list) and all(isinstance(label, str) and (
+                label == "" or re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?", label))
+                for label in labels) and len(labels) == len(set(labels)), "production host labels")
+            result[relative] = labels
     require(bool(result), "production config coverage")
     return result
+
+
+def route_fields(text: str, config: dict, hosts: list[str]) -> str:
+    routes = config.get("routes", [])
+    require(len(routes) == len(hosts) and all(route.get("custom_domain") is True for route in routes),
+            "production route coverage")
+    if not routes:
+        return text
+    pattern = re.compile(r'(?ms)^routes\s*=\s*\[(.*?)\]')
+    matches = list(pattern.finditer(text))
+    require(len(matches) == 1, "production routes")
+    match = matches[0]
+    body = match.group(1)
+    values = iter(hosts)
+    require(len(re.findall(r'pattern\s*=\s*"[^"\n]+"', body)) == len(hosts), "production route patterns")
+    body = re.sub(r'(pattern\s*=\s*)"[^"\n]+"', lambda item: item.group(1) + json.dumps(next(values)), body)
+    return text[:match.start(1)] + body + text[match.end(1):]
 
 
 def identity_module(profile: dict, resources: dict) -> str:
@@ -92,18 +121,114 @@ def platform_identity(profile: dict, resources: dict) -> str:
             "locals {\n" + rows + "\n}\n")
 
 
+def inventory_map(text: str, field: str, values: dict[str, str]) -> str:
+    """Update one existing HCL inventory map without reformatting unrelated content."""
+    pattern = re.compile(r'(?ms)(^  ' + re.escape(field) + r'\s*=\s*\{\n)(.*?)(^  \})')
+    matches = list(pattern.finditer(text))
+    require(len(matches) == 1, "infra inventory " + field)
+    match = matches[0]
+    body = match.group(2)
+    row = re.compile(r'(?m)^(\s*)"([^"\n]+)"(\s*=\s*)"[^"\n]+"([^\n]*\n?)')
+    seen = set()
+
+    def replace(item):
+        name = item.group(2)
+        require(name not in seen, "infra inventory " + field)
+        seen.add(name)
+        if name not in values:
+            return ""
+        return item.group(1) + json.dumps(name) + item.group(3) + json.dumps(values[name]) + item.group(4)
+
+    body = row.sub(replace, body)
+    width = max((len(json.dumps(name)) for name in values), default=0)
+    body += "".join("    " + json.dumps(name).ljust(width) + " = " + json.dumps(values[name]) + "\n"
+                    for name in sorted(set(values) - seen))
+    return text[:match.start(2)] + body + text[match.end(2):]
+
+
+def infrastructure_ids(text: str, resources: dict) -> str:
+    """Refresh public inventory locals; optional frozen applications may be absent in a fresh account."""
+    for field in ("access_policy_ids", "access_app_ids", "flowday_app_ids"):
+        require(field in resources, "resource inventory coverage")
+    maps = {
+        "access_policy_ids": {name.replace("-", "_"): value for name, value in resources["access_policy_ids"].items()},
+        "access_app_ids": resources["access_app_ids"],
+        "flowday_app_ids": resources["flowday_app_ids"],
+        "d1_database_ids": resources["d1_databases"],
+    }
+    for field, values in maps.items():
+        text = inventory_map(text, field, values)
+    standalone = resources.get("standalone_access_app_ids", {})
+    for field, key in (("mail_hero_backup_app_id", "mail-hero-backup"), ("fleet_receipt_app_id", "fleet-receipt")):
+        pattern = re.compile(r'(?m)^(  ' + field + r'\s*=\s*)(?:"[^"\n]+"|null)([ \t]*(?:#.*)?$)')
+        text, count = pattern.subn(r'\g<1>' + json.dumps(standalone.get(key)) + r'\g<2>', text)
+        require(count == 1, "infra inventory " + field)
+    return text
+
+
+def application_files(root: Path, profile: dict) -> dict[str, str]:
+    """App-owned deployment modules and public release configuration."""
+    outputs = {}
+    for app, image in image_repositories(profile).items():
+        path = root / app / "app.toml"
+        if path.is_file():
+            outputs[path.relative_to(root).as_posix()] = literal_field(path.read_text(), "image", image)
+    watch_path = root / "watch/worker/src"
+    if watch_path.is_dir():
+        outputs["watch/worker/src/deployment.ts"] = (
+            "// Generated by tools/cloud-config/generate.py; deployment host policy only.\n"
+            "export const OWN_SUFFIXES: readonly string[] = " + json.dumps([
+                profile["zone"], profile["workers_dev_subdomain"] + ".workers.dev"]) + ";\n")
+    todofy_path = root / "todofy/worker/todofy"
+    if todofy_path.is_dir():
+        outputs["todofy/worker/todofy/deployment.py"] = (
+            '"""Generated by tools/cloud-config/generate.py; public deployment host only."""\n\n'
+            "WATCH_HOST = " + json.dumps("watch." + profile["zone"]) + "\n")
+    if (root / "fleet/web/src").is_dir():
+        github = "https://github.com/" + profile["repository"]
+        outputs["fleet/web/src/deployment.ts"] = (
+            "// Generated by tools/cloud-config/generate.py; public repair links only.\n"
+            "export const ACTIONS_RECONCILE_URL = " + json.dumps(github + "/actions/workflows/personal-cloud-reconcile.yml") + ";\n"
+            "export const REBUILD_DOC_URL = " + json.dumps(github + "/blob/main/docs/rebuild.md#host-recovery") + ";\n")
+    site_path = root / "website/content/site.config.ts"
+    if site_path.is_file():
+        site = site_path.read_text()
+        site, count = re.subn(r'(canonicalOrigin:\s*)"[^"\n]+"',
+                             lambda match: match.group(1) + json.dumps("https://www." + profile["zone"]), site)
+        require(count == 1, "website canonical origin")
+        outputs[site_path.relative_to(root).as_posix()] = site
+    return outputs
+
+
 def generated_files(root: Path) -> dict[str, str]:
     profile, resources = load_profile(root), load_resources(root)
     outputs = {}
     used_audiences, used_databases = set(), set()
-    for relative in config_paths(root):
+    for relative, labels in production_workers(root).items():
         path = root / relative
         config = read_public(path)
         require("env" not in config and "keep_vars" not in config, "sole production config")
         name = config.get("name")
         require(isinstance(name, str), "Worker name")
         text = literal_field(path.read_text(encoding="utf-8"), "account_id", resources["account_id"])
+        hosts = [label + "." + profile["zone"] if label else profile["zone"] for label in labels]
+        text = route_fields(text, config, hosts)
         variables = config.get("vars", {})
+        replacements = {
+            "TODOFY_PUBLIC_HOST": "todofy." + profile["zone"],
+            "TODOFY_HOOKS_HOSTS": "todofy-hooks." + profile["zone"] + ",daily." + profile["zone"],
+            "HOME_URL": "https://home." + profile["zone"] + "/",
+            "GITHUB_REPOSITORY": profile["repository"],
+            "CANONICAL_HOST": "www." + profile["zone"],
+        }
+        if "PUBLIC_HOST" in variables:
+            require(bool(hosts), "public host route")
+            replacements["PUBLIC_HOST"] = hosts[0]
+        if name == "mail-hero":
+            replacements["WEBHOOK_ALLOWED_HOSTS"] = "daily." + profile["zone"]
+        for variable, value in replacements.items():
+            if variable in variables:
+                text = literal_field(text, variable, value, "vars")
         if "ACCOUNT_ID" in variables:
             text = literal_field(text, "ACCOUNT_ID", resources["account_id"], "vars")
         if "ACCESS_ISSUER" in variables:
@@ -122,7 +247,29 @@ def generated_files(root: Path) -> dict[str, str]:
     require(used_databases == set(resources["d1_databases"]), "D1 identity coverage")
     outputs[IDENTITY_MODULE] = identity_module(profile, resources)
     outputs[PLATFORM_IDENTITY] = platform_identity(profile, resources)
+    if (root / "tools/cloud-config").is_dir():
+        outputs["tools/cloud-config/worker-secrets.json"] = json.dumps(worker_secret_specs(root), indent=2, sort_keys=True) + "\n"
+    outputs.update(application_files(root, profile))
+    ids_path = root / "infra/ids.tf"
+    if ids_path.is_file():
+        outputs["infra/ids.tf"] = infrastructure_ids(ids_path.read_text(), resources)
     return outputs
+
+
+def bootstrap_infra_files(root: Path) -> dict[str, str]:
+    """Render only private bootstrap HCL before provider-assigned AUD/D1 identities exist."""
+    sys.path.insert(0, str(REPO / "tools/service-catalog"))
+    from catalog import access_file, load_catalog
+
+    profile, resources = load_profile(root), load_resources(root)
+    resources = {**resources, **{field: resources.get(field, {}) for field in
+                                ("access_policy_ids", "access_app_ids", "flowday_app_ids")}}
+    catalog = load_catalog(root, bootstrap=True)
+    return {
+        PLATFORM_IDENTITY: platform_identity(profile, resources),
+        "infra/ids.tf": infrastructure_ids((root / "infra/ids.tf").read_text(), resources),
+        "infra/access.tf": access_file(catalog),
+    }
 
 
 def check(root: Path, outputs: dict[str, str]) -> list[str]:

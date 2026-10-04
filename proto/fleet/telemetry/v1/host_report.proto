@@ -67,7 +67,7 @@ message HostReport {
     (google.api.field_behavior) = REQUIRED,
     (common.wire.v1.field).non_null = true
   ];
-  // Expected system daemons, three required aliases and an optional deployment transport daemon.
+  // Configured system daemons; SSH tunnel and runtime connector aliases are optional.
   map<string, Daemon> daemons = 7 [
     (google.api.field_behavior) = REQUIRED,
     (common.wire.v1.field) = {
@@ -75,7 +75,6 @@ message HostReport {
       max_items: 4
       required_keys: [
         "k3s",
-        "cloudflared",
         "ssh"
       ]
     }
@@ -145,7 +144,6 @@ message SystemDaemonSnapshot {
       max_items: 4
       required_keys: [
         "k3s",
-        "cloudflared",
         "ssh"
       ]
     }

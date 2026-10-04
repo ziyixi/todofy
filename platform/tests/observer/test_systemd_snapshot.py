@@ -66,6 +66,26 @@ class SnapshotTests(unittest.TestCase):
             self.assertEqual(result["k3s"], {"state": "active"})
             self.assertEqual(result["cloudflared_platform"], {"state": "unknown"})
 
+    def test_fresh_host_observes_only_three_declared_daemons(self):
+        aliases = ["k3s", "ssh", "cloudflared_platform"]
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch.dict("os.environ", {"FLEET_EXPECTED_DAEMONS": json.dumps(aliases)}),
+        ):
+            path = Path(directory) / "snapshot.json"
+            with (
+                patch.object(snapshot, "SNAPSHOT_PATH", path),
+                patch.object(
+                    snapshot, "daemon", return_value={"state": "active"}
+                ) as daemon,
+            ):
+                snapshot.write()
+                self.assertEqual(set(snapshot.read()), set(aliases))
+                self.assertEqual(
+                    [call.args[0] for call in daemon.call_args_list], aliases
+                )
+            self.assertNotIn("cloudflared", json.loads(path.read_bytes())["daemons"])
+
     def test_stale_future_and_missing_observations_cannot_appear_current(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "snapshot.json"

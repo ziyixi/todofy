@@ -346,3 +346,39 @@ def test_check_validates_everything_and_usage_is_refused(tmp_path: Path) -> None
     assert main(["secrets", str(tmp_path / "x.json")], VALID) == 2  # the Worker must be named
     assert main(["secrets", "web", str(tmp_path / "x.json")], VALID) == 2
     assert not (tmp_path / "x.json").exists()
+
+
+@pytest.mark.parametrize("worker", ["core", "gateway"])
+def test_repair_build_identity_uses_the_validated_source_sha(worker: str) -> None:
+    assert injected_vars(worker, VALID | {"BUILD_SOURCE_SHA": "a" * 40})["BUILD_SHA"] == "a" * 40
+    assert injected_vars(worker, VALID | {"BUILD_SOURCE_SHA": ""})["BUILD_SHA"] == SHA
+    for value in ("main", "A" * 40, "a" * 39, "a" * 40 + "\n"):
+        with pytest.raises(SettingError, match="BUILD_SOURCE_SHA"):
+            injected_vars(worker, VALID | {"BUILD_SOURCE_SHA": value})
+
+
+@pytest.mark.parametrize(
+    "worker,map_name", [("core", "TODOFY_CORE_WORKER_SECRETS"), ("gateway", "TODOFY_WORKER_SECRETS")]
+)
+def test_complete_worker_secrets_overlay_personal_fields_without_logging_values(
+    worker: str, map_name: str, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from deploy.deploy_vars import SECRET_SPECS, WORKER_NAMES
+
+    private = "synthetic-private-value"
+    names = SECRET_SPECS[WORKER_NAMES[worker]]["required"]
+    complete = dict.fromkeys(names, private)
+    env = VALID | {map_name: json.dumps(complete), "REQUIRE_COMPLETE_WORKER_SECRETS": "true"}
+    actual = generate_secrets(worker, env)
+    for name, value in generate_secrets(worker, VALID).items():
+        assert actual[name] == value
+    path = tmp_path / "complete.json"
+    assert main(["secrets", worker, str(path)], env) == 0
+    assert secrets_file_problem(worker, path) is None
+    assert private not in capsys.readouterr().out
+    for value in ("not json", "[]", "null", "{}", json.dumps({"UNKNOWN": private}), json.dumps({names[0]: 7})):
+        with pytest.raises(SettingError, match=map_name) as caught:
+            generate_secrets(worker, VALID | {map_name: value})
+        assert private not in str(caught.value)
+    with pytest.raises(SettingError, match=map_name):
+        generate_secrets(worker, VALID | {"REQUIRE_COMPLETE_WORKER_SECRETS": "true"})

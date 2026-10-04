@@ -1,10 +1,14 @@
-# Public metadata only. Hosts/resources remain in this app's committed Wrangler configs.
+# Public metadata and relative host labels. Generated Wrangler configs own production bindings.
 version = 1
 id = "watch"
 target = "cloudflare"
 
 [[workers]]
 config = "watch/wrangler.toml"
+personal_secrets = ["ACCESS_OWNER", "ACCESS_OWNER_ALIASES", "CSRF_SIGNING_KEY"]
+manual_secrets = []
+optional_secrets = ["ACCESS_OWNER_ALIASES"]
+hosts = ["watch"]
 entry = "watch"
 role = "网页监视与 UI"
 position = 8

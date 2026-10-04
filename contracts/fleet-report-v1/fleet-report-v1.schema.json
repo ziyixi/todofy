@@ -48,11 +48,10 @@
       "type": "string"
     },
     "daemons": {
-      "description": "Expected system daemons, three required aliases and an optional deployment transport daemon.",
+      "description": "Configured system daemons; SSH tunnel and runtime connector aliases are optional.",
       "type": "object",
       "required": [
         "k3s",
-        "cloudflared",
         "ssh"
       ],
       "maxProperties": 4,
@@ -463,6 +462,90 @@
                 },
                 "error_code": {
                   "description": "Safe fixed diagnostic alias; no exception or provider error string.",
+                  "type": "string",
+                  "pattern": "^(?:[A-Z][A-Z0-9_]{0,63})$(?!\\n)"
+                }
+              },
+              "additionalProperties": false
+            },
+            "reconcile_plan": {
+              "description": "Latest bounded drift comparison, absent for legacy producers or unavailable controllers.",
+              "type": "object",
+              "required": [
+                "name",
+                "state",
+                "observed_at",
+                "changes"
+              ],
+              "properties": {
+                "name": {
+                  "description": "Always reconcilePlan.",
+                  "const": "reconcilePlan"
+                },
+                "base_release": {
+                  "description": "Latest persisted release selected as the comparison's immutable source.",
+                  "type": "string",
+                  "pattern": "^(?:releases/[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$(?!\\n)"
+                },
+                "base_etag": {
+                  "description": "Revision of that source. A repair requires this token and the fingerprint together.",
+                  "type": "string",
+                  "pattern": "^(?:[A-Za-z0-9_-]{1,128})$(?!\\n)"
+                },
+                "state": {
+                  "description": "Clean is a no-op; sensitive fields/ownership/pause require owner action.",
+                  "enum": [
+                    "clean",
+                    "repairable",
+                    "manual_required",
+                    "unavailable"
+                  ]
+                },
+                "fingerprint": {
+                  "description": "Covers desired identity, bounded live fields and pause state; never includes private contents.",
+                  "type": "string",
+                  "pattern": "^(?:[0-9a-f]{64})$(?!\\n)"
+                },
+                "observed_at": {
+                  "description": "Time this comparison ran; an unavailable plan still reports its attempted observation.",
+                  "type": "string"
+                },
+                "changes": {
+                  "description": "At most ten fixed aliases, without manifests, paths, secrets or provider errors.",
+                  "type": "array",
+                  "maxItems": 10,
+                  "items": {
+                    "type": "object",
+                    "required": [
+                      "resource_key",
+                      "action",
+                      "reason_code"
+                    ],
+                    "properties": {
+                      "resource_key": {
+                        "description": "Fixed public alias, independent of private provider naming.",
+                        "type": "string",
+                        "pattern": "^(?:(newsletter|newsletter-config-sync|platform-runtime|newsletter-daily|platform-observer|newsletter-service|platform-service|newsletter-release|platform-release|platform-runtime-config))$(?!\\n)"
+                      },
+                      "action": {
+                        "description": "Create/update are ordinary manifest repair; conflict requires explicit owner action.",
+                        "enum": [
+                          "create",
+                          "update",
+                          "conflict"
+                        ]
+                      },
+                      "reason_code": {
+                        "description": "Safe diagnostic category, never raw provider text.",
+                        "type": "string",
+                        "pattern": "^(?:[A-Z][A-Z0-9_]{0,63})$(?!\\n)"
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                },
+                "reason_code": {
+                  "description": "Safe reason why comparison/repair needs attention, independent of business health.",
                   "type": "string",
                   "pattern": "^(?:[A-Z][A-Z0-9_]{0,63})$(?!\\n)"
                 }

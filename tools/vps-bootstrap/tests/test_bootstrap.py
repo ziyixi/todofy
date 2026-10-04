@@ -247,7 +247,7 @@ with patch.object(socket, "socket", side_effect=AssertionError("Network use is f
         for directory in ("platform", "newsletter"):
             (root / directory).symlink_to(ROOT / directory, target_is_directory=True)
         images = {
-            name: value.replace("ghcr.io/ziyixi/", "ghcr.io/example/")
+            name: value.replace("ghcr.io/ziyixi/todofy-", "ghcr.io/example/project-")
             for name, value in IMAGES.items()
         }
         normal = prepare.render(root, SHA, images)
@@ -339,7 +339,18 @@ with patch.object(socket, "socket", side_effect=AssertionError("Network use is f
                 self.assertEqual(
                     observer["initContainers"][0]["securityContext"]["runAsUser"], 65534
                 )
-                self.assertNotIn("env", observer["initContainers"][0])
+                self.assertEqual(
+                    observer["initContainers"][0]["env"],
+                    [
+                        {
+                            "name": "FLEET_EXPECTED_DAEMONS",
+                            "value": json.dumps(
+                                list(configuration(runtime_config).expected_daemons),
+                                separators=(",", ":"),
+                            ),
+                        }
+                    ],
+                )
                 self.assertFalse(observer["automountServiceAccountToken"])
         foundation = config.read_json(bundle / "foundation.json")
         for item in foundation["items"]:

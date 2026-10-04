@@ -23,9 +23,10 @@ DEFAULT_CA = "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
 class DependencyUnavailable(RuntimeError):
     """A fixed safe error; the raw SDK response never crosses the API or logs."""
 
-    def __init__(self, *, missing: bool = False):
+    def __init__(self, *, missing: bool = False, conflict: bool = False):
         super().__init__("KUBERNETES_UNAVAILABLE")
         self.missing = missing
+        self.conflict = conflict
 
 
 class Client:
@@ -117,7 +118,9 @@ class Client:
                 raise TypeError("invalid_kubernetes_response")
             return result
         except ApiException as error:
-            raise DependencyUnavailable(missing=error.status == 404) from None
+            raise DependencyUnavailable(
+                missing=error.status == 404, conflict=error.status == 409
+            ) from None
         except (HTTPError, OSError, ValueError, TypeError):
             raise DependencyUnavailable() from None
 
@@ -134,6 +137,26 @@ class Client:
             body=resource,
             query=[("fieldManager", "personal-cloud"), ("force", "false")],
             content_type="application/apply-patch+yaml",
+        )
+
+    def dry_run(self, resource: dict, *, timeout: float = 10) -> dict:
+        if (
+            resource["kind"] in {"Pod", "Node"}
+            or resource["metadata"]["namespace"] != self.namespace
+        ):
+            raise ValueError("invalid_runtime_resource")
+        return self._call(
+            resource["kind"],
+            "PATCH",
+            name=resource["metadata"]["name"],
+            body=resource,
+            query=[
+                ("fieldManager", "personal-cloud"),
+                ("force", "false"),
+                ("dryRun", "All"),
+            ],
+            content_type="application/apply-patch+yaml",
+            timeout=timeout,
         )
 
     def patch(self, kind: str, name: str, change: dict) -> None:

@@ -253,6 +253,16 @@ class Coverage(unittest.TestCase):
 
 
 class MatchesTheApps(unittest.TestCase):
+    def test_flowday_for_each_keys_do_not_require_other_imported_policy_instances(self):
+        # CLI import expands only its selected policy. Resource references inside the application's
+        # for_each local would index an absent sibling before that sibling can be imported.
+        code = (INFRA / "access.tf").read_text()
+        apps = re.search(r"^  flowday_apps = \{\n(.*?)^  \}\n", code, re.MULTILINE | re.DOTALL).group(1)
+        self.assertNotIn("cloudflare_", apps)
+        application = re.search(r'resource "cloudflare_zero_trust_access_application" "flowday" \{(.*?)^\}',
+                                code, re.MULTILINE | re.DOTALL).group(1)
+        self.assertIn("cloudflare_zero_trust_access_policy.flowday[each.key].id", application)
+
     @staticmethod
     def flowday_apps(code: str) -> dict[str, list[str]]:
         block = re.search(r"^  flowday_apps = \{\n(.*?)^  \}\n", code, re.MULTILINE | re.DOTALL).group(1)

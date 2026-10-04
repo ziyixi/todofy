@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""One-time bootstrap of the encrypted remote state in R2 (run once, locally, by whoever holds the token).
+"""Legacy import-only state bootstrap. Prefer tools/cloud-bootstrap/bootstrap.py for fresh create/adopt.
 
     export INFRA_STATE_PASSPHRASE="$(cat ~/.config/todofy-infra/state-passphrase)"   # or --passphrase-file
     python3 infra/scripts/bootstrap_state.py --var-file ~/.config/todofy-infra/local.tfvars
@@ -8,8 +8,7 @@ Steps (each prints one fixed line; no value, token, key or id is ever printed):
 1. Preconditions: OpenTofu 1.12, the passphrase (encryption is enforced; no unencrypted fallback), the values
    file outside the repository, the Cloudflare token from the Mail Hero admin helper's token file.
 2. Derive the R2 S3 credentials from the token (infra_state.py) and look for the private bucket "infra-state";
-   create it if missing through the admin helper's wrangler wrapper (mail-hero/deploy/cloudflare-admin.py),
-   which reads the token itself. Wrangler runs in the private work directory, so it finds no wrangler.toml to edit.
+   create it if missing with an explicit-account R2 API request. No Worker config or account is inferred.
 3. Probe whether R2 honours conditional writes (If-None-Match: *) on a throwaway key. Report only: the backend
    keeps no lock file until a later change enables use_lockfile.
 4. Note whether the state object exists, then `tofu init` with the S3 backend (key <environment>/terraform.tfstate).
@@ -57,7 +56,7 @@ ADMIN = REPO / "mail-hero" / "deploy" / "cloudflare-admin.py"
 WRANGLER = REPO / "mail-hero" / "cloudflare" / "node_modules" / ".bin" / "wrangler"
 # The objects infra/ manages (README.md "Managed here (19 objects)"; test_infra_config.py ties the two together and to
 # the keys of access.tf and storage.tf, so adding an object without raising this fails the Changes job).
-EXPECTED_OBJECTS = 28
+EXPECTED_OBJECTS = 33
 EXIT_NOT_IMPORT_ONLY = 4
 
 
@@ -125,16 +124,15 @@ def tofu_version(binary: str = "tofu") -> str:
         raise Refused("cannot run `tofu version`; install OpenTofu 1.12") from None
 
 
-def run_admin_wrangler(token_file: Path, args: list[str], work: Path, log: Path) -> int:
-    if not WRANGLER.exists():
-        raise Refused("wrangler is not installed for the admin helper: run `npm ci --prefix mail-hero/cloudflare`")
-    with open(log, "a") as handle:
-        handle.write(f"\n$ cloudflare-admin.py wrangler {' '.join(args[:3])}\n")
-        handle.flush()
-        return subprocess.run(
-            [sys.executable, str(ADMIN), "--token-file", str(token_file), "wrangler", *args, "--cwd", str(work)],
-            stdout=handle, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
-        ).returncode
+def create_bucket(token: str, account: str) -> int:
+    sys.path.insert(0, str(REPO / "tools/cloud-bootstrap"))
+    from cloud_api import create_state_bucket
+    from private_input import BootstrapError
+    try:
+        create_state_bucket(token, account)
+    except BootstrapError:
+        raise Refused("explicit-account state bucket creation failed") from None
+    return 0
 
 
 def ensure_bucket(session: infra_state.Session, create: Callable[[], int], sleep=time.sleep) -> str:
@@ -195,7 +193,7 @@ def bootstrap(args: argparse.Namespace, env: dict[str, str], admin=None) -> int:
             state = ensure_bucket(session, lambda: 1)
         else:
             state = ensure_bucket(
-                session, lambda: run_admin_wrangler(token_file, ["r2", "bucket", "create", infra_state.BUCKET], work, session.log)
+                session, lambda: create_bucket(env["CLOUDFLARE_API_TOKEN"], values["account_id"])
             )
         print(f"  bucket {infra_state.BUCKET}: {state}")
 

@@ -1,5 +1,6 @@
 import type { NodeStatus } from '@ziyixi/proto/platform/runtime/v1/runtime_wire';
 import { label, time } from './format.ts';
+import { ReconcileView } from './ReconcileView.tsx';
 
 /** The generic API can add configured workloads without copying a private release DTO into Fleet. */
 export function RuntimeView({ runtime }: { runtime: NodeStatus | null | undefined }) {
@@ -9,6 +10,7 @@ export function RuntimeView({ runtime }: { runtime: NodeStatus | null | undefine
   return (
     <>
       <p>运行时：{label(runtime.state)} · 核验时间：{time(runtime.observed_at)}</p>
+      <ReconcileView plan={runtime.reconcile_plan} />
       {runtime.current_release && (
         <article aria-label="当前发布操作">
           <h3>当前发布操作</h3>

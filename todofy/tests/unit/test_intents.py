@@ -146,7 +146,7 @@ def test_task_text_of_a_watch_digest_links_to_the_app_only():
     names the source, so a lookup never confuses a watch task with a Lab one."""
     value = parsed("watch-digest.json")
     assert (value.source, value.tasks_total) == ("watch", 5)
-    assert intents.urls_allowed(value)
+    assert intents.urls_allowed(value, watch_host="watch.ziyixi.science")
     assert intents.task_text(value, 2) == (
         "合成示例：水壶价格 · 数值 2 次变化",
         "https://watch.ziyixi.science/watches/kettle\n\nTodofy intent: watch/digest-2026-10-01#2",
@@ -162,12 +162,32 @@ def test_each_source_links_only_to_its_own_hosts():
     """A watch intent may link only to the watch app, a Lab intent only to arXiv: never one to the other's host."""
     watch, lab = fixture("watch-digest.json"), fixture("subtasks-3.json")
     assert not intents.urls_allowed(
-        intents.intent(watch | {"items": [{"title": "t", "url": "https://arxiv.org/abs/1"}]})
+        intents.intent(watch | {"items": [{"title": "t", "url": "https://arxiv.org/abs/1"}]}),
+        watch_host="watch.ziyixi.science",
     )
-    assert not intents.urls_allowed(intents.intent(lab | {"items": [{"title": "t", "url": watch["items"][0]["url"]}]}))
     assert not intents.urls_allowed(
-        intents.intent(watch | {"items": [{"title": "t", "url": "https://shop.example.com/kettle"}]})
+        intents.intent(lab | {"items": [{"title": "t", "url": watch["items"][0]["url"]}]}),
+        watch_host="watch.ziyixi.science",
+    )
+    assert not intents.urls_allowed(
+        intents.intent(watch | {"items": [{"title": "t", "url": "https://shop.example.com/kettle"}]}),
+        watch_host="watch.ziyixi.science",
     )  # a watched page's host is never on the list
+
+
+def test_watch_host_follows_the_callers_deployment_without_rewriting_frozen_intent():
+    watch = fixture("watch-digest.json")
+    historical = intents.intent(watch)
+    assert not intents.urls_allowed(historical, watch_host="watch.example.test")
+    moved = watch | {
+        "items": [
+            dict(item, url=item["url"].replace("watch.ziyixi.science", "watch.example.test")) for item in watch["items"]
+        ]
+    }
+    current = intents.intent(moved)
+    assert intents.urls_allowed(current, watch_host="watch.example.test")
+    assert not intents.urls_allowed(current, watch_host="watch.ziyixi.science")
+    assert historical.canonical == intents.intent(watch).canonical
 
 
 def test_a_parent_without_description_is_only_its_footer():

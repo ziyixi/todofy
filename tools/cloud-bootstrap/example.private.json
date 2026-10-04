@@ -1,0 +1,39 @@
+{
+  "version": 1,
+  "cloudflare_api_token_file": "/absolute/path/outside-repository/cloudflare-api-token",
+  "infra_values": {
+    "account_id": "<same account_id as config/resources.toml>",
+    "access_owner_emails": ["<verified owner email>"],
+    "access_github_owner_emails": ["<verified GitHub owner email>"],
+    "access_github_oauth": {
+      "client_id": "<GitHub OAuth app client id>",
+      "client_secret": "<GitHub OAuth app client secret>"
+    },
+    "mail_receive_address": "<local-part>@inbox.<zone from config/cloud.toml>"
+  },
+  "worker_secrets": {
+    "home": {
+      "CF_ANALYTICS_TOKEN": "<Cloudflare token with account analytics read>"
+    },
+    "todofy-core": {
+      "GEMINI_API_KEY": "<Gemini API key>",
+      "TODOIST_API_KEY": "<Todoist API token>",
+      "TODOIST_DEFAULT_PROJECT_ID": "<Todoist project id>"
+    },
+    "ziyixi-notion-publish": {
+      "GITHUB_DISPATCH_TOKEN": "<GitHub token allowed to dispatch this repository's website workflow>",
+      "NOTION_TOKEN": "<Notion integration token>",
+      "NOTION_DATA_SOURCE_ID": "<Notion website data source id>"
+    }
+  },
+  "vps": {
+    "newsletter_env": {
+      "NEWSLETTER_MODE": "mock",
+      "NEWSLETTER_EDITOR": "mock",
+      "NEWSLETTER_MAIL": "fake",
+      "NEWSLETTER_ALLOW_SEND": "false",
+      "NEWSLETTER_NOTION": "disabled",
+      "NEWSLETTER_TODOFY": "disabled"
+    }
+  }
+}

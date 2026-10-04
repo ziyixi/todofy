@@ -1,10 +1,14 @@
-# Public metadata only. Hosts/resources remain in this app's committed Wrangler configs.
+# Public metadata and relative host labels. Generated Wrangler configs own production bindings.
 version = 1
 id = "flowday"
 target = "cloudflare"
 
 [[workers]]
 config = "flowday/wrangler.toml"
+personal_secrets = ["ACCESS_OWNER", "ACCESS_OWNER_ALIASES", "CSRF_SIGNING_KEY", "CREDENTIAL_KEY"]
+manual_secrets = []
+optional_secrets = ["ACCESS_OWNER_ALIASES"]
+hosts = ["flowday"]
 entry = "flowday"
 role = "页面、API 与 PWA 文件"
 position = 6

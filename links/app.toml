@@ -1,10 +1,14 @@
-# Public metadata only. Hosts/resources remain in this app's committed Wrangler configs.
+# Public metadata and relative host labels. Generated Wrangler configs own production bindings.
 version = 1
 id = "links"
 target = "cloudflare"
 
 [[workers]]
 config = "links/wrangler.toml"
+personal_secrets = ["ACCESS_OWNER", "ACCESS_OWNER_ALIASES", "CSRF_SIGNING_KEY"]
+manual_secrets = []
+optional_secrets = ["ACCESS_OWNER_ALIASES"]
+hosts = ["s"]
 entry = "links"
 role = "短链接跳转与启动器"
 position = 7
@@ -12,7 +16,7 @@ position = 7
 [[entries]]
 id = "links"
 name = "短链接"
-description = "s.ziyixi.science 短链接与启动器"
+description = "s.{zone} 短链接与启动器"
 group = "apps"
 icon = "link"
 # Rose is also the danger color; slate keeps a healthy tile unambiguous.

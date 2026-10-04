@@ -86,9 +86,25 @@ describe("Notion publish Worker", () => {
     const upstream = mockGitHub();
     const response = await worker.fetch(request({ method: "GET" }, "/health"), vars);
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ status: "ok" });
+    expect(await response.json()).toEqual({ status: "ok", build_sha: "unknown" });
     expect(response.headers.get("Cache-Control")).toBe("no-store");
     expect(upstream).not.toHaveBeenCalled();
+  });
+
+  it("reports the exact build SHA without contacting GitHub", async () => {
+    const upstream = mockGitHub();
+    const buildSha = "a".repeat(40);
+    const response = await worker.fetch(request({ method: "GET" }, "/health"), {
+      ...vars,
+      BUILD_SHA: buildSha,
+    });
+    expect(await response.json()).toEqual({ status: "ok", build_sha: buildSha });
+    expect(upstream).not.toHaveBeenCalled();
+    const invalid = await worker.fetch(request({ method: "GET" }, "/health"), {
+      ...vars,
+      BUILD_SHA: "not-a-sha",
+    });
+    expect(await invalid.json()).toEqual({ status: "ok", build_sha: "unknown" });
   });
 
   it.each([undefined, "incorrect-secret", `${env.NOTION_WEBHOOK_SECRET}x`, "x".repeat(1025)])(

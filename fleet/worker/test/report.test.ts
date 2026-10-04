@@ -176,3 +176,23 @@ describe('Newsletter process and release projection', () => {
     expect(() => read(report)).toThrow('invalid_report');
   });
 });
+
+describe('runtime reconcile observations', () => {
+  const plan = {
+    name: 'reconcilePlan', base_release: 'releases/6b1c2d3e-4f5a-4b6c-8d7e-9f0a1b2c3d4e',
+    base_etag: 'version-1', fingerprint: 'a'.repeat(64), observed_at: '2026-10-03T00:00:00Z',
+    state: 'clean', changes: [],
+  };
+  const reported = (change: object) => ({ ...fixture, runtime: { ...fixture.runtime, reconcile_plan: { ...plan, ...change } } });
+  it('keeps clean checks and intentional pauses free of drift alerts', () => {
+    expect(reportCodes(read(reported({})))).toEqual([]);
+    expect(reportCodes(read(reported({ state: 'manual_required', reason_code: 'BUSINESS_PAUSED' })))).toEqual([]);
+  });
+  it.each([['repairable', 'runtime_drift'], ['unavailable', 'runtime_comparison_unavailable']])('reports %s as %s', (state, code) => {
+    expect(reportCodes(read(reported({ state })))).toContain(code);
+  });
+  it('reports ownership conflicts and rejects old comparison times', () => {
+    expect(reportCodes(read(reported({ state: 'manual_required', changes: [{ resource_key: 'newsletter', action: 'conflict', reason_code: 'RUNTIME_OWNERSHIP_CONFLICT' }] })))).toContain('runtime_repair_manual');
+    expect(() => read(reported({ observed_at: '2026-10-02T23:58:59Z' }))).toThrow('invalid_report');
+  });
+});

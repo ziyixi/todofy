@@ -22,7 +22,7 @@ except ModuleNotFoundError:
 
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "tools" / "cloud-config"))
-from cloud_profile import ProfileError, load_profile  # noqa: E402
+from cloud_profile import ProfileError, image_repositories, load_profile, worker_secret_specs  # noqa: E402
 
 ID = re.compile(r"[a-z][a-z0-9-]{0,63}")
 SKIP_DIRS = {".git", ".venv", "node_modules", "dist", "out", "uiassets", ".next", ".wrangler"}
@@ -123,14 +123,14 @@ class Catalog:
         return {worker["script"]: worker["config"] for worker in self.workers}
 
 
-def load_catalog(root: Path = REPO) -> Catalog:
+def load_catalog(root: Path = REPO, *, bootstrap: bool = False) -> Catalog:
     root = Path(root).resolve()
     try:
         profile = load_profile(root)
     except ProfileError as error:
         raise CatalogError(str(error)) from error
     zone = profile["zone"]
-    image_owner = profile["repository"].split("/", 1)[0]
+    images = image_repositories(profile)
     manifests = sorted(root.glob("*/app.toml"))
     require(bool(manifests), "manifests")
     apps, configs, workers, entries, access = {}, {}, [], [], []
@@ -148,14 +148,17 @@ def load_catalog(root: Path = REPO) -> Catalog:
             require(isinstance(data.get(collection, []), list), f"{app}.{collection}")
         if data["target"] == "vps":
             require(not data.get("workers") and not data.get("access"), f"{app}.vps resources")
-            require(isinstance(data.get("image"), str) and re.fullmatch(r"ghcr\.io/" + re.escape(image_owner) + r"/[a-z0-9-]+", data["image"]) is not None,
-                    f"{app}.image")
+            if bootstrap:
+                data = {**data, "image": images.get(app)}
+            else:
+                require(data.get("image") == images.get(app), f"{app}.image")
         else:
             require("image" not in data and bool(data.get("workers")), f"{app}.workers")
         require(isinstance(data["entries"], list) and bool(data["entries"]), f"{app}.entries")
         apps[app] = data
         for raw in data.get("workers", []):
-            worker = fields(raw, {"config", "entry", "role", "position"}, {"config", "entry", "role", "position"}, f"{app}.worker")
+            worker = fields(raw, {"config", "hosts", "entry", "role", "position", "personal_secrets", "manual_secrets", "optional_secrets"},
+                            {"config", "hosts", "entry", "role", "position"}, f"{app}.worker")
             config_path = file_path(root, worker["config"], app, f"{app}.config")
             require(config_path.name == "wrangler.toml" and worker["config"] not in paths, f"{app}.config")
             config = read_toml(config_path)
@@ -163,7 +166,31 @@ def load_catalog(root: Path = REPO) -> Catalog:
             require(script not in configs, f"{app}.worker name")
             position = worker["position"]
             require(type(position) is int and position > 0 and position not in positions, f"{app}.worker position")
+            labels = worker["hosts"]
+            require(isinstance(labels, list) and all(isinstance(label, str) and (label == "" or re.fullmatch(
+                r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?", label)) for label in labels)
+                and len(labels) == len(set(labels)), f"{app}.host labels")
+            hosts = [label + "." + zone if label else zone for label in labels]
+            if bootstrap:
+                # This in-memory catalog renders bootstrap HCL only; it cannot deploy a Worker.
+                variables = {**config.get("vars", {})}
+                if "PUBLIC_HOST" in variables:
+                    require(bool(hosts), f"{app}.public host")
+                    variables["PUBLIC_HOST"] = hosts[0]
+                if "ACCESS_AUDIENCE" in variables:
+                    variables["ACCESS_AUDIENCE"] = "0" * 64
+                if "ACCESS_ISSUER" in variables:
+                    variables["ACCESS_ISSUER"] = profile["access_issuer"]
+                if "ACCOUNT_ID" in variables:
+                    variables["ACCOUNT_ID"] = "0" * 32
+                config = {**config, "account_id": "0" * 32, "vars": variables,
+                          "routes": [{"pattern": host, "custom_domain": True} for host in hosts],
+                          "d1_databases": [{**database, "database_id": "00000000-0000-0000-0000-000000000000"}
+                                           for database in config.get("d1_databases", [])]}
             primary_host(config, f"{app}.host", zone)
+            routes = config.get("routes", [])
+            require(all(route.get("custom_domain") is True for route in routes)
+                    and [route.get("pattern") for route in routes] == hosts, f"{app}.generated routes")
             paths.add(worker["config"])
             positions.add(position)
             configs[script] = config
@@ -175,6 +202,8 @@ def load_catalog(root: Path = REPO) -> Catalog:
                            {"id", "name", "description", "group", "icon", "accent", "access", "status", "app_only_signals", "order", "position"},
                            f"{app}.entry")
             entry = dict(entry)
+            if isinstance(entry.get("description"), str):
+                entry["description"] = entry["description"].replace("{zone}", zone)
             entry_id = identifier(entry["id"], f"{app}.entry id")
             require(not any(old["id"] == entry_id for old in entries), f"{app}.entry id")
             for field in ("name", "description", "icon", "accent"):
@@ -273,6 +302,10 @@ def load_catalog(root: Path = REPO) -> Catalog:
             require(rule["key"] == rule["worker"], "owner Access identity")
         else:
             require(rule["worker"] == "flowday" and rule["key"] in {"flowday", "flowday-bypass"} and rule["name"] == rule["key"], "FlowDay Access identity")
+    try:
+        worker_secret_specs(root)
+    except ProfileError as error:
+        raise CatalogError(str(error)) from error
     return Catalog(root, apps, configs, sorted(workers, key=lambda w: w["position"]), sorted(entries, key=lambda e: e["position"]), access)
 
 
@@ -324,18 +357,22 @@ def replace_region(original: str, name: str, body: str, prefix: str) -> str:
     return before + start + "\n" + body + "\n" + end + "\n" + after
 
 
+def access_file(catalog: Catalog) -> str:
+    """Render the same Access HCL for normal generation and private initial bootstrap."""
+    access = replace_region((catalog.root / "infra/access.tf").read_text(), "owner", owner_region(catalog), "    #")
+    for rule in catalog.access:
+        if rule["kind"] == "flowday":
+            body = f'      destinations = {json.dumps(rule["destinations"])}\n      session      = {json.dumps(rule["session"])}'
+            access = replace_region(access, rule["key"], body, "      #")
+    return access
+
+
 def generated_files(catalog: Catalog) -> dict[str, str]:
     registry_path = "dashboard/worker/src/registry.ts"
     registry = (catalog.root / registry_path).read_text()
     registry = replace_region(registry, "entries", entries_region(catalog), "  //")
     registry = replace_region(registry, "workers", workers_region(catalog), "  //")
-    access_path = "infra/access.tf"
-    access = replace_region((catalog.root / access_path).read_text(), "owner", owner_region(catalog), "    #")
-    for rule in catalog.access:
-        if rule["kind"] == "flowday":
-            body = f'      destinations = {json.dumps(rule["destinations"])}\n      session      = {json.dumps(rule["session"])}'
-            access = replace_region(access, rule["key"], body, "      #")
-    return {registry_path: registry, access_path: access}
+    return {registry_path: registry, "infra/access.tf": access_file(catalog)}
 
 
 def check_generated(catalog: Catalog) -> list[str]:

@@ -86,6 +86,8 @@ REQUIRED_VALUES = (
     "access_allowed_idp_ids",
     "access_github_idp_id",
 )
+OPTIONAL_VALUES = frozenset({"access_github_oauth", "access_email_idp_name", "flowday_policy_names", "flowday_policy_options",
+                             "legacy_mail_hero_backup", "mail_route_ready", "mail_receive_address", "mail_route_name"})
 # Environment that could print values (TF_LOG*), change the configuration behind the committed files
 # (TF_ENCRYPTION could add an unencrypted fallback, TF_CLI_ARGS* any flag, TF_VAR_* any variable), point the
 # backend elsewhere (AWS_*) or pick another workspace. The child environment never inherits them.
@@ -105,6 +107,8 @@ ALLOWED_TYPES = frozenset({
     "cloudflare_zero_trust_tunnel_cloudflared",
     "cloudflare_zero_trust_tunnel_cloudflared_config",
     "cloudflare_dns_record",
+    "cloudflare_zero_trust_access_identity_provider",
+    "cloudflare_email_routing_rule",
 })
 # New network resources are scoped by address as well as type. No unrelated DNS or tunnel is managed.
 PLATFORM_OBJECTS = frozenset({
@@ -112,6 +116,9 @@ PLATFORM_OBJECTS = frozenset({
     "cloudflare_zero_trust_tunnel_cloudflared.platform",
     "cloudflare_zero_trust_tunnel_cloudflared_config.platform",
     "cloudflare_dns_record.platform",
+    "cloudflare_zero_trust_access_identity_provider.github",
+    "cloudflare_zero_trust_access_identity_provider.email",
+    "cloudflare_email_routing_rule.mail_hero",
 })
 PLATFORM_TYPES = frozenset(address.split(".", 1)[0] for address in PLATFORM_OBJECTS)
 
@@ -139,11 +146,16 @@ FINGERPRINT_DIGITS = 12
 
 # --- outputs against the apps' configs ---
 # The catalog supplies only public config paths, never credentials or state.
-sys.path.insert(0, str(REPO / "tools" / "service-catalog"))
-from catalog import load_catalog  # noqa: E402
+sys.path[:0] = [str(REPO / "tools" / "cloud-config"), str(REPO / "tools" / "service-catalog")]
+from generate import production_workers  # noqa: E402
+from cloud_profile import load_profile, load_resources  # noqa: E402
+
+if tomllib is not None:
+    FROZEN_OBJECTS = {"cloudflare_zero_trust_access_application.mail_hero_backup":
+                      load_resources(REPO).get("standalone_access_app_ids", {}).get("mail-hero-backup")}
 
 # Preserve the existing older-Python local output-check behaviour; CI requires 3.11+.
-WRANGLER_CONFIGS = tuple(load_catalog(REPO).worker_configs().values()) if tomllib is not None else ()
+WRANGLER_CONFIGS = tuple(production_workers(REPO)) if tomllib is not None else ()
 PUBLIC_OUTPUTS = ("access_aud", "d1_database_ids", "r2_bucket_names")
 OUTPUTS = (*PUBLIC_OUTPUTS, "platform_bootstrap")
 
@@ -188,17 +200,62 @@ def parse_values(text: str) -> dict[str, Any]:
                 raise Refused(f"values line {number} has a value that is not JSON") from None
     if not isinstance(values, dict):
         raise Refused("the values are not an object of variables")
-    if set(values) != set(REQUIRED_VALUES):
+    if values.get("access_github_oauth") is not None:
+        values.setdefault("access_allowed_idp_ids", [])
+        values.setdefault("access_github_idp_id", "")
+    if set(REQUIRED_VALUES) - set(values) or set(values) - set(REQUIRED_VALUES) - OPTIONAL_VALUES:
         missing = sorted(set(REQUIRED_VALUES) - set(values))
-        extra = sorted(set(values) - set(REQUIRED_VALUES))
+        extra = sorted(set(values) - set(REQUIRED_VALUES) - OPTIONAL_VALUES)
         raise Refused(f"the values must hold exactly the variables of variables.tf (missing {missing}, unexpected {extra})")
     if not (isinstance(values["account_id"], str) and re.fullmatch(r"[0-9a-f]{32}", values["account_id"])):
         raise Refused("account_id must be 32 lowercase hex digits")
     for name in ("access_owner_emails", "access_github_owner_emails", "access_allowed_idp_ids"):
-        if not (isinstance(values[name], list) and values[name] and all(isinstance(v, str) and v for v in values[name])):
+        if not (isinstance(values[name], list) and (values[name] or (name == "access_allowed_idp_ids" and values.get("access_github_oauth") is not None))
+                and all(isinstance(v, str) and v for v in values[name])):
             raise Refused(f"{name} must be a non-empty list of strings")
-    if not (isinstance(values["access_github_idp_id"], str) and values["access_github_idp_id"]):
+    if not (isinstance(values["access_github_idp_id"], str)
+            and (values["access_github_idp_id"] or values.get("access_github_oauth") is not None)):
         raise Refused("access_github_idp_id must be a non-empty string")
+    oauth = values.get("access_github_oauth")
+    if oauth is not None and (not isinstance(oauth, dict) or set(oauth) - {"client_id", "client_secret", "name"}
+                             or not isinstance(oauth.get("client_id"), str) or not oauth["client_id"]
+                             or any(not isinstance(item, str) for item in oauth.values())):
+        raise Refused("access_github_oauth must hold the private GitHub client configuration")
+    for name in ("legacy_mail_hero_backup", "mail_route_ready"):
+        if name in values and type(values[name]) is not bool:
+            raise Refused(name + " must be a boolean")
+    for name in ("access_email_idp_name", "mail_receive_address", "mail_route_name"):
+        if name in values and not isinstance(values[name], str):
+            raise Refused(name + " must be a string")
+    if values.get("mail_route_ready"):
+        address = values.get("mail_receive_address", "")
+        zone = load_profile(REPO)["zone"]
+        if (address.count("@") != 1 or not address.endswith("@inbox." + zone)
+                or not address.split("@", 1)[0] or any(c.isspace() for c in address)):
+            raise Refused("mail_receive_address must use the dedicated inbox subdomain")
+    if "flowday_policy_names" in values and (not isinstance(values["flowday_policy_names"], dict)
+            or set(values["flowday_policy_names"]) != {"flowday", "flowday-bypass"}
+            or any(not isinstance(item, str) or not item for item in values["flowday_policy_names"].values())):
+        raise Refused("flowday_policy_names must name both FlowDay policies")
+    options = values.get("flowday_policy_options")
+    if options is not None:
+        if not isinstance(options, dict) or set(options) != {"flowday", "flowday-bypass"}:
+            raise Refused("flowday_policy_options must hold both policies")
+        for item in options.values():
+            if not isinstance(item, dict) or set(item) - {"session_duration", "connection_rules"}:
+                raise Refused("flowday_policy_options has invalid fields")
+            if item.get("session_duration") is not None and not isinstance(item["session_duration"], str):
+                raise Refused("flowday policy duration must be a string")
+            connection = item.get("connection_rules")
+            if connection is not None:
+                if not isinstance(connection, dict) or set(connection) - {"rdp"}:
+                    raise Refused("flowday connection rules must use the supported provider shape")
+                rdp = connection.get("rdp")
+                keys = {"allowed_clipboard_local_to_remote_formats", "allowed_clipboard_remote_to_local_formats"}
+                if rdp is not None and (not isinstance(rdp, dict) or set(rdp) - keys
+                        or any(value is not None and (not isinstance(value, list) or any(not isinstance(v, str) for v in value))
+                               for value in rdp.values())):
+                    raise Refused("flowday clipboard rules must use the supported provider shape")
     return values
 
 
@@ -463,8 +520,9 @@ def error_headlines(text: str) -> list[str]:
 class Tofu:
     """Runs tofu in infra/ with output to a private log; `show` is the only call whose output is read."""
 
-    def __init__(self, env: dict[str, str], log: Path, binary: str = "tofu"):
+    def __init__(self, env: dict[str, str], log: Path, binary: str = "tofu", directory: Optional[Path] = None):
         self.env, self.log, self.binary = env, log, binary
+        self.directory = directory or INFRA
         self.apply_diagnostic_addresses = None
         self.apply_log_offset = 0
 
@@ -473,14 +531,14 @@ class Tofu:
             handle.write(f"\n$ tofu {args[0]}\n")
             handle.flush()
             try:
-                return subprocess.run([self.binary, *args], cwd=INFRA, env=self.env, stdout=handle,
+                return subprocess.run([self.binary, *args], cwd=self.directory, env=self.env, stdout=handle,
                                       stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL).returncode
             except OSError:
                 raise Refused("cannot run tofu; install OpenTofu 1.12") from None
 
     def show_json(self, plan: Path) -> Any:
         try:
-            result = subprocess.run([self.binary, "show", "-json", "-no-color", str(plan)], cwd=INFRA, env=self.env,
+            result = subprocess.run([self.binary, "show", "-json", "-no-color", str(plan)], cwd=self.directory, env=self.env,
                                     capture_output=True, stdin=subprocess.DEVNULL)
         except OSError:
             raise Refused("cannot run tofu; install OpenTofu 1.12") from None
@@ -527,7 +585,7 @@ class Tofu:
         flags = []
         if diagnostic_plan is not None:
             module = load_summary_module()
-            keys = module.Keys(module.config_keys(str(INFRA)))
+            keys = module.Keys(module.config_keys(str(self.directory)))
             self.apply_diagnostic_addresses = {
                 item["address"]: module.safe_address(item["address"], keys)
                 for item in diagnostic_plan.get("resource_changes", [])
@@ -663,8 +721,9 @@ def check_outputs(plan_json: Any, env: dict[str, str], repo: Path = REPO) -> lis
         if on_actions_runner(env):
             raise Refused("the wrangler.toml check needs Python 3.11+ (tomllib) on the runner")
         print("infra_state: wrangler.toml check skipped: it needs Python 3.11+ (tomllib)", file=sys.stderr)
-        return []
-    return output_problems(planned_outputs(plan_json), read_wrangler_configs(repo))
+        return list(plan_json.get("_flowday_include_errors", []))
+    return [*output_problems(planned_outputs(plan_json), read_wrangler_configs(repo)),
+            *plan_json.get("_flowday_include_errors", [])]
 
 
 def drift_exit(summary: dict) -> int:
@@ -682,7 +741,8 @@ class Session:
     """Everything a run needs, prepared before tofu starts: refuses early, prints no value."""
 
     def __init__(self, *, environment: str, values: dict[str, Any], work: Path, env: dict[str, str],
-                 s3_endpoint: Optional[str] = None, fetch: Optional[Callable[[str], dict]] = None):
+                 s3_endpoint: Optional[str] = None, fetch: Optional[Callable[[str], dict]] = None,
+                 directory: Optional[Path] = None):
         self.environment = environment
         state_key(environment)
         self.work = work
@@ -694,6 +754,7 @@ class Session:
         # Before anything can print: every value inside INFRA_TFVARS, then the derived credentials.
         mask(value_scalars(values), env)
         fetch = fetch or (lambda path: cloudflare_get(token, path))
+        self.fetch = fetch
         self.credentials = s3_credentials(env, values["account_id"], fetch)
         mask([self.credentials[0], self.credentials[1]], env)
         self.endpoint = s3_endpoint or endpoint(values["account_id"])
@@ -704,7 +765,7 @@ class Session:
         write_private(self.log, "")
         self.tofu = Tofu(child_env(env, token=token, passphrase_value=self.passphrase,
                                    credentials=self.credentials, s3_endpoint=self.endpoint,
-                                   data_dir=self.work / "tfdata"), self.log)
+                                   data_dir=self.work / "tfdata"), self.log, directory=directory)
 
     def s3(self, method: str, key: str, payload: bytes = b"", extra: Optional[dict[str, str]] = None,
            query: Optional[dict[str, str]] = None):
@@ -730,6 +791,8 @@ class Session:
         out = self.work / f"{name}.tfplan"
         code = self.tofu.plan(self.values_file, out)
         plan_json = self.tofu.show_json(out)
+        from flowday_policy_guard import verify
+        plan_json["_flowday_include_errors"] = verify(plan_json, self.values, self.fetch)
         summary, rendered = summarize(plan_json)
         return code, summary, rendered, plan_json
 
@@ -775,7 +838,7 @@ def command_plan(args: argparse.Namespace, env: dict[str, str]) -> int:
         if verdict == EXIT_DESTRUCTIVE:
             print("infra_state: the plan deletes, replaces or forgets a resource", file=sys.stderr)
         elif verdict == EXIT_MISMATCH:
-            print("infra_state: the outputs and the apps' wrangler.toml files differ", file=sys.stderr)
+            print("infra_state: output configuration or actual FlowDay rules differ from the declared values", file=sys.stderr)
         elif verdict == EXIT_DRIFT:
             print("infra_state: the plan has actions: Cloudflare and infra/ differ (drift)", file=sys.stderr)
         if verdict in (EXIT_DRIFT, EXIT_DESTRUCTIVE):
@@ -855,6 +918,18 @@ def plan_fingerprint(summary: dict) -> str:
     return digest[:FINGERPRINT_DIGITS]
 
 
+def exact_fingerprint(plan_json: dict, phrase: str) -> str:
+    """Bind reviewed before/after values without exposing their low-entropy content in a public hash."""
+    resources = [{"address": item.get("address"), "change": item.get("change")}
+                 for item in plan_json.get("resource_changes", [])
+                 if item.get("change", {}).get("actions") != ["no-op"] or item.get("change", {}).get("importing")]
+    document = {"resources": sorted(resources, key=lambda item: item["address"] or ""),
+                "outputs": {name: change for name, change in plan_json.get("output_changes", {}).items()
+                            if change.get("actions") != ["no-op"]}}
+    encoded = json.dumps(document, separators=(",", ":"), sort_keys=True).encode()
+    return hmac.new(phrase.encode(), encoded, hashlib.sha256).hexdigest()[:FINGERPRINT_DIGITS]
+
+
 def format_expect(found: dict[str, int], fingerprint: Optional[str] = None) -> str:
     """plan_counts() and plan_fingerprint() as the expect text "Infra apply" takes (parse_expect round-trips it)."""
     if not found:
@@ -921,7 +996,7 @@ def frozen_violations(plan_json: Any) -> list[str]:
 
 
 def apply_gate(summary: dict, plan_json: Any, expected: dict[str, int], fingerprint: Optional[str],
-               allow_destructive: bool, problems: list[str]) -> None:
+               allow_destructive: bool, problems: list[str], exact: Optional[str] = None) -> None:
     """Refuses (fixed messages, FROZEN addresses, type names, counts and fingerprints only) unless the plan may be
     applied: exactly the reviewed plan, and nothing a gate forbids."""
     if destructive(summary) and not allow_destructive:
@@ -939,8 +1014,9 @@ def apply_gate(summary: dict, plan_json: Any, expected: dict[str, int], fingerpr
     if found != expected:
         raise Refused(f"the plan's actions {dict(sorted(found.items()))} are not the expected "
                       f"{dict(sorted(expected.items()))}")
-    if found and plan_fingerprint(summary) != fingerprint:
-        raise Refused(f"the plan's fingerprint {plan_fingerprint(summary)} is not the reviewed {fingerprint}: main or "
+    actual = exact or plan_fingerprint(summary)
+    if found and actual != fingerprint:
+        raise Refused(f"the plan's fingerprint {actual} is not the reviewed {fingerprint}: main or "
                       "Cloudflare changed since that \"Infra drift\" run; review a new run before dispatching again")
 
 
@@ -1030,10 +1106,106 @@ def command_list_backups(args: argparse.Namespace, env: dict[str, str]) -> int:
 
 def require_apply_context(env: dict[str, str]) -> None:
     """Refuses unless this is the "Infra apply" workflow, dispatched on main, on a GitHub Actions runner."""
+    reviewed_reconcile = (env.get("GITHUB_WORKFLOW") == "Personal cloud reconcile"
+                          and env.get("INFRA_REVIEWED_APPLY") == "reviewed-plan")
     if not (on_actions_runner(env) and env.get("GITHUB_REF") == APPLY_REF
-            and env.get("GITHUB_EVENT_NAME") == APPLY_EVENT and env.get("GITHUB_WORKFLOW") == APPLY_WORKFLOW):
+            and env.get("GITHUB_EVENT_NAME") == APPLY_EVENT
+            and (env.get("GITHUB_WORKFLOW") == APPLY_WORKFLOW or reviewed_reconcile)):
         raise Refused(f"apply runs only in the \"{APPLY_WORKFLOW}\" workflow dispatched on main "
                       "(infra/README.md \"Apply\"); locally, run `plan`")
+
+
+def command_reconcile(args: argparse.Namespace, env: dict[str, str]) -> int:
+    from reconcile_policy import context_problem, manual_reasons
+    from cloud_profile import load_profile
+    from reviewed_plans import github_output, save
+    problem = context_problem(env)
+    if problem:
+        raise Refused(problem)
+    values = read_values_argument(args.var_file, env)
+    work = new_work_dir(args.work_dir, env)
+    session = None
+    try:
+        session = Session(environment=args.environment, values=values, work=work, env=env)
+        session.tofu.init(args.environment)
+        code, summary, rendered, document = session.plan_full("reconcile")
+        report(rendered, env)
+        problems = check_outputs(document, env)
+        team = load_profile(REPO)["access_issuer"].removeprefix("https://").removesuffix(".cloudflareaccess.com")
+        reasons = manual_reasons(document, team)
+        reasons.extend({"address": 'cloudflare_zero_trust_access_policy.flowday["' + item.rsplit(":", 1)[1] + '"]',
+                        "reason": "FLOWDAY_INCLUDE_REQUIRES_OWNER_REPAIR"}
+                       for item in document.get("_flowday_include_errors", []))
+        module = load_summary_module()
+        keys = module.Keys(module.config_keys(str(INFRA)))
+        reasons = [{"address": module.safe_address(item["address"], keys), "reason": item["reason"]}
+                   for item in reasons]
+        unsafe = bool(type_violations(document) or frozen_violations(document) or problems or reasons or destructive(summary))
+        if unsafe or (getattr(args, "check_only", False) and plan_counts(summary)):
+            expected = format_expect(plan_counts(summary), exact_fingerprint(document, session.passphrase))
+            key = save(session, work / "reconcile.tfplan", expected, env)
+            state = "needs_manual" if unsafe else "repairable"
+            github_output(getattr(args, "github_output", None), state, expected, key)
+            print(json.dumps({"event": "infra_reconcile", "status": state,
+                              "expect": expected, "plan_key": key,
+                              "reasons": reasons, "output_mismatch": bool(problems)}, sort_keys=True))
+            return EXIT_DRIFT
+        if not plan_counts(summary):
+            if code != EXIT_OK:
+                raise Refused("RECONCILE_UNCLASSIFIED_CHANGE")
+            print('{"event":"infra_reconcile","status":"in_sync"}')
+            github_output(getattr(args, "github_output", None), "in_sync")
+            return EXIT_OK
+        backup_state(session, args.environment, env)
+        session.tofu.apply(work / "reconcile.tfplan", diagnostic_plan=document)
+        code, summary, rendered, document = session.plan_full("verify")
+        report(rendered, env)
+        if code != EXIT_OK or drift_exit(summary) != EXIT_OK or check_outputs(document, env):
+            raise Refused("RECONCILE_VERIFY_FAILED")
+        print('{"event":"infra_reconcile","status":"repaired"}')
+        github_output(getattr(args, "github_output", None), "repaired")
+        return EXIT_OK
+    finally:
+        if session is not None:
+            session.cleanup()
+        if not args.keep_work_dir:
+            shutil.rmtree(work, ignore_errors=True)
+
+
+def command_approved_apply(args: argparse.Namespace, env: dict[str, str]) -> int:
+    from reviewed_plans import read
+    require_apply_context(env)
+    if env.get("GITHUB_WORKFLOW") != "Personal cloud reconcile" or env.get("INFRA_REVIEWED_APPLY") != "reviewed-plan":
+        raise Refused("REVIEWED_APPLY_CONTEXT_INVALID")
+    values = read_values_argument(args.var_file, env)
+    expected, fingerprint = parse_expect(args.expect)
+    work = new_work_dir(args.work_dir, env)
+    session = None
+    try:
+        session = Session(environment=args.environment, values=values, work=work, env=env)
+        session.tofu.init(args.environment)
+        saved = read(session, args.plan_key, args.expect, env)
+        approved = session.tofu.show_json(saved)
+        if exact_fingerprint(approved, session.passphrase) != fingerprint:
+            raise Refused("REVIEWED_PLAN_FINGERPRINT_INVALID")
+        _, summary, rendered, current = session.plan_full("review-current")
+        report(rendered, env)
+        if exact_fingerprint(current, session.passphrase) != fingerprint:
+            raise Refused("REVIEWED_PLAN_CHANGED_REVIEW_AGAIN")
+        apply_gate(summary, current, expected, fingerprint, False, check_outputs(current, env), exact=fingerprint)
+        backup_state(session, args.environment, env)
+        session.tofu.apply(saved, diagnostic_plan=approved)
+        code, summary, rendered, current = session.plan_full("verify")
+        report(rendered, env)
+        if code != EXIT_OK or drift_exit(summary) != EXIT_OK or check_outputs(current, env):
+            raise Refused("REVIEWED_APPLY_VERIFY_FAILED")
+        print('{"event":"infra_reconcile","status":"repaired"}')
+        return EXIT_OK
+    finally:
+        if session:
+            session.cleanup()
+        if not args.keep_work_dir:
+            shutil.rmtree(work, ignore_errors=True)
 
 
 def command_apply(args: argparse.Namespace, env: dict[str, str]) -> int:
@@ -1232,6 +1404,20 @@ def main(argv: Optional[list[str]] = None) -> int:
     backups = sub.add_parser("list-backups", help="print the keys of the apply's state backups (keys only)")
     backups.add_argument("--environment", default="production", choices=ENVIRONMENTS)
     backups.add_argument("--var-file", type=Path, help=f"values file outside the repository (default: ${VALUES_ENV})")
+    reconcile = sub.add_parser("reconcile", help="repair only supported in-place drift; otherwise require review")
+    reconcile.add_argument("--environment", default="production", choices=ENVIRONMENTS)
+    reconcile.add_argument("--var-file", type=Path)
+    reconcile.add_argument("--work-dir", type=Path)
+    reconcile.add_argument("--keep-work-dir", action="store_true")
+    reconcile.add_argument("--check-only", action="store_true", help="classify and save drift without repairing")
+    reconcile.add_argument("--github-output", type=Path)
+    reviewed = sub.add_parser("approved-apply", help="apply the exact signed plan after review, refusing any intervening change")
+    reviewed.add_argument("--environment", default="production", choices=ENVIRONMENTS)
+    reviewed.add_argument("--var-file", type=Path)
+    reviewed.add_argument("--work-dir", type=Path)
+    reviewed.add_argument("--keep-work-dir", action="store_true")
+    reviewed.add_argument("--expect", required=True)
+    reviewed.add_argument("--plan-key", required=True)
     plan = sub.add_parser("plan", help="init + plan against the remote state; print the redacted summary only")
     plan.add_argument("--environment", default="production", choices=ENVIRONMENTS)
     plan.add_argument("--var-file", type=Path, help=f"values file outside the repository (default: ${VALUES_ENV})")
@@ -1245,6 +1431,10 @@ def main(argv: Optional[list[str]] = None) -> int:
             return command_plan(args, env)
         if args.command == "apply":
             return command_apply(args, env)
+        if args.command == "reconcile":
+            return command_reconcile(args, env)
+        if args.command == "approved-apply":
+            return command_approved_apply(args, env)
         if args.command == "rotate-passphrase":
             return command_rotate(args, env)
         if args.command == "list-backups":

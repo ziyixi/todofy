@@ -65,9 +65,6 @@ export function assertReleaseContext(inputs: ReleaseInputs): Operation {
   }
   if (inputs.ref !== "refs/heads/main")
     fail("A production release runs only from refs/heads/main.");
-  if (inputs.allowEmpty && operation === "bootstrap") {
-    fail("allow-empty is not valid for bootstrap.");
-  }
   const host = new URL(inputs.siteUrl).host;
   const expected = `${operation}:${host}${inputs.allowEmpty ? ":allow-empty" : ""}`;
   if (inputs.confirmation !== expected) fail(`The confirmation must exactly equal ${expected}`);

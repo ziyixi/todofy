@@ -12,6 +12,7 @@ from ziyixi_proto.wire_json import from_wire, to_wire
 from ..status_daemon.adapters import baked_source_sha
 from .admission import AdmissionBusy, AdmissionConflict, AdmissionUnavailable
 from .kubernetes import DependencyUnavailable
+from .reconcile import Planner
 from .store import Record, Store
 
 WAIT_SECONDS = 600
@@ -52,6 +53,11 @@ class Controller:
         self.worker_error = None
         self.step_lock = threading.Lock()
         self.installed = set()
+        self.planner = Planner(
+            store, renderer, kube, admission, clock=clock, source_sha=source_sha
+        )
+        self.plan_cache = None
+        self.plan_observed = 0
 
     def create(self, request):
         targets = request.release.targets
@@ -90,6 +96,53 @@ class Controller:
         self.wake.set()
         return self.release(record)
 
+    def plan(self, *, fresh=False):
+        with self.step_lock:
+            at = self.clock().timestamp()
+            if fresh or self.plan_cache is None or at - self.plan_observed >= 30:
+                self.plan_cache = self.planner.collect()
+                self.plan_observed = at
+            return self.plan_cache
+
+    def reconcile(self, request):
+        frozen = to_wire(request)
+        with self.step_lock:
+            previous = self.store.reconcile_receipt(frozen)
+            if previous is not None:
+                return self.release(previous)
+            plan = self.planner.collect()
+            self.plan_cache, self.plan_observed = plan, self.clock().timestamp()
+            if plan.state not in {"clean", "repairable"}:
+                raise _error(
+                    "FAILED_PRECONDITION",
+                    ErrorReason.RECONCILE_MANUAL_REQUIRED,
+                    "The runtime needs an explicit owner recovery action.",
+                )
+            if (
+                plan.base_release != request.name
+                or plan.base_etag != request.etag
+                or plan.fingerprint != request.fingerprint
+            ):
+                raise _error(
+                    "ABORTED",
+                    ErrorReason.RECONCILE_PLAN_CHANGED,
+                    "Read the fresh reconciliation plan before repairing.",
+                )
+            body = None
+            if plan.state == "repairable":
+                source = self.store.get(request.name.split("/", 1)[1])
+                body = {
+                    "request_id": request.request_id,
+                    "targets": [
+                        {**target, "request_id": request.request_id}
+                        for target in source.body["targets"]
+                    ],
+                }
+            record = self.store.reconcile(frozen, body)
+            self.plan_cache = None
+        self.wake.set()
+        return self.release(record)
+
     def summary(self):
         record = self.store.latest()
         if record is None:
@@ -122,6 +175,7 @@ class Controller:
                 for value in record.observed
             ),
             error_code=record.error_code or None,
+            source_release=record.source_release or None,
         )
         return from_wire(pb.Release, to_wire(result), strict=True).message
 
@@ -281,11 +335,48 @@ class Controller:
         platform_target = next(
             target for target in targets if target.workload_key == platform.key
         )
-        resources = self.renderer.render(targets, record.identity)
-        gate_key = "release-" + targets[0].source_sha
+        gate_key = record.gate_key or "release-" + targets[0].source_sha
+        resources = self.renderer.render(targets, record.identity, gate_key=gate_key)
         checkpoint = record.checkpoint
         if checkpoint == "suspend":
-            self.kube.patch("CronJob", "newsletter-daily", {"spec": {"suspend": True}})
+            if record.source_release:
+                admission = self.admission.call("status", "")
+                try:
+                    daily = self.kube.get("CronJob", "newsletter-daily")
+                except DependencyUnavailable as error:
+                    if not error.missing:
+                        raise
+                    daily = None
+                if admission["state"] != "active" or (
+                    daily is not None and daily.get("spec", {}).get("suspend") is True
+                ):
+                    self._hold(record, ErrorReason.RECONCILE_MANUAL_REQUIRED)
+                    return False
+                for item in resources:
+                    if item["kind"] == "Service":
+                        self.kube.apply(item)
+                try:
+                    self.kube.patch(
+                        "CronJob", "newsletter-daily", {"spec": {"suspend": True}}
+                    )
+                except DependencyUnavailable as error:
+                    if not error.missing:
+                        raise
+                    daily = next(
+                        item
+                        for item in resources
+                        if item["kind"] == "CronJob"
+                        and item["metadata"]["name"] == "newsletter-daily"
+                    )
+                    daily["spec"]["suspend"] = True
+                    self.kube.apply(daily)
+                    self.kube.patch(
+                        "CronJob", "newsletter-daily", {"spec": {"suspend": True}}
+                    )
+            else:
+                self.kube.patch(
+                    "CronJob", "newsletter-daily", {"spec": {"suspend": True}}
+                )
             self._next(record, "draining", "begin")
         elif checkpoint == "begin":
             self.admission.call("begin", gate_key)

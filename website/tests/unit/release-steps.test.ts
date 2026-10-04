@@ -176,19 +176,37 @@ describe("release context", () => {
     ).toBe("release");
   });
 
-  it("refuses other refs, events, operations and confirmations", () => {
-    expect(() => assertReleaseContext({ ...base, ref: "refs/heads/feature" })).toThrow(/main/);
-    expect(() => assertReleaseContext({ ...base, eventName: "pull_request" })).toThrow(/dispatch/);
-    expect(() => assertReleaseContext({ ...base, operation: "status" })).toThrow(/Unsupported/);
-    expect(() => assertReleaseContext({ ...base, confirmation: "release" })).toThrow(/exactly/);
+  it("accepts a fresh empty bootstrap only with its explicit allow-empty suffix", () => {
     expect(() =>
+      assertReleaseContext({
+        ...base,
+        operation: "bootstrap",
+        allowEmpty: true,
+        confirmation: "bootstrap:www.ziyixi.science",
+      }),
+    ).toThrow("bootstrap:www.ziyixi.science:allow-empty");
+    expect(
       assertReleaseContext({
         ...base,
         operation: "bootstrap",
         allowEmpty: true,
         confirmation: "bootstrap:www.ziyixi.science:allow-empty",
       }),
-    ).toThrow(/not valid for bootstrap/);
+    ).toBe("bootstrap");
+    expect(() =>
+      assertReleaseContext({
+        ...base,
+        operation: "bootstrap",
+        confirmation: "bootstrap:www.ziyixi.science:allow-empty",
+      }),
+    ).toThrow("The confirmation must exactly equal bootstrap:www.ziyixi.science");
+  });
+
+  it("refuses other refs, events, operations and confirmations", () => {
+    expect(() => assertReleaseContext({ ...base, ref: "refs/heads/feature" })).toThrow(/main/);
+    expect(() => assertReleaseContext({ ...base, eventName: "pull_request" })).toThrow(/dispatch/);
+    expect(() => assertReleaseContext({ ...base, operation: "status" })).toThrow(/Unsupported/);
+    expect(() => assertReleaseContext({ ...base, confirmation: "release" })).toThrow(/exactly/);
   });
 });
 
@@ -268,7 +286,18 @@ describe("release gate", () => {
   it("refuses bootstrap once records exist and an empty bootstrap without approval", async () => {
     const existing = fakeGitHub({ rows: [row(10, payload(), 1)], states: { 10: "success" } });
     await expect(
-      gate(deps(existing.github, fakeWorker(V1)), { operation: "bootstrap", siteUrl: SITE }),
+      gate(deps(existing.github, fakeWorker(V1)), {
+        operation: assertReleaseContext({
+          operation: "bootstrap",
+          confirmation: "bootstrap:www.ziyixi.science:allow-empty",
+          allowEmpty: true,
+          eventName: "workflow_dispatch",
+          ref: "refs/heads/main",
+          siteUrl: SITE,
+        }),
+        siteUrl: SITE,
+        bootstrapApproval: SITE,
+      }),
     ).rejects.toThrow(/no website-release record exists/);
     const empty = fakeGitHub({ rows: [], states: {} });
     await expect(

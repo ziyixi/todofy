@@ -8,7 +8,7 @@
 import { describe, expect, it } from 'vitest';
 import { validate } from '../../../contracts/ops-v1/validate.mjs';
 import schema from '../../../contracts/task-intent-v1/task-intent-v1.schema.json';
-import { TASK_INTENT_LIMITS, TASK_INTENT_URL_HOSTS, TASK_INTENT_VERSION } from '../../../contracts/task-intent-v1/task-intent-v1.ts';
+import { TASK_INTENT_LIMITS, taskIntentUrlHosts, TASK_INTENT_VERSION } from '../../../contracts/task-intent-v1/task-intent-v1.ts';
 import type { DescMessage } from '@ziyixi/proto/protobuf';
 import {
   ErrorCode,
@@ -97,12 +97,19 @@ describe('task-intent-v1 fixtures', () => {
     expect(new Set(ids).size).toBe(ids.length);
   });
 
+  it('uses the Watch deployment supplied by the caller and keeps the Lab host fixed', () => {
+    const hosts = taskIntentUrlHosts('watch.example.test');
+    expect(hosts['watch']).toContain('watch.example.test');
+    expect(hosts['watch']).not.toContain('watch.ziyixi.science');
+    expect(hosts['lab']).toEqual(['arxiv.org']);
+  });
+
   it('links only to hosts the source may use', () => {
     for (const [path, value] of Object.entries(valid)) {
       if (defOf(path) !== 'TaskIntent') continue;
       const intent = value as { source: string; items: { url?: string }[] };
       for (const item of intent.items) {
-        if (item.url !== undefined) expect(TASK_INTENT_URL_HOSTS[intent.source]).toContain(new URL(item.url).hostname);
+        if (item.url !== undefined) expect(taskIntentUrlHosts('watch.ziyixi.science')[intent.source]).toContain(new URL(item.url).hostname);
       }
     }
   });
@@ -154,7 +161,7 @@ describe('the generated enums and the task-intent-v1.ts constants', () => {
     expect(defs['Mode']?.['enum']).toEqual(wireEnum(ModeSchema, Mode).names);
     expect(defs['State']?.['enum']).toEqual(wireEnum(StateSchema, State).names);
     expect(defs['ErrorCode']?.['enum']).toEqual(wireEnum(ErrorCodeSchema, ErrorCode).names);
-    expect(Object.keys(TASK_INTENT_URL_HOSTS)).toEqual(wireEnum(SourceSchema, Source).names);
+    expect(Object.keys(taskIntentUrlHosts('watch.ziyixi.science'))).toEqual(wireEnum(SourceSchema, Source).names);
     const items = props('TaskIntent')['items'] ?? {};
     expect(items['maxItems']).toBe(TASK_INTENT_LIMITS.itemsMax);
     expect(defs['ParentTitle']?.['maxLength']).toBe(TASK_INTENT_LIMITS.parentTitleMax);

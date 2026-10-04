@@ -1,10 +1,14 @@
-# infra: OpenTofu for the monorepo apps (encrypted remote state, daily drift plan, gated apply)
+# infra: Cloudflare resources owned by this repository
 
 This directory describes the Cloudflare objects that the monorepo's apps depend on but that wrangler
-does not own. The objects are adopted into an **encrypted remote state** and planned every day for drift
-(P3). Since P4 a **manually dispatched, gated apply** on `main` is the only way anything here changes a
-Cloudflare object or the state ([Apply](#apply-p4)); the other `tofu apply` is the one-time, import-only
-bootstrap, which writes the state and only reads Cloudflare ([Bootstrap](#bootstrap-once)).
+does not own. New deployments start with [cloud-bootstrap](../tools/cloud-bootstrap/README.md), which
+uses these same files to create an empty environment or import an existing one. It refuses any update
+to an existing object. Its private input and captured credentials stay outside Git.
+
+`Personal cloud reconcile` detects drift and repairs only the dedicated runtime CNAME and its authenticated
+loopback tunnel ingress. Other changes need review. An approved continuation applies the original
+OpenTofu-encrypted plan from the private state bucket after checking its source SHA, signed contents and
+current plan. The older P4 dispatch remains available. Detailed historical notes below describe that path.
 
 - Tooling: OpenTofu 1.12 and the Cloudflare provider pinned at exactly **5.25.0**
   (`registry.opentofu.org/cloudflare/cloudflare`). [`.terraform.lock.hcl`](.terraform.lock.hcl) holds
@@ -33,9 +37,10 @@ Nothing unrelated is imported, declared, read or modelled, not even read-only.
 `Infra checks`). It reads the HCL block structure, so quoted and bare labels (`resource "a" "b"` and
 `resource a b`) and nested blocks are all seen, and anything it cannot read fails:
 
-- only eight declared resource types, with the added service-token, tunnel, tunnel-config and DNS types
-  restricted to the exact platform addresses; every resource has its own `lifecycle { prevent_destroy = true }`;
-- no `moved` block names a `FROZEN` address (the backup app; [Apply](#apply-p4)), in `from` or `to`;
+- network, IdP and email rule types are restricted to exact declared addresses; every resource has
+  its own `lifecycle { prevent_destroy = true }`;
+- the legacy backup app stays frozen. Its sole allowed move adds `[0]` to its state address so a
+  fresh account can omit it; the application's identity and rules stay unchanged;
 - no output reads a variable (`var.*`, also inside a `"${...}"` template), so a personal value can never
   become an output;
 - no data source (not even inside a `check` block), module, `check`, `ephemeral` or `removed` block,
@@ -51,10 +56,20 @@ Nothing unrelated is imported, declared, read or modelled, not even read-only.
 [`test_infra_guard.py`](../.github/scripts/test_infra_guard.py) tests the guard itself against
 configurations built to slip past it.
 
-### Managed here (28 objects)
+### Managed here (33 objects)
+
+This is the maximum declared count. Fresh bootstrap creates 31 objects before the first Worker release,
+then adds its exact mail rule (32). An adopted account retains the frozen legacy backup app (33).
+Older private inputs can temporarily keep the existing external IdP references; bootstrap captures and
+imports their actual IDs before switching to the managed references.
 
 | Address | Object | Notes |
 | --- | --- | --- |
+| `cloudflare_zero_trust_access_identity_provider.github[0]` | GitHub login | Imported OAuth secrets stay untouched because Cloudflare never returns them; fresh creation uses the private OAuth input |
+| `cloudflare_zero_trust_access_identity_provider.email[0]` | Email PIN login | Only the provider already selected by these owner applications is adopted |
+| `cloudflare_zero_trust_access_policy.flowday["flowday"]` | FlowDay login | Preserves the existing owner email and GitHub login rules |
+| `cloudflare_zero_trust_access_policy.flowday["flowday-bypass"]` | FlowDay PWA files | The existing everyone bypass on the PWA path |
+| `cloudflare_email_routing_rule.mail_hero[0]` | Exact Mail Hero receive address | Enabled after the Worker exists; no catchall or root mailbox DNS |
 | `cloudflare_zero_trust_access_policy.owner` | reusable Access policy "Mail Hero owner" | Allow. Includes the owner's email(s), which come from a sensitive variable. **Shared, see below** |
 | `cloudflare_zero_trust_access_policy.github_owner` | reusable Access policy "Mail Hero GitHub owner" | Allow. Includes the owner's email(s) and requires the GitHub login method. **Shared, see below** |
 | `cloudflare_zero_trust_access_application.owner["mail-hero"]` | Access app "Mail Hero" | `mail-hero.ziyixi.science` |
@@ -104,9 +119,9 @@ those other apps too.
 | --- | --- | --- |
 | Worker scripts, bindings, vars/secrets, crons, Durable Object migrations, Custom Domains, routes, D1 schema migrations | each app's `wrangler.toml` and CI | When wrangler and OpenTofu both manage one object, each overwrites the other (provider issue #7382) |
 | DNS records of the Worker hostnames | wrangler (Custom Domains create read-only AAAA records) | They are read-only and wrangler-owned; the dedicated platform CNAME is managed above |
-| Email Routing: settings, the Mail Hero rule, catch-all, and the receive subdomain's MX/DKIM/SPF records | Email Routing (set up once) | The enable/DNS resources would try to write apex MX/SPF records, which would split the owner's mailbox. The rule diffs on every plan (#7352). A plan's refresh section would print the receive address from the API |
+| Email Routing: settings, catch-all, and the receive subdomain's MX/DKIM/SPF records | Email Routing (set up once) | The enable/DNS resources would try to write apex MX/SPF records, which would split the owner's mailbox. The exact Mail Hero address rule is managed separately in `mail-routing.tf`; bootstrap verifies its literal match and keeps private plan output off stdout |
 | The service token used by the backup collector, and the rules of the backup app's application-scoped policy | Cloudflare dashboard | A token created or replaced by OpenTofu would put its client secret in state, and replacing it breaks backups without any error. The policy is referenced only by id (see [Import notes](#import-notes)) |
-| The rules of FlowDay's two reusable policies (one per FlowDay application, attached to nothing else) | Cloudflare dashboard, until the follow-up in [FlowDay](#flowday) | Referenced only by id; adopting them would add identity values to `INFRA_TFVARS` for policies that the follow-up retires |
+| Legacy Mail Hero backup policy and service token | Cloudflare dashboard | Kept frozen for existing accounts only; fresh accounts use the Worker-native backup and omit this application. FlowDay policies and selected owner IdPs are managed above |
 | R2 lifecycle rules | none (only Cloudflare's default multipart-abort rule) | See [Storage](#storage) |
 | GitHub secrets and variables, ops switches (`*_PAUSED`, `*_MAINTENANCE_MODE`, …) | GitHub `production` environment | Secret values would end up in state. Switches are flipped at runtime, and IaC would flip them back |
 
@@ -120,7 +135,7 @@ Listed by category only. These are neither declared nor read, and their values a
 - the apex mailbox records (MX, TXT, DKIM, DMARC);
 - third-party verification TXT records;
 - zone-wide settings (SSL, rulesets, certificates);
-- identity providers;
+- identity providers unrelated to the selected owner login methods;
 - notification and budget alerts;
 - R2 buckets of other projects.
 
@@ -130,12 +145,18 @@ FlowDay moved into the monorepo (flowday/docs/design.md) with two Access applica
 move: `flowday` (the host) and `flowday-bypass` (its PWA files under `/pwa/*`, which must load without a
 login). Both are adopted unchanged (`cloudflare_zero_trust_access_application.flowday[...]`):
 
-- **Their policies are referenced by id, not managed.** Each app has its own reusable policy, attached to
-  that app only. Their rules stay in the dashboard for now; declaring them would put more identity values
-  into `INFRA_TFVARS` for two policies that are meant to go away. Follow-up, in its own reviewed commit
-  after the owner agrees: attach the two shared owner policies to `flowday` (like every other owner app),
-  apply, then delete FlowDay's old allow policy by hand. Never detach and delete a policy in the same
-  apply (provider issue #7284).
+- Each app retains its own reusable policy. Bootstrap imports their exact include/require, session and
+  connection rules into `cloudflare_zero_trust_access_policy.flowday[...]`; it does not move FlowDay
+  onto the shared owner policy or change the bypass. Authentication changes require explicit review.
+
+Cloudflare provider 5.25.0 (and 5.26.0) imports an empty `login_method` selector beside an email rule.
+Only these two policies ignore changes to `include` to avoid a perpetual update. Every plan and apply
+independently reads their actual rules and verifies the exact owner emails, GitHub provider, bypass,
+decision, `require` and `exclude`. A mismatch reports `FLOWDAY_INCLUDE_MISMATCH` and blocks apply.
+For this provider defect, restore the exact declared include rules in the official Access policy UI,
+then rerun the check; an approved saved plan cannot repair this ignored field. Fresh creation still
+uses the HCL include rules. The exception does not cover applications or other policies.
+
 Every change to these two applications goes through this directory, never the dashboard (FlowDay's own runbooks,
 `flowday/README.md` "Rollback and removal" and `flowday/docs/design.md` section 11, point here):
 
@@ -208,11 +229,15 @@ All values come from a tfvars file **outside the repository** (locally) or from 
 | `access_github_owner_emails` | **yes** | The live include list of "Mail Hero GitHub owner" |
 | `access_allowed_idp_ids` | no | Identity provider ids allowed on the seven owner-facing apps (links, watch and Fleet have the same list as the others; FlowDay's apps allow every provider, `allowed_idps` unset) |
 | `access_github_idp_id` | no | The GitHub identity provider that "Mail Hero GitHub owner" requires |
+| `access_github_oauth` | **yes** | Fresh OAuth client ID/secret; selected existing IdPs are imported with the existing secret preserved |
+| `flowday_policy_names` / `flowday_policy_options` | no | Exact names, session duration and connection rules captured during adoption |
+| `mail_receive_address` / `mail_route_name` | **yes** | Exact dedicated-subdomain rule captured privately; `mail_route_ready` activates it only after the Worker exists |
+| `legacy_mail_hero_backup` | no | Existing-account compatibility only; false for fresh native backups |
 | `state_passphrase` | **yes** | Not a value of the infrastructure: the state and plan encryption passphrase, `INFRA_STATE_PASSPHRASE` ([Remote state](#remote-state)). Never in a values file |
 
 ### Values in CI: one dedicated secret, `INFRA_TFVARS`
 
-In CI the five values above come from **one** production-environment secret, `INFRA_TFVARS`: the JSON
+In CI the infrastructure values come from **one** production-environment secret, `INFRA_TFVARS`: the JSON
 object that [`scripts/infra_state.py`](scripts/infra_state.py) `values-json` makes from the local values
 file. The email lists therefore reach OpenTofu only as the sensitive variables. GitHub masks a secret
 only as its whole string, never the values inside a JSON secret, so on a runner `infra_state.py`
@@ -245,16 +270,14 @@ python3 infra/scripts/infra_state.py values-json --var-file ~/.config/todofy-inf
 
 **Which ids are committed (one rule).** Ids of the objects this directory manages are committed:
 the Access application ids, the two shared reusable policy ids, the backup app's application-scoped policy
-id, FlowDay's two reusable policy ids (referenced by id only in [`access.tf`](access.tf)) and the D1 ids (in
+id, FlowDay's two managed reusable policy ids, the selected IdPs, owned network/mail-rule IDs and the D1 ids (in
 [`ids.tf`](ids.tf), [`access.tf`](access.tf), [`scripts/local_tfvars.py`](scripts/local_tfvars.py) and,
 as the backup app's `FROZEN` id, [`scripts/infra_state.py`](scripts/infra_state.py)). They are opaque object handles,
 not credentials: no API call can use them without a token for the account. Import needs them, and a
 reviewer has to be able to see which object each address adopts. The D1 ids, the Mail Hero app id and the
 two reusable policy ids were already public (in the wrangler configs and
 `mail-hero/docs/verification-native.md`). Ids of objects **outside** the monorepo boundary that
-this configuration only references, namely the identity providers and the account, come from variables,
-so `infra/` adds no copy of them. The guard test rejects any 32-hex-digit value (the format of account
-and zone ids) under `infra/`.
+this configuration only references stay outside the managed inventory. Public account/zone and managed IDs live in `config/resources.toml`; private OAuth/identity values stay in `INFRA_TFVARS`. The generated `platform-identity.tf` is the sole public zone-ID boundary under `infra/`; other files cannot add account/zone literals.
 
 Even with sensitive variables, `tofu show -json` writes **every value in plain text**: the sensitive
 variables, the include emails read back from the API, and the account id inside import ids. Plan files
@@ -271,15 +294,15 @@ redacted summary may be shared ([`tools/infra-plan-summary`](../tools/infra-plan
 | Passphrase | GitHub production secret **`INFRA_STATE_PASSPHRASE`**; tofu gets it as `TF_VAR_state_passphrase`. Generated locally by whoever runs the bootstrap, who keeps a copy in the owner's password manager. GitHub cannot show it again: without that copy the state can be decrypted only inside CI, and a lost passphrase means rebuilding the state by import ([Rotating the passphrase](#rotating-the-passphrase)) |
 | Credentials | Derived from the Cloudflare API token at runtime: access key id = the token's id (`GET /accounts/<account>/tokens/verify`, or `/user/tokens/verify` for a user token), secret access key = SHA-256 of the token value. Under GitHub Actions both are masked (`::add-mask::`) before tofu starts; they are never printed, written to a file or put on a command line. Derivation verified read-only on 2026-10-01 (a wrong secret is refused) |
 | Credentials fallback | If a future token cannot be used this way (no R2 permission, or Cloudflare stops deriving), create an R2 API token for the `infra-state` bucket only (Object Read & Write) in the dashboard and store its pair as production secrets `INFRA_R2_ACCESS_KEY_ID` / `INFRA_R2_SECRET_ACCESS_KEY`, and pass them to the plan step in `infra.yml`. `infra_state.py` uses that pair instead of deriving whenever both are set (and refuses only one of them) |
-| Locking | **No lock file.** `use_lockfile` needs R2 to honour `If-None-Match: *` on this bucket, which is not proven yet. Until then the GitHub concurrency group `infra-production` serialises every run in CI. The drift plan never writes the state anyway; only the bootstrap (local, once) and P4's apply do. The bootstrap probes conditional writes and reports the result; enable `use_lockfile` in a separate change only after the probe passes on R2 |
-| Contents | The managed objects' attributes as read from the API, including the policies' include emails and the account id, and the [outputs](#outputs): that is why the state is encrypted and never printed. It holds no credential: no service token, tunnel or secret is managed here |
+| Locking | **No lock file.** `use_lockfile` needs R2 to honour `If-None-Match: *` on this bucket, which is not proven yet. Until then the GitHub concurrency group `infra-production` serialises every run in CI. The drift plan never writes the state anyway; the bootstrap, reviewed apply and narrowly scoped reconcile can write it, all under the same CI lock for recurring runs. The bootstrap probes conditional writes and reports the result; enable `use_lockfile` in a separate change only after the probe passes on R2 |
+| Contents | The managed objects' attributes as read from the API, including the policies' include emails and the account id, and the [outputs](#outputs): that is why the state is encrypted and never printed. It also holds the platform deployment service-token credentials and tunnel state. Only the private bootstrap exporter reads those outputs; no public plan, log, or inventory includes them |
 | Rollback | R2 keeps no object versions. Every apply first copies the state object, byte for byte (it is already encrypted), to a dated key and reads the copy back; restoring one is in [Apply](#apply-p4), and `infra_state.py list-backups` prints their keys (keys only). With `imports.tf` restored from history the state is also rebuildable from the `import {}` blocks ([Bootstrap](#bootstrap-once)) |
 
 ## Running a plan locally
 
-You need a token that can read Access apps and policies, D1 and R2 and has R2 access for the S3 credentials:
+A read-only plan needs Access apps/policies/selected IdPs, the exact Email Routing rule, DNS/tunnel, D1 and R2 read scopes plus access to the private state bucket. Apply/bootstrap additionally need writes to the owned resource types. The bootstrap validates account and zone before creating anything:
 today the existing deploy token (the admin helper's token file holds the same token), later
-`CF_INFRA_READ_TOKEN`. Never put a token or the passphrase in a file in the repository or on a command line.
+`CF_API_TOKEN` or a separately scoped read token. Never put a token or the passphrase in a file in the repository or on a command line.
 
 ```sh
 brew install opentofu                                   # 1.12.x
@@ -307,6 +330,8 @@ check is accident-proofing, not a security boundary (anyone can edit the script)
 `production` environment holds the secrets.
 
 ## Bootstrap (once)
+
+This section records the old import-only path. For current fresh creation, adoption and resumable setup, use [cloud-bootstrap](../tools/cloud-bootstrap/README.md). It generates temporary import blocks automatically; do not restore old committed imports for the new flow.
 
 [`scripts/bootstrap_state.py`](scripts/bootstrap_state.py) creates the remote state. Run it **before**
 the branch that adds `infra.yml` reaches `main` (otherwise the first drift run fails on a missing bucket
@@ -858,11 +883,11 @@ the merge:
    staging-host removal through this directory ([FlowDay](#flowday)): its drift run shows `update: 2` (the two
    FlowDay applications only), dispatch with `update=2@<that run's fingerprint>`.
 
-Still open:
+Historical follow-ups recorded at that point:
 
 - After F4: remove the staging host from FlowDay's apps through OpenTofu ([FlowDay](#flowday), step 5 above);
   needs `CF_INFRA_TOKEN` or a deploy token with Access Edit.
-- FlowDay onto the shared owner policies ([FlowDay](#flowday)), with the owner.
+- FlowDay policy ownership is now implemented while retaining the exact existing policies; moving it onto shared policies remains a separate owner decision.
 - The owner decides whether to rename the shared policies (this affects the self-hosted apps) and
   whether the backup app's application-scoped policy becomes reusable (then drop it from `FROZEN`).
 - A `push` trigger for "Infra apply", after several clean manual applies.

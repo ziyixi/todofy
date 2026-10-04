@@ -18,11 +18,13 @@ export const TASK_INTENT_VERSION = 'task-intent-v1';
  * Hosts each source (its wire name) may link to; Todofy refuses any other with url_not_allowed and never
  * fetches them.
  */
-export const TASK_INTENT_URL_HOSTS: Readonly<Record<string, readonly string[]>> = {
-  lab: ['arxiv.org'],
-  // A task links to the change in the watch app (/watches/<id>), never to a watched page.
-  watch: ['watch.ziyixi.science'],
-};
+export function taskIntentUrlHosts(watchHost: string): Readonly<Record<string, readonly string[]>> {
+  return {
+    lab: ['arxiv.org'],
+    // The deployed Watch host is supplied by the caller; a task never links to a watched page.
+    watch: [watchHost],
+  };
+}
 
 export const TASK_INTENT_LIMITS = {
   itemsMax: 30,

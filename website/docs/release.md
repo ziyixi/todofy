@@ -90,10 +90,10 @@ Each step is one `pnpm release <command>` ([`scripts/release/cli.ts`](../scripts
 
 ## Operations
 
-- **bootstrap** (once, before the first release): needs zero records in this repository. It continues the
-  content registry of the last successful record of `ziyixi/ziyixi.science` (Vercel era, read from its public
-  GitHub Deployments), so slug history and feed GUIDs carry over. Without such a record, an empty registry
-  additionally needs the production variable `WEBSITE_BOOTSTRAP_APPROVAL=https://www.ziyixi.science`.
+- **bootstrap** (once, before the first release): needs zero records in this repository. When
+  `WEBSITE_LEGACY_REPOSITORY` is configured, it continues that repository's last successful content registry,
+  preserving slug history and feed GUIDs. An empty registry instead needs the production variable
+  `WEBSITE_BOOTSTRAP_APPROVAL` to equal the configured canonical origin.
 - **recovery**: after a failed or interrupted release, or a manual rollback. If production serves the
   latest record's version, it is verified again (live identity and route contract) and marked `success`;
   if it serves the earlier successful record's version, that is verified; anything else stops for a human.
@@ -104,6 +104,10 @@ Each step is one `pnpm release <command>` ([`scripts/release/cli.ts`](../scripts
   serve the Worker, the baseline check stops every release first, see
   [`cutover.md`](cutover.md#rollback)).
 - **allow_empty**: one run may publish an empty collection after a non-empty one.
+  For a fresh site with no release record and an empty Notion collection, dispatch `operation=bootstrap`
+  with `allow_empty=true` and confirmation `bootstrap:<configured website host>:allow-empty`.
+  Leave `WEBSITE_LEGACY_REPOSITORY` unset and set the production variable `WEBSITE_BOOTSTRAP_APPROVAL`
+  to the configured canonical origin; Notion authorization and the no-record gate still apply.
 
 ## Daily schedule
 

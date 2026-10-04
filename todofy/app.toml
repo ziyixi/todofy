@@ -1,16 +1,24 @@
-# Public metadata only. Hosts/resources remain in this app's committed Wrangler configs.
+# Public metadata and relative host labels. Generated Wrangler configs own production bindings.
 version = 1
 id = "todofy"
 target = "cloudflare"
 
 [[workers]]
 config = "todofy/gateway/wrangler.toml"
+personal_secrets = ["ACCESS_OWNER", "ACCESS_OWNER_ALIASES"]
+manual_secrets = ["MAIL_WEBHOOK_TOKEN_SHA256", "MAIL_WEBHOOK_TOKEN_SHA256_PREVIOUS", "REPORT_BASIC_AUTH_SHA256", "CSRF_SIGNING_KEY"]
+optional_secrets = ["ACCESS_OWNER_ALIASES", "MAIL_WEBHOOK_TOKEN_SHA256_PREVIOUS"]
+hosts = ["todofy", "todofy-hooks", "daily"]
 entry = "todofy"
 role = "网关与 UI"
 position = 2
 
 [[workers]]
 config = "todofy/wrangler.toml"
+personal_secrets = ["TODOIST_DEFAULT_PROJECT_ID", "TODOIST_OPS_PROJECT_ID", "TODOIST_REVIEW_PROJECT_ID"]
+manual_secrets = ["TODOIST_API_KEY", "GEMINI_API_KEY"]
+optional_secrets = ["TODOIST_OPS_PROJECT_ID", "TODOIST_REVIEW_PROJECT_ID"]
+hosts = []
 entry = "todofy"
 role = "处理核心（TodofyCore）"
 position = 3

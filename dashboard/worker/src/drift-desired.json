@@ -407,6 +407,18 @@
           "source": "config"
         },
         {
+          "name": "ACCESS_CLIENT_ID",
+          "type": "secret_text",
+          "source": "manual",
+          "optional": true
+        },
+        {
+          "name": "ACCESS_CLIENT_SECRET",
+          "type": "secret_text",
+          "source": "manual",
+          "optional": true
+        },
+        {
           "name": "ACCESS_ISSUER",
           "type": "plain_text",
           "source": "config"
@@ -420,6 +432,12 @@
           "name": "ACCESS_OWNER_ALIASES",
           "type": "secret_text",
           "source": "deploy"
+        },
+        {
+          "name": "ALERT_WEBHOOK_TOKEN",
+          "type": "secret_text",
+          "source": "manual",
+          "optional": true
         },
         {
           "name": "ASSETS",
@@ -577,6 +595,12 @@
           "name": "MAIL_WEBHOOK_TOKEN_SHA256",
           "type": "secret_text",
           "source": "manual"
+        },
+        {
+          "name": "MAIL_WEBHOOK_TOKEN_SHA256_PREVIOUS",
+          "type": "secret_text",
+          "source": "manual",
+          "optional": true
         },
         {
           "name": "MAINTENANCE_MODE",
@@ -824,6 +848,11 @@
           "name": "AUTO_PUBLISH",
           "type": "plain_text",
           "source": "config"
+        },
+        {
+          "name": "BUILD_SHA",
+          "type": "plain_text",
+          "source": "deploy"
         },
         {
           "name": "CANONICAL_HOST",

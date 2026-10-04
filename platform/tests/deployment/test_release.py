@@ -828,9 +828,9 @@ class Rendering(unittest.TestCase):
                 else:
                     self.assertNotIn("suspend", item["spec"])
                 expected = (
-                    "ghcr.io/example/todofy-platform@" + TARGETS[1].image_digest
+                    "ghcr.io/example/project-platform@" + TARGETS[1].image_digest
                     if observer
-                    else "ghcr.io/example/todofy-newsletter@" + TARGETS[0].image_digest
+                    else "ghcr.io/example/project-newsletter@" + TARGETS[0].image_digest
                 )
                 pod = item["spec"]["jobTemplate"]["spec"]["template"]["spec"]
                 self.assertTrue(
@@ -846,14 +846,24 @@ class Rendering(unittest.TestCase):
                     self.assertEqual(
                         pod["initContainers"][0]["args"], ["observer-systemd"]
                     )
-                    self.assertNotIn("env", pod["initContainers"][0])
+                    self.assertEqual(
+                        pod["initContainers"][0]["env"],
+                        [
+                            {
+                                "name": "FLEET_EXPECTED_DAEMONS",
+                                "value": json.dumps(
+                                    list(CONFIG.expected_daemons), separators=(",", ":")
+                                ),
+                            }
+                        ],
+                    )
                     self.assertFalse(pod["automountServiceAccountToken"])
             if item["kind"] == "Deployment":
                 self.assertEqual(item["spec"]["strategy"], {"type": "Recreate"})
                 expected = (
-                    "ghcr.io/example/todofy-platform@" + TARGETS[1].image_digest
+                    "ghcr.io/example/project-platform@" + TARGETS[1].image_digest
                     if item["metadata"]["name"] == "platform-runtime"
-                    else "ghcr.io/example/todofy-newsletter@" + TARGETS[0].image_digest
+                    else "ghcr.io/example/project-newsletter@" + TARGETS[0].image_digest
                 )
                 pod = item["spec"]["template"]["spec"]
                 self.assertTrue(
@@ -875,7 +885,7 @@ class Rendering(unittest.TestCase):
         )
         self.assertEqual(
             image(CONFIG, "personal-cloud", TARGETS[1].image_digest),
-            "ghcr.io/example/todofy-platform@" + TARGETS[1].image_digest,
+            "ghcr.io/example/project-platform@" + TARGETS[1].image_digest,
         )
         altered = asset()
         altered["items"][0]["kind"] = "Secret"

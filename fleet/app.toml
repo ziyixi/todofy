@@ -4,6 +4,10 @@ target = "cloudflare"
 
 [[workers]]
 config = "fleet/wrangler.toml"
+personal_secrets = ["ACCESS_OWNER", "ACCESS_OWNER_ALIASES", "REPORT_HMAC_KEY"]
+manual_secrets = []
+optional_secrets = ["ACCESS_OWNER_ALIASES"]
+hosts = ["fleet"]
 entry = "fleet"
 role = "VPS 与后台服务监控"
 position = 11
@@ -54,6 +58,9 @@ app_only_signals = [
   "release_held",
   "release_failed",
   "release_in_progress",
+  "runtime_drift",
+  "runtime_repair_manual",
+  "runtime_comparison_unavailable",
 ]
 order = 8
 worker = "fleet"

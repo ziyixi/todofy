@@ -28,7 +28,7 @@ class Client:
     def close(self):
         self.http.close()
 
-    def call(self, action: str, key: str) -> dict:
+    def call(self, action: str, key: str, *, timeout: float = 10) -> dict:
         if action not in {"status", "begin", "freeze", "resume"} or not self.token:
             raise AdmissionUnavailable("UNAVAILABLE")
         path = "/internal/deployment/drain" + (
@@ -43,6 +43,7 @@ class Client:
                     "Authorization": "Bearer " + self.token,
                     "Accept-Encoding": "identity",
                 },
+                timeout=timeout,
                 **options,
             ) as response:
                 raw = bytearray()

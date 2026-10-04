@@ -12,6 +12,8 @@ value; these tests keep ci.yml, the wrappers and the configs in step. They read 
 why they live here and not in any app (root AGENTS.md). Standard library only.
 """
 
+from workflow_sources import effective_ci
+
 import os
 import re
 import subprocess
@@ -238,7 +240,7 @@ def wrangler_commands(line: str) -> list[str]:
 
 
 def workflow_jobs() -> dict[str, str]:
-    text = WORKFLOW.read_text()
+    text = effective_ci()
     body = text.split("\njobs:\n", 1)[1]
     parts = re.split(r"^  ([a-z0-9-]+):\n", body, flags=re.M)
     return dict(zip(parts[1::2], parts[2::2], strict=True))
@@ -735,7 +737,7 @@ class Workflow(unittest.TestCase):
         takes their verdict from a green branch run of the same commit (ci_changes.find_reusable: "no check job
         uses a secret"). So none of them, nor the workflow's top level, may read a secret, run in an environment,
         deploy for real or touch the account with wrangler."""
-        self.assertEqual(production_reach(WORKFLOW.read_text().split("\njobs:\n", 1)[0]), [])
+        self.assertEqual(production_reach(effective_ci().split("\njobs:\n", 1)[0]), [])
         before = {name: block for name, block in self.jobs.items() if name == "gate" or "gate" not in needs(block)}
         # They include every job whose result a reused run vouches for (ci.yml names; a matrix is "<name> (*)").
         names = {
@@ -835,14 +837,14 @@ class Workflow(unittest.TestCase):
         history = (REPO / "docs/history.md").read_text()
         section = history.split("## Committed-config rollback", 1)[1].split("\n#", 1)[0]
         self.assertEqual(set(re.findall(r"`([A-Z][A-Z0-9_]+)`", section)) & LEGACY_VARIABLES, LEGACY_VARIABLES)
-        self.assertFalse(LEGACY_VARIABLES & set(re.findall(r"\b(?:vars|env)\.([A-Z0-9_]+)", WORKFLOW.read_text())))
+        self.assertFalse(LEGACY_VARIABLES & set(re.findall(r"\b(?:vars|env)\.([A-Z0-9_]+)", effective_ci())))
         self.assertFalse(LEGACY_VARIABLES & TOGGLES)
 
     def test_github_variables_are_only_the_switches(self):
-        used = set(re.findall(r"\bvars\.([A-Z0-9_]+)", WORKFLOW.read_text()))
+        used = set(re.findall(r"\bvars\.([A-Z0-9_]+)", effective_ci()))
         self.assertEqual(used, TOGGLES | {"VPS_DEPLOY_ENABLED"})
         # A repository gate cannot inject private runtime values into a Worker.
-        self.assertIn("&& vars.VPS_DEPLOY_ENABLED == 'true'", WORKFLOW.read_text())
+        self.assertIn("&& vars.VPS_DEPLOY_ENABLED == 'true'", effective_ci())
 
     def test_personal_values_come_only_from_secrets_or_placeholders(self):
         for job_name, job in self.jobs.items():
@@ -869,7 +871,7 @@ class Workflow(unittest.TestCase):
         self.assertEqual(read["LAB_ACCESS_OWNER_ALIASES"], {"DASHBOARD_ACCESS_OWNER_ALIASES"})
         self.assertEqual(read["LAB_CSRF_SIGNING_KEY"], {"LAB_CSRF_SIGNING_KEY"})
         self.assertNotIn("DASHBOARD_CSRF_SIGNING_KEY", {secret for names in read.values() for secret in names})
-        self.assertNotRegex(WORKFLOW.read_text(), r"secrets\.LAB_ACCESS_OWNER")
+        self.assertNotRegex(effective_ci(), r"secrets\.LAB_ACCESS_OWNER")
 
     def test_flowday_deploy_reads_the_dashboard_owner_and_its_own_keys(self):
         """FlowDay's owner addresses come from the dashboard's secrets (no FLOWDAY_ACCESS_OWNER* secret exists); its
@@ -884,8 +886,8 @@ class Workflow(unittest.TestCase):
         self.assertEqual(read["FLOWDAY_CSRF_SIGNING_KEY"], {"FLOWDAY_CSRF_SIGNING_KEY"})
         self.assertEqual(read["FLOWDAY_CREDENTIAL_KEY"], {"FLOWDAY_CREDENTIAL_KEY"})
         self.assertEqual(read["CLOUDFLARE_API_TOKEN"], {"CF_API_TOKEN"})
-        self.assertEqual(set(read), {*markers(WRAPPERS["flowday"][0])["secrets"], "CLOUDFLARE_API_TOKEN"})
-        self.assertNotRegex(WORKFLOW.read_text(), r"secrets\.FLOWDAY_ACCESS_OWNER")
+        self.assertEqual(set(read), {*markers(WRAPPERS["flowday"][0])["secrets"], "FLOWDAY_WORKER_SECRETS", "CLOUDFLARE_API_TOKEN"})
+        self.assertNotRegex(effective_ci(), r"secrets\.FLOWDAY_ACCESS_OWNER")
         # The secrets are read only where the secrets file is written (and the token where Cloudflare is called).
         writers = [step["name"] for step in steps(self.jobs["flowday-deploy"]) if "FLOWDAY_CSRF_SIGNING_KEY" in step["env"]]
         self.assertEqual(writers, ["Write the Worker secrets file"])
@@ -946,8 +948,8 @@ class Workflow(unittest.TestCase):
         self.assertEqual(read["LINKS_ACCESS_OWNER_ALIASES"], {"DASHBOARD_ACCESS_OWNER_ALIASES"})
         self.assertEqual(read["LINKS_CSRF_SIGNING_KEY"], {"LINKS_CSRF_SIGNING_KEY"})
         self.assertEqual(read["CLOUDFLARE_API_TOKEN"], {"CF_API_TOKEN"})
-        self.assertEqual(set(read), {*markers(WRAPPERS["links"][0])["secrets"], "CLOUDFLARE_API_TOKEN"})
-        self.assertNotRegex(WORKFLOW.read_text(), r"secrets\.LINKS_ACCESS_OWNER")
+        self.assertEqual(set(read), {*markers(WRAPPERS["links"][0])["secrets"], "LINKS_WORKER_SECRETS", "CLOUDFLARE_API_TOKEN"})
+        self.assertNotRegex(effective_ci(), r"secrets\.LINKS_ACCESS_OWNER")
         writers = [step["name"] for step in steps(self.jobs["links-deploy"]) if "LINKS_CSRF_SIGNING_KEY" in step["env"]]
         self.assertEqual(writers, ["Write the Worker secrets file"])
 
@@ -972,6 +974,7 @@ class Workflow(unittest.TestCase):
                 "Check that Access answers unauthenticated requests",
                 "Check that the Worker answers short links without Access",
                 "Remove the secrets file",
+                "Verify provider identities and record successful deployment",
             ],
         )
         for step in links[deploy + 1 :]:
@@ -1000,8 +1003,8 @@ class Workflow(unittest.TestCase):
         self.assertEqual(read["WATCH_ACCESS_OWNER_ALIASES"], {"DASHBOARD_ACCESS_OWNER_ALIASES"})
         self.assertEqual(read["WATCH_CSRF_SIGNING_KEY"], {"WATCH_CSRF_SIGNING_KEY"})
         self.assertEqual(read["CLOUDFLARE_API_TOKEN"], {"CF_API_TOKEN"})
-        self.assertEqual(set(read), {*markers(WRAPPERS["watch"][0])["secrets"], "CLOUDFLARE_API_TOKEN"})
-        self.assertNotRegex(WORKFLOW.read_text(), r"secrets\.WATCH_ACCESS_OWNER")
+        self.assertEqual(set(read), {*markers(WRAPPERS["watch"][0])["secrets"], "WATCH_WORKER_SECRETS", "CLOUDFLARE_API_TOKEN"})
+        self.assertNotRegex(effective_ci(), r"secrets\.WATCH_ACCESS_OWNER")
         writers = [step["name"] for step in steps(self.jobs["watch-deploy"]) if "WATCH_CSRF_SIGNING_KEY" in step["env"]]
         self.assertEqual(writers, ["Write the Worker secrets file"])
 
@@ -1018,7 +1021,7 @@ class Workflow(unittest.TestCase):
         self.assertNotIn("d1", watch[deploy]["run"])
         check = watch[deploy + 1]
         self.assertEqual(check["name"], "Check that production runs this commit")
-        self.assertEqual(names[deploy + 2 :], ["Check that Access answers unauthenticated requests", "Remove the secrets file"])
+        self.assertEqual(names[deploy + 2 :], ["Check that Access answers unauthenticated requests", "Remove the secrets file", "Verify provider identities and record successful deployment"])
         for step in watch[deploy + 1 :]:
             with self.subTest(step=step["name"]):
                 self.assertFalse({"deploy", "versions upload", "versions deploy", "rollback", "secret"} & set(wrangler_commands(step["run"])))
@@ -1040,6 +1043,7 @@ class Workflow(unittest.TestCase):
             "FLEET_ACCESS_OWNER": "${{ secrets.FLEET_ACCESS_OWNER }}",
             "FLEET_ACCESS_OWNER_ALIASES": "${{ secrets.FLEET_ACCESS_OWNER_ALIASES }}",
             "FLEET_REPORT_HMAC_KEY": "${{ secrets.FLEET_REPORT_HMAC_KEY }}",
+            "FLEET_WORKER_SECRETS": "${{ secrets.FLEET_WORKER_SECRETS }}",
         })
         runs = "\n".join(step["run"] for step in deploy_steps)
         guard = runs.index("cf-guard.mjs --config fleet/wrangler.toml")
@@ -1084,8 +1088,8 @@ class Workflow(unittest.TestCase):
         names |= {s["binding"] for s in load(PRODUCTION["home"])["services"] if s["service"] == lab["name"]}
         read = {job: set(re.findall(r"secrets\.([A-Z0-9_]+)", self.jobs[job])) for job in DEPLOY_JOBS}
         own = read["lab-deploy"] - set().union(*(read[job] for job in DEPLOY_JOBS if job != "lab-deploy"))
-        self.assertEqual(own - {"CLOUDFLARE_API_TOKEN"}, {"LAB_CSRF_SIGNING_KEY"})
-        names |= own - {"CLOUDFLARE_API_TOKEN"}
+        self.assertEqual(own - {"CLOUDFLARE_API_TOKEN"}, {"LAB_CSRF_SIGNING_KEY", "LAB_WORKER_SECRETS"})
+        names |= own - {"CLOUDFLARE_API_TOKEN", "LAB_WORKER_SECRETS"}
         names |= {"TASK_INTENT_SOURCES", "LAB_DAILY_NEURONS", "ingest_paused"}
         for name in sorted(names):
             with self.subTest(name=name):

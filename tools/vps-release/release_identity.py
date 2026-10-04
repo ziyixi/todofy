@@ -7,7 +7,7 @@ from pathlib import Path
 from uuid import UUID
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "cloud-config"))
-from cloud_profile import load_profile
+from cloud_profile import image_repositories, load_profile
 
 
 def release_id(sha: str) -> str:
@@ -26,6 +26,16 @@ def resume_id(name: str, etag: str) -> str:
     return str(UUID(bytes=digest[:16], version=4))
 
 
+def reconcile_id(repository: str, run_id: str, attempt: str) -> str:
+    """One Actions attempt keeps its repair/resume request stable across transport retries."""
+    if not re.fullmatch(r"[A-Za-z0-9-]+/[A-Za-z0-9_.-]+", repository) or any(
+        not re.fullmatch(r"[1-9][0-9]{0,19}", value) for value in (run_id, attempt)
+    ):
+        raise ValueError("Invalid reconciliation identity")
+    value = f"personal-cloud-reconcile-v1:{repository}:{run_id}:{attempt}"
+    return str(UUID(bytes=hashlib.sha256(value.encode()).digest()[:16], version=4))
+
+
 def verified_images(
     root: Path, sha: str, images: dict[str, str]
 ) -> tuple[dict, dict[str, str]]:
@@ -33,11 +43,11 @@ def verified_images(
     profile = release_profile(root, sha)
     if set(images) != {"newsletter", "platform"}:
         raise ValueError("Invalid release images")
-    owner = profile["repository"].split("/")[0]
+    repositories = image_repositories(profile)
     digests = {}
     for service, image in images.items():
         if not isinstance(image, str) or not re.fullmatch(
-            rf"ghcr\.io/{re.escape(owner)}/todofy-{service}@sha256:[0-9a-f]{{64}}",
+            re.escape(repositories[service]) + r"@sha256:[0-9a-f]{64}",
             image,
         ):
             raise ValueError("Invalid verified image")

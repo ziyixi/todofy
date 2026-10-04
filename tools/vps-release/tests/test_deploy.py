@@ -18,7 +18,7 @@ from ziyixi_proto.wire_json import to_wire
 TOOL = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(TOOL))
 from deploy import BINDINGS, Deployment, verified_snapshot
-from release_identity import release_id, resume_id, verified_images
+from release_identity import reconcile_id, release_id, resume_id, verified_images
 from transport import ReleaseFailure, TransientFailure, Transport, request_parts
 
 SHA = "a" * 40
@@ -113,6 +113,23 @@ class ActionDeployment(unittest.TestCase):
         return Deployment(
             transport, monotonic=clock.monotonic, sleep=clock.sleep, now=lambda: NOW
         )
+
+    def test_reconcile_attempt_keeps_stable_uuid_and_distinguishes_a_rerun(self):
+        selected = reconcile_id("example/cloud", "1234", "1")
+        self.assertEqual(selected, reconcile_id("example/cloud", "1234", "1"))
+        self.assertNotEqual(selected, reconcile_id("example/cloud", "1234", "2"))
+        self.assertNotEqual(selected, reconcile_id("example/other", "1234", "1"))
+        self.assertRegex(
+            selected,
+            r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+        )
+        for invalid in (
+            ("../cloud", "1234", "1"),
+            ("example/cloud", "0", "1"),
+            ("example/cloud", "1234", "-1"),
+        ):
+            with self.subTest(invalid=invalid), self.assertRaises(ValueError):
+                reconcile_id(*invalid)
 
     def test_push_uses_generated_body_and_requires_real_runtime_observation(self):
         requests = []
@@ -595,15 +612,17 @@ class TransportPolicy(unittest.TestCase):
 zone="example.test"
 repository="example/personal-cloud"
 access_issuer="https://example.cloudflareaccess.com"
+workers_dev_subdomain="example"
 platform_hostname="fleet.example.test"
 [vps]
 platform_runtime_host="platform-runtime.example.test"
 namespace="personal-cloud"
 state_root="/srv/personal-cloud"
 observer_node_key="vps"
+expected_daemons=["k3s","ssh","cloudflared_platform"]
 """)
         images = {
-            service: "ghcr.io/example/todofy-" + service + "@" + DIGESTS[key]
+            service: "ghcr.io/example/personal-cloud-" + service + "@" + DIGESTS[key]
             for service, key in (
                 ("newsletter", "newsletter"),
                 ("platform", "platform-runtime"),

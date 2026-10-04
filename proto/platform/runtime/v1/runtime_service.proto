@@ -39,6 +39,11 @@ option (common.wire.v1.formats) = {
   pattern: "[A-Za-z0-9_-]{1,128}"
   description: "Opaque bounded concurrency token from the persisted operation."
 };
+option (common.wire.v1.formats) = {
+  name: "ReconcileRequestFingerprint"
+  pattern: "[0-9a-f]{64}"
+  description: "Exact bounded comparison digest returned by GetReconcilePlan."
+};
 
 // Observes configured workloads and requests constrained deployments. No shell or provider proxy method.
 // (-- api-linter: core::0121::resource-must-support-list=disabled
@@ -94,6 +99,22 @@ service RuntimeService {
       body: "*"
     };
     option (google.api.method_signature) = "name,etag,request_id";
+  }
+  // Reads a bounded, non-mutating comparison against the latest accepted immutable release.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  rpc GetReconcilePlan(GetReconcilePlanRequest) returns (ReconcilePlan) {
+    option (google.api.http) = {get: "/api/v1/{name=reconcilePlan}"};
+    option (google.api.method_signature) = "name";
+  }
+  // Creates a separate repair operation from a ready release. Clean plans never restart Pods.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc ReconcileRelease(ReconcileReleaseRequest) returns (Release) {
+    option (google.api.http) = {
+      post: "/api/v1/{name=releases/*}:reconcile"
+      body: "*"
+    };
+    option (google.api.method_signature) = "name,etag,fingerprint,request_id";
   }
 }
 // The singleton node query.
@@ -195,5 +216,41 @@ message ResumeReleaseRequest {
   string etag = 3 [
     (google.api.field_behavior) = REQUIRED,
     (common.wire.v1.field).format = "ResumeEtag"
+  ];
+}
+
+// The singleton bounded reconciliation comparison.
+message GetReconcilePlanRequest {
+  // Always reconcilePlan.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "platform.ziyixi.science/ReconcilePlan",
+    (common.wire.v1.field).allowed = "reconcilePlan"
+  ];
+}
+
+// A CAS-checked repair that cannot supply images, manifests or pause settings.
+message ReconcileReleaseRequest {
+  // Current latest ready releases/{release_id} supplying the original frozen source/images.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "platform.ziyixi.science/Release",
+    (common.wire.v1.field).format = "ReleaseResourceName"
+  ];
+  // Exact source release revision from GetReconcilePlan.
+  string etag = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "ResumeEtag"
+  ];
+  // Exact fresh comparison fingerprint. Changed live/desired fields return ABORTED.
+  string fingerprint = 3 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "ReconcileRequestFingerprint"
+  ];
+  // New UUID4 for this repair; repeats must have the exact same source/etag/fingerprint.
+  string request_id = 4 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.field_info).format = UUID4,
+    (common.wire.v1.field).format = "ReleaseUuid"
   ];
 }

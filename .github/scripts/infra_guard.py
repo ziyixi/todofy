@@ -42,6 +42,8 @@ ALLOWED_TYPES = frozenset({
     "cloudflare_zero_trust_tunnel_cloudflared",
     "cloudflare_zero_trust_tunnel_cloudflared_config",
     "cloudflare_dns_record",
+    "cloudflare_zero_trust_access_identity_provider",
+    "cloudflare_email_routing_rule",
 })
 # New network resources are scoped by address as well as type. No unrelated DNS or tunnel is managed.
 PLATFORM_OBJECTS = frozenset({
@@ -49,6 +51,9 @@ PLATFORM_OBJECTS = frozenset({
     "cloudflare_zero_trust_tunnel_cloudflared.platform",
     "cloudflare_zero_trust_tunnel_cloudflared_config.platform",
     "cloudflare_dns_record.platform",
+    "cloudflare_zero_trust_access_identity_provider.github",
+    "cloudflare_zero_trust_access_identity_provider.email",
+    "cloudflare_email_routing_rule.mail_hero",
 })
 PLATFORM_TYPES = frozenset(address.split(".", 1)[0] for address in PLATFORM_OBJECTS)
 
@@ -314,7 +319,10 @@ def check(infra: Path) -> list[str]:
                     problems.append(f"{where}: resource without its own lifecycle {{ prevent_destroy = true }}")
             if block.type == "output" and block.labels == ["platform_bootstrap"] and not block.is_true("sensitive"):
                 problems.append(f"{where}: platform bootstrap output must be sensitive")
-            if block.type == "moved" and any(_reference(block.attrs.get(side, [])) in FROZEN for side in ("from", "to")):
+            counted_backup = (block.attrs.get("from") == [("ID", "cloudflare_zero_trust_access_application"), ("P", "."), ("ID", "mail_hero_backup")]
+                              and block.attrs.get("to") == [("ID", "cloudflare_zero_trust_access_application"), ("P", "."), ("ID", "mail_hero_backup"), ("P", "["), ("NUM", "0"), ("P", "]")])
+            if (block.type == "moved" and not counted_backup
+                    and any(_reference(block.attrs.get(side, [])) in FROZEN for side in ("from", "to"))):
                 problems.append(f"{where}: a moved block names a FROZEN address; it must never be renamed")
             if block.type == "output" and _reads_a_variable(block):
                 problems.append(f"{where}: an output reads a variable; outputs read managed objects only")

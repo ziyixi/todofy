@@ -281,12 +281,12 @@ def test_todofy_agrees_with_the_schema_on_edge_cases(change: str):
 def test_the_url_host_allow_list_is_todofys_own_check():
     """The schema accepts any https host; Todofy then refuses hosts off the source's list."""
     other = intents.intent(_variant("url_other_host"))
-    assert intents.urls_allowed(intents.intent(_variant("ok")))
-    assert not intents.urls_allowed(other)
-    assert intents.urls_allowed(intents.intent(_variant("url_host_only")))
+    assert intents.urls_allowed(intents.intent(_variant("ok")), watch_host="watch.ziyixi.science")
+    assert not intents.urls_allowed(other, watch_host="watch.ziyixi.science")
+    assert intents.urls_allowed(intents.intent(_variant("url_host_only")), watch_host="watch.ziyixi.science")
     subdomain = _variant("ok")
     subdomain["items"][0]["url"] = "https://export.arxiv.org/abs/1"
-    assert not intents.urls_allowed(intents.intent(subdomain))  # exact hosts only
+    assert not intents.urls_allowed(intents.intent(subdomain), watch_host="watch.ziyixi.science")  # exact hosts only
 
 
 # ---- the generated enums and the constants of task-intent-v1.ts ----------------------------
@@ -309,11 +309,11 @@ def test_the_generated_enums_and_the_constants_match_the_schema_and_the_typescri
     assert _wire_names(pb.Mode) == list(intents.MODES) == defs["Mode"]["enum"]
     assert _wire_names(State) == defs["State"]["enum"]
     assert _wire_names(ErrorCode) == defs["ErrorCode"]["enum"]
-    hosts = re.search(r"TASK_INTENT_URL_HOSTS[^=]*= \{(.*?)\};", TYPES, re.DOTALL).group(1)
-    assert {s: tuple(re.findall(r"'([^']*)'", h)) for s, h in re.findall(r"(\w+): \[([^\]]*)\]", hosts)} == dict(
-        intents.URL_HOSTS
-    )
-    assert tuple(intents.URL_HOSTS) == intents.SOURCES
+    hosts = intents.url_hosts("watch.example.test")
+    assert hosts == {"lab": ("arxiv.org",), "watch": ("watch.example.test",)}
+    assert tuple(hosts) == intents.SOURCES
+    assert "watch: [watchHost]" in TYPES
+    assert "lab: ['arxiv.org']" in TYPES
     assert _ts_limits() == {
         "itemsMax": intents.ITEMS_MAX,
         "tasksMax": intents.TASKS_MAX,

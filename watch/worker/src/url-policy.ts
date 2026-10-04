@@ -6,18 +6,14 @@
  * - no user name or password, no explicit port (only the scheme's default), at most URI_MAX characters;
  * - the host is a DNS name with at least one dot: never an IP literal (the URL parser already turns `0x7f.1`,
  *   `2130706433` and friends into dotted IPv4, and IPv6 is bracketed), never `localhost` or a name under a
- *   special-use or local suffix, and never a name of this owner's own (OWN_SUFFIXES: the zone `ziyixi.science` and
+ *   special-use or local suffix, and never a name of this owner's own (OWN_SUFFIXES: the deployment zone and
  *   the account's `workers.dev` subdomain, each with every name under it: the owner's apps and Workers must not be
  *   poked at by a watch, or by a hostile page's redirect);
  * - the fragment is dropped (it never reaches a server).
  */
 import { URI_MAX } from './limits.ts';
-
-/**
- * The owner's own names: no watch may fetch one of them or any host under it. The zone, and the account's workers.dev
- * subdomain (already public in .github/workflows/ci.yml); one list, so a new one is added here only.
- */
-export const OWN_SUFFIXES: readonly string[] = ['ziyixi.science', 'cloudflare-579.workers.dev'];
+import { OWN_SUFFIXES } from './deployment.ts';
+export { OWN_SUFFIXES } from './deployment.ts';
 
 /** Suffixes that never name a public site (RFC 6761, RFC 6762, RFC 8375 and common private ones). */
 const LOCAL_SUFFIXES = ['localhost', 'local', 'internal', 'intranet', 'lan', 'home', 'corp', 'home.arpa', 'invalid', 'onion'];

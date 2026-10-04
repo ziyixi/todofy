@@ -3,6 +3,12 @@ export interface AlertGuidance { explanation: string; next: string }
 /** Explain observable facts and a useful next step; never guess an outage's cause. */
 export function alertGuidance(code: string): AlertGuidance {
   switch (code) {
+    case 'runtime_drift':
+      return { explanation: 'VPS 的运行配置与已接受的发布有差异。', next: '打开 Fleet 查看具体资源；在 GitHub 的 Personal cloud reconcile 运行 repair，核对修复结果。' }
+    case 'runtime_repair_manual':
+      return { explanation: 'VPS 配置有差异，但暂停状态或字段归属阻止自动修复。', next: '打开 Fleet 查看原因，处理对应配置或明确继续原发布；可以关闭本次提醒。' }
+    case 'runtime_comparison_unavailable':
+      return { explanation: 'daemon 没有完成配置检查，当前无法确认 VPS 与代码一致。', next: '打开 Fleet 核对 daemon、集群和 Tunnel；入口不可达时按重建手册恢复，再运行检查。' }
     case 'newsletter_unknown':
       return {
         explanation: '一些操作记录缺少最终完成结果。计数可能包含中断活动、采编步骤、Notion 写入或发信记录，也可能重叠；它不等于失败邮件数。当前是否运行、是否有在途任务见下方计数。',

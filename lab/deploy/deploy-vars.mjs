@@ -23,6 +23,7 @@
 // must set each input of that mode (Actions sets GITHUB_* itself).
 // deploy-vars-inputs exec: GITHUB_SHA
 // deploy-vars-inputs secrets: LAB_ACCESS_OWNER LAB_ACCESS_OWNER_ALIASES LAB_CSRF_SIGNING_KEY
+import { mergeWorkerSecrets } from '../../tools/cloud-config/worker-secrets.mjs'
 import { spawnSync } from 'node:child_process'
 import { readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
@@ -47,13 +48,17 @@ export const INJECTED = [{ name: 'BUILD_SHA', from: 'GITHUB_SHA', kind: 'build',
 
 function checked(env, name, pattern) {
   const value = env[name]
-  if (typeof value !== 'string' || !pattern.test(value)) throw new SettingError(name)
+  if (typeof value !== 'string' || !pattern.test(value)
+    || (['GITHUB_SHA', 'BUILD_SOURCE_SHA'].includes(name) && value.length !== 40)) throw new SettingError(name)
   return value
 }
 
 /** {NAME: value} for every injected var. */
 export function injectedVars(env) {
-  return Object.fromEntries(INJECTED.map(({ name, from, pattern }) => [name, checked(env, from, pattern)]))
+  return Object.fromEntries(INJECTED.map(({ name, from, pattern }) => {
+    const source = from === 'GITHUB_SHA' && env.BUILD_SOURCE_SHA ? 'BUILD_SOURCE_SHA' : from
+    return [name, checked(env, source, pattern)]
+  }))
 }
 
 /** The flags appended to the wrangler command: --var NAME:value (wrangler splits at the first colon). */
@@ -77,13 +82,14 @@ function aliases(env) {
 /** Worker secrets for `wrangler deploy --secrets-file`. */
 export function generateSecrets(env) {
   const list = aliases(env)
-  return {
+  const personal = {
     ACCESS_OWNER: checked(env, 'LAB_ACCESS_OWNER', ACCESS_EMAIL),
     // --secrets-file only adds or replaces secrets: an emptied list is uploaded as one space (read as no
     // aliases) rather than left out, which would keep the previous aliases working.
     ACCESS_OWNER_ALIASES: list.join(',') || ' ',
     CSRF_SIGNING_KEY: checked(env, 'LAB_CSRF_SIGNING_KEY', /^[0-9a-fA-F]{64}$/),
   }
+  return mergeWorkerSecrets('lab', env, personal, SettingError)
 }
 
 /** Which committed identifier is still the all-zeros placeholder, or null (text scan of the TOML). */

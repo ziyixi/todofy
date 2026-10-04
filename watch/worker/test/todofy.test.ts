@@ -8,7 +8,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { validate } from '../../../contracts/ops-v1/validate.mjs';
-import { TASK_INTENT_LIMITS, TASK_INTENT_URL_HOSTS } from '../../../contracts/task-intent-v1/task-intent-v1.ts';
+import { TASK_INTENT_LIMITS, taskIntentUrlHosts } from '../../../contracts/task-intent-v1/task-intent-v1.ts';
 import { toWire } from '@ziyixi/proto/wire-json';
 import { State, TaskIntentResultSchema, TaskIntentSchema } from '@ziyixi/proto/todofy/taskintent/v1/task_intent_pb';
 import type { TriggerKind } from '../src/config.ts';
@@ -83,7 +83,7 @@ describe('every intent passes the schema and keeps the owner decision', () => {
         expect(validate(SCHEMA, 'TaskIntent', wire), intent.intentId).toEqual([]);
         expect(freezeIntent(intent)).not.toBeNull();
         expect(intent.items.length).toBeLessThanOrEqual(TASK_INTENT_LIMITS.itemsMax);
-        for (const item of intent.items) expect(TASK_INTENT_URL_HOSTS['watch']).toContain(new URL(item.url ?? '').hostname);
+        for (const item of intent.items) expect(taskIntentUrlHosts('watch.ziyixi.science')['watch']).toContain(new URL(item.url ?? '').hostname);
       }
     }
     const digest = digestIntent('2026-10-01', many, HOST);

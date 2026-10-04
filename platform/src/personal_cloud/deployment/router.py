@@ -56,7 +56,14 @@ class Router:
             )
         for binding in api.HTTP_BINDINGS:
             if (
-                binding.rpc not in {"CreateRelease", "GetRelease", "ResumeRelease"}
+                binding.rpc
+                not in {
+                    "CreateRelease",
+                    "GetRelease",
+                    "ResumeRelease",
+                    "GetReconcilePlan",
+                    "ReconcileRelease",
+                }
                 or binding.method != method
             ):
                 continue
@@ -93,6 +100,8 @@ class Router:
                 "CreateRelease": self.controller.create,
                 "GetRelease": self.controller.get,
                 "ResumeRelease": self.controller.resume,
+                "GetReconcilePlan": lambda request: self.controller.plan(),
+                "ReconcileRelease": self.controller.reconcile,
             }[binding.rpc]
             return 200, to_wire(operation(request))
         raise _error(
@@ -103,6 +112,9 @@ class Router:
 
     def summary(self):
         return self.controller.summary()
+
+    def plan(self):
+        return self.controller.plan()
 
     def close(self):
         self.controller.close()

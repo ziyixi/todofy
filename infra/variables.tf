@@ -32,17 +32,71 @@ variable "access_github_owner_emails" {
   }
 }
 
-# Opaque identifiers of account objects OUTSIDE the monorepo boundary that this configuration only
-# references (identity providers). Not secret; the rule (README.md "Variables"): ids of objects infra/
-# manages are committed, ids of objects outside the boundary (identity providers, the account) are not.
+# Legacy selected-IdP references. Bootstrap imports these exact objects and then uses managed IDs;
+# null access_github_oauth preserves older private inputs during that transition.
 variable "access_allowed_idp_ids" {
   description = "Identity provider ids allowed on the owner-facing Access applications (Mail Hero, Todofy, Home, Lab, links)."
   type        = set(string)
+  default     = []
 }
 
 variable "access_github_idp_id" {
   description = "The GitHub identity provider id, required by the \"Mail Hero GitHub owner\" policy."
   type        = string
+  default     = ""
+}
+
+# Null preserves an existing account's external IdP references. Fresh bootstrap supplies the GitHub
+# OAuth application once; API reads never return its secret after creation.
+variable "access_github_oauth" {
+  type      = object({ client_id = string, client_secret = optional(string, ""), name = optional(string, "GitHub") })
+  sensitive = true
+  default   = null
+}
+
+variable "access_email_idp_name" {
+  type    = string
+  default = "One-time PIN"
+}
+
+variable "flowday_policy_names" {
+  type    = map(string)
+  default = { flowday = "FlowDay owner", flowday-bypass = "FlowDay PWA files" }
+}
+
+variable "flowday_policy_options" {
+  type = map(object({
+    session_duration = optional(string)
+    connection_rules = optional(object({
+      rdp = optional(object({
+        allowed_clipboard_local_to_remote_formats = optional(list(string))
+        allowed_clipboard_remote_to_local_formats = optional(list(string))
+      }))
+    }))
+  }))
+  default = { flowday = { session_duration = "24h" }, flowday-bypass = {} }
+}
+
+variable "legacy_mail_hero_backup" {
+  type    = bool
+  default = true
+}
+
+variable "mail_route_ready" {
+  type    = bool
+  default = false
+}
+
+variable "mail_receive_address" {
+  type      = string
+  sensitive = true
+  default   = ""
+}
+
+variable "mail_route_name" {
+  type      = string
+  sensitive = true
+  default   = "Mail Hero inbox"
 }
 
 # The state and plan encryption passphrase (versions.tf "encryption"). No default: a run without it fails.

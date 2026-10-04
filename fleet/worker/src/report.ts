@@ -86,5 +86,9 @@ export function reportCodes(report: Report): string[] {
   if (phase && !['ready', 'held', 'failed'].includes(phase)) {
     codes.push('release_in_progress');
   }
+  const plan = report.runtime?.reconcile_plan;
+  if (plan?.state === 'repairable') codes.push('runtime_drift');
+  if (plan?.state === 'manual_required' && plan.changes.length > 0) codes.push('runtime_repair_manual');
+  if (plan?.state === 'unavailable') codes.push('runtime_comparison_unavailable');
   return codes.sort();
 }

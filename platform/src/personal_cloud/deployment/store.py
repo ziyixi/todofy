@@ -33,6 +33,8 @@ class Record:
     updated: str
     error_code: str
     observed: tuple
+    gate_key: str = ""
+    source_release: str = ""
 
     @property
     def etag(self) -> str:
@@ -62,6 +64,14 @@ class Store:
                     observed TEXT NOT NULL
                 )
             """)
+            columns = {
+                row[1] for row in database.execute("PRAGMA table_info(releases)")
+            }
+            for name in ("gate_key", "source_release"):
+                if name not in columns:
+                    database.execute(
+                        f"ALTER TABLE releases ADD COLUMN {name} TEXT NOT NULL DEFAULT ''"
+                    )
             database.execute(
                 "CREATE TABLE IF NOT EXISTS create_receipts (request_id TEXT PRIMARY KEY, identity TEXT NOT NULL)"
             )
@@ -70,6 +80,13 @@ class Store:
                     request_id TEXT PRIMARY KEY,
                     identity TEXT NOT NULL,
                     etag TEXT NOT NULL
+                )
+            """)
+            database.execute("""
+                CREATE TABLE IF NOT EXISTS reconcile_receipts (
+                    request_id TEXT PRIMARY KEY,
+                    input TEXT NOT NULL,
+                    identity TEXT NOT NULL
                 )
             """)
 
@@ -128,8 +145,117 @@ class Store:
             )
             at = now()
             database.execute(
-                "INSERT INTO releases VALUES (?,?, 'accepted','suspend',1,?,?, '', '[]')",
+                "INSERT INTO releases (identity,body,phase,checkpoint,revision,created,updated,error_code,observed) "
+                "VALUES (?,?, 'accepted','suspend',1,?,?, '', '[]')",
                 (identity, frozen, at, at),
+            )
+            return self._record(
+                database.execute(
+                    "SELECT * FROM releases WHERE identity=?", (identity,)
+                ).fetchone()
+            )
+
+    def reconcile_receipt(self, request: dict) -> Record | None:
+        frozen = json.dumps(request, sort_keys=True, separators=(",", ":"))
+        with self.transaction() as database:
+            receipt = database.execute(
+                "SELECT * FROM reconcile_receipts WHERE request_id=?",
+                (request["request_id"],),
+            ).fetchone()
+            if not receipt:
+                return None
+            if receipt["input"] != frozen:
+                raise error(
+                    "ALREADY_EXISTS",
+                    ErrorReason.RECONCILE_CONFLICT,
+                    "This reconciliation identity has different input.",
+                )
+            return self._record(
+                database.execute(
+                    "SELECT * FROM releases WHERE identity=?", (receipt["identity"],)
+                ).fetchone()
+            )
+
+    def reconcile(self, request: dict, body: dict | None) -> Record:
+        """CAS the current ready source and persist a separate operation before effects."""
+        frozen_input = json.dumps(request, sort_keys=True, separators=(",", ":"))
+        with self.transaction() as database:
+            receipt = database.execute(
+                "SELECT * FROM reconcile_receipts WHERE request_id=?",
+                (request["request_id"],),
+            ).fetchone()
+            if receipt:
+                if receipt["input"] != frozen_input:
+                    raise error(
+                        "ALREADY_EXISTS",
+                        ErrorReason.RECONCILE_CONFLICT,
+                        "This reconciliation identity has different input.",
+                    )
+                return self._record(
+                    database.execute(
+                        "SELECT * FROM releases WHERE identity=?",
+                        (receipt["identity"],),
+                    ).fetchone()
+                )
+            row = database.execute(
+                "SELECT * FROM releases ORDER BY created DESC, rowid DESC LIMIT 1"
+            ).fetchone()
+            source = self._record(row) if row else None
+            if (
+                source is None
+                or "releases/" + source.identity != request["name"]
+                or source.etag != request["etag"]
+            ):
+                raise error(
+                    "ABORTED",
+                    ErrorReason.RECONCILE_PLAN_CHANGED,
+                    "Read the current release and plan before repairing.",
+                )
+            if (
+                source.phase != "ready"
+                or database.execute(
+                    "SELECT identity FROM releases WHERE phase != 'ready' LIMIT 1"
+                ).fetchone()
+            ):
+                raise error(
+                    "FAILED_PRECONDITION",
+                    ErrorReason.RELEASE_HELD,
+                    "Finish the existing release before repairing.",
+                )
+            identity = request["request_id"] if body is not None else source.identity
+            if body is not None:
+                if (
+                    database.execute(
+                        "SELECT identity FROM releases WHERE identity=?", (identity,)
+                    ).fetchone()
+                    or database.execute(
+                        "SELECT identity FROM create_receipts WHERE request_id=?",
+                        (identity,),
+                    ).fetchone()
+                ):
+                    raise error(
+                        "ALREADY_EXISTS",
+                        ErrorReason.RECONCILE_CONFLICT,
+                        "This reconciliation identity already belongs to a release.",
+                    )
+                at = now()
+                database.execute(
+                    "INSERT INTO releases VALUES (?,?, 'accepted','suspend',1,?,?, '', '[]',?,?)",
+                    (
+                        identity,
+                        json.dumps(body, sort_keys=True, separators=(",", ":")),
+                        at,
+                        at,
+                        "release-" + identity,
+                        request["name"],
+                    ),
+                )
+                database.execute(
+                    "INSERT INTO create_receipts VALUES (?,?)", (identity, identity)
+                )
+            database.execute(
+                "INSERT INTO reconcile_receipts VALUES (?,?,?)",
+                (request["request_id"], frozen_input, identity),
             )
             return self._record(
                 database.execute(
@@ -237,4 +363,6 @@ class Store:
             row["updated"],
             row["error_code"],
             tuple(json.loads(row["observed"])),
+            row["gate_key"],
+            row["source_release"],
         )

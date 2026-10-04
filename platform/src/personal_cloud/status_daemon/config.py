@@ -7,6 +7,23 @@ from dataclasses import dataclass
 from ziyixi_proto.platform.runtime.v1 import runtime_pb as pb
 from ziyixi_proto.wire_json import field_rules, format_matches
 
+DAEMON_ALIASES = ("k3s", "cloudflared", "ssh", "cloudflared_platform")
+
+
+def expected_daemons(values):
+    if (
+        not isinstance(values, (tuple, list))
+        or not 2 <= len(values) <= 4
+        or any(
+            not isinstance(value, str) or value not in DAEMON_ALIASES
+            for value in values
+        )
+        or len(set(values)) != len(values)
+        or not {"k3s", "ssh"} <= set(values)
+    ):
+        raise ValueError("invalid_expected_daemons")
+    return tuple(values)
+
 
 def _matches(message: type, field: str, value: object) -> bool:
     return isinstance(value, str) and format_matches(
@@ -29,6 +46,7 @@ class Configuration:
     namespace: str
     workloads: tuple[Workload, ...]
     repository: str
+    expected_daemons: tuple[str, ...] = DAEMON_ALIASES
 
 
 def workloads(text: str) -> tuple[Workload, ...]:
@@ -90,7 +108,8 @@ def configuration(text: str) -> Configuration:
     value = json.loads(text, object_pairs_hook=_unique)
     if (
         not isinstance(value, dict)
-        or set(value) != {"version", "node_key", "namespace", "workloads", "repository"}
+        or set(value) - {"expected_daemons"}
+        != {"version", "node_key", "namespace", "workloads", "repository"}
         or type(value["version"]) is not int
         or value["version"] != 1
         or not _matches(pb.NodeStatus, "node_key", value["node_key"])
@@ -105,4 +124,5 @@ def configuration(text: str) -> Configuration:
         value["namespace"],
         workloads(json.dumps(value["workloads"])),
         value["repository"],
+        expected_daemons(value.get("expected_daemons", list(DAEMON_ALIASES))),
     )

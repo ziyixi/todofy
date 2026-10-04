@@ -1,227 +1,191 @@
-# 个人云重建操作手册
+# 重建个人云
 
-**只换 VPS、保留现有 Cloudflare：已有可执行流程。全新 Cloudflare + VPS：还缺首次创建/采用和几处配置解耦，不能靠一次 `Infra apply` 完成。**
-本页是今天可执行的步骤；[改进计划](rebuild-audit.md)说明补哪些代码后才能做到“以后只改配置”。
-当前生产进展看 [HANDOFF](../HANDOFF.md)，不要从本页推断新账户演练已经通过。
+日常更新：提交代码，等待 main 的 **CI and deploy**。它发布 Workers、构建两个独立镜像，再通过 daemon 更新 VPS。
+检查或修复运行偏差：在 Actions 打开 **Personal cloud reconcile**，选择 `check` 或 `repair`。
 
-## 先选路径
+首次部署需要修改 [cloud.toml](../config/cloud.toml)，填写仓库外的一个私有 JSON，运行 bootstrap，再执行一次 VPS sudo。
+资源 ID 自动写入 [resources.toml](../config/resources.toml)。账户启用、OAuth 注册和应用登录需要 owner 完成。
+历史恢复见 [恢复边界](#data-recovery)，实际验收见 [实施记录](rebuild-verification.md)。
 
-| 情况 | 从哪里开始 | 必须保留什么 |
-| --- | --- | --- |
-| 只换 VPS，账户/域名/仓库不变 | 第 1 步核对配置，再到第 4 步 | Newsletter data/auth/config；需要保留的 daemon ledger 和 observer sequence |
-| 新账户 + 新 VPS，空业务启动 | 第 1–5 步；第 2 步目前需要单独准备创建/采用方案 | 新账户身份与秘密；不能沿用旧 IDs/AUDs |
-| 新账户 + 新 VPS，恢复历史 | 同上，并先完成第 6 步恢复核对 | 原解密材料、冻结事件身份、未确定副作用；不能用空库绕过 |
+## 1. 准备账户
 
-开始时关闭仓库变量 `VPS_DEPLOY_ENABLED`、Home canary，保持 Todofy 外部处理暂停、Mail Hero 强制停发。
-它不会取消 daemon 已持久接管的 release，先检查进行中的操作。换 VPS 时先停旧 observer，
-移交最新 sequence/pending 状态或协调两端新 epoch；不要并行运行相同 host key/epoch 的观察器。
+准备 GitHub 仓库、Cloudflare 域名和 Ubuntu 24.04 amd64 VPS。启用 Workers Free、R2、Zero Trust。
+在专用 `inbox.<域名>` 子域启用 Email Routing，保留根域现有邮箱配置。
+注册 GitHub OAuth app，回调使用目标 Access team 的 `/cdn-cgi/access/callback`；给 Notion integration 授予网站内容集合访问权限。
 
-## 最少准备的输入
+本机运行 `gh auth login`，通过正常 Cloudflare API token 创建流程保存 token 到仓库外的 mode 600 文件。
+权限见 [bootstrap 凭据清单](../tools/cloud-bootstrap/README.md)。VPS 不接收此管理 token。
+准备 Node 26、uv，以及 [infra 固定版本](../infra/versions.tf)的 OpenTofu。
 
-| 输入 | 放在哪里 | 来源 |
-| --- | --- | --- |
-| 域名、仓库、Access team、Fleet/daemon hostname、namespace/state root/node alias | [config/cloud.toml](../config/cloud.toml) | Owner 选择；不放 IP、邮箱或秘密 |
-| Account/zone、D1、Access app/AUD/policy、DO namespace 等真实 ID | [config/resources.toml](../config/resources.toml) | 目标账户创建/盘点返回 |
-| 发布 token、应用秘密与开关 | GitHub `production` + Worker secret | [CI/CD 清单](ci-cd.md#production-environment)及下方 secret inventory |
-| Access machine client、daemon Bearer、connector token、Fleet HMAC | 对应 GitHub secret + VPS 私有 JSON | 创建时安全保存；管理员 Cloudflare token 不放 VPS |
-| 两个已测试 image digest + 完整 source SHA | 公开 bootstrap bundle | 同一成功 Actions run；不用 tag |
-| 原密钥、登录和状态（恢复时） | 独立私有恢复材料 | Owner；Git/镜像/CI artifact 都不替代备份 |
+成功结果：账户已启用、`gh auth status` 正常、目标域名可用。登录或账户启用失败，先完成对应网页步骤。
 
-一次性人工项：zone/Zero Trust/R2 激活、GitHub OAuth 回调和登录同意、外部 provider 授权。
-沿用 Workers Free；R2 激活有超额计费，免费额度按账户共享，提醒不是硬消费上限。重建不自动升级 Paid。
-换域名/仓库还要改 routes、canonical origin、包发布权限和业务链接授权；当前 generator 没有包办它们。
-不全局替换 proto resource type 或 `ErrorInfo.domain`，它们是稳定合同身份。
+## 2. 填两份配置
 
-## 1. 准备并检查公开配置
+在独立分支修改 `config/cloud.toml`：域名、GitHub 仓库、Access team、workers.dev 子域和 VPS 公开身份。
+全新 VPS 的 `expected_daemons` 使用 `k3s`、`ssh`、`cloudflared_platform`；沿用旧 SSH Tunnel 的节点才加入 `cloudflared`。
 
-在独立干净 checkout 使用 Node 26、现有 uv 和 `platform/versions.json` 的 manifest compiler。
-先选择 Python 3.12，避免 macOS 的旧系统 Python 缺少 tomllib；后面的 `rebuild_python` 始终指向这个解释器。
-填好 profile/inventory 后：
+全新账户的 `config/resources.toml` 先只填写目标 `account_id`、`zone_id` 和空清单：
+
+```toml
+version = 1
+account_id = "<目标账户 ID>"
+zone_id = "<目标域 ID>"
+[access_audiences]
+[d1_databases]
+[durable_objects]
+```
+
+将 [私有输入示例](../tools/cloud-bootstrap/example.private.json)复制到仓库外，设为 mode 600，填写 owner、收信地址、OAuth 和外部服务凭据。
+保留已有环境时用 `adopt` 模式、现有清单、原 state passphrase 和原应用密钥。旧数据不能用 `fresh` 生成的新密钥解密。
+
+后文在仓库根目录运行。路径改成自己的值：
 
 ```sh
 uv python install 3.12
-rebuild_python="$(uv python find 3.12)"
-"$rebuild_python" tools/cloud-config/generate.py
-"$rebuild_python" tools/cloud-config/generate.py --check
-"$rebuild_python" tools/service-catalog/catalog.py
-"$rebuild_python" tools/service-catalog/catalog.py --check
-"$rebuild_python" .github/scripts/drift_desired.py
-"$rebuild_python" .github/scripts/drift_desired.py --check
+cloud_python="$(uv python find 3.12)"
+cloud_private="$HOME/.config/todofy-cloud/bootstrap.json"
+cloud_repo="<owner>/<repository>"
 ```
 
-**放行：**生成文件一致；diff 只包含预期身份；binding、预算、暂停开关、迁移和鉴权没有意外变化。
-generator 更新已有生产字段、Home resource identities 和 infra DNS locals。
-Fleet route/PUBLIC_HOST、部分 infra references、workers.dev 自有域规则仍需核查，见改进计划。
-配置改动照常分支 CI，完全通过的同一 SHA 才能进入 main。
-
-## 2. 新账户：先创建/采用，再进入正式 infra
-
-保留现有账户时跳过。**今天没有完整自动 creator；此处是人工准备阶段，不是已经存在的一键命令。**
-
-1. 激活目标 zone、Workers Free、R2 和 Zero Trust，配置 owner/GitHub 登录。
-   保留根邮箱 MX/TXT/DKIM/DMARC；域名、nameserver、DNSSEC/DS 与邮件切换单独安排。
-2. 按 [infra scope](../infra/README.md#scope) 创建/盘点等价对象：五个 D1、三个应用 R2、owner Access，
-   特殊 FlowDay/backup 身份，专用 daemon Tunnel/DNS/Access machine 与 Fleet receipt。
-   先在**新账户**创建 `infra-state` 桶：当前缺桶分支仍调用旧账户 helper，不能拿它创建新账户桶。
-3. 创建时保存 Access client secret；import 不保证取回。记录 IDs/AUDs，更新 inventory、`infra/ids.tf`、
-   app-scoped policy references 和 `FROZEN_OBJECTS` 的新对象 ID，保留冻结语义；补齐完整 import inventory。
-4. 用新 token、独立 passphrase、私有 tfvars 做 import-only adoption。旧账户 state 仅作恢复证据。
-
-仅在对象、引用和 imports 已审查完整后执行。下文 `rebuild_repo` 为目标仓库，`rebuild_private` 为仓库外
-mode 700 私有目录，`rebuild_import_count` 为本次审查的纯 import 数量；私有文件 mode 600：
+首次准备新文件：
 
 ```sh
-"$rebuild_python" infra/scripts/bootstrap_state.py \
-  --var-file "$rebuild_private/local.tfvars" --token-file "$rebuild_private/cf-token" \
-  --passphrase-file "$rebuild_private/state-passphrase" --expect "$rebuild_import_count"
-"$rebuild_python" infra/scripts/infra_state.py values-json --var-file "$rebuild_private/local.tfvars" \
-  | gh secret set INFRA_TFVARS --env production -R "$rebuild_repo"
-gh secret set INFRA_STATE_PASSPHRASE --env production -R "$rebuild_repo" \
-  < "$rebuild_private/state-passphrase"
+"$cloud_python" tools/cloud-bootstrap/bootstrap.py prepare \
+  --mode fresh --private-file "$cloud_private" \
+  --output "$HOME/.config/todofy-cloud/prepared.json"
+cloud_private="$HOME/.config/todofy-cloud/prepared.json"
+"$cloud_python" tools/cloud-bootstrap/bootstrap.py check --mode fresh --private-file "$cloud_private"
 ```
 
-**放行：**目标账户正确、encrypted state 存在、最终 no-op、outputs 与生产 Wrangler 一致，无旧账户写入。
-`bootstrap_state.py` 只允许 import/no-op；不要删 `prevent_destroy`/FROZEN 或绕过 outputs 检查。
-采用与 tfvars 格式见 [infra bootstrap](../infra/README.md#bootstrap-once)。
-之后的正式更新使用已有 workflow；`rebuild_expect` 必须取自最新 drift 的已审查动作/fingerprint：
+成功结果：`input_ready`。如果输出 `missing`，补列出的凭据，再运行 `check`；重复运行保留已生成密钥。
+
+## 3. 创建或采用 Cloudflare 资源
 
 ```sh
-gh workflow run infra.yml --ref main -R "$rebuild_repo"
-gh workflow run infra-apply.yml --ref main -R "$rebuild_repo" -f expect="$rebuild_expect"
+"$cloud_python" tools/cloud-bootstrap/bootstrap.py cloud --mode fresh --private-file "$cloud_private"
+"$cloud_python" tools/cloud-config/generate.py
+"$cloud_python" tools/service-catalog/catalog.py
+"$cloud_python" .github/scripts/drift_desired.py
+"$cloud_python" tools/cloud-bootstrap/bootstrap.py secrets --mode fresh \
+  --private-file "$cloud_private" --output "$HOME/.config/todofy-cloud/vps.json"
 ```
 
-有陌生对象、删除/替换或意外更新先解决差异。`Infra apply` 是采用后的 reconcile，不能直接用于空账户。
-每次 dispatch 后等对应 run 完成再进入下一步；用 `gh run list --workflow <workflow-file> -R "$rebuild_repo"`
-找到本次 run，再用 `gh run watch <run-id> --exit-status -R "$rebuild_repo"` 核对完整结果。
+成功结果：`cloud_in_sync`、`production_secrets_set`。D1、R2、Access、专用 Tunnel、DNS 和 ID/AUD 已登记，GitHub 凭据与 VPS 私有文件已生成。
+state 桶先于 backend 初始化。收信 Worker 尚未存在时，精确收信规则留到第 6 步。
 
-## 3. 初始化秘密并发布 Worker
+沿用环境将 `--mode fresh` 换成 `--mode adopt`，提供示例中的精确 `adopt_ids`。
+中断后重跑同一私有文件和模式。错误账户、陌生同名对象或既有资源变更会停止，先处理具体差异。
 
-按 [secret inventory](#secret-inventory)配置 GitHub/Worker 秘密。通过正常输入或 stdin 保存，例如：
+## 4. 推送并构建
+
+提交配置和生成结果，推送分支，等 **CI gate** 全部通过，再将同一 SHA 合入 main。
+首次 main 的 Website job 若提示 `bootstrap_required`，先完成下面的网站初始化，再重跑全量发布。
+其余服务和安装包可独立完成；下载时以对应 job 成功为准。
+
+Website 首次需要内容身份初始化：设置 `WEBSITE_BOOTSTRAP_APPROVAL` 为配置中的准确网站 URL，
+运行 **Website release**，选择 `operation=bootstrap`，confirmation 填 `bootstrap:<网站主机名>`。
+全新空内容集合可勾选 `allow_empty`，此时 confirmation 必须为 `bootstrap:<网站主机名>:allow-empty`。
+`WEBSITE_LEGACY_REPOSITORY` 仅恢复旧网站发布记录时填写，空环境留空。首次内容要求见 [Website 发布](../website/docs/release.md)。
+
+全量运行：
 
 ```sh
-gh secret set CF_API_TOKEN --env production -R "$rebuild_repo" < "$rebuild_private/cf-token"
-gh variable set VPS_DEPLOY_ENABLED --body false -R "$rebuild_repo"
-gh workflow run ci.yml --ref main -R "$rebuild_repo" -f app=all
+gh workflow run ci.yml --ref main -R "$cloud_repo" -f app=all
+gh run list --workflow ci.yml -R "$cloud_repo"
+gh run watch <本次 run ID> --exit-status -R "$cloud_repo"
 ```
 
-当前 wrapper 只上传它负责的秘密；旧 Worker 保留 secret **不等于新账户已初始化**。
-首次安全发布形成 Worker 后，保持暂停，再初始化 wrapper 外的 runtime secret。
-例如在 Mail Hero 的 `cloudflare/` 目录：
+成功结果：Workers 已发布，两个 VPS 镜像已按 digest 发布，run artifact 中有 `vps-bootstrap-<完整 SHA>`。
+`VPS_DEPLOY_ENABLED=false` 时服务器部署等待一次性安装。
+静态网站是异步发布，另确认 **Website release** 成功；CI 的 dispatch 成功只代表已启动它。
+
+网站或外部凭据错误在对应 job 处理，无需重建数据库。
+
+## 5. 一次性安装 VPS
+
+下载同一 run 中成功生成的固定安装包：
 
 ```sh
-npx wrangler secret bulk "$rebuild_private/mail-hero-runtime-secrets.json" --config ../wrangler.toml
+gh run download <同一 run ID> -R "$cloud_repo" \
+  -n "vps-bootstrap-<完整 SHA>" -D "$HOME/.cache/todofy-cloud/bundle"
 ```
 
-其他应用分别使用自己的锁定工具和唯一 production config，见各 setup。
-Website 独立发布还有 bootstrap approval/Notion 授权；`app=all` 不证明网站内容已恢复。
-首次部署取得真实 DO namespace ID 后补回 inventory、重新生成，再发布 Home 的准确资源身份。
-**放行：**各 deploy 成功、实际版本/绑定正确、Access 登录/拒绝路径正确、runtime secret 齐、暂停的合成流程通过。
-此时不切邮箱转发，不开放真实写入。
-
-## 4. 准备并安装新 VPS
-
-支持 Ubuntu 24.04 Linux amd64、systemd、已有 UID65534、Python stdlib、iptables/ip6tables、启用的标准 AppArmor。
-2 CPU/4 GiB RAM/20 GiB 空余磁盘是准备起点，Newsletter 实际容量另核对。
-允许出站 HTTPS；Tunnel 另需 7844 UDP 或 TCP；固定 Pod CIDR/hostPorts 不得冲突。
-不需要 Docker/Compose、主机应用 Python 包或新 tailnet。
-
-从同一成功 SHA 取得两个 published digest，在该 SHA 的干净 checkout 生成公开 bundle。
-prepare 校验 image 的 owner/digest 形式，不代替 Actions artifact/source 核验：
+通过自己的可信管理通道将 bundle 和第 3 步的 `vps.json` 放入 VPS，私有文件保持 mode 600。
+在 VPS 执行一次：
 
 ```sh
-npm ci --prefix proto --no-audit --no-fund
-node proto/tools/ensure.mjs
-uv sync --project platform --locked --python "$rebuild_python"
-test "$(git rev-parse HEAD)" = "$rebuild_sha"
-git diff --quiet
-git diff --cached --quiet
-platform/.venv/bin/python tools/vps-bootstrap/prepare.py \
-  --sha "$rebuild_sha" --newsletter-image "$rebuild_newsletter_image" \
-  --platform-image "$rebuild_platform_image" --output "$rebuild_bundle"
+sudo /usr/bin/python3 -E -s <bundle>/installer/install.py \
+  --bundle <bundle> --credentials <vps.json> --grant-reader
 ```
 
-SHA 为完整 40 位；image 为目标 owner 的 `todofy-newsletter@sha256:…` 和 `todofy-platform@sha256:…`。
-通过可信管理通道把 bundle、私有 JSON 放 VPS；完整 JSON 格式见 [bootstrap private input](../tools/vps-bootstrap/README.md#private-input)。
-空启动可用 `old_paths: {}`；恢复填停止写入的 data/auth/config 原目录。它不会生成 Codex/provider 登录。
-保留旧 daemon ledger 时先按第 6 步核对，不能挂库就启动。
-
-在 VPS 重新设置 `rebuild_bundle`、`rebuild_private` 为传入文件所在位置，再一次执行：
+成功结果：`complete_held`。K3s、专用 Tunnel、daemon 和 observer 已安装，Newsletter 暂不接新工作。
+示例 Newsletter 使用 mock 模式且禁真实发送，可先验收空服务。首次安装时要启用真实处理，先按
+[Newsletter 配置](../newsletter/README.md)准备专用 Codex 登录目录及外部 provider 凭据，将私有输入的
+`vps.newsletter_env` 改为对应的 live/codex 设置，用 `vps.old_paths.auth` 指定登录目录；安装器会导入该目录。
+已安装后更改 Secret 或登录状态属于 owner 的一次维护操作，daemon 不会替你修改它们。
+mock 服务健康不代表真实摘要通过。
+启动首次发布：
 
 ```sh
-sudo /usr/bin/python3 -E -s "$rebuild_bundle/installer/install.py" \
-  --bundle "$rebuild_bundle" --credentials "$rebuild_private/bootstrap.json" --grant-reader
+gh variable set VPS_DEPLOY_ENABLED --body true -R "$cloud_repo"
+gh workflow run ci.yml --ref main -R "$cloud_repo" -f app=platform
 ```
 
-首次 bootstrap 在应用资源前加载 pinned observer AppArmor policy。
-已有节点先运行 [profile-only installer](../platform/apparmor/README.md)，加载后才发布 Localhost manifest。
-宿主 policy 修改仍需管理员；日常镜像发布不用 sudo，也不能修改 kernel policy。
-**放行：**`complete_held`、专用 connector 注册、reader 能读 metadata、Newsletter 不接新工作、daily suspended。
-初始 gate 通常 draining；`complete_held` 不是 release ready，observer receipt 另验。
-新 VPS 无旧全局 `cloudflared.service` 时当前监督集合会告警；需要补配置边界，不装无用途服务或伪造 active。
+首次 main SHA 必须与安装包一致。成功结果：Actions 显示 ready，daemon 核对两个实际 digest，Fleet 收到新鲜观测，Home 显示相同状态。
+安装完成、镜像构建和业务处理分别核对。错误处理见 [VPS bootstrap](../tools/vps-bootstrap/README.md#failures-and-retries)。
 
-## 5. 第一轮发布、观测，再接真实业务
-
-先完成 provider 设置与历史 unknown 处理决定。**固定 main 在 bootstrap 同一 SHA**，然后：
+## 6. 登记首次 DO 身份并启用业务
 
 ```sh
-gh variable set VPS_DEPLOY_ENABLED --body true -R "$rebuild_repo"
-gh workflow run ci.yml --ref main -R "$rebuild_repo" -f app=platform
+"$cloud_python" tools/cloud-bootstrap/bootstrap.py finalize --mode fresh \
+  --private-file "$cloud_private" --create-pr
 ```
 
-正常 release 会 drain/freeze、apply/verify、resume admission 和 daily，最后 ready。
-当前没有独立“部署完成但继续暂停、另行激活”阶段，所以不能在 provider/对账尚未准备好时执行。
+成功结果：实际 namespace 已核验并登记，精确收信规则已创建，清单 PR 已启动分支检查。
+合入同一通过检查的清单 SHA。保留环境用 `adopt`；已有 DO 身份不匹配会停止。
+核对 Access、Fleet/Home、Mail Hero 后，按应用开启初始暂停开关，最后设置源邮箱转发。
+真实收信、Todoist 写入、Newsletter 发送和网站内容分别验收。
 
-| 放行门 | 必须看到 |
+## 检查与修复
+
+```sh
+gh workflow run personal-cloud-reconcile.yml --ref main -R "$cloud_repo" -f operation=check
+gh workflow run personal-cloud-reconcile.yml --ref main -R "$cloud_repo" -f operation=repair
+```
+
+每日和成功发布后也执行检查。`PERSONAL_CLOUD_AUTO_REPAIR=true` 开放常规自动修复，首次上线先保持 false。
+各服务与正常发布共用锁，锁内重新确认目标。Worker 使用最后一次核验成功的源码；VPS 修复当前已接受的 release，另建事务和排空 ID。
+无差异时跳过部署和重启。Fleet 显示检查时间、差异和下一步，Home 提醒仍可关闭。
+
+| 结果 | 下一步 |
 | --- | --- |
-| Actions `VPS deploy` | ready；两个实际 digest/source/request/generation 与冻结 targets 一致；fresh status |
-| Newsletter | running/accepting；历史 unknown 保持告警，不自动当成功/重放 |
-| Fleet/observer | 自然新鲜签名回执、匹配 image/source；init 固定单元真实状态；主容器 `READ_OK`，不是仅 exit 0 |
-| Home | 正常刷新反映同一部署/业务状态；旧回执有 stale/missing 提示 |
+| clean | 无需操作 |
+| repairable | 运行 repair，等待实际状态再次核验 |
+| Access/密钥/字段归属变化 | 核对差异；敏感 infra 计划需 `reviewed_apply=true` 和 infra-review 审批 |
+| 数据库、桶、DO 或 PVC 身份缺失/变化 | 进入恢复，普通 repair 不创建空资源替代 |
+| held/failed release | 处理错误后选择 resume，填写原 `releases/<UUID>` |
+| daemon、K3s 或 Tunnel 不可达 | 恢复宿主入口 |
 
-Held/failed 先查固定错误，再以原 SHA/身份继续，不换 targets、不清 ledger：
+审批绑定这次实际计划和 SHA；等待期间 state 或目标变化会拒绝旧计划，重新运行后重新审核。
+人工暂停和运维开关保留，修复不自动开启业务。
+
+## Host recovery
+
+保留原安装包和每次接受版本的 bundle。下载与当前接受发布一致且 **VPS bootstrap bundle** job 成功的 artifact，传入 VPS 后执行：
 
 ```sh
-gh workflow run ci.yml --ref main -R "$rebuild_repo" -f app=platform \
-  -f resume_vps_release=true -f resume_source_sha="$rebuild_original_sha"
+sudo /usr/bin/python3 -E -s <新 bundle>/installer/recover.py \
+  --installed-bundle <原安装 bundle> --bundle <新 bundle>
 ```
 
-全部通过后继续 main、开放各应用处理，最后配置专用 Mail Hero Email Routing rule 和源邮箱转发。
-真实收信、摘要、Todoist/Notion/Newsletter 发送分别验收；部署绿灯不覆盖外部业务。
+成功结果：`runtime_restored`。入口恢复保留 Secrets、PVC 和账本，再从 Actions 继续原发布。
+它核对原安装身份和账本接受版本；缺失磁盘数据、错误 bundle 或未知归属会停止。
+宿主服务故障需要管理员操作，日常部署和运行资源修复通过 daemon HTTP API 完成。
+即使其他 job 失败，成功生成的同 SHA bundle 仍可用于该发布。Actions artifact 保留 30 天；下载后自行保留。
+过期时用原接受 SHA 和账本中的两个 digest，按 [固定 bundle 生成命令](../tools/vps-bootstrap/README.md#prepare-locally)重新生成。
 
-## Secret inventory
+## Data recovery
 
-GitHub 名称/必选开关以 [CI/CD production table](ci-cd.md#production-environment)与实际 workflow 为准。
-下面是目前不由普通 wrapper 完整初始化的 runtime secret，只列名称：
-
-| Worker | Runtime secret |
-| --- | --- |
-| Mail Hero | `CREDENTIAL_KEY`、`BACKUP_TOKEN`、`BACKUP_RECEIPT_KEY`；启用能力另需消费者 Access/alert secret |
-| Todofy gateway | `CSRF_SIGNING_KEY`、`MAIL_WEBHOOK_TOKEN_SHA256`、`REPORT_BASIC_AUTH_SHA256`；已有轮换的 previous hash |
-| Todofy core | `GEMINI_API_KEY`、`TODOIST_API_KEY` |
-| Website relay | `GITHUB_DISPATCH_TOKEN`、`NOTION_TOKEN`、`NOTION_DATA_SOURCE_ID`、`NOTION_WEBHOOK_SECRET` |
-
-VPS 的三个 production secret 是 `PLATFORM_ACCESS_CLIENT_ID`、`PLATFORM_ACCESS_CLIENT_SECRET`、`PLATFORM_DEPLOY_TOKEN`。
-Fleet HMAC 与 Bearer 独立；owner/邮箱/project 等个人值也按秘密处理。
-空部署可生成新 key；历史 ciphertext 必须保留 Mail Hero/FlowDay 原解密 key及其绑定身份。
-[CMS exporter](../infra/scripts/platform_export.py)可用 production variable `VPS_BOOTSTRAP_CERT` 的 owner X.509 certificate
-密封 Access client/Tunnel handoff；private key 留 owner 端。这是一天交接 artifact，不是备份。
-创建时没保存 secret 就需要独立安全交接，不能假设 import/CMS 能找回。
-
-## 6. 历史恢复与备份：单独放行
-
-| 对象 | 激活前核对 |
-| --- | --- |
-| Mail Hero | SQL、R2 bytes/customMetadata/hash、最新删除清单、原 event/payload；保持停发，重建 DO 调度并对账 |
-| Todofy、FlowDay、Links、Lab | SQL/schema/原密钥；Todofy 未确定外部副作用；DO 状态另核对 |
-| Watch/Lab/Home DO | 目前没有统一跨账户 export/import；空 namespace 不恢复 watches/queue/settings/ledger/budgets |
-| Newsletter | 一致 SQLite/config、冻结身份、原 mode/delivery target、专用 auth；保留 unknown，不以新身份重发 |
-| Platform/observer | ledger targets/checkpoint 与 namespace/PVC/gate 一致；observer 最新 sequence/pending 或协调新 epoch |
-| Infra | 新账户采用到新 encrypted state；旧 state 仅作证据 |
-
-Daemon 非终态 checkpoint 会自动继续，held/failed 才等待 Resume；启动前离线核对，当前没有统一 quarantine 入口。
-不复制正在写入的 SQLite 主文件而忽略 WAL；PVC Retain 不是离机备份。
-Mail Hero [现有隔离恢复](../mail-hero/deploy/backup/README.md)保持 `activation_allowed=false`，不自动导入新账户/重建 Alarm。
-Mail Hero每日备份已在Cloudflare原生执行；D1/DO/R2普通副本直接进入私有R2，无新增加密或VPS collector。
-当前真实快照和Home恢复已验证；[每日备份](../mail-hero/docs/native-backup.md)给出三个设置，隔离新账户恢复仍单独验收。
-其他 VPS/DO 持续备份仍需按应用补齐，见 [改进计划](rebuild-audit.md)。
-有独立备份、解密材料和真实隔离恢复证据后才记录 RPO/RTO；本文不宣称完整重建/恢复已经通过。
+空环境 bootstrap 创建空业务状态。恢复历史时先停旧写入，保留原事件、密钥、SQL/R2/DO、Newsletter 登录/状态和 daemon 账本，
+按各应用恢复说明核对后激活。Mail Hero 每日副本在私有 R2，见 [原生备份](../mail-hero/docs/native-backup.md)。
+Watch/Lab/Home 等 DO 完整跨账户数据恢复、真实空账户与干净 VPS 演练留待后续。PVC Retain 和镜像 artifact 都不能替代业务备份。

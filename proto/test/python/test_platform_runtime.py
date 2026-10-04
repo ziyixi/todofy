@@ -67,12 +67,25 @@ class RuntimeWire(unittest.TestCase):
             with self.subTest(field=key), self.assertRaises(WireJsonError):
                 from_wire(pb.ReleaseSummary, invalid, strict=True)
 
+    def test_reconciliation_plan_is_bounded_and_contains_no_provider_objects(self):
+        value = {"name": "reconcilePlan", "base_release": "releases/" + RELEASE_ID,
+                 "base_etag": "revision-3", "fingerprint": "a" * 64, "state": "repairable",
+                 "observed_at": "2026-10-03T00:00:00Z", "changes": [
+                     {"resource_key": "platform-observer", "action": "update", "reason_code": "RUNTIME_FIELDS_CHANGED"}]}
+        self.assertEqual(to_wire(from_wire(pb.ReconcilePlan, value, strict=True).message), value)
+        for key, item in (("changes", value["changes"] * 11), ("fingerprint", "too-short"),
+                          ("state", "autoresume"), ("manifests", {})):
+            with self.subTest(field=key), self.assertRaises(WireJsonError):
+                from_wire(pb.ReconcilePlan, {**value, key: item}, strict=True)
+        schema = json.loads((FIXTURES.parent / "platform-runtime-v1.schema.json").read_text())["$defs"]
+        self.assertEqual(schema["ReconcilePlan"]["properties"]["changes"]["maxItems"], 10)
+
 
 class HttpMetadata(unittest.TestCase):
     def test_bindings_use_generated_request_and_response_classes(self):
         routes = {binding.rpc: binding for binding in service.HTTP_BINDINGS}
-        self.assertEqual(set(routes), {"GetNodeStatus", "ListWorkloads", "GetWorkload", "CreateRelease", "GetRelease", "ResumeRelease"})
-        for binding in (routes[name] for name in ("GetNodeStatus", "ListWorkloads", "GetWorkload", "GetRelease")):
+        self.assertEqual(set(routes), {"GetNodeStatus", "ListWorkloads", "GetWorkload", "CreateRelease", "GetRelease", "ResumeRelease", "GetReconcilePlan", "ReconcileRelease"})
+        for binding in (routes[name] for name in ("GetNodeStatus", "ListWorkloads", "GetWorkload", "GetRelease", "GetReconcilePlan")):
             self.assertEqual(binding.method, "GET")
             self.assertEqual(binding.body, "")
         self.assertEqual(routes["GetNodeStatus"].response, pb.NodeStatus)
@@ -82,6 +95,20 @@ class HttpMetadata(unittest.TestCase):
         self.assertEqual(request.name, "workloads/newsletter")
         request = decode_request(routes["ListWorkloads"], "/api/v1/workloads", [("page_size", "8")])
         self.assertEqual(request.page_size, 8)
+
+    def test_reconcile_singleton_and_cas_request_use_generated_routes(self):
+        routes = {binding.rpc: binding for binding in service.HTTP_BINDINGS}
+        request = decode_request(routes["GetReconcilePlan"], "/api/v1/reconcilePlan", [])
+        self.assertIsInstance(request, service.GetReconcilePlanRequest)
+        body = {"request_id": REQUEST_ID, "etag": "revision-3", "fingerprint": "f" * 64}
+        path = "/api/v1/releases/" + RELEASE_ID + ":reconcile"
+        request = decode_request(routes["ReconcileRelease"], path, [], body)
+        self.assertEqual(to_wire(request), {"name": "releases/" + RELEASE_ID, **body})
+        self.assertEqual(routes["ReconcileRelease"].response, pb.Release)
+        for invalid in ({**body, "targets": []}, {**body, "name": "releases/" + RELEASE_ID},
+                        {**body, "fingerprint": "f" * 63}, {"request_id": REQUEST_ID}):
+            with self.subTest(body=invalid), self.assertRaises(WireJsonError):
+                decode_request(routes["ReconcileRelease"], path, [], invalid)
 
     def test_named_body_and_whole_body_use_the_generated_requests(self):
         routes = {binding.rpc: binding for binding in service.HTTP_BINDINGS}

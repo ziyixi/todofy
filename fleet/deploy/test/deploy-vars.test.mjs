@@ -4,7 +4,7 @@ import { spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { INJECTED, SettingError, generateSecrets, injectedVars, placeholderIn, refusal, wranglerArgs } from '../deploy-vars.mjs'
 
 const WRAPPER = fileURLToPath(new URL('../deploy-vars.mjs', import.meta.url))
@@ -91,7 +91,8 @@ test('a missing AUD permits only dry runs; real, zero and malformed AUD cases ca
     const wrapper = join(deploy, 'deploy-vars.mjs')
     const output = join(directory, 'executed.json')
     const stub = join(directory, 'stub.mjs')
-    writeFileSync(wrapper, readFileSync(WRAPPER))
+    writeFileSync(wrapper, readFileSync(WRAPPER, 'utf8').replace('../../tools/cloud-config/worker-secrets.mjs',
+      pathToFileURL(fileURLToPath(new URL('../../../tools/cloud-config/worker-secrets.mjs', import.meta.url))).href))
     writeFileSync(stub, `import { writeFileSync } from 'node:fs'\nwriteFileSync(${JSON.stringify(output)}, JSON.stringify(process.argv.slice(2)))\n`)
     for (const [aud, dry, accepted] of [
       [null, true, true], [null, false, false], ['a'.repeat(64), true, true], ['a'.repeat(64), false, true],
