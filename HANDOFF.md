@@ -16,7 +16,20 @@ Rules for this file:
   what is done, what is left, how to verify it and what to check after its deploy. Link to the app docs for
   design detail instead of copying it.
 
-Last updated: 2026-10-03. The verified foundation implementation is `8628e5e`; the k3s/Fleet
+Last updated: 2026-10-04. Current verified VPS source is `4f1306b`; main release
+[37193606971](https://github.com/ziyixi/todofy/actions/runs/37193606971), post-release check
+[37193806220](https://github.com/ziyixi/todofy/actions/runs/37193806220) and clean repair
+[37194048785](https://github.com/ziyixi/todofy/actions/runs/37194048785) succeeded.
+Fleet's fresh receipt confirms both SHA/digests, generation 11, Newsletter 1/1 and all configured daemons running.
+The repair preserved all three Deployment generations and workload Pod UIDs/restart counts.
+Workers retain their independently verified `adaa835` release. Home has no unhandled reminders; the earlier dismissal remains effective.
+Routine automatic repair is enabled; persistent-resource identity changes, sensitive configuration and owner pauses remain guarded.
+The current rebuild instructions and acceptance limits are in [docs/rebuild.md](docs/rebuild.md)
+and [docs/rebuild-verification.md](docs/rebuild-verification.md).
+
+### Foundation and migration history
+
+The verified foundation implementation is `8628e5e`; the k3s/Fleet
 implementation and pinned connector bootstrap reached `main` at `54861b2`. The owner completed the bounded
 SDK repair at `c703378`; Actions then activated the first API release and verified the physical images.
 The subsequent `0f84d91` release encountered a Kubernetes field-ownership conflict. The owner completed
@@ -55,9 +68,9 @@ the business ledger remains factual, while the Home-owned disposition described 
 Typed VPS verification remains ready
 at `93b387c` with frozen targets and generation matching. No real mail/backup content was printed or
 used as a fixture; production proof is bounded status/marker metadata and Home acceptance.
-The owner Google Drive checkout still stalls reading Git objects: a bounded status check returned
+At that release the owner Google Drive checkout stalled reading Git objects: a bounded status check returned
 IO wait and only its own process was terminated. Remote main and this independent checkout are current;
-do not overwrite any owner/Claude changes or claim that local clone was fast-forwarded.
+the local clone was not fast-forwarded then. The subsequent clean checkout was verified and fast-forwarded during this bootstrap implementation; continue checking for owner/Claude changes before syncing.
 Local checks: 204 Worker tests and 81 UI tests passed. Plain offline recovery's 11 new tests passed;
 its 40-test combined legacy suite has one local GnuPG skip, with real GnuPG required in Linux CI.
 1000 synthetic objects' second backup used 16,621 DO reads, 6,201 SQL writes and 466 Alarm writes;
@@ -84,11 +97,11 @@ was in flight at that landing. The foundation evidence below describes that comp
 
 Newsletter source was imported on `main` from its deployed engine commit
 `c3d622d4771b1ca63ee4e3f785b79032cffc30e1`. Its independent image is `ghcr.io/ziyixi/todofy-newsletter`.
-The running Newsletter uses source `93b387c` and image artifact:
-`sha256:5d1fa9d445c321b30fa040fead4ae77392d60c73c0aff2a8a876a80442af3b25`.
+The running Newsletter uses source `4f1306b` and image artifact:
+`sha256:47add1811cc06d0616d140d4accd62681375e97e2a049cf6f1c6ba5f1f4baebe`.
 The package is public; anonymous manifest access and the manifest/config identity checks passed.
 `ghcr.io/ziyixi/newsletter` was the old VPS runtime. It is stopped, with its image and persistent state
-preserved. Newsletter runs in k3s and the latest `93b387c` release is ready; this does not prove an
+preserved. Newsletter runs in k3s and the latest `4f1306b` release is ready; this does not prove an
 external business operation. The application reads Todofy's
 `/api/summary` and `/api/recommendation` using its existing machine contract. See
 `newsletter/docs/import-source.md` and `newsletter/docs/deployment-drain.md` for the import and release boundaries.
@@ -125,7 +138,7 @@ Practical notes learned the hard way:
 
 ## In flight
 
-### Personal-cloud bootstrap and reconciliation
+### Completed: personal-cloud bootstrap and reconciliation
 
 `codex/personal-cloud-bootstrap` starts at `19582c4`. The owner authorised implementation of the
 configuration/bootstrap/release/drift-repair plan on 2026-10-04. This phase validates the existing
@@ -158,10 +171,13 @@ the complete configured repository. Follow-up branch CI 37191723503 passed; the 
 Full release 37192028704, independent Website release 37192071431 and post-release reconcile 37192262241 succeeded.
 Fleet confirms both actual digests/source SHA, generation 10, Newsletter 1/1 and all configured daemons running;
 Home confirms the new build and retained reminder dismissal. No-drift Worker deployment steps were skipped.
-The next branch gate adds an isolated official k3s API fixture to exercise real SSA/conflicts and Secret/PVC preservation.
-Routine auto-repair remains disabled until acceptance.
-No new-account creation, mail forwarding change, paid upgrade, data deletion, physical isolated
-drift drill or fresh-VPS acceptance has happened in this phase. See docs/rebuild-verification.md.
+The full follow-up branch CI 37193088127 passed at `4f1306b`, including the real official k3s API fixture.
+Its same-SHA main release and fresh Fleet receipts are recorded above. Real SSA restoration, no-write dry-run,
+409 ownership conflicts and Secret/PVC object preservation passed; the API-only fixture does not prove mounted data or Pod readiness.
+An isolated Cloudflare cron/service-binding drift was detected and restored, then all three owned fixtures were removed.
+The optional DNS physical fixture stopped at a read-only preflight 403 before creating any record; its restore proof remains pending.
+Routine auto-repair was enabled after successful production checks and clean repairs. No new-account creation,
+mail forwarding change, paid upgrade, business-data deletion or fresh-VPS acceptance occurred. See docs/rebuild-verification.md.
 
 ### Completed: persistent reminder controls
 
