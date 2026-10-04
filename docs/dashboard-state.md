@@ -82,3 +82,24 @@ gh workflow run personal-cloud-reconcile.yml --ref main -f operation=check
 
 CI 能阻止漏提交资源登记；账户内的手动改动要到下一次检查才能发现。
 状态来源不可达或观测过旧时，Dashboard 保留“不确定”的提示并显示检查时间，不能用上一次成功代替当前核验。
+
+## 2026-10-04 验收
+
+`8937e61` 的 [分支 CI](https://github.com/ziyixi/todofy/actions/runs/37228587877)、
+[main 发布](https://github.com/ziyixi/todofy/actions/runs/37229075275)和
+[发布后检查](https://github.com/ziyixi/todofy/actions/runs/37229282583)成功。
+新鲜 VPS/Fleet 回执确认实际源码为同一 SHA、发布 generation 为 12，两个镜像 digest 匹配发布目标。
+
+最近发送记录为 `provider_accepted`。34 条历史待核对记录全部属于 `workflow_attempts`，
+发送及其余类别为零。线上 Newsletter 运维区域状态正常，提示“最近一次邮件已被邮件服务接管。下一步：无需操作。”
+Home 的批次 34 已关闭，刷新后没有未处理提醒或摘要项目；Todofy 最新回执已保存零项摘要。
+桌面 Newsletter 行自动增高到 77.1 px，换行后没有溢出；`infra-state` 在月度 R2 用量和 R2 表均正确归属。
+本次验收没有触发新的业务发送。
+
+最后的 Home 文案修正 `d4a2aa9` 已通过
+[分支 CI](https://github.com/ziyixi/todofy/actions/runs/37230057641)、
+[main 发布](https://github.com/ziyixi/todofy/actions/runs/37230332240)和
+[发布后检查](https://github.com/ziyixi/todofy/actions/runs/37230452684)。
+13:00 本地时间的自然巡检后，浏览器显示 11 个当前 REST Worker 全部登记，包含没有流量的 `ziyixi-website`。
+`__unknown__` 和 `ziyixi-apex-redirect` 只出现在独立历史用量区，文案注明当前没有对应资源。
+Home 页脚为 `d4a2aa9`，没有未处理提醒、已忽略一项；Newsletter 批次跨新巡检保持关闭。

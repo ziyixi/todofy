@@ -16,25 +16,39 @@ Rules for this file:
   what is done, what is left, how to verify it and what to check after its deploy. Link to the app docs for
   design detail instead of copying it.
 
-In progress: `codex/dashboard-state-controls` implements Newsletter process/outcome separation,
-stable reminder batches, per-service guard controls and authoritative resource inventory. Local Home/Fleet
-unit and real workerd checks, Newsletter monitoring/mypy, observer/status tests, generated catalog and proto
-compatibility checks passed. The generic CI workflow's deployment-condition tests pass; its unrelated Links
-probe mocks fail in this Mac environment, so the complete branch CI remains the publication gate.
-No production writes yet. After the same green SHA is released, verify Home/Fleet receipts and current resources,
-then dismiss the current historical Newsletter reminder without replaying business work.
-Operational semantics and the exact account inventory command are in [docs/dashboard-state.md](docs/dashboard-state.md).
+Last updated: 2026-10-04. Dashboard state controls landed at
+`8937e61c8b018d8c893356759f28cd9f2fd4ac57`: Newsletter process/outcome separation,
+stable reminder batches, independent service controls and exact account inventory checks.
+[Branch CI 37228587877](https://github.com/ziyixi/todofy/actions/runs/37228587877),
+[main release 37229075275](https://github.com/ziyixi/todofy/actions/runs/37229075275) and
+[post-release check 37229282583](https://github.com/ziyixi/todofy/actions/runs/37229282583) succeeded.
+Fresh VPS/Fleet receipts verify the same source, release `686ff4c5-c790-4705-9a54-5b9d2d5160ca`
+and generation 12, with these actual image digests:
 
-Last updated: 2026-10-04. Current verified VPS source is `4f1306b`; main release
-[37193606971](https://github.com/ziyixi/todofy/actions/runs/37193606971), post-release check
-[37193806220](https://github.com/ziyixi/todofy/actions/runs/37193806220) and clean repair
-[37194048785](https://github.com/ziyixi/todofy/actions/runs/37194048785) succeeded.
-Fleet's fresh receipt confirms both SHA/digests, generation 11, Newsletter 1/1 and all configured daemons running.
-The repair preserved all three Deployment generations and workload Pod UIDs/restart counts.
-Workers retain their independently verified `adaa835` release. Home has no unhandled reminders; the earlier dismissal remains effective.
-Routine automatic repair is enabled; persistent-resource identity changes, sensitive configuration and owner pauses remain guarded.
-The current rebuild instructions and acceptance limits are in [docs/rebuild.md](docs/rebuild.md)
-and [docs/rebuild-verification.md](docs/rebuild-verification.md).
+| Image | Verified digest |
+| --- | --- |
+| Newsletter | `sha256:4b06b3f2ffb5e4247dad046749118a7593c216c1f4772285a31634e1c47224cb` |
+| Platform | `sha256:54ef3cd0b9b581657df6dc68ce4958b6299bf76fc97a56807fb875f98f46e93d` |
+
+The latest delivery record is `provider_accepted`. Home's Newsletter ops region shows normal status
+and says the mail provider accepted the latest email, with no action required. All 34 historical
+unknown outcomes are `workflow_attempts`; delivery and the other categories are zero.
+Home's batch 34 was dismissed; a subsequent refresh showed no unhandled reminders or digest items,
+and Todofy's latest receipt saved zero digest items. The business records remain intact.
+The desktop Newsletter row grew to 77.1 px and wrapped without overflow. Both monthly R2 usage and
+the R2 table correctly register `infra-state`. Verification triggered no new business sends.
+
+The final Home wording revision `d4a2aa9733f1c4277c79e897c5fe383f9afeb64e` passed
+[branch CI 37230057641](https://github.com/ziyixi/todofy/actions/runs/37230057641),
+[main release 37230332240](https://github.com/ziyixi/todofy/actions/runs/37230332240) and
+[post-release check 37230452684](https://github.com/ziyixi/todofy/actions/runs/37230452684).
+After the natural 13:00 local tick, the browser showed all 11 current REST Workers registered,
+including idle `ziyixi-website`. `__unknown__` and `ziyixi-apex-redirect` appeared only in the
+separate historical usage section, with wording that no current resource matches them.
+Home's footer shows `d4a2aa9`, zero unhandled reminders and one ignored item; the dismissed
+Newsletter batch remains closed across the new tick. Operational semantics and acceptance
+are in [docs/dashboard-state.md](docs/dashboard-state.md); rebuild limits remain in
+[docs/rebuild.md](docs/rebuild.md) and [docs/rebuild-verification.md](docs/rebuild-verification.md).
 
 ### Foundation and migration history
 
