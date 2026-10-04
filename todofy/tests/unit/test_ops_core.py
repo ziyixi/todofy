@@ -464,6 +464,7 @@ DEPLOYMENT_MODES = {
     "watch": ["maintenance", "notifications"],
     "fleet": ["maintenance"],
     "newsletter": ["maintenance"],
+    "notion-publish": ["maintenance"],
 }
 
 

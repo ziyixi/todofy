@@ -153,7 +153,7 @@ test('status: maintenance is down; an unreadable source is down with only status
 
 /** The modes each app writes even on a `status_unavailable` status (its deployment variables, contracts/ops-v1
  * README "modes"); a key read from storage is left out then, never guessed. */
-const DEPLOYMENT_MODES = { 'mail-hero': ['maintenance', 'force_send_paused'], todofy: ['maintenance', 'processing_paused', 'force_pause_todoist', 'reminder_enabled'], lab: ['maintenance'], watch: ['maintenance', 'notifications'], fleet: ['maintenance'], newsletter: ['maintenance'] }
+const DEPLOYMENT_MODES = { 'mail-hero': ['maintenance', 'force_send_paused'], todofy: ['maintenance', 'processing_paused', 'force_pause_todoist', 'reminder_enabled'], lab: ['maintenance'], watch: ['maintenance', 'notifications'], 'notion-publish': ['maintenance'], fleet: ['maintenance'], newsletter: ['maintenance'] }
 
 test('status: every deployment-variable mode is a boolean, also on status_unavailable', () => {
   for (const value of [status(), status({ env: { ...env, MAINTENANCE_MODE: 'true' } }), status({ coordinator: null }), status({ snapshot: null })]) {
@@ -163,6 +163,7 @@ test('status: every deployment-variable mode is a boolean, also on status_unavai
     const fixture = JSON.parse(readFileSync(new URL(`../../../contracts/ops-v1/fixtures/OpsStatus/${file}`, import.meta.url), 'utf8'))
     assert.ok(Object.hasOwn(DEPLOYMENT_MODES, fixture.app), `${file}: an explicit deployment-mode profile is required`)
     for (const key of DEPLOYMENT_MODES[fixture.app]) assert.equal(typeof fixture.modes[key], 'boolean', `${file}: ${key}`)
+    if (file === 'notion-publish-ok.json') assert.deepEqual(fixture.modes, { maintenance: false }, `${file}: the relay has no other deployment modes`)
   }
 })
 
