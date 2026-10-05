@@ -1,6 +1,6 @@
 # Email model verification
 
-Recorded 2026-10-04 (America/Los_Angeles). Application release:
+Recorded 2026-10-04, updated 2026-10-05 (America/Los_Angeles). Application release:
 `26c9662c1ace2c578866f1691b3549a0cabb2f93`.
 Configuration and rollback instructions are in
 [Todofy README](../todofy/README.md#gemini-model-order).
@@ -53,11 +53,25 @@ forwarding. The persisted event retry counter is separate from the Gemini client
 counter. First-call success and fallback attempt accounting are verified by the fake-service tests.
 Home checks the synthetic run's downstream progress on its normal 30-minute cadence.
 
-## Pending natural report
+## Report model verified; automatic trigger provenance pending
 
-The next configured daily precomputation is `2026-10-05T13:30:00Z` (06:30 local).
-A thread follow-up is scheduled at 06:45 local to inspect the next natural report's actual model,
-status and computation time, then update this record. A default configuration and successful tests
-do not prove that a future report has called Gemini. If the window contains no eligible material,
-or Flash falls back, record that result and retain the pending check when necessary.
-Do not manually recompute history for acceptance.
+After the next configured precomputation time, `2026-10-05T13:30:00Z` (06:30 local),
+a bounded read of the October 5 report metadata confirmed:
+
+| Report | Computed at (UTC) | Local time | Status | Actual model | Error code |
+| --- | --- | --- | --- | --- | --- |
+| Daily summary | `2026-10-05T13:40:19Z` | 06:40:19 | `ok` | `gemini-3.8-flash` | Empty |
+| Top 10 recommendation | `2026-10-05T13:40:00Z` | 06:40:00 | `ok` | `gemini-3.8-flash` | Empty |
+
+Both had nonempty input. The actual Worker still reports the application SHA above,
+the two configured model orders and `REPORT_PRECOMPUTE_UTC=13:30`.
+This proves successful live Flash report calls after the email-model release; these are neither
+empty-window results nor fallback-model responses. Top 5's default order remains covered by
+the fake-service checks; this read found no October 5 Top 5 row.
+
+This acceptance issued only read-only settings and finite D1 metadata queries. It did not call
+the summary/recommendation HTTP endpoints, which can compute missing reports, or trigger recompute.
+The current report ledger does not store trigger origin, and normal on-demand requests can replace
+the same daily row. These timestamps therefore do not independently prove that an automatic Alarm
+initiated computation. Platform invocation evidence for the corresponding time window is still
+pending; the acceptance follow-up remains active. Do not regenerate history to fill this evidence gap.

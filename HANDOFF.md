@@ -16,10 +16,10 @@ Rules for this file:
   what is done, what is left, how to verify it and what to check after its deploy. Link to the app docs for
   design detail instead of copying it.
 
-Last updated: 2026-10-04.
+Last updated: 2026-10-05.
 <!-- Active work is separate from the production evidence below. -->
 
-## Todofy email model order: deployed; natural report pending
+## Todofy email model order: deployed; report trigger provenance pending
 
 Release `26c9662c1ace2c578866f1691b3549a0cabb2f93` separates email/Canary model selection from daily reports.
 Email order is Flash-Lite 3.5, Flash 3.8, Flash 3.7; reports retain Flash 3.8, Flash 3.7,
@@ -34,11 +34,17 @@ succeeded. Cloudflare's actual variables and the live Budget page match both con
 Synthetic Canary `canary-manual-20261005T004417Z` completed at Todofy using real
 `gemini-3.5-flash-lite`; it created no Todoist task or report-summary row.
 
-Pending: the next natural daily report's recorded model after precomputation at
-`2026-10-05T13:30:00Z` (06:30 America/Los_Angeles). A thread follow-up at 06:45 local will verify
-the actual result and update the evidence. Fake services cover provider failures and frozen-history
-behavior; acceptance does not regenerate historical summaries. Local test details, production
-Canary scope and rollback links are in
+The October 5 finite metadata check confirmed real `gemini-3.8-flash` results for Top 10 at
+`2026-10-05T13:40:00Z` and daily summary at `13:40:19Z`, both `ok` with nonempty input and no stored
+error code. The application still reports the accepted release SHA and both intended model orders.
+Branch `codex/email-report-acceptance` records this evidence only; it changes no application or switch.
+
+Pending: platform invocation evidence that identifies the automatic Alarm as the trigger.
+The report ledger stores no trigger origin; an on-demand request can write the same daily row.
+This acceptance made no compute request, so it verifies the live report model without independently
+proving automatic-trigger provenance. The thread follow-up remains active for that final check.
+Fake services cover provider failures, Top 5's default chain and frozen history. Local test details,
+production Canary scope, report observations and rollback links are in
 [docs/email-model-verification.md](docs/email-model-verification.md).
 
 ## Website content sync: deployed; natural daily tick pending
