@@ -69,7 +69,7 @@ This proves successful live Flash report calls after the email-model release; th
 empty-window results nor fallback-model responses. Top 5's default order remains covered by
 the fake-service checks; this read found no October 5 Top 5 row.
 
-This acceptance issued only read-only settings and finite D1 metadata queries. It did not call
+This acceptance used read-only observations and finite D1 metadata queries. It did not call
 the summary/recommendation HTTP endpoints, which can compute missing reports, or trigger recompute.
 The current report ledger does not store trigger origin, and normal on-demand requests can replace
 the same daily row. These timestamps therefore do not independently prove that an automatic Alarm
