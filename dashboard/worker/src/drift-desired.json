@@ -679,6 +679,11 @@
           "source": "config"
         },
         {
+          "name": "GEMINI_EMAIL_MODELS",
+          "type": "plain_text",
+          "source": "config"
+        },
+        {
           "name": "GEMINI_MODELS",
           "type": "plain_text",
           "source": "config"
