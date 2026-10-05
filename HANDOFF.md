@@ -19,27 +19,27 @@ Rules for this file:
 Last updated: 2026-10-04.
 <!-- Active work is separate from the production evidence below. -->
 
-## Todofy email model order: in progress
+## Todofy email model order: deployed; natural report pending
 
-Branch `codex/email-flash-lite` separates email/Canary model selection from daily reports.
+Release `26c9662c1ace2c578866f1691b3549a0cabb2f93` separates email/Canary model selection from daily reports.
 Email order is Flash-Lite 3.5, Flash 3.8, Flash 3.7; reports retain Flash 3.8, Flash 3.7,
 Flash-Lite 3.5. Missing email configuration inherits the existing default chain.
 The shared client, fallback classifier, deadlines, token budget and frozen history stay intact.
 The additive owner status field and Budget page show both orders.
 
-Local checks: the five model-config unit tests, 45 owner-status tests and all 93 frontend tests
-passed; TypeScript, proto lint/typecheck/schema, Ruff and the 15 cloud-config tests passed.
-All 68 selected workerd cases passed across the initial run and the exact fixed fixture rerun.
-The original mixed-row fixture omitted frozen columns; its seed calls now match row shapes.
-Vite compiled and the direct JS budget check passed (176,584 gzip bytes). The local build wrapper
-still has its existing URL-escaped-space path problem; the unchanged Actions wrapper runs on a
-path without spaces and remains a required gate.
+[Branch CI 37247921893](https://github.com/ziyixi/todofy/actions/runs/37247921893),
+[same-SHA main release 37248342156](https://github.com/ziyixi/todofy/actions/runs/37248342156)
+and [post-release reconciliation 37248539807](https://github.com/ziyixi/todofy/actions/runs/37248539807)
+succeeded. Cloudflare's actual variables and the live Budget page match both configured orders.
+Synthetic Canary `canary-manual-20261005T004417Z` completed at Todofy using real
+`gemini-3.5-flash-lite`; it created no Todoist task or report-summary row.
 
-Pending: complete branch CI, same-SHA main release, synthetic production Canary,
-and the next natural daily report's recorded model. Fake services cover fallback failures;
-production will not be deliberately broken or historical summaries regenerated for acceptance.
-Rollback is a committed email-order change through the same release flow; see
-[Todofy README](todofy/README.md#gemini-model-order).
+Pending: the next natural daily report's recorded model after precomputation at
+`2026-10-05T13:30:00Z` (06:30 America/Los_Angeles). A thread follow-up at 06:45 local will verify
+the actual result and update the evidence. Fake services cover provider failures and frozen-history
+behavior; acceptance does not regenerate historical summaries. Local test details, production
+Canary scope and rollback links are in
+[docs/email-model-verification.md](docs/email-model-verification.md).
 
 ## Website content sync: deployed; natural daily tick pending
 
