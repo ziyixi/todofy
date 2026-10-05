@@ -1,6 +1,6 @@
 """Gemini ``generateContent`` with the model fallback chain (v2 plan §5.3 step A).
 
-One call is one step: models are tried in ``GEMINI_MODELS`` order while the
+One call is one step: models are tried in the caller's order (default ``GEMINI_MODELS``) while the
 verdict says the failure is model-specific, all inside the caller's deadline.
 Retries across alarms (and their backoff) belong to the caller.
 """
@@ -36,6 +36,7 @@ async def generate(
     deadline_ms: int,
     response_schema: dict | None = None,
     preface: str = "",
+    models: list[str] | None = None,
 ) -> GeminiResult:
     """``deadline_ms`` is an absolute epoch-ms deadline (e.g. ``now_ms() + 90_000``).
 
@@ -46,7 +47,7 @@ async def generate(
     headers = {"content-type": "application/json", "x-goog-api-key": var(env, "GEMINI_API_KEY")}
     body = gemini_wire.build_request(system, gemini_wire.user_turn(user, preface), response_schema)
     model_timeout_ms = integer(env, "GEMINI_TIMEOUT_MS", GEMINI_MODEL_TIMEOUT * 1000)
-    models = gemini_models(env)
+    models = gemini_models(env) if models is None else models
 
     # Reported when the deadline leaves no room for even one attempt.
     result = GeminiResult(

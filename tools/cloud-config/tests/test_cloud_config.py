@@ -66,6 +66,8 @@ ACCESS_ISSUER = "https://old.cloudflareaccess.com"
 ACCESS_AUDIENCE = "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
 ACCOUNT_ID = "dddddddddddddddddddddddddddddddd"
 SAFETY_BUDGET = "10"
+GEMINI_MODELS = "model-report,model-fallback"
+GEMINI_EMAIL_MODELS = "model-email,model-report"
 '''
 
 

@@ -32,6 +32,7 @@ CORE_VARS = {
     "TODOFY_PUBLIC_HOST",
     "MAIL_SOURCE_ID",
     "GEMINI_MODELS",
+    "GEMINI_EMAIL_MODELS",
     "GEMINI_DAILY_TOKEN_BUDGET",
     "LOOKUP_DELAY_MS",
     "REPORT_DEFAULT_TOP",
@@ -119,9 +120,10 @@ def test_core_vars() -> None:
     assert {name: variables[name] for name in FIXED_UPSTREAMS} == FIXED_UPSTREAMS
     assert DOMAIN.fullmatch(variables["TODOFY_PUBLIC_HOST"])
     assert re.fullmatch(r"[a-z0-9][a-z0-9._-]{0,63}", variables["MAIL_SOURCE_ID"])
-    models = variables["GEMINI_MODELS"].split(",")
-    assert 1 <= len(models) <= 5 and len(set(models)) == len(models)
-    assert all(re.fullmatch(r"[a-z0-9][a-z0-9.-]{0,63}", model) for model in models)
+    for name in ("GEMINI_MODELS", "GEMINI_EMAIL_MODELS"):
+        models = variables[name].split(",")
+        assert 1 <= len(models) <= 5 and len(set(models)) == len(models)
+        assert all(re.fullmatch(r"[a-z0-9][a-z0-9.-]{0,63}", model) for model in models)
     assert _integer(variables["GEMINI_DAILY_TOKEN_BUDGET"], 1, 1_000_000_000)
     assert _integer(variables["LOOKUP_DELAY_MS"], 1_000, 3_600_000)
     assert _integer(variables["REPORT_DEFAULT_TOP"], 1, MAX_TOP_N)

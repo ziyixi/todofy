@@ -118,6 +118,34 @@ describe('budget and health pages', () => {
     expect(screen.getByRole('meter', { name: '15 分钟窗口' })).toHaveAttribute('aria-valuemax', '1000')
   })
 
+  it('shows the email and report fallback orders independently', async () => {
+    const emailModels = ['gemini-3.5-flash-lite', 'gemini-3.8-flash', 'gemini-3.7-flash']
+    const reportsModels = overview().gemini!.models!
+    mockApi({ 'GET /api/v1/serviceStatus': overview({ gemini: { ...overview().gemini, email_models: emailModels } }) })
+    renderApp('/budget')
+    const gemini = await screen.findByRole('region', { name: 'Gemini' })
+    const orders = within(gemini).getAllByRole('list')
+    expect(within(gemini).getByText('逐封邮件摘要模型顺序')).toBeInTheDocument()
+    expect(within(gemini).getByText('日报与推荐模型顺序')).toBeInTheDocument()
+    for (const [index, models] of [emailModels, reportsModels].entries()) {
+      const items = within(orders[index]!).getAllByRole('listitem')
+      expect(items.map((item) => within(item).getByText(/gemini-/).textContent)).toEqual(models)
+      expect(items[0]).toHaveTextContent('首选')
+      expect(within(orders[index]!).getAllByText('首选')).toHaveLength(1)
+    }
+  })
+
+  it('shows an old response without an email chain as unavailable', async () => {
+    mockApi({})
+    renderApp('/budget')
+    const gemini = await screen.findByRole('region', { name: 'Gemini' })
+    const emailFact = within(gemini).getByText('逐封邮件摘要模型顺序').parentElement!
+    expect(emailFact).toHaveTextContent('未提供')
+    expect(within(emailFact).queryByRole('list')).not.toBeInTheDocument()
+    expect(within(gemini).getAllByRole('list')).toHaveLength(1)
+    expect(within(gemini).getByText('gemini-3.8-flash')).toBeInTheDocument()
+  })
+
   it('shows the build, flags and active counts', async () => {
     mockApi({ 'GET /api/v1/serviceStatus': overview({ switches: { ...overview().switches, processing_paused: true } }) })
     renderApp('/health')

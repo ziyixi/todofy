@@ -19,6 +19,28 @@ Rules for this file:
 Last updated: 2026-10-04.
 <!-- Active work is separate from the production evidence below. -->
 
+## Todofy email model order: in progress
+
+Branch `codex/email-flash-lite` separates email/Canary model selection from daily reports.
+Email order is Flash-Lite 3.5, Flash 3.8, Flash 3.7; reports retain Flash 3.8, Flash 3.7,
+Flash-Lite 3.5. Missing email configuration inherits the existing default chain.
+The shared client, fallback classifier, deadlines, token budget and frozen history stay intact.
+The additive owner status field and Budget page show both orders.
+
+Local checks: the five model-config unit tests, 45 owner-status tests and all 93 frontend tests
+passed; TypeScript, proto lint/typecheck/schema, Ruff and the 15 cloud-config tests passed.
+All 68 selected workerd cases passed across the initial run and the exact fixed fixture rerun.
+The original mixed-row fixture omitted frozen columns; its seed calls now match row shapes.
+Vite compiled and the direct JS budget check passed (176,584 gzip bytes). The local build wrapper
+still has its existing URL-escaped-space path problem; the unchanged Actions wrapper runs on a
+path without spaces and remains a required gate.
+
+Pending: complete branch CI, same-SHA main release, synthetic production Canary,
+and the next natural daily report's recorded model. Fake services cover fallback failures;
+production will not be deliberately broken or historical summaries regenerated for acceptance.
+Rollback is a committed email-order change through the same release flow; see
+[Todofy README](todofy/README.md#gemini-model-order).
+
 ## Website content sync: deployed; natural daily tick pending
 
 `da35586e171f4eb8a9df93746f4b5948008ec8f3` passed branch CI and the same SHA passed the main release.

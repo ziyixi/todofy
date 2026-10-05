@@ -34,6 +34,19 @@ cron */10 ----------> scheduled() -------------------------> wake() (RPC)
 
 Any other host or path is a 404. `workers.dev` and preview URLs are off.
 
+## Gemini model order
+
+Single-email summaries and the email Canary use `gemini-3.5-flash-lite`, then
+`gemini-3.8-flash`, then `gemini-3.7-flash`. Daily summaries and Top 5/Top 10 recommendations
+keep `gemini-3.8-flash`, then `gemini-3.7-flash`, then `gemini-3.5-flash-lite`.
+These orders are committed as `GEMINI_EMAIL_MODELS` and `GEMINI_MODELS` in `wrangler.toml`;
+an older config without `GEMINI_EMAIL_MODELS` inherits the default chain. The Budget page shows
+both orders, and each result records the model that answered. Token budget and fallback rules
+remain shared; completed email summaries are not recomputed when the config changes.
+
+To restore Flash as the preferred email model, set `GEMINI_EMAIL_MODELS` to the same order as
+`GEMINI_MODELS` and publish through the normal branch CI and main Actions flow.
+
 ## Event states
 
 | State | Meaning |

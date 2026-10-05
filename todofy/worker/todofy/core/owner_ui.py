@@ -323,6 +323,7 @@ def service_status(overview: Mapping[str, Any]) -> status_pb.ServiceStatus:
             used_tokens=_int32(gemini["used_tokens"]),
             call_count=gemini["calls"],
             models=tuple(gemini["models"]),
+            email_models=tuple(gemini.get("email_models", ())),
         ),
         todoist=status_pb.TodoistBudget(
             block_expire_time=todoist["blocked_until"],

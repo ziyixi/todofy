@@ -106,7 +106,7 @@ is public, so nothing personal or secret goes there), and changing one is a comm
 | UI host, hooks hosts (at most 4; `daily.ziyixi.science` since cutover) | `gateway/wrangler.toml` `routes` (the UI host first, then each hooks host) and `[vars]` `TODOFY_PUBLIC_HOST`, `TODOFY_HOOKS_HOSTS`; the core's `TODOFY_PUBLIC_HOST` (the reminder links to the UI) must be the same |
 | Access issuer and AUD (step 2) | `gateway/wrangler.toml` `ACCESS_ISSUER`, `ACCESS_AUDIENCE` |
 | mail source ID | `wrangler.toml` `MAIL_SOURCE_ID` (`mail-hero-personal`; must equal the source ID of the imported ledger) |
-| Gemini models, daily token budget | `wrangler.toml` `GEMINI_MODELS` (first is preferred), `GEMINI_DAILY_TOKEN_BUDGET` |
+| Gemini models, daily token budget | `wrangler.toml` `GEMINI_EMAIL_MODELS` (single email and Canary), `GEMINI_MODELS` (daily summaries and recommendations), `GEMINI_DAILY_TOKEN_BUDGET`; first model is preferred |
 | report top and precompute time | `wrangler.toml` `REPORT_DEFAULT_TOP` (must equal the newsletter's `?top=`, 10, so its report is precomputed), `REPORT_PRECOMPUTE_UTC` |
 | lookup delay, legacy text retention | `wrangler.toml` `LOOKUP_DELAY_MS`, `LEGACY_TEXT_RETENTION_DAYS` (`0` keeps imported mail text forever) |
 | GTD snapshot time, carryover | `wrangler.toml` `GTD_COLLECT_UTC` (`13:00`, before the 13:30 precompute; `off` stops the snapshot and with it the carryover and the GTD counters), `REPORT_CARRYOVER_DAYS` (`14`, at most 14; `0` turns the carryover off) |

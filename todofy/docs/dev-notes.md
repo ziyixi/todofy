@@ -362,8 +362,9 @@ Existing `var/flag/csv`, plus small typed readers as needed:
 def integer(env, name: str, default: int) -> int
 def source_id(env) -> str                           # MAIL_SOURCE_ID, default "mail-hero-personal"
 def gemini_models(env) -> list[str]                 # GEMINI_MODELS csv, first is preferred
+def gemini_email_models(env) -> list[str]           # GEMINI_EMAIL_MODELS, unset inherits GEMINI_MODELS
 ```
-Vars (plain, with defaults): `MAIL_SOURCE_ID`, `GEMINI_API_BASE`, `GEMINI_MODELS`,
+Vars (plain, with defaults): `MAIL_SOURCE_ID`, `GEMINI_API_BASE`, `GEMINI_MODELS`, `GEMINI_EMAIL_MODELS`,
 `GEMINI_TIMEOUT_MS` (60000), `GEMINI_DAILY_TOKEN_BUDGET` (3000000), `TODOIST_API_BASE`,
 `TODOIST_DEFAULT_PROJECT_ID`, `LOOKUP_DELAY_MS` (120000), `BACKOFF_BASE_MS` (60000),
 `WATCHDOG_MS` (120000), `TODOIST_ATTEMPT_TIMEOUT_MS` (14000), `REPORT_DEFAULT_TOP` (10), `REPORT_PRECOMPUTE_UTC` ("13:30"), `REMINDER_ENABLED`,
@@ -464,14 +465,18 @@ class GeminiResult:
     tokens: int                     # usageMetadata.totalTokenCount summed over attempts
 
 async def generate(env, *, system: str, user: str, deadline_ms: int,   # deadline_ms: absolute epoch ms
-                   response_schema: dict | None = None, preface: str = "") -> GeminiResult
+                   response_schema: dict | None = None, preface: str = "",
+                   models: list[str] | None = None) -> GeminiResult
 ```
-Tries `gemini_models(env)` in order while `verdict.next_model`, each attempt capped by
+Tries the supplied `models`, or `gemini_models(env)` when omitted, in order while `verdict.next_model`, each attempt capped by
 `GEMINI_TIMEOUT_MS` and the remaining `deadline_ms`. No retries across alarms here; the caller applies
 `backoff`. `user` is always framed by `core.gemini_wire` between `<<<BEGIN_CONTENT>>>` and
 `<<<END_CONTENT>>>` (markers inside the content are neutralised; golden-tested); trusted `preface` text,
 such as the truncation notice, goes before the fence. Summary step: `system=prompts.SUMMARY_EMAIL`,
-`user=gemini_wire.summary_content(event)`, `preface=render.content_notice(event)`.
+`user=gemini_wire.summary_content(event)`, `preface=render.content_notice(event)`,
+`models=gemini_email_models(env)`. Email and Canary prefer Flash-Lite; daily summaries and all
+recommendation sizes keep the default Flash-first chain. Both share the same deadline and daily
+token budget. A completed email keeps its frozen summary and model through a config change.
 
 ### todoist.py (P; used by R)
 ```python

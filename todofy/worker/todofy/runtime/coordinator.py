@@ -87,7 +87,7 @@ from todofy.runtime import (
     retention,
     todoist,
 )
-from todofy.runtime.config import flag, gemini_models, integer, source_id, var
+from todofy.runtime.config import flag, gemini_email_models, gemini_models, integer, source_id, var
 from todofy.runtime.http import NO_CONTENT, Result, failed, not_found, ok
 from todofy.runtime.interop import now_ms, now_s, read_capped, sha256_hex
 from todofy.runtime.ledger import WORKER, CompletedSummary, EventRow, OwnerAction
@@ -551,6 +551,7 @@ class TodofyCore(DurableObject):
                 "used_tokens": usage["used_tokens"],
                 "calls": usage["calls"],
                 "models": gemini_models(self.env),
+                "email_models": gemini_email_models(self.env),
             },
             "todoist": {
                 "blocked_until": api.timestamp(blocked_until) if blocked_until > now else None,
@@ -831,6 +832,7 @@ class TodofyCore(DurableObject):
                 user=content,
                 preface=preface,
                 deadline_ms=started + GEMINI_STEP_BUDGET * 1000,
+                models=gemini_email_models(self.env),
             )
             used = result.tokens
         finally:

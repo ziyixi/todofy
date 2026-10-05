@@ -1,6 +1,7 @@
 """gemini.generate in real workerd against the loopback fake: fallback chain,
 per-attempt timeouts inside the step deadline, token accounting, wire format."""
 
+import socket
 import time
 from collections.abc import Iterator
 from email.utils import formatdate
@@ -16,6 +17,7 @@ from todofy.core.prompts import SUMMARY_EMAIL
 
 API_KEY = "fake-gemini-key"
 MODELS = ["model-a", "model-b", "model-c"]
+EMAIL_MODELS = ["gemini-3.5-flash-lite", "gemini-3.8-flash", "gemini-3.7-flash"]
 TIMEOUT_MS = 1500
 
 
@@ -82,37 +84,46 @@ def test_first_model_answers_with_the_fenced_turn_and_the_key_in_a_header(probe,
     }
 
 
-def test_model_specific_failures_fall_through_the_chain_and_tokens_add_up(probe, fake):
-    fake.queue("POST", path("model-a"), answer("   ", tokens=5))  # empty output
-    fake.queue("POST", path("model-b"), Reply(503, {"error": {"code": 503}}))
-    fake.queue("POST", path("model-c"), answer("第三个模型", tokens=10))
-    result = generate(probe)
-    assert (result["ok"], result["text"], result["model"], result["tokens"]) == (True, "第三个模型", "model-c", 15)
-    assert tried(fake) == MODELS
+@pytest.mark.parametrize("models", [None, EMAIL_MODELS], ids=["default", "email"])
+def test_model_specific_failures_fall_through_the_chain_and_tokens_add_up(probe, fake, models):
+    chain = MODELS if models is None else models
+    fake.queue("POST", path(chain[0]), answer("   ", tokens=5))  # empty output
+    fake.queue("POST", path(chain[1]), Reply(503, {"error": {"code": 503}}))
+    fake.queue("POST", path(chain[2]), answer("第三个模型", tokens=10))
+    result = generate(probe, models=models)
+    assert (result["ok"], result["text"], result["model"], result["tokens"]) == (True, "第三个模型", chain[2], 15)
+    assert (result["prompt_tokens"], result["attempts"]) == (2, 3)
+    assert tried(fake) == chain
     assert len({r.body for r in fake.received("POST")}) == 1  # the same request to every model
 
 
-def test_retired_model_404_tries_the_next_model(probe, fake):
-    fake.queue("POST", path("model-a"), Reply(404, {"error": {"code": 404}}))
-    fake.queue("POST", path("model-b"), answer("ok"))
-    assert generate(probe)["model"] == "model-b"
+@pytest.mark.parametrize("models", [None, EMAIL_MODELS], ids=["default", "email"])
+def test_retired_model_404_tries_the_next_model(probe, fake, models):
+    chain = MODELS if models is None else models
+    fake.queue("POST", path(chain[0]), Reply(404, {"error": {"code": 404}}))
+    fake.queue("POST", path(chain[1]), answer("ok"))
+    assert generate(probe, models=models)["model"] == chain[1]
 
 
 @pytest.mark.parametrize("status", [400, 401, 403])
-def test_rejections_that_fail_on_every_model_stop_the_chain(probe, fake, status):
-    fake.queue("POST", path("model-a"), Reply(status, {"error": {"code": status}}))
-    result = generate(probe)
+@pytest.mark.parametrize("models", [None, EMAIL_MODELS], ids=["default", "email"])
+def test_rejections_that_fail_on_every_model_stop_the_chain(probe, fake, status, models):
+    model = (MODELS if models is None else models)[0]
+    fake.queue("POST", path(model), Reply(status, {"error": {"code": status}}))
+    result = generate(probe, models=models)
     assert (result["ok"], result["code"], result["next_model"]) == (False, "llm_request_rejected", False)
-    assert (result["model"], result["text"]) == ("model-a", "")
-    assert tried(fake) == ["model-a"]
+    assert (result["model"], result["text"], result["attempts"]) == (model, "", 1)
+    assert tried(fake) == [model]
 
 
-def test_quota_on_every_model_is_llm_quota_with_retry_after_seconds(probe, fake):
-    for model in MODELS:
+@pytest.mark.parametrize("models", [None, EMAIL_MODELS], ids=["default", "email"])
+def test_quota_on_every_model_is_llm_quota_with_retry_after_seconds(probe, fake, models):
+    chain = MODELS if models is None else models
+    for model in chain:
         fake.queue("POST", path(model), Reply(429, {"error": {"code": 429}}, {"retry-after": "7"}))
-    result = generate(probe)
-    assert (result["ok"], result["code"], result["model"], result["retry_after"]) == (False, "llm_quota", "model-c", 7)
-    assert tried(fake) == MODELS
+    result = generate(probe, models=models)
+    assert (result["ok"], result["code"], result["model"], result["retry_after"]) == (False, "llm_quota", chain[2], 7)
+    assert tried(fake) == chain
 
 
 def test_quota_retry_after_as_http_date(probe, fake):
@@ -125,30 +136,37 @@ def test_quota_retry_after_as_http_date(probe, fake):
     assert 20 <= result["retry_after"] <= 31
 
 
-def test_every_model_failing_is_summary_failed_from_the_last_model(probe, fake):
-    fake.default("POST", path("model-a"), Reply(500, b"oops"))
-    fake.default("POST", path("model-b"), Reply(502, b"oops"))
-    fake.default("POST", path("model-c"), Reply(200, b"not json"))
-    result = generate(probe)
-    assert (result["ok"], result["code"], result["model"], result["tokens"]) == (False, "summary_failed", "model-c", 0)
+@pytest.mark.parametrize("models", [None, EMAIL_MODELS], ids=["default", "email"])
+def test_every_model_failing_is_summary_failed_from_the_last_model(probe, fake, models):
+    chain = MODELS if models is None else models
+    fake.default("POST", path(chain[0]), Reply(500, b"oops"))
+    fake.default("POST", path(chain[1]), Reply(502, b"oops"))
+    fake.default("POST", path(chain[2]), Reply(200, b"not json"))
+    result = generate(probe, models=models)
+    assert (result["ok"], result["code"], result["model"], result["tokens"]) == (False, "summary_failed", chain[2], 0)
+    assert result["attempts"] == 3
 
 
-def test_a_hanging_model_is_abandoned_at_the_model_timeout(probe, fake):
-    fake.queue("POST", path("model-a"), Reply(hang=True))
-    fake.queue("POST", path("model-b"), answer("第二个模型", tokens=3))
-    result = generate(probe)
-    assert (result["ok"], result["model"], result["tokens"]) == (True, "model-b", 3)
+@pytest.mark.parametrize("models", [None, EMAIL_MODELS], ids=["default", "email"])
+def test_a_hanging_model_is_abandoned_at_the_model_timeout(probe, fake, models):
+    chain = MODELS if models is None else models
+    fake.queue("POST", path(chain[0]), Reply(hang=True))
+    fake.queue("POST", path(chain[1]), answer("第二个模型", tokens=3))
+    result = generate(probe, models=models)
+    assert (result["ok"], result["model"], result["tokens"]) == (True, chain[1], 3)
     assert TIMEOUT_MS <= result["elapsed_ms"] < TIMEOUT_MS + 3000
-    fake.wait_for(lambda: path("model-a") in fake.disconnects)
+    fake.wait_for(lambda: path(chain[0]) in fake.disconnects)
 
 
-def test_the_step_deadline_caps_the_chain(probe, fake):
-    for model in MODELS:
+@pytest.mark.parametrize("models", [None, EMAIL_MODELS], ids=["default", "email"])
+def test_the_step_deadline_caps_the_chain(probe, fake, models):
+    chain = MODELS if models is None else models
+    for model in chain:
         fake.queue("POST", path(model), Reply(hang=True))
     # 1.5 s on model-a leaves < 1 s: no second attempt is started.
-    result = generate(probe, budget_ms=2200)
-    assert (result["ok"], result["code"], result["model"]) == (False, "summary_failed", "model-a")
-    assert tried(fake) == ["model-a"]
+    result = generate(probe, budget_ms=2200, models=models)
+    assert (result["ok"], result["code"], result["model"]) == (False, "summary_failed", chain[0])
+    assert tried(fake) == [chain[0]]
     assert result["elapsed_ms"] < 2200
 
 
@@ -186,3 +204,36 @@ def test_models_come_from_the_gemini_models_var(probe, fake):
     result = generate(probe, vars={"GEMINI_MODELS": "only-model"})
     assert (result["model"], result["code"]) == ("only-model", "summary_failed")
     assert tried(fake) == ["only-model"]
+
+
+def test_an_explicit_order_does_not_change_the_default_for_a_later_call(probe, fake):
+    fake.queue("POST", path(EMAIL_MODELS[0]), answer("邮件摘要"))
+    result = generate(probe, models=EMAIL_MODELS)
+    assert (result["model"], result["attempts"]) == (EMAIL_MODELS[0], 1)
+    fake.queue("POST", path(MODELS[0]), answer("日报"))
+    assert generate(probe)["model"] == MODELS[0]
+    assert tried(fake) == [EMAIL_MODELS[0], MODELS[0]]
+
+
+def test_an_empty_explicit_order_sends_nothing(probe, fake):
+    result = generate(probe, models=[])
+    assert (result["ok"], result["model"], result["attempts"], result["tokens"]) == (False, "", 0, 0)
+    assert fake.received() == []
+
+
+def test_network_failure_tries_every_explicit_model(probe, fake):
+    # A bound socket without listen refuses connections; no upstream request can be served.
+    with socket.socket() as refusing:
+        refusing.bind(("127.0.0.1", 0))
+        result = generate(
+            probe,
+            models=EMAIL_MODELS,
+            vars={"GEMINI_API_BASE": f"http://127.0.0.1:{refusing.getsockname()[1]}"},
+        )
+    assert (result["ok"], result["code"], result["model"], result["attempts"]) == (
+        False,
+        "summary_failed",
+        EMAIL_MODELS[-1],
+        3,
+    )
+    assert fake.received() == []

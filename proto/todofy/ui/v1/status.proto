@@ -100,8 +100,10 @@ message GeminiBudget {
   int32 used_tokens = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
   // Calls made today.
   int32 call_count = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // The models in fallback order.
+  // The default models for daily summaries and recommendations, in fallback order.
   repeated string models = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The models for individual email summaries and canaries, in fallback order.
+  repeated string email_models = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
 }
 
 // Todoist's rate window and auth block.

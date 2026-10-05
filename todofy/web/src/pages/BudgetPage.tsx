@@ -144,6 +144,20 @@ function DailyTrends() {
   )
 }
 
+function ModelOrder({ models }: { models: readonly string[] | undefined }) {
+  if (!models?.length) return <>未提供</>
+  return (
+    <ol className="model-order">
+      {models.map((model, index) => (
+        <li key={model}>
+          <code>{model}</code>
+          {index === 0 ? <Badge tone="ok">首选</Badge> : null}
+        </li>
+      ))}
+    </ol>
+  )
+}
+
 export function BudgetPage() {
   const overview = useOverview()
   const gemini = overview.data?.gemini
@@ -170,17 +184,8 @@ export function BudgetPage() {
               <Facts
                 items={[
                   ['调用次数', formatNumber(gemini?.callCount ?? 0)],
-                  [
-                    '模型顺序',
-                    <ol key="m" className="model-order">
-                      {(gemini?.models ?? []).map((model, index) => (
-                        <li key={model}>
-                          <code>{model}</code>
-                          {index === 0 ? <Badge tone="ok">首选</Badge> : null}
-                        </li>
-                      ))}
-                    </ol>,
-                  ],
+                  ['逐封邮件摘要模型顺序', <ModelOrder key="email" models={gemini?.emailModels} />],
+                  ['日报与推荐模型顺序', <ModelOrder key="reports" models={gemini?.models} />],
                 ]}
               />
             </Section>

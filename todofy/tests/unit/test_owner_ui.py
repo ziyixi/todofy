@@ -267,7 +267,8 @@ class TestMessages:
         wire = json.loads(ui.answer(ui.mail_event(summary_row(error_code="something_new"), full=False)))
         assert "error_code" not in wire
 
-    def test_service_status(self):
+    @pytest.mark.parametrize("email_models", [None, ["lite", "m1", "m2"]])
+    def test_service_status(self, email_models):
         overview = {
             "build": "abc",
             "now": AT,
@@ -314,6 +315,8 @@ class TestMessages:
                 "next_backup_at": AT,
             },
         }
+        if email_models is not None:
+            overview["gemini"]["email_models"] = email_models
         wire = json.loads(ui.answer(ui.service_status(overview)))
         assert wire["name"] == "serviceStatus" and wire["read_time"] == AT
         assert wire["switches"] == {"processing_paused": True, "reminder_enabled": True}
@@ -321,6 +324,14 @@ class TestMessages:
         assert wire["latest_reminder"]["name"] == "dailyReminders/2026-09-28"
         # A budget beyond int32 is written as the bound instead of failing the page.
         assert wire["gemini"]["token_budget"] == 2**31 - 1
+        assert wire["gemini"]["models"] == ["m1", "m2"]
+        if email_models is None:
+            assert "email_models" not in wire["gemini"]
+        else:
+            assert wire["gemini"]["email_models"] == email_models
+        decoded, unknown = from_wire(status_pb.ServiceStatus, wire)
+        assert not unknown
+        assert decoded.gemini.email_models == tuple(email_models or ())
         assert wire["backup"]["state"] == "ok" and "next_alarm_time" in wire
 
     def test_metric_and_gtd_days(self):

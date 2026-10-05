@@ -94,7 +94,7 @@ def launch_stack(
 
 @pytest.fixture(scope="module")
 def stack(launch_stack: StackLaunch) -> OpsStack:
-    return launch_stack()
+    return launch_stack(GEMINI_EMAIL_MODELS="gemini-3.5-flash-lite,gemini-3.8-flash,gemini-3.7-flash")
 
 
 # ---- status ----------------------------------------------------------------------------------
@@ -135,7 +135,7 @@ def test_a_canary_is_summarised_and_ends_ok_without_any_side_effect(
 
     assert result["state"] == "ok", result
     [call] = fresh_gemini.calls_mentioning(CANARY_TEXT)
-    assert call.system.strip() and call.model == "model-a"
+    assert call.system.strip() and call.model == "gemini-3.5-flash-lite"
     assert fresh_todoist.creates() == [] and fresh_todoist.lists() == []
     event = stack.event(CANARY_ID)
     assert (event["state"], event["canary"], event["allowed_actions"], event["summary"]) == ("complete", True, [], None)
@@ -170,7 +170,7 @@ def test_a_canary_is_summarised_and_ends_ok_without_any_side_effect(
 def test_a_canary_whose_summary_keeps_failing_ends_failed_after_three_attempts(
     stack: OpsStack, fresh_gemini: GeminiFake, fresh_todoist: TodoistFake
 ) -> None:
-    for _ in range(6):  # three steps, each trying both models
+    for _ in range(9):  # three steps, each trying all three email models
         fresh_gemini.queue_generate(error_reply(503))
     event_id, body = canary_event()
 
@@ -180,7 +180,7 @@ def test_a_canary_whose_summary_keeps_failing_ends_failed_after_three_attempts(
     assert (result["state"], result["error_code"]) == ("failed", "summary_failed")
     event = stack.event(event_id)
     assert (event["state"], event["attempt_count"], event["allowed_actions"]) == ("ignored", 3, [])
-    assert len(fresh_gemini.calls_mentioning(CANARY_TEXT)) == 6
+    assert len(fresh_gemini.calls_mentioning(CANARY_TEXT)) == 9
     assert fresh_todoist.creates() == []
     assert stack.ok("status", definition="OpsStatus")["counters"]["attention_events"] == 0
 

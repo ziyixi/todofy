@@ -34,6 +34,11 @@ def gemini_models(env: Any) -> list[str]:
     return csv(env, "GEMINI_MODELS") or list(DEFAULT_GEMINI_MODELS)
 
 
+def gemini_email_models(env: Any) -> list[str]:
+    """Email summary order; older configurations inherit the shared chain."""
+    return csv(env, "GEMINI_EMAIL_MODELS") or gemini_models(env)
+
+
 def report_default_top(env: Any) -> int:
     """REPORT_DEFAULT_TOP (1-10): the precomputed recommendation size; the newsletter asks for 10."""
     value = integer(env, "REPORT_DEFAULT_TOP", 10)

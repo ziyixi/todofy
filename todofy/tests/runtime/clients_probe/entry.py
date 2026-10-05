@@ -74,6 +74,7 @@ class Default(WorkerEntrypoint):
                     deadline_ms=started + args["budget_ms"],
                     response_schema=args.get("response_schema"),
                     preface=args.get("preface", ""),
+                    models=args.get("models"),
                 )
                 data = {
                     "ok": result.verdict.ok,
@@ -83,6 +84,8 @@ class Default(WorkerEntrypoint):
                     "text": result.text,
                     "model": result.model,
                     "tokens": result.tokens,
+                    "prompt_tokens": result.prompt_tokens,
+                    "attempts": result.attempts,
                 }
             case "/todoist/create":
                 task = build_task_request(

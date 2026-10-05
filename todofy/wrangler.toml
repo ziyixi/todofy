@@ -63,6 +63,7 @@ TODOFY_PUBLIC_HOST = "todofy.ziyixi.science"
 MAIL_SOURCE_ID = "mail-hero-personal"
 # Gemini models, tried in order (at most 5).
 GEMINI_MODELS = "gemini-3.8-flash,gemini-3.7-flash,gemini-3.5-flash-lite"
+GEMINI_EMAIL_MODELS = "gemini-3.5-flash-lite,gemini-3.8-flash,gemini-3.7-flash"
 GEMINI_DAILY_TOKEN_BUDGET = "3000000"
 LOOKUP_DELAY_MS = "120000"
 REPORT_DEFAULT_TOP = "10"
