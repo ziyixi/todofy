@@ -37,7 +37,7 @@ Path(KEYS_DIR.name, "fixture.tf").write_text(
     "  apps = {\n"
     f'    "mail-hero"      = "{ACCOUNT}"\n'
     f'    "todofy-backups" = "{DOTTED}"\n'
-    f'    "lab"            = {{ id = "{TOKEN}", key = "{VERIFICATION}" }}\n'
+    f'    "watch"          = {{ id = "{TOKEN}", key = "{VERIFICATION}" }}\n'
     "  }\n"
     "}\n"
     f"# {ACCOUNT} = 1\n"
@@ -130,15 +130,15 @@ class NeverPrintsValues(unittest.TestCase):
 
     def test_value_like_for_each_keys_become_placeholders(self):
         keys = summary.Keys(summary.config_keys(KEYS_DIR.name))
-        self.assertEqual(keys.allowed, {"mail-hero", "todofy-backups", "lab"})
-        for key in (ACCOUNT, TOKEN, DOTTED, VERIFICATION, "lab.example", "MAIL-HERO"):
+        self.assertEqual(keys.allowed, {"mail-hero", "todofy-backups", "watch"})
+        for key in (ACCOUNT, TOKEN, DOTTED, VERIFICATION, "watch.example", "MAIL-HERO"):
             with self.subTest(key=key[:6]):
                 address = summary.safe_address(f'a.b["{key}"]', keys)
                 self.assertNotIn(key, address)
                 self.assertRegex(address, r'^a\.b\["<key [0-9]+>"\]$')
         # The same key gets the same placeholder within one summary; committed keys print as they are.
         self.assertEqual(summary.safe_address(f'c.d["{TOKEN}"]', keys), 'c.d' + summary.safe_address(f'a.b["{TOKEN}"]', keys)[3:])
-        self.assertEqual(summary.safe_address('module.x["lab"].a.b["mail-hero"]', keys), 'module.x["lab"].a.b["mail-hero"]')
+        self.assertEqual(summary.safe_address('module.x["watch"].a.b["mail-hero"]', keys), 'module.x["watch"].a.b["mail-hero"]')
         self.assertEqual(summary.safe_address('a.b["mail-hero"]'), 'a.b["<key 1>"]')
 
     def test_invalid_input_is_never_quoted(self):

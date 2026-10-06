@@ -35,7 +35,7 @@ variable "access_github_owner_emails" {
 # Legacy selected-IdP references. Bootstrap imports these exact objects and then uses managed IDs;
 # null access_github_oauth preserves older private inputs during that transition.
 variable "access_allowed_idp_ids" {
-  description = "Identity provider ids allowed on the owner-facing Access applications (Mail Hero, Todofy, Home, Lab, links)."
+  description = "Identity provider ids allowed on the owner-facing Access applications (Mail Hero, Todofy, Home, links, watch, Fleet)."
   type        = set(string)
   default     = []
 }

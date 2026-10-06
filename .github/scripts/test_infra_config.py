@@ -71,7 +71,6 @@ PRODUCTION = {
     "home": "dashboard/wrangler.toml",
     "ziyixi-website": "website/wrangler.toml",
     "ziyixi-notion-publish": "website/relay/wrangler.toml",
-    "lab": "lab/wrangler.toml",
     "flowday": "flowday/wrangler.toml",
     "links": "links/wrangler.toml",
     "watch": "watch/wrangler.toml",
@@ -289,7 +288,7 @@ class MatchesTheApps(unittest.TestCase):
         flowday = self.flowday_apps(code)
         self.assertEqual(set(flowday), {"flowday", "flowday-bypass"})
         destinations.update({key: value for key, value in flowday.items()})
-        self.assertEqual(set(owner), {"mail-hero", "todofy", "home", "lab", "links", "watch", "fleet"})
+        self.assertEqual(set(owner), {"mail-hero", "todofy", "home", "links", "watch", "fleet"})
         for key, uris in destinations.items():
             worker = "flowday" if key.startswith("flowday") else key
             if worker in AHEAD_OF_DEPLOY:

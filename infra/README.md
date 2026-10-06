@@ -46,7 +46,7 @@ current plan. The P4 dispatch "Infra apply" remains available; the Writes list b
 ### Owner rule (2026-10-01)
 
 Only objects that belong to the monorepo apps go here: mail-hero, todofy and todofy-core, the dashboard
-`home`, `lab`, `flowday`, `links`, `watch`, the website `ziyixi-website`, the relay `ziyixi-notion-publish`, Fleet and the dedicated VPS platform endpoint.
+`home`, `flowday`, `links`, `watch`, the website `ziyixi-website`, the relay `ziyixi-notion-publish`, Fleet and the dedicated VPS platform endpoint.
 Nothing unrelated is imported, declared, read or modelled, not even read-only.
 [`infra_guard.py`](../.github/scripts/infra_guard.py) enforces the boundary on every push (through
 [`test_infra_config.py`](../.github/scripts/test_infra_config.py) in `Changes`, and again in
@@ -72,10 +72,12 @@ Nothing unrelated is imported, declared, read or modelled, not even read-only.
 [`test_infra_guard.py`](../.github/scripts/test_infra_guard.py) tests the guard itself against
 configurations built to slip past it.
 
-### Managed here (33 objects)
+### Managed here (31 objects)
 
-This is the maximum declared count. Fresh bootstrap creates 31 objects before the first Worker release,
-then adds its exact mail rule (32). An adopted account retains the frozen legacy backup app (33).
+This is the maximum declared count. Fresh bootstrap creates 29 objects before the first Worker release,
+then adds its exact mail rule (30). An adopted account retains the frozen legacy backup app (31).
+Objects being retired ([Retiring an app](#retiring-an-app)) are not counted: [`retired.tf`](retired.tf) moves them
+out of the managed addresses so that the next apply deletes them.
 Older private inputs can temporarily keep the existing external IdP references; bootstrap captures and
 imports their actual IDs before switching to the managed references.
 
@@ -91,7 +93,6 @@ imports their actual IDs before switching to the managed references.
 | `cloudflare_zero_trust_access_application.owner["mail-hero"]` | Access app "Mail Hero" | `mail-hero.ziyixi.science` |
 | `cloudflare_zero_trust_access_application.owner["todofy"]` | Access app "Todofy" | `todofy.ziyixi.science`. `todofy-hooks` and `daily` are deliberately not behind Access |
 | `cloudflare_zero_trust_access_application.owner["home"]` | Access app "Home" | `home.ziyixi.science` (the dashboard) |
-| `cloudflare_zero_trust_access_application.owner["lab"]` | Access app "Lab" | `lab.ziyixi.science` |
 | `cloudflare_zero_trust_access_application.owner["links"]` | Access app "links" | `s.ziyixi.science/_/*` and the exact `s.ziyixi.science/_` (the launcher and owner API), session 168h, the two shared policies. The rest of the host (the short links) is deliberately not behind Access (links/docs/design.md) |
 | `cloudflare_zero_trust_access_application.owner["watch"]` | Access app "watch" | `watch.ziyixi.science` (the whole host), session 24h, the two shared policies. **Created** here before the watch app's first deploy, not imported ([Adding an app](#adding-an-app)) |
 | `cloudflare_zero_trust_access_application.owner["fleet"]` | Access app "Fleet" | Whole Fleet owner host; created before the Worker so its real AUD can be recorded |
@@ -106,7 +107,7 @@ imports their actual IDs before switching to the managed references.
 | `cloudflare_zero_trust_access_application.mail_hero_backup` | Access app "Mail Hero backup API" | `mail-hero.ziyixi.science/api/internal/backup/*`. Used by the backup collector's machine identity (mail-hero/AGENTS.md §7). **Frozen**: an apply refuses any write to it ([Apply](#apply-p4)) |
 | `cloudflare_zero_trust_access_application.flowday["flowday"]` | Access app "flowday" | `flowday.ziyixi.science`, session 168h, FlowDay's own policy by id. See [FlowDay](#flowday) |
 | `cloudflare_zero_trust_access_application.flowday["flowday-bypass"]` | Access app "flowday-bypass" | `flowday.ziyixi.science/pwa/*` (and the staging host's), session 6h, FlowDay's own policy by id. See [FlowDay](#flowday) |
-| `cloudflare_d1_database.app["mail-hero" \| "todofy" \| "lab" \| "flowday" \| "links"]` | D1 databases | Existence only |
+| `cloudflare_d1_database.app["mail-hero" \| "todofy" \| "flowday" \| "links"]` | D1 databases | Existence only |
 | `cloudflare_r2_bucket.app["mail-hero-store" \| "mail-hero-backups" \| "todofy-backups"]` | R2 buckets | Existence only |
 
 **Never edit these objects in the Cloudflare dashboard** (FlowDay's and the links app's applications included). A
@@ -120,8 +121,8 @@ Every object has `prevent_destroy`, for two reasons:
 - **Storage.** A destroyed database or bucket means lost data. A recreated one gets an id that no
   `wrangler.toml` knows.
 
-**The two reusable policies are shared.** Each is attached to the seven owner-facing monorepo apps
-(Mail Hero, Todofy, Home, Lab, links, watch, Fleet), plus applications of self-hosted services outside the monorepo.
+**The two reusable policies are shared.** Each is attached to the six owner-facing monorepo apps
+(Mail Hero, Todofy, Home, links, watch, Fleet), plus applications of self-hosted services outside the monorepo.
 The Mail Hero backup API uses only its own application-scoped policy, and FlowDay's two apps their own
 policies ([FlowDay](#flowday)). Changing a reusable policy here therefore also changes who can reach those
 outside services. This prototype never changes a policy's identity rules,
@@ -588,6 +589,33 @@ AUD exists only once the application does, and the Worker must be deployed with 
 
 Between steps 3 and 5 the application gates a host that no Worker serves yet, which is harmless.
 
+## Retiring an app
+
+An app's Access application and D1 database leave through this directory too, on purpose and after its Worker is
+gone. Every resource has `prevent_destroy`, which also guards each instance of a `for_each` resource that is still
+declared: dropping a key from `local.owner_apps` or `local.d1_databases` alone makes every plan fail with "Resource
+instance cannot be destroyed". The order, for any app:
+
+1. **One commit** removes the app (its Worker's code, deploy job and the bindings other apps had to it), its keys in
+   `local.owner_apps` and `local.d1_databases` (the catalog and `config/resources.toml` regenerate
+   [`access.tf`](access.tf)'s region and [`ids.tf`](ids.tf)), and adds one `moved` block per object to
+   [`retired.tf`](retired.tf): from its instance to an address no resource block declares
+   (`<type>.retired_<app>`), with the same pair in `RETIRED` of [`infra_guard.py`](../.github/scripts/infra_guard.py).
+   The guard refuses any other move to an undeclared address.
+2. **After it is on `main` and every app that bound the Worker has deployed without that binding**, delete the
+   Worker in the Cloudflare dashboard (Wrangler owns it, not this directory). Then neither the hostname nor the
+   database is in use when they go, and the host never serves without Access.
+3. **"Infra drift"** of the merge (or a dispatch of it after step 2) is red by design (exit 3, a delete). Check it
+   against exactly this: `delete: 2`, the rows `cloudflare_zero_trust_access_application.retired_<app>` and
+   `cloudflare_d1_database.retired_<app>`, every other row `no-op`; `output changes: 2` (`update` of `access_aud`
+   and `d1_database_ids`); no outputs problem; and its expect line, `delete=2,outputs=2@<fingerprint>`.
+4. **Dispatch "Infra apply"** on `main` with that `expect` and `confirm_destructive` = `delete-replace-forget`. It
+   backs up the encrypted state, deletes the two objects (the database with every row in it; D1 Time Travel goes
+   with it) and ends with a verify plan of "No changes"; the next "Infra drift" is green. Until then the daily
+   "Personal cloud reconcile" reports the plan as needing a manual review and applies nothing.
+5. **A later commit** removes the `moved` blocks and their `RETIRED` pairs: once the state no longer holds the old
+   addresses, they do nothing.
+
 ## Removing the import blocks
 
 Done in the commit after the first green "Infra apply" (every object was then in the state and the plan
@@ -732,7 +760,7 @@ repository, the read-only token was used through the environment, and the person
    Only their computed `file_size` had changed, because the databases grow. See
    [Drift signal](#drift-signal).
 4. A summary of that real plan with `--all` contained none of the values from the local values file.
-5. By hand, the live AUDs of Mail Hero, Todofy, Home and Lab were checked against the committed
+5. By hand, the live AUDs of the four owner apps then deployed were checked against the committed
    `ACCESS_AUDIENCE` values: all four match.
 6. After the guard and summary hardening (structural guard, file allowlist, for_each key
    placeholders), the plan was run again against the same local state: "No changes" (exit 0), summary
@@ -784,7 +812,7 @@ plan only. Nothing was applied and nothing was written to Cloudflare, R2 or GitH
    and attached to one application each. No identity value was copied.
 2. `infra_state.py plan` with this change: `import: 5`, `no-op: 13`, `output changes: 3`, nothing else.
    Every import is zero-diff (no `import+update`); the backup app is `no-op`. The planned outputs equal every
-   production `wrangler.toml` (`ACCESS_AUDIENCE` of mail-hero, todofy, home, lab, flowday, links; all
+   production `wrangler.toml` (`ACCESS_AUDIENCE` of every owner app then deployed, flowday and links; all
    `database_id`s; all bucket names).
 3. A throwaway plan without the staging host in `local.flowday_apps` (reverted, never committed): the two
    FlowDay apps became `import+update` in place, no `replace`.

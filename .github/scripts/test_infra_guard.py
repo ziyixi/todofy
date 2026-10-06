@@ -133,6 +133,22 @@ class Guard(unittest.TestCase):
         self.assertEqual(run({"moved.tf": counted}), [])
         self.assert_flags({"moved.tf": counted.replace("[0]", "[1]")}, "a moved block names a FROZEN address")
 
+    def test_a_move_out_of_prevent_destroy_is_only_a_listed_retirement(self):
+        """A moved block to an address no resource declares deletes the object at the next apply, past its
+        prevent_destroy: only the exact RETIRED pairs may do that; a move to a declared resource stays ordinary."""
+        [(source, target)] = list(infra_guard.RETIRED.items())[:1]
+        listed = f"moved {{\n  from = {source}\n  to   = {target}\n}}\n"
+        self.assertEqual(run({"retired.tf": listed}), [])
+        for text in (
+            "moved {\n  from = cloudflare_r2_bucket.app[\"old\"]\n  to   = cloudflare_r2_bucket.gone\n}\n",
+            f"moved {{\n  from = {source}\n  to   = {target}_2\n}}\n",
+            f"moved {{\n  from = {target}\n  to   = cloudflare_r2_bucket.gone\n}}\n",
+        ):
+            with self.subTest(text=text):
+                self.assert_flags({"retired.tf": text}, "a moved block's target is not declared")
+        ordinary = "moved {\n  from = cloudflare_r2_bucket.app[\"old\"]\n  to   = cloudflare_d1_database.app\n}\n"
+        self.assertEqual(run({"moved.tf": ordinary}), [])
+
     def test_dynamic_provisioner(self):
         dynamic = """
             resource "cloudflare_r2_bucket" "d" {

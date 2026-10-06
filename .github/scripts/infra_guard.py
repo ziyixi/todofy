@@ -16,6 +16,8 @@ What it keeps true (infra/README.md "Scope" and "Next steps"):
 - Every resource is one of ALLOWED_TYPES and has its own lifecycle { prevent_destroy = true }.
 - No `moved` block names a FROZEN address (from or to, any instance key): a rename must not carry a write to a frozen
   object past the apply's gate (infra_state.py FROZEN_OBJECTS, which also matches by object id).
+- A `moved` block's `to` names a declared resource, except the exact RETIRED pairs: a move to an undeclared address
+  takes the object out of prevent_destroy's reach, so the next plan deletes it.
 - No output reads a variable (var.*): outputs are printed by `tofu output` and compared with the public
   wrangler.toml files, so a personal value (the policies' emails) must never become one. Outputs read managed
   objects only (outputs.tf).
@@ -59,6 +61,14 @@ PLATFORM_TYPES = frozenset(address.split(".", 1)[0] for address in PLATFORM_OBJE
 
 # Addresses an apply never writes to (infra_state.py FROZEN; test_infra_config.py keeps the two equal).
 FROZEN = frozenset({"cloudflare_zero_trust_access_application.mail_hero_backup"})
+# Objects being deleted on purpose (infra/README.md "Retiring an app", infra/retired.tf): the only moves whose `to` no
+# resource block declares, as exact `from` -> `to` addresses. Such a move takes the object out of prevent_destroy's reach,
+# so the next plan deletes it, and "Infra apply" still refuses that unless confirm_destructive is given. Remove a pair
+# with its moved block after the apply that deleted the object.
+RETIRED = {
+    'cloudflare_zero_trust_access_application.owner["lab"]': "cloudflare_zero_trust_access_application.retired_lab",
+    'cloudflare_d1_database.app["lab"]': "cloudflare_d1_database.retired_lab",
+}
 TOP_LEVEL = frozenset({"terraform", "provider", "variable", "locals", "resource", "import", "output", "moved"})
 NEVER_NESTED = frozenset({"provisioner", "connection", "data", "module", "resource"})
 # Committed files under infra/, relative to it. Anything else (a plan named tfplan or plan.out, a .tofu
@@ -250,6 +260,11 @@ def _reads_a_variable(block: Block) -> bool:
     return False
 
 
+def _address(tokens: list[tuple[str, str]]) -> str:
+    """The address an attribute names, instance key included: `a.b["k"]` (quotes kept)."""
+    return "".join(value for _, value in tokens)
+
+
 def _reference(tokens: list[tuple[str, str]]) -> str:
     """The resource address an attribute names, without its instance key: `a.b["k"]` -> `a.b`."""
     text = ""
@@ -298,6 +313,7 @@ def check(infra: Path) -> list[str]:
         problems.append("no *.tf file found")
 
     terraform, variables, resources = [], {}, 0
+    declared, moves = set(), []
     for name, root in roots.items():
         for block in root.blocks:
             where = f"{name}:{block.line}"
@@ -311,6 +327,7 @@ def check(infra: Path) -> list[str]:
                 problems.append(f"{where}: only the cloudflare provider is configured here")
             elif block.type == "resource":
                 resources += 1
+                declared.add(".".join(block.labels))
                 if (len(block.labels) != 2 or block.labels[0] not in ALLOWED_TYPES
                     or (block.labels[0] in PLATFORM_TYPES and ".".join(block.labels) not in PLATFORM_OBJECTS)):
                     problems.append(f"{where}: resource type outside the monorepo boundary (ALLOWED_TYPES)")
@@ -324,6 +341,8 @@ def check(infra: Path) -> list[str]:
             if (block.type == "moved" and not counted_backup
                     and any(_reference(block.attrs.get(side, [])) in FROZEN for side in ("from", "to"))):
                 problems.append(f"{where}: a moved block names a FROZEN address; it must never be renamed")
+            if block.type == "moved" and not counted_backup:
+                moves.append((where, block))
             if block.type == "output" and _reads_a_variable(block):
                 problems.append(f"{where}: an output reads a variable; outputs read managed objects only")
             for nested in block.walk():
@@ -332,6 +351,11 @@ def check(infra: Path) -> list[str]:
                     problems.append(f"{where}: nested {'/'.join(sorted(kinds & NEVER_NESTED))} block is not allowed")
     if roots and not resources:
         problems.append("no resource found")
+    for where, block in moves:
+        source, target = (_address(block.attrs.get(side, [])) for side in ("from", "to"))
+        if _reference(block.attrs.get("to", [])) not in declared and RETIRED.get(source) != target:
+            problems.append(f"{where}: a moved block's target is not declared, which deletes the object past "
+                            "prevent_destroy; only the exact RETIRED pairs may")
 
     backends = [b for t in terraform for b in t.blocks if b.type in ("backend", "cloud")]
     if backends:
