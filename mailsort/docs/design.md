@@ -97,6 +97,9 @@ reads no Gmail and decides nothing, but the alarm still runs and still clears wh
 Examples and rules are what the app learned, so they outlive the 14 days on purpose; both are shown in full in the
 dashboard and can be deleted there one by one.
 
+The public privacy policy (https://www.ziyixi.science/privacy/mailsort, `website/src/app/privacy/mailsort/page.tsx`)
+states the closed table and this retention: change it in the same commit as either.
+
 `firstMailbox` (`mask.ts`) reads the sender as Gmail's DMARC does: quoted display names and comments are blanked out
 before the address is taken, so `"<boss@work.example>" <x@evil.example>` is x@evil.example, never the address in the
 display name (which no sender rule may match).
@@ -506,8 +509,9 @@ Done by the owner, on their own machine and accounts (nothing here can do it):
 
 1. **Google Cloud project**: a new dedicated project; enable the Gmail API.
 2. **OAuth consent screen**: user type External; add only the scope `gmail.readonly` (later `gmail.modify`); add
-   yourself as a user; set the publishing status to **In production** without submitting for verification (a personal
-   app under 100 users may stay unverified; in Testing, refresh tokens expire after 7 days).
+   yourself as a user; the privacy policy link is https://www.ziyixi.science/privacy/mailsort; set the publishing status
+   to **In production** without submitting for verification (a personal app under 100 users may stay unverified; in
+   Testing, refresh tokens expire after 7 days).
 3. **Client**: create an OAuth client of type **Desktop app**.
 4. **Advanced Protection**: check that the Google account is not enrolled in Advanced Protection (it blocks
    unverified apps).
