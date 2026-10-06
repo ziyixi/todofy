@@ -273,7 +273,8 @@
     "generated_at": "2026-10-06T14:00:00Z",
     "health": "down",
     "modes": {
-      "maintenance": false
+      "maintenance": false,
+      "mode_limited": false
     },
     "guard": {
       "level": "normal",

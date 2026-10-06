@@ -165,7 +165,8 @@ export function sortStatus(store: Store, env: StatusEnv, now: number): wire.OpsS
       create(OpsStatusSchema, {
         ...base,
         health: Health.DOWN,
-        modes: { maintenance: false },
+        // The deployment variable (MODE) is known without storage; the switches read from storage are left out.
+        modes: { maintenance: false, mode_limited: ceiling !== 'live' },
         guard: { level: GuardLevel.NORMAL },
         signals: [signal('status_unavailable', Severity.CRITICAL, {})],
       }),

@@ -464,6 +464,7 @@ DEPLOYMENT_MODES = {
     "fleet": ["maintenance"],
     "newsletter": ["maintenance"],
     "notion-publish": ["maintenance"],
+    "mailsort": ["maintenance", "mode_limited"],
 }
 
 
