@@ -61,7 +61,7 @@ ChatGPT 登录使用订阅访问，但仍受额度、模型和工作区权限限
 按 [Notion说明](notion.md) 创建 internal connection、两个数据源并授权，再显式执行 schema setup。
 旧单库摘要适配器已移除；残留的 `NOTION_DATA_SOURCE_ID` 会被忽略。
 
-参考：[创建 internal connection](https://developers.notion.com/guides/get-started/internal-connections)、[权限范围](https://developers.notion.com/reference/capabilities)、[查找 data source ID](https://developers.notion.com/reference/retrieve-a-data-source)。整期入口 `POST /v1/runs` 在 live 配置要求启用 Notion；新选题DAG先将证据与已审版本持久化到SQLite，Notion作为后台镜像单独验收，不再是发信前置条件。旧冻结图保留原门槛。内部fixture或直接调用编稿函数不能冒充整条指令采集链路通过。
+参考：[创建 internal connection](https://developers.notion.com/guides/get-started/internal-connections)、[权限范围](https://developers.notion.com/reference/capabilities)、[查找 data source ID](https://developers.notion.com/reference/retrieve-a-data-source)。整期入口 `POST /v1/runs` 在 live 配置要求启用 Notion；新选题DAG先将证据与已审版本持久化到SQLite，Notion作为后台镜像单独验收，不再是发信前置条件。旧冻结整期刊期的处理见[工作流说明](workflow.md)。内部fixture或直接调用编稿函数不能冒充整条指令采集链路通过。
 
 ## Resend：最后才启用
 
