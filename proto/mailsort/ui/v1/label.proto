@@ -1,6 +1,6 @@
 // A label: one category mailsort may put a mail into (mailsort/docs/design.md §3). It is a Gmail nested label under
-// the prefix "分拣/" (the Gmail name is "分拣/" + display_name), plus the owner's description that the decision model
-// reads as the category's criteria.
+// the prefix "分拣/" (the Gmail name is "分拣/" + display_name, which may itself be a path such as `开发/CI通知`), plus
+// the owner's description that the decision model reads as the category's criteria.
 
 syntax = "proto3";
 
@@ -37,18 +37,22 @@ message Label {
     GMAIL_STATE_MISSING = 3;
   }
 
-  // labels/{label}: 1 to 40 characters of `a-z`, `0-9` and `-`, starting with a letter (AIP-122). The ID is
-  // also the decision model's stable option ID, so it never changes.
+  // labels/{label}: 1 to 40 characters of `a-z`, `0-9` and `-`, starting with a letter (AIP-122); it never
+  // changes. Without a `label_id` CreateLabel derives one from the path (`开发/CI通知` is `dev-ci-notices`).
   string name = 1 [(google.api.field_behavior) = IDENTIFIER];
-  // The part of the Gmail name after "分拣/": 1 to 40 characters, no "/" and no control characters.
+  // The part of the Gmail name after "分拣/": a path of 1 to 3 segments joined by "/" (a Gmail nested label,
+  // `开发/CI通知`), each segment 1 to 40 characters without control characters or surrounding spaces, at most 100
+  // characters in all. Only leaves are labels: no label's path is the parent of another's. The parents exist in
+  // Gmail as plain grouping labels, created as needed, and never get a mail.
   string display_name = 2 [(google.api.field_behavior) = REQUIRED];
-  // What belongs in this label, in the owner's words: the model's criteria for the option. At most 300
-  // characters.
+  // What belongs in this label, in the owner's words: the model's criteria for the option, read as
+  // `display_name: description`. At most 300 characters. A label without one is never offered to the model
+  // (rules and examples may still decide it).
   string description = 3 [(google.api.field_behavior) = OPTIONAL];
   // Mail may be decided into this label (in shadow or live mode). A disabled label is never suggested.
   bool enabled = 4 [(google.api.field_behavior) = OPTIONAL];
-  // In live mode, a confident decision applies this label in Gmail (and archives the mail); otherwise the
-  // decision is only a suggestion in the review queue. The Worker turns it off by itself when the precision's
+  // In live mode, a confident decision applies this label in Gmail (and archives the mail unless
+  // `keep_in_inbox`); otherwise the decision is only a suggestion in the review queue. The Worker turns it off by itself when the precision's
   // lower bound drops below the target (AccuracyReport).
   bool live = 5 [(google.api.field_behavior) = OPTIONAL];
   // The label implies trust (a bank, a brokerage, accounts, security, government): only a rule whose mail passed
@@ -72,4 +76,13 @@ message Label {
   // AIP-154: changes with every change. UpdateLabel and DeleteLabel that carry an etag are refused with
   // ETAG_MISMATCH when the label changed since.
   string etag = 14 [(google.api.field_behavior) = OPTIONAL];
+  // When the label is applied, the mail stays in the inbox: the label is added and INBOX is not removed (for
+  // account security or government mail). False (the default): the mail is archived with its label. A rule may
+  // keep its mail in the inbox too (Rule.keep_in_inbox), never the other way round.
+  // (-- api-linter: core::0140::prepositions=disabled
+  //     aip.dev/not-precedent: "keep in inbox" is the owner's own name for the switch, and the rule file's. --)
+  bool keep_in_inbox = 15 [(google.api.field_behavior) = OPTIONAL];
+  // The label's mail is sensitive (medical, for one): no example (masked summary) of it is kept, so nothing of it
+  // outlives the 14 days of decided mail's content.
+  bool sensitive = 16 [(google.api.field_behavior) = OPTIONAL];
 }

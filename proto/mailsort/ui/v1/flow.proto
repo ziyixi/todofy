@@ -1,0 +1,99 @@
+// How mail moved through mailsort's pipeline (mailsort/docs/design.md §10): daily counters of each stage and
+// outcome per label, kept by the Worker in the same transaction as each decision, for the owner's 流程 view. Counts
+// only: no subject, sender or address.
+
+syntax = "proto3";
+
+package mailsort.ui.v1;
+
+import "google/api/field_behavior.proto";
+import "google/api/resource.proto";
+import "google/protobuf/timestamp.proto";
+
+option java_multiple_files = true;
+option java_outer_classname = "FlowProto";
+option java_package = "science.ziyixi.mailsort.ui.v1";
+
+// The counters of one range of UTC days. The ranges are fixed: `mailFlows/today` (the current UTC day),
+// `mailFlows/last-7-days` and `mailFlows/last-30-days` (that many UTC days, today included).
+message MailFlow {
+  option (google.api.resource) = {
+    type: "sort.ziyixi.science/MailFlow"
+    pattern: "mailFlows/{mail_flow}"
+    singular: "mailFlow"
+    plural: "mailFlows"
+  };
+
+  // The pipeline stage that handled a mail (the decider).
+  enum Stage {
+    // Never written.
+    STAGE_UNSPECIFIED = 0;
+    // Not decided: not incoming inbox mail (sent, draft, spam), a conversation already sorted, mail from before
+    // the install, or unreadable. The outcome says which.
+    STAGE_SKIPPED = 1;
+    // An active rule decided.
+    STAGE_RULE = 2;
+    // Three close, unanimous examples decided without the model.
+    STAGE_NEIGHBOURS = 3;
+    // The decision model Clef (27B).
+    STAGE_CLEF = 4;
+    // The smaller decision model Clef-flash (past 70 % of the day's neuron budget).
+    STAGE_CLEF_FLASH = 5;
+    // Waited for the next UTC day: the neuron budget or Workers AI's quota was used up. Such a mail is counted
+    // again where it is decided later.
+    STAGE_DEFERRED = 6;
+    // No model answer: no label to offer it, or the model unavailable after every retry.
+    STAGE_NO_MODEL = 7;
+  }
+
+  // What became of the mail.
+  enum Outcome {
+    // Never written.
+    OUTCOME_UNSPECIFIED = 0;
+    // The label was written to Gmail and the mail archived.
+    OUTCOME_ARCHIVED = 1;
+    // The label was written to Gmail and the mail kept in the inbox.
+    OUTCOME_KEPT_IN_INBOX = 2;
+    // A confident decision that was only suggested (shadow, or a label not live): nothing written.
+    OUTCOME_SUGGESTED = 3;
+    // Unsure: no label, the mail stays in the inbox and waits in the review queue.
+    OUTCOME_UNSURE = 4;
+    // The owner later corrected the decision's label (in the review queue or in Gmail). Counted on the day the
+    // mail was decided, besides its outcome above.
+    OUTCOME_CORRECTED = 5;
+    // Skipped: sent, a draft, spam, trash or chat, or no longer in the inbox.
+    OUTCOME_NOT_INBOX = 6;
+    // Skipped: its conversation already carries a mailsort label.
+    OUTCOME_THREAD_SORTED = 7;
+    // Skipped: received before the install (no backfill).
+    OUTCOME_BEFORE_INSTALL = 8;
+    // Skipped: Gmail could not give it (too large, refused, or failing for hours).
+    OUTCOME_UNREADABLE = 9;
+    // Deferred to the next UTC day.
+    OUTCOME_DEFERRED = 10;
+  }
+
+  // One counter.
+  message Count {
+    // The stage.
+    Stage stage = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+    // The outcome.
+    Outcome outcome = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+    // The label decided (or suggested, or corrected); empty for unsure, skipped and deferred mail.
+    string label = 3 [
+      (google.api.field_behavior) = OUTPUT_ONLY,
+      (google.api.resource_reference).type = "sort.ziyixi.science/Label"
+    ];
+    // The mails.
+    int32 mail_count = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  }
+
+  // mailFlows/{mail_flow}: `today`, `last-7-days` or `last-30-days`.
+  string name = 1 [(google.api.field_behavior) = IDENTIFIER];
+  // The first moment of the range (00:00 UTC of its first day).
+  google.protobuf.Timestamp start_time = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The end of the range (exclusive): 00:00 UTC after today.
+  google.protobuf.Timestamp end_time = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Every non-zero counter of the range, summed over its days; at most 2,000.
+  repeated Count counts = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+}

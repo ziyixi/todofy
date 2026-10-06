@@ -8,7 +8,7 @@
 // (proto/ts/http-transcoder.ts) and called through the shared client (proto/ts/http-client.ts). Bodies, query
 // parameters and responses are JSON in the wire JSON profile (proto/README.md): proto field names (snake_case),
 // enum values in lower case without their prefix (`Mode.MODE_LIVE` is "live"), timestamps in RFC 3339 UTC.
-// Inputs are read strictly, outputs leniently. Request bodies are at most 64 KiB. Errors: errors.proto (this
+// Inputs are read strictly, outputs leniently. Request bodies are at most 256 KiB (an import of every rule). Errors: errors.proto (this
 // app's reasons) and common/errors/v1/errors.proto (the reasons every API shares).
 //
 // Authentication, in front of the transcoder (packages/edge-auth): the whole host is behind Cloudflare Access,
@@ -43,6 +43,7 @@ import "google/api/resource.proto";
 import "google/protobuf/empty.proto";
 import "google/protobuf/field_mask.proto";
 import "google/protobuf/timestamp.proto";
+import "mailsort/ui/v1/flow.proto";
 import "mailsort/ui/v1/label.proto";
 import "mailsort/ui/v1/review.proto";
 import "mailsort/ui/v1/rule.proto";
@@ -52,8 +53,12 @@ option java_multiple_files = true;
 option java_outer_classname = "MailsortUiServiceProto";
 option java_package = "science.ziyixi.mailsort.ui.v1";
 
-// The owner's mail sorting: labels and their descriptions, the review queue, rules, examples, accuracy, the
-// ledger of Gmail writes, the status and the settings.
+// The owner's mail sorting: labels and their descriptions, the review queue, rules (and their import and export),
+// examples, accuracy, the ledger of Gmail writes, the flow of mail through the pipeline, the status and the
+// settings.
+// (-- api-linter: core::0121::resource-must-support-list=disabled
+//     aip.dev/not-precedent: MailFlow has three fixed ranges (today, the last 7 and 30 days), named in its
+//     comment; a list of them would say nothing more. --)
 service MailsortUiService {
   option (google.api.default_host) = "sort.ziyixi.science";
 
@@ -233,6 +238,34 @@ service MailsortUiService {
     option (google.api.http) = {get: "/api/v1/rules:exportGmailFilters"};
   }
 
+  // Imports labels and rules (AIP-136; AIP-163 `validate_only` for the preview): the owner's rule file, the
+  // export of ExportRules, or the built-in template of recommended labels. Each entry is created, updated or
+  // skipped (unchanged); a label a rule names that does not exist is created (enabled, not live, without a
+  // description). Nothing is written to Gmail: new labels are created there before their first write. All or
+  // nothing: an import with an invalid entry is INVALID_IMPORT and changes nothing.
+  // (-- api-linter: core::0136::http-uri-suffix=disabled
+  //     aip.dev/not-precedent: a custom method on the collection, `rules:import`; the noun is the collection
+  //     itself. --)
+  rpc ImportRules(ImportRulesRequest) returns (ImportRulesResponse) {
+    option (google.api.http) = {
+      post: "/api/v1/rules:import"
+      body: "*"
+    };
+  }
+
+  // Every label and rule as the JSON document ImportRules reads back (`{"labels": [...], "rules": [...]}`), the
+  // rules in the owner's rule file format.
+  // (-- api-linter: core::0136::http-uri-suffix=disabled
+  //     aip.dev/not-precedent: a custom method on the collection, `rules:export`; the noun is the collection
+  //     itself. --)
+  // (-- api-linter: core::0136::http-method=disabled
+  //     aip.dev/not-precedent: a read without side effects, so a GET (AIP-136 allows it for such methods). --)
+  // (-- api-linter: core::0136::http-body=disabled
+  //     aip.dev/not-precedent: a GET has no body. --)
+  rpc ExportRules(ExportRulesRequest) returns (ExportRulesResponse) {
+    option (google.api.http) = {get: "/api/v1/rules:export"};
+  }
+
   // An example (AIP-131).
   // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
   // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
@@ -301,6 +334,14 @@ service MailsortUiService {
       post: "/api/v1/ledgerEntries:undo"
       body: "*"
     };
+  }
+
+  // The flow of mail through the pipeline over a fixed range of UTC days (AIP-131).
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc GetMailFlow(GetMailFlowRequest) returns (MailFlow) {
+    option (google.api.http) = {get: "/api/v1/{name=mailFlows/*}"};
+    option (google.api.method_signature) = "name";
   }
 
   // The accuracy report.
@@ -595,6 +636,179 @@ message ExportGmailFiltersResponse {
   int32 skipped_count = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
 }
 
+// A label of an import: created when no label has its path, else updated where it differs.
+message LabelImport {
+  // The Gmail name, "分拣/" and the label's path (Label.display_name), `分拣/开发/CI通知`.
+  string path = 1 [(google.api.field_behavior) = REQUIRED];
+  // Label.description.
+  string description = 2 [(google.api.field_behavior) = OPTIONAL];
+  // Label.trust_implying.
+  bool trust = 3 [(google.api.field_behavior) = OPTIONAL];
+  // Label.keep_in_inbox.
+  // (-- api-linter: core::0140::prepositions=disabled
+  //     aip.dev/not-precedent: "keep in inbox" is the owner's own name for the switch, and the rule file's. --)
+  bool keep_in_inbox = 4 [(google.api.field_behavior) = OPTIONAL];
+  // Label.sensitive.
+  bool sensitive = 5 [(google.api.field_behavior) = OPTIONAL];
+  // Label.threshold (0 for the default).
+  double threshold = 6 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// What a rule of an import matches: exactly one of the four.
+message RuleMatch {
+  // A sender rule on the From address (Rule.Kind.KIND_SENDER_ADDRESS).
+  // (-- api-linter: core::0140::prepositions=disabled
+  //     aip.dev/not-precedent: the owner's rule file names it so; the request reads that file as it is. --)
+  string from_address = 1 [(google.api.field_behavior) = OPTIONAL];
+  // A sender rule on the From domain and its subdomains (Rule.Kind.KIND_SENDER_DOMAIN).
+  // (-- api-linter: core::0140::prepositions=disabled
+  //     aip.dev/not-precedent: the owner's rule file names it so; the request reads that file as it is. --)
+  string from_domain = 2 [(google.api.field_behavior) = OPTIONAL];
+  // A List-Id rule (Rule.Kind.KIND_LIST_ID).
+  string list_id = 3 [(google.api.field_behavior) = OPTIONAL];
+  // A Delivered-To rule (Rule.Kind.KIND_DELIVERED_TO).
+  // (-- api-linter: core::0140::prepositions=disabled
+  //     aip.dev/not-precedent: the owner's rule file names it so; the request reads that file as it is. --)
+  string to_address = 4 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// A rule of an import, in the owner's rule file format.
+message RuleImport {
+  // The entry's own ID (1 to 64 characters of letters, digits, `.`, `_` and `-`): a later import of the same ID
+  // updates the rule it made (Rule.import_id).
+  string id = 1 [(google.api.field_behavior) = REQUIRED];
+  // What it matches.
+  RuleMatch match = 2 [(google.api.field_behavior) = REQUIRED];
+  // The label's Gmail name, "分拣/" and its path (LabelImport.path).
+  string label = 3 [(google.api.field_behavior) = REQUIRED];
+  // Rule.keep_in_inbox.
+  // (-- api-linter: core::0140::prepositions=disabled
+  //     aip.dev/not-precedent: "keep in inbox" is the owner's own name for the switch, and the rule file's. --)
+  bool keep_in_inbox = 4 [(google.api.field_behavior) = OPTIONAL];
+  // The label implies trust: a label the import creates for this rule is created so; for an existing label
+  // that does not, the preview warns.
+  bool trust = 5 [(google.api.field_behavior) = OPTIONAL];
+  // Rule.require_dmarc (a sender rule needs DMARC whatever this says).
+  bool require_dmarc = 6 [(google.api.field_behavior) = OPTIONAL];
+  // Rule.evidence.
+  string evidence = 7 [(google.api.field_behavior) = OPTIONAL];
+  // Rule.notes.
+  string notes = 8 [(google.api.field_behavior) = OPTIONAL];
+  // Rule.subject_includes.
+  repeated string subject_includes = 9 [(google.api.field_behavior) = OPTIONAL];
+  // Rule.subject_excludes.
+  repeated string subject_excludes = 10 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// Input of ImportRules.
+message ImportRulesRequest {
+  // The labels to create or update (at most 24).
+  repeated LabelImport labels = 1 [(google.api.field_behavior) = OPTIONAL];
+  // The rules to create or update (at most 500).
+  repeated RuleImport rules = 2 [(google.api.field_behavior) = OPTIONAL];
+  // Import the built-in template of recommended labels instead (`labels` and `rules` must then be empty).
+  bool use_template = 3 [(google.api.field_behavior) = OPTIONAL];
+  // AIP-163: only check and answer what the import would do (the preview); nothing changes.
+  bool validate_only = 4 [(google.api.field_behavior) = OPTIONAL];
+  // The idempotency key (AIP-155); see MailsortUiService.
+  string request_id = 5 [
+    (google.api.field_info).format = UUID4,
+    (google.api.field_behavior) = OPTIONAL
+  ];
+}
+
+// What an import does with one entry.
+message ImportChange {
+  // The kind of entry.
+  enum Kind {
+    // Never written.
+    KIND_UNSPECIFIED = 0;
+    // A label (of `labels`, of the template, or one a rule names).
+    KIND_LABEL = 1;
+    // A rule.
+    KIND_RULE = 2;
+  }
+
+  // What happens to it.
+  enum Action {
+    // Never written.
+    ACTION_UNSPECIFIED = 0;
+    // A new label or rule.
+    ACTION_CREATE = 1;
+    // An existing one whose `changed_fields` differ.
+    ACTION_UPDATE = 2;
+    // An existing one, unchanged.
+    ACTION_SKIP = 3;
+    // Refused (`problem`): the import changes nothing while one entry is invalid.
+    ACTION_INVALID = 4;
+  }
+
+  // The kind of entry.
+  Kind kind = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Its position in the request's `labels` or `rules` (or the template's labels); -1 for a label only a rule
+  // names.
+  int32 index = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // What happens to it.
+  Action action = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The label's path, or the rule's import ID.
+  string key = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The label or rule it creates or updates, once known (`labels/dev-ci`, `rules/r1`).
+  string resource = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The fields an update changes (`description`, `subject_includes`, ...).
+  repeated string changed_fields = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Why an entry is invalid, a code: `label_path`, `label_prefix`, `label_tree`, `description`, `threshold`,
+  // `match`, `value`, `rule_id`, `subject`, `text`, `duplicate`, `labels_full`, `rules_full`.
+  string problem = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Something the owner should know that does not stop the import, a code: `trust_mismatch` (the rule says
+  // trust, its label does not imply it), `rule_disabled` (the existing rule stays disabled), `same_match` (another
+  // rule of the import has the same match and conditions: the earlier one is tried first).
+  string warning = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// Output of ImportRules.
+message ImportRulesResponse {
+  // Every entry, labels first, then rules, in the request's order.
+  repeated ImportChange changes = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The import was applied (false for `validate_only`).
+  bool applied = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Labels created (or that would be).
+  int32 created_label_count = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Labels updated (or that would be).
+  int32 updated_label_count = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Rules created (or that would be).
+  int32 created_rule_count = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Rules updated (or that would be).
+  int32 updated_rule_count = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Entries left as they are.
+  int32 skipped_count = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Invalid entries (then nothing is applied).
+  int32 invalid_count = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The labels of the import as they are (or would be), so the preview can show the template's.
+  repeated LabelImport labels = 9 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// Input of ExportRules: nothing.
+message ExportRulesRequest {}
+
+// Output of ExportRules.
+message ExportRulesResponse {
+  // The JSON document (UTF-8 text, two-space indented).
+  string json = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The labels it holds.
+  int32 label_count = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The rules it holds (proposed ones are left out).
+  int32 rule_count = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// Input of GetMailFlow.
+message GetMailFlowRequest {
+  // `mailFlows/today`, `mailFlows/last-7-days` or `mailFlows/last-30-days`.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "sort.ziyixi.science/MailFlow"
+  ];
+}
+
 // Input of GetExample.
 message GetExampleRequest {
   // examples/{example}.
@@ -670,8 +884,16 @@ message GetLedgerEntryRequest {
 message ListLedgerEntriesRequest {
   // At most this many entries (AIP-158): 0 means 50, and a larger value is read as 50.
   int32 page_size = 1 [(google.api.field_behavior) = OPTIONAL];
-  // The previous page's `next_page_token`.
+  // The previous page's `next_page_token`, with the same `label`.
   string page_token = 2 [(google.api.field_behavior) = OPTIONAL];
+  // Only the entries of this label (the 流程 view's link); empty lists every entry.
+  // (-- api-linter: core::0132::request-unknown-fields=disabled
+  //     aip.dev/not-precedent: one exact restriction; an AIP-160 filter of one field would say the same with a
+  //     parser. --)
+  string label = 3 [
+    (google.api.field_behavior) = OPTIONAL,
+    (google.api.resource_reference).type = "sort.ziyixi.science/Label"
+  ];
 }
 
 // Output of ListLedgerEntries.

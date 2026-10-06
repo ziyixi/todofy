@@ -44,4 +44,6 @@ enum ErrorReason {
   ERROR_REASON_GMAIL_WRITE_NOT_ALLOWED = 10;
   // UNAVAILABLE (503): Gmail or Workers AI did not answer; repeat the request with the same request_id.
   ERROR_REASON_DEPENDENCY_UNAVAILABLE = 11;
+  // INVALID_ARGUMENT (400): an ImportRules entry is invalid; the preview (validate_only) lists which and why.
+  ERROR_REASON_INVALID_IMPORT = 12;
 }
