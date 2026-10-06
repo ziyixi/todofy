@@ -11,7 +11,9 @@
 //   authenticates, forwards the method and path, and streams the coordinator's answer back. The coordinator runs the
 //   same transcoder and handlers (handleDelegated), for those routes only;
 // - GET /api/v2/messages/{message}/raw and /api/v2/messages/{message}/attachments/{part_id}: the two downloads, outside
-//   the service (they stream bytes; mail_hero_ui_service.proto says why), behind the same authentication;
+//   the service (they stream bytes; mail_hero_ui_service.proto says why), behind the same authentication. The Worker
+//   streams the raw message itself; an attachment's R2 key is in the parsed record (the same 4 MiB of JSON), so the
+//   Worker checks the path and forwards it like a DELEGATED read, and the coordinator streams the attachment back;
 // - GET /api/csrf: the CSRF token and its cookie (transport, not part of the service);
 // - /api/v1/*, the hand-written owner API before mailhero.ui.v2: 410 `reload_required` in its old error envelope, so a
 //   tab still running the old UI tells the owner to reload (until 2026-11-01, then NOT_FOUND like any other path).
@@ -95,22 +97,33 @@ interface Routed {
   readonly reason?: string | undefined
 }
 
-async function download(ctx: Context, url: URL, match: RegExpExecArray): Promise<Routed> {
-  const head = ctx.request.method === 'HEAD'
-  const fail = (error: RpcError): Routed => ({ response: api.errorResponse(error, ctx.requestId, head), reason: error.reason })
-  if (ctx.request.method !== 'GET') return fail(mhError('METHOD_NOT_ALLOWED', { httpStatus: 405, headers: { allow: 'GET' } }))
+const MESSAGE_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
+
+/** A download's message and attachment part (undefined for the raw message), or the Status that refuses it. */
+interface DownloadTarget {
+  readonly id: string
+  readonly part: string | undefined
+}
+function downloadTarget(request: Request, url: URL, match: RegExpExecArray): DownloadTarget | RpcError {
+  if (request.method !== 'GET') return mhError('METHOD_NOT_ALLOWED', { httpStatus: 405, headers: { allow: 'GET' } })
   let id: string, part: string | undefined
   try {
     id = decodeURIComponent(match[1]!).toLowerCase()
     part = match[2] === undefined ? undefined : decodeURIComponent(match[2])
   } catch {
-    return fail(mhError('BAD_REQUEST'))
+    return mhError('BAD_REQUEST')
   }
-  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(id) || url.search !== '') return fail(mhError('BAD_REQUEST'))
+  if (!MESSAGE_ID.test(id) || url.search !== '') return mhError('BAD_REQUEST')
+  return { id, part }
+}
+
+/** Streams a download from R2: in the Worker for the raw message, in the coordinator for an attachment. */
+async function download(env: Env, target: DownloadTarget, requestId: string): Promise<Routed> {
   try {
-    return { response: await downloadMessage(ctx.env, id, part) }
+    return { response: await downloadMessage(env, target.id, target.part) }
   } catch (error) {
-    return fail(error instanceof HttpError ? fromHttpError(error, true) : unexpected(error))
+    const rpc = error instanceof HttpError ? fromHttpError(error, true) : unexpected(error)
+    return { response: api.errorResponse(rpc, requestId), reason: rpc.reason }
   }
 }
 
@@ -142,7 +155,11 @@ async function route(request: Request, env: Env, requestId: string): Promise<Rou
     }
   }
   const downloadMatch = DOWNLOAD.exec(url.pathname)
-  if (downloadMatch !== null) return download(ctx, url, downloadMatch)
+  if (downloadMatch !== null) {
+    const target = downloadTarget(request, url, downloadMatch)
+    if (target instanceof RpcError) return fail(target)
+    return target.part === undefined ? download(ctx.env, target, requestId) : forward(ctx, url)
+  }
   if (delegated(request, url)) return forward(ctx, url)
   if (url.pathname === '/api/v2' || url.pathname.startsWith(API_PREFIX)) {
     const result = await api.handle(request, ctx, requestId)
@@ -172,16 +189,23 @@ async function forward(ctx: Context, url: URL): Promise<Routed> {
 
 /**
  * The coordinator's side of a delegated read (its fetch handler routes DELEGATED_PREFIX here): the same transcoder and
- * handlers as the Worker, for the DELEGATED routes only, with the Worker's request ID. Only the Worker calls it, after
- * authentication: a Durable Object has no public route.
+ * handlers as the Worker, for the DELEGATED routes only, and the attachment download, with the Worker's request ID. Only
+ * the Worker calls it, after authentication: a Durable Object has no public route.
  */
 export async function handleDelegated(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url)
   const path = url.pathname.slice(DELEGATED_PREFIX.length)
   const requestId = /^[0-9a-f]{16}$/.test(request.headers.get(REQUEST_ID_HEADER) ?? '') ? request.headers.get(REQUEST_ID_HEADER)! : newRequestId()
   const inner = new Request(`https://${API_DOMAIN}${path}${url.search}`, { method: request.method })
+  const innerUrl = new URL(inner.url)
   const head = request.method === 'HEAD'
-  if (!url.pathname.startsWith(`${DELEGATED_PREFIX}/`) || !delegated(inner, new URL(inner.url))) return api.errorResponse(mhError('NOT_FOUND'), requestId, head)
+  if (!url.pathname.startsWith(`${DELEGATED_PREFIX}/`)) return api.errorResponse(mhError('NOT_FOUND'), requestId, head)
+  const attachment = DOWNLOAD.exec(path)
+  if (attachment?.[2] !== undefined) {
+    const target = downloadTarget(inner, innerUrl, attachment)
+    return target instanceof RpcError ? api.errorResponse(target, requestId, head) : (await download(withDependencies(env), target, requestId)).response
+  }
+  if (!delegated(inner, innerUrl)) return api.errorResponse(mhError('NOT_FOUND'), requestId, head)
   const result = await api.handle(inner, { env: withDependencies(env), owner: '', request: inner, requestId }, requestId)
   return result?.response ?? api.errorResponse(mhError('NOT_FOUND'), requestId, head)
 }

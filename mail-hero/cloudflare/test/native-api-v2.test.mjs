@@ -143,6 +143,13 @@ test('downloads stream the raw message and stored attachments with the private h
     { part_id: '1.3', filename: 'big.bin', content_type: 'application/octet-stream', size: 3_000_000, storage_status: 'omitted', omitted_reason: 'size_limit' },
   ] } })
   await env.MAIL_STORE.put('parsed/x/attachment-1', 'bytes')
+  // An attachment's key is in the parsed record (up to about 4 MiB of JSON): the coordinator streams it, never the raw message.
+  const forwarded = []
+  const coordinator = env.COORDINATOR.get
+  env.COORDINATOR.get = name => {
+    const stub = coordinator(name)
+    return { fetch: (url, init) => { if (new URL(url).pathname.startsWith('/owner-api/')) forwarded.push(new URL(url).pathname); return stub.fetch(url, init) } }
+  }
   const content = (await api('GET', `/messages/${id}/content`)).data
   assert.deepEqual(content.attachments, [
     { part_id: '1.2', filename: '报告 "季度".pdf', mime_type: 'application/pdf', size_bytes: 5, storage_state: 'stored', download_uri: `/api/v2/messages/${id}/attachments/1.2` },
@@ -162,8 +169,13 @@ test('downloads stream the raw message and stored attachments with the private h
     const response = await get(env, path)
     assert.deepEqual([response.status, reasonOf(await response.json())], [status, reason], path)
   }
+  assert.deepEqual(forwarded, [`/owner-api/api/v2/messages/${id}/content`, `/owner-api/api/v2/messages/${id}/attachments/1.2`,
+    `/owner-api/api/v2/messages/${id}/attachments/1.3`, `/owner-api/api/v2/messages/${id}/attachments/9`], 'the Worker refuses a bad path itself and serves the raw message')
   const post = await get(env, `/api/v2/messages/${id}/raw`, { method: 'POST' })
   assert.deepEqual([post.status, post.headers.get('allow')], [405, 'GET'])
+  const postAttachment = await get(env, `/api/v2/messages/${id}/attachments/1.2`, { method: 'POST' })
+  assert.deepEqual([postAttachment.status, postAttachment.headers.get('allow')], [405, 'GET'])
+  assert.equal(forwarded.length, 4, 'a refused method is not forwarded')
   await env.DB.prepare("UPDATE messages SET raw_expired_at='2026-09-01T00:00:00.000Z' WHERE id=?").bind(id).run()
   const expired = await get(env, `/api/v2/messages/${id}/raw`)
   assert.deepEqual([expired.status, reasonOf(await expired.json())], [410, 'RAW_EXPIRED'])
@@ -274,7 +286,7 @@ test('the coordinator answers the two heavy reads the Worker forwards, and nothi
     '/owner-api/api/v2/deliveries/-/attempts:summarize', `/owner-api/api/v2/messages/${id}/content`])
   assert.deepEqual(lines.map(line => JSON.parse(line).reason), ['INVALID_TIME_ZONE', 'METHOD_NOT_ALLOWED'], 'the Worker logs what the coordinator refused')
   // The coordinator's side serves those routes only, whatever it is asked.
-  for (const path of ['/owner-api/api/v2/settings', '/owner-api/api/v2/messages', `/owner-api/api/v2/messages/${id}`, '/owner-api/x']) {
+  for (const path of ['/owner-api/api/v2/settings', '/owner-api/api/v2/messages', `/owner-api/api/v2/messages/${id}`, `/owner-api/api/v2/messages/${id}/raw`, '/owner-api/x']) {
     const response = await handleDelegated(new Request(`https://coordinator${path}`), env)
     assert.equal(response.status, 404, path)
   }

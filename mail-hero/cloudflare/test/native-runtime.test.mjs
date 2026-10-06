@@ -121,8 +121,11 @@ test('native workerd: durable archive, protected API, stable retry identity and 
     assert.doesNotMatch(detail.html, /tracker|script|<img/i);
     assert.equal(detail.attachments.length, 1);
     assert.equal((await api('/deliveries')).deliveries, undefined, 'archive mode does not send');
+    // Streamed by the coordinator (a real Durable Object here), with the download's headers intact through the Worker.
     const attachment = await mf.dispatchFetch(`http://localhost${detail.attachments[0].download_uri}`);
     assert.equal(attachment.status, 200);
+    assert.deepEqual(['content-type', 'content-disposition', 'cache-control', 'x-content-type-options'].map(name => attachment.headers.get(name)),
+      ['text/plain', `attachment; filename="download"; filename*=UTF-8''note.txt`, 'no-store', 'nosniff']);
     assert.match(await attachment.text(), /safe attachment/);
     const actionID = crypto.randomUUID();
     const endpointBody = { display_name: 'Synthetic consumer', uri: 'https://consumer.example.org/hooks/mail',

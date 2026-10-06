@@ -138,8 +138,8 @@ export async function clearMessageContent(env: Env, owner: string, id: string, e
 
 /**
  * A download: the raw message, or an attachment's stored copy (`part`), streamed from R2 as an attachment with
- * no-store, nosniff and a sandboxing CSP. Not part of mailhero.ui.v2 (bytes up to 25 MiB): src/native/http.ts serves it
- * next to the transcoder.
+ * no-store, nosniff and a sandboxing CSP. Not part of mailhero.ui.v2 (bytes up to 25 MiB): api.ts serves it next to the
+ * transcoder, an attachment from the coordinator (finding its key reads the whole parsed record).
  */
 export async function downloadMessage(env: Env, id: string, part?: string): Promise<Response> {
   const message = await required(env, `SELECT raw_key,parsed_key,raw_expired_at,content_deleted_at FROM messages WHERE id=? AND origin='cloudflare'`, id)
