@@ -13,7 +13,7 @@
 | 采集、整期状态流转 | `collection/`、`workflow/pipeline.py` | 不绕过冻结的证据/投递策略或直接发送 |
 | 选题采编、独立审校 | `workflow/story_editor.py`、`story_nodes.py` | 不把私有事件交给公开研究 |
 | 版本/checkpoint、确定性拼版 | `workflow/publication.py` | 不将未审内容或被明确撤回的版本自动提升为已核实 |
-| SDK调用、旧整期总编 | `editor.py` | 不把旧整期HOLD重新施加到新选题流程 |
+| SDK调用、离线演示总编 | `editor.py` | 不把旧整期HOLD重新施加到新选题流程 |
 | 模型结构、JSON和工作目录 | `model_schema.py`、`model_io.py` | 不从另一个角色的 schema 内层取字段，不借用其私有 helper |
 | 邮件、预览、图表 | `rendering.py`、`templates/`、`charts.py` | 不让排版依赖 HTTP app，不执行模型 HTML |
 | 供应商、事务与队列 | `adapters.py`、`todofy.py`、`store.py`、`worker.py` | 不为未来假设的后端建立通用框架 |

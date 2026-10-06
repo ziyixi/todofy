@@ -225,7 +225,7 @@ def test_frozen_run_keeps_whole_config_a_while_next_run_gets_b(
         store.close()
 
 
-def test_no_config_remains_legacy_and_settings_reads_only_directory(
+def test_no_config_uses_packaged_recipe_and_settings_reads_only_directory(
     tmp_path, monkeypatch
 ):
     monkeypatch.setenv(
@@ -235,8 +235,10 @@ def test_no_config_remains_legacy_and_settings_reads_only_directory(
         newsletter_settings.Settings.from_env().content_config_dir
         == tmp_path / "config"
     )
-    with pytest.raises(ValueError, match="requires NEWSLETTER_WORKFLOW=dag"):
-        newsletter_settings.Settings(content_config_dir=tmp_path).validate()
+    with pytest.raises(ValueError, match="legacy backend was removed"):
+        newsletter_settings.Settings(
+            content_config_dir=tmp_path / "config", workflow_backend="legacy"
+        ).validate()
     store = newsletter_store.Store(tmp_path / "state.sqlite3", "mock")
     try:
         _, snapshot = pipeline.freeze_workflow(

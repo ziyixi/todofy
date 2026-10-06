@@ -1,4 +1,10 @@
-"""One-shot collection orchestration; no daily scheduling."""
+"""The offline fixture pipeline used by mock mode; no daily scheduling.
+
+Live mode runs the topic DAG (workflow.pipeline.DagPipeline). This pipeline
+collects one direction at a time from the mock collector, waits for fixture
+packet projection and asks the mock editor for a whole-edition draft, so the
+demo and HTTP smoke exercise storage, rendering and send guards offline.
+"""
 
 import asyncio
 import logging
@@ -15,7 +21,7 @@ import newsletter.store as store
 
 
 class CollectionPipeline:
-    """Advance frozen collection directions without scheduling new issues."""
+    """Advance offline fixture runs without scheduling new issues."""
 
     def __init__(
         self,
@@ -33,7 +39,7 @@ class CollectionPipeline:
         )
 
     def has_priority_work(self) -> bool:
-        """Legacy runs require projection first; newer policies may override."""
+        """Fixture runs have no deadline that outranks packet projection."""
         return False
 
     async def collect_next(self) -> bool:

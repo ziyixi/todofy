@@ -3,12 +3,11 @@
 import asyncio
 import logging
 import pathlib
-from typing import cast
+from typing import cast, Protocol
 
 import ziyixi_protos.newsletter.editorial_pb2 as editorial_pb2
 
 import newsletter.adapters as adapters
-import newsletter.collection.pipeline as newsletter_collection_pipeline
 import newsletter.contracts as contracts
 import newsletter.diagnostics as diagnostics
 import newsletter.editor as newsletter_editor
@@ -25,20 +24,35 @@ import newsletter.workflow.state as state
 logger = logging.getLogger(__name__)
 
 
+class Pipeline(Protocol):
+    """Advance collection runs: the live topic DAG or the offline fixture."""
+
+    def advance(self) -> bool:
+        """Move runs whose local barriers are satisfied; report progress."""
+        ...
+
+    def has_priority_work(self) -> bool:
+        """Report runs whose deadline outranks optional projection work."""
+        ...
+
+    async def collect_next(self) -> bool:
+        """Advance one claimed collection run; report whether it worked."""
+        ...
+
+
 class Worker:
     """Prepare queued editions and advance local projection work serially."""
 
     def __init__(
         self,
         store: newsletter_store.Store,
-        editor: newsletter_editor.Editor,
+        editor: newsletter_editor.Editor | None,
         notion: adapters.NotionAdapter,
         workspace: pathlib.Path,
         timeout: float,
         *,
         todofy: newsletter_todofy.TodofyAdapter | None = None,
-        pipeline: newsletter_collection_pipeline.CollectionPipeline
-        | None = None,
+        pipeline: Pipeline | None = None,
         skip_packet_projection: bool = False,
     ) -> None:
         self.store, self.editor, self.notion = store, editor, notion
@@ -174,6 +188,15 @@ class Worker:
                     result = newsletter_editor.EditorResult(
                         frozen["draft"], frozen["review"]
                     )
+                elif self.editor is None:
+                    # Unbound editions come only from the retired legacy
+                    # collection backend; nothing can draft them any more.
+                    self.store.finish(
+                        edition["id"],
+                        state="failed",
+                        error_code="legacy_editor_retired",
+                    )
+                    return
                 else:
                     with newsletter_usage.usage_scope(
                         self.workflow_state.usage_sink(scope_id), "editor"

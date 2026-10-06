@@ -18,6 +18,8 @@ MAX_DEFINITION_BYTES = 65_536
 MAX_NODES = 32
 MAX_MAP_ITEMS = 32
 MAX_TOTAL_TASKS = 128
+# Includes the retired whole-edition types so stored legacy definitions still
+# parse for receipts; story_recipe.validate_story_recipe rejects them for runs.
 NODE_TYPES = frozenset(
     {
         "discovery",

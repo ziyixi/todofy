@@ -15,7 +15,6 @@ import newsletter.store as newsletter_store
 import newsletter.workflow.content as content
 import newsletter.workflow.definition as newsletter_workflow_definition
 import newsletter.workflow.engine as newsletter_workflow_engine
-import newsletter.workflow.nodes as newsletter_workflow_nodes
 import newsletter.workflow.schema as newsletter_workflow_schema
 import newsletter.workflow.sources as sources
 import newsletter.workflow.story_nodes as story_nodes
@@ -394,25 +393,6 @@ def test_duplicate_tasks_and_duplicate_selected_candidate_rejected():
         )
 
 
-def test_gap_plan_can_have_no_candidate_but_has_context_and_only_given_urls():
-    result = content.parse_plan(
-        workflow_content.planned(workflow_content.task(candidate_ids=[])),
-        set(),
-        {workflow_content.URL},
-        3,
-        gaps=True,
-    )
-    assert result.research_tasks[0]["evidence_context"]
-    assert (
-        contracts.to_dict(
-            contracts.parse_message(
-                result.research_tasks[0], editorial_pb2.ResearchTask
-            )
-        )["priority"]
-        == 1
-    )
-
-
 async def test_discover_passes_public_history_watchlist_never_private_fields(
     tmp_path,
 ):
@@ -557,19 +537,12 @@ async def test_shortlist_rejects_invalid_reader_profile_before_model(
     assert not engine.calls
 
 
-@pytest.mark.parametrize(
-    "node_class,recipe",
-    [
-        (newsletter_workflow_nodes.EditorialNodes, "legacy-daily.yaml"),
-        (story_nodes.StoryNodes, "daily.yaml"),
-    ],
-)
 async def test_selection_uses_only_reader_profile_from_frozen_run_policy(
-    tmp_path, node_class, recipe
+    tmp_path,
 ):
     directory = pathlib.Path(__file__).resolve().parents[1]
     definition = newsletter_workflow_definition.load_definition(
-        directory / "src/newsletter/workflows" / recipe
+        directory / "src/newsletter/workflows/daily.yaml"
     )
     ids = {node.type: node.id for node in definition.nodes}
     engine = workflow_content.Engine(
@@ -581,7 +554,9 @@ async def test_selection_uses_only_reader_profile_from_frozen_run_policy(
         "financial mechanisms.\n"
     )
     try:
-        nodes = node_class(store, definition, engine, tmp_path.resolve())
+        nodes = story_nodes.StoryNodes(
+            store, definition, engine, tmp_path.resolve()
+        )
         ctx = newsletter_workflow_engine.NodeContext(
             run_id="synthetic-selection",
             node_id=ids["selection"],
@@ -623,91 +598,6 @@ async def test_selection_uses_only_reader_profile_from_frozen_run_policy(
         store.close()
 
 
-async def test_old_candidates_still_need_fresh_research_provenance(
-    tmp_path,
-):
-    output = json.dumps(
-        {
-            "state": "collected",
-            "note": "Read actual abstract",
-            "packets": [material()],
-        }
-    )
-    engine = workflow_content.Engine(
-        (output, set(), True), (output, {workflow_content.URL}, True)
-    )
-    service = content.ContentPreparation(engine)
-    with pytest.raises(errors.EditorError):
-        await service.research(
-            workflow_content.task(),
-            [workflow_content.candidate()],
-            workflow_content.DAY,
-            tmp_path.resolve() / "bad",
-        )
-    result = await service.research(
-        workflow_content.task(),
-        [workflow_content.candidate()],
-        workflow_content.DAY,
-        tmp_path.resolve() / "good",
-    )
-    assert result.packets[0]["sources"][0]["url"] == workflow_content.URL
-
-
-async def test_gap_research_accepts_empty_candidates_with_explicit_question(
-    tmp_path,
-):
-    output = json.dumps(
-        {
-            "state": "no_findings",
-            "note": "Could not verify the claim",
-            "packets": [],
-        }
-    )
-    engine = workflow_content.Engine((output, set(), True))
-    result = await content.ContentPreparation(engine).research(
-        workflow_content.task(candidate_ids=[]),
-        [],
-        workflow_content.DAY,
-        tmp_path.resolve() / "gap-research",
-    )
-    assert not result.packets
-
-
-async def test_plan_gaps_uses_public_draft_and_strips_packet_record_extras(
-    tmp_path,
-):
-    packet = {"id": "packet-1", "content": material()}
-    draft = {
-        "subject": "Test",
-        "title": "Test",
-        "sections": [
-            {
-                "kind": "feature",
-                "heading": "Research",
-                "paragraphs": [
-                    {
-                        "text": "A claim worth checking",
-                        "citations": ["packet-1/source-1"],
-                    }
-                ],
-            }
-        ],
-    }
-    engine = workflow_content.Engine(
-        (
-            workflow_content.planned(workflow_content.task(candidate_ids=[])),
-            set(),
-            False,
-        )
-    )
-    result = await content.ContentPreparation(engine).plan_gaps(
-        draft, [packet], workflow_content.DAY, tmp_path.resolve() / "gap-plan"
-    )
-    assert result.research_tasks[0]["candidate_ids"] == []
-    assert engine.calls[0][1]["properties"]["research_tasks"]["maxItems"] == 3
-    assert "唯一一轮共享预算" in engine.calls[0][2]
-
-
 async def test_extra_private_fields_on_candidates_are_rejected_before_model(
     tmp_path,
 ):
@@ -738,9 +628,9 @@ def test_schema_agrees_with_shared_proto_directions_eight_separate_files():
         == 5
     )
     assert (
-        newsletter_workflow_schema.planning_schema([], [], 3, gaps=True)[
-            "properties"
-        ]["research_tasks"]["items"]["properties"]["candidate_ids"]["maxItems"]
+        newsletter_workflow_schema.planning_schema([], [], 3)["properties"][
+            "research_tasks"
+        ]["items"]["properties"]["candidate_ids"]["maxItems"]
         == 0
     )
     directory = (

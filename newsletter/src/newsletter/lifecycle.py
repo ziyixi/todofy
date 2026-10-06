@@ -77,41 +77,29 @@ async def service_lifespan(
             runs = repository.RunRepository(store)
             runs.recover()
             workflow_state = state.WorkflowState(store)
-            dag_enabled = (
-                settings.workflow_backend == "dag" and settings.mode == "live"
-            )
-            if dag_enabled:
+            # Live runs execute the frozen topic DAG; mock mode runs the
+            # offline fixture pipeline and never contacts a provider.
+            live = settings.mode == "live"
+            if live:
                 # Fail startup on malformed graphs or missing instruction
                 # resources.
                 newsletter_workflow_pipeline.freeze_workflow(
                     settings, workflow_state, "2000-01-01"
                 )
-            chosen_editor: newsletter_editor.Editor = editor or (
+            # Every live edition carries a frozen workflow result, so only
+            # the offline fixture flow needs a whole-edition editor.
+            chosen_editor = editor or (
                 newsletter_editor.MockEditor()
                 if settings.editor_backend == "mock"
-                else newsletter_editor.CodexEditor(
-                    codex_home=cast(pathlib.Path, settings.codex_home),
-                    model=settings.model,
-                )
+                else None
             )
-            notion_factories: dict[
-                str, Callable[[], adapters.NotionAdapter]
-            ] = {
-                "disabled": lambda: adapters.DisabledNotion(),
-                "fake": lambda: adapters.FakeNotion(
-                    settings.data_dir / "notion"
-                ),
-                "notion": lambda: adapters.Notion(
-                    settings.notion_token, settings.notion_data_source_id
-                ),
-            }
-            notion_v2 = (
-                settings.notion_backend == "notion" and settings.notion_v2
-            )
+            # Real Notion writes go through the dual-database sync below. The
+            # worker's packet projection only serves the offline fixture.
+            notion_v2 = settings.notion_backend == "notion"
             chosen_notion = notion or (
-                adapters.DisabledNotion()
-                if notion_v2
-                else notion_factories[settings.notion_backend]()
+                adapters.FakeNotion(settings.data_dir / "notion")
+                if settings.notion_backend == "fake"
+                else adapters.DisabledNotion()
             )
             app.state.mail = mail or (
                 adapters.FakeMail(settings.data_dir / "outbox")
@@ -136,38 +124,24 @@ async def service_lifespan(
                     time_zone=settings.time_zone,
                 ),
             }
-            research_editor = (
-                newsletter_editor.CodexEditor(
-                    cast(pathlib.Path, settings.codex_home),
-                    model=settings.model,
-                    timeout_seconds=settings.collection_timeout_seconds,
-                )
-                if settings.mode == "live"
-                else None
-            )
-            chosen_collector = collector or (
-                newsletter_collection_collector.MockCollector()
-                if settings.mode == "mock"
-                else newsletter_collection_collector.CodexCollector(
-                    cast(newsletter_editor.CodexEditor, research_editor)
-                )
-            )
-            pipeline_args = (
-                runs,
-                chosen_collector,
-                settings.data_dir / "collection-jobs",
-                settings.collection_timeout_seconds,
-                settings.max_packets,
-            )
-            pipeline: newsletter_collection_pipeline.CollectionPipeline = (
+            pipeline: newsletter_worker.Pipeline = (
                 newsletter_workflow_pipeline.DagPipeline(
-                    *pipeline_args,
-                    editor=cast(newsletter_editor.CodexEditor, research_editor),
-                    recipe_path=settings.workflow_file,
+                    runs,
+                    settings.data_dir / "collection-jobs",
+                    editor=newsletter_editor.CodexEditor(
+                        cast(pathlib.Path, settings.codex_home),
+                        model=settings.model,
+                        timeout_seconds=settings.collection_timeout_seconds,
+                    ),
                 )
-                if dag_enabled
+                if live
                 else newsletter_collection_pipeline.CollectionPipeline(
-                    *pipeline_args
+                    runs,
+                    collector
+                    or newsletter_collection_collector.MockCollector(),
+                    settings.data_dir / "collection-jobs",
+                    settings.collection_timeout_seconds,
+                    settings.max_packets,
                 )
             )
             if isinstance(pipeline, newsletter_workflow_pipeline.DagPipeline):

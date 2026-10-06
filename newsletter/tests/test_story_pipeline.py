@@ -1,8 +1,7 @@
 """Test durable publication with synthetic stories, without models or mail.
 
-These tests deliberately fail the *new* topic DAG after saving a checked brief.
-The legacy all-or-nothing recipe has separate tests and must not be mistaken for
-coverage of deadline publication, local-first evidence, or topic dispositions.
+These tests deliberately fail the topic DAG after saving a checked brief. Runs
+stored with the retired all-or-nothing recipe are only read and retired.
 """
 
 import asyncio
@@ -114,9 +113,7 @@ def test_terminal_deep_attempt_preserves_brief_and_dispositions(
     status = rig.pipeline.repository.get(rig.run["id"])
     assert status["state"] == "failed"
     attempts = copy.deepcopy(rig.pipeline.repository.attempts(rig.run["id"]))
-    assert rig.pipeline.finish_graph(
-        rig.run, rig.definition, rig.run["id"], status
-    )
+    assert rig.pipeline.finish_graph(rig.run, rig.definition, status)
     assert_partial_publication(rig)
     assert rig.publications.results(rig.run["id"]) == [checkpoint]
     assert rig.pipeline.repository.attempts(rig.run["id"]) == attempts
@@ -246,18 +243,24 @@ def test_only_new_topic_collection_has_priority_over_background_projection(
 
 
 @pytest.mark.asyncio
-async def test_legacy_deadline_does_not_adopt_new_local_first_policy(
-    rig_factory,
-):
-    rig = rig_factory(expired=True, legacy=True)
+async def test_stored_legacy_recipe_run_is_retired_not_resumed(rig_factory):
+    rig = rig_factory(legacy=True)
     seed_checkpoint(rig)
+    frozen = copy.deepcopy(rig.runs.workflow_snapshot(rig.run["id"]))
     assert await rig.pipeline.collect_next()
     run = rig.runs.get(rig.run["id"])
-    assert (
-        run["state"] == "blocked" and run["error_code"] == "workflow_deadline"
+    assert (run["state"], run["error_code"]) == (
+        "blocked",
+        pipeline.RETIRED_WORKFLOW,
     )
     assert not run["edition_id"]
     assert rig.publications.get_publication(run["id"]) is None
+    assert not rig.pipeline.repository.attempts(rig.run["id"])
+    # The stored receipt stays readable.
+    assert rig.runs.workflow_snapshot(rig.run["id"]) == frozen
+    assert rig.pipeline.receipt(rig.run["id"])["workflow"]["id"] == (
+        "daily-newsletter"
+    )
 
 
 @pytest.mark.asyncio
@@ -484,9 +487,7 @@ async def test_unfinished_source_survives_history_without_false_novelty(
 
     next_day = "2026-09-07"
     _, snapshot = pipeline.freeze_workflow(
-        settings.Settings(
-            data_dir=rig.path, workflow_file=rig.pipeline.recipe_path
-        ),
+        settings.Settings(data_dir=rig.path),
         rig.pipeline.state,
         next_day,
     )

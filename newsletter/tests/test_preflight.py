@@ -252,8 +252,9 @@ def providers(live):
     return dataclasses.replace(
         live,
         notion_backend="notion",
-        notion_token="synthetic-notion-key",
-        notion_data_source_id="12345678-1234-1234-1234-123456789abc",
+        notion_token="synthetic-notion-key-for-offline-tests",
+        notion_materials_data_source_id="12345678-1234-1234-1234-123456789abc",
+        notion_editions_data_source_id="22345678-1234-1234-1234-123456789abc",
         todofy_backend="todofy",
         todofy_base_url="https://todofy.example.org",
         todofy_user="synthetic-user",
@@ -266,25 +267,10 @@ def providers(live):
     )
 
 
-def notion_response(settings):
-    return {
-        "object": "data_source",
-        "id": settings.notion_data_source_id,
-        "properties": {
-            "Renamed column": {"id": "title", "type": "title", "title": {}}
-        },
-    }
-
-
 @pytest.fixture
 def dual_notion(providers):
     return dataclasses.replace(
         providers,
-        workflow_backend="dag",
-        notion_token="synthetic-notion-key-for-offline-tests",
-        notion_data_source_id="must-not-use-legacy-target",
-        notion_materials_data_source_id="12345678-1234-1234-1234-123456789abc",
-        notion_editions_data_source_id="22345678-1234-1234-1234-123456789abc",
         todofy_backend="disabled",
     )
 
@@ -350,7 +336,6 @@ async def test_dual_notion_validates_both_schemas_read_only(dual_notion, sdk):
         "/v1/data_sources/" + dual_notion.notion_editions_data_source_id,
     ]
     assert "notion_dual_data_sources_and_managed_schema" in report.checks
-    assert "notion_data_source_read_and_title_schema" not in report.checks
     assert any("Update content" in item for item in report.limitations)
     assert any(
         "no page or column was created or changed" in item
@@ -504,16 +489,21 @@ async def test_provider_probes_only_get_schema_and_public_health(
         requests.append(request)
         assert request.method == "GET"
         if request.url.host == "api.notion.com":
-            assert (
-                request.url.path
-                == "/v1/data_sources/" + providers.notion_data_source_id
-            )
             assert request.headers["notion-version"] == "2026-03-11"
             assert (
                 request.headers["authorization"]
                 == "Bearer " + providers.notion_token
             )
-            return httpx.Response(200, json=notion_response(providers))
+            kind = (
+                "material"
+                if request.url.path
+                == "/v1/data_sources/"
+                + providers.notion_materials_data_source_id
+                else "edition"
+            )
+            return httpx.Response(
+                200, json=dual_notion_response(providers, kind)
+            )
         assert (
             request.url.host == "todofy.example.org"
             and request.url.path == "/health"
@@ -526,67 +516,12 @@ async def test_provider_probes_only_get_schema_and_public_health(
     report = await preflight.preflight(
         providers, sdk=module, http_transport=httpx.MockTransport(handler)
     )
-    assert len(requests) == 2
+    assert len(requests) == 3
     assert "resend_configuration_only" in report.checks
     assert any("Insert content" in item for item in report.limitations)
     assert any("Basic Auth" in item for item in report.limitations)
     assert any("No email was sent" in item for item in report.limitations)
     assert "synthetic" not in repr(report)
-
-
-@pytest.mark.parametrize(
-    ("status", "body", "code"),
-    [
-        (401, {"message": "upstream-secret"}, "NOTION_AUTH_FAILED"),
-        (403, {"message": "upstream-secret"}, "NOTION_AUTH_FAILED"),
-        (404, {}, "NOTION_UNAVAILABLE"),
-        (302, {}, "NOTION_UNAVAILABLE"),
-        (200, {"object": "page"}, "NOTION_SCHEMA_INVALID"),
-        (200, [], "NOTION_INVALID_RESPONSE"),
-    ],
-)
-async def test_notion_refuses_auth_redirect_and_wrong_schema(
-    providers, sdk, status, body, code
-):
-    module, _ = sdk
-    calls = []
-
-    def handler(request):
-        calls.append(request)
-        return httpx.Response(
-            status,
-            json=body,
-            headers={"Location": "https://elsewhere.example.org"},
-        )
-
-    with pytest.raises(preflight.PreflightError) as error:
-        await preflight.preflight(
-            providers, sdk=module, http_transport=httpx.MockTransport(handler)
-        )
-    assert error.value.code == code
-    assert len(calls) == 1
-
-
-@pytest.mark.parametrize("change", ["wrong-id", "missing-title", "trashed"])
-async def test_notion_requires_exact_target_and_title_schema(
-    providers, sdk, change
-):
-    module, _ = sdk
-    value = notion_response(providers)
-    if change == "wrong-id":
-        value["id"] = "11111111-1234-1234-1234-123456789abc"
-    elif change == "missing-title":
-        value["properties"] = {}
-    else:
-        value["in_trash"] = True
-    with pytest.raises(preflight.PreflightError, match="NOTION_SCHEMA_INVALID"):
-        await preflight.preflight(
-            providers,
-            sdk=module,
-            http_transport=httpx.MockTransport(
-                lambda _: httpx.Response(200, json=value)
-            ),
-        )
 
 
 async def test_todofy_health_failure_does_not_try_generating_endpoint(
@@ -661,11 +596,14 @@ async def test_provider_response_limits_and_timeout_are_safe(
             )
         return httpx.Response(200, text="private-error-html")
 
+    # Dual-database Notion has its own bounded reader (tested above); the
+    # shared preflight reader now serves the Todofy health probe.
+    settings = dataclasses.replace(providers, notion_backend="disabled")
     with pytest.raises(preflight.PreflightError) as error:
         await preflight.preflight(
-            providers, sdk=module, http_transport=httpx.MockTransport(handler)
+            settings, sdk=module, http_transport=httpx.MockTransport(handler)
         )
-    assert error.value.code == "NOTION_INVALID_RESPONSE"
+    assert error.value.code == "TODOFY_INVALID_RESPONSE"
     assert "private" not in str(error.value)
 
 

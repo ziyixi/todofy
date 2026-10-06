@@ -113,7 +113,6 @@ async def blocked_parent(rig, *, fatal=None, record_usage=True):
     rig.pipeline.finish_graph(
         rig.run,
         rig.definition,
-        rig.run["id"],
         rig.pipeline.repository.get(rig.run["id"]),
     )
     assert rig.runs.get(rig.run["id"])["error_code"] == "no_publishable_content"

@@ -37,34 +37,25 @@ def test_dual_destinations_need_no_legacy_id(live):
     assert "synthetic-provider-key" not in repr(settings)
 
 
-def test_legacy_destination_remains_supported(live):
-    settings = dataclasses.replace(
-        live, notion_data_source_id=MATERIALS, workflow_backend="legacy"
+def test_single_database_destination_was_removed(live, monkeypatch):
+    # The old single-database variable is ignored, never a fallback.
+    monkeypatch.setenv("NOTION_DATA_SOURCE_ID", MATERIALS)
+    assert not hasattr(
+        newsletter_settings.Settings.from_env(), "notion_data_source_id"
     )
-    settings.validate()
-    assert not settings.notion_v2
+    with pytest.raises(ValueError, match="NOTION_MATERIALS_DATA_SOURCE_ID"):
+        live.validate()
 
 
-def test_dual_database_rejects_legacy_workflow_projection_barriers(live):
+def test_removed_legacy_workflow_backend_fails_visibly(live):
     settings = dataclasses.replace(
         live,
         workflow_backend="legacy",
         notion_materials_data_source_id=MATERIALS,
         notion_editions_data_source_id=EDITIONS,
     )
-    with pytest.raises(ValueError, match="requires NEWSLETTER_WORKFLOW=dag"):
+    with pytest.raises(ValueError, match="legacy backend was removed"):
         settings.validate()
-
-
-def test_dual_mode_takes_precedence_over_legacy_destination(live):
-    settings = dataclasses.replace(
-        live,
-        notion_data_source_id="unused-legacy-setting",
-        notion_materials_data_source_id=MATERIALS,
-        notion_editions_data_source_id=EDITIONS,
-    )
-    settings.validate()
-    assert settings.notion_v2
 
 
 @pytest.mark.parametrize(
@@ -72,9 +63,7 @@ def test_dual_mode_takes_precedence_over_legacy_destination(live):
     ["notion_materials_data_source_id", "notion_editions_data_source_id"],
 )
 def test_half_configured_dual_mode_does_not_silently_fall_back(live, field):
-    settings = dataclasses.replace(
-        live, notion_data_source_id=MATERIALS, **{field: EDITIONS}
-    )
+    settings = dataclasses.replace(live, **{field: EDITIONS})
     with pytest.raises(
         ValueError, match="Set both NOTION_MATERIALS_DATA_SOURCE_ID"
     ):
@@ -119,7 +108,10 @@ def test_missing_notion_token_remains_invalid(live):
 
 def test_programmatic_privacy_configuration_rejects_truthy_strings(live):
     settings = dataclasses.replace(
-        live, notion_data_source_id=MATERIALS, notion_archive_private="false"
+        live,
+        notion_materials_data_source_id=MATERIALS,
+        notion_editions_data_source_id=EDITIONS,
+        notion_archive_private="false",
     )
     with pytest.raises(ValueError, match="must be a boolean"):
         settings.validate()

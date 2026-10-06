@@ -16,9 +16,10 @@ import newsletter.preflight as preflight
 import newsletter.settings as newsletter_settings
 import newsletter.store as store
 import newsletter.worker as worker
+import newsletter.workflow.definition as definition
 import newsletter.workflow.pipeline as pipeline
 import newsletter.workflow.state as state
-import newsletter.workflow.story_recipe as story_recipe
+import tests.support.story_pipeline as story_pipeline
 
 
 @pytest.fixture
@@ -111,17 +112,17 @@ def test_status_missing_database_never_creates_it(tmp_path):
     assert not path.exists()
 
 
-def test_legacy_recipe_is_rejected_for_v2_before_freezing(
-    settings, tmp_path, monkeypatch
+def test_retired_whole_edition_recipe_is_rejected_before_freezing(
+    settings, tmp_path
 ):
+    retired = dataclasses.replace(
+        settings, workflow_file=story_pipeline.LEGACY_RECIPE
+    )
     with_store = store.Store(tmp_path / "source.sqlite3", "live")
     try:
-        monkeypatch.setattr(
-            story_recipe, "is_story_recipe", lambda definition: False
-        )
-        with pytest.raises(ValueError, match="story publication"):
+        with pytest.raises(definition.DefinitionError):
             pipeline.freeze_workflow(
-                settings, state.WorkflowState(with_store), "2026-09-07"
+                retired, state.WorkflowState(with_store), "2026-09-07"
             )
     finally:
         with_store.close()

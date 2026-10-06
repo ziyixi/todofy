@@ -7,8 +7,8 @@ import importlib.resources as resources
 import pytest
 
 import newsletter.workflow.definition as newsletter_workflow_definition
-import newsletter.workflow.nodes as nodes
 import newsletter.workflow.story_recipe as story_recipe
+import tests.support.story_pipeline as story_pipeline
 
 
 def recipe():
@@ -26,7 +26,6 @@ def role(value, kind):
 def validate(value):
     definition = newsletter_workflow_definition.parse_definition(value)
     story_recipe.validate_story_recipe(definition)
-    nodes.validate_recipe(definition)
     return definition
 
 
@@ -328,11 +327,10 @@ def test_direct_dataclasses_still_validate_syntax_and_edges():
         story_recipe.validate_story_recipe(broken)
 
 
-def test_legacy_definition_is_still_accepted_by_its_own_validator():
+def test_stored_legacy_definition_still_parses_but_is_not_a_topic_recipe():
     legacy = newsletter_workflow_definition.load_definition(
-        resources.files("newsletter")
-        .joinpath("workflows/legacy-daily.yaml")
-        .read_bytes()
+        story_pipeline.LEGACY_RECIPE
     )
     assert not story_recipe.is_story_recipe(legacy)
-    nodes.validate_recipe(legacy)
+    with pytest.raises(newsletter_workflow_definition.DefinitionError):
+        story_recipe.validate_story_recipe(legacy)

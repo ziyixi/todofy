@@ -17,10 +17,6 @@ def test_every_production_schema_passes_before_any_model_work():
     assert set(schemas) == {
         "discovery",
         "planning",
-        "gaps",
-        "research",
-        "legacy_editor",
-        "legacy_review",
         "story_review",
         "story_brief",
         "story_brief_repair",

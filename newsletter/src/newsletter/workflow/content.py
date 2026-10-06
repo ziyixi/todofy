@@ -16,12 +16,10 @@ import urllib.parse as parse
 
 import ziyixi_protos.newsletter.editorial_pb2 as editorial_pb2
 
-import newsletter.collection.collector as collector
 import newsletter.collection.instructions as newsletter_collection_instructions
 import newsletter.contracts as contracts
 import newsletter.errors as errors
 import newsletter.model_io as model_io
-import newsletter.model_schema as model_schema
 import newsletter.types as types
 import newsletter.workflow.schema as newsletter_workflow_schema
 import newsletter.workflow.sources as sources
@@ -145,23 +143,6 @@ _SELECTION = _SAFETY + (
     "不提前写成突破。不因字段缺失阻断整个选题池，"
     "不为了研究类别齐全选低价值论文。\n"
 )
-_GAPS = _SAFETY + (
-    "\n"
-    "只检查已有公共稿的证据缺口并规划最多3项补查，不写定稿，"
-    "不批准发送；没有必要补查就返回空数组。\n"
-    "重点看核心断言缺原始支持、数字/单位/基线/日期、因果混杂、"
-    "摘要冒充全文及不实的独立验证主张。\n"
-    "算百分比必须保留原始值和比较口径；训练时长、数据量、"
-    "模型/预算同时变化不能声称单一因素净因果效应。\n"
-    "candidate_ids可为空，但evidence_context必须自足指出稿中哪"
-    "一主张、已有证据和具体待核问题。\n"
-    "source_urls仅引用已给原文，不猜新URL；"
-    "需要新来源就在question指定搜索目标，"
-    "由研究节点独立搜索和open。\n"
-    "这只是唯一一轮共享预算内的补查计划，不得要求递归再规划。"
-    "无法在预算内确认时应删/降格主张，而不是继续循环。\n"
-)
-
 # Editable editorial policy is deliberately separate from the fixed provider
 # permissions and source/protobuf validation. Legacy frozen runs use the exact
 # original instructions above, not whatever configuration is active today.
@@ -385,14 +366,6 @@ class ClassifiedSelectionResult(SelectionResult):
 
     task_classifications: dict[str, str]
     omitted_tasks: list[types.Payload]
-
-
-@dataclasses.dataclass(frozen=True)
-class GapPlan:
-    """Carry bounded follow-up research tasks for a reviewed draft."""
-
-    research_tasks: list[ResearchTask]
-    note: str
 
 
 def _text(value: object, limit: int, *, empty: bool = False) -> str:
@@ -632,8 +605,6 @@ def parse_plan(
     candidate_ids: set[str],
     source_urls: set[str],
     max_tasks: int,
-    *,
-    gaps: bool = False,
 ) -> SelectionResult:
     """Validate task identities, evidence references and bounded priorities."""
     values, note = _envelope(text, "research_tasks", max_tasks)
@@ -662,7 +633,7 @@ def parse_plan(
             or not 1 <= priority <= max_tasks
             or priority in priorities
             or not isinstance(refs, list)
-            or not (0 if gaps else 1) <= len(refs) <= 4
+            or not 1 <= len(refs) <= 4
             or any(
                 not isinstance(ref, str) or ref not in candidate_ids
                 for ref in refs
@@ -899,94 +870,3 @@ class ContentPreparation:
                 text, candidates, classifications or {}, max_tasks, limits
             )
         return parse_plan(text, set(ids), set(urls), max_tasks)
-
-    async def research(
-        self,
-        task: ResearchTask,
-        candidates: Sequence[sources.Candidate],
-        issue_date: str,
-        workspace: pathlib.Path,
-    ) -> collector.ResearchResult:
-        """Read selected-task evidence and validate resulting packets."""
-        candidates = [_candidate_view(candidate) for candidate in candidates]
-        task = parse_plan(
-            contracts.canonical_json(
-                {"research_tasks": [task], "note": "Explicit research task"}
-            ),
-            {candidate["id"] for candidate in candidates},
-            set(task["source_urls"]),
-            12,
-            gaps=not bool(task["candidate_ids"]),
-        ).research_tasks[0]
-        selected = [c for c in candidates if c["id"] in task["candidate_ids"]]
-        if (
-            len(selected) != len(task["candidate_ids"])
-            or not task["evidence_context"].strip()
-        ):
-            raise errors.EditorError("invalid_input")
-        for url in task["source_urls"]:
-            contracts.validate_public_url(url)
-        text, opened, searched = await self.engine.execute(
-            contracts.canonical_json(
-                {
-                    "issue_date": issue_date,
-                    "research_task_untrusted": task,
-                    "candidates_untrusted": selected,
-                    "task": (
-                        "为已选择的问题深读原始来源，至多两份自足材料；"
-                        "补查必须区分支持、反证与未证实。"
-                    ),
-                }
-            ),
-            model_schema.research_schema(),
-            collector.RESEARCH_RULES
-            + (
-                "\n"
-                "原始数值、比较基线、同时改变的实验因素必须分开核对。"
-                "通常每个任务只需一份自足packet，"
-                "只有真正不同且必要的两项证据才拆成两份。"
-                "不要仅重复候选摘要。缺口未能证实可no_findings，"
-                "不制造确定结论。"
-            ),
-            model_io.prepare_workspace(workspace, issue_date),
-        )
-        return collector.parse_research(text, opened, searched)
-
-    async def plan_gaps(
-        self,
-        draft: types.Payload,
-        packets: list[types.Payload],
-        issue_date: str,
-        workspace: pathlib.Path,
-        *,
-        max_tasks: int = 3,
-    ) -> GapPlan:
-        """Plan bounded evidence follow-ups without forwarding private data."""
-        if not 1 <= max_tasks <= 3:
-            raise errors.EditorError("invalid_input")
-        contracts.validate_draft(draft, packets)
-        # Packet public content only; never propagate personal_digest or extra
-        # record keys.
-        public_packets = [
-            {"id": p["id"], "content": p["content"]} for p in packets
-        ]
-        urls = sorted(
-            {s["url"] for p in public_packets for s in p["content"]["sources"]}
-        )
-        text, _, _ = await self.engine.execute(
-            contracts.canonical_json(
-                {
-                    "issue_date": issue_date,
-                    "draft_untrusted": draft,
-                    "packets_untrusted": public_packets,
-                    "max_tasks": max_tasks,
-                }
-            ),
-            newsletter_workflow_schema.planning_schema(
-                [], urls, max_tasks, gaps=True
-            ),
-            _GAPS,
-            model_io.prepare_workspace(workspace, issue_date),
-        )
-        plan = parse_plan(text, set(), set(urls), max_tasks, gaps=True)
-        return GapPlan(plan.research_tasks, plan.note)

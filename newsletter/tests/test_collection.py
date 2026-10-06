@@ -1,7 +1,6 @@
 """Test collection contracts and durable triggers without real providers."""
 
 import dataclasses
-import json
 
 import fastapi.testclient as testclient
 import pytest
@@ -10,8 +9,6 @@ import newsletter.adapters as adapters
 import newsletter.app as app
 import newsletter.collection.collector as newsletter_collection_collector
 import newsletter.collection.instructions as newsletter_collection_instructions
-import newsletter.errors as newsletter_errors
-import newsletter.model_schema as model_schema
 import newsletter.preflight as preflight
 import newsletter.settings as newsletter_settings
 
@@ -284,77 +281,6 @@ def test_instruction_readme_is_not_executed_and_limit_is_bounded(tmp_path):
     (tmp_path / "9.md").write_text("too many")
     with pytest.raises(newsletter_collection_instructions.InstructionError):
         newsletter_collection_instructions.load_instructions(tmp_path)
-
-
-def research_payload():
-    return {
-        "state": "collected",
-        "note": "Source opened.",
-        "packets": [
-            {
-                "title": "Synthetic research",
-                "body": "Synthetic unit test evidence.",
-                "tags": ["fixture"],
-                "sources": [
-                    {
-                        "id": "s1",
-                        "title": "Synthetic source",
-                        "url": "https://example.com/original",
-                        "excerpt": "Synthetic test only.",
-                        "access_scope": "full_text",
-                    }
-                ],
-            }
-        ],
-    }
-
-
-def test_research_requires_exact_opened_source_and_search():
-    text = json.dumps(research_payload())
-    assert (
-        len(
-            newsletter_collection_collector.parse_research(
-                text, {"https://example.com/original"}, True
-            ).packets
-        )
-        == 1
-    )
-    for urls, searched in [
-        ({"https://example.com/canonical"}, True),
-        (set(), True),
-        ({"https://example.com/original"}, False),
-    ]:
-        with pytest.raises(newsletter_errors.EditorError):
-            newsletter_collection_collector.parse_research(text, urls, searched)
-    empty = json.dumps(
-        {
-            "state": "no_findings",
-            "note": "Search yielded insufficient evidence.",
-            "packets": [],
-        }
-    )
-    assert (
-        newsletter_collection_collector.parse_research(
-            empty, set(), True
-        ).packets
-        == []
-    )
-    with pytest.raises(newsletter_errors.EditorError):
-        newsletter_collection_collector.parse_research(empty, set(), False)
-
-
-def test_research_schema_uses_public_packet_and_source_enum():
-    schema = model_schema.research_schema()
-    packet = schema["properties"]["packets"]["items"]
-    assert set(packet["properties"]) == {"title", "body", "sources", "tags"}
-    assert packet["properties"]["sources"]["items"]["properties"][
-        "access_scope"
-    ]["enum"] == [
-        "metadata",
-        "abstract",
-        "full_text",
-        "dataset",
-    ]
 
 
 def test_queue_capacity_and_no_implicit_job_on_startup(settings):

@@ -95,14 +95,13 @@ def validate_output_schema(schema: types.Payload) -> None:
 
 
 def production_output_schemas() -> dict[str, types.Payload]:
-    """Enumerate every model operation, including inactive legacy graph paths.
+    """Enumerate every model operation the service can still request.
 
     Imports are local because StoryEditor itself uses CodexEditor. Nonempty
     identifiers exercise dynamic enum and citation-pattern construction; the
     actual request is independently checked by CodexEditor.execute.
     """
     # Break the documented schema catalog -> editor -> validator import cycle.
-    import newsletter.model_schema as model_schema  # noqa: PLC0415
     import newsletter.workflow.schema as newsletter_workflow_schema  # noqa: PLC0415
     import newsletter.workflow.story_editor as story_editor  # noqa: PLC0415
 
@@ -121,12 +120,6 @@ def production_output_schemas() -> dict[str, types.Payload]:
         "planning": newsletter_workflow_schema.planning_schema(
             ["schema-candidate"], ["https://example.com/source"], 12
         ),
-        "gaps": newsletter_workflow_schema.planning_schema(
-            [], ["https://example.com/source"], 12, gaps=True
-        ),
-        "research": model_schema.research_schema(),
-        "legacy_editor": model_schema.editor_schema(packets),
-        "legacy_review": model_schema.legacy_review_schema(),
         "story_review": story_editor.story_review_schema(),
     }
     modes: tuple[Literal["brief", "deep"], ...] = ("brief", "deep")

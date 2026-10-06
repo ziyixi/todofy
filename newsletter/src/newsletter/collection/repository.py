@@ -157,26 +157,6 @@ class RunRepository:
         for row in rows:
             yield cast(types.Payload, json.loads(row[0]))
 
-    def legacy_repair_candidates(self) -> Iterator[types.Payload]:
-        """Read recent blocked runs only while the pending queue has capacity.
-
-        The count and candidate query share one process lock. This is a scan,
-        not a reservation; starting a repair still checks queue capacity.
-        """
-        with self.store.lock:
-            pending = self.store.db.execute(
-                "SELECT COUNT(*) FROM collection_runs WHERE state IN "
-                "('queued','collecting','projecting','editing')"
-            ).fetchone()[0]
-            if pending >= self.store.max_pending_jobs:
-                return
-            rows = self.store.db.execute(
-                "SELECT body FROM collection_runs WHERE state='blocked' "
-                "ORDER BY rowid DESC LIMIT 100"
-            ).fetchall()
-        for row in rows:
-            yield cast(types.Payload, json.loads(row[0]))
-
     def get(self, run_id: str) -> types.Payload:
         """Read a run receipt or raise not_found without constructing a run."""
         with self.store.lock:

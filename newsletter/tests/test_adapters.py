@@ -17,7 +17,6 @@ PNG = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42m"
     "P8/x8AAwMCAO+aB9sAAAAASUVORK5CYII="
 )
-DATA_SOURCE = "12345678-1234-4234-8234-123456789abc"
 
 
 @pytest.fixture
@@ -330,96 +329,6 @@ def test_mail_configuration_requires_one_safe_recipient(recipient):
         adapters.AdapterError, match="INVALID_MAIL_CONFIGURATION"
     ):
         adapters.Resend("fake-key", "sender@example.org", recipient)
-
-
-async def test_notion_single_request_stable_property_id_and_bounded_projection(
-    packet,
-):
-    packet["content"]["body"] = "研究😀" * 6000
-    calls = []
-
-    def handler(request):
-        calls.append(request)
-        assert request.method == "POST"
-        assert str(request.url) == "https://api.notion.com/v1/pages"
-        assert request.headers["Notion-Version"] == "2026-03-11"
-        body = json.loads(request.content)
-        assert body["parent"] == {
-            "type": "data_source_id",
-            "data_source_id": DATA_SOURCE,
-        }
-        assert list(body["properties"]) == ["title"]
-        assert len(body["children"]) == 3
-        projected = json.dumps(body, ensure_ascii=False)
-        assert "投影已截断" in projected and "非已发布稿" in projected
-        assert len(request.content) < 500_000
-        for child in body["children"]:
-            rich = child["paragraph"]["rich_text"]
-            assert len(rich) <= 100
-            assert all(
-                len(item["text"]["content"].encode("utf-16-le")) // 2 <= 2000
-                for item in rich
-            )
-        return httpx.Response(
-            200, json={"object": "page", "id": "notion-page-1"}
-        )
-
-    await adapters.Notion(
-        "fake-token", DATA_SOURCE, transport=httpx.MockTransport(handler)
-    ).project(packet)
-    assert len(calls) == 1
-
-
-@pytest.mark.parametrize(
-    "status,ambiguous", [(400, False), (403, False), (429, True), (503, True)]
-)
-async def test_notion_failure_is_safe_and_single_attempt(
-    packet, status, ambiguous
-):
-    calls = []
-
-    def handler(request):
-        calls.append(request)
-        return httpx.Response(
-            status, json={"message": "fake-token private content"}
-        )
-
-    adapter = adapters.Notion(
-        "fake-token", DATA_SOURCE, transport=httpx.MockTransport(handler)
-    )
-    with pytest.raises(adapters.AdapterError) as caught:
-        await adapter.project(packet)
-    assert caught.value.ambiguous is ambiguous
-    assert "fake-token" not in str(caught.value)
-    assert len(calls) == 1
-
-
-async def test_notion_timeout_or_wrong_object_must_not_look_successful(packet):
-    def timeout(request):
-        raise httpx.ReadTimeout("secret", request=request)
-
-    for handler in [
-        timeout,
-        lambda request: httpx.Response(
-            200, json={"id": "1", "object": "other"}
-        ),
-    ]:
-        with pytest.raises(
-            adapters.AdapterError, match="NOTION_UNKNOWN"
-        ) as caught:
-            await adapters.Notion(
-                "fake-token",
-                DATA_SOURCE,
-                transport=httpx.MockTransport(handler),
-            ).project(packet)
-        assert caught.value.ambiguous
-
-
-def test_invalid_notion_configuration_is_local():
-    with pytest.raises(
-        adapters.AdapterError, match="INVALID_NOTION_CONFIGURATION"
-    ):
-        adapters.Notion("fake-token", "../not-an-id")
 
 
 async def test_adapters_do_not_mutate_inputs(tmp_path, edition, packet):

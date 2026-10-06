@@ -258,18 +258,13 @@ async def test_frozen_config_drives_pipeline_despite_midrun_switch(
         sources.PublicMetadataFeed, "fetch", empty_public_metadata
     )
     monkeypatch.setattr(editor.CodexEditor, "execute", provider)
-    monkeypatch.setattr(editor.CodexEditor, "prepare", forbidden)
-    monkeypatch.setattr(editor.MockEditor, "prepare", forbidden)
     monkeypatch.setattr(collector.MockCollector, "collect", forbidden)
     monkeypatch.setattr(story_editor.StoryEditor, "prepare", prepare_story)
     try:
         runs = repository.RunRepository(store)
         pipeline = newsletter_workflow_pipeline.DagPipeline(
             runs,
-            collector.MockCollector(),
             tmp_path / "collection",
-            10,
-            32,
             editor=editor.CodexEditor(tmp_path / "nonexistent-auth"),
         )
         settings = newsletter_settings.Settings(
@@ -289,7 +284,7 @@ async def test_frozen_config_drives_pipeline_despite_midrun_switch(
         )
         worker = newsletter_worker.Worker(
             store,
-            editor.MockEditor(),
+            None,
             ForbiddenNotion(),
             tmp_path / "editor",
             10,

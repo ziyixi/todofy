@@ -27,6 +27,11 @@ import newsletter.workflow.pipeline as newsletter_workflow_pipeline
 import newsletter.workflow.publication as publication
 import tests.support.publication as tests_support_publication
 
+# The retired whole-edition recipe, kept to build stored legacy runs.
+LEGACY_RECIPE = (
+    pathlib.Path(__file__).parents[1] / "fixtures/workflows/legacy-daily.yaml"
+)
+
 
 class FailingNotion:
     """Record projection attempts and fail without contacting Notion."""
@@ -91,7 +96,6 @@ def rig_factory(
         )
 
     monkeypatch.setattr(editor.CodexEditor, "execute", forbidden)
-    monkeypatch.setattr(editor.CodexEditor, "prepare", forbidden)
     monkeypatch.setattr(collector.MockCollector, "collect", forbidden)
 
     def make(*, expired: bool = False, legacy: bool = False) -> PublicationRig:
@@ -99,29 +103,27 @@ def rig_factory(
         store = newsletter_store.Store(directory / "newsletter.sqlite3", "mock")
         stores.append(store)
         recipe = pathlib.Path(
-            str(
-                resources.files("newsletter").joinpath(
-                    "workflows/legacy-daily.yaml"
-                    if legacy
-                    else "workflows/daily.yaml"
-                )
-            )
+            str(resources.files("newsletter").joinpath("workflows/daily.yaml"))
         )
         runs = repository.RunRepository(store)
         pipeline = newsletter_workflow_pipeline.DagPipeline(
             runs,
-            collector.MockCollector(),
             directory / "collection",
-            10,
-            32,
             editor=editor.CodexEditor(directory / "nonexistent-auth"),
-            recipe_path=recipe,
         )
         instructions, snapshot = newsletter_workflow_pipeline.freeze_workflow(
             settings.Settings(data_dir=directory, workflow_file=recipe),
             pipeline.state,
             tests_support_publication.DAY,
         )
+        if legacy:
+            # A run stored by a release that still ran the whole-edition
+            # recipe; new runs can no longer freeze it.
+            snapshot["definition"] = (
+                newsletter_workflow_definition.load_definition(
+                    LEGACY_RECIPE
+                ).snapshot()
+            )
         if expired:
             snapshot["inputs"]["started_at"] = (
                 datetime.datetime.now(datetime.UTC) - datetime.timedelta(days=1)

@@ -5,7 +5,6 @@ import types
 
 import pytest
 
-import newsletter.contracts as contracts
 import newsletter.editor as newsletter_editor
 import newsletter.errors as newsletter_errors
 import tests.support.editor as editor
@@ -69,24 +68,14 @@ def test_same_host_and_content_id_do_not_prove_exact_source_was_opened(
         source_url
     )
     text = json.dumps(bundle)
-    with pytest.raises(newsletter_errors.EditorError) as error:
-        newsletter_editor.parse_editor_result(
-            text, [], {other_url}, searched=True
-        )
-    assert error.value.code == "invalid_output"
-
+    assert newsletter_editor._unopened_sources(text, {other_url}) == [
+        source_url
+    ]
     # A possible redirect/canonical relationship is not evidence. Only after
     # the exact cited URL also appears in the observed opens can it be accepted.
-    result = newsletter_editor.parse_editor_result(
-        text, [], {other_url, source_url}, searched=True
+    assert (
+        newsletter_editor._unopened_sources(text, {other_url, source_url}) == []
     )
-    assert result.review["passed"] is True
-    added = result.supplemental_packets[0]
-    assert added["content"]["sources"][0]["url"] == source_url
-    assert result.draft["sections"][0]["paragraphs"][0]["citations"] == [
-        added["id"] + "/s1"
-    ]
-    contracts.validate_draft(result.draft, result.supplemental_packets)
 
 
 @pytest.mark.parametrize(
@@ -106,17 +95,11 @@ def test_fragment_is_the_only_ignored_url_component(
     bundle["supplemental_packets"][0]["content"]["sources"][0]["url"] = (
         source_url
     )
-    # _collect already removes fragments from observed opens before
-    # parse_editor_result.
-    result = newsletter_editor.parse_editor_result(
-        json.dumps(bundle), [], {opened_url}, searched=True
-    )
-    assert result.review["passed"] is True
+    # _collect already removes fragments from observed opens.
     assert (
-        result.supplemental_packets[0]["content"]["sources"][0]["url"]
-        == source_url
+        newsletter_editor._unopened_sources(json.dumps(bundle), {opened_url})
+        == []
     )
-    contracts.validate_draft(result.draft, result.supplemental_packets)
 
 
 @pytest.mark.parametrize(
@@ -135,41 +118,9 @@ def test_query_parameters_are_not_removed_or_normalized(
     bundle["supplemental_packets"][0]["content"]["sources"][0]["url"] = (
         CANONICAL_URL + source_suffix
     )
-    with pytest.raises(newsletter_errors.EditorError) as error:
-        newsletter_editor.parse_editor_result(
-            json.dumps(bundle),
-            [],
-            {CANONICAL_URL + opened_suffix},
-            searched=True,
-        )
-    assert error.value.code == "invalid_output"
-
-
-def test_reading_support_citations_receive_host_owned_ids(
-    bundle,
-):
-    supplement = bundle["supplemental_packets"][0]
-    supplement["content"]["sources"].append(
-        {
-            **supplement["content"]["sources"][0],
-            "id": "journal",
-            "url": SHORT_URL,
-        }
-    )
-    bundle["draft"]["recommended_reading"] = {
-        "citation": "supplement-1/s1",
-        "reason": "Synthetic primary reading and journal record.",
-        "supporting_citations": ["supplement-1/journal"],
-    }
-    result = newsletter_editor.parse_editor_result(
-        json.dumps(bundle), [], {CANONICAL_URL, SHORT_URL}, searched=True
-    )
-    identity = result.supplemental_packets[0]["id"]
-    reading = result.draft["recommended_reading"]
-    assert identity != "supplement-1"
-    assert reading["citation"] == identity + "/s1"
-    assert reading["supporting_citations"] == [identity + "/journal"]
-    contracts.validate_draft(result.draft, result.supplemental_packets)
+    assert newsletter_editor._unopened_sources(
+        json.dumps(bundle), {CANONICAL_URL + opened_suffix}
+    ) == [CANONICAL_URL + source_suffix]
 
 
 @pytest.mark.parametrize("component", ["body", "reading", "chart", "signal"])

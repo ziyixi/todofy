@@ -2,8 +2,9 @@
 
 Every real write has one attempt only. The worker owns durable dispatch state;
 an ambiguous outcome must never cause it to call an adapter again. A provider
-acceptance is not evidence of inbox delivery. Notion is a summary projection,
-not an authoritative copy or a two-way editing interface.
+acceptance is not evidence of inbox delivery. Real Notion synchronization
+lives in notion_sync/notion_api; the packet projection here is only the
+offline fixture (FakeNotion) or the disabled policy.
 """
 
 from __future__ import annotations
@@ -22,7 +23,6 @@ import pathlib
 import re
 import tempfile
 from typing import Any, cast, Protocol
-import uuid
 
 import google.protobuf.message as google_protobuf_message
 import httpx
@@ -353,89 +353,3 @@ class Resend:
             "delivery_state": "provider_accepted",
             "provider_message_id": result["id"],
         }
-
-
-def _rich_text(text: str) -> list[types.Payload]:
-    # Stay below Notion's 2,000-character limit, including UTF-16 pairs.
-    return [
-        {"type": "text", "text": {"content": text[start : start + 900]}}
-        for start in range(0, len(text), 900)
-    ]
-
-
-def _paragraph(text: str) -> types.Payload:
-    return {
-        "object": "block",
-        "type": "paragraph",
-        "paragraph": {"rich_text": _rich_text(text)},
-    }
-
-
-class Notion:
-    """Create one summary page using the stable title property ID.
-
-    No provider idempotency exists here. The worker must claim a projection once
-    before calling and retain unknown results for manual inspection, not retry.
-    """
-
-    def __init__(
-        self,
-        token: str,
-        data_source_id: str,
-        transport: httpx.AsyncBaseTransport | None = None,
-    ) -> None:
-        self._token = _header(
-            token, "INVALID_NOTION_CONFIGURATION", 512, ascii_only=True
-        )
-        try:
-            self._data_source_id = str(uuid.UUID(data_source_id))
-        except (ValueError, TypeError, AttributeError):
-            raise AdapterError("INVALID_NOTION_CONFIGURATION") from None
-        self._transport = transport
-
-    async def project(
-        self, packet: Mapping[str, Any] | google_protobuf_message.Message
-    ) -> None:
-        """Create one public summary page without retrying unknown outcomes."""
-        packet = _mapping(packet)
-        identifier = _header(packet.get("id"), "INVALID_ADAPTER_INPUT", 128)
-        content = packet.get("content", {})
-        contracts.validate_packet_body(content)
-        summary = content["body"][:6000]
-        if len(content["body"]) > len(summary):
-            summary += "\n[投影已截断；完整材料保存在 newsletter Inbox。]"
-        metadata = (
-            f"Newsletter Inbox 投影（非已发布稿）\nPacket: {identifier}\n"
-            f"Workflow: {packet.get('workflow_id', '')}\n"
-            f"Content hash: {packet.get('content_hash', '')}\n"
-            f"Fixture: {bool(packet.get('is_fixture', False))}"
-        )
-        children = [_paragraph(metadata), _paragraph(summary)]
-        for source in content["sources"]:
-            # A URL over Notion's 2,000-character link limit remains plain text.
-            children.append(
-                _paragraph(
-                    f"{source['id']} | {source['title']} | "
-                    f"{source['access_scope']}\n{source['url']}"
-                )
-            )
-        payload = {
-            "parent": {
-                "type": "data_source_id",
-                "data_source_id": self._data_source_id,
-            },
-            "properties": {"title": {"title": _rich_text(content["title"])}},
-            "children": children,
-        }
-        result = await _post(
-            "https://api.notion.com/v1/pages",
-            {
-                "Authorization": f"Bearer {self._token}",
-                "Notion-Version": "2026-03-11",
-            },
-            payload,
-            self._transport,
-            "NOTION",
-        )
-        if result.get("object") != "page":
-            raise AdapterError("NOTION_UNKNOWN", ambiguous=True)

@@ -31,8 +31,8 @@ def _boolean_env(name: str, default: str = "false") -> bool:
 class Settings:
     """Explicit service settings with separate private send capabilities.
 
-    Construction keeps programmatic legacy defaults; from_env selects the
-    deployed DAG defaults. Call validate before opening service resources.
+    Programmatic defaults equal the from_env defaults. Call validate before
+    opening service resources.
     """
 
     data_dir: pathlib.Path = pathlib.Path(".data")
@@ -49,7 +49,6 @@ class Settings:
     max_pending_jobs: int = 8
     notion_backend: str = "disabled"
     notion_token: str = dataclasses.field(default="", repr=False)
-    notion_data_source_id: str = ""
     notion_materials_data_source_id: str = ""
     notion_editions_data_source_id: str = ""
     notion_archive_private: bool = False
@@ -70,9 +69,9 @@ class Settings:
         pathlib.Path(__file__).parent / "instructions"
     )
     collection_timeout_seconds: float = 600
-    # Programmatic legacy adapters remain available for existing callers/tests.
-    # CLI/environment deployments default to the versioned DAG.
-    workflow_backend: str = "legacy"
+    # The topic DAG is the only backend. The setting remains so a deployment
+    # that still names the removed legacy backend fails startup visibly.
+    workflow_backend: str = "dag"
     workflow_file: pathlib.Path = (
         pathlib.Path(__file__).parent / "workflows" / "daily.yaml"
     )
@@ -99,7 +98,6 @@ class Settings:
             ),
             notion_backend=os.getenv("NEWSLETTER_NOTION", "disabled"),
             notion_token=os.getenv("NOTION_TOKEN", ""),
-            notion_data_source_id=os.getenv("NOTION_DATA_SOURCE_ID", ""),
             notion_materials_data_source_id=os.getenv(
                 "NOTION_MATERIALS_DATA_SOURCE_ID", ""
             ),
@@ -169,21 +167,22 @@ class Settings:
         self._validate_delivery_limits()
 
     def _validate_workflow(self) -> None:
-        if self.workflow_backend not in {"dag", "legacy"}:
-            raise ValueError("NEWSLETTER_WORKFLOW must be dag or legacy")
-        if self.content_config_dir is not None:
-            if self.workflow_backend != "dag":
-                raise ValueError(
-                    "Content configuration requires NEWSLETTER_WORKFLOW=dag"
-                )
-            if self.content_config_dir.resolve() in {
+        if self.workflow_backend != "dag":
+            raise ValueError(
+                "NEWSLETTER_WORKFLOW must be dag; the legacy backend was "
+                "removed"
+            )
+        if self.content_config_dir is not None and (
+            self.content_config_dir.resolve()
+            in {
                 pathlib.Path("/"),
                 pathlib.Path.home(),
                 self.data_dir.resolve(),
-            }:
-                raise ValueError(
-                    "Content configuration requires a dedicated directory"
-                )
+            }
+        ):
+            raise ValueError(
+                "Content configuration requires a dedicated directory"
+            )
         if (
             not math.isfinite(self.workflow_timeout_seconds)
             or not 60 <= self.workflow_timeout_seconds <= 14400
@@ -292,10 +291,6 @@ class Settings:
                 "NOTION_EDITIONS_DATA_SOURCE_ID"
             )
         if self.notion_v2:
-            if self.workflow_backend != "dag":
-                raise ValueError(
-                    "Dual-database Notion requires NEWSLETTER_WORKFLOW=dag"
-                )
             try:
                 materials_id = uuid.UUID(self.notion_materials_data_source_id)
                 editions_id = uuid.UUID(self.notion_editions_data_source_id)
@@ -312,10 +307,12 @@ class Settings:
         if self.notion_backend == "notion":
             if not self.notion_token:
                 raise ValueError("Notion requires NOTION_TOKEN")
-            if not self.notion_v2 and not self.notion_data_source_id:
+            # The single-database projection was removed; only the
+            # materials/editions pair is supported.
+            if not self.notion_v2:
                 raise ValueError(
-                    "Notion requires both dual database IDs or legacy "
-                    "NOTION_DATA_SOURCE_ID"
+                    "Notion requires NOTION_MATERIALS_DATA_SOURCE_ID and "
+                    "NOTION_EDITIONS_DATA_SOURCE_ID"
                 )
 
     def _validate_delivery_limits(self) -> None:

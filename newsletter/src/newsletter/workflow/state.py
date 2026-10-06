@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from collections.abc import Callable
 import json
-import re
 import sqlite3
 from typing import cast
 
@@ -12,11 +11,6 @@ import newsletter.contracts as contracts
 import newsletter.store as newsletter_store
 import newsletter.types as types
 import newsletter.usage as newsletter_usage
-import newsletter.workflow.definition as newsletter_workflow_definition
-
-MAX_REPAIR_SNAPSHOT_BYTES = 2 * 1024 * 1024
-_REPAIR_SUFFIX = ":repair-1"
-_ID = re.compile(contracts.IDENTIFIER_PATTERN + r"\Z")
 
 
 def _repair_record(row: sqlite3.Row) -> types.Payload:
@@ -155,140 +149,17 @@ class WorkflowState:
         )
 
     def repair(self, parent_run_id: str) -> types.Payload | None:
-        """Read the immutable repair receipt for a parent run, if present."""
+        """Read the immutable repair receipt for a parent run, if present.
+
+        Repairs are no longer created; old receipts stay readable so their
+        runs still report the continuation and its usage lineage.
+        """
         with self.store.lock:
             row = self.store.db.execute(
                 "SELECT * FROM workflow_repairs WHERE parent_run_id=?",
                 (parent_run_id,),
             ).fetchone()
         return _repair_record(row) if row is not None else None
-
-    def create_repair(
-        self,
-        parent_run_id: str,
-        source_edition_id: str,
-        definition: types.Payload,
-        inputs: types.Payload,
-    ) -> types.Payload:
-        """Freeze one repair without changing its blocked source or artifacts.
-
-        A repeated identical request retrieves the existing receipt even after
-        publication; it does not grant a second attempt or rewrite any state.
-        """
-        if any(
-            not isinstance(value, str) or not _ID.fullmatch(value)
-            for value in (parent_run_id, source_edition_id)
-        ):
-            raise newsletter_store.StoreError(
-                "invalid_argument", "Invalid repair identity"
-            )
-        child_run_id = parent_run_id + _REPAIR_SUFFIX
-        if not _ID.fullmatch(child_run_id):
-            raise newsletter_store.StoreError(
-                "invalid_argument", "Invalid repair identity"
-            )
-        try:
-            if not isinstance(definition, dict) or not isinstance(inputs, dict):
-                raise ValueError
-            newsletter_workflow_definition.parse_definition(definition)
-            encoded = contracts.canonical_json(
-                {"definition": definition, "inputs": inputs}
-            )
-            if len(encoded.encode("utf-8")) > MAX_REPAIR_SNAPSHOT_BYTES:
-                raise ValueError
-            snapshot = json.loads(encoded)  # Detach caller-owned mutable data.
-        except (TypeError, ValueError, RecursionError, OverflowError):
-            raise newsletter_store.StoreError(
-                "invalid_argument", "Invalid repair snapshot"
-            ) from None
-        with self.store.transaction():
-            if (
-                parent_run_id.endswith(_REPAIR_SUFFIX)
-                or self.store.db.execute(
-                    "SELECT 1 FROM workflow_repairs WHERE child_run_id=?",
-                    (parent_run_id,),
-                ).fetchone()
-            ):
-                raise newsletter_store.StoreError(
-                    "conflict", "A repair cannot be repaired again"
-                )
-            previous = self.store.db.execute(
-                "SELECT * FROM workflow_repairs WHERE parent_run_id=?",
-                (parent_run_id,),
-            ).fetchone()
-            if previous is not None:
-                if (
-                    previous["source_edition_id"] != source_edition_id
-                    or previous["snapshot"] != encoded
-                ):
-                    raise newsletter_store.StoreError(
-                        "conflict", "Frozen repair cannot change"
-                    )
-                return _repair_record(previous)
-            collection_exists = self.store.db.execute(
-                "SELECT 1 FROM sqlite_master WHERE type='table' AND "
-                "name='collection_runs'"
-            ).fetchone()
-            parent_row = (
-                self.store.db.execute(
-                    "SELECT state,body FROM collection_runs WHERE id=?",
-                    (parent_run_id,),
-                ).fetchone()
-                if collection_exists
-                else None
-            )
-            if parent_row is None:
-                raise newsletter_store.StoreError(
-                    "not_found", "Repair source run does not exist"
-                )
-            parent = json.loads(parent_row["body"])
-            source_row = self.store.db.execute(
-                "SELECT state,body FROM editions WHERE id=?",
-                (source_edition_id,),
-            ).fetchone()
-            source = (
-                json.loads(source_row["body"]) if source_row is not None else {}
-            )
-            binding = self.store.db.execute(
-                "SELECT run_id FROM workflow_editions WHERE edition_id=?",
-                (source_edition_id,),
-            ).fetchone()
-            review = source.get("review")
-            if (
-                parent_row["state"] != "blocked"
-                or parent.get("state") != "blocked"
-                or parent.get("edition_id") != source_edition_id
-                or parent.get("error_code") != "editorial_review_failed"
-                or source_row is None
-                or source_row["state"] != "blocked"
-                or source.get("state") != "blocked"
-                or not isinstance(review, dict)
-                or review.get("passed") is not False
-                or binding is None
-                or binding["run_id"] != parent_run_id
-                or source.get("delivery_state") != "not_requested"
-                or source.get("issue_date") != parent.get("issue_date")
-                or snapshot["inputs"].get("issue_date")
-                != source.get("issue_date")
-                or self.store.db.execute(
-                    "SELECT 1 FROM sends WHERE issue_date=?",
-                    (source.get("issue_date"),),
-                ).fetchone()
-            ):
-                raise newsletter_store.StoreError(
-                    "conflict",
-                    "Repair requires an unsent edition blocked by review",
-                )
-            self.store.db.execute(
-                "INSERT INTO workflow_repairs VALUES(?,?,?,?)",
-                (parent_run_id, source_edition_id, child_run_id, encoded),
-            )
-        return {
-            "parent_run_id": parent_run_id,
-            "source_edition_id": source_edition_id,
-            "child_run_id": child_run_id,
-            "snapshot": snapshot,
-        }
 
     def archive_result(
         self, run_id: str, *, packet_id: str = "", error_code: str = ""

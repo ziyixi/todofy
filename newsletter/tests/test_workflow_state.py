@@ -5,7 +5,6 @@ import sqlite3
 
 import pytest
 
-import newsletter.collection.collector as collector
 import newsletter.collection.repository as repository
 import newsletter.editor as editor
 import newsletter.store as newsletter_store
@@ -219,7 +218,9 @@ def test_unused_projection_does_not_block_adopted_confirmed_material(
     assert store.reserve_send(workflow_state.approval(edition))[1] is True
 
 
-def test_dag_advance_ignores_unused_projection_failures(store, tmp_path):
+def test_legacy_binding_advance_ignores_unused_projection_failures(
+    store, tmp_path
+):
     runs = repository.RunRepository(store)
     run = runs.start(
         {"request_key": "run", "issue_date": "2026-09-06"},
@@ -238,10 +239,7 @@ def test_dag_advance_ignores_unused_projection_failures(store, tmp_path):
     runs.update(run["id"], state="editing", edition_id=edition["id"])
     pipeline = newsletter_workflow_pipeline.DagPipeline(
         runs,
-        collector.MockCollector(),
         tmp_path / "workspace",
-        10,
-        32,
         editor=editor.CodexEditor(tmp_path / "unused-auth-path"),
     )
     assert pipeline.advance()

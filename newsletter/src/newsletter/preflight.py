@@ -26,7 +26,6 @@ import sys
 import tempfile
 import types
 from typing import cast, TYPE_CHECKING
-import uuid
 
 import httpx
 import ziyixi_protos.newsletter.editorial_pb2 as editorial_pb2
@@ -374,56 +373,27 @@ async def _check_notion(
     settings: newsletter_settings.Settings,
     transport: httpx.AsyncBaseTransport | None,
 ) -> None:
-    if settings.notion_v2:
-        try:
-            async with asyncio.timeout(2 * HTTP_TIMEOUT):
-                await notion_api.NotionWorkspace(
-                    settings.notion_token,
-                    settings.notion_materials_data_source_id,
-                    settings.notion_editions_data_source_id,
-                    transport=transport,
-                ).validate()
-        except adapters.AdapterError as exc:
-            codes = {
-                "NOTION_UNAVAILABLE": "NOTION_TEMPORARILY_UNAVAILABLE",
-                "NOTION_RATE_LIMITED": "NOTION_TEMPORARILY_UNAVAILABLE",
-                "NOTION_AUTH_REJECTED": "NOTION_AUTH_FAILED",
-                "NOTION_REJECTED": "NOTION_UNAVAILABLE",
-                "NOTION_INVALID_RESPONSE": "NOTION_INVALID_RESPONSE",
-                "NOTION_SCHEMA_MISSING": "NOTION_SCHEMA_MISSING",
-                "NOTION_SCHEMA_MISMATCH": "NOTION_SCHEMA_INVALID",
-            }
-            raise PreflightError(
-                codes.get(exc.code, "NOTION_CHECK_FAILED")
-            ) from None
-        return
-    adapters.Notion(settings.notion_token, settings.notion_data_source_id)
-    identifier = str(uuid.UUID(settings.notion_data_source_id))
-    value = await _get_json(
-        "https://api.notion.com/v1/data_sources/" + identifier,
-        headers={
-            "Authorization": "Bearer " + settings.notion_token,
-            "Notion-Version": "2026-03-11",
-        },
-        transport=transport,
-        provider="NOTION",
-    )
-    properties = value.get("properties")
-    if (
-        value.get("object") != "data_source"
-        or value.get("id") != identifier
-        or value.get("in_trash", False) is not False
-        or value.get("archived", False) is not False
-        or not isinstance(properties, dict)
-    ):
-        raise PreflightError("NOTION_SCHEMA_INVALID")
-    titles = [
-        p
-        for p in properties.values()
-        if isinstance(p, dict) and p.get("type") == "title"
-    ]
-    if len(titles) != 1 or titles[0].get("id") != "title":
-        raise PreflightError("NOTION_SCHEMA_INVALID")
+    try:
+        async with asyncio.timeout(2 * HTTP_TIMEOUT):
+            await notion_api.NotionWorkspace(
+                settings.notion_token,
+                settings.notion_materials_data_source_id,
+                settings.notion_editions_data_source_id,
+                transport=transport,
+            ).validate()
+    except adapters.AdapterError as exc:
+        codes = {
+            "NOTION_UNAVAILABLE": "NOTION_TEMPORARILY_UNAVAILABLE",
+            "NOTION_RATE_LIMITED": "NOTION_TEMPORARILY_UNAVAILABLE",
+            "NOTION_AUTH_REJECTED": "NOTION_AUTH_FAILED",
+            "NOTION_REJECTED": "NOTION_UNAVAILABLE",
+            "NOTION_INVALID_RESPONSE": "NOTION_INVALID_RESPONSE",
+            "NOTION_SCHEMA_MISSING": "NOTION_SCHEMA_MISSING",
+            "NOTION_SCHEMA_MISMATCH": "NOTION_SCHEMA_INVALID",
+        }
+        raise PreflightError(
+            codes.get(exc.code, "NOTION_CHECK_FAILED")
+        ) from None
 
 
 async def _check_todofy(
@@ -459,43 +429,25 @@ async def _check_notion_availability(
     except (httpx.RequestError, TimeoutError):
         checks.append("notion_temporarily_unavailable")
     else:
-        checks.append(
-            "notion_dual_data_sources_and_managed_schema"
-            if settings.notion_v2
-            else "notion_data_source_read_and_title_schema"
-        )
+        checks.append("notion_dual_data_sources_and_managed_schema")
         limitations.append(
             "Notion read access does not prove Insert content or Update "
             "content "
             "permission; no page or column was created or changed."
         )
     if "notion_temporarily_unavailable" in checks:
-        if settings.notion_v2:
-            logger.warning(
-                "Notion startup check degraded; local evidence remains "
-                "authoritative. "
-                "Dual-database synchronization may be delayed."
-            )
-            limitations.append(
-                "Notion is temporarily unavailable; local SQLite remains "
-                "authoritative. "
-                "Dual-database synchronization may be delayed without "
-                "blocking email. "
-                "No page was created or retried by startup checks."
-            )
-        else:
-            logger.warning(
-                "Notion startup check degraded; local evidence remains "
-                "authoritative. "
-                "Legacy projection gates still apply."
-            )
-            limitations.append(
-                "Notion is temporarily unavailable; local SQLite remains "
-                "authoritative. "
-                "Publication policies that require confirmed projection "
-                "still apply. "
-                "No page was created or retried by startup checks."
-            )
+        logger.warning(
+            "Notion startup check degraded; local evidence remains "
+            "authoritative. "
+            "Dual-database synchronization may be delayed."
+        )
+        limitations.append(
+            "Notion is temporarily unavailable; local SQLite remains "
+            "authoritative. "
+            "Dual-database synchronization may be delayed without "
+            "blocking email. "
+            "No page was created or retried by startup checks."
+        )
 
 
 async def _check_todofy_availability(

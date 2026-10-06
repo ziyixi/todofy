@@ -56,6 +56,18 @@ def queued(database, key="edition"):
     )
 
 
+class ExecutingEditor:
+    """Spend one real SDK request inside the worker's edition activity."""
+
+    def __init__(self, live):
+        self.live = live
+
+    async def prepare(self, packets, issue_date, workspace):
+        workspace.mkdir(parents=True, exist_ok=True)
+        await self.live.execute("{}", {}, "Synthetic policy.", workspace)
+        raise AssertionError("The synthetic turn must not complete")
+
+
 def service_worker(database, tmp_path):
     return worker.Worker(
         database,
@@ -677,7 +689,9 @@ async def test_sdk_timeout_and_failed_cleanup_hold_outer_worker_activity(
         monkeypatch.setattr(fake_sdk.turn, "interrupt", failed_interrupt)
         background = worker.Worker(
             database,
-            editor_support.live_editor(tmp_path, timeout_seconds=0.03),
+            ExecutingEditor(
+                editor_support.live_editor(tmp_path, timeout_seconds=0.03)
+            ),
             adapters.DisabledNotion(),
             tmp_path / "jobs",
             30,
@@ -710,7 +724,9 @@ async def test_outer_timeout_during_sdk_close_cannot_clear_uncertainty(
         fake_sdk.close_hang = True
         background = worker.Worker(
             database,
-            editor_support.live_editor(tmp_path, timeout_seconds=0.03),
+            ExecutingEditor(
+                editor_support.live_editor(tmp_path, timeout_seconds=0.03)
+            ),
             adapters.DisabledNotion(),
             tmp_path / "jobs",
             0.1,

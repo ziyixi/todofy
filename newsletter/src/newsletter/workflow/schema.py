@@ -106,7 +106,6 @@ def planning_schema(
     source_urls: list[str],
     max_tasks: int,
     *,
-    gaps: bool = False,
     classified: bool = False,
 ) -> types.Payload:
     """Restrict task IDs and source choices to the supplied public inputs."""
@@ -125,7 +124,7 @@ def planning_schema(
                 "type": "string",
                 "pattern": f"^{contracts.IDENTIFIER_PATTERN}$",
             },
-            "candidate_ids": choices(candidate_ids, 0 if gaps else 1, 4),
+            "candidate_ids": choices(candidate_ids, 1, 4),
             "question": {"type": "string", "maxLength": 1600},
             "why": {"type": "string", "maxLength": 1000},
             "priority": {"type": "integer", "minimum": 1, "maximum": max_tasks},

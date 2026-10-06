@@ -122,9 +122,11 @@ Notion 是便于阅读和整理的副本，不是服务的主数据库。候选�
 Todofy 事件放在公共内容之后，不进入公开研究上下文或材料库；只有显式允许时，才写入
 私人简报档案。建库、字段和同步规则见[Notion 说明](notion.md)。
 
-兼容代码仍保留旧冻结刊期的原有规则，包括旧版要求的 Notion 确认。
-`workflows/legacy-daily.yaml` 和 `NEWSLETTER_WORKFLOW=legacy` 是两条不同的历史兼容路径，
-都不是当前采编失败后的自动替代方案；升级不会改写旧回执或延长旧任务期限。
+旧的整期工作流（`legacy-daily`）、其一次性修订续跑和 `NEWSLETTER_WORKFLOW=legacy`
+后端已移除；`NEWSLETTER_WORKFLOW` 只接受 `dag`。旧冻结刊期、回执和修订记录仍可读取、
+预览和计入用量，旧版要求的 Notion 确认对其已冻结的刊期继续有效。升级后若仍有未完成的
+旧式运行，服务不再续跑，而是以 `legacy_workflow_retired` 结束该运行；尚未起草的旧式刊期
+以 `legacy_editor_retired` 失败。不改写旧回执，也不延长旧任务期限。mock 模式的离线演示仍使用独立的 fixture 流程，不调用模型。
 
 日常只需修改 `content-config/`，不必重新构建镜像。配置发布、匿名拉取、验证和回退见
 [内容配置说明](content-config.md)。工作流只接受已注册节点、依赖和有界参数；
