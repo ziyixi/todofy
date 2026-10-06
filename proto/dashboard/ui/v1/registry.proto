@@ -68,14 +68,13 @@ message EntryGroup {
 
 // A business group.
 message FlowGroup {
-  // mail, content, research or platform.
+  // mail, content or platform.
   string id = 1 [
     (google.api.field_behavior) = REQUIRED,
     (common.wire.v1.field) = {
       allowed: [
         "mail",
         "content",
-        "research",
         "platform"
       ]
     }
@@ -122,7 +121,6 @@ message RegistryEntry {
         "server",
         "database",
         "link",
-        "flask-conical",
         "eye"
       ]
     }
@@ -236,7 +234,6 @@ message Flow {
       allowed: [
         "mail",
         "content",
-        "research",
         "platform"
       ]
     }

@@ -39,8 +39,7 @@ const ENTRY_GROUPS: readonly EntryGroup[] = [
 const FLOW_GROUPS: readonly FlowGroup[] = [
   { id: 'mail', name: '邮件与任务', order: 1 },
   { id: 'content', name: '内容与发布', order: 2 },
-  { id: 'research', name: '研究', order: 3 },
-  { id: 'platform', name: '平台', order: 4 },
+  { id: 'platform', name: '平台', order: 3 },
 ];
 
 const ENTRIES: readonly EntryDef[] = [

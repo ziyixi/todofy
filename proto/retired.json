@@ -7,6 +7,9 @@
     {"enum": "todofy.taskintent.v1.Source", "name": "SOURCE_LAB", "number": 1, "since": "2026-10-05", "reason": "the proposer was removed; Todofy refuses the source"}
   ],
   "allowed_values": [
-    {"field": "dashboard.ui.v1.OverrideGuardRequest.app", "value": "lab", "since": "2026-10-05", "reason": "Home no longer binds that app"}
+    {"field": "dashboard.ui.v1.OverrideGuardRequest.app", "value": "lab", "since": "2026-10-05", "reason": "Home no longer binds that app"},
+    {"field": "dashboard.ui.v1.FlowGroup.id", "value": "research", "since": "2026-10-05", "reason": "its one flow was the removed app's"},
+    {"field": "dashboard.ui.v1.Flow.group", "value": "research", "since": "2026-10-05", "reason": "its one flow was the removed app's"},
+    {"field": "dashboard.ui.v1.RegistryEntry.icon", "value": "flask-conical", "since": "2026-10-05", "reason": "only the removed app's tile used it"}
   ]
 }
