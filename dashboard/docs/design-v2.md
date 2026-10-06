@@ -364,7 +364,7 @@ real schedule; the TODO resource identifiers of §3. The full list of pending pr
 ## 10. Configuration drift (配置漂移)
 
 A private check, inside this Worker and never on GitHub, that the live Cloudflare account still matches
-what the repository commits. Nothing about it is published: the result lives in `HomeState`, is shown
+what the repository commits, and that nothing changed it outside CI since the previous check. Nothing about it is published: the result lives in `HomeState`, is shown
 only on the Access-protected Cloudflare view, and reaches Todoist only as counts in the ops digest.
 
 **Desired state.** [`.github/scripts/drift_desired.py`](../../.github/scripts/drift_desired.py) writes
@@ -385,11 +385,11 @@ also redeploys the dashboard with the new desired state.
 
 | Step | Calls |
 | --- | --- |
-| account | `GET /accounts/{a}/workers/scripts`, `GET /accounts/{a}/workers/domains` (in parallel), then `GET /zones/{z}/workers/routes` for each zone of the desired state, its id taken from a Custom Domain in that zone (never stored) |
+| account | `GET /accounts/{a}/workers/scripts`, `GET /accounts/{a}/workers/domains` and `GET /accounts/{a}/logs/audit` (the audit window, below; in parallel), then `GET /zones/{z}/workers/routes` for each zone of the desired state, its id taken from a Custom Domain in that zone (never stored) |
 | each desired Worker that exists | `GET .../workers/scripts/{s}/schedules`, `.../settings`, `.../subdomain` (in parallel) |
 
-At most `DRIFT_CALLS_PER_TICK` (12) calls per tick: the account step and three Workers on the first tick,
-four Workers on the next, then the rest, so a check of the 10 Workers takes three ticks, 3 + 4 + 3 (a tick then
+At most `DRIFT_CALLS_PER_TICK` (12) calls per tick: the account step (four calls) and two Workers on the first
+tick, four Workers on each next one, so a check of the 11 Workers takes four ticks, 2 + 4 + 4 + 1 (a tick then
 makes at most 27 outbound calls in all, §5). A failed step is retried by the next tick; after `DRIFT_MAX_ATTEMPTS` (3)
 failed attempts the day is given up (`consecutive_failed_days` + 1), and a run left unfinished at the end
 of its UTC day counts as a failed day too, as does a `drift_run` document that would pass
@@ -409,6 +409,17 @@ remote text never leaves `drift.ts` (failures become `http_<n>`, `timeout`, `net
 | `bindings` | per Worker, a binding or secret name missing (unless optional) or extra, or of another type |
 | `workers_dev` | `workers_dev` or `preview_urls` other than the config's |
 | `personal` | a personal value (wrapper kind `personal`/`optional`) whose live binding is not `secret_text` |
+| `account_changes` | per way in (`actor.context`: `dash`, `oauth`, `api_key`, `api`, `origin_ca_key`) and audit log resource (`dns_records`, `tokens`, `workers.scripts`, ...), the writes since the previous check not made with an API token, with counts per action (`create 1, delete 5`) |
+
+**Changes outside CI.** CI deploys and applies only with API tokens, so a write through any other way in is
+a change outside CI: a dashboard edit (token edits included), a laptop's `wrangler login` deploy, a Global
+API Key. The audit window runs from where the previous completed check's ended (`audit_until`; the day
+before on the first check, at most `AUDIT_LOOKBACK_MAX_MS`, a week, back) to the run's start, so each change
+is reported once, the day after it happened, and its finding clears with the next check. The query asks for
+`create` / `update` / `delete` by those contexts (`AUDIT_EVENTS_MAX`, 100, entries; a full page marks the
+check `truncated`); `drift.ts` filters again, drops what the dashboard records as a write while the owner only
+looks (`analytics` and `observability.*` queries), and keeps the context, resource and action only: no
+actor address, IP, token name, id or request body. Who did it and from where stays in Cloudflare's audit log.
 
 A personal value is reported whatever way its wrapper sends it today; a known difference is a finding
 until the live account or the committed state changes, never a special case. A personal value a wrapper
@@ -419,16 +430,19 @@ value.
 
 **Storage and views.** `state` documents `drift_run` (today's run across ticks: the live names and
 types read so far; deleted when the run ends) and `drift` (the last completed check: counts per
-category, at most `DRIFT_FINDINGS_MAX` (50) findings, and the latest error code, step and failed-day
-count). The Cloudflare view (GetCloudflareView) carries `drift` (`Drift`: status `ok` / `drift` / `never_checked` /
+category, at most `DRIFT_FINDINGS_MAX` (50) findings, where the audit window ended, and the latest error
+code, step and failed-day count). The Cloudflare view (GetCloudflareView) carries `drift` (`Drift`: status `ok` / `drift` / `never_checked` /
 `not_configured` / `failing`, counts, at most `DRIFT_VIEW_FINDINGS_MAX` (20) findings) and the page shows
 it as the 配置漂移 panel. The digest adds `config_drift` (warning; metrics `total` and the non-zero
 category counts) while the last completed check has findings, and `drift_unavailable` (warning) after
 `DRIFT_UNAVAILABLE_AFTER_DAYS` (2) failed days in a row; both point at the Cloudflare view.
 
 **Token.** The same `CF_ANALYTICS_TOKEN` as the GraphQL query ([`setup.md`](setup.md) §4). A read-only
-replacement needs Account Analytics Read, Workers Scripts Read and, on the zone, Workers Routes Read;
-without them the check reports `http_403` and, after two days, `drift_unavailable`.
+replacement needs Account Analytics Read, Workers Scripts Read, Account Settings Read (the audit log) and,
+on the zone, Workers Routes Read. Without the Workers permissions the check reports `http_403` and, after
+two days, `drift_unavailable`; without Account Settings Read (401/403 on the audit log only) the rest of the
+check completes, the panel says the changes were not checked (`audit_unchecked`), and the window stays
+open so the first check that can read the log covers the gap (up to a week).
 
 ## 11. 可关闭的提醒
 

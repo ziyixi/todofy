@@ -1,7 +1,9 @@
 /**
  * Configuration drift (docs/design-v2.md §10): the live Cloudflare account compared with the desired state
  * generated from every committed wrangler.toml and deploy wrapper (src/drift-desired.json, made by
- * .github/scripts/drift_desired.py and checked against a fresh generation in CI).
+ * .github/scripts/drift_desired.py and checked against a fresh generation in CI), and the account's changes
+ * since the previous check that were not made with an API token (CI deploys only with API tokens): a
+ * dashboard edit or a laptop's `wrangler login` deploy shows up once, the day after it happened.
  *
  * Once per UTC day, across ticks, at most DRIFT_CALLS_PER_TICK read-only GETs to fixed paths under
  * CF_API_BASE, with CF_ANALYTICS_TOKEN as the bearer token (the same token as the GraphQL query; never
@@ -12,7 +14,7 @@
 import { DRIFT_CALLS_PER_TICK, DRIFT_FINDINGS_MAX, DRIFT_MAX_ATTEMPTS, DRIFT_UTC_HOUR, type DriftCategory, type DriftFinding, type Drift } from './api-types.ts';
 import { DRIFT_CATEGORIES, DRIFT_VIEW_FINDINGS_MAX } from './idl.ts';
 import desiredJson from './drift-desired.json';
-import { isoOrNull, utcDay } from './time.ts';
+import { DAY_MS, isoOrNull, utcDay } from './time.ts';
 
 export const CF_API_BASE = 'https://api.cloudflare.com/client/v4';
 export const DRIFT_TIMEOUT_MS = 15_000;
@@ -23,8 +25,12 @@ export const DRIFT_DOMAINS_MAX = 100;
 export const DRIFT_ROUTES_MAX = 100;
 export const DRIFT_BINDINGS_MAX = 100;
 export const DRIFT_CRONS_MAX = 10;
-/** Calls of the account step (scripts, domains, then one routes list per zone) and of each Worker's step. */
+/** Calls of the account step (scripts, domains, the audit log, then one routes list per zone) and of each Worker's step. */
 export const SCRIPT_STEP_CALLS = 3;
+/** Audit log entries one check reads (one page; a full page marks the check truncated). */
+export const AUDIT_EVENTS_MAX = 100;
+/** The audit window starts at the previous check, at most this far back. */
+export const AUDIT_LOOKBACK_MAX_MS = 7 * DAY_MS;
 
 // ---- the desired state ----------------------------------------------------------------------------
 
@@ -55,7 +61,7 @@ export interface DesiredState {
 export const DESIRED: DesiredState = desiredJson;
 
 export function accountStepCalls(desired: DesiredState = DESIRED): number {
-  return 2 + desired.zones.length;
+  return 3 + desired.zones.length;
 }
 
 // ---- the live state, as kept between ticks (names, types and flags only) --------------------------
@@ -72,10 +78,20 @@ export interface LiveScript {
   readonly preview_urls: boolean | null;
 }
 
+/** Audit log entries of one kind: how they were authenticated, the resource and the action. */
+export interface LiveChange {
+  readonly via: string;
+  readonly resource: string;
+  readonly action: string;
+  readonly count: number;
+}
+
 export interface LiveAccount {
   readonly scripts: readonly string[];
   readonly domains: readonly { readonly hostname: string; readonly service: string }[];
   readonly routes: readonly { readonly pattern: string; readonly script: string }[];
+  /** Changes not made with an API token since the previous check; null when the token cannot read the audit log. */
+  readonly changes: readonly LiveChange[] | null;
   readonly zones_unchecked: number;
   readonly truncated: boolean;
 }
@@ -84,6 +100,8 @@ export interface LiveAccount {
 export interface DriftRunDoc {
   readonly day: string;
   readonly started_at: number;
+  /** The audit window is [audit_since, started_at). */
+  readonly audit_since: number;
   readonly account: LiveAccount | null;
   /** Desired Workers that exist live and still need their step; null before the account step. */
   readonly pending: readonly string[] | null;
@@ -99,6 +117,9 @@ export interface DriftDoc {
   readonly findings: readonly DriftFinding[];
   readonly zones_unchecked: number;
   readonly truncated: boolean;
+  /** Where the last completed check's audit window ended (the next one starts there); null before the first. */
+  readonly audit_until: number | null;
+  readonly audit_unchecked: boolean;
   /** The UTC day whose check completed or gave up (no new check that day). */
   readonly last_run_day: string | null;
   /** The UTC day of a check in progress (so a view needs no second document). */
@@ -128,6 +149,8 @@ export const NO_DRIFT: DriftDoc = {
   findings: [],
   zones_unchecked: 0,
   truncated: false,
+  audit_until: null,
+  audit_unchecked: false,
   last_run_day: null,
   running_day: null,
   last_error: null,
@@ -135,6 +158,16 @@ export const NO_DRIFT: DriftDoc = {
   last_error_at: null,
   consecutive_failed_days: 0,
 };
+
+/** A stored `drift` document, with the fields an older version did not write. */
+export function storedDrift(doc: DriftDoc | null): DriftDoc {
+  return doc === null ? NO_DRIFT : { ...NO_DRIFT, ...doc, counts: { ...NO_COUNTS, ...doc.counts } };
+}
+
+/** A stored `drift_run`; one an older version started reads the audit log of the day before it. */
+export function storedRun(run: (Omit<DriftRunDoc, 'audit_since'> & Partial<Pick<DriftRunDoc, 'audit_since'>>) | null): DriftRunDoc | null {
+  return run === null ? null : { audit_since: run.started_at - DAY_MS, ...run };
+}
 
 // ---- reading the API ------------------------------------------------------------------------------
 
@@ -147,6 +180,8 @@ const SCRIPT = /^[a-z0-9][a-z0-9_-]{0,62}$/;
 const NAME = /^[A-Za-z_][A-Za-z0-9_]{0,63}$/;
 const TYPE = /^[a-z][a-z0-9_]{0,39}$/;
 const HOST = /^[a-z0-9*.-]{1,253}$/;
+/** An audit log product or resource type (`dns_records`, `observability.telemetry.query`). */
+const AUDIT_NAME = /^[a-z0-9][a-z0-9_.-]{0,63}$/;
 
 type JsonObject = Record<string, unknown>;
 function isObject(value: unknown): value is JsonObject {
@@ -264,6 +299,49 @@ export function parseSubdomain(result: unknown): { workers_dev: boolean; preview
   return { workers_dev: result.enabled, preview_urls: typeof result.previews_enabled === 'boolean' ? result.previews_enabled : null };
 }
 
+/** Ways in, other than an API token, that the audit log names (`actor.context`). */
+export const OUTSIDE_CI_CONTEXTS: readonly string[] = ['dash', 'oauth', 'api_key', 'api', 'origin_ca_key'];
+const WRITES: readonly string[] = ['create', 'update', 'delete'];
+
+/** The audit log query of one window: writes not made with an API token, newest first, one page. */
+export function auditPath(accountId: string, since: number, before: number): string {
+  const query = new URLSearchParams({ since: new Date(since).toISOString(), before: new Date(before).toISOString(), limit: String(AUDIT_EVENTS_MAX) });
+  for (const action of WRITES) query.append('action_type', action);
+  for (const context of OUTSIDE_CI_CONTEXTS) query.append('actor_context', context);
+  return `/accounts/${accountId}/logs/audit?${query.toString()}`;
+}
+
+/** What the dashboard records as a write while the owner only looks: analytics and log queries. */
+function isQuery(product: string, type: string): boolean {
+  return product === 'analytics' || type.startsWith('observability.');
+}
+
+/**
+ * The entries of `GET /accounts/{a}/logs/audit`, counted by how they were authenticated, resource and
+ * action; filtered again here (the query asks for the same), and reduced to those three names: no actor,
+ * address, id or request body is kept.
+ */
+export function parseAudit(result: unknown): { changes: LiveChange[]; truncated: boolean } | null {
+  if (!Array.isArray(result)) return null;
+  const counts = new Map<string, LiveChange>();
+  for (const item of result as unknown[]) {
+    if (!isObject(item) || !isObject(item.action) || !isObject(item.actor)) return null;
+    const via = item.actor.context;
+    const action = item.action.type;
+    if (typeof via !== 'string' || typeof action !== 'string' || !OUTSIDE_CI_CONTEXTS.includes(via) || !WRITES.includes(action)) continue;
+    const resource = isObject(item.resource) ? item.resource : {};
+    const product = typeof resource.product === 'string' ? resource.product : '';
+    const type = typeof resource.type === 'string' ? resource.type : '';
+    if (isQuery(product, type)) continue;
+    const parts = [product, type].filter((part) => part !== '');
+    const name = parts.length > 0 && parts.every((part) => AUDIT_NAME.test(part)) ? parts.join('.') : '(other)';
+    const key = `${via} ${name} ${action}`;
+    counts.set(key, { via, resource: name, action, count: (counts.get(key)?.count ?? 0) + 1 });
+  }
+  const changes = [...counts.values()].sort((a, b) => a.via.localeCompare(b.via) || a.resource.localeCompare(b.resource) || a.action.localeCompare(b.action));
+  return { changes, truncated: result.length >= AUDIT_EVENTS_MAX };
+}
+
 export type StepOutcome<T> = { readonly ok: true; readonly value: T } | { readonly ok: false; readonly code: DriftErrorCode; readonly step: DriftStep; readonly http_status: number | null };
 
 function failed(step: DriftStep, result: { code: DriftErrorCode; http_status: number | null }): { ok: false; code: DriftErrorCode; step: DriftStep; http_status: number | null } {
@@ -272,16 +350,27 @@ function failed(step: DriftStep, result: { code: DriftErrorCode; http_status: nu
 
 const INVALID = { code: 'invalid_response', http_status: 200 } as const;
 
-/** The account step: scripts and Custom Domains in parallel, then each desired zone's routes. */
-export async function fetchAccount(token: string, accountId: string, fetcher: FetchLike, desired: DesiredState = DESIRED): Promise<StepOutcome<LiveAccount>> {
+/**
+ * The account step: scripts, Custom Domains and the audit log of [since, before) in parallel, then each
+ * desired zone's routes. A token without Account Settings Read (401/403 on the audit log) leaves the
+ * changes unchecked; the rest of the check goes on.
+ */
+export async function fetchAccount(token: string, accountId: string, fetcher: FetchLike, window: { since: number; before: number }, desired: DesiredState = DESIRED): Promise<StepOutcome<LiveAccount>> {
   if (!HEX32.test(accountId)) return { ok: false, code: 'bad_account', step: 'account', http_status: null };
   const base = `/accounts/${accountId}/workers`;
-  const [scriptsAnswer, domainsAnswer] = await Promise.all([cfGet(token, `${base}/scripts`, fetcher), cfGet(token, `${base}/domains`, fetcher)]);
+  const [scriptsAnswer, domainsAnswer, auditAnswer] = await Promise.all([
+    cfGet(token, `${base}/scripts`, fetcher),
+    cfGet(token, `${base}/domains`, fetcher),
+    cfGet(token, auditPath(accountId, window.since, window.before), fetcher),
+  ]);
   if (!scriptsAnswer.ok) return failed('account', scriptsAnswer);
   if (!domainsAnswer.ok) return failed('account', domainsAnswer);
+  const unreadable = !auditAnswer.ok && (auditAnswer.http_status === 401 || auditAnswer.http_status === 403);
+  if (!auditAnswer.ok && !unreadable) return failed('account', auditAnswer);
   const scripts = parseScripts(scriptsAnswer.result);
   const domains = parseDomains(domainsAnswer.result);
-  if (scripts === null || domains === null) return failed('account', INVALID);
+  const audit = auditAnswer.ok ? parseAudit(auditAnswer.result) : { changes: null, truncated: false };
+  if (scripts === null || domains === null || audit === null) return failed('account', INVALID);
   const routes: { pattern: string; script: string }[] = [];
   let unchecked = 0;
   for (const zone of desired.zones) {
@@ -303,8 +392,9 @@ export async function fetchAccount(token: string, accountId: string, fetcher: Fe
       scripts: scripts.names,
       domains: domains.domains,
       routes: routes.slice(0, DRIFT_ROUTES_MAX),
+      changes: audit.changes,
       zones_unchecked: unchecked,
-      truncated: scripts.truncated || domains.truncated || routes.length > DRIFT_ROUTES_MAX,
+      truncated: scripts.truncated || domains.truncated || audit.truncated || routes.length > DRIFT_ROUTES_MAX,
     },
   };
 }
@@ -347,8 +437,10 @@ export function driftPlan(now: number, run: DriftRunDoc | null, doc: DriftDoc, c
   return { kind: 'start' };
 }
 
-export function newDriftRun(now: number): DriftRunDoc {
-  return { day: utcDay(now), started_at: now, account: null, pending: null, scripts: {}, attempts: 0 };
+/** Today's run; its audit window starts where the previous completed check's ended (at most a week back). */
+export function newDriftRun(now: number, previous: DriftDoc): DriftRunDoc {
+  const since = Math.max(previous.audit_until ?? now - DAY_MS, now - AUDIT_LOOKBACK_MAX_MS);
+  return { day: utcDay(now), started_at: now, audit_since: since, account: null, pending: null, scripts: {}, attempts: 0 };
 }
 
 export interface AdvanceResult {
@@ -369,7 +461,7 @@ export async function advanceRun(run: DriftRunDoc, token: string, accountId: str
     return fetcher(url, init);
   };
   if (current.account === null) {
-    const account = await fetchAccount(token, accountId, counted, desired);
+    const account = await fetchAccount(token, accountId, counted, { since: run.audit_since, before: run.started_at }, desired);
     if (!account.ok) return { run: { ...current, attempts: current.attempts + 1 }, calls, error: account };
     const live = new Set(account.value.scripts);
     current = { ...current, account: account.value, pending: Object.keys(desired.workers).filter((name) => live.has(name)).sort() };
@@ -470,6 +562,16 @@ export function compareDrift(desired: DesiredState, account: LiveAccount, script
       }
     }
   }
+  // Account changes outside CI: one finding per way in and resource, its actions with counts.
+  const changes = new Map<string, DriftFinding>();
+  for (const change of account.changes ?? []) {
+    const key = `${change.via} ${change.resource}`;
+    const actions = `${change.action} ${String(change.count)}`;
+    const seen = changes.get(key)?.actual;
+    changes.set(key, { category: 'account_changes', script: change.via, name: change.resource, kind: 'extra', actual: seen === undefined ? actions : `${seen}, ${actions}` });
+  }
+  findings.push(...changes.values());
+
   const order = new Map(DRIFT_CATEGORIES.map((category, index) => [category, index]));
   return findings.sort((a, b) => (order.get(a.category) ?? 0) - (order.get(b.category) ?? 0));
 }
@@ -488,7 +590,7 @@ export function totalFindings(counts: Readonly<Record<DriftCategory, number>>): 
 
 /** The `drift` document after a completed run. */
 export function completedDoc(previous: DriftDoc, run: DriftRunDoc, now: number, desired: DesiredState = DESIRED): DriftDoc {
-  const account = run.account ?? { scripts: [], domains: [], routes: [], zones_unchecked: 0, truncated: false };
+  const account = run.account ?? { scripts: [], domains: [], routes: [], changes: null, zones_unchecked: 0, truncated: false };
   const findings = compareDrift(desired, account, run.scripts);
   return {
     ...previous,
@@ -498,6 +600,9 @@ export function completedDoc(previous: DriftDoc, run: DriftRunDoc, now: number, 
     findings: findings.slice(0, DRIFT_FINDINGS_MAX),
     zones_unchecked: account.zones_unchecked,
     truncated: account.truncated,
+    // An unread audit log keeps the window open, so the first check that can read it covers the gap.
+    audit_until: account.changes === null ? previous.audit_until : run.started_at,
+    audit_unchecked: account.changes === null,
     last_run_day: run.day,
     running_day: null,
     last_error: null,
@@ -520,6 +625,15 @@ export function failedDoc(previous: DriftDoc, run: DriftRunDoc, error: { code: D
   };
 }
 
+/**
+ * The counts and flag as the wire writes them: account_changes and audit_unchecked came after the first
+ * release, so they are not REQUIRED and are left out at 0 / false (proto/README.md, Wire JSON profile).
+ */
+function wireCounts(counts: Readonly<Record<DriftCategory, number>>): Drift['counts'] {
+  const { account_changes: changes, ...older } = counts;
+  return changes > 0 ? counts : older;
+}
+
 export function driftView(doc: DriftDoc, configured: boolean, now: number): Drift {
   const total = totalFindings(doc.counts);
   const status: Drift['status'] = !configured
@@ -537,7 +651,7 @@ export function driftView(doc: DriftDoc, configured: boolean, now: number): Drif
     checked_at: isoOrNull(doc.checked_at),
     in_progress: configured && doc.running_day === utcDay(now),
     desired_workers: doc.desired_workers > 0 ? doc.desired_workers : Object.keys(DESIRED.workers).length,
-    counts: doc.counts,
+    counts: wireCounts(doc.counts),
     findings,
     findings_omitted: total - findings.length,
     zones_unchecked: doc.zones_unchecked,
@@ -546,5 +660,6 @@ export function driftView(doc: DriftDoc, configured: boolean, now: number): Drif
     last_error_step: doc.last_error_step,
     last_error_at: isoOrNull(doc.last_error_at),
     consecutive_failed_days: doc.consecutive_failed_days,
+    ...(doc.audit_unchecked ? { audit_unchecked: true } : {}),
   };
 }

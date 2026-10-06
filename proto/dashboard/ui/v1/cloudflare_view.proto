@@ -105,7 +105,8 @@ message CloudflareView {
 }
 
 // The configuration drift check: the live account against the desired state generated from the committed
-// configs. Names only, never a value.
+// configs, and the account's changes since the previous check that were not made with an API token (CI
+// deploys only with API tokens). Names only, never a value.
 message Drift {
   // ok or drift from the last completed check; never_checked before the first; failing when none completed and
   // the last day's attempts failed; not_configured without the token.
@@ -149,6 +150,9 @@ message Drift {
   ];
   // UTC days in a row without a completed check.
   int32 consecutive_failed_days = 13 [(google.api.field_behavior) = REQUIRED];
+  // The token could not read the account audit log (it needs Account Settings Read): the last completed
+  // check has no account_changes findings.
+  bool audit_unchecked = 14 [(google.api.field_behavior) = OUTPUT_ONLY];
 
   // The state of the drift check.
   enum State {
@@ -183,6 +187,8 @@ message DriftCounts {
   int32 workers_dev = 6 [(google.api.field_behavior) = REQUIRED];
   // Personal values that must be secrets.
   int32 personal = 7 [(google.api.field_behavior) = REQUIRED];
+  // Changes made outside CI.
+  int32 account_changes = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
 }
 
 // One difference between the committed and the live configuration, names only.
@@ -194,9 +200,11 @@ message DriftFinding {
     (google.api.field_behavior) = REQUIRED,
     (common.wire.v1.field).non_null = true
   ];
-  // The Worker (script name); for a route without a Worker, `(none)`.
+  // The Worker (script name); for a route without a Worker, `(none)`; for an account change, how it was
+  // authenticated (`dash`, `oauth`, `api_key`, ...).
   string script = 2 [(google.api.field_behavior) = REQUIRED];
-  // The Worker, hostname, route pattern, cron, binding name, or `workers_dev` / `preview_urls`.
+  // The Worker, hostname, route pattern, cron, binding name, or `workers_dev` / `preview_urls`; for an
+  // account change, the audit log's resource (`dns_records`, `tokens`, `workers.scripts`, ...).
   string name = 3 [(google.api.field_behavior) = REQUIRED];
   // How it differs.
   Kind kind = 4 [
@@ -205,7 +213,8 @@ message DriftFinding {
   ];
   // The committed binding type or flag (secret_text, plain_text, true, false), never a value.
   optional string expected = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // The live binding type or flag, never a value.
+  // The live binding type or flag, never a value; for an account change, its actions with counts
+  // (`create 1, delete 5`).
   optional string actual = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
 
   // How a finding differs.
@@ -382,4 +391,6 @@ enum DriftCategory {
   DRIFT_CATEGORY_WORKERS_DEV = 6;
   // Whether each personal value is a secret.
   DRIFT_CATEGORY_PERSONAL = 7;
+  // Account changes since the previous check not made with an API token (the dashboard, a wrangler login).
+  DRIFT_CATEGORY_ACCOUNT_CHANGES = 8;
 }

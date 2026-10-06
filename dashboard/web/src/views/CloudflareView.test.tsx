@@ -343,6 +343,31 @@ describe('Cloudflare 监控', () => {
     expect(screen.getAllByText(/线上配置与代码不一致/).length).toBeGreaterThan(0)
   })
 
+  it('lists changes made outside CI by how and what', async () => {
+    const changed = healthy()
+    changed.cloudflare = {
+      ...changed.cloudflare,
+      drift: driftView({
+        status: 'drift',
+        counts: { ...driftView().counts, account_changes: 1 },
+        findings: [{ category: 'account_changes', script: 'dash', name: 'dns_records', kind: 'extra', actual: 'create 1, delete 5' }],
+      }),
+    }
+    await showCloudflare(changed)
+    const drift = section('配置漂移')
+    const items = within(drift).getAllByRole('listitem').filter((li) => li.closest('.drift-findings'))
+    expect(items.map((li) => li.textContent)).toEqual(['非 CI 改动dns_records经控制台：新建 1 次、删除 5 次，不是 CI 做的'])
+    expect(within(drift).getByRole('list', { name: '各类差异' })).toHaveTextContent('非 CI 改动 1')
+    expect(within(drift).queryByText(/读不了账号审计日志/)).toBeNull()
+  })
+
+  it('says when the token could not read the audit log', async () => {
+    const unchecked = healthy()
+    unchecked.cloudflare = { ...unchecked.cloudflare, drift: driftView({ audit_unchecked: true }) }
+    await showCloudflare(unchecked)
+    expect(within(section('配置漂移')).getByText(/读不了账号审计日志（需要 Account Settings Read）/)).toBeInTheDocument()
+  })
+
   it('says when the drift check fails, keeps the last result, and when no token is configured', async () => {
     const failing = healthy()
     failing.cloudflare = {

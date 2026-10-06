@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { DRIFT_CALLS_PER_TICK, DRIFT_MAX_ATTEMPTS, DRIFT_UTC_HOUR } from '../src/api-types.ts';
 import { DRIFT_CATEGORIES, DRIFT_VIEW_FINDINGS_MAX } from '../src/idl.ts';
 import {
+  AUDIT_EVENTS_MAX,
+  AUDIT_LOOKBACK_MAX_MS,
   CF_API_BASE,
   DESIRED,
   DRIFT_RUN_MAX_BYTES,
@@ -10,6 +12,7 @@ import {
   accountStepCalls,
   advanceRun,
   attemptsExhausted,
+  auditPath,
   cfGet,
   compareDrift,
   completedDoc,
@@ -20,16 +23,20 @@ import {
   fetchAccount,
   fetchScript,
   newDriftRun,
+  parseAudit,
   parseSettings,
   runComplete,
   runTooLarge,
+  storedDrift,
+  storedRun,
   type DesiredState,
+  type DriftDoc,
   type DriftRunDoc,
   type FetchLike,
   type LiveAccount,
   type LiveScript,
 } from '../src/drift.ts';
-import { CF_API, SENTINEL_VALUE, SYNTHETIC_ACCOUNT, fakeCloudflare, type LiveTweaks } from './drift-fixture.ts';
+import { CF_API, SENTINEL_VALUE, SYNTHETIC_ACCOUNT, auditEntry, fakeCloudflare, type LiveTweaks } from './drift-fixture.ts';
 
 const TOKEN = 'synthetic-analytics-token-000000000000';
 const DAY = '2026-09-30';
@@ -79,9 +86,9 @@ function api(tweaks: LiveTweaks = {}, desired: DesiredState = DESIRED): { fetche
 }
 
 /** Runs a whole check against the fake API, tick by tick; returns the documents and the calls per tick. */
-async function fullCheck(tweaks: LiveTweaks = {}, desired: DesiredState = DESIRED) {
+async function fullCheck(tweaks: LiveTweaks = {}, desired: DesiredState = DESIRED, previous: DriftDoc = NO_DRIFT) {
   const { fetcher, calls } = api(tweaks, desired);
-  let run: DriftRunDoc = newDriftRun(AT('02:00'));
+  let run: DriftRunDoc = newDriftRun(AT('02:00'), previous);
   const perTick: number[] = [];
   for (let tick = 0; tick < 5 && !runComplete(run); tick++) {
     const before = calls.length;
@@ -92,11 +99,11 @@ async function fullCheck(tweaks: LiveTweaks = {}, desired: DesiredState = DESIRE
     run = result.run;
   }
   expect(runComplete(run)).toBe(true);
-  const doc = completedDoc(NO_DRIFT, run, AT('02:30'), desired);
+  const doc = completedDoc(previous, run, AT('02:30'), desired);
   return { doc, run, perTick, calls };
 }
 
-const LIVE_OK: LiveAccount = { scripts: ['alpha', 'beta'], domains: [{ hostname: 'alpha.example.com', service: 'alpha' }], routes: [], zones_unchecked: 0, truncated: false };
+const LIVE_OK: LiveAccount = { scripts: ['alpha', 'beta'], domains: [{ hostname: 'alpha.example.com', service: 'alpha' }], routes: [], changes: [], zones_unchecked: 0, truncated: false };
 const SCRIPT_OK: Record<string, LiveScript> = {
   alpha: {
     crons: ['*/30 * * * *'],
@@ -139,6 +146,7 @@ describe('comparison', () => {
         scripts: ['alpha', 'gamma'],
         domains: [{ hostname: 'other.example.com', service: 'alpha' }, { hostname: 'gamma.example.com', service: 'gamma' }],
         routes: [{ pattern: 'example.com/*', script: '(none)' }],
+        changes: [],
         zones_unchecked: 0,
         truncated: false,
       },
@@ -170,7 +178,7 @@ describe('comparison', () => {
       { category: 'workers_dev', script: 'alpha', name: 'workers_dev', kind: 'changed', expected: 'false', actual: 'true' },
       { category: 'personal', script: 'alpha', name: 'OWNER', kind: 'changed', expected: 'secret_text', actual: 'plain_text' },
     ]);
-    expect(countFindings(findings)).toEqual({ scripts: 2, custom_domains: 3, routes: 1, crons: 2, bindings: 3, workers_dev: 1, personal: 1 });
+    expect(countFindings(findings)).toEqual({ scripts: 2, custom_domains: 3, routes: 1, crons: 2, bindings: 3, workers_dev: 1, personal: 1, account_changes: 0 });
   });
 
   it('wants every personal value as a deploy secret, so a live plain_text one is a bindings change', async () => {
@@ -212,8 +220,9 @@ describe('reading the API', () => {
       expect(call.url).not.toContain(TOKEN);
       expect([...headers].filter(([name]) => name !== 'authorization').some(([, value]) => value.includes(TOKEN))).toBe(false);
     }
-    const paths = new Set(calls.map((c) => c.url.slice(CF_API.length).replace(/\/scripts\/[a-z0-9_-]+\//, '/scripts/<s>/')));
+    const paths = new Set(calls.map((c) => c.url.slice(CF_API.length).replace(/\/scripts\/[a-z0-9_-]+\//, '/scripts/<s>/').replace(/\?.*$/, '?<window>')));
     expect([...paths].sort()).toEqual([
+      `/accounts/${SYNTHETIC_ACCOUNT}/logs/audit?<window>`,
       `/accounts/${SYNTHETIC_ACCOUNT}/workers/domains`,
       `/accounts/${SYNTHETIC_ACCOUNT}/workers/scripts`,
       `/accounts/${SYNTHETIC_ACCOUNT}/workers/scripts/<s>/schedules`,
@@ -246,8 +255,9 @@ describe('reading the API', () => {
     const denied = api({ fail: { path: /\/settings$/, status: 403 } });
     expect(await fetchScript(TOKEN, SYNTHETIC_ACCOUNT, 'home', denied.fetcher)).toEqual({ ok: false, code: 'http_403', step: 'script', http_status: 403 });
     const noDomains = api({ fail: { path: /\/domains$/, status: 403 } });
-    expect(await fetchAccount(TOKEN, SYNTHETIC_ACCOUNT, noDomains.fetcher)).toEqual({ ok: false, code: 'http_403', step: 'account', http_status: 403 });
-    expect(await fetchAccount(TOKEN, 'not-an-account', noDomains.fetcher)).toMatchObject({ ok: false, code: 'bad_account' });
+    const window = { since: AT('00:00'), before: AT('02:00') };
+    expect(await fetchAccount(TOKEN, SYNTHETIC_ACCOUNT, noDomains.fetcher, window)).toEqual({ ok: false, code: 'http_403', step: 'account', http_status: 403 });
+    expect(await fetchAccount(TOKEN, 'not-an-account', noDomains.fetcher, window)).toMatchObject({ ok: false, code: 'bad_account' });
   });
 
   it('cannot check the routes of a zone no Custom Domain names, and says so', async () => {
@@ -260,21 +270,21 @@ describe('reading the API', () => {
 describe('a run across ticks', () => {
   it(`never makes more than DRIFT_CALLS_PER_TICK = ${String(DRIFT_CALLS_PER_TICK)} calls in one tick`, async () => {
     const { perTick } = await fullCheck();
-    // The account step and three Workers, four Workers, then the last three.
-    expect(perTick).toEqual([12, 12, 12]);
+    // The account step (four calls) and two Workers, four Workers twice, then the last one.
+    expect(perTick).toEqual([10, 12, 12, 3]);
     expect(Math.max(...perTick)).toBeLessThanOrEqual(DRIFT_CALLS_PER_TICK);
     // The account step always leaves room for at least one Worker, so every tick makes progress.
     expect(accountStepCalls() + SCRIPT_STEP_CALLS).toBeLessThanOrEqual(DRIFT_CALLS_PER_TICK);
   });
 
   it('retries a failed step on the next tick, keeps what it read, and gives up after DRIFT_MAX_ATTEMPTS', async () => {
-    const flaky = api({ fail: { path: /\/home\/settings$/, status: 500 } });
-    let run = newDriftRun(AT('02:00'));
+    const flaky = api({ fail: { path: /\/fleet\/settings$/, status: 500 } });
+    let run = newDriftRun(AT('02:00'), NO_DRIFT);
     const first = await advanceRun(run, TOKEN, SYNTHETIC_ACCOUNT, flaky.fetcher);
     expect(first.error).toMatchObject({ code: 'http_500', step: 'script' });
     expect(first.run.account).not.toBeNull();
-    // home failed; the other two Workers of the batch are kept.
-    expect(Object.keys(first.run.scripts).sort()).toEqual(['fleet', 'flowday']);
+    // fleet failed; the other Worker of the batch is kept.
+    expect(Object.keys(first.run.scripts).sort()).toEqual(['flowday']);
     run = first.run;
     for (let attempt = 2; attempt <= DRIFT_MAX_ATTEMPTS; attempt++) {
       const next = await advanceRun(run, TOKEN, SYNTHETIC_ACCOUNT, flaky.fetcher);
@@ -293,9 +303,101 @@ describe('a run across ticks', () => {
     expect(driftPlan(AT(`${hour}:00`), null, NO_DRIFT, true)).toEqual({ kind: 'start' });
     expect(driftPlan(AT('12:00'), null, { ...NO_DRIFT, last_run_day: DAY }, true)).toEqual({ kind: 'idle' });
     expect(driftPlan(AT('12:00'), null, NO_DRIFT, false)).toEqual({ kind: 'idle' });
-    const running = newDriftRun(AT(`${hour}:00`));
+    const running = newDriftRun(AT(`${hour}:00`), NO_DRIFT);
     expect(driftPlan(AT(`${hour}:30`), running, NO_DRIFT, true)).toEqual({ kind: 'continue', run: running });
     expect(driftPlan(AT(`${hour}:00`) + 86_400_000, running, NO_DRIFT, true)).toEqual({ kind: 'abandon', run: running });
+  });
+});
+
+describe('changes made outside CI (the audit log)', () => {
+  it('asks for the writes of one window not made with an API token', () => {
+    const query = new URL(`${CF_API_BASE}${auditPath(SYNTHETIC_ACCOUNT, AT('00:00'), AT('02:00'))}`).searchParams;
+    expect(query.get('since')).toBe(`${DAY}T00:00:00.000Z`);
+    expect(query.get('before')).toBe(`${DAY}T02:00:00.000Z`);
+    expect(query.get('limit')).toBe(String(AUDIT_EVENTS_MAX));
+    expect(query.getAll('action_type')).toEqual(['create', 'update', 'delete']);
+    expect(query.getAll('actor_context')).not.toContain('api_token');
+    expect(query.getAll('actor_context')).toContain('dash');
+  });
+
+  it('counts them by way in, resource and action, drops looking (analytics, log queries), and keeps no actor or id', () => {
+    const entries = [
+      { context: 'dash', action: 'delete', product: 'dns_records' },
+      { context: 'dash', action: 'delete', product: 'dns_records' },
+      { context: 'dash', action: 'create', product: 'tokens' },
+      { context: 'oauth', action: 'update', product: 'workers', type: 'scripts' },
+      { context: 'dash', action: 'create', product: 'analytics', type: 'query.summary' },
+      { context: 'dash', action: 'create', product: 'workers', type: 'observability.telemetry.query' },
+      { context: 'api_token', action: 'update', product: 'workers', type: 'scripts' },
+      { context: 'dash', action: 'view', product: 'tokens' },
+      { context: 'dash', action: 'update', product: 'Weird Name!' },
+    ].map((entry, i) => auditEntry(entry, i));
+    const parsed = parseAudit(entries);
+    expect(parsed).toEqual({
+      changes: [
+        { via: 'dash', resource: '(other)', action: 'update', count: 1 },
+        { via: 'dash', resource: 'dns_records', action: 'delete', count: 2 },
+        { via: 'dash', resource: 'tokens', action: 'create', count: 1 },
+        { via: 'oauth', resource: 'workers.scripts', action: 'update', count: 1 },
+      ],
+      truncated: false,
+    });
+    expect(JSON.stringify(parsed)).not.toContain(SENTINEL_VALUE);
+    expect(parseAudit(Array.from({ length: AUDIT_EVENTS_MAX }, (_, i) => auditEntry({ context: 'dash', action: 'update', product: 'dns_records' }, i)))?.truncated).toBe(true);
+    expect(parseAudit({ not: 'a list' })).toBeNull();
+    expect(parseAudit([{ actor: {} }])).toBeNull();
+  });
+
+  it('reports them once, as one finding per way in and resource, and the next check starts where this one ended', async () => {
+    const audit = [
+      { context: 'dash', action: 'delete', product: 'workers', type: 'scripts' },
+      { context: 'dash', action: 'update', product: 'workers', type: 'scripts' },
+      { context: 'oauth', action: 'update', product: 'workers', type: 'scripts' },
+    ];
+    const { doc, run } = await fullCheck({ audit });
+    expect(run.audit_since).toBe(AT('02:00') - 86_400_000);
+    expect(doc.findings).toEqual([
+      { category: 'account_changes', script: 'dash', name: 'workers.scripts', kind: 'extra', actual: 'delete 1, update 1' },
+      { category: 'account_changes', script: 'oauth', name: 'workers.scripts', kind: 'extra', actual: 'update 1' },
+    ]);
+    expect(doc).toMatchObject({ audit_until: AT('02:00'), audit_unchecked: false });
+    expect(driftView(doc, true, AT('03:00')).status).toBe('drift');
+    expect(JSON.stringify(doc)).not.toContain(SENTINEL_VALUE);
+    expect(newDriftRun(AT('02:00') + 86_400_000, doc).audit_since).toBe(AT('02:00'));
+  });
+
+  it('reads at most a week back, however long ago the last check was', () => {
+    const old: DriftDoc = { ...NO_DRIFT, audit_until: AT('02:00') - 30 * 86_400_000 };
+    expect(newDriftRun(AT('02:00'), old).audit_since).toBe(AT('02:00') - AUDIT_LOOKBACK_MAX_MS);
+  });
+
+  it('a token without Account Settings Read leaves the changes unchecked and the window open; the rest of the check goes on', async () => {
+    const previous: DriftDoc = { ...NO_DRIFT, audit_until: AT('02:00') - 2 * 86_400_000 };
+    const { doc } = await fullCheck({ fail: { path: /\/logs\/audit/, status: 403 }, audit: [{ context: 'dash', action: 'delete', product: 'tokens' }] }, DESIRED, previous);
+    expect(doc).toMatchObject({ audit_unchecked: true, audit_until: previous.audit_until, checked_at: AT('02:30') });
+    expect(doc.counts.account_changes).toBe(0);
+    expect(driftView(doc, true, AT('03:00'))).toMatchObject({ status: 'ok', audit_unchecked: true });
+  });
+
+  it('any other audit log failure fails the account step, to be retried', async () => {
+    const broken = api({ fail: { path: /\/logs\/audit/, status: 500 } });
+    const result = await advanceRun(newDriftRun(AT('02:00'), NO_DRIFT), TOKEN, SYNTHETIC_ACCOUNT, broken.fetcher);
+    expect(result.error).toMatchObject({ code: 'http_500', step: 'account' });
+    expect(result.run.account).toBeNull();
+  });
+
+  it('reads documents an older version stored', () => {
+    // As JSON, without the fields this version added.
+    const older = JSON.parse(JSON.stringify({ ...NO_DRIFT, checked_at: AT('02:30') }).replace(/,"(audit_until|audit_unchecked|account_changes)":[^,}]+/g, '')) as DriftDoc;
+    expect(older).not.toHaveProperty('audit_until');
+    const doc = storedDrift(older);
+    expect(doc).toMatchObject({ audit_until: null, audit_unchecked: false, checked_at: AT('02:30') });
+    expect(doc.counts.account_changes).toBe(0);
+    expect(storedDrift(null)).toBe(NO_DRIFT);
+    const olderRun = JSON.parse(JSON.stringify(newDriftRun(AT('02:00'), NO_DRIFT)).replace(/,"audit_since":\d+/, '')) as DriftRunDoc;
+    expect(olderRun).not.toHaveProperty('audit_since');
+    expect(storedRun(olderRun)?.audit_since).toBe(AT('02:00') - 86_400_000);
+    expect(storedRun(null)).toBeNull();
   });
 });
 
@@ -319,6 +421,8 @@ describe('the view', () => {
     const view = driftView({ ...NO_DRIFT, checked_at: AT('02:30'), counts: countFindings(many), findings: many }, true, AT('03:00'));
     expect(view.findings).toHaveLength(DRIFT_VIEW_FINDINGS_MAX);
     expect(view.findings_omitted).toBe(40 - DRIFT_VIEW_FINDINGS_MAX);
-    expect(Object.keys(view.counts)).toEqual([...DRIFT_CATEGORIES]);
+    // account_changes, added after the first release, is left out at 0 (not REQUIRED on the wire).
+    expect(Object.keys(view.counts)).toEqual(DRIFT_CATEGORIES.filter((category) => category !== 'account_changes'));
+    expect(view).not.toHaveProperty('audit_unchecked');
   });
 });

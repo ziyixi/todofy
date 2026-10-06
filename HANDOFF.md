@@ -19,6 +19,20 @@ Rules for this file:
 Last updated: 2026-10-06.
 <!-- Active work is separate from the production evidence below. -->
 
+## In flight (2026-10-06, Claude): Home reports account changes made outside CI
+
+Owner request (security follow-up): be told when the Cloudflare account changes other than through CI. Home's
+daily drift check (`dashboard/worker/src/drift.ts`, design-v2 §10) now also reads the account audit log for the
+writes since the previous check not made with an API token (CI uses API tokens only): dashboard edits (token
+edits included), `wrangler login` deploys, a Global API Key. New drift category `account_changes` (非 CI 改动),
+one finding per way in and resource with action counts; each change shows once, the day after; analytics and log
+queries are dropped; no actor address, IP or id is kept. Read with the existing `CF_ANALYTICS_TOKEN` (verified
+2026-10-06: the current token reads the audit log); a split read-only token needs Account Settings Read, and
+without it the panel says the changes were not checked while the rest of the check runs. The check now takes
+four ticks (account step: four calls). Home deploys only together with mailsort (HOME_BOUND while mailsort is
+CHECK_ONLY), so this goes live with the mailsort release. Verify after that: the first 配置漂移 check after
+02:00 UTC completes; the owner's own dashboard actions of the previous day show as 非 CI 改动.
+
 ## In flight (2026-10-06, Claude): mailsort, the Gmail auto-labeler
 
 New app `mailsort/` (Worker `mailsort`, host `sort.ziyixi.science`, one SQLite DO `MailsortState`, no D1/R2), owner

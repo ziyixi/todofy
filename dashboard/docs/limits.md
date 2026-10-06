@@ -88,7 +88,7 @@ and the page says so.
 | Memory | 128 MB per isolate | GraphQL answers over 1 MB are refused | [Workers limits](https://developers.cloudflare.com/workers/platform/limits/) |
 | GraphQL Analytics API | 300 queries per 5 min; account-scoped queries cover 1 account | one query per tick, owner refreshes ≤ 1 per minute | [GraphQL limits](https://developers.cloudflare.com/analytics/graphql-api/limits/) |
 | Token permission for account analytics | "Account Analytics: Read" | `CF_ANALYTICS_TOKEN` ([`setup.md`](setup.md) §4) | [API token auth](https://developers.cloudflare.com/analytics/graphql-api/getting-started/authentication/api-token-auth/) |
-| Token permissions for the drift check | "Workers Scripts: Read" (account) and "Workers Routes: Read" (zone) | `CF_ANALYTICS_TOKEN` ([`setup.md`](setup.md) §4, [`design-v2.md`](design-v2.md) §10) | [API token permissions](https://developers.cloudflare.com/fundamentals/api/reference/permissions/) |
+| Token permissions for the drift check | "Workers Scripts: Read" and "Account Settings: Read" (account; the audit log) and "Workers Routes: Read" (zone) | `CF_ANALYTICS_TOKEN` ([`setup.md`](setup.md) §4, [`design-v2.md`](design-v2.md) §10) | [API token permissions](https://developers.cloudflare.com/fundamentals/api/reference/permissions/) |
 
 ## 3. What the dashboard itself uses per day
 

@@ -160,8 +160,8 @@ describe('persistent occurrence controls', () => {
     h = await start();
     const day = 86_400_000, beginning = Math.floor(NOW / day) * day + DRIFT_UTC_HOUR * 60 * MINUTE;
     const complete = async (at: number) => {
-      await activeHarness().redeploy({ DEV_NOW: new Date(at + 60 * MINUTE).toISOString() });
-      for (let index = 0; index < 3; index++) await activeHarness().tick(at + index * 30 * MINUTE);
+      await activeHarness().redeploy({ DEV_NOW: new Date(at + 90 * MINUTE).toISOString() });
+      for (let index = 0; index < 4; index++) await activeHarness().tick(at + index * 30 * MINUTE);
     };
     h.cloudflare.tweaks = { extraScripts: ['synthetic-orphan'] };
     await complete(beginning);

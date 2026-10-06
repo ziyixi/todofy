@@ -1,8 +1,9 @@
 /**
  * A fake Cloudflare API for the drift check (unit and workerd tests): it answers the read-only paths
  * drift.ts calls with a live state built from a desired state (by default the bundled
- * src/drift-desired.json), optionally changed. Every id is synthetic, and every plain_text binding
- * carries SENTINEL_VALUE as its `text`, so the tests can prove that no value is kept.
+ * src/drift-desired.json), optionally changed, and the account audit log (empty unless given). Every id is
+ * synthetic, and every plain_text binding and audit actor carries SENTINEL_VALUE, so the tests can prove that
+ * no value is kept.
  */
 import type { DesiredState } from '../src/drift.ts';
 
@@ -24,8 +25,29 @@ export interface LiveTweaks {
   /** Script -> binding -> live type, or null to remove the binding. */
   readonly bindings?: Readonly<Record<string, Readonly<Record<string, string | null>>>>;
   readonly workersDev?: Readonly<Record<string, boolean>>;
+  /** Audit log entries, as `{context, action, product, type}`; the fake answers them whatever the query asks. */
+  readonly audit?: readonly AuditEntry[];
   /** Answers a matching path with this HTTP status instead. */
   readonly fail?: { readonly path: RegExp; readonly status: number };
+}
+
+export interface AuditEntry {
+  readonly context: string;
+  readonly action: string;
+  readonly product?: string;
+  readonly type?: string;
+}
+
+/** One audit log entry of the API's shape; the actor's address, IP and token name are the sentinel. */
+export function auditEntry(entry: AuditEntry, index = 0): unknown {
+  return {
+    id: index.toString(16).padStart(32, '9'),
+    account: { id: SYNTHETIC_ACCOUNT, name: SENTINEL_VALUE },
+    action: { description: SENTINEL_VALUE, result: 'success', time: '2026-09-30T01:00:00Z', type: entry.action },
+    actor: { id: 'a'.repeat(32), context: entry.context, email: `${SENTINEL_VALUE}@example.com`, ip_address: '192.0.2.1', token_id: 'b'.repeat(32), token_name: SENTINEL_VALUE, type: 'user' },
+    raw: { cf_ray_id: 'c'.repeat(16), method: 'POST', status_code: 200, uri: `/${SENTINEL_VALUE}`, user_agent: SENTINEL_VALUE },
+    resource: { id: SENTINEL_VALUE, product: entry.product ?? '', request: { value: SENTINEL_VALUE }, response: {}, scope: 'accounts', type: entry.type ?? null },
+  };
 }
 
 const envelope = (result: unknown): Response => Response.json({ success: true, errors: [], messages: [], result });
@@ -55,6 +77,9 @@ export function fakeCloudflare(url: string, tweaks: LiveTweaks, desired: Desired
         cert_id: 'c'.repeat(32),
       })),
     );
+  }
+  if (path.startsWith(`/accounts/${SYNTHETIC_ACCOUNT}/logs/audit?`)) {
+    return envelope((tweaks.audit ?? []).map((entry, i) => auditEntry(entry, i)));
   }
   if (path === `/zones/${SYNTHETIC_ZONE}/workers/routes`) {
     return envelope((tweaks.routes ?? []).map((route, i) => ({ id: i.toString(16).padStart(32, 'd'), pattern: route.pattern, ...(route.script === undefined ? {} : { script: route.script }) })));

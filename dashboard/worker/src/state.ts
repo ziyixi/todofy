@@ -53,7 +53,6 @@ import {
 } from './guard.ts';
 import { mergeScripts, workerRows, withLiveInventory, type CfScriptsDoc } from './discovery.ts';
 import {
-  NO_DRIFT,
   advanceRun,
   attemptsExhausted,
   completedDoc,
@@ -63,6 +62,8 @@ import {
   newDriftRun,
   runComplete,
   runTooLarge,
+  storedDrift,
+  storedRun,
   totalFindings,
   type DriftDoc,
   type DriftRunDoc,
@@ -565,8 +566,8 @@ export class HomeState extends DurableObject<Env> {
    */
   private async runDrift(now: number): Promise<{ outcome: string; calls: number }> {
     const configured = analyticsConfigured(this.env);
-    let doc = this.doc<DriftDoc>('drift') ?? NO_DRIFT;
-    let plan = driftPlan(now, this.doc<DriftRunDoc>('drift_run'), doc, configured);
+    let doc = storedDrift(this.doc<DriftDoc>('drift'));
+    let plan = driftPlan(now, storedRun(this.doc<DriftRunDoc>('drift_run')), doc, configured);
     if (plan.kind === 'abandon') {
       // A run of an earlier day did not finish: that day failed.
       doc = failedDoc(doc, plan.run, { code: 'incomplete', step: plan.run.account === null ? 'account' : 'script' }, now, true);
@@ -575,7 +576,7 @@ export class HomeState extends DurableObject<Env> {
       plan = driftPlan(now, null, doc, configured);
     }
     if (plan.kind !== 'start' && plan.kind !== 'continue') return { outcome: 'idle', calls: 0 };
-    const run = plan.kind === 'start' ? newDriftRun(now) : plan.run;
+    const run = plan.kind === 'start' ? newDriftRun(now, doc) : plan.run;
     const result = await advanceRun(run, (this.env.CF_ANALYTICS_TOKEN ?? '').trim(), this.env.ACCOUNT_ID, (url, init) => globalThis.fetch(url, init));
     if (result.run.account !== null && (run.account === null || runComplete(result.run))) {
       this.putDoc('cf_scripts', withLiveInventory(this.doc<CfScriptsDoc>('cf_scripts'), result.run.account.scripts, now), now);
@@ -726,7 +727,7 @@ export class HomeState extends DurableObject<Env> {
       latestFinished: this.latestFinished(),
       lastTickAt,
       apps: perApp((app) => this.statusDoc(app)),
-      drift: { configured: analyticsConfigured(this.env), doc: this.doc<DriftDoc>('drift') ?? NO_DRIFT },
+      drift: { configured: analyticsConfigured(this.env), doc: storedDrift(this.doc<DriftDoc>('drift')) },
     });
   }
   /** Builds raw facts, then applies Home's reminder disposition before the scheduled report. */
@@ -883,7 +884,7 @@ export class HomeState extends DurableObject<Env> {
     }
     if (condition.code === 'error_rate') return scriptsFresh;
     if (condition.code.startsWith('drift_') || condition.code === 'config_drift') {
-      const drift = this.doc<DriftDoc>('drift') ?? NO_DRIFT;
+      const drift = storedDrift(this.doc<DriftDoc>('drift'));
       const fresh = drift.checked_at !== null && now - drift.checked_at <= 48 * HOUR_MS && drift.last_error === null;
       return fresh && (condition.code === 'config_drift' ? totalFindings(drift.counts) === 0 : drift.consecutive_failed_days === 0);
     }
@@ -958,7 +959,7 @@ export class HomeState extends DurableObject<Env> {
             this.doc<UsageDoc>('usage') ?? NO_USAGE,
             this.doc<CfScriptsDoc>('cf_scripts'),
             this.guardView(now),
-            driftView(this.doc<DriftDoc>('drift') ?? NO_DRIFT, analyticsConfigured(this.env), now),
+            driftView(storedDrift(this.doc<DriftDoc>('drift')), analyticsConfigured(this.env), now),
           );
         case 'ops': {
           const digest = this.doc<DigestDoc>('digest') ?? NO_DIGEST;

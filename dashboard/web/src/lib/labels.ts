@@ -266,11 +266,31 @@ export const DRIFT_CATEGORY: Readonly<Record<DriftCategory, string>> = {
   bindings: '绑定与密钥',
   workers_dev: 'workers.dev / 预览',
   personal: '个人值未设为密钥',
+  account_changes: '非 CI 改动',
 }
 
+/** How an account change was authenticated (the audit log's actor.context). */
+const CHANGE_VIA: Readonly<Record<string, string>> = {
+  dash: '控制台',
+  oauth: 'wrangler 登录',
+  api_key: 'Global API Key',
+  api: 'API',
+  origin_ca_key: 'Origin CA Key',
+}
+
+const CHANGE_ACTION: Readonly<Record<string, string>> = { create: '新建', update: '修改', delete: '删除' }
+
 /** What differs, in words: names and types only, never a value. */
-export function driftFindingText(finding: Pick<DriftFinding, 'category' | 'kind' | 'expected' | 'actual'>): string {
+export function driftFindingText(finding: Pick<DriftFinding, 'category' | 'script' | 'kind' | 'expected' | 'actual'>): string {
   if (finding.category === 'personal') return `应为密钥（secret_text），线上为 ${finding.actual ?? '?'}`
+  if (finding.category === 'account_changes') {
+    // actual is `create 1, delete 5`.
+    const actions = (finding.actual ?? '').split(', ').map((part) => {
+      const [action = '', count = '?'] = part.split(' ')
+      return `${CHANGE_ACTION[action] ?? action} ${count} 次`
+    })
+    return `经${CHANGE_VIA[finding.script] ?? finding.script}：${actions.join('、')}，不是 CI 做的`
+  }
   if (finding.kind === 'missing') return finding.expected ? `代码中有（${finding.expected}），线上没有` : '代码中有，线上没有'
   if (finding.kind === 'extra') return finding.actual ? `线上有（${finding.actual}），代码中没有` : '线上有，代码中没有'
   return `代码为 ${finding.expected ?? '?'}，线上为 ${finding.actual ?? '?'}`

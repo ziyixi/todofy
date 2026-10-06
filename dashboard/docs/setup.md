@@ -82,9 +82,11 @@ two read-only purposes (both URLs are constants, not configuration):
 - the usage query: `POST .../graphql` (`worker/src/usage.ts`), at most once per tick and once per
   minute on an owner refresh;
 - the daily configuration drift check (`worker/src/drift.ts`, [`design-v2.md`](design-v2.md) §10):
-  `GET` on the account's Worker scripts and Custom Domains, the zone's Worker routes, and each Worker's
-  schedules, settings and subdomain flags, at most 12 calls per tick on about three ticks a day. Only
-  binding names and types are kept from the settings; values are dropped while parsing.
+  `GET` on the account's Worker scripts, Custom Domains and audit log (writes since the previous check
+  not made with an API token), the zone's Worker routes, and each Worker's schedules, settings and
+  subdomain flags, at most 12 calls per tick on about four ticks a day. Only binding names and types are
+  kept from the settings, and only the way in, resource and action from the audit log; values, addresses
+  and ids are dropped while parsing.
 
 It is never logged, stored, echoed to the page or sent anywhere else, and unit tests check that it
 appears only in the authorization header of those requests.
@@ -100,8 +102,9 @@ analytics:
 1. Cloudflare dashboard → My Profile → API Tokens → Create Token → Custom token.
 2. Permissions: **Account → Account Analytics → Read** (the permission the GraphQL API needs for
    account-level datasets, [docs](https://developers.cloudflare.com/analytics/graphql-api/getting-started/authentication/api-token-auth/)),
-   **Account → Workers Scripts → Read** and **Zone → Workers Routes → Read** (this zone only) for the
-   drift check. Nothing else: no Edit permission.
+   **Account → Workers Scripts → Read**, **Account → Account Settings → Read** (the audit log) and
+   **Zone → Workers Routes → Read** (this zone only) for the drift check. Nothing else: no Edit
+   permission.
 3. Account resources: include only this account. Optionally restrict client IPs (not practical for
    Workers egress) and set an expiry you will remember to renew.
 4. Save the token value directly into the GitHub secret `DASHBOARD_CF_ANALYTICS_TOKEN` (production
@@ -114,8 +117,9 @@ analytics:
 7. Only then stop using the broader token for this purpose. Do not revoke it if it is still used
    elsewhere (for example as a deploy token).
 
-If the token lacks a drift permission, 配置漂移 shows 检查失败 and the digest reports
-`drift_unavailable` after two failed days; usage is unaffected. If the token fails (revoked, expired,
+If the token lacks a Workers permission, 配置漂移 shows 检查失败 and the digest reports
+`drift_unavailable` after two failed days; usage is unaffected. Without Account Settings Read only the
+changes outside CI go unchecked, and the panel says so. If the token fails (revoked, expired,
 wrong permission), the page and the digest show `usage_unavailable` after 2 h; the guard then never enters `shed` on its own (no fresh usage means no
 automatic shed) and an automatic shed already in place lapses at its `until`. Rotation is the same
 procedure with a new token.
