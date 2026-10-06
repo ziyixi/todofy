@@ -4,6 +4,8 @@ Fleet 保存 VPS 的有界状态报告，显示 k3s、系统 daemon、Newsletter
 它没有 SSH、远程命令或 Kubernetes 修改权限。Newsletter 仍是独立 VPS 服务。
 
 Newsletter 的未确认数量是六类记录的合计，可能包含历史运行中断及重叠计数，不能当作失败邮件数。
+只有投递、采编和 Notion 写入的未确认记录，以及每日投递逾期（最近接管超过 28 小时或结果未确认超过 2.5 小时），
+才作为警告交给 Home；其余计数只作提示。阈值依据 07:00（洛杉矶）每日任务及夏令时，见 `worker/src/health.ts`。
 Fleet 保留只读；提醒的关闭与恢复在 Home 管理。导航地址由本应用 `wrangler.toml` 的公开 `HOME_URL` 声明，
 UI 构建时读取；迁移 Home 域名时同步更新这一项，不从观察报告或另一应用的配置推断地址。
 

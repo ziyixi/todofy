@@ -657,3 +657,15 @@ Fleet counters: `heartbeat_age_seconds`, optional `disk_used_percent`, `memory_u
 Newsletter counters: `heartbeat_age_seconds`, optional `queued_count`, `inflight_count`,
 `unknown_count`. Only fresh metadata is projected. `last_backup_at` stays null: no backup is
 inferred from a healthy heartbeat.
+
+## Newsletter outcome signals (2026-10-05, additive)
+
+Newsletter warnings mean the owner has to act. `newsletter_unknown` keeps its metrics and the
+`unknown_<kind>` counters but is info. Records that may hide a real email, packet or Notion write
+(`delivery`, `packets`, `notion_entities`, `notion_versions`; every record for an unclassified legacy
+report) raise `newsletter_side_effect_unknown` with `count`; interrupted activities and workflow
+attempts alone never warn. Neither marks Newsletter degraded. `newsletter_delivery_overdue` (`since`
+= the latest delivery time) covers the daily 07:00 America/Los_Angeles send: no delivery evidence,
+the latest accepted delivery older than 28 h (24 h, 1 h DST, the 2 h 05 min job deadline and a
+margin), or the latest still unknown after 2.5 h. A latest rejection raises only
+`newsletter_delivery_rejected`. The host report proto and `fleet-report-v1` bytes are unchanged.
