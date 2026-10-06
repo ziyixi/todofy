@@ -29,6 +29,10 @@ def now() -> str:
     return datetime.datetime.now(datetime.UTC).isoformat()
 
 
+# Versioned name of a one-time data migration, recorded in metadata.
+_SETTLED_ATTEMPTS_MIGRATION = "migration:settle_read_only_attempts:v1"
+
+
 class Store:
     """Own packet, edition, and send receipts in a mode-bound SQLite database.
 
@@ -145,8 +149,44 @@ class Store:
             self.db.execute(
                 "INSERT OR IGNORE INTO metadata VALUES ('mode', ?)", (mode,)
             )
+            self._settle_read_only_attempts()
         self.mode = mode
         self.deployment = drain.DeploymentDrain(self)
+
+    def _settle_read_only_attempts(self) -> None:
+        """Mark old timed-out or interrupted node attempts as failed, once.
+
+        Earlier releases stored these as 'unknown', which the monitor reports
+        as records awaiting reconciliation. Workflow nodes are read-only:
+        Codex runs with a read-only sandbox and no approvals, while delivery
+        and Notion keep their own ledgers. Such an attempt has nothing left to
+        reconcile, so it is a known failure. The error code, run receipts and
+        every other ledger stay untouched. The named metadata marker makes
+        this run exactly once, so an unknown recorded by a later release is
+        never rewritten by a restart. The caller owns the transaction.
+        """
+        if self.db.execute(
+            "SELECT 1 FROM metadata WHERE key=?",
+            (_SETTLED_ATTEMPTS_MIGRATION,),
+        ).fetchone():
+            return
+        changed = 0
+        if self.db.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' "
+            "AND name='workflow_attempts'"
+        ).fetchone():
+            changed = self.db.execute(
+                "UPDATE workflow_attempts SET state='failed' "
+                "WHERE state='unknown' "
+                "AND error_code IN ('timeout','interrupted')"
+            ).rowcount
+        self.db.execute(
+            "INSERT INTO metadata VALUES (?, ?)",
+            (
+                _SETTLED_ATTEMPTS_MIGRATION,
+                json.dumps({"applied_at": now(), "changed": changed}),
+            ),
+        )
 
     @contextlib.contextmanager
     def transaction(self) -> Iterator[None]:
