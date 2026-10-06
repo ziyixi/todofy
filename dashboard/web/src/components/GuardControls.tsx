@@ -48,6 +48,7 @@ export function GuardControls({ reg, guard, now }: { reg: Reg; guard: GuardView;
         {guardedEntries(reg, guard).map((app) => {
           const view = guard.apps[app]
           if (!view) return null
+          // A view from before 2026-10-04 has no per-app target (guard.proto): show the automatic one.
           const desired = view.desired ?? guard.desired
           return (
             <li key={app} className="action">

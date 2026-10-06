@@ -92,7 +92,7 @@ Times are epoch milliseconds.
 --   usage       {fetched_at, day, month, rows[], unclassified_r2_operations, last_error, last_error_at,
 --                consecutive_failures, last_attempt_at}
 --   guard       {level, reason, until, entered_day, entered_at}        -- the auto decision (§5.3)
---   guard_override {level, until, set_at}
+--   guard_override:<app> {level, until, set_at}  (one per guarded app since 2026-10-04)
 --   digest      {last_key, last_sent_at, last_generated_at, last_receipt, last_error, items[]}
 --   meta        {last_tick_at, last_tick_scheduled, last_refresh_at}
 CREATE TABLE IF NOT EXISTS state (
@@ -228,12 +228,12 @@ does not shed ([`limits.md`](limits.md) §1).
 
 Desired state, evaluated each tick in this order:
 
-1. **Owner override** (§6 `POST /api/v1/guard`) while `now < override.until`:
+1. **Owner override** (OverrideGuard; one app per request since 2026-10-04, the state document
+   `guard_override:<app>`) while `now < override.until`, for that app only:
    `shed` → `{level: 'shed', reason: 'owner_shed', until: override.until}` (until = set time + 24 h);
-   `normal` → `{level: 'normal', reason: 'owner_clear'}`, which suppresses the automatic shed until the
-   next UTC midnight (the override's `until`). While a `normal` override is in force the automatic
-   decision is held at normal (setting it also resets an automatic shed), so a cleared episode cannot
-   come back through the old shed's own `until` when the override ends. An expired override is deleted.
+   `normal` → `{level: 'normal', reason: 'owner_clear'}`, which suppresses the automatic shed for the app
+   until the next UTC midnight (the override's `until`). The automatic decision keeps running for the
+   other apps and applies again once the override ends; an expired override is ignored.
 2. **Usable usage**: fresh usage (fetched for the tick's UTC day, ≤ 90 min old) with all trigger
    rows; or, right after midnight, a snapshot from the previous UTC day of the same month that is
    still ≤ 90 min old, with only its **monthly** rows (R2 operations do not reset at midnight, so a
