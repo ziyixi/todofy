@@ -222,7 +222,7 @@ export interface HttpClientOptions {
 type InitOf<D> = D extends DescMessage ? MessageInitShape<D> : never;
 type MessageOf<D> = D extends DescMessage ? MessageShape<D> : never;
 
-/** One method per rpc with an HTTP binding, named as protobuf-es names it (`rpc GetDeck` is `getDeck`). */
+/** One method per rpc with an HTTP binding, named as protobuf-es names it (`rpc GetWatch` is `getWatch`). */
 export type HttpClient<S extends GenServiceMethods> = {
   readonly [K in keyof S]: (request: InitOf<S[K]['input']>) => Promise<MessageOf<S[K]['output']>>;
 };

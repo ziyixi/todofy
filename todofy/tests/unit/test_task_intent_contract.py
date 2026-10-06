@@ -213,9 +213,9 @@ def _variant(change: str) -> Any:
         case "intent_id_65":
             doc["intent_id"] = "a" * 65
         case "intent_id_leading_dot":
-            doc["intent_id"] = ".deck"
+            doc["intent_id"] = ".digest"
         case "intent_id_trailing_newline":
-            doc["intent_id"] = "deck\n"
+            doc["intent_id"] = "digest\n"
         case "mode_separate":
             doc["mode"] = "separate"
         case "title_number":

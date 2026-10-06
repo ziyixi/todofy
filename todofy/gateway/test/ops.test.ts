@@ -156,7 +156,7 @@ describe('the task-intent-v1 methods of the Ops entrypoint (contracts/task-inten
 
   it('refuses input over 64 KiB or not JSON without waking the core', async () => {
     const { ops, core } = entrypoint(() => ({ ok: pendingNew }));
-    const item = { title: 'x'.repeat(300), url: 'https://arxiv.org/abs/2609.00001', description: 'y'.repeat(1000) };
+    const item = { title: 'x'.repeat(300), url: 'https://watch.ziyixi.science/watches/w2609-00001', description: 'y'.repeat(1000) };
     const items = Array.from({ length: 60 }, (_, i) => ({ ...item, title: `${String(i)} ${item.title}` }));
     const big = { ...intent, items };
     expect(new TextEncoder().encode(JSON.stringify(big)).byteLength).toBeGreaterThan(65536);

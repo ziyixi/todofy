@@ -541,7 +541,7 @@ recommendation-v1, mail-received-v1 and every app's UI API follow the same patte
   dependency (D1, a Durable Object, the identity provider's keys) is `UNAVAILABLE`, which a client may repeat
   with the same `request_id`: the app wraps exactly those calls. Anything else unexpected is a bug,
   `INTERNAL` (the transcoder's default), which a client never repeats by itself.
-- Paths under `/api/v1/` (`/api/v1/{name=decks/*}:decide`; `/api/v2/` for a v2 package): `/api` stays the prefix
+- Paths under `/api/v1/` (`/api/v1/{name=watches/*}:pause`; `/api/v2/` for a v2 package): `/api` stays the prefix
   that separates an app's API from its static UI on the one host, and the version is in the path. An app's other HTTP surface (the
   CSRF token at `GET /api/csrf`, `/health`) is transport and stays outside the service. An app whose host
   root belongs to something else keeps everything of its own under one reserved segment instead: the links app's
@@ -566,8 +566,8 @@ recommendation-v1, mail-received-v1 and every app's UI API follow the same patte
   `RolloverFlowRequest.all_unfinished`).
 - `page_size` (AIP-158): 0 is the default, a value above the maximum is read as the maximum, a negative one is
   `INVALID_ARGUMENT`; every repeated field of a page counts against its bound, not only the main one.
-- Resource IDs have no `/` (AIP-122). An ID whose natural key has one (an old-style arXiv ID,
-  `hep-th/9901001`) writes it as `~` (`likedPapers/hep-th~9901001`), and a Create's `<resource>_id` takes
+- Resource IDs have no `/` (AIP-122). An ID whose natural key has one (`team/item`) writes it as `~`
+  (`items/team~item`), and a Create's `<resource>_id` takes
   exactly that form (AIP-133: the answer's name is `<collection>/<the given id>`); an ID with `/` (also sent
   as `%2F`) is `INVALID_ARGUMENT`.
 - Create answers the resource; a Delete of a resource that does not exist is `NOT_FOUND` (AIP-135), whatever
@@ -633,7 +633,7 @@ unsupported binding (`custom`, `response_body`, a body on GET or DELETE, a non-m
 Worker's startup, which is its deploy, instead of a request.
 
 **The client** (`ts/http-client.ts`, `createHttpClient(Service, send)`): one typed method per rpc
-(`client.getDeck({ name: 'decks/2026-09-30' })` resolves to a `Deck`), laid out by the rpc's primary binding;
+(`client.getWatch({ name: 'watches/w1' })` resolves to a `Watch`), laid out by the rpc's primary binding;
 `send` is the app's transport (credentials, CSRF header, retries). A request it cannot lay out throws
 `HttpEncodeError` before anything is sent: a path value that does not fit its template, or that has a `.` or
 `..` segment (fetch would resolve it to another path, which the server cannot see), and a value the profile

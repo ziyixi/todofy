@@ -308,8 +308,8 @@ export const VIEW_BODY_MAX = 64 * 1024;
 export const VIEW_BODY_BUDGET = {
   registry: 15 * 1024,
   home: 10 * 1024,
-  // Six flows since the GTD loop and Paper Radar (2026-09-30): 16.1 KB on the mockup day, 17.4 KB in the
-  // workerd suite's full canary history with 20 Workers.
+  // Six flows: 16.1 KB on the mockup day (2026-09-30), 17.4 KB in the workerd suite's full canary history with 20
+  // Workers.
   flows: 20 * 1024,
   // Current REST inventory plus separate bounded historical Analytics rows.
   cloudflare: 24 * 1024,

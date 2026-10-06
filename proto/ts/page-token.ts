@@ -1,7 +1,7 @@
 /**
  * AIP-158 page tokens for list methods: opaque to the client, and bound to the list's other parameters.
  *
- *   const token = encodePageToken({ at: 1700000000000, id: 'arxiv:2609.1' }, { filter });
+ *   const token = encodePageToken({ at: 1700000000000, id: 'w-2609' }, { filter });
  *   const cursor = decodePageToken(request.pageToken, { filter }); // PageTokenError: answer INVALID_ARGUMENT
  *
  * A token is base64url (no padding) of the JSON `{"v": 1, "c": <cursor>, "p": <fingerprint>}`: the app's

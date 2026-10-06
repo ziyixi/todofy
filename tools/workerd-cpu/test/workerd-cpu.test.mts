@@ -83,14 +83,14 @@ test('reference milliseconds divide every number by the scale of the isolate tha
 
 test("the median across isolates is each number's, label by label, over the isolates that measured it", () => {
   const medians = medianAcross([
-    [{ label: 'cold', first: 5, median: 5, best: 5 }, { label: 'deck', first: 2, median: 1, best: 0.5 }],
-    [{ label: 'cold', first: 9, median: 9, best: 9 }, { label: 'deck', first: 1, median: 1.2, best: 0.4 }],
-    [{ label: 'cold', first: 4, median: 4, best: 4 }, { label: 'deck', first: 3, median: 0.8, best: 0 }, { label: 'once', first: 7, median: 6, best: 5 }],
+    [{ label: 'cold', first: 5, median: 5, best: 5 }, { label: 'list', first: 2, median: 1, best: 0.5 }],
+    [{ label: 'cold', first: 9, median: 9, best: 9 }, { label: 'list', first: 1, median: 1.2, best: 0.4 }],
+    [{ label: 'cold', first: 4, median: 4, best: 4 }, { label: 'list', first: 3, median: 0.8, best: 0 }, { label: 'once', first: 7, median: 6, best: 5 }],
   ]);
   // One isolate's outlier (9) does not decide the cold number; a label measured once is that isolate's numbers.
   assert.deepEqual([...medians.values()], [
     { label: 'cold', first: 5, median: 5, best: 5 },
-    { label: 'deck', first: 2, median: 1, best: 0.4 },
+    { label: 'list', first: 2, median: 1, best: 0.4 },
     { label: 'once', first: 7, median: 6, best: 5 },
   ]);
   assert.throws(() => medianAcross([[{ label: 'a', first: 1, median: 1, best: 1 }, { label: 'a', first: 2, median: 2, best: 2 }]]), /measured twice/);

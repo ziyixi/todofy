@@ -19,7 +19,7 @@
  *
  * - A verb is split off the last segment at its last unencoded `:`. A template with a verb matches only a
  *   path with that verb, and a template without one only a path whose last segment has no unencoded `:`
- *   (a client encodes `:` inside a variable), so `decks/x:send` never reads as a deck named `x:send`.
+ *   (a client encodes `:` inside a variable), so `watches/x:pause` never reads as a watch named `x:pause`.
  * - Literals and segments compare as sent (no decoding); an empty segment (`//`, a trailing `/`) matches
  *   nothing; so one path has one spelling.
  * - When several templates match, the one with a literal at the first position where they differ wins

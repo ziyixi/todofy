@@ -41,14 +41,14 @@ describe('specificity', () => {
   });
 
   test('templates that match the same paths have the same shape whatever their variables', () => {
-    expect(sameShape(parseTemplate('/v1/{name=decks/*}'), parseTemplate('/v1/decks/{deck}'))).toBe(true);
-    expect(sameShape(parseTemplate('/v1/{name=decks/*}'), parseTemplate('/v1/{name=decks/*}:send'))).toBe(false);
+    expect(sameShape(parseTemplate('/v1/{name=watches/*}'), parseTemplate('/v1/watches/{watch}'))).toBe(true);
+    expect(sameShape(parseTemplate('/v1/{name=watches/*}'), parseTemplate('/v1/{name=watches/*}:send'))).toBe(false);
   });
 });
 
 describe('expand, then match', () => {
   test.each([
-    ['/v1/{name=decks/*}:decide', 'name', 'decks/2026-09-30'],
+    ['/v1/{name=watches/*}:pause', 'name', 'watches/w1'],
     ['/v1/{name=files/**}', 'name', 'files/a/b c/ü.txt'],
     ['/v1/shelves/{shelf}', 'shelf', 'a/b:c d%e'],
   ])('%s round-trips %s', (source, field, value) => {
@@ -64,20 +64,20 @@ describe('expand, then match', () => {
   });
 
   test('a value that would reach another route is refused', () => {
-    const template = parseTemplate('/v1/{name=decks/*}');
-    for (const value of ['decks', 'decks/a/b', 'seeds/a', 'decks/', '']) {
+    const template = parseTemplate('/v1/{name=watches/*}');
+    for (const value of ['watches', 'watches/a/b', 'feeds/a', 'watches/', '']) {
       expect(() => expandTemplate(template, new Map([['name', value]]))).toThrow(PathTemplateError);
     }
   });
 
   test('a dot segment is refused: fetch would remove or resolve it and send another path', () => {
-    // new URL('/api/v1/decks/../summary', base) is /api/v1/summary: the request would reach another route.
-    expect(new URL('/api/v1/decks/../summary', 'https://a.example.com').pathname).toBe('/api/v1/summary');
+    // new URL('/api/v1/watches/../summary', base) is /api/v1/summary: the request would reach another route.
+    expect(new URL('/api/v1/watches/../summary', 'https://a.example.com').pathname).toBe('/api/v1/summary');
     const cases: [string, string][] = [
-      ['/api/v1/{name=decks/*}', 'decks/..'],
-      ['/api/v1/{name=decks/*}', 'decks/.'],
-      ['/api/v1/{name=decks/*/summary}', 'decks/../summary'],
-      ['/api/v1/{name=likedPapers/*}', 'likedPapers/..'],
+      ['/api/v1/{name=watches/*}', 'watches/..'],
+      ['/api/v1/{name=watches/*}', 'watches/.'],
+      ['/api/v1/{name=watches/*/summary}', 'watches/../summary'],
+      ['/api/v1/{name=changes/*}', 'changes/..'],
       ['/v1/{parent=shelves/*}/books', 'shelves/..'],
       ['/v1/{name=files/**}', 'files/a/../b'],
       ['/v1/{id}', '..'],

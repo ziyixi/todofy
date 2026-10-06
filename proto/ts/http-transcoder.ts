@@ -110,7 +110,7 @@ export class PreEncoded {
 }
 
 /**
- * One typed handler per rpc, keyed as protobuf-es names the methods (`rpc GetDeck` is `getDeck`); it answers the
+ * One typed handler per rpc, keyed as protobuf-es names the methods (`rpc GetWatch` is `getWatch`); it answers the
  * output message, or a PreEncoded answer.
  */
 export type ServiceHandlers<S extends GenServiceMethods, C> = {

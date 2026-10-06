@@ -60,7 +60,7 @@ def test_the_canonical_form_is_schema_order_compact_and_pinned():
 # replay must hash the same, so a pin changes only with its fixture's content (the four generic fixtures were
 # re-sourced to the watch app on 2026-10-05), never with the code.
 PINNED = {
-    "max-items.json": "37d5b5ab722c3ad2a70fc9caa8a8a39c6369b0268e6612571cac516a2eda2f67",
+    "max-items.json": "e94e131237758c132559d60515dd3c161d8f451c24b0c4da5a53ecacc4bdb485",
     "minimal.json": "701ed055316779c3554983d71f1425385ba0cdfb48bb781fd75e8cd77388d313",
     "separate-2.json": "4a08134bf5ba5c360ee0c823f798c8dbbe432985c8ecb6b4785ceba489ee942d",
     "subtasks-3.json": "d5bf27df8b4ae830b7059eb981ed730807431d4eb409e823e8634d223e3b5feb",

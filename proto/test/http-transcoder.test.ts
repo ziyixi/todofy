@@ -51,18 +51,18 @@ describe('the app hooks', () => {
     const archiveBook = (request: ArchiveBookRequest, context: { user: string }) => {
       expect(context.user).toBe('u');
       expect(request.requestId).toBe(UUID);
-      return Promise.reject(new RpcError(Code.ABORTED, 'DECK_CHANGED', 'changed', { details: [errorDetail(BookSchema, create(BookSchema, { title: 'now' }))] }));
+      return Promise.reject(new RpcError(Code.ABORTED, 'WATCH_CHANGED', 'changed', { details: [errorDetail(BookSchema, create(BookSchema, { title: 'now' }))] }));
     };
     const api = new HttpTranscoder(BookService, handlers({ archiveBook }), {
       domain: 'a.example.com',
       maxBodyBytes: 1024,
       authorize: () => undefined,
-      localize: (reason) => (reason === 'DECK_CHANGED' ? { locale: 'zh-CN', message: '已改动' } : undefined),
+      localize: (reason) => (reason === 'WATCH_CHANGED' ? { locale: 'zh-CN', message: '已改动' } : undefined),
     });
     const result = await api.handle(post(JSON.stringify({ request_id: UUID.toUpperCase() })), { user: 'u' }, 'r9');
     expect(result?.response.status).toBe(409);
     const status = parseStatus(409, await result?.response.json());
-    expect(status).toMatchObject({ reason: 'DECK_CHANGED', requestId: 'r9', localizedMessage: { locale: 'zh-CN', message: '已改动' } });
+    expect(status).toMatchObject({ reason: 'WATCH_CHANGED', requestId: 'r9', localizedMessage: { locale: 'zh-CN', message: '已改动' } });
     expect(status && readDetail(status, BookSchema)?.title).toBe('now');
   });
 
