@@ -326,11 +326,12 @@ URL source.
 `state` docs `cf_scripts` (≤ 100 records, under 40 KB; the row cap is 64 KiB), `probe:<entry>`
 (`checked_at`, `ok`, `http_status`, `latency_ms`, `error`, `consecutive_failures`; a probe document of
 an entry no longer probed is deleted by the tick), `usage.resources` (per-resource rows), and `meta.rev`,
-`meta.last_refresh_home_at`, `meta.last_refresh_cloudflare_at`. `canary_runs` gains `canary_id TEXT NOT
-NULL DEFAULT 'mail-todofy'` (one `ALTER TABLE` when `pragma_table_info` lacks it; existing rows are
-mail-todofy) and the partial index `canary_runs_active`. No other table changes; `guard_applied` keeps
-its CHECK while the ops-v1 apps are the two. Everything is additive: a rollback to the previous build
-ignores the new documents and column (the workerd suite migrates a pre-v2 `canary_runs` table).
+`meta.last_refresh_home_at`, `meta.last_refresh_cloudflare_at`. `canary_runs` gains the partial index
+`canary_runs_active`. Stores created before 2026-10-05 also have an unused `canary_runs.canary_id`
+column (v2 added it; nothing reads it, and new stores no longer create it). `guard_applied` has no CHECK
+on `app` since 2026-10-05 (a store with the old CHECK is rebuilt once, rows kept), so a new ops-v1 app
+needs no table change. Everything is additive: a rollback to the previous build ignores the new
+documents and restores its own CHECK.
 
 ## 7. UI
 

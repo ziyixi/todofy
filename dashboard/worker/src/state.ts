@@ -94,21 +94,19 @@ export const GUARD_APPS: readonly OpsApp[] = OPS_APPS.filter((app) => {
   return status?.type === 'ops_v1' && status.guard;
 });
 
-/** guard_applied's CHECK: exactly the ops-v1 apps this dashboard calls (OPS_APPS). */
-const GUARD_APPS_CHECK = `CHECK (app IN (${OPS_APPS.map((app) => `'${app}'`).join(', ')}))`;
-
 /**
- * guard_applied's CHECK lists the apps; SQLite cannot alter a CHECK, so a store created before an app joined ops-v1
- * (Lab on 2026-09-30, the watch app on 2026-10-01) is rebuilt once, rows kept: new table, copy, drop, rename, in one
- * transaction.
+ * Until 2026-10-05 guard_applied had a CHECK listing the ops-v1 apps, and SQLite cannot alter a CHECK, so every new
+ * app meant a rebuild. Only OpsApp values are ever written (typed here), so the CHECK went; a store that still has it
+ * is rebuilt once more without it, rows kept: new table, copy, drop, rename, in one transaction.
+ * Remove after 2026-11-01, when every deployed store has run it (the first start of any later release does).
  */
 export function migrateGuardApplied(storage: DurableObjectStorage): void {
   const sql = storage.sql.exec<{ sql: string }>("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'guard_applied'").toArray()[0]?.sql ?? '';
-  if (sql === '' || sql.includes(GUARD_APPS_CHECK)) return;
+  if (!sql.includes('CHECK')) return;
   storage.transactionSync(() => {
     storage.sql.exec(
       `CREATE TABLE guard_applied_v2 (
-        app TEXT PRIMARY KEY ${GUARD_APPS_CHECK},
+        app TEXT PRIMARY KEY,
         input TEXT,
         state TEXT,
         last_call_at INTEGER,
@@ -152,7 +150,7 @@ const SCHEMA = [
     updated_at INTEGER NOT NULL
   )`,
   `CREATE TABLE IF NOT EXISTS guard_applied (
-    app TEXT PRIMARY KEY ${GUARD_APPS_CHECK},
+    app TEXT PRIMARY KEY,
     input TEXT,
     state TEXT,
     last_call_at INTEGER,
@@ -258,15 +256,7 @@ export class HomeState extends DurableObject<Env> {
     this.attentionState = new AttentionState(ctx.storage, <T extends Record<string, SqlStorageValue>>(query: string, ...bindings: SqlStorageValue[]) => this.rows<T>(query, ...bindings));
     void ctx.blockConcurrencyWhile(() => {
       for (const statement of SCHEMA) ctx.storage.sql.exec(statement);
-      // v2 (design-v2.md §6): runs belong to a canary of the registry; existing rows are mail-todofy.
-      const columns = ctx.storage.sql.exec<{ name: string }>("SELECT name FROM pragma_table_info('canary_runs')").toArray();
-      if (!columns.some((column) => column.name === 'canary_id')) {
-        ctx.storage.sql.exec("ALTER TABLE canary_runs ADD COLUMN canary_id TEXT NOT NULL DEFAULT 'mail-todofy'");
-      }
       migrateGuardApplied(ctx.storage);
-      const scripts = this.doc<CfScriptsDoc>('cf_scripts');
-      const drift = this.doc<DriftDoc>('drift');
-      if (scripts && scripts.live === undefined && drift?.last_run_day) this.putDoc('drift', { ...drift, last_run_day: null }, Date.now());
       // The one global override of releases before 2026-10-04 becomes each guarded app's own. Kept because
       // production DO state cannot be read to prove no such document is left; nothing writes one any more.
       const legacy = this.doc<GuardOverrideDoc>('guard_override');
@@ -477,8 +467,6 @@ export class HomeState extends DurableObject<Env> {
       this.projectAttention(now);
       const item = this.attentionState.change(name, etag, dismiss, now);
       if (item === null) return Promise.resolve({ ok: false, code: 'attention_changed' });
-      // Publish only from the next normal scheduled digest, never from an owner action.
-      this.putDoc('attention_report_pending', { at: now }, now);
       this.bumpRev(now);
       this.remember(requestId, method, item, now, inputKey);
       return Promise.resolve({ ok: true, item });
@@ -732,9 +720,7 @@ export class HomeState extends DurableObject<Env> {
         ? { ...doc, last_key: key, last_sent_at: now, last_generated_at: now, last_receipt: result.value, last_error: null, last_attempt_at: now }
         : { ...doc, last_error: result.code, last_attempt_at: now };
       sent = result.ok ? 'sent' : result.code;
-      if (result.ok) this.deleteDoc('attention_report_pending');
     }
-    if (send && key === previous.last_key) this.deleteDoc('attention_report_pending');
     this.putDoc('digest', doc, now);
     return { sent, items: items.length };
   }

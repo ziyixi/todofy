@@ -12,7 +12,7 @@ import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { QUOTA_RESOURCES } from '../../src/idl.ts';
 import { type HomeView, type OpsView } from '../../src/api-types.ts';
 import { accessClaims, testIssuer, type TestIssuer } from '../jwt.ts';
-import { d1Reads, expectValid, latest, NOW, PATHS, startFlows, SYNTHETIC_BINDINGS, type FlowHarness } from './flows.ts';
+import { d1Reads, expectValid, NOW, PATHS, startFlows, SYNTHETIC_BINDINGS, type FlowHarness } from './flows.ts';
 
 const ISSUER = SYNTHETIC_BINDINGS.ACCESS_ISSUER ?? '';
 const AUDIENCE = SYNTHETIC_BINDINGS.ACCESS_AUDIENCE ?? '';
@@ -203,51 +203,7 @@ describe('ticks and storage bounds', () => {
     expect(ids).toContain(`canary-${day(2)}`);
   });
 
-  it('adds canary_id to a pre-v2 canary_runs table and keeps its runs as mail-todofy', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'home-dashboard-migration-'));
-    try {
-      h = await startFlows({ persist: dir });
-      await h.tick('2026-09-29T16:00:00Z');
-      await h.tick('2026-09-29T16:30:00Z');
-      await h.dispose();
-      h = undefined;
-      // The storage of the previous release: canary_runs without the column.
-      const files = (await readdir(dir, { recursive: true })).filter((name) => name.endsWith('.sqlite'));
-      const columns = (db: DatabaseSync) => (db.prepare("SELECT name FROM pragma_table_info('canary_runs')").all() as { name: string }[]).map((row) => row.name);
-      let tables = 0;
-      for (const file of files) {
-        const db = new DatabaseSync(join(dir, file));
-        if (columns(db).includes('canary_id')) {
-          db.exec('ALTER TABLE canary_runs DROP COLUMN canary_id');
-          expect(columns(db)).not.toContain('canary_id');
-          tables++;
-        }
-        db.close();
-      }
-      expect(tables).toBe(1);
-
-      h = await startFlows({ persist: dir });
-      expect(latest(await h.snapshot())).toMatchObject({ run_id: 'canary-2026-09-29', outcome: 'ok' });
-      expect((await h.post(PATHS.canary, {})).status).toBe(200);
-      await h.dispose();
-      h = undefined;
-      let migrated = 0;
-      for (const file of files) {
-        const db = new DatabaseSync(join(dir, file));
-        if (columns(db).includes('canary_id')) {
-          migrated++;
-          const ids = db.prepare('SELECT DISTINCT canary_id FROM canary_runs').all() as { canary_id: string }[];
-          expect(ids).toEqual([{ canary_id: 'mail-todofy' }]);
-          expect((db.prepare('SELECT count(*) AS n FROM canary_runs').get() as { n: number }).n).toBe(2);
-        }
-        db.close();
-      }
-      expect(migrated).toBe(1);
-    } finally {
-      await rm(dir, { recursive: true, force: true });
-    }
-  });
-  it('rebuilds a guard_applied table from before Lab and the watch app joined ops-v1 and keeps its rows', async () => {
+  it('rebuilds a guard_applied table that still has the app CHECK and keeps its rows', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'home-dashboard-guard-migration-'));
     const tableSql = (db: DatabaseSync) =>
       (db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'guard_applied'").get() as { sql: string } | undefined)?.sql ?? '';
@@ -256,7 +212,7 @@ describe('ticks and storage bounds', () => {
       await h.tick('2026-09-29T10:00:00Z');
       await h.dispose();
       h = undefined;
-      // The storage of the previous release: the CHECK knows two apps, and only their rows exist.
+      // The storage of a release before 2026-10-05: a CHECK that knows two apps, and only their rows.
       const files = (await readdir(dir, { recursive: true })).filter((name) => name.endsWith('.sqlite'));
       let rewritten = 0;
       for (const file of files) {
@@ -268,15 +224,14 @@ describe('ticks and storage bounds', () => {
             INSERT INTO guard_applied_old SELECT * FROM guard_applied WHERE app IN ('mail-hero', 'todofy');
             DROP TABLE guard_applied;
             ALTER TABLE guard_applied_old RENAME TO guard_applied;`);
-          expect(tableSql(db)).not.toContain("'lab'");
-          expect(tableSql(db)).not.toContain("'watch'");
+          expect(tableSql(db)).toContain('CHECK');
           rewritten++;
         }
         db.close();
       }
       expect(rewritten).toBe(1);
 
-      // The new release opens it, rebuilds the CHECK, and can record Lab's and the watch app's guard calls.
+      // The new release opens it, drops the CHECK, and can record Lab's and the watch app's guard calls.
       h = await startFlows({ persist: dir, bindings: { CANARY_UTC_HOUR: '23' }, usage: d1Reads(90) });
       await h.tick('2026-09-29T10:30:00Z');
       const snap = await h.snapshot();
@@ -287,8 +242,7 @@ describe('ticks and storage bounds', () => {
       for (const file of files) {
         const db = new DatabaseSync(join(dir, file));
         if (tableSql(db) !== '') {
-          expect(tableSql(db)).toContain("'lab'");
-          expect(tableSql(db)).toContain("'watch'");
+          expect(tableSql(db)).not.toContain('CHECK');
           const rows = db.prepare('SELECT app, input FROM guard_applied ORDER BY app').all() as { app: string; input: string | null }[];
           expect(rows.map((row) => row.app)).toEqual(['lab', 'mail-hero', 'todofy', 'watch']);
           expect(rows.every((row) => row.input?.includes('quota_d1_rows_read') === true)).toBe(true);

@@ -102,7 +102,7 @@ CREATE TABLE IF NOT EXISTS state (
 );
 -- What the dashboard last asked each app for and got back.
 CREATE TABLE IF NOT EXISTS guard_applied (
-  app TEXT PRIMARY KEY CHECK (app IN ('mail-hero', 'todofy')),
+  app TEXT PRIMARY KEY,       -- an OpsApp; no CHECK since 2026-10-05 (design-v2.md §6)
   input TEXT,                 -- last SetGuardInput sent (JSON)
   state TEXT,                 -- GuardState of the last success (JSON)
   last_call_at INTEGER,
