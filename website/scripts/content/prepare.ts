@@ -240,6 +240,7 @@ function buildRoutes(
     { path: "/", expectedStatus: 200, kind: "page" },
     { path: "/blog", expectedStatus: 200, kind: "page" },
     { path: "/publications", expectedStatus: 200, kind: "page" },
+    { path: "/privacy/mailsort", expectedStatus: 200, kind: "page" },
     { path: "/feed.xml", expectedStatus: 200, kind: "feed" },
     { path: "/sitemap.xml", expectedStatus: 200, kind: "page" },
     { path: "/robots.txt", expectedStatus: 200, kind: "page" },

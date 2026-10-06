@@ -123,6 +123,7 @@ export function validateContentSnapshotWithOptions(
     "/",
     "/blog",
     "/publications",
+    "/privacy/mailsort",
     "/feed.xml",
     "/sitemap.xml",
     "/robots.txt",

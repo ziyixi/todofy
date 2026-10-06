@@ -240,9 +240,32 @@ test.describe("public site", () => {
     );
   });
 
+  test("the mailsort privacy policy is public, outside the navigation, and states Limited Use", async ({
+    page,
+  }) => {
+    const response = await page.goto("/privacy/mailsort");
+    expect(response?.status()).toBe(200);
+    await expect(
+      page.getByRole("heading", { level: 1, name: "mailsort privacy policy" }),
+    ).toBeVisible();
+    await expect(page.locator("main")).toContainText(
+      "mailsort's use and transfer of information received from Google APIs adheres to the Google API Services User Data Policy, including the Limited Use requirements.",
+    );
+    await expect(
+      page.getByRole("link", { name: "Google API Services User Data Policy" }),
+    ).toHaveAttribute("href", "https://developers.google.com/terms/api-services-user-data-policy");
+    await expect(
+      page.getByRole("link", { name: "https://myaccount.google.com/permissions" }),
+    ).toHaveAttribute("href", "https://myaccount.google.com/permissions");
+    await expect(page.locator("main time")).toHaveAttribute("datetime", "2026-10-06");
+    const navigation = page.getByRole("navigation", { name: "Primary" });
+    await expect(navigation.locator('a[href^="/privacy"]')).toHaveCount(0);
+    await expect(navigation.locator("a[aria-current]")).toHaveCount(0);
+  });
+
   test("rendered pages retain canonical and Open Graph metadata", async ({ page }) => {
     const origin = "https://www.ziyixi.science";
-    const sharedRoutes = ["/", "/blog", "/publications"];
+    const sharedRoutes = ["/", "/blog", "/publications", "/privacy/mailsort"];
 
     for (const route of sharedRoutes) {
       await page.goto(route);
@@ -305,7 +328,13 @@ test.describe("public site", () => {
   });
 
   test("trailing slashes redirect permanently and there are no soft 404s", async ({ request }) => {
-    for (const path of ["/blog", "/publications", "/feed.xml", "/sitemap.xml"]) {
+    for (const path of [
+      "/blog",
+      "/publications",
+      "/privacy/mailsort",
+      "/feed.xml",
+      "/sitemap.xml",
+    ]) {
       const response = await request.get(`${path}/?x=1`, { maxRedirects: 0 });
       expect(response.status(), `${path}/`).toBe(308);
       expect(new URL(response.headers().location!, "http://x").pathname).toBe(path);
@@ -344,7 +373,7 @@ test.describe("public site", () => {
   });
 
   test("core pages have no serious or critical axe findings", async ({ page }) => {
-    const paths = ["/", "/blog", "/publications"];
+    const paths = ["/", "/blog", "/publications", "/privacy/mailsort"];
     await page.goto("/blog");
     const articleLink = page.locator('main a[href^="/blog/"]').first();
     const articlePath =

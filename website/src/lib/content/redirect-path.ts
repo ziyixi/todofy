@@ -4,6 +4,7 @@ const FIXED_PUBLIC_ROUTES = new Set([
   "/",
   "/blog",
   "/publications",
+  "/privacy/mailsort",
   "/feed.xml",
   "/sitemap.xml",
   "/robots.txt",

@@ -50,6 +50,7 @@ describe("literal redirect sources", () => {
     "/",
     "/blog",
     "/publications",
+    "/privacy/mailsort",
     "/feed.xml",
     "/sitemap.xml",
     "/robots.txt",

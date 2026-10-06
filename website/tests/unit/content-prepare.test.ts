@@ -45,6 +45,12 @@ describe("prepared content bundle", () => {
       expectedStatus: 200,
       kind: "page",
     });
+    // The privacy policy named on mailsort's OAuth consent screen is in every release's route contract.
+    expect(manifest.routes).toContainEqual({
+      path: "/privacy/mailsort",
+      expectedStatus: 200,
+      kind: "page",
+    });
     await expect(readContentBundle(paths.outputDirectory)).resolves.toMatchObject({
       snapshot: { sourceMode: "empty", posts: [] },
       manifest: { complete: true },
