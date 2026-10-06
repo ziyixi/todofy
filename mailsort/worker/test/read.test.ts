@@ -18,6 +18,20 @@ describe('masking', () => {
     expect(mask('short 12345 stays', 100)).toBe('short 12345 stays');
   });
 
+  it('masks grouped, spaced and full-width numbers, and URLs without a scheme', () => {
+    expect(mask('Card 4111 1111 1111 1111 charged', 100)).toBe('Card [number] charged');
+    expect(mask('验证码 123 456 有效', 100)).toBe('验证码 [number] 有效');
+    expect(mask('账号 6222-0210-0101-2345', 100)).toBe('账号 [number]');
+    expect(mask('订单号１２３４５６７８９', 100)).toBe('订单号[number]');
+    expect(mask('IBAN DE89 3704 0044 0532 0130 00', 100)).toBe('IBAN DE[number]');
+    expect(mask('reset at bank.example.com/reset?token=abcdef now', 100)).toBe('reset at [link bank.example.com] now');
+    expect(mask('Is it alice@mail.example.com? Yes', 100)).toBe('Is it [email]? Yes');
+    // Short numbers, times and amounts stay: the model needs some of them.
+    expect(mask('第 42 期 10:30 共 12.50 元', 100)).toBe('第 42 期 10:30 共 12.50 元');
+    // Full-width punctuation is left as it is (only the digits are folded).
+    expect(mask('请在 10 分钟内输入，谢谢', 100)).toBe('请在 10 分钟内输入，谢谢');
+  });
+
   it('cuts by code points without splitting a pair', () => {
     expect(cut('😀😀😀', 2)).toBe('😀😀…');
     expect(cut('abc', 3)).toBe('abc');
@@ -29,6 +43,10 @@ describe('masking', () => {
     mask(hostile, BODY_CHARS);
     mask('1'.repeat(100_000), BODY_CHARS);
     mask(`https://${'x'.repeat(100_000)}`, BODY_CHARS);
+    mask('1 '.repeat(50_000), BODY_CHARS);
+    mask('a.'.repeat(50_000), BODY_CHARS);
+    mask(`${'ab.'.repeat(30_000)}/`, BODY_CHARS);
+    mask('１'.repeat(100_000), BODY_CHARS);
     expect(performance.now() - started).toBeLessThan(1000);
   });
 });
@@ -38,6 +56,19 @@ describe('addresses and lists', () => {
     expect(firstMailbox('"Weekly Digest" <Digest@News.Example.com>')).toEqual({ name: 'Weekly Digest', address: 'digest@news.example.com', domain: 'news.example.com' });
     expect(firstMailbox('bare@example.org')).toEqual({ name: '', address: 'bare@example.org', domain: 'example.org' });
     expect(firstMailbox('no address here')).toBeNull();
+  });
+
+  it('never takes the address from a quoted display name or a comment', () => {
+    expect(firstMailbox('"<boss@work.example.com>" <x@evil.example.net>')).toMatchObject({ address: 'x@evil.example.net', domain: 'evil.example.net' });
+    expect(firstMailbox('"Boss, <boss@work.example.com>" <x@evil.example.net>')).toMatchObject({ address: 'x@evil.example.net' });
+    expect(firstMailbox('(boss@work.example.com) x@evil.example.net')).toMatchObject({ address: 'x@evil.example.net' });
+    expect(firstMailbox('"a \\" <b@c.example.com>" <x@evil.example.net>')).toMatchObject({ address: 'x@evil.example.net' });
+    // The first mailbox of a list, its last angle address.
+    expect(firstMailbox('First <one@a.example.com>, Second <two@b.example.com>')).toMatchObject({ address: 'one@a.example.com', name: 'First' });
+    const started = performance.now();
+    firstMailbox(`"${'\\"'.repeat(5_000)}`);
+    firstMailbox('('.repeat(10_000));
+    expect(performance.now() - started).toBeLessThan(200);
   });
 
   it('reads a List-Id', () => {

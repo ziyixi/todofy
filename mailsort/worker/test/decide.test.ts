@@ -5,11 +5,13 @@
  */
 import { describe, expect, it } from 'vitest';
 import { wilsonLowerBound } from '../src/accuracy.ts';
-import { AiError, clefInput, cosine, cutTokens, estimateTokens, isQuotaError, readClefAnswer } from '../src/ai.ts';
+import { AiError, clefInput, cosine, criterion, cutTokens, estimateTokens, isQuotaError, readClefAnswer } from '../src/ai.ts';
 import { clefDecision, neighbourDecision, ruleDecision, type LabelFacts } from '../src/decide.ts';
 import { modeCeiling } from '../src/env.ts';
 import { gmailFilterXml } from '../src/filters.ts';
-import { CLEF, CLEF_FLASH, NONE } from '../src/limits.ts';
+import { CLEF, CLEF_FLASH, MAIL_ATTEMPTS_MAX, NONE, RETRY_MAX_MS } from '../src/limits.ts';
+import { clefState, retryDelay } from '../src/pipeline.ts';
+import { ruleValueOk } from '../src/rule-value.ts';
 import { effectiveMode } from '../src/settings.ts';
 import type { RuleRow } from '../src/store.ts';
 import { embedText, FakeAi, QUOTA_MESSAGE } from './fakes/fake-ai.ts';
@@ -60,8 +62,8 @@ describe('neighbours', () => {
 
 describe('Clef', () => {
   const options = [
-    { id: 'newsletter', description: 'newsletter weekly digest' },
-    { id: 'receipt', description: 'receipt invoice' },
+    { id: 'newsletter', name: '订阅', description: 'newsletter weekly digest' },
+    { id: 'receipt', name: '收据', description: 'receipt invoice' },
   ];
   const state = { from: 'Digest <news.example.com>', to: 'to-abc123', list: 'mailing list', subject: 'Your weekly digest', snippet: '', body: '', gmail_category: 'updates', similar_examples: [] };
 
@@ -72,6 +74,22 @@ describe('Clef', () => {
     const questions = input['questions'] as Record<string, { type: string; criteria?: Record<string, string> }>;
     expect(Object.keys(questions).sort()).toEqual(['bulk', 'label', 'suspicious']);
     expect(Object.keys(questions['label']?.criteria ?? {})).toEqual(['newsletter', 'receipt', NONE]);
+    expect(questions['label']?.criteria?.['newsletter']).toBe('订阅: newsletter weekly digest');
+  });
+
+  it('gives every option its display name: a random ID (an imported label) never stands for the meaning', () => {
+    expect(criterion({ id: 'lxy260f75g', name: '学校', description: '' })).toBe('学校');
+    expect(criterion({ id: 'lxy260f75g', name: '学校', description: '课程、成绩、学术会议' })).toBe('学校: 课程、成绩、学术会议');
+    const input = clefInput(CLEF, state, [{ id: 'lxy260f75g', name: '学校', description: '' }]);
+    expect(JSON.stringify(input['questions'])).not.toContain('"lxy260f75g":"lxy260f75g"');
+  });
+
+  it('drops the snippet when the body starts with it, and keeps it for a metadata-only read', () => {
+    const f = { senderAddress: '', senderDomain: '', listId: '', deliveredTo: '', sender: 'Shop <shop.example.com>', subject: 'Receipt', toCode: 'to-abc123', category: '' };
+    const body = 'Thank you for your order.\nYour receipt and invoice total is 42.00. More text follows here.';
+    expect(clefState({ ...f, snippet: 'Thank you for your order. Your receipt and invoice total is 42.00.', body }, []).snippet).toBe('');
+    expect(clefState({ ...f, snippet: 'Something else entirely', body }, []).snippet).toBe('Something else entirely');
+    expect(clefState({ ...f, snippet: 'Thank you for your order.', body: '' }, []).snippet).toBe('Thank you for your order.');
   });
 
   it('reads the fake model’s answer and estimates neurons from input tokens', () => {
@@ -128,6 +146,17 @@ describe('Clef', () => {
   });
 });
 
+describe('retries of one mail', () => {
+  it('back off per mail, doubling from 5 minutes, and give up after about five hours', () => {
+    expect(retryDelay(1)).toBe(5 * 60_000);
+    expect(retryDelay(2)).toBe(10 * 60_000);
+    expect(retryDelay(20)).toBe(RETRY_MAX_MS);
+    let total = 0;
+    for (let attempt = 1; attempt < MAIL_ATTEMPTS_MAX; attempt++) total += retryDelay(attempt);
+    expect(total).toBeGreaterThanOrEqual(4 * 3_600_000);
+  });
+});
+
 describe('the precision bound', () => {
   it('is the Wilson 95 % lower bound', () => {
     expect(wilsonLowerBound(0, 0)).toBe(0);
@@ -152,18 +181,57 @@ describe('modes', () => {
 });
 
 describe('the Gmail filter export', () => {
-  it('writes Gmail’s filter XML: label and archive only, escaped', () => {
+  it('writes Gmail’s filter XML: label and archive only, values quoted', () => {
     const xml = gmailFilterXml(
       [
         { kind: 'sender_address', value: 'digest@news.example.com', labelName: '订阅' },
-        { kind: 'list_id', value: "a'b.example.com", labelName: '订阅' },
+        { kind: 'list_id', value: 'digest.news.example.com', labelName: '订阅' },
+        { kind: 'sender_domain', value: 'shop.example.com', labelName: "收'据" },
       ],
       Date.parse('2026-10-06T00:00:00Z'),
     );
-    expect(xml).toContain("<apps:property name='from' value='digest@news.example.com'/>");
-    expect(xml).toContain("<apps:property name='hasTheWord' value='list:(a&apos;b.example.com)'/>");
+    expect(xml).toContain("<apps:property name='from' value='&quot;digest@news.example.com&quot;'/>");
+    expect(xml).toContain("<apps:property name='hasTheWord' value='list:(&quot;digest.news.example.com&quot;)'/>");
+    expect(xml).toContain("<apps:property name='label' value='分拣/收&apos;据'/>");
     expect(xml).toContain("<apps:property name='label' value='分拣/订阅'/>");
     expect(xml).toContain("name='shouldArchive' value='true'");
     expect(xml).not.toMatch(/shouldMarkAsRead|shouldTrash|forwardTo|shouldStar|shouldNeverSpam/);
+  });
+});
+
+describe('rule values (proposals from mail headers, the owner’s rules, the export)', () => {
+  const hostile: [RuleRow['kind'], string][] = [
+    ['list_id', 'x)or(from:*'],
+    ['list_id', '-digest.example.com'],
+    ['list_id', 'a b.example.com'],
+    ['list_id', '{a b}'],
+    ['list_id', "a'b.example.com"],
+    ['list_id', 'a"b.example.com'],
+    ['sender_address', '-x@example.com'],
+    ['sender_address', 'x@-example.com'],
+    ['sender_address', '(x)@example.com'],
+    ['sender_address', '*@example.com'],
+    ['sender_address', 'x@example'],
+    ['sender_domain', '-example.com'],
+    ['sender_domain', 'example.-com'],
+    ['sender_domain', 'example .com'],
+    ['delivered_to', 'a@b.example.com OR c@d.example.com'],
+  ];
+
+  it('accepts plain values only', () => {
+    expect(ruleValueOk('list_id', 'digest.news.example.com')).toBe(true);
+    expect(ruleValueOk('list_id', 'weekly_list-1.example.org')).toBe(true);
+    expect(ruleValueOk('sender_address', 'statements+1@bank.example.com')).toBe(true);
+    expect(ruleValueOk('sender_domain', 'news.example.com')).toBe(true);
+    expect(ruleValueOk('delivered_to', 'owner@example.com')).toBe(true);
+    for (const [kind, value] of hostile) expect(ruleValueOk(kind, value), `${kind} ${value}`).toBe(false);
+  });
+
+  it('never exports a value that could widen a Gmail filter', () => {
+    const xml = gmailFilterXml(
+      hostile.map(([kind, value]) => ({ kind, value, labelName: '订阅' })),
+      Date.parse('2026-10-06T00:00:00Z'),
+    );
+    expect(xml).not.toContain('<entry>');
   });
 });

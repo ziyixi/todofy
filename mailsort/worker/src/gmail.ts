@@ -45,6 +45,11 @@ export const HISTORY_TYPES = ['messageAdded', 'labelAdded', 'labelRemoved'] as c
 
 /** Message IDs as Gmail writes them (hex). */
 const MESSAGE_ID = /^[0-9a-f]{6,32}$/;
+
+/** Whether `id` is a message ID the guard accepts (history records are untrusted input too). */
+export function isMessageId(id: unknown): id is string {
+  return typeof id === 'string' && MESSAGE_ID.test(id);
+}
 /** User label IDs as Gmail writes them; system labels (INBOX, UNREAD, ...) never match. */
 const USER_LABEL_ID = /^Label_[0-9]{1,24}$/;
 const DIGITS = /^[0-9]{1,24}$/;

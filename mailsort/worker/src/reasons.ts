@@ -25,7 +25,7 @@ export const REASONS: Readonly<Record<Reason, { readonly code: Code; readonly me
   INTERNAL: { code: Code.INTERNAL, message: 'internal error', zh: '服务出错了，请稍后刷新页面' },
   LABEL_EXISTS: { code: Code.ALREADY_EXISTS, message: 'a label holds this ID or name', zh: '已有同名或同 ID 的标签' },
   ETAG_MISMATCH: { code: Code.ABORTED, message: 'the resource changed since the etag', zh: '这一项已在别处修改，已载入最新内容' },
-  INVALID_LABEL: { code: Code.INVALID_ARGUMENT, message: 'a label ID or name breaks its rules', zh: '标签 ID 只能用小写字母、数字和连字符（字母开头，最多 40 个字符）；名称 1–40 个字符，不能含“/”' },
+  INVALID_LABEL: { code: Code.INVALID_ARGUMENT, message: 'a label ID or name breaks its rules', zh: '标签 ID 只能用小写字母、数字和连字符（字母开头，最多 40 个字符）；名称 1–40 个字符，不能含“/”；阈值须在 0.5–0.99 之间（0 为默认）' },
   INVALID_RULE: { code: Code.INVALID_ARGUMENT, message: 'the rule kind and value do not fit', zh: '规则的类型和值不匹配' },
   INVALID_SETTINGS: { code: Code.INVALID_ARGUMENT, message: 'a setting is outside its range', zh: '设置超出允许范围' },
   LIMIT_REACHED: { code: Code.FAILED_PRECONDITION, message: 'the store holds the most items it may', zh: '数量已达上限' },

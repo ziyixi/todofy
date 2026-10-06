@@ -11,48 +11,9 @@ import { LabelSchema } from '@ziyixi/proto/mailsort/ui/v1/label_pb';
 import { Mode, SettingsSchema } from '@ziyixi/proto/mailsort/ui/v1/status_pb';
 import { RuleSchema, Rule_Kind } from '@ziyixi/proto/mailsort/ui/v1/rule_pb';
 import { timestampFromMs } from '@ziyixi/proto/protobuf/wkt';
-import { LABELS, MAILS, message, type SyntheticMail } from '../fakes/fixtures.ts';
-import { allowedOperation, FORBIDDEN_LABELS } from '../fakes/table.ts';
+import { MAILS } from '../fakes/fixtures.ts';
 import { DAY, HOUR, MINUTE, op, reasonOf, rejection, startHarness, T0, type Harness } from './harness.ts';
-
-function checkGoogleCalls(h: Harness): void {
-  const owned = new Set([...h.up.gmail.labels.values()].filter((label) => label.type === 'user' && label.name.startsWith('分拣/')).map((label) => label.id));
-  for (const call of h.up.gmail.calls) {
-    // The modify's ledger state at send time is checked by the guard itself; here: the table's shapes and owned labels.
-    const ledger = () => ({ state: call.body.includes('"addLabelIds":["INBOX"]') || (call.body.includes('removeLabelIds') && !call.body.includes('addLabelIds')) ? 'undo_intended' : 'intended', archived: call.body.includes('INBOX') });
-    expect(allowedOperation(call.method, call.url, call.body, { owned, ledger }), `${call.method} ${call.url} ${call.body}`).not.toBeNull();
-    for (const label of FORBIDDEN_LABELS) expect(call.body).not.toContain(`"${label}"`);
-  }
-  expect(h.up.strays).toEqual([]);
-}
-
-async function setMode(h: Harness, mode: Mode): Promise<void> {
-  await h.api.updateSettings({ settings: create(SettingsSchema, { name: 'settings', mode }), updateMask: { paths: ['mode'] }, requestId: op() });
-}
-
-async function addLabels(h: Harness, live: readonly string[] = []): Promise<void> {
-  for (const label of LABELS) {
-    await h.api.createLabel({
-      labelId: label.id,
-      label: create(LabelSchema, { displayName: label.displayName, description: label.description, enabled: true, live: live.includes(label.id), trustImplying: 'trust' in label && label.trust }),
-      requestId: op(),
-    });
-  }
-}
-
-function deliver(h: Harness, mail: SyntheticMail, at: number): void {
-  h.up.gmail.deliver(message({ ...mail, receivedAt: at }));
-}
-
-async function decision(h: Harness, id: string): Promise<Record<string, unknown> | undefined> {
-  return (await h.sql(`SELECT * FROM decisions WHERE message_id = ?`, id))[0];
-}
-
-function gmailLabels(h: Harness, id: string): string[] {
-  return [...(h.up.gmail.messages.get(id)?.labelIds ?? [])].sort();
-}
-
-const modifies = (h: Harness) => h.up.gmail.calls.filter((call) => call.url.endsWith('/modify'));
+import { addLabels, checkGoogleCalls, decision, deliver, gmailLabels, modifies, setMode } from './helpers.ts';
 
 describe('the pipeline, shadow then live', () => {
   let h: Harness;

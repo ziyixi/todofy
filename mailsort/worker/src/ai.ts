@@ -55,8 +55,20 @@ export interface ClefState {
 }
 
 export interface ClefOption {
+  /** The label's stable ID: the option's key, which the answer must give back exactly. */
   readonly id: string;
+  /** The owner's display name (分拣/<name> in Gmail). */
+  readonly name: string;
   readonly description: string;
+}
+
+/**
+ * An option's criterion: the display name, then the owner's description when there is one. The ID is never the
+ * meaning: labels imported from Gmail or created without an ID have a random one (l + 8 characters), and an option
+ * whose criterion were that ID would tell the model nothing.
+ */
+export function criterion(option: ClefOption): string {
+  return option.description === '' ? option.name : `${option.name}: ${option.description}`;
 }
 
 export interface ClefAnswer {
@@ -77,7 +89,7 @@ export const QUESTION_BULK = 'bulk';
 /** The request body of one Clef call (the input schema of @cf/cloudflare/clef). */
 export function clefInput(model: string, state: ClefState, options: readonly ClefOption[]): Record<string, unknown> {
   const criteria: Record<string, string> = {};
-  for (const option of options) criteria[option.id] = option.description === '' ? option.id : option.description;
+  for (const option of options) criteria[option.id] = criterion(option);
   criteria[NONE] = 'None of the other labels fits this email.';
   return {
     model: model === CLEF_FLASH ? 'clef-flash' : 'clef',

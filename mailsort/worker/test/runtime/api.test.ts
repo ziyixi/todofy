@@ -73,7 +73,8 @@ describe('the owner API', () => {
     expect(reasonOf(await rejection(h.api.createLabel({ labelId: 'other', label: create(LabelSchema, { displayName: '订阅' }), requestId: op() })))).toBe('LABEL_EXISTS');
     expect(reasonOf(await rejection(h.api.createLabel({ labelId: 'none', label: create(LabelSchema, { displayName: 'x' }), requestId: op() })))).toBe('INVALID_LABEL');
     expect(reasonOf(await rejection(h.api.createLabel({ labelId: 'bad', label: create(LabelSchema, { displayName: 'a/b' }), requestId: op() })))).toBe('INVALID_LABEL');
-    expect(reasonOf(await rejection(h.api.createLabel({ labelId: 'thr', label: create(LabelSchema, { displayName: 't', threshold: 0.3 }), requestId: op() })))).toBe('INVALID_SETTINGS');
+    // A label's threshold out of range is a label error (the labels page shows it), not a settings one.
+    expect(reasonOf(await rejection(h.api.createLabel({ labelId: 'thr', label: create(LabelSchema, { displayName: 't', threshold: 0.3 }), requestId: op() })))).toBe('INVALID_LABEL');
     // A repeated request ID answers the first response, whatever the body says now (AIP-155).
     expect((await h.api.createLabel({ labelId: 'newsletter', label: create(LabelSchema, { displayName: '另一个' }), requestId })).displayName).toBe('订阅');
     expect(reasonOf(await rejection(h.api.createLabel({ labelId: 'travel', label: create(LabelSchema, { displayName: '出行' }), requestId })))).toBe('BAD_REQUEST');
@@ -103,7 +104,16 @@ describe('the owner API', () => {
     expect(reasonOf(await rejection(h.api.createRule({ rule: create(RuleSchema, { kind: Rule_Kind.SENDER_ADDRESS, value: 'not-an-address', label: 'labels/newsletter' }), requestId: op() })))).toBe('INVALID_RULE');
     const exported = await h.api.exportGmailFilters({});
     expect(exported.ruleCount).toBe(1);
-    expect(exported.xml).toContain('list:(digest.news.example.com)');
+    expect(exported.xml).toContain('list:(&quot;digest.news.example.com&quot;)');
+    // A value that could widen a Gmail filter is refused, whoever proposes it.
+    expect(reasonOf(await rejection(h.api.createRule({ rule: create(RuleSchema, { kind: Rule_Kind.LIST_ID, value: 'x)OR(from:*', label: 'labels/newsletter' }), requestId: op() })))).toBe('INVALID_RULE');
+    expect(reasonOf(await rejection(h.api.createRule({ rule: create(RuleSchema, { kind: Rule_Kind.SENDER_DOMAIN, value: '-example.com', label: 'labels/newsletter' }), requestId: op() })))).toBe('INVALID_RULE');
+    // An older row with such a value is left out of the export and counted.
+    await h.sql(`INSERT INTO rules (id, kind, value, label_id, state, create_time, update_time) VALUES ('r-old', 'list_id', 'x)or(from:*', 'newsletter', 'active', 0, 0)`);
+    const skipped = await h.api.exportGmailFilters({});
+    expect(skipped).toMatchObject({ ruleCount: 1, skippedCount: 1 });
+    expect(skipped.xml).not.toContain('from:*');
+    await h.sql(`DELETE FROM rules WHERE id = 'r-old'`);
     expect((await h.api.disableRule({ name: rule.name, requestId: op() })).state).toBe(3);
     expect((await h.api.approveRule({ name: rule.name, requestId: op() })).state).toBe(2);
     await h.api.deleteRule({ name: rule.name, requestId: op() });

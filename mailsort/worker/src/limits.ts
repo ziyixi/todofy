@@ -15,6 +15,11 @@ export const DAY = 24 * HOUR;
 export const ALARM_IDLE_MS = 5 * MINUTE;
 /** The next alarm while a backlog waits (pending mails, unembedded examples, intended writes). */
 export const ALARM_BACKLOG_MS = 30 * SECOND;
+/**
+ * Mail received this long before the install-time cursor was stored is never decided (no backfill), even when a lost
+ * cursor's resync lists it. The grace covers the clocks of Google and the Worker.
+ */
+export const INSTALL_GRACE_MS = 5 * MINUTE;
 /** How soon an API call that needs the pipeline (a new mode, a review choice) brings the alarm forward. */
 export const WAKE_MS = SECOND;
 /** After an alarm that threw: try again this much later. */
@@ -104,8 +109,17 @@ export const FLASH_SWITCH_SHARE = 0.7;
 export const DEFAULT_DAILY_NEURON_BUDGET = 7_000;
 export const NEURON_BUDGET_MIN = 500;
 export const NEURON_BUDGET_MAX = 10_000;
-/** A failed (non-quota) model call is retried by this many alarms before the mail is decided unsure. */
-export const AI_ATTEMPTS_MAX = 3;
+/**
+ * A mail whose read or model call failed (Gmail or Workers AI unavailable, not the quota) waits RETRY_BASE_MS, doubling
+ * per failure up to RETRY_MAX_MS, and is given up after MAIL_ATTEMPTS_MAX tries: 5+10+20+40+80+160 minutes, about
+ * five hours, so a short outage never turns waiting mail into unsure decisions. The backoff is per mail, so one mail
+ * Gmail cannot answer for never holds up the mail behind it.
+ */
+export const RETRY_BASE_MS = 5 * MINUTE;
+export const RETRY_MAX_MS = 6 * HOUR;
+export const MAIL_ATTEMPTS_MAX = 7;
+/** A Clef answer this code refused (clef_bad_*): a few tries only, it is the answer, not an outage. */
+export const BAD_ANSWER_ATTEMPTS_MAX = 3;
 
 // ---- writes and the breaker -----------------------------------------------------------------------------------------------
 

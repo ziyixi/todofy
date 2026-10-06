@@ -7,7 +7,8 @@
  *
  * Every table is bounded (limits.ts): LABELS_MAX labels, RULES_MAX rules, EXAMPLES_MAX examples; decisions and the
  * ledger for DECISIONS_KEPT_MS, their content (subject, sender, summary, the exact sender keys) and the review queue for
- * CONTENT_KEPT_MS; request IDs for a day. `prune` runs once per UTC day.
+ * CONTENT_KEPT_MS; request IDs for a day. `prune` runs once per UTC day. Examples (masked summaries) and rules (exact
+ * sender, domain, list or delivered-to values) are what the app learned: they are kept until deleted, never pruned.
  *
  * Nothing here logs. Rows hold the owner's personal data (subjects, senders, rule values); they leave the object only
  * through the owner API behind Access, and the masked text only to Workers AI.

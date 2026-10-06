@@ -715,7 +715,8 @@ message UndoLedgerEntriesResponse {
   int32 undone_count = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
   // Entries Gmail refused to undo (left applied).
   int32 failed_count = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Applied entries of the range still left for another call.
+  // Undoable entries of the range still left for another call (entries whose label was deleted here or went
+  // missing in Gmail are not undoable and not counted).
   int32 remaining_count = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
 }
 

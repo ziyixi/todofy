@@ -48,6 +48,10 @@ export class FakeGmail {
   readonly grants = new Map<string, string>();
   /** Answer every Gmail call with this status (429, 500) while set. */
   failWith: number | null = null;
+  /** Answer the Gmail calls it picks with the status it gives (a failing modify, one unreadable message). */
+  failWhen: ((method: string, url: URL) => number | null) | null = null;
+  /** Called after each answered request (a mail that arrives between two reads). */
+  afterCall: ((method: string, url: URL) => void) | null = null;
   private accessTokens = new Map<string, string>();
   private nextToken = 1;
 
@@ -63,6 +67,8 @@ export class FakeGmail {
     this.historyId = 1000;
     this.oldestHistoryId = 0;
     this.failWith = null;
+    this.failWhen = null;
+    this.afterCall = null;
     this.accessTokens.clear();
   }
 
@@ -108,6 +114,12 @@ export class FakeGmail {
 
   /** Every request Google would get. `url` is the real Google URL. */
   handle(method: string, url: URL, headers: Headers, body: string): Response {
+    const response = this.answer(method, url, headers, body);
+    this.afterCall?.(method, url);
+    return response;
+  }
+
+  private answer(method: string, url: URL, headers: Headers, body: string): Response {
     this.calls.push({ method, url: url.toString(), body });
     if (url.host === 'oauth2.googleapis.com' && url.pathname === '/token' && method === 'POST') {
       const form = new URLSearchParams(body);
@@ -122,6 +134,8 @@ export class FakeGmail {
     const scope = auth === undefined ? undefined : this.accessTokens.get(auth);
     if (scope === undefined) return gmailError(401, 'authError');
     if (this.failWith !== null) return gmailError(this.failWith, this.failWith === 429 ? 'rateLimitExceeded' : 'backendError');
+    const injected = this.failWhen?.(method, url) ?? null;
+    if (injected !== null) return gmailError(injected, injected === 429 ? 'rateLimitExceeded' : injected >= 500 ? 'backendError' : 'failedPrecondition');
     const writable = scope.split(' ').includes('https://www.googleapis.com/auth/gmail.modify');
     const path = url.pathname.replace(/^\/gmail\/v1\/users\/me\//, '');
     const parts = path.split('/');

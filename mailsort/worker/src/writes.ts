@@ -4,15 +4,26 @@
  * modify only for such a row; then the row's outcome. A run interrupted between the two retries the same row: adding a
  * label that is already there, or removing one that is gone, changes nothing in Gmail.
  *
- * Labels are created in Gmail ("分拣/" + display name) just before the first write that needs them.
+ * An `intended` row is written only if the caller's gate allows it at that moment: the row may be from an earlier
+ * pass, and since then the owner may have chosen shadow, the breaker may have tripped or the label may have left live.
+ * A refused row fails (`mode_changed`, ...) and its mail becomes a suggestion in the review queue. Undo rows are never
+ * gated: they only give the mail back to the inbox.
+ *
+ * Labels are created in Gmail ("分拣/" + display name) just before the first write that needs them, after the gate.
  */
 import { setCurrentLabels } from './feedback.ts';
-import { GoogleError, type GmailClient } from './gmail.ts';
+import { GmailRefused, GoogleError, type GmailClient } from './gmail.ts';
 import { LABEL_PREFIX, WRITE_ATTEMPTS_MAX } from './limits.ts';
 import { noteGoogleError } from './session.ts';
 import { timeId } from './ids.ts';
 import { utcDay, type LabelRow, type LedgerRow, type Store } from './store.ts';
 import type { Budget } from './session.ts';
+
+/**
+ * Asked right before an `intended` row is written: null to write it, or the code it fails with. It reads the mode,
+ * the label and the limits as they are now, and may count the write (the alarm's caps).
+ */
+export type WriteGate = (row: LedgerRow, label: LabelRow) => string | null;
 
 export interface WriteContext {
   readonly store: Store;
@@ -20,6 +31,7 @@ export interface WriteContext {
   readonly budget: Budget;
   readonly now: () => number;
   readonly transact: <T>(fn: () => T) => T;
+  readonly gate: WriteGate;
 }
 
 /** Records the intent to add `label` to `messageId` (and archive it). Run inside the caller's transaction. */
@@ -36,6 +48,15 @@ export function intend(store: Store, messageId: string, label: LabelRow, archive
     now,
   );
   return id;
+}
+
+/**
+ * Whether UndoLedgerEntry accepts `row`: mailsort's label still stands as it put it (applied, or an undo already
+ * under way; not changed by the owner in Gmail since), and the label is still owned (`owned`: Store.ownedGmailIds).
+ * A label deleted here, or missing in Gmail, is no longer owned, so the guard would refuse its undo.
+ */
+export function undoable(row: LedgerRow, owned: ReadonlySet<string>): boolean {
+  return (row.state === 'applied' || row.state === 'undo_intended') && row.superseded === 0 && row.gmail_label_id !== null && owned.has(row.gmail_label_id);
 }
 
 /** Marks an applied row for undo (the next execute removes the label, and adds INBOX back if it archived). */
@@ -75,10 +96,33 @@ export interface WriteOutcome {
   readonly stopped: boolean;
 }
 
-function fail(store: Store, row: LedgerRow, code: string): void {
+/** A failed auto write's mail becomes a suggestion in the review queue (once, while its content is kept). */
+export function addSuggestion(store: Store, messageId: string, now: number): void {
+  const row = store.decision(messageId);
+  if (row === undefined || row.content_cleared === 1 || store.pendingReviewOf(messageId) !== undefined) return;
+  store.run(
+    `INSERT INTO review (id, message_id, kind, state, suggested_label, candidates, decider, unsure_reason, subject, sender, receive_time, create_time)
+     VALUES (?, ?, 'suggestion', 'pending', ?, ?, ?, '', ?, ?, ?, ?)`,
+    timeId(now),
+    messageId,
+    row.label_id,
+    JSON.stringify(row.label_id === null ? [] : [{ label: row.label_id, probability: 1 }]),
+    row.decider,
+    row.subject ?? '',
+    row.sender ?? '',
+    row.received_at,
+    now,
+  );
+}
+
+/** Fails an `intended` row for good. Run inside a transaction. */
+function fail(store: Store, row: LedgerRow, code: string, now: number): void {
   store.run(`UPDATE ledger SET state = 'failed', last_code = ? WHERE id = ?`, code, row.id);
-  // An auto write that failed for good leaves its mail as a suggestion: the owner can still review it.
-  if (row.origin === 'auto') store.run(`UPDATE decisions SET outcome = 'suggested' WHERE message_id = ? AND outcome = 'applied'`, row.message_id);
+  // An auto write that failed for good (in this pass or a later retry) leaves its mail as a suggestion in the
+  // review queue: the owner can still label it from there. An owner's row was their own choice: nothing to review.
+  if (row.origin === 'auto' && store.run(`UPDATE decisions SET outcome = 'suggested' WHERE message_id = ? AND outcome = 'applied'`, row.message_id) > 0) {
+    addSuggestion(store, row.message_id, now);
+  }
 }
 
 /**
@@ -104,13 +148,23 @@ export async function executeWrites(ctx: WriteContext, ids: readonly string[] | 
     try {
       if (row.state === 'intended') {
         if (label === undefined) {
-          ctx.transact(() => { fail(store, row, 'label_deleted'); });
+          ctx.transact(() => { fail(store, row, 'label_deleted', ctx.now()); });
+          failed++;
+          continue;
+        }
+        // The gate runs before anything reaches Gmail, label creation included.
+        const refused = ctx.transact(() => {
+          const code = ctx.gate(row, label);
+          if (code !== null) fail(store, row, code, ctx.now());
+          return code;
+        });
+        if (refused !== null) {
           failed++;
           continue;
         }
         const gmailId = row.gmail_label_id ?? (await ensureGmailLabel(ctx, label));
         if (gmailId === null) {
-          ctx.transact(() => { fail(store, row, 'label_missing'); });
+          ctx.transact(() => { fail(store, row, 'label_missing', ctx.now()); });
           failed++;
           continue;
         }
@@ -143,17 +197,21 @@ export async function executeWrites(ctx: WriteContext, ids: readonly string[] | 
       }
     } catch (error) {
       const stop = ctx.transact(() => {
-        if (error instanceof GoogleError && (error.kind === 'not_found' || error.kind === 'forbidden' || error.kind === 'bad_answer')) {
-          // The mail is gone, the grant is read-only, or Gmail refused the request itself: retrying cannot help.
-          store.pushError(error.code);
-          if (row.state === 'intended') fail(store, row, error.kind === 'forbidden' ? 'read_only_grant' : error.code);
-          else store.run(`UPDATE ledger SET state = 'applied', last_code = ? WHERE id = ?`, error.code, row.id);
+        // Permanent for this one row: the mail is gone, the grant is read-only, Gmail refused the request itself, or
+        // the guard refused it (its label is no longer owned: deleted here, or missing in Gmail). Retrying cannot
+        // help, and the other rows are not affected, so the run goes on.
+        const permanent =
+          error instanceof GmailRefused ? 'guard_refused' : error instanceof GoogleError && (error.kind === 'not_found' || error.kind === 'forbidden' || error.kind === 'bad_answer') ? error.code : null;
+        if (permanent !== null) {
+          store.pushError(error instanceof GmailRefused ? 'gmail_guard_refused' : permanent);
+          if (row.state === 'intended') fail(store, row, error instanceof GoogleError && error.kind === 'forbidden' ? 'read_only_grant' : permanent, ctx.now());
+          else store.run(`UPDATE ledger SET state = 'applied', last_code = ? WHERE id = ?`, permanent, row.id);
           return false;
         }
         const attempts = row.attempts + 1;
         store.run(`UPDATE ledger SET attempts = ?, last_code = ? WHERE id = ?`, attempts, error instanceof GoogleError ? error.code : 'gmail_unexpected', row.id);
         if (attempts >= WRITE_ATTEMPTS_MAX) {
-          if (row.state === 'intended') fail(store, row, 'attempts');
+          if (row.state === 'intended') fail(store, row, 'attempts', ctx.now());
           else store.run(`UPDATE ledger SET state = 'applied' WHERE id = ?`, row.id);
         }
         return noteGoogleError(store, error);

@@ -140,7 +140,15 @@ const LEDGER_STATES = {
   undone: LedgerEntry_State.UNDONE,
 } as const;
 
-export function ledgerMessage(row: LedgerRow): LedgerEntry {
+/** A ledger row with what the owner needs to tell the entry apart: whether it can be undone, and the mail's text. */
+export interface LedgerView {
+  readonly undoable: boolean;
+  /** The decision's masked subject and sender, null once its content was cleared. */
+  readonly subject: string | null;
+  readonly sender: string | null;
+}
+
+export function ledgerMessage(row: LedgerRow, view: LedgerView): LedgerEntry {
   return create(LedgerEntrySchema, {
     name: `ledgerEntries/${row.id}`,
     messageId: row.message_id,
@@ -151,6 +159,9 @@ export function ledgerMessage(row: LedgerRow): LedgerEntry {
     createTime: ts(row.create_time),
     applyTime: ts(row.apply_time),
     undoTime: ts(row.undo_time),
+    undoable: view.undoable,
+    subject: view.subject ?? '',
+    sender: view.sender ?? '',
   });
 }
 

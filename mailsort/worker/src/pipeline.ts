@@ -6,10 +6,15 @@
  *    on decided mails to `feedback`, in the same transaction that advances the cursor. The first pass only stores the
  *    mailbox's current historyId: no backfill. A lost cursor (404) is a bounded resync of the inbox's last two days;
  * 3. feedback: the queued label changes become verdicts, examples and rule proposals (feedback.ts);
- * 4. drain: at most DRAIN_MAX pending mails, while the subrequest budget lasts: read, skip what is not the owner's
+ * 4. leftover writes (retries), each through the same gate as a new write;
+ * 5. drain: at most DRAIN_MAX pending mails, while the subrequest budget lasts: read, skip what is not the owner's
  *    incoming mail, mask, decide (rules, neighbours, Clef), record, and in live mode write through the ledger;
- * 5. leftover writes (retries), embeddings of new examples, and once per UTC day: weak accepts, the audit sample, live
- *    gating and the retention cleanup.
+ * 6. embeddings of new examples, and once per UTC day: weak accepts, the audit sample, live gating and the retention
+ *    cleanup.
+ *
+ * Whether a write may go out is read again right before each one (alarmGate): the mode in force, the breaker, the
+ * label's switches and the caps, so a breaker tripped by this pass's own writes, or the owner's shadow chosen while it
+ * runs, stops the rest of the pass.
  *
  * Workers AI's daily quota used up defers the waiting mails to the next UTC day (never a failure); past
  * FLASH_SWITCH_SHARE of the owner's neuron budget the day's remaining mails use Clef-flash, and past the budget they wait.
@@ -22,14 +27,14 @@ import { dmarcAligned } from './dmarc.ts';
 import { modeCeiling, type AiRunner, type Env, type ModeName } from './env.ts';
 import { embeddedCount, nearest, storeEmbedding, unembedded } from './examples.ts';
 import { applyFeedback } from './feedback.ts';
-import { GoogleError, type AccessToken, type GmailClient, type HistoryPage } from './gmail.ts';
+import { GmailRefused, GoogleError, isMessageId, type AccessToken, type GmailClient, type HistoryPage } from './gmail.ts';
 import { timeId } from './ids.ts';
 import {
-  AI_ATTEMPTS_MAX,
   ALARM_BACKLOG_MS,
   ALARM_IDLE_MS,
   ALARM_SUBREQUESTS,
   AUDITS_PER_DAY,
+  BAD_ANSWER_ATTEMPTS_MAX,
   CLEF,
   CLEF_FLASH,
   DAY,
@@ -39,10 +44,14 @@ import {
   FLASH_SWITCH_SHARE,
   HISTORY_PAGE_SIZE,
   HISTORY_PAGES_MAX,
+  INSTALL_GRACE_MS,
+  MAIL_ATTEMPTS_MAX,
   MAIL_SUBREQUESTS,
   NEIGHBOUR_TOKENS_MAX,
   NEIGHBOURS,
   RESYNC_MAX,
+  RETRY_BASE_MS,
+  RETRY_MAX_MS,
   SHARE_JUMP,
   SHARE_MAX,
   SHARE_MIN_WRITES,
@@ -54,7 +63,7 @@ import { readMessage } from './mime.ts';
 import { Budget, noteGoogleError, noteTokenOk, openSession, writeScope } from './session.ts';
 import { effectiveMode, readSettings, tripBreaker, type SettingsValue } from './settings.ts';
 import { utcDay, type LabelRow, type Store } from './store.ts';
-import { executeWrites, intend, type WriteContext } from './writes.ts';
+import { executeWrites, intend, type WriteContext, type WriteGate } from './writes.ts';
 import { putExample } from './examples.ts';
 
 /** Labels Gmail puts on mail that is not the owner's incoming mail: never decided. */
@@ -111,6 +120,8 @@ async function sync(store: Store, gmail: GmailClient, budget: Budget, now: () =>
     transact(() => {
       store.setMeta('history_cursor', id);
       store.setMeta('last_sync_at', String(now()));
+      // What "before the install" means for a later resync (decideMail skips such mail).
+      store.setMeta('installed_at', String(now()));
     });
     return { queued: 0, more: false };
   }
@@ -134,7 +145,8 @@ async function sync(store: Store, gmail: GmailClient, budget: Budget, now: () =>
         const seq = Number(record.id);
         for (const added of record.messagesAdded ?? []) {
           const labels = added.message.labelIds ?? [];
-          if (labels.includes('INBOX') && !labels.some((label) => SKIP_LABELS.has(label))) {
+          // An ID the guard would refuse can never be read: never queued (it would wait at the head forever).
+          if (isMessageId(added.message.id) && labels.includes('INBOX') && !labels.some((label) => SKIP_LABELS.has(label))) {
             store.enqueue(added.message.id, now());
             queued++;
           }
@@ -167,10 +179,14 @@ async function sync(store: Store, gmail: GmailClient, budget: Budget, now: () =>
   return { queued, more: true };
 }
 
-/** After a lost cursor: the inbox's mails of the last two days (deduplicated), and a fresh cursor. */
+/**
+ * After a lost cursor: a fresh cursor, then the inbox's mails of the last two days (deduplicated). The cursor is read
+ * first, so a mail that arrives between the two reads is in the list, after the cursor, or both (the pending key and
+ * enqueue's check of decisions drop the repeat); read the other way round it would be in neither.
+ */
 async function resync(store: Store, gmail: GmailClient, now: () => number, transact: <T>(fn: () => T) => T): Promise<number> {
-  const ids = await gmail.recentInbox(RESYNC_MAX);
   const id = await gmail.currentHistoryId();
+  const ids = await gmail.recentInbox(RESYNC_MAX);
   transact(() => {
     for (const message of ids) store.enqueue(message, now());
     store.setMeta('history_cursor', id);
@@ -190,13 +206,84 @@ interface MailContext {
   readonly now: () => number;
   readonly transact: <T>(fn: () => T) => T;
   readonly settings: SettingsValue;
-  readonly mode: ModeName;
+  /** The deployment's MODE ceiling (the mode in force is read again before each write). */
+  readonly ceiling: ModeName;
   readonly shed: boolean;
-  /** Auto writes made in this pass. */
-  runWrites: number;
+  readonly gate: WriteGate;
+  /** Writes this pass let through its gate (the run cap), and the ones Gmail applied. */
+  readonly counter: { runWrites: number; applied: number };
 }
 
-type MailOutcome = 'decided' | 'skipped' | 'gone' | 'deferred' | 'retry' | 'stop';
+/** `retry`: Workers AI failed, stop calling it this pass; `later`: this mail waits, go on with the next. */
+type MailOutcome = 'decided' | 'skipped' | 'gone' | 'deferred' | 'retry' | 'later' | 'stop';
+
+/** The wait after a mail's `attempts`-th failure: RETRY_BASE_MS doubling, at most RETRY_MAX_MS. */
+export function retryDelay(attempts: number): number {
+  return Math.min(RETRY_BASE_MS * 2 ** Math.max(0, attempts - 1), RETRY_MAX_MS);
+}
+
+/** Puts a pending mail back with one more attempt and its backoff. Run inside a transaction. */
+function postpone(store: Store, messageId: string, attempts: number, now: number): void {
+  store.run(`UPDATE pending SET attempts = ?, not_before = ? WHERE message_id = ?`, attempts + 1, now + retryDelay(attempts + 1), messageId);
+}
+
+/** Auto writes may go out now: live in force (the owner's mode under the ceiling and the breaker) and a write grant. */
+export function writesLive(store: Store, ceiling: ModeName): boolean {
+  return effectiveMode(readSettings(store), ceiling) === 'live' && writeScope(store);
+}
+
+/**
+ * The alarm's gate (writes.ts WriteGate), asked right before each `intended` row goes to Gmail, whether the row is
+ * this pass's or a retry of an earlier one. Every row needs live in force and a write grant. An auto row also needs
+ * its label enabled and live, and stays within the caps: passing the daily or the run cap trips the breaker, which
+ * makes every later write of the pass (and of the next ones) fail this gate. An owner's row (a review choice whose
+ * first try failed) is not capped.
+ */
+export function alarmGate(store: Store, ceiling: ModeName, counter: { runWrites: number }, now: () => number): WriteGate {
+  return (row, label) => {
+    if (!writesLive(store, ceiling)) return 'mode_changed';
+    if (row.origin === 'owner') return null;
+    if (label.enabled !== 1 || label.live !== 1) return 'label_not_live';
+    const settings = readSettings(store);
+    const at = now();
+    if (store.usage(utcDay(at)).applied >= settings.dailyWriteLimit) {
+      tripBreaker(store, 'daily_limit', at);
+      return 'daily_limit';
+    }
+    if (counter.runWrites >= settings.runWriteLimit) {
+      tripBreaker(store, 'run_limit', at);
+      return 'run_limit';
+    }
+    counter.runWrites++;
+    return null;
+  };
+}
+
+/**
+ * A failed read of one pending mail. Rate and auth are Google's state, not the mail's: the pass stops and the mail
+ * keeps its place. Anything else is the mail's own problem and must never hold up the mail behind it (the queue is
+ * read oldest first): an answer that will not change (refused by the guard, malformed, too large even as metadata)
+ * skips it at once; a 403 or an unavailable Gmail puts it back with a backoff, and skips it after MAIL_ATTEMPTS_MAX
+ * tries. Unavailable still stops the pass, since Gmail may be down for every mail.
+ */
+function readFailed(ctx: MailContext, messageId: string, attempts: number, error: unknown): MailOutcome {
+  const { store } = ctx;
+  const now = ctx.now();
+  if (error instanceof GoogleError && error.kind === 'not_found') {
+    ctx.transact(() => store.run(`DELETE FROM pending WHERE message_id = ?`, messageId));
+    return 'gone';
+  }
+  if (error instanceof GoogleError && (error.kind === 'rate' || error.kind === 'auth')) throw error;
+  const code = error instanceof GoogleError ? error.code : error instanceof GmailRefused ? 'gmail_guard_refused' : 'message_unexpected';
+  const final = error instanceof GmailRefused || (error instanceof GoogleError && (error.kind === 'bad_answer' || error.kind === 'too_large'));
+  ctx.transact(() => {
+    store.pushError(code);
+    if (final || attempts + 1 >= MAIL_ATTEMPTS_MAX) recordSkip(store, messageId, messageId, 0, now, 'unreadable');
+    else postpone(store, messageId, attempts, now);
+  });
+  if (error instanceof GoogleError && error.kind === 'unavailable') throw error;
+  return 'skipped';
+}
 
 function recordSkip(store: Store, id: string, threadId: string, receivedAt: number, now: number, reason: string): void {
   store.run(
@@ -210,14 +297,25 @@ function recordSkip(store: Store, id: string, threadId: string, receivedAt: numb
   store.run(`DELETE FROM pending WHERE message_id = ?`, id);
 }
 
-/** The model's state of a mail: masked text, a code for the address, and the neighbours' short texts. */
+/** Whitespace runs as one space, for comparing Gmail's snippet with the body it was cut from. */
+function fold(text: string): string {
+  return text.replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * The model's state of a mail: masked text, a code for the address, and the neighbours' short texts. Gmail's snippet
+ * is the start of the body, so it is sent only when it says something the body does not (a metadata-only read has no
+ * body): up to 300 characters of input saved on every call.
+ */
 export function clefState(f: Features, neighbours: readonly { label: string; summary: string }[]): ClefState {
+  const head = fold(f.snippet).slice(0, 80);
+  const snippetInBody = f.body !== '' && head !== '' && fold(f.body).startsWith(head);
   return {
     from: f.sender,
     to: f.toCode,
     list: f.listId === '' ? '' : 'mailing list',
     subject: f.subject,
-    snippet: f.snippet,
+    snippet: snippetInBody ? '' : f.snippet,
     body: f.body,
     gmail_category: f.category,
     similar_examples: neighbours.map((n) => ({ label: n.label, text: cutTokens(n.summary, NEIGHBOUR_TOKENS_MAX) })),
@@ -231,11 +329,7 @@ async function decideMail(ctx: MailContext, messageId: string, attempts: number)
     const { message } = await gmail.message(messageId);
     read = readMessage(message);
   } catch (error) {
-    if (error instanceof GoogleError && error.kind === 'not_found') {
-      ctx.transact(() => store.run(`DELETE FROM pending WHERE message_id = ?`, messageId));
-      return 'gone';
-    }
-    throw error;
+    return readFailed(ctx, messageId, attempts, error);
   }
   const now = ctx.now();
   if (read === null) {
@@ -247,10 +341,17 @@ async function decideMail(ctx: MailContext, messageId: string, attempts: number)
     ctx.transact(() => { recordSkip(store, read.id, read.threadId, read.receivedAt, now, 'not_inbox'); });
     return 'skipped';
   }
-  // One label per conversation: a thread mailsort (or the owner) already sorted keeps its label.
+  // No backfill: a lost cursor's resync lists the inbox of the last two days, which may reach back before the install.
+  const installedAt = Number(store.getMeta('installed_at') ?? '0');
+  if (installedAt > 0 && read.receivedAt > 0 && read.receivedAt < installedAt - INSTALL_GRACE_MS) {
+    ctx.transact(() => { recordSkip(store, read.id, read.threadId, read.receivedAt, now, 'before_install'); });
+    return 'skipped';
+  }
+  // One label per conversation: a thread that carries an owned label now keeps it. current_labels follows mailsort's
+  // writes and undos and the owner's own changes in Gmail, so a conversation whose label was undone or removed is
+  // decided again, and a shadow verdict (which writes nothing) does not hide the rest of its conversation.
   const threadSorted =
-    read.labelIds.some((label) => owned.has(label)) ||
-    store.count(`SELECT count(*) AS n FROM decisions WHERE thread_id = ? AND (outcome = 'applied' OR verdict_label IS NOT NULL)`, read.threadId) > 0;
+    read.labelIds.some((label) => owned.has(label)) || store.count(`SELECT count(*) AS n FROM decisions WHERE thread_id = ? AND current_labels != '[]'`, read.threadId) > 0;
   if (threadSorted) {
     ctx.transact(() => { recordSkip(store, read.id, read.threadId, read.receivedAt, now, 'thread_sorted'); });
     return 'skipped';
@@ -296,7 +397,7 @@ async function decideMail(ctx: MailContext, messageId: string, attempts: number)
         if (shortcut !== null) {
           decision = { confident: true, label: shortcut, decider: 'neighbours', candidates: [{ label: shortcut, probability: neighbours[0]?.similarity ?? 1 }] };
         } else {
-          const options: ClefOption[] = enabled.map((label) => ({ id: label.id, description: label.description }));
+          const options: ClefOption[] = enabled.map((label) => ({ id: label.id, name: label.display_name, description: label.description }));
           const answer = await askClef(ctx.ai, chosen, clefState(f, neighbours), options);
           ctx.budget.left -= 1;
           ctx.transact(() => {
@@ -318,25 +419,23 @@ async function decideMail(ctx: MailContext, messageId: string, attempts: number)
           return 'deferred';
         }
         const code = error instanceof AiError ? error.code : 'ai_unexpected';
+        // An answer this code refused is about this mail: a few tries, and the pass goes on. Anything else is an
+        // outage: the mail waits (backoff, about five hours in all) and the pass stops calling the model.
+        const badAnswer = code.startsWith('clef_bad');
         ctx.transact(() => { store.pushError(code); });
-        if (attempts + 1 < AI_ATTEMPTS_MAX) {
-          ctx.transact(() => store.run(`UPDATE pending SET attempts = attempts + 1 WHERE message_id = ?`, messageId));
-          return 'retry';
+        if (attempts + 1 < (badAnswer ? BAD_ANSWER_ATTEMPTS_MAX : MAIL_ATTEMPTS_MAX)) {
+          ctx.transact(() => { postpone(store, messageId, attempts, now); });
+          return badAnswer ? 'later' : 'retry';
         }
         decision = { confident: false, top: null, decider: 'none', reason: 'model_unavailable', candidates: candidatesOf(probabilities) };
       }
     }
   }
 
-  // The outcome: a Gmail write (live, a live label, a write grant, within the limits), a suggestion, or unsure.
+  // The outcome: a Gmail write (live in force now, a live label, a write grant), a suggestion, or unsure. The caps are
+  // the gate's, right before the write: a write it refuses becomes a suggestion like any failed write.
   const label = decision.confident ? labels.find((item) => item.id === decision.label) : undefined;
-  let apply = false;
-  if (decision.confident && label !== undefined && ctx.mode === 'live' && label.live === 1 && label.gmail_state !== 'missing' && writeScope(store)) {
-    const today = store.usage(day).applied;
-    if (today >= ctx.settings.dailyWriteLimit) ctx.transact(() => { tripBreaker(store, 'daily_limit', now); });
-    else if (ctx.runWrites >= ctx.settings.runWriteLimit) ctx.transact(() => { tripBreaker(store, 'run_limit', now); });
-    else apply = true;
-  }
+  const apply = decision.confident && label !== undefined && label.live === 1 && label.gmail_state !== 'missing' && writesLive(store, ctx.ceiling);
   const versions = Object.fromEntries(enabled.map((item) => [item.id, item.desc_version]));
   const intent: { id: string | null } = { id: null };
   ctx.transact(() => {
@@ -371,7 +470,7 @@ async function decideMail(ctx: MailContext, messageId: string, attempts: number)
     if (decision.confident && decision.decider === 'rule' && decision.ruleId !== undefined) store.run(`UPDATE rules SET match_count = match_count + 1 WHERE id = ?`, decision.ruleId);
     store.addUsage(day, 'decided', 1);
     if (!decision.confident) store.addUsage(day, 'unsure', 1);
-    if (apply && label !== undefined) {
+    if (apply) {
       intent.id = intend(store, read.id, label, true, 'auto', now);
     } else if (decision.confident || decision.reason !== 'no_labels') {
       store.run(
@@ -394,40 +493,18 @@ async function decideMail(ctx: MailContext, messageId: string, attempts: number)
   });
   const ledgerId = intent.id;
   if (ledgerId !== null) {
-    ctx.runWrites++;
+    // A write the gate refuses, or Gmail refuses for good, fails its row and becomes a suggestion (writes.ts fail).
     const outcome = await executeWrites(writeContext(ctx), [ledgerId], 1);
-    if (outcome.failed > 0 && outcome.applied === 0) {
-      // Left `intended` (to retry) or failed: either way a suggestion in the queue until Gmail has it.
-      const failed = store.ledgerRow(ledgerId)?.state === 'failed';
-      if (failed) ctx.transact(() => { addSuggestion(store, read.id, now); });
-    }
+    ctx.counter.applied += outcome.applied;
     if (outcome.stopped) return 'stop';
-    ctx.transact(() => { checkLabelShare(store, now); });
+    // May trip the breaker: the gate reads it before the pass's next write.
+    if (outcome.applied > 0) ctx.transact(() => { checkLabelShare(store, ctx.now()); });
   }
   return 'decided';
 }
 
-function writeContext(ctx: Pick<MailContext, 'store' | 'gmail' | 'budget' | 'now' | 'transact'>): WriteContext {
-  return { store: ctx.store, gmail: ctx.gmail, budget: ctx.budget, now: ctx.now, transact: ctx.transact };
-}
-
-/** A failed auto write's mail becomes a suggestion in the review queue. */
-function addSuggestion(store: Store, messageId: string, now: number): void {
-  const row = store.decision(messageId);
-  if (row === undefined || row.content_cleared === 1 || store.pendingReviewOf(messageId) !== undefined) return;
-  store.run(
-    `INSERT INTO review (id, message_id, kind, state, suggested_label, candidates, decider, unsure_reason, subject, sender, receive_time, create_time)
-     VALUES (?, ?, 'suggestion', 'pending', ?, ?, ?, '', ?, ?, ?, ?)`,
-    timeId(now),
-    messageId,
-    row.label_id,
-    JSON.stringify(row.label_id === null ? [] : [{ label: row.label_id, probability: 1 }]),
-    row.decider,
-    row.subject ?? '',
-    row.sender ?? '',
-    row.received_at,
-    now,
-  );
+function writeContext(ctx: Pick<MailContext, 'store' | 'gmail' | 'budget' | 'now' | 'transact' | 'gate'>): WriteContext {
+  return { store: ctx.store, gmail: ctx.gmail, budget: ctx.budget, now: ctx.now, transact: ctx.transact, gate: ctx.gate };
 }
 
 /** The breaker's share rule: one label's share of today's writes jumped far above its last week's share. */
@@ -554,12 +631,16 @@ export async function runPass(deps: PassDeps): Promise<PassResult> {
     const owned = new Map(store.labels().flatMap((label) => (label.gmail_state === 'linked' && label.gmail_id !== null ? [[label.gmail_id, label.id] as const] : [])));
     transact(() => applyFeedback(store, owned, deps.now()));
 
-    // Retries of writes an earlier pass left `intended` come before new decisions.
-    const retried = await executeWrites({ store, gmail, budget, now: deps.now, transact }, null, 5);
+    // Retries of writes an earlier pass left `intended` come before new decisions, through the same gate and counted
+    // against the same run cap.
+    const ceiling = modeCeiling(deps.env);
+    const counter = { runWrites: 0, applied: 0 };
+    const gate = alarmGate(store, ceiling, counter, deps.now);
+    const retried = await executeWrites({ store, gmail, budget, now: deps.now, transact, gate }, null, 5);
     applied += retried.applied;
     if (retried.stopped) throw new Error('stopped');
 
-    const ctx: MailContext = { store, gmail, ai: deps.ai, budget, now: deps.now, transact, settings, mode, shed: deps.shed, runWrites: 0 };
+    const ctx: MailContext = { store, gmail, ai: deps.ai, budget, now: deps.now, transact, settings, ceiling, shed: deps.shed, gate, counter };
     const due = store.due(now, DRAIN_MAX);
     for (const item of due) {
       if (!budget.has(MAIL_SUBREQUESTS)) {
@@ -577,7 +658,7 @@ export async function runPass(deps: PassDeps): Promise<PassResult> {
       }
       if (outcome === 'retry' || outcome === 'stop') break;
     }
-    applied += ctx.runWrites;
+    applied += counter.applied;
     if (store.due(deps.now(), 1).length > 0) backlog = true;
 
     // New examples' embeddings, a batch per pass (not while shed: they can wait).

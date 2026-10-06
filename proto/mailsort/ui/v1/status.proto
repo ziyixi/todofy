@@ -29,7 +29,7 @@ message Settings {
   // The mode in force: the owner's, lowered by the deployment's MAILSORT_MODE switch (off or shadow) or by the
   // breaker (shadow).
   Mode effective_mode = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // At most this many Gmail writes per alarm run, 1 to 10.
+  // At most this many Gmail writes per alarm run (retries included), 1 to 10. Passing it trips the breaker.
   int32 run_write_limit = 4 [(google.api.field_behavior) = OPTIONAL];
   // At most this many Gmail writes per UTC day, 1 to 500. Passing it trips the breaker.
   int32 daily_write_limit = 5 [(google.api.field_behavior) = OPTIONAL];
@@ -41,9 +41,9 @@ message Settings {
   // The target precision lower bound of a live label, 0.5 to 0.99: below it the label leaves live mode.
   double precision_target = 8 [(google.api.field_behavior) = OPTIONAL];
   // The breaker tripped (a write limit passed, or one label's share jumped): the effective mode is shadow until
-  // the owner sets the mode again.
+  // an UpdateSettings whose mask names `mode` (the owner choosing a mode again). Any other update keeps it.
   bool breaker_tripped = 9 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Why the breaker tripped: `daily_limit`, `label_share`; empty when it did not.
+  // Why the breaker tripped: `daily_limit`, `run_limit`, `label_share`; empty when it did not.
   string breaker_reason = 10 [(google.api.field_behavior) = OUTPUT_ONLY];
   // AIP-154: changes with every change. UpdateSettings that carries an etag is refused with ETAG_MISMATCH when
   // the settings changed since.

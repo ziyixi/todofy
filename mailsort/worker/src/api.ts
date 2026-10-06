@@ -65,10 +65,11 @@ import {
 } from './limits.ts';
 import { exampleMessage, labelMessage, labelName, ledgerMessage, MODES, modeName, reviewMessage, RULE_KINDS, ruleMessage } from './model.ts';
 import { REASONS, sortError } from './reasons.ts';
+import { ruleValueOk } from './rule-value.ts';
 import { authState, type Budget, writeScope } from './session.ts';
 import { effectiveMode, readSettings, writeSettings, type SettingsValue } from './settings.ts';
 import { utcDay, type DecisionRow, type LabelRow, type LedgerRow, type ReviewRow, type RuleRow, type Store } from './store.ts';
-import { ensureGmailLabel, executeWrites, intend, intendUndo, type WriteContext } from './writes.ts';
+import { ensureGmailLabel, executeWrites, intend, intendUndo, undoable, type WriteContext } from './writes.ts';
 
 /** What every handler gets from MailsortState. */
 export interface ApiContext {
@@ -173,8 +174,9 @@ function gmailError(error: unknown): RpcError {
   return sortError('DEPENDENCY_UNAVAILABLE');
 }
 
+/** The owner's writes go out only while live is in force with a write grant, read again right before each one. */
 function writeContext(ctx: ApiContext, gmail: GmailClient): WriteContext {
-  return { store: ctx.store, gmail, budget: ctx.budget, now: () => ctx.now, transact: ctx.transact };
+  return { store: ctx.store, gmail, budget: ctx.budget, now: () => ctx.now, transact: ctx.transact, gate: () => (ownerWritesAllowed(ctx) ? null : 'mode_changed') };
 }
 
 /** Runs the ledger rows `ids` now; a failure to reach Gmail leaves them for the alarm. */
@@ -214,8 +216,9 @@ function checkDisplayName(name: string): string {
   return value;
 }
 
+/** A label's own threshold: 0 (the default's) or THRESHOLD_MIN to THRESHOLD_MAX. A label error, not a settings one. */
 function checkThreshold(value: number): number {
-  if (value !== 0 && (!Number.isFinite(value) || value < THRESHOLD_MIN || value > THRESHOLD_MAX)) throw sortError('INVALID_SETTINGS');
+  if (value !== 0 && (!Number.isFinite(value) || value < THRESHOLD_MIN || value > THRESHOLD_MAX)) throw sortError('INVALID_LABEL');
   return value;
 }
 
@@ -236,6 +239,12 @@ function pendingItem(ctx: ApiContext, name: string): { item: ReviewRow; decision
   const decision = ctx.store.decision(item.message_id);
   if (decision === undefined) throw sortError('ALREADY_RESOLVED');
   return { item, decision };
+}
+
+/** A ledger row as the API answers it (getLedgerEntry, UndoLedgerEntry). */
+function ledgerOut(ctx: ApiContext, row: LedgerRow): ReturnType<typeof ledgerMessage> {
+  const decision = ctx.store.decision(row.message_id);
+  return ledgerMessage(row, { undoable: undoable(row, ctx.store.ownedGmailIds()), subject: decision?.subject ?? null, sender: decision?.sender ?? null });
 }
 
 /** The ledger row of mailsort's standing label on a mail, if any. */
@@ -302,13 +311,7 @@ const KIND_NAMES = new Map<number, RuleRow['kind']>(Object.entries(RULE_KINDS).m
 
 function checkRuleValue(kind: RuleRow['kind'], raw: string): string {
   const value = raw.trim().toLowerCase();
-  const ok =
-    kind === 'sender_domain'
-      ? /^(?=.{3,200}$)[a-z0-9-]{1,63}(\.[a-z0-9-]{1,63})+$/.test(value)
-      : kind === 'list_id'
-        ? /^[\x21-\x7e]{3,200}$/.test(value) && !/[<>]/.test(value)
-        : /^(?=.{3,200}$)[^\s@<>]+@[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(value);
-  if (!ok) throw sortError('INVALID_RULE');
+  if (!ruleValueOk(kind, value)) throw sortError('INVALID_RULE');
   return value;
 }
 
@@ -449,7 +452,10 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailsortUiService>, ApiCon
         store.run(`DELETE FROM labels WHERE id = ?`, id);
         store.run(`DELETE FROM rules WHERE label_id = ?`, id);
         deleteExamplesOfLabel(store, id);
+        // The Gmail label and its mails stay as they are. Its ledger entries can no longer be undone from here (the
+        // label is not owned any more, so the guard would refuse): writes not made fail, undos not made stand.
         store.run(`UPDATE ledger SET state = 'failed', last_code = 'label_deleted' WHERE label_id = ? AND state = 'intended'`, id);
+        store.run(`UPDATE ledger SET state = 'applied', last_code = 'label_deleted' WHERE label_id = ? AND state = 'undo_intended'`, id);
         return create(EmptySchema, {});
       }),
     );
@@ -649,7 +655,8 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailsortUiService>, ApiCon
     const rows = ctx.store.all<RuleRow & { display_name: string; trust: number }>(
       `SELECT r.*, l.display_name, l.trust FROM rules r JOIN labels l ON l.id = r.label_id WHERE r.state = 'active' ORDER BY r.create_time, r.id`,
     );
-    const exported = rows.filter((row) => row.trust === 0);
+    // Trust rules need DMARC, which a filter cannot check; a value that is not plain (an older row) is never exported.
+    const exported = rows.filter((row) => row.trust === 0 && ruleValueOk(row.kind, row.value));
     return Promise.resolve(
       create(ExportGmailFiltersResponseSchema, {
         xml: gmailFilterXml(exported.map((row) => ({ kind: row.kind, value: row.value, labelName: row.display_name })), ctx.now),
@@ -706,21 +713,32 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailsortUiService>, ApiCon
   listLedgerEntries(request, ctx) {
     const size = pageSize(request.pageSize, PAGE);
     const before = cursorOf(request.pageToken, {}, stringCursor) ?? '￿';
-    const rows = ctx.store.all<LedgerRow>(`SELECT * FROM ledger WHERE id < ? ORDER BY id DESC LIMIT ?`, before, size + 1);
+    const rows = ctx.store.all<LedgerRow & { subject: string | null; sender: string | null }>(
+      `SELECT l.*, d.subject, d.sender FROM ledger l LEFT JOIN decisions d ON d.message_id = l.message_id WHERE l.id < ? ORDER BY l.id DESC LIMIT ?`,
+      before,
+      size + 1,
+    );
     const page = rows.slice(0, size);
     const last = page[page.length - 1];
-    return Promise.resolve(create(ListLedgerEntriesResponseSchema, { ledgerEntries: page.map(ledgerMessage), nextPageToken: rows.length > size && last !== undefined ? encodePageToken(last.id, {}) : '' }));
+    const owned = ctx.store.ownedGmailIds();
+    return Promise.resolve(
+      create(ListLedgerEntriesResponseSchema, {
+        ledgerEntries: page.map((row) => ledgerMessage(row, { undoable: undoable(row, owned), subject: row.subject, sender: row.sender })),
+        nextPageToken: rows.length > size && last !== undefined ? encodePageToken(last.id, {}) : '',
+      }),
+    );
   },
 
   getLedgerEntry(request, ctx) {
-    return Promise.resolve(ledgerMessage(ctx.store.ledgerRow(idOf(request.name, 'ledgerEntries')) ?? notFound()));
+    return Promise.resolve(ledgerOut(ctx, ctx.store.ledgerRow(idOf(request.name, 'ledgerEntries')) ?? notFound()));
   },
 
   async undoLedgerEntry(request, ctx) {
     const id = idOf(request.name, 'ledgerEntries');
     return onceAsync(ctx, request.requestId, 'UndoLedgerEntry', `ledgerEntries/${id}`, LedgerEntrySchema, async () => {
       const row = ctx.store.ledgerRow(id) ?? notFound();
-      if (!(row.state === 'applied' || row.state === 'undo_intended') || row.superseded === 1) throw sortError('NOT_UNDOABLE');
+      // Refused before any intent is written: an undo the guard would refuse could only stall the pipeline.
+      if (!undoable(row, ctx.store.ownedGmailIds())) throw sortError('NOT_UNDOABLE');
       if (!writeScope(ctx.store)) throw sortError('GMAIL_WRITE_NOT_ALLOWED');
       const client = await gmailFor(ctx);
       ctx.transact(() => { intendUndo(ctx.store, row); });
@@ -737,7 +755,7 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailsortUiService>, ApiCon
         if (outcome.stopped || after.state === 'undo_intended') throw sortError('DEPENDENCY_UNAVAILABLE');
         throw sortError('NOT_UNDOABLE');
       }
-      return ledgerMessage(after);
+      return ledgerOut(ctx, after);
     });
   },
 
@@ -748,7 +766,9 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailsortUiService>, ApiCon
     return onceAsync(ctx, request.requestId, 'UndoLedgerEntries', 'ledgerEntries', UndoLedgerEntriesResponseSchema, async () => {
       if (!writeScope(ctx.store)) throw sortError('GMAIL_WRITE_NOT_ALLOWED');
       const client = await gmailFor(ctx);
-      const range = `FROM ledger WHERE state = 'applied' AND superseded = 0 AND create_time >= ? AND create_time < ?`;
+      // The undoable entries of the range (writes.ts undoable): applied, not changed by the owner, label still owned.
+      const range = `FROM ledger WHERE state = 'applied' AND superseded = 0 AND create_time >= ? AND create_time < ?
+        AND gmail_label_id IN (SELECT gmail_id FROM labels WHERE gmail_state = 'linked' AND gmail_id IS NOT NULL)`;
       const rows = ctx.store.all<LedgerRow>(`SELECT * ${range} ORDER BY id DESC LIMIT ?`, start, end, UNDO_BATCH);
       ctx.transact(() => {
         for (const row of rows) intendUndo(ctx.store, row);

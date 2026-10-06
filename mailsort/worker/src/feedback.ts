@@ -16,6 +16,7 @@
 import { deleteExampleOf, putExample } from './examples.ts';
 import { shortId } from './ids.ts';
 import { RULE_PROPOSAL_CORRECTIONS } from './limits.ts';
+import { ruleValueOk } from './rule-value.ts';
 import type { DecisionRow, Store } from './store.ts';
 
 export type VerdictSource = 'review' | 'gmail' | 'auto';
@@ -61,10 +62,13 @@ export function withdrawVerdict(store: Store, row: DecisionRow): void {
   if (row.verdict === 'corrected' && row.verdict_label !== null) retractProposal(store, row, row.verdict_label);
 }
 
-/** The rule key of a mail: its mailing list when it has one, else its sender's address. */
+/**
+ * The rule key of a mail: its mailing list when it has a valid one, else its sender's address when that is valid.
+ * Both come from mail headers (untrusted); a value rule-value.ts refuses never becomes a proposal.
+ */
 function ruleKey(row: Pick<DecisionRow, 'list_id' | 'sender_address'>): { kind: 'list_id' | 'sender_address'; value: string } | null {
-  if (row.list_id !== null && row.list_id !== '') return { kind: 'list_id', value: row.list_id };
-  if (row.sender_address !== null && row.sender_address !== '') return { kind: 'sender_address', value: row.sender_address };
+  if (row.list_id !== null && ruleValueOk('list_id', row.list_id)) return { kind: 'list_id', value: row.list_id };
+  if (row.sender_address !== null && ruleValueOk('sender_address', row.sender_address)) return { kind: 'sender_address', value: row.sender_address };
   return null;
 }
 

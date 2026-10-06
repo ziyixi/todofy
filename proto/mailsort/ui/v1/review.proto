@@ -97,7 +97,8 @@ message Candidate {
 }
 
 // A corrected or confirmed mail kept as a few-shot example (mailsort/docs/design.md §6): a short masked summary
-// and its embedding. Deleted when its correction is withdrawn or its label deleted.
+// and its embedding. Kept until deleted (DeleteExample), or until its correction is withdrawn or its label deleted;
+// not cleared after 14 days like a decision's content.
 message Example {
   option (google.api.resource) = {
     type: "sort.ziyixi.science/Example"
@@ -180,4 +181,11 @@ message LedgerEntry {
   google.protobuf.Timestamp apply_time = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
   // When it was undone.
   google.protobuf.Timestamp undo_time = 9 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // UndoLedgerEntry would be accepted: the label is still on the mail as mailsort put it (applied, not changed by
+  // the owner in Gmail since), and the label is still the app's (not deleted here, not missing in Gmail).
+  bool undoable = 10 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The mail's masked subject, while the decision's content is kept (14 days); empty after.
+  string subject = 11 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The mail's masked sender (display name and domain), while the decision's content is kept; empty after.
+  string sender = 12 [(google.api.field_behavior) = OUTPUT_ONLY];
 }
