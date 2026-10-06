@@ -19,6 +19,38 @@ Rules for this file:
 Last updated: 2026-10-05.
 <!-- Active work is separate from the production evidence below. -->
 
+## In flight (2026-10-05, Claude): readability review, Newsletter warning, Lab removal
+
+The owner asked for working, readable code (no large rewrites; complex but correct code such as the platform
+release state machine stays), meaningful Home warnings, and Lab removed entirely.
+
+Landing now as one stack (each app still deploys only through its own job):
+
+- Newsletter: a node that hits its own deadline is `failed`/`timeout`, not `unknown` (read-only work has nothing to
+  reconcile). This was the source of the daily `newsletter_unknown` warning (38 historical rows, all
+  `workflow_attempts`). Releases the Newsletter + Platform images through the gated VPS release.
+- Fleet + Home: Newsletter warnings mean the owner must act: `newsletter_side_effect_unknown` (delivery/Notion/packet
+  ambiguity), `newsletter_delivery_overdue` (no accepted delivery for about 28 h), rejection, unavailability.
+  Workflow bookkeeping (`newsletter_unknown`) is info only.
+- CPU hot paths near Free's 10 ms: Mail Hero attachment downloads are answered by the coordinator (they parsed the
+  whole parsed record in the Worker) and the Ops status codec is warmed at startup; Todofy's gateway passes the large
+  non-paged core answers through as `PreEncoded`; the website relay's status reads fewer GitHub records.
+- Home: unreachable guard paths and finished migrations removed; attention roll-up computed once.
+- CI: one `test_app_isolation.py` replaces eight per-app import greps; job comments tidied. No deploy condition changed.
+
+Next (branches being built, not pushed yet):
+
+1. `refactor/newsletter-legacy-and-unknowns`: the 38 historical `workflow_attempts` unknowns are reclassified as
+   `failed` (error codes kept, rows kept; owner request), and the dead legacy pipeline (legacy-daily recipe, repair
+   scan, v1 Notion, `legacy` backend) is deleted. Gate: the owner runs a read-only count script on the VPS first.
+2. `chore/decommission-lab`: Lab (paper radar) removed from the tree as if it never existed. After it lands the owner
+   deletes the `lab` Worker (its Durable Object data and custom domain) and dispatches Infra apply for the Access app
+   and D1 `lab`; agents do not delete production data.
+3. Later, from the same review: Newsletter prompts as resources and mechanical cleanup, one shared deploy-vars
+   engine for the Workers, platform helper de-duplication (and the 1000 vs 2^31 monitor-count cap mismatch), and a
+   shorter HANDOFF.
+
+
 ## Todofy email model order: deployed; report trigger provenance pending
 
 Release `26c9662c1ace2c578866f1691b3549a0cabb2f93` separates email/Canary model selection from daily reports.
