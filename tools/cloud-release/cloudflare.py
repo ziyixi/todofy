@@ -12,6 +12,7 @@ DO_KEYS = {
     "MailCoordinator": "mail-coordinator",
     "TodofyCore": "todofy-core-do",
     "WatchState": "watch-state",
+    "MailsortState": "mailsort-state",
 }
 
 

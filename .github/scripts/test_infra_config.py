@@ -75,6 +75,7 @@ PRODUCTION = {
     "links": "links/wrangler.toml",
     "watch": "watch/wrangler.toml",
     "fleet": "fleet/wrangler.toml",
+    "mailsort": "mailsort/wrangler.toml",
 }
 from cloud_profile import load_profile, load_resources  # noqa: E402
 
@@ -88,6 +89,10 @@ _spec.loader.exec_module(generate)
 # The activation commit records the real Access IDs/AUD and removes CHECK_ONLY in the same change.
 AHEAD_OF_DEPLOY = ({"fleet": load_profile(REPO)["platform_hostname"]}
                   if "fleet" in test_wrangler_configs.ci_changes.CHECK_ONLY else {})
+# mailsort's Access application is declared ahead of its Worker's first deploy, the same way: until "Infra apply"
+# creates it and its AUD and application id are committed (and CHECK_ONLY is emptied), its config names the host only.
+if "mailsort" in test_wrangler_configs.ci_changes.CHECK_ONLY:
+    AHEAD_OF_DEPLOY["mailsort"] = "sort." + load_profile(REPO)["zone"]
 # Hosts an Access application may still list although no wrangler.toml declares them. Empty since FlowDay's F3
 # staging host left both FlowDay applications after the F4 cutover (README.md "FlowDay"); a rollback that adds a host
 # back to an application adds it here in the same commit (test_retiring_hosts_are_exact).
@@ -288,7 +293,7 @@ class MatchesTheApps(unittest.TestCase):
         flowday = self.flowday_apps(code)
         self.assertEqual(set(flowday), {"flowday", "flowday-bypass"})
         destinations.update({key: value for key, value in flowday.items()})
-        self.assertEqual(set(owner), {"mail-hero", "todofy", "home", "links", "watch", "fleet"})
+        self.assertEqual(set(owner), {"mail-hero", "todofy", "home", "links", "watch", "fleet", "mailsort"})
         for key, uris in destinations.items():
             worker = "flowday" if key.startswith("flowday") else key
             if worker in AHEAD_OF_DEPLOY:
@@ -364,19 +369,20 @@ class MatchesTheApps(unittest.TestCase):
                 self.assertNotIn(host, code.split("# --- FlowDay")[0], "only FlowDay's applications may list it")
 
     def test_ahead_of_deploy_is_exact(self):
-        """First-phase Fleet has no fake AUD and cannot deploy before the gated Access creation."""
+        """A first-phase app (Fleet before, mailsort now) has no fake AUD and cannot deploy before the gated Access
+        creation, and neither can Home, which binds it."""
         owner = hcl_map((INFRA / "access.tf").read_text(), "owner_apps")
         self.assertEqual(set(AHEAD_OF_DEPLOY), set(test_wrangler_configs.ci_changes.CHECK_ONLY))
         for worker, host in AHEAD_OF_DEPLOY.items():
             with self.subTest(worker=worker):
                 planned = config(worker)
-                self.assertEqual(worker, "fleet")
+                self.assertIn(worker, test_wrangler_configs.ci_changes.HOME_BOUND)
                 self.assertEqual(planned["name"], worker)
                 self.assertEqual(planned["vars"]["PUBLIC_HOST"], host)
                 self.assertNotIn("ACCESS_AUDIENCE", planned["vars"])
                 self.assertEqual(planned["routes"], [{"pattern": host, "custom_domain": True}])
                 self.assertIn(f'domain = "{host}", more = []', owner[worker])
-                for output in ("fleet_deploy", "dashboard_deploy"):
+                for output in (f"{test_wrangler_configs.ci_changes.PREFIX[worker]}_deploy", "dashboard_deploy"):
                     self.assertFalse(test_wrangler_configs.ci_changes.everything()[output])
 
     def test_fleet_receipt_bypasses_only_the_exact_signed_machine_path(self):

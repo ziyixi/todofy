@@ -12,7 +12,11 @@ from cloud_profile import load_resources
 DO_KEYS = {
     "FleetState": "fleet-state", "HomeState": "home-state",
     "MailCoordinator": "mail-coordinator", "TodofyCore": "todofy-core-do", "WatchState": "watch-state",
+    "MailsortState": "mailsort-state",
 }
+# Namespaces whose Worker has not had its first deploy: Cloudflare creates the namespace then, and that release's
+# commit records its id in config/resources.toml. Until then it is neither expected nor registered.
+FIRST_DEPLOY_PENDING = {"mailsort-state"}
 OUTPUT = "dashboard/worker/src/account-inventory.json"
 BUCKET_NAME = re.compile(r"[a-z0-9][a-z0-9-]{1,61}[a-z0-9]")
 PAGE_LIMIT = 100
@@ -27,7 +31,10 @@ def expected(root=REPO):
         result["r2"].extend(b["bucket_name"] for b in config.get("r2_buckets", []))
         for binding in config.get("durable_objects", {}).get("bindings", []):
             require(binding["class_name"] in DO_KEYS, "Durable Object inventory coverage")
-            result["do"].append(identities["durable_objects"][DO_KEYS[binding["class_name"]]])
+            key = DO_KEYS[binding["class_name"]]
+            if key in FIRST_DEPLOY_PENDING and key not in identities["durable_objects"]:
+                continue
+            result["do"].append(identities["durable_objects"][key])
     extras = read_toml(root / "config/account-resources.toml")
     require(set(extras) == {"version", "r2"} and type(extras["version"]) is int
             and extras["version"] == 1 and isinstance(extras["r2"], list)

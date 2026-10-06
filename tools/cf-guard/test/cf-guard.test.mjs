@@ -399,6 +399,8 @@ test("the committed production configs: the hostnames each deploy guards", async
     "links/wrangler.toml": ["links", ["s.ziyixi.science"]],
     // The watch app's one Custom Domain since W2 (watch/docs/design.md section 11), the whole host behind Access.
     "watch/wrangler.toml": ["watch", ["watch.ziyixi.science"]],
+    // mailsort's one Custom Domain, the whole host behind the Access application "mailsort".
+    "mailsort/wrangler.toml": ["mailsort", ["sort.ziyixi.science"]],
   };
   for (const [file, [name, hosts]] of Object.entries(expected)) {
     const triggers = await readTriggers(path.join(REPO, file));

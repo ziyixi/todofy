@@ -1223,6 +1223,189 @@ jobs:
           RELEASE_SOURCE: ${{ steps.source.outputs.source_sha }}
         run: python3 tools/cloud-release/control.py record --app "$RELEASE_APP" --source-sha "$RELEASE_SOURCE" --source-root .release-source
 
+  # mailsort (mailsort/, docs in mailsort/docs/design.md): the Worker "mailsort" on the Custom Domain sort.ziyixi.science,
+  # the whole host behind the Access application "mailsort" (infra/). No D1, no R2, no service binding: everything lives
+  # in the SQLite Durable Object MailsortState, which arms its own alarm on the first owner API call or the dashboard's
+  # next status(). The owner's Gmail grant is not part of this job: the owner puts it with mailsort/deploy/mint-token.mjs,
+  # and --secrets-file keeps it (mailsort/deploy/test/secrets-kept.test.mjs). MAILSORT_MODE is the deployment's ceiling
+  # (live, shadow or off), the emergency switch.
+  mailsort-deploy:
+    name: mailsort production release
+    if: github.ref == 'refs/heads/main' && inputs.app == 'mailsort'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment:
+      name: production
+      url: ${{ steps.config.outputs.url }}
+    concurrency:
+      group: mailsort-production
+      cancel-in-progress: false
+    defaults:
+      run:
+        working-directory: .release-source/mailsort
+    env:
+      DASHBOARD_CANARY_ENABLED: ${{ vars.DASHBOARD_CANARY_ENABLED }}
+      MAIL_HERO_FORCE_SEND_PAUSED: ${{ vars.MAIL_HERO_FORCE_SEND_PAUSED }}
+      MAIL_HERO_MAINTENANCE_MODE: ${{ vars.MAIL_HERO_MAINTENANCE_MODE }}
+      MAIL_HERO_NATIVE_BACKUP_ENABLED: ${{ vars.MAIL_HERO_NATIVE_BACKUP_ENABLED }}
+      TODOFY_FORCE_PAUSE_TODOIST: ${{ vars.TODOFY_FORCE_PAUSE_TODOIST }}
+      TODOFY_GTD_REVIEW_ENABLED: ${{ vars.TODOFY_GTD_REVIEW_ENABLED }}
+      TODOFY_MAINTENANCE_MODE: ${{ vars.TODOFY_MAINTENANCE_MODE }}
+      TODOFY_PROCESSING_PAUSED: ${{ vars.TODOFY_PROCESSING_PAUSED }}
+      TODOFY_REMINDER_ENABLED: ${{ vars.TODOFY_REMINDER_ENABLED }}
+      MAILSORT_MODE: ${{ vars.MAILSORT_MODE }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Select the checked source under the release lock
+        id: source
+        working-directory: .
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_APP: ${{ inputs.app }}
+          RELEASE_SOURCE: ${{ inputs.source_sha }}
+          RELEASE_EXPECTED_MAIN: ${{ inputs.expected_main_sha }}
+          RELEASE_REPAIR: ${{ inputs.repair }}
+        run: |
+          args=()
+          if [ "$RELEASE_REPAIR" = true ]; then args+=(--repair); fi
+          if [ -n "$RELEASE_EXPECTED_MAIN" ]; then args+=(--expected-main-sha "$RELEASE_EXPECTED_MAIN"); fi
+          python3 tools/cloud-release/control.py prepare --app "$RELEASE_APP" --source-sha "$RELEASE_SOURCE" "${args[@]}"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ steps.source.outputs.source_sha }}
+          path: .release-source
+          persist-credentials: false
+      - name: Compare actual configuration and preserve owner pauses
+        id: preflight
+        working-directory: .
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          RELEASE_APP: ${{ inputs.app }}
+          RELEASE_SOURCE: ${{ steps.source.outputs.source_sha }}
+          RELEASE_REPAIR: ${{ inputs.repair }}
+          RELEASE_CHECK_ONLY: ${{ inputs.check_only }}
+        run: |
+          args=()
+          if [ "$RELEASE_REPAIR" = true ]; then args+=(--repair); fi
+          if [ "$RELEASE_CHECK_ONLY" = true ]; then args+=(--check-only); fi
+          python3 tools/cloud-release/control.py preflight --app "$RELEASE_APP" --source-sha "$RELEASE_SOURCE" --source-root .release-source "${args[@]}"
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        if: steps.preflight.outputs.required == 'true'
+        with:
+          node-version: '26'
+          cache: npm
+          cache-dependency-path: |
+            .release-source/mailsort/worker/package-lock.json
+            .release-source/mailsort/web/package-lock.json
+            .release-source/proto/package-lock.json
+      # Every static production value (account, host, Access) is committed in mailsort/wrangler.toml; the environment URL
+      # and the Access probe read it there.
+      - name: Read the host and the Access issuer from the committed config
+        if: steps.preflight.outputs.required == 'true'
+        id: config
+        run: |
+          python3 - >> "$GITHUB_OUTPUT" <<'EOF'
+          import tomllib
+          with open("wrangler.toml", "rb") as file:
+              variables = tomllib.load(file)["vars"]
+          print("url=https://" + variables["PUBLIC_HOST"])
+          print("host=" + variables["PUBLIC_HOST"])
+          print("access_issuer=" + variables["ACCESS_ISSUER"])
+          EOF
+      # The UI's build (web/dist) is the one that ships; its JavaScript budget is checked by the build.
+      - name: Build the verified revision
+        if: steps.preflight.outputs.required == 'true'
+        run: |
+          npm ci --prefix worker --no-audit --no-fund
+          npm ci --prefix web --no-audit --no-fund
+          npm run build --prefix web
+      # The owner's addresses and the CSRF key are environment secrets (masked in this public log) and reach the Worker
+      # as secrets through --secrets-file; wrangler prints plain vars. Mailsort's owner is the dashboard's owner (one
+      # person, the same Access identities), so the addresses come from the dashboard's secrets; the CSRF key is
+      # mailsort's own. The Gmail grant never comes from here. mailsort/README.md "Deploy".
+      - name: Write the Worker secrets file
+        if: steps.preflight.outputs.required == 'true'
+        working-directory: .release-source/mailsort/worker
+        env:
+          MAILSORT_WORKER_SECRETS: ${{ secrets.MAILSORT_WORKER_SECRETS }}
+          MAILSORT_ACCESS_OWNER: ${{ secrets.DASHBOARD_ACCESS_OWNER }}
+          MAILSORT_ACCESS_OWNER_ALIASES: ${{ secrets.DASHBOARD_ACCESS_OWNER_ALIASES }}
+          MAILSORT_CSRF_SIGNING_KEY: ${{ secrets.MAILSORT_CSRF_SIGNING_KEY }}
+        run: node ../deploy/deploy-vars.mjs secrets "$RUNNER_TEMP/mailsort-secrets.json"
+      # deploy-vars.mjs adds MODE and BUILD_SHA as --var and refuses a config without the Access AUD; the bundle that
+      # ships is held to the app's budget and the Workers Free limit (deploy/bundle-size.mjs).
+      - name: Validate the bundle before changing production
+        if: steps.preflight.outputs.required == 'true'
+        working-directory: .release-source/mailsort/worker
+        env:
+          MAILSORT_MODE: ${{ vars.MAILSORT_MODE }}
+        run: |
+          node ../deploy/deploy-vars.mjs exec -- npx --no-install wrangler deploy --dry-run --config ../wrangler.toml \
+            --secrets-file "$RUNNER_TEMP/mailsort-secrets.json" --outdir "$RUNNER_TEMP/mailsort-bundle"
+          node ../deploy/bundle-size.mjs "$RUNNER_TEMP/mailsort-bundle"
+      # tools/cf-guard (read-only GETs; prints listed hostnames, counts, PASS/FAIL): wrangler applies a config's Custom
+      # Domains (or zone routes) as the Worker's complete set, so stop before any production change when a live
+      # hostname would be detached or another Worker's hostname or DNS record taken over. For an intentional
+      # change, set the exact hostnames here (space-separated) in the same commit that changes wrangler.toml.
+      # sort.ziyixi.science has no DNS record before the first deploy, which attaches the Custom Domain.
+      - name: Check the hostnames against production
+        if: steps.preflight.outputs.required == 'true'
+        working-directory: .release-source
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CF_GUARD_ALLOW_REMOVE: ''
+          CF_GUARD_ALLOW_CONFLICT: ''
+        run: node tools/cf-guard/cf-guard.mjs --config mailsort/wrangler.toml
+      - name: Deploy the Worker mailsort
+        if: steps.preflight.outputs.required == 'true'
+        working-directory: .release-source/mailsort/worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          MAILSORT_MODE: ${{ vars.MAILSORT_MODE }}
+        run: |
+          test -n "$CLOUDFLARE_API_TOKEN"
+          node ../deploy/deploy-vars.mjs exec -- npx --no-install wrangler deploy --config ../wrangler.toml \
+            --secrets-file "$RUNNER_TEMP/mailsort-secrets.json"
+      # Nothing anonymous on the host shows BUILD_SHA (all of it is behind Access), so production is read through the
+      # API with the deploy token (GETs only): the Worker serves exactly one version at 100% and that version's
+      # BUILD_SHA is this commit. wrangler's JSON answers are parsed, never printed (they name the token's account
+      # email); only the version id and the result are. (FlowDay's and the links app's check without their D1 part.)
+      - name: Check that production runs this commit
+        if: steps.preflight.outputs.required == 'true'
+        working-directory: .release-source/mailsort/worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+        run: |
+          bash "$GITHUB_WORKSPACE/.release-source/tools/deploy-probes/production.sh" mailsort ../wrangler.toml
+      # Cloudflare Access ("mailsort", the whole host) must answer every unauthenticated request with a 302 to its login
+      # page for this host: the review queue /, the owner API and the settings page, exactly as the dashboard's probe
+      # checks (same script). /health is behind Access too, so no anonymous request reaches the Worker. Whether
+      # MailsortState's alarm is armed cannot be seen from here: the first owner API call and the dashboard's status()
+      # arm it (mailsort/README.md "Deploy", the post-deploy check).
+      - name: Check that Access answers unauthenticated requests
+        if: steps.preflight.outputs.required == 'true'
+        env:
+          ACCESS_ISSUER: ${{ steps.config.outputs.access_issuer }}
+          PUBLIC_HOST: ${{ steps.config.outputs.host }}
+        run: |
+          bash "$GITHUB_WORKSPACE/.release-source/tools/deploy-probes/access.sh" / /api/v1/labels /settings
+      - name: Remove the secrets file
+        if: always() && steps.preflight.outputs.required == 'true'
+        run: rm -f "$RUNNER_TEMP/mailsort-secrets.json"
+
+      - name: Verify provider identities and record successful deployment
+        if: steps.preflight.outputs.required == 'true'
+        working-directory: .
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          RELEASE_APP: ${{ inputs.app }}
+          RELEASE_SOURCE: ${{ steps.source.outputs.source_sha }}
+        run: python3 tools/cloud-release/control.py record --app "$RELEASE_APP" --source-sha "$RELEASE_SOURCE" --source-root .release-source
+
   # Fleet (Worker "fleet"): the gate verified this exact SHA; no VPS credentials or application data reach this job.
   fleet-deploy:
     name: fleet production release

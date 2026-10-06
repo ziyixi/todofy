@@ -72,10 +72,10 @@ Nothing unrelated is imported, declared, read or modelled, not even read-only.
 [`test_infra_guard.py`](../.github/scripts/test_infra_guard.py) tests the guard itself against
 configurations built to slip past it.
 
-### Managed here (31 objects)
+### Managed here (32 objects)
 
-This is the maximum declared count. Fresh bootstrap creates 29 objects before the first Worker release,
-then adds its exact mail rule (30). An adopted account retains the frozen legacy backup app (31).
+This is the maximum declared count. Fresh bootstrap creates 30 objects before the first Worker release,
+then adds its exact mail rule (31). An adopted account retains the frozen legacy backup app (32).
 Objects being retired ([Retiring an app](#retiring-an-app)) are not counted: [`retired.tf`](retired.tf) moves them
 out of the managed addresses so that the next apply deletes them.
 Older private inputs can temporarily keep the existing external IdP references; bootstrap captures and
@@ -96,6 +96,7 @@ imports their actual IDs before switching to the managed references.
 | `cloudflare_zero_trust_access_application.owner["links"]` | Access app "links" | `s.ziyixi.science/_/*` and the exact `s.ziyixi.science/_` (the launcher and owner API), session 168h, the two shared policies. The rest of the host (the short links) is deliberately not behind Access (links/docs/design.md) |
 | `cloudflare_zero_trust_access_application.owner["watch"]` | Access app "watch" | `watch.ziyixi.science` (the whole host), session 24h, the two shared policies. **Created** here before the watch app's first deploy, not imported ([Adding an app](#adding-an-app)) |
 | `cloudflare_zero_trust_access_application.owner["fleet"]` | Access app "Fleet" | Whole Fleet owner host; created before the Worker so its real AUD can be recorded |
+| `cloudflare_zero_trust_access_application.owner["mailsort"]` | Access app "mailsort" | `sort.ziyixi.science` (the whole host), session 24h, the two shared policies. **Created** here before mailsort's first deploy, not imported; its AUD and id are then committed ([Adding an app](#adding-an-app)) |
 | `cloudflare_zero_trust_access_application.fleet_receipt` | Fleet machine receipt | Only the exact `/api/internal/fleet/v1/receipt` path; Worker independently validates signed POST receipts |
 | `cloudflare_zero_trust_access_policy.fleet_receipt` | Fleet signed receipt only | Bypass policy attached only to the exact receipt application; no owner API bypass |
 | `cloudflare_zero_trust_access_service_token.platform_deploy` | Deployment machine identity | Dedicated token in encrypted state and encrypted one-time handoff; never an owner identity |

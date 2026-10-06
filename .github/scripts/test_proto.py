@@ -528,7 +528,7 @@ class Users(unittest.TestCase):
     def test_ops_descriptors_include_the_embedded_website_sync_package(self):
         imports = value_importers()
         users = {app for app, paths in imports.items() if any(path.startswith("proto/ops/") for path in paths)}
-        self.assertEqual(users, {"mail-hero", "todofy", "dashboard", "watch", "website"})
+        self.assertEqual(users, {"mail-hero", "todofy", "dashboard", "watch", "website", "mailsort"})
         for app in users:
             with self.subTest(app=app):
                 self.assertIn("proto/website/sync/v1/sync.proto", imports[app])

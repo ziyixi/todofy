@@ -81,7 +81,7 @@ class CatalogTests(unittest.TestCase):
         self.assertEqual(sync["name"], "网站同步")
         self.assertEqual(sync["status"], {"type": "ops_v1", "binding": "WEBSITE_SYNC", "guard": False})
         workers = [{key: worker[key] for key in ("script", "entry", "role")} for worker in loaded.workers]
-        self.assertEqual([worker for worker in workers if worker["script"] != "fleet"], before["workers"])
+        self.assertEqual([worker for worker in workers if worker["script"] not in {"fleet", "mailsort"}], before["workers"])
 
     def test_generated_regions_are_fresh_and_deterministic(self):
         loaded = catalog.load_catalog()
@@ -93,7 +93,7 @@ class CatalogTests(unittest.TestCase):
         self.assertEqual(set(loaded.worker_configs().values()), catalog.production_configs(catalog.REPO))
         self.assertGreaterEqual(len(loaded.workers), 10)
         self.assertEqual({app for app, data in loaded.apps.items() if data["target"] == "cloudflare"},
-                         {"todofy", "mail-hero", "dashboard", "website", "flowday", "links", "watch"}
+                         {"todofy", "mail-hero", "dashboard", "website", "flowday", "links", "watch", "mailsort"}
                          | ({"fleet"} if "fleet" in loaded.apps else set()))
         self.assertEqual(loaded.apps["newsletter"]["image"], "ghcr.io/ziyixi/todofy-newsletter")
         self.assertEqual(loaded.apps["newsletter"]["target"], "vps")

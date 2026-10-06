@@ -222,7 +222,7 @@ jobs:
       fail-fast: false
       max-parallel: 3
       matrix:
-        app: [todofy, mail-hero, dashboard, flowday, links, watch, fleet, website-relay]
+        app: [todofy, mail-hero, dashboard, flowday, links, watch, fleet, mailsort, website-relay]
     permissions:
       contents: read
       deployments: write

@@ -20,6 +20,7 @@ WORKERS = {
     "links": ["links/wrangler.toml"],
     "watch": ["watch/wrangler.toml"],
     "fleet": ["fleet/wrangler.toml"],
+    "mailsort": ["mailsort/wrangler.toml"],
     "website-relay": ["website/relay/wrangler.toml"],
 }
 MANUAL = {

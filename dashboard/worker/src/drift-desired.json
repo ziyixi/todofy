@@ -218,6 +218,11 @@
           "source": "config"
         },
         {
+          "name": "MAILSORT",
+          "type": "service",
+          "source": "config"
+        },
+        {
           "name": "MAIL_HERO",
           "type": "service",
           "source": "config"
@@ -448,6 +453,87 @@
         },
         {
           "name": "WEBHOOK_ALLOWED_HOSTS",
+          "type": "plain_text",
+          "source": "config"
+        }
+      ],
+      "personal": []
+    },
+    "mailsort": {
+      "config": "mailsort/wrangler.toml",
+      "workers_dev": false,
+      "preview_urls": false,
+      "custom_domains": [
+        "sort.ziyixi.science"
+      ],
+      "routes": [],
+      "crons": [],
+      "bindings": [
+        {
+          "name": "ACCESS_ISSUER",
+          "type": "plain_text",
+          "source": "config"
+        },
+        {
+          "name": "ACCESS_OWNER",
+          "type": "secret_text",
+          "source": "deploy"
+        },
+        {
+          "name": "ACCESS_OWNER_ALIASES",
+          "type": "secret_text",
+          "source": "deploy"
+        },
+        {
+          "name": "AI",
+          "type": "ai",
+          "source": "config"
+        },
+        {
+          "name": "ASSETS",
+          "type": "assets",
+          "source": "config"
+        },
+        {
+          "name": "BUILD_SHA",
+          "type": "plain_text",
+          "source": "deploy"
+        },
+        {
+          "name": "CSRF_SIGNING_KEY",
+          "type": "secret_text",
+          "source": "deploy"
+        },
+        {
+          "name": "GMAIL_CLIENT_ID",
+          "type": "secret_text",
+          "source": "manual",
+          "optional": true
+        },
+        {
+          "name": "GMAIL_CLIENT_SECRET",
+          "type": "secret_text",
+          "source": "manual",
+          "optional": true
+        },
+        {
+          "name": "GMAIL_REFRESH_TOKEN",
+          "type": "secret_text",
+          "source": "manual",
+          "optional": true
+        },
+        {
+          "name": "MAILSORT",
+          "type": "durable_object_namespace",
+          "source": "config"
+        },
+        {
+          "name": "MODE",
+          "type": "plain_text",
+          "source": "deploy"
+        },
+        {
+          "name": "PUBLIC_HOST",
           "type": "plain_text",
           "source": "config"
         }

@@ -39,6 +39,10 @@ resource "cloudflare_zero_trust_access_policy" "github_owner" {
 # The watch app's application exists before its Worker's first deploy (W2, watch/docs/design.md section 11): created
 # here first, its AUD is then committed as watch/wrangler.toml's ACCESS_AUDIENCE with the Custom Domain (README.md
 # "Adding an app"). It gates the whole host, like the other owner apps.
+#
+# mailsort's application ("mailsort", sort.ziyixi.science) is created the same way, ahead of its Worker's first deploy:
+# the apply creates it, then its AUD goes into config/resources.toml (tools/cloud-config/generate.py writes it into
+# mailsort/wrangler.toml), its id into ids.tf, and mailsort leaves CHECK_ONLY in .github/scripts/ci_changes.py.
 
 # The key is the Worker's name, which is also the key of the access_aud output (outputs.tf). `domain` is the first
 # destination; `more` lists any further destinations (the links app also gates the exact path /_).

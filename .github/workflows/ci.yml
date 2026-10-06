@@ -1,5 +1,5 @@
 # One workflow for the apps (Todofy, Mail Hero, the home dashboard, the website, FlowDay, the links app, the watch app,
-# Fleet, Newsletter and Platform).
+# Fleet, Newsletter, Platform and mailsort).
 # "changes" decides what changed since a cumulative base (.github/scripts/ci_changes.py), each app's checks run
 # from its own directory, "Shared packages" checks packages/* (compiled into the apps), "Contracts" runs both
 # sides of mail.received.v1, ops-v1 and task-intent-v1 plus the dashboard's ops-v1 caller tests, "Proto checks"
@@ -21,7 +21,7 @@ on:
         description: App to check and (on main) deploy
         type: choice
         # both = Todofy and Mail Hero (as before the dashboard existed); all = every app.
-        options: [both, all, todofy, mail-hero, dashboard, website, flowday, links, watch, newsletter, fleet, platform]
+        options: [both, all, todofy, mail-hero, dashboard, website, flowday, links, watch, newsletter, fleet, platform, mailsort]
         default: both
       resume_vps_release:
         description: Explicitly resume a held VPS release after investigating its safe error
@@ -63,6 +63,7 @@ jobs:
       newsletter_check: ${{ steps.decide.outputs.newsletter_check }}
       fleet_check: ${{ steps.decide.outputs.fleet_check }}
       platform_check: ${{ steps.decide.outputs.platform_check }}
+      mailsort_check: ${{ steps.decide.outputs.mailsort_check }}
       contracts: ${{ steps.decide.outputs.contracts }}
       packages: ${{ steps.decide.outputs.packages }}
       infra: ${{ steps.decide.outputs.infra }}
@@ -79,6 +80,7 @@ jobs:
       fleet_deploy: ${{ steps.decide.outputs.fleet_deploy }}
       platform_publish: ${{ steps.decide.outputs.platform_publish }}
       platform_deploy: ${{ steps.decide.outputs.platform_deploy }}
+      mailsort_deploy: ${{ steps.decide.outputs.mailsort_deploy }}
       # A push to main that reuses a green branch run of the same commit (all check outputs above are false).
       checks_reused: ${{ steps.decide.outputs.checks_reused }}
       reused_run_url: ${{ steps.decide.outputs.reused_run_url }}
@@ -789,6 +791,83 @@ jobs:
         if: always()
         run: rm -f "$RUNNER_TEMP/watch-secrets.json"
 
+  # mailsort (mailsort/: the Worker "mailsort", its Durable Object MailsortState and the UI it serves; the Gmail sorting
+  # on sort.ziyixi.science, mailsort/docs/design.md). It compiles in packages/edge-auth and the TypeScript proto runtime
+  # with proto/mailsort/ui/ and proto/ops/; Contracts runs its ops-v1 tests. Checked only (CHECK_ONLY in ci_changes.py)
+  # until its Access application exists. No step reaches Google or Workers AI: the fakes answer every request.
+  mailsort-checks:
+    name: Mailsort checks
+    needs: changes
+    if: needs.changes.outputs.mailsort_check == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: mailsort
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: '26'
+          cache: npm
+          cache-dependency-path: |
+            mailsort/worker/package-lock.json
+            mailsort/web/package-lock.json
+            proto/package-lock.json
+      - name: Install locked dependencies
+        run: |
+          npm ci --prefix worker --no-audit --no-fund
+          npm ci --prefix web --no-audit --no-fund
+      # The config test reads wrangler.toml with the pinned wrangler (worker/node_modules), hence after npm ci; the
+      # secrets test pins how that wrangler keeps the owner's Gmail grant on a deploy.
+      - name: Test the production config, the deploy values and the token script
+        run: node --test deploy/test/*.test.mjs
+      # The closed table of Gmail operations (every recorded call against an independent copy, and a fuzz), masking,
+      # DMARC, the decision, Clef's strict answer, the Wilson bound and ops-v1's golden bytes.
+      - name: Lint, typecheck and test the Worker
+        working-directory: mailsort/worker
+        run: |
+          npm run lint
+          npm run typecheck
+          npm test
+      # A real SQLite MailsortState with the fake Gmail and fake Workers AI behind Miniflare's outbound service (no
+      # network): the pipeline in shadow and live, unsure, undo, feedback into examples and rule proposals, trust labels,
+      # the resync, the auth stop, the Clef-flash switch, the quota deferral, the breaker, the owner API, ops-v1 over a
+      # service binding, and the CPU of the fetch handler and of MailsortState (its alarm path at its bounds) against
+      # bounds scaled by the machine's measured speed (tools/workerd-cpu).
+      - name: Runtime tests (workerd with a real Durable Object)
+        working-directory: mailsort/worker
+        run: npm run test:runtime
+      - name: Lint, typecheck, test and build the UI
+        working-directory: mailsort/web
+        run: |
+          npm run lint
+          npm run typecheck
+          npm test
+          npm run build
+      # The real wrangler dev (wrangler.test.toml, local bindings, no AI binding) against the fakes on loopback: the owner's
+      # whole loop through the HTTP API, every Google request checked against the table.
+      - name: Smoke run against wrangler dev with the fake Gmail and fake Workers AI
+        working-directory: mailsort/worker
+        run: npm run test:smoke
+      - name: Dry-run the committed config and check the bundle size
+        working-directory: mailsort/worker
+        env:
+          MAILSORT_ACCESS_OWNER: owner@example.com
+          MAILSORT_ACCESS_OWNER_ALIASES: ''
+          MAILSORT_CSRF_SIGNING_KEY: '0000000000000000000000000000000000000000000000000000000000000000'
+          MAILSORT_MODE: shadow
+        run: |
+          node ../deploy/deploy-vars.mjs secrets "$RUNNER_TEMP/mailsort-secrets.json"
+          node ../deploy/deploy-vars.mjs exec -- npx --no-install wrangler deploy --dry-run --config ../wrangler.toml \
+            --secrets-file "$RUNNER_TEMP/mailsort-secrets.json" --outdir "$RUNNER_TEMP/mailsort-bundle"
+          node ../deploy/bundle-size.mjs "$RUNNER_TEMP/mailsort-bundle"
+      - name: Remove the placeholder secrets file
+        if: always()
+        run: rm -f "$RUNNER_TEMP/mailsort-secrets.json"
+
   fleet-checks:
     name: Fleet checks
     needs: changes
@@ -873,6 +952,7 @@ jobs:
             dashboard/worker/package-lock.json
             watch/worker/package-lock.json
             fleet/worker/package-lock.json
+            mailsort/worker/package-lock.json
             proto/package-lock.json
       - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
@@ -945,6 +1025,14 @@ jobs:
         run: |
           npm ci --no-audit --no-fund
           npx --no-install vitest run test/task-intent-contract.test.ts test/todofy.test.ts test/ops-golden.test.ts
+
+      # ops-v1: mailsort's status and guard answers keep their golden bytes and the contract's mailsort fixtures, pass the
+      # generated schema, and carry counts and codes only. Host only; Mailsort checks runs the entrypoint in workerd.
+      - name: Mailsort answers ops-v1 as declared
+        working-directory: mailsort/worker
+        run: |
+          npm ci --no-audit --no-fund
+          npx --no-install vitest run test/ops-golden.test.ts
 
       # Both ends of the signed content-free report validate the synthetic telemetry contract.
       # Home's caller step above also checks Fleet and Newsletter ops-v1 values; runtime tests live in Fleet checks.
@@ -1326,7 +1414,7 @@ jobs:
 
   gate:
     name: CI gate
-    needs: [changes, shared-packages, todofy-static, todofy-runtime, todofy-checks, mail-hero-checks, dashboard-checks, website-checks, flowday-checks, links-checks, watch-checks, fleet-checks, newsletter-checks, newsletter-image, platform-checks, contracts, infra-checks, proto-checks]
+    needs: [changes, shared-packages, todofy-static, todofy-runtime, todofy-checks, mail-hero-checks, dashboard-checks, website-checks, flowday-checks, links-checks, watch-checks, fleet-checks, mailsort-checks, newsletter-checks, newsletter-image, platform-checks, contracts, infra-checks, proto-checks]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -1345,6 +1433,7 @@ jobs:
           LINKS: ${{ needs.links-checks.result }}
           WATCH: ${{ needs.watch-checks.result }}
           FLEET: ${{ needs.fleet-checks.result }}
+          MAILSORT: ${{ needs.mailsort-checks.result }}
           NEWSLETTER: ${{ needs.newsletter-checks.result }}
           NEWSLETTER_IMAGE: ${{ needs.newsletter-image.result }}
           PLATFORM: ${{ needs.platform-checks.result }}
@@ -1365,7 +1454,7 @@ jobs:
           failed=0
           for pair in "Changes=$CHANGES" "Shared packages=$PACKAGES" "Todofy static checks=$TODOFY_STATIC" \
             "Todofy runtime=$TODOFY_RUNTIME" "Todofy checks=$TODOFY" "Mail Hero checks=$MAIL_HERO" \
-            "Dashboard checks=$DASHBOARD" "Website checks=$WEBSITE" "FlowDay checks=$FLOWDAY" "Links checks=$LINKS" "Watch checks=$WATCH" "Fleet checks=$FLEET" \
+            "Dashboard checks=$DASHBOARD" "Website checks=$WEBSITE" "FlowDay checks=$FLOWDAY" "Links checks=$LINKS" "Watch checks=$WATCH" "Fleet checks=$FLEET" "Mailsort checks=$MAILSORT" \
             "Newsletter checks=$NEWSLETTER" "Newsletter image checks=$NEWSLETTER_IMAGE" "Platform checks=$PLATFORM" \
             "Contracts=$CONTRACTS" "Infra checks=$INFRA" "Proto checks=$PROTO"; do
             echo "$pair"
@@ -1632,10 +1721,10 @@ jobs:
 
   dashboard-deploy:
     name: Dashboard deploy
-    # After the app deploys: the service bindings MAIL_HERO, TODOFY, WATCH and FLEET name their "Ops" entrypoints, which
-    # must be live first. An app deploy that did not run (nothing of that app changed) is fine; one that
+    # After the app deploys: the service bindings MAIL_HERO, TODOFY, WATCH, FLEET and MAILSORT name their "Ops"
+    # entrypoints, which must be live first. An app deploy that did not run (nothing of that app changed) is fine; one that
     # failed or was cancelled stops this job.
-    needs: [changes, dashboard-checks, gate, todofy-deploy, mail-hero-deploy, watch-deploy, fleet-deploy, website-relay-deploy]
+    needs: [changes, dashboard-checks, gate, todofy-deploy, mail-hero-deploy, watch-deploy, fleet-deploy, mailsort-deploy, website-relay-deploy]
     # Explicit status function and results, as for Todofy deploy (implicit success() and skipped ancestors).
     if: >-
       ${{ !cancelled()
@@ -1646,6 +1735,7 @@ jobs:
       && (needs.mail-hero-deploy.result == 'success' || needs.mail-hero-deploy.result == 'skipped')
       && (needs.watch-deploy.result == 'success' || needs.watch-deploy.result == 'skipped')
       && (needs.fleet-deploy.result == 'success' || needs.fleet-deploy.result == 'skipped')
+      && (needs.mailsort-deploy.result == 'success' || needs.mailsort-deploy.result == 'skipped')
       && (needs.website-relay-deploy.result == 'success' || needs.website-relay-deploy.result == 'skipped')
       && github.ref == 'refs/heads/main'
       && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
@@ -1720,6 +1810,27 @@ jobs:
     uses: ./.github/workflows/worker-release.yml
     with:
       app: watch
+      source_sha: ${{ github.sha }}
+    secrets: inherit
+
+  mailsort-deploy:
+    name: Mailsort deploy
+    needs: [changes, mailsort-checks, gate]
+    # Explicit status function and results, as for Todofy deploy (implicit success() and skipped ancestors).
+    if: >-
+      ${{ !cancelled()
+      && needs.changes.result == 'success'
+      && (needs.mailsort-checks.result == 'success' || (needs.changes.outputs.checks_reused == 'true' && needs.mailsort-checks.result == 'skipped'))
+      && needs.gate.result == 'success'
+      && github.ref == 'refs/heads/main'
+      && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+      && needs.changes.outputs.mailsort_deploy == 'true' }}
+    permissions:
+      contents: read
+      deployments: write
+    uses: ./.github/workflows/worker-release.yml
+    with:
+      app: mailsort
       source_sha: ${{ github.sha }}
     secrets: inherit
 

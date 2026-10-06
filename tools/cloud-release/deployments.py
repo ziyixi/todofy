@@ -13,6 +13,7 @@ APPS = {
     "links",
     "watch",
     "fleet",
+    "mailsort",
     "website-relay",
     "platform",
     "website",
