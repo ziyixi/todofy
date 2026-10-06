@@ -14,7 +14,7 @@
 //   the wire profile (toWire, JSON.stringify).
 //
 // The calls are the overview (the UI's first request), the three methods that make a delivery (SendMessage,
-// ResendDelivery, TestEndpoint), the lists and reads the UI opens, one update with a field mask, and the two reads the
+// ResendDelivery, TestEndpoint), the lists and reads the UI opens, one update with a field mask, and the two RPCs the
 // coordinator answers (GetMessageContent, SummarizeDeliveryAttempts): the coordinator's Durable Object runs this same
 // module, so its isolate is warmed too. Each round also builds one Ops status (ops-core.ts buildStatus: the coordinator's
 // GuardState read strictly, the OpsStatus written by the wire codec), the codec path of Home's status() call, which

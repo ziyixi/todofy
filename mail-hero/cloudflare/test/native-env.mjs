@@ -63,7 +63,7 @@ export function environment() {
       if (new URL(url).pathname === '/mutation/begin') return Response.json({id: crypto.randomUUID()})
       // The coordinator creates the deliveries a request asks for (requestDelivery), with the same env here.
       if (new URL(url).pathname === '/deliveries/create') return handleDeliveryRequest(env, new Request(url, init))
-      // ...and answers the owner API's heavy reads the Worker forwards (api.ts DELEGATED).
+      // ...and answers the owner API's heavy reads and attachment downloads the Worker forwards (api.ts).
       if (new URL(url).pathname.startsWith(DELEGATED_PREFIX + '/')) return handleDelegated(new Request(url, init), env)
       if (new URL(url).pathname === '/wake') wakes.push(Date.now())
       if (new URL(url).pathname === '/enqueue') jobs.push({ url: String(url), body: init?.body ? JSON.parse(init.body) : null })

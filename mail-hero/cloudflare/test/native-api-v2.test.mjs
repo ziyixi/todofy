@@ -261,7 +261,7 @@ test('the typed client the UI uses round-trips every kind of call through the tr
   await assert.rejects(client.getEndpoint({ name: `endpoints/${crypto.randomUUID()}` }), error => error instanceof RpcStatusError && error.status.reason === 'NOT_FOUND')
 })
 
-test('the coordinator answers the two heavy reads the Worker forwards, and nothing else', async () => {
+test('the coordinator answers the two heavy reads the Worker forwards, and 404s the owner routes it does not serve', async () => {
   const env = environment(), api = await session(env), id = await message(env)
   const forwarded = []
   const get = env.COORDINATOR.get

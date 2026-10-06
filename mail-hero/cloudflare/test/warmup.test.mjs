@@ -24,7 +24,7 @@ test('the warm-up runs without bindings, every call routed to its own method', (
     assert.ok(JSON.parse(answer) !== null && typeof JSON.parse(answer) === 'object', name)
   }
   // The heaviest first requests are warmed: the overview (the UI's first), the three that make a delivery, the lists and reads,
-  // and the two reads the coordinator answers.
+  // and the two RPCs the coordinator answers.
   for (const name of ['getOverview', 'sendMessage', 'resendDelivery', 'testEndpoint', 'listMessages', 'getMessage', 'listDeliveries', 'getDelivery',
     'getMessageContent', 'summarizeDeliveryAttempts']) assert.ok(Object.hasOwn(WARM_CALLS, name), name)
   // Each request carries what the UI sends: the path's name and the body's fields.

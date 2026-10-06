@@ -19,7 +19,7 @@ function validJob(value:unknown):value is Job {
 /** A SQLite-backed Durable Object is the durable scheduler, not the content DB.
  * Only alarms perform background work. fetch records intents or wakes it, creates the delivery a Worker request
  * asks for (/deliveries/create: building an event takes more CPU than a Worker request has on Workers Free), and answers
- * the owner API's two heavy reads for the same reason (api.ts DELEGATED). */
+ * the owner API's two heavy reads and streams attachment downloads, for the same reason (api.ts). */
 export class MailCoordinator {
   private readonly state:DurableObjectState;
   private readonly env:Env;
@@ -71,7 +71,7 @@ export class MailCoordinator {
   }
   async fetch(request:Request):Promise<Response> {
     const path=new URL(request.url).pathname;
-    // The owner API's heavy reads, which the Worker forwards after authentication (api.ts DELEGATED).
+    // The owner API's heavy reads and attachment downloads, which the Worker forwards after authentication (api.ts).
     if(path.startsWith(DELEGATED_PREFIX+'/')) return handleDelegated(request,this.env);
     if (path==='/mutation/begin' || path==='/backup/begin') {
       try { await this.capacity.initialize(); } catch { await this.state.storage.setAlarm(Date.now()+1000); return new Response(null,{status:503}); }

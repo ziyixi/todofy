@@ -67,9 +67,10 @@ Todofy's gateway sends decoded wire JSON over `COORDINATOR.owner_ui` to the Pyth
 strictly and returns a generated response. The gateway reads that response and writes the wire JSON again.
 
 Mail Hero's raw/attachment byte streams stay outside the transcoder under the same authentication and
-`no-store`/`nosniff`/Content-Disposition headers. Its two heavy reads run the same transcoder in its DO.
-Its backup machine API is a separate surface. Todofy's webhook, reports and health retain their transport,
-paths and authentication in [machine-api-v1.openapi.yaml](../todofy/api/machine-api-v1.openapi.yaml).
+`no-store`/`nosniff`/Content-Disposition headers. Its two heavy reads run the same transcoder in its DO,
+which also streams attachment bytes. Its backup machine API is a separate surface. Todofy's webhook,
+reports and health retain their transport, paths and authentication in
+[machine-api-v1.openapi.yaml](../todofy/api/machine-api-v1.openapi.yaml).
 
 Platform's separate `platform.runtime.v1` machine API owns bounded node/workload reads and persisted
 Create/Get/Resume release operations under `/api/v1/`. Actions sends frozen workload keys, source SHA,

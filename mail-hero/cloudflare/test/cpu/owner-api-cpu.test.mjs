@@ -161,7 +161,8 @@ function start(script, outbound, keys) {
 
 /**
  * One isolate pair's session: the isolate's first API request, then every request's first run and warm runs, measured in
- * the Worker's isolate and, for the two delegated reads, in the coordinator's too (each number pushed to coordinatorCpu).
+ * the Worker's isolate and, for the reads the coordinator answers (the two delegated reads and the attachment download), in
+ * the coordinator's too (each number pushed to coordinatorCpu).
  */
 async function session({ meters, db, ids, events, get, mutate }, coordinatorCpu) {
   const worker = meters.get('mail-hero'), coordinator = meters.get('mail-hero-coordinator')
