@@ -143,7 +143,7 @@ describe('Newsletter process and release projection', () => {
       code: 'newsletter_unknown', severity: 'info', metrics: { unknown_count: 4, unknown_revision: 7 },
     });
     expect(view.signals).toContainEqual({
-      code: 'newsletter_side_effect_unknown', severity: 'warning', metrics: { count: 2 },
+      code: 'newsletter_side_effect_unknown', severity: 'warning', metrics: { count: 2, unknown_revision: 7 },
     });
     expect(view.signals.map((item) => item.code)).not.toContain('newsletter_unavailable');
     expect(view.counters).toMatchObject({ unknown_interrupted_activities: 2, unknown_delivery: 1 });
@@ -184,14 +184,14 @@ describe('Newsletter process and release projection', () => {
     const { report } = historicalUnknown({ delivery: 1, packets: 2, notion_entities: 3, notion_versions: 4, workflow_attempts: 5 });
     const view = newsletterStatus(report);
     expect(view.health).toBe('ok');
-    expect(view.signals[0]).toEqual({ code: 'newsletter_side_effect_unknown', severity: 'warning', metrics: { count: 10 } });
+    expect(view.signals[0]).toEqual({ code: 'newsletter_side_effect_unknown', severity: 'warning', metrics: { count: 10, unknown_revision: 7 } });
   });
   it('treats every record of an unclassified legacy report as a possible side effect', () => {
     const report = structuredClone(fixture);
     report.newsletter.unknown_count = 2;
     expect(newsletterStatus(report).signals).toContainEqual({ code: 'newsletter_side_effect_unknown', severity: 'warning', metrics: { count: 2 } });
   });
-  it('keeps the side-effect fingerprint stable as the heartbeat ages and changes it with the count', () => {
+  it('keeps the side-effect batch stable as the heartbeat ages and names a new batch by revision', () => {
     const { report, item } = historicalUnknown({ delivery: 1, workflow_attempts: 31 });
     const before = newsletterStatus(report);
     const later = statusSnapshot('newsletter', read(report), NOW, NOW + 60_000, 'fleet.example.test');
@@ -202,7 +202,7 @@ describe('Newsletter process and release projection', () => {
     report.newsletter.unknown_revision = 8;
     item.unknown_count = 33;
     const changed = newsletterStatus(report);
-    expect(changed.signals).toContainEqual({ code: 'newsletter_side_effect_unknown', severity: 'warning', metrics: { count: 2 } });
+    expect(changed.signals).toContainEqual({ code: 'newsletter_side_effect_unknown', severity: 'warning', metrics: { count: 2, unknown_revision: 8 } });
     expect(changed.counters.unknown_count).toBe(33);
   });
   it.each(['unknown', 'unhealthy', 'unsupported'] as const)('keeps %s runtime health unavailable despite unknown results', (health) => {

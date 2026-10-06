@@ -40,26 +40,31 @@ async function advance(step: number): Promise<void> {
 }
 
 describe('persistent occurrence controls', () => {
-  it('does not reopen a dismissed batch on count reduction or an equal-count replacement without a new revision', async () => {
+  // Current Fleet warns with newsletter_side_effect_unknown; an older Fleet still warns with newsletter_unknown.
+  it.each([
+    ['newsletter_side_effect_unknown', 'count'],
+    ['newsletter_unknown', 'unknown_count'],
+  ] as const)('does not reopen a dismissed %s batch on count reduction or an equal-count replacement without a new revision', async (code, metric) => {
     h = await start();
     const observe = async (count: number, revision: number, step: number) => {
       await activeHarness().answer('newsletter', 'status', { value: await status('newsletter', {
-        health: 'ok', signals: count === 0 ? [] : [{ code: 'newsletter_unknown', severity: 'warning', metrics: { unknown_count: count, unknown_revision: revision } }],
+        health: 'ok', signals: count === 0 ? [] : [{ code, severity: 'warning', metrics: { [metric]: count, unknown_revision: revision } }],
         counters: { unknown_count: count, unknown_revision: revision },
       }) });
       await advance(step);
     };
+    const open = async () => (await home()).attention.items.some(item => item.code === code);
     await observe(34, 34, 0);
-    const item = (await home()).attention.items.find(item => item.code === 'newsletter_unknown');
+    const item = (await home()).attention.items.find(item => item.code === code);
     if (!item) throw new Error('missing synthetic warning');
     expect((await change(item, 'dismiss')).status).toBe(200);
     await observe(32, 34, 1);
-    expect((await home()).attention.items.some(item => item.code === 'newsletter_unknown')).toBe(false);
+    expect(await open()).toBe(false);
     await observe(0, 34, 2);
     await observe(32, 34, 3);
-    expect((await home()).attention.items.some(item => item.code === 'newsletter_unknown')).toBe(false);
+    expect(await open()).toBe(false);
     await observe(32, 35, 4);
-    expect((await home()).attention.items.some(item => item.code === 'newsletter_unknown')).toBe(true);
+    expect(await open()).toBe(true);
   });
 
   it('dismisses across restart/views without changing facts, and reports only on a later scheduled tick', async () => {

@@ -69,7 +69,7 @@ import {
   type DriftRunDoc,
 } from './drift.ts';
 import { attentionView, freshStatus, targetOf, type EvalInput } from './evaluate.ts';
-import { ATTENTION_ROW_LIMIT, ATTENTION_SCHEMA, AttentionState, type AttentionCondition } from './attention-state.ts';
+import { ATTENTION_ROW_LIMIT, ATTENTION_SCHEMA, AttentionState, NEWSLETTER_BATCH_CODES, type AttentionCondition } from './attention-state.ts';
 import type { Attention, AttentionItem, Badges } from './api-types.ts';
 import { OPS_APPS, opsCanaryDelivery, opsCanaryResult, opsReportOps, opsSetGuard, opsStartCanary, opsStatus } from './ops-client.ts';
 import { callWebsiteRequest, unconfirmedWebsiteRequest } from './website-sync.ts';
@@ -860,7 +860,7 @@ export class HomeState extends DurableObject<Env> {
       const app = condition.source as OpsApp, doc = evaluation.statuses[app], status = freshStatus(doc, now);
       if (doc?.ok !== true || status === null) return false;
       // Stable batches retain their disposition even through a temporary zero count.
-      if (condition.code === 'newsletter_unknown') return status.counters.unknown_revision === undefined && status.counters.unknown_count === 0;
+      if (NEWSLETTER_BATCH_CODES.includes(condition.code)) return status.counters.unknown_revision === undefined && status.counters.unknown_count === 0;
       if (condition.code === 'guard_apply_failed') return this.applied(app).last_call_at !== null && this.applied(app).consecutive_failures === 0;
       if (status.health === 'down' || status.signals.some((signal) => signal.code.endsWith('_unavailable') || ['host_never_seen', 'host_stale', 'host_missing'].includes(signal.code))) return false;
       return true;

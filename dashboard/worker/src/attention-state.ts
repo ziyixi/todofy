@@ -29,13 +29,15 @@ export function attentionName(item: AttentionCondition): string {
 
 /** Duration/usage metrics fluctuate inside an episode. Only an explicit semantic count changes it. */
 const CONDITION_METRICS: Readonly<Record<string, readonly string[]>> = {
-  newsletter_unknown: ['unknown_count'],
+  newsletter_unknown: ['unknown_count'], newsletter_side_effect_unknown: ['count'],
   parse_failed: ['count'], delivery_failed: ['count'], policy_error: ['count'], send_unsettled: ['count'],
   notify_unsettled: ['open', 'failed'], watches_broken: ['count'],
 };
+/** Newsletter record batches: a new revision means new records, a lower count alone does not. */
+export const NEWSLETTER_BATCH_CODES: readonly string[] = ['newsletter_unknown', 'newsletter_side_effect_unknown'];
 function signature(item: AttentionItem): string {
   const fields = Object.hasOwn(CONDITION_METRICS, item.code) ? CONDITION_METRICS[item.code] ?? [] : [];
-  const counts = item.code === 'newsletter_unknown' && item.metrics.unknown_revision !== undefined
+  const counts = NEWSLETTER_BATCH_CODES.includes(item.code) && item.metrics.unknown_revision !== undefined
     ? [item.metrics.unknown_revision] : fields.map((key) => item.metrics[key] ?? null);
   const completedRun = (item.code.startsWith('canary_') || item.code === 'newsletter_delivery_rejected' || item.source === 'notion-publish') ? item.since : null;
   return JSON.stringify([item.severity, item.observed ?? null, counts, completedRun]);

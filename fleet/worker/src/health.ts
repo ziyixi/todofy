@@ -28,16 +28,13 @@ function newsletterOutcomes(newsletter: Report['newsletter'], now: number): ops.
   if (deliveryOverdue(newsletter, now)) signals.push({ code: 'newsletter_delivery_overdue', severity: 'warning', ...since, metrics: {} });
 
   const unknownCount = newsletter.unknown_count ?? 0;
-  if (unknownCount > 0) {
-    signals.push({ code: 'newsletter_unknown', severity: 'info', metrics: {
-      unknown_count: unknownCount,
-      ...(newsletter.unknown_revision == null ? {} : { unknown_revision: newsletter.unknown_revision }),
-    } });
-  }
+  // The revision names the batch, so Home reopens a dismissed reminder only when new records appear.
+  const revision = newsletter.unknown_revision == null ? {} : { unknown_revision: newsletter.unknown_revision };
+  if (unknownCount > 0) signals.push({ code: 'newsletter_unknown', severity: 'info', metrics: { unknown_count: unknownCount, ...revision } });
   const byKind = newsletter.unknown_by_kind;
   // A legacy observer does not classify, so every unknown record may be a side effect.
   const sideEffects = byKind ? SIDE_EFFECT_KINDS.reduce((sum, kind) => sum + (byKind[kind] ?? 0), 0) : unknownCount;
-  if (sideEffects > 0) signals.push({ code: 'newsletter_side_effect_unknown', severity: 'warning', metrics: { count: sideEffects } });
+  if (sideEffects > 0) signals.push({ code: 'newsletter_side_effect_unknown', severity: 'warning', metrics: { count: sideEffects, ...revision } });
   return signals;
 }
 

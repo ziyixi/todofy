@@ -73,7 +73,7 @@ describe('real workerd SQLite receipt persistence', () => {
     expect(await h.status('newsletter', AT)).toMatchObject({
       health: 'ok',
       signals: [
-        { code: 'newsletter_side_effect_unknown', severity: 'warning', metrics: { count: 2 } },
+        { code: 'newsletter_side_effect_unknown', severity: 'warning', metrics: { count: 2, unknown_revision: 7 } },
         { code: 'newsletter_delivery_accepted', severity: 'info' },
         { code: 'newsletter_unknown', severity: 'info', metrics: { unknown_count: 32, unknown_revision: 7 } },
       ],
@@ -89,7 +89,7 @@ describe('real workerd SQLite receipt persistence', () => {
     expect((await h.send(report)).status).toBe(200);
     expect(await h.status('newsletter', AT)).toMatchObject({
       signals: [
-        { code: 'newsletter_side_effect_unknown', severity: 'warning', metrics: { count: 3 } },
+        { code: 'newsletter_side_effect_unknown', severity: 'warning', metrics: { count: 3, unknown_revision: 8 } },
         { code: 'newsletter_delivery_accepted', severity: 'info' },
         { code: 'newsletter_unknown', severity: 'info', metrics: { unknown_count: 33, unknown_revision: 8 } },
       ],
