@@ -72,15 +72,19 @@ class Unresolved(Exception):
 
 
 class Unanchored(Exception):
-    """A path built from a value the module never binds, such as a parameter (pytest's tmp_path)."""
+    """A path built from a function parameter, such as pytest's tmp_path."""
+
+
+PARAMETER, OPAQUE = object(), object()
 
 
 def python_paths(source: str, file: Path) -> list[Path]:
     """Every path a module adds to sys.path or loads with spec_from_file_location.
 
-    Names are followed in source order within their scope (ROOT = Path(__file__).resolve().parents[2], then
-    path /= "x"). A path built from a value the module never binds is not the module's own reach and is skipped; any
-    other form raises Unresolved, so a new way of reaching another directory is looked at instead of passing silently.
+    Names are followed in source order within their scope (ROOT = Path(__file__).resolve().parents[2], or
+    ROOT: Path = ..., then path /= "x"). A path built from a function parameter (pytest's tmp_path) is not the
+    module's own reach and is skipped. Any other form, a name bound by a tuple, for, with or import among them, raises
+    Unresolved, so a new way of reaching another directory is looked at instead of passing silently.
     """
 
     def constant(node: ast.expr) -> str:
@@ -94,9 +98,12 @@ def python_paths(source: str, file: Path) -> list[Path]:
         if isinstance(node, ast.Name):
             if node.id == "__file__":
                 return file
-            if scope.get(node.id) is None:
+            bound = scope.get(node.id, OPAQUE)
+            if bound is PARAMETER:
                 raise Unanchored(node.id)
-            return evaluate(scope[node.id], scope, depth + 1)
+            if bound is OPAQUE:
+                raise Unresolved(node.id)
+            return evaluate(bound, scope, depth + 1)
         if isinstance(node, ast.Call):
             function = ast.unparse(node.func)
             if function in PATH_CALLS and len(node.args) == 1:
@@ -126,30 +133,47 @@ def python_paths(source: str, file: Path) -> list[Path]:
 
     class Reader(ast.NodeVisitor):
         def __init__(self):
-            self.scope: dict[str, ast.expr | None] = {}
+            # A name maps to the expression it was last assigned, PARAMETER or OPAQUE; a missing name is OPAQUE.
+            self.scope: dict[str, object] = {}
 
         def visit_FunctionDef(self, node):
             outer = self.scope
             # Closures see the module's names; parameters shadow them with an unknown value.
-            self.scope = {**outer, **{arg.arg: None for arg in ast.walk(node.args) if isinstance(arg, ast.arg)}}
+            self.scope = {**outer, **{arg.arg: PARAMETER for arg in ast.walk(node.args) if isinstance(arg, ast.arg)}}
             self.generic_visit(node)
             self.scope = outer
 
         visit_AsyncFunctionDef = visit_FunctionDef
         visit_Lambda = visit_FunctionDef
 
+        # Any binding not followed below (a tuple target, for, with, an import) leaves its names OPAQUE.
+        def visit_Name(self, node):
+            if isinstance(node.ctx, ast.Store):
+                self.scope[node.id] = OPAQUE
+
+        def visit_alias(self, node):
+            self.scope[node.asname or node.name.split(".")[0]] = OPAQUE
+
         def visit_Assign(self, node):
             self.generic_visit(node)
             for target in node.targets:
-                for name in ast.walk(target):
-                    if isinstance(name, ast.Name):
-                        self.scope[name.id] = node.value if target is name else None
+                if isinstance(target, ast.Name):
+                    self.scope[target.id] = node.value
+
+        def visit_AnnAssign(self, node):
+            self.generic_visit(node)
+            if isinstance(node.target, ast.Name) and node.value:
+                self.scope[node.target.id] = node.value
+
+        visit_NamedExpr = visit_AnnAssign
 
         def visit_AugAssign(self, node):
+            previous = self.scope.get(node.target.id, OPAQUE) if isinstance(node.target, ast.Name) else OPAQUE
             self.generic_visit(node)
-            if isinstance(node.target, ast.Name):
-                previous = self.scope.get(node.target.id)
-                self.scope[node.target.id] = None if previous is None else ast.BinOp(previous, node.op, node.value)
+            if isinstance(previous, ast.expr):
+                self.scope[node.target.id] = ast.BinOp(previous, node.op, node.value)
+            elif isinstance(node.target, ast.Name):
+                self.scope[node.target.id] = previous
 
         def visit_Call(self, node):
             self.generic_visit(node)
@@ -328,6 +352,8 @@ class Rules(unittest.TestCase):
             "from pathlib import Path\n"
             "ROOT = Path(__file__).resolve().parents[3]\n"
             "sys.path.insert(0, str(ROOT / 'tools/cloud-release'))\n"
+            "TYPED: Path = Path(__file__).resolve().parents[3]\n"
+            "sys.path.insert(0, str(TYPED / 'todofy' / 'core'))\n"
             "sys.path.append(os.path.join(os.path.dirname(__file__), 'lib'))\n"
             "importlib.util.spec_from_file_location('m', Path(__file__).with_name('m.py'))\n"
             "def load(tmp_path):\n"
@@ -338,8 +364,25 @@ class Rules(unittest.TestCase):
         )
         self.assertEqual(
             python_paths(source, file),
-            [REPO / "tools" / "cloud-release", file.parent / "lib", file.with_name("m.py"), REPO / "mail-hero" / "x.py"],
+            [
+                REPO / "tools" / "cloud-release",
+                REPO / "todofy" / "core",
+                file.parent / "lib",
+                file.with_name("m.py"),
+                REPO / "mail-hero" / "x.py",
+            ],
         )
+        # Bindings the reader does not follow fail loudly instead of passing as if they were a parameter.
+        for binding in (
+            "ROOT, HERE = Path(__file__).resolve().parents[3], Path(__file__).parent",
+            "from paths import ROOT",
+            "for ROOT in [Path(__file__).parents[3]]: pass",
+            "with open(__file__) as ROOT: pass",
+            "ROOT = Path(__file__)\nROOT, _ = somewhere()",
+        ):
+            with self.subTest(binding=binding), self.assertRaises(Unresolved):
+                source = f"import sys\nfrom pathlib import Path\n{binding}\nsys.path.insert(0, str(ROOT / 'x'))\n"
+                python_paths(source, file)
         with self.assertRaises(Unresolved):
             python_paths("import sys\nsys.path.insert(0, somewhere())\n", file)
 
