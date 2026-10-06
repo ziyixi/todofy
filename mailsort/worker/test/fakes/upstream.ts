@@ -31,7 +31,8 @@ export class FakeUpstream {
         return Response.json({ error: error instanceof Error ? error.message : 'ai_error' }, { status: 500 });
       }
     }
-    const original = request.headers.get(ORIGINAL_URL_HEADER);
+    // The development fetch sends the real URL in a header; without the bypass (the CPU test) the URL is Google's itself.
+    const original = request.headers.get(ORIGINAL_URL_HEADER) ?? (/^https:\/\/(gmail|oauth2)\.googleapis\.com\//.test(request.url) ? request.url : null);
     if (original === null) {
       this.strays.push(`${request.method} ${request.url}`);
       return new Response('stray', { status: 502 });

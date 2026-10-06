@@ -72,3 +72,9 @@ export const MAILS = {
   bankEn: { id: 'a0000000000000a8', from: 'Example Bank <statements@bank.example.com>', subject: 'Your monthly bank statement', text: 'Your bank account statement for September is ready.' },
   sent: { id: 'a0000000000000a9', from: 'Owner <owner@example.com>', subject: 'Re: order', text: 'Thanks!', labels: ['SENT'] },
 } as const satisfies Record<string, SyntheticMail>;
+
+/** The message as the Gmail API writes it (internalDate a string): what gmail.ts reads. */
+export function apiMessage(mail: SyntheticMail): { id: string; threadId: string; labelIds: string[]; snippet: string; internalDate: string; payload: unknown } {
+  const built = message(mail);
+  return { ...built, internalDate: String(built.internalDate) };
+}

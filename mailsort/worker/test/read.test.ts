@@ -7,7 +7,7 @@ import { dmarcAligned } from '../src/dmarc.ts';
 import { BODY_CHARS } from '../src/limits.ts';
 import { aliasCode, cut, features, firstMailbox, listIdOf, mask, summaryOf } from '../src/mask.ts';
 import { bodyText, decodeBase64Url, readMessage, stripHtml } from '../src/mime.ts';
-import { MAILS, message } from './fakes/fixtures.ts';
+import { apiMessage, MAILS } from './fakes/fixtures.ts';
 
 describe('masking', () => {
   it('replaces addresses, long digit runs and URLs (to their domain)', () => {
@@ -59,8 +59,8 @@ describe('MIME', () => {
   });
 
   it('prefers text/plain and falls back to stripped HTML', () => {
-    expect(readMessage(message({ ...MAILS.receiptEn }))?.body).toContain('Thank you for your order');
-    const html = message({ id: 'b0000000000000b1', from: 'x@example.com', subject: 's', html: '<html><head><style>p{}</style><script>alert(1)</script></head><body><p>Hello&nbsp;<b>there</b> &amp; you</p></body></html>' });
+    expect(readMessage(apiMessage({ ...MAILS.receiptEn }))?.body).toContain('Thank you for your order');
+    const html = apiMessage({ id: 'b0000000000000b1', from: 'x@example.com', subject: 's', html: '<html><head><style>p{}</style><script>alert(1)</script></head><body><p>Hello&nbsp;<b>there</b> &amp; you</p></body></html>' });
     expect(readMessage(html)?.body).toBe('Hello there & you');
     expect(stripHtml('<!-- hidden -->visible')).toBe(' visible');
   });
@@ -73,7 +73,7 @@ describe('MIME', () => {
   });
 
   it('reads the headers, labels and thread', () => {
-    const read = readMessage(message({ ...MAILS.newsletterEn }));
+    const read = readMessage(apiMessage({ ...MAILS.newsletterEn }));
     expect(read?.headers.listId).toContain('digest.news.example.com');
     expect(read?.labelIds).toContain('INBOX');
     expect(read?.threadId).toBe(`t${MAILS.newsletterEn.id}`);
@@ -82,7 +82,7 @@ describe('MIME', () => {
 
 describe('features', () => {
   it('keeps exact keys for rules and masks what the model sees', async () => {
-    const read = readMessage(message({ ...MAILS.newsletterZh }));
+    const read = readMessage(apiMessage({ ...MAILS.newsletterZh }));
     if (read === null) throw new Error('unreadable');
     const f = await features(read);
     expect(f.senderAddress).toBe('weekly@zh.example.org');

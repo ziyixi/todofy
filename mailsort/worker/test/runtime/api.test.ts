@@ -1,0 +1,161 @@
+/**
+ * The HTTP surface and the owner API in workerd (../../../docs/design.md §9): Access, Origin and CSRF in front of the
+ * transcoder, the private headers, AIP-155 request IDs, AIP-154 etags, the value rules the IDL cannot hold, and ops-v1
+ * over the service binding (counts and codes only, the guard).
+ */
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { create } from '@ziyixi/proto/protobuf';
+import { LabelSchema } from '@ziyixi/proto/mailsort/ui/v1/label_pb';
+import { RuleSchema, Rule_Kind } from '@ziyixi/proto/mailsort/ui/v1/rule_pb';
+import { Mode, SettingsSchema } from '@ziyixi/proto/mailsort/ui/v1/status_pb';
+import { fromWire } from '@ziyixi/proto/wire-json';
+import { OpsStatusSchema } from '@ziyixi/proto/ops/v1/ops_pb';
+import { MAILS, message } from '../fakes/fixtures.ts';
+import { HOUR, op, ORIGIN, reasonOf, rejection, startHarness, T0, type Harness } from './harness.ts';
+
+describe('the HTTP surface', () => {
+  let h: Harness;
+  beforeAll(async () => {
+    h = await startHarness();
+  });
+  afterAll(async () => {
+    await h.dispose();
+  });
+
+  it('serves /health without data and the UI with the private headers', async () => {
+    const health = await h.fetch('/health');
+    expect(await health.json()).toEqual({ service: 'mailsort', status: 'ok', build: 'test' });
+    const page = await h.fetch('/review');
+    expect(page.status).toBe(200);
+    expect(page.headers.get('cache-control')).toContain('no-store');
+    expect(page.headers.get('x-content-type-options')).toBe('nosniff');
+    expect(page.headers.get('content-security-policy')).toContain("frame-ancestors 'none'");
+  });
+
+  it('refuses a mutation without the CSRF token or from another origin, before reading the body', async () => {
+    const plain = await h.fetch('/api/v1/labels', { method: 'POST', headers: { 'content-type': 'application/json', origin: ORIGIN }, body: '{}' });
+    expect(plain.status).toBe(403);
+    const csrf = await h.fetch('/api/csrf');
+    const { token } = await csrf.json<{ token: string }>();
+    const cookie = (csrf.headers.get('set-cookie') ?? '').split(';')[0] ?? '';
+    const foreign = await h.fetch('/api/v1/labels', { method: 'POST', headers: { 'content-type': 'application/json', origin: 'https://evil.example.net', 'x-csrf-token': token, cookie }, body: '{}' });
+    expect(foreign.status).toBe(403);
+    expect(h.logs.some((line) => line.includes('"reason":"CSRF_FAILED"'))).toBe(true);
+  });
+
+  it('refuses a request outside loopback when the dev bypass is on (no Access login)', async () => {
+    const response = await h.fetch('/api/v1/labels', { headers: { 'cf-ray': 'synthetic' } });
+    expect(response.status).toBeGreaterThanOrEqual(400);
+  });
+
+  it('answers unknown API paths with a Status and the UI paths with the page', async () => {
+    const missing = await h.fetch('/api/v1/nothing');
+    expect(missing.status).toBe(404);
+    expect((await missing.json<{ error: { status: string } }>()).error.status).toBe('NOT_FOUND');
+  });
+});
+
+describe('the owner API', () => {
+  let h: Harness;
+  beforeAll(async () => {
+    h = await startHarness();
+  });
+  afterAll(async () => {
+    await h.dispose();
+  });
+
+  it('creates labels by the rules, once per request ID', async () => {
+    const requestId = op();
+    const first = await h.api.createLabel({ labelId: 'newsletter', label: create(LabelSchema, { displayName: '订阅', description: 'newsletter', enabled: true }), requestId });
+    const again = await h.api.createLabel({ labelId: 'newsletter', label: create(LabelSchema, { displayName: '订阅', description: 'newsletter', enabled: true }), requestId });
+    expect(again.etag).toBe(first.etag);
+    expect(first).toMatchObject({ name: 'labels/newsletter', displayName: '订阅', gmailState: 1, descriptionVersion: 1 });
+    expect(reasonOf(await rejection(h.api.createLabel({ labelId: 'other', label: create(LabelSchema, { displayName: '订阅' }), requestId: op() })))).toBe('LABEL_EXISTS');
+    expect(reasonOf(await rejection(h.api.createLabel({ labelId: 'none', label: create(LabelSchema, { displayName: 'x' }), requestId: op() })))).toBe('INVALID_LABEL');
+    expect(reasonOf(await rejection(h.api.createLabel({ labelId: 'bad', label: create(LabelSchema, { displayName: 'a/b' }), requestId: op() })))).toBe('INVALID_LABEL');
+    expect(reasonOf(await rejection(h.api.createLabel({ labelId: 'thr', label: create(LabelSchema, { displayName: 't', threshold: 0.3 }), requestId: op() })))).toBe('INVALID_SETTINGS');
+    // A repeated request ID answers the first response, whatever the body says now (AIP-155).
+    expect((await h.api.createLabel({ labelId: 'newsletter', label: create(LabelSchema, { displayName: '另一个' }), requestId })).displayName).toBe('订阅');
+    expect(reasonOf(await rejection(h.api.createLabel({ labelId: 'travel', label: create(LabelSchema, { displayName: '出行' }), requestId })))).toBe('BAD_REQUEST');
+  });
+
+  it('updates with an etag and a mask, and bumps the description version', async () => {
+    const label = await h.api.getLabel({ name: 'labels/newsletter' });
+    const updated = await h.api.updateLabel({ label: create(LabelSchema, { name: 'labels/newsletter', description: '订阅 weekly digest', etag: label.etag }), updateMask: { paths: ['description', 'etag'] }, requestId: op() });
+    expect(updated).toMatchObject({ description: '订阅 weekly digest', descriptionVersion: 2, enabled: true });
+    const stale = await rejection(h.api.updateLabel({ label: create(LabelSchema, { name: 'labels/newsletter', enabled: false, etag: label.etag }), updateMask: { paths: ['enabled', 'etag'] }, requestId: op() }));
+    // The mask names `etag`, so the client sends it (it sends only the masked fields).
+    expect(reasonOf(stale)).toBe('ETAG_MISMATCH');
+  });
+
+  it('settings need an explicit mask; choosing a mode resets the breaker', async () => {
+    expect(reasonOf(await rejection(h.api.updateSettings({ settings: create(SettingsSchema, { name: 'settings', mode: Mode.LIVE }), requestId: op() })))).toBe('BAD_REQUEST');
+    expect(reasonOf(await rejection(h.api.updateSettings({ settings: create(SettingsSchema, { name: 'settings', runWriteLimit: 50 }), updateMask: { paths: ['run_write_limit'] }, requestId: op() })))).toBe('INVALID_SETTINGS');
+    await h.sql(`INSERT INTO meta (key, value) VALUES ('settings', '{"mode":"live","breaker":"daily_limit"}') ON CONFLICT (key) DO UPDATE SET value = excluded.value`);
+    expect(await h.api.getSettings({ name: 'settings' })).toMatchObject({ breakerTripped: true, effectiveMode: Mode.SHADOW });
+    const reset = await h.api.updateSettings({ settings: create(SettingsSchema, { name: 'settings', mode: Mode.LIVE }), updateMask: { paths: ['mode'] }, requestId: op() });
+    expect(reset).toMatchObject({ breakerTripped: false, effectiveMode: Mode.LIVE, mode: Mode.LIVE });
+  });
+
+  it('rules: create, approve, disable, delete, and the filter export', async () => {
+    const rule = await h.api.createRule({ rule: create(RuleSchema, { kind: Rule_Kind.LIST_ID, value: 'Digest.News.Example.com', label: 'labels/newsletter' }), requestId: op() });
+    expect(rule).toMatchObject({ value: 'digest.news.example.com', state: 2, dmarcRequired: false });
+    expect(reasonOf(await rejection(h.api.createRule({ rule: create(RuleSchema, { kind: Rule_Kind.SENDER_ADDRESS, value: 'not-an-address', label: 'labels/newsletter' }), requestId: op() })))).toBe('INVALID_RULE');
+    const exported = await h.api.exportGmailFilters({});
+    expect(exported.ruleCount).toBe(1);
+    expect(exported.xml).toContain('list:(digest.news.example.com)');
+    expect((await h.api.disableRule({ name: rule.name, requestId: op() })).state).toBe(3);
+    expect((await h.api.approveRule({ name: rule.name, requestId: op() })).state).toBe(2);
+    await h.api.deleteRule({ name: rule.name, requestId: op() });
+    expect((await h.api.listRules({})).rules).toEqual([]);
+  });
+
+  it('SyncLabels links and imports the "分拣/" labels of Gmail, and nothing else', async () => {
+    await h.step(T0);
+    const linked = h.up.gmail.createUserLabel('分拣/订阅');
+    h.up.gmail.createUserLabel('分拣/旅行');
+    h.up.gmail.createUserLabel('Personal');
+    const result = await h.api.syncLabels({ requestId: op() });
+    expect(result).toMatchObject({ linkedCount: 1, importedCount: 1, missingCount: 0 });
+    expect(result.labels.map((label) => [label.displayName, label.gmailLabelId])).toEqual([
+      ['订阅', linked],
+      ['旅行', expect.stringMatching(/^Label_/)],
+    ]);
+    expect(result.labels[1]).toMatchObject({ enabled: false, live: false });
+  });
+
+  it('the review queue: confirm, skip, already resolved', async () => {
+    h.up.gmail.deliver(message({ ...MAILS.newsletterEn, receivedAt: T0 }));
+    h.up.gmail.deliver(message({ ...MAILS.unsure, receivedAt: T0 }));
+    await h.api.updateSettings({ settings: create(SettingsSchema, { name: 'settings', mode: Mode.SHADOW }), updateMask: { paths: ['mode'] }, requestId: op() });
+    const pass = await h.step(T0 + HOUR);
+    const { reviewItems } = await h.api.listReviewItems({});
+    expect(reviewItems.length, JSON.stringify({ pass, decisions: await h.sql('SELECT message_id, outcome, unsure_reason FROM decisions'), pending: await h.sql('SELECT * FROM pending') })).toBe(2);
+    expect(reviewItems.length).toBe(2);
+    const suggestion = reviewItems.find((item) => item.kind === 1);
+    const unsure = reviewItems.find((item) => item.kind === 2);
+    expect((await h.api.confirmReviewItem({ name: suggestion?.name ?? '', requestId: op() })).state).toBe(2);
+    expect(reasonOf(await rejection(h.api.confirmReviewItem({ name: unsure?.name ?? '', requestId: op() })))).toBe('BAD_REQUEST');
+    expect((await h.api.skipReviewItem({ name: unsure?.name ?? '', requestId: op() })).state).toBe(4);
+    expect(reasonOf(await rejection(h.api.skipReviewItem({ name: unsure?.name ?? '', requestId: op() })))).toBe('ALREADY_RESOLVED');
+    // Shadow mode wrote nothing.
+    expect(h.up.gmail.calls.filter((call) => call.url.endsWith('/modify'))).toEqual([]);
+    const accuracy = await h.api.getAccuracyReport({ name: 'accuracyReport' });
+    expect(accuracy.labels.find((label) => label.label === 'labels/newsletter')).toMatchObject({ confirmedCount: 1, correctedCount: 0 });
+  });
+
+  it('ops-v1: counts and codes only, and the guard', async () => {
+    const status = await h.opsStatus();
+    const read = fromWire(OpsStatusSchema, status);
+    expect(read.unrecognized).toEqual([]);
+    expect(status).toMatchObject({ version: 'ops-v1', app: 'mailsort', health: 'ok', ui_url: 'https://sort.example.com/', capabilities: ['guard'] });
+    expect(Object.keys(status['counters'] as object)).toEqual(expect.arrayContaining(['decided_today', 'applied_today', 'unsure_today', 'review_pending', 'pending', 'neurons_today', 'neuron_budget']));
+    const text = JSON.stringify(status);
+    for (const secret of ['Weekly', 'digest@', 'owner@example.com', '订阅', 'Lunch']) expect(text).not.toContain(secret);
+    const until = new Date(T0 + 2 * HOUR).toISOString().replace('.000Z', 'Z');
+    const shed = (await h.opsSetGuard({ level: 'shed', reason: 'usage_80', until })) as { level: string; deferred: string[] };
+    expect(shed).toMatchObject({ level: 'shed', deferred: ['full_model', 'audit', 'embedding_rebuild'] });
+    expect((await h.opsSetGuard({ level: 'bogus' }).catch((error: unknown) => (error as Error).message))).toContain('invalid_input');
+    expect(await h.opsSetGuard({ level: 'normal', reason: 'quota_recovered', until: null })).toMatchObject({ level: 'normal' });
+  });
+});

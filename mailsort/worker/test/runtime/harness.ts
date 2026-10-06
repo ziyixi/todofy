@@ -53,10 +53,12 @@ export const SYNTHETIC_BINDINGS: Readonly<Record<string, string>> = {
 
 export const TEST_PAGE = '<!doctype html><html><head><script type="module" src="/assets/app.js"></script></head><body><div id="app"></div></body></html>';
 
-let bundle: Promise<string> | null = null;
-export function workerBundle(): Promise<string> {
-  bundle ??= build({
-    entryPoints: [join(ROOT, 'src/index.ts')],
+const bundles = new Map<string, Promise<string>>();
+export function workerBundle(entry = 'src/index.ts'): Promise<string> {
+  const cached = bundles.get(entry);
+  if (cached !== undefined) return cached;
+  const bundle = build({
+    entryPoints: [join(ROOT, entry)],
     bundle: true,
     format: 'esm',
     platform: 'neutral',
@@ -71,6 +73,7 @@ export function workerBundle(): Promise<string> {
     if (!output) throw new Error('esbuild produced no output');
     return output.text;
   });
+  bundles.set(entry, bundle);
   return bundle;
 }
 
@@ -81,6 +84,8 @@ export interface HarnessOptions {
   readonly inspectorPort?: number;
   /** Runs MailsortState in a Worker of its own, as Cloudflare runs a Durable Object apart from its caller. */
   readonly splitObject?: boolean;
+  /** Binds AI to the fake Workers AI entrypoint (../fakes/ai-entrypoint.ts), as production binds Workers AI. */
+  readonly aiBinding?: boolean;
 }
 
 export type StepResult = { next: number; mode?: string; synced?: number; decided?: number; applied?: number; deferred?: number; code: string };
@@ -104,6 +109,7 @@ export interface Harness {
 export async function startHarness(options: HarnessOptions = {}): Promise<Harness> {
   const temp = await mkdtemp(join(tmpdir(), 'mailsort-runtime-'));
   const script = await workerBundle();
+  const aiScript = options.aiBinding === true ? await workerBundle('test/fakes/ai-entrypoint.ts') : '';
   const up = new FakeUpstream();
   up.gmail.grants.set(REFRESH_TOKEN, SCOPE_MODIFY);
   up.gmail.clock = () => T0;
@@ -116,7 +122,10 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
     script,
     compatibilityDate: '2026-09-08',
     durableObjects: { MAILSORT: { className: 'MailsortState', useSQLite: true, ...(split ? { scriptName: OBJECT_WORKER } : {}) } },
-    serviceBindings: { ASSETS: () => new Response(TEST_PAGE, { headers: { 'content-type': 'text/html; charset=utf-8' } }) },
+    serviceBindings: {
+      ASSETS: () => new Response(TEST_PAGE, { headers: { 'content-type': 'text/html; charset=utf-8' } }),
+      ...(options.aiBinding === true ? { AI: { name: 'fake-ai', entrypoint: 'FakeAiBinding' } } : {}),
+    },
     bindings,
     outboundService: outbound,
   });
@@ -133,6 +142,7 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
       workers: [
         mailsort('mailsort', options.splitObject === true),
         ...(options.splitObject === true ? [{ ...mailsort(OBJECT_WORKER, false) }] : []),
+        ...(options.aiBinding === true ? [{ name: 'fake-ai', modules: true, script: aiScript, compatibilityDate: '2026-09-08' }] : []),
         {
           name: 'probe',
           modules: true,
@@ -149,7 +159,6 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
               if (op === 'sql') return Response.json({ ok: await stub.sqlForTests(...args) })
               if (op === 'meter') return Response.json({ ok: await stub.takeRowMeter() })
               if (op === 'ops_status') return Response.json({ ok: await env.OPS.status() })
-              if (op === 'ops_direct') return Response.json({ ok: await stub.opsStatus() })
               if (op === 'ops_guard') return Response.json({ ok: await env.OPS.setGuard(args[0]) })
               return Response.json({ error: 'unknown op' })
             } catch (error) { return Response.json({ error: error instanceof Error ? error.message : 'not_an_error' }) }
@@ -171,7 +180,7 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
   const csrfToken = async () => {
     if (csrf === undefined) {
       const response = await fetchSort('/api/csrf');
-      const { token } = (await response.json()) as { token: string };
+      const { token } = await response.json<{ token: string }>();
       csrf = { token, cookie: (response.headers.get('set-cookie') ?? '').split(';')[0] ?? '' };
     }
     return csrf;

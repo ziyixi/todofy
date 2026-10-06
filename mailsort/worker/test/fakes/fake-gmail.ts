@@ -107,7 +107,7 @@ export class FakeGmail {
   }
 
   /** Every request Google would get. `url` is the real Google URL. */
-  async handle(method: string, url: URL, headers: Headers, body: string): Promise<Response> {
+  handle(method: string, url: URL, headers: Headers, body: string): Response {
     this.calls.push({ method, url: url.toString(), body });
     if (url.host === 'oauth2.googleapis.com' && url.pathname === '/token' && method === 'POST') {
       const form = new URLSearchParams(body);
