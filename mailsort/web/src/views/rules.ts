@@ -68,7 +68,7 @@ export async function renderRules(ctx: ViewContext): Promise<void> {
       const answer = await act(() => api.exportGmailFilters({}), (done) => `已导出 ${String(done.ruleCount)} 条`, () => Promise.resolve())
       if (answer === null) return
       // Left out: trust rules (a filter cannot check DMARC) and values that are not plain.
-      exported.textContent = `已导出 ${String(answer.ruleCount)} 条${answer.skippedCount > 0 ? `；${String(answer.skippedCount)} 条未导出（可信类或要求 DMARC 的规则过滤器无法检查；带主题条件的例外规则在 Gmail 里会和普通规则同时生效）` : ''}。在 Gmail 设置 → 过滤器 → 导入过滤器中导入。`
+      exported.textContent = `已导出 ${String(answer.ruleCount)} 条${answer.skippedCount > 0 ? `；${String(answer.skippedCount)} 条未导出（可信类或要求 DMARC 的规则过滤器无法检查；带主题条件的规则，以及它覆盖的同一发件人的普通规则，也不导出：Gmail 会让所有匹配的过滤器同时生效，例外的邮件会被打上普通规则的标签并归档）` : ''}。在 Gmail 设置 → 过滤器 → 导入过滤器中导入。`
       exported.hidden = false
       output.value = answer.xml
       output.hidden = false

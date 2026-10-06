@@ -174,8 +174,8 @@ export class FakeServer {
         return Promise.resolve(found)
       },
       // As the Worker: at most 20 per call, newest first, and how many undoable entries are left.
-      undoLedgerEntries: () => {
-        const open = this.ledgerEntries.filter((item) => item.undoable)
+      undoLedgerEntries: (request) => {
+        const open = this.ledgerEntries.filter((item) => item.undoable && (request.label === '' || item.label === request.label))
         const batch = open.slice(0, 20)
         for (const item of batch) Object.assign(item, { state: LedgerEntry_State.UNDONE, undoable: false })
         return Promise.resolve(create(UndoLedgerEntriesResponseSchema, { undoneCount: batch.length, failedCount: 0, remainingCount: open.length - batch.length }))

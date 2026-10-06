@@ -10,7 +10,7 @@
  * like `finance-invest` repeats the meaning in the alphabet the model's instructions are in. Chinese words become
  * English through a small fixed glossary; a word outside it becomes a short hash of itself, still stable.
  */
-import { DISPLAY_NAME_MAX, LABEL_DEPTH_MAX, LABEL_ID_PATTERN, LABEL_PREFIX, LABEL_SEGMENT_MAX, NONE } from './limits.ts';
+import { DISPLAY_NAME_MAX, LABEL_DEPTH_MAX, LABEL_ID_PATTERN, LABEL_PREFIX, LABEL_ROOT, LABEL_SEGMENT_MAX, NONE } from './limits.ts';
 
 /** Whether `text` has a control character (C0, DEL or C1). */
 function hasControlChar(text: string): boolean {
@@ -23,15 +23,28 @@ function hasControlChar(text: string): boolean {
 
 /**
  * The normalized path of `raw` (segments trimmed, empty input refused), or null when it breaks a rule: at most
- * LABEL_DEPTH_MAX non-empty segments of LABEL_SEGMENT_MAX characters, no control characters, DISPLAY_NAME_MAX in all.
+ * LABEL_DEPTH_MAX non-empty segments of LABEL_SEGMENT_MAX characters, no control characters, DISPLAY_NAME_MAX in all,
+ * and a first segment other than the prefix's own root: a path is below `分拣/` already, so `分拣/x` would be the Gmail
+ * label `分拣/分拣/x` (with a grouping label `分拣/分拣`).
  */
 export function normalizePath(raw: string): string | null {
   if (hasControlChar(raw)) return null;
   const segments = raw.split('/').map((segment) => segment.trim());
   if (segments.length === 0 || segments.length > LABEL_DEPTH_MAX) return null;
   if (segments.some((segment) => segment === '' || Array.from(segment).length > LABEL_SEGMENT_MAX)) return null;
+  if (segments[0] === LABEL_ROOT) return null;
   const path = segments.join('/');
   return Array.from(path).length <= DISPLAY_NAME_MAX ? path : null;
+}
+
+/**
+ * The path the owner typed in 标签 (CreateLabel, a rename): the path below `分拣/`, and the same with that prefix
+ * written out (`分拣/金融/投资` is `金融/投资`, as an import reads a rule's label), so both entry points agree. Null as
+ * normalizePath.
+ */
+export function ownerPath(raw: string): string | null {
+  const trimmed = raw.trim();
+  return normalizePath(trimmed.startsWith(LABEL_PREFIX) ? trimmed.slice(LABEL_PREFIX.length) : trimmed);
 }
 
 /** The path of a Gmail name under the prefix (`分拣/开发/CI通知` -> `开发/CI通知`), or null for any other name. */
@@ -68,7 +81,9 @@ export function treeConflict(path: string, others: Iterable<string>): string | n
 
 /**
  * Chinese words of label paths and their English slug, longest first where one contains another. Words that only
- * join others (与, 和, 及) map to nothing.
+ * join others (与, 和, 及) map to nothing. A word outside the glossary falls back to `x` and a short hash of itself
+ * (segmentSlug), so a key stays stable; the other words of the path keep their English (`金融/猫咪` is
+ * `finance-x1b2c`), so a key is at least partly meaningful.
  */
 const GLOSSARY: Readonly<Record<string, string>> = {
   信用卡: 'card',
@@ -152,6 +167,76 @@ const GLOSSARY: Readonly<Record<string, string>> = {
   其他: 'other',
   杂项: 'misc',
   重要: 'important',
+  // Words a personal mailbox's own labels are likely to use (QA D8: most of the owner's custom labels fell back to
+  // hashes). Longer words win over the single characters below.
+  家人: 'family',
+  亲友: 'family-friends',
+  朋友: 'friends',
+  孩子: 'kids',
+  宠物: 'pets',
+  报税: 'tax-filing',
+  报销: 'reimburse',
+  工资: 'payroll',
+  测试: 'test',
+  科研: 'research',
+  研究: 'research',
+  实验室: 'lab',
+  导师: 'advisor',
+  同事: 'colleagues',
+  公司: 'company',
+  团队: 'team',
+  项目: 'project',
+  合同: 'contracts',
+  简历: 'resume',
+  面试: 'interviews',
+  签证: 'visa',
+  移民: 'immigration',
+  护照: 'passport',
+  驾照: 'license',
+  租房: 'rent',
+  房东: 'landlord',
+  物业: 'property',
+  燃气: 'gas',
+  外卖: 'delivery',
+  餐饮: 'dining',
+  美食: 'food',
+  电影: 'movies',
+  音乐: 'music',
+  游戏: 'games',
+  读书: 'reading',
+  运动: 'sports',
+  健身: 'fitness',
+  捐款: 'donations',
+  公益: 'charity',
+  社区: 'neighborhood',
+  校友: 'alumni',
+  大学: 'university',
+  学生: 'students',
+  老师: 'teachers',
+  考试: 'exams',
+  奖学金: 'scholarship',
+  活动: 'events',
+  通讯: 'newsletter',
+  资讯: 'news',
+  博客: 'blogs',
+  论坛: 'forums',
+  开源: 'opensource',
+  代码: 'code',
+  域名: 'domains',
+  服务器: 'servers',
+  数据库: 'database',
+  // Single characters, only where no longer word matches: numbers and a few that stand alone in short labels.
+  一: 'one',
+  二: 'two',
+  三: 'three',
+  四: 'four',
+  五: 'five',
+  家: 'home',
+  税: 'tax',
+  车: 'car',
+  房: 'house',
+  书: 'books',
+  药: 'medicine',
   与: '',
   和: '',
   及: '',

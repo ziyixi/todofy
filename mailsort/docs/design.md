@@ -106,12 +106,18 @@ display name (which no sender rule may match).
 ### 3.1 Labels: a tree of paths, archive or keep
 
 A label's display name is its path below `分拣/`: one to three segments (`出行`, `金融/投资`), each 1-40 characters, 100 in
-all (`paths.ts`). Only leaves are labels: a label may not be the parent or child of another (CreateLabel, a rename, an
+all, and never `分拣` as the first segment (`paths.ts`): typed with the prefix, `分拣/金融/投资` is read as `金融/投资` by
+CreateLabel and a rename (`ownerPath`) as by the import, so no entry point makes `分拣/分拣/x`. Only leaves are labels: a label may not be the parent or child of another (CreateLabel, a rename, an
 import and SyncLabels all hold to it), so a mail's one label is always a leaf. Gmail gets the parents as plain grouping
 labels, created as needed before a label's first write (`writes.ts` ensureGmailLabel: one labels.list, then whatever of
 `分拣`, `分拣/金融` and the leaf is missing) or before a rename; SyncLabels imports a nested Gmail label and never a parent
-that only groups. A label made without an ID gets one from its path (`金融/投资` is `finance-invest`, `paths.ts` pathSlug:
-a fixed glossary of common words, a short hash of any other word), stable and readable in URLs. A deleted label's ID
+that only groups. A parent this app created is recorded (table `gmail_parents`, schema version 3), so once its last
+child is renamed or deleted (`分拣/新闻` left behind by `新闻/周报` -> `资讯/周报/精选`) SyncLabels still does not import it as
+a label; the owner can add it by hand (新建标签 links the Gmail label that is there, and the record goes). A label made
+without an ID gets one from its path (`金融/投资` is `finance-invest`, `paths.ts` pathSlug: a fixed glossary of the words
+labels of a personal mailbox use, from the template's to `家人`, `报税` and `测试`; a word outside it becomes `x` and a
+short hash of itself, while the path's other words keep their English, `金融/猫咪` is `finance-x…`), stable and readable
+in URLs. A deleted label's ID
 is retired (`retired_labels`, until its decisions and flow counters are pruned): its decisions, review items, ledger
 rows and counters still name it, so a new label of the same path gets `finance-invest-2` instead of inheriting that
 history, and CreateLabel refuses it as an explicit ID.
@@ -159,7 +165,9 @@ field keeps the breaker), and ops-v1 raises `breaker_tripped`. A read-only grant
 pass or is a retry of an earlier one (a 429 or 5xx), the gate rereads the mode in force (owner, `MODE` ceiling,
 breaker) and the write grant; for an automatic row also the label's 启用 and 正式打 and both caps. So shadow, `off`,
 `MAILSORT_MODE=shadow`, a tripped breaker (also one tripped by this pass's own previous write) or a label taken out of
-正式打 stop every write not yet made. A refused row fails (`mode_changed`, `label_not_live`, `daily_limit`,
+正式打 stop every write not yet made. The same transaction lowers a row recorded to archive to keep when its label's
+归档 has been turned off since (`writes.ts` keepIfLabelKeeps, its flow count moved along): keeping is the direction the
+owner just chose. Never the other way: a row that keeps never starts archiving. A refused row fails (`mode_changed`, `label_not_live`, `daily_limit`,
 `run_limit`), and its mail becomes a suggestion in 待审, like any write that failed for good. Undo rows are never
 gated: they only give mail back to the inbox. The owner's review choices pass the same check in the API.
 
@@ -209,7 +217,8 @@ The alarm runs every 5 minutes, every 30 s while a backlog waits. A pass may mak
    - stage 3, **Clef**: one call with a `choice` question over the enabled labels that have a description (a label
      without one is never offered: its bare name is too little; rules and examples may still decide it), keyed by a
      slug of each label's path (`finance-invest`, `paths.ts` optionKeys: stable, meaningful, never the random ID a label
-     imported from Gmail used to have) with the criterion `path: description`, plus `none`, and two `noul` questions,
+     imported from Gmail used to have; a word the glossary lacks falls back to a short hash, the rest of the path stays
+     English, §3.1) with the criterion `path: description`, plus `none`, and two `noul` questions,
      `suspicious` and `bulk`. The answer is mapped back to label IDs. The state is lean: Gmail's snippet only when the
      body does not start with it, no empty field, and the neighbours named by the same keys. A model outage (anything but the quota)
      backs the mail off like a failed read and stops calling the model for the pass; an answer this code refuses
@@ -291,8 +300,11 @@ Worker's own label is undone first; 都不是 restores the inbox). A choice is a
   a rule; it decides nothing until the owner approves it in 规则. Withdrawn corrections retract a proposal that falls
   below two. Active rules export as Gmail's filter XML (label, and archive unless the rule or label keeps the
   mail in the inbox) for the owner to import by hand; left out are rules of a trust label or with `require_dmarc` (a
-  filter cannot check DMARC) and carve-outs (Gmail applies every matching filter, so a carve-out and its sender's plain
-  rule would both label the mail). A sender rule of another label is exported without its DMARC check (such a
+  filter cannot check DMARC), rules with subject conditions, and every plain rule whose sender such a rule covers (the
+  same kind and value, or a domain covering the carved address or subdomain, either way round; `filters.ts`
+  exportableRules). Gmail applies every matching filter, so the plain rule's filter alone would give a pickup code the
+  sender's label and archive it, or file a login notice under the sender's plain label: without it Gmail leaves that
+  sender's mail in the inbox. Each is counted in `skipped_count`, and 规则's toast says why. A sender rule of another label is exported without its DMARC check (such a
   filter can only put a forged mail under a non-trust label), so stable rules keep working without this app. Rule
   values come from mail headers, and
   the export puts them into Gmail search criteria, where `(`, `)`, `-`, `*`, `{`, `OR` or a space could widen one
@@ -303,18 +315,22 @@ Worker's own label is undone first; 都不是 restores the inbox). A choice is a
 - **Import and export** (`import.ts`, 导入导出). ImportRules takes the owner's rule file, a JSON list in the format of
   their validated rule set (`id`, `match` with exactly one of `from_address`, `from_domain`, `list_id`, `to_address`,
   `label` as `分拣/<path>`, `keep_in_inbox`, `trust`, `require_dmarc`, `evidence`, `notes`, and the optional
-  `subject_includes` / `subject_excludes`), this app's export (`{"labels": [...], "rules": [...]}`) or the template. It
-  is previewed first (`validate_only`): every entry create, update (which fields), skip or invalid (why: a path, a
-  value rule-value.ts refuses, a match with no or two keys, too many subject words, the tree, the bounds), with
-  warnings (a `trust` rule whose label does not imply trust; two rules with the same match and conditions, of which
-  the earlier is tried first). The confirmation plans again inside one transaction and applies all or nothing; an
-  invalid entry makes it INVALID_IMPORT with the plan as a detail. A rule is matched by its `id` (a re-import updates
-  the rule it made), else by what it is; a proposal it matches becomes active, a disabled rule stays disabled. A label
-  a rule names that exists nowhere is created enabled, not live and without a description (rules fire at once, in
-  shadow first; the model waits for a description; a `trust` rule makes it a trust label). Nothing reaches Gmail.
-  ExportRules writes every label and every rule but the proposals in the same format, so an export imports back as
-  all skips. The UI reads each entry strictly with the wire codec before sending, so a misspelt field is named with its
-  entry's number.
+  `subject_includes` / `subject_excludes`), this app's export (`{"labels": [...], "rules": [...]}`) or the template.
+  Evidence, notes and label descriptions may span lines (CRLF read as LF; any other control character is refused),
+  and a List-Id may be written in its header form (`<digest.news.example.com>`, `rule-value.ts` normalizeRuleValue,
+  as CreateRule reads it). It is previewed first (`validate_only`): every entry create, update (which fields), skip
+  or invalid (why: a path, a value rule-value.ts refuses, a match with no or two keys, too many subject words, the
+  tree, the bounds), with warnings (a `trust` rule whose label does not imply trust; two rules with the same match
+  and conditions, of which the earlier is tried first). The confirmation plans again inside one transaction and
+  applies all or nothing; an invalid entry makes it INVALID_IMPORT with the plan as a detail. A rule is matched by its
+  `id` (a re-import updates the rule it made), else by what it is; a proposal it matches becomes active, a disabled
+  rule stays disabled. A label a rule names that exists nowhere is created enabled, not live and without a
+  description (rules fire at once, in shadow first; the model waits for a description; a `trust` rule makes it a
+  trust label). Nothing reaches Gmail. ExportRules writes every label (with its `enabled` switch) and every rule but
+  the proposals in the same format, so an export imports back as all skips, and into a fresh store with its disabled
+  labels disabled; a label entry without `enabled` (the rule file, the template) creates an enabled label and leaves
+  an existing one's switch alone. The UI reads each entry strictly with the wire codec before sending, so a misspelt
+  field is named with its entry's number.
 - **Accuracy and live gating.** Per label, confirmations count 1, weak accepts 0.5 and corrections 1 against, and
   准确率 shows the Wilson 95 % lower bound of the precision (35 confirmations without an error pass 0.90). The owner turns
   正式打 on per label; the daily pass turns it back off when the bound drops below the target (default 0.90) after a
@@ -341,7 +357,8 @@ app's: deleted in 标签 (the Gmail label and its mails stay as they are) or mis
 it is `undoable`, with the mail's masked subject and sender while they are kept. 操作记录 undoes one entry, or a time
 range: the server undoes at most 20 per call and answers how many are left; the page repeats the call until none is
 left (or a call undoes nothing) and shows the totals; 流程's link to a label opens its entries only (the list's label
-filter). Labels are created in Gmail (`分拣/<path>`, with the parents it nests under) just before the first write that
+filter), and there the range undo is that label's only (UndoLedgerEntries' `label`), which its heading and
+confirmation say. Labels are created in Gmail (`分拣/<path>`, with the parents it nests under) just before the first write that
 needs them, after the gate; SyncLabels links existing `分拣/` labels and imports the leaves mailsort does not know
 (disabled, without a description, which the page says), never a parent that only groups.
 
@@ -359,9 +376,14 @@ Round 2 (same meter and machine, 2026-10-06): GetMailFlow over 30 days of 11,520
 outcome every day, far more than a real month) 7.9 ms first run in MailsortState and 0.4 ms in the fetch handler; the
 preview of an import of 500 rules (about 120 KiB of body, the request body limit is now 256 KiB) 12.4 ms first run in
 MailsortState and 1.1 ms in the fetch handler; the alarm pass at its bounds 33 ms; every other call as before. Bundles:
-the Worker 127.5 KiB gzip (budget 135: the template, the import, the flow counters and the larger descriptors), the UI
-57.9 KiB gzip (budget raised to 67: d3-sankey's layout with the parts of d3-array, d3-shape and d3-path it uses,
+the Worker 128.5 KiB gzip (budget 135: the template, the import, the flow counters and the larger descriptors), the UI
+58.2 KiB gzip (budget raised to 67: d3-sankey's layout with the parts of d3-array, d3-shape and d3-path it uses,
 2.8 KiB, and the 流程 and 导入导出 views).
+
+After the QA fixes of round 2 (same meter and machine, 2026-10-06): GetMailFlow 7.8 ms first run, the 500-rule import
+preview 12.9 ms, the alarm pass at its bounds 33 ms, every other call at most 4.0 ms first run in MailsortState and
+1.9 ms for the fetch handler's very first request. Bundles: the Worker 130.2 KiB gzip (the label glossary's new words,
+the export's carve-out check, the parents' record; budget 135 unchanged), the UI 58.5 KiB gzip (budget 67 unchanged).
 
 Stores are bounded: 24 labels, 500 rules, 2,000 examples, request IDs for a day, content for 14 days, records for
 180 days. Rows read: a pass reads a few rows per mail plus the embedded examples (cached in memory between passes).
@@ -401,7 +423,7 @@ proves a Wilson lower bound of 0.68), so the per-label 正式打 decision stays 
 (List/Get, `:confirm`, `:correct`, `:skip`), rules (List/Get/Create/Delete, `:approve`, `:disable`,
 `rules:exportGmailFilters`, `rules:import` with `validate_only`, `rules:export`), examples (List/Get/Delete,
 `examples:rebuildEmbeddings`), ledger entries (List with a label filter, Get, `:undo`, `ledgerEntries:undo` for a
-range), mail flows (`mailFlows/today`, `last-7-days`, `last-30-days`), and the singletons accuracyReport,
+range, of one label when `label` is set), mail flows (`mailFlows/today`, `last-7-days`, `last-30-days`), and the singletons accuracyReport,
 serviceStatus and settings (UpdateSettings needs an explicit mask). AIP-155 request IDs on every mutation, AIP-154
 etags on labels and settings, google.rpc.Status errors (`errors.proto`). The UI's ten views: 待审, 标签 (a tree of the
 paths, 归档 and 敏感, the template), 规则 (subject conditions, keep in inbox, DMARC, evidence and notes), 流程, 导入
@@ -427,7 +449,10 @@ label the model may not set; 例子 and 记录 page with 加载更多; sync and 
   (moved from written to suggested on its day), and a correction (added on the day the mail was decided, taken back
   when withdrawn). Pruned after 400 days. GetMailFlow sums a fixed range of UTC days (at most 2,000 counters). 流程
   draws it as a Sankey diagram (d3-sankey for the layout only; SVG in the page's light and dark tokens, labels grouped
-  and colored by their top-level segment in the labels' order, a ninth group gray; every node named with its count;
+  and colored by their top-level segment: each group has a home hue in the labels' order, enabled labels' groups
+  first, and the first eight keep theirs in every range; a later group the range shows borrows a hue whose home group
+  the range does not show (`flowchart.ts` groupSlots), so the template's ten groups never run out, and only a range
+  showing more than eight groups has gray ones, which the legend says; every node named with its count;
   hover or focus for exact numbers and shares; a label opens its 操作记录; no motion under prefers-reduced-motion; on
   a phone it scrolls inside its own box) and a table per label (written, by rule, neighbours or model, kept or
   archived, only suggested, corrected). 运行状态 shows today's diagram, compact.
@@ -457,9 +482,14 @@ the fake Gmail (`fake-gmail.ts`) and fake Workers AI (`fake-ai.ts`, Clef and bge
   label created in Gmail with its parents, keep-in-inbox by label and by rule (undo removing only the label), the
   carve-out order, forged and look-alike From headers, the sync of nested labels, the flow counters with corrections
   and the ledger's label filter, and the export.
+  The QA fixes of round 2 have their regression tests: the filter export and its carve-out coverage (`decide.test.ts`),
+  multi-line evidence, header-form List-Ids, `enabled` through an export, `分拣/x` and the glossary (`import.test.ts`), a
+  retry lowered to keep (`failures.test.ts`), the parents' record, `分拣/x` in CreateLabel and the label-filtered range
+  undo (`round2.test.ts`), and in the UI the checkbox rows, the template's ten groups' hues and the filtered range undo.
 - `worker/test/smoke/smoke.mts`: the real `wrangler dev` (`../wrangler.test.toml`) against the fakes on loopback,
   the owner's whole loop through the HTTP API, round 2's import, nested label, keep in inbox, carve-out, forged From,
-  flow API and export included.
+  flow API and export included, and the QA fixes (filter export, `enabled`, multi-line evidence and `<list-id>`,
+  `分拣/x`, the parents' record, the label-filtered range undo).
 - `web/src/*.test.ts`: the views against a fake API on the shared transcoder.
 - `deploy/test/*.test.mjs`: the production config, the deploy wrapper (MODE, the secrets file without the grant), that
   `wrangler deploy --secrets-file` keeps secrets it does not name (the pinned wrangler), that the public GitHub

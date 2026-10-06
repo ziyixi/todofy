@@ -10,7 +10,7 @@ import { AiError, clefInput, clefState, cosine, criterion, cutTokens, decide, es
 import { clefDecision, neighbourDecision, orderRules, ruleDecision, type LabelFacts, type MailAuth } from '../src/decide.ts';
 import { dkimPassDomains, dmarcAligned, listSigned, neutralise } from '../src/dmarc.ts';
 import { modeCeiling } from '../src/env.ts';
-import { gmailFilterXml } from '../src/filters.ts';
+import { exportableRules, gmailFilterXml, type ExportCandidate } from '../src/filters.ts';
 import { CLEF, CLEF_FLASH, MAIL_ATTEMPTS_MAX, NONE, RETRY_MAX_MS } from '../src/limits.ts';
 import { features } from '../src/mask.ts';
 import { readMessage } from '../src/mime.ts';
@@ -359,6 +359,45 @@ describe('the Gmail filter export', () => {
     expect(kept).toContain("<apps:property name='label' value='分拣/账号安全'/>");
     expect(kept).not.toContain('shouldArchive');
     expect(xml).not.toMatch(/shouldMarkAsRead|shouldTrash|forwardTo|shouldStar|shouldNeverSpam/);
+  });
+});
+
+describe('which rules become Gmail filters', () => {
+  const rule = (id: string, kind: RuleRow['kind'], value: string, extra: Partial<ExportCandidate> = {}): ExportCandidate => ({
+    id,
+    kind,
+    value,
+    require_dmarc: 0,
+    subject_includes: '[]',
+    subject_excludes: '[]',
+    trust: 0,
+    ...extra,
+  });
+  const ids = (rules: readonly ExportCandidate[]) => exportableRules(rules).exported.map((item) => item.id);
+
+  it('leaves out the plain rule of a sender a pickup-code carve-out covers, so Gmail never archives the code', () => {
+    const pickup = rule('shop-pickup', 'sender_address', 'orders@shop.example.com', { subject_includes: '["取件码"]' });
+    const all = rule('shop-all', 'sender_address', 'orders@shop.example.com');
+    const other = rule('ci', 'sender_address', 'builds@ci.example.com');
+    expect(exportableRules([pickup, all, other])).toEqual({ exported: [other], skipped: 2 });
+  });
+
+  it('treats a domain and an address or subdomain under it as the same sender, either way round', () => {
+    const carvedAddress = rule('login', 'sender_address', 'alerts@bank.example.com', { subject_includes: '["登录"]', trust: 1 });
+    expect(ids([carvedAddress, rule('bank', 'sender_domain', 'bank.example.com')])).toEqual([]);
+    expect(ids([carvedAddress, rule('parent', 'sender_domain', 'example.com')])).toEqual([]);
+    const carvedDomain = rule('promo', 'sender_domain', 'mail.shop.example.com', { subject_excludes: '["广告"]' });
+    expect(ids([carvedDomain, rule('shop', 'sender_domain', 'shop.example.com')])).toEqual([]);
+    expect(ids([carvedDomain, rule('addr', 'sender_address', 'news@mail.shop.example.com')])).toEqual([]);
+    // Unrelated senders and look-alike domains keep their filters.
+    expect(ids([carvedAddress, rule('other', 'sender_address', 'news@bank.example.com'), rule('lookalike', 'sender_domain', 'notbank.example.com')])).toEqual(['other', 'lookalike']);
+    // A list or delivered-to carve-out covers only the same list or address.
+    const carvedList = rule('list-carve', 'list_id', 'digest.news.example.com', { subject_includes: '["周报"]' });
+    expect(ids([carvedList, rule('list', 'list_id', 'digest.news.example.com'), rule('list2', 'list_id', 'other.news.example.com'), rule('dom', 'sender_domain', 'news.example.com')])).toEqual(['list2', 'dom']);
+  });
+
+  it('still leaves out trust, DMARC and unplain rules', () => {
+    expect(exportableRules([rule('t', 'sender_address', 'a@bank.example.com', { trust: 1 }), rule('d', 'sender_domain', 'gov.example.com', { require_dmarc: 1 }), rule('bad', 'list_id', 'x)or(from:*')])).toEqual({ exported: [], skipped: 3 });
   });
 });
 

@@ -18,7 +18,8 @@
  * they are never linked, so the guard never lets a write add one to a mail (one label per mail, always a leaf).
  *
  * An applied label keeps its mail in the inbox when the ledger row says so (`archived` = 0: the label's or the rule's
- * keep-in-inbox); the guard checks the modify against that flag, and the undo then gives nothing back to the inbox.
+ * keep-in-inbox); the guard checks the modify against that flag, and the undo then gives nothing back to the inbox. A
+ * row recorded to archive keeps instead when its label keeps its mail by the time it goes out (keepIfLabelKeeps).
  */
 import { setCurrentLabels } from './feedback.ts';
 import { countFlow, stageOf } from './flow.ts';
@@ -96,29 +97,37 @@ export function labelCreationCost(label: Pick<LabelRow, 'display_name' | 'gmail_
 }
 
 /**
- * Creates `name` in Gmail unless `existing` has it (409, a name made meanwhile, is fine too); answers its ID. The
- * parents of a nested label are made the same way, outermost first.
+ * Creates `name` in Gmail unless `existing` has it (409, a name made meanwhile, is fine too); answers its ID and
+ * whether this call made it (a 409 counts: most likely an earlier try of ours whose answer was lost). The parents of a
+ * nested label are made the same way, outermost first.
  */
-async function createIfMissing(gmail: GmailClient, existing: Map<string, string>, name: string): Promise<string> {
+async function createIfMissing(gmail: GmailClient, existing: Map<string, string>, name: string): Promise<{ id: string; created: boolean }> {
   const known = existing.get(name);
-  if (known !== undefined) return known;
+  if (known !== undefined) return { id: known, created: false };
   try {
     const id = await gmail.createLabel(name);
     existing.set(name, id);
-    return id;
+    return { id, created: true };
   } catch (error) {
     // 409: Gmail already has a label of that name (made by hand, or by an earlier try): use it.
     if (!(error instanceof GoogleError) || error.code !== 'labels_create_409') throw error;
     const found = (await gmail.labels()).find((item) => item.name === name);
     if (found === undefined) throw error;
     existing.set(name, found.id);
-    return found.id;
+    return { id: found.id, created: true };
   }
 }
 
-/** Makes sure Gmail has the parents of a label's path (`分拣`, `分拣/开发`), so it shows the label nested. */
-export async function ensureGmailParents(gmail: GmailClient, path: string, existing: Map<string, string>): Promise<void> {
-  for (const parent of parentGmailNames(path)) await createIfMissing(gmail, existing, parent);
+/**
+ * Makes sure Gmail has the parents of a label's path (`分拣`, `分拣/开发`), so it shows the label nested. A parent this
+ * app creates is recorded (`gmail_parents`): it only groups, so when its last child is renamed or deleted SyncLabels
+ * must not take it for a label of the owner's (分拣/新闻 imported as 新闻). A parent the owner made by hand is not.
+ */
+export async function ensureGmailParents(gmail: GmailClient, path: string, existing: Map<string, string>, store: Store, now: number): Promise<void> {
+  for (const parent of parentGmailNames(path)) {
+    const { id, created } = await createIfMissing(gmail, existing, parent);
+    if (created) store.run(`INSERT OR IGNORE INTO gmail_parents (gmail_id, create_time) VALUES (?, ?)`, id, now);
+  }
 }
 
 /** The label's Gmail ID, creating the label (and its parents) in Gmail when it is still pending; null when it went missing. */
@@ -128,11 +137,13 @@ export async function ensureGmailLabel(ctx: WriteContext, label: LabelRow): Prom
   const name = `${LABEL_PREFIX}${label.display_name}`;
   // One read of Gmail's labels, then only what is missing: a label the owner made by hand is linked, not created twice.
   const existing = new Map((await ctx.gmail.labels()).map((item) => [item.name, item.id]));
-  await ensureGmailParents(ctx.gmail, label.display_name, existing);
-  const id = await createIfMissing(ctx.gmail, existing, name);
+  await ensureGmailParents(ctx.gmail, label.display_name, existing, ctx.store, ctx.now());
+  const { id } = await createIfMissing(ctx.gmail, existing, name);
   const now = ctx.now();
   ctx.transact(() => {
     ctx.store.run(`UPDATE labels SET gmail_id = ?, gmail_state = 'linked' WHERE id = ?`, id, label.id);
+    // A former parent the owner now adds as a label of its own is a label from here on.
+    ctx.store.run(`DELETE FROM gmail_parents WHERE gmail_id = ?`, id);
     ctx.store.touchLabel(label.id, now);
     ctx.store.run(`UPDATE ledger SET gmail_label_id = ? WHERE label_id = ? AND gmail_label_id IS NULL AND state = 'intended'`, id, label.id);
   });
@@ -184,6 +195,25 @@ function fail(store: Store, row: LedgerRow, code: string, now: number): void {
 }
 
 /**
+ * Lowers an `intended` row from archive to keep when its label keeps its mail in the inbox now (归档 turned off since
+ * the intent, for a write a 429 or 5xx left for a retry): keeping is the direction the owner just chose, and the safe
+ * one, so the retry only adds the label. Never the other way: a row that keeps (by its rule, or a label that archived
+ * then) never starts archiving. The flow's count of an automatic write moves with it. Answers the row as it is now.
+ * Run inside the gate's transaction, so the guard checks the modify against the flag the row now has.
+ */
+function keepIfLabelKeeps(store: Store, row: LedgerRow): LedgerRow {
+  if (row.archived !== 1 || store.label(row.label_id)?.keep_in_inbox !== 1) return row;
+  store.run(`UPDATE ledger SET archived = 0 WHERE id = ? AND state = 'intended'`, row.id);
+  const decision = row.origin === 'auto' ? store.decision(row.message_id) : undefined;
+  if (decision !== undefined && decision.outcome === 'applied') {
+    const stage = stageOf(decision.decider);
+    countFlow(store, decision.decided_at, stage, 'archived', decision.label_id, -1);
+    countFlow(store, decision.decided_at, stage, 'kept_in_inbox', decision.label_id, 1);
+  }
+  return { ...row, archived: 0 };
+}
+
+/**
  * Executes ledger rows in `intended` or `undo_intended` (the given IDs, or the oldest `limit`), one Gmail modify each,
  * while the budget lasts. `ids === null` is the alarm's retry of rows earlier passes left: an automatic one among them,
  * like any automatic row that already failed once, is first checked against the mail as it is now (mailChanged).
@@ -224,6 +254,7 @@ export async function executeWrites(ctx: WriteContext, ids: readonly string[] | 
         const refused = ctx.transact(() => {
           const code = ctx.gate(row, label);
           if (code !== null) fail(store, row, code, ctx.now());
+          else row = keepIfLabelKeeps(store, row);
           return code;
         });
         if (refused !== null) {

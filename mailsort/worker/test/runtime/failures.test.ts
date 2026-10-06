@@ -131,6 +131,50 @@ describe('a write left for a retry goes out only while live is in force', () => 
     expect(labels).not.toContain('INBOX');
   });
 
+  it('the owner turned the label’s 归档 off meanwhile: the retry only adds the label (QA D5)', async () => {
+    const id = 'a1000000000000a7';
+    await leaveIntended(id);
+    expect(await h.sql(`SELECT archived FROM ledger WHERE message_id = ?`, id)).toEqual([{ archived: 1 }]);
+    const flowOf = async (outcome: string) => Number((await h.sql(`SELECT coalesce(sum(n), 0) AS n FROM flow WHERE label = 'newsletter' AND outcome = ?`, outcome))[0]?.['n'] ?? 0);
+    const [archivedBefore, keptBefore] = [await flowOf('archived'), await flowOf('kept_in_inbox')];
+    const keep = async (on: boolean) => {
+      const label = await h.api.getLabel({ name: 'labels/newsletter' });
+      await h.api.updateLabel({ label: { ...label, keepInInbox: on }, updateMask: { paths: ['keep_in_inbox'] }, requestId: op() });
+    };
+    await keep(true);
+    now += 5 * MINUTE;
+    await h.step(now);
+    const labels = gmailLabels(h, id);
+    expect(labels).toContain('INBOX');
+    expect(labels).toContain('UNREAD');
+    expect(labels.some((item) => item.startsWith('Label_'))).toBe(true);
+    expect(await h.sql(`SELECT state, archived FROM ledger WHERE message_id = ?`, id)).toEqual([{ state: 'applied', archived: 0 }]);
+    // The flow counts the write as kept in the inbox now, not archived.
+    expect([await flowOf('archived'), await flowOf('kept_in_inbox')]).toEqual([archivedBefore - 1, keptBefore + 1]);
+    // An undo then gives nothing back to the inbox (it never left).
+    const [entry] = (await h.api.listLedgerEntries({ label: 'labels/newsletter' })).ledgerEntries.filter((item) => item.messageId === id);
+    expect(entry).toMatchObject({ archived: false });
+    await keep(false);
+  });
+
+  it('a row that keeps never starts archiving when the label’s 归档 is turned on', async () => {
+    const id = 'a1000000000000a8';
+    const label = await h.api.getLabel({ name: 'labels/newsletter' });
+    await h.api.updateLabel({ label: { ...label, keepInInbox: true }, updateMask: { paths: ['keep_in_inbox'] }, requestId: op() });
+    const failing = failModifies(h, 503);
+    deliver(h, { ...MAILS.newsletterEn, id, subject: `Weekly digest ${id}` }, now);
+    now += 5 * MINUTE;
+    await h.step(now);
+    failing.off();
+    expect(await h.sql(`SELECT state, archived FROM ledger WHERE message_id = ?`, id)).toEqual([{ state: 'intended', archived: 0 }]);
+    const again = await h.api.getLabel({ name: 'labels/newsletter' });
+    await h.api.updateLabel({ label: { ...again, keepInInbox: false }, updateMask: { paths: ['keep_in_inbox'] }, requestId: op() });
+    now += 5 * MINUTE;
+    await h.step(now);
+    expect(await h.sql(`SELECT state, archived FROM ledger WHERE message_id = ?`, id)).toEqual([{ state: 'applied', archived: 0 }]);
+    expect(gmailLabels(h, id)).toContain('INBOX');
+  });
+
   it('a retry counts against the run cap like a new write', async () => {
     await h.api.updateSettings({ settings: create(SettingsSchema, { name: 'settings', runWriteLimit: 1 }), updateMask: { paths: ['run_write_limit'] }, requestId: op() });
     const failing = failModifies(h, 503);

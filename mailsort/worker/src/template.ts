@@ -4,9 +4,10 @@
  * (ImportRules with `use_template`, previewed first) and then adjust.
  *
  * Each description is written for the decision model, which reads `path: description` for every label on every call:
- * one language (Chinese), one sentence, 60-120 characters (test/template.test.ts holds them to it), saying what
- * belongs there and, where two labels are close, what does not. Trust labels are transactional only: a bank's or a
- * broker's own marketing belongs to 购物/促销, so a look-alike promotion can never borrow a trust label's standing.
+ * one language (Chinese), one sentence, 60-120 characters (the "the template" tests of test/import.test.ts hold them
+ * to it), saying what belongs there and, where two labels are close, what does not. Trust labels are transactional
+ * only: a bank's or a broker's own marketing belongs to 购物/促销, so a look-alike promotion can never borrow a trust
+ * label's standing.
  * Trust labels are only ever applied by a rule whose mail passed DMARC; the model may only suggest them.
  */
 

@@ -7,8 +7,8 @@ import { describe, expect, it } from 'vitest';
 import { countFlow, readFlow } from '../src/flow.ts';
 import { applyImport, exportDocument, foldTerms, planImport, planValid, templateLabels, type LabelInput, type RuleInput } from '../src/import.ts';
 import { DAY, LABEL_PREFIX } from '../src/limits.ts';
-import { labelIdFor, normalizePath, optionKeys, parentGmailNames, pathOfGmailName, pathSlug, treeConflict } from '../src/paths.ts';
-import { SCHEMA_V1, SCHEMA_V2, Store } from '../src/store.ts';
+import { labelIdFor, normalizePath, optionKeys, ownerPath, parentGmailNames, pathOfGmailName, pathSlug, treeConflict } from '../src/paths.ts';
+import { SCHEMA_V1, SCHEMA_V2, SCHEMA_V3, Store } from '../src/store.ts';
 import { LABEL_TEMPLATE } from '../src/template.ts';
 import { memorySql } from './fakes/sql.ts';
 
@@ -38,7 +38,7 @@ function entry(id: string, match: Partial<NonNullable<RuleInput['match']>>, labe
 }
 
 function labelEntry(path: string, extra: Partial<LabelInput> = {}): LabelInput {
-  return { path, description: '', trust: false, keepInInbox: false, sensitive: false, threshold: 0, ...extra };
+  return { path, description: '', trust: false, keepInInbox: false, sensitive: false, threshold: 0, enabled: null, ...extra };
 }
 
 describe('label paths', () => {
@@ -52,6 +52,20 @@ describe('label paths', () => {
     expect(pathOfGmailName('金融/投资')).toBeNull();
     expect(parentGmailNames('开发/CI通知')).toEqual(['分拣', '分拣/开发']);
     expect(parentGmailNames('出行')).toEqual(['分拣']);
+  });
+
+  it('never nests a label under the prefix twice: 分拣/x is x when typed, and 分拣 is no first segment (QA D7)', () => {
+    for (const bad of ['分拣', '分拣/x', ' 分拣 /x']) expect(normalizePath(bad), bad).toBeNull();
+    expect(normalizePath('分拣箱/x')).toBe('分拣箱/x');
+    expect(ownerPath('分拣/金融/投资')).toBe('金融/投资');
+    expect(ownerPath(' 金融/投资 ')).toBe('金融/投资');
+    expect(ownerPath('分拣/分拣/x')).toBeNull();
+    expect(ownerPath('分拣')).toBeNull();
+    expect(ownerPath('分拣/')).toBeNull();
+    expect(pathOfGmailName('分拣/分拣/x')).toBeNull();
+    // The import reads a rule's label the same way: one prefix, never two.
+    const plan = planImport(store(), [], [entry('twice', { fromAddress: 'a@example.com' }, '分拣/分拣/x')]);
+    expect(plan.rules[0]).toMatchObject({ action: 'invalid', problem: 'label_path' });
   });
 
   it('keeps only leaves as labels: a parent and its child cannot both be labels', () => {
@@ -81,8 +95,15 @@ describe('label paths', () => {
       'jobs',
       'school-community',
     ]);
-    // A word outside the glossary becomes a stable short hash, never a random ID.
+    // The words of a personal mailbox's own labels are in the glossary (QA D8).
+    expect(pathSlug('家人')).toBe('family');
+    expect(pathSlug('报税')).toBe('tax-filing');
+    expect(pathSlug('测试/一')).toBe('test-one');
+    expect(pathSlug('学术会议')).toBe('academic-meetings');
+    expect(pathSlug('项目/阿尔法')).toMatch(/^project-x[0-9a-f]{4}$/);
+    // A word outside the glossary becomes a stable short hash, never a random ID; the known words around it stay.
     expect(pathSlug('猫咪')).toMatch(/^x[0-9a-f]{4}$/);
+    expect(pathSlug('金融/猫咪')).toMatch(/^finance-x[0-9a-f]{4}$/);
     expect(pathSlug('猫咪')).toBe(pathSlug('猫咪'));
     expect(pathSlug('none')).toBe('none-label');
     expect(labelIdFor('出行', new Set(['travel']))).toBe('travel-2');
@@ -241,6 +262,54 @@ describe('importing the owner’s rule file', () => {
     expect(foldTerms(['ＡＢ', 'ab'])).toEqual(['ab']);
   });
 
+  it('accepts multi-line evidence and notes and a List-Id in its header form (QA D4)', () => {
+    const s = store();
+    const plan = planImport(s, [labelEntry('分拣/订阅收据', { description: '第一行\r\n第二行' })], [
+      entry('multi', { fromAddress: 'a@example.com' }, '分拣/订阅收据', { evidence: 'line1\nline2', notes: 'a\r\nb\rc' }),
+      entry('bracket', { listId: ' <Digest.News.example.com> ' }, '分拣/订阅收据'),
+      entry('bell', { fromAddress: 'b@example.com' }, '分拣/订阅收据', { evidence: 'ding\u0007' }),
+      entry('tab', { fromAddress: 'c@example.com' }, '分拣/订阅收据', { notes: 'a\tb' }),
+      entry('half', { listId: '<digest.example.com' }, '分拣/订阅收据'),
+    ]);
+    expect(plan.rules.map((item) => [item.key, item.action, item.problem])).toEqual([
+      ['multi', 'create', ''],
+      ['bracket', 'create', ''],
+      ['bell', 'invalid', 'text'],
+      ['tab', 'invalid', 'text'],
+      ['half', 'invalid', 'value'],
+    ]);
+    const valid = planImport(s, [labelEntry('分拣/订阅收据', { description: '第一行\r\n第二行' })], [
+      entry('multi', { fromAddress: 'a@example.com' }, '分拣/订阅收据', { evidence: 'line1\nline2', notes: 'a\r\nb\rc' }),
+      entry('bracket', { listId: ' <Digest.News.example.com> ' }, '分拣/订阅收据'),
+    ]);
+    applyImport(s, valid, T0);
+    expect(s.rule('multi')).toMatchObject({ evidence: 'line1\nline2', notes: 'a\nb\nc' });
+    expect(s.rule('bracket')).toMatchObject({ kind: 'list_id', value: 'digest.news.example.com' });
+    expect(s.labels()[0]?.description).toBe('第一行\n第二行');
+    // The header form of an existing rule's List-Id is the same rule: a re-import skips it.
+    expect(planImport(s, [], [entry('bracket', { listId: 'digest.news.example.com' }, '分拣/订阅收据')]).rules[0]?.action).toBe('skip');
+  });
+
+  it('keeps a disabled label disabled through an export and an import into a fresh store, and through the template (QA D10)', () => {
+    const s = store();
+    applyImport(s, planImport(s, templateLabels(), []), T0);
+    s.run(`UPDATE labels SET enabled = 0 WHERE id = 'travel'`);
+    const document = JSON.parse(exportDocument(s).json) as { labels: { path: string; enabled: boolean }[] };
+    expect(document.labels.find((item) => item.path === '分拣/出行')?.enabled).toBe(false);
+    expect(document.labels.filter((item) => item.enabled)).toHaveLength(14);
+    // The template names no switch: the owner's choice stands.
+    expect(planImport(s, templateLabels(), []).labels.every((item) => item.action === 'skip')).toBe(true);
+    const fresh = store();
+    applyImport(fresh, planImport(fresh, document.labels.map((item) => labelEntry(item.path, { enabled: item.enabled })), []), T0);
+    expect(fresh.labels().find((row) => row.display_name === '出行')?.enabled).toBe(0);
+    expect(fresh.labels().filter((row) => row.enabled === 1)).toHaveLength(14);
+    // An entry with the switch updates an existing label's; one without keeps it.
+    const enabling = planImport(fresh, [labelEntry('分拣/出行', { enabled: true })], []).labels[0];
+    expect(enabling?.action).toBe('update');
+    expect(enabling?.changed).toContain('enabled');
+    expect(planImport(fresh, [labelEntry('分拣/出行')], []).labels[0]?.changed).not.toContain('enabled');
+  });
+
   it('keeps the tree: a label may not become the parent of another', () => {
     const s = store();
     const plan = planImport(s, [labelEntry('分拣/金融', { description: '金融类邮件' })], [entry('x', { fromAddress: 'a@example.com' }, '分拣/金融/投资')]);
@@ -299,12 +368,27 @@ describe('the store', () => {
     sql.exec(`INSERT INTO rules (id, kind, value, label_id, state, create_time, update_time) VALUES ('r1', 'list_id', 'digest.news.example.com', 'newsletter', 'active', 1, 1)`);
     const s = new Store(sql);
     s.migrate();
-    expect(s.getMeta('schema_version')).toBe('2');
+    expect(s.getMeta('schema_version')).toBe('3');
     expect(s.rule('r1')).toMatchObject({ kind: 'list_id', subject_includes: '[]', keep_in_inbox: 0, require_dmarc: 0, import_id: '' });
     expect(SCHEMA_V2.length).toBeGreaterThan(0);
     // A carve-out and a plain rule of one sender to one label are two rules now.
     s.run(`INSERT INTO rules (id, kind, value, label_id, state, create_time, update_time, subject_includes) VALUES ('r2', 'list_id', 'digest.news.example.com', 'newsletter', 'active', 1, 1, '["x"]')`);
     expect(s.count(`SELECT count(*) AS n FROM rules`)).toBe(2);
+  });
+
+  it('migrates a version 2 database to 3: the record of the parents this app created in Gmail', () => {
+    const sql = memorySql();
+    for (const statement of [...SCHEMA_V1, ...SCHEMA_V2]) sql.exec(statement);
+    sql.exec(`INSERT INTO meta (key, value) VALUES ('schema_version', '2')`);
+    const s = new Store(sql);
+    s.migrate();
+    expect(s.getMeta('schema_version')).toBe('3');
+    expect(SCHEMA_V3.length).toBe(1);
+    s.run(`INSERT INTO gmail_parents (gmail_id, create_time) VALUES ('Label_9', 1)`);
+    expect(s.count(`SELECT count(*) AS n FROM gmail_parents`)).toBe(1);
+    // Migrating again changes nothing.
+    s.migrate();
+    expect(s.count(`SELECT count(*) AS n FROM gmail_parents`)).toBe(1);
   });
 
   it('counts the flow per UTC day, never below zero, and reads a range of days', () => {

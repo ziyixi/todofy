@@ -67,6 +67,33 @@ describe('流程', () => {
     ])
   })
 
+  it('never runs out of hues for the template’s ten groups: a later group borrows a slot the range leaves free (QA D3)', () => {
+    const paths = ['开发/CI通知', '开发/平台工具', '金融/投资', '金融/银行支付', '账号安全', '政府法律', '购物/订单物流', '购物/促销', '订阅收据', '出行', '生活/账单住房', '生活/汽车', '生活/医疗', '求职', '学校与社群', '新闻/周报']
+    const labels = paths.map((path, index) => label(`l${String(index)}`, path))
+    const written = (path: string, n: number) => flowCount(MailFlow_Stage.RULE, MailFlow_Outcome.ARCHIVED, `labels/l${String(paths.indexOf(path))}`, n)
+    // Five groups in range, three of them past the eighth: none is gray, and no two share a hue.
+    const graph = flowGraph([written('开发/CI通知', 3), written('金融/投资', 2), written('求职', 1), written('学校与社群', 1), written('新闻/周报', 4)], labels)
+    const slotOf = (group: string) => graph.groups.find((item) => item.name === group)?.slot
+    expect(slotOf('开发')).toBe(1)
+    expect(slotOf('金融')).toBe(2)
+    const shown = ['开发', '金融', '求职', '学校与社群', '新闻'].map(slotOf)
+    expect(shown.every((slot) => slot !== undefined && slot > 0)).toBe(true)
+    expect(new Set(shown).size).toBe(5)
+    // The first eight groups keep their slot in every range (a range never repaints them).
+    const other = flowGraph([written('金融/投资', 1), written('出行', 1)], labels)
+    expect(other.groups.find((item) => item.name === '金融')?.slot).toBe(2)
+    expect(other.groups.find((item) => item.name === '出行')?.slot).toBe(7)
+    // A disabled label's group does not take a hue from the groups that sort mail.
+    const disabledFirst = [Object.assign(label('old', '旧/归档'), { enabled: false }), ...labels]
+    expect(flowGraph([written('开发/CI通知', 1)], disabledFirst).groups.find((item) => item.name === '开发')?.slot).toBe(1)
+    // Only a range with more than eight groups has gray ones, and the legend says so.
+    const all = flowGraph(paths.map((path) => written(path, 1)), labels)
+    expect(all.groups.filter((item) => item.slot === 0).map((item) => item.name)).toEqual(['求职', '学校与社群', '新闻'])
+    const box = sankeyChart(all, {})
+    expect(box.querySelector('.flow-legend')?.textContent).toContain('新闻（灰色：此范围的分组超过八种颜色）')
+    expect(sankeyChart(graph, {}).querySelector('.flow-legend')?.textContent).not.toContain('灰色')
+  })
+
   it('credits the neighbours apart from the model, in the graph and the table', async () => {
     const s = server()
     s.flow.push(flowCount(MailFlow_Stage.NEIGHBOURS, MailFlow_Outcome.ARCHIVED, 'labels/travel', 3))
@@ -232,6 +259,9 @@ describe('导入导出', () => {
     expect(parseImport(file).rules.map((rule) => rule.id)).toEqual(['bank-login', 'bank'])
     expect(parseImport(file).rules[0]).toMatchObject({ keepInInbox: true, subjectIncludes: ['登录'], match: { fromAddress: 'statements@bank.example.com' } })
     expect(parseImport(JSON.stringify({ labels: [{ path: '分拣/出行', description: '行程' }], rules: [] })).labels[0]?.path).toBe('分拣/出行')
+    // An export carries each label's switch; a file without it leaves the switch unset (QA D10).
+    expect(parseImport(JSON.stringify({ labels: [{ path: '分拣/出行', enabled: false }], rules: [] })).labels[0]?.enabled).toBe(false)
+    expect(parseImport(JSON.stringify({ labels: [{ path: '分拣/出行' }], rules: [] })).labels[0]?.enabled).toBeUndefined()
     expect(() => parseImport('[{"id": "x", "match": {"from_adress": "a@example.com"}, "label": "分拣/a"}]')).toThrow(/第 1 个规则/)
     expect(() => parseImport('[{"match": {"from_address": "a@example.com"}, "label": "分拣/a"}]')).toThrow(/第 1 个规则/)
     expect(() => parseImport('{"rules": [], "extra": 1}')).toThrow(/labels 和 rules/)

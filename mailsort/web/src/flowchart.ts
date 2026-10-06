@@ -5,7 +5,8 @@
  *
  * d3-sankey only lays the graph out (positions); the SVG is plain DOM in the page's theme: every color is a CSS token
  * (styles.css, light and dark), labels are grouped and colored by their top-level path segment in a fixed order (the
- * labels' own order, so a range or filter never repaints a group), and a group past the palette's eight hues is gray.
+ * labels' own order, so a range or filter never repaints one of the first eight; a later group borrows a hue the range
+ * leaves free, groupSlots), and only a range showing more than eight groups has gray ones.
  * Color is never the only cue: every right-hand node is labelled with its name and count, and the breakdown table
  * (views/flow.ts) has every number. Hover or focus shows a node's or link's exact count and share; a label node opens
  * that label's 操作记录 (click, Enter or Space). Motion is a short opacity change, off under prefers-reduced-motion
@@ -89,17 +90,38 @@ function topLevel(path: string): string {
   return path.split('/')[0] ?? path
 }
 
+/**
+ * The color slot of every top-level group (1 to SERIES, 0 for gray), so that a group keeps its color whatever the range
+ * shows and gray is left for real overflow:
+ * - each group has a home slot in the labels' order, enabled labels' groups first (the recommended template alone has
+ *   ten groups, so a disabled group should not take a hue from one that sorts mail); the first SERIES groups keep their
+ *   home slot in every range, so a range or filter never repaints them;
+ * - a group past the palette that the range shows borrows the first slot whose home group the range does not show
+ *   (in the labels' order), so with at most SERIES groups in a range none is gray;
+ * - only when the range shows more than SERIES groups do the later ones go gray (the legend says so).
+ */
+export function groupSlots(labels: readonly Label[], shown: ReadonlySet<string>): Map<string, number> {
+  const order: string[] = []
+  for (const label of [...labels.filter((item) => item.enabled), ...labels.filter((item) => !item.enabled)]) {
+    const group = topLevel(label.displayName)
+    if (!order.includes(group)) order.push(group)
+  }
+  const slots = new Map<string, number>()
+  order.forEach((group, index) => slots.set(group, index < SERIES ? index + 1 : 0))
+  // Slots free in this range: their home group shows nothing here.
+  const free = order.slice(0, SERIES).flatMap((group, index) => (shown.has(group) ? [] : [index + 1]))
+  for (const group of order.slice(SERIES)) if (shown.has(group)) slots.set(group, free.shift() ?? 0)
+  return slots
+}
+
 /** The graph and the breakdown of one MailFlow's counters. `labels` give names, order and groups. */
 export function flowGraph(counts: readonly MailFlow_Count[], labels: readonly Label[]): FlowGraph {
-  // Groups in the labels' order: a group keeps its color whatever the range shows.
-  const groupSlot = new Map<string, number>()
-  for (const label of labels) {
-    const group = topLevel(label.displayName)
-    if (!groupSlot.has(group)) groupSlot.set(group, groupSlot.size < SERIES ? groupSlot.size + 1 : 0)
-  }
   const byName = new Map(labels.map((label) => [label.name, label]))
   const nameOf = (label: string) => byName.get(label)?.displayName ?? '（已删除的标签）'
-  const slotOf = (label: string) => groupSlot.get(topLevel(byName.get(label)?.displayName ?? '')) ?? 0
+  const groupOf = (label: string) => topLevel(byName.get(label)?.displayName ?? '')
+  // Filled in once the counters are read (groupSlots below).
+  let groupSlot = new Map<string, number>()
+  const slotOf = (label: string) => groupSlot.get(groupOf(label)) ?? 0
 
   const links = new Map<string, number>()
   const add = (source: string, target: string, value: number) => {
@@ -160,6 +182,9 @@ export function flowGraph(counts: readonly MailFlow_Count[], labels: readonly La
   }
 
   const used = new Set([...links.keys()].flatMap((key) => key.split('\u0000')))
+  const shownGroups = new Set([...used].filter((id) => id.startsWith('label:')).map((id) => groupOf(id.slice('label:'.length))))
+  for (const label of rows.keys()) shownGroups.add(groupOf(label))
+  groupSlot = groupSlots(labels, shownGroups)
   const nodes: FlowNodeData[] = []
   if (used.has('new')) nodes.push({ id: 'new', name: '新邮件', kind: 'source', slot: 0 })
   for (const [, id, name] of STAGES) {
@@ -188,6 +213,7 @@ export function flowGraph(counts: readonly MailFlow_Count[], labels: readonly La
   const breakdown = [...rows.entries()]
     .sort(([a], [b]) => order(a) - order(b) || (a < b ? -1 : 1))
     .map(([label, item]) => ({ label, name: nameOf(label), slot: slotOf(label), ...item }))
+  // In color order (home slots first), the legend's order.
   const groups = [...groupSlot.entries()].map(([name, slot]) => ({ name, slot }))
   return {
     total,
@@ -372,7 +398,7 @@ export function sankeyChart(graph: FlowGraph, options: SankeyOptions = {}): HTML
         ...groups.map((group) => {
           const swatch = el('span', { class: 'swatch' })
           swatch.style.background = group.slot === 0 ? 'var(--muted)' : `var(--series-${String(group.slot)})`
-          return el('li', {}, swatch, group.slot === 0 ? `${group.name}（灰色：分组超过八种颜色）` : group.name)
+          return el('li', {}, swatch, group.slot === 0 ? `${group.name}（灰色：此范围的分组超过八种颜色）` : group.name)
         }),
       ),
     )

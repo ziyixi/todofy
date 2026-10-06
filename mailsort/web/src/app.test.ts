@@ -221,6 +221,35 @@ describe('操作记录', () => {
     expect(toastText(root)).toBe('已撤销 45 条')
   })
 
+  it('filtered to one label, undoes that label’s entries of the range only, and says so before (QA D9)', async () => {
+    const server = new FakeServer()
+    server.labels = [label('travel', '出行'), label('newsletter', '订阅')]
+    server.ledgerEntries = [ledgerEntry('t1', { label: 'labels/travel' }), ledgerEntry('n1'), ledgerEntry('t2', { label: 'labels/travel' })]
+    const asked: string[] = []
+    const root = await open(server, '/ledger?label=labels%2Ftravel', {
+      now: () => NOW,
+      confirm: (message) => {
+        asked.push(message)
+        return true
+      },
+    })
+    expect(root.querySelector('h2')?.textContent).toBe('按时间段撤销“出行”')
+    const [start, end] = [...root.querySelectorAll<HTMLInputElement>('input[type="datetime-local"]')]
+    if (start === undefined || end === undefined) throw new Error('no range inputs')
+    start.value = '2026-10-01T00:00'
+    end.value = '2026-10-02T00:00'
+    buttonNamed(root, '撤销这段时间').click()
+    await settle(10)
+    expect(asked).toEqual(['只撤销这段时间内本应用打的“出行”标签？'])
+    expect(server.calls.find((call) => call.path === '/api/v1/ledgerEntries:undo')?.body?.['label']).toBe('labels/travel')
+    expect(server.ledgerEntries.map((item) => [item.name, item.undoable])).toEqual([
+      ['ledgerEntries/t1', false],
+      ['ledgerEntries/n1', true],
+      ['ledgerEntries/t2', false],
+    ])
+    expect(toastText(root)).toBe('已撤销 2 条')
+  })
+
   it('offers 撤销 only where the server accepts it, names the mail, and loads older pages', async () => {
     const server = new FakeServer()
     server.ledgerEntries = [ledgerEntry('a1', { undoable: false, subject: '已在 Gmail 改过的邮件' }), ...Array.from({ length: 59 }, (_, i) => ledgerEntry(`b${String(i).padStart(2, '0')}`))]

@@ -28,13 +28,13 @@ export const PROBLEMS: Readonly<Record<string, string>> = {
   label_path: '标签路径不对（最多三级，每级 1–40 字）',
   label_prefix: '标签要以“分拣/”开头',
   label_tree: '标签不能和另一个标签互为上下级（只有末级是标签）',
-  description: '说明太长（最多 300 字）',
+  description: '说明太长（最多 300 字）或含换行以外的控制字符',
   threshold: '阈值须为 0 或 0.5–0.99',
   match: 'match 里要有且只有一个：from_address、from_domain、list_id 或 to_address',
   value: '地址、域名或列表 ID 的格式不对',
   rule_id: 'id 只能用字母、数字和 ._-（最多 64 个）',
   subject: '主题条件每边最多 8 个，每个 1–40 字',
-  text: 'evidence 或 notes 太长（最多 300 字）',
+  text: 'evidence 或 notes 太长（最多 300 字）或含换行以外的控制字符',
   duplicate: '和前面的条目重复',
   labels_full: '标签数量会超过上限 24',
   rules_full: '规则数量会超过上限 500',
@@ -49,6 +49,7 @@ export const WARNINGS: Readonly<Record<string, string>> = {
 
 const FIELDS: Readonly<Record<string, string>> = {
   description: '说明',
+  enabled: '启用',
   trust: '可信类',
   keep_in_inbox: '留在收件箱',
   sensitive: '敏感',

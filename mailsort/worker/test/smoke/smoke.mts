@@ -10,7 +10,10 @@
  * rule file (preview, confirm), a nested label created in Gmail with its parents, a label that keeps its mail in the
  * inbox, a subject carve-out before the sender's plain rule, forged From headers that fire no rule (DMARC failed, and
  * a dmarc=pass planted in the quoted envelope sender), a pickup carve-out's suggestion confirmed and kept in the inbox,
- * the flow API (deferred mail counted once, while it waits) and the export's round trip; and last the auth failure. Run from worker/ after the UI's build
+ * the flow API (deferred mail counted once, while it waits) and the export's round trip; the QA fixes (the Gmail
+ * filter export leaving out a carved-out sender's plain rule, enabled in the export, multi-line evidence and a List-Id
+ * in header form, 分拣/x read as x, a former parent not imported by the sync, a range undo of one label); and last the
+ * auth failure. Run from worker/ after the UI's build
  * (the dev server serves web/dist):
  *
  *   npm run test:smoke
@@ -27,6 +30,7 @@ import { MailFlow_Outcome, MailFlow_Stage } from '@ziyixi/proto/mailsort/ui/v1/f
 import { LabelSchema } from '@ziyixi/proto/mailsort/ui/v1/label_pb';
 import { Mode, SettingsSchema } from '@ziyixi/proto/mailsort/ui/v1/status_pb';
 import { create } from '@ziyixi/proto/protobuf';
+import { timestampFromMs } from '@ziyixi/proto/protobuf/wkt';
 import { LABELS, MAILS, message, type SyntheticMail } from '../fakes/fixtures.ts';
 import { allowedOperation, FORBIDDEN_LABELS } from '../fakes/table.ts';
 import { FakeUpstream } from '../fakes/upstream.ts';
@@ -269,6 +273,26 @@ async function run(origin: string, up: FakeUpstream, setClock: (now: number) => 
   const exported = JSON.parse((await api.exportRules({})).json) as { rules: { id: string }[] };
   const again = await api.importRules({ labels: labelsIn, rules: rulesIn, validateOnly: true });
   check(exported.rules.some((rule) => rule.id === 'bank-login') && again.skippedCount === 6 && again.createdRuleCount === 0, 'export lists the imported rules; importing the same file again changes nothing');
+
+  // The QA fixes of round 2, through the same HTTP API.
+  const filters = await api.exportGmailFilters({});
+  check(!filters.xml.includes('orders@shop.example.com') && filters.xml.includes('builds@ci.example.com'), 'Gmail filters: the shop\'s plain rule, which a pickup carve-out covers, is not exported (Gmail would archive the code)');
+  const document = JSON.parse((await api.exportRules({})).json) as { labels: { path: string; enabled?: boolean }[] };
+  check(document.labels.every((label) => typeof label.enabled === 'boolean'), 'export: every label carries its enabled switch');
+  const multiLine = await api.importRules({
+    rules: [create(RuleImportSchema, { id: 'digest-list', match: { listId: '<digest.news.example.com>' }, label: '分拣/订阅收据', evidence: 'line one\nline two' })],
+    validateOnly: true,
+  });
+  check(multiLine.invalidCount === 0 && multiLine.createdRuleCount === 1, 'import: multi-line evidence and a List-Id in its header form are accepted');
+  const typed = await api.createLabel({ label: create(LabelSchema, { displayName: '分拣/新闻/周报', description: '新闻网站的每周摘要与精选文章推送' }), requestId: id() });
+  check(typed.displayName === '新闻/周报' && up.gmail.labelIdByName('分拣/分拣') === undefined, 'CreateLabel reads 分拣/新闻/周报 as 新闻/周报, never 分拣/分拣/…');
+  await api.updateLabel({ label: create(LabelSchema, { name: typed.name, displayName: '资讯/精选', etag: typed.etag }), updateMask: { paths: ['display_name', 'etag'] }, requestId: id() });
+  const synced = await api.syncLabels({ requestId: id() });
+  check(up.gmail.labelIdByName('分拣/新闻') !== undefined && !synced.labels.some((label) => label.displayName === '新闻'), 'sync: the parent 分拣/新闻 this app created is not imported once its child is renamed away');
+  const rangeUndo = await api.undoLedgerEntries({ startTime: timestampFromMs(T0), endTime: timestampFromMs(now + MINUTE), label: 'labels/dev-ci-notices', requestId: id() });
+  const ciAfter = labelsOf(MAILS.ciBuild.id);
+  const bankAfter = labelsOf(MAILS.bankEn.id);
+  check(rangeUndo.undoneCount === 1 && ciAfter.includes('INBOX') && !ciAfter.includes(ciLeaf) && !bankAfter.includes('INBOX'), 'range undo filtered to one label: only 开发/CI通知 is undone, the bank statement stays filed');
 
   // The grant refused three times: Google is no longer called.
   up.gmail.grants.clear();

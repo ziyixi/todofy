@@ -30,13 +30,15 @@ inbox and waits in the review queue. Shadow mode (the default) only suggests. Ch
 - **规则**: approve the rules proposed from repeated corrections, add exact-address, domain, mailing-list or
   delivered-to rules by hand (with subject words to include or exclude, a carve-out tried before the sender's plain
   rule, and keep in inbox), and export them as Gmail filters (label, and archive unless kept) to import in Gmail's
-  settings. A sender rule fires only when DMARC passed aligned with the From domain, a list rule only with a DKIM
+  settings; left out are trust and DMARC rules, rules with subject conditions and the plain rules of the senders they
+  cover (Gmail would apply both). A sender rule fires only when DMARC passed aligned with the From domain, a list rule only with a DKIM
   signature of the list's domain (`docs/design.md` §4.3).
 - **导入**: import the owner's rule file or an export (pasted or uploaded JSON), or the template: a preview of every
-  create, update, skip or invalid entry first, then 确认导入 (all or nothing); export every label and rule as JSON.
+  create, update, skip or invalid entry first, then 确认导入 (all or nothing); export every label (with its 启用) and rule
+  as JSON.
 - **流程**: how mail moved through the pipeline today, over 7 or 30 days (a Sankey diagram and a table per label; a
   label opens its 操作记录); 状态 shows today's, compact.
-- **例子**, **准确率**, **记录** (undo one write or a time range), **状态** (Gmail grant, sync, today's model use),
+- **例子**, **准确率**, **记录** (undo one write or a time range, of one label when opened from 流程), **状态** (Gmail grant, sync, today's model use),
   **设置** (mode, limits, neuron budget; 解除熔断 after the breaker tripped). Emergency stop: 设置 → 关闭
   (`docs/design.md` §10).
 - **What is kept**: decided mail's subject, sender and exact sender keys, and the review queue, for 14 days (the

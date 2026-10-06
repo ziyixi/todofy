@@ -5,9 +5,71 @@
  * mailsort's own writes; none marks read, stars, forwards or deletes. Which rules are left out is the API's choice
  * (api.ts exportGmailFilters); any value rule-value.ts refuses is left out here too.
  */
+import { termsOf } from './decide.ts';
 import { LABEL_PREFIX } from './limits.ts';
 import { ruleValueOk } from './rule-value.ts';
 import type { RuleRow } from './store.ts';
+
+/** What the export needs of an active rule and its label. */
+export type ExportCandidate = Pick<RuleRow, 'id' | 'kind' | 'value' | 'require_dmarc' | 'subject_includes' | 'subject_excludes'> & { readonly trust: number };
+
+function hasSubjectConditions(rule: Pick<RuleRow, 'subject_includes' | 'subject_excludes'>): boolean {
+  return termsOf(rule.subject_includes).length > 0 || termsOf(rule.subject_excludes).length > 0;
+}
+
+/** The sender domain a sender rule covers (an address's domain), or null for a list or delivered-to rule. */
+function senderDomainOf(rule: Pick<RuleRow, 'kind' | 'value'>): string | null {
+  if (rule.kind === 'sender_domain') return rule.value;
+  if (rule.kind === 'sender_address') return rule.value.slice(rule.value.lastIndexOf('@') + 1);
+  return null;
+}
+
+/** Whether `domain` is `parent` or one of its subdomains (Gmail's `from:"parent"` matches both). */
+function withinDomain(domain: string, parent: string): boolean {
+  return domain === parent || domain.endsWith(`.${parent}`);
+}
+
+/**
+ * Whether two rules can match the same mail by their sender keys: the same kind and value, or two sender rules whose
+ * addresses and domains overlap (a domain rule and an address or a subdomain under it, either way round). Erring
+ * towards "overlaps" only ever leaves a filter out, which is the safe direction.
+ */
+function overlaps(a: Pick<RuleRow, 'kind' | 'value'>, b: Pick<RuleRow, 'kind' | 'value'>): boolean {
+  if (a.kind === b.kind && a.value === b.value) return true;
+  const da = senderDomainOf(a);
+  const db = senderDomainOf(b);
+  if (da === null || db === null) return false;
+  if (a.kind === 'sender_address' && b.kind === 'sender_address') return false; // two different addresses
+  if (a.kind === 'sender_domain' && b.kind === 'sender_domain') return withinDomain(da, db) || withinDomain(db, da);
+  // One address and one domain: the address's domain under the domain rule's.
+  return a.kind === 'sender_domain' ? withinDomain(db, da) : withinDomain(da, db);
+}
+
+/**
+ * Which active rules become Gmail filters (design §6). Left out:
+ * - a rule of a trust label, or with its own DMARC switch: a filter cannot check DMARC, and a forged From could then
+ *   reach a trust label;
+ * - a rule with subject conditions: Gmail applies every matching filter, so a carve-out and the sender's plain rule
+ *   would both label the mail;
+ * - a plain rule whose sender an active subject-conditioned rule covers (same kind and value, or a domain that covers
+ *   the carved address or subdomain, either way round). Exported alone it would give the carved-out mail (a pickup
+ *   code meant to stay in the inbox, a login notice meant for 账号安全) the sender's plain label and archive it in Gmail:
+ *   the opposite of what the owner asked for. Without the filter Gmail does nothing to that sender's mail, which only
+ *   leaves it in the inbox;
+ * - a value rule-value.ts refuses (an older row).
+ */
+export function exportableRules<T extends ExportCandidate>(rules: readonly T[]): { exported: T[]; skipped: number } {
+  const conditioned = rules.filter(hasSubjectConditions);
+  const exported = rules.filter(
+    (rule) =>
+      rule.trust === 0 &&
+      rule.require_dmarc === 0 &&
+      !hasSubjectConditions(rule) &&
+      !conditioned.some((carve) => overlaps(carve, rule)) &&
+      ruleValueOk(rule.kind, rule.value),
+  );
+  return { exported, skipped: rules.length - exported.length };
+}
 
 function escapeXml(text: string): string {
   return text.replace(/[<>&'"]/g, (char) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', "'": '&apos;', '"': '&quot;' })[char] ?? char);

@@ -9,8 +9,9 @@
  * and only when no entry is invalid. Nothing reaches Gmail: a new label is created there before its first write.
  *
  * Matching: a label by its path; a rule by its import ID (a re-import updates the rule it made), else by what it is
- * (kind, value, label and subject conditions). A label a rule names that exists nowhere is created enabled, not live
- * and without a description: rules decide it at once (in shadow first), the model only once the owner describes it.
+ * (kind, value, label and subject conditions). A label entry's `enabled` (an export writes it) is kept; without one a
+ * new label is enabled and an existing one keeps its switch. A label a rule names that exists nowhere is created
+ * enabled, not live and without a description: rules decide it at once (in shadow first), the model only once the owner describes it.
  * Rule values pass rule-value.ts like every other rule's, since they reach Gmail filter criteria in the export.
  */
 import { termsOf } from './decide.ts';
@@ -30,7 +31,7 @@ import {
   THRESHOLD_MIN,
 } from './limits.ts';
 import { labelIdFor, normalizePath, treeConflict } from './paths.ts';
-import { ruleValueOk } from './rule-value.ts';
+import { normalizeRuleValue, ruleText, ruleValueOk } from './rule-value.ts';
 import type { LabelRow, RuleRow, Store } from './store.ts';
 import { LABEL_TEMPLATE } from './template.ts';
 
@@ -43,6 +44,11 @@ export interface LabelInput {
   readonly sensitive: boolean;
   /** The label's own threshold (0: the default); null keeps an existing label's (the template never resets it). */
   readonly threshold: number | null;
+  /**
+   * Whether the label is enabled, as an export writes it; null (the owner's rule file, the template) creates it enabled
+   * and keeps an existing label's switch, so a re-imported export brings back a disabled label disabled.
+   */
+  readonly enabled: boolean | null;
 }
 
 /** A rule entry as the request carries it (RuleImport). */
@@ -69,6 +75,7 @@ interface LabelValues {
   readonly keepInInbox: boolean;
   readonly sensitive: boolean;
   readonly threshold: number;
+  readonly enabled: boolean;
 }
 
 export interface PlannedLabel {
@@ -162,7 +169,8 @@ function identity(kind: string, value: string, labelId: string, includes: readon
 /** The template's labels as import entries. */
 export function templateLabels(): LabelInput[] {
   // No threshold: one click on the template must not throw away a threshold the owner tuned (a new label gets the default).
-  return LABEL_TEMPLATE.map((item) => ({ path: `${LABEL_PREFIX}${item.path}`, description: item.description, trust: item.trust, keepInInbox: item.keepInInbox, sensitive: item.sensitive, threshold: null }));
+  // Nor an enabled switch: a label the owner disabled stays disabled.
+  return LABEL_TEMPLATE.map((item) => ({ path: `${LABEL_PREFIX}${item.path}`, description: item.description, trust: item.trust, keepInInbox: item.keepInInbox, sensitive: item.sensitive, threshold: null, enabled: null }));
 }
 
 /** What the import would do (pure over the store's rows; nothing is written). */
@@ -183,7 +191,7 @@ export function planImport(store: Store, labelsIn: readonly LabelInput[], rulesI
     problem,
     warning: '',
     fromRule: false,
-    values: { path: key, description: '', trust: false, keepInInbox: false, sensitive: false, threshold: 0 },
+    values: { path: key, description: '', trust: false, keepInInbox: false, sensitive: false, threshold: 0, enabled: true },
   });
 
   // Labels of the request.
@@ -194,8 +202,9 @@ export function planImport(store: Store, labelsIn: readonly LabelInput[], rulesI
       return;
     }
     const { path } = parsed;
-    const description = input.description.trim();
-    if (Array.from(description).length > DESCRIPTION_MAX || hasControlChar(description.replace(/\n/g, ''))) {
+    // Line breaks allowed (CRLF read as LF), as in a rule's evidence and notes; other control characters not.
+    const description = ruleText(input.description, DESCRIPTION_MAX);
+    if (description === null) {
       plannedLabels.push(invalidLabel(index, path, 'description'));
       return;
     }
@@ -209,7 +218,8 @@ export function planImport(store: Store, labelsIn: readonly LabelInput[], rulesI
       plannedLabels.push(invalidLabel(index, path, 'duplicate'));
       return;
     }
-    const values: LabelValues = { path, description, trust: input.trust, keepInInbox: input.keepInInbox, sensitive: input.sensitive, threshold };
+    const enabled = input.enabled ?? (row === undefined ? true : row.enabled === 1);
+    const values: LabelValues = { path, description, trust: input.trust, keepInInbox: input.keepInInbox, sensitive: input.sensitive, threshold, enabled };
     const planned = row === undefined ? createLabel(index, values, takenIds, false) : updateLabel(index, row, values, exampleCounts.get(row.id) ?? 0);
     plannedLabels.push(planned);
     if (planned.action !== 'invalid') plannedByPath.set(path, planned);
@@ -236,16 +246,17 @@ export function planImport(store: Store, labelsIn: readonly LabelInput[], rulesI
     const chosen = set.length === 1 ? set[0] : undefined;
     if (chosen === undefined) return plannedRules.push(invalidRule(index, key, 'match'));
     const [field, kind] = chosen;
-    const value = (input.match?.[field] ?? '').trim().toLowerCase();
+    const value = normalizeRuleValue(kind, input.match?.[field] ?? '');
     if (!ruleValueOk(kind, value)) return plannedRules.push(invalidRule(index, key, 'value'));
     const parsed = pathOfName(input.label);
     if ('problem' in parsed) return plannedRules.push(invalidRule(index, key, parsed.problem));
     const includes = foldTerms(input.subjectIncludes);
     const excludes = foldTerms(input.subjectExcludes);
     if (includes === null || excludes === null) return plannedRules.push(invalidRule(index, key, 'subject'));
-    const evidence = input.evidence.trim();
-    const notes = input.notes.trim();
-    if ([evidence, notes].some((text) => Array.from(text).length > RULE_TEXT_MAX || hasControlChar(text))) return plannedRules.push(invalidRule(index, key, 'text'));
+    // Multi-line evidence and notes are fine (the owner's validated rule file has them); other control characters not.
+    const evidence = ruleText(input.evidence, RULE_TEXT_MAX);
+    const notes = ruleText(input.notes, RULE_TEXT_MAX);
+    if (evidence === null || notes === null) return plannedRules.push(invalidRule(index, key, 'text'));
 
     // The label: planned from the request, existing, or created for this rule.
     const { path } = parsed;
@@ -254,8 +265,8 @@ export function planImport(store: Store, labelsIn: readonly LabelInput[], rulesI
       const row = byPath.get(path);
       label =
         row !== undefined
-          ? { index: -1, action: 'skip', key: path, id: row.id, changed: [], problem: '', warning: '', fromRule: true, values: { path, description: row.description, trust: row.trust === 1, keepInInbox: row.keep_in_inbox === 1, sensitive: row.sensitive === 1, threshold: row.threshold } }
-          : createLabel(-1, { path, description: '', trust: input.trust, keepInInbox: false, sensitive: false, threshold: 0 }, takenIds, true);
+          ? { index: -1, action: 'skip', key: path, id: row.id, changed: [], problem: '', warning: '', fromRule: true, values: { path, description: row.description, trust: row.trust === 1, keepInInbox: row.keep_in_inbox === 1, sensitive: row.sensitive === 1, threshold: row.threshold, enabled: row.enabled === 1 } }
+          : createLabel(-1, { path, description: '', trust: input.trust, keepInInbox: false, sensitive: false, threshold: 0, enabled: true }, takenIds, true);
       plannedByPath.set(path, label);
       if (row === undefined) plannedLabels.push(label);
     } else if (label.fromRule && label.action === 'create' && input.trust && !label.values.trust) {
@@ -337,6 +348,7 @@ function updateLabel(index: number, row: LabelRow, values: LabelValues, examples
   if ((row.keep_in_inbox === 1) !== values.keepInInbox) changed.push('keep_in_inbox');
   if ((row.sensitive === 1) !== values.sensitive) changed.push('sensitive');
   if (row.threshold !== values.threshold) changed.push('threshold');
+  if ((row.enabled === 1) !== values.enabled) changed.push('enabled');
   const warning = row.sensitive === 0 && values.sensitive && examples > 0 ? 'examples_deleted' : '';
   return { index, action: changed.length === 0 ? 'skip' : 'update', key: values.path, id: row.id, changed, problem: '', warning, fromRule: false, values };
 }
@@ -357,11 +369,12 @@ export function applyImport(store: Store, plan: ImportPlan, now: number): Import
       const seq = (store.one<{ seq: number | null }>(`SELECT max(seq) AS seq FROM labels`)?.seq ?? 0) + 1;
       store.run(
         `INSERT INTO labels (id, seq, display_name, description, enabled, live, trust, threshold, gmail_state, desc_version, live_since, create_time, update_time, etag, keep_in_inbox, sensitive)
-         VALUES (?, ?, ?, ?, 1, 0, ?, ?, 'pending', 1, NULL, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, 0, ?, ?, 'pending', 1, NULL, ?, ?, ?, ?, ?)`,
         item.id,
         seq,
         v.path,
         v.description,
+        v.enabled ? 1 : 0,
         v.trust ? 1 : 0,
         v.threshold,
         now,
@@ -372,8 +385,9 @@ export function applyImport(store: Store, plan: ImportPlan, now: number): Import
       );
     } else if (item.action === 'update') {
       store.run(
-        `UPDATE labels SET description = ?, trust = ?, keep_in_inbox = ?, sensitive = ?, threshold = ?, desc_version = desc_version + ?, update_time = ?, etag = ? WHERE id = ?`,
+        `UPDATE labels SET description = ?, enabled = ?, trust = ?, keep_in_inbox = ?, sensitive = ?, threshold = ?, desc_version = desc_version + ?, update_time = ?, etag = ? WHERE id = ?`,
         v.description,
+        v.enabled ? 1 : 0,
         v.trust ? 1 : 0,
         v.keepInInbox ? 1 : 0,
         v.sensitive ? 1 : 0,
@@ -455,6 +469,7 @@ export function exportDocument(store: Store): { json: string; labels: number; ru
       keep_in_inbox: row.keep_in_inbox === 1,
       sensitive: row.sensitive === 1,
       threshold: row.threshold,
+      enabled: row.enabled === 1,
     })),
     rules: rules.map((row) => {
       const label = pathOf.get(row.label_id);

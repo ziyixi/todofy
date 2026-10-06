@@ -17,7 +17,7 @@
 import { newEtag } from './ids.ts';
 import { CONTENT_KEPT_MS, DAY, DECISIONS_KEPT_MS, ERRORS_KEPT, FLOW_KEPT_DAYS, REQUEST_ID_TTL_MS } from './limits.ts';
 
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
 export const SCHEMA_V1: readonly string[] = [
   `CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)`,
@@ -221,6 +221,14 @@ export const SCHEMA_V2: readonly string[] = [
   ) WITHOUT ROWID`,
 ];
 
+/**
+ * Schema version 3 (QA round 2): the Gmail IDs of the parent labels this app created to nest a label (`分拣/新闻` above
+ * `分拣/新闻/周报`; writes.ts ensureGmailParents), so SyncLabels never imports one as a label of its own once its children
+ * are renamed or deleted. A handful of rows; a row goes when Gmail no longer has the label or the owner adds it as a
+ * label by hand.
+ */
+export const SCHEMA_V3: readonly string[] = [`CREATE TABLE IF NOT EXISTS gmail_parents (gmail_id TEXT PRIMARY KEY, create_time INTEGER NOT NULL)`];
+
 export type Value = string | number | null | ArrayBuffer;
 
 export interface RowMeter {
@@ -381,6 +389,7 @@ export class Store {
     const version = Number(this.getMeta('schema_version') ?? 0);
     if (version < 1) for (const statement of SCHEMA_V1) this.sql.exec(statement);
     if (version < 2) for (const statement of SCHEMA_V2) this.sql.exec(statement);
+    if (version < 3) for (const statement of SCHEMA_V3) this.sql.exec(statement);
     if (version !== SCHEMA_VERSION) this.setMeta('schema_version', String(SCHEMA_VERSION));
   }
 

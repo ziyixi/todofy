@@ -110,7 +110,7 @@ function tree(labels: readonly Label[], card: (label: Label) => HTMLElement): HT
 export async function renderLabels(ctx: ViewContext): Promise<void> {
   const reload: () => Promise<void> = await frame(ctx.main, '标签', async (body) => {
     const labels = await allLabels()
-    const name = el('input', { placeholder: '路径，例如 订阅 或 金融/投资', maxlength: '100', 'aria-label': '新标签路径' })
+    const name = el('input', { placeholder: '路径（不含“分拣/”），例如 订阅 或 金融/投资', maxlength: '100', 'aria-label': '新标签路径' })
     const description = el('input', { placeholder: '说明，例如 newsletter 周报 订阅', maxlength: '300', 'aria-label': '新标签说明' })
     const add = () =>
       void act((requestId) => api.createLabel({ label: create(LabelSchema, { displayName: name.value, description: description.value, enabled: true }), requestId }), '已创建', () => reload())

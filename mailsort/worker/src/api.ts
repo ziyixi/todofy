@@ -40,12 +40,11 @@ import { RpcError } from '@ziyixi/proto/rpc-status';
 import { fromWire, toWire } from '@ziyixi/proto/wire-json';
 import { labelStats } from './accuracy.ts';
 import type { ModeName } from './env.ts';
-import { termsOf } from './decide.ts';
 import { deleteExample, deleteExamplesOfLabel, dropEmbeddings } from './examples.ts';
 import { setVerdict } from './feedback.ts';
-import { gmailFilterXml } from './filters.ts';
+import { exportableRules, gmailFilterXml } from './filters.ts';
 import { FLOW_RANGES, readFlow } from './flow.ts';
-import { GoogleError, hasControl, type GmailClient } from './gmail.ts';
+import { GoogleError, type GmailClient } from './gmail.ts';
 import { newEtag, shortId } from './ids.ts';
 import { applyImport, exportDocument, foldTerms, planImport, planValid, templateLabels, type ImportPlan, type LabelInput, type RuleInput } from './import.ts';
 import {
@@ -73,9 +72,9 @@ import {
   UNDO_RANGE_MAX_MS,
 } from './limits.ts';
 import { exampleMessage, flowMessage, labelMessage, labelName, ledgerMessage, MODES, modeName, reviewMessage, RULE_KINDS, ruleMessage } from './model.ts';
-import { labelIdFor, normalizePath, pathOfGmailName, treeConflict } from './paths.ts';
+import { labelIdFor, ownerPath, pathOfGmailName, treeConflict } from './paths.ts';
 import { REASONS, sortError } from './reasons.ts';
-import { ruleValueOk } from './rule-value.ts';
+import { normalizeRuleValue, ruleText, ruleValueOk } from './rule-value.ts';
 import { authState, type Budget, writeScope } from './session.ts';
 import { effectiveMode, readSettings, writeSettings, type SettingsValue } from './settings.ts';
 import { utcDay, type DecisionRow, type LabelRow, type LedgerRow, type ReviewRow, type RuleRow, type Store } from './store.ts';
@@ -220,9 +219,10 @@ function labelOut(ctx: ApiContext, row: LabelRow): Label {
   return labelMessage(row, ctx.store.exampleCounts().get(row.id) ?? 0);
 }
 
-/** A label's path (paths.ts normalizePath), and the tree rule: no label may be the parent of another (only leaves). */
+/** A label's path (paths.ts ownerPath), and the tree rule: no label may be the parent of another (only leaves). */
 function checkDisplayName(ctx: ApiContext, name: string, exceptId = ''): string {
-  const value = normalizePath(name);
+  // `分拣/x` means `x` (the import reads it so too); `分拣` itself, or a path starting with it again, is refused.
+  const value = ownerPath(name);
   if (value === null) throw sortError('INVALID_LABEL');
   if (treeConflict(value, ctx.store.labelPaths(exceptId)) !== null) throw sortError('INVALID_LABEL');
   return value;
@@ -325,7 +325,7 @@ function fraction(value: number): number {
 const KIND_NAMES = new Map<number, RuleRow['kind']>(Object.entries(RULE_KINDS).map(([name, value]) => [value, name as RuleRow['kind']]));
 
 function checkRuleValue(kind: RuleRow['kind'], raw: string): string {
-  const value = raw.trim().toLowerCase();
+  const value = normalizeRuleValue(kind, raw);
   if (!ruleValueOk(kind, value)) throw sortError('INVALID_RULE');
   return value;
 }
@@ -334,22 +334,22 @@ function ruleOut(ctx: ApiContext, row: RuleRow): ReturnType<typeof ruleMessage> 
   return ruleMessage(row, ctx.store.label(row.label_id)?.trust === 1);
 }
 
-/** The owner's evidence or notes of a rule: at most RULE_TEXT_MAX characters, no control characters. */
+/** The owner's evidence or notes of a rule: at most RULE_TEXT_MAX characters, line breaks but no other control characters. */
 function checkRuleText(text: string): string {
-  const value = text.trim();
-  if (Array.from(value).length > RULE_TEXT_MAX || hasControl(value)) throw sortError('INVALID_RULE');
+  const value = ruleText(text, RULE_TEXT_MAX);
+  if (value === null) throw sortError('INVALID_RULE');
   return value;
 }
 
 /** An import's entries from the request (the generated messages, read strictly by the transcoder). */
-function importInput(request: { labels: readonly { path: string; description: string; trust: boolean; keepInInbox: boolean; sensitive: boolean; threshold: number }[]; rules: readonly { id: string; match?: { fromAddress: string; fromDomain: string; listId: string; toAddress: string } | undefined; label: string; keepInInbox: boolean; trust: boolean; requireDmarc: boolean; evidence: string; notes: string; subjectIncludes: string[]; subjectExcludes: string[] }[]; useTemplate: boolean }): { labels: LabelInput[]; rules: RuleInput[] } {
+function importInput(request: { labels: readonly { path: string; description: string; trust: boolean; keepInInbox: boolean; sensitive: boolean; threshold: number; enabled?: boolean | undefined }[]; rules: readonly { id: string; match?: { fromAddress: string; fromDomain: string; listId: string; toAddress: string } | undefined; label: string; keepInInbox: boolean; trust: boolean; requireDmarc: boolean; evidence: string; notes: string; subjectIncludes: string[]; subjectExcludes: string[] }[]; useTemplate: boolean }): { labels: LabelInput[]; rules: RuleInput[] } {
   if (request.useTemplate) {
     if (request.labels.length > 0 || request.rules.length > 0) bad('use_template imports the template only: leave labels and rules empty');
     return { labels: templateLabels(), rules: [] };
   }
   if (request.labels.length > LABELS_MAX || request.rules.length > RULES_MAX) bad('too many entries');
   return {
-    labels: request.labels.map((item) => ({ path: item.path, description: item.description, trust: item.trust, keepInInbox: item.keepInInbox, sensitive: item.sensitive, threshold: item.threshold })),
+    labels: request.labels.map((item) => ({ path: item.path, description: item.description, trust: item.trust, keepInInbox: item.keepInInbox, sensitive: item.sensitive, threshold: item.threshold, enabled: item.enabled ?? null })),
     rules: request.rules.map((item) => ({
       id: item.id,
       match: item.match,
@@ -413,6 +413,7 @@ function importResponse(plan: ImportPlan, applied: boolean): ReturnType<typeof c
         keepInInbox: item.values.keepInInbox,
         sensitive: item.values.sensitive,
         threshold: item.values.threshold,
+        enabled: item.values.enabled,
       }),
     ),
   });
@@ -518,7 +519,7 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailsortUiService>, ApiCon
           try {
             // A new path may need new parents in Gmail (`生活/汽车` -> `出行/汽车` needs `分拣/出行`); the old ones stay.
             const existing = new Map((await client.labels()).map((item) => [item.name, item.id]));
-            await ensureGmailParents(client, displayName, existing);
+            await ensureGmailParents(client, displayName, existing, ctx.store, ctx.now);
             await client.renameLabel(before.gmail_id, `${LABEL_PREFIX}${displayName}`);
           } catch (error) {
             throw gmailError(error);
@@ -596,6 +597,11 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailsortUiService>, ApiCon
         const leaves = ours.filter((label) => !paths.some((other) => other.startsWith(`${label.path}/`)));
         const byName = new Map(leaves.map((label) => [label.path, label]));
         const ids = new Set(ours.map((label) => label.id));
+        // Parents this app created only to nest a label (writes.ts ensureGmailParents): once their children are
+        // renamed or deleted they look like leaves, but they are not the owner's labels, so they are never imported.
+        // The record of one Gmail no longer has goes.
+        const grouping = new Set(store.all<{ gmail_id: string }>(`SELECT gmail_id FROM gmail_parents`).map((row) => row.gmail_id));
+        for (const id of grouping) if (!ids.has(id)) store.run(`DELETE FROM gmail_parents WHERE gmail_id = ?`, id);
         let linked = 0;
         let imported = 0;
         let missing = 0;
@@ -603,6 +609,8 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailsortUiService>, ApiCon
           const match = byName.get(row.display_name);
           if (match !== undefined && (row.gmail_state !== 'linked' || row.gmail_id !== match.id)) {
             store.run(`UPDATE labels SET gmail_id = ?, gmail_state = 'linked' WHERE id = ?`, match.id, row.id);
+            // The owner made a label of that path by hand: a former parent is theirs now.
+            store.run(`DELETE FROM gmail_parents WHERE gmail_id = ?`, match.id);
             store.touchLabel(row.id, ctx.now);
             linked++;
           } else if (match === undefined && row.gmail_state === 'linked' && row.gmail_id !== null && !ids.has(row.gmail_id)) {
@@ -615,6 +623,7 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailsortUiService>, ApiCon
         for (const [path, label] of byName) {
           if (store.count(`SELECT count(*) AS n FROM labels`) >= LABELS_MAX) break;
           if (store.one(`SELECT 1 AS x FROM labels WHERE gmail_id = ?`, label.id) !== undefined) continue;
+          if (grouping.has(label.id)) continue;
           // A Gmail label below or above one of the store's own would break the tree: left alone.
           if (treeConflict(path, store.labelPaths()) !== null) continue;
           const seq = (store.one<{ seq: number | null }>(`SELECT max(seq) AS seq FROM labels`)?.seq ?? 0) + 1;
@@ -804,19 +813,15 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailsortUiService>, ApiCon
     const rows = ctx.store.all<RuleRow & { display_name: string; trust: number; label_keep: number }>(
       `SELECT r.*, l.display_name, l.trust, l.keep_in_inbox AS label_keep FROM rules r JOIN labels l ON l.id = r.label_id WHERE r.state = 'active' ORDER BY r.create_time, r.id`,
     );
-    // Left out: a trust label or a rule's own DMARC switch (a filter cannot check DMARC, and a forged From could then
-    // reach a trust label); a carve-out (Gmail applies every matching filter, so it and the sender's plain rule would
-    // both label the mail); a value that is not plain (an older row). A sender rule of another label is exported
-    // without its DMARC check: such a filter can only put a forged mail under a non-trust label, as Gmail's own filters
-    // do. A rule or label that keeps its mail in the inbox exports without archiving.
-    const exported = rows.filter(
-      (row) => row.trust === 0 && row.require_dmarc === 0 && termsOf(row.subject_includes).length === 0 && termsOf(row.subject_excludes).length === 0 && ruleValueOk(row.kind, row.value),
-    );
+    // Which rules are left out, and why, is filters.ts exportableRules: trust and DMARC rules, carve-outs, the plain
+    // rules a carve-out covers, values that are not plain. A rule or label that keeps its mail in the inbox exports
+    // without archiving.
+    const { exported, skipped } = exportableRules(rows);
     return Promise.resolve(
       create(ExportGmailFiltersResponseSchema, {
         xml: gmailFilterXml(exported.map((row) => ({ kind: row.kind, value: row.value, labelName: row.display_name, archive: row.keep_in_inbox === 0 && row.label_keep === 0 })), ctx.now),
         ruleCount: exported.length,
-        skippedCount: rows.length - exported.length,
+        skippedCount: skipped,
       }),
     );
   },
@@ -941,13 +946,15 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailsortUiService>, ApiCon
     const start = request.startTime === undefined ? NaN : timestampMs(request.startTime);
     const end = request.endTime === undefined ? NaN : timestampMs(request.endTime);
     if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start || end - start > UNDO_RANGE_MAX_MS) bad('the range is not valid (at most 31 days)');
+    // 操作记录 filtered to one label (流程's link) undoes that label's entries only; empty is every label's.
+    const label = request.label === '' ? '' : idOf(request.label, 'labels');
     return onceAsync(ctx, request.requestId, 'UndoLedgerEntries', 'ledgerEntries', UndoLedgerEntriesResponseSchema, async () => {
       if (!writeScope(ctx.store)) throw sortError('GMAIL_WRITE_NOT_ALLOWED');
       const client = await gmailFor(ctx);
       // The undoable entries of the range (writes.ts undoable): applied, not changed by the owner, label still owned.
-      const range = `FROM ledger WHERE state = 'applied' AND superseded = 0 AND create_time >= ? AND create_time < ?
+      const range = `FROM ledger WHERE state = 'applied' AND superseded = 0 AND create_time >= ? AND create_time < ? AND (? = '' OR label_id = ?)
         AND gmail_label_id IN (SELECT gmail_id FROM labels WHERE gmail_state = 'linked' AND gmail_id IS NOT NULL)`;
-      const rows = ctx.store.all<LedgerRow>(`SELECT * ${range} ORDER BY id DESC LIMIT ?`, start, end, UNDO_BATCH);
+      const rows = ctx.store.all<LedgerRow>(`SELECT * ${range} ORDER BY id DESC LIMIT ?`, start, end, label, label, UNDO_BATCH);
       ctx.transact(() => {
         for (const row of rows) intendUndo(ctx.store, row);
       });
@@ -960,7 +967,7 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailsortUiService>, ApiCon
         await ctx.wake();
       }
       const undone = rows.filter((row) => ctx.store.ledgerRow(row.id)?.state === 'undone').length;
-      return create(UndoLedgerEntriesResponseSchema, { undoneCount: undone, failedCount: failed, remainingCount: ctx.store.count(`SELECT count(*) AS n ${range}`, start, end) });
+      return create(UndoLedgerEntriesResponseSchema, { undoneCount: undone, failedCount: failed, remainingCount: ctx.store.count(`SELECT count(*) AS n ${range}`, start, end, label, label) });
     });
   },
 

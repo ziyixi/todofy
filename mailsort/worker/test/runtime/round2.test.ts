@@ -9,6 +9,7 @@
  */
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { create } from '@ziyixi/proto/protobuf';
+import { timestampFromMs } from '@ziyixi/proto/protobuf/wkt';
 import { LabelSchema } from '@ziyixi/proto/mailsort/ui/v1/label_pb';
 import { MailFlow_Outcome, MailFlow_Stage } from '@ziyixi/proto/mailsort/ui/v1/flow_pb';
 import { ImportChange_Action, ImportRulesResponseSchema, RuleImportSchema, type RuleImport } from '@ziyixi/proto/mailsort/ui/v1/mailsort_ui_service_pb';
@@ -155,11 +156,43 @@ describe('round 2: import, nested labels, keep in inbox, carve-outs, forged From
     expect(result.importedCount).toBe(1);
     const imported = result.labels.find((label) => label.gmailLabelId === leaf);
     expect(imported).toMatchObject({ displayName: '项目/阿尔法', enabled: false });
-    // Its ID comes from its path (words outside the glossary as short hashes), never a random one.
-    expect(imported?.name).toMatch(/^labels\/x[0-9a-f]{4}-x[0-9a-f]{4}$/);
+    // Its ID comes from its path (a word outside the glossary as a short hash), never a random one.
+    expect(imported?.name).toMatch(/^labels\/project-x[0-9a-f]{4}$/);
     expect(result.labels.some((label) => label.displayName === '项目' || label.displayName === '开发' || label.displayName === '')).toBe(false);
     // Creating a label above an existing one is refused: only leaves are labels.
     expect(reasonOf(await rejection(h.api.createLabel({ label: create(LabelSchema, { displayName: '项目' }), requestId: op() })))).toBe('INVALID_LABEL');
+  });
+
+  it('a parent this app created is never imported once its child is renamed away (QA D6)', async () => {
+    const news = await h.api.createLabel({ label: create(LabelSchema, { displayName: '新闻/周报', description: '新闻网站的每周摘要与精选文章推送' }), requestId: op() });
+    expect(h.up.gmail.labelIdByName('分拣/新闻')).toBeDefined();
+    const renamed = await h.api.updateLabel({ label: { ...news, displayName: '资讯/周报/精选' }, updateMask: { paths: ['display_name'] }, requestId: op() });
+    expect(renamed.displayName).toBe('资讯/周报/精选');
+    expect(h.up.gmail.labelIdByName('分拣/资讯/周报/精选')).toBe(news.gmailLabelId);
+    // Gmail keeps the old parent 分拣/新闻, now without children: still not a label of the owner's.
+    const synced = await h.api.syncLabels({ requestId: op() });
+    expect(synced.importedCount).toBe(0);
+    expect(synced.labels.some((label) => label.displayName === '新闻' || label.displayName === '资讯' || label.displayName === '资讯/周报')).toBe(false);
+    // The owner may still add it by hand: it links to the Gmail label that is there.
+    const own = await h.api.createLabel({ label: create(LabelSchema, { displayName: '新闻', description: '新闻网站的推送与快讯' }), requestId: op() });
+    expect(own.gmailLabelId).toBe(h.up.gmail.labelIdByName('分拣/新闻'));
+    expect(await h.sql(`SELECT count(*) AS n FROM gmail_parents WHERE gmail_id = ?`, own.gmailLabelId)).toEqual([{ n: 0 }]);
+    for (const label of [own, renamed]) {
+      const current = await h.api.getLabel({ name: label.name });
+      await h.api.deleteLabel({ name: current.name, etag: current.etag, requestId: op() });
+    }
+  });
+
+  it('CreateLabel and a rename read 分拣/x as x, never as 分拣/分拣/x (QA D7)', async () => {
+    const typed = await h.api.createLabel({ label: create(LabelSchema, { displayName: '分拣/测试/前缀', description: '只用于测试前缀的标签' }), requestId: op() });
+    expect(typed.displayName).toBe('测试/前缀');
+    expect(h.up.gmail.labelIdByName('分拣/分拣')).toBeUndefined();
+    expect(reasonOf(await rejection(h.api.createLabel({ label: create(LabelSchema, { displayName: '分拣' }), requestId: op() })))).toBe('INVALID_LABEL');
+    expect(reasonOf(await rejection(h.api.updateLabel({ label: { ...typed, displayName: '分拣/分拣/x' }, updateMask: { paths: ['display_name'] }, requestId: op() })))).toBe('INVALID_LABEL');
+    const renamed = await h.api.updateLabel({ label: { ...typed, displayName: '分拣/测试/改名' }, updateMask: { paths: ['display_name'] }, requestId: op() });
+    expect(renamed.displayName).toBe('测试/改名');
+    expect([...h.up.gmail.labels.values()].some((label) => label.name.startsWith('分拣/分拣'))).toBe(false);
+    await h.api.deleteLabel({ name: renamed.name, etag: renamed.etag, requestId: op() });
   });
 
   it('counts the flow per stage, outcome and label, corrections included; a label links to its ledger entries', async () => {
@@ -195,10 +228,12 @@ describe('round 2: import, nested labels, keep in inbox, carve-outs, forged From
     const document = JSON.parse(exported.json) as { labels: { path: string }[]; rules: { id: string; match: Record<string, string> }[] };
     expect(document.labels.map((label) => label.path)).toContain('分拣/项目/阿尔法');
     expect(document.rules.find((rule) => rule.id === 'bank-login')).toMatchObject({ match: { from_address: 'statements@bank.example.com' }, subject_includes: ['登录', 'login'], keep_in_inbox: true });
-    // The Gmail filter export leaves out what a filter cannot do: trust labels and the carve-outs.
+    // The Gmail filter export leaves out what a filter cannot do: trust labels, the carve-outs, and the shop's plain
+    // rule, which in Gmail would label the pickup code and archive it (QA D1).
     const filters = await h.api.exportGmailFilters({});
-    expect(filters).toMatchObject({ ruleCount: 2, skippedCount: 3 });
+    expect(filters).toMatchObject({ ruleCount: 1, skippedCount: 4 });
     expect(filters.xml).toContain('分拣/开发/CI通知');
+    expect(filters.xml).not.toContain('orders@shop.example.com');
   });
 
   it('confirming a rule’s suggestion keeps the mail in the inbox when the rule said so, though its label archives', async () => {
@@ -251,5 +286,17 @@ describe('round 2: import, nested labels, keep in inbox, carve-outs, forged From
     now += 5 * MINUTE;
     await h.step(now);
     expect(await decision(h, MAILS.newsletterEn.id)).toMatchObject({ decider: 'rule', label_id: 'subscriptions-receipts', outcome: 'applied' });
+  });
+
+  it('a range undo filtered to one label undoes that label’s entries only (QA D9)', async () => {
+    const applied = async (label: string) => Number((await h.sql(`SELECT count(*) AS n FROM ledger WHERE state = 'applied' AND label_id = ?`, label))[0]?.['n'] ?? 0);
+    const others = await h.sql(`SELECT id FROM ledger WHERE state = 'applied' AND label_id != 'subscriptions-receipts' ORDER BY id`);
+    expect(await applied('subscriptions-receipts')).toBeGreaterThan(0);
+    expect(others.length).toBeGreaterThan(0);
+    const answer = await h.api.undoLedgerEntries({ startTime: timestampFromMs(T0), endTime: timestampFromMs(now + MINUTE), label: 'labels/subscriptions-receipts', requestId: op() });
+    expect(answer).toMatchObject({ failedCount: 0, remainingCount: 0 });
+    expect(answer.undoneCount).toBeGreaterThan(0);
+    expect(await applied('subscriptions-receipts')).toBe(0);
+    expect(await h.sql(`SELECT id FROM ledger WHERE state = 'applied' AND label_id != 'subscriptions-receipts' ORDER BY id`)).toEqual(others);
   });
 });

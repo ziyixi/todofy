@@ -374,16 +374,28 @@ button:disabled {
   color: var(--muted);
 }
 
+/* A checkbox and its text on one row, whatever the width: the box never wraps onto the previous setting's line (on a
+   phone a wrapping box sat above its own text, next to the setting before it). The text column takes the rest of the
+   row and may shrink, and the hint is a block line under the text inside that column. */
 .check {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 0.5rem;
-  align-items: center;
+  align-items: flex-start;
+}
+
+.check > span {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* Centred on the text's first line rather than on the whole block with its hint. */
+.check > input[type='checkbox'] {
+  margin-top: 0.15rem;
 }
 
 .check .hint {
-  flex-basis: 100%;
-  margin-left: 1.75rem;
+  display: block;
 }
 
 .blocks {
