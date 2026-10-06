@@ -14,6 +14,13 @@ export const MODE_NAMES: Readonly<Record<number, string>> = {
   [Mode.LIVE]: '正式打标签',
 }
 
+/** Why the breaker tripped (Settings.breaker_reason). */
+export const BREAKER_REASONS: Readonly<Record<string, string>> = {
+  daily_limit: '超过每天写入上限',
+  run_limit: '超过每次运行写入上限',
+  label_share: '某个标签占比突增',
+}
+
 export const KIND_NAMES: Readonly<Record<number, string>> = {
   [ReviewItem_Kind.SUGGESTION]: '建议',
   [ReviewItem_Kind.UNSURE]: '拿不准',

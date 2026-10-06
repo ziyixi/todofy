@@ -1,6 +1,7 @@
 /**
  * 例子与向量库 (`/examples`): how many examples each label has, how many still wait for their embedding, the examples
- * (masked summaries) of one label or all, deleting one, and rebuilding every embedding.
+ * (masked summaries, kept until deleted) of one label or all, 50 a page, deleting one, and rebuilding every
+ * embedding.
  */
 import type { Example } from '@ziyixi/proto/mailsort/ui/v1/review_pb'
 import type { Label } from '@ziyixi/proto/mailsort/ui/v1/label_pb'
@@ -8,7 +9,7 @@ import { api } from '../api.ts'
 import { button, el, fill } from '../dom.ts'
 import { labelText, ORIGINS, when } from '../format.ts'
 import type { ViewContext } from '../app.ts'
-import { act, allLabels, frame, labelSelect } from './common.ts'
+import { act, allLabels, frame, labelSelect, pagedList } from './common.ts'
 
 function item(example: Example, labels: readonly Label[], reload: () => Promise<void>): HTMLElement {
   return el(
@@ -43,7 +44,12 @@ export async function renderExamples(ctx: ViewContext): Promise<void> {
         ...labels.flatMap((label) => [el('dt', {}, label.displayName), el('dd', {}, String(label.exampleCount))]),
       ),
       el('div', { class: 'actions' }, select, button('重建全部向量', () => void act((requestId) => api.rebuildExampleEmbeddings({ requestId }), '已排队重建', () => reload()))),
-      page.examples.length === 0 ? el('p', { class: 'empty' }, '还没有例子：确认或改正待审邮件，或在 Gmail 里改标签，都会生成例子。') : el('div', { class: 'list' }, ...page.examples.map((example) => item(example, labels, () => reload()))),
+      page.examples.length === 0
+        ? el('p', { class: 'empty' }, '还没有例子：确认或改正待审邮件，或在 Gmail 里改标签，都会生成例子。')
+        : pagedList({ items: page.examples, next: page.nextPageToken }, async (pageToken) => {
+            const more = await api.listExamples({ pageSize: 50, label: filter, pageToken })
+            return { items: more.examples, next: more.nextPageToken }
+          }, (example) => item(example, labels, () => reload())),
     )
   })
 }

@@ -4,22 +4,25 @@
  * explicit mask and the etag; and the tabs.
  */
 import { mountApp, type Host } from './app.ts'
-import { FakeServer, NOW, reviewItem, settle } from './test/fakeServer.ts'
+import { example, FakeServer, label, ledgerEntry, NOW, reviewItem, settle } from './test/fakeServer.ts'
 import { ReviewItem_Kind } from '@ziyixi/proto/mailsort/ui/v1/review_pb'
+import { Mode } from '@ziyixi/proto/mailsort/ui/v1/status_pb'
 import { Rule_Kind, Rule_State, RuleSchema } from '@ziyixi/proto/mailsort/ui/v1/rule_pb'
 import { create } from '@ziyixi/proto/protobuf'
 
 const host: Host = { now: () => NOW, confirm: () => true }
 
-async function open(server: FakeServer, path: string): Promise<HTMLElement> {
+async function open(server: FakeServer, path: string, with_: Host = host): Promise<HTMLElement> {
   server.install()
   window.history.replaceState(null, '', path)
   const root = document.createElement('div')
   document.body.append(root)
-  await mountApp(root, host)
+  await mountApp(root, with_)
   await settle()
   return root
 }
+
+const toastText = (root: HTMLElement) => root.querySelector('#toast')?.textContent ?? ''
 
 function buttonNamed(root: HTMLElement, text: string, index = 0): HTMLButtonElement {
   const found = [...root.querySelectorAll('button')].filter((node) => node.textContent === text)
@@ -57,6 +60,32 @@ describe('待审', () => {
     await settle()
     expect(root.textContent).toContain('没有待审的邮件')
   })
+
+  it('slows the owner down on a suspected phishing mail and on a trust label the model may not set', async () => {
+    const server = new FakeServer()
+    server.labels.push(Object.assign(label('bank', '银行'), { trustImplying: true }))
+    server.reviewItems = [
+      reviewItem('p', { kind: ReviewItem_Kind.UNSURE, suggestedLabel: 'labels/bank', unsureReason: 'suspicious' }),
+      reviewItem('t', { kind: ReviewItem_Kind.UNSURE, suggestedLabel: 'labels/bank', unsureReason: 'trust_needs_rule' }),
+    ]
+    const asked: string[] = []
+    const root = await open(server, '/', { now: () => NOW, confirm: (message) => (asked.push(message), false) })
+    const [phishing, trust] = [...root.querySelectorAll<HTMLElement>('.review-item')]
+    expect(phishing?.textContent).toContain('疑似钓鱼：请先在 Gmail 里核对发件人')
+    expect(trust?.textContent).toContain('可信类标签只允许规则')
+    for (const card of [phishing, trust]) {
+      const confirm = [...(card?.querySelectorAll('button') ?? [])].find((node) => node.textContent === '确认')
+      expect(confirm?.classList.contains('primary')).toBe(false)
+      confirm?.click()
+    }
+    await settle()
+    // Asked twice, refused twice: nothing was sent.
+    expect(asked.length).toBe(2)
+    expect(server.calls.some((call) => call.path.includes(':confirm'))).toBe(false)
+    // The phishing card's select starts at 都不是.
+    expect(phishing?.querySelector('select')?.value).toBe('')
+    expect(trust?.querySelector('select')?.value).toBe('labels/bank')
+  })
 })
 
 describe('标签', () => {
@@ -80,6 +109,17 @@ describe('标签', () => {
     expect(patch?.path).toContain('update_mask=')
     expect(decodeURIComponent(patch?.path ?? '')).toContain('etag')
     expect(patch?.body?.['description']).toBe('newsletter weekly')
+    // The threshold input allows only what the API accepts.
+    expect(root.querySelector<HTMLInputElement>('input[aria-label="阈值"]')?.min).toBe('0.5')
+  })
+
+  it('says what a sync from Gmail did, and that imported labels need a description', async () => {
+    const server = new FakeServer()
+    const root = await open(server, '/labels')
+    buttonNamed(root, '从 Gmail 同步').click()
+    await settle()
+    expect(toastText(root)).toBe('已同步：关联 1，导入 1（未启用，请补说明），Gmail 中缺失 0')
+    expect(root.textContent).toContain('还没有说明：模型只能凭名称判断')
   })
 })
 
@@ -94,6 +134,17 @@ describe('规则', () => {
     await settle()
     expect(server.rules[0]?.state).toBe(Rule_State.ACTIVE)
   })
+
+  it('shows how many rules the filter export left out', async () => {
+    const server = new FakeServer()
+    server.rules = [create(RuleSchema, { name: 'rules/r1', kind: Rule_Kind.LIST_ID, value: 'digest.news.example.com', label: 'labels/newsletter', state: Rule_State.ACTIVE })]
+    server.exportSkipped = 2
+    const root = await open(server, '/rules')
+    buttonNamed(root, '导出为 Gmail 过滤器').click()
+    await settle()
+    expect(root.textContent).toContain('已导出 1 条；2 条未导出（可信类规则需 DMARC，过滤器无法检查）')
+    expect(root.querySelector<HTMLTextAreaElement>('textarea[aria-label="Gmail 过滤器文件"]')?.hidden).toBe(false)
+  })
 })
 
 describe('状态与设置', () => {
@@ -105,7 +156,7 @@ describe('状态与设置', () => {
     expect(root.textContent).toContain('2 分钟前')
   })
 
-  it('saves the settings with an explicit mask and the etag', async () => {
+  it('saves only the changed fields with the etag: a mode change names mode', async () => {
     const server = new FakeServer()
     const root = await open(server, '/settings')
     const mode = root.querySelector<HTMLSelectElement>('select[aria-label="模式"]')
@@ -114,9 +165,88 @@ describe('状态与设置', () => {
     buttonNamed(root, '保存').click()
     await settle()
     const patch = server.calls.find((call) => call.method === 'PATCH')
-    expect(decodeURIComponent(patch?.path ?? '')).toContain('update_mask=mode,run_write_limit,daily_write_limit,daily_neuron_budget,default_threshold,precision_target,etag')
+    expect(decodeURIComponent(patch?.path ?? '')).toContain('update_mask=mode,etag')
     expect(patch?.body).toMatchObject({ mode: 'live', etag: 's1' })
     expect(root.textContent).toContain('当前生效：正式打标签')
+  })
+
+  it('a budget-only save leaves a tripped breaker alone; 解除熔断 clears it', async () => {
+    const server = new FakeServer()
+    Object.assign(server.settings, { mode: Mode.LIVE, effectiveMode: Mode.SHADOW, breakerTripped: true, breakerReason: 'label_share' })
+    const root = await open(server, '/settings')
+    expect(root.textContent).toContain('熔断：某个标签占比突增')
+    expect(root.textContent).not.toContain('label_share')
+    const budget = [...root.querySelectorAll<HTMLInputElement>('input[type="number"]')].find((input) => input.value === '7000')
+    if (budget === undefined) throw new Error('no budget input')
+    budget.value = '5000'
+    buttonNamed(root, '保存').click()
+    await settle()
+    const save = server.calls.find((call) => call.method === 'PATCH')
+    expect(decodeURIComponent(save?.path ?? '')).toContain('update_mask=daily_neuron_budget,etag')
+    expect(decodeURIComponent(save?.path ?? '')).not.toContain('mode')
+    expect(server.settings).toMatchObject({ breakerTripped: true, dailyNeuronBudget: 5000 })
+    expect(root.textContent).toContain('熔断')
+
+    buttonNamed(root, '解除熔断').click()
+    await settle()
+    const reset = server.calls.filter((call) => call.method === 'PATCH')[1]
+    expect(decodeURIComponent(reset?.path ?? '')).toContain('update_mask=mode,etag')
+    expect(server.settings).toMatchObject({ breakerTripped: false, effectiveMode: Mode.LIVE })
+  })
+
+  it('a save with no change sends nothing', async () => {
+    const server = new FakeServer()
+    const root = await open(server, '/settings')
+    buttonNamed(root, '保存').click()
+    await settle()
+    expect(server.calls.some((call) => call.method === 'PATCH')).toBe(false)
+    expect(toastText(root)).toBe('没有改动')
+  })
+})
+
+describe('操作记录', () => {
+  it('undoes a time range in rounds of 20 until none is left, and says how many', async () => {
+    const server = new FakeServer()
+    server.ledgerEntries = Array.from({ length: 45 }, (_, i) => ledgerEntry(`e${String(i).padStart(2, '0')}`))
+    const root = await open(server, '/ledger')
+    const [start, end] = [...root.querySelectorAll<HTMLInputElement>('input[type="datetime-local"]')]
+    if (start === undefined || end === undefined) throw new Error('no range inputs')
+    start.value = '2026-10-01T00:00'
+    end.value = '2026-10-02T00:00'
+    buttonNamed(root, '撤销这段时间').click()
+    await settle(20)
+    expect(server.calls.filter((call) => call.path === '/api/v1/ledgerEntries:undo').length).toBe(3)
+    expect(new Set(server.calls.filter((call) => call.path === '/api/v1/ledgerEntries:undo').map((call) => String(call.body?.['request_id']))).size).toBe(3)
+    expect(server.ledgerEntries.every((item) => !item.undoable)).toBe(true)
+    expect(toastText(root)).toBe('已撤销 45 条')
+  })
+
+  it('offers 撤销 only where the server accepts it, names the mail, and loads older pages', async () => {
+    const server = new FakeServer()
+    server.ledgerEntries = [ledgerEntry('a1', { undoable: false, subject: '已在 Gmail 改过的邮件' }), ...Array.from({ length: 59 }, (_, i) => ledgerEntry(`b${String(i).padStart(2, '0')}`))]
+    const root = await open(server, '/ledger')
+    const cards = () => [...root.querySelectorAll<HTMLElement>('article.card')]
+    expect(cards().length).toBe(50)
+    expect(cards()[0]?.textContent).toContain('已在 Gmail 改过的邮件')
+    expect(cards()[0]?.textContent).not.toContain('撤销')
+    expect(cards()[1]?.textContent).toContain('撤销')
+    expect(cards()[1]?.textContent).toContain('Sender <example.com>')
+    buttonNamed(root, '加载更多').click()
+    await settle()
+    expect(cards().length).toBe(60)
+    expect([...root.querySelectorAll('button')].some((node) => node.textContent === '加载更多')).toBe(false)
+  })
+})
+
+describe('例子', () => {
+  it('loads older examples page by page', async () => {
+    const server = new FakeServer()
+    server.examples = Array.from({ length: 70 }, (_, i) => example(`x${String(i)}`))
+    const root = await open(server, '/examples')
+    expect(root.querySelectorAll('article.card').length).toBe(50)
+    buttonNamed(root, '加载更多').click()
+    await settle()
+    expect(root.querySelectorAll('article.card').length).toBe(70)
   })
 })
 

@@ -40,16 +40,45 @@ export async function frame(main: HTMLElement, title: string, load: (body: HTMLE
   return run
 }
 
-/** Runs one user action with a fresh request ID (repeated once on a transient failure), then toasts and reloads. */
-export async function act<T>(run: (requestId: string) => Promise<T>, done: string, reload: () => Promise<void>): Promise<T | null> {
+/**
+ * Runs one user action with a fresh request ID (repeated once on a transient failure), then toasts and reloads. The
+ * toast is `done`, or what `done` makes of the answer (the counts a sync or an export reports).
+ */
+export async function act<T>(run: (requestId: string) => Promise<T>, done: string | ((answer: T) => string), reload: () => Promise<void>): Promise<T | null> {
   const requestId = newRequestId()
   try {
     const answer = await withRetry(() => run(requestId))
-    toast(done)
+    toast(typeof done === 'string' ? done : done(answer))
     await reload()
     return answer
   } catch (error) {
     toast(errorMessage(error))
     return null
   }
+}
+
+/**
+ * A list that shows its first page and appends the next one on 加载更多 (the page tokens of AIP-158), so every item
+ * stays reachable however long the list grows.
+ */
+export function pagedList<T>(first: { items: T[]; next: string }, more: (pageToken: string) => Promise<{ items: T[]; next: string }>, render: (item: T) => HTMLElement): HTMLElement {
+  const list = el('div', { class: 'list' }, ...first.items.map(render))
+  const box = el('div', {}, list)
+  let next = first.next
+  const button = el('button', { type: 'button', class: 'small' }, '加载更多')
+  const load = async () => {
+    button.disabled = true
+    try {
+      const page = await more(next)
+      list.append(...page.items.map(render))
+      next = page.next
+    } catch (error) {
+      toast(errorMessage(error))
+    }
+    button.disabled = false
+    if (next === '') button.remove()
+  }
+  button.addEventListener('click', () => void load())
+  if (next !== '') box.append(el('div', { class: 'actions' }, button))
+  return box
 }

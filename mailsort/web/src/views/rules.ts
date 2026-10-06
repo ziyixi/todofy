@@ -42,10 +42,14 @@ export async function renderRules(ctx: ViewContext): Promise<void> {
     const value = el('input', { placeholder: '地址、域名或列表 ID', 'aria-label': '值' })
     const label = labelSelect(labels, labels[0]?.name ?? '', false, { 'aria-label': '标签' })
     const output = el('textarea', { rows: '6', readonly: true, hidden: true, 'aria-label': 'Gmail 过滤器文件' })
+    const exported = el('p', { class: 'hint', hidden: true })
     const add = () => void act((requestId) => api.createRule({ rule: create(RuleSchema, { kind: Number(kind.value) as Rule_Kind, value: value.value, label: label.value }), requestId }), '已创建', () => reload())
     const exportFilters = async () => {
-      const answer = await act(() => api.exportGmailFilters({}), '已导出', () => Promise.resolve())
+      const answer = await act(() => api.exportGmailFilters({}), (done) => `已导出 ${String(done.ruleCount)} 条`, () => Promise.resolve())
       if (answer === null) return
+      // Left out: trust rules (a filter cannot check DMARC) and values that are not plain.
+      exported.textContent = `已导出 ${String(answer.ruleCount)} 条${answer.skippedCount > 0 ? `；${String(answer.skippedCount)} 条未导出（可信类规则需 DMARC，过滤器无法检查）` : ''}。在 Gmail 设置 → 过滤器 → 导入过滤器中导入。`
+      exported.hidden = false
       output.value = answer.xml
       output.hidden = false
     }
@@ -54,6 +58,7 @@ export async function renderRules(ctx: ViewContext): Promise<void> {
     fill(
       body,
       el('section', { class: 'card' }, el('h2', {}, '新建规则'), kind, value, label, el('div', { class: 'actions' }, button('创建', add, { class: 'primary' }), button('导出为 Gmail 过滤器', () => void exportFilters()))),
+      exported,
       output,
       proposed.length === 0 ? null : el('h2', {}, `待批准（${String(proposed.length)}）`),
       ...proposed.map((rule) => row(rule, labels, () => reload())),

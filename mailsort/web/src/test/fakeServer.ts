@@ -5,20 +5,34 @@
  * request must be a same-origin /api path, and a mutation must carry the CSRF header.
  */
 import { vi } from 'vitest'
+import { updatePaths } from '@ziyixi/proto/field-mask'
 import { HttpTranscoder, type ServiceHandlers, type ShapeOf } from '@ziyixi/proto/http-transcoder'
 import { create } from '@ziyixi/proto/protobuf'
 import { EmptySchema, timestampFromMs } from '@ziyixi/proto/protobuf/wkt'
 import { Code, RpcError } from '@ziyixi/proto/rpc-status'
 import { Label_GmailState, LabelSchema, type Label } from '@ziyixi/proto/mailsort/ui/v1/label_pb'
 import {
+  ExportGmailFiltersResponseSchema,
   ListExamplesResponseSchema,
   ListLabelsResponseSchema,
   ListLedgerEntriesResponseSchema,
   ListReviewItemsResponseSchema,
   ListRulesResponseSchema,
   MailsortUiService,
+  SyncLabelsResponseSchema,
+  UndoLedgerEntriesResponseSchema,
 } from '@ziyixi/proto/mailsort/ui/v1/mailsort_ui_service_pb'
-import { ReviewItem_Kind, ReviewItem_State, ReviewItemSchema, type ReviewItem } from '@ziyixi/proto/mailsort/ui/v1/review_pb'
+import {
+  ExampleSchema,
+  LedgerEntry_State,
+  LedgerEntrySchema,
+  ReviewItem_Kind,
+  ReviewItem_State,
+  ReviewItemSchema,
+  type Example,
+  type LedgerEntry,
+  type ReviewItem,
+} from '@ziyixi/proto/mailsort/ui/v1/review_pb'
 import { Rule_State, RuleSchema, type Rule } from '@ziyixi/proto/mailsort/ui/v1/rule_pb'
 import { AccuracyReportSchema, Mode, ServiceStatus_AuthState, ServiceStatusSchema, SettingsSchema, type Settings } from '@ziyixi/proto/mailsort/ui/v1/status_pb'
 import { resetClientForTests } from '../api.ts'
@@ -50,6 +64,32 @@ export function reviewItem(id: string, init: Partial<ReviewItem> = {}): ReviewIt
   }), init)
 }
 
+export function ledgerEntry(id: string, init: Partial<LedgerEntry> = {}): LedgerEntry {
+  return Object.assign(create(LedgerEntrySchema, {
+    name: `ledgerEntries/${id}`,
+    messageId: `m${id}`,
+    label: 'labels/newsletter',
+    archived: true,
+    origin: 'auto',
+    state: LedgerEntry_State.APPLIED,
+    undoable: true,
+    subject: `主题 ${id}`,
+    sender: 'Sender <example.com>',
+    createTime: timestampFromMs(NOW - 3_600_000),
+  }), init)
+}
+
+export function example(id: string): Example {
+  return create(ExampleSchema, { name: `examples/${id}`, label: 'labels/newsletter', summary: `例子 ${id}`, embedded: true, createTime: timestampFromMs(NOW) })
+}
+
+/** One page of `items` after the item named by `token` (the fake's page token is the last item's index). */
+function page<T>(items: readonly T[], size: number, token: string): { items: T[]; next: string } {
+  const start = token === '' ? 0 : Number(token)
+  const end = start + (size === 0 ? 50 : size)
+  return { items: items.slice(start, end), next: end < items.length ? String(end) : '' }
+}
+
 function unimplemented(): never {
   throw new RpcError(Code.UNIMPLEMENTED, 'METHOD_NOT_ALLOWED', 'not modelled by the fake server')
 }
@@ -59,6 +99,10 @@ export class FakeServer {
   labels: Label[] = [label('newsletter', '订阅'), label('receipt', '收据')]
   reviewItems: ReviewItem[] = []
   rules: Rule[] = []
+  ledgerEntries: LedgerEntry[] = []
+  examples: Example[] = []
+  /** Rules the export leaves out (trust rules). */
+  exportSkipped = 0
   settings: Settings = create(SettingsSchema, { name: 'settings', mode: Mode.SHADOW, effectiveMode: Mode.SHADOW, runWriteLimit: 10, dailyWriteLimit: 150, dailyNeuronBudget: 7000, defaultThreshold: 0.8, precisionTarget: 0.9, etag: 's1' })
   private readonly transcoder: HttpTranscoder<ShapeOf<typeof MailsortUiService>, null>
 
@@ -97,8 +141,36 @@ export class FakeServer {
         this.rules.push(rule)
         return Promise.resolve(rule)
       },
-      listExamples: () => Promise.resolve(create(ListExamplesResponseSchema, {})),
-      listLedgerEntries: () => Promise.resolve(create(ListLedgerEntriesResponseSchema, {})),
+      listExamples: (request) => {
+        const { items, next } = page(this.examples, request.pageSize, request.pageToken)
+        return Promise.resolve(create(ListExamplesResponseSchema, { examples: items, nextPageToken: next }))
+      },
+      listLedgerEntries: (request) => {
+        const { items, next } = page(this.ledgerEntries, request.pageSize, request.pageToken)
+        return Promise.resolve(create(ListLedgerEntriesResponseSchema, { ledgerEntries: items, nextPageToken: next }))
+      },
+      undoLedgerEntry: (request) => {
+        const found = this.ledgerEntries.find((item) => item.name === request.name)
+        if (found === undefined || !found.undoable) throw new RpcError(Code.FAILED_PRECONDITION, 'NOT_UNDOABLE', 'not undoable')
+        Object.assign(found, { state: LedgerEntry_State.UNDONE, undoable: false })
+        return Promise.resolve(found)
+      },
+      // As the Worker: at most 20 per call, newest first, and how many undoable entries are left.
+      undoLedgerEntries: () => {
+        const open = this.ledgerEntries.filter((item) => item.undoable)
+        const batch = open.slice(0, 20)
+        for (const item of batch) Object.assign(item, { state: LedgerEntry_State.UNDONE, undoable: false })
+        return Promise.resolve(create(UndoLedgerEntriesResponseSchema, { undoneCount: batch.length, failedCount: 0, remainingCount: open.length - batch.length }))
+      },
+      syncLabels: () => {
+        const imported = Object.assign(label('l1abcdefg', '学校'), { enabled: false, description: '' })
+        this.labels.push(imported)
+        return Promise.resolve(create(SyncLabelsResponseSchema, { labels: this.labels, linkedCount: 1, importedCount: 1, missingCount: 0 }))
+      },
+      exportGmailFilters: () => {
+        const active = this.rules.filter((rule) => rule.state === Rule_State.ACTIVE)
+        return Promise.resolve(create(ExportGmailFiltersResponseSchema, { xml: '<feed/>', ruleCount: active.length, skippedCount: this.exportSkipped }))
+      },
       getAccuracyReport: () => Promise.resolve(create(AccuracyReportSchema, { name: 'accuracyReport', labels: this.labels.map((item) => ({ label: item.name, confirmedCount: 40, precisionLowerBound: 0.92 })), decidedCount: 50, unsureCount: 5, coverage: 0.9, precisionTarget: 0.9 })),
       getServiceStatus: () =>
         Promise.resolve(
@@ -120,7 +192,15 @@ export class FakeServer {
       getSettings: () => Promise.resolve(this.settings),
       updateSettings: (request) => {
         if (request.settings === undefined) throw new RpcError(Code.INVALID_ARGUMENT, 'BAD_REQUEST', 'settings')
-        this.settings = Object.assign(create(SettingsSchema), this.settings, request.settings, { effectiveMode: request.settings.mode, etag: 's2' })
+        // As the Worker: only the masked fields change, and naming `mode` clears the breaker.
+        const mask = updatePaths(request.updateMask)
+        const paths = mask === '*' ? [] : mask
+        const next = Object.assign(create(SettingsSchema), this.settings, { etag: 's2' })
+        if (paths.includes('mode')) Object.assign(next, { mode: request.settings.mode, breakerTripped: false, breakerReason: '' })
+        if (paths.includes('daily_neuron_budget')) next.dailyNeuronBudget = request.settings.dailyNeuronBudget
+        if (paths.includes('run_write_limit')) next.runWriteLimit = request.settings.runWriteLimit
+        next.effectiveMode = next.breakerTripped ? Mode.SHADOW : next.mode
+        this.settings = next
         return Promise.resolve(this.settings)
       },
     }
