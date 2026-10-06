@@ -234,6 +234,17 @@ interface CanaryRow extends Record<string, SqlStorageValue> {
   doc: string;
 }
 
+/** projectAttention's inputs; each defaults to what the tables hold now. */
+interface AttentionOptions {
+  /** The last tick the digest conditions are judged against (null: none ran). */
+  readonly lastTickAt?: number | null;
+  /** Nothing ran yet: no items, and the level is unknown. */
+  readonly neverRan?: boolean;
+  /** The digest's conditions and their items when the caller has just built them (runDigest). */
+  readonly candidates?: readonly Candidate[];
+  readonly items?: readonly OpsReportItem[];
+}
+
 interface AppliedRow extends Record<string, SqlStorageValue> {
   app: string;
   input: string | null;
@@ -457,19 +468,20 @@ export class HomeState extends DurableObject<Env> {
   restoreAttention(name: string, etag: string, requestId: string, at: number | null = null): Promise<AttentionMutationOutcome> {
     return this.changeAttention(name, etag, requestId, false, at);
   }
+  /** The change is published only by the next scheduled digest (its key includes the dispositions), never here. */
   private changeAttention(name: string, etag: string, requestId: string, dismiss: boolean, at: number | null): Promise<AttentionMutationOutcome> {
-    return this.serialize((): Promise<AttentionMutationOutcome> => {
+    return this.serialize((): AttentionMutationOutcome => {
       const now = at ?? Date.now(), method = dismiss ? 'dismiss_attention' : 'restore_attention';
       const inputKey = JSON.stringify([name, etag]);
       const replay = this.replay(requestId, method, now, inputKey);
-      if (replay === 'reused') return Promise.resolve({ ok: false, code: 'request_id_reused' });
-      if (replay !== null) return Promise.resolve({ ok: true, item: replay as AttentionItem });
+      if (replay === 'reused') return { ok: false, code: 'request_id_reused' };
+      if (replay !== null) return { ok: true, item: replay as AttentionItem };
       this.projectAttention(now);
       const item = this.attentionState.change(name, etag, dismiss, now);
-      if (item === null) return Promise.resolve({ ok: false, code: 'attention_changed' });
+      if (item === null) return { ok: false, code: 'attention_changed' };
       this.bumpRev(now);
       this.remember(requestId, method, item, now, inputKey);
-      return Promise.resolve({ ok: true, item });
+      return { ok: true, item };
     });
   }
 
@@ -705,8 +717,8 @@ export class HomeState extends DurableObject<Env> {
     const list = this.digestCandidates(now, lastTickAt);
     const firstSeen = this.syncSince(list.map(itemKey), now);
     const rawItems = finalizeItems(list, firstSeen, now, ATTENTION_ROW_LIMIT);
-    const projected = this.projectAttention(now, rawItems, lastTickAt);
-    const items = rawItems.filter((item) => !this.attentionState.isDismissed({ ...item, target: targetOf(item.source, item.code) }));
+    const projected = this.projectAttention(now, { lastTickAt, candidates: list, items: rawItems });
+    const items = this.undismissed(rawItems);
     const previous = this.doc<DigestDoc>('digest') ?? NO_DIGEST;
     let doc: DigestDoc = { ...previous, items: rawItems };
     let sent = 'none';
@@ -806,8 +818,7 @@ export class HomeState extends DurableObject<Env> {
   }
 
   /** Full cached conditions before the outbound report's 20-item bound. No provider call. */
-  private currentItems(now: number, lastTickAt: number | null): OpsReportItem[] {
-    const list = this.digestCandidates(now, lastTickAt);
+  private currentItems(now: number, list: readonly Candidate[]): OpsReportItem[] {
     const cached = this.readCache?.get('#attention_since') as Map<string, number> | undefined;
     const since = cached ?? new Map(this.rows<{ key: string; since: number }>('SELECT key,since FROM item_since').map((row) => [row.key, row.since]));
     this.readCache?.set('#attention_since', since);
@@ -815,9 +826,11 @@ export class HomeState extends DurableObject<Env> {
   }
 
   /** Build all raw explanations first; filtering sooner would recreate a dismissed item as "observed". */
-  private projectAttention(now: number, supplied?: readonly OpsReportItem[], lastTickAt?: number | null, neverRan = false): { attention: Attention; badges: Badges } {
+  private projectAttention(now: number, options: AttentionOptions = {}): { attention: Attention; badges: Badges } {
+    const { lastTickAt, neverRan = false } = options;
     const tickAt = lastTickAt === undefined ? (this.doc<MetaDoc>('meta') ?? NO_META).last_tick_at : lastTickAt;
-    const items = neverRan ? [] : supplied ?? this.currentItems(now, tickAt);
+    const list = options.candidates ?? this.digestCandidates(now, tickAt);
+    const items = neverRan ? [] : options.items ?? this.currentItems(now, list);
     const evaluation = this.evalInput(now);
     const raw = attentionView({ now, neverRan, items, canaryEnabled: canaryEnabled(this.env), desired: this.summaryDesired(now),
       ownerShedApps: GUARD_APPS.filter((app) => {
@@ -825,10 +838,13 @@ export class HomeState extends DurableObject<Env> {
         return this.canGuard(app) && target.level === 'shed' && target.source === 'owner';
       }),
       statuses: evaluation.statuses, ...(neverRan ? {} : { evaluation }) });
-    const candidatesNow = this.digestCandidates(now, tickAt);
-    const active = new Set([...candidatesNow.map(itemKey), ...raw.attention.items.map(itemKey)]);
-    const result = this.attentionState.project(raw.attention, now, (condition) => this.attentionResolved(condition, now, tickAt, active, evaluation));
-    return result;
+    const active = new Set([...list.map(itemKey), ...raw.attention.items.map(itemKey)]);
+    return this.attentionState.project(raw.attention, now, (condition) => this.attentionResolved(condition, now, tickAt, active, evaluation));
+  }
+
+  /** The digest items the owner has not dismissed: what the report and the Ops view's digest list. */
+  private undismissed(items: readonly OpsReportItem[]): OpsReportItem[] {
+    return items.filter((item) => !this.attentionState.isDismissed({ ...item, target: targetOf(item.source, item.code) }));
   }
 
   /** A missing/unavailable source is not evidence that its prior business condition recovered. */
@@ -870,7 +886,7 @@ export class HomeState extends DurableObject<Env> {
     const homeAt = meta.last_refresh_home_at ?? null;
     const cloudflareAt = meta.last_refresh_cloudflare_at ?? null;
     const neverRan = meta.last_tick_at === null && digest.last_attempt_at === null && meta.last_refresh_at === null && homeAt === null && cloudflareAt === null;
-    const { attention, badges } = this.projectAttention(now, neverRan ? [] : undefined, meta.last_tick_at, neverRan);
+    const { attention, badges } = this.projectAttention(now, { lastTickAt: meta.last_tick_at, neverRan });
     let lastRefreshAt: number | null;
     let nextRefreshAt: number;
     if (view === 'home') {
@@ -1009,8 +1025,7 @@ export class HomeState extends DurableObject<Env> {
 
   private digestView(digest: DigestDoc, enabled: boolean): Digest {
     return {
-      items: digest.items
-        .filter((item) => !this.attentionState.isDismissed({ ...item, target: targetOf(item.source, item.code) })).slice(0, 20),
+      items: this.undismissed(digest.items).slice(0, 20),
       enabled,
       last_sent_at: isoOrNull(digest.last_sent_at),
       last_generated_at: isoOrNull(digest.last_generated_at),
@@ -1023,7 +1038,7 @@ export class HomeState extends DurableObject<Env> {
   // ---- storage ----------------------------------------------------------------------------------
 
   /** Runs `fn` after every earlier serialized call (service calls await, so input gates alone would interleave). */
-  private serialize<T>(fn: () => Promise<T>): Promise<T> {
+  private serialize<T>(fn: () => T | Promise<T>): Promise<T> {
     const run = this.chain.then(fn, fn);
     this.chain = run.catch(() => undefined);
     return run;
