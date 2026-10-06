@@ -225,42 +225,6 @@ class Store:
                 (digest,),
             )
 
-    def save_supplements(
-        self, edition_id: str, packets: list[types.Payload]
-    ) -> None:
-        """Save research already validated by the trusted worker."""
-        with self.transaction():
-            row = self.db.execute(
-                "SELECT snapshot FROM editions WHERE id=?", (edition_id,)
-            ).fetchone()
-            snapshot = json.loads(row[0])
-            edition = self.get(edition_id)
-            for packet in packets:
-                if self.db.execute(
-                    "SELECT 1 FROM packets WHERE id=?", (packet["id"],)
-                ).fetchone():
-                    raise StoreError(
-                        "conflict", "Supplemental packet ID is already in use"
-                    )
-                self.db.execute(
-                    "INSERT INTO packets(id,principal,request_key,digest,bo"
-                    "dy) VALUES(?,?,?,?,?)",
-                    (
-                        packet["id"],
-                        "editor",
-                        edition_id + ":" + packet["id"],
-                        contracts.content_hash(packet["content"]),
-                        contracts.canonical_json(packet),
-                    ),
-                )
-                snapshot.append(packet)
-                edition["packet_ids"].append(packet["id"])
-            self.db.execute(
-                "UPDATE editions SET snapshot=? WHERE id=?",
-                (contracts.canonical_json(snapshot), edition_id),
-            )
-            self._write(edition)
-
     def put_packet(
         self, request: types.Payload, principal: str = "producer"
     ) -> types.Payload:

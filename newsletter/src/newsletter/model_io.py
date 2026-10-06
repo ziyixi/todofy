@@ -51,7 +51,7 @@ def prepare_workspace(path: pathlib.Path, issue_date: str) -> pathlib.Path:
         absolute.mkdir(parents=True, exist_ok=True, mode=0o700)
         if not absolute.is_dir() or absolute == pathlib.Path(absolute.anchor):
             raise ValueError
-        for name in ("draft.json", "review.json", "supplemental.json"):
+        for name in ("draft.json", "review.json"):
             if (absolute / name).exists() or (absolute / name).is_symlink():
                 raise ValueError
         return absolute

@@ -36,13 +36,10 @@ POLICY_DIR = pathlib.Path(__file__).parent / "policy"
 
 @dataclasses.dataclass(frozen=True)
 class EditorResult:
-    """An editor draft, its review and newly researched citation packets."""
+    """An editor draft and its review, citing only the supplied packets."""
 
     draft: types.Payload
     review: types.ReviewResult
-    supplemental_packets: list[types.Payload] = dataclasses.field(
-        default_factory=list
-    )
 
 
 @dataclasses.dataclass(frozen=True)
@@ -131,7 +128,6 @@ def _write_result(workspace: pathlib.Path, result: EditorResult) -> None:
     for name, value in (
         ("draft.json", result.draft),
         ("review.json", result.review),
-        ("supplemental.json", result.supplemental_packets),
     ):
         data = _json(value).encode("utf-8")
         if len(data) > model_io.MAX_JSON_BYTES:

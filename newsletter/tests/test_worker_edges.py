@@ -2,7 +2,6 @@
 
 import asyncio
 import concurrent.futures as futures
-import copy
 import json
 import pathlib
 import threading
@@ -13,7 +12,6 @@ import pytest
 
 import newsletter.adapters as adapters
 import newsletter.app as app
-import newsletter.contracts as contracts
 import newsletter.editor as editor
 import newsletter.settings as newsletter_settings
 import newsletter.store as newsletter_store
@@ -140,37 +138,17 @@ async def test_cross_connection_send_reservation_has_one_winner(
 
 
 @pytest.mark.asyncio
-async def test_supplements_keep_authority_and_resolved_citations(
+async def test_draft_cannot_cite_packets_outside_the_frozen_snapshot(
     store, packet_request, tmp_path
 ):
-    supplement = {
-        "id": "supplement-edge",
-        "producer_id": "untrusted-self-report",
-        "workflow_id": "untrusted-workflow",
-        "content_hash": "f" * 64,
-        "is_fixture": False,
-        "content": {
-            "title": "补充模拟材料",
-            "body": "用于检验补充来源的持久保存和引用解析。",
-            "sources": [
-                {
-                    "id": "extra",
-                    "title": "补充模拟来源",
-                    "url": "https://example.org/supplemental-fixture",
-                    "excerpt": "补充材料依然只是候选证据。",
-                    "access_scope": "abstract",
-                }
-            ],
-            "tags": ["fixture"],
-        },
-    }
-
-    class SupplementalEditor:
+    # No shipped editor adds research packets at this boundary any more, so a
+    # citation to anything outside the edition snapshot is a dangling one.
+    class OutsideCitationEditor:
         async def prepare(self, packets, issue_date, workspace):
             return editor.EditorResult(
                 draft={
-                    "subject": "补充材料测试",
-                    "title": "补充材料不会变成悬空引用",
+                    "subject": "悬空引用测试",
+                    "title": "快照外的引用不会被接受",
                     "introduction": "这是离线 fixture。",
                     "sections": [
                         {
@@ -178,12 +156,10 @@ async def test_supplements_keep_authority_and_resolved_citations(
                             "heading": "两项模拟来源",
                             "paragraphs": [
                                 {
-                                    "text": (
-                                        "这一段同时引用原始材料和补充材料。"
-                                    ),
+                                    "text": "这一段引用了快照外的材料。",
                                     "citations": [
                                         f"{packets[0]['id']}/source",
-                                        "supplement-edge/extra",
+                                        "outside-packet/extra",
                                     ],
                                 }
                             ],
@@ -193,45 +169,22 @@ async def test_supplements_keep_authority_and_resolved_citations(
                     "limitations": "模拟材料。",
                 },
                 review={"passed": True, "findings": []},
-                supplemental_packets=[copy.deepcopy(supplement)],
             )
 
-    edition, original = _queue(store, packet_request, "supplement-edition")
+    edition, original = _queue(store, packet_request, "outside-citation")
     worker = newsletter_worker.Worker(
         store,
-        SupplementalEditor(),
+        OutsideCitationEditor(),
         adapters.DisabledNotion(),
         tmp_path / "jobs",
         10,
     )
     assert await worker.step()
     finished = store.get(edition["id"])
-    assert finished["state"] == "ready", finished
-    packets = store.read_inbox()["packets"]
-    saved = next(
-        packet for packet in packets if packet["id"] == supplement["id"]
-    )
-    assert saved["producer_id"] == "editor"
-    assert saved["workflow_id"] == "editor-research"
-    assert saved["is_fixture"] is True
-    assert saved["content_hash"] == contracts.content_hash(saved["content"])
-    assert saved["created_at"]
-    assert finished["packet_ids"] == [original["id"], supplement["id"]]
-    snapshot = json.loads(
-        store.db.execute(
-            "SELECT snapshot FROM editions WHERE id=?", (edition["id"],)
-        ).fetchone()[0]
-    )
-    assert snapshot == [original, saved]
-    contracts.validate_draft(finished["draft"], snapshot)
-    assert "[2] 补充模拟来源" in finished["rendered"]["text"]
-    assert (
-        "https://example.org/supplemental-fixture"
-        in finished["rendered"]["html"]
-    )
-    store.recover()
-    assert store.get(edition["id"])["packet_ids"] == finished["packet_ids"]
-    assert len(store.read_inbox()["packets"]) == 2
+    assert finished["state"] == "failed", finished
+    assert finished["error_code"] == "editor_invalid_result"
+    assert finished["packet_ids"] == [original["id"]]
+    assert [p["id"] for p in store.read_inbox()["packets"]] == [original["id"]]
 
 
 @pytest.mark.asyncio

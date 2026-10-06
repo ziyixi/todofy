@@ -2,6 +2,7 @@
 
 import asyncio
 import copy
+import dataclasses
 import json
 import pathlib
 
@@ -265,7 +266,7 @@ async def test_mock_deterministic_and_conspicuous(tmp_path, packet):
         packet["content"]["body"]
         in first.draft["sections"][0]["paragraphs"][0]["text"]
     )
-    assert first.supplemental_packets == []
+    assert {f.name for f in dataclasses.fields(first)} == {"draft", "review"}
     contracts.validate_draft(first.draft, [packet])
     assert (
         json.loads((tmp_path / "first" / "draft.json").read_text())

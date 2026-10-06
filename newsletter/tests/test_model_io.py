@@ -94,9 +94,7 @@ def test_invalid_date_fails_before_creating_workspace(tmp_path, issue_date):
     assert not workspace.exists()
 
 
-@pytest.mark.parametrize(
-    "name", ["draft.json", "review.json", "supplemental.json"]
-)
+@pytest.mark.parametrize("name", ["draft.json", "review.json"])
 @pytest.mark.parametrize("kind", ["file", "directory", "dangling-symlink"])
 def test_stale_artifacts_are_rejected_without_overwrite(tmp_path, name, kind):
     workspace = tmp_path / "job"

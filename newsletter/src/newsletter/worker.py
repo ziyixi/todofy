@@ -204,24 +204,11 @@ class Worker:
                         result = await self.editor.prepare(
                             packets, edition["issue_date"], workspace
                         )
-                supplements = []
                 phase = "editor_validation"
-                for supplied in result.supplemental_packets:
-                    packet = contracts.to_dict(
-                        contracts.parse_message(supplied, editorial_pb2.Packet)
-                    )
-                    contracts.validate_packet_body(packet["content"])
-                    packet.update(
-                        producer_id="editor",
-                        workflow_id="editor-research",
-                        created_at=newsletter_store.now(),
-                        is_fixture=edition["is_fixture"],
-                        content_hash=contracts.content_hash(packet["content"]),
-                    )
-                    supplements.append(packet)
-                all_packets = packets + supplements
                 # Shape and citation validation do not certify factual truth.
-                contracts.validate_draft(result.draft, all_packets)
+                # No remaining editor researches new packets here, so a draft
+                # may cite only the edition's frozen packet snapshot.
+                contracts.validate_draft(result.draft, packets)
                 draft = contracts.to_dict(
                     contracts.parse_message(result.draft, editorial_pb2.Draft)
                 )
@@ -237,7 +224,6 @@ class Worker:
                     len(f) > 4000 for f in review["findings"]
                 ):
                     raise errors.EditorError("invalid_output")
-                self.store.save_supplements(edition["id"], supplements)
                 if not review["passed"]:
                     self.store.finish(
                         edition["id"],
@@ -274,7 +260,7 @@ class Worker:
             rendered = await asyncio.to_thread(
                 rendering.render_edition,
                 draft,
-                all_packets,
+                packets,
                 edition["issue_date"],
                 edition["is_fixture"],
                 personal_digest=personal,
