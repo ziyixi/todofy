@@ -851,6 +851,7 @@ jobs:
       # whole loop through the HTTP API, every Google request checked against the table.
       - name: Smoke run against wrangler dev with the fake Gmail and fake Workers AI
         working-directory: mailsort/worker
+        timeout-minutes: 5
         run: npm run test:smoke
       - name: Dry-run the committed config and check the bundle size
         working-directory: mailsort/worker

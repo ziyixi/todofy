@@ -80,7 +80,8 @@ async function main(): Promise<void> {
   };
   const args = ['--no-install', 'wrangler', 'dev', '--config', '../wrangler.test.toml', '--ip', '127.0.0.1', '--port', String(port), '--local-upstream', `127.0.0.1:${String(port)}`, '--persist-to', persist, '--inspector-port', '0', '--show-interactive-dev-session=false'];
   for (const [name, value] of Object.entries(vars)) args.push('--var', `${name}:${value}`);
-  const dev: ChildProcess = spawn('npx', args, { cwd: WORKER, env: { ...process.env, WRANGLER_SEND_METRICS: 'false', CI: 'true' }, stdio: ['ignore', 'pipe', 'pipe'] });
+  // Its own process group: npx, wrangler and workerd stop together, or the survivors hold the pipes and this never exits.
+  const dev: ChildProcess = spawn('npx', args, { cwd: WORKER, env: { ...process.env, WRANGLER_SEND_METRICS: 'false', CI: 'true' }, stdio: ['ignore', 'pipe', 'pipe'], detached: true });
   let output = '';
   dev.stdout?.on('data', (chunk: Uint8Array) => {
     output += new TextDecoder().decode(chunk);
@@ -108,12 +109,30 @@ async function main(): Promise<void> {
     check(up.strays.length === 0, `all ${String(up.gmail.calls.length)} Google requests are in the closed table; nothing else left the Worker`);
     check(!/owner@example\.com|digest@news|weekly digest/i.test(output.replace(/--var \S+/g, '')), 'the dev server log holds no address or mail text');
   } finally {
-    dev.kill('SIGINT');
-    await new Promise((resolve) => setTimeout(resolve, 500));
-    if (dev.exitCode === null) dev.kill('SIGKILL');
+    await stopGroup(dev);
+    fake.closeAllConnections();
     fake.close();
     rmSync(persist, { recursive: true, force: true });
   }
+}
+
+/** Stops the whole process group: SIGINT for a clean wrangler shutdown, SIGKILL for whatever is left after 5 s. */
+async function stopGroup(child: ChildProcess): Promise<void> {
+  const group = child.pid;
+  if (group === undefined) return;
+  // Signal 0 only asks whether the group still exists.
+  const send = (signal: NodeJS.Signals | 0): boolean => {
+    try {
+      process.kill(-group, signal);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  if (!send('SIGINT')) return;
+  const deadline = Date.now() + 5_000;
+  while (Date.now() < deadline && send(0)) await new Promise((resolve) => setTimeout(resolve, 100));
+  send('SIGKILL');
 }
 
 async function run(origin: string, up: FakeUpstream, setClock: (now: number) => void): Promise<void> {
