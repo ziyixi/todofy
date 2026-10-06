@@ -99,73 +99,101 @@ function ask(question, hidden) {
   })
 }
 
-async function main(argv) {
-  const scopeName = argv[argv.indexOf('--scope') + 1]
-  const dryRun = argv.includes('--dry-run')
-  if (!argv.includes('--scope') || !(scopeName in SCOPES)) {
-    console.error('Usage: mint-token.mjs --scope readonly|modify [--dry-run]')
-    return 2
-  }
-  const scope = SCOPES[scopeName]
-  const clientId = process.env.GMAIL_CLIENT_ID || (await ask('Desktop OAuth client ID: ', false))
-  const clientSecret = process.env.GMAIL_CLIENT_SECRET || (await ask('Client secret (hidden): ', true))
-  if (!/^[0-9A-Za-z._-]+\.apps\.googleusercontent\.com$/.test(clientId) || clientSecret === '') {
-    console.error('A Desktop client ID (…apps.googleusercontent.com) and its secret are needed.')
-    return 2
-  }
-  const { verifier, challenge } = pkce()
-  const state = base64url(randomBytes(16))
-  const code = await new Promise((resolve, reject) => {
+/** What main() touches outside itself; a test replaces each of these with a fake (test/mint-token.test.mjs). */
+export const realDeps = {
+  env: process.env,
+  ask,
+  fetch: (...args) => fetch(...args),
+  spawnSync,
+  /** Shows the consent page: the browser on macOS, otherwise the owner copies the printed URL. */
+  openUrl: (url) => {
+    if (process.platform === 'darwin') spawnSync('open', [url], { stdio: 'ignore' })
+  },
+  log: (line) => console.log(line),
+  error: (line) => console.error(line),
+  timeoutMs: 5 * 60_000,
+}
+
+/**
+ * Waits for Google's redirect to a one-shot loopback server and answers its code and the exact redirect URI the consent
+ * URL used. The URI is fixed once, in the listen callback: Google requires the token request to repeat it byte for byte,
+ * and after server.close() Node no longer reports the port (server.address() is null).
+ */
+function awaitCallback({ clientId, scope, scopeName, challenge, state, deps }) {
+  return new Promise((resolve, reject) => {
+    let redirectUri = ''
     const server = createServer((request, response) => {
       const result = readCallback(request.url ?? '/', state)
       if (result.error === 'not_the_callback') {
         response.writeHead(404).end()
         return
       }
-      response.writeHead(200, { 'content-type': 'text/plain; charset=utf-8' }).end(result.code === undefined ? `授权未完成（${result.error}），可以关闭此页。\n` : '授权完成，可以关闭此页，回到终端。\n')
+      // connection: close lets server.close() finish now instead of waiting for the browser's keep-alive socket.
+      response.writeHead(200, { 'content-type': 'text/plain; charset=utf-8', connection: 'close' }).end(result.code === undefined ? `授权未完成（${result.error}），可以关闭此页。\n` : '授权完成，可以关闭此页，回到终端。\n')
+      clearTimeout(timer)
       server.close()
       if (result.code === undefined) reject(new Error(result.error))
-      else resolve({ code: result.code, redirectUri: `http://127.0.0.1:${server.address()?.port}` })
+      else resolve({ code: result.code, redirectUri })
     })
-    server.listen(0, '127.0.0.1', () => {
-      const redirectUri = `http://127.0.0.1:${server.address().port}`
-      const url = authUrl({ clientId, redirectUri, scope, challenge, state })
-      console.log(`Open this page, sign in as the mailbox owner and allow ${scopeName} access:\n\n  ${url}\n`)
-      if (process.platform === 'darwin') spawnSync('open', [url], { stdio: 'ignore' })
-    })
-    setTimeout(() => {
+    const timer = setTimeout(() => {
       server.close()
       reject(new Error('timeout'))
-    }, 5 * 60_000).unref()
+    }, deps.timeoutMs)
+    timer.unref()
+    server.listen(0, '127.0.0.1', () => {
+      redirectUri = `http://127.0.0.1:${server.address().port}`
+      const url = authUrl({ clientId, redirectUri, scope, challenge, state })
+      deps.log(`Open this page, sign in as the mailbox owner and allow ${scopeName} access:\n\n  ${url}\n`)
+      deps.openUrl(url)
+    })
   })
-  const response = await fetch(TOKEN_ENDPOINT, {
+}
+
+export async function main(argv, deps = realDeps) {
+  const scopeName = argv[argv.indexOf('--scope') + 1]
+  const dryRun = argv.includes('--dry-run')
+  if (!argv.includes('--scope') || !(scopeName in SCOPES)) {
+    deps.error('Usage: mint-token.mjs --scope readonly|modify [--dry-run]')
+    return 2
+  }
+  const scope = SCOPES[scopeName]
+  const clientId = deps.env.GMAIL_CLIENT_ID || (await deps.ask('Desktop OAuth client ID: ', false))
+  const clientSecret = deps.env.GMAIL_CLIENT_SECRET || (await deps.ask('Client secret (hidden): ', true))
+  if (!/^[0-9A-Za-z._-]+\.apps\.googleusercontent\.com$/.test(clientId) || clientSecret === '') {
+    deps.error('A Desktop client ID (…apps.googleusercontent.com) and its secret are needed.')
+    return 2
+  }
+  const { verifier, challenge } = pkce()
+  const state = base64url(randomBytes(16))
+  const callback = await awaitCallback({ clientId, scope, scopeName, challenge, state, deps })
+  const response = await deps.fetch(TOKEN_ENDPOINT, {
     method: 'POST',
     headers: { 'content-type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({ code: code.code, client_id: clientId, client_secret: clientSecret, redirect_uri: code.redirectUri, grant_type: 'authorization_code', code_verifier: verifier }),
+    body: new URLSearchParams({ code: callback.code, client_id: clientId, client_secret: clientSecret, redirect_uri: callback.redirectUri, grant_type: 'authorization_code', code_verifier: verifier }),
   })
   const answer = await response.json().catch(() => null)
   if (!response.ok) {
-    console.error(`Google refused the code (HTTP ${response.status}${typeof answer?.error === 'string' ? `, ${answer.error}` : ''}).`)
+    deps.error(`Google refused the code (HTTP ${response.status}${typeof answer?.error === 'string' ? `, ${answer.error}` : ''}).`)
     return 1
   }
   const problem = grantProblem(answer, scope)
   if (problem !== null) {
-    console.error(problem)
+    deps.error(problem)
     return 1
   }
   const values = { GMAIL_CLIENT_ID: clientId, GMAIL_CLIENT_SECRET: clientSecret, GMAIL_REFRESH_TOKEN: answer.refresh_token }
   for (const name of SECRET_NAMES) {
     if (dryRun) {
-      console.log(`Would put the Worker secret ${name} (value not printed).`)
+      deps.log(`Would put the Worker secret ${name} (value not printed).`)
       continue
     }
-    const put = spawnSync('npx', secretPutArgs(name), { input: values[name], stdio: ['pipe', 'inherit', 'inherit'] })
+    const put = deps.spawnSync('npx', secretPutArgs(name), { input: values[name], stdio: ['pipe', 'inherit', 'inherit'] })
     if (put.status !== 0) {
-      console.error(`wrangler secret put ${name} failed; nothing else was changed after it.`)
+      deps.error(`wrangler secret put ${name} failed; nothing else was changed after it.`)
       return 1
     }
   }
-  console.log(`Done: the Worker mailsort now holds a ${scopeName} Gmail grant. Revoke it at https://myaccount.google.com/permissions.`)
+  deps.log(`Done: the Worker mailsort now holds a ${scopeName} Gmail grant. Revoke it at https://myaccount.google.com/permissions.`)
   return 0
 }
 
