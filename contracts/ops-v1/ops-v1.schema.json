@@ -117,7 +117,8 @@
             "watch",
             "fleet",
             "newsletter",
-            "notion-publish"
+            "notion-publish",
+            "mailsort"
           ]
         },
         "generated_at": {
@@ -919,7 +920,8 @@
         "watch",
         "fleet",
         "newsletter",
-        "notion-publish"
+        "notion-publish",
+        "mailsort"
       ]
     },
     "Counters": {
