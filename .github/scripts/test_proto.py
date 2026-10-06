@@ -1,7 +1,7 @@
 """The rules of proto/ (proto/README.md, Rules) that live outside the buf module.
 
-python3 -m unittest discover -s .github/scripts (the Changes job, every push) and
-python3 -m unittest discover -s .github/scripts -p test_proto.py (the Proto checks job). Standard library only.
+python3 -m unittest discover -s .github/scripts (the Changes job, every push, which Proto checks needs). Standard
+library only.
 
 - One version: buf, protoc-gen-es and the protobuf-es runtime are pinned exactly, in proto/package.json and
   its lockfile only; the runtime equals the generator's version and is installed once. No app has its own

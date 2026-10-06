@@ -729,9 +729,9 @@ contract this folder's tests read changed (`PROTO_READS`: `contracts/ops-v1/`, `
 output (the commit of the last successful `main` run on `main`, the merge base with `origin/main` on a
 branch; the checkout has `fetch-depth: 0`), the rules self-test, the determinism check, the generated JSON Schemas
 (`npm run check:schema`, also in `Contracts`, which a hand edit of a schema under `contracts/` triggers),
-`test_proto.py` (one version, wiring, the deploy maps), and both codecs' typecheck and tests. When Changes has no base (it
-runs everything: first run, unusable base, dispatch), `breaking.sh` compares with `HEAD~1` and says so in
-the log; a base that predates `proto/` has nothing to break. The job is in `CI gate`'s needs and in
+and both codecs' typecheck and tests. `test_proto.py` (one version, wiring, the deploy maps) runs in the Changes job,
+which every other job needs. When Changes has no base (it runs everything: first run, unusable base, dispatch),
+`breaking.sh` compares with `HEAD~1` and says so in the log; a base that predates `proto/` has nothing to break. The job is in `CI gate`'s needs and in
 `CHECK_JOBS` (a push to `main` reuses a green branch run only if it passed Proto checks).
 
 A `proto/` change also re-checks every app in `PROTO_USERS` (Lab, Todofy, Mail Hero, the dashboard, FlowDay, the links app and the watch app) and runs

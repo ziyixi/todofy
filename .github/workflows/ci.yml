@@ -1247,9 +1247,6 @@ jobs:
         run: node tools/ensure.mjs --check-deterministic
       - name: The contracts' JSON Schemas are generated from the IDL (tools/gen_schema.py)
         run: npm run check:schema
-      - name: One protobuf-es runtime at the generator's version, every user wired the same way
-        working-directory: .
-        run: python3 -m unittest discover -s .github/scripts -p test_proto.py
       - name: Typecheck and test both codecs (the shared edge cases in TypeScript and Python)
         run: |
           npm run typecheck
