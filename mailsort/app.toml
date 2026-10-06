@@ -1,0 +1,46 @@
+version = 1
+id = "mailsort"
+target = "cloudflare"
+
+[[workers]]
+config = "mailsort/wrangler.toml"
+personal_secrets = ["ACCESS_OWNER", "ACCESS_OWNER_ALIASES", "CSRF_SIGNING_KEY"]
+# The owner's Gmail grant, put from the owner's machine with deploy/mint-token.mjs (`wrangler secret put`); never in
+# GitHub (deploy/deploy-vars.mjs refuses it in MAILSORT_WORKER_SECRETS) and kept by every deploy. Optional: before the
+# owner's first mint-token run the Worker reads no mail (ops-v1 `gmail_not_configured`).
+manual_secrets = ["GMAIL_CLIENT_ID", "GMAIL_CLIENT_SECRET", "GMAIL_REFRESH_TOKEN"]
+optional_secrets = ["ACCESS_OWNER_ALIASES", "GMAIL_CLIENT_ID", "GMAIL_CLIENT_SECRET", "GMAIL_REFRESH_TOKEN"]
+hosts = ["sort"]
+entry = "mailsort"
+role = "Gmail 分拣与 UI"
+position = 12
+
+[[entries]]
+id = "mailsort"
+name = "邮件分拣"
+description = "Gmail 自动打标签、归档与待审"
+group = "apps"
+icon = "mail"
+accent = "teal"
+access = true
+app_only_signals = []
+order = 9
+worker = "mailsort"
+url_path = "/"
+position = 14
+[entries.status]
+# Counts and codes only: no subject, sender, address or label name leaves the Ops entrypoint.
+type = "ops_v1"
+binding = "MAILSORT"
+guard = true
+[entries.tile_metric]
+kind = "counter"
+name = "review_pending"
+
+[[access]]
+key = "mailsort"
+kind = "owner"
+worker = "mailsort"
+name = "mailsort"
+paths = [""]
+session = "24h"

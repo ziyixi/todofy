@@ -16,8 +16,8 @@
 # (deploy/test/secrets-kept.test.mjs checks the pinned wrangler), and no [secrets] required list is declared here.
 #
 # Before the first deploy: the Access application "mailsort" (the whole host) is created by infra/ and "Infra apply";
-# its AUD then replaces the all-zeros ACCESS_AUDIENCE below (deploy/deploy-vars.mjs refuses a real deploy until then,
-# and ci_changes.py keeps the app check-only). No workers.dev, no preview URL. Rollback (README.md "Deploy"): detach the
+# its AUD is then committed below as ACCESS_AUDIENCE (deploy/deploy-vars.mjs refuses a real deploy until then, and
+# .github/scripts/ci_changes.py keeps the app check-only). No workers.dev, no preview URL. Rollback (README.md "Deploy"): detach the
 # Custom Domain by hand, then revert.
 #
 # Run wrangler from worker/ (the pinned wrangler lives in worker/node_modules) with --config ../wrangler.toml. Local
@@ -73,6 +73,8 @@ binding = "AI"
 # The app's host: the only origin a mutation may come from (CSRF).
 PUBLIC_HOST = "sort.ziyixi.science"
 ACCESS_ISSUER = "https://ziyixi.cloudflareaccess.com"
-# AUD tag of the Access application "mailsort" (the whole host; infra/access.tf owner_apps["mailsort"]). All zeros until
-# "Infra apply" creates the application (infra/README.md "Adding an app" step 4); a real deploy refuses it.
-ACCESS_AUDIENCE = "0000000000000000000000000000000000000000000000000000000000000000"
+# ACCESS_AUDIENCE, the AUD tag of the Access application "mailsort" (the whole host; infra/access.tf
+# owner_apps["mailsort"]), is added here once "Infra apply" has created the application: its value goes into
+# config/resources.toml [access_audiences] and tools/cloud-config/generate.py writes it below (infra/README.md "Adding
+# an app" step 4). Until then the Worker answers every owner request ACCESS_NOT_CONFIGURED (it fails closed), and
+# deploy/deploy-vars.mjs refuses a real deploy.

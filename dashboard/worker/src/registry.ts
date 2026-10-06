@@ -219,6 +219,20 @@ const ENTRIES: readonly EntryDef[] = [
     app_only_signals: [],
     order: 3,
   },
+  {
+    id: 'mailsort',
+    name: '邮件分拣',
+    description: 'Gmail 自动打标签、归档与待审',
+    group: 'apps',
+    icon: 'mail',
+    accent: 'teal',
+    url: 'https://sort.ziyixi.science/',
+    access: true,
+    status: { type: 'ops_v1', binding: 'MAILSORT', guard: true },
+    tile_metric: { kind: 'counter', name: 'review_pending' },
+    app_only_signals: [],
+    order: 9,
+  },
   // END service-catalog entries
   {
     // Not a monorepo app: the self-hosted VPS and home server keep their backups in the account's R2
@@ -251,6 +265,7 @@ const WORKERS: readonly WorkerDef[] = [
   { script: 'ziyixi-notion-publish', entry: 'notion-publish', role: '发布 Worker' },
   { script: 'ziyixi-website', entry: 'website', role: '静态网站（仅静态资源）' },
   { script: 'fleet', entry: 'fleet', role: 'VPS 与后台服务监控' },
+  { script: 'mailsort', entry: 'mailsort', role: 'Gmail 分拣与 UI' },
   // END service-catalog workers
 ];
 

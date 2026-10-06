@@ -49,6 +49,7 @@ locals {
     "fleet"     = { name = "Fleet", domain = "fleet.ziyixi.science", more = [], session = "24h" }
     "links"     = { name = "links", domain = "s.ziyixi.science/_/*", more = ["s.ziyixi.science/_"], session = "168h" }
     "mail-hero" = { name = "Mail Hero", domain = "mail-hero.ziyixi.science", more = [], session = "24h" }
+    "mailsort"  = { name = "mailsort", domain = "sort.ziyixi.science", more = [], session = "24h" }
     "todofy"    = { name = "Todofy", domain = "todofy.ziyixi.science", more = [], session = "24h" }
     "watch"     = { name = "watch", domain = "watch.ziyixi.science", more = [], session = "24h" }
     # END service-catalog owner
