@@ -145,7 +145,7 @@ class HomeState extends DurableObject<Env> {
   tick(scheduledTime: number): Promise<{ ran: boolean }>;                      // cron
   view(view: ViewId, refresh: boolean, ifNoneMatch: string | null, at: number | null): Promise<ViewBody>; // the views (design-v2.md §5)
   startCanary(at: number | null, requestId: string | null): Promise<{ ok: true; run: CanaryRun } | { ok: false; code: 'canary_disabled' | 'canary_active' | 'canary_limit' | 'request_id_reused' }>;
-  setGuardOverride(level: GuardLevel, at: number | null, requestId: string | null): Promise<{ ok: true; guard: GuardView } | { ok: false; code: 'request_id_reused' }>;
+  setGuardOverride(app: OpsApp, level: GuardLevel, at: number | null, requestId: string | null): Promise<{ ok: true; guard: GuardView } | { ok: false; code: 'request_id_reused' | 'guard_unavailable' }>;
 }
 ```
 

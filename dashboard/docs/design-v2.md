@@ -237,7 +237,7 @@ lost `version`.
 | `GET /api/v1/cloudflareView` (GetCloudflareView) | DO | ordinary fixture ≤ 40 rows read; ≤ 24 KiB |
 | `GET /api/v1/opsView` (GetOpsView) | DO | ordinary fixture ≤ 40 rows read; ≤ 24 KiB |
 | `POST /api/v1/homeView:refresh`, `POST /api/v1/cloudflareView:refresh` (RefreshHomeView, RefreshCloudflareView; were `?refresh=1`) | DO `view(..., refresh)` | Origin + CSRF; each scope fetches at most once a minute |
-| `POST /api/v1/guard:override {level, request_id}` (OverrideGuard), `POST /api/v1/canaries/mail-todofy:run {request_id}` (RunCanary) | DO (`setGuardOverride`, `startCanary`) | Origin + CSRF; ≤ 1 KiB body |
+| `POST /api/v1/guard:override {app, level, request_id}` (OverrideGuard), `POST /api/v1/canaries/mail-todofy:run {request_id}` (RunCanary) | DO (`setGuardOverride`, `startCanary`) | Origin + CSRF; ≤ 1 KiB body |
 | `POST /api/v1/attentionItems/{id}:dismiss`, `:restore` | DO reminder disposition | Access + Origin + CSRF; occurrence etag + UUID request_id; ≤ 1 KiB body |
 | `POST /api/v1/websiteSync:request` (RequestWebsiteSync) | DO permanent request receipt; relay dispatch or lookup | Origin + CSRF; UUID request_id; replay only looks up the same request |
 
