@@ -231,8 +231,9 @@ class WorkflowEngine:
             raise
         except TimeoutError:
             # Nodes do read-only model/feed work, so hitting their own deadline
-            # is a known failure. 'unknown' is reserved for side effects that
-            # need reconciliation, such as interruption or restart recovery.
+            # is a known failure. 'unknown' stays for outcomes the engine
+            # cannot confirm: cancellation, restart recovery and ambiguous
+            # NodeErrors.
             self.repository.finish(attempt, "failed", error_code="timeout")
         except NodeError as error:
             self.repository.finish(
