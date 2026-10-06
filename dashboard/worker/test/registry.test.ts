@@ -75,7 +75,7 @@ describe('the registry', () => {
 
   it('registers the entries of the design, in their groups and order', () => {
     const byGroup = (group: string) => REGISTRY.entries.filter((e) => e.group === group).sort((a, b) => a.order - b.order).map((e) => e.id);
-    expect(byGroup('apps')).toEqual(['mail-hero', 'todofy', 'flowday', 'links', 'watch', 'fleet']);
+    expect(byGroup('apps')).toEqual(['mail-hero', 'todofy', 'flowday', 'links', 'watch', 'fleet', 'mailsort']);
     expect(byGroup('sites')).toEqual(['website']);
     expect(byGroup('services')).toEqual(['notion-publish', 'newsletter']);
     expect(byGroup('hidden')).toEqual(['home', 'self-hosted', 'platform-runtime']);
@@ -90,6 +90,7 @@ describe('the registry', () => {
       'notion-publish': 'ops_v1',
       newsletter: 'ops_v1',
       fleet: 'ops_v1',
+      mailsort: 'ops_v1',
       home: 'self',
       'self-hosted': 'none',
       'platform-runtime': 'none',
@@ -138,9 +139,10 @@ describe('the registry', () => {
     expect(resourceByMatch('r2', 'vultr-backup')).toMatchObject({ id: 'vps-backup', name: 'VPS 备份', entry: 'self-hosted' });
     expect(REGISTRY.entries.find((e) => e.id === 'self-hosted')).toMatchObject({ group: 'hidden', url: null, status: { type: 'none' } });
     expect(REGISTRY.workers.filter((w) => w.entry === 'self-hosted')).toEqual([]);
-    // Fleet's new namespace is recorded in config/resources.toml after its first deploy.
+    // Fleet's and mailsort's new namespaces are recorded in config/resources.toml after their first deploys.
     const unmatched = REGISTRY.resources.filter((r) => r.match === null).map((r) => r.id);
-    expect(unmatched.filter((id) => id !== 'fleet-state')).toEqual([]);
+    expect(unmatched.filter((id) => id !== 'fleet-state' && id !== 'mailsort-state')).toEqual([]);
+    expect(REGISTRY.resources.find((r) => r.id === 'mailsort-state')).toMatchObject({ kind: 'do', entry: 'mailsort', script: 'mailsort' });
     expect(REGISTRY.resources.find((r) => r.id === 'fleet-state')).toMatchObject({
       kind: 'do', entry: 'fleet', script: 'fleet',
     });
@@ -148,10 +150,10 @@ describe('the registry', () => {
   });
 
   it('keeps the tick within the Workers Free subrequest budget', () => {
-    // 7 status() + 3 probes (website, FlowDay, links) + 1 GraphQL + 4 setGuard + 2 canary calls + 1 reportOps + 12 drift calls.
-    expect(outboundPerTick()).toBe(28);
+    // 8 status() + 3 probes (website, FlowDay, links) + 1 GraphQL + 5 setGuard + 2 canary calls + 1 reportOps + 12 drift calls.
+    expect(outboundPerTick()).toBe(30);
     expect(outboundPerTick()).toBeLessThanOrEqual(MAX_OUTBOUND_PER_TICK);
-    expect(outboundPerRefresh()).toBe(9);
+    expect(outboundPerRefresh()).toBe(10);
   });
 
   it('serves a public view without bindings or probe URLs, within its budget', () => {
@@ -347,6 +349,7 @@ describe('validateRegistry', () => {
 });
 
 it('registers every configured account resource, including bootstrap state', () => {
-  for (const kind of ['d1', 'do', 'r2'] as const) expect(REGISTRY.resources.filter(r => r.kind === kind).map(r => r.match).sort()).toEqual(inventory[kind]);
+  // A namespace its Worker's first deploy has not created yet (mailsort-state) has no identity on either side.
+  for (const kind of ['d1', 'do', 'r2'] as const) expect(REGISTRY.resources.filter(r => r.kind === kind && r.match !== null).map(r => r.match).sort()).toEqual(inventory[kind]);
   expect(REGISTRY.workers.map(w => w.script).sort()).toEqual(inventory.workers);
 });

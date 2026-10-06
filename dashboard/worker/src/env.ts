@@ -19,6 +19,8 @@ export interface Env {
   readonly FLEET: Service<WatchOpsEntrypoint>;
   readonly NEWSLETTER: Service<WatchOpsEntrypoint>;
   readonly WEBSITE_SYNC: Service<WebsiteSyncEntrypoint>;
+  /** mailsort's Ops entrypoint: status() and setGuard() (counts and codes of the Gmail sorting). */
+  readonly MAILSORT: Service<WatchOpsEntrypoint>;
   readonly HOME: DurableObjectNamespace<HomeState>;
   readonly ASSETS: Fetcher;
 

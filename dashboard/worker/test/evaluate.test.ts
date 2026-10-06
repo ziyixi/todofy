@@ -219,13 +219,13 @@ describe('flows (stage chains)', () => {
 
   it('shows a hold as 已暂停 on its stage, never as a fault', () => {
     const paused = withSignals('mail-hero', [signal('force_send_paused', 'warning')]);
-    const mail = flow('mail-to-task', { statuses: { 'mail-hero': paused, todofy: status('todofy'), watch: status('watch'), newsletter: status('newsletter'), fleet: status('fleet'), 'notion-publish': status('notion-publish') } });
+    const mail = flow('mail-to-task', { statuses: { 'mail-hero': paused, todofy: status('todofy'), watch: status('watch'), newsletter: status('newsletter'), fleet: status('fleet'), 'notion-publish': status('notion-publish'), mailsort: status('mailsort') } });
     expect(stage(mail, 'deliver')).toMatchObject({ level: 'held', held: true, reason: 'force_send_paused' });
     expect(stage(mail, 'ingest')).toMatchObject({ level: 'ok', held: false });
     expect(mail.level).toBe('held');
     // Maintenance is claimed by the first stage of the app and stays critical.
     const maintenance = withSignals('mail-hero', [signal('maintenance_mode', 'critical')], 'down');
-    const down = flow('mail-to-task', { statuses: { 'mail-hero': maintenance, todofy: status('todofy'), watch: status('watch'), newsletter: status('newsletter'), fleet: status('fleet'), 'notion-publish': status('notion-publish') } });
+    const down = flow('mail-to-task', { statuses: { 'mail-hero': maintenance, todofy: status('todofy'), watch: status('watch'), newsletter: status('newsletter'), fleet: status('fleet'), 'notion-publish': status('notion-publish'), mailsort: status('mailsort') } });
     expect(stage(down, 'ingest')).toMatchObject({ level: 'critical', reason: 'maintenance_mode' });
     // Later stages of the app see the app down through its health.
     expect(stage(down, 'parse')).toMatchObject({ level: 'critical', reason: 'maintenance_mode' });
@@ -261,7 +261,7 @@ describe('flows (stage chains)', () => {
 
   it('names the worst stage as the first issue, not an earlier lesser one', () => {
     const mailHero = withSignals('mail-hero', [signal('capacity_70', 'warning', { percent: 72 }), signal('endpoint_blocked', 'critical')]);
-    const mail = flow('mail-to-task', { statuses: { 'mail-hero': mailHero, todofy: status('todofy'), watch: status('watch'), newsletter: status('newsletter'), fleet: status('fleet'), 'notion-publish': status('notion-publish') } });
+    const mail = flow('mail-to-task', { statuses: { 'mail-hero': mailHero, todofy: status('todofy'), watch: status('watch'), newsletter: status('newsletter'), fleet: status('fleet'), 'notion-publish': status('notion-publish'), mailsort: status('mailsort') } });
     expect(stage(mail, 'ingest').level).toBe('warning');
     expect(stage(mail, 'deliver').level).toBe('critical');
     expect(mail).toMatchObject({ level: 'critical', first_issue: { stage: 'deliver', code: 'endpoint_blocked' } });
@@ -269,7 +269,7 @@ describe('flows (stage chains)', () => {
 
   it('shows unmonitored stages as 未接入 and an unreachable app on every one of its stages', () => {
     const unreachable = failedStatus(status('todofy'), 2);
-    const f = flow('daily-newsletter', { statuses: { 'mail-hero': status('mail-hero'), todofy: unreachable, watch: status('watch'), newsletter: status('newsletter'), fleet: status('fleet'), 'notion-publish': status('notion-publish') } });
+    const f = flow('daily-newsletter', { statuses: { 'mail-hero': status('mail-hero'), todofy: unreachable, watch: status('watch'), newsletter: status('newsletter'), fleet: status('fleet'), 'notion-publish': status('notion-publish'), mailsort: status('mailsort') } });
     expect(f.stages.map((s) => s.level)).toEqual(['critical', 'ok', 'unmonitored']);
     expect(f).toMatchObject({ level: 'critical', partial: false, first_issue: { stage: 'report', code: 'unreachable' } });
   });
@@ -377,7 +377,7 @@ describe('the attention strip', () => {
 
   it('shows an app that failed once as ◆ 未知 above the warnings, and counts it in the badges (F1)', () => {
     const down = failedStatus(status('todofy', {}, NOW - 2 * HOUR), 1);
-    const evaluation = input({ statuses: { 'mail-hero': status('mail-hero'), todofy: down, watch: status('watch'), newsletter: status('newsletter'), fleet: status('fleet'), 'notion-publish': status('notion-publish') } });
+    const evaluation = input({ statuses: { 'mail-hero': status('mail-hero'), todofy: down, watch: status('watch'), newsletter: status('newsletter'), fleet: status('fleet'), 'notion-publish': status('notion-publish'), mailsort: status('mailsort') } });
     const gemini = item('mail-hero', 'backup_stale');
     const { attention, badges } = attentionView(base({ items: [gemini], statuses: evaluation.statuses, evaluation }));
     expect(attention.level).toBe('unknown');
@@ -389,7 +389,7 @@ describe('the attention strip', () => {
     expect(attention.items[0]?.target).toEqual({ view: 'home', entry: 'todofy' });
     expect(badges).toEqual({ home: 1, flows: 0, cloudflare: 0, ops: 1 });
     // Two failures: the digest's app_unreachable explains it; no observed duplicate.
-    const twice = input({ statuses: { 'mail-hero': status('mail-hero'), todofy: failedStatus(status('todofy'), 2), watch: status('watch'), newsletter: status('newsletter'), fleet: status('fleet'), 'notion-publish': status('notion-publish') } });
+    const twice = input({ statuses: { 'mail-hero': status('mail-hero'), todofy: failedStatus(status('todofy'), 2), watch: status('watch'), newsletter: status('newsletter'), fleet: status('fleet'), 'notion-publish': status('notion-publish'), mailsort: status('mailsort') } });
     const digest = item('todofy', 'app_unreachable', 'critical');
     const critical = attentionView(base({ items: [digest], statuses: twice.statuses, evaluation: twice })).attention;
     expect(critical.level).toBe('critical');

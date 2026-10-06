@@ -47,6 +47,7 @@ const SERVICES = {
   fleet: [ops.OpsService],
   newsletter: [ops.OpsService],
   'notion-publish': [ops.OpsService, WebsiteSyncService],
+  mailsort: [ops.OpsService],
 } as const;
 
 /** The methods of `app`'s Ops entrypoint, sorted: the dashboard calls only these, the stubs expose exactly these. */

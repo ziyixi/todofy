@@ -156,6 +156,13 @@ const SIGNALS: Readonly<Record<string, string>> = {
   watches_broken: '有监视已失效',
   scheduler_stale: '监视调度已停止',
   notify_unsettled: '提醒交给 Todofy 未完成',
+  // mailsort
+  gmail_auth_failed: 'Gmail 授权失效，已停止分拣',
+  gmail_not_configured: 'Gmail 尚未授权',
+  breaker_tripped: '写入超限，已退回只给建议',
+  sync_stale: 'Gmail 同步已停止',
+  ai_quota_exhausted: 'Workers AI 今日额度已用完，邮件顺延到明天',
+  label_live_revoked: '有标签准确率下降，已退回只给建议',
   // dashboard digest items
   usage_unavailable: '用量数据获取失败',
   usage_not_configured: '未配置用量查询令牌',
@@ -378,6 +385,16 @@ const COUNTERS: Readonly<Record<string, { label: string; kind: CounterKind }>> =
   notifications_pending: { label: '待发提醒', kind: 'count' },
   intents_open: { label: '未完成的任务提议', kind: 'count' },
   intents_sent_today: { label: '今日交给 Todofy', kind: 'count' },
+  // mailsort
+  decided_today: { label: '今日判断', kind: 'count' },
+  applied_today: { label: '今日打标签', kind: 'count' },
+  unsure_today: { label: '今日拿不准', kind: 'count' },
+  review_pending: { label: '待审', kind: 'count' },
+  pending: { label: '待处理', kind: 'count' },
+  gmail_calls_today: { label: '今日 Gmail 请求', kind: 'count' },
+  neurons_today: { label: '今日 neurons', kind: 'count' },
+  neuron_budget: { label: 'neuron 预算', kind: 'count' },
+  last_sync_minutes: { label: '距上次同步（分钟）', kind: 'count' },
 }
 
 export function counterInfo(name: string): { label: string; kind: CounterKind } {
@@ -398,6 +415,7 @@ export function counterValue(name: string, value: number): string {
 export function counterShort(name: string, value: number): string {
   if (name === 'ingest_today_messages') return `今日 ${formatNumber(value)} 封`
   if (name === 'received_24h') return `24 小时 ${formatNumber(value)} 封`
+  if (name === 'review_pending') return `待审 ${formatNumber(value)} 封`
   return `${counterInfo(name).label} ${counterValue(name, value)}`
 }
 

@@ -155,7 +155,7 @@ describe('the views', () => {
   it('home: every tile but the hidden one, one line per flow, four mini bars without contributors', () => {
     const ev = input();
     const home = homeView(base(), ev, usageView(), DESIRED);
-    expect(home.entries.map((e) => e.id)).toEqual(['mail-hero', 'todofy', 'flowday', 'links', 'watch', 'website', 'notion-publish', 'newsletter', 'fleet']);
+    expect(home.entries.map((e) => e.id)).toEqual(['mail-hero', 'todofy', 'flowday', 'links', 'watch', 'website', 'notion-publish', 'newsletter', 'fleet', 'mailsort']);
     // A link-only entry (synthetic: the registry has none) is a tile at level link, never probed.
     const linked = homeView(base(), ev, usageView(), DESIRED, withLinkOnly()).entries.find((e) => e.id === LINK_ONLY_ENTRY.id);
     expect(linked).toMatchObject({ level: 'link', reason: null, metric: null, checked_at: null });
@@ -207,7 +207,7 @@ describe('the views', () => {
   it('ops: guard, the canary with its id, the digest and every ops-v1 app in registry order', () => {
     const ev = input();
     const ops = opsView(base(), GUARD, canaryView(ev), digestView([]), ev.statuses);
-    expect(ops.apps.map((a) => a.entry)).toEqual(['mail-hero', 'todofy', 'watch', 'notion-publish', 'newsletter', 'fleet']);
+    expect(ops.apps.map((a) => a.entry)).toEqual(['mail-hero', 'todofy', 'watch', 'notion-publish', 'newsletter', 'fleet', 'mailsort']);
     expect(ops.apps[0]).toMatchObject({ reachable: true, error: null, consecutive_failures: 0, status: { app: 'mail-hero' } });
     expect(ops.canary.id).toBe('mail-todofy');
     expect(ops.guard.apps).toHaveProperty('todofy');

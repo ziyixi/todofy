@@ -43,6 +43,7 @@ test('the Durable Object, the Ops service bindings and the one cron', () => {
     { binding: 'FLEET', service: 'fleet', entrypoint: 'Ops' },
     { binding: 'NEWSLETTER', service: 'fleet', entrypoint: 'NewsletterOps' },
     { binding: 'WEBSITE_SYNC', service: 'ziyixi-notion-publish', entrypoint: 'Ops' },
+    { binding: 'MAILSORT', service: 'mailsort', entrypoint: 'Ops' },
   ])
   assert.deepEqual(config.triggers, { crons: ['*/30 * * * *'] })
 })

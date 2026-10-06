@@ -167,9 +167,10 @@ export const CALLED_METHODS = {
   fleet: ['status', 'setGuard'],
   newsletter: ['status', 'setGuard'],
   'notion-publish': ['status', 'setGuard', 'getSyncStatus', 'requestSync', 'getSyncRequest'],
+  mailsort: ['status', 'setGuard'],
 } as const;
 
-type Bindings = Pick<Env, 'MAIL_HERO' | 'TODOFY' | 'WATCH' | 'FLEET' | 'NEWSLETTER' | 'WEBSITE_SYNC'>;
+type Bindings = Pick<Env, 'MAIL_HERO' | 'TODOFY' | 'WATCH' | 'FLEET' | 'NEWSLETTER' | 'WEBSITE_SYNC' | 'MAILSORT'>;
 
 function missing(): Promise<never> {
   return Promise.reject(new MissingBinding('not_configured'));
@@ -182,6 +183,7 @@ export function opsStatus(env: Bindings, app: OpsApp): Promise<OpsCall<ops.OpsSt
     if (app === 'fleet') return (env.FLEET as Bindings['FLEET'] | undefined)?.status() ?? missing();
     if (app === 'newsletter') return (env.NEWSLETTER as Bindings['NEWSLETTER'] | undefined)?.status() ?? missing();
     if (app === 'notion-publish') return (env.WEBSITE_SYNC as Bindings['WEBSITE_SYNC'] | undefined)?.status() ?? missing();
+    if (app === 'mailsort') return (env.MAILSORT as Bindings['MAILSORT'] | undefined)?.status() ?? missing();
     return (env.TODOFY as Bindings['TODOFY'] | undefined)?.status() ?? missing();
   }, asStatus(app));
 }
@@ -194,6 +196,7 @@ export async function opsSetGuard(env: Bindings, app: OpsApp, input: ops.SetGuar
   return callOps(() => {
     if (app === 'mail-hero') return (env.MAIL_HERO as Bindings['MAIL_HERO'] | undefined)?.setGuard(sent) ?? missing();
     if (app === 'watch') return (env.WATCH as Bindings['WATCH'] | undefined)?.setGuard(sent) ?? missing();
+    if (app === 'mailsort') return (env.MAILSORT as Bindings['MAILSORT'] | undefined)?.setGuard(sent) ?? missing();
     return (env.TODOFY as Bindings['TODOFY'] | undefined)?.setGuard(sent) ?? missing();
   }, asGuardState);
 }

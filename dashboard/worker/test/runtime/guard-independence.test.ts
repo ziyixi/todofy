@@ -15,7 +15,7 @@ afterEach(async () => {
 it('shows no aggregate shed after each service is restored while account usage remains high', async () => {
   h = await startFlows({ bindings: { CANARY_UTC_HOUR: '23' }, usage: d1Reads(90) });
   await h.tick(NOW - 20 * 60_000);
-  for (const app of ['mail-hero', 'todofy', 'watch'] as const) {
+  for (const app of ['mail-hero', 'todofy', 'watch', 'mailsort'] as const) {
     expect((await h.post(PATHS.guard, { app, level: 'normal' })).status).toBe(200);
   }
   expect((await h.snapshot()).digest.items.some((item) => item.code === 'guard_shed')).toBe(false);
@@ -33,7 +33,7 @@ it('excludes a service without the guard capability from the aggregate target', 
   h = await startFlows({ bindings: { CANARY_UTC_HOUR: '23' }, usage: d1Reads(90) });
   await h.answer('watch', 'status', { value: await status('watch', { capabilities: [] }) });
   await h.tick(NOW - 20 * 60_000);
-  for (const app of ['mail-hero', 'todofy'] as const) {
+  for (const app of ['mail-hero', 'todofy', 'mailsort'] as const) {
     expect((await h.post(PATHS.guard, { app, level: 'normal' })).status).toBe(200);
   }
 

@@ -246,7 +246,7 @@ describe('ticks and storage bounds', () => {
         if (tableSql(db) !== '') {
           expect(tableSql(db)).not.toContain('CHECK');
           const rows = db.prepare('SELECT app, input FROM guard_applied ORDER BY app').all() as { app: string; input: string | null }[];
-          expect(rows.map((row) => row.app)).toEqual(['mail-hero', 'todofy', 'watch']);
+          expect(rows.map((row) => row.app)).toEqual(['mail-hero', 'mailsort', 'todofy', 'watch']);
           expect(db.prepare("SELECT count(*) AS n FROM state WHERE key GLOB '*former-app'").get()).toEqual({ n: 0 });
           expect((db.prepare("SELECT count(*) AS n FROM state WHERE key = 'status:mail-hero'").get() as { n: number }).n).toBe(1);
           expect(rows.every((row) => row.input?.includes('quota_d1_rows_read') === true)).toBe(true);

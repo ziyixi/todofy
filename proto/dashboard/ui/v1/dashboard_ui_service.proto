@@ -360,7 +360,8 @@ message OverrideGuardRequest {
     allowed: [
       "mail-hero",
       "todofy",
-      "watch"
+      "watch",
+      "mailsort"
     ]
   }];
   // `guard`.
