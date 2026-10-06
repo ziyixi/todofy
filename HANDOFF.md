@@ -19,6 +19,35 @@ Rules for this file:
 Last updated: 2026-10-06.
 <!-- Active work is separate from the production evidence below. -->
 
+## In flight (2026-10-06, Claude): mailsort, the Gmail auto-labeler
+
+New app `mailsort/` (Worker `mailsort`, host `sort.ziyixi.science`, one SQLite DO `MailsortState`, no D1/R2), owner
+plan approved 2026-10-06; design and safety model in `mailsort/docs/design.md`. Rules first, then nearest corrected
+examples (bge-m3), then the Cloudflare decision model Clef 27B (Clef-flash for the rest of the UTC day past ~70% of
+the neuron budget). One label per mail under `分拣/` (up to three levels); confident mail is labelled and archived
+(INBOX removed) but never marked read, unless the label or rule keeps it in the inbox; unsure mail gets nothing. No
+backfill. Gmail is touched only through the closed operation table in `mailsort/worker/src/gmail.ts` (no trash,
+delete, send, UNREAD or non-owned labels; undo via the ledger only). The Gmail grant is written into the Worker from
+the owner's machine (`mailsort/deploy/mint-token.mjs`), never into GitHub. Rules are personal values: they are
+imported at runtime on the 导入 page, never committed.
+
+Landing order:
+1. Land `feat/mailsort` with `mailsort` still in CHECK_ONLY (Home stays undeployed while it binds a missing
+   service; the apps that bundle `proto/ops/` redeploy with unchanged wire).
+2. Infra drift then Infra apply: create the Access app `mailsort` (a create only).
+3. Commit its AUD in `config/resources.toml`, run `tools/cloud-config/generate.py`, add the id to `infra/ids.tf`,
+   remove `mailsort` from CHECK_ONLY; land. This deploys mailsort and Home.
+4. Record the `MailsortState` namespace id in `config/resources.toml` [durable_objects]; check
+   `https://sort.ziyixi.science/status`.
+
+Already set: production secret `MAILSORT_CSRF_SIGNING_KEY`, variable `MAILSORT_MODE=shadow` (the mode ceiling).
+
+Owner, after it is live: Google Cloud project with the Gmail API, consent screen External + In production, Desktop
+OAuth client, then `mint-token.mjs --scope readonly`; apply the 15-label template; import the validated rule set (94
+precision-checked rules from a read-only survey of the last 30 days, kept off the repo); shadow for 1–2 weeks; turn
+正式打 on per label when its precision bound passes; `--scope modify` and `MAILSORT_MODE=live` last. Optional: a
+token with Workers AI permission for the synthetic Clef evaluation (the admin token cannot call `ai/run`).
+
 ## In flight (2026-10-05, Claude): readability review, Newsletter warning, Lab removal
 
 The owner asked for working, readable code (no large rewrites; complex but correct code such as the platform
