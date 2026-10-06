@@ -54,8 +54,9 @@ ops-v1's, task-intent-v1's and mail-received-v1's fixtures and schemas) runs Pro
 push: the files changed between a cumulative base and github.sha, never only this push's own diff,
 so a change whose run was cancelled or failed is checked (and deployed) again by the next run.
   main           base = the commit of the last successful push run of this workflow on main
-                 (LAST_SUCCESS). Any run that failed or was cancelled, including a cancelled deploy,
-                 is not "success", so its changes stay in the next run's diff.
+                 (last_successful_main). Any run that failed or was cancelled, including a cancelled
+                 deploy (also while pending in the concurrency group), is not "success", so its changes
+                 stay in the next run's diff.
   other branches base = git merge-base origin/main HEAD, so the head commit's gate covers every
                  change on the branch, not only the latest push.
   No usable base (no successful main run yet, API failure, base not an ancestor, no origin/main)
@@ -297,6 +298,8 @@ CHECK_JOBS = {
 ALWAYS_JOBS = ("Changes", "CI gate")
 # How many same-SHA branch runs are inspected (newest first).
 MAX_REUSE_CANDIDATES = 5
+# How many first-parent commits before this push are searched for the last successful main run.
+MAX_BASE_CANDIDATES = 50
 
 
 def everything() -> dict[str, bool]:
@@ -572,18 +575,53 @@ def github_get(token: str, api_url: str) -> Callable[[str], dict]:
     return get
 
 
+def last_successful_main(get: Callable[[str], dict], repository: str, run_id: str, commits: Iterable[str]) -> str:
+    """The newest of `commits` (this push's first-parent history, newest first) whose push run of this workflow on
+    main concluded success, or "" when none did. Git decides the order, never the API's run listing, which twice
+    returned a months-old Go-era run first; the workflow is this run's by numeric id, as the Go-era CI shared its
+    path. A commit whose lookup fails is passed over: an older base only checks more."""
+    workflow_id = get(f"/repos/{repository}/actions/runs/{run_id}").get("workflow_id")
+    if not isinstance(workflow_id, int):
+        return ""
+    for commit in commits:
+        query = urllib.parse.urlencode({"head_sha": commit, "branch": "main", "event": "push", "per_page": 10})
+        try:
+            listing = get(f"/repos/{repository}/actions/workflows/{workflow_id}/runs?{query}")
+        except Exception:  # noqa: BLE001 - this commit's run is unknown, so it is no base
+            continue
+        for run in listing.get("workflow_runs", []):
+            if isinstance(run, dict) and run.get("head_sha") == commit and run.get("conclusion") == "success":
+                return commit
+    return ""
+
+
+def api(environ: dict[str, str], get: Callable[[str], dict] | None) -> Callable[[str], dict] | None:
+    """The GitHub reader: the given one (tests), the read-only token's, or None without a token."""
+    if get is None and environ.get("GH_TOKEN"):
+        get = github_get(environ["GH_TOKEN"], environ.get("GITHUB_API_URL", "https://api.github.com"))
+    return get
+
+
+def find_last_success(after: str, environ: dict[str, str], get: Callable[[str], dict] | None) -> str:
+    """The diff base of a push to main. Any failure leaves it empty, and an empty base runs everything."""
+    get, repository, run_id = api(environ, get), environ.get("GITHUB_REPOSITORY", ""), environ.get("GITHUB_RUN_ID", "")
+    if not (get and repository and run_id):
+        return ""
+    try:
+        return last_successful_main(get, repository, run_id, git_first_parents(after, MAX_BASE_CANDIDATES))
+    except Exception:  # noqa: BLE001 - no base means: run everything
+        return ""
+
+
 def try_reuse(
     event: str, ref: str, sha: str, result: dict[str, bool], environ: dict[str, str], get: Callable[[str], dict] | None = None
 ) -> tuple[dict[str, bool], dict[str, str], str]:
     """Only a push to main that needs checks looks for a run to reuse; any failure runs the checks."""
     if event != "push" or ref != MAIN or not any(result[key] for key in CHECK_JOBS):
         return result, dict(NO_REUSE), ""
-    repository, run_id = environ.get("GITHUB_REPOSITORY", ""), environ.get("GITHUB_RUN_ID", "")
-    token = environ.get("GH_TOKEN", "")
-    if get is None:
-        if not (token and repository and run_id):
-            return result, dict(NO_REUSE), "checks run: no token to look for a green branch run"
-        get = github_get(token, environ.get("GITHUB_API_URL", "https://api.github.com"))
+    get, repository, run_id = api(environ, get), environ.get("GITHUB_REPOSITORY", ""), environ.get("GITHUB_RUN_ID", "")
+    if not (get and repository and run_id):
+        return result, dict(NO_REUSE), "checks run: no token to look for a green branch run"
     try:
         run, names, why = find_reusable(get, repository, run_id, sha, result)
     except urllib.error.HTTPError as error:
@@ -610,6 +648,13 @@ def git_is_ancestor(base: str, after: str) -> bool:
     )
 
 
+def git_first_parents(after: str, count: int) -> list[str]:
+    """The commits before `after` on its first-parent line, newest first; empty when git cannot tell."""
+    command = ["git", "rev-list", "--first-parent", f"--max-count={count}", f"{after}~1"]
+    result = subprocess.run(command, capture_output=True, text=True, check=False)
+    return result.stdout.split() if result.returncode == 0 else []
+
+
 def git_merge_base(after: str) -> str:
     result = subprocess.run(["git", "merge-base", "origin/main", after], capture_output=True, text=True, check=False)
     return result.stdout.strip() if result.returncode == 0 else ""
@@ -621,12 +666,16 @@ def main(get: Callable[[str], dict] | None = None) -> int:
     resume = os.environ.get("DISPATCH_RESUME", "false") or "false"
     if resume not in {"true", "false"}:
         raise ValueError("Invalid VPS resume selection")
+    last_success = ""
+    if event == "push" and ref == MAIN:
+        last_success = find_last_success(after, dict(os.environ), get)
+        print(f"Last successful main run: {last_success or 'none'}")
     result, reason, base = decide(
         event,
         ref,
         after,
         os.environ.get("DISPATCH_APP", ""),
-        os.environ.get("LAST_SUCCESS", "").strip(),
+        last_success,
         git_diff,
         git_is_ancestor,
         git_merge_base,

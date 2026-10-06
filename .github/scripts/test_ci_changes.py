@@ -875,7 +875,7 @@ class RealGit(unittest.TestCase):
         self.git("-c", "user.name=ci", "-c", "user.email=ci@example.org", "commit", "-qm", path)
         return self.git("rev-parse", "HEAD")
 
-    def run_main(self, **env):
+    def run_main(self, get=None, **env):
         output = Path(self.root, "output.txt")
         output.unlink(missing_ok=True)
         cwd = os.getcwd()
@@ -884,7 +884,7 @@ class RealGit(unittest.TestCase):
             os.chdir(self.root)
             os.environ.update(env, GITHUB_OUTPUT=str(output))
             os.environ.pop("GITHUB_STEP_SUMMARY", None)
-            ci_changes.main()
+            ci_changes.main(get)
         finally:
             os.chdir(cwd)
             for key, value in saved.items():
@@ -906,8 +906,10 @@ class RealGit(unittest.TestCase):
         self.temporary.cleanup()
 
     def main_run(self, after, last_success, ref=MAIN):
-        outputs = self.run_main(EVENT_NAME="push", REF=ref, AFTER=after, DISPATCH_APP="", LAST_SUCCESS=last_success)
-        # Without a token there is no run to reuse: the checks run (Reuse covers the lookup).
+        """`last_success` is the one commit whose push run on main succeeded."""
+        env = dict(ENV, EVENT_NAME="push", REF=ref, AFTER=after, DISPATCH_APP="")
+        outputs = self.run_main(main_github(last_success), **env)
+        # The fake has no branch run to reuse: the checks run (Reuse covers the lookup).
         self.assertEqual(outputs["checks_reused"], "false")
         return {key: outputs[key] for key in ci_changes.KEYS}
 
@@ -2439,6 +2441,83 @@ def fake_github(runs, jobs_by_run, artifacts_by_run=None):
 ENV = {"GITHUB_REPOSITORY": REPOSITORY, "GITHUB_RUN_ID": RUN_ID, "GH_TOKEN": "unused-by-the-fake"}
 
 
+def main_github(green, others=None):
+    """A fake GitHub for main(): `green` is the one commit whose push run on main succeeded (none when empty). Every
+    other read goes to `others`, by default a GitHub without a branch run of this commit to reuse."""
+
+    def get(path):
+        if path == f"/repos/{REPOSITORY}/actions/runs/{RUN_ID}":
+            return {"id": int(RUN_ID), "workflow_id": WORKFLOW_ID}
+        runs = f"/repos/{REPOSITORY}/actions/workflows/{WORKFLOW_ID}/runs?"
+        if path.startswith(runs) and "branch=main" in path:
+            found = bool(green) and f"head_sha={green}" in path
+            return {"workflow_runs": [{"head_sha": green, "conclusion": "success"}] if found else []}
+        if others:
+            return others(path)
+        if path.startswith(runs):
+            return {"workflow_runs": []}
+        raise AssertionError(f"unexpected read {path}")
+
+    return get
+
+
+class LastSuccess(unittest.TestCase):
+    """The diff base of a push to main: the newest earlier first-parent commit whose push run on main succeeded."""
+
+    def listing(self, runs_by_commit, workflow_id=WORKFLOW_ID, fail=()):
+        calls = []
+
+        def get(path):
+            calls.append(path)
+            if path == f"/repos/{REPOSITORY}/actions/runs/{RUN_ID}":
+                return {"workflow_id": workflow_id}
+            query = ci_changes.urllib.parse.parse_qs(path.split("?", 1)[1])
+            self.assertTrue(path.startswith(f"/repos/{REPOSITORY}/actions/workflows/{WORKFLOW_ID}/runs?"), path)
+            self.assertEqual((query["branch"], query["event"]), (["main"], ["push"]))
+            commit = query["head_sha"][0]
+            if commit in fail:
+                raise OSError("unavailable")
+            return {"workflow_runs": runs_by_commit.get(commit, [])}
+
+        get.calls = calls
+        return get
+
+    def test_the_newest_green_commit_in_git_order(self):
+        older, newer, newest = "1" * 40, "2" * 40, "3" * 40
+        get = self.listing({
+            newest: [{"head_sha": newest, "conclusion": "failure"}, {"head_sha": newest, "conclusion": "cancelled"}],
+            newer: [{"head_sha": newer, "conclusion": "success"}],
+            older: [{"head_sha": older, "conclusion": "success"}],
+        })
+        self.assertEqual(ci_changes.last_successful_main(get, REPOSITORY, RUN_ID, [newest, newer, older]), newer)
+        # Git's order decides; nothing after the first green commit is read.
+        self.assertEqual(len(get.calls), 3)
+
+    def test_a_run_of_another_commit_is_not_this_commits_success(self):
+        commit, other = "1" * 40, "2" * 40
+        get = self.listing({commit: [{"head_sha": other, "conclusion": "success"}]})
+        self.assertEqual(ci_changes.last_successful_main(get, REPOSITORY, RUN_ID, [commit]), "")
+
+    def test_a_failed_lookup_passes_the_commit_over(self):
+        newer, older = "2" * 40, "1" * 40
+        runs = {commit: [{"head_sha": commit, "conclusion": "success"}] for commit in (newer, older)}
+        get = self.listing(runs, fail={newer})
+        self.assertEqual(ci_changes.last_successful_main(get, REPOSITORY, RUN_ID, [newer, older]), older)
+
+    def test_no_green_commit_or_an_unknown_workflow_is_no_base(self):
+        commit = "1" * 40
+        green = {commit: [{"head_sha": commit, "conclusion": "success"}]}
+        for get in (self.listing({}), self.listing(green, workflow_id=None)):
+            self.assertEqual(ci_changes.last_successful_main(get, REPOSITORY, RUN_ID, [commit]), "")
+
+    def test_any_failure_or_no_token_runs_everything(self):
+        def broken(path):
+            raise OSError("unavailable")
+
+        self.assertEqual(ci_changes.find_last_success("HEAD", ENV, broken), "")
+        self.assertEqual(ci_changes.find_last_success("HEAD", {}, None), "")
+
+
 class Reuse(unittest.TestCase):
     """A push to main reuses a green branch push run of the same commit only when that run passed every check
     this push needs; deploy decisions never change."""
@@ -2616,7 +2695,7 @@ class Reuse(unittest.TestCase):
 class ReuseRealGit(unittest.TestCase):
     """main() with a fake GitHub, the way the Changes step runs it on a push to main."""
 
-    git, commit, setUp, tearDown = RealGit.git, RealGit.commit, RealGit.setUp, RealGit.tearDown
+    git, commit, run_main, setUp, tearDown = RealGit.git, RealGit.commit, RealGit.run_main, RealGit.setUp, RealGit.tearDown
 
     def test_main_writes_the_reuse_outputs(self):
         green = self.commit("README.md")
@@ -2626,22 +2705,8 @@ class ReuseRealGit(unittest.TestCase):
         def get_for(path):
             return get(path.replace(after, SHA)) if "workflows" in path else get(path)
 
-        output = Path(self.root, "output.txt")
-        cwd = os.getcwd()
-        saved = {key: os.environ.get(key) for key in ("GITHUB_OUTPUT", "GITHUB_STEP_SUMMARY", "EVENT_NAME", "REF", "AFTER", "DISPATCH_APP", "LAST_SUCCESS", *ENV)}
-        try:
-            os.chdir(self.root)
-            os.environ.update(ENV, EVENT_NAME="push", REF=MAIN, AFTER=after, DISPATCH_APP="", LAST_SUCCESS=green, GITHUB_OUTPUT=str(output))
-            os.environ.pop("GITHUB_STEP_SUMMARY", None)
-            ci_changes.main(get_for)
-        finally:
-            os.chdir(cwd)
-            for key, value in saved.items():
-                if value is None:
-                    os.environ.pop(key, None)
-                else:
-                    os.environ[key] = value
-        outputs = dict(line.split("=", 1) for line in output.read_text().splitlines())
+        env = dict(ENV, EVENT_NAME="push", REF=MAIN, AFTER=after, DISPATCH_APP="")
+        outputs = self.run_main(main_github(green, get_for), **env)
         self.assertEqual(outputs["checks_reused"], "true")
         self.assertEqual(outputs["mail_hero_check"], "false")
         self.assertEqual(outputs["contracts"], "false")
