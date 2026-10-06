@@ -106,6 +106,8 @@ const SIGNALS: Readonly<Record<string, string>> = {
   newsletter_unavailable: 'Newsletter 进程或 Pod 不可用',
   newsletter_paused: 'Newsletter 发布已排空或冻结',
   newsletter_unknown: 'Newsletter 有待核对记录',
+  newsletter_side_effect_unknown: 'Newsletter 有可能已产生结果的待核对记录',
+  newsletter_delivery_overdue: 'Newsletter 每日投递逾期',
   newsletter_delivery_accepted: '最近邮件已由邮件服务接收',
   newsletter_delivery_rejected: '最近邮件发送被拒绝',
   release_held: '发布暂停待处理',

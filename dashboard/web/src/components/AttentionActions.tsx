@@ -71,7 +71,8 @@ function Controls({ item }: { item: AttentionItem & { name: string; etag: string
   const [error, setError] = useState<string | null>(null)
   const dismissed = item.dismissed_at !== undefined
   const action = useAttentionAction(() => feedback?.saved(dismissed ? '已恢复这项提醒。' : '本次提醒已关闭，刷新和重启后仍有效。'))
-  const count = item.code === 'newsletter_unknown' ? item.metrics.unknown_count : undefined
+  const count = item.code === 'newsletter_side_effect_unknown' ? item.metrics.count
+    : item.code === 'newsletter_unknown' ? item.metrics.unknown_count : undefined
   const label = dismissed ? '恢复提醒' : typeof count === 'number' ? `不再提醒这批 ${count} 条记录` : '关闭本次提醒'
 
   function apply() {

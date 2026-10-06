@@ -6,8 +6,8 @@ import { healthy, NOW } from '../test/fixtures'
 import { attentionFor } from './AttentionActions'
 
 const item: AttentionItem = {
-  source: 'newsletter', code: 'newsletter_unknown', severity: 'warning', since: null,
-  metrics: { unknown_count: 32 }, target: { view: 'flows', flow: 'daily-newsletter', stage: 'fetch', entry: 'newsletter' },
+  source: 'newsletter', code: 'newsletter_side_effect_unknown', severity: 'warning', since: null,
+  metrics: { count: 32, unknown_revision: 7 }, target: { view: 'flows', flow: 'daily-newsletter', stage: 'fetch', entry: 'newsletter' },
   name: 'attentionItems/synthetic-newsletter', etag: 'a1-0d8f7a9e-1c2b-4d3e-8f4a-5b6c7d8e9f0a',
 }
 const path = `/api/v1/${item.name}:dismiss`
@@ -106,7 +106,24 @@ describe('owner reminder actions', () => {
 
   it('never chooses a mutation target when a partial match is ambiguous', () => {
     const attention = { level: 'warning' as const, items: [item, { ...item, name: 'attentionItems/other', target: { ...item.target, stage: 'other' } }], info: [], held: [] }
-    expect(attentionFor(attention, 'newsletter', 'newsletter_unknown', { entry: 'newsletter' })).toBeUndefined()
-    expect(attentionFor(attention, 'newsletter', 'newsletter_unknown', { stage: 'fetch' })).toBe(item)
+    expect(attentionFor(attention, 'newsletter', 'newsletter_side_effect_unknown', { entry: 'newsletter' })).toBeUndefined()
+    expect(attentionFor(attention, 'newsletter', 'newsletter_side_effect_unknown', { stage: 'fetch' })).toBe(item)
+  })
+
+  it('names the Newsletter batch and its safe next step, also for an older Fleet warning', async () => {
+    const scenario = warned()
+    serve(scenario, () => apiError(404, 'not_found'))
+    renderApp()
+    expect(await screen.findByRole('button', { name: '不再提醒这批 32 条记录' })).toBeInTheDocument()
+    expect(screen.getAllByText(/先核对实际邮件和 Notion 结果，避免重复发送/).length).toBeGreaterThan(0)
+  })
+
+  it('counts an older Fleet newsletter_unknown batch by unknown_count', async () => {
+    const scenario = warned()
+    const legacy = { ...item, code: 'newsletter_unknown', metrics: { unknown_count: 12, unknown_revision: 7 } }
+    scenario.home = { ...scenario.home, attention: { level: 'warning', items: [legacy], info: [], held: [] } }
+    serve(scenario, () => apiError(404, 'not_found'))
+    renderApp()
+    expect(await screen.findByRole('button', { name: '不再提醒这批 12 条记录' })).toBeInTheDocument()
   })
 })

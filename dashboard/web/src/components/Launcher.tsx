@@ -123,7 +123,7 @@ function ServiceRow({ reg, entry, state, loading, now }: { reg: Reg; entry: Regi
   const dismissed = useSignalsDismissed(entry.id, state?.top_signals ?? []) && state?.level === 'warning'
   let detail = line?.detail ?? line?.word ?? null
   if (line && line.level !== 'ok' && line.detail) detail = `${line.word} · ${line.detail}`
-  if (line && entry.id === 'newsletter' && state?.reason === 'newsletter_unknown') detail = '运行正常 · 有待核对记录'
+  if (line && entry.id === 'newsletter' && ['newsletter_side_effect_unknown', 'newsletter_unknown'].includes(state?.reason ?? '')) detail = '运行正常 · 有待核对记录'
   const label = line ? `${entry.name}：${dismissed ? '本批提醒已关闭' : line.word}${line.detail ? `，${line.detail}` : ''}，${target.what}` : `${entry.name}，${target.what}`
   return (
     <li>

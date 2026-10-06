@@ -17,10 +17,20 @@ export function alertGuidance(code: string): AlertGuidance {
       return { explanation: 'VPS 配置有差异，但暂停状态或字段归属阻止自动修复。', next: '打开 Fleet 查看原因，处理对应配置或明确继续原发布；可以关闭本次提醒。' }
     case 'runtime_comparison_unavailable':
       return { explanation: 'daemon 没有完成配置检查，当前无法确认 VPS 与代码一致。', next: '打开 Fleet 核对 daemon、集群和 Tunnel；入口不可达时按重建手册恢复，再运行检查。' }
+    case 'newsletter_side_effect_unknown':
+      return {
+        explanation: '一些发信、采编或 Notion 写入记录缺少最终结果，邮件或 Notion 内容可能已经产生。计数可能重叠；它不等于失败邮件数。',
+        next: '先核对实际邮件和 Notion 结果，避免重复发送；不打算核对这批记录时，可以关闭本次提醒，出现新记录会再次提醒。',
+      }
     case 'newsletter_unknown':
       return {
         explanation: '一些操作记录缺少最终完成结果。计数可能包含中断活动、采编步骤、Notion 写入或发信记录，也可能重叠；它不等于失败邮件数。当前是否运行、是否有在途任务见下方计数。',
-        next: '不打算核对这批旧记录时，可以关闭本次提醒；需要重跑时，先核对实际邮件和 Notion 结果。',
+        next: '可能已产生邮件或 Notion 结果的记录会单独提醒；需要重跑时，先核对实际邮件和 Notion 结果。',
+      }
+    case 'newsletter_delivery_overdue':
+      return {
+        explanation: '每日 07:00（洛杉矶）的投递没有按时留下记录：最近一次接管超过 28 小时、结果未确认超过 2.5 小时，或还没有投递记录。',
+        next: '打开 Fleet 查看每日任务和最近投递记录；需要补发时先核对实际邮件，避免重复发送。',
       }
     case 'newsletter_delivery_rejected':
       return { explanation: '最近一条投递记录显示邮件服务拒绝发送。后台进程健康并不代表这次投递成功。', next: '打开 Newsletter 查看投递错误并处理发信配置；需要重发时先核对该邮件的结果，避免重复发送。' }
