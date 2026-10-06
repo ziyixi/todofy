@@ -38,7 +38,7 @@ identity on the apex ([`release.md`](release.md)).
 front of the old Vercel CNAME and the apex a zone route (`ziyixi.science/*`) to the separate Worker
 `ziyixi-apex-redirect`, which answered a 308 to `www`. The apex had no certificate of its own: Cloudflare
 served it whichever certificate listed the apex, and every Workers Custom Domain's certificate
-(`mail-hero`, `lab`, `home`, `todofy`, …) lists the zone apex, so that choice changed whenever a Custom
+(`mail-hero`, `home`, `todofy`, …) lists the zone apex, so that choice changed whenever a Custom
 Domain was added. Chrome reuses (coalesces) an HTTP/2 or HTTP/3 connection for another hostname that
 resolves to the same IPs when the certificate it saw on that connection covers the new hostname. Cloudflare's
 edge rejects a request whose `Host` is not covered by the certificate it currently maps to the connection's
