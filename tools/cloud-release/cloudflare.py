@@ -11,7 +11,6 @@ DO_KEYS = {
     "HomeState": "home-state",
     "MailCoordinator": "mail-coordinator",
     "TodofyCore": "todofy-core-do",
-    "LabState": "lab-state",
     "WatchState": "watch-state",
 }
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // The values of the Worker "flowday" that are never committed to ../wrangler.toml, added at deploy time (the same
-// shape as Lab's wrapper, ../../lab/deploy/deploy-vars.mjs):
+// shape as the dashboard's wrapper, ../../dashboard/deploy/deploy-vars.mjs):
 //
 // - with `wrangler deploy --var NAME:value` (a plain_text var, exactly like a [vars] entry): BUILD_SHA (the
 //   commit). FlowDay has no GitHub-variable switches;
@@ -8,7 +8,7 @@
 //   the credential key that seals the Todoist key in D1 (inputs FLOWDAY_ACCESS_OWNER, FLOWDAY_ACCESS_OWNER_ALIASES,
 //   FLOWDAY_CSRF_SIGNING_KEY, FLOWDAY_CREDENTIAL_KEY, masked in the public Actions log). The deploy job ("FlowDay
 //   deploy") fills the first two from the dashboard's environment secrets DASHBOARD_ACCESS_OWNER and
-//   DASHBOARD_ACCESS_OWNER_ALIASES (the same owner, like Lab) and the keys from FlowDay's own
+//   DASHBOARD_ACCESS_OWNER_ALIASES (the same owner) and the keys from FlowDay's own
 //   FLOWDAY_CSRF_SIGNING_KEY and FLOWDAY_CREDENTIAL_KEY (../README.md "Deploy").
 //
 // Since F2 ../wrangler.toml holds the real D1 id and Access AUD. A real deploy is still refused while either is the

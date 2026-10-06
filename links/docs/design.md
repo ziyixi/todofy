@@ -214,7 +214,7 @@ of the file. The page's text is Chinese; the short-link side's own pages (previe
   placeholders.
 - **L2 (first deploy; steps 1-4 done in the commit "Deploy links on s.ziyixi.science (L2)", step 5 after its first
   `Links deploy`):** the lead created the D1 database `links` (WNAM), the Access application `links` (self-hosted,
-  `s.ziyixi.science/_/*` and the exact `s.ziyixi.science/_`, the two owner policies of Lab and Home, session 168 h) and
+  `s.ziyixi.science/_/*` and the exact `s.ziyixi.science/_`, the two shared owner policies, session 168 h) and
   the `production` secret `LINKS_CSRF_SIGNING_KEY`; `s.ziyixi.science` had no DNS record, so the Custom Domain attaches
   without a cf-guard allowance. The commit made every edit of step 4 except the `infra/` adoption: the dashboard
   registry names the Worker and the D1 database under a hidden entry 短链接 (no tile, status `none`), and the
@@ -228,7 +228,7 @@ of the file. The page's text is Chinese; the short-link side's own pages (previe
      `s.ziyixi.science/_`, a policy allowing exactly the owner's identities (the dashboard's), session duration 7 days;
      commit its AUD as `ACCESS_AUDIENCE`. The rest of the host stays outside Access.
   3. Add the GitHub `production` secret `LINKS_CSRF_SIGNING_KEY` (64 hex, `openssl rand -hex 32`); the owner values
-     come from the dashboard's `DASHBOARD_ACCESS_OWNER` and `DASHBOARD_ACCESS_OWNER_ALIASES`, as for Lab and FlowDay.
+     come from the dashboard's `DASHBOARD_ACCESS_OWNER` and `DASHBOARD_ACCESS_OWNER_ALIASES`, as for FlowDay.
   4. In one commit (FlowDay's F2 and F3 commits needed the same edits):
      - `routes = [{ pattern = "s.ziyixi.science", custom_domain = true }]` in `wrangler.toml`.
      - `.github/scripts/test_wrangler_configs.py`: move `links` from `UNDEPLOYED` to `PRODUCTION` and `WRAPPERS` (with

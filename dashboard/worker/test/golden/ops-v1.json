@@ -55,8 +55,8 @@
         }
       },
       {
-        "source": "lab",
-        "code": "neuron_cap_hit",
+        "source": "newsletter",
+        "code": "newsletter_unknown",
         "severity": "warning",
         "since": "2026-09-29T23:30:00.000Z",
         "metrics": {
@@ -178,20 +178,6 @@
     "until": null,
     "set_at": null,
     "deferred": []
-  },
-  "read/GuardState/shed-lab.json": {
-    "level": "shed",
-    "reason": "d1_reads_high",
-    "until": "2026-09-30T20:00:00Z",
-    "set_at": "2026-09-30T07:30:00Z",
-    "deferred": [
-      "feed_fetch",
-      "embed",
-      "rank",
-      "brief",
-      "seed_resolve",
-      "retention"
-    ]
   },
   "read/GuardState/shed-mail-hero.json": {
     "level": "shed",
@@ -315,107 +301,6 @@
     "last_backup_at": null,
     "ui_url": "https://fleet.example.com/",
     "capabilities": []
-  },
-  "read/OpsStatus/lab-degraded.json": {
-    "version": "ops-v1",
-    "app": "lab",
-    "generated_at": "2026-09-30T08:00:00Z",
-    "health": "degraded",
-    "modes": {
-      "maintenance": false,
-      "ingest_paused": false
-    },
-    "guard": {
-      "level": "shed",
-      "reason": "d1_reads_high",
-      "until": "2026-09-30T20:00:00Z",
-      "set_at": "2026-09-30T07:30:00Z",
-      "deferred": [
-        "feed_fetch",
-        "embed",
-        "rank",
-        "brief",
-        "seed_resolve",
-        "retention"
-      ]
-    },
-    "signals": [
-      {
-        "code": "feed_stale",
-        "severity": "warning",
-        "metrics": {
-          "hours": 80
-        },
-        "since": "2026-09-27T00:00:00Z"
-      },
-      {
-        "code": "neuron_cap_hit",
-        "severity": "warning",
-        "metrics": {
-          "used": 4996.2,
-          "cap": 5000
-        },
-        "since": "2026-09-30T06:41:10Z"
-      },
-      {
-        "code": "send_unsettled",
-        "severity": "warning",
-        "metrics": {
-          "count": 1
-        }
-      },
-      {
-        "code": "guard_shed",
-        "severity": "info",
-        "metrics": {
-          "seconds_left": 43200
-        }
-      }
-    ],
-    "counters": {
-      "ingested_24h": 0,
-      "ranked_24h": 0,
-      "liked_7d": 3,
-      "decided_7d": 20,
-      "neurons_today": 4996.2,
-      "neuron_cap": 5000
-    },
-    "last_backup_at": null,
-    "ui_url": "https://lab.example.com/",
-    "capabilities": [
-      "guard"
-    ]
-  },
-  "read/OpsStatus/lab-ok.json": {
-    "version": "ops-v1",
-    "app": "lab",
-    "generated_at": "2026-09-30T08:00:00Z",
-    "health": "ok",
-    "modes": {
-      "maintenance": false,
-      "ingest_paused": false
-    },
-    "guard": {
-      "level": "normal",
-      "reason": null,
-      "until": null,
-      "set_at": null,
-      "deferred": []
-    },
-    "signals": [],
-    "counters": {
-      "ingested_24h": 612,
-      "ranked_24h": 20,
-      "liked_7d": 9,
-      "decided_7d": 60,
-      "neurons_today": 341.5,
-      "neuron_cap": 5000
-    },
-    "last_backup_at": null,
-    "ui_url": "https://lab.example.com/",
-    "capabilities": [
-      "guard"
-    ]
   },
   "read/OpsStatus/mail-hero-degraded.json": {
     "version": "ops-v1",
@@ -1096,75 +981,5 @@
     "attempts": 2,
     "error_code": "tls_handshake"
   },
-  "read/newer/delivery-new-state": null,
-  "read/newer/lab-key-order": {
-    "version": "ops-v1",
-    "app": "lab",
-    "generated_at": "2026-09-30T08:00:00Z",
-    "health": "degraded",
-    "modes": {
-      "maintenance": false,
-      "ingest_paused": false
-    },
-    "guard": {
-      "level": "shed",
-      "reason": "d1_reads_high",
-      "until": "2026-09-30T20:00:00Z",
-      "set_at": "2026-09-30T07:30:00Z",
-      "deferred": [
-        "feed_fetch",
-        "embed",
-        "rank",
-        "brief",
-        "seed_resolve",
-        "retention"
-      ]
-    },
-    "signals": [
-      {
-        "code": "feed_stale",
-        "severity": "warning",
-        "metrics": {
-          "hours": 80
-        },
-        "since": "2026-09-27T00:00:00Z"
-      },
-      {
-        "code": "neuron_cap_hit",
-        "severity": "warning",
-        "metrics": {
-          "used": 4996.2,
-          "cap": 5000
-        },
-        "since": "2026-09-30T06:41:10Z"
-      },
-      {
-        "code": "send_unsettled",
-        "severity": "warning",
-        "metrics": {
-          "count": 1
-        }
-      },
-      {
-        "code": "guard_shed",
-        "severity": "info",
-        "metrics": {
-          "seconds_left": 43200
-        }
-      }
-    ],
-    "counters": {
-      "ingested_24h": 0,
-      "ranked_24h": 0,
-      "liked_7d": 3,
-      "decided_7d": 20,
-      "neurons_today": 4996.2,
-      "neuron_cap": 5000
-    },
-    "last_backup_at": null,
-    "ui_url": "https://lab.example.com/",
-    "capabilities": [
-      "guard"
-    ]
-  }
+  "read/newer/delivery-new-state": null
 }

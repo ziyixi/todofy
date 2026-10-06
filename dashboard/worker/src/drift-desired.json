@@ -218,11 +218,6 @@
           "source": "config"
         },
         {
-          "name": "LAB",
-          "type": "service",
-          "source": "config"
-        },
-        {
           "name": "MAIL_HERO",
           "type": "service",
           "source": "config"
@@ -249,89 +244,6 @@
         },
         {
           "name": "WEBSITE_SYNC",
-          "type": "service",
-          "source": "config"
-        }
-      ],
-      "personal": []
-    },
-    "lab": {
-      "config": "lab/wrangler.toml",
-      "workers_dev": false,
-      "preview_urls": false,
-      "custom_domains": [
-        "lab.ziyixi.science"
-      ],
-      "routes": [],
-      "crons": [],
-      "bindings": [
-        {
-          "name": "ACCESS_AUDIENCE",
-          "type": "plain_text",
-          "source": "config"
-        },
-        {
-          "name": "ACCESS_ISSUER",
-          "type": "plain_text",
-          "source": "config"
-        },
-        {
-          "name": "ACCESS_OWNER",
-          "type": "secret_text",
-          "source": "deploy"
-        },
-        {
-          "name": "ACCESS_OWNER_ALIASES",
-          "type": "secret_text",
-          "source": "deploy"
-        },
-        {
-          "name": "AI",
-          "type": "ai",
-          "source": "config"
-        },
-        {
-          "name": "ASSETS",
-          "type": "assets",
-          "source": "config"
-        },
-        {
-          "name": "BUILD_SHA",
-          "type": "plain_text",
-          "source": "deploy"
-        },
-        {
-          "name": "CSRF_SIGNING_KEY",
-          "type": "secret_text",
-          "source": "deploy"
-        },
-        {
-          "name": "DB",
-          "type": "d1",
-          "source": "config"
-        },
-        {
-          "name": "LAB",
-          "type": "durable_object_namespace",
-          "source": "config"
-        },
-        {
-          "name": "LAB_DAILY_NEURONS",
-          "type": "plain_text",
-          "source": "config"
-        },
-        {
-          "name": "LAB_FETCH_UTC_HOUR",
-          "type": "plain_text",
-          "source": "config"
-        },
-        {
-          "name": "PUBLIC_HOST",
-          "type": "plain_text",
-          "source": "config"
-        },
-        {
-          "name": "TODOFY",
           "type": "service",
           "source": "config"
         }

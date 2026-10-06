@@ -47,7 +47,6 @@ locals {
     # BEGIN service-catalog owner
     "home"      = { name = "Home", domain = "home.ziyixi.science", more = [], session = "24h" }
     "fleet"     = { name = "Fleet", domain = "fleet.ziyixi.science", more = [], session = "24h" }
-    "lab"       = { name = "Lab", domain = "lab.ziyixi.science", more = [], session = "24h" }
     "links"     = { name = "links", domain = "s.ziyixi.science/_/*", more = ["s.ziyixi.science/_"], session = "168h" }
     "mail-hero" = { name = "Mail Hero", domain = "mail-hero.ziyixi.science", more = [], session = "24h" }
     "todofy"    = { name = "Todofy", domain = "todofy.ziyixi.science", more = [], session = "24h" }

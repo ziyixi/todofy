@@ -138,7 +138,7 @@ describe("Todofy's answers", () => {
 
   it('reads only a result about this intent of this source', () => {
     expect(asResult(result({}), 'digest-2026-10-01')?.state).toBe(State.PENDING);
-    expect(asResult(result({ source: 'lab' }), 'digest-2026-10-01')).toBeNull();
+    expect(asResult(result({ source: 'other' }), 'digest-2026-10-01')).toBeNull();
     expect(asResult(result({}), 'digest-2026-10-02')).toBeNull();
     expect(asResult(result({ state: 'exploded' }), 'digest-2026-10-01')).toBeNull();
     expect(asResult(result({ retry_after_seconds: 0 }), 'digest-2026-10-01')).toBeNull();

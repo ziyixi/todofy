@@ -31,8 +31,8 @@ class PackagesTest(unittest.TestCase):
     def test_only_the_python_packages_are_generated(self) -> None:
         # A TypeScript-only package may use what the Python profile lacks (here a real oneof).
         ui = file(
-            "lab/ui/v1/home.proto",
-            "lab.ui.v1",
+            "watch/ui/v1/watch.proto",
+            "watch.ui.v1",
             {"name": "Choice", "field": [{**STRING, "oneofIndex": 0}], "oneofDecl": [{"name": "kind"}]},
         )
         intents = file(
@@ -40,16 +40,16 @@ class PackagesTest(unittest.TestCase):
         )
         out = gen_py.generate({"file": [ui, intents]})
         self.assertIn("todofy/taskintent/v1/task_intent_pb.py", out)
-        self.assertFalse([path for path in out if path.startswith("lab/")])
+        self.assertFalse([path for path in out if path.startswith("watch/")])
 
     def test_a_python_package_cannot_name_a_typescript_only_type(self) -> None:
-        ui = file("lab/ui/v1/paper.proto", "lab.ui.v1", {"name": "Paper", "field": [STRING]})
+        ui = file("watch/ui/v1/watch.proto", "watch.ui.v1", {"name": "Watch", "field": [STRING]})
         ref = {
-            "name": "paper",
+            "name": "watch",
             "number": 1,
             "label": "LABEL_OPTIONAL",
             "type": "TYPE_MESSAGE",
-            "typeName": ".lab.ui.v1.Paper",
+            "typeName": ".watch.ui.v1.Watch",
         }
         intents = file(
             "todofy/taskintent/v1/task_intent.proto", "todofy.taskintent.v1", {"name": "Item", "field": [ref]}

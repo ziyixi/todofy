@@ -1,7 +1,9 @@
 """task-intent-v1 inside TodofyCore (contracts/task-intent-v1; core/intents.py has the rules).
 
-Another app in the account (today only Lab) proposes Todoist tasks through the gateway's ``Ops``
-entrypoint; Todofy stays the only Todoist writer.
+Another app in the account (today the watch app) proposes Todoist tasks through the gateway's ``Intents``
+entrypoint; Todofy stays the only Todoist writer. A source the contract no longer knows (its enum value is reserved)
+is refused like any unknown one; a pending ledger row of such a source no longer reads as an intent, so its next
+step marks it failed (``todoist_rejected``) and nothing more is sent; retention removes it like any other row.
 
 - ``propose``: replay an intent already recorded (same hash; a failed one is re-queued), else
   refuse it (source, URL, a pause, the daily limit) or record it with its task rows in one D1

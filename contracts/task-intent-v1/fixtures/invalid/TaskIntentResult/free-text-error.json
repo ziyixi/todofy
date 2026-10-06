@@ -1,7 +1,7 @@
 {
   "version": "task-intent-v1",
-  "source": "lab",
-  "intent_id": "deck-2026-09-30-g1",
+  "source": "watch",
+  "intent_id": "digest-2026-09-30",
   "state": "failed",
   "recorded": true,
   "tasks_total": 4,

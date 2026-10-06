@@ -152,10 +152,6 @@ const SIGNALS: Readonly<Record<string, string>> = {
   reminder_disabled: '每日提醒已关闭',
   gtd_snapshot_stale: 'GTD 快照过旧',
   review_overdue: '每周回顾已超过 10 天',
-  // Lab
-  feed_stale: 'arXiv 抓取过旧',
-  neuron_cap_hit: '今日 AI 额度已用完',
-  send_unsettled: '交给 Todofy 未完成',
   // the watch app
   watches_broken: '有监视已失效',
   scheduler_stale: '监视调度已停止',
@@ -308,7 +304,6 @@ const MODES: Readonly<Record<string, { label: string; normal: boolean }>> = {
   deployment_paused: { label: 'Newsletter 发布已排空或冻结', normal: false },
   force_pause_todoist: { label: '强制暂停 Todoist', normal: false },
   reminder_enabled: { label: '每日提醒', normal: true },
-  ingest_paused: { label: '暂停抓取', normal: false },
   // the watch app: its reminders go to Todofy (the TODOFY binding)
   notifications: { label: '通知 Todofy', normal: true },
 }
@@ -370,16 +365,9 @@ const COUNTERS: Readonly<Record<string, { label: string; kind: CounterKind }>> =
   carryover_open: { label: '多日未完成邮件任务', kind: 'count' },
   completed_7d: { label: '近 7 天完成', kind: 'count' },
   review_age_days: { label: '距上次回顾', kind: 'days' },
-  // Todofy's task-intent-v1 intake (proposals from Lab)
+  // Todofy's task-intent-v1 intake (proposals from the watch app)
   intents_pending: { label: '待创建的任务提议', kind: 'count' },
   intents_failed_7d: { label: '近 7 天失败的任务提议', kind: 'count' },
-  // Lab
-  ingested_24h: { label: '24 小时抓取', kind: 'count' },
-  ranked_24h: { label: '24 小时排序', kind: 'count' },
-  liked_7d: { label: '近 7 天喜欢', kind: 'count' },
-  decided_7d: { label: '近 7 天已划', kind: 'count' },
-  neurons_today: { label: '今日 AI neurons', kind: 'count' },
-  neuron_cap: { label: '每日 AI neurons 上限', kind: 'count' },
   // the watch app
   watches_active: { label: '正常监视', kind: 'count' },
   watches_paused: { label: '已暂停监视', kind: 'count' },
@@ -439,11 +427,6 @@ export function deferredJobLabel(job: string): string {
       retention: '过期数据清理',
       metrics_rollup: '指标汇总',
       gtd_snapshot: 'GTD 每日快照',
-      feed_fetch: 'arXiv 抓取',
-      embed: '向量化',
-      rank: '排序',
-      brief: '中文简介',
-      seed_resolve: '种子论文解析',
       scheduled_checks: '定时检查',
       daily_sweep: '每日整理',
     },

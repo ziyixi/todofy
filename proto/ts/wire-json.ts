@@ -43,7 +43,7 @@
  *   enum name, a wrong type, null or a missing REQUIRED field throws WireJsonError. null is a value only for a
  *   REQUIRED field declared `optional`: "always present, may be null" (ops-v1's SetGuardInput.until), which is
  *   exactly what toWire writes for it.
- * - lenient (a consumer reading an output, e.g. Lab reading a TaskIntentResult): an unknown field is
+ * - lenient (a consumer reading an output, e.g. the watch app reading a TaskIntentResult): an unknown field is
  *   skipped and an unknown enum name reads as the zero value, so a switch takes its default branch; the
  *   name of a closed enum ((common.wire.v1.closed), ops-v1's states) is refused instead, as on a strict read.
  *   Both are reported in `unrecognized` (field paths only, never values) for logs and metrics. A wrong

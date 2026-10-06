@@ -142,7 +142,7 @@ describe('persistent occurrence controls', () => {
 
   it('filters before the outbound 20-item cap so later active conditions are not lost', async () => {
     h = await start();
-    for (const app of ['mail-hero', 'todofy', 'lab'] as const) await h.answer(app, 'status', { value: await status(app, {
+    for (const app of ['mail-hero', 'todofy', 'watch'] as const) await h.answer(app, 'status', { value: await status(app, {
       health: 'degraded', signals: Array.from({ length: 12 }, (_unused, index) => ({ code: `synthetic_warning_${String(index).padStart(2, '0')}`, severity: 'warning' as const, metrics: {} })),
     }) });
     await h.tick(NOW);
@@ -178,7 +178,7 @@ describe('persistent occurrence controls', () => {
 
   it('all six bounded sources remain manageable on a bad day, closed or active after restart', async () => {
     h = await start();
-    for (const app of ['mail-hero', 'todofy', 'lab', 'watch', 'fleet', 'newsletter'] as const) await h.answer(app, 'status', { value: await status(app, {
+    for (const app of ['mail-hero', 'todofy', 'watch', 'fleet', 'newsletter', 'notion-publish'] as const) await h.answer(app, 'status', { value: await status(app, {
       health: 'degraded', signals: Array.from({ length: 16 }, (_unused, index) => ({ code: `stress_warning_${String(index).padStart(2, '0')}`, severity: 'warning' as const, metrics: { count: index } })),
     }) });
     await h.tick(NOW);

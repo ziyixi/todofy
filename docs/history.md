@@ -12,11 +12,11 @@ repository retains its earlier history. Newsletter retains its own runtime and i
 
 ## Owner API compatibility
 
-All seven Cloudflare owner APIs now use the shared proto HTTP pattern. The dated cleanup schedule is:
+All six Cloudflare owner APIs now use the shared proto HTTP pattern. The dated cleanup schedule is:
 
 | Surface | Old-client response | Earliest removal date |
 | --- | --- | --- |
-| Lab and Mail Hero | Old envelope, 410 `reload_required` | 2026-11-01 |
+| Mail Hero | Old envelope, 410 `reload_required` | 2026-11-01 |
 | Home | Old envelope, 410 `not_found` with a reload message | 2026-11-02 |
 | FlowDay and Todofy | Old envelope, 410 `reload_required` | 2026-11-02 |
 

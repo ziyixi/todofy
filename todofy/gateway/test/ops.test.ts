@@ -13,7 +13,7 @@ import type { TaskIntentService } from '@ziyixi/proto/todofy/taskintent/v1/task_
 import type { WireObject, WireService } from '@ziyixi/proto/wire-json';
 import type { DescMessage } from '@ziyixi/proto/protobuf';
 import subtasks from '../../../contracts/task-intent-v1/fixtures/TaskIntent/subtasks-3.json';
-import labRef from '../../../contracts/task-intent-v1/fixtures/TaskIntentRef/lab.json';
+import watchRefFixture from '../../../contracts/task-intent-v1/fixtures/TaskIntentRef/watch.json';
 import pendingNew from '../../../contracts/task-intent-v1/fixtures/TaskIntentResult/pending-new.json';
 import created from '../../../contracts/task-intent-v1/fixtures/TaskIntentResult/created.json';
 import watchDigest from '../../../contracts/task-intent-v1/fixtures/TaskIntent/watch-digest.json';
@@ -115,7 +115,7 @@ describe('the Ops entrypoint (contracts/ops-v1)', () => {
 
 describe('the task-intent-v1 methods of the Ops entrypoint (contracts/task-intent-v1)', () => {
   const intent: WireObject = subtasks;
-  const ref: WireObject = labRef;
+  const ref: WireObject = watchRefFixture;
 
   it('implements the generated TaskIntentService as Workers RPC methods', () => {
     const { ops } = entrypoint(() => ({ ok: created }));
@@ -197,7 +197,7 @@ describe('the Intents entrypoint: task intents of the one source its binding nam
   });
 
   it.each([
-    ['another source', { source: 'watch' }, intentOf('lab')],
+    ['another source', { source: 'watch' }, intentOf('other')],
     ['no props', undefined, intentOf('watch')],
     ['props without a source', {}, intentOf('watch')],
     ['an empty source', { source: '' }, intentOf('')],

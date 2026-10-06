@@ -17,7 +17,7 @@ from cloudflare import DO_KEYS, observe  # noqa: E402
 from control import release_inputs  # noqa: E402
 from deployments import last_good  # noqa: E402
 
-APPS = ("fleet", "dashboard", "lab", "mail-hero", "todofy", "watch")
+APPS = ("fleet", "dashboard", "mail-hero", "todofy", "watch")
 
 
 class Github:

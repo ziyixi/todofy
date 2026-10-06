@@ -45,25 +45,25 @@ def test_the_canonical_form_is_schema_order_compact_and_pinned():
     """The hash freezes an intent for ever: a change here would turn every replay into a conflict."""
     value = parsed()
     assert value.canonical.startswith(
-        '{"version":"task-intent-v1","source":"lab","intent_id":"deck-2026-09-30-g1","mode":"subtasks",'
-        '"parent":{"title":"论文雷达 2026-09-30 · 3 篇","description":"'
+        '{"version":"task-intent-v1","source":"watch","intent_id":"digest-2026-09-30","mode":"subtasks",'
+        '"parent":{"title":"网页监视 2026-09-30 · 3 个监视","description":"'
     )
     assert json.loads(value.canonical) == fixture("subtasks-3.json")
-    assert value.sha256 == "316d4581f9bd95acb34ddf6ac87efd44c7fff5cc9b0108b031de94eddcf92cdb"
+    assert value.sha256 == "d5bf27df8b4ae830b7059eb981ed730807431d4eb409e823e8634d223e3b5feb"
     reordered = {key: fixture("subtasks-3.json")[key] for key in reversed(list(fixture("subtasks-3.json")))}
     reordered["items"] = [dict(reversed(list(item.items()))) for item in reordered["items"]]
     assert intents.intent(reordered).sha256 == value.sha256
     assert parsed(mode="separate").sha256 != value.sha256
 
 
-# The hashes the hand-written canonical form gave before core/intents.py moved to the generated types and
-# the wire JSON profile (2026-10-01). Recorded intents keep these hashes in D1 for 400 days: a replay must
-# hash the same, so these never change.
+# The canonical form and hash of every intent fixture. Recorded intents keep their hashes in D1 for 400 days: a
+# replay must hash the same, so a pin changes only with its fixture's content (the four generic fixtures were
+# re-sourced to the watch app on 2026-10-05), never with the code.
 PINNED = {
-    "max-items.json": "0ad54ffb827c5300065997329b6be52cadb37f558d62e5a548930d46b8c5b504",
-    "minimal.json": "4509943790f6a041b6664cf1d98894cc867bc99f0584ab4bc8521dc9ee8ba51a",
-    "separate-2.json": "2a8910797cd8f9fb07ad4bfff08a15225c660a6eaeb36c336f7824523c3ee21d",
-    "subtasks-3.json": "316d4581f9bd95acb34ddf6ac87efd44c7fff5cc9b0108b031de94eddcf92cdb",
+    "max-items.json": "37d5b5ab722c3ad2a70fc9caa8a8a39c6369b0268e6612571cac516a2eda2f67",
+    "minimal.json": "701ed055316779c3554983d71f1425385ba0cdfb48bb781fd75e8cd77388d313",
+    "separate-2.json": "4a08134bf5ba5c360ee0c823f798c8dbbe432985c8ecb6b4785ceba489ee942d",
+    "subtasks-3.json": "d5bf27df8b4ae830b7059eb981ed730807431d4eb409e823e8634d223e3b5feb",
     # The watch app's digest and urgent intents (SOURCE_WATCH, 2026-10-01): the bytes watch/worker builds for its
     # synthetic state (its intent golden test compares them with these fixtures).
     "watch-digest.json": "8c770cf825eb116a9867ba4fb96f11a8cc10b88eb94c1c2b28555230c19d6b9a",
@@ -116,34 +116,33 @@ def test_a_lone_surrogate_is_refused():
 def test_task_text_in_subtasks_mode():
     value = parsed()
     assert intents.task_text(value, 0) == (
-        "论文雷达 2026-09-30 · 3 篇",
-        "来自 Lab 论文雷达的今日喜欢（合成示例）\nhttps://lab.ziyixi.science/deck/2026-09-30\n\n"
-        "Todofy intent: lab/deck-2026-09-30-g1#0",
+        "网页监视 2026-09-30 · 3 个监视",
+        "只有名称、类型和次数（合成示例）\nhttps://watch.ziyixi.science/\n\nTodofy intent: watch/digest-2026-09-30#0",
     )
     assert intents.task_text(value, 1) == (
-        "A Synthetic Study of Fixture Ranking for Contract Tests",
-        "合成简介：本文提出一种用于契约测试的示例排序方法，并在合成数据上验证。\n\n"
-        "https://arxiv.org/abs/2609.00001\n\nTodofy intent: lab/deck-2026-09-30-g1#1",
+        "A Synthetic Watch of Fixture Prices for Contract Tests",
+        "合成示例：数值 2 次变化，变化的内容请在网页监视中查看。\n\n"
+        "https://watch.ziyixi.science/watches/w2609-00001\n\nTodofy intent: watch/digest-2026-09-30#1",
     )
     # No description: the URL and the footer; titles are sent as given.
     assert intents.task_text(value, 3) == (
-        'Placeholder Paper With "Quotes" & Ampersands <tags>',
-        "https://arxiv.org/abs/2609.00003\n\nTodofy intent: lab/deck-2026-09-30-g1#3",
+        'Placeholder Watch With "Quotes" & Ampersands <tags>',
+        "https://watch.ziyixi.science/watches/w2609-00003\n\nTodofy intent: watch/digest-2026-09-30#3",
     )
 
 
 def test_task_text_in_separate_mode_names_the_parent():
     value = parsed(mode="separate")
     content, description = intents.task_text(value, 2)
-    assert content == "合成标题：面向小规模个人推荐的对比学习"
-    assert description.endswith("\n\n— 论文雷达 2026-09-30 · 3 篇\n\nTodofy intent: lab/deck-2026-09-30-g1#2")
+    assert content == "合成示例：面向小规模个人站点的价格监视"
+    assert description.endswith("\n\n— 网页监视 2026-09-30 · 3 个监视\n\nTodofy intent: watch/digest-2026-09-30#2")
     with pytest.raises(ValueError):
         intents.task_text(value, 0)
 
 
 def test_task_text_of_a_watch_digest_links_to_the_app_only():
     """SOURCE_WATCH: the owner's names, trigger types and counts, each linking to its watch in the app; the footer
-    names the source, so a lookup never confuses a watch task with a Lab one."""
+    names the source, so a lookup never confuses one source's task with another's."""
     value = parsed("watch-digest.json")
     assert (value.source, value.tasks_total) == ("watch", 5)
     assert intents.urls_allowed(value, watch_host="watch.ziyixi.science")
@@ -159,16 +158,14 @@ def test_task_text_of_a_watch_digest_links_to_the_app_only():
 
 
 def test_each_source_links_only_to_its_own_hosts():
-    """A watch intent may link only to the watch app, a Lab intent only to arXiv: never one to the other's host."""
-    watch, lab = fixture("watch-digest.json"), fixture("subtasks-3.json")
+    """A watch intent may link only to the watch app; a source without hosts (or a retired one) links nowhere."""
+    watch = fixture("watch-digest.json")
+    assert intents.urls_allowed(intents.intent(watch), watch_host="watch.ziyixi.science")
     assert not intents.urls_allowed(
-        intents.intent(watch | {"items": [{"title": "t", "url": "https://arxiv.org/abs/1"}]}),
+        intents.intent(watch | {"items": [{"title": "t", "url": "https://other.example.com/abs/1"}]}),
         watch_host="watch.ziyixi.science",
     )
-    assert not intents.urls_allowed(
-        intents.intent(lab | {"items": [{"title": "t", "url": watch["items"][0]["url"]}]}),
-        watch_host="watch.ziyixi.science",
-    )
+    assert set(intents.url_hosts("watch.ziyixi.science")) == set(intents.SOURCES) == {"watch"}
     assert not intents.urls_allowed(
         intents.intent(watch | {"items": [{"title": "t", "url": "https://shop.example.com/kettle"}]}),
         watch_host="watch.ziyixi.science",
@@ -192,19 +189,19 @@ def test_watch_host_follows_the_callers_deployment_without_rewriting_frozen_inte
 
 def test_a_parent_without_description_is_only_its_footer():
     value = parsed("minimal.json")
-    assert intents.task_text(value, 0)[1] == intents.footer("lab", value.intent_id, 0)
+    assert intents.task_text(value, 0)[1] == intents.footer("watch", value.intent_id, 0)
 
 
 def test_footers_match_exactly_and_only_as_the_last_line():
-    footer = intents.footer("lab", "deck-2026-09-30-g1", 1)
+    footer = intents.footer("watch", "digest-2026-09-30", 1)
     assert intents.has_footer(f"text\n\n{footer}", footer)
     assert intents.has_footer(f"text\r\n{footer} \n", footer)
     assert not intents.has_footer(f"{footer} (edited)", footer)
     assert not intents.has_footer(f"{footer}\n\nmore", footer)  # quoted in a description, not its footer
     assert not intents.has_footer("", footer)
     assert not intents.has_footer(f"{footer}2", footer)  # #12 is another task
-    assert not intents.has_footer(footer.replace("g1", "g2"), footer)
-    assert not intents.has_footer(intents.footer("lab", "deck-2026-09-30-g1-x", 1), footer)
+    assert not intents.has_footer(footer.replace("09-30", "09-29"), footer)
+    assert not intents.has_footer(intents.footer("watch", "digest-2026-09-30-x", 1), footer)
 
 
 # ---- the state machine ---------------------------------------------------------------------
@@ -404,7 +401,7 @@ def test_pause_precedence_and_retry_hints():
 
 def test_a_failed_intent_proposed_again_during_a_pause_is_answered_paused():
     row = intents.IntentRow(
-        "lab", "deck-2026-09-30-g1", "a" * 64, "subtasks", 4, 1, "failed", ErrorCode.TODOIST_REJECTED, 0, NOW, NOW
+        "watch", "digest-2026-09-30", "a" * 64, "subtasks", 4, 1, "failed", ErrorCode.TODOIST_REJECTED, 0, NOW, NOW
     )
     held = (ErrorCode.TODOIST_PAUSED, 3600)
     replayed = intents.describe(row, held, NOW, proposing=True)
@@ -480,11 +477,11 @@ def test_recording_writes_the_intent_and_its_frozen_tasks_once(db):
 
 def test_the_daily_limit_counts_new_intents_per_source_and_utc_day(db):
     for n in range(intents.INTENTS_PER_SOURCE_PER_DAY):
-        assert record(db, parsed(intent_id=f"deck-{n}"))[0] == 1
-    inserted, row = record(db, parsed(intent_id="deck-over"))
+        assert record(db, parsed(intent_id=f"digest-{n}"))[0] == 1
+    inserted, row = record(db, parsed(intent_id="digest-over"))
     assert (inserted, row) == (0, None)
-    assert tasks_of(db, parsed(intent_id="deck-over")) == []
-    assert record(db, parsed(intent_id="deck-over"), intents.day_start(NOW) + DAY)[0] == 1
+    assert tasks_of(db, parsed(intent_id="digest-over")) == []
+    assert record(db, parsed(intent_id="digest-over"), intents.day_start(NOW) + DAY)[0] == 1
 
 
 def test_a_created_intent_holds_no_text_and_all_its_tasks(db):
@@ -599,7 +596,7 @@ def test_status_counts(db):
 
 @pytest.mark.parametrize(
     ("column", "value"),
-    [("source", "Lab"), ("mode", "both"), ("state", "paused"), ("tasks_total", 32), ("payload_sha256", "A" * 64)],
+    [("source", "Watch"), ("mode", "both"), ("state", "paused"), ("tasks_total", 32), ("payload_sha256", "A" * 64)],
 )
 def test_intent_rows_are_checked(db, column, value):
     record(db, parsed())

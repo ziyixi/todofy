@@ -71,16 +71,16 @@ describe('the tables match googleapis', () => {
 describe('statusBody', () => {
   test('writes the HTTP status, the code name, ErrorInfo, LocalizedMessage, RequestInfo and typed details', () => {
     const book = create(BookSchema, { title: 'T', genre: Genre.POETRY, copies: { b: 1, a: 2 } });
-    const error = new RpcError(Code.ABORTED, 'DECK_CHANGED', 'the deck changed', { metadata: { z: '1', a: '2' }, details: [errorDetail(BookSchema, book)] });
-    const body = statusBody(error, { domain: 'lab.ziyixi.science', requestId: 'r1', localized: { locale: 'zh-CN', message: '已改动' } });
+    const error = new RpcError(Code.ABORTED, 'WATCH_CHANGED', 'the watch changed', { metadata: { z: '1', a: '2' }, details: [errorDetail(BookSchema, book)] });
+    const body = statusBody(error, { domain: 'watch.ziyixi.science', requestId: 'r1', localized: { locale: 'zh-CN', message: '已改动' } });
     expect(JSON.stringify(body)).toBe(
       JSON.stringify({
         error: {
           code: 409,
-          message: 'the deck changed',
+          message: 'the watch changed',
           status: 'ABORTED',
           details: [
-            { '@type': 'type.googleapis.com/google.rpc.ErrorInfo', reason: 'DECK_CHANGED', domain: 'lab.ziyixi.science', metadata: { a: '2', z: '1' } },
+            { '@type': 'type.googleapis.com/google.rpc.ErrorInfo', reason: 'WATCH_CHANGED', domain: 'watch.ziyixi.science', metadata: { a: '2', z: '1' } },
             { '@type': 'type.googleapis.com/google.rpc.LocalizedMessage', locale: 'zh-CN', message: '已改动' },
             { '@type': 'type.googleapis.com/google.rpc.RequestInfo', request_id: 'r1' },
             { '@type': 'type.googleapis.com/prototest.v1.Book', title: 'T', genre: 'poetry', copies: { a: 2, b: 1 } },
@@ -95,7 +95,7 @@ describe('statusBody', () => {
     expect(body['error']).toMatchObject({ code: 405, status: 'UNIMPLEMENTED' });
   });
 
-  test.each(['deck_changed', 'DECK-CHANGED', '_X', 'X_', 'A'.repeat(64)])('refuses the reason %s (AIP-193)', (reason) => {
+  test.each(['watch_changed', 'WATCH-CHANGED', '_X', 'X_', 'A'.repeat(64)])('refuses the reason %s (AIP-193)', (reason) => {
     expect(() => new RpcError(Code.ABORTED, reason, 'm')).toThrow(TypeError);
   });
 
@@ -108,13 +108,13 @@ describe('statusBody', () => {
 describe('parseStatus and readDetail', () => {
   test('read back what statusBody wrote', () => {
     const book = create(BookSchema, { title: 'T' });
-    const body = statusBody(new RpcError(Code.NOT_FOUND, 'DECK_NOT_FOUND', 'gone', { details: [errorDetail(BookSchema, book)] }), {
-      domain: 'lab.ziyixi.science',
+    const body = statusBody(new RpcError(Code.NOT_FOUND, 'WATCH_NOT_FOUND', 'gone', { details: [errorDetail(BookSchema, book)] }), {
+      domain: 'watch.ziyixi.science',
       requestId: 'r2',
       localized: { locale: 'zh-CN', message: '找不到' },
     });
     const status = parseStatus(404, JSON.parse(JSON.stringify(body)));
-    expect(status).toMatchObject({ httpStatus: 404, status: 'NOT_FOUND', message: 'gone', reason: 'DECK_NOT_FOUND', domain: 'lab.ziyixi.science', requestId: 'r2' });
+    expect(status).toMatchObject({ httpStatus: 404, status: 'NOT_FOUND', message: 'gone', reason: 'WATCH_NOT_FOUND', domain: 'watch.ziyixi.science', requestId: 'r2' });
     expect(status?.localizedMessage).toEqual({ locale: 'zh-CN', message: '找不到' });
     expect(status && readDetail(status, BookSchema)?.title).toBe('T');
   });

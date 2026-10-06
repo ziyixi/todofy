@@ -1,26 +1,26 @@
 {
   "version": "task-intent-v1",
-  "source": "lab",
-  "intent_id": "Deck-2026-09-30",
+  "source": "watch",
+  "intent_id": "Digest-2026-09-30",
   "mode": "subtasks",
   "parent": {
-    "title": "论文雷达 2026-09-30 · 3 篇",
-    "description": "来自 Lab 论文雷达的今日喜欢（合成示例）\nhttps://lab.ziyixi.science/deck/2026-09-30"
+    "title": "网页监视 2026-09-30 · 3 个监视",
+    "description": "只有名称、类型和次数（合成示例）\nhttps://watch.ziyixi.science/"
   },
   "items": [
     {
-      "title": "A Synthetic Study of Fixture Ranking for Contract Tests",
-      "url": "https://arxiv.org/abs/2609.00001",
-      "description": "合成简介：本文提出一种用于契约测试的示例排序方法，并在合成数据上验证。"
+      "title": "A Synthetic Watch of Fixture Prices for Contract Tests",
+      "url": "https://watch.ziyixi.science/watches/w2609-00001",
+      "description": "合成示例：数值 2 次变化，变化的内容请在网页监视中查看。"
     },
     {
-      "title": "合成标题：面向小规模个人推荐的对比学习",
-      "url": "https://arxiv.org/abs/2609.00002",
-      "description": "合成简介：作者比较了三种向量聚合方式。\n结论仅来自摘要。"
+      "title": "合成示例：面向小规模个人站点的价格监视",
+      "url": "https://watch.ziyixi.science/watches/w2609-00002",
+      "description": "合成示例：比较了三种检查间隔。\n结论仅来自合成数据。"
     },
     {
-      "title": "Placeholder Paper With \"Quotes\" & Ampersands <tags>",
-      "url": "https://arxiv.org/abs/2609.00003"
+      "title": "Placeholder Watch With \"Quotes\" & Ampersands <tags>",
+      "url": "https://watch.ziyixi.science/watches/w2609-00003"
     }
   ]
 }

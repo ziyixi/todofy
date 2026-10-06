@@ -70,7 +70,7 @@ func TestAFileTheLinterLacksFailsOnlyWithExtensions(t *testing.T) {
 }
 
 func TestOnlyGoogleapisFilesAreChecked(t *testing.T) {
-	own := &descriptorpb.FileDescriptorProto{Name: proto.String("lab/ui/v1/deck.proto")}
+	own := &descriptorpb.FileDescriptorProto{Name: proto.String("watch/ui/v1/watch.proto")}
 	wkt := &descriptorpb.FileDescriptorProto{Name: proto.String("google/protobuf/timestamp.proto")}
 	if got := Compare(image(own, wkt), protoregistry.GlobalFiles); len(got) != 0 {
 		t.Fatalf("got %v", got)

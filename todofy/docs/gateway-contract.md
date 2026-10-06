@@ -367,8 +367,8 @@ calls the real entrypoint over a service binding (`tests/runtime/ops_support.py`
 ### 3.8 task-intent-v1 on the same entrypoint (contracts/task-intent-v1)
 `Ops` also implements `WireService<typeof TaskIntentService>`, the generated service of
 `proto/todofy/taskintent/v1/task_intent.proto` as Workers RPC methods (types only: the gateway bundles none of
-the generated code and passes the wire JSON through): another app in the account (today only Lab, binding `TODOFY` →
-`todofy`/`Ops`) proposes Todoist tasks, and Todofy stays the only Todoist writer. Same forwarding, same
+the generated code and passes the wire JSON through): another app in the account proposes Todoist tasks, and Todofy
+stays the only Todoist writer. Same forwarding, same
 error codes, same trust boundary as §3.7.
 
 | `Ops` method | Object method | Gateway checks first |
@@ -380,8 +380,8 @@ The same two methods, and nothing else, are on a second named entrypoint, `Inten
 exported next to `Ops`). A binding names its one source in `props` (`entrypoint = "Intents"`, `props = { source =
 "watch" }`, the watch app's), and `Intents` rejects `invalid_input` before the object wakes when the input's
 `source` differs or the binding has no such prop. So a proposer bound to it can use only its own source's URL
-allow-list and daily quota and cannot reach `status()`, `setGuard()`, `canaryResult()` or `reportOps()`. Lab
-still binds `Ops`. The runtime suite's probe binds both (`tests/runtime/ops_support.py`).
+allow-list and daily quota and cannot reach `status()`, `setGuard()`, `canaryResult()` or `reportOps()`. Every
+proposer binds `Intents` (today the watch app); none binds `Ops`. The runtime suite's probe binds both (`tests/runtime/ops_support.py`).
 
 The object (`runtime/intents.py`, rules in `core/intents.py`) reads the input strictly with the wire JSON
 codec and checks the schema's value rules (`invalid_input` otherwise), records a new intent in D1 (`task_intents`, `task_intent_tasks`,

@@ -3,10 +3,10 @@
  * server, http-transcoder.ts) and the HTTP client (http-client.ts):
  *
  *   {"error": {"code": 409, "message": "...", "status": "ABORTED", "details": [
- *     {"@type": "type.googleapis.com/google.rpc.ErrorInfo", "reason": "DECK_CHANGED", "domain": "lab.ziyixi.science"},
+ *     {"@type": "type.googleapis.com/google.rpc.ErrorInfo", "reason": "ETAG_MISMATCH", "domain": "watch.ziyixi.science"},
  *     {"@type": "type.googleapis.com/google.rpc.LocalizedMessage", "locale": "zh-CN", "message": "..."},
  *     {"@type": "type.googleapis.com/google.rpc.RequestInfo", "request_id": "..."},
- *     {"@type": "type.googleapis.com/lab.ui.v1.DeckState", ...the message in the wire JSON profile}]}}
+ *     {"@type": "type.googleapis.com/watch.ui.v1.Watch", ...the message in the wire JSON profile}]}}
  *
  * `code` is the HTTP status and `status` the google.rpc.Code name, as Google's APIs answer over HTTP. The
  * details are google.rpc messages (ErrorInfo always, RequestInfo and LocalizedMessage when given) plus any
@@ -128,7 +128,7 @@ export class RpcError extends Error {
 }
 
 export interface StatusOptions {
-  /** ErrorInfo.domain: the service's name, e.g. `lab.ziyixi.science`. */
+  /** ErrorInfo.domain: the service's name, e.g. `watch.ziyixi.science`. */
   readonly domain: string;
   /** RequestInfo.request_id, when the server logs one. */
   readonly requestId?: string | undefined;

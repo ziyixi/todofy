@@ -1,9 +1,9 @@
 # Personal Cloud · 个人云
 
-把收邮件、任务、论文、网页监视和个人网站放在一个仓库里维护。
+把收邮件、任务、网页监视和个人网站放在一个仓库里维护。
 Home 是日常入口；各服务独立运行、独立发布，共享接口和必要的基础代码。
 
-One repository for personal mail, tasks, papers, web watches and the website.
+One repository for personal mail, tasks, web watches and the website.
 Home is the daily starting point. Services run and release independently, sharing contracts and a small runtime.
 
 ## 服务 · Services
@@ -13,7 +13,6 @@ Home is the daily starting point. Services run and release independently, sharin
 | Home | 查看服务、业务链路和配额 / Service health, flows and quotas | Cloudflare Worker + DO | [dashboard/](dashboard/README.md) |
 | Mail Hero | 收件箱与可靠 webhook / Inbox and reliable webhooks | Cloudflare Worker + D1 + R2 + DO | [mail-hero/](mail-hero/README.md) |
 | Todofy | 邮件转任务、摘要和提醒 / Mail to tasks, summaries and reminders | Cloudflare TS gateway + Python core + D1/DO | [todofy/](todofy/README.md) |
-| Lab | 论文雷达 / Paper radar | Cloudflare Worker + AI + D1/DO | [lab/](lab/README.md) |
 | FlowDay | 时间块、计时与回顾 / Time blocks, timers and reviews | Cloudflare Worker + D1 | [flowday/](flowday/README.md) |
 | Links | 私人短链接 / Personal short links | Cloudflare Worker + D1 | [links/](links/README.md) |
 | Watch | 网页变化收件箱 / Web change inbox | Cloudflare Worker + DO | [watch/](watch/README.md) |
@@ -39,7 +38,7 @@ Release progress, business health and observation freshness stay separate. See [
    Work in the application's directory; follow its commands and use local bindings and synthetic data.
 
 ```sh
-cd mail-hero    # 或 / or todofy, dashboard, lab, flowday, links, watch, website, newsletter, fleet, platform
+cd mail-hero    # 或 / or todofy, dashboard, flowday, links, watch, website, newsletter, fleet, platform
 ```
 
 仓库没有“一条命令启动所有服务”的要求。Cloudflare TypeScript 应用安装时生成 proto；Todofy 的 Python 代码由 `uv` 构建时生成。

@@ -16,7 +16,6 @@ function effectiveLevel(state: { level: GuardLevel } | null): string {
 const EFFECTS: Readonly<Record<string, string>> = {
   'mail-hero': '延后原件对账、保留期清理、金丝雀清理和告警历史清理；每项最多推迟 48 小时。收件、解析、投递与重试继续运行。',
   todofy: '延后新一轮每周备份、过期数据清理和趋势统计；清理与统计最多推迟 72 小时，备份过旧时仍会执行。真实邮件处理与进行中的备份继续运行。',
-  lab: '延后定时抓取、嵌入、排序、简报生成、来源解析和清理。手动阅读、决定与发送不受影响。',
   watch: '将定时网页检查间隔延长到至少一天，并延后每日维护扫描。手动检查、变化确认与通知不受影响。',
 }
 

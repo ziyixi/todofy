@@ -15,7 +15,7 @@ afterEach(async () => {
 it('shows no aggregate shed after each service is restored while account usage remains high', async () => {
   h = await startFlows({ bindings: { CANARY_UTC_HOUR: '23' }, usage: d1Reads(90) });
   await h.tick(NOW - 20 * 60_000);
-  for (const app of ['mail-hero', 'todofy', 'lab', 'watch'] as const) {
+  for (const app of ['mail-hero', 'todofy', 'watch'] as const) {
     expect((await h.post(PATHS.guard, { app, level: 'normal' })).status).toBe(200);
   }
   expect((await h.snapshot()).digest.items.some((item) => item.code === 'guard_shed')).toBe(false);
@@ -33,7 +33,7 @@ it('excludes a service without the guard capability from the aggregate target', 
   h = await startFlows({ bindings: { CANARY_UTC_HOUR: '23' }, usage: d1Reads(90) });
   await h.answer('watch', 'status', { value: await status('watch', { capabilities: [] }) });
   await h.tick(NOW - 20 * 60_000);
-  for (const app of ['mail-hero', 'todofy', 'lab'] as const) {
+  for (const app of ['mail-hero', 'todofy'] as const) {
     expect((await h.post(PATHS.guard, { app, level: 'normal' })).status).toBe(200);
   }
 
@@ -56,7 +56,7 @@ it('shows one manually delayed service in Home and its own held marker', async (
   expect(snapshot.ops.attention.held).toContainEqual({ entry: 'watch', code: 'owner_shed', target: { view: 'ops', entry: 'watch' } });
   expect(snapshot.ops.attention.held.some((item) => item.code === 'owner_shed' && item.entry !== 'watch')).toBe(false);
   expect(snapshot.ops.attention.items.some((item) => item.code === 'guard_shed')).toBe(false);
-  for (const app of ['mail-hero', 'todofy', 'lab'] as const) expect(await h.callsOf(app, 'setGuard')).toEqual([]);
+  for (const app of ['mail-hero', 'todofy'] as const) expect(await h.callsOf(app, 'setGuard')).toEqual([]);
 });
 
 it('restores a cached remote shed even when its earlier receipt was not saved', async () => {
@@ -70,7 +70,7 @@ it('restores a cached remote shed even when its earlier receipt was not saved', 
 
   expect(response.status).toBe(200);
   expect(await h.callsOf('mail-hero', 'setGuard')).toEqual([[{ level: 'normal', reason: 'owner_clear', until: null }]]);
-  for (const app of ['todofy', 'lab', 'watch'] as const) expect(await h.callsOf(app, 'setGuard')).toEqual([]);
+  for (const app of ['todofy', 'watch'] as const) expect(await h.callsOf(app, 'setGuard')).toEqual([]);
 });
 
 it('replays the selected service answer and rejects reuse for another service', async () => {
@@ -106,7 +106,7 @@ it('lets a service override expire without resetting another service', async () 
   await h.tick('2026-10-02T12:01:00Z');
 
   expect(await h.callsOf('watch', 'setGuard')).toEqual([[{ level: 'normal', reason: 'quota_normal', until: null }]]);
-  for (const app of ['mail-hero', 'todofy', 'lab'] as const) expect(await h.callsOf(app, 'setGuard')).toEqual([]);
+  for (const app of ['mail-hero', 'todofy'] as const) expect(await h.callsOf(app, 'setGuard')).toEqual([]);
 });
 
 it('migrates the previous global owner setting once, preserving its absolute expiry', async () => {
@@ -134,7 +134,7 @@ it('migrates the previous global owner setting once, preserving its absolute exp
     h = await startFlows({ persist: dir, bindings: { CANARY_UTC_HOUR: '23' } });
     const snapshot = await h.snapshot();
     expect(snapshot.guard.override).toBeNull();
-    for (const app of ['mail-hero', 'todofy', 'lab', 'watch'] as const) {
+    for (const app of ['mail-hero', 'todofy', 'watch'] as const) {
       expect(snapshot.guard.apps[app]?.override).toEqual({ level: 'shed', until: '2026-10-02T11:00:00.000Z', set_at: '2026-10-01T11:00:00.000Z' });
     }
     const response = await h.post(PATHS.guard, { app: 'mail-hero', level: 'normal' });

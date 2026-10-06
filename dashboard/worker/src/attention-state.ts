@@ -31,7 +31,7 @@ export function attentionName(item: AttentionCondition): string {
 /** Duration/usage metrics fluctuate inside an episode. Only an explicit semantic count changes it. */
 const CONDITION_METRICS: Readonly<Record<string, readonly string[]>> = {
   newsletter_unknown: ['unknown_count'], newsletter_side_effect_unknown: ['count'],
-  parse_failed: ['count'], delivery_failed: ['count'], policy_error: ['count'], send_unsettled: ['count'],
+  parse_failed: ['count'], delivery_failed: ['count'], policy_error: ['count'],
   notify_unsettled: ['open', 'failed'], watches_broken: ['count'],
 };
 /** Newsletter record batches: a new revision means new records, a lower count alone does not. */

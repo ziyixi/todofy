@@ -21,7 +21,7 @@ def worker_secret_values(private: dict, scalar: dict, specs: dict, *, complete: 
             raise BootstrapError("WORKER_SECRETS_INVALID")
         bindings = dict(configured.get(worker, {}))
         prefix = spec["github_secret"].removesuffix("_WORKER_SECRETS")
-        if worker in {"flowday", "lab", "links", "watch"}:
+        if worker in {"flowday", "links", "watch"}:
             identity_prefix = "DASHBOARD"
         else:
             identity_prefix = prefix

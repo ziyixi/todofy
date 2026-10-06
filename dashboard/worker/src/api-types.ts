@@ -229,14 +229,14 @@ export type CanaryState = Omit<CanaryView, 'id'>;
  * it; ops-client.test.ts holds the two equal). The list is open on the wire (an app may join within ops-v1), so the
  * generated type of `app` is a string; this dashboard knows exactly the apps it binds.
  */
-export type OpsApp = 'mail-hero' | 'todofy' | 'lab' | 'watch' | 'fleet' | 'newsletter' | 'notion-publish';
+export type OpsApp = 'mail-hero' | 'todofy' | 'watch' | 'fleet' | 'newsletter' | 'notion-publish';
 
 // ---- transport outside the service --------------------------------------------------------------------------
 
 /**
  * GET /api/csrf -> 200, plus `Set-Cookie: home_csrf=<token>; Path=/; HttpOnly; SameSite=Strict; Max-Age=43200;
- * Secure`. Mutations send the token as `X-CSRF-Token`. Transport, not part of DashboardUiService (as Lab's and the
- * watch app's).
+ * Secure`. Mutations send the token as `X-CSRF-Token`. Transport, not part of DashboardUiService (as the watch
+ * app's).
  */
 export interface CsrfResponse {
   readonly token: string;

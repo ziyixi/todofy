@@ -1,4 +1,4 @@
-// The deploy wrapper (../deploy-vars.mjs): Lab's rules with FlowDay's inputs, and no real deploy with a placeholder.
+// The deploy wrapper (../deploy-vars.mjs): the dashboard's rules with FlowDay's inputs, and no real deploy with a placeholder.
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
@@ -86,7 +86,7 @@ test('since F2 the committed config holds the real D1 id and Access AUD; a place
   }
 
   for (const argv of [
-    [], deploy, [...deploy, '--dry-run', '--config', 'wrangler.toml'], [...deploy, '--dry-run', '--config', '../../lab/wrangler.toml'],
+    [], deploy, [...deploy, '--dry-run', '--config', 'wrangler.toml'], [...deploy, '--dry-run', '--config', '../../dashboard/wrangler.toml'],
     [...deploy, '--config', '../wrangler.toml', '--env', 'production'],
     [...deploy, '--config', '../wrangler.toml', '--keep-vars'],
     [...deploy, '--config', '../wrangler.toml', '--var', 'BUILD_SHA:x'],
@@ -131,11 +131,11 @@ test('exec runs the deploy (or dry-run) unchanged plus the --var flag; secrets w
   assert.equal(run(['nonsense'], environment()), 2)
 })
 
-test('the owner rules are the same lines as the dashboard and Lab wrappers (the same secrets feed all three)', () => {
+test('the owner rules are the same lines as the dashboard wrapper (the same secrets feed both)', () => {
   const rules = /^(?:const ACCESS_EMAIL|const MAX_ALIASES|const MAX_LIST_CHARS) = .+$/gm
   const ours = readFileSync(WRAPPER, 'utf8').match(rules)
   assert.equal(ours.length, 3)
-  for (const other of ['../../../lab/deploy/deploy-vars.mjs', '../../../dashboard/deploy/deploy-vars.mjs']) {
+  for (const other of ['../../../dashboard/deploy/deploy-vars.mjs']) {
     assert.deepEqual(readFileSync(fileURLToPath(new URL(other, import.meta.url)), 'utf8').match(rules), ours)
   }
 })

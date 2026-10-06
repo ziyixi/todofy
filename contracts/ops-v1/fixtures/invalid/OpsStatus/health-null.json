@@ -1,11 +1,11 @@
 {
   "version": "ops-v1",
-  "app": "lab",
-  "generated_at": "2026-09-30T08:00:00Z",
+  "app": "watch",
+  "generated_at": "2026-10-01T14:00:00Z",
   "health": null,
   "modes": {
     "maintenance": false,
-    "ingest_paused": false
+    "notifications": true
   },
   "guard": {
     "level": "normal",
@@ -16,15 +16,18 @@
   },
   "signals": [],
   "counters": {
-    "ingested_24h": 612,
-    "ranked_24h": 20,
-    "liked_7d": 9,
-    "decided_7d": 60,
-    "neurons_today": 341.5,
-    "neuron_cap": 5000
+    "watches_active": 2,
+    "watches_paused": 1,
+    "watches_broken": 0,
+    "watches_failing": 1,
+    "changes_new": 2,
+    "fetches_today": 37,
+    "notifications_pending": 1,
+    "intents_open": 0,
+    "intents_sent_today": 1
   },
   "last_backup_at": null,
-  "ui_url": "https://lab.example.com/",
+  "ui_url": "https://watch.example.com/",
   "capabilities": [
     "guard"
   ]

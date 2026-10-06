@@ -27,7 +27,7 @@ test('the top level is the production Worker: known keys only, no cron, no worke
   assert.equal(config.triggers, undefined)
   assert.match(config.account_id, /^[a-f0-9]{32}$/)
   // The same account as the other Workers.
-  assert.equal(config.account_id, wrangler.experimental_readRawConfig({ config: new URL('../lab/wrangler.toml', APP).pathname }).rawConfig.account_id)
+  assert.equal(config.account_id, wrangler.experimental_readRawConfig({ config: new URL('../dashboard/wrangler.toml', APP).pathname }).rawConfig.account_id)
 })
 
 test('exactly one hostname, the production Custom Domain (F4), and PUBLIC_HOST names it', () => {
@@ -58,7 +58,7 @@ test('vars: the production host, the public Access issuer and the real AUD; noth
   assert.match(config.vars.ACCESS_AUDIENCE, /^[0-9a-f]{64}$/)
   assert.notEqual(config.vars.ACCESS_AUDIENCE, '0'.repeat(64))
   // The same Access team (issuer) as the other Workers.
-  assert.equal(config.vars.ACCESS_ISSUER, wrangler.experimental_readRawConfig({ config: new URL('../lab/wrangler.toml', APP).pathname }).rawConfig.vars.ACCESS_ISSUER)
+  assert.equal(config.vars.ACCESS_ISSUER, wrangler.experimental_readRawConfig({ config: new URL('../dashboard/wrangler.toml', APP).pathname }).rawConfig.vars.ACCESS_ISSUER)
   const names = Object.keys(config.vars)
   for (const { name } of INJECTED) assert.ok(!names.includes(name), name)
   for (const name of ['ACCESS_OWNER', 'ACCESS_OWNER_ALIASES', 'CSRF_SIGNING_KEY', 'CREDENTIAL_KEY', 'DEV_AUTH_BYPASS', 'E2E_TEST_ROUTES']) assert.ok(!names.includes(name), name)

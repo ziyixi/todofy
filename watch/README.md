@@ -83,11 +83,11 @@ for the owner). The check of the AUD is "Infra drift", which the W2 push runs be
 `vars.ACCESS_AUDIENCE differs from access_aud` means the AUD is wrong: read it again (`infra/README.md` "Adding an
 app" step 4), fix it here and push; this job then ships the fix.
 
-The deploy token is `CF_API_TOKEN`, as for Lab, FlowDay and the links app. The wrapper writes three Worker secrets:
+The deploy token is `CF_API_TOKEN`, as for FlowDay and the links app. The wrapper writes three Worker secrets:
 
 | Worker secret | From the `production` environment secret | Why |
 | --- | --- | --- |
-| `ACCESS_OWNER` | `DASHBOARD_ACCESS_OWNER` | the watch app's owner is the dashboard's owner: one person with the same Access identities, so it reuses the dashboard's secret (as Lab, FlowDay and the links app do) |
+| `ACCESS_OWNER` | `DASHBOARD_ACCESS_OWNER` | the watch app's owner is the dashboard's owner: one person with the same Access identities, so it reuses the dashboard's secret (as FlowDay and the links app do) |
 | `ACCESS_OWNER_ALIASES` | `DASHBOARD_ACCESS_OWNER_ALIASES` | as above |
 | `CSRF_SIGNING_KEY` | `WATCH_CSRF_SIGNING_KEY` (the watch app's own) | a separate key per app: a token of one app never verifies at another |
 
@@ -124,9 +124,9 @@ its Durable Object keeps its alarm, so WatchState keeps checking the watched sit
 stops it, whatever happens to the host.
 
 1. Stop the side effects first.
-   - Tasks: set `TASK_INTENT_SOURCES = "lab"` in the `[vars]` of `todofy/wrangler.toml` (and add it to `CORE_VARS` in
+   - Tasks: set `TASK_INTENT_SOURCES = ""` in the `[vars]` of `todofy/wrangler.toml` (and add it to `CORE_VARS` in
      `todofy/deploy/test_wrangler_configs.py`) and let `Todofy deploy` ship it (`todofy/docs/cloudflare-setup.md`
-     "Task intents"). Every watch proposal then answers `source_not_allowed` and nothing reaches Todoist; Lab is not
+     "Task intents"). Every watch proposal then answers `source_not_allowed` and nothing reaches Todoist; mail is not
      affected. Or, while the app is still in production, ship a watch commit without the `TODOFY` binding through
      `Watch deploy`: the outbox then only fills.
    - Fetches: pause every watch in the UI (暂停, or the owner API's `pauseWatch`). A paused watch is never checked; the

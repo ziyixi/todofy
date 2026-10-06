@@ -34,7 +34,6 @@ The documents below have different jobs; keep one authoritative home for each fa
 | Mail Hero | [README](../mail-hero/README.md), [AGENTS](../mail-hero/AGENTS.md) | [Setup and recovery](../mail-hero/docs/cloudflare-setup.md), [CI/CD](../mail-hero/docs/ci-cd.md), [verification](../mail-hero/docs/verification-native.md) |
 | Todofy | [Development notes](../todofy/docs/dev-notes.md), [gateway contract](../todofy/docs/gateway-contract.md) | [Setup](../todofy/docs/cloudflare-setup.md), [CI/CD](../todofy/docs/ci-cd.md), [verification](../todofy/docs/verification.md) |
 | Home | [Current views](../dashboard/docs/design-v2.md), [storage and jobs](../dashboard/docs/design.md) | [Setup](../dashboard/docs/setup.md), [limits](../dashboard/docs/limits.md), [verification](../dashboard/docs/verification.md) |
-| Lab | [Design](../lab/docs/design.md), [UX](../lab/docs/ux.md) | [README](../lab/README.md) |
 | FlowDay | [Design](../flowday/docs/design.md), [AGENTS](../flowday/AGENTS.md) | [README](../flowday/README.md) |
 | Links | [Design](../links/docs/design.md), [AGENTS](../links/AGENTS.md) | [README](../links/README.md) |
 | Watch | [Design](../watch/docs/design.md), [AGENTS](../watch/AGENTS.md) | [README](../watch/README.md) |

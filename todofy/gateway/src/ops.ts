@@ -29,7 +29,7 @@
  *
  * An input of any other source (or a binding without that prop) is `invalid_input` before the core wakes, so
  * an app that parses untrusted pages (the watch app) can neither use another source's allow-list and daily
- * quota nor reach status(), setGuard(), canaryResult() or reportOps(). Lab still binds `Ops`.
+ * quota nor reach status(), setGuard(), canaryResult() or reportOps(). No proposer binds `Ops`.
  */
 import { WorkerEntrypoint } from 'cloudflare:workers';
 import { OPS_LIMITS } from '../../../contracts/ops-v1/ops-v1.ts';

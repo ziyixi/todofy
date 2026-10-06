@@ -146,7 +146,7 @@ def generated_secrets(value: dict, *, generate: bool = True) -> dict:
             result[name] = secrets.token_urlsafe(32)
     for name in ("FLEET_REPORT_HMAC_KEY", "MAIL_HERO_CREDENTIAL_KEY", "MAIL_HERO_BACKUP_RECEIPT_KEY",
                  "TODOFY_CSRF_SIGNING_KEY", "DASHBOARD_CSRF_SIGNING_KEY", "FLOWDAY_CSRF_SIGNING_KEY",
-                 "FLOWDAY_CREDENTIAL_KEY", "LAB_CSRF_SIGNING_KEY", "LINKS_CSRF_SIGNING_KEY", "WATCH_CSRF_SIGNING_KEY"):
+                 "FLOWDAY_CREDENTIAL_KEY", "LINKS_CSRF_SIGNING_KEY", "WATCH_CSRF_SIGNING_KEY"):
         if generate and not result.get(name):
             result[name] = secrets.token_hex(32)
     owner = value.get("infra_values", {}).get("access_owner_emails", [])

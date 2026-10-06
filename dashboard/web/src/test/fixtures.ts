@@ -552,7 +552,7 @@ export function driftView(patch: Partial<Drift> = {}): Drift {
 export const DRIFT_FINDINGS: DriftFinding[] = [
   { category: 'scripts', script: 'synthetic-orphan', name: 'synthetic-orphan', kind: 'extra' },
   { category: 'custom_domains', script: 'home', name: 'stray.example.com', kind: 'extra' },
-  { category: 'bindings', script: 'lab', name: 'SYNTHETIC_KEY', kind: 'missing', expected: 'secret_text' },
+  { category: 'bindings', script: 'watch', name: 'SYNTHETIC_KEY', kind: 'missing', expected: 'secret_text' },
   { category: 'personal', script: 'mail-hero', name: 'SYNTHETIC_PERSONAL', kind: 'changed', expected: 'secret_text', actual: 'plain_text' },
 ]
 

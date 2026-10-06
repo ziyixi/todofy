@@ -1,7 +1,6 @@
 /**
  * CPU of a Worker's requests inside workerd, calibrated to the machine running the test: the shared part of the
- * apps' CPU tests (lab/worker, flowday/worker, links/worker, dashboard/worker and watch/worker
- * test/runtime/cpu.test.ts, Mail Hero's test/cpu/native-ops-cpu.test.mjs) against Workers Free's 10 ms per request.
+ * apps' CPU tests (flowday/worker, links/worker, dashboard/worker and watch/worker test/runtime/cpu.test.ts, Mail Hero's test/cpu/native-ops-cpu.test.mjs) against Workers Free's 10 ms per request.
  *
  * Test tooling only. A test imports this file by relative path; no production source may (a bundle would carry it,
  * and a tools/ change deploys nothing: .github/scripts/ci_changes.py, test_app_isolation.py). It imports
@@ -26,7 +25,7 @@
  * request's first run is still the isolate's first run of that code path.
  *
  * Cold runs. An isolate's first run of a code path (lazy compilation, the first feedback of each call site, the heap's
- * first growth) is one number per isolate, and it was the number that failed on GitHub runners: Lab's first API
+ * first growth) is one number per isolate, and it was the number that failed on GitHub runners: an app's first API
  * request, one isolate's one run, read 5.7-7.2 reference ms on runners against its bound of 7 (README.md). So a test
  * measures its whole session in COLD_ISOLATES fresh isolates, one after another (measureInIsolates): each isolate
  * calibrates itself, its numbers are divided by its own scale, and the bounds hold each number's median across the

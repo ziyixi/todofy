@@ -256,13 +256,13 @@ SAFETY_BUDGET = "10"
         original = (source / 'infra/ids.tf').read_text()
         self.assertEqual(generate.infrastructure_ids(original, resources), original)
         changed = resources | {
-            'd1_databases': resources['d1_databases'] | {'lab': 'eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee'},
+            'd1_databases': resources['d1_databases'] | {'links': 'eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee'},
             'standalone_access_app_ids': {key: value for key, value in resources['standalone_access_app_ids'].items()
                                           if key != 'mail-hero-backup'},
         }
         updated = generate.infrastructure_ids(original, changed)
         self.assertIn('eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee', updated)
-        self.assertNotIn(resources['d1_databases']['lab'], updated)
+        self.assertNotIn(resources['d1_databases']['links'], updated)
         self.assertIn('mail_hero_backup_app_id = null', updated)
         self.assertIn('# Created by "Infra apply"', updated)
         self.assertEqual((source / 'infra/ids.tf').read_text(), original)

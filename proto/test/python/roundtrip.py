@@ -63,8 +63,8 @@ def built() -> list[dict]:
     for state, code in itertools.product(list(pb.State)[1:], list(pb.ErrorCode)):
         message = pb.TaskIntentResult(
             version="task-intent-v1",
-            source=pb.Source.LAB,
-            intent_id=f"deck-2026-09-30-g{int(state)}",
+            source=pb.Source.WATCH,
+            intent_id=f"digest-2026-09-30-{int(state)}",
             state=state,
             recorded=state not in (pb.State.NOT_FOUND, pb.State.REJECTED),
             tasks_total=31,
@@ -77,12 +77,12 @@ def built() -> list[dict]:
     for mode in list(pb.Mode)[1:]:
         message = pb.TaskIntent(
             version="task-intent-v1",
-            source=pb.Source.LAB,
-            intent_id="deck-2026-09-30-g1",
+            source=pb.Source.WATCH,
+            intent_id="digest-2026-09-30",
             mode=mode,
-            parent=pb.TaskIntentParent(title='论文雷达 · "合成" <示例>', description=""),
+            parent=pb.TaskIntentParent(title='网页监视 · "合成" <示例>', description=""),
             items=(
-                pb.TaskIntentItem(title="A synthetic paper", url="https://arxiv.org/abs/2609.00001"),
+                pb.TaskIntentItem(title="A synthetic watch", url="https://watch.example.test/watches/w1"),
                 pb.TaskIntentItem(title="合成标题\u2003全角", description="第一行\n第二行 \\ 反斜杠"),
             ),
         )
@@ -90,7 +90,7 @@ def built() -> list[dict]:
     out.append(
         {
             "message": "TaskIntentRef",
-            "text": compact(to_wire(pb.TaskIntentRef(version="task-intent-v1", source=pb.Source.LAB, intent_id="x"))),
+            "text": compact(to_wire(pb.TaskIntentRef(version="task-intent-v1", source=pb.Source.WATCH, intent_id="x"))),
         }
     )
     # The ops-v1 status TypeScript builds too: counters and metrics in the producer's own order (keep_order).

@@ -65,9 +65,8 @@ export const LEGACY_CODES: readonly string[] = [
   'unavailable',
 ];
 /**
- * The code of the 410 reload answer. Lab's old client showed any code's message, so Lab sends `reload_required`;
- * the dashboard's old client would hide RELOAD_MESSAGE behind it, so the answer uses the nearest code it knows (the
- * path is gone) and keeps HTTP 410. The Worker's log line still names the reason RELOAD_REQUIRED.
+ * The code of the 410 reload answer. The dashboard's old client would hide RELOAD_MESSAGE behind a code it does not
+ * know (such as `reload_required`), so the answer uses the nearest code it knows (the path is gone) and keeps HTTP 410. The Worker's log line still names the reason RELOAD_REQUIRED.
  */
 export const LEGACY_RELOAD_CODE = 'not_found';
 const IMMUTABLE = 'private, max-age=31536000, immutable';

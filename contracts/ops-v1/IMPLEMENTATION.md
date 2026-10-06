@@ -541,28 +541,9 @@ Example (attention 0, one critical item):
   after `setGuard(normal)`; `test_scenarios_webhook.py` keeps posting every fixture (the canary one now
   ends `complete` without a task).
 
-## 3a. Lab (added 2026-09-30, additive)
-
-Lab (`lab/`, Worker `lab`, `lab/docs/design.md` §10) is the third app: `OPS_APPS` and the schema's `App`
-gained `lab`, `LabModes`/`LabStatus`/`LabOps` were added, fixtures `OpsStatus/lab-ok.json`,
-`OpsStatus/lab-degraded.json` and `GuardState/shed-lab.json`. Nothing of Mail Hero's or Todofy's surface
-changed; the dashboard binds `LAB` next to the two others.
-
-- Files: `lab/worker/src/ops.ts` (the entrypoint, forwards to `LabState`), `lab/worker/src/ops-status.ts`
-  (status and guard, pure over the object's SQLite). `status()` reads **no D1**: counters come from
-  LabState's own tables (`activity`, `labels`, `neurons`), so its budget is 0 D1 statements. Its one write:
-  when LabState has no alarm set it arms one (`ensureAlarm`, a no-op otherwise), so the dashboard's first
-  tick after a deploy starts Lab's pipeline; the deploy's Access probe never reaches the Worker.
-- Counters: `ingested_24h`, `ranked_24h`, `liked_7d`, `decided_7d`, `neurons_today`, `neuron_cap`.
-  Signals: `feed_stale`, `neuron_cap_hit`, `send_unsettled` (warning), `guard_shed` (info).
-- Guard: Lab is the first app whose shed defers **everything** in the background
-  (`feed_fetch`, `embed`, `rank`, `brief`, `seed_resolve`, `retention`); the owner's deck decisions and
-  sends to Todofy are never deferred. Bound: when the last successful fetch is more than 48 h old, the
-  whole day's pipeline runs to its end despite the shed (then defers again).
-
 ## 3c. The watch app (added 2026-10-01, additive)
 
-The watch app (`watch/`, Worker `watch`, `watch/docs/design.md` §7) is the fourth app. `OpsStatus.app` became an open
+The watch app (`watch/`, Worker `watch`, `watch/docs/design.md` §7) joined after Mail Hero and Todofy. `OpsStatus.app` became an open
 list first (its own change, so this one is compatible: `proto/tools/profile_breaking.py` refuses a new name in a closed
 list), then gained `watch`; fixtures `OpsStatus/watch-ok.json`, `OpsStatus/watch-degraded.json` and
 `GuardState/shed-watch.json`. Nothing of the other apps' surface changed; the dashboard binds `WATCH`.
@@ -595,15 +576,11 @@ schema is frozen in `legacy/` for the rollout checks.
 | Mail Hero | `ops.ts` `implements MailHeroOps`; answers built as objects, checked by `validate.mjs` in tests | `implements ops.OpsService, ops.CanaryProducerService` (`ops_wire.ts`); `ops-core.ts` builds generated messages and writes them with `toWire`; `ops-guard.ts` reads `setGuard` input with `fromWireArguments` |
 | Todofy core | `core/ops.py` hand-written rules, `jsonschema` in tests | `ops_pb` messages written with `to_wire`, inputs read strictly; the enums of `OpsError`/`Severity` derived from the generated ones |
 | Todofy gateway | `implements TodofyOps` | `implements` the generated services (types only, no runtime code added) |
-| Lab | `LabOps`, objects | `ops-status.ts` builds messages, `toWire`; `setGuard` via `fromWireArguments` |
 | Dashboard | `validate.mjs` + schema on every answer, `declared-methods.ts` parsed `ops-v1.ts` | `ops-client.ts` reads every answer with a lenient codec read, which refuses a new value of a closed enum and a null REQUIRED enum or message (both stated in the IDL); inputs go out through a strict read; methods and code lists from the generated services and enums |
 
 Wire bytes: the golden tests (`mail-hero/cloudflare/test/ops-golden.test.mjs`,
-`lab/worker/test/ops-golden.test.ts`, `todofy/tests/unit/test_ops_golden.py`,
-`dashboard/worker/test/ops-golden.test.ts`) were written by the code before the move and pass unchanged
-after it. The one difference is the key order of Lab's `status()` (its earlier object spread put
-`version`, `app`, `generated_at`, `ui_url` and `capabilities` first; now every app writes field order);
-JSON readers do not depend on key order, and Lab's golden compares in field order.
+`todofy/tests/unit/test_ops_golden.py`, `dashboard/worker/test/ops-golden.test.ts`) were written by the code before
+the move and pass unchanged after it; every app writes field order.
 
 Rollout: no order is required. Every answer of a new app passes the legacy schema (the golden tests
 check it), so a dashboard deployed before the move keeps working; and a new dashboard reads the answers

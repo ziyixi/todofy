@@ -5,7 +5,7 @@
  * task-intent-v1.schema.json describes, read and written with `@ziyixi/proto/wire-json`.
  *
  * Dependency-free and erasable-only TypeScript, imported by relative path:
- *   lab/worker/src/…               '../../../contracts/task-intent-v1/task-intent-v1.ts'
+ *   watch/worker/src/todofy.ts     '../../../contracts/task-intent-v1/task-intent-v1.ts'
  *   todofy/gateway/src/ops.ts      '../../../contracts/task-intent-v1/task-intent-v1.ts'
  * Todofy's core keeps the same values in worker/todofy/core/intents.py; a test on each side compares them
  * with task-intent-v1.schema.json.
@@ -20,7 +20,6 @@ export const TASK_INTENT_VERSION = 'task-intent-v1';
  */
 export function taskIntentUrlHosts(watchHost: string): Readonly<Record<string, readonly string[]>> {
   return {
-    lab: ['arxiv.org'],
     // The deployed Watch host is supplied by the caller; a task never links to a watched page.
     watch: [watchHost],
   };

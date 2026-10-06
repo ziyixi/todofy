@@ -392,8 +392,8 @@ class Users(unittest.TestCase):
     def test_scripts_that_read_the_generated_code_regenerate_it_first(self):
         users = ts_users()
         importers = importers_of(users)
-        # Lab's UI calls lab.ui.v1 through the generated client: a user itself (it also imports limits.ts).
-        self.assertIn(REPO / "lab" / "web" / "package.json", users, "Lab's UI depends on @ziyixi/proto")
+        # The watch app's UI calls watch.ui.v1 through the generated client: a user itself.
+        self.assertIn(REPO / "watch" / "web" / "package.json", users, "the watch app's UI depends on @ziyixi/proto")
         for manifest, data in {**users, **importers}.items():
             scripts = data.get("scripts", {})
             for name, command in scripts.items():
@@ -528,7 +528,7 @@ class Users(unittest.TestCase):
     def test_ops_descriptors_include_the_embedded_website_sync_package(self):
         imports = value_importers()
         users = {app for app, paths in imports.items() if any(path.startswith("proto/ops/") for path in paths)}
-        self.assertEqual(users, {"mail-hero", "lab", "todofy", "dashboard", "watch", "website"})
+        self.assertEqual(users, {"mail-hero", "todofy", "dashboard", "watch", "website"})
         for app in users:
             with self.subTest(app=app):
                 self.assertIn("proto/website/sync/v1/sync.proto", imports[app])

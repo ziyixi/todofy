@@ -242,7 +242,7 @@ Bindings (`wrangler.toml`, `worker/src/env.ts`): `WATCH` (the object), `ASSETS`,
 entrypoint with `props = { source = "watch" }`: task intents of this source only, never Todofy's ops-v1 methods; the
 notification sink); vars `PUBLIC_HOST`
 (`watch.ziyixi.science`, the CSRF origin), `ACCESS_ISSUER`, `ACCESS_AUDIENCE`, and `BUILD_SHA` at deploy; secrets
-`ACCESS_OWNER`, `ACCESS_OWNER_ALIASES` (the dashboard's owner, as for Lab, FlowDay and the links app) and the app's
+`ACCESS_OWNER`, `ACCESS_OWNER_ALIASES` (the dashboard's owner, as for FlowDay and the links app) and the app's
 own `CSRF_SIGNING_KEY`. A `BROWSER` binding turns on tier 3 (§4). Local development and tests only:
 `DEV_AUTH_BYPASS`, `DEV_MANUAL_ALARMS` (no alarm is armed; a clock the tests set; `/__dev/clock` and `/__dev/step`
 over loopback), `DEV_FAKE_UPSTREAM` (every page request goes to a loopback server of synthetic sites),
@@ -469,7 +469,7 @@ All hermetic: synthetic content only, the only network is loopback, clocks are i
   8. After the deploy: the first API call arms the alarm; verify with a synthetic page on a host the lead controls.
 
   Rollback (README "Rollback"): normally a code-only revert through `Watch deploy`. Leaving production is a separate
-  decision with ordered steps: stop the side effects first (Todofy's `TASK_INTENT_SOURCES = "lab"`, every watch
+  decision with ordered steps: stop the side effects first (Todofy's `TASK_INTENT_SOURCES = ""`, every watch
   paused), then detach the Custom Domain, and keep the dashboard's `WATCH` binding, registry entry and drift entry
   while the Worker exists. Reverting this commit alone would leave WatchState running and the dashboard reporting it
   unreachable.
@@ -482,9 +482,9 @@ All hermetic: synthetic content only, the only network is loopback, clocks are i
      (`todofy/worker/todofy/core/intents.py` and its tests) accepts it with that allow-list
      (`ERROR_CODE_SOURCE_NOT_ALLOWED` otherwise); the task-intent-v1 schema and fixtures regenerated.
   2. A `[[services]]` binding `TODOFY` to `todofy`'s entrypoint `Intents` with `props = { source = "watch" }` in
-     `wrangler.toml` (Lab binds `Ops`; `Intents` has only the two task-intent methods, for this source), called from
+     `wrangler.toml` (`Intents` has only the two task-intent methods, for this source, never `Ops`), called from
      WatchState by a `NotificationSink` (`notify.ts`): an `urgent` change at once, the `digest` events once a day.
-  3. An `export { Ops }` entrypoint (as `lab/worker/src/index.ts`) answering ops-v1 from `pendingCounts` and the
+  3. An `export { Ops }` entrypoint (as the other apps') answering ops-v1 from `pendingCounts` and the
      scheduler's state; `watch` out of `ci_changes.py`'s `NO_CONTRACTS`, with its ops-v1 golden test run by the
      Contracts job like the other apps'; the dashboard registry's ops binding for it.
   4. Logs stay IDs and counts: a task intent carries the watch's display name, the trigger type and a count (the

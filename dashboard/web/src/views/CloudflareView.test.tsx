@@ -337,7 +337,7 @@ describe('Cloudflare 监控', () => {
     expect(items.map((li) => li.textContent)).toEqual([
       'Workersynthetic-orphan线上有，代码中没有',
       '自定义域名homestray.example.com线上有，代码中没有',
-      '绑定与密钥labSYNTHETIC_KEY代码中有（secret_text），线上没有',
+      '绑定与密钥watchSYNTHETIC_KEY代码中有（secret_text），线上没有',
       '个人值未设为密钥mail-heroSYNTHETIC_PERSONAL应为密钥（secret_text），线上为 plain_text',
     ])
     expect(screen.getAllByText(/线上配置与代码不一致/).length).toBeGreaterThan(0)

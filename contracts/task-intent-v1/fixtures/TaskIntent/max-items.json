@@ -1,160 +1,160 @@
 {
   "version": "task-intent-v1",
-  "source": "lab",
-  "intent_id": "deck-2026-10-02-g1",
+  "source": "watch",
+  "intent_id": "digest-2026-10-02",
   "mode": "subtasks",
   "parent": {
-    "title": "论文雷达 2026-10-02 · 30 篇"
+    "title": "网页监视 2026-10-02 · 30 个监视"
   },
   "items": [
     {
-      "title": "Synthetic Paper Number 01",
-      "url": "https://arxiv.org/abs/2610.00001",
+      "title": "Synthetic Watch Number 01",
+      "url": "https://watch.ziyixi.science/watches/w2610-00001",
       "description": "合成简介：摘要内容。摘要内容。摘要内容。"
     },
     {
-      "title": "Synthetic Paper Number 02",
-      "url": "https://arxiv.org/abs/2610.00002",
+      "title": "Synthetic Watch Number 02",
+      "url": "https://watch.ziyixi.science/watches/w2610-00002",
       "description": "合成简介：摘要内容。摘要内容。摘要内容。"
     },
     {
-      "title": "Synthetic Paper Number 03",
-      "url": "https://arxiv.org/abs/2610.00003",
+      "title": "Synthetic Watch Number 03",
+      "url": "https://watch.ziyixi.science/watches/w2610-00003",
       "description": "合成简介：摘要内容。摘要内容。摘要内容。"
     },
     {
-      "title": "Synthetic Paper Number 04",
-      "url": "https://arxiv.org/abs/2610.00004",
+      "title": "Synthetic Watch Number 04",
+      "url": "https://watch.ziyixi.science/watches/w2610-00004",
       "description": "合成简介：摘要内容。摘要内容。摘要内容。"
     },
     {
-      "title": "Synthetic Paper Number 05",
-      "url": "https://arxiv.org/abs/2610.00005",
+      "title": "Synthetic Watch Number 05",
+      "url": "https://watch.ziyixi.science/watches/w2610-00005",
       "description": "合成简介：摘要内容。摘要内容。摘要内容。"
     },
     {
-      "title": "Synthetic Paper Number 06",
-      "url": "https://arxiv.org/abs/2610.00006",
+      "title": "Synthetic Watch Number 06",
+      "url": "https://watch.ziyixi.science/watches/w2610-00006",
       "description": "合成简介：摘要内容。摘要内容。摘要内容。"
     },
     {
-      "title": "Synthetic Paper Number 07",
-      "url": "https://arxiv.org/abs/2610.00007",
+      "title": "Synthetic Watch Number 07",
+      "url": "https://watch.ziyixi.science/watches/w2610-00007",
       "description": "合成简介：摘要内容。摘要内容。摘要内容。"
     },
     {
-      "title": "Synthetic Paper Number 08",
-      "url": "https://arxiv.org/abs/2610.00008",
+      "title": "Synthetic Watch Number 08",
+      "url": "https://watch.ziyixi.science/watches/w2610-00008",
       "description": "合成简介：摘要内容。摘要内容。摘要内容。"
     },
     {
-      "title": "Synthetic Paper Number 09",
-      "url": "https://arxiv.org/abs/2610.00009",
+      "title": "Synthetic Watch Number 09",
+      "url": "https://watch.ziyixi.science/watches/w2610-00009",
       "description": "合成简介：摘要内容。摘要内容。摘要内容。"
     },
     {
-      "title": "Synthetic Paper Number 10",
-      "url": "https://arxiv.org/abs/2610.00010",
+      "title": "Synthetic Watch Number 10",
+      "url": "https://watch.ziyixi.science/watches/w2610-00010",
       "description": "合成简介：摘要内容。摘要内容。摘要内容。"
     },
     {
-      "title": "Synthetic Paper Number 11",
-      "url": "https://arxiv.org/abs/2610.00011",
+      "title": "Synthetic Watch Number 11",
+      "url": "https://watch.ziyixi.science/watches/w2610-00011",
       "description": "合成简介：摘要内容。摘要内容。摘要内容。"
     },
     {
-      "title": "Synthetic Paper Number 12",
-      "url": "https://arxiv.org/abs/2610.00012",
+      "title": "Synthetic Watch Number 12",
+      "url": "https://watch.ziyixi.science/watches/w2610-00012",
       "description": "合成简介：摘要内容。摘要内容。摘要内容。"
     },
     {
-      "title": "Synthetic Paper Number 13",
-      "url": "https://arxiv.org/abs/2610.00013",
+      "title": "Synthetic Watch Number 13",
+      "url": "https://watch.ziyixi.science/watches/w2610-00013",
       "description": "合成简介：摘要内容。摘要内容。摘要内容。"
     },
     {
-      "title": "Synthetic Paper Number 14",
-      "url": "https://arxiv.org/abs/2610.00014",
+      "title": "Synthetic Watch Number 14",
+      "url": "https://watch.ziyixi.science/watches/w2610-00014",
       "description": "合成简介：摘要内容。摘要内容。摘要内容。"
     },
     {
-      "title": "Synthetic Paper Number 15",
-      "url": "https://arxiv.org/abs/2610.00015",
+      "title": "Synthetic Watch Number 15",
+      "url": "https://watch.ziyixi.science/watches/w2610-00015",
       "description": "合成简介：摘要内容。摘要内容。摘要内容。"
     },
     {
-      "title": "Synthetic Paper Number 16",
-      "url": "https://arxiv.org/abs/2610.00016",
+      "title": "Synthetic Watch Number 16",
+      "url": "https://watch.ziyixi.science/watches/w2610-00016",
       "description": "合成简介：摘要内容。摘要内容。摘要内容。"
     },
     {
-      "title": "Synthetic Paper Number 17",
-      "url": "https://arxiv.org/abs/2610.00017",
+      "title": "Synthetic Watch Number 17",
+      "url": "https://watch.ziyixi.science/watches/w2610-00017",
       "description": "合成简介：摘要内容。摘要内容。摘要内容。"
     },
     {
-      "title": "Synthetic Paper Number 18",
-      "url": "https://arxiv.org/abs/2610.00018",
+      "title": "Synthetic Watch Number 18",
+      "url": "https://watch.ziyixi.science/watches/w2610-00018",
       "description": "合成简介：摘要内容。摘要内容。摘要内容。"
     },
     {
-      "title": "Synthetic Paper Number 19",
-      "url": "https://arxiv.org/abs/2610.00019",
+      "title": "Synthetic Watch Number 19",
+      "url": "https://watch.ziyixi.science/watches/w2610-00019",
       "description": "合成简介：摘要内容。摘要内容。摘要内容。"
     },
     {
-      "title": "Synthetic Paper Number 20",
-      "url": "https://arxiv.org/abs/2610.00020",
+      "title": "Synthetic Watch Number 20",
+      "url": "https://watch.ziyixi.science/watches/w2610-00020",
       "description": "合成简介：摘要内容。摘要内容。摘要内容。"
     },
     {
-      "title": "Synthetic Paper Number 21",
-      "url": "https://arxiv.org/abs/2610.00021",
+      "title": "Synthetic Watch Number 21",
+      "url": "https://watch.ziyixi.science/watches/w2610-00021",
       "description": "合成简介：摘要内容。摘要内容。摘要内容。"
     },
     {
-      "title": "Synthetic Paper Number 22",
-      "url": "https://arxiv.org/abs/2610.00022",
+      "title": "Synthetic Watch Number 22",
+      "url": "https://watch.ziyixi.science/watches/w2610-00022",
       "description": "合成简介：摘要内容。摘要内容。摘要内容。"
     },
     {
-      "title": "Synthetic Paper Number 23",
-      "url": "https://arxiv.org/abs/2610.00023",
+      "title": "Synthetic Watch Number 23",
+      "url": "https://watch.ziyixi.science/watches/w2610-00023",
       "description": "合成简介：摘要内容。摘要内容。摘要内容。"
     },
     {
-      "title": "Synthetic Paper Number 24",
-      "url": "https://arxiv.org/abs/2610.00024",
+      "title": "Synthetic Watch Number 24",
+      "url": "https://watch.ziyixi.science/watches/w2610-00024",
       "description": "合成简介：摘要内容。摘要内容。摘要内容。"
     },
     {
-      "title": "Synthetic Paper Number 25",
-      "url": "https://arxiv.org/abs/2610.00025",
+      "title": "Synthetic Watch Number 25",
+      "url": "https://watch.ziyixi.science/watches/w2610-00025",
       "description": "合成简介：摘要内容。摘要内容。摘要内容。"
     },
     {
-      "title": "Synthetic Paper Number 26",
-      "url": "https://arxiv.org/abs/2610.00026",
+      "title": "Synthetic Watch Number 26",
+      "url": "https://watch.ziyixi.science/watches/w2610-00026",
       "description": "合成简介：摘要内容。摘要内容。摘要内容。"
     },
     {
-      "title": "Synthetic Paper Number 27",
-      "url": "https://arxiv.org/abs/2610.00027",
+      "title": "Synthetic Watch Number 27",
+      "url": "https://watch.ziyixi.science/watches/w2610-00027",
       "description": "合成简介：摘要内容。摘要内容。摘要内容。"
     },
     {
-      "title": "Synthetic Paper Number 28",
-      "url": "https://arxiv.org/abs/2610.00028",
+      "title": "Synthetic Watch Number 28",
+      "url": "https://watch.ziyixi.science/watches/w2610-00028",
       "description": "合成简介：摘要内容。摘要内容。摘要内容。"
     },
     {
-      "title": "Synthetic Paper Number 29",
-      "url": "https://arxiv.org/abs/2610.00029",
+      "title": "Synthetic Watch Number 29",
+      "url": "https://watch.ziyixi.science/watches/w2610-00029",
       "description": "合成简介：摘要内容。摘要内容。摘要内容。"
     },
     {
-      "title": "Synthetic Paper Number 30",
-      "url": "https://arxiv.org/abs/2610.00030",
+      "title": "Synthetic Watch Number 30",
+      "url": "https://watch.ziyixi.science/watches/w2610-00030",
       "description": "合成简介：摘要内容。摘要内容。摘要内容。"
     }
   ]

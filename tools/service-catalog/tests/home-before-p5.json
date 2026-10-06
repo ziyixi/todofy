@@ -51,29 +51,6 @@
       "order": 2
     },
     {
-      "id": "lab",
-      "name": "论文雷达",
-      "description": "arXiv 每日推荐，划卡片挑论文",
-      "group": "apps",
-      "icon": "flask-conical",
-      "accent": "violet",
-      "url": "https://lab.ziyixi.science/",
-      "access": true,
-      "status": {
-        "type": "ops_v1",
-        "binding": "LAB",
-        "guard": true
-      },
-      "tile_metric": {
-        "kind": "counter",
-        "name": "liked_7d"
-      },
-      "app_only_signals": [
-        "maintenance_mode"
-      ],
-      "order": 4
-    },
-    {
       "id": "flowday",
       "name": "FlowDay",
       "description": "Todoist 时间块、计时与回顾",
@@ -259,11 +236,6 @@
       "script": "home",
       "entry": "home",
       "role": "本面板"
-    },
-    {
-      "script": "lab",
-      "entry": "lab",
-      "role": "论文雷达与 UI"
     },
     {
       "script": "flowday",

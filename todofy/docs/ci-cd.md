@@ -12,7 +12,7 @@ gateway's `test/ops.test.ts` (which also covers the task-intent-v1 methods); the
 task-intent-v1's Python side (`tests/unit/test_task_intent_contract.py`: fixtures with `jsonschema`, the
 generated types and the wire JSON codec against the schema on every fixture, the core's input checks
 against the schema's verdicts, the generated enums and the `task-intent-v1.ts` constants, every result) runs
-with the host tests in `Todofy static checks` and again in `Contracts`, next to Lab's proposer checks.
+with the host tests in `Todofy static checks` and again in `Contracts`, next to the watch app's proposer checks.
 The Todofy check jobs and `Todofy deploy` below run with `working-directory: todofy`. They check and deploy
 both Todofy Workers from the same commit: the TypeScript gateway `todofy` (`gateway/`) and the Python
 `todofy-core` (`worker/`, root `wrangler.toml`); see [gateway-contract.md](gateway-contract.md). Both

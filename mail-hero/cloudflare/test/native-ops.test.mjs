@@ -153,7 +153,7 @@ test('status: maintenance is down; an unreadable source is down with only status
 
 /** The modes each app writes even on a `status_unavailable` status (its deployment variables, contracts/ops-v1
  * README "modes"); a key read from storage is left out then, never guessed. */
-const DEPLOYMENT_MODES = { 'mail-hero': ['maintenance', 'force_send_paused'], todofy: ['maintenance', 'processing_paused', 'force_pause_todoist', 'reminder_enabled'], lab: ['maintenance'], watch: ['maintenance', 'notifications'], 'notion-publish': ['maintenance'], fleet: ['maintenance'], newsletter: ['maintenance'] }
+const DEPLOYMENT_MODES = { 'mail-hero': ['maintenance', 'force_send_paused'], todofy: ['maintenance', 'processing_paused', 'force_pause_todoist', 'reminder_enabled'], watch: ['maintenance', 'notifications'], 'notion-publish': ['maintenance'], fleet: ['maintenance'], newsletter: ['maintenance'] }
 
 test('status: every deployment-variable mode is a boolean, also on status_unavailable', () => {
   for (const value of [status(), status({ env: { ...env, MAINTENANCE_MODE: 'true' } }), status({ coordinator: null }), status({ snapshot: null })]) {

@@ -12,14 +12,12 @@ entry points are in the [root README](../README.md).
 flowchart LR
   Mail[Forwarded mail] --> MH[Mail Hero]
   MH -->|mail.received.v1 HTTPS| Todo[Todofy]
-  Lab[Lab] -->|task-intent-v1 binding| Todo
   Watch[Watch] -->|task-intent-v1 binding| Todo
   Todo --> Todoist[Todoist]
   Todo -->|reports, HTTPS Basic auth| News[Newsletter on VPS]
   Todoist -->|read only| Flow[FlowDay]
   Home[Home] -->|Ops bindings| MH
   Home -->|Ops bindings| Todo
-  Home -->|Ops bindings| Lab
   Home -->|Ops bindings| Watch
   Home -->|Fleet and Newsletter Ops bindings| Fleet[Fleet]
   Observer[Observer CronJob] -->|signed fleet.report.v1| Fleet
@@ -52,7 +50,6 @@ runtime. Newsletter keeps its own locked container dependencies and existing ext
 | Mail Hero | `mailhero.ui.v2` | `/api/v2/` |
 | Todofy | `todofy.ui.v1` | `/api/v1/` |
 | Home | `dashboard.ui.v1` | `/api/v1/` |
-| Lab | `lab.ui.v1` | `/api/v1/` |
 | FlowDay | `flowday.ui.v1` | `/api/v1/` |
 | Links | `links.ui.v1` | `/_/api/v1/` |
 | Watch | `watch.ui.v1` | `/api/v1/` |
@@ -87,8 +84,8 @@ the owner APIs moved to proto. Dated old-owner routes are listed in [history](hi
 ## Home
 
 Home is the owner launcher and operations console, not a second administrator of each application's storage.
-It calls only generated Ops methods through `MAIL_HERO`, `TODOFY`, `LAB`, `WATCH`, `FLEET` and `NEWSLETTER`
-bindings. `FLEET` targets Fleet's `Ops`; `NEWSLETTER` targets its `NewsletterOps` projection of the latest
+It calls only generated Ops methods through `MAIL_HERO`, `TODOFY`, `WATCH`, `FLEET`, `NEWSLETTER` and
+`WEBSITE_SYNC` bindings. `FLEET` targets Fleet's `Ops`; `NEWSLETTER` targets its `NewsletterOps` projection of the latest
 bounded host report. Home does not call the VPS directly or read an application's D1, R2, private
 configuration or source. The four views are Home, Flows, Cloudflare and Ops.
 
@@ -133,9 +130,6 @@ accepted report nor a ready deployment receipt proves successful Newsletter deli
 - **Todofy:** TypeScript gateway plus Python SQLite DO core, the ledger's only writer/scheduler. Mail receipts,
   summary work, Todoist outcomes and reconciliation use distinct durable states. See the
   [development invariants](../todofy/docs/dev-notes.md) and [gateway contract](../todofy/docs/gateway-contract.md).
-- **Lab:** a daily fixed-host arXiv fetch, owner likes/seeds, Workers AI ranking and Chinese introductions under
-  `LAB_DAILY_NEURONS`. DO alarms do not consume cron slots. Only an explicit owner confirmation proposes tasks;
-  personal choices and send records stay in D1/DO, not ops output or logs. See [design](../lab/docs/design.md).
 - **FlowDay:** read-only Todoist data plus local blocks/timers/reviews on D1. Keyset pages read about one page of
   rows, and write budgets stay small. Historical container rollback material and production retirement
   evidence belong in HANDOFF/history; staging removal and Access changes go through reviewed infra.

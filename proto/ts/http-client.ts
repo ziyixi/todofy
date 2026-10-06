@@ -3,8 +3,8 @@
  * google.api.http bindings (http-rule.ts). Each rpc becomes a typed method that takes the request message (or
  * its init shape) and resolves to the response message:
  *
- *   const lab = createHttpClient(LabUiService, (call) => fetch(call.url, { method: call.httpMethod, body: call.body }));
- *   const deck = await lab.getDeck({ name: 'decks/2026-09-30' }); // GET /api/v1/decks/2026-09-30
+ *   const api = createHttpClient(WatchUiService, (call) => fetch(call.url, { method: call.httpMethod, body: call.body }));
+ *   const watch = await api.getWatch({ name: 'watches/w1' }); // GET /api/v1/watches/w1
  *
  * The request is written with the wire JSON profile and laid out by the rpc's primary binding: path variables
  * are expanded (http-path.ts encodes them as http.proto asks) and taken out of the message; the body is the

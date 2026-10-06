@@ -17,7 +17,7 @@ afterEach(async () => {
 
 async function guardCalls(harness: FlowHarness): Promise<Record<string, SetGuardInput[]>> {
   const out: Record<string, SetGuardInput[]> = {};
-  for (const app of ['mail-hero', 'todofy', 'lab'] as const) {
+  for (const app of ['mail-hero', 'todofy'] as const) {
     const calls = (await harness.callsOf(app, 'setGuard')).map((args) => args[0] as SetGuardInput);
     for (const input of calls) expectValid('SetGuardInput', input);
     out[app] = calls;
@@ -27,7 +27,7 @@ async function guardCalls(harness: FlowHarness): Promise<Record<string, SetGuard
 
 /** Both stubs now report `input` as their effective guard (as the real apps would after setGuard). */
 async function appsReport(harness: FlowHarness, input: SetGuardInput, setAt: string): Promise<void> {
-  for (const app of ['mail-hero', 'todofy', 'lab'] as const) {
+  for (const app of ['mail-hero', 'todofy'] as const) {
     const guard = input.level === 'shed' ? shedState(input.until, input.reason, setAt) : undefined;
     await harness.answer(app, 'setGuard', guard ? { value: guard } : undefined);
     await harness.answer(app, 'status', guard ? { value: await status(app, { guard }) } : undefined);
@@ -40,31 +40,31 @@ describe('automatic guard', () => {
     const shed: SetGuardInput = { level: 'shed', reason: 'quota_d1_rows_read', until: '2026-09-30T01:00:00.000Z' };
 
     await h.tick('2026-09-29T10:00:00Z');
-    expect(await guardCalls(h)).toEqual({ 'mail-hero': [shed], todofy: [shed], lab: [shed] });
+    expect(await guardCalls(h)).toEqual({ 'mail-hero': [shed], todofy: [shed] });
     expect(h.analytics.requests).toHaveLength(1);
     await appsReport(h, shed, '2026-09-29T10:00:00.000Z');
 
     await h.tick('2026-09-29T10:30:00Z');
-    expect(await guardCalls(h)).toEqual({ 'mail-hero': [], todofy: [], lab: [] });
+    expect(await guardCalls(h)).toEqual({ 'mail-hero': [], todofy: [] });
 
     // Mail Hero lost its guard (storage reset): its status reads normal, so the dashboard re-applies.
     await h.answer('mail-hero', 'status', undefined);
     await h.tick('2026-09-29T11:00:00Z');
-    expect(await guardCalls(h)).toEqual({ 'mail-hero': [shed], todofy: [], lab: [] });
+    expect(await guardCalls(h)).toEqual({ 'mail-hero': [shed], todofy: [] });
     await appsReport(h, shed, '2026-09-29T11:00:00.000Z');
 
     h.analytics.answer = d1Reads(75);
     await h.tick('2026-09-29T11:30:00Z');
-    expect(await guardCalls(h)).toEqual({ 'mail-hero': [], todofy: [], lab: [] });
+    expect(await guardCalls(h)).toEqual({ 'mail-hero': [], todofy: [] });
 
     h.analytics.answer = d1Reads(60);
     await h.tick('2026-09-29T12:00:00Z');
     const normal: SetGuardInput = { level: 'normal', reason: 'quota_normal', until: null };
-    expect(await guardCalls(h)).toEqual({ 'mail-hero': [normal], todofy: [normal], lab: [normal] });
+    expect(await guardCalls(h)).toEqual({ 'mail-hero': [normal], todofy: [normal] });
     await appsReport(h, normal, '2026-09-29T12:00:00.000Z');
 
     await h.tick('2026-09-29T12:30:00Z');
-    expect(await guardCalls(h)).toEqual({ 'mail-hero': [], todofy: [], lab: [] });
+    expect(await guardCalls(h)).toEqual({ 'mail-hero': [], todofy: [] });
     const snap = await h.snapshot();
     expect(snap.guard.desired).toMatchObject({ level: 'normal', source: 'auto' });
     expect(snap.guard.apps['mail-hero']?.last_error).toBeNull();
@@ -81,7 +81,7 @@ describe('automatic guard', () => {
     // The 23:00 tick would start a canary (CANARY_UTC_HOUR 23); jump to midnight.
     await h.tick('2026-09-30T00:00:00Z');
     const renewed = { level: 'shed', reason: 'quota_r2_class_a', until: '2026-10-01T01:00:00.000Z' } as const;
-    expect(await guardCalls(h)).toEqual({ 'mail-hero': [renewed], todofy: [renewed], lab: [renewed] });
+    expect(await guardCalls(h)).toEqual({ 'mail-hero': [renewed], todofy: [renewed] });
     expect(h.analytics.requests.at(-1)?.variables).toMatchObject({ day: '2026-09-30', month: '2026-09-01' });
   });
 
@@ -94,7 +94,7 @@ describe('automatic guard', () => {
     h.analytics.answer = () => new Response('{"errors":[{"message":"synthetic secret-text"}]}', { status: 401 });
     for (const at of ['10:30', '11:00', '11:30', '12:00']) await h.tick(`2026-09-29T${at}:00Z`);
     // The shed stays (no normal call) although no usage arrived for two hours.
-    expect(await guardCalls(h)).toEqual({ 'mail-hero': [], todofy: [], lab: [] });
+    expect(await guardCalls(h)).toEqual({ 'mail-hero': [], todofy: [] });
     const snap = await h.snapshot();
     expect(snap.usage).toMatchObject({ last_error: 'http_401', consecutive_failures: 4 });
     expect(snap.digest.items.map((i) => `${i.source}:${i.code}`)).toContain('dashboard:usage_unavailable');
@@ -124,18 +124,18 @@ describe('automatic guard', () => {
     h.analytics.answer = () => new Response('upstream', { status: 503 });
     await h.tick('2026-09-30T00:00:00Z');
     const renewed = { level: 'shed', reason: 'quota_r2_class_a', until: '2026-10-01T01:00:00.000Z' } as const;
-    expect(await guardCalls(h)).toEqual({ 'mail-hero': [renewed], todofy: [renewed], lab: [renewed] });
+    expect(await guardCalls(h)).toEqual({ 'mail-hero': [renewed], todofy: [renewed] });
     await appsReport(h, renewed, '2026-09-30T00:00:00.000Z');
     await h.tick('2026-09-30T00:30:00Z');
     // No normal in between: the deferred jobs never start while R2 stays above 80 %.
-    expect(await guardCalls(h)).toEqual({ 'mail-hero': [], todofy: [], lab: [] });
+    expect(await guardCalls(h)).toEqual({ 'mail-hero': [], todofy: [] });
   });
 
   it('never sheds for Workers AI neurons: the digest reports them, the apps are not called', async () => {
     h = await startFlows({ bindings: { CANARY_UTC_HOUR: '23' }, usage: aiNeurons(97) });
     await h.tick('2026-09-29T12:00:00Z');
     expect(h.analytics.requests).toHaveLength(1);
-    expect(await guardCalls(h)).toEqual({ 'mail-hero': [], todofy: [], lab: [] });
+    expect(await guardCalls(h)).toEqual({ 'mail-hero': [], todofy: [] });
     const snap = await h.snapshot();
     expect(snap.guard.desired).toMatchObject({ level: 'normal', reason: 'quota_normal', source: 'auto' });
     const ai = snap.usage.rows.find((row) => row.id === 'ai_neurons');
@@ -149,7 +149,7 @@ describe('automatic guard', () => {
     // 85 %: still reported (warning), still no guard call.
     h.analytics.answer = aiNeurons(85);
     await h.tick('2026-09-29T12:30:00Z');
-    expect(await guardCalls(h)).toEqual({ 'mail-hero': [], todofy: [], lab: [] });
+    expect(await guardCalls(h)).toEqual({ 'mail-hero': [], todofy: [] });
     expect((await h.snapshot()).digest.items.find((i) => i.code === 'ai_neurons_high')?.severity).toBe('warning');
   });
 
@@ -158,7 +158,7 @@ describe('automatic guard', () => {
     h.analytics.answer = () => Response.json(graphqlBodyWithAiError(d1Reads(90)));
     await h.tick('2026-09-29T10:00:00Z');
     const shed: SetGuardInput = { level: 'shed', reason: 'quota_d1_rows_read', until: '2026-09-30T01:00:00.000Z' };
-    expect(await guardCalls(h)).toEqual({ 'mail-hero': [shed], todofy: [shed], lab: [shed] });
+    expect(await guardCalls(h)).toEqual({ 'mail-hero': [shed], todofy: [shed] });
     const snap = await h.snapshot();
     expect(snap.usage.last_error).toBeNull();
     expect(snap.usage.rows.find((row) => row.id === 'ai_neurons')).toMatchObject({ used: null, percent: null });
@@ -222,13 +222,13 @@ describe('owner override', () => {
     const body = await forced.json() as OverrideGuardResponse;
     expect(body.guard.apps['mail-hero']?.desired).toMatchObject({ level: 'shed', source: 'owner' });
     expect(body.guard.apps.todofy?.desired?.source).toBe('auto');
-    expect(await guardCalls(h)).toMatchObject({ todofy: [], lab: [] });
+    expect(await guardCalls(h)).toMatchObject({ todofy: [] });
     const cleared = await h.post(PATHS.guard, { level: 'normal', app: 'mail-hero' });
     expect(cleared.status).toBe(200);
     const clearBody = await cleared.json() as OverrideGuardResponse;
     expect(clearBody.guard.apps['mail-hero']?.override).toMatchObject({ level: 'normal', until: '2026-10-02T00:00:00.000Z' });
     expect(await guardCalls(h)).toEqual({
-      'mail-hero': [{ level: 'normal', reason: 'owner_clear', until: null }], todofy: [], lab: [],
+      'mail-hero': [{ level: 'normal', reason: 'owner_clear', until: null }], todofy: [],
     });
     await h.tick(NOW + 60_000);
     expect((await guardCalls(h))['mail-hero']).toEqual([]);

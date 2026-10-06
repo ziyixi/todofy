@@ -16,7 +16,6 @@ WORKERS = {
     "todofy": ["todofy/wrangler.toml", "todofy/gateway/wrangler.toml"],
     "mail-hero": ["mail-hero/wrangler.toml"],
     "dashboard": ["dashboard/wrangler.toml"],
-    "lab": ["lab/wrangler.toml"],
     "flowday": ["flowday/wrangler.toml"],
     "links": ["links/wrangler.toml"],
     "watch": ["watch/wrangler.toml"],

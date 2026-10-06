@@ -1,6 +1,6 @@
 {
   // The dashboard UI's settings: allowImportingTsExtensions because the UI imports the owner API's value rules
-  // from ../worker/src/limits.ts, and the generated lab.ui.v1 code (@ziyixi/proto), by their .ts names.
+  // from ../worker/src/limits.ts, and the generated fleet.ui.v1 code (@ziyixi/proto), by their .ts names.
   "compilerOptions": {
     "target": "ES2023",
     "lib": ["ES2023", "DOM", "DOM.Iterable"],

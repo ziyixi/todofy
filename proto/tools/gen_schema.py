@@ -91,7 +91,7 @@ SCHEMAS = (
         "ops.v1",
         "../contracts/ops-v1/ops-v1.schema.json",
         "https://contracts.local/ops-v1/ops-v1.schema.json",
-        "ops-v1: the typed operations surface of Mail Hero, Todofy and Lab",
+        "ops-v1: the typed operations surface of the apps' Ops entrypoints",
         'Every input and output of the named WorkerEntrypoint "Ops" of each app, one $defs entry each (README.md maps '
         "methods to entries). Generated from proto/ops/v1/ops.proto by proto/tools/gen_schema.py: do not edit. Outputs "
         "are closed so that nothing but codes, numbers, booleans and timestamps can leave an app; consumers still "

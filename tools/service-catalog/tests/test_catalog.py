@@ -93,7 +93,7 @@ class CatalogTests(unittest.TestCase):
         self.assertEqual(set(loaded.worker_configs().values()), catalog.production_configs(catalog.REPO))
         self.assertGreaterEqual(len(loaded.workers), 10)
         self.assertEqual({app for app, data in loaded.apps.items() if data["target"] == "cloudflare"},
-                         {"todofy", "mail-hero", "dashboard", "website", "lab", "flowday", "links", "watch"}
+                         {"todofy", "mail-hero", "dashboard", "website", "flowday", "links", "watch"}
                          | ({"fleet"} if "fleet" in loaded.apps else set()))
         self.assertEqual(loaded.apps["newsletter"]["image"], "ghcr.io/ziyixi/todofy-newsletter")
         self.assertEqual(loaded.apps["newsletter"]["target"], "vps")

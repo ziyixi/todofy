@@ -732,8 +732,8 @@ retention had dropped it); otherwise its state (`pending`, or `paused` recorded 
 holds is answered `paused` (recorded, the pause's code), not its old failure: nothing was re-queued;
 `taskIntentStatus` keeps answering `failed` until a proposal after the pause re-queues it.
 (2) `TASK_INTENT_SOURCES` (unset: every source the contract knows; empty: none, an off switch that
-leaves mail running) → `source_not_allowed`; an item URL whose host is not exactly on the source's list (lab:
-`arxiv.org`) → `url_not_allowed`. (3) Maintenance, processing pause, `FORCE_PAUSE_TODOIST`, the Todoist
+leaves mail running) → `source_not_allowed`; an item URL whose host is not exactly on the source's list (watch:
+the deployment's Watch host) → `url_not_allowed`. (3) Maintenance, processing pause, `FORCE_PAUSE_TODOIST`, the Todoist
 auth block, a backup lease → `paused`, nothing written. (4) One batch: the intent row, inserted only while
 the source has fewer than 10 intents that UTC day (`RECORD`, count on `task_intents_created`), its task
 rows with a frozen UUID `X-Request-Id` each (`RECORD_TASKS`, guarded by `changes() = 1`), and the row as

@@ -3,8 +3,8 @@
  * google.api.http bindings (http-rule.ts), in the wire JSON profile (wire-json.ts), with google.rpc.Status
  * errors (rpc-status.ts). An app hands it the service descriptor and one typed handler per rpc:
  *
- *   const api = new HttpTranscoder(LabUiService, { getDeck: (request, ctx) => ..., ... }, {
- *     domain: 'lab.ziyixi.science', maxBodyBytes: 16 * 1024, authorize: (request, route, ctx) => ...,
+ *   const api = new HttpTranscoder(WatchUiService, { getWatch: (request, ctx) => ..., ... }, {
+ *     domain: 'watch.ziyixi.science', maxBodyBytes: 16 * 1024, authorize: (request, route, ctx) => ...,
  *   });
  *   const result = await api.handle(request, ctx, requestId); // null: no route has this path
  *
@@ -74,7 +74,7 @@ export interface RouteInfo {
 }
 
 export interface TranscoderOptions<C> {
-  /** ErrorInfo.domain of every error, e.g. `lab.ziyixi.science`. */
+  /** ErrorInfo.domain of every error, e.g. `watch.ziyixi.science`. */
   readonly domain: string;
   /** The largest request body read (a larger one is BAD_REQUEST before it is parsed). */
   readonly maxBodyBytes: number;
@@ -88,7 +88,7 @@ export interface TranscoderOptions<C> {
 
 type MessageOf<D> = D extends DescMessage ? MessageShape<D> : never;
 
-/** The method shapes of a generated service (`ShapeOf<typeof LabUiService>`), for naming its handler types. */
+/** The method shapes of a generated service (`ShapeOf<typeof WatchUiService>`), for naming its handler types. */
 export type ShapeOf<T> = T extends GenService<infer S> ? S : never;
 
 /**

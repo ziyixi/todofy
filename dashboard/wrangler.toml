@@ -53,11 +53,6 @@ service = "todofy"
 entrypoint = "Ops"
 
 [[services]]
-binding = "LAB"
-service = "lab"
-entrypoint = "Ops"
-
-[[services]]
 binding = "WATCH"
 service = "watch"
 entrypoint = "Ops"

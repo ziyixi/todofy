@@ -1,7 +1,6 @@
-// The deploy wrapper (../deploy-vars.mjs): Lab's and FlowDay's rules with the links app's inputs, and no real deploy
-// with a placeholder. Synthetic values only; the wrapper runs a stub instead of wrangler. (The owner rules are compared
-// with the dashboard's, Lab's and FlowDay's wrappers in .github/scripts/test_wrangler_configs.py: an app reads no other
-// app.)
+// The deploy wrapper (../deploy-vars.mjs): FlowDay's rules with the links app's inputs, and no real deploy with a
+// placeholder. Synthetic values only; the wrapper runs a stub instead of wrangler. (The owner rules are compared with
+// the dashboard's and FlowDay's wrappers in .github/scripts/test_wrangler_configs.py: an app reads no other app.)
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
@@ -85,7 +84,7 @@ test('since L2 the committed config holds the real D1 id and Access AUD; a place
   }
 
   for (const argv of [
-    [], deploy, [...deploy, '--dry-run', '--config', 'wrangler.toml'], [...deploy, '--dry-run', '--config', '../../lab/wrangler.toml'],
+    [], deploy, [...deploy, '--dry-run', '--config', 'wrangler.toml'], [...deploy, '--dry-run', '--config', '../../dashboard/wrangler.toml'],
     [...deploy, '--config', '../wrangler.toml', '--env', 'production'],
     [...deploy, '--config', '../wrangler.toml', '--keep-vars'],
     [...deploy, '--config', '../wrangler.toml', '--var', 'BUILD_SHA:x'],

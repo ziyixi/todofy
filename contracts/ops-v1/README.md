@@ -20,7 +20,7 @@ contract this replaced (each app's golden test, below).
 | `ops-v1.schema.json` | JSON Schema 2020-12 **generated** from the IDL (`proto/tools/gen_schema.py`), one `$defs` entry per input and output (table below), per format and per enum; never edited by hand, `npm run check:schema` in `proto/` fails when stale. Kept for readers outside the monorepo and as the oracle the tests check the codec against. The names the hand-written schema had (`App`, `Counters`, `Metrics`, `Modes`, `OpsErrorCode`) still resolve, as aliases of what the IDL generates (`ALIASES` in `gen_schema.py`) |
 | `ops-v1.ts` | `OPS_LIMITS`: the rules no codec can check (relative to a clock or to a whole message); the TS Workers import it by relative path, `todofy-core` keeps the same numbers |
 | `legacy/ops-v1.schema.json` | The hand-written schema the dashboards deployed before the move validate answers with, frozen: the golden tests prove every answer still passes it (rollout) |
-| `validate.mjs` | Dependency-free validator for the JSON Schema keywords the contracts use; Lab checks `task-intent-v1` with it at runtime, the golden tests check answers against the legacy schema with it |
+| `validate.mjs` | Dependency-free validator for the JSON Schema keywords the contracts use; the proposer's tests check `task-intent-v1` with it, the golden tests check answers against the legacy schema with it |
 | `fixtures/<Def>/*.json` | Valid examples of each input/output; `fixtures/invalid/<Def>/*.json` must fail |
 | `IMPLEMENTATION.md` | Per app: files, migrations, guard keep/defer table, canary state machine, digest, query budgets, tests |
 
@@ -34,7 +34,7 @@ Checks (the `Contracts` CI job, `Proto checks`, and each app's own tests):
   reference validator (Python `jsonschema`) and the codec agrees with it; about 22,000 mutations of the
   valid fixtures get the same verdict from the generated and the legacy schema; the generated schema
   stays inside the keyword subset `validate.mjs` implements.
-- Golden tests (`mail-hero/cloudflare/test/ops-golden.test.mjs`, `lab/worker/test/ops-golden.test.ts`,
+- Golden tests (`mail-hero/cloudflare/test/ops-golden.test.mjs`,
   `todofy/tests/unit/test_ops_golden.py`, `dashboard/worker/test/ops-golden.test.ts`): the exact bytes
   each app answers (or the dashboard sends and keeps) for fixed synthetic state, written by the code
   before the move, and every one valid under the legacy schema. The watch app joined after the move
@@ -52,7 +52,6 @@ next to its unchanged default handlers:
 | --- | --- | --- | --- |
 | Mail Hero | `mail-hero` | `mail-hero/cloudflare/src/native/index.ts` | in the Worker; state in the `MailCoordinator` object |
 | Todofy | `todofy` (the gateway) | `todofy/gateway/src/index.ts` | forwards to `TodofyCore` RPC methods in `todofy-core` |
-| Lab | `lab` | `lab/worker/src/index.ts` | in the Worker; state in the `LabState` object (its own SQLite only) |
 | the watch app | `watch` | `watch/worker/src/index.ts` | in the Worker; state in the `WatchState` object (its own SQLite only) |
 | Fleet | `fleet` | `fleet/worker/src/index.ts` (`Ops`) | read-only receipt projection in `FleetState` SQLite |
 | Newsletter | `fleet` | `fleet/worker/src/index.ts` (`NewsletterOps`) | independently observed VPS process/release metadata; no VPS command surface |
@@ -68,11 +67,6 @@ entrypoint = "Ops"
 [[services]]
 binding = "TODOFY"
 service = "todofy"
-entrypoint = "Ops"
-
-[[services]]
-binding = "LAB"
-service = "lab"
 entrypoint = "Ops"
 
 [[services]]
@@ -154,9 +148,7 @@ lost alarm; `IMPLEMENTATION.md` §3c). Poll it no more often than every 10 minut
   `critical`; otherwise `ok` (`info` signals allowed).
 - `modes`: booleans; `maintenance` always present. Mail Hero: `force_send_paused` (deployment variable),
   `send_paused` (owner switch), `forwarding` (mode forward with a current endpoint), `backup_active`.
-  Todofy: `processing_paused`, `force_pause_todoist`, `reminder_enabled`, `backup_active`. Lab:
-  `maintenance` (always false: Lab has no maintenance switch) and `ingest_paused` (the owner's pause of
-  the daily pipeline, read from storage). The watch app: `maintenance` (always false: it has no maintenance switch)
+  Todofy: `processing_paused`, `force_pause_todoist`, `reminder_enabled`, `backup_active`. The watch app: `maintenance` (always false: it has no maintenance switch)
   and `notifications` (its TODOFY binding is configured: the daily digest and urgent changes go to Todofy). A
   `status_unavailable` status has only the deployment variables (Mail Hero `maintenance`,
   `force_send_paused`; Todofy `maintenance`, `processing_paused`, `force_pause_todoist`,
@@ -170,16 +162,15 @@ lost alarm; `IMPLEMENTATION.md` §3c). Poll it no more often than every 10 minut
 - `last_backup_at`: the app's last complete backup, or null.
 - `ui_url`: `https://<owner UI host>/`, or null when the Worker does not know its host.
 - `capabilities`: what this release supports. Mail Hero `canary_producer`, `guard`; Todofy
-  `canary_consumer`, `guard`, `ops_digest`; Lab `guard`; the watch app `guard`. The dashboard checks them before
+  `canary_consumer`, `guard`, `ops_digest`; the watch app `guard`. The dashboard checks them before
   using a feature. Fleet and Newsletter monitoring expose no capabilities and never accept a quota guard mutation.
 
 Signal codes (severity):
 
 | App | Codes |
 | --- | --- |
-| every app | `maintenance_mode` (critical; never raised by Lab or the watch app), `guard_shed` (info, `seconds_left`), `status_unavailable` (critical) |
+| every app | `maintenance_mode` (critical; never raised by the watch app), `guard_shed` (info, `seconds_left`), `status_unavailable` (critical) |
 | Mail Hero | the alert signals of `alerts.ts` with their metrics: `capacity_70` (warning), `capacity_85`, `capacity_95`, `backup_stale`, `endpoint_blocked` (critical), `pending_stale`, `parse_failed`, `endpoint_paused`, `delivery_failed`, `policy_error` (warning); plus `force_send_paused`, `send_paused`, `ingest_quota_80` (warning), `forwarding_off`, `backup_active` (info) |
-| Lab | `feed_stale` (warning, `hours`: no successful arXiv fetch for over 72 h), `neuron_cap_hit` (warning, `used`, `cap`: the daily Workers AI ceiling stopped AI work until 00:00 UTC), `send_unsettled` (warning, `count`: a send to Todofy failed or unknown for over 24 h) |
 | watch | `watches_broken` (warning, `count`: watches failing their third check in a row or more), `scheduler_stale` (warning, `hours`: no scheduler pass for over 12 h while a watch is to be checked; no metric when none ever ran), `notify_unsettled` (warning, `open`, `failed`: a task intent whose tasks do not all exist 24 h after it was frozen; one Todofy reports failed; or one given up or refused in the last 7 days) |
 | Todofy | `attention`, `due_backlog`, `processing_paused`, `todoist_paused`, `gemini_budget_80`, `backup_failed`, `reminder_failed`, `gtd_snapshot_stale` (warning, `age_hours`); `todoist_blocked`, `gemini_budget_95`, `backup_stale` (critical); `reminder_disabled`, `backup_disabled`, `backup_active`, `review_overdue` (info, `days`) |
 | Fleet | `host_never_seen`, `host_stale`, `host_missing`, `daemon_k3s_inactive`, `daemon_k3s_failed`, `daemon_k3s_missing`, `daemon_k3s_unknown`, `daemon_k3s_activating`, `daemon_k3s_deactivating`, `daemon_cloudflared_inactive`, `daemon_cloudflared_failed`, `daemon_cloudflared_missing`, `daemon_cloudflared_unknown`, `daemon_cloudflared_activating`, `daemon_cloudflared_deactivating`, `daemon_ssh_inactive`, `daemon_ssh_failed`, `daemon_ssh_missing`, `daemon_ssh_unknown`, `daemon_ssh_activating`, `daemon_ssh_deactivating`, `daemon_cloudflared_platform_inactive`, `daemon_cloudflared_platform_failed`, `daemon_cloudflared_platform_missing`, `daemon_cloudflared_platform_unknown`, `daemon_cloudflared_platform_activating`, `daemon_cloudflared_platform_deactivating`, `cluster_degraded`, `cluster_unavailable`, `cluster_unknown`, `disk_high`, `memory_high`, `deployment_pending`, `release_held`, `release_failed`, `release_in_progress` (daemon failures, missing heartbeat, held/failed release critical; in-progress release info; other readiness/capacity conditions warning) |

@@ -7,7 +7,7 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { mergeWorkerSecrets, workerSecretSpec } from '../worker-secrets.mjs'
 
-const applications = { dashboard: 'home', fleet: 'fleet', flowday: 'flowday', lab: 'lab', links: 'links', watch: 'watch', 'mail-hero': 'mail-hero', 'website/relay': 'ziyixi-notion-publish' }
+const applications = { dashboard: 'home', fleet: 'fleet', flowday: 'flowday', links: 'links', watch: 'watch', 'mail-hero': 'mail-hero', 'website/relay': 'ziyixi-notion-publish' }
 const privateValue = 'synthetic-private-value'
 class SettingError extends Error {
   constructor(name) { super(`Invalid deploy field: ${name}`); this.setting = name }

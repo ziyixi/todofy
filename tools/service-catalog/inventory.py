@@ -10,7 +10,7 @@ from catalog import REPO, load_catalog, read_toml, require
 from cloud_profile import load_resources
 
 DO_KEYS = {
-    "FleetState": "fleet-state", "HomeState": "home-state", "LabState": "lab-state",
+    "FleetState": "fleet-state", "HomeState": "home-state",
     "MailCoordinator": "mail-coordinator", "TodofyCore": "todofy-core-do", "WatchState": "watch-state",
 }
 OUTPUT = "dashboard/worker/src/account-inventory.json"

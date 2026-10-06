@@ -43,7 +43,6 @@ export function contractErrors(name: ContractName, value: unknown): string[] {
 const SERVICES = {
   'mail-hero': [ops.OpsService, ops.CanaryProducerService],
   todofy: [ops.OpsService, ops.CanaryConsumerService, ops.OpsDigestService],
-  lab: [ops.OpsService],
   watch: [ops.OpsService],
   fleet: [ops.OpsService],
   newsletter: [ops.OpsService],

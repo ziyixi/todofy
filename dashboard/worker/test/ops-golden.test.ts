@@ -9,7 +9,7 @@
  * contract, never to make a refactor pass.
  */
 import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { OpsReportSchema, OpsStatusSchema, SetGuardInputSchema, StartCanaryInputSchema } from '@ziyixi/proto/ops/v1/ops_pb';
+import { OpsReportSchema, SetGuardInputSchema, StartCanaryInputSchema } from '@ziyixi/proto/ops/v1/ops_pb';
 import { expect, test } from 'vitest';
 import { scheduledRunId, manualRunId } from '../src/canary.ts';
 import { buildReport, finalizeItems, type Candidate } from '../src/digest.ts';
@@ -72,7 +72,7 @@ function cases(): Record<string, unknown> {
     { source: 'todofy', code: 'gemini_budget_80', severity: 'warning', metrics: { percent: 82.4, used_tokens: 2_460_000, reserved_tokens: 12_000, budget_tokens: 3_000_000 } },
     { source: 'cloudflare', code: 'd1_rows_read_high', severity: 'warning', metrics: { percent: 81.5, used: 4_075_000, limit: 5_000_000, projected_percent: 97.25 } },
     { source: 'dashboard', code: 'canary_skipped', severity: 'warning', since: '2026-09-29T22:31:40.000Z', metrics: { no_endpoint: 1 } },
-    { source: 'lab', code: 'neuron_cap_hit', severity: 'warning', metrics: { used: 4996.2, cap: 5000, 'Not A Code': 1 } },
+    { source: 'newsletter', code: 'newsletter_unknown', severity: 'warning', metrics: { used: 4996.2, cap: 5000, 'Not A Code': 1 } },
     { source: 'mail-hero', code: 'guard_shed', severity: 'info', metrics: { seconds_left: 3600 } },
   ];
   const items = finalizeItems(candidates, new Map([['todofy:gemini_budget_80', NOW - 5 * HOUR]]), NOW);
@@ -86,25 +86,7 @@ function cases(): Record<string, unknown> {
   out['read/newer/result-new-waiting-code'] = asCanaryResult({ state: 'processing', waiting_code: 'gemini_paused' });
   out['read/newer/delivery-new-error-code'] = asCanaryDelivery({ state: 'failed', attempts: 2, error_code: 'tls_handshake' });
   out['read/newer/delivery-new-state'] = asCanaryDelivery({ state: 'retrying', attempts: 2 });
-  // Lab's status before its move onto the generated types: the same fields, its keys in another order.
-  const { version, app, generated_at, last_backup_at, ui_url, capabilities, ...rest } = JSON.parse(
-    readFileSync(`${FIXTURES}OpsStatus/lab-degraded.json`, 'utf8'),
-  ) as Record<string, unknown>;
-  out['read/newer/lab-key-order'] = asStatus('lab')({ version, app, generated_at, last_backup_at, ui_url, capabilities, ...rest });
   return out;
-}
-
-/**
- * The one difference the move onto proto/ made, and on purpose: the reader keeps an answer in the contract's field
- * order (it writes what it read with the codec), where it used to keep the producer's key order. Only Lab's status
- * before its own move had another order (`read/newer/lab-key-order`, Lab's real answer then); it is compared with the
- * golden one in field order: same keys, same values. Every fixture and every other answer keeps its bytes.
- */
-const STATUS_FIELDS = [...OpsStatusSchema.fields].sort((a, b) => a.number - b.number).map((field) => field.name);
-function inFieldOrder(value: unknown): unknown {
-  const status = value as Record<string, unknown>;
-  expect(Object.keys(status).sort()).toEqual(STATUS_FIELDS.filter((name) => name in status).sort());
-  return Object.fromEntries(STATUS_FIELDS.filter((name) => name in status).map((name) => [name, status[name]]));
 }
 
 test('every input and every answer kept is byte for byte the golden one', () => {
@@ -113,7 +95,6 @@ test('every input and every answer kept is byte for byte the golden one', () => 
   const golden = JSON.parse(readFileSync(GOLDEN, 'utf8')) as Record<string, unknown>;
   expect(Object.keys(actual)).toEqual(Object.keys(golden));
   for (const [name, value] of Object.entries(actual)) {
-    const expected = name === 'read/newer/lab-key-order' ? inFieldOrder(golden[name]) : golden[name];
-    expect(JSON.stringify(value), name).toBe(JSON.stringify(expected));
+    expect(JSON.stringify(value), name).toBe(JSON.stringify(golden[name]));
   }
 });

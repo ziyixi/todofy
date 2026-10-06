@@ -6,7 +6,7 @@
  * schema check and the dashboard's reader test as well. `UPDATE_GOLDEN=1 npx vitest run test/ops-golden.test.ts`
  * rewrites the golden file (never the fixtures); only for an intended change of the contract.
  *
- * Unlike Mail Hero's, Todofy's and Lab's, these answers are not checked against contracts/ops-v1/legacy: a dashboard
+ * Unlike Mail Hero's and Todofy's, these answers are not checked against contracts/ops-v1/legacy: a dashboard
  * deployed before ops-v1 moved onto proto/ never binds the watch app, and its legacy schema lists only the first three
  * apps. They are checked against the generated schema instead.
  */

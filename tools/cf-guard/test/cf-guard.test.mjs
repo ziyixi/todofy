@@ -391,7 +391,6 @@ test("the committed production configs: the hostnames each deploy guards", async
     "todofy/gateway/wrangler.toml": ["todofy", ["todofy.ziyixi.science", "todofy-hooks.ziyixi.science", "daily.ziyixi.science"]],
     "todofy/wrangler.toml": ["todofy-core", []],
     "dashboard/wrangler.toml": ["home", ["home.ziyixi.science"]],
-    "lab/wrangler.toml": ["lab", ["lab.ziyixi.science"]],
     "website/wrangler.toml": ["ziyixi-website", ["www.ziyixi.science", "ziyixi.science"]],
     "website/relay/wrangler.toml": ["ziyixi-notion-publish", []],
     // The production host since the F4 cutover (flowday/docs/design.md section 11); the F3 staging host is gone.

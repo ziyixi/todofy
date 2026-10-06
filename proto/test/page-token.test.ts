@@ -3,7 +3,7 @@ import { describe, expect, test } from 'vitest';
 import { decodePageToken, encodePageToken, MAX_TOKEN_CHARS, PageTokenError } from '../ts/page-token.ts';
 
 describe('page tokens', () => {
-  const cursor = { at: 1_790_000_000_000, id: 'arxiv:2609.35773' };
+  const cursor = { at: 1_790_000_000_000, id: 'w-35773' };
 
   test('round trip with the same parameters, whatever their order', () => {
     const token = encodePageToken(cursor, { filter: '"graph neural"', parent: '' });
@@ -27,7 +27,7 @@ describe('page tokens', () => {
   test('a hand-made, truncated or oversized token is refused', () => {
     const token = encodePageToken(cursor, {});
     const forged = btoa(JSON.stringify({ v: 1, c: cursor, p: 'ffffffff' })).replace(/=+$/, '');
-    for (const bad of ['', '1790000000000~arxiv:2609.35773', token.slice(0, -3), `${token}!`, forged, 'e30', 'bnVsbA', 'A'.repeat(MAX_TOKEN_CHARS + 1)]) {
+    for (const bad of ['', '1790000000000~w-35773', token.slice(0, -3), `${token}!`, forged, 'e30', 'bnVsbA', 'A'.repeat(MAX_TOKEN_CHARS + 1)]) {
       expect(() => decodePageToken(bad, {}), bad.slice(0, 40)).toThrow(PageTokenError);
     }
   });

@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 // The values of the Worker "links" that are never committed to ../wrangler.toml, added at deploy time (the shape of
-// Lab's and FlowDay's wrappers):
+// FlowDay's wrapper):
 //
 // - with `wrangler deploy --var NAME:value` (a plain_text var, exactly like a [vars] entry): BUILD_SHA (the commit).
 //   The links app has no GitHub-variable switches;
 // - with `--secrets-file` (Worker secrets, hidden in wrangler's output): the owner's addresses and the CSRF key
 //   (inputs LINKS_ACCESS_OWNER, LINKS_ACCESS_OWNER_ALIASES, LINKS_CSRF_SIGNING_KEY, masked in the public Actions log).
 //   The deploy job ("Links deploy") fills the first two from the dashboard's environment secrets
-//   DASHBOARD_ACCESS_OWNER and DASHBOARD_ACCESS_OWNER_ALIASES (the same owner, like Lab and FlowDay) and the key from
+//   DASHBOARD_ACCESS_OWNER and DASHBOARD_ACCESS_OWNER_ALIASES (the same owner, like FlowDay) and the key from
 //   the links app's own LINKS_CSRF_SIGNING_KEY (../README.md "Deploy").
 //
 // Since L2 (../docs/design.md §11) ../wrangler.toml holds the real D1 id and Access AUD. A real deploy is still refused

@@ -20,7 +20,6 @@ locals {
     "mail-hero" = "ebd92116-4d51-4d90-923a-068b05b7e05a"
     "todofy"    = "d4010b0b-c50e-487b-992e-6e30a392f603"
     "home"      = "f190b413-241d-428d-8680-53eebe7f672d"
-    "lab"       = "208a0a3b-6654-4b1f-9b1d-821493171f4d"
     "links"     = "a6e2a6e3-b432-4093-ac20-0211ca180dce"
     # Created by "Infra apply", not imported (README.md "Adding an app"); the id read in step 4, with the AUD in
     # watch/wrangler.toml.
@@ -33,7 +32,6 @@ locals {
   d1_database_ids = {
     "mail-hero" = "6c13e4c3-e239-42fb-a7a4-96810fa8d7dc"
     "todofy"    = "151c1306-3885-4679-9592-08887b30ae68"
-    "lab"       = "f20238dc-93a4-4d1a-91c4-c013f01cbdc9"
     "flowday"   = "df104e83-7183-47e3-b2f9-638dc7502c13"
     "links"     = "2f8c5331-06ce-4347-8c0a-90fe51c82260"
   }

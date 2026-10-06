@@ -163,14 +163,13 @@ const refused: OpsCall<never> = { ok: false, code: 'invalid_input' };
 export const CALLED_METHODS = {
   'mail-hero': ['status', 'setGuard', 'startCanary', 'canaryDelivery'],
   todofy: ['status', 'setGuard', 'canaryResult', 'reportOps'],
-  lab: ['status', 'setGuard'],
   watch: ['status', 'setGuard'],
   fleet: ['status', 'setGuard'],
   newsletter: ['status', 'setGuard'],
   'notion-publish': ['status', 'setGuard', 'getSyncStatus', 'requestSync', 'getSyncRequest'],
 } as const;
 
-type Bindings = Pick<Env, 'MAIL_HERO' | 'TODOFY' | 'LAB' | 'WATCH' | 'FLEET' | 'NEWSLETTER' | 'WEBSITE_SYNC'>;
+type Bindings = Pick<Env, 'MAIL_HERO' | 'TODOFY' | 'WATCH' | 'FLEET' | 'NEWSLETTER' | 'WEBSITE_SYNC'>;
 
 function missing(): Promise<never> {
   return Promise.reject(new MissingBinding('not_configured'));
@@ -179,7 +178,6 @@ function missing(): Promise<never> {
 export function opsStatus(env: Bindings, app: OpsApp): Promise<OpsCall<ops.OpsStatus>> {
   return callOps(() => {
     if (app === 'mail-hero') return (env.MAIL_HERO as Bindings['MAIL_HERO'] | undefined)?.status() ?? missing();
-    if (app === 'lab') return (env.LAB as Bindings['LAB'] | undefined)?.status() ?? missing();
     if (app === 'watch') return (env.WATCH as Bindings['WATCH'] | undefined)?.status() ?? missing();
     if (app === 'fleet') return (env.FLEET as Bindings['FLEET'] | undefined)?.status() ?? missing();
     if (app === 'newsletter') return (env.NEWSLETTER as Bindings['NEWSLETTER'] | undefined)?.status() ?? missing();
@@ -195,7 +193,6 @@ export async function opsSetGuard(env: Bindings, app: OpsApp, input: ops.SetGuar
   const sent = args[0] as ops.SetGuardInput;
   return callOps(() => {
     if (app === 'mail-hero') return (env.MAIL_HERO as Bindings['MAIL_HERO'] | undefined)?.setGuard(sent) ?? missing();
-    if (app === 'lab') return (env.LAB as Bindings['LAB'] | undefined)?.setGuard(sent) ?? missing();
     if (app === 'watch') return (env.WATCH as Bindings['WATCH'] | undefined)?.setGuard(sent) ?? missing();
     return (env.TODOFY as Bindings['TODOFY'] | undefined)?.setGuard(sent) ?? missing();
   }, asGuardState);

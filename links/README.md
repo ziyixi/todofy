@@ -103,18 +103,18 @@ production:
   expired key gets too), both `Cache-Control: private, no-store` and `X-Robots-Tag: noindex`. A 302 to the Access
   login page there means the Access application covers more than `/_/*`. Never make a public link with that key.
 
-The deploy token is `CF_API_TOKEN`, as for Lab and FlowDay. The wrapper writes three Worker secrets:
+The deploy token is `CF_API_TOKEN`, as for FlowDay. The wrapper writes three Worker secrets:
 
 | Worker secret | From the `production` environment secret | Why |
 | --- | --- | --- |
-| `ACCESS_OWNER` | `DASHBOARD_ACCESS_OWNER` | the links app's owner is the dashboard's owner: one person with the same Access identities, so it reuses the dashboard's secret (as Lab and FlowDay do) instead of a copy that could drift |
+| `ACCESS_OWNER` | `DASHBOARD_ACCESS_OWNER` | the links app's owner is the dashboard's owner: one person with the same Access identities, so it reuses the dashboard's secret (as FlowDay does) instead of a copy that could drift |
 | `ACCESS_OWNER_ALIASES` | `DASHBOARD_ACCESS_OWNER_ALIASES` | as above |
 | `CSRF_SIGNING_KEY` | `LINKS_CSRF_SIGNING_KEY` (the links app's own) | a separate key per app: a token of one app never verifies at another |
 
 Inside the job the inputs keep their `LINKS_*` names; only the job's `env:` maps the owner's two to the dashboard's
-secrets, and `.github/scripts/test_wrangler_configs.py` checks that mapping (and that the dashboard's, Lab's, FlowDay's
+secrets, and `.github/scripts/test_wrangler_configs.py` checks that mapping (and that the dashboard's, FlowDay's
 and this wrapper accept the same owner values). A change to either owner secret reaches the links app only with its
-own deploy: after changing one, dispatch `all` (or `dashboard`, `lab`, `flowday` and `links`), as
+own deploy: after changing one, dispatch `all` (or `dashboard`, `flowday`, `links` and `watch`), as
 [`../dashboard/docs/setup.md`](../dashboard/docs/setup.md) §3 says. The CSRF key is 64 hex characters, made where `gh`
 is logged in and never pasted anywhere; rotating it is the same command followed by a links deploy (an open launcher
 then fetches a new token):

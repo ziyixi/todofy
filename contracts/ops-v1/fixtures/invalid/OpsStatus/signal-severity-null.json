@@ -1,69 +1,69 @@
 {
   "version": "ops-v1",
-  "app": "lab",
-  "generated_at": "2026-09-30T08:00:00Z",
+  "app": "watch",
+  "generated_at": "2026-10-01T14:00:00Z",
   "health": "degraded",
   "modes": {
     "maintenance": false,
-    "ingest_paused": false
+    "notifications": true
   },
   "guard": {
     "level": "shed",
-    "reason": "d1_reads_high",
-    "until": "2026-09-30T20:00:00Z",
-    "set_at": "2026-09-30T07:30:00Z",
+    "reason": "do_rows_read_high",
+    "until": "2026-10-02T01:00:00Z",
+    "set_at": "2026-10-01T13:30:00Z",
     "deferred": [
-      "feed_fetch",
-      "embed",
-      "rank",
-      "brief",
-      "seed_resolve",
-      "retention"
+      "scheduled_checks",
+      "daily_sweep"
     ]
   },
   "signals": [
     {
-      "code": "feed_stale",
+      "code": "notify_unsettled",
       "severity": null,
       "metrics": {
-        "hours": 80
+        "open": 1,
+        "failed": 1
       },
-      "since": "2026-09-27T00:00:00Z"
+      "since": "2026-09-29T14:00:00Z"
     },
     {
-      "code": "neuron_cap_hit",
+      "code": "scheduler_stale",
       "severity": "warning",
       "metrics": {
-        "used": 4996.2,
-        "cap": 5000
+        "hours": 13
       },
-      "since": "2026-09-30T06:41:10Z"
+      "since": "2026-10-01T01:00:00Z"
     },
     {
-      "code": "send_unsettled",
+      "code": "watches_broken",
       "severity": "warning",
       "metrics": {
-        "count": 1
-      }
+        "count": 2
+      },
+      "since": "2026-09-26T14:00:00Z"
     },
     {
       "code": "guard_shed",
       "severity": "info",
       "metrics": {
-        "seconds_left": 43200
+        "seconds_left": 39600
       }
     }
   ],
   "counters": {
-    "ingested_24h": 0,
-    "ranked_24h": 0,
-    "liked_7d": 3,
-    "decided_7d": 20,
-    "neurons_today": 4996.2,
-    "neuron_cap": 5000
+    "watches_active": 1,
+    "watches_paused": 0,
+    "watches_broken": 2,
+    "watches_failing": 2,
+    "changes_new": 0,
+    "fetches_today": 0,
+    "notifications_pending": 1,
+    "intents_open": 1,
+    "intents_sent_today": 0
   },
   "last_backup_at": null,
-  "ui_url": "https://lab.example.com/",
+  "ui_url": "https://watch.example.com/",
   "capabilities": [
     "guard"
   ]

@@ -1,5 +1,5 @@
 /**
- * The watch app's adapter of packages/edge-auth (its SPEC §5.4: the dashboard's, Lab's, FlowDay's and the links app's
+ * The watch app's adapter of packages/edge-auth (its SPEC §5.4: the dashboard's, FlowDay's and the links app's
  * parameters): Cloudflare Access for the owner on every path but /health, and Origin plus the signed double-submit
  * CSRF token (cookie `watch_csrf`) for every mutation.
  */

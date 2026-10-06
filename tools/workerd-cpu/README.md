@@ -1,6 +1,6 @@
 # workerd-cpu: calibrated CPU bounds for the workerd tests
 
-The shared part of the apps' CPU tests: Lab's, FlowDay's, the links app's, the dashboard's and the watch app's
+The shared part of the apps' CPU tests: FlowDay's, the links app's, the dashboard's and the watch app's
 `worker/test/runtime/cpu.test.ts`, and Mail Hero's `cloudflare/test/cpu/native-ops-cpu.test.mjs`. Test tooling
 only: tests import [`workerd-cpu.mts`](workerd-cpu.mts) by relative path, no bundle carries it, and a change here
 re-checks every app and deploys none (`.github/scripts/ci_changes.py`). Its own tests need no workerd:
@@ -29,14 +29,14 @@ after 30 s with the step it was in (`TimedOut`), instead of hanging until the ru
 (300 s), the tests' own timeout, leaves room for replaced isolates on a busy machine.
 
 An isolate whose session or calibration timed out is replaced the same way, within the same three more: the inspector
-sometimes gives no answer within 30 s (2 of 38 Todofy and 1 of 30 Lab runs on a busy machine,
+sometimes gives no answer within 30 s (2 of 38 Todofy runs on a busy machine,
 2026-10-02), and one such isolate must not fail a required check. Fewer than three finished isolates fail the test
 with every timeout named, so an inspector or a request that hangs every time still fails it. Any other failure is the
 test's error at once.
 
 ## Why the median of three isolates (2026-10-01)
 
-The cold assertions were the flaky ones. On GitHub runners Lab's first API request, a single isolate's single run,
+The cold assertions were the flaky ones. On GitHub runners an app's first API request, a single isolate's single run,
 read 4.2-5.3 reference ms in ten runs and 5.7-7.2 in the five after ops-v1 moved onto `proto/`. One of those was
 7.18 against a bound of 7 (speed 1.69; its rerun passed). The warm medians of the same runs stayed close to the
 reference machine's. Two things make a cold number noisy, and the data separates them.
@@ -46,15 +46,13 @@ reference machine's. Two things make a cold number noisy, and the data separates
   The median of three is never decided by one isolate's outlier, high or low. Each isolate is scaled by its own
   calibration, which runs within seconds of its cold run.
 - **Machines differ more on cold runs than on warm ones.** Runners read cold runs higher than the reference machine,
-  even after scaling by the warm calibration: Lab about 1.3 times (median 6.2 against 4.8), the dashboard's first
+  even after scaling by the warm calibration: up to about 1.3 times for that first API request, the dashboard's first
   tick 1.2 times (11.6 against 9.6), FlowDay's first sync 1.15 times, Mail Hero 1.0-1.2 times (higher on the faster
   runners), and the links app's first API request 0.95 times. A median does not remove this. Each bound keeps the
   headroom its app needs above the runners, and still fails a 5 ms regression on the reference machine.
 
 | Measured | Reference machine, idle | Runners (single isolates) | Bound |
 | --- | --- | --- | --- |
-| Lab, first API request | 4.0-5.2 | 5.7-7.2 | 8.5 (was 7) |
-| Lab, other first runs | at most 3.4 | at most 3.6 | 7 |
 | Links, first request / first API request | 1.2-1.7 / 4.2-4.5 | 1.0-1.7 / 3.2-4.3 | 3 / 9 |
 | Dashboard, first tick | 8.4-10.3 | 11.1-12.4 | 16 |
 | Mail Hero, first `status()` | 5.8-6.9 | 5.0-7.1 (medians of 3) | 9 (was 8) |
@@ -62,17 +60,16 @@ reference machine's. Two things make a cold number noisy, and the data separates
 | Watch, the fetch handler's very first request | 2.0-2.2 | 2.8 (one run) | 6 |
 
 All values are reference ms. The reference machine's are medians of three isolates over eight runs of each runtime
-suite (single isolates spread wider: the dashboard's 6.3-11.8). The runner data comes from 15 Lab, 11 links, 5
+suite (single isolates spread wider: the dashboard's 6.3-11.8). The runner data comes from 11 links, 5
 dashboard, 5 Mail Hero and 15 FlowDay check jobs on 2026-10-01.
 
 **Regression proof.** A deterministic loop of about 5 ms of CPU (5.0-5.4 ms in the profile) was added to the first
-request of the isolate: Lab's fetch handler, Mail Hero's `Ops.status()`. With it, every one of six runs per app
-failed on the reference machine. Lab read medians of 9.8-10.1 against 8.5. Mail Hero read 10.6-11.2 against 9.
-Without the replacement of disturbed isolates, one of five Lab runs passed: one isolate's calibration hit a busy
-moment (12.6 ms wall for 5.6 ms of CPU, so a speed of 2.62), and another isolate lost samples.
+request of the isolate, Mail Hero's `Ops.status()`. With it, every one of six runs failed on the reference machine:
+medians of 10.6-11.2 against 9. Without the replacement of disturbed isolates, a run with that loop could pass: one
+isolate's calibration hit a busy moment (12.6 ms wall for 5.6 ms of CPU, so a speed of 2.62), and another isolate lost samples.
 
 **Pass rates.** These runs were on the reference machine while other work loaded it (load average 4-14). Every touched
-runtime suite passed 8 of 8 runs: Lab, the links app, the dashboard, Mail Hero's `test:cpu`, FlowDay and the watch
+runtime suite passed 8 of 8 runs: the links app, the dashboard, Mail Hero's `test:cpu`, FlowDay and the watch
 app. With nine of its ten cores also busy (`yes`, load average 17-42), each passed 2 of 2. On such a machine most
 calibrations are disturbed and the profiles lose samples, so the numbers read low. The test stays as lenient there
 as it always was; `MAX_SPEED` is its limit.
@@ -110,7 +107,6 @@ and with nine cores busy.
 **Cost.** These are per-test durations on the reference machine, under the background load of other work, before
 and after the change:
 
-- Lab: 2.3 → 6.7-8.5 s.
 - The links app: 1.9 → 4.6-5.1 s.
 - The dashboard: 0.8 → 1.6 s, or 3.3 s with a replaced isolate.
 - Mail Hero: 2.6 → 3.5-4.9 s. It already started three isolates.

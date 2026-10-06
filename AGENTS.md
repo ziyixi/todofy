@@ -65,7 +65,7 @@
 - 本地只用本地绑定与各应用 `.dev.vars`；D1 命令显式 `--local`，开发不得使用 `--remote`。
 - 分支完整通过 `CI gate` 后合并同一 green SHA。Rebase 或追加提交后重跑受影响检查；pending、cancelled 不是 green。
   正式发布只走授权的 `main` Actions；PR 不接触生产凭据，各应用保留独立 concurrency group。
-- 发布只影响该应用及共享代码实际使用者；更新 reachability 时同步守卫。Lab/Watch 等待 Todofy；Home 等待其四个 Ops 服务。
+- 发布只影响该应用及共享代码实际使用者；更新 reachability 时同步守卫。Watch 等待 Todofy；Home 等待其绑定的 Ops 服务。
   Worker 配置变更前运行 hostname guard；显式、精确审核主机移除/接管，不覆盖其他 Worker 或 DNS。
 - `infra/` 管理其声明范围内的 Access 与 D1/R2 存在性，变更走 gated Infra apply，不手改 dashboard。
   完整配置、CI 门禁和回退见 [CI/CD](docs/ci-cd.md)、[infra README](infra/README.md)。
@@ -77,7 +77,6 @@
 - Todofy：[开发约束](todofy/docs/dev-notes.md)、[网关合同](todofy/docs/gateway-contract.md)、[发布](todofy/docs/ci-cd.md)。
 - Home：[架构约束](docs/architecture.md#home)、[设计](dashboard/docs/design.md)、[当前视图](dashboard/docs/design-v2.md)、
   [配额](dashboard/docs/limits.md)、[设置](dashboard/docs/setup.md)。不读取其他应用 D1/R2/代码；status、刷新、漂移有明确调用预算。
-- Lab：[设计](lab/docs/design.md)、[交互](lab/docs/ux.md)。固定 arXiv 来源，有 AI 硬上限，owner 确认后才提议任务。
 - FlowDay：[AGENTS](flowday/AGENTS.md)、[设计](flowday/docs/design.md)。从不写 Todoist，控制 D1 写入与分页读取。
 - Links：[AGENTS](links/AGENTS.md)、[设计](links/docs/design.md)。匿名重定向一次索引读取、零写入、不记录 key/目标。
 - Watch：[AGENTS](watch/AGENTS.md)、[设计](watch/docs/design.md)。逐跳抓取政策、合成站点、内容不进通知；冻结 intent 幂等重试。

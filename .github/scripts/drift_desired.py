@@ -58,7 +58,6 @@ ZONES = (load_profile(REPO)["zone"],)
 WRAPPERS = {
     "mail-hero": {"language": "js", "file": "mail-hero/deploy/deploy-vars.mjs", "vars": "mail-hero", "secrets": "mail-hero"},
     "dashboard": {"language": "js", "file": "dashboard/deploy/deploy-vars.mjs", "vars": "home", "secrets": "home"},
-    "lab": {"language": "js", "file": "lab/deploy/deploy-vars.mjs", "vars": "lab", "secrets": "lab"},
     "flowday": {"language": "js", "file": "flowday/deploy/deploy-vars.mjs", "vars": "flowday", "secrets": "flowday"},
     "links": {"language": "js", "file": "links/deploy/deploy-vars.mjs", "vars": "links", "secrets": "links"},
     "watch": {"language": "js", "file": "watch/deploy/deploy-vars.mjs", "vars": "watch", "secrets": "watch"},

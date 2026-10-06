@@ -5,9 +5,9 @@ not deploy, follow redirects, or print Cloudflare response bodies or credentials
 
 ```sh
 # From the app's worker directory; omit DB for an app without D1.
-bash ../../tools/deploy-probes/production.sh lab ../wrangler.toml DB
+bash ../../tools/deploy-probes/production.sh links ../wrangler.toml DB
 # From the repository root; issuer and host come from the committed config.
-bash tools/deploy-probes/access.sh / /api/v1/today
+bash tools/deploy-probes/access.sh / /api/v1/homeView
 ```
 
 `production.sh` needs Bash, jq, the app's installed Wrangler, `GITHUB_SHA` and

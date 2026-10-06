@@ -32,7 +32,7 @@ window.
 | `worker/` | The Worker: `src/` (router, Access and CSRF, API, D1 stores, the read-only Todoist sync), `test/` (Node unit tests; `test/runtime/` on workerd with real D1) |
 | `migrations/` | D1 schema: `0001` is the container-era SQLite schema, unchanged; `0002` adds `tasks.todoist_project_id`; `0003` drops four indexes no query needs |
 | `web/` | The UI (`app/`, `components/`, `features/`, `lib/`), its tests (`web/__tests__/`) and scripts |
-| `deploy/` | `deploy-vars.mjs` (the deploy wrapper, Lab's shape: `BUILD_SHA` and the Worker secrets at deploy; refuses a placeholder D1 id or AUD) and its tests; `migrate/flowday_migrate.py`, the F4 import of the container's SQLite file into D1 (export, check-empty, import, verify, reset; within the account's daily D1 write budget, read from the GraphQL Analytics API; [`docs/design.md`](docs/design.md) section 11) |
+| `deploy/` | `deploy-vars.mjs` (the deploy wrapper, the dashboard's shape: `BUILD_SHA` and the Worker secrets at deploy; refuses a placeholder D1 id or AUD) and its tests; `migrate/flowday_migrate.py`, the F4 import of the container's SQLite file into D1 (export, check-empty, import, verify, reset; within the account's daily D1 write budget, read from the GraphQL Analytics API; [`docs/design.md`](docs/design.md) section 11) |
 | `docs/design.md` | The Workers Free design: sync, write budget, limits, security, migration plan |
 | `docs/prd.md` | Product requirements from the standalone repository (historical in parts) |
 | `docs/ui-test-plan.md` | The UI test catalog; every `UI-###` id must match a Playwright test (`ui-test-plan-sync.test.ts`) |
@@ -84,21 +84,21 @@ dry-runs, runs the hostname guard (`tools/cf-guard`), applies the D1 migrations
   for this host (the dashboard's probe), the manifest, two icons and `/pwa/sw` by the Worker with 200 and their
   media types (through "flowday-bypass"), and `/pwa/sw.js`, which is not a public file, by the Worker's 401.
 
-The deploy token is `CF_API_TOKEN`, as for Lab.
+The deploy token is `CF_API_TOKEN`, as for the dashboard.
 
 The wrapper writes four Worker secrets:
 
 | Worker secret | From the `production` environment secret | Why |
 | --- | --- | --- |
-| `ACCESS_OWNER` | `DASHBOARD_ACCESS_OWNER` | FlowDay's owner is the dashboard's owner: one person with the same Access identities, so FlowDay reuses the dashboard's secret (as Lab does) instead of a copy that could drift |
+| `ACCESS_OWNER` | `DASHBOARD_ACCESS_OWNER` | FlowDay's owner is the dashboard's owner: one person with the same Access identities, so FlowDay reuses the dashboard's secret instead of a copy that could drift |
 | `ACCESS_OWNER_ALIASES` | `DASHBOARD_ACCESS_OWNER_ALIASES` | as above |
 | `CSRF_SIGNING_KEY` | `FLOWDAY_CSRF_SIGNING_KEY` (FlowDay's own) | a separate key per app: a token of one app never verifies at another |
 | `CREDENTIAL_KEY` | `FLOWDAY_CREDENTIAL_KEY` (FlowDay's own) | seals the Todoist key stored in D1 (AES-256-GCM, `worker/src/credentials.ts`). Keep an offline copy; losing or changing it only means entering the Todoist key again |
 
 Inside the job the inputs keep their `FLOWDAY_*` names; only the job's `env:` maps the owner's two to the
-dashboard's secrets, and `.github/scripts/test_wrangler_configs.py` checks that mapping (and that the dashboard's,
-Lab's and FlowDay's wrappers accept the same owner values). A change to either owner secret reaches FlowDay only
-with a FlowDay deploy: after changing one, dispatch `all` (or `dashboard`, `lab` and `flowday`), as
+dashboard's secrets, and `.github/scripts/test_wrangler_configs.py` checks that mapping (and that the dashboard's
+and FlowDay's wrappers accept the same owner values). A change to either owner secret reaches FlowDay only
+with a FlowDay deploy: after changing one, dispatch `all` (or `dashboard`, `flowday`, `links` and `watch`), as
 [`../dashboard/docs/setup.md`](../dashboard/docs/setup.md) §3 says. Each of FlowDay's two keys is 64 hex
 characters, made where `gh` is logged in and never pasted anywhere; rotating one is the same command followed by a
 FlowDay deploy:
@@ -155,7 +155,7 @@ one Custom Domain, `flowday.ziyixi.science`).
   `flowday` in the Cloudflare dashboard. Delete the D1 `flowday` only on purpose (export it first with
   `wrangler d1 export`), and the secrets `FLOWDAY_CSRF_SIGNING_KEY` and `FLOWDAY_CREDENTIAL_KEY`
   (`gh secret delete <name> -R ziyixi/todofy --env production`). The `DASHBOARD_ACCESS_OWNER*` secrets stay (the
-  dashboard and Lab use them), and so do the Access apps `flowday` and `flowday-bypass` (the container's hostname
+  dashboard, the links app and the watch app use them), and so do the Access apps `flowday` and `flowday-bypass` (the container's hostname
   uses them until F6). The D1 `flowday` and both Access apps are managed by `infra/` (IaC P4): never delete or edit
   them in the dashboard; they leave through a reviewed `infra/` change and a confirmed "Infra apply"
   (`infra/README.md` "FlowDay"). Detach the Custom Domain `flowday.ziyixi.science` first (the cutover rollback's step 1 above), and decide what serves the hostname afterwards.

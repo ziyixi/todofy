@@ -460,7 +460,6 @@ def test_unavailable_status_matches_the_contract_fixture():
 DEPLOYMENT_MODES = {
     "mail-hero": ["maintenance", "force_send_paused"],
     "todofy": ["maintenance", "processing_paused", "force_pause_todoist", "reminder_enabled"],
-    "lab": ["maintenance"],
     "watch": ["maintenance", "notifications"],
     "fleet": ["maintenance"],
     "newsletter": ["maintenance"],

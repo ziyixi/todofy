@@ -47,13 +47,12 @@ function input(overrides: Partial<DigestInput> = {}): DigestInput {
     now: NOW,
     usage: { configured: true, fresh: true, rows: [], fetched_at: NOW, consecutive_failures: 0, last_http_status: 200 },
     desired: { level: 'normal', reason: 'quota_normal', until: null, source: 'auto' },
-    guardFailures: { 'mail-hero': 0, todofy: 0, lab: 0, watch: 0, fleet: 0, newsletter: 0, 'notion-publish': 0 },
+    guardFailures: { 'mail-hero': 0, todofy: 0, watch: 0, fleet: 0, newsletter: 0, 'notion-publish': 0 },
     latestFinished: null,
     lastTickAt: NOW,
     apps: {
       'mail-hero': { consecutive_failures: 0, status: null, status_at: null },
       todofy: { consecutive_failures: 0, status: todofyOk as OpsStatus, status_at: NOW - 60_000 },
-      lab: { consecutive_failures: 0, status: null, status_at: null },
       watch: { consecutive_failures: 0, status: null, status_at: null },
       fleet: { consecutive_failures: 0, status: null, status_at: null },
       newsletter: { consecutive_failures: 0, status: null, status_at: null },
@@ -145,7 +144,7 @@ describe('digest items', () => {
   it('reports an active shed and repeated setGuard failures', () => {
     const list = items({
       desired: { level: 'shed', reason: 'owner_shed', until: NOW + 5_400_000, source: 'owner' },
-      guardFailures: { 'mail-hero': 2, todofy: 1, lab: 0, watch: 0, fleet: 0, newsletter: 0, 'notion-publish': 0 },
+      guardFailures: { 'mail-hero': 2, todofy: 1, watch: 0, fleet: 0, newsletter: 0, 'notion-publish': 0 },
     });
     expect(list.map(itemKey)).toEqual(['dashboard:guard_shed', 'mail-hero:guard_apply_failed']);
     expect(list[0]?.metrics).toEqual({ hours_left: 1.5, manual: 1 });
@@ -179,7 +178,6 @@ describe('digest items', () => {
       apps: {
         'mail-hero': { consecutive_failures: 0, status: mailHeroDegraded as OpsStatus, status_at: NOW - 60_000 },
         todofy: { consecutive_failures: 2, status: unavailable as OpsStatus, status_at: NOW - 30 * 60_000 },
-        lab: { consecutive_failures: 0, status: null, status_at: null },
         watch: { consecutive_failures: 0, status: null, status_at: null },
       fleet: { consecutive_failures: 0, status: null, status_at: null },
       newsletter: { consecutive_failures: 0, status: null, status_at: null },

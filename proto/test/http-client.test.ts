@@ -4,7 +4,7 @@
  */
 import { describe, expect, test, vi } from 'vitest';
 import { create } from '@bufbuild/protobuf';
-import { LabUiService } from '../ts/lab/ui/v1/lab_ui_service_pb.ts';
+import { WatchUiService } from '../ts/watch/ui/v1/watch_ui_service_pb.ts';
 import { BookSchema, BookService, Genre, ListBooksResponseSchema, ShelfSchema } from '../ts/prototest/v1/prototest_pb.ts';
 import { createHttpClient, HttpEncodeError, HttpResponseError, RpcStatusError, type HttpCall } from '../ts/http-client.ts';
 import { HttpTranscoder, type ServiceHandlers, type ShapeOf } from '../ts/http-transcoder.ts';
@@ -81,11 +81,11 @@ describe('the typed client', () => {
 
   test('a dot segment in a resource name throws before anything is sent', async () => {
     const send = vi.fn();
-    const lab = createHttpClient(LabUiService, send);
-    await expect(lab.getDeckSummary({ name: 'decks/../summary' })).rejects.toBeInstanceOf(HttpEncodeError);
-    await expect(lab.getDeck({ name: 'decks/..' })).rejects.toBeInstanceOf(HttpEncodeError);
-    await expect(lab.getDeck({ name: 'decks/.' })).rejects.toBeInstanceOf(HttpEncodeError);
-    await expect(lab.deleteLikedPaper({ name: 'likedPapers/..' })).rejects.toBeInstanceOf(HttpEncodeError);
+    const watch = createHttpClient(WatchUiService, send);
+    await expect(watch.listChanges({ parent: 'watches/..' })).rejects.toBeInstanceOf(HttpEncodeError);
+    await expect(watch.getWatch({ name: 'watches/..' })).rejects.toBeInstanceOf(HttpEncodeError);
+    await expect(watch.getWatch({ name: 'watches/.' })).rejects.toBeInstanceOf(HttpEncodeError);
+    await expect(watch.deleteWatch({ name: 'watches/..' })).rejects.toBeInstanceOf(HttpEncodeError);
     expect(send).not.toHaveBeenCalled();
   });
 

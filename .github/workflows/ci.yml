@@ -1,12 +1,12 @@
-# One workflow for the apps (Todofy, Mail Hero, the home dashboard, the website, Lab, FlowDay, the links app and the
-# watch app).
+# One workflow for the apps (Todofy, Mail Hero, the home dashboard, the website, FlowDay, the links app, the watch app,
+# Fleet, Newsletter and Platform).
 # "changes" decides what changed since a cumulative base (.github/scripts/ci_changes.py), each app's checks run
 # from its own directory, "Shared packages" checks packages/* (compiled into the apps), "Contracts" runs both
 # sides of mail.received.v1, ops-v1 and task-intent-v1 plus the dashboard's ops-v1 caller tests, "Proto checks"
 # gates the protobuf IDL in proto/, and "CI gate" is the single status check to require.
 # Deploys run only on main, only for the app that changed (itself, a shared package it compiles in, a contract
-# file it bundles, or was dispatched), after the gate passes; Lab and the watch app deploy after Todofy (their TODOFY
-# bindings) and the dashboard after every app whose Ops entrypoint it binds. A push to main whose commit already passed every
+# file it bundles, or was dispatched), after the gate passes; the watch app deploys after Todofy (its TODOFY
+# binding) and the dashboard after every app whose Ops entrypoint it binds. A push to main whose commit already passed every
 # needed check in a branch push run reuses that run: the checks are skipped, the gate and the deploys still run
 # (ci_changes.py find_reusable). Every deploy that applies routes runs tools/cf-guard first.
 # See docs/ci-cd.md.
@@ -21,7 +21,7 @@ on:
         description: App to check and (on main) deploy
         type: choice
         # both = Todofy and Mail Hero (as before the dashboard existed); all = every app.
-        options: [both, all, todofy, mail-hero, dashboard, website, lab, flowday, links, watch, newsletter, fleet, platform]
+        options: [both, all, todofy, mail-hero, dashboard, website, flowday, links, watch, newsletter, fleet, platform]
         default: both
       resume_vps_release:
         description: Explicitly resume a held VPS release after investigating its safe error
@@ -57,7 +57,6 @@ jobs:
       mail_hero_check: ${{ steps.decide.outputs.mail_hero_check }}
       dashboard_check: ${{ steps.decide.outputs.dashboard_check }}
       website_check: ${{ steps.decide.outputs.website_check }}
-      lab_check: ${{ steps.decide.outputs.lab_check }}
       flowday_check: ${{ steps.decide.outputs.flowday_check }}
       links_check: ${{ steps.decide.outputs.links_check }}
       watch_check: ${{ steps.decide.outputs.watch_check }}
@@ -73,7 +72,6 @@ jobs:
       dashboard_deploy: ${{ steps.decide.outputs.dashboard_deploy }}
       website_deploy: ${{ steps.decide.outputs.website_deploy }}
       website_relay_deploy: ${{ steps.decide.outputs.website_relay_deploy }}
-      lab_deploy: ${{ steps.decide.outputs.lab_deploy }}
       flowday_deploy: ${{ steps.decide.outputs.flowday_deploy }}
       links_deploy: ${{ steps.decide.outputs.links_deploy }}
       watch_deploy: ${{ steps.decide.outputs.watch_deploy }}
@@ -112,8 +110,8 @@ jobs:
       - name: Test the deploy hostname guard
         run: node --test tools/cf-guard/test/*.test.mjs tools/cloud-config/tests/worker-secrets.test.mjs
       # The shared test and build tools the apps' checks import by relative path (dependency-free, synthetic data):
-      # the bundle-size budgets and the CPU meter of the workerd CPU tests, whose workerd side runs in the Lab, FlowDay,
-      # Mail Hero and dashboard suites.
+      # the bundle-size budgets and the CPU meter of the workerd CPU tests, whose workerd side runs in the FlowDay,
+      # links, watch, Mail Hero and dashboard suites.
       - name: Test the shared bundle-size and CPU test tools
         run: node --test tools/bundle-size/test/*.test.mjs tools/workerd-cpu/test/*.test.mts
       # On a push to main it reads this workflow's runs with the read-only token: the newest first-parent commit
@@ -255,7 +253,6 @@ jobs:
           test -f "$RUNNER_TEMP/todofy-core-bundle/python_modules/ziyixi_proto/mailhero/webhook/v1/mail_received_pb.py"
           test -f "$RUNNER_TEMP/todofy-core-bundle/python_modules/ziyixi_proto/todofy/ui/v1/todofy_ui_service_pb.py"
           test ! -e "$RUNNER_TEMP/todofy-core-bundle/python_modules/ziyixi_proto/prototest"
-          test ! -e "$RUNNER_TEMP/todofy-core-bundle/python_modules/ziyixi_proto/lab"
           uv run python deploy/deploy_vars.py exec gateway -- npx --no-install wrangler deploy --dry-run \
             --config gateway/wrangler.toml --secrets-file "$RUNNER_TEMP/todofy-gateway-secrets.json" \
             --outdir "$RUNNER_TEMP/todofy-gateway-bundle"
@@ -573,72 +570,6 @@ jobs:
         if: always()
         run: rm -f "$RUNNER_TEMP/home-secrets.json"
 
-  # Lab / Paper Radar (Worker "lab", docs in lab/docs). Everything runs from lab/ with synthetic data: the runtime
-  # suite runs the real LabState and D1 in workerd with a fake AI binding, a fake arXiv and a stub Todofy whose Ops
-  # entrypoint checks every task-intent-v1 input; no network.
-  lab-checks:
-    name: Lab checks
-    needs: changes
-    if: needs.changes.outputs.lab_check == 'true'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    defaults:
-      run:
-        working-directory: lab
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
-        with:
-          node-version: '26'
-          cache: npm
-          cache-dependency-path: |
-            lab/worker/package-lock.json
-            lab/web/package-lock.json
-            proto/package-lock.json
-      - name: Install locked dependencies
-        run: |
-          npm ci --prefix worker --no-audit --no-fund
-          npm ci --prefix web --no-audit --no-fund
-      # The config test reads wrangler.toml with the pinned wrangler (worker/node_modules), hence after npm ci.
-      - name: Test the production config and deploy values
-        run: node --test deploy/test/*.test.mjs
-      - name: Lint, typecheck and test the Worker
-        working-directory: lab/worker
-        run: |
-          npm run lint
-          npm run typecheck
-          npm test
-      - name: Runtime tests (workerd with the real LabState and D1, fake AI and arXiv, stub Todofy)
-        working-directory: lab/worker
-        run: npm run test:runtime
-      # Builds web/dist, which the dry-run below serves as static assets.
-      - name: Lint, typecheck, test and build the UI
-        working-directory: lab/web
-        run: |
-          npm run lint
-          npm run typecheck
-          npm test
-          npm run build
-      # The committed production config (lab/wrangler.toml), run exactly as the deploy runs it, with placeholder
-      # values for what the deploy adds (deploy/deploy-vars.mjs). No token is needed for --dry-run. The bundle it
-      # writes is held to Lab's budget and the Workers Free limit (deploy/bundle-size.mjs).
-      - name: Dry-run the committed production config
-        working-directory: lab/worker
-        env:
-          LAB_ACCESS_OWNER: owner@example.com
-          LAB_ACCESS_OWNER_ALIASES: ''
-          LAB_CSRF_SIGNING_KEY: '0000000000000000000000000000000000000000000000000000000000000000'
-        run: |
-          node ../deploy/deploy-vars.mjs secrets "$RUNNER_TEMP/lab-secrets.json"
-          node ../deploy/deploy-vars.mjs exec -- npx --no-install wrangler deploy --dry-run --config ../wrangler.toml \
-            --secrets-file "$RUNNER_TEMP/lab-secrets.json" --outdir "$RUNNER_TEMP/lab-bundle"
-          node ../deploy/bundle-size.mjs "$RUNNER_TEMP/lab-bundle"
-      - name: Remove the placeholder secrets file
-        if: always()
-        run: rm -f "$RUNNER_TEMP/lab-secrets.json"
-
   # FlowDay (flowday/: the Worker "flowday", its D1 schema and the Next.js static export it serves). "FlowDay deploy"
   # needs this job. It compiles in packages/edge-auth and the TypeScript proto runtime with proto/flowday/ui/ (its owner
   # API, flowday.ui.v1); no contract.
@@ -940,7 +871,6 @@ jobs:
             mail-hero/cloudflare/package-lock.json
             todofy/gateway/package-lock.json
             dashboard/worker/package-lock.json
-            lab/worker/package-lock.json
             watch/worker/package-lock.json
             fleet/worker/package-lock.json
             proto/package-lock.json
@@ -1002,17 +932,9 @@ jobs:
         run: |
           npm ci --no-audit --no-fund
           npx --no-install vitest run test/ops-client.test.ts test/ops-golden.test.ts test/guard.test.ts test/canary.test.ts test/digest.test.ts
-      # task-intent-v1, the proposer: every fixture gets validate.mjs's verdict (Todofy's step above gives the same
-      # fixtures the Python jsonschema verdict), the generated types and the TypeScript codec agree with the schema
-      # on every fixture, the ts constants match it, every intent Lab builds passes it (and keeps the bytes Lab froze
-      # before the generated types), and Lab maps every result fixture. ops-v1: Lab's status and guard answers keep
-      # their golden bytes and pass the legacy schema. Host only; Lab checks runs the workerd flows.
-      - name: Lab proposes task-intent-v1 and answers ops-v1 as declared
-        working-directory: lab/worker
-        run: |
-          npm ci --no-audit --no-fund
-          npx --no-install vitest run test/task-intent-contract.test.ts test/intent.test.ts test/ops-golden.test.ts
-      # task-intent-v1, the watch app's notification sink (W3): its daily digest and an urgent change keep the bytes of
+      # task-intent-v1, the watch app's notification sink (W3): every fixture gets validate.mjs's verdict (Todofy's step
+      # above gives the same fixtures the Python jsonschema verdict), the generated types and the TypeScript codec agree
+      # with the schema on every fixture, and the ts constants match it (task-intent-contract.test.ts); its daily digest and an urgent change keep the bytes of
       # the contract's watch fixtures (which Todofy's step above accepts and pins), every intent it can build passes
       # validate.mjs with only the owner's names, trigger types, counts and links to the app, and every result Todofy
       # may give maps to recorded, refused or a retry. ops-v1: its status and guard answers keep their golden bytes and
@@ -1022,7 +944,7 @@ jobs:
         working-directory: watch/worker
         run: |
           npm ci --no-audit --no-fund
-          npx --no-install vitest run test/todofy.test.ts test/ops-golden.test.ts
+          npx --no-install vitest run test/task-intent-contract.test.ts test/todofy.test.ts test/ops-golden.test.ts
 
       # Both ends of the signed content-free report validate the synthetic telemetry contract.
       # Home's caller step above also checks Fleet and Newsletter ops-v1 values; runtime tests live in Fleet checks.
@@ -1404,7 +1326,7 @@ jobs:
 
   gate:
     name: CI gate
-    needs: [changes, shared-packages, todofy-static, todofy-runtime, todofy-checks, mail-hero-checks, dashboard-checks, website-checks, lab-checks, flowday-checks, links-checks, watch-checks, fleet-checks, newsletter-checks, newsletter-image, platform-checks, contracts, infra-checks, proto-checks]
+    needs: [changes, shared-packages, todofy-static, todofy-runtime, todofy-checks, mail-hero-checks, dashboard-checks, website-checks, flowday-checks, links-checks, watch-checks, fleet-checks, newsletter-checks, newsletter-image, platform-checks, contracts, infra-checks, proto-checks]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -1419,7 +1341,6 @@ jobs:
           MAIL_HERO: ${{ needs.mail-hero-checks.result }}
           DASHBOARD: ${{ needs.dashboard-checks.result }}
           WEBSITE: ${{ needs.website-checks.result }}
-          LAB: ${{ needs.lab-checks.result }}
           FLOWDAY: ${{ needs.flowday-checks.result }}
           LINKS: ${{ needs.links-checks.result }}
           WATCH: ${{ needs.watch-checks.result }}
@@ -1444,7 +1365,7 @@ jobs:
           failed=0
           for pair in "Changes=$CHANGES" "Shared packages=$PACKAGES" "Todofy static checks=$TODOFY_STATIC" \
             "Todofy runtime=$TODOFY_RUNTIME" "Todofy checks=$TODOFY" "Mail Hero checks=$MAIL_HERO" \
-            "Dashboard checks=$DASHBOARD" "Website checks=$WEBSITE" "Lab checks=$LAB" "FlowDay checks=$FLOWDAY" "Links checks=$LINKS" "Watch checks=$WATCH" "Fleet checks=$FLEET" \
+            "Dashboard checks=$DASHBOARD" "Website checks=$WEBSITE" "FlowDay checks=$FLOWDAY" "Links checks=$LINKS" "Watch checks=$WATCH" "Fleet checks=$FLEET" \
             "Newsletter checks=$NEWSLETTER" "Newsletter image checks=$NEWSLETTER_IMAGE" "Platform checks=$PLATFORM" \
             "Contracts=$CONTRACTS" "Infra checks=$INFRA" "Proto checks=$PROTO"; do
             echo "$pair"
@@ -1711,10 +1632,10 @@ jobs:
 
   dashboard-deploy:
     name: Dashboard deploy
-    # After the app deploys: the service bindings MAIL_HERO, TODOFY, LAB and WATCH name their "Ops" entrypoints, which
+    # After the app deploys: the service bindings MAIL_HERO, TODOFY, WATCH and FLEET name their "Ops" entrypoints, which
     # must be live first. An app deploy that did not run (nothing of that app changed) is fine; one that
     # failed or was cancelled stops this job.
-    needs: [changes, dashboard-checks, gate, todofy-deploy, mail-hero-deploy, lab-deploy, watch-deploy, fleet-deploy, website-relay-deploy]
+    needs: [changes, dashboard-checks, gate, todofy-deploy, mail-hero-deploy, watch-deploy, fleet-deploy, website-relay-deploy]
     # Explicit status function and results, as for Todofy deploy (implicit success() and skipped ancestors).
     if: >-
       ${{ !cancelled()
@@ -1723,7 +1644,6 @@ jobs:
       && needs.gate.result == 'success'
       && (needs.todofy-deploy.result == 'success' || needs.todofy-deploy.result == 'skipped')
       && (needs.mail-hero-deploy.result == 'success' || needs.mail-hero-deploy.result == 'skipped')
-      && (needs.lab-deploy.result == 'success' || needs.lab-deploy.result == 'skipped')
       && (needs.watch-deploy.result == 'success' || needs.watch-deploy.result == 'skipped')
       && (needs.fleet-deploy.result == 'success' || needs.fleet-deploy.result == 'skipped')
       && (needs.website-relay-deploy.result == 'success' || needs.website-relay-deploy.result == 'skipped')
@@ -1736,28 +1656,6 @@ jobs:
     uses: ./.github/workflows/worker-release.yml
     with:
       app: dashboard
-      source_sha: ${{ github.sha }}
-    secrets: inherit
-
-  lab-deploy:
-    name: Lab deploy
-    needs: [changes, lab-checks, gate, todofy-deploy]
-    # Explicit status function and results, as for Todofy deploy (implicit success() and skipped ancestors).
-    if: >-
-      ${{ !cancelled()
-      && needs.changes.result == 'success'
-      && (needs.lab-checks.result == 'success' || (needs.changes.outputs.checks_reused == 'true' && needs.lab-checks.result == 'skipped'))
-      && needs.gate.result == 'success'
-      && (needs.todofy-deploy.result == 'success' || needs.todofy-deploy.result == 'skipped')
-      && github.ref == 'refs/heads/main'
-      && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
-      && needs.changes.outputs.lab_deploy == 'true' }}
-    permissions:
-      contents: read
-      deployments: write
-    uses: ./.github/workflows/worker-release.yml
-    with:
-      app: lab
       source_sha: ${{ github.sha }}
     secrets: inherit
 

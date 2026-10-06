@@ -2,7 +2,7 @@
 """Decide which apps a CI run checks and deploys. Standard library only (the runner's python3).
 
 Outputs (GITHUB_OUTPUT, "true"/"false"):
-  todofy_check, mail_hero_check, dashboard_check, website_check, lab_check, flowday_check, links_check, watch_check,
+  todofy_check, mail_hero_check, dashboard_check, website_check, flowday_check, links_check, watch_check,
   newsletter_check, fleet_check, platform_check
                     run that app's full checks
   contracts         run the contract tests: both sides of mail.received.v1, ops-v1 and
@@ -17,7 +17,7 @@ Outputs (GITHUB_OUTPUT, "true"/"false"):
                     tools/ changed, or a dispatch.
   base              not a flag: the commit the diff started from (empty when everything runs), which
                     "Proto checks" compares the IDL with.
-  todofy_deploy, mail_hero_deploy, dashboard_deploy, website_deploy, lab_deploy, flowday_deploy, links_deploy,
+  todofy_deploy, mail_hero_deploy, dashboard_deploy, website_deploy, flowday_deploy, links_deploy,
   watch_deploy, newsletter_deploy, fleet_deploy, platform_publish, platform_deploy
                     the app, a shared package it compiles in, or a contract file it bundles changed
                     (deploy jobs also require refs/heads/main)
@@ -39,11 +39,11 @@ Outputs (GITHUB_OUTPUT, "true"/"false"):
 
 proto/ (the protobuf IDL, proto/README.md) checks every app in PROTO_USERS (an app that depends on @ziyixi/proto or
 ziyixi-proto) and deploys only the apps whose bundle the changed path reaches (proto_deploys): PROTO_USERS[app] names
-the languages whose generated code and runtime the app's production bundles compile in ("ts": Lab's, FlowDay's, Mail
+the languages whose generated code and runtime the app's production bundles compile in ("ts": FlowDay's, Mail
 Hero's, the links app's, the watch app's and the dashboard's Workers and UIs, and Todofy's gateway and UI
 (todofy.ui.v1's transcoder and client); "python": todofy-core, through the wheel pywrangler vendors), PROTO_RUNTIMES
 maps a language's runtime and generator to that language's users, and PROTO_PACKAGES maps each proto package to the apps
-that import its generated code (lab/ui reaches Lab only, flowday/ui FlowDay only, mailhero/ui Mail Hero only, links/ui
+that import its generated code (flowday/ui reaches FlowDay only, mailhero/ui Mail Hero only, links/ui
 the links app only, watch/ui the watch app only, dashboard/ui the dashboard only, todofy/ui Todofy only; prototest, the
 runtimes' fixtures, reaches no app). Tests, test data, the check scripts, the api-linter tool module, check configs and
 Markdown (PROTO_NOT_BUNDLED), and the files of a package proto/retired.json lists (its deletion), deploy nothing; any
@@ -63,8 +63,8 @@ so a change whose run was cancelled or failed is checked (and deployed) again by
   No usable base (no successful main run yet, API failure, base not an ancestor, no origin/main)
   runs everything. An app's own directory checks and deploys it; contracts/ and .github/ re-check
   every app but deploy none, except the contract files the TypeScript Workers bundle (BUNDLED_BY,
-  e.g. OPS_LIMITS in contracts/ops-v1/ops-v1.ts, or the schema and validate.mjs Lab checks task
-  intents with), which also deploy every app listed for them. A
+  e.g. OPS_LIMITS in contracts/ops-v1/ops-v1.ts, or TASK_INTENT_LIMITS in
+  contracts/task-intent-v1/task-intent-v1.ts), which also deploy every app listed for them. A
   shared package packages/<name>/ is compiled into the apps listed in PACKAGE_USERS, so any change
   inside it runs the package checks and checks AND deploys each of those apps. Its Markdown documents
   (packages/<name>/**/*.md: README, SPEC) are compiled into nothing: they run the package checks and
@@ -119,7 +119,6 @@ KEYS = (
     "mail_hero_check",
     "dashboard_check",
     "website_check",
-    "lab_check",
     "flowday_check",
     "links_check",
     "watch_check",
@@ -135,7 +134,6 @@ KEYS = (
     "dashboard_deploy",
     "website_deploy",
     "website_relay_deploy",
-    "lab_deploy",
     "flowday_deploy",
     "links_deploy",
     "watch_deploy",
@@ -151,7 +149,6 @@ DISPATCH = {
     "mail-hero": ("mail-hero",),
     "dashboard": ("dashboard",),
     "website": ("website",),
-    "lab": ("lab",),
     "flowday": ("flowday",),
     "links": ("links",),
     "watch": ("watch",),
@@ -170,13 +167,12 @@ INFRA = ("infra/", "tools/infra-plan-summary/")
 # classified through their own app directory; editing the central inputs alone cannot publish production.
 CLOUD_CONFIG = {"config/cloud.toml", "config/resources.toml", "config/account-resources.toml"}
 # packages/<name>/ -> the apps whose Workers compile it in (a "file:../../packages/<name>" dependency).
-PACKAGE_USERS = {"edge-auth": ("todofy", "mail-hero", "dashboard", "lab", "flowday", "links", "watch", "fleet")}
+PACKAGE_USERS = {"edge-auth": ("todofy", "mail-hero", "dashboard", "flowday", "links", "watch", "fleet")}
 # The protobuf IDL (proto/README.md): app -> the languages ("ts", "python") whose generated code and runtime
 # its production bundles compile in; () for a user whose bundles take nothing from it (types only, tests
 # only). test_proto.py derives this map from the apps' manifests and sources.
 PROTO = "proto/"
 PROTO_USERS: dict[str, tuple[str, ...]] = {
-    "lab": ("ts",),
     "todofy": ("python", "ts"),
     "flowday": ("ts",),
     "links": ("ts",),
@@ -203,13 +199,12 @@ PROTO_RUNTIMES: dict[str, tuple[str, ...]] = {
 # value imports, Python imports; test_proto.py checks this against the sources). A package missing here
 # reaches every user (fail safe; test_proto.py fails until it is listed).
 PROTO_PACKAGES: dict[str, tuple[str, ...]] = {
-    "proto/todofy/taskintent/": ("lab", "todofy", "watch"),
+    "proto/todofy/taskintent/": ("todofy", "watch"),
     # recommendation-v1 and summary-v1 (todofy/api/*.schema.json are generated from it): todofy-core builds them.
     "proto/todofy/report/": ("todofy",),
     # Todofy's owner API (todofy.ui.v1): todofy-core writes every answer with it, the gateway serves it through the
     # shared transcoder and Todofy's UI calls it through the shared client.
     "proto/todofy/ui/": ("todofy",),
-    "proto/lab/ui/": ("lab",),
     "proto/flowday/ui/": ("flowday",),
     "proto/links/ui/": ("links",),
     "proto/watch/ui/": ("watch",),
@@ -220,11 +215,11 @@ PROTO_PACKAGES: dict[str, tuple[str, ...]] = {
     "proto/dashboard/ui/": ("dashboard",),
     # Mail Hero's owner API (mailhero.ui.v2): its Worker serves it, its UI calls it.
     "proto/mailhero/ui/": ("mail-hero",),
-    # CommonReason: Platform bundles Python error aliases; Lab takes its names as types only.
+    # CommonReason: Platform bundles Python error aliases.
     "proto/common/errors/": ("platform",),
     # ops-v1 (contracts/ops-v1): every app's Ops entrypoint and the dashboard that calls them.
-    "proto/ops/": ("mail-hero", "lab", "todofy", "dashboard", "watch", "website"),
-    "proto/website/sync/": ("mail-hero", "lab", "todofy", "dashboard", "watch", "website"),
+    "proto/ops/": ("mail-hero", "todofy", "dashboard", "watch", "website"),
+    "proto/website/sync/": ("mail-hero", "todofy", "dashboard", "watch", "website"),
     # mail.received.v1 (contracts/mail-received-v1's schema is generated from it): Mail Hero builds every event,
     # todofy-core reads every webhook body.
     "proto/mailhero/webhook/": ("mail-hero", "todofy"),
@@ -258,20 +253,16 @@ PROTO_NOT_BUNDLED = (
 )
 
 # Contract files whose code a TypeScript Worker imports at runtime (constants such as OPS_LIMITS land
-# in its bundle; Lab validates task intents with their schema and validate.mjs), mapped to the apps
+# in its bundle), mapped to the apps
 # that bundle them: a change ships only with a deploy of each. ops-v1's schema is generated from
 # proto/ops/ and bundled by nobody: every app reads and writes ops-v1 with the generated code
 # (PROTO_PACKAGES).
 # test_ci_changes.py checks this map against the Workers' imports.
 BUNDLED_BY = {
-    "contracts/ops-v1/ops-v1.ts": ("todofy", "mail-hero", "dashboard", "lab", "watch"),
-    # Lab validates its task intents and Todofy's answers with validate.mjs (ops-v1 answers are read with the
-    # generated code: proto/ops/).
-    "contracts/ops-v1/validate.mjs": ("lab",),
-    # task-intent-v1: Lab and the watch app propose (bounds; Lab also the schema), Todofy's gateway forwards (the input
-    # bound). The types are generated from proto/ (PROTO_USERS).
-    "contracts/task-intent-v1/task-intent-v1.ts": ("lab", "todofy", "watch"),
-    "contracts/task-intent-v1/task-intent-v1.schema.json": ("lab",),
+    "contracts/ops-v1/ops-v1.ts": ("todofy", "mail-hero", "dashboard", "watch"),
+    # task-intent-v1: the watch app proposes (bounds), Todofy's gateway forwards (the input bound). The types are
+    # generated from proto/ (PROTO_USERS).
+    "contracts/task-intent-v1/task-intent-v1.ts": ("todofy", "watch"),
 }
 
 # Outputs that describe a reused branch run (strings, one line each).
@@ -286,7 +277,6 @@ CHECK_JOBS = {
     "mail_hero_check": ("Mail Hero checks",),
     "dashboard_check": ("Dashboard checks",),
     "website_check": ("Website checks",),
-    "lab_check": ("Lab checks",),
     "flowday_check": ("FlowDay checks",),
     "links_check": ("Links checks",),
     "watch_check": ("Watch checks",),

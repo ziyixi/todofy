@@ -4,7 +4,7 @@
  * so must messages built in Python and read here. The corpus is every valid task-intent-v1 and ops-v1 fixture, every
  * mail-received-v1 event (current and legacy), every shared edge case that reads (doubles and maps among them), and
  * messages built in each language (every
- * state with every error code, both modes). This is what lets Lab (TypeScript) and Todofy (Python) hash, freeze and compare each other's bytes.
+ * state with every error code, both modes). This is what lets the watch app (TypeScript) and Todofy (Python) hash, freeze and compare each other's bytes.
  */
 import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
@@ -85,8 +85,8 @@ function builtInTypeScript(): ReadRequest[] {
     for (const code of Object.values(ErrorCode)) {
       const result = create(TaskIntentResultSchema, {
         version: 'task-intent-v1',
-        source: Source.LAB,
-        intentId: `deck-2026-09-30-g${String(state)}`,
+        source: Source.WATCH,
+        intentId: `digest-2026-09-30-${String(state)}`,
         state,
         recorded: state !== State.NOT_FOUND && state !== State.REJECTED,
         tasksTotal: 31,
@@ -101,12 +101,12 @@ function builtInTypeScript(): ReadRequest[] {
   for (const mode of [Mode.SUBTASKS, Mode.SEPARATE]) {
     const intent = create(TaskIntentSchema, {
       version: 'task-intent-v1',
-      source: Source.LAB,
-      intentId: 'deck-2026-09-30-g1',
+      source: Source.WATCH,
+      intentId: 'digest-2026-09-30',
       mode,
-      parent: { title: '论文雷达 · "合成" <示例>', description: '' },
+      parent: { title: '网页监视 · "合成" <示例>', description: '' },
       items: [
-        { title: 'A synthetic paper', url: 'https://arxiv.org/abs/2609.00001' },
+        { title: 'A synthetic watch', url: 'https://watch.example.test/watches/w1' },
         { title: '合成标题\u2003全角', description: '第一行\n第二行 \\ 反斜杠' },
       ],
     });
@@ -115,7 +115,7 @@ function builtInTypeScript(): ReadRequest[] {
   out.push({
     message: 'TaskIntentRef',
     strict: true,
-    text: JSON.stringify(toWire(TaskIntentRefSchema, create(TaskIntentRefSchema, { version: 'task-intent-v1', source: Source.LAB, intentId: 'x' }))),
+    text: JSON.stringify(toWire(TaskIntentRefSchema, create(TaskIntentRefSchema, { version: 'task-intent-v1', source: Source.WATCH, intentId: 'x' }))),
   });
   // An ops-v1 status as a producer builds it: counters and metrics in the producer's own order (keep_order), doubles.
   const status = create(ops.OpsStatusSchema, {

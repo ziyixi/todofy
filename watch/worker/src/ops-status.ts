@@ -62,7 +62,7 @@ export const INTENT_FAILED_WINDOW_MS = 7 * DAY;
 
 const MAX_SIGNALS = fieldRules(OpsStatusSchema.field.signals).maxItems;
 
-/** An ops-v1 timestamp: RFC 3339 UTC without milliseconds, e.g. 2026-10-01T14:00:00Z (as Lab writes them). */
+/** An ops-v1 timestamp: RFC 3339 UTC without milliseconds, e.g. 2026-10-01T14:00:00Z. */
 export function iso(ms: number): string {
   return new Date(Math.floor(ms / 1000) * 1000).toISOString().replace('.000Z', 'Z');
 }

@@ -1,7 +1,7 @@
 """References to D1 migration files anywhere in the repository name files that exist:
 python3 -m unittest discover -s .github/scripts
 
-A migration renumbered at a merge (Lab's task intents went from 0004 to 0005 after GTD's 0004_gtd.sql) leaves
+A migration renumbered at a merge (Todofy's task intents went from 0004 to 0005 after GTD's 0004_gtd.sql) leaves
 stale names in docs and comments that no test would otherwise notice. A path with its folder
 (`todofy/migrations/0005_task_intents.sql`) must exist as written; a bare file name (`0003_ops.sql`) must be
 some app's migration. A line may keep an old name only when it says it was renumbered (a dated record of what
@@ -78,14 +78,14 @@ class MigrationReferences(unittest.TestCase):
             "bare `0004_task_intents.sql`\n"
             "then `0004_task_intents.sql` (renumbered 0005 at merge)\n"
             "fine `todofy/migrations/0005_task_intents.sql`, `migrations/0001_init.sql` and `0003_ops.sql`\n"
-            "wrong app `lab/migrations/0003_ops.sql`\n",
+            "wrong app `links/migrations/0003_ops.sql`\n",
             "todofy/tests/unit/test_probe.py": "LATER = '9999_later.sql'\n",
         }
         files = [
             "todofy/migrations/0001_init.sql",
             "todofy/migrations/0003_ops.sql",
             "todofy/migrations/0005_task_intents.sql",
-            "lab/migrations/0001_init.sql",
+            "links/migrations/0001_init.sql",
             *texts,
         ]
         self.assertEqual(
@@ -93,7 +93,7 @@ class MigrationReferences(unittest.TestCase):
             [
                 f"{probe}:1: todofy/migrations/0004_task_intents.sql",
                 f"{probe}:2: 0004_task_intents.sql",
-                f"{probe}:5: lab/migrations/0003_ops.sql",
+                f"{probe}:5: links/migrations/0003_ops.sql",
             ],
         )
 

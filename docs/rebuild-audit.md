@@ -89,7 +89,7 @@ P0.4 不把 systemd probe 改成宿主业务 daemon；它仍是无凭据 init co
 
 | 状态 | 最小工作 | 恢复门 |
 | --- | --- | --- |
-| Watch/Lab/Home DO | 各应用有界 export/import，记录 schema、队列/intent身份、设置和预算；明确哪些历史可重建 | 空 namespace 不宣称已恢复；预算保守、旧副作用身份不变 |
+| Watch/Home DO | 各应用有界 export/import，记录 schema、队列/intent身份、设置和预算；明确哪些历史可重建 | 空 namespace 不宣称已恢复；预算保守、旧副作用身份不变 |
 | Newsletter | 一致 SQLite、config/frozen identity、原 mode/delivery target与独立 auth 恢复包 | 原 unknown 保留；不通过换空库/mock/目标绕过保护 |
 | Platform | 一致 release ledger 与公开 bundle/image身份；启动前离线检查或版本化 quarantine/恢复门 | 非终态不能未经核对继续 apply/resume；held/failed只CAS继续原操作 |
 | Observer | stop-old→最新sequence/pending移交，或协调两端新epoch | 无双写、无重复刷新新鲜度、无过早快照 |

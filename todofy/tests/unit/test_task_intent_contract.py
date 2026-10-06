@@ -1,8 +1,8 @@
 """contracts/task-intent-v1 on Todofy's side: the reference JSON Schema validator, the generated types
 of proto/todofy/taskintent/v1/task_intent.proto with the wire JSON profile, and core/intents.py.
 
-Lab checks the same fixtures with ``contracts/ops-v1/validate.mjs``
-(lab/worker/test/task-intent-contract.test.ts); here the standard validator must give the same
+The watch app checks the same fixtures with ``contracts/ops-v1/validate.mjs``
+(watch/worker/test/task-intent-contract.test.ts); here the standard validator must give the same
 verdicts, the codec must agree with the schema on every fixture (it reads every valid one and keeps its
 bytes; of the invalid ones, a strict read refuses the structure and Todofy's value rules the rest),
 Todofy's own input checks (the strict read plus the value rules) must agree with the schema on every
@@ -176,23 +176,23 @@ def _variant(change: str) -> Any:
         case "parent_no_description":
             del doc["parent"]["description"]
         case "parent_extra":
-            doc["parent"]["url"] = "https://arxiv.org/abs/1"
+            doc["parent"]["url"] = "https://watch.ziyixi.science/abs/1"
         case "url_host_only":
-            item["url"] = "https://arxiv.org"
+            item["url"] = "https://watch.ziyixi.science"
         case "url_other_host":
             item["url"] = "https://example.com/abs/1"
         case "url_port":
-            item["url"] = "https://arxiv.org:443/abs/1"
+            item["url"] = "https://watch.ziyixi.science:443/abs/1"
         case "url_upper_host":
-            item["url"] = "https://ArXiv.org/abs/1"
+            item["url"] = "https://Watch.ziyixi.science/abs/1"
         case "url_fragment":
-            item["url"] = "https://arxiv.org/abs/1#v2"
+            item["url"] = "https://watch.ziyixi.science/abs/1#v2"
         case "url_percent":
-            item["url"] = "https://arxiv.org/abs/2609.00001%20x"
+            item["url"] = "https://watch.ziyixi.science/abs/2609.00001%20x"
         case "url_trailing_newline":
-            item["url"] = "https://arxiv.org/abs/1\n"
+            item["url"] = "https://watch.ziyixi.science/abs/1\n"
         case "url_501":
-            item["url"] = "https://arxiv.org/" + "a" * 482
+            item["url"] = "https://watch.ziyixi.science/" + "a" * 471
         case "items_30":
             doc["items"] = [{"title": f"t{n}"} for n in range(30)]
         case "items_31":
@@ -203,11 +203,11 @@ def _variant(change: str) -> Any:
             doc["items"] = ["t"]
         case "duplicate_items_other_key_order":
             doc["items"] = [
-                {"url": "https://arxiv.org/abs/1", "title": "t"},
-                {"title": "t", "url": "https://arxiv.org/abs/1"},
+                {"url": "https://watch.ziyixi.science/abs/1", "title": "t"},
+                {"title": "t", "url": "https://watch.ziyixi.science/abs/1"},
             ]
         case "same_title_other_url":
-            doc["items"] = [{"title": "t", "url": "https://arxiv.org/abs/1"}, {"title": "t"}]
+            doc["items"] = [{"title": "t", "url": "https://watch.ziyixi.science/abs/1"}, {"title": "t"}]
         case "intent_id_64":
             doc["intent_id"] = "a" * 64
         case "intent_id_65":
@@ -285,7 +285,7 @@ def test_the_url_host_allow_list_is_todofys_own_check():
     assert not intents.urls_allowed(other, watch_host="watch.ziyixi.science")
     assert intents.urls_allowed(intents.intent(_variant("url_host_only")), watch_host="watch.ziyixi.science")
     subdomain = _variant("ok")
-    subdomain["items"][0]["url"] = "https://export.arxiv.org/abs/1"
+    subdomain["items"][0]["url"] = "https://export.watch.ziyixi.science/abs/1"
     assert not intents.urls_allowed(intents.intent(subdomain), watch_host="watch.ziyixi.science")  # exact hosts only
 
 
@@ -310,10 +310,9 @@ def test_the_generated_enums_and_the_constants_match_the_schema_and_the_typescri
     assert _wire_names(State) == defs["State"]["enum"]
     assert _wire_names(ErrorCode) == defs["ErrorCode"]["enum"]
     hosts = intents.url_hosts("watch.example.test")
-    assert hosts == {"lab": ("arxiv.org",), "watch": ("watch.example.test",)}
+    assert hosts == {"watch": ("watch.example.test",)}
     assert tuple(hosts) == intents.SOURCES
     assert "watch: [watchHost]" in TYPES
-    assert "lab: ['arxiv.org']" in TYPES
     assert _ts_limits() == {
         "itemsMax": intents.ITEMS_MAX,
         "tasksMax": intents.TASKS_MAX,
@@ -342,8 +341,8 @@ def test_the_generated_enums_and_the_constants_match_the_schema_and_the_typescri
 def _row(state: str, **fields: Any) -> IntentRow:
     """A task_intents row as D1 returns it (error codes by wire name), read the way the runtime reads it."""
     base = {
-        "source": "lab",
-        "intent_id": "deck-2026-09-30-g1",
+        "source": "watch",
+        "intent_id": "digest-2026-09-30",
         "payload_sha256": "0" * 64,
         "mode": "subtasks",
         "tasks_total": 4,
@@ -385,11 +384,11 @@ def _results() -> list[dict[str, Any]]:
     value = intents.intent(fixture("TaskIntent/max-items.json"))
     built = [
         intents.recorded_new(value, NOW),
-        intents.not_found("lab", "x", NOW),
+        intents.not_found("watch", "x", NOW),
         intents.conflict(_row(IntentState.PENDING)),
-        intents.rejected_new("lab", "x", ErrorCode.DAILY_LIMIT, NOW, intents.until_tomorrow(NOW)),
-        intents.rejected_new("lab", "x", ErrorCode.URL_NOT_ALLOWED, NOW),
-        intents.rejected_new("lab", "x", ErrorCode.SOURCE_NOT_ALLOWED, NOW),
+        intents.rejected_new("watch", "x", ErrorCode.DAILY_LIMIT, NOW, intents.until_tomorrow(NOW)),
+        intents.rejected_new("watch", "x", ErrorCode.URL_NOT_ALLOWED, NOW),
+        intents.rejected_new("watch", "x", ErrorCode.SOURCE_NOT_ALLOWED, NOW),
     ]
     for held in [None, *PAUSES]:
         built.append(intents.describe(_row(IntentState.PENDING), held, NOW, proposing=False))
@@ -398,7 +397,7 @@ def _results() -> list[dict[str, Any]]:
             intents.describe(_row(IntentState.PENDING, next_attempt_at=NOW + 10**6), held, NOW, proposing=False)
         )
         if held is not None:
-            built.append(intents.paused_new("lab", "x", held, NOW))
+            built.append(intents.paused_new("watch", "x", held, NOW))
         for proposing in (False, True):
             built.append(intents.describe(_row(IntentState.CREATED, tasks_created=4), held, NOW, proposing=proposing))
             built.append(
@@ -419,7 +418,7 @@ def test_every_result_todofy_builds_passes_the_schema(index: int):
 
 @pytest.mark.parametrize("index", range(len(RESULTS)))
 def test_every_result_todofy_builds_reads_back_unchanged(index: int):
-    """What Lab reads (leniently): nothing unrecognized, the same bytes when written again."""
+    """What the proposer reads (leniently): nothing unrecognized, the same bytes when written again."""
     read = from_wire(pb.TaskIntentResult, RESULTS[index])
     assert read.unrecognized == []
     assert compact(to_wire(read.message)) == compact(RESULTS[index])
@@ -444,7 +443,7 @@ def test_results_match_the_fixture_shapes():
     assert {k: v for k, v in held.items() if k != "updated_at"} == {
         k: v for k, v in expected.items() if k != "updated_at"
     }
-    fresh = intents.paused_new("lab", "deck-2026-09-30-g1", PAUSES[0], NOW)
+    fresh = intents.paused_new("watch", "digest-2026-09-30", PAUSES[0], NOW)
     expected = fixture("TaskIntentResult/paused-maintenance.json")
     assert {k: v for k, v in fresh.items() if k != "updated_at"} == {
         k: v for k, v in expected.items() if k != "updated_at"

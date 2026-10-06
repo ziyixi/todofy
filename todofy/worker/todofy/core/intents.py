@@ -279,7 +279,7 @@ def url_host(url: str) -> str:
 
 def url_hosts(watch_host: str) -> Mapping[str, tuple[str, ...]]:
     """Exact source hosts; deployment identity is supplied by Todofy's caller."""
-    return {"lab": ("arxiv.org",), "watch": (watch_host,)}
+    return {"watch": (watch_host,)}
 
 
 def urls_allowed(value: Intent, *, watch_host: str) -> bool:

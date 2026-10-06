@@ -96,7 +96,6 @@ GetRegistry (`GET /api/v1/registry`; no binding names or probe URLs), so no host
 | --- | --- | --- | --- |
 | Mail Hero | 应用 | `ops_v1` (MAIL_HERO, guard) | 今日收件 |
 | Todofy (`todofy`, `todofy-core`) | 应用 | `ops_v1` (TODOFY, guard) | 24 小时收到 |
-| 论文雷达 (`lab`) | 应用 | `ops_v1` (LAB, guard) | 7 天喜欢 |
 | FlowDay (`flowday`, D1 `flowday`) | 应用 | `public_http` outside Access: one GET per tick to `flowday…/pwa/manifest.webmanifest`, expecting 200 and `application/manifest+json`. The host is behind the Access app "flowday", but "flowday-bypass" covers `/pwa/*` and the Worker serves the manifest itself (a static asset, no D1 read), so Access's login redirect can never pass; plus the Worker's error rate (`error_rate`). No Ops entrypoint. F6 may remove the bypass (`flowday/docs/design.md` §11): that change must move this probe first (`test_infra_config.py` fails otherwise) | latency |
 | 短链接 (`links`, D1 `links`) | 应用 | `public_http` outside Access: one GET per tick to `s…/robots.txt`, expecting 200 and `text/plain` (the Worker's constant, before any D1 read); plus the Worker's error rate. The tile opens the launcher `https://s.ziyixi.science/_/` behind the path-scoped Access app "links". No Ops entrypoint, and a short link may go unused for days, so no idle rule | latency |
 | 网页监视 (`watch`, DO `WatchState`) | 应用 | `ops_v1` (WATCH, guard): counts and codes only, never a watch's name, URL or page text; its `status()` re-arms a missing alarm, so each tick restarts a lost scheduler | 新变化 |
@@ -109,8 +108,8 @@ GetRegistry (`GET /api/v1/registry`; no binding names or probe URLs), so no host
 Flows: 邮件 → 任务 (来源转发 ○ → 收件与保存 → 解析 → Webhook 投递 → Todofy 摘要 → Todoist 与提醒; canary
 `mail-todofy` verifies 投递 and 摘要 only), 网站发布 (Notion ○ → 发布 → 网站可用), 每日 Newsletter
 (Todofy 报告 → 读取报告 ○ → 写入 Notion ○; partial), 网页监视 (网站 ○ → 检查 → 变化收件箱 → 交给 Todofy: the watch app's
-`scheduler_stale` and `watches_broken` at 检查, `notify_unsettled` at 交给 Todofy; `maintenance_mode` is app-only, as for
-Lab), 运维摘要 (巡检 → 提交摘要 → 每日提醒), and GTD 循环
+`scheduler_stale` and `watches_broken` at 检查, `notify_unsettled` at 交给 Todofy; `maintenance_mode` is app-only),
+运维摘要 (巡检 → 提交摘要 → 每日提醒), and GTD 循环
 (收集 → 理清 → 组织 → 回顾 → 执行 ○: Todofy's `received_24h`, then the counters of its daily read-only
 Todoist snapshot, `review_overdue` (info) and `gtd_snapshot_stale` at 回顾; 执行 is done in Todoist, outside the dashboard (FlowDay has its own tile but no stage: the work itself is not something the dashboard can see);
 todofy/docs/gtd-features.md §9).
@@ -217,8 +216,8 @@ time (a stale status, stopped ticks) is right at every read.
 Since 2026-10-02 the API is the proto service `DashboardUiService`
 ([`proto/dashboard/ui/v1/dashboard_ui_service.proto`](../../proto/dashboard/ui/v1/dashboard_ui_service.proto), the one
 description of its routes, messages and errors), served by the shared transcoder (`proto/ts/http-transcoder.ts`) and
-called by the UI through the shared client (`web/src/api/client.ts`), as Lab's owner API is (`proto/README.md`, HTTP
-APIs). Resources follow the AIPs: the registry and the four views are singletons (AIP-156) read with standard Gets
+called by the UI through the shared client (`web/src/api/client.ts`), as every app's owner API is (`proto/README.md`,
+HTTP APIs). Resources follow the AIPs: the registry and the four views are singletons (AIP-156) read with standard Gets
 (AIP-131), the refreshes and the two actions are custom methods (AIP-136) on them, on the guard singleton and on the
 canary resource `canaries/mail-todofy`; OverrideGuard and RunCanary take an AIP-155 `request_id` (HomeState answers a
 repeat with the first answer for 24 hours). Same Access + owner check in front of the transcoder, CSRF + Origin on every
@@ -242,7 +241,7 @@ lost `version`.
 | `POST /api/v1/websiteSync:request` (RequestWebsiteSync) | DO permanent request receipt; relay dispatch or lookup | Origin + CSRF; UUID request_id; replay only looks up the same request |
 
 The old paths (`/api/v2/*`) answer 410 with the message 个人控制台已更新，请刷新页面 in the old error envelope until
-2026-11-02 (one release); then they answer NOT_FOUND like any unknown path. The code is `not_found`, not Lab's
+2026-11-02 (one release); then they answer NOT_FOUND like any unknown path. The code is `not_found`, not
 `reload_required`: the old UI shows the envelope's message only for the error codes it knows and turns any other code
 into its generic "unrecognized response (HTTP 410)" error, so only a known code lets a tab still running it ask the
 owner to reload (`worker/test/http.test.ts` runs that client's error handling on every legacy answer). An
@@ -308,8 +307,9 @@ the strip's observed items, §4), the canary rows or the reminder ledger. The me
 older estimates; reads grow with retained decisions while views continue to poll every five minutes.
 A partial index (`canary_runs_active`) keeps the "run in progress" lookup at one row for ticks and views.
 
-Per tick: 6 `status()` (Mail Hero, Todofy, Lab, the watch app, Fleet and Newsletter) + 3 probes (website, FlowDay, links) + 1 GraphQL +
-≤ 4 `setGuard` + ≤ 2 canary calls + ≤ 1 `reportOps` + ≤ 12 read-only drift calls (§10) = 29 outbound calls
+Per tick: 6 `status()` (Mail Hero, Todofy, the watch app, the website relay, Fleet and Newsletter) + 3 probes (website,
+FlowDay, links) + 1 GraphQL + ≤ 3 `setGuard` + ≤ 2 canary calls + ≤ 1 `reportOps` + ≤ 12 read-only drift calls (§10) =
+28 outbound calls
 (`outboundPerTick`, tested ≤ 30 and asserted per tick in workerd; Free allows 50). The probes run in parallel with the
 status polls. GraphQL stays one query per tick (48/day) plus refreshes ≤ 1/min. DO rows written grow by ~4 per tick
 (`cf_scripts` and one `probe:<entry>` per probe). The FlowDay and links probes are each one request of that app's Worker per tick (≤ 144 a day with refreshes, no D1 query); the website's is a static asset. Everything else as in
@@ -412,7 +412,7 @@ remote text never leaves `drift.ts` (failures become `http_<n>`, `timeout`, `net
 
 A personal value is reported whatever way its wrapper sends it today; a known difference is a finding
 until the live account or the committed state changes, never a special case. A personal value a wrapper
-writes with `--secrets-file` (the owner addresses of Mail Hero, Todofy, the dashboard and Lab, Mail Hero's
+writes with `--secrets-file` (the owner addresses of Mail Hero, Todofy and the dashboard, Mail Hero's
 receive address and Todofy's Todoist projects; since 2026-10 every personal value) is wanted as a
 `secret_text` binding, so a live `plain_text` one is a `bindings` change and no Worker lists a `personal`
 value.
@@ -446,8 +446,8 @@ Home 使用已有 SQLite DO 的 `attention_occurrences` 保存当前条件与关
 操作都会换版本。旧页面的操作返回 `ATTENTION_CHANGED`（409），要求重新查看当前提醒。同 UUID 在有限回执窗口
 内重复同一操作返回原答案；换正文或动作拒绝。窗口外的旧 etag 不能覆盖后来的恢复状态。
 
-有效数量变化包括 Newsletter `unknown_count`、Mail Hero 解析/投递/策略错误的 `count`、Lab 未确认发送的
-`count`、Watch 未确认通知的 `open`/`failed` 和失效监视的 `count`；新的金丝雀失败使用运行身份。年龄、心跳、
+有效数量变化包括 Newsletter `unknown_count`、Mail Hero 解析/投递/策略错误的 `count`、
+Watch 未确认通知的 `open`/`failed` 和失效监视的 `count`；新的金丝雀失败使用运行身份。年龄、心跳、
 用量百分比的持续增加或抖动不会把同一问题当作新的提醒。其他条件按严重性及确认恢复后的再次出现区分。
 来源失联、状态过期或 Fleet 底层 `host_stale` 不构成恢复；drift 恢复依据自身观测，与用量 GraphQL 是否成功独立。
 

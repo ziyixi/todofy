@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 // The values of the Worker "watch" that are never committed to ../wrangler.toml, added at deploy time (the shape of
-// Lab's, FlowDay's and the links app's wrappers):
+// FlowDay's and the links app's wrappers):
 //
 // - with `wrangler deploy --var NAME:value` (a plain_text var, exactly like a [vars] entry): BUILD_SHA (the commit).
 //   The watch app has no GitHub-variable switches;
 // - with `--secrets-file` (Worker secrets, hidden in wrangler's output): the owner's addresses and the CSRF key
 //   (inputs WATCH_ACCESS_OWNER, WATCH_ACCESS_OWNER_ALIASES, WATCH_CSRF_SIGNING_KEY, masked in the public Actions log).
 //   The deploy job ("Watch deploy") fills the first two from the dashboard's environment secrets
-//   DASHBOARD_ACCESS_OWNER and DASHBOARD_ACCESS_OWNER_ALIASES (the same owner, like Lab, FlowDay and the links app) and
+//   DASHBOARD_ACCESS_OWNER and DASHBOARD_ACCESS_OWNER_ALIASES (the same owner, like FlowDay and the links app) and
 //   the key from the watch app's own WATCH_CSRF_SIGNING_KEY (../README.md "Deploy").
 //
 // Since W2 (../docs/design.md §11) ../wrangler.toml holds the Access application's AUD (the app has no D1). A real

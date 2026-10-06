@@ -1,42 +1,31 @@
 # `task-intent-v1`: another app proposes Todoist tasks to Todofy
 
 Todofy is the only app that writes to Todoist. When another app in the account wants tasks created
-(Lab: "send today's liked papers to Todoist"; the watch app: its daily digest and urgent changes), it sends Todofy a **task intent**: a parent
+(today the watch app: its daily digest and urgent changes), it sends Todofy a **task intent**: a parent
 title and up to 30 items, under an idempotency key the proposer chooses. Todofy records it in its own
 D1 ledger, creates the tasks with its existing Todoist client and answers with counts. The proposer
 never sees a Todoist token, and a repeated or retried proposal never creates a task twice.
 
-Status: contract written 2026-09-30 with Lab's design (`lab/docs/design.md` §9). Both sides are
-implemented (not released): Lab in `lab/worker/src/intent.ts` and `owner.ts`; Todofy in
-`todofy/worker/todofy/core/intents.py` (validation, canonical form, task text, state machine, results),
-`core/sql/intents.py`, `runtime/intents.py`, `todofy/gateway/src/ops.ts` and migration
-`todofy/migrations/0005_task_intents.sql`.
+Status: contract written 2026-09-30; both sides are implemented and released. The proposer is the watch app
+(`watch/worker/src/todofy.ts`); Todofy's side is `todofy/worker/todofy/core/intents.py` (validation, canonical form,
+task text, state machine, results), `core/sql/intents.py`, `runtime/intents.py`, `todofy/gateway/src/ops.ts` and
+migration `todofy/migrations/0005_task_intents.sql`.
 
 | File | Purpose |
 | --- | --- |
 | `task-intent-v1.schema.json` | JSON Schema 2020-12: `TaskIntent`, `TaskIntentRef`, `TaskIntentResult` (inside the keyword subset of `../ops-v1/validate.mjs`). The published wire description, value rules included |
 | `task-intent-v1.ts` | The value rules the IDL cannot express: `TASK_INTENT_VERSION`, the URL host allow-list, the bounds (dependency-free, erasable-only, imported by relative path) |
-| `fixtures/<Def>/*.json` | Valid examples (synthetic papers only); `fixtures/invalid/<Def>/*.json` must fail |
+| `fixtures/<Def>/*.json` | Valid examples (synthetic watches only); `fixtures/invalid/<Def>/*.json` must fail |
 | [`../../proto/todofy/taskintent/v1/task_intent.proto`](../../proto/todofy/taskintent/v1/task_intent.proto) | The IDL: messages, enums (`Source`, `Mode`, `State`, `ErrorCode`) and `TaskIntentService`. Both apps use the generated code and the wire JSON profile codecs ([`proto/README.md`](../../proto/README.md)); generated, never committed |
 
 ## Transport
 
-Two methods on Todofy's existing named entrypoint `Ops` (`todofy/gateway/src/ops.ts`, the class the
-dashboard already binds for ops-v1). The proposer binds it with a service binding; there is no public
-route and no Access policy (same trust boundary as ops-v1: only a Worker deployed in this account can
-create the binding).
-
-```toml
-# lab/wrangler.toml
-[[services]]
-binding = "TODOFY"
-service = "todofy"
-entrypoint = "Ops"
-```
-
-The same two methods are also on Todofy's least-privilege entrypoint `Intents` (the same file), which has
-nothing else and takes only the source its binding names in `props`. The watch app binds it (it parses
-untrusted pages, so it gets neither Todofy's ops-v1 methods nor another source's allow-list and daily quota):
+Two methods on Todofy's least-privilege named entrypoint `Intents` (`todofy/gateway/src/ops.ts`), which has
+nothing else and takes only the source its binding names in `props`. The proposer binds it with a service binding;
+there is no public route and no Access policy (same trust boundary as ops-v1: only a Worker deployed in this account
+can create the binding). The watch app parses untrusted pages, so it gets neither Todofy's ops-v1 methods nor another
+source's allow-list and daily quota. The same two methods are also on Todofy's `Ops` entrypoint (the class the
+dashboard binds for ops-v1), which no proposer binds. The watch app's binding:
 
 ```toml
 # watch/wrangler.toml
@@ -48,8 +37,7 @@ props = { source = "watch" }
 ```
 
 Through `Intents`, an input whose `source` is not the binding's (or a binding without that prop) rejects
-`invalid_input` before the core wakes; everything else is as through `Ops`. A new proposer binds `Intents`;
-moving Lab over is a later change of its own.
+`invalid_input` before the core wakes; everything else is as through `Ops`. A new proposer binds `Intents`.
 
 ```ts
 import type { TaskIntentService } from '@ziyixi/proto/todofy/taskintent/v1/task_intent_pb';
@@ -79,16 +67,16 @@ same `intent_id` and the same content. Every expected outcome is a value.
 ## Intent
 
 ```json
-{"version": "task-intent-v1", "source": "lab", "intent_id": "deck-2026-09-30-g1", "mode": "subtasks",
- "parent": {"title": "论文雷达 2026-09-30 · 3 篇", "description": "…"},
- "items": [{"title": "…", "url": "https://arxiv.org/abs/2609.00001", "description": "…"}]}
+{"version": "task-intent-v1", "source": "watch", "intent_id": "digest-2026-10-01", "mode": "subtasks",
+ "parent": {"title": "网页监视 2026-10-01 · 4 个监视", "description": "…"},
+ "items": [{"title": "…", "url": "https://watch.ziyixi.science/watches/jobs"}]}
 ```
 
-- `source` is a closed list (`lab`, `watch`). Each source has a URL host allow-list (`taskIntentUrlHosts(watchHost)`,
-  lab: `arxiv.org`; watch: the exact Watch host supplied by the deployment profile, so a watch task links to
-  the change in the app and never to a watched page); any other host is `rejected`/`url_not_allowed`. Todofy never fetches a URL.
-  `SOURCE_WATCH` was added on 2026-10-01 (an additive value: `buf breaking` and the profile rules pass, Lab keeps
-  writing `lab` only, Todofy accepts both).
+- `source` is a closed list (`watch`). Each source has a URL host allow-list (`taskIntentUrlHosts(watchHost)`;
+  watch: the exact Watch host supplied by the deployment profile, so a watch task links to the change in the app and
+  never to a watched page); any other host is `rejected`/`url_not_allowed`. Todofy never fetches a URL. A retired
+  source keeps its number and name reserved in the IDL (`Source` in the `.proto` file), so neither is ever reused;
+  Todofy refuses it like any unknown source, and the ledger rows it recorded stay until retention deletes them.
 - The watch app (`watch/worker/src/todofy.ts`) sends at most one digest a UTC day (`digest-<day>`, subtasks: one
   item per watch with only the owner's name for it, the trigger type and a count, linking to
   `https://<watch host>/watches/<id>`; never page text, a watched URL or a summary) and urgent changes at
@@ -98,10 +86,9 @@ same `intent_id` and the same content. Every expected outcome is a value.
   digest, and proposes the digest first, so a pause across midnight cannot crowd out a day's digest. It polls an
   intent Todofy holds and proposes a `failed` one again with the same bytes (the state table below).
 - `intent_id` is the idempotency key, unique per source **for ever** (the ledger row is kept, content
-  removed, see Retention). Lab uses `deck-<day>-g<generation>`; the watch app `digest-<day>` and
-  `urgent-<change id>`.
-- `mode`: `subtasks` = one parent task plus one subtask per item (default in Lab); `separate` = one
-  top-level task per item, no parent task.
+  removed, see Retention). The watch app uses `digest-<day>` and `urgent-<change id>`.
+- `mode`: `subtasks` = one parent task plus one subtask per item (the watch app's digest); `separate` = one
+  top-level task per item, no parent task (its urgent changes).
 - `items`: 1–30, distinct, created in the given order. Titles are single-line plain text; descriptions
   plain text with newlines. No due dates, labels, priorities or projects: tasks go to Todofy's
   `TODOIST_DEFAULT_PROJECT_ID` like mail tasks.
@@ -127,8 +114,7 @@ The same `(source, intent_id)` with the same hash is a replay; with another hash
 | `not_found` | false | `taskIntentStatus` for an id Todofy never recorded. | treat like "not sent" |
 
 `retry_after_seconds` is a hint (null when there is nothing to wait for). Proposers poll no more often
-than every `statusMinIntervalSeconds` (3 s) and stop after a few minutes (Lab polls only while the
-owner looks at the send screen).
+than every `statusMinIntervalSeconds` (3 s).
 
 **Content rule.** Results carry codes, counts, booleans, the caller's own IDs and a timestamp: never
 task text, Todoist IDs or remote response text. Todofy logs only `source`, `intent_id`, counts and codes.
@@ -168,7 +154,7 @@ task text, Todoist IDs or remote response text. Todofy logs only `source`, `inte
 - **Task text** (deterministic, `core/intents.py`: `task_text`, `footer`): content = the title; description = the
   item's description, then its URL on its own line, then a footer line
   `Todofy intent: <source>/<intent_id>#<n>` (the lookup key, like the mail footer). In separate mode the
-  parent title is added as a line above the footer (`— 论文雷达 2026-09-30 · 3 篇`). Titles are sent as
+  parent title is added as a line above the footer (`— 网页监视 · 紧急变化`). Titles are sent as
   given (no Markdown added).
 - **Retention**: `payload_json` is set to NULL once every task exists or the intent is failed for
   30 days; the row (hash, counts, codes, request IDs, Todoist IDs) is kept 400 days for idempotency, then
@@ -181,7 +167,7 @@ task text, Todoist IDs or remote response text. Todofy logs only `source`, `inte
 
 ## Checks
 
-- Schema/fixtures with both validators: Lab's `lab/worker/test/task-intent-contract.test.ts`
+- Schema/fixtures with both validators: the watch app's `watch/worker/test/task-intent-contract.test.ts`
   (`../ops-v1/validate.mjs` over every fixture, the generated enums and the constants of `task-intent-v1.ts`
   against the schema) and `todofy/tests/unit/test_task_intent_contract.py` (Python `jsonschema` on the
   same fixtures, same verdicts). Both run in the `Contracts` CI job.
@@ -191,16 +177,17 @@ task text, Todoist IDs or remote response text. Todofy logs only `source`, `inte
   lists what it skipped) and the rest break only a value rule, which the schema and each app's own checks
   hold. `proto/test/cross-language.test.ts` pipes the same fixtures and messages built in each language
   through both codecs and requires identical bytes.
-- Frozen bytes: Lab's `intent.test.ts` pins the bytes its builder froze before the generated types, and
-  Todofy's `test_intents.py` pins the canonical form and SHA-256 of every intent fixture (D1 keeps those
-  hashes 400 days; a replay must hash the same).
+- Frozen bytes: the watch app's `todofy.test.ts` pins the bytes of its digest and urgent intents (the watch
+  fixtures), and Todofy's `test_intents.py` pins the canonical form and SHA-256 of every intent fixture (D1 keeps
+  those hashes 400 days; a replay must hash the same).
 - Todofy: unit tests of validation, canonical hash, rendering and the state machine; runtime tests over a
   real service binding (fake Todoist): replay, conflict, pause, unknown + lookup, partial failure retry,
   48-attempt cap, and that mail processing is unchanged with and without intents.
-- Lab: its client maps every state and error code, and every result it stores passes the schema.
+- The watch app: its client maps every state and error code to recorded, refused or a retry.
 
 Changing the contract: additive changes (a new source, a new error code) update the `.proto` file, the
 schema, fixtures and both sides in one change (`buf breaking` and the profile rules gate the rest; a new
-`ErrorCode` value fails Lab's UI typecheck until it has its copy). An older reader takes the default branch
-on a value it does not know: an unknown state is an unreadable answer (Lab asks again later), an unknown
-error code no reason. Anything else is `task-intent-v2`.
+`ErrorCode` value needs the proposer's mapping in the same change). An older reader takes the default branch
+on a value it does not know: an unknown state is an unreadable answer (the proposer asks again later), an unknown
+error code no reason. Removing a source reserves its number and name (`proto/retired.json`, `proto/README.md`
+"Retiring an element"). Anything else is `task-intent-v2`.

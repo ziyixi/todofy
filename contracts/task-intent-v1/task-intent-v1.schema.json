@@ -12,10 +12,10 @@
     },
     "Source": {
       "description": "The proposing app. Todofy accepts only the sources it lists (TASK_INTENT_SOURCES) and applies that source's URL host allow-list.",
-      "enum": ["lab", "watch"]
+      "enum": ["watch"]
     },
     "IntentId": {
-      "description": "The proposer's idempotency key, unique per source for ever (Todofy keeps the ledger row). Lab: deck-<YYYY-MM-DD>-g<n>; watch: digest-<YYYY-MM-DD> and urgent-<change id>.",
+      "description": "The proposer's idempotency key, unique per source for ever (Todofy keeps the ledger row). watch: digest-<YYYY-MM-DD> and urgent-<change id>.",
       "type": "string",
       "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$(?!\\n)"
     },
@@ -30,7 +30,7 @@
       "pattern": "^[^\\u0000-\\u0009\\u000b-\\u001f\\u007f]*$(?!\\n)"
     },
     "HttpsUrl": {
-      "description": "An https URL with a lowercase host and a plain path; no query, fragment, credentials or port. Todofy also requires the host to be on the source's allow-list (lab: arxiv.org; watch: watch.ziyixi.science) and never fetches it.",
+      "description": "An https URL with a lowercase host and a plain path; no query, fragment, credentials or port. Todofy also requires the host to be on the source's allow-list (watch: watch.ziyixi.science) and never fetches it.",
       "type": "string",
       "maxLength": 500,
       "pattern": "^https://[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?(/[A-Za-z0-9._~/%-]{0,400})?$(?!\\n)"

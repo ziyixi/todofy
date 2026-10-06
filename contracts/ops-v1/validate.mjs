@@ -1,7 +1,7 @@
 // A dependency-free validator for the subset of JSON Schema 2020-12 that the contracts' hand-written schemas use.
 //
 // Its users now: task-intent-v1 (contracts/task-intent-v1/task-intent-v1.schema.json, whose value rules are not in
-// the IDL yet: Lab checks its intents and Todofy's answers with it at run time, and the tests check the fixtures), and
+// the IDL yet: the tests check the fixtures with it), and
 // the rollout checks of ops-v1, whose answers each app's golden test still runs through the hand-written schema the
 // dashboards deployed before ops-v1 moved onto proto/ validate with (legacy/ops-v1.schema.json). ops-v1 itself is read
 // and written with the generated code of proto/ops/v1 (the wire codec checks its rules); ops-v1.schema.json is

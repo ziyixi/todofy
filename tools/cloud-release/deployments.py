@@ -9,7 +9,6 @@ APPS = {
     "todofy",
     "mail-hero",
     "dashboard",
-    "lab",
     "flowday",
     "links",
     "watch",

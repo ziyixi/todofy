@@ -63,7 +63,6 @@ WRAPPERS = {
         ["todofy-core", "todofy"],
     ),
     "dashboard": ("dashboard/deploy/deploy-vars.mjs", r"deploy-vars\.mjs (exec|secrets)\b", ["home"]),
-    "lab": ("lab/deploy/deploy-vars.mjs", r"deploy-vars\.mjs (exec|secrets)\b", ["lab"]),
     "flowday": ("flowday/deploy/deploy-vars.mjs", r"deploy-vars\.mjs (exec|secrets)\b", ["flowday"]),
     "links": ("links/deploy/deploy-vars.mjs", r"deploy-vars\.mjs (exec|secrets)\b", ["links"]),
     "watch": ("watch/deploy/deploy-vars.mjs", r"deploy-vars\.mjs (exec|secrets)\b", ["watch"]),
@@ -91,8 +90,6 @@ PERSONAL_INPUTS = {
     "TODOFY_ACCESS_OWNER_ALIASES",
     "DASHBOARD_ACCESS_OWNER",
     "DASHBOARD_ACCESS_OWNER_ALIASES",
-    "LAB_ACCESS_OWNER",
-    "LAB_ACCESS_OWNER_ALIASES",
     "FLOWDAY_ACCESS_OWNER",
     "FLOWDAY_ACCESS_OWNER_ALIASES",
     "LINKS_ACCESS_OWNER",
@@ -102,12 +99,10 @@ PERSONAL_INPUTS = {
     "FLEET_ACCESS_OWNER",
     "FLEET_ACCESS_OWNER_ALIASES",
 }
-# Personal inputs a deploy job reads from another app's secret: the owner of Lab, FlowDay, the links app and the watch
-# app is the dashboard's owner (one person, the same Access identities), so their deploys read the dashboard's secrets
-# (lab/README.md "Deploy secrets", flowday/README.md "Deploy", links/README.md "Deploy", watch/README.md "Deploy").
+# Personal inputs a deploy job reads from another app's secret: the owner of FlowDay, the links app and the watch app is
+# the dashboard's owner (one person, the same Access identities), so their deploys read the dashboard's secrets
+# (flowday/README.md "Deploy", links/README.md "Deploy", watch/README.md "Deploy").
 SHARED_SECRETS = {
-    "LAB_ACCESS_OWNER": "DASHBOARD_ACCESS_OWNER",
-    "LAB_ACCESS_OWNER_ALIASES": "DASHBOARD_ACCESS_OWNER_ALIASES",
     "FLOWDAY_ACCESS_OWNER": "DASHBOARD_ACCESS_OWNER",
     "FLOWDAY_ACCESS_OWNER_ALIASES": "DASHBOARD_ACCESS_OWNER_ALIASES",
     "LINKS_ACCESS_OWNER": "DASHBOARD_ACCESS_OWNER",
@@ -127,7 +122,7 @@ TOGGLES = {
     "TODOFY_GTD_REVIEW_ENABLED",
     "DASHBOARD_CANARY_ENABLED",
 }
-DEPLOY_JOBS = ("todofy-deploy", "mail-hero-deploy", "dashboard-deploy", "lab-deploy", "flowday-deploy", "links-deploy", "watch-deploy", "fleet-deploy")
+DEPLOY_JOBS = ("todofy-deploy", "mail-hero-deploy", "dashboard-deploy", "flowday-deploy", "links-deploy", "watch-deploy", "fleet-deploy")
 # The retired generators' required GitHub variables, still set in production: a revert of the committed-config
 # layout needs them (README "Rolling back the committed-config layout"), and nothing may read them now.
 LEGACY_VARIABLES = {
@@ -199,7 +194,7 @@ def tracked_files() -> list[str]:
 
 
 def wrapper_mode(call: str) -> str:
-    """The `deploy-vars-inputs` mode of a wrapper call: "exec" / "secrets" (Mail Hero, dashboard, Lab); "core" /
+    """The `deploy-vars-inputs` mode of a wrapper call: "exec" / "secrets" (Mail Hero, dashboard, FlowDay); "core" /
     "gateway" for Todofy's `exec core` / `exec gateway`, and "secrets_core" / "secrets_gateway" for its `secrets`."""
     words = call.split()
     return words[-1] if words[0] == "exec" else "_".join(words)
@@ -396,7 +391,7 @@ class Files(unittest.TestCase):
         [binding] = gateway["durable_objects"]["bindings"]
         self.assertIn(binding["script_name"], PRODUCTION)
         self.assertEqual(binding["script_name"], "todofy-core")
-        for worker in ("home", "lab"):
+        for worker in ("home",):
             for service in load(PRODUCTION[worker])["services"]:
                 with self.subTest(worker=worker, service=service["binding"]):
                     self.assertIn(service["service"], PRODUCTION)
@@ -404,10 +399,6 @@ class Files(unittest.TestCase):
                     self.assertEqual(service["entrypoint"], expected)
                     if expected == "NewsletterOps":
                         self.assertEqual(service["service"], "fleet")
-        # Lab reaches Todofy only through the gateway's Ops entrypoint (contracts/task-intent-v1).
-        self.assertEqual(
-            [(s["binding"], s["service"]) for s in load(PRODUCTION["lab"])["services"]], [("TODOFY", "todofy")]
-        )
         # The watch app parses untrusted pages: it reaches Todofy only through the least-privilege Intents entrypoint,
         # bound to its own source (proposeTasks and taskIntentStatus only), never through Ops.
         gateway_exports = (REPO / "todofy/gateway/src/index.ts").read_text()
@@ -497,7 +488,7 @@ class LocalDev(unittest.TestCase):
         return found
 
     def test_the_production_configs_with_routes_are_the_ones_dev_runs(self):
-        for worker in ("mail-hero", "todofy", "home", "lab", "flowday", "links", "watch"):
+        for worker in ("mail-hero", "todofy", "home", "flowday", "links", "watch"):
             with self.subTest(worker=worker):
                 self.assertTrue(load(PRODUCTION[worker]).get("routes"))
 
@@ -509,7 +500,6 @@ class LocalDev(unittest.TestCase):
             {
                 "mail-hero/cloudflare/package.json",
                 "dashboard/worker/package.json",
-                "lab/worker/package.json",
                 "flowday/worker/package.json",
                 "links/worker/package.json",
                 "watch/worker/package.json",
@@ -597,14 +587,13 @@ class Hosts(unittest.TestCase):
     def test_the_dashboard_links_to_the_app_hosts(self):
         """Each app tile opens its Worker's PUBLIC_HOST; the links tile opens the launcher /_/ (links/docs/design.md)."""
         registry = (REPO / "dashboard" / "worker" / "src" / "registry.ts").read_text()
-        urls = dict(re.findall(r"id: '(mail-hero|todofy|lab|flowday|links)',[^}]*?url: '([^']+)'", registry, re.S))
-        host = {app: load(PRODUCTION[app])["vars"]["PUBLIC_HOST"] for app in ("lab", "flowday", "links")}
+        urls = dict(re.findall(r"id: '(mail-hero|todofy|flowday|links)',[^}]*?url: '([^']+)'", registry, re.S))
+        host = {app: load(PRODUCTION[app])["vars"]["PUBLIC_HOST"] for app in ("flowday", "links")}
         self.assertEqual(
             urls,
             {
                 "mail-hero": f"https://{self.mail_hero}/",
                 "todofy": f"https://{self.todofy}/",
-                "lab": f"https://{host['lab']}/",
                 "flowday": f"https://{host['flowday']}/",
                 "links": f"https://{host['links']}/_/",
             },
@@ -662,9 +651,9 @@ class Hosts(unittest.TestCase):
     status: { type: 'none' },
   },
   {
-    id: 'lab',
+    id: 'watch',
     group: 'apps',
-    url: 'https://lab.ziyixi.science/',
+    url: 'https://watch.ziyixi.science/',
   },
 ];
 
@@ -674,7 +663,7 @@ const WORKERS: readonly WorkerDef[] = [
 """
         self.assertEqual(
             registry_entries(sample),
-            {"links": {"group": "hidden", "url": None}, "lab": {"group": "apps", "url": "https://lab.ziyixi.science/"}},
+            {"links": {"group": "hidden", "url": None}, "watch": {"group": "apps", "url": "https://watch.ziyixi.science/"}},
         )
         self.assertEqual(registry_workers(sample), {"links": "links"})
 
@@ -857,25 +846,11 @@ class Workflow(unittest.TestCase):
                         else:
                             self.assertRegex(value, r"^(''|placeholder|[a-z.-]*@([a-z-]+\.)*example\.com)$")
 
-    def test_lab_deploy_reads_the_dashboard_owner_and_its_own_csrf_key(self):
-        """Lab's owner addresses come from the dashboard's secrets (no LAB_ACCESS_OWNER* secret exists); its CSRF
-        key stays its own. The secrets are read only where the secrets file is written."""
-        self.assertLessEqual(set(SHARED_SECRETS), PERSONAL_INPUTS)
-        self.assertLessEqual(set(SHARED_SECRETS.values()), PERSONAL_INPUTS)
-        read = {}
-        for step in steps(self.jobs["lab-deploy"]):
-            for name, value in step["env"].items():
-                if match := re.fullmatch(r"\$\{\{ secrets\.([A-Z0-9_]+) \}\}", value):
-                    read.setdefault(name, set()).add(match.group(1))
-        self.assertEqual(read["LAB_ACCESS_OWNER"], {"DASHBOARD_ACCESS_OWNER"})
-        self.assertEqual(read["LAB_ACCESS_OWNER_ALIASES"], {"DASHBOARD_ACCESS_OWNER_ALIASES"})
-        self.assertEqual(read["LAB_CSRF_SIGNING_KEY"], {"LAB_CSRF_SIGNING_KEY"})
-        self.assertNotIn("DASHBOARD_CSRF_SIGNING_KEY", {secret for names in read.values() for secret in names})
-        self.assertNotRegex(effective_ci(), r"secrets\.LAB_ACCESS_OWNER")
-
     def test_flowday_deploy_reads_the_dashboard_owner_and_its_own_keys(self):
         """FlowDay's owner addresses come from the dashboard's secrets (no FLOWDAY_ACCESS_OWNER* secret exists); its
         CSRF key and credential key are its own, never another app's."""
+        self.assertLessEqual(set(SHARED_SECRETS), PERSONAL_INPUTS)
+        self.assertLessEqual(set(SHARED_SECRETS.values()), PERSONAL_INPUTS)
         read = {}
         for step in steps(self.jobs["flowday-deploy"]):
             for name, value in step["env"].items():
@@ -912,29 +887,6 @@ class Workflow(unittest.TestCase):
         # Reads only: no deploy, upload, rollback, secret or SQL in the check.
         self.assertFalse({"deploy", "versions upload", "versions deploy", "rollback", "secret"} & set(wrangler_commands(probe)))
         self.assertNotIn("execute", probe)
-
-    def test_lab_holds_the_bundle_it_dry_runs_to_its_budget(self):
-        """Lab checks and Lab deploy measure the dry run's bundle (deploy/bundle-size.mjs: Lab's budget and the Workers
-        Free limit) in the same step that writes it, so the bundle that ships is the one measured."""
-        for job in ("lab-checks", "lab-deploy"):
-            [dry] = [s for s in steps(self.jobs[job]) if "--dry-run" in s["run"] and "deploy-vars.mjs exec" in s["run"]]
-            with self.subTest(job=job):
-                self.assertIn('--outdir "$RUNNER_TEMP/lab-bundle"', dry["run"])
-                self.assertIn('node ../deploy/bundle-size.mjs "$RUNNER_TEMP/lab-bundle"', dry["run"])
-                self.assertLess(dry["run"].index("--outdir"), dry["run"].index("bundle-size.mjs"))
-
-    def test_lab_deploy_checks_production_runs_this_commit_before_probing_access(self):
-        """Access answers before the Worker runs, so Lab deploy reads the live version as FlowDay deploy does: right
-        after the real deploy, the same step (reads only), then the Access probe."""
-        lab = steps(self.jobs["lab-deploy"])
-        flowday = steps(self.jobs["flowday-deploy"])
-        [deploy] = [i for i, s in enumerate(lab) if "deploy" in wrangler_commands(s["run"]) and "--dry-run" not in s["run"]]
-        check = lab[deploy + 1]
-        self.assertEqual(check["name"], "Check that production runs this commit")
-        self.assertEqual(lab[deploy + 2]["name"], "Check that Access answers unauthenticated requests")
-        [same] = [s for s in flowday if s["name"] == check["name"]]
-        self.assertEqual(check["run"].replace('production.sh" lab', 'production.sh" flowday'), same["run"])
-        self.assertFalse({"deploy", "versions upload", "versions deploy", "rollback", "secret"} & set(wrangler_commands(check["run"])))
 
     def test_links_deploy_reads_the_dashboard_owner_and_its_own_csrf_key(self):
         """The links app's owner addresses come from the dashboard's secrets (no LINKS_ACCESS_OWNER* secret exists); its
@@ -1061,57 +1013,18 @@ class Workflow(unittest.TestCase):
             self.assertIn('node ../deploy/bundle-size.mjs "$RUNNER_TEMP/fleet-bundle"', dry["run"])
         self.assertIn("fleet-deploy", needs(self.jobs["dashboard-deploy"]))
 
-    def test_lab_flowday_links_and_watch_accept_exactly_the_owner_values_the_dashboard_accepts(self):
+    def test_flowday_links_and_watch_accept_exactly_the_owner_values_the_dashboard_accepts(self):
         """The same secrets feed these wrappers: their owner and alias rules must be the same lines, or a valid
-        dashboard value could stop Lab deploy, FlowDay deploy or Links deploy (or the watch app's, from W2), or the
-        reverse. Here, in Changes, a change to any one wrapper runs this comparison, whichever app's checks it runs."""
+        dashboard value could stop FlowDay deploy, Links deploy or Watch deploy, or the reverse. Here, in Changes, a change to any one wrapper runs this comparison, whichever app's checks it runs."""
         rules = r"^(?:const ACCESS_EMAIL|const MAX_ALIASES|const MAX_LIST_CHARS) = .+$"
-        lab, dashboard, flowday, links, watch = (
+        dashboard, flowday, links, watch = (
             re.findall(rules, (REPO / app / "deploy" / "deploy-vars.mjs").read_text(), re.M)
-            for app in ("lab", "dashboard", "flowday", "links", "watch")
+            for app in ("dashboard", "flowday", "links", "watch")
         )
         self.assertEqual(len(dashboard), 3)
-        self.assertEqual(lab, dashboard)
         self.assertEqual(flowday, dashboard)
         self.assertEqual(links, dashboard)
         self.assertEqual(watch, dashboard)
-
-    def test_the_lab_rollback_note_covers_what_its_first_release_leaves_live(self):
-        """Lab's first release has no earlier version: its README must name what `Lab deploy` makes live (Worker,
-        Custom Domain, Durable Object, D1), the steps after which that is so, the stop switch, what the dashboard
-        must drop first, Lab's own secrets and Todofy's intake switch."""
-        section = (REPO / "lab/README.md").read_text().split("### Rollback and removal", 1)[1].split("\n#", 1)[0]
-        lab = load(PRODUCTION["lab"])
-        names = {lab["name"], *(route["pattern"] for route in lab["routes"])}
-        names |= {binding["class_name"] for binding in lab["durable_objects"]["bindings"]}
-        names |= {database["database_name"] for database in lab["d1_databases"]}
-        names |= {s["binding"] for s in load(PRODUCTION["home"])["services"] if s["service"] == lab["name"]}
-        read = {job: set(re.findall(r"secrets\.([A-Z0-9_]+)", self.jobs[job])) for job in DEPLOY_JOBS}
-        own = read["lab-deploy"] - set().union(*(read[job] for job in DEPLOY_JOBS if job != "lab-deploy"))
-        self.assertEqual(own - {"CLOUDFLARE_API_TOKEN"}, {"LAB_CSRF_SIGNING_KEY", "LAB_WORKER_SECRETS"})
-        names |= own - {"CLOUDFLARE_API_TOKEN", "LAB_WORKER_SECRETS"}
-        names |= {"TASK_INTENT_SOURCES", "LAB_DAILY_NEURONS", "ingest_paused"}
-        for name in sorted(names):
-            with self.subTest(name=name):
-                self.assertRegex(section, rf"`{re.escape(name)}(`| = )")
-        lab_steps = steps(self.jobs["lab-deploy"])
-        # The live deploy step and the two checks right after it (the live version, the Access probe), quoted by
-        # name (line breaks aside).
-        [index] = [
-            i for i, s in enumerate(lab_steps) if "deploy" in wrangler_commands(s["run"]) and "--dry-run" not in s["run"]
-        ]
-        flat = " ".join(section.split())
-        for step in lab_steps[index : index + 3]:
-            with self.subTest(step=step["name"]):
-                self.assertIn(f'"{step["name"]}"', flat)
-        self.assertIn('production.sh" lab ../wrangler.toml DB', lab_steps[index + 1]["run"])
-        self.assertIn("wrangler versions view", (REPO / "tools/deploy-probes/production.sh").read_text())
-        self.assertIn("tools/deploy-probes/access.sh", lab_steps[index + 2]["run"])
-        self.assertIn("curl", (REPO / "tools/deploy-probes/access.sh").read_text())
-        # The stop switch as the settings page labels it.
-        label = "暂停抓取新论文"
-        self.assertIn(label, (REPO / "lab/web/src/views/Settings.tsx").read_text())
-        self.assertIn(label, section)
 
     def test_deploy_jobs_pass_values_through_env_only(self):
         """No ${{ }} inside a deploy job's scripts (values reach them through env:), no account variable

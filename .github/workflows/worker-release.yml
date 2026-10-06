@@ -585,184 +585,11 @@ jobs:
           RELEASE_SOURCE: ${{ steps.source.outputs.source_sha }}
         run: python3 tools/cloud-release/control.py record --app "$RELEASE_APP" --source-sha "$RELEASE_SOURCE" --source-root .release-source
 
-  # Lab (Worker "lab"): after Todofy's deploy (the TODOFY binding names Todofy's Ops entrypoint) and before the
-  # dashboard's (it binds LAB). Migrations first (additive), then the Worker through deploy-vars.mjs, then the
-  # same Access probe as the dashboard's. The deploy token is Todofy's CF_API_TOKEN (D1, Workers, Workers AI).
-  lab-deploy:
-    name: lab production release
-    if: github.ref == 'refs/heads/main' && inputs.app == 'lab'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    environment:
-      name: production
-      url: ${{ steps.config.outputs.url }}
-    concurrency:
-      group: lab-production
-      cancel-in-progress: false
-    defaults:
-      run:
-        working-directory: .release-source/lab
-    env:
-      DASHBOARD_CANARY_ENABLED: ${{ vars.DASHBOARD_CANARY_ENABLED }}
-      MAIL_HERO_FORCE_SEND_PAUSED: ${{ vars.MAIL_HERO_FORCE_SEND_PAUSED }}
-      MAIL_HERO_MAINTENANCE_MODE: ${{ vars.MAIL_HERO_MAINTENANCE_MODE }}
-      MAIL_HERO_NATIVE_BACKUP_ENABLED: ${{ vars.MAIL_HERO_NATIVE_BACKUP_ENABLED }}
-      TODOFY_FORCE_PAUSE_TODOIST: ${{ vars.TODOFY_FORCE_PAUSE_TODOIST }}
-      TODOFY_GTD_REVIEW_ENABLED: ${{ vars.TODOFY_GTD_REVIEW_ENABLED }}
-      TODOFY_MAINTENANCE_MODE: ${{ vars.TODOFY_MAINTENANCE_MODE }}
-      TODOFY_PROCESSING_PAUSED: ${{ vars.TODOFY_PROCESSING_PAUSED }}
-      TODOFY_REMINDER_ENABLED: ${{ vars.TODOFY_REMINDER_ENABLED }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: Select the checked source under the release lock
-        id: source
-        working-directory: .
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_APP: ${{ inputs.app }}
-          RELEASE_SOURCE: ${{ inputs.source_sha }}
-          RELEASE_EXPECTED_MAIN: ${{ inputs.expected_main_sha }}
-          RELEASE_REPAIR: ${{ inputs.repair }}
-        run: |
-          args=()
-          if [ "$RELEASE_REPAIR" = true ]; then args+=(--repair); fi
-          if [ -n "$RELEASE_EXPECTED_MAIN" ]; then args+=(--expected-main-sha "$RELEASE_EXPECTED_MAIN"); fi
-          python3 tools/cloud-release/control.py prepare --app "$RELEASE_APP" --source-sha "$RELEASE_SOURCE" "${args[@]}"
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ steps.source.outputs.source_sha }}
-          path: .release-source
-          persist-credentials: false
-      - name: Compare actual configuration and preserve owner pauses
-        id: preflight
-        working-directory: .
-        env:
-          GH_TOKEN: ${{ github.token }}
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
-          RELEASE_APP: ${{ inputs.app }}
-          RELEASE_SOURCE: ${{ steps.source.outputs.source_sha }}
-          RELEASE_REPAIR: ${{ inputs.repair }}
-          RELEASE_CHECK_ONLY: ${{ inputs.check_only }}
-        run: |
-          args=()
-          if [ "$RELEASE_REPAIR" = true ]; then args+=(--repair); fi
-          if [ "$RELEASE_CHECK_ONLY" = true ]; then args+=(--check-only); fi
-          python3 tools/cloud-release/control.py preflight --app "$RELEASE_APP" --source-sha "$RELEASE_SOURCE" --source-root .release-source "${args[@]}"
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
-        if: steps.preflight.outputs.required == 'true'
-        with:
-          node-version: '26'
-          cache: npm
-          cache-dependency-path: |
-            .release-source/lab/worker/package-lock.json
-            .release-source/lab/web/package-lock.json
-            .release-source/proto/package-lock.json
-      # Every static production value (account, D1, host, Access, neuron ceiling, fetch hour) is committed in
-      # lab/wrangler.toml; the environment URL and the Access probe read it there.
-      - name: Read the host and the Access issuer from the committed config
-        if: steps.preflight.outputs.required == 'true'
-        id: config
-        run: |
-          python3 - >> "$GITHUB_OUTPUT" <<'EOF'
-          import tomllib
-          with open("wrangler.toml", "rb") as file:
-              variables = tomllib.load(file)["vars"]
-          print("url=https://" + variables["PUBLIC_HOST"])
-          print("host=" + variables["PUBLIC_HOST"])
-          print("access_issuer=" + variables["ACCESS_ISSUER"])
-          EOF
-      - name: Build the verified revision
-        if: steps.preflight.outputs.required == 'true'
-        run: |
-          npm ci --prefix worker --no-audit --no-fund
-          npm ci --prefix web --no-audit --no-fund
-          npm run build --prefix web
-      # The owner's addresses and the CSRF key are environment secrets (masked in this public log) and reach the
-      # Worker as secrets through --secrets-file; wrangler prints plain vars. Lab's owner is the dashboard's owner
-      # (one person, the same Access identities), so the addresses come from the dashboard's existing secrets and
-      # cannot drift apart; the CSRF key is Lab's own (a separate key per app). lab/README.md "Deploy secrets".
-      - name: Write the Worker secrets file
-        if: steps.preflight.outputs.required == 'true'
-        working-directory: .release-source/lab/worker
-        env:
-          LAB_WORKER_SECRETS: ${{ secrets.LAB_WORKER_SECRETS }}
-          LAB_ACCESS_OWNER: ${{ secrets.DASHBOARD_ACCESS_OWNER }}
-          LAB_ACCESS_OWNER_ALIASES: ${{ secrets.DASHBOARD_ACCESS_OWNER_ALIASES }}
-          LAB_CSRF_SIGNING_KEY: ${{ secrets.LAB_CSRF_SIGNING_KEY }}
-        run: node ../deploy/deploy-vars.mjs secrets "$RUNNER_TEMP/lab-secrets.json"
-      # deploy-vars.mjs adds BUILD_SHA as --var and refuses the all-zeros D1 id or Access AUD; the bundle that ships
-      # is held to Lab's budget and the Workers Free limit (deploy/bundle-size.mjs).
-      - name: Validate the bundle before changing D1
-        if: steps.preflight.outputs.required == 'true'
-        working-directory: .release-source/lab/worker
-        run: |
-          node ../deploy/deploy-vars.mjs exec -- npx --no-install wrangler deploy --dry-run --config ../wrangler.toml \
-            --secrets-file "$RUNNER_TEMP/lab-secrets.json" --outdir "$RUNNER_TEMP/lab-bundle"
-          node ../deploy/bundle-size.mjs "$RUNNER_TEMP/lab-bundle"
-      # tools/cf-guard (read-only GETs; prints listed hostnames, counts, PASS/FAIL): wrangler applies a config's Custom
-      # Domains (or zone routes) as the Worker's complete set, so stop before any production change when a live
-      # hostname would be detached or another Worker's hostname or DNS record taken over. For an intentional
-      # change, set the exact hostnames here (space-separated) in the same commit that changes wrangler.toml.
-      - name: Check the hostnames against production
-        if: steps.preflight.outputs.required == 'true'
-        working-directory: .release-source
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
-          CF_GUARD_ALLOW_REMOVE: ''
-          CF_GUARD_ALLOW_CONFLICT: ''
-        run: node tools/cf-guard/cf-guard.mjs --config lab/wrangler.toml
-      - name: Apply D1 migrations, then deploy the Worker lab
-        if: steps.preflight.outputs.required == 'true'
-        working-directory: .release-source/lab/worker
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
-        run: |
-          test -n "$CLOUDFLARE_API_TOKEN"
-          npx --no-install wrangler d1 migrations apply DB --remote --config ../wrangler.toml
-          node ../deploy/deploy-vars.mjs exec -- npx --no-install wrangler deploy --config ../wrangler.toml \
-            --secrets-file "$RUNNER_TEMP/lab-secrets.json"
-      # Access answers every request before the Worker runs (the probe below), so production is read through the API
-      # with the deploy token, as FlowDay deploy does (GETs and one D1 read of the migrations table): the Worker serves
-      # exactly one version at 100%, that version's BUILD_SHA is this commit (so this commit's routes, lab.ui.v1 among
-      # them, are what answers), and no D1 migration is pending. wrangler's JSON answers are parsed, never printed (they
-      # name the token's account email); only the version id and the results are.
-      - name: Check that production runs this commit
-        if: steps.preflight.outputs.required == 'true'
-        working-directory: .release-source/lab/worker
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
-        run: |
-          bash "$GITHUB_WORKSPACE/.release-source/tools/deploy-probes/production.sh" lab ../wrangler.toml DB
-      # Cloudflare Access ("Lab") must answer every unauthenticated request with a 302 to its login page for this
-      # host, exactly as the dashboard's probe checks (same script; test_ci_changes.py runs it).
-      - name: Check that Access answers unauthenticated requests
-        if: steps.preflight.outputs.required == 'true'
-        env:
-          ACCESS_ISSUER: ${{ steps.config.outputs.access_issuer }}
-          PUBLIC_HOST: ${{ steps.config.outputs.host }}
-        run: |
-          bash "$GITHUB_WORKSPACE/.release-source/tools/deploy-probes/access.sh" / /api/v1/today
-      - name: Remove the secrets file
-        if: always() && steps.preflight.outputs.required == 'true'
-        run: rm -f "$RUNNER_TEMP/lab-secrets.json"
-
-      - name: Verify provider identities and record successful deployment
-        if: steps.preflight.outputs.required == 'true'
-        working-directory: .
-        env:
-          GH_TOKEN: ${{ github.token }}
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
-          RELEASE_APP: ${{ inputs.app }}
-          RELEASE_SOURCE: ${{ steps.source.outputs.source_sha }}
-        run: python3 tools/cloud-release/control.py record --app "$RELEASE_APP" --source-sha "$RELEASE_SOURCE" --source-root .release-source
-
   # FlowDay (Worker "flowday", flowday/docs/design.md section 11). Migrations first (additive), then the Worker through
   # deploy-vars.mjs, then a read of production through the API (version and migrations), then the production host
   # flowday.ziyixi.science (since the F4 cutover; the staging host flowday-next.ziyixi.science before): Access answers
   # everything anonymous except the exact PWA files, which the Access app "flowday-bypass" lets through to the Worker.
-  # The deploy token is Todofy's CF_API_TOKEN (D1 and Workers), as for Lab.
+  # The deploy token is Todofy's CF_API_TOKEN (D1 and Workers).
   flowday-deploy:
     name: flowday production release
     if: github.ref == 'refs/heads/main' && inputs.app == 'flowday'
@@ -858,7 +685,7 @@ jobs:
           npm run check:export --prefix web
       # The owner's addresses and the two keys are environment secrets (masked in this public log) and reach the
       # Worker as secrets through --secrets-file; wrangler prints plain vars. FlowDay's owner is the dashboard's owner
-      # (one person, the same Access identities), so the addresses come from the dashboard's secrets, as for Lab; the
+      # (one person, the same Access identities), so the addresses come from the dashboard's secrets; the
       # CSRF key and the credential key (it seals the Todoist key in D1) are FlowDay's own. flowday/README.md "Deploy".
       - name: Write the Worker secrets file
         if: steps.preflight.outputs.required == 'true'
@@ -1081,7 +908,7 @@ jobs:
           npm run build --prefix web
       # The owner's addresses and the CSRF key are environment secrets (masked in this public log) and reach the Worker
       # as secrets through --secrets-file; wrangler prints plain vars. The links app's owner is the dashboard's owner
-      # (one person, the same Access identities), so the addresses come from the dashboard's secrets, as for Lab and
+      # (one person, the same Access identities), so the addresses come from the dashboard's secrets, as for
       # FlowDay; the CSRF key is the links app's own. links/README.md "Deploy".
       - name: Write the Worker secrets file
         if: steps.preflight.outputs.required == 'true'
@@ -1317,7 +1144,7 @@ jobs:
           npm run build --prefix web
       # The owner's addresses and the CSRF key are environment secrets (masked in this public log) and reach the Worker
       # as secrets through --secrets-file; wrangler prints plain vars. The watch app's owner is the dashboard's owner
-      # (one person, the same Access identities), so the addresses come from the dashboard's secrets, as for Lab,
+      # (one person, the same Access identities), so the addresses come from the dashboard's secrets, as for
       # FlowDay and the links app; the CSRF key is the watch app's own. watch/README.md "Deploy".
       - name: Write the Worker secrets file
         if: steps.preflight.outputs.required == 'true'

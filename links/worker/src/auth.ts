@@ -1,5 +1,5 @@
 /**
- * The links app's adapter of packages/edge-auth (its SPEC §5.4; the dashboard's, Lab's and FlowDay's parameters):
+ * The links app's adapter of packages/edge-auth (its SPEC §5.4; the dashboard's and FlowDay's parameters):
  * Cloudflare Access for the owner, and Origin plus the signed double-submit CSRF token for every mutation.
  *
  * Two places ask for the owner. Under /_/ (the launcher and its API, behind the path-scoped Access application)

@@ -43,7 +43,6 @@ describe('操作与记录', () => {
     expect(rows.map((row) => within(row).getByRole('rowheader').textContent)).toEqual([
       'Mail Hero',
       'Todofy',
-      '论文雷达',
       'FlowDay',
       '短链接',
       '网页监视',
@@ -55,21 +54,21 @@ describe('操作与记录', () => {
       '自托管服务器',
       '平台运行时',
     ])
-    expect(rows[2]).toHaveTextContent('ops-v1 状态接口')
+    expect(rows[1]).toHaveTextContent('ops-v1 状态接口')
     // FlowDay and the links app: a probe of a path their own Worker answers outside Access.
+    expect(rows[2]).toHaveTextContent('公开地址探测')
+    expect(within(rows[2] as HTMLElement).getAllByRole('cell').at(-1)).toHaveTextContent('flowday')
     expect(rows[3]).toHaveTextContent('公开地址探测')
-    expect(within(rows[3] as HTMLElement).getAllByRole('cell').at(-1)).toHaveTextContent('flowday')
-    expect(rows[4]).toHaveTextContent('公开地址探测')
-    expect(within(rows[4] as HTMLElement).getAllByRole('cell').at(-1)).toHaveTextContent('links')
-    // The watch app: its Ops entrypoint, as Mail Hero, Todofy and Lab.
+    expect(within(rows[3] as HTMLElement).getAllByRole('cell').at(-1)).toHaveTextContent('links')
+    // The watch app: its Ops entrypoint, as Mail Hero and Todofy.
+    expect(rows[4]).toHaveTextContent('ops-v1 状态接口')
+    expect(within(rows[4] as HTMLElement).getAllByRole('cell').at(-1)).toHaveTextContent('watch')
     expect(rows[5]).toHaveTextContent('ops-v1 状态接口')
-    expect(within(rows[5] as HTMLElement).getAllByRole('cell').at(-1)).toHaveTextContent('watch')
-    expect(rows[6]).toHaveTextContent('ops-v1 状态接口')
-    expect(rows[7]).toHaveTextContent('公开地址探测')
-    expect(rows[9]).toHaveTextContent('ops-v1 状态接口')
+    expect(rows[6]).toHaveTextContent('公开地址探测')
+    expect(rows[8]).toHaveTextContent('ops-v1 状态接口')
     // Hidden, with no Worker: it only names the self-hosted servers' backup bucket.
-    expect(rows[11]).toHaveTextContent('未接入监控')
-    expect(within(rows[11] as HTMLElement).getAllByRole('cell').at(-1)).toHaveTextContent('—')
+    expect(rows[10]).toHaveTextContent('未接入监控')
+    expect(within(rows[10] as HTMLElement).getAllByRole('cell').at(-1)).toHaveTextContent('—')
   })
 
   it('names a link-only entry of the registry as such', async () => {

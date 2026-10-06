@@ -62,10 +62,13 @@ service TaskIntentService {
 
 // The proposing app. A closed list on input: Todofy refuses a source it does not know.
 enum Source {
+  // A retired source keeps its number and name reserved, so neither is ever reused: Todofy's ledger may still hold
+  // its rows (keyed by the wire name), and a new source must not be read as that one.
+  reserved 1;
+  reserved "SOURCE_LAB";
+
   // Never sent; a reader that sees it treats the message as invalid input.
   SOURCE_UNSPECIFIED = 0;
-  // Lab, the paper radar. URL host allow-list: arxiv.org.
-  SOURCE_LAB = 1;
   // The watch app's notifications: its daily digest and urgent changes. URL host allow-list:
   // watch.ziyixi.science (a task links to the change in the app, never to a watched page).
   SOURCE_WATCH = 2;

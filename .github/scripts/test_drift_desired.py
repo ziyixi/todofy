@@ -104,8 +104,8 @@ class DesiredState(unittest.TestCase):
             self.assertEqual(deployed, set(names) | set(switches[worker]))
 
     def test_mail_hero_personal_values_are_deploy_secrets(self):
-        """Mail Hero writes its receive address and owner addresses with --secrets-file (as the dashboard and Lab
-        write theirs), so they are wanted as secret_text bindings; the vars it adds are the switches and BUILD_SHA."""
+        """Mail Hero writes its receive address and owner addresses with --secrets-file (as the dashboard and the
+        links app write theirs), so they are wanted as secret_text bindings; the vars it adds are the switches and BUILD_SHA."""
         worker = self.state["workers"]["mail-hero"]
         bindings = {b["name"]: b for b in worker["bindings"]}
         for name in ("RECEIVE_ADDRESS", "ACCESS_OWNER", "ACCESS_OWNER_ALIASES"):

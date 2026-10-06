@@ -4,8 +4,8 @@
  * query and Worker discovery, guard, canary, digest, and the v2 views assembled from its tables. The
  * fetch and scheduled handlers only call these RPC methods.
  *
- * Bounds: every tick makes at most outboundPerTick() = 30 outbound calls (7 status, 3 probes, 1 GraphQL,
- * ≤ 4 setGuard, ≤ 2 canary calls, ≤ 1 reportOps, ≤ DRIFT_CALLS_PER_TICK = 12 read-only drift calls) and
+ * Bounds: every tick makes at most outboundPerTick() = 28 outbound calls (6 status, 3 probes, 1 GraphQL,
+ * ≤ 3 setGuard, ≤ 2 canary calls, ≤ 1 reportOps, ≤ DRIFT_CALLS_PER_TICK = 12 read-only drift calls) and
  * writes a few dozen rows; a v2 view reads at most VIEW_ROWS_READ[view] rows (api-types.ts; tested in
  * workerd).
  */
@@ -119,6 +119,22 @@ export function migrateGuardApplied(storage: DurableObjectStorage): void {
     );
     storage.sql.exec('DROP TABLE guard_applied');
     storage.sql.exec('ALTER TABLE guard_applied_v2 RENAME TO guard_applied');
+  });
+}
+
+/** The ops-v1 apps this dashboard calls (OPS_APPS), as a SQL list. */
+const OPS_APPS_SQL = OPS_APPS.map((app) => `'${app}'`).join(', ');
+
+/**
+ * Deletes what Home keeps per app for an app that has left ops-v1, as nothing reads it again: its guard_applied row,
+ * its cached status (`status:<app>`, Home's copy of the app's last answer) and its owner override
+ * (`guard_override:<app>`). On a store without such rows it deletes nothing.
+ */
+export function dropRemovedApps(storage: DurableObjectStorage): void {
+  storage.transactionSync(() => {
+    storage.sql.exec(`DELETE FROM guard_applied WHERE app NOT IN (${OPS_APPS_SQL})`);
+    storage.sql.exec(`DELETE FROM state WHERE key GLOB 'status:*' AND substr(key, 8) NOT IN (${OPS_APPS_SQL})`);
+    storage.sql.exec(`DELETE FROM state WHERE key GLOB 'guard_override:*' AND substr(key, 16) NOT IN (${OPS_APPS_SQL})`);
   });
 }
 
@@ -268,6 +284,7 @@ export class HomeState extends DurableObject<Env> {
     void ctx.blockConcurrencyWhile(() => {
       for (const statement of SCHEMA) ctx.storage.sql.exec(statement);
       migrateGuardApplied(ctx.storage);
+      dropRemovedApps(ctx.storage);
       // The one global override of releases before 2026-10-04 becomes each guarded app's own. Kept because
       // production DO state cannot be read to prove no such document is left; nothing writes one any more.
       const legacy = this.doc<GuardOverrideDoc>('guard_override');

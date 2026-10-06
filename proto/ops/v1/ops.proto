@@ -87,10 +87,10 @@ option (common.wire.v1.formats) = {
 option (common.wire.v1.formats) = {
   name: "Source"
   pattern: "[a-z][a-z0-9-]{0,31}"
-  description: "Where a report item comes from: an app (mail-hero, todofy, lab), dashboard, cloudflare."
+  description: "Where a report item comes from: an app (mail-hero, todofy, watch), dashboard, cloudflare."
 };
 
-// What every app's "Ops" entrypoint answers (Mail Hero, Todofy, Lab, the watch app).
+// What every app's "Ops" entrypoint answers (Mail Hero, Todofy, the watch app, Fleet and the website relay).
 service OpsService {
   // `status()`: a snapshot built only from bounded, indexed reads; it writes no data. One write is allowed: an app
   // that schedules itself may re-arm its own missing scheduler alarm (the watch app does, so the dashboard's tick
@@ -167,7 +167,6 @@ message OpsStatus {
       allowed: [
         "mail-hero",
         "todofy",
-        "lab",
         "watch",
         "fleet",
         "newsletter",

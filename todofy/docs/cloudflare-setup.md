@@ -236,17 +236,17 @@ in [gateway-contract.md](gateway-contract.md):
   report precompute keep running. Guard and latest report live in the
   object's storage, not in D1 or the backups.
 
-- Task intents (contracts/task-intent-v1): Lab binds the same `Ops` entrypoint to propose Todoist tasks. The watch
-  app binds the least-privilege `Intents` entrypoint instead (`props = { source = "watch" }`: only its own source's
-  intents, none of the ops-v1 methods; `docs/gateway-contract.md` §3.8), so Todofy deploys before watch (CI's
-  `Watch deploy` waits for `Todofy deploy`); a watch call to an older Todofy is retried as `unavailable`.
-  Release order: Todofy with migration `0005_task_intents.sql` first, then Lab (a Lab send against an
-  older Todofy is refused and retried by Lab as `unavailable`). Nothing to configure: intents use the
+- Task intents (contracts/task-intent-v1): the watch app binds the least-privilege `Intents` entrypoint to propose
+  Todoist tasks (`props = { source = "watch" }`: only its own source's intents, none of the ops-v1 methods;
+  `docs/gateway-contract.md` §3.8), so Todofy deploys before watch (CI's `Watch deploy` waits for `Todofy deploy`);
+  a watch call to an older Todofy is retried as `unavailable`. Nothing to configure: intents use the
   existing `TODOIST_API_KEY` and `TODOIST_DEFAULT_PROJECT_ID`. `MAINTENANCE_MODE`, `PROCESSING_PAUSED`
   and `FORCE_PAUSE_TODOIST` hold intents as they hold mail (new proposals answer `paused`, nothing is
   recorded). To turn the intake off without holding mail, add `TASK_INTENT_SOURCES = ""` to the `[vars]`
   of `wrangler.toml` (and to `CORE_VARS` in `deploy/test_wrangler_configs.py`) and deploy (every proposal then answers `rejected`/`source_not_allowed`; recorded
-  intents still finish); unset, it accepts every source the contract lists. After a D1 restore, pending intents
+  intents still finish); unset, it accepts every source the contract lists. A source the contract no longer lists
+  (its enum value reserved) is refused like an unknown one; a still-pending ledger row of it fails at its next step
+  without a Todoist call, and retention removes its rows like any others. After a D1 restore, pending intents
   resume creating their unfinished tasks: keep `FORCE_PAUSE_TODOIST` on until they are reconciled.
 
 ## 6. Local checks before the first deploy

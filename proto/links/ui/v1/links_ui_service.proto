@@ -27,7 +27,7 @@
 // buf lint. The methods that answer a Link (Get, Create, Update, Delete, Undelete, Rollback) carry two
 // `buf:lint:ignore` lines: RPC_RESPONSE_STANDARD_NAME and RPC_REQUEST_RESPONSE_UNIQUE, which the AIPs contradict
 // (a standard method answers the resource itself, so one message answers several methods; api-linter checks those
-// names instead). They are excused here, next to each method, not in buf.yaml's ignore_only as lab/ui is: buf.yaml
+// names instead). They are excused here, next to each method, not in buf.yaml's ignore_only: buf.yaml
 // is a path every proto user's deploy depends on (.github/scripts/ci_changes.py), and this package must not
 // redeploy the other apps.
 //

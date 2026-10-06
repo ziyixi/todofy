@@ -1,6 +1,6 @@
 # Home dashboard: design
 
-The Worker `home` on `home.ziyixi.science` is the owner's operations view and launcher, with Ops bindings to Mail Hero, Todofy, Lab and Watch,
+The Worker `home` on `home.ziyixi.science` is the owner's operations view and launcher, with Ops bindings to Mail Hero, Todofy, Watch, Fleet and the website relay,
 and it runs three jobs: a daily delivery-and-processing canary (scope in §5.4) with a unified ops
 digest, quota guardrails, and the
 cross-app contract tests of `contracts/ops-v1`. It talks to the apps only through their `Ops`

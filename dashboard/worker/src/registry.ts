@@ -74,20 +74,6 @@ const ENTRIES: readonly EntryDef[] = [
     order: 2,
   },
   {
-    id: 'lab',
-    name: '论文雷达',
-    description: 'arXiv 每日推荐，划卡片挑论文',
-    group: 'apps',
-    icon: 'flask-conical',
-    accent: 'violet',
-    url: 'https://lab.ziyixi.science/',
-    access: true,
-    status: { type: 'ops_v1', binding: 'LAB', guard: true },
-    tile_metric: { kind: 'counter', name: 'liked_7d' },
-    app_only_signals: ['maintenance_mode'],
-    order: 4,
-  },
-  {
     id: 'flowday',
     name: 'FlowDay',
     description: 'Todoist 时间块、计时与回顾',
@@ -260,7 +246,6 @@ const WORKERS: readonly WorkerDef[] = [
   { script: 'todofy', entry: 'todofy', role: '网关与 UI' },
   { script: 'todofy-core', entry: 'todofy', role: '处理核心（TodofyCore）' },
   { script: 'home', entry: 'home', role: '本面板' },
-  { script: 'lab', entry: 'lab', role: '论文雷达与 UI' },
   { script: 'flowday', entry: 'flowday', role: '页面、API 与 PWA 文件' },
   { script: 'links', entry: 'links', role: '短链接跳转与启动器' },
   { script: 'watch', entry: 'watch', role: '网页监视与 UI' },
@@ -279,9 +264,6 @@ const RESOURCES: readonly ResourceDef[] = [
   // Defined in todofy-core; the gateway `todofy` binds it by script_name.
   { id: 'todofy-core-do', kind: 'do', name: 'TodofyCore', entry: 'todofy', script: 'todofy-core', match: RESOURCE_IDENTITIES['todofy-core-do'] ?? null },
   { id: 'home-state', kind: 'do', name: 'HomeState', entry: 'home', script: 'home', match: RESOURCE_IDENTITIES['home-state'] ?? null },
-  { id: 'lab-db', kind: 'd1', name: 'lab 论文库', entry: 'lab', match: RESOURCE_IDENTITIES['lab-db'] ?? null },
-  // Created by Lab's first deploy (2026-09-30).
-  { id: 'lab-state', kind: 'do', name: 'LabState', entry: 'lab', script: 'lab', match: RESOURCE_IDENTITIES['lab-state'] ?? null },
   // Created for the links app's first deploy (L2, 2026-10-01).
   { id: 'links-db', kind: 'd1', name: 'links 短链接库', entry: 'links', match: RESOURCE_IDENTITIES['links-db'] ?? null },
   // FlowDay's database (flowday/wrangler.toml, managed by infra/ since IaC P4).
@@ -420,21 +402,6 @@ const FLOWS: readonly FlowDef[] = [
       { id: 'report', name: 'Todofy 报告', entry: 'todofy', workers: ['todofy'], signals: [] },
       { id: 'fetch', name: '后台进程', entry: 'newsletter', signals: ['host_never_seen', 'host_stale', 'host_missing', 'newsletter_unavailable', 'newsletter_side_effect_unknown', 'newsletter_unknown', 'newsletter_delivery_rejected', 'newsletter_delivery_overdue', 'newsletter_delivery_accepted', 'newsletter_paused', 'deployment_pending'], hold_signals: ['newsletter_paused'], counters: ['queued_count', 'inflight_count', 'unknown_count'], note: '监督进程与发布排空，不证明采编或模型成功' },
       { id: 'write', name: '写入 Notion', entry: null, signals: [], note: 'Notion 结果需要业务账本核对，进程健康不能代替业务验收' },
-    ],
-    canary: null,
-  },
-  {
-    id: 'paper-radar',
-    name: '论文雷达',
-    group: 'research',
-    description: 'arXiv 每日公告经向量排序和中文简介做成卡片，喜欢的论文确认后交给 Todofy 创建任务。',
-    order: 1,
-    stages: [
-      { id: 'source', name: 'arXiv', entry: null, signals: [], note: '公开 RSS，每天抓取一次' },
-      { id: 'fetch', name: '抓取', entry: 'lab', analytics: true, signals: ['feed_stale'], counters: ['ingested_24h'] },
-      { id: 'rank', name: '排序与简介', entry: 'lab', signals: ['neuron_cap_hit'], counters: ['ranked_24h', 'neurons_today'] },
-      { id: 'deck', name: '卡片', entry: 'lab', signals: [], counters: ['liked_7d'] },
-      { id: 'send', name: '交给 Todofy', entry: 'lab', signals: ['send_unsettled'] },
     ],
     canary: null,
   },
