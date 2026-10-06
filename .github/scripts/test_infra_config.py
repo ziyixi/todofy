@@ -33,6 +33,7 @@ What they keep true (infra/README.md):
 - No account or zone id (32 hex digits) and no email address is committed under infra/.
 """
 
+import importlib.util
 import os
 import re
 import sys
@@ -76,10 +77,16 @@ PRODUCTION = {
     "watch": "watch/wrangler.toml",
     "fleet": "fleet/wrangler.toml",
 }
+from cloud_profile import load_profile, load_resources  # noqa: E402
+
+# The public configuration generator, loaded by file: its module name "generate" is too generic for sys.path.
+_spec = importlib.util.spec_from_file_location("cloud_config_generate", REPO / "tools" / "cloud-config" / "generate.py")
+generate = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(generate)
+
 # Fleet's initial phase is explicit in ci_changes.CHECK_ONLY. Its sole production config already
 # describes the intended host, but carries no invented AUD and both Fleet/Home deploys stay disabled.
 # The activation commit records the real Access IDs/AUD and removes CHECK_ONLY in the same change.
-from cloud_profile import load_profile, load_resources  # noqa: E402
 AHEAD_OF_DEPLOY = ({"fleet": load_profile(REPO)["platform_hostname"]}
                   if "fleet" in test_wrangler_configs.ci_changes.CHECK_ONLY else {})
 # Hosts an Access application may still list although no wrangler.toml declares them. Empty since FlowDay's F3
@@ -170,8 +177,7 @@ class Boundary(unittest.TestCase):
                 if path.name == "platform-identity.tf":
                     # The sole generated public zone identity is checked against its strict source;
                     # account IDs still come only from var.account_id, and no other literal is allowed.
-                    from cloud_config_generate import platform_identity
-                    self.assertEqual(text, platform_identity(load_profile(REPO), load_resources(REPO)))
+                    self.assertEqual(text, generate.platform_identity(load_profile(REPO), load_resources(REPO)))
                     text = text.replace(load_resources(REPO)["zone_id"], "ZONE_ID")
                 self.assertNotRegex(text, r"(?<![0-9a-f-])[0-9a-f]{32}(?![0-9a-f-])")
                 self.assertNotRegex(text, r"[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}")
