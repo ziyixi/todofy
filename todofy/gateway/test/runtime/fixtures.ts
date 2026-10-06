@@ -23,7 +23,8 @@ export function eventSummary(n: number): Record<string, unknown> {
     name: `mailEvents/${UUID(n)}`,
     state: n % 3 === 0 ? 'todo_unknown' : 'complete',
     error_code: n % 3 === 0 ? 'lookup_not_found' : undefined,
-    attempt_count: n % 4,
+    // At least one: the wire profile omits a 0, as TodofyCore writes it.
+    attempt_count: (n % 4) + 1,
     task_id: n % 3 === 0 ? undefined : `6X7rM8997g3RQ${String(n).padStart(3, '0')}`,
     receive_time: AT,
     update_time: AT,
