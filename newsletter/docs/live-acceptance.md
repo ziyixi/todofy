@@ -24,7 +24,7 @@ make smoke-codex
 | --- | --- | --- |
 | Codex 指令采集、总编及补查 | `NEWSLETTER_CODEX_HOME`、`NEWSLETTER_MODEL` | 在运行服务的机器上完成专用 ChatGPT 登录；不是 OpenAI API key。登录目录只供该服务使用，持久化且可写。 |
 | Todofy 事件概述 | `TODO_API_BASE`、`TODO_API_USER`、`TODO_API_PASSWORD` | 使用现有 Todofy Basic Auth 用户，对应 Todofy 部署的 `ALLOWED_USERS`。不需要把 Todoist token 交给 newsletter。 |
-| Notion 双库或显式旧测试 inbox | `NOTION_TOKEN`、`NOTION_MATERIALS_DATA_SOURCE_ID`、`NOTION_EDITIONS_DATA_SOURCE_ID`；旧单库才用 `NOTION_DATA_SOURCE_ID` | 专用 internal connection 只授权指定数据库。双库需要 Read/Insert/Update content，关系目标均须可访问；旧单库摘要只需 Read/Insert。无需用户资料或评论权限。 |
+| Notion 双库 | `NOTION_TOKEN`、`NOTION_MATERIALS_DATA_SOURCE_ID`、`NOTION_EDITIONS_DATA_SOURCE_ID` | 专用 internal connection 只授权这两个数据库，需要 Read/Insert/Update content，关系目标均须可访问。无需用户资料或评论权限。 |
 | Resend 投递 | `RESEND_API_KEY`、`NEWSLETTER_FROM_EMAIL`、`RECIPIENT_EMAIL` | 可复用现有 key；新建时优先只允许 Sending access 并限制发件域名。发件地址使用已验证域名，收件人由用户明确确认。 |
 | 服务 HTTP 鉴权 | `NEWSLETTER_EDITOR_TOKEN`、`NEWSLETTER_SEND_TOKEN` | 完成 `make setup` 后，用 `.venv/bin/newsletter token` 分别在本机生成两个不同随机值（各至少24字符），无需第三方账号。只准备内容的触发器仅持 editor token；用户明确授权每日投递时，独立 cron 容器另持 send token，不获得供应商密钥。ingest 角色及其旧环境变量已退休。 |
 
@@ -58,13 +58,8 @@ ChatGPT 登录使用订阅访问，但仍受额度、模型和工作区权限限
 
 ## Notion：专用测试数据库
 
-当前双库部署按 [Notion说明](notion.md) 创建并授权两个数据源、显式执行schema setup。
-下面步骤仅用于仍明确选择旧单库摘要适配器的隔离联调，不代表当前双库的权限或归档能力：
-
-1. 在 Notion Developer portal → Internal connections 创建一个 newsletter 测试 connection；从 Configuration 取得 Installation access token，安全保存为 `NOTION_TOKEN`。
-2. 给 connection 配置上表所需内容权限，并在 Content access 只授权专用测试数据库；也可从该数据库的 Connections → Add connection 授权。不开放其他个人页面。
-3. 打开数据库设置 → Manage data sources → 对应数据源的菜单 → Copy data source ID，保存为 `NOTION_DATA_SOURCE_ID`。它不是页面 ID、视图 ID，也不一定等于数据库 ID。
-4. 保留数据库默认的标题属性即可，不必创建一堆自定义列。当前实现只写材料摘要、来源和 workflow 元数据，不读取你在 Notion 的修改，也不写 Todofy 私人事件。
+按 [Notion说明](notion.md) 创建 internal connection、两个数据源并授权，再显式执行 schema setup。
+旧单库摘要适配器已移除；残留的 `NOTION_DATA_SOURCE_ID` 会被忽略。
 
 参考：[创建 internal connection](https://developers.notion.com/guides/get-started/internal-connections)、[权限范围](https://developers.notion.com/reference/capabilities)、[查找 data source ID](https://developers.notion.com/reference/retrieve-a-data-source)。整期入口 `POST /v1/runs` 在 live 配置要求启用 Notion；新选题DAG先将证据与已审版本持久化到SQLite，Notion作为后台镜像单独验收，不再是发信前置条件。旧冻结图保留原门槛。内部fixture或直接调用编稿函数不能冒充整条指令采集链路通过。
 
