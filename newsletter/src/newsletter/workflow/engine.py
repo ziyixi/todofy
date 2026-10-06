@@ -231,10 +231,10 @@ class WorkflowEngine:
             self.repository.finish(attempt, "failed", error_code="interrupted")
             raise
         except TimeoutError:
-            # Nodes do read-only model/feed work, so hitting their own deadline
-            # is a known failure. 'unknown' stays for outcomes the engine
-            # cannot confirm: cancellation, restart recovery and ambiguous
-            # NodeErrors.
+            # Like a cancel, hitting the node's own deadline ends read-only
+            # model/feed work, so it is a known failure; 'unknown' would
+            # reopen the monitoring warning for an outcome nothing has to
+            # reconcile.
             self.repository.finish(attempt, "failed", error_code="timeout")
         except NodeError as error:
             self.repository.finish(

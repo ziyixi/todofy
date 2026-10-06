@@ -160,8 +160,9 @@ class Store:
         as records awaiting reconciliation. Workflow nodes are read-only:
         Codex runs with a read-only sandbox and no approvals, while delivery
         and Notion keep their own ledgers. Such an attempt has nothing left to
-        reconcile, so it is a known failure. The error code, run receipts and
-        every other ledger stay untouched. The named metadata marker makes
+        reconcile, so it is a known failure; this release's engine and restart
+        recovery record new ones as failed directly. The error code, run
+        receipts and every other ledger stay untouched. The named marker makes
         this run exactly once, so an unknown recorded by a later release is
         never rewritten by a restart. The caller owns the transaction.
         """

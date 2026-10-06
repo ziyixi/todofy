@@ -6,6 +6,8 @@ import sqlite3
 
 import newsletter.monitoring_status as monitoring
 import newsletter.store as storage
+import newsletter.workflow.definition as definition
+import newsletter.workflow.engine as engine
 import newsletter.workflow.repository as repository
 
 MARKER = "migration:settle_read_only_attempts:v1"
@@ -138,6 +140,42 @@ def test_monitor_revision_is_kept_but_count_drops_to_zero(tmp_path):
         second = monitoring.snapshot(store)
         assert second["unknown_by_kind"]["workflow_attempts"] == 0
         assert second["unknown_revision"] == first["unknown_revision"]
+    finally:
+        store.close()
+
+
+async def test_node_timeout_after_migration_does_not_reopen_warning(tmp_path):
+    """The marker settles old rows once, so new timeouts must not be unknown."""
+    path = tmp_path / "newsletter.sqlite3"
+    _old_database(path, [("a-timeout", "unknown", "timeout")])
+    store = storage.Store(path, "live")
+    try:
+        before = monitoring.snapshot(store)
+        assert before["unknown_by_kind"]["workflow_attempts"] == 0
+        workflows = repository.WorkflowRepository(store)
+        workflows.start(
+            "run-2",
+            definition.parse_definition(
+                {
+                    "version": 1,
+                    "id": "daily-newsletter",
+                    "nodes": [{"id": "discover", "type": "discovery"}],
+                }
+            ),
+            {},
+        )
+
+        async def slow(context):
+            raise TimeoutError()
+
+        await engine.WorkflowEngine(workflows, {"discovery": slow}).run("run-2")
+        after = monitoring.snapshot(store)
+        assert after["unknown_by_kind"]["workflow_attempts"] == 0
+        assert after["unknown_revision"] == before["unknown_revision"]
+        assert [
+            (row["state"], row["error_code"])
+            for row in workflows.attempts("run-2")
+        ] == [("failed", "timeout")]
     finally:
         store.close()
 
