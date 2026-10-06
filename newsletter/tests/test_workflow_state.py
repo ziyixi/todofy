@@ -247,6 +247,48 @@ def test_legacy_binding_advance_ignores_unused_projection_failures(
     assert store.db.execute("SELECT COUNT(*) FROM sends").fetchone()[0] == 0
 
 
+@pytest.mark.parametrize("projection", ["failed", "unknown"])
+def test_legacy_binding_advance_blocks_unconfirmed_adopted_projection(
+    store, tmp_path, projection
+):
+    # Editions frozen by the retired whole-edition recipe still gate sending on
+    # their adopted packets; a failed or unknown projection must close the run
+    # without a retry and without reserving a send.
+    runs = repository.RunRepository(store)
+    run = runs.start(
+        {"request_key": "run", "issue_date": "2026-09-06"},
+        [],
+        workflow_snapshot={"fixture": "not executed by this state-only test"},
+    )
+    adopted = workflow_state.packet(store, "adopted")
+    edition = workflow_state.ready(store, "edition", [adopted], run=run["id"])
+    assert store.get(edition["id"])["state"] == "ready"
+    assert (
+        newsletter_workflow_state.WorkflowState(store).edition(edition["id"])[
+            "projection_required"
+        ]
+        is True
+    )
+    store.projection_result(adopted["id"], projection)
+    runs.update(run["id"], state="editing", edition_id=edition["id"])
+    pipeline = newsletter_workflow_pipeline.DagPipeline(
+        runs,
+        tmp_path / "workspace",
+        editor=editor.CodexEditor(tmp_path / "unused-auth-path"),
+    )
+    assert pipeline.advance()
+    blocked = runs.get(run["id"])
+    assert blocked["state"] == "blocked"
+    assert blocked["error_code"] == "notion_projection_unconfirmed"
+    with pytest.raises(newsletter_store.StoreError):
+        store.reserve_send(workflow_state.approval(edition))
+    assert store.db.execute("SELECT COUNT(*) FROM sends").fetchone()[0] == 0
+    # A second pass finds no active run, so nothing changes or retries.
+    assert pipeline.advance() is False
+    assert runs.get(run["id"]) == blocked
+    assert store.get(edition["id"])["state"] == "ready"
+
+
 def test_same_date_new_edition_or_send_key_cannot_duplicate_reservation(store):
     source = workflow_state.packet(store, "adopted")
     first = workflow_state.ready(store, "edition-one", [source])
