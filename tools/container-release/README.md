@@ -1,9 +1,10 @@
-# Tested Newsletter image
+# Tested service images
 
-`image.py` is CI tooling, never part of an application bundle. The independent engine image is
-`ghcr.io/ziyixi/todofy-newsletter`; the monorepo name does not change the engine's image name.
+`image.py` is CI tooling, never part of an application bundle. It saves and publishes the Newsletter and Platform
+images (`--service`). The independent engine image is `ghcr.io/ziyixi/todofy-newsletter`; the monorepo name does not
+change the engine's image name.
 
-The credential-free image check builds and tests one image ID, then saves its Docker archive,
+Each credential-free image check builds and tests one image ID, then saves its Docker archive,
 source SHA, image ID and SHA256. The gated main publisher loads that archive and checks all
 three identities before tagging and pushing it. There is no second build in the publisher.
 
