@@ -9,7 +9,9 @@ import { fileURLToPath } from 'node:url'
 import assert from 'node:assert/strict'
 import { MailHeroUiService } from '@ziyixi/proto/mailhero/ui/v2/mail_hero_ui_service_pb'
 import { ownerApiRoutes } from '../src/native/api.ts'
-import { warmCall, WARM_CALLS } from '../src/native/warmup.ts'
+import { warmCall, WARM_CALLS, warmOpsStatus } from '../src/native/warmup.ts'
+import { fromWire } from '@ziyixi/proto/wire-json'
+import { OpsStatusSchema } from '@ziyixi/proto/ops/v1/ops_pb'
 
 test('the warm-up runs without bindings, every call routed to its own method', () => {
   const routes = ownerApiRoutes()
@@ -42,6 +44,11 @@ test('the warm-up runs without bindings, every call routed to its own method', (
   assert.equal(JSON.parse(warmCall(routes, 'getSetupStatus', WARM_CALLS.getSetupStatus).answer).checks[0].result, 'ok')
   const update = warmCall(routes, 'updateSettings', WARM_CALLS.updateSettings).request
   assert.deepEqual([update.settings.name, update.settings.sendPaused, update.updateMask.paths], ['settings', true, ['send_paused']])
+  // Home's status(): the contract's rules hold, and the status takes the paths a real one takes (a guard, signals with metrics).
+  const status = warmOpsStatus()
+  fromWire(OpsStatusSchema, status, { strict: true })
+  assert.deepEqual([status.health, status.guard.level], ['degraded', 'shed'])
+  assert.deepEqual(status.signals.map(signal => signal.code), ['delivery_failed', 'parse_failed', 'guard_shed'])
 })
 
 // A cold warm-up, as an isolate's startup runs it: in a fresh Node process that never imports api.ts (whose module

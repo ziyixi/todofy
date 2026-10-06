@@ -16,13 +16,18 @@
 // The calls are the overview (the UI's first request), the three methods that make a delivery (SendMessage,
 // ResendDelivery, TestEndpoint), the lists and reads the UI opens, one update with a field mask, and the two reads the
 // coordinator answers (GetMessageContent, SummarizeDeliveryAttempts): the coordinator's Durable Object runs this same
-// module, so its isolate is warmed too. Nothing here touches a binding, the network, D1 or R2; no secret and no real
-// data (the global scope allows no I/O, and every value is a constant).
+// module, so its isolate is warmed too. Each round also builds one Ops status (ops-core.ts buildStatus: the coordinator's
+// GuardState read strictly, the OpsStatus written by the wire codec), the codec path of Home's status() call, which
+// otherwise compiles inside the call every 30 minutes, when Home's tick reaches a fresh isolate. Nothing here touches a
+// binding, the network, D1 or R2; no secret and no real data (the global scope allows no I/O, and every value is a
+// constant).
 //
 // Measured on the reference machine on 2026-10-02 (`npm run test:cpu`, four serial runs each, medians of three fresh
 // isolates, reference ms, first run / warm median): SendMessage 4.15-4.60 / 2.50-3.15 -> 3.38-3.98 / 1.90-2.30 (main's
 // hand-written send: 2.84-3.06 / 1.66-2.35), the isolate's first API request (the overview) 7.11-8.20 -> 5.71-6.50,
 // 50 messages with a search 4.66-5.06 -> 2.77-3.26; the coordinator's slowest delegated read 17.8-19.4 -> 15.1-15.4.
+// The Ops status round (2026-10-05, test/cpu/native-ops-cpu.test.mjs, two runs each, load average about 17): the
+// isolate's first status() 3.84-4.15 -> 2.49-2.95.
 import { create, type JsonObject, type JsonValue, type Message } from '@ziyixi/proto/protobuf'
 import { timestampFromDate } from '@ziyixi/proto/protobuf/wkt'
 import { matchTemplate, splitPath } from '@ziyixi/proto/http-path'
@@ -39,9 +44,12 @@ import {
   TestEndpointResponseSchema,
 } from '@ziyixi/proto/mailhero/ui/v2/mail_hero_ui_service_pb'
 import { AttemptBucketSchema } from '@ziyixi/proto/mailhero/ui/v2/delivery_pb'
+import type * as wire from '@ziyixi/proto/ops/v1/ops_wire'
 import type { Row } from './api-common.ts'
 import { toAttempt, toContent, toDelivery, toMessage, toOverview, toSettings, toSetupStatus } from './api-v2.ts'
 import type { ParsedRecord } from './api-messages.ts'
+import { buildStatus, type StatusInput } from './ops-core.ts'
+import { guardState } from './ops-guard.ts'
 
 /**
  * Rounds of every call. The first round compiles the code (V8 compiles a function when it first runs); 1, 5, 20 and 100
@@ -116,6 +124,32 @@ const PARSED: ParsedRecord = {
 }
 
 const repeat = <T>(item: T): T[] => Array.from({ length: PAGE }, () => item)
+
+const OPS_TIME = Date.parse(TIME)
+
+/**
+ * What ops-core.ts opsStatus() reads, synthetic: the coordinator's answer with a shed guard (as ops-guard.ts writes it)
+ * and an alert snapshot with failures, so the status carries signals with metrics, counters and every mode.
+ */
+const OPS_STATUS_INPUT: StatusInput = {
+  time: OPS_TIME,
+  env: { MAINTENANCE_MODE: 'false', FORCE_SEND_PAUSED: 'false', INGEST_DAILY_MESSAGE_LIMIT: '300', INGEST_DAILY_BYTE_LIMIT: '268435456', PUBLIC_HOST: 'mail.example.org' },
+  coordinator: {
+    jobs_pending: 2, jobs_failed: 1, backup_active: false, capacity: { used_bytes: 1024, limit_bytes: 5 * 1024 ** 3 }, ingest_today: { messages: 4, bytes: 4096 },
+    guard: guardState({ level: 'shed', reason: 'd1_reads_high', until: OPS_TIME + 3_600_000, set_at: OPS_TIME }, OPS_TIME),
+  },
+  snapshot: {
+    logical_bytes: 1024, logical_limit_bytes: 5 * 1024 ** 3, last_backup_at: TIME, created_at: TIME, oldest_pending_at: TIME, parse_failed: 1,
+    delivery_failed: 1, policy_error: 0, current_blocked: 0, current_auto_recheck: 0, current_paused: 0, blocked_waiting: 0, blocked_permanent_waiting: 0,
+    paused_waiting: 0, send_paused: 0, forwarding: 1,
+  },
+  active: [{ code: 'parse_failed', active_since: TIME }],
+}
+
+/** One Ops status (Home's status() call without its reads); the test checks it against the contract. */
+export function warmOpsStatus(): wire.OpsStatus {
+  return buildStatus(OPS_STATUS_INPUT)
+}
 
 /** One request of a method, as the UI sends it, and its answer from synthetic rows (as the handler maps them). */
 export interface WarmCall {
@@ -207,9 +241,10 @@ export function warmCall(routes: readonly HttpBinding[], name: string, call: War
   return { request, answer: JSON.stringify(toWire(route.method.output, call.answer() as never)) }
 }
 
-/** Runs every call of WARM_CALLS `rounds` times against the transcoder's routes. */
+/** Runs every call of WARM_CALLS against the transcoder's routes, and one Ops status, `rounds` times. */
 export function warmUp(routes: readonly HttpBinding[], rounds: number = WARMUP_ROUNDS): void {
   for (let round = 0; round < rounds; round += 1) {
     for (const [name, call] of Object.entries(WARM_CALLS)) warmCall(routes, name, call)
+    warmOpsStatus()
   }
 }
