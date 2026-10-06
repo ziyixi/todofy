@@ -32,9 +32,11 @@ the owner's machine (`mailsort/deploy/mint-token.mjs`), never into GitHub. Rules
 imported at runtime on the 导入 page, never committed.
 
 Landing order:
-1. Land `feat/mailsort` with `mailsort` still in CHECK_ONLY (Home stays undeployed while it binds a missing
-   service; the apps that bundle `proto/ops/` redeploy with unchanged wire).
-2. Infra drift then Infra apply: create the Access app `mailsort` (a create only).
+1. Done 2026-10-06: `feat/mailsort` landed at `899b063` with `mailsort` in CHECK_ONLY (the smoke now stops the whole
+   wrangler process group; a passing smoke used to hang the Linux job until its timeout).
+2. Infra apply: the plan is now `create=1,delete=2` (the mailsort Access app, plus Lab's two deletes). It needs the
+   owner's Lab teardown first (section below, steps 3–4); the owner's one apply then does both. Never dispatch it
+   from an agent while it deletes.
 3. Commit its AUD in `config/resources.toml`, run `tools/cloud-config/generate.py`, add the id to `infra/ids.tf`,
    remove `mailsort` from CHECK_ONLY; land. This deploys mailsort and Home.
 4. Record the `MailsortState` namespace id in `config/resources.toml` [durable_objects]; check
@@ -43,8 +45,9 @@ Landing order:
 Already set: production secret `MAILSORT_CSRF_SIGNING_KEY`, variable `MAILSORT_MODE=shadow` (the mode ceiling).
 
 Owner, after it is live: Google Cloud project with the Gmail API, consent screen External + In production, Desktop
-OAuth client, then `mint-token.mjs --scope readonly`; apply the 15-label template; import the validated rule set (94
-precision-checked rules from a read-only survey of the last 30 days, kept off the repo); shadow for 1–2 weeks; turn
+OAuth client, then `mint-token.mjs --scope readonly`; apply the 15-label template; import the validated rule set (93
+precision-checked rules from a read-only survey of the last 30 days, handed to the owner as a file, never in the
+repo; previewed clean onto the template in workerd: 93 create, 0 invalid, 0 warnings); shadow for 1–2 weeks; turn
 正式打 on per label when its precision bound passes; `--scope modify` and `MAILSORT_MODE=live` last. Optional: a
 token with Workers AI permission for the synthetic Clef evaluation (the admin token cannot call `ai/run`).
 
@@ -84,8 +87,9 @@ Landed after it (2026-10-06):
    2. Until step 4 these are red by design: Infra drift (a planned delete), the reconcile inventory check (lab
       Worker, D1 `lab`, LabState namespace unregistered) and Home's drift list (lab script and custom domain).
    3. Owner: delete the `lab` Worker in the Cloudflare dashboard (its LabState data and custom domain go with it).
-   4. Infra drift must read exactly `delete: 2` (`retired_lab` Access app and D1), 31 no-op, output changes 2;
-      the owner dispatches Infra apply with that expect and `confirm_destructive=delete-replace-forget`.
+   4. Infra drift must read exactly `create: 1` (the mailsort Access app) and `delete: 2` (`retired_lab` Access app
+      and D1), output changes 2; the owner dispatches Infra apply with the expect it prints
+      (`create=1,delete=2,outputs=2@…`) and `confirm_destructive=delete-replace-forget`.
    5. Owner: delete the GitHub `production` secrets `LAB_CSRF_SIGNING_KEY` and `LAB_WORKER_SECRETS`.
    6. Agent, after the apply: remove `infra/retired.tf`, its pairs in `.github/scripts/infra_guard.py` and the
       `dashboard: {LAB}` entry of `RETIRED_SERVICE_BINDINGS`.

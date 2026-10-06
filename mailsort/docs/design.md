@@ -316,6 +316,9 @@ Worker's own label is undone first; 都不是 restores the inbox). A choice is a
   their validated rule set (`id`, `match` with exactly one of `from_address`, `from_domain`, `list_id`, `to_address`,
   `label` as `分拣/<path>`, `keep_in_inbox`, `trust`, `require_dmarc`, `evidence`, `notes`, and the optional
   `subject_includes` / `subject_excludes`), this app's export (`{"labels": [...], "rules": [...]}`) or the template.
+  `to_address` is a delivered-to rule (§4.3): it matches the owner's own address Gmail delivered to, never `To` or
+  `Cc`. A list address in `To` needs `list_id`; a notification's reason address in `Cc` (GitHub's) needs the sender
+  and a subject condition.
   Evidence, notes and label descriptions may span lines (CRLF read as LF; any other control character is refused),
   and a List-Id may be written in its header form (`<digest.news.example.com>`, `rule-value.ts` normalizeRuleValue,
   as CreateRule reads it). It is previewed first (`validate_only`): every entry create, update (which fields), skip
