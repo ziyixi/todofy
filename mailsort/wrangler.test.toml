@@ -1,0 +1,29 @@
+# Local development and the smoke test only (never deployed; .github/scripts/test_wrangler_configs.py TEST_CONFIGS): the
+# production wrangler.toml without the Workers AI binding (wrangler dev would reach the account for it) and without the
+# Custom Domain. The Worker then calls the loopback fake of Gmail and Workers AI that DEV_FAKE_UPSTREAM names
+# (worker/test/smoke/fake-upstream.mts), with the values of mailsort/.dev.vars (see .dev.vars.example).
+#
+#   cd worker && npm run dev        (http://127.0.0.1:8795)
+name = "mailsort"
+main = "worker/src/index.ts"
+compatibility_date = "2026-09-08"
+workers_dev = false
+
+[assets]
+directory = "web/dist"
+binding = "ASSETS"
+run_worker_first = true
+not_found_handling = "single-page-application"
+
+[[durable_objects.bindings]]
+name = "MAILSORT"
+class_name = "MailsortState"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["MailsortState"]
+
+[vars]
+PUBLIC_HOST = "sort.localhost"
+ACCESS_ISSUER = "https://synthetic.cloudflareaccess.com"
+ACCESS_AUDIENCE = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"

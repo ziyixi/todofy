@@ -1,0 +1,78 @@
+# Worker "mailsort": the owner's Gmail sorting (sort.ziyixi.science, docs/design.md): new INBOX mail read through the
+# Gmail API, decided by rules, nearest examples and the Workers AI decision model Clef, labelled under "分拣/" and
+# archived (never marked read) in live mode. The production configuration and its single source of truth: top level =
+# production, never [env.*] or keep_vars. Every static value is committed here (the repository is public: nothing
+# personal, no secret).
+#
+# Deployed only by CI ("Mailsort deploy" in .github/workflows/ci.yml) through deploy/deploy-vars.mjs, which appends
+# --var BUILD_SHA (the commit) and --var MODE (the GitHub variable MAILSORT_MODE: the highest mode the deployment allows)
+# and passes ACCESS_OWNER, ACCESS_OWNER_ALIASES and CSRF_SIGNING_KEY as Worker secrets with --secrets-file. A plain
+# `wrangler deploy` of this file DELETES BUILD_SHA and MODE (then the Worker reads MODE as off: nothing is read or
+# written).
+#
+# The Gmail grant (GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET, GMAIL_REFRESH_TOKEN) is NOT deployed: the owner puts it from
+# their own machine with deploy/mint-token.mjs (`wrangler secret put`), and it never enters GitHub. A deploy keeps it:
+# `wrangler deploy --secrets-file` sends keep_bindings secret_text, so a secret the file does not name stays as it is
+# (deploy/test/secrets-kept.test.mjs checks the pinned wrangler), and no [secrets] required list is declared here.
+#
+# Before the first deploy: the Access application "mailsort" (the whole host) is created by infra/ and "Infra apply";
+# its AUD then replaces the all-zeros ACCESS_AUDIENCE below (deploy/deploy-vars.mjs refuses a real deploy until then,
+# and ci_changes.py keeps the app check-only). No workers.dev, no preview URL. Rollback (README.md "Deploy"): detach the
+# Custom Domain by hand, then revert.
+#
+# Run wrangler from worker/ (the pinned wrangler lives in worker/node_modules) with --config ../wrangler.toml. Local
+# development uses ../wrangler.test.toml (no AI binding: a local fake answers instead) and mailsort/.dev.vars.
+name = "mailsort"
+account_id = "f57937bd1d93bf59e737b6d8445fb7a3"
+main = "worker/src/index.ts"
+compatibility_date = "2026-09-08"
+workers_dev = false
+preview_urls = false
+# The one hostname, a Custom Domain (wrangler applies the list as the Worker's complete set; tools/cf-guard checks
+# it before every deploy). vars.PUBLIC_HOST names the same host.
+routes = [{ pattern = "sort.ziyixi.science", custom_domain = true }]
+
+# The Worker's own log lines (a refusal: request ID, status, reason; an alarm: counts and a code) are kept; the
+# invocation logs, which record every request's URL, are off, and so are traces. Nothing logs a subject, a sender, an
+# address or a label name.
+[observability]
+enabled = true
+
+[observability.logs]
+enabled = true
+invocation_logs = false
+
+[observability.traces]
+enabled = false
+
+# The UI (web/, `npm run build`). Every request reaches the Worker first: it checks Access and adds the private
+# headers before handing a path to ASSETS.
+[assets]
+directory = "web/dist"
+binding = "ASSETS"
+run_worker_first = true
+not_found_handling = "single-page-application"
+
+# One SQLite-backed object ("mailsort-v1"): labels, rules, decisions, the review queue, examples and their embeddings,
+# the ledger of Gmail writes; it schedules itself with setAlarm (no cron trigger, no D1, no R2, no KV).
+[[durable_objects.bindings]]
+name = "MAILSORT"
+class_name = "MailsortState"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["MailsortState"]
+
+# Workers AI (Free: 10,000 neurons a day for the whole account): @cf/cloudflare/clef, @cf/cloudflare/clef-flash and
+# @cf/baai/bge-m3, called directly (no AI Gateway: it would log the request bodies). Settings.daily_neuron_budget bounds
+# mailsort's own share.
+[ai]
+binding = "AI"
+
+[vars]
+# The app's host: the only origin a mutation may come from (CSRF).
+PUBLIC_HOST = "sort.ziyixi.science"
+ACCESS_ISSUER = "https://ziyixi.cloudflareaccess.com"
+# AUD tag of the Access application "mailsort" (the whole host; infra/access.tf owner_apps["mailsort"]). All zeros until
+# "Infra apply" creates the application (infra/README.md "Adding an app" step 4); a real deploy refuses it.
+ACCESS_AUDIENCE = "0000000000000000000000000000000000000000000000000000000000000000"

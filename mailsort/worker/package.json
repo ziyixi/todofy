@@ -1,0 +1,41 @@
+{
+  "name": "mailsort-worker",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Worker \"mailsort\": the owner's Gmail sorting (MailsortState, one SQLite Durable Object that schedules itself with setAlarm) and its owner API (mailsort.ui.v1) behind Access.",
+  "engines": {
+    "node": ">=26"
+  },
+  "scripts": {
+    "postinstall": "node ../../proto/tools/ensure.mjs",
+    "pretypecheck": "node ../../proto/tools/ensure.mjs",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p test/runtime/tsconfig.json",
+    "prelint": "node ../../proto/tools/ensure.mjs",
+    "lint": "eslint .",
+    "pretest": "node ../../proto/tools/ensure.mjs",
+    "test": "vitest run",
+    "pretest:runtime": "node ../../proto/tools/ensure.mjs",
+    "test:runtime": "vitest run --config vitest.runtime.config.ts",
+    "predev": "node ../../proto/tools/ensure.mjs",
+    "dev": "wrangler dev --config ../wrangler.test.toml --ip 127.0.0.1 --port 8795 --local-upstream 127.0.0.1:8795",
+    "pretest:smoke": "node ../../proto/tools/ensure.mjs",
+    "test:smoke": "node test/smoke/smoke.mts"
+  },
+  "dependencies": {
+    "@ziyixi/edge-auth": "file:../../packages/edge-auth",
+    "@ziyixi/proto": "file:../../proto/ts"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "5.20260929.1",
+    "@eslint/js": "10.0.1",
+    "@types/node": "26.6.3",
+    "esbuild": "0.28.1",
+    "eslint": "10.11.0",
+    "miniflare": "5.20260926.0-alpha",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.71.0",
+    "vitest": "4.1.11",
+    "wrangler": "4.142.0"
+  }
+}
