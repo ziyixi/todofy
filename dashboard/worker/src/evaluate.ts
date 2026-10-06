@@ -4,12 +4,13 @@
  * here calls out or writes. Flows reorganize what the ticks already know; they never add alarm items,
  * so the digest sent to Todofy is unchanged.
  */
-import { CANARY_DISABLED_ITEM, type OpsSignal, type OpsStatus, type OverallLevel } from './api-types.ts';
-import { LEVEL_RANK, attentionLevel, type AttentionItem, type Attention, type Badges, type CanaryBadge, type EntryState, type FlowState, type FlowSummary, type Freshness, type HeldItem, type Level, type RollupLevel, type StageState, type Target, type TileMetric, type ViewId } from './api-types.ts';
+import { CANARY_DISABLED_ITEM, type OpsSignal, type OpsStatus } from './api-types.ts';
+import { LEVEL_RANK, type AttentionItem, type Attention, type Badges, type CanaryBadge, type EntryState, type FlowState, type FlowSummary, type Freshness, type HeldItem, type Level, type RollupLevel, type StageState, type Target, type TileMetric, type ViewId } from './api-types.ts';
 import { TOP_SIGNALS_MAX } from './idl.ts';
 import type { EntryDef, FlowDef, RegistryDef, StageDef } from './registry-types.ts';
 import type { CanaryRecord } from './canary.ts';
-import { TICK_STALE_MS, overallLevel } from './digest.ts';
+import { rollupAttention, sortAttention } from './attention-rollup.ts';
+import { TICK_STALE_MS } from './digest.ts';
 import { errorLevel, errorPercent, todayOf, workerRows, type CfScriptsDoc } from './discovery.ts';
 import type { DigestDoc, ProbeDoc, StatusDoc } from './docs.ts';
 import { usageFresh, type DesiredGuard } from './guard.ts';
@@ -617,9 +618,6 @@ function observedItems(existing: readonly AttentionItem[], evaluation: EvalInput
   return out;
 }
 
-/** Strip order: critical, then unknown, then warning (stable within a level). */
-const STRIP_RANK = { critical: 0, unknown: 1, warning: 2, info: 3 } as const;
-
 /**
  * The attention strip (design-v2 §1): v1's item set with a target each, plus the observed items
  * (observedItems) when `evaluation` is given. A hold signal of its entry (force-paused delivery, paused
@@ -664,12 +662,11 @@ export function attentionView(input: AttentionInput, registry: RegistryDef = REG
     items.push({ ...item, target });
   }
   if (!input.neverRan && input.evaluation !== undefined) items.push(...observedItems(items, input.evaluation, registry));
-  items.sort((a, b) => STRIP_RANK[attentionLevel(a)] - STRIP_RANK[attentionLevel(b)]);
+  sortAttention(items);
   const info: AttentionItem[] = input.canaryEnabled
     ? []
     : [{ ...CANARY_DISABLED_ITEM, since: null, metrics: {}, target: targetOf(CANARY_DISABLED_ITEM.source, CANARY_DISABLED_ITEM.code, registry) }];
-  let level: OverallLevel = input.neverRan ? 'unknown' : overallLevel(items.map((item) => ({ ...item, since: item.since ?? '' })));
-  if (level !== 'critical' && items.some((item) => attentionLevel(item) === 'unknown')) level = 'unknown';
+  const level = rollupAttention(items, input.neverRan);
   const badges: Record<ViewId, number> = { ...NO_BADGES };
   for (const item of items) badges[item.target.view] += 1;
   return { attention: { level, items, info, held }, badges };

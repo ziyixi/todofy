@@ -4,7 +4,7 @@
  */
 import type { OpsReport, OpsReportItem } from '@ziyixi/proto/ops/v1/ops_wire';
 import { OPS_LIMITS } from '../../../contracts/ops-v1/ops-v1.ts';
-import { GUARD_SHED_PERCENT, QUOTA_CRITICAL_PERCENT, type CanaryStage, type OpsApp, type OpsSeverity, type OpsStatus, type OverallLevel, type QuotaRow } from './api-types.ts';
+import { GUARD_SHED_PERCENT, QUOTA_CRITICAL_PERCENT, type CanaryStage, type OpsApp, type OpsSeverity, type OpsStatus, type QuotaRow } from './api-types.ts';
 import { DRIFT_UNAVAILABLE_AFTER_DAYS } from './api-types.ts';
 import { DRIFT_CATEGORIES } from './idl.ts';
 import { CANARY_DISABLED_CODE, type CanaryRecord } from './canary.ts';
@@ -297,10 +297,4 @@ export function shouldSend(key: string, state: DigestSendState, now: number): bo
   if (age >= DIGEST_REFRESH_MS) return true;
   const date = new Date(now);
   return date.getUTCHours() === 23 && date.getUTCMinutes() >= 30 && age >= 60 * MINUTE_MS;
-}
-
-export function overallLevel(items: readonly OpsReportItem[]): OverallLevel {
-  if (items.some((item) => item.severity === 'critical')) return 'critical';
-  if (items.some((item) => item.severity === 'warning')) return 'warning';
-  return 'ok';
 }

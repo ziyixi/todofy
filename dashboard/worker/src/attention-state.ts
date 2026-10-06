@@ -1,5 +1,6 @@
 /** Home-owned reminder dispositions. These never change a source's health or business ledger. */
 import type { Attention, AttentionItem, Badges, Target } from './api-types.ts';
+import { rollupAttention } from './attention-rollup.ts';
 import { iso } from './time.ts';
 
 export const ATTENTION_ROW_LIMIT = 256;
@@ -86,8 +87,8 @@ export class AttentionState {
       this.current.set(row.name, decorated);
       (row.dismissed_at === null ? items : dismissed).push(decorated);
     }
-    const level = raw.items.length === 0 ? raw.level : items.some((item) => item.severity === 'critical') ? 'critical'
-      : items.some((item) => item.observed === 'unknown') ? 'unknown' : items.length > 0 ? 'warning' : 'ok';
+    // Nothing to dispose of: the evaluation's level stands (unknown before the first run).
+    const level = raw.items.length === 0 ? raw.level : rollupAttention(items);
     const badges: Record<keyof Badges, number> = { home: 0, flows: 0, cloudflare: 0, ops: 0 };
     for (const item of items) badges[item.target.view]++;
     return { attention: { ...raw, level, items, ...(dismissed.length > 0 ? { dismissed_items: dismissed } : {}),

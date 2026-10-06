@@ -16,7 +16,6 @@ import {
   digestKey,
   finalizeItems,
   itemKey,
-  overallLevel,
   reportBytes,
   shouldSend,
   withTickState,
@@ -294,11 +293,5 @@ describe('sending', () => {
     expect(shouldSend('', { last_key: null, last_sent_at: null }, Date.parse('2026-09-16T00:00:00Z'))).toBe(true);
     // The first of a month (a monthly R2 item clearing) is the same rule.
     expect(shouldSend('', sent, Date.parse('2026-10-01T00:00:00Z'))).toBe(false);
-  });
-
-  it('derives the banner level from the items', () => {
-    expect(overallLevel([])).toBe('ok');
-    expect(overallLevel([list[1]])).toBe('warning');
-    expect(overallLevel(list)).toBe('critical');
   });
 });
