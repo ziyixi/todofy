@@ -91,9 +91,23 @@ workflow tests also enforce production concurrency, dispatch options and existin
 [Infra drift](../.github/workflows/infra.yml) is a read-only main/production plan using encrypted remote
 state and `infra-production` concurrency. It fails on planned drift or public outputs inconsistent with
 committed configuration. Its log is a redacted summary; it does not apply and is outside `CI gate`.
-[Infra apply](../.github/workflows/infra-apply.yml) is the sole infrastructure writer: a manual main dispatch
-with the same environment/concurrency, exact reviewed actions and plan fingerprint, applying the saved
-plan. New bootstrap credentials are encrypted before leaving the runner. See [infra](../infra/README.md).
+Three CI paths write Cloudflare objects and the state. Each runs on main in the `production` environment under
+the same `infra-production` lock, backs up the encrypted state first, applies a saved plan and must then plan
+clean:
+
+1. [Infra apply](../.github/workflows/infra-apply.yml): a manual dispatch whose inputs name the exact reviewed
+   actions and plan fingerprint; deletes, replaces and forgets need an explicit confirmation. New bootstrap
+   credentials are encrypted before leaving the runner.
+2. Routine repair in [Personal cloud reconcile](../.github/workflows/personal-cloud-reconcile.yml): only with the
+   `repair` operation (dispatched, or automatic with `PERSONAL_CLOUD_AUTO_REPAIR=true`) and only when every planned
+   change is an in-place update of the platform runtime CNAME or its tunnel's loopback ingress
+   ([reconcile_policy.py](../infra/scripts/reconcile_policy.py)). `check`, the default, writes nothing.
+3. Reviewed apply in the same workflow: a dispatch with `reviewed_apply=true` saves the plan, waits for the
+   protected `infra-review` environment's approval and applies that plan only while the current plan still has
+   its fingerprint.
+
+Locally, the bootstrap writes only a missing state object and `rotate-passphrase` re-encrypts the state.
+See [infra](../infra/README.md).
 
 Every Worker has one committed production `wrangler.toml`, discovered from the catalog, with no `[env.*]`
 or `keep_vars`. Static application configuration, routes, limits, bindings and migrations stay there.

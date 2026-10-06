@@ -8,7 +8,7 @@ to an existing object. Its private input and captured credentials stay outside G
 `Personal cloud reconcile` detects drift and repairs only the dedicated runtime CNAME and its authenticated
 loopback tunnel ingress. Other changes need review. An approved continuation applies the original
 OpenTofu-encrypted plan from the private state bucket after checking its source SHA, signed contents and
-current plan. The older P4 dispatch remains available. Detailed historical notes below describe that path.
+current plan. The P4 dispatch "Infra apply" remains available; the Writes list below names all three paths.
 
 - Tooling: OpenTofu 1.12 and the Cloudflare provider pinned at exactly **5.25.0**
   (`registry.opentofu.org/cloudflare/cloudflare`). [`.terraform.lock.hcl`](.terraform.lock.hcl) holds
@@ -17,11 +17,27 @@ current plan. The older P4 dispatch remains available. Detailed historical notes
   purpose, and only after a plan shows zero diff.
 - State: the private R2 bucket `infra-state`, object `production/terraform.tfstate`, encrypted by
   OpenTofu (state and plans, enforced, no fallback). See [Remote state](#remote-state).
-- Drift: [`.github/workflows/infra.yml`](../.github/workflows/infra.yml) plans daily and on every push to
-  `main` that touches `infra/`, checks the [outputs](#outputs) against every app's `wrangler.toml`, and prints
-  only the redacted summary. See [Drift plan](#drift-plan-ci).
-- Apply: [`.github/workflows/infra-apply.yml`](../.github/workflows/infra-apply.yml), a manual dispatch on
-  `main` only. See [Apply](#apply-p4).
+- Drift: [`.github/workflows/infra.yml`](../.github/workflows/infra.yml) plans on every push to `main` that
+  touches `infra/` and on a manual run, checks the [outputs](#outputs) against every app's `wrangler.toml`, and
+  prints only the redacted summary. It never writes. The daily check is `Personal cloud reconcile`'s. See
+  [Drift plan](#drift-plan-ci).
+- Writes: three CI paths, each on `main` in the `production` environment under the `infra-production` lock, each
+  backing up the encrypted state, applying a saved plan and then requiring a clean plan:
+  1. [`.github/workflows/infra-apply.yml`](../.github/workflows/infra-apply.yml) ("Infra apply", `infra_state.py
+     apply`): a manual dispatch with the reviewed counts and plan fingerprint. See [Apply](#apply-p4).
+  2. Routine repair in [`.github/workflows/personal-cloud-reconcile.yml`](../.github/workflows/personal-cloud-reconcile.yml)
+     (`infra_state.py reconcile`): only with the `repair` operation (dispatched, or on the daily and post-release
+     runs when `PERSONAL_CLOUD_AUTO_REPAIR=true`), and only when every change is an in-place update of
+     `cloudflare_dns_record.platform["runtime"]` or `cloudflare_zero_trust_tunnel_cloudflared_config.platform`
+     that keeps the tunnel target and the authenticated loopback ingress
+     ([`scripts/reconcile_policy.py`](scripts/reconcile_policy.py)). Anything else, and every `check` run with
+     drift, saves the plan for review instead.
+  3. Reviewed apply in the same workflow (`infra_state.py approved-apply`): a dispatch with `reviewed_apply=true`
+     applies that saved plan after the protected `infra-review` environment approves it, and only while the
+     current plan still has its fingerprint.
+
+  Locally, the [bootstrap](#bootstrap-once) writes only a missing state object and
+  [`rotate-passphrase`](#rotating-the-passphrase) re-encrypts the existing one.
 - Driver: [`scripts/infra_state.py`](scripts/infra_state.py) runs every OpenTofu command against the
   remote state (CI and local) so that no raw output, value or credential reaches a terminal or log.
 
@@ -323,9 +339,10 @@ for debugging; the values file and the plan in it are deleted either way (also a
 [`tools/infra-plan-summary`](../tools/infra-plan-summary/summary.py).
 
 **Never run `tofu apply`** (or `import`, `state rm`, `force-unlock`) by hand. The only applies are the
-bootstrap's import-only plan below, which writes **only a missing** state object, and "Infra apply" on `main`.
-`infra_state.py apply` refuses to start unless it runs on a GitHub Actions runner in the workflow "Infra apply",
-dispatched (`workflow_dispatch`) on `refs/heads/main`: a local `apply` instead of `plan` does nothing at all. That
+bootstrap's import-only plan below, which writes **only a missing** state object, and the three CI write paths
+(the list at the top). `infra_state.py apply` refuses to start unless it runs on a GitHub Actions runner in the
+workflow "Infra apply", dispatched (`workflow_dispatch`) on `refs/heads/main`, and `approved-apply` and `reconcile`
+only in "Personal cloud reconcile" on `main`: a local `apply` instead of `plan` does nothing at all. That
 check is accident-proofing, not a security boundary (anyone can edit the script); the real boundary is that only the
 `production` environment holds the secrets.
 
@@ -388,11 +405,10 @@ raw log; delete it when done.
 ## Drift plan (CI)
 
 [`.github/workflows/infra.yml`](../.github/workflows/infra.yml) ("Infra drift") runs on a push to `main`
-that changes `infra/**`, `tools/infra-plan-summary/**` or the workflow itself, every day at 13:23 UTC, and on
-a manual run. It is a separate workflow, not a job in `ci.yml`: its triggers differ, Cloudflare drift is
+that changes `infra/**`, `tools/infra-plan-summary/**` or the workflow itself, and on a manual run (the daily
+check is `Personal cloud reconcile`'s infrastructure comparison). It is a separate workflow, not a job in `ci.yml`: its triggers differ, Cloudflare drift is
 not a property of a commit (a red drift run must not fail `CI gate` and hold back app deploys, and a green
-branch run must never be reused for it), and it is the only place outside the deploy jobs that holds a
-production token.
+branch run must never be reused for it), and it holds a production token, which no check job in `ci.yml` does.
 
 - `production` environment (it admits `main` only), and `if: github.ref == 'refs/heads/main'`, so a manual
   run from another branch is skipped. Concurrency group `infra-production`, never cancelled.
