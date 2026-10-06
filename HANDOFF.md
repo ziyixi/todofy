@@ -114,8 +114,8 @@ The expected October 5 and 6 daily windows produced cron-labelled runs
 [37295602784](https://github.com/ziyixi/todofy/actions/runs/37295602784) and
 [37448792826](https://github.com/ziyixi/todofy/actions/runs/37448792826). Their exact run/attempt/request
 identities match successful `SYNC_UNCHANGED` receipts, checked at `2026-10-05T10:18:37.560Z` and
-`2026-10-06T10:18:57.147Z`. Both verified the live baseline and skipped publishing. Normal code
-pushes later updated the website; the October 6 baseline is publication `2026-10-06T07:28:14Z`,
+`2026-10-06T10:18:57.147Z`. Both verified the live baseline and skipped publishing. Between the
+two daily windows, normal code pushes updated the website; the October 6 baseline is publication `2026-10-06T07:28:14Z`,
 version `2fd07a7c`, website code `30fd74d`, also confirmed by Cloudflare's current version history.
 Home was observed on October 6 with the new check time, matching Actions links and next check
 `2026-10-07T10:17:00Z`; reminder controls were untouched. A direct local public identity fetch

@@ -76,8 +76,9 @@ Publication evidence must be compared with the baseline for each date:
 
 The later baseline came from normal code pushes, including [37410200559](https://github.com/ziyixi/todofy/actions/runs/37410200559).
 Both daily receipts retain the content/config hashes recorded above. Cloudflare's deployment
-history confirms no new website version between October 4's accepted release and October 6's
-first code push, and the current version remains `2fd07a7c` at 100% after October 6's daily check.
+history confirms no deployment changed the serving website version between October 4's accepted
+release and October 6's first code push. The current version remains `2fd07a7c` at 100% after
+October 6's daily check.
 Its deployment was created at `2026-10-06T07:27:43.311506Z`; the verified publication time comes
 from the later successful GitHub release status, as shown in the table.
 
