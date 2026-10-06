@@ -5,7 +5,7 @@ import {
 } from "@ziyixi/proto/website/sync/v1/sync_pb";
 import type { WebsiteSyncRequestResult } from "@ziyixi/proto/website/sync/v1/sync_wire";
 import type { RelayEnv } from "./env";
-import { dispatch, id, listRuns, object, releaseInputs, runUrl } from "./github";
+import { dispatch, id, listRuns, LOOKUP_RUN_PAGE, object, releaseInputs, runUrl } from "./github";
 
 function result(value: WebsiteSyncRequestResult): WebsiteSyncRequestResult {
   return toWire(
@@ -69,7 +69,7 @@ export async function getSyncRequest(
   if (!env.GITHUB_DISPATCH_TOKEN)
     return result({ request_id: requestId, state: "unconfirmed", error_code: "not_configured" });
   try {
-    const match = (await listRuns(env, AbortSignal.timeout(8000))).find(
+    const match = (await listRuns(env, LOOKUP_RUN_PAGE, AbortSignal.timeout(8000))).find(
       (run) => run.requestId === requestId,
     );
     if (match)

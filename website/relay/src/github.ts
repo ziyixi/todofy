@@ -112,11 +112,18 @@ export function parseRuns(listing: unknown): RunSummary[] {
     })
     .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt) || b.id - a.id);
 }
-export async function listRuns(env: RelayEnv, signal: AbortSignal): Promise<RunSummary[]> {
+/** A request lookup must still find its run after later releases, so it reads the larger page. */
+export const LOOKUP_RUN_PAGE = 50;
+/** Each run is ~11 KiB of JSON; read only as many as the caller can use. */
+export async function listRuns(
+  env: RelayEnv,
+  perPage: number,
+  signal: AbortSignal,
+): Promise<RunSummary[]> {
   return parseRuns(
     await githubJson(
       env,
-      `/actions/workflows/${env.RELEASE_WORKFLOW}/runs?branch=main&per_page=50`,
+      `/actions/workflows/${env.RELEASE_WORKFLOW}/runs?branch=main&per_page=${perPage}`,
       signal,
     ),
   );

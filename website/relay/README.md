@@ -37,6 +37,11 @@ existing release ledger. An unchanged check advances the check time without adva
 time. Provider failures, cancelled runs and missing receipts remain visible. A full check older than
 26 hours raises a dismissible Home reminder.
 
+Status stays within a fixed subrequest budget: the 10 newest runs, 25 receipts and 10 release records,
+the statuses of at most two receipts (the latest and active runs), release statuses newest-first until
+the first verified one, and the website's build info. Every listed receipt is still validated. A request
+lookup reads 50 runs so an older request ID stays findable.
+
 ## Checks and release
 
 From `website/`:

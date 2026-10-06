@@ -19,13 +19,16 @@ import {
 } from "./github";
 
 interface Receipt {
+  deploymentId: number;
   runId: number;
   attempt: number;
   checkedAt: string | null;
   decision: "changed" | "unchanged" | "not_checked";
+}
+/** A receipt with its deployment's latest status, which only a displayed run needs. */
+interface SettledReceipt extends Receipt {
   state: string;
   code: string;
-  recordedAt: string;
 }
 interface Release {
   identity: Record<string, unknown>;
@@ -33,6 +36,9 @@ interface Release {
   runId: string;
   verifiedAt: string;
 }
+// Runs leave the shared release lock in queue order, so the latest and any active run sit at the
+// top of the listing; ten runs (~110 KiB of JSON) leave room for cancelled queued runs above them.
+const STATUS_RUN_PAGE = 10;
 const SHA = /^[0-9a-f]{40}$/;
 const VERSION = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const CODES = new Set([
@@ -63,14 +69,16 @@ async function deployments(
   environment: string,
   limit: number,
   signal: AbortSignal,
-): Promise<Record<string, unknown>[]> {
+): Promise<(Record<string, unknown> & { id: number })[]> {
   const rows = await githubJson(
     env,
     `/deployments?task=${task}&environment=${environment}&per_page=${limit}`,
     signal,
   );
   if (!Array.isArray(rows) || rows.length > limit) throw new Error("github_response_invalid");
-  return rows.map(object).filter((row): row is Record<string, unknown> => !!row && id(row.id));
+  return rows
+    .map(object)
+    .filter((row): row is Record<string, unknown> & { id: number } => !!row && id(row.id));
 }
 async function latestState(
   env: RelayEnv,
@@ -95,59 +103,65 @@ function buildIdentity(value: unknown): Record<string, unknown> | null {
     ? identity
     : null;
 }
+/** Validates every recent payload (fail closed) without fetching a status per receipt. */
 async function receipts(env: RelayEnv, signal: AbortSignal): Promise<Receipt[]> {
   const rows = await deployments(env, "website-content-sync", "website-content-sync", 25, signal);
-  const result = await Promise.all(
-    rows.map(async (row): Promise<Receipt | null> => {
-      const payload = object(row.payload);
-      if (
-        !payload ||
-        payload.task !== "website-content-sync" ||
-        payload.schema_version !== 1 ||
-        !id(payload.run_id) ||
-        !id(payload.run_attempt)
-      )
-        return null;
-      const checkedAt = utc(payload.checked_at) ? payload.checked_at : null;
-      const decision = payload.decision;
-      if (decision !== "changed" && decision !== "unchanged" && decision !== "not_checked")
-        return null;
-      if (
-        decision === "not_checked"
-          ? payload.checked_at !== null || payload.identity !== null
-          : !checkedAt || !buildIdentity(payload.identity)
-      )
-        throw new Error("github_response_invalid");
-      if (
-        typeof payload.request_id !== "string" ||
-        (payload.request_id !== "" && !VERSION.test(payload.request_id))
-      )
-        throw new Error("github_response_invalid");
-      const state = await latestState(env, row.id, signal);
-      const code =
-        typeof state.description === "string"
-          ? state.description.toLowerCase()
-          : "sync_receipt_missing";
-      return {
+  const valid = rows.flatMap((row): Receipt[] => {
+    const payload = object(row.payload);
+    if (
+      !payload ||
+      payload.task !== "website-content-sync" ||
+      payload.schema_version !== 1 ||
+      !id(payload.run_id) ||
+      !id(payload.run_attempt)
+    )
+      return [];
+    const checkedAt = utc(payload.checked_at) ? payload.checked_at : null;
+    const decision = payload.decision;
+    if (decision !== "changed" && decision !== "unchanged" && decision !== "not_checked") return [];
+    if (
+      decision === "not_checked"
+        ? payload.checked_at !== null || payload.identity !== null
+        : !checkedAt || !buildIdentity(payload.identity)
+    )
+      throw new Error("github_response_invalid");
+    if (
+      typeof payload.request_id !== "string" ||
+      (payload.request_id !== "" && !VERSION.test(payload.request_id))
+    )
+      throw new Error("github_response_invalid");
+    return [
+      {
+        deploymentId: row.id,
         runId: payload.run_id,
         attempt: payload.run_attempt,
         checkedAt,
         decision,
-        state: typeof state.state === "string" ? state.state : "missing",
-        code: CODES.has(code) ? code : "sync_receipt_missing",
-        recordedAt: utc(state.created_at)
-          ? state.created_at
-          : utc(row.created_at)
-            ? row.created_at
-            : new Date(0).toISOString(),
-      };
-    }),
-  );
-  const valid = result.filter((row): row is Receipt => row !== null);
+      },
+    ];
+  });
   if (new Set(valid.map((row) => `${row.runId}:${row.attempt}`)).size !== valid.length)
     throw new Error("github_response_invalid");
   return valid;
 }
+/** Reads one receipt's latest deployment status; an unknown description is a missing receipt. */
+async function settle(
+  env: RelayEnv,
+  receipt: Receipt,
+  signal: AbortSignal,
+): Promise<SettledReceipt> {
+  const state = await latestState(env, receipt.deploymentId, signal);
+  const code =
+    typeof state.description === "string"
+      ? state.description.toLowerCase()
+      : "sync_receipt_missing";
+  return {
+    ...receipt,
+    state: typeof state.state === "string" ? state.state : "missing",
+    code: CODES.has(code) ? code : "sync_receipt_missing",
+  };
+}
+/** Newest first, stopping at the first verified release: normally a single status read. */
 async function lastRelease(env: RelayEnv, signal: AbortSignal): Promise<Release | null> {
   const rows = await deployments(env, "website-release", "production", 10, signal);
   for (const row of rows) {
@@ -177,7 +191,7 @@ async function lastRelease(env: RelayEnv, signal: AbortSignal): Promise<Release 
   }
   return null;
 }
-function attempt(env: RelayEnv, run: RunSummary, receipt?: Receipt): WebsiteSyncAttempt {
+function attempt(env: RelayEnv, run: RunSummary, receipt?: SettledReceipt): WebsiteSyncAttempt {
   let state: WebsiteSyncAttempt["state"];
   let code: string | undefined;
   if (ACTIVE_STATUSES.has(run.status))
@@ -218,6 +232,31 @@ function attempt(env: RelayEnv, run: RunSummary, receipt?: Receipt): WebsiteSync
     ...(code ? { error_code: code } : {}),
   };
 }
+/** The public site must serve the identity of the last verified release. */
+async function observeWebsite(
+  env: RelayEnv,
+  release: Release,
+  signal: AbortSignal,
+): Promise<string | undefined> {
+  try {
+    const response = await fetch(`https://${env.CANONICAL_HOST}/build-info.json`, {
+      signal,
+      redirect: "manual",
+      headers: { "Cache-Control": "no-cache" },
+    });
+    if (!response.ok) return "website_observation_failed";
+    const body = await response.text();
+    const identity = body.length <= 16_384 ? object(JSON.parse(body)) : null;
+    return !identity ||
+      ["codeSha", "contentHash", "configHash", "schemaVersion"].some(
+        (key) => identity[key] !== release.identity[key],
+      )
+      ? "website_identity_mismatch"
+      : undefined;
+  } catch {
+    return "website_observation_failed";
+  }
+}
 /** One bounded observation: a green workflow cannot stand in for a missing content receipt. */
 export async function getSyncStatus(env: RelayEnv, now = new Date()): Promise<WebsiteSyncStatus> {
   const base = { observed_at: now.toISOString(), next_check_at: nextCheck(env, now) };
@@ -225,43 +264,29 @@ export async function getSyncStatus(env: RelayEnv, now = new Date()): Promise<We
   try {
     const signal = AbortSignal.timeout(8000);
     const [runs, checks, release] = await Promise.all([
-      listRuns(env, signal),
+      listRuns(env, STATUS_RUN_PAGE, signal),
       receipts(env, signal),
       lastRelease(env, signal),
     ]);
-    const receiptFor = (run: RunSummary) =>
-      checks.find((r) => r.runId === run.id && r.attempt === run.attempt);
+    // Only the latest and active runs show a receipt state: at most two status reads.
+    const receiptOf = (run?: RunSummary) => {
+      const receipt = run && checks.find((r) => r.runId === run.id && r.attempt === run.attempt);
+      return receipt ? settle(env, receipt, signal) : undefined;
+    };
+    const latest = runs[0];
+    const active = runs.find((run) => ACTIVE_STATUSES.has(run.status));
+    const latestReceipt = receiptOf(latest);
+    const [latestSettled, activeSettled, websiteError] = await Promise.all([
+      latestReceipt,
+      active === latest ? latestReceipt : receiptOf(active),
+      release ? observeWebsite(env, release, signal) : undefined,
+    ]);
     const lastCheck = checks
       .filter((r) => r.checkedAt)
       .sort((a, b) => b.checkedAt!.localeCompare(a.checkedAt!))[0];
-    const active = runs.find((run) => ACTIVE_STATUSES.has(run.status));
-    let websiteError: string | undefined;
-    if (release) {
-      try {
-        const response = await fetch(`https://${env.CANONICAL_HOST}/build-info.json`, {
-          signal,
-          redirect: "manual",
-          headers: { "Cache-Control": "no-cache" },
-        });
-        if (!response.ok) websiteError = "website_observation_failed";
-        else {
-          const body = await response.text();
-          const identity = body.length <= 16_384 ? object(JSON.parse(body)) : null;
-          if (
-            !identity ||
-            ["codeSha", "contentHash", "configHash", "schemaVersion"].some(
-              (key) => identity[key] !== release.identity[key],
-            )
-          )
-            websiteError = "website_identity_mismatch";
-        }
-      } catch {
-        websiteError = "website_observation_failed";
-      }
-    }
     const value: WebsiteSyncStatus = {
       ...base,
-      ...(runs[0] ? { latest_attempt: attempt(env, runs[0], receiptFor(runs[0])) } : {}),
+      ...(latest ? { latest_attempt: attempt(env, latest, latestSettled) } : {}),
       ...(lastCheck?.checkedAt
         ? {
             last_check: {
@@ -283,7 +308,7 @@ export async function getSyncStatus(env: RelayEnv, now = new Date()): Promise<We
             },
           }
         : {}),
-      ...(active ? { active_run: attempt(env, active, receiptFor(active)) } : {}),
+      ...(active ? { active_run: attempt(env, active, activeSettled) } : {}),
       ...(websiteError ? { error_code: websiteError } : {}),
     };
     return toWire(

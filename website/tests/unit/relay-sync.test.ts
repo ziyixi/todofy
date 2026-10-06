@@ -86,6 +86,13 @@ function observe(
   vi.stubGlobal("fetch", mocked);
   return mocked;
 }
+/** Deployment IDs whose status was read, in request order. */
+function statusReads(send: ReturnType<typeof observe>): string[] {
+  return send.mock.calls.flatMap((call) => {
+    const match = /\/deployments\/(\d+)\/statuses/.exec(String(call[0]));
+    return match ? [match[1]!] : [];
+  });
+}
 afterEach(() => vi.unstubAllGlobals());
 describe("actual sync evidence", () => {
   it("no-change advances only complete check, retaining the verified publish time", async () => {
@@ -172,6 +179,72 @@ describe("actual sync evidence", () => {
   it("returns next daily UTC time without a daylight-saving offset", () => {
     expect(nextCheck(env, now)).toBe("2026-10-05T10:17:00.000Z");
     expect(nextCheck(env, new Date("2026-11-02T08:00:00Z"))).toBe("2026-11-02T10:17:00.000Z");
+  });
+});
+describe("subrequest budget", () => {
+  it("a settled sync costs six subrequests and reads only ten runs", async () => {
+    const send = observe();
+    expect((await getSyncStatus(env, now)).latest_attempt?.state).toBe("unchanged");
+    expect(send).toHaveBeenCalledTimes(6);
+    expect(statusReads(send).sort()).toEqual(["12", "2"]);
+    const runs = send.mock.calls
+      .map((call) => String(call[0]))
+      .find((url) => url.includes("/runs?"));
+    expect(runs).toContain("per_page=10");
+  });
+  it("reads receipt statuses only for the latest and active runs out of 25 receipts", async () => {
+    const send = observe({
+      runs: [
+        run(40, { created_at: "2026-10-04T10:40:00Z" }),
+        run(39, { status: "in_progress", conclusion: null }),
+      ],
+      checks: Array.from({ length: 25 }, (_, index) => check(40 - index)),
+    });
+    const status = await getSyncStatus(env, now);
+    expect(status.latest_attempt).toMatchObject({ run_id: "40", state: "unchanged" });
+    expect(status.active_run).toMatchObject({ run_id: "39", state: "publishing" });
+    expect(statusReads(send).sort()).toEqual(["2", "39", "40"]);
+  });
+  it("reads one receipt status when the latest run is also the active run", async () => {
+    const send = observe({
+      runs: [run(12, { status: "in_progress", conclusion: null })],
+      states: { 12: { state: "in_progress", description: "SYNC_DEPLOYING" } },
+    });
+    expect((await getSyncStatus(env, now)).active_run?.state).toBe("publishing");
+    expect(statusReads(send).filter((deployment) => deployment === "12")).toHaveLength(1);
+  });
+  it("still fails closed on an old malformed receipt whose status it never reads", async () => {
+    const send = observe({
+      checks: [check(12), check(11), check(10, { decision: "changed", identity: null })],
+    });
+    expect((await getSyncStatus(env, now)).error_code).toBe("github_response_invalid");
+    expect(statusReads(send).filter((deployment) => deployment !== "2")).toEqual([]);
+  });
+  it("rejects two receipts for the same run attempt", async () => {
+    observe({ checks: [check(12), { ...check(12), id: 13 }] });
+    expect((await getSyncStatus(env, now)).error_code).toBe("github_response_invalid");
+  });
+  it("stops reading release statuses at the newest verified release", async () => {
+    const releaseFor = (id: number) => ({
+      ...release,
+      id,
+      payload: {
+        ...release.payload,
+        workflowUrl: `https://github.com/owner/site/actions/runs/${id}`,
+      },
+    });
+    const send = observe({
+      releases: [releaseFor(5), releaseFor(4), releaseFor(3)],
+      states: { 5: { state: "failure", description: "Live verification failed" } },
+    });
+    expect((await getSyncStatus(env, now)).last_publish?.run_id).toBe("4");
+    expect(statusReads(send).filter((deployment) => deployment !== "12")).toEqual(["5", "4"]);
+  });
+  it("a request lookup keeps the larger run page so older request IDs stay findable", async () => {
+    const send = observe();
+    await getSyncRequest(env, { request_id: requestId });
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(String(send.mock.calls[0]?.[0])).toContain("per_page=50");
   });
 });
 describe("manual sync dispatch", () => {
