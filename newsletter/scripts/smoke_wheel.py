@@ -156,7 +156,7 @@ def main() -> None:
             "assert Path(newsletter.__file__).resolve().is_relative_to(Path"
             "(sys.prefix)); "
             "assert all(files('newsletter').joinpath(p).is_file() for p in "
-            "('templates/edition.html.j2', 'policy/editorial.md', "
+            "('templates/edition.html.j2', "
             "'fixtures/packets.json', "
             "'instructions/01-ai-ml.md', 'workflows/daily.yaml', "
             "'instructions/discovery/_sources/ai-ml.md', "

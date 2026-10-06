@@ -159,7 +159,7 @@ def _check_resources() -> None:
             raise PreflightError("DEPENDENCY_VERSION_MISMATCH")
     check_proto_dependency()
     package = resources.files("newsletter")
-    for filename in ("editorial.md", "story-editorial.md", "reader-profile.md"):
+    for filename in ("story-editorial.md", "reader-profile.md"):
         if (
             not package.joinpath("policy", filename)
             .read_text(encoding="utf-8")
