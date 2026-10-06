@@ -15,21 +15,19 @@
  * Its ops-v1 methods are the generated OpsService, CanaryConsumerService and OpsDigestService of
  * proto/ops/v1 (ops_wire.ts, types only): wire JSON in and out, read and written by the core.
  *
- * The same entrypoint carries task-intent-v1 (contracts/task-intent-v1/README.md): another app in
- * the account proposes Todoist tasks with `proposeTasks` and reads the outcome with
- * `taskIntentStatus`; Todofy stays the only Todoist writer. Their signatures come from the generated
- * `TaskIntentService` (proto/todofy/taskintent/v1/task_intent.proto): wire JSON in, wire JSON out. The
- * core reads the input strictly and writes the result with the wire JSON profile (proto/README.md); this
- * class only passes both on, so the gateway bundles none of the generated code (types only).
- *
- * `Intents` is the least-privilege entrypoint for task intents: only `proposeTasks` and `taskIntentStatus`,
- * and only for the one source its binding names in `props`:
+ * Task intents (contracts/task-intent-v1/README.md) are not on this entrypoint. Another app in the account
+ * proposes Todoist tasks with `proposeTasks` and reads the outcome with `taskIntentStatus` on `Intents`, the
+ * least-privilege entrypoint, and only for the one source its binding names in `props`:
  *
  *   [[services]]  binding = "TODOFY"  service = "todofy"  entrypoint = "Intents"  props = { source = "watch" }
  *
- * An input of any other source (or a binding without that prop) is `invalid_input` before the core wakes, so
- * an app that parses untrusted pages (the watch app) can neither use another source's allow-list and daily
- * quota nor reach status(), setGuard(), canaryResult() or reportOps(). No proposer binds `Ops`.
+ * Todofy stays the only Todoist writer. The signatures come from the generated `TaskIntentService`
+ * (proto/todofy/taskintent/v1/task_intent.proto): wire JSON in, wire JSON out. The core reads the input strictly
+ * and writes the result with the wire JSON profile (proto/README.md); this file only passes both on, so the
+ * gateway bundles none of the generated code (types only). An input of any other source (or a binding without
+ * that prop) is `invalid_input` before the core wakes, so an app that parses untrusted pages (the watch app) can
+ * neither use another source's allow-list and daily quota nor reach status(), setGuard(), canaryResult() or
+ * reportOps().
  */
 import { WorkerEntrypoint } from 'cloudflare:workers';
 import { OPS_LIMITS } from '../../../contracts/ops-v1/ops-v1.ts';
@@ -82,10 +80,7 @@ async function taskIntentStatus(env: Env, ref: WireObject): Promise<WireObject> 
   return await callCore(env, (core) => core.task_intent_status(text));
 }
 
-export class Ops
-  extends WorkerEntrypoint<Env>
-  implements ops.OpsService, ops.CanaryConsumerService, ops.OpsDigestService, WireService<typeof TaskIntentService>
-{
+export class Ops extends WorkerEntrypoint<Env> implements ops.OpsService, ops.CanaryConsumerService, ops.OpsDigestService {
   private async call<T>(method: (core: DurableObjectStub<Coordinator>) => Promise<OpsAnswer<T>>): Promise<T> {
     return await callCore(this.env, method);
   }
@@ -109,14 +104,6 @@ export class Ops
     // Compact JSON is what the core stores; refuse an oversized report before waking the object.
     if (encoder.encode(text).byteLength > OPS_LIMITS.reportMaxBytes) throw fail('invalid_input');
     return await this.call((core) => core.ops_report(text));
-  }
-
-  async proposeTasks(intent: WireObject): Promise<WireObject> {
-    return await proposeTasks(this.env, intent);
-  }
-
-  async taskIntentStatus(ref: WireObject): Promise<WireObject> {
-    return await taskIntentStatus(this.env, ref);
   }
 }
 

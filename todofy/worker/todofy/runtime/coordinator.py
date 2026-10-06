@@ -300,7 +300,7 @@ class TodofyCore(DurableObject):
         _log(ops="report", stored=result["stored"], items=result["item_count"])
         return {"ok": result}
 
-    # ---- task-intent-v1 (the same Ops entrypoint; contracts/task-intent-v1) -------------------
+    # ---- task-intent-v1 (the Intents entrypoint; contracts/task-intent-v1) --------------------
     # Each returns {"ok": TaskIntentResult} or {"error": OpsErrorCode} and never raises.
 
     async def task_intent_propose(self, input_json: str) -> dict[str, Any]:

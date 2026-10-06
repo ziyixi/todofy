@@ -709,8 +709,8 @@ day after it was generated, so the dashboard's 23:40 report is the next day's di
 that evening.
 
 ### task-intent-v1 (`core/intents.py`, `core/sql/intents.py`, `runtime/intents.py`, `gateway/src/ops.ts`)
-Another app in the account proposes Todoist tasks through the gateway's `Ops` entrypoint
-(`proposeTasks`, `taskIntentStatus`; contract `../contracts/task-intent-v1`). Todofy never calls Gemini
+Another app in the account proposes Todoist tasks through the gateway's `Intents` entrypoint, for the one source
+its binding names (`proposeTasks`, `taskIntentStatus`; contract `../contracts/task-intent-v1`). Todofy never calls Gemini
 for an intent, never fetches its URLs, and logs only the source, intent ID, task number, counts and codes.
 
 Recording (`propose`, in this order): the input is checked against every schema rule (`core/intents.py`:

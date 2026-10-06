@@ -24,8 +24,8 @@ Two methods on Todofy's least-privilege named entrypoint `Intents` (`todofy/gate
 nothing else and takes only the source its binding names in `props`. The proposer binds it with a service binding;
 there is no public route and no Access policy (same trust boundary as ops-v1: only a Worker deployed in this account
 can create the binding). The watch app parses untrusted pages, so it gets neither Todofy's ops-v1 methods nor another
-source's allow-list and daily quota. The same two methods are also on Todofy's `Ops` entrypoint (the class the
-dashboard binds for ops-v1), which no proposer binds. The watch app's binding:
+source's allow-list and daily quota. Todofy's `Ops` entrypoint (the class the dashboard binds for ops-v1) has no
+task-intent methods. The watch app's binding:
 
 ```toml
 # watch/wrangler.toml
@@ -36,8 +36,8 @@ entrypoint = "Intents"
 props = { source = "watch" }
 ```
 
-Through `Intents`, an input whose `source` is not the binding's (or a binding without that prop) rejects
-`invalid_input` before the core wakes; everything else is as through `Ops`. A new proposer binds `Intents`.
+An input whose `source` is not the binding's (or a binding without that prop) rejects `invalid_input` before the
+core wakes. A new proposer binds `Intents` with its own source in `props`.
 
 ```ts
 import type { TaskIntentService } from '@ziyixi/proto/todofy/taskintent/v1/task_intent_pb';
@@ -161,8 +161,8 @@ task text, Todoist IDs or remote response text. Todofy logs only `source`, `inte
   deleted with the existing retention tick.
 - **Not affected by the ops-v1 guard** (owner-initiated, like real mail), not reported in the reminder,
   not in `status()` beyond two counters (`intents_pending`, `intents_failed_7d`).
-- **Gateway**: `Ops.proposeTasks` / `Ops.taskIntentStatus` check only that the input is JSON and at most
-  64 KiB, then forward; a failed core call rejects `unavailable`. `Coordinator` in
+- **Gateway**: `Intents.proposeTasks` / `Intents.taskIntentStatus` check only the binding's source and that the
+  input is JSON and at most 64 KiB, then forward; a failed core call rejects `unavailable`. `Coordinator` in
   `gateway/src/coordinator.ts` gains the two RPC signatures.
 
 ## Checks

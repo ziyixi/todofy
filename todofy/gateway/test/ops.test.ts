@@ -113,65 +113,20 @@ describe('the Ops entrypoint (contracts/ops-v1)', () => {
   });
 });
 
-describe('the task-intent-v1 methods of the Ops entrypoint (contracts/task-intent-v1)', () => {
-  const intent: WireObject = subtasks;
-  const ref: WireObject = watchRefFixture;
-
-  it('implements the generated TaskIntentService as Workers RPC methods', () => {
+describe('task intents are not on the Ops entrypoint (contracts/task-intent-v1)', () => {
+  it('has only the ops-v1 methods: a proposer binds Intents', () => {
+    const methods = Object.getOwnPropertyNames(Ops.prototype).filter((name) => name !== 'constructor' && name !== 'call');
+    expect(methods.sort()).toEqual(['canaryResult', 'reportOps', 'setGuard', 'status']);
     const { ops } = entrypoint(() => ({ ok: created }));
-    const declared: WireService<typeof TaskIntentService> = ops;
-    expect(typeof declared.proposeTasks).toBe('function');
-    expect(typeof declared.taskIntentStatus).toBe('function');
-  });
-
-  it('forwards proposeTasks as compact JSON and returns the core value, a valid TaskIntentResult', async () => {
-    const { ops, core } = entrypoint(() => ({ ok: pendingNew }));
-    const result = await ops.proposeTasks(intent);
-    expect(result).toEqual(pendingNew);
-    expect(validate(INTENT_SCHEMA, 'TaskIntentResult', result)).toEqual([]);
-    expect(core.map((call) => [call.instance, call.method, call.args])).toEqual([
-      ['inbox-v1', 'task_intent_propose', [JSON.stringify(intent)]],
-    ]);
-  });
-
-  it('forwards taskIntentStatus by reference', async () => {
-    const { ops, core } = entrypoint(() => ({ ok: created }));
-    expect(validate(INTENT_SCHEMA, 'TaskIntentResult', await ops.taskIntentStatus(ref))).toEqual([]);
-    expect(core.map((call) => [call.method, call.args])).toEqual([['task_intent_status', [JSON.stringify(ref)]]]);
-  });
-
-  it.each(['invalid_input', 'busy', 'unavailable'])('rejects with the core error code %s', async (code) => {
-    const { ops } = entrypoint(() => ({ error: code }));
-    expect(await rejection(ops.proposeTasks(intent))).toBe(code);
-    expect(await rejection(ops.taskIntentStatus(ref))).toBe(code);
-  });
-
-  it('rejects unavailable when the core call itself fails', async () => {
-    const { ops } = entrypoint(() => {
-      throw new Error('PythonError: Traceback (most recent call last) ...');
-    });
-    expect(await rejection(ops.proposeTasks(intent))).toBe('unavailable');
-    expect(await rejection(ops.taskIntentStatus(ref))).toBe('unavailable');
-  });
-
-  it('refuses input over 64 KiB or not JSON without waking the core', async () => {
-    const { ops, core } = entrypoint(() => ({ ok: pendingNew }));
-    const item = { title: 'x'.repeat(300), url: 'https://watch.ziyixi.science/watches/w2609-00001', description: 'y'.repeat(1000) };
-    const items = Array.from({ length: 60 }, (_, i) => ({ ...item, title: `${String(i)} ${item.title}` }));
-    const big = { ...intent, items };
-    expect(new TextEncoder().encode(JSON.stringify(big)).byteLength).toBeGreaterThan(65536);
-    expect(await rejection(ops.proposeTasks(big))).toBe('invalid_input');
-    expect(await rejection(ops.proposeTasks(undefined as unknown as WireObject))).toBe('invalid_input');
-    const cyclic: Record<string, unknown> = {};
-    cyclic['self'] = cyclic;
-    expect(await rejection(ops.taskIntentStatus(cyclic as never))).toBe('invalid_input');
-    expect(core).toEqual([]);
+    for (const name of ['proposeTasks', 'taskIntentStatus']) expect(name in ops).toBe(false);
   });
 });
 
 describe('the Intents entrypoint: task intents of the one source its binding names (contracts/task-intent-v1)', () => {
   const watchIntent: WireObject = watchDigest;
   const watchRef: WireObject = { version: 'task-intent-v1', source: 'watch', intent_id: 'digest-2026-10-01' };
+  const intent: WireObject = subtasks;
+  const ref: WireObject = watchRefFixture;
 
   function intents(props: unknown, reply: CoreReply = () => ({ ok: pendingNew })) {
     const { env, core } = fakes({}, reply);
@@ -186,7 +141,7 @@ describe('the Intents entrypoint: task intents of the one source its binding nam
     for (const name of ['status', 'setGuard', 'canaryResult', 'reportOps']) expect(name in entry).toBe(false);
   });
 
-  it("forwards the binding's own source to the core, exactly as Ops does", async () => {
+  it("forwards the binding's own source to the core", async () => {
     const { entry, core } = intents({ source: 'watch' });
     expect(await entry.proposeTasks(watchIntent)).toEqual(pendingNew);
     await entry.taskIntentStatus(watchRef);
@@ -194,6 +149,56 @@ describe('the Intents entrypoint: task intents of the one source its binding nam
       ['task_intent_propose', [JSON.stringify(watchIntent)]],
       ['task_intent_status', [JSON.stringify(watchRef)]],
     ]);
+  });
+
+  it('implements the generated TaskIntentService as Workers RPC methods', () => {
+    const { entry } = intents({ source: 'watch' });
+    const declared: WireService<typeof TaskIntentService> = entry;
+    expect(typeof declared.proposeTasks).toBe('function');
+    expect(typeof declared.taskIntentStatus).toBe('function');
+  });
+
+  it('forwards proposeTasks as compact JSON and returns the core value, a valid TaskIntentResult', async () => {
+    const { entry, core } = intents({ source: 'watch' });
+    const result = await entry.proposeTasks(intent);
+    expect(result).toEqual(pendingNew);
+    expect(validate(INTENT_SCHEMA, 'TaskIntentResult', result)).toEqual([]);
+    expect(core.map((call) => [call.instance, call.method, call.args])).toEqual([
+      ['inbox-v1', 'task_intent_propose', [JSON.stringify(intent)]],
+    ]);
+  });
+
+  it('forwards taskIntentStatus by reference', async () => {
+    const { entry, core } = intents({ source: 'watch' }, () => ({ ok: created }));
+    expect(validate(INTENT_SCHEMA, 'TaskIntentResult', await entry.taskIntentStatus(ref))).toEqual([]);
+    expect(core.map((call) => [call.method, call.args])).toEqual([['task_intent_status', [JSON.stringify(ref)]]]);
+  });
+
+  it.each(['invalid_input', 'busy', 'unavailable'])('rejects with the core error code %s', async (code) => {
+    const { entry } = intents({ source: 'watch' }, () => ({ error: code }));
+    expect(await rejection(entry.proposeTasks(intent))).toBe(code);
+    expect(await rejection(entry.taskIntentStatus(ref))).toBe(code);
+  });
+
+  it('rejects unavailable when the core call itself fails', async () => {
+    const { entry } = intents({ source: 'watch' }, () => {
+      throw new Error('PythonError: Traceback (most recent call last) ...');
+    });
+    expect(await rejection(entry.proposeTasks(intent))).toBe('unavailable');
+    expect(await rejection(entry.taskIntentStatus(ref))).toBe('unavailable');
+  });
+
+  it('refuses input of its source over 64 KiB or not JSON without waking the core', async () => {
+    const { entry, core } = intents({ source: 'watch' });
+    const item = { title: 'x'.repeat(300), url: 'https://watch.ziyixi.science/watches/w2609-00001', description: 'y'.repeat(1000) };
+    const items = Array.from({ length: 60 }, (_, i) => ({ ...item, title: `${String(i)} ${item.title}` }));
+    const big = { ...intent, items };
+    expect(new TextEncoder().encode(JSON.stringify(big)).byteLength).toBeGreaterThan(65536);
+    expect(await rejection(entry.proposeTasks(big))).toBe('invalid_input');
+    const cyclic: Record<string, unknown> = { ...ref };
+    cyclic['self'] = cyclic;
+    expect(await rejection(entry.taskIntentStatus(cyclic as never))).toBe('invalid_input');
+    expect(core).toEqual([]);
   });
 
   it.each([

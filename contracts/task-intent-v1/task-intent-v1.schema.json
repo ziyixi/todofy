@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://contracts.local/task-intent-v1/task-intent-v1.schema.json",
   "title": "task-intent-v1: another app proposes Todoist tasks to Todofy",
-  "description": "Inputs and outputs of the Todofy Ops methods proposeTasks and taskIntentStatus (README.md). Todofy is the only Todoist writer; a proposing app sends an intent with its own idempotency key and reads the outcome back. Every object is closed. Only the keywords that contracts/ops-v1/validate.mjs implements may be used here. Patterns end with $(?!\\n): Python's re.search also matches $ before a final newline, ECMAScript does not.",
+  "description": "Inputs and outputs of the Todofy Intents methods proposeTasks and taskIntentStatus (README.md). Todofy is the only Todoist writer; a proposing app sends an intent with its own idempotency key and reads the outcome back. Every object is closed. Only the keywords that contracts/ops-v1/validate.mjs implements may be used here. Patterns end with $(?!\\n): Python's re.search also matches $ before a final newline, ECMAScript does not.",
   "$defs": {
     "Version": {"const": "task-intent-v1"},
     "Timestamp": {

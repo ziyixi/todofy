@@ -1,6 +1,6 @@
-"""task-intent-v1 end to end (contracts/task-intent-v1): a stand-in for a proposer calls the gateway's
-``Ops`` and ``Intents`` entrypoints over a service binding (``proposeTasks`` / ``taskIntentStatus``), in front of
-the real gateway, core, D1, Durable Object alarm and the fake Todoist.
+"""task-intent-v1 end to end (contracts/task-intent-v1): a stand-in for the watch app calls the gateway's
+``Intents`` entrypoint over its service binding (``proposeTasks`` / ``taskIntentStatus``, ``props.source =
+"watch"``), in front of the real gateway, core, D1, Durable Object alarm and the fake Todoist.
 
 Covered: a parent with subtasks and separate tasks created once, parent first (the watch app's digest, SOURCE_WATCH,
 too); a replay answered
@@ -57,7 +57,7 @@ def ref(doc: dict[str, Any]) -> dict[str, str]:
 
 
 def propose(stack: OpsStack, doc: dict[str, Any]) -> dict[str, Any]:
-    answer = stack.ops("proposeTasks", doc)
+    answer = stack.intents("proposeTasks", doc)
     assert "ok" in answer, answer
     assert schema_errors("TaskIntentResult", answer["ok"]) == [], answer["ok"]
     assert (answer["ok"]["source"], answer["ok"]["intent_id"]) == (doc["source"], doc["intent_id"])
@@ -65,7 +65,7 @@ def propose(stack: OpsStack, doc: dict[str, Any]) -> dict[str, Any]:
 
 
 def status(stack: OpsStack, doc: dict[str, Any]) -> dict[str, Any]:
-    answer = stack.ops("taskIntentStatus", ref(doc))
+    answer = stack.intents("taskIntentStatus", ref(doc))
     assert "ok" in answer, answer
     assert schema_errors("TaskIntentResult", answer["ok"]) == [], answer["ok"]
     return answer["ok"]
@@ -291,8 +291,9 @@ def test_a_watch_digest_is_created_like_any_intent_and_links_only_to_the_app(
 
 
 def test_the_intents_entrypoint_takes_only_its_bindings_source(stack: OpsStack, fresh_todoist: TodoistFake) -> None:
-    """The watch app binds ``Intents`` with ``props.source = "watch"``: its own intents go through as over ``Ops``;
-    another source's (its allow-list and daily quota) and the ops-v1 methods are not reachable through it."""
+    """The watch app binds ``Intents`` with ``props.source = "watch"``: its own intents go through; another
+    source's (its allow-list and daily quota) and the ops-v1 methods are not reachable through it, and ``Ops`` has
+    no task-intent methods."""
     doc = new_intent("watch-urgent.json")
     answer = stack.intents("proposeTasks", doc)
     assert "ok" in answer, answer
@@ -306,6 +307,8 @@ def test_the_intents_entrypoint_takes_only_its_bindings_source(stack: OpsStack, 
     assert stack.d1(f"SELECT count(*) AS n FROM task_intents WHERE intent_id = '{other['intent_id']}'") == [{"n": 0}]
     for method in ("status", "setGuard", "canaryResult", "reportOps"):
         assert "error" in stack.intents(method, {}), method
+    for method, value in (("proposeTasks", doc), ("taskIntentStatus", ref(doc))):
+        assert "error" in stack.ops(method, value), method
     assert len(fresh_todoist.creates()) == 1
 
 
@@ -337,9 +340,9 @@ def test_input_the_contract_refuses(stack: OpsStack, fresh_todoist: TodoistFake)
         doc | {"items": [{"title": f"{n} " + "x" * 290, "description": "y" * 1000} for n in range(30)] * 2},
     ]
     for value in invalid:
-        assert stack.ops("proposeTasks", value) == {"error": "invalid_input", "name": "Error"}
+        assert stack.intents("proposeTasks", value) == {"error": "invalid_input", "name": "Error"}
     for bad_ref in (ref(doc) | {"intent_id": ""}, {"source": "other", "intent_id": "x"}, "digest"):
-        assert stack.ops("taskIntentStatus", bad_ref) == {"error": "invalid_input", "name": "Error"}
+        assert stack.intents("taskIntentStatus", bad_ref) == {"error": "invalid_input", "name": "Error"}
     assert stack.d1(f"SELECT count(*) AS n FROM task_intents WHERE intent_id = '{doc['intent_id']}'") == [{"n": 0}]
 
 
@@ -532,7 +535,7 @@ def test_a_pending_row_of_a_source_the_contract_no_longer_knows_fails_and_sends_
 ) -> None:
     """A row recorded under a source whose enum value is now reserved: its frozen text no longer reads as an intent, so
     the next step marks it failed (todoist_rejected) without a Todoist call. Nothing deletes the row; no proposer can
-    ask for it (a strict read refuses the source)."""
+    ask for it (no binding names the source, and the core's strict read refuses it)."""
     now = int(time.time())
     key = {"source": "other", "intent_id": "other-pending"}
     payload = json.dumps(fixture("minimal.json") | key, separators=(",", ":"))
@@ -552,7 +555,7 @@ def test_a_pending_row_of_a_source_the_contract_no_longer_knows_fails_and_sends_
     settled = wait_until(failed, 40, "the row of an unknown source failed")
     assert settled == {"state": "failed", "error_code": "todoist_rejected"}
     assert fresh_todoist.creates() == []
-    asked = stack.ops("taskIntentStatus", {"version": "task-intent-v1"} | key)
+    asked = stack.intents("taskIntentStatus", {"version": "task-intent-v1"} | key)
     assert asked == {"error": "invalid_input", "name": "Error"}
 
 

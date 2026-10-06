@@ -1047,7 +1047,7 @@ jobs:
 
   # The watch app (watch/, docs in watch/docs/design.md): the Worker "watch" on the Custom Domain watch.ziyixi.science,
   # the whole host behind the Access application "watch" (infra/). After Todofy's deploy: its TODOFY binding names
-  # Todofy's Ops entrypoint, which must accept task-intent-v1's SOURCE_WATCH before the first digest. No D1, no R2:
+  # Todofy's Intents entrypoint, which must accept task-intent-v1's SOURCE_WATCH before the first digest. No D1, no R2:
   # everything lives in the SQLite Durable Object WatchState, which arms its own alarm on the first owner API call or
   # the dashboard's next status() (never on this job's anonymous probes, which Access answers).
   watch-deploy:

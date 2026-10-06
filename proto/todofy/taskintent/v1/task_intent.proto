@@ -30,7 +30,7 @@ package todofy.taskintent.v1;
 import "google/api/field_behavior.proto";
 import "google/protobuf/timestamp.proto";
 
-// Todofy's task-intent methods on its "Ops" entrypoint (a Workers service binding, not gRPC).
+// Todofy's task-intent methods on its "Intents" entrypoint (a Workers service binding, not gRPC).
 //
 // The method and message names mirror task-intent-v1; a v2 would follow AIP-133/131
 // (CreateTaskIntent, GetTaskIntent) with request and response messages of their own.

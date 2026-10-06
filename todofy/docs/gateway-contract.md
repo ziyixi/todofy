@@ -364,32 +364,31 @@ calls the real entrypoint over a service binding (`tests/runtime/ops_support.py`
 `Contracts` job runs `test/ops.test.ts` next to both apps' ops-v1 schema checks, so a change under
 `contracts/` re-checks this forwarding; the runtime test runs in the `Todofy runtime` shards.
 
-### 3.8 task-intent-v1 on the same entrypoint (contracts/task-intent-v1)
-`Ops` also implements `WireService<typeof TaskIntentService>`, the generated service of
-`proto/todofy/taskintent/v1/task_intent.proto` as Workers RPC methods (types only: the gateway bundles none of
-the generated code and passes the wire JSON through): another app in the account proposes Todoist tasks, and Todofy
-stays the only Todoist writer. Same forwarding, same
+### 3.8 task-intent-v1 on the `Intents` entrypoint (contracts/task-intent-v1)
+A second named entrypoint, `Intents` (`gateway/src/ops.ts`, exported next to `Ops`), implements
+`WireService<typeof TaskIntentService>`, the generated service of `proto/todofy/taskintent/v1/task_intent.proto` as
+Workers RPC methods (types only: the gateway bundles none of the generated code and passes the wire JSON through):
+another app in the account proposes Todoist tasks, and Todofy stays the only Todoist writer. Same forwarding, same
 error codes, same trust boundary as §3.7.
 
-| `Ops` method | Object method | Gateway checks first |
+| `Intents` method | Object method | Gateway checks first |
 |---|---|---|
-| `proposeTasks(intent)` | `task_intent_propose(json)` | input JSON-serialisable, compact JSON ≤ 64 KiB |
-| `taskIntentStatus(ref)` | `task_intent_status(json)` | input JSON-serialisable, compact JSON ≤ 64 KiB |
+| `proposeTasks(intent)` | `task_intent_propose(json)` | the binding's source, input JSON-serialisable, compact JSON ≤ 64 KiB |
+| `taskIntentStatus(ref)` | `task_intent_status(json)` | the binding's source, input JSON-serialisable, compact JSON ≤ 64 KiB |
 
-The same two methods, and nothing else, are on a second named entrypoint, `Intents` (`gateway/src/ops.ts`,
-exported next to `Ops`). A binding names its one source in `props` (`entrypoint = "Intents"`, `props = { source =
-"watch" }`, the watch app's), and `Intents` rejects `invalid_input` before the object wakes when the input's
-`source` differs or the binding has no such prop. So a proposer bound to it can use only its own source's URL
-allow-list and daily quota and cannot reach `status()`, `setGuard()`, `canaryResult()` or `reportOps()`. Every
-proposer binds `Intents` (today the watch app); none binds `Ops`. The runtime suite's probe binds both (`tests/runtime/ops_support.py`).
+A binding names its one source in `props` (`entrypoint = "Intents"`, `props = { source = "watch" }`, the watch
+app's), and `Intents` rejects `invalid_input` before the object wakes when the input's `source` differs or the
+binding has no such prop. So a proposer can use only its own source's URL allow-list and daily quota and cannot
+reach `status()`, `setGuard()`, `canaryResult()` or `reportOps()`. `Ops` has no task-intent methods. The runtime
+suite's probe binds both (`tests/runtime/ops_support.py`).
 
 The object (`runtime/intents.py`, rules in `core/intents.py`) reads the input strictly with the wire JSON
 codec and checks the schema's value rules (`invalid_input` otherwise), records a new intent in D1 (`task_intents`, `task_intent_tasks`,
 migration `0005_task_intents.sql`) and answers `pending`; its alarm creates the tasks through the
 same Todoist client, gate and 15-minute window as mail. Every expected outcome is a `TaskIntentResult`
 value (`created`, `duplicate`, `paused`, `failed`, `rejected`, `not_found`), never an exception.
-`test/ops.test.ts` covers the forwarding and the 64 KiB bound; `tests/runtime/test_task_intents.py` calls
-the real entrypoint over a service binding with the fake Todoist.
+`test/ops.test.ts` covers the forwarding, the source check and the 64 KiB bound; `tests/runtime/test_task_intents.py`
+calls the real entrypoint over a service binding with the fake Todoist.
 
 ## 4. Trust and request IDs
 
