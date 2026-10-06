@@ -507,6 +507,51 @@ async def test_cancellation_records_unknown_before_propagating(repo):
     assert repo.attempts("run")[0]["error_code"] == "interrupted"
 
 
+async def test_optional_map_item_timeout_is_a_known_failure(repo):
+    repo.start(
+        "run",
+        definition(
+            node(
+                "research",
+                "research",
+                on_error="continue",
+                map={"from": "run.items", "max_items": 2},
+            )
+        ),
+        {"items": [{"id": "a"}, {"id": "b"}]},
+    )
+
+    async def research(context):
+        if context.item_id == "a":
+            raise TimeoutError()
+        return {"id": "b"}
+
+    result = await newsletter_workflow_engine.WorkflowEngine(
+        repo, {"research": research}
+    ).run("run")
+    assert result["state"] == "succeeded"
+    assert result["nodes"]["research"]["error_code"] == "partial_failure"
+    attempts = sorted(repo.attempts("run"), key=lambda item: item["item_id"])
+    assert [(item["state"], item["error_code"]) for item in attempts] == [
+        ("failed", "timeout"),
+        ("succeeded", ""),
+    ]
+
+
+async def test_required_node_timeout_fails_run_instead_of_unknown(repo):
+    repo.start("run", definition(node()), {})
+
+    async def slow(context):
+        raise TimeoutError()
+
+    result = await newsletter_workflow_engine.WorkflowEngine(
+        repo, {"discovery": slow}
+    ).run("run")
+    assert result["state"] == "failed"
+    attempt = repo.attempts("run")[0]
+    assert (attempt["state"], attempt["error_code"]) == ("failed", "timeout")
+
+
 async def test_failures_never_persist_exception_text(repo, capsys):
     sentinel = "SECRET_SENTINEL_DO_NOT_LOG"
     repo.start("failure", definition(node()), {})
