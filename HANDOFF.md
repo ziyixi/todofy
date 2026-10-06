@@ -16,7 +16,7 @@ Rules for this file:
   what is done, what is left, how to verify it and what to check after its deploy. Link to the app docs for
   design detail instead of copying it.
 
-Last updated: 2026-10-05.
+Last updated: 2026-10-06.
 <!-- Active work is separate from the production evidence below. -->
 
 ## In flight (2026-10-05, Claude): readability review, Newsletter warning, Lab removal
@@ -93,7 +93,7 @@ Fake services cover provider failures, Top 5's default chain and frozen history.
 production Canary scope, report observations and rollback links are in
 [docs/email-model-verification.md](docs/email-model-verification.md).
 
-## Website content sync: deployed; natural daily tick pending
+## Website content sync: daily-window checks verified; controller source pending
 
 `da35586e171f4eb8a9df93746f4b5948008ec8f3` passed branch CI and the same SHA passed the main release.
 The existing relay now triggers a full content check daily at 10:17 UTC. Home provides **立即同步**
@@ -110,11 +110,24 @@ verified publication clock and actual Worker version stayed unchanged. Additiona
 accepted into the existing queue. Full evidence and the remaining checks are in
 [docs/website-sync-verification.md](docs/website-sync-verification.md).
 
-The next natural Cron is `2026-10-05T10:17:00Z`. It has not run for this change; a thread follow-up
-is scheduled after that tick to verify its actual run, receipt and Home observation and update this
-record. Do not substitute a manual dispatch for this evidence. Complete withdrawal protection,
-provider failure, cancellation and rollback paths were tested with fixtures; no live articles were
-withdrawn or production deliberately interrupted for this acceptance.
+The expected October 5 and 6 daily windows produced cron-labelled runs
+[37295602784](https://github.com/ziyixi/todofy/actions/runs/37295602784) and
+[37448792826](https://github.com/ziyixi/todofy/actions/runs/37448792826). Their exact run/attempt/request
+identities match successful `SYNC_UNCHANGED` receipts, checked at `2026-10-05T10:18:37.560Z` and
+`2026-10-06T10:18:57.147Z`. Both verified the live baseline and skipped publishing. Normal code
+pushes later updated the website; the October 6 baseline is publication `2026-10-06T07:28:14Z`,
+version `2fd07a7c`, website code `30fd74d`, also confirmed by Cloudflare's current version history.
+Home was observed on October 6 with the new check time, matching Actions links and next check
+`2026-10-07T10:17:00Z`; reminder controls were untouched. A direct local public identity fetch
+was blocked, so its identity verification is the recorded Actions baseline check.
+
+The relay schedule is confirmed as `17 10 * * *`, but the workflow also accepts a manual `cron`
+label. Independent controller provenance still needs an existing relay `daily_sync` log with the
+exact run ID. Existing token permissions block that query; the owner permission request is already
+pending. The acceptance follow-up remains active and should wait quietly for that permission,
+then correlate the existing run and stop once complete. Do not substitute a manual dispatch.
+Complete withdrawal protection, provider failure, cancellation and rollback paths were tested
+with fixtures; no live articles were withdrawn or production deliberately interrupted for this acceptance.
 
 ## Current production evidence
 

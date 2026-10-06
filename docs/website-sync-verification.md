@@ -1,6 +1,6 @@
 # Website daily sync verification
 
-Recorded 2026-10-04. The release contract is in
+Recorded 2026-10-04; daily-window evidence updated 2026-10-06. The release contract is in
 [website/docs/release.md](../website/docs/release.md). This record separates fixture checks from
 production observations; it contains no article content or credentials.
 
@@ -51,6 +51,57 @@ up to 15 minutes for Cron changes to propagate. The timing is consistent with pr
 previous schedule, but that is an inference; the exact event source was not established. This run
 does not verify the new daily 10:17 UTC schedule.
 
+## Daily-window checks observed on October 6
+
+Cloudflare's live relay schedule reads `17 10 * * *`. Both expected daily windows produced
+completed Actions runs with matching content-check receipts:
+
+| Daily window | Actions run and request ID | Receipt and actual check time | Final receipt status |
+| --- | --- | --- | --- |
+| October 5, 10:17 UTC | [37295602784](https://github.com/ziyixi/todofy/actions/runs/37295602784), created `2026-10-05T10:17:10Z`; `068cc3b3-aea9-440f-afe6-e229f551f370` | Deployment `6856525116`; `checked_at=2026-10-05T10:18:37.560Z`; `decision=unchanged` | `success`, `SYNC_UNCHANGED`, recorded `2026-10-05T10:18:40Z` |
+| October 6, 10:17 UTC | [37448792826](https://github.com/ziyixi/todofy/actions/runs/37448792826), created `2026-10-06T10:17:27Z`; `cc85f7db-9b7c-4c89-ace7-e0c5885737f8` | Deployment `6881400090`; `checked_at=2026-10-06T10:18:57.147Z`; `decision=unchanged` | `success`, `SYNC_UNCHANGED`, recorded `2026-10-06T10:18:59Z` |
+
+Both runs completed successfully on attempt 1. Their titles specify `Website release (cron)`;
+each receipt's run ID, attempt and request ID match its run. In both runs,
+`Verify production still serves the recorded baseline` and the complete snapshot/check steps
+succeeded. Worker upload, deployment and release-recording steps were skipped. Neither run
+created a `website-release` Deployment.
+
+Publication evidence must be compared with the baseline for each date:
+
+| Check | Accepted release baseline | Verified publication time | Worker version and website code identity |
+| --- | --- | --- | --- |
+| October 5 | Deployment `6847660009`, run `37240089943` | `2026-10-04T22:30:18Z` | `0f0cb495-1c3e-43e4-bf60-4fe7800b6472`; `4fd173f06ba7048061a86b5a0a5486852c9ad9a8` |
+| October 6 | Deployment `6878226863`, [push run 37429581617](https://github.com/ziyixi/todofy/actions/runs/37429581617) | `2026-10-06T07:28:14Z` | `2fd07a7c-6a1c-461e-848d-219e4bec85b7`; `30fd74d207756ddc12c464e94ef1b42a415a6fd5` |
+
+The later baseline came from normal code pushes, including [37410200559](https://github.com/ziyixi/todofy/actions/runs/37410200559).
+Both daily receipts retain the content/config hashes recorded above. Cloudflare's deployment
+history confirms no new website version between October 4's accepted release and October 6's
+first code push, and the current version remains `2fd07a7c` at 100% after October 6's daily check.
+Its deployment was created at `2026-10-06T07:27:43.311506Z`; the verified publication time comes
+from the later successful GitHub release status, as shown in the table.
+
+Home was observed on October 6, after both windows. Its website-sync panel showed:
+
+- A completed, unchanged check at `2026-10-06T10:18:57.147Z`, linked to `37448792826`.
+- Verified publication at `2026-10-06T07:28:14Z`, linked to `37429581617`, with version `2fd07a7c` and code `30fd74d`.
+- The next automatic check at `2026-10-07T10:17:00.000Z` (October 7, 03:17 in Los Angeles).
+
+Home showed normal website-sync status and an all-normal overview. This acceptance only read the
+UI; it did not request a sync or dismiss/restore reminders. It does not claim an October 5 Home
+observation. A direct public `build-info.json` read from this workstation did not complete
+(HTTP 403 / browser blocked); the successful live-baseline checks above are Actions evidence,
+not a fresh direct identity read from this workstation.
+
+Controller provenance remains pending. The relay's deployed scheduled handler is its only
+application path that dispatches `cron`, and the run times match the live daily schedule.
+GitHub nevertheless exposes `cron` as a workflow-dispatch input, and receipt payloads do not
+record the Cloudflare event source. These observations verify the daily-window checks and
+unchanged behavior, but do not independently prove the scheduled-controller source. The next
+step is to correlate an existing relay `daily_sync` log's `run_id` with one of these runs.
+Existing token permissions currently block that log query; the owner permission request is
+already pending. Do not create a manual run as replacement evidence.
+
 ## Notion cleanup
 
 Only the configured Blog data source was changed: eight operational fields were removed, eight
@@ -80,7 +131,8 @@ An Actions success without its required receipt does not prove a content check o
 
 ## Pending production checks
 
-- Natural daily Cron invocation. The next configured invocation is `2026-10-05T10:17:00Z`;
-  configuring the Cron and manually dispatching a run do not prove this invocation.
+- Independent Cloudflare scheduled-controller provenance for a daily-window run, using its
+  existing `daily_sync` log and exact run ID. Keep the acceptance follow-up active until confirmed;
+  do not repeatedly query the denied endpoint while owner permission is pending.
 - Live outage, cancellation and rollback exercises. Current evidence for these paths is synthetic;
   this acceptance did not deliberately interrupt production.
