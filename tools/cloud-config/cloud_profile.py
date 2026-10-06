@@ -122,8 +122,24 @@ def deployment_urls(profile: dict) -> dict[str, str]:
     }
 
 
+SECRET_FIELDS = ("personal_secrets", "manual_secrets", "optional_secrets", "owner_machine_secrets")
+
+
 def worker_secret_specs(root: Path) -> dict[str, dict]:
-    """Public deploy binding declarations from app manifests; never reads secret values."""
+    """Public deploy binding declarations from app manifests (the GitHub <APP>_WORKER_SECRETS maps); never reads
+    secret values. Owner-machine secrets are left out on purpose: see owner_machine_secrets."""
+    return {name: declared["spec"] for name, declared in _worker_secret_declarations(root).items()}
+
+
+def owner_machine_secrets(root: Path) -> dict[str, list[str]]:
+    """Per Worker, the secrets only the owner puts, from their own machine (`wrangler secret put`), such as
+    mailsort's Gmail grant. They are never part of a GitHub secret or a deploy; the drift check still expects them
+    (optional, since they may not be put yet), and bootstrap refuses them in its private input."""
+    return {name: declared["owner_machine"] for name, declared in _worker_secret_declarations(root).items()
+            if declared["owner_machine"]}
+
+
+def _worker_secret_declarations(root: Path) -> dict[str, dict]:
     result = {}
     for manifest in sorted(root.glob("*/app.toml")):
         for worker in read_public(manifest).get("workers", []):
@@ -135,19 +151,22 @@ def worker_secret_specs(root: Path) -> dict[str, dict]:
             name = config.get("name")
             require(isinstance(name, str) and name not in result, "worker secret name")
             declarations = {}
-            for field in ("personal_secrets", "manual_secrets", "optional_secrets"):
+            for field in SECRET_FIELDS:
                 bindings = worker.get(field, [])
                 require(isinstance(bindings, list) and all(isinstance(binding, str)
                         and re.fullmatch(r"[A-Z][A-Z0-9_]{0,63}", binding) for binding in bindings)
                         and len(bindings) == len(set(bindings)), "worker." + field)
                 declarations[field] = set(bindings)
-            personal, manual, optional = (declarations[field] for field in
-                                          ("personal_secrets", "manual_secrets", "optional_secrets"))
-            require(not personal & manual and optional <= personal | manual, "worker secret declarations")
+            personal, manual, optional, owner_machine = (declarations[field] for field in SECRET_FIELDS)
+            require(not personal & manual and optional <= personal | manual
+                    and not owner_machine & (personal | manual), "worker secret declarations")
             prefix = {"home": "DASHBOARD", "ziyixi-website": "WEBSITE",
                       "ziyixi-notion-publish": "WEBSITE_RELAY"}.get(name, name.upper().replace("-", "_"))
-            result[name] = {"github_secret": prefix + "_WORKER_SECRETS",
-                            "required": sorted((personal | manual) - optional), "optional": sorted(optional)}
+            result[name] = {
+                "spec": {"github_secret": prefix + "_WORKER_SECRETS",
+                         "required": sorted((personal | manual) - optional), "optional": sorted(optional)},
+                "owner_machine": sorted(owner_machine),
+            }
     return result
 
 

@@ -157,7 +157,7 @@ def load_catalog(root: Path = REPO, *, bootstrap: bool = False) -> Catalog:
         require(isinstance(data["entries"], list) and bool(data["entries"]), f"{app}.entries")
         apps[app] = data
         for raw in data.get("workers", []):
-            worker = fields(raw, {"config", "hosts", "entry", "role", "position", "personal_secrets", "manual_secrets", "optional_secrets"},
+            worker = fields(raw, {"config", "hosts", "entry", "role", "position", "personal_secrets", "manual_secrets", "optional_secrets", "owner_machine_secrets"},
                             {"config", "hosts", "entry", "role", "position"}, f"{app}.worker")
             config_path = file_path(root, worker["config"], app, f"{app}.config")
             require(config_path.name == "wrangler.toml" and worker["config"] not in paths, f"{app}.config")

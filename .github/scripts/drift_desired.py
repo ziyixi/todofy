@@ -15,7 +15,9 @@ or a secret. Sources:
   tables name the Worker vars it adds with --var and the Worker secrets it writes with --secrets-file, one
   file per Worker for Todofy's two Workers): the wrapper is imported, never run, and its secrets function
   gets synthetic placeholder inputs, so no real value is ever read;
-- each app manifest's manual_secrets and optional_secrets declarations, names only.
+- each app manifest's manual_secrets, optional_secrets and owner_machine_secrets declarations, names only
+  (owner-machine secrets, put by the owner with `wrangler secret put` and never in GitHub, are expected as
+  optional manual secrets).
 
 A wrapper --var of kind `personal` (or `optional`, a personal value that may be unset) is listed under
 `personal`: it must be a `secret_text` binding on the live Worker, and the drift check reports any other type
@@ -50,7 +52,7 @@ from catalog import load_catalog  # noqa: E402
 WORKERS = load_catalog(REPO).worker_configs()
 
 # The zones whose zone routes are compared (every Custom Domain and route of every Worker is in one of them).
-from cloud_profile import load_profile, read_public, worker_secret_specs  # noqa: E402
+from cloud_profile import load_profile, owner_machine_secrets, read_public, worker_secret_specs  # noqa: E402
 
 ZONES = (load_profile(REPO)["zone"],)
 
@@ -80,6 +82,9 @@ MANUAL_SECRETS = {
     for worker in read_public(manifest).get("workers", [])
     if worker.get("manual_secrets")
 }
+
+# Secrets only the owner puts from their own machine (mailsort's Gmail grant): expected, optional, never deployed.
+OWNER_MACHINE_SECRETS = owner_machine_secrets(REPO)
 
 # Wrapper kinds whose value is personal (must be a Worker secret on the live Worker).
 PERSONAL_KINDS = {"personal", "optional"}
@@ -267,6 +272,7 @@ def build() -> dict:
         bindings += deployed.get(worker, [])
         bindings += [_binding(name, "secret_text", "manual", name in SECRET_SPECS[worker]["optional"])
                      for name in MANUAL_SECRETS.get(worker, ())]
+        bindings += [_binding(name, "secret_text", "manual", True) for name in OWNER_MACHINE_SECRETS.get(worker, ())]
         names = [binding["name"] for binding in bindings]
         duplicates = sorted({name for name in names if names.count(name) > 1})
         if duplicates:
@@ -281,7 +287,7 @@ def build() -> dict:
             "bindings": sorted(bindings, key=lambda binding: binding["name"]),
             "personal": sorted(personal.get(worker, [])),
         }
-    unknown = (set(MANUAL_SECRETS) | set(deployed)) - set(WORKERS)
+    unknown = (set(MANUAL_SECRETS) | set(OWNER_MACHINE_SECRETS) | set(deployed)) - set(WORKERS)
     if unknown:
         raise GeneratorError(f"secrets or vars for unknown Workers: {sorted(unknown)}")
     return {"version": VERSION, "zones": list(ZONES), "workers": workers}

@@ -5,11 +5,14 @@ target = "cloudflare"
 [[workers]]
 config = "mailsort/wrangler.toml"
 personal_secrets = ["ACCESS_OWNER", "ACCESS_OWNER_ALIASES", "CSRF_SIGNING_KEY"]
-# The owner's Gmail grant, put from the owner's machine with deploy/mint-token.mjs (`wrangler secret put`); never in
-# GitHub (deploy/deploy-vars.mjs refuses it in MAILSORT_WORKER_SECRETS) and kept by every deploy. Optional: before the
-# owner's first mint-token run the Worker reads no mail (ops-v1 `gmail_not_configured`).
-manual_secrets = ["GMAIL_CLIENT_ID", "GMAIL_CLIENT_SECRET", "GMAIL_REFRESH_TOKEN"]
-optional_secrets = ["ACCESS_OWNER_ALIASES", "GMAIL_CLIENT_ID", "GMAIL_CLIENT_SECRET", "GMAIL_REFRESH_TOKEN"]
+manual_secrets = []
+optional_secrets = ["ACCESS_OWNER_ALIASES"]
+# The owner's Gmail grant, put from the owner's machine with deploy/mint-token.mjs (`wrangler secret put`) and kept by
+# every deploy. Owner-machine secrets are not part of the GitHub map MAILSORT_WORKER_SECRETS
+# (tools/cloud-config/worker-secrets.json leaves them out, bootstrap refuses them, deploy/deploy-vars.mjs refuses them);
+# the drift check expects them, optional: before the owner's first mint-token run the Worker reads no mail (ops-v1
+# `gmail_not_configured`).
+owner_machine_secrets = ["GMAIL_CLIENT_ID", "GMAIL_CLIENT_SECRET", "GMAIL_REFRESH_TOKEN"]
 hosts = ["sort"]
 entry = "mailsort"
 role = "Gmail 分拣与 UI"

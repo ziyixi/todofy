@@ -9,10 +9,20 @@ import subprocess
 from private_input import BootstrapError
 
 
-def worker_secret_values(private: dict, scalar: dict, specs: dict, *, complete: bool = True) -> tuple[dict[str, str], list[str]]:
+def worker_secret_values(private: dict, scalar: dict, specs: dict, *, complete: bool = True,
+                         owner_machine: dict | None = None) -> tuple[dict[str, str], list[str]]:
+    """The GitHub <APP>_WORKER_SECRETS maps. `owner_machine` (cloud_profile.owner_machine_secrets) names the secrets
+    the owner puts only from their own machine, such as mailsort's Gmail grant: given as a worker binding or as a
+    <PREFIX>_<NAME> GitHub secret, they are refused, so bootstrap can never upload them to GitHub."""
     configured = private.get("worker_secrets", {})
     if not isinstance(configured, dict) or set(configured) - set(specs):
         raise BootstrapError("WORKER_SECRETS_INVALID")
+    for worker, names in (owner_machine or {}).items():
+        bindings = configured.get(worker, {})
+        prefix = specs[worker]["github_secret"].removesuffix("_WORKER_SECRETS") if worker in specs else ""
+        if any((isinstance(bindings, dict) and name in bindings) or (prefix and prefix + "_" + name in scalar)
+               for name in names):
+            raise BootstrapError("WORKER_SECRET_OWNER_MACHINE_ONLY")
     result, missing = {}, []
     for worker, spec in specs.items():
         if not complete and worker not in configured:

@@ -250,6 +250,30 @@ SAFETY_BUDGET = "10"
                 cloud_profile.worker_secret_specs(root)
             self.assertNotIn('private-value', str(caught.exception))
 
+    def test_owner_machine_secrets_stay_out_of_the_github_spec(self):
+        root = self.fixture()
+        manifest = MANIFEST + ('personal_secrets = ["ACCESS_OWNER"]\nmanual_secrets = []\noptional_secrets = []\n'
+                               'owner_machine_secrets = ["GRANT_TOKEN"]\n')
+        (root / 'demo/app.toml').write_text(manifest)
+        self.assertEqual(cloud_profile.worker_secret_specs(root), {
+            'demo': {'github_secret': 'DEMO_WORKER_SECRETS', 'required': ['ACCESS_OWNER'], 'optional': []},
+        })
+        self.assertEqual(cloud_profile.owner_machine_secrets(root), {'demo': ['GRANT_TOKEN']})
+        # The same name may not also be a GitHub-delivered one.
+        for old, new in (('manual_secrets = []', 'manual_secrets = ["GRANT_TOKEN"]'),
+                         ('owner_machine_secrets = ["GRANT_TOKEN"]', 'owner_machine_secrets = ["ACCESS_OWNER"]'),
+                         ('owner_machine_secrets = ["GRANT_TOKEN"]', 'owner_machine_secrets = ["grant"]')):
+            (root / 'demo/app.toml').write_text(manifest.replace(old, new))
+            with self.subTest(field=new), self.assertRaises(cloud_profile.ProfileError):
+                cloud_profile.worker_secret_specs(root)
+
+    def test_mailsort_gmail_grant_is_owner_machine_only_in_the_repository(self):
+        source = TOOL.parents[1]
+        grant = ['GMAIL_CLIENT_ID', 'GMAIL_CLIENT_SECRET', 'GMAIL_REFRESH_TOKEN']
+        self.assertEqual(cloud_profile.owner_machine_secrets(source), {'mailsort': grant})
+        spec = cloud_profile.worker_secret_specs(source)['mailsort']
+        self.assertFalse(set(grant) & set(spec['required'] + spec['optional']))
+
     def test_infrastructure_inventory_updates_ids_preserving_current_bytes_and_optional_frozen_reference(self):
         source = TOOL.parents[1]
         resources = cloud_profile.load_resources(source)

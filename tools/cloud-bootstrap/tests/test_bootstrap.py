@@ -96,6 +96,30 @@ class GitHub(unittest.TestCase):
         self.assertEqual(json.loads(maps["APP_WORKER_SECRETS"]), {"KEY": "existing"})
         self.assertFalse(missing)
 
+    def test_owner_machine_secrets_never_reach_github(self):
+        specs = {"app": {"github_secret": "APP_WORKER_SECRETS", "required": ["KEY"], "optional": []}}
+        owner_machine = {"app": ["GRANT_TOKEN"]}
+        maps, missing = github_secrets.worker_secret_values(
+            {"worker_secrets": {"app": {"KEY": "existing"}}}, {}, specs, owner_machine=owner_machine)
+        self.assertEqual(json.loads(maps["APP_WORKER_SECRETS"]), {"KEY": "existing"})
+        for private, scalar in (({"worker_secrets": {"app": {"KEY": "existing", "GRANT_TOKEN": "synthetic-grant"}}}, {}),
+                                ({"worker_secrets": {"app": {"KEY": "existing"}}}, {"APP_GRANT_TOKEN": "synthetic-grant"})):
+            with self.subTest(private=sorted(private["worker_secrets"]["app"]), scalar=sorted(scalar)), \
+                    self.assertRaises(github_secrets.BootstrapError) as caught:
+                github_secrets.worker_secret_values(private, scalar, specs, owner_machine=owner_machine)
+            self.assertEqual(str(caught.exception), "WORKER_SECRET_OWNER_MACHINE_ONLY")
+            self.assertNotIn("synthetic-grant", str(caught.exception))
+
+    def test_bootstrap_refuses_the_mailsort_gmail_grant_from_the_repository_declarations(self):
+        import cloud_profile
+
+        specs = cloud_profile.worker_secret_specs(ROOT)
+        owner_machine = cloud_profile.owner_machine_secrets(ROOT)
+        for name in ("GMAIL_CLIENT_ID", "GMAIL_CLIENT_SECRET", "GMAIL_REFRESH_TOKEN"):
+            with self.subTest(name=name), self.assertRaises(github_secrets.BootstrapError):
+                github_secrets.worker_secret_values({}, {"MAILSORT_" + name: "synthetic"}, specs, complete=False,
+                                                    owner_machine=owner_machine)
+
     def test_new_environments_require_owner_review_and_pause_defaults(self):
         calls = []
 

@@ -151,3 +151,16 @@ test("the owner's Gmail grant never enters a secrets file: a MAILSORT_WORKER_SEC
   const map = { ...environment(), MAILSORT_WORKER_SECRETS: JSON.stringify({ CSRF_SIGNING_KEY: 'e'.repeat(64), ACCESS_OWNER: 'other@example.org' }) }
   assert.equal(generateSecrets(map).CSRF_SIGNING_KEY, 'd'.repeat(64))
 })
+
+test('the public GitHub secrets spec leaves the Gmail grant out; app.toml declares it owner-machine only', () => {
+  const specs = JSON.parse(readFileSync(new URL('../../../tools/cloud-config/worker-secrets.json', import.meta.url), 'utf8'))
+  const spec = specs.mailsort
+  for (const name of OWNER_ONLY_SECRETS) assert.ok(![...spec.required, ...spec.optional].includes(name), name)
+  const manifest = readFileSync(new URL('../../app.toml', import.meta.url), 'utf8')
+  const line = manifest.split('\n').find((item) => item.startsWith('owner_machine_secrets = '))
+  assert.equal(line, `owner_machine_secrets = ${JSON.stringify(OWNER_ONLY_SECRETS).replaceAll(',', ', ')}`)
+  for (const field of ['manual_secrets', 'optional_secrets']) {
+    const declared = manifest.split('\n').find((item) => item.startsWith(`${field} = `)) ?? ''
+    for (const name of OWNER_ONLY_SECRETS) assert.ok(!declared.includes(name), `${field} ${name}`)
+  }
+})

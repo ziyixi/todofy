@@ -13,7 +13,7 @@ REPO = Path(__file__).resolve().parents[2]
 sys.path[:0] = [str(REPO / "infra/scripts"), str(REPO / "tools/cloud-config")]
 
 import infra_state  # noqa: E402
-from cloud_profile import ProfileError, load_profile, load_resources, worker_secret_specs  # noqa: E402
+from cloud_profile import ProfileError, load_profile, load_resources, owner_machine_secrets, worker_secret_specs  # noqa: E402
 from github_config import initialize as initialize_github
 from github_secrets import set_production, worker_secret_values  # noqa: E402
 from inventory import write_resources  # noqa: E402
@@ -34,7 +34,7 @@ def materialize(private: dict, specs: dict, *, fresh: bool) -> tuple[dict, list[
         raise BootstrapError("INFRA_PRIVATE_INPUT_INVALID")
     infra_state.parse_values(json.dumps(private["infra_values"]))
     scalar = generated_secrets(private, generate=fresh)
-    maps, missing = worker_secret_values(private, scalar, specs, complete=fresh)
+    maps, missing = worker_secret_values(private, scalar, specs, complete=fresh, owner_machine=owner_machine_secrets(REPO))
     return {**scalar, **maps}, missing
 
 
