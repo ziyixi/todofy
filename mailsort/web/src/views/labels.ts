@@ -32,11 +32,11 @@ function editor(label: Label, reload: () => Promise<void>, confirm: (message: st
   const description = el('textarea', { rows: '3', maxlength: '300', 'aria-label': '说明' }, label.description)
   const threshold = el('input', { type: 'number', min: '0.5', max: '0.99', step: '0.01', value: label.threshold === 0 ? '' : String(label.threshold), placeholder: '默认', 'aria-label': '阈值' })
   const [enabledBox, enabled] = check('启用', label.enabled, '可以被建议或打上')
-  const [liveBox, live] = check('正式打', label.live, '正式模式下有把握时直接打标签并归档')
+  const [liveBox, live] = check('正式打', label.live, '正式模式下有把握时直接打标签（按“归档”开关决定是否移出收件箱）')
   const [trustBox, trust] = check('可信类', label.trustImplying, '银行、账户安全等：只允许规则（且 DMARC 通过）打')
   // 归档 is the inverse of keep_in_inbox: on (the default) removes INBOX with the label.
   const [archiveBox, archive] = check('归档', !label.keepInInbox, '打标签时移出收件箱；关掉则只加标签、留在收件箱')
-  const [sensitiveBox, sensitive] = check('敏感', label.sensitive, '不保留这类邮件的例子（摘要）')
+  const [sensitiveBox, sensitive] = check('敏感', label.sensitive, '不保留这类邮件的例子（摘要）；打开时已有的例子会被删除')
   const save = () =>
     void act(
       (requestId) =>
@@ -81,26 +81,30 @@ function editor(label: Label, reload: () => Promise<void>, confirm: (message: st
   )
 }
 
-/** The labels grouped by their top-level segment, in the labels' order: Gmail's tree of nested labels. */
+/**
+ * The labels as Gmail's tree of nested labels, in the labels' order: a section per path prefix that has labels under
+ * it, recursively (a path has up to three segments: 生活/汽车/保养 sits under 分拣/生活/汽车, under 分拣/生活), and a
+ * label's card where its path ends. Only leaves are labels, so a prefix is never a label of its own.
+ */
 function tree(labels: readonly Label[], card: (label: Label) => HTMLElement): HTMLElement {
-  const groups = new Map<string, Label[]>()
-  for (const label of labels) {
-    const top = label.displayName.split('/')[0] ?? label.displayName
-    groups.set(top, [...(groups.get(top) ?? []), label])
+  const branch = (members: readonly Label[], depth: number): HTMLElement[] => {
+    const groups = new Map<string, Label[]>()
+    for (const label of members) {
+      const segment = label.displayName.split('/')[depth] ?? label.displayName
+      groups.set(segment, [...(groups.get(segment) ?? []), label])
+    }
+    return [...groups].map(([segment, group]) => {
+      const prefix = [...(group[0]?.displayName.split('/').slice(0, depth) ?? []), segment].join('/')
+      const only = group[0]
+      // A label that ends here, alone under its prefix: its card, without a heading of its own.
+      if (group.length === 1 && only !== undefined && only.displayName === prefix) {
+        return depth === 0 ? el('section', { class: 'label-group', 'aria-label': `分拣/${prefix}` }, el('div', { class: 'list' }, card(only))) : card(only)
+      }
+      const heading = el(depth === 0 ? 'h2' : 'h3', { class: 'group-name' }, `分拣/${prefix}`, el('span', { class: 'muted' }, ` · ${String(group.length)} 个标签`))
+      return el('section', { class: depth === 0 ? 'label-group' : 'label-subgroup', 'aria-label': `分拣/${prefix}` }, heading, el('div', { class: 'list nested' }, ...branch(group, depth + 1)))
+    })
   }
-  return el(
-    'div',
-    { class: 'label-tree' },
-    ...[...groups].map(([top, members]) => {
-      const nested = members.length > 1 || members[0]?.displayName !== top
-      return el(
-        'section',
-        { class: 'label-group', 'aria-label': `分拣/${top}` },
-        nested ? el('h2', { class: 'group-name' }, `分拣/${top}`, el('span', { class: 'muted' }, ` · ${String(members.length)} 个标签`)) : null,
-        el('div', { class: nested ? 'list nested' : 'list' }, ...members.map(card)),
-      )
-    }),
-  )
+  return el('div', { class: 'label-tree' }, ...branch(labels, 0))
 }
 
 export async function renderLabels(ctx: ViewContext): Promise<void> {

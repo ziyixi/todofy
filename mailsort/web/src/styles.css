@@ -46,13 +46,14 @@
     --warn: #fbbf24;
     --danger: #f87171;
     --focus: #5eead4;
-    /* The same eight hues stepped for the dark surface. */
+    /* The same eight hues stepped for the dark surface, validated (dataviz validate_palette.js --mode dark) on this
+       --panel: every slot at least 3:1 against it (green is lighter here than in the light set for that reason). */
     --series-1: #3987e5;
     --series-2: #d95926;
     --series-3: #199e70;
     --series-4: #c98500;
     --series-5: #d55181;
-    --series-6: #008300;
+    --series-6: #1f9d1f;
     --series-7: #9085e9;
     --series-8: #e66767;
     --flow-node: #94a3b8;
@@ -555,7 +556,7 @@ textarea {
   flex: 1 1 8rem;
 }
 
-/* 标签: the tree of nested labels (a group per top-level segment). */
+/* 标签: the tree of nested labels (a group per path prefix, up to three levels). */
 .label-group + .label-group {
   margin-top: 1rem;
 }
@@ -570,13 +571,20 @@ textarea {
   border-left: 2px solid var(--line);
 }
 
+/* A deeper level of the tree (分拣/生活/汽车 inside 分拣/生活). */
+.label-subgroup .group-name {
+  font-size: 0.95rem;
+  margin-top: 0.25rem;
+}
+
 /* 流程: the Sankey diagram, its tooltip and legend, and the table per label. */
 .flow-chart {
   position: relative;
   margin: 0.75rem 0;
 }
 
-/* On a phone the diagram keeps its width and scrolls inside its own box; the page itself never scrolls sideways. */
+/* The diagram scales to its box; below its minimum width (a phone) it keeps that width and scrolls inside its own box,
+   so the page itself never scrolls sideways. */
 .flow-scroll {
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
@@ -593,7 +601,14 @@ textarea {
 
 .flow-svg {
   display: block;
+  width: 100%;
+  height: auto;
+  min-width: 600px;
   max-width: none;
+}
+
+.flow-chart.compact .flow-svg {
+  min-width: 480px;
 }
 
 .flow-link {

@@ -21,7 +21,8 @@ option java_package = "science.ziyixi.mailsort.ui.v1";
 enum ErrorReason {
   // Never sent.
   ERROR_REASON_UNSPECIFIED = 0;
-  // ALREADY_EXISTS (409): CreateLabel with a `label_id` or display name that a label holds.
+  // ALREADY_EXISTS (409): CreateLabel with a `label_id` or display name that a label holds, or with the
+  // `label_id` of a deleted label (its history still names it, so it is never given again).
   ERROR_REASON_LABEL_EXISTS = 1;
   // ABORTED (409): the request's etag is stale (AIP-154). The error carries the current resource.
   ERROR_REASON_ETAG_MISMATCH = 2;

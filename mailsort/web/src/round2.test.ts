@@ -5,7 +5,7 @@
  * with subject conditions.
  */
 import { mountApp, type Host } from './app.ts'
-import { flowGraph } from './flowchart.ts'
+import { clamp, flowGraph, sankeyChart } from './flowchart.ts'
 import { FakeServer, flowCount, label, ledgerEntry, NOW, settle } from './test/fakeServer.ts'
 import { parseImport } from './views/import.ts'
 import { MailFlow_Outcome, MailFlow_Stage } from '@ziyixi/proto/mailsort/ui/v1/flow_pb'
@@ -47,7 +47,7 @@ function server(): FakeServer {
 }
 
 describe('流程', () => {
-  it('builds the graph: every mail once, corrections only in the table, groups colored by top level', () => {
+  it('builds the graph: every mail once (延后 holds only mail still waiting), corrections only in the table, groups colored by top level', () => {
     const s = server()
     const graph = flowGraph(s.flow, s.labels)
     expect(graph.total).toBe(20)
@@ -65,6 +65,57 @@ describe('流程', () => {
       ['账号安全', 2, 2, 0, 2, 0, 0],
       ['出行', 4, 0, 0, 0, 4, 1],
     ])
+  })
+
+  it('credits the neighbours apart from the model, in the graph and the table', async () => {
+    const s = server()
+    s.flow.push(flowCount(MailFlow_Stage.NEIGHBOURS, MailFlow_Outcome.ARCHIVED, 'labels/travel', 3))
+    const graph = flowGraph(s.flow, s.labels)
+    expect(graph.total).toBe(23)
+    expect(graph.breakdown.find((row) => row.name === '出行')).toMatchObject({ written: 7, byRule: 0, byNeighbours: 3, byModel: 4 })
+    expect(graph.nodes.map((node) => node.name)).toContain('向量近邻')
+    const root = await open(s, '/flow')
+    const header = [...root.querySelectorAll('.flow-table thead th')].map((cell) => cell.textContent)
+    expect(header.slice(0, 5)).toEqual(['标签', '合计', '规则', '近邻', '模型'])
+    const travel = [...root.querySelectorAll('.flow-table tbody tr')].find((row) => row.textContent.startsWith('出行'))
+    expect([...(travel?.children ?? [])].slice(2, 5).map((cell) => cell.textContent)).toEqual(['0', '3', '4'])
+  })
+
+  it('scales the SVG to its box (no fixed size) and exposes its nodes to assistive technology', () => {
+    const s = server()
+    const box = sankeyChart(flowGraph(s.flow, s.labels))
+    const svg = box.querySelector('svg')
+    expect(svg?.getAttribute('width')).toBeNull()
+    expect(svg?.getAttribute('height')).toBeNull()
+    expect(svg?.getAttribute('viewBox')).toMatch(/^0 0 720 \d+$/)
+    // role=img would make every child presentational: the label links must stay reachable.
+    expect(svg?.getAttribute('role')).toBe('group')
+    expect(svg?.getAttribute('aria-label')).toBe('邮件流程：共 20 封')
+    expect(box.querySelectorAll('.flow-node[role="link"]').length).toBe(3)
+  })
+
+  it('keeps the tooltip inside the chart’s box by its measured size, and above the pointer near the bottom', () => {
+    expect(clamp(400, 0, 95)).toBe(95)
+    expect(clamp(-3, 0, 95)).toBe(0)
+    expect(clamp(20, 0, -10)).toBe(0)
+    const s = server()
+    const box = sankeyChart(flowGraph(s.flow, s.labels))
+    document.body.append(box)
+    // A phone's box: 351 px wide, 300 px high; the tip as wide as its 16rem maximum.
+    box.getBoundingClientRect = () => ({ left: 0, top: 0, width: 351, height: 300, right: 351, bottom: 300, x: 0, y: 0, toJSON: () => ({}) })
+    const tip = box.querySelector<HTMLElement>('.flow-tip')
+    if (tip === null) throw new Error('no tip')
+    Object.defineProperty(tip, 'offsetWidth', { value: 256 })
+    Object.defineProperty(tip, 'offsetHeight', { value: 60 })
+    const link = box.querySelector('.flow-link')
+    link?.dispatchEvent(new MouseEvent('pointerenter', { clientX: 300, clientY: 280 }))
+    expect(tip.hidden).toBe(false)
+    expect(tip.style.left).toBe('95px')
+    expect(Number.parseFloat(tip.style.top) + 60).toBeLessThanOrEqual(300)
+    link?.dispatchEvent(new MouseEvent('pointerenter', { clientX: 10, clientY: 10 }))
+    expect(tip.style.left).toBe('22px')
+    expect(tip.style.top).toBe('22px')
+    box.remove()
   })
 
   it('draws the diagram in the theme’s tokens, with counts, tooltips and a keyboard path to a label’s ledger', async () => {
@@ -137,6 +188,22 @@ describe('标签 as a tree', () => {
     expect(patch?.path).toContain('keep_in_inbox')
     expect(patch?.path).toContain('sensitive')
     expect(patch?.body?.['keep_in_inbox']).toBeUndefined()
+  })
+
+  it('nests a three-level path under its own prefix, not beside its parent’s siblings', async () => {
+    const s = server()
+    s.labels = [label('life-car-service', '生活/汽车/保养'), label('life-health', '生活/医疗'), label('life-car-insurance', '生活/汽车/保险'), label('travel', '出行')]
+    const root = await open(s, '/labels')
+    const top = [...root.querySelectorAll('.label-group')]
+    expect(top.map((group) => group.getAttribute('aria-label'))).toEqual(['分拣/生活', '分拣/出行'])
+    expect(top[0]?.querySelector(':scope > .group-name')?.textContent).toContain('3 个标签')
+    const car = top[0]?.querySelector('.label-subgroup')
+    expect(car?.getAttribute('aria-label')).toBe('分拣/生活/汽车')
+    expect(car?.querySelector('h3')?.textContent).toContain('2 个标签')
+    expect([...(car?.querySelectorAll('.label-card strong') ?? [])].map((node) => node.textContent)).toEqual(['分拣/生活/汽车/保养', '分拣/生活/汽车/保险'])
+    // 生活/医疗 is a card right under 分拣/生活, beside the 汽车 section.
+    const direct = [...(top[0]?.querySelector(':scope > .list.nested')?.children ?? [])].map((node) => node.getAttribute('aria-label') ?? node.querySelector('strong')?.textContent)
+    expect(direct).toEqual(['分拣/生活/汽车', '分拣/生活/医疗'])
   })
 
   it('opens the template’s preview in one click', async () => {

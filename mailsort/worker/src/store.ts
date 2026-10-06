@@ -170,7 +170,8 @@ export const SCHEMA_V1: readonly string[] = [
  * conditions, their own keep-in-inbox and DMARC switches, the owner's evidence and notes, and the import entry they
  * came from (the unique key now includes the subject conditions, so one sender may have a carve-out and a plain rule
  * to the same label: SQLite cannot change a table's constraint, so the table is rebuilt); pending mail remembers a
- * deferral (counted once in the flow); and the daily flow counters (flow.ts).
+ * deferral (counted once in the flow); decisions remember a rule's keep-in-inbox; deleted label IDs are retired; and
+ * the daily flow counters (flow.ts).
  */
 export const SCHEMA_V2: readonly string[] = [
   `ALTER TABLE labels ADD COLUMN keep_in_inbox INTEGER NOT NULL DEFAULT 0`,
@@ -201,7 +202,14 @@ export const SCHEMA_V2: readonly string[] = [
   `ALTER TABLE rules_v2 RENAME TO rules`,
   `CREATE INDEX IF NOT EXISTS rules_match ON rules (state, kind, value)`,
   `CREATE UNIQUE INDEX IF NOT EXISTS rules_import ON rules (import_id) WHERE import_id != ''`,
+  // The time (ms) a mail was first deferred for the model's budget, 0 if never: the flow counts it as waiting until
+  // it is decided or skipped, then moves it (pipeline.ts finishPending).
   `ALTER TABLE pending ADD COLUMN deferred INTEGER NOT NULL DEFAULT 0`,
+  // 1: the deciding rule kept the mail in the inbox (its own keep_in_inbox), so the owner's confirmation keeps it too.
+  `ALTER TABLE decisions ADD COLUMN keep_in_inbox INTEGER NOT NULL DEFAULT 0`,
+  // IDs of deleted labels: decisions, review items, the ledger and the flow counters still name them, so a new label
+  // never gets one (paths.ts labelIdFor; Store.takenLabelIds). Pruned once nothing that names them is kept.
+  `CREATE TABLE IF NOT EXISTS retired_labels (id TEXT PRIMARY KEY, retire_time INTEGER NOT NULL)`,
   // One counter per UTC day, stage, outcome and label (flow.ts): a few hundred rows a day at most.
   `CREATE TABLE IF NOT EXISTS flow (
     day TEXT NOT NULL,
@@ -291,6 +299,8 @@ export interface DecisionRow extends Record<string, SqlStorageValue> {
   verdict_label: string | null;
   verdict_source: string | null;
   verdict_at: number | null;
+  /** 1: the deciding rule keeps the mail in the inbox. */
+  keep_in_inbox: number;
 }
 
 export interface ReviewRow extends Record<string, SqlStorageValue> {
@@ -509,6 +519,11 @@ export class Store {
     return this.all<{ message_id: string; attempts: number }>(`SELECT message_id, attempts FROM pending WHERE not_before <= ? ORDER BY not_before, added_at LIMIT ?`, now, limit);
   }
 
+  /** IDs a new label may not take: the labels' own and those of deleted labels (retired_labels). */
+  takenLabelIds(): Set<string> {
+    return new Set(this.all<{ id: string }>(`SELECT id FROM labels UNION SELECT id FROM retired_labels`).map((row) => row.id));
+  }
+
   /** Paths of every label (the tree rule: paths.ts treeConflict). */
   labelPaths(exceptId = ''): string[] {
     return this.all<{ display_name: string }>(`SELECT display_name FROM labels WHERE id != ?`, exceptId).map((row) => row.display_name);
@@ -567,6 +582,8 @@ export class Store {
     this.run(`DELETE FROM ledger WHERE create_time < ? AND state IN ('applied', 'failed', 'undone')`, records);
     this.run(`DELETE FROM usage WHERE day < ?`, utcDay(now - FLOW_KEPT_DAYS * DAY));
     this.run(`DELETE FROM flow WHERE day < ?`, utcDay(now - FLOW_KEPT_DAYS * DAY));
+    // A retired ID is free again once neither the decisions nor the flow counters can still name it.
+    this.run(`DELETE FROM retired_labels WHERE retire_time < ?`, now - Math.max(DECISIONS_KEPT_MS, (FLOW_KEPT_DAYS + 1) * DAY));
     this.run(`DELETE FROM requests WHERE at < ?`, now - REQUEST_ID_TTL_MS);
   }
 }

@@ -209,6 +209,10 @@ describe('limits and failures', () => {
     const pass = await h.step(now);
     expect(pass.code).toBe('deferred');
     expect(await decision(h, 'f10000000000f101')).toBeUndefined();
+    // Waiting: counted as deferred (once, however many passes defer it again).
+    await h.step(now + 30_000);
+    expect((await h.sql(`SELECT sum(n) AS n FROM flow WHERE stage = 'deferred'`))[0]?.['n']).toBeGreaterThanOrEqual(1);
+    expect((await h.sql(`SELECT sum(n) AS n FROM flow WHERE stage = 'deferred'`))[0]?.['n']).toBe((await h.sql(`SELECT count(*) AS n FROM pending WHERE deferred > 0`))[0]?.['n']);
     const status = await h.opsStatus();
     expect(JSON.stringify(status['signals'])).toContain('ai_quota_exhausted');
     h.up.ai.quota = false;
@@ -216,6 +220,11 @@ describe('limits and failures', () => {
     await h.step(now);
     await h.step(now + 30_000);
     expect(await decision(h, 'f10000000000f101')).toMatchObject({ label_id: 'travel' });
+    // Each mail is in the flow once: the deferred ones left 延后 for the stage that decided them.
+    expect(await h.sql(`SELECT coalesce(sum(n), 0) AS n FROM flow WHERE stage = 'deferred'`)).toEqual([{ n: 0 }]);
+    const [counted] = await h.sql(`SELECT sum(n) AS n FROM flow WHERE outcome != 'corrected'`);
+    const [mails] = await h.sql(`SELECT count(*) AS n FROM decisions`);
+    expect(counted?.['n']).toBe(mails?.['n']);
   });
 
   it('a read-only grant never writes, even in live mode', async () => {

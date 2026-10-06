@@ -12,11 +12,12 @@ import { create } from '@ziyixi/proto/protobuf';
 import { LabelSchema } from '@ziyixi/proto/mailsort/ui/v1/label_pb';
 import { MailFlow_Outcome, MailFlow_Stage } from '@ziyixi/proto/mailsort/ui/v1/flow_pb';
 import { ImportChange_Action, ImportRulesResponseSchema, RuleImportSchema, type RuleImport } from '@ziyixi/proto/mailsort/ui/v1/mailsort_ui_service_pb';
+import { RuleSchema, Rule_Kind } from '@ziyixi/proto/mailsort/ui/v1/rule_pb';
 import { Mode } from '@ziyixi/proto/mailsort/ui/v1/status_pb';
 import { readDetail, type Status } from '@ziyixi/proto/rpc-status';
 import { MAILS } from '../fakes/fixtures.ts';
 import { MINUTE, op, reasonOf, rejection, startHarness, T0, type Harness } from './harness.ts';
-import { checkGoogleCalls, decision, deliver, gmailLabels, setLabelLive, setMode } from './helpers.ts';
+import { checkGoogleCalls, decision, deliver, gmailLabels, modifies, setLabelLive, setMode } from './helpers.ts';
 
 /** The owner's rule file, synthetic: a CI sender, a bank's login carve-out and its plain rule, a pickup carve-out. */
 function ruleFile(): RuleImport[] {
@@ -133,9 +134,11 @@ describe('round 2: import, nested labels, keep in inbox, carve-outs, forged From
     const before = h.up.gmail.calls.filter((call) => call.url.endsWith('/modify')).length;
     deliver(h, MAILS.forgedBankLogin, now);
     deliver(h, MAILS.lookalikeBank, now);
+    // A dmarc=pass planted in a quoted envelope local part (Gmail repeats it in its spf comment) is not Gmail's result.
+    deliver(h, MAILS.injectedDmarc, now);
     now += 5 * MINUTE;
     await h.step(now);
-    for (const mail of [MAILS.forgedBankLogin, MAILS.lookalikeBank]) {
+    for (const mail of [MAILS.forgedBankLogin, MAILS.lookalikeBank, MAILS.injectedDmarc]) {
       const row = await decision(h, mail.id);
       expect(row, mail.id).toBeDefined();
       expect(row?.['decider'], mail.id).toBe('clef');
@@ -176,9 +179,9 @@ describe('round 2: import, nested labels, keep in inbox, carve-outs, forged From
     expect(count(MailFlow_Stage.RULE, MailFlow_Outcome.KEPT_IN_INBOX, 'labels/shop-orders-shipping')).toBe(1);
     expect(count(MailFlow_Stage.RULE, MailFlow_Outcome.ARCHIVED, 'labels/shop-orders-shipping')).toBe(1);
     expect(count(MailFlow_Stage.RULE, MailFlow_Outcome.CORRECTED, 'labels/shop-orders-shipping')).toBe(1);
-    // The forged and look-alike mails went to the model and stayed in the inbox.
+    // The forged, look-alike and planted-result mails went to the model and stayed in the inbox.
     const modelled = flow.counts.filter((item) => item.stage === MailFlow_Stage.CLEF && (item.outcome === MailFlow_Outcome.UNSURE || item.outcome === MailFlow_Outcome.SUGGESTED)).reduce((sum, item) => sum + item.mailCount, 0);
-    expect(modelled).toBe(2);
+    expect(modelled).toBe(3);
     expect(flow.startTime !== undefined && flow.endTime !== undefined).toBe(true);
     expect((await h.api.getMailFlow({ name: 'mailFlows/last-30-days' })).counts.length).toBe(flow.counts.length);
     expect(reasonOf(await rejection(h.api.getMailFlow({ name: 'mailFlows/forever' })))).toBe('NOT_FOUND');
@@ -196,5 +199,57 @@ describe('round 2: import, nested labels, keep in inbox, carve-outs, forged From
     const filters = await h.api.exportGmailFilters({});
     expect(filters).toMatchObject({ ruleCount: 2, skippedCount: 3 });
     expect(filters.xml).toContain('分拣/开发/CI通知');
+  });
+
+  it('confirming a rule’s suggestion keeps the mail in the inbox when the rule said so, though its label archives', async () => {
+    await setLabelLive(h, 'shop-orders-shipping', false);
+    const pickup = { ...MAILS.pickupZh, id: 'a0000000000000c1', subject: '取件码提醒：包裹已到驿站' };
+    deliver(h, pickup, now);
+    now += 5 * MINUTE;
+    await h.step(now);
+    expect(await decision(h, pickup.id)).toMatchObject({ outcome: 'suggested', decider: 'rule', label_id: 'shop-orders-shipping', keep_in_inbox: 1 });
+    const [item] = await h.sql(`SELECT id FROM review WHERE message_id = ? AND state = 'pending'`, pickup.id);
+    const before = h.up.gmail.calls.length;
+    await h.api.confirmReviewItem({ name: `reviewItems/${String(item?.['id'])}`, requestId: op() });
+    const orders = h.up.gmail.labelIdByName('分拣/购物/订单物流') ?? '';
+    expect(gmailLabels(h, pickup.id)).toEqual(['CATEGORY_UPDATES', 'INBOX', orders, 'UNREAD'].sort());
+    const written = h.up.gmail.calls.slice(before).filter((call) => call.url.endsWith('/modify'));
+    expect(written.map((call) => call.body)).toEqual([JSON.stringify({ addLabelIds: [orders] })]);
+    await setLabelLive(h, 'shop-orders-shipping', true);
+  });
+
+  it('turning a label sensitive deletes the examples it has', async () => {
+    // The correction above made the receipt an example of 购物/促销.
+    expect((await h.api.listExamples({ label: 'labels/shop-promo' })).examples.length).toBe(1);
+    await h.api.updateLabel({ label: create(LabelSchema, { name: 'labels/shop-promo', sensitive: true }), updateMask: { paths: ['sensitive'] }, requestId: op() });
+    expect((await h.api.listExamples({ label: 'labels/shop-promo' })).examples).toEqual([]);
+    expect(await h.sql(`SELECT count(*) AS n FROM examples WHERE label_id = 'shop-promo'`)).toEqual([{ n: 0 }]);
+  });
+
+  it('a deleted label’s ID is never given to a new label of the same path', async () => {
+    const promo = await h.api.getLabel({ name: 'labels/shop-promo' });
+    await h.api.deleteLabel({ name: promo.name, etag: promo.etag, requestId: op() });
+    const again = await h.api.createLabel({ label: create(LabelSchema, { displayName: '购物/促销', description: '商家与金融机构的营销推广' }), requestId: op() });
+    expect(again.name).toBe('labels/shop-promo-2');
+    // The old ID keeps its history (the correction's counter) and an explicit reuse is refused.
+    expect((await h.sql(`SELECT count(*) AS n FROM decisions WHERE verdict_label = 'shop-promo'`))[0]?.['n']).toBe(1);
+    expect(reasonOf(await rejection(h.api.createLabel({ labelId: 'shop-promo', label: create(LabelSchema, { displayName: '购物/旧促销' }), requestId: op() })))).toBe('LABEL_EXISTS');
+  });
+
+  it('a list rule needs the list domain’s own DKIM: a planted dkim=pass and a copied List-Id fire nothing', async () => {
+    await h.api.createRule({ rule: create(RuleSchema, { kind: Rule_Kind.LIST_ID, value: 'digest.news.example.com', label: 'labels/subscriptions-receipts' }), requestId: op() });
+    await setLabelLive(h, 'subscriptions-receipts', true);
+    const before = modifies(h).length;
+    deliver(h, MAILS.injectedListDkim, now);
+    now += 5 * MINUTE;
+    await h.step(now);
+    expect((await decision(h, MAILS.injectedListDkim.id))?.['decider']).not.toBe('rule');
+    expect(gmailLabels(h, MAILS.injectedListDkim.id)).toEqual(['CATEGORY_UPDATES', 'INBOX', 'UNREAD']);
+    expect(modifies(h).length).toBe(before);
+    // The genuine list mail, signed by news.example.com, takes the rule.
+    deliver(h, MAILS.newsletterEn, now);
+    now += 5 * MINUTE;
+    await h.step(now);
+    expect(await decision(h, MAILS.newsletterEn.id)).toMatchObject({ decider: 'rule', label_id: 'subscriptions-receipts', outcome: 'applied' });
   });
 });

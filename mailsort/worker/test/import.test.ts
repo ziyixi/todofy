@@ -136,6 +136,37 @@ describe('the template', () => {
     // A second click changes nothing.
     expect(planImport(s, templateLabels(), []).labels.every((item) => item.action === 'skip')).toBe(true);
   });
+
+  it('keeps a threshold the owner tuned; turning a label sensitive deletes its examples, and the preview says so', () => {
+    const s = store();
+    applyImport(s, planImport(s, templateLabels(), []), T0);
+    s.run(`UPDATE labels SET threshold = 0.93, sensitive = 0 WHERE id = 'life-health'`);
+    s.run(`INSERT INTO examples (id, label_id, summary, origin, message_id, embedding, create_time) VALUES ('e1', 'life-health', 'synthetic summary', 'confirmation', 'm1', ?, ?)`, new Float32Array([1, 0]).buffer, T0);
+    s.run(`INSERT INTO examples (id, label_id, summary, origin, message_id, create_time) VALUES ('e2', 'travel', 'synthetic trip', 'confirmation', 'm2', ?)`, T0);
+    const plan = planImport(s, templateLabels(), []);
+    const health = plan.labels.find((item) => item.id === 'life-health');
+    expect(health).toMatchObject({ action: 'update', changed: ['sensitive'], warning: 'examples_deleted' });
+    expect(health?.values.threshold).toBe(0.93);
+    applyImport(s, plan, T0 + 1);
+    expect(s.label('life-health')).toMatchObject({ threshold: 0.93, sensitive: 1 });
+    expect(s.all(`SELECT id FROM examples ORDER BY id`)).toEqual([{ id: 'e2' }]);
+    // A label file that names a threshold still sets it.
+    const tuned = planImport(s, [labelEntry(`${LABEL_PREFIX}出行`, { threshold: 0.9, description: s.label('travel')?.description ?? '' })], []);
+    expect(tuned.labels[0]).toMatchObject({ action: 'update', changed: ['threshold'] });
+  });
+
+  it('never gives a new label the ID of a deleted one (its history still names it)', () => {
+    const s = store();
+    applyImport(s, planImport(s, [labelEntry(`${LABEL_PREFIX}金融/投资`)], []), T0);
+    s.run(`DELETE FROM labels WHERE id = 'finance-invest'`);
+    s.run(`INSERT INTO retired_labels (id, retire_time) VALUES ('finance-invest', ?)`, T0);
+    const again = planImport(s, [labelEntry(`${LABEL_PREFIX}金融/投资`)], []);
+    expect(again.labels[0]).toMatchObject({ action: 'create', id: 'finance-invest-2' });
+    expect(labelIdFor('Finance/Invest', s.takenLabelIds())).toBe('finance-invest-2');
+    // Free again once nothing kept can name it.
+    s.prune(T0 + 402 * DAY);
+    expect(s.takenLabelIds().has('finance-invest')).toBe(false);
+  });
 });
 
 describe('importing the owner’s rule file', () => {

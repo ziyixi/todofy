@@ -2,8 +2,9 @@
  * The decision (../../docs/design.md §4): pure functions over what the pipeline gathered, so every branch is a unit test.
  *
  * 1. Rules: the first usable active rule of an enabled label decides, in a fixed order (orderRules): rules with
- *    subject conditions (a carve-out) before plain ones, then the most specific kind (address, list, delivered-to,
- *    domain; a longer domain first), then more conditions, then the oldest. A rule is usable when its subject
+ *    subject_includes (a carve-out) before the others, then the most specific kind (address, list, delivered-to,
+ *    domain; a longer domain first), then more conditions (so a rule with only subject_excludes goes just before a
+ *    plain rule of the same kind and value), then the oldest. A rule is usable when its subject
  *    conditions hold and the mail's authentication does (ruleAuthOk): a sender rule, a trust label and a rule with
  *    `require_dmarc` need DMARC aligned with the From domain, a list rule a DKIM signature of the list's domain. A
  *    forged From therefore never fires a rule: the mail goes on to the model, or stays in the inbox.
@@ -66,12 +67,21 @@ function conditionCount(rule: Pick<RuleRow, 'subject_includes' | 'subject_exclud
 }
 
 /**
- * The order rules are tried in, a total order so the outcome never depends on how SQLite returned them: a rule with
- * subject conditions first, then the kind (address, list, delivered-to, domain), a longer domain before a shorter,
- * more conditions before fewer, then the older rule (create_time, then ID).
+ * Whether a rule is a carve-out: it has subject_includes, so it picks a few of a sender's mails out (a login notice).
+ * subject_excludes alone only narrows a broad rule ("everything but 广告"): such a rule is no more specific than a
+ * plain one and is ranked with the plain rules of its kind, or it would outrank an exact address rule of the sender.
+ */
+export function isCarveOut(rule: Pick<RuleRow, 'subject_includes'>): boolean {
+  return termsOf(rule.subject_includes).length > 0;
+}
+
+/**
+ * The order rules are tried in, a total order so the outcome never depends on how SQLite returned them: a carve-out
+ * first, then the kind (address, list, delivered-to, domain), a longer domain before a shorter, more conditions before
+ * fewer (an exclusion before the plain rule of the same key), then the older rule (create_time, then ID).
  */
 export function orderRules<T extends Pick<RuleRow, 'id' | 'kind' | 'value' | 'create_time' | 'subject_includes' | 'subject_excludes'>>(rules: readonly T[]): T[] {
-  const key = (rule: T) => [conditionCount(rule) > 0 ? 0 : 1, KIND_RANK[rule.kind], rule.kind === 'sender_domain' ? -rule.value.split('.').length : 0, -conditionCount(rule), rule.create_time] as const;
+  const key = (rule: T) => [isCarveOut(rule) ? 0 : 1, KIND_RANK[rule.kind], rule.kind === 'sender_domain' ? -rule.value.split('.').length : 0, -conditionCount(rule), rule.create_time] as const;
   return [...rules].sort((a, b) => {
     const ka = key(a);
     const kb = key(b);
@@ -99,7 +109,8 @@ export function ruleAuthOk(rule: Pick<RuleRow, 'kind' | 'value' | 'require_dmarc
 /**
  * The rule that decides (the first usable one in orderRules' order), or null. A carve-out whose subject conditions
  * hold but which cannot fire (its label disabled, the mail not authenticated) stops the search: the mail it carves
- * out must never fall through to the sender's plain rule (a login notice into 投资), so the model decides it.
+ * out must never fall through to the sender's plain rule (a login notice into 投资), so the model decides it. A rule
+ * with only exclusions that cannot fire does not stop it: it carves nothing out.
  */
 export function ruleDecision(
   matches: readonly RuleRow[],
@@ -112,7 +123,7 @@ export function ruleDecision(
     const label = labels.get(rule.label_id);
     const usable = label !== undefined && label.enabled && ruleAuthOk(rule, label.trust, mail);
     if (usable) return { label: rule.label_id, ruleId: rule.id, keepInInbox: rule.keep_in_inbox === 1 };
-    if (conditionCount(rule) > 0) return null;
+    if (isCarveOut(rule)) return null;
   }
   return null;
 }

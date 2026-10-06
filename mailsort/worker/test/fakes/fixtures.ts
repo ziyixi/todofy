@@ -17,6 +17,8 @@ export interface SyntheticMail {
   readonly dmarc?: 'pass' | 'fail' | 'none';
   /** The domain Gmail authenticated (DKIM, SPF and DMARC's header.from); by default the From address's domain. */
   readonly authDomain?: string;
+  /** Gmail's whole Authentication-Results header, verbatim, in place of the one built from dmarc and authDomain. */
+  readonly authenticationResults?: string;
   readonly labels?: readonly string[];
   readonly receivedAt?: number;
 }
@@ -34,7 +36,7 @@ export function message(mail: SyntheticMail): Omit<FakeMessage, 'labelIds'> & { 
   const domain = mail.authDomain ?? /@([^>\s]+)/.exec(mail.from)?.[1] ?? 'example.com';
   const headers = [
     { name: 'Delivered-To', value: mail.to ?? OWNER_ADDRESS },
-    ...(mail.dmarc === 'none' ? [] : [{ name: 'Authentication-Results', value: `mx.google.com; dkim=pass header.i=@${domain}; spf=pass smtp.mailfrom=${domain}; dmarc=${mail.dmarc ?? 'pass'} (p=REJECT sp=REJECT dis=NONE) header.from=${domain}` }]),
+    ...(mail.dmarc === 'none' ? [] : [{ name: 'Authentication-Results', value: mail.authenticationResults ?? `mx.google.com; dkim=pass header.i=@${domain}; spf=pass smtp.mailfrom=${domain}; dmarc=${mail.dmarc ?? 'pass'} (p=REJECT sp=REJECT dis=NONE) header.from=${domain}` }]),
     { name: 'From', value: mail.from },
     { name: 'To', value: mail.to ?? OWNER_ADDRESS },
     { name: 'Subject', value: mail.subject },
@@ -79,6 +81,28 @@ export const MAILS = {
   forgedBankLogin: { id: 'a0000000000000b3', from: 'Example Bank <statements@bank.example.com>', subject: 'New login to your account', text: 'Confirm the new sign-in at https://bank-secure.example.net/login now.', dmarc: 'fail' },
   /** A display name that copies the bank's address; the real address is another domain's (DMARC passes for that one). */
   lookalikeBank: { id: 'a0000000000000b4', from: '"statements@bank.example.com" <alerts@bank-alerts.example.net>', subject: 'Your monthly bank statement', text: 'Your statement is ready.', authDomain: 'bank-alerts.example.net' },
+  /**
+   * A forged From whose envelope sender is a quoted local part that spells a result: Gmail repeats it in the spf
+   * comment and in smtp.mailfrom, ahead of its own dmarc=fail (the "planted result" trick).
+   */
+  injectedDmarc: {
+    id: 'a0000000000000b6',
+    from: 'Example Bank <statements@bank.example.com>',
+    subject: 'New login to your account',
+    text: 'Confirm the new sign-in at https://bank-secure.example.net/login now.',
+    authenticationResults:
+      'mx.google.com; spf=pass (google.com: domain of "a;dmarc=pass header.from=bank.example.com"@evil.example.net designates 192.0.2.1 as permitted sender) smtp.mailfrom="a;dmarc=pass header.from=bank.example.com"@evil.example.net; dmarc=fail (p=REJECT sp=REJECT dis=QUARANTINE) header.from=bank.example.com',
+  },
+  /** A List-Id copied from a real list, with a planted dkim=pass for the list's domain in the envelope sender. */
+  injectedListDkim: {
+    id: 'a0000000000000b7',
+    from: 'Weekly Digest <digest@evil.example.net>',
+    subject: 'Your weekly digest: 5 new posts',
+    text: 'This week in the newsletter: five new posts.',
+    listId: 'digest.news.example.com',
+    authenticationResults:
+      'mx.google.com; spf=pass (google.com: domain of "x;dkim=pass header.d=news.example.com"@evil.example.net designates 192.0.2.1 as permitted sender) smtp.mailfrom="x;dkim=pass header.d=news.example.com"@evil.example.net; dmarc=pass (p=NONE sp=NONE dis=NONE) header.from=evil.example.net',
+  },
   pickupZh: { id: 'a0000000000000b5', from: 'Shop <orders@shop.example.com>', subject: '您的取件码已送达快递柜', text: '包裹已放入快递柜，凭取件码取件。' },
 } as const satisfies Record<string, SyntheticMail>;
 

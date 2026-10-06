@@ -14,6 +14,7 @@
  * Rule values pass rule-value.ts like every other rule's, since they reach Gmail filter criteria in the export.
  */
 import { termsOf } from './decide.ts';
+import { deleteExamplesOfLabel } from './examples.ts';
 import { newEtag, shortId } from './ids.ts';
 import {
   DESCRIPTION_MAX,
@@ -40,7 +41,8 @@ export interface LabelInput {
   readonly trust: boolean;
   readonly keepInInbox: boolean;
   readonly sensitive: boolean;
-  readonly threshold: number;
+  /** The label's own threshold (0: the default); null keeps an existing label's (the template never resets it). */
+  readonly threshold: number | null;
 }
 
 /** A rule entry as the request carries it (RuleImport). */
@@ -159,14 +161,17 @@ function identity(kind: string, value: string, labelId: string, includes: readon
 
 /** The template's labels as import entries. */
 export function templateLabels(): LabelInput[] {
-  return LABEL_TEMPLATE.map((item) => ({ path: `${LABEL_PREFIX}${item.path}`, description: item.description, trust: item.trust, keepInInbox: item.keepInInbox, sensitive: item.sensitive, threshold: 0 }));
+  // No threshold: one click on the template must not throw away a threshold the owner tuned (a new label gets the default).
+  return LABEL_TEMPLATE.map((item) => ({ path: `${LABEL_PREFIX}${item.path}`, description: item.description, trust: item.trust, keepInInbox: item.keepInInbox, sensitive: item.sensitive, threshold: null }));
 }
 
 /** What the import would do (pure over the store's rows; nothing is written). */
 export function planImport(store: Store, labelsIn: readonly LabelInput[], rulesIn: readonly RuleInput[]): ImportPlan {
   const existingLabels = store.labels();
   const byPath = new Map(existingLabels.map((row) => [row.display_name, row]));
-  const takenIds = new Set(existingLabels.map((row) => row.id));
+  // A deleted label's ID is never reused: its decisions, ledger rows and flow counters still name it.
+  const takenIds = store.takenLabelIds();
+  const exampleCounts = store.exampleCounts();
   const plannedLabels: PlannedLabel[] = [];
   const plannedByPath = new Map<string, PlannedLabel>();
   const invalidLabel = (index: number, key: string, problem: string): PlannedLabel => ({
@@ -194,7 +199,8 @@ export function planImport(store: Store, labelsIn: readonly LabelInput[], rulesI
       plannedLabels.push(invalidLabel(index, path, 'description'));
       return;
     }
-    const threshold = input.threshold;
+    const row = byPath.get(path);
+    const threshold = input.threshold ?? row?.threshold ?? 0;
     if (threshold !== 0 && (!Number.isFinite(threshold) || threshold < THRESHOLD_MIN || threshold > THRESHOLD_MAX)) {
       plannedLabels.push(invalidLabel(index, path, 'threshold'));
       return;
@@ -204,8 +210,7 @@ export function planImport(store: Store, labelsIn: readonly LabelInput[], rulesI
       return;
     }
     const values: LabelValues = { path, description, trust: input.trust, keepInInbox: input.keepInInbox, sensitive: input.sensitive, threshold };
-    const row = byPath.get(path);
-    const planned = row === undefined ? createLabel(index, values, takenIds, false) : updateLabel(index, row, values);
+    const planned = row === undefined ? createLabel(index, values, takenIds, false) : updateLabel(index, row, values, exampleCounts.get(row.id) ?? 0);
     plannedLabels.push(planned);
     if (planned.action !== 'invalid') plannedByPath.set(path, planned);
   });
@@ -324,14 +329,16 @@ function createLabel(index: number, values: LabelValues, takenIds: Set<string>, 
   return { index, action: 'create', key: values.path, id, changed: [], problem: '', warning: '', fromRule, values };
 }
 
-function updateLabel(index: number, row: LabelRow, values: LabelValues): PlannedLabel {
+/** An existing label's update; `examples` is how many examples it has (turning it sensitive deletes them). */
+function updateLabel(index: number, row: LabelRow, values: LabelValues, examples: number): PlannedLabel {
   const changed: string[] = [];
   if (row.description !== values.description) changed.push('description');
   if ((row.trust === 1) !== values.trust) changed.push('trust');
   if ((row.keep_in_inbox === 1) !== values.keepInInbox) changed.push('keep_in_inbox');
   if ((row.sensitive === 1) !== values.sensitive) changed.push('sensitive');
   if (row.threshold !== values.threshold) changed.push('threshold');
-  return { index, action: changed.length === 0 ? 'skip' : 'update', key: values.path, id: row.id, changed, problem: '', warning: '', fromRule: false, values };
+  const warning = row.sensitive === 0 && values.sensitive && examples > 0 ? 'examples_deleted' : '';
+  return { index, action: changed.length === 0 ? 'skip' : 'update', key: values.path, id: row.id, changed, problem: '', warning, fromRule: false, values };
 }
 
 /** Whether the plan may be applied: no entry is invalid. */
@@ -376,6 +383,8 @@ export function applyImport(store: Store, plan: ImportPlan, now: number): Import
         newEtag(now),
         item.id,
       );
+      // A label turned sensitive keeps no example (examples.ts putExample): the ones it has go now, embeddings and all.
+      if (item.changed.includes('sensitive') && v.sensitive) deleteExamplesOfLabel(store, item.id);
     }
   }
   const labelIds = new Map(store.labels().map((row) => [row.display_name, row.id]));

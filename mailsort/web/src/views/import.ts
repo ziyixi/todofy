@@ -44,6 +44,7 @@ export const WARNINGS: Readonly<Record<string, string>> = {
   trust_mismatch: '规则标了 trust，但它的标签不是可信类',
   rule_disabled: '已有的这条规则是停用的，导入后仍停用',
   same_match: '前面有条件完全相同、标签不同的规则：会先用前面那条',
+  examples_deleted: '改为敏感后，这个标签已有的例子会被删除',
 }
 
 const FIELDS: Readonly<Record<string, string>> = {
@@ -226,7 +227,7 @@ export async function renderImport(ctx: ViewContext): Promise<void> {
         'section',
         { class: 'card' },
         el('h2', {}, '推荐模板'),
-        el('p', { class: 'hint' }, '15 个常用分类（开发、金融、账号安全、购物、生活等），带写给模型的说明；可信类只由通过 DMARC 的规则打，账号安全和政府法律留在收件箱。已有同名标签只更新说明和开关。'),
+        el('p', { class: 'hint' }, '15 个常用分类（开发、金融、账号安全、购物、生活等），带写给模型的说明；可信类只由通过 DMARC 的规则打，账号安全和政府法律留在收件箱。已有同名标签会更新说明、可信类、归档和敏感开关（改为敏感会删除它已有的例子），自己调过的阈值保持不变。'),
         el('div', { class: 'actions' }, button('预览模板', () => void showPreview('template'))),
       ),
       el(

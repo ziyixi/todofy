@@ -1,7 +1,8 @@
 /**
  * 流程 (`/flow`): how mail moved through the pipeline over today, the last 7 or the last 30 UTC days (GetMailFlow): the
  * Sankey diagram (flowchart.ts), then a table per label with a bar of its written mail: how many were written, by a
- * rule or by the model, kept in the inbox or archived, only suggested, and later corrected. A label's name opens its
+ * rule, by the neighbours (no model call) or by a model, kept in the inbox or archived, only suggested, and later
+ * corrected. A label's name opens its
  * 操作记录.
  */
 import { api } from '../api.ts'
@@ -24,7 +25,7 @@ export function ledgerPath(label: string): string {
 function breakdownTable(graph: FlowGraph, go: (path: string) => void): HTMLElement {
   if (graph.breakdown.length === 0) return el('p', { class: 'empty' }, '这段时间没有打上或建议任何标签。')
   const most = Math.max(1, ...graph.breakdown.map((row) => row.written + row.suggested))
-  const head = el('tr', {}, ...['标签', '合计', '规则', '模型', '留在收件箱', '归档', '仅建议', '被纠正'].map((name) => el('th', { scope: 'col' }, name)))
+  const head = el('tr', {}, ...['标签', '合计', '规则', '近邻', '模型', '留在收件箱', '归档', '仅建议', '被纠正'].map((name) => el('th', { scope: 'col' }, name)))
   const body = graph.breakdown.map((row) => {
     const link = el('a', { href: ledgerPath(row.label) }, row.name)
     link.addEventListener('click', (event) => {
@@ -41,6 +42,7 @@ function breakdownTable(graph: FlowGraph, go: (path: string) => void): HTMLEleme
       el('th', { scope: 'row' }, link, el('span', { class: 'flow-bar-track' }, bar)),
       el('td', {}, `${String(total)}`, el('span', { class: 'muted' }, ` ${share(total, graph.total)}`)),
       el('td', {}, String(row.byRule)),
+      el('td', {}, String(row.byNeighbours)),
       el('td', {}, String(row.byModel)),
       el('td', {}, String(row.kept)),
       el('td', {}, String(row.archived)),
@@ -75,7 +77,7 @@ export async function renderFlow(ctx: ViewContext): Promise<void> {
     fill(
       body,
       picker,
-      el('p', { class: 'hint' }, `共 ${String(graph.total)} 封（按 UTC 日计）。线的粗细是邮件数；悬停或聚焦看具体数字，点标签看它的操作记录。延后的邮件之后判断时会再计入一次。`),
+      el('p', { class: 'hint' }, `共 ${String(graph.total)} 封（按 UTC 日计）。线的粗细是邮件数；悬停或聚焦看具体数字，点标签看它的操作记录。“延后”只算仍在等额度的邮件，判断后改计入处理它的那一步。`),
       sankeyChart(graph, { onLabel: (label) => ctx.go(ledgerPath(label)) }),
       el('h2', {}, '按标签'),
       breakdownTable(graph, ctx.go),

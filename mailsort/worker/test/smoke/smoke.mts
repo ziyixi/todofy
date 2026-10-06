@@ -8,8 +8,9 @@
  * untouched, an unsure mail left in the inbox, undo, Gmail corrections becoming examples and a rule proposal, the
  * neuron budget's switch to Clef-flash, the quota deferral; then round 2: an import of nested labels and the owner's
  * rule file (preview, confirm), a nested label created in Gmail with its parents, a label that keeps its mail in the
- * inbox, a subject carve-out before the sender's plain rule, a forged From that fires no rule, the flow API and the
- * export's round trip; and last the auth failure. Run from worker/ after the UI's build
+ * inbox, a subject carve-out before the sender's plain rule, forged From headers that fire no rule (DMARC failed, and
+ * a dmarc=pass planted in the quoted envelope sender), a pickup carve-out's suggestion confirmed and kept in the inbox,
+ * the flow API (deferred mail counted once, while it waits) and the export's round trip; and last the auth failure. Run from worker/ after the UI's build
  * (the dev server serves web/dist):
  *
  *   npm run test:smoke
@@ -214,10 +215,13 @@ async function run(origin: string, up: FakeUpstream, setClock: (now: number) => 
     create(RuleImportSchema, { id: 'ci-builds', match: { fromAddress: 'builds@ci.example.com' }, label: '分拣/开发/CI通知' }),
     create(RuleImportSchema, { id: 'bank-login', match: { fromAddress: 'statements@bank.example.com' }, label: '分拣/账号安全', trust: true, keepInInbox: true, subjectIncludes: ['登录', 'login'] }),
     create(RuleImportSchema, { id: 'bank-plain', match: { fromAddress: 'statements@bank.example.com' }, label: '分拣/金融/银行支付', trust: true }),
+    // A pickup-code carve-out kept in the inbox, onto a label that archives the rest of the shop's mail.
+    create(RuleImportSchema, { id: 'pickup', match: { fromAddress: 'orders@shop.example.com' }, label: '分拣/购物/订单物流', keepInInbox: true, subjectIncludes: ['取件码'] }),
+    create(RuleImportSchema, { id: 'shop', match: { fromAddress: 'orders@shop.example.com' }, label: '分拣/购物/订单物流' }),
   ];
   const preview = await api.importRules({ labels: labelsIn, rules: rulesIn, validateOnly: true });
   const before = (await api.listLabels({})).labels.length;
-  check(preview.createdLabelCount === 3 && preview.createdRuleCount === 3 && !preview.applied && (await api.listLabels({})).labels.length === before, 'import: the preview lists 3 labels and 3 rules to create and changes nothing');
+  check(preview.createdLabelCount === 4 && preview.createdRuleCount === 5 && !preview.applied && (await api.listLabels({})).labels.length === before, 'import: the preview lists 4 labels and 5 rules to create and changes nothing');
   const imported = await api.importRules({ labels: labelsIn, rules: rulesIn, requestId: id() });
   check(imported.applied && (await api.listRules({})).rules.some((rule) => rule.importId === 'bank-login' && rule.subjectIncludes.includes('登录')), 'import: confirmed, the rules and their subject conditions are stored');
   for (const labelId of ['dev-ci-notices', 'account-security', 'finance-bank-pay']) {
@@ -227,6 +231,9 @@ async function run(origin: string, up: FakeUpstream, setClock: (now: number) => 
   deliver(MAILS.bankLogin);
   deliver(MAILS.bankEn);
   deliver(MAILS.forgedBankLogin);
+  deliver(MAILS.injectedDmarc);
+  // 购物/订单物流 is not live: the pickup carve-out's decision is a suggestion the owner confirms below.
+  deliver(MAILS.pickupZh);
   await step();
   await step();
   const names = [...up.gmail.labels.values()].map((label) => label.name);
@@ -240,15 +247,28 @@ async function run(origin: string, up: FakeUpstream, setClock: (now: number) => 
   check(plain.includes(up.gmail.labelIdByName('分拣/金融/银行支付') ?? '-') && !plain.includes('INBOX'), 'carve-out order: the same sender\'s statement takes the plain rule (label and archive)');
   const forged = labelsOf(MAILS.forgedBankLogin.id);
   check(forged.includes('INBOX') && forged.every((label) => !label.startsWith('Label_')), 'forged From (DMARC failed): no rule fires and nothing is written');
+  const planted = labelsOf(MAILS.injectedDmarc.id);
+  check(planted.includes('INBOX') && planted.every((label) => !label.startsWith('Label_')), 'forged From with a dmarc=pass planted in the quoted envelope sender: Gmail\'s own dmarc=fail counts, no rule fires');
+  const pickupItem = (await api.listReviewItems({})).reviewItems.find((item) => item.suggestedLabel === 'labels/shop-orders-shipping' && item.decider === 'rule');
+  const beforeConfirm = modifies();
+  await api.confirmReviewItem({ name: pickupItem?.name ?? '', requestId: id() });
+  const pickup = labelsOf(MAILS.pickupZh.id);
+  const orders = up.gmail.labelIdByName('分拣/购物/订单物流') ?? '-';
+  check(pickupItem !== undefined && modifies() === beforeConfirm + 1 && pickup.includes(orders) && pickup.includes('INBOX') && pickup.includes('UNREAD'), 'confirming the pickup carve-out\'s suggestion keeps the mail in the inbox, as the rule says (its label archives)');
   const flow = await api.getMailFlow({ name: 'mailFlows/today' });
+  const waiting = (await api.getServiceStatus({ name: 'serviceStatus' })).deferredCount;
   const counted = (stage: MailFlow_Stage, outcome: MailFlow_Outcome, label: string) => flow.counts.some((item) => item.stage === stage && item.outcome === outcome && item.label === label && item.mailCount >= 1);
   check(
-    counted(MailFlow_Stage.RULE, MailFlow_Outcome.ARCHIVED, 'labels/dev-ci-notices') && counted(MailFlow_Stage.RULE, MailFlow_Outcome.KEPT_IN_INBOX, 'labels/account-security') && flow.counts.some((item) => item.stage === MailFlow_Stage.DEFERRED),
-    'the flow API counts each stage and outcome per label (rule archived, kept in inbox, deferred)',
+    counted(MailFlow_Stage.RULE, MailFlow_Outcome.ARCHIVED, 'labels/dev-ci-notices') &&
+      counted(MailFlow_Stage.RULE, MailFlow_Outcome.KEPT_IN_INBOX, 'labels/account-security') &&
+      counted(MailFlow_Stage.RULE, MailFlow_Outcome.SUGGESTED, 'labels/shop-orders-shipping') &&
+      flow.counts.filter((item) => item.stage === MailFlow_Stage.DEFERRED).reduce((sum, item) => sum + item.mailCount, 0) === waiting &&
+      waiting >= 1,
+    'the flow API counts each stage and outcome per label (rule archived, kept in inbox, suggested; deferred = the mail still waiting)',
   );
   const exported = JSON.parse((await api.exportRules({})).json) as { rules: { id: string }[] };
   const again = await api.importRules({ labels: labelsIn, rules: rulesIn, validateOnly: true });
-  check(exported.rules.some((rule) => rule.id === 'bank-login') && again.skippedCount === 4 && again.createdRuleCount === 0, 'export lists the imported rules; importing the same file again changes nothing');
+  check(exported.rules.some((rule) => rule.id === 'bank-login') && again.skippedCount === 6 && again.createdRuleCount === 0, 'export lists the imported rules; importing the same file again changes nothing');
 
   // The grant refused three times: Google is no longer called.
   up.gmail.grants.clear();

@@ -111,14 +111,19 @@ import and SyncLabels all hold to it), so a mail's one label is always a leaf. G
 labels, created as needed before a label's first write (`writes.ts` ensureGmailLabel: one labels.list, then whatever of
 `分拣`, `分拣/金融` and the leaf is missing) or before a rename; SyncLabels imports a nested Gmail label and never a parent
 that only groups. A label made without an ID gets one from its path (`金融/投资` is `finance-invest`, `paths.ts` pathSlug:
-a fixed glossary of common words, a short hash of any other word), stable and readable in URLs.
+a fixed glossary of common words, a short hash of any other word), stable and readable in URLs. A deleted label's ID
+is retired (`retired_labels`, until its decisions and flow counters are pruned): its decisions, review items, ledger
+rows and counters still name it, so a new label of the same path gets `finance-invest-2` instead of inheriting that
+history, and CreateLabel refuses it as an explicit ID.
 
 A label archives what it gets (removes INBOX) unless its 归档 is off (`keep_in_inbox`): then the label is added and the
 mail stays in the inbox. A rule may keep its mail in the inbox too (Rule.keep_in_inbox) whatever the label says; a rule
 can never make a keeping label archive, since keeping is the safe direction. The owner's review choices follow the
-label. The ledger records the choice per write (`archived`), the guard checks the modify against it, and an undo of a
+label, and the deciding rule when the owner confirms the label it suggested (the decision records the rule's keep:
+a pickup-code carve-out onto 购物/订单物流 not yet live stays in the inbox when confirmed). The ledger records the choice per write (`archived`), the guard checks the modify against it, and an undo of a
 kept mail only removes the label. A sensitive label (敏感) keeps no example: its mail's masked summary would otherwise
-outlive the 14 days of content.
+outlive the 14 days of content. Turning a label sensitive (UpdateLabel, an import, the template) deletes the examples
+it has, embeddings and all, in the same transaction; the import's preview warns `examples_deleted`.
 
 ### 3.2 The template
 
@@ -128,7 +133,8 @@ written for the decision model: one language, one sentence, 60-120 characters, s
 labels, what does not. Trust labels (金融/投资, 金融/银行支付, 账号安全, 政府法律, 生活/医疗) are transactional only: a bank's own
 marketing is 购物/促销, so a look-alike promotion never borrows a trust label. 账号安全 and 政府法律 keep their mail in the
 inbox; 生活/医疗 is sensitive. 标签's 套用推荐模板 previews it in 导入导出; a label that exists already (same path) only gets
-the template's description and switches, never a second copy.
+the template's description and switches, never a second copy, and keeps a threshold the owner tuned (the template
+names none).
 
 ### 3.3 Modes and limits
 
@@ -188,11 +194,14 @@ The alarm runs every 5 minutes, every 30 s while a backlog waits. A pass may mak
    - features: the exact sender address, domain, List-Id and delivered-to address (for rules only), and the masked text
      (§4.2); DMARC alignment from Gmail's own topmost `Authentication-Results` (authserv-id `mx.google.com`);
    - stage 1, **rules** (§4.3): the first usable active rule of an enabled label decides, in a total order: rules with
-     subject conditions first (a carve-out), then the kind (address, list, delivered-to, domain; a longer domain
+     `subject_includes` first (a carve-out), then the kind (address, list, delivered-to, domain; a longer domain
      first), more conditions first, then the oldest rule (create_time, then ID; an import keeps its file's order). A
+     rule with only `subject_excludes` is no carve-out: an exclusion narrows a broad rule ("everything from the bank
+     but 广告"), it does not make it specific, so it ranks with the plain rules of its kind and goes just before the
+     plain rule of the same kind and value (and never before an exact address rule of a domain it covers). A
      rule is usable when its subject conditions hold and the mail is authenticated as §4.3 says. A carve-out whose
      words match but which cannot fire (its label disabled, the mail not authenticated) ends the search: its mail never
-     falls through to the sender's plain rule;
+     falls through to the sender's plain rule; an exclusion-only rule that cannot fire does not;
    - stage 2, **neighbours**: when examples exist, the mail's summary is embedded (bge-m3) and compared by cosine with
      every embedded example of an enabled label; the three nearest go into Clef's state (each cut to 120 tokens). Only
      when the sender passed DMARC aligned and all three agree with similarity ≥ 0.92 on a non-trust label does that
@@ -236,7 +245,11 @@ the review (`worker/test/read.test.ts`). No AI Gateway: it would log request bod
 ### 4.3 What a rule needs: DMARC, DKIM, Delivered-To
 
 Everything is read from Gmail's own topmost `Authentication-Results` (authserv-id `mx.google.com`; `dmarc.ts`), never
-from a header the sender could add below it:
+from a header the sender could add below it. Even that header quotes text the sender chose (the envelope sender in the
+spf comment and in `smtp.mailfrom`, where a quoted local part may hold `;` and `dmarc=pass header.from=…`), so every
+comment and quoted string is blanked before the header is split into results (a quoted string counts inside a comment
+too, so a `)` in it cannot end the comment early), a header with an unclosed one authenticates nothing, and DMARC
+counts only when there is exactly one dmarc result:
 
 - a sender rule (From address or domain) fires only when DMARC passed aligned with the From domain (`header.from`
   equal to the address's domain, the address as Gmail's DMARC reads it, not a display name). A forged From (DMARC
@@ -408,15 +421,16 @@ label the model may not set; 例子 and 记录 page with 加载更多; sync and 
 - **The flow** (`flow.ts`, 流程). The Durable Object keeps one counter per UTC day, stage, outcome and label (table
   `flow`), changed in the same transaction as what it counts: a decision (its decider as the stage: 规则, 向量近邻,
   Clef 27B, Clef-flash, or 未调用模型 without a model answer; its outcome: archived, kept in the inbox, only suggested,
-  unsure), a skip (sent/draft/spam, a conversation already sorted, from before the install, unreadable), a mail's
-  first deferral (延后: counted again where it is decided later), a write that failed and left its mail a suggestion
+  unsure), a skip (sent/draft/spam, a conversation already sorted, from before the install, unreadable), a mail
+  still waiting after a deferral (延后, on the day of its first deferral; the transaction that decides or skips it
+  takes it out again, so every mail is counted exactly once), a write that failed and left its mail a suggestion
   (moved from written to suggested on its day), and a correction (added on the day the mail was decided, taken back
   when withdrawn). Pruned after 400 days. GetMailFlow sums a fixed range of UTC days (at most 2,000 counters). 流程
   draws it as a Sankey diagram (d3-sankey for the layout only; SVG in the page's light and dark tokens, labels grouped
   and colored by their top-level segment in the labels' order, a ninth group gray; every node named with its count;
   hover or focus for exact numbers and shares; a label opens its 操作记录; no motion under prefers-reduced-motion; on
-  a phone it scrolls inside its own box) and a table per label (written, by rule or model, kept or archived, only
-  suggested, corrected). 运行状态 shows today's diagram, compact.
+  a phone it scrolls inside its own box) and a table per label (written, by rule, neighbours or model, kept or
+  archived, only suggested, corrected). 运行状态 shows today's diagram, compact.
 - **Emergency stop**, from fastest: 设置 → 关闭; the GitHub variable `MAILSORT_MODE=off` (or `shadow`) and a redeploy;
   revoking the grant at https://myaccount.google.com/permissions (Google account → Security → Third-party access).
 - **Logs**: one line per alarm (mode, counts, a code) and per refused request (request ID, status, reason).

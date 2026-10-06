@@ -761,7 +761,8 @@ message ImportChange {
   string problem = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
   // Something the owner should know that does not stop the import, a code: `trust_mismatch` (the rule says
   // trust, its label does not imply it), `rule_disabled` (the existing rule stays disabled), `same_match` (another
-  // rule of the import has the same match and conditions: the earlier one is tried first).
+  // rule of the import has the same match and conditions: the earlier one is tried first), `examples_deleted` (the
+  // update turns the label sensitive: its examples are deleted).
   string warning = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
 }
 

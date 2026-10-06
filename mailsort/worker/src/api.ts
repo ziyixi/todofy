@@ -283,8 +283,10 @@ function choose(ctx: ApiContext, item: ReviewRow, decision: DecisionRow, chosen:
     const label = store.label(chosen);
     if (label !== undefined && label.gmail_state !== 'missing') {
       // The decision keeps its own label and outcome (the accuracy is about the decision); the ledger row is the owner's.
-      // A label that keeps its mail in the inbox does so for the owner's choice too.
-      ids.push(intend(store, decision.message_id, label, label.keep_in_inbox !== 1, 'owner', ctx.now));
+      // A label that keeps its mail in the inbox does so for the owner's choice too, and so does the rule that
+      // suggested this very label (a pickup-code carve-out onto 购物/订单物流, which archives the rest).
+      const keep = label.keep_in_inbox === 1 || (chosen === decision.label_id && decision.keep_in_inbox === 1);
+      ids.push(intend(store, decision.message_id, label, !keep, 'owner', ctx.now));
     }
   }
   return ids;
@@ -444,13 +446,14 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailsortUiService>, ApiCon
     const label = request.label ?? bad('label is required');
     const displayName = checkDisplayName(ctx, label.displayName);
     // Without an ID, one from the path (`金融/投资` -> `finance-invest`): meaningful in URLs and stable.
-    const id = request.labelId !== '' ? request.labelId : (labelIdFor(displayName, new Set(ctx.store.labels().map((row) => row.id))) ?? shortId('l'));
+    // A deleted label's ID is never given again (Store.takenLabelIds): its history still names it.
+    const id = request.labelId !== '' ? request.labelId : (labelIdFor(displayName, ctx.store.takenLabelIds()) ?? shortId('l'));
     if (!LABEL_ID_PATTERN.test(id) || id === NONE) throw sortError('INVALID_LABEL');
     const description = checkDescription(label.description);
     const threshold = checkThreshold(label.threshold);
     const created = once(ctx, request.requestId, 'CreateLabel', `labels/${id}`, LabelSchema, () => {
       const { store } = ctx;
-      if (store.label(id) !== undefined || store.one(`SELECT 1 AS x FROM labels WHERE display_name = ?`, displayName) !== undefined) throw sortError('LABEL_EXISTS');
+      if (store.takenLabelIds().has(id) || store.one(`SELECT 1 AS x FROM labels WHERE display_name = ?`, displayName) !== undefined) throw sortError('LABEL_EXISTS');
       if (store.count(`SELECT count(*) AS n FROM labels`) >= LABELS_MAX) throw sortError('LIMIT_REACHED');
       const seq = (store.one<{ seq: number | null }>(`SELECT max(seq) AS seq FROM labels`)?.seq ?? 0) + 1;
       store.run(
@@ -542,6 +545,9 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailsortUiService>, ApiCon
           (has('sensitive') ? label.sensitive : before.sensitive === 1) ? 1 : 0,
           id,
         );
+        // A label turned sensitive keeps no example (examples.ts putExample): the ones it has go now, embeddings and
+        // all, so their summaries neither outlive the 14 days of content nor reach the model as neighbours.
+        if (has('sensitive') && label.sensitive && before.sensitive === 0) deleteExamplesOfLabel(store, id);
         return labelOut(ctx, existingLabel(ctx, id));
       });
     });
@@ -555,6 +561,9 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailsortUiService>, ApiCon
         const row = existingLabel(ctx, id);
         if (request.etag !== '' && request.etag !== row.etag) throw sortError('ETAG_MISMATCH', [{ schema: LabelSchema, message: labelOut(ctx, row) }]);
         store.run(`DELETE FROM labels WHERE id = ?`, id);
+        // Retired: decisions, review items, the ledger and the flow counters keep naming it, so no new label may take
+        // the ID and inherit that history (its accuracy, its 流程 counts, a pending suggestion).
+        store.run(`INSERT OR REPLACE INTO retired_labels (id, retire_time) VALUES (?, ?)`, id, ctx.now);
         store.run(`DELETE FROM rules WHERE label_id = ?`, id);
         deleteExamplesOfLabel(store, id);
         // The Gmail label and its mails stay as they are. Its ledger entries can no longer be undone from here (the
@@ -612,7 +621,7 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailsortUiService>, ApiCon
           store.run(
             `INSERT INTO labels (id, seq, display_name, description, enabled, live, trust, threshold, gmail_id, gmail_state, create_time, update_time, etag)
              VALUES (?, ?, ?, '', 0, 0, 0, 0, ?, 'linked', ?, ?, ?)`,
-            labelIdFor(path, new Set(store.labels().map((row) => row.id))) ?? shortId('l'),
+            labelIdFor(path, store.takenLabelIds()) ?? shortId('l'),
             seq,
             path,
             label.id,

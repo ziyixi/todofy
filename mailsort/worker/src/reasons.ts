@@ -23,7 +23,7 @@ export const REASONS: Readonly<Record<Reason, { readonly code: Code; readonly me
   METHOD_NOT_ALLOWED: { code: Code.UNIMPLEMENTED, message: 'this method is not allowed on this path', zh: '不支持该请求方法' },
   UNAVAILABLE: { code: Code.UNAVAILABLE, message: 'the service is unavailable; repeat the request', zh: '服务暂时不可用，请稍后再试' },
   INTERNAL: { code: Code.INTERNAL, message: 'internal error', zh: '服务出错了，请稍后刷新页面' },
-  LABEL_EXISTS: { code: Code.ALREADY_EXISTS, message: 'a label holds this ID or name', zh: '已有同名或同 ID 的标签' },
+  LABEL_EXISTS: { code: Code.ALREADY_EXISTS, message: 'a label holds this ID or name, or a deleted label held the ID', zh: '已有同名或同 ID 的标签（已删除标签的 ID 也不再使用）' },
   ETAG_MISMATCH: { code: Code.ABORTED, message: 'the resource changed since the etag', zh: '这一项已在别处修改，已载入最新内容' },
   INVALID_LABEL: {
     code: Code.INVALID_ARGUMENT,

@@ -50,6 +50,9 @@ export interface BreakdownRow {
   readonly kept: number
   readonly suggested: number
   readonly byRule: number
+  /** Decided by three unanimous neighbours, without the model. */
+  readonly byNeighbours: number
+  /** Decided by Clef or Clef-flash. */
   readonly byModel: number
   readonly corrected: number
 }
@@ -103,11 +106,11 @@ export function flowGraph(counts: readonly MailFlow_Count[], labels: readonly La
     const key = `${source}\u0000${target}`
     links.set(key, (links.get(key) ?? 0) + value)
   }
-  const rows = new Map<string, { written: number; archived: number; kept: number; suggested: number; byRule: number; byModel: number; corrected: number }>()
+  const rows = new Map<string, { written: number; archived: number; kept: number; suggested: number; byRule: number; byNeighbours: number; byModel: number; corrected: number }>()
   const row = (label: string) => {
     let found = rows.get(label)
     if (found === undefined) {
-      found = { written: 0, archived: 0, kept: 0, suggested: 0, byRule: 0, byModel: 0, corrected: 0 }
+      found = { written: 0, archived: 0, kept: 0, suggested: 0, byRule: 0, byNeighbours: 0, byModel: 0, corrected: 0 }
       rows.set(label, found)
     }
     return found
@@ -131,22 +134,25 @@ export function flowGraph(counts: readonly MailFlow_Count[], labels: readonly La
       continue
     }
     if (stage === 'deferred') continue
-    const fromRule = stage === 'rule'
+    // Who decided: a rule, the neighbours (no model call), or a model; the diagram shows the same three apart.
+    const credit = (item: { byRule: number; byNeighbours: number; byModel: number }) => {
+      if (stage === 'rule') item.byRule += n
+      else if (stage === 'neighbours') item.byNeighbours += n
+      else item.byModel += n
+    }
     if (count.outcome === MailFlow_Outcome.ARCHIVED || count.outcome === MailFlow_Outcome.KEPT_IN_INBOX) {
       add(stage, `label:${count.label}`, n)
       const item = row(count.label)
       item.written += n
       if (count.outcome === MailFlow_Outcome.ARCHIVED) item.archived += n
       else item.kept += n
-      if (fromRule) item.byRule += n
-      else item.byModel += n
+      credit(item)
     } else if (count.outcome === MailFlow_Outcome.SUGGESTED) {
       add(stage, 'suggested', n)
       if (count.label !== '') {
         const item = row(count.label)
         item.suggested += n
-        if (fromRule) item.byRule += n
-        else item.byModel += n
+        credit(item)
       }
     } else if (count.outcome === MailFlow_Outcome.UNSURE) {
       add(stage, 'unsure', n)
@@ -165,7 +171,7 @@ export function flowGraph(counts: readonly MailFlow_Count[], labels: readonly La
       kind: terminal ? 'terminal' : 'stage',
       slot: 0,
       ...(id === 'skipped' ? { detail: [...skipped].map(([reason, n]) => `${reason} ${String(n)}`) } : {}),
-      ...(id === 'deferred' ? { detail: ['等次日的模型额度，之后判断时会再计入一次'] } : {}),
+      ...(id === 'deferred' ? { detail: ['仍在等次日的模型额度；判断后计入处理它的那一步'] } : {}),
     })
   }
   // Label nodes in the labels' order (deleted labels last), then the two outcomes without a label.
@@ -211,6 +217,11 @@ export function share(n: number, total: number): string {
   return percent > 0 && percent < 1 ? '<1%' : `${String(Math.round(percent))}%`
 }
 
+/** `value` within [min, max]; min when the range is empty (a tip wider than its box). */
+export function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(value, max))
+}
+
 /** A node's fill: its group's slot, the neutral ink for the pipeline's own nodes. */
 function fillOf(node: FlowNodeData): string {
   if (node.kind === 'label') return node.slot === 0 ? 'var(--muted)' : `var(--series-${String(node.slot)})`
@@ -239,7 +250,8 @@ export function sankeyChart(graph: FlowGraph, options: SankeyOptions = {}): HTML
     scroll.append(el('p', { class: 'empty' }, '这段时间还没有邮件经过。'))
     return box
   }
-  // Wide enough for three columns and their names; on a phone the box scrolls sideways instead of squeezing.
+  // The drawing's own coordinates: wide enough for three columns and their names. The SVG has no fixed size and
+  // scales to its box (styles.css .flow-svg); below its minimum width, on a phone, the box scrolls sideways instead.
   const width = compact ? 560 : 720
   const rightNodes = graph.nodes.filter((node) => node.kind === 'label' || node.kind === 'unsure' || node.kind === 'suggested').length
   // Each right-hand node gets room for its name even at one mail (12 px text, at least 14 px apart).
@@ -258,15 +270,21 @@ export function sankeyChart(graph: FlowGraph, options: SankeyOptions = {}): HTML
     ])
   const { nodes, links } = layout({ nodes: graph.nodes.map((node) => ({ ...node })), links: graph.links.map((link) => ({ ...link })) })
 
-  const chart = svg('svg', { viewBox: `0 0 ${String(width)} ${String(height)}`, width, height, class: 'flow-svg', role: 'img', 'aria-label': `邮件流程：共 ${String(graph.total)} 封` })
+  // role=group, not img: an image's children are presentational, and the nodes are focusable links and images that a
+  // screen reader must be able to reach.
+  const chart = svg('svg', { viewBox: `0 0 ${String(width)} ${String(height)}`, preserveAspectRatio: 'xMinYMin meet', class: 'flow-svg', role: 'group', 'aria-label': `邮件流程：共 ${String(graph.total)} 封` })
   chart.append(svg('title', {}, `邮件流程：共 ${String(graph.total)} 封`))
   const show = (text: string[], event?: { clientX: number; clientY: number }) => {
     tip.replaceChildren(...text.map((line, index) => (index === 0 ? el('strong', {}, line) : el('span', {}, line))))
     tip.hidden = false
     if (event !== undefined) {
+      // Kept inside the chart's box by the tip's measured size (it grows to 16rem), flipped above the pointer near
+      // the bottom: a tip past the box's edge would make a phone's page scroll sideways.
       const area = box.getBoundingClientRect()
-      tip.style.left = `${String(Math.max(0, Math.min(event.clientX - area.left + 12, area.width - 200)))}px`
-      tip.style.top = `${String(event.clientY - area.top + 12)}px`
+      const x = event.clientX - area.left + 12
+      const y = event.clientY - area.top + 12
+      tip.style.left = `${String(clamp(x, 0, area.width - tip.offsetWidth))}px`
+      tip.style.top = `${String(y + tip.offsetHeight > area.height ? Math.max(0, y - 24 - tip.offsetHeight) : y)}px`
     } else {
       tip.style.left = '0px'
       tip.style.top = '0px'

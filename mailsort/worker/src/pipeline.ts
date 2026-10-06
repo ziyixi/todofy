@@ -272,7 +272,7 @@ function readFailed(ctx: MailContext, messageId: string, attempts: number, error
   const { store } = ctx;
   const now = ctx.now();
   if (error instanceof GoogleError && error.kind === 'not_found') {
-    ctx.transact(() => store.run(`DELETE FROM pending WHERE message_id = ?`, messageId));
+    ctx.transact(() => { finishPending(store, messageId); });
     return 'gone';
   }
   if (error instanceof GoogleError && (error.kind === 'rate' || error.kind === 'auth')) throw error;
@@ -287,6 +287,17 @@ function readFailed(ctx: MailContext, messageId: string, attempts: number, error
   return 'skipped';
 }
 
+/**
+ * Takes a mail off the queue. A mail deferred for the budget was counted as waiting (延后) on the day of its first
+ * deferral; it leaves that count now, in the transaction that counts where it went (a decision or a skip), so every
+ * mail is in the flow exactly once. Run inside a transaction.
+ */
+function finishPending(store: Store, messageId: string): void {
+  const deferredAt = store.one<{ deferred: number }>(`SELECT deferred FROM pending WHERE message_id = ?`, messageId)?.deferred ?? 0;
+  if (deferredAt > 0) countFlow(store, deferredAt, 'deferred', 'deferred', null, -1);
+  store.run(`DELETE FROM pending WHERE message_id = ?`, messageId);
+}
+
 /** Records a skipped mail (and counts it once in the flow). Run inside a transaction. */
 function recordSkip(store: Store, id: string, threadId: string, receivedAt: number, now: number, reason: string): void {
   const recorded = store.run(
@@ -298,7 +309,7 @@ function recordSkip(store: Store, id: string, threadId: string, receivedAt: numb
     reason,
   );
   if (recorded > 0) countFlow(store, now, 'skipped', skipOutcome(reason), null);
-  store.run(`DELETE FROM pending WHERE message_id = ?`, id);
+  finishPending(store, id);
 }
 
 async function decideMail(ctx: MailContext, messageId: string, attempts: number): Promise<MailOutcome> {
@@ -434,8 +445,8 @@ async function decideMail(ctx: MailContext, messageId: string, attempts: number)
     const outcome = apply ? 'applied' : decision.confident ? 'suggested' : 'unsure';
     store.run(
       `INSERT OR REPLACE INTO decisions (message_id, thread_id, received_at, decided_at, outcome, label_id, top_label, decider, unsure_reason, probabilities,
-         suspicious, bulk, model, versions, dmarc, sender_address, sender_domain, list_id, delivered_to, subject, sender, summary, current_labels)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '[]')`,
+         suspicious, bulk, model, versions, dmarc, sender_address, sender_domain, list_id, delivered_to, subject, sender, summary, current_labels, keep_in_inbox)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '[]', ?)`,
       read.id,
       read.threadId,
       read.receivedAt,
@@ -458,6 +469,9 @@ async function decideMail(ctx: MailContext, messageId: string, attempts: number)
       f.subject,
       f.sender,
       summary,
+      // The rule's own keep: a suggestion the owner confirms later (a label not live yet, a write that failed) is
+      // written the way the rule said (api.ts choose).
+      decision.confident && decision.keepInInbox === true ? 1 : 0,
     );
     if (decision.confident && decision.decider === 'rule' && decision.ruleId !== undefined) store.run(`UPDATE rules SET match_count = match_count + 1 WHERE id = ?`, decision.ruleId);
     store.addUsage(day, 'decided', 1);
@@ -482,7 +496,7 @@ async function decideMail(ctx: MailContext, messageId: string, attempts: number)
         now,
       );
     }
-    store.run(`DELETE FROM pending WHERE message_id = ?`, read.id);
+    finishPending(store, read.id);
   });
   const ledgerId = intent.id;
   if (ledgerId !== null) {
@@ -657,11 +671,13 @@ export async function runPass(deps: PassDeps): Promise<PassResult> {
       if (outcome === 'decided') decided++;
       if (outcome === 'deferred') {
         // The quota or the owner's budget is used up today: every waiting mail waits for the next UTC day. The flow
-        // counts each mail's first deferral (it is counted again where it is decided).
+        // counts a mail as deferred (still waiting) from its first deferral until it is decided or skipped
+        // (finishPending moves it there), so a mail deferred twice or decided later is still counted once.
         const until = nextUtcMidnight(deps.now());
         deferred = transact(() => {
-          const first = store.run(`UPDATE pending SET deferred = 1 WHERE not_before < ? AND deferred = 0`, until);
-          countFlow(store, deps.now(), 'deferred', 'deferred', null, first);
+          const at = deps.now();
+          const first = store.run(`UPDATE pending SET deferred = ? WHERE not_before < ? AND deferred = 0`, at, until);
+          countFlow(store, at, 'deferred', 'deferred', null, first);
           return store.run(`UPDATE pending SET not_before = ? WHERE not_before < ?`, until, until);
         });
         code = 'deferred';

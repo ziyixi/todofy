@@ -8,7 +8,7 @@ import { describe, expect, it } from 'vitest';
 import { wilsonLowerBound } from '../src/accuracy.ts';
 import { AiError, clefInput, clefState, cosine, criterion, cutTokens, decide, estimateTokens, isQuotaError, readClefAnswer } from '../src/ai.ts';
 import { clefDecision, neighbourDecision, orderRules, ruleDecision, type LabelFacts, type MailAuth } from '../src/decide.ts';
-import { dkimPassDomains, dmarcAligned, listSigned } from '../src/dmarc.ts';
+import { dkimPassDomains, dmarcAligned, listSigned, neutralise } from '../src/dmarc.ts';
 import { modeCeiling } from '../src/env.ts';
 import { gmailFilterXml } from '../src/filters.ts';
 import { CLEF, CLEF_FLASH, MAIL_ATTEMPTS_MAX, NONE, RETRY_MAX_MS } from '../src/limits.ts';
@@ -108,6 +108,25 @@ describe('rules', () => {
     expect(ruleDecision([notPromo], labels, { ...signed, subject: 'Weekly digest' })?.ruleId).toBe('r3');
   });
 
+  it('an exclusion narrows a broad rule but is no carve-out: the exact address rule still goes first', () => {
+    const broad = rule('invest', 'sender_domain', 'newsletter', { value: 'bank.example.com', subject_excludes: '["广告"]', create_time: 1 });
+    const security = rule('security', 'sender_address', 'receipt', { value: 'security@bank.example.com', keep_in_inbox: 1, create_time: 9 });
+    expect(orderRules([broad, security]).map((r) => r.id)).toEqual(['security', 'invest']);
+    expect(ruleDecision([broad, security], labels, { ...signed, subject: '新设备登录提醒' })).toEqual({ label: 'receipt', ruleId: 'security', keepInInbox: true });
+    // Its label disabled, the exclusion rule steps aside instead of ending the search.
+    const offBroad = { ...broad, label_id: 'off' };
+    const plainDomain = rule('plain', 'sender_domain', 'newsletter', { value: 'bank.example.com', create_time: 5 });
+    expect(ruleDecision([offBroad, plainDomain], labels, { ...signed, subject: 'monthly news' })?.ruleId).toBe('plain');
+    // Against a plain rule of the same kind and value, the exclusion goes first, and its excluded words fall through.
+    const promo = rule('promo', 'sender_domain', 'receipt', { value: 'bank.example.com', create_time: 0 });
+    expect(orderRules([promo, broad]).map((r) => r.id)).toEqual(['invest', 'promo']);
+    expect(ruleDecision([promo, broad], labels, { ...signed, subject: '理财广告' })?.ruleId).toBe('promo');
+    expect(ruleDecision([promo, broad], labels, { ...signed, subject: '月度对账单' })?.ruleId).toBe('invest');
+    // An include carve-out with an exclusion still outranks the plain address rule.
+    const carve = rule('carve', 'sender_domain', 'receipt', { value: 'bank.example.com', subject_includes: '["登录"]', subject_excludes: '["广告"]' });
+    expect(orderRules([security, carve])[0]?.id).toBe('carve');
+  });
+
   it('a carve-out that matches but cannot fire never lets its mail fall through to the plain rule', () => {
     const plain = rule('r1', 'list_id', 'newsletter', { value: 'digest.news.example.com' });
     const carve = rule('r2', 'list_id', 'off', { value: 'digest.news.example.com', subject_includes: '["login"]' });
@@ -125,6 +144,35 @@ describe('rules', () => {
     expect(dmarcAligned(['mx.google.com; dmarc=fail header.from=bank.example.com', 'mx.google.com; dmarc=pass header.from=bank.example.com'], 'bank.example.com')).toBe(false);
     expect(dkimPassDomains(results('mx.google.com; dkim=pass header.i=@news.example.com header.s=s1; dkim=fail header.d=other.example.org; dkim=pass header.d=example.com'))).toEqual(['news.example.com', 'example.com']);
     expect(dkimPassDomains(results('relay.example.net; dkim=pass header.d=news.example.com'))).toEqual([]);
+    // Comments and quoted strings are the sender's text: a result planted there never counts, and an unclosed one
+    // makes the header unreadable rather than letting what follows it count.
+    const planted = MAILS.injectedDmarc.authenticationResults;
+    expect(dmarcAligned([planted], 'bank.example.com')).toBe(false);
+    expect(dmarcAligned([planted.replace('dmarc=fail', 'dmarc=pass')], 'bank.example.com')).toBe(true);
+    expect(dkimPassDomains([MAILS.injectedListDkim.authenticationResults])).toEqual([]);
+    expect(listSigned('digest.news.example.com', dkimPassDomains([MAILS.injectedListDkim.authenticationResults]))).toBe(false);
+    // A ')' inside the quoted local part does not close the spf comment early.
+    expect(dmarcAligned(['mx.google.com; spf=pass (google.com: domain of "a)b;dmarc=pass header.from=bank.example.com"@evil.example.net designates 192.0.2.1) smtp.mailfrom=evil.example.net; dmarc=fail header.from=bank.example.com'], 'bank.example.com')).toBe(false);
+    expect(dmarcAligned(['mx.google.com; spf=pass (unclosed; dmarc=pass header.from=bank.example.com'], 'bank.example.com')).toBe(false);
+    expect(dmarcAligned(['mx.google.com; spf=pass smtp.mailfrom="a\\"; dmarc=pass header.from=bank.example.com'], 'bank.example.com')).toBe(false);
+    // Two dmarc results are ambiguous; an ARC comment that mentions dmarc=pass is only a comment.
+    expect(dmarcAligned(['mx.google.com; dmarc=pass header.from=bank.example.com; dmarc=fail header.from=bank.example.com'], 'bank.example.com')).toBe(false);
+    expect(dmarcAligned(['mx.google.com; arc=pass (i=1 spf=pass dkim=pass dmarc=pass fromdomain=bank.example.com); dmarc=pass (p=REJECT) header.from=bank.example.com'], 'bank.example.com')).toBe(true);
+    const sample = 'a (b "c)" d) e "f\\"g" h';
+    expect(neutralise(sample)?.length).toBe(sample.length);
+    expect(neutralise(sample)?.replace(/ +/g, ' ')).toBe('a e h');
+    // Each forged mail against the rule its From or List-Id would match (ruleDecision gets only matching rules).
+    const cases = [
+      [MAILS.injectedDmarc, rule('r1', 'sender_address', 'bank', { value: 'statements@bank.example.com' })],
+      [MAILS.injectedListDkim, rule('r2', 'list_id', 'newsletter', { value: 'digest.news.example.com' })],
+    ] as const;
+    for (const [mail, matching] of cases) {
+      const read = readMessage(apiMessage(mail));
+      if (read === null) throw new Error('fixture');
+      const f = await features(read);
+      const auth = { subject: f.rawSubject, dmarcAligned: dmarcAligned(read.headers.authenticationResults, f.senderDomain), dkimDomains: dkimPassDomains(read.headers.authenticationResults) };
+      expect(ruleDecision([matching], labels, auth)).toBeNull();
+    }
     // The whole path: a synthetic mail whose From copies the bank's address but whose DMARC failed.
     const forged = readMessage(apiMessage({ ...MAILS.bankEn, id: 'b00000000000b001', dmarc: 'fail' }));
     const genuine = readMessage(apiMessage(MAILS.bankEn));
