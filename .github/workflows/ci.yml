@@ -1871,6 +1871,12 @@ jobs:
       source_sha: ${{ github.sha }}
     secrets: inherit
 
+  # The site release: dispatches website-release.yml (docs in website/docs/release.md), the same workflow the
+  # Notion buttons and the relay's detector dispatch, and returns at once. The release's job holds the one
+  # concurrency group "website-production" and the production environment; this CI run neither waits for a
+  # queued release nor ties other apps' deploys to it, and the relay sees the release like any other run.
+  # The release builds the newest main commit whose push run passed the CI gate (this one, once it is green).
+  # A push releases only when the website's code identity or the Notion content changed.
   website-deploy:
     name: Website deploy
     needs: [changes, website-checks, gate]

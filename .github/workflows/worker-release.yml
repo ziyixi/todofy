@@ -575,9 +575,6 @@ jobs:
         if: always() && steps.preflight.outputs.required == 'true'
         run: rm -f "$RUNNER_TEMP/home-secrets.json"
 
-  # Lab (Worker "lab"): after Todofy's deploy (the TODOFY binding names Todofy's Ops entrypoint) and before the
-  # dashboard's (it binds LAB). Migrations first (additive), then the Worker through deploy-vars.mjs, then the
-  # same Access probe as the dashboard's. The deploy token is Todofy's CF_API_TOKEN (D1, Workers, Workers AI).
       - name: Verify provider identities and record successful deployment
         if: steps.preflight.outputs.required == 'true'
         working-directory: .
@@ -588,6 +585,9 @@ jobs:
           RELEASE_SOURCE: ${{ steps.source.outputs.source_sha }}
         run: python3 tools/cloud-release/control.py record --app "$RELEASE_APP" --source-sha "$RELEASE_SOURCE" --source-root .release-source
 
+  # Lab (Worker "lab"): after Todofy's deploy (the TODOFY binding names Todofy's Ops entrypoint) and before the
+  # dashboard's (it binds LAB). Migrations first (additive), then the Worker through deploy-vars.mjs, then the
+  # same Access probe as the dashboard's. The deploy token is Todofy's CF_API_TOKEN (D1, Workers, Workers AI).
   lab-deploy:
     name: lab production release
     if: github.ref == 'refs/heads/main' && inputs.app == 'lab'
@@ -748,11 +748,6 @@ jobs:
         if: always() && steps.preflight.outputs.required == 'true'
         run: rm -f "$RUNNER_TEMP/lab-secrets.json"
 
-  # FlowDay (Worker "flowday", flowday/docs/design.md section 11). Migrations first (additive), then the Worker through
-  # deploy-vars.mjs, then a read of production through the API (version and migrations), then the production host
-  # flowday.ziyixi.science (since the F4 cutover; the staging host flowday-next.ziyixi.science before): Access answers
-  # everything anonymous except the exact PWA files, which the Access app "flowday-bypass" lets through to the Worker.
-  # The deploy token is Todofy's CF_API_TOKEN (D1 and Workers), as for Lab.
       - name: Verify provider identities and record successful deployment
         if: steps.preflight.outputs.required == 'true'
         working-directory: .
@@ -763,6 +758,11 @@ jobs:
           RELEASE_SOURCE: ${{ steps.source.outputs.source_sha }}
         run: python3 tools/cloud-release/control.py record --app "$RELEASE_APP" --source-sha "$RELEASE_SOURCE" --source-root .release-source
 
+  # FlowDay (Worker "flowday", flowday/docs/design.md section 11). Migrations first (additive), then the Worker through
+  # deploy-vars.mjs, then a read of production through the API (version and migrations), then the production host
+  # flowday.ziyixi.science (since the F4 cutover; the staging host flowday-next.ziyixi.science before): Access answers
+  # everything anonymous except the exact PWA files, which the Access app "flowday-bypass" lets through to the Worker.
+  # The deploy token is Todofy's CF_API_TOKEN (D1 and Workers), as for Lab.
   flowday-deploy:
     name: flowday production release
     if: github.ref == 'refs/heads/main' && inputs.app == 'flowday'
@@ -974,9 +974,6 @@ jobs:
         if: always() && steps.preflight.outputs.required == 'true'
         run: rm -f "$RUNNER_TEMP/flowday-secrets.json"
 
-  # The links app (links/docs/design.md section 11, L2): the Worker "links" on its one Custom Domain s.ziyixi.science.
-  # Only /_ and /_/* sit behind the path-scoped Access application "links"; every other path (the short links) reaches
-  # the Worker anonymously, which the last two checks hold to exactly that split.
       - name: Verify provider identities and record successful deployment
         if: steps.preflight.outputs.required == 'true'
         working-directory: .
@@ -987,6 +984,9 @@ jobs:
           RELEASE_SOURCE: ${{ steps.source.outputs.source_sha }}
         run: python3 tools/cloud-release/control.py record --app "$RELEASE_APP" --source-sha "$RELEASE_SOURCE" --source-root .release-source
 
+  # The links app (links/docs/design.md section 11, L2): the Worker "links" on its one Custom Domain s.ziyixi.science.
+  # Only /_ and /_/* sit behind the path-scoped Access application "links"; every other path (the short links) reaches
+  # the Worker anonymously, which the last two checks hold to exactly that split.
   links-deploy:
     name: links production release
     if: github.ref == 'refs/heads/main' && inputs.app == 'links'
@@ -1208,11 +1208,6 @@ jobs:
         if: always() && steps.preflight.outputs.required == 'true'
         run: rm -f "$RUNNER_TEMP/links-secrets.json"
 
-  # The watch app (watch/, docs in watch/docs/design.md): the Worker "watch" on the Custom Domain watch.ziyixi.science,
-  # the whole host behind the Access application "watch" (infra/). After Todofy's deploy: its TODOFY binding names
-  # Todofy's Ops entrypoint, which must accept task-intent-v1's SOURCE_WATCH before the first digest. No D1, no R2:
-  # everything lives in the SQLite Durable Object WatchState, which arms its own alarm on the first owner API call or
-  # the dashboard's next status() (never on this job's anonymous probes, which Access answers).
       - name: Verify provider identities and record successful deployment
         if: steps.preflight.outputs.required == 'true'
         working-directory: .
@@ -1223,6 +1218,11 @@ jobs:
           RELEASE_SOURCE: ${{ steps.source.outputs.source_sha }}
         run: python3 tools/cloud-release/control.py record --app "$RELEASE_APP" --source-sha "$RELEASE_SOURCE" --source-root .release-source
 
+  # The watch app (watch/, docs in watch/docs/design.md): the Worker "watch" on the Custom Domain watch.ziyixi.science,
+  # the whole host behind the Access application "watch" (infra/). After Todofy's deploy: its TODOFY binding names
+  # Todofy's Ops entrypoint, which must accept task-intent-v1's SOURCE_WATCH before the first digest. No D1, no R2:
+  # everything lives in the SQLite Durable Object WatchState, which arms its own alarm on the first owner API call or
+  # the dashboard's next status() (never on this job's anonymous probes, which Access answers).
   watch-deploy:
     name: watch production release
     if: github.ref == 'refs/heads/main' && inputs.app == 'watch'
@@ -1386,8 +1386,6 @@ jobs:
         if: always() && steps.preflight.outputs.required == 'true'
         run: rm -f "$RUNNER_TEMP/watch-secrets.json"
 
-  # Fleet deploy is disabled by the explicit classifier bootstrap phase until its Access AUD exists.
-  # The gate verifies this exact SHA; no VPS credentials or application data reach this job.
       - name: Verify provider identities and record successful deployment
         if: steps.preflight.outputs.required == 'true'
         working-directory: .
@@ -1398,6 +1396,7 @@ jobs:
           RELEASE_SOURCE: ${{ steps.source.outputs.source_sha }}
         run: python3 tools/cloud-release/control.py record --app "$RELEASE_APP" --source-sha "$RELEASE_SOURCE" --source-root .release-source
 
+  # Fleet (Worker "fleet"): the gate verified this exact SHA; no VPS credentials or application data reach this job.
   fleet-deploy:
     name: fleet production release
     if: github.ref == 'refs/heads/main' && inputs.app == 'fleet'
@@ -1553,12 +1552,6 @@ jobs:
         if: always() && steps.preflight.outputs.required == 'true'
         run: rm -f "$RUNNER_TEMP/fleet-secrets.json"
 
-  # The site release: dispatches website-release.yml (docs in website/docs/release.md), the same workflow the
-  # Notion buttons and the relay's detector dispatch, and returns at once. The release's job holds the one
-  # concurrency group "website-production" and the production environment; this CI run neither waits for a
-  # queued release nor ties other apps' deploys to it, and the relay sees the release like any other run.
-  # The release builds the newest main commit whose push run passed the CI gate (this one, once it is green).
-  # A push releases only when the website's code identity or the Notion content changed.
       - name: Verify provider identities and record successful deployment
         if: steps.preflight.outputs.required == 'true'
         working-directory: .
