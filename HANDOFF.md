@@ -40,9 +40,15 @@ Landing now as one stack (each app still deploys only through its own job):
 
 Next (branches being built, not pushed yet):
 
-1. `refactor/newsletter-legacy-and-unknowns`: the 38 historical `workflow_attempts` unknowns are reclassified as
-   `failed` (error codes kept, rows kept; owner request), and the dead legacy pipeline (legacy-daily recipe, repair
-   scan, v1 Notion, `legacy` backend) is deleted. Gate: the owner runs a read-only count script on the VPS first.
+1. `refactor/newsletter-legacy-and-unknowns` (landing 2026-10-06): the 38 historical `workflow_attempts`
+   unknowns (37 `timeout`, 1 `interrupted`) become `failed` through a one-time migration
+   (`migration:settle_read_only_attempts:v1`; error codes and rows kept, other ledgers untouched); cancelled and
+   restart-recovered read-only attempts are also `failed`/`interrupted` from now on. The dead legacy pipeline
+   (legacy-daily recipe, repair scan, whole-edition editor, v1 Notion, `legacy` backend) is deleted; stored legacy
+   editions still render. The owner's read-only production count (2026-10-06) passed the gate: production runs
+   `dag` with dual-database Notion, no open non-story runs or pending repairs, only old blocked history. A leftover
+   `NOTION_DATA_SOURCE_ID` in the private Secret is ignored. After the release: the monitoring unknown count is 0,
+   Home shows no Newsletter item, the next daily issue is accepted.
 2. `chore/decommission-lab`: Lab (paper radar) removed from the tree as if it never existed. After it lands the owner
    deletes the `lab` Worker (its Durable Object data and custom domain) and dispatches Infra apply for the Access app
    and D1 `lab`; agents do not delete production data.
