@@ -288,7 +288,9 @@ The answer is a plain object, never an exception for an expected outcome:
 {"error": <ErrorInfo reason>, "detail": <a MailEvent as wire JSON text> | null, "retry_after": int | null}
 ```
 
-The gateway reads `ok` leniently with the generated TypeScript code and writes the response; a refusal becomes
+TodofyCore writes `ok` with the wire profile (`core/owner_ui.answer`), so the gateway sends it as it is
+(`PreEncoded`, `gateway/test/pre-encoded.test.ts`), except a list's page, which it reads leniently with the generated
+TypeScript code to add the page token, and writes again; a refusal becomes
 the Status of its reason (`INTERNAL` for one the gateway does not know), with the event as a detail
 (`ETAG_MISMATCH` and `ACTION_NOT_ALLOWED` answer the event as it is now) and `retry-after`. D1 or storage
 failures (a `JsException`) are `UNAVAILABLE`, which the UI may repeat with the same `request_id`; so is a write
@@ -729,7 +731,13 @@ lenient read of the DO's answer with the generated code and the transcoder's wri
 | The same 1.9 MB as 633,333 Chinese characters (the fixture until review CS3) | 2.0-2.1 → 4.4 | 2.4 → 3.8 | 8 |
 | Every stored report at the newsletter's limits | 1.1-1.3 → 4.6-5.2 | 1.2-1.3 → 4.7-5.0 | 8 |
 
-The cost is the generated code reading and writing every answer again: a few tenths of a millisecond per
+Since 2026-10-05 the gateway passes every answer but a list's page through as TodofyCore wrote it (§3.5),
+measured the same way: an event's detail 2.0 → 0.8-1.5 first and 1.7 → 0.7 warm, a reconcile 2.1 → 1.2-1.5 and
+1.6 → 0.8, the legacy text 6.0-6.4 → 1.0-1.3 and 5.3-5.7 → 1.1, the reports 4.6-5.2 → 1.2-1.6 and 4.7-5.0 → 1.1-1.2
+(bound 3, so a decode again fails it); the lists and the isolate's first request are unchanged. `src/warm.ts` warms
+only what the gateway still reads (the lists' messages and a refusal's MailEvent).
+
+Before that, the cost was the generated code reading and writing every answer again: a few tenths of a millisecond per
 small message, about 2 ms for a page of 100 events, the codec's text rules over a report's 230,000
 characters, and JSON.parse and stringify of a legacy text's 1.9 million characters, the largest at about 6 ms of
 the 10 (the ASCII rows were measured on 2026-10-02 in nine runs of the test, three isolates each). `src/warm.ts` runs the codec once over synthetic messages at global scope (startup, outside every

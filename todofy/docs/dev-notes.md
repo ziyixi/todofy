@@ -327,8 +327,9 @@ Local runtime quirks (not production behaviour)
   (bound to the list's other fields). Every rpc but `GetIntegration` is one `owner_ui` call: the object reads
   the request strictly again with the generated Python code, does the work (30 s CPU, single writer; writes
   with `request_id` idempotency via `owner_actions`, its `action_request_id` column) and answers the generated
-  response message (`runtime/owner_ui.py`, mapped from the ledger's dicts by `core/owner_ui.py`), which the
-  gateway reads leniently and writes. The paths before todofy.ui.v1 answer 410 `reload_required` for one release
+  response message (`runtime/owner_ui.py`, mapped from the ledger's dicts by `core/owner_ui.py`) as wire JSON,
+  which the gateway sends as it is (`PreEncoded`), except a list's page: that it reads leniently, gives its page
+  token and writes again. The paths before todofy.ui.v1 answer 410 `reload_required` for one release
   (gateway-contract.md §2.2); the object keeps `owner_api` for the previous gateway until then.
 - One coordinator per D1 database: `ledger.recover_interrupted` treats every `summarizing` /
   `todo_sending` row as abandoned, so two objects on the same database would undo each other's work.

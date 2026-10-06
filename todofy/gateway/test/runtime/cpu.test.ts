@@ -6,9 +6,10 @@
  * machine (an Apple M1 Max).
  *
  * Every request is a real one: Access verified as in production (RS256 against a synthetic issuer's keys, cached in
- * the isolate after the first), the transcoder's decode, one RPC to the stand-in TodofyCore (harness.ts), the
- * generated code's lenient read of its answer and the transcoder's write. The answers are the largest TodofyCore
- * gives (fixtures.ts): the gateway's cost grows with them, since it reads and writes every answer again.
+ * the isolate after the first), the transcoder's decode, one RPC to the stand-in TodofyCore (harness.ts), and the
+ * answer: a list's page read leniently with the generated code and written again by the transcoder, any other answer
+ * passed through as TodofyCore wrote it (PreEncoded, test/pre-encoded.test.ts). The answers are the largest
+ * TodofyCore gives (fixtures.ts).
  *
  * The whole session runs in COLD_ISOLATES fresh isolates (measureInIsolates): every number is divided by its own
  * isolate's speed (never below 1), and the bounds hold each number's median across the isolates.
@@ -30,13 +31,12 @@ const API_INIT_BOUND_MS = 0.8 * FREE_CPU_MS;
 const API_COLD_BOUND_MS = 0.6 * FREE_CPU_MS;
 const API_BOUND_MS = 0.4 * FREE_CPU_MS;
 /**
- * The two answers far larger than the others, read and written again whole: the 1.9 MB legacy text (JSON.parse and
- * stringify of 1.9 million ASCII characters heavy in escapes, the worst case of D1's largest row: first runs
- * 5.96-6.37 and warm medians 5.26-5.67 ms in nine runs; the same bytes of Chinese text, 633,333 characters, read
- * 4.4 / 3.8) and every stored report at the newsletter's limits (about 230,000 characters whose text rules the codec
- * checks on the read and on the write, 4.6-5.0 / 4.7-4.9 ms).
+ * The two answers far larger than the others, the 1.9 MB legacy text (D1's largest row, ASCII heavy in escapes) and
+ * every stored report at the newsletter's limits, passed through unread since 2026-10-05: first runs 1.0-1.6 and warm
+ * medians 1.1-1.2 ms in four runs, what the RPC and the response cost for their size. Reading and writing them again
+ * cost 6.0-6.4 / 5.3-5.7 and 4.6-5.2 / 4.7-5.0 ms, so this bound fails if either is decoded again.
  */
-const LARGE_BOUND_MS = 0.8 * FREE_CPU_MS;
+const PASSED_THROUGH_BOUND_MS = 0.3 * FREE_CPU_MS;
 const RUNS = 11;
 const ISSUER = SYNTHETIC_BINDINGS['ACCESS_ISSUER'] ?? '';
 const AUDIENCE = SYNTHETIC_BINDINGS['ACCESS_AUDIENCE'] ?? '';
@@ -44,7 +44,7 @@ const AUDIENCE = SYNTHETIC_BINDINGS['ACCESS_AUDIENCE'] ?? '';
 const API_INIT = "GET /api/v1/serviceStatus as the isolate's first API request";
 const LEGACY = 'GET /api/v1/legacyTexts/{id} (1.9 MB of ASCII with escapes)';
 const REPORTS = 'GET /api/v1/latestReports (every report at its limits)';
-const LARGE = new Set([LEGACY, REPORTS]);
+const PASSED_THROUGH = new Set([LEGACY, REPORTS]);
 
 const ANSWERS = {
   owner_ui: {
@@ -142,13 +142,13 @@ describe('CPU per owner API request (Workers Free: 10 ms)', () => {
     const { reference } = await measureInIsolates(COLD_ISOLATES, startIsolate, session);
     console.log(
       `cpu bounds (reference ms, medians of ${String(COLD_ISOLATES)} isolates): API's first request < ${API_INIT_BOUND_MS.toFixed(2)}, ` +
-        `first < ${API_COLD_BOUND_MS.toFixed(2)}, median < ${API_BOUND_MS.toFixed(2)}, the legacy text and the reports < ${LARGE_BOUND_MS.toFixed(2)}`,
+        `first < ${API_COLD_BOUND_MS.toFixed(2)}, median < ${API_BOUND_MS.toFixed(2)}, the legacy text and the reports < ${PASSED_THROUGH_BOUND_MS.toFixed(2)}`,
     );
     for (const { label, first, median } of reference.values()) {
       if (label === API_INIT) expect(first, label).toBeLessThan(API_INIT_BOUND_MS);
-      else if (LARGE.has(label)) {
-        expect(first, `${label}: first run`).toBeLessThan(LARGE_BOUND_MS);
-        expect(median, `${label}: warm median`).toBeLessThan(LARGE_BOUND_MS);
+      else if (PASSED_THROUGH.has(label)) {
+        expect(first, `${label}: first run`).toBeLessThan(PASSED_THROUGH_BOUND_MS);
+        expect(median, `${label}: warm median`).toBeLessThan(PASSED_THROUGH_BOUND_MS);
       } else {
         expect(first, `${label}: first run`).toBeLessThan(API_COLD_BOUND_MS);
         expect(median, `${label}: warm median`).toBeLessThan(API_BOUND_MS);
