@@ -30,7 +30,7 @@ test("mailsort's budget is a ratchet well below the Workers Free limit", () => {
 test('the script passes a bundle within the budget and fails one over it', () => {
   const fits = run(BUDGET_GZIP_BYTES / 2)
   assert.equal(fits.status, 0, fits.stderr)
-  assert.match(fits.stdout, /^The mailsort app's Worker bundle: 1 module\(s\), .*\(budget 150\.0 KiB, limit 3072\.0 KiB gzip\)\.$/m)
+  assert.match(fits.stdout, /^The mailsort app's Worker bundle: 1 module\(s\), .*\(budget 135\.0 KiB, limit 3072\.0 KiB gzip\)\.$/m)
   const over = run(BUDGET_GZIP_BYTES + 4096)
   assert.equal(over.status, 1)
   assert.match(over.stderr, /^The mailsort app's Worker bundle is over its bundle budget/m)
