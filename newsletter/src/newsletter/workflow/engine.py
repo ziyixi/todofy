@@ -227,7 +227,8 @@ class WorkflowEngine:
                 attempt, result.state, result.value, result.error_code
             )
         except asyncio.CancelledError:
-            self.repository.finish(attempt, "unknown", error_code="interrupted")
+            # Read-only node work leaves nothing to reconcile after a cancel.
+            self.repository.finish(attempt, "failed", error_code="interrupted")
             raise
         except TimeoutError:
             # Nodes do read-only model/feed work, so hitting their own deadline

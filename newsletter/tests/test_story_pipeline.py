@@ -96,22 +96,23 @@ def assert_partial_publication(rig):
     return edition, published
 
 
-@pytest.mark.parametrize("terminal", ["failed", "unknown"])
+@pytest.mark.parametrize("ending", ["authentication", "restart"])
 def test_terminal_deep_attempt_preserves_brief_and_dispositions(
-    rig_factory, terminal
+    rig_factory, ending
 ):
     rig = rig_factory()
     checkpoint = seed_checkpoint(rig)
     attempt = start_deep_attempt(rig)
-    if terminal == "failed":
+    if ending == "authentication":
         # An expired shared login is fatal even on an optional map.
         rig.pipeline.repository.finish(
             attempt, "failed", error_code="authentication"
         )
     else:
+        # A read-only attempt cut off by a restart is a known failure.
         assert rig.pipeline.repository.recover() == 1
     status = rig.pipeline.repository.get(rig.run["id"])
-    assert status["state"] == terminal
+    assert status["state"] == "failed"
     attempts = copy.deepcopy(rig.pipeline.repository.attempts(rig.run["id"]))
     assert rig.pipeline.finish_graph(
         rig.run, rig.definition, rig.run["id"], status

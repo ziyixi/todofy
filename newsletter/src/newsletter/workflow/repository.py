@@ -602,7 +602,13 @@ class WorkflowRepository:
             self._write(run)
 
     def recover(self) -> int:
-        """Recover at startup with exclusive ownership, never during work."""
+        """Recover at startup with exclusive ownership, never during work.
+
+        The previous process is gone, so its running attempt has ended. Node
+        work is read-only (Codex uses a read-only sandbox without approvals;
+        delivery and Notion keep separate ledgers), leaving nothing external
+        to reconcile: the attempt is a known failure, never replayed.
+        """
         with self.store.transaction():
             rows = self.store.db.execute(
                 "SELECT * FROM workflow_attempts WHERE state='running'"
@@ -617,14 +623,13 @@ class WorkflowRepository:
                         if item["id"] == row["item_id"]
                     )
                     item.update(
-                        {"state": "unknown", "error_code": "interrupted"}
+                        {"state": "failed", "error_code": "interrupted"}
                     )
-                node.update({"state": "unknown", "error_code": "interrupted"})
+                node.update({"state": "failed", "error_code": "interrupted"})
                 self.store.db.execute(
                     (
-                        "UPDATE workflow_attempts SET state='unknown',e"
-                        "rror_code='interrupted',finished_at=? WHERE id"
-                        "=?"
+                        "UPDATE workflow_attempts SET state='failed',"
+                        "error_code='interrupted',finished_at=? WHERE id=?"
                     ),
                     (newsletter_store.now(), row["id"]),
                 )

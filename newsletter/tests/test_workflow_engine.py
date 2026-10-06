@@ -457,7 +457,7 @@ async def test_required_failure_blocks_downstream_and_does_not_retry(
     assert await engine.step("run") is False and calls == ["first"]
 
 
-async def test_restart_recovers_inflight_to_unknown_without_replaying(tmp_path):
+async def test_restart_recovers_inflight_to_failed_without_replaying(tmp_path):
     path = tmp_path / "durable.sqlite3"
     store = newsletter_store.Store(path, "mock")
     repo = newsletter_workflow_repository.WorkflowRepository(store)
@@ -474,7 +474,11 @@ async def test_restart_recovers_inflight_to_unknown_without_replaying(tmp_path):
     store = newsletter_store.Store(path, "mock")
     repo = newsletter_workflow_repository.WorkflowRepository(store)
     assert repo.recover() == 1 and repo.recover() == 0
-    assert repo.get("run")["state"] == "unknown"
+    assert repo.get("run")["state"] == "failed"
+    assert [
+        (attempt["state"], attempt["error_code"])
+        for attempt in repo.attempts("run")
+    ] == [("succeeded", ""), ("failed", "interrupted")]
     assert len(repo.artifacts("run")) == 1
     calls = []
 
@@ -493,7 +497,7 @@ async def test_restart_recovers_inflight_to_unknown_without_replaying(tmp_path):
     store.close()
 
 
-async def test_cancellation_records_unknown_before_propagating(repo):
+async def test_cancellation_records_failure_before_propagating(repo):
     repo.start("run", definition(node()), {})
 
     async def canceled(context):
@@ -503,8 +507,12 @@ async def test_cancellation_records_unknown_before_propagating(repo):
         await newsletter_workflow_engine.WorkflowEngine(
             repo, {"discovery": canceled}
         ).run("run")
-    assert repo.get("run")["state"] == "unknown"
-    assert repo.attempts("run")[0]["error_code"] == "interrupted"
+    assert repo.get("run")["state"] == "failed"
+    attempt = repo.attempts("run")[0]
+    assert (attempt["state"], attempt["error_code"]) == (
+        "failed",
+        "interrupted",
+    )
 
 
 async def test_optional_map_item_timeout_is_a_known_failure(repo):
