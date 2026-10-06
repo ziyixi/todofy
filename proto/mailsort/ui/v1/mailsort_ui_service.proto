@@ -324,8 +324,8 @@ service MailsortUiService {
     option (google.api.method_signature) = "name";
   }
 
-  // Undoes the applied entries recorded in a time range, at most 20 per call (newest first);
-  // `remaining_count` says how many are left for the next call.
+  // Undoes the applied entries recorded in a time range, of one label when `label` is set, at most 20 per
+  // call (newest first); `remaining_count` says how many are left for the next call.
   // (-- api-linter: core::0136::http-uri-suffix=disabled
   //     aip.dev/not-precedent: a custom method on the collection, `ledgerEntries:undo`; the noun is the
   //     collection itself. --)
@@ -652,6 +652,9 @@ message LabelImport {
   bool sensitive = 5 [(google.api.field_behavior) = OPTIONAL];
   // Label.threshold (0 for the default).
   double threshold = 6 [(google.api.field_behavior) = OPTIONAL];
+  // Label.enabled, as an export writes it. Absent (the owner's rule file, the template): a new label is enabled and an
+  // existing one keeps its switch; present: a new label gets it and an existing one is set to it.
+  optional bool enabled = 7 [(google.api.field_behavior) = OPTIONAL];
 }
 
 // What a rule of an import matches: exactly one of the four.
@@ -929,6 +932,12 @@ message UndoLedgerEntriesRequest {
   string request_id = 3 [
     (google.api.field_info).format = UUID4,
     (google.api.field_behavior) = OPTIONAL
+  ];
+  // Only the entries of this label (操作记录 filtered to one label, ListLedgerEntriesRequest.label); empty undoes
+  // every label's entries of the range.
+  string label = 4 [
+    (google.api.field_behavior) = OPTIONAL,
+    (google.api.resource_reference).type = "sort.ziyixi.science/Label"
   ];
 }
 
