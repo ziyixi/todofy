@@ -1,0 +1,12 @@
+# mailsort：规则
+
+在 `mailsort/` 内工作时，除根目录 [`AGENTS.md`](../AGENTS.md) 外还适用以下规则。设计见 [`docs/design.md`](docs/design.md)。
+
+- **Gmail 安全靠构造，不靠提示词**：只有 `worker/src/gmail.ts` 调用 Google，每个请求先过封闭表 `checkRequest`（`docs/design.md` §2）。不得新增 trash、delete、send、drafts、filters、settings、forwarding、batchModify 等任何路径；`message_modify` 只能增删 mailsort 自己的 `分拣/` 标签和 INBOX，且必须对应账本中状态相符的行；从不改 `UNREAD`、`STARRED`、`IMPORTANT`、`SPAM`、`TRASH`、`CATEGORY_*`。改表时同时改独立副本 `worker/test/fakes/table.ts` 并保持 `test/gmail-guard.test.ts` 的拒绝用例与 fuzz 通过；在提交说明中写明理由。授权范围只用 `gmail.readonly`/`gmail.modify`，从不请求 `https://mail.google.com/`。
+- **Owner 已定的行为**：每封至多一个标签；有把握才打标签并归档（移出 INBOX），从不标记已读；没把握不打标签、留在收件箱并进入待审；不回填历史邮件（从安装时的 historyId 开始）；默认 shadow；live 需要 owner 按标签开启“正式打”。不要改变这些默认值。
+- **密钥**：Gmail 授权（`GMAIL_CLIENT_ID`、`GMAIL_CLIENT_SECRET`、`GMAIL_REFRESH_TOKEN`）只由 owner 在本机用 `deploy/mint-token.mjs` 写入 Worker；从不进入 GitHub、CI 或聊天。部署既不需要、也不覆盖或删除它们（`--secrets-file` 保留未列出的 secret，由 `deploy/test/secrets-kept.test.mjs` 固定）。测试与本地开发只用合成值和 `DEV_FAKE_UPSTREAM` 回环假服务，从不访问 Google 或 Workers AI。
+- **邮件内容不可信、也是 owner 的个人数据**：只作为数据交给模型（掩码后的文本，模型没有工具）；日志与 ops-v1 只记 ID、状态、计数与错误码，从不记主题、发件人、地址或标签名。SQLite 中的内容 14 天后清除；`observability` 保持关闭；不接 AI Gateway。测试只用 `worker/test/fakes/fixtures.ts` 的合成邮件。
+- **Workers Free，$0**：不加 cron、D1、R2、KV、Queues 或 Workflows；调度只用 `MailsortState`（实例 `mailsort-v1`）的 `setAlarm()`。fetch handler 只做 Access、CSRF 与一次对象调用（10 ms）；每次 alarm 至多 40 个外部请求（Google 与 Workers AI 合计）。Workers AI 每天 10,000 神经元为整个账户共享：超过 owner 预算的 70% 改用 Clef-flash，超过预算或配额用尽时推迟到下一个 UTC 日（推迟，不失败、不算没把握）。修改流水线、存储或 API 时运行 `test/runtime/cpu.test.ts`；预算（`deploy/bundle-size.mjs`、`web/scripts/js-budget.mjs`）只能有意提高并在提交中写明原因。
+- **写入走账本**：每次 Gmail 写入先在事务中记为 `intended`/`undo_intended`，再调用，再记结果；重试复用同一行。断路器（每轮与每日写入上限、单标签占比突增）与部署上限 `MODE`（GitHub 变量 `MAILSORT_MODE`）只能降低模式，不能放宽。
+- **接口**：owner API 是 `proto/mailsort/ui/v1`（AIP 风格，经共享转码器与客户端）；改 proto 时运行 `proto/` 的 lint、api-lint 与 breaking。ops-v1 的计数、模式和信号见 `docs/design.md` §10，改动需同步 `test/golden/ops-v1.json` 与 `contracts/ops-v1/fixtures/OpsStatus/mailsort-*.json`。
+- **部署**：只由 CI 的 `Mailsort deploy` 经 `deploy/deploy-vars.mjs` 部署；不要手动 `wrangler deploy`，本地开发只用 `wrangler.test.toml`。Access 应用 `mailsort` 创建并写入 AUD 之前，`mailsort` 保持在 `.github/scripts/ci_changes.py` 的 `CHECK_ONLY` 中。

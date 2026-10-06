@@ -19,6 +19,8 @@ flowchart LR
   Home[Home] -->|Ops bindings| MH
   Home -->|Ops bindings| Todo
   Home -->|Ops bindings| Watch
+  Gmail[Owner's Gmail] <-->|own labels only, OAuth| Sort[Mailsort]
+  Home -->|Ops bindings| Sort
   Home -->|Fleet and Newsletter Ops bindings| Fleet[Fleet]
   Observer[Observer CronJob] -->|signed fleet.report.v1| Fleet
   Actions[GitHub Actions] -->|Access and deploy Bearer, typed release API| Runtime[Platform runtime in k3s]
@@ -53,6 +55,7 @@ runtime. Newsletter keeps its own locked container dependencies and existing ext
 | FlowDay | `flowday.ui.v1` | `/api/v1/` |
 | Links | `links.ui.v1` | `/_/api/v1/` |
 | Watch | `watch.ui.v1` | `/api/v1/` |
+| Mailsort | `mailsort.ui.v1` | `/api/v1/` |
 | Fleet | `fleet.ui.v1` | `/api/v1/` |
 
 The [proto HTTP pattern](../proto/README.md#http-apis) owns route descriptors, request/response types and
@@ -84,7 +87,7 @@ the owner APIs moved to proto. Dated old-owner routes are listed in [history](hi
 ## Home
 
 Home is the owner launcher and operations console, not a second administrator of each application's storage.
-It calls only generated Ops methods through `MAIL_HERO`, `TODOFY`, `WATCH`, `FLEET`, `NEWSLETTER` and
+It calls only generated Ops methods through `MAIL_HERO`, `TODOFY`, `WATCH`, `MAILSORT`, `FLEET`, `NEWSLETTER` and
 `WEBSITE_SYNC` bindings. `FLEET` targets Fleet's `Ops`; `NEWSLETTER` targets its `NewsletterOps` projection of the latest
 bounded host report. Home does not call the VPS directly or read an application's D1, R2, private
 configuration or source. The four views are Home, Flows, Cloudflare and Ops.
@@ -142,6 +145,12 @@ accepted report nor a ready deployment receipt proves successful Newsletter deli
   include only owner-created names, trigger types/counts and app links, and never include page text or watched
   URLs. One digest after 14:00 UTC plus at most nine urgent intents obey Todofy's source limit of ten/day.
   BROKEN and automatic pauses enter the digest; status/guard reach Home through Ops.
+- **Mailsort:** one SQLite DO, no D1/R2 and no cron, plus the Workers AI binding (Clef, Clef-flash, bge-m3). It
+  reads the owner's Gmail with the owner's own OAuth grant and only ever adds or removes its own `分拣/` labels and
+  INBOX, through the closed operation table of `gmail.ts`; it never marks mail read, deletes, sends or changes
+  settings. Every write is a ledger row first and can be undone. Shadow mode (the default) only suggests; the
+  deployment variable `MODE` and the breaker can only lower the mode. The Gmail grant is put by the owner and never
+  passes through GitHub. See [AGENTS](../mailsort/AGENTS.md) and [design](../mailsort/docs/design.md).
 - **Newsletter:** runs as an independent k3s image because its workflow uses Codex CLI. It reads Todofy's machine
   reports through existing HTTPS/Basic auth and keeps its own persistent state. It does not import Todofy's
   implementation. Its external `ziyixi-protos`/wire JSON runtime and private drain/monitor adapters stay intact.

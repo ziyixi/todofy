@@ -13,7 +13,7 @@
  */
 import { spawn, type ChildProcess } from 'node:child_process';
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
-import { createServer, type IncomingMessage } from 'node:http';
+import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -25,27 +25,16 @@ import { create } from '@ziyixi/proto/protobuf';
 import { LABELS, MAILS, message, type SyntheticMail } from '../fakes/fixtures.ts';
 import { allowedOperation, FORBIDDEN_LABELS } from '../fakes/table.ts';
 import { FakeUpstream } from '../fakes/upstream.ts';
+import { DEV_REFRESH_TOKEN, serveFakeUpstream } from './fake-upstream.mts';
 
 const WORKER = decodeURIComponent(new URL('../../', import.meta.url).pathname);
 const T0 = Date.parse('2026-10-01T00:00:00Z');
 const MINUTE = 60_000;
-const REFRESH_TOKEN = 'synthetic-refresh-token';
+const REFRESH_TOKEN = DEV_REFRESH_TOKEN;
 
 function check(condition: unknown, what: string): void {
   if (!condition) throw new Error(`smoke: ${what}`);
   console.log(`ok - ${what}`);
-}
-
-async function body(request: IncomingMessage): Promise<Uint8Array> {
-  const chunks: Uint8Array[] = [];
-  for await (const chunk of request) chunks.push(chunk as Uint8Array);
-  const out = new Uint8Array(chunks.reduce((sum, chunk) => sum + chunk.byteLength, 0));
-  let offset = 0;
-  for (const chunk of chunks) {
-    out.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return out;
 }
 
 async function freePort(): Promise<number> {
@@ -63,18 +52,7 @@ async function main(): Promise<void> {
   let clock = T0;
   up.gmail.clock = () => clock;
   // The fake upstream: a Node HTTP server the Worker's development fetch reaches over loopback.
-  const fake = createServer((request, response) => {
-    void (async () => {
-      const raw = await body(request);
-      const headers = new Headers();
-      for (const [name, value] of Object.entries(request.headers)) if (typeof value === 'string') headers.set(name, value);
-      const answer = await up.handle(new Request(`http://127.0.0.1${request.url ?? '/'}`, { method: request.method ?? 'GET', headers, ...(raw.length > 0 ? { body: raw } : {}) }));
-      response.writeHead(answer.status, Object.fromEntries(answer.headers));
-      response.end(new Uint8Array(await answer.arrayBuffer()));
-    })();
-  });
-  await new Promise<void>((resolve) => fake.listen(0, '127.0.0.1', resolve));
-  const fakeOrigin = `http://127.0.0.1:${String((fake.address() as AddressInfo).port)}`;
+  const { server: fake, origin: fakeOrigin } = await serveFakeUpstream(up);
 
   const port = await freePort();
   const origin = `http://127.0.0.1:${String(port)}`;

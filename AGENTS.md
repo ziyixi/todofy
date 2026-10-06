@@ -80,6 +80,8 @@
 - FlowDay：[AGENTS](flowday/AGENTS.md)、[设计](flowday/docs/design.md)。从不写 Todoist，控制 D1 写入与分页读取。
 - Links：[AGENTS](links/AGENTS.md)、[设计](links/docs/design.md)。匿名重定向一次索引读取、零写入、不记录 key/目标。
 - Watch：[AGENTS](watch/AGENTS.md)、[设计](watch/docs/design.md)。逐跳抓取政策、合成站点、内容不进通知；冻结 intent 幂等重试。
+- Mailsort：[AGENTS](mailsort/AGENTS.md)、[设计](mailsort/docs/design.md)。只经 `gmail.ts` 的封闭操作表访问 Gmail，从不标记已读或删除；
+  Gmail 授权只由 owner 本机写入，部署不碰；合成邮件与回环假服务，内容不进日志。
 - Website：[架构约束](docs/architecture.md#website)、[架构](website/docs/architecture.md)、[发布](website/docs/release.md)。
   只用静态访客路径，内容不提交；不绕过发布身份、门禁、验收与回退。
 - Newsletter：[README](newsletter/README.md)。保持独立镜像、VPS 状态目录与业务排空边界，镜像发布不等于服务器升级或发送成功。

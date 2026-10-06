@@ -563,6 +563,22 @@ list), then gained `watch`; fixtures `OpsStatus/watch-ok.json`, `OpsStatus/watch
   An owner's check, a pending change's confirmation, previews, the owner API and the notifications to Todofy are never
   deferred.
 
+## 3d. mailsort (added 2026-10-06, additive)
+
+mailsort (`mailsort/`, Worker `mailsort`, `mailsort/docs/design.md` §10) joined like the watch app: `OpsStatus.app`
+(an open list) gained `mailsort`, and so did the dashboard's `OverrideGuardRequest.app`; fixtures
+`OpsStatus/mailsort-ok.json` and `OpsStatus/mailsort-degraded.json` (also its golden bytes,
+`mailsort/worker/test/ops-golden.test.ts`). Nothing of the other apps' surface changed; the dashboard binds `MAILSORT`.
+
+- Files: `mailsort/worker/src/ops.ts` (the entrypoint, forwards to `MailsortState`), `mailsort/worker/src/ops-status.ts`
+  (status and guard over the object's SQLite). Rows read per `status()`: a few meta rows, today's usage row and two
+  indexed counts (the pending queue, the review queue's `review_state` index). Its one write: an alarm when none is set.
+- Counters: `decided_today`, `applied_today`, `unsure_today`, `review_pending`, `pending`, `gmail_calls_today`,
+  `neurons_today`, `neuron_budget`, `last_sync_minutes` (absent before the first sync). Signals in README. Never a
+  subject, sender, address or label name.
+- Guard: a shed defers `full_model` (Clef-flash only), `audit` (the daily audit sample) and `embedding_rebuild`. New
+  mail is still read, decided and sorted; the owner API is never deferred.
+
 ## 3b. The move onto proto/ (2026-10-01, no wire change)
 
 The contract's source of truth became the IDL [`proto/ops/v1/ops.proto`](../../proto/ops/v1/ops.proto)

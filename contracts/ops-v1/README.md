@@ -53,6 +53,7 @@ next to its unchanged default handlers:
 | Mail Hero | `mail-hero` | `mail-hero/cloudflare/src/native/index.ts` | in the Worker; state in the `MailCoordinator` object |
 | Todofy | `todofy` (the gateway) | `todofy/gateway/src/index.ts` | forwards to `TodofyCore` RPC methods in `todofy-core` |
 | the watch app | `watch` | `watch/worker/src/index.ts` | in the Worker; state in the `WatchState` object (its own SQLite only) |
+| mailsort | `mailsort` | `mailsort/worker/src/index.ts` | in the Worker; state in the `MailsortState` object (its own SQLite only) |
 | Fleet | `fleet` | `fleet/worker/src/index.ts` (`Ops`) | read-only receipt projection in `FleetState` SQLite |
 | Newsletter | `fleet` | `fleet/worker/src/index.ts` (`NewsletterOps`) | independently observed VPS process/release metadata; no VPS command surface |
 
@@ -149,7 +150,9 @@ lost alarm; `IMPLEMENTATION.md` §3c). Poll it no more often than every 10 minut
 - `modes`: booleans; `maintenance` always present. Mail Hero: `force_send_paused` (deployment variable),
   `send_paused` (owner switch), `forwarding` (mode forward with a current endpoint), `backup_active`.
   Todofy: `processing_paused`, `force_pause_todoist`, `reminder_enabled`, `backup_active`. The watch app: `maintenance` (always false: it has no maintenance switch)
-  and `notifications` (its TODOFY binding is configured: the daily digest and urgent changes go to Todofy). A
+  and `notifications` (its TODOFY binding is configured: the daily digest and urgent changes go to Todofy). mailsort:
+  `maintenance` (always false), `mode_limited` (the deployment variable MODE is below live), `live`, `sorting_off`,
+  `breaker` (read from storage; a `status_unavailable` status has only `maintenance` and `mode_limited`). A
   `status_unavailable` status has only the deployment variables (Mail Hero `maintenance`,
   `force_send_paused`; Todofy `maintenance`, `processing_paused`, `force_pause_todoist`,
   `reminder_enabled`); the keys read from storage (Mail Hero `send_paused`, `forwarding`,
@@ -162,7 +165,7 @@ lost alarm; `IMPLEMENTATION.md` §3c). Poll it no more often than every 10 minut
 - `last_backup_at`: the app's last complete backup, or null.
 - `ui_url`: `https://<owner UI host>/`, or null when the Worker does not know its host.
 - `capabilities`: what this release supports. Mail Hero `canary_producer`, `guard`; Todofy
-  `canary_consumer`, `guard`, `ops_digest`; the watch app `guard`. The dashboard checks them before
+  `canary_consumer`, `guard`, `ops_digest`; the watch app and mailsort `guard`. The dashboard checks them before
   using a feature. Fleet and Newsletter monitoring expose no capabilities and never accept a quota guard mutation.
 
 Signal codes (severity):
@@ -172,6 +175,7 @@ Signal codes (severity):
 | every app | `maintenance_mode` (critical; never raised by the watch app), `guard_shed` (info, `seconds_left`), `status_unavailable` (critical) |
 | Mail Hero | the alert signals of `alerts.ts` with their metrics: `capacity_70` (warning), `capacity_85`, `capacity_95`, `backup_stale`, `endpoint_blocked` (critical), `pending_stale`, `parse_failed`, `endpoint_paused`, `delivery_failed`, `policy_error` (warning); plus `force_send_paused`, `send_paused`, `ingest_quota_80` (warning), `forwarding_off`, `backup_active` (info) |
 | watch | `watches_broken` (warning, `count`: watches failing their third check in a row or more), `scheduler_stale` (warning, `hours`: no scheduler pass for over 12 h while a watch is to be checked; no metric when none ever ran), `notify_unsettled` (warning, `open`, `failed`: a task intent whose tasks do not all exist 24 h after it was frozen; one Todofy reports failed; or one given up or refused in the last 7 days) |
+| mailsort | `gmail_auth_failed` (critical, `failures`: Google refused the grant three times and the Worker stopped calling it), `gmail_not_configured` (warning: the owner has not put the Gmail grant), `breaker_tripped` (warning, `applied_today`), `sync_stale` (warning, `minutes`: no complete sync for 30 min while the mode reads Gmail and the grant works), `ai_quota_exhausted` (info, `deferred`), `label_live_revoked` (info: a label's live writing was turned off by its precision bound in the last day) |
 | Todofy | `attention`, `due_backlog`, `processing_paused`, `todoist_paused`, `gemini_budget_80`, `backup_failed`, `reminder_failed`, `gtd_snapshot_stale` (warning, `age_hours`); `todoist_blocked`, `gemini_budget_95`, `backup_stale` (critical); `reminder_disabled`, `backup_disabled`, `backup_active`, `review_overdue` (info, `days`) |
 | Fleet | `host_never_seen`, `host_stale`, `host_missing`, `daemon_k3s_inactive`, `daemon_k3s_failed`, `daemon_k3s_missing`, `daemon_k3s_unknown`, `daemon_k3s_activating`, `daemon_k3s_deactivating`, `daemon_cloudflared_inactive`, `daemon_cloudflared_failed`, `daemon_cloudflared_missing`, `daemon_cloudflared_unknown`, `daemon_cloudflared_activating`, `daemon_cloudflared_deactivating`, `daemon_ssh_inactive`, `daemon_ssh_failed`, `daemon_ssh_missing`, `daemon_ssh_unknown`, `daemon_ssh_activating`, `daemon_ssh_deactivating`, `daemon_cloudflared_platform_inactive`, `daemon_cloudflared_platform_failed`, `daemon_cloudflared_platform_missing`, `daemon_cloudflared_platform_unknown`, `daemon_cloudflared_platform_activating`, `daemon_cloudflared_platform_deactivating`, `cluster_degraded`, `cluster_unavailable`, `cluster_unknown`, `disk_high`, `memory_high`, `deployment_pending`, `release_held`, `release_failed`, `release_in_progress` (daemon failures, missing heartbeat, held/failed release critical; in-progress release info; other readiness/capacity conditions warning) |
 | Newsletter | `host_never_seen`, `host_stale`, `host_missing`, `newsletter_unavailable` (critical), `newsletter_side_effect_unknown` (warning, `count`: unknown delivery, packet and Notion records; `unknown_revision` when reported), `newsletter_delivery_rejected`, `newsletter_delivery_overdue` (warning: no delivery evidence, the last accepted one older than 28 h, or an unknown one older than 2.5 h), `deployment_pending` (warning), `newsletter_unknown` (info, `unknown_count`, `unknown_revision`), `newsletter_paused`, `newsletter_delivery_accepted` (info) |

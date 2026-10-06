@@ -1,0 +1,82 @@
+# mailsort
+
+Gmail sorting for the owner's own mailbox on `sort.ziyixi.science`: each new INBOX mail is decided by the owner's rules,
+the nearest corrected examples and the Workers AI decision model Clef. In live mode a confident mail gets one label
+under `分拣/` and leaves the inbox (archived), and is never marked read; an unsure mail gets no label, stays in the
+inbox and waits in the review queue. Shadow mode (the default) only suggests. Chinese, mobile first. Design:
+[`docs/design.md`](docs/design.md). Rules: [`AGENTS.md`](AGENTS.md).
+
+| Path | What it is |
+| --- | --- |
+| `worker/` | The Worker `mailsort`: the fetch handler (Access, CSRF) and `MailsortState` (storage, alarm, pipeline, owner API, ops-v1) |
+| `worker/src/gmail.ts` | The only code that calls Google, through a closed table of allowed requests (`docs/design.md` §2) |
+| `web/` | The UI, built into `web/dist` and served by the Worker |
+| `wrangler.toml` | The production config (top level = production); `wrangler.test.toml` is for local development and the smoke run |
+| `deploy/` | The deploy wrapper `deploy-vars.mjs`, the bundle budget, and the owner's Gmail grant script `mint-token.mjs` |
+| `../proto/mailsort/ui/v1/` | The owner API `mailsort.ui.v1` |
+
+## Use
+
+- **标签**: add the labels (name, a description of what belongs there, which is what the model reads, the threshold
+  and whether it implies a trusted sender). 同步 Gmail links `分拣/` labels that already exist. 正式打 per label lets
+  live mode write it; it turns itself off when the label's precision bound falls below the target.
+- **待审**: confirm a suggestion, choose another label or 都不是, or skip. Corrections made in Gmail itself (moving a
+  sorted mail to another `分拣/` label, or removing the label) count too.
+- **规则**: approve the rules proposed from repeated corrections, add exact-address, domain, mailing-list or
+  delivered-to rules by hand, and export them as Gmail filters (label + archive only) to import in Gmail's settings.
+- **例子**, **准确率**, **记录** (undo one write or a time range), **状态** (Gmail grant, sync, today's model use),
+  **设置** (mode, limits, neuron budget). Emergency stop: 设置 → 关闭 (`docs/design.md` §10).
+
+## Develop
+
+From `worker/` (Node 26; the pinned toolchains are in each package's lockfile):
+
+```sh
+npm ci && (cd ../web && npm ci)
+npm run lint && npm run typecheck && npm test   # unit tests (Node), the Gmail guard and its fuzz included
+npm run test:runtime                            # workerd: real MailsortState, fake Gmail and Workers AI, CPU
+(cd ../web && npm run lint && npm run typecheck && npm test && npm run build)
+node --test ../deploy/test/*.test.mjs
+npm run test:smoke                              # wrangler dev against the loopback fakes (needs the UI build)
+```
+
+Trying the UI by hand (synthetic mail only, never Google): copy `../.dev.vars.example` to `../.dev.vars`, build the UI,
+then in two terminals from `worker/`:
+
+```sh
+node test/smoke/fake-upstream.mts 8796     # the fake Gmail and Workers AI
+npm run dev                                # wrangler dev on http://127.0.0.1:8795 (local bindings only)
+```
+
+`curl -X POST 'http://127.0.0.1:8796/__fake/deliver?mail=newsletterZh'` delivers a synthetic mail (the names are in
+`test/fakes/fixtures.ts`), `curl -X POST 'http://127.0.0.1:8795/__dev/step?now=<epoch ms>'` runs an alarm pass and
+`/__dev/clock?now=` sets the API's clock. Local state is in `mailsort/.wrangler/` (delete it after a schema change).
+
+## Deploy
+
+Only from GitHub Actions: `Mailsort deploy` (`.github/workflows/ci.yml`) on `main` after `CI gate`, in the
+`production` environment, through `deploy/deploy-vars.mjs` (never a plain `wrangler deploy`). Until the Access
+application `mailsort` exists, `mailsort` is in `CHECK_ONLY` (`.github/scripts/ci_changes.py`): its checks run, its
+deploy and Home's (which binds `MAILSORT`) do not. The steps that lift it are in `docs/design.md` §12.
+
+The wrapper writes the Worker secrets `ACCESS_OWNER` and `ACCESS_OWNER_ALIASES` (from the dashboard's secrets: one
+owner) and `CSRF_SIGNING_KEY` (from `MAILSORT_CSRF_SIGNING_KEY`), and sets `MODE` from the GitHub variable
+`MAILSORT_MODE` (`live`, `shadow` or `off`; anything else is off) and `BUILD_SHA`. It never writes, needs or deletes the
+Gmail secrets `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET` and `GMAIL_REFRESH_TOKEN`: `wrangler deploy --secrets-file` keeps
+secrets the file does not name (pinned by `deploy/test/secrets-kept.test.mjs`), and the wrapper refuses a secrets file
+that names them. Only the owner puts them, with `deploy/mint-token.mjs` from their own machine (`docs/design.md` §12).
+
+```sh
+openssl rand -hex 32 | gh secret set MAILSORT_CSRF_SIGNING_KEY -R ziyixi/todofy --env production
+gh variable set MAILSORT_MODE -R ziyixi/todofy --env production --body shadow
+```
+
+After the first deploy, open `https://sort.ziyixi.science/status` signed in: it must show the next alarm, and, once
+the grant is put, a sync within five minutes. Home's 邮件分拣 tile shows ops-v1 through the `MAILSORT` binding and the
+daily drift check compares the Worker with `dashboard/worker/src/drift-desired.json`.
+
+### Rollback
+
+A code-only revert is the normal path. To stop the Gmail side effects at once: 设置 → 关闭 (or `MAILSORT_MODE=off`
+and a deploy), and revoke the grant at https://myaccount.google.com/permissions. Writes already made can be undone
+from 记录 while the app runs. Deleting the Worker deletes `MailsortState` (labels, rules, examples, ledger) for good.

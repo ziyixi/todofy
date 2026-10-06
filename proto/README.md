@@ -23,7 +23,8 @@ cannot express (bounds, URL hosts). Each app's owner API is served by its Worker
 and called by its UI through `ts/http-client.ts` ([HTTP APIs](#http-apis)). `links/ui/v1` is the
 links app's owner API (2026-10-01, deployed since the app's step L2), under the path
 prefix `/_/api/v1/` (its host's other paths are short links). `watch/ui/v1` is the watch app's owner API (2026-10-01,
-deployed since the app's step W2), under `/api/v1/`.
+deployed since the app's step W2), under `/api/v1/`. `mailsort/ui/v1` is mailsort's owner API (2026-10-06), under
+`/api/v1/`.
 `flowday/ui/v1` is FlowDay's owner API (2026-10-02, branch `proto-flowday-ui`), on a Worker and a Next.js UI
 that had no proto code before, and the first with large lists: its lists are pages sized to Workers Free's CPU limit
 that each read about their own D1 rows, and the Worker runs every list's query and answer once at startup
@@ -130,7 +131,7 @@ bundle is unchanged (its types come from the OpenAPI document).
    `lower_snake_case`, versioned packages) and `COMMENTS` (every element documented); exceptions are written
    next to the element with `buf:lint:ignore` and a reason, and the AIP-shaped HTTP packages are excused only
    from the two response-name rules the AIPs contradict: `links/ui`,
-   `watch/ui`, `flowday/ui`, `dashboard/ui` and `mailhero/ui` by those two `buf:lint:ignore` lines on each method that answers a resource (with the
+   `watch/ui`, `mailsort/ui`, `flowday/ui`, `dashboard/ui` and `mailhero/ui` by those two `buf:lint:ignore` lines on each method that answers a resource (with the
    reason in the file's header),
    because `buf.yaml` reaches every proto user's deploy (`proto_deploys` below) and a new package must not
    redeploy the other apps. Google's api-linter
@@ -187,7 +188,7 @@ bundle is unchanged (its types come from the OpenAPI document).
 | `buf.yaml`, `buf.lock` | The module (`path: .`, tooling directories excluded), lint and breaking rules, the `buf.build/googleapis/googleapis` dependency pinned by commit and digest |
 | `retired.json` | The published elements deleted on purpose (rule 6), which `tools/retired.py` keeps deleted and leaves out of the breaking checks' base |
 | `buf.gen.yaml` | protobuf-es v2 (`target=ts`, `import_extension=ts`, `erasable_syntax=true`) into `ts/` |
-| `<package path>/*.proto` | One directory per proto package: `todofy/taskintent/v1/task_intent.proto` is `todofy.taskintent.v1`; `links/ui/v1/*.proto` is `links.ui.v1`, the links app's owner API; `watch/ui/v1/*.proto` is `watch.ui.v1`, the watch app's owner API; `flowday/ui/v1/*.proto` is `flowday.ui.v1`, FlowDay's owner API; `dashboard/ui/v1/*.proto` is `dashboard.ui.v1`, the dashboard's owner API; `mailhero/ui/v2/*.proto` is `mailhero.ui.v2`, Mail Hero's owner API; `common/errors/v1/errors.proto` is `common.errors.v1`, the error reasons every HTTP API shares; `common/wire/v1/wire.proto` is `common.wire.v1`, the wire profile's own options ([Value rules](#value-rules), `non_null`, `closed`, `keep_order`, `positional`); `ops/v1/ops.proto` is `ops.v1`, the IDL of `contracts/ops-v1` (every app's `Ops` entrypoint), a contract several apps implement, so named by the contract, not an app ([Adding a contract](#common-tasks), step 1); `todofy/report/v1/report.proto` is `todofy.report.v1`, Todofy's newsletter reports (recommendation-v1, summary-v1); `mailhero/webhook/v1/mail_received.proto` is `mailhero.webhook.v1`, Mail Hero's webhook event (mail.received.v1); `todofy/ui/v1/*.proto` is `todofy.ui.v1`, Todofy's owner API |
+| `<package path>/*.proto` | One directory per proto package: `todofy/taskintent/v1/task_intent.proto` is `todofy.taskintent.v1`; `links/ui/v1/*.proto` is `links.ui.v1`, the links app's owner API; `watch/ui/v1/*.proto` is `watch.ui.v1`, the watch app's owner API; `mailsort/ui/v1/*.proto` is `mailsort.ui.v1`, mailsort's owner API; `flowday/ui/v1/*.proto` is `flowday.ui.v1`, FlowDay's owner API; `dashboard/ui/v1/*.proto` is `dashboard.ui.v1`, the dashboard's owner API; `mailhero/ui/v2/*.proto` is `mailhero.ui.v2`, Mail Hero's owner API; `common/errors/v1/errors.proto` is `common.errors.v1`, the error reasons every HTTP API shares; `common/wire/v1/wire.proto` is `common.wire.v1`, the wire profile's own options ([Value rules](#value-rules), `non_null`, `closed`, `keep_order`, `positional`); `ops/v1/ops.proto` is `ops.v1`, the IDL of `contracts/ops-v1` (every app's `Ops` entrypoint), a contract several apps implement, so named by the contract, not an app ([Adding a contract](#common-tasks), step 1); `todofy/report/v1/report.proto` is `todofy.report.v1`, Todofy's newsletter reports (recommendation-v1, summary-v1); `mailhero/webhook/v1/mail_received.proto` is `mailhero.webhook.v1`, Mail Hero's webhook event (mail.received.v1); `todofy/ui/v1/*.proto` is `todofy.ui.v1`, Todofy's owner API |
 | `package.json`, `package-lock.json` | The toolchain pins (`dependencies`: buf, protoc-gen-es, the runtime) and this folder's test tools (`devDependencies`) |
 | `ts/` | The TypeScript package `@ziyixi/proto`. Committed: `package.json` (its exports), `wire-json.ts`, `wire-rules.ts` and `field-mask.ts` (the codec and its value rules), `http-path.ts`, `http-rule.ts`, `http-transcoder.ts`, `http-client.ts` and `rpc-status.ts` (the HTTP runtime, [HTTP APIs](#http-apis)), `page-token.ts` and `filter.ts` (AIP-158 page tokens and the AIP-160 subset for list methods), `protobuf.ts` / `protobuf-wkt.ts` (the runtime re-exports). Generated: every directory (`ts/todofy/...`, `ts/watch/...`, `ts/ops/...`, `ts/common/...`, `ts/google/...`): protobuf-es's `*_pb.ts`, and for the packages of `WIRE_PACKAGES` the wire JSON types `*_wire.ts` |
 | `python/` | The Python package `ziyixi-proto`. Committed: `pyproject.toml` (static metadata, uv cache keys), `build_backend.py`, `src/ziyixi_proto/__init__.py` and `wire_json.py` (the codec and its value rules). Generated: every directory under `src/ziyixi_proto/`, for the packages `tools/gen_py.py` lists in `PYTHON_PACKAGES` only; the wheel leaves the test-only ones out (`TEST_ONLY_PACKAGES`) |
@@ -734,15 +735,15 @@ which every other job needs. When Changes has no base (it runs everything: first
 `CHECK_JOBS` (a push to `main` reuses a green branch run only if it passed Proto checks).
 
 A `proto/` change also re-checks every app in `PROTO_USERS` (Todofy, Mail Hero, the dashboard, FlowDay, the links app, the watch app,
-Fleet, Platform and the website) and runs
+mailsort, Fleet, Platform and the website) and runs
 `Contracts` (the contracts' tests check the codecs against the schemas and pin the wire bytes). It deploys only
 the apps whose production bundle the changed path reaches (`proto_deploys` in `.github/scripts/ci_changes.py`).
 `PROTO_USERS` names each user's bundled languages: Mail Hero and the dashboard `"ts"` (their Workers, and
-Mail Hero's and the dashboard's UIs), FlowDay, the links and watch apps `"ts"` (their Workers and UIs), Todofy `"ts"` and `"python"` (its gateway and UI bundle the runtime and the descriptors of todofy.ui.v1;
+Mail Hero's and the dashboard's UIs), FlowDay, the links, watch and mailsort apps `"ts"` (their Workers and UIs), Todofy `"ts"` and `"python"` (its gateway and UI bundle the runtime and the descriptors of todofy.ui.v1;
 todofy-core vendors the wheel). A language's runtime and generator reach that language's users (`proto/ts/` and `buf.gen.yaml`: the
 TypeScript users; `proto/python/`, `tools/gen_py.py` and `tools/wire_rules.py`: Todofy); the wire profile's own
 options (`common/wire/`) reach both; a package reaches the apps that import it (`PROTO_PACKAGES`:
-`todofy/taskintent/` Todofy and the watch app, `todofy/report/` Todofy, `todofy/ui/` Todofy, `mailhero/webhook/` Mail Hero and Todofy, `flowday/ui/` FlowDay, `links/ui/` the links app, `mailhero/ui/` Mail Hero, `watch/ui/` the watch app, `dashboard/ui/` the dashboard, `ops/` the apps with an `Ops` entrypoint or caller (Mail Hero, the dashboard, Todofy, the watch app and the website relay), `common/errors/` and `prototest/` none);
+`todofy/taskintent/` Todofy and the watch app, `todofy/report/` Todofy, `todofy/ui/` Todofy, `mailhero/webhook/` Mail Hero and Todofy, `flowday/ui/` FlowDay, `links/ui/` the links app, `mailhero/ui/` Mail Hero, `watch/ui/` the watch app, `mailsort/ui/` mailsort, `dashboard/ui/` the dashboard, `ops/` the apps with an `Ops` entrypoint or caller (Mail Hero, the dashboard, Todofy, the watch app, mailsort and the website relay), `common/errors/` and `prototest/` none);
 the module and toolchain files (`buf.yaml`, `buf.lock`, `package-lock.json`, `tools/ensure.mjs`) and any path
 not mapped reach every user; tests, test data, the check scripts, the wire JSON types' and JSON Schema
 generators (`tools/gen_wire_ts.py`: types only; `tools/gen_schema.py`: files under `contracts/` and `todofy/api/`,
