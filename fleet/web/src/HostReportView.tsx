@@ -50,9 +50,7 @@ export function HostReportView({ report }: { report: HostReport }) {
         </dl>
         {delivery ? <p>最近投递记录：{DELIVERY_NAMES[delivery]} · 更新于 {newsletter.latest_delivery_time}</p> : <p>最近投递记录：暂未取得</p>}
         {newsletter.unknown_by_kind ? <dl>{Object.entries(newsletter.unknown_by_kind).map(([kind, count]) => <div key={kind}><dt>{CATEGORY_NAMES[kind] ?? kind}</dt><dd>{count}</dd></div>)}</dl> : null}
-        <p>数量合计历史运行中断、采编步骤、Notion 写入和邮件投递等六类记录；同一次工作可能重复计入，并非失败邮件数。</p>
-        <p>后台进程状态与这些记录分别显示。排空与冻结不会自动重新执行未确认的操作。</p>
-        <p><a href={import.meta.env.VITE_HOME_URL}>到 Home 管理/关闭提醒</a>；关闭后不再列入 Home 的待处理提醒及后续运维摘要，原记录仍保留。</p>
+        <p>六类记录可能重复计入，合计并非失败邮件数；只有邮件投递、采编记录和 Notion 写入可能已产生实际结果，需要核对。</p>
       </section>
     </>
   );

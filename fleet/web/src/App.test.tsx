@@ -63,16 +63,16 @@ describe('Fleet owner page', () => {
     expect(screen.getByText('BUSINESS_OUTCOME_UNKNOWN')).toBeVisible();
     expect(screen.getByText(/暂停待处理/)).toBeVisible();
   });
-  it('explains the unknown aggregate independently of process health and links reminder management to configured Home', async () => {
+  it('explains the unknown aggregate independently of process health and links to configured Home', async () => {
     const report = structuredClone(fixture);
     report.newsletter.unknown_count = 32;
     show({ ...BASE, freshness: 'fresh', report, receive_time: '2026-10-03T00:00:00Z' });
     expect(await screen.findByRole('heading', { name: 'Newsletter' })).toBeVisible();
     expect(screen.getByText('未确认完成记录').nextElementSibling).toHaveTextContent('32');
     expect(screen.getByText(/后台进程：健康/)).toBeVisible();
-    expect(screen.getByText(/六类记录；同一次工作可能重复计入，并非失败邮件数/)).toBeVisible();
-    expect(screen.getByRole('link', { name: '到 Home 管理/关闭提醒' })).toHaveAttribute('href', import.meta.env.VITE_HOME_URL);
-    expect(screen.getByText(/后续运维摘要，原记录仍保留/)).toBeVisible();
+    expect(screen.getByText(/合计并非失败邮件数/)).toBeVisible();
+    expect(screen.queryByText(/关闭提醒/)).toBeNull();
+    expect(screen.getByRole('link', { name: '返回 Home' })).toHaveAttribute('href', import.meta.env.VITE_HOME_URL);
   });
   it('does not turn missing Newsletter observations into zero or a healthy process', async () => {
     const report = { ...fixture, newsletter: { state: 'unavailable', drain_state: 'unknown' } };
@@ -107,7 +107,7 @@ describe('Fleet owner page', () => {
     expect(screen.getByText('未确认完成记录').nextElementSibling).toHaveTextContent('4');
     expect(screen.getByText('运行中断').nextElementSibling).toHaveTextContent('2');
     expect(screen.getByText('邮件投递').nextElementSibling).toHaveTextContent('1');
-    expect(screen.getByRole('link', { name: '到 Home 管理/关闭提醒' })).toBeVisible();
+    expect(screen.getByText(/需要核对/)).toBeVisible();
   });
   it('keeps absent legacy delivery metadata visibly unobserved', async () => {
     show({ ...BASE, freshness: 'fresh', report: fixture, receive_time: '2026-10-03T00:00:00Z' });

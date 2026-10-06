@@ -34,7 +34,9 @@ function Snapshot({ view }: { view: FleetStatus }) {
           </ul>
         ) : <p>暂无记录</p>}
       </section>
-      <footer>监控版本 <code>{view.build_sha || '本地开发'}</code></footer>
+      <footer>
+        <a href={import.meta.env.VITE_HOME_URL}>返回 Home</a> · 监控版本 <code>{view.build_sha || '本地开发'}</code>
+      </footer>
     </>
   );
 }
