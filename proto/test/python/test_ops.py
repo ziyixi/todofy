@@ -81,7 +81,7 @@ class BoundsTest(unittest.TestCase):
         self.assertEqual(field_rules(pb.OpsStatus, "counters").max_items, 32)
         self.assertEqual(field_rules(pb.Signal, "metrics").max_items, 12)
         self.assertEqual(field_rules(pb.OpsReport, "items").max_items, 20)
-        self.assertEqual(field_rules(pb.OpsStatus, "app").allowed, frozenset({"mail-hero", "todofy", "watch", "fleet", "newsletter", "notion-publish"}))
+        self.assertEqual(field_rules(pb.OpsStatus, "app").allowed, frozenset({"mail-hero", "todofy", "watch", "fleet", "newsletter", "notion-publish", "mailsort"}))
         self.assertTrue(field_rules(pb.OpsStatus, "app").open)  # an app may join within ops-v1
         self.assertEqual([wire_name(code) for code in list(pb.ErrorCode)[1:]], ["invalid_input", "busy", "unavailable"])
 
@@ -115,7 +115,7 @@ class SchemaTest(unittest.TestCase):
                     kept = [app for app in was["enum"] if app in now["enum"]]
                     self.assertLessEqual({"mail-hero", "todofy"}, set(kept))
                     self.assertEqual(now["enum"][: len(kept)], kept)
-                    self.assertEqual(now["enum"][len(kept) :], ["watch", "fleet", "newsletter", "notion-publish"])
+                    self.assertEqual(now["enum"][len(kept) :], ["watch", "fleet", "newsletter", "notion-publish", "mailsort"])
                     now, was = {**now, "enum": None}, {**was, "enum": None}
                 self.assertEqual(now, was)
 

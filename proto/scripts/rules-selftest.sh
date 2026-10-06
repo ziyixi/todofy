@@ -89,8 +89,8 @@ case_ "widen Code to 64 characters (older dashboards refuse a newer app's longer
 case_ "narrow Code to 30 characters (a newer dashboard refuses an older app's code)" breaking fail 's/\[a-z\]\[a-z0-9_\]\{0,47\}/[a-z][a-z0-9_]{0,29}/' "$OPS"
 case_ "lower OpsStatus.counters max_items 32 -> 16" breaking fail 's/max_items: 32/max_items: 16/' "$OPS"
 case_ "change OpsStatus.version's closed allowed value (every older reader refuses it)" breaking fail 's/\(common.wire.v1.field\).allowed = "ops-v1"/(common.wire.v1.field).allowed = "ops-v2"/' "$OPS"
-case_ "add an app to OpsStatus.app's open list (next)" breaking pass 's/(        "notion-publish"\n)(      \]\n      open: true)/        "notion-publish",\n        "next"\n$2/' "$OPS"
-case_ "close OpsStatus.app (drop open)" breaking fail 's/(        "notion-publish"\n      \]\n)      open: true\n/$1/' "$OPS"
+case_ "add an app to OpsStatus.app's open list (next)" breaking pass 's/(        "mailsort"\n)(      \]\n      open: true)/        "mailsort",\n        "next"\n$2/' "$OPS"
+case_ "close OpsStatus.app (drop open)" breaking fail 's/(        "mailsort"\n      \]\n)      open: true\n/$1/' "$OPS"
 case_ "close StartCanaryResult.reason (drop open)" breaking fail 's/(    format: "Code"\n)    open: true\n(    cases: \{\n      when: "paused")/$1$2/' "$OPS"
 case_ "drop non_null from CanaryDelivery.state (a newer producer may write null)" breaking fail 's/(  State state = 1 \[\n    \(google.api.field_behavior\) = REQUIRED),\n    \(common.wire.v1.field\).non_null = true\n/$1\n/' "$OPS"
 case_ "add a code to an open list (StartCanaryResult paused: consumer_paused)" breaking pass 's/          "endpoint_blocked"\n/          "endpoint_blocked",\n          "consumer_paused"\n/' "$OPS"
@@ -129,8 +129,8 @@ case_ "remove a listed enum value (SOURCE_WATCH) and reserve its number and name
 case_ "remove a listed enum value without reserving it" breaking fail 's/  \/\/ The watch app[^\n]*\n[^\n]*\n  SOURCE_WATCH = 2;\n//' "$INTENT" "$RETIRE_WATCH_SOURCE"
 case_ "reuse a listed enum value's number (SOURCE_WATCH = 2 -> SOURCE_NEXT = 2)" breaking fail 's/SOURCE_WATCH = 2;/SOURCE_NEXT = 2;/' "$INTENT" "$RETIRE_WATCH_SOURCE"
 case_ "remove an unlisted enum value (ERROR_CODE_DAILY_LIMIT) and reserve it" breaking fail 's/(enum ErrorCode \{\n)/$1  reserved 11;\n  reserved "ERROR_CODE_DAILY_LIMIT";\n/; s/  \/\/ [^\n]*\n  ERROR_CODE_DAILY_LIMIT = 11;\n//'
-case_ "remove a listed allowed value of an input (OverrideGuardRequest.app watch)" breaking pass 's/,\n      "watch"\n    \]/\n    ]/' "$GUARD" "$RETIRE_WATCH_GUARD"
-case_ "remove an unlisted allowed value of an input (OverrideGuardRequest.app watch)" breaking fail 's/,\n      "watch"\n    \]/\n    ]/' "$GUARD"
+case_ "remove a listed allowed value of an input (OverrideGuardRequest.app watch)" breaking pass 's/,\n      "watch",\n      "mailsort"\n    \]/,\n      "mailsort"\n    ]/' "$GUARD" "$RETIRE_WATCH_GUARD"
+case_ "remove an unlisted allowed value of an input (OverrideGuardRequest.app watch)" breaking fail 's/,\n      "watch",\n      "mailsort"\n    \]/,\n      "mailsort"\n    ]/' "$GUARD"
 case_ "zero value without _UNSPECIFIED (MODE_UNSPECIFIED -> MODE_NONE)" lint fail 's/MODE_UNSPECIFIED = 0/MODE_NONE = 0/'
 case_ "enum value without its prefix (SOURCE_WATCH -> WATCH)" lint fail 's/SOURCE_WATCH = 2/WATCH = 2/'
 case_ "lowerCamelCase field (intent_id -> intentId)" lint fail 's/string intent_id = 3;/string intentId = 3;/; s/string intent_id = 3 /string intentId = 3 /'
