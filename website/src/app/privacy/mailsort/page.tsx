@@ -45,8 +45,7 @@ export default function MailsortPrivacyPage() {
         <h2>What mailsort is</h2>
         <p>
           mailsort is a personal tool of the owner of this website. It labels the owner&apos;s own
-          Gmail and is not offered to anyone else. Its dashboard, sort.ziyixi.science, is behind
-          Cloudflare Access and open to the owner only.
+          Gmail, is not offered to anyone else, and its dashboard is open to the owner only.
         </p>
 
         <h2>What it can do in Gmail</h2>
@@ -57,41 +56,50 @@ export default function MailsortPrivacyPage() {
             <code>https://mail.google.com/</code> scope.
           </li>
           <li>
-            Through a closed list of Gmail API operations it reads messages, their labels and the
-            mailbox&apos;s change history, creates and renames its own labels under the prefix{" "}
-            <span lang="zh-CN">分拣/</span> (&ldquo;sorting&rdquo;), adds one of its labels to a
-            message and may remove the message from the inbox (archive).
+            Through a closed list of Gmail API operations it reads messages, their labels, the
+            mailbox&apos;s list of labels and its change history; creates the label{" "}
+            <span lang="zh-CN">分拣</span> (&ldquo;sorting&rdquo;) and labels under it, and renames
+            them; adds one of those labels to a message and may remove the message from the inbox
+            (archive). An undo removes that label and puts the message back in the inbox.
           </li>
           <li>
-            It never sends, deletes or trashes mail, never marks mail read or unread, and never
-            changes a label it did not create. Every change it makes to a message is recorded in its
-            ledger and can be undone from there.
+            It never sends, deletes or trashes mail and never marks mail read or unread. The only
+            labels it renames or adds to mail are under <span lang="zh-CN">分拣/</span>, including
+            ones the owner made there; the only other label it changes on a message is the inbox.
+          </li>
+          <li>
+            Every change it makes to a message is recorded in its ledger first and, while the entry
+            is kept (180 days), can be undone from there, unless the owner has since moved the mail
+            to another label or the label was deleted.
           </li>
         </ul>
 
         <h2>How mail is processed</h2>
         <p>
           A new message is decided by the owner&apos;s rules, the nearest examples the owner has
-          corrected (compared through embeddings from the bge-m3 model) and a decision model (Clef
-          on Cloudflare Workers AI). All of this runs in the owner&apos;s own Cloudflare account: a
-          Worker, a Durable Object and Workers AI. The models are called directly, without AI
+          confirmed or corrected (or left alone for three days), compared through embeddings from
+          the bge-m3 model, and a decision model (Clef on Cloudflare Workers AI). All of this runs
+          in the owner&apos;s own Cloudflare account. The models are called directly, without AI
           Gateway, which would log request bodies.
         </p>
         <p>
           The models read masked text only: the sender&apos;s display name and domain, the subject
           (up to 200 characters), Gmail&apos;s snippet (300), the first text part of the body
-          (2,000), Gmail&apos;s category and the masked summaries of similar examples. Email
-          addresses, long numbers and URLs are masked before a model sees them.
+          (2,000), Gmail&apos;s category, whether the message came from a mailing list, a short code
+          derived from the address it was delivered to (never the address), and the masked summaries
+          of similar examples, together with the owner&apos;s label names and descriptions. Email
+          addresses and numbers of six or more digits are masked, and links are cut to their domain,
+          before a model sees them.
         </p>
 
         <h2>What is stored, and for how long</h2>
-        <p>Everything is stored in the owner&apos;s own Cloudflare account:</p>
+        <p>Everything is stored in the owner&apos;s own Cloudflare account and cleared daily:</p>
         <ul>
           <li>
             A decision&apos;s content (masked subject, sender and summary, and the exact sender
             address, domain, List-Id and delivered-to address): 14 days.
           </li>
-          <li>The review queue (masked subject and sender): 14 days.</li>
+          <li>The review queue (masked subject and sender): 14 days after the message arrived.</li>
           <li>Decisions and the ledger of changes, without content: 180 days.</li>
           <li>
             Examples (a masked summary of at most 200 characters and its embedding): until the owner
@@ -101,23 +109,34 @@ export default function MailsortPrivacyPage() {
             Rules (a sender address, domain, List-Id or delivered-to address, subject words and the
             owner&apos;s evidence and notes): until the owner deletes them, at most 500.
           </li>
+          <li>
+            Labels (their names under <span lang="zh-CN">分拣/</span>, some read from Gmail, and the
+            owner&apos;s descriptions): until the owner deletes them, at most 24.
+          </li>
+          <li>
+            Answers to the owner&apos;s own changes in the dashboard, kept so that a retried request
+            is not applied twice (they can hold a masked subject and sender or a rule&apos;s
+            values): 1 day.
+          </li>
           <li>Daily counters without content: 400 days.</li>
         </ul>
         <p>
-          Logs hold counts and codes only, never subjects, senders, addresses or label names. The
-          Google authorization (client ID, client secret and refresh token) is stored only as
-          Cloudflare Worker secrets, put there from the owner&apos;s own machine, and never in
-          GitHub.
+          Logs hold counts and codes only, never subjects, senders, addresses or label names.
+          Google&apos;s authorization is kept only as encrypted secrets in the owner&apos;s own
+          Cloudflare account, never in source code or on GitHub.
         </p>
 
         <h2>How the data is used</h2>
         <p>
-          The data is used only to label the owner&apos;s own mailbox. It is not sold, not shared
-          with third parties, not used for advertising and not used to train generalized AI models.
+          The data is used only to label the owner&apos;s own mailbox and is read by no one but the
+          owner. It is not sold, not used for advertising, not used to train generalized AI models
+          and not shared with anyone; Cloudflare processes it only as the host and model provider
+          (Workers AI) of the owner&apos;s own account.
         </p>
         <p>
-          mailsort&apos;s use and transfer of information received from Google APIs adheres to the{" "}
-          <a href="https://developers.google.com/terms/api-services-user-data-policy">
+          mailsort&apos;s use and transfer to any other app of information received from Google APIs
+          will adhere to the{" "}
+          <a href="https://developers.google.com/terms/api-services-user-data-policy#additional_requirements_for_specific_api_scopes">
             Google API Services User Data Policy
           </a>
           , including the Limited Use requirements.
@@ -129,8 +148,9 @@ export default function MailsortPrivacyPage() {
           <a href="https://myaccount.google.com/permissions">
             https://myaccount.google.com/permissions
           </a>
-          . Stored examples and rules can be deleted one by one in the mailsort dashboard;
-          everything else expires as listed above.
+          . Revoking stops every Gmail read and write but does not delete what is stored: content
+          expires as listed above, and examples, rules and labels stay until the owner deletes them
+          in the mailsort dashboard (deleting a label also deletes its rules and examples).
         </p>
 
         <h2>Contact</h2>

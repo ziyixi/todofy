@@ -249,11 +249,14 @@ test.describe("public site", () => {
       page.getByRole("heading", { level: 1, name: "mailsort privacy policy" }),
     ).toBeVisible();
     await expect(page.locator("main")).toContainText(
-      "mailsort's use and transfer of information received from Google APIs adheres to the Google API Services User Data Policy, including the Limited Use requirements.",
+      "mailsort's use and transfer to any other app of information received from Google APIs will adhere to the Google API Services User Data Policy, including the Limited Use requirements.",
     );
     await expect(
       page.getByRole("link", { name: "Google API Services User Data Policy" }),
-    ).toHaveAttribute("href", "https://developers.google.com/terms/api-services-user-data-policy");
+    ).toHaveAttribute(
+      "href",
+      "https://developers.google.com/terms/api-services-user-data-policy#additional_requirements_for_specific_api_scopes",
+    );
     await expect(
       page.getByRole("link", { name: "https://myaccount.google.com/permissions" }),
     ).toHaveAttribute("href", "https://myaccount.google.com/permissions");

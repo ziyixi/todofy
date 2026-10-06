@@ -412,3 +412,26 @@ describe('the store', () => {
     expect(readFlow(s, 30, T0).counts).toEqual([]);
   });
 });
+
+describe('retention', () => {
+  it('drops a review item 14 days after its mail came, even when it was queued later', () => {
+    const s = store();
+    const queue = (id: string, receive: number, create: number): void => {
+      s.run(
+        `INSERT INTO review (id, message_id, kind, state, decider, subject, sender, receive_time, create_time) VALUES (?, ?, 'audit', 'pending', 'model', 's', 'f', ?, ?)`,
+        id, `m-${id}`, receive, create,
+      );
+    };
+    queue('fresh', T0, T0);
+    // An audit sample of mail three days old, and a failed write's suggestion of mail ten days old.
+    queue('audit', T0 - 3 * DAY, T0);
+    queue('late', T0 - 10 * DAY, T0);
+    // Each goes 14 days after its mail came, though all three were queued at T0.
+    s.prune(T0 + 5 * DAY);
+    expect(s.all(`SELECT id FROM review ORDER BY id`)).toEqual([{ id: 'audit' }, { id: 'fresh' }]);
+    s.prune(T0 + 12 * DAY);
+    expect(s.all(`SELECT id FROM review ORDER BY id`)).toEqual([{ id: 'fresh' }]);
+    s.prune(T0 + 15 * DAY);
+    expect(s.all(`SELECT id FROM review ORDER BY id`)).toEqual([]);
+  });
+});

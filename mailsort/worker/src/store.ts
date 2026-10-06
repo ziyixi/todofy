@@ -585,7 +585,8 @@ export class Store {
        WHERE content_cleared = 0 AND decided_at < ?`,
       content,
     );
-    this.run(`DELETE FROM review WHERE create_time < ?`, content);
+    // An audit sample or a late write failure can queue older mail: its content still goes 14 days after the mail came.
+    this.run(`DELETE FROM review WHERE create_time < ? OR receive_time < ?`, content, content);
     const records = now - DECISIONS_KEPT_MS;
     this.run(`DELETE FROM decisions WHERE decided_at < ?`, records);
     this.run(`DELETE FROM ledger WHERE create_time < ? AND state IN ('applied', 'failed', 'undone')`, records);

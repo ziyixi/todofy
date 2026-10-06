@@ -88,11 +88,13 @@ reads no Gmail and decides nothing, but the alarm still runs and still clears wh
 | What | Kept |
 | --- | --- |
 | A decision's content: masked subject, sender and summary, and the exact sender address, domain, List-Id and delivered-to address | 14 days |
-| The review queue (masked subject and sender) | 14 days |
+| The review queue (masked subject and sender) | 14 days after the mail came (an audit sample or a late write failure can queue older mail) |
 | Decisions and the ledger without content (IDs, labels, probabilities, model, states) | 180 days |
 | Examples: a masked summary (subject, sender name and domain, snippet; at most 200 characters) and its embedding | until deleted (例子, or with their label), at most 2,000 |
 | Rules: the exact sender address, domain, List-Id or delivered-to address, their subject words, the owner's evidence and notes, proposed or active | until deleted (规则, or with their label), at most 500 |
 | The flow counters: counts per UTC day, stage, outcome and label (no content) | 400 days |
+| Labels: their paths under `分拣/` (some read from Gmail) and the owner's descriptions | until deleted, at most 24 |
+| The answers to the owner's own changes, kept by request ID so a retry is not applied twice (they can hold a masked subject and sender or a rule's values) | 1 day |
 
 Examples and rules are what the app learned, so they outlive the 14 days on purpose; both are shown in full in the
 dashboard and can be deleted there one by one.

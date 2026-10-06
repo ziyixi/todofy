@@ -262,7 +262,7 @@ Standard Protection 保留正式域名公开，并保护生成的部署地址；
   - force_build：`false`（bootstrap 本身会重建）
   - allow_empty：`false`
 - [ ] 等候 candidate 验证、promote、公开域名验证和 GitHub success 全部完成。
-- [ ] 检查首页、`/blog`、`/publications`、真实文章（若有）、`/feed.xml`、`/sitemap.xml`、`/robots.txt`、`/build-info.json` 和未知 URL 的 404。
+- [ ] 检查首页、`/blog`、`/publications`、`/privacy/mailsort`、真实文章（若有）、`/feed.xml`、`/sitemap.xml`、`/robots.txt`、`/build-info.json` 和未知 URL 的 404。
 - [ ] 删除 `BOOTSTRAP_APPROVAL`；保留旧站至观察期结束。
 
 若首次失败，先按准备好的旧站方案恢复，保留失败记录；之后按 operations 手册走 recovery，不删除记录伪装为第一次发布。

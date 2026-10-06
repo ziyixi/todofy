@@ -58,8 +58,12 @@ Landing order:
 
 Already set: production secret `MAILSORT_CSRF_SIGNING_KEY`, variable `MAILSORT_MODE=shadow` (the mode ceiling).
 
-Owner, after it is live: Google Cloud project with the Gmail API, consent screen External + In production, Desktop
-OAuth client, then `mint-token.mjs --scope readonly`; apply the 15-label template; import the validated rule set (93
+Google side, done by an agent with the owner's OK on 2026-10-06: a dedicated Google Cloud project with the Gmail API
+enabled and the consent screen (External; the owner approved accepting the User Data Policy). Left there: the Branding
+page's homepage `https://www.ziyixi.science/`, privacy policy `https://www.ziyixi.science/privacy/mailsort` (the page
+this change adds; enter it once the site release is live) and authorized domain `ziyixi.science`, then Publish app (In
+production). Owner, after mailsort is live: the Desktop OAuth client (its secret is shown once; never by an agent),
+then `mint-token.mjs --scope readonly`; apply the 15-label template; import the validated rule set (93
 precision-checked rules from a read-only survey of the last 30 days, handed to the owner as a file, never in the
 repo; previewed clean onto the template in workerd: 93 create, 0 invalid, 0 warnings); shadow for 1–2 weeks; turn
 正式打 on per label when its precision bound passes; `--scope modify` and `MAILSORT_MODE=live` last. Optional: a

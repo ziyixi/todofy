@@ -158,7 +158,7 @@ test.describe("deployed artifact", () => {
       if (message.type() === "error") consoleErrors.push(message.text());
     });
 
-    for (const pathname of ["/", "/blog", "/publications"] as const) {
+    for (const pathname of ["/", "/blog", "/publications", "/privacy/mailsort"] as const) {
       const response = await page.goto(pathname, { waitUntil: "networkidle" });
       expect(response?.status(), pathname).toBe(200);
       const canonical = await page.locator('link[rel="canonical"]').getAttribute("href");
