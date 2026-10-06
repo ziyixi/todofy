@@ -93,7 +93,7 @@ describe('标签', () => {
     const server = new FakeServer()
     const root = await open(server, '/labels')
     expect(root.textContent).toContain('分拣/订阅')
-    const name = root.querySelector<HTMLInputElement>('input[aria-label="新标签名称"]')
+    const name = root.querySelector<HTMLInputElement>('input[aria-label="新标签路径"]')
     if (name === null) throw new Error('no input')
     name.value = '出行'
     buttonNamed(root, '创建').click()
@@ -119,7 +119,7 @@ describe('标签', () => {
     buttonNamed(root, '从 Gmail 同步').click()
     await settle()
     expect(toastText(root)).toBe('已同步：关联 1，导入 1（未启用，请补说明），Gmail 中缺失 0')
-    expect(root.textContent).toContain('还没有说明：模型只能凭名称判断')
+    expect(root.textContent).toContain('还没有说明：模型不会选这个标签，只有规则和例子能打它')
   })
 })
 
@@ -142,7 +142,7 @@ describe('规则', () => {
     const root = await open(server, '/rules')
     buttonNamed(root, '导出为 Gmail 过滤器').click()
     await settle()
-    expect(root.textContent).toContain('已导出 1 条；2 条未导出（可信类规则需 DMARC，过滤器无法检查）')
+    expect(root.textContent).toContain('已导出 1 条；2 条未导出（可信类或要求 DMARC 的规则过滤器无法检查')
     expect(root.querySelector<HTMLTextAreaElement>('textarea[aria-label="Gmail 过滤器文件"]')?.hidden).toBe(false)
   })
 })
@@ -253,7 +253,7 @@ describe('例子', () => {
 describe('the shell', () => {
   it('has every view as a tab and answers an unknown path', async () => {
     const root = await open(new FakeServer(), '/nowhere')
-    expect([...root.querySelectorAll('.tabs a')].map((a) => a.textContent)).toEqual(['待审', '标签', '规则', '例子', '准确率', '记录', '状态', '设置'])
+    expect([...root.querySelectorAll('.tabs a')].map((a) => a.textContent)).toEqual(['待审', '标签', '规则', '流程', '导入', '例子', '准确率', '记录', '状态', '设置'])
     expect(root.textContent).toContain('找不到这个页面')
   })
 

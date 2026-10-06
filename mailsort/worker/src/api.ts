@@ -14,6 +14,12 @@ import type { ServiceHandlers, ShapeOf } from '@ziyixi/proto/http-transcoder';
 import { LabelSchema, type Label } from '@ziyixi/proto/mailsort/ui/v1/label_pb';
 import {
   ExportGmailFiltersResponseSchema,
+  ExportRulesResponseSchema,
+  ImportChange_Action,
+  ImportChange_Kind,
+  ImportChangeSchema,
+  ImportRulesResponseSchema,
+  LabelImportSchema,
   ListExamplesResponseSchema,
   ListLabelsResponseSchema,
   ListLedgerEntriesResponseSchema,
@@ -34,18 +40,20 @@ import { RpcError } from '@ziyixi/proto/rpc-status';
 import { fromWire, toWire } from '@ziyixi/proto/wire-json';
 import { labelStats } from './accuracy.ts';
 import type { ModeName } from './env.ts';
+import { termsOf } from './decide.ts';
 import { deleteExample, deleteExamplesOfLabel, dropEmbeddings } from './examples.ts';
 import { setVerdict } from './feedback.ts';
 import { gmailFilterXml } from './filters.ts';
-import { GoogleError, hasControl, ownedName, type GmailClient } from './gmail.ts';
+import { FLOW_RANGES, readFlow } from './flow.ts';
+import { GoogleError, hasControl, type GmailClient } from './gmail.ts';
 import { newEtag, shortId } from './ids.ts';
+import { applyImport, exportDocument, foldTerms, planImport, planValid, templateLabels, type ImportPlan, type LabelInput, type RuleInput } from './import.ts';
 import {
   CLEF,
   CLEF_FLASH,
   DAILY_WRITE_LIMIT_MAX,
   DAY,
   DESCRIPTION_MAX,
-  DISPLAY_NAME_MAX,
   FLASH_SWITCH_SHARE,
   ID_PATTERN,
   LABEL_ID_PATTERN,
@@ -56,6 +64,7 @@ import {
   NONE,
   PAGE,
   RULE_PAGE,
+  RULE_TEXT_MAX,
   RULES_MAX,
   RUN_WRITE_LIMIT_MAX,
   THRESHOLD_MAX,
@@ -63,13 +72,14 @@ import {
   UNDO_BATCH,
   UNDO_RANGE_MAX_MS,
 } from './limits.ts';
-import { exampleMessage, labelMessage, labelName, ledgerMessage, MODES, modeName, reviewMessage, RULE_KINDS, ruleMessage } from './model.ts';
+import { exampleMessage, flowMessage, labelMessage, labelName, ledgerMessage, MODES, modeName, reviewMessage, RULE_KINDS, ruleMessage } from './model.ts';
+import { labelIdFor, normalizePath, pathOfGmailName, treeConflict } from './paths.ts';
 import { REASONS, sortError } from './reasons.ts';
 import { ruleValueOk } from './rule-value.ts';
 import { authState, type Budget, writeScope } from './session.ts';
 import { effectiveMode, readSettings, writeSettings, type SettingsValue } from './settings.ts';
 import { utcDay, type DecisionRow, type LabelRow, type LedgerRow, type ReviewRow, type RuleRow, type Store } from './store.ts';
-import { ensureGmailLabel, executeWrites, intend, intendUndo, undoable, type WriteContext } from './writes.ts';
+import { ensureGmailLabel, ensureGmailParents, executeWrites, intend, intendUndo, undoable, type WriteContext } from './writes.ts';
 
 /** What every handler gets from MailsortState. */
 export interface ApiContext {
@@ -210,9 +220,11 @@ function labelOut(ctx: ApiContext, row: LabelRow): Label {
   return labelMessage(row, ctx.store.exampleCounts().get(row.id) ?? 0);
 }
 
-function checkDisplayName(name: string): string {
-  const value = name.trim();
-  if (value === '' || Array.from(value).length > DISPLAY_NAME_MAX || value.includes('/') || hasControl(value) || !ownedName(`${LABEL_PREFIX}${value}`)) throw sortError('INVALID_LABEL');
+/** A label's path (paths.ts normalizePath), and the tree rule: no label may be the parent of another (only leaves). */
+function checkDisplayName(ctx: ApiContext, name: string, exceptId = ''): string {
+  const value = normalizePath(name);
+  if (value === null) throw sortError('INVALID_LABEL');
+  if (treeConflict(value, ctx.store.labelPaths(exceptId)) !== null) throw sortError('INVALID_LABEL');
   return value;
 }
 
@@ -271,7 +283,8 @@ function choose(ctx: ApiContext, item: ReviewRow, decision: DecisionRow, chosen:
     const label = store.label(chosen);
     if (label !== undefined && label.gmail_state !== 'missing') {
       // The decision keeps its own label and outcome (the accuracy is about the decision); the ledger row is the owner's.
-      ids.push(intend(store, decision.message_id, label, true, 'owner', ctx.now));
+      // A label that keeps its mail in the inbox does so for the owner's choice too.
+      ids.push(intend(store, decision.message_id, label, label.keep_in_inbox !== 1, 'owner', ctx.now));
     }
   }
   return ids;
@@ -319,6 +332,90 @@ function ruleOut(ctx: ApiContext, row: RuleRow): ReturnType<typeof ruleMessage> 
   return ruleMessage(row, ctx.store.label(row.label_id)?.trust === 1);
 }
 
+/** The owner's evidence or notes of a rule: at most RULE_TEXT_MAX characters, no control characters. */
+function checkRuleText(text: string): string {
+  const value = text.trim();
+  if (Array.from(value).length > RULE_TEXT_MAX || hasControl(value)) throw sortError('INVALID_RULE');
+  return value;
+}
+
+/** An import's entries from the request (the generated messages, read strictly by the transcoder). */
+function importInput(request: { labels: readonly { path: string; description: string; trust: boolean; keepInInbox: boolean; sensitive: boolean; threshold: number }[]; rules: readonly { id: string; match?: { fromAddress: string; fromDomain: string; listId: string; toAddress: string } | undefined; label: string; keepInInbox: boolean; trust: boolean; requireDmarc: boolean; evidence: string; notes: string; subjectIncludes: string[]; subjectExcludes: string[] }[]; useTemplate: boolean }): { labels: LabelInput[]; rules: RuleInput[] } {
+  if (request.useTemplate) {
+    if (request.labels.length > 0 || request.rules.length > 0) bad('use_template imports the template only: leave labels and rules empty');
+    return { labels: templateLabels(), rules: [] };
+  }
+  if (request.labels.length > LABELS_MAX || request.rules.length > RULES_MAX) bad('too many entries');
+  return {
+    labels: request.labels.map((item) => ({ path: item.path, description: item.description, trust: item.trust, keepInInbox: item.keepInInbox, sensitive: item.sensitive, threshold: item.threshold })),
+    rules: request.rules.map((item) => ({
+      id: item.id,
+      match: item.match,
+      label: item.label,
+      keepInInbox: item.keepInInbox,
+      trust: item.trust,
+      requireDmarc: item.requireDmarc,
+      evidence: item.evidence,
+      notes: item.notes,
+      subjectIncludes: item.subjectIncludes,
+      subjectExcludes: item.subjectExcludes,
+    })),
+  };
+}
+
+const ACTIONS = { create: ImportChange_Action.CREATE, update: ImportChange_Action.UPDATE, skip: ImportChange_Action.SKIP, invalid: ImportChange_Action.INVALID } as const;
+
+/** The plan as ImportRulesResponse. */
+function importResponse(plan: ImportPlan, applied: boolean): ReturnType<typeof create<typeof ImportRulesResponseSchema>> {
+  const changes = [
+    ...plan.labels.map((item) =>
+      create(ImportChangeSchema, {
+        kind: ImportChange_Kind.LABEL,
+        index: item.index,
+        action: ACTIONS[item.action],
+        key: item.key,
+        resource: item.id === '' ? '' : labelName(item.id),
+        changedFields: [...item.changed],
+        problem: item.problem,
+        warning: item.warning,
+      }),
+    ),
+    ...plan.rules.map((item) =>
+      create(ImportChangeSchema, {
+        kind: ImportChange_Kind.RULE,
+        index: item.index,
+        action: ACTIONS[item.action],
+        key: item.key,
+        resource: item.id === '' ? '' : `rules/${item.id}`,
+        changedFields: [...item.changed],
+        problem: item.problem,
+        warning: item.warning,
+      }),
+    ),
+  ];
+  const all = [...plan.labels, ...plan.rules];
+  return create(ImportRulesResponseSchema, {
+    changes,
+    applied,
+    createdLabelCount: plan.labels.filter((item) => item.action === 'create').length,
+    updatedLabelCount: plan.labels.filter((item) => item.action === 'update').length,
+    createdRuleCount: plan.rules.filter((item) => item.action === 'create').length,
+    updatedRuleCount: plan.rules.filter((item) => item.action === 'update').length,
+    skippedCount: all.filter((item) => item.action === 'skip').length,
+    invalidCount: all.filter((item) => item.action === 'invalid').length,
+    labels: plan.labels.map((item) =>
+      create(LabelImportSchema, {
+        path: `${LABEL_PREFIX}${item.values.path}`,
+        description: item.values.description,
+        trust: item.values.trust,
+        keepInInbox: item.values.keepInInbox,
+        sensitive: item.values.sensitive,
+        threshold: item.values.threshold,
+      }),
+    ),
+  });
+}
+
 // ---- the handlers ----------------------------------------------------------------------------------------------------------
 
 export const handlers: ServiceHandlers<ShapeOf<typeof MailsortUiService>, ApiContext> = {
@@ -344,10 +441,11 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailsortUiService>, ApiCon
   },
 
   async createLabel(request, ctx) {
-    const id = request.labelId === '' ? shortId('l') : request.labelId;
-    if (!LABEL_ID_PATTERN.test(id) || id === NONE) throw sortError('INVALID_LABEL');
     const label = request.label ?? bad('label is required');
-    const displayName = checkDisplayName(label.displayName);
+    const displayName = checkDisplayName(ctx, label.displayName);
+    // Without an ID, one from the path (`金融/投资` -> `finance-invest`): meaningful in URLs and stable.
+    const id = request.labelId !== '' ? request.labelId : (labelIdFor(displayName, new Set(ctx.store.labels().map((row) => row.id))) ?? shortId('l'));
+    if (!LABEL_ID_PATTERN.test(id) || id === NONE) throw sortError('INVALID_LABEL');
     const description = checkDescription(label.description);
     const threshold = checkThreshold(label.threshold);
     const created = once(ctx, request.requestId, 'CreateLabel', `labels/${id}`, LabelSchema, () => {
@@ -356,8 +454,8 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailsortUiService>, ApiCon
       if (store.count(`SELECT count(*) AS n FROM labels`) >= LABELS_MAX) throw sortError('LIMIT_REACHED');
       const seq = (store.one<{ seq: number | null }>(`SELECT max(seq) AS seq FROM labels`)?.seq ?? 0) + 1;
       store.run(
-        `INSERT INTO labels (id, seq, display_name, description, enabled, live, trust, threshold, gmail_state, desc_version, live_since, create_time, update_time, etag)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', 1, ?, ?, ?, ?)`,
+        `INSERT INTO labels (id, seq, display_name, description, enabled, live, trust, threshold, gmail_state, desc_version, live_since, create_time, update_time, etag, keep_in_inbox, sensitive)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', 1, ?, ?, ?, ?, ?, ?)`,
         id,
         seq,
         displayName,
@@ -370,6 +468,8 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailsortUiService>, ApiCon
         ctx.now,
         ctx.now,
         newEtag(ctx.now),
+        label.keepInInbox ? 1 : 0,
+        label.sensitive ? 1 : 0,
       );
       return labelOut(ctx, existingLabel(ctx, id));
     });
@@ -402,7 +502,7 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailsortUiService>, ApiCon
     const label = request.label ?? bad('label is required');
     const before = existingLabel(ctx, id);
     labelEtag(ctx, before, label.etag);
-    const displayName = has('display_name') ? checkDisplayName(label.displayName) : before.display_name;
+    const displayName = has('display_name') ? checkDisplayName(ctx, label.displayName, id) : before.display_name;
     const description = has('description') ? checkDescription(label.description) : before.description;
     const threshold = has('threshold') ? checkThreshold(label.threshold) : before.threshold;
     return onceAsync(ctx, request.requestId, 'UpdateLabel', `labels/${id}`, LabelSchema, async () => {
@@ -413,6 +513,9 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailsortUiService>, ApiCon
           if (!writeScope(ctx.store) || effectiveMode(readSettings(ctx.store), ctx.ceiling) === 'off') throw sortError('GMAIL_WRITE_NOT_ALLOWED');
           const client = await gmailFor(ctx);
           try {
+            // A new path may need new parents in Gmail (`生活/汽车` -> `出行/汽车` needs `分拣/出行`); the old ones stay.
+            const existing = new Map((await client.labels()).map((item) => [item.name, item.id]));
+            await ensureGmailParents(client, displayName, existing);
             await client.renameLabel(before.gmail_id, `${LABEL_PREFIX}${displayName}`);
           } catch (error) {
             throw gmailError(error);
@@ -424,7 +527,7 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailsortUiService>, ApiCon
         const live = has('live') ? label.live : before.live === 1;
         store.run(
           `UPDATE labels SET display_name = ?, description = ?, enabled = ?, live = ?, trust = ?, threshold = ?, desc_version = desc_version + ?,
-             live_since = ?, update_time = ?, etag = ? WHERE id = ?`,
+             live_since = ?, update_time = ?, etag = ?, keep_in_inbox = ?, sensitive = ? WHERE id = ?`,
           displayName,
           description,
           (has('enabled') ? label.enabled : before.enabled === 1) ? 1 : 0,
@@ -435,6 +538,8 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailsortUiService>, ApiCon
           live ? (before.live === 1 ? before.live_since : ctx.now) : null,
           ctx.now,
           newEtag(ctx.now),
+          (has('keep_in_inbox') ? label.keepInInbox : before.keep_in_inbox === 1) ? 1 : 0,
+          (has('sensitive') ? label.sensitive : before.sensitive === 1) ? 1 : 0,
           id,
         );
         return labelOut(ctx, existingLabel(ctx, id));
@@ -472,8 +577,15 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailsortUiService>, ApiCon
       }
       return ctx.transact(() => {
         const { store } = ctx;
-        const ours = gmailLabels.filter((label) => ownedName(label.name) && /^Label_[0-9]+$/.test(label.id));
-        const byName = new Map(ours.map((label) => [label.name.slice(LABEL_PREFIX.length), label]));
+        const ours = gmailLabels.flatMap((label) => {
+          const path = /^Label_[0-9]+$/.test(label.id) ? pathOfGmailName(label.name) : null;
+          return path === null ? [] : [{ ...label, path }];
+        });
+        // A Gmail label that is the parent of another of ours only groups them (分拣/开发 above 分拣/开发/CI通知):
+        // never a label of its own, since only leaves are labels.
+        const paths = ours.map((label) => label.path);
+        const leaves = ours.filter((label) => !paths.some((other) => other.startsWith(`${label.path}/`)));
+        const byName = new Map(leaves.map((label) => [label.path, label]));
         const ids = new Set(ours.map((label) => label.id));
         let linked = 0;
         let imported = 0;
@@ -491,17 +603,18 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailsortUiService>, ApiCon
           }
           byName.delete(row.display_name);
         }
-        for (const [leaf, label] of byName) {
+        for (const [path, label] of byName) {
           if (store.count(`SELECT count(*) AS n FROM labels`) >= LABELS_MAX) break;
           if (store.one(`SELECT 1 AS x FROM labels WHERE gmail_id = ?`, label.id) !== undefined) continue;
-          if (leaf.trim() === '' || Array.from(leaf).length > DISPLAY_NAME_MAX) continue;
+          // A Gmail label below or above one of the store's own would break the tree: left alone.
+          if (treeConflict(path, store.labelPaths()) !== null) continue;
           const seq = (store.one<{ seq: number | null }>(`SELECT max(seq) AS seq FROM labels`)?.seq ?? 0) + 1;
           store.run(
             `INSERT INTO labels (id, seq, display_name, description, enabled, live, trust, threshold, gmail_id, gmail_state, create_time, update_time, etag)
              VALUES (?, ?, ?, '', 0, 0, 0, 0, ?, 'linked', ?, ?, ?)`,
-            shortId('l'),
+            labelIdFor(path, new Set(store.labels().map((row) => row.id))) ?? shortId('l'),
             seq,
-            leaf,
+            path,
             label.id,
             ctx.now,
             ctx.now,
@@ -607,13 +720,40 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailsortUiService>, ApiCon
     const label = idOf(rule.label, 'labels');
     const id = request.ruleId === '' ? shortId('r') : request.ruleId;
     if (!LABEL_ID_PATTERN.test(id)) throw sortError('INVALID_RULE');
+    const includes = foldTerms(rule.subjectIncludes) ?? (() => { throw sortError('INVALID_RULE'); })();
+    const excludes = foldTerms(rule.subjectExcludes) ?? (() => { throw sortError('INVALID_RULE'); })();
+    const evidence = checkRuleText(rule.evidence);
+    const notes = checkRuleText(rule.notes);
     return Promise.resolve(
       once(ctx, request.requestId, 'CreateRule', `rules/${id}`, RuleSchema, () => {
         const { store } = ctx;
         existingLabel(ctx, label);
-        if (store.rule(id) !== undefined || store.one(`SELECT 1 AS x FROM rules WHERE kind = ? AND value = ? AND label_id = ?`, kind, value, label) !== undefined) throw sortError('INVALID_RULE');
+        const same = store.one(
+          `SELECT 1 AS x FROM rules WHERE kind = ? AND value = ? AND label_id = ? AND subject_includes = ? AND subject_excludes = ?`,
+          kind,
+          value,
+          label,
+          JSON.stringify(includes),
+          JSON.stringify(excludes),
+        );
+        if (store.rule(id) !== undefined || same !== undefined) throw sortError('INVALID_RULE');
         if (store.count(`SELECT count(*) AS n FROM rules`) >= RULES_MAX) throw sortError('LIMIT_REACHED');
-        store.run(`INSERT INTO rules (id, kind, value, label_id, state, create_time, update_time) VALUES (?, ?, ?, ?, 'active', ?, ?)`, id, kind, value, label, ctx.now, ctx.now);
+        store.run(
+          `INSERT INTO rules (id, kind, value, label_id, state, create_time, update_time, subject_includes, subject_excludes, keep_in_inbox, require_dmarc, evidence, notes)
+           VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?)`,
+          id,
+          kind,
+          value,
+          label,
+          ctx.now,
+          ctx.now,
+          JSON.stringify(includes),
+          JSON.stringify(excludes),
+          rule.keepInInbox ? 1 : 0,
+          rule.requireDmarc ? 1 : 0,
+          evidence,
+          notes,
+        );
         return ruleOut(ctx, store.rule(id) ?? notFound());
       }),
     );
@@ -652,18 +792,45 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailsortUiService>, ApiCon
   },
 
   exportGmailFilters(_request, ctx) {
-    const rows = ctx.store.all<RuleRow & { display_name: string; trust: number }>(
-      `SELECT r.*, l.display_name, l.trust FROM rules r JOIN labels l ON l.id = r.label_id WHERE r.state = 'active' ORDER BY r.create_time, r.id`,
+    const rows = ctx.store.all<RuleRow & { display_name: string; trust: number; label_keep: number }>(
+      `SELECT r.*, l.display_name, l.trust, l.keep_in_inbox AS label_keep FROM rules r JOIN labels l ON l.id = r.label_id WHERE r.state = 'active' ORDER BY r.create_time, r.id`,
     );
-    // Trust rules need DMARC, which a filter cannot check; a value that is not plain (an older row) is never exported.
-    const exported = rows.filter((row) => row.trust === 0 && ruleValueOk(row.kind, row.value));
+    // Left out: a trust label or a rule's own DMARC switch (a filter cannot check DMARC, and a forged From could then
+    // reach a trust label); a carve-out (Gmail applies every matching filter, so it and the sender's plain rule would
+    // both label the mail); a value that is not plain (an older row). A sender rule of another label is exported
+    // without its DMARC check: such a filter can only put a forged mail under a non-trust label, as Gmail's own filters
+    // do. A rule or label that keeps its mail in the inbox exports without archiving.
+    const exported = rows.filter(
+      (row) => row.trust === 0 && row.require_dmarc === 0 && termsOf(row.subject_includes).length === 0 && termsOf(row.subject_excludes).length === 0 && ruleValueOk(row.kind, row.value),
+    );
     return Promise.resolve(
       create(ExportGmailFiltersResponseSchema, {
-        xml: gmailFilterXml(exported.map((row) => ({ kind: row.kind, value: row.value, labelName: row.display_name })), ctx.now),
+        xml: gmailFilterXml(exported.map((row) => ({ kind: row.kind, value: row.value, labelName: row.display_name, archive: row.keep_in_inbox === 0 && row.label_keep === 0 })), ctx.now),
         ruleCount: exported.length,
         skippedCount: rows.length - exported.length,
       }),
     );
+  },
+
+  importRules(request, ctx) {
+    const input = importInput(request);
+    if (request.validateOnly) {
+      const plan = planImport(ctx.store, input.labels, input.rules);
+      return Promise.resolve(importResponse(plan, false));
+    }
+    return Promise.resolve(
+      once(ctx, request.requestId, 'ImportRules', 'rules', ImportRulesResponseSchema, () => {
+        // Planned again inside the transaction, so the preview the owner saw can never apply to a changed store.
+        const plan = planImport(ctx.store, input.labels, input.rules);
+        if (!planValid(plan)) throw sortError('INVALID_IMPORT', [{ schema: ImportRulesResponseSchema, message: importResponse(plan, false) }]);
+        return importResponse(applyImport(ctx.store, plan, ctx.now), true);
+      }),
+    );
+  },
+
+  exportRules(_request, ctx) {
+    const { json, labels, rules } = exportDocument(ctx.store);
+    return Promise.resolve(create(ExportRulesResponseSchema, { json, labelCount: labels, ruleCount: rules }));
   },
 
   // examples
@@ -712,19 +879,21 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailsortUiService>, ApiCon
 
   listLedgerEntries(request, ctx) {
     const size = pageSize(request.pageSize, PAGE);
-    const before = cursorOf(request.pageToken, {}, stringCursor) ?? '￿';
-    const rows = ctx.store.all<LedgerRow & { subject: string | null; sender: string | null }>(
-      `SELECT l.*, d.subject, d.sender FROM ledger l LEFT JOIN decisions d ON d.message_id = l.message_id WHERE l.id < ? ORDER BY l.id DESC LIMIT ?`,
-      before,
-      size + 1,
-    );
+    const label = request.label === '' ? '' : idOf(request.label, 'labels');
+    const before = cursorOf(request.pageToken, { label }, stringCursor) ?? '￿';
+    type Row = LedgerRow & { subject: string | null; sender: string | null };
+    const select = `SELECT l.*, d.subject, d.sender FROM ledger l LEFT JOIN decisions d ON d.message_id = l.message_id`;
+    const rows =
+      label === ''
+        ? ctx.store.all<Row>(`${select} WHERE l.id < ? ORDER BY l.id DESC LIMIT ?`, before, size + 1)
+        : ctx.store.all<Row>(`${select} WHERE l.label_id = ? AND l.id < ? ORDER BY l.id DESC LIMIT ?`, label, before, size + 1);
     const page = rows.slice(0, size);
     const last = page[page.length - 1];
     const owned = ctx.store.ownedGmailIds();
     return Promise.resolve(
       create(ListLedgerEntriesResponseSchema, {
         ledgerEntries: page.map((row) => ledgerMessage(row, { undoable: undoable(row, owned), subject: row.subject, sender: row.sender })),
-        nextPageToken: rows.length > size && last !== undefined ? encodePageToken(last.id, {}) : '',
+        nextPageToken: rows.length > size && last !== undefined ? encodePageToken(last.id, { label }) : '',
       }),
     );
   },
@@ -784,6 +953,16 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailsortUiService>, ApiCon
       const undone = rows.filter((row) => ctx.store.ledgerRow(row.id)?.state === 'undone').length;
       return create(UndoLedgerEntriesResponseSchema, { undoneCount: undone, failedCount: failed, remainingCount: ctx.store.count(`SELECT count(*) AS n ${range}`, start, end) });
     });
+  },
+
+  // the flow
+
+  getMailFlow(request, ctx) {
+    const range = request.name.startsWith('mailFlows/') ? request.name.slice('mailFlows/'.length) : '';
+    const days = Object.hasOwn(FLOW_RANGES, range) ? FLOW_RANGES[range] : undefined;
+    if (days === undefined) notFound();
+    const { start, end, counts } = readFlow(ctx.store, days, ctx.now);
+    return Promise.resolve(flowMessage(range, start, end, counts));
   },
 
   // singletons

@@ -25,8 +25,12 @@ export const REASONS: Readonly<Record<Reason, { readonly code: Code; readonly me
   INTERNAL: { code: Code.INTERNAL, message: 'internal error', zh: '服务出错了，请稍后刷新页面' },
   LABEL_EXISTS: { code: Code.ALREADY_EXISTS, message: 'a label holds this ID or name', zh: '已有同名或同 ID 的标签' },
   ETAG_MISMATCH: { code: Code.ABORTED, message: 'the resource changed since the etag', zh: '这一项已在别处修改，已载入最新内容' },
-  INVALID_LABEL: { code: Code.INVALID_ARGUMENT, message: 'a label ID or name breaks its rules', zh: '标签 ID 只能用小写字母、数字和连字符（字母开头，最多 40 个字符）；名称 1–40 个字符，不能含“/”；阈值须在 0.5–0.99 之间（0 为默认）' },
-  INVALID_RULE: { code: Code.INVALID_ARGUMENT, message: 'the rule kind and value do not fit', zh: '规则的类型和值不匹配' },
+  INVALID_LABEL: {
+    code: Code.INVALID_ARGUMENT,
+    message: 'a label ID or name breaks its rules',
+    zh: '标签 ID 只能用小写字母、数字和连字符（字母开头，最多 40 个字符）；名称是最多三级的路径（如“金融/投资”），每级 1–40 个字符；只有末级是标签，不能和已有标签互为上下级；阈值须在 0.5–0.99 之间（0 为默认）',
+  },
+  INVALID_RULE: { code: Code.INVALID_ARGUMENT, message: 'the rule kind and value do not fit', zh: '规则无效：类型和值不匹配、主题条件超出限制（每边最多 8 个、每个 1–40 字），或已有完全相同的规则' },
   INVALID_SETTINGS: { code: Code.INVALID_ARGUMENT, message: 'a setting is outside its range', zh: '设置超出允许范围' },
   LIMIT_REACHED: { code: Code.FAILED_PRECONDITION, message: 'the store holds the most items it may', zh: '数量已达上限' },
   ALREADY_RESOLVED: { code: Code.FAILED_PRECONDITION, message: 'the review item is resolved', zh: '这封邮件已经处理过了' },
@@ -34,6 +38,7 @@ export const REASONS: Readonly<Record<Reason, { readonly code: Code; readonly me
   GMAIL_NOT_AUTHORIZED: { code: Code.FAILED_PRECONDITION, message: 'Gmail is not authorized', zh: 'Gmail 尚未授权或授权已失效' },
   GMAIL_WRITE_NOT_ALLOWED: { code: Code.FAILED_PRECONDITION, message: 'the mode or the grant does not allow Gmail writes', zh: '当前模式或授权不允许修改 Gmail' },
   DEPENDENCY_UNAVAILABLE: { code: Code.UNAVAILABLE, message: 'Gmail or Workers AI did not answer; repeat the request', zh: 'Gmail 或模型暂时不可用，请稍后再试' },
+  INVALID_IMPORT: { code: Code.INVALID_ARGUMENT, message: 'an import entry is invalid', zh: '导入内容有误，未做任何更改；请先预览并修正标出的条目' },
 };
 
 export function isReason(value: string): value is Reason {

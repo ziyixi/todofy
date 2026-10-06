@@ -92,7 +92,10 @@ export interface Features {
   readonly senderAddress: string;
   readonly senderDomain: string;
   readonly listId: string;
+  /** The Delivered-To address Gmail wrote; never the To the sender wrote (a delivered-to rule must not be forgeable). */
   readonly deliveredTo: string;
+  /** The subject as it is, for the rules' subject conditions only (never stored, never sent to the model). */
+  readonly rawSubject: string;
   /** Masked: what the model, the review queue and the examples see. */
   readonly sender: string;
   readonly subject: string;
@@ -113,13 +116,16 @@ const CATEGORIES: Readonly<Record<string, string>> = {
 
 export async function features(message: ReadMessage): Promise<Features> {
   const from = firstMailbox(message.headers.from);
-  const delivered = firstMailbox(message.headers.deliveredTo) ?? firstMailbox(message.headers.to);
+  const deliveredTo = firstMailbox(message.headers.deliveredTo);
+  // The model's code for the address may fall back to To: it is only a hint, never a key a rule matches.
+  const delivered = deliveredTo ?? firstMailbox(message.headers.to);
   const senderName = from === null ? '' : mask(from.name, 60);
   return {
     senderAddress: from?.address ?? '',
     senderDomain: from?.domain ?? '',
     listId: listIdOf(message.headers.listId),
-    deliveredTo: delivered?.address ?? '',
+    deliveredTo: deliveredTo?.address ?? '',
+    rawSubject: message.headers.subject,
     sender: cut(from === null ? '' : `${senderName} <${from.domain}>`.trim(), SENDER_CHARS),
     subject: mask(message.headers.subject, SUBJECT_CHARS),
     snippet: mask(message.snippet, SNIPPET_CHARS),

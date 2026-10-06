@@ -8,7 +8,8 @@
  * 3. feedback: the queued label changes become verdicts, examples and rule proposals (feedback.ts);
  * 4. leftover writes (retries), each through the same gate as a new write;
  * 5. drain: at most DRAIN_MAX pending mails, while the subrequest budget lasts: read, skip what is not the owner's
- *    incoming mail, mask, decide (rules, neighbours, Clef), record, and in live mode write through the ledger;
+ *    incoming mail, mask, decide (rules, neighbours, Clef), record (with the flow counters, flow.ts), and in live
+ *    mode write through the ledger: the label added, INBOX removed unless the label or the rule keeps it;
  * 6. embeddings of new examples, and once per UTC day: weak accepts, the audit sample, live gating and the retention
  *    cleanup.
  *
@@ -21,12 +22,13 @@
  * The pass answers when it wants to run again: soon while a backlog waits, else ALARM_IDLE_MS.
  */
 import { labelStats } from './accuracy.ts';
-import { AiError, AiQuotaError, cutTokens, decide as askClef, embed, toBlob, type ClefOption, type ClefState } from './ai.ts';
+import { AiError, AiQuotaError, clefState, decide as askClef, embed, toBlob, type ClefOption } from './ai.ts';
 import { candidatesOf, clefDecision, neighbourDecision, ruleDecision, type Decision, type LabelFacts } from './decide.ts';
-import { dmarcAligned } from './dmarc.ts';
+import { dkimPassDomains, dmarcAligned } from './dmarc.ts';
 import { modeCeiling, type AiRunner, type Env, type ModeName } from './env.ts';
 import { embeddedCount, nearest, storeEmbedding, unembedded } from './examples.ts';
 import { applyFeedback } from './feedback.ts';
+import { countFlow, skipOutcome, stageOf } from './flow.ts';
 import { GmailRefused, GoogleError, isMessageId, type AccessToken, type GmailClient, type HistoryPage } from './gmail.ts';
 import { timeId } from './ids.ts';
 import {
@@ -47,7 +49,6 @@ import {
   INSTALL_GRACE_MS,
   MAIL_ATTEMPTS_MAX,
   MAIL_SUBREQUESTS,
-  NEIGHBOUR_TOKENS_MAX,
   NEIGHBOURS,
   RESYNC_MAX,
   RETRY_BASE_MS,
@@ -58,8 +59,9 @@ import {
   WEAK_ACCEPT_MS,
   WEAK_EXAMPLES_BELOW,
 } from './limits.ts';
-import { features, summaryOf, type Features } from './mask.ts';
+import { features, summaryOf } from './mask.ts';
 import { readMessage } from './mime.ts';
+import { optionKeys, pathSlug } from './paths.ts';
 import { Budget, noteGoogleError, noteTokenOk, openSession, writeScope } from './session.ts';
 import { effectiveMode, readSettings, tripBreaker, type SettingsValue } from './settings.ts';
 import { utcDay, type LabelRow, type Store } from './store.ts';
@@ -285,8 +287,9 @@ function readFailed(ctx: MailContext, messageId: string, attempts: number, error
   return 'skipped';
 }
 
+/** Records a skipped mail (and counts it once in the flow). Run inside a transaction. */
 function recordSkip(store: Store, id: string, threadId: string, receivedAt: number, now: number, reason: string): void {
-  store.run(
+  const recorded = store.run(
     `INSERT OR IGNORE INTO decisions (message_id, thread_id, received_at, decided_at, outcome, decider, unsure_reason, content_cleared) VALUES (?, ?, ?, ?, 'skipped', 'skip', ?, 1)`,
     id,
     threadId,
@@ -294,32 +297,8 @@ function recordSkip(store: Store, id: string, threadId: string, receivedAt: numb
     now,
     reason,
   );
+  if (recorded > 0) countFlow(store, now, 'skipped', skipOutcome(reason), null);
   store.run(`DELETE FROM pending WHERE message_id = ?`, id);
-}
-
-/** Whitespace runs as one space, for comparing Gmail's snippet with the body it was cut from. */
-function fold(text: string): string {
-  return text.replace(/\s+/g, ' ').trim();
-}
-
-/**
- * The model's state of a mail: masked text, a code for the address, and the neighbours' short texts. Gmail's snippet
- * is the start of the body, so it is sent only when it says something the body does not (a metadata-only read has no
- * body): up to 300 characters of input saved on every call.
- */
-export function clefState(f: Features, neighbours: readonly { label: string; summary: string }[]): ClefState {
-  const head = fold(f.snippet).slice(0, 80);
-  const snippetInBody = f.body !== '' && head !== '' && fold(f.body).startsWith(head);
-  return {
-    from: f.sender,
-    to: f.toCode,
-    list: f.listId === '' ? '' : 'mailing list',
-    subject: f.subject,
-    snippet: snippetInBody ? '' : f.snippet,
-    body: f.body,
-    gmail_category: f.category,
-    similar_examples: neighbours.map((n) => ({ label: n.label, text: cutTokens(n.summary, NEIGHBOUR_TOKENS_MAX) })),
-  };
 }
 
 async function decideMail(ctx: MailContext, messageId: string, attempts: number): Promise<MailOutcome> {
@@ -362,6 +341,10 @@ async function decideMail(ctx: MailContext, messageId: string, attempts: number)
   const labels = store.labels();
   const facts = labelFacts(labels);
   const enabled = labels.filter((label) => label.enabled === 1);
+  // The model is offered only labels with a description: a bare name is too little to decide by (rules and
+  // examples may still decide the others). Their keys come from their paths (paths.ts optionKeys), stable per path.
+  const offered = enabled.filter((label) => label.description !== '');
+  const keys = optionKeys(offered.map((label) => ({ id: label.id, path: label.display_name })));
   const summary = summaryOf(f, EXAMPLE_SUMMARY_CHARS);
   const day = utcDay(now);
 
@@ -370,11 +353,12 @@ async function decideMail(ctx: MailContext, messageId: string, attempts: number)
   let probabilities: Record<string, number> = {};
   let suspicious: number | null = null;
   let bulk: number | null = null;
-  const rule = enabled.length === 0 ? null : ruleDecision(store.matchingRules(f), facts, dmarc);
+  const rule =
+    enabled.length === 0 ? null : ruleDecision(store.matchingRules(f), facts, { subject: f.rawSubject, dmarcAligned: dmarc, dkimDomains: dkimPassDomains(read.headers.authenticationResults) });
   if (enabled.length === 0) {
     decision = { confident: false, top: null, decider: 'none', reason: 'no_labels', candidates: [] };
   } else if (rule !== null) {
-    decision = { confident: true, label: rule.label, decider: 'rule', ruleId: rule.ruleId, candidates: [{ label: rule.label, probability: 1 }] };
+    decision = { confident: true, label: rule.label, decider: 'rule', ruleId: rule.ruleId, keepInInbox: rule.keepInInbox, candidates: [{ label: rule.label, probability: 1 }] };
   } else {
     if (ctx.ai === null) {
       decision = { confident: false, top: null, decider: 'none', reason: 'model_unavailable', candidates: [] };
@@ -396,9 +380,14 @@ async function decideMail(ctx: MailContext, messageId: string, attempts: number)
         const shortcut = neighbourDecision(neighbours, facts, dmarc);
         if (shortcut !== null) {
           decision = { confident: true, label: shortcut, decider: 'neighbours', candidates: [{ label: shortcut, probability: neighbours[0]?.similarity ?? 1 }] };
+        } else if (offered.length === 0) {
+          decision = { confident: false, top: null, decider: 'none', reason: 'no_model_labels', candidates: [] };
         } else {
-          const options: ClefOption[] = enabled.map((label) => ({ id: label.id, name: label.display_name, description: label.description }));
-          const answer = await askClef(ctx.ai, chosen, clefState(f, neighbours), options);
+          const options: ClefOption[] = offered.map((label) => ({ id: label.id, key: keys.get(label.id) ?? pathSlug(label.display_name), name: label.display_name, description: label.description }));
+          // The neighbours' labels by the names the model knows them by: an offered label's key, another's slug.
+          const pathOf = new Map(labels.map((label) => [label.id, label.display_name]));
+          const named = neighbours.map((n) => ({ label: keys.get(n.label) ?? pathSlug(pathOf.get(n.label) ?? n.label), summary: n.summary }));
+          const answer = await askClef(ctx.ai, chosen, clefState(f, named), options);
           ctx.budget.left -= 1;
           ctx.transact(() => {
             store.addUsage(day, 'ai_calls', 1);
@@ -436,6 +425,9 @@ async function decideMail(ctx: MailContext, messageId: string, attempts: number)
   // the gate's, right before the write: a write it refuses becomes a suggestion like any failed write.
   const label = decision.confident ? labels.find((item) => item.id === decision.label) : undefined;
   const apply = decision.confident && label !== undefined && label.live === 1 && label.gmail_state !== 'missing' && writesLive(store, ctx.ceiling);
+  // Archive (remove INBOX) unless the label or the deciding rule keeps the mail in the inbox; keeping is the safe
+  // direction, so either one is enough.
+  const archive = !(label?.keep_in_inbox === 1 || (decision.confident && decision.keepInInbox === true));
   const versions = Object.fromEntries(enabled.map((item) => [item.id, item.desc_version]));
   const intent: { id: string | null } = { id: null };
   ctx.transact(() => {
@@ -470,8 +462,9 @@ async function decideMail(ctx: MailContext, messageId: string, attempts: number)
     if (decision.confident && decision.decider === 'rule' && decision.ruleId !== undefined) store.run(`UPDATE rules SET match_count = match_count + 1 WHERE id = ?`, decision.ruleId);
     store.addUsage(day, 'decided', 1);
     if (!decision.confident) store.addUsage(day, 'unsure', 1);
+    countFlow(store, now, stageOf(decision.decider), apply ? (archive ? 'archived' : 'kept_in_inbox') : decision.confident ? 'suggested' : 'unsure', decision.confident ? decision.label : null);
     if (apply) {
-      intent.id = intend(store, read.id, label, true, 'auto', now, read.labelIds);
+      intent.id = intend(store, read.id, label, archive, 'auto', now, read.labelIds);
     } else if (decision.confident || decision.reason !== 'no_labels') {
       store.run(
         `INSERT INTO review (id, message_id, kind, state, suggested_label, candidates, decider, unsure_reason, subject, sender, receive_time, create_time)
@@ -663,9 +656,14 @@ export async function runPass(deps: PassDeps): Promise<PassResult> {
       const outcome = await decideMail(ctx, item.message_id, item.attempts);
       if (outcome === 'decided') decided++;
       if (outcome === 'deferred') {
-        // The quota or the owner's budget is used up today: every waiting mail waits for the next UTC day.
+        // The quota or the owner's budget is used up today: every waiting mail waits for the next UTC day. The flow
+        // counts each mail's first deferral (it is counted again where it is decided).
         const until = nextUtcMidnight(deps.now());
-        deferred = transact(() => store.run(`UPDATE pending SET not_before = ? WHERE not_before < ?`, until, until));
+        deferred = transact(() => {
+          const first = store.run(`UPDATE pending SET deferred = 1 WHERE not_before < ? AND deferred = 0`, until);
+          countFlow(store, deps.now(), 'deferred', 'deferred', null, first);
+          return store.run(`UPDATE pending SET not_before = ? WHERE not_before < ?`, until, until);
+        });
         code = 'deferred';
         break;
       }

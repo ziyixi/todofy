@@ -2,7 +2,8 @@
 
 Gmail sorting for the owner's own mailbox on `sort.ziyixi.science`: each new INBOX mail is decided by the owner's rules,
 the nearest corrected examples and the Workers AI decision model Clef. In live mode a confident mail gets one label
-under `分拣/` and leaves the inbox (archived), and is never marked read; an unsure mail gets no label, stays in the
+under `分拣/` (a leaf of up to three levels, `分拣/金融/投资`) and leaves the inbox (archived) unless its label or rule keeps it
+there, and is never marked read; an unsure mail gets no label, stays in the
 inbox and waits in the review queue. Shadow mode (the default) only suggests. Chinese, mobile first. Design:
 [`docs/design.md`](docs/design.md). Rules: [`AGENTS.md`](AGENTS.md).
 
@@ -17,22 +18,31 @@ inbox and waits in the review queue. Shadow mode (the default) only suggests. Ch
 
 ## Use
 
-- **标签**: add the labels (name, a description of what belongs there, the threshold and whether it implies a trusted
-  sender). The model reads `name: description` for each label; one language and 60–120 characters keep every call
-  cheap (`docs/design.md` §8.1). 同步 Gmail links `分拣/` labels that already exist and imports the others (disabled,
-  without a description). 正式打 per label lets live mode write it; it turns itself off when the label's precision
+- **标签**: add the labels (a path such as `金融/投资`, shown as a tree; a description of what belongs there; the threshold;
+  whether it implies a trusted sender; 归档, off to keep its mail in the inbox; 敏感, to keep no example of it). The
+  model reads `path: description` for each label with a description and is never offered one without; one language
+  and 60–120 characters keep every call cheap (`docs/design.md` §8.1). 套用推荐模板 previews 15 recommended labels. 同步
+  Gmail links `分拣/` labels that already exist and imports the other leaves (disabled, without a description). 正式打 per label lets live mode write it; it turns itself off when the label's precision
   bound falls below the target. Deleting a label leaves its Gmail label and mails alone, and its writes can no longer
   be undone from 记录.
 - **待审**: confirm a suggestion, choose another label or 都不是, or skip. Corrections made in Gmail itself (moving a
   sorted mail to another `分拣/` label, or removing the label) count too.
 - **规则**: approve the rules proposed from repeated corrections, add exact-address, domain, mailing-list or
-  delivered-to rules by hand, and export them as Gmail filters (label + archive only) to import in Gmail's settings.
+  delivered-to rules by hand (with subject words to include or exclude, a carve-out tried before the sender's plain
+  rule, and keep in inbox), and export them as Gmail filters (label, and archive unless kept) to import in Gmail's
+  settings. A sender rule fires only when DMARC passed aligned with the From domain, a list rule only with a DKIM
+  signature of the list's domain (`docs/design.md` §4.3).
+- **导入**: import the owner's rule file or an export (pasted or uploaded JSON), or the template: a preview of every
+  create, update, skip or invalid entry first, then 确认导入 (all or nothing); export every label and rule as JSON.
+- **流程**: how mail moved through the pipeline today, over 7 or 30 days (a Sankey diagram and a table per label; a
+  label opens its 操作记录); 状态 shows today's, compact.
 - **例子**, **准确率**, **记录** (undo one write or a time range), **状态** (Gmail grant, sync, today's model use),
   **设置** (mode, limits, neuron budget; 解除熔断 after the breaker tripped). Emergency stop: 设置 → 关闭
   (`docs/design.md` §10).
 - **What is kept**: decided mail's subject, sender and exact sender keys, and the review queue, for 14 days (the
-  daily cleanup runs in every mode, off included); decisions and the ledger without content for 180 days; examples (masked summaries) and rules (exact sender, domain, list or
-  delivered-to values) until you delete them (`docs/design.md` §2).
+  daily cleanup runs in every mode, off included); decisions and the ledger without content for 180 days; the flow
+  counters (counts only) for 400 days; examples (masked summaries) and rules (exact sender, domain, list or
+  delivered-to values, subject words, your evidence and notes) until you delete them (`docs/design.md` §2).
 
 ## Develop
 

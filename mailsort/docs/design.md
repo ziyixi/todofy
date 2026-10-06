@@ -5,8 +5,9 @@ corrected examples and the Workers AI decision model Clef, then labelled under t
 in live mode, never marked read. Unsure mail gets no label and stays in the inbox. The owner teaches it by correcting
 labels in Gmail or in the review queue; nothing is fine-tuned.
 
-The owner's decisions of 2026-10-06 shape v1: one label per mail; labels under `分拣/`; confident mail labelled AND
-archived, `UNREAD` never touched; unsure mail left alone and listed in the review queue; no backfill of history (the
+The owner's decisions of 2026-10-06 shape v1: one label per mail (always a leaf of the label tree); labels under
+`分拣/`, nested up to three levels (`分拣/金融/投资`); confident mail labelled AND archived, unless its label or rule keeps it
+in the inbox (round 2: 账号安全, 政府法律, package pickup codes), `UNREAD` never touched; unsure mail left alone and listed in the review queue; no backfill of history (the
 sync starts at the install-time history ID); Clef (27B) by default, Clef-flash for the rest of a UTC day past 70 % of
 the daily neuron budget, and a deferral (never a failure) when Workers AI's quota is used up.
 
@@ -20,7 +21,9 @@ One Worker, `mailsort`, and one SQLite Durable Object, `MailsortState` ("mailsor
 | `worker/src/state.ts` | The object: SQLite, the alarm (`setAlarm`, no cron), the owner API through the shared transcoder, ops-v1 |
 | `worker/src/gmail.ts` | **The only code that talks to Google**: the closed table of operations (§2) |
 | `worker/src/pipeline.ts` | One alarm pass: sync, feedback, decide, write, embed, daily work (§4) |
-| `worker/src/decide.ts`, `ai.ts` | Rules, neighbours, Clef's request and strict answer, the decision |
+| `worker/src/decide.ts`, `ai.ts`, `dmarc.ts` | Rules (order, carve-outs, DMARC and DKIM), neighbours, Clef's request and strict answer, the decision |
+| `worker/src/paths.ts`, `template.ts`, `import.ts` | Label paths (the tree, IDs and option keys from a path), the label template, import and export (§3.1, §6.4) |
+| `worker/src/flow.ts` | The daily flow counters behind 流程 (§10.1) |
 | `worker/src/feedback.ts`, `examples.ts`, `accuracy.ts` | Verdicts, examples, rule proposals, the precision bound (§6) |
 | `worker/src/writes.ts` | The ledger of Gmail writes (§7) |
 | `web/` | The Chinese, mobile-first UI (no framework) over `mailsort.ui.v1` |
@@ -47,7 +50,7 @@ Two walls, neither of them a prompt:
    | messages_list | `GET users/me/messages?labelIds=INBOX&q=newer_than:2d` (the resync after a lost cursor) |
    | message_get | `GET users/me/messages/{id}`, `format=full` or `metadata` with the fixed header list and `fields` |
    | labels_list | `GET users/me/labels` |
-   | labels_create | `POST users/me/labels`, a name under `分拣/` only |
+   | labels_create | `POST users/me/labels`, a name under `分拣/` (a path of one to three non-empty segments without surrounding spaces), or `分拣` itself |
    | labels_patch | `PATCH users/me/labels/{owned id}`, the name only, still under `分拣/` |
    | message_modify | classify: `addLabelIds = [one owned label]`, `removeLabelIds = [] or [INBOX]`, for a ledger row in `intended`/`applied` whose archive flag matches; undo: `removeLabelIds = [that owned label]`, `addLabelIds = [] or [INBOX]` (INBOX exactly when the row archived), for a row in `undo_intended` |
 
@@ -62,6 +65,12 @@ Two walls, neither of them a prompt:
    independent copy of the table (`test/fakes/table.ts`), tries every forbidden operation, and throws 20,000 seeded
    random operations at the guard; the workerd tests and the smoke run check every request the fake Gmail receives
    against the same independent table.
+
+Round 2 widened `labels_create` for nested labels (2026-10-06, the owner's request): Gmail shows `分拣/开发/CI通知`
+nested only when `分拣` and `分拣/开发` exist, so they may be created too. A parent only groups: it is never linked, so it is
+never owned and no modify can add it to a mail (one label per mail, always a leaf). `labels_patch` still renames only an
+owned label, to a path under `分拣/` (never to `分拣` itself), and `message_modify` is unchanged: a classify without
+`removeLabelIds` (a label that keeps its mail in the inbox) was already one of its two shapes.
 
 Three differences from the first plan, each for a reason: `history.list` is read without `labelId=INBOX` (an archived
 mail has no INBOX, and the owner's label changes on it are the main feedback; the pipeline filters new mail by its
@@ -82,7 +91,8 @@ reads no Gmail and decides nothing, but the alarm still runs and still clears wh
 | The review queue (masked subject and sender) | 14 days |
 | Decisions and the ledger without content (IDs, labels, probabilities, model, states) | 180 days |
 | Examples: a masked summary (subject, sender name and domain, snippet; at most 200 characters) and its embedding | until deleted (例子, or with their label), at most 2,000 |
-| Rules: the exact sender address, domain, List-Id or delivered-to address, proposed or active | until deleted (规则, or with their label), at most 500 |
+| Rules: the exact sender address, domain, List-Id or delivered-to address, their subject words, the owner's evidence and notes, proposed or active | until deleted (规则, or with their label), at most 500 |
+| The flow counters: counts per UTC day, stage, outcome and label (no content) | 400 days |
 
 Examples and rules are what the app learned, so they outlive the 14 days on purpose; both are shown in full in the
 dashboard and can be deleted there one by one.
@@ -91,7 +101,36 @@ dashboard and can be deleted there one by one.
 before the address is taken, so `"<boss@work.example>" <x@evil.example>` is x@evil.example, never the address in the
 display name (which no sender rule may match).
 
-## 3. Modes and limits
+## 3. Labels, modes and limits
+
+### 3.1 Labels: a tree of paths, archive or keep
+
+A label's display name is its path below `分拣/`: one to three segments (`出行`, `金融/投资`), each 1-40 characters, 100 in
+all (`paths.ts`). Only leaves are labels: a label may not be the parent or child of another (CreateLabel, a rename, an
+import and SyncLabels all hold to it), so a mail's one label is always a leaf. Gmail gets the parents as plain grouping
+labels, created as needed before a label's first write (`writes.ts` ensureGmailLabel: one labels.list, then whatever of
+`分拣`, `分拣/金融` and the leaf is missing) or before a rename; SyncLabels imports a nested Gmail label and never a parent
+that only groups. A label made without an ID gets one from its path (`金融/投资` is `finance-invest`, `paths.ts` pathSlug:
+a fixed glossary of common words, a short hash of any other word), stable and readable in URLs.
+
+A label archives what it gets (removes INBOX) unless its 归档 is off (`keep_in_inbox`): then the label is added and the
+mail stays in the inbox. A rule may keep its mail in the inbox too (Rule.keep_in_inbox) whatever the label says; a rule
+can never make a keeping label archive, since keeping is the safe direction. The owner's review choices follow the
+label. The ledger records the choice per write (`archived`), the guard checks the modify against it, and an undo of a
+kept mail only removes the label. A sensitive label (敏感) keeps no example: its mail's masked summary would otherwise
+outlive the 14 days of content.
+
+### 3.2 The template
+
+`template.ts` holds fifteen recommended labels, none of them anyone's own: 开发/CI通知, 开发/平台工具, 金融/投资, 金融/银行支付,
+账号安全, 政府法律, 购物/订单物流, 购物/促销, 订阅收据, 出行, 生活/账单住房, 生活/汽车, 生活/医疗, 求职, 学校与社群. Each description is
+written for the decision model: one language, one sentence, 60-120 characters, saying what belongs and, between close
+labels, what does not. Trust labels (金融/投资, 金融/银行支付, 账号安全, 政府法律, 生活/医疗) are transactional only: a bank's own
+marketing is 购物/促销, so a look-alike promotion never borrows a trust label. 账号安全 and 政府法律 keep their mail in the
+inbox; 生活/医疗 is sensitive. 标签's 套用推荐模板 previews it in 导入导出; a label that exists already (same path) only gets
+the template's description and switches, never a second copy.
+
+### 3.3 Modes and limits
 
 | Mode | Reads Gmail | Decides | Writes Gmail |
 | --- | --- | --- | --- |
@@ -136,7 +175,7 @@ The alarm runs every 5 minutes, every 30 s while a backlog waits. A pass may mak
    queued. The install time is stored with the first cursor, and mail received more than 5 minutes before it is
    skipped (`before_install`) even when a resync lists it: no backfill.
 3. **Feedback** becomes verdicts, examples and rule proposals (§6).
-4. **Retries** of writes an earlier pass left `intended` come first, through the same gate (§3).
+4. **Retries** of writes an earlier pass left `intended` come first, through the same gate (§3.3).
 5. **Drain**: up to 6 pending mails while 5 subrequests per mail are left. Per mail:
    - `messages.get` (full, at most 512 KiB, else metadata only); skip what is not incoming INBOX mail, and mail whose
      conversation carries an owned label now (one label per conversation: the mail's own labels, or a decided mail of
@@ -148,16 +187,22 @@ The alarm runs every 5 minutes, every 30 s while a backlog waits. A pass may mak
      per-mail backoff (5 minutes doubling, at most 6 hours) and skips it after 7 tries (about five hours);
    - features: the exact sender address, domain, List-Id and delivered-to address (for rules only), and the masked text
      (§4.2); DMARC alignment from Gmail's own topmost `Authentication-Results` (authserv-id `mx.google.com`);
-   - stage 1, **rules**: an active rule of an enabled label decides (the most specific kind wins: address, list,
-     delivered-to, domain; a disagreement within a kind decides nothing). A label that implies trust needs DMARC aligned;
+   - stage 1, **rules** (§4.3): the first usable active rule of an enabled label decides, in a total order: rules with
+     subject conditions first (a carve-out), then the kind (address, list, delivered-to, domain; a longer domain
+     first), more conditions first, then the oldest rule (create_time, then ID; an import keeps its file's order). A
+     rule is usable when its subject conditions hold and the mail is authenticated as §4.3 says. A carve-out whose
+     words match but which cannot fire (its label disabled, the mail not authenticated) ends the search: its mail never
+     falls through to the sender's plain rule;
    - stage 2, **neighbours**: when examples exist, the mail's summary is embedded (bge-m3) and compared by cosine with
      every embedded example of an enabled label; the three nearest go into Clef's state (each cut to 120 tokens). Only
      when the sender passed DMARC aligned and all three agree with similarity ≥ 0.92 on a non-trust label does that
      label decide without the model;
-   - stage 3, **Clef**: one call with a `choice` question over the enabled labels (their stable IDs as keys, and as
-     criterion each label's display name, then `: ` and the owner's description when there is one; never the ID alone,
-     which is random for labels imported from Gmail) plus `none`, and two `noul` questions, `suspicious` and `bulk`. The
-     state carries Gmail's snippet only when the body does not start with it. A model outage (anything but the quota)
+   - stage 3, **Clef**: one call with a `choice` question over the enabled labels that have a description (a label
+     without one is never offered: its bare name is too little; rules and examples may still decide it), keyed by a
+     slug of each label's path (`finance-invest`, `paths.ts` optionKeys: stable, meaningful, never the random ID a label
+     imported from Gmail used to have) with the criterion `path: description`, plus `none`, and two `noul` questions,
+     `suspicious` and `bulk`. The answer is mapped back to label IDs. The state is lean: Gmail's snippet only when the
+     body does not start with it, no empty field, and the neighbours named by the same keys. A model outage (anything but the quota)
      backs the mail off like a failed read and stops calling the model for the pass; an answer this code refuses
      (`clef_bad_*`) gets 3 tries. Only then is the mail unsure (`model_unavailable`). The answer must have
      exactly those keys and options, probabilities in [0, 1] summing to 1. Label L when the top option is not `none`,
@@ -188,6 +233,27 @@ without a scheme when a host is followed by a path or query (`bank.example.com/r
 and amounts stay. The patterns are linear (hostile text cannot make them slow); the unit tests include the probes of
 the review (`worker/test/read.test.ts`). No AI Gateway: it would log request bodies.
 
+### 4.3 What a rule needs: DMARC, DKIM, Delivered-To
+
+Everything is read from Gmail's own topmost `Authentication-Results` (authserv-id `mx.google.com`; `dmarc.ts`), never
+from a header the sender could add below it:
+
+- a sender rule (From address or domain) fires only when DMARC passed aligned with the From domain (`header.from`
+  equal to the address's domain, the address as Gmail's DMARC reads it, not a display name). A forged From (DMARC
+  failed) or a look-alike (`"statements@bank.example.com" <alerts@bank-alerts.example.net>`) fires none: the mail goes on
+  to the model, which may only suggest a trust label, or stays in the inbox;
+- a label that implies trust, or a rule with `require_dmarc`, needs the same on any rule kind;
+- a list rule (List-Id) needs the message's List-Id to equal the rule's, and, when the identifier's namespace is a
+  domain (`digest.news.example.com` -> `news.example.com`), a DKIM signature that passed for that domain, a parent or a
+  subdomain of it (`header.d`, or the domain of `header.i`). Anyone can write a List-Id; only the list's domain can sign
+  for it. An opaque namespace has nothing to check a signature against, so there the List-Id alone counts (the choice
+  recorded here: such lists are rare, and their rule can still ask for `require_dmarc`). A list that signs with an
+  unrelated domain never fires its rule: the safe failure, the model decides;
+- a delivered-to rule matches the `Delivered-To` Gmail wrote, never the sender's `To` (the model's address code may
+  still fall back to `To`: it is only a hint).
+
+Subject conditions read the exact subject (never stored or sent), NFKC-folded and lower case, as the words are stored.
+
 ## 5. The review queue
 
 Shadow suggestions, unsure mail (reason shown) and a few random applied mails a day (the audit) wait in 待审 with the
@@ -210,13 +276,32 @@ Worker's own label is undone first; 都不是 restores the inbox). A choice is a
   or drops every embedding for a rebuild.
 - **Rule proposals.** The same mailing list (else the same sender address) corrected to the same label twice proposes
   a rule; it decides nothing until the owner approves it in 规则. Withdrawn corrections retract a proposal that falls
-  below two. Active rules export as Gmail's filter XML (label + archive; rules that need DMARC are left out) for the
-  owner to import by hand, so stable rules keep working without this app. Rule values come from mail headers, and
+  below two. Active rules export as Gmail's filter XML (label, and archive unless the rule or label keeps the
+  mail in the inbox) for the owner to import by hand; left out are rules of a trust label or with `require_dmarc` (a
+  filter cannot check DMARC) and carve-outs (Gmail applies every matching filter, so a carve-out and its sender's plain
+  rule would both label the mail). A sender rule of another label is exported without its DMARC check (such a
+  filter can only put a forged mail under a non-trust label), so stable rules keep working without this app. Rule
+  values come from mail headers, and
   the export puts them into Gmail search criteria, where `(`, `)`, `-`, `*`, `{`, `OR` or a space could widen one
   sender's filter to most incoming mail, with none of mailsort's caps, breaker or undo. So every value, the owner's,
   a proposal's and an exported one's, must be plain (`rule-value.ts`: lower-case letters, digits and `._%+-`, no
   leading `-`, a real domain), a header value that is not never becomes a proposal, an older row that is not is left
   out of the export (counted in `skipped_count`), and the export quotes each value (`list:("…")`).
+- **Import and export** (`import.ts`, 导入导出). ImportRules takes the owner's rule file, a JSON list in the format of
+  their validated rule set (`id`, `match` with exactly one of `from_address`, `from_domain`, `list_id`, `to_address`,
+  `label` as `分拣/<path>`, `keep_in_inbox`, `trust`, `require_dmarc`, `evidence`, `notes`, and the optional
+  `subject_includes` / `subject_excludes`), this app's export (`{"labels": [...], "rules": [...]}`) or the template. It
+  is previewed first (`validate_only`): every entry create, update (which fields), skip or invalid (why: a path, a
+  value rule-value.ts refuses, a match with no or two keys, too many subject words, the tree, the bounds), with
+  warnings (a `trust` rule whose label does not imply trust; two rules with the same match and conditions, of which
+  the earlier is tried first). The confirmation plans again inside one transaction and applies all or nothing; an
+  invalid entry makes it INVALID_IMPORT with the plan as a detail. A rule is matched by its `id` (a re-import updates
+  the rule it made), else by what it is; a proposal it matches becomes active, a disabled rule stays disabled. A label
+  a rule names that exists nowhere is created enabled, not live and without a description (rules fire at once, in
+  shadow first; the model waits for a description; a `trust` rule makes it a trust label). Nothing reaches Gmail.
+  ExportRules writes every label and every rule but the proposals in the same format, so an export imports back as
+  all skips. The UI reads each entry strictly with the wire codec before sending, so a misspelt field is named with its
+  entry's number.
 - **Accuracy and live gating.** Per label, confirmations count 1, weak accepts 0.5 and corrections 1 against, and
   准确率 shows the Wilson 95 % lower bound of the precision (35 confirmations without an error pass 0.90). The owner turns
   正式打 on per label; the daily pass turns it back off when the bound drops below the target (default 0.90) after a
@@ -228,7 +313,7 @@ Worker's own label is undone first; 都不是 restores the inbox). A choice is a
 Every Gmail write is a ledger row first (`intended`, or `undo_intended` for an undo), committed before the request;
 then the modify, which the guard accepts only for such a row; then the outcome (`applied`, `undone`, or `failed` for
 a mail that is gone, a read-only grant, a row the gate refused). A pass interrupted between the two retries the same
-row (adding a label that is there, or removing one that is gone, changes nothing), but only through the gate (§3).
+row (adding a label that is there, or removing one that is gone, changes nothing), but only through the gate (§3.3).
 An automatic row an earlier pass left (or one that failed once) is first checked against the mail as it is now, one
 metadata read (`message_get` with the Message-ID header only): if the mail left the inbox or carries a user label it
 did not have when the row was recorded (the owner filed it, or another `分拣/` label), the row fails (`mail_changed`)
@@ -236,14 +321,16 @@ instead of adding a second label to mail the owner has already dealt with.
 An automatic row that fails for good, in its first pass or a later retry, makes its mail a suggestion in 待审. A
 request the guard refuses (its label no longer owned) is permanent for that row only: the run goes on with the next.
 
-Undo removes exactly the row's label and restores INBOX when it archived. It is refused (`NOT_UNDOABLE`, before any
+A row archives (removes INBOX) unless its label or deciding rule keeps the mail in the inbox (§3.1); the owner's
+review choices follow the label. Undo removes exactly the row's label and restores INBOX when it archived. It is refused (`NOT_UNDOABLE`, before any
 intent is written) for a mail the owner has since moved to another label, and for a label that is no longer the
 app's: deleted in 标签 (the Gmail label and its mails stay as they are) or missing in Gmail. Each entry says whether
 it is `undoable`, with the mail's masked subject and sender while they are kept. 操作记录 undoes one entry, or a time
 range: the server undoes at most 20 per call and answers how many are left; the page repeats the call until none is
-left (or a call undoes nothing) and shows the totals. Labels are created in Gmail (`分拣/<name>`) just before the
-first write that needs them, after the gate; SyncLabels links existing `分拣/` labels and imports the ones mailsort
-does not know (disabled, without a description, which the page says).
+left (or a call undoes nothing) and shows the totals; 流程's link to a label opens its entries only (the list's label
+filter). Labels are created in Gmail (`分拣/<path>`, with the parents it nests under) just before the first write that
+needs them, after the gate; SyncLabels links existing `分拣/` labels and imports the leaves mailsort does not know
+(disabled, without a description, which the page says), never a parent that only groups.
 
 ## 8. Limits and measured costs
 
@@ -254,6 +341,14 @@ review fixes): the fetch handler's very first request 3.2 ms (bound 6), every ot
 50 review items, a page of 50 ledger entries joined with their decisions, the accuracy report over 2,000 decisions;
 bound 300); an alarm pass at its bounds (three history pages, 6 mails decided, 2,000 embedded examples searched)
 35 ms (bound 1,500). Bundles: the Worker 111.6 KiB gzip (budget 135), the UI 46.4 KiB gzip (budget 54).
+
+Round 2 (same meter and machine, 2026-10-06): GetMailFlow over 30 days of 11,520 counters (24 labels, every stage and
+outcome every day, far more than a real month) 7.9 ms first run in MailsortState and 0.4 ms in the fetch handler; the
+preview of an import of 500 rules (about 120 KiB of body, the request body limit is now 256 KiB) 12.4 ms first run in
+MailsortState and 1.1 ms in the fetch handler; the alarm pass at its bounds 33 ms; every other call as before. Bundles:
+the Worker 127.5 KiB gzip (budget 135: the template, the import, the flow counters and the larger descriptors), the UI
+57.9 KiB gzip (budget raised to 67: d3-sankey's layout with the parts of d3-array, d3-shape and d3-path it uses,
+2.8 KiB, and the 流程 and 导入导出 views).
 
 Stores are bounded: 24 labels, 500 rules, 2,000 examples, request IDs for a day, content for 14 days, records for
 180 days. Rows read: a pass reads a few rows per mail plus the embedded examples (cached in memory between passes).
@@ -272,6 +367,11 @@ descriptions of about 70 tokens each; mailsort's `estimateTokens`, Clef's own te
 | The mail's state | 109 tokens (snippet duplicating the body's start in 200 of 200 mails) | 78 tokens (snippet dropped when the body starts with it) |
 | Neurons per call (estimate) | Clef 17.3, Clef-flash 6.5 | Clef 17.8, Clef-flash 6.7 |
 
+Round 2 (keys from the label's path, labels without a description not offered, empty state fields left out), the same
+fixtures: about 814 tokens a request, 738 of them the questions and 67 the state (`/tmp/w4-eval` measure.mjs; the
+eval harness builds every request with the Worker's own `clefState`, `clefInput` and `optionKeys` now, nothing
+copied, and runs as soon as a token with Workers AI permission is on hand).
+
 So each label's name costs about 5.5 tokens a call, and the snippet saved about 31; the criteria dominate the input
 and cost the same on every call, which is why 标签 suggests one language and 60–120 characters per description. At
 about 18 neurons per Clef call, the default budget of 7,000 covers roughly 270 Clef calls a day before the switch to
@@ -286,10 +386,13 @@ proves a Wilson lower bound of 0.68), so the per-label 正式打 decision stays 
 
 `mailsort.ui.v1` (`proto/mailsort/ui/v1`): labels (List/Get/Create/Update/Delete, `labels:sync`), review items
 (List/Get, `:confirm`, `:correct`, `:skip`), rules (List/Get/Create/Delete, `:approve`, `:disable`,
-`rules:exportGmailFilters`), examples (List/Get/Delete, `examples:rebuildEmbeddings`), ledger entries (List/Get,
-`:undo`, `ledgerEntries:undo` for a range), and the singletons accuracyReport, serviceStatus and settings
-(UpdateSettings needs an explicit mask). AIP-155 request IDs on every mutation, AIP-154 etags on labels and settings,
-google.rpc.Status errors (`errors.proto`). The UI's eight views: 待审, 标签, 规则, 例子, 准确率, 记录, 状态, 设置.
+`rules:exportGmailFilters`, `rules:import` with `validate_only`, `rules:export`), examples (List/Get/Delete,
+`examples:rebuildEmbeddings`), ledger entries (List with a label filter, Get, `:undo`, `ledgerEntries:undo` for a
+range), mail flows (`mailFlows/today`, `last-7-days`, `last-30-days`), and the singletons accuracyReport,
+serviceStatus and settings (UpdateSettings needs an explicit mask). AIP-155 request IDs on every mutation, AIP-154
+etags on labels and settings, google.rpc.Status errors (`errors.proto`). The UI's ten views: 待审, 标签 (a tree of the
+paths, 归档 and 敏感, the template), 规则 (subject conditions, keep in inbox, DMARC, evidence and notes), 流程, 导入
+(导入导出), 例子, 准确率, 记录, 状态 (with today's flow, compact), 设置.
 设置 sends only the fields the owner changed (naming `mode` resets the breaker, so a budget change never does); 待审
 puts a warning and a non-primary, confirmed 确认 on a suspected phishing mail (preselecting 都不是) and on a trust
 label the model may not set; 例子 and 记录 page with 加载更多; sync and export toasts say what they did.
@@ -302,6 +405,18 @@ label the model may not set; 例子 and 记录 page with 加载更多; sync and 
   signals `gmail_auth_failed` (critical), `gmail_not_configured`, `breaker_tripped`, `sync_stale` (warnings),
   `ai_quota_exhausted`, `label_live_revoked`, `guard_shed` (information). Counts and codes only. The guard defers
   `full_model`, `audit` and `embedding_rebuild`.
+- **The flow** (`flow.ts`, 流程). The Durable Object keeps one counter per UTC day, stage, outcome and label (table
+  `flow`), changed in the same transaction as what it counts: a decision (its decider as the stage: 规则, 向量近邻,
+  Clef 27B, Clef-flash, or 未调用模型 without a model answer; its outcome: archived, kept in the inbox, only suggested,
+  unsure), a skip (sent/draft/spam, a conversation already sorted, from before the install, unreadable), a mail's
+  first deferral (延后: counted again where it is decided later), a write that failed and left its mail a suggestion
+  (moved from written to suggested on its day), and a correction (added on the day the mail was decided, taken back
+  when withdrawn). Pruned after 400 days. GetMailFlow sums a fixed range of UTC days (at most 2,000 counters). 流程
+  draws it as a Sankey diagram (d3-sankey for the layout only; SVG in the page's light and dark tokens, labels grouped
+  and colored by their top-level segment in the labels' order, a ninth group gray; every node named with its count;
+  hover or focus for exact numbers and shares; a label opens its 操作记录; no motion under prefers-reduced-motion; on
+  a phone it scrolls inside its own box) and a table per label (written, by rule or model, kept or archived, only
+  suggested, corrected). 运行状态 shows today's diagram, compact.
 - **Emergency stop**, from fastest: 设置 → 关闭; the GitHub variable `MAILSORT_MODE=off` (or `shadow`) and a redeploy;
   revoking the grant at https://myaccount.google.com/permissions (Google account → Security → Third-party access).
 - **Logs**: one line per alarm (mode, counts, a code) and per refused request (request ID, status, reason).
@@ -311,8 +426,11 @@ label the model may not set; 例子 and 记录 page with 加载更多; sync and 
 All data is synthetic (Chinese and English mails from example.com-style domains, `worker/test/fakes/fixtures.ts`);
 the fake Gmail (`fake-gmail.ts`) and fake Workers AI (`fake-ai.ts`, Clef and bge-m3) answer every request.
 
-- `worker/test/*.test.ts` (Node): the guard and the fuzz, masking, MIME, DMARC, the decision, Clef's strict read,
-  the Wilson bound, the filter export, ops-v1's golden bytes (two are contract fixtures).
+- `worker/test/*.test.ts` (Node): the guard and the fuzz (nested names, the prefix's own label), masking, MIME,
+  DMARC and DKIM (forged and look-alike From), the decision (rule order, carve-outs), Clef's request (path keys, lean
+  state) and strict read, the Wilson bound, the filter export; `import.test.ts` over the store's SQL on Node's SQLite:
+  paths, IDs and option keys, the template's rules, the import plan, its application and the export's round trip,
+  schema version 2's migration, the flow counters; ops-v1's golden bytes (two are contract fixtures).
 - `worker/test/runtime/*.test.ts` (workerd, a real SQLite MailsortState): the pipeline in shadow and live, unsure,
   undo, corrections into examples and proposals, trust labels, skips, the resync, the auth stop, the Clef-flash switch,
   the quota deferral, the breaker, a read-only grant, the owner API, ops-v1 over a service binding, CPU; and
@@ -320,9 +438,14 @@ the fake Gmail (`fake-gmail.ts`) and fake Workers AI (`fake-ai.ts`, Clef and bge
   breaker, the `MODE` ceiling and a label leaving 正式打; retries against the run cap; a breaker tripped mid-pass; a
   poison mail (400, a lasting 500, a refused ID) never blocking the queue; a deleted or missing label's undo; the
   resync's read order and its install-time cutoff; a model outage backing off; one label per conversation after undo;
-  a retry that finds the mail archived or filed by the owner (`mail_changed`); the content cleanup after 20 days off.
+  a retry that finds the mail archived or filed by the owner (`mail_changed`); the content cleanup after 20 days off;
+  and `round2.test.ts`: the template and the rule file imported (preview, all-or-nothing confirmation), a nested
+  label created in Gmail with its parents, keep-in-inbox by label and by rule (undo removing only the label), the
+  carve-out order, forged and look-alike From headers, the sync of nested labels, the flow counters with corrections
+  and the ledger's label filter, and the export.
 - `worker/test/smoke/smoke.mts`: the real `wrangler dev` (`../wrangler.test.toml`) against the fakes on loopback,
-  the owner's whole loop through the HTTP API.
+  the owner's whole loop through the HTTP API, round 2's import, nested label, keep in inbox, carve-out, forged From,
+  flow API and export included.
 - `web/src/*.test.ts`: the views against a fake API on the shared transcoder.
 - `deploy/test/*.test.mjs`: the production config, the deploy wrapper (MODE, the secrets file without the grant), that
   `wrangler deploy --secrets-file` keeps secrets it does not name (the pinned wrangler), that the public GitHub

@@ -13,11 +13,18 @@
  * one metadata read before the write: if the owner has meanwhile archived it or filed it under a label of their own,
  * mailsort's label would be a second label on mail no longer in the inbox, so the row fails (`mail_changed`).
  *
- * Labels are created in Gmail ("分拣/" + display name) just before the first write that needs them, after the gate.
+ * Labels are created in Gmail ("分拣/" + the label's path) just before the first write that needs them, after the gate,
+ * with the parents Gmail nests them under ("分拣", "分拣/开发") when those do not exist yet. The parents only group:
+ * they are never linked, so the guard never lets a write add one to a mail (one label per mail, always a leaf).
+ *
+ * An applied label keeps its mail in the inbox when the ledger row says so (`archived` = 0: the label's or the rule's
+ * keep-in-inbox); the guard checks the modify against that flag, and the undo then gives nothing back to the inbox.
  */
 import { setCurrentLabels } from './feedback.ts';
+import { countFlow, stageOf } from './flow.ts';
 import { GmailRefused, GoogleError, isUserLabelId, type GmailClient } from './gmail.ts';
 import { LABEL_PREFIX, WRITE_ATTEMPTS_MAX } from './limits.ts';
+import { parentGmailNames } from './paths.ts';
 import { noteGoogleError } from './session.ts';
 import { timeId } from './ids.ts';
 import { utcDay, type LabelRow, type LedgerRow, type Store } from './store.ts';
@@ -83,21 +90,46 @@ export function intendUndo(store: Store, row: LedgerRow): void {
   store.run(`UPDATE ledger SET state = 'undo_intended', attempts = 0 WHERE id = ? AND state = 'applied'`, row.id);
 }
 
-/** The label's Gmail ID, creating the label in Gmail when it is still pending; null when it went missing. */
+/** The Gmail requests ensureGmailLabel may make for `label`: the list, the parents and the label itself. */
+export function labelCreationCost(label: Pick<LabelRow, 'display_name' | 'gmail_state' | 'gmail_id'>): number {
+  return label.gmail_state === 'linked' && label.gmail_id !== null ? 0 : 1 + parentGmailNames(label.display_name).length + 1;
+}
+
+/**
+ * Creates `name` in Gmail unless `existing` has it (409, a name made meanwhile, is fine too); answers its ID. The
+ * parents of a nested label are made the same way, outermost first.
+ */
+async function createIfMissing(gmail: GmailClient, existing: Map<string, string>, name: string): Promise<string> {
+  const known = existing.get(name);
+  if (known !== undefined) return known;
+  try {
+    const id = await gmail.createLabel(name);
+    existing.set(name, id);
+    return id;
+  } catch (error) {
+    // 409: Gmail already has a label of that name (made by hand, or by an earlier try): use it.
+    if (!(error instanceof GoogleError) || error.code !== 'labels_create_409') throw error;
+    const found = (await gmail.labels()).find((item) => item.name === name);
+    if (found === undefined) throw error;
+    existing.set(name, found.id);
+    return found.id;
+  }
+}
+
+/** Makes sure Gmail has the parents of a label's path (`分拣`, `分拣/开发`), so it shows the label nested. */
+export async function ensureGmailParents(gmail: GmailClient, path: string, existing: Map<string, string>): Promise<void> {
+  for (const parent of parentGmailNames(path)) await createIfMissing(gmail, existing, parent);
+}
+
+/** The label's Gmail ID, creating the label (and its parents) in Gmail when it is still pending; null when it went missing. */
 export async function ensureGmailLabel(ctx: WriteContext, label: LabelRow): Promise<string | null> {
   if (label.gmail_state === 'linked' && label.gmail_id !== null) return label.gmail_id;
   if (label.gmail_state === 'missing') return null;
   const name = `${LABEL_PREFIX}${label.display_name}`;
-  let id: string;
-  try {
-    id = await ctx.gmail.createLabel(name);
-  } catch (error) {
-    // 409: Gmail already has a label of that name (made by hand, or by an earlier try): link it.
-    if (!(error instanceof GoogleError) || error.code !== 'labels_create_409') throw error;
-    const found = (await ctx.gmail.labels()).find((item) => item.name === name);
-    if (found === undefined) throw error;
-    id = found.id;
-  }
+  // One read of Gmail's labels, then only what is missing: a label the owner made by hand is linked, not created twice.
+  const existing = new Map((await ctx.gmail.labels()).map((item) => [item.name, item.id]));
+  await ensureGmailParents(ctx.gmail, label.display_name, existing);
+  const id = await createIfMissing(ctx.gmail, existing, name);
   const now = ctx.now();
   ctx.transact(() => {
     ctx.store.run(`UPDATE labels SET gmail_id = ?, gmail_state = 'linked' WHERE id = ?`, id, label.id);
@@ -140,6 +172,13 @@ function fail(store: Store, row: LedgerRow, code: string, now: number): void {
   // An auto write that failed for good (in this pass or a later retry) leaves its mail as a suggestion in the
   // review queue: the owner can still label it from there. An owner's row was their own choice: nothing to review.
   if (row.origin === 'auto' && store.run(`UPDATE decisions SET outcome = 'suggested' WHERE message_id = ? AND outcome = 'applied'`, row.message_id) > 0) {
+    // The flow counted the decision as written: it is a suggestion now, on its own day.
+    const decision = store.decision(row.message_id);
+    if (decision !== undefined) {
+      const stage = stageOf(decision.decider);
+      countFlow(store, decision.decided_at, stage, row.archived === 1 ? 'archived' : 'kept_in_inbox', decision.label_id, -1);
+      countFlow(store, decision.decided_at, stage, 'suggested', decision.label_id, 1);
+    }
     addSuggestion(store, row.message_id, now);
   }
 }
@@ -164,9 +203,10 @@ export async function executeWrites(ctx: WriteContext, ids: readonly string[] | 
   for (const original of rows) {
     let row = original;
     const recheck = row.state === 'intended' && row.origin === 'auto' && (ids === null || row.attempts > 0);
-    // A modify, a label creation if needed, and the recheck's read.
-    if (!ctx.budget.has(recheck ? 3 : 2)) break;
     const label = store.label(row.label_id);
+    // A modify, the recheck's read, and the label's creation in Gmail (with its parents) when it is still pending.
+    const creation = row.state === 'intended' && row.gmail_label_id === null && label !== undefined ? labelCreationCost(label) : 0;
+    if (!ctx.budget.has(1 + (recheck ? 1 : 0) + creation)) break;
     try {
       if (row.state === 'intended') {
         if (label === undefined) {

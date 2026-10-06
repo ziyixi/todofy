@@ -18,8 +18,11 @@ import {
   type ReviewItem,
 } from '@ziyixi/proto/mailsort/ui/v1/review_pb';
 import { Rule_Kind, Rule_State, RuleSchema, type Rule } from '@ziyixi/proto/mailsort/ui/v1/rule_pb';
+import { MailFlow_CountSchema, MailFlow_Outcome, MailFlow_Stage, MailFlowSchema, type MailFlow } from '@ziyixi/proto/mailsort/ui/v1/flow_pb';
 import { Mode } from '@ziyixi/proto/mailsort/ui/v1/status_pb';
+import { termsOf } from './decide.ts';
 import type { ModeName } from './env.ts';
+import type { FlowCount, FlowOutcome, FlowStage } from './flow.ts';
 import type { ExampleRow, LabelRow, LedgerRow, ReviewRow, RuleRow } from './store.ts';
 
 const ts = (ms: number | null) => (ms === null ? undefined : timestampFromMs(ms));
@@ -47,6 +50,8 @@ export function labelMessage(row: LabelRow, exampleCount: number): Label {
     createTime: ts(row.create_time),
     updateTime: ts(row.update_time),
     etag: row.etag,
+    keepInInbox: row.keep_in_inbox === 1,
+    sensitive: row.sensitive === 1,
   });
 }
 
@@ -59,6 +64,11 @@ export const RULE_KINDS = {
 
 const RULE_STATES = { proposed: Rule_State.PROPOSED, active: Rule_State.ACTIVE, disabled: Rule_State.DISABLED } as const;
 
+/** Whether a rule needs DMARC aligned (decide.ts ruleAuthOk): a sender rule, a trust label, or the rule's own switch. */
+export function dmarcRequired(row: Pick<RuleRow, 'kind' | 'require_dmarc'>, trust: boolean): boolean {
+  return row.kind === 'sender_address' || row.kind === 'sender_domain' || trust || row.require_dmarc === 1;
+}
+
 export function ruleMessage(row: RuleRow, trust: boolean): Rule {
   return create(RuleSchema, {
     name: `rules/${row.id}`,
@@ -66,11 +76,54 @@ export function ruleMessage(row: RuleRow, trust: boolean): Rule {
     value: row.value,
     label: labelName(row.label_id),
     state: RULE_STATES[row.state],
-    dmarcRequired: trust,
+    dmarcRequired: dmarcRequired(row, trust),
     correctionCount: row.correction_count,
     matchCount: row.match_count,
     createTime: ts(row.create_time),
     updateTime: ts(row.update_time),
+    subjectIncludes: termsOf(row.subject_includes),
+    subjectExcludes: termsOf(row.subject_excludes),
+    keepInInbox: row.keep_in_inbox === 1,
+    requireDmarc: row.require_dmarc === 1,
+    evidence: row.evidence,
+    notes: row.notes,
+    importId: row.import_id,
+  });
+}
+
+const FLOW_STAGES: Readonly<Record<FlowStage, MailFlow_Stage>> = {
+  skipped: MailFlow_Stage.SKIPPED,
+  rule: MailFlow_Stage.RULE,
+  neighbours: MailFlow_Stage.NEIGHBOURS,
+  clef: MailFlow_Stage.CLEF,
+  'clef-flash': MailFlow_Stage.CLEF_FLASH,
+  deferred: MailFlow_Stage.DEFERRED,
+  no_model: MailFlow_Stage.NO_MODEL,
+};
+
+const FLOW_OUTCOMES: Readonly<Record<FlowOutcome, MailFlow_Outcome>> = {
+  archived: MailFlow_Outcome.ARCHIVED,
+  kept_in_inbox: MailFlow_Outcome.KEPT_IN_INBOX,
+  suggested: MailFlow_Outcome.SUGGESTED,
+  unsure: MailFlow_Outcome.UNSURE,
+  corrected: MailFlow_Outcome.CORRECTED,
+  not_inbox: MailFlow_Outcome.NOT_INBOX,
+  thread_sorted: MailFlow_Outcome.THREAD_SORTED,
+  before_install: MailFlow_Outcome.BEFORE_INSTALL,
+  unreadable: MailFlow_Outcome.UNREADABLE,
+  deferred: MailFlow_Outcome.DEFERRED,
+};
+
+export function flowMessage(range: string, start: number, end: number, counts: readonly FlowCount[]): MailFlow {
+  return create(MailFlowSchema, {
+    name: `mailFlows/${range}`,
+    startTime: timestampFromMs(start),
+    endTime: timestampFromMs(end),
+    counts: counts.flatMap((count) => {
+      // A row this code did not write (an older stage name) is left out rather than answered as unspecified.
+      if (!Object.hasOwn(FLOW_STAGES, count.stage) || !Object.hasOwn(FLOW_OUTCOMES, count.outcome)) return [];
+      return [create(MailFlow_CountSchema, { stage: FLOW_STAGES[count.stage], outcome: FLOW_OUTCOMES[count.outcome], label: labelRef(count.label), mailCount: count.n })];
+    }),
   });
 }
 

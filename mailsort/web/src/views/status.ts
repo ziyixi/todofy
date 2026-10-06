@@ -1,16 +1,19 @@
 /**
  * 运行状态 (`/status`): the Gmail grant, the mode in force, the last sync, the queue, today's Gmail and Workers AI use
- * (estimated neurons against the budget, the decision model in use) and the latest error codes.
+ * (estimated neurons against the budget, the decision model in use) and the latest error codes; on top, today's flow
+ * of mail in the compact diagram (流程 has the full one).
  */
 import { api } from '../api.ts'
 import { el, fill } from '../dom.ts'
+import { flowGraph, sankeyChart } from '../flowchart.ts'
 import { AUTH_STATES, MODE_NAMES, relative } from '../format.ts'
 import type { ViewContext } from '../app.ts'
-import { frame } from './common.ts'
+import { allLabels, frame } from './common.ts'
+import { ledgerPath } from './flow.ts'
 
 export async function renderStatus(ctx: ViewContext): Promise<void> {
   await frame(ctx.main, '运行状态', async (body) => {
-    const status = await api.getServiceStatus({ name: 'serviceStatus' })
+    const [status, flow, labels] = await Promise.all([api.getServiceStatus({ name: 'serviceStatus' }), api.getMailFlow({ name: 'mailFlows/today' }), allLabels()])
     const now = ctx.host.now()
     const facts: (readonly [string, string])[] = [
       ['模式', MODE_NAMES[status.effectiveMode] ?? '—'],
@@ -27,6 +30,15 @@ export async function renderStatus(ctx: ViewContext): Promise<void> {
       ['最近错误', status.recentErrorCodes.length === 0 ? '无' : status.recentErrorCodes.join(', ')],
       ['版本', status.build],
     ]
-    fill(body, el('dl', { class: 'facts' }, ...facts.flatMap(([term, value]) => [el('dt', {}, term), el('dd', {}, value)])))
+    const more = el('a', { href: '/flow' }, '查看流程')
+    more.addEventListener('click', (event) => {
+      event.preventDefault()
+      ctx.go('/flow')
+    })
+    fill(
+      body,
+      el('section', { class: 'card' }, el('div', { class: 'card-head' }, el('h2', {}, '今天的流程'), more), sankeyChart(flowGraph(flow.counts, labels), { compact: true, onLabel: (label) => ctx.go(ledgerPath(label)) })),
+      el('dl', { class: 'facts' }, ...facts.flatMap(([term, value]) => [el('dt', {}, term), el('dd', {}, value)])),
+    )
   })
 }

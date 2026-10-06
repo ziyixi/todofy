@@ -153,14 +153,36 @@ export const ERRORS_KEPT = 8;
 
 // ---- the owner API -----------------------------------------------------------------------------------------------------
 
-export const MAX_BODY_BYTES = 64 * 1024;
+/** A request body at most: an import of every rule (RULES_MAX entries of the owner's rule file) fits. */
+export const MAX_BODY_BYTES = 256 * 1024;
 export const PAGE = 50;
 export const RULE_PAGE = 100;
 export const LABEL_ID_PATTERN = /^[a-z][a-z0-9-]{0,39}$/;
 export const ID_PATTERN = /^[a-z0-9-]{1,40}$/;
-export const DISPLAY_NAME_MAX = 40;
+/**
+ * A label's path below the prefix (Label.display_name): at most LABEL_DEPTH_MAX segments of LABEL_SEGMENT_MAX
+ * characters each, DISPLAY_NAME_MAX in all. Gmail shows `分拣/开发/CI通知` nested under `分拣/开发`.
+ */
+export const LABEL_DEPTH_MAX = 3;
+export const LABEL_SEGMENT_MAX = 40;
+export const DISPLAY_NAME_MAX = 100;
 export const DESCRIPTION_MAX = 300;
 /** The Gmail label prefix every label of this app lives under (a nested label). */
 export const LABEL_PREFIX = '分拣/';
+/** The prefix's own Gmail label, the parent Gmail nests every label of this app under. */
+export const LABEL_ROOT = '分拣';
+/** A rule's subject conditions: at most this many words each way, each 1 to SUBJECT_TERM_CHARS characters. */
+export const SUBJECT_TERMS_MAX = 8;
+export const SUBJECT_TERM_CHARS = 40;
+/** The characters of a subject a rule's conditions read (the exact subject, never sent anywhere). */
+export const SUBJECT_MATCH_CHARS = 1000;
+/** A rule's evidence and notes (the owner's words). */
+export const RULE_TEXT_MAX = 300;
+/** An import entry's own ID (RuleImport.id). */
+export const IMPORT_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+/** The flow counters (flow.ts) are kept this many UTC days, like the daily usage. */
+export const FLOW_KEPT_DAYS = 400;
+/** GetMailFlow answers at most this many counters. */
+export const FLOW_COUNTS_MAX = 2000;
 /** The model's option for "no label fits"; never a label ID. */
 export const NONE = 'none';

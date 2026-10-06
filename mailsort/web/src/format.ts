@@ -35,6 +35,7 @@ export const UNSURE_REASONS: Readonly<Record<string, string>> = {
   label_disabled: '标签未启用',
   model_unavailable: '模型暂时不可用',
   no_labels: '还没有启用的标签',
+  no_model_labels: '没有带说明的标签可交给模型',
 }
 
 export const DECIDERS: Readonly<Record<string, string>> = {
@@ -50,7 +51,7 @@ export const RULE_KINDS: readonly (readonly [Rule_Kind, string])[] = [
   [Rule_Kind.SENDER_ADDRESS, '发件人地址'],
   [Rule_Kind.SENDER_DOMAIN, '发件人域名'],
   [Rule_Kind.LIST_ID, '邮件列表 (List-Id)'],
-  [Rule_Kind.DELIVERED_TO, '来源邮箱 (Delivered-To)'],
+  [Rule_Kind.DELIVERED_TO, '收件地址 (Delivered-To)'],
 ]
 
 export const RULE_STATES: Readonly<Record<number, string>> = {

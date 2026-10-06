@@ -9,7 +9,8 @@
  * free allocation used up) is AiQuotaError: the pipeline defers the mail to the next UTC day instead of failing it.
  */
 import type { AiRunner } from './env.ts';
-import { CLEF, CLEF_FLASH, EMBEDDING_MODEL, NEURONS_PER_M_TOKENS, NONE } from './limits.ts';
+import { CLEF, CLEF_FLASH, EMBEDDING_MODEL, NEIGHBOUR_TOKENS_MAX, NEURONS_PER_M_TOKENS, NONE } from './limits.ts';
+import type { Features } from './mask.ts';
 
 /** The account's daily allocation is used up: retry after 00:00 UTC. */
 export class AiQuotaError extends Error {
@@ -36,44 +37,77 @@ export function isQuotaError(error: unknown): boolean {
   return /\b4006\b|daily free allocation|neurons|quota/i.test(message);
 }
 
-/** A neighbour the model sees: its label and a short masked text. */
+/** A neighbour the model sees: its label's option key and a short masked text. */
 export interface Neighbour {
   readonly label: string;
   readonly text: string;
 }
 
-/** What the model reads of one mail: masked text only, and a code for the address it came to. */
+/**
+ * What the model reads of one mail: masked text only, and a code for the address it came to. Lean: a field with
+ * nothing to say (no list, no snippet beyond the body, no category, no neighbours) is left out, since every
+ * character is input the account pays for on every call.
+ */
 export interface ClefState {
-  readonly from: string;
-  readonly to: string;
-  readonly list: string;
-  readonly subject: string;
-  readonly snippet: string;
-  readonly body: string;
-  readonly gmail_category: string;
-  readonly similar_examples: readonly Neighbour[];
+  readonly from?: string;
+  readonly to?: string;
+  readonly list?: string;
+  readonly subject?: string;
+  readonly snippet?: string;
+  readonly body?: string;
+  readonly gmail_category?: string;
+  readonly similar_examples?: readonly Neighbour[];
+}
+
+/** Whitespace runs as one space, for comparing Gmail's snippet with the body it was cut from. */
+function fold(text: string): string {
+  return text.replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * The model's state of a mail: masked text, a code for the address, and the neighbours' short texts (their labels as
+ * option keys, the names the options have). Gmail's snippet is the start of the body, so it is sent only when it
+ * says something the body does not (a metadata-only read has no body): up to 300 characters of input saved on every
+ * call. Empty fields are left out.
+ */
+export function clefState(f: Pick<Features, 'sender' | 'toCode' | 'listId' | 'subject' | 'snippet' | 'body' | 'category'>, neighbours: readonly { label: string; summary: string }[]): ClefState {
+  const head = fold(f.snippet).slice(0, 80);
+  const snippetInBody = f.body !== '' && head !== '' && fold(f.body).startsWith(head);
+  const fields: [keyof ClefState, string][] = [
+    ['from', f.sender],
+    ['to', f.toCode],
+    ['list', f.listId === '' ? '' : 'mailing list'],
+    ['subject', f.subject],
+    ['snippet', snippetInBody ? '' : f.snippet],
+    ['body', f.body],
+    ['gmail_category', f.category],
+  ];
+  const state: Record<string, unknown> = Object.fromEntries(fields.filter(([, value]) => value !== ''));
+  if (neighbours.length > 0) state['similar_examples'] = neighbours.map((n) => ({ label: n.label, text: cutTokens(n.summary, NEIGHBOUR_TOKENS_MAX) }));
+  return state;
 }
 
 export interface ClefOption {
-  /** The label's stable ID: the option's key, which the answer must give back exactly. */
+  /** The label's ID (labels/{id}): what the answer's probabilities are recorded under. */
   readonly id: string;
-  /** The owner's display name (分拣/<name> in Gmail). */
+  /** The option's key, which the answer must give back exactly: derived from the path (paths.ts optionKeys). */
+  readonly key: string;
+  /** The label's path (分拣/<path> in Gmail), `金融/投资`. */
   readonly name: string;
   readonly description: string;
 }
 
 /**
- * An option's criterion: the display name, then the owner's description when there is one. The ID is never the
- * meaning: labels imported from Gmail or created without an ID have a random one (l + 8 characters), and an option
- * whose criterion were that ID would tell the model nothing.
+ * An option's criterion: the label's path, then `: ` and the owner's description when there is one (the pipeline
+ * offers only labels with one). Never the key or the ID alone: an ID of a label imported from Gmail is random.
  */
-export function criterion(option: ClefOption): string {
+export function criterion(option: Pick<ClefOption, 'name' | 'description'>): string {
   return option.description === '' ? option.name : `${option.name}: ${option.description}`;
 }
 
 export interface ClefAnswer {
   readonly model: string;
-  /** Probability per option ID ("none" included). */
+  /** Probability per option (its key from readClefAnswer, its label ID from decide; "none" included). */
   readonly probabilities: Readonly<Record<string, number>>;
   readonly top: string;
   readonly suspicious: number;
@@ -89,7 +123,7 @@ export const QUESTION_BULK = 'bulk';
 /** The request body of one Clef call (the input schema of @cf/cloudflare/clef). */
 export function clefInput(model: string, state: ClefState, options: readonly ClefOption[]): Record<string, unknown> {
   const criteria: Record<string, string> = {};
-  for (const option of options) criteria[option.id] = criterion(option);
+  for (const option of options) criteria[option.key] = criterion(option);
   criteria[NONE] = 'None of the other labels fits this email.';
   return {
     model: model === CLEF_FLASH ? 'clef-flash' : 'clef',
@@ -163,7 +197,10 @@ export function readClefAnswer(model: string, answer: unknown, optionIds: readon
   };
 }
 
-/** One Clef call; quota refusals are AiQuotaError, other failures AiError. */
+/**
+ * One Clef call; quota refusals are AiQuotaError, other failures AiError. The answer comes back by label ID: the
+ * option keys are only the model's names for them.
+ */
 export async function decide(ai: AiRunner, model: string, state: ClefState, options: readonly ClefOption[]): Promise<ClefAnswer> {
   let answer: unknown;
   try {
@@ -172,7 +209,10 @@ export async function decide(ai: AiRunner, model: string, state: ClefState, opti
     if (isQuotaError(error)) throw new AiQuotaError();
     throw new AiError('ai_unavailable');
   }
-  return readClefAnswer(model, answer, options.map((option) => option.id));
+  const read = readClefAnswer(model, answer, options.map((option) => option.key));
+  const idOf = new Map(options.map((option) => [option.key, option.id]));
+  const byId = (key: string) => (key === NONE ? NONE : (idOf.get(key) ?? key));
+  return { ...read, top: byId(read.top), probabilities: Object.fromEntries(Object.entries(read.probabilities).map(([key, p]) => [byId(key), p])) };
 }
 
 const CJK = /[\u3000-\u9fff\uac00-\ud7af\uf900-\ufaff]/;

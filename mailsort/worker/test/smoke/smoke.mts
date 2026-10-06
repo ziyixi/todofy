@@ -6,7 +6,10 @@
  *
  * It walks the owner's whole loop through the HTTP API the UI uses: a shadow decision, live label + archive with UNREAD
  * untouched, an unsure mail left in the inbox, undo, Gmail corrections becoming examples and a rule proposal, the
- * neuron budget's switch to Clef-flash, the quota deferral, and the auth failure. Run from worker/ after the UI's build
+ * neuron budget's switch to Clef-flash, the quota deferral; then round 2: an import of nested labels and the owner's
+ * rule file (preview, confirm), a nested label created in Gmail with its parents, a label that keeps its mail in the
+ * inbox, a subject carve-out before the sender's plain rule, a forged From that fires no rule, the flow API and the
+ * export's round trip; and last the auth failure. Run from worker/ after the UI's build
  * (the dev server serves web/dist):
  *
  *   npm run test:smoke
@@ -18,7 +21,8 @@ import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHttpClient, type HttpCall } from '@ziyixi/proto/http-client';
-import { MailsortUiService } from '@ziyixi/proto/mailsort/ui/v1/mailsort_ui_service_pb';
+import { LabelImportSchema, MailsortUiService, RuleImportSchema } from '@ziyixi/proto/mailsort/ui/v1/mailsort_ui_service_pb';
+import { MailFlow_Outcome, MailFlow_Stage } from '@ziyixi/proto/mailsort/ui/v1/flow_pb';
 import { LabelSchema } from '@ziyixi/proto/mailsort/ui/v1/label_pb';
 import { Mode, SettingsSchema } from '@ziyixi/proto/mailsort/ui/v1/status_pb';
 import { create } from '@ziyixi/proto/protobuf';
@@ -202,6 +206,49 @@ async function run(origin: string, up: FakeUpstream, setClock: (now: number) => 
   const quota = await api.getServiceStatus({ name: 'serviceStatus' });
   check(deferred.code === 'deferred' && quota.deferredCount >= 1 && quota.aiQuotaExhausted, 'Workers AI out of quota: the mail waits for the next UTC day (deferred, not failed)');
   up.ai.quota = false;
+
+  // Round 2. An import: a nested label with its description, and the owner's rule file (synthetic): a CI sender, a
+  // bank's login carve-out kept in the inbox, the bank's plain rule.
+  const labelsIn = [create(LabelImportSchema, { path: '分拣/开发/CI通知', description: '持续集成平台的构建成功或失败通知、拉取请求与代码评审动态，多为机器自动生成的开发通知邮件。' })];
+  const rulesIn = [
+    create(RuleImportSchema, { id: 'ci-builds', match: { fromAddress: 'builds@ci.example.com' }, label: '分拣/开发/CI通知' }),
+    create(RuleImportSchema, { id: 'bank-login', match: { fromAddress: 'statements@bank.example.com' }, label: '分拣/账号安全', trust: true, keepInInbox: true, subjectIncludes: ['登录', 'login'] }),
+    create(RuleImportSchema, { id: 'bank-plain', match: { fromAddress: 'statements@bank.example.com' }, label: '分拣/金融/银行支付', trust: true }),
+  ];
+  const preview = await api.importRules({ labels: labelsIn, rules: rulesIn, validateOnly: true });
+  const before = (await api.listLabels({})).labels.length;
+  check(preview.createdLabelCount === 3 && preview.createdRuleCount === 3 && !preview.applied && (await api.listLabels({})).labels.length === before, 'import: the preview lists 3 labels and 3 rules to create and changes nothing');
+  const imported = await api.importRules({ labels: labelsIn, rules: rulesIn, requestId: id() });
+  check(imported.applied && (await api.listRules({})).rules.some((rule) => rule.importId === 'bank-login' && rule.subjectIncludes.includes('登录')), 'import: confirmed, the rules and their subject conditions are stored');
+  for (const labelId of ['dev-ci-notices', 'account-security', 'finance-bank-pay']) {
+    await api.updateLabel({ label: create(LabelSchema, { name: `labels/${labelId}`, live: true }), updateMask: { paths: ['live'] }, requestId: id() });
+  }
+  deliver(MAILS.ciBuild);
+  deliver(MAILS.bankLogin);
+  deliver(MAILS.bankEn);
+  deliver(MAILS.forgedBankLogin);
+  await step();
+  await step();
+  const names = [...up.gmail.labels.values()].map((label) => label.name);
+  const ciLeaf = up.gmail.labelIdByName('分拣/开发/CI通知') ?? '';
+  const ci = labelsOf(MAILS.ciBuild.id);
+  check(names.includes('分拣') && names.includes('分拣/开发') && ciLeaf !== '' && ci.includes(ciLeaf) && !ci.includes('INBOX') && ci.filter((label) => label.startsWith('Label_')).length === 1, 'nested label: created in Gmail with its parents; the mail gets only the leaf, archived');
+  const security = up.gmail.labelIdByName('分拣/账号安全') ?? '';
+  const login = labelsOf(MAILS.bankLogin.id);
+  check(security !== '' && login.includes(security) && login.includes('INBOX') && login.includes('UNREAD'), 'keep in inbox: the login notice gets 分拣/账号安全 by its carve-out and stays in the inbox, UNREAD untouched');
+  const plain = labelsOf(MAILS.bankEn.id);
+  check(plain.includes(up.gmail.labelIdByName('分拣/金融/银行支付') ?? '-') && !plain.includes('INBOX'), 'carve-out order: the same sender\'s statement takes the plain rule (label and archive)');
+  const forged = labelsOf(MAILS.forgedBankLogin.id);
+  check(forged.includes('INBOX') && forged.every((label) => !label.startsWith('Label_')), 'forged From (DMARC failed): no rule fires and nothing is written');
+  const flow = await api.getMailFlow({ name: 'mailFlows/today' });
+  const counted = (stage: MailFlow_Stage, outcome: MailFlow_Outcome, label: string) => flow.counts.some((item) => item.stage === stage && item.outcome === outcome && item.label === label && item.mailCount >= 1);
+  check(
+    counted(MailFlow_Stage.RULE, MailFlow_Outcome.ARCHIVED, 'labels/dev-ci-notices') && counted(MailFlow_Stage.RULE, MailFlow_Outcome.KEPT_IN_INBOX, 'labels/account-security') && flow.counts.some((item) => item.stage === MailFlow_Stage.DEFERRED),
+    'the flow API counts each stage and outcome per label (rule archived, kept in inbox, deferred)',
+  );
+  const exported = JSON.parse((await api.exportRules({})).json) as { rules: { id: string }[] };
+  const again = await api.importRules({ labels: labelsIn, rules: rulesIn, validateOnly: true });
+  check(exported.rules.some((rule) => rule.id === 'bank-login') && again.skippedCount === 4 && again.createdRuleCount === 0, 'export lists the imported rules; importing the same file again changes nothing');
 
   // The grant refused three times: Google is no longer called.
   up.gmail.grants.clear();

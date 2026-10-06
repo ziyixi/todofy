@@ -119,12 +119,20 @@ describe('the closed table refuses everything outside it', () => {
     expect(refused('POST', url, JSON.stringify({ removeLabelIds: [OWNED] }), ownership({ [`${MESSAGE}:${OWNED}`]: { state: 'undo_intended', archived: true } }))).toBe('archive_mismatch');
   });
 
-  it('creates and renames labels only under the prefix', () => {
+  it('creates and renames labels only under the prefix (nested paths of up to three segments, and the prefix itself)', () => {
     const create = (name: string) => JSON.stringify({ name, labelListVisibility: 'labelShow', messageListVisibility: 'show' });
-    expect(refused('POST', `${BASE}/labels`, create('分拣/订阅'))).toBe('accepted');
-    expect(refused('POST', `${BASE}/labels`, create('订阅'))).toBe('labels_create');
-    expect(refused('POST', `${BASE}/labels`, create('分拣/a/b'))).toBe('labels_create');
-    expect(refused('POST', `${BASE}/labels`, create('分拣/'))).toBe('labels_create');
+    const ctx = { owned: new Set([OWNED]), ledger: () => null };
+    for (const name of ['分拣/订阅', '分拣/开发/CI通知', '分拣/a/b/c', '分拣']) {
+      expect(refused('POST', `${BASE}/labels`, create(name)), name).toBe('accepted');
+      expect(allowedOperation('POST', `${BASE}/labels`, create(name), ctx), name).toBe('labels_create');
+    }
+    for (const name of ['订阅', '分拣/', '分拣//a', '分拣/a/', '分拣/a/b/c/d', '分拣/ a', '分拣/a /b', '分拣 ', 'Work/分拣', '分拣/a\u0007']) {
+      expect(refused('POST', `${BASE}/labels`, create(name)), name).toBe('labels_create');
+      expect(allowedOperation('POST', `${BASE}/labels`, create(name), ctx), name).toBeNull();
+    }
+    // The prefix's own label is a parent to create, never a name to rename an owned label to.
+    expect(refused('PATCH', `${BASE}/labels/${OWNED}`, JSON.stringify({ name: '分拣' }))).toBe('labels_patch');
+    expect(refused('PATCH', `${BASE}/labels/${OWNED}`, JSON.stringify({ name: '分拣/金融/投资' }))).toBe('accepted');
     expect(refused('POST', `${BASE}/labels`, JSON.stringify({ name: '分拣/x', color: { textColor: '#000000' } }))).toBe('body_key');
     expect(refused('PATCH', `${BASE}/labels/${OWNED}`, JSON.stringify({ name: '分拣/新' }))).toBe('accepted');
     expect(refused('PATCH', `${BASE}/labels/Label_8`, JSON.stringify({ name: '分拣/新' }))).toBe('label_not_owned');
@@ -231,7 +239,7 @@ describe('fuzz: random operations never pass the guard unless the independent ta
               ...(removeSize > 0 ? { removeLabelIds: Array.from({ length: removeSize }, () => pick(random, labels)) } : {}),
             })
           : bodyKind === 'label'
-            ? JSON.stringify({ name: pick(random, ['分拣/a', '分拣/', 'Work', '分拣/a/b']), labelListVisibility: 'labelShow', messageListVisibility: 'show' })
+            ? JSON.stringify({ name: pick(random, ['分拣/a', '分拣/', 'Work', '分拣/a/b', '分拣', '分拣/a/b/c/d', '分拣/ a']), labelListVisibility: 'labelShow', messageListVisibility: 'show' })
             : bodyKind === 'form'
               ? 'client_id=a&client_secret=b&refresh_token=c&grant_type=refresh_token'
               : undefined;

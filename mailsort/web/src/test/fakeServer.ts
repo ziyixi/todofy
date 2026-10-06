@@ -11,12 +11,20 @@ import { create } from '@ziyixi/proto/protobuf'
 import { EmptySchema, timestampFromMs } from '@ziyixi/proto/protobuf/wkt'
 import { Code, RpcError } from '@ziyixi/proto/rpc-status'
 import { Label_GmailState, LabelSchema, type Label } from '@ziyixi/proto/mailsort/ui/v1/label_pb'
+import { MailFlow_CountSchema, MailFlowSchema, type MailFlow_Count } from '@ziyixi/proto/mailsort/ui/v1/flow_pb'
 import {
   ExportGmailFiltersResponseSchema,
+  ExportRulesResponseSchema,
+  ImportChange_Action,
+  ImportChange_Kind,
+  ImportChangeSchema,
+  ImportRulesResponseSchema,
+  type ImportRulesRequest,
   ListExamplesResponseSchema,
   ListLabelsResponseSchema,
   ListLedgerEntriesResponseSchema,
   ListReviewItemsResponseSchema,
+  LabelImportSchema,
   ListRulesResponseSchema,
   MailsortUiService,
   SyncLabelsResponseSchema,
@@ -83,6 +91,11 @@ export function example(id: string): Example {
   return create(ExampleSchema, { name: `examples/${id}`, label: 'labels/newsletter', summary: `例子 ${id}`, embedded: true, createTime: timestampFromMs(NOW) })
 }
 
+/** One flow counter. */
+export function flowCount(stage: MailFlow_Count['stage'], outcome: MailFlow_Count['outcome'], label: string, mailCount: number): MailFlow_Count {
+  return create(MailFlow_CountSchema, { stage, outcome, label, mailCount })
+}
+
 /** One page of `items` after the item named by `token` (the fake's page token is the last item's index). */
 function page<T>(items: readonly T[], size: number, token: string): { items: T[]; next: string } {
   const start = token === '' ? 0 : Number(token)
@@ -103,6 +116,10 @@ export class FakeServer {
   examples: Example[] = []
   /** Rules the export leaves out (trust rules). */
   exportSkipped = 0
+  /** GetMailFlow's counters, whatever the range. */
+  flow: MailFlow_Count[] = []
+  /** The ImportRules requests received (validate_only ones included). */
+  readonly imports: ImportRulesRequest[] = []
   settings: Settings = create(SettingsSchema, { name: 'settings', mode: Mode.SHADOW, effectiveMode: Mode.SHADOW, runWriteLimit: 10, dailyWriteLimit: 150, dailyNeuronBudget: 7000, defaultThreshold: 0.8, precisionTarget: 0.9, etag: 's1' })
   private readonly transcoder: HttpTranscoder<ShapeOf<typeof MailsortUiService>, null>
 
@@ -146,7 +163,8 @@ export class FakeServer {
         return Promise.resolve(create(ListExamplesResponseSchema, { examples: items, nextPageToken: next }))
       },
       listLedgerEntries: (request) => {
-        const { items, next } = page(this.ledgerEntries, request.pageSize, request.pageToken)
+        const entries = request.label === '' ? this.ledgerEntries : this.ledgerEntries.filter((item) => item.label === request.label)
+        const { items, next } = page(entries, request.pageSize, request.pageToken)
         return Promise.resolve(create(ListLedgerEntriesResponseSchema, { ledgerEntries: items, nextPageToken: next }))
       },
       undoLedgerEntry: (request) => {
@@ -171,6 +189,31 @@ export class FakeServer {
         const active = this.rules.filter((rule) => rule.state === Rule_State.ACTIVE)
         return Promise.resolve(create(ExportGmailFiltersResponseSchema, { xml: '<feed/>', ruleCount: active.length, skippedCount: this.exportSkipped }))
       },
+      getMailFlow: (request) => Promise.resolve(create(MailFlowSchema, { name: request.name, startTime: timestampFromMs(NOW - 3_600_000), endTime: timestampFromMs(NOW), counts: this.flow })),
+      // As the Worker, simplified: a rule whose match has no key is invalid; every other entry is a create.
+      importRules: (request) => {
+        this.imports.push(request)
+        const rules = request.rules.map((rule, index) => {
+          const keys = [rule.match?.fromAddress, rule.match?.fromDomain, rule.match?.listId, rule.match?.toAddress].filter((value) => value !== undefined && value !== '')
+          return create(ImportChangeSchema, { kind: ImportChange_Kind.RULE, index, key: rule.id, action: keys.length === 1 ? ImportChange_Action.CREATE : ImportChange_Action.INVALID, problem: keys.length === 1 ? '' : 'match' })
+        })
+        const labels = request.useTemplate
+          ? [create(LabelImportSchema, { path: '分拣/账号安全', description: '账号安全通知', trust: true, keepInInbox: true }), create(LabelImportSchema, { path: '分拣/金融/投资', description: '券商对账单', trust: true })]
+          : request.labels
+        const invalid = rules.filter((change) => change.action === ImportChange_Action.INVALID).length
+        if (invalid > 0 && !request.validateOnly) throw new RpcError(Code.INVALID_ARGUMENT, 'INVALID_IMPORT', 'invalid')
+        return Promise.resolve(
+          create(ImportRulesResponseSchema, {
+            changes: [...labels.map((item, index) => create(ImportChangeSchema, { kind: ImportChange_Kind.LABEL, index, key: item.path.replace('分拣/', ''), action: ImportChange_Action.CREATE })), ...rules],
+            applied: !request.validateOnly,
+            createdLabelCount: labels.length,
+            createdRuleCount: rules.length - invalid,
+            invalidCount: invalid,
+            labels,
+          }),
+        )
+      },
+      exportRules: () => Promise.resolve(create(ExportRulesResponseSchema, { json: '{"labels": [], "rules": []}\n', labelCount: this.labels.length, ruleCount: this.rules.length })),
       getAccuracyReport: () => Promise.resolve(create(AccuracyReportSchema, { name: 'accuracyReport', labels: this.labels.map((item) => ({ label: item.name, confirmedCount: 40, precisionLowerBound: 0.92 })), decidedCount: 50, unsureCount: 5, coverage: 0.9, precisionTarget: 0.9 })),
       getServiceStatus: () =>
         Promise.resolve(
@@ -205,7 +248,7 @@ export class FakeServer {
       },
     }
     const all = new Proxy(handlers, { get: (target, key: string) => (target as Record<string, unknown>)[key] ?? unimplemented }) as ServiceHandlers<ShapeOf<typeof MailsortUiService>, null>
-    this.transcoder = new HttpTranscoder(MailsortUiService, all, { domain: 'sort.ziyixi.science', maxBodyBytes: 65536, authorize: () => undefined })
+    this.transcoder = new HttpTranscoder(MailsortUiService, all, { domain: 'sort.ziyixi.science', maxBodyBytes: 262144, authorize: () => undefined })
   }
 
   private resolve(name: string, state: ReviewItem_State, chosen: string | null): ReviewItem {

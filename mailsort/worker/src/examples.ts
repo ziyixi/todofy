@@ -54,9 +54,14 @@ export function nearest(store: Store, vector: Float32Array, k: number, labels: R
 /**
  * Makes (or moves) the example of `messageId`: label `labelId`, the summary kept. An existing one keeps its embedding
  * (it embeds the summary, not the label). Bounded: past EXAMPLES_PER_LABEL_MAX for the label, or EXAMPLES_MAX in all, the
- * oldest weak accept goes first, then the oldest example.
+ * oldest weak accept goes first, then the oldest example. A sensitive label keeps none: its mail's summary would
+ * otherwise outlive the 14 days of content (an example moved to it is deleted).
  */
 export function putExample(store: Store, messageId: string, labelId: string, summary: string, origin: ExampleRow['origin'], now: number): void {
+  if (store.label(labelId)?.sensitive === 1) {
+    deleteExampleOf(store, messageId);
+    return;
+  }
   const existing = store.one<{ id: string }>(`SELECT id FROM examples WHERE message_id = ?`, messageId);
   if (existing !== undefined) {
     store.run(`UPDATE examples SET label_id = ?, origin = ? WHERE id = ?`, labelId, origin, existing.id);

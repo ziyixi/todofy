@@ -14,6 +14,7 @@
  * rule, which decides nothing until the owner approves it.
  */
 import { deleteExampleOf, putExample } from './examples.ts';
+import { countFlow, stageOf } from './flow.ts';
 import { shortId } from './ids.ts';
 import { RULE_PROPOSAL_CORRECTIONS } from './limits.ts';
 import { ruleValueOk } from './rule-value.ts';
@@ -41,6 +42,8 @@ export function setCurrentLabels(store: Store, messageId: string, labels: readon
 export function setVerdict(store: Store, row: DecisionRow, chosen: string | null, source: VerdictSource, now: number): void {
   const predicted = row.label_id ?? null;
   const verdict = predicted === chosen ? 'confirmed' : 'corrected';
+  // The flow's corrections count decisions whose label the owner changed, once each, on the day it was decided.
+  countCorrection(store, row, (verdict === 'corrected' ? 1 : 0) - (row.verdict === 'corrected' ? 1 : 0));
   store.run(`UPDATE decisions SET verdict = ?, verdict_label = ?, verdict_source = ?, verdict_at = ? WHERE message_id = ?`, verdict, chosen, source, now, row.message_id);
   if (chosen !== null && row.summary !== null && row.summary !== '') {
     putExample(store, row.message_id, chosen, row.summary, verdict === 'confirmed' ? 'confirmation' : 'correction', now);
@@ -56,7 +59,13 @@ export function setVerdict(store: Store, row: DecisionRow, chosen: string | null
 }
 
 /** Withdraws a verdict (the owner undid their own change in Gmail): no verdict, no example, fewer proposals. */
+/** Adds `delta` to the flow's corrections of a decision that had a label (an unsure one has nothing to correct). */
+function countCorrection(store: Store, row: DecisionRow, delta: number): void {
+  if (row.label_id !== null && row.outcome !== 'skipped') countFlow(store, row.decided_at, stageOf(row.decider), 'corrected', row.label_id, delta);
+}
+
 export function withdrawVerdict(store: Store, row: DecisionRow): void {
+  if (row.verdict === 'corrected') countCorrection(store, row, -1);
   store.run(`UPDATE decisions SET verdict = NULL, verdict_label = NULL, verdict_source = NULL, verdict_at = NULL WHERE message_id = ?`, row.message_id);
   deleteExampleOf(store, row.message_id);
   if (row.verdict === 'corrected' && row.verdict_label !== null) retractProposal(store, row, row.verdict_label);

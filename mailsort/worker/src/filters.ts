@@ -1,8 +1,9 @@
 /**
  * The active rules as a Gmail filter file (../../docs/design.md §6.3): the Atom XML that Gmail's Settings > Filters >
  * Import filters reads, for the owner to import by hand, so the stable rules keep working without this app. Each
- * filter adds the label and archives, like mailsort's own writes; none marks read, stars, forwards or deletes. Rules
- * that need DMARC are left out (a filter cannot check it), and so is any value rule-value.ts refuses.
+ * filter adds the label and archives (or only labels, for a rule or label that keeps its mail in the inbox), like
+ * mailsort's own writes; none marks read, stars, forwards or deletes. Which rules are left out is the API's choice
+ * (api.ts exportGmailFilters); any value rule-value.ts refuses is left out here too.
  */
 import { LABEL_PREFIX } from './limits.ts';
 import { ruleValueOk } from './rule-value.ts';
@@ -29,7 +30,7 @@ function criterion(rule: Pick<RuleRow, 'kind' | 'value'>): [string, string] {
   }
 }
 
-export function gmailFilterXml(rules: readonly (Pick<RuleRow, 'kind' | 'value'> & { readonly labelName: string })[], now: number): string {
+export function gmailFilterXml(rules: readonly (Pick<RuleRow, 'kind' | 'value'> & { readonly labelName: string; readonly archive?: boolean })[], now: number): string {
   const updated = new Date(now).toISOString().replace(/\.\d{3}Z$/, 'Z');
   // Checked here too, so the file is safe whoever calls this (the API also counts what it left out).
   const entries = rules.filter((rule) => ruleValueOk(rule.kind, rule.value)).map((rule) => {
@@ -42,7 +43,8 @@ export function gmailFilterXml(rules: readonly (Pick<RuleRow, 'kind' | 'value'> 
       '<content></content>',
       `<apps:property name='${name}' value='${escapeXml(value)}'/>`,
       `<apps:property name='label' value='${escapeXml(`${LABEL_PREFIX}${rule.labelName}`)}'/>`,
-      "<apps:property name='shouldArchive' value='true'/>",
+      // A rule or label that keeps its mail in the inbox: the filter only labels.
+      ...(rule.archive === false ? [] : ["<apps:property name='shouldArchive' value='true'/>"]),
       "<apps:property name='sizeOperator' value='s_sl'/>",
       "<apps:property name='sizeUnit' value='s_smb'/>",
       '</entry>',

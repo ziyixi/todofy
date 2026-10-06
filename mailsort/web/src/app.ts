@@ -6,7 +6,9 @@
  *   /rules      规则: proposed and active rules; approve, disable, delete; export Gmail filters
  *   /examples   例子与向量库: counts per label, embedding status, rebuild, view and delete examples
  *   /accuracy   准确率: per-label precision bound, coverage, counts
- *   /ledger     操作记录: Gmail writes; undo one or a time range
+ *   /flow       流程: how mail moved through the pipeline (today, 7 or 30 days), and per label
+ *   /import     导入导出: the template, the owner's rule file or an export (preview, then confirm); the export
+ *   /ledger     操作记录: Gmail writes; undo one or a time range; one label's (?label=)
  *   /status     运行状态: the grant, the last sync, the queue, today's Gmail and Workers AI use, error codes
  *   /settings   设置: mode, limits, the neuron budget, thresholds
  *
@@ -15,6 +17,8 @@
 import { el } from './dom.ts'
 import { renderAccuracy } from './views/accuracy.ts'
 import { renderExamples } from './views/examples.ts'
+import { renderFlow } from './views/flow.ts'
+import { renderImport } from './views/import.ts'
 import { renderLabels } from './views/labels.ts'
 import { renderLedger } from './views/ledger.ts'
 import { renderReview } from './views/review.ts'
@@ -45,6 +49,8 @@ const ROUTES: readonly (readonly [string, string, View])[] = [
   ['/', '待审', renderReview],
   ['/labels', '标签', renderLabels],
   ['/rules', '规则', renderRules],
+  ['/flow', '流程', renderFlow],
+  ['/import', '导入', renderImport],
   ['/examples', '例子', renderExamples],
   ['/accuracy', '准确率', renderAccuracy],
   ['/ledger', '记录', renderLedger],

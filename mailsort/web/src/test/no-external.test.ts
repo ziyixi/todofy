@@ -15,8 +15,9 @@ const shipped = () => files(join(root, 'src')).filter((path) => !/\.test\.ts$|[/
 
 describe('no external requests', () => {
   it('has no absolute URL in the shipped sources or index.html', () => {
-    // The inline favicon's SVG namespace (http://www.w3.org/2000/svg) is an identifier, never fetched.
-    const text = (path: string) => readFileSync(path, 'utf8').replace(/xmlns='http:\/\/www\.w3\.org\/2000\/svg'/g, '')
+    // The SVG namespace (http://www.w3.org/2000/svg: the inline favicon's, and the flow diagram's createElementNS) is an
+    // identifier, never fetched.
+    const text = (path: string) => readFileSync(path, 'utf8').replace(/xmlns='http:\/\/www\.w3\.org\/2000\/svg'/g, '').replace(/'http:\/\/www\.w3\.org\/2000\/svg'/g, '')
     const offenders = [join(root, 'index.html'), ...shipped()].filter((path) => /\b(?:https?:)?\/\/[a-z0-9.-]+\.[a-z]{2,}/i.test(text(path)))
     expect(offenders.map((path) => relative(root, path))).toEqual([])
   })

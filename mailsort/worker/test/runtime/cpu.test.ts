@@ -5,7 +5,8 @@
  *
  * - the fetch handler (10 ms per request): Access (an RS256 verification), CSRF, one call to the object and its answer
  *   passed through, for the heaviest answers (24 labels, a page of 50 review items, a page of 50 ledger entries, the
- *   accuracy report over 2,000 decisions, the status);
+ *   accuracy report over 2,000 decisions, the status, 30 days of flow counters) and the largest body (the preview of
+ *   an import of 500 rules, about 120 KiB);
  * - MailsortState (30 s per invocation): those API calls, and the alarm path at its bounds: three history pages of 100
  *   records, DRAIN_MAX mails decided with the nearest of EXAMPLES_MAX embedded examples, Clef, and a live write each.
  *
@@ -24,7 +25,7 @@ import {
   type Isolate,
   type Measurement,
 } from '../../../../tools/workerd-cpu/workerd-cpu.mts';
-import { DRAIN_MAX, EXAMPLES_MAX, LABELS_MAX } from '../../src/limits.ts';
+import { DRAIN_MAX, EXAMPLES_MAX, LABELS_MAX, RULES_MAX } from '../../src/limits.ts';
 import { MAILS, message } from '../fakes/fixtures.ts';
 import { accessClaims, testIssuer } from '../jwt.ts';
 import { MINUTE, OBJECT_WORKER, op, PUBLIC_HOST, startHarness, SYNTHETIC_BINDINGS, T0, type Harness } from './harness.ts';
@@ -129,6 +130,17 @@ async function seed(h: Harness): Promise<void> {
     T0,
     T0,
   );
+  // 30 days of flow counters, every stage and outcome for every label: far more rows than a real month.
+  await h.sql(
+    `WITH RECURSIVE d(i) AS (SELECT 0 UNION ALL SELECT i + 1 FROM d WHERE i < 29),
+       s(stage) AS (VALUES ('rule'), ('neighbours'), ('clef'), ('clef-flash')),
+       o(outcome) AS (VALUES ('archived'), ('kept_in_inbox'), ('suggested'), ('corrected')),
+       l(j) AS (SELECT 0 UNION ALL SELECT j + 1 FROM l WHERE j < ?)
+     INSERT INTO flow (day, stage, outcome, label, n)
+     SELECT date(?, 'unixepoch', '-' || i || ' days'), stage, outcome, 'label-' || j, 1 + (i + j) % 5 FROM d, s, o, l`,
+    LABELS_MAX - 1,
+    Math.floor(T0 / 1000),
+  );
   await h.sql(
     `WITH RECURSIVE n(i) AS (SELECT 0 UNION ALL SELECT i + 1 FROM n WHERE i < 199)
      INSERT INTO ledger (id, message_id, label_id, gmail_label_id, archived, origin, state, create_time, apply_time)
@@ -173,6 +185,22 @@ async function session({ h, meter: worker, object }: SortIsolate, index: number)
     return result;
   }
 
+  // The owner's largest import: RULES_MAX rules of the rule file's format, each with subject conditions and notes.
+  const importBody = JSON.stringify({
+    validate_only: true,
+    rules: Array.from({ length: RULES_MAX }, (_, i) => ({
+      id: `rule-${String(i).padStart(3, '0')}`,
+      match: i % 2 === 0 ? { from_address: `sender${String(i)}@shop${String(i % 50)}.example.com` } : { from_domain: `mail${String(i)}.example.org` },
+      label: `分拣/标签${String(i % LABELS_MAX)}`,
+      keep_in_inbox: i % 7 === 0,
+      trust: false,
+      require_dmarc: false,
+      evidence: `synthetic evidence ${String(i)}: 订单与物流通知的发件人`,
+      notes: 'synthetic',
+      subject_includes: i % 3 === 0 ? ['取件码', 'order'] : [],
+    })),
+  });
+
   // The alarm path at its bounds: the install pass, then 300 history records (3 pages) with DRAIN_MAX new mails.
   let clock = T0;
   await h.step(clock);
@@ -194,6 +222,10 @@ async function session({ h, meter: worker, object }: SortIsolate, index: number)
     ...(await both('GET ledgerEntries (a page of 50)', () => expectOk('/api/v1/ledgerEntries'))),
     ...(await both('GET accuracyReport (2,000 decisions)', () => expectOk('/api/v1/accuracyReport'))),
     ...(await both('GET serviceStatus', () => expectOk('/api/v1/serviceStatus'))),
+    ...(await both('GET mailFlows/last-30-days (11,520 counters)', () => expectOk('/api/v1/mailFlows/last-30-days'))),
+    ...(await both(`POST rules:import, validate_only (${String(RULES_MAX)} rules)`, () =>
+      expectOk('/api/v1/rules:import', { method: 'POST', headers: mutationHeaders, body: importBody }),
+    )),
     ...(await both('PATCH settings (mask)', () =>
       expectOk(`/api/v1/settings?update_mask=default_threshold&request_id=${op()}`, { method: 'PATCH', headers: mutationHeaders, body: JSON.stringify({ name: 'settings', default_threshold: 0.85 }) }),
     )),
@@ -220,6 +252,6 @@ describe('CPU (Workers Free: 10 ms per request, 30 s per Durable Object invocati
       }
     }
     expect(get(ALARM).first, ALARM).toBeLessThan(OBJECT_ALARM_BOUND_MS);
-    expect(reference.size).toBe(1 + 1 + 2 * 6);
+    expect(reference.size).toBe(1 + 1 + 2 * 8);
   });
 });

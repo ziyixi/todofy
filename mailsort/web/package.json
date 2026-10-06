@@ -22,10 +22,14 @@
     "check:dist": "node scripts/finish-dist.mjs"
   },
   "dependencies": {
-    "@ziyixi/proto": "file:../../proto/ts"
+    "@ziyixi/proto": "file:../../proto/ts",
+    "d3-sankey": "0.12.3",
+    "d3-shape": "1.3.7"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
+    "@types/d3-sankey": "0.12.5",
+    "@types/d3-shape": "1.3.12",
     "@types/node": "26.6.3",
     "eslint": "10.11.0",
     "jsdom": "27.4.0",

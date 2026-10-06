@@ -10,7 +10,8 @@
  *   messages_list  GET   /gmail/v1/users/me/messages?labelIds=INBOX&q=newer_than:2d   the resync after a lost cursor
  *   message_get    GET   /gmail/v1/users/me/messages/{id}                   format=full or metadata, fixed fields
  *   labels_list    GET   /gmail/v1/users/me/labels
- *   labels_create  POST  /gmail/v1/users/me/labels                          a name under "分拣/" only
+ *   labels_create  POST  /gmail/v1/users/me/labels                          a name under "分拣/" (a path of up to
+ *                                                                            three segments), or "分拣" itself
  *   labels_patch   PATCH /gmail/v1/users/me/labels/{owned id}               the name only, still under "分拣/"
  *   message_modify POST  /gmail/v1/users/me/messages/{id}/modify            exactly two shapes:
  *     classify: addLabelIds = [one owned label], removeLabelIds = [] or [INBOX], for a ledger row in `intended` or
@@ -26,7 +27,7 @@
  *
  * Nothing here logs. Answers are read with a byte cap and parsed as JSON; their content is untrusted mail data.
  */
-import { GOOGLE_TIMEOUT_MS, LABEL_PREFIX, MESSAGE_MAX_BYTES, RESPONSE_MAX_BYTES, RESYNC_QUERY } from './limits.ts';
+import { GOOGLE_TIMEOUT_MS, LABEL_DEPTH_MAX, LABEL_PREFIX, LABEL_ROOT, MESSAGE_MAX_BYTES, RESPONSE_MAX_BYTES, RESYNC_QUERY } from './limits.ts';
 
 export const GMAIL_HOST = 'gmail.googleapis.com';
 export const TOKEN_HOST = 'oauth2.googleapis.com';
@@ -147,11 +148,15 @@ function labelList(value: unknown): string[] {
   return value;
 }
 
-/** A Gmail label name of this app: under the prefix, a non-empty leaf without "/", no control characters. */
+/**
+ * A Gmail label name of this app: under the prefix, a path of 1 to LABEL_DEPTH_MAX segments (a Gmail nested label,
+ * `分拣/开发/CI通知`), each non-empty without surrounding spaces, and no control characters. A label of this app or a
+ * parent that groups some (`分拣/开发`); only a linked label of the app's store is ever written to a mail.
+ */
 export function ownedName(name: unknown): name is string {
   if (typeof name !== 'string' || !name.startsWith(LABEL_PREFIX) || name.length > 225 || hasControl(name)) return false;
-  const leaf = name.slice(LABEL_PREFIX.length);
-  return leaf.trim() !== '' && !leaf.includes('/');
+  const segments = name.slice(LABEL_PREFIX.length).split('/');
+  return segments.length <= LABEL_DEPTH_MAX && segments.every((segment) => segment !== '' && segment === segment.trim());
 }
 
 function owned(labelId: string, ownership: Ownership): void {
@@ -267,7 +272,9 @@ export function checkRequest(request: GoogleRequest, ownership: Ownership): Gmai
     if (method === 'POST') {
       if (url.search !== '') refuse('query_param');
       const value = jsonBody(request.body, ['name', 'labelListVisibility', 'messageListVisibility']);
-      if (!ownedName(value['name']) || value['labelListVisibility'] !== 'labelShow' || value['messageListVisibility'] !== 'show') refuse('labels_create');
+      // The prefix's own label too: Gmail nests `分拣/x` under it only when it exists.
+      const name = value['name'];
+      if (!(ownedName(name) || name === LABEL_ROOT) || value['labelListVisibility'] !== 'labelShow' || value['messageListVisibility'] !== 'show') refuse('labels_create');
       return 'labels_create';
     }
   }
@@ -561,7 +568,7 @@ export class GmailClient {
     });
   }
 
-  /** Creates the Gmail label `name` (under "分拣/"); answers its ID. */
+  /** Creates the Gmail label `name` (under "分拣/", or "分拣" itself); answers its ID. */
   async createLabel(name: string): Promise<string> {
     const value = assertObject(await this.write('labels_create', 'POST', `${GMAIL_BASE}/labels`, { name, labelListVisibility: 'labelShow', messageListVisibility: 'show' }));
     const id = value['id'];

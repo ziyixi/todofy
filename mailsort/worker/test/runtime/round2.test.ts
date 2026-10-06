@@ -1,0 +1,200 @@
+/**
+ * The owner's round-2 requests in workerd with a real SQLite MailsortState, the fake Gmail and the fake Workers AI
+ * (../../../docs/design.md §3, §4.3, §6, §10): the template and the rule file imported with a preview and a
+ * confirmation; nested labels created in Gmail with their parents, the mail getting only the leaf; labels and rules
+ * that keep their mail in the inbox (UNREAD untouched, undo removing only the label); a subject carve-out before the
+ * sender's plain rule; forged and look-alike From headers firing no rule; the sync of nested Gmail labels; the flow
+ * counters with the ledger's label filter; and the export's round trip. Every request Google got is checked against
+ * the independent table after each test. All data is synthetic.
+ */
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { create } from '@ziyixi/proto/protobuf';
+import { LabelSchema } from '@ziyixi/proto/mailsort/ui/v1/label_pb';
+import { MailFlow_Outcome, MailFlow_Stage } from '@ziyixi/proto/mailsort/ui/v1/flow_pb';
+import { ImportChange_Action, ImportRulesResponseSchema, RuleImportSchema, type RuleImport } from '@ziyixi/proto/mailsort/ui/v1/mailsort_ui_service_pb';
+import { Mode } from '@ziyixi/proto/mailsort/ui/v1/status_pb';
+import { readDetail, type Status } from '@ziyixi/proto/rpc-status';
+import { MAILS } from '../fakes/fixtures.ts';
+import { MINUTE, op, reasonOf, rejection, startHarness, T0, type Harness } from './harness.ts';
+import { checkGoogleCalls, decision, deliver, gmailLabels, setLabelLive, setMode } from './helpers.ts';
+
+/** The owner's rule file, synthetic: a CI sender, a bank's login carve-out and its plain rule, a pickup carve-out. */
+function ruleFile(): RuleImport[] {
+  return [
+    create(RuleImportSchema, { id: 'ci-builds', match: { fromAddress: 'builds@ci.example.com' }, label: '分拣/开发/CI通知', evidence: 'synthetic: every CI mail' }),
+    create(RuleImportSchema, { id: 'bank-login', match: { fromAddress: 'statements@bank.example.com' }, label: '分拣/账号安全', trust: true, keepInInbox: true, subjectIncludes: ['登录', 'login'] }),
+    create(RuleImportSchema, { id: 'bank', match: { fromAddress: 'statements@bank.example.com' }, label: '分拣/金融/银行支付', trust: true }),
+    create(RuleImportSchema, { id: 'pickup', match: { fromAddress: 'orders@shop.example.com' }, label: '分拣/购物/订单物流', keepInInbox: true, subjectIncludes: ['取件码'] }),
+    create(RuleImportSchema, { id: 'shop', match: { fromAddress: 'orders@shop.example.com' }, label: '分拣/购物/订单物流' }),
+  ];
+}
+
+describe('round 2: import, nested labels, keep in inbox, carve-outs, forged From, the flow', () => {
+  let h: Harness;
+  let now = T0;
+  beforeAll(async () => {
+    h = await startHarness();
+    await h.step(now);
+  });
+  afterAll(async () => {
+    await h.dispose();
+  });
+  afterEach(() => {
+    checkGoogleCalls(h);
+  });
+
+  it('previews the template without writing, then imports it once per request ID', async () => {
+    const preview = await h.api.importRules({ useTemplate: true, validateOnly: true });
+    expect(preview).toMatchObject({ applied: false, createdLabelCount: 15, invalidCount: 0 });
+    expect(preview.labels.map((label) => label.path)).toContain('分拣/金融/银行支付');
+    expect((await h.api.listLabels({})).labels).toEqual([]);
+    const requestId = op();
+    const applied = await h.api.importRules({ useTemplate: true, requestId });
+    expect(applied).toMatchObject({ applied: true, createdLabelCount: 15 });
+    expect((await h.api.importRules({ useTemplate: true, requestId })).createdLabelCount).toBe(15);
+    const labels = (await h.api.listLabels({})).labels;
+    expect(labels).toHaveLength(15);
+    expect(labels.find((label) => label.displayName === '账号安全')).toMatchObject({ name: 'labels/account-security', enabled: true, live: false, trustImplying: true, keepInInbox: true });
+    expect(labels.find((label) => label.displayName === '生活/医疗')).toMatchObject({ sensitive: true, trustImplying: true });
+    // Nothing reached Gmail: labels are created there before their first write.
+    expect(h.up.gmail.calls.filter((call) => call.method !== 'GET' && !call.url.includes('/token'))).toEqual([]);
+  });
+
+  it('refuses an import with an invalid entry as a whole, and says which entry and why', async () => {
+    const bad = [...ruleFile(), create(RuleImportSchema, { id: 'two-keys', match: { fromAddress: 'a@example.com', fromDomain: 'example.com' }, label: '分拣/订阅收据' })];
+    const preview = await h.api.importRules({ rules: bad, validateOnly: true });
+    expect(preview.invalidCount).toBe(1);
+    expect(preview.changes.find((change) => change.action === ImportChange_Action.INVALID)).toMatchObject({ key: 'two-keys', problem: 'match', index: 5 });
+    const error = await rejection(h.api.importRules({ rules: bad, requestId: op() }));
+    expect(reasonOf(error)).toBe('INVALID_IMPORT');
+    expect(readDetail((error as { status: Status }).status, ImportRulesResponseSchema)?.invalidCount).toBe(1);
+    expect((await h.api.listRules({})).rules).toEqual([]);
+  });
+
+  it('imports the rule file: subject conditions, keep in inbox, evidence, all onto the template’s labels', async () => {
+    const preview = await h.api.importRules({ rules: ruleFile(), validateOnly: true });
+    expect(preview).toMatchObject({ createdRuleCount: 5, createdLabelCount: 0, invalidCount: 0 });
+    await h.api.importRules({ rules: ruleFile(), requestId: op() });
+    const rules = (await h.api.listRules({})).rules;
+    expect(rules).toHaveLength(5);
+    expect(rules.find((rule) => rule.name === 'rules/bank-login')).toMatchObject({ subjectIncludes: ['登录', 'login'], keepInInbox: true, dmarcRequired: true, importId: 'bank-login', label: 'labels/account-security' });
+    expect(rules.find((rule) => rule.name === 'rules/ci-builds')).toMatchObject({ evidence: 'synthetic: every CI mail', dmarcRequired: true });
+    // A second import of the same file changes nothing.
+    expect((await h.api.importRules({ rules: ruleFile(), validateOnly: true })).skippedCount).toBe(5);
+  });
+
+  it('a live write to a nested label creates its parents in Gmail; the mail gets only the leaf', async () => {
+    await setMode(h, Mode.LIVE);
+    for (const id of ['dev-ci-notices', 'account-security', 'finance-bank-pay', 'shop-orders-shipping']) await setLabelLive(h, id, true);
+    deliver(h, MAILS.ciBuild, now);
+    now += 5 * MINUTE;
+    await h.step(now);
+    const names = [...h.up.gmail.labels.values()].filter((label) => label.type === 'user').map((label) => label.name);
+    expect(names).toEqual(expect.arrayContaining(['分拣', '分拣/开发', '分拣/开发/CI通知']));
+    const leaf = h.up.gmail.labelIdByName('分拣/开发/CI通知') ?? '';
+    expect(gmailLabels(h, MAILS.ciBuild.id)).toEqual(['CATEGORY_UPDATES', leaf, 'UNREAD'].sort());
+    expect(await decision(h, MAILS.ciBuild.id)).toMatchObject({ outcome: 'applied', decider: 'rule', label_id: 'dev-ci-notices' });
+    // The parents are never linked: the guard's owned set is the leaves only.
+    expect((await h.api.getLabel({ name: 'labels/dev-ci-notices' })).gmailLabelId).toBe(leaf);
+  });
+
+  it('keeps account-security mail in the inbox: the label added, INBOX and UNREAD untouched; undo removes only the label', async () => {
+    deliver(h, MAILS.bankLogin, now);
+    now += 5 * MINUTE;
+    await h.step(now);
+    const security = h.up.gmail.labelIdByName('分拣/账号安全') ?? '';
+    expect(gmailLabels(h, MAILS.bankLogin.id)).toEqual(['CATEGORY_UPDATES', 'INBOX', security, 'UNREAD'].sort());
+    expect(await decision(h, MAILS.bankLogin.id)).toMatchObject({ decider: 'rule', label_id: 'account-security' });
+    const [entry] = (await h.api.listLedgerEntries({ label: 'labels/account-security' })).ledgerEntries;
+    expect(entry).toMatchObject({ messageId: MAILS.bankLogin.id, archived: false });
+    await h.api.undoLedgerEntry({ name: entry?.name ?? '', requestId: op() });
+    expect(gmailLabels(h, MAILS.bankLogin.id)).toEqual(['CATEGORY_UPDATES', 'INBOX', 'UNREAD']);
+  });
+
+  it('the carve-out goes first: the same sender’s statement takes the plain rule, label and archive', async () => {
+    deliver(h, MAILS.bankEn, now);
+    now += 5 * MINUTE;
+    await h.step(now);
+    const bank = h.up.gmail.labelIdByName('分拣/金融/银行支付') ?? '';
+    expect(gmailLabels(h, MAILS.bankEn.id)).toEqual(['CATEGORY_UPDATES', bank, 'UNREAD'].sort());
+  });
+
+  it('a rule keeps its mail in the inbox while its label archives: a pickup code stays, a receipt goes', async () => {
+    deliver(h, MAILS.pickupZh, now);
+    deliver(h, MAILS.receiptEn, now);
+    now += 5 * MINUTE;
+    await h.step(now);
+    const orders = h.up.gmail.labelIdByName('分拣/购物/订单物流') ?? '';
+    expect(gmailLabels(h, MAILS.pickupZh.id)).toEqual(['CATEGORY_UPDATES', 'INBOX', orders, 'UNREAD'].sort());
+    expect(gmailLabels(h, MAILS.receiptEn.id)).toEqual(['CATEGORY_UPDATES', orders, 'UNREAD'].sort());
+  });
+
+  it('a forged or look-alike From fires no rule: the model may only suggest, nothing is written', async () => {
+    const before = h.up.gmail.calls.filter((call) => call.url.endsWith('/modify')).length;
+    deliver(h, MAILS.forgedBankLogin, now);
+    deliver(h, MAILS.lookalikeBank, now);
+    now += 5 * MINUTE;
+    await h.step(now);
+    for (const mail of [MAILS.forgedBankLogin, MAILS.lookalikeBank]) {
+      const row = await decision(h, mail.id);
+      expect(row, mail.id).toBeDefined();
+      expect(row?.['decider'], mail.id).toBe('clef');
+      expect(row?.['outcome'], mail.id).not.toBe('applied');
+      expect(gmailLabels(h, mail.id), mail.id).toEqual(['CATEGORY_UPDATES', 'INBOX', 'UNREAD']);
+    }
+    expect(h.up.gmail.calls.filter((call) => call.url.endsWith('/modify')).length).toBe(before);
+  });
+
+  it('syncs a nested Gmail label, never its parent', async () => {
+    h.up.gmail.createUserLabel('分拣/项目');
+    const leaf = h.up.gmail.createUserLabel('分拣/项目/阿尔法');
+    const result = await h.api.syncLabels({ requestId: op() });
+    expect(result.importedCount).toBe(1);
+    const imported = result.labels.find((label) => label.gmailLabelId === leaf);
+    expect(imported).toMatchObject({ displayName: '项目/阿尔法', enabled: false });
+    // Its ID comes from its path (words outside the glossary as short hashes), never a random one.
+    expect(imported?.name).toMatch(/^labels\/x[0-9a-f]{4}-x[0-9a-f]{4}$/);
+    expect(result.labels.some((label) => label.displayName === '项目' || label.displayName === '开发' || label.displayName === '')).toBe(false);
+    // Creating a label above an existing one is refused: only leaves are labels.
+    expect(reasonOf(await rejection(h.api.createLabel({ label: create(LabelSchema, { displayName: '项目' }), requestId: op() })))).toBe('INVALID_LABEL');
+  });
+
+  it('counts the flow per stage, outcome and label, corrections included; a label links to its ledger entries', async () => {
+    const shop = h.up.gmail.labelIdByName('分拣/购物/订单物流') ?? '';
+    const promo = h.up.gmail.createUserLabel('分拣/购物/促销');
+    await h.api.syncLabels({ requestId: op() });
+    h.up.gmail.ownerModify(MAILS.receiptEn.id, [promo], [shop]);
+    now += 5 * MINUTE;
+    await h.step(now);
+    expect(await decision(h, MAILS.receiptEn.id)).toMatchObject({ verdict: 'corrected', verdict_label: 'shop-promo' });
+    const flow = await h.api.getMailFlow({ name: 'mailFlows/today' });
+    const count = (stage: MailFlow_Stage, outcome: MailFlow_Outcome, label = '') =>
+      flow.counts.filter((item) => item.stage === stage && item.outcome === outcome && item.label === label).reduce((sum, item) => sum + item.mailCount, 0);
+    expect(count(MailFlow_Stage.RULE, MailFlow_Outcome.ARCHIVED, 'labels/dev-ci-notices')).toBe(1);
+    expect(count(MailFlow_Stage.RULE, MailFlow_Outcome.KEPT_IN_INBOX, 'labels/account-security')).toBe(1);
+    expect(count(MailFlow_Stage.RULE, MailFlow_Outcome.ARCHIVED, 'labels/finance-bank-pay')).toBe(1);
+    expect(count(MailFlow_Stage.RULE, MailFlow_Outcome.KEPT_IN_INBOX, 'labels/shop-orders-shipping')).toBe(1);
+    expect(count(MailFlow_Stage.RULE, MailFlow_Outcome.ARCHIVED, 'labels/shop-orders-shipping')).toBe(1);
+    expect(count(MailFlow_Stage.RULE, MailFlow_Outcome.CORRECTED, 'labels/shop-orders-shipping')).toBe(1);
+    // The forged and look-alike mails went to the model and stayed in the inbox.
+    const modelled = flow.counts.filter((item) => item.stage === MailFlow_Stage.CLEF && (item.outcome === MailFlow_Outcome.UNSURE || item.outcome === MailFlow_Outcome.SUGGESTED)).reduce((sum, item) => sum + item.mailCount, 0);
+    expect(modelled).toBe(2);
+    expect(flow.startTime !== undefined && flow.endTime !== undefined).toBe(true);
+    expect((await h.api.getMailFlow({ name: 'mailFlows/last-30-days' })).counts.length).toBe(flow.counts.length);
+    expect(reasonOf(await rejection(h.api.getMailFlow({ name: 'mailFlows/forever' })))).toBe('NOT_FOUND');
+    const entries = (await h.api.listLedgerEntries({ label: 'labels/shop-orders-shipping' })).ledgerEntries;
+    expect(entries.map((entry) => entry.messageId).sort()).toEqual([MAILS.pickupZh.id, MAILS.receiptEn.id].sort());
+  });
+
+  it('exports every label and rule as the document an import reads back unchanged', async () => {
+    const exported = await h.api.exportRules({});
+    expect(exported).toMatchObject({ ruleCount: 5 });
+    const document = JSON.parse(exported.json) as { labels: { path: string }[]; rules: { id: string; match: Record<string, string> }[] };
+    expect(document.labels.map((label) => label.path)).toContain('分拣/项目/阿尔法');
+    expect(document.rules.find((rule) => rule.id === 'bank-login')).toMatchObject({ match: { from_address: 'statements@bank.example.com' }, subject_includes: ['登录', 'login'], keep_in_inbox: true });
+    // The Gmail filter export leaves out what a filter cannot do: trust labels and the carve-outs.
+    const filters = await h.api.exportGmailFilters({});
+    expect(filters).toMatchObject({ ruleCount: 2, skippedCount: 3 });
+    expect(filters.xml).toContain('分拣/开发/CI通知');
+  });
+});

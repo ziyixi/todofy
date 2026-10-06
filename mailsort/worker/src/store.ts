@@ -7,7 +7,7 @@
  *
  * Every table is bounded (limits.ts): LABELS_MAX labels, RULES_MAX rules, EXAMPLES_MAX examples; decisions and the
  * ledger for DECISIONS_KEPT_MS, their content (subject, sender, summary, the exact sender keys) and the review queue for
- * CONTENT_KEPT_MS; request IDs for a day. `prune` runs once per UTC day in every mode, off included (pipeline.ts
+ * CONTENT_KEPT_MS; the daily usage and flow counters for FLOW_KEPT_DAYS; request IDs for a day. `prune` runs once per UTC day in every mode, off included (pipeline.ts
  * retain). Examples (masked summaries) and rules (exact sender, domain, list or delivered-to values) are what the app
  * learned: they are kept until deleted, never pruned.
  *
@@ -15,11 +15,11 @@
  * through the owner API behind Access, and the masked text only to Workers AI.
  */
 import { newEtag } from './ids.ts';
-import { CONTENT_KEPT_MS, DAY, DECISIONS_KEPT_MS, ERRORS_KEPT, REQUEST_ID_TTL_MS } from './limits.ts';
+import { CONTENT_KEPT_MS, DAY, DECISIONS_KEPT_MS, ERRORS_KEPT, FLOW_KEPT_DAYS, REQUEST_ID_TTL_MS } from './limits.ts';
 
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
-const SCHEMA_V1 = [
+export const SCHEMA_V1: readonly string[] = [
   `CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS labels (
     id TEXT PRIMARY KEY,
@@ -165,6 +165,54 @@ const SCHEMA_V1 = [
   `CREATE TABLE IF NOT EXISTS requests (request_id TEXT PRIMARY KEY, rpc TEXT NOT NULL, resource TEXT NOT NULL, response TEXT NOT NULL, at INTEGER NOT NULL)`,
 ];
 
+/**
+ * Version 2 (2026-10-06, round 2): labels may keep their mail in the inbox and be sensitive; rules gain subject
+ * conditions, their own keep-in-inbox and DMARC switches, the owner's evidence and notes, and the import entry they
+ * came from (the unique key now includes the subject conditions, so one sender may have a carve-out and a plain rule
+ * to the same label: SQLite cannot change a table's constraint, so the table is rebuilt); pending mail remembers a
+ * deferral (counted once in the flow); and the daily flow counters (flow.ts).
+ */
+export const SCHEMA_V2: readonly string[] = [
+  `ALTER TABLE labels ADD COLUMN keep_in_inbox INTEGER NOT NULL DEFAULT 0`,
+  `ALTER TABLE labels ADD COLUMN sensitive INTEGER NOT NULL DEFAULT 0`,
+  `CREATE TABLE rules_v2 (
+    id TEXT PRIMARY KEY,
+    kind TEXT NOT NULL CHECK (kind IN ('sender_address', 'sender_domain', 'list_id', 'delivered_to')),
+    value TEXT NOT NULL,
+    label_id TEXT NOT NULL,
+    state TEXT NOT NULL CHECK (state IN ('proposed', 'active', 'disabled')),
+    correction_count INTEGER NOT NULL DEFAULT 0,
+    match_count INTEGER NOT NULL DEFAULT 0,
+    create_time INTEGER NOT NULL,
+    update_time INTEGER NOT NULL,
+    -- JSON arrays of lower-case words (rules.ts subjectMatches).
+    subject_includes TEXT NOT NULL DEFAULT '[]',
+    subject_excludes TEXT NOT NULL DEFAULT '[]',
+    keep_in_inbox INTEGER NOT NULL DEFAULT 0,
+    require_dmarc INTEGER NOT NULL DEFAULT 0,
+    evidence TEXT NOT NULL DEFAULT '',
+    notes TEXT NOT NULL DEFAULT '',
+    import_id TEXT NOT NULL DEFAULT '',
+    UNIQUE (kind, value, label_id, subject_includes, subject_excludes)
+  )`,
+  `INSERT INTO rules_v2 (id, kind, value, label_id, state, correction_count, match_count, create_time, update_time)
+   SELECT id, kind, value, label_id, state, correction_count, match_count, create_time, update_time FROM rules`,
+  `DROP TABLE rules`,
+  `ALTER TABLE rules_v2 RENAME TO rules`,
+  `CREATE INDEX IF NOT EXISTS rules_match ON rules (state, kind, value)`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS rules_import ON rules (import_id) WHERE import_id != ''`,
+  `ALTER TABLE pending ADD COLUMN deferred INTEGER NOT NULL DEFAULT 0`,
+  // One counter per UTC day, stage, outcome and label (flow.ts): a few hundred rows a day at most.
+  `CREATE TABLE IF NOT EXISTS flow (
+    day TEXT NOT NULL,
+    stage TEXT NOT NULL,
+    outcome TEXT NOT NULL,
+    label TEXT NOT NULL DEFAULT '',
+    n INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (day, stage, outcome, label)
+  ) WITHOUT ROWID`,
+];
+
 export type Value = string | number | null | ArrayBuffer;
 
 export interface RowMeter {
@@ -188,6 +236,10 @@ export interface LabelRow extends Record<string, SqlStorageValue> {
   create_time: number;
   update_time: number;
   etag: string;
+  /** 1: the label is added without removing INBOX. */
+  keep_in_inbox: number;
+  /** 1: no example of it is kept. */
+  sensitive: number;
 }
 
 export interface RuleRow extends Record<string, SqlStorageValue> {
@@ -200,6 +252,14 @@ export interface RuleRow extends Record<string, SqlStorageValue> {
   match_count: number;
   create_time: number;
   update_time: number;
+  /** JSON arrays of lower-case words (rules.ts). */
+  subject_includes: string;
+  subject_excludes: string;
+  keep_in_inbox: number;
+  require_dmarc: number;
+  evidence: string;
+  notes: string;
+  import_id: string;
 }
 
 export interface DecisionRow extends Record<string, SqlStorageValue> {
@@ -310,6 +370,7 @@ export class Store {
     this.sql.exec(`CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)`);
     const version = Number(this.getMeta('schema_version') ?? 0);
     if (version < 1) for (const statement of SCHEMA_V1) this.sql.exec(statement);
+    if (version < 2) for (const statement of SCHEMA_V2) this.sql.exec(statement);
     if (version !== SCHEMA_VERSION) this.setMeta('schema_version', String(SCHEMA_VERSION));
   }
 
@@ -448,6 +509,11 @@ export class Store {
     return this.all<{ message_id: string; attempts: number }>(`SELECT message_id, attempts FROM pending WHERE not_before <= ? ORDER BY not_before, added_at LIMIT ?`, now, limit);
   }
 
+  /** Paths of every label (the tree rule: paths.ts treeConflict). */
+  labelPaths(exceptId = ''): string[] {
+    return this.all<{ display_name: string }>(`SELECT display_name FROM labels WHERE id != ?`, exceptId).map((row) => row.display_name);
+  }
+
   // ---- decisions ---------------------------------------------------------------------------------------------------------
 
   decision(messageId: string): DecisionRow | undefined {
@@ -499,7 +565,8 @@ export class Store {
     const records = now - DECISIONS_KEPT_MS;
     this.run(`DELETE FROM decisions WHERE decided_at < ?`, records);
     this.run(`DELETE FROM ledger WHERE create_time < ? AND state IN ('applied', 'failed', 'undone')`, records);
-    this.run(`DELETE FROM usage WHERE day < ?`, utcDay(now - 400 * DAY));
+    this.run(`DELETE FROM usage WHERE day < ?`, utcDay(now - FLOW_KEPT_DAYS * DAY));
+    this.run(`DELETE FROM flow WHERE day < ?`, utcDay(now - FLOW_KEPT_DAYS * DAY));
     this.run(`DELETE FROM requests WHERE at < ?`, now - REQUEST_ID_TTL_MS);
   }
 }

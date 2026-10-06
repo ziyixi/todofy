@@ -72,7 +72,10 @@ describe('the owner API', () => {
     expect(first).toMatchObject({ name: 'labels/newsletter', displayName: '订阅', gmailState: 1, descriptionVersion: 1 });
     expect(reasonOf(await rejection(h.api.createLabel({ labelId: 'other', label: create(LabelSchema, { displayName: '订阅' }), requestId: op() })))).toBe('LABEL_EXISTS');
     expect(reasonOf(await rejection(h.api.createLabel({ labelId: 'none', label: create(LabelSchema, { displayName: 'x' }), requestId: op() })))).toBe('INVALID_LABEL');
-    expect(reasonOf(await rejection(h.api.createLabel({ labelId: 'bad', label: create(LabelSchema, { displayName: 'a/b' }), requestId: op() })))).toBe('INVALID_LABEL');
+    // A path of up to three segments; a parent or child of another label is refused (only leaves are labels).
+    for (const displayName of ['a//b', 'a/b/c/d', '/a', '订阅/周报']) {
+      expect(reasonOf(await rejection(h.api.createLabel({ labelId: 'bad', label: create(LabelSchema, { displayName }), requestId: op() }))), displayName).toBe('INVALID_LABEL');
+    }
     // A label's threshold out of range is a label error (the labels page shows it), not a settings one.
     expect(reasonOf(await rejection(h.api.createLabel({ labelId: 'thr', label: create(LabelSchema, { displayName: 't', threshold: 0.3 }), requestId: op() })))).toBe('INVALID_LABEL');
     // A repeated request ID answers the first response, whatever the body says now (AIP-155).

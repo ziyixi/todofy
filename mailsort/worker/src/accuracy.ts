@@ -1,5 +1,5 @@
 /**
- * Per-label accuracy (../../docs/design.md §6.4): the precision of confident decisions, from the owner's verdicts. A
+ * Per-label accuracy (../../docs/design.md §6): the precision of confident decisions, from the owner's verdicts. A
  * confirmation (review queue, audit, or the owner adding the suggested label in Gmail) counts 1, a weak accept (an
  * applied label untouched for 3 days) WEAK_ACCEPT_WEIGHT, a correction 1 against. The Wilson 95 % lower bound of that
  * precision gates live mode: the dashboard shows it, the owner turns `live` on per label, and the daily pass turns a

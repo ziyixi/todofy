@@ -13,8 +13,20 @@ export interface TableContext {
 const MESSAGE_ID = /^[0-9a-f]{6,32}$/;
 const PREFIX = '分拣/';
 
+/**
+ * A name under the prefix: a nested path of one to three segments (design §2, 2026-10-06 round 2: nested labels),
+ * each segment non-empty with no leading or trailing space.
+ */
 function okName(name: unknown): boolean {
-  return typeof name === 'string' && name.startsWith(PREFIX) && name.length > PREFIX.length && !name.slice(PREFIX.length).includes('/');
+  // eslint-disable-next-line no-control-regex
+  if (typeof name !== 'string' || !name.startsWith(PREFIX) || /[\u0000-\u001f\u007f]/.test(name)) return false;
+  const segments = name.slice(PREFIX.length).split('/');
+  return segments.length >= 1 && segments.length <= 3 && segments.every((segment) => segment.length > 0 && segment.trim() === segment);
+}
+
+/** labels.create may also make the prefix's own label, the parent Gmail nests the others under. */
+function okCreateName(name: unknown): boolean {
+  return name === '分拣' || okName(name);
 }
 
 /** A JSON object body exactly as JSON.stringify writes its parsed value (no duplicate keys, no other spelling), or null. */
@@ -65,7 +77,7 @@ export function allowedOperation(method: string, rawUrl: string, body: string, c
   if (method === 'POST' && path.join('/') === 'labels') {
     const value = canonicalObject(body);
     if (value === null) return null;
-    return okName(value['name']) && Object.keys(value).every((key) => ['name', 'labelListVisibility', 'messageListVisibility'].includes(key)) ? 'labels_create' : null;
+    return okCreateName(value['name']) && Object.keys(value).every((key) => ['name', 'labelListVisibility', 'messageListVisibility'].includes(key)) ? 'labels_create' : null;
   }
   if (method === 'PATCH' && path[0] === 'labels' && path.length === 2) {
     const value = canonicalObject(body);

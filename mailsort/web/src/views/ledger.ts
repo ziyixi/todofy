@@ -23,7 +23,7 @@ function entry(item: LedgerEntry, labels: readonly Label[], reload: () => Promis
     el('div', { class: 'card-head' }, el('span', { class: 'chip' }, LEDGER_STATES[item.state] ?? ''), el('span', { class: 'time' }, when(item.createTime))),
     item.subject === '' ? null : el('p', { class: 'subject' }, item.subject),
     item.sender === '' ? null : el('p', { class: 'muted' }, item.sender),
-    el('p', {}, `${labelText(item.label, labels)}${item.archived ? ' · 已归档' : ''} · ${item.origin === 'owner' ? '你的选择' : '自动'}`),
+    el('p', {}, `${labelText(item.label, labels)}${item.archived ? ' · 已归档' : ' · 留在收件箱'} · ${item.origin === 'owner' ? '你的选择' : '自动'}`),
     el('p', { class: 'hint mono' }, item.messageId),
     // The server says whether an undo would be accepted: not after the owner changed the label in Gmail, nor once the
     // label was deleted here or went missing in Gmail.
@@ -47,8 +47,16 @@ async function undoAll(from: number, to: number): Promise<{ undone: number; fail
 }
 
 export async function renderLedger(ctx: ViewContext): Promise<void> {
+  // ?label=labels/x: one label's entries (流程's links to a label).
+  const only = new URLSearchParams(window.location.search).get('label') ?? ''
   const reload: () => Promise<void> = await frame(ctx.main, '操作记录', async (body) => {
-    const [page, labels] = await Promise.all([api.listLedgerEntries({ pageSize: 50 }), allLabels()])
+    const [page, labels] = await Promise.all([api.listLedgerEntries({ pageSize: 50, label: only }), allLabels()])
+    const all = el('a', { href: '/ledger' }, '看全部记录')
+    all.addEventListener('click', (event) => {
+      event.preventDefault()
+      ctx.go('/ledger')
+    })
+    const filter = only === '' ? null : el('p', { class: 'hint' }, `只看“${labelText(only, labels)}”的记录 · `, all)
     const start = el('input', { type: 'datetime-local', 'aria-label': '开始' })
     const end = el('input', { type: 'datetime-local', 'aria-label': '结束' })
     const undoRange = async () => {
@@ -70,11 +78,12 @@ export async function renderLedger(ctx: ViewContext): Promise<void> {
     const render = (item: LedgerEntry) => entry(item, labels, () => reload())
     fill(
       body,
+      filter,
       el('section', { class: 'card' }, el('h2', {}, '按时间段撤销'), start, end, el('div', { class: 'actions' }, button('撤销这段时间', () => void undoRange()))),
       page.ledgerEntries.length === 0
         ? el('p', { class: 'empty' }, '还没有写入 Gmail 的记录。')
         : pagedList({ items: page.ledgerEntries, next: page.nextPageToken }, async (pageToken) => {
-            const more = await api.listLedgerEntries({ pageSize: 50, pageToken })
+            const more = await api.listLedgerEntries({ pageSize: 50, pageToken, label: only })
             return { items: more.ledgerEntries, next: more.nextPageToken }
           }, render),
     )
