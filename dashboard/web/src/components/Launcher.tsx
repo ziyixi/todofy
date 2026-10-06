@@ -70,7 +70,7 @@ function Tile({
 }) {
   const url = httpsUrl(entry.url)
   const line = loading ? null : statusLine(entry, state, now)
-  const dismissed = useSignalsDismissed(entry.id, state?.top_signals ?? []) && state?.level === 'warning'
+  const dismissed = useSignalsDismissed(entry.id, state?.top_signals ?? [], state?.level)
   const head = (
     <>
       <EntryIcon icon={entry.icon} accent={entry.accent} />
@@ -120,7 +120,7 @@ function Tile({
 function ServiceRow({ reg, entry, state, loading, now }: { reg: Reg; entry: RegistryEntry; state: EntryState | undefined; loading: boolean; now: Date }) {
   const target = entryPageHash(reg, entry)
   const line = loading ? null : statusLine(entry, state, now)
-  const dismissed = useSignalsDismissed(entry.id, state?.top_signals ?? []) && state?.level === 'warning'
+  const dismissed = useSignalsDismissed(entry.id, state?.top_signals ?? [], state?.level)
   let detail = line?.detail ?? line?.word ?? null
   if (line && line.level !== 'ok' && line.detail) detail = `${line.word} · ${line.detail}`
   if (line && entry.id === 'newsletter' && ['newsletter_side_effect_unknown', 'newsletter_unknown'].includes(state?.reason ?? '')) detail = '运行正常 · 有待核对记录'

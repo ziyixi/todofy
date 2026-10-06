@@ -2,7 +2,7 @@ import { ChevronDown, ExternalLink } from 'lucide-react'
 import { useEffect, useId, useRef, useState } from 'react'
 import type { Flow as FlowDef, FlowState, FlowsView as FlowsViewData, Stage as StageDef, StageState } from '../../../worker/src/api-types.ts'
 import { CanaryDays, CanaryFacts, CanaryHistory, CanaryToday } from '../components/Canary'
-import { SignalActions, targetDismissed, useAttention, useTargetDismissed } from '../components/AttentionActions'
+import { SignalActions, dismissedFor, useAttention } from '../components/AttentionActions'
 import { LevelMark, LevelShape } from '../components/status'
 import { Metrics, Pill, Time } from '../components/ui'
 import { flowMark, freshnessText } from '../lib/flows'
@@ -60,7 +60,8 @@ function StageDetail({ reg, flow, stage, state, now }: { reg: Reg; flow: string;
   const scripts = stageScripts(reg, stage)
   const url = httpsUrl(entry?.url)
   const level = state?.level ?? 'unknown'
-  const dismissed = useTargetDismissed({ flow, stage: stage.id }) && level === 'warning'
+  const attention = useAttention()
+  const dismissed = dismissedFor(attention, { flow, stage: stage.id }, level)
   const unseen = level === 'unmonitored' || level === 'link'
   return (
     <section className="stage-detail" aria-labelledby={headingId}>
@@ -194,7 +195,7 @@ function FlowCard({
   const mark = state ? flowMark(state) : { level: 'unknown' as const, word: LEVEL.unknown.word }
   const level = mark.level
   const attention = useAttention()
-  const dismissed = useTargetDismissed({ flow: flow.id }) && level === 'warning'
+  const dismissed = dismissedFor(attention, { flow: flow.id }, level)
   const [open, setOpen] = useState(() => focused || ATTENTION.has(level))
   const routeStage = focused && focusStage !== undefined && flow.stages.some((stage) => stage.id === focusStage) ? focusStage : undefined
   const [selected, setSelected] = useState(() => routeStage ?? defaultStage(flow, state))
@@ -242,7 +243,7 @@ function FlowCard({
             {flow.stages.map((stage, index) => {
               const item = stageState(stage.id)
               const stageLevel = item?.level ?? 'unknown'
-              const stageDismissed = targetDismissed(attention, { flow: flow.id, stage: stage.id }) && stageLevel === 'warning'
+              const stageDismissed = dismissedFor(attention, { flow: flow.id, stage: stage.id }, stageLevel)
               const count = stageCount(stage, item, now)
               const badge = item?.canary ? CANARY_BADGE[item.canary] : null
               return (
@@ -294,7 +295,7 @@ function FlowCard({
           <ol className="pill-chain" aria-label="阶段">
             {flow.stages.map((stage, index) => {
               const stageLevel = stageState(stage.id)?.level ?? 'unknown'
-              const stageDismissed = targetDismissed(attention, { flow: flow.id, stage: stage.id }) && stageLevel === 'warning'
+              const stageDismissed = dismissedFor(attention, { flow: flow.id, stage: stage.id }, stageLevel)
               return (
                 <li key={stage.id}>
                   {index > 0 ? (

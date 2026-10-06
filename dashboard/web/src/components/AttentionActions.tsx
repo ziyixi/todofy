@@ -33,11 +33,15 @@ export function AttentionFeedback() {
     role="status" aria-live="polite" aria-atomic="true" tabIndex={-1}>{feedback?.message}</p>
 }
 
+/** Whether `item` points at `target`: every field `target` gives is equal (an omitted one matches anything). */
+export function matchesTarget(item: AttentionItem, target: Partial<Target>): boolean {
+  return Object.entries(target).every(([key, value]) => value === undefined || item.target[key as keyof Target] === value)
+}
+
 /** Partial target matches are only accepted when exactly one occurrence fits. */
 export function attentionFor(attention: Attention | undefined, source: string, code: string, target: Partial<Target> = {}): AttentionItem | undefined {
   const items = [...(attention?.items ?? []), ...(attention?.dismissed_items ?? [])]
-  const matches = items.filter(item => item.source === source && item.code === code &&
-    Object.entries(target).every(([key, value]) => value === undefined || item.target[key as keyof Target] === value))
+  const matches = items.filter(item => item.source === source && item.code === code && matchesTarget(item, target))
   return matches.length === 1 ? matches[0] : undefined
 }
 
@@ -45,25 +49,30 @@ export function useAttentionFor(source: string, code: string, target?: Partial<T
   return attentionFor(useContext(AttentionContext), source, code, target)
 }
 
-export function useSignalsDismissed(source: string, signals: readonly { code: string; severity: string }[]): boolean {
+/**
+ * Whether an entry's warning tile shows as dismissed: every actionable signal of `source` has a dismissed reminder
+ * and none of its reminders is open. Only a warning; a critical or unknown tile always shows as it is.
+ */
+export function useSignalsDismissed(source: string, signals: readonly { code: string; severity: string }[], level: string | undefined): boolean {
   const attention = useContext(AttentionContext)
+  if (level !== 'warning') return false
   const actionable = signals.filter(signal => signal.severity !== 'info')
   const pending = attention?.items.some(item => item.source === source || item.target.entry === source)
   return !pending && actionable.length > 0 && actionable.every(signal =>
     attentionFor(attention, source, signal.code, { entry: source })?.dismissed_at !== undefined)
 }
 
+/** Some reminder at `target` was dismissed, and no open one is at `target`, from the same source or for the same entry. */
 export function targetDismissed(attention: Attention | undefined, target: Partial<Target>): boolean {
-  const matches = (item: AttentionItem) => Object.entries(target).every(([key, value]) =>
-    value === undefined || item.target[key as keyof Target] === value)
-  const dismissed = attention?.dismissed_items?.filter(matches) ?? []
+  const dismissed = attention?.dismissed_items?.filter(item => matchesTarget(item, target)) ?? []
   const sources = new Set(dismissed.map(item => item.source))
   const entries = new Set(dismissed.map(item => item.target.entry))
-  return dismissed.length > 0 && !attention?.items.some(item => matches(item) || sources.has(item.source) || (item.target.entry !== undefined && entries.has(item.target.entry)))
+  return dismissed.length > 0 && !attention?.items.some(item => matchesTarget(item, target) || sources.has(item.source) || (item.target.entry !== undefined && entries.has(item.target.entry)))
 }
 
-export function useTargetDismissed(target: Partial<Target>): boolean {
-  return targetDismissed(useContext(AttentionContext), target)
+/** Whether a flow or stage row at `level` shows as dismissed: only a warning whose reminders at `target` were. */
+export function dismissedFor(attention: Attention | undefined, target: Partial<Target>, level: string): boolean {
+  return level === 'warning' && targetDismissed(attention, target)
 }
 
 function Controls({ item }: { item: AttentionItem & { name: string; etag: string } }) {

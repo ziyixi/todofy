@@ -2,7 +2,7 @@ import { ChevronRight } from 'lucide-react'
 import type { FlowSummary, HomeView as HomeViewData } from '../../../worker/src/api-types.ts'
 import { WebsiteSyncPanel } from '../components/WebsiteSyncPanel'
 import { Launcher } from '../components/Launcher'
-import { targetDismissed, useAttention } from '../components/AttentionActions'
+import { dismissedFor, useAttention } from '../components/AttentionActions'
 import { MiniQuota } from '../components/QuotaBars'
 import { LevelMark, LevelShape } from '../components/status'
 import { flowLine, flowMark } from '../lib/flows'
@@ -27,7 +27,7 @@ function FlowRows({ reg, flows, now }: { reg: Reg; flows: readonly FlowSummary[]
             const flow = flowOf(reg, summary.id)
             const line = flowLine(reg, summary, now)
             const { level } = flowMark(summary)
-            const dismissed = targetDismissed(attention, { flow: summary.id }) && level === 'warning'
+            const dismissed = dismissedFor(attention, { flow: summary.id }, level)
             const name = flow?.name ?? summary.id
             return (
               <li key={summary.id}>

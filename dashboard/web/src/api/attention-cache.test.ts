@@ -1,6 +1,6 @@
 import { applyAttentionResult } from './attention-cache'
 import { GEMINI_ITEM, shell } from '../test/fixtures'
-import { targetDismissed } from '../components/AttentionActions'
+import { dismissedFor, targetDismissed } from '../components/AttentionActions'
 import type { ShellFields } from '../../../worker/src/api-types.ts'
 
 const item = { ...GEMINI_ITEM, name: 'attentionItems/test', etag: 'old' }
@@ -27,4 +27,8 @@ it('a same-source alert outside the flow prevents its dismissal label from hidin
   expect(targetDismissed(attention, { flow: 'mail-to-task' })).toBe(true)
   const outage = { ...item, code: 'unreachable', target: { view: 'home' as const, entry: 'todofy' } }
   expect(targetDismissed({ ...attention, items: [outage] }, { flow: 'mail-to-task' })).toBe(false)
+  // Only a warning row reads as dismissed; a critical or unknown one always shows as it is.
+  expect(dismissedFor(attention, { flow: 'mail-to-task' }, 'warning')).toBe(true)
+  expect(dismissedFor(attention, { flow: 'mail-to-task' }, 'critical')).toBe(false)
+  expect(dismissedFor(attention, { flow: 'mail-to-task' }, 'unknown')).toBe(false)
 })
