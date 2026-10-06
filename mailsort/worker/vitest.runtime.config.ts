@@ -1,8 +1,8 @@
 import { defineConfig } from 'vitest/config';
 
-// workerd suite (../docs/design.md §10): each file bundles src/index.ts with esbuild and runs it in Miniflare with a
-// real SQLite WatchState, a fake ASSETS binding and an outbound service that answers from synthetic sites
-// (test/fake-sites.ts) and a synthetic Access issuer's keys. No network. Starting workerd takes a moment, so files
+// workerd suite (../docs/design.md §11): each file bundles src/index.ts with esbuild and runs it in Miniflare with a
+// real SQLite MailsortState, a fake ASSETS binding and an outbound service that answers from the fake Gmail and fake
+// Workers AI (test/fakes/) and a synthetic Access issuer's keys. No network. Starting workerd takes a moment, so files
 // run one at a time.
 export default defineConfig({
   test: {

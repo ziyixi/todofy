@@ -51,6 +51,9 @@ Two walls, neither of them a prompt:
    | labels_patch | `PATCH users/me/labels/{owned id}`, the name only, still under `分拣/` |
    | message_modify | classify: `addLabelIds = [one owned label]`, `removeLabelIds = [] or [INBOX]`, for a ledger row in `intended`/`applied` whose archive flag matches; undo: `removeLabelIds = [that owned label]`, `addLabelIds = [] or [INBOX]` (INBOX exactly when the row archived), for a row in `undo_intended` |
 
+   JSON bodies must be the canonical text of the value the guard checked (`JSON.stringify` of it): a duplicate key
+   (`JSON.parse` keeps the last, a server might keep the first) or any other spelling is refused (`body_not_canonical`).
+
    So trash, untrash, delete, batchDelete, batchModify, send, drafts, filters, settings and forwarding have no path,
    and neither have `UNREAD`, `STARRED`, `IMPORTANT`, `SPAM`, `TRASH`, `CATEGORY_*` or any label mailsort does not own
    (an owned label is a linked label whose Gmail name starts with `分拣/`). Feedback never writes.
@@ -70,7 +73,8 @@ GitHub; logs hold counts and codes only (never a subject, sender, address or lab
 only (§4.2); mail content is untrusted data, and the model has no tools: the worst a hostile mail can do is pick a
 wrong label, which a review or an undo reverts.
 
-Retention, as the code does it (`store.ts` `prune`, daily):
+Retention, as the code does it (`store.ts` `prune`, once per UTC day from `pipeline.ts` `retain`, in every mode: off
+reads no Gmail and decides nothing, but the alarm still runs and still clears what is past its time):
 
 | What | Kept |
 | --- | --- |
@@ -96,7 +100,8 @@ display name (which no sender rule may match).
 | live | yes | yes | confident decisions of labels marked 正式打 (label + archive), and the owner's review choices |
 
 The mode in force is the owner's (设置), lowered by the deployment's ceiling `MODE` (the GitHub variable
-`MAILSORT_MODE`: `live`, `shadow` or `off`; anything else reads as off) and by the breaker (live becomes shadow).
+`MAILSORT_MODE`: `live`, `shadow` or `off`; the deploy wrapper refuses any other value, and a missing or unknown
+`MODE` reads as off) and by the breaker (live becomes shadow).
 Writes are capped per alarm run (`run_write_limit`, at most 10, retries of earlier passes included; a pass decides at
 most 6 mails, so a value of 1 to 5 can trip on an ordinary busy pass) and per UTC day (`daily_write_limit`, default
 150); passing either, or one label's share of today's writes jumping above 60 % and twice its last week's share (once
@@ -224,6 +229,10 @@ Every Gmail write is a ledger row first (`intended`, or `undo_intended` for an u
 then the modify, which the guard accepts only for such a row; then the outcome (`applied`, `undone`, or `failed` for
 a mail that is gone, a read-only grant, a row the gate refused). A pass interrupted between the two retries the same
 row (adding a label that is there, or removing one that is gone, changes nothing), but only through the gate (§3).
+An automatic row an earlier pass left (or one that failed once) is first checked against the mail as it is now, one
+metadata read (`message_get` with the Message-ID header only): if the mail left the inbox or carries a user label it
+did not have when the row was recorded (the owner filed it, or another `分拣/` label), the row fails (`mail_changed`)
+instead of adding a second label to mail the owner has already dealt with.
 An automatic row that fails for good, in its first pass or a later retry, makes its mail a suggestion in 待审. A
 request the guard refuses (its label no longer owned) is permanent for that row only: the run goes on with the next.
 
@@ -310,12 +319,16 @@ the fake Gmail (`fake-gmail.ts`) and fake Workers AI (`fake-ai.ts`, Clef and bge
   `failures.test.ts`, the review's findings each as a regression test: a leftover write stopped by shadow, the
   breaker, the `MODE` ceiling and a label leaving 正式打; retries against the run cap; a breaker tripped mid-pass; a
   poison mail (400, a lasting 500, a refused ID) never blocking the queue; a deleted or missing label's undo; the
-  resync's read order and its install-time cutoff; a model outage backing off; one label per conversation after undo.
+  resync's read order and its install-time cutoff; a model outage backing off; one label per conversation after undo;
+  a retry that finds the mail archived or filed by the owner (`mail_changed`); the content cleanup after 20 days off.
 - `worker/test/smoke/smoke.mts`: the real `wrangler dev` (`../wrangler.test.toml`) against the fakes on loopback,
   the owner's whole loop through the HTTP API.
 - `web/src/*.test.ts`: the views against a fake API on the shared transcoder.
 - `deploy/test/*.test.mjs`: the production config, the deploy wrapper (MODE, the secrets file without the grant), that
-  `wrangler deploy --secrets-file` keeps secrets it does not name (the pinned wrangler), and mint-token's checks.
+  `wrangler deploy --secrets-file` keeps secrets it does not name (the pinned wrangler), that the public GitHub
+  secrets spec leaves the grant out (`owner_machine_secrets` in `app.toml`), and mint-token: its checks, and `main()`
+  end to end with its real loopback server, a fake browser, token endpoint and wrangler (the token request repeats
+  the consent URL's `redirect_uri`).
 
 ## 12. Owner setup and going live
 

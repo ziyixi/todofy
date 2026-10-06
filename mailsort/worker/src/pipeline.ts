@@ -471,7 +471,7 @@ async function decideMail(ctx: MailContext, messageId: string, attempts: number)
     store.addUsage(day, 'decided', 1);
     if (!decision.confident) store.addUsage(day, 'unsure', 1);
     if (apply) {
-      intent.id = intend(store, read.id, label, true, 'auto', now);
+      intent.id = intend(store, read.id, label, true, 'auto', now, read.labelIds);
     } else if (decision.confident || decision.reason !== 'no_labels') {
       store.run(
         `INSERT INTO review (id, message_id, kind, state, suggested_label, candidates, decider, unsure_reason, subject, sender, receive_time, create_time)
@@ -533,7 +533,18 @@ export function checkLabelShare(store: Store, now: number): void {
 
 // ---- daily work -------------------------------------------------------------------------------------------------------------
 
-/** Weak accepts, the audit sample, live gating and the retention cleanup, once per UTC day. */
+/**
+ * The retention cleanup (store.ts prune), once per UTC day and in every mode: the 14 days of content hold even while
+ * the mode is off, when nothing else runs. No Google call. Run inside a transaction.
+ */
+export function retain(store: Store, now: number): void {
+  const day = utcDay(now);
+  if (store.getMeta('pruned_day') === day) return;
+  store.prune(now);
+  store.setMeta('pruned_day', day);
+}
+
+/** Weak accepts, the audit sample and live gating, once per UTC day (not while off: they follow the sorting). */
 export function daily(store: Store, settings: SettingsValue, shed: boolean, now: number): void {
   const day = utcDay(now);
   if (store.getMeta('daily_done') === day) return;
@@ -593,7 +604,6 @@ export function daily(store: Store, settings: SettingsValue, shed: boolean, now:
       store.setMeta('revoked_at', String(now));
     }
   }
-  store.prune(now);
   store.setMeta('daily_done', day);
 }
 
@@ -605,7 +615,10 @@ export async function runPass(deps: PassDeps): Promise<PassResult> {
   const settings = readSettings(store);
   const mode = effectiveMode(settings, modeCeiling(deps.env));
   const idle = now + ALARM_IDLE_MS;
-  transact(() => { store.setMeta('last_alarm_at', String(now)); });
+  transact(() => {
+    store.setMeta('last_alarm_at', String(now));
+    retain(store, now);
+  });
   if (mode === 'off') return { next: idle, mode, synced: 0, decided: 0, applied: 0, deferred: 0, code: 'off' };
 
   const budget = new Budget(ALARM_SUBREQUESTS);

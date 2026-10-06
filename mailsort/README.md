@@ -30,8 +30,8 @@ inbox and waits in the review queue. Shadow mode (the default) only suggests. Ch
 - **例子**, **准确率**, **记录** (undo one write or a time range), **状态** (Gmail grant, sync, today's model use),
   **设置** (mode, limits, neuron budget; 解除熔断 after the breaker tripped). Emergency stop: 设置 → 关闭
   (`docs/design.md` §10).
-- **What is kept**: decided mail's subject, sender and exact sender keys, and the review queue, for 14 days; decisions
-  and the ledger without content for 180 days; examples (masked summaries) and rules (exact sender, domain, list or
+- **What is kept**: decided mail's subject, sender and exact sender keys, and the review queue, for 14 days (the
+  daily cleanup runs in every mode, off included); decisions and the ledger without content for 180 days; examples (masked summaries) and rules (exact sender, domain, list or
   delivered-to values) until you delete them (`docs/design.md` §2).
 
 ## Develop
@@ -68,7 +68,8 @@ deploy and Home's (which binds `MAILSORT`) do not. The steps that lift it are in
 
 The wrapper writes the Worker secrets `ACCESS_OWNER` and `ACCESS_OWNER_ALIASES` (from the dashboard's secrets: one
 owner) and `CSRF_SIGNING_KEY` (from `MAILSORT_CSRF_SIGNING_KEY`), and sets `MODE` from the GitHub variable
-`MAILSORT_MODE` (`live`, `shadow` or `off`; anything else is off) and `BUILD_SHA`. It never writes, needs or deletes the
+`MAILSORT_MODE` (`live`, `shadow` or `off`; an unset or other value stops the deploy before wrangler runs, and a
+Worker without `MODE`, such as after a plain `wrangler deploy`, reads it as off) and `BUILD_SHA`. It never writes, needs or deletes the
 Gmail secrets `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET` and `GMAIL_REFRESH_TOKEN`: `wrangler deploy --secrets-file` keeps
 secrets the file does not name (pinned by `deploy/test/secrets-kept.test.mjs`), and the wrapper refuses a secrets file
 that names them. Only the owner puts them, with `deploy/mint-token.mjs` from their own machine (`docs/design.md` §12).

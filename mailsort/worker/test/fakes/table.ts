@@ -17,6 +17,16 @@ function okName(name: unknown): boolean {
   return typeof name === 'string' && name.startsWith(PREFIX) && name.length > PREFIX.length && !name.slice(PREFIX.length).includes('/');
 }
 
+/** A JSON object body exactly as JSON.stringify writes its parsed value (no duplicate keys, no other spelling), or null. */
+function canonicalObject(body: string): Record<string, unknown> | null {
+  try {
+    const value: unknown = JSON.parse(body);
+    return typeof value === 'object' && value !== null && !Array.isArray(value) && JSON.stringify(value) === body ? (value as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
+}
+
 /** The operation name, or null when the request is not in the table. */
 export function allowedOperation(method: string, rawUrl: string, body: string, ctx: TableContext): string | null {
   let url: URL;
@@ -53,17 +63,20 @@ export function allowedOperation(method: string, rawUrl: string, body: string, c
   }
   if (method === 'GET' && path.join('/') === 'labels') return params.length === 0 ? 'labels_list' : null;
   if (method === 'POST' && path.join('/') === 'labels') {
-    const value = JSON.parse(body) as Record<string, unknown>;
+    const value = canonicalObject(body);
+    if (value === null) return null;
     return okName(value['name']) && Object.keys(value).every((key) => ['name', 'labelListVisibility', 'messageListVisibility'].includes(key)) ? 'labels_create' : null;
   }
   if (method === 'PATCH' && path[0] === 'labels' && path.length === 2) {
-    const value = JSON.parse(body) as Record<string, unknown>;
+    const value = canonicalObject(body);
+    if (value === null) return null;
     return ctx.owned.has(path[1] ?? '') && okName(value['name']) && Object.keys(value).join() === 'name' ? 'labels_patch' : null;
   }
   if (method === 'POST' && path[0] === 'messages' && path[2] === 'modify' && path.length === 3) {
     const id = path[1] ?? '';
     if (!MESSAGE_ID.test(id)) return null;
-    const value = JSON.parse(body) as { addLabelIds?: string[]; removeLabelIds?: string[] };
+    const value = canonicalObject(body) as { addLabelIds?: string[]; removeLabelIds?: string[] } | null;
+    if (value === null) return null;
     const add = value.addLabelIds ?? [];
     const remove = value.removeLabelIds ?? [];
     if (Object.keys(value).some((key) => key !== 'addLabelIds' && key !== 'removeLabelIds')) return null;

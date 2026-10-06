@@ -4,8 +4,9 @@
  * owner's shadow, the breaker, the MODE ceiling, the label's switch), retries count against the run cap, a breaker
  * tripped by a pass's own write stops the rest of that pass, one unreadable mail never holds up the queue, a deleted
  * label's entries are refused before any intent, the resync's read order, a model outage backs off per mail, one
- * label per conversation follows the labels a thread carries now, and a resync never sorts mail from before the
- * install. After every test, every request Google got is checked against the independent table.
+ * label per conversation follows the labels a thread carries now, a resync never sorts mail from before the install,
+ * a retry never labels mail the owner filed in the meantime, and the 14-day content cleanup runs while the mode is off.
+ * After every test, every request Google got is checked against the independent table.
  */
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { create } from '@ziyixi/proto/protobuf';
@@ -80,6 +81,54 @@ describe('a write left for a retry goes out only while live is in force', () => 
     await setLabelLive(h, 'newsletter', false);
     await nextPassWritesNothing('a1000000000000a3', 'label_not_live');
     await setLabelLive(h, 'newsletter', true);
+  });
+
+  /** The retry's modifies and label reads after `before` calls. */
+  const callsSince = (before: number) => h.up.gmail.calls.slice(before).map((call) => `${call.method} ${new URL(call.url).pathname.split('/').slice(-2).join('/')}`);
+
+  it('the owner archived the mail and filed it under a label of their own meanwhile: the retry writes nothing', async () => {
+    const id = 'a1000000000000a4';
+    await leaveIntended(id);
+    const work = h.up.gmail.createUserLabel('Work');
+    h.up.gmail.ownerModify(id, [work], ['INBOX']);
+    const before = h.up.gmail.calls.length;
+    now += 5 * MINUTE;
+    await h.step(now);
+    // One metadata read of the mail, and no modify.
+    expect(callsSince(before).filter((call) => call.includes(id))).toEqual([`GET messages/${id}`]);
+    expect(gmailLabels(h, id)).toEqual([work, 'CATEGORY_UPDATES', 'UNREAD'].sort());
+    expect(await ledgerOf(h, id)).toEqual([{ state: 'failed', origin: 'auto', last_code: 'mail_changed' }]);
+    expect(await decision(h, id)).toMatchObject({ outcome: 'suggested', label_id: 'newsletter' });
+  });
+
+  it('the owner only archived it: the retry writes nothing', async () => {
+    const id = 'a1000000000000a5';
+    await leaveIntended(id);
+    h.up.gmail.ownerModify(id, [], ['INBOX']);
+    const before = modifies(h).length;
+    now += 5 * MINUTE;
+    await h.step(now);
+    expect(modifies(h).length).toBe(before);
+    expect(gmailLabels(h, id)).not.toContain('INBOX');
+    expect(await ledgerOf(h, id)).toEqual([{ state: 'failed', origin: 'auto', last_code: 'mail_changed' }]);
+  });
+
+  it('a user label the mail already had when it was decided does not stop the retry', async () => {
+    const id = 'a1000000000000a6';
+    const filtered = h.up.gmail.createUserLabel('From a filter');
+    const failing = failModifies(h, 503);
+    deliver(h, { ...MAILS.newsletterEn, id, subject: `Weekly digest ${id}`, labels: ['INBOX', 'UNREAD', 'CATEGORY_UPDATES', filtered] }, now);
+    now += 5 * MINUTE;
+    await h.step(now);
+    failing.off();
+    expect(await ledgerOf(h, id)).toEqual([{ state: 'intended', origin: 'auto', last_code: 'message_modify_503' }]);
+    now += 5 * MINUTE;
+    await h.step(now);
+    expect(await ledgerOf(h, id)).toEqual([{ state: 'applied', origin: 'auto', last_code: null }]);
+    const labels = gmailLabels(h, id);
+    expect(labels).toContain(filtered);
+    expect(labels).toContain('UNREAD');
+    expect(labels).not.toContain('INBOX');
   });
 
   it('a retry counts against the run cap like a new write', async () => {
@@ -404,5 +453,38 @@ describe('sync, the model and conversations', () => {
     now += 5 * MINUTE;
     await h.step(now);
     expect(await decision(h, 'c4000000000000c3')).toMatchObject({ outcome: 'applied', label_id: 'receipt' });
+  });
+});
+
+describe('the 14-day content cleanup runs while the mode is off', () => {
+  let h: Harness;
+  beforeAll(async () => {
+    h = await startHarness();
+  });
+  afterAll(async () => {
+    await h.dispose();
+  });
+  afterEach(() => {
+    checkGoogleCalls(h);
+  });
+
+  it('twenty days off: the subject, the sender keys and the review item are gone, and Google was never called', async () => {
+    await addLabels(h);
+    await h.step(T0);
+    deliver(h, MAILS.unsure, T0);
+    await h.step(T0 + 5 * MINUTE);
+    expect(await decision(h, MAILS.unsure.id)).toMatchObject({ outcome: 'unsure', content_cleared: 0, subject: 'Lunch on Friday?' });
+    expect(await pendingReview(h, MAILS.unsure.id)).toHaveLength(1);
+    await setMode(h, Mode.OFF);
+    const calls = h.up.gmail.calls.length;
+    for (let day = 1; day <= 20; day++) {
+      const result = await h.step(T0 + day * DAY);
+      expect(result.code).toBe('off');
+    }
+    expect(h.up.gmail.calls.length).toBe(calls);
+    expect(await decision(h, MAILS.unsure.id)).toMatchObject({
+      content_cleared: 1, subject: null, sender: null, summary: null, sender_address: null, sender_domain: null, list_id: null, delivered_to: null,
+    });
+    expect(await h.sql(`SELECT id FROM review WHERE message_id = ?`, MAILS.unsure.id)).toEqual([]);
   });
 });

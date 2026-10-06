@@ -52,6 +52,10 @@ export function isMessageId(id: unknown): id is string {
 }
 /** User label IDs as Gmail writes them; system labels (INBOX, UNREAD, ...) never match. */
 const USER_LABEL_ID = /^Label_[0-9]{1,24}$/;
+/** Whether `id` is a user label (the owner's or mailsort's), not a system one such as INBOX, UNREAD or CATEGORY_*. */
+export function isUserLabelId(id: string): boolean {
+  return USER_LABEL_ID.test(id);
+}
 const DIGITS = /^[0-9]{1,24}$/;
 const PAGE_TOKEN = /^[0-9A-Za-z_-]{1,256}$/;
 /** Whether `text` has a control character (C0 or DEL). */
@@ -128,6 +132,10 @@ function jsonBody(body: string | undefined, keys: readonly string[]): Record<str
     refuse('body_json');
   }
   if (typeof value !== 'object' || value === null || Array.isArray(value)) refuse('body_shape');
+  // The check is of the parsed value, but the text is what Google reads: only the canonical text of that value may go
+  // out. A duplicate key (JSON.parse keeps the last one; a server might keep the first) or any other spelling of a
+  // different meaning is refused. The client sends JSON.stringify of plain objects, which is canonical.
+  if (JSON.stringify(value) !== body) refuse('body_not_canonical');
   for (const key of Object.keys(value)) if (!keys.includes(key)) refuse('body_key');
   return value as Record<string, unknown>;
 }
@@ -530,6 +538,18 @@ export class GmailClient {
     for (const name of METADATA_HEADERS) meta.append('metadataHeaders', name);
     meta.set('fields', MESSAGE_FIELDS);
     return { message: assertObject(await this.getJson('message_get', `${GMAIL_BASE}/messages/${id}?${meta.toString()}`, MESSAGE_MAX_BYTES)) as unknown as GmailMessage, metadataOnly: true };
+  }
+
+  /**
+   * The labels `id` carries now. The table's metadata shape with a single header (Message-ID), so the answer is small;
+   * only labelIds is read. A deleted message is `not_found`.
+   */
+  async labelIdsOf(id: string): Promise<string[]> {
+    const meta = new URLSearchParams({ format: 'metadata', metadataHeaders: 'Message-ID', fields: MESSAGE_FIELDS });
+    const value = assertObject(await this.getJson('message_get', `${GMAIL_BASE}/messages/${id}?${meta.toString()}`, MESSAGE_MAX_BYTES));
+    const labels = value['labelIds'];
+    if (labels !== undefined && (!Array.isArray(labels) || !labels.every((item): item is string => typeof item === 'string'))) throw new GoogleError('bad_answer', 'message_get_bad_answer');
+    return labels ?? [];
   }
 
   async labels(): Promise<GmailLabel[]> {

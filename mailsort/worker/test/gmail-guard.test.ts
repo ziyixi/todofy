@@ -81,6 +81,26 @@ describe('the closed table refuses everything outside it', () => {
     expect(refused('POST', url, JSON.stringify({ addLabelIds: [OWNED], removeLabelIds: [OWNED] }), own)).not.toBe('accepted');
   });
 
+  it('checks the text that is sent: a duplicate key or any non-canonical spelling is refused', () => {
+    const own = ownership({ [`${MESSAGE}:${OWNED}`]: { state: 'intended', archived: true } });
+    const url = `${BASE}/messages/${MESSAGE}/modify`;
+    // JSON.parse keeps the last removeLabelIds (INBOX); a server that kept the first would mark the mail read.
+    const duplicate = `{"addLabelIds":["${OWNED}"],"removeLabelIds":["UNREAD"],"removeLabelIds":["INBOX"]}`;
+    expect(JSON.parse(duplicate)).toEqual({ addLabelIds: [OWNED], removeLabelIds: ['INBOX'] });
+    expect(refused('POST', url, duplicate, own)).toBe('body_not_canonical');
+    expect(refused('POST', url, `{"addLabelIds":["${OWNED}"],"addLabelIds":["${OWNED}"],"removeLabelIds":["INBOX"]}`, own)).toBe('body_not_canonical');
+    expect(refused('POST', url, `{ "addLabelIds": ["${OWNED}"], "removeLabelIds": ["INBOX"] }`, own)).toBe('body_not_canonical');
+    expect(refused('POST', url, `{"addLabelIds":["\\u004cabel_7"],"removeLabelIds":["INBOX"]}`, own)).toBe('body_not_canonical');
+    expect(refused('POST', `${BASE}/labels`, '{"name":"分拣/a","name":"Work","labelListVisibility":"labelShow","messageListVisibility":"show"}')).toBe('body_not_canonical');
+    expect(refused('PATCH', `${BASE}/labels/${OWNED}`, '{"name":"Work","name":"分拣/新"}')).toBe('body_not_canonical');
+    // The canonical text of the same value passes, and the independent table agrees on both.
+    const canonical = JSON.stringify({ addLabelIds: [OWNED], removeLabelIds: ['INBOX'] });
+    expect(refused('POST', url, canonical, own)).toBe('accepted');
+    const ctx = { owned: new Set([OWNED]), ledger: () => ({ state: 'intended', archived: true }) };
+    expect(allowedOperation('POST', url, canonical, ctx)).toBe('classify');
+    expect(allowedOperation('POST', url, duplicate, ctx)).toBeNull();
+  });
+
   it('accepts a classify only for a ledger row in intended or applied whose archive flag matches', () => {
     const url = `${BASE}/messages/${MESSAGE}/modify`;
     const archive = JSON.stringify({ addLabelIds: [OWNED], removeLabelIds: ['INBOX'] });
@@ -153,6 +173,7 @@ describe('every request the client makes is in the table', () => {
     await client.history('42', '7', 100);
     await client.recentInbox(100);
     await client.message(MESSAGE);
+    expect(await client.labelIdsOf(MESSAGE)).toEqual(['INBOX']);
     await client.labels();
     await client.createLabel('分拣/新');
     await client.renameLabel(OWNED, '分拣/改');
@@ -203,7 +224,7 @@ describe('fuzz: random operations never pass the guard unless the independent ta
       const addSize = Math.floor(random() * 3);
       const removeSize = Math.floor(random() * 3);
       const bodyKind = pick(random, ['modify', 'label', 'form', 'none']);
-      const body =
+      const plain =
         bodyKind === 'modify'
           ? JSON.stringify({
               ...(addSize > 0 ? { addLabelIds: Array.from({ length: addSize }, () => pick(random, labels)) } : {}),
@@ -214,6 +235,8 @@ describe('fuzz: random operations never pass the guard unless the independent ta
             : bodyKind === 'form'
               ? 'client_id=a&client_secret=b&refresh_token=c&grant_type=refresh_token'
               : undefined;
+      // Now and then the same body with one key written twice (a different value first): never accepted.
+      const body = plain !== undefined && plain.startsWith('{"') && random() < 0.2 ? `{"${pick(random, ['addLabelIds', 'removeLabelIds', 'name'])}":["UNREAD"],${plain.slice(1)}` : plain;
       const row = random() < 0.7 ? { state: pick(random, states), archived: random() < 0.5 } : null;
       const own: Ownership = { ownedLabelIds: () => new Set([OWNED]), ledger: (m, l) => (m === MESSAGE && l === OWNED ? row : null) };
       let passed = true;

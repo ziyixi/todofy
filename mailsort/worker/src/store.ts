@@ -7,8 +7,9 @@
  *
  * Every table is bounded (limits.ts): LABELS_MAX labels, RULES_MAX rules, EXAMPLES_MAX examples; decisions and the
  * ledger for DECISIONS_KEPT_MS, their content (subject, sender, summary, the exact sender keys) and the review queue for
- * CONTENT_KEPT_MS; request IDs for a day. `prune` runs once per UTC day. Examples (masked summaries) and rules (exact
- * sender, domain, list or delivered-to values) are what the app learned: they are kept until deleted, never pruned.
+ * CONTENT_KEPT_MS; request IDs for a day. `prune` runs once per UTC day in every mode, off included (pipeline.ts
+ * retain). Examples (masked summaries) and rules (exact sender, domain, list or delivered-to values) are what the app
+ * learned: they are kept until deleted, never pruned.
  *
  * Nothing here logs. Rows hold the owner's personal data (subjects, senders, rule values); they leave the object only
  * through the owner API behind Access, and the masked text only to Workers AI.
@@ -135,7 +136,10 @@ const SCHEMA_V1 = [
     superseded INTEGER NOT NULL DEFAULT 0,
     create_time INTEGER NOT NULL,
     apply_time INTEGER,
-    undo_time INTEGER
+    undo_time INTEGER,
+    -- The mail's user labels (Label_*) when the intent was recorded: a retry in a later pass checks that the owner has
+    -- not filed the mail since (writes.ts mailChanged).
+    base_labels TEXT NOT NULL DEFAULT '[]'
   )`,
   `CREATE INDEX IF NOT EXISTS ledger_message ON ledger (message_id)`,
   `CREATE INDEX IF NOT EXISTS ledger_state ON ledger (state, id)`,
@@ -272,6 +276,8 @@ export interface LedgerRow extends Record<string, SqlStorageValue> {
   create_time: number;
   apply_time: number | null;
   undo_time: number | null;
+  /** JSON array of the mail's user label IDs when the intent was recorded. */
+  base_labels: string;
 }
 
 export interface UsageRow extends Record<string, SqlStorageValue> {

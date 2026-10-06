@@ -9,10 +9,14 @@
  * A refused row fails (`mode_changed`, ...) and its mail becomes a suggestion in the review queue. Undo rows are never
  * gated: they only give the mail back to the inbox.
  *
+ * An automatic row left by an earlier pass (a 503, a pass cut short) is also checked against the mail as it is now,
+ * one metadata read before the write: if the owner has meanwhile archived it or filed it under a label of their own,
+ * mailsort's label would be a second label on mail no longer in the inbox, so the row fails (`mail_changed`).
+ *
  * Labels are created in Gmail ("分拣/" + display name) just before the first write that needs them, after the gate.
  */
 import { setCurrentLabels } from './feedback.ts';
-import { GmailRefused, GoogleError, type GmailClient } from './gmail.ts';
+import { GmailRefused, GoogleError, isUserLabelId, type GmailClient } from './gmail.ts';
 import { LABEL_PREFIX, WRITE_ATTEMPTS_MAX } from './limits.ts';
 import { noteGoogleError } from './session.ts';
 import { timeId } from './ids.ts';
@@ -34,11 +38,14 @@ export interface WriteContext {
   readonly gate: WriteGate;
 }
 
-/** Records the intent to add `label` to `messageId` (and archive it). Run inside the caller's transaction. */
-export function intend(store: Store, messageId: string, label: LabelRow, archive: boolean, origin: 'auto' | 'owner', now: number): string {
+/**
+ * Records the intent to add `label` to `messageId` (and archive it). `labelIds` are the labels the mail carries as the
+ * decision read it; its user labels are kept for the later-pass check (mailChanged). Run inside the caller's transaction.
+ */
+export function intend(store: Store, messageId: string, label: LabelRow, archive: boolean, origin: 'auto' | 'owner', now: number, labelIds: readonly string[] = []): string {
   const id = timeId(now);
   store.run(
-    `INSERT INTO ledger (id, message_id, label_id, gmail_label_id, archived, origin, state, create_time) VALUES (?, ?, ?, ?, ?, ?, 'intended', ?)`,
+    `INSERT INTO ledger (id, message_id, label_id, gmail_label_id, archived, origin, state, create_time, base_labels) VALUES (?, ?, ?, ?, ?, ?, 'intended', ?, ?)`,
     id,
     messageId,
     label.id,
@@ -46,8 +53,20 @@ export function intend(store: Store, messageId: string, label: LabelRow, archive
     archive ? 1 : 0,
     origin,
     now,
+    JSON.stringify(labelIds.filter(isUserLabelId)),
   );
   return id;
+}
+
+/**
+ * Whether the mail changed since `row`'s intent in a way that makes the write wrong: it left the inbox, or it carries a
+ * user label it did not have then (the owner's own, or another 分拣/ one), other than the row's own label (a write
+ * that reached Gmail before its answer was lost).
+ */
+export function mailChanged(row: LedgerRow, labelIds: readonly string[]): boolean {
+  if (!labelIds.includes('INBOX')) return true;
+  const base = new Set(JSON.parse(row.base_labels) as string[]);
+  return labelIds.some((id) => isUserLabelId(id) && id !== row.gmail_label_id && !base.has(id));
 }
 
 /**
@@ -127,7 +146,8 @@ function fail(store: Store, row: LedgerRow, code: string, now: number): void {
 
 /**
  * Executes ledger rows in `intended` or `undo_intended` (the given IDs, or the oldest `limit`), one Gmail modify each,
- * while the budget lasts.
+ * while the budget lasts. `ids === null` is the alarm's retry of rows earlier passes left: an automatic one among them,
+ * like any automatic row that already failed once, is first checked against the mail as it is now (mailChanged).
  */
 export async function executeWrites(ctx: WriteContext, ids: readonly string[] | null, limit: number): Promise<WriteOutcome> {
   const { store } = ctx;
@@ -142,13 +162,21 @@ export async function executeWrites(ctx: WriteContext, ids: readonly string[] | 
   let undone = 0;
   let failed = 0;
   for (const original of rows) {
-    if (!ctx.budget.has(2)) break;
     let row = original;
+    const recheck = row.state === 'intended' && row.origin === 'auto' && (ids === null || row.attempts > 0);
+    // A modify, a label creation if needed, and the recheck's read.
+    if (!ctx.budget.has(recheck ? 3 : 2)) break;
     const label = store.label(row.label_id);
     try {
       if (row.state === 'intended') {
         if (label === undefined) {
           ctx.transact(() => { fail(store, row, 'label_deleted', ctx.now()); });
+          failed++;
+          continue;
+        }
+        // Before the gate, so a mail that is not written does not use up a write of the run's cap.
+        if (recheck && mailChanged(row, await ctx.gmail.labelIdsOf(row.message_id))) {
+          ctx.transact(() => { fail(store, row, 'mail_changed', ctx.now()); });
           failed++;
           continue;
         }
