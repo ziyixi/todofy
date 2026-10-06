@@ -38,20 +38,28 @@ Landing now as one stack (each app still deploys only through its own job):
 - Home: unreachable guard paths and finished migrations removed; attention roll-up computed once.
 - CI: one `test_app_isolation.py` replaces eight per-app import greps; job comments tidied. No deploy condition changed.
 
-Next (branches being built, not pushed yet):
+Landed after it (2026-10-06):
 
-1. `refactor/newsletter-legacy-and-unknowns` (landing 2026-10-06): the 38 historical `workflow_attempts`
+1. `refactor/newsletter-legacy-and-unknowns` (landed `befa1e7`, verified): the 38 historical `workflow_attempts`
    unknowns (37 `timeout`, 1 `interrupted`) become `failed` through a one-time migration
    (`migration:settle_read_only_attempts:v1`; error codes and rows kept, other ledgers untouched); cancelled and
    restart-recovered read-only attempts are also `failed`/`interrupted` from now on. The dead legacy pipeline
    (legacy-daily recipe, repair scan, whole-edition editor, v1 Notion, `legacy` backend) is deleted; stored legacy
    editions still render. The owner's read-only production count (2026-10-06) passed the gate: production runs
    `dag` with dual-database Notion, no open non-story runs or pending repairs, only old blocked history. A leftover
-   `NOTION_DATA_SOURCE_ID` in the private Secret is ignored. After the release: the monitoring unknown count is 0,
-   Home shows no Newsletter item, the next daily issue is accepted.
-2. `chore/decommission-lab`: Lab (paper radar) removed from the tree as if it never existed. After it lands the owner
-   deletes the `lab` Worker (its Durable Object data and custom domain) and dispatches Infra apply for the Access app
-   and D1 `lab`; agents do not delete production data.
+   `NOTION_DATA_SOURCE_ID` in the private Secret is ignored. Verified: Fleet reports
+   unknown_count 0 at `befa1e7`; Home shows no Newsletter item. Left: the next daily issue is accepted.
+2. `chore/decommission-lab` (landing 2026-10-06): Lab (paper radar) removed from the tree. Production teardown, in order:
+   1. Wait for Home's deploy: its release removes the live `LAB` service binding (reason
+      `RETIRED_SERVICE_BINDING` in `tools/cloud-release/control.py`).
+   2. Until step 4 these are red by design: Infra drift (a planned delete), the reconcile inventory check (lab
+      Worker, D1 `lab`, LabState namespace unregistered) and Home's drift list (lab script and custom domain).
+   3. Owner: delete the `lab` Worker in the Cloudflare dashboard (its LabState data and custom domain go with it).
+   4. Infra drift must read exactly `delete: 2` (`retired_lab` Access app and D1), 31 no-op, output changes 2;
+      the owner dispatches Infra apply with that expect and `confirm_destructive=delete-replace-forget`.
+   5. Owner: delete the GitHub `production` secrets `LAB_CSRF_SIGNING_KEY` and `LAB_WORKER_SECRETS`.
+   6. Agent, after the apply: remove `infra/retired.tf`, its pairs in `.github/scripts/infra_guard.py` and the
+      `dashboard: {LAB}` entry of `RETIRED_SERVICE_BINDINGS`.
 3. Later, from the same review: Newsletter prompts as resources and mechanical cleanup, one shared deploy-vars
    engine for the Workers, platform helper de-duplication (and the 1000 vs 2^31 monitor-count cap mismatch), and a
    shorter HANDOFF.
@@ -204,7 +212,6 @@ was in flight at that landing. The foundation evidence below describes that comp
 | --- | --- | --- | --- | --- |
 | Mail Hero | `mail-hero` (+ `MailCoordinator` DO) | `mail-hero.ziyixi.science` | `Mail Hero deploy` | Yes (`mailhero.ui.v2`; webhook `mail.received.v1`) |
 | Todofy | `todofy` (TS gateway) + `todofy-core` (Python) | `todofy.ziyixi.science`, hooks and daily hosts | `Todofy deploy` | Yes (`todofy.ui.v1`; reports `todofy.report.v1`, `task-intent-v1`, `ops-v1`) |
-| Lab | `lab` | `lab.ziyixi.science` | `Lab deploy` | Yes (`lab.ui.v1`, the pilot) |
 | Links | `links` | `s.ziyixi.science` | `Links deploy` | Yes (`links.ui.v1`) |
 | Watch | `watch` (+ `WatchState` DO) | `watch.ziyixi.science` | `Watch deploy` | Yes (`watch.ui.v1`) |
 | FlowDay | `flowday` | `flowday.ziyixi.science` | `FlowDay deploy` | Yes (`flowday.ui.v1`) |
