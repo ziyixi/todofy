@@ -72,6 +72,7 @@ async def test_consumers_stop_before_store_and_skip_legacy_projection(
         assert events == ["worker-start", "sync-start"]
         assert isinstance(app.state.worker.notion, adapters.DisabledNotion)
         assert app.state.worker.skip_packet_projection
+        assert app.state.worker.pipeline.packet_projection is False
         before = (settings.data_dir / "newsletter.sqlite3").read_bytes()
         assert notion_cli.status(settings.data_dir / "newsletter.sqlite3")[
             "enabled"

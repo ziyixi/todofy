@@ -289,6 +289,57 @@ def test_legacy_binding_advance_blocks_unconfirmed_adopted_projection(
     assert store.get(edition["id"])["state"] == "ready"
 
 
+def _pending_legacy_run(store, runs):
+    run = runs.start(
+        {"request_key": "run", "issue_date": "2026-09-06"},
+        [],
+        workflow_snapshot={"fixture": "not executed by this state-only test"},
+    )
+    adopted = workflow_state.packet(store, "adopted")
+    edition = workflow_state.ready(store, "edition", [adopted], run=run["id"])
+    runs.update(run["id"], state="editing", edition_id=edition["id"])
+    return run, edition
+
+
+def test_legacy_binding_closes_when_packet_projection_is_skipped(
+    store, tmp_path
+):
+    # Dual-database deployments never project packets, so the adopted packet
+    # stays pending forever; the run must close instead of waiting.
+    runs = repository.RunRepository(store)
+    run, edition = _pending_legacy_run(store, runs)
+    pipeline = newsletter_workflow_pipeline.DagPipeline(
+        runs,
+        tmp_path / "workspace",
+        editor=editor.CodexEditor(tmp_path / "unused-auth-path"),
+        packet_projection=False,
+    )
+    assert pipeline.advance()
+    closed = runs.get(run["id"])
+    assert closed["state"] == "blocked"
+    assert closed["error_code"] == newsletter_workflow_pipeline.RETIRED_WORKFLOW
+    with pytest.raises(newsletter_store.StoreError):
+        store.reserve_send(workflow_state.approval(edition))
+    assert pipeline.advance() is False
+    assert runs.get(run["id"]) == closed
+
+
+def test_legacy_binding_waits_for_pending_projection_when_it_runs(
+    store, tmp_path
+):
+    # With packet projection enabled the worker will still resolve the
+    # pending packet, so the gate keeps waiting rather than closing early.
+    runs = repository.RunRepository(store)
+    run, _ = _pending_legacy_run(store, runs)
+    pipeline = newsletter_workflow_pipeline.DagPipeline(
+        runs,
+        tmp_path / "workspace",
+        editor=editor.CodexEditor(tmp_path / "unused-auth-path"),
+    )
+    assert pipeline.advance() is False
+    assert runs.get(run["id"])["state"] == "editing"
+
+
 def test_same_date_new_edition_or_send_key_cannot_duplicate_reservation(store):
     source = workflow_state.packet(store, "adopted")
     first = workflow_state.ready(store, "edition-one", [source])

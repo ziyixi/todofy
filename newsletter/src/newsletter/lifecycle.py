@@ -133,6 +133,7 @@ async def service_lifespan(
                         model=settings.model,
                         timeout_seconds=settings.collection_timeout_seconds,
                     ),
+                    packet_projection=not notion_v2,
                 )
                 if live
                 else newsletter_collection_pipeline.CollectionPipeline(

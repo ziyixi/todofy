@@ -114,10 +114,14 @@ class DagPipeline:
         workspace: pathlib.Path,
         *,
         editor: newsletter_editor.CodexEditor,
+        packet_projection: bool = True,
     ) -> None:
         self.runs = runs
         self.workspace = workspace
         self.editor = editor
+        # False when the worker skips per-packet projection (dual-database
+        # Notion), so a pending packet projection will never be resolved.
+        self.packet_projection = packet_projection
         self.repository = newsletter_workflow_repository.WorkflowRepository(
             runs.store
         )
@@ -518,8 +522,11 @@ class DagPipeline:
                     self.runs.update(run["id"], state="ready")
                 changed = True
                 continue
-            # Editions frozen by the retired whole-edition recipe keep their
-            # original gate: every adopted packet confirmed in legacy Notion.
+            # Editions frozen by the retired whole-edition recipe still gate
+            # on the worker's per-packet projection of every adopted packet.
+            # No real Notion adapter remains for it: the disabled policy
+            # records each packet as done, and dual-database deployments skip
+            # the projection entirely.
             states = self.runs.projection_states(
                 binding["required_packets"] if binding else []
             )
@@ -530,6 +537,15 @@ class DagPipeline:
                     run["id"],
                     state="blocked",
                     error_code="notion_projection_unconfirmed",
+                )
+                changed = True
+            elif not self.packet_projection and any(
+                state == "pending" for state in states
+            ):
+                # Nothing will ever project these packets, so close the run
+                # like a snapshotless one instead of letting it wait forever.
+                self.runs.update(
+                    run["id"], state="blocked", error_code=RETIRED_WORKFLOW
                 )
                 changed = True
             elif all(state == "done" for state in states):
