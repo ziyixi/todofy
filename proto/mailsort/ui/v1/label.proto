@@ -1,0 +1,75 @@
+// A label: one category mailsort may put a mail into (mailsort/docs/design.md §3). It is a Gmail nested label under
+// the prefix "分拣/" (the Gmail name is "分拣/" + display_name), plus the owner's description that the decision model
+// reads as the category's criteria.
+
+syntax = "proto3";
+
+package mailsort.ui.v1;
+
+import "google/api/field_behavior.proto";
+import "google/api/resource.proto";
+import "google/protobuf/timestamp.proto";
+
+option java_multiple_files = true;
+option java_outer_classname = "LabelProto";
+option java_package = "science.ziyixi.mailsort.ui.v1";
+
+// A category. Its names and description are the owner's: they live only in the Worker's Durable Object and in
+// Gmail, behind Access, and never reach a log or the dashboard.
+message Label {
+  option (google.api.resource) = {
+    type: "sort.ziyixi.science/Label"
+    pattern: "labels/{label}"
+    singular: "label"
+    plural: "labels"
+  };
+
+  // Whether the label exists in Gmail.
+  enum GmailState {
+    // Never written.
+    GMAIL_STATE_UNSPECIFIED = 0;
+    // Not created in Gmail yet: it is created before the first live write that needs it.
+    GMAIL_STATE_PENDING = 1;
+    // Linked to the Gmail label of the same name.
+    GMAIL_STATE_LINKED = 2;
+    // Linked before, but Gmail no longer has it (deleted or renamed outside mailsort). Nothing is written with
+    // it until SyncLabels links it again.
+    GMAIL_STATE_MISSING = 3;
+  }
+
+  // labels/{label}: 1 to 40 characters of `a-z`, `0-9` and `-`, starting with a letter (AIP-122). The ID is
+  // also the decision model's stable option ID, so it never changes.
+  string name = 1 [(google.api.field_behavior) = IDENTIFIER];
+  // The part of the Gmail name after "分拣/": 1 to 40 characters, no "/" and no control characters.
+  string display_name = 2 [(google.api.field_behavior) = REQUIRED];
+  // What belongs in this label, in the owner's words: the model's criteria for the option. At most 300
+  // characters.
+  string description = 3 [(google.api.field_behavior) = OPTIONAL];
+  // Mail may be decided into this label (in shadow or live mode). A disabled label is never suggested.
+  bool enabled = 4 [(google.api.field_behavior) = OPTIONAL];
+  // In live mode, a confident decision applies this label in Gmail (and archives the mail); otherwise the
+  // decision is only a suggestion in the review queue. The Worker turns it off by itself when the precision's
+  // lower bound drops below the target (AccuracyReport).
+  bool live = 5 [(google.api.field_behavior) = OPTIONAL];
+  // The label implies trust (a bank, a brokerage, accounts, security, government): only a rule whose mail passed
+  // DMARC aligned with its From domain may apply it; the model and the neighbours may only suggest it.
+  bool trust_implying = 6 [(google.api.field_behavior) = OPTIONAL];
+  // The lowest probability a model decision needs for this label, 0.5 to 0.99; 0 uses the default threshold of
+  // the settings.
+  double threshold = 7 [(google.api.field_behavior) = OPTIONAL];
+  // The Gmail label's ID once linked; empty before.
+  string gmail_label_id = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Whether the label exists in Gmail.
+  GmailState gmail_state = 9 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Grows with every change of `description` (and so of what the model reads). Every decision records it.
+  int32 description_version = 10 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The examples of this label in the example store.
+  int32 example_count = 11 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // When it was created.
+  google.protobuf.Timestamp create_time = 12 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // When the owner or the Worker last changed it.
+  google.protobuf.Timestamp update_time = 13 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // AIP-154: changes with every change. UpdateLabel and DeleteLabel that carry an etag are refused with
+  // ETAG_MISMATCH when the label changed since.
+  string etag = 14 [(google.api.field_behavior) = OPTIONAL];
+}

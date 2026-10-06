@@ -1,0 +1,183 @@
+// The review queue (mailsort/docs/design.md §5): shadow suggestions, unsure mails and the daily random audit of
+// labelled mails, which the owner confirms, corrects or skips. Every confirmation builds the evaluation set and
+// every correction an example.
+
+syntax = "proto3";
+
+package mailsort.ui.v1;
+
+import "google/api/field_behavior.proto";
+import "google/api/resource.proto";
+import "google/protobuf/timestamp.proto";
+
+option java_multiple_files = true;
+option java_outer_classname = "ReviewProto";
+option java_package = "science.ziyixi.mailsort.ui.v1";
+
+// One mail waiting for the owner. Its subject and sender are masked (addresses, long digit runs and URLs
+// replaced) and kept at most 14 days; then the item leaves the queue unresolved.
+message ReviewItem {
+  option (google.api.resource) = {
+    type: "sort.ziyixi.science/ReviewItem"
+    pattern: "reviewItems/{review_item}"
+    singular: "reviewItem"
+    plural: "reviewItems"
+  };
+
+  // Why the mail is in the queue.
+  enum Kind {
+    // Never written.
+    KIND_UNSPECIFIED = 0;
+    // Shadow mode (or a label not live yet): the decision was confident but only suggested.
+    KIND_SUGGESTION = 1;
+    // The decision was unsure: no label in Gmail, the mail stays in the inbox.
+    KIND_UNSURE = 2;
+    // A random check of a mail the Worker labelled in Gmail.
+    KIND_AUDIT = 3;
+  }
+
+  // The item's lifecycle (AIP-216).
+  enum State {
+    // Never written.
+    STATE_UNSPECIFIED = 0;
+    // Waiting for the owner.
+    STATE_PENDING = 1;
+    // The owner confirmed the suggested label.
+    STATE_CONFIRMED = 2;
+    // The owner chose another label, or none.
+    STATE_CORRECTED = 3;
+    // The owner skipped it.
+    STATE_SKIPPED = 4;
+  }
+
+  // reviewItems/{review_item}: an ID the Worker makes.
+  string name = 1 [(google.api.field_behavior) = IDENTIFIER];
+  // Why the mail is in the queue.
+  Kind kind = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The item's lifecycle.
+  State state = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The masked subject (at most 200 characters).
+  string subject = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The sender's display name and domain, masked (at most 120 characters).
+  string sender = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The suggested label; empty when the decision was "none of them".
+  string suggested_label = 6 [
+    (google.api.field_behavior) = OUTPUT_ONLY,
+    (google.api.resource_reference).type = "sort.ziyixi.science/Label"
+  ];
+  // The decision's three most likely options, the most likely first.
+  repeated Candidate candidates = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // What decided: `rule`, `neighbours`, `clef` or `clef-flash`.
+  string decider = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Why the decision was unsure: `below_threshold`, `none`, `suspicious`, `trust_needs_rule`, `label_disabled`,
+  // `model_unavailable`; empty for a confident one. More may come (shown as the code).
+  string unsure_reason = 9 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The label the owner chose (CONFIRMED or CORRECTED); empty for "none of them".
+  string resolved_label = 10 [
+    (google.api.field_behavior) = OUTPUT_ONLY,
+    (google.api.resource_reference).type = "sort.ziyixi.science/Label"
+  ];
+  // When Gmail received the mail.
+  google.protobuf.Timestamp receive_time = 11 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // When the item entered the queue.
+  google.protobuf.Timestamp create_time = 12 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // When the owner resolved it.
+  google.protobuf.Timestamp resolve_time = 13 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// One of a decision's most likely options.
+message Candidate {
+  // The label, or empty for "none of them".
+  string label = 1 [
+    (google.api.field_behavior) = OUTPUT_ONLY,
+    (google.api.resource_reference).type = "sort.ziyixi.science/Label"
+  ];
+  // Its probability, 0 to 1.
+  double probability = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// A corrected or confirmed mail kept as a few-shot example (mailsort/docs/design.md §6): a short masked summary
+// and its embedding. Deleted when its correction is withdrawn or its label deleted.
+message Example {
+  option (google.api.resource) = {
+    type: "sort.ziyixi.science/Example"
+    pattern: "examples/{example}"
+    singular: "example"
+    plural: "examples"
+  };
+
+  // Where an example comes from.
+  enum Origin {
+    // Never written.
+    ORIGIN_UNSPECIFIED = 0;
+    // The owner moved the mail to another label in Gmail, or corrected it in the review queue.
+    ORIGIN_CORRECTION = 1;
+    // The owner confirmed a suggestion in the review queue.
+    ORIGIN_CONFIRMATION = 2;
+    // The label stayed untouched for 3 days after the Worker applied it (a weaker example).
+    ORIGIN_WEAK_ACCEPT = 3;
+  }
+
+  // examples/{example}: an ID the Worker makes.
+  string name = 1 [(google.api.field_behavior) = IDENTIFIER];
+  // The example's label.
+  string label = 2 [
+    (google.api.field_behavior) = OUTPUT_ONLY,
+    (google.api.resource_reference).type = "sort.ziyixi.science/Label"
+  ];
+  // The masked summary the model reads (at most 200 characters).
+  string summary = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Where it comes from.
+  Origin origin = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Its embedding is stored; until then it is not used as a neighbour.
+  bool embedded = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // When it was made.
+  google.protobuf.Timestamp create_time = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// One Gmail write by mailsort (mailsort/docs/design.md §7): the intent is recorded first, then the write, then its
+// outcome. Undo removes exactly what the entry added (and restores INBOX when it archived).
+message LedgerEntry {
+  option (google.api.resource) = {
+    type: "sort.ziyixi.science/LedgerEntry"
+    pattern: "ledgerEntries/{ledger_entry}"
+    singular: "ledgerEntry"
+    plural: "ledgerEntries"
+  };
+
+  // The entry's lifecycle (AIP-216).
+  enum State {
+    // Never written.
+    STATE_UNSPECIFIED = 0;
+    // Recorded, the Gmail write not confirmed yet (retried by the next alarm).
+    STATE_INTENDED = 1;
+    // Gmail applied it.
+    STATE_APPLIED = 2;
+    // Gmail refused it for good (the mail is gone, or the grant is read-only).
+    STATE_FAILED = 3;
+    // Undone: the label removed (and INBOX restored when it archived).
+    STATE_UNDONE = 4;
+  }
+
+  // ledgerEntries/{ledger_entry}: an ID the Worker makes.
+  string name = 1 [(google.api.field_behavior) = IDENTIFIER];
+  // The Gmail message ID (opaque).
+  string message_id = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The label it added.
+  string label = 3 [
+    (google.api.field_behavior) = OUTPUT_ONLY,
+    (google.api.resource_reference).type = "sort.ziyixi.science/Label"
+  ];
+  // It also removed INBOX (archived the mail). UNREAD is never touched.
+  bool archived = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // `auto` (a confident decision) or `owner` (a review-queue choice).
+  string origin = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The entry's lifecycle.
+  State state = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // When the intent was recorded.
+  google.protobuf.Timestamp create_time = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // When Gmail applied it.
+  google.protobuf.Timestamp apply_time = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // When it was undone.
+  google.protobuf.Timestamp undo_time = 9 [(google.api.field_behavior) = OUTPUT_ONLY];
+}

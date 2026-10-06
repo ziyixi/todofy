@@ -1,0 +1,47 @@
+// The errors of MailsortUiService (AIP-193).
+//
+// Every error is a google.rpc.Status in Google's HTTP JSON form, written by the shared transcoder
+// (proto/ts/http-transcoder.ts), with an ErrorInfo whose domain is "sort.ziyixi.science", a zh-CN
+// LocalizedMessage, a RequestInfo and, for ETAG_MISMATCH, the current resource as a typed detail.
+//
+// The UI branches on ErrorInfo.reason only: a value name without its prefix, of ErrorReason below (mailsort's
+// own reasons) or of common.errors.v1.CommonReason (the reasons every API shares). A reason the UI does not
+// know is shown with the LocalizedMessage, never read as success.
+
+syntax = "proto3";
+
+package mailsort.ui.v1;
+
+option java_multiple_files = true;
+option java_outer_classname = "ErrorsProto";
+option java_package = "science.ziyixi.mailsort.ui.v1";
+
+// Mailsort's own reasons: ErrorInfo.reason is the value's name without `ERROR_REASON_`. The HTTP status
+// follows the google.rpc.Code listed for each value (the AIP-193 mapping).
+enum ErrorReason {
+  // Never sent.
+  ERROR_REASON_UNSPECIFIED = 0;
+  // ALREADY_EXISTS (409): CreateLabel with a `label_id` or display name that a label holds.
+  ERROR_REASON_LABEL_EXISTS = 1;
+  // ABORTED (409): the request's etag is stale (AIP-154). The error carries the current resource.
+  ERROR_REASON_ETAG_MISMATCH = 2;
+  // INVALID_ARGUMENT (400): a label ID or display name breaks its rules (Label.name, Label.display_name).
+  ERROR_REASON_INVALID_LABEL = 3;
+  // INVALID_ARGUMENT (400): a rule's kind and value do not fit (Rule.value).
+  ERROR_REASON_INVALID_RULE = 4;
+  // INVALID_ARGUMENT (400): a setting or a threshold is outside its range.
+  ERROR_REASON_INVALID_SETTINGS = 5;
+  // FAILED_PRECONDITION (400): the store holds the most labels or rules it may.
+  ERROR_REASON_LIMIT_REACHED = 6;
+  // FAILED_PRECONDITION (400): the review item was already confirmed, corrected or skipped, or expired.
+  ERROR_REASON_ALREADY_RESOLVED = 7;
+  // FAILED_PRECONDITION (400): the ledger entry is not one this app applied, or it was already undone.
+  ERROR_REASON_NOT_UNDOABLE = 8;
+  // FAILED_PRECONDITION (400): Gmail is not authorized (no refresh token, or Google refused it).
+  ERROR_REASON_GMAIL_NOT_AUTHORIZED = 9;
+  // FAILED_PRECONDITION (400): the change needs a Gmail write, and the mode is not live or the grant is
+  // read-only.
+  ERROR_REASON_GMAIL_WRITE_NOT_ALLOWED = 10;
+  // UNAVAILABLE (503): Gmail or Workers AI did not answer; repeat the request with the same request_id.
+  ERROR_REASON_DEPENDENCY_UNAVAILABLE = 11;
+}

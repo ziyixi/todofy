@@ -1,0 +1,77 @@
+// A rule: stage 1 of the pipeline (mailsort/docs/design.md §4). A deterministic match on a sender, a mailing list or
+// the address the mail was delivered to decides a label without the model. Rules come from the owner or from a
+// proposal: the same sender or list corrected to the same label at least twice.
+
+syntax = "proto3";
+
+package mailsort.ui.v1;
+
+import "google/api/field_behavior.proto";
+import "google/api/resource.proto";
+import "google/protobuf/timestamp.proto";
+
+option java_multiple_files = true;
+option java_outer_classname = "RuleProto";
+option java_package = "science.ziyixi.mailsort.ui.v1";
+
+// A deterministic rule. Its value (an address, a domain, a list ID) is the owner's data: it lives only in the
+// Durable Object, behind Access, and never reaches a log.
+message Rule {
+  option (google.api.resource) = {
+    type: "sort.ziyixi.science/Rule"
+    pattern: "rules/{rule}"
+    singular: "rule"
+    plural: "rules"
+  };
+
+  // What a rule matches.
+  enum Kind {
+    // Never written; refused on input.
+    KIND_UNSPECIFIED = 0;
+    // The From address, exactly (ASCII letters case-insensitively).
+    KIND_SENDER_ADDRESS = 1;
+    // The From address's domain or a subdomain of it.
+    KIND_SENDER_DOMAIN = 2;
+    // The List-Id header's identifier (between the angle brackets).
+    KIND_LIST_ID = 3;
+    // The Delivered-To (or To) address: which of the owner's addresses the mail came in through.
+    KIND_DELIVERED_TO = 4;
+  }
+
+  // The rule's lifecycle (AIP-216).
+  enum State {
+    // Never written.
+    STATE_UNSPECIFIED = 0;
+    // Proposed from corrections: it decides nothing until the owner approves it.
+    STATE_PROPOSED = 1;
+    // Decides every matching mail.
+    STATE_ACTIVE = 2;
+    // Kept, decides nothing.
+    STATE_DISABLED = 3;
+  }
+
+  // rules/{rule}: an ID the Worker makes.
+  string name = 1 [(google.api.field_behavior) = IDENTIFIER];
+  // What the rule matches.
+  Kind kind = 2 [(google.api.field_behavior) = REQUIRED];
+  // The address, domain or list ID, 3 to 200 printable ASCII characters; stored in lower case.
+  string value = 3 [(google.api.field_behavior) = REQUIRED];
+  // The label a match decides.
+  string label = 4 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "sort.ziyixi.science/Label"
+  ];
+  // The rule's lifecycle.
+  State state = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // A match also needs DMARC to pass aligned with the From domain (Authentication-Results). Always set for a
+  // label that implies trust; then a mail that fails it is only a suggestion.
+  bool dmarc_required = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The corrections a proposal came from (0 for the owner's own rules).
+  int32 correction_count = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The mails the rule decided.
+  int32 match_count = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // When it was created.
+  google.protobuf.Timestamp create_time = 9 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // When its state last changed.
+  google.protobuf.Timestamp update_time = 10 [(google.api.field_behavior) = OUTPUT_ONLY];
+}

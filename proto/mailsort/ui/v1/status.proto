@@ -1,0 +1,173 @@
+// The singletons of mailsort's owner API: the owner's settings, the accuracy report and the service status
+// (mailsort/docs/design.md §8-§9). Codes, counts and times only: no subject, sender or address.
+
+syntax = "proto3";
+
+package mailsort.ui.v1;
+
+import "google/api/field_behavior.proto";
+import "google/api/resource.proto";
+import "google/protobuf/timestamp.proto";
+
+option java_multiple_files = true;
+option java_outer_classname = "StatusProto";
+option java_package = "science.ziyixi.mailsort.ui.v1";
+
+// The owner's settings. A singleton.
+message Settings {
+  option (google.api.resource) = {
+    type: "sort.ziyixi.science/Settings"
+    pattern: "settings"
+    singular: "settings"
+    plural: "settings"
+  };
+
+  // Always `settings`.
+  string name = 1 [(google.api.field_behavior) = IDENTIFIER];
+  // The owner's mode.
+  Mode mode = 2 [(google.api.field_behavior) = OPTIONAL];
+  // The mode in force: the owner's, lowered by the deployment's MAILSORT_MODE switch (off or shadow) or by the
+  // breaker (shadow).
+  Mode effective_mode = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // At most this many Gmail writes per alarm run, 1 to 10.
+  int32 run_write_limit = 4 [(google.api.field_behavior) = OPTIONAL];
+  // At most this many Gmail writes per UTC day, 1 to 500. Passing it trips the breaker.
+  int32 daily_write_limit = 5 [(google.api.field_behavior) = OPTIONAL];
+  // The Workers AI neurons mailsort may use per UTC day (estimated), 500 to 10000. Past 70 % of it the rest
+  // of the day uses Clef-flash.
+  int32 daily_neuron_budget = 6 [(google.api.field_behavior) = OPTIONAL];
+  // The threshold of a label without its own, 0.5 to 0.99.
+  double default_threshold = 7 [(google.api.field_behavior) = OPTIONAL];
+  // The target precision lower bound of a live label, 0.5 to 0.99: below it the label leaves live mode.
+  double precision_target = 8 [(google.api.field_behavior) = OPTIONAL];
+  // The breaker tripped (a write limit passed, or one label's share jumped): the effective mode is shadow until
+  // the owner sets the mode again.
+  bool breaker_tripped = 9 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Why the breaker tripped: `daily_limit`, `label_share`; empty when it did not.
+  string breaker_reason = 10 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // AIP-154: changes with every change. UpdateSettings that carries an etag is refused with ETAG_MISMATCH when
+  // the settings changed since.
+  string etag = 11 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// One label's accuracy, from the owner's confirmations and corrections.
+message LabelAccuracy {
+  // The label.
+  string label = 1 [
+    (google.api.field_behavior) = OUTPUT_ONLY,
+    (google.api.resource_reference).type = "sort.ziyixi.science/Label"
+  ];
+  // Suggestions or applied labels the owner confirmed (review queue, audits) or left untouched for 3 days.
+  int32 confirmed_count = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Those the owner corrected (review queue or Gmail).
+  int32 corrected_count = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The Wilson 95 % lower bound of the precision; 0 without confirmations.
+  double precision_lower_bound = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Mails decided into this label in the last 7 days (suggested or applied).
+  int32 decided_count = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Of those, applied in Gmail.
+  int32 applied_count = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// How well the decisions match the owner's. A singleton.
+message AccuracyReport {
+  option (google.api.resource) = {
+    type: "sort.ziyixi.science/AccuracyReport"
+    pattern: "accuracyReport"
+    singular: "accuracyReport"
+    plural: "accuracyReports"
+  };
+
+  // Always `accuracyReport`.
+  string name = 1 [(google.api.field_behavior) = IDENTIFIER];
+  // Every label, in the labels' order.
+  repeated LabelAccuracy labels = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Mails decided in the last 7 days.
+  int32 decided_count = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Of those, unsure (no label).
+  int32 unsure_count = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The share of decided mails that were confident, 0 to 1.
+  double coverage = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The precision target a live label must keep (Settings.precision_target).
+  double precision_target = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// The pipeline's state: codes, counts and times only. A singleton.
+message ServiceStatus {
+  option (google.api.resource) = {
+    type: "sort.ziyixi.science/ServiceStatus"
+    pattern: "serviceStatus"
+    singular: "serviceStatus"
+    plural: "serviceStatuses"
+  };
+
+  // The Gmail grant, as the Worker last saw it.
+  enum AuthState {
+    // Never written.
+    AUTH_STATE_UNSPECIFIED = 0;
+    // No refresh token is configured (the owner's mint-token step).
+    AUTH_STATE_NOT_CONFIGURED = 1;
+    // The last token refresh worked.
+    AUTH_STATE_OK = 2;
+    // Google refused the grant (revoked or expired): the Worker stopped calling Google until the token is
+    // replaced.
+    AUTH_STATE_FAILED = 3;
+  }
+
+  // Always `serviceStatus`.
+  string name = 1 [(google.api.field_behavior) = IDENTIFIER];
+  // The mode in force.
+  Mode effective_mode = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The Gmail grant.
+  AuthState auth_state = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The grant allows label writes (gmail.modify); false for a read-only grant.
+  bool write_scope = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The last complete sync with Gmail's history.
+  google.protobuf.Timestamp last_sync_time = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The next alarm; unset when none is armed (the next API call arms one).
+  google.protobuf.Timestamp next_alarm_time = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // New mails waiting to be decided.
+  int32 pending_count = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Mails waiting for a free model quota (deferred, not failed).
+  int32 deferred_count = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Review items waiting for the owner.
+  int32 review_count = 9 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Mails decided today (UTC).
+  int32 decided_today_count = 10 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Labels applied in Gmail today.
+  int32 applied_today_count = 11 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Unsure decisions today.
+  int32 unsure_today_count = 12 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Requests to Google today.
+  int32 gmail_call_today_count = 13 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Workers AI calls today.
+  int32 ai_call_today_count = 14 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The neurons used today, estimated from the reported input tokens and the models' prices.
+  double neurons_today = 15 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The daily neuron budget (Settings.daily_neuron_budget).
+  int32 daily_neuron_budget = 16 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The decision model in use now: `clef` or `clef-flash`.
+  string decision_model = 17 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Workers AI refused for quota today: the remaining mails wait for the next UTC day.
+  bool ai_quota_exhausted = 18 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Examples without an embedding yet.
+  int32 unembedded_example_count = 19 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The last few error codes (newest first, at most 8), e.g. `gmail_429`, `ai_unavailable`.
+  repeated string recent_error_codes = 20 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The deployed commit.
+  string build = 21 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// What the pipeline may do.
+enum Mode {
+  // Never written; refused on input.
+  MODE_UNSPECIFIED = 0;
+  // Nothing is read from Gmail or decided.
+  MODE_OFF = 1;
+  // Mail is read and decided; every decision is only a suggestion in the review queue. Nothing is written to
+  // Gmail.
+  MODE_SHADOW = 2;
+  // Confident decisions of live labels are applied in Gmail (the label added, INBOX removed; UNREAD never
+  // touched); the rest stay suggestions.
+  MODE_LIVE = 3;
+}

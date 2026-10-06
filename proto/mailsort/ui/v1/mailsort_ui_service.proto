@@ -1,0 +1,761 @@
+// Mailsort's owner API: the HTTP/JSON interface between its UI (mailsort/web) and the Worker "mailsort"
+// (mailsort/worker), whose Durable Object MailsortState holds every label, rule, decision, example and ledger entry.
+//
+// Callers. Only the mailsort UI calls it (same origin, sort.ziyixi.science). The dashboard gets counts through
+// ops-v1, never this API.
+//
+// Transport. google.api.http bindings under /api/v1, served by the shared transcoder
+// (proto/ts/http-transcoder.ts) and called through the shared client (proto/ts/http-client.ts). Bodies, query
+// parameters and responses are JSON in the wire JSON profile (proto/README.md): proto field names (snake_case),
+// enum values in lower case without their prefix (`Mode.MODE_LIVE` is "live"), timestamps in RFC 3339 UTC.
+// Inputs are read strictly, outputs leniently. Request bodies are at most 64 KiB. Errors: errors.proto (this
+// app's reasons) and common/errors/v1/errors.proto (the reasons every API shares).
+//
+// Authentication, in front of the transcoder (packages/edge-auth): the whole host is behind Cloudflare Access,
+// and every route needs the owner's Access JWT; every method other than GET also needs the same-origin Origin
+// header and the signed double-submit CSRF token (header X-CSRF-Token, cookie mailsort_csrf), issued by
+// GET /api/csrf, which is transport, not part of this service. A mutation takes a `request_id` (AIP-155, a UUID4
+// the browser makes once per user action): repeating it within 24 hours answers the first response and changes
+// nothing; reused for another rpc or resource it is INVALID_ARGUMENT (BAD_REQUEST).
+//
+// Gmail. Only the methods that say so write to Gmail, and only through the Worker's closed table of operations
+// (mailsort/worker/src/gmail.ts): a label added or removed, a label of the "分拣/" prefix created or renamed.
+// Nothing here can trash, delete, send or change another label.
+//
+// Value rules the IDL cannot express (lengths, ranges, counts) are in each field's comment and enforced by the
+// Worker; the constants are in mailsort/worker/src/limits.ts.
+//
+// buf lint. The methods that answer a resource or google.protobuf.Empty carry two `buf:lint:ignore` lines:
+// RPC_RESPONSE_STANDARD_NAME and RPC_REQUEST_RESPONSE_UNIQUE, which the AIPs contradict (a standard or state
+// method answers the resource itself, so one message answers several methods; api-linter checks those names
+// instead). They are excused here, next to each method, not in buf.yaml: buf.yaml is a path every proto user's
+// deploy depends on (.github/scripts/ci_changes.py), and this package must not redeploy the other apps.
+
+syntax = "proto3";
+
+package mailsort.ui.v1;
+
+import "google/api/annotations.proto";
+import "google/api/client.proto";
+import "google/api/field_behavior.proto";
+import "google/api/field_info.proto";
+import "google/api/resource.proto";
+import "google/protobuf/empty.proto";
+import "google/protobuf/field_mask.proto";
+import "google/protobuf/timestamp.proto";
+import "mailsort/ui/v1/label.proto";
+import "mailsort/ui/v1/review.proto";
+import "mailsort/ui/v1/rule.proto";
+import "mailsort/ui/v1/status.proto";
+
+option java_multiple_files = true;
+option java_outer_classname = "MailsortUiServiceProto";
+option java_package = "science.ziyixi.mailsort.ui.v1";
+
+// The owner's mail sorting: labels and their descriptions, the review queue, rules, examples, accuracy, the
+// ledger of Gmail writes, the status and the settings.
+service MailsortUiService {
+  option (google.api.default_host) = "sort.ziyixi.science";
+
+  // A label (AIP-131).
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc GetLabel(GetLabelRequest) returns (Label) {
+    option (google.api.http) = {get: "/api/v1/{name=labels/*}"};
+    option (google.api.method_signature) = "name";
+  }
+
+  // The labels, in the order they were created (AIP-132, AIP-158).
+  rpc ListLabels(ListLabelsRequest) returns (ListLabelsResponse) {
+    option (google.api.http) = {get: "/api/v1/labels"};
+    option (google.api.method_signature) = "";
+  }
+
+  // Creates a label (AIP-133). It is created in Gmail ("分拣/" + display_name) before the first live write that
+  // needs it, or at once when the mode is live and the grant allows writes.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc CreateLabel(CreateLabelRequest) returns (Label) {
+    option (google.api.http) = {
+      post: "/api/v1/labels"
+      body: "label"
+    };
+    option (google.api.method_signature) = "label,label_id";
+  }
+
+  // Replaces the fields `update_mask` names, or every field the owner sets without one (AIP-134). A new
+  // display name of a linked label renames it in Gmail first (needs a write grant).
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc UpdateLabel(UpdateLabelRequest) returns (Label) {
+    option (google.api.http) = {
+      patch: "/api/v1/{label.name=labels/*}"
+      body: "label"
+    };
+    option (google.api.method_signature) = "label,update_mask";
+  }
+
+  // Deletes a label from mailsort with its rules and examples (AIP-135). The Gmail label and the mails that carry
+  // it stay as they are: mailsort never deletes a Gmail label.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc DeleteLabel(DeleteLabelRequest) returns (google.protobuf.Empty) {
+    option (google.api.http) = {delete: "/api/v1/{name=labels/*}"};
+    option (google.api.method_signature) = "name";
+  }
+
+  // Reads Gmail's labels: links every label to the Gmail label of its name, imports the "分拣/" labels mailsort
+  // does not know yet (disabled, without a description), and marks linked labels Gmail no longer has.
+  // (-- api-linter: core::0136::http-uri-suffix=disabled
+  //     aip.dev/not-precedent: a custom method on the collection, `labels:sync`; the noun is the collection
+  //     itself. --)
+  rpc SyncLabels(SyncLabelsRequest) returns (SyncLabelsResponse) {
+    option (google.api.http) = {
+      post: "/api/v1/labels:sync"
+      body: "*"
+    };
+  }
+
+  // A review item (AIP-131).
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc GetReviewItem(GetReviewItemRequest) returns (ReviewItem) {
+    option (google.api.http) = {get: "/api/v1/{name=reviewItems/*}"};
+    option (google.api.method_signature) = "name";
+  }
+
+  // The review items waiting for the owner, newest first (AIP-132, AIP-158).
+  rpc ListReviewItems(ListReviewItemsRequest) returns (ListReviewItemsResponse) {
+    option (google.api.http) = {get: "/api/v1/reviewItems"};
+    option (google.api.method_signature) = "";
+  }
+
+  // Confirms the suggested label (AIP-216). In live mode an unsure or suggested mail then gets that label in
+  // Gmail (and is archived).
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc ConfirmReviewItem(ConfirmReviewItemRequest) returns (ReviewItem) {
+    option (google.api.http) = {
+      post: "/api/v1/{name=reviewItems/*}:confirm"
+      body: "*"
+    };
+    option (google.api.method_signature) = "name";
+  }
+
+  // Chooses another label, or none (AIP-216). The choice becomes an example; for an audited mail the Worker's
+  // label is replaced in Gmail.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc CorrectReviewItem(CorrectReviewItemRequest) returns (ReviewItem) {
+    option (google.api.http) = {
+      post: "/api/v1/{name=reviewItems/*}:correct"
+      body: "*"
+    };
+    option (google.api.method_signature) = "name,label";
+  }
+
+  // Leaves the item without a verdict (AIP-216).
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc SkipReviewItem(SkipReviewItemRequest) returns (ReviewItem) {
+    option (google.api.http) = {
+      post: "/api/v1/{name=reviewItems/*}:skip"
+      body: "*"
+    };
+    option (google.api.method_signature) = "name";
+  }
+
+  // A rule (AIP-131).
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc GetRule(GetRuleRequest) returns (Rule) {
+    option (google.api.http) = {get: "/api/v1/{name=rules/*}"};
+    option (google.api.method_signature) = "name";
+  }
+
+  // The rules, newest first (AIP-132, AIP-158).
+  rpc ListRules(ListRulesRequest) returns (ListRulesResponse) {
+    option (google.api.http) = {get: "/api/v1/rules"};
+    option (google.api.method_signature) = "";
+  }
+
+  // Creates an active rule (AIP-133).
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc CreateRule(CreateRuleRequest) returns (Rule) {
+    option (google.api.http) = {
+      post: "/api/v1/rules"
+      body: "rule"
+    };
+    option (google.api.method_signature) = "rule,rule_id";
+  }
+
+  // Makes a proposed or disabled rule active (AIP-216).
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc ApproveRule(ApproveRuleRequest) returns (Rule) {
+    option (google.api.http) = {
+      post: "/api/v1/{name=rules/*}:approve"
+      body: "*"
+    };
+    option (google.api.method_signature) = "name";
+  }
+
+  // Stops a rule (AIP-216).
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc DisableRule(DisableRuleRequest) returns (Rule) {
+    option (google.api.http) = {
+      post: "/api/v1/{name=rules/*}:disable"
+      body: "*"
+    };
+    option (google.api.method_signature) = "name";
+  }
+
+  // Deletes a rule (AIP-135).
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc DeleteRule(DeleteRuleRequest) returns (google.protobuf.Empty) {
+    option (google.api.http) = {delete: "/api/v1/{name=rules/*}"};
+    option (google.api.method_signature) = "name";
+  }
+
+  // The active rules as a Gmail filter file (Settings > Filters > Import filters), for the owner to import by
+  // hand. Rules that need DMARC are left out: a Gmail filter cannot check it.
+  // (-- api-linter: core::0136::http-uri-suffix=disabled
+  //     aip.dev/not-precedent: a custom method on the collection, `rules:exportGmailFilters`; the noun is the
+  //     collection itself. --)
+  // (-- api-linter: core::0136::http-method=disabled
+  //     aip.dev/not-precedent: a read without side effects, so a GET (AIP-136 allows it for such methods). --)
+  // (-- api-linter: core::0136::http-body=disabled
+  //     aip.dev/not-precedent: a GET has no body. --)
+  rpc ExportGmailFilters(ExportGmailFiltersRequest) returns (ExportGmailFiltersResponse) {
+    option (google.api.http) = {get: "/api/v1/rules:exportGmailFilters"};
+  }
+
+  // An example (AIP-131).
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc GetExample(GetExampleRequest) returns (Example) {
+    option (google.api.http) = {get: "/api/v1/{name=examples/*}"};
+    option (google.api.method_signature) = "name";
+  }
+
+  // The examples, newest first (AIP-132, AIP-158).
+  rpc ListExamples(ListExamplesRequest) returns (ListExamplesResponse) {
+    option (google.api.http) = {get: "/api/v1/examples"};
+    option (google.api.method_signature) = "";
+  }
+
+  // Deletes an example (AIP-135).
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc DeleteExample(DeleteExampleRequest) returns (google.protobuf.Empty) {
+    option (google.api.http) = {delete: "/api/v1/{name=examples/*}"};
+    option (google.api.method_signature) = "name";
+  }
+
+  // Drops every stored embedding: the alarm embeds the examples again, a few per run.
+  // (-- api-linter: core::0136::http-uri-suffix=disabled
+  //     aip.dev/not-precedent: a custom method on the collection, `examples:rebuildEmbeddings`; the noun is the
+  //     collection itself. --)
+  rpc RebuildExampleEmbeddings(RebuildExampleEmbeddingsRequest) returns (RebuildExampleEmbeddingsResponse) {
+    option (google.api.http) = {
+      post: "/api/v1/examples:rebuildEmbeddings"
+      body: "*"
+    };
+  }
+
+  // A ledger entry (AIP-131).
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc GetLedgerEntry(GetLedgerEntryRequest) returns (LedgerEntry) {
+    option (google.api.http) = {get: "/api/v1/{name=ledgerEntries/*}"};
+    option (google.api.method_signature) = "name";
+  }
+
+  // The ledger of Gmail writes, newest first (AIP-132, AIP-158).
+  rpc ListLedgerEntries(ListLedgerEntriesRequest) returns (ListLedgerEntriesResponse) {
+    option (google.api.http) = {get: "/api/v1/ledgerEntries"};
+    option (google.api.method_signature) = "";
+  }
+
+  // Undoes one applied entry in Gmail (AIP-216): removes its label, and adds INBOX back when it archived.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc UndoLedgerEntry(UndoLedgerEntryRequest) returns (LedgerEntry) {
+    option (google.api.http) = {
+      post: "/api/v1/{name=ledgerEntries/*}:undo"
+      body: "*"
+    };
+    option (google.api.method_signature) = "name";
+  }
+
+  // Undoes the applied entries recorded in a time range, at most 20 per call (newest first);
+  // `remaining_count` says how many are left for the next call.
+  // (-- api-linter: core::0136::http-uri-suffix=disabled
+  //     aip.dev/not-precedent: a custom method on the collection, `ledgerEntries:undo`; the noun is the
+  //     collection itself. --)
+  rpc UndoLedgerEntries(UndoLedgerEntriesRequest) returns (UndoLedgerEntriesResponse) {
+    option (google.api.http) = {
+      post: "/api/v1/ledgerEntries:undo"
+      body: "*"
+    };
+  }
+
+  // The accuracy report.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc GetAccuracyReport(GetAccuracyReportRequest) returns (AccuracyReport) {
+    option (google.api.http) = {get: "/api/v1/{name=accuracyReport}"};
+    option (google.api.method_signature) = "name";
+  }
+
+  // The service status.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc GetServiceStatus(GetServiceStatusRequest) returns (ServiceStatus) {
+    option (google.api.http) = {get: "/api/v1/{name=serviceStatus}"};
+    option (google.api.method_signature) = "name";
+  }
+
+  // The settings.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc GetSettings(GetSettingsRequest) returns (Settings) {
+    option (google.api.http) = {get: "/api/v1/{name=settings}"};
+    option (google.api.method_signature) = "name";
+  }
+
+  // Replaces the fields `update_mask` names (AIP-134). Setting the mode resets the breaker.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc UpdateSettings(UpdateSettingsRequest) returns (Settings) {
+    option (google.api.http) = {
+      patch: "/api/v1/{settings.name=settings}"
+      body: "settings"
+    };
+    option (google.api.method_signature) = "settings,update_mask";
+  }
+}
+
+// Input of GetLabel.
+message GetLabelRequest {
+  // labels/{label}.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "sort.ziyixi.science/Label"
+  ];
+}
+
+// Input of ListLabels.
+message ListLabelsRequest {
+  // At most this many labels (AIP-158): 0 means 50, and a larger value is read as 50.
+  int32 page_size = 1 [(google.api.field_behavior) = OPTIONAL];
+  // The previous page's `next_page_token`.
+  string page_token = 2 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// Output of ListLabels.
+message ListLabelsResponse {
+  // The page.
+  repeated Label labels = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The next page's token; empty on the last page.
+  string next_page_token = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// Input of CreateLabel.
+message CreateLabelRequest {
+  // The label to create: its `name` is ignored (`label_id` names it).
+  Label label = 1 [(google.api.field_behavior) = REQUIRED];
+  // The ID of the new label (a query parameter), by Label.name's rule; empty: the Worker makes one.
+  string label_id = 2 [(google.api.field_behavior) = OPTIONAL];
+  // The idempotency key (AIP-155), a query parameter; see MailsortUiService.
+  string request_id = 3 [
+    (google.api.field_info).format = UUID4,
+    (google.api.field_behavior) = OPTIONAL
+  ];
+}
+
+// Input of UpdateLabel.
+message UpdateLabelRequest {
+  // The new values: the fields `update_mask` names, or every field the owner sets without one. Its `etag`,
+  // when set, must be the label's current one (AIP-154).
+  Label label = 1 [(google.api.field_behavior) = REQUIRED];
+  // AIP-134: the Label fields to replace (a query parameter). Absent, empty or `*` replaces every field the
+  // owner sets.
+  google.protobuf.FieldMask update_mask = 2 [(google.api.field_behavior) = OPTIONAL];
+  // The idempotency key (AIP-155), a query parameter; see MailsortUiService.
+  string request_id = 3 [
+    (google.api.field_info).format = UUID4,
+    (google.api.field_behavior) = OPTIONAL
+  ];
+}
+
+// Input of DeleteLabel.
+message DeleteLabelRequest {
+  // labels/{label}.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "sort.ziyixi.science/Label"
+  ];
+  // When set, the label's current etag (AIP-154); a stale one is ETAG_MISMATCH. A query parameter.
+  string etag = 2 [(google.api.field_behavior) = OPTIONAL];
+  // The idempotency key (AIP-155), a query parameter; see MailsortUiService.
+  string request_id = 3 [
+    (google.api.field_info).format = UUID4,
+    (google.api.field_behavior) = OPTIONAL
+  ];
+}
+
+// Input of SyncLabels.
+message SyncLabelsRequest {
+  // The idempotency key (AIP-155); see MailsortUiService.
+  string request_id = 1 [
+    (google.api.field_info).format = UUID4,
+    (google.api.field_behavior) = OPTIONAL
+  ];
+}
+
+// Output of SyncLabels.
+message SyncLabelsResponse {
+  // Every label after the sync.
+  repeated Label labels = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Labels linked to the Gmail label of their name by this sync.
+  int32 linked_count = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // "分拣/" labels of Gmail imported by this sync.
+  int32 imported_count = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Linked labels Gmail no longer has.
+  int32 missing_count = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// Input of GetReviewItem.
+message GetReviewItemRequest {
+  // reviewItems/{review_item}.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "sort.ziyixi.science/ReviewItem"
+  ];
+}
+
+// Input of ListReviewItems.
+message ListReviewItemsRequest {
+  // At most this many items (AIP-158): 0 means 50, and a larger value is read as 50.
+  int32 page_size = 1 [(google.api.field_behavior) = OPTIONAL];
+  // The previous page's `next_page_token`.
+  string page_token = 2 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// Output of ListReviewItems.
+message ListReviewItemsResponse {
+  // The page: pending items only.
+  repeated ReviewItem review_items = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The next page's token; empty on the last page.
+  string next_page_token = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// Input of ConfirmReviewItem.
+message ConfirmReviewItemRequest {
+  // reviewItems/{review_item}.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "sort.ziyixi.science/ReviewItem"
+  ];
+  // The idempotency key (AIP-155); see MailsortUiService.
+  string request_id = 2 [
+    (google.api.field_info).format = UUID4,
+    (google.api.field_behavior) = OPTIONAL
+  ];
+}
+
+// Input of CorrectReviewItem.
+message CorrectReviewItemRequest {
+  // reviewItems/{review_item}.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "sort.ziyixi.science/ReviewItem"
+  ];
+  // The right label; empty for "none of them".
+  string label = 2 [
+    (google.api.field_behavior) = OPTIONAL,
+    (google.api.resource_reference).type = "sort.ziyixi.science/Label"
+  ];
+  // The idempotency key (AIP-155); see MailsortUiService.
+  string request_id = 3 [
+    (google.api.field_info).format = UUID4,
+    (google.api.field_behavior) = OPTIONAL
+  ];
+}
+
+// Input of SkipReviewItem.
+message SkipReviewItemRequest {
+  // reviewItems/{review_item}.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "sort.ziyixi.science/ReviewItem"
+  ];
+  // The idempotency key (AIP-155); see MailsortUiService.
+  string request_id = 2 [
+    (google.api.field_info).format = UUID4,
+    (google.api.field_behavior) = OPTIONAL
+  ];
+}
+
+// Input of GetRule.
+message GetRuleRequest {
+  // rules/{rule}.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "sort.ziyixi.science/Rule"
+  ];
+}
+
+// Input of ListRules.
+message ListRulesRequest {
+  // At most this many rules (AIP-158): 0 means 100, and a larger value is read as 100.
+  int32 page_size = 1 [(google.api.field_behavior) = OPTIONAL];
+  // The previous page's `next_page_token`.
+  string page_token = 2 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// Output of ListRules.
+message ListRulesResponse {
+  // The page.
+  repeated Rule rules = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The next page's token; empty on the last page.
+  string next_page_token = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// Input of CreateRule.
+message CreateRuleRequest {
+  // The rule to create: `kind`, `value` and `label`; its `name` is ignored (`rule_id` names it).
+  Rule rule = 1 [(google.api.field_behavior) = REQUIRED];
+  // The ID of the new rule (a query parameter): 1 to 40 characters of `a-z`, `0-9` and `-`, starting with a
+  // letter; empty: the Worker makes one.
+  string rule_id = 3 [(google.api.field_behavior) = OPTIONAL];
+  // The idempotency key (AIP-155), a query parameter; see MailsortUiService.
+  string request_id = 2 [
+    (google.api.field_info).format = UUID4,
+    (google.api.field_behavior) = OPTIONAL
+  ];
+}
+
+// Input of ApproveRule.
+message ApproveRuleRequest {
+  // rules/{rule}.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "sort.ziyixi.science/Rule"
+  ];
+  // The idempotency key (AIP-155); see MailsortUiService.
+  string request_id = 2 [
+    (google.api.field_info).format = UUID4,
+    (google.api.field_behavior) = OPTIONAL
+  ];
+}
+
+// Input of DisableRule.
+message DisableRuleRequest {
+  // rules/{rule}.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "sort.ziyixi.science/Rule"
+  ];
+  // The idempotency key (AIP-155); see MailsortUiService.
+  string request_id = 2 [
+    (google.api.field_info).format = UUID4,
+    (google.api.field_behavior) = OPTIONAL
+  ];
+}
+
+// Input of DeleteRule.
+message DeleteRuleRequest {
+  // rules/{rule}.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "sort.ziyixi.science/Rule"
+  ];
+  // The idempotency key (AIP-155), a query parameter; see MailsortUiService.
+  string request_id = 2 [
+    (google.api.field_info).format = UUID4,
+    (google.api.field_behavior) = OPTIONAL
+  ];
+}
+
+// Input of ExportGmailFilters: nothing.
+message ExportGmailFiltersRequest {}
+
+// Output of ExportGmailFilters.
+message ExportGmailFiltersResponse {
+  // The filter file (Atom XML, as Gmail exports filters).
+  string xml = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The rules it holds.
+  int32 rule_count = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Active rules left out because they need DMARC.
+  int32 skipped_count = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// Input of GetExample.
+message GetExampleRequest {
+  // examples/{example}.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "sort.ziyixi.science/Example"
+  ];
+}
+
+// Input of ListExamples.
+message ListExamplesRequest {
+  // At most this many examples (AIP-158): 0 means 50, and a larger value is read as 50.
+  int32 page_size = 1 [(google.api.field_behavior) = OPTIONAL];
+  // The previous page's `next_page_token`, with the same `label`.
+  string page_token = 2 [(google.api.field_behavior) = OPTIONAL];
+  // Only the examples of this label; empty lists every example.
+  // (-- api-linter: core::0132::request-unknown-fields=disabled
+  //     aip.dev/not-precedent: one exact restriction; an AIP-160 filter of one field would say the same with a
+  //     parser. --)
+  string label = 3 [
+    (google.api.field_behavior) = OPTIONAL,
+    (google.api.resource_reference).type = "sort.ziyixi.science/Label"
+  ];
+}
+
+// Output of ListExamples.
+message ListExamplesResponse {
+  // The page.
+  repeated Example examples = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The next page's token; empty on the last page.
+  string next_page_token = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// Input of DeleteExample.
+message DeleteExampleRequest {
+  // examples/{example}.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "sort.ziyixi.science/Example"
+  ];
+  // The idempotency key (AIP-155), a query parameter; see MailsortUiService.
+  string request_id = 2 [
+    (google.api.field_info).format = UUID4,
+    (google.api.field_behavior) = OPTIONAL
+  ];
+}
+
+// Input of RebuildExampleEmbeddings.
+message RebuildExampleEmbeddingsRequest {
+  // The idempotency key (AIP-155); see MailsortUiService.
+  string request_id = 1 [
+    (google.api.field_info).format = UUID4,
+    (google.api.field_behavior) = OPTIONAL
+  ];
+}
+
+// Output of RebuildExampleEmbeddings.
+message RebuildExampleEmbeddingsResponse {
+  // Examples waiting for an embedding now.
+  int32 queued_count = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// Input of GetLedgerEntry.
+message GetLedgerEntryRequest {
+  // ledgerEntries/{ledger_entry}.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "sort.ziyixi.science/LedgerEntry"
+  ];
+}
+
+// Input of ListLedgerEntries.
+message ListLedgerEntriesRequest {
+  // At most this many entries (AIP-158): 0 means 50, and a larger value is read as 50.
+  int32 page_size = 1 [(google.api.field_behavior) = OPTIONAL];
+  // The previous page's `next_page_token`.
+  string page_token = 2 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// Output of ListLedgerEntries.
+message ListLedgerEntriesResponse {
+  // The page.
+  repeated LedgerEntry ledger_entries = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The next page's token; empty on the last page.
+  string next_page_token = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// Input of UndoLedgerEntry.
+message UndoLedgerEntryRequest {
+  // ledgerEntries/{ledger_entry}.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "sort.ziyixi.science/LedgerEntry"
+  ];
+  // The idempotency key (AIP-155); see MailsortUiService.
+  string request_id = 2 [
+    (google.api.field_info).format = UUID4,
+    (google.api.field_behavior) = OPTIONAL
+  ];
+}
+
+// Input of UndoLedgerEntries.
+message UndoLedgerEntriesRequest {
+  // The first moment of the range (an entry's create_time).
+  google.protobuf.Timestamp start_time = 1 [(google.api.field_behavior) = REQUIRED];
+  // The end of the range (exclusive), after `start_time`, at most 31 days later.
+  google.protobuf.Timestamp end_time = 2 [(google.api.field_behavior) = REQUIRED];
+  // The idempotency key (AIP-155); see MailsortUiService.
+  string request_id = 3 [
+    (google.api.field_info).format = UUID4,
+    (google.api.field_behavior) = OPTIONAL
+  ];
+}
+
+// Output of UndoLedgerEntries.
+message UndoLedgerEntriesResponse {
+  // Entries undone by this call.
+  int32 undone_count = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Entries Gmail refused to undo (left applied).
+  int32 failed_count = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Applied entries of the range still left for another call.
+  int32 remaining_count = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// Input of GetAccuracyReport.
+message GetAccuracyReportRequest {
+  // Always `accuracyReport`.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "sort.ziyixi.science/AccuracyReport"
+  ];
+}
+
+// Input of GetServiceStatus.
+message GetServiceStatusRequest {
+  // Always `serviceStatus`.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "sort.ziyixi.science/ServiceStatus"
+  ];
+}
+
+// Input of GetSettings.
+message GetSettingsRequest {
+  // Always `settings`.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "sort.ziyixi.science/Settings"
+  ];
+}
+
+// Input of UpdateSettings.
+message UpdateSettingsRequest {
+  // The new values of the fields `update_mask` names. Its `etag`, when set, must be the current one (AIP-154).
+  Settings settings = 1 [(google.api.field_behavior) = REQUIRED];
+  // AIP-134: the Settings fields to replace (a query parameter). Required by the Worker: absent, empty or `*` is
+  // INVALID_ARGUMENT, so a client that leaves a field out never switches the mode by accident.
+  google.protobuf.FieldMask update_mask = 2 [(google.api.field_behavior) = OPTIONAL];
+  // The idempotency key (AIP-155), a query parameter; see MailsortUiService.
+  string request_id = 3 [
+    (google.api.field_info).format = UUID4,
+    (google.api.field_behavior) = OPTIONAL
+  ];
+}
