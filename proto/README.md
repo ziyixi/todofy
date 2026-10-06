@@ -160,7 +160,8 @@ bundle is unchanged (its types come from the OpenAPI document).
    gain one: `PROFILE_RULE_SAME_MATCH`), and a closed enum may not gain a value or change its `closed` (rule 5). Formats
    compare by pattern, length and JSON Schema `format`, so renaming a format is compatible. Like buf, it skips the
    directories `buf.yaml` lists under `breaking.ignore` (the runtimes' fixtures). `scripts/rules-selftest.sh`
-   proves the rules bite (53 cases, on `task_intent.proto`, `lab/ui/v1`, `ops/v1`, `todofy/report/v1`, `mailhero/webhook/v1` and `prototest`), and
+   proves the rules bite (65 cases, on `task_intent.proto`, `watch/ui/v1`, `ops/v1`, `dashboard/ui/v1`, `todofy/report/v1`,
+   `mailhero/webhook/v1` and `prototest`, the retirement of a package, an enum value and an allowed value among them), and
    `test/python/test_profile_breaking.py` checks the directions on synthetic images.
 5. **Adding a value to an open enum is compatible by design**, so neither buf nor the profile check flags it.
    What keeps consumers working is the reading rule: outputs are read leniently (an unknown enum name reads as
@@ -169,12 +170,24 @@ bundle is unchanged (its types come from the OpenAPI document).
    whose consumers branch on every value of an enum, with no default to fall back to, marks it
    `option (common.wire.v1.closed) = true` (every enum ops-v1 writes): every read refuses an unknown name, a
    lenient one too, and a new value is a new major version (`PROFILE_ENUM_CLOSED`).
+6. **Retiring an element.** Deleting a published package, enum value or allowed value is breaking by every rule above,
+   and that stays so. When no producer or consumer of it remains (the app that used it is removed in the same change),
+   [`retired.json`](retired.json) lists it by full name with the date and the reason, and `tools/retired.py` (run by
+   `scripts/breaking.sh` and the self-test before `buf breaking` and the profile rules) first checks that the head keeps
+   the promise: no file under a retired package path or of its package name, no retired allowed value, and a retired
+   enum value absent with **both its number and its name reserved** (`reserved 1; reserved "NAME";`, so neither is ever
+   reused: a stored row may still hold the old name). It then removes exactly the listed elements from the base, so
+   their deletion is the base's state and every other difference is checked as before; an element the base no longer
+   has is left alone. Once every base CI compares with is newer than the deletion (the first green run on `main`
+   after it), an entry does nothing and may be removed; the `reserved` lines stay. `ci_changes.py` deploys nothing for
+   the deleted files of a listed package (every importer stopped importing them in the same change).
 
 ## Layout
 
 | Path | What |
 | --- | --- |
 | `buf.yaml`, `buf.lock` | The module (`path: .`, tooling directories excluded), lint and breaking rules, the `buf.build/googleapis/googleapis` dependency pinned by commit and digest |
+| `retired.json` | The published elements deleted on purpose (rule 6), which `tools/retired.py` keeps deleted and leaves out of the breaking checks' base |
 | `buf.gen.yaml` | protobuf-es v2 (`target=ts`, `import_extension=ts`, `erasable_syntax=true`) into `ts/` |
 | `<package path>/*.proto` | One directory per proto package: `todofy/taskintent/v1/task_intent.proto` is `todofy.taskintent.v1`; `lab/ui/v1/*.proto` is `lab.ui.v1`, Lab's owner UI API; `links/ui/v1/*.proto` is `links.ui.v1`, the links app's owner API; `watch/ui/v1/*.proto` is `watch.ui.v1`, the watch app's owner API; `flowday/ui/v1/*.proto` is `flowday.ui.v1`, FlowDay's owner API; `dashboard/ui/v1/*.proto` is `dashboard.ui.v1`, the dashboard's owner API; `mailhero/ui/v2/*.proto` is `mailhero.ui.v2`, Mail Hero's owner API; `common/errors/v1/errors.proto` is `common.errors.v1`, the error reasons every HTTP API shares; `common/wire/v1/wire.proto` is `common.wire.v1`, the wire profile's own options ([Value rules](#value-rules), `non_null`, `closed`, `keep_order`, `positional`); `ops/v1/ops.proto` is `ops.v1`, the IDL of `contracts/ops-v1` (every app's `Ops` entrypoint), a contract several apps implement, so named by the contract, not an app ([Adding a contract](#common-tasks), step 1); `todofy/report/v1/report.proto` is `todofy.report.v1`, Todofy's newsletter reports (recommendation-v1, summary-v1); `mailhero/webhook/v1/mail_received.proto` is `mailhero.webhook.v1`, Mail Hero's webhook event (mail.received.v1); `todofy/ui/v1/*.proto` is `todofy.ui.v1`, Todofy's owner API |
 | `package.json`, `package-lock.json` | The toolchain pins (`dependencies`: buf, protoc-gen-es, the runtime) and this folder's test tools (`devDependencies`) |

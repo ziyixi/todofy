@@ -46,7 +46,8 @@ maps a language's runtime and generator to that language's users, and PROTO_PACK
 that import its generated code (lab/ui reaches Lab only, flowday/ui FlowDay only, mailhero/ui Mail Hero only, links/ui
 the links app only, watch/ui the watch app only, dashboard/ui the dashboard only, todofy/ui Todofy only; prototest, the
 runtimes' fixtures, reaches no app). Tests, test data, the check scripts, the api-linter tool module, check configs and
-Markdown (PROTO_NOT_BUNDLED) deploy nothing; any other proto/ path (buf.yaml, buf.lock, the toolchain lockfile,
+Markdown (PROTO_NOT_BUNDLED), and the files of a package proto/retired.json lists (its deletion), deploy nothing; any
+other proto/ path (buf.yaml, buf.lock, the toolchain lockfile,
 ensure.mjs, a package not listed yet) deploys every user (fail safe). test_proto.py derives PROTO_USERS and the
 packages' importers from the sources. It also runs Contracts. A change to a contract proto/'s tests read (PROTO_READS:
 ops-v1's, task-intent-v1's and mail-received-v1's fixtures and schemas) runs Proto checks as well.
@@ -242,6 +243,9 @@ PROTO_NOT_BUNDLED = (
     "proto/testdata/",
     "proto/scripts/",
     "proto/tools/profile_breaking.py",
+    # The retirement list and its check (proto/README.md "Retiring an element").
+    "proto/retired.json",
+    "proto/tools/retired.py",
     # The wire JSON types (types only, never in a bundle) and the contracts' JSON Schema generator.
     "proto/tools/gen_wire_ts.py",
     "proto/tools/gen_schema.py",
@@ -343,9 +347,22 @@ def is_package_document(path: str) -> bool:
     return path.startswith("packages/") and path.count("/") >= 2 and path.endswith(".md")
 
 
+def retired_packages(root: Path = Path(__file__).resolve().parents[2]) -> tuple[str, ...]:
+    """The directories of the proto packages proto/retired.json lists, as proto/ paths. Deleting one reaches no bundle:
+    every importer stopped importing it in the same change (its own directory deploys it), so the deletion alone
+    deploys nothing. A missing or unreadable list retires nothing (fail safe)."""
+    try:
+        listed = json.loads((root / "proto" / "retired.json").read_text(encoding="utf-8")).get("packages", [])
+        return tuple(PROTO + entry["path"] for entry in listed)
+    except (OSError, ValueError, AttributeError, KeyError, TypeError):
+        return ()
+
+
 def proto_deploys(path: str) -> set[str]:
     """The apps whose production bundle a change of one proto/ path can reach."""
     if path.startswith(PROTO_NOT_BUNDLED) or path.endswith(".md"):
+        return set()
+    if path.startswith(retired_packages()):
         return set()
     bundling = {app for app, languages in PROTO_USERS.items() if languages}
     for prefix, languages in PROTO_RUNTIMES.items():

@@ -478,6 +478,8 @@ class Classify(unittest.TestCase):
             "proto/scripts/breaking.sh": none,
             "proto/scripts/api-lint.sh": none,
             "proto/tools/profile_breaking.py": none,
+            "proto/tools/retired.py": none,
+            "proto/retired.json": none,
             "proto/tools/gen_wire_ts.py": none,
             "proto/tools/gen_schema.py": none,
             "proto/tools/schema.mjs": none,
@@ -534,6 +536,29 @@ class Classify(unittest.TestCase):
         self.assertEqual(ci_changes.proto_deploys("proto/fleet/ui/v1/fleet_ui_service.proto"), {"fleet"})
         self.assertEqual(ci_changes.proto_deploys("proto/fleet/telemetry/v1/host_report.proto"), {"fleet", "platform"})
         self.assertEqual(ci_changes.proto_deploys("proto/mailhero/ui/v2/message.proto"), {"mail-hero"})
+
+    def test_deleting_a_retired_package_deploys_nothing(self):
+        """A package proto/retired.json lists is gone with its importers' use of it: its deletion checks every user and
+        deploys none; any other unlisted package still reaches every user (fail safe)."""
+        saved = ci_changes.retired_packages
+        try:
+            ci_changes.retired_packages = lambda: ("proto/gone/ui/v1/",)
+            self.assertEqual(ci_changes.proto_deploys("proto/gone/ui/v1/gone_ui_service.proto"), set())
+            self.assertEqual(ci_changes.proto_deploys("proto/gonex/ui/v1/x.proto"), {app for app, langs in ci_changes.PROTO_USERS.items() if langs})
+            result = push(["proto/gone/ui/v1/gone_ui_service.proto"])
+            self.assertTrue(result["proto"])
+            self.assertFalse(any(value for key, value in result.items() if key.endswith(("_deploy", "_publish"))))
+        finally:
+            ci_changes.retired_packages = saved
+
+    def test_the_retired_packages_are_read_from_proto_retired_json(self):
+        with tempfile.TemporaryDirectory() as root:
+            (Path(root) / "proto").mkdir()
+            self.assertEqual(ci_changes.retired_packages(Path(root)), ())
+            (Path(root) / "proto" / "retired.json").write_text('{"packages": [{"path": "gone/ui/v1/", "package": "gone.ui.v1"}]}')
+            self.assertEqual(ci_changes.retired_packages(Path(root)), ("proto/gone/ui/v1/",))
+            (Path(root) / "proto" / "retired.json").write_text("not json")
+            self.assertEqual(ci_changes.retired_packages(Path(root)), ())
 
     def test_every_proto_package_and_runtime_is_mapped(self):
         """Each package directory under proto/ (a directory holding .proto files) is in PROTO_PACKAGES, and every

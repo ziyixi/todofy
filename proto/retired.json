@@ -1,0 +1,6 @@
+{
+  "about": "Published IDL elements deleted on purpose (README.md, \"Retiring an element\"; tools/retired.py). scripts/breaking.sh compares the head with a base without them, so their deletion is not breaking; the head must keep them deleted and an enum value's number and name reserved. An entry does nothing once every base CI compares with is newer than the deletion, and may then be removed.",
+  "packages": [],
+  "enum_values": [],
+  "allowed_values": []
+}

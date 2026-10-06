@@ -2,6 +2,8 @@
 # Breaking-change gate of proto/ (README.md, Rules): `buf breaking` (FILE) and the rules buf cannot see
 # (tools/profile_breaking.py: the wire profile's REQUIRED and presence, and the HTTP APIs' bindings, method
 # signatures, resource patterns, OUTPUT_ONLY inputs and formats) of the working tree against proto/ at BASE.
+# Both compare with BASE without the elements retired.json lists (tools/retired.py, README.md "Retiring an
+# element"), after checking that the working tree keeps them deleted (and a retired enum value reserved).
 #
 #   scripts/breaking.sh BASE      (npm run breaking -- BASE; the pinned buf from npm ci in proto/)
 #
@@ -37,10 +39,12 @@ fi
 WORK=$(mktemp -d "${TMPDIR:-/tmp}/proto-breaking.XXXXXX")
 trap 'rm -rf "$WORK"' EXIT
 git -C "$REPO" archive "$BASE" proto | tar -x -C "$WORK"
-echo "== buf breaking (FILE) against $BASE"
-"$BUF" breaking --against "$WORK/proto"
-echo "== wire profile and HTTP API rules against $BASE"
-"$BUF" build "$WORK/proto" --exclude-source-info -o "$WORK/base.json#format=json"
+"$BUF" build "$WORK/proto" --exclude-source-info -o "$WORK/published.json#format=json"
 "$BUF" build --exclude-source-info -o "$WORK/head.json#format=json"
+echo "== retired elements (retired.json) against $BASE"
+python3 tools/retired.py retired.json "$WORK/published.json" "$WORK/head.json" "$WORK/base.json"
+echo "== buf breaking (FILE) against $BASE"
+"$BUF" breaking --against "$WORK/base.json#format=json"
+echo "== wire profile and HTTP API rules against $BASE"
 python3 tools/profile_breaking.py "$WORK/base.json" "$WORK/head.json" --config buf.yaml
 echo "proto/: no breaking change against $BASE"
