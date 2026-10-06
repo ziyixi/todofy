@@ -114,7 +114,12 @@ def test_valid_fixture(name, path):
 @pytest.mark.parametrize(("name", "path"), INVALID, ids=[f"{n}/{p.stem}" for n, p in INVALID])
 def test_invalid_fixture(name, path):
     assert _errors(name, path) != []
-    assert not _validator(LEGACY, name).is_valid(json.loads(path.read_text()))
+    value = json.loads(path.read_text())
+    legacy = list(_validator(LEGACY, name).iter_errors(value))
+    assert legacy != []
+    # The frozen reader must reject the fixture's own mutation, not only an app it never knew (a joined one).
+    if path.stem != "unknown-app":
+        assert all(list(error.absolute_path) != ["app"] for error in legacy)
 
 
 def _validator(schema: dict[str, Any], name: str) -> jsonschema.Draft202012Validator:

@@ -1,11 +1,14 @@
 {
   "version": "ops-v1",
-  "app": "watch",
-  "generated_at": "2026-10-01T14:00:00Z",
+  "app": "todofy",
+  "generated_at": "2026-09-29T08:00:00Z",
   "health": null,
   "modes": {
     "maintenance": false,
-    "notifications": true
+    "processing_paused": false,
+    "force_pause_todoist": false,
+    "reminder_enabled": true,
+    "backup_active": false
   },
   "guard": {
     "level": "normal",
@@ -16,19 +19,29 @@
   },
   "signals": [],
   "counters": {
-    "watches_active": 2,
-    "watches_paused": 1,
-    "watches_broken": 0,
-    "watches_failing": 1,
-    "changes_new": 2,
-    "fetches_today": 37,
-    "notifications_pending": 1,
-    "intents_open": 0,
-    "intents_sent_today": 1
+    "active_events": 2,
+    "attention_events": 0,
+    "received_24h": 63,
+    "oldest_due_age_seconds": 0,
+    "gemini_used_tokens": 412880,
+    "gemini_reserved_tokens": 0,
+    "gemini_token_budget": 3000000,
+    "gemini_calls": 64,
+    "todoist_window_calls": 3,
+    "todoist_window_limit": 1000,
+    "backup_age_seconds": 363600,
+    "inbox_open": 23,
+    "inbox_oldest_days": 41,
+    "overdue": 3,
+    "carryover_open": 9,
+    "completed_7d": 42,
+    "review_age_days": 2
   },
-  "last_backup_at": null,
-  "ui_url": "https://watch.example.com/",
+  "last_backup_at": "2026-09-27T10:00:02Z",
+  "ui_url": "https://todofy.example.com/",
   "capabilities": [
-    "guard"
+    "canary_consumer",
+    "guard",
+    "ops_digest"
   ]
 }
