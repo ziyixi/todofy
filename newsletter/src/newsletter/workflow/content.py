@@ -1,8 +1,7 @@
 """Prepare public content without scheduling, persistence or provider writes.
 
-Discovery is lightweight; research reuses the collector's exact-source
-provenance and protobuf checks. Gap-planner questions are not evidence.
-The caller owns time budgets, once-only scheduling and one gap round.
+Discovery is lightweight; selection only compares supplied candidates and
+adds no evidence. The caller owns time budgets and once-only scheduling.
 """
 
 from __future__ import annotations
@@ -735,7 +734,7 @@ def parse_classified_plan(
 
 
 class ContentPreparation:
-    """Coordinate public discovery, selection and research model jobs."""
+    """Coordinate public discovery and selection (shortlist) model jobs."""
 
     def __init__(self, engine: ContentEngine) -> None:
         self.engine = engine
