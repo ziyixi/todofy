@@ -16,7 +16,7 @@ preview_urls = false
 # (every page carries <link rel=canonical> to https://www.ziyixi.science) and the apex serves the same
 # static site. The two share one dedicated certificate (ziyixi.science, www.ziyixi.science,
 # *.www.ziyixi.science) that covers no app host, so browsers never reuse a site connection for
-# mail-hero/lab/home/todofy.
+# mail-hero/home/todofy.
 routes = [
   { pattern = "www.ziyixi.science", custom_domain = true },
   { pattern = "ziyixi.science", custom_domain = true },

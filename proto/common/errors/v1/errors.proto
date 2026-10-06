@@ -4,7 +4,7 @@
 // without its enum prefix. The reasons here are written by code every app shares, not by the app's own
 // handlers alone: the HTTP transcoder (proto/ts/http-transcoder.ts), the authentication in front of it
 // (packages/edge-auth: Cloudflare Access and the CSRF check) and the failures any handler can meet (a bug, a
-// storage or Durable Object call that failed). Each API's own `ErrorReason` enum (e.g. lab.ui.v1) lists only
+// storage or Durable Object call that failed). Each API's own `ErrorReason` enum (e.g. watch.ui.v1) lists only
 // its domain reasons, and a client reads `reason` against both enums. Both share one ErrorInfo.domain, the
 // API's, so a reason name is never reused with another meaning in an app's enum.
 

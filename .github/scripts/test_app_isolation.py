@@ -66,7 +66,7 @@ def tracked_files() -> list[PurePosixPath]:
 
 
 def js_imports(text: str) -> tuple[list[str], list[str]]:
-    """(relative specifiers, bare specifiers that climb with a `..` segment, such as "@/../../lab/x")."""
+    """(relative specifiers, bare specifiers that climb with a `..` segment, such as "@/../../watch/x")."""
     specifiers = JS_IMPORT.findall(text)
     relative = [s for s in specifiers if s.startswith(("./", "../"))]
     climbing = [s for s in specifiers if not s.startswith(("./", "../")) and ".." in s.split("/")]
@@ -298,16 +298,16 @@ class AppIsolation(unittest.TestCase):
             for name, targets in self.script_imports.items()
         }
         for name in (
-            "lab/worker/test/runtime/cpu.test.ts",
             "flowday/worker/test/runtime/cpu.test.ts",
             "mail-hero/cloudflare/test/cpu/native-ops-cpu.test.mjs",
             "dashboard/worker/test/runtime/cpu.test.ts",
-            "lab/deploy/bundle-size.mjs",
-            "lab/web/scripts/js-budget.mjs",
             "flowday/worker/scripts/bundle-size.mjs",
             "flowday/web/scripts/js-budget.mjs",
             "mail-hero/deploy/bundle-size.mjs",
             "dashboard/deploy/bundle-size.mjs",
+            "watch/worker/test/runtime/cpu.test.ts",
+            "watch/deploy/bundle-size.mjs",
+            "watch/web/scripts/js-budget.mjs",
         ):
             self.assertTrue(importers.get(name), name)
         for name, targets in importers.items():
@@ -356,7 +356,7 @@ class Rules(unittest.TestCase):
             "import { z } from '@ziyixi/proto/ts/z'\n"
             "import { w } from 'vitest'\n"
             "import { v } from '@/lib/v'\n"
-            'import { x } from "@/../../lab/worker/src/index";\n'
+            'import { x } from "@/../../watch/worker/src/index";\n'
             "const u = await import('~/../u')\n"
             "import { t } from 'pkg..name/t'\n"
         )
@@ -371,7 +371,7 @@ class Rules(unittest.TestCase):
                     "../tools/x.mjs",
                     "../y.cjs",
                 ],
-                ["@/../../lab/worker/src/index", "~/../u"],
+                ["@/../../watch/worker/src/index", "~/../u"],
             ),
         )
 
@@ -422,16 +422,16 @@ class Rules(unittest.TestCase):
 
     def test_the_rule(self):
         cases = {
-            ("lab", "lab/worker/src/a.ts", "lab/web/src/b.ts"): None,
-            ("lab", "lab/worker/src/a.ts", "proto/ts/x.ts"): None,
-            ("lab", "lab/worker/src/a.ts", "contracts/ops-v1/ops-v1.ts"): None,
-            ("lab", "lab/worker/src/a.ts", "packages/edge-auth/src/index.ts"): None,
-            ("lab", "lab/worker/test/a.test.ts", "tools/workerd-cpu/workerd-cpu.mts"): None,
-            ("lab", "lab/deploy/bundle-size.mjs", "tools/bundle-size/bundle-size.mjs"): None,
-            ("lab", "lab/worker/src/a.ts", "tools/bundle-size/bundle-size.mjs"): "ships, so it may not import tools/",
-            ("lab", "lab/worker/src/a.ts", "todofy/gateway/src/ops.ts"): "reaches todofy/",
-            ("lab", "lab/worker/test/a.test.ts", "dashboard/worker/test/fake.ts"): "reaches dashboard/",
-            ("lab", "lab/worker/src/a.ts", ".github/scripts/x.py"): "reaches .github/",
+            ("watch", "watch/worker/src/a.ts", "watch/web/src/b.ts"): None,
+            ("watch", "watch/worker/src/a.ts", "proto/ts/x.ts"): None,
+            ("watch", "watch/worker/src/a.ts", "contracts/ops-v1/ops-v1.ts"): None,
+            ("watch", "watch/worker/src/a.ts", "packages/edge-auth/src/index.ts"): None,
+            ("watch", "watch/worker/test/a.test.ts", "tools/workerd-cpu/workerd-cpu.mts"): None,
+            ("watch", "watch/deploy/bundle-size.mjs", "tools/bundle-size/bundle-size.mjs"): None,
+            ("watch", "watch/worker/src/a.ts", "tools/bundle-size/bundle-size.mjs"): "ships, so it may not import tools/",
+            ("watch", "watch/worker/src/a.ts", "todofy/gateway/src/ops.ts"): "reaches todofy/",
+            ("watch", "watch/worker/test/a.test.ts", "dashboard/worker/test/fake.ts"): "reaches dashboard/",
+            ("watch", "watch/worker/src/a.ts", ".github/scripts/x.py"): "reaches .github/",
             ("website", "website/src/a.ts", "proto/ts/x.ts"): None,
             ("website", "website/src/a.ts", "contracts/ops-v1/ops-v1.ts"): "reaches contracts/",
             ("website", "website/src/a.ts", "packages/edge-auth/src/index.ts"): "reaches packages/",
@@ -440,12 +440,12 @@ class Rules(unittest.TestCase):
         for (app, importer, target), expected in cases.items():
             with self.subTest(importer=importer, target=target):
                 self.assertEqual(violation(app, PurePosixPath(importer), REPO / target), expected)
-        self.assertEqual(violation("lab", PurePosixPath("lab/a.ts"), REPO.parent / "elsewhere"), "leaves the repository")
+        self.assertEqual(violation("watch", PurePosixPath("watch/a.ts"), REPO.parent / "elsewhere"), "leaves the repository")
 
     def test_every_catalog_app_is_scanned(self):
         tops = {name.parts[0] for name in tracked_files()}
         self.assertLessEqual(set(APPS), tops)
-        self.assertGreaterEqual(len(APPS), 11)
+        self.assertGreaterEqual(len(APPS), 10)
 
 
 if __name__ == "__main__":
