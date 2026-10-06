@@ -397,3 +397,10 @@ class TestMessages:
     def test_every_message_reads_back_strictly(self):
         message = ui.mail_event(detail_row())
         assert from_wire(mail_event_pb.MailEvent, json.loads(ui.answer(message)), strict=True).message == message
+
+    def test_an_answer_is_the_compact_wire_profile(self):
+        # The gateway passes these bytes to the browser unread (gateway/test/pre-encoded.test.ts checks them against
+        # toWire), so the separators and the unescaped UTF-8 are part of the contract.
+        text = ui.answer(ui.mail_event(detail_row()))
+        assert text == json.dumps(json.loads(text), ensure_ascii=False, separators=(",", ":"))
+        assert "季度预缴税" in text and "\\u" not in text

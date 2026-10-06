@@ -5,7 +5,9 @@ The gateway serves TodofyUiService through the shared transcoder and asks Todofy
 cursors, a reconcile's task ID), the error reasons TodofyCore answers, and the mapping from the dicts the
 ledger's readers build (runtime/api.py, the coordinator, reminder.py, metrics.py, gtd.py, backup.py) to the
 generated messages, which ``answer`` writes with the wire JSON codec. The codec checks every message before a
-byte leaves; the gateway reads the text leniently and writes it again for the browser.
+byte leaves. The gateway reads only a list's page (to add the page token) and sends every other answer to the
+browser byte for byte (PreEncoded, gateway/test/pre-encoded.test.ts), so ``answer`` must keep writing the compact
+wire profile toWire writes: no other separators, escaping or indentation.
 """
 
 import json
@@ -65,7 +67,10 @@ class UiError(Exception):
 
 
 def answer(message: Any) -> str:
-    """A message as compact wire JSON text (the codec refuses one that breaks a rule: a bug, never sent)."""
+    """A message as compact wire JSON text (the codec refuses one that breaks a rule: a bug, never sent).
+
+    The gateway passes most answers through unread, so these bytes are what the browser receives.
+    """
     return json.dumps(to_wire(message), ensure_ascii=False, separators=(",", ":"))
 
 
