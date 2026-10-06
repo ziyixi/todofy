@@ -367,20 +367,18 @@ def _unobserved_approval_actions(
 ) -> list[str]:
     """A claimed pass needs both actions; an honest HOLD needs neither.
 
-    Inspect legacy envelopes and independent whole/story review shapes. This
-    selects an existing correction opportunity; it does not replace either
-    caller's fail-closed validation.
+    Only the story review claims approval: an approved component assessment
+    or a prior-withdrawal verdict. Writer, discovery and selection outputs
+    carry no approval. This selects an existing correction opportunity; it
+    does not replace StoryEditor's fail-closed validation.
     """
     value = model_io.load_json(text)
     if not isinstance(value, dict):
         raise errors.EditorError("invalid_output")
-    review = value.get("review")
-    approved = value.get("passed") is True or (
-        isinstance(review, dict) and review.get("passed") is True
-    )
+    approved = False
     assessments = value.get("assessments")
     if isinstance(assessments, list):
-        approved |= any(
+        approved = any(
             isinstance(item, dict)
             and item.get("component") in ("body", "reading", "chart", "signal")
             and item.get("status") == "approved"
@@ -559,20 +557,12 @@ class CodexEditor:
                                 "已读或事实正确。"
                                 "missing_approval_actions "
                                 "列出声称通过审校却未观测到的动作。"
-                                "若要返回 review.passed=true 或顶层 "
-                                "passed=true，必须实际"
+                                "assessments 中 status=approved 必须实际"
                                 "进行 web search 并独立 web open "
                                 "原文，核验关键事实。"
-                                "若无法核验，应返回 passed=false（保持原sch"
-                                "ema层级）并在"
-                                "findings 写明 HOLD "
-                                "原因，不能仅声称已搜索或已阅读。"
-                                "对于选题组件审校，assessments 中 "
-                                "status=approved 同样"
-                                "要求实际 search/open；无法核验就将相应组件"
-                                " status 改为"
-                                "blocked 并在该组件 findings "
-                                "说明原因，保持原schema，"
+                                "无法核验就将相应组件 status 改为 blocked，"
+                                "并在该组件 findings 写明 HOLD 原因，"
+                                "不能仅声称已搜索或已阅读。保持原schema，"
                                 "不得增加 passed 字段，也不影响其他已核验组件。"
                                 "unverified_urls也包含代码按已声明approved"
                                 "组件所引用来源"
