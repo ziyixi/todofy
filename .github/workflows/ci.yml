@@ -244,8 +244,6 @@ jobs:
           npm run typecheck
           npm test
           npm run build
-          # The UI is Todofy's own code; nothing may be copied from Mail Hero.
-          if grep -rnE 'mail_hero|mail-hero' src; then exit 1; fi
       # The committed production configs (wrangler.toml, gateway/wrangler.toml), run exactly as the deploy
       # runs them, with placeholder values for what the deploy adds (deploy/deploy_vars.py). No token is
       # needed for --dry-run.
@@ -577,10 +575,6 @@ jobs:
           npm run typecheck
           npm test
           npm run build
-      # The dashboard reaches the apps only through their Ops entrypoints; it never imports their code.
-      - name: No imports from mail-hero/ or todofy/
-        run: |
-          if grep -rnE "(from|import)[[:space:]]*\(?[[:space:]]*['\"][^'\"]*(mail-hero|todofy)/" worker/src web/src; then exit 1; fi
       # The committed production config (dashboard/wrangler.toml), run exactly as the deploy runs it, with
       # placeholder values for what the deploy adds (deploy/deploy-vars.mjs). No token is needed for --dry-run. The
       # bundle it writes is held to the dashboard's budget and the Workers Free limit (deploy/bundle-size.mjs).
@@ -649,13 +643,6 @@ jobs:
           npm run typecheck
           npm test
           npm run build
-      # Lab reaches Todofy only through its Ops entrypoint and the dashboard only through its own; it never
-      # imports another app's code. The generated proto/ IDL package is shared code: its paths name the proto
-      # package (@ziyixi/proto/todofy/taskintent/v1/...), not an app directory.
-      - name: No imports from other apps
-        run: |
-          if grep -rnE "(from|import)[[:space:]]*\(?[[:space:]]*['\"][^'\"]*(mail-hero|todofy|dashboard|website)/" worker/src web/src \
-            | grep -v "['\"]@ziyixi/proto/"; then exit 1; fi
       # The committed production config (lab/wrangler.toml), run exactly as the deploy runs it, with placeholder
       # values for what the deploy adds (deploy/deploy-vars.mjs). No token is needed for --dry-run. The bundle it
       # writes is held to Lab's budget and the Workers Free limit (deploy/bundle-size.mjs).
@@ -734,10 +721,6 @@ jobs:
           npm test
           npm run build
           npm run check:export
-      - name: No imports from other apps
-        run: |
-          if grep -rnE "(from|import)[[:space:]]*\(?[[:space:]]*['\"][^'\"]*(mail-hero|todofy|dashboard|website|lab)/" \
-            worker/src web/app web/components web/features web/lib web/scripts web/__tests__; then exit 1; fi
       # The committed config, run exactly as the deploy runs it but with --dry-run and placeholder values for what
       # the deploy adds (deploy/deploy-vars.mjs). No token is needed. Then the bundle's size.
       - name: Dry-run the committed config and check the bundle size
@@ -807,12 +790,6 @@ jobs:
           npm run typecheck
           npm test
           npm run build
-      # The generated proto/ IDL package is shared code: its paths name the proto package (@ziyixi/proto/links/...),
-      # not an app directory.
-      - name: No imports from other apps
-        run: |
-          if grep -rnE "(from|import)[[:space:]]*\(?[[:space:]]*['\"][^'\"]*(mail-hero|todofy|dashboard|website|lab|flowday)/" worker/src web/src \
-            | grep -v "['\"]@ziyixi/proto/"; then exit 1; fi
       # The committed config, run exactly as the deploy runs it but with --dry-run and placeholder values for what the
       # deploy adds (deploy/deploy-vars.mjs). No token is needed. The bundle it writes is held to the app's budget and
       # the Workers Free limit (deploy/bundle-size.mjs).
@@ -885,12 +862,6 @@ jobs:
           npm run typecheck
           npm test
           npm run build
-      # The generated proto/ IDL package is shared code: its paths name the proto package (@ziyixi/proto/watch/...),
-      # not an app directory.
-      - name: No imports from other apps
-        run: |
-          if grep -rnE "(from|import)[[:space:]]*\(?[[:space:]]*['\"][^'\"]*(mail-hero|todofy|dashboard|website|lab|flowday|links)/" worker/src web/src \
-            | grep -v "['\"]@ziyixi/proto/"; then exit 1; fi
       # The committed config, run exactly as the deploy runs it but with --dry-run and placeholder values for what the
       # deploy adds (deploy/deploy-vars.mjs). No token is needed. The bundle it writes is held to the app's budget and
       # the Workers Free limit (deploy/bundle-size.mjs).
@@ -955,11 +926,6 @@ jobs:
           npm run typecheck
           npm test
           npm run build
-      # Fleet communicates with services through contracts and generated proto types.
-      - name: No imports from other apps
-        run: |
-          if grep -rnE "(from|import)[[:space:]]*\(?[[:space:]]*['\"][^'\"]*(mail-hero|todofy|dashboard|website|lab|flowday|links|watch|newsletter)/" worker/src web/src \
-            | grep -v "['\"]@ziyixi/proto/"; then exit 1; fi
       # The committed config, run exactly as the deploy runs it but with --dry-run and placeholder values for what the
       # deploy adds (deploy/deploy-vars.mjs). No token is needed. The bundle it writes is held to the app's budget and
       # the Workers Free limit (deploy/bundle-size.mjs).
@@ -1166,11 +1132,6 @@ jobs:
         run: |
           pnpm exec wrangler deploy --dry-run --config wrangler.toml
           pnpm exec wrangler deploy --dry-run --config relay/wrangler.toml --outdir "$RUNNER_TEMP/relay-bundle"
-      # The website may import shared proto; it never imports another app.
-      - name: No imports from other apps
-        run: |
-          if grep -rnE "(from|import)[[:space:]]*\(?[[:space:]]*['\"][^'\"]*(mail-hero|todofy|dashboard|contracts|packages)/" \
-            src scripts relay/src tests; then exit 1; fi
 
   # infra/: the OpenTofu configuration (infra/README.md). No Cloudflare token, no state and no plan here: the
   # locked provider download, format and validation, the guards that keep infra/ free of code-running data

@@ -567,7 +567,7 @@ class Classify(unittest.TestCase):
         # tools/cf-guard runs in every deploy job (and the website release): re-check everything, deploy nothing.
         self.assertEqual(push(["tools/cf-guard/cf-guard.mjs"]), expect(T, T, T, F, F, packages=T, proto=T, **ALL_CHECKED))
         self.assertEqual(push(["tools-notes.md"]), expect(F, F, F, F, F))
-        # The shared test and build tools (ToolsImports): their importers re-run, nothing deploys.
+        # The shared test and build tools (test_app_isolation.py): their importers re-run, nothing deploys.
         for path in ("tools/workerd-cpu/workerd-cpu.mts", "tools/bundle-size/bundle-size.mjs"):
             with self.subTest(path=path):
                 self.assertEqual(push([path]), expect(T, T, T, F, F, packages=T, proto=T, **ALL_CHECKED))
@@ -1030,73 +1030,9 @@ class PackageUsers(unittest.TestCase):
         self.assertEqual(set(catalog.apps), set(ci_changes.APPS))
 
 
-class ToolsImports(unittest.TestCase):
-    """A tools/ change deploys nothing (classify), which holds only while no Worker or UI bundle carries any of it. An
-    app imports a shared tool (tools/workerd-cpu, tools/bundle-size) by relative path from its tests and its build or
-    deploy scripts only, never from the sources it ships; and the Changes job runs every tool's own tests."""
-
-    IMPORT = re.compile(r"""(?:\bfrom|\bimport)\s*\(?\s*['"]([^'"]*/tools/[^'"]*)['"]""")
-    # Directories whose files never reach a bundle.
-    NOT_SHIPPED = {"test", "tests", "__tests__", "scripts", "deploy"}
-    SOURCES = (".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs")
-
-    @staticmethod
-    def tracked():
-        out = subprocess.run(
-            ["git", "-C", str(REPO), "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
-            check=True,
-            capture_output=True,
-        ).stdout.decode()
-        return [Path(name) for name in out.split("\0") if name]
-
-    def importers(self):
-        """App source file (relative) -> the tools/ files it imports."""
-        found = {}
-        for name in self.tracked():
-            if name.parts[0] not in ci_changes.APPS or name.suffix not in self.SOURCES or "node_modules" in name.parts:
-                continue
-            path = REPO / name
-            if not path.is_file():
-                continue
-            for specifier in self.IMPORT.findall(path.read_text(errors="ignore")):
-                target = (path.parent / specifier).resolve()
-                if target.is_relative_to(REPO / "tools"):
-                    found.setdefault(name, []).append(str(target.relative_to(REPO)))
-        return found
-
-    def test_only_tests_and_scripts_import_a_tool(self):
-        importers = self.importers()
-        # The apps' CPU tests and bundle budgets.
-        for name in (
-            "lab/worker/test/runtime/cpu.test.ts",
-            "flowday/worker/test/runtime/cpu.test.ts",
-            "mail-hero/cloudflare/test/cpu/native-ops-cpu.test.mjs",
-            "dashboard/worker/test/runtime/cpu.test.ts",
-            "lab/deploy/bundle-size.mjs",
-            "lab/web/scripts/js-budget.mjs",
-            "flowday/worker/scripts/bundle-size.mjs",
-            "flowday/web/scripts/js-budget.mjs",
-            "mail-hero/deploy/bundle-size.mjs",
-            "dashboard/deploy/bundle-size.mjs",
-        ):
-            self.assertIn(Path(name), importers)
-        for name, targets in importers.items():
-            with self.subTest(file=str(name)):
-                self.assertTrue(self.NOT_SHIPPED & set(name.parts[:-1]), f"{name} ships, but imports {targets}")
-                for target in targets:
-                    self.assertTrue((REPO / target).is_file(), target)
-
-    def test_the_import_pattern_finds_relative_tool_imports(self):
-        text = (
-            "import { connectCpuMeter } from '../../../../tools/workerd-cpu/workerd-cpu.mts';\n"
-            "import {\n  checkWorkerBundle,\n} from '../../tools/bundle-size/bundle-size.mjs'\n"
-            "const x = await import('../tools/x.mjs')\n"
-            "import { y } from '@ziyixi/proto/ts/y'\n"
-        )
-        self.assertEqual(
-            self.IMPORT.findall(text),
-            ["../../../../tools/workerd-cpu/workerd-cpu.mts", "../../tools/bundle-size/bundle-size.mjs", "../tools/x.mjs"],
-        )
+class ToolsTests(unittest.TestCase):
+    """A tools/ change deploys nothing (classify): test_app_isolation.py keeps every tool out of the shipped sources,
+    and the Changes job runs every tool's own tests."""
 
     def test_the_changes_job_runs_every_tools_own_tests(self):
         changes = workflow_jobs()["changes"]
@@ -1612,8 +1548,6 @@ class WebsiteChecks(unittest.TestCase):
         self.assertIn("pnpm exec wrangler deploy --dry-run --config wrangler.toml\n", block)
         self.assertIn("pnpm exec wrangler deploy --dry-run --config relay/wrangler.toml", block)
         self.assertEqual(block.count("wrangler deploy --dry-run"), 2)
-        # The import guard covers every source directory of both Workers and the tests.
-        self.assertIn("src scripts relay/src tests; then exit 1; fi", block)
         vitest = (REPO / "website" / "vitest.config.ts").read_text()
         self.assertIn('include: ["tests/unit/**/*.test.ts"],', vitest)
 
@@ -1675,7 +1609,6 @@ class TodofyJobs(unittest.TestCase):
             "uv run pytest tests/unit tests/fakes tools deploy",
             "npm run lint\n          npm run typecheck\n          npm test\n          npm run test:runtime",
             "npm ci --no-audit --no-fund\n          npm run typecheck\n          npm test\n          npm run build",
-            "if grep -rnE 'mail_hero|mail-hero' src; then exit 1; fi",
             'uv run python deploy/deploy_vars.py secrets core "$RUNNER_TEMP/todofy-core-secrets.json"',
             'uv run python deploy/deploy_vars.py secrets gateway "$RUNNER_TEMP/todofy-gateway-secrets.json"',
             "uv run python deploy/deploy_vars.py exec core -- uv run pywrangler deploy --dry-run --config wrangler.toml",

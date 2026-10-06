@@ -4,7 +4,7 @@
  * test/runtime/cpu.test.ts, Mail Hero's test/cpu/native-ops-cpu.test.mjs) against Workers Free's 10 ms per request.
  *
  * Test tooling only. A test imports this file by relative path; no production source may (a bundle would carry it,
- * and a tools/ change deploys nothing: .github/scripts/ci_changes.py, test_ci_changes.py ToolsImports). It imports
+ * and a tools/ change deploys nothing: .github/scripts/ci_changes.py, test_app_isolation.py). It imports
  * nothing, so it type-checks under each app's own flags and runs under Node's type stripping
  * (node --test tools/workerd-cpu/test/*.test.mts, in the Changes job).
  *

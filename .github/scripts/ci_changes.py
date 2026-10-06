@@ -83,7 +83,7 @@ the same tree and the same ci.yml, and no check job uses a secret, so the branch
 (test_wrangler_configs.py: no job before the deploys reads a secret, has an environment or deploys for real).
 Anything else (no such run, a check it did not run, an API error, workflow_dispatch) runs the checks.
 tools/ (CI, test and build tooling: the deploy hostname guard, and the bundle budgets and CPU meter that the
-apps' build scripts and tests import, which no bundle carries: test_ci_changes.py ToolsImports) counts as
+apps' build scripts and tests import, which no bundle carries: test_app_isolation.py) counts as
 .github/: every app is re-checked, none deployed. The exception is tools/infra-plan-summary/, which belongs to
 infra/: it runs only Infra checks, as infra/ does (and .github/ does too); the other tools/ do not run them.
 workflow_dispatch: the "app" input checks and deploys that app ("both" = Todofy and Mail Hero, as
