@@ -17,15 +17,22 @@ inbox and waits in the review queue. Shadow mode (the default) only suggests. Ch
 
 ## Use
 
-- **标签**: add the labels (name, a description of what belongs there, which is what the model reads, the threshold
-  and whether it implies a trusted sender). 同步 Gmail links `分拣/` labels that already exist. 正式打 per label lets
-  live mode write it; it turns itself off when the label's precision bound falls below the target.
+- **标签**: add the labels (name, a description of what belongs there, the threshold and whether it implies a trusted
+  sender). The model reads `name: description` for each label; one language and 60–120 characters keep every call
+  cheap (`docs/design.md` §8.1). 同步 Gmail links `分拣/` labels that already exist and imports the others (disabled,
+  without a description). 正式打 per label lets live mode write it; it turns itself off when the label's precision
+  bound falls below the target. Deleting a label leaves its Gmail label and mails alone, and its writes can no longer
+  be undone from 记录.
 - **待审**: confirm a suggestion, choose another label or 都不是, or skip. Corrections made in Gmail itself (moving a
   sorted mail to another `分拣/` label, or removing the label) count too.
 - **规则**: approve the rules proposed from repeated corrections, add exact-address, domain, mailing-list or
   delivered-to rules by hand, and export them as Gmail filters (label + archive only) to import in Gmail's settings.
 - **例子**, **准确率**, **记录** (undo one write or a time range), **状态** (Gmail grant, sync, today's model use),
-  **设置** (mode, limits, neuron budget). Emergency stop: 设置 → 关闭 (`docs/design.md` §10).
+  **设置** (mode, limits, neuron budget; 解除熔断 after the breaker tripped). Emergency stop: 设置 → 关闭
+  (`docs/design.md` §10).
+- **What is kept**: decided mail's subject, sender and exact sender keys, and the review queue, for 14 days; decisions
+  and the ledger without content for 180 days; examples (masked summaries) and rules (exact sender, domain, list or
+  delivered-to values) until you delete them (`docs/design.md` §2).
 
 ## Develop
 
