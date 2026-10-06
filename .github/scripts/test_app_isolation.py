@@ -282,6 +282,15 @@ class AppIsolation(unittest.TestCase):
                 with self.subTest(file=str(name), specifier=specifier):
                     self.fail(f"{name} imports {specifier}: an alias may not climb with '..'; use a relative import")
 
+    def test_the_todofy_ui_copies_nothing_from_mail_hero(self):
+        """The UI is Todofy's own code (todofy/docs/implementation-order.md, S7): its source never names mail-hero or
+        mail_hero, which also catches copied identifiers and comments. The product name "Mail Hero" may appear."""
+        sources = [name for name in self.files if name.parts[:3] == ("todofy", "web", "src")]
+        self.assertGreater(len(sources), 10)
+        for name in sources:
+            with self.subTest(file=str(name)):
+                self.assertNotRegex((REPO / name).read_text(errors="ignore"), r"mail_hero|mail-hero")
+
     def test_only_tests_and_scripts_import_a_tool(self):
         """The apps' CPU tests and bundle budgets do import tools/ (the scan sees them), and each target exists."""
         importers = {
