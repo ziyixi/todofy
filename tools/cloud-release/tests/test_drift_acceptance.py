@@ -79,6 +79,7 @@ class ProviderFixture:
                         if value["name"] == item["name"]
                     )
                     alias = {
+                        "HomeState": "home-state",
                         "WatchState": "watch-state",
                         "MailCoordinator": "mail-coordinator",
                     }[source["class_name"]]
@@ -389,6 +390,52 @@ class DriftAcceptance(unittest.TestCase):
             with self.subTest(app=app, repair=repair, name=name):
                 fixture = self.fixture(app)
                 fixture.bindings().append({"name": name, "type": "secret_text"})
+                output = io.StringIO()
+                with (
+                    redirect_stdout(output),
+                    self.assertRaisesRegex(ReleaseError, "REPAIR_MANUAL_REQUIRED"),
+                ):
+                    preflight(ROOT, app, SHA, repair, fixture.cloud, fixture.github)
+                self.assertEqual(
+                    json.loads(output.getvalue())["changes"],
+                    [{"script": fixture.configs[0]["name"], "field": name,
+                      "reason": "BINDING_UNDECLARED"}],
+                )
+                self.assert_readonly(fixture)
+
+    def test_normal_home_release_removes_the_retired_lab_binding(self):
+        fixture = self.fixture("dashboard")
+        fixture.bindings().append(
+            {"name": "LAB", "type": "service", "service": "lab", "entrypoint": "Ops",
+             "environment": "production"}
+        )
+        output = io.StringIO()
+        with redirect_stdout(output):
+            required = preflight(
+                ROOT, fixture.app, SHA, False, fixture.cloud, fixture.github
+            )
+        self.assertTrue(required)
+        self.assertEqual(
+            json.loads(output.getvalue()),
+            {"state": "repairable", "changes": [
+                {"script": "home", "field": "LAB", "reason": "RETIRED_SERVICE_BINDING"},
+            ]},
+        )
+        self.assert_readonly(fixture)
+
+    def test_service_retirement_does_not_allow_other_bindings_apps_or_repairs(self):
+        for app, repair, name in (
+            ("dashboard", True, "LAB"),
+            ("dashboard", False, "LAB_EXTRA"),
+            ("dashboard", False, "lab"),
+            ("watch", False, "LAB"),
+        ):
+            with self.subTest(app=app, repair=repair, name=name):
+                fixture = self.fixture(app)
+                fixture.bindings().append(
+                    {"name": name, "type": "service", "service": "lab",
+                     "environment": "production"}
+                )
                 output = io.StringIO()
                 with (
                     redirect_stdout(output),

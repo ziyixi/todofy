@@ -44,6 +44,11 @@ RETIRED_WEBSITE_BINDINGS = {
     "RECONCILE_UTC_HOUR",
     "IGNORED_EDITOR_IDS",
 }
+# Bindings to Workers the owner retired; a normal release of that app removes them.
+# Drop an entry once the target Worker is deleted (see infra/README "Retiring an app").
+RETIRED_SERVICE_BINDINGS = {
+    "dashboard": {"LAB"},
+}
 
 
 def read_toml(path):
@@ -179,6 +184,12 @@ def preflight(source, app, sha, repair, cloud, github, check_only=False):
             ):
                 # Explicit owner-approved retirement; other undeclared bindings still stop release/repair.
                 change["reason"] = "LEGACY_WEBSITE_BINDING_RETIRED"
+            if (
+                change["reason"] == "BINDING_UNDECLARED"
+                and change["field"] in RETIRED_SERVICE_BINDINGS.get(app, ())
+            ):
+                # Explicit owner-approved app retirement; repair still cannot remove it.
+                change["reason"] = "RETIRED_SERVICE_BINDING"
     if any(item["reason"] in MANUAL for item in changes):
         print(json.dumps({"state": "manual_required", "changes": changes}))
         raise ReleaseError("REPAIR_MANUAL_REQUIRED")

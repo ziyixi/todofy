@@ -601,10 +601,19 @@ instance cannot be destroyed". The order, for any app:
    [`access.tf`](access.tf)'s region and [`ids.tf`](ids.tf)), and adds one `moved` block per object to
    [`retired.tf`](retired.tf): from its instance to an address no resource block declares
    (`<type>.retired_<app>`), with the same pair in `RETIRED` of [`infra_guard.py`](../.github/scripts/infra_guard.py).
-   The guard refuses any other move to an undeclared address.
+   The guard refuses any other move to an undeclared address. A release refuses to drop a live binding the
+   desired state no longer declares (`BINDING_UNDECLARED`), so each binding another app had to the Worker gets an
+   entry in `RETIRED_SERVICE_BINDINGS` of [`control.py`](../tools/cloud-release/control.py): that app's normal
+   release may then remove exactly that name, while a repair still stops.
 2. **After it is on `main` and every app that bound the Worker has deployed without that binding**, delete the
    Worker in the Cloudflare dashboard (Wrangler owns it, not this directory). Then neither the hostname nor the
    database is in use when they go, and the host never serves without Access.
+
+   Until then two other checks are red or noisy by design, besides "Infra drift". "Verify complete account resource
+   registration" ("Personal cloud reconcile") fails with the Worker, its D1 database and its Durable Object
+   namespace as `unregistered`, and Home's 配置漂移 shows the Worker's script and custom domain as `extra`. The
+   Worker and Durable Object items clear when the Worker is deleted (check that its namespace went with it), the D1
+   item after the apply in step 4. Any other finding there is real drift.
 3. **"Infra drift"** of the merge (or a dispatch of it after step 2) is red by design (exit 3, a delete). Check it
    against exactly this: `delete: 2`, the rows `cloudflare_zero_trust_access_application.retired_<app>` and
    `cloudflare_d1_database.retired_<app>`, every other row `no-op`; `output changes: 2` (`update` of `access_aud`
@@ -613,8 +622,8 @@ instance cannot be destroyed". The order, for any app:
    backs up the encrypted state, deletes the two objects (the database with every row in it; D1 Time Travel goes
    with it) and ends with a verify plan of "No changes"; the next "Infra drift" is green. Until then the daily
    "Personal cloud reconcile" reports the plan as needing a manual review and applies nothing.
-5. **A later commit** removes the `moved` blocks and their `RETIRED` pairs: once the state no longer holds the old
-   addresses, they do nothing.
+5. **A later commit** removes the `moved` blocks and their `RETIRED` pairs, and the app's `RETIRED_SERVICE_BINDINGS`
+   entries: once the state no longer holds the old addresses and no live Worker has the binding, they do nothing.
 
 ## Removing the import blocks
 
