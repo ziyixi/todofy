@@ -10,9 +10,11 @@ For every app of the service catalog this resolves
 - the paths its Python files add to sys.path or load with importlib's spec_from_file_location, and
 - the local dependencies of its package.json files (file:, link:), the "paths" and "extends" of its tsconfig files
   and the path sources and workspace members of its pyproject.toml files,
-and requires every target to lie in the app itself or in a directory the app may use. A bare npm specifier resolves
-to an installed package, so the package.json and tsconfig checks cover it. Needs Python 3.11+ (tomllib), as CI's
-ubuntu-24.04 python3 has; standard library only.
+and requires every target to lie in the app itself or in a directory the app may use. A bare specifier is an installed
+package (covered by the package.json check) or a path alias. tsconfig "paths" are checked to stay in the app; the vite
+and vitest aliases, which this does not read, map the same in-app prefixes ("@" to "." or "./src"). An alias followed
+by `..` could still climb out, so a bare specifier may not have a `..` segment, which no package name has. Needs
+Python 3.11+ (tomllib), as CI's ubuntu-24.04 python3 has; standard library only.
 """
 
 import ast
@@ -47,8 +49,8 @@ TOOLS = "tools"
 NOT_SHIPPED = {"test", "tests", "__tests__", "scripts", "deploy"}
 SCRIPT_SUFFIXES = {".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"}
 
-# A relative specifier after `from`, `import`, `import(` or `require(`.
-JS_IMPORT = re.compile(r"""(?:\bfrom|\bimport|\brequire)\s*\(?\s*['"](\.{1,2}/[^'"\n]*)['"]""")
+# The specifier after `from`, `import`, `import(` or `require(`.
+JS_IMPORT = re.compile(r"""(?:\bfrom|\bimport|\brequire)\s*\(?\s*['"]([^'"\n]+)['"]""")
 PATH_CALLS = {"Path", "pathlib.Path", "str", "os.fspath", "os.path.abspath", "os.path.realpath"}
 JSON_STRING = r'"(?:\\.|[^"\\])*"'
 
@@ -63,8 +65,12 @@ def tracked_files() -> list[PurePosixPath]:
     return [PurePosixPath(name) for name in out.split("\0") if name and (REPO / name).is_file()]
 
 
-def js_imports(text: str) -> list[str]:
-    return JS_IMPORT.findall(text)
+def js_imports(text: str) -> tuple[list[str], list[str]]:
+    """(relative specifiers, bare specifiers that climb with a `..` segment, such as "@/../../lab/x")."""
+    specifiers = JS_IMPORT.findall(text)
+    relative = [s for s in specifiers if s.startswith(("./", "../"))]
+    climbing = [s for s in specifiers if not s.startswith(("./", "../")) and ".." in s.split("/")]
+    return relative, climbing
 
 
 class Unresolved(Exception):
@@ -248,12 +254,14 @@ class AppIsolation(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.files = [name for name in tracked_files() if name.parts[0] in APPS]
-        cls.script_imports = {}
+        cls.script_imports, cls.climbing_aliases = {}, {}
         for name in cls.files:
             if name.suffix in SCRIPT_SUFFIXES:
                 path = REPO / name
-                specifiers = js_imports(path.read_text(errors="ignore"))
-                cls.script_imports[name] = [Path(os.path.normpath(path.parent / s)) for s in specifiers]
+                relative, climbing = js_imports(path.read_text(errors="ignore"))
+                cls.script_imports[name] = [Path(os.path.normpath(path.parent / s)) for s in relative]
+                if climbing:
+                    cls.climbing_aliases[name] = climbing
 
     def assertAllowed(self, importer: PurePosixPath, target: Path, verb: str):
         reason = violation(importer.parts[0], importer, target)
@@ -267,6 +275,12 @@ class AppIsolation(unittest.TestCase):
                     self.assertAllowed(name, target, "imports")
         # A pattern that silently matched nothing would pass the loop above.
         self.assertGreater(sum(map(len, self.script_imports.values())), 500)
+
+    def test_no_alias_climbs_out_of_its_target(self):
+        for name, specifiers in self.climbing_aliases.items():
+            for specifier in specifiers:
+                with self.subTest(file=str(name), specifier=specifier):
+                    self.fail(f"{name} imports {specifier}: an alias may not climb with '..'; use a relative import")
 
     def test_only_tests_and_scripts_import_a_tool(self):
         """The apps' CPU tests and bundle budgets do import tools/ (the scan sees them), and each target exists."""
@@ -322,7 +336,7 @@ class AppIsolation(unittest.TestCase):
 class Rules(unittest.TestCase):
     """The readers and the rule on synthetic inputs, so a regression in them cannot pass the checks above vacuously."""
 
-    def test_the_import_pattern_finds_every_relative_form(self):
+    def test_the_import_pattern_finds_every_form(self):
         text = (
             "import { connectCpuMeter } from '../../../../tools/workerd-cpu/workerd-cpu.mts';\n"
             "import {\n  checkWorkerBundle,\n} from '../../tools/bundle-size/bundle-size.mjs'\n"
@@ -332,17 +346,24 @@ class Rules(unittest.TestCase):
             'const y = require("../y.cjs")\n'
             "import { z } from '@ziyixi/proto/ts/z'\n"
             "import { w } from 'vitest'\n"
+            "import { v } from '@/lib/v'\n"
+            'import { x } from "@/../../lab/worker/src/index";\n'
+            "const u = await import('~/../u')\n"
+            "import { t } from 'pkg..name/t'\n"
         )
         self.assertEqual(
             js_imports(text),
-            [
-                "../../../../tools/workerd-cpu/workerd-cpu.mts",
-                "../../tools/bundle-size/bundle-size.mjs",
-                "./local.ts",
-                "./side-effect.css",
-                "../tools/x.mjs",
-                "../y.cjs",
-            ],
+            (
+                [
+                    "../../../../tools/workerd-cpu/workerd-cpu.mts",
+                    "../../tools/bundle-size/bundle-size.mjs",
+                    "./local.ts",
+                    "./side-effect.css",
+                    "../tools/x.mjs",
+                    "../y.cjs",
+                ],
+                ["@/../../lab/worker/src/index", "~/../u"],
+            ),
         )
 
     def test_python_paths_follow_the_usual_spellings(self):
