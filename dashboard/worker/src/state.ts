@@ -37,7 +37,6 @@ import { buildReport, candidates, digestKey, finalizeItems, itemKey, shouldSend,
 import { NO_DIGEST, NO_META, NO_STATUS, NO_USAGE, type DigestDoc, type MetaDoc, type ProbeDoc, type StatusDoc, type UsageDoc } from './docs.ts';
 import type { Env } from './env.ts';
 import {
-  AUTO_NORMAL,
   NO_APPLIED,
   activeOverride,
   desiredGuard,
@@ -88,6 +87,12 @@ export const HOME_OBJECT = 'home-v1';
 export function perApp<T>(value: (app: OpsApp) => T): Record<OpsApp, T> {
   return Object.fromEntries(OPS_APPS.map((app) => [app, value(app)])) as Record<OpsApp, T>;
 }
+
+/** The ops-v1 apps the registry lets the guard drive (`status.guard`): the only ones it lists, overrides or calls. */
+export const GUARD_APPS: readonly OpsApp[] = OPS_APPS.filter((app) => {
+  const status = REGISTRY.entries.find((entry) => entry.id === app)?.status;
+  return status?.type === 'ops_v1' && status.guard;
+});
 
 /** guard_applied's CHECK: exactly the ops-v1 apps this dashboard calls (OPS_APPS). */
 const GUARD_APPS_CHECK = `CHECK (app IN (${OPS_APPS.map((app) => `'${app}'`).join(', ')}))`;
@@ -262,12 +267,11 @@ export class HomeState extends DurableObject<Env> {
       const scripts = this.doc<CfScriptsDoc>('cf_scripts');
       const drift = this.doc<DriftDoc>('drift');
       if (scripts && scripts.live === undefined && drift?.last_run_day) this.putDoc('drift', { ...drift, last_run_day: null }, Date.now());
+      // The one global override of releases before 2026-10-04 becomes each guarded app's own. Kept because
+      // production DO state cannot be read to prove no such document is left; nothing writes one any more.
       const legacy = this.doc<GuardOverrideDoc>('guard_override');
       if (legacy !== null) {
-        for (const app of OPS_APPS) {
-          const entry = REGISTRY.entries.find((item) => item.id === app);
-          if (entry?.status.type === 'ops_v1' && entry.status.guard) this.putDoc(`guard_override:${app}`, legacy, Date.now());
-        }
+        for (const app of GUARD_APPS) this.putDoc(`guard_override:${app}`, legacy, Date.now());
         this.deleteDoc('guard_override');
       }
       return Promise.resolve();
@@ -394,22 +398,20 @@ export class HomeState extends DurableObject<Env> {
   }
 
   /**
-   * OverrideGuard: force shed for 24 h, or clear and suppress the automatic shed until 00:00 UTC. With a `requestId`
-   * already answered (AIP-155), the first answer again.
+   * OverrideGuard for one app: force shed for 24 h, or clear and suppress the automatic shed until 00:00 UTC. With a
+   * `requestId` already answered (AIP-155), the first answer again.
    */
-  setGuardOverride(level: GuardLevel, at: number | null = null, requestId: string | null = null, app: OpsApp | null = null): Promise<GuardOverrideOutcome> {
+  setGuardOverride(app: OpsApp, level: GuardLevel, at: number | null = null, requestId: string | null = null): Promise<GuardOverrideOutcome> {
     return this.serialize(async (): Promise<GuardOverrideOutcome> => {
       const now = at ?? Date.now();
       const inputKey = JSON.stringify([app, level]);
       const replay = this.replay(requestId, 'override_guard', now, inputKey);
       if (replay === 'reused') return { ok: false, code: 'request_id_reused' };
       if (replay !== null) return { ok: true, guard: replay as GuardView };
-      if (app !== null && this.statusDoc(app).status?.capabilities.includes('guard') !== true) return { ok: false, code: 'guard_unavailable' };
-      this.putDoc(app === null ? 'guard_override' : `guard_override:${app}`, ownerOverride(level, now), now);
-      // A cleared episode must not come back when the override ends (the auto shed's own until).
-      if (level === 'normal' && app === null) this.putDoc('guard', AUTO_NORMAL, now);
-      const desired = this.currentDesired(now);
-      const calls = await this.applyGuard(now, desired, perApp((id) => this.statusDoc(id).status?.guard ?? null), app);
+      // A listed app whose status has been seen with the capability: otherwise no setGuard could carry the override.
+      if (!this.canGuard(app) || this.statusDoc(app).status === null) return { ok: false, code: 'guard_unavailable' };
+      this.putDoc(`guard_override:${app}`, ownerOverride(level, now), now);
+      const calls = await this.applyGuard(now, perApp((id) => this.statusDoc(id).status?.guard ?? null), app);
       await this.runDigest(now, false, (this.doc<MetaDoc>('meta') ?? NO_META).last_tick_at);
       this.bumpRev(now);
       console.log(JSON.stringify({ event: 'guard_override', level, guard_calls: calls }));
@@ -585,45 +587,43 @@ export class HomeState extends DurableObject<Env> {
     return { outcome, calls: result.calls };
   }
 
-  /** Aggregate only the actual per-service targets; normal owner overrides can suppress every shed. */
-  private summaryDesired(now: number): DesiredGuard {
-    const targets = OPS_APPS.filter((app) => {
-      const entry = REGISTRY.entries.find(item => item.id === app);
-      return entry?.status.type === 'ops_v1' && entry.status.guard
-        && this.statusDoc(app).status?.capabilities.includes('guard') !== false;
-    }).map(app => this.currentDesired(now, app));
-    return targets.find(target => target.level === 'shed' && target.source === 'auto')
-      ?? targets.find(target => target.level === 'shed')
-      ?? { ...this.currentDesired(now), level: 'normal', until: null };
+  /**
+   * Whether the guard lists `app`: registered for it and not known to lack the capability (an app not polled yet is
+   * listed). Every guard listing uses this, so what the owner sees is what the guard acts on.
+   */
+  private canGuard(app: OpsApp): boolean {
+    return GUARD_APPS.includes(app) && this.statusDoc(app).status?.capabilities.includes('guard') !== false;
   }
 
-  private currentDesired(now: number, app: OpsApp | null = null): DesiredGuard {
-    const override = activeOverride(this.doc<GuardOverrideDoc>(app === null ? 'guard_override' : `guard_override:${app}`), now)
-      ?? activeOverride(this.doc<GuardOverrideDoc>('guard_override'), now);
-    return desiredGuard(now, this.doc<AutoGuard>('guard'), override);
+  /** Aggregate only the actual per-service targets; normal owner overrides can suppress every shed. */
+  private summaryDesired(now: number): DesiredGuard {
+    const targets = GUARD_APPS.filter((app) => this.canGuard(app)).map((app) => this.currentDesired(now, app));
+    return targets.find(target => target.level === 'shed' && target.source === 'auto')
+      ?? targets.find(target => target.level === 'shed')
+      ?? { ...this.autoDesired(now), level: 'normal', until: null };
+  }
+
+  /** The automatic rule's target alone, before any app's owner override. */
+  private autoDesired(now: number): DesiredGuard {
+    return desiredGuard(now, this.doc<AutoGuard>('guard'), null);
+  }
+
+  /** One app's target: its owner override while that holds, else the automatic rule. */
+  private currentDesired(now: number, app: OpsApp): DesiredGuard {
+    return desiredGuard(now, this.doc<AutoGuard>('guard'), this.doc<GuardOverrideDoc>(`guard_override:${app}`));
   }
 
   private async runGuard(now: number, observed: Record<OpsApp, OpsStatus | null>): Promise<{ desired: DesiredGuard; calls: number }> {
-    const stored = this.doc<GuardOverrideDoc>('guard_override');
-    const override = activeOverride(stored, now);
-    if (stored !== null && override === null) this.deleteDoc('guard_override');
-    const usage = this.doc<UsageDoc>('usage');
-    // While the owner has cleared the guard, the automatic rule stays off until the override ends.
-    const auto = override?.level === 'normal' ? AUTO_NORMAL : evaluateAuto(now, usage, this.doc<AutoGuard>('guard'));
+    const auto = evaluateAuto(now, this.doc<UsageDoc>('usage'), this.doc<AutoGuard>('guard'));
     this.putDoc('guard', auto, now);
-    const desired = desiredGuard(now, auto, override);
-    const calls = await this.applyGuard(
-      now,
-      desired,
-      perApp((app) => observed[app]?.guard ?? null),
-    );
-    return { desired, calls };
+    const calls = await this.applyGuard(now, perApp((app) => observed[app]?.guard ?? null));
+    return { desired: this.autoDesired(now), calls };
   }
 
-  /** setGuard on each app that supports it and needs it (§5.3 "Applying"), in parallel. */
-  private async applyGuard(now: number, desired: DesiredGuard, observed: Record<OpsApp, GuardState | null>, only: OpsApp | null = null): Promise<number> {
-    const inputs = perApp((app) => guardInput(this.doc(`guard_override:${app}`) === null ? desired : this.currentDesired(now, app), now));
-    const targets = OPS_APPS.filter((app) => {
+  /** setGuard on each guarded app that supports it and needs it (§5.3 "Applying"), in parallel. */
+  private async applyGuard(now: number, observed: Record<OpsApp, GuardState | null>, only: OpsApp | null = null): Promise<number> {
+    const inputs = perApp((app) => guardInput(this.currentDesired(now, app), now));
+    const targets = GUARD_APPS.filter((app) => {
       const status = this.statusDoc(app).status;
       return (only === null || only === app) && status !== null && status.capabilities.includes('guard') && needsApply(inputs[app], this.applied(app), observed[app]);
     });
@@ -834,12 +834,9 @@ export class HomeState extends DurableObject<Env> {
     const items = neverRan ? [] : supplied ?? this.currentItems(now, tickAt);
     const evaluation = this.evalInput(now);
     const raw = attentionView({ now, neverRan, items, canaryEnabled: canaryEnabled(this.env), desired: this.summaryDesired(now),
-      ownerShedApps: OPS_APPS.filter(app => {
-        const entry = REGISTRY.entries.find(item => item.id === app);
+      ownerShedApps: GUARD_APPS.filter((app) => {
         const target = this.currentDesired(now, app);
-        return entry?.status.type === 'ops_v1' && entry.status.guard
-          && this.statusDoc(app).status?.capabilities.includes('guard') !== false
-          && target.level === 'shed' && target.source === 'owner';
+        return this.canGuard(app) && target.level === 'shed' && target.source === 'owner';
       }),
       statuses: evaluation.statuses, ...(neverRan ? {} : { evaluation }) });
     const candidatesNow = this.digestCandidates(now, tickAt);
@@ -980,8 +977,7 @@ export class HomeState extends DurableObject<Env> {
   }
 
   private guardView(now: number): GuardView {
-    const desired = this.currentDesired(now);
-    const override = activeOverride(this.doc<GuardOverrideDoc>('guard_override'), now);
+    const desired = this.autoDesired(now);
     const appView = (app: OpsApp): GuardAppView => {
       const applied = this.applied(app);
       const status = this.statusDoc(app);
@@ -999,13 +995,10 @@ export class HomeState extends DurableObject<Env> {
     };
     return {
       desired: { level: desired.level, reason: desired.reason, until: isoOrNull(desired.until), source: desired.source },
-      override: override === null ? null : { level: override.level, until: iso(override.until), set_at: iso(override.set_at) },
+      // Deprecated: overrides are per app (apps[].override) since 2026-10-04, so there is no global one.
+      override: null,
       thresholds: { shed_percent: GUARD_SHED_PERCENT, clear_percent: GUARD_CLEAR_PERCENT },
-      apps: Object.fromEntries(OPS_APPS.filter((app) => {
-        const entry = REGISTRY.entries.find((item) => item.id === app);
-        return entry?.status.type === 'ops_v1' && entry.status.guard
-          && this.statusDoc(app).status?.capabilities.includes('guard') !== false;
-      }).map((app) => [app, appView(app)])),
+      apps: Object.fromEntries(GUARD_APPS.filter((app) => this.canGuard(app)).map((app) => [app, appView(app)])),
     };
   }
 

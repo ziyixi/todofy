@@ -151,7 +151,7 @@ export const handlers: ServiceHandlers<ShapeOf<typeof DashboardUiService>, ApiCo
     if (level === null) throw dashboardError('BAD_REQUEST');
     if (!request.app) throw dashboardError('REFRESH_REQUIRED');
     const result = await callHome(
-      () => home(ctx.env).setGuardOverride(level, ctx.at, requestIdOf(request.requestId), request.app as OpsApp) as unknown as Promise<GuardOverrideOutcome>,
+      () => home(ctx.env).setGuardOverride(request.app as OpsApp, level, ctx.at, requestIdOf(request.requestId)) as unknown as Promise<GuardOverrideOutcome>,
     );
     if (!result.ok) throw dashboardError(result.code === 'guard_unavailable' ? 'UNAVAILABLE' : 'BAD_REQUEST');
     return ownAnswer(OverrideGuardResponseSchema, { guard: result.guard });

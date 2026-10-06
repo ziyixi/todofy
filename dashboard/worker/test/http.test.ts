@@ -74,7 +74,7 @@ interface HomeCalls {
   views: string[];
   /** The request_id of every startCanary call. */
   startCanary: (string | null)[];
-  /** `<level>:<request_id>` of every setGuardOverride call. */
+  /** `<app>:<level>:<request_id>` of every setGuardOverride call. */
   guard: string[];
   /** The request time (`at`) of every view, startCanary and setGuardOverride call, in order. */
   at: (number | null)[];
@@ -88,8 +88,8 @@ function makeEnv(overrides: Partial<Env> = {}, answers: { startCanary?: unknown;
       calls.at.push(at);
       return Promise.resolve(answers.startCanary ?? { ok: true, run: RUN });
     },
-    setGuardOverride(level: 'normal' | 'shed', at: number | null, requestId: string | null) {
-      calls.guard.push(`${level}:${String(requestId)}`);
+    setGuardOverride(app: string, level: 'normal' | 'shed', at: number | null, requestId: string | null) {
+      calls.guard.push(`${app}:${level}:${String(requestId)}`);
       calls.at.push(at);
       return Promise.resolve(answers.guard ?? { ok: true, guard: guardOf(level) });
     },
@@ -376,7 +376,7 @@ describe('CSRF and mutations', () => {
     const body = await response.json();
     expect(body).toEqual({ guard: guardOf('normal') });
     expectWire(OverrideGuardResponseSchema, body);
-    expect(calls.guard).toEqual([`normal:${REQUEST_ID}`]);
+    expect(calls.guard).toEqual([`mail-hero:normal:${REQUEST_ID}`]);
   });
 
   it('refuses malformed bodies with BAD_REQUEST before calling the object', async () => {
@@ -480,13 +480,13 @@ describe('CSRF and mutations', () => {
     });
     const ok = await worker.fetch(incoming(`https://${HOST}${PATHS.guard}`, { method: 'POST', headers, body: small, duplex: 'half' } as RequestInit), env);
     expect(ok.status).toBe(200);
-    expect(calls.guard).toEqual(['shed:null']);
+    expect(calls.guard).toEqual(['mail-hero:shed:null']);
     // A declared length above the limit or a malformed one is refused before reading.
     for (const length of ['1025', 'abc', '-1']) {
       const refused = await mutate(env, PATHS.guard, { level: 'shed', app: 'mail-hero' }, { csrf: pair, headers: { 'content-length': length } });
       expect(refused.status, length).toBe(400);
     }
-    expect(calls.guard).toEqual(['shed:null']);
+    expect(calls.guard).toEqual(['mail-hero:shed:null']);
   });
 });
 
