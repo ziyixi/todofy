@@ -60,6 +60,10 @@ function guardMessage(store: Store, now: number): GuardState {
   return create(GuardStateSchema, { level: GuardLevel.SHED, reason: shed.reason, until: iso(shed.until), setAt: iso(shed.setAt), deferred: [...DEFERRED_JOBS] });
 }
 
+export function guardState(store: Store, now: number): wire.GuardState {
+  return toWire(GuardStateSchema, guardMessage(store, now));
+}
+
 export type GuardOutcome = { readonly ok: wire.GuardState } | { readonly error: 'invalid_input' };
 
 /** setGuard: the contract's rules, then `until` in (now, now + 36 h]; the same shed as stored keeps its set_at. */
@@ -83,7 +87,7 @@ export function setGuard(store: Store, input: unknown, now: number): GuardOutcom
   } else {
     store.deleteMeta('guard_reason', 'guard_until', 'guard_set_at');
   }
-  return { ok: toWire(GuardStateSchema, guardMessage(store, now)) };
+  return { ok: guardState(store, now) };
 }
 
 // ---- status ---------------------------------------------------------------------------------------------------------

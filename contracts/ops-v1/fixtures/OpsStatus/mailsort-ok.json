@@ -1,0 +1,37 @@
+{
+  "version": "ops-v1",
+  "app": "mailsort",
+  "generated_at": "2026-10-06T14:00:00Z",
+  "health": "ok",
+  "modes": {
+    "maintenance": false,
+    "live": true,
+    "sorting_off": false,
+    "mode_limited": false,
+    "breaker": false
+  },
+  "guard": {
+    "level": "normal",
+    "reason": null,
+    "until": null,
+    "set_at": null,
+    "deferred": []
+  },
+  "signals": [],
+  "counters": {
+    "decided_today": 34,
+    "applied_today": 21,
+    "unsure_today": 6,
+    "review_pending": 1,
+    "pending": 1,
+    "gmail_calls_today": 120,
+    "neurons_today": 1520,
+    "neuron_budget": 7000,
+    "last_sync_minutes": 4
+  },
+  "last_backup_at": null,
+  "ui_url": "https://sort.example.com/",
+  "capabilities": [
+    "guard"
+  ]
+}

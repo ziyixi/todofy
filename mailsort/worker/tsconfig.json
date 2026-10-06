@@ -23,6 +23,6 @@
     "noEmit": true
   },
   "include": ["src", "test", "vitest.config.ts", "vitest.runtime.config.ts"],
-  // test/runtime runs in Node against Miniflare: its own tsconfig with Node types.
-  "exclude": ["test/runtime"]
+  // test/runtime (Miniflare) and test/smoke (wrangler dev) run in Node: their own tsconfigs with Node types.
+  "exclude": ["test/runtime", "test/smoke"]
 }

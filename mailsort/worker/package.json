@@ -10,7 +10,7 @@
   "scripts": {
     "postinstall": "node ../../proto/tools/ensure.mjs",
     "pretypecheck": "node ../../proto/tools/ensure.mjs",
-    "typecheck": "tsc --noEmit && tsc --noEmit -p test/runtime/tsconfig.json",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p test/runtime/tsconfig.json && tsc --noEmit -p test/smoke/tsconfig.json",
     "prelint": "node ../../proto/tools/ensure.mjs",
     "lint": "eslint .",
     "pretest": "node ../../proto/tools/ensure.mjs",

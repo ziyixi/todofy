@@ -1,0 +1,11 @@
+{
+  // The smoke run is a Node script (it drives wrangler dev), so it type-checks against Node's types, not the
+  // Workers types of ../../tsconfig.json. It imports the Worker's limits and fake sites, which name Workers types.
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "lib": ["ES2024"],
+    "types": ["node", "@cloudflare/workers-types"]
+  },
+  "include": ["."],
+  "exclude": []
+}

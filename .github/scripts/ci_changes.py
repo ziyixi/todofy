@@ -3,7 +3,7 @@
 
 Outputs (GITHUB_OUTPUT, "true"/"false"):
   todofy_check, mail_hero_check, dashboard_check, website_check, flowday_check, links_check, watch_check,
-  newsletter_check, fleet_check, platform_check
+  newsletter_check, fleet_check, platform_check, mailsort_check
                     run that app's full checks
   contracts         run the contract tests: both sides of mail.received.v1, ops-v1 and
                     task-intent-v1, and the dashboard's ops-v1 caller tests (also on a proto/ change: the
@@ -18,7 +18,7 @@ Outputs (GITHUB_OUTPUT, "true"/"false"):
   base              not a flag: the commit the diff started from (empty when everything runs), which
                     "Proto checks" compares the IDL with.
   todofy_deploy, mail_hero_deploy, dashboard_deploy, website_deploy, flowday_deploy, links_deploy,
-  watch_deploy, newsletter_deploy, fleet_deploy, platform_publish, platform_deploy
+  watch_deploy, newsletter_deploy, fleet_deploy, platform_publish, platform_deploy, mailsort_deploy
                     the app, a shared package it compiles in, or a contract file it bundles changed
                     (deploy jobs also require refs/heads/main)
   website_relay_deploy
@@ -35,7 +35,11 @@ Outputs (GITHUB_OUTPUT, "true"/"false"):
   and answers ops-v1 (its Ops entrypoint; Contracts runs both tests) and compiles in packages/edge-auth and the
   TypeScript proto runtime with proto/watch/ui/, proto/todofy/taskintent/ and proto/ops/, so a change to those checks
   and deploys it too. CHECK_ONLY keeps a new app's deploy output false until its resources are ready. Fleet's
-  Access resources are registered; its deployment and Home's binding can now be published after the gate.
+  Access resources are registered; its deployment and Home's binding can now be published after the gate. Mailsort
+  (mailsort/, the Gmail sorting on sort.ziyixi.science, mailsort/docs/design.md) is CHECK_ONLY until "Infra apply"
+  has created its Access application and its AUD is committed: it answers ops-v1 (Contracts runs its tests) and
+  compiles in packages/edge-auth and the TypeScript proto runtime with proto/mailsort/ui/ and proto/ops/. Home binds
+  its Ops entrypoint, so Home's deploy output stays false while mailsort is CHECK_ONLY (HOME_BOUND).
 
 proto/ (the protobuf IDL, proto/README.md) checks every app in PROTO_USERS (an app that depends on @ziyixi/proto or
 ziyixi-proto) and deploys only the apps whose bundle the changed path reaches (proto_deploys): PROTO_USERS[app] names
@@ -113,7 +117,10 @@ APPS = tuple(load_catalog(Path(__file__).resolve().parents[2]).apps)
 PREFIX = {app: app.replace("-", "_") for app in APPS}
 # A new app is checked but its deploy output stays false until its Cloudflare resources are ready. Keep its output
 # present so the workflow and same-SHA reuse have one stable interface.
-CHECK_ONLY: set[str] = set()
+CHECK_ONLY: set[str] = {"mailsort"}
+# Apps whose Ops entrypoint Home binds (dashboard/wrangler.toml): while one of them is CHECK_ONLY its Worker does not
+# exist yet, so Home's deploy (whose binding would name a missing service) waits too.
+HOME_BOUND = {"fleet", "mailsort"}
 KEYS = (
     "todofy_check",
     "mail_hero_check",
@@ -125,6 +132,7 @@ KEYS = (
     "newsletter_check",
     "fleet_check",
     "platform_check",
+    "mailsort_check",
     "contracts",
     "packages",
     "infra",
@@ -141,6 +149,7 @@ KEYS = (
     "fleet_deploy",
     "platform_publish",
     "platform_deploy",
+    "mailsort_deploy",
 )
 DISPATCH = {
     "both": ("todofy", "mail-hero"),
@@ -155,6 +164,7 @@ DISPATCH = {
     "newsletter": ("newsletter",),
     "fleet": ("fleet",),
     "platform": ("platform",),
+    "mailsort": ("mailsort",),
 }
 # The website's Notion relay Worker deploys on its own (website_relay_deploy).
 RELAY = "website/relay/"
@@ -167,7 +177,7 @@ INFRA = ("infra/", "tools/infra-plan-summary/")
 # classified through their own app directory; editing the central inputs alone cannot publish production.
 CLOUD_CONFIG = {"config/cloud.toml", "config/resources.toml", "config/account-resources.toml"}
 # packages/<name>/ -> the apps whose Workers compile it in (a "file:../../packages/<name>" dependency).
-PACKAGE_USERS = {"edge-auth": ("todofy", "mail-hero", "dashboard", "flowday", "links", "watch", "fleet")}
+PACKAGE_USERS = {"edge-auth": ("todofy", "mail-hero", "dashboard", "flowday", "links", "watch", "fleet", "mailsort")}
 # The protobuf IDL (proto/README.md): app -> the languages ("ts", "python") whose generated code and runtime
 # its production bundles compile in; () for a user whose bundles take nothing from it (types only, tests
 # only). test_proto.py derives this map from the apps' manifests and sources.
@@ -182,6 +192,7 @@ PROTO_USERS: dict[str, tuple[str, ...]] = {
     "fleet": ("ts",),
     "platform": ("python",),
     "website": ("ts",),
+    "mailsort": ("ts",),
 }
 # The hand-written runtimes and generators: a change reaches every user of each language listed. The wire
 # profile's own options (common/wire/v1: value rules, map order, binding arguments) are part of both runtimes:
@@ -208,6 +219,8 @@ PROTO_PACKAGES: dict[str, tuple[str, ...]] = {
     "proto/flowday/ui/": ("flowday",),
     "proto/links/ui/": ("links",),
     "proto/watch/ui/": ("watch",),
+    # mailsort's owner API (mailsort.ui.v1): its Worker serves it, its UI calls it.
+    "proto/mailsort/ui/": ("mailsort",),
     "proto/fleet/ui/": ("fleet",),
     "proto/fleet/telemetry/": ("fleet", "platform"),
     "proto/platform/runtime/": ("fleet", "platform"),
@@ -218,8 +231,8 @@ PROTO_PACKAGES: dict[str, tuple[str, ...]] = {
     # CommonReason: Platform bundles Python error aliases.
     "proto/common/errors/": ("platform",),
     # ops-v1 (contracts/ops-v1): every app's Ops entrypoint and the dashboard that calls them.
-    "proto/ops/": ("mail-hero", "todofy", "dashboard", "watch", "website"),
-    "proto/website/sync/": ("mail-hero", "todofy", "dashboard", "watch", "website"),
+    "proto/ops/": ("mail-hero", "todofy", "dashboard", "watch", "website", "mailsort"),
+    "proto/website/sync/": ("mail-hero", "todofy", "dashboard", "watch", "website", "mailsort"),
     # mail.received.v1 (contracts/mail-received-v1's schema is generated from it): Mail Hero builds every event,
     # todofy-core reads every webhook body.
     "proto/mailhero/webhook/": ("mail-hero", "todofy"),
@@ -259,7 +272,7 @@ PROTO_NOT_BUNDLED = (
 # (PROTO_PACKAGES).
 # test_ci_changes.py checks this map against the Workers' imports.
 BUNDLED_BY = {
-    "contracts/ops-v1/ops-v1.ts": ("todofy", "mail-hero", "dashboard", "watch"),
+    "contracts/ops-v1/ops-v1.ts": ("todofy", "mail-hero", "dashboard", "watch", "mailsort"),
     # task-intent-v1: the watch app proposes (bounds), Todofy's gateway forwards (the input bound). The types are
     # generated from proto/ (PROTO_USERS).
     "contracts/task-intent-v1/task-intent-v1.ts": ("todofy", "watch"),
@@ -283,6 +296,7 @@ CHECK_JOBS = {
     "newsletter_check": ("Newsletter checks", "Newsletter image checks"),
     "fleet_check": ("Fleet checks",),
     "platform_check": ("Platform checks",),
+    "mailsort_check": ("Mailsort checks",),
     "contracts": ("Contracts",),
     "packages": ("Shared packages",),
     "infra": ("Infra checks",),
@@ -324,9 +338,9 @@ def outputs(
     }
     for app in APPS:
         result[f"{PREFIX[app]}_check"] = app in checked
-        # Home binds Fleet's entrypoints. Until Fleet's bootstrap is complete, neither Worker can be published by
-        # full fallback, dispatch, a path diff or reused branch checks. No deployment decision bypasses this gate.
-        blocked = app in CHECK_ONLY or (app == "dashboard" and "fleet" in CHECK_ONLY)
+        # Home binds Fleet's and mailsort's entrypoints. Until such an app's resources are ready (CHECK_ONLY), neither its
+        # Worker nor Home can be published by full fallback, dispatch, a path diff or reused branch checks.
+        blocked = app in CHECK_ONLY or (app == "dashboard" and bool(HOME_BOUND & CHECK_ONLY))
         result[f"{PREFIX[app]}_deploy"] = app in deployed and not blocked
     result["platform_publish"] = result.get("platform_deploy", False)
     return {key: result[key] for key in KEYS}

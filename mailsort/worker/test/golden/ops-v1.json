@@ -1,0 +1,331 @@
+{
+  "status/ok": {
+    "version": "ops-v1",
+    "app": "mailsort",
+    "generated_at": "2026-10-06T14:00:00Z",
+    "health": "ok",
+    "modes": {
+      "maintenance": false,
+      "live": true,
+      "sorting_off": false,
+      "mode_limited": false,
+      "breaker": false
+    },
+    "guard": {
+      "level": "normal",
+      "reason": null,
+      "until": null,
+      "set_at": null,
+      "deferred": []
+    },
+    "signals": [],
+    "counters": {
+      "decided_today": 34,
+      "applied_today": 21,
+      "unsure_today": 6,
+      "review_pending": 1,
+      "pending": 1,
+      "gmail_calls_today": 120,
+      "neurons_today": 1520,
+      "neuron_budget": 7000,
+      "last_sync_minutes": 4
+    },
+    "last_backup_at": null,
+    "ui_url": "https://sort.example.com/",
+    "capabilities": [
+      "guard"
+    ]
+  },
+  "status/forced-shadow": {
+    "version": "ops-v1",
+    "app": "mailsort",
+    "generated_at": "2026-10-06T14:00:00Z",
+    "health": "ok",
+    "modes": {
+      "maintenance": false,
+      "live": false,
+      "sorting_off": false,
+      "mode_limited": true,
+      "breaker": false
+    },
+    "guard": {
+      "level": "normal",
+      "reason": null,
+      "until": null,
+      "set_at": null,
+      "deferred": []
+    },
+    "signals": [],
+    "counters": {
+      "decided_today": 34,
+      "applied_today": 21,
+      "unsure_today": 6,
+      "review_pending": 1,
+      "pending": 1,
+      "gmail_calls_today": 120,
+      "neurons_today": 1520,
+      "neuron_budget": 7000,
+      "last_sync_minutes": 4
+    },
+    "last_backup_at": null,
+    "ui_url": "https://sort.example.com/",
+    "capabilities": [
+      "guard"
+    ]
+  },
+  "status/degraded": {
+    "version": "ops-v1",
+    "app": "mailsort",
+    "generated_at": "2026-10-06T14:00:00Z",
+    "health": "degraded",
+    "modes": {
+      "maintenance": false,
+      "live": false,
+      "sorting_off": false,
+      "mode_limited": false,
+      "breaker": true
+    },
+    "guard": {
+      "level": "shed",
+      "reason": "ai_neurons_high",
+      "until": "2026-10-07T01:00:00Z",
+      "set_at": "2026-10-06T13:30:00Z",
+      "deferred": [
+        "full_model",
+        "audit",
+        "embedding_rebuild"
+      ]
+    },
+    "signals": [
+      {
+        "code": "gmail_auth_failed",
+        "severity": "critical",
+        "metrics": {
+          "failures": 3
+        }
+      },
+      {
+        "code": "breaker_tripped",
+        "severity": "warning",
+        "metrics": {
+          "applied_today": 150
+        }
+      },
+      {
+        "code": "ai_quota_exhausted",
+        "severity": "info",
+        "metrics": {
+          "deferred": 0
+        }
+      },
+      {
+        "code": "guard_shed",
+        "severity": "info",
+        "metrics": {
+          "seconds_left": 39600
+        }
+      }
+    ],
+    "counters": {
+      "decided_today": 160,
+      "applied_today": 150,
+      "unsure_today": 3,
+      "review_pending": 0,
+      "pending": 0,
+      "gmail_calls_today": 120,
+      "neurons_today": 8100,
+      "neuron_budget": 7000,
+      "last_sync_minutes": 180
+    },
+    "last_backup_at": null,
+    "ui_url": "https://sort.example.com/",
+    "capabilities": [
+      "guard"
+    ]
+  },
+  "status/not-configured": {
+    "version": "ops-v1",
+    "app": "mailsort",
+    "generated_at": "2026-10-06T14:00:00Z",
+    "health": "degraded",
+    "modes": {
+      "maintenance": false,
+      "live": false,
+      "sorting_off": false,
+      "mode_limited": true,
+      "breaker": false
+    },
+    "guard": {
+      "level": "normal",
+      "reason": null,
+      "until": null,
+      "set_at": null,
+      "deferred": []
+    },
+    "signals": [
+      {
+        "code": "gmail_not_configured",
+        "severity": "warning",
+        "metrics": {}
+      }
+    ],
+    "counters": {
+      "decided_today": 0,
+      "applied_today": 0,
+      "unsure_today": 0,
+      "review_pending": 0,
+      "pending": 0,
+      "gmail_calls_today": 0,
+      "neurons_today": 0,
+      "neuron_budget": 7000
+    },
+    "last_backup_at": null,
+    "ui_url": "https://sort.example.com/",
+    "capabilities": [
+      "guard"
+    ]
+  },
+  "status/off": {
+    "version": "ops-v1",
+    "app": "mailsort",
+    "generated_at": "2026-10-06T14:00:00Z",
+    "health": "ok",
+    "modes": {
+      "maintenance": false,
+      "live": false,
+      "sorting_off": true,
+      "mode_limited": true,
+      "breaker": false
+    },
+    "guard": {
+      "level": "normal",
+      "reason": null,
+      "until": null,
+      "set_at": null,
+      "deferred": []
+    },
+    "signals": [],
+    "counters": {
+      "decided_today": 0,
+      "applied_today": 0,
+      "unsure_today": 0,
+      "review_pending": 0,
+      "pending": 0,
+      "gmail_calls_today": 0,
+      "neurons_today": 0,
+      "neuron_budget": 7000
+    },
+    "last_backup_at": null,
+    "ui_url": "https://sort.example.com/",
+    "capabilities": [
+      "guard"
+    ]
+  },
+  "status/sync-stale": {
+    "version": "ops-v1",
+    "app": "mailsort",
+    "generated_at": "2026-10-06T14:00:00Z",
+    "health": "degraded",
+    "modes": {
+      "maintenance": false,
+      "live": false,
+      "sorting_off": false,
+      "mode_limited": false,
+      "breaker": false
+    },
+    "guard": {
+      "level": "normal",
+      "reason": null,
+      "until": null,
+      "set_at": null,
+      "deferred": []
+    },
+    "signals": [
+      {
+        "code": "sync_stale",
+        "severity": "warning",
+        "metrics": {
+          "minutes": 120
+        },
+        "since": "2026-10-06T12:00:00Z"
+      }
+    ],
+    "counters": {
+      "decided_today": 0,
+      "applied_today": 0,
+      "unsure_today": 0,
+      "review_pending": 0,
+      "pending": 0,
+      "gmail_calls_today": 0,
+      "neurons_today": 0,
+      "neuron_budget": 7000,
+      "last_sync_minutes": 120
+    },
+    "last_backup_at": null,
+    "ui_url": "https://sort.example.com/",
+    "capabilities": [
+      "guard"
+    ]
+  },
+  "status/unavailable": {
+    "version": "ops-v1",
+    "app": "mailsort",
+    "generated_at": "2026-10-06T14:00:00Z",
+    "health": "down",
+    "modes": {
+      "maintenance": false
+    },
+    "guard": {
+      "level": "normal",
+      "reason": null,
+      "until": null,
+      "set_at": null,
+      "deferred": []
+    },
+    "signals": [
+      {
+        "code": "status_unavailable",
+        "severity": "critical",
+        "metrics": {}
+      }
+    ],
+    "counters": {},
+    "last_backup_at": null,
+    "ui_url": "https://sort.example.com/",
+    "capabilities": [
+      "guard"
+    ]
+  },
+  "guard/normal": {
+    "level": "normal",
+    "reason": null,
+    "until": null,
+    "set_at": null,
+    "deferred": []
+  },
+  "guard/set-shed": {
+    "ok": {
+      "level": "shed",
+      "reason": "ai_neurons_high",
+      "until": "2026-10-07T01:00:00Z",
+      "set_at": "2026-10-06T13:30:00Z",
+      "deferred": [
+        "full_model",
+        "audit",
+        "embedding_rebuild"
+      ]
+    }
+  },
+  "guard/cleared": {
+    "ok": {
+      "level": "normal",
+      "reason": null,
+      "until": null,
+      "set_at": null,
+      "deferred": []
+    }
+  },
+  "guard/refused-too-far": {
+    "error": "invalid_input"
+  }
+}
