@@ -4,17 +4,19 @@
  * `authorize` hook adds, for every method but GET, the CSRF check and MAINTENANCE_MODE before the body is read.
  *
  * The work runs in todofy-core: each rpc but GetIntegration is one call of TodofyCore.owner_ui (the coordinator's
- * RPC method) with the rpc's name and the decoded request in wire JSON, and the answer is read leniently with the
- * generated code and written again by the transcoder. The gateway adds only what is transport: AIP-158 page
- * tokens (proto/ts/page-token.ts, bound to the list's other parameters; TodofyCore sees and returns the cursor
- * inside), a made-up request_id for a mutation sent without one (so it is not deduplicated), Retry-After, and the
- * mapping of each reason to its google.rpc.Code and the owner's copy. A failed core call (the object down, a
- * deploy in progress) is UNAVAILABLE; TodofyCore answers its own bugs (a Python exception, an answer its codec
- * refuses) as the reason INTERNAL, and an answer the generated code here cannot read is INTERNAL too.
+ * RPC method) with the rpc's name and the decoded request in wire JSON. TodofyCore writes every answer with the wire
+ * profile (core/owner_ui.answer), so an answer goes out as it came (PreEncoded), unless it is a list's page: that is
+ * read leniently with the generated code, given its page token and written again by the transcoder. The gateway adds
+ * only what is transport: AIP-158 page tokens (proto/ts/page-token.ts, bound to the list's other parameters;
+ * TodofyCore sees and returns the cursor inside), a made-up request_id for a mutation sent without one (so it is not
+ * deduplicated), Retry-After, and the mapping of each reason to its google.rpc.Code and the owner's copy. A failed
+ * core call (the object down, a deploy in progress) is UNAVAILABLE; TodofyCore answers its own bugs (a Python
+ * exception, an answer its codec refuses) as the reason INTERNAL, and a page the generated code here cannot read is
+ * INTERNAL too.
  * GetIntegration is composed here from the gateway's own facts and TodofyCore's setup().
  */
 import type { CommonReason } from '@ziyixi/proto/common/errors/v1/errors_pb';
-import { HttpTranscoder, type RouteInfo, type ServiceHandlers, type ShapeOf } from '@ziyixi/proto/http-transcoder';
+import { HttpTranscoder, PreEncoded, type RouteInfo, type ServiceHandlers, type ShapeOf } from '@ziyixi/proto/http-transcoder';
 import { decodePageToken, encodePageToken, PageTokenError, type PageParameters } from '@ziyixi/proto/page-token';
 import { create, type DescMessage, type DescMethod, type JsonObject, type JsonValue, type Message } from '@ziyixi/proto/protobuf';
 import { Code, errorDetail, RpcError, type ErrorDetail } from '@ziyixi/proto/rpc-status';
@@ -92,9 +94,14 @@ function coreRefusal(answer: UiRefusal): RpcError {
   return uiError(reason, details, headers);
 }
 
+/** Whether an rpc is an AIP-158 list, whose answer gets the page token the gateway makes from TodofyCore's cursor. */
+export function isPaged(method: DescMethod): boolean {
+  return method.input.fields.some((field) => field.name === 'page_token');
+}
+
 /** The handler of an rpc TodofyCore answers: one owner_ui call, with the page token and request_id handled here. */
-function forwarded(method: DescMethod): (request: Message, ctx: UiContext) => Promise<Message> {
-  const paged = method.input.fields.some((field) => field.name === 'page_token');
+function forwarded(method: DescMethod): (request: Message, ctx: UiContext) => Promise<Message | PreEncoded> {
+  const paged = isPaged(method);
   const idempotent = method.input.fields.some((field) => field.name === 'request_id');
   return async (request, ctx) => {
     const wire: JsonObject = { ...toWire<DescMessage>(method.input, request) };
@@ -118,8 +125,11 @@ function forwarded(method: DescMethod): (request: Message, ctx: UiContext) => Pr
       throw uiError('UNAVAILABLE');
     }
     if ('error' in answer) throw coreRefusal(answer);
+    // Already the bytes toWire would write (test/pre-encoded.test.ts): reading and writing them again cost up to 6 ms
+    // of Free's 10 for the largest answers (a 1.9 MB legacy text, every stored report).
+    if (!paged) return new PreEncoded(answer.ok);
     const message = fromWire(method.output, JSON.parse(answer.ok)).message as Message & { nextPageToken?: string };
-    if (paged && answer.next_cursor !== null) message.nextPageToken = encodePageToken(JSON.parse(answer.next_cursor) as JsonValue, parameters);
+    if (answer.next_cursor !== null) message.nextPageToken = encodePageToken(JSON.parse(answer.next_cursor) as JsonValue, parameters);
     return message;
   };
 }

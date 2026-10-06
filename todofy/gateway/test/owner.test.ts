@@ -204,7 +204,18 @@ describe('todofy.ui.v1 through the transcoder', () => {
     expect(line?.request_id).toMatch(/^[0-9a-f]{16}$/);
   });
 
-  it('answers UNAVAILABLE when TodofyCore cannot be reached, and INTERNAL for an answer it cannot read', async () => {
+  it('passes an answer that is not a page through as TodofyCore wrote it', async () => {
+    const text = JSON.stringify({ name: `legacyTexts/${EVENT}`, create_time: AT, text: '旧邮件 "quoted" \\ \r\n' });
+    const { env, core: calls } = fakes({}, () => ({ ok: text, next_cursor: null }));
+    const response = await owner(env, `/api/v1/legacyTexts/${EVENT}`);
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-type')).toBe('application/json; charset=utf-8');
+    expectPrivate(response);
+    expect(await response.text()).toBe(text);
+    expect(calls[0]?.args.slice(1)).toEqual(['GetLegacyText', JSON.stringify({ name: `legacyTexts/${EVENT}` }), null]);
+  });
+
+  it('answers UNAVAILABLE when TodofyCore cannot be reached, and INTERNAL for a page it cannot read', async () => {
     const down = await owner(fakes({}, () => {
       throw new Error('stub down');
     }).env, '/api/v1/serviceStatus');
@@ -212,7 +223,7 @@ describe('todofy.ui.v1 through the transcoder', () => {
     expect(await statusReason(down)).toBe('UNAVAILABLE');
     expectPrivate(down);
 
-    const garbled = await owner(fakes({}, () => uiOk({ name: 7 })).env, '/api/v1/serviceStatus');
+    const garbled = await owner(fakes({}, () => uiOk({ mail_events: 7 })).env, '/api/v1/mailEvents');
     expect(garbled.status).toBe(500);
     expect(await statusReason(garbled)).toBe('INTERNAL');
   });
