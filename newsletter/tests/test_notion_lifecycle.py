@@ -8,6 +8,7 @@ import fastapi
 import pytest
 
 import newsletter.adapters as adapters
+import newsletter.collection.instructions as instructions
 import newsletter.editor as editor
 import newsletter.lifecycle as lifecycle
 import newsletter.notion_cli as notion_cli
@@ -104,6 +105,33 @@ async def test_destination_failure_does_not_leave_content_worker_running(
             settings=dataclasses.replace(settings, notion_archive_private=True),
         ):
             pytest.fail("Changed audience/privacy was silently adopted")
+
+
+async def test_live_startup_ignores_the_offline_fixture_directions(
+    settings, monkeypatch, tmp_path
+):
+    # Live runs freeze discovery directions from source guides or
+    # content-config; the legacy collection directions feed only mock mode.
+    async def checked(*args, **kwargs):
+        return preflight.PreflightReport((), ())
+
+    legacy = tmp_path / "unreadable-legacy-directions"
+    real_loader = instructions.load_instructions
+
+    def guarded(directory):
+        if directory == legacy:
+            pytest.fail("Live startup read the offline fixture directions")
+        return real_loader(directory)
+
+    monkeypatch.setattr(preflight, "preflight", checked)
+    monkeypatch.setattr(instructions, "load_instructions", guarded)
+    app = fastapi.FastAPI()
+    async with lifecycle.service_lifespan(
+        app,
+        settings=dataclasses.replace(settings, instructions_dir=legacy),
+        start_worker=False,
+    ):
+        assert isinstance(app.state.worker.pipeline, pipeline.DagPipeline)
 
 
 def test_status_missing_database_never_creates_it(tmp_path):

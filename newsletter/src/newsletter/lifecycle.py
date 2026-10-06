@@ -73,13 +73,17 @@ async def service_lifespan(
             app.state.preflight = await preflight.preflight(
                 settings, store=store
             )
-            instructions.load_instructions(settings.instructions_dir)
-            runs = repository.RunRepository(store)
-            runs.recover()
-            workflow_state = state.WorkflowState(store)
             # Live runs execute the frozen topic DAG; mock mode runs the
             # offline fixture pipeline and never contacts a provider.
             live = settings.mode == "live"
+            if not live:
+                # The legacy collection directions feed only the offline
+                # fixture pipeline. Live runs freeze discovery directions via
+                # freeze_workflow below, so only mock mode validates these.
+                instructions.load_instructions(settings.instructions_dir)
+            runs = repository.RunRepository(store)
+            runs.recover()
+            workflow_state = state.WorkflowState(store)
             if live:
                 # Fail startup on malformed graphs or missing instruction
                 # resources.
