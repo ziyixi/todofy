@@ -2705,7 +2705,7 @@ class HostnameGuard(unittest.TestCase):
             with self.subTest(config=relative):
                 if relative == "website/wrangler.toml":
                     # The site release runs the guard through `pnpm release hostnames` and inside `deploy`.
-                    self.assertIn("\n            pnpm release hostnames\n", release)
+                    self.assertIn("\n        run: pnpm release hostnames\n", release)
                 else:
                     self.assertIn(f"--config {relative}", text)
 
@@ -2722,88 +2722,6 @@ class HostnameGuard(unittest.TestCase):
         self.assertLess(steps.index("await deps.hostnames.check()"), steps.index("await deps.wrangler.deployTriggers()"))
         cloudflare = (REPO / "website" / "scripts" / "release" / "cloudflare.ts").read_text()
         self.assertIn('path.resolve(cwd, "..", "tools", "cf-guard", "cf-guard.mjs")', cloudflare)
-
-    @staticmethod
-    def release_guard_script():
-        """The `run: |` script of the release's guard step, dedented."""
-        release = (REPO / ".github" / "workflows" / "website-release.yml").read_text()
-        step = release[release.index("- name: Check the wrangler.toml hostnames against production\n") :].split("\n      - ", 1)[0]
-        block = step.split("        run: |\n", 1)[1]
-        return "".join(line[10:] + "\n" for line in block.split("\n") if line.strip())
-
-    def test_the_website_release_guard_skips_only_a_commit_that_predates_it(self):
-        """The release workflow comes from main, the code from the green commit, which can predate the guard
-        (no `pnpm release hostnames` there). Only a commit whose history never had tools/cf-guard is skipped;
-        one that deleted it, or a git failure, still runs the guard or fails."""
-        script = self.release_guard_script()
-        git = shutil.which("git")
-        bash = shutil.which("bash")
-        if not git or not bash:
-            self.skipTest("needs git and bash")
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            stub = root / "bin"
-            stub.mkdir()
-            calls = root / "pnpm-calls"
-            (stub / "pnpm").write_text(f'#!/bin/sh\necho "$*" >> "{calls}"\n')
-            (stub / "pnpm").chmod(0o755)
-            env = {
-                "PATH": f"{stub}{os.pathsep}{os.environ.get('PATH', '')}",
-                "HOME": directory,
-                "GIT_CONFIG_GLOBAL": os.devnull,
-                "GIT_CONFIG_NOSYSTEM": "1",
-                "GIT_CEILING_DIRECTORIES": directory,
-                "GIT_AUTHOR_NAME": "t",
-                "GIT_AUTHOR_EMAIL": "t@example.com",
-                "GIT_COMMITTER_NAME": "t",
-                "GIT_COMMITTER_EMAIL": "t@example.com",
-            }
-            repo = root / "repo"
-            (repo / "website").mkdir(parents=True)
-
-            def git_run(*args):
-                subprocess.run([git, *args], cwd=repo, env=env, check=True, capture_output=True)
-
-            def commit(message):
-                git_run("add", "-A")
-                git_run("commit", "-q", "--allow-empty", "-m", message)
-
-            def step():
-                if calls.exists():
-                    calls.unlink()
-                result = subprocess.run(
-                    [bash, "--noprofile", "--norc", "-eo", "pipefail", "-c", script],
-                    cwd=repo / "website", env=env, capture_output=True, text=True,
-                )
-                ran = calls.read_text() if calls.exists() else ""
-                return result.returncode, result.stdout, ran
-
-            git_run("init", "-q")
-            git_run("config", "gc.auto", "0")
-            git_run("config", "maintenance.auto", "false")
-            (repo / "website" / "index.txt").write_text("site\n")
-            commit("site before the guard")
-            code, out, ran = step()
-            self.assertEqual((code, ran), (0, ""), out)
-            self.assertIn("cf-guard: skipped", out)
-
-            (repo / "tools" / "cf-guard").mkdir(parents=True)
-            (repo / "tools" / "cf-guard" / "cf-guard.mjs").write_text("// guard\n")
-            commit("add the guard")
-            code, out, ran = step()
-            self.assertEqual((code, ran), (0, "release hostnames\n"), out)
-
-            shutil.rmtree(repo / "tools")
-            commit("delete the guard")
-            code, out, ran = step()
-            self.assertEqual(ran, "release hostnames\n", out)
-            self.assertNotIn("skipped", out)
-
-            # Not a repository (git fails): the step fails, it does not skip.
-            shutil.rmtree(repo / ".git")
-            code, out, ran = step()
-            self.assertNotEqual(code, 0)
-            self.assertEqual(ran, "")
 
     def test_the_changes_job_tests_the_guard(self):
         self.assertIn("run: node --test tools/cf-guard/test/*.test.mjs tools/cloud-config/tests/worker-secrets.test.mjs\n", workflow_jobs()["changes"])
