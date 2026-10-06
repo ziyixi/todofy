@@ -48,30 +48,51 @@ describe('real workerd SQLite receipt persistence', () => {
       health: 'degraded', signals: [
         { code: 'newsletter_unavailable', severity: 'critical' },
         { code: 'deployment_pending', severity: 'warning' },
+        { code: 'newsletter_delivery_overdue', severity: 'warning' },
       ],
     });
   });
-  it('publishes the stable unknown count on the signal without claiming a process failure or resolving source records', async () => {
+  it('warns on unknown side effects only, without claiming a process failure or resolving source records', async () => {
     const h = await start();
-    const report = structuredClone(fixture);
+    const unknownByKind = {
+      interrupted_activities: 0, packets: 0, workflow_attempts: 30,
+      notion_entities: 0, notion_versions: 0, delivery: 2,
+    };
+    const report = structuredClone({
+      ...fixture,
+      newsletter: {
+        ...fixture.newsletter, unknown_count: 32, unknown_revision: 7, unknown_by_kind: unknownByKind,
+        latest_delivery_state: 'provider_accepted', latest_delivery_time: '2026-10-02T23:00:00Z',
+      },
+    });
     const workload = report.runtime.workloads[0];
     if (!workload) throw new Error('missing fixture workload');
     workload.health_state = 'degraded';
     workload.unknown_count = 32;
-    report.newsletter.unknown_count = 32;
     expect((await h.send(report)).status).toBe(200);
     expect(await h.status('newsletter', AT)).toMatchObject({
-      signals: [{ code: 'newsletter_unknown', severity: 'warning', metrics: { unknown_count: 32 } }],
-      counters: { unknown_count: 32 },
+      health: 'ok',
+      signals: [
+        { code: 'newsletter_side_effect_unknown', severity: 'warning', metrics: { count: 2 } },
+        { code: 'newsletter_delivery_accepted', severity: 'info' },
+        { code: 'newsletter_unknown', severity: 'info', metrics: { unknown_count: 32, unknown_revision: 7 } },
+      ],
+      counters: { unknown_count: 32, unknown_workflow_attempts: 30 },
     });
     expect(await h.view()).toMatchObject({ report: { newsletter: { worker_healthy: true, unknown_count: 32 } } });
     report.sequence = 2;
     report.receipt_id = 'f47ab98a-3b34-4dd3-8924-2a1ead4da4dc';
     report.newsletter.unknown_count = 33;
+    report.newsletter.unknown_by_kind.delivery = 3;
+    report.newsletter.unknown_revision = 8;
     workload.unknown_count = 33;
     expect((await h.send(report)).status).toBe(200);
     expect(await h.status('newsletter', AT)).toMatchObject({
-      signals: [{ code: 'newsletter_unknown', severity: 'warning', metrics: { unknown_count: 33 } }],
+      signals: [
+        { code: 'newsletter_side_effect_unknown', severity: 'warning', metrics: { count: 3 } },
+        { code: 'newsletter_delivery_accepted', severity: 'info' },
+        { code: 'newsletter_unknown', severity: 'info', metrics: { unknown_count: 33, unknown_revision: 8 } },
+      ],
       counters: { unknown_count: 33 },
     });
   });
