@@ -48,13 +48,12 @@ imported at runtime on the 导入 page, never committed.
 Landing order:
 1. Done 2026-10-06: `feat/mailsort` landed at `899b063` with `mailsort` in CHECK_ONLY (the smoke now stops the whole
    wrangler process group; a passing smoke used to hang the Linux job until its timeout).
-2. Infra apply: the plan is now `create=1,delete=2` (the mailsort Access app, plus Lab's two deletes). It needs the
-   owner's Lab teardown first (section below, steps 3–4); the owner's one apply then does both. Never dispatch it
-   from an agent while it deletes.
-3. Commit its AUD in `config/resources.toml`, run `tools/cloud-config/generate.py`, add the id to `infra/ids.tf`,
-   remove `mailsort` from CHECK_ONLY; land. This deploys mailsort and Home.
-4. Record the `MailsortState` namespace id in `config/resources.toml` [durable_objects]; check
-   `https://sort.ziyixi.science/status`.
+2. Done 2026-10-07: the owner's Infra apply (run `37582770604`) created the mailsort Access app and deleted Lab's two
+   objects; its verify plan was no-op (32).
+3. `feat/mailsort-live`: AUD and application id in `config/resources.toml` (`generate.py` writes them into
+   `mailsort/wrangler.toml` and `infra/ids.tf`), CHECK_ONLY emptied; landing deploys mailsort and Home.
+4. After that deploy: record the `MailsortState` namespace id in `config/resources.toml` [durable_objects] (and drop it
+   from `FIRST_DEPLOY_PENDING` in `tools/service-catalog/inventory.py`); check `https://sort.ziyixi.science`.
 
 Already set: production secret `MAILSORT_CSRF_SIGNING_KEY`, variable `MAILSORT_MODE=shadow` (the mode ceiling).
 
@@ -99,7 +98,8 @@ Landed after it (2026-10-06):
    `dag` with dual-database Notion, no open non-story runs or pending repairs, only old blocked history. A leftover
    `NOTION_DATA_SOURCE_ID` in the private Secret is ignored. Verified: Fleet reports
    unknown_count 0 at `befa1e7`; Home shows no Newsletter item. Left: the next daily issue is accepted.
-2. `chore/decommission-lab` (landing 2026-10-06): Lab (paper radar) removed from the tree. Production teardown, in order:
+2. `chore/decommission-lab` (landed 2026-10-06): Lab (paper radar) removed from the tree. Production teardown, in order
+   (steps 3–5 done 2026-10-07 by the owner; `LAB_WORKER_SECRETS` no longer existed):
    1. Wait for Home's deploy: its release removes the live `LAB` service binding (reason
       `RETIRED_SERVICE_BINDING` in `tools/cloud-release/control.py`).
    2. Until step 4 these are red by design: Infra drift (a planned delete), the reconcile inventory check (lab
@@ -109,8 +109,9 @@ Landed after it (2026-10-06):
       and D1), output changes 2; the owner dispatches Infra apply with the expect it prints
       (`create=1,delete=2,outputs=2@…`) and `confirm_destructive=delete-replace-forget`.
    5. Owner: delete the GitHub `production` secrets `LAB_CSRF_SIGNING_KEY` and `LAB_WORKER_SECRETS`.
-   6. Agent, after the apply: remove `infra/retired.tf`, its pairs in `.github/scripts/infra_guard.py` and the
-      `dashboard: {LAB}` entry of `RETIRED_SERVICE_BINDINGS`.
+   6. Agent, once Home's deploy (with mailsort live) has dropped the live `LAB` binding: remove `infra/retired.tf`, its
+      pairs in `.github/scripts/infra_guard.py` (its test then needs a synthetic pair) and the `dashboard: {LAB}` entry
+      of `RETIRED_SERVICE_BINDINGS`.
 3. Later, from the same review: Newsletter prompts as resources and mechanical cleanup, one shared deploy-vars
    engine for the Workers, platform helper de-duplication (and the 1000 vs 2^31 monitor-count cap mismatch), and a
    shorter HANDOFF.

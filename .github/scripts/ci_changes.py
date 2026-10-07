@@ -36,10 +36,10 @@ Outputs (GITHUB_OUTPUT, "true"/"false"):
   TypeScript proto runtime with proto/watch/ui/, proto/todofy/taskintent/ and proto/ops/, so a change to those checks
   and deploys it too. CHECK_ONLY keeps a new app's deploy output false until its resources are ready. Fleet's
   Access resources are registered; its deployment and Home's binding can now be published after the gate. Mailsort
-  (mailsort/, the Gmail sorting on sort.ziyixi.science, mailsort/docs/design.md) is CHECK_ONLY until "Infra apply"
-  has created its Access application and its AUD is committed: it answers ops-v1 (Contracts runs its tests) and
-  compiles in packages/edge-auth and the TypeScript proto runtime with proto/mailsort/ui/ and proto/ops/. Home binds
-  its Ops entrypoint, so Home's deploy output stays false while mailsort is CHECK_ONLY (HOME_BOUND).
+  (mailsort/, the Gmail sorting on sort.ziyixi.science, mailsort/docs/design.md) is checked and deployed since its
+  Access application was created (2026-10-07): it answers ops-v1 (Contracts runs its tests) and compiles in
+  packages/edge-auth and the TypeScript proto runtime with proto/mailsort/ui/ and proto/ops/. Home binds its Ops
+  entrypoint, so while an app Home binds is CHECK_ONLY, Home's deploy output stays false too (HOME_BOUND).
 
 proto/ (the protobuf IDL, proto/README.md) checks every app in PROTO_USERS (an app that depends on @ziyixi/proto or
 ziyixi-proto) and deploys only the apps whose bundle the changed path reaches (proto_deploys): PROTO_USERS[app] names
@@ -117,7 +117,7 @@ APPS = tuple(load_catalog(Path(__file__).resolve().parents[2]).apps)
 PREFIX = {app: app.replace("-", "_") for app in APPS}
 # A new app is checked but its deploy output stays false until its Cloudflare resources are ready. Keep its output
 # present so the workflow and same-SHA reuse have one stable interface.
-CHECK_ONLY: set[str] = {"mailsort"}
+CHECK_ONLY: set[str] = set()
 # Apps whose Ops entrypoint Home binds (dashboard/wrangler.toml): while one of them is CHECK_ONLY its Worker does not
 # exist yet, so Home's deploy (whose binding would name a missing service) waits too.
 HOME_BOUND = {"fleet", "mailsort"}

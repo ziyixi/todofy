@@ -24,6 +24,7 @@ locals {
     # Created by "Infra apply", not imported (README.md "Adding an app"); the id read in step 4, with the AUD in
     # watch/wrangler.toml.
     "watch" = "7d5134ca-1362-4fa3-9c84-d2ee9afb656c"
+    "mailsort"  = "3d8f08e0-1327-4408-99c8-2431abed5892"
   }
   flowday_app_ids = {
     "flowday"        = "3d956afb-07ea-4b5e-802e-27fd29ca4587"

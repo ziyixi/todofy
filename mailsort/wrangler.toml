@@ -15,9 +15,8 @@
 # `wrangler deploy --secrets-file` sends keep_bindings secret_text, so a secret the file does not name stays as it is
 # (deploy/test/secrets-kept.test.mjs checks the pinned wrangler), and no [secrets] required list is declared here.
 #
-# Before the first deploy: the Access application "mailsort" (the whole host) is created by infra/ and "Infra apply";
-# its AUD is then committed below as ACCESS_AUDIENCE (deploy/deploy-vars.mjs refuses a real deploy until then, and
-# .github/scripts/ci_changes.py keeps the app check-only). No workers.dev, no preview URL. Rollback (README.md "Deploy"): detach the
+# The Access application "mailsort" (the whole host) is created by infra/ and "Infra apply"; its AUD is committed below
+# as ACCESS_AUDIENCE (deploy/deploy-vars.mjs refuses a real deploy without it). No workers.dev, no preview URL. Rollback (README.md "Deploy"): detach the
 # Custom Domain by hand, then revert.
 #
 # Run wrangler from worker/ (the pinned wrangler lives in worker/node_modules) with --config ../wrangler.toml. Local
@@ -73,8 +72,8 @@ binding = "AI"
 # The app's host: the only origin a mutation may come from (CSRF).
 PUBLIC_HOST = "sort.ziyixi.science"
 ACCESS_ISSUER = "https://ziyixi.cloudflareaccess.com"
-# ACCESS_AUDIENCE, the AUD tag of the Access application "mailsort" (the whole host; infra/access.tf
-# owner_apps["mailsort"]), is added here once "Infra apply" has created the application: its value goes into
-# config/resources.toml [access_audiences] and tools/cloud-config/generate.py writes it below (infra/README.md "Adding
-# an app" step 4). Until then the Worker answers every owner request ACCESS_NOT_CONFIGURED (it fails closed), and
-# deploy/deploy-vars.mjs refuses a real deploy.
+# The AUD tag of the Access application "mailsort" (the whole host; infra/access.tf owner_apps["mailsort"]), created
+# by "Infra apply" on 2026-10-07: config/resources.toml [access_audiences] holds it and tools/cloud-config/generate.py
+# writes it here; its application id is in infra/ids.tf. "Infra drift" compares this value with the application's
+# every day.
+ACCESS_AUDIENCE = "ab055212313461d3bbafc9152984427cb7a512f0afdbf1e18266b13f7be35b01"

@@ -186,9 +186,9 @@ class Classify(unittest.TestCase):
                 self.assertEqual(push([path], ref=BRANCH), expect(F, F, F, F, F, **FLOWDAY))
 
     def test_every_app_has_stable_check_and_deploy_outputs_during_bootstrap(self):
-        """CHECK_ONLY suppresses deployment, never the output that the workflow consumes. Mailsort is the one app in it
-        until "Infra apply" creates its Access application (mailsort/docs/design.md section 12)."""
-        self.assertEqual(ci_changes.CHECK_ONLY, {"mailsort"})
+        """CHECK_ONLY suppresses deployment, never the output that the workflow consumes. No app is in it since
+        mailsort's Access application was created (2026-10-07); a new app joins it until its resources are ready."""
+        self.assertEqual(ci_changes.CHECK_ONLY, set())
         for app in ci_changes.APPS:
             with self.subTest(app=app):
                 self.assertIn(f"{ci_changes.PREFIX[app]}_check", ci_changes.KEYS)
@@ -215,22 +215,23 @@ class Classify(unittest.TestCase):
         finally:
             ci_changes.CHECK_ONLY = saved
 
-    def test_mailsort_is_checked_but_neither_it_nor_home_deploys_until_its_access_app_exists(self):
-        for result in (ci_changes.everything(), ci_changes.dispatched("all"), push(["mailsort/worker/src/pipeline.ts", "dashboard/worker/src/index.ts"])):
-            with self.subTest(result=result):
-                self.assertTrue(result["mailsort_check"])
-                self.assertTrue(result["dashboard_check"])
-                self.assertFalse(result["mailsort_deploy"])
-                self.assertFalse(result["dashboard_deploy"])
-        self.assertEqual({key for key, value in ci_changes.everything().items() if not value}, {"mailsort_deploy", "dashboard_deploy"})
+    def test_mailsort_deploys_and_holding_it_back_would_hold_home_too(self):
+        """Mailsort deploys like any app since its Access application exists; were it CHECK_ONLY again, Home, which
+        binds its Ops entrypoint, would wait with it (HOME_BOUND)."""
+        result = push(["mailsort/worker/src/pipeline.ts"])
+        self.assertTrue(result["mailsort_deploy"])
+        self.assertFalse(result["dashboard_deploy"])
+        self.assertFalse(push(["mailsort/app.toml"])["mailsort_deploy"])
+        self.assertEqual({key for key, value in ci_changes.everything().items() if not value}, set())
         saved = ci_changes.CHECK_ONLY
         try:
-            ci_changes.CHECK_ONLY = set()
-            result = push(["mailsort/worker/src/pipeline.ts"])
-            self.assertTrue(result["mailsort_deploy"])
-            self.assertFalse(result["dashboard_deploy"])
-            self.assertFalse(push(["mailsort/app.toml"])["mailsort_deploy"])
-            self.assertTrue(ci_changes.everything()["dashboard_deploy"])
+            ci_changes.CHECK_ONLY = {"mailsort"}
+            for result in (ci_changes.everything(), ci_changes.dispatched("all"), push(["mailsort/worker/src/pipeline.ts", "dashboard/worker/src/index.ts"])):
+                with self.subTest(result=result):
+                    self.assertTrue(result["mailsort_check"])
+                    self.assertTrue(result["dashboard_check"])
+                    self.assertFalse(result["mailsort_deploy"])
+                    self.assertFalse(result["dashboard_deploy"])
         finally:
             ci_changes.CHECK_ONLY = saved
 

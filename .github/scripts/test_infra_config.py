@@ -89,10 +89,6 @@ _spec.loader.exec_module(generate)
 # The activation commit records the real Access IDs/AUD and removes CHECK_ONLY in the same change.
 AHEAD_OF_DEPLOY = ({"fleet": load_profile(REPO)["platform_hostname"]}
                   if "fleet" in test_wrangler_configs.ci_changes.CHECK_ONLY else {})
-# mailsort's Access application is declared ahead of its Worker's first deploy, the same way: until "Infra apply"
-# creates it and its AUD and application id are committed (and CHECK_ONLY is emptied), its config names the host only.
-if "mailsort" in test_wrangler_configs.ci_changes.CHECK_ONLY:
-    AHEAD_OF_DEPLOY["mailsort"] = "sort." + load_profile(REPO)["zone"]
 # Hosts an Access application may still list although no wrangler.toml declares them. Empty since FlowDay's F3
 # staging host left both FlowDay applications after the F4 cutover (README.md "FlowDay"); a rollback that adds a host
 # back to an application adds it here in the same commit (test_retiring_hosts_are_exact).

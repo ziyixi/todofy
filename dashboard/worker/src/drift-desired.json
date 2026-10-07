@@ -470,6 +470,11 @@
       "crons": [],
       "bindings": [
         {
+          "name": "ACCESS_AUDIENCE",
+          "type": "plain_text",
+          "source": "config"
+        },
+        {
           "name": "ACCESS_ISSUER",
           "type": "plain_text",
           "source": "config"
