@@ -26,27 +26,30 @@ Four tabs under a header whose one status line shows the mode in force, the Gmai
   labels, or removing the label) count too.
 - **概览**: today's numbers (处理, 已打标签, 待审, 拿不准), the flow of today's mail as a Sankey diagram (drawn at zero on
   a day without mail), the precision bound of each label with verdicts, the model budget and the latest error.
-- **标签**: add the labels (a path such as `金融/投资`, shown as a tree; a description of what belongs there; the threshold;
-  whether it implies a trusted sender; 归档, off to keep its mail in the inbox; 敏感, to keep no example of it). The
-  model reads `path: description` for each label with a description and is never offered one without; one language
-  and 60–120 characters keep every call cheap (`docs/design.md` §8.1). A label's Gmail name is its path; when Gmail
-  already has a label of exactly that name (made by hand), it is adopted (沿用) instead of created twice, and the
-  owner's other labels are never touched. 正式打 per label lets live mode write it; it turns itself off when the
-  label's precision bound falls below the target. Deleting a label leaves its Gmail label and mails alone, and its
-  writes can no longer be undone. Its 规则 button opens the rules: approve the ones proposed from repeated
-  corrections, add exact-address, domain, mailing-list or delivered-to rules by hand (with subject words to include or
-  exclude, a carve-out tried before the sender's plain rule, and keep in inbox). A sender rule fires only when DMARC
-  passed aligned with the From domain, a list rule only with a DKIM signature of the list's domain
-  (`docs/design.md` §4.3).
+- **标签**: everything about a label in one place. A search box finds a label by its path or by a rule's sender,
+  domain or list. The labels form a tree grouped by their top level (开发 › CI通知, 平台工具), one line each: the
+  name, the rule count, a small precision bar once it has verdicts, and 正式打, which lets live mode write it (it turns
+  itself off when the label's precision bound falls below the target). A row opens its detail under it: the
+  description (the model reads `path: description` and never picks a label without one; one language and 60–120
+  characters keep every call cheap, `docs/design.md` §8.1), 留在收件箱, the rules (approve a proposal from repeated
+  corrections, stop or delete one behind ⋯, and 添加规则: one address or domain, its kind inferred, with the kind for a
+  list or a delivered-to address, subject words to include or exclude, a carve-out tried before the sender's plain
+  rule, and keep in inbox under 更多), the examples (listed on demand, deleted one by one) and 高级 (the threshold,
+  可信, 敏感 to keep no example, 启用, rename, delete). A sender rule fires only when DMARC passed aligned with the
+  From domain, a list rule only with a DKIM signature of the list's domain (`docs/design.md` §4.3). A label's Gmail
+  name is its path; when Gmail already has a label of exactly that name (made by hand), it is adopted (沿用) instead
+  of created twice, and the owner's other labels are never touched. Deleting a label leaves its Gmail label and
+  mails alone, and its writes can no longer be undone. With no label at all, 套用推荐模板 previews the 15
+  recommended labels and adds them.
 - **设置**: the mode (关闭 · 影子 · 正式, with the deployment's ceiling or a tripped breaker in one line, and 解除熔断);
   撤销, the undo of a time range (1 hour, 24 hours, 7 days or your own), of one label when chosen, previewed first;
   从 Gmail 同步 (follows renames and deletions made in Gmail and adopts such labels; it never imports another one);
   and 导出过滤器, the active rules as a Gmail filter file to import in Gmail's settings (label, and archive unless
   kept; left out are trust and DMARC rules, rules with subject conditions and the plain rules of the senders they
   cover, since Gmail would apply both). Emergency stop: 设置 → 关闭 (`docs/design.md` §10).
-- **API only** (no page since 2026-10-07): ImportRules and ExportRules (the owner's rule file, the template of 15
-  recommended labels, previewed with `validate_only`; a label written with the old `分拣/` prefix means the same
-  label), the examples, the single-entry undo, the write limits, the neuron budget and the thresholds.
+- **API only** (no page since 2026-10-07): ImportRules and ExportRules (the owner's rule file, previewed with
+  `validate_only`; a label written with the old `分拣/` prefix means the same label), the embedding rebuild, the
+  single-entry undo, the write limits, the neuron budget and the default threshold.
 - **What is kept**: decided mail's subject, sender and exact sender keys, and the review queue, for 14 days (the
   daily cleanup runs in every mode, off included); decisions and the ledger without content for 180 days; the flow
   counters (counts only) for 400 days; examples (masked summaries) until you delete them (with their label, by

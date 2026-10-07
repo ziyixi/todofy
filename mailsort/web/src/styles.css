@@ -279,6 +279,22 @@ button.danger {
   color: var(--danger);
 }
 
+/* A smaller button inside a line (a rule's 批准, a menu's actions, 查看). */
+button.small {
+  min-height: 32px;
+  padding: 0 12px;
+  font-size: 13px;
+}
+
+/* The ⋯ of a menu. */
+button.icon {
+  min-width: 32px;
+  min-height: 32px;
+  padding: 0 var(--space-2);
+  font-size: 16px;
+  line-height: 1;
+}
+
 button:disabled {
   opacity: 0.5;
   cursor: default;
@@ -461,6 +477,16 @@ input.switch:checked::before {
   flex: 1 1 10rem;
 }
 
+.actions input {
+  width: auto;
+  min-width: 0;
+  flex: 1 1 12rem;
+}
+
+.actions.center {
+  justify-content: center;
+}
+
 /* The disclosure (更多, 为什么). */
 details.more > summary {
   display: inline-flex;
@@ -487,9 +513,24 @@ details.more[open] > summary::after {
   transform: rotate(-90deg);
 }
 
-details.more > :not(summary) {
+details.more > p {
   color: var(--muted);
   font-size: 13px;
+}
+
+/* What a disclosure folds away when it holds controls (更多, 高级). */
+.more-body {
+  display: grid;
+  gap: 12px;
+  padding-top: var(--space-2);
+}
+
+/* The small menu behind ⋯: its actions appear inline beside it. */
+.menu,
+.menu-items {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
 }
 
 /* The empty state. */
@@ -507,6 +548,10 @@ details.more > :not(summary) {
 
 .card .empty {
   padding: var(--space-3) 0;
+}
+
+.empty .actions {
+  margin-top: var(--space-3);
 }
 
 /* The KPI numbers. */
@@ -768,16 +813,6 @@ details.more > :not(summary) {
   gap: var(--space-2);
 }
 
-.field {
-  display: grid;
-  gap: var(--space-1);
-}
-
-.field > .label {
-  color: var(--muted);
-  font-size: 13px;
-}
-
 .toast {
   position: fixed;
   left: 50%;
@@ -820,29 +855,292 @@ kbd {
   overflow-wrap: anywhere;
 }
 
-/* 标签 and 规则 (until 标签 is redesigned): a tree of cards and their editors. */
-.list {
+/* 标签 (views/labels.ts, label-detail.ts): one tree of labels in a card, a hairline between rows, the top-level
+   groups as quiet headings with their labels indented under them, and a label's detail opened under its row. */
+.tree-box {
   display: grid;
   gap: var(--space-2);
 }
 
-.list.nested {
-  padding-left: 12px;
-  border-left: 1px solid var(--line);
+.tree-head {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: 0 var(--space-3);
+  color: var(--muted);
+  font-size: 13px;
 }
 
-.label-group + .label-group {
-  margin-top: var(--space-3);
+.tree,
+.tree ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
 }
 
-.group-name {
-  margin: 0 0 var(--space-2);
+.tree {
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.tree li + li {
+  border-top: 1px solid var(--line);
+}
+
+.branch-name {
+  display: block;
+  padding: 12px var(--space-3) var(--space-1);
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.leaf-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding-right: var(--space-3);
+}
+
+.leaf-row:hover {
+  background: var(--sunken);
+}
+
+.leaf.open > .leaf-row {
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+/* The row's button: everything on the line but the switch. */
+.leaf-main {
+  display: flex;
+  flex: 1 1 auto;
+  justify-content: flex-start;
+  gap: 12px;
+  min-width: 0;
+  min-height: 48px;
+  padding: var(--space-2) 0 var(--space-2) var(--space-3);
+  border: 0;
+  border-radius: 0;
+  background: none;
+  font-size: 15px;
+  text-align: left;
+  white-space: normal;
+}
+
+.leaf-main:hover {
+  background: none;
+}
+
+.leaf-main:focus-visible {
+  outline-offset: -2px;
+}
+
+.branch .leaf-main {
+  padding-left: var(--space-5);
+}
+
+.leaf-name {
+  display: grid;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.leaf-name > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.leaf.open .leaf-name > span:first-child {
+  font-weight: 600;
+}
+
+.leaf.off .leaf-name {
+  color: var(--muted);
+}
+
+.leaf-hit {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.leaf-count {
+  flex: none;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+/* A proposal waits: a dot by the rule count. */
+.dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-left: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  vertical-align: middle;
+}
+
+/* The precision bar's place, kept when a label has no verdicts so the column stays aligned. */
+.bar-slot {
+  flex: none;
+  width: 32px;
+}
+
+/* The 正式打 switch, its touch target the row's height. */
+.live {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  cursor: pointer;
+}
+
+.live .switch {
+  margin: 0;
+}
+
+.detail {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border-top: 1px solid var(--line);
+  background: var(--bg);
+}
+
+@media (min-width: 520px) {
+  .branch .detail {
+    padding-left: var(--space-5);
+  }
+}
+
+.desc {
+  display: grid;
+  gap: var(--space-1);
+  justify-items: end;
+}
+
+.desc textarea {
+  min-height: 64px;
+  line-height: 1.5;
+  resize: none;
+}
+
+.part {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.part-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.part h3 .meta {
+  font-weight: 400;
+}
+
+/* A rule on one line (wrapping on a phone): kind, value, subject words, state, and its actions on the right. */
+.rule-list,
+.example-list,
+.template {
+  display: grid;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.rule {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 40px;
+  padding: var(--space-1) var(--space-1) var(--space-1) var(--space-2);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.rule.off {
+  color: var(--muted);
+}
+
+/* What the search found. */
+.rule.hit {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.rule-main {
+  display: flex;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-2);
+  min-width: 0;
+}
+
+.rule-value {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.rule-actions {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+/* A small word before its control (更多's 类型). */
+.inline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.add-rule {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.example-list li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-2);
+  padding: var(--space-1) var(--space-1) var(--space-1) var(--space-2);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  font-size: 13px;
+}
+
+.example-list p {
+  flex: 1 1 16rem;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.setting input[type='number'] {
+  width: 7rem;
+}
+
+/* The template's preview: one line per group. */
+.template li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-2);
   font-size: 14px;
 }
 
-.label-subgroup .group-name {
-  margin-top: var(--space-1);
-  font-size: 13px;
+.template strong {
+  font-weight: 600;
 }
 
 /* The flow diagram (flowchart.ts): it scales to its box; below its minimum width (a phone) it keeps that width and

@@ -113,8 +113,8 @@ reads no Gmail and decides nothing, but the alarm still runs and still clears wh
 | A decision's content: masked subject, sender and summary, and the exact sender address, domain, List-Id and delivered-to address | 14 days |
 | The review queue (masked subject and sender) | 14 days after the mail came (an audit sample or a late write failure can queue older mail) |
 | Decisions and the ledger without content (IDs, labels, probabilities, model, states) | 180 days |
-| Examples: a masked summary (subject, sender name and domain, snippet; at most 200 characters) and its embedding | until deleted (with their label, by turning the label 敏感, or DeleteExample in the API), at most 2,000 |
-| Rules: the exact sender address, domain, List-Id or delivered-to address, their subject words, the owner's evidence and notes, proposed or active | until deleted (规则, or with their label), at most 500 |
+| Examples: a masked summary (subject, sender name and domain, snippet; at most 200 characters) and its embedding | until deleted (one by one in 标签, with their label, or by turning the label 敏感), at most 2,000 |
+| Rules: the exact sender address, domain, List-Id or delivered-to address, their subject words, the owner's evidence and notes, proposed or active | until deleted (in 标签, or with their label), at most 500 |
 | The flow counters: counts per UTC day, stage, outcome and label (no content) | 400 days |
 | Labels: their paths (also their Gmail names; SyncLabels reads back a rename made in Gmail), the Gmail label each is linked to and whether it was adopted, and the owner's descriptions | until deleted, at most 24 |
 | The answers to the owner's own changes, kept by request ID so a retry is not applied twice (they can hold a masked subject and sender or a rule's values) | 1 day |
@@ -174,8 +174,8 @@ it has, embeddings and all, in the same transaction; the import's preview warns 
 written for the decision model: one language, one sentence, 60-120 characters, saying what belongs and, between close
 labels, what does not. Trust labels (金融/投资, 金融/银行支付, 账号安全, 政府法律, 生活/医疗) are transactional only: a bank's own
 marketing is 购物/促销, so a look-alike promotion never borrows a trust label. 账号安全 and 政府法律 keep their mail in the
-inbox; 生活/医疗 is sensitive. ImportRules applies it (`use_template`, previewed first with `validate_only`; the UI no
-longer offers it since the redesign of 2026-10-07, the live store has it); a label that exists already (same path) only gets
+inbox; 生活/医疗 is sensitive. ImportRules applies it (`use_template`, previewed first with `validate_only`; 标签 offers it,
+previewed, only when there is no label at all, and the live store has it); a label that exists already (same path) only gets
 the template's description and switches, never a second copy, and keeps a threshold the owner tuned (the template
 names none).
 
@@ -331,10 +331,10 @@ Worker's own label is undone first; 都不是 restores the inbox). A choice is a
 - **Examples.** A verdict with a label stores the mail's masked summary (at most 200 characters) as an example of that
   label (origin correction, confirmation or weak accept; weak accepts only while the label has fewer than 50) and the
   next pass embeds it. A withdrawn verdict deletes it, deleting a label deletes its examples. At most 200 per label and
-  2,000 in all (the oldest weak accepts go first). The UI does not list them (since 2026-10-07); ListExamples,
-  DeleteExample and RebuildExampleEmbeddings stay in the API.
+  2,000 in all (the oldest weak accepts go first). 标签 shows each label's count and lists its examples on demand
+  (ListExamples of the label), each with 删除 (DeleteExample); RebuildExampleEmbeddings stays in the API.
 - **Rule proposals.** The same mailing list (else the same sender address) corrected to the same label twice proposes
-  a rule; it decides nothing until the owner approves it in 规则 (reached from 标签). Withdrawn corrections retract a proposal that falls
+  a rule; it decides nothing until the owner approves it in 标签 (批准 on its line; a dot by the label's rule count says one waits). Withdrawn corrections retract a proposal that falls
   below two. Active rules export as Gmail's filter XML (label, and archive unless the rule or label keeps the
   mail in the inbox) for the owner to import by hand; left out are rules of a trust label or with `require_dmarc` (a
   filter cannot check DMARC), rules with subject conditions, and every plain rule whose sender such a rule covers (the
@@ -349,7 +349,8 @@ Worker's own label is undone first; 都不是 restores the inbox). A choice is a
   a proposal's and an exported one's, must be plain (`rule-value.ts`: lower-case letters, digits and `._%+-`, no
   leading `-`, a real domain), a header value that is not never becomes a proposal, an older row that is not is left
   out of the export (counted in `skipped_count`), and the export quotes each value (`list:("…")`).
-- **Import and export** (`import.ts`; in the API only since the UI's redesign of 2026-10-07). ImportRules takes the owner's rule file, a JSON list in the format of
+- **Import and export** (`import.ts`; the rule file and the JSON export in the API only since the UI's redesign of
+  2026-10-07, the template also from 标签 when there is no label). ImportRules takes the owner's rule file, a JSON list in the format of
   their validated rule set (`id`, `match` with exactly one of `from_address`, `from_domain`, `list_id`, `to_address`,
   `label` as the label's path (`金融/投资`; the legacy `分拣/金融/投资` of the owner's file means the same), `keep_in_inbox`, `trust`, `require_dmarc`, `evidence`, `notes`, and the optional
   `subject_includes` / `subject_excludes`), this app's export (`{"labels": [...], "rules": [...]}`) or the template.
@@ -432,7 +433,8 @@ call at most 4.6 ms, the fetch handler's very first request 2.1 ms; every bound 
 gzip, the UI 58.5 KiB gzip (budgets unchanged).
 
 The UI's redesign (2026-10-07, §9; the Worker unchanged): the UI 56.4 KiB gzip (budget 67 unchanged: six views and
-the flow's table removed, the components, the picker and the zero skeleton added).
+the flow's table removed, the components, the picker and the zero skeleton added). Then 标签 with the rules, the
+examples and the template folded in, and 规则 removed: 59.0 KiB gzip (budget unchanged).
 
 Stores are bounded: 24 labels, 500 rules, 2,000 examples, request IDs for a day, content for 14 days, records for
 180 days. Rows read: a pass reads a few rows per mail plus the embedded examples (cached in memory between passes).
@@ -475,7 +477,8 @@ proves a Wilson lower bound of 0.68), so the per-label 正式打 decision stays 
 range, of one label when `label` is set), mail flows (`mailFlows/today`, `last-7-days`, `last-30-days`), and the singletons accuracyReport,
 serviceStatus and settings (UpdateSettings needs an explicit mask). AIP-155 request IDs on every mutation, AIP-154
 etags on labels and settings, google.rpc.Status errors (`errors.proto`). The UI uses only part of it; every RPC
-stays (the import, the JSON export, the examples, the single undo and the 7- and 30-day flows are API only).
+stays (the import of a rule file, the JSON export, the embedding rebuild, the write limits, the neuron budget and
+the thresholds of the settings, the single undo and the 7- and 30-day flows are API only).
 
 **The UI** (redesigned 2026-10-07 on the owner's "less is more": too many settings, flat lists, a flow without a
 diagram at zero, import and the ledger page not needed). Plain TypeScript DOM (`web/src/dom.ts`, `components.ts`), no
@@ -486,15 +489,16 @@ framework; Chinese, short plain words, at most one hint line where needed.
   `--danger` for state only; the flow's eight series and its zero gray), an 8 px spacing scale, a 10 px radius, 1 px
   hairlines, no heavy shadows, the system font with PingFang SC and Noto Sans SC, tabular figures for every number,
   a 2 px accent focus ring. One set of components: primary, ghost (the plain button) and quiet buttons, chips, a
-  segmented control, a toggle switch, a disclosure (更多, 为什么), a card, a compact list row, a KPI number, a meter
-  and a small bar, an empty state, and the searchable label picker. A 48rem column with 16 px gutters; works at
+  segmented control, a toggle switch, a disclosure (更多, 为什么, 高级), a small ⋯ menu, a textarea that grows with its
+  text, a card, a compact list row, a KPI number, a meter and a small bar, an empty state, and the searchable label
+  picker. A 48rem column with 16 px gutters; works at
   360 px (the flow diagram scrolls inside its own box below 600 px).
 - **Shell** (`app.ts`): a sticky header with 邮件分拣 and, on the same row (wrapping under it on a phone), one quiet
   status line from ServiceStatus: the mode in force as a chip (影子 neutral, 正式 accent, 关闭 warn), `Gmail ✓ 只读`
   or `可写` (or the problem: 授权失效, 未授权, 未连接, in the warning color) and `下次运行 3 分钟后`; under it exactly
   four tabs, 待审 (with the queue's count as a chip) · 概览 · 标签 · 设置, the current one underlined in the accent.
-  The status is read once per navigation and again after a review choice or a mode change. 规则 (`/rules`) has no tab:
-  标签 links to it and stays the current tab there, until 标签 holds the rules itself.
+  The status is read once per navigation and again after a review choice or a mode change. There is no other page:
+  the rules and the examples live in 标签 (`/rules` answers 找不到这个页面).
 - **待审** (`/`): one list, newest first, one row per mail: the masked subject (one line) and the time, the masked
   sender, then the suggested label as an accent chip (都不是 as a muted one) with the model's confidence as a small
   bar and a percentage, why it is here when not a plain suggestion (`拿不准 · 低于阈值`, `抽查`), and on the right
@@ -519,8 +523,37 @@ framework; Chinese, short plain words, at most one hint line where needed.
   (a toast says what the sync did) and 导出过滤器 (downloads `mailsort-filters.xml`, keeps a 下载过滤器文件 link,
   folds why rules were left out under `N 条没有导出`, and one line on where to import it in Gmail). The write limits,
   the neuron budget and the thresholds are no longer in the UI; their stored values stand.
-- **标签** (`/labels`) and **规则** (`/rules`) keep their editors on the new components (switches for the label
-  switches) until their own redesign; the sync moved to 设置, the template's button went with 导入.
+- **标签** (`/labels`, `views/labels.ts` and `label-detail.ts`): the one place for everything about a label. From the
+  top: a search box (搜索标签、发件人或域名) that filters as one types, over the labels' paths and their rules' values,
+  so a sender's rule is found at once (Escape clears it); a quiet line with `15 个标签` (`找到 2 个` while searching)
+  on the left and 正式打 on the right, over the switch column; then one card holding the tree, in the labels' order,
+  hairlines between rows. A top-level group (开发, 金融) is a muted 13 px heading row and its labels are indented
+  under it by their rest of the path (CI通知, 平台工具; `汽车 › 保养` under 生活); a label of one segment (账号安全) is
+  a row at the top level. Each row is one line and nothing else: the name (muted when the label is off), the rule
+  count when it has rules (`3 规则`, with an accent dot when a proposal waits), a 32 px bar of the precision bound
+  when the label has verdicts (warn below the target; an empty slot keeps the column), and the 正式打 switch, which
+  saves `live` at once (`update_mask=live,etag`) and puts itself back when refused. While searching, a row found by
+  its rules names the matching values under its name in small mono.
+  The row is a button: it opens the label's detail under it (an accent edge on the open row, one detail open at a
+  time; again closes it). The detail, on the page's background: the description, a textarea that grows with its text
+  (the placeholder says the model never picks a label without one), saved on blur or with a small 保存 shown while
+  it differs; the 留在收件箱 switch; 规则 with its count, one bordered line per rule (proposals first, then active,
+  then stopped, which is muted with 已停用): the kind chip (发件人, 域名, 列表, 收件地址), the value in mono, the subject
+  words as outline chips (`含 取件码`, `不含 广告`), `留在收件箱` when the rule keeps, `待批准` (accent) with a small
+  批准, and ⋯ on the right, which shows 停用 or 启用 and 删除 inline (Escape closes it); a line the search matched is
+  drawn in the accent's soft color. Under them 添加规则: one field (地址或域名) whose kind is inferred as one types and
+  shown as a chip beside it (an address is a sender, also `Name <x@y>`; `@domain` or a bare domain a domain;
+  `<list.id>` a list), Enter or 添加 creates it (the field is locked while it is sent, then empty and focused for the
+  next); 更多 holds 类型 (自动 · 列表 · 收件地址), 主题包含 and 主题不含 (comma separated) and the rule's 留在收件箱.
+  Then 例子 with its count and 查看 / 收起 (50 at a time, 再看 50 个), each a masked summary, its date and 删除; a
+  sensitive label says 敏感标签不留例子. Last, 高级, folded: 阈值 (0.5–0.99, empty for the default, saved on change),
+  可信, 敏感 (asks before it deletes the examples), 启用, the path with 改名 (the label moves in the tree, the detail
+  stays open), `Gmail：已关联` (尚未创建, 已沿用原有标签, or 已不存在 in the warning color) and 删除标签 (asks first).
+  Every save sends only its own fields and the label's current etag. At the bottom one quiet `+ 新标签`: one path
+  field, and the new label opens with its description focused. With no label at all the page is one empty state,
+  还没有标签, with 套用推荐模板 and + 新标签: the template's 15 labels are previewed by group (ImportRules with
+  `validate_only`) and 添加这些标签 imports them. Light and dark from the same tokens; at 360 px the rows keep one
+  line, a rule's text wraps beside its ⋯ and the detail loses its indent.
 
 ## 10. Operations
 
@@ -587,9 +620,13 @@ the fake Gmail (`fake-gmail.ts`) and fake Workers AI (`fake-ai.ts`, Clef and bge
 - `web/src/*.test.ts`: the views against a fake API on the shared transcoder: `app.test.ts` the shell (four tabs, the
   status line, the queue's count), 待审 (confirm, the picker, skip, the keyboard, the caution), 设置 (the mode's mask,
   the ceiling, the breaker, the undo's preview and rounds, one label's undo, the custom range, the sync, the filter
-  download), 标签 and 规则; `overview.test.ts` the flow graph and diagram (hues, size, tooltip, tokens, the zero
-  skeleton) and 概览 with and without mail; `check-layout.test.ts` the switch rows; `no-external.test.ts` the
-  same-origin rules.
+  download); `labels.test.ts` 标签 (the tree's grouping, the one-line row with its count, proposal dot, precision bar
+  and 正式打 with its mask, etag and refusal, one detail open at a time, the search over names and rule values, 添加规则's
+  inferred kinds, its lock and 更多, the rule menu, the description on blur, the examples on demand, 高级 with 敏感's
+  question, rename and delete, a new label, and the template's preview and import when there is no label; the fake
+  refuses a stale etag and changes only masked fields); `overview.test.ts` the flow graph and diagram (hues, size,
+  tooltip, tokens, the zero skeleton) and 概览 with and without mail; `check-layout.test.ts` the switch rows;
+  `no-external.test.ts` the same-origin rules.
 - `deploy/test/*.test.mjs`: the production config, the deploy wrapper (MODE, the secrets file without the grant), that
   `wrangler deploy --secrets-file` keeps secrets it does not name (the pinned wrangler), that the public GitHub
   secrets spec leaves the grant out (`owner_machine_secrets` in `app.toml`), and mint-token: its checks, and `main()`

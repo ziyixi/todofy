@@ -1,8 +1,8 @@
 /**
  * The owner's flows in the UI against the fake API (test/fakeServer.ts, the shared transcoder): the shell's four tabs
  * and status line; 待审's confirm, change and skip (with the CSRF header and a request ID each), its keyboard and its
- * caution; 设置's mode, ceiling and breaker, the range undo's preview and confirmation, the sync and the filter export;
- * 标签 (its tree, 归档 and 敏感) and 规则.
+ * caution; 设置's mode, ceiling and breaker, the range undo's preview and confirmation, the sync and the filter export.
+ * 标签 has its own file, labels.test.ts.
  */
 import { mountApp, type Host } from './app.ts'
 import { FakeServer, label, ledgerEntry, NOW, reviewItem, settle } from './test/fakeServer.ts'
@@ -67,12 +67,13 @@ describe('the shell', () => {
     expect(root.querySelector('.tabs a[aria-current="page"]')?.textContent).toBe('设置')
   })
 
-  it('moves between tabs without reloading, and keeps 标签 current on 规则', async () => {
+  it('moves between tabs without reloading; 规则 has no page of its own any more', async () => {
     const server = new FakeServer()
-    const root = await open(server, '/labels')
-    buttonNamed(root, '规则').click()
+    const root = await open(server, '/rules')
+    expect(root.textContent).toContain('找不到这个页面')
+    root.querySelector<HTMLAnchorElement>('.tabs a[href="/labels"]')?.click()
     await settle()
-    expect(window.location.pathname).toBe('/rules')
+    expect(window.location.pathname).toBe('/labels')
     expect(root.querySelector('.tabs a[aria-current="page"]')?.textContent).toBe('标签')
     root.querySelector<HTMLAnchorElement>('.tabs a[href="/overview"]')?.click()
     await settle()
@@ -354,115 +355,5 @@ describe('设置', () => {
     const why = root.querySelector('details.more')
     expect(why?.querySelector('summary')?.textContent).toBe('2 条没有导出')
     expect(why?.textContent).toContain('过滤器查不了 DMARC')
-  })
-})
-
-describe('标签', () => {
-  it('creates a label and saves an edit with every field and the etag in the mask', async () => {
-    const server = new FakeServer()
-    const root = await open(server, '/labels')
-    expect(root.textContent).toContain('订阅')
-    expect(root.textContent).not.toContain('分拣/')
-    // The sync moved to 设置 and the template's import is gone.
-    expect([...root.querySelectorAll('button')].map((node) => node.textContent)).not.toContain('从 Gmail 同步')
-    expect([...root.querySelectorAll('button')].map((node) => node.textContent)).not.toContain('套用推荐模板')
-    const name = root.querySelector<HTMLInputElement>('input[aria-label="新标签路径"]')
-    if (name === null) throw new Error('no input')
-    name.value = '出行'
-    buttonNamed(root, '创建').click()
-    await settle()
-    expect(server.labels.map((item) => item.displayName)).toContain('出行')
-
-    const description = root.querySelector<HTMLTextAreaElement>('textarea')
-    if (description === null) throw new Error('no textarea')
-    description.value = 'newsletter weekly'
-    buttonNamed(root, '保存').click()
-    await settle()
-    const patch = server.calls.find((call) => call.method === 'PATCH')
-    expect(patch?.path).toContain('update_mask=')
-    expect(decodeURIComponent(patch?.path ?? '')).toContain('etag')
-    expect(patch?.body?.['description']).toBe('newsletter weekly')
-    // The threshold input allows only what the API accepts.
-    expect(root.querySelector<HTMLInputElement>('input[aria-label="阈值"]')?.min).toBe('0.5')
-  })
-
-  it('says what a label without a description means, and shows one that adopted the owner’s Gmail label', async () => {
-    const server = new FakeServer()
-    const [first, second] = server.labels
-    if (first === undefined || second === undefined) throw new Error('no label')
-    first.description = ''
-    second.gmailState = Label_GmailState.ADOPTED
-    const root = await open(server, '/labels')
-    expect(root.textContent).toContain('还没有说明：模型不会选这个标签，只有规则和例子能打它')
-    expect(root.textContent).toContain('已沿用 Gmail 原有标签')
-  })
-
-  it('groups nested labels under their top level and saves 归档 and 敏感 with the mask', async () => {
-    const server = new FakeServer()
-    server.labels = [label('finance-invest', '金融/投资'), label('finance-bank-pay', '金融/银行支付'), Object.assign(label('account-security', '账号安全'), { keepInInbox: true }), label('travel', '出行')]
-    const root = await open(server, '/labels')
-    const groups = [...root.querySelectorAll('.label-group')]
-    expect(groups.map((group) => group.getAttribute('aria-label'))).toEqual(['金融', '账号安全', '出行'])
-    expect(groups[0]?.querySelectorAll('.label-card').length).toBe(2)
-    expect(groups[0]?.querySelector('.group-name')?.textContent).toContain('2 个标签')
-    const security = groups[1]?.querySelector('.label-card')
-    const archive = [...(security?.querySelectorAll('label.check') ?? [])].find((node) => node.textContent.startsWith('归档'))?.querySelector('input')
-    expect(archive?.classList.contains('switch')).toBe(true)
-    expect(archive?.checked).toBe(false)
-    if (archive) archive.checked = true
-    const save = [...(security?.querySelectorAll('button') ?? [])].find((node) => node.textContent === '保存')
-    save?.click()
-    await settle()
-    const patch = server.calls.find((call) => call.method === 'PATCH' && call.path.startsWith('/api/v1/labels/account-security'))
-    expect(patch?.path).toContain('keep_in_inbox')
-    expect(patch?.path).toContain('sensitive')
-    expect(patch?.body?.['keep_in_inbox']).toBeUndefined()
-  })
-
-  it('nests a three-level path under its own prefix, not beside its parent’s siblings', async () => {
-    const server = new FakeServer()
-    server.labels = [label('life-car-service', '生活/汽车/保养'), label('life-health', '生活/医疗'), label('life-car-insurance', '生活/汽车/保险'), label('travel', '出行')]
-    const root = await open(server, '/labels')
-    const top = [...root.querySelectorAll('.label-group')]
-    expect(top.map((group) => group.getAttribute('aria-label'))).toEqual(['生活', '出行'])
-    expect(top[0]?.querySelector(':scope > .group-name')?.textContent).toContain('3 个标签')
-    const car = top[0]?.querySelector('.label-subgroup')
-    expect(car?.getAttribute('aria-label')).toBe('生活/汽车')
-    expect(car?.querySelector('h3')?.textContent).toContain('2 个标签')
-    expect([...(car?.querySelectorAll('.label-card strong') ?? [])].map((node) => node.textContent)).toEqual(['生活/汽车/保养', '生活/汽车/保险'])
-    // 生活/医疗 is a card right under 生活, beside the 汽车 section.
-    const direct = [...(top[0]?.querySelector(':scope > .list.nested')?.children ?? [])].map((node) => node.getAttribute('aria-label') ?? node.querySelector('strong')?.textContent)
-    expect(direct).toEqual(['生活/汽车', '生活/医疗'])
-  })
-})
-
-describe('规则', () => {
-  it('lists proposals first and approves one', async () => {
-    const server = new FakeServer()
-    server.rules = [create(RuleSchema, { name: 'rules/r1', kind: Rule_Kind.LIST_ID, value: 'digest.news.example.com', label: 'labels/newsletter', state: Rule_State.PROPOSED, correctionCount: 2 })]
-    const root = await open(server, '/rules')
-    expect(root.textContent).toContain('待批准（1）')
-    expect(root.textContent).toContain('digest.news.example.com')
-    buttonNamed(root, '批准').click()
-    await settle()
-    expect(server.rules[0]?.state).toBe(Rule_State.ACTIVE)
-  })
-
-  it('creates a carve-out that keeps its mail in the inbox', async () => {
-    const server = new FakeServer()
-    const root = await open(server, '/rules')
-    const value = root.querySelector<HTMLInputElement>('input[aria-label="值"]')
-    const includes = root.querySelector<HTMLInputElement>('input[aria-label="主题包含"]')
-    const keep = root.querySelector<HTMLInputElement>('input[aria-label="留在收件箱"]')
-    if (value === null || includes === null || keep === null) throw new Error('no form')
-    value.value = 'notice@parcel.example.cn'
-    includes.value = '取件码，pickup code'
-    keep.checked = true
-    buttonNamed(root, '创建').click()
-    await settle()
-    const rule = server.calls.find((call) => call.method === 'POST' && call.path.startsWith('/api/v1/rules?'))?.body
-    expect(rule).toMatchObject({ value: 'notice@parcel.example.cn', subject_includes: ['取件码', 'pickup code'], keep_in_inbox: true })
-    expect(root.textContent).toContain('主题包含：取件码、pickup code')
-    expect(root.textContent).toContain('留在收件箱')
   })
 })

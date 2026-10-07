@@ -1,7 +1,7 @@
 /**
  * The UI's components (styles.css draws them): a card, a chip, a KPI number, a meter and a small bar, a segmented
- * control, a toggle switch, a disclosure, an empty state and the searchable label picker. Plain DOM, text only ever as
- * text.
+ * control, a toggle switch, a disclosure, a small ⋯ menu, a textarea that grows with its text, an empty state and the
+ * searchable label picker. Plain DOM, text only ever as text.
  */
 import { button, el, type Child } from './dom.ts'
 
@@ -59,6 +59,62 @@ export function toggle(name: string, checked: boolean, hint = ''): [HTMLLabelEle
 /** A disclosure: `summary` opens the rest. */
 export function disclosure(summary: string, ...children: Child[]): HTMLDetailsElement {
   return el('details', { class: 'more' }, el('summary', {}, summary), ...children)
+}
+
+/** One action of a menu: its text, what it does, and `danger` for one that deletes. */
+export type MenuAction = readonly [text: string, run: () => void, tone?: 'danger']
+
+let menus = 0
+
+/**
+ * A small menu behind ⋯ (`name` is its name for assistive technology): it shows its actions inline beside it; a
+ * choice or Escape closes it. `focusKey` marks the ⋯ button for a view that puts the focus back after repainting.
+ */
+export function menu(name: string, actions: readonly MenuAction[], focusKey = ''): HTMLElement {
+  menus += 1
+  const id = `menu-${String(menus)}`
+  const items = el('span', { id, class: 'menu-items', hidden: true })
+  const opener = button('⋯', () => {
+    if (items.hidden) open()
+    else close()
+  }, { class: 'quiet icon', 'aria-label': name, 'aria-expanded': 'false', 'aria-controls': id, ...(focusKey === '' ? {} : { 'data-focus': focusKey }) })
+  const close = () => {
+    items.hidden = true
+    opener.setAttribute('aria-expanded', 'false')
+  }
+  const open = () => {
+    items.hidden = false
+    opener.setAttribute('aria-expanded', 'true')
+    items.querySelector('button')?.focus()
+  }
+  items.append(
+    ...actions.map(([text, run, tone]) =>
+      button(text, () => {
+        close()
+        run()
+      }, { class: tone === undefined ? 'quiet small' : `quiet small ${tone}` }),
+    ),
+  )
+  items.addEventListener('keydown', (event) => {
+    if (event.key !== 'Escape') return
+    event.preventDefault()
+    close()
+    opener.focus()
+  })
+  return el('span', { class: 'menu' }, items, opener)
+}
+
+/** Lets a textarea grow with its text, from its own rows up: on every input, and once it is in the page. */
+export function growing(area: HTMLTextAreaElement): HTMLTextAreaElement {
+  const fit = () => {
+    if (!area.isConnected) return
+    area.style.height = 'auto'
+    // scrollHeight leaves out the 1 px borders the box's height includes.
+    if (area.scrollHeight > 0) area.style.height = `${String(area.scrollHeight + 2)}px`
+  }
+  area.addEventListener('input', fit)
+  setTimeout(fit, 0)
+  return area
 }
 
 /** The empty state: one line, and an optional hint under it. */

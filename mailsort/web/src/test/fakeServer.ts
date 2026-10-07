@@ -1,9 +1,11 @@
 /**
  * An in-memory stand-in for the Worker's owner API (proto/mailsort/ui/v1), served by the same shared transcoder the
  * Worker uses, so every request is routed, decoded strictly and answered in the wire JSON profile as in production. It
- * keeps a few labels, review items, rules, ledger entries, the flow, the status and the settings; a method it does not
- * model (ImportRules, ExportRules and the examples, which the UI no longer shows) answers UNIMPLEMENTED. Every
- * request must be a same-origin /api path, and a mutation must carry the CSRF header.
+ * keeps a few labels, rules, examples, review items, ledger entries, the flow, the status and the settings, and
+ * applies the template of ImportRules; a method it does not model (ExportRules, an import of the owner's own file, the
+ * single undo, which the UI no longer offers) answers UNIMPLEMENTED. UpdateLabel changes only the masked fields and
+ * refuses a stale etag, as the Worker does. Every request must be a same-origin /api path, and a mutation must carry
+ * the CSRF header.
  */
 import { vi } from 'vitest'
 import { updatePaths } from '@ziyixi/proto/field-mask'
@@ -15,6 +17,9 @@ import { Label_GmailState, LabelSchema, type Label } from '@ziyixi/proto/mailsor
 import { MailFlow_CountSchema, MailFlowSchema, type MailFlow_Count } from '@ziyixi/proto/mailsort/ui/v1/flow_pb'
 import {
   ExportGmailFiltersResponseSchema,
+  ImportRulesResponseSchema,
+  LabelImportSchema,
+  ListExamplesResponseSchema,
   ListLabelsResponseSchema,
   ListLedgerEntriesResponseSchema,
   ListReviewItemsResponseSchema,
@@ -24,11 +29,13 @@ import {
   UndoLedgerEntriesResponseSchema,
 } from '@ziyixi/proto/mailsort/ui/v1/mailsort_ui_service_pb'
 import {
+  ExampleSchema,
   LedgerEntry_State,
   LedgerEntrySchema,
   ReviewItem_Kind,
   ReviewItem_State,
   ReviewItemSchema,
+  type Example,
   type LedgerEntry,
   type ReviewItem,
 } from '@ziyixi/proto/mailsort/ui/v1/review_pb'
@@ -88,6 +95,25 @@ export function ledgerEntry(id: string, init: Partial<LedgerEntry> = {}): Ledger
   }), init)
 }
 
+export function example(id: string, labelId: string, summary = `例子 ${id} 的摘要`): Example {
+  return create(ExampleSchema, { name: `examples/${id}`, label: `labels/${labelId}`, summary, embedded: true, createTime: timestampFromMs(NOW - 86_400_000) })
+}
+
+/** The template's 15 labels (worker/src/template.ts), by path: what ImportRules' use_template adds. */
+export const TEMPLATE_PATHS = ['开发/CI通知', '开发/平台工具', '金融/投资', '金融/银行支付', '账号安全', '政府法律', '购物/订单物流', '购物/促销', '订阅收据', '出行', '生活/账单住房', '生活/汽车', '生活/医疗', '求职', '学校与社群']
+
+/** UpdateLabel's mask paths and the Label fields they name. */
+const LABEL_FIELDS: Readonly<Record<string, keyof Label>> = {
+  display_name: 'displayName',
+  description: 'description',
+  enabled: 'enabled',
+  live: 'live',
+  trust_implying: 'trustImplying',
+  threshold: 'threshold',
+  keep_in_inbox: 'keepInInbox',
+  sensitive: 'sensitive',
+}
+
 /** One flow counter. */
 export function flowCount(stage: MailFlow_Count['stage'], outcome: MailFlow_Count['outcome'], label: string, mailCount: number): MailFlow_Count {
   return create(MailFlow_CountSchema, { stage, outcome, label, mailCount })
@@ -109,6 +135,7 @@ export class FakeServer {
   labels: Label[] = [label('newsletter', '订阅'), label('receipt', '收据')]
   reviewItems: ReviewItem[] = []
   rules: Rule[] = []
+  examples: Example[] = []
   ledgerEntries: LedgerEntry[] = []
   /** Rules the export leaves out (trust rules). */
   exportSkipped = 0
@@ -116,6 +143,8 @@ export class FakeServer {
   flow: MailFlow_Count[] = []
   /** GetAccuracyReport's rows; null: every label with 40 confirmations and a bound of 0.92. */
   accuracy: LabelAccuracy[] | null = null
+  /** GetAccuracyReport answers UNAVAILABLE. */
+  accuracyFails = false
   /** Fields of GetServiceStatus that a test sets (the rest as below; review_count counts the pending items). */
   status: Partial<ServiceStatus> = {}
   settings: Settings = create(SettingsSchema, { name: 'settings', mode: Mode.SHADOW, effectiveMode: Mode.SHADOW, runWriteLimit: 10, dailyWriteLimit: 150, dailyNeuronBudget: 7000, defaultThreshold: 0.8, precisionTarget: 0.9, etag: 's1' })
@@ -129,15 +158,52 @@ export class FakeServer {
         this.labels.push(created)
         return Promise.resolve(created)
       },
+      // As the Worker: a stale etag is refused, only the masked fields change, a new etag every time, and a label
+      // turned sensitive loses its examples.
       updateLabel: (request) => {
         const index = this.labels.findIndex((item) => item.name === request.label?.name)
-        if (index < 0) throw new RpcError(Code.NOT_FOUND, 'NOT_FOUND', 'no such label')
-        const updated = Object.assign(create(LabelSchema), this.labels[index], request.label, { etag: 'updated' })
+        const before = this.labels[index]
+        if (before === undefined || request.label === undefined) throw new RpcError(Code.NOT_FOUND, 'NOT_FOUND', 'no such label')
+        if (request.label.etag !== '' && request.label.etag !== before.etag) throw new RpcError(Code.ABORTED, 'ETAG_MISMATCH', 'stale etag')
+        const mask = updatePaths(request.updateMask)
+        const updated = Object.assign(create(LabelSchema), before, { etag: `${before.etag}+` })
+        for (const [path, field] of Object.entries(LABEL_FIELDS)) {
+          if (mask === '*' || mask.includes(path)) Object.assign(updated, { [field]: request.label[field] })
+        }
+        if (updated.sensitive && !before.sensitive) {
+          this.examples = this.examples.filter((item) => item.label !== before.name)
+          updated.exampleCount = 0
+        }
         this.labels[index] = updated
         return Promise.resolve(updated)
       },
       deleteLabel: (request) => {
         this.labels = this.labels.filter((item) => item.name !== request.name)
+        this.rules = this.rules.filter((item) => item.label !== request.name)
+        return Promise.resolve(create(EmptySchema, {}))
+      },
+      // The template only, as the Worker applies it to a store without those labels.
+      importRules: (request) => {
+        if (!request.useTemplate) unimplemented()
+        const labels = TEMPLATE_PATHS.map((path) => create(LabelImportSchema, { path, description: `${path} 的说明` }))
+        if (!request.validateOnly) {
+          TEMPLATE_PATHS.forEach((path, index) => {
+            this.labels.push(Object.assign(label(`t${String(index)}`, path), { gmailState: Label_GmailState.PENDING }))
+          })
+        }
+        return Promise.resolve(create(ImportRulesResponseSchema, { applied: !request.validateOnly, createdLabelCount: labels.length, labels }))
+      },
+      listExamples: (request) => {
+        const examples = request.label === '' ? this.examples : this.examples.filter((item) => item.label === request.label)
+        const { items, next } = page(examples, request.pageSize, request.pageToken)
+        return Promise.resolve(create(ListExamplesResponseSchema, { examples: items, nextPageToken: next }))
+      },
+      deleteExample: (request) => {
+        const found = this.examples.find((item) => item.name === request.name)
+        if (found === undefined) throw new RpcError(Code.NOT_FOUND, 'NOT_FOUND', 'no such example')
+        this.examples = this.examples.filter((item) => item !== found)
+        const owner = this.labels.find((item) => item.name === found.label)
+        if (owner !== undefined) owner.exampleCount -= 1
         return Promise.resolve(create(EmptySchema, {}))
       },
       listReviewItems: () => Promise.resolve(create(ListReviewItemsResponseSchema, { reviewItems: this.reviewItems.filter((item) => item.state === ReviewItem_State.PENDING) })),
@@ -150,6 +216,16 @@ export class FakeServer {
         if (rule === undefined) throw new RpcError(Code.NOT_FOUND, 'NOT_FOUND', 'no such rule')
         rule.state = Rule_State.ACTIVE
         return Promise.resolve(rule)
+      },
+      disableRule: (request) => {
+        const rule = this.rules.find((item) => item.name === request.name)
+        if (rule === undefined) throw new RpcError(Code.NOT_FOUND, 'NOT_FOUND', 'no such rule')
+        rule.state = Rule_State.DISABLED
+        return Promise.resolve(rule)
+      },
+      deleteRule: (request) => {
+        this.rules = this.rules.filter((item) => item.name !== request.name)
+        return Promise.resolve(create(EmptySchema, {}))
       },
       createRule: (request) => {
         const rule = Object.assign(create(RuleSchema), request.rule, { name: `rules/r${String(this.rules.length)}`, state: Rule_State.ACTIVE })
@@ -189,8 +265,9 @@ export class FakeServer {
         return Promise.resolve(create(ExportGmailFiltersResponseSchema, { xml: '<feed/>', ruleCount: active.length, skippedCount: this.exportSkipped }))
       },
       getMailFlow: (request) => Promise.resolve(create(MailFlowSchema, { name: request.name, startTime: timestampFromMs(NOW - 3_600_000), endTime: timestampFromMs(NOW), counts: this.flow })),
-      getAccuracyReport: () =>
-        Promise.resolve(
+      getAccuracyReport: () => {
+        if (this.accuracyFails) throw new RpcError(Code.UNAVAILABLE, 'UNAVAILABLE', 'try later')
+        return Promise.resolve(
           create(AccuracyReportSchema, {
             name: 'accuracyReport',
             labels: this.accuracy ?? this.labels.map((item) => create(LabelAccuracySchema, { label: item.name, confirmedCount: 40, precisionLowerBound: 0.92 })),
@@ -199,7 +276,8 @@ export class FakeServer {
             coverage: 0.9,
             precisionTarget: 0.9,
           }),
-        ),
+        )
+      },
       getServiceStatus: () =>
         Promise.resolve(
           Object.assign(create(ServiceStatusSchema, {

@@ -44,7 +44,7 @@ the neuron budget). One label per mail, at Gmail's top level (up to three levels
 backfill. Gmail is touched only through the closed operation table in `mailsort/worker/src/gmail.ts` (no trash,
 delete, send, UNREAD or non-owned labels; undo via the ledger only). The Gmail grant is written into the Worker from
 the owner's machine (`mailsort/deploy/mint-token.mjs`), never into GitHub. Rules are personal values: they are
-imported at runtime (ImportRules, API only since the UI redesign), never committed.
+imported at runtime (ImportRules of the rule file, API only since the UI redesign), never committed.
 
 Landing order:
 1. Done 2026-10-06: `feat/mailsort` landed at `899b063` with `mailsort` in CHECK_ONLY (the smoke now stops the whole
@@ -65,9 +65,13 @@ Landing order:
    On the same branch, the UI redesign (the owner's "less is more", 2026-10-07; `mailsort/docs/design.md` §9), UI only,
    no proto or stored-data change: B1 done (the design system, the shell with four tabs 待审 · 概览 · 标签 · 设置 and
    one status line, 待审 with the picker and keys, 概览 with the always-drawn flow, 设置 with the mode, the previewed
-   range undo, the sync and the filter download; 流程, 准确率, 状态, 例子, 导入 and 记录 removed, 规则 reached from
-   标签). Next: the 标签 page (with the rules folded in). After its deploy: 概览 draws the skeleton on a quiet day, and
-   设置 → 撤销 → 预览 counts 0 while the grant is read-only.
+   range undo, the sync and the filter download; 流程, 准确率, 状态, 例子, 导入 and 记录 removed) and B2 done (标签 as the
+   one place for a label: search over paths and rule values, the tree grouped by top level with one line per label
+   and 正式打, the detail inline with the description, 留在收件箱, the rules and 添加规则, the examples and 高级; the
+   template when there is no label; `/rules` gone). Checked locally only (web lint, typecheck, vitest, build and a
+   hand run against `wrangler dev` with the loopback fakes); the branch is not pushed. After its deploy: 概览 draws the
+   skeleton on a quiet day, 设置 → 撤销 → 预览 counts 0 while the grant is read-only, and 标签 shows the 15 labels in
+   their groups with the 93 rules' counts (searching a sender of the rule file finds its label).
 
 Already set: production secret `MAILSORT_CSRF_SIGNING_KEY`, variable `MAILSORT_MODE=shadow` (the mode ceiling).
 

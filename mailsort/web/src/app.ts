@@ -4,7 +4,7 @@
  *
  *   /           待审: the mails waiting for the owner (confirm / change / skip, by keyboard too)
  *   /overview   概览: today's numbers, the flow of mail, accuracy per label, the model budget, the latest error
- *   /labels     标签: the labels (and, until 标签 holds them itself, its link to /rules)
+ *   /labels     标签: the labels as a tree, each with its description, rules, examples and switches
  *   /settings   设置: the mode, the range undo, the Gmail filter export, the sync with Gmail
  *
  * Mobile first, light and dark from the system, plain DOM (no framework), and nothing but the page's own API.
@@ -17,7 +17,6 @@ import { MODE_NAMES, relative } from './format.ts'
 import { renderLabels } from './views/labels.ts'
 import { renderOverview } from './views/overview.ts'
 import { renderReview } from './views/review.ts'
-import { renderRules } from './views/rules.ts'
 import { renderSettings } from './views/settings.ts'
 
 /** What the views need from the browser, replaceable in tests. */
@@ -52,9 +51,6 @@ const TABS: readonly (readonly [string, string, View])[] = [
   ['/settings', '设置', renderSettings],
 ]
 
-/** Pages without a tab of their own, and the tab they belong to: 规则 until 标签 holds the rules itself. */
-const PAGES: readonly (readonly [string, string, View])[] = [['/rules', '/labels', renderRules]]
-
 /** The status line's parts: the mode badge, the Gmail grant (or its problem), the next run. */
 function statusParts(status: ServiceStatus, now: number): HTMLElement[] {
   const mode = status.effectiveMode
@@ -82,11 +78,10 @@ export function mountApp(root: HTMLElement, host: Host = browserHost): Promise<v
 
   const paintNav = () => {
     const path = window.location.pathname
-    const tab = PAGES.find(([page]) => page === path)?.[1] ?? path
     nav.replaceChildren(
       ...TABS.map(([target, label]) => {
         const count = target === '/' && reviewCount > 0 ? chip(String(reviewCount), 'accent') : null
-        const link = el('a', { href: target, ...(target === tab ? { 'aria-current': 'page' } : {}) }, label, count)
+        const link = el('a', { href: target, ...(target === path ? { 'aria-current': 'page' } : {}) }, label, count)
         if (count !== null) link.setAttribute('aria-label', `${label}（${String(reviewCount)} 封）`)
         link.addEventListener('click', (event) => {
           event.preventDefault()
@@ -117,7 +112,7 @@ export function mountApp(root: HTMLElement, host: Host = browserHost): Promise<v
     paintNav()
     main.replaceChildren()
     const path = window.location.pathname
-    const view = TABS.find(([target]) => target === path)?.[2] ?? PAGES.find(([page]) => page === path)?.[2]
+    const view = TABS.find(([target]) => target === path)?.[2]
     if (view === undefined) {
       main.append(el('div', { class: 'empty' }, el('strong', {}, '找不到这个页面')))
       return

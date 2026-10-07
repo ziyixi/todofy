@@ -1,10 +1,10 @@
 /**
- * The UI's words for the API's values: modes, review kinds, unsure reasons, rule kinds and states, and times in the
- * browser's zone.
+ * The UI's words for the API's values: modes, review kinds, unsure reasons, rule kinds, and times in the browser's
+ * zone.
  */
 import { timestampMs, type Timestamp } from '@ziyixi/proto/protobuf/wkt'
 import { ReviewItem_Kind } from '@ziyixi/proto/mailsort/ui/v1/review_pb'
-import { Rule_Kind, Rule_State } from '@ziyixi/proto/mailsort/ui/v1/rule_pb'
+import { Rule_Kind } from '@ziyixi/proto/mailsort/ui/v1/rule_pb'
 import { Mode } from '@ziyixi/proto/mailsort/ui/v1/status_pb'
 import type { Label } from '@ziyixi/proto/mailsort/ui/v1/label_pb'
 
@@ -38,17 +38,12 @@ export const UNSURE_REASONS: Readonly<Record<string, string>> = {
   no_model_labels: '没有带说明的标签',
 }
 
-export const RULE_KINDS: readonly (readonly [Rule_Kind, string])[] = [
-  [Rule_Kind.SENDER_ADDRESS, '发件人地址'],
-  [Rule_Kind.SENDER_DOMAIN, '发件人域名'],
-  [Rule_Kind.LIST_ID, '邮件列表 (List-Id)'],
-  [Rule_Kind.DELIVERED_TO, '收件地址 (Delivered-To)'],
-]
-
-export const RULE_STATES: Readonly<Record<number, string>> = {
-  [Rule_State.PROPOSED]: '待批准',
-  [Rule_State.ACTIVE]: '生效中',
-  [Rule_State.DISABLED]: '已停用',
+/** A rule's kind in one word (标签's rule lines and 添加规则). */
+export const RULE_KIND_NAMES: Readonly<Record<number, string>> = {
+  [Rule_Kind.SENDER_ADDRESS]: '发件人',
+  [Rule_Kind.SENDER_DOMAIN]: '域名',
+  [Rule_Kind.LIST_ID]: '列表',
+  [Rule_Kind.DELIVERED_TO]: '收件地址',
 }
 
 export function ms(time: Timestamp | undefined): number | null {
