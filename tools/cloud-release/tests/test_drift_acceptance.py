@@ -403,10 +403,11 @@ class DriftAcceptance(unittest.TestCase):
                 )
                 self.assert_readonly(fixture)
 
-    def test_normal_home_release_removes_the_retired_lab_binding(self):
+    @patch.dict("control.RETIRED_SERVICE_BINDINGS", {"dashboard": {"OLD_APP"}})
+    def test_normal_home_release_removes_a_retired_binding(self):
         fixture = self.fixture("dashboard")
         fixture.bindings().append(
-            {"name": "LAB", "type": "service", "service": "lab", "entrypoint": "Ops",
+            {"name": "OLD_APP", "type": "service", "service": "old-app", "entrypoint": "Ops",
              "environment": "production"}
         )
         output = io.StringIO()
@@ -418,22 +419,23 @@ class DriftAcceptance(unittest.TestCase):
         self.assertEqual(
             json.loads(output.getvalue()),
             {"state": "repairable", "changes": [
-                {"script": "home", "field": "LAB", "reason": "RETIRED_SERVICE_BINDING"},
+                {"script": "home", "field": "OLD_APP", "reason": "RETIRED_SERVICE_BINDING"},
             ]},
         )
         self.assert_readonly(fixture)
 
+    @patch.dict("control.RETIRED_SERVICE_BINDINGS", {"dashboard": {"OLD_APP"}})
     def test_service_retirement_does_not_allow_other_bindings_apps_or_repairs(self):
         for app, repair, name in (
-            ("dashboard", True, "LAB"),
-            ("dashboard", False, "LAB_EXTRA"),
-            ("dashboard", False, "lab"),
-            ("watch", False, "LAB"),
+            ("dashboard", True, "OLD_APP"),
+            ("dashboard", False, "OLD_APP_EXTRA"),
+            ("dashboard", False, "old_app"),
+            ("watch", False, "OLD_APP"),
         ):
             with self.subTest(app=app, repair=repair, name=name):
                 fixture = self.fixture(app)
                 fixture.bindings().append(
-                    {"name": name, "type": "service", "service": "lab",
+                    {"name": name, "type": "service", "service": "old-app",
                      "environment": "production"}
                 )
                 output = io.StringIO()

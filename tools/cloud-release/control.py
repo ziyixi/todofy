@@ -46,10 +46,8 @@ RETIRED_WEBSITE_BINDINGS = {
     "IGNORED_EDITOR_IDS",
 }
 # Bindings to Workers the owner retired; a normal release of that app removes them.
-# Drop an entry once the target Worker is deleted (see infra/README "Retiring an app").
-RETIRED_SERVICE_BINDINGS = {
-    "dashboard": {"LAB"},
-}
+# Drop an entry once the target Worker is deleted (see infra/README "Retiring an app"). Empty: none is being retired.
+RETIRED_SERVICE_BINDINGS: dict[str, set[str]] = {}
 
 
 def read_toml(path):

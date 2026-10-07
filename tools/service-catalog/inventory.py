@@ -15,8 +15,9 @@ DO_KEYS = {
     "MailsortState": "mailsort-state",
 }
 # Namespaces whose Worker has not had its first deploy: Cloudflare creates the namespace then, and that release's
-# commit records its id in config/resources.toml. Until then it is neither expected nor registered.
-FIRST_DEPLOY_PENDING = {"mailsort-state"}
+# commit records its id in config/resources.toml. Until then it is neither expected nor registered. Empty since
+# mailsort's first deploy (2026-10-07).
+FIRST_DEPLOY_PENDING: set[str] = set()
 OUTPUT = "dashboard/worker/src/account-inventory.json"
 BUCKET_NAME = re.compile(r"[a-z0-9][a-z0-9-]{1,61}[a-z0-9]")
 PAGE_LIMIT = 100

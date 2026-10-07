@@ -29,9 +29,9 @@ one finding per way in and resource with action counts; each change shows once, 
 queries are dropped; no actor address, IP or id is kept. Read with the existing `CF_ANALYTICS_TOKEN` (verified
 2026-10-06: the current token reads the audit log); a split read-only token needs Account Settings Read, and
 without it the panel says the changes were not checked while the rest of the check runs. The check now takes
-four ticks (account step: four calls). Home deploys only together with mailsort (HOME_BOUND while mailsort is
-CHECK_ONLY), so this goes live with the mailsort release. Verify after that: the first 配置漂移 check after
-02:00 UTC completes; the owner's own dashboard actions of the previous day show as 非 CI 改动.
+four ticks (account step: four calls). Live since Home's deploy with mailsort (`a3705ed`, 2026-10-07). Verify: the
+first 配置漂移 check after 02:00 UTC on 2026-10-08 completes, and the owner's dashboard actions of 2026-10-07 (the
+Lab Worker deletion) show once as 非 CI 改动.
 
 ## In flight (2026-10-06, Claude): mailsort, the Gmail auto-labeler
 
@@ -52,8 +52,9 @@ Landing order:
    objects; its verify plan was no-op (32).
 3. `feat/mailsort-live`: AUD and application id in `config/resources.toml` (`generate.py` writes them into
    `mailsort/wrangler.toml` and `infra/ids.tf`), CHECK_ONLY emptied; landing deploys mailsort and Home.
-4. After that deploy: record the `MailsortState` namespace id in `config/resources.toml` [durable_objects] (and drop it
-   from `FIRST_DEPLOY_PENDING` in `tools/service-catalog/inventory.py`); check `https://sort.ziyixi.science`.
+4. Done: deployed at `a3705ed` (mailsort and Home); the `MailsortState` namespace id is in `config/resources.toml`
+   (`chore/after-mailsort-live`). Live on 2026-10-07 in shadow: the owner's readonly Gmail grant (mint-token), the
+   15-label template and the 93-rule file imported through the dashboard (93 create, 0 invalid).
 
 Already set: production secret `MAILSORT_CSRF_SIGNING_KEY`, variable `MAILSORT_MODE=shadow` (the mode ceiling).
 
@@ -61,12 +62,11 @@ Google side, done by an agent with the owner's OK on 2026-10-06: a dedicated Goo
 enabled; the consent screen External (the owner approved accepting the User Data Policy) with homepage
 `https://www.ziyixi.science/`, privacy policy `https://www.ziyixi.science/privacy/mailsort` (live since `3e369ec`) and
 authorized domain `ziyixi.science`; published In production (unverified, so the grant shows Google's notice once).
-Owner, after mailsort is live: the Desktop OAuth client (its secret is shown once; never by an agent), then
-`mint-token.mjs --scope readonly`; apply the 15-label template; import the validated rule set (93
-precision-checked rules from a read-only survey of the last 30 days, handed to the owner as a file, never in the
-repo; previewed clean onto the template in workerd: 93 create, 0 invalid, 0 warnings); shadow for 1–2 weeks; turn
-正式打 on per label when its precision bound passes; `--scope modify` and `MAILSORT_MODE=live` last. Optional: a
-token with Workers AI permission for the synthetic Clef evaluation (the admin token cannot call `ai/run`).
+Done 2026-10-07: the Desktop OAuth client (owner), `mint-token.mjs --scope readonly` (the owner pasted the secret in
+their own terminal), the 15-label template and the validated rule set (93 precision-checked rules from a read-only
+survey of the last 30 days, kept off the repo). Next, owner: shadow for 1–2 weeks, confirming or correcting a few
+mails a day; turn 正式打 on per label when its precision bound passes; `--scope modify` and `MAILSORT_MODE=live` last.
+The synthetic Clef evaluation is dropped: the shadow run on real mail measures each label instead.
 
 ## In flight (2026-10-05, Claude): readability review, Newsletter warning, Lab removal
 
@@ -109,9 +109,9 @@ Landed after it (2026-10-06):
       and D1), output changes 2; the owner dispatches Infra apply with the expect it prints
       (`create=1,delete=2,outputs=2@…`) and `confirm_destructive=delete-replace-forget`.
    5. Owner: delete the GitHub `production` secrets `LAB_CSRF_SIGNING_KEY` and `LAB_WORKER_SECRETS`.
-   6. Agent, once Home's deploy (with mailsort live) has dropped the live `LAB` binding: remove `infra/retired.tf`, its
-      pairs in `.github/scripts/infra_guard.py` (its test then needs a synthetic pair) and the `dashboard: {LAB}` entry
-      of `RETIRED_SERVICE_BINDINGS`.
+   6. Done (`chore/after-mailsort-live`): Home's deploy dropped the live `LAB` binding; the moved blocks, the `RETIRED`
+      pairs and the `RETIRED_SERVICE_BINDINGS` entry are gone (the mechanism stays, its tests use synthetic entries).
+      Lab is fully decommissioned.
 3. Later, from the same review: Newsletter prompts as resources and mechanical cleanup, one shared deploy-vars
    engine for the Workers, platform helper de-duplication (and the 1000 vs 2^31 monitor-count cap mismatch), and a
    shorter HANDOFF.

@@ -8,6 +8,7 @@ export const RESOURCE_IDENTITIES: Readonly<Record<string, string | null>> = {
   "links-db": "2f8c5331-06ce-4347-8c0a-90fe51c82260",
   "mail-coordinator": "55c248f9d82c45f3a89d2de1d719d5db",
   "mail-hero-db": "6c13e4c3-e239-42fb-a7a4-96810fa8d7dc",
+  "mailsort-state": "7dd130a08de1451cab2931db6a7d178d",
   "todofy-core-do": "a013ef9fa45048d4b4f7bfcc641b57ea",
   "todofy-db": "151c1306-3885-4679-9592-08887b30ae68",
   "watch-state": "d58e1bdabacb4d14bbba1887f169c8b4",

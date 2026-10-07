@@ -9,6 +9,7 @@ import tempfile
 import textwrap
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import infra_guard
 
@@ -136,9 +137,11 @@ class Guard(unittest.TestCase):
     def test_a_move_out_of_prevent_destroy_is_only_a_listed_retirement(self):
         """A moved block to an address no resource declares deletes the object at the next apply, past its
         prevent_destroy: only the exact RETIRED pairs may do that; a move to a declared resource stays ordinary."""
-        [(source, target)] = list(infra_guard.RETIRED.items())[:1]
+        source, target = 'cloudflare_d1_database.app["old"]', "cloudflare_d1_database.retired_old"
         listed = f"moved {{\n  from = {source}\n  to   = {target}\n}}\n"
-        self.assertEqual(run({"retired.tf": listed}), [])
+        self.assert_flags({"retired.tf": listed}, "a moved block's target is not declared")
+        with mock.patch.dict(infra_guard.RETIRED, {source: target}):
+            self.assertEqual(run({"retired.tf": listed}), [])
         for text in (
             "moved {\n  from = cloudflare_r2_bucket.app[\"old\"]\n  to   = cloudflare_r2_bucket.gone\n}\n",
             f"moved {{\n  from = {source}\n  to   = {target}_2\n}}\n",

@@ -5,15 +5,5 @@
 # and expect names exactly these deletions. .github/scripts/infra_guard.py accepts such a move only for the exact
 # pairs it lists in RETIRED. Remove a block, and its RETIRED pair, after the apply that deleted the object: once the
 # state no longer holds the old address, the block does nothing.
-
-# The Access application of a Worker that was deleted first (its hostname no longer serves anything).
-moved {
-  from = cloudflare_zero_trust_access_application.owner["lab"]
-  to   = cloudflare_zero_trust_access_application.retired_lab
-}
-
-# That Worker's D1 database, with every row in it.
-moved {
-  from = cloudflare_d1_database.app["lab"]
-  to   = cloudflare_d1_database.retired_lab
-}
+#
+# No app is being retired now: Lab's Access application and D1 database were deleted by the apply of 2026-10-07.
