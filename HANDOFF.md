@@ -16,7 +16,7 @@ Rules for this file:
   what is done, what is left, how to verify it and what to check after its deploy. Link to the app docs for
   design detail instead of copying it.
 
-Last updated: 2026-10-06.
+Last updated: 2026-10-07.
 <!-- Active work is separate from the production evidence below. -->
 
 ## In flight (2026-10-06, Claude): Home reports account changes made outside CI
@@ -38,7 +38,8 @@ Lab Worker deletion) show once as 非 CI 改动.
 New app `mailsort/` (Worker `mailsort`, host `sort.ziyixi.science`, one SQLite DO `MailsortState`, no D1/R2), owner
 plan approved 2026-10-06; design and safety model in `mailsort/docs/design.md`. Rules first, then nearest corrected
 examples (bge-m3), then the Cloudflare decision model Clef 27B (Clef-flash for the rest of the UTC day past ~70% of
-the neuron budget). One label per mail under `分拣/` (up to three levels); confident mail is labelled and archived
+the neuron budget). One label per mail, at Gmail's top level (up to three levels; no `分拣/` prefix since
+`feat/mailsort-labels-ui`); confident mail is labelled and archived
 (INBOX removed) but never marked read, unless the label or rule keeps it in the inbox; unsure mail gets nothing. No
 backfill. Gmail is touched only through the closed operation table in `mailsort/worker/src/gmail.ts` (no trash,
 delete, send, UNREAD or non-owned labels; undo via the ledger only). The Gmail grant is written into the Worker from
@@ -55,6 +56,12 @@ Landing order:
 4. Done: deployed at `a3705ed` (mailsort and Home); the `MailsortState` namespace id is in `config/resources.toml`
    (`chore/after-mailsort-live`). Live on 2026-10-07 in shadow: the owner's readonly Gmail grant (mint-token), the
    15-label template and the 93-rule file imported through the dashboard (93 create, 0 invalid).
+5. `feat/mailsort-labels-ui` (local, not pushed yet): labels at Gmail's top level without `分拣/` (the owner's request,
+   2026-10-07; `mailsort/docs/design.md` §2 "Labels without a prefix"). The guard creates only the store's planned
+   names and renames an owned label only to its planned path; a user label of exactly a label's path is adopted
+   (schema version 4, `gmail_adopted`; additive, the live labels and rules need no data change); SyncLabels follows
+   renames and deletions by Gmail ID and never imports; the rule file's legacy `分拣/` still imports. After its deploy:
+   标签 shows the 15 labels without `分拣/`, still 尚未在 Gmail 创建; 从 Gmail 同步 imports nothing.
 
 Already set: production secret `MAILSORT_CSRF_SIGNING_KEY`, variable `MAILSORT_MODE=shadow` (the mode ceiling).
 

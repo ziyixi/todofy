@@ -38,7 +38,7 @@ export default function MailsortPrivacyPage() {
       <header className={styles.pageHeader}>
         <h1 className={styles.pageTitle}>{TITLE}</h1>
         <p className={styles.pageIntro}>
-          Effective and last updated <time dateTime="2026-10-06">October 6, 2026</time>.
+          Effective and last updated <time dateTime="2026-10-07">October 7, 2026</time>.
         </p>
       </header>
       <div className={articleStyles.articleBody}>
@@ -57,15 +57,16 @@ export default function MailsortPrivacyPage() {
           </li>
           <li>
             Through a closed list of Gmail API operations it reads messages, their labels, the
-            mailbox&apos;s list of labels and its change history; creates the label{" "}
-            <span lang="zh-CN">分拣</span> (&ldquo;sorting&rdquo;) and labels under it, and renames
-            them; adds one of those labels to a message and may remove the message from the inbox
+            mailbox&apos;s list of labels and its change history; creates the labels the owner sets
+            up in its dashboard (and the parent labels Gmail nests them under), and renames them;
+            adds one of those labels to a message and may remove the message from the inbox
             (archive). An undo removes that label and puts the message back in the inbox.
           </li>
           <li>
             It never sends, deletes or trashes mail and never marks mail read or unread. The only
-            labels it renames or adds to mail are under <span lang="zh-CN">分拣/</span>, including
-            ones the owner made there; the only other label it changes on a message is the inbox.
+            labels it renames or adds to mail are the ones it created and the ones the owner linked
+            in its dashboard by giving a label there exactly the name of an existing Gmail label;
+            the only other label it changes on a message is the inbox.
           </li>
           <li>
             Every change it makes to a message is recorded in its ledger first and, while the entry
@@ -110,7 +111,7 @@ export default function MailsortPrivacyPage() {
             owner&apos;s evidence and notes): until the owner deletes them, at most 500.
           </li>
           <li>
-            Labels (their names under <span lang="zh-CN">分拣/</span>, some read from Gmail, and the
+            Labels (their names, some read from Gmail, the Gmail labels they are linked to, and the
             owner&apos;s descriptions): until the owner deletes them, at most 24.
           </li>
           <li>

@@ -340,23 +340,27 @@ describe('modes', () => {
 });
 
 describe('the Gmail filter export', () => {
-  it('writes Gmail’s filter XML: label and archive only, values quoted', () => {
+  it('writes Gmail’s filter XML: the label by its path, archive only, values quoted', () => {
     const xml = gmailFilterXml(
       [
         { kind: 'sender_address', value: 'digest@news.example.com', labelName: '订阅' },
         { kind: 'list_id', value: 'digest.news.example.com', labelName: '订阅' },
+        { kind: 'sender_domain', value: 'ci.example.com', labelName: '开发/CI通知' },
         { kind: 'sender_domain', value: 'shop.example.com', labelName: "收'据" },
       ],
       Date.parse('2026-10-06T00:00:00Z'),
     );
     expect(xml).toContain("<apps:property name='from' value='&quot;digest@news.example.com&quot;'/>");
     expect(xml).toContain("<apps:property name='hasTheWord' value='list:(&quot;digest.news.example.com&quot;)'/>");
-    expect(xml).toContain("<apps:property name='label' value='分拣/收&apos;据'/>");
-    expect(xml).toContain("<apps:property name='label' value='分拣/订阅'/>");
+    expect(xml).toContain("<apps:property name='label' value='收&apos;据'/>");
+    expect(xml).toContain("<apps:property name='label' value='订阅'/>");
+    expect(xml).not.toContain('分拣');
+    // A nested label by its Gmail name, the path itself.
+    expect(xml).toContain("<apps:property name='label' value='开发/CI通知'/>");
     expect(xml).toContain("name='shouldArchive' value='true'");
     // A rule or label that keeps its mail in the inbox only labels.
     const kept = gmailFilterXml([{ kind: 'sender_address', value: 'codes@login.example.com', labelName: '账号安全', archive: false }], Date.parse('2026-10-06T00:00:00Z'));
-    expect(kept).toContain("<apps:property name='label' value='分拣/账号安全'/>");
+    expect(kept).toContain("<apps:property name='label' value='账号安全'/>");
     expect(kept).not.toContain('shouldArchive');
     expect(xml).not.toMatch(/shouldMarkAsRead|shouldTrash|forwardTo|shouldStar|shouldNeverSpam/);
   });

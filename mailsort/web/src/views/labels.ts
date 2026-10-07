@@ -1,8 +1,9 @@
 /**
  * 标签 (`/labels`): every label with its description (the model's criteria), switches and threshold, as a tree of its
- * path (`金融/投资` under 金融: Gmail's nested labels; only leaves are labels); a new label; the sync with Gmail's
- * "分拣/" labels; and the recommended template (导入导出 previews it before anything changes). Deleting a label here
- * leaves the Gmail label and its mails as they are.
+ * path (`金融/投资` under 金融: Gmail's nested labels, named by the path; only leaves are labels); a new label; the sync
+ * with Gmail (renames and deletions there, and the owner's Gmail label of a label's path, which is adopted); and the
+ * recommended template (导入导出 previews it before anything changes). Deleting a label here leaves the Gmail label
+ * and its mails as they are.
  */
 import { create } from '@ziyixi/proto/protobuf'
 import { Label_GmailState, LabelSchema, type Label } from '@ziyixi/proto/mailsort/ui/v1/label_pb'
@@ -11,14 +12,15 @@ import { button, el, fill } from '../dom.ts'
 import type { ViewContext } from '../app.ts'
 import { act, allLabels, frame } from './common.ts'
 
-/** What SyncLabels did, in the owner's words: imported labels arrive disabled and without a description. */
-function syncMessage(answer: { linkedCount: number; importedCount: number; missingCount: number }): string {
-  return `已同步：关联 ${String(answer.linkedCount)}，导入 ${String(answer.importedCount)}${answer.importedCount > 0 ? '（未启用，请补说明）' : ''}，Gmail 中缺失 ${String(answer.missingCount)}`
+/** What SyncLabels did, in the owner's words. */
+function syncMessage(answer: { linkedCount: number; renamedCount: number; missingCount: number }): string {
+  return `已同步：关联 ${String(answer.linkedCount)}，改名 ${String(answer.renamedCount)}，Gmail 中缺失 ${String(answer.missingCount)}`
 }
 
 const GMAIL_STATES: Readonly<Record<number, string>> = {
   [Label_GmailState.PENDING]: '尚未在 Gmail 创建',
   [Label_GmailState.LINKED]: '已关联 Gmail',
+  [Label_GmailState.ADOPTED]: '已沿用 Gmail 原有标签',
   [Label_GmailState.MISSING]: 'Gmail 中已不存在',
 }
 
@@ -66,7 +68,7 @@ function editor(label: Label, reload: () => Promise<void>, confirm: (message: st
   return el(
     'article',
     { class: 'card label-card' },
-    el('div', { class: 'card-head' }, el('strong', {}, `分拣/${label.displayName}`), el('span', { class: 'chip' }, GMAIL_STATES[label.gmailState] ?? '')),
+    el('div', { class: 'card-head' }, el('strong', {}, label.displayName), el('span', { class: 'chip' }, GMAIL_STATES[label.gmailState] ?? '')),
     el('p', { class: 'hint' }, `ID ${label.name.replace('labels/', '')} · 说明版本 ${String(label.descriptionVersion)} · 例子 ${String(label.exampleCount)}`),
     el('label', { class: 'field' }, el('span', { class: 'label' }, '路径（最多三级，如 金融/投资）'), name),
     el('label', { class: 'field' }, el('span', { class: 'label' }, '说明（模型看到“名称: 说明”；建议一种语言、60–120 字）'), description),
@@ -83,7 +85,7 @@ function editor(label: Label, reload: () => Promise<void>, confirm: (message: st
 
 /**
  * The labels as Gmail's tree of nested labels, in the labels' order: a section per path prefix that has labels under
- * it, recursively (a path has up to three segments: 生活/汽车/保养 sits under 分拣/生活/汽车, under 分拣/生活), and a
+ * it, recursively (a path has up to three segments: 生活/汽车/保养 sits under 生活/汽车, under 生活), and a
  * label's card where its path ends. Only leaves are labels, so a prefix is never a label of its own.
  */
 function tree(labels: readonly Label[], card: (label: Label) => HTMLElement): HTMLElement {
@@ -98,10 +100,10 @@ function tree(labels: readonly Label[], card: (label: Label) => HTMLElement): HT
       const only = group[0]
       // A label that ends here, alone under its prefix: its card, without a heading of its own.
       if (group.length === 1 && only !== undefined && only.displayName === prefix) {
-        return depth === 0 ? el('section', { class: 'label-group', 'aria-label': `分拣/${prefix}` }, el('div', { class: 'list' }, card(only))) : card(only)
+        return depth === 0 ? el('section', { class: 'label-group', 'aria-label': prefix }, el('div', { class: 'list' }, card(only))) : card(only)
       }
-      const heading = el(depth === 0 ? 'h2' : 'h3', { class: 'group-name' }, `分拣/${prefix}`, el('span', { class: 'muted' }, ` · ${String(group.length)} 个标签`))
-      return el('section', { class: depth === 0 ? 'label-group' : 'label-subgroup', 'aria-label': `分拣/${prefix}` }, heading, el('div', { class: 'list nested' }, ...branch(group, depth + 1)))
+      const heading = el(depth === 0 ? 'h2' : 'h3', { class: 'group-name' }, prefix, el('span', { class: 'muted' }, ` · ${String(group.length)} 个标签`))
+      return el('section', { class: depth === 0 ? 'label-group' : 'label-subgroup', 'aria-label': prefix }, heading, el('div', { class: 'list nested' }, ...branch(group, depth + 1)))
     })
   }
   return el('div', { class: 'label-tree' }, ...branch(labels, 0))
@@ -110,13 +112,13 @@ function tree(labels: readonly Label[], card: (label: Label) => HTMLElement): HT
 export async function renderLabels(ctx: ViewContext): Promise<void> {
   const reload: () => Promise<void> = await frame(ctx.main, '标签', async (body) => {
     const labels = await allLabels()
-    const name = el('input', { placeholder: '路径（不含“分拣/”），例如 订阅 或 金融/投资', maxlength: '100', 'aria-label': '新标签路径' })
+    const name = el('input', { placeholder: '路径，例如 订阅 或 金融/投资', maxlength: '100', 'aria-label': '新标签路径' })
     const description = el('input', { placeholder: '说明，例如 newsletter 周报 订阅', maxlength: '300', 'aria-label': '新标签说明' })
     const add = () =>
       void act((requestId) => api.createLabel({ label: create(LabelSchema, { displayName: name.value, description: description.value, enabled: true }), requestId }), '已创建', () => reload())
     fill(
       body,
-      el('p', { class: 'hint' }, '标签在 Gmail 中位于“分拣/”下，可以分级（金融/投资）：上级只用来分组，邮件只打末级的一个标签。'),
+      el('p', { class: 'hint' }, '可以分级（金融/投资）：上级只用来分组，邮件只打末级的一个标签。Gmail 里已有同名标签时直接沿用。'),
       el(
         'section',
         { class: 'card' },

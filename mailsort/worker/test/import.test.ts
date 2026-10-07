@@ -1,14 +1,14 @@
 /**
  * Label paths (nesting, the tree rule, the IDs and option keys derived from a path), the built-in template, the import
- * plan and its application, the export's round trip, schema version 2's migration and the flow counters, over the
+ * plan and its application, the export's round trip, the schema migrations and the flow counters, over the
  * store's own SQL on Node's SQLite (./fakes/sql.ts). Every rule value and address is synthetic (example.* domains).
  */
 import { describe, expect, it } from 'vitest';
 import { countFlow, readFlow } from '../src/flow.ts';
 import { applyImport, exportDocument, foldTerms, planImport, planValid, templateLabels, type LabelInput, type RuleInput } from '../src/import.ts';
-import { DAY, LABEL_PREFIX } from '../src/limits.ts';
+import { DAY, LEGACY_LABEL_PREFIX } from '../src/limits.ts';
 import { labelIdFor, normalizePath, optionKeys, ownerPath, parentGmailNames, pathOfGmailName, pathSlug, treeConflict } from '../src/paths.ts';
-import { SCHEMA_V1, SCHEMA_V2, SCHEMA_V3, Store } from '../src/store.ts';
+import { SCHEMA_V1, SCHEMA_V2, SCHEMA_V3, SCHEMA_V4, Store } from '../src/store.ts';
 import { LABEL_TEMPLATE } from '../src/template.ts';
 import { memorySql } from './fakes/sql.ts';
 
@@ -47,14 +47,17 @@ describe('label paths', () => {
     expect(normalizePath('出行')).toBe('出行');
     expect(normalizePath('a/b/c')).toBe('a/b/c');
     for (const bad of ['', '/', 'a//b', 'a/', 'a/b/c/d', 'x'.repeat(41), 'a\u0007', 'a\u0085b']) expect(normalizePath(bad), JSON.stringify(bad)).toBeNull();
-    expect(pathOfGmailName('分拣/金融/投资')).toBe('金融/投资');
-    expect(pathOfGmailName('分拣/ 金融')).toBeNull();
-    expect(pathOfGmailName('金融/投资')).toBeNull();
-    expect(parentGmailNames('开发/CI通知')).toEqual(['分拣', '分拣/开发']);
-    expect(parentGmailNames('出行')).toEqual(['分拣']);
+    // A Gmail name is a label's path as it is: only the normalized spelling.
+    expect(pathOfGmailName('金融/投资')).toBe('金融/投资');
+    expect(pathOfGmailName('金融/ 投资')).toBeNull();
+    expect(pathOfGmailName('出行 ')).toBeNull();
+    expect(pathOfGmailName('a/b/c/d')).toBeNull();
+    expect(parentGmailNames('开发/CI通知')).toEqual(['开发']);
+    expect(parentGmailNames('生活/汽车/保养')).toEqual(['生活', '生活/汽车']);
+    expect(parentGmailNames('出行')).toEqual([]);
   });
 
-  it('never nests a label under the prefix twice: 分拣/x is x when typed, and 分拣 is no first segment (QA D7)', () => {
+  it('reads the legacy prefix as nothing: 分拣/x is x at every entry point, and 分拣 is no first segment (QA D7)', () => {
     for (const bad of ['分拣', '分拣/x', ' 分拣 /x']) expect(normalizePath(bad), bad).toBeNull();
     expect(normalizePath('分拣箱/x')).toBe('分拣箱/x');
     expect(ownerPath('分拣/金融/投资')).toBe('金融/投资');
@@ -62,10 +65,16 @@ describe('label paths', () => {
     expect(ownerPath('分拣/分拣/x')).toBeNull();
     expect(ownerPath('分拣')).toBeNull();
     expect(ownerPath('分拣/')).toBeNull();
+    // A legacy Gmail name is not a path: SyncLabels never takes `分拣/x` for a rename to it.
+    expect(pathOfGmailName('分拣/金融/投资')).toBeNull();
     expect(pathOfGmailName('分拣/分拣/x')).toBeNull();
-    // The import reads a rule's label the same way: one prefix, never two.
-    const plan = planImport(store(), [], [entry('twice', { fromAddress: 'a@example.com' }, '分拣/分拣/x')]);
+    // The import reads a rule's label the same way: one legacy prefix at most, and with or without it the same label.
+    const s = store();
+    const plan = planImport(s, [], [entry('twice', { fromAddress: 'a@example.com' }, '分拣/分拣/x')]);
     expect(plan.rules[0]).toMatchObject({ action: 'invalid', problem: 'label_path' });
+    applyImport(s, planImport(s, [], [entry('plain', { fromAddress: 'a@example.com' }, '金融/投资')]), T0);
+    expect(s.labels().map((row) => row.display_name)).toEqual(['金融/投资']);
+    expect(planImport(s, [], [entry('plain', { fromAddress: 'a@example.com' }, `${LEGACY_LABEL_PREFIX}金融/投资`)]).rules[0]?.action).toBe('skip');
   });
 
   it('keeps only leaves as labels: a parent and its child cannot both be labels', () => {
@@ -172,16 +181,16 @@ describe('the template', () => {
     expect(s.label('life-health')).toMatchObject({ threshold: 0.93, sensitive: 1 });
     expect(s.all(`SELECT id FROM examples ORDER BY id`)).toEqual([{ id: 'e2' }]);
     // A label file that names a threshold still sets it.
-    const tuned = planImport(s, [labelEntry(`${LABEL_PREFIX}出行`, { threshold: 0.9, description: s.label('travel')?.description ?? '' })], []);
+    const tuned = planImport(s, [labelEntry('出行', { threshold: 0.9, description: s.label('travel')?.description ?? '' })], []);
     expect(tuned.labels[0]).toMatchObject({ action: 'update', changed: ['threshold'] });
   });
 
   it('never gives a new label the ID of a deleted one (its history still names it)', () => {
     const s = store();
-    applyImport(s, planImport(s, [labelEntry(`${LABEL_PREFIX}金融/投资`)], []), T0);
+    applyImport(s, planImport(s, [labelEntry('金融/投资')], []), T0);
     s.run(`DELETE FROM labels WHERE id = 'finance-invest'`);
     s.run(`INSERT INTO retired_labels (id, retire_time) VALUES ('finance-invest', ?)`, T0);
-    const again = planImport(s, [labelEntry(`${LABEL_PREFIX}金融/投资`)], []);
+    const again = planImport(s, [labelEntry(`${LEGACY_LABEL_PREFIX}金融/投资`)], []);
     expect(again.labels[0]).toMatchObject({ action: 'create', id: 'finance-invest-2' });
     expect(labelIdFor('Finance/Invest', s.takenLabelIds())).toBe('finance-invest-2');
     // Free again once nothing kept can name it.
@@ -191,6 +200,7 @@ describe('the template', () => {
 });
 
 describe('importing the owner’s rule file', () => {
+  // In the file's own format: its labels still carry the legacy `分拣/` prefix.
   const file = (): RuleInput[] => [
     entry('ci-builds', { fromAddress: 'Builds@CI.example.com' }, '分拣/开发/CI通知', { evidence: 'every build mail', notes: 'synthetic' }),
     entry('broker-login', { fromDomain: 'broker.example.com' }, '分拣/账号安全', { trust: true, keepInInbox: true, subjectIncludes: ['登录', 'Login Code'] }),
@@ -244,32 +254,32 @@ describe('importing the owner’s rule file', () => {
   it('refuses every invalid entry, says why, and applies nothing', () => {
     const s = store();
     const bad: RuleInput[] = [
-      entry('ok', { fromAddress: 'a@example.com' }, '分拣/订阅收据'),
-      entry('no-prefix', { fromAddress: 'b@example.com' }, '订阅收据'),
-      entry('two-keys', { fromAddress: 'c@example.com', fromDomain: 'example.com' }, '分拣/订阅收据'),
-      entry('no-key', {}, '分拣/订阅收据'),
-      entry('hostile', { listId: 'x)or(from:*' }, '分拣/订阅收据'),
-      entry('deep', { fromAddress: 'd@example.com' }, '分拣/a/b/c/d'),
-      entry('many', { fromAddress: 'e@example.com' }, '分拣/订阅收据', { subjectIncludes: Array.from({ length: 9 }, (_, i) => `w${String(i)}`) }),
-      entry('ok', { fromAddress: 'f@example.com' }, '分拣/订阅收据'),
-      entry('bad id!', { fromAddress: 'g@example.com' }, '分拣/订阅收据'),
-      entry('long', { fromAddress: 'h@example.com' }, '分拣/订阅收据', { notes: 'n'.repeat(301) }),
+      entry('ok', { fromAddress: 'a@example.com' }, '订阅收据'),
+      entry('plain-path', { fromAddress: 'b@example.com' }, '订阅收据'),
+      entry('two-keys', { fromAddress: 'c@example.com', fromDomain: 'example.com' }, '订阅收据'),
+      entry('no-key', {}, '订阅收据'),
+      entry('hostile', { listId: 'x)or(from:*' }, '订阅收据'),
+      entry('deep', { fromAddress: 'd@example.com' }, 'a/b/c/d'),
+      entry('many', { fromAddress: 'e@example.com' }, '订阅收据', { subjectIncludes: Array.from({ length: 9 }, (_, i) => `w${String(i)}`) }),
+      entry('ok', { fromAddress: 'f@example.com' }, '订阅收据'),
+      entry('bad id!', { fromAddress: 'g@example.com' }, '订阅收据'),
+      entry('long', { fromAddress: 'h@example.com' }, '订阅收据', { notes: 'n'.repeat(301) }),
     ];
     const plan = planImport(s, [], bad);
     expect(planValid(plan)).toBe(false);
-    expect(plan.rules.map((item) => item.problem)).toEqual(['', 'label_prefix', 'match', 'match', 'value', 'label_path', 'subject', 'duplicate', 'rule_id', 'text']);
+    expect(plan.rules.map((item) => item.problem)).toEqual(['', '', 'match', 'match', 'value', 'label_path', 'subject', 'duplicate', 'rule_id', 'text']);
     expect(foldTerms(['', 'x'])).toBeNull();
     expect(foldTerms(['ＡＢ', 'ab'])).toEqual(['ab']);
   });
 
   it('accepts multi-line evidence and notes and a List-Id in its header form (QA D4)', () => {
     const s = store();
-    const plan = planImport(s, [labelEntry('分拣/订阅收据', { description: '第一行\r\n第二行' })], [
-      entry('multi', { fromAddress: 'a@example.com' }, '分拣/订阅收据', { evidence: 'line1\nline2', notes: 'a\r\nb\rc' }),
-      entry('bracket', { listId: ' <Digest.News.example.com> ' }, '分拣/订阅收据'),
-      entry('bell', { fromAddress: 'b@example.com' }, '分拣/订阅收据', { evidence: 'ding\u0007' }),
-      entry('tab', { fromAddress: 'c@example.com' }, '分拣/订阅收据', { notes: 'a\tb' }),
-      entry('half', { listId: '<digest.example.com' }, '分拣/订阅收据'),
+    const plan = planImport(s, [labelEntry('订阅收据', { description: '第一行\r\n第二行' })], [
+      entry('multi', { fromAddress: 'a@example.com' }, '订阅收据', { evidence: 'line1\nline2', notes: 'a\r\nb\rc' }),
+      entry('bracket', { listId: ' <Digest.News.example.com> ' }, '订阅收据'),
+      entry('bell', { fromAddress: 'b@example.com' }, '订阅收据', { evidence: 'ding\u0007' }),
+      entry('tab', { fromAddress: 'c@example.com' }, '订阅收据', { notes: 'a\tb' }),
+      entry('half', { listId: '<digest.example.com' }, '订阅收据'),
     ]);
     expect(plan.rules.map((item) => [item.key, item.action, item.problem])).toEqual([
       ['multi', 'create', ''],
@@ -278,16 +288,16 @@ describe('importing the owner’s rule file', () => {
       ['tab', 'invalid', 'text'],
       ['half', 'invalid', 'value'],
     ]);
-    const valid = planImport(s, [labelEntry('分拣/订阅收据', { description: '第一行\r\n第二行' })], [
-      entry('multi', { fromAddress: 'a@example.com' }, '分拣/订阅收据', { evidence: 'line1\nline2', notes: 'a\r\nb\rc' }),
-      entry('bracket', { listId: ' <Digest.News.example.com> ' }, '分拣/订阅收据'),
+    const valid = planImport(s, [labelEntry('订阅收据', { description: '第一行\r\n第二行' })], [
+      entry('multi', { fromAddress: 'a@example.com' }, '订阅收据', { evidence: 'line1\nline2', notes: 'a\r\nb\rc' }),
+      entry('bracket', { listId: ' <Digest.News.example.com> ' }, '订阅收据'),
     ]);
     applyImport(s, valid, T0);
     expect(s.rule('multi')).toMatchObject({ evidence: 'line1\nline2', notes: 'a\nb\nc' });
     expect(s.rule('bracket')).toMatchObject({ kind: 'list_id', value: 'digest.news.example.com' });
     expect(s.labels()[0]?.description).toBe('第一行\n第二行');
     // The header form of an existing rule's List-Id is the same rule: a re-import skips it.
-    expect(planImport(s, [], [entry('bracket', { listId: 'digest.news.example.com' }, '分拣/订阅收据')]).rules[0]?.action).toBe('skip');
+    expect(planImport(s, [], [entry('bracket', { listId: 'digest.news.example.com' }, '订阅收据')]).rules[0]?.action).toBe('skip');
   });
 
   it('keeps a disabled label disabled through an export and an import into a fresh store, and through the template (QA D10)', () => {
@@ -295,7 +305,7 @@ describe('importing the owner’s rule file', () => {
     applyImport(s, planImport(s, templateLabels(), []), T0);
     s.run(`UPDATE labels SET enabled = 0 WHERE id = 'travel'`);
     const document = JSON.parse(exportDocument(s).json) as { labels: { path: string; enabled: boolean }[] };
-    expect(document.labels.find((item) => item.path === '分拣/出行')?.enabled).toBe(false);
+    expect(document.labels.find((item) => item.path === '出行')?.enabled).toBe(false);
     expect(document.labels.filter((item) => item.enabled)).toHaveLength(14);
     // The template names no switch: the owner's choice stands.
     expect(planImport(s, templateLabels(), []).labels.every((item) => item.action === 'skip')).toBe(true);
@@ -304,15 +314,15 @@ describe('importing the owner’s rule file', () => {
     expect(fresh.labels().find((row) => row.display_name === '出行')?.enabled).toBe(0);
     expect(fresh.labels().filter((row) => row.enabled === 1)).toHaveLength(14);
     // An entry with the switch updates an existing label's; one without keeps it.
-    const enabling = planImport(fresh, [labelEntry('分拣/出行', { enabled: true })], []).labels[0];
+    const enabling = planImport(fresh, [labelEntry('出行', { enabled: true })], []).labels[0];
     expect(enabling?.action).toBe('update');
     expect(enabling?.changed).toContain('enabled');
-    expect(planImport(fresh, [labelEntry('分拣/出行')], []).labels[0]?.changed).not.toContain('enabled');
+    expect(planImport(fresh, [labelEntry(`${LEGACY_LABEL_PREFIX}出行`)], []).labels[0]?.changed).not.toContain('enabled');
   });
 
   it('keeps the tree: a label may not become the parent of another', () => {
     const s = store();
-    const plan = planImport(s, [labelEntry('分拣/金融', { description: '金融类邮件' })], [entry('x', { fromAddress: 'a@example.com' }, '分拣/金融/投资')]);
+    const plan = planImport(s, [labelEntry('金融', { description: '金融类邮件' })], [entry('x', { fromAddress: 'a@example.com' }, '金融/投资')]);
     expect(plan.labels.map((item) => [item.key, item.problem])).toEqual([
       ['金融', 'label_tree'],
       ['金融/投资', 'label_tree'],
@@ -323,8 +333,8 @@ describe('importing the owner’s rule file', () => {
     const s = store();
     const plan = planImport(
       s,
-      [labelEntry('分拣/购物/促销', { description: '营销邮件' })],
-      [entry('a', { fromDomain: 'bank.example.com' }, '分拣/购物/促销', { trust: true }), entry('b', { fromDomain: 'bank.example.com' }, '分拣/订阅收据')],
+      [labelEntry('购物/促销', { description: '营销邮件' })],
+      [entry('a', { fromDomain: 'bank.example.com' }, '购物/促销', { trust: true }), entry('b', { fromDomain: 'bank.example.com' }, '订阅收据')],
     );
     expect(plan.rules.map((item) => item.warning)).toEqual(['trust_mismatch', 'same_match']);
     expect(planValid(plan)).toBe(true);
@@ -339,8 +349,10 @@ describe('importing the owner’s rule file', () => {
     expect(labels).toBe(15);
     expect(rules).toBe(6);
     const document = JSON.parse(json) as { labels: { path: string; description: string; trust: boolean; keep_in_inbox: boolean; sensitive: boolean; threshold: number }[]; rules: { id: string; match: Record<string, string>; label: string; keep_in_inbox: boolean; trust: boolean; require_dmarc: boolean; evidence: string; notes: string; subject_includes?: string[]; subject_excludes?: string[] }[] };
-    expect(document.rules[1]).toEqual({ id: 'broker-login', match: { from_domain: 'broker.example.com' }, label: '分拣/账号安全', keep_in_inbox: true, trust: true, require_dmarc: false, evidence: '', notes: '', subject_includes: ['登录', 'login code'] });
-    expect(document.labels.every((item) => item.path.startsWith(LABEL_PREFIX))).toBe(true);
+    // The file says `分拣/账号安全` (the legacy prefix); the export writes the path alone.
+    expect(document.rules[1]).toEqual({ id: 'broker-login', match: { from_domain: 'broker.example.com' }, label: '账号安全', keep_in_inbox: true, trust: true, require_dmarc: false, evidence: '', notes: '', subject_includes: ['登录', 'login code'] });
+    expect(document.labels.map((item) => item.path)).toEqual(LABEL_TEMPLATE.map((item) => item.path));
+    expect(json).not.toContain(LEGACY_LABEL_PREFIX);
     const again = planImport(
       s,
       document.labels.map((item) => labelEntry(item.path, { description: item.description, trust: item.trust, keepInInbox: item.keep_in_inbox, sensitive: item.sensitive, threshold: item.threshold })),
@@ -368,7 +380,7 @@ describe('the store', () => {
     sql.exec(`INSERT INTO rules (id, kind, value, label_id, state, create_time, update_time) VALUES ('r1', 'list_id', 'digest.news.example.com', 'newsletter', 'active', 1, 1)`);
     const s = new Store(sql);
     s.migrate();
-    expect(s.getMeta('schema_version')).toBe('3');
+    expect(s.getMeta('schema_version')).toBe('4');
     expect(s.rule('r1')).toMatchObject({ kind: 'list_id', subject_includes: '[]', keep_in_inbox: 0, require_dmarc: 0, import_id: '' });
     expect(SCHEMA_V2.length).toBeGreaterThan(0);
     // A carve-out and a plain rule of one sender to one label are two rules now.
@@ -382,13 +394,47 @@ describe('the store', () => {
     sql.exec(`INSERT INTO meta (key, value) VALUES ('schema_version', '2')`);
     const s = new Store(sql);
     s.migrate();
-    expect(s.getMeta('schema_version')).toBe('3');
+    expect(s.getMeta('schema_version')).toBe('4');
     expect(SCHEMA_V3.length).toBe(1);
     s.run(`INSERT INTO gmail_parents (gmail_id, create_time) VALUES ('Label_9', 1)`);
     expect(s.count(`SELECT count(*) AS n FROM gmail_parents`)).toBe(1);
     // Migrating again changes nothing.
     s.migrate();
     expect(s.count(`SELECT count(*) AS n FROM gmail_parents`)).toBe(1);
+  });
+
+  it('migrates a version 3 database to 4: its labels and rules are kept as they are, none adopted', () => {
+    const sql = memorySql();
+    for (const statement of [...SCHEMA_V1, ...SCHEMA_V2, ...SCHEMA_V3]) sql.exec(statement);
+    sql.exec(`INSERT INTO meta (key, value) VALUES ('schema_version', '3')`);
+    // The live store's shape: the template's labels, none in Gmail yet, and rules naming them by ID.
+    for (const [i, item] of LABEL_TEMPLATE.entries()) {
+      sql.exec(
+        `INSERT INTO labels (id, seq, display_name, description, enabled, trust, gmail_state, create_time, update_time, etag, keep_in_inbox, sensitive) VALUES (?, ?, ?, ?, 1, ?, 'pending', 1, 1, 'e', ?, ?)`,
+        `l${String(i)}`,
+        i + 1,
+        item.path,
+        item.description,
+        item.trust ? 1 : 0,
+        item.keepInInbox ? 1 : 0,
+        item.sensitive ? 1 : 0,
+      );
+    }
+    sql.exec(`INSERT INTO labels (id, seq, display_name, gmail_id, gmail_state, create_time, update_time, etag) VALUES ('linked', 99, '已建', 'Label_5', 'linked', 1, 1, 'e')`);
+    sql.exec(`INSERT INTO rules (id, kind, value, label_id, state, create_time, update_time, import_id) VALUES ('r1', 'sender_address', 'builds@ci.example.com', 'l0', 'active', 1, 1, 'ci-builds')`);
+    const before = sql.exec(`SELECT * FROM labels ORDER BY seq`).toArray();
+    const s = new Store(sql);
+    s.migrate();
+    expect(s.getMeta('schema_version')).toBe('4');
+    expect(SCHEMA_V4.length).toBe(1);
+    const after = s.labels();
+    expect(after.map(({ gmail_adopted: adopted, ...row }) => [row, adopted])).toEqual(before.map((row) => [row, 0]));
+    expect(after.some((row) => row.display_name.startsWith(LEGACY_LABEL_PREFIX))).toBe(false);
+    expect(s.rule('r1')).toMatchObject({ label_id: 'l0', import_id: 'ci-builds' });
+    expect(s.ownedGmailIds()).toEqual(new Set(['Label_5']));
+    // Migrating again changes nothing.
+    s.migrate();
+    expect(s.labels()).toEqual(after);
   });
 
   it('counts the flow per UTC day, never below zero, and reads a range of days', () => {

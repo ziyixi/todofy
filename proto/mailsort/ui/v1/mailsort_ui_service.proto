@@ -19,7 +19,8 @@
 // nothing; reused for another rpc or resource it is INVALID_ARGUMENT (BAD_REQUEST).
 //
 // Gmail. Only the methods that say so write to Gmail, and only through the Worker's closed table of operations
-// (mailsort/worker/src/gmail.ts): a label added or removed, a label of the "分拣/" prefix created or renamed.
+// (mailsort/worker/src/gmail.ts): one of mailsort's labels (created by it or adopted) added to or removed from a
+// mail, with the inbox; a label of the store (or a parent it nests under) created, or renamed to its path.
 // Nothing here can trash, delete, send or change another label.
 //
 // Value rules the IDL cannot express (lengths, ranges, counts) are in each field's comment and enforced by the
@@ -76,8 +77,9 @@ service MailsortUiService {
     option (google.api.method_signature) = "";
   }
 
-  // Creates a label (AIP-133). It is created in Gmail ("分拣/" + display_name) before the first live write that
-  // needs it, or at once when the mode is live and the grant allows writes.
+  // Creates a label (AIP-133). It is created in Gmail (named display_name) before the first live write that
+  // needs it, or at once when the mode is live and the grant allows writes; a user label Gmail already has under
+  // that name is adopted instead (Label.GmailState.GMAIL_STATE_ADOPTED).
   // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
   // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
   rpc CreateLabel(CreateLabelRequest) returns (Label) {
@@ -109,8 +111,9 @@ service MailsortUiService {
     option (google.api.method_signature) = "name";
   }
 
-  // Reads Gmail's labels: links every label to the Gmail label of its name, imports the "分拣/" labels mailsort
-  // does not know yet (disabled, without a description), and marks linked labels Gmail no longer has.
+  // Reads Gmail's labels and refreshes the store's own: a linked label follows a rename made in Gmail (when the
+  // new name is a path no other label has) or is marked missing when Gmail no longer has it; a label not in
+  // Gmail is linked to (adopts) the user label of exactly its path. It never imports another Gmail label.
   // (-- api-linter: core::0136::http-uri-suffix=disabled
   //     aip.dev/not-precedent: a custom method on the collection, `labels:sync`; the noun is the collection
   //     itself. --)
@@ -462,12 +465,18 @@ message SyncLabelsRequest {
 message SyncLabelsResponse {
   // Every label after the sync.
   repeated Label labels = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Labels linked to the Gmail label of their name by this sync.
+  // Labels linked to (adopting) the Gmail label of their path by this sync.
   int32 linked_count = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // "分拣/" labels of Gmail imported by this sync.
-  int32 imported_count = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Deprecated: always 0 since 2026-10-07. SyncLabels no longer imports Gmail labels (there is no prefix to
+  // tell mailsort's from the owner's).
+  int32 imported_count = 3 [
+    deprecated = true,
+    (google.api.field_behavior) = OUTPUT_ONLY
+  ];
   // Linked labels Gmail no longer has.
   int32 missing_count = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Linked labels whose path followed a rename made in Gmail.
+  int32 renamed_count = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
 }
 
 // Input of GetReviewItem.
@@ -638,7 +647,8 @@ message ExportGmailFiltersResponse {
 
 // A label of an import: created when no label has its path, else updated where it differs.
 message LabelImport {
-  // The Gmail name, "分拣/" and the label's path (Label.display_name), `分拣/开发/CI通知`.
+  // The label's path (Label.display_name), `开发/CI通知`. The legacy `分拣/开发/CI通知` of older files means the
+  // same.
   string path = 1 [(google.api.field_behavior) = REQUIRED];
   // Label.description.
   string description = 2 [(google.api.field_behavior) = OPTIONAL];
@@ -682,7 +692,7 @@ message RuleImport {
   string id = 1 [(google.api.field_behavior) = REQUIRED];
   // What it matches.
   RuleMatch match = 2 [(google.api.field_behavior) = REQUIRED];
-  // The label's Gmail name, "分拣/" and its path (LabelImport.path).
+  // The label's path (LabelImport.path; the legacy `分拣/` prefix is read as nothing).
   string label = 3 [(google.api.field_behavior) = REQUIRED];
   // Rule.keep_in_inbox.
   // (-- api-linter: core::0140::prepositions=disabled
@@ -759,7 +769,7 @@ message ImportChange {
   string resource = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
   // The fields an update changes (`description`, `subject_includes`, ...).
   repeated string changed_fields = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Why an entry is invalid, a code: `label_path`, `label_prefix`, `label_tree`, `description`, `threshold`,
+  // Why an entry is invalid, a code: `label_path`, `label_tree`, `description`, `threshold`,
   // `match`, `value`, `rule_id`, `subject`, `text`, `duplicate`, `labels_full`, `rules_full`.
   string problem = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
   // Something the owner should know that does not stop the import, a code: `trust_mismatch` (the rule says

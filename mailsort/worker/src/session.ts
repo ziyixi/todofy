@@ -77,6 +77,8 @@ export async function openSession(options: SessionOptions): Promise<{ client: Gm
   if (store.getMeta('auth_state') === 'failed') return { reason: 'stopped' };
   const ownership: Ownership = {
     ownedLabelIds: () => store.ownedGmailIds(),
+    plannedPaths: () => new Set(store.labelPaths()),
+    plannedPath: (labelId) => store.labelByGmailId(labelId)?.display_name ?? null,
     ledger: (messageId, labelId) => {
       const row = store.ledgerFor(messageId, labelId);
       return row === undefined ? null : { state: row.state, archived: row.archived === 1 };

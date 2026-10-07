@@ -180,10 +180,11 @@ export class FakeServer {
         for (const item of batch) Object.assign(item, { state: LedgerEntry_State.UNDONE, undoable: false })
         return Promise.resolve(create(UndoLedgerEntriesResponseSchema, { undoneCount: batch.length, failedCount: 0, remainingCount: open.length - batch.length }))
       },
+      // As the Worker: the first label adopts the owner's Gmail label of its path; nothing is imported.
       syncLabels: () => {
-        const imported = Object.assign(label('l1abcdefg', '学校'), { enabled: false, description: '' })
-        this.labels.push(imported)
-        return Promise.resolve(create(SyncLabelsResponseSchema, { labels: this.labels, linkedCount: 1, importedCount: 1, missingCount: 0 }))
+        const first = this.labels[0]
+        if (first !== undefined) first.gmailState = Label_GmailState.ADOPTED
+        return Promise.resolve(create(SyncLabelsResponseSchema, { labels: this.labels, linkedCount: 1, renamedCount: 0, missingCount: 0 }))
       },
       exportGmailFilters: () => {
         const active = this.rules.filter((rule) => rule.state === Rule_State.ACTIVE)
@@ -198,13 +199,13 @@ export class FakeServer {
           return create(ImportChangeSchema, { kind: ImportChange_Kind.RULE, index, key: rule.id, action: keys.length === 1 ? ImportChange_Action.CREATE : ImportChange_Action.INVALID, problem: keys.length === 1 ? '' : 'match' })
         })
         const labels = request.useTemplate
-          ? [create(LabelImportSchema, { path: '分拣/账号安全', description: '账号安全通知', trust: true, keepInInbox: true }), create(LabelImportSchema, { path: '分拣/金融/投资', description: '券商对账单', trust: true })]
+          ? [create(LabelImportSchema, { path: '账号安全', description: '账号安全通知', trust: true, keepInInbox: true }), create(LabelImportSchema, { path: '金融/投资', description: '券商对账单', trust: true })]
           : request.labels
         const invalid = rules.filter((change) => change.action === ImportChange_Action.INVALID).length
         if (invalid > 0 && !request.validateOnly) throw new RpcError(Code.INVALID_ARGUMENT, 'INVALID_IMPORT', 'invalid')
         return Promise.resolve(
           create(ImportRulesResponseSchema, {
-            changes: [...labels.map((item, index) => create(ImportChangeSchema, { kind: ImportChange_Kind.LABEL, index, key: item.path.replace('分拣/', ''), action: ImportChange_Action.CREATE })), ...rules],
+            changes: [...labels.map((item, index) => create(ImportChangeSchema, { kind: ImportChange_Kind.LABEL, index, key: item.path.replace(/^分拣\//, ''), action: ImportChange_Action.CREATE })), ...rules],
             applied: !request.validateOnly,
             createdLabelCount: labels.length,
             createdRuleCount: rules.length - invalid,

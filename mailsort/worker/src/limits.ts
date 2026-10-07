@@ -160,17 +160,20 @@ export const RULE_PAGE = 100;
 export const LABEL_ID_PATTERN = /^[a-z][a-z0-9-]{0,39}$/;
 export const ID_PATTERN = /^[a-z0-9-]{1,40}$/;
 /**
- * A label's path below the prefix (Label.display_name): at most LABEL_DEPTH_MAX segments of LABEL_SEGMENT_MAX
- * characters each, DISPLAY_NAME_MAX in all. Gmail shows `分拣/开发/CI通知` nested under `分拣/开发`.
+ * A label's path (Label.display_name), which is also its Gmail name: at most LABEL_DEPTH_MAX segments of
+ * LABEL_SEGMENT_MAX characters each, DISPLAY_NAME_MAX in all. Gmail shows `开发/CI通知` nested under `开发`.
  */
 export const LABEL_DEPTH_MAX = 3;
 export const LABEL_SEGMENT_MAX = 40;
 export const DISPLAY_NAME_MAX = 100;
 export const DESCRIPTION_MAX = 300;
-/** The Gmail label prefix every label of this app lives under (a nested label). */
-export const LABEL_PREFIX = '分拣/';
-/** The prefix's own Gmail label, the parent Gmail nests every label of this app under. */
-export const LABEL_ROOT = '分拣';
+/**
+ * The prefix the labels had in Gmail until 2026-10-07 (`分拣/开发/CI通知`). It is never written; on input (the owner's
+ * rule file, an older export, a path typed in 标签) it is read as nothing, so `分拣/x` is `x` at every entry point.
+ */
+export const LEGACY_LABEL_PREFIX = '分拣/';
+/** The legacy prefix's own segment: no path starts with it, so the import and its export always agree. */
+export const LEGACY_LABEL_ROOT = '分拣';
 /** A rule's subject conditions: at most this many words each way, each 1 to SUBJECT_TERM_CHARS characters. */
 export const SUBJECT_TERMS_MAX = 8;
 export const SUBJECT_TERM_CHARS = 40;

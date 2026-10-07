@@ -6,7 +6,6 @@
  * (api.ts exportGmailFilters); any value rule-value.ts refuses is left out here too.
  */
 import { termsOf } from './decide.ts';
-import { LABEL_PREFIX } from './limits.ts';
 import { ruleValueOk } from './rule-value.ts';
 import type { RuleRow } from './store.ts';
 
@@ -104,7 +103,7 @@ export function gmailFilterXml(rules: readonly (Pick<RuleRow, 'kind' | 'value'> 
       `<updated>${updated}</updated>`,
       '<content></content>',
       `<apps:property name='${name}' value='${escapeXml(value)}'/>`,
-      `<apps:property name='label' value='${escapeXml(`${LABEL_PREFIX}${rule.labelName}`)}'/>`,
+      `<apps:property name='label' value='${escapeXml(rule.labelName)}'/>`,
       // A rule or label that keeps its mail in the inbox: the filter only labels.
       ...(rule.archive === false ? [] : ["<apps:property name='shouldArchive' value='true'/>"]),
       "<apps:property name='sizeOperator' value='s_sl'/>",

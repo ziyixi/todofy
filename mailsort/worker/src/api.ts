@@ -56,7 +56,6 @@ import {
   FLASH_SWITCH_SHARE,
   ID_PATTERN,
   LABEL_ID_PATTERN,
-  LABEL_PREFIX,
   LABELS_MAX,
   NEURON_BUDGET_MAX,
   NEURON_BUDGET_MIN,
@@ -78,7 +77,7 @@ import { normalizeRuleValue, ruleText, ruleValueOk } from './rule-value.ts';
 import { authState, type Budget, writeScope } from './session.ts';
 import { effectiveMode, readSettings, writeSettings, type SettingsValue } from './settings.ts';
 import { utcDay, type DecisionRow, type LabelRow, type LedgerRow, type ReviewRow, type RuleRow, type Store } from './store.ts';
-import { ensureGmailLabel, ensureGmailParents, executeWrites, intend, intendUndo, undoable, type WriteContext } from './writes.ts';
+import { ensureGmailLabel, ensureGmailParents, executeWrites, intend, intendUndo, linkGmailLabel, undoable, userLabelsByName, type WriteContext } from './writes.ts';
 
 /** What every handler gets from MailsortState. */
 export interface ApiContext {
@@ -221,7 +220,7 @@ function labelOut(ctx: ApiContext, row: LabelRow): Label {
 
 /** A label's path (paths.ts ownerPath), and the tree rule: no label may be the parent of another (only leaves). */
 function checkDisplayName(ctx: ApiContext, name: string, exceptId = ''): string {
-  // `分拣/x` means `x` (the import reads it so too); `分拣` itself, or a path starting with it again, is refused.
+  // The legacy `分拣/x` means `x` (the import reads it so too); `分拣` itself, or a path starting with it again, is refused.
   const value = ownerPath(name);
   if (value === null) throw sortError('INVALID_LABEL');
   if (treeConflict(value, ctx.store.labelPaths(exceptId)) !== null) throw sortError('INVALID_LABEL');
@@ -241,6 +240,27 @@ function checkDescription(text: string): string {
 
 function labelEtag(ctx: ApiContext, row: LabelRow, etag: string): void {
   if (etag !== '' && etag !== row.etag) throw sortError('ETAG_MISMATCH', [{ schema: LabelSchema, message: labelOut(ctx, row) }]);
+}
+
+/**
+ * Renames a linked label in Gmail to its new path (its Gmail name), with any new parents the path needs (`生活/汽车` ->
+ * `出行/汽车` needs `出行`; the old ones stay). The store holds the new path first, since the guard renames an owned
+ * label only to the path its store plans for it (gmail.ts); a failure puts the old path back.
+ */
+async function renameInGmail(ctx: ApiContext, before: LabelRow, gmailId: string, path: string): Promise<void> {
+  if (!writeScope(ctx.store) || effectiveMode(readSettings(ctx.store), ctx.ceiling) === 'off') throw sortError('GMAIL_WRITE_NOT_ALLOWED');
+  const client = await gmailFor(ctx);
+  ctx.transact(() => ctx.store.run(`UPDATE labels SET display_name = ? WHERE id = ?`, path, before.id));
+  try {
+    const existing = userLabelsByName(await client.labels());
+    await ensureGmailParents(client, path, existing, ctx.store, ctx.now);
+    await client.renameLabel(gmailId, path);
+  } catch (error) {
+    ctx.transact(() => ctx.store.run(`UPDATE labels SET display_name = ? WHERE id = ? AND display_name = ?`, before.display_name, before.id, path));
+    // 409: Gmail has another label of that name already (one of the owner's).
+    if (error instanceof GoogleError && error.code === 'labels_patch_409') throw sortError('LABEL_EXISTS');
+    throw gmailError(error);
+  }
 }
 
 // ---- review ----------------------------------------------------------------------------------------------------------------
@@ -407,7 +427,7 @@ function importResponse(plan: ImportPlan, applied: boolean): ReturnType<typeof c
     invalidCount: all.filter((item) => item.action === 'invalid').length,
     labels: plan.labels.map((item) =>
       create(LabelImportSchema, {
-        path: `${LABEL_PREFIX}${item.values.path}`,
+        path: item.values.path,
         description: item.values.description,
         trust: item.values.trust,
         keepInInbox: item.values.keepInInbox,
@@ -512,19 +532,8 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailsortUiService>, ApiCon
     return onceAsync(ctx, request.requestId, 'UpdateLabel', `labels/${id}`, LabelSchema, async () => {
       if (displayName !== before.display_name) {
         if (ctx.store.one(`SELECT 1 AS x FROM labels WHERE display_name = ? AND id != ?`, displayName, id) !== undefined) throw sortError('LABEL_EXISTS');
-        if (before.gmail_state === 'linked' && before.gmail_id !== null) {
-          // A linked label is renamed in Gmail first: its name is how the owner sees it there.
-          if (!writeScope(ctx.store) || effectiveMode(readSettings(ctx.store), ctx.ceiling) === 'off') throw sortError('GMAIL_WRITE_NOT_ALLOWED');
-          const client = await gmailFor(ctx);
-          try {
-            // A new path may need new parents in Gmail (`生活/汽车` -> `出行/汽车` needs `分拣/出行`); the old ones stay.
-            const existing = new Map((await client.labels()).map((item) => [item.name, item.id]));
-            await ensureGmailParents(client, displayName, existing, ctx.store, ctx.now);
-            await client.renameLabel(before.gmail_id, `${LABEL_PREFIX}${displayName}`);
-          } catch (error) {
-            throw gmailError(error);
-          }
-        }
+        // A linked label is renamed in Gmail first: its name is how the owner sees it there.
+        if (before.gmail_state === 'linked' && before.gmail_id !== null) await renameInGmail(ctx, before, before.gmail_id, displayName);
       }
       return ctx.transact(() => {
         const { store } = ctx;
@@ -587,64 +596,44 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailsortUiService>, ApiCon
       }
       return ctx.transact(() => {
         const { store } = ctx;
-        const ours = gmailLabels.flatMap((label) => {
-          const path = /^Label_[0-9]+$/.test(label.id) ? pathOfGmailName(label.name) : null;
-          return path === null ? [] : [{ ...label, path }];
-        });
-        // A Gmail label that is the parent of another of ours only groups them (分拣/开发 above 分拣/开发/CI通知):
-        // never a label of its own, since only leaves are labels.
-        const paths = ours.map((label) => label.path);
-        const leaves = ours.filter((label) => !paths.some((other) => other.startsWith(`${label.path}/`)));
-        const byName = new Map(leaves.map((label) => [label.path, label]));
-        const ids = new Set(ours.map((label) => label.id));
-        // Parents this app created only to nest a label (writes.ts ensureGmailParents): once their children are
-        // renamed or deleted they look like leaves, but they are not the owner's labels, so they are never imported.
-        // The record of one Gmail no longer has goes.
-        const grouping = new Set(store.all<{ gmail_id: string }>(`SELECT gmail_id FROM gmail_parents`).map((row) => row.gmail_id));
-        for (const id of grouping) if (!ids.has(id)) store.run(`DELETE FROM gmail_parents WHERE gmail_id = ?`, id);
+        // Only Gmail's user labels count: a system label is never linked. No other Gmail label is ever imported: with
+        // no prefix to tell them apart, every label the owner has would be one.
+        const idByName = userLabelsByName(gmailLabels);
+        const nameById = new Map([...idByName].map(([name, id]) => [id, name]));
+        // The record of a parent this app made goes once Gmail no longer has it.
+        for (const { gmail_id } of store.all<{ gmail_id: string }>(`SELECT gmail_id FROM gmail_parents`)) if (!nameById.has(gmail_id)) store.run(`DELETE FROM gmail_parents WHERE gmail_id = ?`, gmail_id);
         let linked = 0;
-        let imported = 0;
+        let renamed = 0;
         let missing = 0;
         for (const row of store.labels()) {
-          const match = byName.get(row.display_name);
-          if (match !== undefined && (row.gmail_state !== 'linked' || row.gmail_id !== match.id)) {
-            store.run(`UPDATE labels SET gmail_id = ?, gmail_state = 'linked' WHERE id = ?`, match.id, row.id);
-            // The owner made a label of that path by hand: a former parent is theirs now.
-            store.run(`DELETE FROM gmail_parents WHERE gmail_id = ?`, match.id);
+          if (row.gmail_state === 'linked' && row.gmail_id !== null) {
+            const name = nameById.get(row.gmail_id);
+            if (name === undefined) {
+              store.run(`UPDATE labels SET gmail_state = 'missing' WHERE id = ?`, row.id);
+              store.touchLabel(row.id, ctx.now);
+              missing++;
+              continue;
+            }
+            // Renamed in Gmail: the label takes the new name when it is a path the store can hold (unique, the tree).
+            // Any other name (the legacy `分拣/` one among them) is left as it is; writes go by the Gmail ID.
+            const path = pathOfGmailName(name);
+            if (path === null || path === row.display_name || store.one(`SELECT 1 AS x FROM labels WHERE display_name = ?`, path) !== undefined || treeConflict(path, store.labelPaths(row.id)) !== null) continue;
+            store.run(`UPDATE labels SET display_name = ? WHERE id = ?`, path, row.id);
             store.touchLabel(row.id, ctx.now);
-            linked++;
-          } else if (match === undefined && row.gmail_state === 'linked' && row.gmail_id !== null && !ids.has(row.gmail_id)) {
-            store.run(`UPDATE labels SET gmail_state = 'missing' WHERE id = ?`, row.id);
-            store.touchLabel(row.id, ctx.now);
-            missing++;
+            renamed++;
+            continue;
           }
-          byName.delete(row.display_name);
-        }
-        for (const [path, label] of byName) {
-          if (store.count(`SELECT count(*) AS n FROM labels`) >= LABELS_MAX) break;
-          if (store.one(`SELECT 1 AS x FROM labels WHERE gmail_id = ?`, label.id) !== undefined) continue;
-          if (grouping.has(label.id)) continue;
-          // A Gmail label below or above one of the store's own would break the tree: left alone.
-          if (treeConflict(path, store.labelPaths()) !== null) continue;
-          const seq = (store.one<{ seq: number | null }>(`SELECT max(seq) AS seq FROM labels`)?.seq ?? 0) + 1;
-          store.run(
-            `INSERT INTO labels (id, seq, display_name, description, enabled, live, trust, threshold, gmail_id, gmail_state, create_time, update_time, etag)
-             VALUES (?, ?, ?, '', 0, 0, 0, 0, ?, 'linked', ?, ?, ?)`,
-            labelIdFor(path, store.takenLabelIds()) ?? shortId('l'),
-            seq,
-            path,
-            label.id,
-            ctx.now,
-            ctx.now,
-            newEtag(ctx.now),
-          );
-          imported++;
+          // Not in Gmail yet, or gone from it: the user label of exactly its path is linked (adopted), if no label has it.
+          const match = idByName.get(row.display_name);
+          if (match === undefined || store.one(`SELECT 1 AS x FROM labels WHERE gmail_id = ? AND gmail_state = 'linked'`, match) !== undefined) continue;
+          linkGmailLabel(store, row.id, match, false, ctx.now);
+          linked++;
         }
         const counts = store.exampleCounts();
         return create(SyncLabelsResponseSchema, {
           labels: store.labels().map((row) => labelMessage(row, counts.get(row.id) ?? 0)),
           linkedCount: linked,
-          importedCount: imported,
+          renamedCount: renamed,
           missingCount: missing,
         });
       });

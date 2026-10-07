@@ -5,28 +5,40 @@
  */
 
 export interface TableContext {
+  /** Gmail IDs of mailsort's labels: the ones it created or adopted. */
   readonly owned: ReadonlySet<string>;
+  /**
+   * The paths of mailsort's labels as its store plans them: labels.create may make one or a parent of one, labels.patch
+   * may rename an owned label to one. Null for a check after the fact (the workerd suites and the smoke run, once the
+   * store has moved on): then a name's shape alone is checked.
+   */
+  readonly planned: ReadonlySet<string> | null;
   /** The ledger row's state and archive flag for (message, Gmail label), or null. */
   readonly ledger: (messageId: string, labelId: string) => { state: string; archived: boolean } | null;
 }
 
 const MESSAGE_ID = /^[0-9a-f]{6,32}$/;
-const PREFIX = '分拣/';
 
 /**
- * A name under the prefix: a nested path of one to three segments (design §2, 2026-10-06 round 2: nested labels),
- * each segment non-empty with no leading or trailing space.
+ * A label path (design §2, 2026-10-07: labels at Gmail's top level): one to three segments, each non-empty with no
+ * leading or trailing space and no control character, never starting with the legacy prefix's segment `分拣`.
  */
-function okName(name: unknown): boolean {
+function okName(name: unknown): name is string {
   // eslint-disable-next-line no-control-regex
-  if (typeof name !== 'string' || !name.startsWith(PREFIX) || /[\u0000-\u001f\u007f]/.test(name)) return false;
-  const segments = name.slice(PREFIX.length).split('/');
-  return segments.length >= 1 && segments.length <= 3 && segments.every((segment) => segment.length > 0 && segment.trim() === segment);
+  if (typeof name !== 'string' || /[\u0000-\u001f\u007f]/.test(name)) return false;
+  const segments = name.split('/');
+  return segments.length >= 1 && segments.length <= 3 && segments[0] !== '分拣' && segments.every((segment) => segment.length > 0 && segment.trim() === segment);
 }
 
-/** labels.create may also make the prefix's own label, the parent Gmail nests the others under. */
-function okCreateName(name: unknown): boolean {
-  return name === '分拣' || okName(name);
+/** labels.create: a planned path, or a parent Gmail nests one under (`开发` above `开发/CI通知`). */
+function okCreateName(name: unknown, planned: ReadonlySet<string> | null): boolean {
+  if (!okName(name)) return false;
+  return planned === null || [...planned].some((path) => path === name || path.startsWith(`${name}/`));
+}
+
+/** labels.patch: a planned path (the guard narrows it to the one planned for that label). */
+function okPatchName(name: unknown, planned: ReadonlySet<string> | null): boolean {
+  return okName(name) && (planned === null || planned.has(name));
 }
 
 /** A JSON object body exactly as JSON.stringify writes its parsed value (no duplicate keys, no other spelling), or null. */
@@ -77,12 +89,12 @@ export function allowedOperation(method: string, rawUrl: string, body: string, c
   if (method === 'POST' && path.join('/') === 'labels') {
     const value = canonicalObject(body);
     if (value === null) return null;
-    return okCreateName(value['name']) && Object.keys(value).every((key) => ['name', 'labelListVisibility', 'messageListVisibility'].includes(key)) ? 'labels_create' : null;
+    return okCreateName(value['name'], ctx.planned) && Object.keys(value).every((key) => ['name', 'labelListVisibility', 'messageListVisibility'].includes(key)) ? 'labels_create' : null;
   }
   if (method === 'PATCH' && path[0] === 'labels' && path.length === 2) {
     const value = canonicalObject(body);
     if (value === null) return null;
-    return ctx.owned.has(path[1] ?? '') && okName(value['name']) && Object.keys(value).join() === 'name' ? 'labels_patch' : null;
+    return ctx.owned.has(path[1] ?? '') && okPatchName(value['name'], ctx.planned) && Object.keys(value).join() === 'name' ? 'labels_patch' : null;
   }
   if (method === 'POST' && path[0] === 'messages' && path[2] === 'modify' && path.length === 3) {
     const id = path[1] ?? '';

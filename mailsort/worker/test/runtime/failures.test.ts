@@ -218,7 +218,7 @@ describe('the MODE ceiling stops a write left for a retry', () => {
     await addLabels(h, ['newsletter']);
     await setMode(h, Mode.LIVE);
     await h.step(T0);
-    const gmailId = h.up.gmail.createUserLabel('分拣/订阅');
+    const gmailId = h.up.gmail.createUserLabel('订阅', true);
     await h.api.syncLabels({ requestId: op() });
     deliver(h, MAILS.newsletterEn, T0);
     await h.step(T0 + 5 * MINUTE);

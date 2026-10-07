@@ -583,7 +583,7 @@ textarea {
   border-left: 2px solid var(--line);
 }
 
-/* A deeper level of the tree (分拣/生活/汽车 inside 分拣/生活). */
+/* A deeper level of the tree (生活/汽车 inside 生活). */
 .label-subgroup .group-name {
   font-size: 0.95rem;
   margin-top: 0.25rem;

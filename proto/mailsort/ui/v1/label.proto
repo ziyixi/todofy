@@ -1,6 +1,6 @@
-// A label: one category mailsort may put a mail into (mailsort/docs/design.md §3). It is a Gmail nested label under
-// the prefix "分拣/" (the Gmail name is "分拣/" + display_name, which may itself be a path such as `开发/CI通知`), plus
-// the owner's description that the decision model reads as the category's criteria.
+// A label: one category mailsort may put a mail into (mailsort/docs/design.md §3). It is a Gmail label whose name is
+// display_name (a path such as `开发/CI通知`, a nested label), plus the owner's description that the decision model
+// reads as the category's criteria.
 
 syntax = "proto3";
 
@@ -30,20 +30,24 @@ message Label {
     GMAIL_STATE_UNSPECIFIED = 0;
     // Not created in Gmail yet: it is created before the first live write that needs it.
     GMAIL_STATE_PENDING = 1;
-    // Linked to the Gmail label of the same name.
+    // Linked to the Gmail label of the same name, which mailsort created.
     GMAIL_STATE_LINKED = 2;
-    // Linked before, but Gmail no longer has it (deleted or renamed outside mailsort). Nothing is written with
-    // it until SyncLabels links it again.
+    // Linked before, but Gmail no longer has it (deleted outside mailsort). Nothing is written with it until a
+    // Gmail label of its name is linked again (SyncLabels).
     GMAIL_STATE_MISSING = 3;
+    // Linked to a user label Gmail already had under exactly this name (the owner's, not created by mailsort):
+    // adopted instead of made twice. From then on mailsort adds it to mail and renames it like one it created.
+    GMAIL_STATE_ADOPTED = 4;
   }
 
   // labels/{label}: 1 to 40 characters of `a-z`, `0-9` and `-`, starting with a letter (AIP-122); it never
   // changes. Without a `label_id` CreateLabel derives one from the path (`开发/CI通知` is `dev-ci-notices`).
   string name = 1 [(google.api.field_behavior) = IDENTIFIER];
-  // The part of the Gmail name after "分拣/": a path of 1 to 3 segments joined by "/" (a Gmail nested label,
-  // `开发/CI通知`), each segment 1 to 40 characters without control characters or surrounding spaces, at most 100
-  // characters in all. Only leaves are labels: no label's path is the parent of another's. The parents exist in
-  // Gmail as plain grouping labels, created as needed, and never get a mail.
+  // The Gmail name: a path of 1 to 3 segments joined by "/" (a Gmail nested label, `开发/CI通知`), each segment 1
+  // to 40 characters without control characters or surrounding spaces, at most 100 characters in all, and never
+  // starting with the segment `分拣` (the legacy prefix: `分拣/x` is read as `x`). Only leaves are labels: no
+  // label's path is the parent of another's. The parents exist in Gmail as plain grouping labels, created as
+  // needed, and never get a mail.
   string display_name = 2 [(google.api.field_behavior) = REQUIRED];
   // What belongs in this label, in the owner's words: the model's criteria for the option, read as
   // `display_name: description`. At most 300 characters. A label without one is never offered to the model

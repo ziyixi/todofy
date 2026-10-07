@@ -1,12 +1,13 @@
 # mailsort design
 
 Gmail sorting for the owner's own mailbox on `sort.ziyixi.science`: new INBOX mail is decided by rules, the nearest
-corrected examples and the Workers AI decision model Clef, then labelled under the nested prefix `分拣/` and archived
-in live mode, never marked read. Unsure mail gets no label and stays in the inbox. The owner teaches it by correcting
-labels in Gmail or in the review queue; nothing is fine-tuned.
+corrected examples and the Workers AI decision model Clef, then labelled (a Gmail label named by the label's path, at
+Gmail's top level) and archived in live mode, never marked read. Unsure mail gets no label and stays in the inbox. The
+owner teaches it by correcting labels in Gmail or in the review queue; nothing is fine-tuned.
 
-The owner's decisions of 2026-10-06 shape v1: one label per mail (always a leaf of the label tree); labels under
-`分拣/`, nested up to three levels (`分拣/金融/投资`); confident mail labelled AND archived, unless its label or rule keeps it
+The owner's decisions of 2026-10-06 shape v1: one label per mail (always a leaf of the label tree); labels nested up to
+three levels (`金融/投资`), at Gmail's top level since 2026-10-07 (under `分拣/` before: only mailsort sorts this
+mailbox, so the prefix only added a level); confident mail labelled AND archived, unless its label or rule keeps it
 in the inbox (round 2: 账号安全, 政府法律, package pickup codes), `UNREAD` never touched; unsure mail left alone and listed in the review queue; no backfill of history (the
 sync starts at the install-time history ID); Clef (27B) by default, Clef-flash for the rest of a UTC day past 70 % of
 the daily neuron budget, and a deferral (never a failure) when Workers AI's quota is used up.
@@ -50,32 +51,54 @@ Two walls, neither of them a prompt:
    | messages_list | `GET users/me/messages?labelIds=INBOX&q=newer_than:2d` (the resync after a lost cursor) |
    | message_get | `GET users/me/messages/{id}`, `format=full` or `metadata` with the fixed header list and `fields` |
    | labels_list | `GET users/me/labels` |
-   | labels_create | `POST users/me/labels`, a name under `分拣/` (a path of one to three non-empty segments without surrounding spaces), or `分拣` itself |
-   | labels_patch | `PATCH users/me/labels/{owned id}`, the name only, still under `分拣/` |
+   | labels_create | `POST users/me/labels`, a name the store plans: one of its labels' paths, or a parent such a path nests under (a path of one to three non-empty segments without surrounding spaces) |
+   | labels_patch | `PATCH users/me/labels/{owned id}`, the name only, exactly the path the store plans for that label |
    | message_modify | classify: `addLabelIds = [one owned label]`, `removeLabelIds = [] or [INBOX]`, for a ledger row in `intended`/`applied` whose archive flag matches; undo: `removeLabelIds = [that owned label]`, `addLabelIds = [] or [INBOX]` (INBOX exactly when the row archived), for a row in `undo_intended` |
 
    JSON bodies must be the canonical text of the value the guard checked (`JSON.stringify` of it): a duplicate key
    (`JSON.parse` keeps the last, a server might keep the first) or any other spelling is refused (`body_not_canonical`).
 
    So trash, untrash, delete, batchDelete, batchModify, send, drafts, filters, settings and forwarding have no path,
-   and neither have `UNREAD`, `STARRED`, `IMPORTANT`, `SPAM`, `TRASH`, `CATEGORY_*` or any label mailsort does not own
-   (an owned label is a linked label whose Gmail name starts with `分拣/`). Feedback never writes.
+   and neither have `UNREAD`, `STARRED`, `IMPORTANT`, `SPAM`, `TRASH`, `CATEGORY_*` or any label mailsort does not own.
+   Ownership is by Gmail label ID, never by name: an owned label is a linked label of the store (`ownedLabelIds`), one
+   mailsort created or one it adopted (below). The owner's other labels are never owned, so no modify or rename can
+   reach them, and neither can a parent that only groups. Feedback never writes.
 
    `test/gmail-guard.test.ts` records every call GmailClient makes through a fake fetch and checks it against an
    independent copy of the table (`test/fakes/table.ts`), tries every forbidden operation, and throws 20,000 seeded
    random operations at the guard; the workerd tests and the smoke run check every request the fake Gmail receives
-   against the same independent table.
+   against the same independent table (after the fact, so with the shapes and the labels mailsort created or a test
+   made for it to adopt; the names the store planned at that moment are the guard's own check).
 
-Round 2 widened `labels_create` for nested labels (2026-10-06, the owner's request): Gmail shows `分拣/开发/CI通知`
-nested only when `分拣` and `分拣/开发` exist, so they may be created too. A parent only groups: it is never linked, so it is
-never owned and no modify can add it to a mail (one label per mail, always a leaf). `labels_patch` still renames only an
-owned label, to a path under `分拣/` (never to `分拣` itself), and `message_modify` is unchanged: a classify without
-`removeLabelIds` (a label that keeps its mail in the inbox) was already one of its two shapes.
+Round 2 widened `labels_create` for nested labels (2026-10-06, the owner's request): Gmail shows `开发/CI通知` nested
+only when `开发` exists, so a parent may be created too. A parent only groups: it is never linked, so it is never owned
+and no modify can add it to a mail (one label per mail, always a leaf). `message_modify` is unchanged: a classify
+without `removeLabelIds` (a label that keeps its mail in the inbox) was already one of its two shapes.
+
+**Labels without a prefix** (2026-10-07, the owner's request). Until then every label lived under `分拣/`, and the guard
+took any name under it for mailsort's. Now a label's Gmail name is its path (`开发/CI通知`, `出行`), so a name says nothing
+about who owns a label, and the guard asks the store instead (`Ownership` in `gmail.ts`): `labels_create` makes only a
+name the store plans (`plannedPaths`: a label's path or a parent of one), `labels_patch` renames an owned label only to
+the path the store plans for that very label (`plannedPath`; a rename writes the new path into the store first and puts
+the old one back if Gmail refuses, `api.ts` renameInGmail), and there is no root label to create any more. When Gmail
+already has a user label of exactly a label's path (the owner made it by hand), mailsort **adopts** it instead of
+failing on the name: it links that Gmail label, owns it from then on (adds it to mail, renames it with the label) and
+says so (`Label.GmailState` ADOPTED, column `gmail_adopted`, schema version 4); the owner named a label of this app
+exactly like it, so it is that label. Two labels never share one: a Gmail label another label here already holds (one
+renamed to that path in Gmail) is not adopted, and the new label stays out of Gmail. A system label is never adopted,
+whatever its name (`writes.ts` userLabelsByName keeps `Label_*` IDs only), and a parent the owner already has is used
+to nest under, never linked or recorded. So no other label of the owner's is ever written: only one the owner named
+exactly like a label here. The legacy prefix is still read on input, as nothing (`paths.ts` ownerPath): the owner's
+rule file and older exports say `分拣/金融/投资` and keep importing; nothing writes it. No stored row needed a migration: a
+label's row has always held its path without the prefix (every entry point stripped it, and no path may start with
+`分拣`), and rules name their label by ID. The live store had no Gmail label yet (a read-only grant cannot create one),
+so nothing in Gmail needed renaming; a store with a label still named `分拣/x` in Gmail keeps writing it by its ID, and
+SyncLabels leaves that name alone.
 
 Three differences from the first plan, each for a reason: `history.list` is read without `labelId=INBOX` (an archived
 mail has no INBOX, and the owner's label changes on it are the main feedback; the pipeline filters new mail by its
 labels instead); `profile` (fields=historyId only) gives the install-time cursor without reading any message; and
-`labels.patch` exists so a rename in the dashboard renames the Gmail label (name only, still under the prefix).
+`labels.patch` exists so a rename in the dashboard renames the Gmail label (name only, to the path the store holds).
 
 Other guarantees: the Gmail grant lives only in Worker secrets the owner puts from their own machine (§12), never in
 GitHub; logs hold counts and codes only (never a subject, sender, address or label name); the model sees masked text
@@ -93,7 +116,7 @@ reads no Gmail and decides nothing, but the alarm still runs and still clears wh
 | Examples: a masked summary (subject, sender name and domain, snippet; at most 200 characters) and its embedding | until deleted (例子, or with their label), at most 2,000 |
 | Rules: the exact sender address, domain, List-Id or delivered-to address, their subject words, the owner's evidence and notes, proposed or active | until deleted (规则, or with their label), at most 500 |
 | The flow counters: counts per UTC day, stage, outcome and label (no content) | 400 days |
-| Labels: their paths under `分拣/` (some read from Gmail) and the owner's descriptions | until deleted, at most 24 |
+| Labels: their paths (also their Gmail names; SyncLabels reads back a rename made in Gmail), the Gmail label each is linked to and whether it was adopted, and the owner's descriptions | until deleted, at most 24 |
 | The answers to the owner's own changes, kept by request ID so a retry is not applied twice (they can hold a masked subject and sender or a rule's values) | 1 day |
 
 Examples and rules are what the app learned, so they outlive the 14 days on purpose; both are shown in full in the
@@ -110,15 +133,23 @@ display name (which no sender rule may match).
 
 ### 3.1 Labels: a tree of paths, archive or keep
 
-A label's display name is its path below `分拣/`: one to three segments (`出行`, `金融/投资`), each 1-40 characters, 100 in
-all, and never `分拣` as the first segment (`paths.ts`): typed with the prefix, `分拣/金融/投资` is read as `金融/投资` by
-CreateLabel and a rename (`ownerPath`) as by the import, so no entry point makes `分拣/分拣/x`. Only leaves are labels: a label may not be the parent or child of another (CreateLabel, a rename, an
-import and SyncLabels all hold to it), so a mail's one label is always a leaf. Gmail gets the parents as plain grouping
-labels, created as needed before a label's first write (`writes.ts` ensureGmailLabel: one labels.list, then whatever of
-`分拣`, `分拣/金融` and the leaf is missing) or before a rename; SyncLabels imports a nested Gmail label and never a parent
-that only groups. A parent this app created is recorded (table `gmail_parents`, schema version 3), so once its last
-child is renamed or deleted (`分拣/新闻` left behind by `新闻/周报` -> `资讯/周报/精选`) SyncLabels still does not import it as
-a label; the owner can add it by hand (新建标签 links the Gmail label that is there, and the record goes). A label made
+A label's display name is its path, and its Gmail name is that path (`出行`, `金融/投资`, at Gmail's top level): one to
+three segments, each 1-40 characters, 100 in all, and never `分拣` as the first segment (`paths.ts`): the legacy prefix
+is read as nothing, `分拣/金融/投资` is `金融/投资` in CreateLabel and a rename (`ownerPath`) as in the import, so an export
+always imports back. Only leaves are labels: a label may not be the parent or child of another (CreateLabel, a rename,
+an import and SyncLabels' rename all hold to it), so a mail's one label is always a leaf. Gmail gets the parents as
+plain grouping labels, created as needed before a label's first write (`writes.ts` ensureGmailLabel: one labels.list,
+then whatever of `金融` and the leaf is missing; a user label already there under the leaf's path is adopted, §2) or
+before a rename. A parent this app created is recorded (table `gmail_parents`, schema version 3): a label later made of
+it (新建标签 `新闻` once `新闻/周报` became `资讯/周报/精选`) links the Gmail label that is there as the app's own, not
+adopted, and the record goes. A parent the owner already had is used as it is.
+
+SyncLabels (从 Gmail 同步) only reads Gmail and never imports a Gmail label: with no prefix to tell them apart, every
+label of the owner's would look like one. It refreshes the labels the store knows by their Gmail ID: one Gmail no
+longer has is marked missing (nothing is written with it), one renamed in Gmail takes the new name when that is a path
+no other label has and the tree allows (any other name, the legacy `分拣/x` among them, is left alone: writes go by the
+ID). And a label not in Gmail (not created yet, or missing) is linked to the user label of exactly its path, adopted
+(§2), when no other label holds it. A label made
 without an ID gets one from its path (`金融/投资` is `finance-invest`, `paths.ts` pathSlug: a fixed glossary of the words
 labels of a personal mailbox use, from the template's to `家人`, `报税` and `测试`; a word outside it becomes `x` and a
 short hash of itself, while the path's other words keep their English, `金融/猫咪` is `finance-x…`), stable and readable
@@ -319,7 +350,7 @@ Worker's own label is undone first; 都不是 restores the inbox). A choice is a
   out of the export (counted in `skipped_count`), and the export quotes each value (`list:("…")`).
 - **Import and export** (`import.ts`, 导入导出). ImportRules takes the owner's rule file, a JSON list in the format of
   their validated rule set (`id`, `match` with exactly one of `from_address`, `from_domain`, `list_id`, `to_address`,
-  `label` as `分拣/<path>`, `keep_in_inbox`, `trust`, `require_dmarc`, `evidence`, `notes`, and the optional
+  `label` as the label's path (`金融/投资`; the legacy `分拣/金融/投资` of the owner's file means the same), `keep_in_inbox`, `trust`, `require_dmarc`, `evidence`, `notes`, and the optional
   `subject_includes` / `subject_excludes`), this app's export (`{"labels": [...], "rules": [...]}`) or the template.
   `to_address` is a delivered-to rule (§4.3): it matches the owner's own address Gmail delivered to, never `To` or
   `Cc`. A list address in `To` needs `list_id`; a notification's reason address in `Cc` (GitHub's) needs the sender
@@ -353,7 +384,7 @@ a mail that is gone, a read-only grant, a row the gate refused). A pass interrup
 row (adding a label that is there, or removing one that is gone, changes nothing), but only through the gate (§3.3).
 An automatic row an earlier pass left (or one that failed once) is first checked against the mail as it is now, one
 metadata read (`message_get` with the Message-ID header only): if the mail left the inbox or carries a user label it
-did not have when the row was recorded (the owner filed it, or another `分拣/` label), the row fails (`mail_changed`)
+did not have when the row was recorded (the owner filed it, or another of mailsort's labels), the row fails (`mail_changed`)
 instead of adding a second label to mail the owner has already dealt with.
 An automatic row that fails for good, in its first pass or a later retry, makes its mail a suggestion in 待审. A
 request the guard refuses (its label no longer owned) is permanent for that row only: the run goes on with the next.
@@ -366,9 +397,9 @@ it is `undoable`, with the mail's masked subject and sender while they are kept.
 range: the server undoes at most 20 per call and answers how many are left; the page repeats the call until none is
 left (or a call undoes nothing) and shows the totals; 流程's link to a label opens its entries only (the list's label
 filter), and there the range undo is that label's only (UndoLedgerEntries' `label`), which its heading and
-confirmation say. Labels are created in Gmail (`分拣/<path>`, with the parents it nests under) just before the first write that
-needs them, after the gate; SyncLabels links existing `分拣/` labels and imports the leaves mailsort does not know
-(disabled, without a description, which the page says), never a parent that only groups.
+confirmation say. Labels are created in Gmail (named by their path, with the parents it nests under) just before the
+first write that needs them, after the gate, or adopted when Gmail already has a user label of that path (§2);
+SyncLabels follows renames and deletions made in Gmail and adopts, never imports (§3.1).
 
 ## 8. Limits and measured costs
 
@@ -392,6 +423,11 @@ After the QA fixes of round 2 (same meter and machine, 2026-10-06): GetMailFlow 
 preview 12.9 ms, the alarm pass at its bounds 33 ms, every other call at most 4.0 ms first run in MailsortState and
 1.9 ms for the fetch handler's very first request. Bundles: the Worker 130.2 KiB gzip (the label glossary's new words,
 the export's carve-out check, the parents' record; budget 135 unchanged), the UI 58.5 KiB gzip (budget 67 unchanged).
+
+Labels without a prefix (2026-10-07, the same meter in reference ms, one run on a development machine): the alarm pass
+at its bounds 37 ms, the 500-rule import preview 14.6 ms and GetMailFlow 8.1 ms first run in MailsortState, every other
+call at most 4.6 ms, the fetch handler's very first request 2.1 ms; every bound held. Bundles: the Worker 130.4 KiB
+gzip, the UI 58.5 KiB gzip (budgets unchanged).
 
 Stores are bounded: 24 labels, 500 rules, 2,000 examples, request IDs for a day, content for 14 days, records for
 180 days. Rows read: a pass reads a few rows per mail plus the embedded examples (cached in memory between passes).
@@ -473,11 +509,13 @@ label the model may not set; 例子 and 记录 page with 加载更多; sync and 
 All data is synthetic (Chinese and English mails from example.com-style domains, `worker/test/fakes/fixtures.ts`);
 the fake Gmail (`fake-gmail.ts`) and fake Workers AI (`fake-ai.ts`, Clef and bge-m3) answer every request.
 
-- `worker/test/*.test.ts` (Node): the guard and the fuzz (nested names, the prefix's own label), masking, MIME,
+- `worker/test/*.test.ts` (Node): the guard and the fuzz (nested names, only the store's planned names, a rename only
+  to its label's planned path), masking, MIME,
   DMARC and DKIM (forged and look-alike From), the decision (rule order, carve-outs), Clef's request (path keys, lean
   state) and strict read, the Wilson bound, the filter export; `import.test.ts` over the store's SQL on Node's SQLite:
   paths, IDs and option keys, the template's rules, the import plan, its application and the export's round trip,
-  schema version 2's migration, the flow counters; ops-v1's golden bytes (two are contract fixtures).
+  the schema migrations (version 4 keeps the live store's labels and rules as they are), the flow counters; ops-v1's
+  golden bytes (two are contract fixtures).
 - `worker/test/runtime/*.test.ts` (workerd, a real SQLite MailsortState): the pipeline in shadow and live, unsure,
   undo, corrections into examples and proposals, trust labels, skips, the resync, the auth stop, the Clef-flash switch,
   the quota deferral, the breaker, a read-only grant, the owner API, ops-v1 over a service binding, CPU; and
@@ -488,16 +526,17 @@ the fake Gmail (`fake-gmail.ts`) and fake Workers AI (`fake-ai.ts`, Clef and bge
   a retry that finds the mail archived or filed by the owner (`mail_changed`); the content cleanup after 20 days off;
   and `round2.test.ts`: the template and the rule file imported (preview, all-or-nothing confirmation), a nested
   label created in Gmail with its parents, keep-in-inbox by label and by rule (undo removing only the label), the
-  carve-out order, forged and look-alike From headers, the sync of nested labels, the flow counters with corrections
+  carve-out order, forged and look-alike From headers, a nested Gmail label adopted (never its parent, nothing imported), a rename refused for a name Gmail has, the flow counters with corrections
   and the ledger's label filter, and the export.
   The QA fixes of round 2 have their regression tests: the filter export and its carve-out coverage (`decide.test.ts`),
-  multi-line evidence, header-form List-Ids, `enabled` through an export, `分拣/x` and the glossary (`import.test.ts`), a
-  retry lowered to keep (`failures.test.ts`), the parents' record, `分拣/x` in CreateLabel and the label-filtered range
+  multi-line evidence, header-form List-Ids, `enabled` through an export, the legacy `分拣/x` and the glossary (`import.test.ts`), a
+  retry lowered to keep (`failures.test.ts`), the parents' record, the legacy `分拣/x` in CreateLabel and the label-filtered range
   undo (`round2.test.ts`), and in the UI the checkbox rows, the template's ten groups' hues and the filtered range undo.
 - `worker/test/smoke/smoke.mts`: the real `wrangler dev` (`../wrangler.test.toml`) against the fakes on loopback,
   the owner's whole loop through the HTTP API, round 2's import, nested label, keep in inbox, carve-out, forged From,
   flow API and export included, and the QA fixes (filter export, `enabled`, multi-line evidence and `<list-id>`,
-  `分拣/x`, the parents' record, the label-filtered range undo).
+  the legacy `分拣/x`, the parents' record, the label-filtered range undo), and labels at Gmail's top level with an owner's
+  label of a label's path adopted by the sync.
 - `web/src/*.test.ts`: the views against a fake API on the shared transcoder.
 - `deploy/test/*.test.mjs`: the production config, the deploy wrapper (MODE, the secrets file without the grant), that
   `wrangler deploy --secrets-file` keeps secrets it does not name (the pinned wrangler), that the public GitHub

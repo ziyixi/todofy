@@ -17,7 +17,7 @@
 import { newEtag } from './ids.ts';
 import { CONTENT_KEPT_MS, DAY, DECISIONS_KEPT_MS, ERRORS_KEPT, FLOW_KEPT_DAYS, REQUEST_ID_TTL_MS } from './limits.ts';
 
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 
 export const SCHEMA_V1: readonly string[] = [
   `CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)`,
@@ -222,12 +222,19 @@ export const SCHEMA_V2: readonly string[] = [
 ];
 
 /**
- * Schema version 3 (QA round 2): the Gmail IDs of the parent labels this app created to nest a label (`分拣/新闻` above
- * `分拣/新闻/周报`; writes.ts ensureGmailParents), so SyncLabels never imports one as a label of its own once its children
- * are renamed or deleted. A handful of rows; a row goes when Gmail no longer has the label or the owner adds it as a
- * label by hand.
+ * Schema version 3 (QA round 2): the Gmail IDs of the parent labels this app created to nest a label (`新闻` above
+ * `新闻/周报`; writes.ts ensureGmailParents), so a label later linked to one is the app's own, never adopted. A
+ * handful of rows; a row goes when Gmail no longer has the label or the owner adds it as a label by hand.
  */
 export const SCHEMA_V3: readonly string[] = [`CREATE TABLE IF NOT EXISTS gmail_parents (gmail_id TEXT PRIMARY KEY, create_time INTEGER NOT NULL)`];
+
+/**
+ * Schema version 4 (2026-10-07, labels at Gmail's top level, without the `分拣/` prefix): 1 when a linked label was
+ * adopted, a user label of exactly its path that Gmail already had and mailsort did not create (writes.ts
+ * linkGmailLabel). Existing rows read 0. Nothing else changes: a label's row holds its path without the prefix (every
+ * entry point stripped it, and no path may start with `分拣`), and rules name their label by ID.
+ */
+export const SCHEMA_V4: readonly string[] = [`ALTER TABLE labels ADD COLUMN gmail_adopted INTEGER NOT NULL DEFAULT 0`];
 
 export type Value = string | number | null | ArrayBuffer;
 
@@ -256,6 +263,8 @@ export interface LabelRow extends Record<string, SqlStorageValue> {
   keep_in_inbox: number;
   /** 1: no example of it is kept. */
   sensitive: number;
+  /** 1: linked to a Gmail label of its path that mailsort did not create (adopted). */
+  gmail_adopted: number;
 }
 
 export interface RuleRow extends Record<string, SqlStorageValue> {
@@ -390,6 +399,7 @@ export class Store {
     if (version < 1) for (const statement of SCHEMA_V1) this.sql.exec(statement);
     if (version < 2) for (const statement of SCHEMA_V2) this.sql.exec(statement);
     if (version < 3) for (const statement of SCHEMA_V3) this.sql.exec(statement);
+    if (version < 4) for (const statement of SCHEMA_V4) this.sql.exec(statement);
     if (version !== SCHEMA_VERSION) this.setMeta('schema_version', String(SCHEMA_VERSION));
   }
 

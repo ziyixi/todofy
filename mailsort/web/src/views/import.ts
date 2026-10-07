@@ -26,7 +26,6 @@ const ACTIONS: Readonly<Record<number, string>> = {
 /** ImportChange.problem in the owner's words. */
 export const PROBLEMS: Readonly<Record<string, string>> = {
   label_path: '标签路径不对（最多三级，每级 1–40 字）',
-  label_prefix: '标签要以“分拣/”开头',
   label_tree: '标签不能和另一个标签互为上下级（只有末级是标签）',
   description: '说明太长（最多 300 字）或含换行以外的控制字符',
   threshold: '阈值须为 0 或 0.5–0.99',
@@ -148,7 +147,7 @@ export async function renderImport(ctx: ViewContext): Promise<void> {
   await frame(ctx.main, '导入导出', async (body) => {
     const preview = el('section', { class: 'card', 'aria-live': 'polite' })
     preview.hidden = true
-    const text = el('textarea', { rows: '8', 'aria-label': '要导入的 JSON', placeholder: '[{"id": "...", "match": {"from_address": "..."}, "label": "分拣/...", ...}]' })
+    const text = el('textarea', { rows: '8', 'aria-label': '要导入的 JSON', placeholder: '[{"id": "...", "match": {"from_address": "..."}, "label": "金融/投资", ...}]' })
     const file = el('input', { type: 'file', accept: '.json,application/json', 'aria-label': '选择 JSON 文件' })
     file.addEventListener('change', () => {
       const chosen = file.files?.[0]

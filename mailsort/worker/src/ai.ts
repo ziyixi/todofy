@@ -92,7 +92,7 @@ export interface ClefOption {
   readonly id: string;
   /** The option's key, which the answer must give back exactly: derived from the path (paths.ts optionKeys). */
   readonly key: string;
-  /** The label's path (分拣/<path> in Gmail), `金融/投资`. */
+  /** The label's path (also its Gmail name), `金融/投资`. */
   readonly name: string;
   readonly description: string;
 }

@@ -3,14 +3,14 @@
  * (../../../docs/design.md §3, §4.3, §6, §10): the template and the rule file imported with a preview and a
  * confirmation; nested labels created in Gmail with their parents, the mail getting only the leaf; labels and rules
  * that keep their mail in the inbox (UNREAD untouched, undo removing only the label); a subject carve-out before the
- * sender's plain rule; forged and look-alike From headers firing no rule; the sync of nested Gmail labels; the flow
+ * sender's plain rule; forged and look-alike From headers firing no rule; nested Gmail labels adopted, never imported; the flow
  * counters with the ledger's label filter; and the export's round trip. Every request Google got is checked against
  * the independent table after each test. All data is synthetic.
  */
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { create } from '@ziyixi/proto/protobuf';
 import { timestampFromMs } from '@ziyixi/proto/protobuf/wkt';
-import { LabelSchema } from '@ziyixi/proto/mailsort/ui/v1/label_pb';
+import { Label_GmailState, LabelSchema } from '@ziyixi/proto/mailsort/ui/v1/label_pb';
 import { MailFlow_Outcome, MailFlow_Stage } from '@ziyixi/proto/mailsort/ui/v1/flow_pb';
 import { ImportChange_Action, ImportRulesResponseSchema, RuleImportSchema, type RuleImport } from '@ziyixi/proto/mailsort/ui/v1/mailsort_ui_service_pb';
 import { RuleSchema, Rule_Kind } from '@ziyixi/proto/mailsort/ui/v1/rule_pb';
@@ -20,7 +20,10 @@ import { MAILS } from '../fakes/fixtures.ts';
 import { MINUTE, op, reasonOf, rejection, startHarness, T0, type Harness } from './harness.ts';
 import { checkGoogleCalls, decision, deliver, gmailLabels, modifies, setLabelLive, setMode } from './helpers.ts';
 
-/** The owner's rule file, synthetic: a CI sender, a bank's login carve-out and its plain rule, a pickup carve-out. */
+/**
+ * The owner's rule file, synthetic: a CI sender, a bank's login carve-out and its plain rule, a pickup carve-out. In
+ * the file's own format, whose labels still carry the legacy `分拣/` prefix.
+ */
 function ruleFile(): RuleImport[] {
   return [
     create(RuleImportSchema, { id: 'ci-builds', match: { fromAddress: 'builds@ci.example.com' }, label: '分拣/开发/CI通知', evidence: 'synthetic: every CI mail' }),
@@ -48,7 +51,7 @@ describe('round 2: import, nested labels, keep in inbox, carve-outs, forged From
   it('previews the template without writing, then imports it once per request ID', async () => {
     const preview = await h.api.importRules({ useTemplate: true, validateOnly: true });
     expect(preview).toMatchObject({ applied: false, createdLabelCount: 15, invalidCount: 0 });
-    expect(preview.labels.map((label) => label.path)).toContain('分拣/金融/银行支付');
+    expect(preview.labels.map((label) => label.path)).toContain('金融/银行支付');
     expect((await h.api.listLabels({})).labels).toEqual([]);
     const requestId = op();
     const applied = await h.api.importRules({ useTemplate: true, requestId });
@@ -63,7 +66,7 @@ describe('round 2: import, nested labels, keep in inbox, carve-outs, forged From
   });
 
   it('refuses an import with an invalid entry as a whole, and says which entry and why', async () => {
-    const bad = [...ruleFile(), create(RuleImportSchema, { id: 'two-keys', match: { fromAddress: 'a@example.com', fromDomain: 'example.com' }, label: '分拣/订阅收据' })];
+    const bad = [...ruleFile(), create(RuleImportSchema, { id: 'two-keys', match: { fromAddress: 'a@example.com', fromDomain: 'example.com' }, label: '订阅收据' })];
     const preview = await h.api.importRules({ rules: bad, validateOnly: true });
     expect(preview.invalidCount).toBe(1);
     expect(preview.changes.find((change) => change.action === ImportChange_Action.INVALID)).toMatchObject({ key: 'two-keys', problem: 'match', index: 5 });
@@ -92,8 +95,10 @@ describe('round 2: import, nested labels, keep in inbox, carve-outs, forged From
     now += 5 * MINUTE;
     await h.step(now);
     const names = [...h.up.gmail.labels.values()].filter((label) => label.type === 'user').map((label) => label.name);
-    expect(names).toEqual(expect.arrayContaining(['分拣', '分拣/开发', '分拣/开发/CI通知']));
-    const leaf = h.up.gmail.labelIdByName('分拣/开发/CI通知') ?? '';
+    // At Gmail's top level: the parent 开发 and the leaf, no root label.
+    expect(names).toEqual(expect.arrayContaining(['开发', '开发/CI通知']));
+    expect(names.some((name) => name === '分拣' || name.startsWith('分拣/'))).toBe(false);
+    const leaf = h.up.gmail.labelIdByName('开发/CI通知') ?? '';
     expect(gmailLabels(h, MAILS.ciBuild.id)).toEqual(['CATEGORY_UPDATES', leaf, 'UNREAD'].sort());
     expect(await decision(h, MAILS.ciBuild.id)).toMatchObject({ outcome: 'applied', decider: 'rule', label_id: 'dev-ci-notices' });
     // The parents are never linked: the guard's owned set is the leaves only.
@@ -104,7 +109,7 @@ describe('round 2: import, nested labels, keep in inbox, carve-outs, forged From
     deliver(h, MAILS.bankLogin, now);
     now += 5 * MINUTE;
     await h.step(now);
-    const security = h.up.gmail.labelIdByName('分拣/账号安全') ?? '';
+    const security = h.up.gmail.labelIdByName('账号安全') ?? '';
     expect(gmailLabels(h, MAILS.bankLogin.id)).toEqual(['CATEGORY_UPDATES', 'INBOX', security, 'UNREAD'].sort());
     expect(await decision(h, MAILS.bankLogin.id)).toMatchObject({ decider: 'rule', label_id: 'account-security' });
     const [entry] = (await h.api.listLedgerEntries({ label: 'labels/account-security' })).ledgerEntries;
@@ -117,7 +122,7 @@ describe('round 2: import, nested labels, keep in inbox, carve-outs, forged From
     deliver(h, MAILS.bankEn, now);
     now += 5 * MINUTE;
     await h.step(now);
-    const bank = h.up.gmail.labelIdByName('分拣/金融/银行支付') ?? '';
+    const bank = h.up.gmail.labelIdByName('金融/银行支付') ?? '';
     expect(gmailLabels(h, MAILS.bankEn.id)).toEqual(['CATEGORY_UPDATES', bank, 'UNREAD'].sort());
   });
 
@@ -126,7 +131,7 @@ describe('round 2: import, nested labels, keep in inbox, carve-outs, forged From
     deliver(h, MAILS.receiptEn, now);
     now += 5 * MINUTE;
     await h.step(now);
-    const orders = h.up.gmail.labelIdByName('分拣/购物/订单物流') ?? '';
+    const orders = h.up.gmail.labelIdByName('购物/订单物流') ?? '';
     expect(gmailLabels(h, MAILS.pickupZh.id)).toEqual(['CATEGORY_UPDATES', 'INBOX', orders, 'UNREAD'].sort());
     expect(gmailLabels(h, MAILS.receiptEn.id)).toEqual(['CATEGORY_UPDATES', orders, 'UNREAD'].sort());
   });
@@ -149,33 +154,39 @@ describe('round 2: import, nested labels, keep in inbox, carve-outs, forged From
     expect(h.up.gmail.calls.filter((call) => call.url.endsWith('/modify')).length).toBe(before);
   });
 
-  it('syncs a nested Gmail label, never its parent', async () => {
-    h.up.gmail.createUserLabel('分拣/项目');
-    const leaf = h.up.gmail.createUserLabel('分拣/项目/阿尔法');
-    const result = await h.api.syncLabels({ requestId: op() });
-    expect(result.importedCount).toBe(1);
-    const imported = result.labels.find((label) => label.gmailLabelId === leaf);
-    expect(imported).toMatchObject({ displayName: '项目/阿尔法', enabled: false });
+  it('adopts the owner\'s Gmail label of a new label\'s exact path, never its parent, and the sync imports nothing', async () => {
+    // The owner made 项目 and 项目/阿尔法 in Gmail by hand; a label of that path is created here in live mode.
+    const parent = h.up.gmail.createUserLabel('项目');
+    const leaf = h.up.gmail.createUserLabel('项目/阿尔法', true);
+    h.up.gmail.createUserLabel('项目/贝塔');
+    const before = h.up.gmail.calls.filter((call) => call.method === 'POST' && call.url.endsWith('/labels')).length;
+    const created = await h.api.createLabel({ label: create(LabelSchema, { displayName: '项目/阿尔法', description: '阿尔法项目的协作通知与周会纪要' }), requestId: op() });
+    expect(created).toMatchObject({ gmailLabelId: leaf, gmailState: Label_GmailState.ADOPTED });
+    // Linked, not created twice: no labels.create, and the owner's parent is neither linked nor recorded as ours.
+    expect(h.up.gmail.calls.filter((call) => call.method === 'POST' && call.url.endsWith('/labels')).length).toBe(before);
+    expect(await h.sql(`SELECT count(*) AS n FROM gmail_parents WHERE gmail_id = ?`, parent)).toEqual([{ n: 0 }]);
     // Its ID comes from its path (a word outside the glossary as a short hash), never a random one.
-    expect(imported?.name).toMatch(/^labels\/project-x[0-9a-f]{4}$/);
-    expect(result.labels.some((label) => label.displayName === '项目' || label.displayName === '开发' || label.displayName === '')).toBe(false);
+    expect(created.name).toMatch(/^labels\/project-x[0-9a-f]{4}$/);
+    const result = await h.api.syncLabels({ requestId: op() });
+    expect(result).toMatchObject({ linkedCount: 0, importedCount: 0 });
+    expect(result.labels.some((label) => label.displayName === '项目' || label.displayName === '项目/贝塔' || label.gmailLabelId === parent)).toBe(false);
     // Creating a label above an existing one is refused: only leaves are labels.
     expect(reasonOf(await rejection(h.api.createLabel({ label: create(LabelSchema, { displayName: '项目' }), requestId: op() })))).toBe('INVALID_LABEL');
   });
 
-  it('a parent this app created is never imported once its child is renamed away (QA D6)', async () => {
+  it('a parent this app created stays its own: never imported, and a label made of it later is linked, not adopted (QA D6)', async () => {
     const news = await h.api.createLabel({ label: create(LabelSchema, { displayName: '新闻/周报', description: '新闻网站的每周摘要与精选文章推送' }), requestId: op() });
-    expect(h.up.gmail.labelIdByName('分拣/新闻')).toBeDefined();
+    expect(news.gmailState).toBe(Label_GmailState.LINKED);
+    expect(h.up.gmail.labelIdByName('新闻')).toBeDefined();
     const renamed = await h.api.updateLabel({ label: { ...news, displayName: '资讯/周报/精选' }, updateMask: { paths: ['display_name'] }, requestId: op() });
     expect(renamed.displayName).toBe('资讯/周报/精选');
-    expect(h.up.gmail.labelIdByName('分拣/资讯/周报/精选')).toBe(news.gmailLabelId);
-    // Gmail keeps the old parent 分拣/新闻, now without children: still not a label of the owner's.
+    expect(h.up.gmail.labelIdByName('资讯/周报/精选')).toBe(news.gmailLabelId);
+    // Gmail keeps the old parent 新闻, now without children: still no label of mailsort's.
     const synced = await h.api.syncLabels({ requestId: op() });
-    expect(synced.importedCount).toBe(0);
     expect(synced.labels.some((label) => label.displayName === '新闻' || label.displayName === '资讯' || label.displayName === '资讯/周报')).toBe(false);
-    // The owner may still add it by hand: it links to the Gmail label that is there.
+    // The owner may still add it by hand: it links to the Gmail label that is there, which this app made.
     const own = await h.api.createLabel({ label: create(LabelSchema, { displayName: '新闻', description: '新闻网站的推送与快讯' }), requestId: op() });
-    expect(own.gmailLabelId).toBe(h.up.gmail.labelIdByName('分拣/新闻'));
+    expect(own).toMatchObject({ gmailLabelId: h.up.gmail.labelIdByName('新闻'), gmailState: Label_GmailState.LINKED });
     expect(await h.sql(`SELECT count(*) AS n FROM gmail_parents WHERE gmail_id = ?`, own.gmailLabelId)).toEqual([{ n: 0 }]);
     for (const label of [own, renamed]) {
       const current = await h.api.getLabel({ name: label.name });
@@ -183,21 +194,46 @@ describe('round 2: import, nested labels, keep in inbox, carve-outs, forged From
     }
   });
 
-  it('CreateLabel and a rename read 分拣/x as x, never as 分拣/分拣/x (QA D7)', async () => {
+  it('a rename to the name of another Gmail label is refused, and the label keeps its path', async () => {
+    const label = await h.api.createLabel({ label: create(LabelSchema, { displayName: '测试/改名前', description: '只用于测试改名冲突的标签' }), requestId: op() });
+    h.up.gmail.createUserLabel('Work');
+    expect(reasonOf(await rejection(h.api.updateLabel({ label: { ...label, displayName: 'Work' }, updateMask: { paths: ['display_name'] }, requestId: op() })))).toBe('LABEL_EXISTS');
+    expect(await h.api.getLabel({ name: label.name })).toMatchObject({ displayName: '测试/改名前', gmailLabelId: label.gmailLabelId });
+    expect(h.up.gmail.labels.get(label.gmailLabelId)?.name).toBe('测试/改名前');
+    const current = await h.api.getLabel({ name: label.name });
+    await h.api.deleteLabel({ name: current.name, etag: current.etag, requestId: op() });
+  });
+
+  it('two labels never share a Gmail label: one renamed in Gmail to a new label\'s path stays with its own', async () => {
+    const bank = h.up.gmail.labels.get(h.up.gmail.labelIdByName('金融/银行支付') ?? '');
+    if (bank === undefined) throw new Error('no bank label');
+    bank.name = '临时/测试';
+    const created = await h.api.createLabel({ label: create(LabelSchema, { displayName: '临时/测试', description: '只用于测试重名的标签' }), requestId: op() });
+    expect(created).toMatchObject({ gmailLabelId: '', gmailState: Label_GmailState.PENDING });
+    const synced = await h.api.syncLabels({ requestId: op() });
+    expect(synced).toMatchObject({ linkedCount: 0, renamedCount: 0 });
+    expect(synced.labels.find((label) => label.name === 'labels/finance-bank-pay')).toMatchObject({ displayName: '金融/银行支付', gmailLabelId: bank.id });
+    bank.name = '金融/银行支付';
+    const current = await h.api.getLabel({ name: created.name });
+    await h.api.deleteLabel({ name: current.name, etag: current.etag, requestId: op() });
+  });
+
+  it('CreateLabel and a rename read the legacy 分拣/x as x, never as a label under 分拣 (QA D7)', async () => {
     const typed = await h.api.createLabel({ label: create(LabelSchema, { displayName: '分拣/测试/前缀', description: '只用于测试前缀的标签' }), requestId: op() });
     expect(typed.displayName).toBe('测试/前缀');
-    expect(h.up.gmail.labelIdByName('分拣/分拣')).toBeUndefined();
     expect(reasonOf(await rejection(h.api.createLabel({ label: create(LabelSchema, { displayName: '分拣' }), requestId: op() })))).toBe('INVALID_LABEL');
     expect(reasonOf(await rejection(h.api.updateLabel({ label: { ...typed, displayName: '分拣/分拣/x' }, updateMask: { paths: ['display_name'] }, requestId: op() })))).toBe('INVALID_LABEL');
     const renamed = await h.api.updateLabel({ label: { ...typed, displayName: '分拣/测试/改名' }, updateMask: { paths: ['display_name'] }, requestId: op() });
     expect(renamed.displayName).toBe('测试/改名');
-    expect([...h.up.gmail.labels.values()].some((label) => label.name.startsWith('分拣/分拣'))).toBe(false);
+    expect(h.up.gmail.labels.get(renamed.gmailLabelId)?.name).toBe('测试/改名');
+    expect([...h.up.gmail.labels.values()].some((label) => label.name === '分拣' || label.name.startsWith('分拣/'))).toBe(false);
     await h.api.deleteLabel({ name: renamed.name, etag: renamed.etag, requestId: op() });
   });
 
   it('counts the flow per stage, outcome and label, corrections included; a label links to its ledger entries', async () => {
-    const shop = h.up.gmail.labelIdByName('分拣/购物/订单物流') ?? '';
-    const promo = h.up.gmail.createUserLabel('分拣/购物/促销');
+    const shop = h.up.gmail.labelIdByName('购物/订单物流') ?? '';
+    // The owner made 购物/促销 in Gmail by hand: the sync adopts it for the template's label of that path.
+    const promo = h.up.gmail.createUserLabel('购物/促销', true);
     await h.api.syncLabels({ requestId: op() });
     h.up.gmail.ownerModify(MAILS.receiptEn.id, [promo], [shop]);
     now += 5 * MINUTE;
@@ -226,13 +262,14 @@ describe('round 2: import, nested labels, keep in inbox, carve-outs, forged From
     const exported = await h.api.exportRules({});
     expect(exported).toMatchObject({ ruleCount: 5 });
     const document = JSON.parse(exported.json) as { labels: { path: string }[]; rules: { id: string; match: Record<string, string> }[] };
-    expect(document.labels.map((label) => label.path)).toContain('分拣/项目/阿尔法');
+    expect(document.labels.map((label) => label.path)).toContain('项目/阿尔法');
+    expect(exported.json).not.toContain('分拣');
     expect(document.rules.find((rule) => rule.id === 'bank-login')).toMatchObject({ match: { from_address: 'statements@bank.example.com' }, subject_includes: ['登录', 'login'], keep_in_inbox: true });
     // The Gmail filter export leaves out what a filter cannot do: trust labels, the carve-outs, and the shop's plain
     // rule, which in Gmail would label the pickup code and archive it (QA D1).
     const filters = await h.api.exportGmailFilters({});
     expect(filters).toMatchObject({ ruleCount: 1, skippedCount: 4 });
-    expect(filters.xml).toContain('分拣/开发/CI通知');
+    expect(filters.xml).toContain("value='开发/CI通知'");
     expect(filters.xml).not.toContain('orders@shop.example.com');
   });
 
@@ -246,7 +283,7 @@ describe('round 2: import, nested labels, keep in inbox, carve-outs, forged From
     const [item] = await h.sql(`SELECT id FROM review WHERE message_id = ? AND state = 'pending'`, pickup.id);
     const before = h.up.gmail.calls.length;
     await h.api.confirmReviewItem({ name: `reviewItems/${String(item?.['id'])}`, requestId: op() });
-    const orders = h.up.gmail.labelIdByName('分拣/购物/订单物流') ?? '';
+    const orders = h.up.gmail.labelIdByName('购物/订单物流') ?? '';
     expect(gmailLabels(h, pickup.id)).toEqual(['CATEGORY_UPDATES', 'INBOX', orders, 'UNREAD'].sort());
     const written = h.up.gmail.calls.slice(before).filter((call) => call.url.endsWith('/modify'));
     expect(written.map((call) => call.body)).toEqual([JSON.stringify({ addLabelIds: [orders] })]);

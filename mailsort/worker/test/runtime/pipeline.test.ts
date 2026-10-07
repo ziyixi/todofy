@@ -67,7 +67,7 @@ describe('the pipeline, shadow then live', () => {
     deliver(h, MAILS.unsure, now);
     now += 5 * MINUTE;
     await h.step(now);
-    const labelId = h.up.gmail.labelIdByName('分拣/订阅');
+    const labelId = h.up.gmail.labelIdByName('订阅');
     expect(labelId).toMatch(/^Label_/);
     expect(gmailLabels(h, MAILS.newsletterZh.id)).toEqual(['CATEGORY_UPDATES', labelId, 'UNREAD'].sort());
     expect(await decision(h, MAILS.newsletterZh.id)).toMatchObject({ outcome: 'applied', label_id: 'newsletter' });
@@ -92,9 +92,11 @@ describe('the pipeline, shadow then live', () => {
   });
 
   it('a Gmail correction becomes an example; the second for the same list proposes a rule', async () => {
-    const receiptGmail = h.up.gmail.createUserLabel('分拣/收据');
+    // The owner made 收据 in Gmail by hand: the sync adopts it for the label of that path.
+    const receiptGmail = h.up.gmail.createUserLabel('收据', true);
     await h.api.syncLabels({ requestId: op() });
-    const newsletterGmail = h.up.gmail.labelIdByName('分拣/订阅') ?? '';
+    expect((await h.api.getLabel({ name: 'labels/receipt' })).gmailLabelId).toBe(receiptGmail);
+    const newsletterGmail = h.up.gmail.labelIdByName('订阅') ?? '';
     for (const [i, id] of ['c000000000000c01', 'c000000000000c02'].entries()) {
       deliver(h, { ...MAILS.newsletterEn, id, subject: `Weekly digest ${String(i)}` }, now);
       now += 5 * MINUTE;
@@ -152,7 +154,7 @@ describe('the pipeline, shadow then live', () => {
     const unsure = reviewItems.find((item) => item.subject === 'Lunch on Friday?');
     const corrected = await h.api.correctReviewItem({ name: unsure?.name ?? '', label: 'labels/travel', requestId: op() });
     expect(corrected.state).toBe(3);
-    const travel = h.up.gmail.labelIdByName('分拣/出行');
+    const travel = h.up.gmail.labelIdByName('出行');
     expect(gmailLabels(h, MAILS.unsure.id)).toEqual(['CATEGORY_UPDATES', travel, 'UNREAD'].sort());
     expect(reasonOf(await rejection(h.api.skipReviewItem({ name: unsure?.name ?? '', requestId: op() })))).toBe('ALREADY_RESOLVED');
   });

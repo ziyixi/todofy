@@ -10,9 +10,10 @@
  *   messages_list  GET   /gmail/v1/users/me/messages?labelIds=INBOX&q=newer_than:2d   the resync after a lost cursor
  *   message_get    GET   /gmail/v1/users/me/messages/{id}                   format=full or metadata, fixed fields
  *   labels_list    GET   /gmail/v1/users/me/labels
- *   labels_create  POST  /gmail/v1/users/me/labels                          a name under "分拣/" (a path of up to
- *                                                                            three segments), or "分拣" itself
- *   labels_patch   PATCH /gmail/v1/users/me/labels/{owned id}               the name only, still under "分拣/"
+ *   labels_create  POST  /gmail/v1/users/me/labels                          a name the store plans: a label's path
+ *                                                                            or a parent it nests under
+ *   labels_patch   PATCH /gmail/v1/users/me/labels/{owned id}               the name only, to the path the store
+ *                                                                            plans for that label
  *   message_modify POST  /gmail/v1/users/me/messages/{id}/modify            exactly two shapes:
  *     classify: addLabelIds = [one owned label], removeLabelIds = [] or [INBOX], for a ledger row in `intended` or
  *               `applied` whose `archived` matches;
@@ -21,13 +22,15 @@
  *
  * So there is no path to trash, untrash, delete, batchDelete, batchModify, send, drafts, filters, settings or
  * forwarding, and no way to touch UNREAD, STARRED, IMPORTANT, SPAM, TRASH, CATEGORY_* or a label mailsort does not own.
+ * Ownership is by Gmail label ID, never by name: a label is mailsort's once its store links it (one it created, or a
+ * Gmail label of exactly the planned name that it adopted), and the owner's other labels never are.
  * The OAuth grant is the second wall: gmail.readonly in shadow, gmail.modify in live, never https://mail.google.com/
  * (the only scope that can delete for good). test/gmail-guard.test.ts records every call a fake fetch receives and
  * checks it against an independent copy of this table, and throws random operations at the guard.
  *
  * Nothing here logs. Answers are read with a byte cap and parsed as JSON; their content is untrusted mail data.
  */
-import { GOOGLE_TIMEOUT_MS, LABEL_DEPTH_MAX, LABEL_PREFIX, LABEL_ROOT, MESSAGE_MAX_BYTES, RESPONSE_MAX_BYTES, RESYNC_QUERY } from './limits.ts';
+import { GOOGLE_TIMEOUT_MS, LABEL_DEPTH_MAX, MESSAGE_MAX_BYTES, RESPONSE_MAX_BYTES, RESYNC_QUERY } from './limits.ts';
 
 export const GMAIL_HOST = 'gmail.googleapis.com';
 export const TOKEN_HOST = 'oauth2.googleapis.com';
@@ -76,10 +79,14 @@ export interface LedgerView {
   readonly archived: boolean;
 }
 
-/** What the guard knows of the app's own state: the labels it owns and its ledger. */
+/** What the guard knows of the app's own state: the labels it owns, the names it plans for them, and its ledger. */
 export interface Ownership {
-  /** Gmail IDs of the labels mailsort owns (linked labels whose name starts with "分拣/"). */
+  /** Gmail IDs of the labels mailsort owns: the linked labels of its store (created by it, or adopted). */
   ownedLabelIds(): ReadonlySet<string>;
+  /** The paths of the store's labels: the only names labels.create may make, with the parents they nest under. */
+  plannedPaths(): ReadonlySet<string>;
+  /** The path the store plans for the owned Gmail label `labelId` (the only name labels.patch may give it), or null. */
+  plannedPath(labelId: string): string | null;
   /** The ledger row that adds `labelId` to `messageId`, or null. */
   ledger(messageId: string, labelId: string): LedgerView | null;
 }
@@ -149,14 +156,21 @@ function labelList(value: unknown): string[] {
 }
 
 /**
- * A Gmail label name of this app: under the prefix, a path of 1 to LABEL_DEPTH_MAX segments (a Gmail nested label,
- * `分拣/开发/CI通知`), each non-empty without surrounding spaces, and no control characters. A label of this app or a
- * parent that groups some (`分拣/开发`); only a linked label of the app's store is ever written to a mail.
+ * Whether `name` has the shape of a label path (a Gmail nested label, `开发/CI通知`): 1 to LABEL_DEPTH_MAX segments,
+ * each non-empty without surrounding spaces, no control characters, at most Gmail's 225 characters. A second check
+ * besides the store's plan, which only ever holds such paths.
  */
-export function ownedName(name: unknown): name is string {
-  if (typeof name !== 'string' || !name.startsWith(LABEL_PREFIX) || name.length > 225 || hasControl(name)) return false;
-  const segments = name.slice(LABEL_PREFIX.length).split('/');
+function pathShaped(name: unknown): name is string {
+  if (typeof name !== 'string' || name.length > 225 || hasControl(name)) return false;
+  const segments = name.split('/');
   return segments.length <= LABEL_DEPTH_MAX && segments.every((segment) => segment !== '' && segment === segment.trim());
+}
+
+/** Whether `name` is a planned path or a parent one nests under (`开发` for `开发/CI通知`). */
+function plannedOrParent(name: string, paths: ReadonlySet<string>): boolean {
+  if (paths.has(name)) return true;
+  for (const path of paths) if (path.startsWith(`${name}/`)) return true;
+  return false;
 }
 
 function owned(labelId: string, ownership: Ownership): void {
@@ -272,17 +286,19 @@ export function checkRequest(request: GoogleRequest, ownership: Ownership): Gmai
     if (method === 'POST') {
       if (url.search !== '') refuse('query_param');
       const value = jsonBody(request.body, ['name', 'labelListVisibility', 'messageListVisibility']);
-      // The prefix's own label too: Gmail nests `分拣/x` under it only when it exists.
+      // A parent too: Gmail nests `开发/CI通知` under `开发` only when that exists. A parent is never linked, so never owned.
       const name = value['name'];
-      if (!(ownedName(name) || name === LABEL_ROOT) || value['labelListVisibility'] !== 'labelShow' || value['messageListVisibility'] !== 'show') refuse('labels_create');
+      if (!pathShaped(name) || !plannedOrParent(name, ownership.plannedPaths()) || value['labelListVisibility'] !== 'labelShow' || value['messageListVisibility'] !== 'show') refuse('labels_create');
       return 'labels_create';
     }
   }
   if (method === 'PATCH' && rest.length === 2 && rest[0] === 'labels') {
     if (url.search !== '') refuse('query_param');
-    owned(rest[1] ?? '', ownership);
+    const id = rest[1] ?? '';
+    owned(id, ownership);
     const value = jsonBody(request.body, ['name']);
-    if (!ownedName(value['name'])) refuse('labels_patch');
+    const name = value['name'];
+    if (!pathShaped(name) || name !== ownership.plannedPath(id)) refuse('labels_patch');
     return 'labels_patch';
   }
   if (method === 'POST' && rest.length === 3 && rest[0] === 'messages' && rest[2] === 'modify') {
@@ -568,7 +584,7 @@ export class GmailClient {
     });
   }
 
-  /** Creates the Gmail label `name` (under "分拣/", or "分拣" itself); answers its ID. */
+  /** Creates the Gmail label `name` (a planned path, or a parent of one); answers its ID. */
   async createLabel(name: string): Promise<string> {
     const value = assertObject(await this.write('labels_create', 'POST', `${GMAIL_BASE}/labels`, { name, labelListVisibility: 'labelShow', messageListVisibility: 'show' }));
     const id = value['id'];
@@ -576,7 +592,7 @@ export class GmailClient {
     return id;
   }
 
-  /** Renames an owned label (the name stays under "分拣/"). */
+  /** Renames an owned label to the path its store plans for it. */
   async renameLabel(labelId: string, name: string): Promise<void> {
     await this.write('labels_patch', 'PATCH', `${GMAIL_BASE}/labels/${labelId}`, { name });
   }

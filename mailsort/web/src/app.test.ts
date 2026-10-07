@@ -92,7 +92,8 @@ describe('标签', () => {
   it('creates a label and saves an edit with every field and the etag in the mask', async () => {
     const server = new FakeServer()
     const root = await open(server, '/labels')
-    expect(root.textContent).toContain('分拣/订阅')
+    expect(root.textContent).toContain('订阅')
+    expect(root.textContent).not.toContain('分拣/')
     const name = root.querySelector<HTMLInputElement>('input[aria-label="新标签路径"]')
     if (name === null) throw new Error('no input')
     name.value = '出行'
@@ -113,13 +114,18 @@ describe('标签', () => {
     expect(root.querySelector<HTMLInputElement>('input[aria-label="阈值"]')?.min).toBe('0.5')
   })
 
-  it('says what a sync from Gmail did, and that imported labels need a description', async () => {
+  it('says what a sync from Gmail did, and shows a label that adopted the owner’s Gmail label', async () => {
     const server = new FakeServer()
+    // A label without a description says what that means.
+    const first = server.labels[0]
+    if (first === undefined) throw new Error('no label')
+    first.description = ''
     const root = await open(server, '/labels')
+    expect(root.textContent).toContain('还没有说明：模型不会选这个标签，只有规则和例子能打它')
     buttonNamed(root, '从 Gmail 同步').click()
     await settle()
-    expect(toastText(root)).toBe('已同步：关联 1，导入 1（未启用，请补说明），Gmail 中缺失 0')
-    expect(root.textContent).toContain('还没有说明：模型不会选这个标签，只有规则和例子能打它')
+    expect(toastText(root)).toBe('已同步：关联 1，改名 0，Gmail 中缺失 0')
+    expect(root.textContent).toContain('已沿用 Gmail 原有标签')
   })
 })
 

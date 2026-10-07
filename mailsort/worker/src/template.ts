@@ -12,7 +12,7 @@
  */
 
 export interface TemplateLabel {
-  /** The path below 分拣/. */
+  /** The label's path, also its Gmail name. */
   readonly path: string;
   readonly description: string;
   readonly trust: boolean;

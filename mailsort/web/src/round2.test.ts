@@ -201,7 +201,7 @@ describe('标签 as a tree', () => {
     s.labels[2] = Object.assign(label('account-security', '账号安全'), { keepInInbox: true })
     const root = await open(s, '/labels')
     const groups = [...root.querySelectorAll('.label-group')]
-    expect(groups.map((group) => group.getAttribute('aria-label'))).toEqual(['分拣/金融', '分拣/账号安全', '分拣/出行'])
+    expect(groups.map((group) => group.getAttribute('aria-label'))).toEqual(['金融', '账号安全', '出行'])
     expect(groups[0]?.querySelectorAll('.label-card').length).toBe(2)
     expect(groups[0]?.querySelector('.group-name')?.textContent).toContain('2 个标签')
     const security = groups[1]?.querySelector('.label-card')
@@ -222,15 +222,15 @@ describe('标签 as a tree', () => {
     s.labels = [label('life-car-service', '生活/汽车/保养'), label('life-health', '生活/医疗'), label('life-car-insurance', '生活/汽车/保险'), label('travel', '出行')]
     const root = await open(s, '/labels')
     const top = [...root.querySelectorAll('.label-group')]
-    expect(top.map((group) => group.getAttribute('aria-label'))).toEqual(['分拣/生活', '分拣/出行'])
+    expect(top.map((group) => group.getAttribute('aria-label'))).toEqual(['生活', '出行'])
     expect(top[0]?.querySelector(':scope > .group-name')?.textContent).toContain('3 个标签')
     const car = top[0]?.querySelector('.label-subgroup')
-    expect(car?.getAttribute('aria-label')).toBe('分拣/生活/汽车')
+    expect(car?.getAttribute('aria-label')).toBe('生活/汽车')
     expect(car?.querySelector('h3')?.textContent).toContain('2 个标签')
-    expect([...(car?.querySelectorAll('.label-card strong') ?? [])].map((node) => node.textContent)).toEqual(['分拣/生活/汽车/保养', '分拣/生活/汽车/保险'])
-    // 生活/医疗 is a card right under 分拣/生活, beside the 汽车 section.
+    expect([...(car?.querySelectorAll('.label-card strong') ?? [])].map((node) => node.textContent)).toEqual(['生活/汽车/保养', '生活/汽车/保险'])
+    // 生活/医疗 is a card right under 生活, beside the 汽车 section.
     const direct = [...(top[0]?.querySelector(':scope > .list.nested')?.children ?? [])].map((node) => node.getAttribute('aria-label') ?? node.querySelector('strong')?.textContent)
-    expect(direct).toEqual(['分拣/生活/汽车', '分拣/生活/医疗'])
+    expect(direct).toEqual(['生活/汽车', '生活/医疗'])
   })
 
   it('opens the template’s preview in one click', async () => {
@@ -241,7 +241,7 @@ describe('标签 as a tree', () => {
     expect(window.location.pathname).toBe('/import')
     expect(s.imports[0]).toMatchObject({ useTemplate: true, validateOnly: true })
     expect(root.textContent).toContain('预览：推荐模板')
-    expect(root.textContent).toContain('分拣/账号安全')
+    expect(root.textContent).toContain('账号安全')
     buttonNamed(root, '确认导入').click()
     await settle()
     expect(s.imports[1]).toMatchObject({ useTemplate: true, validateOnly: false })
@@ -250,6 +250,7 @@ describe('标签 as a tree', () => {
 })
 
 describe('导入导出', () => {
+  // The owner's rule file, in its own format: the labels still carry the legacy `分拣/` prefix (the Worker reads it).
   const file = JSON.stringify([
     { id: 'bank-login', match: { from_address: 'statements@bank.example.com' }, label: '分拣/账号安全', keep_in_inbox: true, trust: true, require_dmarc: true, evidence: 'synthetic', notes: '', subject_includes: ['登录'] },
     { id: 'bank', match: { from_domain: 'bank.example.com' }, label: '分拣/金融/银行支付', keep_in_inbox: false, trust: true, require_dmarc: true, evidence: '', notes: '' },
@@ -258,12 +259,12 @@ describe('导入导出', () => {
   it('reads the owner’s rule file strictly and names the entry of a mistake', () => {
     expect(parseImport(file).rules.map((rule) => rule.id)).toEqual(['bank-login', 'bank'])
     expect(parseImport(file).rules[0]).toMatchObject({ keepInInbox: true, subjectIncludes: ['登录'], match: { fromAddress: 'statements@bank.example.com' } })
-    expect(parseImport(JSON.stringify({ labels: [{ path: '分拣/出行', description: '行程' }], rules: [] })).labels[0]?.path).toBe('分拣/出行')
+    expect(parseImport(JSON.stringify({ labels: [{ path: '出行', description: '行程' }], rules: [] })).labels[0]?.path).toBe('出行')
     // An export carries each label's switch; a file without it leaves the switch unset (QA D10).
-    expect(parseImport(JSON.stringify({ labels: [{ path: '分拣/出行', enabled: false }], rules: [] })).labels[0]?.enabled).toBe(false)
-    expect(parseImport(JSON.stringify({ labels: [{ path: '分拣/出行' }], rules: [] })).labels[0]?.enabled).toBeUndefined()
-    expect(() => parseImport('[{"id": "x", "match": {"from_adress": "a@example.com"}, "label": "分拣/a"}]')).toThrow(/第 1 个规则/)
-    expect(() => parseImport('[{"match": {"from_address": "a@example.com"}, "label": "分拣/a"}]')).toThrow(/第 1 个规则/)
+    expect(parseImport(JSON.stringify({ labels: [{ path: '出行', enabled: false }], rules: [] })).labels[0]?.enabled).toBe(false)
+    expect(parseImport(JSON.stringify({ labels: [{ path: '出行' }], rules: [] })).labels[0]?.enabled).toBeUndefined()
+    expect(() => parseImport('[{"id": "x", "match": {"from_adress": "a@example.com"}, "label": "a"}]')).toThrow(/第 1 个规则/)
+    expect(() => parseImport('[{"match": {"from_address": "a@example.com"}, "label": "a"}]')).toThrow(/第 1 个规则/)
     expect(() => parseImport('{"rules": [], "extra": 1}')).toThrow(/labels 和 rules/)
     expect(() => parseImport('not json')).toThrow('不是有效的 JSON')
     expect(() => parseImport('[]')).toThrow('没有任何标签或规则')
@@ -292,7 +293,7 @@ describe('导入导出', () => {
     const root = await open(s, '/import')
     const area = root.querySelector<HTMLTextAreaElement>('textarea[aria-label="要导入的 JSON"]')
     if (area === null) throw new Error('no textarea')
-    area.value = JSON.stringify([{ id: 'two', match: { from_address: 'a@example.com', from_domain: 'example.com' }, label: '分拣/出行' }])
+    area.value = JSON.stringify([{ id: 'two', match: { from_address: 'a@example.com', from_domain: 'example.com' }, label: '出行' }])
     buttonNamed(root, '预览').click()
     await settle()
     expect(root.textContent).toContain('match 里要有且只有一个')

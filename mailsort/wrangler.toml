@@ -1,6 +1,6 @@
 # Worker "mailsort": the owner's Gmail sorting (sort.ziyixi.science, docs/design.md): new INBOX mail read through the
-# Gmail API, decided by rules, nearest examples and the Workers AI decision model Clef, labelled under "分拣/" and
-# archived (never marked read) in live mode. The production configuration and its single source of truth: top level =
+# Gmail API, decided by rules, nearest examples and the Workers AI decision model Clef, labelled (its own Gmail labels,
+# named by their paths) and archived (never marked read) in live mode. The production configuration and its single source of truth: top level =
 # production, never [env.*] or keep_vars. Every static value is committed here (the repository is public: nothing
 # personal, no secret).
 #

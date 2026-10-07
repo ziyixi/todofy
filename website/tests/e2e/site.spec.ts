@@ -260,7 +260,7 @@ test.describe("public site", () => {
     await expect(
       page.getByRole("link", { name: "https://myaccount.google.com/permissions" }),
     ).toHaveAttribute("href", "https://myaccount.google.com/permissions");
-    await expect(page.locator("main time")).toHaveAttribute("datetime", "2026-10-06");
+    await expect(page.locator("main time")).toHaveAttribute("datetime", "2026-10-07");
     const navigation = page.getByRole("navigation", { name: "Primary" });
     await expect(navigation.locator('a[href^="/privacy"]')).toHaveCount(0);
     await expect(navigation.locator("a[aria-current]")).toHaveCount(0);

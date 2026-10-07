@@ -5,7 +5,7 @@
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { create } from '@ziyixi/proto/protobuf';
-import { LabelSchema } from '@ziyixi/proto/mailsort/ui/v1/label_pb';
+import { Label_GmailState, LabelSchema } from '@ziyixi/proto/mailsort/ui/v1/label_pb';
 import { RuleSchema, Rule_Kind } from '@ziyixi/proto/mailsort/ui/v1/rule_pb';
 import { Mode, SettingsSchema } from '@ziyixi/proto/mailsort/ui/v1/status_pb';
 import { fromWire } from '@ziyixi/proto/wire-json';
@@ -123,18 +123,46 @@ describe('the owner API', () => {
     expect((await h.api.listRules({})).rules).toEqual([]);
   });
 
-  it('SyncLabels links and imports the "分拣/" labels of Gmail, and nothing else', async () => {
+  it('SyncLabels adopts the Gmail label of a label\'s exact path, follows renames by ID, and never imports another label', async () => {
     await h.step(T0);
-    const linked = h.up.gmail.createUserLabel('分拣/订阅');
-    h.up.gmail.createUserLabel('分拣/旅行');
-    h.up.gmail.createUserLabel('Personal');
-    const result = await h.api.syncLabels({ requestId: op() });
-    expect(result).toMatchObject({ linkedCount: 1, importedCount: 1, missingCount: 0 });
-    expect(result.labels.map((label) => [label.displayName, label.gmailLabelId])).toEqual([
-      ['订阅', linked],
-      ['旅行', expect.stringMatching(/^Label_/)],
-    ]);
-    expect(result.labels[1]).toMatchObject({ enabled: false, live: false });
+    const gmail = h.up.gmail;
+    // The owner's labels: one with the path of mailsort's 订阅, the rest their own (none is ever imported or linked).
+    const adopted = gmail.createUserLabel('订阅', true);
+    for (const name of ['旅行', 'Personal', '订阅/周报', '分拣/订阅']) gmail.createUserLabel(name);
+    const before = (await h.api.listLabels({})).labels.length;
+    const writes = () => gmail.calls.filter((call) => call.method !== 'GET' && !call.url.includes('/token')).length;
+    const writesBefore = writes();
+    const first = await h.api.syncLabels({ requestId: op() });
+    expect(first).toMatchObject({ linkedCount: 1, renamedCount: 0, missingCount: 0, importedCount: 0 });
+    expect(first.labels).toHaveLength(before);
+    const newsletter = () => first.labels.find((label) => label.name === 'labels/newsletter');
+    expect(newsletter()).toMatchObject({ displayName: '订阅', gmailLabelId: adopted, gmailState: Label_GmailState.ADOPTED });
+    // Renamed in Gmail: the label follows its Gmail ID.
+    const named = (name: string) => {
+      const label = gmail.labels.get(adopted);
+      if (label !== undefined) label.name = name;
+    };
+    named('资讯');
+    expect(await h.api.syncLabels({ requestId: op() })).toMatchObject({ linkedCount: 0, renamedCount: 1, missingCount: 0 });
+    expect(await h.api.getLabel({ name: 'labels/newsletter' })).toMatchObject({ displayName: '资讯', gmailLabelId: adopted, gmailState: Label_GmailState.ADOPTED });
+    // A name the store cannot hold (the legacy prefix, not a path) is left alone; writes still go by the ID.
+    named('分拣/资讯');
+    expect(await h.api.syncLabels({ requestId: op() })).toMatchObject({ renamedCount: 0 });
+    expect((await h.api.getLabel({ name: 'labels/newsletter' })).displayName).toBe('资讯');
+    // Deleted in Gmail: missing; a Gmail label of its path again: linked again.
+    gmail.labels.delete(adopted);
+    expect(await h.api.syncLabels({ requestId: op() })).toMatchObject({ missingCount: 1 });
+    expect((await h.api.getLabel({ name: 'labels/newsletter' })).gmailState).toBe(Label_GmailState.MISSING);
+    const again = gmail.createUserLabel('资讯', true);
+    expect(await h.api.syncLabels({ requestId: op() })).toMatchObject({ linkedCount: 1 });
+    expect(await h.api.getLabel({ name: 'labels/newsletter' })).toMatchObject({ gmailLabelId: again, gmailState: Label_GmailState.ADOPTED });
+    // A sync only reads Gmail.
+    expect(writes()).toBe(writesBefore);
+    // A system label is never adopted, whatever its name (nor by CreateLabel, which tries Gmail at once in live mode).
+    const inbox = await h.api.createLabel({ labelId: 'inbox-name', label: create(LabelSchema, { displayName: 'INBOX' }), requestId: op() });
+    expect(await h.api.syncLabels({ requestId: op() })).toMatchObject({ linkedCount: 0 });
+    expect(await h.api.getLabel({ name: inbox.name })).toMatchObject({ gmailLabelId: '', gmailState: Label_GmailState.PENDING });
+    await h.api.deleteLabel({ name: inbox.name, requestId: op() });
   });
 
   it('the review queue: confirm, skip, already resolved', async () => {

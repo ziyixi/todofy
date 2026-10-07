@@ -36,6 +36,10 @@ const gmailError = (status: number, reason: string) => json({ error: { code: sta
 export class FakeGmail {
   readonly messages = new Map<string, FakeMessage>();
   readonly labels = new Map<string, { id: string; name: string; type: 'system' | 'user' }>();
+  /** User labels the Worker created (labels.create). */
+  readonly createdByWorker = new Set<string>();
+  /** User labels the test's owner made with the name of a label of mailsort's, for mailsort to adopt. */
+  readonly adoptable = new Set<string>();
   readonly history: HistoryEntry[] = [];
   readonly calls: RecordedCall[] = [];
   historyId = 1000;
@@ -62,6 +66,8 @@ export class FakeGmail {
   reset(): void {
     this.messages.clear();
     for (const [id, label] of this.labels) if (label.type === 'user') this.labels.delete(id);
+    this.createdByWorker.clear();
+    this.adoptable.clear();
     this.history.length = 0;
     this.calls.length = 0;
     this.historyId = 1000;
@@ -93,10 +99,20 @@ export class FakeGmail {
     return [...this.labels.values()].find((label) => label.name === name)?.id;
   }
 
-  createUserLabel(name: string): string {
+  /**
+   * The owner makes a label by hand. `adoptable`: it has the name of one of mailsort's labels, which mailsort adopts
+   * and may write from then on; any other label of the owner's is never written (the independent table's check).
+   */
+  createUserLabel(name: string, adoptable = false): string {
     const id = `Label_${String(this.nextLabel++)}`;
     this.labels.set(id, { id, name, type: 'user' });
+    if (adoptable) this.adoptable.add(id);
     return id;
+  }
+
+  /** The labels mailsort may write: the ones it created and the ones the test made for it to adopt. */
+  mailsortLabelIds(): Set<string> {
+    return new Set([...this.createdByWorker, ...this.adoptable]);
   }
 
   private applyModify(messageId: string, add: string[], remove: string[]): boolean {
@@ -173,13 +189,16 @@ export class FakeGmail {
       const { name } = JSON.parse(body) as { name: string };
       if ([...this.labels.values()].some((label) => label.name === name)) return gmailError(409, 'duplicate');
       const id = this.createUserLabel(name);
+      this.createdByWorker.add(id);
       return json({ id, name, type: 'user' });
     }
     if (method === 'PATCH' && parts[0] === 'labels' && parts.length === 2) {
       if (!writable) return gmailError(403, 'insufficientPermissions');
       const label = this.labels.get(parts[1] ?? '');
       if (label === undefined || label.type !== 'user') return gmailError(404, 'notFound');
-      label.name = (JSON.parse(body) as { name: string }).name;
+      const { name } = JSON.parse(body) as { name: string };
+      if ([...this.labels.values()].some((other) => other.id !== label.id && other.name === name)) return gmailError(409, 'duplicate');
+      label.name = name;
       return json(label);
     }
     if (method === 'POST' && parts[0] === 'messages' && parts[2] === 'modify') {

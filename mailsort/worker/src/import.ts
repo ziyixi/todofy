@@ -21,7 +21,6 @@ import {
   DESCRIPTION_MAX,
   IMPORT_ID_PATTERN,
   LABEL_ID_PATTERN,
-  LABEL_PREFIX,
   LABELS_MAX,
   RULE_TEXT_MAX,
   RULES_MAX,
@@ -30,7 +29,7 @@ import {
   THRESHOLD_MAX,
   THRESHOLD_MIN,
 } from './limits.ts';
-import { labelIdFor, normalizePath, treeConflict } from './paths.ts';
+import { labelIdFor, ownerPath, treeConflict } from './paths.ts';
 import { normalizeRuleValue, ruleText, ruleValueOk } from './rule-value.ts';
 import type { LabelRow, RuleRow, Store } from './store.ts';
 import { LABEL_TEMPLATE } from './template.ts';
@@ -146,11 +145,12 @@ export function foldTerms(raw: readonly string[]): string[] | null {
   return out;
 }
 
-/** The path of a Gmail name of this app (`分拣/金融/投资`): 'label_prefix' without the prefix, 'label_path' when invalid. */
+/**
+ * The path an entry names (`金融/投资`; the legacy `分拣/金融/投资` of the owner's rule file and older exports means the
+ * same, paths.ts ownerPath, as in 标签), or 'label_path' when it is not one.
+ */
 function pathOfName(name: string): { path: string } | { problem: string } {
-  const trimmed = name.trim();
-  if (!trimmed.startsWith(LABEL_PREFIX)) return { problem: 'label_prefix' };
-  const path = normalizePath(trimmed.slice(LABEL_PREFIX.length));
+  const path = ownerPath(name);
   return path === null ? { problem: 'label_path' } : { path };
 }
 
@@ -170,7 +170,7 @@ function identity(kind: string, value: string, labelId: string, includes: readon
 export function templateLabels(): LabelInput[] {
   // No threshold: one click on the template must not throw away a threshold the owner tuned (a new label gets the default).
   // Nor an enabled switch: a label the owner disabled stays disabled.
-  return LABEL_TEMPLATE.map((item) => ({ path: `${LABEL_PREFIX}${item.path}`, description: item.description, trust: item.trust, keepInInbox: item.keepInInbox, sensitive: item.sensitive, threshold: null, enabled: null }));
+  return LABEL_TEMPLATE.map((item) => ({ path: item.path, description: item.description, trust: item.trust, keepInInbox: item.keepInInbox, sensitive: item.sensitive, threshold: null, enabled: null }));
 }
 
 /** What the import would do (pure over the store's rows; nothing is written). */
@@ -463,7 +463,7 @@ export function exportDocument(store: Store): { json: string; labels: number; ru
   const rules = store.all<RuleRow>(`SELECT * FROM rules WHERE state != 'proposed' ORDER BY create_time, id`).filter((row) => pathOf.has(row.label_id));
   const document = {
     labels: labels.map((row) => ({
-      path: `${LABEL_PREFIX}${row.display_name}`,
+      path: row.display_name,
       description: row.description,
       trust: row.trust === 1,
       keep_in_inbox: row.keep_in_inbox === 1,
@@ -478,7 +478,7 @@ export function exportDocument(store: Store): { json: string; labels: number; ru
       return {
         id: row.import_id !== '' ? row.import_id : row.id,
         match: { [MATCH_FIELDS[row.kind]]: row.value },
-        label: `${LABEL_PREFIX}${label?.display_name ?? ''}`,
+        label: label?.display_name ?? '',
         keep_in_inbox: row.keep_in_inbox === 1,
         trust: label?.trust === 1,
         require_dmarc: row.require_dmarc === 1,

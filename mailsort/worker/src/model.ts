@@ -34,6 +34,11 @@ export const labelRef = (id: string | null) => (id === null || id === '' ? '' : 
 
 const GMAIL_STATES = { pending: Label_GmailState.PENDING, linked: Label_GmailState.LINKED, missing: Label_GmailState.MISSING } as const;
 
+/** A label's Gmail state; a linked label that adopted the owner's Gmail label of its path says so. */
+function gmailState(row: LabelRow): Label_GmailState {
+  return row.gmail_state === 'linked' && row.gmail_adopted === 1 ? Label_GmailState.ADOPTED : GMAIL_STATES[row.gmail_state];
+}
+
 export function labelMessage(row: LabelRow, exampleCount: number): Label {
   return create(LabelSchema, {
     name: labelName(row.id),
@@ -44,7 +49,7 @@ export function labelMessage(row: LabelRow, exampleCount: number): Label {
     trustImplying: row.trust === 1,
     threshold: row.threshold,
     gmailLabelId: row.gmail_id ?? '',
-    gmailState: GMAIL_STATES[row.gmail_state],
+    gmailState: gmailState(row),
     descriptionVersion: row.desc_version,
     exampleCount,
     createTime: ts(row.create_time),

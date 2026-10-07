@@ -2,7 +2,8 @@
  * The safety model by construction (../../docs/design.md §2): gmail.ts's closed table. Three angles:
  *
  * 1. every operation outside the table (trash, delete, send, drafts, filters, settings, a system label, a label mailsort
- *    does not own, a modify without its ledger row) throws GmailRefused and never reaches fetch;
+ *    does not own, a label name its store does not plan, a modify without its ledger row) throws GmailRefused and never
+ *    reaches fetch;
  * 2. every request GmailClient's methods make, recorded by a fake fetch, is one an independent copy of the table
  *    (fakes/table.ts) allows;
  * 3. random operations (a seeded fuzz) never pass the guard unless the independent table allows them, and never carry a
@@ -15,11 +16,16 @@ import { allowedOperation, FORBIDDEN_LABELS } from './fakes/table.ts';
 const BASE = 'https://gmail.googleapis.com/gmail/v1/users/me';
 const OWNED = 'Label_7';
 const MESSAGE = '18c0ffee0000aaaa';
+/** The store's labels: OWNED is linked and its path is 订阅; the other two are not in Gmail yet. */
+const PLANNED = new Set(['订阅', '开发/CI通知', '生活/汽车/保养']);
+const OWNED_PATH = '订阅';
 
-function ownership(rows: Record<string, LedgerView> = {}): Ownership & { readonly rows: Record<string, LedgerView> } {
+function ownership(rows: Record<string, LedgerView> = {}, ownedPath = OWNED_PATH): Ownership & { readonly rows: Record<string, LedgerView> } {
   return {
     rows,
     ownedLabelIds: () => new Set([OWNED]),
+    plannedPaths: () => new Set([...PLANNED].map((path) => (path === OWNED_PATH ? ownedPath : path))),
+    plannedPath: (labelId) => (labelId === OWNED ? ownedPath : null),
     ledger: (messageId, labelId) => rows[`${messageId}:${labelId}`] ?? null,
   };
 }
@@ -49,7 +55,7 @@ describe('the closed table refuses everything outside it', () => {
     ['POST', `${BASE}/settings/forwardingAddresses`, '{}'],
     ['PUT', `${BASE}/settings/vacation`, '{}'],
     ['DELETE', `${BASE}/labels/${OWNED}`],
-    ['PUT', `${BASE}/labels/${OWNED}`, JSON.stringify({ name: '分拣/x' })],
+    ['PUT', `${BASE}/labels/${OWNED}`, JSON.stringify({ name: OWNED_PATH })],
     ['POST', `${BASE}/threads/t1/modify`, JSON.stringify({ addLabelIds: [OWNED] })],
     ['POST', `${BASE}/threads/t1/trash`],
     ['POST', `${BASE}/messages/import`, '{}'],
@@ -91,12 +97,12 @@ describe('the closed table refuses everything outside it', () => {
     expect(refused('POST', url, `{"addLabelIds":["${OWNED}"],"addLabelIds":["${OWNED}"],"removeLabelIds":["INBOX"]}`, own)).toBe('body_not_canonical');
     expect(refused('POST', url, `{ "addLabelIds": ["${OWNED}"], "removeLabelIds": ["INBOX"] }`, own)).toBe('body_not_canonical');
     expect(refused('POST', url, `{"addLabelIds":["\\u004cabel_7"],"removeLabelIds":["INBOX"]}`, own)).toBe('body_not_canonical');
-    expect(refused('POST', `${BASE}/labels`, '{"name":"分拣/a","name":"Work","labelListVisibility":"labelShow","messageListVisibility":"show"}')).toBe('body_not_canonical');
-    expect(refused('PATCH', `${BASE}/labels/${OWNED}`, '{"name":"Work","name":"分拣/新"}')).toBe('body_not_canonical');
+    expect(refused('POST', `${BASE}/labels`, '{"name":"订阅","name":"Work","labelListVisibility":"labelShow","messageListVisibility":"show"}')).toBe('body_not_canonical');
+    expect(refused('PATCH', `${BASE}/labels/${OWNED}`, '{"name":"Work","name":"订阅"}')).toBe('body_not_canonical');
     // The canonical text of the same value passes, and the independent table agrees on both.
     const canonical = JSON.stringify({ addLabelIds: [OWNED], removeLabelIds: ['INBOX'] });
     expect(refused('POST', url, canonical, own)).toBe('accepted');
-    const ctx = { owned: new Set([OWNED]), ledger: () => ({ state: 'intended', archived: true }) };
+    const ctx = { owned: new Set([OWNED]), planned: PLANNED, ledger: () => ({ state: 'intended', archived: true }) };
     expect(allowedOperation('POST', url, canonical, ctx)).toBe('classify');
     expect(allowedOperation('POST', url, duplicate, ctx)).toBeNull();
   });
@@ -119,25 +125,41 @@ describe('the closed table refuses everything outside it', () => {
     expect(refused('POST', url, JSON.stringify({ removeLabelIds: [OWNED] }), ownership({ [`${MESSAGE}:${OWNED}`]: { state: 'undo_intended', archived: true } }))).toBe('archive_mismatch');
   });
 
-  it('creates and renames labels only under the prefix (nested paths of up to three segments, and the prefix itself)', () => {
+  it('creates only the names the store plans (a label\'s path or a parent it nests under), never a root or another label', () => {
     const create = (name: string) => JSON.stringify({ name, labelListVisibility: 'labelShow', messageListVisibility: 'show' });
-    const ctx = { owned: new Set([OWNED]), ledger: () => null };
-    for (const name of ['分拣/订阅', '分拣/开发/CI通知', '分拣/a/b/c', '分拣']) {
+    const ctx = { owned: new Set([OWNED]), planned: PLANNED, ledger: () => null };
+    for (const name of ['订阅', '开发/CI通知', '开发', '生活/汽车/保养', '生活/汽车', '生活']) {
       expect(refused('POST', `${BASE}/labels`, create(name)), name).toBe('accepted');
       expect(allowedOperation('POST', `${BASE}/labels`, create(name), ctx), name).toBe('labels_create');
     }
-    for (const name of ['订阅', '分拣/', '分拣//a', '分拣/a/', '分拣/a/b/c/d', '分拣/ a', '分拣/a /b', '分拣 ', 'Work/分拣', '分拣/a\u0007']) {
+    // Not planned: another label of the owner's, a sibling, a segment's prefix, the legacy prefix, a system label.
+    for (const name of ['Work', '出行', '开发/平台工具', '开发/CI', '汽车', '分拣', '分拣/订阅', 'INBOX', 'UNREAD']) {
       expect(refused('POST', `${BASE}/labels`, create(name)), name).toBe('labels_create');
       expect(allowedOperation('POST', `${BASE}/labels`, create(name), ctx), name).toBeNull();
     }
-    // The prefix's own label is a parent to create, never a name to rename an owned label to.
-    expect(refused('PATCH', `${BASE}/labels/${OWNED}`, JSON.stringify({ name: '分拣' }))).toBe('labels_patch');
-    expect(refused('PATCH', `${BASE}/labels/${OWNED}`, JSON.stringify({ name: '分拣/金融/投资' }))).toBe('accepted');
-    expect(refused('POST', `${BASE}/labels`, JSON.stringify({ name: '分拣/x', color: { textColor: '#000000' } }))).toBe('body_key');
-    expect(refused('PATCH', `${BASE}/labels/${OWNED}`, JSON.stringify({ name: '分拣/新' }))).toBe('accepted');
-    expect(refused('PATCH', `${BASE}/labels/Label_8`, JSON.stringify({ name: '分拣/新' }))).toBe('label_not_owned');
-    expect(refused('PATCH', `${BASE}/labels/INBOX`, JSON.stringify({ name: '分拣/新' }))).toBe('label_not_owned');
-    expect(refused('PATCH', `${BASE}/labels/${OWNED}`, JSON.stringify({ name: 'Inbox' }))).toBe('labels_patch');
+    // Not a path at all.
+    for (const name of ['', '/', '订阅/', '/订阅', '开发//CI通知', '订阅 ', ' 订阅', '开发/ CI通知', 'a/b/c/d', '订阅\u0007']) {
+      expect(refused('POST', `${BASE}/labels`, create(name)), JSON.stringify(name)).toBe('labels_create');
+      expect(allowedOperation('POST', `${BASE}/labels`, create(name), ctx), JSON.stringify(name)).toBeNull();
+    }
+    expect(refused('POST', `${BASE}/labels`, JSON.stringify({ name: '订阅', color: { textColor: '#000000' } }))).toBe('body_key');
+    expect(refused('POST', `${BASE}/labels`, JSON.stringify({ name: '订阅', labelListVisibility: 'labelHide', messageListVisibility: 'show' }))).toBe('labels_create');
+  });
+
+  it('renames an owned label only to the path its store plans for it', () => {
+    // A rename: the store holds the new path first (api.ts renameInGmail).
+    const renaming = ownership({}, '资讯/周报');
+    expect(refused('PATCH', `${BASE}/labels/${OWNED}`, JSON.stringify({ name: '资讯/周报' }), renaming)).toBe('accepted');
+    expect(allowedOperation('PATCH', `${BASE}/labels/${OWNED}`, JSON.stringify({ name: '资讯/周报' }), { owned: new Set([OWNED]), planned: renaming.plannedPaths(), ledger: () => null })).toBe('labels_patch');
+    expect(refused('PATCH', `${BASE}/labels/${OWNED}`, JSON.stringify({ name: OWNED_PATH }))).toBe('accepted');
+    // Another label's path, a parent, a name nobody planned, the legacy prefix: never.
+    for (const name of ['开发/CI通知', '开发', 'Work', '分拣/订阅', '分拣', 'Inbox', '订阅 ']) {
+      expect(refused('PATCH', `${BASE}/labels/${OWNED}`, JSON.stringify({ name }), renaming), name).toBe('labels_patch');
+    }
+    // Only an owned label: never the owner's, never a system one, whatever the name.
+    expect(refused('PATCH', `${BASE}/labels/Label_8`, JSON.stringify({ name: OWNED_PATH }))).toBe('label_not_owned');
+    expect(refused('PATCH', `${BASE}/labels/INBOX`, JSON.stringify({ name: OWNED_PATH }))).toBe('label_not_owned');
+    expect(refused('PATCH', `${BASE}/labels/${OWNED}`, JSON.stringify({ name: OWNED_PATH, labelListVisibility: 'labelShow' }))).toBe('body_key');
   });
 
   it('reads only the fixed shapes', () => {
@@ -164,11 +186,11 @@ describe('every request the client makes is in the table', () => {
       const request = new Request(input, init);
       const body = request.method === 'GET' ? '' : await request.text();
       // The independent table's verdict with the ledger as it is when the request leaves.
-      const op = allowedOperation(request.method, request.url, body, { owned: own.ownedLabelIds(), ledger: (m, l) => own.ledger(m, l) });
+      const op = allowedOperation(request.method, request.url, body, { owned: own.ownedLabelIds(), planned: own.plannedPaths(), ledger: (m, l) => own.ledger(m, l) });
       recorded.push({ method: request.method, url: request.url, body, op });
       if (request.url.startsWith('https://oauth2')) return Response.json({ access_token: 't', expires_in: 3600, scope: 'https://www.googleapis.com/auth/gmail.modify' });
       if (request.url.endsWith('/profile?fields=historyId')) return Response.json({ historyId: '42' });
-      if (request.url.includes('/labels') && request.method === 'POST') return Response.json({ id: 'Label_9', name: '分拣/x' });
+      if (request.url.includes('/labels') && request.method === 'POST') return Response.json({ id: 'Label_9', name: '开发' });
       if (request.url.endsWith('/labels')) return Response.json({ labels: [] });
       if (request.url.includes('/messages?')) return Response.json({ messages: [{ id: MESSAGE }] });
       if (request.url.includes('/history?')) return Response.json({ historyId: '43' });
@@ -183,8 +205,12 @@ describe('every request the client makes is in the table', () => {
     await client.message(MESSAGE);
     expect(await client.labelIdsOf(MESSAGE)).toEqual(['INBOX']);
     await client.labels();
-    await client.createLabel('分拣/新');
-    await client.renameLabel(OWNED, '分拣/改');
+    await client.createLabel('开发');
+    await client.createLabel('开发/CI通知');
+    await client.renameLabel(OWNED, OWNED_PATH);
+    // A name the store does not plan never reaches fetch.
+    await expect(client.createLabel('Work')).rejects.toBeInstanceOf(GmailRefused);
+    await expect(client.renameLabel(OWNED, '开发/CI通知')).rejects.toBeInstanceOf(GmailRefused);
     rows[`${MESSAGE}:${OWNED}`] = { state: 'intended', archived: true };
     await client.classify(MESSAGE, OWNED, true);
     rows[`${MESSAGE}:${OWNED}`] = { state: 'undo_intended', archived: true };
@@ -239,14 +265,14 @@ describe('fuzz: random operations never pass the guard unless the independent ta
               ...(removeSize > 0 ? { removeLabelIds: Array.from({ length: removeSize }, () => pick(random, labels)) } : {}),
             })
           : bodyKind === 'label'
-            ? JSON.stringify({ name: pick(random, ['分拣/a', '分拣/', 'Work', '分拣/a/b', '分拣', '分拣/a/b/c/d', '分拣/ a']), labelListVisibility: 'labelShow', messageListVisibility: 'show' })
+            ? JSON.stringify({ name: pick(random, [OWNED_PATH, '开发', '开发/CI通知', '出行', 'Work', '分拣', '分拣/订阅', 'a/b/c/d', '订阅 ', '']), labelListVisibility: 'labelShow', messageListVisibility: 'show' })
             : bodyKind === 'form'
               ? 'client_id=a&client_secret=b&refresh_token=c&grant_type=refresh_token'
               : undefined;
       // Now and then the same body with one key written twice (a different value first): never accepted.
       const body = plain !== undefined && plain.startsWith('{"') && random() < 0.2 ? `{"${pick(random, ['addLabelIds', 'removeLabelIds', 'name'])}":["UNREAD"],${plain.slice(1)}` : plain;
       const row = random() < 0.7 ? { state: pick(random, states), archived: random() < 0.5 } : null;
-      const own: Ownership = { ownedLabelIds: () => new Set([OWNED]), ledger: (m, l) => (m === MESSAGE && l === OWNED ? row : null) };
+      const own: Ownership = { ...ownership(), ledger: (m, l) => (m === MESSAGE && l === OWNED ? row : null) };
       let passed = true;
       try {
         checkRequest({ method, url, ...(body === undefined ? {} : { body }) }, own);
@@ -256,7 +282,7 @@ describe('fuzz: random operations never pass the guard unless the independent ta
       }
       if (!passed) continue;
       accepted++;
-      const op = allowedOperation(method, url, body ?? '', { owned: new Set([OWNED]), ledger: (m, l) => (m === MESSAGE && l === OWNED ? row : null) });
+      const op = allowedOperation(method, url, body ?? '', { owned: new Set([OWNED]), planned: PLANNED, ledger: (m, l) => (m === MESSAGE && l === OWNED ? row : null) });
       expect(op, `${method} ${url} ${body ?? ''}`).not.toBeNull();
       for (const label of FORBIDDEN_LABELS) expect(body ?? '').not.toContain(`"${label}"`);
     }
