@@ -13,27 +13,30 @@ export async function allLabels(): Promise<Label[]> {
   })
 }
 
-/** A select of the labels (value: the label's name), with "都不是" (value '') first when `none`. */
-export function labelSelect(labels: readonly Label[], selected: string, none: boolean, attributes: Readonly<Record<string, string>> = {}): HTMLSelectElement {
+/** A select of the labels (value: the label's name), with `first` (value '': 都不是, 全部标签) on top when given. */
+export function labelSelect(labels: readonly Label[], selected: string, first: string | null, attributes: Readonly<Record<string, string>> = {}): HTMLSelectElement {
   const select = el(
     'select',
     attributes,
-    ...(none ? [el('option', { value: '' }, '都不是')] : []),
+    ...(first === null ? [] : [el('option', { value: '' }, first)]),
     ...labels.map((label) => el('option', { value: label.name, ...(label.name === selected ? { selected: true } : {}) }, label.displayName)),
   )
-  if (selected === '' && none) select.value = ''
+  if (selected === '' && first !== null) select.value = ''
   return select
 }
 
-/** Renders `title` and a body that `load` fills; a failure shows its message there. */
+/**
+ * Renders the page's title (for assistive technology: the tab already names the page) and a body that `load` fills;
+ * a failure shows its message there.
+ */
 export async function frame(main: HTMLElement, title: string, load: (body: HTMLElement) => Promise<void>): Promise<() => Promise<void>> {
-  const body = el('div', {}, el('p', { class: 'status' }, '加载中…'))
-  main.replaceChildren(el('h1', {}, title), body)
+  const body = el('div', { class: 'body' }, el('p', { class: 'hint' }, '加载中…'))
+  main.replaceChildren(el('h1', { class: 'visually-hidden' }, title), body)
   const run = async () => {
     try {
       await load(body)
     } catch (error) {
-      body.replaceChildren(el('p', { class: 'status' }, errorMessage(error)))
+      body.replaceChildren(el('div', { class: 'empty' }, el('strong', {}, errorMessage(error))))
     }
   }
   await run()
@@ -55,30 +58,4 @@ export async function act<T>(run: (requestId: string) => Promise<T>, done: strin
     toast(errorMessage(error))
     return null
   }
-}
-
-/**
- * A list that shows its first page and appends the next one on 加载更多 (the page tokens of AIP-158), so every item
- * stays reachable however long the list grows.
- */
-export function pagedList<T>(first: { items: T[]; next: string }, more: (pageToken: string) => Promise<{ items: T[]; next: string }>, render: (item: T) => HTMLElement): HTMLElement {
-  const list = el('div', { class: 'list' }, ...first.items.map(render))
-  const box = el('div', {}, list)
-  let next = first.next
-  const button = el('button', { type: 'button', class: 'small' }, '加载更多')
-  const load = async () => {
-    button.disabled = true
-    try {
-      const page = await more(next)
-      list.append(...page.items.map(render))
-      next = page.next
-    } catch (error) {
-      toast(errorMessage(error))
-    }
-    button.disabled = false
-    if (next === '') button.remove()
-  }
-  button.addEventListener('click', () => void load())
-  if (next !== '') box.append(el('div', { class: 'actions' }, button))
-  return box
 }

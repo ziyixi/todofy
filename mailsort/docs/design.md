@@ -24,7 +24,7 @@ One Worker, `mailsort`, and one SQLite Durable Object, `MailsortState` ("mailsor
 | `worker/src/pipeline.ts` | One alarm pass: sync, feedback, decide, write, embed, daily work (§4) |
 | `worker/src/decide.ts`, `ai.ts`, `dmarc.ts` | Rules (order, carve-outs, DMARC and DKIM), neighbours, Clef's request and strict answer, the decision |
 | `worker/src/paths.ts`, `template.ts`, `import.ts` | Label paths (the tree, IDs and option keys from a path), the label template, import and export (§3.1, §6.4) |
-| `worker/src/flow.ts` | The daily flow counters behind 流程 (§10.1) |
+| `worker/src/flow.ts` | The daily flow counters behind 概览's diagram (§10) |
 | `worker/src/feedback.ts`, `examples.ts`, `accuracy.ts` | Verdicts, examples, rule proposals, the precision bound (§6) |
 | `worker/src/writes.ts` | The ledger of Gmail writes (§7) |
 | `web/` | The Chinese, mobile-first UI (no framework) over `mailsort.ui.v1` |
@@ -113,7 +113,7 @@ reads no Gmail and decides nothing, but the alarm still runs and still clears wh
 | A decision's content: masked subject, sender and summary, and the exact sender address, domain, List-Id and delivered-to address | 14 days |
 | The review queue (masked subject and sender) | 14 days after the mail came (an audit sample or a late write failure can queue older mail) |
 | Decisions and the ledger without content (IDs, labels, probabilities, model, states) | 180 days |
-| Examples: a masked summary (subject, sender name and domain, snippet; at most 200 characters) and its embedding | until deleted (例子, or with their label), at most 2,000 |
+| Examples: a masked summary (subject, sender name and domain, snippet; at most 200 characters) and its embedding | until deleted (with their label, by turning the label 敏感, or DeleteExample in the API), at most 2,000 |
 | Rules: the exact sender address, domain, List-Id or delivered-to address, their subject words, the owner's evidence and notes, proposed or active | until deleted (规则, or with their label), at most 500 |
 | The flow counters: counts per UTC day, stage, outcome and label (no content) | 400 days |
 | Labels: their paths (also their Gmail names; SyncLabels reads back a rename made in Gmail), the Gmail label each is linked to and whether it was adopted, and the owner's descriptions | until deleted, at most 24 |
@@ -174,7 +174,8 @@ it has, embeddings and all, in the same transaction; the import's preview warns 
 written for the decision model: one language, one sentence, 60-120 characters, saying what belongs and, between close
 labels, what does not. Trust labels (金融/投资, 金融/银行支付, 账号安全, 政府法律, 生活/医疗) are transactional only: a bank's own
 marketing is 购物/促销, so a look-alike promotion never borrows a trust label. 账号安全 and 政府法律 keep their mail in the
-inbox; 生活/医疗 is sensitive. 标签's 套用推荐模板 previews it in 导入导出; a label that exists already (same path) only gets
+inbox; 生活/医疗 is sensitive. ImportRules applies it (`use_template`, previewed first with `validate_only`; the UI no
+longer offers it since the redesign of 2026-10-07, the live store has it); a label that exists already (same path) only gets
 the template's description and switches, never a second copy, and keeps a threshold the owner tuned (the template
 names none).
 
@@ -330,17 +331,17 @@ Worker's own label is undone first; 都不是 restores the inbox). A choice is a
 - **Examples.** A verdict with a label stores the mail's masked summary (at most 200 characters) as an example of that
   label (origin correction, confirmation or weak accept; weak accepts only while the label has fewer than 50) and the
   next pass embeds it. A withdrawn verdict deletes it, deleting a label deletes its examples. At most 200 per label and
-  2,000 in all (the oldest weak accepts go first). 例子与向量库 shows the counts and the embedding backlog, deletes one,
-  or drops every embedding for a rebuild.
+  2,000 in all (the oldest weak accepts go first). The UI does not list them (since 2026-10-07); ListExamples,
+  DeleteExample and RebuildExampleEmbeddings stay in the API.
 - **Rule proposals.** The same mailing list (else the same sender address) corrected to the same label twice proposes
-  a rule; it decides nothing until the owner approves it in 规则. Withdrawn corrections retract a proposal that falls
+  a rule; it decides nothing until the owner approves it in 规则 (reached from 标签). Withdrawn corrections retract a proposal that falls
   below two. Active rules export as Gmail's filter XML (label, and archive unless the rule or label keeps the
   mail in the inbox) for the owner to import by hand; left out are rules of a trust label or with `require_dmarc` (a
   filter cannot check DMARC), rules with subject conditions, and every plain rule whose sender such a rule covers (the
   same kind and value, or a domain covering the carved address or subdomain, either way round; `filters.ts`
   exportableRules). Gmail applies every matching filter, so the plain rule's filter alone would give a pickup code the
   sender's label and archive it, or file a login notice under the sender's plain label: without it Gmail leaves that
-  sender's mail in the inbox. Each is counted in `skipped_count`, and 规则's toast says why. A sender rule of another label is exported without its DMARC check (such a
+  sender's mail in the inbox. Each is counted in `skipped_count`, and 设置's export says why (folded under 为什么). A sender rule of another label is exported without its DMARC check (such a
   filter can only put a forged mail under a non-trust label), so stable rules keep working without this app. Rule
   values come from mail headers, and
   the export puts them into Gmail search criteria, where `(`, `)`, `-`, `*`, `{`, `OR` or a space could widen one
@@ -348,7 +349,7 @@ Worker's own label is undone first; 都不是 restores the inbox). A choice is a
   a proposal's and an exported one's, must be plain (`rule-value.ts`: lower-case letters, digits and `._%+-`, no
   leading `-`, a real domain), a header value that is not never becomes a proposal, an older row that is not is left
   out of the export (counted in `skipped_count`), and the export quotes each value (`list:("…")`).
-- **Import and export** (`import.ts`, 导入导出). ImportRules takes the owner's rule file, a JSON list in the format of
+- **Import and export** (`import.ts`; in the API only since the UI's redesign of 2026-10-07). ImportRules takes the owner's rule file, a JSON list in the format of
   their validated rule set (`id`, `match` with exactly one of `from_address`, `from_domain`, `list_id`, `to_address`,
   `label` as the label's path (`金融/投资`; the legacy `分拣/金融/投资` of the owner's file means the same), `keep_in_inbox`, `trust`, `require_dmarc`, `evidence`, `notes`, and the optional
   `subject_includes` / `subject_excludes`), this app's export (`{"labels": [...], "rules": [...]}`) or the template.
@@ -368,10 +369,9 @@ Worker's own label is undone first; 都不是 restores the inbox). A choice is a
   trust label). Nothing reaches Gmail. ExportRules writes every label (with its `enabled` switch) and every rule but
   the proposals in the same format, so an export imports back as all skips, and into a fresh store with its disabled
   labels disabled; a label entry without `enabled` (the rule file, the template) creates an enabled label and leaves
-  an existing one's switch alone. The UI reads each entry strictly with the wire codec before sending, so a misspelt
-  field is named with its entry's number.
+  an existing one's switch alone.
 - **Accuracy and live gating.** Per label, confirmations count 1, weak accepts 0.5 and corrections 1 against, and
-  准确率 shows the Wilson 95 % lower bound of the precision (35 confirmations without an error pass 0.90). The owner turns
+  概览 shows the Wilson 95 % lower bound of the precision (35 confirmations without an error pass 0.90). The owner turns
   正式打 on per label; the daily pass turns it back off when the bound drops below the target (default 0.90) after a
   correction since it went live (ops-v1 `label_live_revoked`).
 - TODO (not in v1): a weekly suggestion of description changes from the recurring corrections, approved by the owner.
@@ -393,11 +393,13 @@ A row archives (removes INBOX) unless its label or deciding rule keeps the mail 
 review choices follow the label. Undo removes exactly the row's label and restores INBOX when it archived. It is refused (`NOT_UNDOABLE`, before any
 intent is written) for a mail the owner has since moved to another label, and for a label that is no longer the
 app's: deleted in 标签 (the Gmail label and its mails stay as they are) or missing in Gmail. Each entry says whether
-it is `undoable`, with the mail's masked subject and sender while they are kept. 操作记录 undoes one entry, or a time
-range: the server undoes at most 20 per call and answers how many are left; the page repeats the call until none is
-left (or a call undoes nothing) and shows the totals; 流程's link to a label opens its entries only (the list's label
-filter), and there the range undo is that label's only (UndoLedgerEntries' `label`), which its heading and
-confirmation say. Labels are created in Gmail (named by their path, with the parents it nests under) just before the
+it is `undoable`, with the mail's masked subject and sender while they are kept. 设置's 撤销 undoes a time range (1
+小时, 24 小时, 7 天 or the owner's own, at most 31 days), of one label when one is chosen (UndoLedgerEntries' `label`):
+预览 first counts the range's undoable entries from ListLedgerEntries (newest first, the label filter, at most 20
+pages of 50; "至少" when it stopped there), and only 确认撤销 undoes them: the server undoes at most 20 per call and
+answers how many are left; the page repeats the call until none is left (or a call undoes nothing) and shows the
+totals. A preset range ends ten minutes after the browser's clock, so a write the Worker dated later is in it.
+UndoLedgerEntry (one entry) stays in the API; the UI no longer lists the ledger. Labels are created in Gmail (named by their path, with the parents it nests under) just before the
 first write that needs them, after the gate, or adopted when Gmail already has a user label of that path (§2);
 SyncLabels follows renames and deletions made in Gmail and adopts, never imports (§3.1).
 
@@ -428,6 +430,9 @@ Labels without a prefix (2026-10-07, the same meter in reference ms, one run on 
 at its bounds 37 ms, the 500-rule import preview 14.6 ms and GetMailFlow 8.1 ms first run in MailsortState, every other
 call at most 4.6 ms, the fetch handler's very first request 2.1 ms; every bound held. Bundles: the Worker 130.4 KiB
 gzip, the UI 58.5 KiB gzip (budgets unchanged).
+
+The UI's redesign (2026-10-07, §9; the Worker unchanged): the UI 56.4 KiB gzip (budget 67 unchanged: six views and
+the flow's table removed, the components, the picker and the zero skeleton added).
 
 Stores are bounded: 24 labels, 500 rules, 2,000 examples, request IDs for a day, content for 14 days, records for
 180 days. Rows read: a pass reads a few rows per mail plus the embedded examples (cached in memory between passes).
@@ -469,12 +474,53 @@ proves a Wilson lower bound of 0.68), so the per-label 正式打 decision stays 
 `examples:rebuildEmbeddings`), ledger entries (List with a label filter, Get, `:undo`, `ledgerEntries:undo` for a
 range, of one label when `label` is set), mail flows (`mailFlows/today`, `last-7-days`, `last-30-days`), and the singletons accuracyReport,
 serviceStatus and settings (UpdateSettings needs an explicit mask). AIP-155 request IDs on every mutation, AIP-154
-etags on labels and settings, google.rpc.Status errors (`errors.proto`). The UI's ten views: 待审, 标签 (a tree of the
-paths, 归档 and 敏感, the template), 规则 (subject conditions, keep in inbox, DMARC, evidence and notes), 流程, 导入
-(导入导出), 例子, 准确率, 记录, 状态 (with today's flow, compact), 设置.
-设置 sends only the fields the owner changed (naming `mode` resets the breaker, so a budget change never does); 待审
-puts a warning and a non-primary, confirmed 确认 on a suspected phishing mail (preselecting 都不是) and on a trust
-label the model may not set; 例子 and 记录 page with 加载更多; sync and export toasts say what they did.
+etags on labels and settings, google.rpc.Status errors (`errors.proto`). The UI uses only part of it; every RPC
+stays (the import, the JSON export, the examples, the single undo and the 7- and 30-day flows are API only).
+
+**The UI** (redesigned 2026-10-07 on the owner's "less is more": too many settings, flat lists, a flow without a
+diagram at zero, import and the ledger page not needed). Plain TypeScript DOM (`web/src/dom.ts`, `components.ts`), no
+framework; Chinese, short plain words, at most one hint line where needed.
+
+- **Design system** (`styles.css`): light and dark from `prefers-color-scheme` through CSS tokens (neutral `--bg`,
+  `--surface`, `--sunken`, `--ink`, `--muted`, `--line`; one accent `--accent` with `--accent-soft`; `--warn` and
+  `--danger` for state only; the flow's eight series and its zero gray), an 8 px spacing scale, a 10 px radius, 1 px
+  hairlines, no heavy shadows, the system font with PingFang SC and Noto Sans SC, tabular figures for every number,
+  a 2 px accent focus ring. One set of components: primary, ghost (the plain button) and quiet buttons, chips, a
+  segmented control, a toggle switch, a disclosure (更多, 为什么), a card, a compact list row, a KPI number, a meter
+  and a small bar, an empty state, and the searchable label picker. A 48rem column with 16 px gutters; works at
+  360 px (the flow diagram scrolls inside its own box below 600 px).
+- **Shell** (`app.ts`): a sticky header with 邮件分拣 and, on the same row (wrapping under it on a phone), one quiet
+  status line from ServiceStatus: the mode in force as a chip (影子 neutral, 正式 accent, 关闭 warn), `Gmail ✓ 只读`
+  or `可写` (or the problem: 授权失效, 未授权, 未连接, in the warning color) and `下次运行 3 分钟后`; under it exactly
+  four tabs, 待审 (with the queue's count as a chip) · 概览 · 标签 · 设置, the current one underlined in the accent.
+  The status is read once per navigation and again after a review choice or a mode change. 规则 (`/rules`) has no tab:
+  标签 links to it and stays the current tab there, until 标签 holds the rules itself.
+- **待审** (`/`): one list, newest first, one row per mail: the masked subject (one line) and the time, the masked
+  sender, then the suggested label as an accent chip (都不是 as a muted one) with the model's confidence as a small
+  bar and a percentage, why it is here when not a plain suggestion (`拿不准 · 低于阈值`, `抽查`), and on the right
+  确认 (primary), 改为… and 跳过 (quiet). 改为… opens the searchable picker under the row (都不是 first, then the
+  labels; typing filters, ↑ ↓ move, Enter chooses, Escape closes). Keyboard: j / k move between rows (the active one
+  has an accent edge), Enter confirms the focused row, c opens the picker, s skips; a hint line shows the keys where
+  there is a fine pointer. A choice leaves the list at once and the next row takes the focus; an empty queue says
+  都处理完了. A suspected phishing mail and a trust label the model may not set show one warning line, their 确认 is
+  not primary and asks first, and the phishing mail's picker starts at 都不是 (another at the model's next choice).
+- **概览** (`/overview`): four KPI numbers for the UTC day (处理, 已打标签, 待审, 拿不准; 2 × 2 on a phone); the card
+  今天的流程 with the Sankey diagram (§10), always drawn: with no mail the skeleton at zero and the line 今天还没有邮件;
+  then, side by side from 640 px, 准确率 (each label with verdicts: name, a small bar of its precision bound, warn
+  below the target, `92% · 40`; the target in the card's corner; else one line, 还没有确认或纠正过的邮件) and 模型额度
+  (today's estimated neurons over the budget as a thin meter, warn from 70 %, danger when used up, and a line only
+  when Clef-flash is in use, the quota is gone or mail waits for tomorrow); the latest error code in a warning box
+  only when there is one.
+- **设置** (`/settings`): three cards and nothing else. 模式: a segmented 关闭 · 影子 · 正式 (正式 asks first; a choice
+  sends only `mode` and the etag) and one line: what the mode does, or the deployment's ceiling (`部署上限是“影子”，现在按
+  影子运行`), or the tripped breaker in words with 解除熔断. 撤销 (the safety net that replaced 操作记录, §7): a
+  segmented 1 小时 · 24 小时 · 7 天 · 自定义 (two date-time fields), a label select (全部标签 first) and 预览, which
+  shows `将撤销“出行”的 12 条` with 确认撤销 and 取消, or 这段时间没有可撤销的写入. Gmail: two rows, 从 Gmail 同步
+  (a toast says what the sync did) and 导出过滤器 (downloads `mailsort-filters.xml`, keeps a 下载过滤器文件 link,
+  folds why rules were left out under `N 条没有导出`, and one line on where to import it in Gmail). The write limits,
+  the neuron budget and the thresholds are no longer in the UI; their stored values stand.
+- **标签** (`/labels`) and **规则** (`/rules`) keep their editors on the new components (switches for the label
+  switches) until their own redesign; the sync moved to 设置, the template's button went with 导入.
 
 ## 10. Operations
 
@@ -484,22 +530,23 @@ label the model may not set; 例子 and 记录 page with 加载更多; sync and 
   signals `gmail_auth_failed` (critical), `gmail_not_configured`, `breaker_tripped`, `sync_stale` (warnings),
   `ai_quota_exhausted`, `label_live_revoked`, `guard_shed` (information). Counts and codes only. The guard defers
   `full_model`, `audit` and `embedding_rebuild`.
-- **The flow** (`flow.ts`, 流程). The Durable Object keeps one counter per UTC day, stage, outcome and label (table
+- **The flow** (`flow.ts`, 概览). The Durable Object keeps one counter per UTC day, stage, outcome and label (table
   `flow`), changed in the same transaction as what it counts: a decision (its decider as the stage: 规则, 向量近邻,
   Clef 27B, Clef-flash, or 未调用模型 without a model answer; its outcome: archived, kept in the inbox, only suggested,
   unsure), a skip (sent/draft/spam, a conversation already sorted, from before the install, unreadable), a mail
   still waiting after a deferral (延后, on the day of its first deferral; the transaction that decides or skips it
   takes it out again, so every mail is counted exactly once), a write that failed and left its mail a suggestion
   (moved from written to suggested on its day), and a correction (added on the day the mail was decided, taken back
-  when withdrawn). Pruned after 400 days. GetMailFlow sums a fixed range of UTC days (at most 2,000 counters). 流程
-  draws it as a Sankey diagram (d3-sankey for the layout only; SVG in the page's light and dark tokens, labels grouped
-  and colored by their top-level segment: each group has a home hue in the labels' order, enabled labels' groups
-  first, and the first eight keep theirs in every range; a later group the range shows borrows a hue whose home group
-  the range does not show (`flowchart.ts` groupSlots), so the template's ten groups never run out, and only a range
-  showing more than eight groups has gray ones, which the legend says; every node named with its count;
-  hover or focus for exact numbers and shares; a label opens its 操作记录; no motion under prefers-reduced-motion; on
-  a phone it scrolls inside its own box) and a table per label (written, by rule, neighbours or model, kept or
-  archived, only suggested, corrected). 运行状态 shows today's diagram, compact.
+  when withdrawn). Pruned after 400 days. GetMailFlow sums a fixed range of UTC days (at most 2,000 counters; the UI
+  reads `today`). 概览 draws it as a Sankey diagram (d3-sankey for the layout only; SVG in the page's light and dark
+  tokens, labels grouped and colored by their top-level segment: each group has a home hue in the labels' order,
+  enabled labels' groups first, and the first eight keep theirs every day; a later group the day shows borrows a hue
+  whose home group the day does not show (`flowchart.ts` groupSlots), so the template's ten groups never run out, and
+  only a day showing more than eight groups has gray ones, which the legend says; every node named with its count;
+  hover or focus for exact numbers and shares; no motion under prefers-reduced-motion; on a phone it scrolls inside
+  its own box). A day without mail draws the skeleton (`skeletonGraph`): 新邮件, the seven stages, and 打标签, 拿不准
+  and 影子建议 with every path a mail can take, laid out as one mail per path and drawn with hairline links, muted
+  nodes and every count 0, so the diagram is never missing.
 - **Emergency stop**, from fastest: 设置 → 关闭; the GitHub variable `MAILSORT_MODE=off` (or `shadow`) and a redeploy;
   revoking the grant at https://myaccount.google.com/permissions (Google account → Security → Third-party access).
 - **Logs**: one line per alarm (mode, counts, a code) and per refused request (request ID, status, reason).
@@ -531,13 +578,18 @@ the fake Gmail (`fake-gmail.ts`) and fake Workers AI (`fake-ai.ts`, Clef and bge
   The QA fixes of round 2 have their regression tests: the filter export and its carve-out coverage (`decide.test.ts`),
   multi-line evidence, header-form List-Ids, `enabled` through an export, the legacy `分拣/x` and the glossary (`import.test.ts`), a
   retry lowered to keep (`failures.test.ts`), the parents' record, the legacy `分拣/x` in CreateLabel and the label-filtered range
-  undo (`round2.test.ts`), and in the UI the checkbox rows, the template's ten groups' hues and the filtered range undo.
+  undo (`round2.test.ts`), and in the UI the switch rows, the template's ten groups' hues and the filtered range undo.
 - `worker/test/smoke/smoke.mts`: the real `wrangler dev` (`../wrangler.test.toml`) against the fakes on loopback,
   the owner's whole loop through the HTTP API, round 2's import, nested label, keep in inbox, carve-out, forged From,
   flow API and export included, and the QA fixes (filter export, `enabled`, multi-line evidence and `<list-id>`,
   the legacy `分拣/x`, the parents' record, the label-filtered range undo), and labels at Gmail's top level with an owner's
   label of a label's path adopted by the sync.
-- `web/src/*.test.ts`: the views against a fake API on the shared transcoder.
+- `web/src/*.test.ts`: the views against a fake API on the shared transcoder: `app.test.ts` the shell (four tabs, the
+  status line, the queue's count), 待审 (confirm, the picker, skip, the keyboard, the caution), 设置 (the mode's mask,
+  the ceiling, the breaker, the undo's preview and rounds, one label's undo, the custom range, the sync, the filter
+  download), 标签 and 规则; `overview.test.ts` the flow graph and diagram (hues, size, tooltip, tokens, the zero
+  skeleton) and 概览 with and without mail; `check-layout.test.ts` the switch rows; `no-external.test.ts` the
+  same-origin rules.
 - `deploy/test/*.test.mjs`: the production config, the deploy wrapper (MODE, the secrets file without the grant), that
   `wrangler deploy --secrets-file` keeps secrets it does not name (the pinned wrangler), that the public GitHub
   secrets spec leaves the grant out (`owner_machine_secrets` in `app.toml`), and mint-token: its checks, and `main()`

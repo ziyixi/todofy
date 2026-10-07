@@ -1,8 +1,9 @@
 /**
- * 规则 (`/rules`): rules from the owner (by hand, or imported in 导入) and proposals from corrections (the same sender or
- * list corrected to the same label twice). Each shows its subject conditions (a carve-out is tried before the sender's
- * plain rule), whether it keeps its mail in the inbox, whether it needs DMARC, and the owner's evidence and notes.
- * Approve, disable, delete; a new rule; and the active rules as a Gmail filter file to import by hand.
+ * 规则 (`/rules`, reached from 标签 until that page holds the rules itself): rules from the owner (by hand, or
+ * imported) and proposals from corrections (the same sender or list corrected to the same label twice). Each shows its
+ * subject conditions (a carve-out is tried before the sender's plain rule), whether it keeps its mail in the inbox,
+ * whether it needs DMARC, and the owner's evidence and notes. Approve, disable, delete; a new rule. (The Gmail filter
+ * export is in 设置.)
  */
 import { create } from '@ziyixi/proto/protobuf'
 import { Rule_State, RuleSchema, type Rule, type Rule_Kind } from '@ziyixi/proto/mailsort/ui/v1/rule_pb'
@@ -46,14 +47,12 @@ export async function renderRules(ctx: ViewContext): Promise<void> {
     ])
     const kind = el('select', { 'aria-label': '类型' }, ...RULE_KINDS.map(([value, name]) => el('option', { value: String(value) }, name)))
     const value = el('input', { placeholder: '地址、域名或列表 ID', 'aria-label': '值' })
-    const label = labelSelect(labels, labels[0]?.name ?? '', false, { 'aria-label': '标签' })
+    const label = labelSelect(labels, labels[0]?.name ?? '', null, { 'aria-label': '标签' })
     const includes = el('input', { placeholder: '主题包含（可选，用逗号分隔，如 登录, login）', 'aria-label': '主题包含' })
     const excludes = el('input', { placeholder: '主题不含（可选，用逗号分隔）', 'aria-label': '主题不含' })
-    const keepBox = el('input', { type: 'checkbox', 'aria-label': '留在收件箱' })
-    const dmarcBox = el('input', { type: 'checkbox', 'aria-label': '需要 DMARC' })
+    const keepBox = el('input', { type: 'checkbox', class: 'switch', 'aria-label': '留在收件箱' })
+    const dmarcBox = el('input', { type: 'checkbox', class: 'switch', 'aria-label': '需要 DMARC' })
     const words = (input: HTMLInputElement) => input.value.split(/[,，、]/).map((word) => word.trim()).filter((word) => word !== '')
-    const output = el('textarea', { rows: '6', readonly: true, hidden: true, 'aria-label': 'Gmail 过滤器文件' })
-    const exported = el('p', { class: 'hint', hidden: true })
     const add = () =>
       void act(
         (requestId) =>
@@ -64,15 +63,6 @@ export async function renderRules(ctx: ViewContext): Promise<void> {
         '已创建',
         () => reload(),
       )
-    const exportFilters = async () => {
-      const answer = await act(() => api.exportGmailFilters({}), (done) => `已导出 ${String(done.ruleCount)} 条`, () => Promise.resolve())
-      if (answer === null) return
-      // Left out: trust rules (a filter cannot check DMARC) and values that are not plain.
-      exported.textContent = `已导出 ${String(answer.ruleCount)} 条${answer.skippedCount > 0 ? `；${String(answer.skippedCount)} 条未导出（可信类或要求 DMARC 的规则过滤器无法检查；带主题条件的规则，以及它覆盖的同一发件人的普通规则，也不导出：Gmail 会让所有匹配的过滤器同时生效，例外的邮件会被打上普通规则的标签并归档）` : ''}。在 Gmail 设置 → 过滤器 → 导入过滤器中导入。`
-      exported.hidden = false
-      output.value = answer.xml
-      output.hidden = false
-    }
     const proposed = rules.filter((rule) => rule.state === Rule_State.PROPOSED)
     const others = rules.filter((rule) => rule.state !== Rule_State.PROPOSED)
     fill(
@@ -88,10 +78,8 @@ export async function renderRules(ctx: ViewContext): Promise<void> {
         excludes,
         el('label', { class: 'check' }, keepBox, el('span', {}, '留在收件箱', el('span', { class: 'hint' }, '只加标签，不移出收件箱（如取件码）'))),
         el('label', { class: 'check' }, dmarcBox, el('span', {}, '需要 DMARC', el('span', { class: 'hint' }, '列表或收件地址规则也要求发件域名通过 DMARC；按发件人的规则总是要求'))),
-        el('div', { class: 'actions' }, button('创建', add, { class: 'primary' }), button('导出为 Gmail 过滤器', () => void exportFilters())),
+        el('div', { class: 'actions' }, button('创建', add, { class: 'primary' })),
       ),
-      exported,
-      output,
       proposed.length === 0 ? null : el('h2', {}, `待批准（${String(proposed.length)}）`),
       ...proposed.map((rule) => row(rule, labels, () => reload())),
       el('h2', {}, `规则（${String(others.length)}）`),

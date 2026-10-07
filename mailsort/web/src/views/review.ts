@@ -1,59 +1,48 @@
 /**
- * 待审 (`/`): shadow suggestions, unsure mails and the daily audit of labelled mails, newest first. Confirm takes the
- * suggested label, the select corrects to another label or "都不是", skip leaves it. Subjects and senders are masked
- * and kept 14 days. A suspected phishing mail, or a trust label the model may not set, gets a warning and a 确认
- * that is not the primary action and asks first.
+ * 待审 (`/`): the mails waiting for the owner, newest first, one compact row each: the masked subject and sender (kept
+ * 14 days), the suggested label with the model's confidence, and 确认, 改为… (the searchable label picker, 都不是
+ * first) and 跳过. A choice leaves the list at once and the next row takes the focus.
+ *
+ * Keyboard: j / k move between rows, Enter confirms the focused row, c opens 改为…, s skips. A suspected phishing
+ * mail, or a trust label the model may not set, says so, and its 确认 is not the primary action and asks first; its
+ * picker starts at 都不是 (another mail's at the model's next choice).
  */
 import type { ReviewItem } from '@ziyixi/proto/mailsort/ui/v1/review_pb'
-import type { Label } from '@ziyixi/proto/mailsort/ui/v1/label_pb'
-import { api, listAll } from '../api.ts'
-import { button, el, fill } from '../dom.ts'
-import { DECIDERS, KIND_NAMES, labelText, percent, UNSURE_REASONS, when } from '../format.ts'
+import { api, errorMessage, listAll, newRequestId, withRetry } from '../api.ts'
+import { bar, chip, emptyState, picker, type PickerOption } from '../components.ts'
+import { button, el, fill, toast } from '../dom.ts'
+import { KIND_NAMES, labelText, percent, UNSURE_REASONS, when } from '../format.ts'
 import type { ViewContext } from '../app.ts'
-import { act, allLabels, frame, labelSelect } from './common.ts'
+import { allLabels, frame } from './common.ts'
 
-/** Unsure reasons where the pipeline refused the suggestion on purpose: one tap must not file such a mail under it. */
+/** Unsure reasons where the pipeline refused the suggestion on purpose: one key must not file such a mail under it. */
 const CAUTION: Readonly<Record<string, string>> = {
-  suspicious: '疑似钓鱼：请先在 Gmail 里核对发件人和链接，再决定是否归类',
-  trust_needs_rule: '可信类标签只允许规则（且 DMARC 通过）打：请先在 Gmail 里核对发件人',
+  suspicious: '疑似钓鱼：先在 Gmail 里核对发件人和链接',
+  trust_needs_rule: '可信类标签只能由规则打：先在 Gmail 里核对发件人',
 }
 
-function card(item: ReviewItem, labels: readonly Label[], reload: () => Promise<void>, confirm: (message: string) => boolean): HTMLElement {
-  const caution = CAUTION[item.unsureReason]
-  // A suspected phishing mail starts at 都不是; a trust label's suggestion stays selected, but behind a confirmation.
-  const select = labelSelect(labels, item.unsureReason === 'suspicious' ? '' : item.suggestedLabel, true, { 'aria-label': '改为' })
-  const candidates = item.candidates.map((candidate) => `${labelText(candidate.label, labels)} ${percent(candidate.probability)}`).join(' · ')
-  const confirmItem = () => {
-    if (caution !== undefined && !confirm(`${caution}。仍然确认为“${labelText(item.suggestedLabel, labels)}”？`)) return
-    void act((requestId) => api.confirmReviewItem({ name: item.name, requestId }), '已确认', reload)
-  }
-  return el(
-    'article',
-    { class: 'card review-item' },
-    el('div', { class: 'card-head' }, el('span', { class: `chip kind-${String(item.kind)}` }, KIND_NAMES[item.kind] ?? '?'), el('span', { class: 'time' }, when(item.receiveTime))),
-    el('p', { class: 'subject' }, item.subject === '' ? '（无主题）' : item.subject),
-    el('p', { class: 'muted' }, item.sender),
-    el(
-      'p',
-      { class: 'summary' },
-      item.suggestedLabel === '' ? '建议：都不是' : `建议：${labelText(item.suggestedLabel, labels)}`,
-      `（${DECIDERS[item.decider] ?? item.decider}${item.unsureReason === '' ? '' : `，${UNSURE_REASONS[item.unsureReason] ?? item.unsureReason}`}）`,
-    ),
-    candidates === '' ? null : el('p', { class: 'hint' }, candidates),
-    caution === undefined ? null : el('p', { class: 'warn', role: 'note' }, caution),
-    el(
-      'div',
-      { class: 'actions' },
-      item.suggestedLabel === '' ? null : button('确认', confirmItem, caution === undefined ? { class: 'primary' } : {}),
-      select,
-      button('改为所选', () => void act((requestId) => api.correctReviewItem({ name: item.name, label: select.value, requestId }), '已改正', reload)),
-      button('跳过', () => void act((requestId) => api.skipReviewItem({ name: item.name, requestId }), '已跳过', reload), { class: 'small' }),
-    ),
-  )
+interface Row {
+  readonly node: HTMLLIElement
+  readonly confirm: () => void
+  readonly change: () => void
+  readonly skip: () => void
+}
+
+/** Why a mail is here, when it is not a plain suggestion: `拿不准 · 低于阈值`, `抽查`. */
+function why(item: ReviewItem): string {
+  const kind = KIND_NAMES[item.kind]
+  const reason = item.unsureReason === '' ? '' : (UNSURE_REASONS[item.unsureReason] ?? item.unsureReason)
+  return [kind ?? '', reason].filter((part) => part !== '').join(' · ')
+}
+
+/** The keyboard hint, shown where there is a keyboard (styles.css .keys). */
+function keys(): HTMLElement {
+  const key = (name: string) => el('kbd', {}, name)
+  return el('p', { class: 'hint keys' }, key('j'), ' ', key('k'), ' 移动 · ', key('Enter'), ' 确认 · ', key('c'), ' 改为 · ', key('s'), ' 跳过')
 }
 
 export async function renderReview(ctx: ViewContext): Promise<void> {
-  const reload: () => Promise<void> = await frame(ctx.main, '待审', async (body) => {
+  await frame(ctx.main, '待审', async (body) => {
     const [items, labels] = await Promise.all([
       listAll(async (pageToken) => {
         const page = await api.listReviewItems({ pageSize: 50, pageToken })
@@ -61,10 +50,148 @@ export async function renderReview(ctx: ViewContext): Promise<void> {
       }, 4),
       allLabels(),
     ])
-    fill(
-      body,
-      el('p', { class: 'hint' }, '确认或改正会成为例子和评测数据；正式模式下还会在 Gmail 里打上你选的标签并归档（不会标为已读）。'),
-      items.length === 0 ? el('p', { class: 'empty' }, '没有待审的邮件。') : el('div', { class: 'list' }, ...items.map((item) => card(item, labels, () => reload(), ctx.host.confirm))),
-    )
+    if (items.length === 0) {
+      fill(body, emptyState('都处理完了'))
+      return
+    }
+    const options: PickerOption[] = [{ value: '', text: '都不是' }, ...labels.map((label) => ({ value: label.name, text: label.displayName }))]
+    const list = el('ul', { class: 'rows', 'aria-label': '待审邮件' })
+    const rows: Row[] = []
+    let active = -1
+
+    const select = (index: number, focus: boolean) => {
+      active = Math.max(0, Math.min(index, rows.length - 1))
+      rows.forEach((row, i) => {
+        row.node.classList.toggle('active', i === active)
+        row.node.tabIndex = i === active ? 0 : -1
+      })
+      if (focus) rows[active]?.node.focus()
+    }
+    // A resolved row leaves; the one after it (or before, at the end) takes its place and the focus.
+    const leave = (row: Row) => {
+      const index = rows.indexOf(row)
+      rows.splice(index, 1)
+      row.node.remove()
+      ctx.refreshStatus()
+      if (rows.length === 0) fill(body, emptyState('都处理完了'))
+      else select(index, true)
+    }
+
+    const build = (item: ReviewItem): Row => {
+      const caution = CAUTION[item.unsureReason]
+      const suggested = item.suggestedLabel
+      const probability = item.candidates.find((candidate) => candidate.label === suggested)?.probability
+      const node = el('li', { tabindex: '-1', 'aria-label': item.subject === '' ? '（无主题）' : item.subject })
+      const slot = el('div', { hidden: true })
+      let busy = false
+      const run = async (call: (requestId: string) => Promise<unknown>, done: string) => {
+        if (busy) return
+        busy = true
+        const requestId = newRequestId()
+        try {
+          await withRetry(() => call(requestId))
+          toast(done)
+          leave(row)
+        } catch (error) {
+          toast(errorMessage(error))
+          busy = false
+        }
+      }
+      const confirm = () => {
+        if (suggested === '') return
+        if (caution !== undefined && !ctx.host.confirm(`${caution}。仍然确认为“${labelText(suggested, labels)}”？`)) return
+        void run((requestId) => api.confirmReviewItem({ name: item.name, requestId }), `已确认：${labelText(suggested, labels)}`)
+      }
+      const correct = (label: string) => void run((requestId) => api.correctReviewItem({ name: item.name, label, requestId }), `已改为：${labelText(label, labels)}`)
+      const skip = () => void run((requestId) => api.skipReviewItem({ name: item.name, requestId }), '已跳过')
+      const changeButton = button('改为…', () => {
+        if (slot.hidden) change()
+        else close()
+      }, { 'aria-expanded': 'false' })
+      const close = () => {
+        slot.hidden = true
+        slot.replaceChildren()
+        changeButton.setAttribute('aria-expanded', 'false')
+      }
+      const change = () => {
+        // A suspected phishing mail starts at 都不是; another at the model's next choice.
+        const next = item.unsureReason === 'suspicious' ? '' : (item.candidates.find((candidate) => candidate.label !== suggested)?.label ?? '')
+        slot.replaceChildren(
+          picker(options, next, (value) => {
+            close()
+            correct(value)
+          }, () => {
+            close()
+            changeButton.focus()
+          }),
+        )
+        slot.hidden = false
+        changeButton.setAttribute('aria-expanded', 'true')
+        slot.querySelector('input')?.focus()
+      }
+      const reason = why(item)
+      fill(
+        node,
+        el('div', { class: 'row-head' }, el('span', { class: 'row-title' }, item.subject === '' ? '（无主题）' : item.subject), el('span', { class: 'meta' }, when(item.receiveTime))),
+        el('div', { class: 'row-sub' }, item.sender),
+        caution === undefined ? null : el('p', { class: 'hint warn', role: 'note' }, caution),
+        el(
+          'div',
+          { class: 'row-foot' },
+          el(
+            'span',
+            { class: 'suggestion' },
+            suggested === '' ? chip('都不是', 'muted') : chip(labelText(suggested, labels), 'accent'),
+            probability === undefined ? null : bar(probability),
+            probability === undefined ? null : el('span', { class: 'meta' }, percent(probability)),
+            reason === '' ? null : el('span', { class: 'meta' }, reason),
+          ),
+          el(
+            'div',
+            { class: 'actions' },
+            suggested === '' ? null : button('确认', confirm, caution === undefined ? { class: 'primary' } : {}),
+            changeButton,
+            button('跳过', skip, { class: 'quiet' }),
+          ),
+        ),
+        slot,
+      )
+      const row: Row = { node, confirm, change, skip }
+      node.addEventListener('focusin', () => {
+        if (rows[active] !== row) select(rows.indexOf(row), false)
+      })
+      return row
+    }
+
+    for (const item of items) rows.push(build(item))
+    list.append(...rows.map((row) => row.node))
+
+    const onKey = (event: KeyboardEvent) => {
+      if (event.altKey || event.ctrlKey || event.metaKey || rows.length === 0) return
+      // Typing in the picker (or any field) is typing, never a shortcut.
+      if (event.target instanceof Element && event.target.closest('input, textarea, select') !== null) return
+      if (event.key === 'j' || event.key === 'k') {
+        event.preventDefault()
+        select(active < 0 ? 0 : active + (event.key === 'j' ? 1 : -1), true)
+        return
+      }
+      const row = rows[active]
+      if (row === undefined) return
+      if (event.key === 'Enter' && event.target === row.node) {
+        event.preventDefault()
+        row.confirm()
+      } else if (event.key === 'c') {
+        event.preventDefault()
+        row.change()
+      } else if (event.key === 's') {
+        event.preventDefault()
+        row.skip()
+      }
+    }
+    document.addEventListener('keydown', onKey)
+    ctx.onLeave(() => {
+      document.removeEventListener('keydown', onKey)
+    })
+    fill(body, list, keys())
   })
 }

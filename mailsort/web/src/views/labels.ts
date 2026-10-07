@@ -1,21 +1,16 @@
 /**
  * 标签 (`/labels`): every label with its description (the model's criteria), switches and threshold, as a tree of its
- * path (`金融/投资` under 金融: Gmail's nested labels, named by the path; only leaves are labels); a new label; the sync
- * with Gmail (renames and deletions there, and the owner's Gmail label of a label's path, which is adopted); and the
- * recommended template (导入导出 previews it before anything changes). Deleting a label here leaves the Gmail label
- * and its mails as they are.
+ * path (`金融/投资` under 金融: Gmail's nested labels, named by the path; only leaves are labels); a new label; and the
+ * link to 规则. Deleting a label here leaves the Gmail label and its mails as they are. (The sync with Gmail is in
+ * 设置; this page is redesigned next.)
  */
 import { create } from '@ziyixi/proto/protobuf'
 import { Label_GmailState, LabelSchema, type Label } from '@ziyixi/proto/mailsort/ui/v1/label_pb'
 import { api } from '../api.ts'
+import { toggle } from '../components.ts'
 import { button, el, fill } from '../dom.ts'
 import type { ViewContext } from '../app.ts'
 import { act, allLabels, frame } from './common.ts'
-
-/** What SyncLabels did, in the owner's words. */
-function syncMessage(answer: { linkedCount: number; renamedCount: number; missingCount: number }): string {
-  return `已同步：关联 ${String(answer.linkedCount)}，改名 ${String(answer.renamedCount)}，Gmail 中缺失 ${String(answer.missingCount)}`
-}
 
 const GMAIL_STATES: Readonly<Record<number, string>> = {
   [Label_GmailState.PENDING]: '尚未在 Gmail 创建',
@@ -24,21 +19,16 @@ const GMAIL_STATES: Readonly<Record<number, string>> = {
   [Label_GmailState.MISSING]: 'Gmail 中已不存在',
 }
 
-function check(label: string, checked: boolean, hint: string): [HTMLLabelElement, HTMLInputElement] {
-  const input = el('input', { type: 'checkbox', ...(checked ? { checked: true } : {}) })
-  return [el('label', { class: 'check' }, input, el('span', {}, label, el('span', { class: 'hint' }, hint))), input]
-}
-
 function editor(label: Label, reload: () => Promise<void>, confirm: (message: string) => boolean): HTMLElement {
   const name = el('input', { value: label.displayName, 'aria-label': '路径', maxlength: '100' })
   const description = el('textarea', { rows: '3', maxlength: '300', 'aria-label': '说明' }, label.description)
   const threshold = el('input', { type: 'number', min: '0.5', max: '0.99', step: '0.01', value: label.threshold === 0 ? '' : String(label.threshold), placeholder: '默认', 'aria-label': '阈值' })
-  const [enabledBox, enabled] = check('启用', label.enabled, '可以被建议或打上')
-  const [liveBox, live] = check('正式打', label.live, '正式模式下有把握时直接打标签（按“归档”开关决定是否移出收件箱）')
-  const [trustBox, trust] = check('可信类', label.trustImplying, '银行、账户安全等：只允许规则（且 DMARC 通过）打')
+  const [enabledBox, enabled] = toggle('启用', label.enabled, '可以被建议或打上')
+  const [liveBox, live] = toggle('正式打', label.live, '正式模式下有把握时直接打标签（按“归档”开关决定是否移出收件箱）')
+  const [trustBox, trust] = toggle('可信类', label.trustImplying, '银行、账户安全等：只允许规则（且 DMARC 通过）打')
   // 归档 is the inverse of keep_in_inbox: on (the default) removes INBOX with the label.
-  const [archiveBox, archive] = check('归档', !label.keepInInbox, '打标签时移出收件箱；关掉则只加标签、留在收件箱')
-  const [sensitiveBox, sensitive] = check('敏感', label.sensitive, '不保留这类邮件的例子（摘要）；打开时已有的例子会被删除')
+  const [archiveBox, archive] = toggle('归档', !label.keepInInbox, '打标签时移出收件箱；关掉则只加标签、留在收件箱')
+  const [sensitiveBox, sensitive] = toggle('敏感', label.sensitive, '不保留这类邮件的例子（摘要）；打开时已有的例子会被删除')
   const save = () =>
     void act(
       (requestId) =>
@@ -62,7 +52,7 @@ function editor(label: Label, reload: () => Promise<void>, confirm: (message: st
       reload,
     )
   const remove = () => {
-    if (!confirm(`从本应用删除“${label.displayName}”及其规则和例子？Gmail 里的标签和邮件不会变，它的操作记录也不能再从这里撤销（要撤销请先撤销再删除）。`)) return
+    if (!confirm(`从本应用删除“${label.displayName}”及其规则和例子？Gmail 里的标签和邮件不会变，它打过的标签也不能再撤销（要撤销请先在设置里撤销再删除）。`)) return
     void act((requestId) => api.deleteLabel({ name: label.name, etag: label.etag, requestId }), '已删除', reload)
   }
   return el(
@@ -125,17 +115,9 @@ export async function renderLabels(ctx: ViewContext): Promise<void> {
         el('h2', {}, '新建标签'),
         name,
         description,
-        el(
-          'div',
-          { class: 'actions' },
-          button('创建', add, { class: 'primary' }),
-          button('从 Gmail 同步', () => void act((requestId) => api.syncLabels({ requestId }), syncMessage, () => reload())),
-          button('套用推荐模板', () => {
-            ctx.go('/import?template=1')
-          }),
-        ),
+        el('div', { class: 'actions' }, button('创建', add, { class: 'primary' }), button('规则', () => ctx.go('/rules'))),
       ),
-      labels.length === 0 ? el('p', { class: 'empty' }, '还没有标签。可以先套用推荐模板（15 个常用分类，先预览再确认）。') : tree(labels, (label) => editor(label, () => reload(), ctx.host.confirm)),
+      labels.length === 0 ? el('p', { class: 'empty' }, '还没有标签。') : tree(labels, (label) => editor(label, () => reload(), ctx.host.confirm)),
     )
   })
 }

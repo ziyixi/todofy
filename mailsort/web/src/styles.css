@@ -1,22 +1,28 @@
-/* The UI's styles (the watch app's, with a few of its own at the end): mobile first, one column, light and dark from the system setting. No external font or image. */
+/*
+ * The UI's design system (../docs/design.md §9): calm neutral surfaces, one accent, an 8 px spacing scale, a 10 px
+ * radius, hairline borders and no heavy shadows. Light and dark come from the system setting through the tokens below;
+ * every component reads them, never a color of its own. No external font or image.
+ */
 :root {
   color-scheme: light dark;
-  --bg: #f8fafc;
-  --panel: #ffffff;
-  --fg: #0f172a;
-  --muted: #475569;
-  --line: #e2e8f0;
+  --bg: #f6f6f4;
+  --surface: #ffffff;
+  /* Tracks, hover and the segmented control's well. */
+  --sunken: #efefec;
+  --ink: #1d1d1f;
+  --muted: #6e6e73;
+  --line: #e5e5e1;
+  /* The one accent. */
   --accent: #1f6f5c;
-  --accent-fg: #ffffff;
-  --added: #166534;
-  --added-bg: #dcfce7;
-  --removed: #991b1b;
-  --removed-bg: #fee2e2;
-  --warn: #b45309;
-  --danger: #b91c1c;
-  --focus: #0d9488;
+  --accent-ink: #ffffff;
+  --accent-soft: #e3f0ec;
+  /* State only (a warning, a refusal), never decoration. */
+  --warn: #9a5b08;
+  --warn-soft: #fbf0df;
+  --danger: #b42318;
   /* The flow diagram (flowchart.ts): eight categorical slots in a fixed order, validated for color-vision deficiency
-     on --panel (the dataviz palette's light steps), and the pipeline's own neutral nodes and links. */
+     on --surface (dataviz validate_palette.js, light: every check passes, three slots under 3:1 contrast, so every node
+     is named in the diagram), the pipeline's own neutral nodes and links, and the zero skeleton. */
   --series-1: #2a78d6;
   --series-2: #eb6834;
   --series-3: #1baf7a;
@@ -25,29 +31,37 @@
   --series-6: #008300;
   --series-7: #4a3aa7;
   --series-8: #e34948;
-  --flow-node: #64748b;
-  --flow-link: #94a3b8;
-  font: 16px/1.45 system-ui, -apple-system, 'PingFang SC', 'Noto Sans CJK SC', sans-serif;
+  --flow-node: #8a8a8f;
+  --flow-link: #b4b4b8;
+  --flow-zero: #d6d6d2;
+  /* The 8 px scale (4 is its half step). */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 16px;
+  --space-4: 24px;
+  --space-5: 32px;
+  --space-6: 48px;
+  --radius: 10px;
+  font: 16px/1.5 system-ui, -apple-system, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans SC', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif;
+  font-variant-numeric: tabular-nums;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #0f172a;
-    --panel: #1e293b;
-    --fg: #f1f5f9;
-    --muted: #94a3b8;
-    --line: #334155;
+    --bg: #141416;
+    --surface: #1c1c1f;
+    --sunken: #26262a;
+    --ink: #ececee;
+    --muted: #9b9ba1;
+    --line: #2e2e33;
     --accent: #6cc3a7;
-    --accent-fg: #042f2e;
-    --added: #86efac;
-    --added-bg: #14532d;
-    --removed: #fca5a5;
-    --removed-bg: #7f1d1d;
-    --warn: #fbbf24;
-    --danger: #f87171;
-    --focus: #5eead4;
-    /* The same eight hues stepped for the dark surface, validated (dataviz validate_palette.js --mode dark) on this
-       --panel: every slot at least 3:1 against it (green is lighter here than in the light set for that reason). */
+    --accent-ink: #0b2a22;
+    --accent-soft: #1d3a32;
+    --warn: #f0b44c;
+    --warn-soft: #3a2c14;
+    --danger: #f97066;
+    /* The same eight hues stepped for the dark surface, validated on this --surface (--mode dark): every check passes,
+       every slot at least 3:1 against it. */
     --series-1: #3987e5;
     --series-2: #d95926;
     --series-3: #199e70;
@@ -56,8 +70,9 @@
     --series-6: #1f9d1f;
     --series-7: #9085e9;
     --series-8: #e66767;
-    --flow-node: #94a3b8;
-    --flow-link: #64748b;
+    --flow-node: #8e8e94;
+    --flow-link: #5a5a60;
+    --flow-zero: #3a3a40;
   }
 }
 
@@ -65,7 +80,7 @@
   box-sizing: border-box;
 }
 
-/* `hidden` wins over every display rule (the toast is a flex box). */
+/* `hidden` wins over every display rule. */
 [hidden] {
   display: none !important;
 }
@@ -73,410 +88,43 @@
 body {
   margin: 0;
   background: var(--bg);
-  color: var(--fg);
+  color: var(--ink);
+  -webkit-text-size-adjust: 100%;
 }
 
 #app {
-  max-width: 46rem;
+  max-width: 48rem;
   margin: 0 auto;
-  padding: 0 0.75rem calc(5rem + env(safe-area-inset-bottom));
+  padding: 0 var(--space-3) calc(var(--space-6) + env(safe-area-inset-bottom));
 }
 
-h1 {
-  font-size: 1.35rem;
-  margin: 0.75rem 0;
+h1,
+h2,
+h3,
+p {
+  margin: 0;
 }
 
 h2 {
-  font-size: 1.05rem;
-  margin: 1.25rem 0 0.5rem;
-}
-
-.bar {
-  position: sticky;
-  top: 0;
-  z-index: 2;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.25rem 0.75rem;
-  align-items: center;
-  padding: calc(0.6rem + env(safe-area-inset-top)) 0 0.6rem;
-  background: var(--bg);
-  border-bottom: 1px solid var(--line);
-}
-
-.brand {
-  font-weight: 700;
-  color: var(--accent);
-}
-
-.tabs {
-  display: flex;
-  gap: 0.25rem;
-  overflow-x: auto;
-}
-
-.tabs a {
-  padding: 0.45rem 0.75rem;
-  border-radius: 999px;
-  color: var(--muted);
-  text-decoration: none;
-  white-space: nowrap;
-}
-
-.tabs a[aria-current='page'] {
-  background: var(--accent);
-  color: var(--accent-fg);
-}
-
-input,
-select,
-button {
-  font: inherit;
-  color: inherit;
-}
-
-input,
-select {
-  min-height: 2.75rem;
-  padding: 0.5rem 0.75rem;
-  border: 1px solid var(--line);
-  border-radius: 0.6rem;
-  background: var(--panel);
-  width: 100%;
-}
-
-input[type='checkbox'] {
-  width: 1.25rem;
-  min-height: 1.25rem;
-  flex: none;
-}
-
-button {
-  min-height: 2.75rem;
-  padding: 0.5rem 1rem;
-  border: 1px solid var(--line);
-  border-radius: 0.6rem;
-  background: var(--panel);
-  cursor: pointer;
-}
-
-button.small {
-  min-height: 2.25rem;
-  padding: 0.3rem 0.75rem;
-  font-size: 0.9rem;
-}
-
-button.primary {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: var(--accent-fg);
+  font-size: 15px;
   font-weight: 600;
 }
 
-button.danger {
-  color: var(--danger);
+h3 {
+  font-size: 14px;
+  font-weight: 600;
 }
 
-button.link {
-  border: 0;
-  background: none;
+a {
   color: var(--accent);
-  min-height: 0;
-  padding: 0.25rem 0.5rem;
-}
-
-button[aria-pressed='true'] {
-  border-color: var(--accent);
-  box-shadow: inset 0 0 0 1px var(--accent);
-}
-
-button:disabled {
-  opacity: 0.5;
-  cursor: default;
 }
 
 :focus-visible {
-  outline: 2px solid var(--focus);
+  outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
 
-.row {
-  display: flex;
-  gap: 0.5rem;
-  align-items: center;
-  flex-wrap: wrap;
-}
-
-.row > input {
-  flex: 1 1 12rem;
-}
-
-.list {
-  display: grid;
-  gap: 0.6rem;
-}
-
-.card {
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: 0.8rem;
-  padding: 0.75rem;
-}
-
-.card p {
-  margin: 0.25rem 0;
-}
-
-.card-head {
-  display: flex;
-  justify-content: space-between;
-  gap: 0.5rem;
-  align-items: baseline;
-}
-
-.watch-name {
-  font-weight: 600;
-  color: var(--fg);
-  text-decoration: none;
-  overflow-wrap: anywhere;
-}
-
-.time,
-.muted,
-.hint,
-.status,
-.empty {
-  color: var(--muted);
-  font-size: 0.9rem;
-}
-
-.warn {
-  color: var(--warn);
-}
-
-.summary {
-  font-weight: 600;
-}
-
-.chips,
-.actions {
-  display: flex;
-  gap: 0.35rem;
-  flex-wrap: wrap;
-  align-items: center;
-  margin-top: 0.4rem;
-}
-
-.chip {
-  display: inline-block;
-  padding: 0.05rem 0.5rem;
-  border-radius: 999px;
-  font-size: 0.8rem;
-  border: 1px solid var(--line);
-  white-space: nowrap;
-}
-
-.chip.ok {
-  color: var(--added);
-}
-
-.chip.broken {
-  color: var(--danger);
-  border-color: var(--danger);
-}
-
-.chip.paused,
-.chip.muted {
-  color: var(--muted);
-}
-
-.chip.new,
-.chip.warn {
-  color: var(--warn);
-  border-color: var(--warn);
-}
-
-.diff {
-  list-style: none;
-  padding: 0;
-  margin: 0.5rem 0 0;
-  font-size: 0.9rem;
-}
-
-.diff li {
-  display: flex;
-  gap: 0.4rem;
-  align-items: baseline;
-  padding: 0.15rem 0.35rem;
-  border-radius: 0.3rem;
-  overflow-wrap: anywhere;
-}
-
-.diff li.added {
-  background: var(--added-bg);
-  color: var(--added);
-}
-
-.diff li.removed {
-  background: var(--removed-bg);
-  color: var(--removed);
-}
-
-.diff .text {
-  flex: 1;
-}
-
-.diff .sign {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-}
-
-.drawer,
-.more-settings {
-  margin-top: 1.25rem;
-}
-
-.drawer > summary,
-.more-settings > summary {
-  cursor: pointer;
-  font-weight: 600;
-  padding: 0.5rem 0;
-}
-
-.facts {
-  display: grid;
-  grid-template-columns: max-content 1fr;
-  gap: 0.25rem 0.75rem;
-  margin: 0.5rem 0;
-}
-
-.facts dt {
-  color: var(--muted);
-}
-
-.facts dd {
-  margin: 0;
-  overflow-wrap: anywhere;
-}
-
-.settings {
-  display: grid;
-  gap: 0.6rem;
-}
-
-.field {
-  display: grid;
-  gap: 0.25rem;
-}
-
-.field .label {
-  font-size: 0.9rem;
-  color: var(--muted);
-}
-
-/* A checkbox and its text on one row, whatever the width: the box never wraps onto the previous setting's line (on a
-   phone a wrapping box sat above its own text, next to the setting before it). The text column takes the rest of the
-   row and may shrink, and the hint is a block line under the text inside that column. */
-.check {
-  display: flex;
-  flex-wrap: nowrap;
-  gap: 0.5rem;
-  align-items: flex-start;
-}
-
-.check > span {
-  flex: 1 1 auto;
-  min-width: 0;
-}
-
-/* Centred on the text's first line rather than on the whole block with its hint. */
-.check > input[type='checkbox'] {
-  margin-top: 0.15rem;
-}
-
-.check .hint {
-  display: block;
-}
-
-.blocks {
-  display: grid;
-  gap: 0.35rem;
-}
-
-.block {
-  display: flex;
-  gap: 0.5rem;
-  text-align: left;
-  align-items: baseline;
-  width: 100%;
-}
-
-.block .tag {
-  font: 0.75rem ui-monospace, SFMono-Regular, Menlo, monospace;
-  color: var(--muted);
-  flex: none;
-}
-
-.block .text {
-  overflow-wrap: anywhere;
-}
-
-.block.dropped {
-  opacity: 0.55;
-}
-
-.block.included {
-  border-color: var(--accent);
-  background: var(--added-bg);
-}
-
-.block.excluded {
-  border-color: var(--danger);
-  background: var(--removed-bg);
-  text-decoration: line-through;
-}
-
-.lines {
-  font-size: 0.9rem;
-  padding-left: 1.25rem;
-  overflow-wrap: anywhere;
-}
-
-.selected {
-  font: 0.8rem ui-monospace, SFMono-Regular, Menlo, monospace;
-  padding-left: 1.25rem;
-  overflow-wrap: anywhere;
-}
-
-.actions.sticky {
-  position: sticky;
-  bottom: calc(0.75rem + env(safe-area-inset-bottom));
-  justify-content: flex-end;
-}
-
-.toast {
-  position: fixed;
-  left: 50%;
-  bottom: calc(1rem + env(safe-area-inset-bottom));
-  transform: translateX(-50%);
-  display: flex;
-  gap: 0.75rem;
-  align-items: center;
-  max-width: calc(100% - 1.5rem);
-  padding: 0.6rem 0.9rem;
-  border-radius: 0.8rem;
-  background: var(--fg);
-  color: var(--bg);
-  z-index: 3;
-}
-
-.toast button.link {
-  color: var(--bg);
-  font-weight: 700;
-  text-decoration: underline;
-}
-
-/* Text for screen readers only (the diff's 新增/删除, the preview's status line). */
+/* Text for screen readers only (each page's h1: the tab already names the page). */
 .visually-hidden {
   position: absolute;
   width: 1px;
@@ -489,138 +137,731 @@ button:disabled {
   border: 0;
 }
 
-.block .note {
-  font-size: 0.75rem;
-  color: var(--muted);
-  flex: none;
+/* The header: the name, one quiet status line, and the four tabs. */
+.top {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--bg);
+  padding-top: env(safe-area-inset-top);
+  border-bottom: 1px solid var(--line);
 }
 
-.shared strong {
-  overflow-wrap: anywhere;
-}
-
-ul.ignored {
-  padding-left: 1.25rem;
-  font-size: 0.9rem;
-}
-
-ul.ignored li {
+.top-row {
   display: flex;
-  gap: 0.5rem;
-  align-items: baseline;
+  flex-wrap: wrap;
+  align-items: center;
   justify-content: space-between;
+  gap: var(--space-1) var(--space-3);
+  padding: var(--space-3) 0 var(--space-1);
 }
 
-ul.ignored .text {
-  overflow-wrap: anywhere;
-}
-
-/* mailsort */
-textarea {
-  font: inherit;
-  color: inherit;
-  width: 100%;
-  padding: 0.5rem 0.75rem;
-  border: 1px solid var(--line);
-  border-radius: 0.6rem;
-  background: var(--panel);
-}
-
-.card > input,
-.card > select,
-.card > textarea {
-  margin: 0.25rem 0;
-}
-
-.subject {
+.brand {
+  font-size: 17px;
   font-weight: 600;
 }
 
-.mono {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 0.9rem;
-  overflow-wrap: anywhere;
+.status-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-2);
+  color: var(--muted);
+  font-size: 13px;
 }
 
-.table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 0.95rem;
-}
-
-.table th,
-.table td {
-  padding: 0.45rem 0.35rem;
-  border-bottom: 1px solid var(--line);
-  text-align: left;
-}
-
-.table td.ok {
-  color: var(--added);
-}
-
-.table td.warn {
+.status-line .problem {
   color: var(--warn);
+}
+
+.tabs {
+  display: flex;
+  gap: var(--space-4);
+}
+
+.tabs a {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  color: var(--muted);
+  text-decoration: none;
+  font-size: 15px;
+}
+
+.tabs a:hover {
+  color: var(--ink);
+}
+
+.tabs a[aria-current='page'] {
+  color: var(--ink);
+  font-weight: 600;
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+
+/* A page: its sections one under another. */
+#view {
+  padding-top: var(--space-4);
+}
+
+#view > .body {
+  display: grid;
+  gap: var(--space-3);
+}
+
+/* Controls. A plain button is the ghost button: a hairline on the surface. */
+input,
+select,
+textarea,
+button {
+  font: inherit;
+  color: inherit;
+}
+
+input,
+select,
+textarea {
+  width: 100%;
+  min-height: 40px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+textarea {
+  padding: var(--space-2) 12px;
+}
+
+button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 40px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  font-size: 14px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+button:hover {
+  background: var(--sunken);
+}
+
+button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+  font-weight: 600;
+}
+
+button.primary:hover {
+  opacity: 0.92;
+}
+
+/* Text only: a secondary action that should not pull the eye (跳过, 取消). */
+button.quiet {
+  border-color: transparent;
+  background: none;
+  color: var(--muted);
+}
+
+button.quiet:hover {
+  color: var(--ink);
+  background: var(--sunken);
+}
+
+button.danger {
+  color: var(--danger);
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* The toast's action. */
+button.link {
+  min-height: 0;
+  padding: 0 var(--space-1);
+  border: 0;
+  background: none;
+  color: inherit;
+  font-weight: 600;
+  text-decoration: underline;
+}
+
+/* The toggle switch: a checkbox drawn as a track and a knob. */
+input.switch {
+  appearance: none;
+  position: relative;
+  flex: none;
+  width: 36px;
+  height: 20px;
+  min-height: 0;
+  margin: 2px 0 0;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: var(--line);
+  cursor: pointer;
+}
+
+input.switch::before {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #ffffff;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.2);
+}
+
+input.switch:checked {
+  background: var(--accent);
+}
+
+input.switch:checked::before {
+  transform: translateX(16px);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  input.switch,
+  input.switch::before {
+    transition: background 0.15s ease, transform 0.15s ease;
+  }
+}
+
+/* A switch (or checkbox) and its text on one row at any width: the box never wraps away from its own text, the text
+   column takes the rest of the row and may shrink, and the hint is a block line under the text. */
+.check {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.check > span {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.check .hint {
+  display: block;
+}
+
+/* The segmented control: one choice of a few (the mode, the undo range). */
+.segmented {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 2px;
+  border-radius: var(--radius);
+  background: var(--sunken);
+}
+
+.segmented button {
+  min-height: 36px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--muted);
+}
+
+.segmented button[aria-pressed='true'] {
+  background: var(--surface);
+  color: var(--ink);
+  font-weight: 600;
+  box-shadow: 0 0 0 1px var(--line);
+}
+
+/* Chips: a label, a kind, a mode. */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  height: 22px;
+  padding: 0 var(--space-2);
+  border-radius: 999px;
+  background: var(--sunken);
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.chip.accent {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.chip.warn {
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+
+.chip.muted {
+  background: none;
+  color: var(--muted);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+
+/* A card: one section of a page. */
+.card {
+  padding: var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.card-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-1) var(--space-2);
+  margin-bottom: 12px;
+}
+
+.card > * + * {
+  margin-top: 12px;
+}
+
+.card > .card-head + * {
+  margin-top: 0;
+}
+
+.hint,
+.meta,
+.muted {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.warn {
+  color: var(--warn);
+}
+
+/* A row of actions; on a phone it wraps. */
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
 }
 
 .actions select {
   width: auto;
-  flex: 1 1 8rem;
+  flex: 1 1 10rem;
 }
 
-/* 标签: the tree of nested labels (a group per path prefix, up to three levels). */
-.label-group + .label-group {
-  margin-top: 1rem;
+/* The disclosure (更多, 为什么). */
+details.more > summary {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: 32px;
+  color: var(--muted);
+  font-size: 13px;
+  list-style: none;
+  cursor: pointer;
 }
 
-.group-name {
-  font-size: 1rem;
-  margin: 0.75rem 0 0.4rem;
+details.more > summary::-webkit-details-marker {
+  display: none;
+}
+
+details.more > summary::after {
+  content: '›';
+  display: inline-block;
+  transform: rotate(90deg);
+}
+
+details.more[open] > summary::after {
+  transform: rotate(-90deg);
+}
+
+details.more > :not(summary) {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+/* The empty state. */
+.empty {
+  padding: var(--space-6) var(--space-3);
+  color: var(--muted);
+  text-align: center;
+}
+
+.empty strong {
+  display: block;
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.card .empty {
+  padding: var(--space-3) 0;
+}
+
+/* The KPI numbers. */
+.kpis {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-2);
+}
+
+.kpi {
+  display: grid;
+  gap: 2px;
+  padding: 12px var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.kpi-label {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.kpi-value {
+  font-size: 28px;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.kpi.attention .kpi-value {
+  color: var(--accent);
+}
+
+@media (max-width: 520px) {
+  .kpis {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* The meter (the model budget) and the small bars (accuracy, confidence). The unfilled track is the sunken surface. */
+.meter,
+.bar {
+  display: block;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--sunken);
+}
+
+.meter {
+  height: 6px;
+}
+
+.bar {
+  height: 4px;
+}
+
+.meter > span,
+.bar > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+}
+
+.meter.warn > span,
+.bar.warn > span {
+  background: var(--warn);
+}
+
+.meter.danger > span {
+  background: var(--danger);
+}
+
+/* The per-label accuracy: name, bar, figures. */
+.bars {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.bars li {
+  display: grid;
+  grid-template-columns: minmax(0, 8.5rem) minmax(3rem, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  font-size: 14px;
+}
+
+.bars .name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bars .figures {
+  color: var(--muted);
+  font-size: 13px;
+  text-align: right;
+}
+
+.two {
+  display: grid;
+  gap: var(--space-3);
+}
+
+@media (min-width: 640px) {
+  .two {
+    grid-template-columns: 3fr 2fr;
+    align-items: start;
+  }
+}
+
+/* The compact list (待审): one row per mail, hairlines between. */
+.rows {
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  list-style: none;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.rows > li {
+  display: grid;
+  gap: 6px;
+  padding: 12px var(--space-3);
+  border-top: 1px solid var(--line);
+}
+
+.rows > li:first-child {
+  border-top: 0;
+}
+
+.rows > li.active {
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.rows > li:focus-visible {
+  outline-offset: -2px;
+}
+
+.row-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+
+.row-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.row-sub {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.row-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) 12px;
+  margin-top: 2px;
+}
+
+.row-foot .actions {
+  margin-left: auto;
+}
+
+.suggestion {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.suggestion .bar {
+  width: 40px;
+}
+
+/* The searchable label picker (改为…). */
+.picker {
+  display: grid;
+  gap: var(--space-1);
+  padding: var(--space-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg);
+}
+
+.picker ul {
+  display: grid;
+  max-height: 14rem;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.picker li {
+  padding: var(--space-2) 12px;
+  border-radius: 8px;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.picker li[aria-selected='true'] {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.picker li.none {
+  color: var(--muted);
+  cursor: default;
+}
+
+/* Settings rows: the text left, its control right; stacked on a phone. */
+.setting {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-3);
+}
+
+.setting + .setting {
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.setting > div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.notice {
+  padding: 12px var(--space-3);
+  border-radius: var(--radius);
+  background: var(--warn-soft);
+  color: var(--warn);
+  font-size: 14px;
+}
+
+/* The undo's own range: two pickers side by side, stacked on a phone. */
+.range {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+  gap: var(--space-2);
+}
+
+.field {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.field > .label {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: calc(var(--space-3) + env(safe-area-inset-bottom));
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: calc(100% - var(--space-5));
+  padding: 10px var(--space-3);
+  border-radius: var(--radius);
+  background: var(--ink);
+  color: var(--bg);
+  font-size: 14px;
+  transform: translateX(-50%);
+}
+
+/* Shown only where there is a keyboard and a pointer to hover with. */
+.keys {
+  display: none;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .keys {
+    display: block;
+    text-align: center;
+  }
+}
+
+kbd {
+  padding: 0 5px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  font: 12px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+/* 标签 and 规则 (until 标签 is redesigned): a tree of cards and their editors. */
+.list {
+  display: grid;
+  gap: var(--space-2);
 }
 
 .list.nested {
-  padding-left: 0.75rem;
-  border-left: 2px solid var(--line);
+  padding-left: 12px;
+  border-left: 1px solid var(--line);
 }
 
-/* A deeper level of the tree (生活/汽车 inside 生活). */
+.label-group + .label-group {
+  margin-top: var(--space-3);
+}
+
+.group-name {
+  margin: 0 0 var(--space-2);
+  font-size: 14px;
+}
+
 .label-subgroup .group-name {
-  font-size: 0.95rem;
-  margin-top: 0.25rem;
+  margin-top: var(--space-1);
+  font-size: 13px;
 }
 
-/* 流程: the Sankey diagram, its tooltip and legend, and the table per label. */
+/* The flow diagram (flowchart.ts): it scales to its box; below its minimum width (a phone) it keeps that width and
+   scrolls inside its own box, so the page never scrolls sideways. */
 .flow-chart {
   position: relative;
-  margin: 0.75rem 0;
 }
 
-/* The diagram scales to its box; below its minimum width (a phone) it keeps that width and scrolls inside its own box,
-   so the page itself never scrolls sideways. */
 .flow-scroll {
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: 0.8rem;
-  padding: 0.5rem;
-}
-
-.card .flow-scroll {
-  border: 0;
-  padding: 0;
 }
 
 .flow-svg {
   display: block;
   width: 100%;
-  height: auto;
   min-width: 600px;
   max-width: none;
-}
-
-.flow-chart.compact .flow-svg {
-  min-width: 480px;
+  height: auto;
 }
 
 .flow-link {
@@ -635,30 +876,31 @@ textarea {
   stroke-opacity: 0.6;
 }
 
+/* With no mail, the skeleton: hairline links and muted nodes. */
+.flow-link.zero {
+  stroke-opacity: 1;
+}
+
 .flow-node {
-  cursor: default;
   outline: none;
 }
 
-.flow-node.kind-label {
-  cursor: pointer;
-}
-
 .flow-node:focus-visible rect {
-  stroke: var(--focus);
+  stroke: var(--accent);
   stroke-width: 2px;
 }
 
 .flow-text {
+  fill: var(--ink);
   font-size: 12px;
-  fill: var(--fg);
   /* A halo in the surface color keeps a name readable where it crosses the links. */
   paint-order: stroke;
-  stroke: var(--panel);
+  stroke: var(--surface);
   stroke-width: 3px;
   stroke-linejoin: round;
 }
 
+.flow-node.zero .flow-text,
 .flow-count {
   fill: var(--muted);
 }
@@ -673,104 +915,32 @@ textarea {
   position: absolute;
   z-index: 1;
   display: grid;
-  gap: 0.1rem;
+  gap: 2px;
   max-width: 16rem;
-  padding: 0.4rem 0.6rem;
+  padding: 6px 10px;
   border: 1px solid var(--line);
-  border-radius: 0.5rem;
-  background: var(--panel);
-  color: var(--fg);
-  font-size: 0.85rem;
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 13px;
   pointer-events: none;
-  box-shadow: 0 2px 8px rgb(15 23 42 / 0.15);
 }
 
 .flow-legend {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.25rem 0.9rem;
-  margin: 0.5rem 0 0;
+  gap: var(--space-1) var(--space-3);
+  margin: var(--space-2) 0 0;
   padding: 0;
-  list-style: none;
   color: var(--muted);
-  font-size: 0.85rem;
+  font-size: 12px;
+  list-style: none;
 }
 
 .flow-legend .swatch {
   display: inline-block;
-  width: 0.7rem;
-  height: 0.7rem;
-  margin-right: 0.3rem;
+  width: 8px;
+  height: 8px;
+  margin-right: 6px;
   border-radius: 2px;
-  vertical-align: -0.05rem;
-}
-
-.table-scroll {
-  overflow-x: auto;
-}
-
-.flow-table,
-.import-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 0.9rem;
-}
-
-.flow-table th,
-.flow-table td,
-.import-table th,
-.import-table td {
-  padding: 0.4rem 0.5rem;
-  border-bottom: 1px solid var(--line);
-  text-align: left;
-  vertical-align: top;
-}
-
-.flow-table td {
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-
-.flow-table td.warn {
-  color: var(--warn);
-}
-
-.flow-bar-track {
-  display: block;
-  height: 4px;
-  margin-top: 0.3rem;
-  background: var(--line);
-  border-radius: 2px;
-}
-
-.flow-bar {
-  display: block;
-  height: 100%;
-  border-radius: 2px;
-}
-
-/* 导入导出: what each entry would become. */
-.chip.action-1 {
-  color: var(--added);
-  border-color: var(--added);
-}
-
-.chip.action-2 {
-  color: var(--accent);
-  border-color: var(--accent);
-}
-
-.chip.action-4 {
-  color: var(--danger);
-  border-color: var(--danger);
-}
-
-.import-table tr.action-3 {
-  color: var(--muted);
-}
-
-/* Column names stay on one line; the table scrolls in its own box on a phone. */
-.flow-table thead th {
-  white-space: nowrap;
 }

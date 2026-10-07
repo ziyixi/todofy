@@ -1,17 +1,17 @@
 /**
- * The UI's words for the API's values: modes, review kinds, unsure reasons, rule kinds, ledger states, and times in the
+ * The UI's words for the API's values: modes, review kinds, unsure reasons, rule kinds and states, and times in the
  * browser's zone.
  */
 import { timestampMs, type Timestamp } from '@ziyixi/proto/protobuf/wkt'
-import { ReviewItem_Kind, LedgerEntry_State, Example_Origin } from '@ziyixi/proto/mailsort/ui/v1/review_pb'
+import { ReviewItem_Kind } from '@ziyixi/proto/mailsort/ui/v1/review_pb'
 import { Rule_Kind, Rule_State } from '@ziyixi/proto/mailsort/ui/v1/rule_pb'
-import { Mode, ServiceStatus_AuthState } from '@ziyixi/proto/mailsort/ui/v1/status_pb'
+import { Mode } from '@ziyixi/proto/mailsort/ui/v1/status_pb'
 import type { Label } from '@ziyixi/proto/mailsort/ui/v1/label_pb'
 
 export const MODE_NAMES: Readonly<Record<number, string>> = {
   [Mode.OFF]: '关闭',
-  [Mode.SHADOW]: '只给建议（影子）',
-  [Mode.LIVE]: '正式打标签',
+  [Mode.SHADOW]: '影子',
+  [Mode.LIVE]: '正式',
 }
 
 /** Why the breaker tripped (Settings.breaker_reason). */
@@ -21,30 +21,21 @@ export const BREAKER_REASONS: Readonly<Record<string, string>> = {
   label_share: '某个标签占比突增',
 }
 
+/** The kinds a review row names (a suggestion is the plain case and carries no chip). */
 export const KIND_NAMES: Readonly<Record<number, string>> = {
-  [ReviewItem_Kind.SUGGESTION]: '建议',
   [ReviewItem_Kind.UNSURE]: '拿不准',
   [ReviewItem_Kind.AUDIT]: '抽查',
 }
 
 export const UNSURE_REASONS: Readonly<Record<string, string>> = {
-  below_threshold: '概率低于阈值',
+  below_threshold: '低于阈值',
   none: '都不像',
   suspicious: '疑似钓鱼',
-  trust_needs_rule: '可信类标签只能由规则打',
+  trust_needs_rule: '可信类只能由规则打',
   label_disabled: '标签未启用',
-  model_unavailable: '模型暂时不可用',
+  model_unavailable: '模型暂不可用',
   no_labels: '还没有启用的标签',
-  no_model_labels: '没有带说明的标签可交给模型',
-}
-
-export const DECIDERS: Readonly<Record<string, string>> = {
-  rule: '规则',
-  neighbours: '相似例子',
-  clef: 'Clef',
-  'clef-flash': 'Clef-flash',
-  audit: '抽查',
-  none: '—',
+  no_model_labels: '没有带说明的标签',
 }
 
 export const RULE_KINDS: readonly (readonly [Rule_Kind, string])[] = [
@@ -58,25 +49,6 @@ export const RULE_STATES: Readonly<Record<number, string>> = {
   [Rule_State.PROPOSED]: '待批准',
   [Rule_State.ACTIVE]: '生效中',
   [Rule_State.DISABLED]: '已停用',
-}
-
-export const LEDGER_STATES: Readonly<Record<number, string>> = {
-  [LedgerEntry_State.INTENDED]: '待写入',
-  [LedgerEntry_State.APPLIED]: '已打标签',
-  [LedgerEntry_State.FAILED]: '失败',
-  [LedgerEntry_State.UNDONE]: '已撤销',
-}
-
-export const ORIGINS: Readonly<Record<number, string>> = {
-  [Example_Origin.CORRECTION]: '纠正',
-  [Example_Origin.CONFIRMATION]: '确认',
-  [Example_Origin.WEAK_ACCEPT]: '默认接受',
-}
-
-export const AUTH_STATES: Readonly<Record<number, string>> = {
-  [ServiceStatus_AuthState.NOT_CONFIGURED]: '未授权（需运行 mint-token）',
-  [ServiceStatus_AuthState.OK]: '正常',
-  [ServiceStatus_AuthState.FAILED]: '授权失效，已停止访问 Gmail',
 }
 
 export function ms(time: Timestamp | undefined): number | null {

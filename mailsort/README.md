@@ -18,36 +18,40 @@ inbox and waits in the review queue. Shadow mode (the default) only suggests. Ch
 
 ## Use
 
+Four tabs under a header whose one status line shows the mode in force, the Gmail grant and the next run
+(`docs/design.md` §9):
+
+- **待审**: confirm a suggestion, change it (改为…, a searchable label picker with 都不是 first), or skip; j / k, Enter,
+  c and s do the same by keyboard. Corrections made in Gmail itself (moving a sorted mail to another of mailsort's
+  labels, or removing the label) count too.
+- **概览**: today's numbers (处理, 已打标签, 待审, 拿不准), the flow of today's mail as a Sankey diagram (drawn at zero on
+  a day without mail), the precision bound of each label with verdicts, the model budget and the latest error.
 - **标签**: add the labels (a path such as `金融/投资`, shown as a tree; a description of what belongs there; the threshold;
   whether it implies a trusted sender; 归档, off to keep its mail in the inbox; 敏感, to keep no example of it). The
   model reads `path: description` for each label with a description and is never offered one without; one language
-  and 60–120 characters keep every call cheap (`docs/design.md` §8.1). 套用推荐模板 previews 15 recommended labels. A
-  label's Gmail name is its path; when Gmail already has a label of exactly that name (made by hand), it is adopted
-  (沿用) instead of created twice, and the owner's other labels are never touched. 从 Gmail 同步 follows renames and
-  deletions made in Gmail and adopts such labels; it never imports another one. 正式打 per label lets live mode write it; it turns itself off when the label's precision
-  bound falls below the target. Deleting a label leaves its Gmail label and mails alone, and its writes can no longer
-  be undone from 记录.
-- **待审**: confirm a suggestion, choose another label or 都不是, or skip. Corrections made in Gmail itself (moving a
-  sorted mail to another of mailsort's labels, or removing the label) count too.
-- **规则**: approve the rules proposed from repeated corrections, add exact-address, domain, mailing-list or
-  delivered-to rules by hand (with subject words to include or exclude, a carve-out tried before the sender's plain
-  rule, and keep in inbox), and export them as Gmail filters (label, and archive unless kept) to import in Gmail's
-  settings; left out are trust and DMARC rules, rules with subject conditions and the plain rules of the senders they
-  cover (Gmail would apply both). A sender rule fires only when DMARC passed aligned with the From domain, a list rule only with a DKIM
-  signature of the list's domain (`docs/design.md` §4.3).
-- **导入**: import the owner's rule file or an export (pasted or uploaded JSON; a label written with the old `分拣/`
-  prefix means the same label), or the template: a preview of every
-  create, update, skip or invalid entry first, then 确认导入 (all or nothing); export every label (with its 启用) and rule
-  as JSON.
-- **流程**: how mail moved through the pipeline today, over 7 or 30 days (a Sankey diagram and a table per label; a
-  label opens its 操作记录); 状态 shows today's, compact.
-- **例子**, **准确率**, **记录** (undo one write or a time range, of one label when opened from 流程), **状态** (Gmail grant, sync, today's model use),
-  **设置** (mode, limits, neuron budget; 解除熔断 after the breaker tripped). Emergency stop: 设置 → 关闭
-  (`docs/design.md` §10).
+  and 60–120 characters keep every call cheap (`docs/design.md` §8.1). A label's Gmail name is its path; when Gmail
+  already has a label of exactly that name (made by hand), it is adopted (沿用) instead of created twice, and the
+  owner's other labels are never touched. 正式打 per label lets live mode write it; it turns itself off when the
+  label's precision bound falls below the target. Deleting a label leaves its Gmail label and mails alone, and its
+  writes can no longer be undone. Its 规则 button opens the rules: approve the ones proposed from repeated
+  corrections, add exact-address, domain, mailing-list or delivered-to rules by hand (with subject words to include or
+  exclude, a carve-out tried before the sender's plain rule, and keep in inbox). A sender rule fires only when DMARC
+  passed aligned with the From domain, a list rule only with a DKIM signature of the list's domain
+  (`docs/design.md` §4.3).
+- **设置**: the mode (关闭 · 影子 · 正式, with the deployment's ceiling or a tripped breaker in one line, and 解除熔断);
+  撤销, the undo of a time range (1 hour, 24 hours, 7 days or your own), of one label when chosen, previewed first;
+  从 Gmail 同步 (follows renames and deletions made in Gmail and adopts such labels; it never imports another one);
+  and 导出过滤器, the active rules as a Gmail filter file to import in Gmail's settings (label, and archive unless
+  kept; left out are trust and DMARC rules, rules with subject conditions and the plain rules of the senders they
+  cover, since Gmail would apply both). Emergency stop: 设置 → 关闭 (`docs/design.md` §10).
+- **API only** (no page since 2026-10-07): ImportRules and ExportRules (the owner's rule file, the template of 15
+  recommended labels, previewed with `validate_only`; a label written with the old `分拣/` prefix means the same
+  label), the examples, the single-entry undo, the write limits, the neuron budget and the thresholds.
 - **What is kept**: decided mail's subject, sender and exact sender keys, and the review queue, for 14 days (the
   daily cleanup runs in every mode, off included); decisions and the ledger without content for 180 days; the flow
-  counters (counts only) for 400 days; examples (masked summaries) and rules (exact sender, domain, list or
-  delivered-to values, subject words, your evidence and notes) until you delete them (`docs/design.md` §2).
+  counters (counts only) for 400 days; examples (masked summaries) until you delete them (with their label, by
+  turning it 敏感, or DeleteExample) and rules (exact sender, domain, list or delivered-to values, subject words,
+  your evidence and notes) until you delete them (`docs/design.md` §2).
 
 ## Develop
 
@@ -94,12 +98,12 @@ openssl rand -hex 32 | gh secret set MAILSORT_CSRF_SIGNING_KEY -R ziyixi/todofy 
 gh variable set MAILSORT_MODE -R ziyixi/todofy --env production --body shadow
 ```
 
-After the first deploy, open `https://sort.ziyixi.science/status` signed in: it must show the next alarm, and, once
-the grant is put, a sync within five minutes. Home's 邮件分拣 tile shows ops-v1 through the `MAILSORT` binding and the
+After the first deploy, open `https://sort.ziyixi.science/` signed in: the header's status line must show the next
+run, and, once the grant is put, `Gmail ✓`. Home's 邮件分拣 tile shows ops-v1 through the `MAILSORT` binding and the
 daily drift check compares the Worker with `dashboard/worker/src/drift-desired.json`.
 
 ### Rollback
 
 A code-only revert is the normal path. To stop the Gmail side effects at once: 设置 → 关闭 (or `MAILSORT_MODE=off`
 and a deploy), and revoke the grant at https://myaccount.google.com/permissions. Writes already made can be undone
-from 记录 while the app runs. Deleting the Worker deletes `MailsortState` (labels, rules, examples, ledger) for good.
+from 设置 → 撤销 while the app runs. Deleting the Worker deletes `MailsortState` (labels, rules, examples, ledger) for good.

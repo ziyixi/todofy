@@ -44,7 +44,7 @@ the neuron budget). One label per mail, at Gmail's top level (up to three levels
 backfill. Gmail is touched only through the closed operation table in `mailsort/worker/src/gmail.ts` (no trash,
 delete, send, UNREAD or non-owned labels; undo via the ledger only). The Gmail grant is written into the Worker from
 the owner's machine (`mailsort/deploy/mint-token.mjs`), never into GitHub. Rules are personal values: they are
-imported at runtime on the 导入 page, never committed.
+imported at runtime (ImportRules, API only since the UI redesign), never committed.
 
 Landing order:
 1. Done 2026-10-06: `feat/mailsort` landed at `899b063` with `mailsort` in CHECK_ONLY (the smoke now stops the whole
@@ -62,6 +62,12 @@ Landing order:
    (schema version 4, `gmail_adopted`; additive, the live labels and rules need no data change); SyncLabels follows
    renames and deletions by Gmail ID and never imports; the rule file's legacy `分拣/` still imports. After its deploy:
    标签 shows the 15 labels without `分拣/`, still 尚未在 Gmail 创建; 从 Gmail 同步 imports nothing.
+   On the same branch, the UI redesign (the owner's "less is more", 2026-10-07; `mailsort/docs/design.md` §9), UI only,
+   no proto or stored-data change: B1 done (the design system, the shell with four tabs 待审 · 概览 · 标签 · 设置 and
+   one status line, 待审 with the picker and keys, 概览 with the always-drawn flow, 设置 with the mode, the previewed
+   range undo, the sync and the filter download; 流程, 准确率, 状态, 例子, 导入 and 记录 removed, 规则 reached from
+   标签). Next: the 标签 page (with the rules folded in). After its deploy: 概览 draws the skeleton on a quiet day, and
+   设置 → 撤销 → 预览 counts 0 while the grant is read-only.
 
 Already set: production secret `MAILSORT_CSRF_SIGNING_KEY`, variable `MAILSORT_MODE=shadow` (the mode ceiling).
 

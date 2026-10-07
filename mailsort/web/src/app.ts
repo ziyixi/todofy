@@ -1,30 +1,24 @@
 /**
- * The UI's shell (../../docs/design.md §9): a header with the views, a toast, and a router over the page's paths:
+ * The UI's shell (../../docs/design.md §9): a header with the name, one quiet status line (the mode in force, the
+ * Gmail grant, the next run) and four tabs, a toast, and a router over the page's paths:
  *
- *   /           待审: shadow suggestions, unsure mails and audits (confirm / correct / skip)
- *   /labels     标签: create, rename, describe, enable, live, trust, threshold; sync with Gmail
- *   /rules      规则: proposed and active rules; approve, disable, delete; export Gmail filters
- *   /examples   例子与向量库: counts per label, embedding status, rebuild, view and delete examples
- *   /accuracy   准确率: per-label precision bound, coverage, counts
- *   /flow       流程: how mail moved through the pipeline (today, 7 or 30 days), and per label
- *   /import     导入导出: the template, the owner's rule file or an export (preview, then confirm); the export
- *   /ledger     操作记录: Gmail writes; undo one or a time range; one label's (?label=)
- *   /status     运行状态: the grant, the last sync, the queue, today's Gmail and Workers AI use, error codes
- *   /settings   设置: mode, limits, the neuron budget, thresholds
+ *   /           待审: the mails waiting for the owner (confirm / change / skip, by keyboard too)
+ *   /overview   概览: today's numbers, the flow of mail, accuracy per label, the model budget, the latest error
+ *   /labels     标签: the labels (and, until 标签 holds them itself, its link to /rules)
+ *   /settings   设置: the mode, the range undo, the Gmail filter export, the sync with Gmail
  *
  * Mobile first, light and dark from the system, plain DOM (no framework), and nothing but the page's own API.
  */
+import { Mode, ServiceStatus_AuthState, type ServiceStatus } from '@ziyixi/proto/mailsort/ui/v1/status_pb'
+import { api } from './api.ts'
+import { chip } from './components.ts'
 import { el } from './dom.ts'
-import { renderAccuracy } from './views/accuracy.ts'
-import { renderExamples } from './views/examples.ts'
-import { renderFlow } from './views/flow.ts'
-import { renderImport } from './views/import.ts'
+import { MODE_NAMES, relative } from './format.ts'
 import { renderLabels } from './views/labels.ts'
-import { renderLedger } from './views/ledger.ts'
+import { renderOverview } from './views/overview.ts'
 import { renderReview } from './views/review.ts'
 import { renderRules } from './views/rules.ts'
 import { renderSettings } from './views/settings.ts'
-import { renderStatus } from './views/status.ts'
 
 /** What the views need from the browser, replaceable in tests. */
 export interface Host {
@@ -41,35 +35,59 @@ export interface ViewContext {
   readonly main: HTMLElement
   readonly host: Host
   readonly go: (path: string) => void
+  /** The service status of this page view (the header's), loaded once per navigation. */
+  readonly status: () => Promise<ServiceStatus>
+  /** Reads the status again and repaints the header (after a choice that changes the mode or the queue). */
+  readonly refreshStatus: () => void
+  /** Runs `cleanup` when the page is left (a view's document listeners). */
+  readonly onLeave: (cleanup: () => void) => void
 }
 
 type View = (ctx: ViewContext) => Promise<void>
 
-const ROUTES: readonly (readonly [string, string, View])[] = [
+const TABS: readonly (readonly [string, string, View])[] = [
   ['/', '待审', renderReview],
+  ['/overview', '概览', renderOverview],
   ['/labels', '标签', renderLabels],
-  ['/rules', '规则', renderRules],
-  ['/flow', '流程', renderFlow],
-  ['/import', '导入', renderImport],
-  ['/examples', '例子', renderExamples],
-  ['/accuracy', '准确率', renderAccuracy],
-  ['/ledger', '记录', renderLedger],
-  ['/status', '状态', renderStatus],
   ['/settings', '设置', renderSettings],
 ]
+
+/** Pages without a tab of their own, and the tab they belong to: 规则 until 标签 holds the rules itself. */
+const PAGES: readonly (readonly [string, string, View])[] = [['/rules', '/labels', renderRules]]
+
+/** The status line's parts: the mode badge, the Gmail grant (or its problem), the next run. */
+function statusParts(status: ServiceStatus, now: number): HTMLElement[] {
+  const mode = status.effectiveMode
+  const badge = chip(MODE_NAMES[mode] ?? '—', mode === Mode.LIVE ? 'accent' : mode === Mode.OFF ? 'warn' : 'muted')
+  const gmail =
+    status.authState === ServiceStatus_AuthState.OK
+      ? el('span', {}, `Gmail ✓ ${status.writeScope ? '可写' : '只读'}`)
+      : el('span', { class: 'problem' }, status.authState === ServiceStatus_AuthState.FAILED ? 'Gmail 授权失效' : status.authState === ServiceStatus_AuthState.NOT_CONFIGURED ? 'Gmail 未授权' : 'Gmail 未连接')
+  const next = status.nextAlarmTime === undefined ? null : el('span', {}, `下次运行 ${relative(status.nextAlarmTime, now)}`)
+  return [badge, gmail, ...(next === null ? [] : [next])]
+}
 
 /** Mounts the UI into `root` and renders the current path; resolves when the first view has rendered. */
 export function mountApp(root: HTMLElement, host: Host = browserHost): Promise<void> {
   const main = el('main', { id: 'view' })
   const nav = el('nav', { class: 'tabs', 'aria-label': '页面' })
+  const line = el('p', { class: 'status-line' })
   const toastBox = el('div', { id: 'toast', class: 'toast', role: 'status', 'aria-live': 'polite', hidden: true })
-  root.replaceChildren(el('header', { class: 'bar' }, el('span', { class: 'brand' }, '邮件分拣'), nav), main, toastBox)
+  root.replaceChildren(el('header', { class: 'top' }, el('div', { class: 'top-row' }, el('span', { class: 'brand' }, '邮件分拣'), line), nav), main, toastBox)
 
-  const render = async (): Promise<void> => {
+  // Set by refreshStatus, which every render calls before its view.
+  let status!: Promise<ServiceStatus>
+  let reviewCount = 0
+  let leaving: (() => void)[] = []
+
+  const paintNav = () => {
     const path = window.location.pathname
+    const tab = PAGES.find(([page]) => page === path)?.[1] ?? path
     nav.replaceChildren(
-      ...ROUTES.map(([target, label]) => {
-        const link = el('a', { href: target, ...(target === path ? { 'aria-current': 'page' } : {}) }, label)
+      ...TABS.map(([target, label]) => {
+        const count = target === '/' && reviewCount > 0 ? chip(String(reviewCount), 'accent') : null
+        const link = el('a', { href: target, ...(target === tab ? { 'aria-current': 'page' } : {}) }, label, count)
+        if (count !== null) link.setAttribute('aria-label', `${label}（${String(reviewCount)} 封）`)
         link.addEventListener('click', (event) => {
           event.preventDefault()
           go(target)
@@ -77,19 +95,49 @@ export function mountApp(root: HTMLElement, host: Host = browserHost): Promise<v
         return link
       }),
     )
+  }
+  const refreshStatus = () => {
+    status = api.getServiceStatus({ name: 'serviceStatus' })
+    status.then(
+      (answer) => {
+        line.replaceChildren(...statusParts(answer, host.now()))
+        reviewCount = answer.reviewCount
+        paintNav()
+      },
+      () => {
+        line.replaceChildren(el('span', { class: 'problem' }, '状态读取失败'))
+      },
+    )
+  }
+
+  const render = async (): Promise<void> => {
+    for (const cleanup of leaving) cleanup()
+    leaving = []
+    refreshStatus()
+    paintNav()
     main.replaceChildren()
-    const route = ROUTES.find(([target]) => target === path)
-    if (route === undefined) {
-      main.append(el('p', { class: 'empty' }, '找不到这个页面。'))
+    const path = window.location.pathname
+    const view = TABS.find(([target]) => target === path)?.[2] ?? PAGES.find(([page]) => page === path)?.[2]
+    if (view === undefined) {
+      main.append(el('div', { class: 'empty' }, el('strong', {}, '找不到这个页面')))
       return
     }
-    await route[2](ctx)
+    await view(ctx)
   }
   const go = (path: string) => {
     window.history.pushState(null, '', path)
     void render()
   }
-  const ctx: ViewContext = { main, host, go }
+  const ctx: ViewContext = {
+    main,
+    host,
+    go,
+    status: () => status,
+    refreshStatus,
+    onLeave: (cleanup) => {
+      leaving.push(cleanup)
+    },
+  }
   window.addEventListener('popstate', () => {
     void render()
   })

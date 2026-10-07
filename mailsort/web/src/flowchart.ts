@@ -1,16 +1,16 @@
 /**
  * The flow of mail through the pipeline (../../docs/design.md §10) as a Sankey diagram: 新邮件 on the left, the stage
- * that handled each mail in the middle (跳过, 规则, 向量近邻, Clef 27B, Clef-flash, 延后), and on the right each leaf label
- * written to Gmail, 拿不准 (left in the inbox) and 影子建议 (suggested, nothing written). Link widths are mail counts.
+ * that handled each mail in the middle (跳过, 规则, 向量近邻, Clef 27B, Clef-flash, 未调用模型, 延后), and on the right each
+ * leaf label written to Gmail, 拿不准 (left in the inbox) and 影子建议 (suggested, nothing written). Link widths are mail
+ * counts. With no mail at all it draws the skeleton instead: every stage and outcome at 0, muted nodes and hairline
+ * links, so the diagram is always there.
  *
  * d3-sankey only lays the graph out (positions); the SVG is plain DOM in the page's theme: every color is a CSS token
  * (styles.css, light and dark), labels are grouped and colored by their top-level path segment in a fixed order (the
- * labels' own order, so a range or filter never repaints one of the first eight; a later group borrows a hue the range
- * leaves free, groupSlots), and only a range showing more than eight groups has gray ones.
- * Color is never the only cue: every right-hand node is labelled with its name and count, and the breakdown table
- * (views/flow.ts) has every number. Hover or focus shows a node's or link's exact count and share; a label node opens
- * that label's 操作记录 (click, Enter or Space). Motion is a short opacity change, off under prefers-reduced-motion
- * (styles.css).
+ * labels' own order, so a day never repaints one of the first eight; a later group borrows a hue the day leaves free,
+ * groupSlots), and only a day showing more than eight groups has gray ones. Color is never the only cue: every node
+ * is named with its count. Hover or focus shows a node's or link's exact count and share. Motion is a short opacity
+ * change, off under prefers-reduced-motion (styles.css).
  */
 import { sankey, sankeyLeft, sankeyLinkHorizontal, type SankeyLink, type SankeyNode } from 'd3-sankey'
 import { MailFlow_Outcome, MailFlow_Stage, type MailFlow_Count } from '@ziyixi/proto/mailsort/ui/v1/flow_pb'
@@ -26,8 +26,6 @@ export interface FlowNodeData {
   readonly id: string
   readonly name: string
   readonly kind: NodeKind
-  /** The label's resource name (labels/x), for a label node. */
-  readonly label?: string
   /** The color slot (1-8), 0 for gray. */
   readonly slot: number
   /** The top-level group of a label node. */
@@ -42,28 +40,11 @@ export interface FlowLinkData {
   readonly value: number
 }
 
-export interface BreakdownRow {
-  readonly label: string
-  readonly name: string
-  readonly slot: number
-  readonly written: number
-  readonly archived: number
-  readonly kept: number
-  readonly suggested: number
-  readonly byRule: number
-  /** Decided by three unanimous neighbours, without the model. */
-  readonly byNeighbours: number
-  /** Decided by Clef or Clef-flash. */
-  readonly byModel: number
-  readonly corrected: number
-}
-
 export interface FlowGraph {
   /** Mails that entered the pipeline (corrections are not mails). */
   readonly total: number
   readonly nodes: readonly FlowNodeData[]
   readonly links: readonly FlowLinkData[]
-  readonly breakdown: readonly BreakdownRow[]
   /** Top-level groups in color order, for the legend. */
   readonly groups: readonly { readonly name: string; readonly slot: number }[]
 }
@@ -114,7 +95,7 @@ export function groupSlots(labels: readonly Label[], shown: ReadonlySet<string>)
   return slots
 }
 
-/** The graph and the breakdown of one MailFlow's counters. `labels` give names, order and groups. */
+/** The graph of one MailFlow's counters (corrections are not mails, so not in it). `labels` give names, order and groups. */
 export function flowGraph(counts: readonly MailFlow_Count[], labels: readonly Label[]): FlowGraph {
   const byName = new Map(labels.map((label) => [label.name, label]))
   const nameOf = (label: string) => byName.get(label)?.displayName ?? '（已删除的标签）'
@@ -128,15 +109,6 @@ export function flowGraph(counts: readonly MailFlow_Count[], labels: readonly La
     const key = `${source}\u0000${target}`
     links.set(key, (links.get(key) ?? 0) + value)
   }
-  const rows = new Map<string, { written: number; archived: number; kept: number; suggested: number; byRule: number; byNeighbours: number; byModel: number; corrected: number }>()
-  const row = (label: string) => {
-    let found = rows.get(label)
-    if (found === undefined) {
-      found = { written: 0, archived: 0, kept: 0, suggested: 0, byRule: 0, byNeighbours: 0, byModel: 0, corrected: 0 }
-      rows.set(label, found)
-    }
-    return found
-  }
   const skipped = new Map<string, number>()
   let total = 0
   for (const count of counts) {
@@ -144,10 +116,7 @@ export function flowGraph(counts: readonly MailFlow_Count[], labels: readonly La
     if (n <= 0) continue
     const stage = STAGES.find(([value]) => value === count.stage)?.[1]
     if (stage === undefined) continue
-    if (count.outcome === MailFlow_Outcome.CORRECTED) {
-      if (count.label !== '') row(count.label).corrected += n
-      continue
-    }
+    if (count.outcome === MailFlow_Outcome.CORRECTED) continue
     total += n
     add('new', stage, n)
     if (stage === 'skipped') {
@@ -156,26 +125,10 @@ export function flowGraph(counts: readonly MailFlow_Count[], labels: readonly La
       continue
     }
     if (stage === 'deferred') continue
-    // Who decided: a rule, the neighbours (no model call), or a model; the diagram shows the same three apart.
-    const credit = (item: { byRule: number; byNeighbours: number; byModel: number }) => {
-      if (stage === 'rule') item.byRule += n
-      else if (stage === 'neighbours') item.byNeighbours += n
-      else item.byModel += n
-    }
     if (count.outcome === MailFlow_Outcome.ARCHIVED || count.outcome === MailFlow_Outcome.KEPT_IN_INBOX) {
       add(stage, `label:${count.label}`, n)
-      const item = row(count.label)
-      item.written += n
-      if (count.outcome === MailFlow_Outcome.ARCHIVED) item.archived += n
-      else item.kept += n
-      credit(item)
     } else if (count.outcome === MailFlow_Outcome.SUGGESTED) {
       add(stage, 'suggested', n)
-      if (count.label !== '') {
-        const item = row(count.label)
-        item.suggested += n
-        credit(item)
-      }
     } else if (count.outcome === MailFlow_Outcome.UNSURE) {
       add(stage, 'unsure', n)
     }
@@ -183,7 +136,6 @@ export function flowGraph(counts: readonly MailFlow_Count[], labels: readonly La
 
   const used = new Set([...links.keys()].flatMap((key) => key.split('\u0000')))
   const shownGroups = new Set([...used].filter((id) => id.startsWith('label:')).map((id) => groupOf(id.slice('label:'.length))))
-  for (const label of rows.keys()) shownGroups.add(groupOf(label))
   groupSlot = groupSlots(labels, shownGroups)
   const nodes: FlowNodeData[] = []
   if (used.has('new')) nodes.push({ id: 'new', name: '新邮件', kind: 'source', slot: 0 })
@@ -206,13 +158,10 @@ export function flowGraph(counts: readonly MailFlow_Count[], labels: readonly La
   }
   const labelIds = [...used].filter((id) => id.startsWith('label:')).map((id) => id.slice('label:'.length))
   labelIds.sort((a, b) => order(a) - order(b) || (a < b ? -1 : 1))
-  for (const label of labelIds) nodes.push({ id: `label:${label}`, name: nameOf(label), kind: 'label', label, slot: slotOf(label), group: topLevel(byName.get(label)?.displayName ?? '') })
+  for (const label of labelIds) nodes.push({ id: `label:${label}`, name: nameOf(label), kind: 'label', slot: slotOf(label), group: groupOf(label) })
   if (used.has('unsure')) nodes.push({ id: 'unsure', name: '拿不准（留在收件箱）', kind: 'unsure', slot: 0 })
   if (used.has('suggested')) nodes.push({ id: 'suggested', name: '影子建议（未写入）', kind: 'suggested', slot: 0 })
 
-  const breakdown = [...rows.entries()]
-    .sort(([a], [b]) => order(a) - order(b) || (a < b ? -1 : 1))
-    .map(([label, item]) => ({ label, name: nameOf(label), slot: slotOf(label), ...item }))
   // In color order (home slots first), the legend's order.
   const groups = [...groupSlot.entries()].map(([name, slot]) => ({ name, slot }))
   return {
@@ -222,8 +171,35 @@ export function flowGraph(counts: readonly MailFlow_Count[], labels: readonly La
       const [source = '', target = ''] = key.split('\u0000')
       return { source, target, value }
     }),
-    breakdown,
     groups,
+  }
+}
+
+/**
+ * The graph of a day without mail: every stage and outcome and each path a mail can take, all at 0. 打标签 stands for
+ * the labels (a label is a node of its own once it has mail).
+ */
+export function skeletonGraph(): FlowGraph {
+  const stage = ([, id, name]: (typeof STAGES)[number]): FlowNodeData => ({ id, name, kind: id === 'skipped' || id === 'deferred' ? 'terminal' : 'stage', slot: 0 })
+  const decided = ['rule', 'neighbours', 'clef', 'clef-flash']
+  return {
+    total: 0,
+    nodes: [
+      { id: 'new', name: '新邮件', kind: 'source', slot: 0 },
+      ...STAGES.map(stage),
+      { id: 'written', name: '打标签', kind: 'label', slot: 0 },
+      { id: 'unsure', name: '拿不准（留在收件箱）', kind: 'unsure', slot: 0 },
+      { id: 'suggested', name: '影子建议（未写入）', kind: 'suggested', slot: 0 },
+    ],
+    links: [
+      ...STAGES.map(([, id]) => ({ source: 'new', target: id, value: 0 })),
+      ...decided.flatMap((id) => [
+        { source: id, target: 'written', value: 0 },
+        { source: id, target: 'suggested', value: 0 },
+      ]),
+      ...['clef', 'clef-flash', 'no_model'].map((id) => ({ source: id, target: 'unsure', value: 0 })),
+    ],
+    groups: [],
   }
 }
 
@@ -255,52 +231,47 @@ function fillOf(node: FlowNodeData): string {
   return 'var(--flow-node)'
 }
 
-export interface SankeyOptions {
-  /** The compact version (运行状态): shorter, no group legend. */
-  readonly compact?: boolean
-  /** A label node was chosen (its 操作记录). */
-  readonly onLabel?: (label: string) => void
-}
-
 type Node = SankeyNode<FlowNodeData, FlowLinkData>
 type Link = SankeyLink<FlowNodeData, FlowLinkData>
 
-/** The diagram of `graph`: an SVG in a horizontally scrollable box, with its tooltip. */
-export function sankeyChart(graph: FlowGraph, options: SankeyOptions = {}): HTMLElement {
-  const compact = options.compact === true
-  const box = el('div', { class: `flow-chart${compact ? ' compact' : ''}` })
+/**
+ * The diagram of `graph`: an SVG in a horizontally scrollable box, with its tooltip. A graph without mail is drawn as
+ * the skeleton (skeletonGraph): laid out as if each path carried one mail, then drawn with hairline links, muted
+ * nodes and every count 0.
+ */
+export function sankeyChart(graph: FlowGraph): HTMLElement {
+  const zero = graph.total === 0
+  const drawn = zero ? skeletonGraph() : graph
+  const box = el('div', { class: 'flow-chart' })
   const scroll = el('div', { class: 'flow-scroll' })
   const tip = el('div', { class: 'flow-tip', role: 'status', hidden: true })
   box.append(scroll, tip)
-  if (graph.total === 0) {
-    scroll.append(el('p', { class: 'empty' }, '这段时间还没有邮件经过。'))
-    return box
-  }
   // The drawing's own coordinates: wide enough for three columns and their names. The SVG has no fixed size and
   // scales to its box (styles.css .flow-svg); below its minimum width, on a phone, the box scrolls sideways instead.
-  const width = compact ? 560 : 720
-  const rightNodes = graph.nodes.filter((node) => node.kind === 'label' || node.kind === 'unsure' || node.kind === 'suggested').length
+  const width = 720
+  const rightNodes = drawn.nodes.filter((node) => node.kind === 'label' || node.kind === 'unsure' || node.kind === 'suggested').length
   // Each right-hand node gets room for its name even at one mail (12 px text, at least 14 px apart).
-  const height = compact ? Math.max(160, 26 * rightNodes + 40) : Math.max(260, 30 * rightNodes + 60)
+  const height = Math.max(260, 30 * rightNodes + 60)
   const margin = { left: 6, right: 170, top: 8, bottom: 8 }
   const layout = sankey<FlowNodeData, FlowLinkData>()
     .nodeId((node) => node.id)
     .nodeAlign(sankeyLeft)
     .nodeWidth(10)
-    .nodePadding(compact ? 14 : 16)
+    .nodePadding(16)
     // Keep the given order (stages, then labels by the labels' order) instead of d3's own.
-    .nodeSort((a, b) => graph.nodes.findIndex((node) => node.id === a.id) - graph.nodes.findIndex((node) => node.id === b.id))
+    .nodeSort((a, b) => drawn.nodes.findIndex((node) => node.id === a.id) - drawn.nodes.findIndex((node) => node.id === b.id))
     .extent([
       [margin.left, margin.top],
       [width - margin.right, height - margin.bottom],
     ])
-  const { nodes, links } = layout({ nodes: graph.nodes.map((node) => ({ ...node })), links: graph.links.map((link) => ({ ...link })) })
+  const { nodes, links } = layout({ nodes: drawn.nodes.map((node) => ({ ...node })), links: drawn.links.map((link) => ({ ...link, value: zero ? 1 : link.value })) })
 
-  // role=group, not img: an image's children are presentational, and the nodes are focusable links and images that a
-  // screen reader must be able to reach.
-  const chart = svg('svg', { viewBox: `0 0 ${String(width)} ${String(height)}`, preserveAspectRatio: 'xMinYMin meet', class: 'flow-svg', role: 'group', 'aria-label': `邮件流程：共 ${String(graph.total)} 封` })
-  chart.append(svg('title', {}, `邮件流程：共 ${String(graph.total)} 封`))
-  const show = (text: string[], event?: { clientX: number; clientY: number }) => {
+  // role=group, not img: an image's children are presentational, and the nodes are focusable images that a screen
+  // reader must be able to reach.
+  const title = zero ? '邮件流程：还没有邮件' : `邮件流程：共 ${String(graph.total)} 封`
+  const chart = svg('svg', { viewBox: `0 0 ${String(width)} ${String(height)}`, preserveAspectRatio: 'xMinYMin meet', class: 'flow-svg', role: 'group', 'aria-label': title })
+  chart.append(svg('title', {}, title))
+  const show = (text: readonly string[], event?: { clientX: number; clientY: number }) => {
     tip.replaceChildren(...text.map((line, index) => (index === 0 ? el('strong', {}, line) : el('span', {}, line))))
     tip.hidden = false
     if (event !== undefined) {
@@ -319,6 +290,16 @@ export function sankeyChart(graph: FlowGraph, options: SankeyOptions = {}): HTML
   const hide = () => {
     tip.hidden = true
   }
+  const hover = (target: SVGElement, lines: readonly string[]) => {
+    target.addEventListener('pointerenter', (event) => {
+      show(lines, event)
+    })
+    target.addEventListener('pointermove', (event) => {
+      show(lines, event)
+    })
+    target.addEventListener('pointerleave', hide)
+  }
+  const amount = (value: number) => (zero ? '0 封' : `${String(value)} 封 · 占全部 ${share(value, graph.total)}`)
   const nodeOf = (end: Link['source']) => end as Node
   const linkGroup = svg('g', { class: 'flow-links', fill: 'none' })
   const path = sankeyLinkHorizontal<FlowNodeData, FlowLinkData>()
@@ -326,16 +307,9 @@ export function sankeyChart(graph: FlowGraph, options: SankeyOptions = {}): HTML
     const source = nodeOf(link.source)
     const target = nodeOf(link.target)
     const d = path(link) ?? ''
-    const stroke = target.kind === 'label' ? fillOf(target) : target.kind === 'unsure' ? 'var(--warn)' : 'var(--flow-link)'
-    const shape = svg('path', { d, stroke, 'stroke-width': Math.max(1, link.width ?? 1), class: `flow-link${target.kind === 'suggested' ? ' dashed' : ''}` })
-    const lines = [`${source.name} → ${target.name}`, `${String(link.value)} 封 · 占全部 ${share(link.value, graph.total)}`]
-    shape.addEventListener('pointerenter', (event) => {
-      show(lines, event)
-    })
-    shape.addEventListener('pointermove', (event) => {
-      show(lines, event)
-    })
-    shape.addEventListener('pointerleave', hide)
+    const stroke = zero ? 'var(--flow-zero)' : target.kind === 'label' ? fillOf(target) : target.kind === 'unsure' ? 'var(--warn)' : 'var(--flow-link)'
+    const shape = svg('path', { d, stroke, 'stroke-width': zero ? 1 : Math.max(1, link.width ?? 1), class: `flow-link${zero ? ' zero' : ''}${target.kind === 'suggested' ? ' dashed' : ''}` })
+    hover(shape, [`${source.name} → ${target.name}`, amount(link.value)])
     linkGroup.append(shape)
   }
   chart.append(linkGroup)
@@ -346,51 +320,32 @@ export function sankeyChart(graph: FlowGraph, options: SankeyOptions = {}): HTML
     const x1 = node.x1 ?? 0
     const y0 = node.y0 ?? 0
     const y1 = node.y1 ?? 0
-    const value = node.value ?? 0
-    const lines = [node.name, `${String(value)} 封 · 占全部 ${share(value, graph.total)}`, ...(node.detail ?? []), ...(node.kind === 'label' ? ['点击查看这个标签的操作记录'] : [])]
+    const value = zero ? 0 : (node.value ?? 0)
+    const lines = [node.name, amount(value), ...(zero ? [] : (node.detail ?? []))]
     const group = svg('g', {
-      class: `flow-node kind-${node.kind}`,
+      class: `flow-node kind-${node.kind}${zero ? ' zero' : ''}`,
       tabindex: 0,
-      role: node.kind === 'label' ? 'link' : 'img',
-      'aria-label': `${node.name}：${String(value)} 封，占 ${share(value, graph.total)}`,
+      role: 'img',
+      'aria-label': zero ? `${node.name}：0 封` : `${node.name}：${String(value)} 封，占 ${share(value, graph.total)}`,
     })
-    group.append(svg('rect', { x: x0, y: y0, width: Math.max(1, x1 - x0), height: Math.max(1, y1 - y0), rx: 2, fill: fillOf(node) }))
+    group.append(svg('rect', { x: x0, y: y0, width: Math.max(1, x1 - x0), height: Math.max(1, y1 - y0), rx: 2, fill: zero ? 'var(--flow-zero)' : fillOf(node) }))
     // Every node's name and count right of it (a halo in the surface color keeps it readable over the links).
     const text = svg('text', { x: x1 + 6, y: (y0 + y1) / 2, dy: '0.35em', class: 'flow-text' })
     text.append(svg('tspan', {}, node.name), svg('tspan', { class: 'flow-count', dx: 6 }, String(value)))
     group.append(text)
-    group.addEventListener('pointerenter', (event) => {
-      show(lines, event)
-    })
-    group.addEventListener('pointermove', (event) => {
-      show(lines, event)
-    })
-    group.addEventListener('pointerleave', hide)
+    hover(group, lines)
     group.addEventListener('focus', () => {
       show(lines)
     })
     group.addEventListener('blur', hide)
-    const label = node.label
-    if (node.kind === 'label' && label !== undefined && options.onLabel !== undefined) {
-      const open = options.onLabel
-      group.addEventListener('click', () => {
-        open(label)
-      })
-      group.addEventListener('keydown', (event) => {
-        if (event.key === 'Enter' || event.key === ' ') {
-          event.preventDefault()
-          open(label)
-        }
-      })
-    }
     nodeGroup.append(group)
   }
   chart.append(nodeGroup)
   scroll.append(chart)
-  // The legend names the groups this range shows (every label node is also named in the diagram itself).
-  const shown = new Set(graph.nodes.filter((node) => node.kind === 'label').map((node) => node.group))
-  const groups = graph.groups.filter((group) => shown.has(group.name))
-  if (!compact && groups.length > 0) {
+  // The legend names the groups this day shows (every label node is also named in the diagram itself).
+  const shown = new Set(drawn.nodes.filter((node) => node.kind === 'label').map((node) => node.group))
+  const groups = drawn.groups.filter((group) => shown.has(group.name))
+  if (groups.length > 0) {
     box.append(
       el(
         'ul',
@@ -398,7 +353,7 @@ export function sankeyChart(graph: FlowGraph, options: SankeyOptions = {}): HTML
         ...groups.map((group) => {
           const swatch = el('span', { class: 'swatch' })
           swatch.style.background = group.slot === 0 ? 'var(--muted)' : `var(--series-${String(group.slot)})`
-          return el('li', {}, swatch, group.slot === 0 ? `${group.name}（灰色：此范围的分组超过八种颜色）` : group.name)
+          return el('li', {}, swatch, group.slot === 0 ? `${group.name}（灰色：分组超过八种颜色）` : group.name)
         }),
       ),
     )

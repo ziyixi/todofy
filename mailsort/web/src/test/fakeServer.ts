@@ -1,48 +1,49 @@
 /**
  * An in-memory stand-in for the Worker's owner API (proto/mailsort/ui/v1), served by the same shared transcoder the
  * Worker uses, so every request is routed, decoded strictly and answered in the wire JSON profile as in production. It
- * keeps a few labels, review items, rules and the settings; a method it does not model answers UNIMPLEMENTED. Every
+ * keeps a few labels, review items, rules, ledger entries, the flow, the status and the settings; a method it does not
+ * model (ImportRules, ExportRules and the examples, which the UI no longer shows) answers UNIMPLEMENTED. Every
  * request must be a same-origin /api path, and a mutation must carry the CSRF header.
  */
 import { vi } from 'vitest'
 import { updatePaths } from '@ziyixi/proto/field-mask'
 import { HttpTranscoder, type ServiceHandlers, type ShapeOf } from '@ziyixi/proto/http-transcoder'
 import { create } from '@ziyixi/proto/protobuf'
-import { EmptySchema, timestampFromMs } from '@ziyixi/proto/protobuf/wkt'
+import { EmptySchema, timestampFromMs, timestampMs } from '@ziyixi/proto/protobuf/wkt'
 import { Code, RpcError } from '@ziyixi/proto/rpc-status'
 import { Label_GmailState, LabelSchema, type Label } from '@ziyixi/proto/mailsort/ui/v1/label_pb'
 import { MailFlow_CountSchema, MailFlowSchema, type MailFlow_Count } from '@ziyixi/proto/mailsort/ui/v1/flow_pb'
 import {
   ExportGmailFiltersResponseSchema,
-  ExportRulesResponseSchema,
-  ImportChange_Action,
-  ImportChange_Kind,
-  ImportChangeSchema,
-  ImportRulesResponseSchema,
-  type ImportRulesRequest,
-  ListExamplesResponseSchema,
   ListLabelsResponseSchema,
   ListLedgerEntriesResponseSchema,
   ListReviewItemsResponseSchema,
-  LabelImportSchema,
   ListRulesResponseSchema,
   MailsortUiService,
   SyncLabelsResponseSchema,
   UndoLedgerEntriesResponseSchema,
 } from '@ziyixi/proto/mailsort/ui/v1/mailsort_ui_service_pb'
 import {
-  ExampleSchema,
   LedgerEntry_State,
   LedgerEntrySchema,
   ReviewItem_Kind,
   ReviewItem_State,
   ReviewItemSchema,
-  type Example,
   type LedgerEntry,
   type ReviewItem,
 } from '@ziyixi/proto/mailsort/ui/v1/review_pb'
 import { Rule_State, RuleSchema, type Rule } from '@ziyixi/proto/mailsort/ui/v1/rule_pb'
-import { AccuracyReportSchema, Mode, ServiceStatus_AuthState, ServiceStatusSchema, SettingsSchema, type Settings } from '@ziyixi/proto/mailsort/ui/v1/status_pb'
+import {
+  AccuracyReportSchema,
+  LabelAccuracySchema,
+  Mode,
+  ServiceStatus_AuthState,
+  ServiceStatusSchema,
+  SettingsSchema,
+  type LabelAccuracy,
+  type ServiceStatus,
+  type Settings,
+} from '@ziyixi/proto/mailsort/ui/v1/status_pb'
 import { resetClientForTests } from '../api.ts'
 
 export const NOW = Date.parse('2026-10-01T08:00:00Z')
@@ -87,10 +88,6 @@ export function ledgerEntry(id: string, init: Partial<LedgerEntry> = {}): Ledger
   }), init)
 }
 
-export function example(id: string): Example {
-  return create(ExampleSchema, { name: `examples/${id}`, label: 'labels/newsletter', summary: `例子 ${id}`, embedded: true, createTime: timestampFromMs(NOW) })
-}
-
 /** One flow counter. */
 export function flowCount(stage: MailFlow_Count['stage'], outcome: MailFlow_Count['outcome'], label: string, mailCount: number): MailFlow_Count {
   return create(MailFlow_CountSchema, { stage, outcome, label, mailCount })
@@ -113,13 +110,14 @@ export class FakeServer {
   reviewItems: ReviewItem[] = []
   rules: Rule[] = []
   ledgerEntries: LedgerEntry[] = []
-  examples: Example[] = []
   /** Rules the export leaves out (trust rules). */
   exportSkipped = 0
   /** GetMailFlow's counters, whatever the range. */
   flow: MailFlow_Count[] = []
-  /** The ImportRules requests received (validate_only ones included). */
-  readonly imports: ImportRulesRequest[] = []
+  /** GetAccuracyReport's rows; null: every label with 40 confirmations and a bound of 0.92. */
+  accuracy: LabelAccuracy[] | null = null
+  /** Fields of GetServiceStatus that a test sets (the rest as below; review_count counts the pending items). */
+  status: Partial<ServiceStatus> = {}
   settings: Settings = create(SettingsSchema, { name: 'settings', mode: Mode.SHADOW, effectiveMode: Mode.SHADOW, runWriteLimit: 10, dailyWriteLimit: 150, dailyNeuronBudget: 7000, defaultThreshold: 0.8, precisionTarget: 0.9, etag: 's1' })
   private readonly transcoder: HttpTranscoder<ShapeOf<typeof MailsortUiService>, null>
 
@@ -158,10 +156,6 @@ export class FakeServer {
         this.rules.push(rule)
         return Promise.resolve(rule)
       },
-      listExamples: (request) => {
-        const { items, next } = page(this.examples, request.pageSize, request.pageToken)
-        return Promise.resolve(create(ListExamplesResponseSchema, { examples: items, nextPageToken: next }))
-      },
       listLedgerEntries: (request) => {
         const entries = request.label === '' ? this.ledgerEntries : this.ledgerEntries.filter((item) => item.label === request.label)
         const { items, next } = page(entries, request.pageSize, request.pageToken)
@@ -173,9 +167,13 @@ export class FakeServer {
         Object.assign(found, { state: LedgerEntry_State.UNDONE, undoable: false })
         return Promise.resolve(found)
       },
-      // As the Worker: at most 20 per call, newest first, and how many undoable entries are left.
+      // As the Worker: the range's entries (of the label when set), at most 20 per call, newest first, and how many
+      // undoable entries are left.
       undoLedgerEntries: (request) => {
-        const open = this.ledgerEntries.filter((item) => item.undoable && (request.label === '' || item.label === request.label))
+        const from = request.startTime === undefined ? 0 : timestampMs(request.startTime)
+        const to = request.endTime === undefined ? 0 : timestampMs(request.endTime)
+        const inRange = (item: LedgerEntry) => item.createTime !== undefined && timestampMs(item.createTime) >= from && timestampMs(item.createTime) < to
+        const open = this.ledgerEntries.filter((item) => item.undoable && inRange(item) && (request.label === '' || item.label === request.label))
         const batch = open.slice(0, 20)
         for (const item of batch) Object.assign(item, { state: LedgerEntry_State.UNDONE, undoable: false })
         return Promise.resolve(create(UndoLedgerEntriesResponseSchema, { undoneCount: batch.length, failedCount: 0, remainingCount: open.length - batch.length }))
@@ -191,47 +189,35 @@ export class FakeServer {
         return Promise.resolve(create(ExportGmailFiltersResponseSchema, { xml: '<feed/>', ruleCount: active.length, skippedCount: this.exportSkipped }))
       },
       getMailFlow: (request) => Promise.resolve(create(MailFlowSchema, { name: request.name, startTime: timestampFromMs(NOW - 3_600_000), endTime: timestampFromMs(NOW), counts: this.flow })),
-      // As the Worker, simplified: a rule whose match has no key is invalid; every other entry is a create.
-      importRules: (request) => {
-        this.imports.push(request)
-        const rules = request.rules.map((rule, index) => {
-          const keys = [rule.match?.fromAddress, rule.match?.fromDomain, rule.match?.listId, rule.match?.toAddress].filter((value) => value !== undefined && value !== '')
-          return create(ImportChangeSchema, { kind: ImportChange_Kind.RULE, index, key: rule.id, action: keys.length === 1 ? ImportChange_Action.CREATE : ImportChange_Action.INVALID, problem: keys.length === 1 ? '' : 'match' })
-        })
-        const labels = request.useTemplate
-          ? [create(LabelImportSchema, { path: '账号安全', description: '账号安全通知', trust: true, keepInInbox: true }), create(LabelImportSchema, { path: '金融/投资', description: '券商对账单', trust: true })]
-          : request.labels
-        const invalid = rules.filter((change) => change.action === ImportChange_Action.INVALID).length
-        if (invalid > 0 && !request.validateOnly) throw new RpcError(Code.INVALID_ARGUMENT, 'INVALID_IMPORT', 'invalid')
-        return Promise.resolve(
-          create(ImportRulesResponseSchema, {
-            changes: [...labels.map((item, index) => create(ImportChangeSchema, { kind: ImportChange_Kind.LABEL, index, key: item.path.replace(/^分拣\//, ''), action: ImportChange_Action.CREATE })), ...rules],
-            applied: !request.validateOnly,
-            createdLabelCount: labels.length,
-            createdRuleCount: rules.length - invalid,
-            invalidCount: invalid,
-            labels,
+      getAccuracyReport: () =>
+        Promise.resolve(
+          create(AccuracyReportSchema, {
+            name: 'accuracyReport',
+            labels: this.accuracy ?? this.labels.map((item) => create(LabelAccuracySchema, { label: item.name, confirmedCount: 40, precisionLowerBound: 0.92 })),
+            decidedCount: 50,
+            unsureCount: 5,
+            coverage: 0.9,
+            precisionTarget: 0.9,
           }),
-        )
-      },
-      exportRules: () => Promise.resolve(create(ExportRulesResponseSchema, { json: '{"labels": [], "rules": []}\n', labelCount: this.labels.length, ruleCount: this.rules.length })),
-      getAccuracyReport: () => Promise.resolve(create(AccuracyReportSchema, { name: 'accuracyReport', labels: this.labels.map((item) => ({ label: item.name, confirmedCount: 40, precisionLowerBound: 0.92 })), decidedCount: 50, unsureCount: 5, coverage: 0.9, precisionTarget: 0.9 })),
+        ),
       getServiceStatus: () =>
         Promise.resolve(
-          create(ServiceStatusSchema, {
+          Object.assign(create(ServiceStatusSchema, {
             name: 'serviceStatus',
             effectiveMode: this.settings.effectiveMode,
             authState: ServiceStatus_AuthState.OK,
             writeScope: false,
             lastSyncTime: timestampFromMs(NOW - 120_000),
+            nextAlarmTime: timestampFromMs(NOW + 300_000),
             pendingCount: 2,
+            reviewCount: this.reviewItems.filter((item) => item.state === ReviewItem_State.PENDING).length,
             decidedTodayCount: 12,
             neuronsToday: 523.4,
             dailyNeuronBudget: 7000,
             decisionModel: 'clef',
             recentErrorCodes: ['gmail_429'],
             build: 'test',
-          }),
+          }), this.status),
         ),
       getSettings: () => Promise.resolve(this.settings),
       updateSettings: (request) => {

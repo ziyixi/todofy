@@ -1,9 +1,9 @@
 /**
- * The settings checkboxes (标签's 启用, 正式打, 归档, 可信类, 敏感; 规则's 留在收件箱, 需要 DMARC) keep the box and its own
- * text on one row at any width. jsdom has no layout, so this pins the two things the row depends on: the markup (the
- * box and one text column, the hint inside that column) and the rules of styles.css (no wrapping, a shrinkable text
- * column, the hint a block). At 375 px the old `flex-wrap: wrap` moved the box onto the line of the setting above it
- * (QA D2); the layout was also checked by hand in a 375 px browser.
+ * The switches (标签's 启用, 正式打, 归档, 可信类, 敏感; 规则's 留在收件箱, 需要 DMARC) keep the switch and its own text on
+ * one row at any width. jsdom has no layout, so this pins the two things the row depends on: the markup (the switch
+ * and one text column, the hint inside that column) and the rules of styles.css (no wrapping, a shrinkable text
+ * column, the hint a block, a switch that never shrinks). At 375 px the old `flex-wrap: wrap` moved the box onto the
+ * line of the setting above it (QA D2); that layout was checked by hand in a 375 px browser, the switch is not yet.
  */
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -41,8 +41,8 @@ async function open(server: FakeServer, path: string): Promise<HTMLElement> {
   return root
 }
 
-describe('settings checkboxes share a row with their own text', () => {
-  it('never wraps the box away from its text', () => {
+describe('switches share a row with their own text', () => {
+  it('never wraps the switch away from its text', () => {
     const check = rule('.check')
     expect(check.get('display')).toBe('flex')
     expect(check.get('flex-wrap')).toBe('nowrap')
@@ -51,11 +51,11 @@ describe('settings checkboxes share a row with their own text', () => {
     expect(text.get('flex')).toBe('1 1 auto')
     expect(text.get('min-width')).toBe('0')
     expect(rule('.check .hint').get('display')).toBe('block')
-    // The box itself never shrinks or grows (input[type='checkbox'] is flex: none).
-    expect(rule("input[type='checkbox']").get('flex')).toBe('none')
+    // The switch itself never shrinks or grows.
+    expect(rule('input.switch').get('flex')).toBe('none')
   })
 
-  it('renders each switch as the box and one text column holding its name and hint', async () => {
+  it('renders each switch as the switch and one text column holding its name and hint', async () => {
     const server = new FakeServer()
     server.labels = [label('travel', '出行')]
     const labels = await open(server, '/labels')
@@ -65,6 +65,7 @@ describe('settings checkboxes share a row with their own text', () => {
     expect(names).toEqual(expect.arrayContaining(['启用', '正式打', '可信类', '归档', '敏感', '留在收件箱', '需要 DMARC']))
     for (const node of checks) {
       expect([...node.children].map((child) => child.tagName)).toEqual(['INPUT', 'SPAN'])
+      expect(node.children[0]?.classList.contains('switch')).toBe(true)
       expect(node.children[1]?.querySelector('.hint')).not.toBeNull()
     }
   })
