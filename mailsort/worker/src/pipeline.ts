@@ -435,7 +435,8 @@ async function decideMail(ctx: MailContext, messageId: string, attempts: number)
   // The outcome: a Gmail write (live in force now, a live label, a write grant), a suggestion, or unsure. The caps are
   // the gate's, right before the write: a write it refuses becomes a suggestion like any failed write.
   const label = decision.confident ? labels.find((item) => item.id === decision.label) : undefined;
-  const apply = decision.confident && label !== undefined && label.live === 1 && label.gmail_state !== 'missing' && writesLive(store, ctx.ceiling);
+  // A label missing from Gmail, or whose path names a Gmail label not its own, writes nothing until the owner acts.
+  const apply = decision.confident && label !== undefined && label.live === 1 && label.gmail_state !== 'missing' && label.gmail_name_taken !== 1 && writesLive(store, ctx.ceiling);
   // Archive (remove INBOX) unless the label or the deciding rule keeps the mail in the inbox; keeping is the safe
   // direction, so either one is enough.
   const archive = !(label?.keep_in_inbox === 1 || (decision.confident && decision.keepInInbox === true));

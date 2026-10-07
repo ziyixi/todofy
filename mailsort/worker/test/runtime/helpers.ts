@@ -12,13 +12,14 @@ import { allowedOperation, FORBIDDEN_LABELS } from '../fakes/table.ts';
 import { op, type Harness } from './harness.ts';
 
 export function checkGoogleCalls(h: Harness): void {
-  // Owned: the labels mailsort created and the ones a test made for it to adopt; never another label of the owner's.
+  // Owned: the leaf labels mailsort created and the ones a test made for it to adopt; never another of the owner's.
   const owned = h.up.gmail.mailsortLabelIds();
   for (const call of h.up.gmail.calls) {
-    // The modify's ledger state and the store's planned names at send time are checked by the guard itself; here: the
-    // table's shapes and owned labels.
+    // A label's name against the store's paths when it was sent (FakeUpstream.plannedPaths). The modify's ledger state
+    // at send time is the guard's own check; here: the table's shapes and owned labels.
+    const planned = new Set(call.planned ?? []);
     const ledger = () => ({ state: call.body.includes('"addLabelIds":["INBOX"]') || (call.body.includes('removeLabelIds') && !call.body.includes('addLabelIds')) ? 'undo_intended' : 'intended', archived: call.body.includes('INBOX') });
-    expect(allowedOperation(call.method, call.url, call.body, { owned, planned: null, ledger }), `${call.method} ${call.url} ${call.body}`).not.toBeNull();
+    expect(allowedOperation(call.method, call.url, call.body, { owned, planned, ledger }), `${call.method} ${call.url} ${call.body}`).not.toBeNull();
     for (const label of FORBIDDEN_LABELS) expect(call.body).not.toContain(`"${label}"`);
   }
   expect(h.up.strays).toEqual([]);

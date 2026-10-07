@@ -403,7 +403,7 @@ describe('the store', () => {
     expect(s.count(`SELECT count(*) AS n FROM gmail_parents`)).toBe(1);
   });
 
-  it('migrates a version 3 database to 4: its labels and rules are kept as they are, none adopted', () => {
+  it('migrates a version 3 database to 4: its labels and rules are kept as they are, none adopted or name-taken', () => {
     const sql = memorySql();
     for (const statement of [...SCHEMA_V1, ...SCHEMA_V2, ...SCHEMA_V3]) sql.exec(statement);
     sql.exec(`INSERT INTO meta (key, value) VALUES ('schema_version', '3')`);
@@ -426,9 +426,9 @@ describe('the store', () => {
     const s = new Store(sql);
     s.migrate();
     expect(s.getMeta('schema_version')).toBe('4');
-    expect(SCHEMA_V4.length).toBe(1);
+    expect(SCHEMA_V4.length).toBe(2);
     const after = s.labels();
-    expect(after.map(({ gmail_adopted: adopted, ...row }) => [row, adopted])).toEqual(before.map((row) => [row, 0]));
+    expect(after.map(({ gmail_adopted: adopted, gmail_name_taken: taken, ...row }) => [row, adopted, taken])).toEqual(before.map((row) => [row, 0, 0]));
     expect(after.some((row) => row.display_name.startsWith(LEGACY_LABEL_PREFIX))).toBe(false);
     expect(s.rule('r1')).toMatchObject({ label_id: 'l0', import_id: 'ci-builds' });
     expect(s.ownedGmailIds()).toEqual(new Set(['Label_5']));

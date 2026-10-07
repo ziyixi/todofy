@@ -3,7 +3,7 @@
  * (../../../docs/design.md §3, §4.3, §6, §10): the template and the rule file imported with a preview and a
  * confirmation; nested labels created in Gmail with their parents, the mail getting only the leaf; labels and rules
  * that keep their mail in the inbox (UNREAD untouched, undo removing only the label); a subject carve-out before the
- * sender's plain rule; forged and look-alike From headers firing no rule; nested Gmail labels adopted, never imported; the flow
+ * sender's plain rule; forged and look-alike From headers firing no rule; nested Gmail labels adopted by the sync only, never imported; the flow
  * counters with the ledger's label filter; and the export's round trip. Every request Google got is checked against
  * the independent table after each test. All data is synthetic.
  */
@@ -154,21 +154,23 @@ describe('round 2: import, nested labels, keep in inbox, carve-outs, forged From
     expect(h.up.gmail.calls.filter((call) => call.url.endsWith('/modify')).length).toBe(before);
   });
 
-  it('adopts the owner\'s Gmail label of a new label\'s exact path, never its parent, and the sync imports nothing', async () => {
+  it('the owner\'s Gmail label of a new label\'s exact path is never taken over at once: the sync adopts it, never its parent, and imports nothing', async () => {
     // The owner made 项目 and 项目/阿尔法 in Gmail by hand; a label of that path is created here in live mode.
     const parent = h.up.gmail.createUserLabel('项目');
     const leaf = h.up.gmail.createUserLabel('项目/阿尔法', true);
     h.up.gmail.createUserLabel('项目/贝塔');
     const before = h.up.gmail.calls.filter((call) => call.method === 'POST' && call.url.endsWith('/labels')).length;
     const created = await h.api.createLabel({ label: create(LabelSchema, { displayName: '项目/阿尔法', description: '阿尔法项目的协作通知与周会纪要' }), requestId: op() });
-    expect(created).toMatchObject({ gmailLabelId: leaf, gmailState: Label_GmailState.ADOPTED });
-    // Linked, not created twice: no labels.create, and the owner's parent is neither linked nor recorded as ours.
+    expect(created).toMatchObject({ gmailLabelId: '', gmailState: Label_GmailState.NAME_TAKEN });
+    // Nothing created twice: no labels.create.
     expect(h.up.gmail.calls.filter((call) => call.method === 'POST' && call.url.endsWith('/labels')).length).toBe(before);
-    expect(await h.sql(`SELECT count(*) AS n FROM gmail_parents WHERE gmail_id = ?`, parent)).toEqual([{ n: 0 }]);
     // Its ID comes from its path (a word outside the glossary as a short hash), never a random one.
     expect(created.name).toMatch(/^labels\/project-x[0-9a-f]{4}$/);
+    // The owner's 从 Gmail 同步 adopts the leaf; their parent is neither linked nor recorded as ours.
     const result = await h.api.syncLabels({ requestId: op() });
-    expect(result).toMatchObject({ linkedCount: 0, importedCount: 0 });
+    expect(result).toMatchObject({ linkedCount: 1, importedCount: 0 });
+    expect(result.labels.find((label) => label.name === created.name)).toMatchObject({ gmailLabelId: leaf, gmailState: Label_GmailState.ADOPTED });
+    expect(await h.sql(`SELECT count(*) AS n FROM gmail_parents WHERE gmail_id = ?`, parent)).toEqual([{ n: 0 }]);
     expect(result.labels.some((label) => label.displayName === '项目' || label.displayName === '项目/贝塔' || label.gmailLabelId === parent)).toBe(false);
     // Creating a label above an existing one is refused: only leaves are labels.
     expect(reasonOf(await rejection(h.api.createLabel({ label: create(LabelSchema, { displayName: '项目' }), requestId: op() })))).toBe('INVALID_LABEL');
@@ -209,7 +211,7 @@ describe('round 2: import, nested labels, keep in inbox, carve-outs, forged From
     if (bank === undefined) throw new Error('no bank label');
     bank.name = '临时/测试';
     const created = await h.api.createLabel({ label: create(LabelSchema, { displayName: '临时/测试', description: '只用于测试重名的标签' }), requestId: op() });
-    expect(created).toMatchObject({ gmailLabelId: '', gmailState: Label_GmailState.PENDING });
+    expect(created).toMatchObject({ gmailLabelId: '', gmailState: Label_GmailState.NAME_TAKEN });
     const synced = await h.api.syncLabels({ requestId: op() });
     expect(synced).toMatchObject({ linkedCount: 0, renamedCount: 0 });
     expect(synced.labels.find((label) => label.name === 'labels/finance-bank-pay')).toMatchObject({ displayName: '金融/银行支付', gmailLabelId: bank.id });

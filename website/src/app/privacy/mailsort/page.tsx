@@ -64,8 +64,9 @@ export default function MailsortPrivacyPage() {
           </li>
           <li>
             It never sends, deletes or trashes mail and never marks mail read or unread. The only
-            labels it renames or adds to mail are the ones it created and the ones the owner linked
-            in its dashboard by giving a label there exactly the name of an existing Gmail label;
+            labels it renames or adds to mail are the ones it created and the existing Gmail labels
+            the owner chose to link in its dashboard (one named exactly like a label there, with no
+            label nested under it), never adding a linked label to a message that already has it;
             the only other label it changes on a message is the inbox.
           </li>
           <li>

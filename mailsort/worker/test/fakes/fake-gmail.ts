@@ -25,6 +25,8 @@ export interface RecordedCall {
   readonly method: string;
   readonly url: string;
   readonly body: string;
+  /** For a label create or rename: the paths the store held when it was sent (FakeUpstream.plannedPaths). */
+  readonly planned?: readonly string[];
 }
 
 const SYSTEM_LABELS = ['INBOX', 'SENT', 'DRAFT', 'SPAM', 'TRASH', 'UNREAD', 'STARRED', 'IMPORTANT', 'CHAT', 'CATEGORY_PROMOTIONS', 'CATEGORY_SOCIAL', 'CATEGORY_UPDATES', 'CATEGORY_FORUMS', 'CATEGORY_PERSONAL'];
@@ -100,8 +102,9 @@ export class FakeGmail {
   }
 
   /**
-   * The owner makes a label by hand. `adoptable`: it has the name of one of mailsort's labels, which mailsort adopts
-   * and may write from then on; any other label of the owner's is never written (the independent table's check).
+   * The owner makes a label by hand. `adoptable`: it has the name of one of mailsort's labels, which the owner's sync
+   * adopts and mailsort may write from then on; any other label of the owner's is never written (the independent
+   * table's check).
    */
   createUserLabel(name: string, adoptable = false): string {
     const id = `Label_${String(this.nextLabel++)}`;
@@ -110,9 +113,17 @@ export class FakeGmail {
     return id;
   }
 
-  /** The labels mailsort may write: the ones it created and the ones the test made for it to adopt. */
+  /**
+   * The labels mailsort may write: the ones it created and the ones the test made for it to adopt, leaves only. One
+   * with labels nested under it (a parent mailsort made, or the owner's) only groups, and no mail may get it.
+   */
   mailsortLabelIds(): Set<string> {
-    return new Set([...this.createdByWorker, ...this.adoptable]);
+    const names = [...this.labels.values()].filter((label) => label.type === 'user').map((label) => label.name);
+    const isParent = (id: string) => {
+      const name = this.labels.get(id)?.name;
+      return name !== undefined && names.some((other) => other.startsWith(`${name}/`));
+    };
+    return new Set([...this.createdByWorker, ...this.adoptable].filter((id) => !isParent(id)));
   }
 
   private applyModify(messageId: string, add: string[], remove: string[]): boolean {
@@ -128,15 +139,15 @@ export class FakeGmail {
     return true;
   }
 
-  /** Every request Google would get. `url` is the real Google URL. */
-  handle(method: string, url: URL, headers: Headers, body: string): Response {
-    const response = this.answer(method, url, headers, body);
+  /** Every request Google would get. `url` is the real Google URL; `planned` is recorded with it (RecordedCall). */
+  handle(method: string, url: URL, headers: Headers, body: string, planned?: readonly string[]): Response {
+    const response = this.answer(method, url, headers, body, planned);
     this.afterCall?.(method, url);
     return response;
   }
 
-  private answer(method: string, url: URL, headers: Headers, body: string): Response {
-    this.calls.push({ method, url: url.toString(), body });
+  private answer(method: string, url: URL, headers: Headers, body: string, planned: readonly string[] | undefined): Response {
+    this.calls.push({ method, url: url.toString(), body, ...(planned === undefined ? {} : { planned }) });
     if (url.host === 'oauth2.googleapis.com' && url.pathname === '/token' && method === 'POST') {
       const form = new URLSearchParams(body);
       const scope = this.grants.get(form.get('refresh_token') ?? '');

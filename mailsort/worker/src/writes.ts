@@ -16,8 +16,14 @@
  * Labels are created in Gmail (named by their path) just before the first write that needs them, after the gate, with
  * the parents Gmail nests them under (`开发` for `开发/CI通知`) when those do not exist yet. The parents only group:
  * they are never linked, so the guard never lets a write add one to a mail (one label per mail, always a leaf). A
- * user label Gmail already has under a label's exact path is adopted instead of created (linkGmailLabel): the owner
- * gave a label of this app that name, so it is that label.
+ * write never takes over a Gmail label this app did not make: when Gmail already has a label of a label's exact path,
+ * the label stays pending (`gmail_name_taken`) and the row fails (`label_name_taken`) until the owner renames the
+ * label or adopts that Gmail label (从 Gmail 同步, api.ts syncLabels, the only place a label is adopted).
+ *
+ * Nor does a write add a label the mail already carries (`already_labelled`), so an undo never takes off a label that
+ * was there before: the labels its intent recorded, and for an adopted label (the owner's own, which they may put on
+ * mail themselves) the ones the mail has right before the write. A retry whose earlier try reached Gmail with its
+ * answer lost fails that way too for an adopted label: the label stays, as one the owner may have put there.
  *
  * An applied label keeps its mail in the inbox when the ledger row says so (`archived` = 0: the label's or the rule's
  * keep-in-inbox); the guard checks the modify against that flag, and the undo then gives nothing back to the inbox. A
@@ -106,72 +112,100 @@ export function userLabelsByName(labels: readonly GmailLabel[]): Map<string, str
   return new Map(labels.filter((item) => item.type !== 'system' && isUserLabelId(item.id)).map((item) => [item.name, item.id]));
 }
 
+/** Whether Gmail has user labels nested under `path` (`MSU/课程` under `MSU`): `path` is a parent there, never linked. */
+export function hasSublabels(existing: ReadonlyMap<string, string>, path: string): boolean {
+  return [...existing.keys()].some((name) => name.startsWith(`${path}/`));
+}
+
 /**
- * Creates `name` in Gmail unless `existing` (userLabelsByName) has it (409, a name made meanwhile, is fine too);
- * answers its ID and whether this call made it (a 409 counts: most likely an earlier try of ours whose answer was
- * lost). The parents of a nested label are made the same way, outermost first.
+ * Creates `name` in Gmail and answers its ID; null on a 409: Gmail has a label of that name, made since its labels were
+ * read, so by someone else (the owner): never one this app made.
  */
-async function createIfMissing(gmail: GmailClient, existing: Map<string, string>, name: string): Promise<{ id: string; created: boolean }> {
-  const known = existing.get(name);
-  if (known !== undefined) return { id: known, created: false };
+async function createUnlessTaken(gmail: GmailClient, name: string): Promise<string | null> {
   try {
-    const id = await gmail.createLabel(name);
-    existing.set(name, id);
-    return { id, created: true };
+    return await gmail.createLabel(name);
   } catch (error) {
-    // 409: Gmail already has a user label of that name (made meanwhile, or by an earlier try): use it.
-    if (!(error instanceof GoogleError) || error.code !== 'labels_create_409') throw error;
-    const found = userLabelsByName(await gmail.labels()).get(name);
-    if (found === undefined) throw error;
-    existing.set(name, found);
-    return { id: found, created: true };
+    if (error instanceof GoogleError && error.code === 'labels_create_409') return null;
+    throw error;
   }
 }
 
 /**
- * Makes sure Gmail has the parents of a label's path (`开发` for `开发/CI通知`), so it shows the label nested. A parent
- * this app creates is recorded (`gmail_parents`): a label later linked to it (the owner adds `开发` by hand once its
- * children are gone) is the app's own, not adopted. A parent Gmail already had (the owner's) is used as it is.
+ * Makes sure Gmail has the parents of a label's path (`开发` for `开发/CI通知`), outermost first, so it shows the label
+ * nested. A parent this app creates is recorded (`gmail_parents`): a label later linked to it (the owner adds `开发` by
+ * hand once its children are gone) is the app's own, not adopted. A parent Gmail already had, or one made meanwhile
+ * (a 409), is the owner's: used to nest under as it is, never recorded.
  */
 export async function ensureGmailParents(gmail: GmailClient, path: string, existing: Map<string, string>, store: Store, now: number): Promise<void> {
   for (const parent of parentGmailNames(path)) {
-    const { id, created } = await createIfMissing(gmail, existing, parent);
-    if (created) store.run(`INSERT OR IGNORE INTO gmail_parents (gmail_id, create_time) VALUES (?, ?)`, id, now);
+    if (existing.has(parent)) continue;
+    const id = await createUnlessTaken(gmail, parent);
+    if (id === null) continue;
+    existing.set(parent, id);
+    store.run(`INSERT OR IGNORE INTO gmail_parents (gmail_id, create_time) VALUES (?, ?)`, id, now);
   }
+}
+
+/** Whether this app created the Gmail label `gmailId` as a parent (ensureGmailParents). */
+export function isOwnParent(store: Store, gmailId: string): boolean {
+  return store.one(`SELECT 1 AS x FROM gmail_parents WHERE gmail_id = ?`, gmailId) !== undefined;
 }
 
 /**
  * Links the label `labelId` to the Gmail label `gmailId`: owned from here on (the guard's set). Adopted when this app
- * did not create that Gmail label: a user label of exactly the label's path that Gmail already had (the owner's); a
- * parent this app made earlier is its own, and its record goes. Run inside a transaction.
+ * did not create that Gmail label: a user label of exactly the label's path that Gmail already had (the owner's, linked
+ * by their 从 Gmail 同步); a parent this app made earlier is its own, and its record goes. Run inside a transaction.
  */
 export function linkGmailLabel(store: Store, labelId: string, gmailId: string, created: boolean, now: number): void {
-  const ownParent = store.one(`SELECT 1 AS x FROM gmail_parents WHERE gmail_id = ?`, gmailId) !== undefined;
+  const ownParent = isOwnParent(store, gmailId);
   store.run(`DELETE FROM gmail_parents WHERE gmail_id = ?`, gmailId);
-  store.run(`UPDATE labels SET gmail_id = ?, gmail_state = 'linked', gmail_adopted = ? WHERE id = ?`, gmailId, created || ownParent ? 0 : 1, labelId);
+  store.run(`UPDATE labels SET gmail_id = ?, gmail_state = 'linked', gmail_adopted = ?, gmail_name_taken = 0 WHERE id = ?`, gmailId, created || ownParent ? 0 : 1, labelId);
   store.touchLabel(labelId, now);
   store.run(`UPDATE ledger SET gmail_label_id = ? WHERE label_id = ? AND gmail_label_id IS NULL AND state = 'intended'`, gmailId, labelId);
 }
 
+/** Records whether a pending label's path is the name of a Gmail label that is not its own. Run inside a transaction. */
+export function setNameTaken(store: Store, labelId: string, taken: boolean, now: number): void {
+  const flag = taken ? 1 : 0;
+  if (store.run(`UPDATE labels SET gmail_name_taken = ? WHERE id = ? AND gmail_state = 'pending' AND gmail_name_taken != ?`, flag, labelId, flag) > 0) store.touchLabel(labelId, now);
+}
+
 /**
- * The label's Gmail ID, creating the label (and its parents) in Gmail when it is still pending, or adopting the user
- * label Gmail already has under its path; null when it went missing, or when another label here holds the Gmail label
- * of its path (one renamed to it in Gmail): two labels never share one.
+ * The label's Gmail ID, creating the label (and its parents) in Gmail when it is still pending. Null when it went
+ * missing, or when its path is taken (`gmail_name_taken`): Gmail has a label of that name that is not its own (the
+ * owner's, a system label, another label's here renamed to it in Gmail). Such a label is never adopted here, only by
+ * the owner's 从 Gmail 同步. The one exception is a parent this app made, with no sublabels left: its own, so linked.
  */
 export async function ensureGmailLabel(ctx: WriteContext, label: LabelRow): Promise<string | null> {
   if (label.gmail_state === 'linked' && label.gmail_id !== null) return label.gmail_id;
   if (label.gmail_state === 'missing') return null;
-  // One read of Gmail's labels, then only what is missing: a label the owner made by hand is adopted, not created twice.
-  const existing = userLabelsByName(await ctx.gmail.labels());
-  const held = existing.get(label.display_name);
-  if (held !== undefined && ctx.store.labelByGmailId(held) !== undefined) return null;
-  await ensureGmailParents(ctx.gmail, label.display_name, existing, ctx.store, ctx.now());
-  const { id, created } = await createIfMissing(ctx.gmail, existing, label.display_name);
+  // One read of Gmail's labels, then only what is missing.
+  const labels = await ctx.gmail.labels();
+  const existing = userLabelsByName(labels);
+  const path = label.display_name;
+  const there = labels.find((item) => item.name === path);
+  let id: string | null;
+  if (there === undefined) {
+    await ensureGmailParents(ctx.gmail, path, existing, ctx.store, ctx.now());
+    id = await createUnlessTaken(ctx.gmail, path);
+  } else {
+    // Taken, unless it is a parent this app made that nests nothing any more.
+    id = isOwnParent(ctx.store, there.id) && !hasSublabels(existing, path) ? there.id : null;
+  }
   const now = ctx.now();
   ctx.transact(() => {
-    linkGmailLabel(ctx.store, label.id, id, created, now);
+    if (id === null) setNameTaken(ctx.store, label.id, true, now);
+    else linkGmailLabel(ctx.store, label.id, id, there === undefined, now);
   });
   return id;
+}
+
+/**
+ * Whether the mail already carries `gmailId`: as its intent recorded it (base_labels), or as it is now (`labelsNow`,
+ * read for an adopted label). Writing it would change nothing, and its undo would take off a label that was there.
+ */
+export function alreadyLabelled(row: LedgerRow, gmailId: string, labelsNow: readonly string[] | null): boolean {
+  return (JSON.parse(row.base_labels) as string[]).includes(gmailId) || (labelsNow?.includes(gmailId) ?? false);
 }
 
 export interface WriteOutcome {
@@ -258,9 +292,12 @@ export async function executeWrites(ctx: WriteContext, ids: readonly string[] | 
     let row = original;
     const recheck = row.state === 'intended' && row.origin === 'auto' && (ids === null || row.attempts > 0);
     const label = store.label(row.label_id);
-    // A modify, the recheck's read, and the label's creation in Gmail (with its parents) when it is still pending.
+    // The owner's own label, adopted: the mail's labels are read right before the write (alreadyLabelled).
+    const adopted = row.state === 'intended' && label?.gmail_state === 'linked' && label.gmail_adopted === 1;
+    // A modify, one read of the mail (a recheck, an adopted label), and the label's creation in Gmail (with its
+    // parents) when it is still pending.
     const creation = row.state === 'intended' && row.gmail_label_id === null && label !== undefined ? labelCreationCost(label) : 0;
-    if (!ctx.budget.has(1 + (recheck ? 1 : 0) + creation)) break;
+    if (!ctx.budget.has(1 + (recheck || adopted ? 1 : 0) + creation)) break;
     try {
       if (row.state === 'intended') {
         if (label === undefined) {
@@ -268,8 +305,9 @@ export async function executeWrites(ctx: WriteContext, ids: readonly string[] | 
           failed++;
           continue;
         }
+        const labelsNow = recheck || adopted ? await ctx.gmail.labelIdsOf(row.message_id) : null;
         // Before the gate, so a mail that is not written does not use up a write of the run's cap.
-        if (recheck && mailChanged(row, await ctx.gmail.labelIdsOf(row.message_id))) {
+        if (recheck && labelsNow !== null && mailChanged(row, labelsNow)) {
           ctx.transact(() => { fail(store, row, 'mail_changed', ctx.now()); });
           failed++;
           continue;
@@ -287,7 +325,12 @@ export async function executeWrites(ctx: WriteContext, ids: readonly string[] | 
         }
         const gmailId = row.gmail_label_id ?? (await ensureGmailLabel(ctx, label));
         if (gmailId === null) {
-          ctx.transact(() => { fail(store, row, 'label_missing', ctx.now()); });
+          ctx.transact(() => { fail(store, row, label.gmail_state === 'missing' ? 'label_missing' : 'label_name_taken', ctx.now()); });
+          failed++;
+          continue;
+        }
+        if (alreadyLabelled(row, gmailId, adopted ? labelsNow : null)) {
+          ctx.transact(() => { fail(store, row, 'already_labelled', ctx.now()); });
           failed++;
           continue;
         }

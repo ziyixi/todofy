@@ -35,9 +35,13 @@ message Label {
     // Linked before, but Gmail no longer has it (deleted outside mailsort). Nothing is written with it until a
     // Gmail label of its name is linked again (SyncLabels).
     GMAIL_STATE_MISSING = 3;
-    // Linked to a user label Gmail already had under exactly this name (the owner's, not created by mailsort):
-    // adopted instead of made twice. From then on mailsort adds it to mail and renames it like one it created.
+    // Linked to a user label Gmail already had under exactly this name (the owner's, not created by mailsort),
+    // adopted by the owner's SyncLabels; never one with labels nested under it. From then on mailsort adds it to
+    // mail that does not carry it yet and renames it like one it created.
     GMAIL_STATE_ADOPTED = 4;
+    // Not created in Gmail: Gmail already has a label of exactly this name that is not mailsort's (the owner's).
+    // Nothing is created or written with it until the label is renamed or SyncLabels adopts that Gmail label.
+    GMAIL_STATE_NAME_TAKEN = 5;
   }
 
   // labels/{label}: 1 to 40 characters of `a-z`, `0-9` and `-`, starting with a letter (AIP-122); it never

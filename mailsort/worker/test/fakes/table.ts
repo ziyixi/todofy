@@ -8,11 +8,10 @@ export interface TableContext {
   /** Gmail IDs of mailsort's labels: the ones it created or adopted. */
   readonly owned: ReadonlySet<string>;
   /**
-   * The paths of mailsort's labels as its store plans them: labels.create may make one or a parent of one, labels.patch
-   * may rename an owned label to one. Null for a check after the fact (the workerd suites and the smoke run, once the
-   * store has moved on): then a name's shape alone is checked.
+   * The paths of mailsort's labels as its store plans them when the request is sent: labels.create may make one or a
+   * parent of one, labels.patch may rename an owned label to one.
    */
-  readonly planned: ReadonlySet<string> | null;
+  readonly planned: ReadonlySet<string>;
   /** The ledger row's state and archive flag for (message, Gmail label), or null. */
   readonly ledger: (messageId: string, labelId: string) => { state: string; archived: boolean } | null;
 }
@@ -31,14 +30,13 @@ function okName(name: unknown): name is string {
 }
 
 /** labels.create: a planned path, or a parent Gmail nests one under (`开发` above `开发/CI通知`). */
-function okCreateName(name: unknown, planned: ReadonlySet<string> | null): boolean {
-  if (!okName(name)) return false;
-  return planned === null || [...planned].some((path) => path === name || path.startsWith(`${name}/`));
+function okCreateName(name: unknown, planned: ReadonlySet<string>): boolean {
+  return okName(name) && [...planned].some((path) => path === name || path.startsWith(`${name}/`));
 }
 
 /** labels.patch: a planned path (the guard narrows it to the one planned for that label). */
-function okPatchName(name: unknown, planned: ReadonlySet<string> | null): boolean {
-  return okName(name) && (planned === null || planned.has(name));
+function okPatchName(name: unknown, planned: ReadonlySet<string>): boolean {
+  return okName(name) && planned.has(name);
 }
 
 /** A JSON object body exactly as JSON.stringify writes its parsed value (no duplicate keys, no other spelling), or null. */

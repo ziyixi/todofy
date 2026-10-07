@@ -14,6 +14,12 @@ export class FakeUpstream {
   readonly ai = new FakeAi();
   /** Requests that were neither Google nor Workers AI. */
   readonly strays: string[] = [];
+  /**
+   * Reads the store's label paths (the workerd harness and the smoke run set it). Called when a label create or rename
+   * arrives, while the Worker waits for it: the independent table then checks the name against what the store
+   * planned at that moment, not only its shape (../runtime/helpers.ts checkGoogleCalls).
+   */
+  plannedPaths: (() => Promise<readonly string[]>) | null = null;
 
   reset(): void {
     this.gmail.reset();
@@ -37,6 +43,9 @@ export class FakeUpstream {
       this.strays.push(`${request.method} ${request.url}`);
       return new Response('stray', { status: 502 });
     }
-    return this.gmail.handle(request.method, new URL(original), request.headers, body);
+    const google = new URL(original);
+    const labelWrite = (request.method === 'POST' || request.method === 'PATCH') && /\/labels(\/[^/]+)?$/.test(google.pathname);
+    const planned = labelWrite ? await this.plannedPaths?.() : undefined;
+    return this.gmail.handle(request.method, google, request.headers, body, planned);
   }
 }

@@ -48,6 +48,7 @@ const GMAIL_STATES: Readonly<Record<number, string>> = {
   [Label_GmailState.LINKED]: '已关联',
   [Label_GmailState.ADOPTED]: '已沿用原有标签',
   [Label_GmailState.MISSING]: '已不存在',
+  [Label_GmailState.NAME_TAKEN]: '已有同名标签，没有沿用。改个名字，或在设置里从 Gmail 同步沿用它',
 }
 
 /** How 添加规则 reads its value: by its shape, or as a list or the delivered-to address. */
@@ -312,7 +313,7 @@ function advanced(page: DetailPage, examplesChanged: () => void): HTMLDetailsEle
     fieldSwitch(page, '敏感', '不留这类邮件的例子', 'sensitive', 'sensitive', examplesChanged, deletesExamples),
     fieldSwitch(page, '启用', '关掉后不再建议或打它', 'enabled', 'enabled'),
     el('div', { class: 'actions' }, path, button('改名', () => void rename())),
-    gmail === undefined ? null : el('p', { class: label.gmailState === Label_GmailState.MISSING ? 'hint warn' : 'hint' }, `Gmail：${gmail}`),
+    gmail === undefined ? null : el('p', { class: label.gmailState === Label_GmailState.MISSING || label.gmailState === Label_GmailState.NAME_TAKEN ? 'hint warn' : 'hint' }, `Gmail：${gmail}`),
     el('div', { class: 'actions' }, button('删除标签', remove, { class: 'small danger' })),
   )
   const details = disclosure('高级', body)

@@ -100,12 +100,13 @@ async function main(): Promise<void> {
     await run(origin, up, (now) => {
       clock = now;
     });
-    // Every request Google got is one of the closed table's shapes, with owned labels only.
-    // Owned: the labels the Worker created and the one this run made for it to adopt; never another of the owner's.
+    // Every request Google got is one of the closed table's shapes, with owned labels only, and a label's name one the
+    // store planned when it was sent (FakeUpstream.plannedPaths, set in run).
+    // Owned: the leaf labels the Worker created and the one this run made for it to adopt; never another of the owner's.
     const owned = up.gmail.mailsortLabelIds();
     for (const call of up.gmail.calls) {
       const ledger = () => ({ state: call.body.includes('"addLabelIds":["INBOX"]') || (call.body.includes('removeLabelIds') && !call.body.includes('addLabelIds')) ? 'undo_intended' : 'intended', archived: call.body.includes('INBOX') });
-      if (allowedOperation(call.method, call.url, call.body, { owned, planned: null, ledger }) === null) throw new Error(`smoke: a request outside the table: ${call.method} ${call.url}`);
+      if (allowedOperation(call.method, call.url, call.body, { owned, planned: new Set(call.planned ?? []), ledger }) === null) throw new Error(`smoke: a request outside the table: ${call.method} ${call.url}`);
       for (const label of FORBIDDEN_LABELS) if (call.body.includes(`"${label}"`)) throw new Error(`smoke: ${label} in a write`);
     }
     check(up.strays.length === 0, `all ${String(up.gmail.calls.length)} Google requests are in the closed table; nothing else left the Worker`);
@@ -152,6 +153,7 @@ async function run(origin: string, up: FakeUpstream, setClock: (now: number) => 
     return fetch(`${origin}${call.url}`, { method: call.httpMethod, headers, ...(call.body === undefined ? {} : { body: call.body }) });
   };
   const api = createHttpClient(MailsortUiService, send);
+  up.plannedPaths = async () => (await api.listLabels({})).labels.map((label) => label.displayName);
   const id = () => crypto.randomUUID();
   let now = T0;
   const step = async (advance = 5 * MINUTE) => {

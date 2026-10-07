@@ -8,6 +8,7 @@ import { mountApp, type Host } from './app.ts'
 import { groupByTop, leafName, searchLabels } from './views/labels.ts'
 import { ruleFor } from './views/label-detail.ts'
 import { example, FakeServer, label, NOW, settle, TEMPLATE_PATHS } from './test/fakeServer.ts'
+import { Label_GmailState } from '@ziyixi/proto/mailsort/ui/v1/label_pb'
 import { Rule_Kind, Rule_State, RuleSchema, type Rule } from '@ziyixi/proto/mailsort/ui/v1/rule_pb'
 import { LabelAccuracySchema } from '@ziyixi/proto/mailsort/ui/v1/status_pb'
 import { create } from '@ziyixi/proto/protobuf'
@@ -388,6 +389,16 @@ describe('the detail', () => {
     expect(s.examples.map((item) => item.name)).toEqual(['examples/e2'])
     expect(part?.querySelector('h3')?.textContent).toBe('例子 1')
     expect(toastText(root)).toBe('例子已删除')
+  })
+
+  it('高级 warns when Gmail already has a label of the path, which mailsort does not take over', async () => {
+    const s = server()
+    const travel = s.labels.find((item) => item.name === 'labels/travel')
+    if (travel !== undefined) travel.gmailState = Label_GmailState.NAME_TAKEN
+    const root = await open(s)
+    rowButton(root, '出行').click()
+    const note = (openDetails(root)[0] ?? root).querySelector(':scope > details.more p.hint.warn')
+    expect(note?.textContent).toBe('Gmail：已有同名标签，没有沿用。改个名字，或在设置里从 Gmail 同步沿用它')
   })
 
   it('folds the threshold, 可信, 敏感 (asking before it deletes examples), 启用, rename and delete under 高级', async () => {

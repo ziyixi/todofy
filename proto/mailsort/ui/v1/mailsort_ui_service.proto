@@ -78,8 +78,8 @@ service MailsortUiService {
   }
 
   // Creates a label (AIP-133). It is created in Gmail (named display_name) before the first live write that
-  // needs it, or at once when the mode is live and the grant allows writes; a user label Gmail already has under
-  // that name is adopted instead (Label.GmailState.GMAIL_STATE_ADOPTED).
+  // needs it, or at once when the mode is live and the grant allows writes. A label Gmail already has under that
+  // name is never taken over: the label stays out of Gmail (Label.GmailState.GMAIL_STATE_NAME_TAKEN).
   // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
   // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
   rpc CreateLabel(CreateLabelRequest) returns (Label) {
@@ -113,7 +113,8 @@ service MailsortUiService {
 
   // Reads Gmail's labels and refreshes the store's own: a linked label follows a rename made in Gmail (when the
   // new name is a path no other label has) or is marked missing when Gmail no longer has it; a label not in
-  // Gmail is linked to (adopts) the user label of exactly its path. It never imports another Gmail label.
+  // Gmail is linked to (adopts) the user label of exactly its path, unless another label holds it or labels are
+  // nested under it. The only way a label is adopted. It never imports another Gmail label.
   // (-- api-linter: core::0136::http-uri-suffix=disabled
   //     aip.dev/not-precedent: a custom method on the collection, `labels:sync`; the noun is the collection
   //     itself. --)

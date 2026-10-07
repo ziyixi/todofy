@@ -34,9 +34,14 @@ export const labelRef = (id: string | null) => (id === null || id === '' ? '' : 
 
 const GMAIL_STATES = { pending: Label_GmailState.PENDING, linked: Label_GmailState.LINKED, missing: Label_GmailState.MISSING } as const;
 
-/** A label's Gmail state; a linked label that adopted the owner's Gmail label of its path says so. */
+/**
+ * A label's Gmail state; a linked label that adopted the owner's Gmail label of its path says so, and so does a pending
+ * one whose path is the name of a Gmail label not its own.
+ */
 function gmailState(row: LabelRow): Label_GmailState {
-  return row.gmail_state === 'linked' && row.gmail_adopted === 1 ? Label_GmailState.ADOPTED : GMAIL_STATES[row.gmail_state];
+  if (row.gmail_state === 'linked' && row.gmail_adopted === 1) return Label_GmailState.ADOPTED;
+  if (row.gmail_state === 'pending' && row.gmail_name_taken === 1) return Label_GmailState.NAME_TAKEN;
+  return GMAIL_STATES[row.gmail_state];
 }
 
 export function labelMessage(row: LabelRow, exampleCount: number): Label {

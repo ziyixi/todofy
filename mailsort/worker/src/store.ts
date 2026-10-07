@@ -229,12 +229,17 @@ export const SCHEMA_V2: readonly string[] = [
 export const SCHEMA_V3: readonly string[] = [`CREATE TABLE IF NOT EXISTS gmail_parents (gmail_id TEXT PRIMARY KEY, create_time INTEGER NOT NULL)`];
 
 /**
- * Schema version 4 (2026-10-07, labels at Gmail's top level, without the `分拣/` prefix): 1 when a linked label was
- * adopted, a user label of exactly its path that Gmail already had and mailsort did not create (writes.ts
- * linkGmailLabel). Existing rows read 0. Nothing else changes: a label's row holds its path without the prefix (every
- * entry point stripped it, and no path may start with `分拣`), and rules name their label by ID.
+ * Schema version 4 (2026-10-07, labels at Gmail's top level, without the `分拣/` prefix): two flags of a label's Gmail
+ * state. `gmail_adopted`: 1 when a linked label was adopted, a user label of exactly its path that Gmail already had
+ * and mailsort did not create, linked by the owner's 从 Gmail 同步 (api.ts syncLabels). `gmail_name_taken`: 1 while a
+ * pending label's path is the name of a Gmail label that is not its own (writes.ts ensureGmailLabel), so nothing is
+ * created or written with it. Existing rows read 0 for both. Nothing else changes: a label's row holds its path without
+ * the prefix (every entry point stripped it, and no path may start with `分拣`), and rules name their label by ID.
  */
-export const SCHEMA_V4: readonly string[] = [`ALTER TABLE labels ADD COLUMN gmail_adopted INTEGER NOT NULL DEFAULT 0`];
+export const SCHEMA_V4: readonly string[] = [
+  `ALTER TABLE labels ADD COLUMN gmail_adopted INTEGER NOT NULL DEFAULT 0`,
+  `ALTER TABLE labels ADD COLUMN gmail_name_taken INTEGER NOT NULL DEFAULT 0`,
+];
 
 export type Value = string | number | null | ArrayBuffer;
 
@@ -265,6 +270,8 @@ export interface LabelRow extends Record<string, SqlStorageValue> {
   sensitive: number;
   /** 1: linked to a Gmail label of its path that mailsort did not create (adopted). */
   gmail_adopted: number;
+  /** 1: pending, and Gmail has a label of its path that is not its own (the owner's): nothing is written with it. */
+  gmail_name_taken: number;
 }
 
 export interface RuleRow extends Record<string, SqlStorageValue> {

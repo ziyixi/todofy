@@ -67,8 +67,9 @@ Two walls, neither of them a prompt:
    `test/gmail-guard.test.ts` records every call GmailClient makes through a fake fetch and checks it against an
    independent copy of the table (`test/fakes/table.ts`), tries every forbidden operation, and throws 20,000 seeded
    random operations at the guard; the workerd tests and the smoke run check every request the fake Gmail receives
-   against the same independent table (after the fact, so with the shapes and the labels mailsort created or a test
-   made for it to adopt; the names the store planned at that moment are the guard's own check).
+   against the same independent table, with the leaf labels mailsort created or a test made for it to adopt, and for
+   a label create or rename the store's paths as they were when it was sent (the fake reads them while the Worker
+   waits: `FakeUpstream.plannedPaths`).
 
 Round 2 widened `labels_create` for nested labels (2026-10-06, the owner's request): Gmail shows `开发/CI通知` nested
 only when `开发` exists, so a parent may be created too. A parent only groups: it is never linked, so it is never owned
@@ -80,20 +81,25 @@ took any name under it for mailsort's. Now a label's Gmail name is its path (`�
 about who owns a label, and the guard asks the store instead (`Ownership` in `gmail.ts`): `labels_create` makes only a
 name the store plans (`plannedPaths`: a label's path or a parent of one), `labels_patch` renames an owned label only to
 the path the store plans for that very label (`plannedPath`; a rename writes the new path into the store first and puts
-the old one back if Gmail refuses, `api.ts` renameInGmail), and there is no root label to create any more. When Gmail
-already has a user label of exactly a label's path (the owner made it by hand), mailsort **adopts** it instead of
-failing on the name: it links that Gmail label, owns it from then on (adds it to mail, renames it with the label) and
-says so (`Label.GmailState` ADOPTED, column `gmail_adopted`, schema version 4); the owner named a label of this app
-exactly like it, so it is that label. Two labels never share one: a Gmail label another label here already holds (one
-renamed to that path in Gmail) is not adopted, and the new label stays out of Gmail. A system label is never adopted,
-whatever its name (`writes.ts` userLabelsByName keeps `Label_*` IDs only), and a parent the owner already has is used
-to nest under, never linked or recorded. So no other label of the owner's is ever written: only one the owner named
-exactly like a label here. The legacy prefix is still read on input, as nothing (`paths.ts` ownerPath): the owner's
-rule file and older exports say `分拣/金融/投资` and keep importing; nothing writes it. No stored row needed a migration: a
-label's row has always held its path without the prefix (every entry point stripped it, and no path may start with
-`分拣`), and rules name their label by ID. The live store had no Gmail label yet (a read-only grant cannot create one),
-so nothing in Gmail needed renaming; a store with a label still named `分拣/x` in Gmail keeps writing it by its ID, and
-SyncLabels leaves that name alone.
+the old one back if Gmail refuses, `api.ts` renameInGmail), and there is no root label to create any more. Nor does a
+name alone give mailsort a Gmail label: when Gmail already has a label of exactly a label's path (the owner's, made by
+hand), no write creates or adopts anything; the label stays out of Gmail and says so (`Label.GmailState` NAME_TAKEN,
+column `gmail_name_taken`), its mail becomes a suggestion, and nothing is written with it until the owner renames it or
+**adopts** that Gmail label with 从 Gmail 同步 (SyncLabels, the only place a label is adopted, §3.1). Adopted, mailsort
+owns it from then on (adds it to mail, renames it with the label) and says so (ADOPTED, column `gmail_adopted`; both
+columns schema version 4). SyncLabels never adopts a Gmail label with labels nested under it (a parent there, and a
+mail's label is always a leaf; not even a parent mailsort made), nor one another label here already holds (one renamed
+to that path in Gmail): two labels never share one. A system label is never adopted, whatever its name (`writes.ts`
+userLabelsByName keeps `Label_*` IDs only), and a parent the owner already has, or makes while mailsort creates one (a
+409), is used to nest under, never linked or recorded. And a write fails when the mail already carries its label
+(`already_labelled`), by the labels its intent recorded and, for an adopted label, by the mail as it is right before the
+write, so an undo never takes off an owner's label that was there before. So no other label of the owner's is ever
+written: only one the owner adopted, and never onto a mail that has it. The legacy prefix is still read on input, as
+nothing (`paths.ts` ownerPath): the owner's rule file and older exports say `分拣/金融/投资` and keep importing; nothing
+writes it. No stored row needed a migration: a label's row has always held its path without the prefix (every entry
+point stripped it, and no path may start with `分拣`), and rules name their label by ID. The live store had no Gmail label
+yet (a read-only grant cannot create one), so nothing in Gmail needed renaming; a store with a label still named `分拣/x`
+in Gmail keeps writing it by its ID, and SyncLabels leaves that name alone.
 
 Three differences from the first plan, each for a reason: `history.list` is read without `labelId=INBOX` (an archived
 mail has no INBOX, and the owner's label changes on it are the main feedback; the pipeline filters new mail by its
@@ -139,17 +145,19 @@ is read as nothing, `分拣/金融/投资` is `金融/投资` in CreateLabel and
 always imports back. Only leaves are labels: a label may not be the parent or child of another (CreateLabel, a rename,
 an import and SyncLabels' rename all hold to it), so a mail's one label is always a leaf. Gmail gets the parents as
 plain grouping labels, created as needed before a label's first write (`writes.ts` ensureGmailLabel: one labels.list,
-then whatever of `金融` and the leaf is missing; a user label already there under the leaf's path is adopted, §2) or
-before a rename. A parent this app created is recorded (table `gmail_parents`, schema version 3): a label later made of
-it (新建标签 `新闻` once `新闻/周报` became `资讯/周报/精选`) links the Gmail label that is there as the app's own, not
-adopted, and the record goes. A parent the owner already had is used as it is.
+then whatever of `金融` and the leaf is missing; a label already there under the leaf's path leaves the label out of
+Gmail, its name taken, §2) or before a rename. A parent this app created is recorded (table `gmail_parents`, schema
+version 3): a label later made of it (新建标签 `新闻` once `新闻/周报` became `资讯/周报/精选`) links the Gmail label that is
+there as the app's own, not adopted, and the record goes; while labels are still nested under it in Gmail it is a
+parent, and the name is taken. A parent the owner already had is used as it is.
 
 SyncLabels (从 Gmail 同步) only reads Gmail and never imports a Gmail label: with no prefix to tell them apart, every
 label of the owner's would look like one. It refreshes the labels the store knows by their Gmail ID: one Gmail no
 longer has is marked missing (nothing is written with it), one renamed in Gmail takes the new name when that is a path
 no other label has and the tree allows (any other name, the legacy `分拣/x` among them, is left alone: writes go by the
 ID). And a label not in Gmail (not created yet, or missing) is linked to the user label of exactly its path, adopted
-(§2), when no other label holds it. A label made
+(§2), when no other label holds it and no label is nested under it there; a label not created yet whose path is still
+the name of a Gmail label keeps its name taken, and one whose path is free again loses it. A label made
 without an ID gets one from its path (`金融/投资` is `finance-invest`, `paths.ts` pathSlug: a fixed glossary of the words
 labels of a personal mailbox use, from the template's to `家人`, `报税` and `测试`; a word outside it becomes `x` and a
 short hash of itself, while the path's other words keep their English, `金融/猫咪` is `finance-x…`), stable and readable
@@ -386,7 +394,11 @@ row (adding a label that is there, or removing one that is gone, changes nothing
 An automatic row an earlier pass left (or one that failed once) is first checked against the mail as it is now, one
 metadata read (`message_get` with the Message-ID header only): if the mail left the inbox or carries a user label it
 did not have when the row was recorded (the owner filed it, or another of mailsort's labels), the row fails (`mail_changed`)
-instead of adding a second label to mail the owner has already dealt with.
+instead of adding a second label to mail the owner has already dealt with. A row whose label the mail already carries
+fails too (`already_labelled`, §2): for an adopted label the mail is read right before every write (an owner's choice
+recorded no labels), and a retry whose earlier try reached Gmail with its answer lost then fails the same way, the
+label left in place. The write that finds a label's name taken fails (`label_name_taken`); from then on that label's
+mail is only suggested, until the owner renames the label or adopts the Gmail label.
 An automatic row that fails for good, in its first pass or a later retry, makes its mail a suggestion in 待审. A
 request the guard refuses (its label no longer owned) is permanent for that row only: the run goes on with the next.
 
@@ -401,7 +413,7 @@ pages of 50; "至少" when it stopped there), and only 确认撤销 undoes them:
 answers how many are left; the page repeats the call until none is left (or a call undoes nothing) and shows the
 totals. A preset range ends ten minutes after the browser's clock, so a write the Worker dated later is in it.
 UndoLedgerEntry (one entry) stays in the API; the UI no longer lists the ledger. Labels are created in Gmail (named by their path, with the parents it nests under) just before the
-first write that needs them, after the gate, or adopted when Gmail already has a user label of that path (§2);
+first write that needs them, after the gate, never over a Gmail label of that path (its name is then taken, §2);
 SyncLabels follows renames and deletions made in Gmail and adopts, never imports (§3.1).
 
 ## 8. Limits and measured costs
@@ -604,9 +616,11 @@ the fake Gmail (`fake-gmail.ts`) and fake Workers AI (`fake-ai.ts`, Clef and bge
   poison mail (400, a lasting 500, a refused ID) never blocking the queue; a deleted or missing label's undo; the
   resync's read order and its install-time cutoff; a model outage backing off; one label per conversation after undo;
   a retry that finds the mail archived or filed by the owner (`mail_changed`); the content cleanup after 20 days off;
+  the owner's own Gmail labels never taken over (a write never adopts, a label already on the mail is never written
+  so its undo cannot take it off, no adoption of a label with sublabels, a 409 is the owner's);
   and `round2.test.ts`: the template and the rule file imported (preview, all-or-nothing confirmation), a nested
   label created in Gmail with its parents, keep-in-inbox by label and by rule (undo removing only the label), the
-  carve-out order, forged and look-alike From headers, a nested Gmail label adopted (never its parent, nothing imported), a rename refused for a name Gmail has, the flow counters with corrections
+  carve-out order, forged and look-alike From headers, a nested Gmail label adopted by the sync (never at once, never its parent, nothing imported), a rename refused for a name Gmail has, the flow counters with corrections
   and the ledger's label filter, and the export.
   The QA fixes of round 2 have their regression tests: the filter export and its carve-out coverage (`decide.test.ts`),
   multi-line evidence, header-form List-Ids, `enabled` through an export, the legacy `分拣/x` and the glossary (`import.test.ts`), a

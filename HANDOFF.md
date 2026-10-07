@@ -58,9 +58,12 @@ Landing order:
    15-label template and the 93-rule file imported through the dashboard (93 create, 0 invalid).
 5. `feat/mailsort-labels-ui` (local, not pushed yet): labels at Gmail's top level without `分拣/` (the owner's request,
    2026-10-07; `mailsort/docs/design.md` §2 "Labels without a prefix"). The guard creates only the store's planned
-   names and renames an owned label only to its planned path; a user label of exactly a label's path is adopted
-   (schema version 4, `gmail_adopted`; additive, the live labels and rules need no data change); SyncLabels follows
-   renames and deletions by Gmail ID and never imports; the rule file's legacy `分拣/` still imports. After its deploy:
+   names and renames an owned label only to its planned path; a Gmail label of exactly a label's path is never taken
+   over by a write (the label shows 已有同名标签 and writes nothing) and only the owner's 从 Gmail 同步 adopts it,
+   never one with sublabels; a label already on a mail is never written, so an undo cannot remove the owner's own
+   (schema version 4, `gmail_adopted` and `gmail_name_taken`; additive, the live labels and rules need no data
+   change); SyncLabels follows renames and deletions by Gmail ID and never imports; the rule file's legacy `分拣/`
+   still imports. After its deploy:
    标签 shows the 15 labels without `分拣/`, still 尚未在 Gmail 创建; 从 Gmail 同步 imports nothing.
    On the same branch, the UI redesign (the owner's "less is more", 2026-10-07; `mailsort/docs/design.md` §9), UI only,
    no proto or stored-data change: B1 done (the design system, the shell with four tabs 待审 · 概览 · 标签 · 设置 and

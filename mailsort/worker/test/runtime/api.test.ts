@@ -123,15 +123,21 @@ describe('the owner API', () => {
     expect((await h.api.listRules({})).rules).toEqual([]);
   });
 
-  it('SyncLabels adopts the Gmail label of a label\'s exact path, follows renames by ID, and never imports another label', async () => {
+  it('SyncLabels adopts the Gmail label of a label\'s exact path (never one with labels nested under it), follows renames by ID, and never imports another label', async () => {
     await h.step(T0);
     const gmail = h.up.gmail;
     // The owner's labels: one with the path of mailsort's 订阅, the rest their own (none is ever imported or linked).
     const adopted = gmail.createUserLabel('订阅', true);
-    for (const name of ['旅行', 'Personal', '订阅/周报', '分拣/订阅']) gmail.createUserLabel(name);
+    const nested = gmail.createUserLabel('订阅/周报');
+    for (const name of ['旅行', 'Personal', '分拣/订阅']) gmail.createUserLabel(name);
     const before = (await h.api.listLabels({})).labels.length;
     const writes = () => gmail.calls.filter((call) => call.method !== 'GET' && !call.url.includes('/token')).length;
     const writesBefore = writes();
+    // 订阅 has 订阅/周报 under it: a parent in Gmail, never adopted (a mail's label is always a leaf). Its name is taken.
+    const parentFirst = await h.api.syncLabels({ requestId: op() });
+    expect(parentFirst).toMatchObject({ linkedCount: 0, renamedCount: 0, missingCount: 0, importedCount: 0 });
+    expect(parentFirst.labels.find((label) => label.name === 'labels/newsletter')).toMatchObject({ gmailLabelId: '', gmailState: Label_GmailState.NAME_TAKEN });
+    gmail.labels.delete(nested);
     const first = await h.api.syncLabels({ requestId: op() });
     expect(first).toMatchObject({ linkedCount: 1, renamedCount: 0, missingCount: 0, importedCount: 0 });
     expect(first.labels).toHaveLength(before);
@@ -158,10 +164,11 @@ describe('the owner API', () => {
     expect(await h.api.getLabel({ name: 'labels/newsletter' })).toMatchObject({ gmailLabelId: again, gmailState: Label_GmailState.ADOPTED });
     // A sync only reads Gmail.
     expect(writes()).toBe(writesBefore);
-    // A system label is never adopted, whatever its name (nor by CreateLabel, which tries Gmail at once in live mode).
+    // A system label is never adopted, whatever its name (nor by CreateLabel, which tries Gmail at once in live mode):
+    // its name is taken.
     const inbox = await h.api.createLabel({ labelId: 'inbox-name', label: create(LabelSchema, { displayName: 'INBOX' }), requestId: op() });
     expect(await h.api.syncLabels({ requestId: op() })).toMatchObject({ linkedCount: 0 });
-    expect(await h.api.getLabel({ name: inbox.name })).toMatchObject({ gmailLabelId: '', gmailState: Label_GmailState.PENDING });
+    expect(await h.api.getLabel({ name: inbox.name })).toMatchObject({ gmailLabelId: '', gmailState: Label_GmailState.NAME_TAKEN });
     await h.api.deleteLabel({ name: inbox.name, requestId: op() });
   });
 

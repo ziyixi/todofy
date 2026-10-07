@@ -5,11 +5,14 @@
  * tripped by a pass's own write stops the rest of that pass, one unreadable mail never holds up the queue, a deleted
  * label's entries are refused before any intent, the resync's read order, a model outage backs off per mail, one
  * label per conversation follows the labels a thread carries now, a resync never sorts mail from before the install,
- * a retry never labels mail the owner filed in the meantime, and the 14-day content cleanup runs while the mode is off.
- * After every test, every request Google got is checked against the independent table.
+ * a retry never labels mail the owner filed in the meantime, the 14-day content cleanup runs while the mode is off,
+ * and the owner's own Gmail labels are never taken over (a write never adopts one, a sync never adopts a parent, a
+ * label already on a mail is never written, so its undo cannot take it off). After every test, every request Google
+ * got is checked against the independent table.
  */
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { create } from '@ziyixi/proto/protobuf';
+import { Label_GmailState, LabelSchema } from '@ziyixi/proto/mailsort/ui/v1/label_pb';
 import { Mode, SettingsSchema } from '@ziyixi/proto/mailsort/ui/v1/status_pb';
 import { timestampFromMs } from '@ziyixi/proto/protobuf/wkt';
 import { MAILS, type SyntheticMail } from '../fakes/fixtures.ts';
@@ -530,5 +533,115 @@ describe('the 14-day content cleanup runs while the mode is off', () => {
       content_cleared: 1, subject: null, sender: null, summary: null, sender_address: null, sender_domain: null, list_id: null, delivered_to: null,
     });
     expect(await h.sql(`SELECT id FROM review WHERE message_id = ?`, MAILS.unsure.id)).toEqual([]);
+  });
+});
+
+describe('the owner’s own Gmail labels are never taken over', () => {
+  let h: Harness;
+  let now = T0;
+  beforeAll(async () => {
+    h = await startHarness();
+    await addLabels(h, ['newsletter']);
+    await h.step(now);
+  });
+  afterAll(async () => {
+    await h.dispose();
+  });
+  afterEach(() => {
+    checkGoogleCalls(h);
+  });
+
+  const labelCreates = () => h.up.gmail.calls.filter((call) => call.method === 'POST' && call.url.endsWith('/labels')).length;
+  const labelLists = () => h.up.gmail.calls.filter((call) => call.method === 'GET' && call.url.endsWith('/labels')).length;
+  const pendingItem = async (id: string) => `reviewItems/${(await h.sql<{ id: string }>(`SELECT id FROM review WHERE message_id = ? AND state = 'pending'`, id))[0]?.id ?? ''}`;
+  const newsletter = (id: string, labels?: string[]): SyntheticMail => ({ ...MAILS.newsletterEn, id, subject: `Weekly digest ${id}`, ...(labels === undefined ? {} : { labels }) });
+  let own = '';
+
+  it('a write never adopts: the owner’s Gmail label of the path leaves the label out of Gmail until the owner’s sync adopts it', async () => {
+    // The owner made 订阅 in Gmail and has a mail filed under it that stays in the inbox; shadow suggests the label.
+    own = h.up.gmail.createUserLabel('订阅', true);
+    await setMode(h, Mode.SHADOW);
+    deliver(h, newsletter('e1000000000000e1', ['INBOX', 'UNREAD', 'CATEGORY_UPDATES', own]), now);
+    now += 5 * MINUTE;
+    await h.step(now);
+    expect(await decision(h, 'e1000000000000e1')).toMatchObject({ outcome: 'suggested', label_id: 'newsletter' });
+    // Live: the first write finds the name taken, creates nothing and writes nothing.
+    await setMode(h, Mode.LIVE);
+    deliver(h, newsletter('e1000000000000e2'), now);
+    now += 5 * MINUTE;
+    await h.step(now);
+    expect(labelCreates()).toBe(0);
+    expect(modifies(h)).toEqual([]);
+    expect(await ledgerOf(h, 'e1000000000000e2')).toEqual([{ state: 'failed', origin: 'auto', last_code: 'label_name_taken' }]);
+    expect(await decision(h, 'e1000000000000e2')).toMatchObject({ outcome: 'suggested' });
+    expect(await h.api.getLabel({ name: 'labels/newsletter' })).toMatchObject({ gmailLabelId: '', gmailState: Label_GmailState.NAME_TAKEN });
+    // The next mail of the label is a suggestion at once: not even Gmail's labels are read.
+    const lists = labelLists();
+    deliver(h, newsletter('e1000000000000e3'), now);
+    now += 5 * MINUTE;
+    await h.step(now);
+    expect(labelLists()).toBe(lists);
+    expect(await decision(h, 'e1000000000000e3')).toMatchObject({ outcome: 'suggested' });
+    expect(await ledgerOf(h, 'e1000000000000e3')).toEqual([]);
+    // Only the owner's 从 Gmail 同步 adopts it.
+    expect(await h.api.syncLabels({ requestId: op() })).toMatchObject({ linkedCount: 1 });
+    expect(await h.api.getLabel({ name: 'labels/newsletter' })).toMatchObject({ gmailLabelId: own, gmailState: Label_GmailState.ADOPTED });
+    deliver(h, newsletter('e1000000000000e4'), now);
+    now += 5 * MINUTE;
+    await h.step(now);
+    expect(gmailLabels(h, 'e1000000000000e4')).toEqual([own, 'CATEGORY_UPDATES', 'UNREAD'].sort());
+    expect(labelCreates()).toBe(0);
+  });
+
+  it('a label already on the mail is never written, so an undo never takes off one the owner put there', async () => {
+    // The suggestion from before the adoption, confirmed now: the mail already carries the owner's 订阅.
+    const before = modifies(h).length;
+    await h.api.confirmReviewItem({ name: await pendingItem('e1000000000000e1'), requestId: op() });
+    expect(modifies(h).length).toBe(before);
+    expect(await ledgerOf(h, 'e1000000000000e1')).toEqual([{ state: 'failed', origin: 'owner', last_code: 'already_labelled' }]);
+    expect(gmailLabels(h, 'e1000000000000e1')).toEqual([own, 'CATEGORY_UPDATES', 'INBOX', 'UNREAD'].sort());
+    expect((await h.api.listLedgerEntries({})).ledgerEntries.filter((entry) => entry.messageId === 'e1000000000000e1' && entry.undoable)).toEqual([]);
+    // A mail without it is written, and its undo removes exactly what mailsort added.
+    await h.api.confirmReviewItem({ name: await pendingItem('e1000000000000e2'), requestId: op() });
+    expect(gmailLabels(h, 'e1000000000000e2')).toEqual([own, 'CATEGORY_UPDATES', 'UNREAD'].sort());
+    const entry = (await h.api.listLedgerEntries({})).ledgerEntries.find((item) => item.messageId === 'e1000000000000e2');
+    await h.api.undoLedgerEntry({ name: entry?.name ?? '', requestId: op() });
+    expect(gmailLabels(h, 'e1000000000000e2')).toEqual(['CATEGORY_UPDATES', 'INBOX', 'UNREAD']);
+  });
+
+  it('a Gmail label with labels nested under it is never adopted, not even a parent mailsort made', async () => {
+    // The owner's MSU holds MSU/课程: a label MSU here stays out of Gmail, and the sync leaves it so.
+    h.up.gmail.createUserLabel('MSU');
+    h.up.gmail.createUserLabel('MSU/课程');
+    const msu = await h.api.createLabel({ label: create(LabelSchema, { displayName: 'MSU', description: '学校的课程与通知' }), requestId: op() });
+    expect(msu).toMatchObject({ gmailLabelId: '', gmailState: Label_GmailState.NAME_TAKEN });
+    expect(await h.api.syncLabels({ requestId: op() })).toMatchObject({ linkedCount: 0 });
+    expect(await h.api.getLabel({ name: msu.name })).toMatchObject({ gmailLabelId: '', gmailState: Label_GmailState.NAME_TAKEN });
+    // 学校 was made here as the parent of 学校/作业; that label is deleted, its Gmail label stays under 学校.
+    const homework = await h.api.createLabel({ label: create(LabelSchema, { displayName: '学校/作业', description: '作业提交与成绩通知' }), requestId: op() });
+    expect(homework.gmailState).toBe(Label_GmailState.LINKED);
+    await h.api.deleteLabel({ name: homework.name, requestId: op() });
+    const school = await h.api.createLabel({ label: create(LabelSchema, { displayName: '学校', description: '学校的其他通知' }), requestId: op() });
+    expect(school).toMatchObject({ gmailLabelId: '', gmailState: Label_GmailState.NAME_TAKEN });
+    expect(await h.api.syncLabels({ requestId: op() })).toMatchObject({ linkedCount: 0 });
+    expect(await h.api.getLabel({ name: school.name })).toMatchObject({ gmailState: Label_GmailState.NAME_TAKEN });
+  });
+
+  it('a label made in Gmail between the list and the create is the owner’s: a parent is not recorded, a leaf’s name is taken', async () => {
+    // The owner makes 旅行 right after mailsort read Gmail's labels: mailsort's create gets a 409.
+    const after = (name: string) => {
+      h.up.gmail.afterCall = (method, url) => {
+        if (method !== 'GET' || !url.pathname.endsWith('/labels')) return;
+        h.up.gmail.afterCall = null;
+        h.up.gmail.createUserLabel(name);
+      };
+    };
+    after('旅行');
+    const visa = await h.api.createLabel({ label: create(LabelSchema, { displayName: '旅行/签证', description: '签证申请与预约' }), requestId: op() });
+    expect(visa.gmailState).toBe(Label_GmailState.LINKED);
+    expect(await h.sql(`SELECT count(*) AS n FROM gmail_parents WHERE gmail_id = ?`, h.up.gmail.labelIdByName('旅行') ?? '')).toEqual([{ n: 0 }]);
+    after('旅行/护照');
+    const passport = await h.api.createLabel({ label: create(LabelSchema, { displayName: '旅行/护照', description: '护照办理与续签' }), requestId: op() });
+    expect(passport).toMatchObject({ gmailLabelId: '', gmailState: Label_GmailState.NAME_TAKEN });
   });
 });

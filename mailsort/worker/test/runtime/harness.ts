@@ -175,6 +175,7 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
     if (result.error !== undefined) throw new Error(`${op}: ${result.error}`);
     return result.ok;
   };
+  up.plannedPaths = async () => ((await probe('sql', ['SELECT display_name FROM labels'])) as { display_name: string }[]).map((row) => row.display_name);
   const fetchSort = (path: string, init?: RequestInit) => mf.dispatchFetch(`${ORIGIN}${path}`, { redirect: 'manual', ...init } as never) as unknown as Promise<Response>;
   let csrf: { token: string; cookie: string } | undefined;
   const csrfToken = async () => {

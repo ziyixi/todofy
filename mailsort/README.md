@@ -37,13 +37,16 @@ Four tabs under a header whose one status line shows the mode in force, the Gmai
   rule, and keep in inbox under 更多), the examples (listed on demand, deleted one by one) and 高级 (the threshold,
   可信, 敏感 to keep no example, 启用, rename, delete). A sender rule fires only when DMARC passed aligned with the
   From domain, a list rule only with a DKIM signature of the list's domain (`docs/design.md` §4.3). A label's Gmail
-  name is its path; when Gmail already has a label of exactly that name (made by hand), it is adopted (沿用) instead
-  of created twice, and the owner's other labels are never touched. Deleting a label leaves its Gmail label and
-  mails alone, and its writes can no longer be undone. With no label at all, 套用推荐模板 previews the 15
+  name is its path; when Gmail already has a label of exactly that name (made by hand), mailsort never takes it over:
+  the label shows 已有同名标签 under 高级 and writes nothing until it is renamed or 从 Gmail 同步 adopts (沿用) that
+  label. An adopted label is never added to a mail that already has it, so an undo never removes the owner's own,
+  and the owner's other labels are never touched. Deleting a label leaves its Gmail label and mails alone, and its
+  writes can no longer be undone. With no label at all, 套用推荐模板 previews the 15
   recommended labels and adds them.
 - **设置**: the mode (关闭 · 影子 · 正式, with the deployment's ceiling or a tripped breaker in one line, and 解除熔断);
   撤销, the undo of a time range (1 hour, 24 hours, 7 days or your own), of one label when chosen, previewed first;
-  从 Gmail 同步 (follows renames and deletions made in Gmail and adopts such labels; it never imports another one);
+  从 Gmail 同步 (follows renames and deletions made in Gmail and adopts such labels, never one with labels nested
+  under it; it never imports another one);
   and 导出过滤器, the active rules as a Gmail filter file to import in Gmail's settings (label, and archive unless
   kept; left out are trust and DMARC rules, rules with subject conditions and the plain rules of the senders they
   cover, since Gmail would apply both). Emergency stop: 设置 → 关闭 (`docs/design.md` §10).

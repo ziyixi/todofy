@@ -77,7 +77,7 @@ import { normalizeRuleValue, ruleText, ruleValueOk } from './rule-value.ts';
 import { authState, type Budget, writeScope } from './session.ts';
 import { effectiveMode, readSettings, writeSettings, type SettingsValue } from './settings.ts';
 import { utcDay, type DecisionRow, type LabelRow, type LedgerRow, type ReviewRow, type RuleRow, type Store } from './store.ts';
-import { ensureGmailLabel, ensureGmailParents, executeWrites, intend, intendUndo, linkGmailLabel, undoable, userLabelsByName, type WriteContext } from './writes.ts';
+import { ensureGmailLabel, ensureGmailParents, executeWrites, hasSublabels, intend, intendUndo, linkGmailLabel, setNameTaken, undoable, userLabelsByName, type WriteContext } from './writes.ts';
 
 /** What every handler gets from MailsortState. */
 export interface ApiContext {
@@ -301,7 +301,8 @@ function choose(ctx: ApiContext, item: ReviewRow, decision: DecisionRow, chosen:
   }
   if (chosen !== null && (current === undefined || current.label_id !== chosen)) {
     const label = store.label(chosen);
-    if (label !== undefined && label.gmail_state !== 'missing') {
+    // As in the pipeline: a label missing from Gmail, or whose name is taken there, writes nothing.
+    if (label !== undefined && label.gmail_state !== 'missing' && label.gmail_name_taken !== 1) {
       // The decision keeps its own label and outcome (the accuracy is about the decision); the ledger row is the owner's.
       // A label that keeps its mail in the inbox does so for the owner's choice too, and so does the rule that
       // suggested this very label (a pickup-code carve-out onto 购物/订单物流, which archives the rest).
@@ -497,7 +498,8 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailsortUiService>, ApiCon
       );
       return labelOut(ctx, existingLabel(ctx, id));
     });
-    // In live mode with a write grant the label is created in Gmail at once; otherwise before its first write.
+    // In live mode with a write grant the label is created in Gmail at once; otherwise before its first write. Never
+    // over a Gmail label of its path: it then stays pending, its name taken (writes.ts ensureGmailLabel).
     const row = ctx.store.label(id);
     if (row !== undefined && row.gmail_state === 'pending' && ownerWritesAllowed(ctx)) {
       const client = await ctx.gmail();
@@ -537,6 +539,8 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailsortUiService>, ApiCon
       }
       return ctx.transact(() => {
         const { store } = ctx;
+        // A new path may be free in Gmail: the next write that needs the label looks again.
+        if (displayName !== before.display_name) store.run(`UPDATE labels SET gmail_name_taken = 0 WHERE id = ?`, id);
         const live = has('live') ? label.live : before.live === 1;
         store.run(
           `UPDATE labels SET display_name = ?, description = ?, enabled = ?, live = ?, trust = ?, threshold = ?, desc_version = desc_version + ?,
@@ -623,11 +627,16 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailsortUiService>, ApiCon
             renamed++;
             continue;
           }
-          // Not in Gmail yet, or gone from it: the user label of exactly its path is linked (adopted), if no label has it.
+          // Not in Gmail yet, or gone from it: the owner's sync adopts the user label of exactly its path (the only place
+          // a label is adopted), unless another label here holds it or labels are nested under it (a mail's label is
+          // always a leaf). Otherwise a pending label whose path names a Gmail label stays out of Gmail: its name is taken.
           const match = idByName.get(row.display_name);
-          if (match === undefined || store.one(`SELECT 1 AS x FROM labels WHERE gmail_id = ? AND gmail_state = 'linked'`, match) !== undefined) continue;
-          linkGmailLabel(store, row.id, match, false, ctx.now);
-          linked++;
+          if (match !== undefined && store.labelByGmailId(match) === undefined && !hasSublabels(idByName, row.display_name)) {
+            linkGmailLabel(store, row.id, match, false, ctx.now);
+            linked++;
+            continue;
+          }
+          setNameTaken(store, row.id, gmailLabels.some((item) => item.name === row.display_name), ctx.now);
         }
         const counts = store.exampleCounts();
         return create(SyncLabelsResponseSchema, {
