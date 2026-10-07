@@ -173,7 +173,8 @@ a {
   font-size: 13px;
 }
 
-.status-line .problem {
+.status-line .problem,
+.leaf-main .meta.warn {
   color: var(--warn);
 }
 

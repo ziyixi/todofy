@@ -112,7 +112,7 @@ export function userLabelsByName(labels: readonly GmailLabel[]): Map<string, str
   return new Map(labels.filter((item) => item.type !== 'system' && isUserLabelId(item.id)).map((item) => [item.name, item.id]));
 }
 
-/** Whether Gmail has user labels nested under `path` (`MSU/课程` under `MSU`): `path` is a parent there, never linked. */
+/** Whether Gmail has user labels nested under `path` (`社团/活动` under `社团`): `path` is a parent there, never linked. */
 export function hasSublabels(existing: ReadonlyMap<string, string>, path: string): boolean {
   return [...existing.keys()].some((name) => name.startsWith(`${path}/`));
 }

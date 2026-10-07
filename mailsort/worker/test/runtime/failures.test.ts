@@ -610,13 +610,13 @@ describe('the owner’s own Gmail labels are never taken over', () => {
   });
 
   it('a Gmail label with labels nested under it is never adopted, not even a parent mailsort made', async () => {
-    // The owner's MSU holds MSU/课程: a label MSU here stays out of Gmail, and the sync leaves it so.
-    h.up.gmail.createUserLabel('MSU');
-    h.up.gmail.createUserLabel('MSU/课程');
-    const msu = await h.api.createLabel({ label: create(LabelSchema, { displayName: 'MSU', description: '学校的课程与通知' }), requestId: op() });
-    expect(msu).toMatchObject({ gmailLabelId: '', gmailState: Label_GmailState.NAME_TAKEN });
+    // The owner's 社团 holds 社团/活动: a label 社团 here stays out of Gmail, and the sync leaves it so.
+    h.up.gmail.createUserLabel('社团');
+    h.up.gmail.createUserLabel('社团/活动');
+    const club = await h.api.createLabel({ label: create(LabelSchema, { displayName: '社团', description: '社团的活动与通知' }), requestId: op() });
+    expect(club).toMatchObject({ gmailLabelId: '', gmailState: Label_GmailState.NAME_TAKEN });
     expect(await h.api.syncLabels({ requestId: op() })).toMatchObject({ linkedCount: 0 });
-    expect(await h.api.getLabel({ name: msu.name })).toMatchObject({ gmailLabelId: '', gmailState: Label_GmailState.NAME_TAKEN });
+    expect(await h.api.getLabel({ name: club.name })).toMatchObject({ gmailLabelId: '', gmailState: Label_GmailState.NAME_TAKEN });
     // 学校 was made here as the parent of 学校/作业; that label is deleted, its Gmail label stays under 学校.
     const homework = await h.api.createLabel({ label: create(LabelSchema, { displayName: '学校/作业', description: '作业提交与成绩通知' }), requestId: op() });
     expect(homework.gmailState).toBe(Label_GmailState.LINKED);

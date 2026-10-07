@@ -56,7 +56,7 @@ Landing order:
 4. Done: deployed at `a3705ed` (mailsort and Home); the `MailsortState` namespace id is in `config/resources.toml`
    (`chore/after-mailsort-live`). Live on 2026-10-07 in shadow: the owner's readonly Gmail grant (mint-token), the
    15-label template and the 93-rule file imported through the dashboard (93 create, 0 invalid).
-5. `feat/mailsort-labels-ui` (local, not pushed yet): labels at Gmail's top level without `分拣/` (the owner's request,
+5. `feat/mailsort-labels-ui` (2026-10-07): labels at Gmail's top level without `分拣/` (the owner's request,
    2026-10-07; `mailsort/docs/design.md` §2 "Labels without a prefix"). The guard creates only the store's planned
    names and renames an owned label only to its planned path; a Gmail label of exactly a label's path is never taken
    over by a write (the label shows 已有同名标签 and writes nothing) and only the owner's 从 Gmail 同步 adopts it,
@@ -79,7 +79,12 @@ Landing order:
    typecheck, vitest, build, a hand run against `wrangler dev` with the loopback fakes, and the review fixes at 360 px,
    light and dark, against the web tests' fake API); the branch is not pushed. After its deploy: 概览 draws the
    skeleton on a quiet day, 设置 → 撤销 → 预览 counts 0 while the grant is read-only, and 标签 shows the 15 labels in
-   their groups with the 93 rules' counts (searching a sender of the rule file finds its label).
+   their groups with the 93 rules' counts (searching a sender of the rule file finds its label). A label whose name
+   is taken or that Gmail lost says so on its row (同名已占用, Gmail 中已删除). Verified before landing: every CI job
+   of the changed files locally, and workerd probes that the owner's own Gmail labels are never written by any
+   automatic path. Known follow-up (low, needs the owner to act in Gmail first): a label mailsort already holds that
+   later gains sublabels in Gmail keeps being written (`writes.ts` executeWrites, `api.ts` SyncLabels); refuse it the
+   way adoption already refuses a label with sublabels.
 
 Already set: production secret `MAILSORT_CSRF_SIGNING_KEY`, variable `MAILSORT_MODE=shadow` (the mode ceiling).
 

@@ -133,6 +133,16 @@ describe('the tree', () => {
 })
 
 describe('a row', () => {
+  it('says on the row when Gmail holds its name or lost the label', async () => {
+    const s = server()
+    s.labels[2]!.gmailState = Label_GmailState.NAME_TAKEN
+    s.labels[5]!.gmailState = Label_GmailState.MISSING
+    const root = await open(s)
+    expect(row(root, '账号安全').querySelector('.leaf-main > .meta.warn')?.textContent).toBe('同名已占用')
+    expect(row(root, '出行').querySelector('.leaf-main > .meta.warn')?.textContent).toBe('Gmail 中已删除')
+    expect(row(root, 'CI通知').querySelector('.leaf-main > .meta.warn')).toBeNull()
+  })
+
   it('opens its detail inline, one at a time, and closes again', async () => {
     const root = await open(server())
     expect(openDetails(root).length).toBe(0)

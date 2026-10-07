@@ -15,7 +15,7 @@
  * Deleting a label leaves its Gmail label and mails as they are. (The sync with Gmail is in 设置.)
  */
 import { create } from '@ziyixi/proto/protobuf'
-import { LabelSchema, type Label } from '@ziyixi/proto/mailsort/ui/v1/label_pb'
+import { Label_GmailState, LabelSchema, type Label } from '@ziyixi/proto/mailsort/ui/v1/label_pb'
 import type { ImportRulesResponse } from '@ziyixi/proto/mailsort/ui/v1/mailsort_ui_service_pb'
 import { Rule_State, type Rule } from '@ziyixi/proto/mailsort/ui/v1/rule_pb'
 import { api, errorMessage, listAll, newRequestId, withRetry } from '../api.ts'
@@ -28,6 +28,12 @@ import { labelDetail, type DetailPage, type LabelFields } from './label-detail.t
 
 /** Rule pages read at most: 5 of 100, the store's 500. */
 const RULE_PAGES = 5
+
+/** A label mailsort cannot write, said on its row; its detail says what to do. */
+const GMAIL_TROUBLE: Partial<Record<Label_GmailState, string>> = {
+  [Label_GmailState.NAME_TAKEN]: '同名已占用',
+  [Label_GmailState.MISSING]: 'Gmail 中已删除',
+}
 
 /** A group of the tree: the labels under one top-level segment, or ('') a run of labels of one segment. */
 export interface Group<T> {
@@ -178,11 +184,13 @@ function labelsPage(body: HTMLElement, ctx: ViewContext, labels: Label[], rules:
     const own = state.rules.filter((rule) => rule.label === label.name)
     const proposed = own.filter((rule) => rule.state === Rule_State.PROPOSED).length
     const open = state.open === label.name
+    const trouble = GMAIL_TROUBLE[label.gmailState]
     const main = el(
       'button',
       { type: 'button', class: 'leaf-main', 'aria-expanded': String(open), 'aria-controls': row.slot.id, 'data-focus': `row:${label.name}` },
       el('span', { class: 'leaf-name' }, el('span', {}, leafName(label.displayName, row.group)), row.hits.length === 0 ? null : el('span', { class: 'leaf-hit mono' }, hitText(row.hits))),
       label.enabled ? null : el('span', { class: 'meta' }, '未启用'),
+      trouble === undefined ? null : el('span', { class: 'meta warn' }, trouble),
       own.length === 0 ? null : el('span', { class: 'leaf-count' }, `${String(own.length)} 条规则`, proposed === 0 ? null : el('span', { class: 'dot', title: `${String(proposed)} 条待批准` }, el('span', { class: 'visually-hidden' }, `，${String(proposed)} 条待批准`))),
       precisionBar(precision.get(label.name)),
     )
