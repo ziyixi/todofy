@@ -28,7 +28,7 @@ export const KIND_NAMES: Readonly<Record<number, string>> = {
 }
 
 export const UNSURE_REASONS: Readonly<Record<string, string>> = {
-  below_threshold: '低于阈值',
+  below_threshold: '把握不够',
   none: '都不像',
   suspicious: '疑似钓鱼',
   trust_needs_rule: '可信类只能由规则打',
@@ -59,14 +59,15 @@ export function when(time: Timestamp | undefined): string {
   return `${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`
 }
 
-/** `3 分钟前`, `2 小时后`. */
+/** `3 分钟前`, `2 小时后`; within a minute, 刚刚 before and 马上 after. */
 export function relative(time: Timestamp | undefined, now: number): string {
   const value = ms(time)
   if (value === null) return '—'
   const minutes = Math.round((value - now) / 60_000)
   const size = Math.abs(minutes)
-  const text = size < 1 ? '刚刚' : size < 60 ? `${String(size)} 分钟` : size < 48 * 60 ? `${String(Math.round(size / 60))} 小时` : `${String(Math.round(size / 1440))} 天`
-  return size < 1 ? text : minutes < 0 ? `${text}前` : `${text}后`
+  if (size < 1) return value > now ? '马上' : '刚刚'
+  const text = size < 60 ? `${String(size)} 分钟` : size < 48 * 60 ? `${String(Math.round(size / 60))} 小时` : `${String(Math.round(size / 1440))} 天`
+  return minutes < 0 ? `${text}前` : `${text}后`
 }
 
 export function percent(value: number): string {

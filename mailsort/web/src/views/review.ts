@@ -8,12 +8,12 @@
  * picker starts at 都不是 (another mail's at the model's next choice).
  */
 import type { ReviewItem } from '@ziyixi/proto/mailsort/ui/v1/review_pb'
-import { api, errorMessage, listAll, newRequestId, withRetry } from '../api.ts'
+import { api, listAll } from '../api.ts'
 import { bar, chip, emptyState, picker, type PickerOption } from '../components.ts'
-import { button, el, fill, toast } from '../dom.ts'
+import { button, el, fill } from '../dom.ts'
 import { KIND_NAMES, labelText, percent, UNSURE_REASONS, when } from '../format.ts'
 import type { ViewContext } from '../app.ts'
-import { allLabels, frame } from './common.ts'
+import { act, allLabels, frame } from './common.ts'
 
 /** Unsure reasons where the pipeline refused the suggestion on purpose: one key must not file such a mail under it. */
 const CAUTION: Readonly<Record<string, string>> = {
@@ -28,7 +28,7 @@ interface Row {
   readonly skip: () => void
 }
 
-/** Why a mail is here, when it is not a plain suggestion: `拿不准 · 低于阈值`, `抽查`. */
+/** Why a mail is here, when it is not a plain suggestion: `拿不准 · 把握不够`, `抽查`. */
 function why(item: ReviewItem): string {
   const kind = KIND_NAMES[item.kind]
   const reason = item.unsureReason === '' ? '' : (UNSURE_REASONS[item.unsureReason] ?? item.unsureReason)
@@ -84,18 +84,14 @@ export async function renderReview(ctx: ViewContext): Promise<void> {
       const node = el('li', { tabindex: '-1', 'aria-label': item.subject === '' ? '（无主题）' : item.subject })
       const slot = el('div', { hidden: true })
       let busy = false
+      // Done, the row leaves; refused, it stays to be tried again.
       const run = async (call: (requestId: string) => Promise<unknown>, done: string) => {
         if (busy) return
         busy = true
-        const requestId = newRequestId()
-        try {
-          await withRetry(() => call(requestId))
-          toast(done)
+        const answer = await act(call, done, () => {
           leave(row)
-        } catch (error) {
-          toast(errorMessage(error))
-          busy = false
-        }
+        })
+        if (answer === null) busy = false
       }
       const confirm = () => {
         if (suggested === '') return
@@ -128,8 +124,11 @@ export async function renderReview(ctx: ViewContext): Promise<void> {
         slot.hidden = false
         changeButton.setAttribute('aria-expanded', 'true')
         slot.querySelector('input')?.focus()
+        // Now that the list is on the page, its highlighted label can be scrolled into sight.
+        slot.querySelector('[aria-selected="true"]')?.scrollIntoView?.({ block: 'nearest' })
       }
-      const reason = why(item)
+      // A warning line already says why (疑似钓鱼): the small text then names only the kind.
+      const reason = caution === undefined ? why(item) : (KIND_NAMES[item.kind] ?? '')
       fill(
         node,
         el('div', { class: 'row-head' }, el('span', { class: 'row-title' }, item.subject === '' ? '（无主题）' : item.subject), el('span', { class: 'meta' }, when(item.receiveTime))),

@@ -4,6 +4,7 @@
  */
 import type { Label } from '@ziyixi/proto/mailsort/ui/v1/label_pb'
 import { api, errorMessage, listAll, newRequestId, withRetry } from '../api.ts'
+import { emptyState } from '../components.ts'
 import { el, toast } from '../dom.ts'
 
 export async function allLabels(): Promise<Label[]> {
@@ -36,7 +37,7 @@ export async function frame(main: HTMLElement, title: string, load: (body: HTMLE
     try {
       await load(body)
     } catch (error) {
-      body.replaceChildren(el('div', { class: 'empty' }, el('strong', {}, errorMessage(error))))
+      body.replaceChildren(emptyState(errorMessage(error)))
     }
   }
   await run()
@@ -44,15 +45,16 @@ export async function frame(main: HTMLElement, title: string, load: (body: HTMLE
 }
 
 /**
- * Runs one user action with a fresh request ID (repeated once on a transient failure), then toasts and reloads. The
- * toast is `done`, or what `done` makes of the answer (the counts a sync or an export reports).
+ * Runs one user action with a fresh request ID (repeated once on a transient failure), then toasts and runs `after`
+ * (a reload, or a row leaving); a failure only toasts its message, and answers null. The toast is `done`, or what
+ * `done` makes of the answer (the counts a sync or an export reports).
  */
-export async function act<T>(run: (requestId: string) => Promise<T>, done: string | ((answer: T) => string), reload: () => Promise<void>): Promise<T | null> {
+export async function act<T>(run: (requestId: string) => Promise<T>, done: string | ((answer: T) => string), after: () => Promise<void> | void): Promise<T | null> {
   const requestId = newRequestId()
   try {
     const answer = await withRetry(() => run(requestId))
     toast(typeof done === 'string' ? done : done(answer))
-    await reload()
+    await after()
     return answer
   } catch (error) {
     toast(errorMessage(error))

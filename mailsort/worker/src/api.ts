@@ -944,7 +944,7 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailsortUiService>, ApiCon
     const start = request.startTime === undefined ? NaN : timestampMs(request.startTime);
     const end = request.endTime === undefined ? NaN : timestampMs(request.endTime);
     if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start || end - start > UNDO_RANGE_MAX_MS) bad('the range is not valid (at most 31 days)');
-    // 操作记录 filtered to one label (流程's link) undoes that label's entries only; empty is every label's.
+    // 设置's 撤销 with a label chosen undoes that label's entries only; empty is every label's.
     const label = request.label === '' ? '' : idOf(request.label, 'labels');
     return onceAsync(ctx, request.requestId, 'UndoLedgerEntries', 'ledgerEntries', UndoLedgerEntriesResponseSchema, async () => {
       if (!writeScope(ctx.store)) throw sortError('GMAIL_WRITE_NOT_ALLOWED');

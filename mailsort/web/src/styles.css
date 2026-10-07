@@ -12,6 +12,8 @@
   --ink: #1d1d1f;
   --muted: #6e6e73;
   --line: #e5e5e1;
+  /* An off switch's track: at least 3:1 against the card and the page (WCAG 1.4.11). */
+  --track: #8e8e93;
   /* The one accent. */
   --accent: #1f6f5c;
   --accent-ink: #ffffff;
@@ -54,6 +56,7 @@
     --ink: #ececee;
     --muted: #9b9ba1;
     --line: #2e2e33;
+    --track: #6e6e73;
     --accent: #6cc3a7;
     --accent-ink: #0b2a22;
     --accent-soft: #1d3a32;
@@ -199,13 +202,15 @@ a {
   box-shadow: inset 0 -2px 0 var(--accent);
 }
 
-/* A page: its sections one under another. */
+/* A page: its sections one under another, in one column that never grows past the page (a wide child, the flow
+   diagram, scrolls inside its own box instead). */
 #view {
   padding-top: var(--space-4);
 }
 
 #view > .body {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--space-3);
 }
 
@@ -323,7 +328,7 @@ input.switch {
   padding: 0;
   border: 0;
   border-radius: 999px;
-  background: var(--line);
+  background: var(--track);
   cursor: pointer;
 }
 
@@ -487,7 +492,7 @@ input.switch:checked::before {
   justify-content: center;
 }
 
-/* The disclosure (更多, 为什么). */
+/* The disclosure (更多, 高级, N 条没有导出). */
 details.more > summary {
   display: inline-flex;
   align-items: center;
@@ -666,7 +671,8 @@ details.more > p {
   }
 }
 
-/* The compact list (待审): one row per mail, hairlines between. */
+/* The compact list (待审): one row per mail, hairlines between. A row's one column never grows past the list, so a
+   long subject is cut with … and the actions stay in sight. */
 .rows {
   margin: 0;
   padding: 0;
@@ -679,6 +685,7 @@ details.more > p {
 
 .rows > li {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 6px;
   padding: 12px var(--space-3);
   border-top: 1px solid var(--line);
@@ -708,6 +715,11 @@ details.more > p {
   overflow: hidden;
   font-weight: 500;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.row-head .meta {
+  flex: none;
   white-space: nowrap;
 }
 
@@ -794,16 +806,9 @@ details.more > p {
 
 .setting > div {
   display: grid;
+  flex: 1 1 0;
   gap: 2px;
   min-width: 0;
-}
-
-.notice {
-  padding: 12px var(--space-3);
-  border-radius: var(--radius);
-  background: var(--warn-soft);
-  color: var(--warn);
-  font-size: 14px;
 }
 
 /* The undo's own range: two pickers side by side, stacked on a phone. */
@@ -872,7 +877,7 @@ kbd {
 }
 
 .tree,
-.tree ul {
+.branch > ul {
   margin: 0;
   padding: 0;
   list-style: none;
@@ -885,7 +890,9 @@ kbd {
   background: var(--surface);
 }
 
-.tree li + li {
+/* Between the tree's rows only, never between the lines inside an open label. */
+.tree > li + li,
+.branch > ul > li + li {
   border-top: 1px solid var(--line);
 }
 
@@ -1125,10 +1132,6 @@ kbd {
   flex: 1 1 16rem;
   min-width: 0;
   overflow-wrap: anywhere;
-}
-
-.setting input[type='number'] {
-  width: 7rem;
 }
 
 /* The template's preview: one line per group. */

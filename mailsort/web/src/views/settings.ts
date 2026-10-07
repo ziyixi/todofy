@@ -1,5 +1,5 @@
 /**
- * 设置 (`/settings`): four things only.
+ * 设置 (`/settings`): three cards only.
  *
  * - 模式: 关闭, 影子 or 正式, and one line on what is in force (the deployment's MAILSORT_MODE ceiling or the breaker may
  *   lower the owner's choice; 解除熔断 once the breaker tripped). A choice names only `mode` (and the etag) in the
@@ -89,7 +89,7 @@ function modeCard(settings: Settings, ctx: ViewContext, reload: () => Promise<vo
   const line = settings.breakerTripped
     ? `已熔断（${BREAKER_REASONS[settings.breakerReason] ?? settings.breakerReason}），暂按影子运行`
     : settings.effectiveMode !== settings.mode
-      ? `部署上限是“${effective}”，现在按${effective}运行`
+      ? `受部署上限限制，按${effective}运行`
       : (MODE_HINTS[settings.mode] ?? '')
   return card(
     '模式',
@@ -243,7 +243,7 @@ function gmailCard(): HTMLElement {
   return card(
     'Gmail',
     '',
-    setting('从 Gmail 同步', '跟上你在 Gmail 里的改名和删除', button('同步', () => void act((requestId) => api.syncLabels({ requestId }), syncMessage, () => Promise.resolve()))),
+    setting('从 Gmail 同步', '跟上你在 Gmail 里的改名和删除，沿用同名标签', button('同步', () => void act((requestId) => api.syncLabels({ requestId }), syncMessage, () => Promise.resolve()))),
     setting('导出过滤器', '把规则存成 Gmail 能导入的过滤器文件', button('导出', () => void exportFilters())),
     exported,
   )

@@ -1,8 +1,8 @@
 /**
  * 标签 against the fake API (test/fakeServer.ts, the shared transcoder): the tree grouped by top-level segment with one
  * compact row per label, a row's detail opened inline one at a time, the search over labels and rules' values,
- * 添加规则 with its kind inferred, 正式打 on the row, the rule menu, the description, the examples, 高级, a new label,
- * and the template offered when there is no label.
+ * 添加规则 with its kind inferred, 正式打 on the row, the rule menu (one open at a time, 删除 asking first), the
+ * description, the examples, the Gmail state, 高级, a new label, and the template offered when there is no label.
  */
 import { mountApp, type Host } from './app.ts'
 import { groupByTop, leafName, searchLabels } from './views/labels.ts'
@@ -110,9 +110,9 @@ describe('the tree', () => {
 
     const ci = row(root, 'CI通知')
     // Nothing else on the row: the name, the count (a dot for the proposal), the bar, and one switch.
-    expect(ci.querySelector('.leaf-count')?.textContent).toContain('2 规则')
+    expect(ci.querySelector('.leaf-count')?.textContent).toContain('2 条规则')
     expect(ci.querySelector('.leaf-count .dot')?.getAttribute('title')).toBe('1 条待批准')
-    expect(ci.querySelector('.bar-slot')?.getAttribute('title')).toBe('精确率下界 92% · 40 封')
+    expect(ci.querySelector('.bar-slot')?.getAttribute('title')).toBe('准确率 92% · 40 封')
     expect(ci.querySelectorAll('.leaf-row input').length).toBe(1)
     expect(ci.querySelector('.leaf-row input')?.getAttribute('aria-label')).toBe('正式打：开发/CI通知')
     expect(ci.querySelectorAll('.leaf-row button').length).toBe(1)
@@ -257,12 +257,12 @@ describe('添加规则', () => {
     // The detail stayed open with the new rule, the row counts it, and the field is empty and focused again.
     const detail = openDetails(root)[0]
     expect(detail?.querySelector('.rule .rule-value')?.textContent).toBe('security@example.com')
-    expect(row(root, '账号安全').querySelector('.leaf-count')?.textContent).toBe('1 规则')
+    expect(row(root, '账号安全').querySelector('.leaf-count')?.textContent).toBe('1 条规则')
     expect(document.activeElement).toBe(input(root, '添加规则'))
     expect(input(root, '添加规则').value).toBe('')
   })
 
-  it('takes the kind, the subject words and 留在收件箱 from 更多', async () => {
+  it('takes the kind and the subject words from 更多; 留在收件箱 is the label’s own switch only', async () => {
     const s = server()
     const root = await open(s)
     rowButton(root, '出行').click()
@@ -278,22 +278,33 @@ describe('添加规则', () => {
     expect(detail.querySelector('.add-rule .chip')?.textContent).toBe('收件地址')
     type(input(detail, '主题包含'), '取件码，pickup code')
     type(input(detail, '主题不含'), '广告')
-    const keep = [...detail.querySelectorAll('.add-rule label.check')].find((node) => node.textContent.startsWith('留在收件箱'))?.querySelector('input')
-    if (keep === undefined || keep === null) throw new Error('no keep switch')
-    keep.checked = true
+    expect(detail.querySelector('.add-rule label.check')).toBeNull()
+    expect(input(detail, '添加规则').placeholder).toBe('发件地址或域名')
     buttonNamed(detail, '添加').click()
     await settle()
     const post = s.calls.find((call) => call.method === 'POST' && call.path.startsWith('/api/v1/rules?'))
-    expect(post?.body).toMatchObject({ kind: 'delivered_to', value: 'me+travel@example.com', subject_includes: ['取件码', 'pickup code'], subject_excludes: ['广告'], keep_in_inbox: true })
+    expect(post?.body).toMatchObject({ kind: 'delivered_to', value: 'me+travel@example.com', subject_includes: ['取件码', 'pickup code'], subject_excludes: ['广告'] })
+    expect(post?.body?.['keep_in_inbox']).toBeUndefined()
     const added = [...(openDetails(root)[0]?.querySelectorAll('.rule') ?? [])].find((node) => node.textContent.includes('me+travel@example.com'))
-    expect([...(added?.querySelectorAll('.chip') ?? [])].map((node) => node.textContent)).toEqual(['收件地址', '含 取件码', '含 pickup code', '不含 广告', '留在收件箱'])
+    expect([...(added?.querySelectorAll('.chip') ?? [])].map((node) => node.textContent)).toEqual(['收件地址', '含 取件码', '含 pickup code', '不含 广告'])
+  })
+
+  it('still names a rule that keeps its mail in the inbox (an imported one)', async () => {
+    const s = server()
+    s.rules.push(rule('r5', 'travel', Rule_Kind.SENDER_ADDRESS, 'pickup@rail.example.com', { keepInInbox: true }))
+    const root = await open(s)
+    rowButton(root, '出行').click()
+    const kept = [...(openDetails(root)[0]?.querySelectorAll('.rule') ?? [])].find((node) => node.textContent.includes('pickup@rail.example.com'))
+    expect([...(kept?.querySelectorAll('.chip') ?? [])].map((node) => node.textContent)).toEqual(['发件人', '留在收件箱'])
   })
 })
 
 describe('the rules of a label', () => {
-  it('lists the proposal first with 批准, and keeps 停用 / 启用 / 删除 behind ⋯', async () => {
+  it('lists the proposal first with 批准, and keeps 停用 / 启用 / 删除 (asking first) behind ⋯', async () => {
     const s = server()
-    const root = await open(s)
+    const asked: string[] = []
+    let answer = false
+    const root = await open(s, { now: () => NOW, confirm: (message) => (asked.push(message), answer) })
     rowButton(root, 'CI通知').click()
     const lines = () => [...(openDetails(root)[0]?.querySelectorAll<HTMLLIElement>('.rule') ?? [])]
     expect(lines().map((node) => node.querySelector('.rule-value')?.textContent)).toEqual(['ci.example.org', 'notifications@github.com'])
@@ -326,10 +337,49 @@ describe('the rules of a label', () => {
     expect(stopped?.textContent).toContain('已停用')
     stopped?.querySelector<HTMLButtonElement>('.menu > button')?.click()
     expect([...(stopped?.querySelectorAll('.menu-items button') ?? [])].map((node) => node.textContent)).toEqual(['启用', '删除'])
+    // Refused: nothing is sent.
+    buttonNamed(stopped ?? root, '删除').click()
+    await settle()
+    expect(asked).toEqual(['删除规则 notifications@github.com？'])
+    expect(s.calls.some((call) => call.method === 'DELETE')).toBe(false)
+    answer = true
+    stopped?.querySelector<HTMLButtonElement>('.menu > button')?.click()
     buttonNamed(stopped ?? root, '删除').click()
     await settle()
     expect(s.rules.some((item) => item.name === 'rules/r1')).toBe(false)
     expect(lines().map((node) => node.querySelector('.rule-value')?.textContent)).toEqual(['ci.example.org'])
+  })
+
+  it('keeps one ⋯ menu open at a time, and closes it on a click elsewhere or a key that takes the focus out of it', async () => {
+    const root = await open(server())
+    rowButton(root, 'CI通知').click()
+    const [proposal, active] = [...(openDetails(root)[0]?.querySelectorAll<HTMLLIElement>('.rule') ?? [])]
+    const opener = (line: HTMLLIElement | undefined) => {
+      const found = line?.querySelector<HTMLButtonElement>('.menu > button')
+      if (found === null || found === undefined) throw new Error('no menu')
+      return found
+    }
+    const isOpen = (line: HTMLLIElement | undefined) => line?.querySelector<HTMLElement>('.menu-items')?.hidden === false
+    opener(active).click()
+    opener(proposal).click()
+    expect([isOpen(proposal), isOpen(active)]).toEqual([true, false])
+    expect(opener(active).getAttribute('aria-expanded')).toBe('false')
+    document.body.click()
+    expect(isOpen(proposal)).toBe(false)
+    // A click inside it, between its actions, leaves it open; one on the rest of the line does not.
+    opener(active).click()
+    active?.querySelector('.menu-items')?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    expect(isOpen(active)).toBe(true)
+    active?.querySelector('.rule-value')?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    expect(isOpen(active)).toBe(false)
+    opener(active).click()
+    // A key within it (the focus is on its first action) leaves it open; Tab out of it does not.
+    document.activeElement?.dispatchEvent(new KeyboardEvent('keyup', { key: 'Tab', bubbles: true }))
+    expect(isOpen(active)).toBe(true)
+    const area = openDetails(root)[0]?.querySelector('textarea')
+    area?.focus()
+    area?.dispatchEvent(new KeyboardEvent('keyup', { key: 'Tab', bubbles: true }))
+    expect(isOpen(active)).toBe(false)
   })
 })
 
@@ -391,17 +441,31 @@ describe('the detail', () => {
     expect(toastText(root)).toBe('例子已删除')
   })
 
-  it('高级 warns when Gmail already has a label of the path, which mailsort does not take over', async () => {
+  it('says first, in one line, when Gmail takes nothing from the label: its name is taken there, or its label is gone', async () => {
     const s = server()
-    const travel = s.labels.find((item) => item.name === 'labels/travel')
-    if (travel !== undefined) travel.gmailState = Label_GmailState.NAME_TAKEN
+    const states: Readonly<Record<string, Label_GmailState>> = { 'labels/travel': Label_GmailState.NAME_TAKEN, 'labels/account-security': Label_GmailState.MISSING, 'labels/life-health': Label_GmailState.PENDING }
+    for (const item of s.labels) item.gmailState = states[item.name] ?? item.gmailState
     const root = await open(s)
-    rowButton(root, '出行').click()
-    const note = (openDetails(root)[0] ?? root).querySelector(':scope > details.more p.hint.warn')
-    expect(note?.textContent).toBe('Gmail：已有同名标签，没有沿用。改个名字，或在设置里从 Gmail 同步沿用它')
+    const opened = (name: string) => {
+      rowButton(root, name).click()
+      const detail = openDetails(root)[0]
+      if (detail === undefined) throw new Error('no detail')
+      return detail
+    }
+    const taken = opened('出行')
+    expect(taken.firstElementChild?.matches('p.hint.warn[role="note"]')).toBe(true)
+    expect(taken.firstElementChild?.textContent).toBe('Gmail 里已有同名标签，改个名字或到 设置 → 从 Gmail 同步 沿用')
+    // Said once: 高级 does not repeat it.
+    expect(taken.querySelector(':scope > details.more')?.textContent).not.toContain('Gmail')
+    expect(opened('账号安全').firstElementChild?.textContent).toBe('Gmail 里已没有这个标签，不再打它；在 Gmail 建回同名标签后到 设置 → 从 Gmail 同步')
+    // A label not in Gmail yet says so quietly under 高级; a linked one says nothing about Gmail.
+    const pending = opened('医疗')
+    expect(pending.querySelector('p.warn')).toBeNull()
+    expect(pending.querySelector(':scope > details.more p.hint')?.textContent).toBe('Gmail：尚未创建')
+    expect(opened('CI通知').textContent).not.toContain('Gmail')
   })
 
-  it('folds the threshold, 可信, 敏感 (asking before it deletes examples), 启用, rename and delete under 高级', async () => {
+  it('folds 可信, 敏感 (asking before it deletes examples), 启用, rename and delete under 高级, and no threshold', async () => {
     const s = server()
     const travel = s.labels.find((item) => item.name === 'labels/travel')
     if (travel !== undefined) travel.exampleCount = 1
@@ -412,7 +476,8 @@ describe('the detail', () => {
     const detail = () => openDetails(root)[0] ?? root
     const advanced = detail().querySelector<HTMLDetailsElement>(':scope > details.more')
     expect(advanced?.open).toBe(false)
-    expect(advanced?.textContent).toContain('Gmail：已关联')
+    expect(advanced?.querySelector('input[type="number"]')).toBeNull()
+    expect(advanced?.textContent).not.toContain('阈值')
     if (advanced) advanced.open = true
     advanced?.dispatchEvent(new Event('toggle'))
     const switchNamed = (name: string) => {
@@ -432,17 +497,9 @@ describe('the detail', () => {
     enabled.checked = false
     enabled.dispatchEvent(new Event('change'))
     await settle()
+    // Off is said in words on the row, not by its gray alone.
     expect(row(root, '出行').classList.contains('off')).toBe(true)
-    expect(row(root, '出行').querySelector('.leaf-main')?.textContent).toContain('未启用')
-
-    const threshold = input(detail(), '阈值')
-    threshold.value = '0.4'
-    threshold.dispatchEvent(new Event('change'))
-    expect(toastText(root)).toBe('阈值在 0.5 到 0.99 之间，空为默认')
-    threshold.value = '0.85'
-    threshold.dispatchEvent(new Event('change'))
-    await settle()
-    expect(s.labels.find((item) => item.name === 'labels/travel')?.threshold).toBe(0.85)
+    expect(row(root, '出行').querySelector('.leaf-main > .meta')?.textContent).toBe('未启用')
 
     // A rename moves the label in the tree; it stays open with 高级 open and the focus on the path.
     const path = input(detail(), '路径')
@@ -499,6 +556,8 @@ describe('no label yet', () => {
     expect(lines.slice(0, 3)).toEqual(['开发CI通知 · 平台工具', '金融投资 · 银行支付', '账号安全'])
     expect(lines.length).toBe(10)
     expect(document.activeElement?.textContent).toBe('添加这些标签')
+    // One primary action at a time: the offer waits while its preview is shown.
+    expect(buttonNamed(root, '套用推荐模板').hidden).toBe(true)
 
     buttonNamed(root, '添加这些标签').click()
     await settle()
@@ -516,8 +575,10 @@ describe('no label yet', () => {
     const root = await open(s)
     buttonNamed(root, '套用推荐模板').click()
     await settle()
+    expect(buttonNamed(root, '套用推荐模板').hidden).toBe(true)
     buttonNamed(root, '取消').click()
     expect(root.querySelector('.template')).toBeNull()
+    expect(buttonNamed(root, '套用推荐模板').hidden).toBe(false)
     expect(document.activeElement?.textContent).toBe('套用推荐模板')
     buttonNamed(root, '+ 新标签').click()
     const path = input(root, '新标签路径')

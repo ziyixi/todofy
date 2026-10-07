@@ -1,6 +1,6 @@
 /**
  * The flow counters (../../docs/design.md §10): how many mails each pipeline stage handled and what became of them,
- * per UTC day and label, for the owner's 流程 view (GetMailFlow). Counters only, never content.
+ * per UTC day and label, for 概览's diagram (GetMailFlow). Counters only, never content.
  *
  * Each counter changes in the same transaction as the row it counts: a decision (pipeline.ts decideMail), a skip, a
  * deferral, a write that failed and left its mail a suggestion (writes.ts fail), a correction and its withdrawal

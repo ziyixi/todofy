@@ -1,7 +1,7 @@
 /**
  * 概览 (`/overview`): today at a glance (UTC day). Four numbers (处理, 已打标签, 待审, 拿不准); the flow of today's mail,
- * always drawn (with no mail, the skeleton at 0); the precision bound of each label that has verdicts against the
- * target; the model budget as a thin meter; and the latest error code, only when there is one.
+ * always drawn (with no mail, the skeleton at 0; on a phone it starts at its right end, where the mail went); the
+ * precision bound of each label that has verdicts against the target (准确率); and the model budget as a thin meter.
  */
 import type { AccuracyReport, ServiceStatus } from '@ziyixi/proto/mailsort/ui/v1/status_pb'
 import type { Label } from '@ziyixi/proto/mailsort/ui/v1/label_pb'
@@ -21,7 +21,7 @@ function accuracy(report: AccuracyReport, labels: readonly Label[]): HTMLElement
   const rows = report.labels.filter((row) => row.confirmedCount + row.correctedCount > 0)
   const body =
     rows.length === 0
-      ? emptyState('还没有确认或纠正过的邮件')
+      ? emptyState('还没有确认或改过标签的邮件')
       : el(
           'ul',
           { class: 'bars' },
@@ -30,7 +30,7 @@ function accuracy(report: AccuracyReport, labels: readonly Label[]): HTMLElement
             const below = row.precisionLowerBound < report.precisionTarget
             return el(
               'li',
-              { 'aria-label': `${labelText(row.label, labels)}：精确率下界 ${percent(row.precisionLowerBound)}，${String(n)} 封` },
+              { 'aria-label': `${labelText(row.label, labels)}：准确率 ${percent(row.precisionLowerBound)}，${String(n)} 封` },
               el('span', { class: 'name' }, labelText(row.label, labels)),
               bar(row.precisionLowerBound, below ? 'warn' : ''),
               el('span', { class: 'figures' }, `${percent(row.precisionLowerBound)} · ${String(n)}`),
@@ -64,7 +64,6 @@ export async function renderOverview(ctx: ViewContext): Promise<void> {
   await frame(ctx.main, '概览', async (body) => {
     const [status, flow, labels, report] = await Promise.all([ctx.status(), api.getMailFlow({ name: 'mailFlows/today' }), allLabels(), api.getAccuracyReport({ name: 'accuracyReport' })])
     const graph = flowGraph(flow.counts, labels)
-    const latest = status.recentErrorCodes[0]
     fill(
       body,
       el(
@@ -77,7 +76,9 @@ export async function renderOverview(ctx: ViewContext): Promise<void> {
       ),
       card('今天的流程', graph.total === 0 ? '' : `共 ${String(graph.total)} 封`, sankeyChart(graph), graph.total === 0 ? el('p', { class: 'hint' }, '今天还没有邮件') : null),
       el('div', { class: 'two' }, accuracy(report, labels), budget(status)),
-      latest === undefined ? null : el('p', { class: 'notice', role: 'note' }, `最近错误：${latest}`),
     )
+    // Where the diagram is wider than its box (a phone), it starts at its right end: the labels, 拿不准, 影子建议.
+    const scroll = body.querySelector('.flow-scroll')
+    if (scroll !== null && scroll.scrollWidth > scroll.clientWidth) scroll.scrollLeft = scroll.scrollWidth
   })
 }

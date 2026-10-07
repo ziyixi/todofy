@@ -66,9 +66,13 @@ export type MenuAction = readonly [text: string, run: () => void, tone?: 'danger
 
 let menus = 0
 
+/** The open menu's close: one menu is open at a time. */
+let closeOpenMenu: (() => void) | null = null
+
 /**
  * A small menu behind ⋯ (`name` is its name for assistive technology): it shows its actions inline beside it; a
- * choice or Escape closes it. `focusKey` marks the ⋯ button for a view that puts the focus back after repainting.
+ * choice, Escape, a click outside it, a key that takes the focus out of it (Tab) or another menu opening closes it. `focusKey` marks the ⋯
+ * button for a view that puts the focus back after repainting.
  */
 export function menu(name: string, actions: readonly MenuAction[], focusKey = ''): HTMLElement {
   menus += 1
@@ -78,13 +82,27 @@ export function menu(name: string, actions: readonly MenuAction[], focusKey = ''
     if (items.hidden) open()
     else close()
   }, { class: 'quiet icon', 'aria-label': name, 'aria-expanded': 'false', 'aria-controls': id, ...(focusKey === '' ? {} : { 'data-focus': focusKey }) })
+  const box = el('span', { class: 'menu' }, items, opener)
+  // Once a click or a key is done, not on a focus change: an open menu widens its line, and closing it as a press
+  // moves the focus would move what that very click lands on.
+  const outside = (event: Event) => {
+    const node = event.type === 'click' ? event.target : document.activeElement
+    if (!(node instanceof Node && box.contains(node))) close()
+  }
   const close = () => {
     items.hidden = true
     opener.setAttribute('aria-expanded', 'false')
+    document.removeEventListener('click', outside)
+    document.removeEventListener('keyup', outside)
+    if (closeOpenMenu === close) closeOpenMenu = null
   }
   const open = () => {
+    closeOpenMenu?.()
+    closeOpenMenu = close
     items.hidden = false
     opener.setAttribute('aria-expanded', 'true')
+    document.addEventListener('click', outside)
+    document.addEventListener('keyup', outside)
     items.querySelector('button')?.focus()
   }
   items.append(
@@ -101,7 +119,7 @@ export function menu(name: string, actions: readonly MenuAction[], focusKey = ''
     close()
     opener.focus()
   })
-  return el('span', { class: 'menu' }, items, opener)
+  return box
 }
 
 /** Lets a textarea grow with its text, from its own rows up: on every input, and once it is in the page. */
@@ -117,9 +135,9 @@ export function growing(area: HTMLTextAreaElement): HTMLTextAreaElement {
   return area
 }
 
-/** The empty state: one line, and an optional hint under it. */
-export function emptyState(title: string, hint = ''): HTMLElement {
-  return el('div', { class: 'empty' }, el('strong', {}, title), hint === '' ? null : el('span', {}, hint))
+/** The empty state: one line, an optional hint under it, and what follows (its actions). */
+export function emptyState(title: string, hint = '', ...children: Child[]): HTMLElement {
+  return el('div', { class: 'empty' }, el('strong', {}, title), hint === '' ? null : el('span', {}, hint), ...children)
 }
 
 export interface PickerOption {

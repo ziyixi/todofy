@@ -324,7 +324,8 @@ export function sankeyChart(graph: FlowGraph): HTMLElement {
     const lines = [node.name, amount(value), ...(zero ? [] : (node.detail ?? []))]
     const group = svg('g', {
       class: `flow-node kind-${node.kind}${zero ? ' zero' : ''}`,
-      tabindex: 0,
+      // The skeleton's nodes all say 0: named, but not eleven Tab stops.
+      tabindex: zero ? -1 : 0,
       role: 'img',
       'aria-label': zero ? `${node.name}：0 封` : `${node.name}：${String(value)} 封，占 ${share(value, graph.total)}`,
     })

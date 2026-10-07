@@ -1,10 +1,11 @@
 /**
  * The owner's flows in the UI against the fake API (test/fakeServer.ts, the shared transcoder): the shell's four tabs
- * and status line; 待审's confirm, change and skip (with the CSRF header and a request ID each), its keyboard and its
- * caution; 设置's mode, ceiling and breaker, the range undo's preview and confirmation, the sync and the filter export.
- * 标签 has its own file, labels.test.ts.
+ * (the focus kept on a tab chosen by keyboard) and status line; 待审's confirm, change and skip (with the CSRF header
+ * and a request ID each), its keyboard, its picker and its caution; 设置's mode, ceiling and breaker, the range undo's
+ * preview and confirmation, the sync and the filter export. 标签 has its own file, labels.test.ts.
  */
 import { mountApp, type Host } from './app.ts'
+import { relative } from './format.ts'
 import { FakeServer, label, ledgerEntry, NOW, reviewItem, settle } from './test/fakeServer.ts'
 import { Label_GmailState } from '@ziyixi/proto/mailsort/ui/v1/label_pb'
 import { CandidateSchema, ReviewItem_Kind } from '@ziyixi/proto/mailsort/ui/v1/review_pb'
@@ -65,6 +66,29 @@ describe('the shell', () => {
     expect(root.querySelector('.status-line .chip.accent')?.textContent).toBe('正式')
     expect(root.querySelector('.status-line .problem')?.textContent).toBe('Gmail 授权失效')
     expect(root.querySelector('.tabs a[aria-current="page"]')?.textContent).toBe('设置')
+  })
+
+  it('keeps the focus on a tab chosen by keyboard: the tabs are only marked, never drawn again', async () => {
+    const server = new FakeServer()
+    server.reviewItems = [reviewItem('a')]
+    const root = await open(server, '/')
+    const overview = root.querySelector<HTMLAnchorElement>('.tabs a[href="/overview"]')
+    if (overview === null) throw new Error('no tab')
+    overview.focus()
+    overview.click()
+    await settle()
+    expect(overview.isConnected).toBe(true)
+    expect(document.activeElement).toBe(overview)
+    expect(overview.getAttribute('aria-current')).toBe('page')
+    expect(root.querySelectorAll('.tabs a[aria-current]').length).toBe(1)
+    expect(root.querySelector('.tabs a .chip')?.textContent).toBe('1')
+  })
+
+  it('says 马上 for a time less than a minute ahead, 刚刚 for one just past', () => {
+    expect(relative(timestampFromMs(NOW + 20_000), NOW)).toBe('马上')
+    expect(relative(timestampFromMs(NOW - 20_000), NOW)).toBe('刚刚')
+    expect(relative(timestampFromMs(NOW + 300_000), NOW)).toBe('5 分钟后')
+    expect(relative(timestampFromMs(NOW - 3 * 3_600_000), NOW)).toBe('3 小时前')
   })
 
   it('moves between tabs without reloading; 规则 has no page of its own any more', async () => {
@@ -178,6 +202,8 @@ describe('待审', () => {
     const [phishing, trust] = rows(root)
     expect(phishing?.textContent).toContain('疑似钓鱼：先在 Gmail 里核对发件人和链接')
     expect(trust?.textContent).toContain('可信类标签只能由规则打')
+    // The warning line says why: the small text names only the kind.
+    expect([...(phishing?.querySelectorAll('.suggestion .meta') ?? [])].map((node) => node.textContent)).toEqual(['70%', '拿不准'])
     for (const row of [phishing, trust]) {
       const confirm = [...(row?.querySelectorAll('button') ?? [])].find((node) => node.textContent === '确认')
       expect(confirm?.classList.contains('primary')).toBe(false)
@@ -197,10 +223,38 @@ describe('待审', () => {
     expect(selected(trust)).toBe('收据')
   })
 
+  it('says why a mail is unsure in plain words, never 阈值', async () => {
+    const server = new FakeServer()
+    server.reviewItems = [reviewItem('u', { kind: ReviewItem_Kind.UNSURE, unsureReason: 'below_threshold' })]
+    const root = await open(server, '/')
+    expect(rows(root)[0]?.textContent).toContain('拿不准 · 把握不够')
+    expect(root.querySelector('#view')?.textContent).not.toContain('阈值')
+  })
+
+  it('scrolls 改为…’s highlighted label into sight once the picker is on the page', async () => {
+    // jsdom has no scrollIntoView: record what is scrolled to, and whether it was on the page then.
+    const scrolled: string[] = []
+    Element.prototype.scrollIntoView = function (this: Element) {
+      scrolled.push(this.isConnected ? this.textContent : `${this.textContent}（不在页面上）`)
+    }
+    try {
+      const server = new FakeServer()
+      server.reviewItems = [reviewItem('a', { candidates: [create(CandidateSchema, { label: 'labels/newsletter', probability: 0.6 }), create(CandidateSchema, { label: 'labels/receipt', probability: 0.3 })] })]
+      const root = await open(server, '/')
+      buttonNamed(root, '改为…').click()
+      expect(root.querySelector('.picker [aria-selected="true"]')?.textContent).toBe('收据')
+      expect(scrolled.at(-1)).toBe('收据')
+    } finally {
+      delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView
+    }
+  })
+
   it('says so when nothing waits', async () => {
     const root = await open(new FakeServer(), '/')
     expect(root.querySelector('.empty')?.textContent).toBe('都处理完了')
-    expect(root.querySelector('.tabs a .chip')).toBeNull()
+    const queue = root.querySelector<HTMLElement>('.tabs a .chip')
+    expect(queue?.hidden).toBe(true)
+    expect(queue?.parentElement?.hasAttribute('aria-label')).toBe(false)
   })
 })
 
@@ -236,7 +290,7 @@ describe('设置', () => {
     const server = new FakeServer()
     Object.assign(server.settings, { mode: Mode.LIVE, effectiveMode: Mode.SHADOW })
     const root = await open(server, '/settings')
-    expect(root.textContent).toContain('部署上限是“影子”，现在按影子运行')
+    expect(root.textContent).toContain('受部署上限限制，按影子运行')
   })
 
   it('names a tripped breaker in the owner’s words, and 解除熔断 clears it', async () => {

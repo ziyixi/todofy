@@ -25,20 +25,22 @@ Four tabs under a header whose one status line shows the mode in force, the Gmai
   c and s do the same by keyboard. Corrections made in Gmail itself (moving a sorted mail to another of mailsort's
   labels, or removing the label) count too.
 - **概览**: today's numbers (处理, 已打标签, 待审, 拿不准), the flow of today's mail as a Sankey diagram (drawn at zero on
-  a day without mail), the precision bound of each label with verdicts, the model budget and the latest error.
+  a day without mail; on a phone it scrolls in its own box, starting at where the mail went), the precision bound of
+  each label with verdicts (准确率) and the model budget.
 - **标签**: everything about a label in one place. A search box finds a label by its path or by a rule's sender,
   domain or list. The labels form a tree grouped by their top level (开发 › CI通知, 平台工具), one line each: the
-  name, the rule count, a small precision bar once it has verdicts, and 正式打, which lets live mode write it (it turns
-  itself off when the label's precision bound falls below the target). A row opens its detail under it: the
+  name (未启用 beside it when off), the rule count, a small precision bar once it has verdicts, and 正式打, which lets
+  live mode write it (it turns itself off when the label's precision bound falls below the target). A row opens its
+  detail under it: the
   description (the model reads `path: description` and never picks a label without one; one language and 60–120
   characters keep every call cheap, `docs/design.md` §8.1), 留在收件箱, the rules (approve a proposal from repeated
   corrections, stop or delete one behind ⋯, and 添加规则: one address or domain, its kind inferred, with the kind for a
-  list or a delivered-to address, subject words to include or exclude, a carve-out tried before the sender's plain
-  rule, and keep in inbox under 更多), the examples (listed on demand, deleted one by one) and 高级 (the threshold,
-  可信, 敏感 to keep no example, 启用, rename, delete). A sender rule fires only when DMARC passed aligned with the
-  From domain, a list rule only with a DKIM signature of the list's domain (`docs/design.md` §4.3). A label's Gmail
-  name is its path; when Gmail already has a label of exactly that name (made by hand), mailsort never takes it over:
-  the label shows 已有同名标签 under 高级 and writes nothing until it is renamed or 从 Gmail 同步 adopts (沿用) that
+  list or a delivered-to address and subject words to include or exclude, a carve-out tried before the sender's plain
+  rule, under 更多), the examples (listed on demand, deleted one by one) and 高级 (可信, 敏感 to keep no example, 启用,
+  rename, delete). A sender rule fires only when DMARC passed aligned with the From domain, a list rule only with a
+  DKIM signature of the list's domain (`docs/design.md` §4.3). A label's Gmail name is its path; when Gmail already
+  has a label of exactly that name (made by hand), mailsort never takes it over: the label's detail says so in its
+  first line (Gmail 里已有同名标签) and it writes nothing until it is renamed or 从 Gmail 同步 adopts (沿用) that
   label. An adopted label is never added to a mail that already has it, so an undo never removes the owner's own,
   and the owner's other labels are never touched. Deleting a label leaves its Gmail label and mails alone, and its
   writes can no longer be undone. With no label at all, 套用推荐模板 previews the 15
@@ -52,7 +54,16 @@ Four tabs under a header whose one status line shows the mode in force, the Gmai
   cover, since Gmail would apply both). Emergency stop: 设置 → 关闭 (`docs/design.md` §10).
 - **API only** (no page since 2026-10-07): ImportRules and ExportRules (the owner's rule file, previewed with
   `validate_only`; a label written with the old `分拣/` prefix means the same label), the embedding rebuild, the
-  single-entry undo, the write limits, the neuron budget and the default threshold.
+  single-entry undo, the write limits, the neuron budget, the default and per-label thresholds, and a rule's own keep
+  in inbox (CreateRule or the rule file). To import the rule file, from the signed-in page's console, with `rules` the
+  file's JSON list:
+
+  ```js
+  const t = (await (await fetch('/api/csrf')).json()).token
+  const send = (validate_only) => fetch('/api/v1/rules:import', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': t }, body: JSON.stringify({ rules, validate_only, request_id: crypto.randomUUID() }) }).then((r) => r.json())
+  await send(true)   // the preview: every entry's change, nothing written
+  await send(false)  // then the import itself
+  ```
 - **What is kept**: decided mail's subject, sender and exact sender keys, and the review queue, for 14 days (the
   daily cleanup runs in every mode, off included); decisions and the ledger without content for 180 days; the flow
   counters (counts only) for 400 days; examples (masked summaries) until you delete them (with their label, by

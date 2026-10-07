@@ -63,16 +63,21 @@ Landing order:
    never one with sublabels; a label already on a mail is never written, so an undo cannot remove the owner's own
    (schema version 4, `gmail_adopted` and `gmail_name_taken`; additive, the live labels and rules need no data
    change); SyncLabels follows renames and deletions by Gmail ID and never imports; the rule file's legacy `分拣/`
-   still imports. After its deploy:
-   标签 shows the 15 labels without `分拣/`, still 尚未在 Gmail 创建; 从 Gmail 同步 imports nothing.
+   still imports. After its deploy: 标签 lists the 15 labels without `分拣/` (each label's 高级 says Gmail：尚未创建);
+   设置 → 从 Gmail 同步 answers 已同步：关联 0，改名 0，Gmail 中缺失 0 and adds no label (a Gmail label of exactly one of
+   their paths is adopted instead, 已沿用原有标签; one with sublabels is not, and that label's detail opens with
+   Gmail 里已有同名标签).
    On the same branch, the UI redesign (the owner's "less is more", 2026-10-07; `mailsort/docs/design.md` §9), UI only,
    no proto or stored-data change: B1 done (the design system, the shell with four tabs 待审 · 概览 · 标签 · 设置 and
    one status line, 待审 with the picker and keys, 概览 with the always-drawn flow, 设置 with the mode, the previewed
    range undo, the sync and the filter download; 流程, 准确率, 状态, 例子, 导入 and 记录 removed) and B2 done (标签 as the
    one place for a label: search over paths and rule values, the tree grouped by top level with one line per label
    and 正式打, the detail inline with the description, 留在收件箱, the rules and 添加规则, the examples and 高级; the
-   template when there is no label; `/rules` gone). Checked locally only (web lint, typecheck, vitest, build and a
-   hand run against `wrangler dev` with the loopback fakes); the branch is not pushed. After its deploy: 概览 draws the
+   template when there is no label; `/rules` gone). The UX review's findings are fixed on it too (no sideways scroll at
+   360 px on 概览 or 待审, tabs that keep the focus, no lasting error box, 阈值 and a rule's 留在收件箱 out of the UI, a
+   visible off state and switch track, menus that close, 删除 of a rule asks first). Checked locally only (web lint,
+   typecheck, vitest, build, a hand run against `wrangler dev` with the loopback fakes, and the review fixes at 360 px,
+   light and dark, against the web tests' fake API); the branch is not pushed. After its deploy: 概览 draws the
    skeleton on a quiet day, 设置 → 撤销 → 预览 counts 0 while the grant is read-only, and 标签 shows the 15 labels in
    their groups with the 93 rules' counts (searching a sender of the rule file finds its label).
 

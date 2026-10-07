@@ -1,20 +1,22 @@
 /**
  * One label's detail, opened inline under its row in 标签 (labels.ts): everything about the label in one place.
  *
+ * - First, only when Gmail takes nothing from it: one line on why (Gmail has a label of its name that is the owner's,
+ *   or its own label was deleted there) and what to do.
  * - The description, what the model reads as `path: description` (without one the model never picks the label): it
  *   grows with its text and is saved when it loses the focus, or with 保存.
  * - 留在收件箱: the label is added and the mail stays in the inbox (账号安全, 政府法律).
  * - Its rules, one line each: the kind (发件人, 域名, 列表, 收件地址), the value, the subject words and the state;
- *   批准 for a proposal, 停用 / 启用 / 删除 behind ⋯. 添加规则 takes one value and infers its kind (ruleFor); 更多 holds
- *   the kind for a list or a delivered-to address, the subject words and the rule's 留在收件箱.
+ *   批准 for a proposal, 停用 / 启用 / 删除 (asking first) behind ⋯. 添加规则 takes one value and infers its kind
+ *   (ruleFor); 更多 holds the kind for a list or a delivered-to address and the subject words.
  * - Its examples (masked summaries, kept until deleted): the count, the list on demand, and deleting one.
- * - 高级, folded: the threshold, 可信, 敏感, 启用, rename, the Gmail state and delete.
+ * - 高级, folded: 可信, 敏感, 启用, rename, the Gmail state while it is not simply linked, and delete.
  */
 import { create } from '@ziyixi/proto/protobuf'
 import { Label_GmailState, type Label } from '@ziyixi/proto/mailsort/ui/v1/label_pb'
 import type { Example } from '@ziyixi/proto/mailsort/ui/v1/review_pb'
 import { Rule_Kind, Rule_State, RuleSchema, type Rule } from '@ziyixi/proto/mailsort/ui/v1/rule_pb'
-import { api, errorMessage, newRequestId, withRetry } from '../api.ts'
+import { api, errorMessage } from '../api.ts'
 import { chip, disclosure, growing, menu, segmented, toggle, type MenuAction } from '../components.ts'
 import { button, el, fill, toast } from '../dom.ts'
 import { RULE_KIND_NAMES, when } from '../format.ts'
@@ -22,7 +24,7 @@ import type { Host } from '../app.ts'
 import { act } from './common.ts'
 
 /** The fields of a label the detail and its row change. */
-export type LabelFields = Partial<Pick<Label, 'displayName' | 'description' | 'enabled' | 'live' | 'trustImplying' | 'keepInInbox' | 'sensitive' | 'threshold'>>
+export type LabelFields = Partial<Pick<Label, 'displayName' | 'description' | 'enabled' | 'live' | 'trustImplying' | 'keepInInbox' | 'sensitive'>>
 
 /** What the detail needs from the page (labels.ts). */
 export interface DetailPage {
@@ -43,12 +45,16 @@ export interface DetailPage {
   readonly repaint: (focus: string) => void
 }
 
+/** The Gmail states 高级 names (a linked label says nothing). */
 const GMAIL_STATES: Readonly<Record<number, string>> = {
   [Label_GmailState.PENDING]: '尚未创建',
-  [Label_GmailState.LINKED]: '已关联',
   [Label_GmailState.ADOPTED]: '已沿用原有标签',
-  [Label_GmailState.MISSING]: '已不存在',
-  [Label_GmailState.NAME_TAKEN]: '已有同名标签，没有沿用。改个名字，或在设置里从 Gmail 同步沿用它',
+}
+
+/** The Gmail states where nothing is written with the label: said at the top of its detail, with what to do. */
+const GMAIL_PROBLEMS: Readonly<Record<number, string>> = {
+  [Label_GmailState.NAME_TAKEN]: 'Gmail 里已有同名标签，改个名字或到 设置 → 从 Gmail 同步 沿用',
+  [Label_GmailState.MISSING]: 'Gmail 里已没有这个标签，不再打它；在 Gmail 建回同名标签后到 设置 → 从 Gmail 同步',
 }
 
 /** How 添加规则 reads its value: by its shape, or as a list or the delivered-to address. */
@@ -131,7 +137,10 @@ function ruleLine(rule: Rule, page: DetailPage): HTMLLIElement {
   const focus = `rule:${rule.name}`
   const approve = () => void act((requestId) => api.approveRule({ name: rule.name, requestId }), '规则已生效', () => page.refresh(focus))
   const disable = () => void act((requestId) => api.disableRule({ name: rule.name, requestId }), '规则已停用', () => page.refresh(focus))
-  const remove = () => void act((requestId) => api.deleteRule({ name: rule.name, requestId }), '规则已删除', () => page.refresh('add-rule'))
+  const remove = () => {
+    if (!page.host.confirm(`删除规则 ${rule.value}？`)) return
+    void act((requestId) => api.deleteRule({ name: rule.name, requestId }), '规则已删除', () => page.refresh('add-rule'))
+  }
   const proposed = rule.state === Rule_State.PROPOSED
   const disabled = rule.state === Rule_State.DISABLED
   const actions: MenuAction[] = [...(proposed ? [] : disabled ? [['启用', approve] as const] : [['停用', disable] as const]), ['删除', remove, 'danger']]
@@ -152,14 +161,13 @@ function ruleLine(rule: Rule, page: DetailPage): HTMLLIElement {
   )
 }
 
-/** 添加规则: one value (its kind shown as it is typed), and 更多 for the kind, the subject words and keep. */
+/** 添加规则: one value (its kind shown as it is typed), and 更多 for the kind and the subject words. */
 function addRule(page: DetailPage): HTMLElement {
   let match: Match = 'auto'
-  const input = el('input', { placeholder: '地址或域名，如 noreply@github.com', 'aria-label': '添加规则', autocomplete: 'off', spellcheck: 'false', 'data-focus': 'add-rule' })
+  const input = el('input', { placeholder: '发件地址或域名', 'aria-label': '添加规则', autocomplete: 'off', spellcheck: 'false', 'data-focus': 'add-rule' })
   const kind = el('span', { class: 'chip', hidden: true, 'aria-live': 'polite' })
   const includes = el('input', { placeholder: '主题包含（逗号分隔）', 'aria-label': '主题包含' })
   const excludes = el('input', { placeholder: '主题不含（逗号分隔）', 'aria-label': '主题不含' })
-  const [keepBox, keep] = toggle('留在收件箱', false, '只加标签，不归档')
   const matches = el('div')
   const showKind = () => {
     kind.hidden = input.value.trim() === ''
@@ -189,7 +197,7 @@ function addRule(page: DetailPage): HTMLElement {
       return
     }
     const { kind: ruleKind, value } = ruleFor(input.value, match)
-    const rule = create(RuleSchema, { kind: ruleKind, value, label: page.label().name, subjectIncludes: words(includes), subjectExcludes: words(excludes), keepInInbox: keep.checked })
+    const rule = create(RuleSchema, { kind: ruleKind, value, label: page.label().name, subjectIncludes: words(includes), subjectExcludes: words(excludes) })
     busy(true)
     await act((requestId) => api.createRule({ rule, requestId }), '规则已添加', () => {
       page.memory.more = false
@@ -205,7 +213,7 @@ function addRule(page: DetailPage): HTMLElement {
     void add()
   })
   paintMatches()
-  const more = disclosure('更多', el('div', { class: 'more-body' }, el('div', { class: 'inline' }, el('span', { class: 'hint' }, '类型'), matches), includes, excludes, keepBox))
+  const more = disclosure('更多', el('div', { class: 'more-body' }, el('div', { class: 'inline' }, el('span', { class: 'hint' }, '类型'), matches), includes, excludes))
   more.open = page.memory.more
   more.addEventListener('toggle', () => {
     page.memory.more = more.open
@@ -232,28 +240,21 @@ function examplesPart(page: DetailPage): HTMLElement {
   const title = el('h3', {}, '例子', figure)
   const part = el('section', { class: 'part', 'aria-label': '例子' })
   if (label.sensitive || count === 0) {
-    fill(part, title, el('p', { class: 'hint' }, label.sensitive ? '敏感标签不留例子' : '确认或改正这类邮件后会留下例子'))
+    fill(part, title, el('p', { class: 'hint' }, label.sensitive ? '敏感标签不留例子' : '确认或改为这个标签的邮件会留下例子'))
     return part
   }
   const list = el('ul', { class: 'example-list', hidden: true })
   const more = el('div')
   const item = (example: Example): HTMLLIElement => {
-    const remove = async () => {
-      const requestId = newRequestId()
-      try {
-        await withRetry(() => api.deleteExample({ name: example.name, requestId }))
-      } catch (error) {
-        toast(errorMessage(error))
-        return
-      }
+    const gone = () => {
       node.remove()
       count -= 1
       figure.textContent = ` ${String(count)}`
       page.label().exampleCount = count
-      toast('例子已删除')
       show.focus()
     }
-    const node = el('li', {}, el('p', {}, example.summary), el('span', { class: 'meta' }, when(example.createTime)), button('删除', () => void remove(), { class: 'quiet small danger', 'aria-label': '删除这个例子' }))
+    const remove = () => void act((requestId) => api.deleteExample({ name: example.name, requestId }), '例子已删除', gone)
+    const node = el('li', {}, el('p', {}, example.summary), el('span', { class: 'meta' }, when(example.createTime)), button('删除', remove, { class: 'quiet small danger', 'aria-label': '删除这个例子' }))
     return node
   }
   const load = async (pageToken: string) => {
@@ -280,18 +281,9 @@ function examplesPart(page: DetailPage): HTMLElement {
   return part
 }
 
-/** 高级: the threshold, 可信, 敏感 (which deletes the examples), 启用, rename, the Gmail state and delete. */
+/** 高级: 可信, 敏感 (which deletes the examples), 启用, rename, the Gmail state while not simply linked, and delete. */
 function advanced(page: DetailPage, examplesChanged: () => void): HTMLDetailsElement {
   const label = page.label()
-  const threshold = el('input', { type: 'number', min: '0.5', max: '0.99', step: '0.01', inputmode: 'decimal', value: label.threshold === 0 ? '' : String(label.threshold), placeholder: '默认', 'aria-label': '阈值' })
-  threshold.addEventListener('change', () => {
-    const value = threshold.value === '' ? 0 : Number(threshold.value)
-    if (value !== 0 && !(value >= 0.5 && value <= 0.99)) {
-      toast('阈值在 0.5 到 0.99 之间，空为默认')
-      return
-    }
-    void page.save({ threshold: value }, ['threshold'], '已保存')
-  })
   const path = el('input', { value: label.displayName, maxlength: '100', 'aria-label': '路径', 'data-focus': 'rename' })
   const rename = async () => {
     const value = path.value.trim()
@@ -308,12 +300,11 @@ function advanced(page: DetailPage, examplesChanged: () => void): HTMLDetailsEle
   const body = el(
     'div',
     { class: 'more-body' },
-    el('label', { class: 'setting' }, el('span', {}, '阈值'), threshold),
     fieldSwitch(page, '可信', '只有 DMARC 通过的规则能打它', 'trustImplying', 'trust_implying'),
     fieldSwitch(page, '敏感', '不留这类邮件的例子', 'sensitive', 'sensitive', examplesChanged, deletesExamples),
     fieldSwitch(page, '启用', '关掉后不再建议或打它', 'enabled', 'enabled'),
     el('div', { class: 'actions' }, path, button('改名', () => void rename())),
-    gmail === undefined ? null : el('p', { class: label.gmailState === Label_GmailState.MISSING || label.gmailState === Label_GmailState.NAME_TAKEN ? 'hint warn' : 'hint' }, `Gmail：${gmail}`),
+    gmail === undefined ? null : el('p', { class: 'hint' }, `Gmail：${gmail}`),
     el('div', { class: 'actions' }, button('删除标签', remove, { class: 'small danger' })),
   )
   const details = disclosure('高级', body)
@@ -332,5 +323,13 @@ export function labelDetail(page: DetailPage): HTMLElement[] {
     examples.replaceWith(next)
     examples = next
   }
-  return [descriptionBox(page), fieldSwitch(page, '留在收件箱', '只加标签，不归档', 'keepInInbox', 'keep_in_inbox'), rulesPart(page), examples, advanced(page, examplesChanged)]
+  const problem = GMAIL_PROBLEMS[page.label().gmailState]
+  return [
+    ...(problem === undefined ? [] : [el('p', { class: 'hint warn', role: 'note' }, problem)]),
+    descriptionBox(page),
+    fieldSwitch(page, '留在收件箱', '只加标签，不归档', 'keepInInbox', 'keep_in_inbox'),
+    rulesPart(page),
+    examples,
+    advanced(page, examplesChanged),
+  ]
 }

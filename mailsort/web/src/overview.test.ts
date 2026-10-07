@@ -1,7 +1,7 @@
 /**
  * 概览 against the fake API (test/fakeServer.ts, the shared transcoder): today's four numbers, the flow diagram (its
- * graph, hues, size, tooltip and theme tokens, and the zero skeleton on a day without mail), accuracy per label with
- * data, the model budget's meter and the latest error.
+ * graph, hues, size, tooltip and theme tokens, the zero skeleton on a day without mail, and its start on a phone),
+ * accuracy per label with data and the model budget's meter; no error box.
  */
 import { mountApp, type Host } from './app.ts'
 import { clamp, flowGraph, sankeyChart, skeletonGraph } from './flowchart.ts'
@@ -151,6 +151,8 @@ describe('the flow diagram', () => {
     expect(nodes.length).toBe(11)
     expect(nodes.every((node) => node.classList.contains('zero') && node.querySelector('.flow-count')?.textContent === '0')).toBe(true)
     expect(nodes.every((node) => node.querySelector('rect')?.getAttribute('fill') === 'var(--flow-zero)')).toBe(true)
+    // Named, but not eleven Tab stops that each say 0.
+    expect(nodes.every((node) => node.getAttribute('tabindex') === '-1')).toBe(true)
     // Every rect has a real size (laid out as one mail per path), none is NaN.
     expect(nodes.every((node) => Number(node.querySelector('rect')?.getAttribute('height')) > 0)).toBe(true)
     const links = [...box.querySelectorAll('.flow-link')]
@@ -163,7 +165,7 @@ describe('the flow diagram', () => {
 })
 
 describe('概览', () => {
-  it('shows today’s four numbers, the flow, accuracy for labels with data, the budget and the latest error', async () => {
+  it('shows today’s four numbers, the flow, accuracy for labels with data and the budget, and no error box', async () => {
     const s = server()
     s.status = { decidedTodayCount: 16, appliedTodayCount: 11, unsureTodayCount: 2, reviewCount: 3 }
     s.accuracy = [
@@ -193,7 +195,18 @@ describe('概览', () => {
     expect(budget?.getAttribute('aria-valuenow')).toBe('523')
     expect(budget?.getAttribute('aria-valuemax')).toBe('7000')
     expect(root.textContent).toContain('523 / 7000')
-    expect(root.querySelector('.notice')?.textContent).toBe('最近错误：gmail_429')
+    // A transient error code (the fake reports gmail_429) never stays on the page.
+    expect(root.textContent).not.toContain('gmail_429')
+    // Wide enough for the diagram: it is not scrolled.
+    expect(root.querySelector('.flow-scroll')?.scrollLeft).toBe(0)
+  })
+
+  it('starts the diagram at its right end where it scrolls inside its box (a phone), where the mail went', async () => {
+    // jsdom has no layout: a 600 px drawing in a 294 px box.
+    vi.spyOn(Element.prototype, 'scrollWidth', 'get').mockReturnValue(600)
+    vi.spyOn(Element.prototype, 'clientWidth', 'get').mockReturnValue(294)
+    const root = await open(server(), '/overview')
+    expect(root.querySelector('.flow-scroll')?.scrollLeft).toBe(600)
   })
 
   it('still draws the diagram on a day without mail, and says so in one line each', async () => {
@@ -205,10 +218,9 @@ describe('概览', () => {
     expect(root.querySelectorAll('.flow-node.zero').length).toBe(11)
     expect(root.textContent).toContain('今天还没有邮件')
     expect(root.querySelector('.bars')).toBeNull()
-    expect(root.textContent).toContain('还没有确认或纠正过的邮件')
+    expect(root.textContent).toContain('还没有确认或改过标签的邮件')
     // Past 70 % of the budget: the warning tone and why.
     expect(root.querySelector('[role="meter"]')?.classList.contains('warn')).toBe(true)
     expect(root.textContent).toContain('已过 70%，今天改用 Clef-flash；4 封等明天的额度')
-    expect(root.querySelector('.notice')).toBeNull()
   })
 })

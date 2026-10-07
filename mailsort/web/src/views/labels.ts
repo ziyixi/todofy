@@ -4,12 +4,13 @@
  * - A search box over the labels' names and their rules' values (a sender, a domain, a list), so a sender's rule is
  *   found at once: a label shown for its rules names the matching values under its name, and its detail marks them.
  * - The labels as one tree in the labels' order, grouped by their top-level segment (开发 › CI通知, 平台工具; a label of
- *   one segment stands alone). One compact row each: the name, the rule count (when it has rules), a small bar of the
- *   precision bound when the label has verdicts, and the one switch, 正式打.
- * - A row opens its detail under it, one at a time (label-detail.ts): the description, 留在收件箱, the rules with
- *   添加规则, the examples and 高级.
+ *   one segment stands alone). One compact row each: the name (未启用 beside it when off), the rule count (when it
+ *   has rules), a small bar of the precision bound when the label has verdicts, and the one switch, 正式打.
+ * - A row opens its detail under it, one at a time (label-detail.ts): a line when Gmail has a label of its name, the
+ *   description, 留在收件箱, the rules with 添加规则, the examples and 高级.
  * - One quiet “+ 新标签” at the bottom. With no label at all, 套用推荐模板 previews the template's 15 labels (ImportRules
- *   with validate_only) and adds them on confirmation; “+ 新标签” sits beside it.
+ *   with validate_only, which hides the offer until it is cancelled) and adds them on confirmation; “+ 新标签” sits
+ *   beside it.
  *
  * Deleting a label leaves its Gmail label and mails as they are. (The sync with Gmail is in 设置.)
  */
@@ -88,11 +89,11 @@ interface Precision {
   readonly below: boolean
 }
 
-/** The small bar of a precision bound (its figures in the title and for assistive technology). */
+/** The small bar of a precision bound, 准确率 as in 概览 (its figures in the title and for assistive technology). */
 function precisionBar(score: Precision | undefined): HTMLElement {
   if (score === undefined) return el('span', { class: 'bar-slot' })
   const node = bar(score.bound, score.below ? 'warn' : '')
-  return el('span', { class: 'bar-slot', title: `精确率下界 ${percent(score.bound)} · ${String(score.count)} 封` }, node, el('span', { class: 'visually-hidden' }, `，精确率 ${percent(score.bound)}`))
+  return el('span', { class: 'bar-slot', title: `准确率 ${percent(score.bound)} · ${String(score.count)} 封` }, node, el('span', { class: 'visually-hidden' }, `，准确率 ${percent(score.bound)}`))
 }
 
 /** The values a search found among a label's rules, for the row: the first two and how many more. */
@@ -181,8 +182,8 @@ function labelsPage(body: HTMLElement, ctx: ViewContext, labels: Label[], rules:
       'button',
       { type: 'button', class: 'leaf-main', 'aria-expanded': String(open), 'aria-controls': row.slot.id, 'data-focus': `row:${label.name}` },
       el('span', { class: 'leaf-name' }, el('span', {}, leafName(label.displayName, row.group)), row.hits.length === 0 ? null : el('span', { class: 'leaf-hit mono' }, hitText(row.hits))),
-      label.enabled ? null : el('span', { class: 'visually-hidden' }, '，未启用'),
-      own.length === 0 ? null : el('span', { class: 'leaf-count' }, `${String(own.length)} 规则`, proposed === 0 ? null : el('span', { class: 'dot', title: `${String(proposed)} 条待批准` }, el('span', { class: 'visually-hidden' }, `，${String(proposed)} 条待批准`))),
+      label.enabled ? null : el('span', { class: 'meta' }, '未启用'),
+      own.length === 0 ? null : el('span', { class: 'leaf-count' }, `${String(own.length)} 条规则`, proposed === 0 ? null : el('span', { class: 'dot', title: `${String(proposed)} 条待批准` }, el('span', { class: 'visually-hidden' }, `，${String(proposed)} 条待批准`))),
       precisionBar(precision.get(label.name)),
     )
     main.addEventListener('click', () => {
@@ -343,8 +344,11 @@ function labelsPage(body: HTMLElement, ctx: ViewContext, labels: Label[], rules:
     const showTemplate = async () => {
       try {
         const answer = await api.importRules({ useTemplate: true, validateOnly: true })
+        // One primary action at a time: the offer waits while its preview is shown.
+        offer.hidden = true
         fill(preview, templateCard(answer, apply, () => {
           preview.replaceChildren()
+          offer.hidden = false
           offer.focus()
         }))
         preview.querySelector<HTMLButtonElement>('button.primary')?.focus()
@@ -353,7 +357,7 @@ function labelsPage(body: HTMLElement, ctx: ViewContext, labels: Label[], rules:
       }
     }
     const offer = button('套用推荐模板', () => void showTemplate(), { class: 'primary' })
-    return [el('div', { class: 'empty' }, el('strong', {}, '还没有标签'), el('div', { class: 'actions center' }, offer, newLabel())), preview]
+    return [emptyState('还没有标签', '', el('div', { class: 'actions center' }, offer, newLabel())), preview]
   }
 
   const layout = [search, el('div', { class: 'tree-box' }, head, tree), newLabel()]
