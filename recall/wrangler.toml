@@ -1,0 +1,71 @@
+# Worker "recall": the owner's browsing record (recall.ziyixi.science, docs/design.md): the Chrome extension's uploads of
+# visits and page texts, one SQLite Durable Object (pages, visits, the search index, the archive change feed), the texts
+# in the private R2 bucket recall-store, and the owner's timeline and search UI behind Access. The production
+# configuration and its single source of truth: top level = production, never [env.*] or keep_vars. Every static value
+# is committed here (the repository is public: nothing personal, no secret).
+#
+# Deployed only by CI through deploy/deploy-vars.mjs, which appends --var BUILD_SHA (the commit) and passes
+# ACCESS_OWNER, ACCESS_OWNER_ALIASES and CSRF_SIGNING_KEY as Worker secrets with --secrets-file. A plain
+# `wrangler deploy` of this file DELETES BUILD_SHA.
+#
+# The machine tokens' digests (INGEST_TOKEN_SHA256, EXPORT_TOKEN_SHA256 and their _PREVIOUS) are NOT deployed: the owner
+# puts them from their own machine with deploy/mint-tokens.mjs (`wrangler secret put`), and they never enter GitHub. A
+# deploy keeps them: `wrangler deploy --secrets-file` keeps every secret the file does not name
+# (deploy/test/secrets-kept.test.mjs), and no [secrets] required list is declared here. Until they are put, the machine
+# routes answer 503.
+#
+# Check-only (recall in CHECK_ONLY of .github/scripts/ci_changes.py) until "Infra apply" has created the Access
+# applications (the whole host, and the Bypass of the three machine routes) and the bucket; the go-live commit then adds
+# ACCESS_AUDIENCE (deploy/deploy-vars.mjs refuses a real deploy without it). No workers.dev, no preview URL.
+#
+# Run wrangler from worker/ (the pinned wrangler lives in worker/node_modules) with --config ../wrangler.toml. Local
+# development uses ../wrangler.test.toml and recall/.dev.vars.
+name = "recall"
+account_id = "f57937bd1d93bf59e737b6d8445fb7a3"
+main = "worker/src/index.ts"
+compatibility_date = "2026-09-08"
+workers_dev = false
+preview_urls = false
+# The one hostname, a Custom Domain (wrangler applies the list as the Worker's complete set; tools/cf-guard checks it
+# before every deploy). vars.PUBLIC_HOST names the same host.
+routes = [{ pattern = "recall.ziyixi.science", custom_domain = true }]
+
+# The Worker's own log lines (an upload: batch ID, counts, a code; a refusal: request ID, status, reason) are kept; the
+# invocation logs, which record every request's URL, are off, and so are traces. Nothing logs a URL, host, title or text.
+[observability]
+enabled = true
+
+[observability.logs]
+enabled = true
+invocation_logs = false
+
+[observability.traces]
+enabled = false
+
+# The UI (web/, `npm run build`). Every request reaches the Worker first: it checks the caller and adds the private
+# headers before handing a path to ASSETS.
+[assets]
+directory = "web/dist"
+binding = "ASSETS"
+run_worker_first = true
+not_found_handling = "single-page-application"
+
+# One SQLite-backed object ("recall-v1"): devices, sites, pages, visits, the texts' metadata, the FTS5 index, the
+# tombstones and the feed's counter; it schedules itself with setAlarm (no cron trigger, no D1, no KV).
+[[durable_objects.bindings]]
+name = "RECALL"
+class_name = "RecallState"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["RecallState"]
+
+# The captured texts, at their archive paths (blobs/<YYYY>/<MM>/<uuid>.txt.gz), private: no public bucket, no r2.dev.
+[[r2_buckets]]
+binding = "STORE"
+bucket_name = "recall-store"
+
+[vars]
+# The app's host: the only origin a mutation may come from (CSRF), and a host recall never records.
+PUBLIC_HOST = "recall.ziyixi.science"
+ACCESS_ISSUER = "https://ziyixi.cloudflareaccess.com"

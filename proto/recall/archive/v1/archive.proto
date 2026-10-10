@@ -1,0 +1,454 @@
+// recall-archive-v1 as a protobuf IDL (proto/README.md; contracts/recall-archive-v1/README.md is the contract's
+// text): the change feed recall serves to archive consumers (GET /api/machine/v1/changes) and the records an archive
+// keeps, one JSON line per change, plus the archive's own cursor file (state.json).
+//
+// This file is the one description of the records: their fields and value rules (common.wire.v1), from which
+// contracts/recall-archive-v1/recall-archive-v1.schema.json is generated (proto/tools/gen_schema.py: a consumer's
+// schema, every object open, and a change of a kind it does not know accepted on its envelope alone). Messages only:
+// the feed's paths, query parameters, bearer token and blob downloads are the HTTP transport's, described in the
+// contract's README.
+//
+// The feed is compacted. recall keeps each record's latest change only: a newer revision of a record takes a new seq,
+// and a deletion removes the record's changes and adds one tombstone. So seqs have gaps, and every record's latest
+// change appears above any cursor that has not seen it.
+//
+// Compatibility within v1. A consumer reads leniently: it keeps fields it does not know (it archives each change
+// whole), and it archives a change of a kind it does not know with its blobs, checking only its envelope. So v1 may
+// add optional fields, kinds (Change.Kind is open) and blob roles; anything else is recall-archive-v2, served on a
+// new path while v1 is still served.
+
+syntax = "proto3";
+
+package recall.archive.v1;
+
+import "common/wire/v1/wire.proto";
+import "google/api/field_behavior.proto";
+import "google/protobuf/timestamp.proto";
+
+option java_multiple_files = true;
+option java_outer_classname = "ArchiveProto";
+option java_package = "science.ziyixi.recall.archive.v1";
+option (common.wire.v1.formats) = {
+  name: "RecordId"
+  pattern: "[a-z][a-z0-9]{0,31}/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+  description: "A record: its collection and a lower-case UUID (visits/, documents/, tombstones/, a newer kind's own)."
+};
+option (common.wire.v1.formats) = {
+  name: "PageId"
+  pattern: "[0-9a-f]{32}"
+  description: "A page: the first 16 bytes of the SHA-256 of its normalized URL before scrubbing, in lower-case hex."
+};
+option (common.wire.v1.formats) = {
+  name: "TombstoneTarget"
+  pattern: "pages/[0-9a-f]{32}|[a-z][a-z0-9]{0,31}/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+  description: "What a tombstone deletes: pages/<page id> (every earlier change of the page) or a record's id."
+};
+option (common.wire.v1.formats) = {
+  name: "Uuid"
+  pattern: "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+  description: "A lower-case UUID."
+};
+option (common.wire.v1.formats) = {
+  name: "Url"
+  pattern: "https?://[!-~]+"
+  max_length: 8192
+  description: "A normalized, scrubbed http(s) URL (ASCII, as WHATWG URL serializes it), cut to 8192 characters."
+};
+option (common.wire.v1.formats) = {
+  name: "Site"
+  pattern: "[a-z0-9_]([a-z0-9._-]{0,251}[a-z0-9_])?|\\[[0-9a-f:.]{2,45}\\]"
+  description: "The URL's host in lower case (IDN in punycode, `_` allowed, no trailing dot) without a leading www., or a bracketed IPv6 literal."
+};
+option (common.wire.v1.formats) = {
+  name: "Text"
+  pattern: "[\\s\\S]*"
+  max_length: 1000
+  description: "Page text from the browser (a title, a meta description): untrusted, scrubbed, cut to 1000 characters."
+};
+option (common.wire.v1.formats) = {
+  name: "Label"
+  pattern: "[\\s\\S]+"
+  max_length: 64
+  description: "The device label the owner sets in the extension's options."
+};
+option (common.wire.v1.formats) = {
+  name: "Role"
+  pattern: "[a-z][a-z0-9_]{0,31}"
+  description: "What a blob is to its record (text)."
+};
+option (common.wire.v1.formats) = {
+  name: "BlobPath"
+  pattern: "[0-9]{4}/(0[1-9]|1[0-2])/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}([.][a-z0-9]{1,16}){1,3}"
+  description: "A blob's path, under blobs/ and in the blob route: UTC year and month, record UUID, extensions."
+};
+option (common.wire.v1.formats) = {
+  name: "MediaType"
+  pattern: "[a-z]+/[a-z0-9.+-]+(; charset=utf-8)?"
+  max_length: 100
+  description: "The media type of a blob's bytes once its content encoding is undone."
+};
+option (common.wire.v1.formats) = {
+  name: "Sha256"
+  pattern: "[0-9a-f]{64}"
+  description: "A SHA-256 digest in lower-case hex."
+};
+option (common.wire.v1.formats) = {
+  name: "Origin"
+  pattern: "https?://[a-z0-9.-]+(:[0-9]{1,5})?"
+  description: "The origin of the recall deployment a feed came from."
+};
+option (common.wire.v1.formats) = {
+  name: "Consumer"
+  pattern: "[a-z][a-z0-9-]{0,31}"
+  description: "An archive consumer's name, chosen by its operator (nas)."
+};
+
+// One page of the change feed: the answer of GET /api/machine/v1/changes?after=<seq>&limit=<n>&consumer=<name>.
+message ChangePage {
+  // Always recall-archive-v1.
+  string version = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).allowed = "recall-archive-v1"
+  ];
+  // The feed's identity: a UUID recall made when its store was created. A seq means something only within its feed,
+  // so a consumer refuses a page of another feed than its archive's (ArchiveState.feed_id).
+  string feed_id = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "Uuid"
+  ];
+  // The changes with a seq above the request's `after`, in seq order, at most the request's limit (at most 500).
+  // Seqs have gaps where a change was superseded or deleted.
+  repeated Change changes = 3 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).max_items = 500
+  ];
+  // The next request's `after`: the seq of the page's last change when the page holds `limit` changes, otherwise
+  // head_seq (nothing else is committed up to it).
+  int32 last_seq = 4 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).minimum = 0
+  ];
+  // The newest seq recall had assigned when the page was read (0 before the first). The consumer is caught up when
+  // last_seq equals it; an `after` above it is refused (409 cursor_ahead).
+  int32 head_seq = 5 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).minimum = 0
+  ];
+  // recall keeps every tombstone with a seq at or above this one: 1 while it keeps them all (v1 does). An `after`
+  // below oldest_seq - 1 is refused (410 cursor_expired), since that archive could miss a deletion: it starts a new
+  // archive from after=0.
+  int32 oldest_seq = 6 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).minimum = 1
+  ];
+}
+
+// One change: a record as recall holds it now. A later change with the same id replaces it (an upsert); a tombstone
+// deletes the earlier changes of its target. Reading a seq again gives the same change (a newer recall may add
+// optional fields to it).
+message Change {
+  option (common.wire.v1.message).discriminator = "kind";
+
+  // What the record is. Open: a consumer archives a change of a kind it does not know, with its blobs, on its
+  // envelope (seq, id, kind, event_time, page_id, blobs) alone.
+  enum Kind {
+    // Never written.
+    KIND_UNSPECIFIED = 0;
+    // A visit to a page with at least one second of focus (Change.visit).
+    KIND_VISIT = 1;
+    // The text captured from a page (Change.document), in the blob with role `text`.
+    KIND_DOCUMENT = 2;
+    // The deletion of a page or a record (Change.tombstone).
+    KIND_TOMBSTONE = 3;
+  }
+
+  // The change's position in its feed: assigned in commit order from 1; a superseded or deleted change leaves a gap.
+  int32 seq = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).minimum = 1
+  ];
+  // The record's identity; every change of one record has the same one.
+  string id = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "RecordId"
+  ];
+  // What the record is.
+  Kind kind = 3 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).non_null = true
+  ];
+  // When it happened in the browser (a visit's start, a capture) or at recall (a deletion).
+  google.protobuf.Timestamp event_time = 4 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).non_null = true
+  ];
+  // The page the record belongs to: a tombstone of that page deletes it, whatever its kind. Every visit and document
+  // has one, a tombstone none; a kind a consumer does not know may have one.
+  optional string page_id = 5 [(common.wire.v1.field) = {
+    format: "PageId"
+    cases: {
+      when: [
+        "visit",
+        "document"
+      ]
+      presence: PRESENCE_REQUIRED
+    }
+    cases: {
+      when: "tombstone"
+      presence: PRESENCE_ABSENT
+    }
+  }];
+  // The record's files, each fetched from the feed's blob route by its path and checked against its size and
+  // SHA-256 before it is kept. Every blob of a change is in recall's store before the change is committed.
+  repeated Blob blobs = 6 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field) = {
+      max_items: 8
+      cases: {
+        when: [
+          "visit",
+          "tombstone"
+        ]
+        rules: {empty: true}
+      }
+    }
+  ];
+  // The visit, for kind visit.
+  Visit visit = 7 [(common.wire.v1.field) = {
+    cases: {
+      when: "visit"
+      presence: PRESENCE_REQUIRED
+    }
+    otherwise: PRESENCE_ABSENT
+  }];
+  // The captured text's metadata, for kind document.
+  Document document = 8 [(common.wire.v1.field) = {
+    cases: {
+      when: "document"
+      presence: PRESENCE_REQUIRED
+    }
+    otherwise: PRESENCE_ABSENT
+  }];
+  // The deletion, for kind tombstone.
+  Tombstone tombstone = 9 [(common.wire.v1.field) = {
+    cases: {
+      when: "tombstone"
+      presence: PRESENCE_REQUIRED
+    }
+    otherwise: PRESENCE_ABSENT
+  }];
+}
+
+// A file of a record, kept under blobs/<path> in the archive.
+message Blob {
+  // What the file is to its record: `text` for a document's captured text.
+  string role = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "Role"
+  ];
+  // Where the file is: GET /api/machine/v1/blobs/<path> answers its bytes, and the archive keeps it at
+  // blobs/<path>. Never chosen by the consumer, always checked against the format (no `..`, no absolute path).
+  string path = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "BlobPath"
+  ];
+  // The media type of the bytes once content_encoding is undone (text/plain; charset=utf-8).
+  string media_type = 3 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "MediaType"
+  ];
+  // How the stored bytes are encoded: gzip, or absent for none. Closed: another encoding is recall-archive-v2. The
+  // blob route answers the stored bytes as they are (application/octet-stream, no Content-Encoding header), so the
+  // digest holds on the wire and on disk.
+  string content_encoding = 4 [(common.wire.v1.field).allowed = "gzip"];
+  // The SHA-256 of the stored bytes.
+  string sha256 = 5 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "Sha256"
+  ];
+  // The number of stored bytes.
+  int32 size_bytes = 6 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).minimum = 0
+  ];
+}
+
+// A visit to a page: one document in one tab, from its first focus to its last. A visit ends when its tab leaves the
+// page or closes, after 30 minutes without focus, or 6 hours after it started; the next focus starts a new visit.
+// A page of a sensitive kind (mail, chat, banking, a password manager, a console) is recorded by its site alone: the
+// URL is the site's root and the title is empty.
+message Visit {
+  // The page's URL, normalized and scrubbed.
+  string url = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "Url"
+  ];
+  // The URL was longer than 8192 characters: `url` is its beginning (the page ID still comes from the whole URL).
+  bool url_truncated = 2;
+  // The title the tab showed, scrubbed, cut to 1000 characters ending with `…`; empty when the page had none.
+  string title = 3 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "Text"
+  ];
+  // The URL's site.
+  string site = 4 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "Site"
+  ];
+  // The browser profile that recorded it: a UUID the extension made when it was installed.
+  string device_id = 5 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "Uuid"
+  ];
+  // That profile's label at the time.
+  string device_label = 6 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "Label"
+  ];
+  // The start of the first focus span.
+  google.protobuf.Timestamp start_time = 7 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).non_null = true
+  ];
+  // The end of the last focus span.
+  google.protobuf.Timestamp end_time = 8 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).non_null = true
+  ];
+  // The seconds of focus: the focus spans' total, rounded.
+  // (-- api-linter: core::0142::time-field-type=disabled
+  //     aip.dev/not-precedent: a duration in whole seconds, not a time; the wire profile has no
+  //     google.protobuf.Duration. --)
+  int32 focus_seconds = 9 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field) = {
+      minimum: 1
+      maximum: 21600
+    }
+  ];
+  // When the page had the focus (its tab active in the focused window, the owner not idle), in time order, without
+  // overlaps.
+  repeated FocusSpan focus_spans = 10 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).max_items = 200
+  ];
+}
+
+// A stretch of focus.
+message FocusSpan {
+  // When the focus came.
+  google.protobuf.Timestamp start_time = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).non_null = true
+  ];
+  // When it went: a tab or window change, idle (backdated by the idle threshold) or the page's end.
+  google.protobuf.Timestamp end_time = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).non_null = true
+  ];
+}
+
+// The text captured from a page, at most once per page and UTC day, after ten seconds of focus, and only when it
+// differs from the page's latest capture. The text itself is the change's blob with role `text`: UTF-8 plain text
+// (the page's innerText), scrubbed, gzip-encoded.
+message Document {
+  // The visit it was captured in: visits/<uuid>.
+  string visit = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "RecordId"
+  ];
+  // The page's URL, normalized and scrubbed.
+  string url = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "Url"
+  ];
+  // The URL was longer than 8192 characters: `url` is its beginning.
+  bool url_truncated = 3;
+  // The title, scrubbed, cut to 1000 characters ending with `…`.
+  string title = 4 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "Text"
+  ];
+  // The page's meta description, scrubbed and cut like the title; empty when it had none.
+  string description = 5 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "Text"
+  ];
+  // The URL's site.
+  string site = 6 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "Site"
+  ];
+  // The browser profile that captured it.
+  string device_id = 7 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "Uuid"
+  ];
+  // That profile's label at the time.
+  string device_label = 8 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "Label"
+  ];
+  // When the text was read from the page.
+  google.protobuf.Timestamp capture_time = 9 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).non_null = true
+  ];
+  // The UTF-8 size of the text (before gzip).
+  int32 text_bytes = 10 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field) = {
+      minimum: 0
+      maximum: 65536
+    }
+  ];
+  // The page had more text than the 64 KiB kept: the text is its beginning, cut at a character boundary.
+  bool text_truncated = 11;
+}
+
+// A deletion by the owner. A consumer deletes every archived change with a lower seq whose id is the target, or whose
+// page_id is the page the target names, and those changes' blobs; it keeps the tombstone itself (it holds no
+// content).
+message Tombstone {
+  // What is deleted: pages/<page id> for a page with its visits and documents (the only target recall v1 writes), or
+  // one record's id.
+  string target = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "TombstoneTarget"
+  ];
+}
+
+// An archive's cursor: its state.json, written last and atomically after everything up to synced_seq is durable.
+message ArchiveState {
+  // Always recall-archive-v1.
+  string version = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).allowed = "recall-archive-v1"
+  ];
+  // The feed this archive follows (ChangePage.feed_id): set by the first page applied to an empty archive, then
+  // compared with every page.
+  string feed_id = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "Uuid"
+  ];
+  // The origin of the recall deployment the consumer last pulled from (informational: the feed is named by feed_id).
+  string source = 3 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "Origin"
+  ];
+  // The consumer that keeps this archive (the feed's `consumer` parameter).
+  string consumer = 4 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "Consumer"
+  ];
+  // Every change with a seq up to this one is durable here: the next request's `after`.
+  int32 synced_seq = 5 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).minimum = 0
+  ];
+  // When the consumer last wrote this file.
+  google.protobuf.Timestamp update_time = 6 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).non_null = true
+  ];
+}

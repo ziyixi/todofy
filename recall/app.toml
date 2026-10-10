@@ -1,0 +1,44 @@
+version = 1
+id = "recall"
+target = "cloudflare"
+
+[[workers]]
+config = "recall/wrangler.toml"
+personal_secrets = ["ACCESS_OWNER", "ACCESS_OWNER_ALIASES", "CSRF_SIGNING_KEY"]
+manual_secrets = []
+optional_secrets = ["ACCESS_OWNER_ALIASES"]
+# The SHA-256 digests of the two machine tokens (the extension's ingest token, the archive's export token) and their
+# previous values during a rotation, put from the owner's machine with deploy/mint-tokens.mjs (`wrangler secret put`)
+# and kept by every deploy. Owner-machine secrets are not part of the GitHub map RECALL_WORKER_SECRETS; the drift check
+# expects them, optional: before the owner's first mint-tokens run the machine routes answer 503 not_configured.
+owner_machine_secrets = ["INGEST_TOKEN_SHA256", "INGEST_TOKEN_SHA256_PREVIOUS", "EXPORT_TOKEN_SHA256", "EXPORT_TOKEN_SHA256_PREVIOUS"]
+hosts = ["recall"]
+entry = "recall"
+role = "浏览记录、搜索与归档"
+position = 13
+
+[[entries]]
+id = "recall"
+name = "浏览记录"
+description = "浏览时间线、读过内容的全文搜索与 NAS 归档"
+group = "apps"
+icon = "notebook-pen"
+accent = "violet"
+access = true
+app_only_signals = []
+order = 10
+worker = "recall"
+url_path = "/"
+position = 15
+[entries.status]
+# Check-only until its go-live commit (docs/design.md §11): then ops_v1 with Home's RECALL binding (codes and counts
+# only, no guard).
+type = "none"
+
+[[access]]
+key = "recall"
+kind = "owner"
+worker = "recall"
+name = "recall"
+paths = [""]
+session = "24h"

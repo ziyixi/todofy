@@ -1,0 +1,10 @@
+{
+  "seq": 9,
+  "id": "tombstones/e1f2a3b4-c5d6-4e7f-8a9b-0c1d2e3f4a05",
+  "kind": "tombstone",
+  "event_time": "2026-10-11T09:30:00Z",
+  "blobs": [],
+  "tombstone": {
+    "target": "pages/3CB7"
+  }
+}

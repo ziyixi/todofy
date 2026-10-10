@@ -1,0 +1,1342 @@
+/*
+ * The UI's design system (../docs/design.md §8.2), copied from mailsort's UI (mailsort/web/src/styles.css, 2026-10-07)
+ * with the same names: calm neutral surfaces, one accent (recall's is the violet of its Home tile), an 8 px spacing
+ * scale, a 10 px radius, hairline borders and no shadow but the segmented control's. Light and dark come from the
+ * system setting through the tokens below; every component reads them, never a color of its own. No external font or
+ * image.
+ */
+:root {
+  color-scheme: light dark;
+  --bg: #f6f6f4;
+  --surface: #ffffff;
+  /* Tracks, hover, empty hours and the segmented control's well. */
+  --sunken: #efefec;
+  --ink: #1d1d1f;
+  --muted: #6e6e73;
+  --line: #e5e5e1;
+  /* A control's off state: at least 3:1 against the card and the page (WCAG 1.4.11). */
+  --track: #8e8e93;
+  /* The one accent: Home's violet (--accent-violet-*); each ink on its accent is above 7:1. */
+  --accent: #56419a;
+  --accent-ink: #ffffff;
+  --accent-soft: #eae5f5;
+  /* State only (a warning, a refusal), never decoration. */
+  --warn: #9a5b08;
+  --warn-soft: #fbf0df;
+  --danger: #b42318;
+  /* The sites' colors (sessions.ts siteSlots): mailsort's eight categorical slots, validated for color-vision
+     deficiency on --surface. A site is always named beside its badge. */
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  --series-3: #1baf7a;
+  --series-4: #eda100;
+  --series-5: #e87ba4;
+  --series-6: #008300;
+  --series-7: #4a3aa7;
+  --series-8: #e34948;
+  /* The 8 px scale (4 is its half step). */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 16px;
+  --space-4: 24px;
+  --space-5: 32px;
+  --space-6: 48px;
+  --radius: 10px;
+  font: 16px/1.5 system-ui, -apple-system, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans SC', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif;
+  font-variant-numeric: tabular-nums;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #141416;
+    --surface: #1c1c1f;
+    --sunken: #26262a;
+    --ink: #ececee;
+    --muted: #9b9ba1;
+    --line: #2e2e33;
+    --track: #6e6e73;
+    --accent: #b9a8ea;
+    --accent-ink: #1b1433;
+    --accent-soft: #2e2842;
+    --warn: #f0b44c;
+    --warn-soft: #3a2c14;
+    --danger: #f97066;
+    --series-1: #3987e5;
+    --series-2: #d95926;
+    --series-3: #199e70;
+    --series-4: #c98500;
+    --series-5: #d55181;
+    --series-6: #1f9d1f;
+    --series-7: #9085e9;
+    --series-8: #e66767;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* `hidden` wins over every display rule. */
+[hidden] {
+  display: none !important;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  -webkit-text-size-adjust: 100%;
+}
+
+#app {
+  max-width: 48rem;
+  margin: 0 auto;
+  padding: 0 var(--space-3) calc(var(--space-6) + env(safe-area-inset-bottom));
+}
+
+h1,
+h2,
+h3,
+p {
+  margin: 0;
+}
+
+h2 {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+h3 {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+a {
+  color: var(--accent);
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Text for screen readers only (each page's h1: the tab already names the page), and the day bar's date field. */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* The header: the name, one quiet status line, and the three tabs. */
+.top {
+  position: sticky;
+  top: 0;
+  z-index: 4;
+  background: var(--bg);
+  padding-top: env(safe-area-inset-top);
+  border-bottom: 1px solid var(--line);
+}
+
+.top-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-1) var(--space-3);
+  padding: var(--space-3) 0 var(--space-1);
+}
+
+.brand {
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.status-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-2);
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.status-line > span + span::before {
+  content: '·';
+  margin-right: var(--space-2);
+  color: var(--muted);
+}
+
+.status-line .problem {
+  color: var(--warn);
+}
+
+.tabs {
+  display: flex;
+  gap: var(--space-4);
+}
+
+.tabs a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  color: var(--muted);
+  text-decoration: none;
+  font-size: 15px;
+}
+
+.tabs a:hover {
+  color: var(--ink);
+}
+
+.tabs a[aria-current='page'] {
+  color: var(--ink);
+  font-weight: 600;
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+
+/* A page: its sections one under another, in one column that never grows past the page. */
+#view {
+  padding-top: var(--space-4);
+}
+
+#view > .body,
+.stack {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-3);
+}
+
+/* What the sticky header would cover when a heading, a session or a match is scrolled into sight. */
+.hour-head,
+.session,
+.reader mark {
+  scroll-margin-top: 136px;
+}
+
+/* Controls. A plain button is the ghost button: a hairline on the surface. */
+input,
+select,
+textarea,
+button {
+  font: inherit;
+  color: inherit;
+}
+
+input,
+select {
+  width: 100%;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  font-size: 14px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+button:hover {
+  background: var(--sunken);
+}
+
+button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+  font-weight: 600;
+}
+
+button.primary:hover {
+  opacity: 0.92;
+}
+
+/* Text only: a secondary action that should not pull the eye. */
+button.quiet {
+  border-color: transparent;
+  background: none;
+  color: var(--muted);
+}
+
+button.quiet:hover {
+  color: var(--ink);
+  background: var(--sunken);
+}
+
+button.danger {
+  color: var(--danger);
+}
+
+/* A smaller button inside a line (a menu's actions, 重试, 确定). */
+button.small {
+  min-height: 36px;
+  padding: 0 12px;
+  font-size: 13px;
+}
+
+/* An arrow or ⋯ alone. */
+button.icon {
+  min-width: 44px;
+  padding: 0 var(--space-2);
+  font-size: 16px;
+  line-height: 1;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* The segmented control: one choice of a few. */
+.segmented {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 2px;
+  border-radius: var(--radius);
+  background: var(--sunken);
+}
+
+.segmented button {
+  min-height: 40px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--muted);
+}
+
+.segmented button[aria-pressed='true'] {
+  background: var(--surface);
+  color: var(--ink);
+  font-weight: 600;
+  box-shadow: 0 0 0 1px var(--line);
+}
+
+/* A card: one section of a page. */
+.card {
+  padding: var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.card-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-1) var(--space-2);
+  margin-bottom: 12px;
+}
+
+.card > * + * {
+  margin-top: 12px;
+}
+
+.card > .card-head + * {
+  margin-top: 0;
+}
+
+.hint,
+.meta {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.warn,
+.hint.warn,
+.meta.warn {
+  color: var(--warn);
+}
+
+/* A row of actions; on a phone it wraps. */
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* A chip: a short label beside a row (accent, warn, muted), never a control. */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  height: 22px;
+  padding: 0 var(--space-2);
+  border-radius: 999px;
+  background: var(--sunken);
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.chip.muted {
+  background: none;
+  color: var(--muted);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+
+.actions input {
+  width: auto;
+  min-width: 0;
+  flex: 1 1 12rem;
+}
+
+.actions.center {
+  justify-content: center;
+}
+
+/* The disclosure (内置 N 条). */
+details.more > summary {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: 44px;
+  color: var(--muted);
+  font-size: 13px;
+  list-style: none;
+  cursor: pointer;
+}
+
+details.more > summary::-webkit-details-marker {
+  display: none;
+}
+
+details.more > summary::after {
+  content: '›';
+  display: inline-block;
+  transform: rotate(90deg);
+}
+
+details.more[open] > summary::after {
+  transform: rotate(-90deg);
+}
+
+details.more > * + * {
+  margin-top: var(--space-2);
+}
+
+/* The small menu behind ⋯: its actions appear inline beside it, wrapping on a phone. */
+.menu,
+.menu-items {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-1);
+}
+
+/* The empty state. */
+.empty {
+  grid-template-columns: minmax(0, 1fr);
+  display: grid;
+  gap: var(--space-1);
+  padding: var(--space-6) var(--space-3);
+  color: var(--muted);
+  text-align: center;
+}
+
+.empty strong {
+  display: block;
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.card .empty {
+  padding: var(--space-3) 0;
+}
+
+.empty .actions {
+  margin-top: var(--space-2);
+}
+
+/* Loading: grey rows in the list's shape, never a spinner, never moving. */
+.skeleton {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.skeleton li {
+  display: grid;
+  gap: 6px;
+  padding: 12px var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.skeleton span {
+  display: block;
+  height: 12px;
+  border-radius: 6px;
+  background: var(--sunken);
+}
+
+.skeleton span:first-child {
+  width: 60%;
+}
+
+.skeleton span + span {
+  width: 35%;
+}
+
+/* A failure where the content would be: its message and 重试. */
+.error-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2) 12px;
+  padding: var(--space-4) 0;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+/* The KPI numbers: three in a row, inside 存储's card without boxes of their own (format.ts compact keeps each to five
+   characters, which fit a third of a phone at 28 px). */
+.kpis {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-2);
+}
+
+.kpi {
+  display: grid;
+  gap: 2px;
+}
+
+.kpi-label {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.kpi-value {
+  font-size: 28px;
+  font-weight: 600;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+/* The meter (storage, the day's rows). The unfilled track is the sunken surface. */
+.meter {
+  display: block;
+  height: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--sunken);
+}
+
+.meter > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+}
+
+.meter.warn > span {
+  background: var(--warn);
+}
+
+.meter.danger > span {
+  background: var(--danger);
+}
+
+/* The compact list: one row per item, hairlines between. A row's one column never grows past the list, so a long
+   title is cut with … and its figures stay in sight. */
+.rows {
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  list-style: none;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.rows > li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 6px;
+  padding: 12px var(--space-3);
+  border-top: 1px solid var(--line);
+}
+
+.rows > li:first-child {
+  border-top: 0;
+}
+
+.card .rows {
+  border: 0;
+  border-radius: 0;
+  background: none;
+}
+
+.card .rows > li {
+  padding: 12px 0;
+}
+
+.card .rows > li:first-child {
+  padding-top: 0;
+}
+
+.row-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+
+.row-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 15px;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.row-head .meta {
+  flex: none;
+  white-space: nowrap;
+}
+
+/* The searchable picker (网站). */
+.picker {
+  grid-template-columns: minmax(0, 1fr);
+  display: grid;
+  gap: var(--space-1);
+}
+
+.picker ul {
+  grid-template-columns: minmax(0, 1fr);
+  display: grid;
+  max-height: 14rem;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.picker li {
+  padding: 10px 12px;
+  border-radius: 8px;
+  font-size: 14px;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+
+.picker li[aria-selected='true'] {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.picker li.none {
+  color: var(--muted);
+  cursor: default;
+}
+
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: calc(var(--space-3) + env(safe-area-inset-bottom));
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: calc(100% - var(--space-5));
+  padding: 10px var(--space-3);
+  border-radius: var(--radius);
+  background: var(--ink);
+  color: var(--bg);
+  font-size: 14px;
+  transform: translateX(-50%);
+}
+
+/* Shown only where there is a keyboard and a pointer to hover with. */
+.keys {
+  display: none;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .keys {
+    display: block;
+    text-align: center;
+  }
+}
+
+kbd {
+  padding: 0 5px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  font: 12px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+/* The query's words in a title, a snippet or the reader. */
+mark {
+  border-radius: 2px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* ---- 时间线 (views/timeline.ts) ------------------------------------------------------------------------------------ */
+
+/* The day bar: ‹ · the date (the date picker) · › · 今天. */
+.day-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.day-pick {
+  position: relative;
+  min-width: 0;
+}
+
+button.day-title {
+  padding: 0 var(--space-2);
+  border-color: transparent;
+  background: none;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.day-bar button.small {
+  margin-left: auto;
+}
+
+.day-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-1) 12px;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+/* The hour grid: two rows of 12 on a phone, one row of 24 once the grid has room for 24 cells of 24 px and their
+   gaps; every cell at least 24 × 32 px (WCAG's minimum target: each hour is also a heading of the list). An empty hour
+   is only outlined, inactive, so that a used one never reads as a gap; five fills from a fifth of the accent to the
+   accent, each numeral at least 4.5:1 on its fill, light and dark. */
+.hours-box {
+  container-type: inline-size;
+}
+
+.hours {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(24px, 1fr));
+  gap: 2px;
+}
+
+@container (min-width: 624px) {
+  .hours {
+    grid-template-columns: repeat(24, minmax(24px, 1fr));
+  }
+}
+
+button.hour {
+  min-width: 24px;
+  min-height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+button.hour:disabled {
+  opacity: 1;
+}
+
+button.hour.l0 {
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+
+button.hour.l1 {
+  background: color-mix(in srgb, var(--accent) 20%, var(--surface));
+  color: var(--ink);
+}
+
+button.hour.l2 {
+  background: color-mix(in srgb, var(--accent) 35%, var(--surface));
+  color: var(--ink);
+}
+
+button.hour.l3 {
+  background: color-mix(in srgb, var(--accent) 50%, var(--surface));
+  color: var(--ink);
+}
+
+button.hour.l4 {
+  background: color-mix(in srgb, var(--accent) 80%, var(--surface));
+  color: var(--accent-ink);
+}
+
+button.hour.l5 {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+.day-list {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-3);
+  container-type: inline-size;
+}
+
+.hour-block {
+  grid-template-columns: minmax(0, 1fr);
+  display: grid;
+  gap: var(--space-1);
+}
+
+.hour-head {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.rows.sessions > li {
+  gap: 0;
+  padding: 0;
+}
+
+/* A session's row: badge, host (cut with …), time, focus and pages; the whole row opens its pages. */
+button.session-main {
+  justify-content: flex-start;
+  width: 100%;
+  min-height: 48px;
+  padding: var(--space-2) var(--space-3);
+  border: 0;
+  border-radius: 0;
+  background: none;
+  text-align: left;
+  white-space: normal;
+}
+
+button.session-main:focus-visible {
+  outline-offset: -2px;
+}
+
+.session-main[aria-expanded='true'] {
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.session-line {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.session-site {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 15px;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-time,
+.session-figures {
+  flex: none;
+  white-space: nowrap;
+}
+
+.session-figures {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+/* A narrow list (a phone): the host takes the first line whole, the time and figures a muted second line under it. */
+@container (max-width: 480px) {
+  .session-line {
+    flex-wrap: wrap;
+    row-gap: 0;
+  }
+
+  .session-site {
+    flex-basis: calc(100% - 36px);
+  }
+
+  .session-time {
+    margin-left: 36px;
+  }
+
+  .session-figures::before {
+    content: '· ';
+  }
+}
+
+.session-pages {
+  grid-template-columns: minmax(0, 1fr);
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 0 var(--space-3) var(--space-2) 52px;
+  list-style: none;
+}
+
+.session-pages li {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 44px;
+}
+
+a.session-page {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-pages .meta {
+  flex: none;
+}
+
+button.fold {
+  justify-self: start;
+}
+
+/* A site's badge: its initial on its color slot; slot 0 (beyond eight sites) is muted. */
+.badge {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--muted);
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.badge.s1 {
+  background: var(--series-1);
+}
+
+.badge.s2 {
+  background: var(--series-2);
+}
+
+.badge.s3 {
+  background: var(--series-3);
+}
+
+.badge.s4 {
+  background: var(--series-4);
+}
+
+.badge.s5 {
+  background: var(--series-5);
+}
+
+.badge.s6 {
+  background: var(--series-6);
+}
+
+.badge.s7 {
+  background: var(--series-7);
+}
+
+.badge.s8 {
+  background: var(--series-8);
+}
+
+/* ---- 搜索 (views/search.ts) ---------------------------------------------------------------------------------------- */
+
+/* 16 px, so a phone does not zoom into the box. */
+.search-form input {
+  font-size: 16px;
+}
+
+/* The filter chips, and the popover under them: under its chip on a wide screen, a full-width panel on a phone. */
+.filters-wrap {
+  position: relative;
+}
+
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+button.filter {
+  min-height: 44px;
+  padding: 0 14px;
+  border-radius: 999px;
+  color: var(--muted);
+}
+
+.filter.set {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  background: var(--accent-soft);
+}
+
+.filter.set button {
+  min-height: 44px;
+  border: 0;
+  border-radius: 999px;
+  background: none;
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.filter.set .filter-value {
+  padding: 0 4px 0 14px;
+}
+
+.filter.set .filter-clear {
+  min-width: 44px;
+  padding: 0;
+}
+
+.popover {
+  grid-template-columns: minmax(0, 1fr);
+  position: absolute;
+  top: calc(100% + var(--space-2));
+  left: 0;
+  z-index: 3;
+  display: grid;
+  gap: 12px;
+  width: min(24rem, 100%);
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+@media (max-width: 520px) {
+  .popover {
+    position: static;
+    width: auto;
+    margin-top: var(--space-2);
+  }
+}
+
+/* A popover's choices keep their own width (the grid would stretch the well across the panel). */
+.popover > .segmented {
+  justify-self: start;
+}
+
+.popover .custom {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.range {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+  gap: var(--space-2);
+}
+
+.range label {
+  display: grid;
+  gap: 2px;
+}
+
+.results-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.results {
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  list-style: none;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.result + .result {
+  border-top: 1px solid var(--line);
+}
+
+/* A result: one link of one column, so a long title or URL is cut with … and never widens the page. */
+a.result-link {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 2px;
+  padding: 12px var(--space-3);
+  color: inherit;
+  text-decoration: none;
+}
+
+a.result-link:hover {
+  background: var(--sunken);
+}
+
+a.result-link:focus-visible {
+  outline-offset: -2px;
+}
+
+.result-title {
+  overflow: hidden;
+  font-size: 15px;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.result-meta {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Up to two lines of snippet. */
+.snippet {
+  display: -webkit-box;
+  overflow: hidden;
+  font-size: 14px;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+}
+
+.result-url {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+button.more-results {
+  justify-self: center;
+}
+
+/* ---- 页面详情 (views/page.ts) -------------------------------------------------------------------------------------- */
+
+.page-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-1);
+}
+
+.page-title-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: var(--space-2);
+}
+
+/* The ⋯ stays beside the title; its open actions take a line of their own under it, so the title keeps its width. */
+.page-title-row .menu {
+  display: contents;
+}
+
+.page-title-row .menu-items {
+  flex-basis: 100%;
+  justify-content: flex-start;
+  order: 1;
+}
+
+h2.page-title {
+  flex: 1 1 0;
+  min-width: 0;
+  font-size: 22px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.page-site {
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.page-url {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+/* The match bar sticks under the header (its height: app.ts), so ↑ ↓ stay in reach while the text scrolls. */
+.find {
+  position: sticky;
+  top: var(--top-height, 0);
+  z-index: 3;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-2);
+  background: var(--surface);
+}
+
+.find .keys {
+  margin-left: auto;
+}
+
+/* The reader: the captured text at 17 px, line height 1.75, lines of at most 40 em; a page's lines kept. */
+.reader {
+  max-width: 40em;
+  font-size: 17px;
+  line-height: 1.75;
+  overflow-wrap: anywhere;
+}
+
+.reader p {
+  white-space: pre-line;
+}
+
+.reader p + p {
+  margin-top: 1em;
+}
+
+.reader mark.current {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+.visits {
+  grid-template-columns: minmax(0, 1fr);
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.visits li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0 var(--space-2);
+  min-height: 44px;
+  font-size: 14px;
+}
+
+.visits li + li {
+  border-top: 1px solid var(--line);
+}
+
+/* ---- 设置 (views/settings.ts) -------------------------------------------------------------------------------------- */
+
+.facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) 12px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.steps {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding-left: 1.25em;
+  font-size: 14px;
+}
+
+.gauge {
+  grid-template-columns: minmax(0, 1fr);
+  display: grid;
+  gap: 6px;
+}
+
+.gauge-head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0 var(--space-2);
+  font-size: 14px;
+}
+
+.patterns {
+  grid-template-columns: minmax(0, 1fr);
+  display: grid;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.patterns li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding-left: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.patterns .mono {
+  min-width: 0;
+}
+
+.builtin {
+  margin: 0;
+  padding: 0;
+  columns: 2 12rem;
+  color: var(--muted);
+  list-style: none;
+}
+
+.build {
+  text-align: center;
+}
+
+/* ---- motion: only a popover's fade and a session opening ------------------------------------------------------------ */
+
+@media (prefers-reduced-motion: no-preference) {
+  .popover:not([hidden]),
+  .session-pages:not([hidden]) {
+    animation: fade-in 0.15s ease-out;
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}

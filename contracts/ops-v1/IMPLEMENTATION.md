@@ -580,6 +580,23 @@ mailsort (`mailsort/`, Worker `mailsort`, `mailsort/docs/design.md` §10) joined
   audit sample, until 2026-10-10) and `embedding_rebuild`. New mail is still read, decided and sorted; the owner API is
   never deferred.
 
+## 3e. recall (added 2026-10-10, additive)
+
+recall (`recall/`, Worker `recall`, `recall/docs/design.md` §9) joined `OpsStatus.app` (an open list) as `recall`, so
+that its `Ops` entrypoint writes a valid status; nothing of the other apps' surface changed. Home does not bind it yet:
+the dashboard's `UNBOUND_OPS_APPS` (`dashboard/worker/src/ops-client.ts`) keeps it out of the apps it calls until
+recall's go-live commit adds the `RECALL` binding (Home's deploy waits for every service it binds). recall has no
+guard: it lists no capability and `setGuard` rejects with `invalid_input`, as Fleet's does.
+
+- Files: `recall/worker/src/ops.ts` (the entrypoint, forwards to `RecallState`), `recall/worker/src/ops-status.ts`
+  (over the object's SQLite, the same facts as the owner API's ServiceStatus). Rows read per `status()`: the devices,
+  at most 8 consumers (the oldest unarchived change of each that pulled in the last 30 days, one indexed read per
+  table; never a count), a week of daily usage rows and a few meta rows: a few dozen rows however far behind an
+  archive is (`recall/worker/test/runtime/scale.test.ts`). Its one write: an alarm when none is set (the rows it read
+  count toward recall's daily read budget with the next call that writes).
+- Counters: `visits_today`, `texts_today`, `rows_written_today`, `rows_read_today`. Signals in README. Never a URL,
+  host, title or text.
+
 ## 3b. The move onto proto/ (2026-10-01, no wire change)
 
 The contract's source of truth became the IDL [`proto/ops/v1/ops.proto`](../../proto/ops/v1/ops.proto)

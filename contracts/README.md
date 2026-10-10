@@ -17,6 +17,7 @@ hand-written, checked against the codec on every fixture.
 | `platform-runtime-v1/` | Independent platform daemon → deployment verifier/host observer; shared bounded runtime metadata | Platform; [contract](platform-runtime-v1/README.md) |
 | `fleet-report-v1/` | Platform host observer → Fleet; signed metadata with the shared runtime snapshot | Fleet; [contract](fleet-report-v1/README.md) |
 | `task-intent-v1/` | a proposing app (the watch app) → Todofy's `Intents` entrypoint: "create these Todoist tasks", idempotent per intent | Todofy; see [`task-intent-v1/README.md`](task-intent-v1/README.md) |
+| `recall-archive-v1/` | recall → any archive consumer (today `recall/sync/` on the owner's NAS): the change feed and the plain-file archive layout | recall; see [`recall-archive-v1/README.md`](recall-archive-v1/README.md) |
 
 ## `mail-received-v1/`
 
@@ -94,3 +95,19 @@ wire JSON codec agree with the schema on every fixture.
 Watch's `watch/worker/test/todofy.test.ts` pins the digest and urgent intents against the watch fixtures,
 and `ops-golden.test.ts` pins its status/guard answers. These checks also run in `Contracts`; the app's
 runtime suite checks its binding and durable notification state with synthetic sites and a stub consumer.
+
+## `recall-archive-v1/`
+
+The change feed recall serves to archive consumers and the archive layout they fill, so the store behind recall (the
+owner's NAS today) can be replaced without touching recall. The IDL is
+[`proto/recall/archive/v1/archive.proto`](../proto/recall/archive/v1/archive.proto); `recall-archive-v1.schema.json` is
+generated from it (a consumer's schema, every object open; `npm run check:schema` in `proto/`); the README holds the
+routes, the records, the guarantees, the layout and how another consumer or store implements it; `fixtures/` holds the
+golden records, a change of a newer kind every consumer archives, the invalid ones and the archive an empty store holds
+after the first page. Designed 2026-10-10 with recall itself (`recall/docs/design.md`):
+`proto/test/recall-archive.test.ts` round-trips every fixture through the codec (Proto checks, `PROTO_READS`);
+recall's Worker renders each change from its row and its tests rebuild `fixtures/Change/` and `fixtures/ChangePage/`
+from synthetic uploads (`recall/worker/test/feed.test.ts`, `test/runtime/ingest.test.ts`);
+`recall/sync/test_recall_sync.py` runs the contract's consumer tests (§5) against these fixtures and compares the
+consumer's rules with the generated schema; and recall's smoke run (`recall/worker/test/smoke/`) checks the archive the
+reference consumer fills from a real `wrangler dev` against the codec. All run in "Recall checks".

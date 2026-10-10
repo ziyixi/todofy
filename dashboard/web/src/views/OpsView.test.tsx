@@ -48,6 +48,7 @@ describe('操作与记录', () => {
       '网页监视',
       '服务器监控',
       '邮件分拣',
+      '浏览记录',
       '个人网站',
       '网站同步',
       'Newsletter',
@@ -68,11 +69,14 @@ describe('操作与记录', () => {
     // mailsort: its Ops entrypoint (counts and codes of the Gmail sorting).
     expect(rows[6]).toHaveTextContent('ops-v1 状态接口')
     expect(within(rows[6] as HTMLElement).getAllByRole('cell').at(-1)).toHaveTextContent('mailsort')
-    expect(rows[7]).toHaveTextContent('公开地址探测')
-    expect(rows[9]).toHaveTextContent('ops-v1 状态接口')
+    // recall: check-only, its Ops entrypoint bound only by its go-live commit.
+    expect(rows[7]).toHaveTextContent('未接入监控')
+    expect(within(rows[7] as HTMLElement).getAllByRole('cell').at(-1)).toHaveTextContent('recall')
+    expect(rows[8]).toHaveTextContent('公开地址探测')
+    expect(rows[10]).toHaveTextContent('ops-v1 状态接口')
     // Hidden, with no Worker: it only names the self-hosted servers' backup bucket.
-    expect(rows[11]).toHaveTextContent('未接入监控')
-    expect(within(rows[11] as HTMLElement).getAllByRole('cell').at(-1)).toHaveTextContent('—')
+    expect(rows[12]).toHaveTextContent('未接入监控')
+    expect(within(rows[12] as HTMLElement).getAllByRole('cell').at(-1)).toHaveTextContent('—')
   })
 
   it('names a link-only entry of the registry as such', async () => {

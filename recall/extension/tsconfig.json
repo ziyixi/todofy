@@ -1,0 +1,28 @@
+{
+  // The Worker's flag set with the browser's libraries: the service worker, the injected capture script and the
+  // options page run in Chrome 120 or newer (ES2024 for String.prototype.toWellFormed, which ../shared uses), typed by
+  // @types/chrome. ../shared is the code the Worker runs too. Node types are for the tests only: esbuild bundles for
+  // the browser and refuses a Node built-in.
+  "compilerOptions": {
+    "target": "ES2024",
+    "lib": ["ES2024", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "allowImportingTsExtensions": true,
+    "resolveJsonModule": true,
+    "types": ["chrome", "node"],
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noImplicitOverride": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
+    "erasableSyntaxOnly": true,
+    "skipLibCheck": true,
+    "noEmit": true
+  },
+  "include": ["src", "test", "../shared", "vitest.config.ts"]
+}

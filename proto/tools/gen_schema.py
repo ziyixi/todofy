@@ -23,7 +23,9 @@ there and matches the format; a second group goes into ``allOf``), a ``present_w
 is true) ``then`` (the field is there). Patterns are anchored as ECMAScript
 and Python's ``re.search`` both need (``$(?!\\n)``: Python's ``$`` also matches before a final newline). The schema is
 the producer's view: an ``open`` allowed list is closed here, as it is for a write; a consumer reads such a field more
-leniently (the codecs' lenient read). A format's ``json_schema_format`` is written as ``format`` next to its pattern
+leniently (the codecs' lenient read). One exception, in a consumer's schema only: a union whose discriminator a lenient
+read may meet with a value it does not know (an open enum) has one more branch for any other value, with the fields'
+own rules and no case (recall-archive-v1's change of a newer kind). A format's ``json_schema_format`` is written as ``format`` next to its pattern
 (an annotation the codecs do not check; a validator that asserts formats does). Rules the IDL cannot hold (a clock
 bound, a whole message's size) are in the contract's README, not here. Characters Python does not print (a pattern's
 control characters and Unicode spaces) are written as ``\\u`` escapes, so the committed file shows them.
@@ -32,7 +34,8 @@ SCHEMAS lists the committed schemas, each with what must be regenerated after it
 generator copies the schema; none does since Todofy's UI takes its types from todofy.ui.v1), which a write that
 changes the file and a check that finds it stale print. Only keywords contracts/ops-v1/validate.mjs implements are
 written, so a TypeScript test may still check a document with it, except for the relations (``allOf``, ``if``,
-``then``), which only mail.received.v1 states and only Python's jsonschema reads in the tests.
+``then``), which only mail.received.v1 states, and that extra branch's ``not``, which only recall-archive-v1 has; only
+Python's jsonschema reads those.
 """
 
 from __future__ import annotations
@@ -120,6 +123,19 @@ SCHEMAS = (
         "https://mail-hero.local/schema/mail-received-v1.schema.json",
         "Mail Hero mail.received.v1 event",
         root="MailReceivedEvent",
+        open=True,
+    ),
+    # recall's change feed and archive records: what an archive consumer accepts (open: it keeps fields it does not
+    # know), one $defs entry per document a consumer reads (a feed page, an archived change, state.json).
+    Target(
+        "recall.archive.v1",
+        "../contracts/recall-archive-v1/recall-archive-v1.schema.json",
+        "https://contracts.local/recall-archive-v1/recall-archive-v1.schema.json",
+        "recall-archive-v1: recall's change feed and the archive it fills",
+        "ChangePage is the answer of GET /api/machine/v1/changes, Change one line of changes/YYYY/MM/DD.jsonl and "
+        "ArchiveState the archive's state.json (README.md). Generated from proto/recall/archive/v1/archive.proto by "
+        "proto/tools/gen_schema.py: do not edit. Open: a consumer keeps the fields it does not know, and a change of a "
+        "kind it does not know passes on its envelope.",
         open=True,
     ),
 )
@@ -373,7 +389,16 @@ class Package:
         name = message["name"] if file.get("package") == self.package else file["package"] + "." + message["name"]
         if variants[0].value is None:
             return self.object(name, variants[0].fields, groups)
-        return {"oneOf": [self.object(name, variant.fields, groups) for variant in variants]}
+        branches = [self.object(name, variant.fields, groups) for variant in variants]
+        unknown = wire_rules.unknown_variant(file, message, self.enums) if self.open else None
+        if unknown is not None:
+            # A consumer's schema reads a newer producer's discriminator value as its lenient read does: the value is
+            # any other string, and only the fields' own rules apply.
+            branch = self.object(name, unknown.fields, groups)
+            known = [variant.value for variant in variants]
+            branch["properties"][wire_rules.discriminator(message)] = {"type": "string", "not": {"enum": known}}
+            branches.append(branch)
+        return {"oneOf": branches}
 
     def schema(self, identity: str, title: str, description: str) -> dict[str, Any]:
         defs: dict[str, Any] = {}

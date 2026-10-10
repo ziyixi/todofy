@@ -82,6 +82,8 @@
 - Watch：[AGENTS](watch/AGENTS.md)、[设计](watch/docs/design.md)。逐跳抓取政策、合成站点、内容不进通知；冻结 intent 幂等重试。
 - Mailsort：[AGENTS](mailsort/AGENTS.md)、[设计](mailsort/docs/design.md)。只经 `gmail.ts` 的封闭操作表访问 Gmail，从不标记已读或删除；
   Gmail 授权只由 owner 本机写入，部署不碰；合成邮件与回环假服务，内容不进日志。
+- Recall：[AGENTS](recall/AGENTS.md)、[设计](recall/docs/design.md)。只用合成页面，URL、标题与正文不进日志；三条机器路由各凭
+  自己的令牌摘要，令牌只由 owner 本机生成和写入；变更 feed 是 recall 拥有的公开合同 `recall-archive-v1`。
 - Website：[架构约束](docs/architecture.md#website)、[架构](website/docs/architecture.md)、[发布](website/docs/release.md)。
   只用静态访客路径，内容不提交；不绕过发布身份、门禁、验收与回退。
 - Newsletter：[README](newsletter/README.md)。保持独立镜像、VPS 状态目录与业务排空边界，镜像发布不等于服务器升级或发送成功。

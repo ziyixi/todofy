@@ -1,0 +1,501 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.local/recall-archive-v1/recall-archive-v1.schema.json",
+  "title": "recall-archive-v1: recall's change feed and the archive it fills",
+  "description": "ChangePage is the answer of GET /api/machine/v1/changes, Change one line of changes/YYYY/MM/DD.jsonl and ArchiveState the archive's state.json (README.md). Generated from proto/recall/archive/v1/archive.proto by proto/tools/gen_schema.py: do not edit. Open: a consumer keeps the fields it does not know, and a change of a kind it does not know passes on its envelope.",
+  "$defs": {
+    "RecordId": {
+      "description": "A record: its collection and a lower-case UUID (visits/, documents/, tombstones/, a newer kind's own).",
+      "type": "string",
+      "pattern": "^(?:[a-z][a-z0-9]{0,31}/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$(?!\\n)"
+    },
+    "PageId": {
+      "description": "A page: the first 16 bytes of the SHA-256 of its normalized URL before scrubbing, in lower-case hex.",
+      "type": "string",
+      "pattern": "^(?:[0-9a-f]{32})$(?!\\n)"
+    },
+    "TombstoneTarget": {
+      "description": "What a tombstone deletes: pages/<page id> (every earlier change of the page) or a record's id.",
+      "type": "string",
+      "pattern": "^(?:pages/[0-9a-f]{32}|[a-z][a-z0-9]{0,31}/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$(?!\\n)"
+    },
+    "Uuid": {
+      "description": "A lower-case UUID.",
+      "type": "string",
+      "pattern": "^(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$(?!\\n)"
+    },
+    "Url": {
+      "description": "A normalized, scrubbed http(s) URL (ASCII, as WHATWG URL serializes it), cut to 8192 characters.",
+      "type": "string",
+      "maxLength": 8192,
+      "pattern": "^(?:https?://[!-~]+)$(?!\\n)"
+    },
+    "Site": {
+      "description": "The URL's host in lower case (IDN in punycode, `_` allowed, no trailing dot) without a leading www., or a bracketed IPv6 literal.",
+      "type": "string",
+      "pattern": "^(?:[a-z0-9_]([a-z0-9._-]{0,251}[a-z0-9_])?|\\[[0-9a-f:.]{2,45}\\])$(?!\\n)"
+    },
+    "Text": {
+      "description": "Page text from the browser (a title, a meta description): untrusted, scrubbed, cut to 1000 characters.",
+      "type": "string",
+      "maxLength": 1000,
+      "pattern": "^(?:[\\s\\S]*)$(?!\\n)"
+    },
+    "Label": {
+      "description": "The device label the owner sets in the extension's options.",
+      "type": "string",
+      "maxLength": 64,
+      "pattern": "^(?:[\\s\\S]+)$(?!\\n)"
+    },
+    "Role": {
+      "description": "What a blob is to its record (text).",
+      "type": "string",
+      "pattern": "^(?:[a-z][a-z0-9_]{0,31})$(?!\\n)"
+    },
+    "BlobPath": {
+      "description": "A blob's path, under blobs/ and in the blob route: UTC year and month, record UUID, extensions.",
+      "type": "string",
+      "pattern": "^(?:[0-9]{4}/(0[1-9]|1[0-2])/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}([.][a-z0-9]{1,16}){1,3})$(?!\\n)"
+    },
+    "MediaType": {
+      "description": "The media type of a blob's bytes once its content encoding is undone.",
+      "type": "string",
+      "maxLength": 100,
+      "pattern": "^(?:[a-z]+/[a-z0-9.+-]+(; charset=utf-8)?)$(?!\\n)"
+    },
+    "Sha256": {
+      "description": "A SHA-256 digest in lower-case hex.",
+      "type": "string",
+      "pattern": "^(?:[0-9a-f]{64})$(?!\\n)"
+    },
+    "Origin": {
+      "description": "The origin of the recall deployment a feed came from.",
+      "type": "string",
+      "pattern": "^(?:https?://[a-z0-9.-]+(:[0-9]{1,5})?)$(?!\\n)"
+    },
+    "Consumer": {
+      "description": "An archive consumer's name, chosen by its operator (nas).",
+      "type": "string",
+      "pattern": "^(?:[a-z][a-z0-9-]{0,31})$(?!\\n)"
+    },
+    "Change_Kind": {
+      "enum": [
+        "visit",
+        "document",
+        "tombstone"
+      ]
+    },
+    "ChangePage": {
+      "type": "object",
+      "required": [
+        "version",
+        "feed_id",
+        "changes",
+        "last_seq",
+        "head_seq",
+        "oldest_seq"
+      ],
+      "properties": {
+        "version": {
+          "const": "recall-archive-v1"
+        },
+        "feed_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "changes": {
+          "type": "array",
+          "maxItems": 500,
+          "items": {
+            "$ref": "#/$defs/Change"
+          }
+        },
+        "last_seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "head_seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "oldest_seq": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "additionalProperties": true
+    },
+    "Change": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "seq",
+            "id",
+            "kind",
+            "event_time",
+            "page_id",
+            "blobs",
+            "visit"
+          ],
+          "properties": {
+            "seq": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "id": {
+              "$ref": "#/$defs/RecordId"
+            },
+            "kind": {
+              "const": "visit"
+            },
+            "event_time": {
+              "type": "string"
+            },
+            "page_id": {
+              "$ref": "#/$defs/PageId"
+            },
+            "blobs": {
+              "type": "array",
+              "maxItems": 0,
+              "items": {
+                "$ref": "#/$defs/Blob"
+              }
+            },
+            "visit": {
+              "$ref": "#/$defs/Visit"
+            }
+          },
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "required": [
+            "seq",
+            "id",
+            "kind",
+            "event_time",
+            "page_id",
+            "blobs",
+            "document"
+          ],
+          "properties": {
+            "seq": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "id": {
+              "$ref": "#/$defs/RecordId"
+            },
+            "kind": {
+              "const": "document"
+            },
+            "event_time": {
+              "type": "string"
+            },
+            "page_id": {
+              "$ref": "#/$defs/PageId"
+            },
+            "blobs": {
+              "type": "array",
+              "maxItems": 8,
+              "items": {
+                "$ref": "#/$defs/Blob"
+              }
+            },
+            "document": {
+              "$ref": "#/$defs/Document"
+            }
+          },
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "required": [
+            "seq",
+            "id",
+            "kind",
+            "event_time",
+            "blobs",
+            "tombstone"
+          ],
+          "properties": {
+            "seq": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "id": {
+              "$ref": "#/$defs/RecordId"
+            },
+            "kind": {
+              "const": "tombstone"
+            },
+            "event_time": {
+              "type": "string"
+            },
+            "blobs": {
+              "type": "array",
+              "maxItems": 0,
+              "items": {
+                "$ref": "#/$defs/Blob"
+              }
+            },
+            "tombstone": {
+              "$ref": "#/$defs/Tombstone"
+            }
+          },
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "required": [
+            "seq",
+            "id",
+            "kind",
+            "event_time",
+            "blobs"
+          ],
+          "properties": {
+            "seq": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "id": {
+              "$ref": "#/$defs/RecordId"
+            },
+            "kind": {
+              "type": "string",
+              "not": {
+                "enum": [
+                  "visit",
+                  "document",
+                  "tombstone"
+                ]
+              }
+            },
+            "event_time": {
+              "type": "string"
+            },
+            "page_id": {
+              "$ref": "#/$defs/PageId"
+            },
+            "blobs": {
+              "type": "array",
+              "maxItems": 8,
+              "items": {
+                "$ref": "#/$defs/Blob"
+              }
+            },
+            "visit": {
+              "$ref": "#/$defs/Visit"
+            },
+            "document": {
+              "$ref": "#/$defs/Document"
+            },
+            "tombstone": {
+              "$ref": "#/$defs/Tombstone"
+            }
+          },
+          "additionalProperties": true
+        }
+      ]
+    },
+    "Blob": {
+      "type": "object",
+      "required": [
+        "role",
+        "path",
+        "media_type",
+        "sha256",
+        "size_bytes"
+      ],
+      "properties": {
+        "role": {
+          "$ref": "#/$defs/Role"
+        },
+        "path": {
+          "$ref": "#/$defs/BlobPath"
+        },
+        "media_type": {
+          "$ref": "#/$defs/MediaType"
+        },
+        "content_encoding": {
+          "const": "gzip"
+        },
+        "sha256": {
+          "$ref": "#/$defs/Sha256"
+        },
+        "size_bytes": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": true
+    },
+    "Visit": {
+      "type": "object",
+      "required": [
+        "url",
+        "title",
+        "site",
+        "device_id",
+        "device_label",
+        "start_time",
+        "end_time",
+        "focus_seconds",
+        "focus_spans"
+      ],
+      "properties": {
+        "url": {
+          "$ref": "#/$defs/Url"
+        },
+        "url_truncated": {
+          "type": "boolean"
+        },
+        "title": {
+          "$ref": "#/$defs/Text"
+        },
+        "site": {
+          "$ref": "#/$defs/Site"
+        },
+        "device_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "device_label": {
+          "$ref": "#/$defs/Label"
+        },
+        "start_time": {
+          "type": "string"
+        },
+        "end_time": {
+          "type": "string"
+        },
+        "focus_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 21600
+        },
+        "focus_spans": {
+          "type": "array",
+          "maxItems": 200,
+          "items": {
+            "$ref": "#/$defs/FocusSpan"
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "FocusSpan": {
+      "type": "object",
+      "required": [
+        "start_time",
+        "end_time"
+      ],
+      "properties": {
+        "start_time": {
+          "type": "string"
+        },
+        "end_time": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    },
+    "Document": {
+      "type": "object",
+      "required": [
+        "visit",
+        "url",
+        "title",
+        "description",
+        "site",
+        "device_id",
+        "device_label",
+        "capture_time",
+        "text_bytes"
+      ],
+      "properties": {
+        "visit": {
+          "$ref": "#/$defs/RecordId"
+        },
+        "url": {
+          "$ref": "#/$defs/Url"
+        },
+        "url_truncated": {
+          "type": "boolean"
+        },
+        "title": {
+          "$ref": "#/$defs/Text"
+        },
+        "description": {
+          "$ref": "#/$defs/Text"
+        },
+        "site": {
+          "$ref": "#/$defs/Site"
+        },
+        "device_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "device_label": {
+          "$ref": "#/$defs/Label"
+        },
+        "capture_time": {
+          "type": "string"
+        },
+        "text_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65536
+        },
+        "text_truncated": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": true
+    },
+    "Tombstone": {
+      "type": "object",
+      "required": [
+        "target"
+      ],
+      "properties": {
+        "target": {
+          "$ref": "#/$defs/TombstoneTarget"
+        }
+      },
+      "additionalProperties": true
+    },
+    "ArchiveState": {
+      "type": "object",
+      "required": [
+        "version",
+        "feed_id",
+        "source",
+        "consumer",
+        "synced_seq",
+        "update_time"
+      ],
+      "properties": {
+        "version": {
+          "const": "recall-archive-v1"
+        },
+        "feed_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "source": {
+          "$ref": "#/$defs/Origin"
+        },
+        "consumer": {
+          "$ref": "#/$defs/Consumer"
+        },
+        "synced_seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "update_time": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    }
+  }
+}

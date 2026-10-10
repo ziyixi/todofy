@@ -118,7 +118,8 @@
             "fleet",
             "newsletter",
             "notion-publish",
-            "mailsort"
+            "mailsort",
+            "recall"
           ]
         },
         "generated_at": {
@@ -921,7 +922,8 @@
         "fleet",
         "newsletter",
         "notion-publish",
-        "mailsort"
+        "mailsort",
+        "recall"
       ]
     },
     "Counters": {

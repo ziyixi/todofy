@@ -1,0 +1,351 @@
+// Recall's owner API: the HTTP/JSON interface between its UI (recall/web) and the Worker "recall" (recall/worker),
+// whose Durable Object RecallState holds every page, visit, captured text's metadata, the search index and the change
+// feed (recall/docs/design.md).
+//
+// Callers. Only the recall UI calls it (same origin, recall.ziyixi.science). The browser extension and archive
+// consumers use the machine routes under /api/machine/v1 (an upload, the change feed of contracts/recall-archive-v1
+// and its blobs), each with its own bearer token; they are not part of this service and no machine token reaches it.
+//
+// Transport. google.api.http bindings under /api/v1, served by the shared transcoder (proto/ts/http-transcoder.ts,
+// run inside RecallState) and called through the shared client (proto/ts/http-client.ts). Bodies, query parameters
+// and responses are JSON in the wire JSON profile (proto/README.md): proto field names (snake_case), enum values in
+// lower case without their prefix (`SortOrder.SORT_ORDER_RECENT` is "recent"), timestamps in RFC 3339 UTC. Inputs
+// are read strictly, outputs leniently. Request bodies are at most 64 KiB. Errors: errors.proto (this app's reasons)
+// and common/errors/v1/errors.proto (the reasons every API shares).
+//
+// Authentication, in front of the transcoder (packages/edge-auth): the whole host is behind Cloudflare Access, and
+// every route needs the owner's Access JWT; every method other than GET also needs the same-origin Origin header and
+// the signed double-submit CSRF token (header X-CSRF-Token, cookie recall_csrf), issued by GET /api/csrf, which is
+// transport, not part of this service. A mutation takes a `request_id` (AIP-155, a UUID4 the browser makes once per
+// user action): repeating it within 24 hours answers the first response and changes nothing; reused for another rpc
+// or resource it is INVALID_ARGUMENT (BAD_REQUEST).
+//
+// Days. The API has no time zone: the UI turns the owner's local day (or range of days) into two instants and asks for
+// what falls between them, so a day is the browser's day wherever it is.
+//
+// Value rules the IDL cannot express (lengths, ranges, counts) are in each field's comment and enforced by the
+// Worker; the constants are in recall/worker/src/limits.ts.
+//
+// buf lint. The methods that answer a resource or google.protobuf.Empty carry two `buf:lint:ignore` lines:
+// RPC_RESPONSE_STANDARD_NAME and RPC_REQUEST_RESPONSE_UNIQUE, which the AIPs contradict (a standard method answers
+// the resource itself, so one message answers several methods; api-linter checks those names instead). They are
+// excused here, next to each method, not in buf.yaml: buf.yaml is a path every proto user's deploy depends on
+// (.github/scripts/ci_changes.py), and this package must not redeploy the other apps.
+
+syntax = "proto3";
+
+package recall.ui.v1;
+
+import "google/api/annotations.proto";
+import "google/api/client.proto";
+import "google/api/field_behavior.proto";
+import "google/api/field_info.proto";
+import "google/api/resource.proto";
+import "google/protobuf/empty.proto";
+import "google/protobuf/field_mask.proto";
+import "google/protobuf/timestamp.proto";
+import "recall/ui/v1/page.proto";
+import "recall/ui/v1/status.proto";
+
+option java_multiple_files = true;
+option java_outer_classname = "RecallUiServiceProto";
+option java_package = "science.ziyixi.recall.ui.v1";
+
+// The owner's browsing record: the timeline of visits, the search over pages and their captured texts, a page's
+// visits and latest text, the sites, the settings and the status.
+// (-- api-linter: core::0121::resource-must-support-list=disabled
+//     aip.dev/not-precedent: SearchPages is the pages' list: a search with filters, which without a query lists the
+//     pages by their latest visit. A second, plain list would say nothing more. A page's documents are read through
+//     Page.latest_document: older captures of a page are kept and archived, and the UI does not list them. --)
+service RecallUiService {
+  option (google.api.default_host) = "recall.ziyixi.science";
+
+  // A page (AIP-131).
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc GetPage(GetPageRequest) returns (Page) {
+    option (google.api.http) = {get: "/api/v1/{name=pages/*}"};
+    option (google.api.method_signature) = "name";
+  }
+
+  // Deletes a page with its visits and captured texts (AIP-135): at once from the API, the search index and the
+  // change feed, which gets one tombstone for the page so that every archive deletes them too; the rows and R2
+  // objects themselves within minutes. A visit or capture that began before the deletion and arrives later is
+  // dropped. The page is recorded again if it is visited again; the settings' denylist keeps a site's text out.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc DeletePage(DeletePageRequest) returns (google.protobuf.Empty) {
+    option (google.api.http) = {delete: "/api/v1/{name=pages/*}"};
+    option (google.api.method_signature) = "name";
+  }
+
+  // Searches the pages (AIP-136): the query over titles, URLs and captured texts, narrowed by a time range, a site,
+  // a type and a minimum of focus, sorted by relevance or by the latest visit. A GET: a search is a URL the owner can
+  // reload and go back to.
+  rpc SearchPages(SearchPagesRequest) returns (SearchPagesResponse) {
+    option (google.api.http) = {get: "/api/v1/pages:search"};
+  }
+
+  // A visit (AIP-131).
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc GetVisit(GetVisitRequest) returns (Visit) {
+    option (google.api.http) = {get: "/api/v1/{name=pages/*/visits/*}"};
+    option (google.api.method_signature) = "name";
+  }
+
+  // The visits of a page, or of every page (`pages/-`, AIP-159: the timeline), within an optional time range
+  // (AIP-132, AIP-158).
+  rpc ListVisits(ListVisitsRequest) returns (ListVisitsResponse) {
+    option (google.api.http) = {get: "/api/v1/{parent=pages/*}/visits"};
+    option (google.api.method_signature) = "parent";
+  }
+
+  // A captured text with the text itself (AIP-131).
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc GetDocument(GetDocumentRequest) returns (Document) {
+    option (google.api.http) = {get: "/api/v1/{name=pages/*/documents/*}"};
+    option (google.api.method_signature) = "name";
+  }
+
+  // A site (AIP-131).
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc GetSite(GetSiteRequest) returns (Site) {
+    option (google.api.http) = {get: "/api/v1/{name=sites/*}"};
+    option (google.api.method_signature) = "name";
+  }
+
+  // The sites, most focused first (AIP-132, AIP-158): the search's site filter offers them.
+  rpc ListSites(ListSitesRequest) returns (ListSitesResponse) {
+    option (google.api.http) = {get: "/api/v1/sites"};
+    option (google.api.method_signature) = "";
+  }
+
+  // The settings.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc GetSettings(GetSettingsRequest) returns (Settings) {
+    option (google.api.http) = {get: "/api/v1/{name=settings}"};
+    option (google.api.method_signature) = "name";
+  }
+
+  // Replaces the fields `update_mask` names (AIP-134).
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc UpdateSettings(UpdateSettingsRequest) returns (Settings) {
+    option (google.api.http) = {
+      patch: "/api/v1/{settings.name=settings}"
+      body: "settings"
+    };
+    option (google.api.method_signature) = "settings,update_mask";
+  }
+
+  // The service status.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc GetServiceStatus(GetServiceStatusRequest) returns (ServiceStatus) {
+    option (google.api.http) = {get: "/api/v1/{name=serviceStatus}"};
+    option (google.api.method_signature) = "name";
+  }
+}
+
+// Input of GetPage.
+message GetPageRequest {
+  // pages/{page}.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "recall.ziyixi.science/Page"
+  ];
+}
+
+// Input of DeletePage.
+// (-- api-linter: core::0135::force-field=disabled
+//     aip.dev/not-precedent: a page's visits and texts are its record: DeletePage always deletes them with it, and a
+//     page cannot be deleted without them. --)
+message DeletePageRequest {
+  // pages/{page}.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "recall.ziyixi.science/Page"
+  ];
+  // The idempotency key (AIP-155), a query parameter; see RecallUiService.
+  string request_id = 2 [
+    (google.api.field_info).format = UUID4,
+    (google.api.field_behavior) = OPTIONAL
+  ];
+}
+
+// Input of SearchPages. Every field narrows the result; none at all lists every page by its latest visit. The UI's
+// search box writes the same fields from its chips and from the operators typed into it (site:, after:, before:,
+// type:, dwell:; recall/docs/design.md §6.2), so the query never holds an operator.
+message SearchPagesRequest {
+  // The words to find, at most 200 characters and 10 terms: terms are separated by spaces, and a "quoted phrase" is
+  // one term. Every term must occur (in the title, the URL or the first 32 KiB of the latest captured text), ignoring
+  // case, width and diacritics; a term of Chinese, Japanese or Korean characters is found as the pairs of characters it
+  // is made of, so a single such character alone finds nothing (QUERY_NOT_SEARCHABLE). Empty: no text condition.
+  string query = 1 [(google.api.field_behavior) = OPTIONAL];
+  // Only pages with a visit whose focus overlaps [start_time, end_time); unset: no lower bound.
+  google.protobuf.Timestamp start_time = 2 [(google.api.field_behavior) = OPTIONAL];
+  // The range's end, after start_time; unset: no upper bound.
+  google.protobuf.Timestamp end_time = 3 [(google.api.field_behavior) = OPTIONAL];
+  // Only pages of this host and its subdomains (`github.com` covers `gist.github.com`), in lower case without a
+  // scheme or path, at most 253 characters; a leading `www.` is ignored.
+  string site = 4 [(google.api.field_behavior) = OPTIONAL];
+  // Which pages: every page, or only those with a captured text.
+  PageType page_type = 5 [(google.api.field_behavior) = OPTIONAL];
+  // Only pages with at least this many seconds of focus within the range (of all time without one), 0 to 86400; a
+  // visit that overlaps the range counts whole.
+  // (-- api-linter: core::0142::time-field-type=disabled
+  //     aip.dev/not-precedent: a duration in whole seconds, not a time; the wire profile has no
+  //     google.protobuf.Duration. --)
+  int32 min_focus_seconds = 6 [(google.api.field_behavior) = OPTIONAL];
+  // How to sort.
+  SortOrder sort_order = 7 [(google.api.field_behavior) = OPTIONAL];
+  // At most this many results (AIP-158): 0 means 10, and a larger value is read as 10 (each result's snippet reads
+  // its text from R2).
+  int32 page_size = 8 [(google.api.field_behavior) = OPTIONAL];
+  // The previous page's `next_page_token`, with the same other fields (another search is BAD_REQUEST).
+  string page_token = 9 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// Output of SearchPages.
+message SearchPagesResponse {
+  // The page of results.
+  repeated SearchResult results = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The next page's token; empty on the last page. A search reaches at most 200 results.
+  string next_page_token = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The search stopped at a read bound before it could answer completely, so some results may be missing: with a time
+  // range, only the range's newest 20,000 visits were read; without one, only the 2,000 best matches of the words, or
+  // the 5,000 pages visited last (recall/docs/design.md §6.3). Reported only when the bound can change the results.
+  // The UI says which and suggests a shorter range, a condition or another word.
+  bool candidates_capped = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// Input of GetVisit.
+message GetVisitRequest {
+  // pages/{page}/visits/{visit}.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "recall.ziyixi.science/Visit"
+  ];
+}
+
+// Input of ListVisits.
+// (-- api-linter: core::0132::request-unknown-fields=disabled
+//     aip.dev/not-precedent: start_time and end_time are the one restriction a visit list takes (the timeline's day);
+//     two typed fields instead of an AIP-160 filter language that would hold nothing else. --)
+message ListVisitsRequest {
+  // pages/{page}, or `pages/-` for every page.
+  string parent = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "recall.ziyixi.science/Page"
+  ];
+  // At most this many visits (AIP-158): 0 means 200, and a larger value than 500 is read as 500.
+  int32 page_size = 2 [(google.api.field_behavior) = OPTIONAL];
+  // The previous page's `next_page_token`, with the same other fields (another list is BAD_REQUEST).
+  string page_token = 3 [(google.api.field_behavior) = OPTIONAL];
+  // `start_time` (the default, oldest first) or `start_time desc` (newest first); anything else is BAD_REQUEST.
+  string order_by = 4 [(google.api.field_behavior) = OPTIONAL];
+  // Only visits whose focus overlaps [start_time, end_time); unset: no lower bound.
+  google.protobuf.Timestamp start_time = 5 [(google.api.field_behavior) = OPTIONAL];
+  // The range's end, after start_time; unset: no upper bound.
+  google.protobuf.Timestamp end_time = 6 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// Output of ListVisits.
+message ListVisitsResponse {
+  // The page of visits.
+  repeated Visit visits = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The next page's token; empty on the last page.
+  string next_page_token = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// Input of GetDocument.
+message GetDocumentRequest {
+  // pages/{page}/documents/{document}.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "recall.ziyixi.science/Document"
+  ];
+}
+
+// Input of GetSite.
+message GetSiteRequest {
+  // sites/{site}.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "recall.ziyixi.science/Site"
+  ];
+}
+
+// Input of ListSites.
+message ListSitesRequest {
+  // At most this many sites (AIP-158): 0 means 100, and a larger value than 200 is read as 200.
+  int32 page_size = 1 [(google.api.field_behavior) = OPTIONAL];
+  // The previous page's `next_page_token`, with the same filter (another filter is BAD_REQUEST).
+  string page_token = 2 [(google.api.field_behavior) = OPTIONAL];
+  // AIP-160 in the subset of proto/ts/filter.ts: empty, or one literal (the search box quotes what the owner typed):
+  // the sites whose host starts with it, after an optional `www.`.
+  string filter = 3 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// Output of ListSites.
+message ListSitesResponse {
+  // The page of sites, most focused first.
+  repeated Site sites = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The next page's token; empty on the last page.
+  string next_page_token = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// Input of GetSettings.
+message GetSettingsRequest {
+  // Always `settings`.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "recall.ziyixi.science/Settings"
+  ];
+}
+
+// Input of UpdateSettings.
+message UpdateSettingsRequest {
+  // The new values of the fields `update_mask` names, and the settings' current etag (AIP-154).
+  Settings settings = 1 [(google.api.field_behavior) = REQUIRED];
+  // AIP-134: the Settings fields to replace (a query parameter, `update_mask=denylist_patterns,etag`). Required here:
+  // an update without a mask, an empty one or `*` is BAD_REQUEST, so a client that leaves the list out never empties
+  // the denylist by accident.
+  google.protobuf.FieldMask update_mask = 2 [(google.api.field_behavior) = OPTIONAL];
+  // The idempotency key (AIP-155), a query parameter; see RecallUiService.
+  string request_id = 3 [
+    (google.api.field_info).format = UUID4,
+    (google.api.field_behavior) = OPTIONAL
+  ];
+}
+
+// Input of GetServiceStatus.
+message GetServiceStatusRequest {
+  // Always `serviceStatus`.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "recall.ziyixi.science/ServiceStatus"
+  ];
+}
+
+// Which pages SearchPages returns.
+enum PageType {
+  // Every page.
+  PAGE_TYPE_UNSPECIFIED = 0;
+  // Pages with a captured text (读过): at least ten seconds of focus, not on the denylist.
+  PAGE_TYPE_READ = 1;
+}
+
+// How SearchPages sorts.
+enum SortOrder {
+  // By relevance with a query, by the latest visit without one.
+  SORT_ORDER_UNSPECIFIED = 0;
+  // By relevance: BM25 over the title (weight 5), the URL (2) and the text (1). Refused without a query.
+  SORT_ORDER_RELEVANCE = 1;
+  // By the latest visit within the time range, newest first.
+  SORT_ORDER_RECENT = 2;
+}

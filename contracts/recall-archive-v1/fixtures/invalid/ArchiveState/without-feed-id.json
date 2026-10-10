@@ -1,0 +1,7 @@
+{
+  "version": "recall-archive-v1",
+  "source": "https://recall.example.com",
+  "consumer": "nas",
+  "synced_seq": 5,
+  "update_time": "2026-10-10T02:15:07Z"
+}

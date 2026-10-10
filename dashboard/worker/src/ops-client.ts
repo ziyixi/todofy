@@ -36,8 +36,14 @@ export const OPS_MAX_JSON_CHARS = 32_768;
 
 // ---- the contract's values, read from the IDL ------------------------------------------------------
 
-/** Every ops-v1 app, in the contract's order (OpsStatus.app's allowed list). */
-export const OPS_APPS = fieldRules(OpsStatusSchema.field.app).allowed as readonly OpsApp[];
+/**
+ * ops-v1 apps of the contract that this build does not bind yet: an app answers ops-v1 (its name is in OpsStatus.app's
+ * allowed list, which it must be to write a valid status) before Home binds its entrypoint. recall until its go-live
+ * commit, which adds its binding (recall/docs/design.md §9, §11).
+ */
+export const UNBOUND_OPS_APPS: readonly string[] = ['recall'];
+/** Every ops-v1 app this dashboard calls, in the contract's order (OpsStatus.app's allowed list without the unbound). */
+export const OPS_APPS = fieldRules(OpsStatusSchema.field.app).allowed.filter((app) => !UNBOUND_OPS_APPS.includes(app)) as readonly OpsApp[];
 /** The guard's levels by wire name. */
 export const GUARD_LEVELS: readonly ops.GuardLevel[] = wireEnum(GuardLevelSchema, GuardLevel).names;
 /** The codes an Ops method rejects with (`new Error(code)`). */

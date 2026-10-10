@@ -14,6 +14,7 @@ APPS = {
     "watch",
     "fleet",
     "mailsort",
+    "recall",
     "website-relay",
     "platform",
     "website",

@@ -1,0 +1,27 @@
+{
+  "seq": 2,
+  "id": "visits/1f3e8a27-6c4b-4f0d-a1e2-9b8c7d6e5f01",
+  "kind": "visit",
+  "event_time": "2026-10-10T02:00:05Z",
+  "blobs": [],
+  "visit": {
+    "url": "https://docs.example.com/guide/durable-objects",
+    "title": "Durable Objects 入门 · Example Docs",
+    "site": "docs.example.com",
+    "device_id": "5d0c3b52-8a5e-4f8e-9b8e-2d7c1a6f4e10",
+    "device_label": "MacBook · 工作",
+    "start_time": "2026-10-10T02:00:05Z",
+    "end_time": "2026-10-10T02:03:41Z",
+    "focus_seconds": 196,
+    "focus_spans": [
+      {
+        "start_time": "2026-10-10T02:00:05Z",
+        "end_time": "2026-10-10T02:02:10Z"
+      },
+      {
+        "start_time": "2026-10-10T02:02:30Z",
+        "end_time": "2026-10-10T02:03:41Z"
+      }
+    ]
+  }
+}

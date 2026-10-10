@@ -508,3 +508,24 @@ def variants(file: dict[str, Any], message: dict[str, Any], enums: dict[str, dic
             views.append(FieldView(f, entry_of(message, f), r, presence, allowed, minimum, maximum, max_items))
         out.append(Variant(value, tuple(views)))
     return out
+
+
+def unknown_variant(file: dict[str, Any], message: dict[str, Any], enums: dict[str, dict[str, Any]]) -> Variant | None:
+    """A union's fields as a lenient read checks them when the discriminator holds a value the reader does not know (a
+    newer producer's): every field's own rules and no case. None for a plain message, and for a discriminator whose
+    enum is closed or whose ``allowed`` list is not ``open``, since every read refuses an unknown value of those."""
+    union = discriminator(message)
+    if union is None:
+        return None
+    fields = sorted(message.get("field", []), key=lambda f: f["number"])
+    rules = {f["name"]: field_rules(file, message, f, enums, entry_of(message, f)) for f in fields}
+    target = next(f for f in fields if f["name"] == union)
+    own = rules[union]
+    if closed(enums[target["typeName"]]) or (own is not None and own.bounds.allowed is not None and not own.open):
+        return None
+    return Variant(
+        None,
+        tuple(
+            FieldView(f, entry_of(message, f), rules[f["name"]], "", *_merge(None, rules[f["name"]])) for f in fields
+        ),
+    )

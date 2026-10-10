@@ -1,0 +1,14 @@
+{
+  "manifest_version": 3,
+  "name": "recall",
+  "description": "记录浏览的时间和读过的页面，上传到你自己的 recall。",
+  "minimum_chrome_version": "120",
+  "incognito": "not_allowed",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAg8QRVQ7a/3s/FatYgnu8FjCW638zc4ml285hdGh0jzpEclVBWOit3udT4gpIjZUz+SmoqfDbugKPA1bXNJcKmb26am7Ct17UFDK49QhBW9ZTw0JMXIyI4EkDT+Go1FW5BDv1OjqtNvgrDqjjPYuc6KhdeOQgvsWrNaSV9YLFPnucfsBDb6FS2GHfnJhAvZHMuzTWHBjO8VHPG0T7/WRvZ5tzTRY7Cr9YLav47dd4BxcWWSg1IJCWCnznZfYeYtr3N8JZn0WNc0ezSiDkYbUZfNDFWh8ZfIzEvRHQRB0quI0+BKSGFmPs/kcNqmDpz7ZfonUxxwodFCZHG371T59QKwIDAQAB",
+  "permissions": ["tabs", "webNavigation", "idle", "alarms", "storage", "unlimitedStorage", "scripting"],
+  "host_permissions": ["<all_urls>"],
+  "background": { "service_worker": "sw.js", "type": "module" },
+  "action": { "default_title": "recall", "default_icon": { "16": "icons/16.png", "32": "icons/32.png" } },
+  "icons": { "16": "icons/16.png", "32": "icons/32.png", "48": "icons/48.png", "128": "icons/128.png" },
+  "options_ui": { "page": "options.html", "open_in_tab": true }
+}

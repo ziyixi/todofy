@@ -7,6 +7,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { OpsStatusSchema } from '@ziyixi/proto/ops/v1/ops_pb';
+import { fieldRules } from '@ziyixi/proto/wire-json';
 import type { OpsApp } from '../src/api-types.ts';
 import mailHeroOk from '../../../contracts/ops-v1/fixtures/OpsStatus/mail-hero-ok.json';
 import mailHeroDegraded from '../../../contracts/ops-v1/fixtures/OpsStatus/mail-hero-degraded.json';
@@ -64,6 +65,7 @@ import {
   opsSetGuard,
   opsStartCanary,
   opsStatus,
+  UNBOUND_OPS_APPS,
   type OpsCall,
 } from '../src/ops-client.ts';
 
@@ -111,9 +113,12 @@ const WRAPPERS: readonly { app: OpsApp; method: string; call: Wrapper; valid: un
 ];
 
 describe('only the methods of the services each app implements', () => {
-  it('knows exactly the apps of the IDL (OpsStatus.app is open on the wire, OpsApp is this list)', () => {
+  it('knows exactly the apps of the IDL (OpsStatus.app is open on the wire, OpsApp is this list), but those it does not bind yet', () => {
     expect(OPS_APPS).toEqual(['mail-hero', 'todofy', 'watch', 'fleet', 'newsletter', 'notion-publish', 'mailsort'] satisfies readonly OpsApp[]);
     expect(Object.keys(CALLED_METHODS)).toEqual([...OPS_APPS]);
+    // recall answers ops-v1 before its go-live commit binds it: Home calls it from then on.
+    expect(UNBOUND_OPS_APPS).toEqual(['recall']);
+    expect(fieldRules(OpsStatusSchema.field.app).allowed).toEqual([...OPS_APPS, ...UNBOUND_OPS_APPS]);
   });
 
   it('never forwards guard mutations to read-only Fleet or Newsletter monitor bindings', async () => {

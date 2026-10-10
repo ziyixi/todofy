@@ -1,0 +1,13 @@
+# Node toolchains of the Worker (and the UI and the extension, when they land)
+node_modules/
+# Vite output, served by the Worker as static assets (wrangler.toml [assets])
+web/dist/
+# The extension's build and zip (npm run build in extension/)
+extension/dist/
+# Local workerd state and dev values (see .dev.vars.example)
+.wrangler/
+worker/.wrangler/
+.dev.vars*
+!.dev.vars.example
+# Files mint-tokens.mjs writes for the NAS container (mode 0600), never committed
+recall-sync.env

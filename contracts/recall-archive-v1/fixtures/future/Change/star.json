@@ -1,0 +1,20 @@
+{
+  "seq": 12,
+  "id": "stars/0d1e2f3a-4b5c-4d6e-8f70-819203a4b5c6",
+  "kind": "star",
+  "event_time": "2026-11-02T08:00:00Z",
+  "page_id": "f9735ed632fb5291d9bc44726777dbd8",
+  "blobs": [
+    {
+      "role": "snapshot",
+      "path": "2026/11/0d1e2f3a-4b5c-4d6e-8f70-819203a4b5c6.html.gz",
+      "media_type": "text/html; charset=utf-8",
+      "content_encoding": "gzip",
+      "sha256": "1cdb9d44384ba444ed3fe86c64cea7b810df78cd54f2d42a0e582a11a8673aa6",
+      "size_bytes": 236
+    }
+  ],
+  "star": {
+    "note": "合成示例：以后再读"
+  }
+}

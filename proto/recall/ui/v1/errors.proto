@@ -1,0 +1,36 @@
+// The errors of RecallUiService (AIP-193).
+//
+// Every error is a google.rpc.Status in Google's HTTP JSON form, written by the shared transcoder
+// (proto/ts/http-transcoder.ts), with an ErrorInfo whose domain is "recall.ziyixi.science", a zh-CN
+// LocalizedMessage, a RequestInfo and, for ETAG_MISMATCH, the current resource as a typed detail.
+//
+// The UI branches on ErrorInfo.reason only: a value name without its prefix, of ErrorReason below (recall's own
+// reasons) or of common.errors.v1.CommonReason (the reasons every API shares: a failed dependency, the Durable Object
+// or R2, is UNAVAILABLE). A reason the UI does not know is shown with the LocalizedMessage, never read as success.
+
+syntax = "proto3";
+
+package recall.ui.v1;
+
+option java_multiple_files = true;
+option java_outer_classname = "ErrorsProto";
+option java_package = "science.ziyixi.recall.ui.v1";
+
+// Recall's own reasons: ErrorInfo.reason is the value's name without `ERROR_REASON_`. The HTTP status follows the
+// google.rpc.Code listed for each value (the AIP-193 mapping).
+enum ErrorReason {
+  // Never sent.
+  ERROR_REASON_UNSPECIFIED = 0;
+  // ABORTED (409): the request's etag is stale (AIP-154). The error carries the current resource.
+  ERROR_REASON_ETAG_MISMATCH = 1;
+  // INVALID_ARGUMENT (400): a denylist pattern breaks its rule (Settings.denylist_patterns).
+  ERROR_REASON_INVALID_SETTINGS = 2;
+  // FAILED_PRECONDITION (400): the denylist holds the most patterns it may.
+  ERROR_REASON_LIMIT_REACHED = 3;
+  // INVALID_ARGUMENT (400): the query has no term the index can find: only punctuation, or only single Chinese,
+  // Japanese or Korean characters (the index holds pairs of them, SearchPagesRequest.query).
+  ERROR_REASON_QUERY_NOT_SEARCHABLE = 4;
+  // RESOURCE_EXHAUSTED (429): today's read budget is used up (ServiceStatus.daily_read_budget); searches work again
+  // after the next UTC midnight. The timeline and the pages still answer.
+  ERROR_REASON_SEARCH_OVER_BUDGET = 5;
+}

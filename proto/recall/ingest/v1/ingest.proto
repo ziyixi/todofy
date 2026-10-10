@@ -1,0 +1,285 @@
+// recall-ingest-v1 as a protobuf IDL (proto/README.md; recall/docs/design.md §4): the batch recall's Chrome extension
+// uploads (POST /api/machine/v1/batches, gzipped wire JSON, the ingest token as a bearer) and the Worker's answer.
+//
+// Messages only: the route, the bearer token, gzip and the size bounds (1 MiB on the wire, 4 MiB once decompressed)
+// are the HTTP transport's (recall/worker/src/machine.ts). Inputs are read strictly, one item at a time: the batch's
+// envelope (version, device, at most 50 items) must be valid as a whole (else 400), and an item that breaks a rule
+// is refused alone (IngestResult.rejected, `invalid_item`) while the others are kept. An item that only a newer build
+// can read (an unknown field or kind: the extension runs ahead of the Worker) is refused as `unsupported_item`, which
+// the extension keeps and sends again later.
+//
+// Nothing is refused for its length or its age: a URL, a title, a description or a text longer than its bound is cut
+// by the extension and cut again by the Worker (for an older build), so the strings below carry no length rule. The
+// Worker also scrubs every string again and applies the denylist again (recall/shared/), so an older build cannot let
+// text through. The rules the IDL cannot state are the Worker's (recall/worker/src/ingest.ts): a time more than a
+// minute after the batch's sent_time, spans out of order or overlapping, a visit longer than 6 hours, a URL that is
+// not http(s), a Chrome version part above 65535.
+//
+// Compatibility: the extension and the Worker deploy apart (the extension updates when the owner installs a build),
+// so the Worker must keep reading every batch an installed extension sends. A new optional field, kind or answer
+// field is compatible (a newer extension's items wait as `unsupported_item` until the Worker reads them); anything
+// else is recall-ingest-v2 on a new route.
+
+syntax = "proto3";
+
+package recall.ingest.v1;
+
+import "common/wire/v1/wire.proto";
+import "google/api/field_behavior.proto";
+import "google/protobuf/timestamp.proto";
+
+option java_multiple_files = true;
+option java_outer_classname = "IngestProto";
+option java_package = "science.ziyixi.recall.ingest.v1";
+option (common.wire.v1.formats) = {
+  name: "Uuid"
+  pattern: "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+  description: "A lower-case UUID the extension made."
+};
+option (common.wire.v1.formats) = {
+  name: "PageId"
+  pattern: "[0-9a-f]{32}"
+  description: "A page: the first 16 bytes of the SHA-256 of its normalized URL before scrubbing, in lower-case hex."
+};
+option (common.wire.v1.formats) = {
+  name: "Label"
+  pattern: "[\\s\\S]+"
+  max_length: 64
+  description: "The device label the owner sets in the extension's options, 1 to 64 characters."
+};
+option (common.wire.v1.formats) = {
+  name: "ChromeVersion"
+  pattern: "(0|[1-9][0-9]{0,4})([.](0|[1-9][0-9]{0,4})){0,3}"
+  description: "An extension version in Chrome's form: one to four dot-separated integers without leading zeros."
+};
+option (common.wire.v1.formats) = {
+  name: "Code"
+  pattern: "[a-z][a-z0-9_]{0,63}"
+  description: "A machine-readable code (an error code, a refusal reason)."
+};
+
+// One upload: the device's report and up to 50 visits and captured texts. An upload without items is the device's
+// heartbeat (every 30 minutes while nothing else was uploaded).
+message IngestBatch {
+  // Always recall-ingest-v1.
+  string version = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).allowed = "recall-ingest-v1"
+  ];
+  // A UUID the extension made for this upload, for logs only (a retry may send the same items under another one).
+  string batch_id = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "Uuid"
+  ];
+  // When the extension sent it, by the device's clock: an item's time may not be more than a minute later, and recall
+  // records the device's clock skew from it.
+  google.protobuf.Timestamp sent_time = 3 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).non_null = true
+  ];
+  // The device that sends it.
+  DeviceReport device = 4 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).non_null = true
+  ];
+  // The visits and captured texts, at most 50 (and 1 MiB of JSON before gzip).
+  repeated IngestItem items = 5 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).max_items = 50
+  ];
+}
+
+// The device (one browser profile running the extension) as it describes itself in every upload.
+message DeviceReport {
+  // A UUID the extension made when it was installed.
+  string device_id = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "Uuid"
+  ];
+  // The owner's name for it (`MacBook · 工作`).
+  string label = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "Label"
+  ];
+  // The extension's version (`2026.105.903`).
+  string extension_version = 3 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "ChromeVersion"
+  ];
+  // Items waiting in its outbox, this upload's included.
+  int32 queued_count = 4 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).minimum = 0
+  ];
+  // The extension's last error code (`capture_failed`); empty when none.
+  string last_error_code = 5 [(common.wire.v1.field).format = "Code"];
+}
+
+// One item of an upload: a visit or a captured text.
+message IngestItem {
+  option (common.wire.v1.message).discriminator = "kind";
+
+  // What the item is.
+  enum Kind {
+    // Never sent.
+    KIND_UNSPECIFIED = 0;
+    // A visit (IngestItem.visit).
+    KIND_VISIT = 1;
+    // A captured text (IngestItem.document).
+    KIND_DOCUMENT = 2;
+  }
+
+  // What the item is.
+  Kind kind = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).non_null = true
+  ];
+  // The visit, for kind visit.
+  VisitItem visit = 2 [(common.wire.v1.field) = {
+    cases: {
+      when: "visit"
+      presence: PRESENCE_REQUIRED
+    }
+    otherwise: PRESENCE_ABSENT
+  }];
+  // The captured text, for kind document.
+  DocumentItem document = 3 [(common.wire.v1.field) = {
+    cases: {
+      when: "document"
+      presence: PRESENCE_REQUIRED
+    }
+    otherwise: PRESENCE_ABSENT
+  }];
+}
+
+// A visit: one document in one tab on one normalized URL, from its first focus to its last, at least one second of
+// focus and at most 6 hours. Uploaded again with a higher revision while it grows; recall keeps the highest.
+message VisitItem {
+  // The visit's UUID.
+  string id = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "Uuid"
+  ];
+  // Counts up from 1 with every upload of this visit; a revision not above the stored one changes nothing.
+  int32 revision = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).minimum = 1
+  ];
+  // The page: the first 16 bytes of the SHA-256 of the whole normalized URL before scrubbing and cutting.
+  string page_id = 3 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "PageId"
+  ];
+  // The normalized, scrubbed URL (http or https), cut to 8192 characters.
+  string url = 4 [(google.api.field_behavior) = REQUIRED];
+  // The URL was longer than 8192 characters and `url` is its beginning.
+  bool url_truncated = 5;
+  // The tab's title, scrubbed, cut to 1000 characters; empty when it had none.
+  string title = 6 [(google.api.field_behavior) = REQUIRED];
+  // When the page had the focus, in time order, without overlaps, 1 to 200: the visit's start, end and focus follow
+  // from them.
+  repeated FocusSpan focus_spans = 7 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).max_items = 200
+  ];
+}
+
+// A stretch of focus: the page's tab active in the focused window, the owner not idle.
+message FocusSpan {
+  // When the focus came.
+  google.protobuf.Timestamp start_time = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).non_null = true
+  ];
+  // When it went (backdated by the idle threshold when the owner went idle).
+  google.protobuf.Timestamp end_time = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).non_null = true
+  ];
+}
+
+// The text captured from a page after ten seconds of focus in a visit: its innerText, scrubbed, cut to 64 KiB of
+// UTF-8 at a character boundary. recall keeps at most one per page and UTC day, and none that repeats the page's
+// latest text.
+message DocumentItem {
+  // The capture's UUID.
+  string id = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "Uuid"
+  ];
+  // The UUID of the visit it was captured in.
+  string visit_id = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "Uuid"
+  ];
+  // The page (VisitItem.page_id).
+  string page_id = 3 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "PageId"
+  ];
+  // The normalized, scrubbed URL, cut to 8192 characters.
+  string url = 4 [(google.api.field_behavior) = REQUIRED];
+  // The URL was longer than 8192 characters and `url` is its beginning.
+  bool url_truncated = 5;
+  // The page's title, scrubbed, cut to 1000 characters.
+  string title = 6 [(google.api.field_behavior) = REQUIRED];
+  // The page's meta description, scrubbed, cut to 1000 characters; empty when it had none.
+  string description = 7 [(google.api.field_behavior) = REQUIRED];
+  // When the text was read from the page.
+  google.protobuf.Timestamp capture_time = 8 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).non_null = true
+  ];
+  // The text, scrubbed, at most 64 KiB of UTF-8.
+  string text = 9 [(google.api.field_behavior) = REQUIRED];
+  // The page had more text: `text` is its beginning.
+  bool text_truncated = 10;
+}
+
+// The Worker's answer to an upload it took (HTTP 200): every item is either accepted (stored, or skipped as already
+// known) or rejected. The extension removes the accepted ones and those rejected for good from its outbox, and keeps
+// those rejected as `unsupported_item` to send again later.
+message IngestResult {
+  // Items stored or skipped as already known (an older revision, a second capture on the same UTC day, a repeated
+  // text, a page deleted since, a page recall does not record).
+  int32 accepted_count = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).minimum = 0
+  ];
+  // Items recall refused, counted by reason (the status says so for 7 days): `invalid_item` and `id_conflict` are
+  // lost, `unsupported_item` waits in the extension's outbox.
+  repeated RejectedItem rejected = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).max_items = 50
+  ];
+  // The owner's no-text patterns (Settings.denylist_patterns of recall.ui.v1), which the extension applies before it
+  // captures a text.
+  repeated string denylist_patterns = 3 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).max_items = 200
+  ];
+  // Changes whenever either of the owner's lists does.
+  string denylist_etag = 4 [(google.api.field_behavior) = REQUIRED];
+  // The owner's site-only patterns (Settings.site_only_patterns of recall.ui.v1), which the extension applies before
+  // it records a page's URL and title; absent from an older Worker's answer (none).
+  repeated string site_only_patterns = 5 [(common.wire.v1.field).max_items = 200];
+}
+
+// An item recall refused.
+message RejectedItem {
+  // The item's UUID as sent (VisitItem.id or DocumentItem.id); empty when the item had no readable one.
+  string id = 1 [(google.api.field_behavior) = REQUIRED];
+  // `invalid_item`: the item breaks the upload's rules (a bug in the extension). `id_conflict`: recall holds that ID
+  // with other content. `unsupported_item`: the item reads only with members or a kind this Worker does not know (a
+  // newer extension); the extension keeps it and sends it again later.
+  string reason = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field) = {
+      allowed: [
+        "invalid_item",
+        "id_conflict",
+        "unsupported_item"
+      ]
+    }
+  ];
+}

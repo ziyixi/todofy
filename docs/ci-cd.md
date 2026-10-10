@@ -42,7 +42,9 @@ migrating an account; their changed committed Wrangler outputs follow the affect
 While Fleet is in that set, both Fleet and Home deploy outputs remain false, including dispatch, full-run
 and same-SHA reuse. Complete the reviewed Access bootstrap, commit its real AUD/identity configuration and
 remove that explicit freeze together before enabling those releases. A placeholder dry-run is not evidence
-that the production identity exists.
+that the production identity exists. recall is in the set now: its checks, deploy job and release recipe exist, and
+its deploy output stays false until "Infra apply" has created its Access applications and bucket and the go-live
+commit adds the AUD ([recall design](../recall/docs/design.md) §11).
 
 | Job | Checks or release responsibility |
 | --- | --- |
@@ -50,6 +52,7 @@ that the production identity exists.
 | `Shared packages` | Locked install, typecheck and tests for the independent `packages/*/` consumers. |
 | `Todofy static checks`, `Todofy runtime (1/3)`–`(3/3)`, `Todofy checks` | Host/gateway/UI checks, dry-runs and bundle/CPU budgets; real-binding tests in balanced shards with completeness and serial-test guards. All required shards must pass. |
 | `Mail Hero checks`, `Dashboard checks`, `FlowDay checks`, `Links checks`, `Watch checks` | Each application's config/wrapper checks, lint/typechecks, synthetic unit and real-binding runtime tests, UI build and production-config dry-run. Existing app-specific CPU, bundle and query budgets stay in their own jobs/runbooks. |
+| `Recall checks` | Worker lint/typecheck/unit and workerd runtime tests (a real SQLite DO and R2, CPU bounds), the UI's tests and build, the archive consumer's tests on Python 3.12 (its rules against the generated schema), the smoke run (the extension's own upload through `wrangler dev` into an archive checked against `recall-archive-v1`), the dry run with the bundle budget, and the extension's checks and build, kept 30 days as the artifact `recall-extension-<sha>` (the extension is never deployed). |
 | `Fleet checks` | Worker and UI lint/typecheck/tests, real SQLite DO signed-receipt runtime tests, UI build, config/wrapper checks and dry-run bundle budget. The observer's Python tests run with Platform, not from a retired Fleet host executable. |
 | `Website checks` | Synthetic Notion/source fixtures, static export and Playwright, relay/release tests and both Worker dry-runs; no production content or credentials. |
 | `Contracts` | Generated schemas, frozen golden bytes, both sides' consumer tests and Home's generated Ops caller. Mail receipt legacy compatibility, task-intent value rules and Ops fixtures remain checked. Apps' own jobs run real-binding tests. |
@@ -153,6 +156,7 @@ also initializes missing operational variables without overwriting existing paus
 | `Mail Hero deploy` | `MAIL_HERO_FORCE_SEND_PAUSED`, `MAIL_HERO_MAINTENANCE_MODE`, `MAIL_HERO_NATIVE_BACKUP_ENABLED` | `MAIL_HERO_CF_API_TOKEN`, `MAIL_HERO_RECEIVE_ADDRESS`, `MAIL_HERO_ACCESS_OWNER`, `MAIL_HERO_ACCESS_OWNER_ALIASES` |
 | Website release/relay | Website's settings stay in its workflow/config; optional `WEBSITE_BOOTSTRAP_APPROVAL` for an empty release registry | `CF_API_TOKEN`; release additionally uses `WEBSITE_NOTION_TOKEN`, `WEBSITE_NOTION_DATA_SOURCE_ID`; relay retains its existing Worker secrets |
 | FlowDay, Links, Watch deploys | Committed app configuration; owner pause settings remain app-owned | `CF_API_TOKEN`, `DASHBOARD_ACCESS_OWNER`, `DASHBOARD_ACCESS_OWNER_ALIASES`; respectively `FLOWDAY_CSRF_SIGNING_KEY` + `FLOWDAY_CREDENTIAL_KEY`, `LINKS_CSRF_SIGNING_KEY`, `WATCH_CSRF_SIGNING_KEY` |
+| `Recall deploy` | Committed config and `BUILD_SHA` from the release commit; no switch | `CF_API_TOKEN`, `DASHBOARD_ACCESS_OWNER`, `DASHBOARD_ACCESS_OWNER_ALIASES`, `RECALL_CSRF_SIGNING_KEY`; the machine tokens' digests are put from the owner's machine only, never through GitHub |
 | `Fleet deploy` | Committed config and `BUILD_SHA` from the release commit | `CF_API_TOKEN`, `FLEET_ACCESS_OWNER`, `FLEET_ACCESS_OWNER_ALIASES`, `FLEET_REPORT_HMAC_KEY` |
 | `Dashboard deploy` | Required boolean `DASHBOARD_CANARY_ENABLED` | `CF_API_TOKEN`, `DASHBOARD_ACCESS_OWNER`, `DASHBOARD_ACCESS_OWNER_ALIASES`, `DASHBOARD_CSRF_SIGNING_KEY`, `DASHBOARD_CF_ANALYTICS_TOKEN` (separate least-privilege read-only token; [setup](../dashboard/docs/setup.md) §4) |
 | `VPS deploy` | `VPS_DEPLOY_ENABLED`; dispatch may explicitly select resume | `PLATFORM_ACCESS_CLIENT_ID`, `PLATFORM_ACCESS_CLIENT_SECRET`, `PLATFORM_DEPLOY_TOKEN`; no SSH or Kubernetes credential |
@@ -166,6 +170,11 @@ and ships through `Mail Hero checks/deploy`. Recovery tests require GnuPG and sy
 The [legacy collector image workflow](../.github/workflows/mail-hero-backup-image.yml) is manual-only;
 no push automatically publishes a VPS collector. Existing v1 ciphertext and recovery tools remain compatible.
 Neither Newsletter nor the Platform observer claims backup coverage through process health.
+
+recall's reference archive consumer follows that collector's pattern: its
+[image workflow](../.github/workflows/recall-sync-image.yml) is manual-only, tests the consumer, builds and tests the
+image on a branch without publishing, and on main publishes `ghcr.io/ziyixi/recall-sync` and prints the digest the NAS
+pins ([sync README](../recall/sync/README.md)).
 
 ## VPS releases and runtime verification
 

@@ -19,96 +19,84 @@ Rules for this file:
 Last updated: 2026-10-10.
 <!-- Active work is separate from the production evidence below. -->
 
-## In flight (2026-10-10, Claude): mailsort replay calibration, branch `mailsort-calibration`
+## In flight (2026-10-10, Claude): recall, the browsing recorder (built, check-only)
 
-Why: mid-run, 34 of 41 replayed mails came out uncertain; the replay evaluation must give content-free numbers to
-choose a gating rule with high precision and coverage (`mailsort/docs/design.md` §5.1). Branched from `b39d430`.
+Owner request (2026-10-10): record what the owner reads in Chrome (visits with real focus time, the page's text after
+ten seconds), with a very good timeline and search UI, and keep a durable copy on the NAS through a generic protocol
+so the store can change later. New app `recall/` (Worker `recall`, host `recall.ziyixi.science`, one SQLite DO
+`RecallState`, private R2 bucket `recall-store`, a MV3 extension, a NAS pull container); design in
+`recall/docs/design.md`, rules in `recall/AGENTS.md`, use and deploy in `recall/README.md`. Owner defaults of §12
+kept: sensitive sites by their site alone, Google Docs/Drive IDs kept by the scrubber.
 
-Done on the branch (one local commit, not pushed):
-- Each replayed mail keeps the decision's numbers (schema version 6: nine columns added to `replay`, once, in the
-  migration's transaction): view 1's top option and probability, the runner-up's probability, view 2's probability of
-  that label, the combined probability, the higher p(suspicious) and p(needs_action), authenticated, trust label, and
-  the reason it already had. Rows evaluated before version 6 keep theirs without numbers.
-- GetReplayEvaluation adds `cases` (OUTPUT_ONLY, at most 200: those numbers with the owner's answer and the outcome, no
-  message ID) and `reason_counts`; additive, `npm run breaking` clean.
-- A seeded trusted domain (origin `seed`, the former rules) counts at any as-of time; a learned one (`owner`) only from
-  its time (`store.ts` isTrusted). The live gate is unchanged (it asks as of now).
-- Re-running: StartReplayEvaluation already replaced the previous job, running or finished; a fresh run needs a new
-  `request_id` (the same one within 24 h answers the first start). Now tested after a finished run.
-- The privacy page's replay line names the numbers kept (its date stays 2026-10-10).
+On branch `recall`, all built and checked, nothing deployed:
 
-Left, in order:
-1. Push, the full CI gate, land (deploys mailsort and the website).
-2. After the deploy: GetReplayEvaluation answers `cases` and `reason_counts`; the running job (if any) keeps its counts.
-3. Start a fresh replay from the signed-in page (new `request_id`), wait for `succeeded`, read `cases` for the
-   precision and coverage of candidate gates, then change the thresholds (`limits.ts`, design §4.4) in a follow-up.
+- The contracts: the owner API `proto/recall/ui/v1`, the upload `proto/recall/ingest/v1` (the extension uses its
+  generated wire types only: `recall.ingest.v1` is in `gen_wire_ts.py`'s `WIRE_PACKAGES`), and the archive contract
+  `contracts/recall-archive-v1` (IDL `proto/recall/archive/v1`, generated schema, golden fixtures, sample archive;
+  `proto/test/recall-archive.test.ts`, `PROTO_READS`).
+- `recall/shared/` (URL normalization and the page ID, the scrubber, the denylist, the bigram segmenter, run by both
+  the extension and the Worker); `recall/worker/` (machine routes with digest-checked tokens before Access,
+  `RecallState`: the write and index budgets, the compacted feed with `feed_id` and tombstones, FTS5 search, the
+  timeline, the owner API, ServiceStatus and ops-v1); `recall/deploy/` (deploy-vars, bundle budget, `mint-tokens.mjs`).
+- `recall/extension/` (focus, visits, captures, outbox, uploads, self-update through `BUILD`; CI builds the artifact
+  `recall-extension-<sha>`, kept 30 days; extension ID `kpehdcbafdhgghclgaeigokjoceemfhj`, from the committed public
+  key).
+- `recall/web/` (时间线 · 搜索 · 设置, mailsort's design system with a violet accent; 53.6 KiB of JavaScript gzip
+  against 62 KiB).
+- `recall/sync/` (the reference consumer, one standard-library Python file, its Dockerfile) and the manual workflow
+  `recall-sync-image.yml` (`ghcr.io/ziyixi/recall-sync`; never dispatched yet).
+- The smoke run `recall/worker/test/smoke/smoke.mts` (`npm run test:smoke`, in "Recall checks"): the extension's own
+  code uploads to a real `wrangler dev`, the owner API answers the UI's calls, `recall_sync.py --once` fills an archive
+  that the generated codec and the contract accept, a second pull changes nothing and a DeletePage reaches it.
+- A second review of the built code (safety, correctness, UI) was applied on the branch (design §12): a daily read
+  budget and bounded search sources (rows read held in `worker/test/runtime/scale.test.ts` at two years' scale), a
+  wider scrubber and denylist, the owner's site-only list (`site_only_patterns` in Settings and the upload's answer),
+  `unsupported_item` for a newer extension's items, `_` in the archive's Site format, the
+  deletion ledger in recall's clock, `mint-tokens.mjs --revoke` for a leaked token, NAS details out of the public docs,
+  and the UI's back, phone rows, picker, focus and wording fixes. These contract changes were made before anything was
+  deployed; against `main` (CI's diff base) they are additions, against the branch's earlier commit the profile's
+  breaking rules would name the Site format and `RejectedItem.reason`.
 
-Checked locally: the worker's lint, typecheck, unit and workerd runtime tests (CPU: the 200-case answer 4.2 ms first in
-MailsortState, the fetch handler 0.4 first and 0.8 warm), the smoke run, the web's lint, typecheck, tests and build
-(56.6 KiB gzip of 67), the deploy tests, the dry run (Worker 123.0 -> 124.6 KiB gzip of 135), proto's buf lint,
-api-linter, breaking, self-test, determinism and tests, `.github/scripts`' tests, and the website's unit tests,
-eslint and prettier for the privacy page.
+Landed check-only (design §11 step 1, mailsort's step 1 as the template), each list one entry: the catalog
+(`recall/app.toml`, Home's tile with `status.type = "none"`), `CHECK_ONLY` in `ci_changes.py`, the "Recall checks"
+and "Recall deploy" jobs, the release recipe in `worker-release.yml` (production, Access and Bypass probes), the
+reconcile matrix, the release and bootstrap tools (`control.py`, `cloudflare.py`, `deployments.py`, `finalize.py`,
+`github_secrets.py`), cf-guard's committed-config test, `infra/` (the owner application, the Bypass application of the
+three machine routes and the bucket: 36 objects; `AHEAD_OF_DEPLOY`), the drift desired state, the account inventory
+(`FIRST_DEPLOY_PENDING = {"recall-state"}`) and ops-v1's `OpsStatus.app` (Home keeps recall out of the apps it calls:
+`UNBOUND_OPS_APPS`). Red or noisy by design until the first deploy: "Infra drift" (the four creates: two Access
+applications, the Bypass policy, the bucket), Home's 配置漂移 and the inventory (recall missing), and "Personal cloud
+reconcile", whose "Compare or repair recall" leg has no verified deployment to compare yet
+(`VERIFIED_DEPLOYMENT_MISSING`); if the owner's steps wait long, take recall out of that matrix until the go-live
+commit.
 
-## In flight (2026-10-10, Claude): mailsort model-first, branch `mailsort-model-first`
+Verify, in `recall/worker`: `npm run lint`, `npm run typecheck`, `npm test`, `npm run test:runtime`,
+`npm run test:smoke` (after the UI build; `RECALL_SMOKE_PYTHON` names a Python 3.12+); in `recall/web` and
+`recall/extension`: `npm run lint`, `npm run typecheck`, `npm test`, `npm run build`; in `recall`:
+`node --test deploy/test/*.test.mjs` and the consumer's tests (`recall/README.md` "Develop"); the root guards
+(`python3 -m unittest discover -s .github/scripts`, the tools' tests, `generate.py --check`, `catalog.py --check`,
+`inventory.py --check`, cf-guard's tests).
 
-Owner request 2026-10-10: sender-address rules sort badly (one sender's statements and promotions alike), so remove
-them; the owner no longer wants to review every mail, only highly uncertain ones (about 1 in 20); use the model more
-for precision; then turn Gmail labelling live. Design: `mailsort/docs/design.md` §3.2, §4.4, §5, §5.1, §9.
+Next, in order: owner review; land `recall` (its push's "Infra drift" is red with those four creates); the owner
+dispatches "Infra apply" and sets `RECALL_CSRF_SIGNING_KEY` (`openssl rand -hex 32 | gh secret set ...`, never shown);
+the go-live commit (the AUD and application ids into `config/resources.toml` and `infra/ids.tf` through
+`generate.py`, `CHECK_ONLY` and `AHEAD_OF_DEPLOY` emptied, Home's `RECALL` binding and `status.type = "ops_v1"` with
+`UNBOUND_OPS_APPS` emptied and ops-v1 golden fixtures for recall in `contracts/ops-v1` and Contracts, as mailsort's
+had); after the first deploy the namespace id (`FIRST_DEPLOY_PENDING` emptied); then the owner's `mint-tokens.mjs`,
+the extension loaded unpacked, the image dispatched and the NAS container. Phase 1a's first checks in a real Chrome
+(design §3.10, `recall/extension/README.md`): one focus switch, one capture, the badge, the options page, and whether
+Chrome serves an unpacked extension's files as they are on disk (the self-update relies on it).
 
-Done on the branch (local commits from `5f68724`, not pushed):
-- `proto/mailsort/ui/v2` (`/api/v2/`), `mailsort.ui.v1` retired in `proto/retired.json`; the Worker answers every
-  `/api/v1/...` path 410 `RELOAD_REQUIRED` until 2026-11-10 (`docs/history.md`).
-- The decision: the model decides every mail, two views (view 2 over view 1's three labels, reversed, when view 1's
-  top label has p ≥ 0.4), accept on agreement with a mean ≥ 0.7 (view 2's probability put on view 1's scale first);
-  `needs_action` keeps a labelled mail in the inbox; a trust label needs DMARC and a trusted domain; the sender history
-  (a salted hash of the From address, never the address, read only across mail of the same authentication) is
-  evidence. 6 subrequests per mail, 6 mails a pass (40 in all).
-- The review queue: uncertain mail only, a daily quota of 1-5 (5 % of the last week's daily mail), the last place
-  kept for the informative band (a none top with a label in [0.35, 0.7) is in it too).
-- Trusted domains: schema version 5 (one transaction under blockConcurrencyWhile) seeds them from the active rules
-  of trust labels and the rules with `require_dmarc` (an address rule's domain exact, a domain rule's with its
-  subdomains, never a public mailbox provider), then drops the rules, the proposals and what only they used; every
-  pending review item goes (the queue starts empty, no older decision counts as shown); labels lose
-  `live`/`threshold`; decisions keep the sender as a hash. A review answer teaches only `ReviewItem.teachable_domain`
-  (authenticated, not suspicious, not a public provider), an exact entry, and 待审 names it in a question first.
-- The replay evaluation (`replayEvaluation:start`, GET `replayEvaluation`): the owner's resolved items of 14 days
-  decided again as of each mail's time (the sender history, examples and trusted domains of then: never what the
-  answer to that mail taught), nothing written, a model outage backed off per mail, summary counts and label pairs
-  only.
-- The review's findings on the branch, fixed: the replay no longer sees the owner's answer (its own example, a domain
-  its answer taught); view 2 on view 1's scale; trust taught only with a named domain and never for a public mailbox
-  provider or a former address rule's whole domain; a retried trust-label write re-checks the trust
-  (`untrusted_sender`); the forged-From history split; v4's pending items dropped; `model_unavailable` rows suggest
-  nothing; live-mode copy; Home's mailsort signal copy (`breaker_tripped` reworded, `label_live_revoked` dropped).
-- Removed: rules (CRUD, approve, disable, import, export, the Gmail filter export, `filters.ts`, `rule-value.ts`,
-  `import.ts`, `template.ts`), the audit, live gating and 正式打, the Wilson bound (`accuracy.ts`); ops-v1 no longer
-  raises `label_live_revoked`, and the guard defers `replay` in place of `audit` (contract fixture
-  `OpsStatus/mailsort-degraded.json` and the dashboard's golden line follow; tests only for the dashboard).
-- The privacy policy page states the new retention.
-- The model-first UI (`mailsort/docs/design.md` §9, the 2026-10-07 visual system kept): 待审 holds only uncertain
-  mail, each row the masked subject and sender, the reason in plain words and one-tap answers (the model's labels with
-  their probabilities, 都不是, 其他…, 跳过; any answer that would teach a trust label a domain asks first, naming it,
-  and is never primary), quiet as 没有需要你确认的邮件; 概览 has a status line, today's numbers with their 7 days (处理, 有把握, 都不是,
-  拿不准), the flow with 拿不准 split by 待审, and a per-label table (自动, 改正, 拿不准); 标签 rows show the 7-day count
-  and 启用, the detail 归档, a trust label's trusted domains, the examples and 高级 (no rules, no 正式打); 设置 has the
-  mode (with a line when 正式 has only a read-only grant), the undo and the sync. UI only, no API change.
+## Done (2026-10-10, Claude): mailsort model-first, calibrated and live
 
-Left, in order:
-1. Push, the full CI gate, land (mailsort, Home's web copy and tests, contracts, the website for the privacy page).
-2. After the deploy, verify: ServiceStatus answers on `/api/v2/serviceStatus`; an old tab shows 邮件分拣已更新，请刷新页面;
-   标签 shows each trust label's seeded trusted domains (the former sender rules' domains, no public mailbox
-   provider); 待审 starts empty and then holds only uncertain items, at most the day's quota, or says
-   没有需要你确认的邮件; 概览's numbers match its flow diagram.
-3. Owner: run the replay evaluation from the signed-in page (`mailsort/README.md`), read the matches and the
-   mismatching pairs; then `mint-token.mjs --scope modify` (设置 says 只读授权 until then), `MAILSORT_MODE=live`, and
-   正式 in 设置.
+mailsort decides every mail with the model since `af11953`..`2fa050d` (no sender rules; two views; a small review
+queue; trusted domains; the replay evaluation; design §4.4, §5, §5.1). The replay of 81 mails the owner had labelled
+calibrated the gate: p(suspicious) told ordinary mail nothing apart, so it is gated only for unauthenticated senders
+(< 0.6) and trust labels (< 0.95); about 60 of the 81 labelled at about 97 % precision (design §8.1). The daily neuron
+budget defaults to 95 % of the account's allocation, shared with the replay. Live since 2026-10-10: the owner set
+`MAILSORT_MODE=live` and put the modify grant (`mint-token.mjs --scope modify`); 设置's mode is 正式. Watch the first
+days' corrections in Gmail and 概览; undo by range in 设置.
 
-Checked locally on the branch: the worker's lint, typecheck, unit tests and workerd runtime tests (CPU included), the
-smoke run against `wrangler dev`, the web's lint, typecheck, tests and build (its JavaScript budget: 56.2 KiB gzip of
-67), the deploy tests, the production dry run and bundle budget, proto's buf lint, api-linter, breaking (with the
-retirement) and its own tests, and `.github/scripts`' tests. The UI was also run by hand against `wrangler dev` with
-the loopback fakes and synthetic mail: 待审 (an answer, 其他…) and 概览 at 360 and 375 px without sideways scroll, 设置
-at 375 px, 概览 and 标签 (a trust label's detail) in dark at desktop width.
 
 ## In flight (2026-10-06, Claude): Home reports account changes made outside CI
 

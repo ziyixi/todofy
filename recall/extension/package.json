@@ -1,0 +1,36 @@
+{
+  "name": "recall-extension",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "recall's Chrome extension (Manifest V3, no runtime dependency): visits with their focus, page texts after ten seconds of focus, scrubbed and uploaded to the Worker \"recall\". Built into dist/ and a zip; installed into ~/recall-extension.",
+  "engines": {
+    "node": ">=26"
+  },
+  "scripts": {
+    "postinstall": "node ../../proto/tools/ensure.mjs",
+    "pretypecheck": "node ../../proto/tools/ensure.mjs",
+    "typecheck": "tsc --noEmit",
+    "prelint": "node ../../proto/tools/ensure.mjs",
+    "lint": "eslint .",
+    "pretest": "node ../../proto/tools/ensure.mjs",
+    "test": "vitest run",
+    "prebuild": "node ../../proto/tools/ensure.mjs",
+    "build": "tsc --noEmit && node scripts/build.mjs",
+    "install-extension": "node scripts/install.mjs"
+  },
+  "dependencies": {
+    "@ziyixi/proto": "file:../../proto/ts"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@types/chrome": "0.3.0",
+    "@types/node": "26.6.3",
+    "esbuild": "0.28.1",
+    "eslint": "10.11.0",
+    "fake-indexeddb": "6.2.5",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.71.0",
+    "vitest": "4.1.11"
+  }
+}

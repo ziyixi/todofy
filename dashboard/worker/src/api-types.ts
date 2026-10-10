@@ -225,9 +225,10 @@ export type AppStatusView = Omit<AppDetail, 'entry'>;
 export type CanaryState = Omit<CanaryView, 'id'>;
 
 /**
- * An app of ops-v1 that this dashboard calls: OpsStatus.app's allowed list in proto/ops/v1/ops.proto (OPS_APPS reads
- * it; ops-client.test.ts holds the two equal). The list is open on the wire (an app may join within ops-v1), so the
- * generated type of `app` is a string; this dashboard knows exactly the apps it binds.
+ * An app of ops-v1 that this dashboard calls: OpsStatus.app's allowed list in proto/ops/v1/ops.proto without the apps it
+ * does not bind yet (OPS_APPS reads it, UNBOUND_OPS_APPS names the rest; ops-client.test.ts holds them equal). The list
+ * is open on the wire (an app may join within ops-v1), so the generated type of `app` is a string; this dashboard knows
+ * exactly the apps it binds.
  */
 export type OpsApp = 'mail-hero' | 'todofy' | 'watch' | 'fleet' | 'newsletter' | 'notion-publish' | 'mailsort';
 

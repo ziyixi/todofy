@@ -18,6 +18,7 @@ locals {
     "mail-hero-store"   = "mail-hero (MAIL_STORE)"
     "mail-hero-backups" = "mail-hero (BACKUP_STORE)"
     "todofy-backups"    = "todofy-core (BACKUPS)"
+    "recall-store"      = "recall (STORE)"
   }
 }
 

@@ -54,6 +54,8 @@ TEST_CONFIGS = {
     "todofy/gateway/wrangler.test-auth.toml",
     # mailsort's local development and smoke run (no AI binding, no routes, no account).
     "mailsort/wrangler.test.toml",
+    # recall's local development (no routes, no account).
+    "recall/wrangler.test.toml",
 }
 
 # Each app with a deploy-vars wrapper: the wrapper, how CI calls it, and its production configs.
@@ -70,6 +72,7 @@ WRAPPERS = {
     "watch": ("watch/deploy/deploy-vars.mjs", r"deploy-vars\.mjs (exec|secrets)\b", ["watch"]),
     "fleet": ("fleet/deploy/deploy-vars.mjs", r"deploy-vars\.mjs (exec|secrets)\b", ["fleet"]),
     "mailsort": ("mailsort/deploy/deploy-vars.mjs", r"deploy-vars\.mjs (exec|secrets)\b", ["mailsort"]),
+    "recall": ("recall/deploy/deploy-vars.mjs", r"deploy-vars\.mjs (exec|secrets)\b", ["recall"]),
 }
 # Worker vars that must never be committed: personal values (GitHub environment secrets) ...
 PERSONAL_VARS = {
@@ -103,6 +106,8 @@ PERSONAL_INPUTS = {
     "FLEET_ACCESS_OWNER_ALIASES",
     "MAILSORT_ACCESS_OWNER",
     "MAILSORT_ACCESS_OWNER_ALIASES",
+    "RECALL_ACCESS_OWNER",
+    "RECALL_ACCESS_OWNER_ALIASES",
 }
 # Personal inputs a deploy job reads from another app's secret: the owner of FlowDay, the links app and the watch app is
 # the dashboard's owner (one person, the same Access identities), so their deploys read the dashboard's secrets
@@ -116,6 +121,8 @@ SHARED_SECRETS = {
     "WATCH_ACCESS_OWNER_ALIASES": "DASHBOARD_ACCESS_OWNER_ALIASES",
     "MAILSORT_ACCESS_OWNER": "DASHBOARD_ACCESS_OWNER",
     "MAILSORT_ACCESS_OWNER_ALIASES": "DASHBOARD_ACCESS_OWNER_ALIASES",
+    "RECALL_ACCESS_OWNER": "DASHBOARD_ACCESS_OWNER",
+    "RECALL_ACCESS_OWNER_ALIASES": "DASHBOARD_ACCESS_OWNER_ALIASES",
 }
 # The only GitHub variables CI reads: the operational switches, stated at every deploy (mail-hero AGENTS.md §8).
 TOGGLES = {
@@ -131,7 +138,7 @@ TOGGLES = {
     # mailsort's ceiling (live, shadow or off): the emergency switch of mailsort/docs/design.md section 10.
     "MAILSORT_MODE",
 }
-DEPLOY_JOBS = ("todofy-deploy", "mail-hero-deploy", "dashboard-deploy", "flowday-deploy", "links-deploy", "watch-deploy", "fleet-deploy", "mailsort-deploy")
+DEPLOY_JOBS = ("todofy-deploy", "mail-hero-deploy", "dashboard-deploy", "flowday-deploy", "links-deploy", "watch-deploy", "fleet-deploy", "mailsort-deploy", "recall-deploy")
 # The retired generators' required GitHub variables, still set in production: a revert of the committed-config
 # layout needs them (README "Rolling back the committed-config layout"), and nothing may read them now.
 LEGACY_VARIABLES = {

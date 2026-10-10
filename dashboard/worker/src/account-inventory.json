@@ -6,6 +6,7 @@
     "links",
     "mail-hero",
     "mailsort",
+    "recall",
     "todofy",
     "todofy-core",
     "watch",
@@ -30,6 +31,7 @@
     "infra-state",
     "mail-hero-backups",
     "mail-hero-store",
+    "recall-store",
     "todofy-backups",
     "vultr-backup"
   ]

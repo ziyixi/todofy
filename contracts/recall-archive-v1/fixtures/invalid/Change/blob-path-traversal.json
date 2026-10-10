@@ -1,0 +1,28 @@
+{
+  "seq": 3,
+  "id": "documents/7c2e9f41-3b6a-4d5e-8f10-2a9b4c6d8e01",
+  "kind": "document",
+  "event_time": "2026-10-10T02:00:15.250Z",
+  "page_id": "3cb732b26093d5571ec48a363db593b2",
+  "blobs": [
+    {
+      "role": "text",
+      "path": "../../etc/passwd",
+      "media_type": "text/plain; charset=utf-8",
+      "content_encoding": "gzip",
+      "sha256": "6439c89dc81886b6bd18e091105aeb31cb92aca181cefedc4d0068fba0b09bf5",
+      "size_bytes": 185
+    }
+  ],
+  "document": {
+    "visit": "visits/1f3e8a27-6c4b-4f0d-a1e2-9b8c7d6e5f01",
+    "url": "https://docs.example.com/guide/durable-objects",
+    "title": "Durable Objects 入门 · Example Docs",
+    "description": "一篇合成的示例文档：Durable Object、SQLite 存储与 alarm。",
+    "site": "docs.example.com",
+    "device_id": "5d0c3b52-8a5e-4f8e-9b8e-2d7c1a6f4e10",
+    "device_label": "MacBook · 工作",
+    "capture_time": "2026-10-10T02:00:15.250Z",
+    "text_bytes": 181
+  }
+}

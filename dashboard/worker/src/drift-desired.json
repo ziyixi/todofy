@@ -545,6 +545,88 @@
       ],
       "personal": []
     },
+    "recall": {
+      "config": "recall/wrangler.toml",
+      "workers_dev": false,
+      "preview_urls": false,
+      "custom_domains": [
+        "recall.ziyixi.science"
+      ],
+      "routes": [],
+      "crons": [],
+      "bindings": [
+        {
+          "name": "ACCESS_ISSUER",
+          "type": "plain_text",
+          "source": "config"
+        },
+        {
+          "name": "ACCESS_OWNER",
+          "type": "secret_text",
+          "source": "deploy"
+        },
+        {
+          "name": "ACCESS_OWNER_ALIASES",
+          "type": "secret_text",
+          "source": "deploy"
+        },
+        {
+          "name": "ASSETS",
+          "type": "assets",
+          "source": "config"
+        },
+        {
+          "name": "BUILD_SHA",
+          "type": "plain_text",
+          "source": "deploy"
+        },
+        {
+          "name": "CSRF_SIGNING_KEY",
+          "type": "secret_text",
+          "source": "deploy"
+        },
+        {
+          "name": "EXPORT_TOKEN_SHA256",
+          "type": "secret_text",
+          "source": "manual",
+          "optional": true
+        },
+        {
+          "name": "EXPORT_TOKEN_SHA256_PREVIOUS",
+          "type": "secret_text",
+          "source": "manual",
+          "optional": true
+        },
+        {
+          "name": "INGEST_TOKEN_SHA256",
+          "type": "secret_text",
+          "source": "manual",
+          "optional": true
+        },
+        {
+          "name": "INGEST_TOKEN_SHA256_PREVIOUS",
+          "type": "secret_text",
+          "source": "manual",
+          "optional": true
+        },
+        {
+          "name": "PUBLIC_HOST",
+          "type": "plain_text",
+          "source": "config"
+        },
+        {
+          "name": "RECALL",
+          "type": "durable_object_namespace",
+          "source": "config"
+        },
+        {
+          "name": "STORE",
+          "type": "r2_bucket",
+          "source": "config"
+        }
+      ],
+      "personal": []
+    },
     "todofy": {
       "config": "todofy/gateway/wrangler.toml",
       "workers_dev": false,

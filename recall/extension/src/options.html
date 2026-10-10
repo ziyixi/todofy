@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>recall 扩展设置</title>
+    <link rel="stylesheet" href="options.css" />
+    <script type="module" src="options.js"></script>
+  </head>
+  <body>
+    <main>
+      <header>
+        <h1>recall</h1>
+        <p class="muted">浏览记录 · 扩展设置</p>
+      </header>
+
+      <section class="card" aria-labelledby="connect-title">
+        <h2 id="connect-title">连接</h2>
+        <form id="settings" novalidate>
+          <label for="server">服务器</label>
+          <input id="server" name="server" type="url" autocomplete="off" spellcheck="false" required />
+
+          <label for="token">令牌</label>
+          <input id="token" name="token" type="password" autocomplete="off" spellcheck="false" aria-describedby="token-hint" />
+          <p class="hint" id="token-hint">
+            在自己的电脑上运行 <code>node recall/deploy/mint-tokens.mjs</code>，把它放进剪贴板的上传令牌粘贴到这里。保存后不再显示。
+          </p>
+
+          <label for="label">设备名称</label>
+          <input id="label" name="label" type="text" maxlength="64" autocomplete="off" required aria-describedby="label-hint" />
+          <p class="hint" id="label-hint">recall 的设置页用它区分设备，例如 MacBook · 工作</p>
+
+          <p id="form-error" class="error" role="alert" hidden></p>
+          <div class="actions"><button type="submit" class="primary">保存</button></div>
+        </form>
+      </section>
+
+      <section class="card" aria-labelledby="upload-title">
+        <h2 id="upload-title">上传</h2>
+        <dl id="upload-status" class="rows"></dl>
+        <div class="actions">
+          <button type="button" id="flush">立即上传</button>
+          <button type="button" id="check-update">检查更新</button>
+        </div>
+      </section>
+
+      <footer class="muted" id="build"></footer>
+    </main>
+    <div id="toast" role="status" hidden></div>
+  </body>
+</html>

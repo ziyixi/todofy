@@ -1,6 +1,7 @@
 """tools/gen_wire_ts.py and tools/gen_schema.py on synthetic buf images (JSON form): what they make of a union, a
 nullable field, a map and a positional method, a case's empty list, a self-contained schema of one message, a
-consumer's (open) schema with the relations between fields, and which packages they write. The real outputs are
+consumer's (open) schema with the relations between fields and a newer producer's union value, and which packages they
+write. The real outputs are
 checked where they are used: test/ops.test.ts type-checks ops_wire.ts against toWire, the Contracts CI job compares
 contracts/ops-v1/ops-v1.schema.json with gen_schema.py's output and gives every fixture the reference validator's
 verdict on it, and Todofy's tests validate its reports with todofy/api/*.schema.json.
@@ -461,6 +462,26 @@ class ConsumerSchemaTest(unittest.TestCase):
         self.assertEqual(
             self.schema["properties"]["id"], {"type": "string", "format": "uuid", "pattern": "^(?:[0-9a-f]{8})$(?!\\n)"}
         )
+
+    def test_a_union_with_an_open_discriminator_takes_a_value_it_does_not_know(self) -> None:
+        """A lenient read of a newer producer's kind checks the fields' own rules and no case (recall-archive-v1)."""
+
+        def branches(open: bool, file: dict) -> list[dict]:
+            gen_schema.SCHEMAS = (gen_schema.Target("u.v1", "x.json", "https://x.local/x.json", "T", "D", open=open),)
+            return json.loads(gen_schema.generate({"file": [file]})["x.json"])["$defs"]["M"]["oneOf"]
+
+        on, _off, _idle, unknown = branches(True, union_file("u.v1"))
+        self.assertEqual(unknown["properties"]["state"], {"type": "string", "not": {"enum": ["on", "off", "idle"]}})
+        # REQUIRED fields stay required (written as null when unset); a case's presence does not apply.
+        self.assertEqual(unknown["required"], ["state", "since", "counts"])
+        self.assertEqual(on["required"], ["state", "since", "note", "counts"])
+        self.assertEqual(unknown["properties"]["note"], {"type": "string"})
+        self.assertIs(unknown["additionalProperties"], True)
+        # A producer's schema, or a closed enum, has no such branch: every read refuses an unknown value.
+        self.assertEqual(len(branches(False, union_file("u.v1"))), 3)
+        closed = union_file("u.v1")
+        closed["messageType"][0]["enumType"][0]["options"] = {"[common.wire.v1.closed]": True}
+        self.assertEqual(len(branches(True, closed)), 3)
 
 
 if __name__ == "__main__":

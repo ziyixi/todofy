@@ -1,2 +1,5 @@
 # Golden webhook bodies are compared byte for byte: never convert line endings.
 contracts/**/fixtures/**/*.json -text
+# recall-archive-v1's sample archive (fixtures/archive/: day file, VERSION, gzip blob) and future blobs, byte for byte.
+contracts/recall-archive-v1/fixtures/archive/** -text
+contracts/recall-archive-v1/fixtures/future/** -text

@@ -65,6 +65,7 @@ WRAPPERS = {
     "watch": {"language": "js", "file": "watch/deploy/deploy-vars.mjs", "vars": "watch", "secrets": "watch"},
     "fleet": {"language": "js", "file": "fleet/deploy/deploy-vars.mjs", "vars": "fleet", "secrets": "fleet"},
     "mailsort": {"language": "js", "file": "mailsort/deploy/deploy-vars.mjs", "vars": "mailsort", "secrets": "mailsort"},
+    "recall": {"language": "js", "file": "recall/deploy/deploy-vars.mjs", "vars": "recall", "secrets": "recall"},
     "website-relay": {"language": "js", "file": "website/relay/deploy/deploy-vars.mjs", "vars": "ziyixi-notion-publish", "secrets": "ziyixi-notion-publish"},
     "todofy": {
         "language": "py",
@@ -83,7 +84,8 @@ MANUAL_SECRETS = {
     if worker.get("manual_secrets")
 }
 
-# Secrets only the owner puts from their own machine (mailsort's Gmail grant): expected, optional, never deployed.
+# Secrets only the owner puts from their own machine (mailsort's Gmail grant, recall's machine-token digests):
+# expected, optional, never deployed.
 OWNER_MACHINE_SECRETS = owner_machine_secrets(REPO)
 
 # Wrapper kinds whose value is personal (must be a Worker secret on the live Worker).

@@ -3,7 +3,7 @@
 
 Outputs (GITHUB_OUTPUT, "true"/"false"):
   todofy_check, mail_hero_check, dashboard_check, website_check, flowday_check, links_check, watch_check,
-  newsletter_check, fleet_check, platform_check, mailsort_check
+  newsletter_check, fleet_check, platform_check, mailsort_check, recall_check
                     run that app's full checks
   contracts         run the contract tests: both sides of mail.received.v1, ops-v1 and
                     task-intent-v1, and the dashboard's ops-v1 caller tests (also on a proto/ change: the
@@ -18,7 +18,7 @@ Outputs (GITHUB_OUTPUT, "true"/"false"):
   base              not a flag: the commit the diff started from (empty when everything runs), which
                     "Proto checks" compares the IDL with.
   todofy_deploy, mail_hero_deploy, dashboard_deploy, website_deploy, flowday_deploy, links_deploy,
-  watch_deploy, newsletter_deploy, fleet_deploy, platform_publish, platform_deploy, mailsort_deploy
+  watch_deploy, newsletter_deploy, fleet_deploy, platform_publish, platform_deploy, mailsort_deploy, recall_deploy
                     the app, a shared package it compiles in, or a contract file it bundles changed
                     (deploy jobs also require refs/heads/main)
   website_relay_deploy
@@ -39,7 +39,11 @@ Outputs (GITHUB_OUTPUT, "true"/"false"):
   (mailsort/, the Gmail sorting on sort.ziyixi.science, mailsort/docs/design.md) is checked and deployed since its
   Access application was created (2026-10-07): it answers ops-v1 (Contracts runs its tests) and compiles in
   packages/edge-auth and the TypeScript proto runtime with proto/mailsort/ui/ and proto/ops/. Home binds its Ops
-  entrypoint, so while an app Home binds is CHECK_ONLY, Home's deploy output stays false too (HOME_BOUND).
+  entrypoint, so while an app Home binds is CHECK_ONLY, Home's deploy output stays false too (HOME_BOUND). recall
+  (recall/, the browsing record on recall.ziyixi.science, recall/docs/design.md) is CHECK_ONLY until "Infra apply" has
+  created its Access applications and its bucket and its AUD is committed (design section 11): it answers ops-v1
+  (Home binds it only with its go-live commit, so it is not HOME_BOUND yet) and compiles in packages/edge-auth and the
+  TypeScript proto runtime with proto/recall/ui/, proto/recall/ingest/, proto/recall/archive/ and proto/ops/.
 
 proto/ (the protobuf IDL, proto/README.md) checks every app in PROTO_USERS (an app that depends on @ziyixi/proto or
 ziyixi-proto) and deploys only the apps whose bundle the changed path reaches (proto_deploys): PROTO_USERS[app] names
@@ -117,7 +121,7 @@ APPS = tuple(load_catalog(Path(__file__).resolve().parents[2]).apps)
 PREFIX = {app: app.replace("-", "_") for app in APPS}
 # A new app is checked but its deploy output stays false until its Cloudflare resources are ready. Keep its output
 # present so the workflow and same-SHA reuse have one stable interface.
-CHECK_ONLY: set[str] = set()
+CHECK_ONLY: set[str] = {"recall"}
 # Apps whose Ops entrypoint Home binds (dashboard/wrangler.toml): while one of them is CHECK_ONLY its Worker does not
 # exist yet, so Home's deploy (whose binding would name a missing service) waits too.
 HOME_BOUND = {"fleet", "mailsort"}
@@ -133,6 +137,7 @@ KEYS = (
     "fleet_check",
     "platform_check",
     "mailsort_check",
+    "recall_check",
     "contracts",
     "packages",
     "infra",
@@ -150,6 +155,7 @@ KEYS = (
     "platform_publish",
     "platform_deploy",
     "mailsort_deploy",
+    "recall_deploy",
 )
 DISPATCH = {
     "both": ("todofy", "mail-hero"),
@@ -165,6 +171,7 @@ DISPATCH = {
     "fleet": ("fleet",),
     "platform": ("platform",),
     "mailsort": ("mailsort",),
+    "recall": ("recall",),
 }
 # The website's Notion relay Worker deploys on its own (website_relay_deploy).
 RELAY = "website/relay/"
@@ -177,7 +184,7 @@ INFRA = ("infra/", "tools/infra-plan-summary/")
 # classified through their own app directory; editing the central inputs alone cannot publish production.
 CLOUD_CONFIG = {"config/cloud.toml", "config/resources.toml", "config/account-resources.toml"}
 # packages/<name>/ -> the apps whose Workers compile it in (a "file:../../packages/<name>" dependency).
-PACKAGE_USERS = {"edge-auth": ("todofy", "mail-hero", "dashboard", "flowday", "links", "watch", "fleet", "mailsort")}
+PACKAGE_USERS = {"edge-auth": ("todofy", "mail-hero", "dashboard", "flowday", "links", "watch", "fleet", "mailsort", "recall")}
 # The protobuf IDL (proto/README.md): app -> the languages ("ts", "python") whose generated code and runtime
 # its production bundles compile in; () for a user whose bundles take nothing from it (types only, tests
 # only). test_proto.py derives this map from the apps' manifests and sources.
@@ -193,6 +200,7 @@ PROTO_USERS: dict[str, tuple[str, ...]] = {
     "platform": ("python",),
     "website": ("ts",),
     "mailsort": ("ts",),
+    "recall": ("ts",),
 }
 # The hand-written runtimes and generators: a change reaches every user of each language listed. The wire
 # profile's own options (common/wire/v1: value rules, map order, binding arguments) are part of both runtimes:
@@ -231,20 +239,33 @@ PROTO_PACKAGES: dict[str, tuple[str, ...]] = {
     # CommonReason: Platform bundles Python error aliases.
     "proto/common/errors/": ("platform",),
     # ops-v1 (contracts/ops-v1): every app's Ops entrypoint and the dashboard that calls them.
-    "proto/ops/": ("mail-hero", "todofy", "dashboard", "watch", "website", "mailsort"),
-    "proto/website/sync/": ("mail-hero", "todofy", "dashboard", "watch", "website", "mailsort"),
+    "proto/ops/": ("mail-hero", "todofy", "dashboard", "watch", "website", "mailsort", "recall"),
+    "proto/website/sync/": ("mail-hero", "todofy", "dashboard", "watch", "website", "mailsort", "recall"),
     # mail.received.v1 (contracts/mail-received-v1's schema is generated from it): Mail Hero builds every event,
     # todofy-core reads every webhook body.
     "proto/mailhero/webhook/": ("mail-hero", "todofy"),
     # The runtimes' test fixtures (never imported by an app; not in the Python wheel).
     "proto/prototest/": (),
+    # recall (recall/docs/design.md): its owner API (recall.ui.v1), the extension's upload (recall.ingest.v1) and the
+    # archive change feed (recall.archive.v1, contracts/recall-archive-v1): its Worker serves all three.
+    "proto/recall/ui/": ("recall",),
+    "proto/recall/ingest/": ("recall",),
+    "proto/recall/archive/": ("recall",),
 }
 # The contracts whose fixtures and schemas proto/'s own tests read (proto/test/ops.test.ts and test_ops.py round-trip
 # every ops-v1 fixture byte for byte through both codecs, mail-received.test.ts and test_mail_received.py every
-# mail-received-v1 event; the task-intent-v1 tests check both codecs against its schema; Proto checks also compares
-# ops-v1's and mail-received-v1's JSON Schemas with the ones the IDL generates): a change there runs Proto checks too,
-# so a fixture neither codec writes byte for byte, or one a strict read wrongly accepts, fails its push.
-PROTO_READS = ("contracts/ops-v1/", "contracts/task-intent-v1/", "contracts/mail-received-v1/", "contracts/fleet-report-v1/", "contracts/platform-runtime-v1/")
+# mail-received-v1 event, recall-archive.test.ts every recall-archive-v1 fixture; the task-intent-v1 tests check both
+# codecs against its schema; Proto checks also compares the contracts' JSON Schemas with the ones the IDL generates): a
+# change there runs Proto checks too, so a fixture neither codec writes byte for byte, or one a strict read wrongly
+# accepts, fails its push.
+PROTO_READS = (
+    "contracts/ops-v1/",
+    "contracts/task-intent-v1/",
+    "contracts/mail-received-v1/",
+    "contracts/fleet-report-v1/",
+    "contracts/platform-runtime-v1/",
+    "contracts/recall-archive-v1/",
+)
 # proto/ paths that never reach a bundle: a change there checks the users but deploys none.
 PROTO_NOT_BUNDLED = (
     "proto/test/",
@@ -297,6 +318,7 @@ CHECK_JOBS = {
     "fleet_check": ("Fleet checks",),
     "platform_check": ("Platform checks",),
     "mailsort_check": ("Mailsort checks",),
+    "recall_check": ("Recall checks",),
     "contracts": ("Contracts",),
     "packages": ("Shared packages",),
     "infra": ("Infra checks",),

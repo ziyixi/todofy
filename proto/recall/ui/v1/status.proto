@@ -1,0 +1,155 @@
+// The singletons of recall's owner API: the owner's settings and the service status (recall/docs/design.md §3.7, §5.3,
+// §8.7). Codes, counts, labels and times only: no URL, title or text.
+
+syntax = "proto3";
+
+package recall.ui.v1;
+
+import "google/api/field_behavior.proto";
+import "google/api/resource.proto";
+import "google/protobuf/timestamp.proto";
+
+option java_multiple_files = true;
+option java_outer_classname = "StatusProto";
+option java_package = "science.ziyixi.recall.ui.v1";
+
+// The owner's settings. A singleton.
+message Settings {
+  option (google.api.resource) = {
+    type: "recall.ziyixi.science/Settings"
+    pattern: "settings"
+    singular: "settings"
+    plural: "settings"
+  };
+
+  // Always `settings`.
+  string name = 1 [(google.api.field_behavior) = IDENTIFIER];
+  // The owner's no-text patterns: pages that match one are recorded as visits (scrubbed URL and title) and never
+  // have their text captured. A pattern is a host (`example.com`, which also covers its subdomains) or a host and a
+  // path prefix (`example.com/account`), in lower case, at most 200 characters, without a scheme, query or fragment;
+  // this list and site_only_patterns hold at most 200 patterns together. The extension receives both lists with every
+  // upload's answer, and recall applies them to every item itself, so a new pattern holds at once.
+  repeated string denylist_patterns = 2 [(google.api.field_behavior) = OPTIONAL];
+  // The built-in patterns whose pages are recorded without their text (the owner's other apps, login and
+  // authorization paths), in the same form. Pages with a password field are never captured either.
+  repeated string builtin_denylist_patterns = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // AIP-154: changes with every change. UpdateSettings that carries an etag is refused with ETAG_MISMATCH when the
+  // settings changed since.
+  string etag = 4 [(google.api.field_behavior) = OPTIONAL];
+  // The built-in patterns whose pages are recorded by their site alone, the URL reduced to the site's root and the
+  // title left empty, never with text: mail, messaging and AI chats, banks and payments, password managers, cloud
+  // consoles, identity and account pages. recall's own host is never recorded at all.
+  repeated string builtin_site_only_patterns = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The owner's site-only patterns, in the same form: pages that match one are recorded by their site alone, as the
+  // built-in site-only patterns are (the owner's own banks and other sensitive sites). The stricter list wins when a
+  // page matches patterns of both.
+  repeated string site_only_patterns = 6 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// The state of recording, archiving and storage. A singleton.
+message ServiceStatus {
+  option (google.api.resource) = {
+    type: "recall.ziyixi.science/ServiceStatus"
+    pattern: "serviceStatus"
+    singular: "serviceStatus"
+    plural: "serviceStatuses"
+  };
+
+  // Always `serviceStatus`.
+  string name = 1 [(google.api.field_behavior) = IDENTIFIER];
+  // Every device that ever uploaded, most recently heard from first.
+  repeated DeviceStatus devices = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Every archive consumer that pulled the change feed, most recently seen first (at most 8).
+  repeated ArchiveConsumer archive_consumers = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The newest change's seq; 0 before the first.
+  int32 head_seq = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The start of the first visit; unset before it (the timeline's earliest day).
+  google.protobuf.Timestamp first_visit_time = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Pages kept.
+  int32 page_count = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Visits kept.
+  int32 visit_count = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Captured texts kept.
+  int32 document_count = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The Durable Object's SQLite database, in MiB.
+  int32 storage_used_mib = 9 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Its budget, in MiB (900). The oldest pages' texts leave the search index (oldest_indexed_text_time) while it holds
+  // over 500 MiB of text (each page's first 32 KiB) or the database passes 850 MiB, where the status warns.
+  int32 storage_budget_mib = 10 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The captured texts in R2, in MiB (gzip, as stored).
+  int32 blob_stored_mib = 11 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Rows the Durable Object wrote today (UTC).
+  int32 rows_written_today_count = 12 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Its daily budget: past it, uploads are answered 429 until the next UTC day.
+  int32 daily_row_budget = 13 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The oldest capture whose text is still in the search index; unset while every capture's text is. Older pages
+  // are found by title and URL only (their texts are still kept and archived).
+  google.protobuf.Timestamp oldest_indexed_text_time = 14 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The last few error codes, newest first, at most 8 (e.g. `r2_unavailable`, `upload_over_budget`).
+  repeated string recent_error_codes = 15 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The deployed commit.
+  string build = 16 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Items of uploads that recall refused over the last 7 days, by reason; empty when none.
+  repeated RejectedItems rejected_items = 17 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Rows the Durable Object read today (UTC).
+  int32 rows_read_today_count = 18 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Its daily budget: past it, SearchPages is SEARCH_OVER_BUDGET until the next UTC day; the change feed stops
+  // earlier (at two thirds of it), so that an archive catching up leaves room for the owner's searches.
+  int32 daily_read_budget = 19 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// Items of uploads that recall refused, for one reason, over 7 days. recall refuses an item only when it breaks the
+// upload's rules (a bug in the extension) or only a newer Worker can read it, never for its age or length.
+message RejectedItems {
+  // `invalid_item` (the item breaks the upload's rules) or `id_conflict` (a document ID already holds other content):
+  // the extension drops the item, so it is lost. `unsupported_item` (the extension is newer than the Worker): the item
+  // waits in the extension's outbox until a Worker that reads it is deployed.
+  string reason = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Items refused for it over the last 7 days.
+  int32 count = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The latest one.
+  google.protobuf.Timestamp last_time = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// A browser profile running the extension, as its uploads describe it.
+message DeviceStatus {
+  // The device's ID: a lower-case UUID the extension made when it was installed.
+  string device_id = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The owner's name for it, set in the extension's options.
+  string label = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The extension's version.
+  string extension_version = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // When recall first heard from it.
+  google.protobuf.Timestamp first_seen_time = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Its latest upload (an empty one is its heartbeat, every 30 minutes while Chrome runs).
+  google.protobuf.Timestamp last_heartbeat_time = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Items waiting in its outbox at that upload.
+  int32 queued_count = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The extension's last error code at that upload (e.g. `capture_failed`); empty when none.
+  string last_error_code = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // No upload for more than 24 hours.
+  bool stale = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Its clock minus recall's at its latest upload, in seconds, when they differ by more than 2 minutes (its visits'
+  // times are as its clock gave them); 0 otherwise.
+  // (-- api-linter: core::0142::time-field-type=disabled
+  //     aip.dev/not-precedent: a duration in whole seconds, not a time; the wire profile has no
+  //     google.protobuf.Duration. --)
+  int32 clock_skew_seconds = 9 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// An archive consumer of the change feed (contracts/recall-archive-v1), as its requests describe it.
+message ArchiveConsumer {
+  // The consumer's name (the feed's `consumer` parameter, e.g. `nas`).
+  string consumer = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The `after` of its latest request: every change up to this seq is durable in its archive.
+  int32 synced_seq = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Its latest request.
+  google.protobuf.Timestamp last_pull_time = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Changes above synced_seq (not archived yet), counted up to 500; 0 for a stale consumer, which is not counted (its
+  // oldest_unsynced_time says how far behind it is).
+  int32 behind_count = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // When recall committed the oldest change it has not archived; unset when it is caught up.
+  google.protobuf.Timestamp oldest_unsynced_time = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // No request for more than 24 hours.
+  bool stale = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+}

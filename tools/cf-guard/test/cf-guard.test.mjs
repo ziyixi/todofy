@@ -401,6 +401,9 @@ test("the committed production configs: the hostnames each deploy guards", async
     "watch/wrangler.toml": ["watch", ["watch.ziyixi.science"]],
     // mailsort's one Custom Domain, the whole host behind the Access application "mailsort".
     "mailsort/wrangler.toml": ["mailsort", ["sort.ziyixi.science"]],
+    // recall's one Custom Domain: the whole host behind the Access application "recall", its three machine routes
+    // behind the Bypass application "recall machine routes" (recall/docs/design.md section 2.1).
+    "recall/wrangler.toml": ["recall", ["recall.ziyixi.science"]],
   };
   for (const [file, [name, hosts]] of Object.entries(expected)) {
     const triggers = await readTriggers(path.join(REPO, file));

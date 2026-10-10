@@ -21,6 +21,8 @@ flowchart LR
   Home -->|Ops bindings| Watch
   Gmail[Owner's Gmail] <-->|own labels only, OAuth| Sort[Mailsort]
   Home -->|Ops bindings| Sort
+  Chrome[Owner's Chrome extension] -->|recall.ingest.v1, ingest token| Recall[recall]
+  Recall -->|recall-archive-v1 feed, export token| NAS[NAS archive]
   Home -->|Fleet and Newsletter Ops bindings| Fleet[Fleet]
   Observer[Observer CronJob] -->|signed fleet.report.v1| Fleet
   Actions[GitHub Actions] -->|Access and deploy Bearer, typed release API| Runtime[Platform runtime in k3s]
@@ -56,6 +58,7 @@ runtime. Newsletter keeps its own locked container dependencies and existing ext
 | Links | `links.ui.v1` | `/_/api/v1/` |
 | Watch | `watch.ui.v1` | `/api/v1/` |
 | Mailsort | `mailsort.ui.v2` | `/api/v2/` |
+| recall | `recall.ui.v1` | `/api/v1/` |
 | Fleet | `fleet.ui.v1` | `/api/v1/` |
 
 The [proto HTTP pattern](../proto/README.md#http-apis) owns route descriptors, request/response types and
@@ -71,6 +74,11 @@ Mail Hero's raw/attachment byte streams stay outside the transcoder under the sa
 which also streams attachment bytes. Its backup machine API is a separate surface. Todofy's webhook,
 reports and health retain their transport, paths and authentication in
 [machine-api-v1.openapi.yaml](../todofy/api/machine-api-v1.openapi.yaml).
+
+recall's three machine routes under `/api/machine/v1/` sit outside its owner API: the extension's uploads
+(`recall.ingest.v1`, an ingest token) and the archive consumers' change feed and blobs
+([recall-archive-v1](../contracts/recall-archive-v1/README.md), an export token). An Access Bypass application lets
+exactly these paths through, and the Worker checks each route's own token digest before any object call.
 
 Platform's separate `platform.runtime.v1` machine API owns bounded node/workload reads and persisted
 Create/Get/Resume release operations under `/api/v1/`. Actions sends frozen workload keys, source SHA,
@@ -151,6 +159,13 @@ accepted report nor a ready deployment receipt proves successful Newsletter deli
   settings. Every write is a ledger row first and can be undone. Shadow mode (the default) only records; the
   deployment variable `MODE` and the breaker can only lower the mode. The Gmail grant is put by the owner and never
   passes through GitHub. See [AGENTS](../mailsort/AGENTS.md) and [design](../mailsort/docs/design.md).
+- **recall:** one SQLite DO (records, the bigram FTS5 index, the compacted change feed) and one private R2 bucket (the
+  texts), no D1 and no cron. A Chrome extension (never in incognito) records visits with their focus time and a page's
+  text after ten seconds; both it and the Worker scrub secrets and apply the denylist with the same `recall/shared/`
+  code, and sensitive sites are kept by their site alone. Logs never hold a URL, title or text. The NAS pulls the feed
+  with `recall/sync/` (one standard-library Python file in its own image); any store implementing the contract can
+  replace it. Check-only until its Access applications exist. See [AGENTS](../recall/AGENTS.md) and
+  [design](../recall/docs/design.md).
 - **Newsletter:** runs as an independent k3s image because its workflow uses Codex CLI. It reads Todofy's machine
   reports through existing HTTPS/Basic auth and keeps its own persistent state. It does not import Todofy's
   implementation. Its external `ziyixi-protos`/wire JSON runtime and private drain/monitor adapters stay intact.

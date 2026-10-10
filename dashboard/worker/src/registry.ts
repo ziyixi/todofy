@@ -233,6 +233,20 @@ const ENTRIES: readonly EntryDef[] = [
     app_only_signals: [],
     order: 9,
   },
+  {
+    id: 'recall',
+    name: '浏览记录',
+    description: '浏览时间线、读过内容的全文搜索与 NAS 归档',
+    group: 'apps',
+    icon: 'notebook-pen',
+    accent: 'violet',
+    url: 'https://recall.ziyixi.science/',
+    access: true,
+    status: { type: 'none' },
+    tile_metric: null,
+    app_only_signals: [],
+    order: 10,
+  },
   // END service-catalog entries
   {
     // Not a monorepo app: the self-hosted VPS and home server keep their backups in the account's R2
@@ -266,6 +280,7 @@ const WORKERS: readonly WorkerDef[] = [
   { script: 'ziyixi-website', entry: 'website', role: '静态网站（仅静态资源）' },
   { script: 'fleet', entry: 'fleet', role: 'VPS 与后台服务监控' },
   { script: 'mailsort', entry: 'mailsort', role: 'Gmail 分拣与 UI' },
+  { script: 'recall', entry: 'recall', role: '浏览记录、搜索与归档' },
   // END service-catalog workers
 ];
 
@@ -273,6 +288,7 @@ const RESOURCES: readonly ResourceDef[] = [
   { id: 'infra-state', kind: 'r2', name: '基础设施状态存储', entry: 'home', match: 'infra-state' },
   { id: 'fleet-state', kind: 'do', name: 'FleetState', entry: 'fleet', script: 'fleet', match: RESOURCE_IDENTITIES['fleet-state'] ?? null, todo: '首次 Fleet 发布后，记录 DO namespace 到 config/resources.toml' },
   { id: 'mailsort-state', kind: 'do', name: 'MailsortState', entry: 'mailsort', script: 'mailsort', match: RESOURCE_IDENTITIES['mailsort-state'] ?? null, todo: '首次 mailsort 发布后，记录 DO namespace 到 config/resources.toml' },
+  { id: 'recall-state', kind: 'do', name: 'RecallState', entry: 'recall', script: 'recall', match: RESOURCE_IDENTITIES['recall-state'] ?? null, todo: '首次 recall 发布后，记录 DO namespace 到 config/resources.toml' },
   { id: 'mail-hero-db', kind: 'd1', name: 'mail-hero 主库', entry: 'mail-hero', match: RESOURCE_IDENTITIES['mail-hero-db'] ?? null },
   { id: 'todofy-db', kind: 'd1', name: 'todofy 主库', entry: 'todofy', match: RESOURCE_IDENTITIES['todofy-db'] ?? null },
   { id: 'mail-coordinator', kind: 'do', name: 'MailCoordinator', entry: 'mail-hero', script: 'mail-hero', match: RESOURCE_IDENTITIES['mail-coordinator'] ?? null },
@@ -289,6 +305,8 @@ const RESOURCES: readonly ResourceDef[] = [
   { id: 'mail-hero-store', kind: 'r2', name: 'mail-hero 邮件存储', entry: 'mail-hero', match: 'mail-hero-store' },
   { id: 'mail-hero-backup', kind: 'r2', name: 'mail-hero 备份', entry: 'mail-hero', match: 'mail-hero-backups' },
   { id: 'todofy-backups', kind: 'r2', name: 'todofy 备份', entry: 'todofy', match: 'todofy-backups' },
+  // recall's captured texts (recall/wrangler.toml STORE), created by "Infra apply" before recall's first deploy.
+  { id: 'recall-store', kind: 'r2', name: 'recall 正文存储', entry: 'recall', match: 'recall-store' },
   // The self-hosted servers' backups (~790 MB on 2026-09-30), outside this repository.
   { id: 'vps-backup', kind: 'r2', name: 'VPS 备份', entry: 'self-hosted', match: 'vultr-backup' },
 ];

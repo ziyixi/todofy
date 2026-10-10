@@ -1,0 +1,188 @@
+// The pages, visits, captured texts and sites of recall's owner API (recall/docs/design.md §3, §6, §8). Titles, URLs
+// and texts come from the owner's browser: untrusted, scrubbed text, which the UI shows as text only.
+//
+// Durations are whole seconds in int32 fields: the wire profile has no google.protobuf.Duration. File-wide (api-linter
+// reads it from this header):
+//
+// (-- api-linter: core::0142::time-field-type=disabled
+//     aip.dev/not-precedent: the `*_seconds` fields are durations in whole seconds, not times; the wire profile has
+//     no google.protobuf.Duration. --)
+
+syntax = "proto3";
+
+package recall.ui.v1;
+
+import "google/api/field_behavior.proto";
+import "google/api/resource.proto";
+import "google/protobuf/timestamp.proto";
+
+option java_multiple_files = true;
+option java_outer_classname = "PageProto";
+option java_package = "science.ziyixi.recall.ui.v1";
+
+// A page: one normalized URL, with what was recorded about it on every device.
+message Page {
+  option (google.api.resource) = {
+    type: "recall.ziyixi.science/Page"
+    pattern: "pages/{page}"
+    singular: "page"
+    plural: "pages"
+  };
+
+  // pages/{page}: 32 lower-case hex characters, the first 16 bytes of the SHA-256 of the normalized URL before
+  // scrubbing (the same page ID as recall-archive-v1's).
+  string name = 1 [(google.api.field_behavior) = IDENTIFIER];
+  // The normalized, scrubbed URL; a part the scrubber removed reads `[redacted]`.
+  string url = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The latest title seen; empty when the page had none.
+  string title = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The URL's host in lower case without a leading `www.`.
+  string site = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The start of the first visit.
+  google.protobuf.Timestamp first_visit_time = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The end of the latest visit.
+  google.protobuf.Timestamp last_visit_time = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Visits on every device.
+  int32 visit_count = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Seconds of focus over every visit.
+  int32 focus_seconds = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Captured texts: at most one per UTC day, and none that repeats the page's latest text.
+  int32 document_count = 9 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The latest capture; unset when there is none.
+  google.protobuf.Timestamp latest_capture_time = 10 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The latest capture's text is in the search index. False without a capture, or when the storage budget left
+  // only the page's title and URL in the index (the text is still kept and archived).
+  bool text_indexed = 11 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The latest capture (GetDocument reads its text); empty when there is none.
+  string latest_document = 12 [
+    (google.api.field_behavior) = OUTPUT_ONLY,
+    (google.api.resource_reference).type = "recall.ziyixi.science/Document"
+  ];
+  // The URL was longer than 8192 characters: `url` is its beginning.
+  bool url_truncated = 13 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// A visit to a page: one document in one tab, from its first focus to its last. A visit ends when its tab leaves the
+// page or closes, after 30 minutes without focus, or 6 hours after it started.
+message Visit {
+  option (google.api.resource) = {
+    type: "recall.ziyixi.science/Visit"
+    pattern: "pages/{page}/visits/{visit}"
+    singular: "visit"
+    plural: "visits"
+  };
+
+  // pages/{page}/visits/{visit}: the visit's ID is a lower-case UUID the extension made.
+  string name = 1 [(google.api.field_behavior) = IDENTIFIER];
+  // The page's URL, normalized and scrubbed.
+  string url = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The title the tab showed during this visit.
+  string title = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The URL's site.
+  string site = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The label of the device it was recorded on.
+  string device_label = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The start of the first focus span.
+  google.protobuf.Timestamp start_time = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The end of the last focus span.
+  google.protobuf.Timestamp end_time = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Seconds of focus: the spans' total.
+  int32 focus_seconds = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // When the page had the focus, in time order, at most 200.
+  repeated FocusSpan focus_spans = 9 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// A stretch of focus: the page's tab was active in the focused window and the owner was not idle.
+message FocusSpan {
+  // When the focus came.
+  google.protobuf.Timestamp start_time = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // When it went.
+  google.protobuf.Timestamp end_time = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// The text captured from a page after ten seconds of focus: at most once per page and UTC day, and only when it
+// differs from the page's latest text.
+message Document {
+  option (google.api.resource) = {
+    type: "recall.ziyixi.science/Document"
+    pattern: "pages/{page}/documents/{document}"
+    singular: "document"
+    plural: "documents"
+  };
+
+  // pages/{page}/documents/{document}: the document's ID is a lower-case UUID the extension made.
+  string name = 1 [(google.api.field_behavior) = IDENTIFIER];
+  // When the text was read from the page.
+  google.protobuf.Timestamp capture_time = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The title then.
+  string title = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The page's meta description then; empty when it had none.
+  string description = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The label of the device it was captured on.
+  string device_label = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The text's UTF-8 size, at most 65536.
+  int32 text_bytes = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The page had more text than the 64 KiB kept: `text` is its beginning.
+  bool text_truncated = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The plain text (the page's innerText, scrubbed).
+  string text = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Only the text's first 32 KiB is in the search index; the rest is kept, shown and archived.
+  bool search_truncated = 9 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// A site: every page of one host.
+message Site {
+  option (google.api.resource) = {
+    type: "recall.ziyixi.science/Site"
+    pattern: "sites/{site}"
+    singular: "site"
+    plural: "sites"
+  };
+
+  // sites/{site}: the host in lower case without a leading `www.` (`sites/github.com`). Visits to an IPv6 literal host
+  // have no site resource.
+  string name = 1 [(google.api.field_behavior) = IDENTIFIER];
+  // The start of the first visit.
+  google.protobuf.Timestamp first_visit_time = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The end of the latest visit.
+  google.protobuf.Timestamp last_visit_time = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Visits to its pages.
+  int32 visit_count = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Seconds of focus on its pages.
+  int32 focus_seconds = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// One result of SearchPages: a page, with what happened to it within the search's time range.
+message SearchResult {
+  // The page.
+  string page = 1 [
+    (google.api.field_behavior) = OUTPUT_ONLY,
+    (google.api.resource_reference).type = "recall.ziyixi.science/Page"
+  ];
+  // The page's URL.
+  string url = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The page's latest title.
+  string title = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The page's site.
+  string site = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The end of its latest visit within the range (of all time without a range).
+  google.protobuf.Timestamp last_visit_time = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Its visits within the range.
+  int32 visit_count = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Its seconds of focus within the range: a visit that overlaps the range counts whole.
+  int32 focus_seconds = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The page has a captured text (读过).
+  bool has_text = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // About 160 characters of the latest captured text around the first match, cut into plain and highlighted parts
+  // (a highlight is an occurrence of a query term, ignoring case and width). Empty when the query matched only the
+  // title or URL, or there is no query.
+  repeated TextSegment snippet = 9 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// A run of text, highlighted or not.
+message TextSegment {
+  // The text, shown as text only.
+  string text = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The run is an occurrence of a query term.
+  bool highlighted = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+}

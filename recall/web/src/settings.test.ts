@@ -1,0 +1,241 @@
+/**
+ * 设置 against the fake API, in the owner's words: devices (the latest upload, stale with what to check, version,
+ * outbox, the last error as a sentence, clock skew), the steps without one, lost items and items waiting for a newer
+ * recall; archives (the last pull, behind, late, a stale one not counted); storage (counts, meters, the day's budgets,
+ * the index's reach); the owner's two lists (add to either, a pattern moving between them, remove, only the lists with
+ * the etag, a stale etag, the server's refusal, the built-in lists) and the build.
+ */
+import { timestampFromMs } from '@ziyixi/proto/protobuf/wkt'
+import { at, FakeServer, HOUR, MINUTE, NOW } from './test/fakeServer.ts'
+import { buttonNamed, open, toastText, type } from './test/helpers.ts'
+
+const tick = () => new Promise((resolve) => setTimeout(resolve, 0))
+async function settled(): Promise<void> {
+  for (let i = 0; i < 8; i++) await tick()
+}
+
+const cards = (root: HTMLElement) => [...root.querySelectorAll<HTMLElement>('.card')]
+const card = (root: HTMLElement, title: string) => cards(root).find((node) => node.querySelector('h2')?.textContent === title) ?? (() => { throw new Error(`no card ${title}`) })()
+
+describe('设备', () => {
+  it('shows each device’s latest upload, version, outbox, error and clock skew; a stale one says what to check', async () => {
+    const fake = new FakeServer()
+    fake.status = {
+      devices: [
+        { $typeName: 'recall.ui.v1.DeviceStatus', deviceId: 'a', label: 'MacBook · 工作', extensionVersion: '2026.1009.1200', lastHeartbeatTime: timestampFromMs(NOW - 3 * MINUTE), queuedCount: 0, lastErrorCode: '', stale: false, clockSkewSeconds: 3600 },
+        { $typeName: 'recall.ui.v1.DeviceStatus', deviceId: 'b', label: 'Mini · 家', extensionVersion: '2026.1001.900', lastHeartbeatTime: timestampFromMs(NOW - 50 * HOUR), queuedCount: 12, lastErrorCode: 'outbox_full', stale: true, clockSkewSeconds: 0 },
+      ],
+      rejectedItems: [
+        { $typeName: 'recall.ui.v1.RejectedItems', reason: 'invalid_item', count: 3, lastTime: timestampFromMs(NOW - HOUR) },
+        { $typeName: 'recall.ui.v1.RejectedItems', reason: 'unsupported_item', count: 2, lastTime: timestampFromMs(NOW - HOUR) },
+      ],
+    }
+    const root = await open(fake, '/settings')
+    const devices = card(root, '设备')
+    const [mac, mini] = [...devices.querySelectorAll('.rows > li')]
+    expect(mac?.querySelector('.row-head')?.textContent).toBe('MacBook · 工作最近上传 3 分钟前')
+    expect([...(mac?.querySelectorAll('.facts > span') ?? [])].map((node) => node.textContent)).toEqual(['版本 2026.1009.1200', '待上传 0', '时钟差 1 小时'])
+    expect(mac?.querySelector('.facts .warn')?.textContent).toBe('时钟差 1 小时')
+    expect(mini?.querySelector('.row-head .meta.warn')?.textContent).toBe('最近上传 2 天前')
+    // The last error as what it means and what to do, in the warning color when it needs the owner; the code in a tooltip.
+    expect([...(mini?.querySelectorAll('p.hint.warn') ?? [])].map((node) => node.textContent)).toEqual(['检查 Chrome 是否开着、扩展是否启用（开发者模式）', '扩展存储已满，新页面的正文没有保存：打开扩展的选项检查'])
+    expect(mini?.querySelectorAll('p.hint.warn')[1]?.getAttribute('title')).toBe('outbox_full')
+    expect([...(mini?.querySelectorAll('.facts > span') ?? [])].map((node) => node.textContent)).toEqual(['版本 2026.1001.900', '待上传 12'])
+    expect([...devices.querySelectorAll(':scope > p.hint')].map((node) => [node.textContent, node.classList.contains('warn')])).toEqual([
+      ['7 天内有 3 条上传被拒（格式不对），已丢失：扩展可能有问题', true],
+      ['7 天内有 2 条记录来自比 recall 新的扩展，正在扩展里等 recall 更新后再上传', false],
+    ])
+  })
+
+  it('without a device, gives the three steps to connect one', async () => {
+    const fake = new FakeServer()
+    fake.status = { devices: [] }
+    const root = await open(fake, '/settings')
+    expect([...card(root, '设备').querySelectorAll('ol.steps li')].map((node) => node.textContent)).toEqual([
+      '在自己的电脑上运行 node recall/deploy/mint-tokens.mjs，生成上传令牌（已复制到剪贴板）',
+      '在 Chrome 打开 chrome://extensions，打开开发者模式，加载扩展的文件夹',
+      '在扩展的选项里粘贴令牌，填上设备名',
+    ])
+  })
+})
+
+describe('归档', () => {
+  it('shows when each archive last pulled and how far behind it is, late or stale in the warning color', async () => {
+    const fake = new FakeServer()
+    fake.status = {
+      archiveConsumers: [
+        { $typeName: 'recall.ui.v1.ArchiveConsumer', consumer: 'nas', syncedSeq: 10432, lastPullTime: timestampFromMs(NOW - 2 * MINUTE), behindCount: 0, stale: false },
+        { $typeName: 'recall.ui.v1.ArchiveConsumer', consumer: 'backup-disk', syncedSeq: 900, lastPullTime: timestampFromMs(NOW - 3 * 24 * HOUR), behindCount: 0, oldestUnsyncedTime: timestampFromMs(NOW - 3 * 24 * HOUR), stale: true },
+        { $typeName: 'recall.ui.v1.ArchiveConsumer', consumer: 'laptop', syncedSeq: 10400, lastPullTime: timestampFromMs(NOW - 10 * MINUTE), behindCount: 32, oldestUnsyncedTime: timestampFromMs(NOW - 3 * HOUR), stale: false },
+        { $typeName: 'recall.ui.v1.ArchiveConsumer', consumer: 'catch-up', syncedSeq: 10, lastPullTime: timestampFromMs(NOW - MINUTE), behindCount: 500, oldestUnsyncedTime: timestampFromMs(NOW - 30 * 24 * HOUR), stale: false },
+      ],
+    }
+    const root = await open(fake, '/settings')
+    const rows = [...card(root, '归档').querySelectorAll('.rows > li')]
+    expect(rows.map((row) => row.textContent)).toEqual([
+      'NAS2 分钟前同步已全部同步',
+      'backup-disk3 天前同步最早一条没同步的是 3 天前',
+      'laptop10 分钟前同步落后 32 条（最早一条 3 小时前）',
+      'catch-up1 分钟前同步落后 500+ 条（最早一条 30 天前）',
+    ])
+    expect(rows[0]?.querySelector('.row-head .meta')?.getAttribute('title')).toBe('seq 10432')
+    expect(rows[1]?.querySelector('.row-head .meta')?.classList.contains('warn')).toBe(true)
+    expect(rows[1]?.querySelector('.facts')?.classList.contains('warn')).toBe(true)
+    expect(rows[2]?.querySelector('.facts')?.classList.contains('warn')).toBe(false)
+    expect(rows[3]?.querySelector('.facts')?.classList.contains('warn')).toBe(true)
+  })
+
+  it('without one, says where the archive contract is', async () => {
+    const fake = new FakeServer()
+    fake.status = { archiveConsumers: [] }
+    const root = await open(fake, '/settings')
+    const archive = card(root, '归档')
+    expect(archive.querySelector('.empty strong')?.textContent).toBe('还没有归档连上')
+    expect(archive.querySelector('code')?.textContent).toBe('contracts/recall-archive-v1/README.md')
+  })
+})
+
+describe('存储', () => {
+  it('counts what is kept and meters the database, R2 and the day’s rows; the index’s reach', async () => {
+    const root = await open(new FakeServer(), '/settings')
+    const storage = card(root, '存储')
+    expect([...storage.querySelectorAll('.kpi')].map((node) => node.textContent)).toEqual(['页面1,234', '访问5,678', '正文345'])
+    expect([...storage.querySelectorAll('.gauge-head')].map((node) => node.textContent)).toEqual([
+      '数据库120 / 900 MB',
+      '云端正文40 MB / 10 GB 免费（账户共用）',
+      '今天写入4,210 / 20,000 条记录',
+      '今天读取52,000 / 1,500,000 条记录',
+    ])
+    expect([...storage.querySelectorAll('[role="meter"]')].map((node) => [node.getAttribute('aria-valuenow'), node.getAttribute('aria-valuemax'), node.className])).toEqual([
+      ['120', '900', 'meter'],
+      ['40', '10240', 'meter'],
+      ['4210', '20000', 'meter'],
+      ['52000', '1500000', 'meter'],
+    ])
+    expect(storage.querySelector(':scope > p.hint')?.textContent).toBe('正文搜索覆盖全部')
+  })
+
+  it('warns near the budget and when the day’s rows ran out; large counts stay short', async () => {
+    const fake = new FakeServer()
+    fake.status = { storageUsedMib: 860, rowsWrittenTodayCount: 20000, rowsReadTodayCount: 1_500_000, pageCount: 12_345, visitCount: 220_000, documentCount: 1_234_567, oldestIndexedTextTime: timestampFromMs(at('2025-03-04 10:00')) }
+    const root = await open(fake, '/settings')
+    const storage = card(root, '存储')
+    expect([...storage.querySelectorAll('[role="meter"]')].map((node) => node.className)).toEqual(['meter warn', 'meter', 'meter warn', 'meter warn'])
+    expect([...storage.querySelectorAll('.gauge .hint.warn')].map((node) => node.textContent)).toEqual([
+      '接近上限：最早页面的正文会移出搜索索引（标题和网址仍能搜到，全文仍在云端和归档里）',
+      '今天的写入额度用完了，上传会等到明天（UTC）再继续，扩展里的记录不会丢',
+      '今天的读取额度用完了，搜索要等到明天（UTC）；时间线和页面照常能看',
+    ])
+    expect([...storage.querySelectorAll('.kpi-value')].map((node) => node.textContent)).toEqual(['1.2 万', '22.0 万', '123 万'])
+    expect(storage.querySelector(':scope > p.hint')?.textContent).toBe('正文搜索覆盖 2025年3月 起')
+    expect(root.querySelector('.status-line .problem')?.textContent).toBe('存储接近上限')
+  })
+})
+
+describe('网站名单', () => {
+  it('adds a pattern from a pasted address to 只记网站 by default, sending only the two lists with the etag', async () => {
+    const fake = new FakeServer()
+    const root = await open(fake, '/settings')
+    const list = card(root, '网站名单')
+    expect(list.querySelector('.card-head .meta')?.textContent).toBe('1 条')
+    const field = list.querySelector<HTMLInputElement>('input')
+    if (field === null) throw new Error('no field')
+    type(field, 'https://Portal.Bank.Example/#/accounts')
+    buttonNamed(list, '添加').click()
+    await settled()
+    const update = fake.calls.find((call) => call.method === 'PATCH')
+    expect(update?.path).toMatch(/^\/api\/v1\/settings\?update_mask=denylist_patterns%2Csite_only_patterns%2Cetag&request_id=[0-9a-f-]{36}$/)
+    expect(update?.body).toEqual({ denylist_patterns: ['bank.example'], site_only_patterns: ['portal.bank.example'], etag: 's1' })
+    const rows = () => [...list.querySelectorAll('.patterns li')].map((row) => [row.querySelector('.mono')?.textContent, row.querySelector('.chip')?.textContent])
+    expect(rows()).toEqual([
+      ['portal.bank.example', '只记网站'],
+      ['bank.example', '不存正文'],
+    ])
+    expect(list.querySelector('.card-head .meta')?.textContent).toBe('2 条')
+    expect(toastText(root)).toBe('已添加 portal.bank.example（只记网站）')
+    expect(document.activeElement).toBe(list.querySelector('input'))
+  })
+
+  it('adds to 不存正文 when chosen; a pattern moves from one list to the other', async () => {
+    const fake = new FakeServer()
+    const root = await open(fake, '/settings')
+    const list = card(root, '网站名单')
+    buttonNamed(list, '不存正文').click()
+    const field = list.querySelector<HTMLInputElement>('input')
+    if (field === null) throw new Error('no field')
+    type(field, 'wiki.example/private')
+    buttonNamed(list, '添加').click()
+    await settled()
+    expect(fake.settings.denylistPatterns).toEqual(['bank.example', 'wiki.example/private'])
+    // bank.example to 只记网站: it leaves 不存正文.
+    buttonNamed(list, '只记网站').click()
+    const again = list.querySelector<HTMLInputElement>('input')
+    if (again === null) throw new Error('no field')
+    type(again, 'bank.example')
+    buttonNamed(list, '添加').click()
+    await settled()
+    expect([fake.settings.siteOnlyPatterns, fake.settings.denylistPatterns]).toEqual([['bank.example'], ['wiki.example/private']])
+  })
+
+  it('removes a pattern with its ✕, with the etag the last change gave', async () => {
+    const fake = new FakeServer()
+    const root = await open(fake, '/settings')
+    const list = card(root, '网站名单')
+    buttonNamed(list, '移除 bank.example').click()
+    await settled()
+    // The wire profile leaves an empty list out; the mask still names it, so the list becomes empty.
+    const update = fake.calls.find((call) => call.method === 'PATCH')
+    expect(update?.path).toContain('update_mask=denylist_patterns%2Csite_only_patterns%2Cetag')
+    expect(update?.body).toEqual({ etag: 's1' })
+    expect(list.querySelector('.patterns')).toBeNull()
+    expect(fake.settings.denylistPatterns).toEqual([])
+  })
+
+  it('shows the server’s refusal, and after a stale etag the list as it is now', async () => {
+    const fake = new FakeServer()
+    const root = await open(fake, '/settings')
+    const list = card(root, '网站名单')
+    const field = list.querySelector<HTMLInputElement>('input')
+    if (field === null) throw new Error('no field')
+    type(field, 'bad_host!')
+    buttonNamed(list, '添加').click()
+    await settled()
+    expect(toastText(root)).toBe('网站格式不对')
+    // Another tab changed the list meanwhile.
+    fake.settings = Object.assign(fake.settings, { denylistPatterns: ['bank.example', 'other.example'], etag: 's9' })
+    const again = list.querySelector<HTMLInputElement>('input')
+    if (again === null) throw new Error('no field')
+    type(again, 'new.example')
+    buttonNamed(list, '添加').click()
+    await settled()
+    expect(toastText(root)).toBe('设置已在别处修改，已载入最新内容')
+    expect([...list.querySelectorAll('.patterns .mono')].map((node) => node.textContent)).toEqual(['bank.example', 'other.example'])
+  })
+
+  it('folds the built-in lists in their two groups', async () => {
+    const root = await open(new FakeServer(), '/settings')
+    const builtin = card(root, '网站名单').querySelector('details')
+    expect(builtin?.querySelector('summary')?.textContent).toBe('内置 3 条')
+    expect([...(builtin?.querySelectorAll('h3') ?? [])].map((node) => node.textContent)).toEqual(['只记网站', '不存正文'])
+    expect([...(builtin?.querySelectorAll('.builtin') ?? [])].map((node) => node.textContent)).toEqual(['mail.examplechat.example', 'ziyixi.science'])
+  })
+
+  it('ends with the build’s short commit', async () => {
+    const root = await open(new FakeServer(), '/settings')
+    expect(root.querySelector('.build')?.textContent).toBe('版本 0123456')
+  })
+})
+
+describe('a failure', () => {
+  it('shows one line with 重试 where the content would be, and 重试 asks again', async () => {
+    const fake = new FakeServer()
+    fake.statusFailures = 1
+    const root = await open(fake, '/settings')
+    expect(root.querySelector('.status-line')?.textContent).toBe('状态读取失败')
+    expect(root.querySelector('#view .error-line span')?.textContent).toBe('服务暂时不可用，请稍后再试')
+    buttonNamed(root, '重试').click()
+    await settled()
+    expect(cards(root).map((node) => node.querySelector('h2')?.textContent)).toEqual(['设备', '归档', '存储', '网站名单'])
+    expect(root.querySelector('.status-line')?.textContent).toBe('上传 3 分钟前NAS 已同步')
+  })
+})

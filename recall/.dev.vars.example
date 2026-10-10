@@ -1,0 +1,13 @@
+# Local development only. Copy to recall/.dev.vars (gitignored; wrangler reads the .dev.vars next to the config) and
+# run, from worker/: npm run dev (http://127.0.0.1:8797, with ../wrangler.test.toml). Synthetic values only; never a real
+# owner address, key or token.
+BUILD_SHA=dev
+# Loopback-only login bypass (http://localhost, 127.0.0.1 or [::1] without cf-ray; 503 anywhere else).
+DEV_AUTH_BYPASS=true
+ACCESS_OWNER=owner@example.com
+# A locally generated 64-hex key, e.g. `openssl rand -hex 32`:
+CSRF_SIGNING_KEY=0000000000000000000000000000000000000000000000000000000000000000
+# The SHA-256 (hex) of local machine tokens, e.g. for the token recall_ingest_local-dev-token-0000000000000000000000:
+#   printf %s recall_ingest_local-dev-token-0000000000000000000000 | shasum -a 256
+INGEST_TOKEN_SHA256=
+EXPORT_TOKEN_SHA256=

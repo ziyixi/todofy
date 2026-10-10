@@ -1,0 +1,200 @@
+/*
+ * The options page in recall's design language (../../docs/design.md §8.2): mailsort's tokens with recall's violet
+ * accent, light and dark from the system setting, the 8 px scale, a 10 px radius, hairlines, no shadow. No external
+ * font or image.
+ */
+:root {
+  color-scheme: light dark;
+  --bg: #f6f6f4;
+  --surface: #ffffff;
+  --sunken: #efefec;
+  --ink: #1d1d1f;
+  --muted: #6e6e73;
+  --line: #e5e5e1;
+  --accent: #56419a;
+  --accent-ink: #ffffff;
+  --accent-soft: #eae5f5;
+  --warn: #9a5b08;
+  --warn-soft: #fbf0df;
+  --danger: #b42318;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 16px;
+  --space-4: 24px;
+  --space-5: 32px;
+  --radius: 10px;
+  font: 16px/1.5 system-ui, -apple-system, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans SC', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif;
+  font-variant-numeric: tabular-nums;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #141416;
+    --surface: #1c1c1f;
+    --sunken: #26262a;
+    --ink: #ececee;
+    --muted: #9b9ba1;
+    --line: #2e2e33;
+    --accent: #b9a8ea;
+    --accent-ink: #1b1433;
+    --accent-soft: #2e2842;
+    --warn: #f0b44c;
+    --warn-soft: #3a2c14;
+    --danger: #f97066;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+}
+
+main {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-3);
+  max-width: 40rem;
+  margin: 0 auto;
+  padding: var(--space-4) var(--space-3);
+}
+
+h1 {
+  margin: 0;
+  font-size: 17px;
+}
+
+h2 {
+  margin: 0 0 var(--space-2);
+  font-size: 15px;
+}
+
+header p,
+footer {
+  margin: 0;
+  font-size: 13px;
+}
+
+.muted,
+.hint {
+  color: var(--muted);
+}
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: var(--space-3);
+}
+
+form {
+  display: grid;
+  gap: var(--space-1);
+}
+
+label {
+  margin-top: var(--space-2);
+  font-size: 14px;
+}
+
+input {
+  min-height: 44px;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--sunken);
+  color: var(--ink);
+  font: inherit;
+}
+
+.hint {
+  margin: 0;
+  font-size: 13px;
+}
+
+code {
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+
+button {
+  min-height: 44px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+button.primary {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+input:focus-visible,
+button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.rows {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: var(--space-2) var(--space-3);
+  margin: 0;
+  font-size: 14px;
+}
+
+.rows dt {
+  color: var(--muted);
+}
+
+.rows dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.warn {
+  color: var(--warn);
+}
+
+.error {
+  margin: var(--space-2) 0 0;
+  color: var(--danger);
+  font-size: 14px;
+}
+
+#toast {
+  position: fixed;
+  right: var(--space-3);
+  bottom: var(--space-3);
+  left: var(--space-3);
+  max-width: 24rem;
+  margin: 0 auto;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius);
+  background: var(--ink);
+  color: var(--bg);
+  font-size: 14px;
+}

@@ -267,12 +267,15 @@ SAFETY_BUDGET = "10"
             with self.subTest(field=new), self.assertRaises(cloud_profile.ProfileError):
                 cloud_profile.worker_secret_specs(root)
 
-    def test_mailsort_gmail_grant_is_owner_machine_only_in_the_repository(self):
+    def test_owner_machine_secrets_never_reach_the_github_maps_in_the_repository(self):
+        """mailsort's Gmail grant and recall's machine-token digests are put by the owner from their own machine only."""
         source = TOOL.parents[1]
         grant = ['GMAIL_CLIENT_ID', 'GMAIL_CLIENT_SECRET', 'GMAIL_REFRESH_TOKEN']
-        self.assertEqual(cloud_profile.owner_machine_secrets(source), {'mailsort': grant})
-        spec = cloud_profile.worker_secret_specs(source)['mailsort']
-        self.assertFalse(set(grant) & set(spec['required'] + spec['optional']))
+        digests = ['EXPORT_TOKEN_SHA256', 'EXPORT_TOKEN_SHA256_PREVIOUS', 'INGEST_TOKEN_SHA256', 'INGEST_TOKEN_SHA256_PREVIOUS']
+        self.assertEqual(cloud_profile.owner_machine_secrets(source), {'mailsort': grant, 'recall': digests})
+        for worker, names in (('mailsort', grant), ('recall', digests)):
+            spec = cloud_profile.worker_secret_specs(source)[worker]
+            self.assertFalse(set(names) & set(spec['required'] + spec['optional']), worker)
 
     def test_infrastructure_inventory_updates_ids_preserving_current_bytes_and_optional_frozen_reference(self):
         source = TOOL.parents[1]

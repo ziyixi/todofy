@@ -13,6 +13,7 @@ DO_KEYS = {
     "TodofyCore": "todofy-core-do",
     "WatchState": "watch-state",
     "MailsortState": "mailsort-state",
+    "RecallState": "recall-state",
 }
 
 

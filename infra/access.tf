@@ -43,6 +43,9 @@ resource "cloudflare_zero_trust_access_policy" "github_owner" {
 # mailsort's application ("mailsort", sort.ziyixi.science) is created the same way, ahead of its Worker's first deploy:
 # the apply creates it, then its AUD goes into config/resources.toml (tools/cloud-config/generate.py writes it into
 # mailsort/wrangler.toml), its id into ids.tf, and mailsort leaves CHECK_ONLY in .github/scripts/ci_changes.py.
+#
+# recall's application ("recall", recall.ziyixi.science) is created the same way (recall/docs/design.md section 11),
+# with the Bypass application of its three machine routes below.
 
 # The key is the Worker's name, which is also the key of the access_aud output (outputs.tf). `domain` is the first
 # destination; `more` lists any further destinations (the links app also gates the exact path /_).
@@ -54,6 +57,7 @@ locals {
     "links"     = { name = "links", domain = "s.ziyixi.science/_/*", more = ["s.ziyixi.science/_"], session = "168h" }
     "mail-hero" = { name = "Mail Hero", domain = "mail-hero.ziyixi.science", more = [], session = "24h" }
     "mailsort"  = { name = "mailsort", domain = "sort.ziyixi.science", more = [], session = "24h" }
+    "recall"    = { name = "recall", domain = "recall.ziyixi.science", more = [], session = "24h" }
     "todofy"    = { name = "Todofy", domain = "todofy.ziyixi.science", more = [], session = "24h" }
     "watch"     = { name = "watch", domain = "watch.ziyixi.science", more = [], session = "24h" }
     # END service-catalog owner
@@ -114,6 +118,47 @@ resource "cloudflare_zero_trust_access_application" "fleet_receipt" {
   options_preflight_bypass    = false
   session_duration            = "24h"
   policies                    = [{ id = cloudflare_zero_trust_access_policy.fleet_receipt.id, precedence = 1 }]
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+# --- recall machine routes ---------------------------------------------------------------------------
+# Exactly recall's three machine routes bypass interactive Access (recall/docs/design.md section 2.1): the browser
+# extension's uploads, and the archive consumers' change feed and blobs. Each route has its own bearer token, which the
+# Worker compares by its SHA-256 digest before anything else, answering every other method and path under
+# /api/machine/ itself (404, 405); the owner API and the UI stay behind the application "recall". Exact paths as
+# Fleet's receipt has, and a wildcard only where the path carries a blob's archive path.
+resource "cloudflare_zero_trust_access_policy" "recall_machine" {
+  account_id = var.account_id
+  name       = "recall machine routes only"
+  decision   = "bypass"
+  include    = [{ everyone = {} }]
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+resource "cloudflare_zero_trust_access_application" "recall_machine" {
+  account_id = var.account_id
+  name       = "recall machine routes"
+  type       = "self_hosted"
+  domain     = "recall.ziyixi.science/api/machine/v1/batches"
+  destinations = [
+    { type = "public", uri = "recall.ziyixi.science/api/machine/v1/batches" },
+    { type = "public", uri = "recall.ziyixi.science/api/machine/v1/changes" },
+    { type = "public", uri = "recall.ziyixi.science/api/machine/v1/blobs/*" },
+  ]
+  allow_authenticate_via_warp = false
+  app_launcher_visible        = false
+  auto_redirect_to_identity   = false
+  enable_binding_cookie       = false
+  http_only_cookie_attribute  = true
+  options_preflight_bypass    = false
+  session_duration            = "24h"
+  policies                    = [{ id = cloudflare_zero_trust_access_policy.recall_machine.id, precedence = 1 }]
 
   lifecycle {
     prevent_destroy = true

@@ -72,10 +72,10 @@ Nothing unrelated is imported, declared, read or modelled, not even read-only.
 [`test_infra_guard.py`](../.github/scripts/test_infra_guard.py) tests the guard itself against
 configurations built to slip past it.
 
-### Managed here (32 objects)
+### Managed here (36 objects)
 
-This is the maximum declared count. Fresh bootstrap creates 30 objects before the first Worker release,
-then adds its exact mail rule (31). An adopted account retains the frozen legacy backup app (32).
+This is the maximum declared count. Fresh bootstrap creates 34 objects before the first Worker release,
+then adds its exact mail rule (35). An adopted account retains the frozen legacy backup app (36).
 Objects being retired ([Retiring an app](#retiring-an-app)) are not counted: [`retired.tf`](retired.tf) moves them
 out of the managed addresses so that the next apply deletes them.
 Older private inputs can temporarily keep the existing external IdP references; bootstrap captures and
@@ -97,6 +97,9 @@ imports their actual IDs before switching to the managed references.
 | `cloudflare_zero_trust_access_application.owner["watch"]` | Access app "watch" | `watch.ziyixi.science` (the whole host), session 24h, the two shared policies. **Created** here before the watch app's first deploy, not imported ([Adding an app](#adding-an-app)) |
 | `cloudflare_zero_trust_access_application.owner["fleet"]` | Access app "Fleet" | Whole Fleet owner host; created before the Worker so its real AUD can be recorded |
 | `cloudflare_zero_trust_access_application.owner["mailsort"]` | Access app "mailsort" | `sort.ziyixi.science` (the whole host), session 24h, the two shared policies. **Created** here before mailsort's first deploy, not imported; its AUD and id are then committed ([Adding an app](#adding-an-app)) |
+| `cloudflare_zero_trust_access_application.owner["recall"]` | Access app "recall" | `recall.ziyixi.science` (the whole host), session 24h, the two shared policies. **Created** here before recall's first deploy, not imported; its AUD and id are then committed ([Adding an app](#adding-an-app)) |
+| `cloudflare_zero_trust_access_application.recall_machine` | recall machine routes | Only the exact `/api/machine/v1/batches` and `/api/machine/v1/changes` and the blobs under `/api/machine/v1/blobs/*`; the Worker checks each route's own bearer token (recall/docs/design.md §2.1) |
+| `cloudflare_zero_trust_access_policy.recall_machine` | recall machine routes only | Bypass policy attached only to the machine-routes application; no owner API bypass |
 | `cloudflare_zero_trust_access_application.fleet_receipt` | Fleet machine receipt | Only the exact `/api/internal/fleet/v1/receipt` path; Worker independently validates signed POST receipts |
 | `cloudflare_zero_trust_access_policy.fleet_receipt` | Fleet signed receipt only | Bypass policy attached only to the exact receipt application; no owner API bypass |
 | `cloudflare_zero_trust_access_service_token.platform_deploy` | Deployment machine identity | Dedicated token in encrypted state and encrypted one-time handoff; never an owner identity |
@@ -109,7 +112,7 @@ imports their actual IDs before switching to the managed references.
 | `cloudflare_zero_trust_access_application.flowday["flowday"]` | Access app "flowday" | `flowday.ziyixi.science`, session 168h, FlowDay's own policy by id. See [FlowDay](#flowday) |
 | `cloudflare_zero_trust_access_application.flowday["flowday-bypass"]` | Access app "flowday-bypass" | `flowday.ziyixi.science/pwa/*` (and the staging host's), session 6h, FlowDay's own policy by id. See [FlowDay](#flowday) |
 | `cloudflare_d1_database.app["mail-hero" \| "todofy" \| "flowday" \| "links"]` | D1 databases | Existence only |
-| `cloudflare_r2_bucket.app["mail-hero-store" \| "mail-hero-backups" \| "todofy-backups"]` | R2 buckets | Existence only |
+| `cloudflare_r2_bucket.app["mail-hero-store" \| "mail-hero-backups" \| "todofy-backups" \| "recall-store"]` | R2 buckets | Existence only. `recall-store` is **created** here before recall's first deploy |
 
 **Never edit these objects in the Cloudflare dashboard** (FlowDay's and the links app's applications included). A
 hand edit is drift: the next "Infra apply" reverts it, and before the first apply it would even turn an import into
