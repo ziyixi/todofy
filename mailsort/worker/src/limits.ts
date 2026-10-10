@@ -88,10 +88,14 @@ export const SECOND_VIEW_MIN = 0.4;
 export const SECOND_VIEW_LABELS = 3;
 /** "No label fits" is confident when the first view's top option is none with at least this probability. */
 export const NONE_CONFIDENT = 0.6;
-/** No label is accepted while p(suspicious), the higher of the two views', reaches this. */
-export const SUSPICIOUS_MAX = 0.3;
-/** ... and no trust label while it reaches this. */
-export const TRUST_SUSPICIOUS_MAX = 0.1;
+/**
+ * No label is accepted for an unauthenticated sender (no DMARC pass aligned with the From domain) while p(suspicious),
+ * the higher of the two views', reaches this. An authenticated sender's mail is not gated on it: in the replay of the
+ * owner's answers (2026-10-10) ordinary mail scored 0.1–0.9, so the score told nothing apart (design §4.4).
+ */
+export const SUSPICIOUS_MAX = 0.6;
+/** ... and no trust label while it reaches this (real bank and account notices scored 0.8–0.9 there). */
+export const TRUST_SUSPICIOUS_MAX = 0.95;
 /** A mail whose p(needs_action), the higher of the two views', reaches this stays in the inbox with its label. */
 export const NEEDS_ACTION_KEEP = 0.6;
 /** Sender history: the labels of the sender's earlier mail this far back, the most frequent this many. */

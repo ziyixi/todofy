@@ -126,7 +126,7 @@ export function decideViews(view1: View, view2: View | null, labels: ReadonlyMap
   }
   const label = view1.top;
   const confidence = combined(view1, view2, label);
-  if (suspicious >= SUSPICIOUS_MAX) return unsure('suspicious', label, confidence);
+  if (!sender.authenticated && suspicious >= SUSPICIOUS_MAX) return unsure('suspicious', label, confidence);
   if (view2 === null) return unsure('low_confidence', label, confidence);
   if (view2.top !== label) return unsure('views_disagree', label, confidence);
   // View 1 offers enabled labels only, so a disabled one means the label changed while the mail was decided.

@@ -28,7 +28,7 @@ Four tabs under a header whose one status line shows the mode in force, the Gmai
   answers as one-tap buttons: the model's likely labels with their probabilities, 都不是, 其他… (a searchable picker
   over every label) and 跳过; j / k, the digits, Enter, c and s do the same by keyboard. An answer with a trust label
   can teach that label the sender's exact domain (only for a sender whose identity Gmail verified, that the model did
-  not find suspicious, and never a public mailbox like gmail.com): a question names the domain before any such answer,
+  not find almost certainly suspicious, and never a public mailbox like gmail.com): a question names the domain before any such answer,
   and it is never the one-tap default.
   Corrections made in Gmail itself (moving a sorted mail to another of mailsort's labels, or removing the label)
   count too.

@@ -210,7 +210,7 @@ domain (`marketplace.shop.example`), whose text a third party wrote.
 The domains are learned, never typed. When the owner answers a review item with a trust label, the item's teachable
 domain joins that label's list (origin `owner`, an exact entry; `api.ts` choose, `decide.ts` teachableDomain; at most
 50 per label, the oldest going first): the mail's From domain, only when DMARC passed aligned with it, the model's
-p(suspicious) was below 0.1 (a mail it doubted, or could not judge, teaches nothing) and it is not a public mailbox
+p(suspicious) was below 0.95 (a mail it was sure of, or could not judge, teaches nothing) and it is not a public mailbox
 provider's. A public mailbox provider (`gmail.com`, `outlook.com`, `qq.com`, `163.com`, ...; a small fixed list,
 `decide.ts` SHARED_MAILBOX_DOMAINS, and their subdomains) is never a trusted domain, seeded or learned: anyone can send
 DMARC-aligned mail from one, so a person writing from such an address stays uncertain for a trust label. The review
@@ -375,19 +375,20 @@ teaches no trusted domain from it (§3.2).
    inbox the higher p(needs_action); they cost little next to the labels' criteria, and the code reads both answers
    the same way.
 3. **Accept label L** (confident) when both views' top is L, the mean of their p(L) is at least `AUTO_THRESHOLD` (0.7,
-   a constant in `limits.ts`, not owner-facing), the higher p(suspicious) is below 0.3 and L is enabled. The mean is
+   a constant in `limits.ts`, not owner-facing), L is enabled and, for a sender that is not authenticated (§4.3),
+   the higher p(suspicious) is below 0.6. The mean is
    taken on view 1's scale (`decide.ts` combined): view 2 chose only among view 1's top three labels and none, so its
    p(L) is relative to those options (a model consistent with itself answers p1(L) / p1(options), which would lift the
    mean above view 1's own p(L) by the narrower question alone); it is multiplied by the share view 1 gave those
    options, so view 2 confirms or doubts view 1's probability and a sharper second opinion still counts. A **trust
    label** also needs an authenticated sender (§4.3) whose From domain is one of L's trusted domains or a subdomain of
-   one (§3.2), and p(suspicious) below 0.1.
+   one (§3.2), and p(suspicious) below 0.95.
 4. **Confident none** when view 1's top is `none` with p ≥ 0.6, or both views' top is `none` (view 2 runs only after a
    label top, so in practice the first): no label, the mail left in the inbox, not shown.
-5. Anything else is **uncertain**, with the first reason that holds, in the code's order: `suspicious` (p ≥ 0.3);
+5. Anything else is **uncertain**, with the first reason that holds, in the code's order: `suspicious` (an unauthenticated sender at p ≥ 0.6);
    `low_confidence` (view 2 did not run); `views_disagree` (view 2's top is another option, whatever the mean);
    `low_confidence` (the mean below 0.7, or the label disabled since); `untrusted_sender` (a trust label without an
-   authenticated sender of a trusted domain); `suspicious` for a trust label at p ≥ 0.1. And `model_unavailable` after
+   authenticated sender of a trusted domain); `suspicious` for a trust label at p ≥ 0.95. And `model_unavailable` after
    the retries; `no_labels` when no enabled label has a description (nothing to ask, never shown). A none top of view 1
    below 0.6 is `low_confidence` too. Its combined probability is that of view 1's top label as in step 3 (view 1's
    alone when view 2 did not run).
@@ -602,10 +603,14 @@ and cost the same on every call, which is why 标签 suggests one language and 6
 about 18 neurons per Clef call, the default budget of 9,500 covers roughly 370 Clef calls a day before the switch to
 Clef-flash (at 70 %), far above the expected volume.
 
-Defaults kept, pending the real run: the label threshold 0.8 and `suspicious` < 0.3. Before trusting them, the run
-should check the calibration around p = 0.8 and how often legitimate bank, government and account-security notices
-score `suspicious` ≥ 0.3. With 8 mails per label the run can only give a go/no-go and a model choice (8 of 8 correct
-proves a Wilson lower bound of 0.68), so the per-label 正式打 decision stays with shadow-mode feedback on real volume.
+Calibrated on the replay of the owner's answers (§5.1, 2026-10-10; 81 mails the owner had labelled, the numbers only):
+Clef's most likely label matched the owner's in 70 of 81, and was none in 7. p(suspicious) did not tell ordinary mail
+apart: it ranged 0.1–0.9 on the owner's own mail, 0.8–0.9 on real bank and account notices, so with the first gate
+(below 0.3 for every label) 53 of 57 uncertain mails were uncertain for it alone and only 19 were labelled (all
+right). Gating it only for unauthenticated senders (below 0.6) and trust labels (below 0.95), with the mean at 0.7,
+labels about 59–62 of the 81 at about 97 % precision (the two misses: a travel company's offer the owner filed under
+出行, labelled 购物/促销); 0.75 gives about 54 at 98 %. Phishing stays gated by what a sender cannot fake: DMARC aligned
+with the From domain, and for a trust label the trusted domains.
 
 ## 9. The owner API and the UI
 
@@ -762,7 +767,7 @@ the fake Gmail (`fake-gmail.ts`) and fake Workers AI (`fake-ai.ts`, Clef and bge
   to its label's planned path), masking, MIME, DMARC (forged and look-alike From, planted results); `decide.test.ts`
   the decision table (both views agreeing, the mean at the threshold, view 2 on view 1's scale, views that disagree,
   view 2 not run, suspicious in either view, confident none, the trust gate: authenticated, trusted domain,
-  p(suspicious) below 0.1, a disabled label), view 2's labels, needs_action, the review quota and its informative band
+  p(suspicious) below 0.95, an unauthenticated sender's p(suspicious), a disabled label), view 2's labels, needs_action, the review quota and its informative band
   (a none top with a label in the band among it), the teachable domain and the public mailbox providers, the sender
   history's text, Clef's
   request (three noul questions, the options' order, path keys, lean state with the sender evidence) and strict read;

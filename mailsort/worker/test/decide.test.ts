@@ -78,15 +78,17 @@ describe('the decision table', () => {
     expect(combined(view({ a: 0.62, b: 0.2, none: 0.18 }), null, 'a')).toBe(0.62);
   });
 
-  it('is uncertain when the views disagree, when view 2 did not run, or when either view finds it suspicious', () => {
+  it('is uncertain when the views disagree, when view 2 did not run, or when either view finds an unauthenticated sender suspicious', () => {
     const v1 = view({ newsletter: 0.6, receipt: 0.3, none: 0.1 });
     expect(decideViews(v1, view({ receipt: 0.6, newsletter: 0.3, none: 0.1 }), labels, unknown)).toMatchObject({ kind: 'unsure', reason: 'views_disagree', top: 'newsletter' });
     expect(decideViews(v1, view({ none: 0.7, newsletter: 0.2, receipt: 0.1 }), labels, unknown)).toMatchObject({ kind: 'unsure', reason: 'views_disagree' });
     expect(decideViews(view({ newsletter: 0.35, receipt: 0.33, none: 0.32 }), null, labels, unknown)).toMatchObject({ kind: 'unsure', reason: 'low_confidence', confidence: 0.35 });
-    expect(decideViews(view({ newsletter: 0.9, none: 0.1 }, 0.3), view({ newsletter: 0.9, none: 0.1 }), labels, unknown)).toMatchObject({ kind: 'unsure', reason: 'suspicious' });
+    expect(decideViews(view({ newsletter: 0.9, none: 0.1 }, 0.6), view({ newsletter: 0.9, none: 0.1 }), labels, forged)).toMatchObject({ kind: 'unsure', reason: 'suspicious' });
     // The higher of the two views' p(suspicious).
-    expect(decideViews(view({ newsletter: 0.9, none: 0.1 }), view({ newsletter: 0.9, none: 0.1 }, 0.35), labels, unknown)).toMatchObject({ kind: 'unsure', reason: 'suspicious' });
-    expect(decideViews(view({ newsletter: 0.9, none: 0.1 }), view({ newsletter: 0.9, none: 0.1 }, 0.29), labels, unknown)).toMatchObject({ kind: 'label' });
+    expect(decideViews(view({ newsletter: 0.9, none: 0.1 }), view({ newsletter: 0.9, none: 0.1 }, 0.65), labels, forged)).toMatchObject({ kind: 'unsure', reason: 'suspicious' });
+    expect(decideViews(view({ newsletter: 0.9, none: 0.1 }), view({ newsletter: 0.9, none: 0.1 }, 0.59), labels, forged)).toMatchObject({ kind: 'label' });
+    // An authenticated sender's ordinary mail is not gated on it: the score told the owner's mail nothing apart.
+    expect(decideViews(view({ newsletter: 0.9, none: 0.1 }, 0.9), view({ newsletter: 0.9, none: 0.1 }), labels, unknown)).toMatchObject({ kind: 'label' });
   });
 
   it('is confident that no label fits when view 1 says none with p >= 0.6, or both views say none', () => {
@@ -95,17 +97,17 @@ describe('the decision table', () => {
     expect(decideViews(view({ none: 0.5, newsletter: 0.3, receipt: 0.2 }), view({ none: 0.8, newsletter: 0.2 }), labels, unknown)).toMatchObject({ kind: 'none' });
   });
 
-  it('a trust label also needs an authenticated sender of a trusted domain and p(suspicious) below 0.1', () => {
+  it('a trust label also needs an authenticated sender of a trusted domain and p(suspicious) below 0.95', () => {
     const v = view({ bank: 0.9, none: 0.1 });
     expect(decideViews(v, v, labels, trusted)).toMatchObject({ kind: 'label', label: 'bank' });
     // A forged From (DMARC failed) or a look-alike domain never borrows the trust label.
     expect(decideViews(v, v, labels, forged)).toMatchObject({ kind: 'unsure', reason: 'untrusted_sender' });
     expect(decideViews(v, v, labels, unknown)).toMatchObject({ kind: 'unsure', reason: 'untrusted_sender' });
-    const slightly = view({ bank: 0.9, none: 0.1 }, 0.15);
-    expect(decideViews(slightly, slightly, labels, trusted)).toMatchObject({ kind: 'unsure', reason: 'suspicious' });
-    // The same p(suspicious) does not stop a label that implies no trust.
-    const plain = view({ receipt: 0.9, none: 0.1 }, 0.15);
-    expect(decideViews(plain, plain, labels, unknown)).toMatchObject({ kind: 'label', label: 'receipt' });
+    // Real bank notices scored 0.8–0.9: only a near-certain p(suspicious) stops a trusted sender's trust label.
+    const usual = view({ bank: 0.9, none: 0.1 }, 0.9);
+    expect(decideViews(usual, usual, labels, trusted)).toMatchObject({ kind: 'label', label: 'bank' });
+    const sure = view({ bank: 0.9, none: 0.1 }, 0.95);
+    expect(decideViews(sure, sure, labels, trusted)).toMatchObject({ kind: 'unsure', reason: 'suspicious' });
   });
 
   it('never accepts a label that is not enabled (it changed while the mail was decided)', () => {
@@ -214,7 +216,8 @@ describe('trusted domains', () => {
     expect(teachableDomain({ authenticated: true, domain: 'Bank.Example.com', suspicious: 0.02 })).toBe('bank.example.com');
     // A forged From, a mail the model doubted (or could not judge), no domain: nothing to teach.
     expect(teachableDomain({ authenticated: false, domain: 'bank.example.com', suspicious: 0.02 })).toBe('');
-    expect(teachableDomain({ authenticated: true, domain: 'bank.example.com', suspicious: 0.1 })).toBe('');
+    expect(teachableDomain({ authenticated: true, domain: 'bank.example.com', suspicious: 0.9 })).toBe('bank.example.com');
+    expect(teachableDomain({ authenticated: true, domain: 'bank.example.com', suspicious: 0.95 })).toBe('');
     expect(teachableDomain({ authenticated: true, domain: 'bank.example.com', suspicious: null })).toBe('');
     expect(teachableDomain({ authenticated: true, domain: null, suspicious: 0.02 })).toBe('');
     // Anyone can send DMARC-aligned mail from a public mailbox provider.
