@@ -1,147 +1,69 @@
 /**
- * The decision (../../docs/design.md §4): pure functions over what the pipeline gathered, so every branch is a unit test.
+ * The decision (../../docs/design.md §4): pure functions over the model's two views of a mail and what the pipeline
+ * knows of its sender, so every branch is a unit test. There are no rules, and the neighbours never decide on their own:
+ * the model decides every mail.
  *
- * 1. Rules: the first usable active rule of an enabled label decides, in a fixed order (orderRules): rules with
- *    subject_includes (a carve-out) before the others, then the most specific kind (address, list, delivered-to,
- *    domain; a longer domain first), then more conditions (so a rule with only subject_excludes goes just before a
- *    plain rule of the same kind and value), then the oldest. A rule is usable when its subject
- *    conditions hold and the mail's authentication does (ruleAuthOk): a sender rule, a trust label and a rule with
- *    `require_dmarc` need DMARC aligned with the From domain, a list rule a DKIM signature of the list's domain. A
- *    forged From therefore never fires a rule: the mail goes on to the model, or stays in the inbox.
- * 2. Neighbours: when the sender passed DMARC aligned and all NEIGHBOURS nearest examples have the same enabled,
- *    non-trust label with similarity of at least NEIGHBOUR_SHORTCUT_SIMILARITY, that label is decided without the model.
- * 3. Clef: label L when the top option is not "none", p(L) reaches L's threshold, p(suspicious) stays below
- *    SUSPICIOUS_MAX, L is enabled and does not imply trust. Anything else is unsure, with the reason.
+ * 1. View 1 asks Clef one `choice` over the enabled labels with a description plus `none`, and the `noul` questions
+ *    suspicious, bulk and needs_action.
+ * 2. View 2 runs only when view 1's top option is a label with p >= SECOND_VIEW_MIN: the same state and questions, over
+ *    view 1's three most likely labels plus `none`, in reverse order (secondViewLabels).
+ * 3. Accept label L when both views' top is L, the mean of their p(L) reaches AUTO_THRESHOLD, the higher p(suspicious)
+ *    of the two stays below SUSPICIOUS_MAX and L is enabled. A trust label also needs an authenticated sender (DMARC
+ *    aligned with the From domain), a From domain among L's trusted domains (or a subdomain of one) and p(suspicious)
+ *    below TRUST_SUSPICIOUS_MAX.
+ * 4. Confident none when view 1's top is `none` with p >= NONE_CONFIDENT, or both views' top is `none` (view 2 runs only
+ *    after a label top, so in practice the first).
+ * 5. Anything else is uncertain, with the reason: a candidate for the review queue, whose daily quota (reviewQuota)
+ *    prefers the informative band (informative).
  */
 import type { ClefAnswer } from './ai.ts';
-import { listSigned } from './dmarc.ts';
-import { NEIGHBOUR_SHORTCUT_SIMILARITY, NEIGHBOURS, NONE, SUBJECT_MATCH_CHARS, SUSPICIOUS_MAX } from './limits.ts';
-import type { RuleRow } from './store.ts';
+import {
+  AUTO_THRESHOLD,
+  INFORMATIVE_MIN,
+  NEEDS_ACTION_KEEP,
+  NONE,
+  NONE_CONFIDENT,
+  REVIEW_QUOTA_MAX,
+  REVIEW_QUOTA_MIN,
+  REVIEW_SHARE,
+  SECOND_VIEW_LABELS,
+  SECOND_VIEW_MIN,
+  SENDER_HISTORY_TOP,
+  SUSPICIOUS_MAX,
+  TRUST_SUSPICIOUS_MAX,
+} from './limits.ts';
 
 export interface LabelFacts {
   readonly id: string;
   readonly enabled: boolean;
   readonly trust: boolean;
-  /** The label's own threshold, or 0 for the default. */
-  readonly threshold: number;
 }
+
+/** One view of the model: its probabilities by label ID (and `none`), its top option and two of its noul answers. */
+export type View = Pick<ClefAnswer, 'probabilities' | 'top' | 'suspicious' | 'needsAction'>;
 
 export interface Candidate {
   readonly label: string;
   readonly probability: number;
 }
 
-export type UnsureReason = 'below_threshold' | 'none' | 'suspicious' | 'trust_needs_rule' | 'label_disabled' | 'model_unavailable' | 'no_labels' | 'no_model_labels';
+export type UnsureReason = 'low_confidence' | 'views_disagree' | 'suspicious' | 'untrusted_sender' | 'model_unavailable' | 'no_labels';
 
+/** What the decision knows of the sender beyond the text: DMARC's verdict and the label's trusted domains. */
+export interface SenderTrust {
+  readonly authenticated: boolean;
+  /** Whether the sender's From domain is one of the label's trusted domains, or a subdomain of one. */
+  readonly trusted: (labelId: string) => boolean;
+}
+
+/**
+ * The decision. `confidence` is the top option's combined probability: the mean of both views' when view 2 ran, else
+ * view 1's. `top` is the most likely label (null for `none`). `candidates` are view 1's three most likely options.
+ */
 export type Decision =
-  | { readonly confident: true; readonly label: string; readonly decider: string; readonly ruleId?: string; readonly keepInInbox?: boolean; readonly candidates: readonly Candidate[] }
-  | { readonly confident: false; readonly top: string | null; readonly decider: string; readonly reason: UnsureReason; readonly candidates: readonly Candidate[] };
-
-/** Rule kinds from the most to the least specific. */
-const KIND_RANK: Readonly<Record<RuleRow['kind'], number>> = { sender_address: 0, list_id: 1, delivered_to: 2, sender_domain: 3 };
-
-/** A subject as rules compare it: the first SUBJECT_MATCH_CHARS characters, NFKC-folded (full-width to ASCII), lower case. */
-export function foldSubject(subject: string): string {
-  return subject.slice(0, SUBJECT_MATCH_CHARS).normalize('NFKC').toLowerCase();
-}
-
-/** A rule's stored list of words (JSON written by the API, already folded); [] for anything else. */
-export function termsOf(json: string): string[] {
-  try {
-    const value: unknown = JSON.parse(json);
-    return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string' && item !== '') : [];
-  } catch {
-    return [];
-  }
-}
-
-/** Whether a folded subject meets a rule's conditions: one of its includes (if any), none of its excludes. */
-export function subjectMatches(rule: Pick<RuleRow, 'subject_includes' | 'subject_excludes'>, folded: string): boolean {
-  const includes = termsOf(rule.subject_includes);
-  if (includes.length > 0 && !includes.some((term) => folded.includes(term))) return false;
-  return !termsOf(rule.subject_excludes).some((term) => folded.includes(term));
-}
-
-function conditionCount(rule: Pick<RuleRow, 'subject_includes' | 'subject_excludes'>): number {
-  return termsOf(rule.subject_includes).length + termsOf(rule.subject_excludes).length;
-}
-
-/**
- * Whether a rule is a carve-out: it has subject_includes, so it picks a few of a sender's mails out (a login notice).
- * subject_excludes alone only narrows a broad rule ("everything but 广告"): such a rule is no more specific than a
- * plain one and is ranked with the plain rules of its kind, or it would outrank an exact address rule of the sender.
- */
-export function isCarveOut(rule: Pick<RuleRow, 'subject_includes'>): boolean {
-  return termsOf(rule.subject_includes).length > 0;
-}
-
-/**
- * The order rules are tried in, a total order so the outcome never depends on how SQLite returned them: a carve-out
- * first, then the kind (address, list, delivered-to, domain), a longer domain before a shorter, more conditions before
- * fewer (an exclusion before the plain rule of the same key), then the older rule (create_time, then ID).
- */
-export function orderRules<T extends Pick<RuleRow, 'id' | 'kind' | 'value' | 'create_time' | 'subject_includes' | 'subject_excludes'>>(rules: readonly T[]): T[] {
-  const key = (rule: T) => [isCarveOut(rule) ? 0 : 1, KIND_RANK[rule.kind], rule.kind === 'sender_domain' ? -rule.value.split('.').length : 0, -conditionCount(rule), rule.create_time] as const;
-  return [...rules].sort((a, b) => {
-    const ka = key(a);
-    const kb = key(b);
-    for (let i = 0; i < ka.length; i++) {
-      const d = (ka[i] ?? 0) - (kb[i] ?? 0);
-      if (d !== 0) return d;
-    }
-    return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
-  });
-}
-
-/** What the rules know of a mail's authentication: Gmail's DMARC result and the domains whose DKIM signature passed. */
-export interface MailAuth {
-  readonly dmarcAligned: boolean;
-  readonly dkimDomains: readonly string[];
-}
-
-/** Whether a rule may fire for a mail of this authentication (design §4.3). */
-export function ruleAuthOk(rule: Pick<RuleRow, 'kind' | 'value' | 'require_dmarc'>, trustLabel: boolean, auth: MailAuth): boolean {
-  const needsDmarc = rule.kind === 'sender_address' || rule.kind === 'sender_domain' || trustLabel || rule.require_dmarc === 1;
-  if (needsDmarc && !auth.dmarcAligned) return false;
-  return rule.kind !== 'list_id' || listSigned(rule.value, auth.dkimDomains);
-}
-
-/**
- * The rule that decides (the first usable one in orderRules' order), or null. A carve-out whose subject conditions
- * hold but which cannot fire (its label disabled, the mail not authenticated) stops the search: the mail it carves
- * out must never fall through to the sender's plain rule (a login notice into 投资), so the model decides it. A rule
- * with only exclusions that cannot fire does not stop it: it carves nothing out.
- */
-export function ruleDecision(
-  matches: readonly RuleRow[],
-  labels: ReadonlyMap<string, LabelFacts>,
-  mail: MailAuth & { readonly subject: string },
-): { label: string; ruleId: string; keepInInbox: boolean } | null {
-  const folded = foldSubject(mail.subject);
-  for (const rule of orderRules(matches)) {
-    if (!subjectMatches(rule, folded)) continue;
-    const label = labels.get(rule.label_id);
-    const usable = label !== undefined && label.enabled && ruleAuthOk(rule, label.trust, mail);
-    if (usable) return { label: rule.label_id, ruleId: rule.id, keepInInbox: rule.keep_in_inbox === 1 };
-    if (isCarveOut(rule)) return null;
-  }
-  return null;
-}
-
-export interface Neighbourhood {
-  readonly label: string;
-  readonly similarity: number;
-}
-
-/** The neighbour shortcut's label, or null. */
-export function neighbourDecision(neighbours: readonly Neighbourhood[], labels: ReadonlyMap<string, LabelFacts>, dmarcAligned: boolean): string | null {
-  if (!dmarcAligned || neighbours.length < NEIGHBOURS) return null;
-  const nearest = neighbours.slice(0, NEIGHBOURS);
-  const first = nearest[0]?.label;
-  if (first === undefined || !nearest.every((n) => n.label === first && n.similarity >= NEIGHBOUR_SHORTCUT_SIMILARITY)) return null;
-  const label = labels.get(first);
-  return label !== undefined && label.enabled && !label.trust ? first : null;
-}
+  | { readonly kind: 'label'; readonly label: string; readonly confidence: number; readonly candidates: readonly Candidate[] }
+  | { readonly kind: 'none'; readonly confidence: number; readonly candidates: readonly Candidate[] }
+  | { readonly kind: 'unsure'; readonly reason: UnsureReason; readonly top: string | null; readonly confidence: number; readonly candidates: readonly Candidate[] };
 
 /** The three most likely options of an answer, the most likely first ("none" as the empty label). */
 export function candidatesOf(probabilities: Readonly<Record<string, number>>): Candidate[] {
@@ -151,17 +73,102 @@ export function candidatesOf(probabilities: Readonly<Record<string, number>>): C
     .map(([label, probability]) => ({ label: label === NONE ? '' : label, probability }));
 }
 
-/** Stage 3: the decision from Clef's answer. */
-export function clefDecision(answer: ClefAnswer, decider: string, labels: ReadonlyMap<string, LabelFacts>, defaultThreshold: number): Decision {
-  const candidates = candidatesOf(answer.probabilities);
-  const top = answer.top;
-  const unsure = (reason: UnsureReason): Decision => ({ confident: false, top: top === NONE ? null : top, decider, reason, candidates });
-  if (top === NONE) return unsure('none');
-  const label = labels.get(top);
-  if (label === undefined || !label.enabled) return unsure('label_disabled');
-  const threshold = label.threshold > 0 ? label.threshold : defaultThreshold;
-  if ((answer.probabilities[top] ?? 0) < threshold) return unsure('below_threshold');
-  if (answer.suspicious >= SUSPICIOUS_MAX) return unsure('suspicious');
-  if (label.trust) return unsure('trust_needs_rule');
-  return { confident: true, label: top, decider, candidates };
+/**
+ * View 2's labels, or null when it does not run: view 1's SECOND_VIEW_LABELS most likely labels (never `none`), the
+ * most likely first, when view 1's top option is a label with p >= SECOND_VIEW_MIN. The caller offers them reversed.
+ */
+export function secondViewLabels(view1: View): string[] | null {
+  if (view1.top === NONE || (view1.probabilities[view1.top] ?? 0) < SECOND_VIEW_MIN) return null;
+  return Object.entries(view1.probabilities)
+    .filter(([id]) => id !== NONE)
+    .sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1))
+    .slice(0, SECOND_VIEW_LABELS)
+    .map(([id]) => id);
+}
+
+/** The higher of the two views' answers to a noul question (a view that did not run answers nothing). */
+export function higher(view1: View, view2: View | null, question: 'suspicious' | 'needsAction'): number {
+  return Math.max(view1[question], view2?.[question] ?? 0);
+}
+
+/** Whether a mail stays in the inbox with its label: it asks the owner to act soon (a code, a payment, a reply). */
+export function needsAction(probability: number | null): boolean {
+  return probability !== null && probability >= NEEDS_ACTION_KEEP;
+}
+
+/** §4's decision from the two views (view 2 null when it did not run). */
+export function decideViews(view1: View, view2: View | null, labels: ReadonlyMap<string, LabelFacts>, sender: SenderTrust): Decision {
+  const candidates = candidatesOf(view1.probabilities);
+  const suspicious = higher(view1, view2, 'suspicious');
+  const p1 = (id: string) => view1.probabilities[id] ?? 0;
+  const unsure = (reason: UnsureReason, top: string | null, confidence: number): Decision => ({ kind: 'unsure', reason, top, confidence, candidates });
+  if (view1.top === NONE) {
+    const confidence = p1(NONE);
+    if (confidence >= NONE_CONFIDENT || view2?.top === NONE) return { kind: 'none', confidence, candidates };
+    return unsure('low_confidence', null, confidence);
+  }
+  const label = view1.top;
+  const confidence = view2 === null ? p1(label) : (p1(label) + (view2.probabilities[label] ?? 0)) / 2;
+  if (suspicious >= SUSPICIOUS_MAX) return unsure('suspicious', label, confidence);
+  if (view2 === null) return unsure('low_confidence', label, confidence);
+  if (view2.top !== label) return unsure('views_disagree', label, confidence);
+  // View 1 offers enabled labels only, so a disabled one means the label changed while the mail was decided.
+  const facts = labels.get(label);
+  if (confidence < AUTO_THRESHOLD || facts === undefined || !facts.enabled) return unsure('low_confidence', label, confidence);
+  if (facts.trust) {
+    if (!sender.authenticated || !sender.trusted(label)) return unsure('untrusted_sender', label, confidence);
+    if (suspicious >= TRUST_SUSPICIOUS_MAX) return unsure('suspicious', label, confidence);
+  }
+  return { kind: 'label', label, confidence, candidates };
+}
+
+// ---- the review queue (../../docs/design.md §5) -------------------------------------------------------------------
+
+/**
+ * Whether an uncertain decision is in the informative band, whose answer teaches the most: two views that disagree, a
+ * trust label for an untrusted sender, or a top label whose combined probability is in [INFORMATIVE_MIN,
+ * AUTO_THRESHOLD).
+ */
+export function informative(decision: Extract<Decision, { kind: 'unsure' }>): boolean {
+  if (decision.reason === 'views_disagree' || decision.reason === 'untrusted_sender') return true;
+  return decision.top !== null && decision.confidence >= INFORMATIVE_MIN && decision.confidence < AUTO_THRESHOLD;
+}
+
+/** Today's quota of the review queue: REVIEW_SHARE of the average daily mail of the last 7 days, rounded up, 1 to 5. */
+export function reviewQuota(averagePerDay: number): number {
+  return Math.min(REVIEW_QUOTA_MAX, Math.max(REVIEW_QUOTA_MIN, Math.ceil(REVIEW_SHARE * averagePerDay)));
+}
+
+/**
+ * Whether an uncertain mail joins the review queue, `shown` of today's `quota` being taken: an informative one while
+ * the quota has room, any other only while two places are left, so the day's last place is kept for the
+ * informative band. Nothing to ask (no label to offer) never joins.
+ */
+export function joinsReview(decision: Extract<Decision, { kind: 'unsure' }>, shown: number, quota: number): boolean {
+  if (decision.reason === 'no_labels') return false;
+  return shown < (informative(decision) ? quota : quota - 1);
+}
+
+// ---- the sender history ---------------------------------------------------------------------------------------------
+
+/** What one label (an ID, or `none`) got from the sender's earlier mail: the owner's verdicts and automatic labels. */
+export interface HistoryEntry {
+  readonly label: string;
+  readonly owner: number;
+  readonly auto: number;
+}
+
+/**
+ * The sender history as the model reads it: the SENDER_HISTORY_TOP entries, the owner's verdicts first, then the most
+ * frequent, each as `key ×n` (`keyOf` names a label as the options do; null leaves a label out, a deleted one).
+ */
+export function historyText(entries: readonly HistoryEntry[], keyOf: (label: string) => string | null): string {
+  return [...entries]
+    .sort((a, b) => b.owner - a.owner || b.owner + b.auto - (a.owner + a.auto) || (a.label < b.label ? -1 : a.label > b.label ? 1 : 0))
+    .flatMap((entry) => {
+      const key = keyOf(entry.label);
+      return key === null ? [] : [`${key} ×${String(entry.owner + entry.auto)}`];
+    })
+    .slice(0, SENDER_HISTORY_TOP)
+    .join(', ');
 }

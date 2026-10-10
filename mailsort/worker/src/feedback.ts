@@ -1,23 +1,19 @@
 /**
- * Learning from the owner (../../docs/design.md §6), without fine-tuning: verdicts on decisions, examples and rule
- * proposals.
+ * Learning from the owner (../../docs/design.md §6), without fine-tuning: verdicts on decisions and examples.
  *
- * Verdicts come from two places. The review queue's confirm and correct; and Gmail itself, read from the history's
+ * Verdicts come from two places. The review queue's choices; and Gmail itself, read from the history's
  * labelAdded/labelRemoved records on mails mailsort decided: the owned labels a mail carries now are compared with what
  * mailsort did. Moving an applied mail from one owned label to another is a correction to the new one, removing the
  * label only is a correction to "none", putting it back withdraws the correction; adding an owned label to a mail
- * mailsort only suggested is a confirmation (the suggested label) or a correction (another). Mailsort's own writes
- * change `current_labels` when they are made, so their history records change nothing.
+ * mailsort left (a label only recorded in shadow mode, an uncertain mail, a confident none) is a confirmation (the
+ * decided label) or a correction (another). Mailsort's own writes change `current_labels` when they are made, so
+ * their history records change nothing.
  *
  * A verdict with a label makes an example of the mail's summary (while its content is kept); a withdrawn verdict
- * deletes it. The same sender (or mailing list) corrected to the same label RULE_PROPOSAL_CORRECTIONS times proposes a
- * rule, which decides nothing until the owner approves it.
+ * deletes it. The verdicts also feed the sender history the model reads (judge.ts senderHistory).
  */
 import { deleteExampleOf, putExample } from './examples.ts';
 import { countFlow, stageOf } from './flow.ts';
-import { shortId } from './ids.ts';
-import { RULE_PROPOSAL_CORRECTIONS } from './limits.ts';
-import { ruleValueOk } from './rule-value.ts';
 import type { DecisionRow, Store } from './store.ts';
 
 export type VerdictSource = 'review' | 'gmail' | 'auto';
@@ -36,8 +32,8 @@ export function setCurrentLabels(store: Store, messageId: string, labels: readon
 }
 
 /**
- * Records the owner's choice for a decided mail: `chosen` is a label ID or null ("none of them"). Updates the example,
- * the rule proposals and a pending review item of the mail.
+ * Records the owner's choice for a decided mail: `chosen` is a label ID or null ("none of them"). Updates the example
+ * and a pending review item of the mail.
  */
 export function setVerdict(store: Store, row: DecisionRow, chosen: string | null, source: VerdictSource, now: number): void {
   const predicted = row.label_id ?? null;
@@ -50,70 +46,24 @@ export function setVerdict(store: Store, row: DecisionRow, chosen: string | null
   } else {
     deleteExampleOf(store, row.message_id);
   }
-  if (verdict === 'corrected' && chosen !== null) proposeRule(store, row, chosen, now);
   const review = store.pendingReviewOf(row.message_id);
   if (review !== undefined) {
+    // `confirmed` when the owner chose the model's most likely label, else `corrected`: both are resolved.
     const state = review.suggested_label === chosen ? 'confirmed' : 'corrected';
     store.run(`UPDATE review SET state = ?, resolved_label = ?, resolve_time = ? WHERE id = ?`, state, chosen, now, review.id);
   }
 }
 
-/** Withdraws a verdict (the owner undid their own change in Gmail): no verdict, no example, fewer proposals. */
 /** Adds `delta` to the flow's corrections of a decision that had a label (an unsure one has nothing to correct). */
 function countCorrection(store: Store, row: DecisionRow, delta: number): void {
   if (row.label_id !== null && row.outcome !== 'skipped') countFlow(store, row.decided_at, stageOf(row.decider), 'corrected', row.label_id, delta);
 }
 
+/** Withdraws a verdict (the owner undid their own change in Gmail): no verdict, no example. */
 export function withdrawVerdict(store: Store, row: DecisionRow): void {
   if (row.verdict === 'corrected') countCorrection(store, row, -1);
   store.run(`UPDATE decisions SET verdict = NULL, verdict_label = NULL, verdict_source = NULL, verdict_at = NULL WHERE message_id = ?`, row.message_id);
   deleteExampleOf(store, row.message_id);
-  if (row.verdict === 'corrected' && row.verdict_label !== null) retractProposal(store, row, row.verdict_label);
-}
-
-/**
- * The rule key of a mail: its mailing list when it has a valid one, else its sender's address when that is valid.
- * Both come from mail headers (untrusted); a value rule-value.ts refuses never becomes a proposal.
- */
-function ruleKey(row: Pick<DecisionRow, 'list_id' | 'sender_address'>): { kind: 'list_id' | 'sender_address'; value: string } | null {
-  if (row.list_id !== null && ruleValueOk('list_id', row.list_id)) return { kind: 'list_id', value: row.list_id };
-  if (row.sender_address !== null && ruleValueOk('sender_address', row.sender_address)) return { kind: 'sender_address', value: row.sender_address };
-  return null;
-}
-
-function corrections(store: Store, key: { kind: 'list_id' | 'sender_address'; value: string }, label: string): number {
-  const column = key.kind === 'list_id' ? 'list_id' : 'sender_address';
-  return store.count(`SELECT count(*) AS n FROM decisions WHERE ${column} = ? AND verdict_label = ? AND verdict = 'corrected'`, key.value, label);
-}
-
-export function proposeRule(store: Store, row: DecisionRow, label: string, now: number): void {
-  const key = ruleKey(row);
-  if (key === null) return;
-  const count = corrections(store, key, label);
-  if (count < RULE_PROPOSAL_CORRECTIONS) return;
-  const existing = store.one<{ id: string; state: string }>(`SELECT id, state FROM rules WHERE kind = ? AND value = ? AND label_id = ?`, key.kind, key.value, label);
-  if (existing !== undefined) {
-    store.run(`UPDATE rules SET correction_count = ? WHERE id = ?`, count, existing.id);
-    return;
-  }
-  store.run(
-    `INSERT INTO rules (id, kind, value, label_id, state, correction_count, create_time, update_time) VALUES (?, ?, ?, ?, 'proposed', ?, ?, ?)`,
-    shortId('r'),
-    key.kind,
-    key.value,
-    label,
-    count,
-    now,
-    now,
-  );
-}
-
-function retractProposal(store: Store, row: DecisionRow, label: string): void {
-  const key = ruleKey(row);
-  if (key === null) return;
-  const count = corrections(store, key, label);
-  if (count < RULE_PROPOSAL_CORRECTIONS) store.run(`DELETE FROM rules WHERE kind = ? AND value = ? AND label_id = ? AND state = 'proposed'`, key.kind, key.value, label);
-  else store.run(`UPDATE rules SET correction_count = ? WHERE kind = ? AND value = ? AND label_id = ?`, count, key.kind, key.value, label);
 }
 
 /**
@@ -165,6 +115,9 @@ function judge(store: Store, row: DecisionRow, now: number): void {
     return;
   }
   const chosen = others[0] ?? null;
-  if (row.verdict_source !== 'gmail' || row.verdict_label !== chosen) setVerdict(store, row, chosen, 'gmail', now);
+  // The owner's review choice, written to Gmail in live mode, comes back from the history as a label change: the same
+  // verdict, which keeps its source and time (the sender history counts it from then).
+  const sameReview = row.verdict_source === 'review' && row.verdict_label === chosen;
+  if (!sameReview && (row.verdict_source !== 'gmail' || row.verdict_label !== chosen)) setVerdict(store, row, chosen, 'gmail', now);
   if (standing && chosen !== applied) store.run(`UPDATE ledger SET superseded = 1 WHERE id = ?`, ledger.id);
 }

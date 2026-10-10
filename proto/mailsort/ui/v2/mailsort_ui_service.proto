@@ -1,15 +1,19 @@
 // Mailsort's owner API: the HTTP/JSON interface between its UI (mailsort/web) and the Worker "mailsort"
-// (mailsort/worker), whose Durable Object MailsortState holds every label, rule, decision, example and ledger entry.
+// (mailsort/worker), whose Durable Object MailsortState holds every label, decision, example and ledger entry.
+//
+// Version 2 (2026-10-10): the model decides every mail (no rules), the review queue holds only a few uncertain
+// mails a day, and a label writes in live mode whenever it is enabled. It replaced mailsort.ui.v1 (/api/v1), whose
+// paths answer 410 RELOAD_REQUIRED for one release.
 //
 // Callers. Only the mailsort UI calls it (same origin, sort.ziyixi.science). The dashboard gets counts through
 // ops-v1, never this API.
 //
-// Transport. google.api.http bindings under /api/v1, served by the shared transcoder
+// Transport. google.api.http bindings under /api/v2, served by the shared transcoder
 // (proto/ts/http-transcoder.ts) and called through the shared client (proto/ts/http-client.ts). Bodies, query
 // parameters and responses are JSON in the wire JSON profile (proto/README.md): proto field names (snake_case),
 // enum values in lower case without their prefix (`Mode.MODE_LIVE` is "live"), timestamps in RFC 3339 UTC.
-// Inputs are read strictly, outputs leniently. Request bodies are at most 256 KiB (an import of every rule). Errors: errors.proto (this
-// app's reasons) and common/errors/v1/errors.proto (the reasons every API shares).
+// // Inputs are read strictly, outputs leniently. Request bodies are at most 16 KiB. Errors: errors.proto (this app's
+// reasons) and common/errors/v1/errors.proto (the reasons every API shares).
 //
 // Authentication, in front of the transcoder (packages/edge-auth): the whole host is behind Cloudflare Access,
 // and every route needs the owner's Access JWT; every method other than GET also needs the same-origin Origin
@@ -34,7 +38,7 @@
 
 syntax = "proto3";
 
-package mailsort.ui.v1;
+package mailsort.ui.v2;
 
 import "google/api/annotations.proto";
 import "google/api/client.proto";
@@ -44,19 +48,19 @@ import "google/api/resource.proto";
 import "google/protobuf/empty.proto";
 import "google/protobuf/field_mask.proto";
 import "google/protobuf/timestamp.proto";
-import "mailsort/ui/v1/flow.proto";
-import "mailsort/ui/v1/label.proto";
-import "mailsort/ui/v1/review.proto";
-import "mailsort/ui/v1/rule.proto";
-import "mailsort/ui/v1/status.proto";
+import "mailsort/ui/v2/flow.proto";
+import "mailsort/ui/v2/label.proto";
+import "mailsort/ui/v2/replay.proto";
+import "mailsort/ui/v2/review.proto";
+import "mailsort/ui/v2/status.proto";
 
 option java_multiple_files = true;
 option java_outer_classname = "MailsortUiServiceProto";
-option java_package = "science.ziyixi.mailsort.ui.v1";
+option java_package = "science.ziyixi.mailsort.ui.v2";
 
-// The owner's mail sorting: labels and their descriptions, the review queue, rules (and their import and export),
-// examples, accuracy, the ledger of Gmail writes, the flow of mail through the pipeline, the status and the
-// settings.
+// The owner's mail sorting: labels with their descriptions and trusted domains, the review queue, examples, the
+// ledger of Gmail writes, the flow of mail through the pipeline, the label report, the replay evaluation, the
+// status and the settings.
 // (-- api-linter: core::0121::resource-must-support-list=disabled
 //     aip.dev/not-precedent: MailFlow has three fixed ranges (today, the last 7 and 30 days), named in its
 //     comment; a list of them would say nothing more. --)
@@ -67,13 +71,13 @@ service MailsortUiService {
   // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
   // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
   rpc GetLabel(GetLabelRequest) returns (Label) {
-    option (google.api.http) = {get: "/api/v1/{name=labels/*}"};
+    option (google.api.http) = {get: "/api/v2/{name=labels/*}"};
     option (google.api.method_signature) = "name";
   }
 
   // The labels, in the order they were created (AIP-132, AIP-158).
   rpc ListLabels(ListLabelsRequest) returns (ListLabelsResponse) {
-    option (google.api.http) = {get: "/api/v1/labels"};
+    option (google.api.http) = {get: "/api/v2/labels"};
     option (google.api.method_signature) = "";
   }
 
@@ -84,7 +88,7 @@ service MailsortUiService {
   // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
   rpc CreateLabel(CreateLabelRequest) returns (Label) {
     option (google.api.http) = {
-      post: "/api/v1/labels"
+      post: "/api/v2/labels"
       body: "label"
     };
     option (google.api.method_signature) = "label,label_id";
@@ -96,18 +100,18 @@ service MailsortUiService {
   // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
   rpc UpdateLabel(UpdateLabelRequest) returns (Label) {
     option (google.api.http) = {
-      patch: "/api/v1/{label.name=labels/*}"
+      patch: "/api/v2/{label.name=labels/*}"
       body: "label"
     };
     option (google.api.method_signature) = "label,update_mask";
   }
 
-  // Deletes a label from mailsort with its rules and examples (AIP-135). The Gmail label and the mails that carry
-  // it stay as they are: mailsort never deletes a Gmail label.
+  // Deletes a label from mailsort with its examples and trusted domains (AIP-135). The Gmail label and the mails
+  // that carry it stay as they are: mailsort never deletes a Gmail label.
   // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
   // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
   rpc DeleteLabel(DeleteLabelRequest) returns (google.protobuf.Empty) {
-    option (google.api.http) = {delete: "/api/v1/{name=labels/*}"};
+    option (google.api.http) = {delete: "/api/v2/{name=labels/*}"};
     option (google.api.method_signature) = "name";
   }
 
@@ -120,44 +124,47 @@ service MailsortUiService {
   //     itself. --)
   rpc SyncLabels(SyncLabelsRequest) returns (SyncLabelsResponse) {
     option (google.api.http) = {
-      post: "/api/v1/labels:sync"
+      post: "/api/v2/labels:sync"
       body: "*"
     };
+  }
+
+  // Takes one domain off a label's trusted domains (Label.trusted_domains). There is no add: a domain is learned
+  // from the owner's review choices.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc RemoveTrustedDomain(RemoveTrustedDomainRequest) returns (Label) {
+    option (google.api.http) = {
+      post: "/api/v2/{name=labels/*}:removeTrustedDomain"
+      body: "*"
+    };
+    option (google.api.method_signature) = "name,domain";
   }
 
   // A review item (AIP-131).
   // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
   // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
   rpc GetReviewItem(GetReviewItemRequest) returns (ReviewItem) {
-    option (google.api.http) = {get: "/api/v1/{name=reviewItems/*}"};
+    option (google.api.http) = {get: "/api/v2/{name=reviewItems/*}"};
     option (google.api.method_signature) = "name";
   }
 
-  // The review items waiting for the owner, newest first (AIP-132, AIP-158).
+  // The review items waiting for the owner, newest first (AIP-132, AIP-158): uncertain mail only, at most a daily
+  // quota of 1 to 5 (5 % of the last week's daily mail).
   rpc ListReviewItems(ListReviewItemsRequest) returns (ListReviewItemsResponse) {
-    option (google.api.http) = {get: "/api/v1/reviewItems"};
+    option (google.api.http) = {get: "/api/v2/reviewItems"};
     option (google.api.method_signature) = "";
   }
 
-  // Confirms the suggested label (AIP-216). In live mode an unsure or suggested mail then gets that label in
-  // Gmail (and is archived).
+  // Answers an uncertain mail with a label, or "none of them" (AIP-216). The answer is a verdict: with a label it
+  // becomes an example, and for a trust label and a sender that passed DMARC the sender's domain joins the label's
+  // trusted domains. In live mode the label is also written to Gmail (and the mail archived, unless the label or
+  // the mail keeps it in the inbox).
   // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
   // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
-  rpc ConfirmReviewItem(ConfirmReviewItemRequest) returns (ReviewItem) {
+  rpc ResolveReviewItem(ResolveReviewItemRequest) returns (ReviewItem) {
     option (google.api.http) = {
-      post: "/api/v1/{name=reviewItems/*}:confirm"
-      body: "*"
-    };
-    option (google.api.method_signature) = "name";
-  }
-
-  // Chooses another label, or none (AIP-216). The choice becomes an example; for an audited mail the Worker's
-  // label is replaced in Gmail.
-  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
-  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
-  rpc CorrectReviewItem(CorrectReviewItemRequest) returns (ReviewItem) {
-    option (google.api.http) = {
-      post: "/api/v1/{name=reviewItems/*}:correct"
+      post: "/api/v2/{name=reviewItems/*}:resolve"
       body: "*"
     };
     option (google.api.method_signature) = "name,label";
@@ -168,119 +175,23 @@ service MailsortUiService {
   // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
   rpc SkipReviewItem(SkipReviewItemRequest) returns (ReviewItem) {
     option (google.api.http) = {
-      post: "/api/v1/{name=reviewItems/*}:skip"
+      post: "/api/v2/{name=reviewItems/*}:skip"
       body: "*"
     };
     option (google.api.method_signature) = "name";
-  }
-
-  // A rule (AIP-131).
-  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
-  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
-  rpc GetRule(GetRuleRequest) returns (Rule) {
-    option (google.api.http) = {get: "/api/v1/{name=rules/*}"};
-    option (google.api.method_signature) = "name";
-  }
-
-  // The rules, newest first (AIP-132, AIP-158).
-  rpc ListRules(ListRulesRequest) returns (ListRulesResponse) {
-    option (google.api.http) = {get: "/api/v1/rules"};
-    option (google.api.method_signature) = "";
-  }
-
-  // Creates an active rule (AIP-133).
-  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
-  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
-  rpc CreateRule(CreateRuleRequest) returns (Rule) {
-    option (google.api.http) = {
-      post: "/api/v1/rules"
-      body: "rule"
-    };
-    option (google.api.method_signature) = "rule,rule_id";
-  }
-
-  // Makes a proposed or disabled rule active (AIP-216).
-  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
-  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
-  rpc ApproveRule(ApproveRuleRequest) returns (Rule) {
-    option (google.api.http) = {
-      post: "/api/v1/{name=rules/*}:approve"
-      body: "*"
-    };
-    option (google.api.method_signature) = "name";
-  }
-
-  // Stops a rule (AIP-216).
-  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
-  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
-  rpc DisableRule(DisableRuleRequest) returns (Rule) {
-    option (google.api.http) = {
-      post: "/api/v1/{name=rules/*}:disable"
-      body: "*"
-    };
-    option (google.api.method_signature) = "name";
-  }
-
-  // Deletes a rule (AIP-135).
-  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
-  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
-  rpc DeleteRule(DeleteRuleRequest) returns (google.protobuf.Empty) {
-    option (google.api.http) = {delete: "/api/v1/{name=rules/*}"};
-    option (google.api.method_signature) = "name";
-  }
-
-  // The active rules as a Gmail filter file (Settings > Filters > Import filters), for the owner to import by
-  // hand. Rules that need DMARC are left out: a Gmail filter cannot check it.
-  // (-- api-linter: core::0136::http-uri-suffix=disabled
-  //     aip.dev/not-precedent: a custom method on the collection, `rules:exportGmailFilters`; the noun is the
-  //     collection itself. --)
-  // (-- api-linter: core::0136::http-method=disabled
-  //     aip.dev/not-precedent: a read without side effects, so a GET (AIP-136 allows it for such methods). --)
-  // (-- api-linter: core::0136::http-body=disabled
-  //     aip.dev/not-precedent: a GET has no body. --)
-  rpc ExportGmailFilters(ExportGmailFiltersRequest) returns (ExportGmailFiltersResponse) {
-    option (google.api.http) = {get: "/api/v1/rules:exportGmailFilters"};
-  }
-
-  // Imports labels and rules (AIP-136; AIP-163 `validate_only` for the preview): the owner's rule file, the
-  // export of ExportRules, or the built-in template of recommended labels. Each entry is created, updated or
-  // skipped (unchanged); a label a rule names that does not exist is created (enabled, not live, without a
-  // description). Nothing is written to Gmail: new labels are created there before their first write. All or
-  // nothing: an import with an invalid entry is INVALID_IMPORT and changes nothing.
-  // (-- api-linter: core::0136::http-uri-suffix=disabled
-  //     aip.dev/not-precedent: a custom method on the collection, `rules:import`; the noun is the collection
-  //     itself. --)
-  rpc ImportRules(ImportRulesRequest) returns (ImportRulesResponse) {
-    option (google.api.http) = {
-      post: "/api/v1/rules:import"
-      body: "*"
-    };
-  }
-
-  // Every label and rule as the JSON document ImportRules reads back (`{"labels": [...], "rules": [...]}`), the
-  // rules in the owner's rule file format.
-  // (-- api-linter: core::0136::http-uri-suffix=disabled
-  //     aip.dev/not-precedent: a custom method on the collection, `rules:export`; the noun is the collection
-  //     itself. --)
-  // (-- api-linter: core::0136::http-method=disabled
-  //     aip.dev/not-precedent: a read without side effects, so a GET (AIP-136 allows it for such methods). --)
-  // (-- api-linter: core::0136::http-body=disabled
-  //     aip.dev/not-precedent: a GET has no body. --)
-  rpc ExportRules(ExportRulesRequest) returns (ExportRulesResponse) {
-    option (google.api.http) = {get: "/api/v1/rules:export"};
   }
 
   // An example (AIP-131).
   // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
   // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
   rpc GetExample(GetExampleRequest) returns (Example) {
-    option (google.api.http) = {get: "/api/v1/{name=examples/*}"};
+    option (google.api.http) = {get: "/api/v2/{name=examples/*}"};
     option (google.api.method_signature) = "name";
   }
 
   // The examples, newest first (AIP-132, AIP-158).
   rpc ListExamples(ListExamplesRequest) returns (ListExamplesResponse) {
-    option (google.api.http) = {get: "/api/v1/examples"};
+    option (google.api.http) = {get: "/api/v2/examples"};
     option (google.api.method_signature) = "";
   }
 
@@ -288,7 +199,7 @@ service MailsortUiService {
   // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
   // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
   rpc DeleteExample(DeleteExampleRequest) returns (google.protobuf.Empty) {
-    option (google.api.http) = {delete: "/api/v1/{name=examples/*}"};
+    option (google.api.http) = {delete: "/api/v2/{name=examples/*}"};
     option (google.api.method_signature) = "name";
   }
 
@@ -298,7 +209,7 @@ service MailsortUiService {
   //     collection itself. --)
   rpc RebuildExampleEmbeddings(RebuildExampleEmbeddingsRequest) returns (RebuildExampleEmbeddingsResponse) {
     option (google.api.http) = {
-      post: "/api/v1/examples:rebuildEmbeddings"
+      post: "/api/v2/examples:rebuildEmbeddings"
       body: "*"
     };
   }
@@ -307,13 +218,13 @@ service MailsortUiService {
   // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
   // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
   rpc GetLedgerEntry(GetLedgerEntryRequest) returns (LedgerEntry) {
-    option (google.api.http) = {get: "/api/v1/{name=ledgerEntries/*}"};
+    option (google.api.http) = {get: "/api/v2/{name=ledgerEntries/*}"};
     option (google.api.method_signature) = "name";
   }
 
   // The ledger of Gmail writes, newest first (AIP-132, AIP-158).
   rpc ListLedgerEntries(ListLedgerEntriesRequest) returns (ListLedgerEntriesResponse) {
-    option (google.api.http) = {get: "/api/v1/ledgerEntries"};
+    option (google.api.http) = {get: "/api/v2/ledgerEntries"};
     option (google.api.method_signature) = "";
   }
 
@@ -322,7 +233,7 @@ service MailsortUiService {
   // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
   rpc UndoLedgerEntry(UndoLedgerEntryRequest) returns (LedgerEntry) {
     option (google.api.http) = {
-      post: "/api/v1/{name=ledgerEntries/*}:undo"
+      post: "/api/v2/{name=ledgerEntries/*}:undo"
       body: "*"
     };
     option (google.api.method_signature) = "name";
@@ -335,7 +246,7 @@ service MailsortUiService {
   //     collection itself. --)
   rpc UndoLedgerEntries(UndoLedgerEntriesRequest) returns (UndoLedgerEntriesResponse) {
     option (google.api.http) = {
-      post: "/api/v1/ledgerEntries:undo"
+      post: "/api/v2/ledgerEntries:undo"
       body: "*"
     };
   }
@@ -344,15 +255,38 @@ service MailsortUiService {
   // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
   // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
   rpc GetMailFlow(GetMailFlowRequest) returns (MailFlow) {
-    option (google.api.http) = {get: "/api/v1/{name=mailFlows/*}"};
+    option (google.api.http) = {get: "/api/v2/{name=mailFlows/*}"};
     option (google.api.method_signature) = "name";
   }
 
-  // The accuracy report.
+  // The label report of the last 7 days.
   // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
   // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
-  rpc GetAccuracyReport(GetAccuracyReportRequest) returns (AccuracyReport) {
-    option (google.api.http) = {get: "/api/v1/{name=accuracyReport}"};
+  rpc GetLabelReport(GetLabelReportRequest) returns (LabelReport) {
+    option (google.api.http) = {get: "/api/v2/{name=labelReport}"};
+    option (google.api.method_signature) = "name";
+  }
+
+  // The latest replay evaluation and its summary (no mail content); NOT_FOUND before the first or after its rows
+  // were pruned.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc GetReplayEvaluation(GetReplayEvaluationRequest) returns (ReplayEvaluation) {
+    option (google.api.http) = {get: "/api/v2/{name=replayEvaluation}"};
+    option (google.api.method_signature) = "name";
+  }
+
+  // Starts a replay evaluation over the review items the owner resolved in the last 14 days, replacing the
+  // previous one. The alarm re-reads each mail with the read grant and decides it again without writing anything
+  // to Gmail and without making verdicts or examples. Needs a mode that reads Gmail (shadow or live) to make
+  // progress.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc StartReplayEvaluation(StartReplayEvaluationRequest) returns (ReplayEvaluation) {
+    option (google.api.http) = {
+      post: "/api/v2/{name=replayEvaluation}:start"
+      body: "*"
+    };
     option (google.api.method_signature) = "name";
   }
 
@@ -360,7 +294,7 @@ service MailsortUiService {
   // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
   // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
   rpc GetServiceStatus(GetServiceStatusRequest) returns (ServiceStatus) {
-    option (google.api.http) = {get: "/api/v1/{name=serviceStatus}"};
+    option (google.api.http) = {get: "/api/v2/{name=serviceStatus}"};
     option (google.api.method_signature) = "name";
   }
 
@@ -368,7 +302,7 @@ service MailsortUiService {
   // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
   // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
   rpc GetSettings(GetSettingsRequest) returns (Settings) {
-    option (google.api.http) = {get: "/api/v1/{name=settings}"};
+    option (google.api.http) = {get: "/api/v2/{name=settings}"};
     option (google.api.method_signature) = "name";
   }
 
@@ -377,7 +311,7 @@ service MailsortUiService {
   // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
   rpc UpdateSettings(UpdateSettingsRequest) returns (Settings) {
     option (google.api.http) = {
-      patch: "/api/v1/{settings.name=settings}"
+      patch: "/api/v2/{settings.name=settings}"
       body: "settings"
     };
     option (google.api.method_signature) = "settings,update_mask";
@@ -468,16 +402,28 @@ message SyncLabelsResponse {
   repeated Label labels = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
   // Labels linked to (adopting) the Gmail label of their path by this sync.
   int32 linked_count = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Deprecated: always 0 since 2026-10-07. SyncLabels no longer imports Gmail labels (there is no prefix to
-  // tell mailsort's from the owner's).
-  int32 imported_count = 3 [
-    deprecated = true,
-    (google.api.field_behavior) = OUTPUT_ONLY
-  ];
   // Linked labels Gmail no longer has.
-  int32 missing_count = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  int32 missing_count = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
   // Linked labels whose path followed a rename made in Gmail.
-  int32 renamed_count = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  int32 renamed_count = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// Input of RemoveTrustedDomain.
+message RemoveTrustedDomainRequest {
+  // labels/{label}.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "sort.ziyixi.science/Label"
+  ];
+  // The domain to take off, exactly as Label.trusted_domains lists it; one it does not list is NOT_FOUND.
+  string domain = 2 [(google.api.field_behavior) = REQUIRED];
+  // When set, the label's current etag (AIP-154); a stale one is ETAG_MISMATCH.
+  string etag = 3 [(google.api.field_behavior) = OPTIONAL];
+  // The idempotency key (AIP-155); see MailsortUiService.
+  string request_id = 4 [
+    (google.api.field_info).format = UUID4,
+    (google.api.field_behavior) = OPTIONAL
+  ];
 }
 
 // Input of GetReviewItem.
@@ -505,22 +451,8 @@ message ListReviewItemsResponse {
   string next_page_token = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
 }
 
-// Input of ConfirmReviewItem.
-message ConfirmReviewItemRequest {
-  // reviewItems/{review_item}.
-  string name = 1 [
-    (google.api.field_behavior) = REQUIRED,
-    (google.api.resource_reference).type = "sort.ziyixi.science/ReviewItem"
-  ];
-  // The idempotency key (AIP-155); see MailsortUiService.
-  string request_id = 2 [
-    (google.api.field_info).format = UUID4,
-    (google.api.field_behavior) = OPTIONAL
-  ];
-}
-
-// Input of CorrectReviewItem.
-message CorrectReviewItemRequest {
+// Input of ResolveReviewItem.
+message ResolveReviewItemRequest {
   // reviewItems/{review_item}.
   string name = 1 [
     (google.api.field_behavior) = REQUIRED,
@@ -550,269 +482,6 @@ message SkipReviewItemRequest {
     (google.api.field_info).format = UUID4,
     (google.api.field_behavior) = OPTIONAL
   ];
-}
-
-// Input of GetRule.
-message GetRuleRequest {
-  // rules/{rule}.
-  string name = 1 [
-    (google.api.field_behavior) = REQUIRED,
-    (google.api.resource_reference).type = "sort.ziyixi.science/Rule"
-  ];
-}
-
-// Input of ListRules.
-message ListRulesRequest {
-  // At most this many rules (AIP-158): 0 means 100, and a larger value is read as 100.
-  int32 page_size = 1 [(google.api.field_behavior) = OPTIONAL];
-  // The previous page's `next_page_token`.
-  string page_token = 2 [(google.api.field_behavior) = OPTIONAL];
-}
-
-// Output of ListRules.
-message ListRulesResponse {
-  // The page.
-  repeated Rule rules = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // The next page's token; empty on the last page.
-  string next_page_token = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
-}
-
-// Input of CreateRule.
-message CreateRuleRequest {
-  // The rule to create: `kind`, `value` and `label`; its `name` is ignored (`rule_id` names it).
-  Rule rule = 1 [(google.api.field_behavior) = REQUIRED];
-  // The ID of the new rule (a query parameter): 1 to 40 characters of `a-z`, `0-9` and `-`, starting with a
-  // letter; empty: the Worker makes one.
-  string rule_id = 3 [(google.api.field_behavior) = OPTIONAL];
-  // The idempotency key (AIP-155), a query parameter; see MailsortUiService.
-  string request_id = 2 [
-    (google.api.field_info).format = UUID4,
-    (google.api.field_behavior) = OPTIONAL
-  ];
-}
-
-// Input of ApproveRule.
-message ApproveRuleRequest {
-  // rules/{rule}.
-  string name = 1 [
-    (google.api.field_behavior) = REQUIRED,
-    (google.api.resource_reference).type = "sort.ziyixi.science/Rule"
-  ];
-  // The idempotency key (AIP-155); see MailsortUiService.
-  string request_id = 2 [
-    (google.api.field_info).format = UUID4,
-    (google.api.field_behavior) = OPTIONAL
-  ];
-}
-
-// Input of DisableRule.
-message DisableRuleRequest {
-  // rules/{rule}.
-  string name = 1 [
-    (google.api.field_behavior) = REQUIRED,
-    (google.api.resource_reference).type = "sort.ziyixi.science/Rule"
-  ];
-  // The idempotency key (AIP-155); see MailsortUiService.
-  string request_id = 2 [
-    (google.api.field_info).format = UUID4,
-    (google.api.field_behavior) = OPTIONAL
-  ];
-}
-
-// Input of DeleteRule.
-message DeleteRuleRequest {
-  // rules/{rule}.
-  string name = 1 [
-    (google.api.field_behavior) = REQUIRED,
-    (google.api.resource_reference).type = "sort.ziyixi.science/Rule"
-  ];
-  // The idempotency key (AIP-155), a query parameter; see MailsortUiService.
-  string request_id = 2 [
-    (google.api.field_info).format = UUID4,
-    (google.api.field_behavior) = OPTIONAL
-  ];
-}
-
-// Input of ExportGmailFilters: nothing.
-message ExportGmailFiltersRequest {}
-
-// Output of ExportGmailFilters.
-message ExportGmailFiltersResponse {
-  // The filter file (Atom XML, as Gmail exports filters).
-  string xml = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // The rules it holds.
-  int32 rule_count = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Active rules left out because they need DMARC.
-  int32 skipped_count = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
-}
-
-// A label of an import: created when no label has its path, else updated where it differs.
-message LabelImport {
-  // The label's path (Label.display_name), `开发/CI通知`. The legacy `分拣/开发/CI通知` of older files means the
-  // same.
-  string path = 1 [(google.api.field_behavior) = REQUIRED];
-  // Label.description.
-  string description = 2 [(google.api.field_behavior) = OPTIONAL];
-  // Label.trust_implying.
-  bool trust = 3 [(google.api.field_behavior) = OPTIONAL];
-  // Label.keep_in_inbox.
-  // (-- api-linter: core::0140::prepositions=disabled
-  //     aip.dev/not-precedent: "keep in inbox" is the owner's own name for the switch, and the rule file's. --)
-  bool keep_in_inbox = 4 [(google.api.field_behavior) = OPTIONAL];
-  // Label.sensitive.
-  bool sensitive = 5 [(google.api.field_behavior) = OPTIONAL];
-  // Label.threshold (0 for the default).
-  double threshold = 6 [(google.api.field_behavior) = OPTIONAL];
-  // Label.enabled, as an export writes it. Absent (the owner's rule file, the template): a new label is enabled and an
-  // existing one keeps its switch; present: a new label gets it and an existing one is set to it.
-  optional bool enabled = 7 [(google.api.field_behavior) = OPTIONAL];
-}
-
-// What a rule of an import matches: exactly one of the four.
-message RuleMatch {
-  // A sender rule on the From address (Rule.Kind.KIND_SENDER_ADDRESS).
-  // (-- api-linter: core::0140::prepositions=disabled
-  //     aip.dev/not-precedent: the owner's rule file names it so; the request reads that file as it is. --)
-  string from_address = 1 [(google.api.field_behavior) = OPTIONAL];
-  // A sender rule on the From domain and its subdomains (Rule.Kind.KIND_SENDER_DOMAIN).
-  // (-- api-linter: core::0140::prepositions=disabled
-  //     aip.dev/not-precedent: the owner's rule file names it so; the request reads that file as it is. --)
-  string from_domain = 2 [(google.api.field_behavior) = OPTIONAL];
-  // A List-Id rule (Rule.Kind.KIND_LIST_ID).
-  string list_id = 3 [(google.api.field_behavior) = OPTIONAL];
-  // A Delivered-To rule (Rule.Kind.KIND_DELIVERED_TO).
-  // (-- api-linter: core::0140::prepositions=disabled
-  //     aip.dev/not-precedent: the owner's rule file names it so; the request reads that file as it is. --)
-  string to_address = 4 [(google.api.field_behavior) = OPTIONAL];
-}
-
-// A rule of an import, in the owner's rule file format.
-message RuleImport {
-  // The entry's own ID (1 to 64 characters of letters, digits, `.`, `_` and `-`): a later import of the same ID
-  // updates the rule it made (Rule.import_id).
-  string id = 1 [(google.api.field_behavior) = REQUIRED];
-  // What it matches.
-  RuleMatch match = 2 [(google.api.field_behavior) = REQUIRED];
-  // The label's path (LabelImport.path; the legacy `分拣/` prefix is read as nothing).
-  string label = 3 [(google.api.field_behavior) = REQUIRED];
-  // Rule.keep_in_inbox.
-  // (-- api-linter: core::0140::prepositions=disabled
-  //     aip.dev/not-precedent: "keep in inbox" is the owner's own name for the switch, and the rule file's. --)
-  bool keep_in_inbox = 4 [(google.api.field_behavior) = OPTIONAL];
-  // The label implies trust: a label the import creates for this rule is created so; for an existing label
-  // that does not, the preview warns.
-  bool trust = 5 [(google.api.field_behavior) = OPTIONAL];
-  // Rule.require_dmarc (a sender rule needs DMARC whatever this says).
-  bool require_dmarc = 6 [(google.api.field_behavior) = OPTIONAL];
-  // Rule.evidence.
-  string evidence = 7 [(google.api.field_behavior) = OPTIONAL];
-  // Rule.notes.
-  string notes = 8 [(google.api.field_behavior) = OPTIONAL];
-  // Rule.subject_includes.
-  repeated string subject_includes = 9 [(google.api.field_behavior) = OPTIONAL];
-  // Rule.subject_excludes.
-  repeated string subject_excludes = 10 [(google.api.field_behavior) = OPTIONAL];
-}
-
-// Input of ImportRules.
-message ImportRulesRequest {
-  // The labels to create or update (at most 24).
-  repeated LabelImport labels = 1 [(google.api.field_behavior) = OPTIONAL];
-  // The rules to create or update (at most 500).
-  repeated RuleImport rules = 2 [(google.api.field_behavior) = OPTIONAL];
-  // Import the built-in template of recommended labels instead (`labels` and `rules` must then be empty).
-  bool use_template = 3 [(google.api.field_behavior) = OPTIONAL];
-  // AIP-163: only check and answer what the import would do (the preview); nothing changes.
-  bool validate_only = 4 [(google.api.field_behavior) = OPTIONAL];
-  // The idempotency key (AIP-155); see MailsortUiService.
-  string request_id = 5 [
-    (google.api.field_info).format = UUID4,
-    (google.api.field_behavior) = OPTIONAL
-  ];
-}
-
-// What an import does with one entry.
-message ImportChange {
-  // The kind of entry.
-  enum Kind {
-    // Never written.
-    KIND_UNSPECIFIED = 0;
-    // A label (of `labels`, of the template, or one a rule names).
-    KIND_LABEL = 1;
-    // A rule.
-    KIND_RULE = 2;
-  }
-
-  // What happens to it.
-  enum Action {
-    // Never written.
-    ACTION_UNSPECIFIED = 0;
-    // A new label or rule.
-    ACTION_CREATE = 1;
-    // An existing one whose `changed_fields` differ.
-    ACTION_UPDATE = 2;
-    // An existing one, unchanged.
-    ACTION_SKIP = 3;
-    // Refused (`problem`): the import changes nothing while one entry is invalid.
-    ACTION_INVALID = 4;
-  }
-
-  // The kind of entry.
-  Kind kind = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Its position in the request's `labels` or `rules` (or the template's labels); -1 for a label only a rule
-  // names.
-  int32 index = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // What happens to it.
-  Action action = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // The label's path, or the rule's import ID.
-  string key = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // The label or rule it creates or updates, once known (`labels/dev-ci`, `rules/r1`).
-  string resource = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // The fields an update changes (`description`, `subject_includes`, ...).
-  repeated string changed_fields = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Why an entry is invalid, a code: `label_path`, `label_tree`, `description`, `threshold`,
-  // `match`, `value`, `rule_id`, `subject`, `text`, `duplicate`, `labels_full`, `rules_full`.
-  string problem = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Something the owner should know that does not stop the import, a code: `trust_mismatch` (the rule says
-  // trust, its label does not imply it), `rule_disabled` (the existing rule stays disabled), `same_match` (another
-  // rule of the import has the same match and conditions: the earlier one is tried first), `examples_deleted` (the
-  // update turns the label sensitive: its examples are deleted).
-  string warning = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
-}
-
-// Output of ImportRules.
-message ImportRulesResponse {
-  // Every entry, labels first, then rules, in the request's order.
-  repeated ImportChange changes = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // The import was applied (false for `validate_only`).
-  bool applied = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Labels created (or that would be).
-  int32 created_label_count = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Labels updated (or that would be).
-  int32 updated_label_count = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Rules created (or that would be).
-  int32 created_rule_count = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Rules updated (or that would be).
-  int32 updated_rule_count = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Entries left as they are.
-  int32 skipped_count = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Invalid entries (then nothing is applied).
-  int32 invalid_count = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // The labels of the import as they are (or would be), so the preview can show the template's.
-  repeated LabelImport labels = 9 [(google.api.field_behavior) = OUTPUT_ONLY];
-}
-
-// Input of ExportRules: nothing.
-message ExportRulesRequest {}
-
-// Output of ExportRules.
-message ExportRulesResponse {
-  // The JSON document (UTF-8 text, two-space indented).
-  string json = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // The labels it holds.
-  int32 label_count = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // The rules it holds (proposed ones are left out).
-  int32 rule_count = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
 }
 
 // Input of GetMailFlow.
@@ -901,7 +570,7 @@ message ListLedgerEntriesRequest {
   int32 page_size = 1 [(google.api.field_behavior) = OPTIONAL];
   // The previous page's `next_page_token`, with the same `label`.
   string page_token = 2 [(google.api.field_behavior) = OPTIONAL];
-  // Only the entries of this label (the 流程 view's link); empty lists every entry.
+  // Only the entries of this label; empty lists every entry.
   // (-- api-linter: core::0132::request-unknown-fields=disabled
   //     aip.dev/not-precedent: one exact restriction; an AIP-160 filter of one field would say the same with a
   //     parser. --)
@@ -944,8 +613,8 @@ message UndoLedgerEntriesRequest {
     (google.api.field_info).format = UUID4,
     (google.api.field_behavior) = OPTIONAL
   ];
-  // Only the entries of this label (操作记录 filtered to one label, ListLedgerEntriesRequest.label); empty undoes
-  // every label's entries of the range.
+  // Only the entries of this label (ListLedgerEntriesRequest.label); empty undoes every label's entries of the
+  // range.
   string label = 4 [
     (google.api.field_behavior) = OPTIONAL,
     (google.api.resource_reference).type = "sort.ziyixi.science/Label"
@@ -963,12 +632,35 @@ message UndoLedgerEntriesResponse {
   int32 remaining_count = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
 }
 
-// Input of GetAccuracyReport.
-message GetAccuracyReportRequest {
-  // Always `accuracyReport`.
+// Input of GetLabelReport.
+message GetLabelReportRequest {
+  // Always `labelReport`.
   string name = 1 [
     (google.api.field_behavior) = REQUIRED,
-    (google.api.resource_reference).type = "sort.ziyixi.science/AccuracyReport"
+    (google.api.resource_reference).type = "sort.ziyixi.science/LabelReport"
+  ];
+}
+
+// Input of GetReplayEvaluation.
+message GetReplayEvaluationRequest {
+  // Always `replayEvaluation`.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "sort.ziyixi.science/ReplayEvaluation"
+  ];
+}
+
+// Input of StartReplayEvaluation.
+message StartReplayEvaluationRequest {
+  // Always `replayEvaluation`.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "sort.ziyixi.science/ReplayEvaluation"
+  ];
+  // The idempotency key (AIP-155); see MailsortUiService. A repeat answers the evaluation it started.
+  string request_id = 2 [
+    (google.api.field_info).format = UUID4,
+    (google.api.field_behavior) = OPTIONAL
   ];
 }
 

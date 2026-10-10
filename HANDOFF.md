@@ -16,8 +16,51 @@ Rules for this file:
   what is done, what is left, how to verify it and what to check after its deploy. Link to the app docs for
   design detail instead of copying it.
 
-Last updated: 2026-10-07.
+Last updated: 2026-10-10.
 <!-- Active work is separate from the production evidence below. -->
+
+## In flight (2026-10-10, Claude): mailsort model-first, branch `mailsort-model-first`
+
+Owner request 2026-10-10: sender-address rules sort badly (one sender's statements and promotions alike), so remove
+them; the owner no longer wants to review every mail, only highly uncertain ones (about 1 in 20); use the model more
+for precision; then turn Gmail labelling live. Design: `mailsort/docs/design.md` §3.2, §4.4, §5, §5.1.
+
+Done on the branch (local commits from `5f68724`, not pushed), the Worker side:
+- `proto/mailsort/ui/v2` (`/api/v2/`), `mailsort.ui.v1` retired in `proto/retired.json`; the Worker answers every
+  `/api/v1/...` path 410 `RELOAD_REQUIRED` until 2026-11-10 (`docs/history.md`).
+- The decision: the model decides every mail, two views (view 2 over view 1's three labels, reversed, when view 1's
+  top label has p ≥ 0.4), accept on agreement with a mean ≥ 0.7; `needs_action` keeps a labelled mail in the inbox; a
+  trust label needs DMARC and a trusted domain; the sender history (a keyed hash of the From address, never the
+  address) is evidence. 6 subrequests per mail, 6 mails a pass (40 in all).
+- The review queue: uncertain mail only, a daily quota of 1-5 (5 % of the last week's daily mail), the last place
+  kept for the informative band.
+- Trusted domains: schema version 5 (one transaction under blockConcurrencyWhile) seeds them from the active rules
+  of trust labels and the rules with `require_dmarc`, then drops the rules, the proposals and what only they used;
+  pending suggestions and audits leave 待审; labels lose `live`/`threshold`; decisions keep the sender as a hash.
+- The replay evaluation (`replayEvaluation:start`, GET `replayEvaluation`): the owner's resolved items of 14 days
+  decided again, nothing written, summary counts and label pairs only.
+- Removed: rules (CRUD, approve, disable, import, export, the Gmail filter export, `filters.ts`, `rule-value.ts`,
+  `import.ts`, `template.ts`), the audit, live gating and 正式打, the Wilson bound (`accuracy.ts`); ops-v1 no longer
+  raises `label_live_revoked`, and the guard defers `replay` in place of `audit` (contract fixture
+  `OpsStatus/mailsort-degraded.json` and the dashboard's golden line follow; tests only for the dashboard).
+- The web UI moved onto v2 with the smallest changes (待审 resolves, 概览's 准确率 card became the 7-day label report,
+  标签 has 启用 instead of 正式打 and a trust label's trusted domains, no rules, no template; 设置 lost the filter
+  export). The privacy policy page states the new retention.
+
+Left, in order:
+1. The UI redesign of the spec's §8 (待审 with plain-Chinese reasons and the empty state 没有需要你确认的邮件; 概览 with
+   the model → 已打标签 / 留在收件箱 / 不确定 DAG; 标签 with counts; 设置 with mode, undo and sync), on this branch.
+2. Push, the full CI gate, land (mailsort, Home's tests, contracts, the website for the privacy page).
+3. After the deploy, verify: ServiceStatus answers on `/api/v2/serviceStatus`; an old tab shows 邮件分拣已更新，请刷新页面;
+   标签 shows each trust label's seeded trusted domains (the former sender rules' domains); 待审 holds only uncertain
+   items; the next days' 待审 stays within its quota.
+4. Owner: run the replay evaluation from the signed-in page (`mailsort/README.md`), read the matches and the
+   mismatching pairs; then `mint-token.mjs --scope modify`, `MAILSORT_MODE=live`, and 正式 in 设置.
+
+Checked locally on the branch: the worker's lint, typecheck, unit tests and workerd runtime tests (CPU included), the
+smoke run against `wrangler dev`, the web's lint, typecheck, tests and build (its JavaScript budget), the deploy
+tests, the production dry run and bundle budget, proto's buf lint, api-linter, breaking (with the retirement) and its
+own tests, and `.github/scripts`' tests.
 
 ## In flight (2026-10-06, Claude): Home reports account changes made outside CI
 
@@ -94,8 +137,8 @@ enabled; the consent screen External (the owner approved accepting the User Data
 authorized domain `ziyixi.science`; published In production (unverified, so the grant shows Google's notice once).
 Done 2026-10-07: the Desktop OAuth client (owner), `mint-token.mjs --scope readonly` (the owner pasted the secret in
 their own terminal), the 15-label template and the validated rule set (93 precision-checked rules from a read-only
-survey of the last 30 days, kept off the repo). Next, owner: shadow for 1–2 weeks, confirming or correcting a few
-mails a day; turn 正式打 on per label when its precision bound passes; `--scope modify` and `MAILSORT_MODE=live` last.
+survey of the last 30 days, kept off the repo). Superseded 2026-10-10 by the model-first branch above (no rules, no
+正式打): going live is the replay evaluation, then `--scope modify` and `MAILSORT_MODE=live`.
 The synthetic Clef evaluation is dropped: the shadow run on real mail measures each label instead.
 
 ## In flight (2026-10-05, Claude): readability review, Newsletter warning, Lab removal

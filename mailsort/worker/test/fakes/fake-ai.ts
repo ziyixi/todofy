@@ -5,8 +5,10 @@
  * Clef: an option scores when a word of its description (two or more characters, split at spaces and Chinese or
  * ASCII punctuation) occurs in the state's subject, snippet or body; the best option gets `confidence`, the rest share
  * what is left, and with no match "none" gets it. `suspicious` is high for the phrases of the synthetic phishing mail,
- * `bulk` for a mailing list. bge-m3: a hashed bag of character trigrams, normalized (similar text, similar vector).
- * `quota` makes every call fail like the account's exhausted daily allocation.
+ * `needs_action` for a pickup or verification code, a payment due or a deadline, `bulk` for a mailing list. bge-m3: a
+ * hashed bag of character trigrams, normalized (similar text, similar vector). `quota` makes every call fail like the
+ * account's exhausted daily allocation; `choiceOverride` answers a view's `choice` as a test sets it (by the options
+ * it was offered).
  */
 
 export interface ClefCall {
@@ -24,6 +26,7 @@ function words(text: string): string[] {
 }
 
 const SUSPICIOUS = ['verify your account', 'password expires', '账户异常', '立即验证', 'suspended'];
+const NEEDS_ACTION = ['取件码', 'verification code', '验证码', 'payment due', 'please reply', 'deadline'];
 
 export class FakeAi {
   /** The best option's probability (the decision's confidence). */
@@ -34,6 +37,12 @@ export class FakeAi {
   readonly calls: ClefCall[] = [];
   /** Input tokens each Clef call reports. */
   tokensPerCall = 2000;
+  /**
+   * The probabilities a `choice` answers instead of the word match, from the option keys it was offered (the first
+   * view's, or the second's fewer); null for the word match. They are completed to the options (the rest 0) and must
+   * sum to 1.
+   */
+  choiceOverride: ((options: readonly string[]) => Record<string, number> | null) | null = null;
 
   reset(): void {
     this.confidence = 0.92;
@@ -41,6 +50,7 @@ export class FakeAi {
     this.broken = false;
     this.calls.length = 0;
     this.tokensPerCall = 2000;
+    this.choiceOverride = null;
   }
 
   /** The binding's `run`: an answer, or a thrown Error with the message Workers AI gives. */
@@ -61,6 +71,13 @@ export class FakeAi {
     for (const [id, question] of Object.entries(questions)) {
       if (question.type === 'choice') {
         const options = Object.keys(question.criteria ?? {});
+        const forced = this.choiceOverride?.(options) ?? null;
+        if (forced !== null) {
+          const probabilities = Object.fromEntries(options.map((option) => [option, forced[option] ?? 0]));
+          const top = Object.entries(probabilities).sort((a, b) => b[1] - a[1])[0]?.[0] ?? 'none';
+          answers[id] = { type: 'choice', choice: top, probabilities, confidence: probabilities[top] ?? 0 };
+          continue;
+        }
         const scores = options.map((option) => (option === 'none' ? 0 : words(question.criteria?.[option] ?? '').filter((word) => text.includes(word)).length));
         const best = Math.max(...scores);
         const top = best > 0 ? options[scores.indexOf(best)] ?? 'none' : 'none';
@@ -68,7 +85,8 @@ export class FakeAi {
         const probabilities = Object.fromEntries(options.map((option) => [option, option === top ? this.confidence : rest]));
         answers[id] = { type: 'choice', choice: top, probabilities, confidence: this.confidence };
       } else if (question.type === 'noul') {
-        const yes = id === 'suspicious' ? SUSPICIOUS.some((phrase) => text.includes(phrase)) : typeof state['list'] === 'string' && state['list'] !== '';
+        const phrases = id === 'suspicious' ? SUSPICIOUS : id === 'needs_action' ? NEEDS_ACTION : null;
+        const yes = phrases !== null ? phrases.some((phrase) => text.includes(phrase)) : typeof state['list'] === 'string' && state['list'] !== '';
         answers[id] = { type: 'noul', noul: yes ? 0.9 : 0.05 };
       }
     }

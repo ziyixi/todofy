@@ -1,8 +1,8 @@
 /**
  * MailsortState (../../docs/design.md §3): the single SQLite-backed Durable Object "mailsort-v1". It holds every label,
- * rule, decision, example and ledger entry, schedules itself with setAlarm (no cron trigger), makes every request to
+ * decision, example and ledger entry, schedules itself with setAlarm (no cron trigger), makes every request to
  * Gmail (gmail.ts) and Workers AI, and serves the owner API (api.ts) through the shared transcoder: the Worker (http.ts)
- * authenticates the owner and checks CSRF, then forwards /api/v1/* here, so the Worker's own request stays far below
+ * authenticates the owner and checks CSRF, then forwards /api/v2/* here, so the Worker's own request stays far below
  * Workers Free's 10 ms of CPU, and the Gmail and model calls get the object's 30 s.
  *
  * Scheduling: `alarm()` runs one pass (pipeline.ts) and arms the next alarm (soon while a backlog waits, else five
@@ -15,7 +15,7 @@
  */
 import { DurableObject } from 'cloudflare:workers';
 import { HttpTranscoder } from '@ziyixi/proto/http-transcoder';
-import { MailsortUiService } from '@ziyixi/proto/mailsort/ui/v1/mailsort_ui_service_pb';
+import { MailsortUiService } from '@ziyixi/proto/mailsort/ui/v2/mailsort_ui_service_pb';
 import type * as opsWire from '@ziyixi/proto/ops/v1/ops_wire';
 import { RpcError } from '@ziyixi/proto/rpc-status';
 import { handlers, type ApiContext } from './api.ts';
@@ -26,7 +26,7 @@ import { activeShed, setGuard, sortStatus, type GuardOutcome } from './ops-statu
 import { runPass, type PassResult } from './pipeline.ts';
 import { API_DOMAIN, localize, REASONS } from './reasons.ts';
 import { Budget, noteTokenOk, openSession } from './session.ts';
-import { Store, type RowMeter } from './store.ts';
+import { senderHashesToBackfill, Store, type RowMeter } from './store.ts';
 
 /**
  * The transcoder's authorize hook: nothing left to check. Only the Worker's fetch handler reaches this object, after it
@@ -54,9 +54,11 @@ export class MailsortState extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     this.store = new Store(ctx.storage.sql);
-    void ctx.blockConcurrencyWhile(() => {
-      this.store.migrate();
-      return Promise.resolve();
+    // The sender hashes a migration to version 5 needs are computed first (hashing is asynchronous); the migration
+    // itself is one transaction.
+    void ctx.blockConcurrencyWhile(async () => {
+      const hashes = await senderHashesToBackfill(this.store);
+      this.store.migrate(this.transact, hashes);
     });
   }
 

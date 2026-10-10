@@ -1,10 +1,10 @@
-// The review queue (mailsort/docs/design.md §5): shadow suggestions, unsure mails and the daily random audit of
-// labelled mails, which the owner confirms, corrects or skips. Every confirmation builds the evaluation set and
-// every correction an example.
+// The review queue (mailsort/docs/design.md §5): the few uncertain mails a day the model could not decide, at most a
+// daily quota, which the owner answers with a label, "none of them" or a skip. Every answer is a verdict and, with a
+// label, an example.
 
 syntax = "proto3";
 
-package mailsort.ui.v1;
+package mailsort.ui.v2;
 
 import "google/api/field_behavior.proto";
 import "google/api/resource.proto";
@@ -12,10 +12,10 @@ import "google/protobuf/timestamp.proto";
 
 option java_multiple_files = true;
 option java_outer_classname = "ReviewProto";
-option java_package = "science.ziyixi.mailsort.ui.v1";
+option java_package = "science.ziyixi.mailsort.ui.v2";
 
-// One mail waiting for the owner. Its subject and sender are masked (addresses, long digit runs and URLs
-// replaced) and kept at most 14 days; then the item leaves the queue unresolved.
+// One uncertain mail waiting for the owner. Its subject and sender are masked (addresses, long digit runs and URLs
+// replaced) and kept at most 14 days; then the item leaves the queue unanswered.
 message ReviewItem {
   option (google.api.resource) = {
     type: "sort.ziyixi.science/ReviewItem"
@@ -24,65 +24,44 @@ message ReviewItem {
     plural: "reviewItems"
   };
 
-  // Why the mail is in the queue.
-  enum Kind {
-    // Never written.
-    KIND_UNSPECIFIED = 0;
-    // Shadow mode (or a label not live yet): the decision was confident but only suggested.
-    KIND_SUGGESTION = 1;
-    // The decision was unsure: no label in Gmail, the mail stays in the inbox.
-    KIND_UNSURE = 2;
-    // A random check of a mail the Worker labelled in Gmail.
-    KIND_AUDIT = 3;
-  }
-
   // The item's lifecycle (AIP-216).
   enum State {
     // Never written.
     STATE_UNSPECIFIED = 0;
     // Waiting for the owner.
     STATE_PENDING = 1;
-    // The owner confirmed the suggested label.
-    STATE_CONFIRMED = 2;
-    // The owner chose another label, or none.
-    STATE_CORRECTED = 3;
+    // The owner chose a label, or none of them (ResolveReviewItem).
+    STATE_RESOLVED = 2;
     // The owner skipped it.
-    STATE_SKIPPED = 4;
+    STATE_SKIPPED = 3;
   }
 
   // reviewItems/{review_item}: an ID the Worker makes.
   string name = 1 [(google.api.field_behavior) = IDENTIFIER];
-  // Why the mail is in the queue.
-  Kind kind = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
   // The item's lifecycle.
-  State state = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  State state = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
   // The masked subject (at most 200 characters).
-  string subject = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  string subject = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
   // The sender's display name and domain, masked (at most 120 characters).
-  string sender = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // The suggested label; empty when the decision was "none of them".
-  string suggested_label = 6 [
-    (google.api.field_behavior) = OUTPUT_ONLY,
-    (google.api.resource_reference).type = "sort.ziyixi.science/Label"
-  ];
-  // The decision's three most likely options, the most likely first.
-  repeated Candidate candidates = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // What decided: `rule`, `neighbours`, `clef` or `clef-flash`.
-  string decider = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Why the decision was unsure: `below_threshold`, `none`, `suspicious`, `trust_needs_rule`, `label_disabled`,
-  // `model_unavailable`; empty for a confident one. More may come (shown as the code).
-  string unsure_reason = 9 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // The label the owner chose (CONFIRMED or CORRECTED); empty for "none of them".
-  string resolved_label = 10 [
+  string sender = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The model's three most likely options, the most likely first; an empty label is "none of them".
+  repeated Candidate candidates = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Why the model was uncertain: `low_confidence` (no option was likely enough), `views_disagree` (its two
+  // readings chose different labels), `suspicious` (it may be phishing), `untrusted_sender` (a trust label for a
+  // sender that is not authenticated or not among the label's trusted domains), `model_unavailable`. More may
+  // come (shown as the code).
+  string reason = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The label the owner chose (RESOLVED); empty for "none of them" and while pending.
+  string resolved_label = 7 [
     (google.api.field_behavior) = OUTPUT_ONLY,
     (google.api.resource_reference).type = "sort.ziyixi.science/Label"
   ];
   // When Gmail received the mail.
-  google.protobuf.Timestamp receive_time = 11 [(google.api.field_behavior) = OUTPUT_ONLY];
+  google.protobuf.Timestamp receive_time = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
   // When the item entered the queue.
-  google.protobuf.Timestamp create_time = 12 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // When the owner resolved it.
-  google.protobuf.Timestamp resolve_time = 13 [(google.api.field_behavior) = OUTPUT_ONLY];
+  google.protobuf.Timestamp create_time = 9 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // When the owner resolved or skipped it.
+  google.protobuf.Timestamp resolve_time = 10 [(google.api.field_behavior) = OUTPUT_ONLY];
 }
 
 // One of a decision's most likely options.
@@ -111,9 +90,9 @@ message Example {
   enum Origin {
     // Never written.
     ORIGIN_UNSPECIFIED = 0;
-    // The owner moved the mail to another label in Gmail, or corrected it in the review queue.
+    // The owner moved the mail to another label in Gmail, or chose another label than the decided one.
     ORIGIN_CORRECTION = 1;
-    // The owner confirmed a suggestion in the review queue.
+    // The owner chose the label the decision had, in the review queue or in Gmail.
     ORIGIN_CONFIRMATION = 2;
     // The label stayed untouched for 3 days after the Worker applied it (a weaker example).
     ORIGIN_WEAK_ACCEPT = 3;

@@ -1,7 +1,7 @@
 /**
  * The flow of mail through the pipeline (../../docs/design.md §10) as a Sankey diagram: 新邮件 on the left, the stage
- * that handled each mail in the middle (跳过, 规则, 向量近邻, Clef 27B, Clef-flash, 未调用模型, 延后), and on the right each
- * leaf label written to Gmail, 拿不准 (left in the inbox) and 影子建议 (suggested, nothing written). Link widths are mail
+ * that handled each mail in the middle (跳过, Clef 27B, Clef-flash, 未调用模型, 延后), and on the right each leaf label
+ * written to Gmail, 都不是 and 拿不准 (left in the inbox) and 影子建议 (recorded, nothing written). Link widths are mail
  * counts. With no mail at all it draws the skeleton instead: every stage and outcome at 0, muted nodes and hairline
  * links, so the diagram is always there.
  *
@@ -13,8 +13,8 @@
  * change, off under prefers-reduced-motion (styles.css).
  */
 import { sankey, sankeyLeft, sankeyLinkHorizontal, type SankeyLink, type SankeyNode } from 'd3-sankey'
-import { MailFlow_Outcome, MailFlow_Stage, type MailFlow_Count } from '@ziyixi/proto/mailsort/ui/v1/flow_pb'
-import type { Label } from '@ziyixi/proto/mailsort/ui/v1/label_pb'
+import { MailFlow_Outcome, MailFlow_Stage, type MailFlow_Count } from '@ziyixi/proto/mailsort/ui/v2/flow_pb'
+import type { Label } from '@ziyixi/proto/mailsort/ui/v2/label_pb'
 import { el } from './dom.ts'
 
 /** The categorical slots of styles.css (--series-1 to --series-8). */
@@ -51,8 +51,6 @@ export interface FlowGraph {
 
 const STAGES: readonly (readonly [MailFlow_Stage, string, string])[] = [
   [MailFlow_Stage.SKIPPED, 'skipped', '跳过'],
-  [MailFlow_Stage.RULE, 'rule', '规则'],
-  [MailFlow_Stage.NEIGHBOURS, 'neighbours', '向量近邻'],
   [MailFlow_Stage.CLEF, 'clef', 'Clef 27B'],
   [MailFlow_Stage.CLEF_FLASH, 'clef-flash', 'Clef-flash'],
   [MailFlow_Stage.NO_MODEL, 'no_model', '未调用模型'],
@@ -129,8 +127,10 @@ export function flowGraph(counts: readonly MailFlow_Count[], labels: readonly La
       add(stage, `label:${count.label}`, n)
     } else if (count.outcome === MailFlow_Outcome.SUGGESTED) {
       add(stage, 'suggested', n)
-    } else if (count.outcome === MailFlow_Outcome.UNSURE) {
+    } else if (count.outcome === MailFlow_Outcome.UNSURE || count.outcome === MailFlow_Outcome.UNSURE_SHOWN) {
       add(stage, 'unsure', n)
+    } else if (count.outcome === MailFlow_Outcome.NO_LABEL) {
+      add(stage, 'none', n)
     }
   }
 
@@ -159,6 +159,7 @@ export function flowGraph(counts: readonly MailFlow_Count[], labels: readonly La
   const labelIds = [...used].filter((id) => id.startsWith('label:')).map((id) => id.slice('label:'.length))
   labelIds.sort((a, b) => order(a) - order(b) || (a < b ? -1 : 1))
   for (const label of labelIds) nodes.push({ id: `label:${label}`, name: nameOf(label), kind: 'label', slot: slotOf(label), group: groupOf(label) })
+  if (used.has('none')) nodes.push({ id: 'none', name: '都不是（留在收件箱）', kind: 'unsure', slot: 0 })
   if (used.has('unsure')) nodes.push({ id: 'unsure', name: '拿不准（留在收件箱）', kind: 'unsure', slot: 0 })
   if (used.has('suggested')) nodes.push({ id: 'suggested', name: '影子建议（未写入）', kind: 'suggested', slot: 0 })
 
@@ -181,13 +182,14 @@ export function flowGraph(counts: readonly MailFlow_Count[], labels: readonly La
  */
 export function skeletonGraph(): FlowGraph {
   const stage = ([, id, name]: (typeof STAGES)[number]): FlowNodeData => ({ id, name, kind: id === 'skipped' || id === 'deferred' ? 'terminal' : 'stage', slot: 0 })
-  const decided = ['rule', 'neighbours', 'clef', 'clef-flash']
+  const decided = ['clef', 'clef-flash']
   return {
     total: 0,
     nodes: [
       { id: 'new', name: '新邮件', kind: 'source', slot: 0 },
       ...STAGES.map(stage),
       { id: 'written', name: '打标签', kind: 'label', slot: 0 },
+      { id: 'none', name: '都不是（留在收件箱）', kind: 'unsure', slot: 0 },
       { id: 'unsure', name: '拿不准（留在收件箱）', kind: 'unsure', slot: 0 },
       { id: 'suggested', name: '影子建议（未写入）', kind: 'suggested', slot: 0 },
     ],
@@ -195,6 +197,7 @@ export function skeletonGraph(): FlowGraph {
       ...STAGES.map(([, id]) => ({ source: 'new', target: id, value: 0 })),
       ...decided.flatMap((id) => [
         { source: id, target: 'written', value: 0 },
+        { source: id, target: 'none', value: 0 },
         { source: id, target: 'suggested', value: 0 },
       ]),
       ...['clef', 'clef-flash', 'no_model'].map((id) => ({ source: id, target: 'unsure', value: 0 })),

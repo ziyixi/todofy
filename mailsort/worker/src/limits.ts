@@ -32,9 +32,12 @@ export const ALARM_ERROR_RETRY_MS = MINUTE;
  * inside the run never hits the limit. Each step checks what is left before it starts.
  */
 export const ALARM_SUBREQUESTS = 40;
-/** A mail's worst case: messages.get (and its metadata fallback), an embedding, the decision model, a modify. */
-export const MAIL_SUBREQUESTS = 5;
-/** Mails decided per alarm at most (8 x 5 = 40, but the token and the history read come first). */
+/**
+ * A mail's worst case: messages.get (and its metadata fallback), an embedding, the decision model's two views, a
+ * modify. A label's creation in Gmail before its first write is checked apart (writes.ts executeWrites).
+ */
+export const MAIL_SUBREQUESTS = 6;
+/** Mails decided per alarm at most: 6 x 6 = 36, after the token and up to three history pages (40 in all). */
 export const DRAIN_MAX = 6;
 /** History pages read per alarm (each up to HISTORY_PAGE_SIZE records). */
 export const HISTORY_PAGES_MAX = 3;
@@ -75,27 +78,58 @@ export const NEIGHBOUR_TOKENS_MAX = 120;
 /** Neighbours retrieved and shown to the model. */
 export const NEIGHBOURS = 3;
 
-// ---- decisions ---------------------------------------------------------------------------------------------------------
+// ---- decisions (../../docs/design.md §4) ----------------------------------------------------------------------------
 
-export const DEFAULT_THRESHOLD = 0.8;
-export const THRESHOLD_MIN = 0.5;
-export const THRESHOLD_MAX = 0.99;
-/** A decision is unsure when p(suspicious) reaches this. */
+/** A label is accepted when both views chose it and the mean of their probabilities reaches this. Not owner-facing. */
+export const AUTO_THRESHOLD = 0.7;
+/** The second view runs only when the first view's top option is a label at least this likely. */
+export const SECOND_VIEW_MIN = 0.4;
+/** The second view's options: the first view's most likely labels, this many (plus none). */
+export const SECOND_VIEW_LABELS = 3;
+/** "No label fits" is confident when the first view's top option is none with at least this probability. */
+export const NONE_CONFIDENT = 0.6;
+/** No label is accepted while p(suspicious), the higher of the two views', reaches this. */
 export const SUSPICIOUS_MAX = 0.3;
-/** The neighbour shortcut: every one of the NEIGHBOURS has this cosine similarity and the same label. */
-export const NEIGHBOUR_SHORTCUT_SIMILARITY = 0.92;
-/** The default precision target of a live label (its Wilson lower bound). */
-export const DEFAULT_PRECISION_TARGET = 0.9;
-/** Corrections of one sender or list to one label that make a rule proposal. */
-export const RULE_PROPOSAL_CORRECTIONS = 2;
+/** ... and no trust label while it reaches this. */
+export const TRUST_SUSPICIOUS_MAX = 0.1;
+/** A mail whose p(needs_action), the higher of the two views', reaches this stays in the inbox with its label. */
+export const NEEDS_ACTION_KEEP = 0.6;
+/** Sender history: the labels of the sender's earlier mail this far back, the most frequent this many. */
+export const SENDER_HISTORY_MS = 180 * DAY;
+export const SENDER_HISTORY_TOP = 3;
+/** ... read from at most this many of the sender's newest decisions. */
+export const SENDER_HISTORY_ROWS = 200;
+/** Trusted domains per label at most (a review choice adds one; the oldest goes first past it). */
+export const TRUSTED_DOMAINS_PER_LABEL_MAX = 50;
 /** An applied label untouched this long is a weak accept. */
 export const WEAK_ACCEPT_MS = 3 * DAY;
-/** Weak accepts count this much in the precision bound (an explicit confirmation counts 1). */
-export const WEAK_ACCEPT_WEIGHT = 0.5;
 /** Weak-accept examples are added only while the label has fewer examples than this. */
 export const WEAK_EXAMPLES_BELOW = 50;
-/** Applied mails put into the review queue at random each UTC day (the audit). */
-export const AUDITS_PER_DAY = 3;
+
+// ---- the review queue (../../docs/design.md §5) ---------------------------------------------------------------------
+
+/**
+ * The daily quota of uncertain mails shown in the review queue: this share of the last 7 UTC days' average daily
+ * mail, rounded up, within REVIEW_QUOTA_MIN and REVIEW_QUOTA_MAX.
+ */
+export const REVIEW_SHARE = 0.05;
+export const REVIEW_QUOTA_MIN = 1;
+export const REVIEW_QUOTA_MAX = 5;
+/** The informative band: an uncertain mail whose top label's combined probability is in [this, AUTO_THRESHOLD). */
+export const INFORMATIVE_MIN = 0.35;
+
+// ---- the replay evaluation (../../docs/design.md §5.1) ---------------------------------------------------------------
+
+/** The review items it covers: resolved in this window before the start, at most this many. */
+export const REPLAY_WINDOW_MS = 14 * DAY;
+export const REPLAY_ITEMS_MAX = 200;
+/** Mails decided again per alarm at most, each needing this many of the pass's leftover subrequests. */
+export const REPLAY_BATCH = 6;
+export const REPLAY_SUBREQUESTS = 5;
+/** The replay calls the model only while the day's neurons are below this share of the owner's budget. */
+export const REPLAY_NEURON_SHARE = 0.5;
+/** Its rows are pruned this long after it started. */
+export const REPLAY_KEPT_MS = 7 * DAY;
 
 // ---- Workers AI ----------------------------------------------------------------------------------------------------------
 
@@ -141,7 +175,6 @@ export const UNDO_RANGE_MAX_MS = 31 * DAY;
 // ---- stores and retention -----------------------------------------------------------------------------------------------------
 
 export const LABELS_MAX = 24;
-export const RULES_MAX = 500;
 export const EXAMPLES_MAX = 2000;
 export const EXAMPLES_PER_LABEL_MAX = 200;
 /** Subjects, senders and summaries of decided mails (and the review queue) are kept this long. */
@@ -153,10 +186,9 @@ export const ERRORS_KEPT = 8;
 
 // ---- the owner API -----------------------------------------------------------------------------------------------------
 
-/** A request body at most: an import of every rule (RULES_MAX entries of the owner's rule file) fits. */
-export const MAX_BODY_BYTES = 256 * 1024;
+/** A request body at most: the largest is a label with its description. */
+export const MAX_BODY_BYTES = 16 * 1024;
 export const PAGE = 50;
-export const RULE_PAGE = 100;
 export const LABEL_ID_PATTERN = /^[a-z][a-z0-9-]{0,39}$/;
 export const ID_PATTERN = /^[a-z0-9-]{1,40}$/;
 /**
@@ -168,21 +200,12 @@ export const LABEL_SEGMENT_MAX = 40;
 export const DISPLAY_NAME_MAX = 100;
 export const DESCRIPTION_MAX = 300;
 /**
- * The prefix the labels had in Gmail until 2026-10-07 (`分拣/开发/CI通知`). It is never written; on input (the owner's
- * rule file, an older export, a path typed in 标签) it is read as nothing, so `分拣/x` is `x` at every entry point.
+ * The prefix the labels had in Gmail until 2026-10-07 (`分拣/开发/CI通知`). It is never written; on input (a path typed
+ * in 标签) it is read as nothing, so `分拣/x` is `x` at every entry point.
  */
 export const LEGACY_LABEL_PREFIX = '分拣/';
-/** The legacy prefix's own segment: no path starts with it, so the import and its export always agree. */
+/** The legacy prefix's own segment: no path starts with it, so `分拣/x` always reads as `x`. */
 export const LEGACY_LABEL_ROOT = '分拣';
-/** A rule's subject conditions: at most this many words each way, each 1 to SUBJECT_TERM_CHARS characters. */
-export const SUBJECT_TERMS_MAX = 8;
-export const SUBJECT_TERM_CHARS = 40;
-/** The characters of a subject a rule's conditions read (the exact subject, never sent anywhere). */
-export const SUBJECT_MATCH_CHARS = 1000;
-/** A rule's evidence and notes (the owner's words). */
-export const RULE_TEXT_MAX = 300;
-/** An import entry's own ID (RuleImport.id). */
-export const IMPORT_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 /** The flow counters (flow.ts) are kept this many UTC days, like the daily usage. */
 export const FLOW_KEPT_DAYS = 400;
 /** GetMailFlow answers at most this many counters. */

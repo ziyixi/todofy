@@ -4,18 +4,15 @@
  * Nothing reaches Google or Cloudflare: DEV_FAKE_UPSTREAM sends every Google request and every model call to the fake,
  * and every request the fake receives is checked against the independent table (../fakes/table.ts).
  *
- * It walks the owner's whole loop through the HTTP API the UI uses: a shadow decision, live label + archive with UNREAD
- * untouched, an unsure mail left in the inbox, undo, Gmail corrections becoming examples and a rule proposal, the
- * neuron budget's switch to Clef-flash, the quota deferral; then round 2: an import of nested labels and the owner's
- * rule file (preview, confirm), a nested label created in Gmail with its parents, a label that keeps its mail in the
- * inbox, a subject carve-out before the sender's plain rule, forged From headers that fire no rule (DMARC failed, and
- * a dmarc=pass planted in the quoted envelope sender), a pickup carve-out's suggestion confirmed and kept in the inbox,
- * the flow API (deferred mail counted once, while it waits) and the export's round trip; the QA fixes (the Gmail
- * filter export leaving out a carved-out sender's plain rule, enabled in the export, multi-line evidence and a List-Id
- * in header form, the legacy 分拣/x read as x, a former parent not imported by the sync, a range undo of one label);
- * labels at Gmail's top level, an owner's Gmail label of a label's path adopted; and last the auth failure. Run from
- * worker/ after the UI's build
- * (the dev server serves web/dist):
+ * It walks the owner's whole loop through the HTTP API the UI uses (mailsort.ui.v2): a shadow decision from the model's
+ * two views, only recorded; live label + archive with UNREAD untouched; a confident none left in the inbox; a mail that
+ * asks for action kept in the inbox with its label; undo; a trust label waiting for a trusted domain until the owner's
+ * review choice teaches it, a forged From never getting it; Gmail corrections becoming examples; an owner's Gmail label
+ * of a label's path adopted; a nested label created in Gmail with its parents; the neuron budget's switch to
+ * Clef-flash and the quota deferral; the flow API (deferred mail counted once, while it waits); the legacy 分拣/x read
+ * as x, a former parent not imported by the sync, a range undo of one label; the replay evaluation (nothing written,
+ * the owner's answer matched); the old /api/v1 paths answering 410; and last the auth failure. Run from worker/ after
+ * the UI's build (the dev server serves web/dist):
  *
  *   npm run test:smoke
  */
@@ -26,10 +23,11 @@ import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHttpClient, type HttpCall } from '@ziyixi/proto/http-client';
-import { LabelImportSchema, MailsortUiService, RuleImportSchema } from '@ziyixi/proto/mailsort/ui/v1/mailsort_ui_service_pb';
-import { MailFlow_Outcome, MailFlow_Stage } from '@ziyixi/proto/mailsort/ui/v1/flow_pb';
-import { Label_GmailState, LabelSchema } from '@ziyixi/proto/mailsort/ui/v1/label_pb';
-import { Mode, SettingsSchema } from '@ziyixi/proto/mailsort/ui/v1/status_pb';
+import { MailsortUiService } from '@ziyixi/proto/mailsort/ui/v2/mailsort_ui_service_pb';
+import { MailFlow_Outcome, MailFlow_Stage } from '@ziyixi/proto/mailsort/ui/v2/flow_pb';
+import { Label_GmailState, LabelSchema } from '@ziyixi/proto/mailsort/ui/v2/label_pb';
+import { ReplayEvaluation_State } from '@ziyixi/proto/mailsort/ui/v2/replay_pb';
+import { Mode, SettingsSchema } from '@ziyixi/proto/mailsort/ui/v2/status_pb';
 import { create } from '@ziyixi/proto/protobuf';
 import { timestampFromMs } from '@ziyixi/proto/protobuf/wkt';
 import { LABELS, MAILS, message, type SyntheticMail } from '../fakes/fixtures.ts';
@@ -176,37 +174,50 @@ async function run(origin: string, up: FakeUpstream, setClock: (now: number) => 
   const first = await step(0);
   check(first.code === 'ok', 'the first pass stores the install-time cursor (no backfill)');
 
-  // Shadow (the default): a suggestion, no write.
+  // Shadow (the default): the model's two views agree, the decision is only recorded; no write, nothing to review.
+  const before = up.ai.calls.length;
   deliver(MAILS.newsletterEn);
   await step();
-  const items = (await api.listReviewItems({})).reviewItems;
-  check(items.some((item) => item.suggestedLabel === 'labels/newsletter') && modifies() === 0, 'shadow: a confident decision is a suggestion in the review queue and nothing is written to Gmail');
+  const views = up.ai.calls.slice(before).filter((call) => call.model.includes('clef'));
+  check(views.length === 2 && (await api.listReviewItems({})).reviewItems.length === 0 && modifies() === 0, 'shadow: two views of the model agree; the decision is only recorded, nothing waits for review, nothing is written');
 
-  // Live: label + archive, UNREAD untouched; the unsure mail stays in the inbox.
+  // Live: label + archive, UNREAD untouched; a mail no label fits stays in the inbox; one that asks for action keeps
+  // its label in the inbox.
   await api.updateSettings({ settings: create(SettingsSchema, { name: 'settings', mode: Mode.LIVE }), updateMask: { paths: ['mode'] }, requestId: id() });
-  await api.updateLabel({ label: create(LabelSchema, { name: 'labels/newsletter', live: true }), updateMask: { paths: ['live'] }, requestId: id() });
   deliver(MAILS.newsletterZh);
   deliver(MAILS.unsure);
+  deliver({ ...MAILS.receiptZh, id: 'a1000000000000b1', subject: '订单已到快递柜', text: '订单包裹已到快递柜，凭取件码 1234 取件。' });
   await step();
   const sorted = up.gmail.labelIdByName('订阅') ?? '';
   const zh = labelsOf(MAILS.newsletterZh.id);
   check(sorted !== '' && zh.includes(sorted) && !zh.includes('INBOX') && zh.includes('UNREAD'), 'live: the label is added and INBOX removed, UNREAD untouched');
-  const unsure = labelsOf(MAILS.unsure.id);
-  check(unsure.includes('INBOX') && unsure.every((label) => !label.startsWith('Label_')), 'unsure: the mail keeps INBOX and gets no label');
+  const none = labelsOf(MAILS.unsure.id);
+  check(none.includes('INBOX') && none.every((label) => !label.startsWith('Label_')), 'confident none: the mail keeps INBOX and gets no label');
+  const pickup = labelsOf('a1000000000000b1');
+  check(pickup.includes(up.gmail.labelIdByName('收据') ?? '-') && pickup.includes('INBOX'), 'needs action: a pickup code keeps its label in the inbox');
 
   // Undo.
-  const [entry] = (await api.listLedgerEntries({})).ledgerEntries;
+  const entry = (await api.listLedgerEntries({})).ledgerEntries.find((item) => item.messageId === MAILS.newsletterZh.id);
   await api.undoLedgerEntry({ name: entry?.name ?? '', requestId: id() });
   const undone = labelsOf(MAILS.newsletterZh.id);
   check(undone.includes('INBOX') && !undone.includes(sorted) && undone.includes('UNREAD'), 'undo: the label is removed and INBOX restored');
 
-  // Corrections in Gmail -> examples -> a rule proposal.
-  // The owner made 收据 in Gmail by hand (and a label of their own): the sync adopts the one of a label's path only.
-  const receipt = up.gmail.createUserLabel('收据', true);
+  // A trust label waits for a trusted domain; the owner's review choice teaches it; a forged From never gets it.
+  deliver(MAILS.bankEn);
+  await step();
+  const [bankItem] = (await api.listReviewItems({})).reviewItems;
+  check(bankItem?.reason === 'untrusted_sender' && labelsOf(MAILS.bankEn.id).includes('INBOX'), 'a trust label for a sender not yet trusted: uncertain, shown in the review queue, nothing written');
+  await api.resolveReviewItem({ name: bankItem?.name ?? '', label: 'labels/bank', requestId: id() });
+  const bank = up.gmail.labelIdByName('银行') ?? '-';
+  check(labelsOf(MAILS.bankEn.id).includes(bank) && (await api.getLabel({ name: 'labels/bank' })).trustedDomains.join() === 'bank.example.com', 'the owner\'s choice writes the label and teaches the sender\'s domain');
+  deliver({ ...MAILS.bankEn, id: 'b100000000000001', subject: 'Your monthly bank statement for October' });
+  deliver(MAILS.forgedBankLogin);
+  await step();
+  check(labelsOf('b100000000000001').includes(bank) && labelsOf(MAILS.forgedBankLogin.id).every((label) => !label.startsWith('Label_')), 'the trusted sender\'s next statement is labelled; a forged From (DMARC failed) gets nothing');
+
+  // Corrections in Gmail (to 收据, which mailsort made) -> examples; Personal is a label of the owner's own.
+  const receipt = up.gmail.labelIdByName('收据') ?? '';
   const personal = up.gmail.createUserLabel('Personal');
-  const adopted = await api.syncLabels({ requestId: id() });
-  const receiptLabel = adopted.labels.find((label) => label.name === 'labels/receipt');
-  check(adopted.linkedCount === 1 && receiptLabel?.gmailLabelId === receipt && receiptLabel.gmailState === Label_GmailState.ADOPTED && !adopted.labels.some((label) => label.gmailLabelId === personal), 'sync: the owner\'s Gmail label of a label\'s exact path is adopted, no other label imported');
   for (const [i, messageId] of ['c000000000000c01', 'c000000000000c02'].entries()) {
     deliver({ ...MAILS.newsletterEn, id: messageId, subject: `Weekly digest ${String(i)}` });
     await step();
@@ -216,12 +227,33 @@ async function run(origin: string, up: FakeUpstream, setClock: (now: number) => 
   await step();
   const examples = (await api.listExamples({ label: 'labels/receipt' })).examples;
   check(examples.length === 2 && examples.every((example) => example.embedded), 'corrections in Gmail become embedded examples of the new label');
-  const rules = (await api.listRules({})).rules;
-  check(rules.some((rule) => rule.value === 'digest.news.example.com' && rule.label === 'labels/receipt' && rule.correctionCount === 2), 'two corrections of the same list propose a rule');
+  // The owner made 出行 in Gmail by hand: the sync adopts the one of a label's path only.
+  const travel = up.gmail.createUserLabel('出行', true);
+  const adopted = await api.syncLabels({ requestId: id() });
+  const travelLabel = adopted.labels.find((label) => label.name === 'labels/travel');
+  check(adopted.linkedCount === 1 && travelLabel?.gmailLabelId === travel && travelLabel.gmailState === Label_GmailState.ADOPTED && !adopted.labels.some((label) => label.gmailLabelId === personal), 'sync: the owner\'s Gmail label of a label\'s exact path is adopted, no other label imported');
+
+  // A nested label: created at Gmail's top level with its parent, the mail getting only the leaf.
+  await api.createLabel({ label: create(LabelSchema, { displayName: '开发/CI通知', description: 'CI build passed failed main 构建', enabled: true }), requestId: id() });
+  deliver(MAILS.ciBuild);
+  await step();
+  const names = [...up.gmail.labels.values()].map((label) => label.name);
+  const ciLeaf = up.gmail.labelIdByName('开发/CI通知') ?? '';
+  const ci = labelsOf(MAILS.ciBuild.id);
+  check(names.includes('开发') && !names.some((name) => name === '分拣' || name.startsWith('分拣/')) && ciLeaf !== '' && ci.includes(ciLeaf) && !ci.includes('INBOX') && ci.filter((label) => label.startsWith('Label_')).length === 1, 'nested label: created at Gmail\'s top level with its parent 开发, no 分拣; the mail gets only the leaf, archived');
+
+  // The replay evaluation: the owner's one answer decided again, nothing written (before the quota test below, which
+  // stops it for the day).
+  const writes = modifies();
+  const replay = await api.startReplayEvaluation({ name: 'replayEvaluation', requestId: id() });
+  await step();
+  const summary = await api.getReplayEvaluation({ name: 'replayEvaluation' });
+  check(replay.totalCount === 1 && summary.state === ReplayEvaluation_State.SUCCEEDED && summary.autoCount === 1 && summary.autoMatchCount === 1 && modifies() === writes, 'the replay evaluation decides the answered mail again, matches the owner and writes nothing');
 
   // The neuron budget: Clef-flash past 70 %.
-  // 16,000 input tokens: Clef about 349 neurons a call, Clef-flash 131; the switch comes at 1,050 of 1,500.
-  await api.updateSettings({ settings: create(SettingsSchema, { name: 'settings', dailyNeuronBudget: 1500 }), updateMask: { paths: ['daily_neuron_budget'] }, requestId: id() });
+  // 16,000 input tokens: Clef about 349 neurons a call, Clef-flash 131; two views a mail; the day has used about 900 of
+  // its 3,000 so far, and the switch comes at 2,100.
+  await api.updateSettings({ settings: create(SettingsSchema, { name: 'settings', dailyNeuronBudget: 3000 }), updateMask: { paths: ['daily_neuron_budget'] }, requestId: id() });
   up.ai.tokensPerCall = 16_000;
   for (let i = 0; i < 5; i++) deliver({ ...MAILS.receiptZh, id: `f00000000000f00${String(i)}`, subject: `订单 ${String(i)} 已发货` });
   await step();
@@ -238,80 +270,20 @@ async function run(origin: string, up: FakeUpstream, setClock: (now: number) => 
   const quota = await api.getServiceStatus({ name: 'serviceStatus' });
   check(deferred.code === 'deferred' && quota.deferredCount >= 1 && quota.aiQuotaExhausted, 'Workers AI out of quota: the mail waits for the next UTC day (deferred, not failed)');
   up.ai.quota = false;
-
-  // Round 2. An import: a nested label with its description, and the owner's rule file (synthetic): a CI sender, a
-  // bank's login carve-out kept in the inbox, the bank's plain rule.
-  // The rule file still writes the legacy `分拣/` prefix: read as nothing.
-  const labelsIn = [create(LabelImportSchema, { path: '分拣/开发/CI通知', description: '持续集成平台的构建成功或失败通知、拉取请求与代码评审动态，多为机器自动生成的开发通知邮件。' })];
-  const rulesIn = [
-    create(RuleImportSchema, { id: 'ci-builds', match: { fromAddress: 'builds@ci.example.com' }, label: '分拣/开发/CI通知' }),
-    create(RuleImportSchema, { id: 'bank-login', match: { fromAddress: 'statements@bank.example.com' }, label: '分拣/账号安全', trust: true, keepInInbox: true, subjectIncludes: ['登录', 'login'] }),
-    create(RuleImportSchema, { id: 'bank-plain', match: { fromAddress: 'statements@bank.example.com' }, label: '分拣/金融/银行支付', trust: true }),
-    // A pickup-code carve-out kept in the inbox, onto a label that archives the rest of the shop's mail.
-    create(RuleImportSchema, { id: 'pickup', match: { fromAddress: 'orders@shop.example.com' }, label: '分拣/购物/订单物流', keepInInbox: true, subjectIncludes: ['取件码'] }),
-    create(RuleImportSchema, { id: 'shop', match: { fromAddress: 'orders@shop.example.com' }, label: '分拣/购物/订单物流' }),
-  ];
-  const preview = await api.importRules({ labels: labelsIn, rules: rulesIn, validateOnly: true });
-  const before = (await api.listLabels({})).labels.length;
-  check(preview.createdLabelCount === 4 && preview.createdRuleCount === 5 && !preview.applied && (await api.listLabels({})).labels.length === before, 'import: the preview lists 4 labels and 5 rules to create and changes nothing');
-  const imported = await api.importRules({ labels: labelsIn, rules: rulesIn, requestId: id() });
-  check(imported.applied && (await api.listRules({})).rules.some((rule) => rule.importId === 'bank-login' && rule.subjectIncludes.includes('登录')), 'import: confirmed, the rules and their subject conditions are stored');
-  for (const labelId of ['dev-ci-notices', 'account-security', 'finance-bank-pay']) {
-    await api.updateLabel({ label: create(LabelSchema, { name: `labels/${labelId}`, live: true }), updateMask: { paths: ['live'] }, requestId: id() });
-  }
-  deliver(MAILS.ciBuild);
-  deliver(MAILS.bankLogin);
-  deliver(MAILS.bankEn);
-  deliver(MAILS.forgedBankLogin);
-  deliver(MAILS.injectedDmarc);
-  // 购物/订单物流 is not live: the pickup carve-out's decision is a suggestion the owner confirms below.
-  deliver(MAILS.pickupZh);
-  await step();
-  await step();
-  const names = [...up.gmail.labels.values()].map((label) => label.name);
-  const ciLeaf = up.gmail.labelIdByName('开发/CI通知') ?? '';
-  const ci = labelsOf(MAILS.ciBuild.id);
-  check(names.includes('开发') && !names.some((name) => name === '分拣' || name.startsWith('分拣/')) && ciLeaf !== '' && ci.includes(ciLeaf) && !ci.includes('INBOX') && ci.filter((label) => label.startsWith('Label_')).length === 1, 'nested label: created at Gmail\'s top level with its parent 开发, no 分拣; the mail gets only the leaf, archived');
-  const security = up.gmail.labelIdByName('账号安全') ?? '';
-  const login = labelsOf(MAILS.bankLogin.id);
-  check(security !== '' && login.includes(security) && login.includes('INBOX') && login.includes('UNREAD'), 'keep in inbox: the login notice gets 账号安全 by its carve-out and stays in the inbox, UNREAD untouched');
-  const plain = labelsOf(MAILS.bankEn.id);
-  check(plain.includes(up.gmail.labelIdByName('金融/银行支付') ?? '-') && !plain.includes('INBOX'), 'carve-out order: the same sender\'s statement takes the plain rule (label and archive)');
-  const forged = labelsOf(MAILS.forgedBankLogin.id);
-  check(forged.includes('INBOX') && forged.every((label) => !label.startsWith('Label_')), 'forged From (DMARC failed): no rule fires and nothing is written');
-  const planted = labelsOf(MAILS.injectedDmarc.id);
-  check(planted.includes('INBOX') && planted.every((label) => !label.startsWith('Label_')), 'forged From with a dmarc=pass planted in the quoted envelope sender: Gmail\'s own dmarc=fail counts, no rule fires');
-  const pickupItem = (await api.listReviewItems({})).reviewItems.find((item) => item.suggestedLabel === 'labels/shop-orders-shipping' && item.decider === 'rule');
-  const beforeConfirm = modifies();
-  await api.confirmReviewItem({ name: pickupItem?.name ?? '', requestId: id() });
-  const pickup = labelsOf(MAILS.pickupZh.id);
-  const orders = up.gmail.labelIdByName('购物/订单物流') ?? '-';
-  check(pickupItem !== undefined && modifies() === beforeConfirm + 1 && pickup.includes(orders) && pickup.includes('INBOX') && pickup.includes('UNREAD'), 'confirming the pickup carve-out\'s suggestion keeps the mail in the inbox, as the rule says (its label archives)');
   const flow = await api.getMailFlow({ name: 'mailFlows/today' });
   const waiting = (await api.getServiceStatus({ name: 'serviceStatus' })).deferredCount;
   const counted = (stage: MailFlow_Stage, outcome: MailFlow_Outcome, label: string) => flow.counts.some((item) => item.stage === stage && item.outcome === outcome && item.label === label && item.mailCount >= 1);
   check(
-    counted(MailFlow_Stage.RULE, MailFlow_Outcome.ARCHIVED, 'labels/dev-ci-notices') &&
-      counted(MailFlow_Stage.RULE, MailFlow_Outcome.KEPT_IN_INBOX, 'labels/account-security') &&
-      counted(MailFlow_Stage.RULE, MailFlow_Outcome.SUGGESTED, 'labels/shop-orders-shipping') &&
+    counted(MailFlow_Stage.CLEF, MailFlow_Outcome.ARCHIVED, 'labels/dev-ci-notices') &&
+      counted(MailFlow_Stage.CLEF, MailFlow_Outcome.KEPT_IN_INBOX, 'labels/receipt') &&
+      counted(MailFlow_Stage.CLEF, MailFlow_Outcome.NO_LABEL, '') &&
+      counted(MailFlow_Stage.CLEF, MailFlow_Outcome.UNSURE_SHOWN, '') &&
       flow.counts.filter((item) => item.stage === MailFlow_Stage.DEFERRED).reduce((sum, item) => sum + item.mailCount, 0) === waiting &&
       waiting >= 1,
-    'the flow API counts each stage and outcome per label (rule archived, kept in inbox, suggested; deferred = the mail still waiting)',
+    'the flow API counts each stage and outcome per label (archived, kept in inbox, no label, shown; deferred = the mail still waiting)',
   );
-  const exported = JSON.parse((await api.exportRules({})).json) as { rules: { id: string }[] };
-  const again = await api.importRules({ labels: labelsIn, rules: rulesIn, validateOnly: true });
-  check(exported.rules.some((rule) => rule.id === 'bank-login') && again.skippedCount === 6 && again.createdRuleCount === 0, 'export lists the imported rules; importing the same file again changes nothing');
 
-  // The QA fixes of round 2, through the same HTTP API.
-  const filters = await api.exportGmailFilters({});
-  check(!filters.xml.includes('orders@shop.example.com') && filters.xml.includes('builds@ci.example.com') && filters.xml.includes("value='开发/CI通知'") && !filters.xml.includes('分拣'), 'Gmail filters: labels by their path; the shop\'s plain rule, which a pickup carve-out covers, is not exported (Gmail would archive the code)');
-  const document = JSON.parse((await api.exportRules({})).json) as { labels: { path: string; enabled?: boolean }[] };
-  check(document.labels.every((label) => typeof label.enabled === 'boolean' && !label.path.startsWith('分拣')), 'export: every label carries its enabled switch and its path without the legacy prefix');
-  const multiLine = await api.importRules({
-    rules: [create(RuleImportSchema, { id: 'digest-list', match: { listId: '<digest.news.example.com>' }, label: '分拣/订阅收据', evidence: 'line one\nline two' })],
-    validateOnly: true,
-  });
-  check(multiLine.invalidCount === 0 && multiLine.createdRuleCount === 1, 'import: multi-line evidence and a List-Id in its header form are accepted');
+  // The legacy prefix, a rename, the sync and a range undo of one label.
   const typed = await api.createLabel({ label: create(LabelSchema, { displayName: '分拣/新闻/周报', description: '新闻网站的每周摘要与精选文章推送' }), requestId: id() });
   check(typed.displayName === '新闻/周报' && up.gmail.labelIdByName('新闻/周报') === typed.gmailLabelId && up.gmail.labelIdByName('分拣') === undefined, 'CreateLabel reads the legacy 分拣/新闻/周报 as 新闻/周报, created in Gmail as 新闻/周报');
   await api.updateLabel({ label: create(LabelSchema, { name: typed.name, displayName: '资讯/精选', etag: typed.etag }), updateMask: { paths: ['display_name', 'etag'] }, requestId: id() });
@@ -319,8 +291,12 @@ async function run(origin: string, up: FakeUpstream, setClock: (now: number) => 
   check(up.gmail.labelIdByName('资讯/精选') === typed.gmailLabelId && up.gmail.labelIdByName('新闻') !== undefined && !synced.labels.some((label) => label.displayName === '新闻'), 'rename: Gmail\'s label follows (资讯/精选); sync: the parent 新闻 this app created is not imported once its child is renamed away');
   const rangeUndo = await api.undoLedgerEntries({ startTime: timestampFromMs(T0), endTime: timestampFromMs(now + MINUTE), label: 'labels/dev-ci-notices', requestId: id() });
   const ciAfter = labelsOf(MAILS.ciBuild.id);
-  const bankAfter = labelsOf(MAILS.bankEn.id);
+  const bankAfter = labelsOf('b100000000000001');
   check(rangeUndo.undoneCount === 1 && ciAfter.includes('INBOX') && !ciAfter.includes(ciLeaf) && !bankAfter.includes('INBOX'), 'range undo filtered to one label: only 开发/CI通知 is undone, the bank statement stays filed');
+
+  // A page of the API before v2 is told to reload.
+  const old = await fetch(`${origin}/api/v1/labels`);
+  check(old.status === 410 && (await old.text()).includes('RELOAD_REQUIRED'), 'the old /api/v1 paths answer 410 RELOAD_REQUIRED');
 
   // The grant refused three times: Google is no longer called.
   up.gmail.grants.clear();

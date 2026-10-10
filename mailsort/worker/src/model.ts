@@ -1,29 +1,28 @@
 /**
- * Rows of MailsortState's SQLite (store.ts) as the generated messages of mailsort.ui.v1, for the owner API (api.ts).
+ * Rows of MailsortState's SQLite (store.ts) as the generated messages of mailsort.ui.v2, for the owner API (api.ts).
  */
 import { create } from '@ziyixi/proto/protobuf';
 import { timestampFromMs } from '@ziyixi/proto/protobuf/wkt';
-import { Label_GmailState, LabelSchema, type Label } from '@ziyixi/proto/mailsort/ui/v1/label_pb';
+import { Label_GmailState, LabelSchema, type Label } from '@ziyixi/proto/mailsort/ui/v2/label_pb';
+import { ReplayEvaluation_MismatchSchema, ReplayEvaluation_State, ReplayEvaluationSchema, type ReplayEvaluation } from '@ziyixi/proto/mailsort/ui/v2/replay_pb';
 import {
   CandidateSchema,
   Example_Origin,
   ExampleSchema,
   LedgerEntry_State,
   LedgerEntrySchema,
-  ReviewItem_Kind,
   ReviewItem_State,
   ReviewItemSchema,
   type Example,
   type LedgerEntry,
   type ReviewItem,
-} from '@ziyixi/proto/mailsort/ui/v1/review_pb';
-import { Rule_Kind, Rule_State, RuleSchema, type Rule } from '@ziyixi/proto/mailsort/ui/v1/rule_pb';
-import { MailFlow_CountSchema, MailFlow_Outcome, MailFlow_Stage, MailFlowSchema, type MailFlow } from '@ziyixi/proto/mailsort/ui/v1/flow_pb';
-import { Mode } from '@ziyixi/proto/mailsort/ui/v1/status_pb';
-import { termsOf } from './decide.ts';
+} from '@ziyixi/proto/mailsort/ui/v2/review_pb';
+import { MailFlow_CountSchema, MailFlow_Outcome, MailFlow_Stage, MailFlowSchema, type MailFlow } from '@ziyixi/proto/mailsort/ui/v2/flow_pb';
+import { Mode } from '@ziyixi/proto/mailsort/ui/v2/status_pb';
 import type { ModeName } from './env.ts';
 import type { FlowCount, FlowOutcome, FlowStage } from './flow.ts';
-import type { ExampleRow, LabelRow, LedgerRow, ReviewRow, RuleRow } from './store.ts';
+import type { ReplaySummary } from './replay.ts';
+import type { ExampleRow, LabelRow, LedgerRow, ReviewRow } from './store.ts';
 
 const ts = (ms: number | null) => (ms === null ? undefined : timestampFromMs(ms));
 
@@ -44,15 +43,13 @@ function gmailState(row: LabelRow): Label_GmailState {
   return GMAIL_STATES[row.gmail_state];
 }
 
-export function labelMessage(row: LabelRow, exampleCount: number): Label {
+export function labelMessage(row: LabelRow, exampleCount: number, trustedDomains: readonly string[]): Label {
   return create(LabelSchema, {
     name: labelName(row.id),
     displayName: row.display_name,
     description: row.description,
     enabled: row.enabled === 1,
-    live: row.live === 1,
     trustImplying: row.trust === 1,
-    threshold: row.threshold,
     gmailLabelId: row.gmail_id ?? '',
     gmailState: gmailState(row),
     descriptionVersion: row.desc_version,
@@ -62,49 +59,13 @@ export function labelMessage(row: LabelRow, exampleCount: number): Label {
     etag: row.etag,
     keepInInbox: row.keep_in_inbox === 1,
     sensitive: row.sensitive === 1,
+    trustedDomains: [...trustedDomains],
   });
 }
 
-export const RULE_KINDS = {
-  sender_address: Rule_Kind.SENDER_ADDRESS,
-  sender_domain: Rule_Kind.SENDER_DOMAIN,
-  list_id: Rule_Kind.LIST_ID,
-  delivered_to: Rule_Kind.DELIVERED_TO,
-} as const;
-
-const RULE_STATES = { proposed: Rule_State.PROPOSED, active: Rule_State.ACTIVE, disabled: Rule_State.DISABLED } as const;
-
-/** Whether a rule needs DMARC aligned (decide.ts ruleAuthOk): a sender rule, a trust label, or the rule's own switch. */
-export function dmarcRequired(row: Pick<RuleRow, 'kind' | 'require_dmarc'>, trust: boolean): boolean {
-  return row.kind === 'sender_address' || row.kind === 'sender_domain' || trust || row.require_dmarc === 1;
-}
-
-export function ruleMessage(row: RuleRow, trust: boolean): Rule {
-  return create(RuleSchema, {
-    name: `rules/${row.id}`,
-    kind: RULE_KINDS[row.kind],
-    value: row.value,
-    label: labelName(row.label_id),
-    state: RULE_STATES[row.state],
-    dmarcRequired: dmarcRequired(row, trust),
-    correctionCount: row.correction_count,
-    matchCount: row.match_count,
-    createTime: ts(row.create_time),
-    updateTime: ts(row.update_time),
-    subjectIncludes: termsOf(row.subject_includes),
-    subjectExcludes: termsOf(row.subject_excludes),
-    keepInInbox: row.keep_in_inbox === 1,
-    requireDmarc: row.require_dmarc === 1,
-    evidence: row.evidence,
-    notes: row.notes,
-    importId: row.import_id,
-  });
-}
-
-const FLOW_STAGES: Readonly<Record<FlowStage, MailFlow_Stage>> = {
+/** The stages of decisions before 2026-10-10 (`rule`, `neighbours`) have no value: their rows are left out. */
+const FLOW_STAGES: Readonly<Partial<Record<FlowStage, MailFlow_Stage>>> = {
   skipped: MailFlow_Stage.SKIPPED,
-  rule: MailFlow_Stage.RULE,
-  neighbours: MailFlow_Stage.NEIGHBOURS,
   clef: MailFlow_Stage.CLEF,
   'clef-flash': MailFlow_Stage.CLEF_FLASH,
   deferred: MailFlow_Stage.DEFERRED,
@@ -115,7 +76,9 @@ const FLOW_OUTCOMES: Readonly<Record<FlowOutcome, MailFlow_Outcome>> = {
   archived: MailFlow_Outcome.ARCHIVED,
   kept_in_inbox: MailFlow_Outcome.KEPT_IN_INBOX,
   suggested: MailFlow_Outcome.SUGGESTED,
+  no_label: MailFlow_Outcome.NO_LABEL,
   unsure: MailFlow_Outcome.UNSURE,
+  unsure_shown: MailFlow_Outcome.UNSURE_SHOWN,
   corrected: MailFlow_Outcome.CORRECTED,
   not_inbox: MailFlow_Outcome.NOT_INBOX,
   thread_sorted: MailFlow_Outcome.THREAD_SORTED,
@@ -130,15 +93,16 @@ export function flowMessage(range: string, start: number, end: number, counts: r
     startTime: timestampFromMs(start),
     endTime: timestampFromMs(end),
     counts: counts.flatMap((count) => {
-      // A row this code did not write (an older stage name) is left out rather than answered as unspecified.
-      if (!Object.hasOwn(FLOW_STAGES, count.stage) || !Object.hasOwn(FLOW_OUTCOMES, count.outcome)) return [];
-      return [create(MailFlow_CountSchema, { stage: FLOW_STAGES[count.stage], outcome: FLOW_OUTCOMES[count.outcome], label: labelRef(count.label), mailCount: count.n })];
+      // A row of an older stage (rules, neighbours) is left out rather than answered as unspecified.
+      const stage = Object.hasOwn(FLOW_STAGES, count.stage) ? FLOW_STAGES[count.stage] : undefined;
+      if (stage === undefined || !Object.hasOwn(FLOW_OUTCOMES, count.outcome)) return [];
+      return [create(MailFlow_CountSchema, { stage, outcome: FLOW_OUTCOMES[count.outcome], label: labelRef(count.label), mailCount: count.n })];
     }),
   });
 }
 
-const REVIEW_KINDS = { suggestion: ReviewItem_Kind.SUGGESTION, unsure: ReviewItem_Kind.UNSURE, audit: ReviewItem_Kind.AUDIT } as const;
-const REVIEW_STATES = { pending: ReviewItem_State.PENDING, confirmed: ReviewItem_State.CONFIRMED, corrected: ReviewItem_State.CORRECTED, skipped: ReviewItem_State.SKIPPED } as const;
+/** `confirmed` and `corrected` (the owner chose the most likely label, or another) are both resolved. */
+const REVIEW_STATES = { pending: ReviewItem_State.PENDING, confirmed: ReviewItem_State.RESOLVED, corrected: ReviewItem_State.RESOLVED, skipped: ReviewItem_State.SKIPPED } as const;
 
 function candidates(text: string): { label: string; probability: number }[] {
   try {
@@ -156,14 +120,11 @@ function candidates(text: string): { label: string; probability: number }[] {
 export function reviewMessage(row: ReviewRow): ReviewItem {
   return create(ReviewItemSchema, {
     name: `reviewItems/${row.id}`,
-    kind: REVIEW_KINDS[row.kind],
     state: REVIEW_STATES[row.state],
     subject: row.subject,
     sender: row.sender,
-    suggestedLabel: labelRef(row.suggested_label),
     candidates: candidates(row.candidates).map((c) => create(CandidateSchema, { label: labelRef(c.label), probability: c.probability })),
-    decider: row.decider,
-    unsureReason: row.unsure_reason,
+    reason: row.unsure_reason,
     resolvedLabel: labelRef(row.resolved_label),
     receiveTime: ts(row.receive_time),
     createTime: ts(row.create_time),
@@ -225,6 +186,26 @@ export function ledgerMessage(row: LedgerRow, view: LedgerView): LedgerEntry {
     undoable: view.undoable,
     subject: view.subject ?? '',
     sender: view.sender ?? '',
+  });
+}
+
+/** The replay evaluation's summary (counts and label names only). */
+export function replayMessage(summary: ReplaySummary): ReplayEvaluation {
+  return create(ReplayEvaluationSchema, {
+    name: 'replayEvaluation',
+    state: summary.state === 'succeeded' ? ReplayEvaluation_State.SUCCEEDED : ReplayEvaluation_State.RUNNING,
+    createTime: timestampFromMs(summary.createTime),
+    completeTime: ts(summary.completeTime),
+    totalCount: summary.total,
+    evaluatedCount: summary.evaluated,
+    skippedCount: summary.skipped,
+    autoCount: summary.auto,
+    autoMatchCount: summary.autoMatch,
+    noLabelCount: summary.none,
+    noLabelMatchCount: summary.noneMatch,
+    unsureCount: summary.unsure,
+    shownCount: summary.shown,
+    mismatches: summary.mismatches.map((m) => create(ReplayEvaluation_MismatchSchema, { decidedLabel: labelRef(m.decided), ownerLabel: labelRef(m.owner), mailCount: m.count })),
   });
 }
 

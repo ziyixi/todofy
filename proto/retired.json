@@ -1,7 +1,8 @@
 {
   "about": "Published IDL elements deleted on purpose (README.md, \"Retiring an element\"; tools/retired.py). scripts/breaking.sh compares the head with a base without them, so their deletion is not breaking; the head must keep them deleted and an enum value's number and name reserved. An entry does nothing once every base CI compares with is newer than the deletion, and may then be removed.",
   "packages": [
-    {"path": "lab/ui/v1/", "package": "lab.ui.v1", "since": "2026-10-05", "reason": "the app that served it was removed"}
+    {"path": "lab/ui/v1/", "package": "lab.ui.v1", "since": "2026-10-05", "reason": "the app that served it was removed"},
+    {"path": "mailsort/ui/v1/", "package": "mailsort.ui.v1", "since": "2026-10-10", "reason": "replaced by mailsort.ui.v2 (rules, live gating and the audit removed); the Worker and its UI moved together and /api/v1 answers 410 for one release"}
   ],
   "enum_values": [
     {"enum": "todofy.taskintent.v1.Source", "name": "SOURCE_LAB", "number": 1, "since": "2026-10-05", "reason": "the proposer was removed; Todofy refuses the source"}

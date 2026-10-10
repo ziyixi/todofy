@@ -1,43 +1,38 @@
 /**
  * 概览 (`/overview`): today at a glance (UTC day). Four numbers (处理, 已打标签, 待审, 拿不准); the flow of today's mail,
- * always drawn (with no mail, the skeleton at 0; on a phone it starts at its right end, where the mail went); the
- * precision bound of each label that has verdicts against the target (准确率); and the model budget as a thin meter.
+ * always drawn (with no mail, the skeleton at 0; on a phone it starts at its right end, where the mail went); the label
+ * report of the last 7 days (each label's automatic labels, corrections and uncertain mail); and the model budget as a
+ * thin meter.
  */
-import type { AccuracyReport, ServiceStatus } from '@ziyixi/proto/mailsort/ui/v1/status_pb'
-import type { Label } from '@ziyixi/proto/mailsort/ui/v1/label_pb'
+import type { LabelReport, ServiceStatus } from '@ziyixi/proto/mailsort/ui/v2/status_pb'
+import type { Label } from '@ziyixi/proto/mailsort/ui/v2/label_pb'
 import { api } from '../api.ts'
-import { bar, card, emptyState, kpi, meter } from '../components.ts'
+import { card, emptyState, kpi, meter } from '../components.ts'
 import { el, fill } from '../dom.ts'
 import { flowGraph, sankeyChart } from '../flowchart.ts'
-import { labelText, percent } from '../format.ts'
+import { labelText } from '../format.ts'
 import type { ViewContext } from '../app.ts'
 import { allLabels, frame } from './common.ts'
 
 /** Past this share of the budget the rest of the UTC day uses Clef-flash (../../docs/design.md §4.1). */
 const FLASH_SHARE = 0.7
 
-/** Each label with verdicts: its name, its precision bound as a bar (warn below the target), the bound and the count. */
-function accuracy(report: AccuracyReport, labels: readonly Label[]): HTMLElement {
-  const rows = report.labels.filter((row) => row.confirmedCount + row.correctedCount > 0)
+/** Each label with mail in the last 7 days: automatic labels, the owner's corrections, and uncertain mail. */
+function report(answer: LabelReport, labels: readonly Label[]): HTMLElement {
+  const rows = answer.labels.filter((row) => row.autoCount + row.unsureCount > 0)
   const body =
     rows.length === 0
-      ? emptyState('还没有确认或改过标签的邮件')
+      ? emptyState('最近 7 天还没有邮件')
       : el(
           'ul',
           { class: 'bars' },
           ...rows.map((row) => {
-            const n = row.confirmedCount + row.correctedCount
-            const below = row.precisionLowerBound < report.precisionTarget
-            return el(
-              'li',
-              { 'aria-label': `${labelText(row.label, labels)}：准确率 ${percent(row.precisionLowerBound)}，${String(n)} 封` },
-              el('span', { class: 'name' }, labelText(row.label, labels)),
-              bar(row.precisionLowerBound, below ? 'warn' : ''),
-              el('span', { class: 'figures' }, `${percent(row.precisionLowerBound)} · ${String(n)}`),
-            )
+            const corrected = row.gmailCorrectionCount + row.reviewCorrectionCount
+            const text = `自动 ${String(row.autoCount)} · 改 ${String(corrected)} · 拿不准 ${String(row.unsureCount)}`
+            return el('li', { 'aria-label': `${labelText(row.label, labels)}：${text}` }, el('span', { class: 'name' }, labelText(row.label, labels)), el('span', { class: 'figures' }, text))
           }),
         )
-  return card('准确率', `目标 ${percent(report.precisionTarget)}`, body)
+  return card('最近 7 天', `共 ${String(answer.decidedCount)} 封`, body)
 }
 
 /** Today's estimated neurons against the budget, with what it means when it is high. */
@@ -62,7 +57,7 @@ function budget(status: ServiceStatus): HTMLElement {
 
 export async function renderOverview(ctx: ViewContext): Promise<void> {
   await frame(ctx.main, '概览', async (body) => {
-    const [status, flow, labels, report] = await Promise.all([ctx.status(), api.getMailFlow({ name: 'mailFlows/today' }), allLabels(), api.getAccuracyReport({ name: 'accuracyReport' })])
+    const [status, flow, labels, week] = await Promise.all([ctx.status(), api.getMailFlow({ name: 'mailFlows/today' }), allLabels(), api.getLabelReport({ name: 'labelReport' })])
     const graph = flowGraph(flow.counts, labels)
     fill(
       body,
@@ -75,7 +70,7 @@ export async function renderOverview(ctx: ViewContext): Promise<void> {
         kpi('拿不准', status.unsureTodayCount),
       ),
       card('今天的流程', graph.total === 0 ? '' : `共 ${String(graph.total)} 封`, sankeyChart(graph), graph.total === 0 ? el('p', { class: 'hint' }, '今天还没有邮件') : null),
-      el('div', { class: 'two' }, accuracy(report, labels), budget(status)),
+      el('div', { class: 'two' }, report(week, labels), budget(status)),
     )
     // Where the diagram is wider than its box (a phone), it starts at its right end: the labels, 拿不准, 影子建议.
     const scroll = body.querySelector('.flow-scroll')

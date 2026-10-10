@@ -4,11 +4,13 @@
  * Cloudflare, so the two limits are measured apart:
  *
  * - the fetch handler (10 ms per request): Access (an RS256 verification), CSRF, one call to the object and its answer
- *   passed through, for the heaviest answers (24 labels, a page of 50 review items, a page of 50 ledger entries, the
- *   accuracy report over 2,000 decisions, the status, 30 days of flow counters) and the largest body (the preview of
- *   an import of 500 rules, about 120 KiB);
+ *   passed through, for the heaviest answers (24 labels with their trusted domains, a page of 50 review items, a page
+ *   of 50 ledger entries, the label report over 2,000 decisions, the status, 30 days of flow counters, the replay
+ *   evaluation's summary over REPLAY_ITEMS_MAX mails) and a settings update;
  * - MailsortState (30 s per invocation): those API calls, and the alarm path at its bounds: three history pages of 100
- *   records, DRAIN_MAX mails decided with the nearest of EXAMPLES_MAX embedded examples, Clef, and a live write each.
+ *   records, DRAIN_MAX mails decided with the nearest of EXAMPLES_MAX embedded examples, a sender history of
+ *   SENDER_HISTORY_ROWS decisions, the model's two views and a live write each; then a pass of the replay evaluation
+ *   (REPLAY_BATCH mails decided again).
  *
  * No dev bypass: Access is verified as in production. Bounds are milliseconds of the reference machine.
  */
@@ -25,7 +27,8 @@ import {
   type Isolate,
   type Measurement,
 } from '../../../../tools/workerd-cpu/workerd-cpu.mts';
-import { DRAIN_MAX, EXAMPLES_MAX, LABELS_MAX, RULES_MAX } from '../../src/limits.ts';
+import { DRAIN_MAX, EXAMPLES_MAX, LABELS_MAX, REPLAY_BATCH, REPLAY_ITEMS_MAX, SENDER_HISTORY_ROWS, TRUSTED_DOMAINS_PER_LABEL_MAX } from '../../src/limits.ts';
+import { senderHash } from '../../src/mask.ts';
 import { MAILS, message } from '../fakes/fixtures.ts';
 import { accessClaims, testIssuer } from '../jwt.ts';
 import { MINUTE, OBJECT_WORKER, op, PUBLIC_HOST, startHarness, SYNTHETIC_BINDINGS, T0, type Harness } from './harness.ts';
@@ -41,6 +44,7 @@ const RUNS = 7;
 const HANDLER = 'fetch handler';
 const OBJECT = 'MailsortState';
 const ALARM = `alarm pass: 3 history pages, ${String(DRAIN_MAX)} mails, ${String(EXAMPLES_MAX)} examples`;
+const REPLAY = `alarm pass: the replay of ${String(REPLAY_BATCH)} mails`;
 const COLD_LABEL = "GET /api/csrf as the fetch handler's very first request";
 const ISSUER = SYNTHETIC_BINDINGS['ACCESS_ISSUER'] ?? '';
 const AUDIENCE = SYNTHETIC_BINDINGS['ACCESS_AUDIENCE'] ?? '';
@@ -90,8 +94,8 @@ async function startIsolate(): Promise<SortIsolate> {
 async function seed(h: Harness): Promise<void> {
   for (let i = 0; i < LABELS_MAX; i++) {
     await h.sql(
-      `INSERT INTO labels (id, seq, display_name, description, enabled, live, trust, threshold, gmail_state, create_time, update_time, etag)
-       VALUES (?, ?, ?, ?, 1, 1, 0, 0, 'pending', ?, ?, 'e')`,
+      `INSERT INTO labels (id, seq, display_name, description, enabled, trust, gmail_state, create_time, update_time, etag)
+       VALUES (?, ?, ?, ?, 1, 0, 'pending', ?, ?, 'e')`,
       `label-${String(i)}`,
       i + 1,
       `标签${String(i)}`,
@@ -102,6 +106,13 @@ async function seed(h: Harness): Promise<void> {
   }
   await h.sql(
     `WITH RECURSIVE n(i) AS (SELECT 0 UNION ALL SELECT i + 1 FROM n WHERE i < ?)
+     INSERT INTO trusted_domains (label_id, domain, origin, create_time) SELECT 'label-' || (i % ?), printf('d%04d.example.com', i), 'owner', ? FROM n`,
+    LABELS_MAX * TRUSTED_DOMAINS_PER_LABEL_MAX - 1,
+    LABELS_MAX,
+    T0,
+  );
+  await h.sql(
+    `WITH RECURSIVE n(i) AS (SELECT 0 UNION ALL SELECT i + 1 FROM n WHERE i < ?)
      INSERT INTO examples (id, label_id, summary, origin, message_id, embedding, create_time)
      SELECT printf('ex%06d', i), 'label-' || (i % ?), printf('示例邮件 %d · Weekly digest · Sender <example.com> · 本周订阅内容摘要', i), 'correction', printf('ffff%012d', i), randomblob(4096), ?
      FROM n`,
@@ -109,22 +120,30 @@ async function seed(h: Harness): Promise<void> {
     LABELS_MAX,
     T0,
   );
+  // 2,000 decisions of the last week, the first SENDER_HISTORY_ROWS from the sender of the mails the alarm decides.
+  const hash = await senderHash('weekly@zh.example.org');
   await h.sql(
     `WITH RECURSIVE n(i) AS (SELECT 0 UNION ALL SELECT i + 1 FROM n WHERE i < 1999)
-     INSERT INTO decisions (message_id, thread_id, received_at, decided_at, outcome, label_id, top_label, decider, verdict, verdict_label, subject, sender, summary)
-     SELECT printf('dddd%012d', i), printf('tddd%012d', i), ?, ?, CASE WHEN i % 3 = 0 THEN 'applied' ELSE 'suggested' END, 'label-' || (i % ?), 'label-' || (i % ?), 'clef',
-            CASE WHEN i % 5 = 0 THEN 'corrected' ELSE 'confirmed' END, 'label-' || (i % ?), '主题', '发件人', '摘要'
+     INSERT INTO decisions (message_id, thread_id, received_at, decided_at, outcome, label_id, top_label, decider, shown, verdict, verdict_label, verdict_source, verdict_at, sender_hash, subject, sender, summary)
+     SELECT printf('dddd%012d', i), printf('tddd%012d', i), ?, ? - i * 1000, CASE i % 4 WHEN 0 THEN 'applied' WHEN 1 THEN 'suggested' WHEN 2 THEN 'unsure' ELSE 'none' END,
+            CASE WHEN i % 4 < 2 THEN 'label-' || (i % ?) END, 'label-' || (i % ?), 'clef', i % 8 = 2,
+            CASE WHEN i % 5 = 0 THEN 'corrected' ELSE 'confirmed' END, 'label-' || (i % ?), CASE WHEN i % 2 = 0 THEN 'gmail' ELSE 'review' END, ?,
+            CASE WHEN i < ? THEN ? ELSE printf('%016x', i) END, '主题', '发件人', '摘要'
      FROM n`,
     T0,
     T0,
     LABELS_MAX,
     LABELS_MAX,
     LABELS_MAX,
+    T0 - 1000,
+    SENDER_HISTORY_ROWS,
+    hash,
   );
+
   await h.sql(
     `WITH RECURSIVE n(i) AS (SELECT 0 UNION ALL SELECT i + 1 FROM n WHERE i < 199)
      INSERT INTO review (id, message_id, kind, state, suggested_label, candidates, decider, subject, sender, receive_time, create_time)
-     SELECT printf('rv%014d', i), printf('dddd%012d', i), 'suggestion', 'pending', 'label-1', '[{"label":"label-1","probability":0.9},{"label":"","probability":0.05},{"label":"label-2","probability":0.05}]', 'clef',
+     SELECT printf('rv%014d', i), printf('dddd%012d', i), 'unsure', 'pending', 'label-1', '[{"label":"label-1","probability":0.9},{"label":"","probability":0.05},{"label":"label-2","probability":0.05}]', 'clef',
             printf('[email] 您的订单 [number] 已发货，请查收电子发票和物流信息 %d', i), '商城 <mall.example.cn>', ?, ?
      FROM n`,
     T0,
@@ -133,8 +152,8 @@ async function seed(h: Harness): Promise<void> {
   // 30 days of flow counters, every stage and outcome for every label: far more rows than a real month.
   await h.sql(
     `WITH RECURSIVE d(i) AS (SELECT 0 UNION ALL SELECT i + 1 FROM d WHERE i < 29),
-       s(stage) AS (VALUES ('rule'), ('neighbours'), ('clef'), ('clef-flash')),
-       o(outcome) AS (VALUES ('archived'), ('kept_in_inbox'), ('suggested'), ('corrected')),
+       s(stage) AS (VALUES ('clef'), ('clef-flash')),
+       o(outcome) AS (VALUES ('archived'), ('kept_in_inbox'), ('suggested'), ('no_label'), ('unsure'), ('unsure_shown'), ('corrected'), ('deferred')),
        l(j) AS (SELECT 0 UNION ALL SELECT j + 1 FROM l WHERE j < ?)
      INSERT INTO flow (day, stage, outcome, label, n)
      SELECT date(?, 'unixepoch', '-' || i || ' days'), stage, outcome, 'label-' || j, 1 + (i + j) % 5 FROM d, s, o, l`,
@@ -146,6 +165,22 @@ async function seed(h: Harness): Promise<void> {
      INSERT INTO ledger (id, message_id, label_id, gmail_label_id, archived, origin, state, create_time, apply_time)
      SELECT printf('lg%014d', i), printf('dddd%012d', i), 'label-1', 'Label_1', 1, 'auto', 'applied', ?, ?
      FROM n`,
+    T0,
+    T0,
+  );
+}
+
+/** The replay at its bounds: REPLAY_ITEMS_MAX evaluated mails (its summary reads them all). */
+async function seedReplay(h: Harness): Promise<void> {
+  await h.sql(`DELETE FROM replay`);
+  await h.sql(`INSERT INTO replay (job_id, message_id, state, create_time) VALUES ('job0', '', 'succeeded', ?)`, T0);
+  await h.sql(
+    `WITH RECURSIVE n(i) AS (SELECT 0 UNION ALL SELECT i + 1 FROM n WHERE i < ?)
+     INSERT INTO replay (job_id, message_id, state, owner_label, as_of, outcome, label, shown, create_time, done_time)
+     SELECT 'job0', printf('dddd%012d', i), 'evaluated', 'label-' || (i % 7), ?, CASE i % 3 WHEN 0 THEN 'label' WHEN 1 THEN 'none' ELSE 'unsure' END, 'label-' || (i % 5), i % 2, ?, ?
+     FROM n`,
+    REPLAY_ITEMS_MAX - 1,
+    T0,
     T0,
     T0,
   );
@@ -185,22 +220,6 @@ async function session({ h, meter: worker, object }: SortIsolate, index: number)
     return result;
   }
 
-  // The owner's largest import: RULES_MAX rules of the rule file's format, each with subject conditions and notes.
-  const importBody = JSON.stringify({
-    validate_only: true,
-    rules: Array.from({ length: RULES_MAX }, (_, i) => ({
-      id: `rule-${String(i).padStart(3, '0')}`,
-      match: i % 2 === 0 ? { from_address: `sender${String(i)}@shop${String(i % 50)}.example.com` } : { from_domain: `mail${String(i)}.example.org` },
-      label: `分拣/标签${String(i % LABELS_MAX)}`,
-      keep_in_inbox: i % 7 === 0,
-      trust: false,
-      require_dmarc: false,
-      evidence: `synthetic evidence ${String(i)}: 订单与物流通知的发件人`,
-      notes: 'synthetic',
-      subject_includes: i % 3 === 0 ? ['取件码', 'order'] : [],
-    })),
-  });
-
   // The alarm path at its bounds: the install pass, then 300 history records (3 pages) with DRAIN_MAX new mails.
   let clock = T0;
   await h.step(clock);
@@ -215,22 +234,30 @@ async function session({ h, meter: worker, object }: SortIsolate, index: number)
     }),
   ]);
   expect(decided).toBe(DRAIN_MAX);
+  // The replay evaluation of the mails just decided: a pass with nothing else to do decides REPLAY_BATCH of them again.
+  await h.sql(`DELETE FROM replay`);
+  await h.sql(`INSERT INTO replay (job_id, message_id, state, create_time) VALUES ('job1', '', 'running', ?)`, clock);
+  for (let i = 0; i < REPLAY_BATCH; i++) {
+    await h.sql(`INSERT INTO replay (job_id, message_id, state, owner_label, as_of, create_time) VALUES ('job1', ?, 'pending', 'label-1', ?, ?)`, `cc00000000000${String(i).padStart(3, '0')}`, clock, clock);
+  }
+  clock += 5 * MINUTE;
+  const replay = summarize(REPLAY, [await object.cpu(async () => { await h.step(clock); })]);
+  expect(await h.sql(`SELECT count(*) AS n FROM replay WHERE state = 'evaluated'`)).toEqual([{ n: REPLAY_BATCH }]);
+  await seedReplay(h);
 
   const api = [
-    ...(await both(`GET labels (${String(LABELS_MAX)})`, () => expectOk('/api/v1/labels'))),
-    ...(await both('GET reviewItems (a page of 50)', () => expectOk('/api/v1/reviewItems'))),
-    ...(await both('GET ledgerEntries (a page of 50)', () => expectOk('/api/v1/ledgerEntries'))),
-    ...(await both('GET accuracyReport (2,000 decisions)', () => expectOk('/api/v1/accuracyReport'))),
-    ...(await both('GET serviceStatus', () => expectOk('/api/v1/serviceStatus'))),
-    ...(await both('GET mailFlows/last-30-days (11,520 counters)', () => expectOk('/api/v1/mailFlows/last-30-days'))),
-    ...(await both(`POST rules:import, validate_only (${String(RULES_MAX)} rules)`, () =>
-      expectOk('/api/v1/rules:import', { method: 'POST', headers: mutationHeaders, body: importBody }),
-    )),
+    ...(await both(`GET labels (${String(LABELS_MAX)}, with their trusted domains)`, () => expectOk('/api/v2/labels'))),
+    ...(await both('GET reviewItems (a page of 50)', () => expectOk('/api/v2/reviewItems'))),
+    ...(await both('GET ledgerEntries (a page of 50)', () => expectOk('/api/v2/ledgerEntries'))),
+    ...(await both('GET labelReport (2,000 decisions)', () => expectOk('/api/v2/labelReport'))),
+    ...(await both('GET serviceStatus', () => expectOk('/api/v2/serviceStatus'))),
+    ...(await both('GET mailFlows/last-30-days (11,520 counters)', () => expectOk('/api/v2/mailFlows/last-30-days'))),
+    ...(await both(`GET replayEvaluation (${String(REPLAY_ITEMS_MAX)} mails)`, () => expectOk('/api/v2/replayEvaluation'))),
     ...(await both('PATCH settings (mask)', () =>
-      expectOk(`/api/v1/settings?update_mask=default_threshold&request_id=${op()}`, { method: 'PATCH', headers: mutationHeaders, body: JSON.stringify({ name: 'settings', default_threshold: 0.85 }) }),
+      expectOk(`/api/v2/settings?update_mask=daily_neuron_budget&request_id=${op()}`, { method: 'PATCH', headers: mutationHeaders, body: JSON.stringify({ name: 'settings', daily_neuron_budget: 7000 }) }),
     )),
   ];
-  return [cold, alarm, ...api];
+  return [cold, alarm, replay, ...api];
 }
 
 describe('CPU (Workers Free: 10 ms per request, 30 s per Durable Object invocation)', () => {
@@ -252,6 +279,7 @@ describe('CPU (Workers Free: 10 ms per request, 30 s per Durable Object invocati
       }
     }
     expect(get(ALARM).first, ALARM).toBeLessThan(OBJECT_ALARM_BOUND_MS);
-    expect(reference.size).toBe(1 + 1 + 2 * 8);
+    expect(get(REPLAY).first, REPLAY).toBeLessThan(OBJECT_ALARM_BOUND_MS);
+    expect(reference.size).toBe(1 + 2 + 2 * 8);
   });
 });

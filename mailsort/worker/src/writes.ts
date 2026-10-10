@@ -5,9 +5,9 @@
  * label that is already there, or removing one that is gone, changes nothing in Gmail.
  *
  * An `intended` row is written only if the caller's gate allows it at that moment: the row may be from an earlier
- * pass, and since then the owner may have chosen shadow, the breaker may have tripped or the label may have left live.
- * A refused row fails (`mode_changed`, ...) and its mail becomes a suggestion in the review queue. Undo rows are never
- * gated: they only give the mail back to the inbox.
+ * pass, and since then the owner may have chosen shadow, the breaker may have tripped or the label may have been
+ * disabled. A refused row fails (`mode_changed`, ...) and its decision stays only recorded (`suggested`); the mail is
+ * left in the inbox as it is. Undo rows are never gated: they only give the mail back to the inbox.
  *
  * An automatic row left by an earlier pass (a 503, a pass cut short) is also checked against the mail as it is now,
  * one metadata read before the write: if the owner has meanwhile archived it or filed it under a label of their own,
@@ -25,9 +25,10 @@
  * mail themselves) the ones the mail has right before the write. A retry whose earlier try reached Gmail with its
  * answer lost fails that way too for an adopted label: the label stays, as one the owner may have put there.
  *
- * An applied label keeps its mail in the inbox when the ledger row says so (`archived` = 0: the label's or the rule's
- * keep-in-inbox); the guard checks the modify against that flag, and the undo then gives nothing back to the inbox. A
- * row recorded to archive keeps instead when its label keeps its mail by the time it goes out (keepIfLabelKeeps).
+ * An applied label keeps its mail in the inbox when the ledger row says so (`archived` = 0: the label's keep-in-inbox,
+ * or a mail that asks the owner to act soon); the guard checks the modify against that flag, and the undo then gives
+ * nothing back to the inbox. A row recorded to archive keeps instead when its label keeps its mail by the time it goes
+ * out (keepIfLabelKeeps).
  */
 import { setCurrentLabels } from './feedback.ts';
 import { countFlow, stageOf } from './flow.ts';
@@ -216,47 +217,27 @@ export interface WriteOutcome {
   readonly stopped: boolean;
 }
 
-/** A failed auto write's mail becomes a suggestion in the review queue (once, while its content is kept). */
-export function addSuggestion(store: Store, messageId: string, now: number): void {
-  const row = store.decision(messageId);
-  if (row === undefined || row.content_cleared === 1 || store.pendingReviewOf(messageId) !== undefined) return;
-  store.run(
-    `INSERT INTO review (id, message_id, kind, state, suggested_label, candidates, decider, unsure_reason, subject, sender, receive_time, create_time)
-     VALUES (?, ?, 'suggestion', 'pending', ?, ?, ?, '', ?, ?, ?, ?)`,
-    timeId(now),
-    messageId,
-    row.label_id,
-    JSON.stringify(row.label_id === null ? [] : [{ label: row.label_id, probability: 1 }]),
-    row.decider,
-    row.subject ?? '',
-    row.sender ?? '',
-    row.received_at,
-    now,
-  );
-}
-
 /** Fails an `intended` row for good. Run inside a transaction. */
-function fail(store: Store, row: LedgerRow, code: string, now: number): void {
+function fail(store: Store, row: LedgerRow, code: string): void {
   store.run(`UPDATE ledger SET state = 'failed', last_code = ? WHERE id = ?`, code, row.id);
-  // An auto write that failed for good (in this pass or a later retry) leaves its mail as a suggestion in the
-  // review queue: the owner can still label it from there. An owner's row was their own choice: nothing to review.
+  // An auto write that failed for good (in this pass or a later retry) leaves its decision only recorded, as in
+  // shadow mode: the mail stays in the inbox as it is. The review queue holds uncertain mail only.
   if (row.origin === 'auto' && store.run(`UPDATE decisions SET outcome = 'suggested' WHERE message_id = ? AND outcome = 'applied'`, row.message_id) > 0) {
-    // The flow counted the decision as written: it is a suggestion now, on its own day.
+    // The flow counted the decision as written: it is only recorded now, on its own day.
     const decision = store.decision(row.message_id);
     if (decision !== undefined) {
       const stage = stageOf(decision.decider);
       countFlow(store, decision.decided_at, stage, row.archived === 1 ? 'archived' : 'kept_in_inbox', decision.label_id, -1);
       countFlow(store, decision.decided_at, stage, 'suggested', decision.label_id, 1);
     }
-    addSuggestion(store, row.message_id, now);
   }
 }
 
 /**
  * Lowers an `intended` row from archive to keep when its label keeps its mail in the inbox now (归档 turned off since
  * the intent, for a write a 429 or 5xx left for a retry): keeping is the direction the owner just chose, and the safe
- * one, so the retry only adds the label. Never the other way: a row that keeps (by its rule, or a label that archived
- * then) never starts archiving. The flow's count of an automatic write moves with it. Answers the row as it is now.
+ * one, so the retry only adds the label. Never the other way: a row that keeps (a mail that asks the owner to act, or
+ * a label that kept then) never starts archiving. The flow's count of an automatic write moves with it. Answers the row as it is now.
  * Run inside the gate's transaction, so the guard checks the modify against the flag the row now has.
  */
 function keepIfLabelKeeps(store: Store, row: LedgerRow): LedgerRow {
@@ -301,21 +282,21 @@ export async function executeWrites(ctx: WriteContext, ids: readonly string[] | 
     try {
       if (row.state === 'intended') {
         if (label === undefined) {
-          ctx.transact(() => { fail(store, row, 'label_deleted', ctx.now()); });
+          ctx.transact(() => { fail(store, row, 'label_deleted'); });
           failed++;
           continue;
         }
         const labelsNow = recheck || adopted ? await ctx.gmail.labelIdsOf(row.message_id) : null;
         // Before the gate, so a mail that is not written does not use up a write of the run's cap.
         if (recheck && labelsNow !== null && mailChanged(row, labelsNow)) {
-          ctx.transact(() => { fail(store, row, 'mail_changed', ctx.now()); });
+          ctx.transact(() => { fail(store, row, 'mail_changed'); });
           failed++;
           continue;
         }
         // The gate runs before anything reaches Gmail, label creation included.
         const refused = ctx.transact(() => {
           const code = ctx.gate(row, label);
-          if (code !== null) fail(store, row, code, ctx.now());
+          if (code !== null) fail(store, row, code);
           else row = keepIfLabelKeeps(store, row);
           return code;
         });
@@ -325,12 +306,12 @@ export async function executeWrites(ctx: WriteContext, ids: readonly string[] | 
         }
         const gmailId = row.gmail_label_id ?? (await ensureGmailLabel(ctx, label));
         if (gmailId === null) {
-          ctx.transact(() => { fail(store, row, label.gmail_state === 'missing' ? 'label_missing' : 'label_name_taken', ctx.now()); });
+          ctx.transact(() => { fail(store, row, label.gmail_state === 'missing' ? 'label_missing' : 'label_name_taken'); });
           failed++;
           continue;
         }
         if (alreadyLabelled(row, gmailId, adopted ? labelsNow : null)) {
-          ctx.transact(() => { fail(store, row, 'already_labelled', ctx.now()); });
+          ctx.transact(() => { fail(store, row, 'already_labelled'); });
           failed++;
           continue;
         }
@@ -370,14 +351,14 @@ export async function executeWrites(ctx: WriteContext, ids: readonly string[] | 
           error instanceof GmailRefused ? 'guard_refused' : error instanceof GoogleError && (error.kind === 'not_found' || error.kind === 'forbidden' || error.kind === 'bad_answer') ? error.code : null;
         if (permanent !== null) {
           store.pushError(error instanceof GmailRefused ? 'gmail_guard_refused' : permanent);
-          if (row.state === 'intended') fail(store, row, error instanceof GoogleError && error.kind === 'forbidden' ? 'read_only_grant' : permanent, ctx.now());
+          if (row.state === 'intended') fail(store, row, error instanceof GoogleError && error.kind === 'forbidden' ? 'read_only_grant' : permanent);
           else store.run(`UPDATE ledger SET state = 'applied', last_code = ? WHERE id = ?`, permanent, row.id);
           return false;
         }
         const attempts = row.attempts + 1;
         store.run(`UPDATE ledger SET attempts = ?, last_code = ? WHERE id = ?`, attempts, error instanceof GoogleError ? error.code : 'gmail_unexpected', row.id);
         if (attempts >= WRITE_ATTEMPTS_MAX) {
-          if (row.state === 'intended') fail(store, row, 'attempts', ctx.now());
+          if (row.state === 'intended') fail(store, row, 'attempts');
           else store.run(`UPDATE ledger SET state = 'applied' WHERE id = ?`, row.id);
         }
         return noteGoogleError(store, error);

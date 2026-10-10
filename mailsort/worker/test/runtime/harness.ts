@@ -16,7 +16,7 @@ import { build } from 'esbuild';
 import { Miniflare, convertV4MiniflareOptions } from 'miniflare';
 import { createHttpClient, type HttpCall, type HttpClient } from '@ziyixi/proto/http-client';
 import type { ShapeOf } from '@ziyixi/proto/http-transcoder';
-import { MailsortUiService } from '@ziyixi/proto/mailsort/ui/v1/mailsort_ui_service_pb';
+import { MailsortUiService } from '@ziyixi/proto/mailsort/ui/v2/mailsort_ui_service_pb';
 import { FakeUpstream } from '../fakes/upstream.ts';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');

@@ -1,11 +1,13 @@
 # mailsort
 
-Gmail sorting for the owner's own mailbox on `sort.ziyixi.science`: each new INBOX mail is decided by the owner's rules,
-the nearest corrected examples and the Workers AI decision model Clef. In live mode a confident mail gets one label
-(a leaf of up to three levels, `金融/投资`, at Gmail's top level) and leaves the inbox (archived) unless its label or rule keeps it
-there, and is never marked read; an unsure mail gets no label, stays in the
-inbox and waits in the review queue. Shadow mode (the default) only suggests. Chinese, mobile first. Design:
-[`docs/design.md`](docs/design.md). Rules: [`AGENTS.md`](AGENTS.md).
+Gmail sorting for the owner's own mailbox on `sort.ziyixi.science`: each new INBOX mail is decided by the Workers AI
+decision model Clef, asked twice (two views), with the masked mail, whether its sender is authenticated, the nearest
+corrected examples and what the sender's earlier mail got. In live mode a confident mail gets one label (a leaf of up
+to three levels, `金融/投资`, at Gmail's top level) and leaves the inbox (archived) unless its label keeps it there or it
+asks you to act soon (a code, a payment, a reply), and is never marked read; a mail no label fits, or an uncertain one,
+gets no label and stays in the inbox, and a few uncertain ones a day (about 1 in 20) wait in the review queue. Shadow
+mode (the default) only records. Chinese, mobile first. Design: [`docs/design.md`](docs/design.md). Rules:
+[`AGENTS.md`](AGENTS.md).
 
 | Path | What it is |
 | --- | --- |
@@ -14,61 +16,52 @@ inbox and waits in the review queue. Shadow mode (the default) only suggests. Ch
 | `web/` | The UI, built into `web/dist` and served by the Worker |
 | `wrangler.toml` | The production config (top level = production); `wrangler.test.toml` is for local development and the smoke run |
 | `deploy/` | The deploy wrapper `deploy-vars.mjs`, the bundle budget, and the owner's Gmail grant script `mint-token.mjs` |
-| `../proto/mailsort/ui/v1/` | The owner API `mailsort.ui.v1` |
+| `../proto/mailsort/ui/v2/` | The owner API `mailsort.ui.v2` (`/api/v2/`; the paths of v1 answer 410 until 2026-11-10) |
 
 ## Use
 
 Four tabs under a header whose one status line shows the mode in force, the Gmail grant and the next run
 (`docs/design.md` §9):
 
-- **待审**: confirm a suggestion, change it (改为…, a searchable label picker with 都不是 first), or skip; j / k, Enter,
-  c and s do the same by keyboard. Corrections made in Gmail itself (moving a sorted mail to another of mailsort's
-  labels, or removing the label) count too.
+- **待审**: the few uncertain mails of a day (at most 1 to 5, 5 % of the last week's daily mail), each with the model's
+  most likely label and why it was uncertain: 确认 that label, 改为… another (a searchable label picker with 都不是
+  first), or 跳过; j / k, Enter, c and s do the same by keyboard. An answer with a trust label for a sender that passed
+  DMARC teaches that label the sender's domain. Corrections made in Gmail itself (moving a sorted mail to another of
+  mailsort's labels, or removing the label) count too.
 - **概览**: today's numbers (处理, 已打标签, 待审, 拿不准), the flow of today's mail as a Sankey diagram (drawn at zero on
-  a day without mail; on a phone it scrolls in its own box, starting at where the mail went), the precision bound of
-  each label with verdicts (准确率) and the model budget.
-- **标签**: everything about a label in one place. A search box finds a label by its path or by a rule's sender,
-  domain or list. The labels form a tree grouped by their top level (开发 › CI通知, 平台工具), one line each: the
-  name (未启用 beside it when off), the rule count, a small precision bar once it has verdicts, and 正式打, which lets
-  live mode write it (it turns itself off when the label's precision bound falls below the target). A row opens its
-  detail under it: the
-  description (the model reads `path: description` and never picks a label without one; one language and 60–120
-  characters keep every call cheap, `docs/design.md` §8.1), 留在收件箱, the rules (approve a proposal from repeated
-  corrections, stop or delete one behind ⋯, and 添加规则: one address or domain, its kind inferred, with the kind for a
-  list or a delivered-to address and subject words to include or exclude, a carve-out tried before the sender's plain
-  rule, under 更多), the examples (listed on demand, deleted one by one) and 高级 (可信, 敏感 to keep no example, 启用,
-  rename, delete). A sender rule fires only when DMARC passed aligned with the From domain, a list rule only with a
-  DKIM signature of the list's domain (`docs/design.md` §4.3). A label's Gmail name is its path; when Gmail already
-  has a label of exactly that name (made by hand), mailsort never takes it over: the label's detail says so in its
-  first line (Gmail 里已有同名标签) and it writes nothing until it is renamed or 从 Gmail 同步 adopts (沿用) that
-  label. An adopted label is never added to a mail that already has it, so an undo never removes the owner's own,
-  and the owner's other labels are never touched. Deleting a label leaves its Gmail label and mails alone, and its
-  writes can no longer be undone. With no label at all, 套用推荐模板 previews the 15
-  recommended labels and adds them.
+  a day without mail; on a phone it scrolls in its own box, starting at where the mail went), the last 7 days per label
+  (automatic labels, your corrections, uncertain mail) and the model budget.
+- **标签**: everything about a label in one place. A search box finds a label by its path. The labels form a tree
+  grouped by their top level (开发 › CI通知, 平台工具), one line each: the name (未启用 beside it when off), its example
+  count, and 启用 (an enabled label is written to Gmail in live mode). A row opens its detail under it: the description
+  (the model reads `path: description` and never picks a label without one; one language and 60–120 characters keep
+  every call cheap, `docs/design.md` §8.1), 留在收件箱, a trust label's trusted domains (learned from 待审, each with
+  删除), the examples (listed on demand, deleted one by one) and 高级 (可信, 敏感 to keep no example, 启用, rename,
+  delete). A trust label is written only for a sender that passed DMARC and whose domain it trusts (`docs/design.md`
+  §4.4). A label's Gmail name is its path; when Gmail already has a label of exactly that name (made by hand), mailsort
+  never takes it over: the label's detail says so in its first line (Gmail 里已有同名标签) and it writes nothing until
+  it is renamed or 从 Gmail 同步 adopts (沿用) that label. An adopted label is never added to a mail that already has it,
+  so an undo never removes the owner's own, and the owner's other labels are never touched. Deleting a label leaves its
+  Gmail label and mails alone, and its writes can no longer be undone.
 - **设置**: the mode (关闭 · 影子 · 正式, with the deployment's ceiling or a tripped breaker in one line, and 解除熔断);
-  撤销, the undo of a time range (1 hour, 24 hours, 7 days or your own), of one label when chosen, previewed first;
-  从 Gmail 同步 (follows renames and deletions made in Gmail and adopts such labels, never one with labels nested
-  under it; it never imports another one);
-  and 导出过滤器, the active rules as a Gmail filter file to import in Gmail's settings (label, and archive unless
-  kept; left out are trust and DMARC rules, rules with subject conditions and the plain rules of the senders they
-  cover, since Gmail would apply both). Emergency stop: 设置 → 关闭 (`docs/design.md` §10).
-- **API only** (no page since 2026-10-07): ImportRules and ExportRules (the owner's rule file, previewed with
-  `validate_only`; a label written with the old `分拣/` prefix means the same label), the embedding rebuild, the
-  single-entry undo, the write limits, the neuron budget, the default and per-label thresholds, and a rule's own keep
-  in inbox (CreateRule or the rule file). To import the rule file, from the signed-in page's console, with `rules` the
-  file's JSON list:
+  撤销, the undo of a time range (1 hour, 24 hours, 7 days or your own), of one label when chosen, previewed first; and
+  从 Gmail 同步 (follows renames and deletions made in Gmail and adopts such labels, never one with labels nested under
+  it; it never imports another one). Emergency stop: 设置 → 关闭 (`docs/design.md` §10).
+- **API only**: the replay evaluation (before going live: your answers of the last 14 days decided again by today's
+  pipeline, nothing written, `docs/design.md` §5.1), the embedding rebuild, the single-entry undo, the write limits and
+  the neuron budget. To run the replay from the signed-in page's console:
 
   ```js
   const t = (await (await fetch('/api/csrf')).json()).token
-  const send = (validate_only) => fetch('/api/v1/rules:import', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': t }, body: JSON.stringify({ rules, validate_only, request_id: crypto.randomUUID() }) }).then((r) => r.json())
-  await send(true)   // the preview: every entry's change, nothing written
-  await send(false)  // then the import itself
+  await fetch('/api/v2/replayEvaluation:start', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': t }, body: JSON.stringify({ request_id: crypto.randomUUID() }) }).then((r) => r.json())
+  // a few alarm passes later (about 6 mails each):
+  await fetch('/api/v2/replayEvaluation').then((r) => r.json())
   ```
-- **What is kept**: decided mail's subject, sender and exact sender keys, and the review queue, for 14 days (the
-  daily cleanup runs in every mode, off included); decisions and the ledger without content for 180 days; the flow
-  counters (counts only) for 400 days; examples (masked summaries) until you delete them (with their label, by
-  turning it 敏感, or DeleteExample) and rules (exact sender, domain, list or delivered-to values, subject words,
-  your evidence and notes) until you delete them (`docs/design.md` §2).
+- **What is kept**: decided mail's subject, sender and From domain, and the review queue, for 14 days (the daily
+  cleanup runs in every mode, off included); decisions and the ledger without content (the sender only as a keyed hash)
+  for 180 days; the replay evaluation for 7 days; the flow counters (counts only) for 400 days; examples (masked
+  summaries) until you delete them (with their label, by turning it 敏感, or DeleteExample) and trusted domains until you
+  delete them (`docs/design.md` §2).
 
 ## Develop
 
@@ -76,7 +69,7 @@ From `worker/` (Node 26; the pinned toolchains are in each package's lockfile):
 
 ```sh
 npm ci && (cd ../web && npm ci)
-npm run lint && npm run typecheck && npm test   # unit tests (Node), the Gmail guard and its fuzz included
+npm run lint && npm run typecheck && npm test   # unit tests (Node): the decision table, the migration, the Gmail guard and its fuzz
 npm run test:runtime                            # workerd: real MailsortState, fake Gmail and Workers AI, CPU
 (cd ../web && npm run lint && npm run typecheck && npm test && npm run build)
 node --test ../deploy/test/*.test.mjs
@@ -123,4 +116,5 @@ daily drift check compares the Worker with `dashboard/worker/src/drift-desired.j
 
 A code-only revert is the normal path. To stop the Gmail side effects at once: 设置 → 关闭 (or `MAILSORT_MODE=off`
 and a deploy), and revoke the grant at https://myaccount.google.com/permissions. Writes already made can be undone
-from 设置 → 撤销 while the app runs. Deleting the Worker deletes `MailsortState` (labels, rules, examples, ledger) for good.
+from 设置 → 撤销 while the app runs. Deleting the Worker deletes `MailsortState` (labels, trusted domains, examples,
+ledger) for good.

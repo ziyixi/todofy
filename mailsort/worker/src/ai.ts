@@ -1,8 +1,10 @@
 /**
- * Workers AI (../../docs/design.md §4.4-§4.5): the decision model Clef (27B, or Clef-flash past FLASH_SWITCH_SHARE of the
- * day's neuron budget) and the embedding model bge-m3. One Clef call per mail, with one `choice` question over the
- * enabled labels plus "none", and two `noul` questions (suspicious, bulk). The answer is untrusted: its keys must be
- * exactly the questions asked and the options offered, its probabilities in [0, 1] summing to 1, or the mail is unsure.
+ * Workers AI (../../docs/design.md §4.1-§4.2): the decision model Clef (27B, or Clef-flash past FLASH_SWITCH_SHARE of
+ * the day's neuron budget) and the embedding model bge-m3. Up to two Clef calls per mail, the two views of decide.ts:
+ * each one `choice` question over its labels plus "none" (the first over every offered label, the second over the
+ * first's three most likely, in reverse order) and the same three `noul` questions (suspicious, bulk, needs_action).
+ * The answer is untrusted: its keys must be exactly the questions asked and the options offered, its probabilities in
+ * [0, 1] summing to 1, or the call failed.
  *
  * Neurons are estimated from the input tokens each answer reports (Clef bills input tokens only) at the published
  * prices (limits.ts NEURONS_PER_M_TOKENS); the embedding's from the text's length. A quota refusal (the account's daily
@@ -50,6 +52,10 @@ export interface Neighbour {
  */
 export interface ClefState {
   readonly from?: string;
+  /** `yes` when DMARC passed aligned with the From domain, else `no`. */
+  readonly sender_authenticated?: string;
+  /** What the sender's earlier mail got: `label-key ×n`, the most frequent first (decide.ts senderHistory). */
+  readonly sender_history?: string;
   readonly to?: string;
   readonly list?: string;
   readonly subject?: string;
@@ -59,22 +65,34 @@ export interface ClefState {
   readonly similar_examples?: readonly Neighbour[];
 }
 
+/** The evidence of a mail beyond its text: authentication and the sender's history (already as option keys). */
+export interface SenderEvidence {
+  readonly authenticated: boolean;
+  readonly history: string;
+}
+
 /** Whitespace runs as one space, for comparing Gmail's snippet with the body it was cut from. */
 function fold(text: string): string {
   return text.replace(/\s+/g, ' ').trim();
 }
 
 /**
- * The model's state of a mail: masked text, a code for the address, and the neighbours' short texts (their labels as
- * option keys, the names the options have). Gmail's snippet is the start of the body, so it is sent only when it
- * says something the body does not (a metadata-only read has no body): up to 300 characters of input saved on every
- * call. Empty fields are left out.
+ * The model's state of a mail: masked text, whether the sender is authenticated and what its earlier mail got, a code
+ * for the address, and the neighbours' short texts (their labels as option keys, the names the options have). Gmail's
+ * snippet is the start of the body, so it is sent only when it says something the body does not (a metadata-only read
+ * has no body): up to 300 characters of input saved on every call. Empty fields are left out.
  */
-export function clefState(f: Pick<Features, 'sender' | 'toCode' | 'listId' | 'subject' | 'snippet' | 'body' | 'category'>, neighbours: readonly { label: string; summary: string }[]): ClefState {
+export function clefState(
+  f: Pick<Features, 'sender' | 'toCode' | 'listId' | 'subject' | 'snippet' | 'body' | 'category'>,
+  neighbours: readonly { label: string; summary: string }[],
+  sender: SenderEvidence,
+): ClefState {
   const head = fold(f.snippet).slice(0, 80);
   const snippetInBody = f.body !== '' && head !== '' && fold(f.body).startsWith(head);
   const fields: [keyof ClefState, string][] = [
     ['from', f.sender],
+    ['sender_authenticated', sender.authenticated ? 'yes' : 'no'],
+    ['sender_history', sender.history],
     ['to', f.toCode],
     ['list', f.listId === '' ? '' : 'mailing list'],
     ['subject', f.subject],
@@ -112,6 +130,8 @@ export interface ClefAnswer {
   readonly top: string;
   readonly suspicious: number;
   readonly bulk: number;
+  /** p(the mail asks the owner to act soon). */
+  readonly needsAction: number;
   readonly inputTokens: number;
   readonly neurons: number;
 }
@@ -119,8 +139,13 @@ export interface ClefAnswer {
 export const QUESTION_LABEL = 'label';
 export const QUESTION_SUSPICIOUS = 'suspicious';
 export const QUESTION_BULK = 'bulk';
+export const QUESTION_NEEDS_ACTION = 'needs_action';
+const QUESTIONS = [QUESTION_BULK, QUESTION_LABEL, QUESTION_NEEDS_ACTION, QUESTION_SUSPICIOUS].sort();
 
-/** The request body of one Clef call (the input schema of @cf/cloudflare/clef). */
+/**
+ * The request body of one Clef call (the input schema of @cf/cloudflare/clef): the options in the order given (the
+ * second view passes the first's in reverse), then none.
+ */
 export function clefInput(model: string, state: ClefState, options: readonly ClefOption[]): Record<string, unknown> {
   const criteria: Record<string, string> = {};
   for (const option of options) criteria[option.key] = criterion(option);
@@ -143,6 +168,10 @@ export function clefInput(model: string, state: ClefState, options: readonly Cle
         type: 'noul',
         instructions: 'Is this a bulk or automated email (a newsletter, marketing, or an automatic notification)?',
       },
+      [QUESTION_NEEDS_ACTION]: {
+        type: 'noul',
+        instructions: 'Does this email ask the owner to act soon: a pickup or verification code, a payment due, a deadline, or a reply wanted?',
+      },
     },
   };
 }
@@ -158,7 +187,7 @@ export function readClefAnswer(model: string, answer: unknown, optionIds: readon
   const { answers, usage, model: reported } = answer as { answers?: unknown; usage?: unknown; model?: unknown };
   if (typeof answers !== 'object' || answers === null || Array.isArray(answers)) throw new AiError('clef_bad_answer');
   const keys = Object.keys(answers).sort();
-  if (keys.join(',') !== [QUESTION_BULK, QUESTION_LABEL, QUESTION_SUSPICIOUS].sort().join(',')) throw new AiError('clef_bad_keys');
+  if (keys.join(',') !== QUESTIONS.join(',')) throw new AiError('clef_bad_keys');
   const record = answers as Record<string, { type?: unknown; probabilities?: unknown; choice?: unknown; noul?: unknown }>;
   const label = record[QUESTION_LABEL];
   if (label?.type !== 'choice' || typeof label.probabilities !== 'object' || label.probabilities === null) throw new AiError('clef_bad_choice');
@@ -192,6 +221,7 @@ export function readClefAnswer(model: string, answer: unknown, optionIds: readon
     top,
     suspicious: noul(QUESTION_SUSPICIOUS),
     bulk: noul(QUESTION_BULK),
+    needsAction: noul(QUESTION_NEEDS_ACTION),
     inputTokens: tokens,
     neurons: (tokens * (NEURONS_PER_M_TOKENS[model] ?? NEURONS_PER_M_TOKENS[CLEF] ?? 0)) / 1_000_000,
   };

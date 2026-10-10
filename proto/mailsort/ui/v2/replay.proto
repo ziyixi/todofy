@@ -1,0 +1,83 @@
+// The replay evaluation (mailsort/docs/design.md §5.1): before Gmail labelling goes live, the mails the owner answered
+// in the review queue are decided again by today's pipeline, without writing anything, and compared with the
+// owner's answers. Counts and label names only: no subject, sender or address.
+
+syntax = "proto3";
+
+package mailsort.ui.v2;
+
+import "google/api/field_behavior.proto";
+import "google/api/resource.proto";
+import "google/protobuf/timestamp.proto";
+
+option java_multiple_files = true;
+option java_outer_classname = "ReplayProto";
+option java_package = "science.ziyixi.mailsort.ui.v2";
+
+// The latest replay evaluation and its summary. A singleton: StartReplayEvaluation replaces it. Its rows are
+// pruned 7 days after it started.
+message ReplayEvaluation {
+  option (google.api.resource) = {
+    type: "sort.ziyixi.science/ReplayEvaluation"
+    pattern: "replayEvaluation"
+    singular: "replayEvaluation"
+    plural: "replayEvaluations"
+  };
+
+  // The evaluation's lifecycle.
+  enum State {
+    // Never written.
+    STATE_UNSPECIFIED = 0;
+    // Mails are still waiting: the alarm decides a few per run, with what the live pipeline leaves of the run's
+    // requests, while the day's model use is below half the neuron budget and the guard does not shed.
+    STATE_RUNNING = 1;
+    // Every mail was decided again (or could not be read).
+    STATE_SUCCEEDED = 2;
+  }
+
+  // A pair of labels the replay and the owner disagreed on, and how often.
+  message Mismatch {
+    // What the replay decided: a label, or empty for "no label fits" (a confident none).
+    string decided_label = 1 [
+      (google.api.field_behavior) = OUTPUT_ONLY,
+      (google.api.resource_reference).type = "sort.ziyixi.science/Label"
+    ];
+    // The owner's answer: a label, or empty for "none of them".
+    string owner_label = 2 [
+      (google.api.field_behavior) = OUTPUT_ONLY,
+      (google.api.resource_reference).type = "sort.ziyixi.science/Label"
+    ];
+    // The mails.
+    int32 mail_count = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  }
+
+  // Always `replayEvaluation`.
+  string name = 1 [(google.api.field_behavior) = IDENTIFIER];
+  // The evaluation's lifecycle.
+  State state = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // When it started.
+  google.protobuf.Timestamp create_time = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // When its last mail was done; unset while running.
+  google.protobuf.Timestamp complete_time = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The mails it covers: every review item the owner resolved in the 14 days before the start, with a label or
+  // "none of them", at most 200, newest first.
+  int32 total_count = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Mails decided again so far.
+  int32 evaluated_count = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Mails Gmail no longer gives (deleted, or unreadable): not evaluated.
+  int32 skipped_count = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Of the evaluated mails, a confident label (what live mode would write).
+  int32 auto_count = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Of those, the label the owner chose.
+  int32 auto_match_count = 9 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Of the evaluated mails, confident that no label fits.
+  int32 no_label_count = 10 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Of those, answered "none of them" by the owner.
+  int32 no_label_match_count = 11 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Of the evaluated mails, uncertain.
+  int32 unsure_count = 12 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Of those, the ones the review queue's daily quota would have shown (per UTC day of the original decision).
+  int32 shown_count = 13 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The confident decisions that differ from the owner's answer, per pair of labels, the most frequent first.
+  repeated Mismatch mismatches = 14 [(google.api.field_behavior) = OUTPUT_ONLY];
+}

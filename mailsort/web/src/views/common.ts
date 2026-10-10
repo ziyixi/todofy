@@ -2,7 +2,7 @@
  * What several views share: every label (for names and selects), a label select, a loading/error frame, and running a
  * mutation with its toast.
  */
-import type { Label } from '@ziyixi/proto/mailsort/ui/v1/label_pb'
+import type { Label } from '@ziyixi/proto/mailsort/ui/v2/label_pb'
 import { api, errorMessage, listAll, newRequestId, withRetry } from '../api.ts'
 import { emptyState } from '../components.ts'
 import { el, toast } from '../dom.ts'

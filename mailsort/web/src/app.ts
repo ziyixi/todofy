@@ -9,7 +9,7 @@
  *
  * Mobile first, light and dark from the system, plain DOM (no framework), and nothing but the page's own API.
  */
-import { Mode, ServiceStatus_AuthState, type ServiceStatus } from '@ziyixi/proto/mailsort/ui/v1/status_pb'
+import { Mode, ServiceStatus_AuthState, type ServiceStatus } from '@ziyixi/proto/mailsort/ui/v2/status_pb'
 import { api } from './api.ts'
 import { chip, emptyState } from './components.ts'
 import { el } from './dom.ts'

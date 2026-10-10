@@ -576,8 +576,9 @@ mailsort (`mailsort/`, Worker `mailsort`, `mailsort/docs/design.md` §10) joined
 - Counters: `decided_today`, `applied_today`, `unsure_today`, `review_pending`, `pending`, `gmail_calls_today`,
   `neurons_today`, `neuron_budget`, `last_sync_minutes` (absent before the first sync). Signals in README. Never a
   subject, sender, address or label name.
-- Guard: a shed defers `full_model` (Clef-flash only), `audit` (the daily audit sample) and `embedding_rebuild`. New
-  mail is still read, decided and sorted; the owner API is never deferred.
+- Guard: a shed defers `full_model` (Clef-flash only), `replay` (the owner's replay evaluation; `audit`, the daily
+  audit sample, until 2026-10-10) and `embedding_rebuild`. New mail is still read, decided and sorted; the owner API is
+  never deferred.
 
 ## 3b. The move onto proto/ (2026-10-01, no wire change)
 

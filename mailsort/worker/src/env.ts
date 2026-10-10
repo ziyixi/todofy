@@ -14,7 +14,7 @@ export interface AiRunner {
 }
 
 export interface Env {
-  /** The single SQLite-backed object "mailsort-v1": every label, rule, decision and example, and the scheduler. */
+  /** The single SQLite-backed object "mailsort-v1": every label, decision and example, and the scheduler. */
   readonly MAILSORT: DurableObjectNamespace<MailsortState>;
   /** The UI's static files (web/dist). */
   readonly ASSETS: Fetcher;

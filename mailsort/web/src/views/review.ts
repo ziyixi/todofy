@@ -1,24 +1,26 @@
 /**
- * 待审 (`/`): the mails waiting for the owner, newest first, one compact row each: the masked subject and sender (kept
- * 14 days), the suggested label with the model's confidence, and 确认, 改为… (the searchable label picker, 都不是
- * first) and 跳过. A choice leaves the list at once and the next row takes the focus.
+ * 待审 (`/`): the few uncertain mails waiting for the owner, newest first, one compact row each: the masked subject and
+ * sender (kept 14 days), the model's most likely label with its confidence and why it was uncertain, and 确认 (that
+ * label), 改为… (the searchable label picker, 都不是 first) and 跳过. Every choice is ResolveReviewItem with a label or
+ * 都不是. A choice leaves the list at once and the next row takes the focus. (The redesign of 2026-10-10 replaces this
+ * view; until then it is the v1 view on mailsort.ui.v2.)
  *
  * Keyboard: j / k move between rows, Enter confirms the focused row, c opens 改为…, s skips. A suspected phishing
- * mail, or a trust label the model may not set, says so, and its 确认 is not the primary action and asks first; its
- * picker starts at 都不是 (another mail's at the model's next choice).
+ * mail, or a trust label for a sender not trusted yet, says so, and its 确认 is not the primary action and asks first;
+ * its picker starts at 都不是 (another mail's at the model's next choice).
  */
-import type { ReviewItem } from '@ziyixi/proto/mailsort/ui/v1/review_pb'
+import type { ReviewItem } from '@ziyixi/proto/mailsort/ui/v2/review_pb'
 import { api, listAll } from '../api.ts'
 import { bar, chip, emptyState, picker, type PickerOption } from '../components.ts'
 import { button, el, fill } from '../dom.ts'
-import { KIND_NAMES, labelText, percent, UNSURE_REASONS, when } from '../format.ts'
+import { labelText, percent, UNSURE_REASONS, when } from '../format.ts'
 import type { ViewContext } from '../app.ts'
 import { act, allLabels, frame } from './common.ts'
 
-/** Unsure reasons where the pipeline refused the suggestion on purpose: one key must not file such a mail under it. */
+/** Reasons where the pipeline refused the label on purpose: one key must not file such a mail under it. */
 const CAUTION: Readonly<Record<string, string>> = {
   suspicious: '疑似钓鱼：先在 Gmail 里核对发件人和链接',
-  trust_needs_rule: '可信类标签只能由规则打：先在 Gmail 里核对发件人',
+  untrusted_sender: '发件人还不可信：先在 Gmail 里核对发件人',
 }
 
 interface Row {
@@ -28,11 +30,9 @@ interface Row {
   readonly skip: () => void
 }
 
-/** Why a mail is here, when it is not a plain suggestion: `拿不准 · 把握不够`, `抽查`. */
+/** Why the model was uncertain: `把握不够`, `两次判断不一致`. */
 function why(item: ReviewItem): string {
-  const kind = KIND_NAMES[item.kind]
-  const reason = item.unsureReason === '' ? '' : (UNSURE_REASONS[item.unsureReason] ?? item.unsureReason)
-  return [kind ?? '', reason].filter((part) => part !== '').join(' · ')
+  return item.reason === '' ? '' : (UNSURE_REASONS[item.reason] ?? item.reason)
 }
 
 /** The keyboard hint, shown where there is a keyboard (styles.css .keys). */
@@ -78,8 +78,8 @@ export async function renderReview(ctx: ViewContext): Promise<void> {
     }
 
     const build = (item: ReviewItem): Row => {
-      const caution = CAUTION[item.unsureReason]
-      const suggested = item.suggestedLabel
+      const caution = CAUTION[item.reason]
+      const suggested = item.candidates[0]?.label ?? ''
       const probability = item.candidates.find((candidate) => candidate.label === suggested)?.probability
       const node = el('li', { tabindex: '-1', 'aria-label': item.subject === '' ? '（无主题）' : item.subject })
       const slot = el('div', { hidden: true })
@@ -96,9 +96,9 @@ export async function renderReview(ctx: ViewContext): Promise<void> {
       const confirm = () => {
         if (suggested === '') return
         if (caution !== undefined && !ctx.host.confirm(`${caution}。仍然确认为“${labelText(suggested, labels)}”？`)) return
-        void run((requestId) => api.confirmReviewItem({ name: item.name, requestId }), `已确认：${labelText(suggested, labels)}`)
+        void run((requestId) => api.resolveReviewItem({ name: item.name, label: suggested, requestId }), `已确认：${labelText(suggested, labels)}`)
       }
-      const correct = (label: string) => void run((requestId) => api.correctReviewItem({ name: item.name, label, requestId }), `已改为：${labelText(label, labels)}`)
+      const correct = (label: string) => void run((requestId) => api.resolveReviewItem({ name: item.name, label, requestId }), `已改为：${labelText(label, labels)}`)
       const skip = () => void run((requestId) => api.skipReviewItem({ name: item.name, requestId }), '已跳过')
       const changeButton = button('改为…', () => {
         if (slot.hidden) change()
@@ -111,7 +111,7 @@ export async function renderReview(ctx: ViewContext): Promise<void> {
       }
       const change = () => {
         // A suspected phishing mail starts at 都不是; another at the model's next choice.
-        const next = item.unsureReason === 'suspicious' ? '' : (item.candidates.find((candidate) => candidate.label !== suggested)?.label ?? '')
+        const next = item.reason === 'suspicious' ? '' : (item.candidates.find((candidate) => candidate.label !== suggested)?.label ?? '')
         slot.replaceChildren(
           picker(options, next, (value) => {
             close()
@@ -127,8 +127,8 @@ export async function renderReview(ctx: ViewContext): Promise<void> {
         // Now that the list is on the page, its highlighted label can be scrolled into sight.
         slot.querySelector('[aria-selected="true"]')?.scrollIntoView?.({ block: 'nearest' })
       }
-      // A warning line already says why (疑似钓鱼): the small text then names only the kind.
-      const reason = caution === undefined ? why(item) : (KIND_NAMES[item.kind] ?? '')
+      // A warning line already says why (疑似钓鱼): the small text then says nothing more.
+      const reason = caution === undefined ? why(item) : ''
       fill(
         node,
         el('div', { class: 'row-head' }, el('span', { class: 'row-title' }, item.subject === '' ? '（无主题）' : item.subject), el('span', { class: 'meta' }, when(item.receiveTime))),

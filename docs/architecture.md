@@ -55,7 +55,7 @@ runtime. Newsletter keeps its own locked container dependencies and existing ext
 | FlowDay | `flowday.ui.v1` | `/api/v1/` |
 | Links | `links.ui.v1` | `/_/api/v1/` |
 | Watch | `watch.ui.v1` | `/api/v1/` |
-| Mailsort | `mailsort.ui.v1` | `/api/v1/` |
+| Mailsort | `mailsort.ui.v2` | `/api/v2/` |
 | Fleet | `fleet.ui.v1` | `/api/v1/` |
 
 The [proto HTTP pattern](../proto/README.md#http-apis) owns route descriptors, request/response types and
@@ -148,7 +148,7 @@ accepted report nor a ready deployment receipt proves successful Newsletter deli
 - **Mailsort:** one SQLite DO, no D1/R2 and no cron, plus the Workers AI binding (Clef, Clef-flash, bge-m3). It
   reads the owner's Gmail with the owner's own OAuth grant and only ever adds or removes its own labels (created by it
   or adopted, owned by ID) and INBOX, through the closed operation table of `gmail.ts`; it never marks mail read, deletes, sends or changes
-  settings. Every write is a ledger row first and can be undone. Shadow mode (the default) only suggests; the
+  settings. Every write is a ledger row first and can be undone. Shadow mode (the default) only records; the
   deployment variable `MODE` and the breaker can only lower the mode. The Gmail grant is put by the owner and never
   passes through GitHub. See [AGENTS](../mailsort/AGENTS.md) and [design](../mailsort/docs/design.md).
 - **Newsletter:** runs as an independent k3s image because its workflow uses Codex CLI. It reads Todofy's machine

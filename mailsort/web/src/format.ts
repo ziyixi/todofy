@@ -1,12 +1,9 @@
 /**
- * The UI's words for the API's values: modes, review kinds, unsure reasons, rule kinds, and times in the browser's
- * zone.
+ * The UI's words for the API's values: modes, uncertain reasons, and times in the browser's zone.
  */
 import { timestampMs, type Timestamp } from '@ziyixi/proto/protobuf/wkt'
-import { ReviewItem_Kind } from '@ziyixi/proto/mailsort/ui/v1/review_pb'
-import { Rule_Kind } from '@ziyixi/proto/mailsort/ui/v1/rule_pb'
-import { Mode } from '@ziyixi/proto/mailsort/ui/v1/status_pb'
-import type { Label } from '@ziyixi/proto/mailsort/ui/v1/label_pb'
+import { Mode } from '@ziyixi/proto/mailsort/ui/v2/status_pb'
+import type { Label } from '@ziyixi/proto/mailsort/ui/v2/label_pb'
 
 export const MODE_NAMES: Readonly<Record<number, string>> = {
   [Mode.OFF]: '关闭',
@@ -21,29 +18,13 @@ export const BREAKER_REASONS: Readonly<Record<string, string>> = {
   label_share: '某个标签占比突增',
 }
 
-/** The kinds a review row names (a suggestion is the plain case and carries no chip). */
-export const KIND_NAMES: Readonly<Record<number, string>> = {
-  [ReviewItem_Kind.UNSURE]: '拿不准',
-  [ReviewItem_Kind.AUDIT]: '抽查',
-}
-
+/** Why the model was uncertain (ReviewItem.reason). */
 export const UNSURE_REASONS: Readonly<Record<string, string>> = {
-  below_threshold: '把握不够',
-  none: '都不像',
+  low_confidence: '把握不够',
+  views_disagree: '两次判断不一致',
   suspicious: '疑似钓鱼',
-  trust_needs_rule: '可信类只能由规则打',
-  label_disabled: '标签未启用',
+  untrusted_sender: '发件人还不可信',
   model_unavailable: '模型暂不可用',
-  no_labels: '还没有启用的标签',
-  no_model_labels: '没有带说明的标签',
-}
-
-/** A rule's kind in one word (标签's rule lines and 添加规则). */
-export const RULE_KIND_NAMES: Readonly<Record<number, string>> = {
-  [Rule_Kind.SENDER_ADDRESS]: '发件人',
-  [Rule_Kind.SENDER_DOMAIN]: '域名',
-  [Rule_Kind.LIST_ID]: '列表',
-  [Rule_Kind.DELIVERED_TO]: '收件地址',
 }
 
 export function ms(time: Timestamp | undefined): number | null {

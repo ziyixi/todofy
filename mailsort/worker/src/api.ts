@@ -1,52 +1,42 @@
 /**
- * The owner API (proto/mailsort/ui/v1): one handler per rpc of MailsortUiService, served by the shared transcoder inside
+ * The owner API (proto/mailsort/ui/v2): one handler per rpc of MailsortUiService, served by the shared transcoder inside
  * MailsortState (state.ts), after the Worker authenticated the owner and checked Origin and CSRF (http.ts). A handler
  * checks what the IDL cannot (limits.ts), reads or writes the object's SQLite (store.ts) and maps rows to messages
  * (model.ts). A mutation and its AIP-155 request log entry are one transaction; the few that write to Gmail (an owner's
  * review choice in live mode, an undo, a label rename, SyncLabels) record their ledger rows first, make the Gmail
  * requests through writes.ts and gmail.ts, then log the answer.
  *
- * Errors are RpcErrors with a reason of mailsort.ui.v1.ErrorReason or common.errors.v1.CommonReason (reasons.ts). A
+ * Errors are RpcErrors with a reason of mailsort.ui.v2.ErrorReason or common.errors.v1.CommonReason (reasons.ts). A
  * Gmail failure is DEPENDENCY_UNAVAILABLE (repeat it) or GMAIL_NOT_AUTHORIZED; anything else unexpected is INTERNAL.
  */
 import { FieldMaskError, updatePaths } from '@ziyixi/proto/field-mask';
 import type { ServiceHandlers, ShapeOf } from '@ziyixi/proto/http-transcoder';
-import { LabelSchema, type Label } from '@ziyixi/proto/mailsort/ui/v1/label_pb';
+import { LabelSchema, type Label } from '@ziyixi/proto/mailsort/ui/v2/label_pb';
 import {
-  ExportGmailFiltersResponseSchema,
-  ExportRulesResponseSchema,
-  ImportChange_Action,
-  ImportChange_Kind,
-  ImportChangeSchema,
-  ImportRulesResponseSchema,
-  LabelImportSchema,
   ListExamplesResponseSchema,
   ListLabelsResponseSchema,
   ListLedgerEntriesResponseSchema,
   ListReviewItemsResponseSchema,
-  ListRulesResponseSchema,
   RebuildExampleEmbeddingsResponseSchema,
   SyncLabelsResponseSchema,
   UndoLedgerEntriesResponseSchema,
   type MailsortUiService,
-} from '@ziyixi/proto/mailsort/ui/v1/mailsort_ui_service_pb';
-import { LedgerEntrySchema, ReviewItemSchema } from '@ziyixi/proto/mailsort/ui/v1/review_pb';
-import { Rule_Kind, RuleSchema } from '@ziyixi/proto/mailsort/ui/v1/rule_pb';
-import { AccuracyReportSchema, LabelAccuracySchema, ServiceStatus_AuthState, ServiceStatusSchema, SettingsSchema, type Settings } from '@ziyixi/proto/mailsort/ui/v1/status_pb';
+} from '@ziyixi/proto/mailsort/ui/v2/mailsort_ui_service_pb';
+import { ReplayEvaluationSchema } from '@ziyixi/proto/mailsort/ui/v2/replay_pb';
+import { LedgerEntrySchema, ReviewItemSchema } from '@ziyixi/proto/mailsort/ui/v2/review_pb';
+import { LabelCountSchema, LabelReportSchema, ServiceStatus_AuthState, ServiceStatusSchema, SettingsSchema, type Settings } from '@ziyixi/proto/mailsort/ui/v2/status_pb';
 import { decodePageToken, encodePageToken, PageTokenError, type PageParameters } from '@ziyixi/proto/page-token';
 import { create, type DescMessage, type JsonValue, type MessageShape } from '@ziyixi/proto/protobuf';
 import { EmptySchema, timestampFromMs, timestampMs } from '@ziyixi/proto/protobuf/wkt';
 import { RpcError } from '@ziyixi/proto/rpc-status';
 import { fromWire, toWire } from '@ziyixi/proto/wire-json';
-import { labelStats } from './accuracy.ts';
+import { needsAction } from './decide.ts';
 import type { ModeName } from './env.ts';
 import { deleteExample, deleteExamplesOfLabel, dropEmbeddings } from './examples.ts';
 import { setVerdict } from './feedback.ts';
-import { exportableRules, gmailFilterXml } from './filters.ts';
 import { FLOW_RANGES, readFlow } from './flow.ts';
 import { GoogleError, type GmailClient } from './gmail.ts';
 import { newEtag, shortId } from './ids.ts';
-import { applyImport, exportDocument, foldTerms, planImport, planValid, templateLabels, type ImportPlan, type LabelInput, type RuleInput } from './import.ts';
 import {
   CLEF,
   CLEF_FLASH,
@@ -61,22 +51,17 @@ import {
   NEURON_BUDGET_MIN,
   NONE,
   PAGE,
-  RULE_PAGE,
-  RULE_TEXT_MAX,
-  RULES_MAX,
   RUN_WRITE_LIMIT_MAX,
-  THRESHOLD_MAX,
-  THRESHOLD_MIN,
   UNDO_BATCH,
   UNDO_RANGE_MAX_MS,
 } from './limits.ts';
-import { exampleMessage, flowMessage, labelMessage, labelName, ledgerMessage, MODES, modeName, reviewMessage, RULE_KINDS, ruleMessage } from './model.ts';
+import { exampleMessage, flowMessage, labelMessage, labelName, ledgerMessage, MODES, modeName, replayMessage, reviewMessage } from './model.ts';
 import { labelIdFor, ownerPath, pathOfGmailName, treeConflict } from './paths.ts';
 import { REASONS, sortError } from './reasons.ts';
-import { normalizeRuleValue, ruleText, ruleValueOk } from './rule-value.ts';
+import { replaySummary, startReplay } from './replay.ts';
 import { authState, type Budget, writeScope } from './session.ts';
 import { effectiveMode, readSettings, writeSettings, type SettingsValue } from './settings.ts';
-import { utcDay, type DecisionRow, type LabelRow, type LedgerRow, type ReviewRow, type RuleRow, type Store } from './store.ts';
+import { utcDay, type DecisionRow, type LabelRow, type LedgerRow, type ReviewRow, type Store } from './store.ts';
 import { ensureGmailLabel, ensureGmailParents, executeWrites, hasSublabels, intend, intendUndo, linkGmailLabel, setNameTaken, undoable, userLabelsByName, type WriteContext } from './writes.ts';
 
 /** What every handler gets from MailsortState. */
@@ -215,7 +200,14 @@ function existingLabel(ctx: ApiContext, id: string): LabelRow {
 }
 
 function labelOut(ctx: ApiContext, row: LabelRow): Label {
-  return labelMessage(row, ctx.store.exampleCounts().get(row.id) ?? 0);
+  return labelMessage(row, ctx.store.exampleCounts().get(row.id) ?? 0, ctx.store.trustedDomains(row.id));
+}
+
+/** Every label (one read of the examples' counts and one of the trusted domains), in the labels' order. */
+function labelsOut(store: Store, rows: readonly LabelRow[]): Label[] {
+  const counts = store.exampleCounts();
+  const domains = store.allTrustedDomains();
+  return rows.map((row) => labelMessage(row, counts.get(row.id) ?? 0, domains.get(row.id) ?? []));
 }
 
 /** A label's path (paths.ts ownerPath), and the tree rule: no label may be the parent of another (only leaves). */
@@ -224,12 +216,6 @@ function checkDisplayName(ctx: ApiContext, name: string, exceptId = ''): string 
   const value = ownerPath(name);
   if (value === null) throw sortError('INVALID_LABEL');
   if (treeConflict(value, ctx.store.labelPaths(exceptId)) !== null) throw sortError('INVALID_LABEL');
-  return value;
-}
-
-/** A label's own threshold: 0 (the default's) or THRESHOLD_MIN to THRESHOLD_MAX. A label error, not a settings one. */
-function checkThreshold(value: number): number {
-  if (value !== 0 && (!Number.isFinite(value) || value < THRESHOLD_MIN || value > THRESHOLD_MAX)) throw sortError('INVALID_LABEL');
   return value;
 }
 
@@ -286,12 +272,20 @@ function standing(ctx: ApiContext, decision: DecisionRow): LedgerRow | undefined
   return row;
 }
 
-/** Records the owner's choice and the Gmail writes it implies (live mode only); answers the ledger rows to run. */
+/**
+ * Records the owner's choice and what it teaches: the verdict (and its example), and for a trust label and a mail that
+ * passed DMARC its From domain as one of the label's trusted domains. Answers the ledger rows to run: the Gmail writes
+ * the choice implies (live mode only).
+ */
 function choose(ctx: ApiContext, item: ReviewRow, decision: DecisionRow, chosen: string | null): string[] {
   const { store } = ctx;
   setVerdict(store, decision, chosen, 'review', ctx.now);
-  // setVerdict resolves the item through pendingReviewOf; an audit item is the one asked about.
+  // setVerdict resolves the item through pendingReviewOf; this item is the one asked about.
   store.run(`UPDATE review SET state = ?, resolved_label = ?, resolve_time = ? WHERE id = ?`, item.suggested_label === chosen ? 'confirmed' : 'corrected', chosen, ctx.now, item.id);
+  const chosenLabel = chosen === null ? undefined : store.label(chosen);
+  if (chosenLabel?.trust === 1 && decision.dmarc === 1 && decision.sender_domain !== null && decision.sender_domain !== '') {
+    if (store.addTrustedDomain(chosenLabel.id, decision.sender_domain, ctx.now)) store.touchLabel(chosenLabel.id, ctx.now);
+  }
   if (!ownerWritesAllowed(ctx)) return [];
   const ids: string[] = [];
   const current = standing(ctx, decision);
@@ -303,10 +297,10 @@ function choose(ctx: ApiContext, item: ReviewRow, decision: DecisionRow, chosen:
     const label = store.label(chosen);
     // As in the pipeline: a label missing from Gmail, or whose name is taken there, writes nothing.
     if (label !== undefined && label.gmail_state !== 'missing' && label.gmail_name_taken !== 1) {
-      // The decision keeps its own label and outcome (the accuracy is about the decision); the ledger row is the owner's.
-      // A label that keeps its mail in the inbox does so for the owner's choice too, and so does the rule that
-      // suggested this very label (a pickup-code carve-out onto 购物/订单物流, which archives the rest).
-      const keep = label.keep_in_inbox === 1 || (chosen === decision.label_id && decision.keep_in_inbox === 1);
+      // The decision keeps its own label and outcome (the report is about the decision); the ledger row is the owner's.
+      // A label that keeps its mail in the inbox does so for the owner's choice too, and so does a mail that asks the
+      // owner to act soon.
+      const keep = label.keep_in_inbox === 1 || needsAction(decision.needs_action);
       ids.push(intend(store, decision.message_id, label, !keep, 'owner', ctx.now));
     }
   }
@@ -323,8 +317,6 @@ function settingsMessage(ctx: ApiContext, value: SettingsValue): Settings {
     runWriteLimit: value.runWriteLimit,
     dailyWriteLimit: value.dailyWriteLimit,
     dailyNeuronBudget: value.dailyNeuronBudget,
-    defaultThreshold: value.defaultThreshold,
-    precisionTarget: value.precisionTarget,
     breakerTripped: value.breaker !== '',
     breakerReason: value.breaker,
     etag: value.etag,
@@ -336,107 +328,60 @@ function integer(value: number, min: number, max: number): number {
   return value;
 }
 
-function fraction(value: number): number {
-  if (!Number.isFinite(value) || value < THRESHOLD_MIN || value > THRESHOLD_MAX) throw sortError('INVALID_SETTINGS');
-  return value;
-}
+// ---- the label report -------------------------------------------------------------------------------------------------
 
-// ---- rules ----------------------------------------------------------------------------------------------------------------
-
-const KIND_NAMES = new Map<number, RuleRow['kind']>(Object.entries(RULE_KINDS).map(([name, value]) => [value, name as RuleRow['kind']]));
-
-function checkRuleValue(kind: RuleRow['kind'], raw: string): string {
-  const value = normalizeRuleValue(kind, raw);
-  if (!ruleValueOk(kind, value)) throw sortError('INVALID_RULE');
-  return value;
-}
-
-function ruleOut(ctx: ApiContext, row: RuleRow): ReturnType<typeof ruleMessage> {
-  return ruleMessage(row, ctx.store.label(row.label_id)?.trust === 1);
-}
-
-/** The owner's evidence or notes of a rule: at most RULE_TEXT_MAX characters, line breaks but no other control characters. */
-function checkRuleText(text: string): string {
-  const value = ruleText(text, RULE_TEXT_MAX);
-  if (value === null) throw sortError('INVALID_RULE');
-  return value;
-}
-
-/** An import's entries from the request (the generated messages, read strictly by the transcoder). */
-function importInput(request: { labels: readonly { path: string; description: string; trust: boolean; keepInInbox: boolean; sensitive: boolean; threshold: number; enabled?: boolean | undefined }[]; rules: readonly { id: string; match?: { fromAddress: string; fromDomain: string; listId: string; toAddress: string } | undefined; label: string; keepInInbox: boolean; trust: boolean; requireDmarc: boolean; evidence: string; notes: string; subjectIncludes: string[]; subjectExcludes: string[] }[]; useTemplate: boolean }): { labels: LabelInput[]; rules: RuleInput[] } {
-  if (request.useTemplate) {
-    if (request.labels.length > 0 || request.rules.length > 0) bad('use_template imports the template only: leave labels and rules empty');
-    return { labels: templateLabels(), rules: [] };
+/**
+ * The last 7 UTC days' decisions (today included) per label, in one grouped read of their rows: confident labels, the
+ * owner's corrections in Gmail and in the review queue (of a decision's label, or of an uncertain one's most likely),
+ * uncertain decisions and the ones shown.
+ */
+function labelReport(ctx: ApiContext): ReturnType<typeof create<typeof LabelReportSchema>> {
+  const start = Math.floor(ctx.now / DAY) * DAY - 6 * DAY;
+  type Row = { label: string | null; outcome: string; shown: number; gmail: number; review: number; n: number };
+  const rows = ctx.store.all<Row>(
+    `SELECT coalesce(label_id, top_label) AS label, outcome, shown,
+       sum(verdict_source = 'gmail' AND verdict IN ('confirmed', 'corrected') AND coalesce(verdict_label, '') != coalesce(label_id, top_label, '')) AS gmail,
+       sum(verdict_source = 'review' AND coalesce(verdict_label, '') != coalesce(label_id, top_label, '')) AS review,
+       count(*) AS n
+     FROM decisions WHERE decided_at >= ? AND outcome != 'skipped' GROUP BY label, outcome, shown`,
+    start,
+  );
+  const per = new Map<string, { auto: number; gmail: number; review: number; unsure: number; shown: number }>();
+  const total = { decided: 0, auto: 0, none: 0, unsure: 0, shown: 0 };
+  for (const row of rows) {
+    const auto = row.outcome === 'applied' || row.outcome === 'suggested';
+    total.decided += row.n;
+    if (auto) total.auto += row.n;
+    if (row.outcome === 'none') total.none += row.n;
+    if (row.outcome === 'unsure') total.unsure += row.n;
+    if (row.outcome === 'unsure' && row.shown === 1) total.shown += row.n;
+    if (row.label === null) continue;
+    const entry = per.get(row.label) ?? { auto: 0, gmail: 0, review: 0, unsure: 0, shown: 0 };
+    if (auto) entry.auto += row.n;
+    if (row.outcome === 'unsure') entry.unsure += row.n;
+    if (row.outcome === 'unsure' && row.shown === 1) entry.shown += row.n;
+    entry.gmail += row.gmail;
+    entry.review += row.review;
+    per.set(row.label, entry);
   }
-  if (request.labels.length > LABELS_MAX || request.rules.length > RULES_MAX) bad('too many entries');
-  return {
-    labels: request.labels.map((item) => ({ path: item.path, description: item.description, trust: item.trust, keepInInbox: item.keepInInbox, sensitive: item.sensitive, threshold: item.threshold, enabled: item.enabled ?? null })),
-    rules: request.rules.map((item) => ({
-      id: item.id,
-      match: item.match,
-      label: item.label,
-      keepInInbox: item.keepInInbox,
-      trust: item.trust,
-      requireDmarc: item.requireDmarc,
-      evidence: item.evidence,
-      notes: item.notes,
-      subjectIncludes: item.subjectIncludes,
-      subjectExcludes: item.subjectExcludes,
-    })),
-  };
-}
-
-const ACTIONS = { create: ImportChange_Action.CREATE, update: ImportChange_Action.UPDATE, skip: ImportChange_Action.SKIP, invalid: ImportChange_Action.INVALID } as const;
-
-/** The plan as ImportRulesResponse. */
-function importResponse(plan: ImportPlan, applied: boolean): ReturnType<typeof create<typeof ImportRulesResponseSchema>> {
-  const changes = [
-    ...plan.labels.map((item) =>
-      create(ImportChangeSchema, {
-        kind: ImportChange_Kind.LABEL,
-        index: item.index,
-        action: ACTIONS[item.action],
-        key: item.key,
-        resource: item.id === '' ? '' : labelName(item.id),
-        changedFields: [...item.changed],
-        problem: item.problem,
-        warning: item.warning,
-      }),
-    ),
-    ...plan.rules.map((item) =>
-      create(ImportChangeSchema, {
-        kind: ImportChange_Kind.RULE,
-        index: item.index,
-        action: ACTIONS[item.action],
-        key: item.key,
-        resource: item.id === '' ? '' : `rules/${item.id}`,
-        changedFields: [...item.changed],
-        problem: item.problem,
-        warning: item.warning,
-      }),
-    ),
-  ];
-  const all = [...plan.labels, ...plan.rules];
-  return create(ImportRulesResponseSchema, {
-    changes,
-    applied,
-    createdLabelCount: plan.labels.filter((item) => item.action === 'create').length,
-    updatedLabelCount: plan.labels.filter((item) => item.action === 'update').length,
-    createdRuleCount: plan.rules.filter((item) => item.action === 'create').length,
-    updatedRuleCount: plan.rules.filter((item) => item.action === 'update').length,
-    skippedCount: all.filter((item) => item.action === 'skip').length,
-    invalidCount: all.filter((item) => item.action === 'invalid').length,
-    labels: plan.labels.map((item) =>
-      create(LabelImportSchema, {
-        path: item.values.path,
-        description: item.values.description,
-        trust: item.values.trust,
-        keepInInbox: item.values.keepInInbox,
-        sensitive: item.values.sensitive,
-        threshold: item.values.threshold,
-        enabled: item.values.enabled,
-      }),
-    ),
+  return create(LabelReportSchema, {
+    name: 'labelReport',
+    labels: ctx.store.labels().map((label) => {
+      const entry = per.get(label.id);
+      return create(LabelCountSchema, {
+        label: labelName(label.id),
+        autoCount: entry?.auto ?? 0,
+        gmailCorrectionCount: entry?.gmail ?? 0,
+        reviewCorrectionCount: entry?.review ?? 0,
+        unsureCount: entry?.unsure ?? 0,
+        shownCount: entry?.shown ?? 0,
+      });
+    }),
+    decidedCount: total.decided,
+    autoCount: total.auto,
+    noLabelCount: total.none,
+    unsureCount: total.unsure,
+    shownCount: total.shown,
   });
 }
 
@@ -450,11 +395,10 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailsortUiService>, ApiCon
     const after = cursorOf(request.pageToken, {}, numberCursor) ?? -1;
     const rows = ctx.store.all<LabelRow>(`SELECT * FROM labels WHERE seq > ? ORDER BY seq LIMIT ?`, after, size + 1);
     const page = rows.slice(0, size);
-    const counts = ctx.store.exampleCounts();
     const last = page[page.length - 1];
     return Promise.resolve(
       create(ListLabelsResponseSchema, {
-        labels: page.map((row) => labelMessage(row, counts.get(row.id) ?? 0)),
+        labels: labelsOut(ctx.store, page),
         nextPageToken: rows.length > size && last !== undefined ? encodePageToken(last.seq, {}) : '',
       }),
     );
@@ -472,24 +416,20 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailsortUiService>, ApiCon
     const id = request.labelId !== '' ? request.labelId : (labelIdFor(displayName, ctx.store.takenLabelIds()) ?? shortId('l'));
     if (!LABEL_ID_PATTERN.test(id) || id === NONE) throw sortError('INVALID_LABEL');
     const description = checkDescription(label.description);
-    const threshold = checkThreshold(label.threshold);
     const created = once(ctx, request.requestId, 'CreateLabel', `labels/${id}`, LabelSchema, () => {
       const { store } = ctx;
       if (store.takenLabelIds().has(id) || store.one(`SELECT 1 AS x FROM labels WHERE display_name = ?`, displayName) !== undefined) throw sortError('LABEL_EXISTS');
       if (store.count(`SELECT count(*) AS n FROM labels`) >= LABELS_MAX) throw sortError('LIMIT_REACHED');
       const seq = (store.one<{ seq: number | null }>(`SELECT max(seq) AS seq FROM labels`)?.seq ?? 0) + 1;
       store.run(
-        `INSERT INTO labels (id, seq, display_name, description, enabled, live, trust, threshold, gmail_state, desc_version, live_since, create_time, update_time, etag, keep_in_inbox, sensitive)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', 1, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO labels (id, seq, display_name, description, enabled, trust, gmail_state, desc_version, create_time, update_time, etag, keep_in_inbox, sensitive)
+         VALUES (?, ?, ?, ?, ?, ?, 'pending', 1, ?, ?, ?, ?, ?)`,
         id,
         seq,
         displayName,
         description,
         label.enabled ? 1 : 0,
-        label.live ? 1 : 0,
         label.trustImplying ? 1 : 0,
-        threshold,
-        label.live ? ctx.now : null,
         ctx.now,
         ctx.now,
         newEtag(ctx.now),
@@ -530,7 +470,6 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailsortUiService>, ApiCon
     labelEtag(ctx, before, label.etag);
     const displayName = has('display_name') ? checkDisplayName(ctx, label.displayName, id) : before.display_name;
     const description = has('description') ? checkDescription(label.description) : before.description;
-    const threshold = has('threshold') ? checkThreshold(label.threshold) : before.threshold;
     return onceAsync(ctx, request.requestId, 'UpdateLabel', `labels/${id}`, LabelSchema, async () => {
       if (displayName !== before.display_name) {
         if (ctx.store.one(`SELECT 1 AS x FROM labels WHERE display_name = ? AND id != ?`, displayName, id) !== undefined) throw sortError('LABEL_EXISTS');
@@ -541,18 +480,14 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailsortUiService>, ApiCon
         const { store } = ctx;
         // A new path may be free in Gmail: the next write that needs the label looks again.
         if (displayName !== before.display_name) store.run(`UPDATE labels SET gmail_name_taken = 0 WHERE id = ?`, id);
-        const live = has('live') ? label.live : before.live === 1;
         store.run(
-          `UPDATE labels SET display_name = ?, description = ?, enabled = ?, live = ?, trust = ?, threshold = ?, desc_version = desc_version + ?,
-             live_since = ?, update_time = ?, etag = ?, keep_in_inbox = ?, sensitive = ? WHERE id = ?`,
+          `UPDATE labels SET display_name = ?, description = ?, enabled = ?, trust = ?, desc_version = desc_version + ?, update_time = ?, etag = ?, keep_in_inbox = ?,
+             sensitive = ? WHERE id = ?`,
           displayName,
           description,
           (has('enabled') ? label.enabled : before.enabled === 1) ? 1 : 0,
-          live ? 1 : 0,
           (has('trust_implying') ? label.trustImplying : before.trust === 1) ? 1 : 0,
-          threshold,
           description !== before.description ? 1 : 0,
-          live ? (before.live === 1 ? before.live_since : ctx.now) : null,
           ctx.now,
           newEtag(ctx.now),
           (has('keep_in_inbox') ? label.keepInInbox : before.keep_in_inbox === 1) ? 1 : 0,
@@ -576,9 +511,9 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailsortUiService>, ApiCon
         if (request.etag !== '' && request.etag !== row.etag) throw sortError('ETAG_MISMATCH', [{ schema: LabelSchema, message: labelOut(ctx, row) }]);
         store.run(`DELETE FROM labels WHERE id = ?`, id);
         // Retired: decisions, review items, the ledger and the flow counters keep naming it, so no new label may take
-        // the ID and inherit that history (its accuracy, its 流程 counts, a pending suggestion).
+        // the ID and inherit that history (its report, its flow counts, its sender history).
         store.run(`INSERT OR REPLACE INTO retired_labels (id, retire_time) VALUES (?, ?)`, id, ctx.now);
-        store.run(`DELETE FROM rules WHERE label_id = ?`, id);
+        store.run(`DELETE FROM trusted_domains WHERE label_id = ?`, id);
         deleteExamplesOfLabel(store, id);
         // The Gmail label and its mails stay as they are. Its ledger entries can no longer be undone from here (the
         // label is not owned any more, so the guard would refuse): writes not made fail, undos not made stand.
@@ -638,15 +573,23 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailsortUiService>, ApiCon
           }
           setNameTaken(store, row.id, gmailLabels.some((item) => item.name === row.display_name), ctx.now);
         }
-        const counts = store.exampleCounts();
-        return create(SyncLabelsResponseSchema, {
-          labels: store.labels().map((row) => labelMessage(row, counts.get(row.id) ?? 0)),
-          linkedCount: linked,
-          renamedCount: renamed,
-          missingCount: missing,
-        });
+        return create(SyncLabelsResponseSchema, { labels: labelsOut(store, store.labels()), linkedCount: linked, renamedCount: renamed, missingCount: missing });
       });
     });
+  },
+
+  removeTrustedDomain(request, ctx) {
+    const id = idOf(request.name, 'labels');
+    return Promise.resolve(
+      once(ctx, request.requestId, 'RemoveTrustedDomain', `labels/${id}`, LabelSchema, () => {
+        const { store } = ctx;
+        const row = existingLabel(ctx, id);
+        labelEtag(ctx, row, request.etag);
+        if (store.run(`DELETE FROM trusted_domains WHERE label_id = ? AND domain = ?`, id, request.domain) === 0) notFound();
+        store.touchLabel(id, ctx.now);
+        return labelOut(ctx, existingLabel(ctx, id));
+      }),
+    );
   },
 
   // review
@@ -668,24 +611,11 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailsortUiService>, ApiCon
     return Promise.resolve(reviewMessage(ctx.store.review(idOf(request.name, 'reviewItems')) ?? notFound()));
   },
 
-  async confirmReviewItem(request, ctx) {
-    const id = idOf(request.name, 'reviewItems');
-    let ids: string[] = [];
-    const answer = once(ctx, request.requestId, 'ConfirmReviewItem', `reviewItems/${id}`, ReviewItemSchema, () => {
-      const { item, decision } = pendingItem(ctx, request.name);
-      if (item.suggested_label === null) bad('the item has no suggested label: correct it instead');
-      ids = choose(ctx, item, decision, item.suggested_label);
-      return reviewMessage(ctx.store.review(id) ?? notFound());
-    });
-    await flush(ctx, ids);
-    return answer;
-  },
-
-  async correctReviewItem(request, ctx) {
+  async resolveReviewItem(request, ctx) {
     const id = idOf(request.name, 'reviewItems');
     const chosen = request.label === '' ? null : idOf(request.label, 'labels');
     let ids: string[] = [];
-    const answer = once(ctx, request.requestId, 'CorrectReviewItem', `reviewItems/${id}`, ReviewItemSchema, () => {
+    const answer = once(ctx, request.requestId, 'ResolveReviewItem', `reviewItems/${id}`, ReviewItemSchema, () => {
       const { item, decision } = pendingItem(ctx, request.name);
       if (chosen !== null) existingLabel(ctx, chosen);
       ids = choose(ctx, item, decision, chosen);
@@ -704,145 +634,6 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailsortUiService>, ApiCon
         return reviewMessage(ctx.store.review(id) ?? notFound());
       }),
     );
-  },
-
-  // rules
-
-  listRules(request, ctx) {
-    const size = pageSize(request.pageSize, RULE_PAGE);
-    const after = cursorOf(request.pageToken, {}, (cursor) => (Array.isArray(cursor) && typeof cursor[0] === 'number' && typeof cursor[1] === 'string' ? ([cursor[0], cursor[1]] as const) : null));
-    const rows = after === null
-      ? ctx.store.all<RuleRow>(`SELECT * FROM rules ORDER BY create_time DESC, id DESC LIMIT ?`, size + 1)
-      : ctx.store.all<RuleRow>(`SELECT * FROM rules WHERE create_time < ? OR (create_time = ? AND id < ?) ORDER BY create_time DESC, id DESC LIMIT ?`, after[0], after[0], after[1], size + 1);
-    const page = rows.slice(0, size);
-    const last = page[page.length - 1];
-    return Promise.resolve(
-      create(ListRulesResponseSchema, {
-        rules: page.map((row) => ruleOut(ctx, row)),
-        nextPageToken: rows.length > size && last !== undefined ? encodePageToken([last.create_time, last.id], {}) : '',
-      }),
-    );
-  },
-
-  getRule(request, ctx) {
-    return Promise.resolve(ruleOut(ctx, ctx.store.rule(idOf(request.name, 'rules')) ?? notFound()));
-  },
-
-  createRule(request, ctx) {
-    const rule = request.rule ?? bad('rule is required');
-    const kind = rule.kind === Rule_Kind.UNSPECIFIED ? undefined : KIND_NAMES.get(rule.kind);
-    if (kind === undefined) throw sortError('INVALID_RULE');
-    const value = checkRuleValue(kind, rule.value);
-    const label = idOf(rule.label, 'labels');
-    const id = request.ruleId === '' ? shortId('r') : request.ruleId;
-    if (!LABEL_ID_PATTERN.test(id)) throw sortError('INVALID_RULE');
-    const includes = foldTerms(rule.subjectIncludes) ?? (() => { throw sortError('INVALID_RULE'); })();
-    const excludes = foldTerms(rule.subjectExcludes) ?? (() => { throw sortError('INVALID_RULE'); })();
-    const evidence = checkRuleText(rule.evidence);
-    const notes = checkRuleText(rule.notes);
-    return Promise.resolve(
-      once(ctx, request.requestId, 'CreateRule', `rules/${id}`, RuleSchema, () => {
-        const { store } = ctx;
-        existingLabel(ctx, label);
-        const same = store.one(
-          `SELECT 1 AS x FROM rules WHERE kind = ? AND value = ? AND label_id = ? AND subject_includes = ? AND subject_excludes = ?`,
-          kind,
-          value,
-          label,
-          JSON.stringify(includes),
-          JSON.stringify(excludes),
-        );
-        if (store.rule(id) !== undefined || same !== undefined) throw sortError('INVALID_RULE');
-        if (store.count(`SELECT count(*) AS n FROM rules`) >= RULES_MAX) throw sortError('LIMIT_REACHED');
-        store.run(
-          `INSERT INTO rules (id, kind, value, label_id, state, create_time, update_time, subject_includes, subject_excludes, keep_in_inbox, require_dmarc, evidence, notes)
-           VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?)`,
-          id,
-          kind,
-          value,
-          label,
-          ctx.now,
-          ctx.now,
-          JSON.stringify(includes),
-          JSON.stringify(excludes),
-          rule.keepInInbox ? 1 : 0,
-          rule.requireDmarc ? 1 : 0,
-          evidence,
-          notes,
-        );
-        return ruleOut(ctx, store.rule(id) ?? notFound());
-      }),
-    );
-  },
-
-  approveRule(request, ctx) {
-    const id = idOf(request.name, 'rules');
-    return Promise.resolve(
-      once(ctx, request.requestId, 'ApproveRule', `rules/${id}`, RuleSchema, () => {
-        const row = ctx.store.rule(id) ?? notFound();
-        if (row.state !== 'active') ctx.store.run(`UPDATE rules SET state = 'active', update_time = ? WHERE id = ?`, ctx.now, id);
-        return ruleOut(ctx, ctx.store.rule(id) ?? notFound());
-      }),
-    );
-  },
-
-  disableRule(request, ctx) {
-    const id = idOf(request.name, 'rules');
-    return Promise.resolve(
-      once(ctx, request.requestId, 'DisableRule', `rules/${id}`, RuleSchema, () => {
-        const row = ctx.store.rule(id) ?? notFound();
-        if (row.state !== 'disabled') ctx.store.run(`UPDATE rules SET state = 'disabled', update_time = ? WHERE id = ?`, ctx.now, id);
-        return ruleOut(ctx, ctx.store.rule(id) ?? notFound());
-      }),
-    );
-  },
-
-  deleteRule(request, ctx) {
-    const id = idOf(request.name, 'rules');
-    return Promise.resolve(
-      once(ctx, request.requestId, 'DeleteRule', `rules/${id}`, EmptySchema, () => {
-        if (ctx.store.run(`DELETE FROM rules WHERE id = ?`, id) === 0) notFound();
-        return create(EmptySchema, {});
-      }),
-    );
-  },
-
-  exportGmailFilters(_request, ctx) {
-    const rows = ctx.store.all<RuleRow & { display_name: string; trust: number; label_keep: number }>(
-      `SELECT r.*, l.display_name, l.trust, l.keep_in_inbox AS label_keep FROM rules r JOIN labels l ON l.id = r.label_id WHERE r.state = 'active' ORDER BY r.create_time, r.id`,
-    );
-    // Which rules are left out, and why, is filters.ts exportableRules: trust and DMARC rules, carve-outs, the plain
-    // rules a carve-out covers, values that are not plain. A rule or label that keeps its mail in the inbox exports
-    // without archiving.
-    const { exported, skipped } = exportableRules(rows);
-    return Promise.resolve(
-      create(ExportGmailFiltersResponseSchema, {
-        xml: gmailFilterXml(exported.map((row) => ({ kind: row.kind, value: row.value, labelName: row.display_name, archive: row.keep_in_inbox === 0 && row.label_keep === 0 })), ctx.now),
-        ruleCount: exported.length,
-        skippedCount: skipped,
-      }),
-    );
-  },
-
-  importRules(request, ctx) {
-    const input = importInput(request);
-    if (request.validateOnly) {
-      const plan = planImport(ctx.store, input.labels, input.rules);
-      return Promise.resolve(importResponse(plan, false));
-    }
-    return Promise.resolve(
-      once(ctx, request.requestId, 'ImportRules', 'rules', ImportRulesResponseSchema, () => {
-        // Planned again inside the transaction, so the preview the owner saw can never apply to a changed store.
-        const plan = planImport(ctx.store, input.labels, input.rules);
-        if (!planValid(plan)) throw sortError('INVALID_IMPORT', [{ schema: ImportRulesResponseSchema, message: importResponse(plan, false) }]);
-        return importResponse(applyImport(ctx.store, plan, ctx.now), true);
-      }),
-    );
-  },
-
-  exportRules(_request, ctx) {
-    const { json, labels, rules } = exportDocument(ctx.store);
-    return Promise.resolve(create(ExportRulesResponseSchema, { json, labelCount: labels, ruleCount: rules }));
   },
 
   // examples
@@ -981,37 +772,25 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailsortUiService>, ApiCon
 
   // singletons
 
-  getAccuracyReport(request, ctx) {
-    if (request.name !== 'accuracyReport') notFound();
-    const labels = ctx.store.labels();
-    const stats = labelStats(ctx.store, labels.map((label) => label.id), ctx.now);
-    const settings = readSettings(ctx.store);
-    const week = ctx.store.one<{ decided: number; unsure: number | null }>(
-      `SELECT count(*) AS decided, sum(outcome = 'unsure') AS unsure FROM decisions WHERE decided_at >= ? AND outcome != 'skipped'`,
-      ctx.now - 7 * DAY,
-    );
-    const decided = week?.decided ?? 0;
-    const unsure = week?.unsure ?? 0;
-    return Promise.resolve(
-      create(AccuracyReportSchema, {
-        name: 'accuracyReport',
-        labels: labels.map((label) => {
-          const s = stats.get(label.id);
-          return create(LabelAccuracySchema, {
-            label: labelName(label.id),
-            confirmedCount: (s?.confirmed ?? 0) + (s?.weak ?? 0),
-            correctedCount: s?.corrected ?? 0,
-            precisionLowerBound: s?.lowerBound ?? 0,
-            decidedCount: s?.decided7d ?? 0,
-            appliedCount: s?.applied7d ?? 0,
-          });
-        }),
-        decidedCount: decided,
-        unsureCount: unsure,
-        coverage: decided === 0 ? 0 : (decided - unsure) / decided,
-        precisionTarget: settings.precisionTarget,
-      }),
-    );
+  getLabelReport(request, ctx) {
+    if (request.name !== 'labelReport') notFound();
+    return Promise.resolve(labelReport(ctx));
+  },
+
+  getReplayEvaluation(request, ctx) {
+    if (request.name !== 'replayEvaluation') notFound();
+    const summary = replaySummary(ctx.store);
+    return Promise.resolve(replayMessage(summary ?? notFound()));
+  },
+
+  async startReplayEvaluation(request, ctx) {
+    if (request.name !== 'replayEvaluation') notFound();
+    const answer = once(ctx, request.requestId, 'StartReplayEvaluation', 'replayEvaluation', ReplayEvaluationSchema, () => {
+      startReplay(ctx.store, ctx.now);
+      return replayMessage(replaySummary(ctx.store) ?? notFound());
+    });
+    await ctx.wake();
+    return answer;
   },
 
   async getServiceStatus(request, ctx) {
@@ -1080,8 +859,6 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailsortUiService>, ApiCon
         } else if (path === 'run_write_limit') next = { ...next, runWriteLimit: integer(input.runWriteLimit, 1, RUN_WRITE_LIMIT_MAX) };
         else if (path === 'daily_write_limit') next = { ...next, dailyWriteLimit: integer(input.dailyWriteLimit, 1, DAILY_WRITE_LIMIT_MAX) };
         else if (path === 'daily_neuron_budget') next = { ...next, dailyNeuronBudget: integer(input.dailyNeuronBudget, NEURON_BUDGET_MIN, NEURON_BUDGET_MAX) };
-        else if (path === 'default_threshold') next = { ...next, defaultThreshold: fraction(input.defaultThreshold) };
-        else if (path === 'precision_target') next = { ...next, precisionTarget: fraction(input.precisionTarget) };
         else if (!['name', 'etag', 'effective_mode', 'breaker_tripped', 'breaker_reason'].includes(path)) bad('update_mask names an unknown field');
       }
       return settingsMessage(ctx, writeSettings(ctx.store, next, ctx.now));

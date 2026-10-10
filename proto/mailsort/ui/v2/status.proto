@@ -1,9 +1,9 @@
-// The singletons of mailsort's owner API: the owner's settings, the accuracy report and the service status
+// The singletons of mailsort's owner API: the owner's settings, the label report and the service status
 // (mailsort/docs/design.md §8-§9). Codes, counts and times only: no subject, sender or address.
 
 syntax = "proto3";
 
-package mailsort.ui.v1;
+package mailsort.ui.v2;
 
 import "google/api/field_behavior.proto";
 import "google/api/resource.proto";
@@ -11,7 +11,7 @@ import "google/protobuf/timestamp.proto";
 
 option java_multiple_files = true;
 option java_outer_classname = "StatusProto";
-option java_package = "science.ziyixi.mailsort.ui.v1";
+option java_package = "science.ziyixi.mailsort.ui.v2";
 
 // The owner's settings. A singleton.
 message Settings {
@@ -36,60 +36,59 @@ message Settings {
   // The Workers AI neurons mailsort may use per UTC day (estimated), 500 to 10000. Past 70 % of it the rest
   // of the day uses Clef-flash.
   int32 daily_neuron_budget = 6 [(google.api.field_behavior) = OPTIONAL];
-  // The threshold of a label without its own, 0.5 to 0.99.
-  double default_threshold = 7 [(google.api.field_behavior) = OPTIONAL];
-  // The target precision lower bound of a live label, 0.5 to 0.99: below it the label leaves live mode.
-  double precision_target = 8 [(google.api.field_behavior) = OPTIONAL];
   // The breaker tripped (a write limit passed, or one label's share jumped): the effective mode is shadow until
   // an UpdateSettings whose mask names `mode` (the owner choosing a mode again). Any other update keeps it.
-  bool breaker_tripped = 9 [(google.api.field_behavior) = OUTPUT_ONLY];
+  bool breaker_tripped = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
   // Why the breaker tripped: `daily_limit`, `run_limit`, `label_share`; empty when it did not.
-  string breaker_reason = 10 [(google.api.field_behavior) = OUTPUT_ONLY];
+  string breaker_reason = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
   // AIP-154: changes with every change. UpdateSettings that carries an etag is refused with ETAG_MISMATCH when
   // the settings changed since.
-  string etag = 11 [(google.api.field_behavior) = OPTIONAL];
+  string etag = 9 [(google.api.field_behavior) = OPTIONAL];
 }
 
-// One label's accuracy, from the owner's confirmations and corrections.
-message LabelAccuracy {
+// One label's share of the last 7 days of decisions.
+message LabelCount {
   // The label.
   string label = 1 [
     (google.api.field_behavior) = OUTPUT_ONLY,
     (google.api.resource_reference).type = "sort.ziyixi.science/Label"
   ];
-  // Suggestions or applied labels the owner confirmed (review queue, audits) or left untouched for 3 days.
-  int32 confirmed_count = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Those the owner corrected (review queue or Gmail).
-  int32 corrected_count = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // The Wilson 95 % lower bound of the precision; 0 without confirmations.
-  double precision_lower_bound = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Mails decided into this label in the last 7 days (suggested or applied).
-  int32 decided_count = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Of those, applied in Gmail.
-  int32 applied_count = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Confident decisions of this label (written to Gmail, or recorded in shadow mode).
+  int32 auto_count = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Decisions of this label (confident, or the most likely option of an uncertain one) whose label the owner
+  // changed in Gmail: moved to another label, or removed.
+  int32 gmail_correction_count = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Decisions of this label (as above) the owner answered with another label, or none, in the review queue.
+  int32 review_correction_count = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Uncertain decisions whose most likely option was this label.
+  int32 unsure_count = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Of those, shown in the review queue.
+  int32 shown_count = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
 }
 
-// How well the decisions match the owner's. A singleton.
-message AccuracyReport {
+// What the decisions of the last 7 days (UTC, today included) came to, per label. A singleton.
+message LabelReport {
   option (google.api.resource) = {
-    type: "sort.ziyixi.science/AccuracyReport"
-    pattern: "accuracyReport"
-    singular: "accuracyReport"
-    plural: "accuracyReports"
+    type: "sort.ziyixi.science/LabelReport"
+    pattern: "labelReport"
+    singular: "labelReport"
+    plural: "labelReports"
   };
 
-  // Always `accuracyReport`.
+  // Always `labelReport`.
   string name = 1 [(google.api.field_behavior) = IDENTIFIER];
   // Every label, in the labels' order.
-  repeated LabelAccuracy labels = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Mails decided in the last 7 days.
+  repeated LabelCount labels = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Mails decided (not skipped).
   int32 decided_count = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Of those, unsure (no label).
-  int32 unsure_count = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // The share of decided mails that were confident, 0 to 1.
-  double coverage = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // The precision target a live label must keep (Settings.precision_target).
-  double precision_target = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Of those, a confident label.
+  int32 auto_count = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Of those, confident that no label fits.
+  int32 no_label_count = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Of those, uncertain.
+  int32 unsure_count = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Of the uncertain ones, shown in the review queue.
+  int32 shown_count = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
 }
 
 // The pipeline's state: codes, counts and times only. A singleton.
@@ -136,7 +135,7 @@ message ServiceStatus {
   int32 decided_today_count = 10 [(google.api.field_behavior) = OUTPUT_ONLY];
   // Labels applied in Gmail today.
   int32 applied_today_count = 11 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Unsure decisions today.
+  // Uncertain decisions today (shown in the review queue or not).
   int32 unsure_today_count = 12 [(google.api.field_behavior) = OUTPUT_ONLY];
   // Requests to Google today.
   int32 gmail_call_today_count = 13 [(google.api.field_behavior) = OUTPUT_ONLY];
@@ -164,10 +163,10 @@ enum Mode {
   MODE_UNSPECIFIED = 0;
   // Nothing is read from Gmail or decided.
   MODE_OFF = 1;
-  // Mail is read and decided; every decision is only a suggestion in the review queue. Nothing is written to
-  // Gmail.
+  // Mail is read and decided; confident decisions are only recorded and counted, and uncertain ones may be
+  // asked in the review queue. Nothing is written to Gmail.
   MODE_SHADOW = 2;
-  // Confident decisions of live labels are applied in Gmail (the label added, INBOX removed; UNREAD never
-  // touched); the rest stay suggestions.
+  // Confident decisions of enabled labels are applied in Gmail (the label added, INBOX removed unless the label
+  // or the mail keeps it; UNREAD never touched), and so are the owner's review choices.
   MODE_LIVE = 3;
 }

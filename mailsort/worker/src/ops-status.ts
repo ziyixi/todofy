@@ -5,10 +5,11 @@
  *
  * Signals: `gmail_auth_failed` (critical: Google refused the grant and the Worker stopped calling it; it reaches Home's
  * attention and so the daily digest), `gmail_not_configured`, `breaker_tripped` and `sync_stale` (warnings), and
- * `ai_quota_exhausted`, `label_live_revoked` and `guard_shed` (information).
+ * `ai_quota_exhausted` and `guard_shed` (information).
  *
  * The guard (Home's 80 % rule) defers what can wait while it lasts: the large decision model (Clef-flash only), the
- * daily audit sample and embedding rebuilds. New mail is still read, decided and sorted.
+ * replay evaluation (an owner's check before going live) and embedding rebuilds. New mail is still read, decided and
+ * sorted.
  */
 import { create } from '@ziyixi/proto/protobuf';
 import { file_ops_v1_ops, GuardLevel, GuardStateSchema, Health, OpsService, OpsStatusSchema, Severity, SignalSchema, type GuardState, type Signal } from '@ziyixi/proto/ops/v1/ops_pb';
@@ -16,13 +17,13 @@ import type * as wire from '@ziyixi/proto/ops/v1/ops_wire';
 import { fieldRules, formatMatches, fromWireArguments, toWire, WireJsonError } from '@ziyixi/proto/wire-json';
 import { OPS_LIMITS } from '../../../contracts/ops-v1/ops-v1.ts';
 import { modeCeiling, publicHost, type Env } from './env.ts';
-import { ALARM_IDLE_MS, DAY, MINUTE } from './limits.ts';
+import { ALARM_IDLE_MS, MINUTE } from './limits.ts';
 import { authState } from './session.ts';
 import { effectiveMode, readSettings } from './settings.ts';
 import { utcDay, type Store } from './store.ts';
 
 /** The jobs a shed defers (GuardState.deferred). */
-export const DEFERRED_JOBS = ['full_model', 'audit', 'embedding_rebuild'] as const;
+export const DEFERRED_JOBS = ['full_model', 'replay', 'embedding_rebuild'] as const;
 /** No complete sync for this long, while the mode reads Gmail and the grant works, raises `sync_stale`. */
 export const SYNC_STALE_MS = 6 * ALARM_IDLE_MS;
 
@@ -117,7 +118,6 @@ export function sortStatus(store: Store, env: StatusEnv, now: number): wire.OpsS
     const auth = authState(store, env);
     const lastSync = Number(store.getMeta('last_sync_at') ?? '');
     const synced = Number.isFinite(lastSync) && lastSync > 0 ? lastSync : null;
-    const revoked = Number(store.getMeta('revoked_at') ?? '');
     const pending = store.count(`SELECT count(*) AS n FROM pending`);
     const review = store.count(`SELECT count(*) AS n FROM review WHERE state = 'pending'`);
 
@@ -131,7 +131,6 @@ export function sortStatus(store: Store, env: StatusEnv, now: number): wire.OpsS
     }
     if (settings.breaker !== '' && settings.mode === 'live') signals.push(signal('breaker_tripped', Severity.WARNING, { applied_today: usage.applied }));
     if (usage.quota_exhausted === 1) signals.push(signal('ai_quota_exhausted', Severity.INFO, { deferred: store.count(`SELECT count(*) AS n FROM pending WHERE not_before > ?`, now) }));
-    if (Number.isFinite(revoked) && revoked > now - DAY) signals.push(signal('label_live_revoked', Severity.INFO, {}, revoked));
     if (guard.level === GuardLevel.SHED && guard.until !== undefined) {
       signals.push(signal('guard_shed', Severity.INFO, { seconds_left: Math.max(0, Math.round((Date.parse(guard.until) - now) / 1000)) }));
     }

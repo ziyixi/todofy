@@ -3,20 +3,24 @@
  * per UTC day and label, for 概览's diagram (GetMailFlow). Counters only, never content.
  *
  * Each counter changes in the same transaction as the row it counts: a decision (pipeline.ts decideMail), a skip, a
- * deferral, a write that failed and left its mail a suggestion (writes.ts fail), a correction and its withdrawal
- * (feedback.ts). A decision's counters stay on the UTC day it was decided, so a later correction adds to that day.
+ * deferral, a write that failed and left its decision only recorded (writes.ts fail), a correction and its withdrawal
+ * (feedback.ts). Rows of the stages before 2026-10-10 (`rule`, `neighbours`) stay until pruned and are left out of the
+ * API's answers (model.ts flowMessage). A decision's counters stay on the UTC day it was decided, so a later correction adds to that day.
  * Kept FLOW_KEPT_DAYS (store.ts prune); a day has a few hundred rows at most (stages x outcomes x labels).
  */
 import { DAY, FLOW_COUNTS_MAX } from './limits.ts';
 import { utcDay, type Store } from './store.ts';
 
-export type FlowStage = 'skipped' | 'rule' | 'neighbours' | 'clef' | 'clef-flash' | 'deferred' | 'no_model';
+/** `rule` and `neighbours` only name the stages of decisions made before 2026-10-10 (a correction of one counts there). */
+export type FlowStage = 'skipped' | 'clef' | 'clef-flash' | 'deferred' | 'no_model' | 'rule' | 'neighbours';
 
 export type FlowOutcome =
   | 'archived'
   | 'kept_in_inbox'
   | 'suggested'
+  | 'no_label'
   | 'unsure'
+  | 'unsure_shown'
   | 'corrected'
   | 'not_inbox'
   | 'thread_sorted'
@@ -26,9 +30,9 @@ export type FlowOutcome =
 
 const SKIP_OUTCOMES: ReadonlySet<string> = new Set(['not_inbox', 'thread_sorted', 'before_install', 'unreadable']);
 
-/** A decision's decider as its stage: the rule, the neighbours or a model; anything else had no model answer. */
+/** A decision's decider as its stage: a model (or a stage of the decisions before 2026-10-10); else no model answer. */
 export function stageOf(decider: string): FlowStage {
-  return decider === 'rule' || decider === 'neighbours' || decider === 'clef' || decider === 'clef-flash' ? decider : 'no_model';
+  return decider === 'clef' || decider === 'clef-flash' || decider === 'rule' || decider === 'neighbours' ? decider : 'no_model';
 }
 
 /** A skip reason as its outcome (pipeline.ts recordSkip's reasons). */

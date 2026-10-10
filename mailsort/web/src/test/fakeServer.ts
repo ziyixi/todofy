@@ -1,11 +1,10 @@
 /**
- * An in-memory stand-in for the Worker's owner API (proto/mailsort/ui/v1), served by the same shared transcoder the
+ * An in-memory stand-in for the Worker's owner API (proto/mailsort/ui/v2), served by the same shared transcoder the
  * Worker uses, so every request is routed, decoded strictly and answered in the wire JSON profile as in production. It
- * keeps a few labels, rules, examples, review items, ledger entries, the flow, the status and the settings, and
- * applies the template of ImportRules; a method it does not model (ExportRules, an import of the owner's own file, the
- * single undo, which the UI no longer offers) answers UNIMPLEMENTED. UpdateLabel changes only the masked fields and
- * refuses a stale etag, as the Worker does. Every request must be a same-origin /api path, and a mutation must carry
- * the CSRF header.
+ * keeps a few labels, examples, review items, ledger entries, the flow, the label report, the status and the settings;
+ * a method it does not model (the replay evaluation, which the UI does not call) answers UNIMPLEMENTED. UpdateLabel
+ * changes only the masked fields and refuses a stale etag, as the Worker does. Every request must be a same-origin /api
+ * path, and a mutation must carry the CSRF header.
  */
 import { vi } from 'vitest'
 import { updatePaths } from '@ziyixi/proto/field-mask'
@@ -13,44 +12,29 @@ import { HttpTranscoder, type ServiceHandlers, type ShapeOf } from '@ziyixi/prot
 import { create } from '@ziyixi/proto/protobuf'
 import { EmptySchema, timestampFromMs, timestampMs } from '@ziyixi/proto/protobuf/wkt'
 import { Code, RpcError } from '@ziyixi/proto/rpc-status'
-import { Label_GmailState, LabelSchema, type Label } from '@ziyixi/proto/mailsort/ui/v1/label_pb'
-import { MailFlow_CountSchema, MailFlowSchema, type MailFlow_Count } from '@ziyixi/proto/mailsort/ui/v1/flow_pb'
+import { Label_GmailState, LabelSchema, type Label } from '@ziyixi/proto/mailsort/ui/v2/label_pb'
+import { MailFlow_CountSchema, MailFlowSchema, type MailFlow_Count } from '@ziyixi/proto/mailsort/ui/v2/flow_pb'
 import {
-  ExportGmailFiltersResponseSchema,
-  ImportRulesResponseSchema,
-  LabelImportSchema,
   ListExamplesResponseSchema,
   ListLabelsResponseSchema,
   ListLedgerEntriesResponseSchema,
   ListReviewItemsResponseSchema,
-  ListRulesResponseSchema,
   MailsortUiService,
   SyncLabelsResponseSchema,
   UndoLedgerEntriesResponseSchema,
-} from '@ziyixi/proto/mailsort/ui/v1/mailsort_ui_service_pb'
+} from '@ziyixi/proto/mailsort/ui/v2/mailsort_ui_service_pb'
+import { ExampleSchema, LedgerEntry_State, LedgerEntrySchema, ReviewItem_State, ReviewItemSchema, type Example, type LedgerEntry, type ReviewItem } from '@ziyixi/proto/mailsort/ui/v2/review_pb'
 import {
-  ExampleSchema,
-  LedgerEntry_State,
-  LedgerEntrySchema,
-  ReviewItem_Kind,
-  ReviewItem_State,
-  ReviewItemSchema,
-  type Example,
-  type LedgerEntry,
-  type ReviewItem,
-} from '@ziyixi/proto/mailsort/ui/v1/review_pb'
-import { Rule_State, RuleSchema, type Rule } from '@ziyixi/proto/mailsort/ui/v1/rule_pb'
-import {
-  AccuracyReportSchema,
-  LabelAccuracySchema,
+  LabelCountSchema,
+  LabelReportSchema,
   Mode,
   ServiceStatus_AuthState,
   ServiceStatusSchema,
   SettingsSchema,
-  type LabelAccuracy,
+  type LabelCount,
   type ServiceStatus,
   type Settings,
-} from '@ziyixi/proto/mailsort/ui/v1/status_pb'
+} from '@ziyixi/proto/mailsort/ui/v2/status_pb'
 import { resetClientForTests } from '../api.ts'
 
 export const NOW = Date.parse('2026-10-01T08:00:00Z')
@@ -69,13 +53,11 @@ export function label(id: string, displayName: string): Label {
 export function reviewItem(id: string, init: Partial<ReviewItem> = {}): ReviewItem {
   return Object.assign(create(ReviewItemSchema, {
     name: `reviewItems/${id}`,
-    kind: ReviewItem_Kind.SUGGESTION,
     state: ReviewItem_State.PENDING,
     subject: `主题 ${id}`,
     sender: 'Sender <example.com>',
-    suggestedLabel: 'labels/newsletter',
-    candidates: [{ label: 'labels/newsletter', probability: 0.9 }],
-    decider: 'clef',
+    candidates: [{ label: 'labels/newsletter', probability: 0.6 }, { label: '', probability: 0.3 }, { label: 'labels/receipt', probability: 0.1 }],
+    reason: 'low_confidence',
     receiveTime: timestampFromMs(NOW - 3_600_000),
   }), init)
 }
@@ -99,17 +81,12 @@ export function example(id: string, labelId: string, summary = `例子 ${id} 的
   return create(ExampleSchema, { name: `examples/${id}`, label: `labels/${labelId}`, summary, embedded: true, createTime: timestampFromMs(NOW - 86_400_000) })
 }
 
-/** The template's 15 labels (worker/src/template.ts), by path: what ImportRules' use_template adds. */
-export const TEMPLATE_PATHS = ['开发/CI通知', '开发/平台工具', '金融/投资', '金融/银行支付', '账号安全', '政府法律', '购物/订单物流', '购物/促销', '订阅收据', '出行', '生活/账单住房', '生活/汽车', '生活/医疗', '求职', '学校与社群']
-
 /** UpdateLabel's mask paths and the Label fields they name. */
 const LABEL_FIELDS: Readonly<Record<string, keyof Label>> = {
   display_name: 'displayName',
   description: 'description',
   enabled: 'enabled',
-  live: 'live',
   trust_implying: 'trustImplying',
-  threshold: 'threshold',
   keep_in_inbox: 'keepInInbox',
   sensitive: 'sensitive',
 }
@@ -134,20 +111,15 @@ export class FakeServer {
   readonly calls: Call[] = []
   labels: Label[] = [label('newsletter', '订阅'), label('receipt', '收据')]
   reviewItems: ReviewItem[] = []
-  rules: Rule[] = []
   examples: Example[] = []
   ledgerEntries: LedgerEntry[] = []
-  /** Rules the export leaves out (trust rules). */
-  exportSkipped = 0
   /** GetMailFlow's counters, whatever the range. */
   flow: MailFlow_Count[] = []
-  /** GetAccuracyReport's rows; null: every label with 40 confirmations and a bound of 0.92. */
-  accuracy: LabelAccuracy[] | null = null
-  /** GetAccuracyReport answers UNAVAILABLE. */
-  accuracyFails = false
+  /** GetLabelReport's rows; null: every label with 10 automatic labels and 1 uncertain mail. */
+  report: LabelCount[] | null = null
   /** Fields of GetServiceStatus that a test sets (the rest as below; review_count counts the pending items). */
   status: Partial<ServiceStatus> = {}
-  settings: Settings = create(SettingsSchema, { name: 'settings', mode: Mode.SHADOW, effectiveMode: Mode.SHADOW, runWriteLimit: 10, dailyWriteLimit: 150, dailyNeuronBudget: 7000, defaultThreshold: 0.8, precisionTarget: 0.9, etag: 's1' })
+  settings: Settings = create(SettingsSchema, { name: 'settings', mode: Mode.SHADOW, effectiveMode: Mode.SHADOW, runWriteLimit: 10, dailyWriteLimit: 150, dailyNeuronBudget: 7000, etag: 's1' })
   private readonly transcoder: HttpTranscoder<ShapeOf<typeof MailsortUiService>, null>
 
   constructor() {
@@ -179,19 +151,16 @@ export class FakeServer {
       },
       deleteLabel: (request) => {
         this.labels = this.labels.filter((item) => item.name !== request.name)
-        this.rules = this.rules.filter((item) => item.label !== request.name)
         return Promise.resolve(create(EmptySchema, {}))
       },
-      // The template only, as the Worker applies it to a store without those labels.
-      importRules: (request) => {
-        if (!request.useTemplate) unimplemented()
-        const labels = TEMPLATE_PATHS.map((path) => create(LabelImportSchema, { path, description: `${path} 的说明` }))
-        if (!request.validateOnly) {
-          TEMPLATE_PATHS.forEach((path, index) => {
-            this.labels.push(Object.assign(label(`t${String(index)}`, path), { gmailState: Label_GmailState.PENDING }))
-          })
-        }
-        return Promise.resolve(create(ImportRulesResponseSchema, { applied: !request.validateOnly, createdLabelCount: labels.length, labels }))
+      removeTrustedDomain: (request) => {
+        const index = this.labels.findIndex((item) => item.name === request.name)
+        const before = this.labels[index]
+        if (before === undefined || !before.trustedDomains.includes(request.domain)) throw new RpcError(Code.NOT_FOUND, 'NOT_FOUND', 'no such domain')
+        if (request.etag !== '' && request.etag !== before.etag) throw new RpcError(Code.ABORTED, 'ETAG_MISMATCH', 'stale etag')
+        const updated = Object.assign(create(LabelSchema), before, { etag: `${before.etag}+`, trustedDomains: before.trustedDomains.filter((domain) => domain !== request.domain) })
+        this.labels[index] = updated
+        return Promise.resolve(updated)
       },
       listExamples: (request) => {
         const examples = request.label === '' ? this.examples : this.examples.filter((item) => item.label === request.label)
@@ -207,31 +176,8 @@ export class FakeServer {
         return Promise.resolve(create(EmptySchema, {}))
       },
       listReviewItems: () => Promise.resolve(create(ListReviewItemsResponseSchema, { reviewItems: this.reviewItems.filter((item) => item.state === ReviewItem_State.PENDING) })),
-      confirmReviewItem: (request) => Promise.resolve(this.resolve(request.name, ReviewItem_State.CONFIRMED, null)),
-      correctReviewItem: (request) => Promise.resolve(this.resolve(request.name, ReviewItem_State.CORRECTED, request.label)),
-      skipReviewItem: (request) => Promise.resolve(this.resolve(request.name, ReviewItem_State.SKIPPED, null)),
-      listRules: () => Promise.resolve(create(ListRulesResponseSchema, { rules: this.rules })),
-      approveRule: (request) => {
-        const rule = this.rules.find((item) => item.name === request.name)
-        if (rule === undefined) throw new RpcError(Code.NOT_FOUND, 'NOT_FOUND', 'no such rule')
-        rule.state = Rule_State.ACTIVE
-        return Promise.resolve(rule)
-      },
-      disableRule: (request) => {
-        const rule = this.rules.find((item) => item.name === request.name)
-        if (rule === undefined) throw new RpcError(Code.NOT_FOUND, 'NOT_FOUND', 'no such rule')
-        rule.state = Rule_State.DISABLED
-        return Promise.resolve(rule)
-      },
-      deleteRule: (request) => {
-        this.rules = this.rules.filter((item) => item.name !== request.name)
-        return Promise.resolve(create(EmptySchema, {}))
-      },
-      createRule: (request) => {
-        const rule = Object.assign(create(RuleSchema), request.rule, { name: `rules/r${String(this.rules.length)}`, state: Rule_State.ACTIVE })
-        this.rules.push(rule)
-        return Promise.resolve(rule)
-      },
+      resolveReviewItem: (request) => Promise.resolve(this.resolve(request.name, ReviewItem_State.RESOLVED, request.label)),
+      skipReviewItem: (request) => Promise.resolve(this.resolve(request.name, ReviewItem_State.SKIPPED, '')),
       listLedgerEntries: (request) => {
         const entries = request.label === '' ? this.ledgerEntries : this.ledgerEntries.filter((item) => item.label === request.label)
         const { items, next } = page(entries, request.pageSize, request.pageToken)
@@ -260,24 +206,19 @@ export class FakeServer {
         if (first !== undefined) first.gmailState = Label_GmailState.ADOPTED
         return Promise.resolve(create(SyncLabelsResponseSchema, { labels: this.labels, linkedCount: 1, renamedCount: 0, missingCount: 0 }))
       },
-      exportGmailFilters: () => {
-        const active = this.rules.filter((rule) => rule.state === Rule_State.ACTIVE)
-        return Promise.resolve(create(ExportGmailFiltersResponseSchema, { xml: '<feed/>', ruleCount: active.length, skippedCount: this.exportSkipped }))
-      },
       getMailFlow: (request) => Promise.resolve(create(MailFlowSchema, { name: request.name, startTime: timestampFromMs(NOW - 3_600_000), endTime: timestampFromMs(NOW), counts: this.flow })),
-      getAccuracyReport: () => {
-        if (this.accuracyFails) throw new RpcError(Code.UNAVAILABLE, 'UNAVAILABLE', 'try later')
-        return Promise.resolve(
-          create(AccuracyReportSchema, {
-            name: 'accuracyReport',
-            labels: this.accuracy ?? this.labels.map((item) => create(LabelAccuracySchema, { label: item.name, confirmedCount: 40, precisionLowerBound: 0.92 })),
+      getLabelReport: () =>
+        Promise.resolve(
+          create(LabelReportSchema, {
+            name: 'labelReport',
+            labels: this.report ?? this.labels.map((item) => create(LabelCountSchema, { label: item.name, autoCount: 10, unsureCount: 1 })),
             decidedCount: 50,
+            autoCount: 40,
+            noLabelCount: 5,
             unsureCount: 5,
-            coverage: 0.9,
-            precisionTarget: 0.9,
+            shownCount: 2,
           }),
-        )
-      },
+        ),
       getServiceStatus: () =>
         Promise.resolve(
           Object.assign(create(ServiceStatusSchema, {
@@ -316,12 +257,12 @@ export class FakeServer {
     this.transcoder = new HttpTranscoder(MailsortUiService, all, { domain: 'sort.ziyixi.science', maxBodyBytes: 262144, authorize: () => undefined })
   }
 
-  private resolve(name: string, state: ReviewItem_State, chosen: string | null): ReviewItem {
+  private resolve(name: string, state: ReviewItem_State, chosen: string): ReviewItem {
     const item = this.reviewItems.find((candidate) => candidate.name === name)
     if (item === undefined) throw new RpcError(Code.NOT_FOUND, 'NOT_FOUND', 'no such item')
     if (item.state !== ReviewItem_State.PENDING) throw new RpcError(Code.FAILED_PRECONDITION, 'ALREADY_RESOLVED', 'resolved')
     item.state = state
-    item.resolvedLabel = chosen ?? item.suggestedLabel
+    item.resolvedLabel = chosen
     return item
   }
 

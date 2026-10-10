@@ -12,12 +12,12 @@
  */
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { create } from '@ziyixi/proto/protobuf';
-import { Label_GmailState, LabelSchema } from '@ziyixi/proto/mailsort/ui/v1/label_pb';
-import { Mode, SettingsSchema } from '@ziyixi/proto/mailsort/ui/v1/status_pb';
+import { Label_GmailState, LabelSchema } from '@ziyixi/proto/mailsort/ui/v2/label_pb';
+import { Mode, SettingsSchema } from '@ziyixi/proto/mailsort/ui/v2/status_pb';
 import { timestampFromMs } from '@ziyixi/proto/protobuf/wkt';
 import { MAILS, type SyntheticMail } from '../fakes/fixtures.ts';
 import { DAY, HOUR, MINUTE, op, reasonOf, rejection, startHarness, T0, type Harness } from './harness.ts';
-import { addLabels, checkGoogleCalls, decision, deliver, failModifies, gmailLabels, modifies, setLabelLive, setMode } from './helpers.ts';
+import { addLabels, checkGoogleCalls, decision, deliver, failModifies, gmailLabels, modifies, roomInReview, setLabelEnabled, setMode } from './helpers.ts';
 
 async function ledgerOf(h: Harness, id: string): Promise<Record<string, unknown>[]> {
   return h.sql(`SELECT state, origin, last_code FROM ledger WHERE message_id = ? ORDER BY id`, id);
@@ -32,7 +32,7 @@ describe('a write left for a retry goes out only while live is in force', () => 
   let now = T0;
   beforeAll(async () => {
     h = await startHarness();
-    await addLabels(h, ['newsletter']);
+    await addLabels(h);
     await setMode(h, Mode.LIVE);
     await h.step(now);
   });
@@ -53,7 +53,7 @@ describe('a write left for a retry goes out only while live is in force', () => 
     expect(await ledgerOf(h, id)).toEqual([{ state: 'intended', origin: 'auto', last_code: 'message_modify_503' }]);
   }
 
-  /** The next pass sends no modify: the row fails with `code`, and the mail is a suggestion in the review queue. */
+  /** The next pass sends no modify: the row fails with `code`, and the decision stays only recorded (not shown). */
   async function nextPassWritesNothing(id: string, code: string): Promise<void> {
     const before = modifies(h).length;
     now += 5 * MINUTE;
@@ -61,8 +61,8 @@ describe('a write left for a retry goes out only while live is in force', () => 
     expect(modifies(h).length).toBe(before);
     expect(gmailLabels(h, id)).toContain('INBOX');
     expect(await ledgerOf(h, id)).toEqual([{ state: 'failed', origin: 'auto', last_code: code }]);
-    expect(await decision(h, id)).toMatchObject({ outcome: 'suggested', label_id: 'newsletter' });
-    expect(await pendingReview(h, id)).toEqual([{ kind: 'suggestion', suggested_label: 'newsletter' }]);
+    expect(await decision(h, id)).toMatchObject({ outcome: 'suggested', label_id: 'newsletter', shown: 0 });
+    expect(await pendingReview(h, id)).toEqual([]);
   }
 
   it('the owner chose shadow', async () => {
@@ -79,11 +79,11 @@ describe('a write left for a retry goes out only while live is in force', () => 
     await setMode(h, Mode.LIVE);
   });
 
-  it('the label left live', async () => {
+  it('the label was disabled', async () => {
     await leaveIntended('a1000000000000a3');
-    await setLabelLive(h, 'newsletter', false);
-    await nextPassWritesNothing('a1000000000000a3', 'label_not_live');
-    await setLabelLive(h, 'newsletter', true);
+    await setLabelEnabled(h, 'newsletter', false);
+    await nextPassWritesNothing('a1000000000000a3', 'label_disabled');
+    await setLabelEnabled(h, 'newsletter', true);
   });
 
   /** The retry's modifies and label reads after `before` calls. */
@@ -218,7 +218,7 @@ describe('the MODE ceiling stops a write left for a retry', () => {
   });
 
   it('MAILSORT_MODE=shadow: the owner’s live is lowered, and no leftover row reaches Gmail', async () => {
-    await addLabels(h, ['newsletter']);
+    await addLabels(h);
     await setMode(h, Mode.LIVE);
     await h.step(T0);
     const gmailId = h.up.gmail.createUserLabel('订阅', true);
@@ -238,7 +238,8 @@ describe('the MODE ceiling stops a write left for a retry', () => {
     await h.step(T0 + 10 * MINUTE);
     expect(modifies(h)).toEqual([]);
     expect(await ledgerOf(h, MAILS.newsletterEn.id)).toEqual([{ state: 'failed', origin: 'auto', last_code: 'mode_changed' }]);
-    expect(await pendingReview(h, MAILS.newsletterEn.id)).toEqual([{ kind: 'suggestion', suggested_label: 'newsletter' }]);
+    expect(await decision(h, MAILS.newsletterEn.id)).toMatchObject({ outcome: 'suggested' });
+    expect(await pendingReview(h, MAILS.newsletterEn.id)).toEqual([]);
   });
 });
 
@@ -255,7 +256,7 @@ describe('a breaker tripped by a pass’s own write stops the rest of that pass'
   });
 
   it('the label-share rule trips on the first write; the next mails of the pass stay in the inbox', async () => {
-    await addLabels(h, ['newsletter']);
+    await addLabels(h);
     await setMode(h, Mode.LIVE);
     await h.step(T0);
     // A week of writes to another label, and 14 newsletter writes today: the next newsletter write makes 15.
@@ -345,7 +346,7 @@ describe('ledger entries whose label is no longer owned', () => {
   let now = T0;
   beforeAll(async () => {
     h = await startHarness();
-    await addLabels(h, ['newsletter', 'receipt']);
+    await addLabels(h);
     await setMode(h, Mode.LIVE);
     await h.step(now);
   });
@@ -383,7 +384,8 @@ describe('ledger entries whose label is no longer owned', () => {
     await h.sql(`UPDATE ledger SET state = 'undo_intended' WHERE message_id = ?`, MAILS.receiptEn.id);
     await h.sql(`UPDATE labels SET gmail_state = 'missing' WHERE id = 'receipt'`);
     const before = modifies(h).length;
-    deliver(h, { ...MAILS.travelZh }, now);
+    // A mail no label fits: decided, nothing to write.
+    deliver(h, { ...MAILS.unsure, id: 'a3000000000000a1' }, now);
     now += 5 * MINUTE;
     const pass = await h.step(now);
     expect(pass).toMatchObject({ code: 'ok', decided: 1 });
@@ -398,7 +400,7 @@ describe('sync, the model and conversations', () => {
   let now = T0;
   beforeAll(async () => {
     h = await startHarness();
-    await addLabels(h, ['receipt']);
+    await addLabels(h);
     deliver(h, { ...MAILS.receiptEn, id: 'c0000000000000c0', subject: 'Receipt from before the install' }, T0 - HOUR);
     await h.step(now);
   });
@@ -471,11 +473,15 @@ describe('sync, the model and conversations', () => {
 
   it('shadow: a review verdict (nothing written) does not hide the rest of its conversation', async () => {
     const first = { ...MAILS.receiptEn, id: 'c3000000000000c1', threadId: 'c3000000000000c1' } satisfies SyntheticMail;
+    // An uncertain first mail (the model's 0.5), shown and answered.
+    await roomInReview(h, now);
+    h.up.ai.confidence = 0.5;
     deliver(h, first, now);
     now += 5 * MINUTE;
     await h.step(now);
+    h.up.ai.confidence = 0.92;
     const [item] = await h.sql<{ id: string }>(`SELECT id FROM review WHERE message_id = ? AND state = 'pending'`, first.id);
-    await h.api.confirmReviewItem({ name: `reviewItems/${item?.id ?? ''}`, requestId: op() });
+    await h.api.resolveReviewItem({ name: `reviewItems/${item?.id ?? ''}`, label: 'labels/receipt', requestId: op() });
     deliver(h, { ...first, id: 'c3000000000000c2', subject: 'Re: Receipt' }, now);
     now += 5 * MINUTE;
     await h.step(now);
@@ -515,13 +521,16 @@ describe('the 14-day content cleanup runs while the mode is off', () => {
     checkGoogleCalls(h);
   });
 
-  it('twenty days off: the subject, the sender keys and the review item are gone, and Google was never called', async () => {
+  it('twenty days off: the subject, the sender\'s domain and the review item are gone, and Google was never called', async () => {
     await addLabels(h);
     await h.step(T0);
-    deliver(h, MAILS.unsure, T0);
+    // An uncertain mail (the model's 0.5), shown in the review queue.
+    h.up.ai.confidence = 0.5;
+    deliver(h, MAILS.travelZh, T0);
     await h.step(T0 + 5 * MINUTE);
-    expect(await decision(h, MAILS.unsure.id)).toMatchObject({ outcome: 'unsure', content_cleared: 0, subject: 'Lunch on Friday?' });
-    expect(await pendingReview(h, MAILS.unsure.id)).toHaveLength(1);
+    expect(await decision(h, MAILS.travelZh.id)).toMatchObject({ outcome: 'unsure', content_cleared: 0, subject: '航班行程确认', sender_domain: 'travel.example.net' });
+    expect(await pendingReview(h, MAILS.travelZh.id)).toHaveLength(1);
+    const hash = (await decision(h, MAILS.travelZh.id))?.['sender_hash'];
     await setMode(h, Mode.OFF);
     const calls = h.up.gmail.calls.length;
     for (let day = 1; day <= 20; day++) {
@@ -529,10 +538,9 @@ describe('the 14-day content cleanup runs while the mode is off', () => {
       expect(result.code).toBe('off');
     }
     expect(h.up.gmail.calls.length).toBe(calls);
-    expect(await decision(h, MAILS.unsure.id)).toMatchObject({
-      content_cleared: 1, subject: null, sender: null, summary: null, sender_address: null, sender_domain: null, list_id: null, delivered_to: null,
-    });
-    expect(await h.sql(`SELECT id FROM review WHERE message_id = ?`, MAILS.unsure.id)).toEqual([]);
+    // The sender's hash stays with the record (180 days): it is not the address.
+    expect(await decision(h, MAILS.travelZh.id)).toMatchObject({ content_cleared: 1, subject: null, sender: null, summary: null, sender_domain: null, sender_hash: hash });
+    expect(await h.sql(`SELECT id FROM review WHERE message_id = ?`, MAILS.travelZh.id)).toEqual([]);
   });
 });
 
@@ -541,7 +549,7 @@ describe('the owner’s own Gmail labels are never taken over', () => {
   let now = T0;
   beforeAll(async () => {
     h = await startHarness();
-    await addLabels(h, ['newsletter']);
+    await addLabels(h);
     await h.step(now);
   });
   afterAll(async () => {
@@ -558,13 +566,19 @@ describe('the owner’s own Gmail labels are never taken over', () => {
   let own = '';
 
   it('a write never adopts: the owner’s Gmail label of the path leaves the label out of Gmail until the owner’s sync adopts it', async () => {
-    // The owner made 订阅 in Gmail and has a mail filed under it that stays in the inbox; shadow suggests the label.
+    // The owner made 订阅 in Gmail and has a mail filed under it that stays in the inbox. In shadow two uncertain
+    // mails (the model's 0.5) wait in the review queue, one of them with the owner's label.
     own = h.up.gmail.createUserLabel('订阅', true);
     await setMode(h, Mode.SHADOW);
+    await roomInReview(h, now);
+    h.up.ai.confidence = 0.5;
     deliver(h, newsletter('e1000000000000e1', ['INBOX', 'UNREAD', 'CATEGORY_UPDATES', own]), now);
+    deliver(h, newsletter('e1000000000000e0'), now);
     now += 5 * MINUTE;
     await h.step(now);
-    expect(await decision(h, 'e1000000000000e1')).toMatchObject({ outcome: 'suggested', label_id: 'newsletter' });
+    h.up.ai.confidence = 0.92;
+    expect(await decision(h, 'e1000000000000e1')).toMatchObject({ outcome: 'unsure', top_label: 'newsletter', shown: 1 });
+    expect(await decision(h, 'e1000000000000e0')).toMatchObject({ outcome: 'unsure', top_label: 'newsletter', shown: 1 });
     // Live: the first write finds the name taken, creates nothing and writes nothing.
     await setMode(h, Mode.LIVE);
     deliver(h, newsletter('e1000000000000e2'), now);
@@ -594,19 +608,19 @@ describe('the owner’s own Gmail labels are never taken over', () => {
   });
 
   it('a label already on the mail is never written, so an undo never takes off one the owner put there', async () => {
-    // The suggestion from before the adoption, confirmed now: the mail already carries the owner's 订阅.
+    // The review item from before the adoption, answered now: the mail already carries the owner's 订阅.
     const before = modifies(h).length;
-    await h.api.confirmReviewItem({ name: await pendingItem('e1000000000000e1'), requestId: op() });
+    await h.api.resolveReviewItem({ name: await pendingItem('e1000000000000e1'), label: 'labels/newsletter', requestId: op() });
     expect(modifies(h).length).toBe(before);
     expect(await ledgerOf(h, 'e1000000000000e1')).toEqual([{ state: 'failed', origin: 'owner', last_code: 'already_labelled' }]);
     expect(gmailLabels(h, 'e1000000000000e1')).toEqual([own, 'CATEGORY_UPDATES', 'INBOX', 'UNREAD'].sort());
     expect((await h.api.listLedgerEntries({})).ledgerEntries.filter((entry) => entry.messageId === 'e1000000000000e1' && entry.undoable)).toEqual([]);
     // A mail without it is written, and its undo removes exactly what mailsort added.
-    await h.api.confirmReviewItem({ name: await pendingItem('e1000000000000e2'), requestId: op() });
-    expect(gmailLabels(h, 'e1000000000000e2')).toEqual([own, 'CATEGORY_UPDATES', 'UNREAD'].sort());
-    const entry = (await h.api.listLedgerEntries({})).ledgerEntries.find((item) => item.messageId === 'e1000000000000e2');
+    await h.api.resolveReviewItem({ name: await pendingItem('e1000000000000e0'), label: 'labels/newsletter', requestId: op() });
+    expect(gmailLabels(h, 'e1000000000000e0')).toEqual([own, 'CATEGORY_UPDATES', 'UNREAD'].sort());
+    const entry = (await h.api.listLedgerEntries({})).ledgerEntries.find((item) => item.messageId === 'e1000000000000e0');
     await h.api.undoLedgerEntry({ name: entry?.name ?? '', requestId: op() });
-    expect(gmailLabels(h, 'e1000000000000e2')).toEqual(['CATEGORY_UPDATES', 'INBOX', 'UNREAD']);
+    expect(gmailLabels(h, 'e1000000000000e0')).toEqual(['CATEGORY_UPDATES', 'INBOX', 'UNREAD']);
   });
 
   it('a Gmail label with labels nested under it is never adopted, not even a parent mailsort made', async () => {

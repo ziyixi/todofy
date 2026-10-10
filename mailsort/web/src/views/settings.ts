@@ -6,18 +6,17 @@
  *   mask, which is what clears a tripped breaker.
  * - 撤销: a time range (1 小时, 24 小时, 7 天 or one's own) and optionally one label; 预览 counts what an undo would take
  *   back, 确认撤销 then undoes it, 20 entries per call, until none is left. The safety net for every write.
- * - Gmail: 从 Gmail 同步 (renames and deletions made in Gmail; the owner's label of a label's path is adopted), and
- *   导出过滤器 (the active rules as Gmail's filter file, downloaded).
+ * - Gmail: 从 Gmail 同步 (renames and deletions made in Gmail; the owner's label of a label's path is adopted).
  *
- * The other settings (write limits, the neuron budget, thresholds) keep their stored values; the API still takes them.
+ * The other settings (write limits, the neuron budget) keep their stored values; the API still takes them.
  */
 import { create } from '@ziyixi/proto/protobuf'
 import { timestampFromMs } from '@ziyixi/proto/protobuf/wkt'
-import type { Label } from '@ziyixi/proto/mailsort/ui/v1/label_pb'
-import { Mode, SettingsSchema, type Settings } from '@ziyixi/proto/mailsort/ui/v1/status_pb'
+import type { Label } from '@ziyixi/proto/mailsort/ui/v2/label_pb'
+import { Mode, SettingsSchema, type Settings } from '@ziyixi/proto/mailsort/ui/v2/status_pb'
 import { api, errorMessage, newRequestId, withRetry } from '../api.ts'
-import { card, disclosure, segmented } from '../components.ts'
-import { button, el, fill, toast } from '../dom.ts'
+import { card, segmented } from '../components.ts'
+import { button, el, toast } from '../dom.ts'
 import { BREAKER_REASONS, labelText, MODE_NAMES, ms } from '../format.ts'
 import type { Host, ViewContext } from '../app.ts'
 import { act, allLabels, frame, labelSelect } from './common.ts'
@@ -27,7 +26,7 @@ const MODES: readonly (readonly [Mode, string])[] = [Mode.OFF, Mode.SHADOW, Mode
 /** What each mode does, in one line. */
 const MODE_HINTS: Readonly<Record<number, string>> = {
   [Mode.OFF]: '不读 Gmail，也不判断',
-  [Mode.SHADOW]: '只给建议，不改 Gmail',
+  [Mode.SHADOW]: '只判断和记录，不改 Gmail',
   [Mode.LIVE]: '有把握的邮件打标签并归档，从不标为已读',
 }
 
@@ -218,34 +217,10 @@ function undoCard(labels: readonly Label[], host: Host): HTMLElement {
 }
 
 function gmailCard(): HTMLElement {
-  const exported = el('div', { hidden: true })
-  let url = ''
-  const exportFilters = async () => {
-    const answer = await act(() => api.exportGmailFilters({}), (done) => `已导出 ${String(done.ruleCount)} 条规则`, () => Promise.resolve())
-    if (answer === null) return
-    if (url !== '') URL.revokeObjectURL(url)
-    url = URL.createObjectURL(new Blob([answer.xml], { type: 'application/xml' }))
-    const link = el('a', { href: url, download: 'mailsort-filters.xml' }, '下载过滤器文件')
-    fill(
-      exported,
-      el('p', {}, `${String(answer.ruleCount)} 条规则 · `, link),
-      answer.skippedCount === 0
-        ? null
-        : disclosure(
-            `${String(answer.skippedCount)} 条没有导出`,
-            el('p', {}, '过滤器查不了 DMARC，所以可信类和要求 DMARC 的规则不导出；带主题条件的规则和它覆盖的同一发件人的普通规则也不导出，否则 Gmail 会同时套用两条。'),
-          ),
-      el('p', { class: 'hint' }, '在 Gmail 设置 → 过滤器和屏蔽的地址 → 导入过滤器。'),
-    )
-    exported.hidden = false
-    link.click()
-  }
   return card(
     'Gmail',
     '',
     setting('从 Gmail 同步', '跟上你在 Gmail 里的改名和删除，沿用同名标签', button('同步', () => void act((requestId) => api.syncLabels({ requestId }), syncMessage, () => Promise.resolve()))),
-    setting('导出过滤器', '把规则存成 Gmail 能导入的过滤器文件', button('导出', () => void exportFilters())),
-    exported,
   )
 }
 

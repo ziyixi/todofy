@@ -38,7 +38,7 @@ export default function MailsortPrivacyPage() {
       <header className={styles.pageHeader}>
         <h1 className={styles.pageTitle}>{TITLE}</h1>
         <p className={styles.pageIntro}>
-          Effective and last updated <time dateTime="2026-10-07">October 7, 2026</time>.
+          Effective and last updated <time dateTime="2026-10-10">October 10, 2026</time>.
         </p>
       </header>
       <div className={articleStyles.articleBody}>
@@ -78,38 +78,46 @@ export default function MailsortPrivacyPage() {
 
         <h2>How mail is processed</h2>
         <p>
-          A new message is decided by the owner&apos;s rules, the nearest examples the owner has
-          confirmed or corrected (or left alone for three days), compared through embeddings from
-          the bge-m3 model, and a decision model (Clef on Cloudflare Workers AI). All of this runs
-          in the owner&apos;s own Cloudflare account. The models are called directly, without AI
+          A new message is decided by a decision model (Clef on Cloudflare Workers AI), asked twice,
+          with the nearest examples the owner has confirmed or corrected (or left alone for three
+          days), compared through embeddings from the bge-m3 model, as context. All of this runs in
+          the owner&apos;s own Cloudflare account. The models are called directly, without AI
           Gateway, which would log request bodies.
         </p>
         <p>
           The models read masked text only: the sender&apos;s display name and domain, the subject
           (up to 200 characters), Gmail&apos;s snippet (300), the first text part of the body
-          (2,000), Gmail&apos;s category, whether the message came from a mailing list, a short code
-          derived from the address it was delivered to (never the address), and the masked summaries
-          of similar examples, together with the owner&apos;s label names and descriptions. Email
-          addresses and numbers of six or more digits are masked, and links are cut to their domain,
-          before a model sees them.
+          (2,000), Gmail&apos;s category, whether the message came from a mailing list, whether the
+          sender passed Gmail&apos;s DMARC check, which labels the same sender&apos;s earlier
+          messages got, a short code derived from the address it was delivered to (never the
+          address), and the masked summaries of similar examples, together with the owner&apos;s
+          label names and descriptions. Email addresses and numbers of six or more digits are
+          masked, and links are cut to their domain, before a model sees them.
         </p>
 
         <h2>What is stored, and for how long</h2>
         <p>Everything is stored in the owner&apos;s own Cloudflare account and cleared daily:</p>
         <ul>
           <li>
-            A decision&apos;s content (masked subject, sender and summary, and the exact sender
-            address, domain, List-Id and delivered-to address): 14 days.
+            A decision&apos;s content (masked subject, sender and summary, and the sender&apos;s
+            domain): 14 days.
           </li>
           <li>The review queue (masked subject and sender): 14 days after the message arrived.</li>
-          <li>Decisions and the ledger of changes, without content: 180 days.</li>
+          <li>
+            Decisions and the ledger of changes, without content (the sender only as a salted hash
+            of the address, never the address): 180 days.
+          </li>
           <li>
             Examples (a masked summary of at most 200 characters and its embedding): until the owner
             deletes them, at most 2,000.
           </li>
           <li>
-            Rules (a sender address, domain, List-Id or delivered-to address, subject words and the
-            owner&apos;s evidence and notes): until the owner deletes them, at most 500.
+            Trusted sender domains of the labels that need them, learned from the owner&apos;s own
+            answers: until the owner deletes them, at most 50 per label.
+          </li>
+          <li>
+            A replay evaluation the owner starts (per message its identifier, the owner&apos;s
+            answer and the label decided again, no content): 7 days.
           </li>
           <li>
             Labels (their names, some read from Gmail, the Gmail labels they are linked to, and the
@@ -117,8 +125,8 @@ export default function MailsortPrivacyPage() {
           </li>
           <li>
             Answers to the owner&apos;s own changes in the dashboard, kept so that a retried request
-            is not applied twice (they can hold a masked subject and sender or a rule&apos;s
-            values): 1 day.
+            is not applied twice (they can hold a masked subject and sender or a trusted domain): 1
+            day.
           </li>
           <li>Daily counters without content: 400 days.</li>
         </ul>
@@ -151,8 +159,9 @@ export default function MailsortPrivacyPage() {
             https://myaccount.google.com/permissions
           </a>
           . Revoking stops every Gmail read and write but does not delete what is stored: content
-          expires as listed above, and examples, rules and labels stay until the owner deletes them
-          in the mailsort dashboard (deleting a label also deletes its rules and examples).
+          expires as listed above, and examples, trusted domains and labels stay until the owner
+          deletes them in the mailsort dashboard (deleting a label also deletes its examples and
+          trusted domains).
         </p>
 
         <h2>Contact</h2>

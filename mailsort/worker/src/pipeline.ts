@@ -5,51 +5,49 @@
  * 2. sync: Gmail's history after the stored cursor, a few pages; new INBOX mails go to `pending` and owned-label changes
  *    on decided mails to `feedback`, in the same transaction that advances the cursor. The first pass only stores the
  *    mailbox's current historyId: no backfill. A lost cursor (404) is a bounded resync of the inbox's last two days;
- * 3. feedback: the queued label changes become verdicts, examples and rule proposals (feedback.ts);
+ * 3. feedback: the queued label changes become verdicts and examples (feedback.ts);
  * 4. leftover writes (retries), each through the same gate as a new write;
  * 5. drain: at most DRAIN_MAX pending mails, while the subrequest budget lasts: read, skip what is not the owner's
- *    incoming mail, mask, decide (rules, neighbours, Clef), record (with the flow counters, flow.ts), and in live
- *    mode write through the ledger: the label added, INBOX removed unless the label or the rule keeps it;
- * 6. embeddings of new examples, and once per UTC day: weak accepts, the audit sample, live gating and the retention
- *    cleanup.
+ *    incoming mail, gather the evidence and ask the model's two views (judge.ts), decide (decide.ts), record (with the
+ *    flow counters, flow.ts; an uncertain mail joins the review queue while its daily quota has room), and in live
+ *    mode write a confident label through the ledger: the label added, INBOX removed unless the label keeps it or the
+ *    mail asks the owner to act soon;
+ * 6. embeddings of new examples; the replay evaluation with what the pass leaves (replay.ts); and once per UTC day,
+ *    weak accepts and the retention cleanup.
  *
  * Whether a write may go out is read again right before each one (alarmGate): the mode in force, the breaker, the
- * label's switches and the caps, so a breaker tripped by this pass's own writes, or the owner's shadow chosen while it
+ * label's switch and the caps, so a breaker tripped by this pass's own writes, or the owner's shadow chosen while it
  * runs, stops the rest of the pass.
  *
  * Workers AI's daily quota used up defers the waiting mails to the next UTC day (never a failure); past
  * FLASH_SWITCH_SHARE of the owner's neuron budget the day's remaining mails use Clef-flash, and past the budget they wait.
  * The pass answers when it wants to run again: soon while a backlog waits, else ALARM_IDLE_MS.
  */
-import { labelStats } from './accuracy.ts';
-import { AiError, AiQuotaError, clefState, decide as askClef, embed, toBlob, type ClefOption } from './ai.ts';
-import { candidatesOf, clefDecision, neighbourDecision, ruleDecision, type Decision, type LabelFacts } from './decide.ts';
-import { dkimPassDomains, dmarcAligned } from './dmarc.ts';
+import { AiError, AiQuotaError, embed, toBlob, type ClefAnswer } from './ai.ts';
+import { higher, joinsReview, needsAction, type Decision } from './decide.ts';
 import { modeCeiling, type AiRunner, type Env, type ModeName } from './env.ts';
-import { embeddedCount, nearest, storeEmbedding, unembedded } from './examples.ts';
+import { putExample, storeEmbedding, unembedded } from './examples.ts';
 import { applyFeedback } from './feedback.ts';
-import { countFlow, skipOutcome, stageOf } from './flow.ts';
+import { countFlow, skipOutcome, stageOf, type FlowOutcome } from './flow.ts';
 import { GmailRefused, GoogleError, isMessageId, type AccessToken, type GmailClient, type HistoryPage } from './gmail.ts';
 import { timeId } from './ids.ts';
+import { gather, judge, modelUnavailable, reviewQuotaOn, shownOn, type Judgement } from './judge.ts';
 import {
   ALARM_BACKLOG_MS,
   ALARM_IDLE_MS,
   ALARM_SUBREQUESTS,
-  AUDITS_PER_DAY,
   BAD_ANSWER_ATTEMPTS_MAX,
   CLEF,
   CLEF_FLASH,
   DAY,
   DRAIN_MAX,
   EMBED_BATCH,
-  EXAMPLE_SUMMARY_CHARS,
   FLASH_SWITCH_SHARE,
   HISTORY_PAGE_SIZE,
   HISTORY_PAGES_MAX,
   INSTALL_GRACE_MS,
   MAIL_ATTEMPTS_MAX,
   MAIL_SUBREQUESTS,
-  NEIGHBOURS,
   RESYNC_MAX,
   RETRY_BASE_MS,
   RETRY_MAX_MS,
@@ -59,14 +57,12 @@ import {
   WEAK_ACCEPT_MS,
   WEAK_EXAMPLES_BELOW,
 } from './limits.ts';
-import { features, summaryOf } from './mask.ts';
 import { readMessage } from './mime.ts';
-import { optionKeys, pathSlug } from './paths.ts';
+import { replayStep } from './replay.ts';
 import { Budget, noteGoogleError, noteTokenOk, openSession, writeScope } from './session.ts';
 import { effectiveMode, readSettings, tripBreaker, type SettingsValue } from './settings.ts';
-import { utcDay, type LabelRow, type Store } from './store.ts';
+import { utcDay, type Store } from './store.ts';
 import { executeWrites, intend, type WriteContext, type WriteGate } from './writes.ts';
-import { putExample } from './examples.ts';
 
 /** Labels Gmail puts on mail that is not the owner's incoming mail: never decided. */
 const SKIP_LABELS = new Set(['SENT', 'DRAFT', 'SPAM', 'TRASH', 'CHAT']);
@@ -81,7 +77,7 @@ export interface PassDeps {
   /** The access token cached by the object between passes, and where to put a new one. */
   readonly token: AccessToken | null;
   readonly saveToken: (token: AccessToken | null) => void;
-  /** Home's guard is shed: Clef-flash only, no embedding rebuild, no audit. */
+  /** Home's guard is shed: Clef-flash only, no embedding rebuild, no replay evaluation. */
   readonly shed: boolean;
 }
 
@@ -105,10 +101,6 @@ export function chooseModel(store: Store, settings: SettingsValue, shed: boolean
   const used = store.usage(utcDay(now)).neurons;
   if (used >= settings.dailyNeuronBudget) return null;
   return shed || used >= FLASH_SWITCH_SHARE * settings.dailyNeuronBudget ? CLEF_FLASH : CLEF;
-}
-
-function labelFacts(labels: readonly LabelRow[]): Map<string, LabelFacts> {
-  return new Map(labels.map((label) => [label.id, { id: label.id, enabled: label.enabled === 1, trust: label.trust === 1, threshold: label.threshold }]));
 }
 
 // ---- sync -------------------------------------------------------------------------------------------------------------
@@ -237,15 +229,15 @@ export function writesLive(store: Store, ceiling: ModeName): boolean {
 /**
  * The alarm's gate (writes.ts WriteGate), asked right before each `intended` row goes to Gmail, whether the row is
  * this pass's or a retry of an earlier one. Every row needs live in force and a write grant. An auto row also needs
- * its label enabled and live, and stays within the caps: passing the daily or the run cap trips the breaker, which
- * makes every later write of the pass (and of the next ones) fail this gate. An owner's row (a review choice whose
- * first try failed) is not capped.
+ * its label enabled, and stays within the caps: passing the daily or the run cap trips the breaker, which makes every
+ * later write of the pass (and of the next ones) fail this gate. An owner's row (a review choice whose first try
+ * failed) is not capped.
  */
 export function alarmGate(store: Store, ceiling: ModeName, counter: { runWrites: number }, now: () => number): WriteGate {
   return (row, label) => {
     if (!writesLive(store, ceiling)) return 'mode_changed';
     if (row.origin === 'owner') return null;
-    if (label.enabled !== 1 || label.live !== 1) return 'label_not_live';
+    if (label.enabled !== 1) return 'label_disabled';
     const settings = readSettings(store);
     const at = now();
     if (store.usage(utcDay(at)).applied >= settings.dailyWriteLimit) {
@@ -347,152 +339,71 @@ async function decideMail(ctx: MailContext, messageId: string, attempts: number)
     return 'skipped';
   }
 
-  const f = await features(read);
-  const dmarc = dmarcAligned(read.headers.authenticationResults, f.senderDomain);
-  const labels = store.labels();
-  const facts = labelFacts(labels);
-  const enabled = labels.filter((label) => label.enabled === 1);
-  // The model is offered only labels with a description: a bare name is too little to decide by (rules and
-  // examples may still decide the others). Their keys come from their paths (paths.ts optionKeys), stable per path.
-  const offered = enabled.filter((label) => label.description !== '');
-  const keys = optionKeys(offered.map((label) => ({ id: label.id, path: label.display_name })));
-  const summary = summaryOf(f, EXAMPLE_SUMMARY_CHARS);
-  const day = utcDay(now);
-
-  let decision: Decision;
+  const g = await gather(read);
+  let judgement: Judgement;
   let model = '';
-  let probabilities: Record<string, number> = {};
-  let suspicious: number | null = null;
-  let bulk: number | null = null;
-  const rule =
-    enabled.length === 0 ? null : ruleDecision(store.matchingRules(f), facts, { subject: f.rawSubject, dmarcAligned: dmarc, dkimDomains: dkimPassDomains(read.headers.authenticationResults) });
-  if (enabled.length === 0) {
-    decision = { confident: false, top: null, decider: 'none', reason: 'no_labels', candidates: [] };
-  } else if (rule !== null) {
-    decision = { confident: true, label: rule.label, decider: 'rule', ruleId: rule.ruleId, keepInInbox: rule.keepInInbox, candidates: [{ label: rule.label, probability: 1 }] };
+  if (ctx.ai === null) {
+    judgement = modelUnavailable();
   } else {
-    if (ctx.ai === null) {
-      decision = { confident: false, top: null, decider: 'none', reason: 'model_unavailable', candidates: [] };
-    } else {
-      const chosen = chooseModel(store, ctx.settings, ctx.shed, now);
-      if (chosen === null) return 'deferred';
-      let neighbours: { label: string; summary: string; similarity: number }[] = [];
-      try {
-        if (embeddedCount(store) > 0) {
-          const { vectors, neurons } = await embed(ctx.ai, [summary]);
-          ctx.budget.left -= 1;
-          ctx.transact(() => {
-            store.addUsage(day, 'ai_calls', 1);
-            store.addUsage(day, 'neurons', neurons);
-          });
-          const vector = vectors[0];
-          if (vector !== undefined) neighbours = nearest(store, vector, NEIGHBOURS, new Set(enabled.map((label) => label.id)));
-        }
-        const shortcut = neighbourDecision(neighbours, facts, dmarc);
-        if (shortcut !== null) {
-          decision = { confident: true, label: shortcut, decider: 'neighbours', candidates: [{ label: shortcut, probability: neighbours[0]?.similarity ?? 1 }] };
-        } else if (offered.length === 0) {
-          decision = { confident: false, top: null, decider: 'none', reason: 'no_model_labels', candidates: [] };
-        } else {
-          const options: ClefOption[] = offered.map((label) => ({ id: label.id, key: keys.get(label.id) ?? pathSlug(label.display_name), name: label.display_name, description: label.description }));
-          // The neighbours' labels by the names the model knows them by: an offered label's key, another's slug.
-          const pathOf = new Map(labels.map((label) => [label.id, label.display_name]));
-          const named = neighbours.map((n) => ({ label: keys.get(n.label) ?? pathSlug(pathOf.get(n.label) ?? n.label), summary: n.summary }));
-          const answer = await askClef(ctx.ai, chosen, clefState(f, named), options);
-          ctx.budget.left -= 1;
-          ctx.transact(() => {
-            store.addUsage(day, 'ai_calls', 1);
-            store.addUsage(day, 'neurons', answer.neurons);
-          });
-          model = answer.model;
-          probabilities = { ...answer.probabilities };
-          suspicious = answer.suspicious;
-          bulk = answer.bulk;
-          decision = clefDecision(answer, chosen === CLEF_FLASH ? 'clef-flash' : 'clef', facts, ctx.settings.defaultThreshold);
-        }
-      } catch (error) {
-        if (error instanceof AiQuotaError) {
-          ctx.transact(() => {
-            store.setQuotaExhausted(day);
-            store.pushError('ai_quota_exhausted');
-          });
-          return 'deferred';
-        }
-        const code = error instanceof AiError ? error.code : 'ai_unexpected';
-        // An answer this code refused is about this mail: a few tries, and the pass goes on. Anything else is an
-        // outage: the mail waits (backoff, about five hours in all) and the pass stops calling the model.
-        const badAnswer = code.startsWith('clef_bad');
-        ctx.transact(() => { store.pushError(code); });
-        if (attempts + 1 < (badAnswer ? BAD_ANSWER_ATTEMPTS_MAX : MAIL_ATTEMPTS_MAX)) {
-          ctx.transact(() => { postpone(store, messageId, attempts, now); });
-          return badAnswer ? 'later' : 'retry';
-        }
-        decision = { confident: false, top: null, decider: 'none', reason: 'model_unavailable', candidates: candidatesOf(probabilities) };
+    const chosen = chooseModel(store, ctx.settings, ctx.shed, now);
+    if (chosen === null) return 'deferred';
+    try {
+      judgement = await judge({ store, ai: ctx.ai, budget: ctx.budget, now: ctx.now, transact: ctx.transact }, chosen, g, now, read.id);
+      if (judgement.view1 !== null) model = chosen === CLEF_FLASH ? 'clef-flash' : 'clef';
+    } catch (error) {
+      if (error instanceof AiQuotaError) {
+        ctx.transact(() => {
+          store.setQuotaExhausted(utcDay(now));
+          store.pushError('ai_quota_exhausted');
+        });
+        return 'deferred';
       }
+      const code = error instanceof AiError ? error.code : 'ai_unexpected';
+      // An answer this code refused is about this mail: a few tries, and the pass goes on. Anything else is an
+      // outage: the mail waits (backoff, about five hours in all) and the pass stops calling the model.
+      const badAnswer = code.startsWith('clef_bad');
+      ctx.transact(() => { store.pushError(code); });
+      if (attempts + 1 < (badAnswer ? BAD_ANSWER_ATTEMPTS_MAX : MAIL_ATTEMPTS_MAX)) {
+        ctx.transact(() => { postpone(store, messageId, attempts, now); });
+        return badAnswer ? 'later' : 'retry';
+      }
+      judgement = modelUnavailable();
     }
   }
+  const { decision, view1, view2 } = judgement;
 
-  // The outcome: a Gmail write (live in force now, a live label, a write grant), a suggestion, or unsure. The caps are
-  // the gate's, right before the write: a write it refuses becomes a suggestion like any failed write.
-  const label = decision.confident ? labels.find((item) => item.id === decision.label) : undefined;
+  // The outcome: a confident label is written to Gmail while live is in force with a write grant (the caps are the
+  // gate's, right before the write: a write it refuses stays recorded, like any failed write), else only recorded.
+  const labels = store.labels();
+  const label = decision.kind === 'label' ? labels.find((item) => item.id === decision.label) : undefined;
   // A label missing from Gmail, or whose path names a Gmail label not its own, writes nothing until the owner acts.
-  const apply = decision.confident && label !== undefined && label.live === 1 && label.gmail_state !== 'missing' && label.gmail_name_taken !== 1 && writesLive(store, ctx.ceiling);
-  // Archive (remove INBOX) unless the label or the deciding rule keeps the mail in the inbox; keeping is the safe
-  // direction, so either one is enough.
-  const archive = !(label?.keep_in_inbox === 1 || (decision.confident && decision.keepInInbox === true));
-  const versions = Object.fromEntries(enabled.map((item) => [item.id, item.desc_version]));
+  const apply = label !== undefined && label.gmail_state !== 'missing' && label.gmail_name_taken !== 1 && writesLive(store, ctx.ceiling);
+  const keepAction = view1 === null ? null : higher(view1, view2, 'needsAction');
+  // Archive (remove INBOX) unless the label keeps its mail in the inbox or the mail asks the owner to act soon:
+  // keeping is the safe direction, so either one is enough.
+  const archive = !(label?.keep_in_inbox === 1 || needsAction(keepAction));
   const intent: { id: string | null } = { id: null };
   ctx.transact(() => {
-    const outcome = apply ? 'applied' : decision.confident ? 'suggested' : 'unsure';
-    store.run(
-      `INSERT OR REPLACE INTO decisions (message_id, thread_id, received_at, decided_at, outcome, label_id, top_label, decider, unsure_reason, probabilities,
-         suspicious, bulk, model, versions, dmarc, sender_address, sender_domain, list_id, delivered_to, subject, sender, summary, current_labels, keep_in_inbox)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '[]', ?)`,
-      read.id,
-      read.threadId,
-      read.receivedAt,
-      now,
-      outcome,
-      decision.confident ? decision.label : null,
-      decision.confident ? decision.label : decision.top,
-      decision.decider,
-      decision.confident ? '' : decision.reason,
-      JSON.stringify(probabilities),
-      suspicious,
-      bulk,
-      model,
-      JSON.stringify(versions),
-      dmarc ? 1 : 0,
-      f.senderAddress,
-      f.senderDomain,
-      f.listId,
-      f.deliveredTo,
-      f.subject,
-      f.sender,
-      summary,
-      // The rule's own keep: a suggestion the owner confirms later (a label not live yet, a write that failed) is
-      // written the way the rule said (api.ts choose).
-      decision.confident && decision.keepInInbox === true ? 1 : 0,
-    );
-    if (decision.confident && decision.decider === 'rule' && decision.ruleId !== undefined) store.run(`UPDATE rules SET match_count = match_count + 1 WHERE id = ?`, decision.ruleId);
-    store.addUsage(day, 'decided', 1);
-    if (!decision.confident) store.addUsage(day, 'unsure', 1);
-    countFlow(store, now, stageOf(decision.decider), apply ? (archive ? 'archived' : 'kept_in_inbox') : decision.confident ? 'suggested' : 'unsure', decision.confident ? decision.label : null);
-    if (apply) {
-      intent.id = intend(store, read.id, label, archive, 'auto', now, read.labelIds);
-    } else if (decision.confident || decision.reason !== 'no_labels') {
+    // An uncertain mail joins the review queue while today's quota has room (decide.ts joinsReview).
+    const shown = decision.kind === 'unsure' && joinsReview(decision, shownOn(store, now), reviewQuotaOn(store, now));
+    const outcome = decision.kind === 'label' ? (apply ? 'applied' : 'suggested') : decision.kind === 'none' ? 'none' : 'unsure';
+    recordDecision(store, read, g, now, { outcome, decision, view1, view2, model, versions: judgement.versions, shown });
+    store.addUsage(utcDay(now), 'decided', 1);
+    if (decision.kind === 'unsure') store.addUsage(utcDay(now), 'unsure', 1);
+    countFlow(store, now, stageOf(model), flowOutcome(decision, apply, archive, shown), decision.kind === 'label' ? decision.label : null);
+    if (apply) intent.id = intend(store, read.id, label, archive, 'auto', now, read.labelIds);
+    if (shown) {
       store.run(
         `INSERT INTO review (id, message_id, kind, state, suggested_label, candidates, decider, unsure_reason, subject, sender, receive_time, create_time)
-         VALUES (?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, 'unsure', 'pending', ?, ?, ?, ?, ?, ?, ?, ?)`,
         timeId(now),
         read.id,
-        decision.confident ? 'suggestion' : 'unsure',
-        decision.confident ? decision.label : decision.top,
+        decision.top,
         JSON.stringify(decision.candidates),
-        decision.decider,
-        decision.confident ? '' : decision.reason,
-        f.subject,
-        f.sender,
+        model === '' ? 'none' : model,
+        decision.reason,
+        g.features.subject,
+        g.features.sender,
         read.receivedAt,
         now,
       );
@@ -501,7 +412,7 @@ async function decideMail(ctx: MailContext, messageId: string, attempts: number)
   });
   const ledgerId = intent.id;
   if (ledgerId !== null) {
-    // A write the gate refuses, or Gmail refuses for good, fails its row and becomes a suggestion (writes.ts fail).
+    // A write the gate refuses, or Gmail refuses for good, fails its row and stays recorded (writes.ts fail).
     const outcome = await executeWrites(writeContext(ctx), [ledgerId], 1);
     ctx.counter.applied += outcome.applied;
     if (outcome.stopped) return 'stop';
@@ -509,6 +420,60 @@ async function decideMail(ctx: MailContext, messageId: string, attempts: number)
     if (outcome.applied > 0) ctx.transact(() => { checkLabelShare(store, ctx.now()); });
   }
   return 'decided';
+}
+
+/** Where a decision goes in the flow (flow.ts). */
+function flowOutcome(decision: Decision, applied: boolean, archive: boolean, shown: boolean): FlowOutcome {
+  if (decision.kind === 'label') return applied ? (archive ? 'archived' : 'kept_in_inbox') : 'suggested';
+  if (decision.kind === 'none') return 'no_label';
+  return shown ? 'unsure_shown' : 'unsure';
+}
+
+interface Recorded {
+  readonly outcome: 'applied' | 'suggested' | 'none' | 'unsure';
+  readonly decision: Decision;
+  readonly view1: ClefAnswer | null;
+  readonly view2: ClefAnswer | null;
+  readonly model: string;
+  readonly versions: Readonly<Record<string, number>>;
+  readonly shown: boolean;
+}
+
+/**
+ * The decision's row: both views' probabilities, the higher p(suspicious) and p(needs_action), the reason, whether it
+ * was shown, the sender's hash and (for 14 days) its domain and the masked content. Run inside a transaction.
+ */
+function recordDecision(store: Store, read: { id: string; threadId: string; receivedAt: number }, g: Awaited<ReturnType<typeof gather>>, now: number, r: Recorded): void {
+  const { decision, view1, view2 } = r;
+  store.run(
+    `INSERT OR REPLACE INTO decisions (message_id, thread_id, received_at, decided_at, outcome, label_id, top_label, decider, unsure_reason, probabilities, probabilities2,
+       suspicious, bulk, needs_action, confidence, shown, model, versions, dmarc, sender_hash, sender_domain, subject, sender, summary, current_labels)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '[]')`,
+    read.id,
+    read.threadId,
+    read.receivedAt,
+    now,
+    r.outcome,
+    decision.kind === 'label' ? decision.label : null,
+    decision.kind === 'label' ? decision.label : decision.kind === 'unsure' ? decision.top : null,
+    r.model === '' ? 'none' : r.model,
+    decision.kind === 'unsure' ? decision.reason : '',
+    JSON.stringify(view1?.probabilities ?? {}),
+    JSON.stringify(view2?.probabilities ?? {}),
+    view1 === null ? null : higher(view1, view2, 'suspicious'),
+    view1?.bulk ?? null,
+    view1 === null ? null : higher(view1, view2, 'needsAction'),
+    view1 === null ? null : decision.confidence,
+    r.shown ? 1 : 0,
+    view1?.model ?? '',
+    JSON.stringify(r.versions),
+    g.authenticated ? 1 : 0,
+    g.senderHash === '' ? null : g.senderHash,
+    g.features.senderDomain === '' ? null : g.features.senderDomain,
+    g.features.subject,
+    g.features.sender,
+    g.summary,
+  );
 }
 
 function writeContext(ctx: Pick<MailContext, 'store' | 'gmail' | 'budget' | 'now' | 'transact' | 'gate'>): WriteContext {
@@ -552,8 +517,8 @@ export function retain(store: Store, now: number): void {
   store.setMeta('pruned_day', day);
 }
 
-/** Weak accepts, the audit sample and live gating, once per UTC day (not while off: they follow the sorting). */
-export function daily(store: Store, settings: SettingsValue, shed: boolean, now: number): void {
+/** Weak accepts, once per UTC day (not while off: they follow the sorting). */
+export function daily(store: Store, now: number): void {
   const day = utcDay(now);
   if (store.getMeta('daily_done') === day) return;
   // Applied labels left alone for WEAK_ACCEPT_MS: a weak confirmation, and an example while the label has few.
@@ -571,45 +536,6 @@ export function daily(store: Store, settings: SettingsValue, shed: boolean, now:
     if (row.summary !== null && row.summary !== '' && count < WEAK_EXAMPLES_BELOW && store.one(`SELECT 1 AS x FROM examples WHERE message_id = ?`, row.message_id) === undefined) {
       putExample(store, row.message_id, row.label_id, row.summary, 'weak_accept', now);
       counts.set(row.label_id, count + 1);
-    }
-  }
-  // The audit: a few applied mails of the last three days, at random, into the review queue.
-  if (!shed) {
-    const sample = store.all<{ message_id: string; label_id: string; subject: string; sender: string; received_at: number }>(
-      `SELECT message_id, label_id, subject, sender, received_at FROM decisions
-       WHERE outcome = 'applied' AND verdict IS NULL AND content_cleared = 0 AND decided_at >= ?
-         AND NOT EXISTS (SELECT 1 FROM review r WHERE r.message_id = decisions.message_id)
-       ORDER BY random() LIMIT ?`,
-      now - 3 * DAY,
-      AUDITS_PER_DAY,
-    );
-    for (const row of sample) {
-      store.run(
-        `INSERT INTO review (id, message_id, kind, state, suggested_label, candidates, decider, unsure_reason, subject, sender, receive_time, create_time)
-         VALUES (?, ?, 'audit', 'pending', ?, ?, 'audit', '', ?, ?, ?, ?)`,
-        timeId(now),
-        row.message_id,
-        row.label_id,
-        JSON.stringify([{ label: row.label_id, probability: 1 }]),
-        row.subject,
-        row.sender,
-        row.received_at,
-        now,
-      );
-    }
-  }
-  // Live gating: a live label whose precision bound fell below the target after a correction goes back to shadow.
-  const live = store.all<LabelRow>(`SELECT * FROM labels WHERE live = 1`);
-  const stats = labelStats(store, live.map((label) => label.id), now);
-  for (const label of live) {
-    const bound = stats.get(label.id)?.lowerBound ?? 0;
-    const corrected = store.count(`SELECT count(*) AS n FROM decisions WHERE label_id = ? AND verdict = 'corrected' AND verdict_at >= ?`, label.id, label.live_since ?? 0);
-    if (bound < settings.precisionTarget && corrected > 0) {
-      store.run(`UPDATE labels SET live = 0, live_since = NULL WHERE id = ?`, label.id);
-      store.touchLabel(label.id, now);
-      store.pushError('label_live_revoked');
-      // ops-v1 shows `label_live_revoked` for a day after the newest revocation.
-      store.setMeta('revoked_at', String(now));
     }
   }
   store.setMeta('daily_done', day);
@@ -632,7 +558,7 @@ export async function runPass(deps: PassDeps): Promise<PassResult> {
   const budget = new Budget(ALARM_SUBREQUESTS);
   const session = await openSession({ store, env: deps.env, fetch: deps.fetch, now: deps.now, budget, token: deps.token });
   if ('reason' in session) {
-    transact(() => { daily(store, settings, deps.shed, now); });
+    transact(() => { daily(store, now); });
     return { next: idle, mode, synced: 0, decided: 0, applied: 0, deferred: 0, code: session.reason };
   }
   const gmail = session.client;
@@ -710,6 +636,8 @@ export async function runPass(deps: PassDeps): Promise<PassResult> {
         }
       }
     }
+    // The replay evaluation last, with what the live pipeline left of the pass (not while shed: it can wait).
+    if (deps.ai !== null && !deps.shed) backlog = (await replayStep({ store, gmail, ai: deps.ai, budget, now: deps.now, transact, settings })) || backlog;
     if (store.count(`SELECT count(*) AS n FROM ledger WHERE state IN ('intended', 'undo_intended')`) > 0) backlog = true;
   } catch (error) {
     if (!(error instanceof Error && error.message === 'stopped')) {
@@ -721,6 +649,6 @@ export async function runPass(deps: PassDeps): Promise<PassResult> {
     }
     backlog = false;
   }
-  transact(() => { daily(store, settings, deps.shed, deps.now()); });
+  transact(() => { daily(store, deps.now()); });
   return { next: backlog ? deps.now() + ALARM_BACKLOG_MS : idle, mode, synced, decided, applied, deferred, code };
 }

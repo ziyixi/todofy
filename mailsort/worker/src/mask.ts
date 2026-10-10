@@ -5,7 +5,8 @@
  * only their domain ([link example.com]). Every pattern is linear (no nested quantifiers over overlapping classes),
  * since the text is untrusted and may be built to make a regular expression slow.
  *
- * The rules (stage 1) read the exact addresses before masking; nothing masked is ever used to match.
+ * The exact From address is read before masking only for its keyed hash (senderHash, the sender history) and its
+ * domain (DMARC, the trusted domains); neither the address nor anything masked is sent to the model unmasked.
  */
 import { BODY_CHARS, SENDER_CHARS, SNIPPET_CHARS, SUBJECT_CHARS } from './limits.ts';
 import type { ReadMessage } from './mime.ts';
@@ -79,6 +80,16 @@ export function listIdOf(header: string): string {
   return /^[\x21-\x7e]{1,255}$/.test(id) ? id : '';
 }
 
+/**
+ * The sender of a mail as the decisions keep it (16 hex characters of a salted SHA-256 of the lower-case From address),
+ * so the sender history can count what the same sender's earlier mail got without keeping the address; '' for none.
+ */
+export async function senderHash(address: string): Promise<string> {
+  if (address === '') return '';
+  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`mailsort-sender:${address.toLowerCase()}`)));
+  return Array.from(digest.slice(0, 8), (byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
 /** A short code for the address the mail came in through: stable, but not the address. */
 export async function aliasCode(address: string): Promise<string> {
   if (address === '') return '';
@@ -86,16 +97,14 @@ export async function aliasCode(address: string): Promise<string> {
   return `to-${Array.from(digest.slice(0, 3), (byte) => byte.toString(16).padStart(2, '0')).join('')}`;
 }
 
-/** What the pipeline knows of one mail: the exact keys for rules, and the masked text for everything else. */
+/** What the pipeline knows of one mail: the exact sender for its hash and domain, and the masked text for the rest. */
 export interface Features {
-  /** Exact, for rules and rule proposals only (never sent to the model). */
+  /** Exact, for senderHash only: never stored, never sent to the model. */
   readonly senderAddress: string;
+  /** The From domain: DMARC's alignment, the trusted domains, kept with the content for 14 days. */
   readonly senderDomain: string;
+  /** The List-Id: the model only learns whether there is one. */
   readonly listId: string;
-  /** The Delivered-To address Gmail wrote; never the To the sender wrote (a delivered-to rule must not be forgeable). */
-  readonly deliveredTo: string;
-  /** The subject as it is, for the rules' subject conditions only (never stored, never sent to the model). */
-  readonly rawSubject: string;
   /** Masked: what the model, the review queue and the examples see. */
   readonly sender: string;
   readonly subject: string;
@@ -116,16 +125,13 @@ const CATEGORIES: Readonly<Record<string, string>> = {
 
 export async function features(message: ReadMessage): Promise<Features> {
   const from = firstMailbox(message.headers.from);
-  const deliveredTo = firstMailbox(message.headers.deliveredTo);
-  // The model's code for the address may fall back to To: it is only a hint, never a key a rule matches.
-  const delivered = deliveredTo ?? firstMailbox(message.headers.to);
+  // The model's code for the address it came to: Delivered-To, else To (only a hint).
+  const delivered = firstMailbox(message.headers.deliveredTo) ?? firstMailbox(message.headers.to);
   const senderName = from === null ? '' : mask(from.name, 60);
   return {
     senderAddress: from?.address ?? '',
     senderDomain: from?.domain ?? '',
     listId: listIdOf(message.headers.listId),
-    deliveredTo: deliveredTo?.address ?? '',
-    rawSubject: message.headers.subject,
     sender: cut(from === null ? '' : `${senderName} <${from.domain}>`.trim(), SENDER_CHARS),
     subject: mask(message.headers.subject, SUBJECT_CHARS),
     snippet: mask(message.snippet, SNIPPET_CHARS),

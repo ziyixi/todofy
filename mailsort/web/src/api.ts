@@ -1,5 +1,5 @@
 /**
- * The owner API client (proto/mailsort/ui/v1, ../../docs/design.md §9): MailsortUiService through the shared typed client
+ * The owner API client (proto/mailsort/ui/v2, ../../docs/design.md §9): MailsortUiService through the shared typed client
  * (proto/ts/http-client.ts), built from the same descriptors the Worker's transcoder routes with. Same-origin only:
  * every request goes to /api/* with the Access cookie; nothing else leaves the page. This file adds only the
  * transport: mutations carry the signed double-submit CSRF token (header X-CSRF-Token, cookie mailsort_csrf, from
@@ -9,8 +9,8 @@
  */
 import type { CommonReason } from '@ziyixi/proto/common/errors/v1/errors_pb'
 import { createHttpClient, HttpEncodeError, HttpResponseError, RpcStatusError, type HttpCall } from '@ziyixi/proto/http-client'
-import type { ErrorReason } from '@ziyixi/proto/mailsort/ui/v1/errors_pb'
-import { MailsortUiService } from '@ziyixi/proto/mailsort/ui/v1/mailsort_ui_service_pb'
+import type { ErrorReason } from '@ziyixi/proto/mailsort/ui/v2/errors_pb'
+import { MailsortUiService } from '@ziyixi/proto/mailsort/ui/v2/mailsort_ui_service_pb'
 import { parseStatus } from '@ziyixi/proto/rpc-status'
 
 export const CSRF_HEADER = 'X-CSRF-Token'

@@ -1,10 +1,12 @@
 /**
- * The owner's settings (Settings in proto/mailsort/ui/v1/status.proto), kept as one JSON row of MailsortState's meta
+ * The owner's settings (Settings in proto/mailsort/ui/v2/status.proto), kept as one JSON row of MailsortState's meta
  * table, and the mode in force: the owner's mode lowered by the deployment's MAILSORT_MODE ceiling and by the breaker.
+ * A row written before 2026-10-10 may still hold the owner's default threshold and precision target: they are ignored
+ * (the decision's threshold is a constant, limits.ts AUTO_THRESHOLD) and dropped by the next save.
  */
 import type { ModeName } from './env.ts';
 import { newEtag } from './ids.ts';
-import { DEFAULT_DAILY_NEURON_BUDGET, DEFAULT_DAILY_WRITE_LIMIT, DEFAULT_PRECISION_TARGET, DEFAULT_RUN_WRITE_LIMIT, DEFAULT_THRESHOLD } from './limits.ts';
+import { DEFAULT_DAILY_NEURON_BUDGET, DEFAULT_DAILY_WRITE_LIMIT, DEFAULT_RUN_WRITE_LIMIT } from './limits.ts';
 import type { Store } from './store.ts';
 
 export interface SettingsValue {
@@ -12,8 +14,6 @@ export interface SettingsValue {
   readonly runWriteLimit: number;
   readonly dailyWriteLimit: number;
   readonly dailyNeuronBudget: number;
-  readonly defaultThreshold: number;
-  readonly precisionTarget: number;
   /** Why the breaker tripped (`daily_limit`, `run_limit`, `label_share`), or '' when it did not. */
   readonly breaker: string;
   readonly etag: string;
@@ -25,8 +25,6 @@ export const DEFAULTS: Omit<SettingsValue, 'etag'> = {
   runWriteLimit: DEFAULT_RUN_WRITE_LIMIT,
   dailyWriteLimit: DEFAULT_DAILY_WRITE_LIMIT,
   dailyNeuronBudget: DEFAULT_DAILY_NEURON_BUDGET,
-  defaultThreshold: DEFAULT_THRESHOLD,
-  precisionTarget: DEFAULT_PRECISION_TARGET,
   breaker: '',
 };
 
@@ -46,8 +44,6 @@ export function readSettings(store: Store): SettingsValue {
     runWriteLimit: number(stored.runWriteLimit, DEFAULTS.runWriteLimit),
     dailyWriteLimit: number(stored.dailyWriteLimit, DEFAULTS.dailyWriteLimit),
     dailyNeuronBudget: number(stored.dailyNeuronBudget, DEFAULTS.dailyNeuronBudget),
-    defaultThreshold: number(stored.defaultThreshold, DEFAULTS.defaultThreshold),
-    precisionTarget: number(stored.precisionTarget, DEFAULTS.precisionTarget),
     breaker: typeof stored.breaker === 'string' ? stored.breaker : '',
     etag: typeof stored.etag === 'string' ? stored.etag : 'initial',
   };

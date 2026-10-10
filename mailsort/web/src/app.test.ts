@@ -1,16 +1,15 @@
 /**
  * The owner's flows in the UI against the fake API (test/fakeServer.ts, the shared transcoder): the shell's four tabs
- * (the focus kept on a tab chosen by keyboard) and status line; 待审's confirm, change and skip (with the CSRF header
- * and a request ID each), its keyboard, its picker and its caution; 设置's mode, ceiling and breaker, the range undo's
- * preview and confirmation, the sync and the filter export. 标签 has its own file, labels.test.ts.
+ * (the focus kept on a tab chosen by keyboard) and status line; 待审's confirm, change and skip (ResolveReviewItem with
+ * the CSRF header and a request ID each), its keyboard, its picker and its caution; 设置's mode, ceiling and breaker, the
+ * range undo's preview and confirmation and the sync. 标签 has its own file, labels.test.ts.
  */
 import { mountApp, type Host } from './app.ts'
 import { relative } from './format.ts'
 import { FakeServer, label, ledgerEntry, NOW, reviewItem, settle } from './test/fakeServer.ts'
-import { Label_GmailState } from '@ziyixi/proto/mailsort/ui/v1/label_pb'
-import { CandidateSchema, ReviewItem_Kind } from '@ziyixi/proto/mailsort/ui/v1/review_pb'
-import { Mode, ServiceStatus_AuthState } from '@ziyixi/proto/mailsort/ui/v1/status_pb'
-import { Rule_Kind, Rule_State, RuleSchema } from '@ziyixi/proto/mailsort/ui/v1/rule_pb'
+import { Label_GmailState } from '@ziyixi/proto/mailsort/ui/v2/label_pb'
+import { CandidateSchema } from '@ziyixi/proto/mailsort/ui/v2/review_pb'
+import { Mode, ServiceStatus_AuthState } from '@ziyixi/proto/mailsort/ui/v2/status_pb'
 import { create } from '@ziyixi/proto/protobuf'
 import { timestampFromMs } from '@ziyixi/proto/protobuf/wkt'
 
@@ -109,22 +108,23 @@ describe('the shell', () => {
 describe('待审', () => {
   it('confirms, changes through the searchable picker and skips, with CSRF and a request ID each', async () => {
     const server = new FakeServer()
-    server.reviewItems = [reviewItem('a'), reviewItem('b', { kind: ReviewItem_Kind.UNSURE, suggestedLabel: '', unsureReason: 'none', candidates: [] }), reviewItem('c')]
+    server.reviewItems = [reviewItem('a'), reviewItem('b', { reason: 'model_unavailable', candidates: [] }), reviewItem('c')]
     const root = await open(server, '/')
     expect(rows(root).length).toBe(3)
     const [a, b] = rows(root)
     expect(a?.textContent).toContain('主题 a')
     expect(a?.querySelector('.chip.accent')?.textContent).toBe('订阅')
-    expect(a?.textContent).toContain('90%')
-    // An unsure mail without a suggestion: why, and no 确认.
-    expect(b?.textContent).toContain('拿不准 · 都不像')
+    expect(a?.textContent).toContain('60%')
+    // A mail the model could not read: why, and no 确认.
+    expect(b?.textContent).toContain('模型暂不可用')
     expect(b?.querySelector('.chip')?.textContent).toBe('都不是')
     expect([...(b?.querySelectorAll('button') ?? [])].map((node) => node.textContent)).toEqual(['改为…', '跳过'])
 
     buttonNamed(a ?? root, '确认').click()
     await settle()
-    const confirm = server.calls.find((call) => call.path.startsWith('/api/v1/reviewItems/a:confirm'))
+    const confirm = server.calls.find((call) => call.path.startsWith('/api/v2/reviewItems/a:resolve'))
     expect(confirm?.method).toBe('POST')
+    expect(confirm?.body?.['label']).toBe('labels/newsletter')
     expect(confirm?.headers['x-csrf-token']).toBe('csrf-token')
     expect(String(confirm?.body?.['request_id'])).toMatch(/^[0-9a-f-]{36}$/)
     expect(toastText(root)).toBe('已确认：订阅')
@@ -142,7 +142,7 @@ describe('待审', () => {
     expect([...root.querySelectorAll('.picker [role="option"]')].map((node) => node.textContent)).toEqual(['收据'])
     press('Enter')
     await settle()
-    expect(server.calls.find((call) => call.path.includes('/b:correct'))?.body?.['label']).toBe('labels/receipt')
+    expect(server.calls.find((call) => call.path.includes('/b:resolve'))?.body?.['label']).toBe('labels/receipt')
     expect(toastText(root)).toBe('已改为：收据')
 
     buttonNamed(root, '跳过').click()
@@ -167,7 +167,7 @@ describe('待审', () => {
     expect(rows(root)[1]?.classList.contains('active')).toBe(true)
     press('Enter')
     await settle()
-    expect(server.calls.some((call) => call.path.startsWith('/api/v1/reviewItems/b:confirm'))).toBe(true)
+    expect(server.calls.some((call) => call.path.startsWith('/api/v2/reviewItems/b:resolve'))).toBe(true)
     // The row after it took its place and the focus.
     expect(rows(root).map((row) => row.getAttribute('aria-label'))).toEqual(['主题 a', '主题 c'])
     expect(document.activeElement).toBe(rows(root)[1])
@@ -189,21 +189,18 @@ describe('待审', () => {
     expect(root.querySelector('.keys')?.textContent).toContain('跳过')
   })
 
-  it('slows the owner down on a suspected phishing mail and on a trust label the model may not set', async () => {
+  it('slows the owner down on a suspected phishing mail and on a trust label for a sender not trusted yet', async () => {
     const server = new FakeServer()
     server.labels.push(Object.assign(label('bank', '银行'), { trustImplying: true }))
     const candidates = [create(CandidateSchema, { label: 'labels/bank', probability: 0.7 }), create(CandidateSchema, { label: 'labels/receipt', probability: 0.2 })]
-    server.reviewItems = [
-      reviewItem('p', { kind: ReviewItem_Kind.UNSURE, suggestedLabel: 'labels/bank', unsureReason: 'suspicious', candidates }),
-      reviewItem('t', { kind: ReviewItem_Kind.UNSURE, suggestedLabel: 'labels/bank', unsureReason: 'trust_needs_rule', candidates }),
-    ]
+    server.reviewItems = [reviewItem('p', { reason: 'suspicious', candidates }), reviewItem('t', { reason: 'untrusted_sender', candidates })]
     const asked: string[] = []
     const root = await open(server, '/', { now: () => NOW, confirm: (message) => (asked.push(message), false) })
     const [phishing, trust] = rows(root)
     expect(phishing?.textContent).toContain('疑似钓鱼：先在 Gmail 里核对发件人和链接')
-    expect(trust?.textContent).toContain('可信类标签只能由规则打')
-    // The warning line says why: the small text names only the kind.
-    expect([...(phishing?.querySelectorAll('.suggestion .meta') ?? [])].map((node) => node.textContent)).toEqual(['70%', '拿不准'])
+    expect(trust?.textContent).toContain('发件人还不可信')
+    // The warning line says why: the small text says nothing more.
+    expect([...(phishing?.querySelectorAll('.suggestion .meta') ?? [])].map((node) => node.textContent)).toEqual(['70%'])
     for (const row of [phishing, trust]) {
       const confirm = [...(row?.querySelectorAll('button') ?? [])].find((node) => node.textContent === '确认')
       expect(confirm?.classList.contains('primary')).toBe(false)
@@ -212,7 +209,7 @@ describe('待审', () => {
     await settle()
     // Asked twice, refused twice: nothing was sent.
     expect(asked.length).toBe(2)
-    expect(server.calls.some((call) => call.path.includes(':confirm'))).toBe(false)
+    expect(server.calls.some((call) => call.path.includes(':resolve'))).toBe(false)
     // The phishing mail's picker starts at 都不是, the other at the model's next choice.
     const selected = (row: HTMLElement | undefined) => {
       if (row === undefined) throw new Error('no row')
@@ -225,9 +222,10 @@ describe('待审', () => {
 
   it('says why a mail is unsure in plain words, never 阈值', async () => {
     const server = new FakeServer()
-    server.reviewItems = [reviewItem('u', { kind: ReviewItem_Kind.UNSURE, unsureReason: 'below_threshold' })]
+    server.reviewItems = [reviewItem('u', { reason: 'views_disagree' }), reviewItem('v')]
     const root = await open(server, '/')
-    expect(rows(root)[0]?.textContent).toContain('拿不准 · 把握不够')
+    expect(rows(root)[0]?.textContent).toContain('两次判断不一致')
+    expect(rows(root)[1]?.textContent).toContain('把握不够')
     expect(root.querySelector('#view')?.textContent).not.toContain('阈值')
   })
 
@@ -264,7 +262,8 @@ describe('设置', () => {
     expect([...root.querySelectorAll('h2')].map((node) => node.textContent)).toEqual(['模式', '撤销', 'Gmail'])
     expect(root.querySelectorAll('input[type="number"]').length).toBe(0)
     expect(root.querySelector('[aria-label="模式"] [aria-pressed="true"]')?.textContent).toBe('影子')
-    expect(root.textContent).toContain('只给建议，不改 Gmail')
+    expect(root.textContent).toContain('只判断和记录，不改 Gmail')
+    expect(root.textContent).not.toContain('导出过滤器')
   })
 
   it('changes the mode with only mode and the etag in the mask, after asking for 正式', async () => {
@@ -321,10 +320,10 @@ describe('设置', () => {
     buttonNamed(root, '预览').click()
     await settle(10)
     expect(root.textContent).toContain('将撤销 45 条')
-    expect(server.calls.some((call) => call.path === '/api/v1/ledgerEntries:undo')).toBe(false)
+    expect(server.calls.some((call) => call.path === '/api/v2/ledgerEntries:undo')).toBe(false)
     buttonNamed(root, '确认撤销').click()
     await settle(20)
-    const undos = server.calls.filter((call) => call.path === '/api/v1/ledgerEntries:undo')
+    const undos = server.calls.filter((call) => call.path === '/api/v2/ledgerEntries:undo')
     expect(undos.length).toBe(3)
     expect(new Set(undos.map((call) => String(call.body?.['request_id']))).size).toBe(3)
     expect(server.ledgerEntries.filter((item) => item.undoable).map((item) => item.name)).toEqual(Array.from({ length: 10 }, (_, i) => `ledgerEntries/old${String(i)}`))
@@ -347,7 +346,7 @@ describe('设置', () => {
     expect(root.textContent).toContain('将撤销“出行”的 2 条')
     buttonNamed(root, '确认撤销').click()
     await settle(10)
-    expect(server.calls.find((call) => call.path === '/api/v1/ledgerEntries:undo')?.body?.['label']).toBe('labels/travel')
+    expect(server.calls.find((call) => call.path === '/api/v2/ledgerEntries:undo')?.body?.['label']).toBe('labels/travel')
     expect(server.ledgerEntries.map((item) => [item.name, item.undoable])).toEqual([
       ['ledgerEntries/t1', false],
       ['ledgerEntries/n1', true],
@@ -390,24 +389,5 @@ describe('设置', () => {
     await settle()
     expect(toastText(root)).toBe('已同步：关联 1，改名 0，Gmail 中缺失 0')
     expect(server.labels[0]?.gmailState).toBe(Label_GmailState.ADOPTED)
-  })
-
-  it('downloads the Gmail filter file and folds away why some rules were left out', async () => {
-    const server = new FakeServer()
-    server.rules = [create(RuleSchema, { name: 'rules/r1', kind: Rule_Kind.LIST_ID, value: 'digest.news.example.com', label: 'labels/newsletter', state: Rule_State.ACTIVE })]
-    server.exportSkipped = 2
-    Object.assign(URL, { createObjectURL: vi.fn(() => 'blob:filters'), revokeObjectURL: vi.fn() })
-    const clicked = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined)
-    const root = await open(server, '/settings')
-    buttonNamed(root, '导出').click()
-    await settle()
-    expect(toastText(root)).toBe('已导出 1 条规则')
-    const link = root.querySelector<HTMLAnchorElement>('a[download]')
-    expect(link?.getAttribute('download')).toBe('mailsort-filters.xml')
-    expect(link?.getAttribute('href')).toBe('blob:filters')
-    expect(clicked).toHaveBeenCalledTimes(1)
-    const why = root.querySelector('details.more')
-    expect(why?.querySelector('summary')?.textContent).toBe('2 条没有导出')
-    expect(why?.textContent).toContain('过滤器查不了 DMARC')
   })
 })

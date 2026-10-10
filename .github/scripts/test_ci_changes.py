@@ -443,7 +443,7 @@ class Classify(unittest.TestCase):
             # OpsStatus embeds WebsiteSyncStatus; every Ops descriptor brings this package too.
             "proto/website/sync/v1/sync.proto": {"mail-hero", "todofy", "dashboard", "watch", "website", "mailsort"},
             # mailsort's owner API: its Worker serves it, its UI calls it.
-            "proto/mailsort/ui/v1/mailsort_ui_service.proto": {"mailsort"},
+            "proto/mailsort/ui/v2/mailsort_ui_service.proto": {"mailsort"},
             # mail.received.v1: Mail Hero builds every event, todofy-core reads every body.
             "proto/mailhero/webhook/v1/mail_received.proto": {"mail-hero", "todofy"},
             # FlowDay's UI API reaches only FlowDay.
