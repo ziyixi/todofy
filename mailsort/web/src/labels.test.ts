@@ -1,13 +1,15 @@
 /**
  * 标签 against the fake API (test/fakeServer.ts, the shared transcoder): the tree grouped by top-level segment with one
- * compact row per label, a row's detail opened inline one at a time, the search over labels' names, 启用 on the row,
- * the description, a trust label's trusted domains (删除 each), the examples, the Gmail state, 高级, and a new label,
- * also when there is none yet.
+ * compact row per label (its last 7 days' count and 启用), a row's detail opened inline one at a time, the search over
+ * labels' names, the description, 归档, a trust label's trusted domains (删除 each), the examples, the Gmail state,
+ * 高级, and a new label, also when there is none yet.
  */
 import { mountApp, type Host } from './app.ts'
 import { groupByTop, leafName, searchLabels } from './views/labels.ts'
 import { example, FakeServer, label, NOW, settle } from './test/fakeServer.ts'
 import { Label_GmailState } from '@ziyixi/proto/mailsort/ui/v2/label_pb'
+import { LabelCountSchema } from '@ziyixi/proto/mailsort/ui/v2/status_pb'
+import { create } from '@ziyixi/proto/protobuf'
 
 const host: Host = { now: () => NOW, confirm: () => true }
 
@@ -21,12 +23,16 @@ async function open(server: FakeServer, with_: Host = host): Promise<HTMLElement
   return root
 }
 
-/** A store like the owner's: two groups, labels of one segment between them, a trust label with a trusted domain. */
+/**
+ * A store like the owner's: two groups, labels of one segment between them, a trust label with a trusted domain; one
+ * label with mail this week.
+ */
 function server(): FakeServer {
   const s = new FakeServer()
   s.labels = [label('dev-ci', '开发/CI通知'), label('dev-platform', '开发/平台工具'), label('account-security', '账号安全'), label('life-car-service', '生活/汽车/保养'), label('life-health', '生活/医疗'), label('travel', '出行')]
   Object.assign(s.labels[0] ?? {}, { exampleCount: 2 })
   Object.assign(s.labels[2] ?? {}, { trustImplying: true, trustedDomains: ['bank.example.com'] })
+  s.report = [create(LabelCountSchema, { label: 'labels/dev-ci', autoCount: 12, unsureCount: 1 })]
   return s
 }
 
@@ -86,7 +92,7 @@ describe('the tree', () => {
     expect(leafName('出行', '')).toBe('出行')
   })
 
-  it('draws one tree: quiet group headings, one compact row per label with its example count and 启用', async () => {
+  it('draws one tree: quiet group headings, one compact row per label with its last 7 days and 启用', async () => {
     const root = await open(server())
     const tree = root.querySelector('ul.tree')
     const top = [...(tree?.children ?? [])].map((node) => (node.classList.contains('branch') ? `${node.querySelector('.branch-name')?.textContent ?? ''} ›` : node.querySelector('.leaf-name > span')?.textContent))
@@ -97,14 +103,23 @@ describe('the tree', () => {
     expect(root.querySelector('.tree-head')?.textContent).toBe('6 个标签启用')
 
     const ci = row(root, 'CI通知')
-    // Nothing else on the row: the name, the count and one switch.
-    expect(ci.querySelector('.leaf-count')?.textContent).toBe('2 个例子')
+    // Nothing else on the row: the name, the count of the last 7 days and one switch.
+    expect(ci.querySelector('.leaf-count')?.textContent).toBe('7 天 12 封')
     expect(ci.querySelectorAll('.leaf-row input').length).toBe(1)
     expect(ci.querySelector('.leaf-row input')?.getAttribute('aria-label')).toBe('启用：开发/CI通知')
     expect(ci.querySelectorAll('.leaf-row button').length).toBe(1)
     expect(root.textContent).not.toContain('正式打')
-    // No example, no count.
+    expect(root.textContent).not.toContain('规则')
+    // No mail this week, no count.
     expect(row(root, '账号安全').querySelector('.leaf-count')).toBeNull()
+  })
+
+  it('still draws the tree when the week cannot be read, without counts', async () => {
+    const s = server()
+    s.reportFails = true
+    const root = await open(s)
+    expect(root.querySelectorAll('li.leaf').length).toBe(6)
+    expect(root.querySelector('.leaf-count')).toBeNull()
   })
 })
 
@@ -222,17 +237,24 @@ describe('the detail', () => {
     expect(s.calls.filter((call) => call.method === 'PATCH').length).toBe(1)
   })
 
-  it('saves 留在收件箱 at once', async () => {
+  it('saves 归档 at once: on archives (the default), off keeps the mail in the inbox', async () => {
     const s = server()
     const root = await open(s)
     rowButton(root, '账号安全').click()
-    const keep = [...(openDetails(root)[0]?.querySelectorAll(':scope > label.check') ?? [])].find((node) => node.textContent.startsWith('留在收件箱'))?.querySelector('input')
-    if (keep === undefined || keep === null) throw new Error('no switch')
-    keep.checked = true
-    keep.dispatchEvent(new Event('change'))
+    const archive = [...(openDetails(root)[0]?.querySelectorAll(':scope > label.check') ?? [])].find((node) => node.textContent.startsWith('归档'))?.querySelector('input')
+    if (archive === undefined || archive === null) throw new Error('no switch')
+    expect(archive.checked).toBe(true)
+    archive.checked = false
+    archive.dispatchEvent(new Event('change'))
     await settle()
-    expect(decodeURIComponent(s.calls.find((call) => call.method === 'PATCH')?.path ?? '')).toContain('update_mask=keep_in_inbox,etag')
+    const patch = s.calls.find((call) => call.method === 'PATCH')
+    expect(decodeURIComponent(patch?.path ?? '')).toContain('update_mask=keep_in_inbox,etag')
+    expect(patch?.body).toMatchObject({ keep_in_inbox: true })
     expect(s.labels.find((item) => item.name === 'labels/account-security')?.keepInInbox).toBe(true)
+    archive.checked = true
+    archive.dispatchEvent(new Event('change'))
+    await settle()
+    expect(s.labels.find((item) => item.name === 'labels/account-security')?.keepInInbox).toBe(false)
   })
 
   it('lists a trust label\'s trusted domains, each with 删除, and none for another label', async () => {
@@ -300,7 +322,7 @@ describe('the detail', () => {
     expect(opened('CI通知').textContent).not.toContain('Gmail')
   })
 
-  it('folds 可信, 敏感 (asking before it deletes examples), 启用, rename and delete under 高级, and no threshold', async () => {
+  it('folds 可信, 敏感 (asking before it deletes examples), rename and delete under 高级, and no threshold', async () => {
     const s = server()
     const travel = s.labels.find((item) => item.name === 'labels/travel')
     if (travel !== undefined) travel.exampleCount = 1
@@ -320,6 +342,14 @@ describe('the detail', () => {
       if (found === undefined || found === null) throw new Error(`no switch ${name}`)
       return found
     }
+    // 启用 is on the row only.
+    expect([...detail().querySelectorAll('details.more label.check')].map((node) => node.querySelector(':scope > span')?.firstChild?.textContent)).toEqual(['可信', '敏感'])
+    // Turned 可信, the label shows its (still empty) trusted domains and says what that means.
+    const trust = switchNamed('可信')
+    trust.checked = true
+    trust.dispatchEvent(new Event('change'))
+    await settle()
+    expect(detail().querySelector('[aria-label="可信域名"]')?.textContent).toBe('可信域名 0还没有，所以这个标签还不会自动打。在待审里选它、且发件人通过 DMARC 时，发件域会记在这里')
     const sensitive = switchNamed('敏感')
     sensitive.checked = true
     sensitive.dispatchEvent(new Event('change'))
@@ -328,7 +358,8 @@ describe('the detail', () => {
     expect(s.examples.length).toBe(0)
     expect(detail().querySelector('[aria-label="例子"]')?.textContent).toContain('敏感标签不留例子')
 
-    const enabled = switchNamed('启用')
+    const enabled = row(root, '出行').querySelector<HTMLInputElement>('.leaf-row input.switch')
+    if (enabled === null) throw new Error('no switch')
     enabled.checked = false
     enabled.dispatchEvent(new Event('change'))
     await settle()

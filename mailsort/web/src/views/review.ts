@@ -1,44 +1,65 @@
 /**
- * 待审 (`/`): the few uncertain mails waiting for the owner, newest first, one compact row each: the masked subject and
- * sender (kept 14 days), the model's most likely label with its confidence and why it was uncertain, and 确认 (that
- * label), 改为… (the searchable label picker, 都不是 first) and 跳过. Every choice is ResolveReviewItem with a label or
- * 都不是. A choice leaves the list at once and the next row takes the focus. (The redesign of 2026-10-10 replaces this
- * view; until then it is the v1 view on mailsort.ui.v2.)
+ * 待审 (`/`): the few uncertain mails a day the model asks about (at most a daily quota, ../../docs/design.md §5), newest
+ * first, one compact row each: the masked subject and sender (kept 14 days), why the model was uncertain in plain
+ * words, and the answers as one-tap buttons: the model's most likely options with their probabilities (the first
+ * always, and primary; the others from 5 %), 都不是 among them or after them, 其他… (the searchable picker over every
+ * label) and 跳过. A label or 都不是 is ResolveReviewItem; 跳过 is SkipReviewItem. An answer leaves the list at once
+ * and the next row takes the focus.
  *
- * Keyboard: j / k move between rows, Enter confirms the focused row, c opens 改为…, s skips. A suspected phishing
- * mail, or a trust label for a sender not trusted yet, says so, and its 确认 is not the primary action and asks first;
- * its picker starts at 都不是 (another mail's at the model's next choice).
+ * Keyboard: j / k move between rows, 1 to 4 choose that answer, Enter the first, c opens 其他…, s skips. A suspected
+ * phishing mail, or a trust label for a sender not trusted yet, says so in a warning line; then no answer is primary
+ * and a label asks first (a trust label also says that it teaches the sender's domain when DMARC passed).
  */
+import type { Label } from '@ziyixi/proto/mailsort/ui/v2/label_pb'
 import type { ReviewItem } from '@ziyixi/proto/mailsort/ui/v2/review_pb'
 import { api, listAll } from '../api.ts'
-import { bar, chip, emptyState, picker, type PickerOption } from '../components.ts'
+import { emptyState, picker, type PickerOption } from '../components.ts'
 import { button, el, fill } from '../dom.ts'
 import { labelText, percent, UNSURE_REASONS, when } from '../format.ts'
 import type { ViewContext } from '../app.ts'
 import { act, allLabels, frame } from './common.ts'
 
-/** Reasons where the pipeline refused the label on purpose: one key must not file such a mail under it. */
+/** Reasons where the pipeline held the label back on purpose: one tap must not file such a mail under it. */
 const CAUTION: Readonly<Record<string, string>> = {
   suspicious: '疑似钓鱼：先在 Gmail 里核对发件人和链接',
   untrusted_sender: '发件人还不可信：先在 Gmail 里核对发件人',
 }
 
+/** The page with nothing to answer. */
+const QUIET = '没有需要你确认的邮件'
+
+/** One answer of a row: a label ('' for 都不是) and its probability when the model gave one. */
+interface Choice {
+  readonly label: string
+  readonly probability: number | undefined
+}
+
 interface Row {
   readonly node: HTMLLIElement
-  readonly confirm: () => void
-  readonly change: () => void
+  /** Chooses the row's answer at `index` (0 is the first); nothing past the last. */
+  readonly choose: (index: number) => void
+  readonly other: () => void
   readonly skip: () => void
 }
 
-/** Why the model was uncertain: `把握不够`, `两次判断不一致`. */
-function why(item: ReviewItem): string {
-  return item.reason === '' ? '' : (UNSURE_REASONS[item.reason] ?? item.reason)
+/** Below this probability an option after the first is not worth a button of its own (其他… still has every label). */
+const OPTION_MIN = 0.05
+
+/**
+ * A row's answers: the model's options in its order (the first always, the others from OPTION_MIN), 都不是 included
+ * where the model ranked it, else after them. A mail without a model answer has 都不是 only.
+ */
+export function choices(item: ReviewItem): Choice[] {
+  const ranked: Choice[] = item.candidates
+    .filter((candidate, index) => index === 0 || candidate.probability >= OPTION_MIN)
+    .map((candidate) => ({ label: candidate.label, probability: candidate.probability }))
+  return ranked.some((choice) => choice.label === '') ? ranked : [...ranked, { label: '', probability: undefined }]
 }
 
 /** The keyboard hint, shown where there is a keyboard (styles.css .keys). */
 function keys(): HTMLElement {
   const key = (name: string) => el('kbd', {}, name)
-  return el('p', { class: 'hint keys' }, key('j'), ' ', key('k'), ' 移动 · ', key('Enter'), ' 确认 · ', key('c'), ' 改为 · ', key('s'), ' 跳过')
+  return el('p', { class: 'hint keys' }, key('j'), ' ', key('k'), ' 移动 · ', key('1'), '–', key('4'), ' 选择 · ', key('c'), ' 其他 · ', key('s'), ' 跳过')
 }
 
 export async function renderReview(ctx: ViewContext): Promise<void> {
@@ -50,11 +71,12 @@ export async function renderReview(ctx: ViewContext): Promise<void> {
       }, 4),
       allLabels(),
     ])
+    const quiet = () => emptyState(QUIET, '只有模型拿不准的少数邮件会来这里')
     if (items.length === 0) {
-      fill(body, emptyState('都处理完了'))
+      fill(body, quiet())
       return
     }
-    const options: PickerOption[] = [{ value: '', text: '都不是' }, ...labels.map((label) => ({ value: label.name, text: label.displayName }))]
+    const options: PickerOption[] = labels.map((label) => ({ value: label.name, text: label.displayName }))
     const list = el('ul', { class: 'rows', 'aria-label': '待审邮件' })
     const rows: Row[] = []
     let active = -1
@@ -67,21 +89,22 @@ export async function renderReview(ctx: ViewContext): Promise<void> {
       })
       if (focus) rows[active]?.node.focus()
     }
-    // A resolved row leaves; the one after it (or before, at the end) takes its place and the focus.
+    // An answered row leaves; the one after it (or before, at the end) takes its place and the focus.
     const leave = (row: Row) => {
       const index = rows.indexOf(row)
       rows.splice(index, 1)
       row.node.remove()
       ctx.refreshStatus()
-      if (rows.length === 0) fill(body, emptyState('都处理完了'))
+      if (rows.length === 0) fill(body, quiet())
       else select(index, true)
     }
 
     const build = (item: ReviewItem): Row => {
       const caution = CAUTION[item.reason]
-      const suggested = item.candidates[0]?.label ?? ''
-      const probability = item.candidates.find((candidate) => candidate.label === suggested)?.probability
-      const node = el('li', { tabindex: '-1', 'aria-label': item.subject === '' ? '（无主题）' : item.subject })
+      const answers = choices(item)
+      const first = item.candidates[0]?.label
+      const subject = item.subject === '' ? '（无主题）' : item.subject
+      const node = el('li', { tabindex: '-1', 'aria-label': subject })
       const slot = el('div', { hidden: true })
       let busy = false
       // Done, the row leaves; refused, it stays to be tried again.
@@ -93,69 +116,68 @@ export async function renderReview(ctx: ViewContext): Promise<void> {
         })
         if (answer === null) busy = false
       }
-      const confirm = () => {
-        if (suggested === '') return
-        if (caution !== undefined && !ctx.host.confirm(`${caution}。仍然确认为“${labelText(suggested, labels)}”？`)) return
-        void run((requestId) => api.resolveReviewItem({ name: item.name, label: suggested, requestId }), `已确认：${labelText(suggested, labels)}`)
+      const resolve = (label: string) => {
+        const name = labelText(label, labels)
+        if (label !== '' && caution !== undefined && !ctx.host.confirm(`${caution}。仍然选“${name}”？${teaches(label, labels)}`)) return
+        void run((requestId) => api.resolveReviewItem({ name: item.name, label, requestId }), `${label === first ? '已确认' : '已改为'}：${name}`)
       }
-      const correct = (label: string) => void run((requestId) => api.resolveReviewItem({ name: item.name, label, requestId }), `已改为：${labelText(label, labels)}`)
       const skip = () => void run((requestId) => api.skipReviewItem({ name: item.name, requestId }), '已跳过')
-      const changeButton = button('改为…', () => {
-        if (slot.hidden) change()
+      const otherButton = button('其他…', () => {
+        if (slot.hidden) other()
         else close()
-      }, { 'aria-expanded': 'false' })
+      }, { class: 'quiet', 'aria-expanded': 'false' })
       const close = () => {
         slot.hidden = true
         slot.replaceChildren()
-        changeButton.setAttribute('aria-expanded', 'false')
+        otherButton.setAttribute('aria-expanded', 'false')
       }
-      const change = () => {
-        // A suspected phishing mail starts at 都不是; another at the model's next choice.
-        const next = item.reason === 'suspicious' ? '' : (item.candidates.find((candidate) => candidate.label !== suggested)?.label ?? '')
+      const other = () => {
+        // The first label the buttons do not already offer is highlighted.
+        const offered = new Set(answers.map((choice) => choice.label))
+        const next = options.find((option) => !offered.has(option.value))?.value ?? ''
         slot.replaceChildren(
           picker(options, next, (value) => {
             close()
-            correct(value)
+            resolve(value)
           }, () => {
             close()
-            changeButton.focus()
+            otherButton.focus()
           }),
         )
         slot.hidden = false
-        changeButton.setAttribute('aria-expanded', 'true')
+        otherButton.setAttribute('aria-expanded', 'true')
         slot.querySelector('input')?.focus()
         // Now that the list is on the page, its highlighted label can be scrolled into sight.
         slot.querySelector('[aria-selected="true"]')?.scrollIntoView?.({ block: 'nearest' })
       }
-      // A warning line already says why (疑似钓鱼): the small text then says nothing more.
-      const reason = caution === undefined ? why(item) : ''
+      const answerButton = ({ label, probability }: Choice, index: number) => {
+        const name = labelText(label, labels)
+        const answer = button(name, () => {
+          resolve(label)
+        }, { ...(index === 0 && caution === undefined ? { class: 'primary' } : {}), 'aria-label': probability === undefined ? name : `${name}，${percent(probability)}` })
+        // The probability after the name, quieter (the aria-label already says it).
+        if (probability !== undefined) answer.append(el('span', { class: 'odds', 'aria-hidden': 'true' }, percent(probability)))
+        return answer
+      }
+      const reason = UNSURE_REASONS[item.reason] ?? item.reason
       fill(
         node,
-        el('div', { class: 'row-head' }, el('span', { class: 'row-title' }, item.subject === '' ? '（无主题）' : item.subject), el('span', { class: 'meta' }, when(item.receiveTime))),
+        el('div', { class: 'row-head' }, el('span', { class: 'row-title' }, subject), el('span', { class: 'meta' }, when(item.receiveTime))),
         el('div', { class: 'row-sub' }, item.sender),
-        caution === undefined ? null : el('p', { class: 'hint warn', role: 'note' }, caution),
-        el(
-          'div',
-          { class: 'row-foot' },
-          el(
-            'span',
-            { class: 'suggestion' },
-            suggested === '' ? chip('都不是', 'muted') : chip(labelText(suggested, labels), 'accent'),
-            probability === undefined ? null : bar(probability),
-            probability === undefined ? null : el('span', { class: 'meta' }, percent(probability)),
-            reason === '' ? null : el('span', { class: 'meta' }, reason),
-          ),
-          el(
-            'div',
-            { class: 'actions' },
-            suggested === '' ? null : button('确认', confirm, caution === undefined ? { class: 'primary' } : {}),
-            changeButton,
-            button('跳过', skip, { class: 'quiet' }),
-          ),
-        ),
+        // A warning line says why for the reasons that need care; the others in a quiet word.
+        caution === undefined ? (reason === '' ? null : el('p', { class: 'hint' }, reason)) : el('p', { class: 'hint warn', role: 'note' }, caution),
+        el('div', { class: 'actions answers' }, ...answers.map(answerButton), otherButton, button('跳过', skip, { class: 'quiet skip' })),
         slot,
       )
-      const row: Row = { node, confirm, change, skip }
+      const row: Row = {
+        node,
+        choose: (index) => {
+          const choice = answers[index]
+          if (choice !== undefined) resolve(choice.label)
+        },
+        other,
+        skip,
+      }
       node.addEventListener('focusin', () => {
         if (rows[active] !== row) select(rows.indexOf(row), false)
       })
@@ -178,10 +200,13 @@ export async function renderReview(ctx: ViewContext): Promise<void> {
       if (row === undefined) return
       if (event.key === 'Enter' && event.target === row.node) {
         event.preventDefault()
-        row.confirm()
+        row.choose(0)
+      } else if (/^[1-4]$/.test(event.key)) {
+        event.preventDefault()
+        row.choose(Number(event.key) - 1)
       } else if (event.key === 'c') {
         event.preventDefault()
-        row.change()
+        row.other()
       } else if (event.key === 's') {
         event.preventDefault()
         row.skip()
@@ -193,4 +218,9 @@ export async function renderReview(ctx: ViewContext): Promise<void> {
     })
     fill(body, list, keys())
   })
+}
+
+/** What choosing a trust label teaches (../../docs/design.md §3.2), for the question before it; '' for another label. */
+function teaches(label: string, labels: readonly Label[]): string {
+  return labels.find((item) => item.name === label)?.trustImplying === true ? '发件人通过 DMARC 时，它的域名会记为这个标签的可信域名。' : ''
 }

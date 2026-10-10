@@ -1,7 +1,7 @@
 /**
- * The UI's components (styles.css draws them): a card, a chip, a KPI number, a meter and a small bar, a segmented
- * control, a toggle switch, a disclosure, a small ⋯ menu, a textarea that grows with its text, an empty state and the
- * searchable label picker. Plain DOM, text only ever as text.
+ * The UI's components (styles.css draws them): a card, a chip, a KPI number, a meter, a segmented control, a toggle
+ * switch, a disclosure, a textarea that grows with its text, an empty state and the searchable label picker. Plain
+ * DOM, text only ever as text.
  */
 import { button, el, type Child } from './dom.ts'
 
@@ -17,9 +17,9 @@ export function chip(text: string, tone: Tone = ''): HTMLElement {
   return el('span', { class: tone === '' ? 'chip' : `chip ${tone}` }, text)
 }
 
-/** One KPI: a short label over its number. */
-export function kpi(label: string, value: number, attention = false): HTMLElement {
-  return el('div', { class: attention ? 'kpi attention' : 'kpi' }, el('span', { class: 'kpi-label' }, label), el('span', { class: 'kpi-value' }, String(value)))
+/** One KPI: a short label over its number, and an optional quiet line under it (the last 7 days). */
+export function kpi(label: string, value: number, sub = ''): HTMLElement {
+  return el('div', { class: 'kpi' }, el('span', { class: 'kpi-label' }, label), el('span', { class: 'kpi-value' }, String(value)), sub === '' ? null : el('span', { class: 'kpi-sub' }, sub))
 }
 
 /** The share of `value` in `max` as a CSS width, within 0-100 %. */
@@ -32,13 +32,6 @@ export function meter(value: number, max: number, label: string, tone: '' | 'war
   const fill = el('span')
   fill.style.width = width(value, max)
   return el('span', { class: tone === '' ? 'meter' : `meter ${tone}`, role: 'meter', 'aria-label': label, 'aria-valuemin': '0', 'aria-valuemax': String(max), 'aria-valuenow': String(Math.round(value)) }, fill)
-}
-
-/** A small bar of a share, 0 to 1 (a precision bound, a confidence); decorative, its number is shown beside it. */
-export function bar(share: number, tone: '' | 'warn' = ''): HTMLElement {
-  const fill = el('span')
-  fill.style.width = width(share, 1)
-  return el('span', { class: tone === '' ? 'bar' : `bar ${tone}`, 'aria-hidden': 'true' }, fill)
 }
 
 /** One choice of a few: buttons in a group, the current one pressed. */
@@ -61,67 +54,6 @@ export function disclosure(summary: string, ...children: Child[]): HTMLDetailsEl
   return el('details', { class: 'more' }, el('summary', {}, summary), ...children)
 }
 
-/** One action of a menu: its text, what it does, and `danger` for one that deletes. */
-export type MenuAction = readonly [text: string, run: () => void, tone?: 'danger']
-
-let menus = 0
-
-/** The open menu's close: one menu is open at a time. */
-let closeOpenMenu: (() => void) | null = null
-
-/**
- * A small menu behind ⋯ (`name` is its name for assistive technology): it shows its actions inline beside it; a
- * choice, Escape, a click outside it, a key that takes the focus out of it (Tab) or another menu opening closes it. `focusKey` marks the ⋯
- * button for a view that puts the focus back after repainting.
- */
-export function menu(name: string, actions: readonly MenuAction[], focusKey = ''): HTMLElement {
-  menus += 1
-  const id = `menu-${String(menus)}`
-  const items = el('span', { id, class: 'menu-items', hidden: true })
-  const opener = button('⋯', () => {
-    if (items.hidden) open()
-    else close()
-  }, { class: 'quiet icon', 'aria-label': name, 'aria-expanded': 'false', 'aria-controls': id, ...(focusKey === '' ? {} : { 'data-focus': focusKey }) })
-  const box = el('span', { class: 'menu' }, items, opener)
-  // Once a click or a key is done, not on a focus change: an open menu widens its line, and closing it as a press
-  // moves the focus would move what that very click lands on.
-  const outside = (event: Event) => {
-    const node = event.type === 'click' ? event.target : document.activeElement
-    if (!(node instanceof Node && box.contains(node))) close()
-  }
-  const close = () => {
-    items.hidden = true
-    opener.setAttribute('aria-expanded', 'false')
-    document.removeEventListener('click', outside)
-    document.removeEventListener('keyup', outside)
-    if (closeOpenMenu === close) closeOpenMenu = null
-  }
-  const open = () => {
-    closeOpenMenu?.()
-    closeOpenMenu = close
-    items.hidden = false
-    opener.setAttribute('aria-expanded', 'true')
-    document.addEventListener('click', outside)
-    document.addEventListener('keyup', outside)
-    items.querySelector('button')?.focus()
-  }
-  items.append(
-    ...actions.map(([text, run, tone]) =>
-      button(text, () => {
-        close()
-        run()
-      }, { class: tone === undefined ? 'quiet small' : `quiet small ${tone}` }),
-    ),
-  )
-  items.addEventListener('keydown', (event) => {
-    if (event.key !== 'Escape') return
-    event.preventDefault()
-    close()
-    opener.focus()
-  })
-  return box
-}
-
 /** Lets a textarea grow with its text, from its own rows up: on every input, and once it is in the page. */
 export function growing(area: HTMLTextAreaElement): HTMLTextAreaElement {
   const fit = () => {
@@ -141,7 +73,7 @@ export function emptyState(title: string, hint = '', ...children: Child[]): HTML
 }
 
 export interface PickerOption {
-  /** The value chosen (a label's resource name, '' for 都不是). */
+  /** The value chosen (a label's resource name). */
   readonly value: string
   readonly text: string
 }
@@ -150,7 +82,7 @@ let pickers = 0
 
 /**
  * The searchable picker: a search box over a list of options. Typing filters by name; ↑ ↓ move, Enter or a click
- * chooses, Escape cancels. `initial` is highlighted first (都不是 for a suspected phishing mail).
+ * chooses, Escape cancels. `initial` is highlighted first (待审's 其他…: the first label its buttons do not offer).
  */
 export function picker(options: readonly PickerOption[], initial: string, pick: (value: string) => void, cancel: () => void): HTMLElement {
   pickers += 1

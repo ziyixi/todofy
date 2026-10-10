@@ -1,9 +1,10 @@
 /**
  * The flow of mail through the pipeline (../../docs/design.md §10) as a Sankey diagram: 新邮件 on the left, the stage
- * that handled each mail in the middle (跳过, Clef 27B, Clef-flash, 未调用模型, 延后), and on the right each leaf label
- * written to Gmail, 都不是 and 拿不准 (left in the inbox) and 影子建议 (recorded, nothing written). Link widths are mail
- * counts. With no mail at all it draws the skeleton instead: every stage and outcome at 0, muted nodes and hairline
- * links, so the diagram is always there.
+ * that handled each mail in the middle (跳过, Clef 27B, Clef-flash, 未调用模型, 延后), and on the right what the model
+ * decided: each leaf label written to Gmail, 都不是 (confident that no label fits), 拿不准 split by whether the mail
+ * went to 待审 (all three left in the inbox), and 影子建议 (a confident label only recorded, nothing written). Link
+ * widths are mail counts. With no mail at all it draws the skeleton instead: every stage and outcome at 0, muted
+ * nodes and hairline links, so the diagram is always there.
  *
  * d3-sankey only lays the graph out (positions); the SVG is plain DOM in the page's theme: every color is a CSS token
  * (styles.css, light and dark), labels are grouped and colored by their top-level path segment in a fixed order (the
@@ -20,7 +21,7 @@ import { el } from './dom.ts'
 /** The categorical slots of styles.css (--series-1 to --series-8). */
 const SERIES = 8
 
-export type NodeKind = 'source' | 'stage' | 'terminal' | 'label' | 'unsure' | 'suggested'
+export type NodeKind = 'source' | 'stage' | 'terminal' | 'label' | 'none' | 'unsure' | 'suggested'
 
 export interface FlowNodeData {
   readonly id: string
@@ -30,7 +31,7 @@ export interface FlowNodeData {
   readonly slot: number
   /** The top-level group of a label node. */
   readonly group?: string
-  /** Extra lines for the tooltip (the skip reasons). */
+  /** Extra lines for the tooltip (the skip reasons, what an outcome means). */
   readonly detail?: readonly string[]
 }
 
@@ -63,6 +64,14 @@ const SKIP_REASONS: Readonly<Record<number, string>> = {
   [MailFlow_Outcome.BEFORE_INSTALL]: '安装前的历史邮件',
   [MailFlow_Outcome.UNREADABLE]: '无法读取',
 }
+
+/** The outcomes without a label, in the diagram's order (under the labels). */
+const OUTCOMES: readonly FlowNodeData[] = [
+  { id: 'none', name: '都不是（留在收件箱）', kind: 'none', slot: 0, detail: ['模型确定没有合适的标签'] },
+  { id: 'unsure_shown', name: '拿不准（进了待审）', kind: 'unsure', slot: 0, detail: ['留在收件箱，在待审里问你'] },
+  { id: 'unsure', name: '拿不准（没进待审）', kind: 'unsure', slot: 0, detail: ['留在收件箱：今天的待审名额已满，或没有可问的标签'] },
+  { id: 'suggested', name: '影子建议（未写入）', kind: 'suggested', slot: 0, detail: ['有把握，但只记录：影子模式，或写入失败'] },
+]
 
 /** The top-level segment of a path. */
 function topLevel(path: string): string {
@@ -127,7 +136,9 @@ export function flowGraph(counts: readonly MailFlow_Count[], labels: readonly La
       add(stage, `label:${count.label}`, n)
     } else if (count.outcome === MailFlow_Outcome.SUGGESTED) {
       add(stage, 'suggested', n)
-    } else if (count.outcome === MailFlow_Outcome.UNSURE || count.outcome === MailFlow_Outcome.UNSURE_SHOWN) {
+    } else if (count.outcome === MailFlow_Outcome.UNSURE_SHOWN) {
+      add(stage, 'unsure_shown', n)
+    } else if (count.outcome === MailFlow_Outcome.UNSURE) {
       add(stage, 'unsure', n)
     } else if (count.outcome === MailFlow_Outcome.NO_LABEL) {
       add(stage, 'none', n)
@@ -151,7 +162,7 @@ export function flowGraph(counts: readonly MailFlow_Count[], labels: readonly La
       ...(id === 'deferred' ? { detail: ['仍在等次日的模型额度；判断后计入处理它的那一步'] } : {}),
     })
   }
-  // Label nodes in the labels' order (deleted labels last), then the two outcomes without a label.
+  // Label nodes in the labels' order (deleted labels last), then the outcomes without a label.
   const order = (label: string) => {
     const index = labels.findIndex((item) => item.name === label)
     return index < 0 ? labels.length : index
@@ -159,9 +170,7 @@ export function flowGraph(counts: readonly MailFlow_Count[], labels: readonly La
   const labelIds = [...used].filter((id) => id.startsWith('label:')).map((id) => id.slice('label:'.length))
   labelIds.sort((a, b) => order(a) - order(b) || (a < b ? -1 : 1))
   for (const label of labelIds) nodes.push({ id: `label:${label}`, name: nameOf(label), kind: 'label', slot: slotOf(label), group: groupOf(label) })
-  if (used.has('none')) nodes.push({ id: 'none', name: '都不是（留在收件箱）', kind: 'unsure', slot: 0 })
-  if (used.has('unsure')) nodes.push({ id: 'unsure', name: '拿不准（留在收件箱）', kind: 'unsure', slot: 0 })
-  if (used.has('suggested')) nodes.push({ id: 'suggested', name: '影子建议（未写入）', kind: 'suggested', slot: 0 })
+  for (const node of OUTCOMES) if (used.has(node.id)) nodes.push(node)
 
   // In color order (home slots first), the legend's order.
   const groups = [...groupSlot.entries()].map(([name, slot]) => ({ name, slot }))
@@ -189,9 +198,7 @@ export function skeletonGraph(): FlowGraph {
       { id: 'new', name: '新邮件', kind: 'source', slot: 0 },
       ...STAGES.map(stage),
       { id: 'written', name: '打标签', kind: 'label', slot: 0 },
-      { id: 'none', name: '都不是（留在收件箱）', kind: 'unsure', slot: 0 },
-      { id: 'unsure', name: '拿不准（留在收件箱）', kind: 'unsure', slot: 0 },
-      { id: 'suggested', name: '影子建议（未写入）', kind: 'suggested', slot: 0 },
+      ...OUTCOMES,
     ],
     links: [
       ...STAGES.map(([, id]) => ({ source: 'new', target: id, value: 0 })),
@@ -200,7 +207,10 @@ export function skeletonGraph(): FlowGraph {
         { source: id, target: 'none', value: 0 },
         { source: id, target: 'suggested', value: 0 },
       ]),
-      ...['clef', 'clef-flash', 'no_model'].map((id) => ({ source: id, target: 'unsure', value: 0 })),
+      ...['clef', 'clef-flash', 'no_model'].flatMap((id) => [
+        { source: id, target: 'unsure_shown', value: 0 },
+        { source: id, target: 'unsure', value: 0 },
+      ]),
     ],
     groups: [],
   }
@@ -252,7 +262,7 @@ export function sankeyChart(graph: FlowGraph): HTMLElement {
   // The drawing's own coordinates: wide enough for three columns and their names. The SVG has no fixed size and
   // scales to its box (styles.css .flow-svg); below its minimum width, on a phone, the box scrolls sideways instead.
   const width = 720
-  const rightNodes = drawn.nodes.filter((node) => node.kind === 'label' || node.kind === 'unsure' || node.kind === 'suggested').length
+  const rightNodes = drawn.nodes.filter((node) => node.kind === 'label' || node.kind === 'none' || node.kind === 'unsure' || node.kind === 'suggested').length
   // Each right-hand node gets room for its name even at one mail (12 px text, at least 14 px apart).
   const height = Math.max(260, 30 * rightNodes + 60)
   const margin = { left: 6, right: 170, top: 8, bottom: 8 }

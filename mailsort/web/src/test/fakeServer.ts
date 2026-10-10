@@ -117,6 +117,8 @@ export class FakeServer {
   flow: MailFlow_Count[] = []
   /** GetLabelReport's rows; null: every label with 10 automatic labels and 1 uncertain mail. */
   report: LabelCount[] | null = null
+  /** GetLabelReport answers UNAVAILABLE. */
+  reportFails = false
   /** Fields of GetServiceStatus that a test sets (the rest as below; review_count counts the pending items). */
   status: Partial<ServiceStatus> = {}
   settings: Settings = create(SettingsSchema, { name: 'settings', mode: Mode.SHADOW, effectiveMode: Mode.SHADOW, runWriteLimit: 10, dailyWriteLimit: 150, dailyNeuronBudget: 7000, etag: 's1' })
@@ -207,8 +209,9 @@ export class FakeServer {
         return Promise.resolve(create(SyncLabelsResponseSchema, { labels: this.labels, linkedCount: 1, renamedCount: 0, missingCount: 0 }))
       },
       getMailFlow: (request) => Promise.resolve(create(MailFlowSchema, { name: request.name, startTime: timestampFromMs(NOW - 3_600_000), endTime: timestampFromMs(NOW), counts: this.flow })),
-      getLabelReport: () =>
-        Promise.resolve(
+      getLabelReport: () => {
+        if (this.reportFails) throw new RpcError(Code.UNAVAILABLE, 'UNAVAILABLE', 'the store is busy')
+        return Promise.resolve(
           create(LabelReportSchema, {
             name: 'labelReport',
             labels: this.report ?? this.labels.map((item) => create(LabelCountSchema, { label: item.name, autoCount: 10, unsureCount: 1 })),
@@ -218,7 +221,8 @@ export class FakeServer {
             unsureCount: 5,
             shownCount: 2,
           }),
-        ),
+        )
+      },
       getServiceStatus: () =>
         Promise.resolve(
           Object.assign(create(ServiceStatusSchema, {

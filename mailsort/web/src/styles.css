@@ -285,20 +285,11 @@ button.danger {
   color: var(--danger);
 }
 
-/* A smaller button inside a line (a rule's 批准, a menu's actions, 查看). */
+/* A smaller button inside a line (查看, 删除, 保存). */
 button.small {
   min-height: 32px;
   padding: 0 12px;
   font-size: 13px;
-}
-
-/* The ⋯ of a menu. */
-button.icon {
-  min-width: 32px;
-  min-height: 32px;
-  padding: 0 var(--space-2);
-  font-size: 16px;
-  line-height: 1;
 }
 
 button:disabled {
@@ -493,7 +484,7 @@ input.switch:checked::before {
   justify-content: center;
 }
 
-/* The disclosure (更多, 高级, N 条没有导出). */
+/* The disclosure (高级). */
 details.more > summary {
   display: inline-flex;
   align-items: center;
@@ -524,19 +515,11 @@ details.more > p {
   font-size: 13px;
 }
 
-/* What a disclosure folds away when it holds controls (更多, 高级). */
+/* What a disclosure folds away when it holds controls (高级). */
 .more-body {
   display: grid;
   gap: 12px;
   padding-top: var(--space-2);
-}
-
-/* The small menu behind ⋯: its actions appear inline beside it. */
-.menu,
-.menu-items {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-1);
 }
 
 /* The empty state. */
@@ -587,8 +570,9 @@ details.more > p {
   line-height: 1.2;
 }
 
-.kpi.attention .kpi-value {
-  color: var(--accent);
+.kpi-sub {
+  color: var(--muted);
+  font-size: 12px;
 }
 
 @media (max-width: 520px) {
@@ -597,33 +581,23 @@ details.more > p {
   }
 }
 
-/* The meter (the model budget) and the small bars (accuracy, confidence). The unfilled track is the sunken surface. */
-.meter,
-.bar {
+/* The meter (the model budget). The unfilled track is the sunken surface. */
+.meter {
   display: block;
+  height: 6px;
   overflow: hidden;
   border-radius: 999px;
   background: var(--sunken);
 }
 
-.meter {
-  height: 6px;
-}
-
-.bar {
-  height: 4px;
-}
-
-.meter > span,
-.bar > span {
+.meter > span {
   display: block;
   height: 100%;
   border-radius: inherit;
   background: var(--accent);
 }
 
-.meter.warn > span,
-.bar.warn > span {
+.meter.warn > span {
   background: var(--warn);
 }
 
@@ -631,33 +605,45 @@ details.more > p {
   background: var(--danger);
 }
 
-/* The per-label accuracy: name, bar, figures. */
-.bars {
-  display: grid;
-  gap: 10px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
+/* 概览's status line: what the mode does, the last sync, mail waiting. */
+.lead {
+  padding: 0 var(--space-1);
 }
 
-.bars li {
-  display: grid;
-  grid-template-columns: minmax(0, 8.5rem) minmax(3rem, 1fr) auto;
-  align-items: center;
-  gap: 12px;
+/* The last 7 days per label (概览): the name, then its figures in narrow right-aligned columns; a long name is cut
+   with … so the table never grows past its card. */
+.report {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
   font-size: 14px;
 }
 
-.bars .name {
+.report th,
+.report td {
+  padding: 6px 0;
+  border-top: 1px solid var(--line);
+  text-align: right;
+}
+
+.report thead th {
+  border-top: 0;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.report th:first-child {
   overflow: hidden;
+  font-weight: 400;
+  text-align: left;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.bars .figures {
-  color: var(--muted);
-  font-size: 13px;
-  text-align: right;
+.report th:not(:first-child),
+.report td {
+  width: 3.5rem;
 }
 
 .two {
@@ -732,30 +718,38 @@ details.more > p {
   white-space: nowrap;
 }
 
-.row-foot {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-2) 12px;
+/* A row's answers: the model's options, each with its probability after the name, then 其他… and, at the end of the
+   line (or of the next, on a narrow phone), 跳过. A little tighter than other actions, so a typical row (one label, 都不是,
+   其他…, 跳过) is one line at 375 px. */
+.answers {
+  gap: var(--space-2) 6px;
   margin-top: 2px;
 }
 
-.row-foot .actions {
+.answers button {
+  padding: 0 12px;
+}
+
+.answers button.quiet {
+  padding: 0 var(--space-2);
+}
+
+.answers .skip {
   margin-left: auto;
 }
 
-.suggestion {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-2);
-  min-width: 0;
+.answers .odds {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 400;
 }
 
-.suggestion .bar {
-  width: 40px;
+.answers .primary .odds {
+  color: inherit;
+  opacity: 0.8;
 }
 
-/* The searchable label picker (改为…). */
+/* The searchable label picker (其他…). */
 .picker {
   display: grid;
   gap: var(--space-1);
@@ -969,35 +963,13 @@ kbd {
   color: var(--muted);
 }
 
-.leaf-hit {
-  color: var(--muted);
-  font-size: 12px;
-}
-
 .leaf-count {
   flex: none;
   color: var(--muted);
   font-size: 13px;
 }
 
-/* A proposal waits: a dot by the rule count. */
-.dot {
-  display: inline-block;
-  width: 6px;
-  height: 6px;
-  margin-left: 6px;
-  border-radius: 50%;
-  background: var(--accent);
-  vertical-align: middle;
-}
-
-/* The precision bar's place, kept when a label has no verdicts so the column stays aligned. */
-.bar-slot {
-  flex: none;
-  width: 32px;
-}
-
-/* The 正式打 switch, its touch target the row's height. */
+/* The row's 启用 switch, its touch target the row's height. */
 .live {
   display: inline-flex;
   align-items: center;
@@ -1051,70 +1023,13 @@ kbd {
   font-weight: 400;
 }
 
-/* A rule on one line (wrapping on a phone): kind, value, subject words, state, and its actions on the right. */
-.rule-list,
-.example-list,
-.template {
+/* A trusted domain or an example on one line (wrapping on a phone), its 删除 on the right. */
+.example-list {
   display: grid;
   gap: var(--space-1);
   margin: 0;
   padding: 0;
   list-style: none;
-}
-
-.rule {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  min-height: 40px;
-  padding: var(--space-1) var(--space-1) var(--space-1) var(--space-2);
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--surface);
-}
-
-.rule.off {
-  color: var(--muted);
-}
-
-/* What the search found. */
-.rule.hit {
-  border-color: var(--accent);
-  background: var(--accent-soft);
-}
-
-.rule-main {
-  display: flex;
-  flex: 1 1 auto;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-1) var(--space-2);
-  min-width: 0;
-}
-
-.rule-value {
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-
-.rule-actions {
-  display: inline-flex;
-  flex: none;
-  align-items: center;
-  gap: var(--space-1);
-}
-
-/* A small word before its control (更多's 类型). */
-.inline {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-2);
-}
-
-.add-rule {
-  display: grid;
-  gap: var(--space-1);
 }
 
 .example-list li {
@@ -1133,18 +1048,6 @@ kbd {
   flex: 1 1 16rem;
   min-width: 0;
   overflow-wrap: anywhere;
-}
-
-/* The template's preview: one line per group. */
-.template li {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-1) var(--space-2);
-  font-size: 14px;
-}
-
-.template strong {
-  font-weight: 600;
 }
 
 /* The flow diagram (flowchart.ts): it scales to its box; below its minimum width (a phone) it keeps that width and

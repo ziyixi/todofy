@@ -1,8 +1,9 @@
 /**
  * The owner's flows in the UI against the fake API (test/fakeServer.ts, the shared transcoder): the shell's four tabs
- * (the focus kept on a tab chosen by keyboard) and status line; 待审's confirm, change and skip (ResolveReviewItem with
- * the CSRF header and a request ID each), its keyboard, its picker and its caution; 设置's mode, ceiling and breaker, the
- * range undo's preview and confirmation and the sync. 标签 has its own file, labels.test.ts.
+ * (the focus kept on a tab chosen by keyboard) and status line; 待审's one-tap answers, 都不是, 其他… and 跳过
+ * (ResolveReviewItem or SkipReviewItem with the CSRF header and a request ID each), its keyboard, its picker, its
+ * caution and its quiet state; 设置's mode, ceiling, breaker and read-only grant, the range undo's preview and
+ * confirmation and the sync. 标签 has its own file, labels.test.ts; 概览 overview.test.ts.
  */
 import { mountApp, type Host } from './app.ts'
 import { relative } from './format.ts'
@@ -106,21 +107,35 @@ describe('the shell', () => {
 })
 
 describe('待审', () => {
-  it('confirms, changes through the searchable picker and skips, with CSRF and a request ID each', async () => {
+  /** A row's answer buttons, as their accessible names (`订阅，60%`), then 其他… and 跳过. */
+  const buttons = (row: HTMLElement | undefined) => [...(row?.querySelectorAll('.answers > button') ?? [])].map((node) => node.getAttribute('aria-label') ?? node.textContent)
+
+  /** The answer of `row` whose accessible name starts with `name`. */
+  function answer(row: HTMLElement | undefined, name: string): HTMLButtonElement {
+    const found = [...(row?.querySelectorAll<HTMLButtonElement>('.answers > button') ?? [])].find((node) => (node.getAttribute('aria-label') ?? node.textContent).split('，')[0] === name)
+    if (found === undefined) throw new Error(`no answer ${name}`)
+    return found
+  }
+
+  it('answers with one tap, through 其他… and with 都不是, and skips, with CSRF and a request ID each', async () => {
     const server = new FakeServer()
-    server.reviewItems = [reviewItem('a'), reviewItem('b', { reason: 'model_unavailable', candidates: [] }), reviewItem('c')]
+    server.reviewItems = [reviewItem('a'), reviewItem('b', { reason: 'model_unavailable', candidates: [] }), reviewItem('c'), reviewItem('d')]
     const root = await open(server, '/')
-    expect(rows(root).length).toBe(3)
+    expect(rows(root).length).toBe(4)
     const [a, b] = rows(root)
     expect(a?.textContent).toContain('主题 a')
-    expect(a?.querySelector('.chip.accent')?.textContent).toBe('订阅')
-    expect(a?.textContent).toContain('60%')
-    // A mail the model could not read: why, and no 确认.
+    expect(a?.textContent).toContain('Sender <example.com>')
+    expect(a?.querySelector('p.hint')?.textContent).toBe('把握不够')
+    // The model's options in its order (都不是 where it ranked it), the first primary, then 其他… and 跳过.
+    expect(buttons(a)).toEqual(['订阅，60%', '都不是，30%', '收据，10%', '其他…', '跳过'])
+    expect(answer(a, '订阅').classList.contains('primary')).toBe(true)
+    expect(answer(a, '订阅').textContent).toBe('订阅60%')
+    expect(answer(a, '都不是').classList.contains('primary')).toBe(false)
+    // A mail the model could not read: why, and 都不是 as its only answer.
     expect(b?.textContent).toContain('模型暂不可用')
-    expect(b?.querySelector('.chip')?.textContent).toBe('都不是')
-    expect([...(b?.querySelectorAll('button') ?? [])].map((node) => node.textContent)).toEqual(['改为…', '跳过'])
+    expect(buttons(b)).toEqual(['都不是', '其他…', '跳过'])
 
-    buttonNamed(a ?? root, '确认').click()
+    answer(a, '订阅').click()
     await settle()
     const confirm = server.calls.find((call) => call.path.startsWith('/api/v2/reviewItems/a:resolve'))
     expect(confirm?.method).toBe('POST')
@@ -128,15 +143,16 @@ describe('待审', () => {
     expect(confirm?.headers['x-csrf-token']).toBe('csrf-token')
     expect(String(confirm?.body?.['request_id'])).toMatch(/^[0-9a-f-]{36}$/)
     expect(toastText(root)).toBe('已确认：订阅')
-    expect(rows(root).length).toBe(2)
+    expect(rows(root).length).toBe(3)
     // The header follows the queue.
-    expect(root.querySelector('.tabs a .chip')?.textContent).toBe('2')
+    expect(root.querySelector('.tabs a .chip')?.textContent).toBe('3')
 
-    buttonNamed(rows(root)[0] ?? root, '改为…').click()
+    buttonNamed(rows(root)[0] ?? root, '其他…').click()
     const search = root.querySelector<HTMLInputElement>('.picker input')
     if (search === null) throw new Error('no picker')
     expect(document.activeElement).toBe(search)
-    expect([...root.querySelectorAll('.picker [role="option"]')].map((node) => node.textContent)).toEqual(['都不是', '订阅', '收据'])
+    // Every label; 都不是 has its own button.
+    expect([...root.querySelectorAll('.picker [role="option"]')].map((node) => node.textContent)).toEqual(['订阅', '收据'])
     search.value = '收'
     search.dispatchEvent(new Event('input'))
     expect([...root.querySelectorAll('.picker [role="option"]')].map((node) => node.textContent)).toEqual(['收据'])
@@ -145,16 +161,24 @@ describe('待审', () => {
     expect(server.calls.find((call) => call.path.includes('/b:resolve'))?.body?.['label']).toBe('labels/receipt')
     expect(toastText(root)).toBe('已改为：收据')
 
+    answer(rows(root)[0], '都不是').click()
+    await settle()
+    const none = server.calls.find((call) => call.path.includes('/c:resolve'))
+    expect(none?.body?.['label'] ?? '').toBe('')
+    expect(server.reviewItems.find((item) => item.name === 'reviewItems/c')?.resolvedLabel).toBe('')
+    expect(toastText(root)).toBe('已改为：都不是')
+
     buttonNamed(root, '跳过').click()
     await settle()
-    expect(server.calls.some((call) => call.path.includes('/c:skip'))).toBe(true)
-    expect(root.textContent).toContain('都处理完了')
+    expect(server.calls.some((call) => call.path.includes('/d:skip'))).toBe(true)
+    expect(root.querySelector('.empty strong')?.textContent).toBe('没有需要你确认的邮件')
   })
 
-  it('moves with j and k, confirms with Enter, opens the picker with c and skips with s', async () => {
+  it('moves with j and k, chooses with Enter and the digits, opens 其他… with c and skips with s', async () => {
     const server = new FakeServer()
     server.reviewItems = [reviewItem('a'), reviewItem('b'), reviewItem('c')]
     const root = await open(server, '/')
+    expect(root.querySelector('.keys')?.textContent).toBe('j k 移动 · 1–4 选择 · c 其他 · s 跳过')
     press('j')
     expect(document.activeElement).toBe(rows(root)[0])
     press('j')
@@ -167,26 +191,36 @@ describe('待审', () => {
     expect(rows(root)[1]?.classList.contains('active')).toBe(true)
     press('Enter')
     await settle()
-    expect(server.calls.some((call) => call.path.startsWith('/api/v2/reviewItems/b:resolve'))).toBe(true)
+    expect(server.calls.find((call) => call.path.startsWith('/api/v2/reviewItems/b:resolve'))?.body?.['label']).toBe('labels/newsletter')
     // The row after it took its place and the focus.
     expect(rows(root).map((row) => row.getAttribute('aria-label'))).toEqual(['主题 a', '主题 c'])
     expect(document.activeElement).toBe(rows(root)[1])
 
+    // Three answers: 4 chooses nothing, 2 is the second (都不是).
+    press('4')
+    await settle()
+    expect(server.calls.some((call) => call.path.includes('/c:resolve'))).toBe(false)
+    press('2')
+    await settle()
+    expect(server.calls.find((call) => call.path.includes('/c:resolve'))?.body?.['label'] ?? '').toBe('')
+    expect(rows(root).map((row) => row.getAttribute('aria-label'))).toEqual(['主题 a'])
+
     press('c')
     const search = root.querySelector<HTMLInputElement>('.picker input')
     expect(document.activeElement).toBe(search)
-    // Typing in the search box is typing: j does not move.
+    // Typing in the search box is typing: j and 1 do nothing else.
     search?.dispatchEvent(new KeyboardEvent('keydown', { key: 'j', bubbles: true }))
+    search?.dispatchEvent(new KeyboardEvent('keydown', { key: '1', bubbles: true }))
     expect(document.activeElement).toBe(search)
     press('Escape')
     expect(root.querySelector('.picker')).toBeNull()
-    expect(document.activeElement?.textContent).toBe('改为…')
+    expect(document.activeElement?.textContent).toBe('其他…')
 
     press('s')
     await settle()
-    expect(server.calls.some((call) => call.path.includes('/c:skip'))).toBe(true)
-    expect(rows(root).map((row) => row.getAttribute('aria-label'))).toEqual(['主题 a'])
-    expect(root.querySelector('.keys')?.textContent).toContain('跳过')
+    expect(server.calls.some((call) => call.path.includes('/a:skip'))).toBe(true)
+    expect(server.calls.some((call) => call.path.includes('/a:resolve'))).toBe(false)
+    expect(root.querySelector('.empty strong')?.textContent).toBe('没有需要你确认的邮件')
   })
 
   it('slows the owner down on a suspected phishing mail and on a trust label for a sender not trusted yet', async () => {
@@ -197,27 +231,40 @@ describe('待审', () => {
     const asked: string[] = []
     const root = await open(server, '/', { now: () => NOW, confirm: (message) => (asked.push(message), false) })
     const [phishing, trust] = rows(root)
-    expect(phishing?.textContent).toContain('疑似钓鱼：先在 Gmail 里核对发件人和链接')
-    expect(trust?.textContent).toContain('发件人还不可信')
-    // The warning line says why: the small text says nothing more.
-    expect([...(phishing?.querySelectorAll('.suggestion .meta') ?? [])].map((node) => node.textContent)).toEqual(['70%'])
-    for (const row of [phishing, trust]) {
-      const confirm = [...(row?.querySelectorAll('button') ?? [])].find((node) => node.textContent === '确认')
-      expect(confirm?.classList.contains('primary')).toBe(false)
-      confirm?.click()
-    }
+    // One warning line says why, and nothing more.
+    expect([...(phishing?.querySelectorAll('p.hint') ?? [])].map((node) => [node.textContent, node.classList.contains('warn')])).toEqual([['疑似钓鱼：先在 Gmail 里核对发件人和链接', true]])
+    expect(trust?.querySelector('p.hint.warn')?.textContent).toBe('发件人还不可信：先在 Gmail 里核对发件人')
+    // 都不是 after the model's labels; no answer is primary.
+    expect(buttons(trust)).toEqual(['银行，70%', '收据，20%', '都不是', '其他…', '跳过'])
+    expect(root.querySelector('#view .answers .primary')).toBeNull()
+    answer(phishing, '银行').click()
+    answer(trust, '银行').click()
     await settle()
-    // Asked twice, refused twice: nothing was sent.
-    expect(asked.length).toBe(2)
+    // Asked twice, refused twice: nothing was sent. Choosing a trust label says what it teaches.
+    expect(asked).toEqual([
+      '疑似钓鱼：先在 Gmail 里核对发件人和链接。仍然选“银行”？发件人通过 DMARC 时，它的域名会记为这个标签的可信域名。',
+      '发件人还不可信：先在 Gmail 里核对发件人。仍然选“银行”？发件人通过 DMARC 时，它的域名会记为这个标签的可信域名。',
+    ])
     expect(server.calls.some((call) => call.path.includes(':resolve'))).toBe(false)
-    // The phishing mail's picker starts at 都不是, the other at the model's next choice.
-    const selected = (row: HTMLElement | undefined) => {
-      if (row === undefined) throw new Error('no row')
-      buttonNamed(row, '改为…').click()
-      return row.querySelector('.picker [aria-selected="true"]')?.textContent
-    }
-    expect(selected(phishing)).toBe('都不是')
-    expect(selected(trust)).toBe('收据')
+    // 都不是 is never asked about.
+    answer(phishing, '都不是').click()
+    await settle()
+    expect(asked.length).toBe(2)
+    expect(server.calls.some((call) => call.path.includes('/p:resolve'))).toBe(true)
+  })
+
+  it('gives a button only to the options worth one: the first always, the others from 5 %', async () => {
+    const server = new FakeServer()
+    const candidates = [create(CandidateSchema, { label: 'labels/newsletter', probability: 0.92 }), create(CandidateSchema, { label: 'labels/receipt', probability: 0.04 }), create(CandidateSchema, { label: '', probability: 0.04 })]
+    server.reviewItems = [reviewItem('a', { candidates }), reviewItem('b', { candidates: [create(CandidateSchema, { label: '', probability: 0.5 }), create(CandidateSchema, { label: 'labels/receipt', probability: 0.3 })] })]
+    const root = await open(server, '/')
+    expect(buttons(rows(root)[0])).toEqual(['订阅，92%', '都不是', '其他…', '跳过'])
+    // 都不是 ranked first is the primary answer, as any first option.
+    expect(buttons(rows(root)[1])).toEqual(['都不是，50%', '收据，30%', '其他…', '跳过'])
+    expect(answer(rows(root)[1], '都不是').classList.contains('primary')).toBe(true)
+    answer(rows(root)[1], '都不是').click()
+    await settle()
+    expect(toastText(root)).toBe('已确认：都不是')
   })
 
   it('says why a mail is unsure in plain words, never 阈值', async () => {
@@ -229,7 +276,7 @@ describe('待审', () => {
     expect(root.querySelector('#view')?.textContent).not.toContain('阈值')
   })
 
-  it('scrolls 改为…’s highlighted label into sight once the picker is on the page', async () => {
+  it('highlights in 其他… the first label the buttons do not offer, scrolled into sight once on the page', async () => {
     // jsdom has no scrollIntoView: record what is scrolled to, and whether it was on the page then.
     const scrolled: string[] = []
     Element.prototype.scrollIntoView = function (this: Element) {
@@ -237,19 +284,21 @@ describe('待审', () => {
     }
     try {
       const server = new FakeServer()
+      server.labels.push(label('travel', '出行'))
       server.reviewItems = [reviewItem('a', { candidates: [create(CandidateSchema, { label: 'labels/newsletter', probability: 0.6 }), create(CandidateSchema, { label: 'labels/receipt', probability: 0.3 })] })]
       const root = await open(server, '/')
-      buttonNamed(root, '改为…').click()
-      expect(root.querySelector('.picker [aria-selected="true"]')?.textContent).toBe('收据')
-      expect(scrolled.at(-1)).toBe('收据')
+      buttonNamed(root, '其他…').click()
+      expect(root.querySelector('.picker [aria-selected="true"]')?.textContent).toBe('出行')
+      expect(scrolled.at(-1)).toBe('出行')
     } finally {
       delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView
     }
   })
 
-  it('says so when nothing waits', async () => {
+  it('says it is quiet when nothing waits', async () => {
     const root = await open(new FakeServer(), '/')
-    expect(root.querySelector('.empty')?.textContent).toBe('都处理完了')
+    expect(root.querySelector('.empty strong')?.textContent).toBe('没有需要你确认的邮件')
+    expect(root.querySelector('.empty span')?.textContent).toBe('只有模型拿不准的少数邮件会来这里')
     const queue = root.querySelector<HTMLElement>('.tabs a .chip')
     expect(queue?.hidden).toBe(true)
     expect(queue?.parentElement?.hasAttribute('aria-label')).toBe(false)
@@ -272,7 +321,7 @@ describe('设置', () => {
     const root = await open(server, '/settings', { now: () => NOW, confirm: (message) => (asked.push(message), true) })
     buttonNamed(root, '正式').click()
     await settle()
-    expect(asked).toEqual(['切到正式？开了“正式打”的标签会在 Gmail 里打标签并归档。'])
+    expect(asked).toEqual(['切到正式？启用的标签会在 Gmail 里给有把握的邮件打标签并归档。'])
     const patch = server.calls.find((call) => call.method === 'PATCH')
     expect(decodeURIComponent(patch?.path ?? '')).toContain('update_mask=mode,etag')
     expect(patch?.body).toMatchObject({ mode: 'live', etag: 's1' })
@@ -283,6 +332,19 @@ describe('设置', () => {
     buttonNamed(root, '正式').click()
     await settle()
     expect(server.calls.filter((call) => call.method === 'PATCH').length).toBe(1)
+  })
+
+  it('says when 正式 cannot write yet: the grant is read-only', async () => {
+    const server = new FakeServer()
+    Object.assign(server.settings, { mode: Mode.LIVE, effectiveMode: Mode.LIVE })
+    const root = await open(server, '/settings')
+    const line = root.querySelector('.card p.hint')
+    expect(line?.textContent).toBe('Gmail 只读授权，还不会写入：在本机运行 mint-token.mjs --scope modify')
+    expect(line?.classList.contains('warn')).toBe(true)
+    // With the write grant, what live does.
+    server.status = { writeScope: true }
+    const again = await open(server, '/settings')
+    expect(again.querySelector('.card p.hint')?.textContent).toBe('有把握的邮件打标签并归档，从不标为已读')
   })
 
   it('explains the deployment’s ceiling in one line', async () => {

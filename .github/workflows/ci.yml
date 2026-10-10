@@ -825,7 +825,8 @@ jobs:
       - name: Test the production config, the deploy values and the token script
         run: node --test deploy/test/*.test.mjs
       # The closed table of Gmail operations (every recorded call against an independent copy, and a fuzz), masking,
-      # DMARC, the decision, Clef's strict answer, the Wilson bound and ops-v1's golden bytes.
+      # DMARC, the decision table of the two views, the review quota, the schema migrations, Clef's strict answer and
+      # ops-v1's golden bytes.
       - name: Lint, typecheck and test the Worker
         working-directory: mailsort/worker
         run: |
@@ -833,10 +834,10 @@ jobs:
           npm run typecheck
           npm test
       # A real SQLite MailsortState with the fake Gmail and fake Workers AI behind Miniflare's outbound service (no
-      # network): the pipeline in shadow and live, unsure, undo, feedback into examples and rule proposals, trust labels,
-      # the resync, the auth stop, the Clef-flash switch, the quota deferral, the breaker, the owner API, ops-v1 over a
-      # service binding, and the CPU of the fetch handler and of MailsortState (its alarm path at its bounds) against
-      # bounds scaled by the machine's measured speed (tools/workerd-cpu).
+      # network): the pipeline in shadow and live, unsure, undo, feedback into examples, trust labels and their domains,
+      # the replay evaluation, the resync, the auth stop, the Clef-flash switch, the quota deferral, the breaker, the
+      # owner API, ops-v1 over a service binding, and the CPU of the fetch handler and of MailsortState (its alarm path
+      # at its bounds) against bounds scaled by the machine's measured speed (tools/workerd-cpu).
       - name: Runtime tests (workerd with a real Durable Object)
         working-directory: mailsort/worker
         run: npm run test:runtime

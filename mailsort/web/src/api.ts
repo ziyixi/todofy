@@ -15,7 +15,7 @@ import { parseStatus } from '@ziyixi/proto/rpc-status'
 
 export const CSRF_HEADER = 'X-CSRF-Token'
 
-/** An ErrorInfo reason the API answers: mailsort.ui.v1's own (errors.proto) or one every API shares (CommonReason). */
+/** An ErrorInfo reason the API answers: mailsort.ui.v2's own (errors.proto) or one every API shares (CommonReason). */
 export type Reason = Exclude<keyof typeof ErrorReason | keyof typeof CommonReason, 'UNSPECIFIED'>
 
 export class ApiError extends Error {

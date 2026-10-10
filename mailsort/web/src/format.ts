@@ -11,6 +11,13 @@ export const MODE_NAMES: Readonly<Record<number, string>> = {
   [Mode.LIVE]: '正式',
 }
 
+/** What each mode does, in one line (设置, 概览's status line). */
+export const MODE_HINTS: Readonly<Record<number, string>> = {
+  [Mode.OFF]: '不读 Gmail，也不判断',
+  [Mode.SHADOW]: '只判断和记录，不改 Gmail',
+  [Mode.LIVE]: '有把握的邮件打标签并归档，从不标为已读',
+}
+
 /** Why the breaker tripped (Settings.breaker_reason). */
 export const BREAKER_REASONS: Readonly<Record<string, string>> = {
   daily_limit: '超过每天写入上限',

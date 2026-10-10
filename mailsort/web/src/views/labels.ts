@@ -3,14 +3,15 @@
  *
  * - A search box over the labels' names.
  * - The labels as one tree in the labels' order, grouped by their top-level segment (开发 › CI通知, 平台工具; a label of
- *   one segment stands alone). One compact row each: the name (未启用 beside it when off), its example count, and the
- *   one switch, 启用 (an enabled label is written to Gmail in live mode).
+ *   one segment stands alone). One compact row each: the name (未启用 beside it when off), how many mails the model
+ *   gave it in the last 7 days (the label report's confident decisions), and the one switch, 启用 (an enabled label is
+ *   offered to the model, and written to Gmail in live mode).
  * - A row opens its detail under it, one at a time (label-detail.ts): a line when Gmail has a label of its name, the
- *   description, 留在收件箱, the examples and 高级.
+ *   description, 归档, a trust label's trusted domains, the examples and 高级.
  * - One quiet “+ 新标签” at the bottom; with no label at all, the page is that one offer.
  *
- * Deleting a label leaves its Gmail label and mails as they are. (The sync with Gmail is in 设置.) The redesign of
- * 2026-10-10 replaces this view (trusted domains among its parts); until then it is the v1 view on mailsort.ui.v2.
+ * Deleting a label leaves its Gmail label and mails as they are. (The sync with Gmail is in 设置.) There are no rules
+ * and no per-label 正式打 since 2026-10-10.
  */
 import { create } from '@ziyixi/proto/protobuf'
 import { Label_GmailState, LabelSchema, type Label } from '@ziyixi/proto/mailsort/ui/v2/label_pb'
@@ -73,7 +74,11 @@ interface Row {
   readonly slot: HTMLElement
 }
 
-function labelsPage(body: HTMLElement, ctx: ViewContext, labels: Label[]): void {
+/**
+ * The page. `counts` are the last 7 days' confident decisions per label (empty when the report could not be read: the
+ * rows then show none).
+ */
+function labelsPage(body: HTMLElement, ctx: ViewContext, labels: Label[], counts: ReadonlyMap<string, number>): void {
   const state = { labels, query: '', open: '' }
   let memory = { more: false, advanced: false }
   let rows = new Map<string, Row>()
@@ -106,19 +111,20 @@ function labelsPage(body: HTMLElement, ctx: ViewContext, labels: Label[]): void 
     paint(focus)
   }
 
-  /** The row's own line: the name, the example count and 启用. */
+  /** The row's own line: the name, the last 7 days' count and 启用. */
   const paintHead = (row: Row) => {
     const label = find(row.name)
     if (label === undefined) return
     const open = state.open === label.name
     const trouble = GMAIL_TROUBLE[label.gmailState]
+    const count = counts.get(label.name) ?? 0
     const main = el(
       'button',
       { type: 'button', class: 'leaf-main', 'aria-expanded': String(open), 'aria-controls': row.slot.id, 'data-focus': `row:${label.name}` },
       el('span', { class: 'leaf-name' }, el('span', {}, leafName(label.displayName, row.group))),
       label.enabled ? null : el('span', { class: 'meta' }, '未启用'),
       trouble === undefined ? null : el('span', { class: 'meta warn' }, trouble),
-      label.exampleCount === 0 ? null : el('span', { class: 'leaf-count' }, `${String(label.exampleCount)} 个例子`),
+      count === 0 ? null : el('span', { class: 'leaf-count', title: '最近 7 天模型有把握的邮件' }, `7 天 ${String(count)} 封`),
     )
     main.addEventListener('click', () => {
       setOpen(label.name)
@@ -288,6 +294,8 @@ function labelsPage(body: HTMLElement, ctx: ViewContext, labels: Label[]): void 
 
 export async function renderLabels(ctx: ViewContext): Promise<void> {
   await frame(ctx.main, '标签', async (body) => {
-    labelsPage(body, ctx, await allLabels())
+    // The counts only add a figure to each row: without the report the page still works.
+    const [labels, report] = await Promise.all([allLabels(), api.getLabelReport({ name: 'labelReport' }).catch(() => null)])
+    labelsPage(body, ctx, labels, new Map((report?.labels ?? []).map((row) => [row.label, row.autoCount])))
   })
 }

@@ -23,30 +23,35 @@ mode (the default) only records. Chinese, mobile first. Design: [`docs/design.md
 Four tabs under a header whose one status line shows the mode in force, the Gmail grant and the next run
 (`docs/design.md` §9):
 
-- **待审**: the few uncertain mails of a day (at most 1 to 5, 5 % of the last week's daily mail), each with the model's
-  most likely label and why it was uncertain: 确认 that label, 改为… another (a searchable label picker with 都不是
-  first), or 跳过; j / k, Enter, c and s do the same by keyboard. An answer with a trust label for a sender that passed
-  DMARC teaches that label the sender's domain. Corrections made in Gmail itself (moving a sorted mail to another of
-  mailsort's labels, or removing the label) count too.
-- **概览**: today's numbers (处理, 已打标签, 待审, 拿不准), the flow of today's mail as a Sankey diagram (drawn at zero on
-  a day without mail; on a phone it scrolls in its own box, starting at where the mail went), the last 7 days per label
-  (automatic labels, your corrections, uncertain mail) and the model budget.
+- **待审**: only the few uncertain mails of a day (at most 1 to 5, 5 % of the last week's daily mail); with none it says
+  没有需要你确认的邮件. Each row shows the masked subject and sender, why the model was unsure in plain words, and the
+  answers as one-tap buttons: the model's likely labels with their probabilities, 都不是, 其他… (a searchable picker
+  over every label) and 跳过; j / k, the digits, Enter, c and s do the same by keyboard. An answer with a trust label
+  for a sender that passed DMARC teaches that label the sender's domain (the question before it says so).
+  Corrections made in Gmail itself (moving a sorted mail to another of mailsort's labels, or removing the label)
+  count too.
+- **概览**: one status line (what the mode does, the last sync, mail waiting), today's numbers with their last 7 days
+  (处理, 有把握, 都不是, 拿不准), the flow of today's mail as a Sankey diagram (the model's stages to the labels, 都不是
+  and 拿不准, split by whether it went to 待审; drawn at zero on a day without mail; on a phone it scrolls in its own
+  box, starting at where the mail went), a table of the last 7 days per label (自动, 改正, 拿不准) and the model budget.
 - **标签**: everything about a label in one place. A search box finds a label by its path. The labels form a tree
-  grouped by their top level (开发 › CI通知, 平台工具), one line each: the name (未启用 beside it when off), its example
-  count, and 启用 (an enabled label is written to Gmail in live mode). A row opens its detail under it: the description
-  (the model reads `path: description` and never picks a label without one; one language and 60–120 characters keep
-  every call cheap, `docs/design.md` §8.1), 留在收件箱, a trust label's trusted domains (learned from 待审, each with
-  删除), the examples (listed on demand, deleted one by one) and 高级 (可信, 敏感 to keep no example, 启用, rename,
-  delete). A trust label is written only for a sender that passed DMARC and whose domain it trusts (`docs/design.md`
-  §4.4). A label's Gmail name is its path; when Gmail already has a label of exactly that name (made by hand), mailsort
-  never takes it over: the label's detail says so in its first line (Gmail 里已有同名标签) and it writes nothing until
-  it is renamed or 从 Gmail 同步 adopts (沿用) that label. An adopted label is never added to a mail that already has it,
-  so an undo never removes the owner's own, and the owner's other labels are never touched. Deleting a label leaves its
-  Gmail label and mails alone, and its writes can no longer be undone.
-- **设置**: the mode (关闭 · 影子 · 正式, with the deployment's ceiling or a tripped breaker in one line, and 解除熔断);
-  撤销, the undo of a time range (1 hour, 24 hours, 7 days or your own), of one label when chosen, previewed first; and
-  从 Gmail 同步 (follows renames and deletions made in Gmail and adopts such labels, never one with labels nested under
-  it; it never imports another one). Emergency stop: 设置 → 关闭 (`docs/design.md` §10).
+  grouped by their top level (开发 › CI通知, 平台工具), one line each: the name (未启用 beside it when off), how many mails
+  the model was sure of for it in the last 7 days, and 启用 (an enabled label is offered to the model and written to
+  Gmail in live mode). A row opens its detail under it: the description (the model reads `path: description` and
+  never picks a label without one; one language and 60–120 characters keep every call cheap, `docs/design.md` §8.1),
+  归档 (off: the label is only added and the mail stays in the inbox), a trust label's trusted domains (learned from
+  待审, each with 删除), the examples (listed on demand, deleted one by one) and 高级 (可信, 敏感 to keep no example,
+  rename, delete). A trust label is written only for a sender that passed DMARC and whose domain it trusts
+  (`docs/design.md` §4.4). A label's Gmail name is its path; when Gmail already has a label of exactly that name (made
+  by hand), mailsort never takes it over: the label's detail says so in its first line (Gmail 里已有同名标签) and it
+  writes nothing until it is renamed or 从 Gmail 同步 adopts (沿用) that label. An adopted label is never added to a mail
+  that already has it, so an undo never removes the owner's own, and the owner's other labels are never touched.
+  Deleting a label leaves its Gmail label and mails alone, and its writes can no longer be undone.
+- **设置**: the mode (关闭 · 影子 · 正式, with the deployment's ceiling, a tripped breaker and 解除熔断, or a read-only
+  Gmail grant under 正式 in one line); 撤销, the undo of a time range (1 hour, 24 hours, 7 days or your own), of one
+  label when chosen, previewed first; and 从 Gmail 同步 (follows renames and deletions made in Gmail and adopts such
+  labels, never one with labels nested under it; it never imports another one). Emergency stop: 设置 → 关闭
+  (`docs/design.md` §10).
 - **API only**: the replay evaluation (before going live: your answers of the last 14 days decided again by today's
   pipeline, nothing written, `docs/design.md` §5.1), the embedding rebuild, the single-entry undo, the write limits and
   the neuron budget. To run the replay from the signed-in page's console:

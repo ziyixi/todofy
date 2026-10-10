@@ -380,7 +380,8 @@ left, so the day's last place is kept for the informative band (a quota of 1 is 
 to ask (`no_labels`) never joins. The rest stays in the inbox untouched, recorded as uncertain and not shown
 (`decisions.shown` says which). There are no shadow suggestions, no audit sample and no confident decisions in 待审: in
 shadow mode confident decisions are only recorded and counted (概览). Each item shows the masked subject and sender
-(kept 14 days), the reason, and the model's three most likely options.
+(kept 14 days), the reason, and the model's most likely options as one-tap answers (of its three, the first always and
+the others from 5 %; §9).
 
 The owner's choices (ResolveReviewItem, SkipReviewItem): a label (the top candidates first), 都不是, or 跳过. A label
 or 都不是 is a verdict (§6): with a label it makes an example, and for a trust label and a mail that passed DMARC it
@@ -514,7 +515,9 @@ evaluation deciding 6 mails again 13.7 ms (same bound); MailsortState's heaviest
 summary 1.5; bound 300); the fetch handler's very first request 2.2 ms (bound 6), every other at most 1.4 ms first and
 0.8 ms warm (bounds 6 and 2.5). Bundles: the Worker 130.4 → 121.9 KiB gzip (the rules, the import, the template, the
 filter export and the precision bound gone; the replay, the two views and the trusted domains added; budget 135
-unchanged), the UI 59.0 → 55.0 KiB gzip (budget 67 unchanged). Subrequests per mail: 6 (§4).
+unchanged), the UI 59.0 → 55.0 KiB gzip (budget 67 unchanged). Subrequests per mail: 6 (§4). Then the model-first UI
+(§9; the Worker unchanged): 55.9 KiB gzip (budget unchanged: the one-tap answers, today's tally, the 7-day table; the
+⋯ menu and the confidence bar gone).
 
 Stores are bounded: 24 labels, 50 trusted domains each, 2,000 examples, a replay of 200 mails for 7 days, request IDs
 for a day, content for 14 days, records for 180 days. Rows read: a pass reads a few rows per mail (the sender history
@@ -571,77 +574,92 @@ accuracy report removed: breaking, so a new major version, `proto/README.md` rul
 请刷新页面, is what that page shows for a reason it does not know) until 2026-11-10 (`docs/history.md`).
 
 **The UI** (redesigned 2026-10-07 on the owner's "less is more": too many settings, flat lists, a flow without a
-diagram at zero, import and the ledger page not needed; moved onto mailsort.ui.v2 on 2026-10-10 with the smallest
-changes, until its model-first redesign). Plain TypeScript DOM (`web/src/dom.ts`, `components.ts`), no framework;
-Chinese, short plain words, at most one hint line where needed.
+diagram at zero, import and the ledger page not needed; redesigned again for the model-first decision on 2026-10-10:
+the owner answers a few uncertain mails, not every one, so 待审 is a short list of one-tap answers, 概览 says what the
+model did, and 标签 has neither rules nor 正式打). Plain TypeScript DOM (`web/src/dom.ts`, `components.ts`), no
+framework; Chinese, short plain words, at most one hint line where needed.
 
-- **Design system** (`styles.css`): light and dark from `prefers-color-scheme` through CSS tokens (neutral `--bg`,
-  `--surface`, `--sunken`, `--ink`, `--muted`, `--line`, and `--track` for an off switch, at least 3:1; one accent
-  `--accent` with `--accent-soft`; `--warn` and `--danger` for state only; the flow's eight series and its zero gray),
-  an 8 px spacing scale, a 10 px radius, 1 px hairlines, no heavy shadows, the system font with PingFang SC and Noto
-  Sans SC, tabular figures for every number, a 2 px accent focus ring. One set of components: primary, ghost (the
-  plain button) and quiet buttons, chips, a segmented control, a toggle switch, a disclosure (更多, 高级,
-  `N 条没有导出`), a small ⋯ menu (one open at a time; a choice, Escape, a click elsewhere or Tab away closes it), a
-  textarea that grows with its text, a card, a compact list row, a KPI number, a meter and a small bar, an empty
-  state, and the searchable label picker. A 48rem column with 16 px gutters; works at 360 px: each page is one
-  `minmax(0, 1fr)` grid column, so no child widens it (the flow diagram scrolls inside its own box below 600 px), and
-  `check-layout.test.ts` pins the rules this depends on.
+- **Design system** (`styles.css`, unchanged since 2026-10-07): light and dark from `prefers-color-scheme` through CSS
+  tokens (neutral `--bg`, `--surface`, `--sunken`, `--ink`, `--muted`, `--line`, and `--track` for an off switch, at
+  least 3:1; one accent `--accent` with `--accent-soft`; `--warn` and `--danger` for state only; the flow's eight series
+  and its zero gray), an 8 px spacing scale, a 10 px radius, 1 px hairlines, no heavy shadows, the system font with
+  PingFang SC and Noto Sans SC, tabular figures for every number, a 2 px accent focus ring. One set of components:
+  primary, ghost (the plain button) and quiet buttons, chips, a segmented control, a toggle switch, a disclosure (高级),
+  a textarea that grows with its text, a card, a compact list row, a KPI number with an optional quiet line under it, a
+  meter, a small table, an empty state, and the searchable label picker. A 48rem column with 16 px gutters; works at
+  360 px: each page is one `minmax(0, 1fr)` grid column, so no child widens it (the flow diagram scrolls inside its own
+  box below 600 px), and `check-layout.test.ts` pins the rules this depends on. (The ⋯ menu and the small bar went with
+  the rules and the confidence bar.)
 - **Shell** (`app.ts`): a sticky header with 邮件分拣 and, on the same row (wrapping under it on a phone), one quiet
   status line from ServiceStatus: the mode in force as a chip (影子 neutral, 正式 accent, 关闭 warn), `Gmail ✓ 只读`
   or `可写` (or the problem: 授权失效, 未授权, 未连接, in the warning color) and `下次运行 3 分钟后` (马上 within a
   minute); under it exactly four tabs, 待审 (with the queue's count as a chip, hidden at 0) · 概览 · 标签 · 设置, the
   current one underlined in the accent. The tabs are built once and only marked, so one chosen by keyboard keeps the
-  focus. The status is read once per navigation and again after a review choice or a mode change. There is no other
-  page: the examples live in 标签 (`/rules` answers 找不到这个页面).
-- **待审** (`/`): one list, newest first, one row per uncertain mail: the masked subject (one line) and the time, the
-  masked sender, then the model's most likely label as an accent chip (都不是 as a muted one) with its confidence as a
-  small bar and a percentage, why the model was uncertain in plain words (把握不够, 两次判断不一致, 疑似钓鱼, 发件人还不
-  可信, 模型暂不可用; nothing more when a warning line already says why), and on the right 确认 (that label: primary),
-  改为… and 跳过 (quiet). Both are ResolveReviewItem with a label or 都不是. A long subject is cut with … and the time
-  stays on one line, so the actions are always in sight. 改为… opens the searchable picker under the row (都不是
-  first, then the labels, the highlighted one scrolled into sight; typing filters, ↑ ↓ move, Enter chooses, Escape
-  closes). Keyboard: j / k move between rows (the active one has an accent edge), Enter confirms the focused row, c
-  opens the picker, s skips; a hint line shows the keys where there is a fine pointer. A choice leaves the list at once
-  and the next row takes the focus; an empty queue says 都处理完了. A suspected phishing mail and a trust label for a
-  sender not trusted yet show one warning line, their 确认 is not primary and asks first, and the phishing mail's
-  picker starts at 都不是 (another at the model's next choice).
-- **概览** (`/overview`): four KPI numbers for the UTC day (处理, 已打标签, 待审, 拿不准; 2 × 2 on a phone); the card
-  今天的流程 with the Sankey diagram (§10), always drawn: with no mail the skeleton at zero (its nodes named, but not
-  Tab stops) and the line 今天还没有邮件; where it scrolls in its box (a phone) it starts at its right end, where the
-  mail went; then, side by side from 640 px, 最近 7 天 (the label report: each label with mail this week, `自动 38 · 改
-  2 · 拿不准 2`; else one line, 最近 7 天还没有邮件) and 模型额度 (today's estimated neurons over the budget as a thin
-  meter, warn from 70 %, danger when used up, and a line only when Clef-flash is in use, the quota is gone or mail
-  waits for tomorrow). No error box: the codes are never cleared and carry no time, so one transient `gmail_429` would
-  stay for good (ServiceStatus still lists them).
-- **设置** (`/settings`): three cards and nothing else. 模式: a segmented 关闭 · 影子 · 正式 (正式 asks first; a
-  choice sends only `mode` and the etag) and one line: what the mode does, or the deployment's ceiling
-  (`受部署上限限制，按影子运行`), or the tripped breaker in words with 解除熔断. 撤销 (the safety net that replaced
-  操作记录, §7): a segmented 1 小时 · 24 小时 · 7 天 · 自定义 (two date-time fields), a label select (全部标签 first)
-  and 预览, which shows `将撤销“出行”的 12 条` with 确认撤销 and 取消, or 这段时间没有可撤销的写入. Gmail: one row,
-  从 Gmail 同步 (a toast says what the sync did). The write limits and the neuron budget are not in the UI; their stored
-  values stand.
+  focus. The status is read once per navigation and again after a review answer or a mode change. There is no other
+  page (`/rules` answers 找不到这个页面).
+- **待审** (`/`, `views/review.ts`): only uncertain mail, at most the daily quota (§5), newest first, one compact row
+  each: the masked subject (one line, cut with …) and the time, the masked sender, why the model was uncertain in plain
+  words (把握不够, 两次判断不一致, 疑似钓鱼, 发件人还不可信, 模型暂不可用), and the answers as one-tap buttons on one line:
+  the model's options in its order, each with its probability after the name (`金融/银行 92%`; the first always, and
+  primary; the others only from 5 %, so a 2 % option is no button), 都不是 where the model ranked it or after them,
+  then 其他… (quiet: the searchable picker over every label, the first label the buttons do not offer highlighted and
+  scrolled into sight; typing filters, ↑ ↓ move, Enter chooses, Escape closes) and, at the line's end, 跳过 (quiet).
+  A label or 都不是 is ResolveReviewItem, 跳过 SkipReviewItem; the toast says 已确认 (the first option) or 已改为. A
+  suspected phishing mail and a trust label for a sender not trusted yet show one warning line instead of the reason
+  (`疑似钓鱼：先在 Gmail 里核对发件人和链接`, `发件人还不可信：先在 Gmail 里核对发件人`); then no answer is primary and
+  a label asks first, saying for a trust label that a sender who passed DMARC teaches it the domain (§3.2); 都不是
+  never asks. Keyboard: j / k move between rows (the active one has an accent edge), 1 to 4 choose that answer, Enter
+  the first, c opens 其他…, s skips; a hint line shows the keys where there is a fine pointer. An answer leaves the
+  list at once and the next row takes the focus. With nothing to answer the page says 没有需要你确认的邮件 and one hint
+  line, 只有模型拿不准的少数邮件会来这里. At 375 px a row's answers (one label, 都不是, 其他…, 跳过) are one line; at
+  360 px 跳过 wraps to the right of the next.
+- **概览** (`/overview`, `views/overview.ts`): from the top, one status line (what the mode in force does, as 设置 says
+  it, or `正式：Gmail 只读授权，还不会写入` for live with a read-only grant; `上次同步 2 分钟前`; `2 封待判断` while mail
+  waits); four KPI numbers for the UTC day, each with its last 7 days under it (`7 天 50`): 处理, 有把握 (a confident
+  label, written or only recorded), 都不是 and 拿不准, today's from the flow's counters (the diagram's own numbers) and
+  the week's from the label report; 2 × 2 on a phone. Then the card 今天的流程 with the Sankey diagram (§10), always
+  drawn: with no mail the skeleton at zero (its nodes named, but not Tab stops) and the line 今天还没有邮件; where it
+  scrolls in its box (a phone) it starts at its right end, where the mail went. Then, side by side from 640 px, 各标签 ·
+  最近 7 天 (a table of each label with mail this week: 自动, 改正 (in Gmail and in 待审) and 拿不准, its name cut with …;
+  else one line, 最近 7 天还没有邮件) and 模型额度 (today's estimated neurons over the budget as a thin meter, warn from
+  70 %, danger when used up, and a line only when Clef-flash is in use, the quota is gone or mail waits for tomorrow).
+  No error box: the codes are never cleared and carry no time, so one transient `gmail_429` would stay for good
+  (ServiceStatus still lists them).
 - **标签** (`/labels`, `views/labels.ts` and `label-detail.ts`): the one place for everything about a label. From the
   top: a search box (搜索标签) that filters the labels' paths as one types (Escape clears it); a quiet line with
   `15 个标签` (`找到 2 个` while searching) on the left and 启用 on the right, over the switch column; then one card
   holding the tree, in the labels' order, hairlines between rows. A top-level group (开发, 金融) is a muted 13 px heading
   row and its labels are indented under it by their rest of the path (CI通知, 平台工具; `汽车 › 保养` under 生活); a
   label of one segment (账号安全) is a row at the top level. Each row is one line and nothing else: the name (muted,
-  with 未启用 beside it, when the label is off), its example count when it has examples, and the 启用 switch, which
-  saves `enabled` at once (`update_mask=enabled,etag`) and puts itself back when refused. The row is a button: it opens
-  the label's detail under it (an accent edge on the open row, one detail open at a time; again closes it). The detail,
-  on the page's background: first, only when Gmail takes nothing from the label, one warning line with what to do (its
-  path is a Gmail label of the owner's: `Gmail 里已有同名标签，改个名字或到 设置 → 从 Gmail 同步 沿用`; its Gmail
-  label was deleted: `Gmail 里已没有这个标签，不再打它；在 Gmail 建回同名标签后到 设置 → 从 Gmail 同步`); the
-  description, a textarea that grows with its text (the placeholder says the model never picks a label without one),
-  saved on blur or with a small 保存 shown while it differs; the 留在收件箱 switch; for a trust label, 可信域名 with its
-  count, one line per domain in mono with 删除 (RemoveTrustedDomain with the etag; no add: a hint says they come from
-  the review queue); then 例子 with its count and 查看 / 收起 (50 at a time, 再看 50 个), each a masked summary, its
-  date and 删除; a sensitive label says 敏感标签不留例子. Last, 高级, folded: 可信, 敏感 (asks before it deletes the
-  examples), 启用, the path with 改名 (the label moves in the tree, the detail stays open), the Gmail state only when it
-  says something (`Gmail：尚未创建` or `已沿用原有标签`; a linked label says nothing) and 删除标签 (asks first). Every
-  save sends only its own fields and the label's current etag. At the bottom one quiet `+ 新标签`: one path field, and
-  the new label opens with its description focused. With no label at all the page is one empty state, 还没有标签, with
-  + 新标签. Light and dark from the same tokens; at 360 px the rows keep one line and the detail loses its indent.
+  with 未启用 beside it, when the label is off; 同名已占用 or Gmail 中已删除 in the warning color when Gmail takes nothing
+  from it), how many mails the model was sure of for it in the last 7 days (`7 天 12 封`, from the label report; none
+  at 0, and none when the report cannot be read), and the 启用 switch, which saves `enabled` at once
+  (`update_mask=enabled,etag`) and puts itself back when refused. The row is a button: it opens the label's detail
+  under it (an accent edge on the open row, one detail open at a time; again closes it). The detail, on the page's
+  background: first, only when Gmail takes nothing from the label, one warning line with what to do (its path is a
+  Gmail label of the owner's: `Gmail 里已有同名标签，改个名字或到 设置 → 从 Gmail 同步 沿用`; its Gmail label was
+  deleted: `Gmail 里已没有这个标签，不再打它；在 Gmail 建回同名标签后到 设置 → 从 Gmail 同步`); the description, a
+  textarea that grows with its text (the placeholder says the model never picks a label without one), saved on blur
+  or with a small 保存 shown while it differs; the 归档 switch (on by default; off saves `keep_in_inbox`, and its hint
+  says a mail that asks the owner to act stays in the inbox either way, §3.1); for a trust label, 可信域名 with its
+  count, one line per domain in mono with 删除 (RemoveTrustedDomain with the etag; no add), or, with none yet, the line
+  that the label is not written automatically until an answer in 待审 for a sender that passed DMARC teaches one;
+  then 例子 with its count and 查看 / 收起 (50 at a time, 再看 50 个), each a masked summary, its date and 删除; a
+  sensitive label says 敏感标签不留例子. Last, 高级, folded: 可信 (turned on, the trusted domains appear at once), 敏感
+  (asks before it deletes the examples), the path with 改名 (the label moves in the tree, the detail stays open), the
+  Gmail state only when it says something (`Gmail：尚未创建` or `已沿用原有标签`; a linked label says nothing) and
+  删除标签 (asks first); 启用 is on the row only. Every save sends only its own fields and the label's current etag. At
+  the bottom one quiet `+ 新标签`: one path field, and the new label opens with its description focused. With no label
+  at all the page is one empty state, 还没有标签, with + 新标签. Light and dark from the same tokens; at 360 px the rows
+  keep one line and the detail loses its indent.
+- **设置** (`/settings`): three cards and nothing else. 模式: a segmented 关闭 · 影子 · 正式 (正式 asks first: 启用的标签会在
+  Gmail 里给有把握的邮件打标签并归档; a choice sends only `mode` and the etag) and one line: what the mode does, or the
+  deployment's ceiling (`受部署上限限制，按影子运行`), or the tripped breaker in words with 解除熔断, or, for 正式 with a
+  read-only grant, `Gmail 只读授权，还不会写入：在本机运行 mint-token.mjs --scope modify` in the warning color (§12).
+  撤销 (the safety net that replaced 操作记录, §7): a segmented 1 小时 · 24 小时 · 7 天 · 自定义 (two date-time fields),
+  a label select (全部标签 first) and 预览, which shows `将撤销“出行”的 12 条` with 确认撤销 and 取消, or
+  这段时间没有可撤销的写入. Gmail: one row, 从 Gmail 同步 (a toast says what the sync did). The write limits and the
+  neuron budget are not in the UI; their stored values stand.
 
 ## 10. Operations
 
@@ -667,10 +685,13 @@ Chinese, short plain words, at most one hint line where needed.
   enabled labels' groups first, and the first eight keep theirs every day; a later group the day shows borrows a hue
   whose home group the day does not show (`flowchart.ts` groupSlots), so ten groups of labels never run out, and
   only a day showing more than eight groups has gray ones, which the legend says; every node named with its count;
-  hover or focus for exact numbers and shares; no motion under prefers-reduced-motion; on a phone it scrolls inside
-  its own box). A day without mail draws the skeleton (`skeletonGraph`): 新邮件, the five stages, and 打标签, 都不是,
-  拿不准 and 影子建议 with every path a mail can take, laid out as one mail per path and drawn with hairline links, muted
-  nodes and every count 0, so the diagram is never missing.
+  hover or focus for exact numbers and shares, and for an outcome what it means; no motion under
+  prefers-reduced-motion; on a phone it scrolls inside its own box). On the right, under the labels written to Gmail:
+  都不是（留在收件箱） in the pipeline's neutral color (a decision, not a warning), 拿不准 in the warning color and split
+  by whether the mail went to 待审 (进了待审, 没进待审: the quota was full or there was nothing to ask), and
+  影子建议（未写入）. A day without mail draws the skeleton (`skeletonGraph`): 新邮件, the five stages, and 打标签, 都不是,
+  both 拿不准 and 影子建议 with every path a mail can take, laid out as one mail per path and drawn with hairline links,
+  muted nodes and every count 0, so the diagram is never missing.
 - **Emergency stop**, from fastest: 设置 → 关闭; the GitHub variable `MAILSORT_MODE=off` (or `shadow`) and a redeploy;
   revoking the grant at https://myaccount.google.com/permissions (Google account → Security → Third-party access).
 - **Logs**: one line per alarm (mode, counts, a code) and per refused request (request ID, status, reason).
@@ -719,16 +740,21 @@ the fake Gmail (`fake-gmail.ts`) and fake Workers AI (`fake-ai.ts`, Clef and bge
   nested label, the replay evaluation, the Clef-flash switch, the quota deferral, the flow API, the legacy `分拣/x`, the
   parents' record, a label-filtered range undo, the old `/api/v1` paths' 410 and the auth failure.
 - `web/src/*.test.ts`: the views against a fake API on the shared transcoder: `app.test.ts` the shell (four tabs, the
-  focus kept on a tab, the status line, 马上, the queue's count), 待审 (ResolveReviewItem by 确认 and the picker and its
-  highlighted label scrolled into sight, skip, the keyboard, the caution for phishing and an untrusted sender, the
-  reasons in words), 设置 (the mode's mask, the ceiling, the breaker, the undo's preview and rounds, one label's undo,
-  the custom range, the sync; no filter export); `labels.test.ts` 标签 (the tree's grouping, the one-line row with its
-  example count and 启用 with its mask, etag and refusal, one detail open at a time, the search over names, the
-  description on blur, a trust label's trusted domains with 删除, the examples on demand, the Gmail state lines, 高级
-  with 敏感's question, the visible 未启用, rename and delete, a new label, also when there is none; the fake refuses a
-  stale etag and changes only masked fields); `overview.test.ts` the flow graph and diagram (hues, 都不是 apart from
-  拿不准, size, tooltip, tokens, the zero skeleton out of the Tab order, the phone's start at the outcomes) and 概览 with
-  and without mail (the label report), without an error box; `check-layout.test.ts` the switch rows and the
+  focus kept on a tab, the status line, 马上, the queue's count), 待审 (the one-tap answers in the model's order with
+  their probabilities and the 5 % floor, 都不是 ranked or appended, ResolveReviewItem with a label or 都不是 and
+  SkipReviewItem with CSRF and a request ID, 其他…'s picker and its highlighted label scrolled into sight, the keyboard
+  with the digits, the caution for phishing and an untrusted sender with what a trust label teaches, the reasons in
+  words, the quiet state 没有需要你确认的邮件), 设置 (the mode's mask and question, the ceiling, the breaker, 正式 with a
+  read-only grant, the undo's preview and rounds, one label's undo, the custom range, the sync; no filter export);
+  `labels.test.ts` 标签 (the tree's grouping, the one-line row with its 7-day count, also without the report, and 启用
+  with its mask, etag and refusal, one detail open at a time, the search over names, the description on blur, 归档
+  saving `keep_in_inbox` inverted, a trust label's trusted domains with 删除 and their empty line once 可信 is turned
+  on, the examples on demand, the Gmail state lines, 高级 without 启用 and with 敏感's question, the visible 未启用,
+  rename and delete, a new label, also when there is none; the fake refuses a stale etag and changes only masked
+  fields); `overview.test.ts` the flow graph and diagram (hues, 都不是 apart from 拿不准 and in the neutral color,
+  拿不准 split by 待审, size, tooltip, tokens, the zero skeleton out of the Tab order, the phone's start at the
+  outcomes) and 概览 with and without mail (the status line, also live with a read-only grant, today's tally and the 7
+  days under each number, the per-label table), without an error box; `check-layout.test.ts` the switch rows and the
   phone-width rules (one column per page and per 待审 row, the time on one line, the settings rows, the tree's
   hairlines, the off switch's track); `test/no-external.test.ts` the same-origin rules.
 - `deploy/test/*.test.mjs`: the production config, the deploy wrapper (MODE, the secrets file without the grant), that

@@ -23,9 +23,9 @@ Last updated: 2026-10-10.
 
 Owner request 2026-10-10: sender-address rules sort badly (one sender's statements and promotions alike), so remove
 them; the owner no longer wants to review every mail, only highly uncertain ones (about 1 in 20); use the model more
-for precision; then turn Gmail labelling live. Design: `mailsort/docs/design.md` §3.2, §4.4, §5, §5.1.
+for precision; then turn Gmail labelling live. Design: `mailsort/docs/design.md` §3.2, §4.4, §5, §5.1, §9.
 
-Done on the branch (local commits from `5f68724`, not pushed), the Worker side:
+Done on the branch (local commits from `5f68724`, not pushed):
 - `proto/mailsort/ui/v2` (`/api/v2/`), `mailsort.ui.v1` retired in `proto/retired.json`; the Worker answers every
   `/api/v1/...` path 410 `RELOAD_REQUIRED` until 2026-11-10 (`docs/history.md`).
 - The decision: the model decides every mail, two views (view 2 over view 1's three labels, reversed, when view 1's
@@ -43,24 +43,30 @@ Done on the branch (local commits from `5f68724`, not pushed), the Worker side:
   `import.ts`, `template.ts`), the audit, live gating and 正式打, the Wilson bound (`accuracy.ts`); ops-v1 no longer
   raises `label_live_revoked`, and the guard defers `replay` in place of `audit` (contract fixture
   `OpsStatus/mailsort-degraded.json` and the dashboard's golden line follow; tests only for the dashboard).
-- The web UI moved onto v2 with the smallest changes (待审 resolves, 概览's 准确率 card became the 7-day label report,
-  标签 has 启用 instead of 正式打 and a trust label's trusted domains, no rules, no template; 设置 lost the filter
-  export). The privacy policy page states the new retention.
+- The privacy policy page states the new retention.
+- The model-first UI (`mailsort/docs/design.md` §9, the 2026-10-07 visual system kept): 待审 holds only uncertain
+  mail, each row the masked subject and sender, the reason in plain words and one-tap answers (the model's labels with
+  their probabilities, 都不是, 其他…, 跳过; a trust label for an untrusted sender asks first and says it teaches the
+  domain), quiet as 没有需要你确认的邮件; 概览 has a status line, today's numbers with their 7 days (处理, 有把握, 都不是,
+  拿不准), the flow with 拿不准 split by 待审, and a per-label table (自动, 改正, 拿不准); 标签 rows show the 7-day count
+  and 启用, the detail 归档, a trust label's trusted domains, the examples and 高级 (no rules, no 正式打); 设置 has the
+  mode (with a line when 正式 has only a read-only grant), the undo and the sync. UI only, no API change.
 
 Left, in order:
-1. The UI redesign of the spec's §8 (待审 with plain-Chinese reasons and the empty state 没有需要你确认的邮件; 概览 with
-   the model → 已打标签 / 留在收件箱 / 不确定 DAG; 标签 with counts; 设置 with mode, undo and sync), on this branch.
-2. Push, the full CI gate, land (mailsort, Home's tests, contracts, the website for the privacy page).
-3. After the deploy, verify: ServiceStatus answers on `/api/v2/serviceStatus`; an old tab shows 邮件分拣已更新，请刷新页面;
+1. Push, the full CI gate, land (mailsort, Home's tests, contracts, the website for the privacy page).
+2. After the deploy, verify: ServiceStatus answers on `/api/v2/serviceStatus`; an old tab shows 邮件分拣已更新，请刷新页面;
    标签 shows each trust label's seeded trusted domains (the former sender rules' domains); 待审 holds only uncertain
-   items; the next days' 待审 stays within its quota.
-4. Owner: run the replay evaluation from the signed-in page (`mailsort/README.md`), read the matches and the
-   mismatching pairs; then `mint-token.mjs --scope modify`, `MAILSORT_MODE=live`, and 正式 in 设置.
+   items, at most the day's quota, or says 没有需要你确认的邮件; 概览's numbers match its flow diagram.
+3. Owner: run the replay evaluation from the signed-in page (`mailsort/README.md`), read the matches and the
+   mismatching pairs; then `mint-token.mjs --scope modify` (设置 says 只读授权 until then), `MAILSORT_MODE=live`, and
+   正式 in 设置.
 
 Checked locally on the branch: the worker's lint, typecheck, unit tests and workerd runtime tests (CPU included), the
-smoke run against `wrangler dev`, the web's lint, typecheck, tests and build (its JavaScript budget), the deploy
-tests, the production dry run and bundle budget, proto's buf lint, api-linter, breaking (with the retirement) and its
-own tests, and `.github/scripts`' tests.
+smoke run against `wrangler dev`, the web's lint, typecheck, tests and build (its JavaScript budget: 55.9 KiB gzip of
+67), the deploy tests, the production dry run and bundle budget, proto's buf lint, api-linter, breaking (with the
+retirement) and its own tests, and `.github/scripts`' tests. The UI was also run by hand against `wrangler dev` with
+the loopback fakes and synthetic mail: 待审 (an answer, 其他…) and 概览 at 360 and 375 px without sideways scroll, 设置
+at 375 px, 概览 and 标签 (a trust label's detail) in dark at desktop width.
 
 ## In flight (2026-10-06, Claude): Home reports account changes made outside CI
 

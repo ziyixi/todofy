@@ -5,10 +5,11 @@
  *   or its own label was deleted there) and what to do.
  * - The description, what the model reads as `path: description` (without one the model never picks the label): it
  *   grows with its text and is saved when it loses the focus, or with 保存.
- * - 留在收件箱: the label is added and the mail stays in the inbox (账号安全, 政府法律).
+ * - 归档: on (the default), the label's mail leaves the inbox; off (`keep_in_inbox`), the label is only added and the
+ *   mail stays (账号安全, 政府法律). A mail that asks the owner to act soon stays either way.
  * - A trust label's trusted domains (learned from the owner's review choices, never typed), each with 删除.
  * - Its examples (masked summaries, kept until deleted): the count, the list on demand, and deleting one.
- * - 高级, folded: 可信, 敏感, 启用, rename, the Gmail state while it is not simply linked, and delete.
+ * - 高级, folded: 可信, 敏感, rename, the Gmail state while it is not simply linked, and delete. (启用 is on the row.)
  */
 import { Label_GmailState, type Label } from '@ziyixi/proto/mailsort/ui/v2/label_pb'
 import type { Example } from '@ziyixi/proto/mailsort/ui/v2/review_pb'
@@ -49,9 +50,17 @@ const GMAIL_PROBLEMS: Readonly<Record<number, string>> = {
   [Label_GmailState.MISSING]: 'Gmail 里已没有这个标签，不再打它；在 Gmail 建回同名标签后到 设置 → 从 Gmail 同步',
 }
 
+/** How a field's switch behaves beyond saving: `inverted` (on is the field false), a question first, what follows. */
+interface SwitchOptions {
+  readonly inverted?: boolean
+  readonly ask?: (on: boolean) => boolean
+  readonly after?: (label: Label) => void
+}
+
 /** A switch that saves one boolean field of the label at once (and puts itself back when that fails). */
-function fieldSwitch(page: DetailPage, name: string, hint: string, field: 'keepInInbox' | 'trustImplying' | 'sensitive' | 'enabled', path: string, after?: (label: Label) => void, ask?: (on: boolean) => boolean): HTMLLabelElement {
-  const [box, input] = toggle(name, page.label()[field], hint)
+function fieldSwitch(page: DetailPage, name: string, hint: string, field: 'keepInInbox' | 'trustImplying' | 'sensitive', path: string, options: SwitchOptions = {}): HTMLLabelElement {
+  const { inverted = false, ask, after } = options
+  const [box, input] = toggle(name, page.label()[field] !== inverted, hint)
   input.addEventListener('change', () => {
     const on = input.checked
     if (ask !== undefined && !ask(on)) {
@@ -59,7 +68,7 @@ function fieldSwitch(page: DetailPage, name: string, hint: string, field: 'keepI
       return
     }
     const fields: LabelFields = {}
-    fields[field] = on
+    fields[field] = on !== inverted
     void page.save(fields, [path], '已保存').then((answer) => {
       if (answer === null) input.checked = !on
       else after?.(answer)
@@ -91,10 +100,13 @@ function descriptionBox(page: DetailPage): HTMLElement {
   return el('div', { class: 'desc' }, area, save)
 }
 
-/** A trust label's trusted domains, each with 删除 (there is no add: they are learned from the review queue). */
-function domainsPart(page: DetailPage): HTMLElement | null {
+/**
+ * A trust label's trusted domains, each with 删除 (there is no add: they are learned from the review queue); for another
+ * label an empty placeholder, which 可信 replaces.
+ */
+function domainsPart(page: DetailPage): HTMLElement {
   const label = page.label()
-  if (!label.trustImplying) return null
+  if (!label.trustImplying) return el('div', { hidden: true })
   const remove = (domain: string) =>
     void act((requestId) => api.removeTrustedDomain({ name: label.name, domain, etag: page.label().etag, requestId }), `已删除 ${domain}`, () => page.refresh('description'))
   return el(
@@ -102,7 +114,7 @@ function domainsPart(page: DetailPage): HTMLElement | null {
     { class: 'part', 'aria-label': '可信域名' },
     el('h3', {}, '可信域名', el('span', { class: 'meta' }, ` ${String(label.trustedDomains.length)}`)),
     label.trustedDomains.length === 0
-      ? el('p', { class: 'hint' }, '在待审里选这个标签，发件人通过 DMARC 时，它的域名就会记在这里')
+      ? el('p', { class: 'hint' }, '还没有，所以这个标签还不会自动打。在待审里选它、且发件人通过 DMARC 时，发件域会记在这里')
       : el('ul', { class: 'example-list' }, ...label.trustedDomains.map((domain) => el('li', {}, el('p', { class: 'mono' }, domain), button('删除', () => { remove(domain) }, { class: 'quiet small danger', 'aria-label': `删除 ${domain}` })))),
   )
 }
@@ -156,8 +168,14 @@ function examplesPart(page: DetailPage): HTMLElement {
   return part
 }
 
-/** 高级: 可信, 敏感 (which deletes the examples), 启用, rename, the Gmail state while not simply linked, and delete. */
-function advanced(page: DetailPage, examplesChanged: () => void): HTMLDetailsElement {
+/** What a switch of 高级 redraws in the detail: the trusted domains (可信) and the examples (敏感). */
+interface Redraw {
+  readonly domains: () => void
+  readonly examples: () => void
+}
+
+/** 高级: 可信, 敏感 (which deletes the examples), rename, the Gmail state while not simply linked, and delete. */
+function advanced(page: DetailPage, redraw: Redraw): HTMLDetailsElement {
   const label = page.label()
   const path = el('input', { value: label.displayName, maxlength: '100', 'aria-label': '路径', 'data-focus': 'rename' })
   const rename = async () => {
@@ -175,9 +193,8 @@ function advanced(page: DetailPage, examplesChanged: () => void): HTMLDetailsEle
   const body = el(
     'div',
     { class: 'more-body' },
-    fieldSwitch(page, '可信', '只给通过 DMARC 的可信域名发件人打它', 'trustImplying', 'trust_implying'),
-    fieldSwitch(page, '敏感', '不留这类邮件的例子', 'sensitive', 'sensitive', examplesChanged, deletesExamples),
-    fieldSwitch(page, '启用', '关掉后不再建议或打它', 'enabled', 'enabled'),
+    fieldSwitch(page, '可信', '只给通过 DMARC 的可信域名发件人打它', 'trustImplying', 'trust_implying', { after: redraw.domains }),
+    fieldSwitch(page, '敏感', '不留这类邮件的例子', 'sensitive', 'sensitive', { ask: deletesExamples, after: redraw.examples }),
     el('div', { class: 'actions' }, path, button('改名', () => void rename())),
     gmail === undefined ? null : el('p', { class: 'hint' }, `Gmail：${gmail}`),
     el('div', { class: 'actions' }, button('删除标签', remove, { class: 'small danger' })),
@@ -192,20 +209,27 @@ function advanced(page: DetailPage, examplesChanged: () => void): HTMLDetailsEle
 
 /** The detail's parts, in order. */
 export function labelDetail(page: DetailPage): HTMLElement[] {
+  let domains = domainsPart(page)
   let examples = examplesPart(page)
-  const examplesChanged = () => {
-    const next = examplesPart(page)
-    examples.replaceWith(next)
-    examples = next
+  const redraw: Redraw = {
+    domains: () => {
+      const next = domainsPart(page)
+      domains.replaceWith(next)
+      domains = next
+    },
+    examples: () => {
+      const next = examplesPart(page)
+      examples.replaceWith(next)
+      examples = next
+    },
   }
   const problem = GMAIL_PROBLEMS[page.label().gmailState]
-  const domains = domainsPart(page)
   return [
     ...(problem === undefined ? [] : [el('p', { class: 'hint warn', role: 'note' }, problem)]),
     descriptionBox(page),
-    fieldSwitch(page, '留在收件箱', '只加标签，不归档', 'keepInInbox', 'keep_in_inbox'),
-    ...(domains === null ? [] : [domains]),
+    fieldSwitch(page, '归档', '打标签后移出收件箱；关掉则留在收件箱。要你处理的邮件总会留下', 'keepInInbox', 'keep_in_inbox', { inverted: true }),
+    domains,
     examples,
-    advanced(page, examplesChanged),
+    advanced(page, redraw),
   ]
 }

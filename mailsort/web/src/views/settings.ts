@@ -2,8 +2,9 @@
  * 设置 (`/settings`): three cards only.
  *
  * - 模式: 关闭, 影子 or 正式, and one line on what is in force (the deployment's MAILSORT_MODE ceiling or the breaker may
- *   lower the owner's choice; 解除熔断 once the breaker tripped). A choice names only `mode` (and the etag) in the
- *   mask, which is what clears a tripped breaker.
+ *   lower the owner's choice; 解除熔断 once the breaker tripped; 正式 with a read-only Gmail grant writes nothing, and
+ *   the line says how to grant writes). A choice names only `mode` (and the etag) in the mask, which is what clears a
+ *   tripped breaker.
  * - 撤销: a time range (1 小时, 24 小时, 7 天 or one's own) and optionally one label; 预览 counts what an undo would take
  *   back, 确认撤销 then undoes it, 20 entries per call, until none is left. The safety net for every write.
  * - Gmail: 从 Gmail 同步 (renames and deletions made in Gmail; the owner's label of a label's path is adopted).
@@ -13,22 +14,15 @@
 import { create } from '@ziyixi/proto/protobuf'
 import { timestampFromMs } from '@ziyixi/proto/protobuf/wkt'
 import type { Label } from '@ziyixi/proto/mailsort/ui/v2/label_pb'
-import { Mode, SettingsSchema, type Settings } from '@ziyixi/proto/mailsort/ui/v2/status_pb'
+import { Mode, ServiceStatus_AuthState, SettingsSchema, type ServiceStatus, type Settings } from '@ziyixi/proto/mailsort/ui/v2/status_pb'
 import { api, errorMessage, newRequestId, withRetry } from '../api.ts'
 import { card, segmented } from '../components.ts'
 import { button, el, toast } from '../dom.ts'
-import { BREAKER_REASONS, labelText, MODE_NAMES, ms } from '../format.ts'
+import { BREAKER_REASONS, labelText, MODE_HINTS, MODE_NAMES, ms } from '../format.ts'
 import type { Host, ViewContext } from '../app.ts'
 import { act, allLabels, frame, labelSelect } from './common.ts'
 
 const MODES: readonly (readonly [Mode, string])[] = [Mode.OFF, Mode.SHADOW, Mode.LIVE].map((mode) => [mode, MODE_NAMES[mode] ?? ''] as const)
-
-/** What each mode does, in one line. */
-const MODE_HINTS: Readonly<Record<number, string>> = {
-  [Mode.OFF]: '不读 Gmail，也不判断',
-  [Mode.SHADOW]: '只判断和记录，不改 Gmail',
-  [Mode.LIVE]: '有把握的邮件打标签并归档，从不标为已读',
-}
 
 const HOUR = 3_600_000
 const DAY = 24 * HOUR
@@ -70,14 +64,19 @@ function setMode(settings: Settings, mode: Mode, requestId: string): Promise<Set
   return api.updateSettings({ settings: create(SettingsSchema, { name: 'settings', mode, etag: settings.etag }), updateMask: { paths: ['mode', 'etag'] }, requestId })
 }
 
-function modeCard(settings: Settings, ctx: ViewContext, reload: () => Promise<void>): HTMLElement {
+/** The owner chose 正式, but the grant is read-only (mint-token's readonly scope): nothing would be written. */
+function readOnly(settings: Settings, status: ServiceStatus | null): boolean {
+  return settings.mode === Mode.LIVE && status !== null && status.authState === ServiceStatus_AuthState.OK && !status.writeScope
+}
+
+function modeCard(settings: Settings, status: ServiceStatus | null, ctx: ViewContext, reload: () => Promise<void>): HTMLElement {
   const after = async () => {
     ctx.refreshStatus()
     await reload()
   }
   const choose = (mode: Mode) => {
     if (mode === settings.mode) return
-    if (mode === Mode.LIVE && !ctx.host.confirm('切到正式？开了“正式打”的标签会在 Gmail 里打标签并归档。')) return
+    if (mode === Mode.LIVE && !ctx.host.confirm('切到正式？启用的标签会在 Gmail 里给有把握的邮件打标签并归档。')) return
     void act((requestId) => setMode(settings, mode, requestId), `已切到${MODE_NAMES[mode] ?? ''}`, after)
   }
   const resetBreaker = () => {
@@ -89,12 +88,15 @@ function modeCard(settings: Settings, ctx: ViewContext, reload: () => Promise<vo
     ? `已熔断（${BREAKER_REASONS[settings.breakerReason] ?? settings.breakerReason}），暂按影子运行`
     : settings.effectiveMode !== settings.mode
       ? `受部署上限限制，按${effective}运行`
-      : (MODE_HINTS[settings.mode] ?? '')
+      : readOnly(settings, status)
+        ? 'Gmail 只读授权，还不会写入：在本机运行 mint-token.mjs --scope modify'
+        : (MODE_HINTS[settings.mode] ?? '')
+  const warn = settings.breakerTripped || (settings.effectiveMode === settings.mode && readOnly(settings, status))
   return card(
     '模式',
     '',
     segmented('模式', MODES, settings.mode, choose),
-    el('p', { class: settings.breakerTripped ? 'hint warn' : 'hint' }, line),
+    el('p', { class: warn ? 'hint warn' : 'hint' }, line),
     settings.breakerTripped ? el('div', { class: 'actions' }, button('解除熔断', resetBreaker)) : null,
   )
 }
@@ -226,7 +228,8 @@ function gmailCard(): HTMLElement {
 
 export async function renderSettings(ctx: ViewContext): Promise<void> {
   const reload: () => Promise<void> = await frame(ctx.main, '设置', async (body) => {
-    const [settings, labels] = await Promise.all([api.getSettings({ name: 'settings' }), allLabels()])
-    body.replaceChildren(modeCard(settings, ctx, () => reload()), undoCard(labels, ctx.host), gmailCard())
+    // The header's status (its grant) only adds a line: without it the page still works.
+    const [settings, labels, status] = await Promise.all([api.getSettings({ name: 'settings' }), allLabels(), ctx.status().catch(() => null)])
+    body.replaceChildren(modeCard(settings, status, ctx, () => reload()), undoCard(labels, ctx.host), gmailCard())
   })
 }
