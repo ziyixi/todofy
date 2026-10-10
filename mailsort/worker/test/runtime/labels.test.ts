@@ -111,6 +111,17 @@ describe('labels: nested, kept in the inbox, trusted domains, Gmail labels, the 
       expect(gmailLabels(h, mail.id), mail.id).toEqual(['CATEGORY_UPDATES', 'INBOX', 'UNREAD']);
     }
     expect(modifies(h).length).toBe(before);
+    // In 待审, what a trust label's answer would teach: the look-alike's own domain (its DMARC passed for that one),
+    // which the question before such an answer names; a forged From (DMARC failed) teaches nothing.
+    const teachable = async (id: string) => {
+      const [row] = await h.sql<{ id: string }>(`SELECT id FROM review WHERE message_id = ? AND state = 'pending'`, id);
+      return (await h.api.getReviewItem({ name: `reviewItems/${row?.id ?? ''}` })).teachableDomain;
+    };
+    expect(await teachable(MAILS.lookalikeBank.id)).toBe('bank-alerts.example.net');
+    expect(await teachable(MAILS.forgedBankLogin.id)).toBe('');
+    expect(await teachable(MAILS.injectedDmarc.id)).toBe('');
+    const listed = (await h.api.listReviewItems({})).reviewItems.filter((item) => item.teachableDomain !== '');
+    expect(listed.map((item) => [item.subject, item.teachableDomain])).toEqual([[MAILS.lookalikeBank.subject, 'bank-alerts.example.net']]);
   });
 
   it('RemoveTrustedDomain takes a domain off (etag and request ID honoured); the label then waits again', async () => {

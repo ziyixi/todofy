@@ -15,7 +15,7 @@ export const MODE_NAMES: Readonly<Record<number, string>> = {
 export const MODE_HINTS: Readonly<Record<number, string>> = {
   [Mode.OFF]: '不读 Gmail，也不判断',
   [Mode.SHADOW]: '只判断和记录，不改 Gmail',
-  [Mode.LIVE]: '有把握的邮件打标签并归档，从不标为已读',
+  [Mode.LIVE]: '有把握的邮件打上标签，按归档设置移出收件箱，要你处理的留下；从不标为已读',
 }
 
 /** Why the breaker tripped (Settings.breaker_reason). */

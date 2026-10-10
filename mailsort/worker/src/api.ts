@@ -30,7 +30,7 @@ import { create, type DescMessage, type JsonValue, type MessageShape } from '@zi
 import { EmptySchema, timestampFromMs, timestampMs } from '@ziyixi/proto/protobuf/wkt';
 import { RpcError } from '@ziyixi/proto/rpc-status';
 import { fromWire, toWire } from '@ziyixi/proto/wire-json';
-import { needsAction } from './decide.ts';
+import { needsAction, teachableDomain } from './decide.ts';
 import type { ModeName } from './env.ts';
 import { deleteExample, deleteExamplesOfLabel, dropEmbeddings } from './examples.ts';
 import { setVerdict } from './feedback.ts';
@@ -272,10 +272,21 @@ function standing(ctx: ApiContext, decision: DecisionRow): LedgerRow | undefined
   return row;
 }
 
+/** The From domain a trust label's answer to `decision` would teach (decide.ts teachableDomain), or ''. */
+function teachable(decision: Pick<DecisionRow, 'dmarc' | 'sender_domain' | 'suspicious'> | undefined): string {
+  return decision === undefined ? '' : teachableDomain({ authenticated: decision.dmarc === 1, domain: decision.sender_domain, suspicious: decision.suspicious });
+}
+
+/** A review item as the API answers it, with the domain a trust label's answer would teach while it is pending. */
+function reviewOut(ctx: ApiContext, row: ReviewRow): ReturnType<typeof reviewMessage> {
+  return reviewMessage(row, row.state === 'pending' ? teachable(ctx.store.decision(row.message_id)) : '');
+}
+
 /**
- * Records the owner's choice and what it teaches: the verdict (and its example), and for a trust label and a mail that
- * passed DMARC its From domain as one of the label's trusted domains. Answers the ledger rows to run: the Gmail writes
- * the choice implies (live mode only).
+ * Records the owner's choice and what it teaches: the verdict (and its example), and for a trust label the mail's
+ * teachable From domain (authenticated, not a shared mailbox provider's, not suspicious; teachable) as one of the
+ * label's trusted domains, an exact entry. Answers the ledger rows to run: the Gmail writes the choice implies (live
+ * mode only).
  */
 function choose(ctx: ApiContext, item: ReviewRow, decision: DecisionRow, chosen: string | null): string[] {
   const { store } = ctx;
@@ -283,9 +294,8 @@ function choose(ctx: ApiContext, item: ReviewRow, decision: DecisionRow, chosen:
   // setVerdict resolves the item through pendingReviewOf; this item is the one asked about.
   store.run(`UPDATE review SET state = ?, resolved_label = ?, resolve_time = ? WHERE id = ?`, item.suggested_label === chosen ? 'confirmed' : 'corrected', chosen, ctx.now, item.id);
   const chosenLabel = chosen === null ? undefined : store.label(chosen);
-  if (chosenLabel?.trust === 1 && decision.dmarc === 1 && decision.sender_domain !== null && decision.sender_domain !== '') {
-    if (store.addTrustedDomain(chosenLabel.id, decision.sender_domain, ctx.now)) store.touchLabel(chosenLabel.id, ctx.now);
-  }
+  const domain = teachable(decision);
+  if (chosenLabel?.trust === 1 && domain !== '' && store.addTrustedDomain(chosenLabel.id, domain, ctx.now)) store.touchLabel(chosenLabel.id, ctx.now);
   if (!ownerWritesAllowed(ctx)) return [];
   const ids: string[] = [];
   const current = standing(ctx, decision);
@@ -597,18 +607,26 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailsortUiService>, ApiCon
   listReviewItems(request, ctx) {
     const size = pageSize(request.pageSize, PAGE);
     const before = cursorOf(request.pageToken, {}, stringCursor);
-    const rows = ctx.store.all<ReviewRow>(
-      `SELECT * FROM review WHERE state = 'pending' AND id < ? ORDER BY id DESC LIMIT ?`,
+    // With each item, what its decision says of the sender (one read): the domain a trust label's answer would teach.
+    type Row = ReviewRow & { dmarc: number | null; sender_domain: string | null; suspicious: number | null };
+    const rows = ctx.store.all<Row>(
+      `SELECT r.*, d.dmarc, d.sender_domain, d.suspicious FROM review r LEFT JOIN decisions d ON d.message_id = r.message_id
+       WHERE r.state = 'pending' AND r.id < ? ORDER BY r.id DESC LIMIT ?`,
       before ?? '￿',
       size + 1,
     );
     const page = rows.slice(0, size);
     const last = page[page.length - 1];
-    return Promise.resolve(create(ListReviewItemsResponseSchema, { reviewItems: page.map(reviewMessage), nextPageToken: rows.length > size && last !== undefined ? encodePageToken(last.id, {}) : '' }));
+    return Promise.resolve(
+      create(ListReviewItemsResponseSchema, {
+        reviewItems: page.map((row) => reviewMessage(row, row.dmarc === null ? '' : teachable({ dmarc: row.dmarc, sender_domain: row.sender_domain, suspicious: row.suspicious }))),
+        nextPageToken: rows.length > size && last !== undefined ? encodePageToken(last.id, {}) : '',
+      }),
+    );
   },
 
   getReviewItem(request, ctx) {
-    return Promise.resolve(reviewMessage(ctx.store.review(idOf(request.name, 'reviewItems')) ?? notFound()));
+    return Promise.resolve(reviewOut(ctx, ctx.store.review(idOf(request.name, 'reviewItems')) ?? notFound()));
   },
 
   async resolveReviewItem(request, ctx) {
@@ -619,7 +637,7 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailsortUiService>, ApiCon
       const { item, decision } = pendingItem(ctx, request.name);
       if (chosen !== null) existingLabel(ctx, chosen);
       ids = choose(ctx, item, decision, chosen);
-      return reviewMessage(ctx.store.review(id) ?? notFound());
+      return reviewOut(ctx, ctx.store.review(id) ?? notFound());
     });
     await flush(ctx, ids);
     return answer;
@@ -631,7 +649,7 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailsortUiService>, ApiCon
       once(ctx, request.requestId, 'SkipReviewItem', `reviewItems/${id}`, ReviewItemSchema, () => {
         const { item } = pendingItem(ctx, request.name);
         ctx.store.run(`UPDATE review SET state = 'skipped', resolve_time = ? WHERE id = ?`, ctx.now, item.id);
-        return reviewMessage(ctx.store.review(id) ?? notFound());
+        return reviewOut(ctx, ctx.store.review(id) ?? notFound());
       }),
     );
   },

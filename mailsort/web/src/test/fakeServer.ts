@@ -117,6 +117,8 @@ export class FakeServer {
   flow: MailFlow_Count[] = []
   /** GetLabelReport's rows; null: every label with 10 automatic labels and 1 uncertain mail. */
   report: LabelCount[] | null = null
+  /** The label report's decided mails of 7 days (the other totals follow the defaults). */
+  reportDecidedCount = 50
   /** GetLabelReport answers UNAVAILABLE. */
   reportFails = false
   /** Fields of GetServiceStatus that a test sets (the rest as below; review_count counts the pending items). */
@@ -215,7 +217,7 @@ export class FakeServer {
           create(LabelReportSchema, {
             name: 'labelReport',
             labels: this.report ?? this.labels.map((item) => create(LabelCountSchema, { label: item.name, autoCount: 10, unsureCount: 1 })),
-            decidedCount: 50,
+            decidedCount: this.reportDecidedCount,
             autoCount: 40,
             noLabelCount: 5,
             unsureCount: 5,

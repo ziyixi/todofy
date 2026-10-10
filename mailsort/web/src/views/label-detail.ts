@@ -114,7 +114,7 @@ function domainsPart(page: DetailPage): HTMLElement {
     { class: 'part', 'aria-label': '可信域名' },
     el('h3', {}, '可信域名', el('span', { class: 'meta' }, ` ${String(label.trustedDomains.length)}`)),
     label.trustedDomains.length === 0
-      ? el('p', { class: 'hint' }, '还没有，所以这个标签还不会自动打。在待审里选它、且发件人通过 DMARC 时，发件域会记在这里')
+      ? el('p', { class: 'hint' }, '还没有，所以这个标签还不会自动打。在待审里选它、且发件人身份经 Gmail 验证（DMARC 通过）时，发件域会记在这里')
       : el('ul', { class: 'example-list' }, ...label.trustedDomains.map((domain) => el('li', {}, el('p', { class: 'mono' }, domain), button('删除', () => { remove(domain) }, { class: 'quiet small danger', 'aria-label': `删除 ${domain}` })))),
   )
 }
@@ -193,7 +193,7 @@ function advanced(page: DetailPage, redraw: Redraw): HTMLDetailsElement {
   const body = el(
     'div',
     { class: 'more-body' },
-    fieldSwitch(page, '可信', '只给通过 DMARC 的可信域名发件人打它', 'trustImplying', 'trust_implying', { after: redraw.domains }),
+    fieldSwitch(page, '可信', '只给身份经过验证、且域名在可信域名里的发件人打它', 'trustImplying', 'trust_implying', { after: redraw.domains }),
     fieldSwitch(page, '敏感', '不留这类邮件的例子', 'sensitive', 'sensitive', { ask: deletesExamples, after: redraw.examples }),
     el('div', { class: 'actions' }, path, button('改名', () => void rename())),
     gmail === undefined ? null : el('p', { class: 'hint' }, `Gmail：${gmail}`),

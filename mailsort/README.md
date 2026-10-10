@@ -27,7 +27,9 @@ Four tabs under a header whose one status line shows the mode in force, the Gmai
   没有需要你确认的邮件. Each row shows the masked subject and sender, why the model was unsure in plain words, and the
   answers as one-tap buttons: the model's likely labels with their probabilities, 都不是, 其他… (a searchable picker
   over every label) and 跳过; j / k, the digits, Enter, c and s do the same by keyboard. An answer with a trust label
-  for a sender that passed DMARC teaches that label the sender's domain (the question before it says so).
+  can teach that label the sender's exact domain (only for a sender whose identity Gmail verified, that the model did
+  not find suspicious, and never a public mailbox like gmail.com): a question names the domain before any such answer,
+  and it is never the one-tap default.
   Corrections made in Gmail itself (moving a sorted mail to another of mailsort's labels, or removing the label)
   count too.
 - **概览**: one status line (what the mode does, the last sync, mail waiting), today's numbers with their last 7 days
@@ -53,7 +55,7 @@ Four tabs under a header whose one status line shows the mode in force, the Gmai
   labels, never one with labels nested under it; it never imports another one). Emergency stop: 设置 → 关闭
   (`docs/design.md` §10).
 - **API only**: the replay evaluation (before going live: your answers of the last 14 days decided again by today's
-  pipeline, nothing written, `docs/design.md` §5.1), the embedding rebuild, the single-entry undo, the write limits and
+  pipeline as of each mail's time, without what your answers taught after it, nothing written, `docs/design.md` §5.1), the embedding rebuild, the single-entry undo, the write limits and
   the neuron budget. To run the replay from the signed-in page's console:
 
   ```js
@@ -63,7 +65,7 @@ Four tabs under a header whose one status line shows the mode in force, the Gmai
   await fetch('/api/v2/replayEvaluation').then((r) => r.json())
   ```
 - **What is kept**: decided mail's subject, sender and From domain, and the review queue, for 14 days (the daily
-  cleanup runs in every mode, off included); decisions and the ledger without content (the sender only as a keyed hash)
+  cleanup runs in every mode, off included); decisions and the ledger without content (the sender only as a salted hash)
   for 180 days; the replay evaluation for 7 days; the flow counters (counts only) for 400 days; examples (masked
   summaries) until you delete them (with their label, by turning it 敏感, or DeleteExample) and trusted domains until you
   delete them (`docs/design.md` §2).

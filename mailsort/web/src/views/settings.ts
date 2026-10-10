@@ -76,7 +76,7 @@ function modeCard(settings: Settings, status: ServiceStatus | null, ctx: ViewCon
   }
   const choose = (mode: Mode) => {
     if (mode === settings.mode) return
-    if (mode === Mode.LIVE && !ctx.host.confirm('切到正式？启用的标签会在 Gmail 里给有把握的邮件打标签并归档。')) return
+    if (mode === Mode.LIVE && !ctx.host.confirm('切到正式？启用的标签会在 Gmail 里给有把握的邮件打标签（按归档设置移出收件箱，要你处理的留下），待审里的选择也会写入。')) return
     void act((requestId) => setMode(settings, mode, requestId), `已切到${MODE_NAMES[mode] ?? ''}`, after)
   }
   const resetBreaker = () => {

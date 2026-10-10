@@ -12,7 +12,7 @@
 // (proto/ts/http-transcoder.ts) and called through the shared client (proto/ts/http-client.ts). Bodies, query
 // parameters and responses are JSON in the wire JSON profile (proto/README.md): proto field names (snake_case),
 // enum values in lower case without their prefix (`Mode.MODE_LIVE` is "live"), timestamps in RFC 3339 UTC.
-// // Inputs are read strictly, outputs leniently. Request bodies are at most 16 KiB. Errors: errors.proto (this app's
+// Inputs are read strictly, outputs leniently. Request bodies are at most 16 KiB. Errors: errors.proto (this app's
 // reasons) and common/errors/v1/errors.proto (the reasons every API shares).
 //
 // Authentication, in front of the transcoder (packages/edge-auth): the whole host is behind Cloudflare Access,
@@ -157,8 +157,8 @@ service MailsortUiService {
   }
 
   // Answers an uncertain mail with a label, or "none of them" (AIP-216). The answer is a verdict: with a label it
-  // becomes an example, and for a trust label and a sender that passed DMARC the sender's domain joins the label's
-  // trusted domains. In live mode the label is also written to Gmail (and the mail archived, unless the label or
+  // becomes an example, and for a trust label the item's `teachable_domain` (when set) joins the label's trusted
+  // domains. In live mode the label is also written to Gmail (and the mail archived, unless the label or
   // the mail keeps it in the inbox).
   // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
   // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE

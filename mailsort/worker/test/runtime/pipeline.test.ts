@@ -151,7 +151,7 @@ describe('the pipeline, shadow then live', () => {
     expect(await decision(h, MAILS.bankEn.id)).toMatchObject({ outcome: 'unsure', unsure_reason: 'untrusted_sender', top_label: 'bank', shown: 1 });
     expect(modifies(h).filter((call) => call.url.includes(MAILS.bankEn.id))).toEqual([]);
     const [item] = (await h.api.listReviewItems({})).reviewItems;
-    expect(item).toMatchObject({ reason: 'untrusted_sender', subject: 'Your monthly bank statement', state: ReviewItem_State.PENDING });
+    expect(item).toMatchObject({ reason: 'untrusted_sender', subject: 'Your monthly bank statement', state: ReviewItem_State.PENDING, teachableDomain: 'bank.example.com' });
     expect(item?.candidates[0]?.label).toBe('labels/bank');
     // The owner's answer: a verdict, the label written in live mode (archived), and the domain learned.
     const resolved = await h.api.resolveReviewItem({ name: item?.name ?? '', label: 'labels/bank', requestId: op() });
@@ -170,8 +170,12 @@ describe('the pipeline, shadow then live', () => {
     expect(String(clefCalls(h, from)[0]?.state['sender_history'])).toMatch(/^bank[a-z0-9-]* ×1$/);
     // The owner's choice, written to Gmail, came back from the history as the same verdict: still the review's.
     expect(await decision(h, MAILS.bankEn.id)).toMatchObject({ verdict_source: 'review', verdict_label: 'bank' });
-    // The forged copy (DMARC failed) stays uncertain, and the day's one place in the queue is taken.
+    // The forged copy (DMARC failed) stays uncertain, and the day's one place in the queue is taken. It read no
+    // sender history: the owner's verdict belongs to the address's authenticated mail.
     expect(await decision(h, 'b100000000000002')).toMatchObject({ outcome: 'unsure', unsure_reason: 'untrusted_sender', shown: 0 });
+    const forged = clefCalls(h, from).filter((call) => call.state['sender_authenticated'] === 'no');
+    expect(forged.length).toBe(2);
+    expect(forged.map((call) => call.state['sender_history'])).toEqual([undefined, undefined]);
     expect(gmailLabels(h, 'b100000000000002')).toEqual(['CATEGORY_UPDATES', 'INBOX', 'UNREAD']);
     expect((await h.api.listReviewItems({})).reviewItems).toEqual([]);
   });
@@ -186,7 +190,9 @@ describe('the pipeline, shadow then live', () => {
     now = T0 + DAY + MINUTE;
     deliver(h, { ...MAILS.travelZh, id: 'd100000000000002', subject: '航班行程变更' }, now);
     await h.step(now);
-    expect(await decision(h, 'd100000000000002')).toMatchObject({ outcome: 'unsure', shown: 1, confidence: 0.5 });
+    // The mean of view 1's 0.5 and view 2's 0.5 put on view 1's scale (view 1 gave view 2's four options 0.875 of
+    // its probability): 0.46875.
+    expect(await decision(h, 'd100000000000002')).toMatchObject({ outcome: 'unsure', shown: 1, confidence: 0.46875 });
     const items = (await h.api.listReviewItems({})).reviewItems;
     expect(items.map((item) => item.reason)).toEqual(['low_confidence']);
     expect(await h.sql(`SELECT outcome, sum(n) AS n FROM flow WHERE outcome LIKE 'unsure%' GROUP BY outcome ORDER BY outcome`)).toEqual([

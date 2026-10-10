@@ -7,8 +7,11 @@
  * answer, next to the job's own row (message_id ''), in the one table `replay`. Each alarm pass then decides a few of
  * them (replayStep), after the drain and the embeddings, with the subrequests the pass has left: it re-reads the mail
  * (metadata and body, as the drain does, with the read grant), gathers the same evidence and asks the same two views
- * (judge.ts), as of the mail's original decision (its sender history before it), and records what the decision would
- * have been, and whether the review queue's quota of that day would have shown it. It writes nothing to Gmail, makes
+ * (judge.ts), as of the mail's original decision (the sender history, the examples and the trusted domains of then:
+ * never what the owner's answer to that mail, or a later one, taught), and records what the decision would have been,
+ * and whether the review queue's quota of that day would have shown it. A model outage backs the mail off as the drain
+ * does (and stops calling the model for the pass); a refused answer gets a few tries; then the mail counts as
+ * uncertain (`model_unavailable`). It writes nothing to Gmail, makes
  * no verdict, example, decision, review item or flow count: only its own rows and the day's usage (Gmail calls,
  * neurons), which every model call counts against the owner's budget.
  *
@@ -22,8 +25,8 @@ import { joinsReview, type Decision } from './decide.ts';
 import type { AiRunner } from './env.ts';
 import { GoogleError, type GmailClient } from './gmail.ts';
 import { timeId } from './ids.ts';
-import { gather, judge, modelUnavailable, reviewQuotaOn, type Judgement } from './judge.ts';
-import { BAD_ANSWER_ATTEMPTS_MAX, CLEF, DAY, REPLAY_BATCH, REPLAY_ITEMS_MAX, REPLAY_NEURON_SHARE, REPLAY_SUBREQUESTS, REPLAY_WINDOW_MS } from './limits.ts';
+import { gather, judge, modelUnavailable, retryDelay, reviewQuotaOn, type Judgement } from './judge.ts';
+import { BAD_ANSWER_ATTEMPTS_MAX, CLEF, DAY, MAIL_ATTEMPTS_MAX, REPLAY_BATCH, REPLAY_ITEMS_MAX, REPLAY_NEURON_SHARE, REPLAY_SUBREQUESTS, REPLAY_WINDOW_MS } from './limits.ts';
 import { readMessage } from './mime.ts';
 import type { Budget } from './session.ts';
 import type { SettingsValue } from './settings.ts';
@@ -44,6 +47,8 @@ export interface ReplayRow extends Record<string, SqlStorageValue> {
   reason: string;
   shown: number;
   attempts: number;
+  /** A mail backed off after a model outage waits until then. */
+  not_before: number;
   create_time: number;
   done_time: number | null;
 }
@@ -101,7 +106,7 @@ function finish(store: Store, row: ReplayRow, state: 'evaluated' | 'skipped', no
   let shown = 0;
   if (decision?.kind === 'unsure') {
     // The quota of the mail's own day, against the mails of this replay shown on that day so far (rows are decided in
-    // the order of their days, so each day's mails compete as they arrived).
+    // the order of their days, so each day's mails compete as they arrived; one backed off goes after the rest).
     const dayStart = Math.floor(row.as_of / DAY) * DAY;
     const before = store.count(`SELECT count(*) AS n FROM replay WHERE job_id = ? AND shown = 1 AND as_of >= ? AND as_of < ?`, row.job_id, dayStart, dayStart + DAY);
     shown = joinsReview(decision, before, reviewQuotaOn(store, row.as_of)) ? 1 : 0;
@@ -130,8 +135,10 @@ export async function replayStep(deps: ReplayDeps): Promise<boolean> {
   const job = store.one<{ job_id: string; state: string }>(`SELECT job_id, state FROM replay WHERE message_id = ''`);
   if (job?.state !== 'running') return false;
   for (let done = 0; done < REPLAY_BATCH; done++) {
-    const row = store.one<ReplayRow>(`SELECT * FROM replay WHERE job_id = ? AND state = 'pending' ORDER BY as_of, message_id LIMIT 1`, job.job_id);
+    const row = store.one<ReplayRow>(`SELECT * FROM replay WHERE job_id = ? AND state = 'pending' AND not_before <= ? ORDER BY as_of, message_id LIMIT 1`, job.job_id, deps.now());
     if (row === undefined) {
+      // Done, unless a mail backed off after an outage still waits.
+      if (store.one(`SELECT 1 AS x FROM replay WHERE job_id = ? AND state = 'pending'`, job.job_id) !== undefined) return false;
       deps.transact(() => store.run(`UPDATE replay SET state = 'succeeded', done_time = ? WHERE job_id = ? AND message_id = ''`, deps.now(), job.job_id));
       return false;
     }
@@ -163,15 +170,24 @@ export async function replayStep(deps: ReplayDeps): Promise<boolean> {
         return false;
       }
       const code = error instanceof AiError ? error.code : 'ai_unexpected';
+      // As the drain treats a mail: an answer this code refused is about this mail, a few tries and the replay goes on;
+      // anything else is an outage, the mail backs off (about five hours in all) and the replay stops calling the model
+      // this pass. Then the decision the drain would make: uncertain, model_unavailable.
+      const badAnswer = code.startsWith('clef_bad');
       const attempts = row.attempts + 1;
+      const now = deps.now();
       deps.transact(() => {
         store.pushError(code);
-        store.run(`UPDATE replay SET attempts = ? WHERE job_id = ? AND message_id = ?`, attempts, row.job_id, row.message_id);
+        store.run(
+          `UPDATE replay SET attempts = ?, not_before = ? WHERE job_id = ? AND message_id = ?`,
+          attempts,
+          badAnswer ? row.not_before : now + retryDelay(attempts),
+          row.job_id,
+          row.message_id,
+        );
       });
-      // A few tries, as the drain gives a mail; then the decision the drain would make: uncertain, model_unavailable.
-      if (attempts < BAD_ANSWER_ATTEMPTS_MAX) {
-        // An answer this code refused is about this mail; anything else is an outage: no more model calls this pass.
-        if (code.startsWith('clef_bad')) continue;
+      if (attempts < (badAnswer ? BAD_ANSWER_ATTEMPTS_MAX : MAIL_ATTEMPTS_MAX)) {
+        if (badAnswer) continue;
         return false;
       }
       judgement = modelUnavailable();
@@ -179,7 +195,7 @@ export async function replayStep(deps: ReplayDeps): Promise<boolean> {
     const { decision } = judgement;
     deps.transact(() => { finish(store, row, 'evaluated', deps.now(), decision); });
   }
-  return store.one(`SELECT 1 AS x FROM replay WHERE job_id = ? AND state = 'pending'`, job.job_id) !== undefined;
+  return store.one(`SELECT 1 AS x FROM replay WHERE job_id = ? AND state = 'pending' AND not_before <= ?`, job.job_id, deps.now()) !== undefined;
 }
 
 export interface ReplaySummary {

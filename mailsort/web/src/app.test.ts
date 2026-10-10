@@ -131,9 +131,10 @@ describe('待审', () => {
     expect(answer(a, '订阅').classList.contains('primary')).toBe(true)
     expect(answer(a, '订阅').textContent).toBe('订阅60%')
     expect(answer(a, '都不是').classList.contains('primary')).toBe(false)
-    // A mail the model could not read: why, and 都不是 as its only answer.
-    expect(b?.textContent).toContain('模型暂不可用')
+    // A mail the model gave no answer for: why, where to answer, and 都不是 without being suggested (not primary).
+    expect(b?.querySelector('p.hint')?.textContent).toBe('模型暂不可用：可用 其他… 选标签')
     expect(buttons(b)).toEqual(['都不是', '其他…', '跳过'])
+    expect(answer(b, '都不是').classList.contains('primary')).toBe(false)
 
     answer(a, '订阅').click()
     await settle()
@@ -159,7 +160,7 @@ describe('待审', () => {
     press('Enter')
     await settle()
     expect(server.calls.find((call) => call.path.includes('/b:resolve'))?.body?.['label']).toBe('labels/receipt')
-    expect(toastText(root)).toBe('已改为：收据')
+    expect(toastText(root)).toBe('已选：收据')
 
     answer(rows(root)[0], '都不是').click()
     await settle()
@@ -240,17 +241,66 @@ describe('待审', () => {
     answer(phishing, '银行').click()
     answer(trust, '银行').click()
     await settle()
-    // Asked twice, refused twice: nothing was sent. Choosing a trust label says what it teaches.
-    expect(asked).toEqual([
-      '疑似钓鱼：先在 Gmail 里核对发件人和链接。仍然选“银行”？发件人通过 DMARC 时，它的域名会记为这个标签的可信域名。',
-      '发件人还不可信：先在 Gmail 里核对发件人。仍然选“银行”？发件人通过 DMARC 时，它的域名会记为这个标签的可信域名。',
-    ])
+    // Asked twice, refused twice: nothing was sent. Neither mail would teach a domain (no teachable_domain).
+    expect(asked).toEqual(['疑似钓鱼：先在 Gmail 里核对发件人和链接。仍然选“银行”？', '发件人还不可信：先在 Gmail 里核对发件人。仍然选“银行”？'])
     expect(server.calls.some((call) => call.path.includes(':resolve'))).toBe(false)
     // 都不是 is never asked about.
     answer(phishing, '都不是').click()
     await settle()
     expect(asked.length).toBe(2)
     expect(server.calls.some((call) => call.path.includes('/p:resolve'))).toBe(true)
+  })
+
+  it('names the domain before any answer that would teach a trust label one, whatever the reason, and never makes it primary', async () => {
+    const server = new FakeServer()
+    server.labels.push(Object.assign(label('bank', '银行'), { trustImplying: true }), Object.assign(label('broker', '券商'), { trustImplying: true, trustedDomains: ['bank-alerts.example.net'] }))
+    const candidates = [create(CandidateSchema, { label: 'labels/bank', probability: 0.55 }), create(CandidateSchema, { label: 'labels/receipt', probability: 0.3 })]
+    // 把握不够 (no warning line), yet a bank answer would trust the sender's domain.
+    server.reviewItems = [reviewItem('t', { reason: 'low_confidence', candidates, teachableDomain: 'bank-alerts.example.net' })]
+    const asked: string[] = []
+    let agree = false
+    const root = await open(server, '/', { now: () => NOW, confirm: (message) => (asked.push(message), agree) })
+    const [row] = rows(root)
+    expect(row?.querySelector('p.hint.warn')).toBeNull()
+    expect(answer(row, '银行').classList.contains('primary')).toBe(false)
+    // Neither a tap nor Enter trusts it without the question, which names the domain.
+    answer(row, '银行').click()
+    press('j')
+    press('Enter')
+    await settle()
+    const question = '选“银行”？这会把 bank-alerts.example.net 记为“银行”的可信域名，以后这个域名的邮件可以自动打上它。'
+    expect(asked).toEqual([question, question])
+    expect(server.calls.some((call) => call.path.includes(':resolve'))).toBe(false)
+    // A label that does not imply trust, or a trust label that lists the domain already, teaches nothing: no question.
+    answer(row, '收据').click()
+    await settle()
+    expect(asked.length).toBe(2)
+    expect(server.calls.find((call) => call.path.includes('/t:resolve'))?.body?.['label']).toBe('labels/receipt')
+    server.reviewItems = [reviewItem('u', { reason: 'low_confidence', candidates: [create(CandidateSchema, { label: 'labels/broker', probability: 0.6 })], teachableDomain: 'bank-alerts.example.net' })]
+    const again = await open(server, '/', { now: () => NOW, confirm: (message) => (asked.push(message), agree) })
+    expect(answer(rows(again)[0], '券商').classList.contains('primary')).toBe(true)
+    answer(rows(again)[0], '券商').click()
+    await settle()
+    expect(asked.length).toBe(2)
+    // Agreeing sends the answer.
+    server.reviewItems = [reviewItem('v', { reason: 'low_confidence', candidates, teachableDomain: 'bank-alerts.example.net' })]
+    agree = true
+    const third = await open(server, '/', { now: () => NOW, confirm: (message) => (asked.push(message), agree) })
+    answer(rows(third)[0], '银行').click()
+    await settle()
+    expect(asked.length).toBe(3)
+    expect(server.calls.find((call) => call.path.includes('/v:resolve'))?.body?.['label']).toBe('labels/bank')
+  })
+
+  it('opens 其他… on Enter for a mail the model gave no answer for, never choosing 都不是', async () => {
+    const server = new FakeServer()
+    server.reviewItems = [reviewItem('m', { reason: 'model_unavailable', candidates: [] })]
+    const root = await open(server, '/')
+    press('j')
+    press('Enter')
+    await settle()
+    expect(server.calls.some((call) => call.path.includes(':resolve'))).toBe(false)
+    expect(document.activeElement).toBe(root.querySelector('.picker input'))
   })
 
   it('gives a button only to the options worth one: the first always, the others from 5 %', async () => {
@@ -321,7 +371,7 @@ describe('设置', () => {
     const root = await open(server, '/settings', { now: () => NOW, confirm: (message) => (asked.push(message), true) })
     buttonNamed(root, '正式').click()
     await settle()
-    expect(asked).toEqual(['切到正式？启用的标签会在 Gmail 里给有把握的邮件打标签并归档。'])
+    expect(asked).toEqual(['切到正式？启用的标签会在 Gmail 里给有把握的邮件打标签（按归档设置移出收件箱，要你处理的留下），待审里的选择也会写入。'])
     const patch = server.calls.find((call) => call.method === 'PATCH')
     expect(decodeURIComponent(patch?.path ?? '')).toContain('update_mask=mode,etag')
     expect(patch?.body).toMatchObject({ mode: 'live', etag: 's1' })
@@ -344,7 +394,7 @@ describe('设置', () => {
     // With the write grant, what live does.
     server.status = { writeScope: true }
     const again = await open(server, '/settings')
-    expect(again.querySelector('.card p.hint')?.textContent).toBe('有把握的邮件打标签并归档，从不标为已读')
+    expect(again.querySelector('.card p.hint')?.textContent).toBe('有把握的邮件打上标签，按归档设置移出收件箱，要你处理的留下；从不标为已读')
   })
 
   it('explains the deployment’s ceiling in one line', async () => {

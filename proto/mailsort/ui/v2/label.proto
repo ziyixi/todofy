@@ -61,8 +61,8 @@ message Label {
   // Gmail; in shadow mode it is only recorded.
   bool enabled = 4 [(google.api.field_behavior) = OPTIONAL];
   // The label implies trust (a bank, a brokerage, accounts, security, government): a confident decision needs,
-  // besides the model's agreement, a sender that passed DMARC aligned with its From domain, a From domain in
-  // `trusted_domains` (or a subdomain of one), and a lower suspicion.
+  // besides the model's agreement, a sender that passed DMARC aligned with its From domain, a From domain trusted
+  // by `trusted_domains`, and a lower suspicion.
   bool trust_implying = 5 [(google.api.field_behavior) = OPTIONAL];
   // The Gmail label's ID once linked; empty before.
   string gmail_label_id = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
@@ -89,8 +89,9 @@ message Label {
   // outlives the 14 days of decided mail's content.
   bool sensitive = 14 [(google.api.field_behavior) = OPTIONAL];
   // The sender domains a trust label may be decided for (`trust_implying`), sorted: a mail's From domain matches
-  // one that is listed or a subdomain of it. Learned, never typed: a review choice of this label for a mail that
-  // passed DMARC adds its From domain; the store's former sender rules seeded the first ones. At most 50;
-  // RemoveTrustedDomain takes one off.
+  // one that is listed exactly, or a subdomain of one seeded from a former sender domain rule. Learned, never
+  // typed: a review choice of this label adds the mail's ReviewItem.teachable_domain; the store's former sender
+  // rules seeded the first ones. A public mailbox provider's domain is never one. At most 50; RemoveTrustedDomain
+  // takes one off.
   repeated string trusted_domains = 15 [(google.api.field_behavior) = OUTPUT_ONLY];
 }

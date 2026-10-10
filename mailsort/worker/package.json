@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "Worker \"mailsort\": the owner's Gmail sorting (MailsortState, one SQLite Durable Object that schedules itself with setAlarm) and its owner API (mailsort.ui.v1) behind Access.",
+  "description": "Worker \"mailsort\": the owner's Gmail sorting (MailsortState, one SQLite Durable Object that schedules itself with setAlarm) and its owner API (mailsort.ui.v2) behind Access.",
   "engines": {
     "node": ">=26"
   },

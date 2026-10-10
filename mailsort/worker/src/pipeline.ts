@@ -31,7 +31,7 @@ import { applyFeedback } from './feedback.ts';
 import { countFlow, skipOutcome, stageOf, type FlowOutcome } from './flow.ts';
 import { GmailRefused, GoogleError, isMessageId, type AccessToken, type GmailClient, type HistoryPage } from './gmail.ts';
 import { timeId } from './ids.ts';
-import { gather, judge, modelUnavailable, reviewQuotaOn, shownOn, type Judgement } from './judge.ts';
+import { gather, judge, modelUnavailable, retryDelay, reviewQuotaOn, shownOn, type Judgement } from './judge.ts';
 import {
   ALARM_BACKLOG_MS,
   ALARM_IDLE_MS,
@@ -49,8 +49,6 @@ import {
   MAIL_ATTEMPTS_MAX,
   MAIL_SUBREQUESTS,
   RESYNC_MAX,
-  RETRY_BASE_MS,
-  RETRY_MAX_MS,
   SHARE_JUMP,
   SHARE_MAX,
   SHARE_MIN_WRITES,
@@ -211,11 +209,6 @@ interface MailContext {
 /** `retry`: Workers AI failed, stop calling it this pass; `later`: this mail waits, go on with the next. */
 type MailOutcome = 'decided' | 'skipped' | 'gone' | 'deferred' | 'retry' | 'later' | 'stop';
 
-/** The wait after a mail's `attempts`-th failure: RETRY_BASE_MS doubling, at most RETRY_MAX_MS. */
-export function retryDelay(attempts: number): number {
-  return Math.min(RETRY_BASE_MS * 2 ** Math.max(0, attempts - 1), RETRY_MAX_MS);
-}
-
 /** Puts a pending mail back with one more attempt and its backoff. Run inside a transaction. */
 function postpone(store: Store, messageId: string, attempts: number, now: number): void {
   store.run(`UPDATE pending SET attempts = ?, not_before = ? WHERE message_id = ?`, attempts + 1, now + retryDelay(attempts + 1), messageId);
@@ -229,15 +222,20 @@ export function writesLive(store: Store, ceiling: ModeName): boolean {
 /**
  * The alarm's gate (writes.ts WriteGate), asked right before each `intended` row goes to Gmail, whether the row is
  * this pass's or a retry of an earlier one. Every row needs live in force and a write grant. An auto row also needs
- * its label enabled, and stays within the caps: passing the daily or the run cap trips the breaker, which makes every
- * later write of the pass (and of the next ones) fail this gate. An owner's row (a review choice whose first try
- * failed) is not capped.
+ * its label enabled, for a trust label still a trusted sender (authenticated, and its From domain still trusted: the
+ * owner may have removed the domain, or turned 可信 on, since a 429 or 5xx left the row), and stays within the caps:
+ * passing the daily or the run cap trips the breaker, which makes every later write of the pass (and of the next ones)
+ * fail this gate. An owner's row (a review choice whose first try failed) is not capped.
  */
 export function alarmGate(store: Store, ceiling: ModeName, counter: { runWrites: number }, now: () => number): WriteGate {
   return (row, label) => {
     if (!writesLive(store, ceiling)) return 'mode_changed';
     if (row.origin === 'owner') return null;
     if (label.enabled !== 1) return 'label_disabled';
+    if (label.trust === 1) {
+      const decision = store.decision(row.message_id);
+      if (decision?.dmarc !== 1 || decision.sender_domain === null || !store.isTrusted(label.id, decision.sender_domain)) return 'untrusted_sender';
+    }
     const settings = readSettings(store);
     const at = now();
     if (store.usage(utcDay(at)).applied >= settings.dailyWriteLimit) {

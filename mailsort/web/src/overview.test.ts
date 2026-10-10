@@ -237,7 +237,11 @@ describe('概览', () => {
     expect(root.textContent).toContain('今天还没有邮件')
     expect([...root.querySelectorAll('.kpi-value')].map((node) => node.textContent)).toEqual(['0', '0', '0', '0'])
     expect(root.querySelector('table.report')).toBeNull()
-    expect(root.textContent).toContain('最近 7 天还没有邮件')
+    // The week had mail (7 天 50 above), just none on a label: the line says so, not that there was no mail.
+    expect(root.querySelector('.empty strong')?.textContent).toBe('最近 7 天还没有邮件归到标签')
+    s.reportDecidedCount = 0
+    const quiet = await open(s, '/overview')
+    expect(quiet.querySelector('.empty strong')?.textContent).toBe('最近 7 天还没有邮件')
     // Past 70 % of the budget: the warning tone and why.
     expect(root.querySelector('[role="meter"]')?.classList.contains('warn')).toBe(true)
     expect(root.textContent).toContain('已过 70%，今天改用 Clef-flash；4 封等明天的额度')

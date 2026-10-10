@@ -349,7 +349,7 @@ describe('the detail', () => {
     trust.checked = true
     trust.dispatchEvent(new Event('change'))
     await settle()
-    expect(detail().querySelector('[aria-label="可信域名"]')?.textContent).toBe('可信域名 0还没有，所以这个标签还不会自动打。在待审里选它、且发件人通过 DMARC 时，发件域会记在这里')
+    expect(detail().querySelector('[aria-label="可信域名"]')?.textContent).toBe('可信域名 0还没有，所以这个标签还不会自动打。在待审里选它、且发件人身份经 Gmail 验证（DMARC 通过）时，发件域会记在这里')
     const sensitive = switchNamed('敏感')
     sensitive.checked = true
     sensitive.dispatchEvent(new Event('change'))

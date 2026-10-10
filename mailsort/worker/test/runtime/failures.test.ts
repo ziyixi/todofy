@@ -1,7 +1,8 @@
 /**
  * The pipeline when things go wrong, in workerd with a real SQLite MailsortState and the fakes
  * (../../../docs/design.md §3, §4, §7): a write left for a retry never goes out once live is no longer in force (the
- * owner's shadow, the breaker, the MODE ceiling, the label's switch), retries count against the run cap, a breaker
+ * owner's shadow, the breaker, the MODE ceiling, the label's switch) or its trust label's sender is no longer trusted,
+ * retries count against the run cap, a breaker
  * tripped by a pass's own write stops the rest of that pass, one unreadable mail never holds up the queue, a deleted
  * label's entries are refused before any intent, the resync's read order, a model outage backs off per mail, one
  * label per conversation follows the labels a thread carries now, a resync never sorts mail from before the install,
@@ -84,6 +85,26 @@ describe('a write left for a retry goes out only while live is in force', () => 
     await setLabelEnabled(h, 'newsletter', false);
     await nextPassWritesNothing('a1000000000000a3', 'label_disabled');
     await setLabelEnabled(h, 'newsletter', true);
+  });
+
+  it('the owner took the trust label\'s domain off meanwhile: the retry writes nothing', async () => {
+    const id = 'a1000000000000a9';
+    await h.sql(`INSERT INTO trusted_domains (label_id, domain, origin, create_time) VALUES ('bank', 'bank.example.com', 'owner', ?)`, now - MINUTE);
+    const failing = failModifies(h, 503);
+    deliver(h, { ...MAILS.bankEn, id, subject: `Your monthly bank statement ${id}` }, now);
+    now += 5 * MINUTE;
+    await h.step(now);
+    failing.off();
+    expect(await ledgerOf(h, id)).toEqual([{ state: 'intended', origin: 'auto', last_code: 'message_modify_503' }]);
+    const label = await h.api.getLabel({ name: 'labels/bank' });
+    await h.api.removeTrustedDomain({ name: label.name, domain: 'bank.example.com', etag: label.etag, requestId: op() });
+    const before = modifies(h).length;
+    now += 5 * MINUTE;
+    await h.step(now);
+    expect(modifies(h).length).toBe(before);
+    expect(gmailLabels(h, id)).toContain('INBOX');
+    expect(await ledgerOf(h, id)).toEqual([{ state: 'failed', origin: 'auto', last_code: 'untrusted_sender' }]);
+    expect(await decision(h, id)).toMatchObject({ outcome: 'suggested', label_id: 'bank', shown: 0 });
   });
 
   /** The retry's modifies and label reads after `before` calls. */

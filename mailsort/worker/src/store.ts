@@ -10,11 +10,12 @@
  * domain) and the review queue for CONTENT_KEPT_MS; the replay for REPLAY_KEPT_MS; the daily usage and flow counters
  * for FLOW_KEPT_DAYS; request IDs for a day. `prune` runs once per UTC day in every mode, off included (pipeline.ts
  * retain). Examples (masked summaries) and trusted domains are what the app learned: they are kept until deleted,
- * never pruned. The sender of a decision is kept only as a keyed hash (mask.ts senderHash), never as its address.
+ * never pruned. The sender of a decision is kept only as a salted hash (mask.ts senderHash), never as its address.
  *
  * Nothing here logs. Rows hold the owner's personal data (subjects, senders, domains); they leave the object only
  * through the owner API behind Access, and the masked text only to Workers AI.
  */
+import { sharedMailbox } from './decide.ts';
 import { newEtag } from './ids.ts';
 import { CONTENT_KEPT_MS, DAY, DECISIONS_KEPT_MS, ERRORS_KEPT, FLOW_KEPT_DAYS, REPLAY_KEPT_MS, REQUEST_ID_TTL_MS, TRUSTED_DOMAINS_PER_LABEL_MAX } from './limits.ts';
 import { senderHash } from './mask.ts';
@@ -244,37 +245,45 @@ export const SCHEMA_V4: readonly string[] = [
 ];
 
 /**
- * Schema version 5 (2026-10-10, the model decides every mail; ../../docs/design.md §3.4). In one transaction:
+ * Schema version 5 (2026-10-10, the model decides every mail; ../../docs/design.md §3.2). In one transaction:
  *
  * 1. trusted domains, seeded from the active rules of trust labels and the active rules with `require_dmarc`: the
- *    domain of a sender address rule, or a sender domain rule's own (list and delivered-to rules name no sender);
+ *    domain of a sender address rule, matched exactly, or a sender domain rule's own, which also covers its subdomains
+ *    (`subdomains`, as the rule did); list and delivered-to rules name no sender. A shared mailbox provider's domain
+ *    (decide.ts sharedMailbox) is never seeded: Store.migrate deletes any right after;
  * 2. the rules (proposals included) dropped, and what only they used: a decision's exact sender address, List-Id,
  *    delivered-to address and its rule's keep-in-inbox, with their indexes;
  * 3. decisions rebuilt (SQLite cannot change a CHECK): the outcome `none` (confident that no label fits), the sender
- *    as a keyed hash (filled from the addresses still kept: senderHashesToBackfill), the second view's probabilities,
- *    p(needs_action), the combined probability and whether the mail was shown in the review queue;
+ *    as a salted hash (filled from the addresses still kept: senderHashesToBackfill), the second view's probabilities,
+ *    p(needs_action), the combined probability and whether the mail was shown in the review queue (0 for every
+ *    decision before: the daily quota counts only the places of this queue);
  * 4. labels rebuilt without live mode per label (`live`, `live_since`) and the owner's thresholds: a label writes
  *    in live mode when it is enabled;
- * 5. the review queue keeps only uncertain mail: pending shadow suggestions and audit samples go (resolved items stay
- *    for the replay evaluation);
+ * 5. the review queue starts empty: every pending item goes (the shadow suggestions, the audit samples and the
+ *    uncertain mail version 4 asked about, all of it), the resolved items stay for the replay evaluation;
  * 6. the replay evaluation's table.
  *
- * Every statement is safe to run again (IF EXISTS, IF NOT EXISTS, OR IGNORE), and Store.migrate runs them inside the
+ * Every statement is safe to run again (IF EXISTS, IF NOT EXISTS, ON CONFLICT), and Store.migrate runs them inside the
  * object's transaction, under blockConcurrencyWhile, so a migration cut short leaves version 4 as it was.
  */
 export const SCHEMA_V5: readonly string[] = [
+  // `subdomains` 1: the domain also covers its subdomains (only one seeded from a former sender domain rule); 0: only
+  // that exact From domain (one the owner's answer taught, or a former sender address rule's).
   `CREATE TABLE IF NOT EXISTS trusted_domains (
     label_id TEXT NOT NULL,
     domain TEXT NOT NULL,
     origin TEXT NOT NULL CHECK (origin IN ('seed', 'owner')),
+    subdomains INTEGER NOT NULL DEFAULT 0,
     create_time INTEGER NOT NULL,
     PRIMARY KEY (label_id, domain)
   ) WITHOUT ROWID`,
-  `INSERT OR IGNORE INTO trusted_domains (label_id, domain, origin, create_time)
-   SELECT r.label_id, CASE r.kind WHEN 'sender_address' THEN substr(r.value, instr(r.value, '@') + 1) ELSE r.value END, 'seed', r.create_time
+  `INSERT INTO trusted_domains (label_id, domain, origin, subdomains, create_time)
+   SELECT r.label_id, lower(CASE r.kind WHEN 'sender_address' THEN substr(r.value, instr(r.value, '@') + 1) ELSE r.value END), 'seed',
+     r.kind = 'sender_domain', r.create_time
    FROM rules r JOIN labels l ON l.id = r.label_id
    WHERE r.state = 'active' AND r.kind IN ('sender_address', 'sender_domain') AND (l.trust = 1 OR r.require_dmarc = 1)
-     AND (r.kind = 'sender_domain' OR instr(r.value, '@') > 1)`,
+     AND (r.kind = 'sender_domain' OR instr(r.value, '@') > 1)
+   ON CONFLICT (label_id, domain) DO UPDATE SET subdomains = max(subdomains, excluded.subdomains), create_time = min(create_time, excluded.create_time)`,
   `DROP TABLE IF EXISTS rules`,
   `DROP TABLE IF EXISTS decisions_v5`,
   `CREATE TABLE decisions_v5 (
@@ -309,18 +318,16 @@ export const SCHEMA_V5: readonly string[] = [
     verdict_source TEXT,
     verdict_at INTEGER
   )`,
-  // A decision in the review queue then was shown there.
   `INSERT INTO decisions_v5 (message_id, thread_id, received_at, decided_at, outcome, label_id, top_label, decider, unsure_reason, probabilities, suspicious,
-     bulk, shown, model, versions, dmarc, sender_domain, subject, sender, summary, content_cleared, current_labels, verdict, verdict_label, verdict_source, verdict_at)
+     bulk, model, versions, dmarc, sender_domain, subject, sender, summary, content_cleared, current_labels, verdict, verdict_label, verdict_source, verdict_at)
    SELECT message_id, thread_id, received_at, decided_at, outcome, label_id, top_label, decider, unsure_reason, probabilities, suspicious,
-     bulk, EXISTS (SELECT 1 FROM review r WHERE r.message_id = decisions.message_id), model, versions, dmarc, sender_domain, subject, sender, summary,
-     content_cleared, current_labels, verdict, verdict_label, verdict_source, verdict_at
+     bulk, model, versions, dmarc, sender_domain, subject, sender, summary, content_cleared, current_labels, verdict, verdict_label, verdict_source, verdict_at
    FROM decisions`,
   `DROP TABLE decisions`,
   `ALTER TABLE decisions_v5 RENAME TO decisions`,
   `CREATE INDEX IF NOT EXISTS decisions_thread ON decisions (thread_id)`,
   `CREATE INDEX IF NOT EXISTS decisions_time ON decisions (decided_at)`,
-  `CREATE INDEX IF NOT EXISTS decisions_sender ON decisions (sender_hash, decided_at)`,
+  `CREATE INDEX IF NOT EXISTS decisions_sender ON decisions (sender_hash, dmarc, decided_at)`,
   `DROP TABLE IF EXISTS labels_v5`,
   `CREATE TABLE labels_v5 (
     id TEXT PRIMARY KEY,
@@ -347,8 +354,9 @@ export const SCHEMA_V5: readonly string[] = [
    FROM labels`,
   `DROP TABLE labels`,
   `ALTER TABLE labels_v5 RENAME TO labels`,
-  `DELETE FROM review WHERE state = 'pending' AND kind != 'unsure'`,
-  // The replay evaluation (replay.ts): one row for the job itself (message_id ''), one per mail it decides again.
+  `DELETE FROM review WHERE state = 'pending'`,
+  // The replay evaluation (replay.ts): one row for the job itself (message_id ''), one per mail it decides again;
+  // `not_before` holds a mail backed off after a model outage.
   `CREATE TABLE IF NOT EXISTS replay (
     job_id TEXT NOT NULL,
     message_id TEXT NOT NULL,
@@ -360,6 +368,7 @@ export const SCHEMA_V5: readonly string[] = [
     reason TEXT NOT NULL DEFAULT '',
     shown INTEGER NOT NULL DEFAULT 0,
     attempts INTEGER NOT NULL DEFAULT 0,
+    not_before INTEGER NOT NULL DEFAULT 0,
     create_time INTEGER NOT NULL,
     done_time INTEGER,
     PRIMARY KEY (job_id, message_id)
@@ -427,7 +436,7 @@ export interface DecisionRow extends Record<string, SqlStorageValue> {
   versions: string;
   /** 1: DMARC passed aligned with the From domain (authenticated). */
   dmarc: number;
-  /** The From address as a keyed hash (mask.ts senderHash): the sender history, never the address. */
+  /** The From address as a salted hash (mask.ts senderHash): the sender history, never the address. */
   sender_hash: string | null;
   /** The From domain, kept with the content (14 days): a review choice may make it a trusted domain. */
   sender_domain: string | null;
@@ -531,6 +540,10 @@ export class Store {
       if (version < 4) for (const statement of SCHEMA_V4) this.sql.exec(statement);
       if (version < 5) {
         for (const statement of SCHEMA_V5) this.sql.exec(statement);
+        // A shared mailbox provider's domain (a rule for one person's address there) is never a trusted domain.
+        for (const row of this.sql.exec<{ label_id: string; domain: string }>(`SELECT label_id, domain FROM trusted_domains`).toArray()) {
+          if (sharedMailbox(row.domain)) this.sql.exec(`DELETE FROM trusted_domains WHERE label_id = ? AND domain = ?`, row.label_id, row.domain);
+        }
         for (const [messageId, hash] of senderHashes) this.sql.exec(`UPDATE decisions SET sender_hash = ? WHERE message_id = ? AND sender_hash IS NULL`, hash, messageId);
       }
       if (version !== SCHEMA_VERSION) this.setMeta('schema_version', String(SCHEMA_VERSION));
@@ -666,19 +679,33 @@ export class Store {
     return out;
   }
 
-  /** Whether `domain` is one of the label's trusted domains or a subdomain of one (`a.bank.example.com` of `bank.example.com`). */
-  isTrusted(labelId: string, domain: string): boolean {
+  /**
+   * Whether `domain` is trusted for the label: one of its trusted domains exactly, or a subdomain of one that covers
+   * its subdomains (`a.bank.example.com` of a seeded sender domain `bank.example.com`), among those it had before
+   * `asOf` (the replay evaluation asks as of a mail's original decision).
+   */
+  isTrusted(labelId: string, domain: string, asOf = Number.MAX_SAFE_INTEGER): boolean {
     const suffixes = domainSuffixes(domain.toLowerCase());
     if (suffixes.length === 0) return false;
-    return this.one(`SELECT 1 AS x FROM trusted_domains WHERE label_id = ? AND domain IN (${suffixes.map(() => '?').join(', ')})`, labelId, ...suffixes) !== undefined;
+    return (
+      this.one(
+        `SELECT 1 AS x FROM trusted_domains WHERE label_id = ? AND create_time < ? AND (domain = ? OR (subdomains = 1 AND domain IN (${suffixes.map(() => '?').join(', ')})))`,
+        labelId,
+        asOf,
+        domain.toLowerCase(),
+        ...suffixes,
+      ) !== undefined
+    );
   }
 
   /**
-   * Adds a trusted domain the owner's choice taught (origin `owner`); the label's oldest goes first past
-   * TRUSTED_DOMAINS_PER_LABEL_MAX. Answers whether it was new. Run inside a transaction.
+   * Adds a trusted domain the owner's choice taught (origin `owner`; that exact domain only, never a shared mailbox
+   * provider's); the label's oldest goes first past TRUSTED_DOMAINS_PER_LABEL_MAX. Answers whether it was new. Run
+   * inside a transaction.
    */
   addTrustedDomain(labelId: string, domain: string, now: number): boolean {
-    const added = this.run(`INSERT OR IGNORE INTO trusted_domains (label_id, domain, origin, create_time) VALUES (?, ?, 'owner', ?)`, labelId, domain, now) > 0;
+    if (sharedMailbox(domain) || this.isTrusted(labelId, domain)) return false;
+    const added = this.run(`INSERT OR IGNORE INTO trusted_domains (label_id, domain, origin, create_time) VALUES (?, ?, 'owner', ?)`, labelId, domain.toLowerCase(), now) > 0;
     const over = this.count(`SELECT count(*) AS n FROM trusted_domains WHERE label_id = ?`, labelId) - TRUSTED_DOMAINS_PER_LABEL_MAX;
     if (over > 0) this.run(`DELETE FROM trusted_domains WHERE label_id = ? AND domain IN (SELECT domain FROM trusted_domains WHERE label_id = ? ORDER BY create_time, domain LIMIT ?)`, labelId, labelId, over);
     return added;

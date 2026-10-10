@@ -5,7 +5,7 @@
  * only their domain ([link example.com]). Every pattern is linear (no nested quantifiers over overlapping classes),
  * since the text is untrusted and may be built to make a regular expression slow.
  *
- * The exact From address is read before masking only for its keyed hash (senderHash, the sender history) and its
+ * The exact From address is read before masking only for its salted hash (senderHash, the sender history) and its
  * domain (DMARC, the trusted domains); neither the address nor anything masked is sent to the model unmasked.
  */
 import { BODY_CHARS, SENDER_CHARS, SNIPPET_CHARS, SUBJECT_CHARS } from './limits.ts';
@@ -83,6 +83,8 @@ export function listIdOf(header: string): string {
 /**
  * The sender of a mail as the decisions keep it (16 hex characters of a salted SHA-256 of the lower-case From address),
  * so the sender history can count what the same sender's earlier mail got without keeping the address; '' for none.
+ * The salt is fixed and in this public code (no secret key): it keeps the address out of the row, not out of reach of
+ * someone who tests candidate addresses against a row.
  */
 export async function senderHash(address: string): Promise<string> {
   if (address === '') return '';

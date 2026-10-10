@@ -117,7 +117,8 @@ function candidates(text: string): { label: string; probability: number }[] {
   }
 }
 
-export function reviewMessage(row: ReviewRow): ReviewItem {
+/** A review item; `teachableDomain` is the From domain a trust label's answer would teach ('' for none). */
+export function reviewMessage(row: ReviewRow, teachableDomain = ''): ReviewItem {
   return create(ReviewItemSchema, {
     name: `reviewItems/${row.id}`,
     state: REVIEW_STATES[row.state],
@@ -129,6 +130,7 @@ export function reviewMessage(row: ReviewRow): ReviewItem {
     receiveTime: ts(row.receive_time),
     createTime: ts(row.create_time),
     resolveTime: ts(row.resolve_time),
+    teachableDomain,
   });
 }
 

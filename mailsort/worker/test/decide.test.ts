@@ -1,18 +1,34 @@
 /**
- * The decision's pure parts (../../docs/design.md §4): the two views and their decision table (the trust gate,
- * needs_action, confident none), view 2's labels, the review queue's quota and its informative band, the sender
- * history's text, DMARC from Gmail's own header (forged From headers), Clef's request and the strict read of its answer;
- * the neuron estimate, quota detection, the per-mail backoff and the mode lowering.
+ * The decision's pure parts (../../docs/design.md §4): the two views and their decision table (view 2 on view 1's
+ * scale, the trust gate, needs_action, confident none), view 2's labels, the review queue's quota and its informative
+ * band, what a review answer may teach (never a public mailbox provider), the sender history's text, DMARC from
+ * Gmail's own header (forged From headers), Clef's request and the strict read of its answer; the neuron estimate,
+ * quota detection, the per-mail backoff and the mode lowering.
  */
 import { describe, expect, it } from 'vitest';
 import { AiError, clefInput, clefState, cosine, criterion, cutTokens, decide, estimateTokens, isQuotaError, readClefAnswer } from '../src/ai.ts';
-import { decideViews, historyText, informative, joinsReview, needsAction, reviewQuota, secondViewLabels, type Decision, type LabelFacts, type SenderTrust, type View } from '../src/decide.ts';
+import {
+  combined,
+  decideViews,
+  historyText,
+  informative,
+  joinsReview,
+  needsAction,
+  reviewQuota,
+  secondViewLabels,
+  sharedMailbox,
+  teachableDomain,
+  type Decision,
+  type LabelFacts,
+  type SenderTrust,
+  type View,
+} from '../src/decide.ts';
 import { dmarcAligned, neutralise } from '../src/dmarc.ts';
 import { modeCeiling } from '../src/env.ts';
 import { CLEF, CLEF_FLASH, MAIL_ATTEMPTS_MAX, NONE, RETRY_MAX_MS } from '../src/limits.ts';
 import { features } from '../src/mask.ts';
 import { readMessage } from '../src/mime.ts';
-import { retryDelay } from '../src/pipeline.ts';
+import { retryDelay } from '../src/judge.ts';
 import { effectiveMode } from '../src/settings.ts';
 import { embedText, FakeAi, QUOTA_MESSAGE } from './fakes/fake-ai.ts';
 import { apiMessage, MAILS } from './fakes/fixtures.ts';
@@ -44,6 +60,22 @@ describe('the decision table', () => {
     expect(decideViews(v1, view({ newsletter: 0.55, receipt: 0.35, none: 0.1 }), labels, unknown)).toMatchObject({ kind: 'unsure', reason: 'low_confidence', top: 'newsletter', confidence: 0.675 });
     // Exactly at the threshold is enough.
     expect(decideViews(view({ newsletter: 0.7, none: 0.3 }), view({ newsletter: 0.7, none: 0.3 }), labels, unknown)).toMatchObject({ kind: 'label' });
+  });
+
+  it('puts view 2 on view 1\'s scale: its narrower question alone never lifts the mean', () => {
+    const seven = new Map(['a', 'b', 'c', 'd', 'e', 'f', 'g'].map((id) => [id, { id, enabled: true, trust: false }]));
+    const v1 = view({ a: 0.45, b: 0.06, c: 0.06, d: 0.06, e: 0.06, f: 0.06, g: 0.05, none: 0.2 });
+    expect(secondViewLabels(v1)).toEqual(['a', 'b', 'c']);
+    // View 2 asked only about a, b, c and none, to which view 1 gave 0.77: its 0.95 is worth 0.7315 on view 1's
+    // scale, and the mean (0.59) stays below 0.7 though view 1 put 55 % on other options.
+    const sharp = view({ a: 0.95, b: 0.01, c: 0.01, none: 0.03 });
+    expect(combined(v1, sharp, 'a')).toBeCloseTo((0.45 + 0.95 * 0.77) / 2, 10);
+    expect(decideViews(v1, sharp, seven, unknown)).toMatchObject({ kind: 'unsure', reason: 'low_confidence', top: 'a' });
+    // A view 2 that only renormalises view 1 (p1 / 0.77) gives view 1's own probability back.
+    expect(combined(v1, view({ a: 0.45 / 0.77, b: 0.06 / 0.77, c: 0.06 / 0.77, none: 0.2 / 0.77 }), 'a')).toBeCloseTo(0.45, 10);
+    // Over all of view 1's options the scale is 1, and a sharper second opinion still counts.
+    expect(decideViews(view({ a: 0.62, b: 0.2, none: 0.18 }), view({ a: 0.8, b: 0.1, none: 0.1 }), seven, unknown)).toMatchObject({ kind: 'label', label: 'a' });
+    expect(combined(view({ a: 0.62, b: 0.2, none: 0.18 }), null, 'a')).toBe(0.62);
   });
 
   it('is uncertain when the views disagree, when view 2 did not run, or when either view finds it suspicious', () => {
@@ -143,6 +175,17 @@ describe('the review queue', () => {
     expect(reviewQuota(1000)).toBe(5);
   });
 
+  it('asks whether a label applies at all: a none top that is not sure, with a label in the band, is informative', () => {
+    const toss: Extract<Decision, { kind: 'unsure' }> = { kind: 'unsure', reason: 'low_confidence', top: null, confidence: 0.5, candidates: [{ label: '', probability: 0.5 }, { label: 'bank', probability: 0.45 }, { label: 'receipt', probability: 0.05 }] };
+    expect(informative(toss)).toBe(true);
+    // It takes a quota of 1, the band's only place.
+    expect(joinsReview(toss, 0, 1)).toBe(true);
+    expect(informative({ ...toss, candidates: [{ label: '', probability: 0.55 }, { label: 'bank', probability: 0.3 }, { label: 'receipt', probability: 0.15 }] })).toBe(false);
+    // decideViews records what informative reads.
+    const decided = decideViews(view({ none: 0.5, bank: 0.45, receipt: 0.05 }), null, labels, unknown);
+    expect(decided.kind === 'unsure' && informative(decided)).toBe(true);
+  });
+
   it('prefers the informative band: [0.35, 0.7), views that disagree, an untrusted sender', () => {
     expect(informative(unsure('low_confidence', 0.35))).toBe(true);
     expect(informative(unsure('low_confidence', 0.69))).toBe(true);
@@ -163,6 +206,24 @@ describe('the review queue', () => {
     expect(joinsReview(unsure('suspicious', 0.1), 0, 1)).toBe(false);
     expect(joinsReview(unsure('low_confidence', 0.5), 0, 1)).toBe(true);
     expect(joinsReview(unsure('no_labels', 0, null), 0, 5)).toBe(false);
+  });
+});
+
+describe('trusted domains', () => {
+  it('a trust label\'s answer teaches only an authenticated, unsuspicious sender\'s own domain', () => {
+    expect(teachableDomain({ authenticated: true, domain: 'Bank.Example.com', suspicious: 0.02 })).toBe('bank.example.com');
+    // A forged From, a mail the model doubted (or could not judge), no domain: nothing to teach.
+    expect(teachableDomain({ authenticated: false, domain: 'bank.example.com', suspicious: 0.02 })).toBe('');
+    expect(teachableDomain({ authenticated: true, domain: 'bank.example.com', suspicious: 0.1 })).toBe('');
+    expect(teachableDomain({ authenticated: true, domain: 'bank.example.com', suspicious: null })).toBe('');
+    expect(teachableDomain({ authenticated: true, domain: null, suspicious: 0.02 })).toBe('');
+    // Anyone can send DMARC-aligned mail from a public mailbox provider.
+    expect(teachableDomain({ authenticated: true, domain: 'gmail.com', suspicious: 0.02 })).toBe('');
+  });
+
+  it('knows the public mailbox providers and their subdomains, not a look-alike of one', () => {
+    for (const domain of ['gmail.com', 'Outlook.com', 'qq.com', 'vip.qq.com', '163.com', 'icloud.com']) expect(sharedMailbox(domain), domain).toBe(true);
+    for (const domain of ['notgmail.com', 'qq.com.example.net', 'bank.example.com', 'com', '']) expect(sharedMailbox(domain), domain).toBe(false);
   });
 });
 

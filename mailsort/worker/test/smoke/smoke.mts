@@ -11,8 +11,8 @@
  * of a label's path adopted; a nested label created in Gmail with its parents; the neuron budget's switch to
  * Clef-flash and the quota deferral; the flow API (deferred mail counted once, while it waits); the legacy 分拣/x read
  * as x, a former parent not imported by the sync, a range undo of one label; the replay evaluation (nothing written,
- * the owner's answer matched); the old /api/v1 paths answering 410; and last the auth failure. Run from worker/ after
- * the UI's build (the dev server serves web/dist):
+ * the evidence as of the mail's time); the old /api/v1 paths answering 410; and last the auth failure. Run from
+ * worker/ after the UI's build (the dev server serves web/dist):
  *
  *   npm run test:smoke
  */
@@ -242,13 +242,17 @@ async function run(origin: string, up: FakeUpstream, setClock: (now: number) => 
   const ci = labelsOf(MAILS.ciBuild.id);
   check(names.includes('开发') && !names.some((name) => name === '分拣' || name.startsWith('分拣/')) && ciLeaf !== '' && ci.includes(ciLeaf) && !ci.includes('INBOX') && ci.filter((label) => label.startsWith('Label_')).length === 1, 'nested label: created at Gmail\'s top level with its parent 开发, no 分拣; the mail gets only the leaf, archived');
 
-  // The replay evaluation: the owner's one answer decided again, nothing written (before the quota test below, which
-  // stops it for the day).
+  // The replay evaluation: the owner's one answer (the bank mail) decided again as of its own time, nothing written
+  // (before the quota test below, which stops it for the day). Its domain was taught by that very answer, later: as of
+  // then its sender was not trusted, so it is uncertain, never a match borrowed from the answer.
   const writes = modifies();
   const replay = await api.startReplayEvaluation({ name: 'replayEvaluation', requestId: id() });
   await step();
   const summary = await api.getReplayEvaluation({ name: 'replayEvaluation' });
-  check(replay.totalCount === 1 && summary.state === ReplayEvaluation_State.SUCCEEDED && summary.autoCount === 1 && summary.autoMatchCount === 1 && modifies() === writes, 'the replay evaluation decides the answered mail again, matches the owner and writes nothing');
+  check(
+    replay.totalCount === 1 && summary.state === ReplayEvaluation_State.SUCCEEDED && summary.evaluatedCount === 1 && summary.autoCount === 0 && summary.unsureCount === 1 && modifies() === writes,
+    'the replay evaluation decides the answered mail again as of its time (its domain not taught yet: uncertain) and writes nothing',
+  );
 
   // The neuron budget: Clef-flash past 70 %.
   // 16,000 input tokens: Clef about 349 neurons a call, Clef-flash 131; two views a mail; the day has used about 900 of

@@ -29,16 +29,27 @@ Done on the branch (local commits from `5f68724`, not pushed):
 - `proto/mailsort/ui/v2` (`/api/v2/`), `mailsort.ui.v1` retired in `proto/retired.json`; the Worker answers every
   `/api/v1/...` path 410 `RELOAD_REQUIRED` until 2026-11-10 (`docs/history.md`).
 - The decision: the model decides every mail, two views (view 2 over view 1's three labels, reversed, when view 1's
-  top label has p ≥ 0.4), accept on agreement with a mean ≥ 0.7; `needs_action` keeps a labelled mail in the inbox; a
-  trust label needs DMARC and a trusted domain; the sender history (a keyed hash of the From address, never the
-  address) is evidence. 6 subrequests per mail, 6 mails a pass (40 in all).
+  top label has p ≥ 0.4), accept on agreement with a mean ≥ 0.7 (view 2's probability put on view 1's scale first);
+  `needs_action` keeps a labelled mail in the inbox; a trust label needs DMARC and a trusted domain; the sender history
+  (a salted hash of the From address, never the address, read only across mail of the same authentication) is
+  evidence. 6 subrequests per mail, 6 mails a pass (40 in all).
 - The review queue: uncertain mail only, a daily quota of 1-5 (5 % of the last week's daily mail), the last place
-  kept for the informative band.
+  kept for the informative band (a none top with a label in [0.35, 0.7) is in it too).
 - Trusted domains: schema version 5 (one transaction under blockConcurrencyWhile) seeds them from the active rules
-  of trust labels and the rules with `require_dmarc`, then drops the rules, the proposals and what only they used;
-  pending suggestions and audits leave 待审; labels lose `live`/`threshold`; decisions keep the sender as a hash.
+  of trust labels and the rules with `require_dmarc` (an address rule's domain exact, a domain rule's with its
+  subdomains, never a public mailbox provider), then drops the rules, the proposals and what only they used; every
+  pending review item goes (the queue starts empty, no older decision counts as shown); labels lose
+  `live`/`threshold`; decisions keep the sender as a hash. A review answer teaches only `ReviewItem.teachable_domain`
+  (authenticated, not suspicious, not a public provider), an exact entry, and 待审 names it in a question first.
 - The replay evaluation (`replayEvaluation:start`, GET `replayEvaluation`): the owner's resolved items of 14 days
-  decided again, nothing written, summary counts and label pairs only.
+  decided again as of each mail's time (the sender history, examples and trusted domains of then: never what the
+  answer to that mail taught), nothing written, a model outage backed off per mail, summary counts and label pairs
+  only.
+- The review's findings on the branch, fixed: the replay no longer sees the owner's answer (its own example, a domain
+  its answer taught); view 2 on view 1's scale; trust taught only with a named domain and never for a public mailbox
+  provider or a former address rule's whole domain; a retried trust-label write re-checks the trust
+  (`untrusted_sender`); the forged-From history split; v4's pending items dropped; `model_unavailable` rows suggest
+  nothing; live-mode copy; Home's mailsort signal copy (`breaker_tripped` reworded, `label_live_revoked` dropped).
 - Removed: rules (CRUD, approve, disable, import, export, the Gmail filter export, `filters.ts`, `rule-value.ts`,
   `import.ts`, `template.ts`), the audit, live gating and 正式打, the Wilson bound (`accuracy.ts`); ops-v1 no longer
   raises `label_live_revoked`, and the guard defers `replay` in place of `audit` (contract fixture
@@ -46,23 +57,24 @@ Done on the branch (local commits from `5f68724`, not pushed):
 - The privacy policy page states the new retention.
 - The model-first UI (`mailsort/docs/design.md` §9, the 2026-10-07 visual system kept): 待审 holds only uncertain
   mail, each row the masked subject and sender, the reason in plain words and one-tap answers (the model's labels with
-  their probabilities, 都不是, 其他…, 跳过; a trust label for an untrusted sender asks first and says it teaches the
-  domain), quiet as 没有需要你确认的邮件; 概览 has a status line, today's numbers with their 7 days (处理, 有把握, 都不是,
+  their probabilities, 都不是, 其他…, 跳过; any answer that would teach a trust label a domain asks first, naming it,
+  and is never primary), quiet as 没有需要你确认的邮件; 概览 has a status line, today's numbers with their 7 days (处理, 有把握, 都不是,
   拿不准), the flow with 拿不准 split by 待审, and a per-label table (自动, 改正, 拿不准); 标签 rows show the 7-day count
   and 启用, the detail 归档, a trust label's trusted domains, the examples and 高级 (no rules, no 正式打); 设置 has the
   mode (with a line when 正式 has only a read-only grant), the undo and the sync. UI only, no API change.
 
 Left, in order:
-1. Push, the full CI gate, land (mailsort, Home's tests, contracts, the website for the privacy page).
+1. Push, the full CI gate, land (mailsort, Home's web copy and tests, contracts, the website for the privacy page).
 2. After the deploy, verify: ServiceStatus answers on `/api/v2/serviceStatus`; an old tab shows 邮件分拣已更新，请刷新页面;
-   标签 shows each trust label's seeded trusted domains (the former sender rules' domains); 待审 holds only uncertain
-   items, at most the day's quota, or says 没有需要你确认的邮件; 概览's numbers match its flow diagram.
+   标签 shows each trust label's seeded trusted domains (the former sender rules' domains, no public mailbox
+   provider); 待审 starts empty and then holds only uncertain items, at most the day's quota, or says
+   没有需要你确认的邮件; 概览's numbers match its flow diagram.
 3. Owner: run the replay evaluation from the signed-in page (`mailsort/README.md`), read the matches and the
    mismatching pairs; then `mint-token.mjs --scope modify` (设置 says 只读授权 until then), `MAILSORT_MODE=live`, and
    正式 in 设置.
 
 Checked locally on the branch: the worker's lint, typecheck, unit tests and workerd runtime tests (CPU included), the
-smoke run against `wrangler dev`, the web's lint, typecheck, tests and build (its JavaScript budget: 55.9 KiB gzip of
+smoke run against `wrangler dev`, the web's lint, typecheck, tests and build (its JavaScript budget: 56.2 KiB gzip of
 67), the deploy tests, the production dry run and bundle budget, proto's buf lint, api-linter, breaking (with the
 retirement) and its own tests, and `.github/scripts`' tests. The UI was also run by hand against `wrangler dev` with
 the loopback fakes and synthetic mail: 待审 (an answer, 其他…) and 概览 at 360 and 375 px without sideways scroll, 设置

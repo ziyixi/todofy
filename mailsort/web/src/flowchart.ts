@@ -81,9 +81,9 @@ function topLevel(path: string): string {
 /**
  * The color slot of every top-level group (1 to SERIES, 0 for gray), so that a group keeps its color whatever the range
  * shows and gray is left for real overflow:
- * - each group has a home slot in the labels' order, enabled labels' groups first (the recommended template alone has
- *   ten groups, so a disabled group should not take a hue from one that sorts mail); the first SERIES groups keep their
- *   home slot in every range, so a range or filter never repaints them;
+ * - each group has a home slot in the labels' order, enabled labels' groups first (a store can have ten groups or
+ *   more, so a disabled group should not take a hue from one that sorts mail); the first SERIES groups keep their home
+ *   slot in every range, so a range or filter never repaints them;
  * - a group past the palette that the range shows borrows the first slot whose home group the range does not show
  *   (in the labels' order), so with at most SERIES groups in a range none is gray;
  * - only when the range shows more than SERIES groups do the later ones go gray (the legend says so).

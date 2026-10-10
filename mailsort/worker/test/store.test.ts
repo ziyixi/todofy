@@ -2,7 +2,8 @@
  * The store over its own SQL on Node's SQLite (./fakes/sql.ts): label paths (nesting, the tree rule, the IDs and option
  * keys derived from a path), the schema's migrations (version 5 seeds the trusted domains from the rules and then drops
  * them, in one transaction), the trusted domains, the flow counters and the retention cleanup. Every address and
- * domain is synthetic (example.* domains).
+ * domain is synthetic (example.* domains; the public mailbox providers only by their domain names, as the denylist
+ * holds them).
  */
 import { describe, expect, it } from 'vitest';
 import { countFlow, readFlow } from '../src/flow.ts';
@@ -45,8 +46,9 @@ function tables(sql: SqlStorage): string[] {
 }
 
 /**
- * A version 4 database as the live store had it: a trust label and another, rules of every kind and state, decisions
- * that still hold their exact sender addresses, review items of every kind, and a live label's revocation time.
+ * A version 4 database as the live store had it: a trust label and another, rules of every kind and state (one person's
+ * address at a public mailbox provider among them), decisions that still hold their exact sender addresses, review
+ * items of every kind, and a live label's revocation time.
  */
 function version4(): SqlStorage {
   const sql = memorySql();
@@ -65,6 +67,11 @@ function version4(): SqlStorage {
   rule('r6', 'sender_domain', 'old.example.org', 'bank', 'disabled');
   rule('r7', 'sender_domain', 'news.example.com', 'newsletter', 'active', 1);
   rule('r8', 'sender_address', 'digest@weekly.example.net', 'newsletter');
+  // An address under a domain rule's domain: the domain keeps covering its subdomains.
+  rule('r9', 'sender_address', 'notices@alerts.bank.example.com', 'bank');
+  // Anyone can send from a public mailbox provider: never a trusted domain, nor a subdomain of one.
+  rule('r10', 'sender_address', 'someone.synthetic@gmail.com', 'bank');
+  rule('r11', 'sender_domain', 'vip.qq.com', 'bank');
   const decision = (id: string, outcome: string, address: string | null) =>
     sql.exec(
       `INSERT INTO decisions (message_id, thread_id, received_at, decided_at, outcome, label_id, decider, dmarc, sender_address, sender_domain, list_id, delivered_to, subject, sender, keep_in_inbox)
@@ -170,13 +177,18 @@ describe('the store', () => {
     s.migrate(transactional(sql), hashes);
     expect(s.getMeta('schema_version')).toBe('5');
     expect(SCHEMA_V5.length).toBeGreaterThan(0);
-    // An address rule's domain, a domain rule's own; never a list, delivered-to, proposed or disabled rule, nor a plain
-    // rule of a label that implies no trust.
-    expect(s.all(`SELECT label_id, domain, origin FROM trusted_domains ORDER BY label_id, domain`)).toEqual([
-      { label_id: 'bank', domain: 'alerts.bank.example.com', origin: 'seed' },
-      { label_id: 'bank', domain: 'bank.example.com', origin: 'seed' },
-      { label_id: 'newsletter', domain: 'news.example.com', origin: 'seed' },
+    // An address rule's domain (exactly), a domain rule's own (with its subdomains); never a list, delivered-to,
+    // proposed or disabled rule, a plain rule of a label that implies no trust, or a public mailbox provider.
+    expect(s.all(`SELECT label_id, domain, origin, subdomains FROM trusted_domains ORDER BY label_id, domain`)).toEqual([
+      { label_id: 'bank', domain: 'alerts.bank.example.com', origin: 'seed', subdomains: 1 },
+      { label_id: 'bank', domain: 'bank.example.com', origin: 'seed', subdomains: 0 },
+      { label_id: 'newsletter', domain: 'news.example.com', origin: 'seed', subdomains: 1 },
     ]);
+    // A former address rule trusts that exact domain, never the platform's other subdomains.
+    expect(s.isTrusted('bank', 'bank.example.com')).toBe(true);
+    expect(s.isTrusted('bank', 'marketplace.bank.example.com')).toBe(false);
+    expect(s.isTrusted('bank', 'x.alerts.bank.example.com')).toBe(true);
+    expect(s.isTrusted('bank', 'gmail.com')).toBe(false);
     expect(tables(sql)).not.toContain('rules');
     expect(tables(sql)).toEqual(expect.arrayContaining(['trusted_domains', 'replay', 'decisions', 'labels']));
     // Labels keep everything but live mode per label and the owner's thresholds.
@@ -188,11 +200,15 @@ describe('the store', () => {
     expect(columns(sql, 'decisions').filter((name) => ['sender_address', 'list_id', 'delivered_to', 'keep_in_inbox'].includes(name))).toEqual([]);
     const hash = await senderHash('statements@bank.example.com');
     expect(hash).toMatch(/^[0-9a-f]{16}$/);
-    expect(s.decision('m1')).toMatchObject({ sender_hash: hash, sender_domain: 'bank.example.com', outcome: 'applied', shown: 1, probabilities2: '{}' });
-    expect(s.decision('m2')?.sender_hash).toBe(hash);
-    expect(s.decision('m3')).toMatchObject({ sender_hash: null, shown: 1 });
-    // The review queue keeps the uncertain mail and every resolved item; pending suggestions and audits go.
-    expect(s.all(`SELECT id FROM review ORDER BY id`)).toEqual([{ id: 'q3' }, { id: 'q4' }]);
+    // None was shown in the new review queue: an audit, a suggestion and an uncertain mail version 4 asked about alike,
+    // so they take no place of the day's quota.
+    expect(s.decision('m1')).toMatchObject({ sender_hash: hash, sender_domain: 'bank.example.com', outcome: 'applied', shown: 0, probabilities2: '{}' });
+    expect(s.decision('m2')).toMatchObject({ sender_hash: hash, shown: 0 });
+    expect(s.decision('m3')).toMatchObject({ sender_hash: null, shown: 0 });
+    // The review queue starts empty: every pending item goes (the uncertain one too), the resolved ones stay.
+    expect(s.all(`SELECT id FROM review ORDER BY id`)).toEqual([{ id: 'q4' }]);
+    // The sender history reads the index of the hash and the authentication.
+    expect(sql.exec<{ name: string }>(`PRAGMA index_info(decisions_sender)`).toArray().map((row) => row.name)).toEqual(['sender_hash', 'dmarc', 'decided_at']);
     expect(s.getMeta('revoked_at')).toBeNull();
     // Migrating again changes nothing.
     const before = { labels: s.labels(), domains: s.allTrustedDomains(), decisions: s.all(`SELECT * FROM decisions ORDER BY message_id`) };
@@ -212,7 +228,7 @@ describe('the store', () => {
     expect(s.getMeta('schema_version')).toBe('4');
     expect(tables(sql)).toContain('rules');
     expect(tables(sql)).not.toContain('trusted_domains');
-    expect(sql.exec(`SELECT count(*) AS n FROM rules`).toArray()[0]).toEqual({ n: 8 });
+    expect(sql.exec(`SELECT count(*) AS n FROM rules`).toArray()[0]).toEqual({ n: 11 });
     expect(columns(sql, 'labels')).toContain('live');
     expect(sql.exec(`SELECT count(*) AS n FROM review`).toArray()[0]).toEqual({ n: 4 });
     // Without the obstacle it goes through.
@@ -244,9 +260,10 @@ describe('the store', () => {
     }
   });
 
-  it('trusts a listed domain and its subdomains, never a look-alike or a parent', () => {
+  it('trusts a listed domain exactly, its subdomains only for a former domain rule, never a look-alike or a parent', () => {
     const s = store();
-    s.run(`INSERT INTO trusted_domains (label_id, domain, origin, create_time) VALUES ('bank', 'bank.example.com', 'seed', 1)`);
+    s.run(`INSERT INTO trusted_domains (label_id, domain, origin, subdomains, create_time) VALUES ('bank', 'bank.example.com', 'seed', 1, 1)`);
+    s.run(`INSERT INTO trusted_domains (label_id, domain, origin, create_time) VALUES ('bank', 'shop.example.org', 'owner', ?)`, T0);
     expect(s.isTrusted('bank', 'bank.example.com')).toBe(true);
     expect(s.isTrusted('bank', 'alerts.bank.example.com')).toBe(true);
     expect(s.isTrusted('bank', 'ALERTS.Bank.Example.com')).toBe(true);
@@ -255,17 +272,31 @@ describe('the store', () => {
     expect(s.isTrusted('bank', 'example.com')).toBe(false);
     expect(s.isTrusted('other', 'bank.example.com')).toBe(false);
     expect(s.isTrusted('bank', '')).toBe(false);
+    // A learned domain is that exact From domain: a seller's subdomain of the same platform is not it.
+    expect(s.isTrusted('bank', 'shop.example.org')).toBe(true);
+    expect(s.isTrusted('bank', 'Shop.Example.org')).toBe(true);
+    expect(s.isTrusted('bank', 'sellers.shop.example.org')).toBe(false);
+    // As of a time: only the domains it had then (the replay evaluation's mail before the owner taught it).
+    expect(s.isTrusted('bank', 'shop.example.org', T0)).toBe(false);
+    expect(s.isTrusted('bank', 'shop.example.org', T0 + 1)).toBe(true);
   });
 
-  it('learns a trusted domain once, and keeps at most 50 per label, the oldest going first', () => {
+  it('learns a trusted domain once, never a public mailbox provider\'s, and keeps at most 50 per label, the oldest going first', () => {
     const s = store();
     expect(s.addTrustedDomain('bank', 'bank.example.com', T0)).toBe(true);
     expect(s.addTrustedDomain('bank', 'bank.example.com', T0 + 1)).toBe(false);
+    expect(s.addTrustedDomain('bank', 'gmail.com', T0)).toBe(false);
+    expect(s.addTrustedDomain('bank', 'vip.163.com', T0)).toBe(false);
+    expect(s.trustedDomains('bank')).toEqual(['bank.example.com']);
+    // A domain a seeded domain rule already covers is not added again.
+    s.run(`INSERT INTO trusted_domains (label_id, domain, origin, subdomains, create_time) VALUES ('broker', 'broker.example.com', 'seed', 1, 1)`);
+    expect(s.addTrustedDomain('broker', 'mail.broker.example.com', T0)).toBe(false);
+    expect(s.trustedDomains('broker')).toEqual(['broker.example.com']);
     for (let i = 0; i < TRUSTED_DOMAINS_PER_LABEL_MAX; i++) s.addTrustedDomain('bank', `d${String(i).padStart(2, '0')}.example.com`, T0 + 10 + i);
     const domains = s.trustedDomains('bank');
     expect(domains).toHaveLength(TRUSTED_DOMAINS_PER_LABEL_MAX);
     expect(domains).not.toContain('bank.example.com');
-    expect(s.all(`SELECT DISTINCT origin FROM trusted_domains`)).toEqual([{ origin: 'owner' }]);
+    expect(s.all(`SELECT DISTINCT origin, subdomains FROM trusted_domains WHERE label_id = 'bank'`)).toEqual([{ origin: 'owner', subdomains: 0 }]);
   });
 
   it('counts the flow per UTC day, never below zero, and reads a range of days', () => {

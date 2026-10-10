@@ -5,14 +5,18 @@
  * The evidence, all masked as the model reads it (mask.ts): the subject, snippet and body, Gmail's category, whether
  * there is a list, whether the sender is authenticated (DMARC aligned with the From domain, dmarc.ts), the three nearest
  * examples (bge-m3, context only) and the sender history: what the sender's earlier mail of the last 180 days got,
- * by the From address's keyed hash, the owner's verdicts first.
+ * by the From address's salted hash, the owner's verdicts first.
+ *
+ * Every piece of evidence the owner taught is read as of the decision's time (`asOf`, only what was there before it):
+ * the sender history, the examples and the trusted domains. Live decisions ask as of now; the replay evaluation as of
+ * a mail's original decision, so an answer the owner gave to that mail later (or to another one) never decides it.
  */
 import { clefState, decide as askClef, embed, type ClefAnswer, type ClefOption } from './ai.ts';
 import { decideViews, historyText, reviewQuota, secondViewLabels, type Decision, type HistoryEntry, type LabelFacts } from './decide.ts';
 import { dmarcAligned } from './dmarc.ts';
 import type { AiRunner } from './env.ts';
 import { embeddedCount, nearest } from './examples.ts';
-import { DAY, EXAMPLE_SUMMARY_CHARS, NEIGHBOURS, NONE, SENDER_HISTORY_MS, SENDER_HISTORY_ROWS } from './limits.ts';
+import { DAY, EXAMPLE_SUMMARY_CHARS, NEIGHBOURS, NONE, RETRY_BASE_MS, RETRY_MAX_MS, SENDER_HISTORY_MS, SENDER_HISTORY_ROWS } from './limits.ts';
 import { features, senderHash, summaryOf, type Features } from './mask.ts';
 import type { ReadMessage } from './mime.ts';
 import { optionKeys, pathSlug } from './paths.ts';
@@ -23,7 +27,7 @@ import { utcDay, type LabelRow, type Store } from './store.ts';
 export interface Gathered {
   readonly features: Features;
   readonly authenticated: boolean;
-  /** The From address's keyed hash ('' without a From address). */
+  /** The From address's salted hash ('' without a From address). */
   readonly senderHash: string;
   /** The masked summary an example keeps and the embedding reads. */
   readonly summary: string;
@@ -38,13 +42,18 @@ export async function gather(read: ReadMessage): Promise<Gathered> {
  * What the sender's earlier mail got, per label: the owner's verdict when there is one (a label, or `none` for "none of
  * them"), else the automatic label of a confident decision. Only decisions before `asOf` count, and only verdicts given
  * before it (the replay decides a mail as of its own time); `exclude` is the mail itself.
+ *
+ * Only the sender's mail of the same authentication counts: an authenticated mail reads the history of the address's
+ * authenticated mail, any other mail that of its unauthenticated mail. A forged From (DMARC failed) neither reads the
+ * real sender's verdicts nor adds its own labels to the history the real sender's mail reads.
  */
-export function senderHistory(store: Store, hash: string, asOf: number, exclude: string): HistoryEntry[] {
+export function senderHistory(store: Store, hash: string, authenticated: boolean, asOf: number, exclude: string): HistoryEntry[] {
   if (hash === '') return [];
   const rows = store.all<{ outcome: string; label_id: string | null; verdict: string | null; verdict_label: string | null; verdict_source: string | null; verdict_at: number | null }>(
     `SELECT outcome, label_id, verdict, verdict_label, verdict_source, verdict_at FROM decisions
-     WHERE sender_hash = ? AND decided_at >= ? AND decided_at < ? AND message_id != ? ORDER BY decided_at DESC LIMIT ?`,
+     WHERE sender_hash = ? AND dmarc = ? AND decided_at >= ? AND decided_at < ? AND message_id != ? ORDER BY decided_at DESC LIMIT ?`,
     hash,
+    authenticated ? 1 : 0,
     asOf - SENDER_HISTORY_MS,
     asOf,
     exclude,
@@ -70,10 +79,10 @@ export function reviewQuotaOn(store: Store, at: number): number {
   return reviewQuota((week?.n ?? 0) / 7);
 }
 
-/** The mails decided on the UTC day of `at` that were shown in the review queue. */
+/** The uncertain mails decided on the UTC day of `at` that were shown in the review queue (its quota's places taken). */
 export function shownOn(store: Store, at: number): number {
   const dayStart = Math.floor(at / DAY) * DAY;
-  return store.count(`SELECT count(*) AS n FROM decisions WHERE shown = 1 AND decided_at >= ? AND decided_at < ?`, dayStart, dayStart + DAY);
+  return store.count(`SELECT count(*) AS n FROM decisions WHERE shown = 1 AND outcome = 'unsure' AND decided_at >= ? AND decided_at < ?`, dayStart, dayStart + DAY);
 }
 
 export function labelFacts(labels: readonly LabelRow[]): Map<string, LabelFacts> {
@@ -97,6 +106,14 @@ export interface Judgement {
   readonly versions: Readonly<Record<string, number>>;
 }
 
+/**
+ * The wait after a mail's `attempts`-th failure (a failed read, a model outage), in the drain and in the replay
+ * evaluation alike: RETRY_BASE_MS doubling, at most RETRY_MAX_MS.
+ */
+export function retryDelay(attempts: number): number {
+  return Math.min(RETRY_BASE_MS * 2 ** Math.max(0, attempts - 1), RETRY_MAX_MS);
+}
+
 /** The judgement of a mail the model could not decide (no Workers AI, or every retry failed): uncertain. */
 export function modelUnavailable(): Judgement {
   return { decision: { kind: 'unsure', reason: 'model_unavailable', top: null, confidence: 0, candidates: [] }, view1: null, view2: null, versions: {} };
@@ -113,10 +130,10 @@ function countCall(ctx: ModelContext, neurons: number): void {
 }
 
 /**
- * Decides one mail with `model`, as of `asOf` (the sender history before it; the mail `exclude` left out): the
- * neighbours (an embedding, when examples exist), view 1, view 2 when it runs, then decide.ts. Throws AiQuotaError or
- * AiError, after the calls that answered were counted. A store without an enabled label with a description has
- * nothing to offer the model: uncertain, `no_labels`, without a call.
+ * Decides one mail with `model`, as of `asOf` (the sender history, the examples and the trusted domains of then; the
+ * mail `exclude` left out of the first two): the neighbours (an embedding, when examples exist), view 1, view 2 when
+ * it runs, then decide.ts. Throws AiQuotaError or AiError, after the calls that answered were counted. A store without
+ * an enabled label with a description has nothing to offer the model: uncertain, `no_labels`, without a call.
  */
 export async function judge(ctx: ModelContext, model: string, g: Gathered, asOf: number, exclude: string): Promise<Judgement> {
   const { store } = ctx;
@@ -137,12 +154,12 @@ export async function judge(ctx: ModelContext, model: string, g: Gathered, asOf:
     const { vectors, neurons } = await embed(ctx.ai, [g.summary]);
     countCall(ctx, neurons);
     const vector = vectors[0];
-    if (vector !== undefined) neighbours = nearest(store, vector, NEIGHBOURS, new Set(enabled.map((label) => label.id))).flatMap((n) => {
+    if (vector !== undefined) neighbours = nearest(store, vector, NEIGHBOURS, new Set(enabled.map((label) => label.id)), asOf, exclude).flatMap((n) => {
       const key = keyOf(n.label);
       return key === null ? [] : [{ label: key, summary: n.summary }];
     });
   }
-  const history = historyText(senderHistory(store, g.senderHash, asOf, exclude), keyOf);
+  const history = historyText(senderHistory(store, g.senderHash, g.authenticated, asOf, exclude), keyOf);
   const state = clefState(g.features, neighbours, { authenticated: g.authenticated, history });
   const option = (label: LabelRow): ClefOption => ({ id: label.id, key: keys.get(label.id) ?? pathSlug(label.display_name), name: label.display_name, description: label.description });
 
@@ -161,6 +178,6 @@ export async function judge(ctx: ModelContext, model: string, g: Gathered, asOf:
     view2 = await askClef(ctx.ai, model, state, options.reverse());
     countCall(ctx, view2.neurons);
   }
-  const decision = decideViews(view1, view2, labelFacts(labels), { authenticated: g.authenticated, trusted: (id) => store.isTrusted(id, g.features.senderDomain) });
+  const decision = decideViews(view1, view2, labelFacts(labels), { authenticated: g.authenticated, trusted: (id) => store.isTrusted(id, g.features.senderDomain, asOf) });
   return { decision, view1, view2, versions };
 }

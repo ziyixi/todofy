@@ -159,10 +159,9 @@ const SIGNALS: Readonly<Record<string, string>> = {
   // mailsort
   gmail_auth_failed: 'Gmail 授权失效，已停止分拣',
   gmail_not_configured: 'Gmail 尚未授权',
-  breaker_tripped: '写入超限，已退回只给建议',
+  breaker_tripped: '写入超限，已退回影子模式（只记录）',
   sync_stale: 'Gmail 同步已停止',
   ai_quota_exhausted: 'Workers AI 今日额度已用完，邮件顺延到明天',
-  label_live_revoked: '有标签准确率下降，已退回只给建议',
   // dashboard digest items
   usage_unavailable: '用量数据获取失败',
   usage_not_configured: '未配置用量查询令牌',

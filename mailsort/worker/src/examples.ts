@@ -18,7 +18,7 @@ export interface Neighbour {
 
 interface Loaded {
   readonly version: string;
-  readonly items: readonly { id: string; label: string; summary: string; vector: Float32Array }[];
+  readonly items: readonly { id: string; label: string; summary: string; messageId: string | null; createTime: number; vector: Float32Array }[];
 }
 
 let cache: Loaded | null = null;
@@ -32,20 +32,27 @@ export function embeddedCount(store: Store): number {
   return store.count(`SELECT count(*) AS n FROM examples WHERE embedding IS NOT NULL`);
 }
 
-/** The `k` nearest embedded examples of enabled labels to `vector`, the most similar first. */
-export function nearest(store: Store, vector: Float32Array, k: number, labels: ReadonlySet<string>): Neighbour[] {
+/**
+ * The `k` nearest embedded examples of enabled labels to `vector`, the most similar first, as of `asOf`: only examples
+ * made before then, and never the example of the mail `exclude` itself. The live pipeline asks as of now, about a mail
+ * that has no example yet; the replay evaluation as of a mail's original decision, so the example the owner's answer to
+ * that same mail made (its own summary, labelled with the answer) never tells the model the answer.
+ */
+export function nearest(store: Store, vector: Float32Array, k: number, labels: ReadonlySet<string>, asOf: number, exclude: string): Neighbour[] {
   const version = store.getMeta('examples_version') ?? '0';
   if (cache?.version !== version) {
     const items = store
-      .all<Pick<ExampleRow, 'id' | 'label_id' | 'summary' | 'embedding'>>(`SELECT id, label_id, summary, embedding FROM examples WHERE embedding IS NOT NULL`)
+      .all<Pick<ExampleRow, 'id' | 'label_id' | 'summary' | 'message_id' | 'create_time' | 'embedding'>>(
+        `SELECT id, label_id, summary, message_id, create_time, embedding FROM examples WHERE embedding IS NOT NULL`,
+      )
       .flatMap((row) => {
         const v = row.embedding === null ? null : fromBlob(row.embedding);
-        return v === null ? [] : [{ id: row.id, label: row.label_id, summary: row.summary, vector: v }];
+        return v === null ? [] : [{ id: row.id, label: row.label_id, summary: row.summary, messageId: row.message_id, createTime: row.create_time, vector: v }];
       });
     cache = { version, items };
   }
   return cache.items
-    .filter((item) => labels.has(item.label))
+    .filter((item) => labels.has(item.label) && item.createTime < asOf && item.messageId !== exclude)
     .map((item) => ({ id: item.id, label: item.label, summary: item.summary, similarity: cosine(vector, item.vector) }))
     .sort((a, b) => b.similarity - a.similarity)
     .slice(0, k);

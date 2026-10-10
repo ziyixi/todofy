@@ -7,14 +7,17 @@
  *    suspicious, bulk and needs_action.
  * 2. View 2 runs only when view 1's top option is a label with p >= SECOND_VIEW_MIN: the same state and questions, over
  *    view 1's three most likely labels plus `none`, in reverse order (secondViewLabels).
- * 3. Accept label L when both views' top is L, the mean of their p(L) reaches AUTO_THRESHOLD, the higher p(suspicious)
- *    of the two stays below SUSPICIOUS_MAX and L is enabled. A trust label also needs an authenticated sender (DMARC
- *    aligned with the From domain), a From domain among L's trusted domains (or a subdomain of one) and p(suspicious)
- *    below TRUST_SUSPICIOUS_MAX.
+ * 3. Accept label L when both views' top is L, the mean of their p(L) reaches AUTO_THRESHOLD (view 2's put on view 1's
+ *    scale first: combined), the higher p(suspicious) of the two stays below SUSPICIOUS_MAX and L is enabled. A trust
+ *    label also needs an authenticated sender (DMARC aligned with the From domain), a From domain trusted for L
+ *    (store.ts isTrusted) and p(suspicious) below TRUST_SUSPICIOUS_MAX.
  * 4. Confident none when view 1's top is `none` with p >= NONE_CONFIDENT, or both views' top is `none` (view 2 runs only
  *    after a label top, so in practice the first).
  * 5. Anything else is uncertain, with the reason: a candidate for the review queue, whose daily quota (reviewQuota)
  *    prefers the informative band (informative).
+ *
+ * And what a trust label's answer in the review queue may teach (teachableDomain): the From domain of an authenticated
+ * sender the model did not find suspicious, never a shared mailbox provider's (sharedMailbox).
  */
 import type { ClefAnswer } from './ai.ts';
 import {
@@ -57,8 +60,9 @@ export interface SenderTrust {
 }
 
 /**
- * The decision. `confidence` is the top option's combined probability: the mean of both views' when view 2 ran, else
- * view 1's. `top` is the most likely label (null for `none`). `candidates` are view 1's three most likely options.
+ * The decision. `confidence` is the top option's combined probability (combined): the mean of both views' when view 2
+ * ran, else view 1's. `top` is the most likely label (null for `none`). `candidates` are view 1's three most likely
+ * options.
  */
 export type Decision =
   | { readonly kind: 'label'; readonly label: string; readonly confidence: number; readonly candidates: readonly Candidate[] }
@@ -96,19 +100,32 @@ export function needsAction(probability: number | null): boolean {
   return probability !== null && probability >= NEEDS_ACTION_KEEP;
 }
 
+/**
+ * The combined probability of `label`: view 1's alone when view 2 did not run, else the mean of view 1's and view 2's
+ * on view 1's scale. View 2 chose only among view 1's most likely labels plus none, so its probabilities are relative
+ * to those options: a model consistent with itself answers p2(L) = p1(L) / p1(options), which alone would lift the
+ * mean above view 1's own p(L). Multiplied by the share view 1 gave those options, view 2 confirms or doubts view 1's
+ * probability and is never inflated by its narrower question.
+ */
+export function combined(view1: View, view2: View | null, label: string): number {
+  const p1 = view1.probabilities[label] ?? 0;
+  if (view2 === null) return p1;
+  const share = Math.min(1, Object.keys(view2.probabilities).reduce((sum, id) => sum + (view1.probabilities[id] ?? 0), 0));
+  return (p1 + (view2.probabilities[label] ?? 0) * share) / 2;
+}
+
 /** §4's decision from the two views (view 2 null when it did not run). */
 export function decideViews(view1: View, view2: View | null, labels: ReadonlyMap<string, LabelFacts>, sender: SenderTrust): Decision {
   const candidates = candidatesOf(view1.probabilities);
   const suspicious = higher(view1, view2, 'suspicious');
-  const p1 = (id: string) => view1.probabilities[id] ?? 0;
   const unsure = (reason: UnsureReason, top: string | null, confidence: number): Decision => ({ kind: 'unsure', reason, top, confidence, candidates });
   if (view1.top === NONE) {
-    const confidence = p1(NONE);
+    const confidence = view1.probabilities[NONE] ?? 0;
     if (confidence >= NONE_CONFIDENT || view2?.top === NONE) return { kind: 'none', confidence, candidates };
     return unsure('low_confidence', null, confidence);
   }
   const label = view1.top;
-  const confidence = view2 === null ? p1(label) : (p1(label) + (view2.probabilities[label] ?? 0)) / 2;
+  const confidence = combined(view1, view2, label);
   if (suspicious >= SUSPICIOUS_MAX) return unsure('suspicious', label, confidence);
   if (view2 === null) return unsure('low_confidence', label, confidence);
   if (view2.top !== label) return unsure('views_disagree', label, confidence);
@@ -126,12 +143,14 @@ export function decideViews(view1: View, view2: View | null, labels: ReadonlyMap
 
 /**
  * Whether an uncertain decision is in the informative band, whose answer teaches the most: two views that disagree, a
- * trust label for an untrusted sender, or a top label whose combined probability is in [INFORMATIVE_MIN,
- * AUTO_THRESHOLD).
+ * trust label for an untrusted sender, or a most likely label whose combined probability is in [INFORMATIVE_MIN,
+ * AUTO_THRESHOLD). When view 1's top was none (and not likely enough), that label is its most likely one after none:
+ * whether a label applies at all is the question then.
  */
 export function informative(decision: Extract<Decision, { kind: 'unsure' }>): boolean {
   if (decision.reason === 'views_disagree' || decision.reason === 'untrusted_sender') return true;
-  return decision.top !== null && decision.confidence >= INFORMATIVE_MIN && decision.confidence < AUTO_THRESHOLD;
+  const p = decision.top !== null ? decision.confidence : (decision.candidates.find((candidate) => candidate.label !== '')?.probability ?? 0);
+  return p >= INFORMATIVE_MIN && p < AUTO_THRESHOLD;
 }
 
 /** Today's quota of the review queue: REVIEW_SHARE of the average daily mail of the last 7 days, rounded up, 1 to 5. */
@@ -171,4 +190,37 @@ export function historyText(entries: readonly HistoryEntry[], keyOf: (label: str
     })
     .slice(0, SENDER_HISTORY_TOP)
     .join(', ');
+}
+
+// ---- trusted domains (../../docs/design.md §3.2) --------------------------------------------------------------------
+
+/**
+ * Public mailbox providers: anyone can send DMARC-aligned mail from them, so none is ever a trusted domain (not seeded,
+ * not learned), nor a subdomain of one (`vip.qq.com`). A small fixed list of the common ones, not a complete one.
+ */
+export const SHARED_MAILBOX_DOMAINS: ReadonlySet<string> = new Set([
+  'gmail.com', 'googlemail.com', 'outlook.com', 'hotmail.com', 'live.com', 'msn.com', 'yahoo.com', 'ymail.com', 'icloud.com',
+  'me.com', 'mac.com', 'aol.com', 'proton.me', 'protonmail.com', 'pm.me', 'gmx.com', 'gmx.de', 'gmx.net', 'mail.com',
+  'yandex.com', 'yandex.ru', 'zoho.com', 'fastmail.com', 'hey.com', 'qq.com', 'foxmail.com', '163.com', '126.com', 'yeah.net',
+  'sina.com', 'sina.cn', 'sohu.com', 'aliyun.com', '139.com', '189.cn', 'naver.com', 'daum.net', 'hanmail.net',
+  'hotmail.co.uk', 'yahoo.co.uk', 'yahoo.co.jp', 'outlook.jp', 'hotmail.fr', 'yahoo.fr', 'web.de', 'mail.ru',
+]);
+
+/** Whether `domain` is a public mailbox provider's (SHARED_MAILBOX_DOMAINS) or a subdomain of one. */
+export function sharedMailbox(domain: string): boolean {
+  const parts = domain.toLowerCase().split('.').filter((part) => part !== '');
+  for (let i = 0; i + 2 <= parts.length; i++) if (SHARED_MAILBOX_DOMAINS.has(parts.slice(i).join('.'))) return true;
+  return false;
+}
+
+/**
+ * The From domain a trust label's answer in the review queue would add to that label's trusted domains, or '' when no
+ * answer would teach one: only an authenticated sender's (DMARC aligned with the From domain), never a shared mailbox
+ * provider's, and only when the model's p(suspicious) was below TRUST_SUSPICIOUS_MAX (a mail the model doubted, or
+ * could not judge, teaches nothing).
+ */
+export function teachableDomain(sender: { readonly authenticated: boolean; readonly domain: string | null; readonly suspicious: number | null }): string {
+  const domain = (sender.domain ?? '').toLowerCase();
+  if (!sender.authenticated || domain === '' || sender.suspicious === null || sender.suspicious >= TRUST_SUSPICIOUS_MAX || sharedMailbox(domain)) return '';
+  return domain;
 }

@@ -62,6 +62,11 @@ message ReviewItem {
   google.protobuf.Timestamp create_time = 9 [(google.api.field_behavior) = OUTPUT_ONLY];
   // When the owner resolved or skipped it.
   google.protobuf.Timestamp resolve_time = 10 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // While pending: the From domain that an answer with a trust label (`Label.trust_implying`) adds to that label's
+  // trusted domains, unless the label lists it already. Set only for a sender that passed DMARC aligned with its
+  // From domain, when the domain is not a public mailbox provider's (gmail.com, qq.com, ...) and the model did not
+  // find the mail suspicious; empty when no answer teaches a domain. The UI names it before such an answer.
+  string teachable_domain = 11 [(google.api.field_behavior) = OUTPUT_ONLY];
 }
 
 // One of a decision's most likely options.

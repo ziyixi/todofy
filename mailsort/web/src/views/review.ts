@@ -6,9 +6,11 @@
  * label) and 跳过. A label or 都不是 is ResolveReviewItem; 跳过 is SkipReviewItem. An answer leaves the list at once
  * and the next row takes the focus.
  *
- * Keyboard: j / k move between rows, 1 to 4 choose that answer, Enter the first, c opens 其他…, s skips. A suspected
- * phishing mail, or a trust label for a sender not trusted yet, says so in a warning line; then no answer is primary
- * and a label asks first (a trust label also says that it teaches the sender's domain when DMARC passed).
+ * Keyboard: j / k move between rows, 1 to 4 choose that answer, Enter the first (or 其他… when the model gave none), c
+ * opens 其他…, s skips. A suspected phishing mail, or a trust label for a sender not trusted yet, says so in a warning
+ * line; then no answer is primary and a label asks first. Any answer that would teach a trust label a domain
+ * (ReviewItem.teachable_domain, ../../docs/design.md §3.2) asks first too, naming the domain, whatever the reason, and
+ * is never primary: one tap must not trust a sender. A mail the model gave no answer for has no primary answer either.
  */
 import type { Label } from '@ziyixi/proto/mailsort/ui/v2/label_pb'
 import type { ReviewItem } from '@ziyixi/proto/mailsort/ui/v2/review_pb'
@@ -38,6 +40,8 @@ interface Row {
   readonly node: HTMLLIElement
   /** Chooses the row's answer at `index` (0 is the first); nothing past the last. */
   readonly choose: (index: number) => void
+  /** Enter: the first answer, or 其他… when the model gave none. */
+  readonly enter: () => void
   readonly other: () => void
   readonly skip: () => void
 }
@@ -103,6 +107,8 @@ export async function renderReview(ctx: ViewContext): Promise<void> {
       const caution = CAUTION[item.reason]
       const answers = choices(item)
       const first = item.candidates[0]?.label
+      // Without the model's options there is nothing to suggest: no primary answer, and Enter opens 其他….
+      const unanswered = item.candidates.length === 0
       const subject = item.subject === '' ? '（无主题）' : item.subject
       const node = el('li', { tabindex: '-1', 'aria-label': subject })
       const slot = el('div', { hidden: true })
@@ -118,8 +124,12 @@ export async function renderReview(ctx: ViewContext): Promise<void> {
       }
       const resolve = (label: string) => {
         const name = labelText(label, labels)
-        if (label !== '' && caution !== undefined && !ctx.host.confirm(`${caution}。仍然选“${name}”？${teaches(label, labels)}`)) return
-        void run((requestId) => api.resolveReviewItem({ name: item.name, label, requestId }), `${label === first ? '已确认' : '已改为'}：${name}`)
+        const teaching = teaches(label, item, labels)
+        if (label !== '' && (caution !== undefined || teaching !== '')) {
+          const question = caution === undefined ? `选“${name}”？${teaching}` : `${caution}。仍然选“${name}”？${teaching}`
+          if (!ctx.host.confirm(question)) return
+        }
+        void run((requestId) => api.resolveReviewItem({ name: item.name, label, requestId }), `${unanswered ? '已选' : label === first ? '已确认' : '已改为'}：${name}`)
       }
       const skip = () => void run((requestId) => api.skipReviewItem({ name: item.name, requestId }), '已跳过')
       const otherButton = button('其他…', () => {
@@ -152,14 +162,15 @@ export async function renderReview(ctx: ViewContext): Promise<void> {
       }
       const answerButton = ({ label, probability }: Choice, index: number) => {
         const name = labelText(label, labels)
+        const primary = index === 0 && caution === undefined && !unanswered && teaches(label, item, labels) === ''
         const answer = button(name, () => {
           resolve(label)
-        }, { ...(index === 0 && caution === undefined ? { class: 'primary' } : {}), 'aria-label': probability === undefined ? name : `${name}，${percent(probability)}` })
+        }, { ...(primary ? { class: 'primary' } : {}), 'aria-label': probability === undefined ? name : `${name}，${percent(probability)}` })
         // The probability after the name, quieter (the aria-label already says it).
         if (probability !== undefined) answer.append(el('span', { class: 'odds', 'aria-hidden': 'true' }, percent(probability)))
         return answer
       }
-      const reason = UNSURE_REASONS[item.reason] ?? item.reason
+      const reason = unanswered ? `${UNSURE_REASONS[item.reason] ?? item.reason}：可用 其他… 选标签` : (UNSURE_REASONS[item.reason] ?? item.reason)
       fill(
         node,
         el('div', { class: 'row-head' }, el('span', { class: 'row-title' }, subject), el('span', { class: 'meta' }, when(item.receiveTime))),
@@ -174,6 +185,10 @@ export async function renderReview(ctx: ViewContext): Promise<void> {
         choose: (index) => {
           const choice = answers[index]
           if (choice !== undefined) resolve(choice.label)
+        },
+        enter: () => {
+          if (unanswered) other()
+          else row.choose(0)
         },
         other,
         skip,
@@ -200,7 +215,7 @@ export async function renderReview(ctx: ViewContext): Promise<void> {
       if (row === undefined) return
       if (event.key === 'Enter' && event.target === row.node) {
         event.preventDefault()
-        row.choose(0)
+        row.enter()
       } else if (/^[1-4]$/.test(event.key)) {
         event.preventDefault()
         row.choose(Number(event.key) - 1)
@@ -220,7 +235,13 @@ export async function renderReview(ctx: ViewContext): Promise<void> {
   })
 }
 
-/** What choosing a trust label teaches (../../docs/design.md §3.2), for the question before it; '' for another label. */
-function teaches(label: string, labels: readonly Label[]): string {
-  return labels.find((item) => item.name === label)?.trustImplying === true ? '发件人通过 DMARC 时，它的域名会记为这个标签的可信域名。' : ''
+/**
+ * What choosing `label` would teach (../../docs/design.md §3.2), for the question before it: the item's teachable
+ * domain for a trust label that does not list it yet; '' for any other answer.
+ */
+function teaches(label: string, item: ReviewItem, labels: readonly Label[]): string {
+  const domain = item.teachableDomain
+  const chosen = labels.find((candidate) => candidate.name === label)
+  if (domain === '' || chosen?.trustImplying !== true || chosen.trustedDomains.includes(domain)) return ''
+  return `这会把 ${domain} 记为“${chosen.displayName}”的可信域名，以后这个域名的邮件可以自动打上它。`
 }

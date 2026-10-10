@@ -57,7 +57,11 @@ function statusLine(status: ServiceStatus, now: number): HTMLElement {
   return el('p', { class: 'hint lead' }, parts.filter((part) => part !== '').join(' · '))
 }
 
-/** Each label with mail in the last 7 days: its automatic labels, the owner's corrections, and uncertain mail. */
+/**
+ * Each label with mail in the last 7 days: its automatic labels, the owner's corrections, and uncertain mail. Mail that
+ * got no label (都不是, or uncertain with 都不是 most likely) is in the numbers above, not here, so the empty line says
+ * which is empty: no mail at all, or none on a label.
+ */
 function labelTable(answer: LabelReport, labels: readonly Label[]): HTMLElement {
   const rows = answer.labels
     .map((row) => ({ name: labelText(row.label, labels), auto: row.autoCount, corrected: row.gmailCorrectionCount + row.reviewCorrectionCount, unsure: row.unsureCount }))
@@ -67,7 +71,7 @@ function labelTable(answer: LabelReport, labels: readonly Label[]): HTMLElement 
     '各标签 · 最近 7 天',
     '',
     rows.length === 0
-      ? emptyState('最近 7 天还没有邮件')
+      ? emptyState(answer.decidedCount === 0 ? '最近 7 天还没有邮件' : '最近 7 天还没有邮件归到标签')
       : el(
           'table',
           { class: 'report' },
