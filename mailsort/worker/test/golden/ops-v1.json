@@ -177,7 +177,7 @@
       "pending": 0,
       "gmail_calls_today": 0,
       "neurons_today": 0,
-      "neuron_budget": 7000
+      "neuron_budget": 9500
     },
     "last_backup_at": null,
     "ui_url": "https://sort.example.com/",
@@ -213,7 +213,7 @@
       "pending": 0,
       "gmail_calls_today": 0,
       "neurons_today": 0,
-      "neuron_budget": 7000
+      "neuron_budget": 9500
     },
     "last_backup_at": null,
     "ui_url": "https://sort.example.com/",
@@ -258,7 +258,7 @@
       "pending": 0,
       "gmail_calls_today": 0,
       "neurons_today": 0,
-      "neuron_budget": 7000,
+      "neuron_budget": 9500,
       "last_sync_minutes": 120
     },
     "last_backup_at": null,

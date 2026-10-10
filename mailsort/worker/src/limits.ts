@@ -126,8 +126,6 @@ export const REPLAY_ITEMS_MAX = 200;
 /** Mails decided again per alarm at most, each needing this many of the pass's leftover subrequests. */
 export const REPLAY_BATCH = 6;
 export const REPLAY_SUBREQUESTS = 5;
-/** The replay calls the model only while the day's neurons are below this share of the owner's budget. */
-export const REPLAY_NEURON_SHARE = 0.5;
 /** Its rows are pruned this long after it started. */
 export const REPLAY_KEPT_MS = 7 * DAY;
 /** GetReplayEvaluation answers at most this many cases (each evaluated mail's numbers): all of REPLAY_ITEMS_MAX. */
@@ -142,7 +140,8 @@ export const EMBEDDING_MODEL = '@cf/baai/bge-m3';
 export const NEURONS_PER_M_TOKENS: Readonly<Record<string, number>> = { [CLEF]: 21_818, [CLEF_FLASH]: 8_182, [EMBEDDING_MODEL]: 1_075 };
 /** Past this share of the daily neuron budget the rest of the UTC day uses Clef-flash. */
 export const FLASH_SWITCH_SHARE = 0.7;
-export const DEFAULT_DAILY_NEURON_BUDGET = 7_000;
+/** 95 % of the account's free daily Workers AI allocation (10,000): nothing else in the account uses Workers AI. */
+export const DEFAULT_DAILY_NEURON_BUDGET = 9_500;
 export const NEURON_BUDGET_MIN = 500;
 export const NEURON_BUDGET_MAX = 10_000;
 /**

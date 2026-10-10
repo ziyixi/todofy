@@ -318,12 +318,12 @@ The alarm runs every 5 minutes, every 30 s while a backlog waits. A pass may mak
 ### 4.1 Workers AI budget
 
 Neurons are estimated from each answer's reported input tokens at the published prices (Clef 21,818, Clef-flash 8,182,
-bge-m3 1,075 neurons per million input tokens). Past 70 % of the owner's daily neuron budget (default 7,000 of the
-account's 10,000) the rest of the UTC day uses Clef-flash; past the budget, or when Workers AI refuses for quota (its
+bge-m3 1,075 neurons per million input tokens). Past 70 % of the owner's daily neuron budget (default 9,500: 95 % of the
+account's 10,000, which nothing else uses) the rest of the UTC day uses Clef-flash; past the budget, or when Workers AI refuses for quota (its
 daily free allocation), every waiting mail is deferred to the next UTC day: deferred, never failed, never unsure. A mail
 asks up to two Clef calls (view 2 is cheaper: three labels' criteria instead of all of them), and the model is chosen
-once per mail, so its two views always use the same one. The replay evaluation calls the model only while the day is
-below half the budget (§5.1). Home's guard (its 80 % rule) sheds deferrable work: Clef-flash only, no replay
+once per mail, so its two views always use the same one. The replay evaluation shares the same budget, after the live pipeline in every pass
+(§5.1). Home's guard (its 80 % rule) sheds deferrable work: Clef-flash only, no replay
 evaluation, no embedding rebuild.
 
 ### 4.2 What the model reads
@@ -447,8 +447,8 @@ Before Gmail labelling goes live, the owner checks the new decision against thei
   doubling, `replay.not_before`; the replay calls the model no more that pass and decides the other mails meanwhile)
   and gives it up after 7 tries, about five hours; a refused answer is tried 3 times; only then is it counted as
   uncertain (`model_unavailable`).
-- It never starves the live pipeline: it runs last, only while the day's neurons are below half the owner's budget
-  and Workers AI's quota lasts (else it waits for the next UTC day), never while Home's guard sheds (§10), and not in
+- It runs last in a pass, after the live pipeline, only while the day's neurons are below the owner's budget and
+  Workers AI's quota lasts (else it waits for the next UTC day), never while Home's guard sheds (§10), and not in
   off mode (no Gmail read). It is a backtest without hindsight: how live would have decided each mail when it came,
   which understates what a sender's later mail gets once the owner has taught its domain, the safe direction for the
   check before going live.
@@ -599,7 +599,7 @@ copied, and runs as soon as a token with Workers AI permission is on hand).
 
 So each label's name costs about 5.5 tokens a call, and the snippet saved about 31; the criteria dominate the input
 and cost the same on every call, which is why 标签 suggests one language and 60–120 characters per description. At
-about 18 neurons per Clef call, the default budget of 7,000 covers roughly 270 Clef calls a day before the switch to
+about 18 neurons per Clef call, the default budget of 9,500 covers roughly 370 Clef calls a day before the switch to
 Clef-flash (at 70 %), far above the expected volume.
 
 Defaults kept, pending the real run: the label threshold 0.8 and `suspicious` < 0.3. Before trusting them, the run
@@ -789,7 +789,7 @@ the fake Gmail (`fake-gmail.ts`) and fake Workers AI (`fake-ai.ts`, Clef and bge
   later one, and a trust domain its own answer taught not yet trusted; a deleted mail skipped; a model outage backing
   a mail off without using up its tries; the summary's counts, label pairs, reason counts and each mail's numbers
   without content; a repeated request ID; a fresh start once the last one finished, with a seeded trusted domain
-  counted at any time; waiting while shed and past half the budget);
+  counted at any time; waiting while shed and past the day's budget);
   `labels.test.ts` nested labels with their parents, a trust label's
   domain learned and removed (RemoveTrustedDomain, etag and request ID), forged and look-alike From headers never
   borrowing it (the look-alike's own domain the only teachable one), Gmail labels adopted by the sync only (never at once, never a parent), renames, the legacy

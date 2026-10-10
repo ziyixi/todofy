@@ -52,9 +52,12 @@ function usage(target: Store, decided: number, applied: number, unsure: number, 
   target.run(`INSERT INTO usage (day, gmail_calls, ai_calls, neurons, decided, applied, unsure) VALUES ('2026-10-06', 120, ?, ?, ?, ?, ?)`, decided, neurons, decided, applied, unsure);
 }
 
+/** The synthetic states' settings: the defaults with the budget the contract's fixtures were written with. */
+const SYNTHETIC = { ...DEFAULTS, dailyNeuronBudget: 7000 };
+
 function cases(): Record<string, unknown> {
   const ok = store();
-  writeSettings(ok, { ...DEFAULTS, mode: 'live' }, NOW - HOUR);
+  writeSettings(ok, { ...SYNTHETIC, mode: 'live' }, NOW - HOUR);
   usage(ok, 34, 21, 6, 1520.4);
   ok.setMeta('auth_state', 'ok');
   ok.setMeta('last_sync_at', String(NOW - 4 * MINUTE));
@@ -62,7 +65,7 @@ function cases(): Record<string, unknown> {
   ok.run(`INSERT INTO review (id, message_id, kind, state, decider, subject, sender, receive_time, create_time) VALUES ('r1', 'a2', 'unsure', 'pending', 'clef', '合成主题', 'Sender <example.org>', ?, ?)`, NOW, NOW);
 
   const degraded = store();
-  writeSettings(degraded, { ...DEFAULTS, mode: 'live', breaker: 'daily_limit' }, NOW - HOUR);
+  writeSettings(degraded, { ...SYNTHETIC, mode: 'live', breaker: 'daily_limit' }, NOW - HOUR);
   usage(degraded, 160, 150, 3, 8100);
   degraded.run(`UPDATE usage SET quota_exhausted = 1`);
   degraded.setMeta('auth_state', 'failed');

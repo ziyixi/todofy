@@ -6,7 +6,7 @@
  * trusted domain the owner's answer to it taught, while a seeded one counts at any time); a mail Gmail no longer gives
  * is skipped; a model outage backs a mail off without using up its tries; the answer holds counts, label pairs and each
  * evaluated mail's decision numbers only (no content); a repeated request ID answers the first start, a new one starts
- * again, also once the last one finished; the guard's shed and the neuron share make it wait. Every request Google got
+ * again, also once the last one finished; the guard's shed and the day's neuron budget make it wait. Every request Google got
  * is checked against the independent table after each test.
  */
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
@@ -163,14 +163,14 @@ describe('the replay evaluation', () => {
     expect(await h.sql(`SELECT count(DISTINCT job_id) AS n FROM replay`)).toEqual([{ n: 1 }]);
   });
 
-  it('waits while the guard sheds, and while the day\'s neurons reach half the budget', async () => {
+  it('waits while the guard sheds, and while the day\'s neurons reach the budget', async () => {
     const until = new Date(now + 2 * HOUR).toISOString().replace(/\.\d{3}Z$/, 'Z');
     await h.opsSetGuard({ level: 'shed', reason: 'usage_80', until });
     now += 5 * MINUTE;
     await h.step(now);
     expect((await h.api.getReplayEvaluation({ name: 'replayEvaluation' })).evaluatedCount).toBe(0);
     await h.opsSetGuard({ level: 'normal', reason: 'usage_ok', until: null });
-    // 500 neurons a day: today's use is past half of it already.
+    // 500 neurons a day: today's use is past it already.
     await h.api.updateSettings({ settings: create(SettingsSchema, { name: 'settings', dailyNeuronBudget: 500 }), updateMask: { paths: ['daily_neuron_budget'] }, requestId: op() });
     now += 5 * MINUTE;
     await h.step(now);

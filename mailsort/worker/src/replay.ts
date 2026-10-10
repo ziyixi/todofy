@@ -15,8 +15,8 @@
  * no verdict, example, decision, review item or flow count: only its own rows and the day's usage (Gmail calls,
  * neurons), which every model call counts against the owner's budget.
  *
- * It never starves the live pipeline: it runs last in a pass, only while the day's neurons are below
- * REPLAY_NEURON_SHARE of the owner's budget and Workers AI's quota lasts (else the next UTC day), never while Home's
+ * It runs last in a pass, after the live pipeline, only while the day's neurons are below the owner's budget and
+ * Workers AI's quota lasts (else the next UTC day), never while Home's
  * guard sheds (pipeline.ts), always with the full Clef (what live decisions use). Its rows are pruned REPLAY_KEPT_MS
  * after the start (store.ts prune). GetReplayEvaluation answers counts, label pairs and each evaluated mail's decision
  * numbers (replaySummary, numbersOf), never the mail's content: what the thresholds of decide.ts are calibrated with.
@@ -27,7 +27,7 @@ import type { AiRunner } from './env.ts';
 import { GoogleError, type GmailClient } from './gmail.ts';
 import { timeId } from './ids.ts';
 import { gather, judge, modelUnavailable, retryDelay, reviewQuotaOn, type Judgement } from './judge.ts';
-import { BAD_ANSWER_ATTEMPTS_MAX, CLEF, DAY, MAIL_ATTEMPTS_MAX, NONE, REPLAY_BATCH, REPLAY_CASES_MAX, REPLAY_ITEMS_MAX, REPLAY_NEURON_SHARE, REPLAY_SUBREQUESTS, REPLAY_WINDOW_MS } from './limits.ts';
+import { BAD_ANSWER_ATTEMPTS_MAX, CLEF, DAY, MAIL_ATTEMPTS_MAX, NONE, REPLAY_BATCH, REPLAY_CASES_MAX, REPLAY_ITEMS_MAX, REPLAY_SUBREQUESTS, REPLAY_WINDOW_MS } from './limits.ts';
 import { readMessage } from './mime.ts';
 import type { Budget } from './session.ts';
 import type { SettingsValue } from './settings.ts';
@@ -208,9 +208,9 @@ export async function replayStep(deps: ReplayDeps): Promise<boolean> {
       return false;
     }
     if (!deps.budget.has(REPLAY_SUBREQUESTS)) return true;
-    // The live pipeline keeps the rest of the day's budget: the replay waits for the next UTC day past its share.
+    // Past the day's budget (shared with the live pipeline, which goes first in every pass) it waits for the next UTC day.
     const usage = store.usage(utcDay(deps.now()));
-    if (usage.quota_exhausted === 1 || usage.neurons >= REPLAY_NEURON_SHARE * deps.settings.dailyNeuronBudget) return false;
+    if (usage.quota_exhausted === 1 || usage.neurons >= deps.settings.dailyNeuronBudget) return false;
     let read;
     try {
       read = readMessage((await deps.gmail.message(row.message_id)).message);
