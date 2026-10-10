@@ -61,7 +61,8 @@ Four tabs under a header whose one status line shows the mode in force, the Gmai
   ```js
   const t = (await (await fetch('/api/csrf')).json()).token
   await fetch('/api/v2/replayEvaluation:start', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': t }, body: JSON.stringify({ request_id: crypto.randomUUID() }) }).then((r) => r.json())
-  // a few alarm passes later (about 6 mails each):
+  // a few alarm passes later (about 6 mails each): the counts, reason_counts and cases (each mail's decision numbers);
+  // a new start (a new request_id) replaces the last run
   await fetch('/api/v2/replayEvaluation').then((r) => r.json())
   ```
 - **What is kept**: decided mail's subject, sender and From domain, and the review queue, for 14 days (the daily

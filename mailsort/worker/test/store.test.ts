@@ -1,7 +1,8 @@
 /**
  * The store over its own SQL on Node's SQLite (./fakes/sql.ts): label paths (nesting, the tree rule, the IDs and option
  * keys derived from a path), the schema's migrations (version 5 seeds the trusted domains from the rules and then drops
- * them, in one transaction), the trusted domains, the flow counters and the retention cleanup. Every address and
+ * them, in one transaction; version 6 gives the replay its decision numbers), the trusted domains (a seeded one at any
+ * time, a learned one from its time), the flow counters and the retention cleanup. Every address and
  * domain is synthetic (example.* domains; the public mailbox providers only by their domain names, as the denylist
  * holds them).
  */
@@ -10,7 +11,7 @@ import { countFlow, readFlow } from '../src/flow.ts';
 import { DAY, TRUSTED_DOMAINS_PER_LABEL_MAX } from '../src/limits.ts';
 import { senderHash } from '../src/mask.ts';
 import { labelIdFor, normalizePath, optionKeys, ownerPath, parentGmailNames, pathOfGmailName, pathSlug, treeConflict } from '../src/paths.ts';
-import { SCHEMA_V1, SCHEMA_V2, SCHEMA_V3, SCHEMA_V4, SCHEMA_V5, senderHashesToBackfill, Store } from '../src/store.ts';
+import { SCHEMA_V1, SCHEMA_V2, SCHEMA_V3, SCHEMA_V4, SCHEMA_V5, SCHEMA_V6, SCHEMA_VERSION, senderHashesToBackfill, Store } from '../src/store.ts';
 import { memorySql } from './fakes/sql.ts';
 
 const T0 = Date.parse('2026-10-06T08:00:00Z');
@@ -175,7 +176,7 @@ describe('the store', () => {
     const hashes = await senderHashesToBackfill(s);
     expect([...hashes.keys()].sort()).toEqual(['m1', 'm2']);
     s.migrate(transactional(sql), hashes);
-    expect(s.getMeta('schema_version')).toBe('5');
+    expect(s.getMeta('schema_version')).toBe(String(SCHEMA_VERSION));
     expect(SCHEMA_V5.length).toBeGreaterThan(0);
     // An address rule's domain (exactly), a domain rule's own (with its subdomains); never a list, delivered-to,
     // proposed or disabled rule, a plain rule of a label that implies no trust, or a public mailbox provider.
@@ -234,15 +235,15 @@ describe('the store', () => {
     // Without the obstacle it goes through.
     sql.exec(`DROP VIEW labels_v5`);
     s.migrate(transactional(sql), hashes);
-    expect(s.getMeta('schema_version')).toBe('5');
+    expect(s.getMeta('schema_version')).toBe(String(SCHEMA_VERSION));
     expect(s.trustedDomains('bank')).toEqual(['alerts.bank.example.com', 'bank.example.com']);
   });
 
-  it('migrates a new database and older versions straight to 5', async () => {
+  it('migrates a new database and older versions straight to the current one', async () => {
     const fresh = new Store(memorySql());
     expect(await senderHashesToBackfill(fresh)).toEqual(new Map());
     fresh.migrate();
-    expect(fresh.getMeta('schema_version')).toBe('5');
+    expect(fresh.getMeta('schema_version')).toBe(String(SCHEMA_VERSION));
     expect(fresh.labels()).toEqual([]);
     for (const version of [1, 2, 3]) {
       const sql = memorySql();
@@ -252,12 +253,35 @@ describe('the store', () => {
       sql.exec(`INSERT INTO rules (id, kind, value, label_id, state, create_time, update_time) VALUES ('r1', 'sender_address', 'a@bank.example.com', 'bank', 'active', 1, 1)`);
       const s = new Store(sql);
       s.migrate(transactional(sql), await senderHashesToBackfill(s));
-      expect(s.getMeta('schema_version'), `version ${String(version)}`).toBe('5');
+      expect(s.getMeta('schema_version'), `version ${String(version)}`).toBe(String(SCHEMA_VERSION));
       expect(s.trustedDomains('bank')).toEqual(['bank.example.com']);
       expect(s.label('bank')).toMatchObject({ gmail_adopted: 0, gmail_name_taken: 0 });
       s.run(`INSERT INTO gmail_parents (gmail_id, create_time) VALUES ('Label_9', 1)`);
       expect(s.count(`SELECT count(*) AS n FROM gmail_parents`)).toBe(1);
     }
+  });
+
+  it('migrates version 5 to 6: the replay keeps its rows and gains the decision numbers, unset; once only', () => {
+    const sql = memorySql();
+    for (const statement of [...SCHEMA_V1, ...SCHEMA_V2, ...SCHEMA_V3, ...SCHEMA_V4, ...SCHEMA_V5]) sql.exec(statement);
+    sql.exec(`INSERT INTO meta (key, value) VALUES ('schema_version', '5')`);
+    sql.exec(`INSERT INTO replay (job_id, message_id, state, create_time) VALUES ('j', '', 'running', 1)`);
+    sql.exec(`INSERT INTO replay (job_id, message_id, state, owner_label, as_of, outcome, label, reason, create_time, done_time) VALUES ('j', 'm1', 'evaluated', '', 1, 'unsure', 'bank', 'untrusted_sender', 1, 2)`);
+    const added = ['top_option', 'top_p', 'runner_up_p', 'view2_p', 'combined', 'suspicious', 'needs_action', 'authenticated', 'trust'];
+    expect(SCHEMA_V6).toHaveLength(added.length);
+    const s = new Store(sql);
+    s.migrate(transactional(sql));
+    expect(s.getMeta('schema_version')).toBe('6');
+    expect(columns(sql, 'replay')).toEqual(expect.arrayContaining(added));
+    // The mail evaluated before keeps its verdict; its numbers were never recorded.
+    expect(s.one(`SELECT outcome, reason, ${added.join(', ')} FROM replay WHERE message_id = 'm1'`)).toEqual({
+      outcome: 'unsure', reason: 'untrusted_sender', ...Object.fromEntries(added.map((column) => [column, null])),
+    });
+    // Migrating again changes nothing (and does not add the columns twice).
+    const before = s.all(`SELECT * FROM replay ORDER BY message_id`);
+    s.migrate(transactional(sql));
+    expect(s.all(`SELECT * FROM replay ORDER BY message_id`)).toEqual(before);
+    expect(columns(sql, 'replay').filter((column) => column === 'top_option')).toHaveLength(1);
   });
 
   it('trusts a listed domain exactly, its subdomains only for a former domain rule, never a look-alike or a parent', () => {
@@ -276,9 +300,15 @@ describe('the store', () => {
     expect(s.isTrusted('bank', 'shop.example.org')).toBe(true);
     expect(s.isTrusted('bank', 'Shop.Example.org')).toBe(true);
     expect(s.isTrusted('bank', 'sellers.shop.example.org')).toBe(false);
-    // As of a time: only the domains it had then (the replay evaluation's mail before the owner taught it).
+    // As of a time: only the learned domains it had then (the replay evaluation's mail before the owner taught it).
     expect(s.isTrusted('bank', 'shop.example.org', T0)).toBe(false);
     expect(s.isTrusted('bank', 'shop.example.org', T0 + 1)).toBe(true);
+    // A seeded one at any time: the owner's former rule decided the mail before the migration recorded it.
+    s.run(`INSERT INTO trusted_domains (label_id, domain, origin, create_time) VALUES ('broker', 'broker.example.com', 'seed', ?)`, T0 + DAY);
+    expect(s.isTrusted('broker', 'broker.example.com', T0)).toBe(true);
+    expect(s.isTrusted('bank', 'alerts.bank.example.com', 0)).toBe(true);
+    // Still exactly that domain (it covers no subdomain, unlike a former domain rule's).
+    expect(s.isTrusted('broker', 'mail.broker.example.com', T0)).toBe(false);
   });
 
   it('learns a trusted domain once, never a public mailbox provider\'s, and keeps at most 50 per label, the oldest going first', () => {

@@ -130,6 +130,8 @@ export const REPLAY_SUBREQUESTS = 5;
 export const REPLAY_NEURON_SHARE = 0.5;
 /** Its rows are pruned this long after it started. */
 export const REPLAY_KEPT_MS = 7 * DAY;
+/** GetReplayEvaluation answers at most this many cases (each evaluated mail's numbers): all of REPLAY_ITEMS_MAX. */
+export const REPLAY_CASES_MAX = 200;
 
 // ---- Workers AI ----------------------------------------------------------------------------------------------------------
 

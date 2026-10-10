@@ -4,7 +4,15 @@
 import { create } from '@ziyixi/proto/protobuf';
 import { timestampFromMs } from '@ziyixi/proto/protobuf/wkt';
 import { Label_GmailState, LabelSchema, type Label } from '@ziyixi/proto/mailsort/ui/v2/label_pb';
-import { ReplayEvaluation_MismatchSchema, ReplayEvaluation_State, ReplayEvaluationSchema, type ReplayEvaluation } from '@ziyixi/proto/mailsort/ui/v2/replay_pb';
+import {
+  ReplayEvaluation_CaseSchema,
+  ReplayEvaluation_MismatchSchema,
+  ReplayEvaluation_Outcome,
+  ReplayEvaluation_State,
+  ReplayEvaluationSchema,
+  type ReplayEvaluation,
+  type ReplayEvaluation_Case,
+} from '@ziyixi/proto/mailsort/ui/v2/replay_pb';
 import {
   CandidateSchema,
   Example_Origin,
@@ -21,7 +29,8 @@ import { MailFlow_CountSchema, MailFlow_Outcome, MailFlow_Stage, MailFlowSchema,
 import { Mode } from '@ziyixi/proto/mailsort/ui/v2/status_pb';
 import type { ModeName } from './env.ts';
 import type { FlowCount, FlowOutcome, FlowStage } from './flow.ts';
-import type { ReplaySummary } from './replay.ts';
+import { NONE } from './limits.ts';
+import type { ReplayCase, ReplaySummary } from './replay.ts';
 import type { ExampleRow, LabelRow, LedgerRow, ReviewRow } from './store.ts';
 
 const ts = (ms: number | null) => (ms === null ? undefined : timestampFromMs(ms));
@@ -191,7 +200,30 @@ export function ledgerMessage(row: LedgerRow, view: LedgerView): LedgerEntry {
   });
 }
 
-/** The replay evaluation's summary (counts and label names only). */
+const REPLAY_OUTCOMES = { label: ReplayEvaluation_Outcome.LABEL, none: ReplayEvaluation_Outcome.NONE, unsure: ReplayEvaluation_Outcome.UNSURE } as const;
+
+/** An optional probability: unset when null (not asked). */
+const optional = (value: number | null) => value ?? undefined;
+
+/** One evaluated mail's decision numbers (no content). */
+function replayCase(c: ReplayCase): ReplayEvaluation_Case {
+  return create(ReplayEvaluation_CaseSchema, {
+    ownerLabel: labelRef(c.owner),
+    outcome: REPLAY_OUTCOMES[c.outcome],
+    topLabel: c.topOption === NONE ? '' : labelRef(c.topOption),
+    topProbability: optional(c.topP),
+    runnerUpProbability: optional(c.runnerUpP),
+    secondViewProbability: optional(c.view2P),
+    combinedProbability: optional(c.combined),
+    suspiciousProbability: optional(c.suspicious),
+    needsActionProbability: optional(c.needsAction),
+    authenticated: c.authenticated,
+    trustImplying: c.trust,
+    reason: c.reason,
+  });
+}
+
+/** The replay evaluation's summary and each evaluated mail's numbers (counts, label names and probabilities only). */
 export function replayMessage(summary: ReplaySummary): ReplayEvaluation {
   return create(ReplayEvaluationSchema, {
     name: 'replayEvaluation',
@@ -208,6 +240,8 @@ export function replayMessage(summary: ReplaySummary): ReplayEvaluation {
     unsureCount: summary.unsure,
     shownCount: summary.shown,
     mismatches: summary.mismatches.map((m) => create(ReplayEvaluation_MismatchSchema, { decidedLabel: labelRef(m.decided), ownerLabel: labelRef(m.owner), mailCount: m.count })),
+    cases: summary.cases.map(replayCase),
+    reasonCounts: { ...summary.reasonCounts },
   });
 }
 

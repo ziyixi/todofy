@@ -18,15 +18,16 @@
  * It never starves the live pipeline: it runs last in a pass, only while the day's neurons are below
  * REPLAY_NEURON_SHARE of the owner's budget and Workers AI's quota lasts (else the next UTC day), never while Home's
  * guard sheds (pipeline.ts), always with the full Clef (what live decisions use). Its rows are pruned REPLAY_KEPT_MS
- * after the start (store.ts prune). GetReplayEvaluation answers counts and label pairs only (replaySummary).
+ * after the start (store.ts prune). GetReplayEvaluation answers counts, label pairs and each evaluated mail's decision
+ * numbers (replaySummary, numbersOf), never the mail's content: what the thresholds of decide.ts are calibrated with.
  */
 import { AiError, AiQuotaError } from './ai.ts';
-import { joinsReview, type Decision } from './decide.ts';
+import { higher, joinsReview, type Decision, type View } from './decide.ts';
 import type { AiRunner } from './env.ts';
 import { GoogleError, type GmailClient } from './gmail.ts';
 import { timeId } from './ids.ts';
 import { gather, judge, modelUnavailable, retryDelay, reviewQuotaOn, type Judgement } from './judge.ts';
-import { BAD_ANSWER_ATTEMPTS_MAX, CLEF, DAY, MAIL_ATTEMPTS_MAX, REPLAY_BATCH, REPLAY_ITEMS_MAX, REPLAY_NEURON_SHARE, REPLAY_SUBREQUESTS, REPLAY_WINDOW_MS } from './limits.ts';
+import { BAD_ANSWER_ATTEMPTS_MAX, CLEF, DAY, MAIL_ATTEMPTS_MAX, NONE, REPLAY_BATCH, REPLAY_CASES_MAX, REPLAY_ITEMS_MAX, REPLAY_NEURON_SHARE, REPLAY_SUBREQUESTS, REPLAY_WINDOW_MS } from './limits.ts';
 import { readMessage } from './mime.ts';
 import type { Budget } from './session.ts';
 import type { SettingsValue } from './settings.ts';
@@ -51,11 +52,62 @@ export interface ReplayRow extends Record<string, SqlStorageValue> {
   not_before: number;
   create_time: number;
   done_time: number | null;
+  // The decision's numbers (numbersOf; schema version 6). NULL before it was evaluated, and for a skipped mail.
+  /** View 1's top option: a label ID or `none`; NULL when view 1 did not answer. */
+  top_option: string | null;
+  top_p: number | null;
+  runner_up_p: number | null;
+  /** View 2's probability of the top label; NULL when view 2 did not run. */
+  view2_p: number | null;
+  combined: number | null;
+  suspicious: number | null;
+  needs_action: number | null;
+  /** 1: DMARC passed aligned with the From domain. Set for every mail evaluated since schema version 6. */
+  authenticated: number | null;
+  /** 1: the top label is a trust label. */
+  trust: number | null;
+}
+
+/** One evaluated mail's decision numbers (no content): what the thresholds are calibrated with. */
+export interface ReplayNumbers {
+  readonly topOption: string | null;
+  readonly topP: number | null;
+  readonly runnerUpP: number | null;
+  readonly view2P: number | null;
+  readonly combined: number | null;
+  readonly suspicious: number | null;
+  readonly needsAction: number | null;
+  readonly authenticated: boolean;
+  readonly trust: boolean;
 }
 
 /**
- * Starts a replay evaluation at `now`, replacing the previous one (and its rows): answers the new job's ID. Run inside
- * a transaction (the API's, with its request log entry).
+ * The numbers of a judgement: view 1's top option (a label ID or `none`), its probability and the next most likely
+ * option's, view 2's probability of that label as it answered, the combined probability the threshold reads (view 1's
+ * p(none) for a none top), the higher p(suspicious) and p(needs_action) of the two views, and whether the sender is
+ * authenticated and the top label a trust label (`isTrust`). Without view 1 (the model unavailable, no label to offer)
+ * only the last two.
+ */
+export function numbersOf(decision: Decision, view1: View | null, view2: View | null, authenticated: boolean, isTrust: (labelId: string) => boolean): ReplayNumbers {
+  if (view1 === null) return { topOption: null, topP: null, runnerUpP: null, view2P: null, combined: null, suspicious: null, needsAction: null, authenticated, trust: false };
+  const top = view1.top;
+  const runnerUp = Object.entries(view1.probabilities).reduce((best, [option, p]) => (option === top ? best : Math.max(best, p)), 0);
+  return {
+    topOption: top,
+    topP: view1.probabilities[top] ?? 0,
+    runnerUpP: runnerUp,
+    view2P: view2 === null || top === NONE ? null : (view2.probabilities[top] ?? 0),
+    combined: decision.confidence,
+    suspicious: higher(view1, view2, 'suspicious'),
+    needsAction: higher(view1, view2, 'needsAction'),
+    authenticated,
+    trust: top !== NONE && isTrust(top),
+  };
+}
+
+/**
+ * Starts a replay evaluation at `now`, replacing the previous one (and its rows), still running or finished: answers
+ * the new job's ID. Run inside a transaction (the API's, with its request log entry).
  */
 export function startReplay(store: Store, now: number): string {
   store.run(`DELETE FROM replay`);
@@ -102,7 +154,9 @@ function outcomeOf(decision: Decision): { outcome: string; label: string | null;
   return { outcome: 'unsure', label: decision.top, reason: decision.reason };
 }
 
-function finish(store: Store, row: ReplayRow, state: 'evaluated' | 'skipped', now: number, decision: Decision | null): void {
+/** Records a mail's replay: evaluated with its judgement (and the sender's authentication), or skipped (null). */
+function finish(store: Store, row: ReplayRow, now: number, evaluated: { readonly judgement: Judgement; readonly authenticated: boolean } | null): void {
+  const decision = evaluated?.judgement.decision ?? null;
   let shown = 0;
   if (decision?.kind === 'unsure') {
     // The quota of the mail's own day, against the mails of this replay shown on that day so far (rows are decided in
@@ -112,14 +166,25 @@ function finish(store: Store, row: ReplayRow, state: 'evaluated' | 'skipped', no
     shown = joinsReview(decision, before, reviewQuotaOn(store, row.as_of)) ? 1 : 0;
   }
   const verdict = decision === null ? { outcome: null, label: null, reason: '' } : outcomeOf(decision);
+  const n = evaluated === null ? null : numbersOf(evaluated.judgement.decision, evaluated.judgement.view1, evaluated.judgement.view2, evaluated.authenticated, (id) => store.label(id)?.trust === 1);
   store.run(
-    `UPDATE replay SET state = ?, outcome = ?, label = ?, reason = ?, shown = ?, done_time = ? WHERE job_id = ? AND message_id = ?`,
-    state,
+    `UPDATE replay SET state = ?, outcome = ?, label = ?, reason = ?, shown = ?, done_time = ?, top_option = ?, top_p = ?, runner_up_p = ?, view2_p = ?, combined = ?,
+       suspicious = ?, needs_action = ?, authenticated = ?, trust = ? WHERE job_id = ? AND message_id = ?`,
+    evaluated === null ? 'skipped' : 'evaluated',
     verdict.outcome,
     verdict.label,
     verdict.reason,
     shown,
     now,
+    n?.topOption ?? null,
+    n?.topP ?? null,
+    n?.runnerUpP ?? null,
+    n?.view2P ?? null,
+    n?.combined ?? null,
+    n?.suspicious ?? null,
+    n?.needsAction ?? null,
+    n === null ? null : n.authenticated ? 1 : 0,
+    n === null ? null : n.trust ? 1 : 0,
     row.job_id,
     row.message_id,
   );
@@ -154,7 +219,7 @@ export async function replayStep(deps: ReplayDeps): Promise<boolean> {
       read = null;
     }
     if (read === null) {
-      deps.transact(() => { finish(store, row, 'skipped', deps.now(), null); });
+      deps.transact(() => { finish(store, row, deps.now(), null); });
       continue;
     }
     const g = await gather(read);
@@ -192,8 +257,7 @@ export async function replayStep(deps: ReplayDeps): Promise<boolean> {
       }
       judgement = modelUnavailable();
     }
-    const { decision } = judgement;
-    deps.transact(() => { finish(store, row, 'evaluated', deps.now(), decision); });
+    deps.transact(() => { finish(store, row, deps.now(), { judgement, authenticated: g.authenticated }); });
   }
   return store.one(`SELECT 1 AS x FROM replay WHERE job_id = ? AND state = 'pending' AND not_before <= ?`, job.job_id, deps.now()) !== undefined;
 }
@@ -213,9 +277,20 @@ export interface ReplaySummary {
   readonly shown: number;
   /** The confident decisions that differ from the owner's answer: decided and owner label ('' for none), counted. */
   readonly mismatches: readonly { readonly decided: string; readonly owner: string; readonly count: number }[];
+  /** The evaluated mails with their numbers, in the order of their original decisions, at most REPLAY_CASES_MAX. */
+  readonly cases: readonly ReplayCase[];
+  /** The uncertain mails per reason. */
+  readonly reasonCounts: Readonly<Record<string, number>>;
 }
 
-/** The latest replay's summary (counts and label IDs only), or null when there is none. */
+/** One case: the owner's answer ('' for none), the replay's outcome and reason, and the decision's numbers. */
+export interface ReplayCase extends ReplayNumbers {
+  readonly owner: string;
+  readonly outcome: 'label' | 'none' | 'unsure';
+  readonly reason: string;
+}
+
+/** The latest replay's summary (counts, label IDs and each case's numbers; no content), or null when there is none. */
 export function replaySummary(store: Store): ReplaySummary | null {
   const job = store.one<ReplayRow>(`SELECT * FROM replay WHERE message_id = ''`);
   if (job === undefined) return null;
@@ -233,6 +308,16 @@ export function replaySummary(store: Store): ReplaySummary | null {
      GROUP BY decided, owner ORDER BY n DESC, decided, owner`,
     job.job_id,
   );
+  // `authenticated` is set for every mail evaluated since the numbers were recorded (schema version 6).
+  const cases = store.all<ReplayRow>(
+    `SELECT * FROM replay WHERE job_id = ? AND message_id != '' AND state = 'evaluated' AND authenticated IS NOT NULL ORDER BY as_of, message_id LIMIT ?`,
+    job.job_id,
+    REPLAY_CASES_MAX,
+  );
+  const reasons = store.all<{ reason: string; n: number }>(
+    `SELECT reason, count(*) AS n FROM replay WHERE job_id = ? AND message_id != '' AND outcome = 'unsure' GROUP BY reason ORDER BY reason`,
+    job.job_id,
+  );
   const n = (key: string) => counts[key] ?? 0;
   return {
     state: job.state === 'succeeded' ? 'succeeded' : 'running',
@@ -248,5 +333,20 @@ export function replaySummary(store: Store): ReplaySummary | null {
     unsure: n('unsure'),
     shown: n('shown'),
     mismatches: mismatches.map((row) => ({ decided: row.decided, owner: row.owner, count: row.n })),
+    cases: cases.map((row) => ({
+      owner: row.owner_label ?? '',
+      outcome: row.outcome === 'label' || row.outcome === 'none' ? row.outcome : 'unsure',
+      reason: row.reason,
+      topOption: row.top_option,
+      topP: row.top_p,
+      runnerUpP: row.runner_up_p,
+      view2P: row.view2_p,
+      combined: row.combined,
+      suspicious: row.suspicious,
+      needsAction: row.needs_action,
+      authenticated: row.authenticated === 1,
+      trust: row.trust === 1,
+    })),
+    reasonCounts: Object.fromEntries(reasons.map((row) => [row.reason, row.n])),
   };
 }

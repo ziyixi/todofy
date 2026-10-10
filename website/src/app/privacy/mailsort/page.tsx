@@ -117,7 +117,8 @@ export default function MailsortPrivacyPage() {
           </li>
           <li>
             A replay evaluation the owner starts (per message its identifier, the owner&apos;s
-            answer and the label decided again, no content): 7 days.
+            answer, the label decided again, the model&apos;s probabilities behind it and whether
+            the sender passed Gmail&apos;s DMARC check, no content): 7 days.
           </li>
           <li>
             Labels (their names, some read from Gmail, the Gmail labels they are linked to, and the

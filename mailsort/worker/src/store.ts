@@ -20,7 +20,7 @@ import { newEtag } from './ids.ts';
 import { CONTENT_KEPT_MS, DAY, DECISIONS_KEPT_MS, ERRORS_KEPT, FLOW_KEPT_DAYS, REPLAY_KEPT_MS, REQUEST_ID_TTL_MS, TRUSTED_DOMAINS_PER_LABEL_MAX } from './limits.ts';
 import { senderHash } from './mask.ts';
 
-export const SCHEMA_VERSION = 5;
+export const SCHEMA_VERSION = 6;
 
 export const SCHEMA_V1: readonly string[] = [
   `CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)`,
@@ -376,6 +376,27 @@ export const SCHEMA_V5: readonly string[] = [
   `DELETE FROM meta WHERE key = 'revoked_at'`,
 ];
 
+/**
+ * Schema version 6 (2026-10-10, calibrating the thresholds): each replayed mail keeps the decision's numbers
+ * (replay.ts finish), never its content: view 1's top option (a label ID or `none`; NULL when view 1 did not answer),
+ * its probability and the runner-up's, view 2's probability of that label (NULL when view 2 did not run), the
+ * combined probability, the higher p(suspicious) and p(needs_action), whether the sender was authenticated and whether
+ * the top label is a trust label. `authenticated` is set for every mail evaluated from this version on (NULL: evaluated
+ * before, or skipped). Like versions 2 and 4, run once from version 5 inside the migration's transaction, so one cut
+ * short leaves version 5 as it was and a store at version 6 is never migrated again.
+ */
+export const SCHEMA_V6: readonly string[] = [
+  `ALTER TABLE replay ADD COLUMN top_option TEXT`,
+  `ALTER TABLE replay ADD COLUMN top_p REAL`,
+  `ALTER TABLE replay ADD COLUMN runner_up_p REAL`,
+  `ALTER TABLE replay ADD COLUMN view2_p REAL`,
+  `ALTER TABLE replay ADD COLUMN combined REAL`,
+  `ALTER TABLE replay ADD COLUMN suspicious REAL`,
+  `ALTER TABLE replay ADD COLUMN needs_action REAL`,
+  `ALTER TABLE replay ADD COLUMN authenticated INTEGER`,
+  `ALTER TABLE replay ADD COLUMN trust INTEGER`,
+];
+
 export type Value = string | number | null | ArrayBuffer;
 
 export interface RowMeter {
@@ -546,6 +567,7 @@ export class Store {
         }
         for (const [messageId, hash] of senderHashes) this.sql.exec(`UPDATE decisions SET sender_hash = ? WHERE message_id = ? AND sender_hash IS NULL`, hash, messageId);
       }
+      if (version < 6) for (const statement of SCHEMA_V6) this.sql.exec(statement);
       if (version !== SCHEMA_VERSION) this.setMeta('schema_version', String(SCHEMA_VERSION));
     });
   }
@@ -682,14 +704,16 @@ export class Store {
   /**
    * Whether `domain` is trusted for the label: one of its trusted domains exactly, or a subdomain of one that covers
    * its subdomains (`a.bank.example.com` of a seeded sender domain `bank.example.com`), among those it had before
-   * `asOf` (the replay evaluation asks as of a mail's original decision).
+   * `asOf` (the replay evaluation asks as of a mail's original decision). A seeded domain counts at any `asOf`: it
+   * stands for one of the owner's former rules, which decided the mail before the migration recorded it (2026-10-10);
+   * only a learned one (origin `owner`) dates from the owner's answer.
    */
   isTrusted(labelId: string, domain: string, asOf = Number.MAX_SAFE_INTEGER): boolean {
     const suffixes = domainSuffixes(domain.toLowerCase());
     if (suffixes.length === 0) return false;
     return (
       this.one(
-        `SELECT 1 AS x FROM trusted_domains WHERE label_id = ? AND create_time < ? AND (domain = ? OR (subdomains = 1 AND domain IN (${suffixes.map(() => '?').join(', ')})))`,
+        `SELECT 1 AS x FROM trusted_domains WHERE label_id = ? AND (origin = 'seed' OR create_time < ?) AND (domain = ? OR (subdomains = 1 AND domain IN (${suffixes.map(() => '?').join(', ')})))`,
         labelId,
         asOf,
         domain.toLowerCase(),

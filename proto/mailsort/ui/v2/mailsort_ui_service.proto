@@ -267,8 +267,8 @@ service MailsortUiService {
     option (google.api.method_signature) = "name";
   }
 
-  // The latest replay evaluation and its summary (no mail content); NOT_FOUND before the first or after its rows
-  // were pruned.
+  // The latest replay evaluation: its summary and each evaluated mail's decision numbers (no mail content);
+  // NOT_FOUND before the first or after its rows were pruned.
   // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
   // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
   rpc GetReplayEvaluation(GetReplayEvaluationRequest) returns (ReplayEvaluation) {
@@ -277,9 +277,9 @@ service MailsortUiService {
   }
 
   // Starts a replay evaluation over the review items the owner resolved in the last 14 days, replacing the
-  // previous one. The alarm re-reads each mail with the read grant and decides it again without writing anything
-  // to Gmail and without making verdicts or examples. Needs a mode that reads Gmail (shadow or live) to make
-  // progress.
+  // previous one (running or finished). The alarm re-reads each mail with the read grant and decides it again
+  // without writing anything to Gmail and without making verdicts or examples. Needs a mode that reads Gmail (shadow
+  // or live) to make progress.
   // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
   // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
   rpc StartReplayEvaluation(StartReplayEvaluationRequest) returns (ReplayEvaluation) {

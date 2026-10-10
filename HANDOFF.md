@@ -19,6 +19,36 @@ Rules for this file:
 Last updated: 2026-10-10.
 <!-- Active work is separate from the production evidence below. -->
 
+## In flight (2026-10-10, Claude): mailsort replay calibration, branch `mailsort-calibration`
+
+Why: mid-run, 34 of 41 replayed mails came out uncertain; the replay evaluation must give content-free numbers to
+choose a gating rule with high precision and coverage (`mailsort/docs/design.md` §5.1). Branched from `b39d430`.
+
+Done on the branch (one local commit, not pushed):
+- Each replayed mail keeps the decision's numbers (schema version 6: nine columns added to `replay`, once, in the
+  migration's transaction): view 1's top option and probability, the runner-up's probability, view 2's probability of
+  that label, the combined probability, the higher p(suspicious) and p(needs_action), authenticated, trust label, and
+  the reason it already had. Rows evaluated before version 6 keep theirs without numbers.
+- GetReplayEvaluation adds `cases` (OUTPUT_ONLY, at most 200: those numbers with the owner's answer and the outcome, no
+  message ID) and `reason_counts`; additive, `npm run breaking` clean.
+- A seeded trusted domain (origin `seed`, the former rules) counts at any as-of time; a learned one (`owner`) only from
+  its time (`store.ts` isTrusted). The live gate is unchanged (it asks as of now).
+- Re-running: StartReplayEvaluation already replaced the previous job, running or finished; a fresh run needs a new
+  `request_id` (the same one within 24 h answers the first start). Now tested after a finished run.
+- The privacy page's replay line names the numbers kept (its date stays 2026-10-10).
+
+Left, in order:
+1. Push, the full CI gate, land (deploys mailsort and the website).
+2. After the deploy: GetReplayEvaluation answers `cases` and `reason_counts`; the running job (if any) keeps its counts.
+3. Start a fresh replay from the signed-in page (new `request_id`), wait for `succeeded`, read `cases` for the
+   precision and coverage of candidate gates, then change the thresholds (`limits.ts`, design §4.4) in a follow-up.
+
+Checked locally: the worker's lint, typecheck, unit and workerd runtime tests (CPU: the 200-case answer 4.2 ms first in
+MailsortState, the fetch handler 0.4 first and 0.8 warm), the smoke run, the web's lint, typecheck, tests and build
+(56.6 KiB gzip of 67), the deploy tests, the dry run (Worker 123.0 -> 124.6 KiB gzip of 135), proto's buf lint,
+api-linter, breaking, self-test, determinism and tests, `.github/scripts`' tests, and the website's unit tests,
+eslint and prettier for the privacy page.
+
 ## In flight (2026-10-10, Claude): mailsort model-first, branch `mailsort-model-first`
 
 Owner request 2026-10-10: sender-address rules sort badly (one sender's statements and promotions alike), so remove

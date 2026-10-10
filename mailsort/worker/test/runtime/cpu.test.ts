@@ -6,7 +6,7 @@
  * - the fetch handler (10 ms per request): Access (an RS256 verification), CSRF, one call to the object and its answer
  *   passed through, for the heaviest answers (24 labels with their trusted domains, a page of 50 review items, a page
  *   of 50 ledger entries, the label report over 2,000 decisions, the status, 30 days of flow counters, the replay
- *   evaluation's summary over REPLAY_ITEMS_MAX mails) and a settings update;
+ *   evaluation's summary over REPLAY_ITEMS_MAX mails with REPLAY_CASES_MAX cases) and a settings update;
  * - MailsortState (30 s per invocation): those API calls, and the alarm path at its bounds: three history pages of 100
  *   records, DRAIN_MAX mails decided with the nearest of EXAMPLES_MAX embedded examples, a sender history of
  *   SENDER_HISTORY_ROWS decisions, the model's two views and a live write each; then a pass of the replay evaluation
@@ -27,7 +27,7 @@ import {
   type Isolate,
   type Measurement,
 } from '../../../../tools/workerd-cpu/workerd-cpu.mts';
-import { DRAIN_MAX, EXAMPLES_MAX, LABELS_MAX, REPLAY_BATCH, REPLAY_ITEMS_MAX, SENDER_HISTORY_ROWS, TRUSTED_DOMAINS_PER_LABEL_MAX } from '../../src/limits.ts';
+import { DRAIN_MAX, EXAMPLES_MAX, LABELS_MAX, REPLAY_BATCH, REPLAY_CASES_MAX, REPLAY_ITEMS_MAX, SENDER_HISTORY_ROWS, TRUSTED_DOMAINS_PER_LABEL_MAX } from '../../src/limits.ts';
 import { senderHash } from '../../src/mask.ts';
 import { MAILS, message } from '../fakes/fixtures.ts';
 import { accessClaims, testIssuer } from '../jwt.ts';
@@ -170,14 +170,20 @@ async function seed(h: Harness): Promise<void> {
   );
 }
 
-/** The replay at its bounds: REPLAY_ITEMS_MAX evaluated mails (its summary reads them all). */
+/**
+ * The replay at its bounds: REPLAY_ITEMS_MAX evaluated mails (its summary reads them all), each with every decision
+ * number recorded, so the answer holds REPLAY_CASES_MAX cases.
+ */
 async function seedReplay(h: Harness): Promise<void> {
   await h.sql(`DELETE FROM replay`);
   await h.sql(`INSERT INTO replay (job_id, message_id, state, create_time) VALUES ('job0', '', 'succeeded', ?)`, T0);
   await h.sql(
     `WITH RECURSIVE n(i) AS (SELECT 0 UNION ALL SELECT i + 1 FROM n WHERE i < ?)
-     INSERT INTO replay (job_id, message_id, state, owner_label, as_of, outcome, label, shown, create_time, done_time)
-     SELECT 'job0', printf('dddd%012d', i), 'evaluated', 'label-' || (i % 7), ?, CASE i % 3 WHEN 0 THEN 'label' WHEN 1 THEN 'none' ELSE 'unsure' END, 'label-' || (i % 5), i % 2, ?, ?
+     INSERT INTO replay (job_id, message_id, state, owner_label, as_of, outcome, label, reason, shown, create_time, done_time, top_option, top_p, runner_up_p,
+       view2_p, combined, suspicious, needs_action, authenticated, trust)
+     SELECT 'job0', printf('dddd%012d', i), 'evaluated', 'label-' || (i % 7), ?, CASE i % 3 WHEN 0 THEN 'label' WHEN 1 THEN 'none' ELSE 'unsure' END, 'label-' || (i % 5),
+       CASE i % 3 WHEN 2 THEN 'views_disagree' ELSE '' END, i % 2, ?, ?, 'label-' || (i % 5), 0.61 + i / 1000.0, 0.21 - i / 2000.0, 0.57 + i / 3000.0,
+       0.59 + i / 1500.0, 0.013 * (i % 7), 0.6 * (i % 2), i % 2, i % 3 = 0
      FROM n`,
     REPLAY_ITEMS_MAX - 1,
     T0,
@@ -252,11 +258,14 @@ async function session({ h, meter: worker, object }: SortIsolate, index: number)
     ...(await both('GET labelReport (2,000 decisions)', () => expectOk('/api/v2/labelReport'))),
     ...(await both('GET serviceStatus', () => expectOk('/api/v2/serviceStatus'))),
     ...(await both('GET mailFlows/last-30-days (11,520 counters)', () => expectOk('/api/v2/mailFlows/last-30-days'))),
-    ...(await both(`GET replayEvaluation (${String(REPLAY_ITEMS_MAX)} mails)`, () => expectOk('/api/v2/replayEvaluation'))),
+    ...(await both(`GET replayEvaluation (${String(REPLAY_ITEMS_MAX)} mails, ${String(REPLAY_CASES_MAX)} cases)`, () => expectOk('/api/v2/replayEvaluation'))),
     ...(await both('PATCH settings (mask)', () =>
       expectOk(`/api/v2/settings?update_mask=daily_neuron_budget&request_id=${op()}`, { method: 'PATCH', headers: mutationHeaders, body: JSON.stringify({ name: 'settings', daily_neuron_budget: 7000 }) }),
     )),
   ];
+  // Measured at its bound (read after the measurements, so their first run stays the isolate's first).
+  const answer = await (await h.fetch('/api/v2/replayEvaluation', { headers })).json<{ cases: unknown[] }>();
+  expect(answer.cases).toHaveLength(REPLAY_CASES_MAX);
   return [cold, alarm, replay, ...api];
 }
 

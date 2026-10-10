@@ -137,7 +137,7 @@ reads no Gmail and decides nothing, but the alarm still runs and still clears wh
 | Decisions and the ledger without content (IDs, labels, both views' probabilities, model, states, and the sender as a salted hash: 16 hex characters of a SHA-256 of the From address with a fixed salt, never the address; the salt is in the public code and no secret key is used, so it keeps the address out of the row, not out of reach of someone testing candidate addresses) | 180 days |
 | Examples: a masked summary (subject, sender name and domain, snippet; at most 200 characters) and its embedding | until deleted (one by one in 标签, with their label, or by turning the label 敏感), at most 2,000 |
 | Trusted domains: a trust label's sender domains, learned from the owner's review choices (the first ones seeded from the former sender rules) | until deleted (one by one in 标签, or with their label), at most 50 per label |
-| The replay evaluation: per mail its ID, the owner's answer and what the replay decided (labels and codes, no content) | 7 days |
+| The replay evaluation: per mail its ID, the owner's answer, what the replay decided (labels and codes) and the decision's numbers (the model's probabilities, whether the sender passed DMARC), no content | 7 days |
 | The flow counters: counts per UTC day, stage, outcome and label (no content) | 400 days |
 | Labels: their paths (also their Gmail names; SyncLabels reads back a rename made in Gmail), the Gmail label each is linked to and whether it was adopted, and the owner's descriptions | until deleted, at most 24 |
 | The answers to the owner's own changes, kept by request ID so a retry is not applied twice (they can hold a masked subject and sender or a trusted domain) | 1 day |
@@ -425,18 +425,24 @@ Before Gmail labelling goes live, the owner checks the new decision against thei
 - **StartReplayEvaluation** (POST `/api/v2/replayEvaluation:start`, idempotent by `request_id`: a repeat answers the
   first start) takes every review item the owner resolved in the last 14 days with a label or 都不是, at most 200,
   newest first (one per mail, its newest answer), and writes one row per mail with the owner's answer and the original
-  decision's time, next to the job's own row, in the one table `replay`. A new start replaces the previous job.
+  decision's time, next to the job's own row, in the one table `replay`. A new start replaces the previous job, still
+  running or finished: a fresh run is a start with a new `request_id`.
 - Each alarm pass, after the drain and the embeddings and with the subrequests the pass has left (5 per mail: the
   read and its metadata fallback, the embedding, two views), decides up to 6 waiting mails again, oldest first: it
   re-reads the mail (metadata and body, as the drain does, with the read grant), gathers the same evidence and asks
   the same two views (`judge.ts`), as of the original decision, always with the full Clef: the sender history (decisions
   and verdicts before it), the examples (made before it; never the one the owner's answer to the same mail made, its own
-  summary labelled with the answer) and the trusted domains (learned before it) are what live had then. So nothing the
-  owner's answers taught later decides a mail: a trust-label mail whose domain its own answer taught is uncertain
-  (`untrusted_sender`), and the summary does not count answers the model was shown. It writes nothing to Gmail and makes no decision, verdict, example, review item,
-  ledger row or flow count: only its own rows and the day's usage (Gmail calls, neurons). It also records whether the
-  review quota of the mail's own day would have shown an uncertain decision, the replayed mails of that day competing
-  as they arrived. A mail Gmail no longer gives (deleted, unreadable) is skipped; Gmail's rate, a refused grant or an
+  summary labelled with the answer) and the trusted domains (learned before it; a seeded one at any time, since the
+  owner's former rule it stands for decided the mail before the migration of 2026-10-10 recorded it) are what live had
+  then. So nothing the owner's answers taught later decides a mail: a trust-label mail whose domain its own answer
+  taught is uncertain (`untrusted_sender`), and the summary does not count answers the model was shown. Each row keeps
+  the decision's numbers, never content (`replay.ts` numbersOf, schema version 6): view 1's top option and its
+  probability, the runner-up's probability, view 2's probability of that label as it answered, the combined
+  probability, the higher p(suspicious) and p(needs_action), whether the sender was authenticated, whether the top
+  label is a trust label, and the uncertain reason. It writes nothing to Gmail and makes no decision, verdict,
+  example, review item, ledger row or flow count: only its own rows and the day's usage (Gmail calls, neurons). It
+  also records whether the review quota of the mail's own day would have shown an uncertain decision, the replayed
+  mails of that day competing as they arrived. A mail Gmail no longer gives (deleted, unreadable) is skipped; Gmail's rate, a refused grant or an
   outage stops the pass like any Google failure. A model outage backs the mail off as the drain does (5 minutes
   doubling, `replay.not_before`; the replay calls the model no more that pass and decides the other mails meanwhile)
   and gives it up after 7 tries, about five hours; a refused answer is tried 3 times; only then is it counted as
@@ -446,10 +452,13 @@ Before Gmail labelling goes live, the owner checks the new decision against thei
   off mode (no Gmail read). It is a backtest without hindsight: how live would have decided each mail when it came,
   which understates what a sender's later mail gets once the owner has taught its domain, the safe direction for the
   check before going live.
-- **GetReplayEvaluation** (GET `/api/v2/replayEvaluation`) answers the summary, counts and label names only: how many
+- **GetReplayEvaluation** (GET `/api/v2/replayEvaluation`) answers counts, label names and numbers, no content: how many
   mails it covers, evaluated and skipped; confident labels and how many matched the owner; confident nones and how many
-  matched 都不是; uncertain and how many the quota would have shown; and the mismatching confident decisions as label
-  pairs (decided, owner's), the most frequent first. NOT_FOUND before the first start and after its rows were pruned
+  matched 都不是; uncertain and how many the quota would have shown; the mismatching confident decisions as label
+  pairs (decided, owner's), the most frequent first; the uncertain mails per reason (`reason_counts`); and `cases`, each
+  evaluated mail's numbers with the owner's answer and the outcome (at most 200, in the order of the original
+  decisions, no message ID; a mail evaluated before version 6 has none), which calibrate the thresholds: what precision
+  and coverage another gating rule would have had. NOT_FOUND before the first start and after its rows were pruned
   (7 days after the start). The UI does not show it: the owner (or the agent, from the signed-in page) calls it from
   the browser's console.
 
@@ -556,7 +565,10 @@ unchanged), the UI 59.0 → 55.0 KiB gzip (budget 67 unchanged). Subrequests per
 time, exact trusted domains, the teachable domain, the retry's trust check): the alarm pass at its bounds 30.5 ms, a
 replay pass of 6 mails 10.8, MailsortState's API at most 7.8 first run (GetMailFlow; ListReviewItems with each item's
 teachable domain 3.0), the fetch handler's very first request 2.0 (bounds unchanged); the Worker 121.9 → 123.0 KiB
-gzip, the UI 55.9 → 56.2 KiB gzip (budgets unchanged).
+gzip, the UI 55.9 → 56.2 KiB gzip (budgets unchanged). Then the replay's calibration numbers (2026-10-10: 200 cases in
+GetReplayEvaluation): its answer over 200 mails 4.2 ms first run and 3.0 warm in MailsortState, the fetch handler 0.4
+first and 0.8 warm; a replay pass of 6 mails 12.3; the Worker 123.0 → 124.6 KiB gzip, the UI 56.2 → 56.6 KiB gzip (the
+descriptors; budgets unchanged).
 
 Stores are bounded: 24 labels, 50 trusted domains each, 2,000 examples, a replay of 200 mails for 7 days, request IDs
 for a day, content for 14 days, records for 180 days. Rows read: a pass reads a few rows per mail (the sender history
@@ -758,10 +770,13 @@ the fake Gmail (`fake-gmail.ts`) and fake Workers AI (`fake-ai.ts`, Clef and bge
   to 5 seeds the trusted domains from the right rules, exact for an address rule and with subdomains for a domain rule,
   never a public mailbox provider, drops the rules, keeps labels and decisions with the sender as its hash and none
   shown, empties the queue's pending items, and runs again harmlessly; a migration cut short leaves version 4 as it
-  was; versions 1 to 3 go straight to 5), the trusted domains (exact or with subdomains, never a look-alike, as of a
-  time, never a public mailbox provider, the bound of 50),
-  the flow counters and the retention cleanup (the hash outliving the content, the replay's 7 days); ops-v1's golden
-  bytes (two are contract fixtures).
+  was; versions 1 to 3 go straight to the current one; version 5 to 6 gives the replay its decision numbers, unset for
+  the rows it has, once), the trusted domains (exact or with subdomains, never a look-alike, a learned one as of a time
+  and a seeded one at any time, never a public mailbox provider, the bound of 50),
+  the flow counters and the retention cleanup (the hash outliving the content, the replay's 7 days); `replay.test.ts`
+  the replay's decision numbers from the two views, its cases (in order, at most 200, none for a mail evaluated before
+  version 6) and reason counts, and the answer's wire JSON (only those fields, an unset probability left out); ops-v1's
+  golden bytes (two are contract fixtures).
 - `worker/test/runtime/*.test.ts` (workerd, a real SQLite MailsortState): `pipeline.test.ts` the pipeline in shadow and
   live (two views, view 2 over view 1's three labels reversed, only recorded in shadow, label and archive in live,
   confident none left in the inbox, needs_action keeping a label in the inbox), undo, a Gmail correction into an
@@ -772,8 +787,10 @@ the fake Gmail (`fake-gmail.ts`) and fake Workers AI (`fake-ai.ts`, Clef and bge
   grant; `replay.test.ts` the replay evaluation (no write even in live mode, no decision, verdict, example, review item,
   ledger row or flow count; the evidence as of each mail: an older example as a neighbour, never the mail's own or a
   later one, and a trust domain its own answer taught not yet trusted; a deleted mail skipped; a model outage backing
-  a mail off without using up its tries; the summary's counts and label pairs without content; a repeated request ID;
-  waiting while shed and past half the budget); `labels.test.ts` nested labels with their parents, a trust label's
+  a mail off without using up its tries; the summary's counts, label pairs, reason counts and each mail's numbers
+  without content; a repeated request ID; a fresh start once the last one finished, with a seeded trusted domain
+  counted at any time; waiting while shed and past half the budget);
+  `labels.test.ts` nested labels with their parents, a trust label's
   domain learned and removed (RemoveTrustedDomain, etag and request ID), forged and look-alike From headers never
   borrowing it (the look-alike's own domain the only teachable one), Gmail labels adopted by the sync only (never at once, never a parent), renames, the legacy
   `分拣/x`, the flow counters and the label report, sensitive labels, retired IDs and a label-filtered range undo;
