@@ -9,6 +9,12 @@ Its old waiting lists and release identities are historical, not instructions to
 
 ## Current work
 
+`codex/mailsort-flat-labels` is implementing the owner-approved single-level English labels, consolidation of
+existing labels and mail, and a Settings entry point for replay evaluation. The private production mapping is not
+committed. Preserve Gmail message state, old identities and learning times; use the existing Alarm and budget.
+Backend, owner proto/API and UI are being updated together. Synthetic checks, branch CI, same-SHA Actions release
+and the owner-approved production consolidation remain pending. No production label has been changed by this work.
+
 No implementation remains open from the October 11 maintenance task. `codex/maintenance-simplification`
 landed at `ccf2c27`: concise handoff, checked test-only release exclusions and parsed YAML boundary assertions.
 [Full branch CI](https://github.com/ziyixi/todofy/actions/runs/38161463808) and
