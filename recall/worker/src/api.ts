@@ -16,6 +16,7 @@ import { EmptySchema, timestampMs, type Timestamp } from '@ziyixi/proto/protobuf
 import { SearchResultSchema, TextSegmentSchema } from '@ziyixi/proto/recall/ui/v1/page_pb';
 import {
   ConnectDropboxBackupResponseSchema,
+  ListDocumentsResponseSchema,
   ListSitesResponseSchema,
   ListVisitsResponseSchema,
   PageType,
@@ -26,9 +27,12 @@ import {
 import { DropboxBackupSchema, MachineTokenSchema, SettingsSchema, type Settings } from '@ziyixi/proto/recall/ui/v1/status_pb';
 import { fromWire, toWire } from '@ziyixi/proto/wire-json';
 import { builtinNoTextPatterns, OWNER_PATTERNS_MAX, parsePattern, patternText, SITE_ONLY_PATTERNS } from '../../shared/denylist.ts';
+import type { DayBlob } from './archive.ts';
+import { DOCUMENT_MAX_BYTES } from '../../shared/url.ts';
+import { base64Of } from './screenshot.ts';
 import { APP_KEY, backupMessage, startConnect } from './backup.ts';
-import { readText, sha256Hex } from './blobs.ts';
-import { pkceChallenge, randomText, type DropboxEndpoints } from './dropbox.ts';
+import { blobKey, readBounded, readText, sha256Hex } from './blobs.ts';
+import { DropboxError, pkceChallenge, randomText, type DropboxEndpoints } from './dropbox.ts';
 import {
   DAILY_READ_BUDGET,
   DROPBOX_CONNECT_MS,
@@ -66,6 +70,7 @@ export interface ApiContext {
   /** The Dropbox backup's connection: Dropbox's endpoints, recall's host (null: not configured), the disconnection. */
   readonly dropbox: { readonly endpoints: DropboxEndpoints; readonly host: string | null; readonly disconnect: () => Promise<void> };
   /** Whether a Worker secret holds a digest of each route's token too. */
+  readonly readArchive: (blob: DayBlob) => Promise<Uint8Array>;
   readonly secretTokens: Readonly<Record<TokenRoute, boolean>>;
 }
 
@@ -177,6 +182,22 @@ async function snippets(ctx: ApiContext, rows: readonly ResultRow[], terms: read
     }),
   );
   return out;
+}
+
+/** Reads only a record's fixed blob, from R2 or the already confirmed Dropbox archive. */
+async function readContent(ctx: ApiContext, blob: DayBlob, archived: boolean): Promise<Uint8Array> {
+  if (archived) return ctx.readArchive(blob);
+  let object: R2ObjectBody | null;
+  try { object = await ctx.bucket.get(blobKey(blob.path)); } catch { throw new DropboxError('r2_unavailable'); }
+  if (object === null) return ctx.readArchive(blob);
+  let bytes: Uint8Array;
+  try { bytes = await readBounded(object.body, blob.size); } catch { throw new DropboxError('blob_corrupt'); }
+  if (bytes.length !== blob.size || await sha256Hex(bytes) !== blob.sha256) throw new DropboxError('blob_corrupt');
+  return bytes;
+}
+
+function contentFailure(error: unknown): string {
+  return error instanceof DropboxError ? error.code : 'blob_corrupt';
 }
 
 // ---- settings ---------------------------------------------------------------------------------------------------------
@@ -314,29 +335,44 @@ export const handlers: ServiceHandlers<ShapeOf<typeof RecallUiService>, ApiConte
     );
   },
 
-  async getDocument(request, ctx) {
-    const { page, id } = childName(request.name, 'documents');
-    const row =
-      ctx.store.one<DocumentRow>(`SELECT d.* FROM documents d JOIN pages p ON p.rowid = d.page_rowid WHERE d.id = ? AND p.id = ?`, id, page) ?? fail('NOT_FOUND');
-    // Past the retention window and confirmed in the Dropbox archive: no R2 read, the archive's path instead.
-    if (row.archived_ms !== null) return documentMessage(row, page, '');
-    let text: string | null;
-    try {
-      text = await readText(ctx.bucket, row.blob_path);
-    } catch {
-      throw recallError('UNAVAILABLE');
-    }
-    if (text === null) {
-      // A live record whose object is gone: a wrong binding or a lost object, never a retry's matter.
-      ctx.transact(() => {
-        ctx.store.pushError('blob_missing');
-      });
-      console.log(JSON.stringify({ event: 'blob_missing', document: id }));
-      throw recallError('INTERNAL');
-    }
-    return documentMessage(row, page, text);
+  listDocuments(request, ctx) {
+    const parent = pageName(request.parent);
+    const page = ctx.store.one<{ rowid: number }>(`SELECT rowid FROM pages WHERE id = ?`, parent) ?? fail('NOT_FOUND');
+    const size = pageSize(request.pageSize, 20, 50);
+    const parameters = { parent: request.parent };
+    const after = cursorOf(request.pageToken, parameters, (value) => Array.isArray(value) && value.length === 2 && typeof value[0] === 'number' && Number.isSafeInteger(value[0]) && typeof value[1] === 'string' && UUID.test(value[1]) ? [value[0], value[1]] as const : null);
+    const rows = after === null
+      ? ctx.store.all<DocumentRow>(`SELECT * FROM documents WHERE page_rowid = ? ORDER BY capture_ms DESC, id DESC LIMIT ?`, page.rowid, size + 1)
+      : ctx.store.all<DocumentRow>(`SELECT * FROM documents WHERE page_rowid = ? AND (capture_ms, id) < (?, ?) ORDER BY capture_ms DESC, id DESC LIMIT ?`, page.rowid, after[0], after[1], size + 1);
+    const selected = rows.slice(0, size);
+    const last = selected.at(-1);
+    return Promise.resolve(create(ListDocumentsResponseSchema, {
+      documents: selected.map((row) => documentMessage(row, parent)),
+      nextPageToken: rows.length > size && last !== undefined ? encodePageToken([last.capture_ms, last.id], parameters) : '',
+    }));
   },
 
+  async getDocument(request, ctx) {
+    const { page, id } = childName(request.name, 'documents');
+    const row = ctx.store.one<DocumentRow>(`SELECT d.* FROM documents d JOIN pages p ON p.rowid = d.page_rowid WHERE d.id = ? AND p.id = ?`, id, page) ?? fail('NOT_FOUND');
+    let text = '';
+    let screenshot = '';
+    let error = '';
+    try {
+      const compressed = await readContent(ctx, { path: row.blob_path, sha256: row.sha256, size: row.stored_bytes }, row.archived_ms !== null);
+      const plain = await readBounded(new Blob([compressed]).stream().pipeThrough(new DecompressionStream('gzip')), DOCUMENT_MAX_BYTES);
+      if (plain.length !== row.text_bytes || await sha256Hex(plain) !== row.text_sha256) throw new DropboxError('blob_corrupt');
+      text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: false }).decode(plain);
+    } catch (failure) { error = contentFailure(failure); }
+    if (row.screenshot_path !== '') {
+      try {
+        screenshot = base64Of(await readContent(ctx, { path: row.screenshot_path, sha256: row.screenshot_sha256, size: row.screenshot_bytes }, row.archived_ms !== null));
+      } catch (failure) { error ||= contentFailure(failure); }
+    }
+    // A delete during an external read must not resurrect its content in an owner response.
+    if (ctx.store.one(`SELECT 1 FROM pages WHERE id = ?`, page) === undefined) fail('NOT_FOUND');
+    return documentMessage(row, page, text, screenshot, error);
+  },
   getSite(request, ctx) {
     const host = request.name.startsWith('sites/') ? request.name.slice('sites/'.length) : '';
     if (!HOST.test(host)) bad('not a site name');

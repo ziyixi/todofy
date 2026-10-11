@@ -14,12 +14,9 @@
  *   the date of its latest visit within the range, its focus and visits; 加载更多 adds the next ten (the focus goes to
  *   the first of them). A capped search says which bound it reached. ↓ ↑ or j k move between results, Enter opens one.
  * - Without words or chips: 最近读过. No results: 没有找到, a button per set chip to drop it, and what the index covers.
- *   Once the retention window moved texts to the Dropbox archive alone, a search with words also says that its text
- *   search covers the last N days (older pages are still found by title and URL).
  * - Back from a page's detail shows the results as they were (the pages 加载更多 added included), without asking again.
  */
 import type { SearchResult } from '@ziyixi/proto/recall/ui/v1/page_pb'
-import type { ServiceStatus } from '@ziyixi/proto/recall/ui/v1/status_pb'
 import { quoteLiteral } from '@ziyixi/proto/filter'
 import { api, ApiError, errorMessage } from '../api.ts'
 import { emptyState, errorLine, keys, picker, segmented, skeleton, type PickerOption } from '../components.ts'
@@ -51,15 +48,6 @@ import { titleOf } from './timeline.ts'
 
 /** The sites the 网站 picker loads once and filters as the owner types (ListSites' largest page). */
 const SITES_LOADED = 200
-
-/**
- * What the text search covers once the retention window moved texts to the Dropbox archive alone; null while every
- * text is in Cloudflare.
- */
-function retentionText(status: ServiceStatus): string | null {
-  if (status.textRetentionDays <= 0 || status.archivedTextCount === 0) return null
-  return `正文搜索覆盖最近 ${String(status.textRetentionDays)} 天保存的正文；更早的正文已归档到 Dropbox，那些页面仍能按标题和网址搜到`
-}
 
 /** What a search showed: kept in the history entry, so back shows it again as it was. */
 interface Shown {
@@ -378,16 +366,6 @@ export async function renderSearch(ctx: ViewContext): Promise<void> {
   let list = el('ul', { class: 'results', 'aria-label': '结果' })
   const tail = el('div', { class: 'stack' })
   ctx.keep(() => shown)
-  // The retention line, one element: a tail painted again moves it rather than adding another.
-  const coverage = ctx.status().then(
-    (status) => {
-      const text = retentionText(status)
-      return text === null ? null : el('p', { class: 'hint coverage' }, text)
-    },
-    // The status is the header's to report.
-    () => null,
-  )
-
   const paintLine = (asked: SearchState, total: number, more: boolean) => {
     const plain = !hasWords(asked) && FILTERS.every((filter) => filterValue(asked, filter, today, now) === null)
     count.textContent = plain ? '最近读过' : `${String(total)}${more ? '+' : ''} 个结果`
@@ -401,10 +379,6 @@ export async function renderSearch(ctx: ViewContext): Promise<void> {
       current.next === '' ? null : button('加载更多', () => void more(), { class: 'more-results' }),
       current.capped ? el('p', { class: 'hint warn cap' }, capText(current.asked)) : null,
     )
-    if (!hasWords(current.asked)) return
-    void coverage.then((node) => {
-      if (node !== null && shown === current) tail.append(node)
-    })
   }
 
   /** The results of `current`, drawn whole (a search's first page, or the kept results of back). */
@@ -482,13 +456,11 @@ export async function renderSearch(ctx: ViewContext): Promise<void> {
       const value = filterValue(asked, filter, today, now)
       return value === null ? [] : [[filter, value] as const]
     })
-    if (!hasWords(asked) && set.length === 0 && !capped) return emptyState('还没有读过的页面', '停留 10 秒以上的页面会保存正文，之后能在这里搜到。')
+    if (!hasWords(asked) && set.length === 0 && !capped) return emptyState('还没有读过的页面', '扩展会尝试保存停留 10 秒以上页面的内容，保存后可在这里搜索。')
     let oldest: number | null = null
-    let retained: string | null = null
     try {
       const status = await ctx.status()
       oldest = ms(status.oldestIndexedTextTime)
-      retained = retentionText(status)
     } catch {
       // The status is the header's to report.
     }
@@ -499,7 +471,6 @@ export async function renderSearch(ctx: ViewContext): Promise<void> {
       capped ? el('p', { class: 'hint warn cap' }, capText(asked)) : null,
       el('p', { class: 'hint' }, '正文只搜每页前 32 KB'),
       oldest === null ? null : el('p', { class: 'hint' }, `正文搜索覆盖 ${monthText(oldest)} 起，更早的页面只按标题和网址搜索（全文仍在页面详情和 Dropbox 归档里）`),
-      retained === null ? null : el('p', { class: 'hint coverage' }, retained),
     )
   }
 

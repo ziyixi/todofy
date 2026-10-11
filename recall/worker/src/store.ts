@@ -17,7 +17,7 @@
  */
 import { ACTIVE_MS, DAY, ERRORS_KEPT, REQUEST_ID_TTL_MS, USAGE_KEPT_DAYS } from './limits.ts';
 
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 
 export const SCHEMA_V1: readonly string[] = [
   `CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)`,
@@ -171,6 +171,20 @@ export const SCHEMA_V2: readonly string[] = [
 export const SCHEMA_V3_COLUMN = `ALTER TABLE documents ADD COLUMN archived_ms INTEGER`;
 export const SCHEMA_V3: readonly string[] = [`CREATE INDEX IF NOT EXISTS documents_retention ON documents (capture_ms) WHERE archived_ms IS NULL`];
 
+/** Version 4: activity snapshots and seven-day hot storage; the existing text index remains independent. */
+export const SCHEMA_V4: readonly string[] = [
+  `ALTER TABLE documents ADD COLUMN screenshot_path TEXT NOT NULL DEFAULT ''`,
+  `ALTER TABLE documents ADD COLUMN screenshot_sha256 TEXT NOT NULL DEFAULT ''`,
+  `ALTER TABLE documents ADD COLUMN screenshot_bytes INTEGER NOT NULL DEFAULT 0`,
+  `ALTER TABLE documents ADD COLUMN screenshot_width INTEGER NOT NULL DEFAULT 0`,
+  `ALTER TABLE documents ADD COLUMN screenshot_height INTEGER NOT NULL DEFAULT 0`,
+  `ALTER TABLE pages ADD COLUMN latest_text_document TEXT`,
+  `UPDATE pages SET latest_text_document = latest_document`,
+  `CREATE INDEX IF NOT EXISTS documents_visit ON documents (visit, capture_ms, id)`,
+  `DROP INDEX documents_page`,
+  `CREATE INDEX documents_page ON documents (page_rowid, capture_ms, id)`,
+];
+
 export type Value = string | number | null | ArrayBuffer;
 
 export interface RowMeter {
@@ -191,6 +205,7 @@ export interface PageRow extends Record<string, SqlStorageValue> {
   focus_seconds: number;
   document_count: number;
   latest_document: string | null;
+  latest_text_document: string | null;
   latest_capture_ms: number | null;
   latest_text_sha256: string | null;
   text_indexed: number;
@@ -235,6 +250,11 @@ export interface DocumentRow extends Record<string, SqlStorageValue> {
   truncated: number;
   /** When retention moved the text to the Dropbox archive alone (R2 no longer holds it); null while R2 does. */
   archived_ms: number | null;
+  screenshot_path: string;
+  screenshot_sha256: string;
+  screenshot_bytes: number;
+  screenshot_width: number;
+  screenshot_height: number;
 }
 
 export interface TombstoneRow extends Record<string, SqlStorageValue> {
@@ -367,6 +387,17 @@ export class Store {
         // The column exists: this store was at version 3 before a rollback wrote version 2 back.
       }
       for (const statement of SCHEMA_V3) this.sql.exec(statement);
+    }
+    if (version < 4) {
+      const columns = new Set(this.sql.exec<{ name: string }>(`PRAGMA table_info(documents)`).toArray().map((row) => row.name));
+      for (const statement of SCHEMA_V4) {
+        const column = /ALTER TABLE documents ADD COLUMN (\w+)/.exec(statement)?.[1];
+        if (column !== undefined && columns.has(column)) continue;
+        if (statement.startsWith('ALTER TABLE pages') && this.sql.exec<{ name: string }>(`PRAGMA table_info(pages)`).toArray().some((row) => row.name === 'latest_text_document')) continue;
+        this.sql.exec(statement);
+      }
+      this.setMeta('text_retention_days', '7');
+      this.setMeta('denylist_etag', crypto.randomUUID());
     }
     if (version !== SCHEMA_VERSION) this.setMeta('schema_version', String(SCHEMA_VERSION));
     // The migration's rows are no request's: neither the meter nor the budgets count them.

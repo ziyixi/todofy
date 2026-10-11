@@ -36,8 +36,9 @@ const R2_FREE_MB = 10 * 1024
 
 /** A device's last error code in words, and whether it needs the owner. */
 const DEVICE_ERRORS: Readonly<Record<string, readonly [string, boolean]>> = {
-  outbox_full: ['扩展存储已满，新页面的正文没有保存：打开扩展的选项检查', true],
+  outbox_full: ['扩展存储已满，新页面的内容没有保存：打开扩展的选项检查', true],
   capture_failed: ['有页面的正文没读到（页面不让扩展读取时会这样）', false],
+  screenshot_failed: ['有页面的截图没保存，已读取的正文仍会保存', false],
   upload_failed: ['上传失败过，扩展会自动重试', false],
 }
 
@@ -64,12 +65,12 @@ const BACKUP_ERRORS: Readonly<Record<string, readonly [string, boolean]>> = {
 
 /** Why retention removes nothing now, in words (ServiceStatus.text_retention_paused_reason). */
 const RETENTION_PAUSES: Readonly<Record<string, string>> = {
-  dropbox_not_connected: 'Dropbox 备份未连接：暂不从云端移除正文，连接后自动开始',
-  dropbox_failing: 'Dropbox 备份最近失败：暂不从云端移除正文，备份恢复后自动继续',
+  dropbox_not_connected: 'Dropbox 备份未连接：暂不从云端移除正文和截图，连接后自动开始',
+  dropbox_failing: 'Dropbox 备份最近失败：暂不从云端移除正文和截图，备份恢复后自动继续',
 }
 
 /** The retention windows offered, in days; null keeps every text in the cloud. */
-const RETENTION_CHOICES: readonly (number | null)[] = [30, 90, 180, 365, 730, 1095, 1825, 3650, null]
+const RETENTION_CHOICES: readonly (number | null)[] = [7, 30, 90, 180, 365, 730, 1095, 1825, 3650, null]
 
 /** A retention window in words: `90 天`, `1 年`, `永久`. */
 function retentionName(days: number | null): string {
@@ -320,7 +321,7 @@ function connectBackup(ctx: ViewContext, backup: DropboxBackup | undefined): HTM
   })
   return [
     errorLine(backup),
-    el('p', {}, '还没有连接。recall 会把归档（访问记录、正文和删除记录）大约每小时写进你自己的 Dropbox 应用文件夹；NAS 再用 Cloud Drives 把它同步下来。连接一次：'),
+    el('p', {}, '还没有连接。recall 会把归档（访问记录、正文、截图和删除记录）大约每小时写进你自己的 Dropbox 应用文件夹；NAS 再用 Cloud Drives 把它同步下来。连接一次：'),
     el(
       'ol',
       { class: 'steps' },
@@ -395,15 +396,15 @@ function retentionBlock(ctx: ViewContext, status: ServiceStatus, shared: Setting
     const focused = box.contains(document.activeElement)
     fill(
       box,
-      el('div', { class: 'retention' }, el('label', { for: 'retention' }, '正文在云端保留'), select),
+      el('div', { class: 'retention' }, el('label', { for: 'retention' }, '正文和截图在云端保留'), select),
       el(
         'p',
         { class: 'hint' },
         days === null
-          ? '所有正文都留在云端。'
-          : `只保留最近 ${retentionName(days)}保存的正文：更早的正文在 Dropbox 确认备份后从云端移除，只留在 Dropbox 归档里。页面和访问记录一直保留，标题和网址仍能搜到。`,
+          ? '所有正文和截图都留在云端。'
+          : `最近 ${retentionName(days)}的正文和截图留在云端；更早的内容确认已备份后移到 Dropbox，打开快照时按需读取。页面、访问记录和预算范围内的全文索引继续保留。`,
       ),
-      el('p', { class: 'facts' }, el('span', {}, `云端 ${count(Math.max(0, status.documentCount - status.archivedTextCount))} 篇`), el('span', {}, `只在 Dropbox ${count(status.archivedTextCount)} 篇`)),
+      el('p', { class: 'facts' }, el('span', {}, `云端 ${count(Math.max(0, status.documentCount - status.archivedTextCount))} 份`), el('span', {}, `已归档 ${count(status.archivedTextCount)} 份`)),
       pause === '' ? null : el('p', { class: 'hint warn', role: 'note', title: status.textRetentionPausedReason }, pause),
     )
     if (focused) select.focus()
@@ -411,7 +412,7 @@ function retentionBlock(ctx: ViewContext, status: ServiceStatus, shared: Setting
   const choose = async (next: number | null) => {
     const days = shared.current.textRetentionDays ?? null
     const shorter = next !== null && (days === null || next < days)
-    if (shorter && !ctx.host.confirm(`改成保留 ${retentionName(next)}？更早保存的正文在 Dropbox 确认备份后会从云端移除（Dropbox 里仍有），页面和访问记录不变。`)) {
+    if (shorter && !ctx.host.confirm(`改成保留 ${retentionName(next)}？更早的正文和截图在 Dropbox 确认备份后会从云端移除，打开时从归档读取；页面、访问记录和全文索引不变。`)) {
       paint()
       return
     }
@@ -422,7 +423,7 @@ function retentionBlock(ctx: ViewContext, status: ServiceStatus, shared: Setting
           updateMask: { paths: ['text_retention_days', 'etag'] },
           requestId,
         }),
-      next === null ? '正文会一直留在云端' : `正文在云端保留 ${retentionName(next)}`,
+      next === null ? '正文和截图会一直留在云端' : `正文和截图在云端保留 ${retentionName(next)}`,
       () => undefined,
     )
     if (saved !== null) shared.current = saved
@@ -453,14 +454,14 @@ function storageCard(ctx: ViewContext, status: ServiceStatus, shared: SettingsBo
   return card(
     '存储',
     '',
-    el('div', { class: 'kpis' }, kpi('页面', compact(status.pageCount)), kpi('访问', compact(status.visitCount)), kpi('正文', compact(status.documentCount))),
+    el('div', { class: 'kpis' }, kpi('页面', compact(status.pageCount)), kpi('访问', compact(status.visitCount)), kpi('快照', compact(status.documentCount))),
     line(
       '数据库',
       `${count(used)} / ${count(budget)} MB`,
       meter(used, budget, '数据库用量', used >= budget ? 'danger' : used >= STORAGE_HIGH_MIB ? 'warn' : ''),
-      used >= STORAGE_HIGH_MIB ? '接近上限：最早页面的正文会移出搜索索引（标题和网址仍能搜到，全文仍在云端和归档里）' : '',
+      used >= STORAGE_HIGH_MIB ? '接近上限：最早页面的正文会移出搜索索引（标题和网址仍能搜到，全文仍可从云端或 Dropbox 归档读取）' : '',
     ),
-    line('云端正文', `${count(status.blobStoredMib)} MB / 10 GB 免费（账户共用）`, meter(status.blobStoredMib, R2_FREE_MB, '云端正文用量')),
+    line('云端文件', `${count(status.blobStoredMib)} MB / 10 GB 免费（账户共用）`, meter(status.blobStoredMib, R2_FREE_MB, '云端正文和截图用量')),
     retentionBlock(ctx, status, shared),
     line(
       '今天写入',
@@ -560,7 +561,7 @@ function paintDenylist(box: HTMLElement, shared: SettingsBox, focusField = false
   const builtin = settings.builtinSiteOnlyPatterns.length + settings.builtinDenylistPatterns.length
   fill(
     box,
-    el('p', { class: 'hint' }, '只记网站：只记录访问时间和网站，不记标题和路径（自己的银行、私人网站）。不存正文：记录访问时间、网址和标题，不保存正文。'),
+    el('p', { class: 'hint' }, '只记网站：只记录访问时间和网站，不记标题和路径（自己的银行、私人网站）。不存正文：记录访问时间、网址和标题，不保存正文和截图。'),
     rows.length === 0 ? null : el('ul', { class: 'patterns' }, ...rows),
     el('div', { class: 'actions' }, field, choice, button('添加', add)),
     disclosure(

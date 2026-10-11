@@ -85,7 +85,7 @@
   Gmail 授权只由 owner 本机写入，部署不碰；合成邮件与回环假服务，内容不进日志。
 - Recall：[AGENTS](recall/AGENTS.md)、[设计](recall/docs/design.md)。只用合成页面，URL、标题与正文不进日志；三条机器路由各凭
   自己的令牌摘要，令牌由 owner 在设置里生成、只显示一次；归档由 recall 只增不删地写进 owner 的 Dropbox，
-  布局与变更 feed 是 recall 拥有的公开合同 `recall-archive-v1`；Cloudflare 只留保留窗口内的正文，且只在归档确认后移出。
+  布局与变更 feed 是 recall 拥有的公开合同 `recall-archive-v1`；Cloudflare 只留保留窗口内的正文和截图，且只在归档确认后移出。
 - Brief：[AGENTS](brief/AGENTS.md)、[设计](brief/docs/design.md)。只经 `claude.ts` 调 Claude、只经 `send.ts` 经账本发信，
   每天至多一封、unknown 不重发；Claude 与 Resend 密钥只由 owner 写入 Worker、不经 GitHub；测试只用合成网页与假客户端，标题和正文不进日志。
 - Website：[架构约束](docs/architecture.md#website)、[架构](website/docs/architecture.md)、[发布](website/docs/release.md)。

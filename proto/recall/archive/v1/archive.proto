@@ -242,7 +242,7 @@ message Change {
 
 // A file of a record, kept under blobs/<path> in the archive.
 message Blob {
-  // What the file is to its record: `text` for a document's captured text.
+  // What the file is to its record: `text` or the optional `screenshot` for a document.
   string role = 1 [
     (google.api.field_behavior) = REQUIRED,
     (common.wire.v1.field).format = "Role"
@@ -253,7 +253,7 @@ message Blob {
     (google.api.field_behavior) = REQUIRED,
     (common.wire.v1.field).format = "BlobPath"
   ];
-  // The media type of the bytes once content_encoding is undone (text/plain; charset=utf-8).
+  // The media type once content_encoding is undone: text/plain; charset=utf-8 or image/webp.
   string media_type = 3 [
     (google.api.field_behavior) = REQUIRED,
     (common.wire.v1.field).format = "MediaType"
@@ -349,9 +349,9 @@ message FocusSpan {
   ];
 }
 
-// The text captured from a page, at most once per page and UTC day, after ten seconds of focus, and only when it
-// differs from the page's latest capture. The text itself is the change's blob with role `text`: UTF-8 plain text
-// (the page's innerText), scrubbed, gzip-encoded.
+// A captured page snapshot. The change's blob with role `text` is scrubbed UTF-8 plain text, gzip-encoded. New
+// captures may also have a WebP blob with role `screenshot`; image-only snapshots have an empty text. The first
+// capture follows ten seconds of focus, then changed snapshots may be captured about once a minute.
 message Document {
   // The visit it was captured in: visits/<uuid>.
   string visit = 1 [
@@ -405,6 +405,16 @@ message Document {
   ];
   // The page had more text than the 64 KiB kept: the text is its beginning, cut at a character boundary.
   bool text_truncated = 11;
+  // Pixel width of the optional screenshot blob; absent on text-only snapshots.
+  int32 screenshot_width = 12 [(common.wire.v1.field) = {
+    minimum: 1
+    maximum: 1920
+  }];
+  // Pixel height of the optional screenshot blob; absent on text-only snapshots.
+  int32 screenshot_height = 13 [(common.wire.v1.field) = {
+    minimum: 1
+    maximum: 1920
+  }];
 }
 
 // A deletion by the owner. A consumer deletes every archived change with a lower seq whose id is the target, or whose

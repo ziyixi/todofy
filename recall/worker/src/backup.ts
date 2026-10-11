@@ -347,7 +347,7 @@ async function writeBlobs(ctx: BackupContext, conn: Connection, token: string, b
       throw new PassFailure('r2_unavailable');
     }
     if (bytes === null || bytes.byteLength !== blob.size || (await sha256Hex(bytes)) !== blob.sha256) {
-      const live = store.one(`SELECT 1 AS x FROM documents d JOIN pages p ON p.rowid = d.page_rowid WHERE d.blob_path = ?`, blob.path) !== undefined;
+      const live = store.one(`SELECT 1 AS x FROM documents d JOIN pages p ON p.rowid = d.page_rowid WHERE d.blob_path = ? OR d.screenshot_path = ?`, blob.path, blob.path) !== undefined;
       if (!live) return 'again';
       const code = bytes === null ? 'blob_missing' : 'blob_corrupt';
       ctx.transact(() => {
@@ -525,4 +525,18 @@ export function backupMessage(store: Store): DropboxBackup {
     errorCode: error?.code ?? '',
     errorTime: time(error?.ms ?? null),
   });
+}
+
+/** Owner-requested cold read; credentials stay here and downloaded content never returns to R2. */
+export async function readArchive(ctx: BackupContext, blob: DayBlob): Promise<Uint8Array> {
+  const conn = connection(ctx.store);
+  if (conn === null) throw new DropboxError('archive_not_connected');
+  const receipt = ctx.store.one<{ target: string; content_hash: string }>(`SELECT target, content_hash FROM archive_blobs WHERE path = ?`, blob.path);
+  if (receipt === undefined || receipt.content_hash === '') throw new DropboxError('archive_missing');
+  if (receipt.target !== conn.target) throw new DropboxError('archive_other_target');
+  const token = await accessToken(ctx, conn, new Budget(2, 2 * DROPBOX_TIMEOUT_MS));
+  const bytes = await downloadFile(ctx.fetch, ctx.endpoints, token, `/${blobKey(blob.path)}`, blob.size);
+  if (bytes === null) throw new DropboxError('archive_missing');
+  if (bytes.length !== blob.size || await sha256Hex(bytes) !== blob.sha256) throw new DropboxError('archive_corrupt');
+  return bytes;
 }

@@ -123,7 +123,10 @@ export function renderDay(store: Store, row: Pick<DayRow, 'day' | 'min_seq' | 'm
     text: lines.length === 0 ? '' : `${lines.join('\n')}\n`,
     count: changes.length,
     // A text retention moved out of Cloudflare has no R2 object to copy: the archive that confirmed it holds it.
-    blobs: documents.filter((document) => document.archived_ms === null).map((document) => ({ path: document.blob_path, sha256: document.sha256, size: document.stored_bytes })),
+    blobs: documents.filter((document) => document.archived_ms === null).flatMap((document) => [
+      { path: document.blob_path, sha256: document.sha256, size: document.stored_bytes },
+      ...(document.screenshot_path === '' ? [] : [{ path: document.screenshot_path, sha256: document.screenshot_sha256, size: document.screenshot_bytes }]),
+    ]),
   };
 }
 

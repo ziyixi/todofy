@@ -198,9 +198,9 @@ message FocusSpan {
   ];
 }
 
-// The text captured from a page after ten seconds of focus in a visit: its innerText, scrubbed, cut to 64 KiB of
-// UTF-8 at a character boundary. recall keeps at most one per page and UTC day, and none that repeats the page's
-// latest text.
+// A page snapshot after ten seconds of focus and then about once a minute: its scrubbed innerText and an optional
+// compressed viewport screenshot. An unchanged snapshot in the same visit is omitted. At least text or a screenshot
+// must be present; image-only snapshots do not replace the page's searchable text.
 message DocumentItem {
   // The capture's UUID.
   string id = 1 [
@@ -234,6 +234,20 @@ message DocumentItem {
   string text = 9 [(google.api.field_behavior) = REQUIRED];
   // The page had more text: `text` is its beginning.
   bool text_truncated = 10;
+  // Optional WebP viewport bytes in standard base64, at most 384 KiB decoded. No data URL prefix.
+  // (-- api-linter: core::0140::base64=disabled
+  //     aip.dev/not-precedent: The shared wire JSON profile has no bytes scalar; keep the bounded image opaque. --)
+  string screenshot_webp_base64 = 11;
+  // The screenshot's pixel width, required with screenshot_webp_base64, from 1 to 1920.
+  int32 screenshot_width = 12 [(common.wire.v1.field) = {
+    minimum: 1
+    maximum: 1920
+  }];
+  // The screenshot's pixel height, required with screenshot_webp_base64, from 1 to 1920.
+  int32 screenshot_height = 13 [(common.wire.v1.field) = {
+    minimum: 1
+    maximum: 1920
+  }];
 }
 
 // The Worker's answer to an upload it took (HTTP 200): every item is either accepted (stored, or skipped as already

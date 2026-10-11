@@ -58,6 +58,7 @@ const document: Joined<DocumentRow> = {
   text_sha256: 'unused',
   truncated: 0,
   archived_ms: null,
+  screenshot_path: '', screenshot_sha256: '', screenshot_bytes: 0, screenshot_width: 0, screenshot_height: 0,
   page_id: '3cb732b26093d5571ec48a363db593b2',
   host_key: hostKey('docs.example.com'),
 };

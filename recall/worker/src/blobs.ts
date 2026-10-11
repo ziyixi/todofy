@@ -25,7 +25,7 @@ export function blobKey(path: string): string {
 
 /** The document UUID a text blob path names, or null. */
 export function documentIdOfPath(path: string): string | null {
-  return TEXT_BLOB_PATH.test(path) ? (path.split('/')[2] ?? '').slice(0, 36) : null;
+  return (TEXT_BLOB_PATH.test(path) || /^[0-9]{4}\/(0[1-9]|1[0-2])\/[0-9a-f-]{36}\.webp$/.test(path)) ? (path.split('/')[2] ?? '').slice(0, 36) : null;
 }
 
 export function hex(bytes: ArrayBuffer | Uint8Array): string {
@@ -80,4 +80,30 @@ export async function readText(bucket: R2Bucket, path: string): Promise<string |
 /** Deletes blobs by path, at most 1,000 per R2 call (deleting a missing object is not an error). */
 export async function deleteBlobs(bucket: R2Bucket, paths: readonly string[]): Promise<void> {
   for (let i = 0; i < paths.length; i += 1000) await bucket.delete(paths.slice(i, i + 1000).map(blobKey));
+}
+
+/** Reads a bounded payload, cancelling before buffering a body larger than its recorded size. */
+export async function readBounded(stream: ReadableStream<unknown>, limit: number): Promise<Uint8Array> {
+  const reader = stream.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  try {
+    for (;;) {
+      const next = await reader.read();
+      if (next.done) break;
+      if (!(next.value instanceof Uint8Array)) throw new Error('invalid_content');
+      size += next.value.byteLength;
+      if (size > limit) {
+        await reader.cancel();
+        throw new Error('content_too_large');
+      }
+      chunks.push(next.value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  const result = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) { result.set(chunk, offset); offset += chunk.length; }
+  return result;
 }

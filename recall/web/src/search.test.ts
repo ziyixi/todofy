@@ -454,25 +454,11 @@ describe('results', () => {
     expect(titles(root)).toEqual(['Durable alarm retries'])
   })
 
-  it('says the text search covers the last N days once texts were archived to Dropbox, for a search with words', async () => {
+  it('does not limit text search coverage to the seven-day R2 window', async () => {
     const fake = server()
-    const guide = fake.pages[1]
-    if (guide === undefined) throw new Error('no page')
-    // An archived text is no longer searched: its page is found by title and URL only.
-    fake.addText(guide, textOf('guide', '', { textArchived: true, archivePath: 'blobs/2025/09/x.txt.gz' }))
-    fake.status = { textRetentionDays: 365, archivedTextCount: 12 }
-    const line = '正文搜索覆盖最近 365 天保存的正文；更早的正文已归档到 Dropbox，那些页面仍能按标题和网址搜到'
-    let root = await open(fake, '/search?q=durable')
+    fake.status = { textRetentionDays: 7, archivedTextCount: 12 }
+    const root = await open(fake, '/search?q=durable')
     expect(titles(root)).toEqual(['Durable alarm retries', 'A durable headline'])
-    expect(root.querySelector('.results-area .coverage')?.textContent).toBe(line)
-    root = await open(fake, '/search?q=冷启动')
-    expect([...root.querySelectorAll('.empty p.hint')].map((node) => node.textContent)).toEqual(['正文只搜每页前 32 KB', line])
-    // 最近读过 searches no text: no line.
-    root = await open(fake, '/search')
-    expect(root.querySelector('.coverage')).toBeNull()
-    // Nothing archived yet, or every text kept: no line.
-    fake.status = { textRetentionDays: 365, archivedTextCount: 0 }
-    root = await open(fake, '/search?q=durable')
     expect(root.querySelector('.coverage')).toBeNull()
   })
 

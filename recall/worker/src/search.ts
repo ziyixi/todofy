@@ -146,7 +146,7 @@ export interface SearchRows {
 /** Results asked of every source: a search's most, and one more. */
 const WANTED = SEARCH_MAX_RESULTS + 1;
 const PAGE_COLUMNS = `p.rowid AS rowid, p.id AS id, p.url AS url, p.title AS title, p.host_key AS host_key, p.document_count AS document_count,
-  p.latest_document AS latest_document, p.visit_count AS visit_count, p.focus_seconds AS focus_seconds, p.last_visit_ms AS last_ms`;
+  p.latest_text_document AS latest_document, p.visit_count AS visit_count, p.focus_seconds AS focus_seconds, p.last_visit_ms AS last_ms`;
 const RANK = `rank MATCH 'bm25(5.0, 2.0, 1.0)'`;
 
 /** The conditions on `p` other than the words: the site and the type, and the page's whole focus without a range. */

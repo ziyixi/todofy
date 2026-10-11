@@ -46,7 +46,7 @@ const DENIED_SITE = 'notes.example.net';
 const SITE_ONLY = 'bank.example.net';
 const MINUTE = 60_000;
 const DAY = 24 * 60 * MINUTE;
-/** A page read 400 days ago (an old device's late upload), past the default retention window of 365 days. */
+/** A page read 400 days ago (an old device's late upload), past the default retention window of seven days. */
 const OLD_URL = 'https://archive.example.org/2025/notes';
 const OLD_TITLE = '旧笔记 Retention';
 const OLD_TEXT = '一年多以前读过的合成正文 quokka-retention。';
@@ -280,7 +280,7 @@ async function run(origin: string, dropbox: FakeDropbox): Promise<string[]> {
   check(latest.text === text.text, "GetDocument (the page detail) gives the article's text");
 
   // An old device's late upload: a page read 400 days ago with its text (nothing is refused for its age), past the
-  // retention window (365 days until the owner changes it). It waits for Dropbox: nothing leaves Cloudflare before.
+  // retention window (seven days until the owner changes it). It waits for Dropbox: nothing leaves Cloudflare before.
   const old = normalizeUrl(OLD_URL);
   if (old === null) throw new Error('smoke: the old URL does not normalize');
   const oldPage = await pageIdOf(old.url);
@@ -304,7 +304,7 @@ async function run(origin: string, dropbox: FakeDropbox): Promise<string[]> {
   const oldBlob = beforeArchive.changes.find((change) => change.id === `documents/${oldDocument}`)?.blobs[0];
   if (oldBlob === undefined) throw new Error('smoke: the old text is not in the feed');
   const paused = await api.getServiceStatus({ name: 'serviceStatus' });
-  check(paused.textRetentionDays === 365 && paused.textRetentionPausedReason === 'dropbox_not_connected' && paused.archivedTextCount === 0, 'before Dropbox is connected, retention waits and says why');
+  check(paused.textRetentionDays === 7 && paused.textRetentionPausedReason === 'dropbox_not_connected' && paused.archivedTextCount === 0, 'before Dropbox is connected, retention waits and says why');
   check((await machine(`blobs/${oldBlob.path}`, EXPORT_TOKEN)).status === 200, 'the old text is still in Cloudflare');
 
   // 设置 → 备份到 Dropbox: the App key, 连接, Dropbox's page (the fake approves at once), back to the callback.
@@ -342,10 +342,10 @@ async function run(origin: string, dropbox: FakeDropbox): Promise<string[]> {
   const archivedBytes = dropbox.files.get(`/blobs/${oldBlob.path}`);
   check(archivedBytes !== undefined && sha256(archivedBytes) === oldBlob.sha256 && new TextDecoder().decode(gunzipSync(archivedBytes)) === OLD_TEXT, 'Dropbox holds the old text, byte for byte');
   const archivedDetail = await api.getDocument({ name: `pages/${oldPage}/documents/${oldDocument}` });
-  check(archivedDetail.textArchived && archivedDetail.text === '' && archivedDetail.archivePath === `blobs/${oldBlob.path}`, 'GetDocument says the text is in the Dropbox archive, and where');
+  check(archivedDetail.textArchived && archivedDetail.text === OLD_TEXT && archivedDetail.archivePath === `blobs/${oldBlob.path}`, 'GetDocument reads the archived text from Dropbox');
   check((await api.getPage({ name: `pages/${oldPage}` })).visitCount === 1, 'the page and its visit stay');
   const byTitle = await api.searchPages({ query: '旧笔记' });
-  check((await api.searchPages({ query: 'quokka-retention' })).results.length === 0 && byTitle.results.some((result) => result.page === `pages/${oldPage}`), 'the old text is no longer searched; its page is found by its title');
+  check((await api.searchPages({ query: 'quokka-retention' })).results.length === 1 && byTitle.results.some((result) => result.page === `pages/${oldPage}`), 'archived text remains searchable, along with its title');
   deepStrictEqual(await feed(), beforeArchive);
   check(true, 'retention changed nothing in the feed: no tombstone, no new seq');
   const retained = await api.getServiceStatus({ name: 'serviceStatus' });

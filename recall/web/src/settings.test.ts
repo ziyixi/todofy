@@ -43,7 +43,7 @@ describe('设备', () => {
     expect(mac?.querySelector('.facts .warn')?.textContent).toBe('时钟差 1 小时')
     expect(mini?.querySelector('.row-head .meta.warn')?.textContent).toBe('最近上传 2 天前')
     // The last error as what it means and what to do, in the warning color when it needs the owner; the code in a tooltip.
-    expect([...(mini?.querySelectorAll('p.hint.warn') ?? [])].map((node) => node.textContent)).toEqual(['检查 Chrome 是否开着、扩展是否启用（开发者模式）', '扩展存储已满，新页面的正文没有保存：打开扩展的选项检查'])
+    expect([...(mini?.querySelectorAll('p.hint.warn') ?? [])].map((node) => node.textContent)).toEqual(['检查 Chrome 是否开着、扩展是否启用（开发者模式）', '扩展存储已满，新页面的内容没有保存：打开扩展的选项检查'])
     expect(mini?.querySelectorAll('p.hint.warn')[1]?.getAttribute('title')).toBe('outbox_full')
     expect([...(mini?.querySelectorAll('.facts > span') ?? [])].map((node) => node.textContent)).toEqual(['版本 2026.1001.900', '待上传 12'])
     expect([...devices.querySelectorAll(':scope > p.hint')].map((node) => [node.textContent, node.classList.contains('warn')])).toEqual([
@@ -241,10 +241,10 @@ describe('存储', () => {
   it('counts what is kept and meters the database, R2 and the day’s rows; the index’s reach', async () => {
     const root = await open(new FakeServer(), '/settings')
     const storage = card(root, '存储')
-    expect([...storage.querySelectorAll('.kpi')].map((node) => node.textContent)).toEqual(['页面1,234', '访问5,678', '正文345'])
+    expect([...storage.querySelectorAll('.kpi')].map((node) => node.textContent)).toEqual(['页面1,234', '访问5,678', '快照345'])
     expect([...storage.querySelectorAll('.gauge-head')].map((node) => node.textContent)).toEqual([
       '数据库120 / 900 MB',
-      '云端正文40 MB / 10 GB 免费（账户共用）',
+      '云端文件40 MB / 10 GB 免费（账户共用）',
       '今天写入4,210 / 20,000 条记录',
       '今天读取52,000 / 1,500,000 条记录',
     ])
@@ -264,7 +264,7 @@ describe('存储', () => {
     const storage = card(root, '存储')
     expect([...storage.querySelectorAll('[role="meter"]')].map((node) => node.className)).toEqual(['meter warn', 'meter', 'meter warn', 'meter warn'])
     expect([...storage.querySelectorAll('.gauge .hint.warn')].map((node) => node.textContent)).toEqual([
-      '接近上限：最早页面的正文会移出搜索索引（标题和网址仍能搜到，全文仍在云端和归档里）',
+      '接近上限：最早页面的正文会移出搜索索引（标题和网址仍能搜到，全文仍可从云端或 Dropbox 归档读取）',
       '今天的写入额度用完了，上传会等到明天（UTC）再继续，扩展里的记录不会丢',
       '今天的读取额度用完了，搜索要等到明天（UTC）；时间线和页面照常能看',
     ])
@@ -289,15 +289,15 @@ describe('正文在云端保留', () => {
     fake.status = { documentCount: 345, archivedTextCount: 45, textRetentionPausedReason: 'dropbox_not_connected' }
     const root = await open(fake, '/settings')
     const storage = card(root, '存储')
-    expect(storage.querySelector('label[for="retention"]')?.textContent).toBe('正文在云端保留')
-    expect(retention(root).value).toBe('365')
-    expect([...retention(root).options].map((node) => node.textContent)).toEqual(['30 天', '90 天', '180 天', '1 年', '2 年', '3 年', '5 年', '10 年', '永久'])
+    expect(storage.querySelector('label[for="retention"]')?.textContent).toBe('正文和截图在云端保留')
+    expect(retention(root).value).toBe('7')
+    expect([...retention(root).options].map((node) => node.textContent)).toEqual(['7 天', '30 天', '90 天', '180 天', '1 年', '2 年', '3 年', '5 年', '10 年', '永久'])
     expect(storage.querySelector('.retention + p.hint')?.textContent).toBe(
-      '只保留最近 1 年保存的正文：更早的正文在 Dropbox 确认备份后从云端移除，只留在 Dropbox 归档里。页面和访问记录一直保留，标题和网址仍能搜到。',
+      '最近 7 天的正文和截图留在云端；更早的内容确认已备份后移到 Dropbox，打开快照时按需读取。页面、访问记录和预算范围内的全文索引继续保留。',
     )
-    expect([...storage.querySelectorAll('.stack .facts span')].map((node) => node.textContent)).toEqual(['云端 300 篇', '只在 Dropbox 45 篇'])
+    expect([...storage.querySelectorAll('.stack .facts span')].map((node) => node.textContent)).toEqual(['云端 300 份', '已归档 45 份'])
     const pause = storage.querySelector('.stack p.hint.warn')
-    expect([pause?.textContent, pause?.getAttribute('title')]).toEqual(['Dropbox 备份未连接：暂不从云端移除正文，连接后自动开始', 'dropbox_not_connected'])
+    expect([pause?.textContent, pause?.getAttribute('title')]).toEqual(['Dropbox 备份未连接：暂不从云端移除正文和截图，连接后自动开始', 'dropbox_not_connected'])
   })
 
   it('says when a failing backup keeps the texts in the cloud, and shows a window the list does not offer', async () => {
@@ -307,20 +307,21 @@ describe('正文在云端保留', () => {
     const root = await open(fake, '/settings')
     expect(retention(root).value).toBe('400')
     expect(retention(root).options[0]?.textContent).toBe('400 天')
-    expect(card(root, '存储').querySelector('.stack p.hint.warn')?.textContent).toBe('Dropbox 备份最近失败：暂不从云端移除正文，备份恢复后自动继续')
+    expect(card(root, '存储').querySelector('.stack p.hint.warn')?.textContent).toBe('Dropbox 备份最近失败：暂不从云端移除正文和截图，备份恢复后自动继续')
   })
 
   it('asks before a shorter window, sends only it with the etag, and the lists save on top of its change', async () => {
     const fake = new FakeServer()
+    fake.settings.textRetentionDays = 365
     const host = testHost()
     const root = await open(fake, '/settings', host)
     await choose(root, '90')
-    expect(host.asked).toEqual(['改成保留 90 天？更早保存的正文在 Dropbox 确认备份后会从云端移除（Dropbox 里仍有），页面和访问记录不变。'])
+    expect(host.asked).toEqual(['改成保留 90 天？更早的正文和截图在 Dropbox 确认备份后会从云端移除，打开时从归档读取；页面、访问记录和全文索引不变。'])
     const update = fake.calls.find((call) => call.method === 'PATCH')
     expect(update?.path).toMatch(/^\/api\/v1\/settings\?update_mask=text_retention_days%2Cetag&request_id=[0-9a-f-]{36}$/)
     expect(update?.body).toEqual({ text_retention_days: 90, etag: 's1' })
     expect(fake.settings.textRetentionDays).toBe(90)
-    expect(toastText(root)).toBe('正文在云端保留 90 天')
+    expect(toastText(root)).toBe('正文和截图在云端保留 90 天')
     expect(retention(root).value).toBe('90')
     expect(document.activeElement).toBe(retention(root))
     // The lists' next change carries the etag the window's change gave.
@@ -340,6 +341,7 @@ describe('正文在云端保留', () => {
 
   it('keeps the window when the owner says no, and keeps every text with 永久 without asking', async () => {
     const fake = new FakeServer()
+    fake.settings.textRetentionDays = 365
     fake.status = { textRetentionPausedReason: 'dropbox_not_connected' }
     const host = testHost(false)
     const root = await open(fake, '/settings', host)
@@ -352,9 +354,9 @@ describe('正文在云端保留', () => {
     // Named in the mask without a value: kept forever.
     expect(update?.body).toEqual({ etag: 's1' })
     expect(fake.settings.textRetentionDays).toBeUndefined()
-    expect(toastText(root)).toBe('正文会一直留在云端')
+    expect(toastText(root)).toBe('正文和截图会一直留在云端')
     const storage = card(root, '存储')
-    expect([retention(root).value, storage.querySelector('.retention + p.hint')?.textContent, storage.querySelector('.stack p.hint.warn')]).toEqual(['off', '所有正文都留在云端。', null])
+    expect([retention(root).value, storage.querySelector('.retention + p.hint')?.textContent, storage.querySelector('.stack p.hint.warn')]).toEqual(['off', '所有正文和截图都留在云端。', null])
   })
 })
 

@@ -1,7 +1,8 @@
 # recall's Chrome extension
 
-Records each page's visits with the time it actually had the focus, and its text once it was read for ten seconds;
-scrubs secrets and uploads to the Worker `recall` ([design §3](../docs/design.md#3-the-extension)). Manifest V3, no
+Records each page's visits with its actual focus time, and a text/viewport snapshot after ten seconds, then on the
+minute tick while focused. Unchanged snapshots in the same visit are skipped; empty text or a failed capture can be
+retried on the next tick. Text is scrubbed and sensitive/password pages are excluded before screenshots. Uploads go to the Worker `recall` ([design §3](../docs/design.md#3-the-extension)). Manifest V3, no
 runtime dependency, no remote code, never in incognito. Extension ID `kpehdcbafdhgghclgaeigokjoceemfhj` (from the
 public key in `src/manifest.json`; the private half was never kept).
 
@@ -73,3 +74,5 @@ The tests run in Node over a hand-written fake of the `chrome.*` APIs and a fake
 fake-indexeddb, all with synthetic pages and tokens. `test/smoke-upload.ts` is the extension's part of recall's smoke
 run (`../worker/test/smoke/smoke.mts`, `npm run test:smoke` in `worker/`): the same code under the same fake records a
 short session and uploads it to a real `wrangler dev`, the only real thing being the network.
+
+Screenshot deduplication compares a 32×32 preview with the last saved image. With unchanged text, fewer than 8% of pixels changing by 24 RGB levels is ignored, so a small clock or cursor does not produce a new snapshot every minute. Text changes are still saved.

@@ -37,6 +37,10 @@ export const URL_MAX_CHARS = 8192;
 export const TEXT_MAX_CHARS = 1000;
 /** A captured text is cut to this many bytes of UTF-8, at a character boundary. */
 export const DOCUMENT_MAX_BYTES = 64 * 1024;
+/** A compressed visible-viewport screenshot, kept inside the existing 1 MiB upload bound. */
+export const SCREENSHOT_MAX_BYTES = 384 * 1024;
+export const SCREENSHOT_MAX_EDGE = 1920;
+export const SCREENSHOT_QUALITY = 0.75;
 export const ELLIPSIS = '…';
 
 /** A host as the archive's Site format allows it (IDN in punycode, `_` included), or a bracketed IPv6 literal. */

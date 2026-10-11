@@ -5,7 +5,7 @@
  * `auth/token/revoke`. Nothing here deletes a file. Every call has a timeout; every failure becomes a DropboxError
  * with a code the status shows (backup.ts) and, for 429, Dropbox's Retry-After. No token, path or body is logged.
  */
-import { hex } from './blobs.ts';
+import { hex, readBounded } from './blobs.ts';
 import { DROPBOX_TIMEOUT_MS } from './limits.ts';
 
 /** Dropbox's three hosts: the browser's authorization page, the RPC endpoints, the content endpoints. */
@@ -229,10 +229,15 @@ export async function uploadFile(
 }
 
 /** A file's bytes, or null when the path holds none. */
-export async function downloadFile(fetcher: Fetcher, endpoints: DropboxEndpoints, token: string, path: string): Promise<Uint8Array | null> {
+export async function downloadFile(fetcher: Fetcher, endpoints: DropboxEndpoints, token: string, path: string, maxBytes = 64 * 1024): Promise<Uint8Array | null> {
   try {
     const response = await call(fetcher, `${endpoints.content}/2/files/download`, { method: 'POST', headers: { ...bearer(token), 'dropbox-api-arg': apiArg({ path }) } });
-    return new Uint8Array(await response.arrayBuffer());
+    if (response.body === null) throw new DropboxError('dropbox_bad_response');
+    try {
+      return await readBounded(response.body, maxBytes);
+    } catch {
+      throw new DropboxError('archive_corrupt');
+    }
   } catch (error) {
     if (error instanceof DropboxError && error.code === 'not_found') return null;
     throw error;

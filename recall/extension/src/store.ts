@@ -10,7 +10,6 @@
  * | local | `device` | the device ID, the owner's label and the server's origin |
  * | local | `upload` | the uploads' state: the last success, the backoff, the batch size, a refused token |
  * | local | `denylist` | the owner's two lists of patterns and their etag, from recall's last answer |
- * | local | `captured` | the `<day>:<page id>` keys of the pages captured today and yesterday (UTC) |
  * | local | `error` | the last error code and its time, reported with every upload for a day |
  * | local | `reloaded` | the version the worker last reloaded for (update.ts) |
  */
@@ -117,11 +116,6 @@ export const uploadState = {
 export const ownerDenylist = {
   get: async (api: typeof chrome): Promise<OwnerDenylist> => ({ patterns: [], siteOnly: [], etag: '', ...(await read<Partial<OwnerDenylist>>(api.storage.local, 'denylist')) }),
   set: (api: typeof chrome, value: OwnerDenylist) => write(api.storage.local, 'denylist', value),
-};
-
-export const capturedKeys = {
-  get: async (api: typeof chrome): Promise<string[]> => (await read<string[]>(api.storage.local, 'captured')) ?? [],
-  set: (api: typeof chrome, keys: readonly string[]) => write(api.storage.local, 'captured', keys),
 };
 
 /** The version the worker last reloaded into: the tick does not reload twice for the same one. */

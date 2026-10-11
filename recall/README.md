@@ -2,8 +2,8 @@
 
 The owner's browsing record on `recall.ziyixi.science`, to answer two questions years from now: what did I do on day X,
 and where did I read that. A Chrome extension records each page's visits with the time it really had the focus, and
-the page's text once it was read for ten seconds; it scrubs secrets and uploads to the Worker `recall`, which keeps
-every visit in one SQLite Durable Object (`RecallState`) and the texts of a rolling window (a year by default) in the
+a text and viewport snapshot after ten seconds, then about once a minute; it scrubs secrets and uploads to the Worker `recall`, which keeps
+every visit in one SQLite Durable Object (`RecallState`) and the snapshot files of a rolling window (seven days by default) in the
 private R2 bucket `recall-store`, indexes them for full-text search (Chinese included) and serves a timeline and a
 search UI behind Access. A durable copy of everything leaves Cloudflare as plain files
 ([`recall-archive-v1`](../contracts/recall-archive-v1/README.md)): recall writes them into the owner's own Dropbox app
@@ -29,16 +29,16 @@ NAS. Every owner step is a click. Chinese UI, mobile first. Design:
   网站, 类型 (读过) and 停留, or the operators `site:`, `after:` (`after:昨天` too), `before:`, `type:read` and `dwell:`
   typed in the box; 相关 · 最新. A single Chinese character is not searchable (the index is of character pairs). Each
   search reads a bounded number of rows, and searches stop for the rest of the UTC day once the day's read budget is
-  spent (design §6.3). Texts older than the retention window are searched by title and URL only, and the search says
-  so once there are any.
-- **页面详情**: the page's text in a reader view with the matches marked (past the retention window: 正文已归档到
-  Dropbox, with the text's path in the app folder), its visits, and behind ⋯ 打开原网页,
+  spent (design §6.3). Archiving files does not clear the search index; its existing size budget still determines
+  how far full-text search reaches.
+- **页面详情**: snapshots by capture time, with plain text and an optional screenshot. Older content is read from
+  Dropbox when opened. The page also shows its visits, and behind ⋯ 打开原网页,
   以后不保存这个网站的正文 and 删除这个页面的记录 (the visits and texts leave recall; the Dropbox archive only grows:
   it gains the deletion's tombstone line and keeps its files, which the owner removes there by hand if they want).
 - **设置**: devices (last upload, version, outbox, clock skew); 插件口令 (the extension's token: 生成, 重新生成 with
   24 hours' grace, revoke a leaked one at once, stop; shown once; the optional export token of the change feed folded
   under it); 备份到 Dropbox (connect with the App key, the account, the last upload, what waits, failures in words,
-  断开); storage and the day's budgets, with 正文在云端保留 (the retention window: 30 天 to 10 年, 1 年 by default, or
+  断开); storage and the day's budgets, with 快照在云端保留 (the retention window: 7 天 to 10 年, 7 天 by default, or
   永久; how many texts are in Cloudflare and how many only in Dropbox, and why nothing leaves while Dropbox is not
   connected or failing); and the owner's 网站名单: sites recorded by their name alone (their own banks)
   or without their text (the owner's own lists live here, never in this repository).
@@ -47,8 +47,20 @@ What is never recorded, and what is kept for how long, is in the design's §2 an
 pages, visits under one second of focus; sensitive sites (mail, chats, banks, consoles, where API keys are made) and the
 owner's site-only list by their site alone; no text of a denylisted page or a page with a password field. Pages and
 visits stay in Cloudflare; a text leaves it after the retention window, and only once the Dropbox archive has
-confirmed holding it (never while Dropbox is not connected or failing): that is not a deletion, and the archive keeps
-every text.
+confirmed holding every file (never while Dropbox is not connected or failing). The search index stays within its
+existing budget, and the archive keeps every snapshot.
+
+## Captures
+
+Each eligible foreground visit is captured after ten seconds and then sampled on the existing minute tick. Empty
+text or a temporary failure does not permanently stop later samples. Within the same visit, identical text and a visibly unchanged
+screenshot do not create another snapshot; visit times continue to be recorded. Screenshots show one visible
+viewport, not an entire page. They use browser-native WebP compression (longest edge 1920 pixels, quality 0.75,
+at most 384 KiB) and the existing sensitive-site/password-page exclusions. Text is scrubbed; screenshot pixels are not.
+
+Text and images share the existing document, upload and Dropbox archive. R2 keeps seven days of confirmed archived
+files; older content is downloaded only when the owner opens a snapshot, without caching it back in R2. Dropbox
+disconnection or missing files are shown in the detail. Existing visits and text-only archive records remain readable.
 
 ## Develop
 

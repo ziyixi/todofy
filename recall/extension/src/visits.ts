@@ -21,7 +21,7 @@ export function focusMs(spans: readonly (readonly [number, number])[]): number {
 }
 
 export function newVisit(id: string, tabId: number, documentId: string, page: PageInfo, title: string, at: number): Visit {
-  return { id, tabId, documentId, page, title, spans: [], revision: 0, changed: false, queuedAt: at, captured: false };
+  return { id, tabId, documentId, page, title, spans: [], revision: 0, changed: false, queuedAt: at };
 }
 
 /** When the visit's first focus began, or `fallback` before it has a span. */

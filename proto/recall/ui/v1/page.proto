@@ -46,13 +46,12 @@ message Page {
   int32 visit_count = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
   // Seconds of focus over every visit.
   int32 focus_seconds = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Captured texts: at most one per UTC day, and none that repeats the page's latest text.
+  // Captured page snapshots, with text and optionally a viewport screenshot.
   int32 document_count = 9 [(google.api.field_behavior) = OUTPUT_ONLY];
   // The latest capture; unset when there is none.
   google.protobuf.Timestamp latest_capture_time = 10 [(google.api.field_behavior) = OUTPUT_ONLY];
   // The latest capture's text is in the search index. False without a capture, when the storage budget left only
-  // the page's title and URL in the index (the text is still kept and archived), or when the retention window moved
-  // the text to the Dropbox archive alone (Document.text_archived).
+  // the page's title and URL in the index. Moving files to Dropbox does not clear this index.
   bool text_indexed = 11 [(google.api.field_behavior) = OUTPUT_ONLY];
   // The latest capture (GetDocument reads its text); empty when there is none.
   string latest_document = 12 [
@@ -101,8 +100,7 @@ message FocusSpan {
   google.protobuf.Timestamp end_time = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
 }
 
-// The text captured from a page after ten seconds of focus: at most once per page and UTC day, and only when it
-// differs from the page's latest text.
+// A page snapshot captured after ten seconds of focus or on a later minute sample.
 message Document {
   option (google.api.resource) = {
     type: "recall.ziyixi.science/Document"
@@ -125,17 +123,32 @@ message Document {
   int32 text_bytes = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
   // The page had more text than the 64 KiB kept: `text` is its beginning.
   bool text_truncated = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // The plain text (the page's innerText, scrubbed); empty when text_archived.
+  // The plain text (the page's innerText, scrubbed), read from R2 or the Dropbox archive. Empty for image-only snapshots.
   string text = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
   // Only the text's first 32 KiB is in the search index; the rest is kept, shown and archived.
   bool search_truncated = 9 [(google.api.field_behavior) = OUTPUT_ONLY];
   // The text is no longer in Cloudflare: it was captured before the retention window (Settings.text_retention_days)
-  // and the Dropbox archive confirmed holding it, so recall removed it from R2 and the search index. The archive keeps
+  // and the Dropbox archive confirmed holding it, so recall removed its files from R2. The search index stays. The archive keeps
   // it at archive_path.
   bool text_archived = 10 [(google.api.field_behavior) = OUTPUT_ONLY];
   // Where the archive holds the text, relative to its root (the Dropbox app folder): `blobs/2026/10/<uuid>.txt.gz`,
   // the gzip of the UTF-8 text (contracts/recall-archive-v1). Set only when text_archived.
   string archive_path = 11 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The optional WebP viewport screenshot in standard base64. Returned by GetDocument, omitted from ListDocuments.
+  // (-- api-linter: core::0140::base64=disabled
+  //     aip.dev/not-precedent: The shared wire JSON profile has no bytes scalar; keep the bounded image opaque. --)
+  string screenshot_webp_base64 = 12 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Pixel width of the optional screenshot.
+  int32 screenshot_width = 13 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Pixel height of the optional screenshot.
+  int32 screenshot_height = 14 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // A safe reason code when the content could not be read; metadata is still returned.
+  string content_error = 15 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The visit this snapshot belongs to.
+  string visit = 16 [
+    (google.api.field_behavior) = OUTPUT_ONLY,
+    (google.api.resource_reference).type = "recall.ziyixi.science/Visit"
+  ];
 }
 
 // A site: every page of one host.

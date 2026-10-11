@@ -27,13 +27,13 @@
   过期，不需要 Bypass。只增不删：从不调用 Dropbox 的删除或移动；blob 用 `add` 写一次，日文件、`VERSION`、`state.json`
   整体覆盖；遇到 429 / `too_many_write_operations` 按 Retry-After 或退避重试；每次 pass 受子请求（40）、墙钟与渲染行数
   约束。改动这些时运行 `test/runtime/archive.test.ts`（假 Dropbox）与 smoke。
-- **正文保留窗口**（owner 2026-10-11：全部已备份到 Dropbox，Cloudflare 只留滚动窗口以守住免费额度）：
-  `Settings.text_retention_days` 默认 365，30–3650 或永久（不设）。窗口外的正文只有在页面未删除、Dropbox 已连接且
-  最近一次没有失败、并且归档账本确认了这一份（`archive_blobs` 里当前连接的记录带 Dropbox 内容哈希、它所在日文件此后
-  已写入、`state.json` 的 seq 已覆盖它）时，才由 alarm 的有界步骤（`retention.ts`，每次至多 100 条、一次 R2 调用、
-  受每日维护额度约束）移出 R2 和全文索引；documents 行保留（`archived_ms`，seq 与 blob 路径不变），页面与访问永不因此
-  删除。这不是删除：不写墓碑、不改 feed 与归档，blob 路由答 410 `blob_deleted`。任何放宽这些条件的改动都不允许；
-  改动保留、归档账本或 blob 路由时运行 `test/retention.test.ts`、`test/runtime/retention.test.ts` 与 smoke。
+- **快照与保留窗口**（owner 2026-10-11）：前台累计 10 秒首次采集，之后复用一分钟 tick 补采；同一次访问的文字未变、截图无明显变化时省略重复快照，不再按天限制。Document 可带可见区域 WebP，复用现有上传、R2 和 Dropbox 归档；
+  截图继承正文的站点和密码页排除规则，文字脱敏不处理图片像素。
+  `Settings.text_retention_days` 默认 7，7–3650 或永久（不设），同时适用于正文和截图文件。只有页面仍有效、
+  Dropbox 已连接且最近一次没有失败、当前连接已确认快照全部 blob 的内容哈希、日期文件已写入并由 state.json 覆盖时，
+  才由现有有界清理移出 R2。保留 documents、访问、seq 和搜索索引；索引仍受现有容量预算限制。
+  Owner 点开归档快照时用既有 Dropbox 下载能力读取，文件不回填 R2；缺失或断连返回明确原因。
+  改动保留、归档或 blob 路由时运行相关既有 retention/runtime/smoke 检查。
 - **Workers Free，$0**：不加 cron、D1、KV、Queues 或 Workflows；调度只用 `RecallState`（实例 `recall-v1`）的
   `setAlarm()`。fetch handler 只做路由、鉴权与一次对象调用（10 ms），从不解析上传、搜索或 feed；blob 路由直接读 R2，
   只在 R2 没有对象时才问对象。每日写入预算（20,000 行，之后 429）、每日读取预算（1,500,000 行，之后搜索拒绝；
@@ -41,8 +41,8 @@
   调整并在提交中写明原因；改动摄取、存储、搜索或 API 时运行 `test/runtime/cpu.test.ts` 与 `test/runtime/scale.test.ts`
   （两年规模下每条路径读取的行数）；预算（`deploy/bundle-size.mjs`、`web/scripts/js-budget.mjs`）只能有意提高。
 - **变更 feed 是公开合同**：`contracts/recall-archive-v1` 由 recall 拥有。feed 是记录行自己的 `seq`（压缩：修订移到新
-  seq，删除留下一个 `pages/<id>` 墓碑），`feed_id` 标识 feed，seq 从不复用。v1 内只做兼容的新增（可选字段、新 kind、
-  新 blob role）；其他改动是 `recall-archive-v2`（新路由、新 `VERSION`）。改 IDL 后运行 `proto/` 的 `npm run schema`，
+  seq，删除留下一个 `pages/<id>` 墓碑），`feed_id` 标识 feed，seq 从不复用。本次 owner 明确选择在现有 v1 内追加截图字段与 blob role、取消每日采样限制并将热窗口改为 7 天；
+  保留旧字段与历史字节可读，不为未使用的外部消费者增加版本迁移。其余格式变更继续遵循合同。改 IDL 后运行 `proto/` 的 `npm run schema`，
   并让 `proto/test/recall-archive.test.ts`、`worker/test/archive.test.ts`、`test/runtime/archive.test.ts` 与
   `worker/test/smoke/` 一起通过（归档的日文件、`state.json` 与 `VERSION` 逐字节等于合同的 `fixtures/archive/`）。
 - **接口**：owner API 是 `proto/recall/ui/v1`，扩展的上传是 `proto/recall/ingest/v1`（扩展只用生成的 wire 类型，

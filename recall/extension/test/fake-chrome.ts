@@ -95,6 +95,8 @@ export class FakeBrowser {
    * (location.href) as its tab's current URL unless it names one: a script that read another route says so.
    */
   script: ScriptAnswer = () => undefined;
+  screenshot: string | Error = new Error('Screenshot unavailable');
+  screenshotCalls = 0;
   /** The extension's own files, served by getURL + fetch. */
   readonly files = new Map<string, string>();
   readonly scriptCalls: { tabId: number; documentIds?: string[]; files?: string[] }[] = [];
@@ -169,6 +171,10 @@ export class FakeBrowser {
 
   readonly api = {
     tabs: {
+      captureVisibleTab: () => {
+        this.screenshotCalls += 1;
+        return this.screenshot instanceof Error ? Promise.reject(this.screenshot) : Promise.resolve(this.screenshot);
+      },
       get: (tabId: number) => Promise.resolve().then(() => ({ ...this.tab(tabId) })),
       query: ({ active, windowId }: { active?: boolean; windowId?: number }) =>
         Promise.resolve([...this.tabs.values()].filter((tab) => (active === undefined || tab.active === active) && (windowId === undefined || tab.windowId === windowId)).map((tab) => ({ ...tab }))),

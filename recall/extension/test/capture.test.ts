@@ -1,17 +1,20 @@
-// Captures (src/capture.ts, src/page-text.ts): ten seconds of focus, once per page per UTC day, never for a page whose
+// Captures: ten seconds of focus, then minute sampling, never for a page whose
 // text recall does not keep, nothing from a page with a visible password field, a result of another build dropped,
 // failures, the storage bound, and the text scrubbed and cut. Synthetic pages and texts only.
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { DOCUMENT_MAX_BYTES, utf8Bytes } from '../../shared/url.ts';
 import { captureDelay, captureDue, readTab, storeCapture } from '../src/capture.ts';
 import { reconcile } from '../src/focus.ts';
 import { readPage, type PageText } from '../src/page-text.ts';
-import { capturedKeys, lastError } from '../src/store.ts';
+import { lastError } from '../src/store.ts';
 import { harness, MINUTE, SECOND, T0, WINDOW_ID_NONE, type Harness } from './fake-chrome.ts';
 import { queuedDocuments } from './helpers.ts';
+import { compressScreenshot } from '../src/screenshot.ts';
+
+vi.mock('../src/screenshot.ts', async (original) => ({ ...await original<typeof import('../src/screenshot.ts')>(), compressScreenshot: vi.fn() }));
+beforeEach(() => vi.mocked(compressScreenshot).mockResolvedValue(null));
 
 const ARTICLE = 'https://blog.example.com/2026/durable-objects-alarms';
-const DAY = 24 * 60 * MINUTE;
 
 /** A capture script's answer; its URL is the tab's (the fake browser fills it in) unless `url` names another. */
 function pageText(overrides: Partial<PageText> = {}): Omit<PageText, 'url'> & { url?: string } {
@@ -72,25 +75,37 @@ describe('when a page is captured', () => {
     ]);
   });
 
-  it('a visit captures once', async () => {
+  it('keeps changed text on the next minute, skips identical snapshots, and keeps another visit the same day', async () => {
     const h = await harness();
     await captureAfterTenSeconds(h, ARTICLE, T0);
-    expect(await captureDelay(h.ctx, T0 + MINUTE)).toBeNull();
-    expect(await captureDue(h.ctx, T0 + MINUTE)).toBeNull();
+    const sample = async (at: number, body: string) => {
+      h.browser.script = () => pageText({ text: body });
+      const job = await captureDue(h.ctx, at);
+      expect(job).not.toBeNull();
+      if (job !== null) await storeCapture(h.ctx, job, await readTab(h.ctx, job), at);
+    };
+    await sample(T0 + MINUTE, 'The page changed today.');
+    await sample(T0 + 2 * MINUTE, 'The page changed today.');
+    expect((await queuedDocuments(h.ctx)).map((doc) => doc.text)).toEqual(['闹钟会唤醒对象。An alarm wakes the object.', 'The page changed today.']);
+    const again = await captureAfterTenSeconds(h, ARTICLE, T0 + 3 * MINUTE);
+    expect(again.documents).toHaveLength(3);
   });
 
-  it('a page at most once per UTC day; the keys of today and yesterday are kept', async () => {
+  it('keeps a changed screenshot even when the text is unchanged, including an image-only page', async () => {
     const h = await harness();
+    h.browser.screenshot = 'data:image/png;base64,synthetic';
+    vi.mocked(compressScreenshot).mockResolvedValue({ base64: 'cGljdHVyZS0x', preview: '800x600:' + btoa('a'.repeat(4096)), width: 800, height: 600 });
     await captureAfterTenSeconds(h, ARTICLE, T0);
-    // Another visit of the same page the same day: no capture.
-    const again = await captureAfterTenSeconds(h, ARTICLE, T0 + 2 * MINUTE);
-    expect(again.job).toBeNull();
-    // The next UTC day: captured again.
-    const tomorrow = await captureAfterTenSeconds(h, ARTICLE, T0 + DAY);
-    expect(tomorrow.documents).toHaveLength(2);
-    await captureAfterTenSeconds(h, 'https://blog.example.com/other', T0 + 2 * DAY);
-    const keys = await capturedKeys.get(h.ctx.chrome);
-    expect(keys.map((key) => key.slice(0, 10))).toEqual(['2026-10-11', '2026-10-12']);
+    vi.mocked(compressScreenshot).mockResolvedValue({ base64: 'clock-tick', preview: '800x600:' + btoa('z'.repeat(40) + 'a'.repeat(4056)), width: 800, height: 600 });
+    const clockJob = await captureDue(h.ctx, T0 + MINUTE);
+    if (clockJob !== null) await storeCapture(h.ctx, clockJob, await readTab(h.ctx, clockJob), T0 + MINUTE);
+    expect(await queuedDocuments(h.ctx)).toHaveLength(1);
+    vi.mocked(compressScreenshot).mockResolvedValue({ base64: 'cGljdHVyZS0y', preview: '800x600:' + btoa('z'.repeat(4096)), width: 800, height: 600 });
+    const job = await captureDue(h.ctx, T0 + 2 * MINUTE);
+    if (job !== null) await storeCapture(h.ctx, job, await readTab(h.ctx, job), T0 + 2 * MINUTE);
+    expect((await queuedDocuments(h.ctx)).map((doc) => doc.screenshot_webp_base64)).toEqual(['cGljdHVyZS0x', 'cGljdHVyZS0y']);
+    const imageOnly = await captureAfterTenSeconds(h, 'https://example.org/gallery', T0 + 3 * MINUTE, pageText({ text: '' }));
+    expect(imageOnly.documents.at(-1)).toMatchObject({ text: '', screenshot_webp_base64: 'cGljdHVyZS0y' });
   });
 
   it('never for a page whose text recall does not keep', async () => {
@@ -110,11 +125,11 @@ describe('when a page is captured', () => {
 });
 
 describe('what a capture keeps', () => {
-  it('nothing from a page with a visible password field, and the page counts as captured today', async () => {
+  it('nothing from a page with a visible password field, including its screenshot', async () => {
     const h = await harness();
     const { documents } = await captureAfterTenSeconds(h, ARTICLE, T0, pageText({ hasPasswordField: true, text: 'Sign in to example.com' }));
     expect(documents).toEqual([]);
-    expect(await capturedKeys.get(h.ctx.chrome)).toHaveLength(1);
+    expect(h.browser.screenshotCalls).toBe(0);
   });
 
   it('the text scrubbed and cut again, with its truncation flag', async () => {
@@ -136,16 +151,21 @@ describe('what a capture keeps', () => {
     expect(documents[0]?.text_truncated).toBe(true);
   });
 
-  it('nothing from an empty page', async () => {
+  it.each(['empty', 'failure'])('a %s first attempt does not block the next minute from saving content', async (first) => {
     const h = await harness();
-    expect((await captureAfterTenSeconds(h, ARTICLE, T0, pageText({ text: ' \n\t ' }))).documents).toEqual([]);
+    await captureAfterTenSeconds(h, ARTICLE, T0, first === 'empty' ? pageText({ text: ' \n\t ' }) : new Error('Synthetic failure'));
+    expect(await queuedDocuments(h.ctx)).toEqual([]);
+    h.browser.script = () => pageText({ text: 'Content available on the next tick.' });
+    const job = await captureDue(h.ctx, T0 + MINUTE);
+    if (job !== null) await storeCapture(h.ctx, job, await readTab(h.ctx, job), T0 + MINUTE);
+    expect((await queuedDocuments(h.ctx)).map((doc) => doc.text)).toEqual(['Content available on the next tick.']);
   });
 
   it('nothing from a capture script of another build (the worker reloads within the minute)', async () => {
     const h = await harness();
     const { documents } = await captureAfterTenSeconds(h, ARTICLE, T0, pageText({ build: '2026.1009.100' }));
     expect(documents).toEqual([]);
-    expect(await capturedKeys.get(h.ctx.chrome)).toEqual([]);
+
   });
 });
 

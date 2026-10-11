@@ -122,6 +122,7 @@ async function ensureAlarm(): Promise<void> {
 
 async function onTick(at: number): Promise<void> {
   await serial((ctx) => beat(ctx, at));
+  await capture();
   await scheduleCapture();
   await upload('tick');
   await updateIfInstalled('tick');

@@ -37,8 +37,8 @@ export const SPANS_MAX = 200;
 export const CAPTURE_FOCUS_MS = 10 * SECOND;
 /** Past this much of the extension's storage, texts are no longer captured (visits continue). */
 export const CAPTURE_STORAGE_MAX_BYTES = 200 * 1000 * 1000;
-/** The `<day>:<page id>` keys of today's captures are kept this many UTC days (today and yesterday). */
-export const CAPTURE_KEY_DAYS = 2;
+/** Long visits and failed attempts are sampled by the existing one-minute tick. */
+export const CAPTURE_INTERVAL_MS = MINUTE;
 
 // ---- uploads (upload.ts) ---------------------------------------------------------------------------------------------
 

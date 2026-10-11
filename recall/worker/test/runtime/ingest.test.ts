@@ -104,15 +104,15 @@ describe('upload to feed to blob', () => {
   it('retries change nothing: the same batch, an older revision, a replayed document, the same text again', async () => {
     const before = await feed(h);
     const docsVisit = await visit({ id: '1f3e8a27-6c4b-4f0d-a1e2-9b8c7d6e5f01', url: DOCS, title: 'older', revision: 1, spans: [[at('2026-10-10T02:00:05Z'), at('2026-10-10T02:00:10Z')]] });
-    const replay = await document({ id: '7c2e9f41-3b6a-4d5e-8f10-2a9b4c6d8e01', visitId: uuid(1), url: DOCS, captureMs: at('2026-10-10T02:00:15.250Z'), text: FIXTURE_TEXT });
-    const sameTextNextDay = await document({ id: uuid(2, 2), visitId: uuid(1), url: DOCS, captureMs: at('2026-10-10T02:00:15.250Z') + DAY, text: FIXTURE_TEXT });
+    const replay = await document({ id: '7c2e9f41-3b6a-4d5e-8f10-2a9b4c6d8e01', visitId: '1f3e8a27-6c4b-4f0d-a1e2-9b8c7d6e5f01', url: DOCS, captureMs: at('2026-10-10T02:00:15.250Z'), text: FIXTURE_TEXT });
+    const sameTextNextDay = await document({ id: uuid(2, 2), visitId: '1f3e8a27-6c4b-4f0d-a1e2-9b8c7d6e5f01', url: DOCS, captureMs: at('2026-10-10T02:00:15.250Z') + DAY, text: FIXTURE_TEXT });
     await h.clock(T0 + 2 * DAY);
     const answer = await ok(await h.upload(batch([docsVisit, replay, sameTextNextDay], { sentMs: T0 + 2 * DAY })));
     expect(answer).toMatchObject({ accepted_count: 3, rejected: [] });
     expect(await feed(h)).toEqual(before);
   });
 
-  it('keeps one capture of a page a UTC day, and refuses a known document ID with other content', async () => {
+  it('keeps changed captures of a page in the same day, and refuses a known document ID with other content', async () => {
     const day = at('2026-10-12T08:00:00Z');
     await h.clock(day);
     const first = await document({ id: uuid(3, 2), visitId: uuid(1), url: DOCS, captureMs: day, text: '新的一天，新的正文。' });
@@ -121,9 +121,9 @@ describe('upload to feed to blob', () => {
     const conflict = await document({ id: uuid(3, 2), visitId: uuid(1), url: DOCS, captureMs: day, text: '同一个 ID，别的内容。' });
     expect(await ok(await h.upload(batch([conflict], { sentMs: day + 4 * 60 * MINUTE })))).toMatchObject({ accepted_count: 0, rejected: [{ id: uuid(3, 2), reason: 'id_conflict' }] });
     const documents = await h.sql<{ id: string }>(`SELECT id FROM documents ORDER BY seq`);
-    expect(documents.map((row) => row.id)).toEqual(['7c2e9f41-3b6a-4d5e-8f10-2a9b4c6d8e01', uuid(3, 2)]);
+    expect(documents.map((row) => row.id)).toEqual(['7c2e9f41-3b6a-4d5e-8f10-2a9b4c6d8e01', uuid(3, 2), uuid(4, 2)]);
     const { pageId } = await page(DOCS);
-    expect((await h.api.getPage({ name: `pages/${pageId}` })).documentCount).toBe(2);
+    expect((await h.api.getPage({ name: `pages/${pageId}` })).documentCount).toBe(3);
   });
 
   it('leaves no object behind for a text its transaction did not keep', async () => {

@@ -9,6 +9,17 @@ Its old waiting lists and release identities are historical, not instructions to
 
 ## Current work
 
+`codex/recall-activity-snapshots` implements the owner-authorized personal Recall update: first capture after
+10 seconds, minute sampling, optional viewport screenshots on existing documents, seven-day R2 retention
+with the search index kept, and Dropbox reads for archived content. Extension, Worker and UI changes are
+implemented; the owner also approved a small 32×32 image comparison to ignore minor clocks/cursors when text is
+unchanged. It compares with the last saved image; at least 8% of pixels must differ by 24 or more in an RGB channel.
+Local checks passed: proto lint/API lint/breaking and TS/Python suites, extension 103 tests, UI 128 tests,
+Worker 153 unit tests and 93 real DO/R2 runtime tests, deployment 18 tests, and the existing full smoke flow.
+Runtime checks include screenshot storage, duplicate omission, metadata pagination, retained FTS, and byte-for-byte
+Dropbox reads after both R2 blobs are removed. Branch CI, production release and real Chrome acceptance remain pending.
+No new service, dependency or separate screenshot pipeline was added; existing CPU, storage and bundle budgets remain.
+
 Mailsort flat English labels and Settings' classification-effect check are deployed at `4a48878`.
 [Branch CI](https://github.com/ziyixi/todofy/actions/runs/38177634581) and the
 [same-SHA release](https://github.com/ziyixi/todofy/actions/runs/38177844303) passed; Deployment `7002296191`

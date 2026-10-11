@@ -44,8 +44,8 @@ message Settings {
   // built-in site-only patterns are (the owner's own banks and other sensitive sites). The stricter list wins when a
   // page matches patterns of both.
   repeated string site_only_patterns = 6 [(google.api.field_behavior) = OPTIONAL];
-  // Days a captured text stays in Cloudflare after its capture, 30-3650 (365 until the owner changes it); unset: every
-  // text stays. Past the window, the alarm removes a text from Cloudflare (R2 and the search index) only once the
+  // Days snapshot files stay in R2 after capture, 7-3650 (7 by default); unset: every file stays.
+  // Past the window, the alarm removes the files from R2 while keeping the search index, only once the
   // Dropbox backup is connected and has confirmed holding it (its blob and the day file that names it); the page, its
   // visits and the document's record stay, and the archive keeps the text (recall/docs/design.md §2.3). An update that
   // names it without a value keeps every text; a value outside the range is INVALID_RETENTION.

@@ -1233,14 +1233,36 @@ h2.page-title {
   color: var(--accent-ink);
 }
 
-/* A text the retention window moved to the Dropbox archive alone: what happened, and where the archive keeps it. */
-.archived-title {
-  font-weight: 600;
+/* A bounded history list keeps the selected capture within reach on a phone. */
+.snapshots {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-1);
+  max-height: 15rem;
+  overflow-y: auto;
+  list-style: none;
+  padding: 2px;
+  margin: 0;
 }
 
-.archive-path {
-  font-size: 14px;
+.snapshots button {
+  width: 100%;
+  text-align: left;
   overflow-wrap: anywhere;
+}
+
+.snapshots button[aria-pressed='true'] {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--surface);
+}
+
+.snapshot-image {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
 }
 
 .visits {

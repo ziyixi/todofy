@@ -108,11 +108,11 @@ export const PURGE_BATCH = 500;
 export const MAINTENANCE_ROW_LIMIT = DAILY_ROW_BUDGET / 2;
 /**
  * Settings.text_retention_days: how long a captured text stays in Cloudflare after its capture, until the owner
- * changes it, and the range they may choose (or none: every text stays). Past it a text leaves R2 and the index only
+ * changes it, and the range they may choose (or none: every text stays). Past it the files leave R2 only
  * once the Dropbox archive confirmed holding it (retention.ts).
  */
-export const TEXT_RETENTION_DEFAULT_DAYS = 365;
-export const TEXT_RETENTION_MIN_DAYS = 30;
+export const TEXT_RETENTION_DEFAULT_DAYS = 7;
+export const TEXT_RETENTION_MIN_DAYS = 7;
 export const TEXT_RETENTION_MAX_DAYS = 3650;
 /**
  * Texts past the window one alarm run moves out of Cloudflare (their R2 objects in one call, a few rows written each),

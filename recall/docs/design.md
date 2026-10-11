@@ -2,9 +2,8 @@
 
 The owner's own browsing recorder and archive on `recall.ziyixi.science`, so that years from now they can answer two
 questions: **what did I do on day X**, and **where did I read that**. A Chrome extension (Manifest V3, no runtime
-dependencies) records each page's visits with the time it actually had the focus, and the page's text once it was read
-for ten seconds; it scrubs secrets and uploads to the Worker `recall`, which keeps the records in one SQLite Durable
-Object and the texts of a rolling window (a year by default, §2.3) in a private R2 bucket, indexes them for full-text
+dependencies) records each page's visits with the time it actually had the focus, and text and a visible-viewport screenshot after ten seconds, then about once a minute; it scrubs secrets and uploads to the Worker `recall`, which keeps the records in one SQLite Durable
+Object and the snapshot files of a rolling window (seven days by default, §2.3) in a private R2 bucket, indexes them for full-text
 search (Chinese included), and serves a timeline and a search UI behind Access. A durable copy of everything leaves
 Cloudflare as plain files in an open, versioned layout
 ([`contracts/recall-archive-v1`](../../contracts/recall-archive-v1/README.md)) that recall itself writes into the
@@ -32,8 +31,9 @@ tested, and the smoke run (§10) drives them together from an upload to the arch
 and bucket (step 2), and the go-live commit (step 3, `ee02b62`) deployed it; its namespace is recorded (`5086599`).
 Branch `recall-dropbox-archive` (2026-10-11, `c3e21b6`) replaced the NAS container (`sync/`, never published) with the
 Dropbox writer and moved the tokens into 设置. Branch `recall-retention` (2026-10-11) adds the retention window (§2.3):
-Cloudflare keeps the texts of the last year (the owner's choice, 30 days to 10 years or all), the Dropbox archive all of
-them. None of it has run yet in a real Chrome, Dropbox or NAS.
+That earlier retention release kept a year of text. The owner's next update, described below, uses minute snapshots
+with optional screenshots, a seven-day R2 window and Dropbox reads when an archived snapshot is opened. Dated
+production acceptance belongs in HANDOFF and the linked verification notes.
 
 ## 1. Shape
 
@@ -157,7 +157,7 @@ page's deletion and uploaded later is dropped. Bounded on purpose:
 | What | Kept |
 | --- | --- |
 | Pages and visits | until the owner deletes them |
-| Texts in Cloudflare (R2, and the index's text of a page) | the retention window after their capture (365 days by default; 30 to 3650, or always), and past it until the Dropbox archive has confirmed them (or until the owner deletes their page) |
+| Snapshot files in R2 | seven days by default (owner setting: 7 to 3650, or always), and past it until Dropbox has confirmed every file |
 | A document's record (its row: when, where, its size and digest, its archive path) | until the owner deletes its page, also after retention moved its text to the archive alone |
 | Tombstones (one small row per deleted page) | always: they keep a deleted page deleted, in recall and in every reader of the archive |
 | The search index's text of a page (its first 32 KiB) | until the indexed text passes 500 MiB or the database 850 MiB; then the oldest pages keep only their title and URL in the index (§5.3) |
@@ -169,34 +169,19 @@ page's deletion and uploaded later is dropped. Bounded on purpose:
 
 The feed is not a table of its own (§5.1), so it never outgrows the records.
 
-**The retention window** (the owner's request of 2026-10-11: everything is in Dropbox, so Cloudflare keeps a rolling
-hot window, not everything, to stay inside the free limits). `Settings.text_retention_days`, 365 until the owner changes
-it in 设置 → 存储, 30 to 3650 days, or none (every text stays). Retention is not a deletion: it writes no tombstone,
-changes no seq, and the Dropbox archive loses nothing. A text leaves Cloudflare only when all of these hold:
+**The retention window** (`Settings.text_retention_days`) applies to both snapshot files, with a seven-day default.
+The owner may choose 7 to 3650 days or disable file removal using the existing setting. The approved upgrade sets
+the existing deployment to seven days. It does not alter either website list.
 
-1. its capture is older than the window (`capture_ms < now - days`; one captured exactly at the edge stays);
-2. its page is live (a deleted page's texts leave by the deletion, §2.3 above);
-3. the Dropbox backup is connected and its last attempt did not fail, and the archive confirmed this text: its blob
-   recorded in `archive_blobs` for the current connection with Dropbox's content hash (a blob whose path held another
-   file is recorded without one, §7.2), the day file of its commit written since its last change (`archive_days`, not
-   dirty, with a content hash), and its seq within the seq `state.json` vouches for.
+The existing alarm removes files only after their window and after the connected Dropbox archive confirms every
+blob, its date file and the covering state.json. Disconnected or failing archive connections keep the files in R2.
+Cleanup preserves document rows, visit associations, seqs, digests and the existing search index. The normal index
+budget can still remove old searchable text; file retention itself does not. No tombstone or new feed event is
+created by this move to the archive.
 
-Then the alarm's retention step (§5.4) deletes its R2 object, removes its words from the search index (the page's index
-row keeps its title and URL, as the index budget's demotion does, when the text was the page's latest), and marks the
-document row archived (`archived_ms`); the row keeps its seq, blob path, size and digest, so the feed and the archive
-render the same change, and the page, its visits and the record stay in the timeline and the API. The page's latest
-text digest is forgotten with it, so the same text read again is kept again (and searchable). With Dropbox not
-connected or failing, nothing is removed, and 设置 says why (`ServiceStatus.text_retention_paused_reason`). A shorter
-window only lets more texts go, step by step within the daily allowance; a longer one or none stops removing (texts
-already removed stay in the archive alone; recall does not copy them back).
-
-What the owner sees: the page detail says 正文已归档到 Dropbox with the text's path in the app folder
-(`blobs/2026/10/<uuid>.txt.gz`), the search says its text search covers the last N days once texts were archived (pages
-are still found by title and URL), and 设置 → 存储 counts the texts in Cloudflare and those only in Dropbox. The feed's
-blob route answers 410 `blob_deleted` for such a text (the contract says retention causes it and the archive keeps the
-copy). A new Dropbox connection (another app or account) gets every line written again, but the texts only the earlier
-archive holds are not in Cloudflare to copy: their lines name blobs the new folder lacks, and the earlier folder (and
-the NAS copy of it) keeps them.
+Opening an archived snapshot reads its known files through the existing Dropbox client and returns them to the
+owner without storing them back in R2. A disconnected archive or a removed file gives a readable error alongside
+the snapshot metadata. A changed Dropbox app does not move old files into the new app folder.
 
 ## 3. The extension
 
@@ -245,18 +230,22 @@ that would need more ends.
 
 ### 3.4 Capture
 
-When a visit's focus reaches 10 s, its page is captured if it was not captured today (UTC; the extension keeps
-`<day>:<page id>` keys for two days) and is not denylisted: `scripting.executeScript({target: {tabId, documentIds:
-[documentId]}, files: ['capture.js']})` in the isolated world. The script returns the title, `meta[name=description]`,
-`document.body.innerText` cut to 64 KiB of UTF-8 at a character boundary (with a flag when cut), and
-`hasPasswordField` (a visible `input[type=password]`), and where the document is (`location.href`): an SPA's route
-change keeps the document, so the script may have read another route than the visit's, and the service worker keeps the
-text only when that URL is still the visit's page and the page keeps its text. A page with a password field gives no
-text. recall keeps a
-capture only when its text's SHA-256 differs from the page's latest, so a front page or a dashboard read every day
-stores a new text only when its words changed. No Readability and no HTML in v1 (phase 2
-measures sizes first). Pages Chrome does not let an extension script (the PDF viewer, the Web Store, other extensions)
-are visits without text; a capture that fails is recorded as the device's `capture_failed`.
+The first sample follows ten seconds of foreground focus. Later samples run on the existing minute tick, only
+while the page remains eligible and focused. Each visit stores its last attempt time and the last successfully
+queued text digest and image preview; failed attempts do not advance this baseline. With unchanged text, a
+32×32 preview must have at least 8% of pixels differ by 24 RGB levels before another image is saved. Small clocks
+and cursors are ignored; cumulative changes are compared with the last saved image. Visit times continue to be
+recorded and no daily capture limit applies.
+
+The isolated capture script reads title, description and body.innerText (UTF-8, at most 64 KiB), with the existing
+visible-password check and URL/page identity check. Eligible pages also use captureVisibleTab, then native
+OffscreenCanvas WebP encoding: quality 0.75, longest edge 1920 pixels, at most 384 KiB. The current window, tab,
+document and focus are checked around the screenshot so a switched page cannot be attached to the old visit.
+Screenshots inherit the text/site exclusion lists; their pixels cannot be cleaned by the text scrubber. A screenshot
+failure still permits text capture, and an image-only snapshot is useful when a page has no extractable text.
+
+Optional screenshot fields and text travel in the existing DocumentItem. There is no scroll stitching, OCR,
+extra scheduler or provider layer.
 
 ### 3.5 URLs and the page ID
 
@@ -413,14 +402,13 @@ IDL, `proto/recall/ingest/v1/ingest.proto` (messages only, read strictly), lands
 | `IngestBatch` | `version` (`recall-ingest-v1`), `batch_id` (UUID, for logs), `sent_time`, `device`, `items` (at most 50, a union by `kind`) |
 | `DeviceReport` | `device_id`, `label` (1-64 characters), `extension_version` (Chrome's form: up to four parts, no leading zeros), `queued_count`, `last_error_code` |
 | `VisitItem` | `id`, `revision`, `page_id`, `url`, `url_truncated`, `title`, `focus_spans` (1-200; start and end follow from them) |
-| `DocumentItem` | `id`, `visit_id`, `page_id`, `url`, `url_truncated`, `title`, `description`, `capture_time`, `text` (at most 64 KiB of UTF-8), `text_truncated` |
+| `DocumentItem` | `id`, `visit_id`, `page_id`, `url`, `url_truncated`, `title`, `description`, `capture_time`, `text` (at most 64 KiB of UTF-8), `text_truncated`, optional `screenshot_webp_base64`, `screenshot_width`, `screenshot_height` |
 | `IngestResult` (the answer, plain JSON) | `accepted_count`, `rejected` (`{id, reason}`: `invalid_item`, `id_conflict`, `unsupported_item`), `denylist_patterns`, `denylist_etag`, `site_only_patterns` |
 
 RecallState reads the body through `DecompressionStream` with a 4 MiB cap (413 past it), reads the batch strictly, and
 per item: applies the three denylist levels again (§3.7), cuts what is too long (§3.5) and scrubs every string;
 computes the site and the focus seconds from the URL and the spans; skips, as accepted, a visit revision not newer than
-the stored one, a second capture of a page on the same UTC day, a capture whose text has the page's latest digest, and
-a visit or capture that began before its page's tombstone (the item's time moved to recall's clock by the batch's
+the stored one, an unchanged snapshot within the same visit, and a visit or capture that began before its page's tombstone (the item's time moved to recall's clock by the batch's
 skew, `sent_time` against the arrival, so a device's fast or slow clock neither revives a deleted page nor drops a new
 visit); refuses an item that breaks a rule as `invalid_item` (a time more than a minute after the batch's own
 `sent_time`, which comes from the same clock, is one; an item is never refused for its age or length), a document ID it
@@ -446,17 +434,17 @@ indexed text drops from 32 KiB to 16 KiB a page before the budget is raised.
 
 ### 5.1 The object's SQLite
 
-Schema version 3 (`store.ts`, migrated in `blockConcurrencyWhile`; version 2 added the archive's two tables, version 3
-the retention window's column and index):
+Schema version 4 (`store.ts`, migrated in `blockConcurrencyWhile`): version 2 added archive tables, version 3
+retention metadata, and version 4 the optional screenshot metadata and seven-day default.
 
 | Table | Columns (indexes) |
 | --- | --- |
 | `meta` | `key`, `value`: schema version, `feed_id` (a UUID made by the first migration), `seq` (the feed's counter), settings (denylist JSON, etag, `text_retention_days`: days or `off`), the running totals (`archived_count`: texts only in the archive), budget counters, `oldest_indexed_text_ms`, the machine tokens' digests (`token_ingest`, `token_export`), the Dropbox connection (`dropbox_*`) and the archive's progress (`archive_*`: the scanned and the written seq, the target, the last upload, the last failure and its retry time) |
 | `devices` | `id`, `label`, `extension_version`, `first_seen_ms`, `last_seen_ms`, `queued_count`, `last_error_code`, `clock_skew_s` |
 | `sites` | `host`, `host_key` (labels reversed, `com.github.gist.`; unique), `first_visit_ms`, `last_visit_ms`, `visit_count`, `focus_seconds` (index `focus_seconds`) |
-| `pages` | `rowid` (`INTEGER PRIMARY KEY AUTOINCREMENT`, never reused; the index's rowid), `id` (32 hex, unique), `url`, `url_truncated`, `title`, `host_key`, `first_visit_ms`, `last_visit_ms` (never null: a page a capture makes takes the capture's time until its visit arrives), `visit_count`, `focus_seconds`, `document_count`, `latest_document`, `latest_text_sha256`, `text_indexed` (indexes `last_visit_ms`; `host_key, last_visit_ms`) |
+| `pages` | `rowid` (`INTEGER PRIMARY KEY AUTOINCREMENT`, never reused; the index's rowid), `id` (32 hex, unique), `url`, `url_truncated`, `title`, `host_key`, `first_visit_ms`, `last_visit_ms` (never null: a page a capture makes takes the capture's time until its visit arrives), `visit_count`, `focus_seconds`, `document_count`, `latest_document`, `latest_text_document`, `latest_text_sha256`, `text_indexed` (indexes `last_visit_ms`; `host_key, last_visit_ms`) |
 | `visits` | `id`, `seq` (unique), `seq_ms`, `page_rowid`, `device_id`, `device_label`, `url`, `url_truncated`, `title`, `start_ms`, `end_ms`, `focus_seconds`, `spans` (JSON, at most 200 pairs), `revision` (indexes `start_ms`; `page_rowid, start_ms`) |
-| `documents` | `id`, `seq` (unique), `seq_ms`, `page_rowid`, `visit`, `device_id`, `device_label`, `capture_ms`, `url`, `url_truncated`, `title`, `description`, `blob_path`, `sha256`, `stored_bytes`, `text_bytes`, `text_sha256`, `truncated`, `archived_ms` (schema 3: when retention moved the text to the archive alone; null while R2 holds it) (indexes `page_rowid, capture_ms`; `capture_ms` where `archived_ms` is null, schema 3) |
+| `documents` | `id`, `seq` (unique), `seq_ms`, `page_rowid`, `visit`, `device_id`, `device_label`, `capture_ms`, `url`, `url_truncated`, `title`, `description`, `blob_path`, `sha256`, `stored_bytes`, `text_bytes`, `text_sha256`, `truncated`, optional `screenshot_path`, `screenshot_sha256`, `screenshot_bytes`, `screenshot_width`, `screenshot_height`, `archived_ms` (schema 3: when retention moved the text to the archive alone; null while R2 holds it) (indexes `page_rowid, capture_ms`; `capture_ms` where `archived_ms` is null, schema 3) |
 | `fts` | `fts5(title, url, body, content='', contentless_delete=1, tokenize='unicode61 remove_diacritics 2')`; rowid = `pages.rowid` (§6) |
 | `tombstones` | `id`, `seq` (unique), `seq_ms`, `page_id` (indexed): the feed's deletions, and the ledger that keeps a deleted page deleted (§2.3) |
 | `purges` | `page_rowid`, `page_id`, `started_ms`: deleted pages whose rows and R2 objects the alarm is still removing |
@@ -492,7 +480,7 @@ object leaves R2 when its page is deleted, or when the retention window passed a
 | Subrequests (50 per invocation) and Dropbox | an archive pass about hourly while changes come: a token refresh, the day's file, state.json and each new text (an R2 read and an upload): about 100 Dropbox calls a day; a retention step one R2 delete | at most 40 subrequests and 5 minutes a pass, with the purge's and the retention step's R2 call or two beside it; a backlog goes on a minute later; Dropbox's 429 and Retry-After are kept |
 | Durable Object rows written (100,000/day) | 4,000 to 13,000: a visit revision about 6 (its row, its indexes and seq, the page, the site), about 600 revisions; a kept text about 8 plus FTS5's writes (1 counted locally, possibly 20-100 in production for 32 KiB of Chinese), about 60 kept texts; a batch 2; once the window is reached about 60 texts a day leave Cloudflare, a few rows each (their row and its index entry, for a page's latest text its index row and the page; about 1 counted locally) | 20,000/day, then 429 (§4); purges, demotions and retention stop at 10,000 (§5.4); measured on the first day |
 | Durable Object rows read (5 million/day) | timeline days of a few hundred rows; the status a few dozen (at most about 1,000 with Dropbox far behind); a search a few thousand (at most about 6,000 without a range, 62,000 over the longest range: §6.3, measured at two years); an archive pass today's changes and their pages, about 1,000 at the end of a day; a retention step about 630 rows for 100 texts (measured at two years) | 1,500,000/day, then searches refuse (the feed stops at 1,000,000), §4; an archive pass scans at most 10,000 changes a table and renders at most 20,000 changes; a retention step looks at most at the 1,000 oldest texts still in Cloudflare |
-| Durable Object storage (5 GB account; 1 GB per object in one line of the docs, 10 GB in another) | the index, about 1.1 bytes per byte of indexed text (at most 32 KiB a page), at most about 550 MiB; with the retention window (a year) a year's texts, about 22,000; the tables, about 0.15 GB a year | budget 900 MiB; texts past the window leave the index once Dropbox holds them (§2.3); the oldest pages' texts leave the index while it holds over 500 MiB of text or the database passes 850 MiB (title and URL stay; the archive keeps the text); a warning at 850 MiB |
+| Durable Object storage (5 GB account; 1 GB per object in one line of the docs, 10 GB in another) | the index, about 1.1 bytes per byte of indexed text (at most 32 KiB a page), at most about 550 MiB; with the retention window (a year) a year's texts, about 22,000; the tables, about 0.15 GB a year | budget 900 MiB; file retention preserves the index (§2.3); the oldest pages' texts leave the index while it holds over 500 MiB of text or the database passes 850 MiB (title and URL stay; the archive keeps the text); a warning at 850 MiB |
 | R2 (10 GB-month, 1 M Class A, 10 M Class B a month) | about 0.2 GB a year, held at about a year's texts by the retention window; about 3,000 writes and 10,000 reads a month (retention's deletes are free) | shown in 设置 |
 | CPU: 10 ms per Worker request, 30 s per object call | the Worker never parses an upload; the object's heaviest call (an upload of 50 items with 10 texts) is expected well under 1 s | CPU tests (§10) |
 
@@ -720,16 +708,16 @@ it in words.
 
 ### 8.1 The API
 
-`recall.ui.v1` ([`proto/recall/ui/v1`](../../proto/recall/ui/v1)), under `/api/v1`, served by RecallState through the
-shared transcoder: pages (Get, Delete, `pages:search`), a page's visits (Get, List; `pages/-` lists every page's, the
-timeline), a page's latest document (Get with the text, named by `Page.latest_document`; older captures are kept and
-archived, not listed; `text_archived` and `archive_path` instead of the text once retention moved it to the archive
-alone), sites (Get, List, most focused first, with a prefix filter), the settings (Get, Update with an explicit mask
-and an etag: the two lists and `text_retention_days`, which a mask naming it without a value turns off;
-INVALID_RETENTION outside 30-3650) and the service status (with the window, the texts only in the archive and why
-retention is paused). AIP-155 request IDs on both mutations; google.rpc.Status errors
-(`errors.proto`). The API has no time zone: the UI turns local days into instants. Texts come as plain strings (at most
-64 KiB), so v1 has no raw route.
+`recall.ui.v1` under /api/v1 is served by RecallState through the existing shared transcoder. Pages, visits, sites,
+settings, tokens and archive setup keep their existing methods. ListDocuments lists a page's snapshot metadata
+newest first, in pages of 20 (maximum 50), with a seek cursor. GetDocument returns the selected snapshot's text
+and optional WebP picture, using R2 for recent files or the existing Dropbox connection for archived ones. The
+picture is a bounded base64 string; the strict CSP already permits data images. Content loading errors have safe
+reason codes and preserve metadata. No additional image endpoint is needed.
+
+Settings keeps the existing text_retention_days field, now the common text/image file window: default 7 days,
+7 to 3650 or unset for no removal. The search index remains governed by its existing budget. Authentication,
+Origin/CSRF and request IDs follow the existing owner API rules.
 
 ### 8.2 The design language
 
@@ -829,8 +817,7 @@ restoration is off). `/` anywhere focuses the search box.
 - **No results**: 没有找到, with one button per set chip to drop it (`去掉 网站：github.com`), the line 正文只搜每页前
   32 KB, and when the index lost old texts (`oldest_indexed_text_time`), the line 正文搜索覆盖 2025年3月 起，更早的页面只按
   标题和网址搜索（全文仍在页面详情和 Dropbox 归档里）.
-- **The retention window**: once texts were moved to the archive alone (`archived_text_count`), a search with words, and
-  没有找到, add one quiet line: 正文搜索覆盖最近 365 天保存的正文；更早的正文已归档到 Dropbox，那些页面仍能按标题和网址搜到.
+- File retention does not limit text-search history. Only the existing index-budget coverage hint applies.
 
 ### 8.6 页面详情 (`/pages/<id>`)
 
@@ -840,13 +827,11 @@ restoration is off). `/` anywhere focuses the search box.
 - **Actions** behind ⋯: 打开原网页, 以后不保存这个网站的正文 (adds the host to the denylist; asks first), 删除这个页面
   的记录 (asks first: 访问和正文会从 recall 删除，不能恢复；Dropbox 备份只增不删，会多一条删除记录，原来的文件要在
   Dropbox 里自己删).
-- **正文**: the latest capture's text in the reader style, paragraphs split on blank lines, the query's matches marked
-  when the page came from a search (`第 1/5 处` with ↑ ↓ and the keys n and N, in a bar that sticks under the header;
-  the first match is scrolled to only when it is below the screen); `10月9日保存 · 共 3 次` when there were earlier, different
-  captures (kept and archived, not listed); `正文超过 64 KB，只保存了开头` when cut, `搜索只看正文前 32 KB` when longer
-  than that; without any capture, one line: 停留不到 10 秒或在不保存正文的名单里，没有正文. A text the retention window moved
-  to the archive alone reads 正文已归档到 Dropbox, why (超过云端保留的天数…), and its path in the app folder
-  (`Dropbox 应用文件夹里的 blobs/2026/10/<uuid>.txt.gz`).
+- **快照**: newest-first capture times, twenty at a time with 更多. Selecting one loads its plain text and optional
+  viewport screenshot. Text keeps the existing reader, match navigation and truncation hints. The picture preserves
+  its aspect ratio and is displayed as image/webp. Empty content says 未保存正文; it does not guess a dwell time or
+  privacy reason. Archived content is read on demand and marked as coming from Dropbox. An unavailable archive
+  or missing file has a specific hint.
 - **访问**: the visits, newest first, 20 at a time (更多): the date and time range, the minutes, the device label; a
   date opens that day's timeline at that hour.
 
@@ -878,7 +863,7 @@ Five cards, in the owner's words (a code stays in a tooltip only):
 - **存储**: meters: the object's database against its budget, the texts in the cloud, today's records written against
   20,000 and read against 1,500,000 (each with what happens when it runs out); the counts of pages, visits and texts;
   the index's reach (`正文搜索覆盖全部` or `覆盖 2025年3月 起`). Under the texts' meter the retention window: 正文在云端保留
-  with a choice of 30 天, 90 天, 180 天, 1 年 (the default), 2, 3, 5 or 10 年, or 永久 (a window set otherwise is shown as
+  with a choice of 7 天 (the default), 30 天, 90 天, 180 天, 1 年, 2, 3, 5 or 10 年, or 永久 (a window set otherwise is shown as
   it is); a shorter window asks first (更早保存的正文在 Dropbox 确认备份后会从云端移除…); one line of what it means, the
   counts `云端 300 篇 · 只在 Dropbox 45 篇`, and in the warning color while Dropbox keeps it paused (`Dropbox 备份未连接：
   暂不从云端移除正文…`, or a failing backup). It shares the settings' etag with 网站名单: each saves on top of the other.
@@ -977,7 +962,7 @@ the tests, synthetic tokens of every scrubbed shape.
   disconnecting with `archive_not_connected`; disconnecting, the same app resuming, another app getting everything; a
   folder of another feed never written into); the retention window against a fake Dropbox (`retention.test.ts`: nothing
   removed while not connected or after a failed upload, with the status saying why; after the confirming pass the text
-  leaves R2 and the index while the page, its visits and the record stay, no tombstone, the feed unchanged, the blob
+  leaves R2 while the index and page, its visits and the record stay, no tombstone, the feed unchanged, the blob
   route's 410, GetDocument's archive path, the search by title only; a text read again kept again; the owner's window,
   its range and 永久; a new Dropbox without the texts only the old one holds; on 250 seeded texts at most 100 a pass,
   oldest first, rows bounded, the edge kept); `scale.test.ts` also connects Dropbox to the two-year store (the status,
@@ -994,7 +979,7 @@ the tests, synthetic tokens of every scrubbed shape.
   fake, `DEV_DROPBOX_ORIGIN`), and the archive the alarm writes there is accepted by the generated codec and, read by
   the contract's rules, holds exactly the feed's records with their blobs; a late upload of a text read 400 days ago
   waits while Dropbox is not connected, then leaves Cloudflare right after the pass that wrote it (the blob route's 410,
-  the archive's bytes, GetDocument's archive path, found by title only, the feed unchanged); after a DeletePage it gains
+  the archive's bytes, GetDocument's Dropbox text and screenshot reads, still found by indexed text, the feed unchanged); after a DeletePage it gains
   the tombstone and keeps every file; no delete is ever called; the dev server's log holds no URL, title, text or token.
 - `extension/test/` (Node, fake `chrome.*` APIs and a fake clock): the focus state machine (window and tab changes,
   idle backdating, lock, worker restarts, sleep gaps), visit splitting and revisions (one queued on focus loss,
@@ -1068,7 +1053,7 @@ CSP).
    `documents_retention`), `Settings.text_retention_days`, `Document.text_archived` and `.archive_path`,
    `ServiceStatus.text_retention_days`, `.archived_text_count` and `.text_retention_paused_reason`,
    `ERROR_REASON_INVALID_RETENTION` (all additive), the alarm's retention step and the UI's lines. Its deploy moves no
-   text before the owner's Dropbox backup is connected and has confirmed it; with the default of 365 days and recall
+   text before the owner's Dropbox backup is connected and has confirmed it; with the then-default of 365 days and recall
    live since 2026-10-11, the first text leaves Cloudflare in October 2027.
 
 **The owner's steps**, all clicks, in this order (the agent builds the extension into its folder first:

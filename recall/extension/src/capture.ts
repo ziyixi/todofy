@@ -1,14 +1,8 @@
 /**
- * Captures (../../docs/design.md §3.4): when a visit's focus reaches ten seconds, its page's text is read once, if the
- * page was not captured today (UTC) and its level lets recall keep its text, by injecting capture.js into exactly that
- * visit's document. A page with a visible password field gives no text; a page Chrome does not let an extension script
- * (the PDF viewer, the Web Store, another extension) is a visit without text; any other failure is the device's
- * `capture_failed`. Past 200 MB of storage the extension stops capturing (visits continue).
- *
- * The capture runs in three steps so that a slow page never holds up the focus events: `captureDue` (with the state)
- * claims the visit's one capture, `readTab` runs the script, `storeCapture` (with the state again) queues the text,
- * only when the document is still on the claimed visit's page and that page still keeps its text: an SPA's route
- * change keeps the document, so the script may have read another route (a settings or account page among them).
+ * Capture after ten seconds of foreground focus, then once a minute while the visit continues. A failed or empty
+ * attempt can run again on the next tick. Reads run outside the state queue so they do not delay focus events.
+ * Only successful outbox writes update the visit's snapshot hash. Private pages and visible password fields are
+ * excluded before taking screenshots, and their document and focus are checked again before anything is queued.
  */
 import type { IngestItem } from '@ziyixi/proto/recall/ingest/v1/ingest_wire';
 import { scrubText } from '../../shared/scrub.ts';
@@ -16,80 +10,116 @@ import { cutText, cutUtf8, DOCUMENT_MAX_BYTES } from '../../shared/url.ts';
 import type { Context } from './context.ts';
 import { getVisit, queueItem, saveVisit } from './db.ts';
 import { loadFocus } from './focus.ts';
-import { CAPTURE_FOCUS_MS, CAPTURE_KEY_DAYS, CAPTURE_STORAGE_MAX_BYTES, DAY } from './limits.ts';
-import type { PageInfo } from './page.ts';
-import { pageOf } from './page.ts';
+import { CAPTURE_FOCUS_MS, CAPTURE_INTERVAL_MS, CAPTURE_STORAGE_MAX_BYTES } from './limits.ts';
+import { pageOf, type PageInfo } from './page.ts';
 import { isPageText, type PageText } from './page-text.ts';
+import { compressScreenshot, visiblyChanged, type Screenshot } from './screenshot.ts';
 import { currentDenylist } from './settings.ts';
-import { capturedKeys, lastError } from './store.ts';
+import { focusState, lastError } from './store.ts';
 import { focusMs, isoTime } from './visits.ts';
 
 export interface CaptureJob {
   readonly visitId: string;
   readonly tabId: number;
+  readonly windowId: number;
   readonly documentId: string;
+  readonly focusStart: number;
   readonly page: PageInfo;
-  /** `<UTC day>:<page id>`: at most one capture of a page a day. */
-  readonly key: string;
 }
 
-export type ReadOutcome = { readonly kind: 'text'; readonly text: PageText } | { readonly kind: 'not_scriptable' } | { readonly kind: 'failed' };
-
-const utcDay = (ms: number): string => new Date(ms).toISOString().slice(0, 10);
+export type ReadOutcome =
+  | { readonly kind: 'text'; readonly text: PageText; readonly screenshot?: Screenshot; readonly screenshotFailed?: boolean }
+  | { readonly kind: 'not_scriptable' }
+  | { readonly kind: 'failed' };
 
 /** Chrome's refusal to script a page (the PDF viewer, the Web Store, chrome:// and extension pages). */
 const NOT_SCRIPTABLE = /cannot (?:access|be scripted)/i;
 
-/** The open span's visit when its page's capture is still to be decided (a page that keeps its text, not captured in it). */
-async function pendingVisit(ctx: Context, at: number) {
-  const { open } = await loadFocus(ctx, at);
+async function focusedVisit(ctx: Context, at: number) {
+  const { open, windowId } = await loadFocus(ctx, at);
   if (open === null) return null;
   const visit = await getVisit(ctx.db, open.visitId);
-  if (visit === undefined || visit.captured || visit.page.level !== 'record') return null;
-  return { open, visit, focus: focusMs(visit.spans) + at - open.start };
+  if (visit === undefined || visit.page.level !== 'record') return null;
+  return { open, windowId, visit, focus: focusMs(visit.spans) + at - open.start };
 }
 
-/** Milliseconds until the focused visit's capture is due, or null when it has none to come. */
+/** Only the first attempt needs a short timer; later attempts use the existing minute tick. */
 export async function captureDelay(ctx: Context, at: number): Promise<number | null> {
-  const pending = await pendingVisit(ctx, at);
-  return pending === null ? null : Math.max(0, CAPTURE_FOCUS_MS - pending.focus);
+  const current = await focusedVisit(ctx, at);
+  if (current === null || current.visit.lastAttemptAt !== undefined) return null;
+  return Math.max(0, CAPTURE_FOCUS_MS - current.focus);
 }
 
-/** The capture due now, claimed (a visit captures once), or null. */
+/** Claim an attempt before reading the page; this timestamp limits attempts without marking them successful. */
 export async function captureDue(ctx: Context, at: number): Promise<CaptureJob | null> {
-  const pending = await pendingVisit(ctx, at);
-  if (pending === null || pending.focus < CAPTURE_FOCUS_MS) return null;
-  const { open, visit } = pending;
-  visit.captured = true;
+  const current = await focusedVisit(ctx, at);
+  if (current === null || current.focus < CAPTURE_FOCUS_MS) return null;
+  const { open, windowId, visit } = current;
+  if (visit.lastAttemptAt !== undefined && Math.floor(at / CAPTURE_INTERVAL_MS) <= Math.floor(visit.lastAttemptAt / CAPTURE_INTERVAL_MS)) return null;
+  visit.lastAttemptAt = at;
   await saveVisit(ctx.db, visit);
-  const key = `${utcDay(at)}:${visit.page.pageId}`;
-  if ((await capturedKeys.get(ctx.chrome)).includes(key)) return null;
   if ((await ctx.storageUsage()) > CAPTURE_STORAGE_MAX_BYTES) {
     await lastError.set(ctx.chrome, 'outbox_full', at);
     return null;
   }
-  return { visitId: visit.id, tabId: open.tabId, documentId: open.documentId, page: visit.page, key };
+  return { visitId: visit.id, tabId: open.tabId, windowId, documentId: open.documentId, focusStart: open.start, page: visit.page };
 }
 
-/** Runs capture.js in the visit's document (its isolated world). */
-export async function readTab(ctx: Context, job: CaptureJob): Promise<ReadOutcome> {
+/** The same foreground span must still own the visible tab, even if a tab was switched away and back. */
+async function sameFocus(ctx: Context, job: CaptureJob): Promise<boolean> {
   try {
-    const [first] = await ctx.chrome.scripting.executeScript({ target: { tabId: job.tabId, documentIds: [job.documentId] }, files: ['capture.js'] });
-    const value: unknown = first?.result;
-    return isPageText(value) ? { kind: 'text', text: value } : { kind: 'failed' };
-  } catch (error) {
-    return error instanceof Error && NOT_SCRIPTABLE.test(error.message) ? { kind: 'not_scriptable' } : { kind: 'failed' };
+    const [state, window, tab, frame] = await Promise.all([
+      focusState.get(ctx.chrome),
+      ctx.chrome.windows.getLastFocused(),
+      ctx.chrome.tabs.get(job.tabId),
+      ctx.chrome.webNavigation.getFrame({ tabId: job.tabId, frameId: 0 }),
+    ]);
+    if (state?.idle !== 'active' || state.windowId !== job.windowId || state.open?.visitId !== job.visitId || state.open.start !== job.focusStart) return false;
+    if (!window.focused || window.id !== job.windowId || !tab.active || tab.windowId !== job.windowId || tab.incognito) return false;
+    if (frame?.documentId !== job.documentId || frame.documentLifecycle !== 'active') return false;
+    const page = await pageOf(tab.url ?? frame.url, await currentDenylist(ctx));
+    return page?.pageId === job.page.pageId && page.level === 'record';
+  } catch {
+    return false;
   }
 }
 
-/** Remembers today's capture of a page, keeping the keys of today and yesterday only. */
-async function remember(ctx: Context, key: string, at: number): Promise<void> {
-  const oldest = utcDay(at - (CAPTURE_KEY_DAYS - 1) * DAY);
-  const kept = (await capturedKeys.get(ctx.chrome)).filter((existing) => existing.slice(0, 10) >= oldest && existing !== key);
-  await capturedKeys.set(ctx.chrome, [...kept, key]);
+async function readPage(ctx: Context, job: CaptureJob): Promise<PageText | null> {
+  const [first] = await ctx.chrome.scripting.executeScript({ target: { tabId: job.tabId, documentIds: [job.documentId] }, files: ['capture.js'] });
+  const value: unknown = first?.result;
+  return isPageText(value) ? value : null;
 }
 
-/** Queues a captured text, scrubbed and cut again (a scrub may lengthen it). */
+async function allowedPage(ctx: Context, job: CaptureJob, text: PageText): Promise<boolean> {
+  if (text.build !== ctx.build || text.hasPasswordField) return false;
+  const page = await pageOf(text.url, await currentDenylist(ctx));
+  return page?.pageId === job.page.pageId && page.level === 'record';
+}
+
+/** Text remains useful when screenshot capture or encoding fails. */
+export async function readTab(ctx: Context, job: CaptureJob): Promise<ReadOutcome> {
+  let text: PageText | null;
+  try {
+    text = await readPage(ctx, job);
+  } catch (error) {
+    return error instanceof Error && NOT_SCRIPTABLE.test(error.message) ? { kind: 'not_scriptable' } : { kind: 'failed' };
+  }
+  if (text === null) return { kind: 'failed' };
+  if (!(await allowedPage(ctx, job, text)) || !(await sameFocus(ctx, job))) return { kind: 'text', text };
+  try {
+    const png = await ctx.chrome.tabs.captureVisibleTab(job.windowId, { format: 'png' });
+    if (!(await sameFocus(ctx, job))) return { kind: 'text', text };
+    // An in-page sign-in dialog may have appeared without a navigation while Chrome captured the viewport.
+    const after = await readPage(ctx, job);
+    if (after === null || !(await allowedPage(ctx, job, after))) return { kind: 'text', text };
+    const screenshot = await compressScreenshot(png);
+    return screenshot === null ? { kind: 'text', text, screenshotFailed: true } : { kind: 'text', text, screenshot };
+  } catch {
+    return { kind: 'text', text, screenshotFailed: true };
+  }
+}
+
+/** Queue changed content; an empty page or failed read leaves the next tick free to try again. */
 export async function storeCapture(ctx: Context, job: CaptureJob, outcome: ReadOutcome, at: number): Promise<void> {
   if (outcome.kind === 'not_scriptable') return;
   if (outcome.kind === 'failed') {
@@ -97,15 +127,15 @@ export async function storeCapture(ctx: Context, job: CaptureJob, outcome: ReadO
     return;
   }
   const { text } = outcome;
-  // A script of another build: this worker reloads within the minute, and the next visit captures again.
-  if (text.build !== ctx.build) return;
-  // The document moved to another page (an SPA's route) since the capture was claimed: that page's visit captures it.
-  const now = await pageOf(text.url, await currentDenylist(ctx));
-  if (now?.pageId !== job.page.pageId || now.level !== 'record') return;
-  await remember(ctx, job.key, at);
-  if (text.hasPasswordField) return;
+  if (!(await allowedPage(ctx, job, text))) return;
+  if (outcome.screenshotFailed) await lastError.set(ctx.chrome, 'screenshot_failed', at);
+  const screenshot = outcome.screenshot !== undefined && await sameFocus(ctx, job) ? outcome.screenshot : undefined;
   const body = cutUtf8(scrubText(text.text), DOCUMENT_MAX_BYTES);
-  if (body.text.trim() === '') return;
+  if (body.text.trim() === '' && screenshot === undefined) return;
+  const hash = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(body.text)));
+  const snapshotTextHash = Array.from(hash, (byte) => byte.toString(16).padStart(2, '0')).join('');
+  const visit = await getVisit(ctx.db, job.visitId);
+  if (visit?.snapshotTextHash === snapshotTextHash && (screenshot === undefined || !visiblyChanged(visit.screenshotPreview, screenshot.preview))) return;
   const id = ctx.uuid();
   const item: IngestItem = {
     kind: 'document',
@@ -120,7 +150,9 @@ export async function storeCapture(ctx: Context, job: CaptureJob, outcome: ReadO
       capture_time: isoTime(at),
       text: body.text,
       ...(text.textTruncated || body.truncated ? { text_truncated: true } : {}),
+      ...(screenshot === undefined ? {} : { screenshot_webp_base64: screenshot.base64, screenshot_width: screenshot.width, screenshot_height: screenshot.height }),
     },
   };
   await queueItem(ctx.db, { id, kind: 'document', json: JSON.stringify(item), version: 1 }, at);
+  if (visit !== undefined) await saveVisit(ctx.db, { ...visit, snapshotTextHash, ...(screenshot === undefined ? {} : { screenshotPreview: screenshot.preview }) });
 }

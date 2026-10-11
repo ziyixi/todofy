@@ -4,7 +4,7 @@
  * keeps synthetic pages, visits, captured texts, sites, the settings and the status, and answers as the Worker does
  * where the UI depends on it: SearchPages filters by every field (the words in titles, URLs and texts, ignoring case;
  * the range by overlapping visits; the site with its subdomains) in pages of 10 with a reported cap, and refuses a
- * query of lone CJK characters (a text only in the Dropbox archive gives no snippet); ListVisits overlaps its range and
+ * query of lone CJK characters; ListDocuments returns metadata and GetDocument returns content; ListVisits overlaps its range and
  * pages; UpdateSettings needs an explicit mask, refuses a stale etag and a retention window out of its range;
  * RegenerateMachineToken answers a new token once (a repeated request_id without it);
  * ConnectDropboxBackup answers an authorization URL and DisconnectDropboxBackup forgets the connection. Every request
@@ -32,6 +32,7 @@ import {
 } from '@ziyixi/proto/recall/ui/v1/page_pb'
 import {
   ConnectDropboxBackupResponseSchema,
+  ListDocumentsResponseSchema,
   ListSitesResponseSchema,
   ListVisitsResponseSchema,
   PageType,
@@ -152,7 +153,7 @@ const LOCALIZED: Readonly<Record<string, string>> = {
   NOT_FOUND: '找不到这一项（可能已被删除）',
   UNAVAILABLE: '服务暂时不可用，请稍后再试',
   INVALID_SETTINGS: '网站格式不对',
-  INVALID_RETENTION: '正文在云端保留的天数要在 30 到 3650 之间，或选永久保留',
+  INVALID_RETENTION: '正文和截图在云端保留的天数要在 7 到 3650 之间，或选永久保留',
   SEARCH_OVER_BUDGET: '今天的搜索额度用完了，明天（UTC 零点后）再搜；时间线和页面照常能看',
 }
 
@@ -194,7 +195,7 @@ export class FakeServer {
     builtinDenylistPatterns: ['ziyixi.science'],
     builtinSiteOnlyPatterns: ['mail.example', 'chat.example'],
     etag: 's1',
-    textRetentionDays: 365,
+    textRetentionDays: 7,
   })
   private readonly transcoder: HttpTranscoder<ShapeOf<typeof RecallUiService>, null>
 
@@ -230,9 +231,9 @@ export class FakeServer {
         const end = request.endTime === undefined ? Infinity : timestampMs(request.endTime)
         const ranged = request.startTime !== undefined || request.endTime !== undefined
         const rows = this.pages.flatMap((item) => {
-          // A text only in the Dropbox archive is no longer searched (its title and URL still are).
+          // Retiring R2 files does not remove the text from the search index.
           const latest = this.documents.get(item.latestDocument)
-          const text = latest === undefined || latest.textArchived ? '' : latest.text
+          const text = latest?.text ?? ''
           const haystack = fold(`${item.title} ${item.url} ${text}`)
           if (!kept.every((term) => haystack.includes(fold(term)))) return []
           if (request.site !== '' && item.site !== request.site && !item.site.endsWith(`.${request.site}`)) return []
@@ -270,6 +271,13 @@ export class FakeServer {
         const { items, next } = slice(own, request.pageSize === 0 ? 200 : Math.min(request.pageSize, 500), request.pageToken)
         return Promise.resolve(create(ListVisitsResponseSchema, { visits: items, nextPageToken: next }))
       },
+      listDocuments: (request) => {
+        const documents = [...this.documents.values()].filter((item) => item.name.startsWith(`${request.parent}/`)).sort((a, b) => timestampMs(b.captureTime!) - timestampMs(a.captureTime!))
+        const { items, next } = slice(documents, request.pageSize || 20, request.pageToken)
+        return Promise.resolve(create(ListDocumentsResponseSchema, {
+          documents: items.map((item) => create(DocumentSchema, { ...item, text: '', screenshotWebpBase64: '', contentError: '' })), nextPageToken: next,
+        }))
+      },
       getDocument: (request) => Promise.resolve(this.documents.get(request.name) ?? notFound()),
       getSite: (request) => Promise.resolve(this.sites.find((item) => item.name === request.name) ?? notFound()),
       // Most focused first; a filter is one literal, the hosts it begins.
@@ -288,7 +296,7 @@ export class FakeServer {
         if (request.settings.etag !== '' && request.settings.etag !== this.settings.etag) throw new RpcError(Code.ABORTED, 'ETAG_MISMATCH', 'stale etag')
         if (paths.includes('text_retention_days')) {
           const days = request.settings.textRetentionDays
-          if (days !== undefined && (days < 30 || days > 3650)) throw new RpcError(Code.INVALID_ARGUMENT, 'INVALID_RETENTION', 'retention')
+          if (days !== undefined && (days < 7 || days > 3650)) throw new RpcError(Code.INVALID_ARGUMENT, 'INVALID_RETENTION', 'retention')
           const next = Object.assign(create(SettingsSchema), this.settings, { etag: `${this.settings.etag}+` })
           if (days === undefined) delete next.textRetentionDays
           else next.textRetentionDays = days

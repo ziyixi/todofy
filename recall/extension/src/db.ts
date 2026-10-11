@@ -29,8 +29,12 @@ export interface Visit {
   changed: boolean;
   /** When the last revision was queued, or when the visit began. */
   queuedAt: number;
-  /** A capture ran, or was ruled out, in this visit. */
-  captured: boolean;
+  /** The last capture attempt, successful or not; absent on visits made by older builds. */
+  lastAttemptAt?: number;
+  /** The last successfully queued text; failed attempts do not change this baseline. */
+  snapshotTextHash?: string;
+  /** A tiny pixel preview of the last successfully queued screenshot, for visible-change comparison. */
+  screenshotPreview?: string;
 }
 
 /** An item of the outbox: one IngestItem in recall.ingest.v1's wire JSON. */

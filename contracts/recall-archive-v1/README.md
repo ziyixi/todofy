@@ -80,16 +80,18 @@ the record belongs to; absent for a tombstone), `blobs` (`[]` when none), and on
 | Kind | `id` | `event_time` | Body | Blobs |
 | --- | --- | --- | --- | --- |
 | `visit` | `visits/<uuid>` | the visit's start | `visit`: URL, title, site, device ID and label, start, end, focus seconds, focus spans | none |
-| `document` | `documents/<uuid>` | the capture | `document`: visit, URL, title, description, site, device ID and label, capture time, text size, truncated | `text`: the page's text, UTF-8, gzip |
+| `document` | `documents/<uuid>` | the capture | `document`: visit, URL, title, description, site, device ID and label, capture time, text size, truncated | `text`: UTF-8, gzip; optional `screenshot`: WebP viewport |
 | `tombstone` | `tombstones/<uuid>` | the deletion | `tombstone`: `target`, `pages/<page id>` (or a record's id) | none |
 
 - **A visit** is one page in one tab, from its first focus to its last (it ends when the tab leaves the page or
   closes, after 30 minutes without focus, or 6 hours after it began). Only visits with at least one second of focus
   exist. A long visit is uploaded again while it grows: an upsert. A page of a sensitive kind (mail, chat, banking, a
   password manager, a console) is recorded by its site alone: the URL is the site's root and the title is empty.
-- **A document** is the text recall captured from a page after ten seconds of focus, at most once per page and UTC
-  day and only when it differs from the page's latest text: the page's `innerText`, scrubbed of secrets, cut at
-  64 KiB.
+- **A document** is a page snapshot after ten seconds of focus or a later minute sample. Its `text` blob is the
+  page's scrubbed `innerText`, at most 64 KiB; an optional `screenshot` blob has media type `image/webp` and no
+  content encoding. Optional `screenshot_width`/`screenshot_height` describe it. Image-only snapshots have an empty
+  text blob. Identical snapshots within the same visit may be omitted; there is no daily limit. Existing text-only
+  documents and their stored bytes remain valid.
 - **The page ID** is the first 16 bytes of the SHA-256 of the page's normalized URL before scrubbing, in hex: it joins
   a page's visits and documents, and it keeps two URLs apart whose secret-bearing parts the scrubber replaced with the
   same `[redacted]`. A URL over 8192 characters is cut (`url_truncated`); its page ID still comes from the whole URL.
@@ -144,7 +146,7 @@ because the owner deleted its record (its tombstone follows, or came already), o
 window** moved the text out of Cloudflare. Retention is not a deletion: recall moves a text out only after its own
 archive (the Dropbox folder of §1) confirmed holding that blob and the day file that names it, so the archive keeps the
 copy at `blobs/<path>`, the record stays live in the feed, and no tombstone follows. A consumer that wants every blob
-copies it while it is recent (the window is at least 30 days), or reads it from recall's archive. Any other answer, 404
+copies it while it is recent (the default window is seven days), or reads it from recall's archive. Any other answer, 404
 included (a wrong path, a route that does not exist, a store that lost the object), stops the run without advancing
 the cursor.
 
@@ -190,6 +192,10 @@ the cursor.
   consumer below it gets 410 and starts again.
 
 ## 5. Versioning
+
+The owner's October 11 update adds optional screenshot fields and a blob role, removes the daily sampling limit,
+and changes the default hot-file window to seven days within this existing archive. Stored historical bytes and
+field identities remain valid. No external consumer migration is required for this personal deployment.
 
 Within v1, recall may add optional fields, kinds and blob roles; a reader keeps what it does not know (each change is
 kept whole) and checks what it does. Anything else (a renamed or

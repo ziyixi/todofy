@@ -1,6 +1,6 @@
 // The retention window in workerd (../../../docs/design.md §2.3, §5.4), with a real RecallState and R2 and a fake
 // Dropbox (fake-dropbox.ts): nothing leaves Cloudflare while Dropbox is not connected or its last upload failed; after
-// the pass that confirms them, the texts past the window leave R2 and the index, while the pages, their visits and the
+// the pass that confirms them, the files past the window leave R2 while the index stays, while the pages, their visits and the
 // document records stay, no tombstone is written, the feed is unchanged and the blob route answers 410; the page detail
 // says where the archive keeps the text; a text read again is kept again; the owner's window and its range; a new
 // Dropbox gets every line without the texts only the old one holds. Then, on seeded rows: the window's boundary and
@@ -8,7 +8,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { gzipSync } from 'node:zlib';
 import { RETENTION_BATCH, RETENTION_SCAN, TEXT_RETENTION_DEFAULT_DAYS } from '../../src/limits.ts';
-import { batch, document, page, uuid, visit, type ChangePage } from './data.ts';
+import { batch, document, page, uuid, visit, WEBP, type ChangePage } from './data.ts';
 import { FakeDropbox } from './fake-dropbox.ts';
 import { DAY, machineReason, MINUTE, op, reasonOf, rejection, SECOND, sha256, startHarness, T0, type Harness } from './harness.ts';
 
@@ -44,7 +44,7 @@ describe('the retention window with Dropbox', () => {
       h,
       [
         await visit({ id: uuid(1), url: read, title: 'Alarm 指南', spans: [[T0 - 10 * MINUTE, T0 - 5 * MINUTE]] }),
-        await document({ id: uuid(2), visitId: uuid(1), url: read, captureMs: T0 - 9 * MINUTE, text: '合成正文：持久对象的闹钟 alarm 与存储 keyword-zephyr。' }),
+        await document({ id: uuid(2), visitId: uuid(1), url: read, captureMs: T0 - 9 * MINUTE, text: '合成正文：持久对象的闹钟 alarm 与存储 keyword-zephyr。', screenshot: WEBP }),
         await visit({ id: uuid(3), url: doomed, title: '旧闻', spans: [[T0 - 4 * MINUTE, T0 - 3 * MINUTE]] }),
         await document({ id: uuid(4), visitId: uuid(3), url: doomed, captureMs: T0 - 4 * MINUTE + 15 * SECOND, text: '要删除的合成正文 keyword-quokka。' }),
       ],
@@ -82,15 +82,18 @@ describe('the retention window with Dropbox', () => {
     expect(await h.step(later + 5 * MINUTE)).toMatchObject({ archive: 'done', retaining: false, code: 'ok' });
     expect(await archivedIds(h)).toEqual([uuid(2)]);
     expect(dropbox.files.has(`/blobs/${blobPath(2)}`)).toBe(true);
+    const imagePath = blobPath(2).replace('.txt.gz', '.webp');
+    expect(btoa(String.fromCharCode(...(dropbox.files.get(`/blobs/${imagePath}`) ?? [])))).toBe(WEBP);
+    expect(await (await h.r2()).head(`blobs/${imagePath}`)).toBeNull();
     expect(await (await h.r2()).head(`blobs/${blobPath(2)}`)).toBeNull();
     // The page, its visits and the document's record stay; the page detail says where the archive keeps the text.
     const { pageId } = await page(read);
     const shown = await h.api.getPage({ name: `pages/${pageId}` });
-    expect(shown).toMatchObject({ visitCount: 1, documentCount: 1, textIndexed: false, latestDocument: `pages/${pageId}/documents/${uuid(2)}` });
+    expect(shown).toMatchObject({ visitCount: 1, documentCount: 1, textIndexed: true, latestDocument: `pages/${pageId}/documents/${uuid(2)}` });
     expect((await h.api.listVisits({ parent: `pages/${pageId}` })).visits).toHaveLength(1);
-    expect(await h.api.getDocument({ name: shown.latestDocument })).toMatchObject({ textArchived: true, archivePath: `blobs/${blobPath(2)}`, text: '', textBytes: 70 });
-    // Found by its title, no longer by its text, and without a snippet.
-    expect((await h.api.searchPages({ query: 'keyword-zephyr' })).results).toEqual([]);
+    expect(await h.api.getDocument({ name: shown.latestDocument })).toMatchObject({ textArchived: true, archivePath: `blobs/${blobPath(2)}`, text: '合成正文：持久对象的闹钟 alarm 与存储 keyword-zephyr。', textBytes: 70, screenshotWebpBase64: WEBP, screenshotWidth: 1, screenshotHeight: 1, contentError: '' });
+    // Still found by archived text; snippets only read R2 and remain optional.
+    expect((await h.api.searchPages({ query: 'keyword-zephyr' })).results).toHaveLength(1);
     expect((await h.api.searchPages({ query: 'Alarm 指南' })).results.map((result) => [result.page, result.hasText, result.snippet.length])).toEqual([[`pages/${pageId}`, true, 0]]);
     // Not a deletion: no tombstone, no new seq, the feed renders the same changes; the blob route answers 410.
     expect(await h.sql(`SELECT id FROM tombstones`)).toEqual(tombstones);
@@ -118,10 +121,10 @@ describe('the retention window with Dropbox', () => {
     expect(await status(h)).toMatchObject({ archivedTextCount: 1, documentCount: 3 });
   });
 
-  it("is the owner's: 30 to 3650 days, or every text kept", async () => {
+  it("is the owner's: 7 to 3650 days, or every text kept", async () => {
     const settings = await h.api.getSettings({ name: 'settings' });
     expect(settings.textRetentionDays).toBe(TEXT_RETENTION_DEFAULT_DAYS);
-    for (const days of [29, 3651, 0]) {
+    for (const days of [6, 3651, 0]) {
       expect(reasonOf(await rejection(h.api.updateSettings({ settings: { name: 'settings', textRetentionDays: days }, updateMask: { paths: ['text_retention_days'] }, requestId: op() })))).toBe('INVALID_RETENTION');
     }
     const off = await h.api.updateSettings({ settings: { name: 'settings', etag: settings.etag }, updateMask: { paths: ['text_retention_days', 'etag'] }, requestId: op() });

@@ -55,8 +55,7 @@ option java_package = "science.ziyixi.recall.ui.v1";
 // visits and latest text, the sites, the settings and the status.
 // (-- api-linter: core::0121::resource-must-support-list=disabled
 //     aip.dev/not-precedent: SearchPages is the pages' list: a search with filters, which without a query lists the
-//     pages by their latest visit. A second, plain list would say nothing more. A page's documents are read through
-//     Page.latest_document: older captures of a page are kept and archived, and the UI does not list them. --)
+//     pages by their latest visit. A second, plain page list would say nothing more. --)
 service RecallUiService {
   option (google.api.default_host) = "recall.ziyixi.science";
 
@@ -101,7 +100,13 @@ service RecallUiService {
     option (google.api.method_signature) = "parent";
   }
 
-  // A captured text with the text itself (AIP-131).
+  // The snapshots of a page, newest first (AIP-132, AIP-158). Only metadata: GetDocument reads the content.
+  rpc ListDocuments(ListDocumentsRequest) returns (ListDocumentsResponse) {
+    option (google.api.http) = {get: "/api/v1/{parent=pages/*}/documents"};
+    option (google.api.method_signature) = "parent";
+  }
+
+  // A snapshot with its text and optional screenshot, including archived content (AIP-131).
   // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
   // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
   rpc GetDocument(GetDocumentRequest) returns (Document) {
@@ -298,6 +303,27 @@ message ListVisitsRequest {
 message ListVisitsResponse {
   // The page of visits.
   repeated Visit visits = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The next page's token; empty on the last page.
+  string next_page_token = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// Input of ListDocuments.
+message ListDocumentsRequest {
+  // The page whose snapshots are listed: pages/{page}.
+  string parent = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).child_type = "recall.ziyixi.science/Document"
+  ];
+  // At most this many snapshots: 0 means 20, and values above 50 are read as 50.
+  int32 page_size = 2 [(google.api.field_behavior) = OPTIONAL];
+  // The next_page_token of the preceding page; every other parameter must stay the same.
+  string page_token = 3 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// Output of ListDocuments. Content is loaded only when a snapshot is opened.
+message ListDocumentsResponse {
+  // Snapshot metadata, in descending capture time order.
+  repeated Document documents = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
   // The next page's token; empty on the last page.
   string next_page_token = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
 }

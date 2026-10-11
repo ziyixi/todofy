@@ -126,20 +126,20 @@ describe('schema 3', () => {
     expect(() => {
       store.migrate();
     }).not.toThrow();
-    expect([store.getMeta('schema_version'), archived(store, id)]).toEqual(['3', NOW]);
+    expect([store.getMeta('schema_version'), archived(store, id)]).toEqual(['4', NOW]);
   });
 });
 
 describe('the retention window setting', () => {
-  it('is 365 days until the owner changes it, can be off, and reads a value it did not write as the default', () => {
+  it('is seven days until the owner changes it, can be off, and reads a value it did not write as the default', () => {
     const store = memoryStore();
-    expect(readRetention(store)).toBe(365);
+    expect(readRetention(store)).toBe(7);
     writeSettings(store, { retentionDays: 30 }, NOW);
     expect(readRetention(store)).toBe(30);
     writeSettings(store, { retentionDays: null }, NOW);
     expect(readRetention(store)).toBeNull();
-    store.setMeta('text_retention_days', '7');
-    expect(readRetention(store)).toBe(365);
+    store.setMeta('text_retention_days', '6');
+    expect(readRetention(store)).toBe(7);
   });
 
   it('changes the settings etag, so another tab cannot overwrite it unseen', () => {
@@ -206,7 +206,7 @@ describe('a retention step', () => {
     expect([archived(store, edge), archived(store, older)]).toEqual([null, NOW]);
   });
 
-  it("reduces the page's index row to its title and URL, forgets the latest text's digest and moves the totals; no tombstone, no seq", async () => {
+  it("keeps the search index and text digest while removing archived files; no tombstone, no seq", async () => {
     const store = connectedStore(50);
     const rowid = page(store, 'Durable guide');
     const earlier = doc(store, rowid, { captureMs: old - DAY, seq: 1 });
@@ -217,12 +217,12 @@ describe('a retention step', () => {
     const head = store.headSeq();
     expect(await retentionStep(store, bucket().bucket, transact, NOW)).toBe(false);
     expect([archived(store, earlier), archived(store, latest)]).toEqual([NOW, NOW]);
-    // The text's words are gone from the index; the page's title and URL still find it; the recent page keeps its text.
-    expect(matches(store, 'storage')).toEqual([]);
-    expect(matches(store, 'alarm')).toEqual([other]);
+    // File rotation preserves indexed words on both old and recent pages.
+    expect(matches(store, 'storage')).toEqual([rowid]);
+    expect(matches(store, 'alarm')).toEqual([rowid, other]);
     expect(matches(store, 'durable')).toEqual([rowid]);
-    expect(store.one(`SELECT text_indexed, latest_text_sha256, latest_document FROM pages WHERE rowid = ?`, rowid)).toEqual({ text_indexed: 0, latest_text_sha256: null, latest_document: latest });
-    expect([store.counter('archived_count'), store.counter('document_count'), store.counter('blob_bytes'), store.counter('indexed_text_bytes')]).toEqual([2, 3, 1000, 500]);
+    expect(store.one(`SELECT text_indexed, latest_text_sha256, latest_document FROM pages WHERE rowid = ?`, rowid)).toEqual({ text_indexed: 500, latest_text_sha256: `digest-${latest}`, latest_document: latest });
+    expect([store.counter('archived_count'), store.counter('document_count'), store.counter('blob_bytes'), store.counter('indexed_text_bytes')]).toEqual([2, 3, 1000, 1000]);
     expect(store.count(`SELECT count(*) AS n FROM tombstones`)).toBe(0);
     expect(store.headSeq()).toBe(head);
     expect(store.all(`SELECT seq FROM documents ORDER BY seq`)).toEqual([{ seq: 1 }, { seq: 2 }, { seq: 3 }]);

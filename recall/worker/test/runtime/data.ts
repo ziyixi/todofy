@@ -68,6 +68,7 @@ export interface DocumentInput {
   readonly captureMs: number;
   readonly text: string;
   readonly truncated?: boolean;
+  readonly screenshot?: string;
 }
 
 export async function document(input: DocumentInput): Promise<unknown> {
@@ -83,6 +84,7 @@ export async function document(input: DocumentInput): Promise<unknown> {
       description: input.description ?? '',
       capture_time: iso(input.captureMs),
       text: input.text,
+      ...(input.screenshot === undefined ? {} : { screenshot_webp_base64: input.screenshot, screenshot_width: 1, screenshot_height: 1 }),
       ...(input.truncated === true ? { text_truncated: true } : {}),
     },
   };
@@ -100,7 +102,7 @@ export interface Change {
   readonly id: string;
   readonly kind: string;
   readonly page_id?: string;
-  readonly blobs: readonly { readonly path: string; readonly sha256: string; readonly size_bytes: number }[];
+  readonly blobs: readonly { readonly path: string; readonly sha256: string; readonly size_bytes: number; readonly role?: string; readonly media_type?: string }[];
   readonly visit?: Record<string, unknown>;
   readonly document?: Record<string, unknown>;
   readonly tombstone?: { readonly target: string };
@@ -127,3 +129,6 @@ export function text(bytes: number, seed = 0): string {
   for (let i = 0; new TextEncoder().encode(out).byteLength < bytes; i++) out += sentences[i % sentences.length] ?? '';
   return out;
 }
+
+/** Synthetic 1x1 still WebP used to check byte-for-byte screenshot storage. */
+export const WEBP = 'UklGRiIAAABXRUJQVlA4IBYAAAAwAQCdASoBAAEADsD+JaQAA3AAAAAA';

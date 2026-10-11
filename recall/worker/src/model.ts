@@ -52,7 +52,7 @@ export function visitMessage(row: VisitRow & { readonly page_id: string; readonl
  * A captured text's message: `text` is the text R2 holds, '' for one the retention window moved to the Dropbox archive
  * alone (then `archive_path` names where the archive keeps it: the same path as its R2 key).
  */
-export function documentMessage(row: DocumentRow, pageId: string, text: string): Document {
+export function documentMessage(row: DocumentRow, pageId: string, text = '', screenshot = '', contentError = ''): Document {
   const archived = row.archived_ms !== null;
   return create(DocumentSchema, {
     name: `pages/${pageId}/documents/${row.id}`,
@@ -63,6 +63,11 @@ export function documentMessage(row: DocumentRow, pageId: string, text: string):
     textBytes: row.text_bytes,
     textTruncated: row.truncated === 1,
     text,
+    screenshotWebpBase64: screenshot,
+    screenshotWidth: row.screenshot_width,
+    screenshotHeight: row.screenshot_height,
+    contentError,
+    visit: `pages/${pageId}/visits/${row.visit}`,
     searchTruncated: row.text_bytes > INDEXED_TEXT_MAX_BYTES,
     textArchived: archived,
     archivePath: archived ? blobKey(row.blob_path) : '',

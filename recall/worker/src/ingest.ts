@@ -32,10 +32,11 @@ import { denyLevel, routePaths, type DenyLevel, type OwnerPatterns } from '../..
 import { scrubText, scrubUrl } from '../../shared/scrub.ts';
 import { cutText, cutUrl, cutUtf8, DOCUMENT_MAX_BYTES, pageIdOf, rootUrl, siteOf } from '../../shared/url.ts';
 import { machineError, machineJson, type MachineAnswer } from './answers.ts';
-import { deleteBlobs, putText, storedText, textBlobPath, type StoredText } from './blobs.ts';
+import { blobKey, deleteBlobs, putText, sha256Hex, storedText, textBlobPath, type StoredText } from './blobs.ts';
 import { documentChange, visitChange } from './feed.ts';
 import { indexedPart, writeIndexRow } from './fts.ts';
-import { BATCH_MAX_JSON_BYTES, CLOCK_SKEW_RECORDED_MS, DAILY_ROW_BUDGET, DAY, ITEM_CLOCK_LEEWAY_MS, OVER_BUDGET_JITTER_MS, VERSION_PART_MAX, VISIT_MAX_MS } from './limits.ts';
+import { BATCH_MAX_JSON_BYTES, CLOCK_SKEW_RECORDED_MS, DAILY_ROW_BUDGET, ITEM_CLOCK_LEEWAY_MS, OVER_BUDGET_JITTER_MS, VERSION_PART_MAX, VISIT_MAX_MS } from './limits.ts';
+import { screenshotBytes } from './screenshot.ts';
 import { ownerPatterns, readDenylist } from './settings.ts';
 import { addDelta, hostKey, nextUtcMidnight, utcDay, type CounterDeltas, type DocumentRow, type PageRow, type Store, type VisitRow } from './store.ts';
 
@@ -107,6 +108,7 @@ interface DocumentPlan {
   readonly truncated: boolean;
   readonly stored: StoredText;
   readonly blobPath: string;
+  readonly screenshot: { readonly bytes: Uint8Array; readonly sha256: string; readonly path: string; readonly width: number; readonly height: number } | null;
 }
 
 type Plan = VisitPlan | DocumentPlan;
@@ -249,6 +251,11 @@ function documentRow(plan: DocumentPlan, seq: number, now: number, pageRowid: nu
     text_sha256: plan.stored.textSha256,
     truncated: plan.truncated ? 1 : 0,
     archived_ms: null,
+    screenshot_path: plan.screenshot?.path ?? '',
+    screenshot_sha256: plan.screenshot?.sha256 ?? '',
+    screenshot_bytes: plan.screenshot?.bytes.length ?? 0,
+    screenshot_width: plan.screenshot?.width ?? 0,
+    screenshot_height: plan.screenshot?.height ?? 0,
   };
 }
 
@@ -340,6 +347,12 @@ async function planDocument(item: DocumentItem, { envelope, patterns, ownHosts, 
   if (denyLevel(parsed.host, parsed.paths, patterns, ownHosts) !== 'record') return SKIP;
   const url = cutUrl(scrubUrl(item.url));
   const text = cutUtf8(scrubText(item.text), DOCUMENT_MAX_BYTES);
+  const image = item.screenshotWebpBase64;
+  const width = item.screenshotWidth;
+  const height = item.screenshotHeight;
+  const bytes = image === '' ? null : screenshotBytes(image, width, height);
+  if ((image !== '' && bytes === null) || (image === '' && (width !== 0 || height !== 0)) || (image === '' && text.text.trim() === '')) return INVALID;
+  const blobPath = textBlobPath(captureMs, item.id);
   const plan: DocumentPlan = {
     kind: 'document',
     id: item.id,
@@ -355,7 +368,8 @@ async function planDocument(item: DocumentItem, { envelope, patterns, ownHosts, 
     text: text.text,
     truncated: item.textTruncated || text.truncated,
     stored: await storedText(text.text),
-    blobPath: textBlobPath(captureMs, item.id),
+    blobPath,
+    screenshot: bytes === null ? null : { bytes, width, height, sha256: await sha256Hex(bytes), path: blobPath.replace('.txt.gz', '.webp') },
   };
   const row = documentRow(plan, 1, 0, 0, envelope.device);
   return renders(() => documentChange({ ...row, page_id: plan.pageId, host_key: hostKey(plan.site) })) ? { kind: 'plan', plan } : INVALID;
@@ -520,22 +534,24 @@ function applyVisit(store: Store, totals: CounterDeltas, plan: VisitPlan, nextSe
   return { outcome: 'stored', newVisit: added === 1, reachedTenSeconds };
 }
 
-/** Why a capture changes nothing (a replay, a deleted page, its page's capture of that day, the latest text), or null. */
-function documentSkip(store: Store, plan: DocumentPlan): Applied | null {
-  const existing = store.one<{ page_rowid: number; text_sha256: string }>(`SELECT page_rowid, text_sha256 FROM documents WHERE id = ?`, plan.id);
+/** Stable IDs are immutable; only consecutive identical snapshots of the same visit are redundant. */
+function documentSkip(store: Store, plan: DocumentPlan, compareLatest = true): Applied | null {
+  const existing = store.one<{ page_rowid: number; visit: string; text_sha256: string; screenshot_sha256: string }>(
+    `SELECT page_rowid, visit, text_sha256, screenshot_sha256 FROM documents WHERE id = ?`, plan.id,
+  );
   if (existing !== undefined) {
     const holder = pageIdOfRowid(store, existing.page_rowid);
     if (holder === undefined) return { outcome: 'skip' };
-    return holder === plan.pageId && existing.text_sha256 === plan.stored.textSha256 ? { outcome: 'skip' } : { outcome: 'id_conflict' };
+    return holder === plan.pageId && existing.visit === plan.visitId && existing.text_sha256 === plan.stored.textSha256 && existing.screenshot_sha256 === (plan.screenshot?.sha256 ?? '')
+      ? { outcome: 'skip' } : { outcome: 'id_conflict' };
   }
   const deleted = deletedAt(store, plan.pageId);
   if (deleted !== null && plan.serverCaptureMs < deleted) return { outcome: 'skip' };
-  const page = livePage(store, plan.pageId);
-  if (page === undefined) return null;
-  if (page.latest_text_sha256 === plan.stored.textSha256) return { outcome: 'skip', captured: true };
-  const dayStart = Math.floor(plan.captureMs / DAY) * DAY;
-  const sameDay = store.one(`SELECT 1 AS x FROM documents WHERE page_rowid = ? AND capture_ms >= ? AND capture_ms < ? LIMIT 1`, page.rowid, dayStart, dayStart + DAY);
-  return sameDay === undefined ? null : { outcome: 'skip', captured: true };
+  if (!compareLatest) return null;
+  const previous = store.one<{ text_sha256: string; screenshot_sha256: string }>(
+    `SELECT text_sha256, screenshot_sha256 FROM documents WHERE visit = ? ORDER BY capture_ms DESC, id DESC LIMIT 1`, plan.visitId,
+  );
+  return previous?.text_sha256 === plan.stored.textSha256 && previous.screenshot_sha256 === (plan.screenshot?.sha256 ?? '') ? { outcome: 'skip', captured: true } : null;
 }
 
 function applyDocument(store: Store, totals: CounterDeltas, plan: DocumentPlan, nextSeq: () => number, now: number, device: Device): Applied {
@@ -549,23 +565,22 @@ function applyDocument(store: Store, totals: CounterDeltas, plan: DocumentPlan, 
   const row = documentRow(plan, nextSeq(), now, page.rowid, device);
   store.insert('documents', row);
   addDelta(totals, 'document_count', 1);
-  addDelta(totals, 'blob_bytes', row.stored_bytes);
+  addDelta(totals, 'blob_bytes', row.stored_bytes + row.screenshot_bytes);
+  const changes: Record<string, string | number> = { document_count: page.document_count + 1 };
   if (page.latest_capture_ms === null || plan.captureMs >= page.latest_capture_ms) {
-    // The page's newest capture: its index row is written again with this text (and the page's current title).
-    const indexed = indexedPart(plan.text);
-    writeIndexRow(store, page.rowid, page.title, page.url, indexed.text, true);
-    addDelta(totals, 'indexed_text_bytes', indexed.bytes - page.text_indexed);
-    store.run(
-      `UPDATE pages SET document_count = document_count + 1, latest_document = ?, latest_capture_ms = ?, latest_text_sha256 = ?, text_indexed = ? WHERE rowid = ?`,
-      plan.id,
-      plan.captureMs,
-      plan.stored.textSha256,
-      indexed.bytes,
-      page.rowid,
-    );
-  } else {
-    store.run(`UPDATE pages SET document_count = document_count + 1 WHERE rowid = ?`, page.rowid);
+    Object.assign(changes, { latest_document: plan.id, latest_capture_ms: plan.captureMs });
   }
+  // A visual-only snapshot never replaces the latest searchable text.
+  const latestText = page.latest_text_document === null ? undefined : store.one<{ capture_ms: number }>(`SELECT capture_ms FROM documents WHERE id = ?`, page.latest_text_document);
+  if (plan.text.trim() !== '' && (latestText === undefined || plan.captureMs >= latestText.capture_ms)) {
+    const indexed = indexedPart(plan.text);
+    if (page.latest_text_sha256 !== plan.stored.textSha256 || page.text_indexed === 0) {
+      writeIndexRow(store, page.rowid, page.title, page.url, indexed.text, true);
+      addDelta(totals, 'indexed_text_bytes', indexed.bytes - page.text_indexed);
+    }
+    Object.assign(changes, { latest_text_document: plan.id, latest_text_sha256: plan.stored.textSha256, text_indexed: indexed.bytes });
+  }
+  store.update('pages', 'rowid', page.rowid, changes);
   return { outcome: 'stored', captured: true };
 }
 
@@ -584,18 +599,21 @@ function overBudget(ctx: IngestContext, day: string): MachineAnswer {
   return machineError('UPLOAD_OVER_BUDGET', ctx.requestId, { 'retry-after': String(retryAfter) });
 }
 
-/** Texts recall already has, or that change nothing, are skipped before their R2 write (and stay skipped). */
+/** Check immutable IDs before any R2 put, including duplicate IDs inside the same batch. */
 function skipKnownTexts(store: Store, entries: readonly { outcome: Outcome }[]): void {
-  const seen = new Set<string>();
+  const seen = new Map<string, DocumentPlan>();
   for (const entry of entries) {
     if (entry.outcome.kind !== 'plan' || entry.outcome.plan.kind !== 'document') continue;
     const plan = entry.outcome.plan;
-    const pageDay = `${plan.pageId}:${utcDay(plan.captureMs)}`;
-    const skip = documentSkip(store, plan);
+    const prior = seen.get(plan.id);
+    if (prior !== undefined) {
+      entry.outcome = prior.pageId === plan.pageId && prior.visitId === plan.visitId && prior.stored.textSha256 === plan.stored.textSha256 && prior.screenshot?.sha256 === plan.screenshot?.sha256
+        ? { kind: 'skip', captured: true } : { kind: 'reject', reason: 'id_conflict' };
+      continue;
+    }
+    seen.set(plan.id, plan);
+    const skip = documentSkip(store, plan, false);
     if (skip !== null) entry.outcome = skip.outcome === 'skip' ? { kind: 'skip', captured: skip.captured === true } : { kind: 'reject', reason: 'id_conflict' };
-    // Two captures of one page on one UTC day in one batch: the first is kept.
-    else if (seen.has(pageDay)) entry.outcome = { kind: 'skip', captured: true };
-    seen.add(pageDay);
   }
 }
 
@@ -619,7 +637,11 @@ export async function ingestBatch(ctx: IngestContext, body: ArrayBuffer): Promis
   skipKnownTexts(store, entries);
   try {
     for (const { outcome } of entries) {
-      if (outcome.kind === 'plan' && outcome.plan.kind === 'document') await putText(ctx.bucket, outcome.plan.blobPath, outcome.plan.stored);
+      if (outcome.kind === 'plan' && outcome.plan.kind === 'document') {
+        await putText(ctx.bucket, outcome.plan.blobPath, outcome.plan.stored);
+        const image = outcome.plan.screenshot;
+        if (image !== null) await ctx.bucket.put(blobKey(image.path), image.bytes, { sha256: image.sha256, httpMetadata: { contentType: 'image/webp' } });
+      }
     }
   } catch {
     ctx.transact(() => {
@@ -673,7 +695,10 @@ export async function ingestBatch(ctx: IngestContext, body: ArrayBuffer): Promis
       if (applied.captured === true) captures += 1;
       if (outcome.kind === 'plan' && outcome.plan.kind === 'document') {
         if (applied.outcome === 'stored') texts += 1;
-        else if (store.one(`SELECT 1 AS x FROM documents WHERE id = ?`, outcome.plan.id) === undefined) unkept.push(outcome.plan.blobPath);
+        else if (store.one(`SELECT 1 AS x FROM documents WHERE id = ?`, outcome.plan.id) === undefined) {
+          unkept.push(outcome.plan.blobPath);
+          if (outcome.plan.screenshot !== null) unkept.push(outcome.plan.screenshot.path);
+        }
       }
     }
     seqs.commit();

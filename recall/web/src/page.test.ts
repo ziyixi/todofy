@@ -7,11 +7,14 @@
  */
 import { timestampFromMs } from '@ziyixi/proto/protobuf/wkt'
 import { onTestFinished, vi } from 'vitest'
+import { api, ApiError } from './api.ts'
+import type { Document } from '@ziyixi/proto/recall/ui/v1/page_pb'
 import { at, FakeServer, page, pageId, textOf, visit } from './test/fakeServer.ts'
 import { buttonNamed, open, press, testHost, toastText } from './test/helpers.ts'
 
 const ID = pageId('pr')
 const TEXT = 'Durable Objects 的 alarm 在冷启动后重试。\n\n第二段：alarm 会再次运行。\n一行接着一行。\n\n第三段没有。'
+const WEBP = 'UklGRiIAAABXRUJQVlA4IBYAAAAwAQCdASoBAAEADsD+JaQAA3AAAAAA'
 
 function server(): FakeServer {
   const fake = new FakeServer()
@@ -57,10 +60,10 @@ describe('the head', () => {
 describe('正文', () => {
   it('reads as paragraphs, says what was cut and what search sees, and how many captures there were', async () => {
     const root = await open(server(), `/pages/${ID}`)
-    const card = [...root.querySelectorAll('.card')][0]
-    expect(card?.querySelector('.card-head')?.textContent).toBe('正文10月9日保存 · 共 3 次')
+    const card = root.querySelector('.snapshot-content .card')
+    expect(card?.querySelector('.card-head')?.textContent).toBe('正文与截图10月9日 10:00 · MacBook · 工作')
     expect([...root.querySelectorAll('.reader p')].map((node) => node.textContent)).toEqual(['Durable Objects 的 alarm 在冷启动后重试。', '第二段：alarm 会再次运行。\n一行接着一行。', '第三段没有。'])
-    expect([...(card?.querySelectorAll(':scope > p.hint') ?? [])].map((node) => node.textContent)).toEqual(['正文超过 64 KB，只保存了开头', '搜索只看正文前 32 KB'])
+    expect([...(card?.querySelectorAll(':scope > p.hint') ?? [])].map((node) => node.textContent)).toEqual(['正文超过 64 KB，只保存了开头', '搜索只看正文前 32 KB', '这次快照没有保存截图。'])
     expect(root.querySelector('.find')).toBeNull()
   })
 
@@ -104,26 +107,127 @@ describe('正文', () => {
     expect(scrolled).toEqual(['alarm'])
   })
 
-  it('says the text is archived in Dropbox, and where, instead of the text', async () => {
+  it('loads an archived capture, keeping its text and screenshot readable', async () => {
     const fake = new FakeServer()
-    const old = page('old', { documentCount: 2 })
-    fake.addText(old, textOf('old', '', { textArchived: true, archivePath: 'blobs/2025/09/00000000-0000-4000-8000-0000000000aa.txt.gz', captureTime: timestampFromMs(at('2025-09-01 10:00')) }))
+    const old = page('old', { documentCount: 1 })
+    fake.addText(old, textOf('old', '归档里的 alarm 正文', { textArchived: true, screenshotWebpBase64: WEBP, screenshotWidth: 1, screenshotHeight: 1, captureTime: timestampFromMs(at('2025-09-01 10:00')) }))
     fake.pages = [old]
     const root = await open(fake, `/pages/${pageId('old')}?q=alarm`)
-    const text = [...root.querySelectorAll<HTMLElement>('.card')].find((node) => node.querySelector('h2')?.textContent === '正文')
-    expect(text?.querySelector('.card-head .meta')?.textContent).toBe('2025年9月1日保存 · 共 2 次')
-    expect(text?.querySelector('.archived-title')?.textContent).toBe('正文已归档到 Dropbox')
-    expect(text?.querySelector('.archive-path')?.textContent).toBe('Dropbox 应用文件夹里的 blobs/2025/09/00000000-0000-4000-8000-0000000000aa.txt.gz')
-    expect(text?.querySelector('.hint')?.textContent).toBe('超过云端保留的天数，正文已从云端移除，只留在 Dropbox 归档里（gzip 压缩的纯文本）；页面和访问记录仍在这里，标题和网址仍能搜到。')
-    expect([text?.querySelector('.reader'), root.querySelector('.find')]).toEqual([null, null])
+    expect(root.querySelector('.snapshot-content')?.textContent).toContain('内容来源：Dropbox 归档')
+    expect(root.querySelector('.reader')?.textContent).toBe('归档里的 alarm 正文')
+    expect(root.querySelector('.reader mark')?.textContent).toBe('alarm')
+    expect(root.querySelector('img')?.getAttribute('src')).toBe(`data:image/webp;base64,${WEBP}`)
+    expect(fake.calls.filter((call) => /\/documents\//u.test(call.path))).toHaveLength(1)
   })
 
-  it('without a capture, says why there is no text', async () => {
+  it.each([
+    ['archive_not_connected', '内容已归档，请在设置中连接 Dropbox 后重试。'],
+    ['archive_other_target', '这份内容在原来的 Dropbox 应用或账户中，请连接原归档后重试。'],
+    ['archive_missing', 'Dropbox 归档中找不到这份内容，请检查归档文件是否被移动或删除。'],
+  ])('explains %s without hiding the part that was read, and retries the selected capture', async (contentError, message) => {
+    const fake = new FakeServer()
+    const item = page('archive')
+    const capture = textOf('archive', '仍能读到的正文', { textArchived: true, contentError, screenshotWidth: 1, screenshotHeight: 1 })
+    fake.addText(item, capture)
+    fake.pages = [item]
+    const root = await open(fake, `/pages/${pageId('archive')}`)
+    expect(root.querySelector('.snapshot-content .error-line')?.textContent).toContain(message)
+    expect(root.querySelector('.reader')?.textContent).toBe('仍能读到的正文')
+    expect(root.querySelector('.snapshot-content')?.textContent).toContain('截图暂时无法读取。')
+    capture.contentError = ''
+    capture.screenshotWebpBase64 = WEBP
+    buttonNamed(root, '重试').click()
+    await settled()
+    expect(root.querySelector('.snapshot-content .error-line')).toBeNull()
+    expect(root.querySelector('img')?.getAttribute('src')).toBe(`data:image/webp;base64,${WEBP}`)
+  })
+
+  it('shows a screenshot-only capture without inventing a reason for absent text', async () => {
+    const fake = new FakeServer()
+    const item = page('visual')
+    fake.addText(item, textOf('visual', '', { screenshotWebpBase64: WEBP, screenshotWidth: 1, screenshotHeight: 1 }))
+    fake.pages = [item]
+    const root = await open(fake, `/pages/${pageId('visual')}`)
+    expect(root.querySelector('.snapshot-content')?.textContent).toContain('这次快照没有保存正文。')
+    expect(root.querySelector('img')).not.toBeNull()
+    expect(root.textContent).not.toContain('不到 10 秒')
+  })
+
+  it('without captures, says what is available without guessing why', async () => {
     const fake = new FakeServer()
     fake.pages = [page('short')]
     const root = await open(fake, `/pages/${pageId('short')}`)
-    expect(root.querySelector('.card .hint')?.textContent).toBe('停留不到 10 秒或在不保存正文的名单里，没有正文')
-    expect(fake.calls.some((call) => call.path.includes('/documents/'))).toBe(false)
+    expect(root.querySelector('.card .hint')?.textContent).toBe('还没有保存这个页面的正文或截图。')
+    expect(fake.calls.some((call) => /\/documents\//u.test(call.path))).toBe(false)
+  })
+})
+
+describe('historical snapshots', () => {
+  function history() {
+    const fake = new FakeServer()
+    const item = page('history', { documentCount: 22 })
+    const captures = Array.from({ length: 22 }, (_, i) => textOf('history', `第 ${String(i + 1)} 份合成正文`, {
+      captureTime: timestampFromMs(at('2026-10-09 10:00') - i * 60_000),
+      ...(i === 1 ? { screenshotWebpBase64: WEBP, screenshotWidth: 1, screenshotHeight: 1 } : {}),
+    }))
+    fake.pages = [item]
+    for (const capture of captures) fake.documents.set(capture.name, capture)
+    return { fake, captures, path: `/pages/${pageId('history')}` }
+  }
+
+  it('lists metadata newest first, loads only the selected content, and fetches more history on demand', async () => {
+    const { fake, captures, path } = history()
+    const root = await open(fake, path)
+    const choices = () => [...root.querySelectorAll<HTMLButtonElement>('.snapshots button')]
+    expect(choices()).toHaveLength(20)
+    expect(choices()[0]?.textContent).toContain('10:00')
+    expect(root.querySelector('.reader')?.textContent).toBe('第 1 份合成正文')
+    expect(fake.calls.filter((call) => /\/documents\//u.test(call.path))).toHaveLength(1)
+    choices()[1]?.click()
+    await settled()
+    expect(root.querySelector('.reader')?.textContent).toBe('第 2 份合成正文')
+    expect(root.querySelector('img')?.getAttribute('src')).toBe(`data:image/webp;base64,${WEBP}`)
+    expect(choices()[1]?.getAttribute('aria-pressed')).toBe('true')
+    expect(fake.calls.filter((call) => /\/documents\//u.test(call.path)).at(-1)?.path).toBe(`/api/v1/${captures[1]!.name}`)
+    buttonNamed(root, '更多快照').click()
+    await settled()
+    expect(choices()).toHaveLength(22)
+    choices()[21]?.click()
+    await settled()
+    expect(root.querySelector('.reader')?.textContent).toBe('第 22 份合成正文')
+    expect(root.querySelector('img')).toBeNull()
+    expect(fake.calls.filter((call) => /\/documents\//u.test(call.path))).toHaveLength(3)
+  })
+
+  it('keeps the most recently selected capture when an older request finishes late', async () => {
+    const { fake, captures, path } = history()
+    const root = await open(fake, path)
+    let release!: (capture: Document) => void
+    const get = vi.spyOn(api, 'getDocument').mockImplementationOnce(() => new Promise((resolve) => { release = resolve }))
+    onTestFinished(() => get.mockRestore())
+    const choices = root.querySelectorAll<HTMLButtonElement>('.snapshots button')
+    choices[1]?.click()
+    choices[2]?.click()
+    await settled()
+    expect(root.querySelector('.reader')?.textContent).toBe('第 3 份合成正文')
+    release(captures[1]!)
+    await settled()
+    expect(root.querySelector('.reader')?.textContent).toBe('第 3 份合成正文')
+    expect(root.querySelector('img')).toBeNull()
+  })
+
+  it('keeps history available after a content request fails and retries that selection', async () => {
+    const { fake, path } = history()
+    const root = await open(fake, path)
+    const get = vi.spyOn(api, 'getDocument').mockRejectedValueOnce(new ApiError(503, 'UNAVAILABLE', '服务暂时不可用，请稍后再试'))
+    onTestFinished(() => get.mockRestore())
+    root.querySelectorAll<HTMLButtonElement>('.snapshots button')[1]?.click()
+    await settled()
+    expect(root.querySelector('.snapshot-content .error-line')?.textContent).toContain('服务暂时不可用')
+    expect(root.querySelectorAll('.snapshots button')).toHaveLength(20)
+    buttonNamed(root, '重试').click()
+    await settled()
+    expect(root.querySelector('.reader')?.textContent).toBe('第 2 份合成正文')
   })
 })
 
@@ -157,27 +261,27 @@ describe('the ⋯ actions', () => {
     const host = testHost()
     const root = await open(fake, `/pages/${ID}`, host)
     buttonNamed(root, '页面操作').click()
-    buttonNamed(root, '以后不保存这个网站的正文').click()
+    buttonNamed(root, '以后不保存这个网站的内容').click()
     await settled()
-    expect(host.asked).toEqual(['以后不保存 github.com 的正文？之后只记录访问时间、网址和标题，已保存的正文不变。'])
+    expect(host.asked).toEqual(['以后不保存 github.com 的正文和截图？之后只记录访问时间、网址和标题，已保存的内容不变。'])
     const update = fake.calls.find((call) => call.method === 'PATCH')
     expect(update?.path).toMatch(/^\/api\/v1\/settings\?update_mask=denylist_patterns%2Cetag&request_id=[0-9a-f-]{36}$/)
     expect(update?.body).toEqual({ denylist_patterns: ['bank.example', 'github.com'], etag: 's1' })
     expect(update?.headers['x-csrf-token']).toBe('csrf-token')
-    expect(toastText(root)).toBe('以后不保存 github.com 的正文')
+    expect(toastText(root)).toBe('以后不保存 github.com 的正文和截图')
     // Already there: nothing more is sent.
     buttonNamed(root, '页面操作').click()
-    buttonNamed(root, '以后不保存这个网站的正文').click()
+    buttonNamed(root, '以后不保存这个网站的内容').click()
     await settled()
     expect(fake.calls.filter((call) => call.method === 'PATCH').length).toBe(1)
-    expect(toastText(root)).toBe('github.com 已在不保存正文的名单里')
+    expect(toastText(root)).toBe('github.com 已在不保存内容的名单里')
   })
 
   it('changes nothing when the owner says no', async () => {
     const fake = server()
     const root = await open(fake, `/pages/${ID}`, testHost(false))
     buttonNamed(root, '页面操作').click()
-    buttonNamed(root, '以后不保存这个网站的正文').click()
+    buttonNamed(root, '以后不保存这个网站的内容').click()
     buttonNamed(root, '页面操作').click()
     buttonNamed(root, '删除这个页面的记录').click()
     await settled()
@@ -195,7 +299,7 @@ describe('the ⋯ actions', () => {
     buttonNamed(root, '页面操作').click()
     buttonNamed(root, '删除这个页面的记录').click()
     await settled()
-    expect(host.asked).toEqual(['删除这个页面的记录？访问和正文会从 recall 删除，不能恢复；Dropbox 备份只增不删，会多一条删除记录，原来的文件要在 Dropbox 里自己删。'])
+    expect(host.asked).toEqual(['删除这个页面的记录？访问、正文和截图会从 recall 删除，不能恢复；Dropbox 备份只增不删，会多一条删除记录，原来的文件要在 Dropbox 里自己删。'])
     const removal = fake.calls.find((call) => call.method === 'DELETE')
     expect(removal?.path).toMatch(new RegExp(`^/api/v1/pages/${ID}\\?request_id=[0-9a-f-]{36}$`))
     expect(fake.pages).toEqual([])

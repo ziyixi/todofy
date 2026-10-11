@@ -448,6 +448,16 @@
         },
         "text_truncated": {
           "type": "boolean"
+        },
+        "screenshot_width": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1920
+        },
+        "screenshot_height": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1920
         }
       },
       "additionalProperties": true

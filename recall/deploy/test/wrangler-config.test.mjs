@@ -5,7 +5,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { existsSync, readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
-import { pathToFileURL } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { CONFIG, INJECTED, OWNER_ONLY_SECRETS } from '../deploy-vars.mjs'
 
 const APP = new URL('../../', import.meta.url)
@@ -67,7 +67,7 @@ test('vars: the public host and the Access issuer (and the AUD once Infra apply 
 })
 
 test('the development config is the production one without routes, account and secrets: never deployable', () => {
-  const dev = read(new URL('wrangler.test.toml', APP).pathname)
+  const dev = read(fileURLToPath(new URL('wrangler.test.toml', APP)))
   assert.equal(dev.name, 'recall')
   assert.equal(dev.routes, undefined)
   assert.equal(dev.account_id, undefined)

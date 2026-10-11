@@ -31,7 +31,7 @@ import { RpcError } from '@ziyixi/proto/rpc-status';
 import { RECALL_HOST } from '../../shared/denylist.ts';
 import { machineError, type MachineAnswer } from './answers.ts';
 import { handlers, type ApiContext } from './api.ts';
-import { archivePass, connected, disconnect, finishConnect, type AccessSession, type BackupContext, type ConnectOutcome, type PassResult } from './backup.ts';
+import { archivePass, connected, disconnect, finishConnect, readArchive, type AccessSession, type BackupContext, type ConnectOutcome, type PassResult } from './backup.ts';
 import { scannedSeq } from './archive.ts';
 import { documentIdOfPath } from './blobs.ts';
 import { dropboxEndpoints } from './dropbox.ts';
@@ -274,7 +274,7 @@ export class RecallState extends DurableObject<Env> {
     const id = documentIdOfPath(path);
     const live =
       id !== null &&
-      this.store.one(`SELECT 1 AS x FROM documents d JOIN pages p ON p.rowid = d.page_rowid WHERE d.id = ? AND d.blob_path = ? AND d.archived_ms IS NULL`, id, path) !==
+      this.store.one(`SELECT 1 AS x FROM documents d JOIN pages p ON p.rowid = d.page_rowid WHERE d.id = ? AND (d.blob_path = ? OR d.screenshot_path = ?) AND d.archived_ms IS NULL`, id, path, path) !==
         undefined;
     if (!live) {
       this.charge();
@@ -339,6 +339,7 @@ export class RecallState extends DurableObject<Env> {
         // One at a time with the alarm's passes, so that no upload runs on a token being revoked.
         disconnect: () => this.serially(() => disconnect(this.backup(this.now()))),
       },
+      readArchive: (blob) => readArchive(this.backup(this.now()), blob),
       secretTokens: this.secretTokens(),
     };
     const result = await api.handle(request, ctx, requestId);
