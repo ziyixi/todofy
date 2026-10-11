@@ -20,6 +20,8 @@ import watchDegraded from '../../../../contracts/ops-v1/fixtures/OpsStatus/watch
 import watchOk from '../../../../contracts/ops-v1/fixtures/OpsStatus/watch-ok.json'
 import recallDegraded from '../../../../contracts/ops-v1/fixtures/OpsStatus/recall-degraded.json'
 import recallOk from '../../../../contracts/ops-v1/fixtures/OpsStatus/recall-ok.json'
+import briefOk from '../../../../contracts/ops-v1/fixtures/OpsStatus/brief-ok.json'
+import briefDegraded from '../../../../contracts/ops-v1/fixtures/OpsStatus/brief-degraded.json'
 import shedWatch from '../../../../contracts/ops-v1/fixtures/GuardState/shed-watch.json'
 import report from '../../../../contracts/ops-v1/fixtures/OpsReport/daily.json'
 
@@ -35,11 +37,11 @@ describe('labels', () => {
   })
 
   it('labels every code in the contract fixtures', () => {
-    const signals = [...mailHeroDegraded.signals, ...todofyDegraded.signals, ...watchDegraded.signals, ...recallDegraded.signals].map((signal) => signal.code)
+    const signals = [...mailHeroDegraded.signals, ...todofyDegraded.signals, ...watchDegraded.signals, ...recallDegraded.signals, ...briefDegraded.signals].map((signal) => signal.code)
     for (const code of [...signals, ...report.items.map((item) => item.code)]) expect(signalLabel(code)).not.toBe(code)
-    const counters = [mailHeroOk, todofyOk, watchOk, watchDegraded, recallOk].flatMap((status) => Object.keys(status.counters))
+    const counters = [mailHeroOk, todofyOk, watchOk, watchDegraded, recallOk, briefOk].flatMap((status) => Object.keys(status.counters))
     for (const name of counters) expect(counterInfo(name).label).not.toBe(name)
-    const modes = [mailHeroOk, todofyOk, watchOk].flatMap((status) => Object.keys(status.modes))
+    const modes = [mailHeroOk, todofyOk, watchOk, briefOk].flatMap((status) => Object.keys(status.modes))
     for (const name of modes) expect(modeInfo(name, false).label).not.toBe(name)
     // Every mode of an ok status is in its usual position (an unusual one is marked for attention).
     for (const status of [mailHeroOk, todofyOk, watchOk]) {
@@ -64,6 +66,12 @@ describe('labels', () => {
   it('labels the task-intent counters of Todofy', () => {
     expect(counterInfo('intents_pending').label).toBe('待创建的任务提议')
     expect(counterInfo('intents_failed_7d').label).toBe('近 7 天失败的任务提议')
+  })
+
+  it('shows Brief costs as dollars and names its deferred work', () => {
+    expect(counterValue('budget_month_cents', 8000)).toBe('US$ 80.00')
+    expect(counterValue('cost_month_cents', 1234)).toBe('US$ 12.34')
+    for (const job of ['embedding', 'learning', 'source_probe']) expect(deferredJobLabel(job)).not.toBe(job)
   })
 
   it('keeps unknown codes raw', () => {

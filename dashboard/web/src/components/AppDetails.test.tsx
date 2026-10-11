@@ -2,6 +2,8 @@ import { render, screen, within } from '@testing-library/react'
 import type { OpsStatus } from '../../../worker/src/api-types.ts'
 import watchOk from '../../../../contracts/ops-v1/fixtures/OpsStatus/watch-ok.json'
 import watchDegraded from '../../../../contracts/ops-v1/fixtures/OpsStatus/watch-degraded.json'
+import briefOk from '../../../../contracts/ops-v1/fixtures/OpsStatus/brief-ok.json'
+import briefDegraded from '../../../../contracts/ops-v1/fixtures/OpsStatus/brief-degraded.json'
 import { signalLabel } from '../lib/labels'
 import { AppDetails } from './AppDetails'
 
@@ -10,7 +12,7 @@ const NOW = new Date('2026-10-01T14:05:00Z')
 function show(status: OpsStatus) {
   render(
     <AppDetails
-      card={{ entry: 'watch', reachable: true, checked_at: status.generated_at, error: null, consecutive_failures: 0, status, status_at: status.generated_at }}
+      card={{ entry: status.app, reachable: true, checked_at: status.generated_at, error: null, consecutive_failures: 0, status, status_at: status.generated_at }}
       entry={undefined}
       guard={undefined}
       now={NOW}
@@ -33,6 +35,21 @@ describe('应用详情 of the watch app', () => {
     show(watchDegraded as unknown as OpsStatus)
     for (const signal of watchDegraded.signals) expect(signalLabel(signal.code)).not.toBe(signal.code)
     expect(screen.getByText('有监视已失效')).toBeInTheDocument()
-    expect(screen.getByText('监视调度已停止')).toBeInTheDocument()
+    expect(screen.getByText('调度已停止')).toBeInTheDocument()
+  })
+})
+
+describe('应用详情 of Brief', () => {
+  it('shows archive mode and the reported monthly budget in dollars', () => {
+    show(briefOk as unknown as OpsStatus)
+    expect(screen.getByText(/未启用正式模式：开/)).toBeInTheDocument()
+    expect(screen.getByText('US$ 80.00')).toBeInTheDocument()
+  })
+
+  it('names failures and the work deferred by its guard', () => {
+    show(briefDegraded as unknown as OpsStatus)
+    expect(screen.getByText('Claude 调用被拒绝')).toBeInTheDocument()
+    expect(screen.getByText('简报发送结果待核对')).toBeInTheDocument()
+    expect(screen.getByText('推迟的任务：候选条目向量计算、每周学习、已暂停来源探测')).toBeInTheDocument()
   })
 })

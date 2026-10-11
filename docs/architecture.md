@@ -25,7 +25,8 @@ flowchart LR
   Recall -->|recall-archive-v1 feed, export token| NAS[NAS archive]
   Sources[Public feeds and pages] -->|polite polls, honest UA| Brief[Brief]
   Brief -->|Messages API| Claude[Claude API]
-  Brief -->|one email a day, idempotency key| Resend[Resend]
+  Brief -->|shadow or live, at most one email a day| Resend[Resend]
+  Home -->|Ops binding| Brief
   Home -->|Fleet and Newsletter Ops bindings| Fleet[Fleet]
   Observer[Observer CronJob] -->|signed fleet.report.v1| Fleet
   Actions[GitHub Actions] -->|Access and deploy Bearer, typed release API| Runtime[Platform runtime in k3s]
@@ -99,10 +100,14 @@ the owner APIs moved to proto. Dated old-owner routes are listed in [history](hi
 ## Home
 
 Home is the owner launcher and operations console, not a second administrator of each application's storage.
-It calls only generated Ops methods through `MAIL_HERO`, `TODOFY`, `WATCH`, `MAILSORT`, `RECALL`, `FLEET`,
+It calls only generated Ops methods through `MAIL_HERO`, `TODOFY`, `WATCH`, `MAILSORT`, `RECALL`, `BRIEF`, `FLEET`,
 `NEWSLETTER` and `WEBSITE_SYNC` bindings. `FLEET` targets Fleet's `Ops`; `NEWSLETTER` targets its `NewsletterOps` projection of the latest
 bounded host report. Home does not call the VPS directly or read an application's D1, R2, private
 configuration or source. The four views are Home, Flows, Cloudflare and Ops.
+
+`BRIEF` targets Brief's `Ops`: bounded counts, costs, budget and signal codes, with no issue text or source URLs.
+Its guard defers embedding, learning and source probes. Brief and Home deploy at the same source SHA, with Home
+waiting for Brief; the integration's rollout evidence is in [HANDOFF](../HANDOFF.md).
 
 Fetch/cron handlers authenticate, route and make one RPC; the SQLite `HomeState` owns the work. It serializes
 each view once and the Worker forwards `PreEncoded` bytes with ETag/304, avoiding another decode/encode under
@@ -177,7 +182,9 @@ accepted report nor a ready deployment receipt proves successful Newsletter deli
   paywall or a login), screens with Claude Haiku, picks and writes with Claude Opus through the official SDK (the only
   caller is `claude.ts`), checks every quote and number in code, and sends at most one email a day through a ledger
   (`send.ts`; an unknown outcome is never sent again). The Claude and Resend keys are put by the owner and never pass
-  through GitHub; `BRIEF_MODE` and 暂停 can only lower what it does. Check-only until its Access applications exist. See
+  through GitHub; `BRIEF_MODE` and 暂停 can only lower what it does. Its first deployment (`7bea3ec`) runs in archive
+  mode: public-source fetching and paid Claude calls can run, with no email sent. Home monitors its Ops entrypoint;
+  resource registration and Home rollout acceptance are tracked in [HANDOFF](../HANDOFF.md). See
   [AGENTS](../brief/AGENTS.md) and [design](../brief/docs/design.md).
 - **Newsletter:** runs as an independent k3s image because its workflow uses Codex CLI. It reads Todofy's machine
   reports through existing HTTPS/Basic auth and keeps its own persistent state. It does not import Todofy's

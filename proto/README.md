@@ -29,7 +29,7 @@ audit and live gating were removed, a breaking change, so a new major version), 
 `RELOAD_REQUIRED` in its google.rpc.Status for one release. `recall/ui/v1` is recall's owner API (2026-10-10, served by its Worker, not deployed yet), under
 `/api/v1/`; its Worker also reads `recall/ingest/v1` (the extension's uploads) and writes `recall/archive/v1` (the change feed).
 `brief/ui/v1` is the brief's owner API (2026-10-10: drafted in `549069d`, landed with its first build; served by its
-Worker, not deployed yet), under `/api/v1/`: the archive's issues and items, the votes, the sources' health, the profile,
+Worker, first deployed in archive mode on 2026-10-11), under `/api/v1/`: the archive's issues and items, the votes, the sources' health, the profile,
 the settings, the service status and 恢复调用.
 `flowday/ui/v1` is FlowDay's owner API (2026-10-02, branch `proto-flowday-ui`), on a Worker and a Next.js UI
 that had no proto code before, and the first with large lists: its lists are pages sized to Workers Free's CPU limit

@@ -207,7 +207,7 @@ describe('the views', () => {
   it('ops: guard, the canary with its id, the digest and every ops-v1 app in registry order', () => {
     const ev = input();
     const ops = opsView(base(), GUARD, canaryView(ev), digestView([]), ev.statuses);
-    expect(ops.apps.map((a) => a.entry)).toEqual(['mail-hero', 'todofy', 'watch', 'notion-publish', 'newsletter', 'fleet', 'mailsort', 'recall']);
+    expect(ops.apps.map((a) => a.entry)).toEqual(['mail-hero', 'todofy', 'watch', 'notion-publish', 'newsletter', 'fleet', 'mailsort', 'recall', 'brief']);
     expect(ops.apps[0]).toMatchObject({ reachable: true, error: null, consecutive_failures: 0, status: { app: 'mail-hero' } });
     expect(ops.canary.id).toBe('mail-todofy');
     expect(ops.guard.apps).toHaveProperty('todofy');

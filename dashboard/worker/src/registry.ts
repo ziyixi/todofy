@@ -256,7 +256,7 @@ const ENTRIES: readonly EntryDef[] = [
     accent: 'amber',
     url: 'https://brief.ziyixi.science/',
     access: true,
-    status: { type: 'none' },
+    status: { type: 'ops_v1', binding: 'BRIEF', guard: true },
     tile_metric: null,
     app_only_signals: [],
     order: 11,

@@ -274,10 +274,10 @@ class Classify(unittest.TestCase):
         self.assertTrue(ci_changes.everything()["recall_extension_publish"])
         self.assertTrue(ci_changes.dispatched("all")["recall_extension_publish"])
         self.assertFalse(ci_changes.dispatched("both")["recall_extension_publish"])
-    def test_the_brief_deploys_with_its_archive_ui_and_home_does_not_wait(self):
+    def test_the_brief_deploys_with_its_archive_ui_and_home_waits_for_its_binding(self):
         """The brief deploys since "Infra apply" created its Access applications (brief/docs/design.md section 18). Its
-        archive UI (brief/web) ships as the Worker's static assets, so it checks and deploys the brief. Home does not
-        bind it yet, so Home deploys as before; its owner API package reaches the brief alone."""
+        archive UI ships as the Worker's static assets. Home binds its Ops entrypoint and waits if its deploy is held;
+        the brief's owner API package still reaches the brief alone."""
         for result in (ci_changes.everything(), ci_changes.dispatched("all"), ci_changes.dispatched("brief"), push(["brief/worker/src/state.ts"]), push(["brief/content-config/sources.yaml"]), push(["brief/web/src/views/issue.ts"])):
             with self.subTest(result=result):
                 self.assertTrue(result["brief_check"])
@@ -286,13 +286,19 @@ class Classify(unittest.TestCase):
         self.assertFalse(push(["brief/worker/src/claude.ts"])["dashboard_deploy"])
         for path in ("proto/brief/ui/v1/brief_ui_service.proto", "proto/brief/ui/v1/issue.proto"):
             self.assertEqual(ci_changes.proto_deploys(path), {"brief"})
-        self.assertNotIn("brief", ci_changes.HOME_BOUND)
+        self.assertIn("brief", ci_changes.HOME_BOUND)
         saved = ci_changes.CHECK_ONLY
         try:
             ci_changes.CHECK_ONLY = set()
             self.assertTrue(push(["brief/worker/src/state.ts"])["brief_deploy"])
             self.assertTrue(push(["brief/web/src/views/issue.ts"])["brief_deploy"])
             self.assertFalse(push(["brief/app.toml"])["brief_deploy"])
+            ci_changes.CHECK_ONLY = {"brief"}
+            held = push(["brief/worker/src/state.ts", "dashboard/worker/src/index.ts"])
+            self.assertTrue(held["brief_check"])
+            self.assertTrue(held["dashboard_check"])
+            self.assertFalse(held["brief_deploy"])
+            self.assertFalse(held["dashboard_deploy"])
         finally:
             ci_changes.CHECK_ONLY = saved
 
@@ -1291,6 +1297,7 @@ class DeployConditions(unittest.TestCase):
         ("dashboard-deploy", "fleet-deploy"),
         ("dashboard-deploy", "mailsort-deploy"),
         ("dashboard-deploy", "recall-deploy"),
+        ("dashboard-deploy", "brief-deploy"),
         ("dashboard-deploy", "website-relay-deploy"),
         ("watch-deploy", "todofy-deploy"),
     }
@@ -1396,7 +1403,7 @@ class DeployConditions(unittest.TestCase):
     def test_the_dashboard_deploys_after_the_apps_and_watch_after_todofy(self):
         self.assertLessEqual({"todofy-deploy"}, set(self.needs(self.jobs()["watch-deploy"])))
         block = self.jobs()["dashboard-deploy"]
-        self.assertLessEqual({"todofy-deploy", "mail-hero-deploy", "watch-deploy", "fleet-deploy", "mailsort-deploy", "recall-deploy"},
+        self.assertLessEqual({"todofy-deploy", "mail-hero-deploy", "watch-deploy", "fleet-deploy", "mailsort-deploy", "recall-deploy", "brief-deploy"},
                              set(self.needs(block)))
         self.assertIn("group: dashboard-production", block)
         # The only token: the one Todofy deploy uses; no other secret reaches wrangler's environment.

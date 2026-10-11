@@ -1,9 +1,10 @@
 /**
  * contracts/ops-v1: the exact bytes the brief's Ops code answers for fixed synthetic state (BriefState's own SQLite,
  * here node:sqlite behind the SqlStorage surface Store uses; ../../docs/design.md §15, §17). Home reads these answers
- * once its go-live commit binds the brief: every case is compared as compact JSON with test/golden/ops-v1.json and
- * checked against the generated schema. `UPDATE_GOLDEN=1 npx vitest run test/ops-golden.test.ts` rewrites the golden
- * file; only for an intended change. All state is synthetic.
+ * through its BRIEF binding: every case is compared as compact JSON with test/golden/ops-v1.json and checked against
+ * the generated schema. The archive-ready and degraded answers also match the shared contract fixtures consumed by
+ * Home and the other contract readers. `UPDATE_GOLDEN=1 npx vitest run test/ops-golden.test.ts` rewrites the golden
+ * file (never the contract fixtures); only for an intended change. All state is synthetic.
  */
 import { readFileSync, writeFileSync } from 'node:fs';
 import { expect, test } from 'vitest';
@@ -18,7 +19,8 @@ import { memorySql } from './fakes/sql.ts';
 
 const path = (relative: string): string => decodeURIComponent(new URL(relative, import.meta.url).pathname);
 const GOLDEN = path('golden/ops-v1.json');
-const SCHEMA = JSON.parse(readFileSync(path('../../../contracts/ops-v1/ops-v1.schema.json'), 'utf8')) as { $defs: Record<string, unknown> };
+const CONTRACT = path('../../../contracts/ops-v1/');
+const SCHEMA = JSON.parse(readFileSync(`${CONTRACT}ops-v1.schema.json`, 'utf8')) as { $defs: Record<string, unknown> };
 
 // Tuesday 2026-10-13, 09:00 in Los Angeles (PDT): past the send, before the 12:00 cutoff.
 const NOW = Date.parse('2026-10-13T16:00:00.000Z');
@@ -57,6 +59,14 @@ function cases(): Record<string, unknown> {
   call(ok, '2026-10-13', 'pick', 0.14, '2026-10-13');
   call(ok, '2026-10-12', 'write', 9.1, '2026-10-12');
 
+  // Archive mode after the send cutoff: a ready issue, no mail credentials, and the owner's saved $80 budget.
+  const archive = store();
+  archive.setMeta('last_alarm_ms', String(NOW + 4 * HOUR - 10 * MINUTE));
+  archive.insert('issues', { issue: '2026-10-13', kind: 'weekday', state: 'archived', title: '简报', item_count: 8, created_ms: NOW - 4 * HOUR });
+  writeSettings(archive, { monthlyBudgetUsd: 80 }, NOW - HOUR);
+  call(archive, '2026-10-13', 'write', 0.62, '2026-10-13');
+  call(archive, '2026-10-13', 'pick', 0.14, '2026-10-13');
+
   // A bad morning: the key refused (402), today's send unknown, the pick fell back, a source family stale, Home's
   // guard shedding.
   const degraded = store();
@@ -78,6 +88,7 @@ function cases(): Record<string, unknown> {
   const guards = store();
   return {
     'status/ok': briefStatus(ok, registry, env, NOW),
+    'status/archive-ready': briefStatus(archive, registry, { ...env, MODE: 'archive', RESEND_API_KEY: '', MAIL_TO: '' }, NOW + 4 * HOUR),
     'status/shadow-without-mail': briefStatus(ok, registry, { ...env, MODE: 'shadow', MAIL_TO: '' }, NOW),
     'status/degraded': briefStatus(degraded, registry, env, NOW),
     'status/archive-without-keys': briefStatus(fresh, registry, { PUBLIC_HOST: 'brief.example.org', MODE: 'archive' } as unknown as Env, NOW),
@@ -109,6 +120,24 @@ test('every answer passes the generated schema; a refusal is invalid_input', () 
     }
     expect(validate(SCHEMA, name.startsWith('status/') ? 'OpsStatus' : 'GuardState', answer), name).toEqual([]);
   }
+});
+
+test('the shared contract fixtures are the exact archive-ready and degraded answers', () => {
+  const actual = cases();
+  for (const [name, file] of [['status/archive-ready', 'brief-ok.json'], ['status/degraded', 'brief-degraded.json']] as const) {
+    const fixture: unknown = JSON.parse(readFileSync(`${CONTRACT}fixtures/OpsStatus/${file}`, 'utf8'));
+    expect(JSON.stringify(actual[name])).toBe(JSON.stringify(fixture));
+  }
+});
+
+test('archive mode does not require email or a send, but still reports a missing issue and real failures', () => {
+  const archive = cases()['status/archive-ready'];
+  expect(archive).toMatchObject({ health: 'ok', signals: [], modes: { mode_limited: true }, counters: { issues_sent_7d: 0, budget_month_cents: 8000 } });
+  const waiting = briefStatus(store(), registry, { ...env, MODE: 'archive', RESEND_API_KEY: '' }, NOW + 4 * HOUR);
+  expect(waiting.signals.map((entry) => entry.code)).toEqual(['issue_late']);
+  const failed = store();
+  failed.insert('issues', { issue: '2026-10-13', kind: 'weekday', state: 'failed', created_ms: NOW });
+  expect(briefStatus(failed, registry, { ...env, MODE: 'archive' }, NOW).signals).toEqual([expect.objectContaining({ code: 'issue_failed', severity: 'critical' })]);
 });
 
 test('the refused key and the unknown send are critical; a fallback pick and a refused packet are information', () => {

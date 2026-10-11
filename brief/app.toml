@@ -32,9 +32,10 @@ worker = "brief"
 url_path = "/"
 position = 16
 [entries.status]
-# Check-only until its go-live commit (docs/design.md §18): then ops_v1 with Home's BRIEF binding (codes and counts
-# only; Home's guard defers its embedding, learning and source probes).
-type = "none"
+# Home reads codes and counts; its guard defers embedding, learning and source probes.
+type = "ops_v1"
+binding = "BRIEF"
+guard = true
 
 # The whole host behind the owner's Access application. The exact path /feedback (the email's vote links) has its own
 # Bypass application in infra/access.tf, and the Worker verifies each link's signed token itself (docs/design.md §10).

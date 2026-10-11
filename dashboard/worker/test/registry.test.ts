@@ -92,8 +92,7 @@ describe('the registry', () => {
       fleet: 'ops_v1',
       mailsort: 'ops_v1',
       recall: 'ops_v1',
-      // Check-only until its go-live commit binds its Ops entrypoint (brief/docs/design.md §18).
-      brief: 'none',
+      brief: 'ops_v1',
       home: 'self',
       'self-hosted': 'none',
       'platform-runtime': 'none',
@@ -142,11 +141,10 @@ describe('the registry', () => {
     expect(resourceByMatch('r2', 'vultr-backup')).toMatchObject({ id: 'vps-backup', name: 'VPS 备份', entry: 'self-hosted' });
     expect(REGISTRY.entries.find((e) => e.id === 'self-hosted')).toMatchObject({ group: 'hidden', url: null, status: { type: 'none' } });
     expect(REGISTRY.workers.filter((w) => w.entry === 'self-hosted')).toEqual([]);
-    // Fleet's, mailsort's, recall's and the brief's new namespaces are recorded in config/resources.toml after their first
-    // deploys.
+    // All deployed namespaces, including Brief, are recorded in config/resources.toml.
     const unmatched = REGISTRY.resources.filter((r) => r.match === null).map((r) => r.id);
-    expect(unmatched.filter((id) => id !== 'fleet-state' && id !== 'mailsort-state' && id !== 'recall-state' && id !== 'brief-state')).toEqual([]);
-    expect(REGISTRY.resources.find((r) => r.id === 'brief-state')).toMatchObject({ kind: 'do', entry: 'brief', script: 'brief' });
+    expect(unmatched).toEqual([]);
+    expect(resourceByMatch('do', '6edfe7c19d6748b186ee38bb48c686be')).toMatchObject({ id: 'brief-state', kind: 'do', entry: 'brief', script: 'brief' });
     expect(REGISTRY.resources.find((r) => r.id === 'recall-state')).toMatchObject({ kind: 'do', entry: 'recall', script: 'recall' });
     expect(resourceByMatch('r2', 'recall-store')).toMatchObject({ id: 'recall-store', entry: 'recall' });
     expect(REGISTRY.resources.find((r) => r.id === 'mailsort-state')).toMatchObject({ kind: 'do', entry: 'mailsort', script: 'mailsort' });
@@ -157,10 +155,10 @@ describe('the registry', () => {
   });
 
   it('keeps the tick within the Workers Free subrequest budget', () => {
-    // 8 status() + 3 probes (website, FlowDay, links) + 1 GraphQL + 4 setGuard + 2 canary calls + 1 reportOps + 12 drift calls.
-    expect(outboundPerTick()).toBe(31);
+    // 9 status() + 3 probes (website, FlowDay, links) + 1 GraphQL + 5 setGuard + 2 canary calls + 1 reportOps + 12 drift calls.
+    expect(outboundPerTick()).toBe(33);
     expect(outboundPerTick()).toBeLessThanOrEqual(MAX_OUTBOUND_PER_TICK);
-    expect(outboundPerRefresh()).toBe(11);
+    expect(outboundPerRefresh()).toBe(12);
   });
 
   it('serves a public view without bindings or probe URLs, within its budget', () => {
@@ -356,7 +354,7 @@ describe('validateRegistry', () => {
 });
 
 it('registers every configured account resource, including bootstrap state', () => {
-  // A namespace its Worker's first deploy has not created yet (recall-state, brief-state) has no identity on either side.
+  // A future namespace awaiting its Worker's first deploy would have no identity on either side.
   for (const kind of ['d1', 'do', 'r2'] as const) expect(REGISTRY.resources.filter(r => r.kind === kind && r.match !== null).map(r => r.match).sort()).toEqual(inventory[kind]);
   expect(REGISTRY.workers.map(w => w.script).sort()).toEqual(inventory.workers);
 });

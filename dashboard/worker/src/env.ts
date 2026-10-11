@@ -23,6 +23,8 @@ export interface Env {
   readonly MAILSORT: Service<WatchOpsEntrypoint>;
   /** recall's Ops entrypoint: status() (counts and codes of the browsing record); its setGuard always refuses. */
   readonly RECALL: Service<WatchOpsEntrypoint>;
+  /** Brief's Ops entrypoint: status and the guard for embedding, learning and source probes. */
+  readonly BRIEF: Service<WatchOpsEntrypoint>;
   readonly HOME: DurableObjectNamespace<HomeState>;
   readonly ASSETS: Fetcher;
 

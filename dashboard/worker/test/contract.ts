@@ -49,6 +49,7 @@ const SERVICES = {
   'notion-publish': [ops.OpsService, WebsiteSyncService],
   mailsort: [ops.OpsService],
   recall: [ops.OpsService],
+  brief: [ops.OpsService],
 } as const;
 
 /** The methods of `app`'s Ops entrypoint, sorted: the dashboard calls only these, the stubs expose exactly these. */

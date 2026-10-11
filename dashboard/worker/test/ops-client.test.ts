@@ -19,6 +19,7 @@ import fleetOk from '../../../contracts/ops-v1/fixtures/OpsStatus/fleet-ok.json'
 import notionPublishOk from '../../../contracts/ops-v1/fixtures/OpsStatus/notion-publish-ok.json';
 import newsletterOk from '../../../contracts/ops-v1/fixtures/OpsStatus/newsletter-ok.json';
 import recallOk from '../../../contracts/ops-v1/fixtures/OpsStatus/recall-ok.json';
+import briefOk from '../../../contracts/ops-v1/fixtures/OpsStatus/brief-ok.json';
 import watchDegraded from '../../../contracts/ops-v1/fixtures/OpsStatus/watch-degraded.json';
 import statusUnavailable from '../../../contracts/ops-v1/fixtures/OpsStatus/status-unavailable.json';
 import guardNormal from '../../../contracts/ops-v1/fixtures/GuardState/normal.json';
@@ -75,7 +76,7 @@ const EVENT_ID = '6d3b2f0e-4c1a-4b7e-8a52-0c9e7f1d2a31';
 type Calls = { app: OpsApp; method: string; args: unknown[] }[];
 
 /** A binding that records every property called on it and answers from `answers`. */
-function recordingEnv(answers: Record<string, () => unknown>): { env: Pick<Env, 'MAIL_HERO' | 'TODOFY' | 'WATCH' | 'FLEET' | 'NEWSLETTER' | 'WEBSITE_SYNC' | 'MAILSORT' | 'RECALL'>; calls: Calls } {
+function recordingEnv(answers: Record<string, () => unknown>): { env: Pick<Env, 'MAIL_HERO' | 'TODOFY' | 'WATCH' | 'FLEET' | 'NEWSLETTER' | 'WEBSITE_SYNC' | 'MAILSORT' | 'RECALL' | 'BRIEF'>; calls: Calls } {
   const calls: Calls = [];
   const binding = (app: OpsApp): unknown =>
     new Proxy(
@@ -91,17 +92,19 @@ function recordingEnv(answers: Record<string, () => unknown>): { env: Pick<Env, 
         },
       },
     );
-  return { env: { MAIL_HERO: binding('mail-hero'), TODOFY: binding('todofy'), WATCH: binding('watch'), FLEET: binding('fleet'), NEWSLETTER: binding('newsletter'), WEBSITE_SYNC: binding('notion-publish'), MAILSORT: binding('mailsort'), RECALL: binding('recall') } as Pick<Env, 'MAIL_HERO' | 'TODOFY' | 'WATCH' | 'FLEET' | 'NEWSLETTER' | 'WEBSITE_SYNC' | 'MAILSORT' | 'RECALL'>, calls };
+  return { env: { MAIL_HERO: binding('mail-hero'), TODOFY: binding('todofy'), WATCH: binding('watch'), FLEET: binding('fleet'), NEWSLETTER: binding('newsletter'), WEBSITE_SYNC: binding('notion-publish'), MAILSORT: binding('mailsort'), RECALL: binding('recall'), BRIEF: binding('brief') } as Pick<Env, 'MAIL_HERO' | 'TODOFY' | 'WATCH' | 'FLEET' | 'NEWSLETTER' | 'WEBSITE_SYNC' | 'MAILSORT' | 'RECALL' | 'BRIEF'>, calls };
 }
 
 const guardInput = { level: 'shed', reason: 'quota_d1_rows_read', until: '2026-09-30T00:10:00.000Z' } as const;
 
-type Wrapper = (env: Pick<Env, 'MAIL_HERO' | 'TODOFY' | 'WATCH' | 'FLEET' | 'NEWSLETTER' | 'WEBSITE_SYNC' | 'MAILSORT' | 'RECALL'>) => Promise<OpsCall<unknown>>;
+type Wrapper = (env: Pick<Env, 'MAIL_HERO' | 'TODOFY' | 'WATCH' | 'FLEET' | 'NEWSLETTER' | 'WEBSITE_SYNC' | 'MAILSORT' | 'RECALL' | 'BRIEF'>) => Promise<OpsCall<unknown>>;
 const WRAPPERS: readonly { app: OpsApp; method: string; call: Wrapper; valid: unknown }[] = [
   { app: 'fleet', method: 'status', call: (env) => opsStatus(env, 'fleet'), valid: fleetOk },
   { app: 'notion-publish', method: 'status', call: (env) => opsStatus(env, 'notion-publish'), valid: notionPublishOk },
   { app: 'newsletter', method: 'status', call: (env) => opsStatus(env, 'newsletter'), valid: newsletterOk },
   { app: 'recall', method: 'status', call: (env) => opsStatus(env, 'recall'), valid: recallOk },
+  { app: 'brief', method: 'status', call: (env) => opsStatus(env, 'brief'), valid: briefOk },
+  { app: 'brief', method: 'setGuard', call: (env) => opsSetGuard(env, 'brief', { level: 'normal', reason: 'quota_normal', until: null }), valid: guardNormal },
   { app: 'mail-hero', method: 'status', call: (env) => opsStatus(env, 'mail-hero'), valid: mailHeroOk },
   { app: 'mail-hero', method: 'setGuard', call: (env) => opsSetGuard(env, 'mail-hero', guardInput), valid: guardShedMail },
   { app: 'mail-hero', method: 'startCanary', call: (env) => opsStartCanary(env, { run_id: 'canary-2026-09-29' }), valid: startQueued },
@@ -116,10 +119,9 @@ const WRAPPERS: readonly { app: OpsApp; method: string; call: Wrapper; valid: un
 
 describe('only the methods of the services each app implements', () => {
   it('knows exactly the apps of the IDL (OpsStatus.app is open on the wire, OpsApp is this list), but those it does not bind yet', () => {
-    expect(OPS_APPS).toEqual(['mail-hero', 'todofy', 'watch', 'fleet', 'newsletter', 'notion-publish', 'mailsort', 'recall'] satisfies readonly OpsApp[]);
+    expect(OPS_APPS).toEqual(['mail-hero', 'todofy', 'watch', 'fleet', 'newsletter', 'notion-publish', 'mailsort', 'recall', 'brief'] satisfies readonly OpsApp[]);
     expect(Object.keys(CALLED_METHODS)).toEqual([...OPS_APPS]);
-    // The brief answers ops-v1 before its go-live commit binds it (recall did until its own): Home calls it from then on.
-    expect(UNBOUND_OPS_APPS).toEqual(['brief']);
+    expect(UNBOUND_OPS_APPS).toEqual([]);
     expect(fieldRules(OpsStatusSchema.field.app).allowed).toEqual([...OPS_APPS, ...UNBOUND_OPS_APPS]);
   });
 
@@ -141,6 +143,7 @@ describe('only the methods of the services each app implements', () => {
     expect([...CALLED_METHODS['mail-hero']].sort()).toEqual(declaredMethods('mail-hero'));
     expect([...CALLED_METHODS.todofy].sort()).toEqual(declaredMethods('todofy'));
     expect([...CALLED_METHODS.watch].sort()).toEqual(declaredMethods('watch'));
+    expect([...CALLED_METHODS.brief].sort()).toEqual(declaredMethods('brief'));
   });
 
   it('calls each wrapper\'s declared method on the right app, with contract-valid input', async () => {
@@ -160,6 +163,7 @@ describe('only the methods of the services each app implements', () => {
     expect(WRAPPERS.filter((w) => w.app === 'mail-hero').map((w) => w.method).sort()).toEqual(declaredMethods('mail-hero'));
     expect(WRAPPERS.filter((w) => w.app === 'todofy').map((w) => w.method).sort()).toEqual(declaredMethods('todofy'));
     expect(WRAPPERS.filter((w) => w.app === 'watch').map((w) => w.method).sort()).toEqual(declaredMethods('watch'));
+    expect(WRAPPERS.filter((w) => w.app === 'brief').map((w) => w.method).sort()).toEqual(declaredMethods('brief'));
   });
 
   it('never sends an input the contract refuses: the call answers invalid_input, as the app would', async () => {
@@ -192,7 +196,7 @@ describe('error handling for every method', () => {
       expect(await wrapper.call(notAnError.env)).toEqual({ ok: false, code: 'unavailable' });
       // An older release without the method: the RPC receiver rejects.
       expect(await wrapper.call(recordingEnv({}).env)).toEqual({ ok: false, code: 'unavailable' });
-      expect(await wrapper.call({} as Pick<Env, 'MAIL_HERO' | 'TODOFY' | 'WATCH' | 'FLEET' | 'NEWSLETTER' | 'WEBSITE_SYNC' | 'MAILSORT' | 'RECALL'>)).toEqual({ ok: false, code: 'not_configured' });
+      expect(await wrapper.call({} as Pick<Env, 'MAIL_HERO' | 'TODOFY' | 'WATCH' | 'FLEET' | 'NEWSLETTER' | 'WEBSITE_SYNC' | 'MAILSORT' | 'RECALL' | 'BRIEF'>)).toEqual({ ok: false, code: 'not_configured' });
       const bad = recordingEnv({ [wrapper.method]: () => ({ unexpected: true }) });
       expect(await wrapper.call(bad.env)).toEqual({ ok: false, code: 'invalid_output' });
       const huge = recordingEnv({ [wrapper.method]: () => ({ ...(wrapper.valid as object), padding: 'x'.repeat(40_000) }) });

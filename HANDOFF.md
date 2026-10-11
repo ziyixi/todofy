@@ -19,27 +19,44 @@ Rules for this file:
 Last updated: 2026-10-11.
 <!-- Active work is separate from the production evidence below. -->
 
-## In flight (2026-10-10, Claude): the brief, going live (first deploy in `archive` mode)
+## In flight (2026-10-11): Brief resource registration and Home monitoring
 
-2026-10-11: landed check-only in `0e48a59`; "Infra apply" created the Access applications `brief` and `brief-feedback`;
-the go-live commit (branch `brief-live`) records the AUD and application id, empties `CHECK_ONLY` and deploys with
-`BRIEF_MODE=archive` (no email). Left: the owner puts `ANTHROPIC_API_KEY` and `RESEND_API_KEY` in the Cloudflare
-dashboard (Workers → brief → Settings → Variables and Secrets, type Secret); the commit after the first deploy records
-the `brief-state` namespace id and empties `FIRST_DEPLOY_PENDING` and the reconcile exclude; Home's `BRIEF` binding
-(`status.type = "ops_v1"`, `UNBOUND_OPS_APPS` emptied, ops-v1 fixtures) comes later. The sender is
-`onboarding@resend.dev`, as the newsletter's, so mail reaches only the Resend account's own address.
+First deployment confirmed: `7bea3ec`, [CI run 38128504001](https://github.com/ziyixi/todofy/actions/runs/38128504001).
+"Infra apply" created the Access applications `brief` and `brief-feedback`. A limited production check confirmed
+`BUILD_SHA=7bea3ec`, `MODE=archive`, the `BriefState` namespace and the configured secret names `ANTHROPIC_API_KEY` and
+`RESEND_API_KEY`; no secret values were read. The GitHub variable `BRIEF_MODE` is also `archive`. This mode fetches
+sources and can call the paid Claude API, but sends no email. Configured keys do not prove successful model calls or
+email delivery.
+
+Current work: `codex/brief-home-monitoring`, based on `7bea3ec`, registers the existing `brief-state` namespace,
+regenerates the resource inventory, removes the first-deploy exceptions and connects Home's `BRIEF` Ops binding
+(`status.type = "ops_v1"`, status/guard fixtures and labels). CI must deploy Brief before Home at the same SHA.
+Implementation and local checks are complete; branch CI, release and production acceptance for this follow-up
+remain pending. Local verification: 435 repository checks (one skipped), 33 service-catalog and 17 cloud-config
+tests; proto lint/breaking checks; Home's 267 unit, 97 workerd, 158 web and 17 deployment-configuration tests;
+Brief's six Ops tests and the workerd restart test preserving the saved budget. Home typecheck, lint and web build
+passed. A read-only comparison with the Cloudflare account found zero Worker, D1, DO or R2 inventory differences.
+The release classifier selects only Brief and Home; Newsletter, VPS and other applications are not selected.
+
+The production settings page was checked read-only: version `7bea3ec`, archive mode and the owner's saved **$80**
+monthly budget. Preserve this stored setting; the code's initial default remains $40, and the Claude Console limit
+is separate and unverified. Keep `MODE=archive`; Newsletter is unchanged by this work. The sender remains
+`onboarding@resend.dev`, as the newsletter's, so future mail can reach only
+the Resend account's own address until the sender changes.
 
 Owner request 2026-10-10: replace the newsletter with a cheaper, better briefing (design in `brief/docs/design.md`,
 rules in `brief/AGENTS.md`, use and deploy in `brief/README.md`). The owner's answers of 2026-10-10 are in the design
 (§3.3, §6, §19): the LLM topics 熟悉 (seismology and ML for geophysics 专业, the rest 通俗); full text wherever it is
 public as the owner's browser would reach it (AI-agent robots blocks do not apply, a group naming `ziyixi-brief`
 does; pacing, the honest UA and arXiv's 1 request / 3 s stay; never a paywall or a login); the spend approved in
-principle ($40 budget, $50 Console limit); 06:30 weekdays and 07:30 Saturday; `brief.ziyixi.science`; the deep read at
-`high` effort. The newsletter's retirement stays a separate decision (root `AGENTS.md` now names the brief as its
+principle (originally a $40 budget and a suggested $50 Console limit); 06:30 weekdays and 07:30 Saturday;
+`brief.ziyixi.science`; the deep read at `high` effort. The newsletter's retirement stays a separate decision
+(root `AGENTS.md` now names the brief as its
 successor in progress).
 
-Squashed onto `main` at `2a6e241` as one commit on branch `brief-land` (the design, the Worker, the archive UI, the
-email's render, the dry run and the review fixes of 2026-10-11), nothing deployed:
+The initial implementation landed on `main` in `0e48a59`, from `brief-land` (the design, the Worker, the archive UI,
+the email's render, the dry run and the review fixes of 2026-10-11). The following records that build's predeployment
+implementation and synthetic validation:
 
 - `brief/worker/`: the fetch handler (Access, CSRF, `/feedback` with its HMAC token before anything else) and
   `BriefState` (`brief-v1`): the alarm chain with per-step budgets (40 subrequests, a 4-minute step wall with its own
@@ -89,15 +106,15 @@ email's render, the dry run and the review fixes of 2026-10-11), nothing deploye
   1 MiB 523, the embedding and gate 96, the pick with its hold-back 35, the check over 68 aligned quotes 137; a day at
   the bounds about 36,000 rows read and 6,500 written.
 
-Landed check-only (recall's pattern, each list one entry): the catalog (`brief/app.toml`, Home's tile with
+Initial check-only integration (`0e48a59`, historical): the catalog (`brief/app.toml`, Home's tile with
 `status.type = "none"`), `CHECK_ONLY` in `ci_changes.py`, the "Brief checks" and "Brief deploy" jobs, the release recipe
-in `worker-release.yml` (it builds `brief/web`; `CHECK_ONLY` keeps it from running), the reconcile matrix, the release
+in `worker-release.yml` (it builds `brief/web`; `CHECK_ONLY` kept it from running), the reconcile matrix, the release
 and bootstrap tools, cf-guard's committed-config test, `infra/` (the owner application `brief` and the Bypass
 application `brief-feedback` of exactly `/feedback` with its policy: 39 objects; `AHEAD_OF_DEPLOY`), the drift desired
 state (with `rules` taught as a bundling key), the account inventory and the reconcile matrix
-(`FIRST_DEPLOY_PENDING = {"brief"}` and the matrix's `exclude`, so neither fails before the first deploy) and ops-v1's
-`OpsStatus.app` (`UNBOUND_OPS_APPS` adds `brief`). Noisy by design until "Infra apply": "Infra drift" (three creates)
-and Home's 配置漂移.
+(`FIRST_DEPLOY_PENDING = {"brief"}` and the matrix's `exclude` skipped checks before the first deploy) and ops-v1's
+`OpsStatus.app` (`UNBOUND_OPS_APPS` contained `brief`). "Infra drift" and Home's 配置漂移 showed the three missing
+Access objects until "Infra apply". These were rollout stages, not the current deployment state.
 
 Verify, in `brief/worker`: `npm run lint`, `npm run typecheck`, `npm test`, `npm run test:runtime`; in `brief/web`:
 `npm run lint`, `npm run typecheck`, `npm test`, `npm run build` (the JavaScript budget); in `brief`:
@@ -107,14 +124,16 @@ tests); `proto/`: lint, api-lint, breaking, the rules self-test, the codecs' tes
 
 Open for the owner: whether `geo.earth` stays 熟悉 (the design's reading of "seismology and geophysics stay 专业": the
 seismology and ML-for-geophysics topics 专业, the broader solid Earth 熟悉); the writer's cache breakpoint follows the
-spec's caching of the stable prefix (about $0.1 a month when it misses, design §7). Nothing has called the real Claude
-API: the prompts, the efforts and how well Opus keeps the length and format rules wait for the archive days.
+spec's caching of the stable prefix (about $0.1 a month when it misses, design §7). The initial checks above used fake
+Claude responses. The prompts, efforts and Opus's length and format handling still need archive-day acceptance.
 
-Next, in order: land (CI); the owner steps of design §18 (Console workspace and key, Resend key, "Infra apply",
-the GitHub secrets `BRIEF_CSRF_SIGNING_KEY`, `BRIEF_FEEDBACK_SIGNING_KEY`, `BRIEF_MAIL_FROM`, `BRIEF_MAIL_TO` and
-`BRIEF_MODE=archive`); the go-live commit (AUD and ids through `generate.py`, `CHECK_ONLY`/`AHEAD_OF_DEPLOY` emptied,
-Home's `BRIEF` binding and `status.type = "ops_v1"`, `UNBOUND_OPS_APPS` emptied, ops-v1 fixtures in `contracts/ops-v1`);
-after the first deploy the namespace id (and `FIRST_DEPLOY_PENDING` and the reconcile exclude emptied); then the archive days and the shadow week (design §16).
+Next, in order:
+
+1. Complete the resource and Home integration checks, then release the same green SHA through main CI.
+2. Confirm Brief and Home's build SHAs, the registered namespace and Home's real Ops status; verify `MODE=archive`
+   and the saved $80 budget remain in place. Record the exact CI run and production evidence here.
+3. Observe the archive days for source coverage, model quality and cost (design §16). Shadow mode, live sending and
+   Newsletter retirement require separate owner decisions.
 
 
 ## Done (2026-10-11, Claude): mailsort archives every labelled mail

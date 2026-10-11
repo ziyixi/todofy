@@ -82,6 +82,11 @@ binding = "RECALL"
 service = "recall"
 entrypoint = "Ops"
 
+[[services]]
+binding = "BRIEF"
+service = "brief"
+entrypoint = "Ops"
+
 # One trigger (the account's Free plan allows 5 in total): status, usage, guard, canary, digest.
 [triggers]
 crons = ["*/30 * * * *"]

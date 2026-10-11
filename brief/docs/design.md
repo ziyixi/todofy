@@ -10,16 +10,17 @@ a Haiku entailment check logs overstatements. One send per day through Resend, n
 outcome; a private archive behind Access shows every issue, its sources, its quotes and what it cost. The owner's
 👍 / 👎 / 多来点 adjust source and topic weights weekly.
 
-**Status: Worker and archive UI built, check-only** (2026-10-10). The Worker (`worker/`), its tests (unit, and workerd
-with fake feeds, a fake Claude API, a fake Workers AI and a fake Resend, CPU and rows at the bounds), the deploy wrapper
-(`deploy/`), the owner API `brief.ui.v1` (`proto/brief/ui/v1`, restored from `549069d` and reshaped by the owner's
-answers) and the ops-v1 join landed with the first build, the archive UI (`web/`, §11), the email's final render and the
-end-to-end dry run (§17) after it; `brief` is in `CHECK_ONLY` of `.github/scripts/ci_changes.py`, so CI checks it and
-deploys nothing. A review on 2026-10-11 made the emergency stops and the send cutoff hold for an issue already running,
-widened the check (headings, links, a 10% bound on quantities) and made the cards fair to the owner's own field (§4-§8,
-§15). Not done yet: the owner steps of §18 (the Access applications, the keys, the GitHub secrets, `BRIEF_MODE`), then
-the go-live commit (the AUD, Home's binding). The owner approved the spend in principle on
-2026-10-10 ($20-30 a month, a $40 budget, a $50 Console limit); the newsletter's retirement stays a separate decision
+**Status: deployed in archive mode** (2026-10-11). The implementation landed in `0e48a59`; the first deployment,
+`7bea3ec`, passed [CI](https://github.com/ziyixi/todofy/actions/runs/38128504001). The Access applications and
+`BriefState` namespace exist, and production has both provider secret names configured. Production `MODE` and the
+GitHub variable `BRIEF_MODE` are `archive`: the pipeline can call the paid Claude API and archive issues, but sends
+no email. Real model quality and delivery remain separate acceptance steps (§16).
+
+The resource registration and Home Ops integration are being completed on `codex/brief-home-monitoring`; deployment
+of Brief and Home at the same commit and the production checks remain pending. [`HANDOFF.md`](../../HANDOFF.md)
+records that rollout and the initial synthetic validation. The production settings page confirms the owner's saved
+$80 monthly budget; preserve it across deployment. This does not change the $40 initial default or establish the
+Console spend limit (§13). Newsletter continues unchanged, and its retirement remains a separate decision
 (root `AGENTS.md`).
 
 The owner's decisions of 2026-10-10: the current newsletter's quality is low and its topics are not the owner's; make
@@ -45,10 +46,9 @@ At Opus prices the newsletter's tokens would cost about $300+ a month; that expl
 of searching, but it is not a saving against today's bill, which the subscription covers. The honest comparison is
 about $25 a month of included credits against $0 extra today, for the owner's topics and a checked text.
 
-The brief does the newsletter's job as a Worker, so calling it a new app does not get around root `AGENTS.md`: the
-owner approves the successor explicitly (§18 step 1), and the first build lands a root `AGENTS.md` change with it, a
-Brief line among the app entries and the newsletter marked as being replaced by the brief, its retirement decided
-separately (§16). The two run side by side for the shadow week.
+The owner approved Brief as the newsletter's successor on 2026-10-10. The first implementation updated root
+`AGENTS.md` accordingly; Newsletter's retirement remains a separate decision (§16). The current rollout keeps
+Brief in archive mode and leaves Newsletter unchanged. A later shadow week requires the owner's approval.
 
 ## 1. Shape
 
@@ -68,7 +68,7 @@ One Worker `brief`, one SQLite Durable Object `BriefState` ("brief-v1"), the sha
 | `worker/src/send.ts` | **The only code that calls Resend**, through the ledger (§12) |
 | `worker/src/learn.ts` | Votes into weights (§10) |
 | `web/` | The archive: Chinese, mobile-first, no framework, over `brief.ui.v1` (§11) |
-| `brief.ui.v1` | The owner API (AIP resources and custom methods): drafted in `549069d`, lands in `proto/brief/ui/v1/` with the first build (§18) |
+| `brief.ui.v1` | The owner API (AIP resources and custom methods) in `proto/brief/ui/v1/`, landed with the first implementation in `0e48a59` |
 
 No D1, R2, KV, Queues, Workflows or cron trigger. Bindings: `BRIEF` (the object), `ASSETS`, `AI` (Workers AI, for
 bge-m3 only). Vars: `PUBLIC_HOST`, `ACCESS_ISSUER`, `ACCESS_AUDIENCE`, and from the deploy wrapper `BUILD_SHA` and
@@ -670,6 +670,10 @@ the picks have none (one call a day each). Output and thinking dominate, so effo
    (`budget_spent`: critical when it blocks an issue's call, info otherwise).
 3. **The Console workspace's spend limit** (suggested $50), the outer wall, which the brief cannot change.
 
+On 2026-10-11 the production settings page confirmed the owner's saved **$80** monthly budget in 设置. It is persisted
+in `BriefState` and must survive deployment. The initial code default remains $40, and the actual Console workspace
+limit has not been verified; the $50 above is the original recommendation, not a record of its current setting.
+
 No per-issue or per-day cap: with 64K reservations a per-issue cap of $2.50 would leave no room for the repair, and the
 attempt limits already bound an issue (one pick and its retry, 3 writes, 2 repairs, 4 bisection calls; a deploy-killed
 call bounded by the cutoff), while the month's budget bounds the rest.
@@ -768,7 +772,8 @@ status, error type); invocation logs and traces off.
 
 ## 16. The shadow run
 
-1. **Archive mode** (`BRIEF_MODE=archive`, one or two days): issues are made and archived, nothing is emailed. Check
+1. **Archive mode** (`BRIEF_MODE=archive`, one or two days): sources are fetched and paid Claude API calls run;
+   issues are made and archived, nothing is emailed. Check
    every source from Cloudflare's egress (ListSources: the research fetched from a home IP, and bot walls differ:
    Wiley, Nature, Science, OUP, GSW, OpenAI, FT, NYT, the Economist; a blocked AGU journal switches to its Crossref
    alternate, §3.1), the robots verdicts, the costs, the Opus durations against the 13-minute deadline (they decide the
@@ -834,33 +839,27 @@ Workers AI. CI never holds a Claude key.
 
 ## 18. Owner steps
 
-1. **Approve two things**: the spend (the Claude API is a new paid product, root `AGENTS.md`; about $20-30 a month from
-   the Max 5x plan's API credits), and the brief as the newsletter's successor on Cloudflare (root `AGENTS.md` keeps the
-   newsletter a VPS container, "不改成 Worker"; the retirement itself stays a separate decision, §16).
-2. **Credits**: claim the Max plan's API credits and link a Console organization.
-3. **Key**: in the Console, a dedicated workspace `brief` with a monthly spend limit (suggested $50) and an API key in
-   it; after the first deploy, from `brief/worker/` on your own machine, `npx wrangler secret put ANTHROPIC_API_KEY
-   --config ../wrangler.toml`. Never paste it into a chat, an issue or GitHub.
-4. **Resend**: a key with sending access only, for the domain the newsletter already sends from, put the same way as
-   `RESEND_API_KEY`; the GitHub production secrets `BRIEF_MAIL_FROM` and `BRIEF_MAIL_TO`.
-5. **Access**: dispatch "Infra apply" for the Access application `brief` (the whole host) and the Bypass application
-   `brief-feedback` (exactly `brief.ziyixi.science/feedback`); the AUD goes into `config/resources.toml` as for the
-   other apps.
-6. **GitHub**: secrets `BRIEF_CSRF_SIGNING_KEY` and `BRIEF_FEEDBACK_SIGNING_KEY` (64 hex each), the variable
-   `BRIEF_MODE=archive`.
-7. **Approve the shadow run**: `BRIEF_MODE=shadow`; after the week, `live`.
+Completed through the first deployment on 2026-10-11:
 
-Repository side, with the first build (as the watch app's W2):
+- The owner approved the spend and successor on 2026-10-10. The implementation and owner API landed in `0e48a59`.
+- "Infra apply" created `brief` and the exact-path `brief-feedback` Access applications; their identities are recorded
+  in the repository. `7bea3ec` passed CI and deployed Brief in archive mode.
+- A limited production check confirmed `BUILD_SHA=7bea3ec`, `MODE=archive`, the `BriefState` namespace and the names
+  `ANTHROPIC_API_KEY` and `RESEND_API_KEY`. It did not read secret values or prove a successful provider call.
+  The GitHub variable `BRIEF_MODE` is also `archive`.
+- The production settings page confirms version `7bea3ec`, archive mode and the owner's saved $80 monthly budget.
+  Preserve the persisted budget (§13); the UI's configured-provider indicators do not prove calls or delivery.
 
-- the root `AGENTS.md` change: a Brief line among the app entries (its AGENTS and this design), and the Newsletter line
-  marked as being replaced by the brief, its retirement decided separately;
-- `proto/brief/ui/v1`, restored from `549069d` (`git restore --source 549069d -- proto/brief`) and reshaped by the
-  owner's answers and this revision (the pick's reasons, formats, 还有, verdicts, quiet days, stale sources, 恢复调用),
-  with its `proto/README.md` paragraph and its `PROTO_PACKAGES` line mapping it to `brief`, in the same change as the
-  code that imports it;
-- `brief/app.toml` with the host, the Home entry and `owner_machine_secrets`; `brief` in `CHECK_ONLY` of
-  `.github/scripts/ci_changes.py` until the Access application exists, then a `Brief deploy` job through
-  `deploy/deploy-vars.mjs` (never a hand deploy).
+Current repository follow-up (`codex/brief-home-monitoring`): register the existing `brief-state` namespace in
+`config/resources.toml` and the generated resource inventory; remove the first-deploy exceptions; connect Home's
+`BRIEF` binding to Brief's `Ops`, including the bounded status/guard contracts and labels. CI must deploy Brief before
+Home at the same SHA. The release and production acceptance are pending; see [`HANDOFF.md`](../../HANDOFF.md).
+
+After that release, confirm both build SHAs, the registered namespace, Home's real Ops status, `MODE=archive` and the
+preserved $80 budget. Archive-day source coverage, model quality and costs still need observation (§16). A shadow
+week, live sending and Newsletter retirement each require the owner's decision; this follow-up changes none of them.
+The owner manages provider keys in the Cloudflare dashboard or with `wrangler secret put`, never through chat,
+issues or GitHub. The Console workspace's actual credit balance and spend limit are separate owner-side settings.
 
 ## 19. Deviations and open questions
 
@@ -880,7 +879,8 @@ Deviations from the spec, each for a reason:
 6. **The source line is code's** (§7), from the registry, so a review status is never the model's guess.
 7. **Votes take two taps** (§10): a GET that voted would count every scanner's visit.
 8. **Learning moves weights only** (§10), never the profile's text or a prompt: voted titles are untrusted.
-9. **The owner API waits for the first build** (§18): it is designed, not frozen.
+9. **The owner API landed with the first implementation** (§18): its design and consumers were checked together;
+   later changes follow the repository's proto compatibility rules.
 10. **No owner mode in the UI**: the deployment's `BRIEF_MODE` and 暂停 cover it (less is more).
 
 The owner's answers (2026-10-10):
@@ -892,10 +892,11 @@ The owner's answers (2026-10-10):
    honest user agent stay; paywalls and logins are never circumvented; the archive stays private behind Access
    (§3.3). arXiv's API terms (one request every 3 seconds) still apply.
 3. **Deep read effort**: `high`.
-4. **Spend**: approved in principle ($20-30 a month expected, a $40 monthly budget, a $50 Console limit); the defaults
-   below stand.
+4. **Spend**: approved in principle ($20-30 a month expected, an initial $40 monthly budget and a suggested $50 Console
+   limit). The owner later saved an $80 runtime budget (§13).
 
 Defaults unless the owner says otherwise: sends at 06:30 on weekdays and 07:30 on Saturday, none on Sunday; a monthly
-budget of $40 and a $50 Console limit; the host `brief.ziyixi.science`; the Guardian's Open Platform API and Springer
-Nature's metadata API off (each needs a free key the owner sets; Springer Nature's only if Nature's feeds block
+budget default of $40 and a suggested $50 Console limit (the current runtime budget is $80, §13); the host
+`brief.ziyixi.science`; the Guardian's Open Platform API and Springer Nature's metadata API off (each needs a free key
+the owner sets; Springer Nature's only if Nature's feeds block
 Workers).

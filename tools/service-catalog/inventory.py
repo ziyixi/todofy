@@ -14,15 +14,14 @@ DO_KEYS = {
     "MailCoordinator": "mail-coordinator", "TodofyCore": "todofy-core-do", "WatchState": "watch-state",
     "MailsortState": "mailsort-state", "RecallState": "recall-state", "BriefState": "brief-state",
 }
-# Workers (script names) before their first deploy, one entry per app: the brief's until its go-live commit has
-# deployed (brief/docs/design.md section 18). Such a Worker and the buckets it binds stay registered (Home's registry
-# names them) but may be absent: "Infra apply" creates the bucket, the first deploy the Worker. Its Durable Object
+# Workers (script names) before their first deploy, one entry per app. Such a Worker and the buckets it binds stay
+# registered (Home's registry names them) but may be absent: "Infra apply" creates the bucket, the first deploy the Worker. Its Durable Object
 # namespaces get their ids only from that deploy, so they are neither expected nor registered, and an existing one is
 # not reported. The commit after the first deploy records those ids in config/resources.toml and removes the entry
-# (expected() refuses a recorded id while the entry remains; recall's left on 2026-10-11). The entry also keeps the
+# (expected() refuses a recorded id while the entry remains). The entry also keeps the
 # app out of "Personal cloud reconcile"'s Worker comparison, which needs a verified deployment (the matrix's exclude,
 # held equal by .github/scripts/test_reconcile_workflow.py).
-FIRST_DEPLOY_PENDING: set[str] = {"brief"}
+FIRST_DEPLOY_PENDING: set[str] = set()
 OUTPUT = "dashboard/worker/src/account-inventory.json"
 BUCKET_NAME = re.compile(r"[a-z0-9][a-z0-9-]{1,61}[a-z0-9]")
 PAGE_LIMIT = 100

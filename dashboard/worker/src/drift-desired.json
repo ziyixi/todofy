@@ -278,6 +278,11 @@
           "source": "config"
         },
         {
+          "name": "BRIEF",
+          "type": "service",
+          "source": "config"
+        },
+        {
           "name": "BUILD_SHA",
           "type": "plain_text",
           "source": "deploy"

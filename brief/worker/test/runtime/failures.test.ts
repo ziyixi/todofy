@@ -442,6 +442,35 @@ describe('the walls and the switches', () => {
 });
 
 describe('the owner API', () => {
+  it('preserves the owner budget through a redeploy, Ops reads and a pause-only settings update', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'brief-budget-redeploy-'));
+    try {
+      const first = await startHarness({ persist: dir, bindings: { MODE: 'archive' } });
+      h = first;
+      await first.clock(la('2026-10-11', '12:00'));
+      await first.api.updateSettings({ settings: { name: 'settings', monthlyBudgetUsd: 80 }, updateMask: { paths: ['monthly_budget_usd'] }, requestId: op() });
+      await first.dispose();
+      h = null;
+
+      const second = await startHarness({ persist: dir, bindings: { MODE: 'archive', BUILD_SHA: 'test-monitoring' } });
+      h = second;
+      await second.clock(la('2026-10-11', '12:01'));
+      expect(await second.api.getSettings({ name: 'settings' })).toMatchObject({ monthlyBudgetUsd: 80, paused: false });
+      for (let read = 0; read < 2; read++) {
+        expect(await second.opsStatus()).toMatchObject({ counters: { budget_month_cents: 8000 }, modes: { mode_limited: true } });
+      }
+      await second.api.updateSettings({ settings: { name: 'settings', paused: true }, updateMask: { paths: ['paused'] }, requestId: op() });
+      expect(await second.api.getSettings({ name: 'settings' })).toMatchObject({ monthlyBudgetUsd: 80, paused: true });
+      expect(await second.opsStatus()).toMatchObject({ counters: { budget_month_cents: 8000 }, modes: { paused: true } });
+      expect(second.claude.requests).toHaveLength(0);
+      expect(second.sent).toHaveLength(0);
+    } finally {
+      await h?.dispose();
+      h = null;
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it('keeps the settings rules: an explicit mask, the budget range, the etag, AIP-155', async () => {
     const harness = await startHarness();
     h = harness;

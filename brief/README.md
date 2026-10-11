@@ -6,10 +6,16 @@ itself, Claude Haiku 5.5 screens them, Claude Opus 5.5 picks the day's items sid
 checks every quote, name and number. One Worker and one SQLite Durable Object on Workers Free; the Claude API is its
 only paid product. Design: [`docs/design.md`](docs/design.md). Rules: [`AGENTS.md`](AGENTS.md).
 
-**Status: Worker and archive UI built, check-only** (2026-10-10). CI checks both on every change and deploys nothing:
-`brief` is in `CHECK_ONLY` until "Infra apply" has created its Access applications and the go-live commit adds the AUD
-and Home's binding ([design §18](docs/design.md#18-owner-steps)). The owner approved the spend in principle; the
-newsletter's retirement is a separate decision.
+**Status: deployed in archive mode** (2026-10-11). The first deployment, `7bea3ec`, passed
+[CI](https://github.com/ziyixi/todofy/actions/runs/38128504001). Production `MODE` and the GitHub variable `BRIEF_MODE`
+are both `archive`: sources are fetched and paid Claude API calls can run, but no email is sent. The follow-up
+resource registration and Home monitoring are in progress; their release and production checks are tracked in
+[`HANDOFF.md`](../HANDOFF.md). Newsletter continues unchanged, and its retirement remains a separate decision.
+
+The owner has saved a monthly budget of **$80** in 设置, confirmed on the production settings page on 2026-10-11.
+Deployments must preserve this stored setting. The code's initial default remains $40; the separate Claude Console
+spend limit has not been verified. Both provider secret
+names are configured in production; that confirms configuration, not successful model calls or email delivery.
 
 | Path | What it is |
 | --- | --- |
@@ -65,13 +71,14 @@ loopback fake named by `DEV_FAKE_UPSTREAM`.
 
 Only from GitHub Actions: `Brief deploy` (`.github/workflows/ci.yml`, the recipe in `worker-release.yml`) on `main`
 after `CI gate`, in the `production` environment, through `deploy/deploy-vars.mjs` (never a plain `wrangler deploy`).
-While `brief` is in `CHECK_ONLY` its deploy output stays false; the recipe builds `web/` and ships that build.
+The recipe builds `web/` and ships that build. Home's `BRIEF` Ops binding is part of the follow-up integration;
+its deployment must follow Brief's deployment of the same commit. See [`HANDOFF.md`](../HANDOFF.md) for release evidence.
 
 The wrapper sets `MODE` (the GitHub variable `BRIEF_MODE`: `off`, `archive`, `shadow` or `live`) and `BUILD_SHA`, and
 writes the Worker secrets `ACCESS_OWNER` and `ACCESS_OWNER_ALIASES` (from the dashboard's secrets: one owner),
 `CSRF_SIGNING_KEY`, `FEEDBACK_SIGNING_KEY`, `MAIL_FROM` and `MAIL_TO` (from `BRIEF_*` secrets). It never writes, needs
-or deletes `ANTHROPIC_API_KEY` or `RESEND_API_KEY`: the owner puts them from their own machine
-(`npx wrangler secret put ANTHROPIC_API_KEY --config ../wrangler.toml` from `worker/`), and `wrangler deploy
+or deletes `ANTHROPIC_API_KEY` or `RESEND_API_KEY`: the owner manages them in the Cloudflare dashboard or from their
+own machine (`npx wrangler secret put ANTHROPIC_API_KEY --config ../wrangler.toml` from `worker/`), and `wrangler deploy
 --secrets-file` keeps them (`deploy/test/secrets-kept.test.mjs`). Never paste a key into a chat, an issue or GitHub.
 
 The release checks that production runs the commit, that Access answers the archive and the owner API with its login

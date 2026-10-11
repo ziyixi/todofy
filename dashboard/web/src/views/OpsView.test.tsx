@@ -73,8 +73,8 @@ describe('操作与记录', () => {
     // recall: its Ops entrypoint (counts and codes of the browsing record).
     expect(rows[7]).toHaveTextContent('ops-v1 状态接口')
     expect(within(rows[7] as HTMLElement).getAllByRole('cell').at(-1)).toHaveTextContent('recall')
-    // The brief: check-only the same way.
-    expect(rows[8]).toHaveTextContent('未接入监控')
+    // Brief's status and guard are available through its own Ops binding.
+    expect(rows[8]).toHaveTextContent('ops-v1 状态接口')
     expect(within(rows[8] as HTMLElement).getAllByRole('cell').at(-1)).toHaveTextContent('brief')
     expect(rows[9]).toHaveTextContent('公开地址探测')
     expect(rows[11]).toHaveTextContent('ops-v1 状态接口')

@@ -137,7 +137,7 @@ PREFIX = {app: app.replace("-", "_") for app in APPS}
 CHECK_ONLY: set[str] = set()
 # Apps whose Ops entrypoint Home binds (dashboard/wrangler.toml): while one of them is CHECK_ONLY its Worker does not
 # exist yet, so Home's deploy (whose binding would name a missing service) waits too.
-HOME_BOUND = {"fleet", "mailsort", "recall"}
+HOME_BOUND = {"fleet", "mailsort", "recall", "brief"}
 KEYS = (
     "todofy_check",
     "mail_hero_check",
