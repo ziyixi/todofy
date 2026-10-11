@@ -1,5 +1,5 @@
 // A label: one category mailsort may put a mail into (mailsort/docs/design.md §3). It is a Gmail label whose name is
-// display_name (a path such as `开发/CI通知`, a nested label), plus the owner's description that the decision model
+// display_name (a single-level English name), plus the owner's description that the decision model
 // reads as the category's criteria.
 
 syntax = "proto3";
@@ -44,14 +44,22 @@ message Label {
     GMAIL_STATE_NAME_TAKEN = 5;
   }
 
+  // A synchronized Gmail condition that blocks new writes with this label.
+  enum Problem {
+    // No recorded problem.
+    PROBLEM_UNSPECIFIED = 0;
+    // The linked Gmail name is not a single-level English label name.
+    PROBLEM_INVALID_NAME = 1;
+    // The Gmail label has nested labels; it cannot receive new classifications.
+    PROBLEM_HAS_CHILDREN = 2;
+  }
+
   // labels/{label}: 1 to 40 characters of `a-z`, `0-9` and `-`, starting with a letter (AIP-122); it never
-  // changes. Without a `label_id` CreateLabel derives one from the path (`开发/CI通知` is `dev-ci-notices`).
+  // changes. Without a `label_id` CreateLabel derives one from the English name.
   string name = 1 [(google.api.field_behavior) = IDENTIFIER];
-  // The Gmail name: a path of 1 to 3 segments joined by "/" (a Gmail nested label, `开发/CI通知`), each segment 1
-  // to 40 characters without control characters or surrounding spaces, at most 100 characters in all, and never
-  // starting with the segment `分拣` (the legacy prefix: `分拣/x` is read as `x`). Only leaves are labels: no
-  // label's path is the parent of another's. The parents exist in Gmail as plain grouping labels, created as
-  // needed, and never get a mail.
+  // The Gmail name: one English level, 1 to 40 characters, including at least one ASCII letter. ASCII digits,
+  // spaces and &'().,+_- are allowed; slashes and non-ASCII characters are refused on new writes. Historical
+  // Chinese or nested names remain readable until the owner consolidates or renames them.
   string display_name = 2 [(google.api.field_behavior) = REQUIRED];
   // What belongs in this label, in the owner's words: the model's criteria for the option, read as
   // `display_name: description`. At most 300 characters. A label without one is never offered to the model, so
@@ -94,4 +102,6 @@ message Label {
   // rules seeded the first ones. A public mailbox provider's domain is never one. At most 50; RemoveTrustedDomain
   // takes one off.
   repeated string trusted_domains = 15 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // A condition found by SyncLabels that blocks new Gmail writes. Unset when no condition is recorded.
+  Problem problem = 16 [(google.api.field_behavior) = OUTPUT_ONLY];
 }

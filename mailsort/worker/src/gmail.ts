@@ -10,15 +10,18 @@
  *   messages_list  GET   /gmail/v1/users/me/messages?labelIds=INBOX&q=newer_than:2d   the resync after a lost cursor
  *   message_get    GET   /gmail/v1/users/me/messages/{id}                   format=full or metadata, fixed fields
  *   labels_list    GET   /gmail/v1/users/me/labels
- *   labels_create  POST  /gmail/v1/users/me/labels                          a name the store plans: a label's path
- *                                                                            or a parent it nests under
+ *   labels_create  POST  /gmail/v1/users/me/labels                          an exact planned single English name
  *   labels_patch   PATCH /gmail/v1/users/me/labels/{owned id}               the name only, to the path the store
  *                                                                            plans for that label
- *   message_modify POST  /gmail/v1/users/me/messages/{id}/modify            exactly two shapes:
+ *   merge_list     GET   /gmail/v1/users/me/messages                       approved source, first 10 IDs, all time
+ *   merge_metadata GET   /gmail/v1/users/me/messages/{registered id}       labels and history identity only
+ *   labels_hide    PATCH /gmail/v1/users/me/labels/{verified empty id}     hide visibility, never delete
+ *   message_modify POST  /gmail/v1/users/me/messages/{id}/modify            ledger shapes or an approved consolidation swap:
  *     classify: addLabelIds = [one owned label], removeLabelIds = [] or [INBOX], for a ledger row in `intended` or
  *               `applied` whose `archived` matches;
  *     undo:     removeLabelIds = [that owned label], addLabelIds = [] or [INBOX] (INBOX exactly when the row
- *               archived), for a ledger row in `undo_intended`.
+ *               archived), for a ledger row in `undo_intended`;
+ *     merge:    add one owned target and remove one owned source, for the persisted private migration intent.
  *
  * So there is no path to trash, untrash, delete, batchDelete, batchModify, send, drafts, filters, settings or
  * forwarding, and no way to touch UNREAD, STARRED, IMPORTANT, SPAM, TRASH, CATEGORY_* or a label mailsort does not own.
@@ -30,7 +33,8 @@
  *
  * Nothing here logs. Answers are read with a byte cap and parsed as JSON; their content is untrusted mail data.
  */
-import { GOOGLE_TIMEOUT_MS, LABEL_DEPTH_MAX, MESSAGE_MAX_BYTES, RESPONSE_MAX_BYTES, RESYNC_QUERY } from './limits.ts';
+import { ownerPath } from './paths.ts';
+import { GOOGLE_TIMEOUT_MS, MESSAGE_MAX_BYTES, RESPONSE_MAX_BYTES, RESYNC_QUERY } from './limits.ts';
 
 export const GMAIL_HOST = 'gmail.googleapis.com';
 export const TOKEN_HOST = 'oauth2.googleapis.com';
@@ -71,7 +75,7 @@ export function hasControl(text: string): boolean {
   return false;
 }
 
-export type GmailOp = 'token' | 'profile' | 'history' | 'messages_list' | 'message_get' | 'labels_list' | 'labels_create' | 'labels_patch' | 'message_modify';
+export type GmailOp = 'token' | 'profile' | 'history' | 'messages_list' | 'message_get' | 'labels_list' | 'labels_create' | 'labels_patch' | 'message_modify' | 'merge_list' | 'merge_metadata' | 'merge_modify' | 'labels_hide';
 
 /** A ledger row as the guard needs it (store.ts LedgerState). */
 export interface LedgerView {
@@ -83,12 +87,19 @@ export interface LedgerView {
 export interface Ownership {
   /** Gmail IDs of the labels mailsort owns: the linked labels of its store (created by it, or adopted). */
   ownedLabelIds(): ReadonlySet<string>;
-  /** The paths of the store's labels: the only names labels.create may make, with the parents they nest under. */
+  /** Exact single-level names planned by the store; labels.create cannot create grouping parents. */
   plannedPaths(): ReadonlySet<string>;
   /** The path the store plans for the owned Gmail label `labelId` (the only name labels.patch may give it), or null. */
   plannedPath(labelId: string): string | null;
   /** The ledger row that adds `labelId` to `messageId`, or null. */
   ledger(messageId: string, labelId: string): LedgerView | null;
+  /** Exact private consolidation plan/intent; absent outside this operation. */
+  mergeListLabel?(labelId: string): boolean;
+  mergeMessage?(messageId: string): boolean;
+  mergeSwap?(messageId: string, sourceId: string, targetId: string): boolean;
+  mergeHide?(labelId: string): boolean;
+  mergeRename?(labelId: string): string | null;
+
 }
 
 /** A request the closed table refuses. Thrown before fetch; the message is a fixed code. */
@@ -155,23 +166,8 @@ function labelList(value: unknown): string[] {
   return value;
 }
 
-/**
- * Whether `name` has the shape of a label path (a Gmail nested label, `开发/CI通知`): 1 to LABEL_DEPTH_MAX segments,
- * each non-empty without surrounding spaces, no control characters, at most Gmail's 225 characters. A second check
- * besides the store's plan, which only ever holds such paths.
- */
-function pathShaped(name: unknown): name is string {
-  if (typeof name !== 'string' || name.length > 225 || hasControl(name)) return false;
-  const segments = name.split('/');
-  return segments.length <= LABEL_DEPTH_MAX && segments.every((segment) => segment !== '' && segment === segment.trim());
-}
-
-/** Whether `name` is a planned path or a parent one nests under (`开发` for `开发/CI通知`). */
-function plannedOrParent(name: string, paths: ReadonlySet<string>): boolean {
-  if (paths.has(name)) return true;
-  for (const path of paths) if (path.startsWith(`${name}/`)) return true;
-  return false;
-}
+/** Owner label names are single-level English; legacy names are read only. */
+function flatName(name: unknown): name is string { return typeof name === 'string' && ownerPath(name) === name; }
 
 function owned(labelId: string, ownership: Ownership): void {
   if (!USER_LABEL_ID.test(labelId) || !ownership.ownedLabelIds().has(labelId)) refuse('label_not_owned');
@@ -183,6 +179,15 @@ function checkModify(messageId: string, body: string | undefined, ownership: Own
   const add = labelList(value['addLabelIds']);
   const remove = labelList(value['removeLabelIds']);
   const inboxOnly = (list: string[]) => list.length === 0 || (list.length === 1 && list[0] === 'INBOX');
+  if (add.length === 1 && remove.length === 1 && isUserLabelId(add[0] ?? '') && isUserLabelId(remove[0] ?? '')) {
+    const target = add[0] ?? '';
+    const source = remove[0] ?? '';
+    owned(source, ownership);
+    owned(target, ownership);
+    if (source === target || ownership.mergeSwap?.(messageId, source, target) !== true) refuse('no_merge_intent');
+    return;
+  }
+
   if (add.length === 1 && inboxOnly(remove)) {
     // classify
     const label = add[0] ?? '';
@@ -217,7 +222,7 @@ export function checkRequest(request: GoogleRequest, ownership: Ownership): Gmai
   }
   if (url.protocol !== 'https:' || url.username !== '' || url.password !== '' || url.port !== '' || url.hash !== '') refuse('url');
   // A raw URL with dot segments or an encoded slash could mean another path to the server than to this check.
-  if (/%2f|%2e|\/\.\.?(\/|$)|\/\//i.test(request.url.slice(url.origin.length))) refuse('url_path');
+  if (/%2f|%2e|\/\.\.?(\/|$)|\/\//i.test(request.url.slice(url.origin.length).split('?')[0] ?? '')) refuse('url_path');
   const method = request.method.toUpperCase();
   const path = url.pathname;
 
@@ -253,6 +258,14 @@ export function checkRequest(request: GoogleRequest, ownership: Ownership): Gmai
     return 'history';
   }
   if (method === 'GET' && rest.length === 1 && rest[0] === 'messages') {
+
+    if (url.searchParams.get('fields') === 'messages/id,nextPageToken,resultSizeEstimate') {
+      const params = query(url, ['labelIds', 'maxResults', 'fields', 'includeSpamTrash']);
+      const label = single(params, 'labelIds') ?? '';
+      const max = Number(single(params, 'maxResults'));
+      if (!isUserLabelId(label) || ownership.mergeListLabel?.(label) !== true || !Number.isInteger(max) || max < 1 || max > 10 || single(params, 'includeSpamTrash') !== 'true' || request.body !== undefined) refuse('merge_list');
+      return 'merge_list';
+    }
     const params = query(url, ['labelIds', 'q', 'maxResults', 'pageToken']);
     if (single(params, 'labelIds') !== 'INBOX' || single(params, 'q') !== RESYNC_QUERY) refuse('list_query');
     const max = Number(single(params, 'maxResults') ?? '');
@@ -266,6 +279,11 @@ export function checkRequest(request: GoogleRequest, ownership: Ownership): Gmai
     if (!MESSAGE_ID.test(rest[1] ?? '')) refuse('message_id');
     const params = query(url, ['format', 'metadataHeaders', 'fields']);
     const format = single(params, 'format');
+    if (format === 'minimal' && single(params, 'fields') === 'id,labelIds,historyId') {
+      if (params.has('metadataHeaders') || ownership.mergeMessage?.(rest[1] ?? '') !== true || request.body !== undefined) refuse('merge_metadata');
+      return 'merge_metadata';
+    }
+
     const headers = params.get('metadataHeaders') ?? [];
     if (format === 'full') {
       if (headers.length > 0) refuse('metadata_headers');
@@ -286,19 +304,23 @@ export function checkRequest(request: GoogleRequest, ownership: Ownership): Gmai
     if (method === 'POST') {
       if (url.search !== '') refuse('query_param');
       const value = jsonBody(request.body, ['name', 'labelListVisibility', 'messageListVisibility']);
-      // A parent too: Gmail nests `开发/CI通知` under `开发` only when that exists. A parent is never linked, so never owned.
       const name = value['name'];
-      if (!pathShaped(name) || !plannedOrParent(name, ownership.plannedPaths()) || value['labelListVisibility'] !== 'labelShow' || value['messageListVisibility'] !== 'show') refuse('labels_create');
+      if (!flatName(name) || !ownership.plannedPaths().has(name) || value['labelListVisibility'] !== 'labelShow' || value['messageListVisibility'] !== 'show') refuse('labels_create');
       return 'labels_create';
     }
   }
   if (method === 'PATCH' && rest.length === 2 && rest[0] === 'labels') {
     if (url.search !== '') refuse('query_param');
     const id = rest[1] ?? '';
+
+    if (request.body === JSON.stringify({ labelListVisibility: 'labelHide', messageListVisibility: 'hide' })) {
+      if (!isUserLabelId(id) || ownership.mergeHide?.(id) !== true) refuse('hide_not_verified');
+      return 'labels_hide';
+    }
     owned(id, ownership);
     const value = jsonBody(request.body, ['name']);
     const name = value['name'];
-    if (!pathShaped(name) || name !== ownership.plannedPath(id)) refuse('labels_patch');
+    if (!flatName(name) || name !== (ownership.mergeRename?.(id) ?? ownership.plannedPath(id))) refuse('labels_patch');
     return 'labels_patch';
   }
   if (method === 'POST' && rest.length === 3 && rest[0] === 'messages' && rest[2] === 'modify') {
@@ -393,6 +415,8 @@ export interface GmailLabel {
   readonly id: string;
   readonly name: string;
   readonly type?: string;
+  readonly labelListVisibility?: string;
+  readonly messageListVisibility?: string;
 }
 
 /** The access token and what the grant allows. */
@@ -579,8 +603,8 @@ export class GmailClient {
     const value = assertObject(await this.getJson('labels_list', `${GMAIL_BASE}/labels`));
     const labels = Array.isArray(value['labels']) ? (value['labels'] as unknown[]) : [];
     return labels.flatMap((item) => {
-      const { id, name, type } = (item ?? {}) as { id?: unknown; name?: unknown; type?: unknown };
-      return typeof id === 'string' && typeof name === 'string' ? [{ id, name, ...(typeof type === 'string' ? { type } : {}) }] : [];
+      const { id, name, type, labelListVisibility, messageListVisibility } = (item ?? {}) as Record<string, unknown>;
+      return typeof id === 'string' && typeof name === 'string' ? [{ id, name, ...(typeof type === 'string' ? { type } : {}), ...(typeof labelListVisibility === 'string' ? { labelListVisibility } : {}), ...(typeof messageListVisibility === 'string' ? { messageListVisibility } : {}) }] : [];
     });
   }
 
@@ -595,6 +619,35 @@ export class GmailClient {
   /** Renames an owned label to the path its store plans for it. */
   async renameLabel(labelId: string, name: string): Promise<void> {
     await this.write('labels_patch', 'PATCH', `${GMAIL_BASE}/labels/${labelId}`, { name });
+  }
+
+  /** First bounded page only: removing its source label safely makes progress without a mutable offset. */
+  async mergeMessages(labelId: string, max = 10): Promise<string[]> {
+    const params = new URLSearchParams({ labelIds: labelId, maxResults: String(max), includeSpamTrash: 'true', fields: 'messages/id,nextPageToken,resultSizeEstimate' });
+    const value = assertObject(await this.getJson('merge_list', `${GMAIL_BASE}/messages?${params.toString()}`));
+    const messages = value['messages'] ?? [];
+    if (!Array.isArray(messages) || messages.length > max) throw new GoogleError('bad_answer', 'merge_list_bad_answer');
+    const ids = messages.map((item: unknown) => assertObject(item)['id']);
+    if (!ids.every(isMessageId) || new Set(ids).size !== ids.length || (ids.length === 0 && value['nextPageToken'] !== undefined)) throw new GoogleError('bad_answer', 'merge_list_bad_answer');
+    return ids;
+  }
+
+  /** No snippet, headers or body: only the current labels and their history identity. */
+  async mergeMetadata(messageId: string): Promise<{ labels: string[]; historyId: string }> {
+    const params = new URLSearchParams({ format: 'minimal', fields: 'id,labelIds,historyId' });
+    const value = assertObject(await this.getJson('merge_metadata', `${GMAIL_BASE}/messages/${messageId}?${params.toString()}`));
+    const labels = value['labelIds'];
+    const historyId = value['historyId'];
+    if (value['id'] !== messageId || !Array.isArray(labels) || !labels.every((id): id is string => typeof id === 'string') || typeof historyId !== 'string' || !DIGITS.test(historyId)) throw new GoogleError('bad_answer', 'merge_metadata_bad_answer');
+    return { labels, historyId };
+  }
+
+  async swapMergeLabel(messageId: string, sourceId: string, targetId: string): Promise<void> {
+    await this.write('merge_modify', 'POST', `${GMAIL_BASE}/messages/${messageId}/modify`, { addLabelIds: [targetId], removeLabelIds: [sourceId] });
+  }
+
+  async hideMergeLabel(labelId: string): Promise<void> {
+    await this.write('labels_hide', 'PATCH', `${GMAIL_BASE}/labels/${labelId}`, { labelListVisibility: 'labelHide', messageListVisibility: 'hide' });
   }
 
   /** Adds an owned label (and removes INBOX when `archive`): the ledger row must be `intended` or `applied`. */

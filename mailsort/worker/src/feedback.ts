@@ -12,6 +12,7 @@
  * A verdict with a label makes an example of the mail's summary (while its content is kept); a withdrawn verdict
  * deletes it. The verdicts also feed the sender history the model reads (judge.ts senderHistory).
  */
+import { canonicalDecision, effectiveLedgerRow, isMergeFeedback } from './label-identity.ts';
 import { deleteExampleOf, putExample } from './examples.ts';
 import { countFlow, stageOf } from './flow.ts';
 import type { DecisionRow, Store } from './store.ts';
@@ -36,7 +37,7 @@ export function setCurrentLabels(store: Store, messageId: string, labels: readon
  * and a pending review item of the mail.
  */
 export function setVerdict(store: Store, row: DecisionRow, chosen: string | null, source: VerdictSource, now: number): void {
-  const predicted = row.label_id ?? null;
+  const predicted = row.label_id === null ? null : store.canonicalLabelId(row.label_id);
   const verdict = predicted === chosen ? 'confirmed' : 'corrected';
   // The flow's corrections count decisions whose label the owner changed, once each, on the day it was decided.
   countCorrection(store, row, (verdict === 'corrected' ? 1 : 0) - (row.verdict === 'corrected' ? 1 : 0));
@@ -49,14 +50,15 @@ export function setVerdict(store: Store, row: DecisionRow, chosen: string | null
   const review = store.pendingReviewOf(row.message_id);
   if (review !== undefined) {
     // `confirmed` when the owner chose the model's most likely label, else `corrected`: both are resolved.
-    const state = review.suggested_label === chosen ? 'confirmed' : 'corrected';
+    const state = (review.suggested_label === null ? null : store.canonicalLabelId(review.suggested_label)) === chosen ? 'confirmed' : 'corrected';
     store.run(`UPDATE review SET state = ?, resolved_label = ?, resolve_time = ? WHERE id = ?`, state, chosen, now, review.id);
   }
 }
 
 /** Adds `delta` to the flow's corrections of a decision that had a label (an unsure one has nothing to correct). */
 function countCorrection(store: Store, row: DecisionRow, delta: number): void {
-  if (row.label_id !== null && row.outcome !== 'skipped') countFlow(store, row.decided_at, stageOf(row.decider), 'corrected', row.label_id, delta);
+  const original = store.decision(row.message_id) ?? row;
+  if (original.label_id !== null && original.outcome !== 'skipped') countFlow(store, original.decided_at, stageOf(original.decider), 'corrected', original.label_id, delta);
 }
 
 /** Withdraws a verdict (the owner undid their own change in Gmail): no verdict, no example. */
@@ -71,17 +73,19 @@ export function withdrawVerdict(store: Store, row: DecisionRow): void {
  * to the app's label ID. Answers how many changes it read.
  */
 export function applyFeedback(store: Store, owned: ReadonlyMap<string, string>, now: number, limit = 200): number {
-  const events = store.all<{ key: string; message_id: string; change: 'added' | 'removed'; gmail_label_id: string }>(
-    `SELECT key, message_id, change, gmail_label_id FROM feedback ORDER BY seq, key LIMIT ?`,
+  const events = store.all<{ key: string; message_id: string; change: 'added' | 'removed'; gmail_label_id: string; seq: number }>(
+    `SELECT key, message_id, change, gmail_label_id, seq FROM feedback ORDER BY seq, key LIMIT ?`,
     limit,
   );
   const touched = new Set<string>();
   for (const event of events) {
     store.run(`DELETE FROM feedback WHERE key = ?`, event.key);
-    const label = owned.get(event.gmail_label_id);
+    if (isMergeFeedback(store, event)) continue;
+    const original = owned.get(event.gmail_label_id);
+    const label = original === undefined ? undefined : store.canonicalLabelId(original);
     const row = store.decision(event.message_id);
     if (label === undefined || row === undefined || row.outcome === 'skipped') continue;
-    const labels = new Set(labelsOf(row));
+    const labels = new Set(labelsOf(canonicalDecision(store, row)));
     if (event.change === 'added') labels.add(label);
     else labels.delete(label);
     setCurrentLabels(store, row.message_id, [...labels]);
@@ -96,10 +100,13 @@ export function applyFeedback(store: Store, owned: ReadonlyMap<string, string>, 
 
 /** The verdict Gmail's current labels say for one decided mail. */
 function judge(store: Store, row: DecisionRow, now: number): void {
+  const original = row;
+  row = canonicalDecision(store, row);
   const labels = labelsOf(row);
   const applied = row.outcome === 'applied' ? row.label_id : null;
   // What mailsort itself left on the mail: its label while its write stands.
-  const ledger = applied === null ? undefined : store.one<{ id: string; state: string }>(`SELECT id, state FROM ledger WHERE message_id = ? AND label_id = ? ORDER BY create_time DESC LIMIT 1`, row.message_id, applied);
+  const rawLedger = applied === null ? undefined : store.one<import('./store.ts').LedgerRow>(`SELECT * FROM ledger WHERE message_id = ? AND label_id = ? ORDER BY create_time DESC LIMIT 1`, row.message_id, original.label_id);
+  const ledger = rawLedger === undefined ? undefined : effectiveLedgerRow(store, rawLedger);
   const standing = applied !== null && ledger !== undefined && (ledger.state === 'applied' || ledger.state === 'intended');
   const base = standing ? [applied] : [];
   const same = labels.length === base.length && labels.every((label) => base.includes(label));

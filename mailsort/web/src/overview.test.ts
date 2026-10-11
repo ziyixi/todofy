@@ -42,43 +42,40 @@ function server(): FakeServer {
 }
 
 describe('the flow diagram', () => {
-  it('builds the graph: every mail once (延后 holds only mail still waiting), no correction, groups colored by top level', () => {
+  it('builds the graph: every mail once (延后 holds only mail still waiting), no correction, legacy labels retain their full names and individual colors', () => {
     const s = server()
     const graph = flowGraph(s.flow, s.labels)
     expect(graph.total).toBe(20)
     expect(graph.nodes.map((node) => node.name)).toEqual(['新邮件', '跳过', 'Clef 27B', 'Clef-flash', '延后（额度）', '金融/投资', '账号安全', '出行', '拿不准（没进待审）', '影子建议（未写入）'])
     expect(graph.nodes.find((node) => node.id === 'skipped')?.detail).toEqual(['对话已分拣 3', '已发送、草稿或垃圾邮件 1'])
-    // 金融/投资 and 金融/银行支付 share a group, so a color.
+    // Legacy paths stay readable until consolidation, with one color per complete label.
     expect(graph.groups).toEqual([
-      { name: '金融', slot: 1 },
-      { name: '账号安全', slot: 2 },
-      { name: '出行', slot: 3 },
+      { name: '金融/投资', slot: 1 },
+      { name: '金融/银行支付', slot: 2 },
+      { name: '账号安全', slot: 3 },
+      { name: '出行', slot: 4 },
     ])
   })
 
-  it('never runs out of hues for the template’s ten groups: a later group borrows a slot the day leaves free (QA D3)', () => {
-    const paths = ['开发/CI通知', '开发/平台工具', '金融/投资', '金融/银行支付', '账号安全', '政府法律', '购物/订单物流', '购物/促销', '订阅收据', '出行', '生活/账单住房', '生活/汽车', '生活/医疗', '求职', '学校与社群', '新闻/周报']
-    const labels = paths.map((path, index) => label(`l${String(index)}`, path))
-    const written = (path: string, n: number) => flowCount(MailFlow_Stage.CLEF, MailFlow_Outcome.ARCHIVED, `labels/l${String(paths.indexOf(path))}`, n)
-    // Five groups in a day, three of them past the eighth: none is gray, and no two share a hue.
-    const graph = flowGraph([written('开发/CI通知', 3), written('金融/投资', 2), written('求职', 1), written('学校与社群', 1), written('新闻/周报', 4)], labels)
-    const slotOf = (group: string) => graph.groups.find((item) => item.name === group)?.slot
-    expect(slotOf('开发')).toBe(1)
-    expect(slotOf('金融')).toBe(2)
-    const shown = ['开发', '金融', '求职', '学校与社群', '新闻'].map(slotOf)
+  it('borrows unused color slots for later flat labels, keeping stable colors for earlier labels', () => {
+    const names = Array.from({ length: 11 }, (_, index) => `Category ${String(index + 1)}`)
+    const labels = names.map((name, index) => label(`l${String(index)}`, name))
+    const written = (index: number) => flowCount(MailFlow_Stage.CLEF, MailFlow_Outcome.ARCHIVED, `labels/l${String(index)}`, 1)
+    const graph = flowGraph([0, 2, 8, 9, 10].map(written), labels)
+    const slotOf = (index: number) => graph.groups.find((item) => item.name === names[index])?.slot
+    expect(slotOf(0)).toBe(1)
+    expect(slotOf(2)).toBe(3)
+    const shown = [0, 2, 8, 9, 10].map(slotOf)
     expect(shown.every((slot) => slot !== undefined && slot > 0)).toBe(true)
     expect(new Set(shown).size).toBe(5)
-    // The first eight groups keep their slot every day (a day never repaints them).
-    const other = flowGraph([written('金融/投资', 1), written('出行', 1)], labels)
-    expect(other.groups.find((item) => item.name === '金融')?.slot).toBe(2)
-    expect(other.groups.find((item) => item.name === '出行')?.slot).toBe(7)
-    // A disabled label's group does not take a hue from the groups that sort mail.
-    const disabledFirst = [Object.assign(label('old', '旧/归档'), { enabled: false }), ...labels]
-    expect(flowGraph([written('开发/CI通知', 1)], disabledFirst).groups.find((item) => item.name === '开发')?.slot).toBe(1)
-    // Only a day with more than eight groups has gray ones, and the legend says so.
-    const all = flowGraph(paths.map((path) => written(path, 1)), labels)
-    expect(all.groups.filter((item) => item.slot === 0).map((item) => item.name)).toEqual(['求职', '学校与社群', '新闻'])
-    expect(sankeyChart(all).querySelector('.flow-legend')?.textContent).toContain('新闻（灰色：分组超过八种颜色）')
+    const other = flowGraph([2, 6].map(written), labels)
+    expect(other.groups.find((item) => item.name === names[2])?.slot).toBe(3)
+    expect(other.groups.find((item) => item.name === names[6])?.slot).toBe(7)
+    const disabledFirst = [Object.assign(label('old', 'Legacy/Archive'), { enabled: false }), ...labels]
+    expect(flowGraph([written(0)], disabledFirst).groups.find((item) => item.name === names[0])?.slot).toBe(1)
+    const all = flowGraph(names.map((_, index) => written(index)), labels)
+    expect(all.groups.filter((item) => item.slot === 0).map((item) => item.name)).toEqual(names.slice(8))
+    expect(sankeyChart(all).querySelector('.flow-legend')?.textContent).toContain('Category 11（灰色：标签超过八种颜色）')
     expect(sankeyChart(graph).querySelector('.flow-legend')?.textContent).not.toContain('灰色')
   })
 
@@ -148,7 +145,7 @@ describe('the flow diagram', () => {
     expect(nodes.map((node) => node.getAttribute('aria-label'))).toContain('出行：4 封，占 20%')
     // Colors are tokens, never hex in the markup.
     const travel = nodes.find((node) => node.textContent.startsWith('出行'))
-    expect(travel?.querySelector('rect')?.getAttribute('fill')).toBe('var(--series-3)')
+    expect(travel?.querySelector('rect')?.getAttribute('fill')).toBe('var(--series-4)')
     expect(box.querySelector('svg')?.outerHTML).not.toMatch(/#[0-9a-f]{6}/i)
     travel?.dispatchEvent(new FocusEvent('focus'))
     expect(box.querySelector('.flow-tip')?.textContent).toContain('4 封 · 占全部 20%')

@@ -2,7 +2,7 @@
  * An in-memory stand-in for the Worker's owner API (proto/mailsort/ui/v2), served by the same shared transcoder the
  * Worker uses, so every request is routed, decoded strictly and answered in the wire JSON profile as in production. It
  * keeps a few labels, examples, review items, ledger entries, the flow, the label report, the status and the settings;
- * a method it does not model (the replay evaluation, which the UI does not call) answers UNIMPLEMENTED. UpdateLabel
+ * a method it does not model answers UNIMPLEMENTED. UpdateLabel
  * changes only the masked fields and refuses a stale etag, as the Worker does. Every request must be a same-origin /api
  * path, and a mutation must carry the CSRF header.
  */
@@ -23,6 +23,8 @@ import {
   SyncLabelsResponseSchema,
   UndoLedgerEntriesResponseSchema,
 } from '@ziyixi/proto/mailsort/ui/v2/mailsort_ui_service_pb'
+import { LabelConsolidation_Phase, LabelConsolidation_State, LabelConsolidationSchema, type LabelConsolidation } from '@ziyixi/proto/mailsort/ui/v2/consolidation_pb'
+import { ReplayEvaluation_State, ReplayEvaluationSchema, type ReplayEvaluation } from '@ziyixi/proto/mailsort/ui/v2/replay_pb'
 import { ExampleSchema, LedgerEntry_State, LedgerEntrySchema, ReviewItem_State, ReviewItemSchema, type Example, type LedgerEntry, type ReviewItem } from '@ziyixi/proto/mailsort/ui/v2/review_pb'
 import {
   LabelCountSchema,
@@ -124,6 +126,14 @@ export class FakeServer {
   /** Fields of GetServiceStatus that a test sets (the rest as below; review_count counts the pending items). */
   status: Partial<ServiceStatus> = {}
   settings: Settings = create(SettingsSchema, { name: 'settings', mode: Mode.SHADOW, effectiveMode: Mode.SHADOW, runWriteLimit: 10, dailyWriteLimit: 150, dailyNeuronBudget: 7000, etag: 's1' })
+  consolidation: LabelConsolidation | null = null
+  consolidationFails = false
+  private readonly consolidationRequests = new Map<string, LabelConsolidation>()
+  replay: ReplayEvaluation | null = null
+  replayFails = false
+  replayStartFails = false
+  replaySamples = 0
+  private readonly replayStarts = new Map<string, ReplayEvaluation>()
   private readonly transcoder: HttpTranscoder<ShapeOf<typeof MailsortUiService>, null>
 
   constructor() {
@@ -224,6 +234,39 @@ export class FakeServer {
             shownCount: 2,
           }),
         )
+      },
+      getLabelConsolidation: () => {
+        if (this.consolidationFails) throw new RpcError(Code.UNAVAILABLE, 'UNAVAILABLE', '整理状态暂不可用')
+        if (this.consolidation === null) throw new RpcError(Code.NOT_FOUND, 'NOT_FOUND', 'no consolidation')
+        return Promise.resolve(this.consolidation)
+      },
+      startLabelConsolidation: (request) => {
+        const previous = this.consolidationRequests.get(request.requestId)
+        if (previous !== undefined) return Promise.resolve(previous)
+        this.consolidation = create(LabelConsolidationSchema, { name: 'labelConsolidation', jobId: 'job-1', state: LabelConsolidation_State.RUNNING, phase: LabelConsolidation_Phase.PREFLIGHT, etag: 'c1', nextAction: 'wait', updateTime: timestampFromMs(NOW) })
+        this.consolidationRequests.set(request.requestId, this.consolidation)
+        return Promise.resolve(this.consolidation)
+      },
+      resumeLabelConsolidation: (request) => {
+        const previous = this.consolidationRequests.get(request.requestId)
+        if (previous !== undefined) return Promise.resolve(previous)
+        if (this.consolidation === null || request.etag !== this.consolidation.etag) throw new RpcError(Code.ABORTED, 'ETAG_MISMATCH', 'stale')
+        this.consolidation = Object.assign(create(LabelConsolidationSchema), this.consolidation, { state: LabelConsolidation_State.RUNNING, etag: 'c2', nextAction: 'wait', errorCode: '' })
+        this.consolidationRequests.set(request.requestId, this.consolidation)
+        return Promise.resolve(this.consolidation)
+      },
+      getReplayEvaluation: () => {
+        if (this.replayFails) throw new RpcError(Code.UNAVAILABLE, 'UNAVAILABLE', '回放状态暂不可用')
+        if (this.replay === null) throw new RpcError(Code.NOT_FOUND, 'NOT_FOUND', 'no replay')
+        return Promise.resolve(this.replay)
+      },
+      startReplayEvaluation: (request) => {
+        if (this.replayStartFails) throw new RpcError(Code.UNAVAILABLE, 'UNAVAILABLE', '回放启动失败，请重试')
+        const prior = this.replayStarts.get(request.requestId)
+        if (prior !== undefined) return Promise.resolve(prior)
+        this.replay = create(ReplayEvaluationSchema, { name: 'replayEvaluation', state: this.replaySamples === 0 ? ReplayEvaluation_State.SUCCEEDED : ReplayEvaluation_State.RUNNING, totalCount: this.replaySamples, createTime: timestampFromMs(NOW), ...(this.replaySamples === 0 ? { completeTime: timestampFromMs(NOW) } : {}) })
+        this.replayStarts.set(request.requestId, this.replay)
+        return Promise.resolve(this.replay)
       },
       getServiceStatus: () =>
         Promise.resolve(

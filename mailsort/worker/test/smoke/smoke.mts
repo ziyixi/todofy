@@ -189,13 +189,13 @@ async function run(origin: string, up: FakeUpstream, setClock: (now: number) => 
   deliver(MAILS.unsure);
   deliver({ ...MAILS.receiptZh, id: 'a1000000000000b1', subject: '订单已到快递柜', text: '订单包裹已到快递柜，凭取件码 1234 取件。' });
   await step();
-  const sorted = up.gmail.labelIdByName('订阅') ?? '';
+  const sorted = up.gmail.labelIdByName('Digests') ?? '';
   const zh = labelsOf(MAILS.newsletterZh.id);
   check(sorted !== '' && zh.includes(sorted) && !zh.includes('INBOX') && zh.includes('UNREAD'), 'live: the label is added and INBOX removed, UNREAD untouched');
   const none = labelsOf(MAILS.unsure.id);
   check(none.includes('INBOX') && none.every((label) => !label.startsWith('Label_')), 'confident none: the mail keeps INBOX and gets no label');
   const pickup = labelsOf('a1000000000000b1');
-  check(pickup.includes(up.gmail.labelIdByName('收据') ?? '-') && !pickup.includes('INBOX') && pickup.includes('UNREAD'), 'a pickup code is labelled and archived like any other, UNREAD untouched');
+  check(pickup.includes(up.gmail.labelIdByName('Receipts') ?? '-') && !pickup.includes('INBOX') && pickup.includes('UNREAD'), 'a pickup code is labelled and archived like any other, UNREAD untouched');
   // Only a label's 归档 switch keeps its mail in the inbox: off (keep_in_inbox), the label is only added.
   const keepInInbox = async (on: boolean) => {
     const receipt = await api.getLabel({ name: 'labels/receipt' });
@@ -205,7 +205,7 @@ async function run(origin: string, up: FakeUpstream, setClock: (now: number) => 
   deliver({ ...MAILS.receiptZh, id: 'a1000000000000b2', subject: '订单 b2 已发货' });
   await step();
   const kept = labelsOf('a1000000000000b2');
-  check(kept.includes(up.gmail.labelIdByName('收据') ?? '-') && kept.includes('INBOX') && kept.includes('UNREAD'), '归档 off: the label is added and the mail stays in the inbox, UNREAD untouched');
+  check(kept.includes(up.gmail.labelIdByName('Receipts') ?? '-') && kept.includes('INBOX') && kept.includes('UNREAD'), '归档 off: the label is added and the mail stays in the inbox, UNREAD untouched');
   await keepInInbox(false);
 
   // Undo.
@@ -220,7 +220,7 @@ async function run(origin: string, up: FakeUpstream, setClock: (now: number) => 
   const [bankItem] = (await api.listReviewItems({})).reviewItems;
   check(bankItem?.reason === 'untrusted_sender' && labelsOf(MAILS.bankEn.id).includes('INBOX'), 'a trust label for a sender not yet trusted: uncertain, shown in the review queue, nothing written');
   await api.resolveReviewItem({ name: bankItem?.name ?? '', label: 'labels/bank', requestId: id() });
-  const bank = up.gmail.labelIdByName('银行') ?? '-';
+  const bank = up.gmail.labelIdByName('Banking') ?? '-';
   check(labelsOf(MAILS.bankEn.id).includes(bank) && (await api.getLabel({ name: 'labels/bank' })).trustedDomains.join() === 'bank.example.com', 'the owner\'s choice writes the label and teaches the sender\'s domain');
   deliver({ ...MAILS.bankEn, id: 'b100000000000001', subject: 'Your monthly bank statement for October' });
   deliver(MAILS.forgedBankLogin);
@@ -228,7 +228,7 @@ async function run(origin: string, up: FakeUpstream, setClock: (now: number) => 
   check(labelsOf('b100000000000001').includes(bank) && labelsOf(MAILS.forgedBankLogin.id).every((label) => !label.startsWith('Label_')), 'the trusted sender\'s next statement is labelled; a forged From (DMARC failed) gets nothing');
 
   // Corrections in Gmail (to 收据, which mailsort made) -> examples; Personal is a label of the owner's own.
-  const receipt = up.gmail.labelIdByName('收据') ?? '';
+  const receipt = up.gmail.labelIdByName('Receipts') ?? '';
   const personal = up.gmail.createUserLabel('Personal');
   for (const [i, messageId] of ['c000000000000c01', 'c000000000000c02'].entries()) {
     deliver({ ...MAILS.newsletterEn, id: messageId, subject: `Weekly digest ${String(i)}` });
@@ -240,19 +240,19 @@ async function run(origin: string, up: FakeUpstream, setClock: (now: number) => 
   const examples = (await api.listExamples({ label: 'labels/receipt' })).examples;
   check(examples.length === 2 && examples.every((example) => example.embedded), 'corrections in Gmail become embedded examples of the new label');
   // The owner made 出行 in Gmail by hand: the sync adopts the one of a label's path only.
-  const travel = up.gmail.createUserLabel('出行', true);
+  const travel = up.gmail.createUserLabel('Trips', true);
   const adopted = await api.syncLabels({ requestId: id() });
   const travelLabel = adopted.labels.find((label) => label.name === 'labels/travel');
   check(adopted.linkedCount === 1 && travelLabel?.gmailLabelId === travel && travelLabel.gmailState === Label_GmailState.ADOPTED && !adopted.labels.some((label) => label.gmailLabelId === personal), 'sync: the owner\'s Gmail label of a label\'s exact path is adopted, no other label imported');
 
-  // A nested label: created at Gmail's top level with its parent, the mail getting only the leaf.
-  await api.createLabel({ label: create(LabelSchema, { displayName: '开发/CI通知', description: 'CI build passed failed main 构建', enabled: true }), requestId: id() });
+  // A flat English label creates one Gmail label and no grouping parents.
+  await api.createLabel({ labelId: 'dev-ci-notices', label: create(LabelSchema, { displayName: 'Build Notices', description: 'CI build passed failed main 构建', enabled: true }), requestId: id() });
   deliver(MAILS.ciBuild);
   await step();
   const names = [...up.gmail.labels.values()].map((label) => label.name);
-  const ciLeaf = up.gmail.labelIdByName('开发/CI通知') ?? '';
+  const ciLeaf = up.gmail.labelIdByName('Build Notices') ?? '';
   const ci = labelsOf(MAILS.ciBuild.id);
-  check(names.includes('开发') && !names.some((name) => name === '分拣' || name.startsWith('分拣/')) && ciLeaf !== '' && ci.includes(ciLeaf) && !ci.includes('INBOX') && ci.filter((label) => label.startsWith('Label_')).length === 1, 'nested label: created at Gmail\'s top level with its parent 开发, no 分拣; the mail gets only the leaf, archived');
+  check(!names.some((name) => name.includes('/')) && ciLeaf !== '' && ci.includes(ciLeaf) && !ci.includes('INBOX') && ci.filter((label) => label.startsWith('Label_')).length === 1, 'flat English label: one Gmail label, no grouping parents; confident mail archived');
 
   // The replay evaluation: the owner's one answer (the bank mail) decided again as of its own time, nothing written
   // (before the quota test below, which stops it for the day). Its domain was taught by that very answer, later: as of
@@ -299,16 +299,16 @@ async function run(origin: string, up: FakeUpstream, setClock: (now: number) => 
     'the flow API counts each stage and outcome per label (archived, kept in inbox, no label, shown; deferred = the mail still waiting)',
   );
 
-  // The legacy prefix, a rename, the sync and a range undo of one label.
-  const typed = await api.createLabel({ label: create(LabelSchema, { displayName: '分拣/新闻/周报', description: '新闻网站的每周摘要与精选文章推送' }), requestId: id() });
-  check(typed.displayName === '新闻/周报' && up.gmail.labelIdByName('新闻/周报') === typed.gmailLabelId && up.gmail.labelIdByName('分拣') === undefined, 'CreateLabel reads the legacy 分拣/新闻/周报 as 新闻/周报, created in Gmail as 新闻/周报');
-  await api.updateLabel({ label: create(LabelSchema, { name: typed.name, displayName: '资讯/精选', etag: typed.etag }), updateMask: { paths: ['display_name', 'etag'] }, requestId: id() });
+  // A flat rename, explicit sync and a range undo of one label.
+  const typed = await api.createLabel({ label: create(LabelSchema, { displayName: 'Weekly News', description: '新闻网站的每周摘要与精选文章推送' }), requestId: id() });
+  check(typed.displayName === 'Weekly News' && up.gmail.labelIdByName('Weekly News') === typed.gmailLabelId, 'flat English name is identical in Gmail and the app');
+  await api.updateLabel({ label: create(LabelSchema, { name: typed.name, displayName: 'Reading', etag: typed.etag }), updateMask: { paths: ['display_name', 'etag'] }, requestId: id() });
   const synced = await api.syncLabels({ requestId: id() });
-  check(up.gmail.labelIdByName('资讯/精选') === typed.gmailLabelId && up.gmail.labelIdByName('新闻') !== undefined && !synced.labels.some((label) => label.displayName === '新闻'), 'rename: Gmail\'s label follows (资讯/精选); sync: the parent 新闻 this app created is not imported once its child is renamed away');
+  check(up.gmail.labelIdByName('Reading') === typed.gmailLabelId && synced.labels.some((label) => label.name === typed.name && label.displayName === 'Reading'), 'rename preserves the Gmail ID and sync reports the same name');
   const rangeUndo = await api.undoLedgerEntries({ startTime: timestampFromMs(T0), endTime: timestampFromMs(now + MINUTE), label: 'labels/dev-ci-notices', requestId: id() });
   const ciAfter = labelsOf(MAILS.ciBuild.id);
   const bankAfter = labelsOf('b100000000000001');
-  check(rangeUndo.undoneCount === 1 && ciAfter.includes('INBOX') && !ciAfter.includes(ciLeaf) && !bankAfter.includes('INBOX'), 'range undo filtered to one label: only 开发/CI通知 is undone, the bank statement stays filed');
+  check(rangeUndo.undoneCount === 1 && ciAfter.includes('INBOX') && !ciAfter.includes(ciLeaf) && !bankAfter.includes('INBOX'), 'range undo filtered to one label: only Build Notices is undone, the bank statement stays filed');
 
   // A page of the API before v2 is told to reload.
   const old = await fetch(`${origin}/api/v1/labels`);

@@ -79,5 +79,13 @@ export function readFlow(store: Store, days: number, now: number): { start: numb
     utcDay(end),
     FLOW_COUNTS_MAX,
   );
-  return { start, end, counts };
+  const aliases = store.labelAliases();
+  const canonical = new Map<string, FlowCount>();
+  for (const row of counts) {
+    const label = aliases.get(row.label) ?? row.label;
+    const key = `${row.stage}:${row.outcome}:${label}`;
+    const previous = canonical.get(key);
+    canonical.set(key, { ...row, label, n: row.n + (previous?.n ?? 0) });
+  }
+  return { start, end, counts: [...canonical.values()] };
 }

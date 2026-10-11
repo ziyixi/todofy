@@ -6,7 +6,7 @@
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { create } from '@ziyixi/proto/protobuf';
-import { Label_GmailState, LabelSchema } from '@ziyixi/proto/mailsort/ui/v2/label_pb';
+import { Label_GmailState, Label_Problem, LabelSchema } from '@ziyixi/proto/mailsort/ui/v2/label_pb';
 import { ReviewItem_State } from '@ziyixi/proto/mailsort/ui/v2/review_pb';
 import { Mode, SettingsSchema } from '@ziyixi/proto/mailsort/ui/v2/status_pb';
 import { fromWire } from '@ziyixi/proto/wire-json';
@@ -77,25 +77,25 @@ describe('the owner API', () => {
 
   it('creates labels by the rules, once per request ID', async () => {
     const requestId = op();
-    const first = await h.api.createLabel({ labelId: 'newsletter', label: create(LabelSchema, { displayName: '订阅', description: 'newsletter', enabled: true }), requestId });
-    const again = await h.api.createLabel({ labelId: 'newsletter', label: create(LabelSchema, { displayName: '订阅', description: 'newsletter', enabled: true }), requestId });
+    const first = await h.api.createLabel({ labelId: 'newsletter', label: create(LabelSchema, { displayName: 'Newsletters', description: 'newsletter', enabled: true }), requestId });
+    const again = await h.api.createLabel({ labelId: 'newsletter', label: create(LabelSchema, { displayName: 'Newsletters', description: 'newsletter', enabled: true }), requestId });
     expect(again.etag).toBe(first.etag);
-    expect(first).toMatchObject({ name: 'labels/newsletter', displayName: '订阅', gmailState: 1, descriptionVersion: 1 });
-    expect(reasonOf(await rejection(h.api.createLabel({ labelId: 'other', label: create(LabelSchema, { displayName: '订阅' }), requestId: op() })))).toBe('LABEL_EXISTS');
+    expect(first).toMatchObject({ name: 'labels/newsletter', displayName: 'Newsletters', gmailState: 1, descriptionVersion: 1 });
+    expect(reasonOf(await rejection(h.api.createLabel({ labelId: 'other', label: create(LabelSchema, { displayName: 'Newsletters' }), requestId: op() })))).toBe('LABEL_EXISTS');
     expect(reasonOf(await rejection(h.api.createLabel({ labelId: 'none', label: create(LabelSchema, { displayName: 'x' }), requestId: op() })))).toBe('INVALID_LABEL');
-    // A path of up to three segments; a parent or child of another label is refused (only leaves are labels).
-    for (const displayName of ['a//b', 'a/b/c/d', '/a', '订阅/周报']) {
+    // Only single-level English names are accepted on new writes; legacy reads remain valid.
+    for (const displayName of ['a//b', 'a/b', '/a', '订阅', '123', 'a'.repeat(41)]) {
       expect(reasonOf(await rejection(h.api.createLabel({ labelId: 'bad', label: create(LabelSchema, { displayName }), requestId: op() }))), displayName).toBe('INVALID_LABEL');
     }
     // A repeated request ID answers the first response, whatever the body says now (AIP-155).
-    expect((await h.api.createLabel({ labelId: 'newsletter', label: create(LabelSchema, { displayName: '另一个' }), requestId })).displayName).toBe('订阅');
-    expect(reasonOf(await rejection(h.api.createLabel({ labelId: 'travel', label: create(LabelSchema, { displayName: '出行' }), requestId })))).toBe('BAD_REQUEST');
+    expect((await h.api.createLabel({ labelId: 'newsletter', label: create(LabelSchema, { displayName: 'Other' }), requestId })).displayName).toBe('Newsletters');
+    expect(reasonOf(await rejection(h.api.createLabel({ labelId: 'travel', label: create(LabelSchema, { displayName: 'Travel' }), requestId })))).toBe('BAD_REQUEST');
   });
 
   it('updates with an etag and a mask, and bumps the description version', async () => {
     const label = await h.api.getLabel({ name: 'labels/newsletter' });
-    const updated = await h.api.updateLabel({ label: create(LabelSchema, { name: 'labels/newsletter', description: '订阅 weekly digest', etag: label.etag }), updateMask: { paths: ['description', 'etag'] }, requestId: op() });
-    expect(updated).toMatchObject({ description: '订阅 weekly digest', descriptionVersion: 2, enabled: true });
+    const updated = await h.api.updateLabel({ label: create(LabelSchema, { name: 'labels/newsletter', description: 'Newsletters weekly digest', etag: label.etag }), updateMask: { paths: ['description', 'etag'] }, requestId: op() });
+    expect(updated).toMatchObject({ description: 'Newsletters weekly digest', descriptionVersion: 2, enabled: true });
     const stale = await rejection(h.api.updateLabel({ label: create(LabelSchema, { name: 'labels/newsletter', enabled: false, etag: label.etag }), updateMask: { paths: ['enabled', 'etag'] }, requestId: op() }));
     // The mask names `etag`, so the client sends it (it sends only the masked fields).
     expect(reasonOf(stale)).toBe('ETAG_MISMATCH');
@@ -113,40 +113,44 @@ describe('the owner API', () => {
   it('SyncLabels adopts the Gmail label of a label\'s exact path (never one with labels nested under it), follows renames by ID, and never imports another label', async () => {
     await h.step(T0);
     const gmail = h.up.gmail;
-    // The owner's labels: one with the path of mailsort's 订阅, the rest their own (none is ever imported or linked).
-    const adopted = gmail.createUserLabel('订阅', true);
-    const nested = gmail.createUserLabel('订阅/周报');
-    for (const name of ['旅行', 'Personal', '分拣/订阅']) gmail.createUserLabel(name);
+    // The owner's labels: one with the path of mailsort's Newsletters, the rest their own (none is ever imported or linked).
+    const adopted = gmail.createUserLabel('Newsletters', true);
+    const nested = gmail.createUserLabel('Newsletters/周报');
+    for (const name of ['旅行', 'Personal', '分拣/Newsletters']) gmail.createUserLabel(name);
     const before = (await h.api.listLabels({})).labels.length;
     const writes = () => gmail.calls.filter((call) => call.method !== 'GET' && !call.url.includes('/token')).length;
     const writesBefore = writes();
-    // 订阅 has 订阅/周报 under it: a parent in Gmail, never adopted (a mail's label is always a leaf). Its name is taken.
+    // Newsletters has Newsletters/周报 under it: a parent in Gmail, never adopted (a mail's label is always a leaf). Its name is taken.
     const parentFirst = await h.api.syncLabels({ requestId: op() });
     expect(parentFirst).toMatchObject({ linkedCount: 0, renamedCount: 0, missingCount: 0 });
-    expect(parentFirst.labels.find((label) => label.name === 'labels/newsletter')).toMatchObject({ gmailLabelId: '', gmailState: Label_GmailState.NAME_TAKEN });
+    expect(parentFirst.labels.find((label) => label.name === 'labels/newsletter')).toMatchObject({ gmailLabelId: '', gmailState: Label_GmailState.NAME_TAKEN, problem: Label_Problem.HAS_CHILDREN });
     gmail.labels.delete(nested);
     const first = await h.api.syncLabels({ requestId: op() });
     expect(first).toMatchObject({ linkedCount: 1, renamedCount: 0, missingCount: 0 });
     expect(first.labels).toHaveLength(before);
     const newsletter = () => first.labels.find((label) => label.name === 'labels/newsletter');
-    expect(newsletter()).toMatchObject({ displayName: '订阅', gmailLabelId: adopted, gmailState: Label_GmailState.ADOPTED });
+    expect(newsletter()).toMatchObject({ displayName: 'Newsletters', gmailLabelId: adopted, gmailState: Label_GmailState.ADOPTED });
+    const addedChild = gmail.createUserLabel('Newsletters/External');
+    expect((await h.api.syncLabels({ requestId: op() })).labels.find((label) => label.name === 'labels/newsletter')).toMatchObject({ problem: Label_Problem.HAS_CHILDREN });
+    gmail.labels.delete(addedChild);
+    expect((await h.api.syncLabels({ requestId: op() })).labels.find((label) => label.name === 'labels/newsletter')).toMatchObject({ problem: Label_Problem.UNSPECIFIED });
     // Renamed in Gmail: the label follows its Gmail ID.
     const named = (name: string) => {
       const label = gmail.labels.get(adopted);
       if (label !== undefined) label.name = name;
     };
-    named('资讯');
+    named('News');
     expect(await h.api.syncLabels({ requestId: op() })).toMatchObject({ linkedCount: 0, renamedCount: 1, missingCount: 0 });
-    expect(await h.api.getLabel({ name: 'labels/newsletter' })).toMatchObject({ displayName: '资讯', gmailLabelId: adopted, gmailState: Label_GmailState.ADOPTED });
-    // A name the store cannot hold (the legacy prefix, not a path) is left alone; writes still go by the ID.
-    named('分拣/资讯');
+    expect(await h.api.getLabel({ name: 'labels/newsletter' })).toMatchObject({ displayName: 'News', gmailLabelId: adopted, gmailState: Label_GmailState.ADOPTED });
+    // An invalid remote name is retained for diagnosis and blocks new writes by ID.
+    named('分拣/News');
     expect(await h.api.syncLabels({ requestId: op() })).toMatchObject({ renamedCount: 0 });
-    expect((await h.api.getLabel({ name: 'labels/newsletter' })).displayName).toBe('资讯');
+    expect(await h.api.getLabel({ name: 'labels/newsletter' })).toMatchObject({ displayName: 'News', problem: Label_Problem.INVALID_NAME });
     // Deleted in Gmail: missing; a Gmail label of its path again: linked again.
     gmail.labels.delete(adopted);
     expect(await h.api.syncLabels({ requestId: op() })).toMatchObject({ missingCount: 1 });
     expect((await h.api.getLabel({ name: 'labels/newsletter' })).gmailState).toBe(Label_GmailState.MISSING);
-    const again = gmail.createUserLabel('资讯', true);
+    const again = gmail.createUserLabel('News', true);
     expect(await h.api.syncLabels({ requestId: op() })).toMatchObject({ linkedCount: 1 });
     expect(await h.api.getLabel({ name: 'labels/newsletter' })).toMatchObject({ gmailLabelId: again, gmailState: Label_GmailState.ADOPTED });
     // A sync only reads Gmail.
@@ -192,7 +196,7 @@ describe('the owner API', () => {
     expect(status).toMatchObject({ version: 'ops-v1', app: 'mailsort', health: 'ok', ui_url: 'https://sort.example.com/', capabilities: ['guard'] });
     expect(Object.keys(status['counters'] as object)).toEqual(expect.arrayContaining(['decided_today', 'applied_today', 'unsure_today', 'review_pending', 'pending', 'neurons_today', 'neuron_budget']));
     const text = JSON.stringify(status);
-    for (const secret of ['Weekly', 'digest@', 'owner@example.com', '订阅', 'Lunch']) expect(text).not.toContain(secret);
+    for (const secret of ['Weekly', 'digest@', 'owner@example.com', 'Newsletters', 'Lunch']) expect(text).not.toContain(secret);
     const until = new Date(T0 + 2 * HOUR).toISOString().replace('.000Z', 'Z');
     const shed = (await h.opsSetGuard({ level: 'shed', reason: 'usage_80', until })) as { level: string; deferred: string[] };
     expect(shed).toMatchObject({ level: 'shed', deferred: ['full_model', 'replay', 'embedding_rebuild'] });

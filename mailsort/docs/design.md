@@ -3,17 +3,16 @@
 Gmail sorting for the owner's own mailbox on `sort.ziyixi.science`: every new INBOX mail is decided by the Workers AI
 decision model Clef, asked twice (two views), with the mail's masked text, whether its sender is authenticated, the
 nearest corrected examples and what the sender's earlier mail got as its evidence; a confident label is written to
-Gmail (a label named by the label's path, at Gmail's top level) and the mail archived in live mode, never marked read.
+Gmail (a single-level English label) and the mail archived in live mode, never marked read.
 Confident that no label fits, or uncertain, the mail gets no label and stays in the inbox; a few uncertain mails a day
 are asked in the review queue. The owner teaches it by correcting labels in Gmail or answering the review queue;
 nothing is fine-tuned.
 
-The owner's decisions of 2026-10-06 shape v1: one label per mail (always a leaf of the label tree); labels nested up to
-three levels (`金融/投资`), at Gmail's top level since 2026-10-07 (under `分拣/` before: only mailsort sorts this
-mailbox, so the prefix only added a level); confident mail labelled AND archived, unless its label keeps it in the inbox
-(账号安全, 政府法律 then; since 2026-10-11 only the owner's 归档 switch does, below), `UNREAD` never touched; no
-backfill of history (the sync starts at the install-time history ID); Clef (27B) by default, Clef-flash for the rest of
-a UTC day past 70 % of the daily neuron budget, and a deferral (never a failure) when Workers AI's quota is used up.
+The current label rule (2026-10-11) is one single-level English label per new classification, with Chinese
+criteria and UI text. Existing Chinese and nested names remain readable until the owner consolidates them. Confident
+mail is labelled and archived unless its label keeps it in the inbox; `UNREAD` is never touched. New mail starts at the
+install-time history ID. Consolidation moves existing label memberships without classifying or reading old content.
+Clef (27B) remains the default, Clef-flash is used past 70% of the daily neuron budget, and quota exhaustion defers work.
 
 The owner's decisions of 2026-10-10 make it model-first (mailsort.ui.v2): sender-address rules sorted badly (one bank
 sends statements and promotions alike), so there are no rules and the neighbours never decide on their own; the model
@@ -42,7 +41,8 @@ One Worker, `mailsort`, and one SQLite Durable Object, `MailsortState` ("mailsor
 | `worker/src/judge.ts`, `decide.ts` | One mail's evidence and the model's two views (shared with the replay); the decision table, the review quota, the sender history's text (§4.4, §5) |
 | `worker/src/ai.ts`, `dmarc.ts`, `mask.ts` | Clef's request and strict answer, bge-m3; DMARC from Gmail's own header; masking and the sender's salted hash (§4.2, §4.3) |
 | `worker/src/replay.ts` | The replay evaluation (§5.1) |
-| `worker/src/paths.ts` | Label paths: the tree, IDs and option keys from a path (§3.1) |
+| `worker/src/paths.ts` | Single-level English names, legacy path reading, stable IDs and option keys (§3.1) |
+| `worker/src/label-merge.ts`, `label-identity.ts` | Bounded label consolidation and canonical views of preserved historical identities (§3.1) |
 | `worker/src/flow.ts` | The daily flow counters behind 概览's diagram (§10) |
 | `worker/src/feedback.ts`, `examples.ts` | Verdicts and examples (§6) |
 | `worker/src/writes.ts` | The ledger of Gmail writes (§7) |
@@ -71,9 +71,14 @@ Two walls, neither of them a prompt:
    | messages_list | `GET users/me/messages?labelIds=INBOX&q=newer_than:2d` (the resync after a lost cursor) |
    | message_get | `GET users/me/messages/{id}`, `format=full` or `metadata` with the fixed header list and `fields` |
    | labels_list | `GET users/me/labels` |
-   | labels_create | `POST users/me/labels`, a name the store plans: one of its labels' paths, or a parent such a path nests under (a path of one to three non-empty segments without surrounding spaces) |
-   | labels_patch | `PATCH users/me/labels/{owned id}`, the name only, exactly the path the store plans for that label |
+   | labels_create | `POST users/me/labels`, a single-level English name planned by the store |
+   | labels_patch | `PATCH users/me/labels/{owned id}`, the name only, exactly the name the store or frozen consolidation plans for that label |
    | message_modify | classify: `addLabelIds = [one owned label]`, `removeLabelIds = [] or [INBOX]`, for a ledger row in `intended`/`applied` whose archive flag matches; undo: `removeLabelIds = [that owned label]`, `addLabelIds = [] or [INBOX]` (INBOX exactly when the row archived), for a row in `undo_intended` |
+
+   | merge_list | `GET users/me/messages`, one frozen source label or recorded app-created grouping label; IDs only, bounded first page, including archived mail |
+   | merge_metadata | `GET users/me/messages/{id}`, only `id,labelIds,historyId`, for a persisted consolidation item |
+   | merge_modify | one frozen source label removed and its frozen target added, only with a persisted pending intent; no INBOX or other labels |
+   | labels_hide | visibility fields only, after an owned source or app-created grouping label is verified empty |
 
    JSON bodies must be the canonical text of the value the guard checked (`JSON.stringify` of it): a duplicate key
    (`JSON.parse` keeps the last, a server might keep the first) or any other spelling is refused (`body_not_canonical`).
@@ -91,40 +96,17 @@ Two walls, neither of them a prompt:
    a label create or rename the store's paths as they were when it was sent (the fake reads them while the Worker
    waits: `FakeUpstream.plannedPaths`).
 
-Round 2 widened `labels_create` for nested labels (2026-10-06, the owner's request): Gmail shows `开发/CI通知` nested
-only when `开发` exists, so a parent may be created too. A parent only groups: it is never linked, so it is never owned
-and no modify can add it to a mail (one label per mail, always a leaf). `message_modify` is unchanged: a classify
-without `removeLabelIds` (a label that keeps its mail in the inbox) was already one of its two shapes.
-
-**Labels without a prefix** (2026-10-07, the owner's request). Until then every label lived under `分拣/`, and the guard
-took any name under it for mailsort's. Now a label's Gmail name is its path (`开发/CI通知`, `出行`), so a name says nothing
-about who owns a label, and the guard asks the store instead (`Ownership` in `gmail.ts`): `labels_create` makes only a
-name the store plans (`plannedPaths`: a label's path or a parent of one), `labels_patch` renames an owned label only to
-the path the store plans for that very label (`plannedPath`; a rename writes the new path into the store first and puts
-the old one back if Gmail refuses, `api.ts` renameInGmail), and there is no root label to create any more. Nor does a
-name alone give mailsort a Gmail label: when Gmail already has a label of exactly a label's path (the owner's, made by
-hand), no write creates or adopts anything; the label stays out of Gmail and says so (`Label.GmailState` NAME_TAKEN,
-column `gmail_name_taken`), its mail becomes a suggestion, and nothing is written with it until the owner renames it or
-**adopts** that Gmail label with 从 Gmail 同步 (SyncLabels, the only place a label is adopted, §3.1). Adopted, mailsort
-owns it from then on (adds it to mail, renames it with the label) and says so (ADOPTED, column `gmail_adopted`; both
-columns schema version 4). SyncLabels never adopts a Gmail label with labels nested under it (a parent there, and a
-mail's label is always a leaf; not even a parent mailsort made), nor one another label here already holds (one renamed
-to that path in Gmail): two labels never share one. A system label is never adopted, whatever its name (`writes.ts`
-userLabelsByName keeps `Label_*` IDs only), and a parent the owner already has, or makes while mailsort creates one (a
-409), is used to nest under, never linked or recorded. And a write fails when the mail already carries its label
-(`already_labelled`), by the labels its intent recorded and, for an adopted label, by the mail as it is right before the
-write, so an undo never takes off an owner's label that was there before. So no other label of the owner's is ever
-written: only one the owner adopted, and never onto a mail that has it. The legacy prefix is still read on input, as
-nothing (`paths.ts` ownerPath): a path typed as `分拣/金融/投资` (as the owner's rule file and older exports wrote it,
-until rules went on 2026-10-10) means `金融/投资`; nothing writes it. No stored row needed a migration: a label's row
-has always held its path without the prefix (every entry point stripped it, and no path may start with `分拣`). The live store had no Gmail label
-yet (a read-only grant cannot create one), so nothing in Gmail needed renaming; a store with a label still named `分拣/x`
-in Gmail keeps writing it by its ID, and SyncLabels leaves that name alone.
+A Gmail name alone does not grant ownership. A same-name external label stays `NAME_TAKEN` until the owner explicitly
+adopts it through 从 Gmail 同步; a label with children or a system label is never adopted. All writes identify owned
+labels by Gmail ID. If a message already carries the target label, ordinary classification refuses the write so an
+undo cannot later remove an existing owner label. Consolidation leaves merged source operations read-only; they cannot be undone after the merge. New
+classification writes retain ordinary undo. Old grouping labels are never added to mail; only empty app-created groups without unrelated
+children may be hidden. Neither source labels nor grouping labels are deleted.
 
 Three differences from the first plan, each for a reason: `history.list` is read without `labelId=INBOX` (an archived
 mail has no INBOX, and the owner's label changes on it are the main feedback; the pipeline filters new mail by its
 labels instead); `profile` (fields=historyId only) gives the install-time cursor without reading any message; and
-`labels.patch` exists so a rename in the dashboard renames the Gmail label (name only, to the path the store holds).
+`labels.patch` exists so a rename in the dashboard renames the Gmail label (name only, to the name the store holds).
 
 Other guarantees: the Gmail grant lives only in Worker secrets the owner puts from their own machine (§12), never in
 GitHub; logs hold counts and codes only (never a subject, sender, address or label name); the model sees masked text
@@ -159,34 +141,24 @@ display name (whose domain is never the one DMARC checks or a trusted domain mat
 
 ## 3. Labels, modes and limits
 
-### 3.1 Labels: a tree of paths, archive or keep
+### 3.1 Labels: single-level names, archive or keep
 
-A label's display name is its path, and its Gmail name is that path (`出行`, `金融/投资`, at Gmail's top level): one to
-three segments, each 1-40 characters, 100 in all, and never `分拣` as the first segment (`paths.ts`): the legacy prefix
-is read as nothing, `分拣/金融/投资` is `金融/投资` in CreateLabel and a rename (`ownerPath`). Only leaves are labels: a label
-may not be the parent or child of another (CreateLabel, a rename and SyncLabels' rename all hold to it), so a mail's one
-label is always a leaf. Gmail gets the parents as
-plain grouping labels, created as needed before a label's first write (`writes.ts` ensureGmailLabel: one labels.list,
-then whatever of `金融` and the leaf is missing; a label already there under the leaf's path leaves the label out of
-Gmail, its name taken, §2) or before a rename. A parent this app created is recorded (table `gmail_parents`, schema
-version 3): a label later made of it (新建标签 `新闻` once `新闻/周报` became `资讯/周报/精选`) links the Gmail label that is
-there as the app's own, not adopted, and the record goes; while labels are still nested under it in Gmail it is a
-parent, and the name is taken. A parent the owner already had is used as it is.
+Gmail and Mailsort use the same English name, at most 40 characters, with at least one ASCII letter. Digits, spaces
+and common punctuation (`& ' ( ) . , + _ -`) are allowed; `/`, control characters and non-ASCII names are rejected on
+create and rename. The UI is a flat searchable list. Existing Chinese or nested names remain readable with their
+full name; their internal IDs do not change. Normal creation never creates a grouping label.
 
-SyncLabels (从 Gmail 同步) only reads Gmail and never imports a Gmail label: with no prefix to tell them apart, every
-label of the owner's would look like one. It refreshes the labels the store knows by their Gmail ID: one Gmail no
-longer has is marked missing (nothing is written with it), one renamed in Gmail takes the new name when that is a path
-no other label has and the tree allows (any other name, the legacy `分拣/x` among them, is left alone: writes go by the
-ID). And a label not in Gmail (not created yet, or missing) is linked to the user label of exactly its path, adopted
-(§2), when no other label holds it and no label is nested under it there; a label not created yet whose path is still
-the name of a Gmail label keeps its name taken, and one whose path is free again loses it. A label made
-without an ID gets one from its path (`金融/投资` is `finance-invest`, `paths.ts` pathSlug: a fixed glossary of the words
-labels of a personal mailbox use, from `开发/CI通知` and `金融/投资` to `家人`, `报税` and `测试`; a word outside it becomes `x` and a
-short hash of itself, while the path's other words keep their English, `金融/猫咪` is `finance-x…`), stable and readable
-in URLs. A deleted label's ID
-is retired (`retired_labels`, until its decisions and flow counters are pruned): its decisions, review items, ledger
-rows and counters still name it, so a new label of the same path gets `finance-invest-2` instead of inheriting that
-history, and CreateLabel refuses it as an explicit ID.
+SyncLabels reads only labels the store already knows. It identifies them by Gmail ID, adopts an exact-name external
+label only on explicit sync, and never imports unrelated labels. A Chinese/nested external rename, or an owned label
+that now has children, is exposed as a specific `Label.problem` and blocks new classification writes for that label.
+The owner can rename it through its detail. A missing Gmail ID is marked missing. The old slug/path helpers remain for
+reading historical records and assigning stable IDs; they do not authorize a new nested label.
+
+The owner can consolidate labels in Settings with a private mapping. `label-merge.ts` journals bounded Alarm work;
+`label-identity.ts` maps old IDs for reports and replay while stored predictions, probabilities and ledger
+rows remain unchanged. One-to-one groups rename the same Gmail ID; merged sources transfer their members to the
+first source and are hidden when verified empty. Merged source ledger entries stay read-only; there is no reverse migration. Examples and trusted domains retain their learning times. The full
+preflight, pause, resume and validation procedure is in [label consolidation](label-consolidation.md).
 
 A label archives what it gets (removes INBOX, `UNREAD` untouched) unless its 归档 is off (`keep_in_inbox`): then the
 label is added and the mail stays in the inbox. Nothing else keeps a labelled mail in the inbox (the owner's decision of
@@ -197,7 +169,7 @@ against it, and an undo of a kept mail only removes the label. A sensitive label
 masked summary would otherwise outlive the 14 days of content. Turning a label sensitive (UpdateLabel) deletes the
 examples it has, embeddings and all, in the same transaction.
 
-A label's description is what the model reads (`path: description`); a label without one is never offered, so it never
+A label's description is what the model reads (`name: description`); a label without one is never offered, so it never
 gets a mail. One language and 60-120 characters, saying what belongs and, between close labels, what does not, keep
 every call cheap (§8.1). Trust labels (a bank, a brokerage, accounts, security, government) are transactional only:
 a bank's own marketing belongs to a promotions label, so a look-alike promotion never borrows a trust label.
@@ -431,8 +403,9 @@ Before Gmail labelling goes live, the owner checks the new decision against thei
 - **StartReplayEvaluation** (POST `/api/v2/replayEvaluation:start`, idempotent by `request_id`: a repeat answers the
   first start) takes every review item the owner resolved in the last 14 days with a label or 都不是, at most 200,
   newest first (one per mail, its newest answer), and writes one row per mail with the owner's answer and the original
-  decision's time, next to the job's own row, in the one table `replay`. A new start replaces the previous job, still
-  running or finished: a fresh run is a start with a new `request_id`.
+  decision's time, next to the job's own row, in the one table `replay`. A running job cannot be replaced by a new
+  request; the same request returns its original receipt. A new run can replace a finished job. Consolidation pauses
+  evaluation, and old answer IDs compare through the canonical mapping without changing the original time boundary.
 - Each alarm pass, after the drain and the embeddings and with the subrequests the pass has left (5 per mail: the
   read and its metadata fallback, the embedding, two views), decides up to 6 waiting mails again, oldest first: it
   re-reads the mail (metadata and body, as the drain does, with the read grant), gathers the same evidence and asks
@@ -465,8 +438,7 @@ Before Gmail labelling goes live, the owner checks the new decision against thei
   evaluated mail's numbers with the owner's answer and the outcome (at most 200, in the order of the original
   decisions, no message ID; a mail evaluated before version 6 has none), which calibrate the thresholds: what precision
   and coverage another gating rule would have had. NOT_FOUND before the first start and after its rows were pruned
-  (7 days after the start). The UI does not show it: the owner (or the agent, from the signed-in page) calls it from
-  the browser's console.
+  (7 days after the start). Settings shows the counts, progress and main mismatches through 检查分类效果.
 
 ## 6. Learning from the owner
 
@@ -520,7 +492,7 @@ it is `undoable`, with the mail's masked subject and sender while they are kept.
 pages of 50; "至少" when it stopped there), and only 确认撤销 undoes them: the server undoes at most 20 per call and
 answers how many are left; the page repeats the call until none is left (or a call undoes nothing) and shows the
 totals. A preset range ends ten minutes after the browser's clock, so a write the Worker dated later is in it.
-UndoLedgerEntry (one entry) stays in the API; the UI no longer lists the ledger. Labels are created in Gmail (named by their path, with the parents it nests under) just before the
+UndoLedgerEntry (one entry) stays in the API; the UI no longer lists the ledger. Labels are created in Gmail with their single-level English name just before the
 first write that needs them, after the gate, never over a Gmail label of that path (its name is then taken, §2);
 SyncLabels follows renames and deletions made in Gmail and adopts, never imports (§3.1).
 
@@ -690,35 +662,14 @@ framework; Chinese, short plain words, at most one hint line where needed.
   70 %, danger when used up, and a line only when Clef-flash is in use, the quota is gone or mail waits for tomorrow).
   No error box: the codes are never cleared and carry no time, so one transient `gmail_429` would stay for good
   (ServiceStatus still lists them).
-- **标签** (`/labels`, `views/labels.ts` and `label-detail.ts`): the one place for everything about a label. From the
-  top: a search box (搜索标签) that filters the labels' paths as one types (Escape clears it); a quiet line with
-  `15 个标签` (`找到 2 个` while searching) on the left and 启用 on the right, over the switch column; then one card
-  holding the tree, in the labels' order, hairlines between rows. A top-level group (开发, 金融) is a muted 13 px heading
-  row and its labels are indented under it by their rest of the path (CI通知, 平台工具; `汽车 › 保养` under 生活); a
-  label of one segment (账号安全) is a row at the top level. Each row is one line and nothing else: the name (muted,
-  with 未启用 beside it, when the label is off; 同名已占用 or Gmail 中已删除 in the warning color when Gmail takes nothing
-  from it), how many mails the model was sure of for it in the last 7 days (`7 天 12 封`, from the label report; none
-  at 0, and none when the report cannot be read), and the 启用 switch, which saves `enabled` at once
-  (`update_mask=enabled,etag`) and puts itself back when refused. The row is a button: it opens the label's detail
-  under it (an accent edge on the open row, one detail open at a time; again closes it). The detail, on the page's
-  background: first, only when Gmail takes nothing from the label, one warning line with what to do (its path is a
-  Gmail label of the owner's: `Gmail 里已有同名标签，改个名字或到 设置 → 从 Gmail 同步 沿用`; its Gmail label was
-  deleted: `Gmail 里已没有这个标签，不再打它；在 Gmail 建回同名标签后到 设置 → 从 Gmail 同步`); the description, a
-  textarea that grows with its text (the placeholder says the model never picks a label without one), saved on blur
-  or with a small 保存 shown while it differs; the 归档 switch (on by default; off saves `keep_in_inbox`, and its hint
-  says the mail then stays in the inbox, §3.1); for a trust label, 可信域名 with its
-  count, one line per domain in mono with 删除 (RemoveTrustedDomain with the etag; no add), or, with none yet, the line
-  that the label is not written automatically until an answer in 待审 for a sender whose identity Gmail verified (DMARC
-  passed) teaches one;
-  then 例子 with its count and 查看 / 收起 (50 at a time, 再看 50 个), each a masked summary, its date and 删除; a
-  sensitive label says 敏感标签不留例子. Last, 高级, folded: 可信 (turned on, the trusted domains appear at once), 敏感
-  (asks before it deletes the examples), the path with 改名 (the label moves in the tree, the detail stays open), the
-  Gmail state only when it says something (`Gmail：尚未创建` or `已沿用原有标签`; a linked label says nothing) and
-  删除标签 (asks first); 启用 is on the row only. Every save sends only its own fields and the label's current etag. At
-  the bottom one quiet `+ 新标签`: one path field, and the new label opens with its description focused. With no label
-  at all the page is one empty state, 还没有标签, with + 新标签. Light and dark from the same tokens; at 360 px the rows
-  keep one line and the detail loses its indent.
-- **设置** (`/settings`): three cards and nothing else. 模式: a segmented 关闭 · 影子 · 正式 (正式 asks first: 启用的标签会在
+- **标签** (`/labels`, `views/labels.ts` and `label-detail.ts`): a flat searchable list with each label's full name,
+  7-day count and enable switch. Legacy names stay visible in full until consolidation; there are no grouping headers
+  or indented tree rows. Expanding a row shows Chinese criteria, archive/trust/sensitive settings, trusted domains and
+  examples. Advanced settings retain rename and deletion of the app record. Name validation matches the Worker.
+  Gmail conflicts, missing labels, invalid external names and labels with children show a specific next action.
+  Each update sends only changed fields and the current etag. The page retains empty, unavailable and narrow-screen
+  states. During consolidation, mutation controls are disabled and the status points to Settings.
+- **设置** (`/settings`): 模式: a segmented 关闭 · 影子 · 正式 (正式 asks first: 启用的标签会在
   Gmail 里给有把握的邮件打标签（按归档设置移出收件箱），待审里的选择也会写入; a choice sends only
   `mode` and the etag) and one line: what the mode does, or the
   deployment's ceiling (`受部署上限限制，按影子运行`), or the tripped breaker in words with 解除熔断, or, for 正式 with a
@@ -727,6 +678,11 @@ framework; Chinese, short plain words, at most one hint line where needed.
   a label select (全部标签 first) and 预览, which shows `将撤销“出行”的 12 条` with 确认撤销 and 取消, or
   这段时间没有可撤销的写入. Gmail: one row, 从 Gmail 同步 (a toast says what the sync did). The write limits and the
   neuron budget are not in the UI; their stored values stand.
+  检查分类效果 uses StartReplayEvaluation/GetReplayEvaluation: start, refresh, current progress, completed time,
+  sample/agreement/unsure/skipped counts and main confusions. It explains the 14-day sample boundary and model cost;
+  no samples, off mode, budget/quota waiting and dependency failure are distinct states. A running job disables start.
+  整理标签 is folded by default: private JSON, current-ID/etag resolution, preview and explicit start. It shows durable
+  phase, processed memberships, error and resume for the same task. No production mapping is embedded in assets.
 
 ## 10. Operations
 
@@ -800,10 +756,10 @@ the fake Gmail (`fake-gmail.ts`) and fake Workers AI (`fake-ai.ts`, Clef and bge
   a mail off without using up its tries; the summary's counts, label pairs, reason counts and each mail's numbers
   without content; a repeated request ID; a fresh start once the last one finished, with a seeded trusted domain
   counted at any time; waiting while shed and past the day's budget);
-  `labels.test.ts` nested labels with their parents, a trust label's
+  `labels.test.ts` flat English labels without grouping creation, a trust label's
   domain learned and removed (RemoveTrustedDomain, etag and request ID), forged and look-alike From headers never
-  borrowing it (the look-alike's own domain the only teachable one), Gmail labels adopted by the sync only (never at once, never a parent), renames, the legacy
-  `分拣/x`, the flow counters and the label report, sensitive labels, retired IDs and a label-filtered range undo;
+  borrowing it (the look-alike's own domain the only teachable one), Gmail labels adopted by the sync only (never at once, never a parent), renames, rejection of new
+  Chinese or nested names, the flow counters and the label report, sensitive labels, retired IDs and a label-filtered range undo;
   `api.test.ts` the HTTP surface (the old `/api/v1` paths answering 410 RELOAD_REQUIRED), the owner API and ops-v1 over
   a service binding; `failures.test.ts`, the review's findings each as a regression test: a leftover write stopped by
   shadow, the breaker, the `MODE` ceiling and a disabled label (each left only recorded); retries against the run cap;
@@ -816,8 +772,8 @@ the fake Gmail (`fake-gmail.ts`) and fake Workers AI (`fake-ai.ts`, Clef and bge
 - `worker/test/smoke/smoke.mts`: the real `wrangler dev` (`../wrangler.test.toml`) against the fakes on loopback, the
   owner's whole loop through the HTTP API: two views in shadow, live labels, confident none, a pickup code archived and
   a label with 归档 off keeping its mail in the inbox, undo, a trust label's domain learned from the review queue and a
-  forged From, Gmail corrections into examples, an adoption, a nested label, the replay evaluation, the Clef-flash
-  switch, the quota deferral, the flow API, the legacy `分拣/x`, the parents' record, a label-filtered range undo, the
+  forged From, Gmail corrections into examples, an adoption, a flat English label, the replay evaluation, the Clef-flash
+  switch, the quota deferral, the flow API, a rename preserving its Gmail ID, a label-filtered range undo, the
   old `/api/v1` paths' 410 and the auth failure.
 - `web/src/*.test.ts`: the views against a fake API on the shared transcoder: `app.test.ts` the shell (four tabs, the
   focus kept on a tab, the status line, 马上, the queue's count), 待审 (the one-tap answers in the model's order with
@@ -827,7 +783,7 @@ the fake Gmail (`fake-gmail.ts`) and fake Workers AI (`fake-ai.ts`, Clef and bge
   that would teach one (never primary, Enter too), a mail without the model's options (no primary, Enter opens 其他…),
   the reasons in words, the quiet state 没有需要你确认的邮件), 设置 (the mode's mask and question, the ceiling, the breaker, 正式 with a
   read-only grant, the undo's preview and rounds, one label's undo, the custom range, the sync; no filter export);
-  `labels.test.ts` 标签 (the tree's grouping, the one-line row with its 7-day count, also without the report, and 启用
+  `labels.test.ts` 标签 (the flat list, the one-line row with its 7-day count, also without the report, and 启用
   with its mask, etag and refusal, one detail open at a time, the search over names, the description on blur, 归档
   saving `keep_in_inbox` inverted, a trust label's trusted domains with 删除 and their empty line once 可信 is turned
   on, the examples on demand, the Gmail state lines, 高级 without 启用 and with 敏感's question, the visible 未启用,
@@ -836,7 +792,7 @@ the fake Gmail (`fake-gmail.ts`) and fake Workers AI (`fake-ai.ts`, Clef and bge
   拿不准 split by 待审, size, tooltip, tokens, the zero skeleton out of the Tab order, the phone's start at the
   outcomes) and 概览 with and without mail (the status line, also live with a read-only grant, today's tally and the 7
   days under each number, the per-label table and its two empty lines), without an error box; `check-layout.test.ts` the switch rows and the
-  phone-width rules (one column per page and per 待审 row, the time on one line, the settings rows, the tree's
+  phone-width rules (one column per page and per 待审 row, the time on one line, the settings rows, the label list's
   hairlines, the off switch's track); `test/no-external.test.ts` the same-origin rules.
 - `deploy/test/*.test.mjs`: the production config, the deploy wrapper (MODE, the secrets file without the grant), that
   `wrangler deploy --secrets-file` keeps secrets it does not name (the pinned wrangler), that the public GitHub
@@ -873,7 +829,7 @@ created; then `mailsort` leaves `CHECK_ONLY` in `.github/scripts/ci_changes.py` 
 `[durable_objects]` as `mailsort-state`.
 
 Then: run in shadow and answer the few uncertain mails 待审 shows; check the trust labels' trusted domains in 标签; run
-the replay evaluation from the signed-in page's console (StartReplayEvaluation, then GetReplayEvaluation once it
+the replay evaluation from Settings (StartReplayEvaluation, then GetReplayEvaluation once it
 succeeded, §5.1) and read its matches and mismatching label pairs; then grant `gmail.modify` (mint-token
 `--scope modify`), set `MAILSORT_MODE=live` and choose 正式 in 设置. Every enabled label then writes; 设置 → 撤销 and
 the breaker stay the safety net.

@@ -57,12 +57,12 @@ export function message(mail: SyntheticMail): Omit<FakeMessage, 'labelIds'> & { 
   };
 }
 
-/** The tests' labels: ID, Chinese display name, and the description the fake model matches words of. */
+/** The tests' labels: ID, English display name, and the description the fake model matches words of. */
 export const LABELS = [
-  { id: 'newsletter', displayName: '订阅', description: 'newsletter weekly digest 周报 订阅' },
-  { id: 'receipt', displayName: '收据', description: 'receipt invoice order 订单 收据 发票' },
-  { id: 'travel', displayName: '出行', description: 'flight itinerary hotel 航班 行程 酒店' },
-  { id: 'bank', displayName: '银行', description: 'bank statement account 银行 账户 对账单', trust: true },
+  { id: 'newsletter', displayName: 'Digests', description: 'newsletter weekly digest 周报 订阅' },
+  { id: 'receipt', displayName: 'Receipts', description: 'receipt invoice order 订单 收据 发票' },
+  { id: 'travel', displayName: 'Trips', description: 'flight itinerary hotel 航班 行程 酒店' },
+  { id: 'bank', displayName: 'Banking', description: 'bank statement account 银行 账户 对账单', trust: true },
 ] as const;
 
 export const MAILS = {

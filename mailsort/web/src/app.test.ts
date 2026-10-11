@@ -7,9 +7,11 @@
  */
 import { mountApp, type Host } from './app.ts'
 import { relative } from './format.ts'
-import { FakeServer, label, ledgerEntry, NOW, reviewItem, settle } from './test/fakeServer.ts'
+import { FakeServer, flowCount, label, ledgerEntry, NOW, reviewItem, settle } from './test/fakeServer.ts'
+import { MailFlow_Outcome, MailFlow_Stage } from '@ziyixi/proto/mailsort/ui/v2/flow_pb'
 import { Label_GmailState } from '@ziyixi/proto/mailsort/ui/v2/label_pb'
 import { CandidateSchema } from '@ziyixi/proto/mailsort/ui/v2/review_pb'
+import { ReplayEvaluation_State, ReplayEvaluationSchema } from '@ziyixi/proto/mailsort/ui/v2/replay_pb'
 import { Mode, ServiceStatus_AuthState } from '@ziyixi/proto/mailsort/ui/v2/status_pb'
 import { create } from '@ziyixi/proto/protobuf'
 import { timestampFromMs } from '@ziyixi/proto/protobuf/wkt'
@@ -44,6 +46,30 @@ function press(key: string): void {
 const rows = (root: HTMLElement) => [...root.querySelectorAll<HTMLLIElement>('ul.rows > li')]
 
 describe('the shell', () => {
+  it('uses current canonical English names in review, charts, reports, undo options and replay results', async () => {
+    const server = new FakeServer()
+    server.labels = [label('newsletter', 'Project Updates'), label('receipt', 'Purchase Records')]
+    server.reviewItems = [reviewItem('a')]
+    server.flow = [flowCount(MailFlow_Stage.CLEF, MailFlow_Outcome.ARCHIVED, 'labels/newsletter', 2)]
+    server.replay = create(ReplayEvaluationSchema, { name: 'replayEvaluation', state: ReplayEvaluation_State.SUCCEEDED, totalCount: 1, evaluatedCount: 1, autoCount: 1, mismatches: [{ decidedLabel: 'labels/newsletter', ownerLabel: 'labels/receipt', mailCount: 1 }] })
+    const root = await open(server, '/')
+    expect(root.querySelector('.answers')?.textContent).toContain('Project Updates')
+    const navigate = async (path: string) => {
+      root.querySelector<HTMLAnchorElement>(`.tabs a[href="${path}"]`)?.click()
+      await settle()
+      expect(root.textContent).not.toContain('订阅')
+      expect(root.textContent).not.toContain('收据')
+    }
+    await navigate('/overview')
+    expect(root.querySelector('.flow-legend')?.textContent).toContain('Project Updates')
+    expect(root.querySelector('.report')?.textContent).toContain('Purchase Records')
+    await navigate('/settings')
+    expect([...root.querySelectorAll('select[aria-label="标签"] option')].map((node) => node.textContent)).toEqual(['全部标签', 'Project Updates', 'Purchase Records'])
+    expect(root.querySelector('.replay-mismatches')?.textContent).toContain('Project Updates → 你的回答：Purchase Records')
+    await navigate('/labels')
+    expect([...root.querySelectorAll('.leaf-name')].map((node) => node.textContent)).toEqual(['Project Updates', 'Purchase Records'])
+  })
+
   it('has exactly four tabs, the quiet status line, and answers an unknown path', async () => {
     const server = new FakeServer()
     server.reviewItems = [reviewItem('a'), reviewItem('b'), reviewItem('c')]
@@ -356,9 +382,9 @@ describe('待审', () => {
 })
 
 describe('设置', () => {
-  it('has only the mode, the undo and Gmail', async () => {
+  it('has the mode, undo, Gmail and replay evaluation', async () => {
     const root = await open(new FakeServer(), '/settings')
-    expect([...root.querySelectorAll('h2')].map((node) => node.textContent)).toEqual(['模式', '撤销', 'Gmail'])
+    expect([...root.querySelectorAll('h2')].map((node) => node.textContent)).toEqual(['模式', '撤销', 'Gmail', '检查分类效果'])
     expect(root.querySelectorAll('input[type="number"]').length).toBe(0)
     expect(root.querySelector('[aria-label="模式"] [aria-pressed="true"]')?.textContent).toBe('影子')
     expect(root.textContent).toContain('只判断和记录，不改 Gmail')

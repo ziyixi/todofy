@@ -3,7 +3,7 @@
  */
 import { create } from '@ziyixi/proto/protobuf';
 import { timestampFromMs } from '@ziyixi/proto/protobuf/wkt';
-import { Label_GmailState, LabelSchema, type Label } from '@ziyixi/proto/mailsort/ui/v2/label_pb';
+import { Label_GmailState, Label_Problem, LabelSchema, type Label } from '@ziyixi/proto/mailsort/ui/v2/label_pb';
 import {
   ReplayEvaluation_CaseSchema,
   ReplayEvaluation_MismatchSchema,
@@ -69,6 +69,7 @@ export function labelMessage(row: LabelRow, exampleCount: number, trustedDomains
     keepInInbox: row.keep_in_inbox === 1,
     sensitive: row.sensitive === 1,
     trustedDomains: [...trustedDomains],
+    problem: row.problem === 'invalid_name' ? Label_Problem.INVALID_NAME : row.problem === 'has_children' ? Label_Problem.HAS_CHILDREN : Label_Problem.UNSPECIFIED,
   });
 }
 

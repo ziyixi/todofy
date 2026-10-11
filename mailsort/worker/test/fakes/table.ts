@@ -14,24 +14,20 @@ export interface TableContext {
   readonly planned: ReadonlySet<string>;
   /** The ledger row's state and archive flag for (message, Gmail label), or null. */
   readonly ledger: (messageId: string, labelId: string) => { state: string; archived: boolean } | null;
+  /** Independent test fixture's explicit migration scope, never inferred from a request. */
+  readonly merge?: { readonly labels: ReadonlySet<string>; readonly messages: ReadonlySet<string>; readonly swaps: ReadonlySet<string>; readonly hidden: ReadonlySet<string>; readonly names: ReadonlySet<string> };
+
 }
 
 const MESSAGE_ID = /^[0-9a-f]{6,32}$/;
 
-/**
- * A label path (design §2, 2026-10-07: labels at Gmail's top level): one to three segments, each non-empty with no
- * leading or trailing space and no control character, never starting with the legacy prefix's segment `分拣`.
- */
+/** Independent single-level English name check. */
 function okName(name: unknown): name is string {
-  // eslint-disable-next-line no-control-regex
-  if (typeof name !== 'string' || /[\u0000-\u001f\u007f]/.test(name)) return false;
-  const segments = name.split('/');
-  return segments.length >= 1 && segments.length <= 3 && segments[0] !== '分拣' && segments.every((segment) => segment.length > 0 && segment.trim() === segment);
+  return typeof name === 'string' && name.length > 0 && name.length <= 40 && name.trim() === name && /[A-Za-z]/.test(name) && /^[A-Za-z0-9 &'().,+_-]+$/.test(name);
 }
 
-/** labels.create: a planned path, or a parent Gmail nests one under (`开发` above `开发/CI通知`). */
 function okCreateName(name: unknown, planned: ReadonlySet<string>): boolean {
-  return okName(name) && [...planned].some((path) => path === name || path.startsWith(`${name}/`));
+  return okName(name) && planned.has(name);
 }
 
 /** labels.patch: a planned path (the guard narrows it to the one planned for that label). */
@@ -78,9 +74,11 @@ export function allowedOperation(method: string, rawUrl: string, body: string, c
       : null;
   }
   if (method === 'GET' && path.join('/') === 'messages') {
+    if (url.searchParams.get('fields') === 'messages/id,nextPageToken,resultSizeEstimate') return only('labelIds', 'fields', 'maxResults', 'includeSpamTrash') && ctx.merge?.labels.has(url.searchParams.get('labelIds') ?? '') === true && url.searchParams.get('includeSpamTrash') === 'true' && Number(url.searchParams.get('maxResults')) <= 10 ? 'merge_list' : null;
     return only('labelIds', 'q', 'maxResults', 'pageToken') && url.searchParams.get('labelIds') === 'INBOX' && url.searchParams.get('q') === 'newer_than:2d' ? 'messages_list' : null;
   }
   if (method === 'GET' && path[0] === 'messages' && path.length === 2) {
+    if (url.searchParams.get('format') === 'minimal') return only('format', 'fields') && url.searchParams.get('fields') === 'id,labelIds,historyId' && ctx.merge?.messages.has(path[1] ?? '') === true ? 'merge_metadata' : null;
     return MESSAGE_ID.test(path[1] ?? '') && only('format', 'metadataHeaders', 'fields') && ['full', 'metadata'].includes(url.searchParams.get('format') ?? '') ? 'message_get' : null;
   }
   if (method === 'GET' && path.join('/') === 'labels') return params.length === 0 ? 'labels_list' : null;
@@ -92,7 +90,8 @@ export function allowedOperation(method: string, rawUrl: string, body: string, c
   if (method === 'PATCH' && path[0] === 'labels' && path.length === 2) {
     const value = canonicalObject(body);
     if (value === null) return null;
-    return ctx.owned.has(path[1] ?? '') && okPatchName(value['name'], ctx.planned) && Object.keys(value).join() === 'name' ? 'labels_patch' : null;
+    if (Object.keys(value).length === 2 && value['labelListVisibility'] === 'labelHide' && value['messageListVisibility'] === 'hide') return ctx.merge?.hidden.has(path[1] ?? '') === true ? 'labels_hide' : null;
+    return ctx.owned.has(path[1] ?? '') && (okPatchName(value['name'], ctx.planned) || (typeof value['name'] === 'string' && ctx.merge?.names.has(value['name']) === true)) && Object.keys(value).join() === 'name' ? 'labels_patch' : null;
   }
   if (method === 'POST' && path[0] === 'messages' && path[2] === 'modify' && path.length === 3) {
     const id = path[1] ?? '';
@@ -103,6 +102,7 @@ export function allowedOperation(method: string, rawUrl: string, body: string, c
     const remove = value.removeLabelIds ?? [];
     if (Object.keys(value).some((key) => key !== 'addLabelIds' && key !== 'removeLabelIds')) return null;
     const inbox = (list: string[]) => list.length === 0 || (list.length === 1 && list[0] === 'INBOX');
+    if (add.length === 1 && remove.length === 1 && add[0] !== remove[0] && ctx.owned.has(add[0] ?? '') && ctx.owned.has(remove[0] ?? '')) return ctx.merge?.swaps.has(`${id}:${remove[0] ?? ''}:${add[0] ?? ''}`) === true ? 'merge_modify' : null;
     if (add.length === 1 && inbox(remove) && ctx.owned.has(add[0] ?? '')) {
       const row = ctx.ledger(id, add[0] ?? '');
       return row !== null && ['intended', 'applied'].includes(row.state) && row.archived === (remove.length === 1) ? 'classify' : null;

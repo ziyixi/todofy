@@ -9,11 +9,19 @@ Its old waiting lists and release identities are historical, not instructions to
 
 ## Current work
 
-`codex/mailsort-flat-labels` is implementing the owner-approved single-level English labels, consolidation of
-existing labels and mail, and a Settings entry point for replay evaluation. The private production mapping is not
-committed. Preserve Gmail message state, old identities and learning times; use the existing Alarm and budget.
-Backend, owner proto/API and UI are being updated together. Synthetic checks, branch CI, same-SHA Actions release
-and the owner-approved production consolidation remain pending. No production label has been changed by this work.
+`codex/mailsort-flat-labels` implements single-level English labels, consolidation of existing label memberships,
+and Settings' classification-effect check. Labels, review choices, overview statistics, ledger filters and replay
+results resolve historical IDs to current English labels. The private production mapping is not committed.
+The owner explicitly removed reverse migration and special historical undo from scope: merged source operations
+are read-only; same-ID renames and new classifications keep ordinary undo. The existing Alarm, write limits,
+models and budgets are unchanged. No new service or dependency was introduced.
+
+Local checks passed: Worker lint/typecheck, 114 unit tests, 87 workerd tests including CPU and concurrent-start
+cases; UI lint/typecheck/build and 97 tests; 26 deployment-tool tests; proto lint/API lint/breaking; synthetic
+Wrangler smoke with 67 allowed Google calls. Desktop and mobile browser checks used isolated fake data; a
+zero-sample effect check finished without Gmail writes. Branch CI, same-SHA Actions release and the authorized
+production consolidation are still pending. No production label has changed yet.
+[Operation and verification](mailsort/docs/label-consolidation.md) describes the private input and current behavior.
 
 No implementation remains open from the October 11 maintenance task. `codex/maintenance-simplification`
 landed at `ccf2c27`: concise handoff, checked test-only release exclusions and parsed YAML boundary assertions.
@@ -80,9 +88,8 @@ Update each verification document through the normal branch CI and same-SHA rele
   FlowDay's owner setup/device check before F6 retirement, and Newsletter's natural provider/send acceptance after
   its last business change. Use the app runbooks and fresh status before treating an old waiting item as still open;
   do not restart Compose, replay a send or request credentials solely from an archived note.
-- The Mailsort handoff records a low-priority follow-up for an owned Gmail label that later gains sublabels;
-  [the original note](docs/history/handoff-2026-10-11.md#in-flight-2026-10-06-claude-mailsort-the-gmail-auto-labeler)
-  has not been revalidated against the later model-first implementation. It is outside this maintenance scope.
+- The Mailsort flat-label branch handles owned labels that later gain sublabels: Gmail sync reports the conflict
+  and pauses writes for that label. This supersedes the older follow-up once the branch is released.
 
 ## Operating boundaries
 

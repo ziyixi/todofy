@@ -62,7 +62,8 @@ export function senderHistory(store: Store, hash: string, authenticated: boolean
   const counts = new Map<string, { owner: number; auto: number }>();
   for (const row of rows) {
     const owner = (row.verdict === 'confirmed' || row.verdict === 'corrected') && (row.verdict_source === 'review' || row.verdict_source === 'gmail') && (row.verdict_at ?? asOf) < asOf;
-    const label = owner ? (row.verdict_label ?? NONE) : row.outcome === 'applied' || row.outcome === 'suggested' ? row.label_id : null;
+    const original = owner ? (row.verdict_label ?? NONE) : row.outcome === 'applied' || row.outcome === 'suggested' ? row.label_id : null;
+    const label = original === null ? null : store.canonicalLabelId(original);
     if (label === null) continue;
     const entry = counts.get(label) ?? { owner: 0, auto: 0 };
     if (owner) entry.owner++;
@@ -86,7 +87,7 @@ export function shownOn(store: Store, at: number): number {
 }
 
 export function labelFacts(labels: readonly LabelRow[]): Map<string, LabelFacts> {
-  return new Map(labels.map((label) => [label.id, { id: label.id, enabled: label.enabled === 1, trust: label.trust === 1 }]));
+  return new Map(labels.map((label) => [label.id, { id: label.id, enabled: label.enabled === 1 && label.problem === '', trust: label.trust === 1 }]));
 }
 
 export interface ModelContext {
@@ -138,7 +139,7 @@ function countCall(ctx: ModelContext, neurons: number): void {
 export async function judge(ctx: ModelContext, model: string, g: Gathered, asOf: number, exclude: string): Promise<Judgement> {
   const { store } = ctx;
   const labels = store.labels();
-  const enabled = labels.filter((label) => label.enabled === 1);
+  const enabled = labels.filter((label) => label.enabled === 1 && label.problem === '');
   const versions = Object.fromEntries(enabled.map((item) => [item.id, item.desc_version]));
   // The model is offered only labels with a description: a bare name is too little to decide by. Their keys come from
   // their paths (paths.ts optionKeys), stable per path.

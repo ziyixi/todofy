@@ -1,13 +1,13 @@
 /**
  * The flow of mail through the pipeline (../../docs/design.md §10) as a Sankey diagram: 新邮件 on the left, the stage
  * that handled each mail in the middle (跳过, Clef 27B, Clef-flash, 未调用模型, 延后), and on the right what the model
- * decided: each leaf label written to Gmail, 都不是 (confident that no label fits), 拿不准 split by whether the mail
+ * decided: each label written to Gmail, 都不是 (confident that no label fits), 拿不准 split by whether the mail
  * went to 待审 (all three left in the inbox), and 影子建议 (a confident label only recorded, nothing written). Link
  * widths are mail counts. With no mail at all it draws the skeleton instead: every stage and outcome at 0, muted
  * nodes and hairline links, so the diagram is always there.
  *
  * d3-sankey only lays the graph out (positions); the SVG is plain DOM in the page's theme: every color is a CSS token
- * (styles.css, light and dark), labels are grouped and colored by their top-level path segment in a fixed order (the
+ * (styles.css, light and dark), labels are colored by their complete name in a fixed order (the
  * labels' own order, so a day never repaints one of the first eight; a later group borrows a hue the day leaves free,
  * groupSlots), and only a day showing more than eight groups has gray ones. Color is never the only cue: every node
  * is named with its count. Hover or focus shows a node's or link's exact count and share. Motion is a short opacity
@@ -29,7 +29,7 @@ export interface FlowNodeData {
   readonly kind: NodeKind
   /** The color slot (1-8), 0 for gray. */
   readonly slot: number
-  /** The top-level group of a label node. */
+  /** The full label name used by the legend. */
   readonly group?: string
   /** Extra lines for the tooltip (the skip reasons, what an outcome means). */
   readonly detail?: readonly string[]
@@ -46,7 +46,7 @@ export interface FlowGraph {
   readonly total: number
   readonly nodes: readonly FlowNodeData[]
   readonly links: readonly FlowLinkData[]
-  /** Top-level groups in color order, for the legend. */
+  /** Labels in color order, for the legend. */
   readonly groups: readonly { readonly name: string; readonly slot: number }[]
 }
 
@@ -73,13 +73,8 @@ const OUTCOMES: readonly FlowNodeData[] = [
   { id: 'suggested', name: '影子建议（未写入）', kind: 'suggested', slot: 0, detail: ['有把握，但只记录：影子模式，或写入失败'] },
 ]
 
-/** The top-level segment of a path. */
-function topLevel(path: string): string {
-  return path.split('/')[0] ?? path
-}
-
 /**
- * The color slot of every top-level group (1 to SERIES, 0 for gray), so that a group keeps its color whatever the range
+ * The color slot of every label (1 to SERIES, 0 for gray), so that a group keeps its color whatever the range
  * shows and gray is left for real overflow:
  * - each group has a home slot in the labels' order, enabled labels' groups first (a store can have ten groups or
  *   more, so a disabled group should not take a hue from one that sorts mail); the first SERIES groups keep their home
@@ -91,7 +86,7 @@ function topLevel(path: string): string {
 export function groupSlots(labels: readonly Label[], shown: ReadonlySet<string>): Map<string, number> {
   const order: string[] = []
   for (const label of [...labels.filter((item) => item.enabled), ...labels.filter((item) => !item.enabled)]) {
-    const group = topLevel(label.displayName)
+    const group = label.displayName
     if (!order.includes(group)) order.push(group)
   }
   const slots = new Map<string, number>()
@@ -106,7 +101,7 @@ export function groupSlots(labels: readonly Label[], shown: ReadonlySet<string>)
 export function flowGraph(counts: readonly MailFlow_Count[], labels: readonly Label[]): FlowGraph {
   const byName = new Map(labels.map((label) => [label.name, label]))
   const nameOf = (label: string) => byName.get(label)?.displayName ?? '（已删除的标签）'
-  const groupOf = (label: string) => topLevel(byName.get(label)?.displayName ?? '')
+  const groupOf = (label: string) => byName.get(label)?.displayName ?? ''
   // Filled in once the counters are read (groupSlots below).
   let groupSlot = new Map<string, number>()
   const slotOf = (label: string) => groupSlot.get(groupOf(label)) ?? 0
@@ -363,11 +358,11 @@ export function sankeyChart(graph: FlowGraph): HTMLElement {
     box.append(
       el(
         'ul',
-        { class: 'flow-legend', 'aria-label': '标签分组' },
+        { class: 'flow-legend', 'aria-label': '标签颜色' },
         ...groups.map((group) => {
           const swatch = el('span', { class: 'swatch' })
           swatch.style.background = group.slot === 0 ? 'var(--muted)' : `var(--series-${String(group.slot)})`
-          return el('li', {}, swatch, group.slot === 0 ? `${group.name}（灰色：分组超过八种颜色）` : group.name)
+          return el('li', {}, swatch, group.slot === 0 ? `${group.name}（灰色：标签超过八种颜色）` : group.name)
         }),
       ),
     )

@@ -44,6 +44,12 @@ export const NETWORK_MESSAGE = '网络异常，或登录已过期，请稍后重
 const MESSAGES: Readonly<Partial<Record<Reason, string>>> = {
   ETAG_MISMATCH: '这一项已在别处修改，请刷新后重试',
   CSRF_FAILED: '页面安全令牌已过期，请刷新页面',
+  INVALID_LABEL: '标签名称或计划无效：新名称须为英文单层、最多 40 字符，来源标签须仍由本应用拥有',
+  CONSOLIDATION_ACTIVE: '标签正在整理；到设置查看进度，完成后再操作',
+  CONSOLIDATION_NOT_BLOCKED: '该整理任务无需继续，请刷新状态',
+  CONSOLIDATION_PENDING_WRITES: '等待已有 Gmail 写入完成后再开始整理',
+  CONSOLIDATION_UNDO_UNSAFE: '标签已合并，旧操作不可撤销',
+  REPLAY_ACTIVE: '已有回放正在运行，请等待完成',
 }
 
 export function errorMessage(error: unknown): string {

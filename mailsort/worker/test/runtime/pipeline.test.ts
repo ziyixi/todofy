@@ -78,7 +78,7 @@ describe('the pipeline, shadow then live', () => {
     deliver(h, MAILS.unsure, now);
     now += 5 * MINUTE;
     await h.step(now);
-    const labelId = h.up.gmail.labelIdByName('订阅');
+    const labelId = h.up.gmail.labelIdByName('Digests');
     expect(labelId).toMatch(/^Label_/);
     expect(gmailLabels(h, MAILS.newsletterZh.id)).toEqual(['CATEGORY_UPDATES', labelId, 'UNREAD'].sort());
     expect(await decision(h, MAILS.newsletterZh.id)).toMatchObject({ outcome: 'applied', label_id: 'newsletter' });
@@ -96,7 +96,7 @@ describe('the pipeline, shadow then live', () => {
     deliver(h, { ...MAILS.receiptZh, id: 'a1000000000000b1', subject: '订单已到快递柜', text: '订单包裹已到快递柜，凭取件码 1234 取件。' }, now);
     now += 5 * MINUTE;
     await h.step(now);
-    const receipt = h.up.gmail.labelIdByName('收据');
+    const receipt = h.up.gmail.labelIdByName('Receipts');
     expect(gmailLabels(h, 'a1000000000000b1')).toEqual(['CATEGORY_UPDATES', receipt, 'UNREAD'].sort());
     // Neither view asks whether the mail needs action (the owner's decision of 2026-10-11), and the column stays NULL.
     const questions = h.up.ai.calls.slice(from).filter((call) => call.model.includes('clef')).map((call) => Object.keys(call.input['questions'] as object).sort());
@@ -121,8 +121,8 @@ describe('the pipeline, shadow then live', () => {
   });
 
   it('a Gmail correction becomes an example, and putting the label back takes it away', async () => {
-    const receiptGmail = h.up.gmail.labelIdByName('收据') ?? '';
-    const newsletterGmail = h.up.gmail.labelIdByName('订阅') ?? '';
+    const receiptGmail = h.up.gmail.labelIdByName('Receipts') ?? '';
+    const newsletterGmail = h.up.gmail.labelIdByName('Digests') ?? '';
     for (const [i, id] of ['c000000000000c01', 'c000000000000c02'].entries()) {
       deliver(h, { ...MAILS.newsletterEn, id, subject: `Weekly digest ${String(i)}` }, now);
       now += 5 * MINUTE;
@@ -161,7 +161,7 @@ describe('the pipeline, shadow then live', () => {
     // The owner's answer: a verdict, the label written in live mode (archived), and the domain learned.
     const resolved = await h.api.resolveReviewItem({ name: item?.name ?? '', label: 'labels/bank', requestId: op() });
     expect(resolved).toMatchObject({ state: ReviewItem_State.RESOLVED, resolvedLabel: 'labels/bank' });
-    const bank = h.up.gmail.labelIdByName('银行');
+    const bank = h.up.gmail.labelIdByName('Banking');
     expect(gmailLabels(h, MAILS.bankEn.id)).toEqual(['CATEGORY_UPDATES', bank, 'UNREAD'].sort());
     expect((await h.api.getLabel({ name: 'labels/bank' })).trustedDomains).toEqual(['bank.example.com']);
     expect(reasonOf(await rejection(h.api.skipReviewItem({ name: item?.name ?? '', requestId: op() })))).toBe('ALREADY_RESOLVED');

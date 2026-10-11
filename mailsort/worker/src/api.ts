@@ -11,6 +11,10 @@
  */
 import { FieldMaskError, updatePaths } from '@ziyixi/proto/field-mask';
 import type { ServiceHandlers, ShapeOf } from '@ziyixi/proto/http-transcoder';
+import {
+  LabelConsolidation_Group_State, LabelConsolidation_GroupSchema, LabelConsolidation_Phase, LabelConsolidation_State,
+  LabelConsolidationSchema, type LabelConsolidation, type LabelConsolidationGroup,
+} from '@ziyixi/proto/mailsort/ui/v2/consolidation_pb';
 import { LabelSchema, type Label } from '@ziyixi/proto/mailsort/ui/v2/label_pb';
 import {
   ListExamplesResponseSchema,
@@ -37,6 +41,8 @@ import { setVerdict } from './feedback.ts';
 import { FLOW_RANGES, readFlow } from './flow.ts';
 import { GoogleError, type GmailClient } from './gmail.ts';
 import { newEtag, shortId } from './ids.ts';
+import { createLabelMerge, labelMergeSummary, migrationActive, MergeError, resumeLabelMerge, type MergePlanItem, type MergeSummary } from './label-merge.ts';
+import { canonicalDecision, canonicalReview, effectiveLedgerRow } from './label-identity.ts';
 import {
   CLEF,
   CLEF_FLASH,
@@ -62,7 +68,7 @@ import { replaySummary, startReplay } from './replay.ts';
 import { authState, type Budget, writeScope } from './session.ts';
 import { effectiveMode, readSettings, writeSettings, type SettingsValue } from './settings.ts';
 import { utcDay, type DecisionRow, type LabelRow, type LedgerRow, type ReviewRow, type Store } from './store.ts';
-import { ensureGmailLabel, ensureGmailParents, executeWrites, hasSublabels, intend, intendUndo, linkGmailLabel, setNameTaken, undoable, userLabelsByName, type WriteContext } from './writes.ts';
+import { ensureGmailLabel, executeWrites, hasSublabels, intend, intendUndo, linkGmailLabel, setNameTaken, undoable, userLabelsByName, type WriteContext } from './writes.ts';
 
 /** What every handler gets from MailsortState. */
 export interface ApiContext {
@@ -80,6 +86,8 @@ export interface ApiContext {
   readonly gmail: () => Promise<GmailClient | 'not_configured' | 'stopped'>;
   readonly budget: Budget;
   readonly shed: boolean;
+  /** Existing alarm or owner mutation must finish before accepting a consolidation. */
+  readonly consolidationBusy: () => boolean;
 }
 
 function bad(message = REASONS.BAD_REQUEST.message): never {
@@ -134,6 +142,7 @@ function once<Desc extends DescMessage>(ctx: ApiContext, requestId: string, rpc:
   return ctx.transact(() => {
     const logged = replay(ctx, requestId, rpc, resource, schema);
     if (logged !== undefined) return logged;
+    checkConsolidationMutation(ctx, rpc);
     const answer = run();
     if (requestId !== '') ctx.store.putRequest(requestId, rpc, resource, JSON.stringify(toWire(schema, answer)), ctx.now);
     return answer;
@@ -144,9 +153,16 @@ function once<Desc extends DescMessage>(ctx: ApiContext, requestId: string, rpc:
 async function onceAsync<Desc extends DescMessage>(ctx: ApiContext, requestId: string, rpc: string, resource: string, schema: Desc, run: () => Promise<MessageShape<Desc>>): Promise<MessageShape<Desc>> {
   const logged = ctx.transact(() => replay(ctx, requestId, rpc, resource, schema));
   if (logged !== undefined) return logged;
+  checkConsolidationMutation(ctx, rpc);
   const answer = await run();
   if (requestId !== '') ctx.transact(() => { ctx.store.putRequest(requestId, rpc, resource, JSON.stringify(toWire(schema, answer)), ctx.now); });
   return answer;
+}
+
+/** A frozen consolidation owns label/decision writes until it succeeds; settings still allow an emergency off. */
+function checkConsolidationMutation(ctx: ApiContext, rpc: string): void {
+  if (rpc === 'UpdateSettings' || rpc === 'StartLabelConsolidation' || rpc === 'ResumeLabelConsolidation') return;
+  if (migrationActive(ctx.store)) throw sortError('CONSOLIDATION_ACTIVE');
 }
 
 // ---- Gmail from a request --------------------------------------------------------------------------------------------
@@ -196,6 +212,7 @@ function ownerWritesAllowed(ctx: ApiContext): boolean {
 // ---- labels -------------------------------------------------------------------------------------------------------------
 
 function existingLabel(ctx: ApiContext, id: string): LabelRow {
+  if (ctx.store.canonicalLabelId(id) !== id) notFound();
   return ctx.store.label(id) ?? notFound();
 }
 
@@ -210,13 +227,65 @@ function labelsOut(store: Store, rows: readonly LabelRow[]): Label[] {
   return rows.map((row) => labelMessage(row, counts.get(row.id) ?? 0, domains.get(row.id) ?? []));
 }
 
-/** A label's path (paths.ts ownerPath), and the tree rule: no label may be the parent of another (only leaves). */
+/** New writes use a single English name; historical paths remain readable. */
 function checkDisplayName(ctx: ApiContext, name: string, exceptId = ''): string {
-  // The legacy `分拣/x` means `x` (the import reads it so too); `分拣` itself, or a path starting with it again, is refused.
   const value = ownerPath(name);
   if (value === null) throw sortError('INVALID_LABEL');
   if (treeConflict(value, ctx.store.labelPaths(exceptId)) !== null) throw sortError('INVALID_LABEL');
   return value;
+}
+
+// ---- label consolidation ----------------------------------------------------------------------------------------------
+
+function consolidationMessage(summary: MergeSummary): LabelConsolidation {
+  const states = { running: LabelConsolidation_State.RUNNING, blocked: LabelConsolidation_State.BLOCKED, succeeded: LabelConsolidation_State.SUCCEEDED } as const;
+  const phases = { preflight: LabelConsolidation_Phase.PREFLIGHT, rename: LabelConsolidation_Phase.RENAME, move: LabelConsolidation_Phase.MOVE,
+    verify: LabelConsolidation_Phase.VERIFY, hide: LabelConsolidation_Phase.HIDE, complete: LabelConsolidation_Phase.COMPLETE } as const;
+  const groups = { pending: LabelConsolidation_Group_State.PENDING, running: LabelConsolidation_Group_State.RUNNING, succeeded: LabelConsolidation_Group_State.SUCCEEDED } as const;
+  return create(LabelConsolidationSchema, {
+    name: 'labelConsolidation', jobId: summary.id, state: states[summary.state], phase: phases[summary.phase], errorCode: summary.errorCode,
+    nextAction: summary.state === 'blocked' ? 'resume' : summary.state === 'succeeded' ? 'none' : 'wait',
+    createTime: timestampFromMs(summary.createdAt), updateTime: timestampFromMs(summary.updatedAt), etag: summary.etag,
+    processedCount: summary.processedCount,
+    groups: summary.groups.map((group) => create(LabelConsolidation_GroupSchema, {
+      targetLabel: labelName(group.targetLabelId), sourceLabels: group.sourceLabelIds.map(labelName), displayName: group.displayName,
+      state: groups[group.state], processedCount: group.processedCount,
+    })),
+  });
+}
+
+function consolidationPlan(ctx: ApiContext, groups: readonly LabelConsolidationGroup[]): MergePlanItem[] {
+  if (groups.length === 0 || groups.length > LABELS_MAX) throw sortError('INVALID_LABEL');
+  const seen = new Set<string>();
+  return groups.map((group) => {
+    if (group.sources.length === 0) throw sortError('INVALID_LABEL');
+    const sources = group.sources.map((source) => {
+      const labelId = idOf(source.label, 'labels');
+      if (seen.has(labelId) || seen.size >= LABELS_MAX) throw sortError('INVALID_LABEL');
+      seen.add(labelId);
+      const label = existingLabel(ctx, labelId);
+      if (source.etag === '') bad('every consolidation source needs its current etag');
+      labelEtag(ctx, label, source.etag);
+      return { labelId, etag: source.etag };
+    });
+    const targetLabelId = idOf(group.targetLabel, 'labels');
+    if (targetLabelId !== sources[0]?.labelId) throw sortError('INVALID_LABEL');
+    const displayName = ownerPath(group.displayName);
+    if (displayName === null) throw sortError('INVALID_LABEL');
+    return { sources, targetLabelId, displayName, ...(group.description === undefined ? {} : { description: checkDescription(group.description) }) };
+  });
+}
+
+function consolidationError(error: unknown): never {
+  if (!(error instanceof MergeError)) throw error;
+  switch (error.code) {
+    case 'MERGE_BUSY': throw sortError('CONSOLIDATION_ACTIVE');
+    case 'MERGE_PENDING_WRITES': throw sortError('CONSOLIDATION_PENDING_WRITES');
+    case 'MERGE_ETAG_MISMATCH': throw sortError('ETAG_MISMATCH');
+    case 'MERGE_NOT_FOUND': throw sortError('NOT_FOUND');
+    case 'MERGE_NOT_BLOCKED': throw sortError('CONSOLIDATION_NOT_BLOCKED');
+    case 'MERGE_INVALID_PLAN': throw sortError('INVALID_LABEL');
+  }
 }
 
 function checkDescription(text: string): string {
@@ -229,9 +298,8 @@ function labelEtag(ctx: ApiContext, row: LabelRow, etag: string): void {
 }
 
 /**
- * Renames a linked label in Gmail to its new path (its Gmail name), with any new parents the path needs (`生活/汽车` ->
- * `出行/汽车` needs `出行`; the old ones stay). The store holds the new path first, since the guard renames an owned
- * label only to the path its store plans for it (gmail.ts); a failure puts the old path back.
+ * Renames a linked label to an English leaf. The store holds the planned name before the guarded Gmail write;
+ * a failure restores the old value. Existing grouping labels are never adopted by a rename.
  */
 async function renameInGmail(ctx: ApiContext, before: LabelRow, gmailId: string, path: string): Promise<void> {
   if (!writeScope(ctx.store) || effectiveMode(readSettings(ctx.store), ctx.ceiling) === 'off') throw sortError('GMAIL_WRITE_NOT_ALLOWED');
@@ -239,7 +307,7 @@ async function renameInGmail(ctx: ApiContext, before: LabelRow, gmailId: string,
   ctx.transact(() => ctx.store.run(`UPDATE labels SET display_name = ? WHERE id = ?`, path, before.id));
   try {
     const existing = userLabelsByName(await client.labels());
-    await ensureGmailParents(client, path, existing, ctx.store, ctx.now);
+    if (hasSublabels(existing, path)) throw sortError('INVALID_LABEL');
     await client.renameLabel(gmailId, path);
   } catch (error) {
     ctx.transact(() => ctx.store.run(`UPDATE labels SET display_name = ? WHERE id = ? AND display_name = ?`, before.display_name, before.id, path));
@@ -256,20 +324,24 @@ function pendingItem(ctx: ApiContext, name: string): { item: ReviewRow; decision
   if (item.state !== 'pending') throw sortError('ALREADY_RESOLVED');
   const decision = ctx.store.decision(item.message_id);
   if (decision === undefined) throw sortError('ALREADY_RESOLVED');
-  return { item, decision };
+  return { item: canonicalReview(ctx.store, item), decision: canonicalDecision(ctx.store, decision) };
 }
 
 /** A ledger row as the API answers it (getLedgerEntry, UndoLedgerEntry). */
 function ledgerOut(ctx: ApiContext, row: LedgerRow): ReturnType<typeof ledgerMessage> {
   const decision = ctx.store.decision(row.message_id);
-  return ledgerMessage(row, { undoable: undoable(row, ctx.store.ownedGmailIds()), subject: decision?.subject ?? null, sender: decision?.sender ?? null });
+  const effective = effectiveLedgerRow(ctx.store, row);
+  return ledgerMessage({ ...effective, label_id: ctx.store.canonicalLabelId(effective.label_id) }, { undoable: undoable(effective, ctx.store.ownedGmailIds()), subject: decision?.subject ?? null, sender: decision?.sender ?? null });
 }
 
 /** The ledger row of mailsort's standing label on a mail, if any. */
 function standing(ctx: ApiContext, decision: DecisionRow): LedgerRow | undefined {
   if (decision.outcome !== 'applied' || decision.label_id === null) return undefined;
-  const row = ctx.store.one<LedgerRow>(`SELECT * FROM ledger WHERE message_id = ? AND label_id = ? AND state = 'applied' AND superseded = 0 ORDER BY create_time DESC LIMIT 1`, decision.message_id, decision.label_id);
-  return row;
+  const row = ctx.store.one<LedgerRow>(`SELECT * FROM ledger WHERE message_id = ? AND (label_id = ? OR label_id IN (SELECT source_id FROM label_aliases WHERE target_id = ?))
+    AND state = 'applied' AND superseded = 0 ORDER BY create_time DESC LIMIT 1`, decision.message_id, decision.label_id, decision.label_id);
+  if (row === undefined) return undefined;
+  const effective = effectiveLedgerRow(ctx.store, row);
+  return effective.superseded === 1 ? undefined : effective;
 }
 
 /** The From domain a trust label's answer to `decision` would teach (decide.ts teachableDomain), or ''. */
@@ -279,7 +351,7 @@ function teachable(decision: Pick<DecisionRow, 'dmarc' | 'sender_domain' | 'susp
 
 /** A review item as the API answers it, with the domain a trust label's answer would teach while it is pending. */
 function reviewOut(ctx: ApiContext, row: ReviewRow): ReturnType<typeof reviewMessage> {
-  return reviewMessage(row, row.state === 'pending' ? teachable(ctx.store.decision(row.message_id)) : '');
+  return reviewMessage(canonicalReview(ctx.store, row), row.state === 'pending' ? teachable(ctx.store.decision(row.message_id)) : '');
 }
 
 /**
@@ -347,11 +419,13 @@ function labelReport(ctx: ApiContext): ReturnType<typeof create<typeof LabelRepo
   const start = Math.floor(ctx.now / DAY) * DAY - 6 * DAY;
   type Row = { label: string | null; outcome: string; shown: number; gmail: number; review: number; n: number };
   const rows = ctx.store.all<Row>(
-    `SELECT coalesce(label_id, top_label) AS label, outcome, shown,
-       sum(verdict_source = 'gmail' AND verdict IN ('confirmed', 'corrected') AND coalesce(verdict_label, '') != coalesce(label_id, top_label, '')) AS gmail,
-       sum(verdict_source = 'review' AND coalesce(verdict_label, '') != coalesce(label_id, top_label, '')) AS review,
+    `SELECT coalesce(selected.target_id, d.label_id, d.top_label) AS label, d.outcome, d.shown,
+       sum(d.verdict_source = 'gmail' AND d.verdict IN ('confirmed', 'corrected') AND coalesce(verdict.target_id, d.verdict_label, '') != coalesce(selected.target_id, d.label_id, d.top_label, '')) AS gmail,
+       sum(d.verdict_source = 'review' AND coalesce(verdict.target_id, d.verdict_label, '') != coalesce(selected.target_id, d.label_id, d.top_label, '')) AS review,
        count(*) AS n
-     FROM decisions WHERE decided_at >= ? AND outcome != 'skipped' GROUP BY label, outcome, shown`,
+     FROM decisions d LEFT JOIN label_aliases selected ON selected.source_id = coalesce(d.label_id, d.top_label)
+       LEFT JOIN label_aliases verdict ON verdict.source_id = d.verdict_label
+     WHERE d.decided_at >= ? AND d.outcome != 'skipped' GROUP BY label, d.outcome, d.shown`,
     start,
   );
   const per = new Map<string, { auto: number; gmail: number; review: number; unsure: number; shown: number }>();
@@ -401,7 +475,7 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailsortUiService>, ApiCon
   listLabels(request, ctx) {
     const size = pageSize(request.pageSize, PAGE);
     const after = cursorOf(request.pageToken, {}, numberCursor) ?? -1;
-    const rows = ctx.store.all<LabelRow>(`SELECT * FROM labels WHERE seq > ? ORDER BY seq LIMIT ?`, after, size + 1);
+    const rows = ctx.store.all<LabelRow>(`SELECT * FROM labels WHERE seq > ? AND id NOT IN (SELECT source_id FROM label_aliases) ORDER BY seq LIMIT ?`, after, size + 1);
     const page = rows.slice(0, size);
     const last = page[page.length - 1];
     return Promise.resolve(
@@ -413,13 +487,13 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailsortUiService>, ApiCon
   },
 
   getLabel(request, ctx) {
-    return Promise.resolve(labelOut(ctx, existingLabel(ctx, idOf(request.name, 'labels'))));
+    return Promise.resolve(labelOut(ctx, existingLabel(ctx, ctx.store.canonicalLabelId(idOf(request.name, 'labels')))));
   },
 
   async createLabel(request, ctx) {
     const label = request.label ?? bad('label is required');
     const displayName = checkDisplayName(ctx, label.displayName);
-    // Without an ID, one from the path (`金融/投资` -> `finance-invest`): meaningful in URLs and stable.
+    // Without an ID, derive one from the English name: meaningful in URLs and stable.
     // A deleted label's ID is never given again (Store.takenLabelIds): its history still names it.
     const id = request.labelId !== '' ? request.labelId : (labelIdFor(displayName, ctx.store.takenLabelIds()) ?? shortId('l'));
     if (!LABEL_ID_PATTERN.test(id) || id === NONE) throw sortError('INVALID_LABEL');
@@ -427,7 +501,7 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailsortUiService>, ApiCon
     const created = once(ctx, request.requestId, 'CreateLabel', `labels/${id}`, LabelSchema, () => {
       const { store } = ctx;
       if (store.takenLabelIds().has(id) || store.one(`SELECT 1 AS x FROM labels WHERE display_name = ?`, displayName) !== undefined) throw sortError('LABEL_EXISTS');
-      if (store.count(`SELECT count(*) AS n FROM labels`) >= LABELS_MAX) throw sortError('LIMIT_REACHED');
+      if (store.count(`SELECT count(*) AS n FROM labels WHERE id NOT IN (SELECT source_id FROM label_aliases)`) >= LABELS_MAX) throw sortError('LIMIT_REACHED');
       const seq = (store.one<{ seq: number | null }>(`SELECT max(seq) AS seq FROM labels`)?.seq ?? 0) + 1;
       store.run(
         `INSERT INTO labels (id, seq, display_name, description, enabled, trust, gmail_state, desc_version, create_time, update_time, etag, keep_in_inbox, sensitive)
@@ -449,6 +523,7 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailsortUiService>, ApiCon
     // In live mode with a write grant the label is created in Gmail at once; otherwise before its first write. Never
     // over a Gmail label of its path: it then stays pending, its name taken (writes.ts ensureGmailLabel).
     const row = ctx.store.label(id);
+    if (migrationActive(ctx.store)) return created;
     if (row !== undefined && row.gmail_state === 'pending' && ownerWritesAllowed(ctx)) {
       const client = await ctx.gmail();
       if (client !== 'not_configured' && client !== 'stopped') {
@@ -474,11 +549,11 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailsortUiService>, ApiCon
     }
     const has = (field: string) => paths === '*' || paths.includes(field);
     const label = request.label ?? bad('label is required');
-    const before = existingLabel(ctx, id);
-    labelEtag(ctx, before, label.etag);
-    const displayName = has('display_name') ? checkDisplayName(ctx, label.displayName, id) : before.display_name;
-    const description = has('description') ? checkDescription(label.description) : before.description;
     return onceAsync(ctx, request.requestId, 'UpdateLabel', `labels/${id}`, LabelSchema, async () => {
+      const before = existingLabel(ctx, id);
+      labelEtag(ctx, before, label.etag);
+      const displayName = has('display_name') ? checkDisplayName(ctx, label.displayName, id) : before.display_name;
+      const description = has('description') ? checkDescription(label.description) : before.description;
       if (displayName !== before.display_name) {
         if (ctx.store.one(`SELECT 1 AS x FROM labels WHERE display_name = ? AND id != ?`, displayName, id) !== undefined) throw sortError('LABEL_EXISTS');
         // A linked label is renamed in Gmail first: its name is how the owner sees it there.
@@ -487,7 +562,7 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailsortUiService>, ApiCon
       return ctx.transact(() => {
         const { store } = ctx;
         // A new path may be free in Gmail: the next write that needs the label looks again.
-        if (displayName !== before.display_name) store.run(`UPDATE labels SET gmail_name_taken = 0 WHERE id = ?`, id);
+        if (displayName !== before.display_name) store.run(`UPDATE labels SET gmail_name_taken = 0, problem = '' WHERE id = ?`, id);
         store.run(
           `UPDATE labels SET display_name = ?, description = ?, enabled = ?, trust = ?, desc_version = desc_version + ?, update_time = ?, etag = ?, keep_in_inbox = ?,
              sensitive = ? WHERE id = ?`,
@@ -561,10 +636,13 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailsortUiService>, ApiCon
               missing++;
               continue;
             }
-            // Renamed in Gmail: the label takes the new name when it is a path the store can hold (unique, the tree).
-            // Any other name (the legacy `分拣/` one among them) is left as it is; writes go by the Gmail ID.
             const path = pathOfGmailName(name);
-            if (path === null || path === row.display_name || store.one(`SELECT 1 AS x FROM labels WHERE display_name = ?`, path) !== undefined || treeConflict(path, store.labelPaths(row.id)) !== null) continue;
+            const problem = hasSublabels(idByName, name) ? 'has_children' : path === null ? 'invalid_name' : '';
+            if (problem !== row.problem) {
+              store.run(`UPDATE labels SET problem = ? WHERE id = ?`, problem, row.id);
+              store.touchLabel(row.id, ctx.now);
+            }
+            if (problem !== '' || path === null || path === row.display_name || store.one(`SELECT 1 AS x FROM labels WHERE display_name = ?`, path) !== undefined || treeConflict(path, store.labelPaths(row.id)) !== null) continue;
             store.run(`UPDATE labels SET display_name = ? WHERE id = ?`, path, row.id);
             store.touchLabel(row.id, ctx.now);
             renamed++;
@@ -574,7 +652,12 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailsortUiService>, ApiCon
           // a label is adopted), unless another label here holds it or labels are nested under it (a mail's label is
           // always a leaf). Otherwise a pending label whose path names a Gmail label stays out of Gmail: its name is taken.
           const match = idByName.get(row.display_name);
-          if (match !== undefined && store.labelByGmailId(match) === undefined && !hasSublabels(idByName, row.display_name)) {
+          const problem = pathOfGmailName(row.display_name) === null ? 'invalid_name' : match !== undefined && hasSublabels(idByName, row.display_name) ? 'has_children' : '';
+          if (problem !== row.problem) {
+            store.run(`UPDATE labels SET problem = ? WHERE id = ?`, problem, row.id);
+            store.touchLabel(row.id, ctx.now);
+          }
+          if (problem === '' && match !== undefined && store.labelByGmailId(match) === undefined) {
             linkGmailLabel(store, row.id, match, false, ctx.now);
             linked++;
             continue;
@@ -584,6 +667,43 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailsortUiService>, ApiCon
         return create(SyncLabelsResponseSchema, { labels: labelsOut(store, store.labels()), linkedCount: linked, renamedCount: renamed, missingCount: missing });
       });
     });
+  },
+
+  getLabelConsolidation(request, ctx) {
+    if (request.name !== 'labelConsolidation') notFound();
+    return Promise.resolve(consolidationMessage(labelMergeSummary(ctx.store) ?? notFound()));
+  },
+
+  async startLabelConsolidation(request, ctx) {
+    if (request.name !== 'labelConsolidation') notFound();
+    const answer = once(ctx, request.requestId, 'StartLabelConsolidation', request.name, LabelConsolidationSchema, () => {
+      if (migrationActive(ctx.store)) throw sortError('CONSOLIDATION_ACTIVE');
+      if (ctx.consolidationBusy()) throw sortError('CONSOLIDATION_PENDING_WRITES');
+      if (replaySummary(ctx.store)?.state === 'running') throw sortError('REPLAY_ACTIVE');
+      const plan = consolidationPlan(ctx, request.groups);
+      try {
+        return consolidationMessage(createLabelMerge(ctx.store, plan, ctx.now, request.requestId || crypto.randomUUID()));
+      } catch (error) {
+        return consolidationError(error);
+      }
+    });
+    await ctx.wake();
+    return answer;
+  },
+
+  async resumeLabelConsolidation(request, ctx) {
+    if (request.name !== 'labelConsolidation') notFound();
+    const answer = once(ctx, request.requestId, 'ResumeLabelConsolidation', request.name, LabelConsolidationSchema, () => {
+      const summary = labelMergeSummary(ctx.store) ?? notFound();
+      if (request.etag !== summary.etag) throw sortError('ETAG_MISMATCH', [{ schema: LabelConsolidationSchema, message: consolidationMessage(summary) }]);
+      try {
+        return consolidationMessage(resumeLabelMerge(ctx.store, summary.id, ctx.now));
+      } catch (error) {
+        return consolidationError(error);
+      }
+    });
+    await ctx.wake();
+    return answer;
   },
 
   removeTrustedDomain(request, ctx) {
@@ -617,7 +737,7 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailsortUiService>, ApiCon
     const last = page[page.length - 1];
     return Promise.resolve(
       create(ListReviewItemsResponseSchema, {
-        reviewItems: page.map((row) => reviewMessage(row, row.dmarc === null ? '' : teachable({ dmarc: row.dmarc, sender_domain: row.sender_domain, suspicious: row.suspicious }))),
+        reviewItems: page.map((row) => reviewMessage(canonicalReview(ctx.store, row), row.dmarc === null ? '' : teachable({ dmarc: row.dmarc, sender_domain: row.sender_domain, suspicious: row.suspicious }))),
         nextPageToken: rows.length > size && last !== undefined ? encodePageToken(last.id, {}) : '',
       }),
     );
@@ -656,7 +776,7 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailsortUiService>, ApiCon
 
   listExamples(request, ctx) {
     const size = pageSize(request.pageSize, PAGE);
-    const label = request.label === '' ? '' : idOf(request.label, 'labels');
+    const label = request.label === '' ? '' : ctx.store.canonicalLabelId(idOf(request.label, 'labels'));
     const before = cursorOf(request.pageToken, { label }, stringCursor) ?? '￿';
     type Row = { id: string; label_id: string; summary: string; origin: 'correction' | 'confirmation' | 'weak_accept'; message_id: string | null; create_time: number; embedded: number };
     const select = `SELECT id, label_id, summary, origin, message_id, create_time, embedding IS NOT NULL AS embedded FROM examples`;
@@ -698,20 +818,23 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailsortUiService>, ApiCon
 
   listLedgerEntries(request, ctx) {
     const size = pageSize(request.pageSize, PAGE);
-    const label = request.label === '' ? '' : idOf(request.label, 'labels');
+    const label = request.label === '' ? '' : ctx.store.canonicalLabelId(idOf(request.label, 'labels'));
     const before = cursorOf(request.pageToken, { label }, stringCursor) ?? '￿';
     type Row = LedgerRow & { subject: string | null; sender: string | null };
     const select = `SELECT l.*, d.subject, d.sender FROM ledger l LEFT JOIN decisions d ON d.message_id = l.message_id`;
     const rows =
       label === ''
         ? ctx.store.all<Row>(`${select} WHERE l.id < ? ORDER BY l.id DESC LIMIT ?`, before, size + 1)
-        : ctx.store.all<Row>(`${select} WHERE l.label_id = ? AND l.id < ? ORDER BY l.id DESC LIMIT ?`, label, before, size + 1);
+        : ctx.store.all<Row>(`${select} WHERE (l.label_id = ? OR l.label_id IN (SELECT source_id FROM label_aliases WHERE target_id = ?)) AND l.id < ? ORDER BY l.id DESC LIMIT ?`, label, label, before, size + 1);
     const page = rows.slice(0, size);
     const last = page[page.length - 1];
     const owned = ctx.store.ownedGmailIds();
     return Promise.resolve(
       create(ListLedgerEntriesResponseSchema, {
-        ledgerEntries: page.map((row) => ledgerMessage(row, { undoable: undoable(row, owned), subject: row.subject, sender: row.sender })),
+        ledgerEntries: page.map((row) => {
+          const effective = effectiveLedgerRow(ctx.store, row);
+          return ledgerMessage({ ...effective, label_id: ctx.store.canonicalLabelId(effective.label_id) }, { undoable: undoable(effective, owned), subject: row.subject, sender: row.sender });
+        }),
         nextPageToken: rows.length > size && last !== undefined ? encodePageToken(last.id, { label }) : '',
       }),
     );
@@ -725,8 +848,8 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailsortUiService>, ApiCon
     const id = idOf(request.name, 'ledgerEntries');
     return onceAsync(ctx, request.requestId, 'UndoLedgerEntry', `ledgerEntries/${id}`, LedgerEntrySchema, async () => {
       const row = ctx.store.ledgerRow(id) ?? notFound();
-      // Refused before any intent is written: an undo the guard would refuse could only stall the pipeline.
-      if (!undoable(row, ctx.store.ownedGmailIds())) throw sortError('NOT_UNDOABLE');
+      // Merged source history is read-only; normal writes and same-ID renames keep ordinary undo.
+      if (!undoable(effectiveLedgerRow(ctx.store, row), ctx.store.ownedGmailIds())) throw sortError('NOT_UNDOABLE');
       if (!writeScope(ctx.store)) throw sortError('GMAIL_WRITE_NOT_ALLOWED');
       const client = await gmailFor(ctx);
       ctx.transact(() => { intendUndo(ctx.store, row); });
@@ -752,12 +875,12 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailsortUiService>, ApiCon
     const end = request.endTime === undefined ? NaN : timestampMs(request.endTime);
     if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start || end - start > UNDO_RANGE_MAX_MS) bad('the range is not valid (at most 31 days)');
     // 设置's 撤销 with a label chosen undoes that label's entries only; empty is every label's.
-    const label = request.label === '' ? '' : idOf(request.label, 'labels');
+    const label = request.label === '' ? '' : ctx.store.canonicalLabelId(idOf(request.label, 'labels'));
     return onceAsync(ctx, request.requestId, 'UndoLedgerEntries', 'ledgerEntries', UndoLedgerEntriesResponseSchema, async () => {
       if (!writeScope(ctx.store)) throw sortError('GMAIL_WRITE_NOT_ALLOWED');
       const client = await gmailFor(ctx);
-      // The undoable entries of the range (writes.ts undoable): applied, not changed by the owner, label still owned.
-      const range = `FROM ledger WHERE state = 'applied' AND superseded = 0 AND create_time >= ? AND create_time < ? AND (? = '' OR label_id = ?)
+      const range = `FROM ledger WHERE state = 'applied' AND superseded = 0 AND create_time >= ? AND create_time < ?
+        AND (? = '' OR label_id = ?) AND label_id NOT IN (SELECT source_id FROM label_aliases)
         AND gmail_label_id IN (SELECT gmail_id FROM labels WHERE gmail_state = 'linked' AND gmail_id IS NOT NULL)`;
       const rows = ctx.store.all<LedgerRow>(`SELECT * ${range} ORDER BY id DESC LIMIT ?`, start, end, label, label, UNDO_BATCH);
       ctx.transact(() => {
@@ -802,6 +925,7 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailsortUiService>, ApiCon
   async startReplayEvaluation(request, ctx) {
     if (request.name !== 'replayEvaluation') notFound();
     const answer = once(ctx, request.requestId, 'StartReplayEvaluation', 'replayEvaluation', ReplayEvaluationSchema, () => {
+      if (replaySummary(ctx.store)?.state === 'running') throw sortError('REPLAY_ACTIVE');
       startReplay(ctx.store, ctx.now);
       return replayMessage(replaySummary(ctx.store) ?? notFound());
     });

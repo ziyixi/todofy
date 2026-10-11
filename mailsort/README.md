@@ -2,8 +2,8 @@
 
 Gmail sorting for the owner's own mailbox on `sort.ziyixi.science`: each new INBOX mail is decided by the Workers AI
 decision model Clef, asked twice (two views), with the masked mail, whether its sender is authenticated, the nearest
-corrected examples and what the sender's earlier mail got. In live mode a confident mail gets one label (a leaf of up
-to three levels, `金融/投资`, at Gmail's top level) and leaves the inbox (archived, so you find it under its label)
+corrected examples and what the sender's earlier mail got. In live mode a confident mail gets one label with a flat
+English name, such as `Projects`, and leaves the inbox (archived, so you find it under its label)
 unless you turned that label's 归档 off, and is never marked read; a mail no label fits, or an uncertain one, gets no
 label and stays in the inbox, and a few uncertain ones a day (about 1 in 20) wait in the review queue. Shadow mode (the
 default) only records. Chinese, mobile first. Design: [`docs/design.md`](docs/design.md). Rules:
@@ -36,15 +36,16 @@ Four tabs under a header whose one status line shows the mode in force, the Gmai
   (处理, 有把握, 都不是, 拿不准), the flow of today's mail as a Sankey diagram (the model's stages to the labels, 都不是
   and 拿不准, split by whether it went to 待审; drawn at zero on a day without mail; on a phone it scrolls in its own
   box, starting at where the mail went), a table of the last 7 days per label (自动, 改正, 拿不准) and the model budget.
-- **标签**: everything about a label in one place. A search box finds a label by its path. The labels form a tree
-  grouped by their top level (开发 › CI通知, 平台工具), one line each: the name (未启用 beside it when off), how many mails
+- **标签**: everything about a label in one place. Search the flat list by name. Each row shows the
+  name (未启用 beside it when off), how many mails
   the model was sure of for it in the last 7 days, and 启用 (an enabled label is offered to the model and written to
-  Gmail in live mode). A row opens its detail under it: the description (the model reads `path: description` and
+  Gmail in live mode). A row opens its detail under it: the description (the model reads `name: description` and
   never picks a label without one; one language and 60–120 characters keep every call cheap, `docs/design.md` §8.1),
   归档 (off: the label is only added and the mail stays in the inbox), a trust label's trusted domains (learned from
   待审, each with 删除), the examples (listed on demand, deleted one by one) and 高级 (可信, 敏感 to keep no example,
-  rename, delete). A trust label is written only for a sender that passed DMARC and whose domain it trusts
-  (`docs/design.md` §4.4). A label's Gmail name is its path; when Gmail already has a label of exactly that name (made
+  rename, delete). New names use English letters, digits, spaces and ordinary punctuation, at most 40 characters,
+  with no slash or grouping prefix. A trust label is written only for a sender that passed DMARC and whose domain it trusts
+  (`docs/design.md` §4.4). A label's Gmail name is its display name; when Gmail already has a label of exactly that name (made
   by hand), mailsort never takes it over: the label's detail says so in its first line (Gmail 里已有同名标签) and it
   writes nothing until it is renamed or 从 Gmail 同步 adopts (沿用) that label. An adopted label is never added to a mail
   that already has it, so an undo never removes the owner's own, and the owner's other labels are never touched.
@@ -54,17 +55,14 @@ Four tabs under a header whose one status line shows the mode in force, the Gmai
   label when chosen, previewed first; and 从 Gmail 同步 (follows renames and deletions made in Gmail and adopts such
   labels, never one with labels nested under it; it never imports another one). Emergency stop: 设置 → 关闭
   (`docs/design.md` §10).
-- **API only**: the replay evaluation (before going live: your answers of the last 14 days decided again by today's
-  pipeline as of each mail's time, without what your answers taught after it, nothing written, `docs/design.md` §5.1), the embedding rebuild, the single-entry undo, the write limits and
-  the neuron budget. To run the replay from the signed-in page's console:
-
-  ```js
-  const t = (await (await fetch('/api/csrf')).json()).token
-  await fetch('/api/v2/replayEvaluation:start', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': t }, body: JSON.stringify({ request_id: crypto.randomUUID() }) }).then((r) => r.json())
-  // a few alarm passes later (about 6 mails each): the counts, reason_counts and cases (each mail's decision numbers);
-  // a new start (a new request_id) replaces the last run
-  await fetch('/api/v2/replayEvaluation').then((r) => r.json())
-  ```
+- **检查分类效果** in Settings replays the answered samples from the last 14 days against the current labels.
+  It uses the existing model budget after normal sorting, reads those mails again and changes no Gmail labels.
+  The card shows progress, matches, uncertain/skipped samples and common mismatches. These are results for the
+  answered sample, not an accuracy estimate for the whole mailbox. A running evaluation cannot be replaced.
+- **整理标签** in Settings accepts a private mapping, previews it, and starts the bounded label consolidation.
+  Existing mail changes labels without being classified again; its inbox/read/starred state stays unchanged.
+  [The consolidation runbook](docs/label-consolidation.md) covers progress, interrupted work and old-label visibility.
+- **API only**: embedding rebuild, single-entry undo, write limits and neuron budget. Stored limits are unchanged.
 - **What is kept**: decided mail's subject, sender and From domain, and the review queue, for 14 days (the daily
   cleanup runs in every mode, off included); decisions and the ledger without content (the sender only as a salted hash)
   for 180 days; the replay evaluation for 7 days; the flow counters (counts only) for 400 days; examples (masked

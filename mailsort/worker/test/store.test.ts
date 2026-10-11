@@ -91,14 +91,14 @@ function version4(): SqlStorage {
   return sql;
 }
 
-describe('label paths', () => {
-  it('normalizes up to three segments and refuses the rest', () => {
+describe('label names and legacy paths', () => {
+  it('keeps old paths readable for migration and stable keys', () => {
     expect(normalizePath(' 开发 / CI通知 ')).toBe('开发/CI通知');
     expect(normalizePath('出行')).toBe('出行');
     expect(normalizePath('a/b/c')).toBe('a/b/c');
     for (const bad of ['', '/', 'a//b', 'a/', 'a/b/c/d', 'x'.repeat(41), 'a\u0007', 'a\u0085b']) expect(normalizePath(bad), JSON.stringify(bad)).toBeNull();
-    // A Gmail name is a label's path as it is: only the normalized spelling.
-    expect(pathOfGmailName('金融/投资')).toBe('金融/投资');
+    // A legacy path is readable, but cannot be adopted as a new name.
+    expect(pathOfGmailName('金融/投资')).toBeNull();
     expect(pathOfGmailName('金融/ 投资')).toBeNull();
     expect(pathOfGmailName('出行 ')).toBeNull();
     expect(pathOfGmailName('a/b/c/d')).toBeNull();
@@ -107,11 +107,22 @@ describe('label paths', () => {
     expect(parentGmailNames('出行')).toEqual([]);
   });
 
-  it('reads the legacy prefix as nothing: 分拣/x is x at every entry point, and 分拣 is no first segment (QA D7)', () => {
+  it('accepts flat English names and rejects ambiguous or legacy new input', () => {
+    for (const name of ['Projects', 'Home & Garden', "Editor's Notes", 'Project-2', 'API (v2)', 'Cloud.Tools', 'C++', 'A'.repeat(40)]) {
+      expect(ownerPath(` ${name} `)).toBe(name);
+      expect(pathOfGmailName(name)).toBe(name);
+      expect(pathOfGmailName(` ${name}`)).toBeNull();
+    }
+    for (const bad of ['', ' ', '123', '&', 'A'.repeat(41), 'Projects/Builds', '开发', '分拣/Projects', 'Work\\Tools', 'Café', 'Mail\n', 'Mail\tBox', 'Mail\u0085Box', 'Mail📬']) {
+      expect(ownerPath(bad), JSON.stringify(bad)).toBeNull();
+    }
+  });
+
+  it('does not silently strip an old prefix on create or rename', () => {
     for (const bad of ['分拣', '分拣/x', ' 分拣 /x']) expect(normalizePath(bad), bad).toBeNull();
     expect(normalizePath('分拣箱/x')).toBe('分拣箱/x');
-    expect(ownerPath('分拣/金融/投资')).toBe('金融/投资');
-    expect(ownerPath(' 金融/投资 ')).toBe('金融/投资');
+    expect(ownerPath('分拣/金融/投资')).toBeNull();
+    expect(ownerPath(' 金融/投资 ')).toBeNull();
     expect(ownerPath('分拣/分拣/x')).toBeNull();
     expect(ownerPath('分拣')).toBeNull();
     expect(ownerPath('分拣/')).toBeNull();
@@ -271,7 +282,7 @@ describe('the store', () => {
     expect(SCHEMA_V6).toHaveLength(added.length);
     const s = new Store(sql);
     s.migrate(transactional(sql));
-    expect(s.getMeta('schema_version')).toBe('6');
+    expect(s.getMeta('schema_version')).toBe(String(SCHEMA_VERSION));
     expect(columns(sql, 'replay')).toEqual(expect.arrayContaining(added));
     // The mail evaluated before keeps its verdict; its numbers were never recorded.
     expect(s.one(`SELECT outcome, reason, ${added.join(', ')} FROM replay WHERE message_id = 'm1'`)).toEqual({

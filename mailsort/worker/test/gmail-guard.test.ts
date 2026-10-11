@@ -17,8 +17,8 @@ const BASE = 'https://gmail.googleapis.com/gmail/v1/users/me';
 const OWNED = 'Label_7';
 const MESSAGE = '18c0ffee0000aaaa';
 /** The store's labels: OWNED is linked and its path is 订阅; the other two are not in Gmail yet. */
-const PLANNED = new Set(['订阅', '开发/CI通知', '生活/汽车/保养']);
-const OWNED_PATH = '订阅';
+const PLANNED = new Set(['Digests', 'Development', 'Home & Auto']);
+const OWNED_PATH = 'Digests';
 
 function ownership(rows: Record<string, LedgerView> = {}, ownedPath = OWNED_PATH): Ownership & { readonly rows: Record<string, LedgerView> } {
   return {
@@ -125,10 +125,10 @@ describe('the closed table refuses everything outside it', () => {
     expect(refused('POST', url, JSON.stringify({ removeLabelIds: [OWNED] }), ownership({ [`${MESSAGE}:${OWNED}`]: { state: 'undo_intended', archived: true } }))).toBe('archive_mismatch');
   });
 
-  it('creates only the names the store plans (a label\'s path or a parent it nests under), never a root or another label', () => {
+  it('creates only exact planned single-level English names', () => {
     const create = (name: string) => JSON.stringify({ name, labelListVisibility: 'labelShow', messageListVisibility: 'show' });
     const ctx = { owned: new Set([OWNED]), planned: PLANNED, ledger: () => null };
-    for (const name of ['订阅', '开发/CI通知', '开发', '生活/汽车/保养', '生活/汽车', '生活']) {
+    for (const name of ['Digests', 'Development', 'Home & Auto']) {
       expect(refused('POST', `${BASE}/labels`, create(name)), name).toBe('accepted');
       expect(allowedOperation('POST', `${BASE}/labels`, create(name), ctx), name).toBe('labels_create');
     }
@@ -148,9 +148,9 @@ describe('the closed table refuses everything outside it', () => {
 
   it('renames an owned label only to the path its store plans for it', () => {
     // A rename: the store holds the new path first (api.ts renameInGmail).
-    const renaming = ownership({}, '资讯/周报');
-    expect(refused('PATCH', `${BASE}/labels/${OWNED}`, JSON.stringify({ name: '资讯/周报' }), renaming)).toBe('accepted');
-    expect(allowedOperation('PATCH', `${BASE}/labels/${OWNED}`, JSON.stringify({ name: '资讯/周报' }), { owned: new Set([OWNED]), planned: renaming.plannedPaths(), ledger: () => null })).toBe('labels_patch');
+    const renaming = ownership({}, 'Newsletters');
+    expect(refused('PATCH', `${BASE}/labels/${OWNED}`, JSON.stringify({ name: 'Newsletters' }), renaming)).toBe('accepted');
+    expect(allowedOperation('PATCH', `${BASE}/labels/${OWNED}`, JSON.stringify({ name: 'Newsletters' }), { owned: new Set([OWNED]), planned: renaming.plannedPaths(), ledger: () => null })).toBe('labels_patch');
     expect(refused('PATCH', `${BASE}/labels/${OWNED}`, JSON.stringify({ name: OWNED_PATH }))).toBe('accepted');
     // Another label's path, a parent, a name nobody planned, the legacy prefix: never.
     for (const name of ['开发/CI通知', '开发', 'Work', '分拣/订阅', '分拣', 'Inbox', '订阅 ']) {
@@ -190,7 +190,7 @@ describe('every request the client makes is in the table', () => {
       recorded.push({ method: request.method, url: request.url, body, op });
       if (request.url.startsWith('https://oauth2')) return Response.json({ access_token: 't', expires_in: 3600, scope: 'https://www.googleapis.com/auth/gmail.modify' });
       if (request.url.endsWith('/profile?fields=historyId')) return Response.json({ historyId: '42' });
-      if (request.url.includes('/labels') && request.method === 'POST') return Response.json({ id: 'Label_9', name: '开发' });
+      if (request.url.includes('/labels') && request.method === 'POST') return Response.json({ id: 'Label_9', name: 'Development' });
       if (request.url.endsWith('/labels')) return Response.json({ labels: [] });
       if (request.url.includes('/messages?')) return Response.json({ messages: [{ id: MESSAGE }] });
       if (request.url.includes('/history?')) return Response.json({ historyId: '43' });
@@ -205,8 +205,8 @@ describe('every request the client makes is in the table', () => {
     await client.message(MESSAGE);
     expect(await client.labelIdsOf(MESSAGE)).toEqual(['INBOX']);
     await client.labels();
-    await client.createLabel('开发');
-    await client.createLabel('开发/CI通知');
+    await client.createLabel('Home & Auto');
+    await client.createLabel('Development');
     await client.renameLabel(OWNED, OWNED_PATH);
     // A name the store does not plan never reaches fetch.
     await expect(client.createLabel('Work')).rejects.toBeInstanceOf(GmailRefused);

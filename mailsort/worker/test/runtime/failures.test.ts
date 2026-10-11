@@ -242,7 +242,7 @@ describe('the MODE ceiling stops a write left for a retry', () => {
     await addLabels(h);
     await setMode(h, Mode.LIVE);
     await h.step(T0);
-    const gmailId = h.up.gmail.createUserLabel('订阅', true);
+    const gmailId = h.up.gmail.createUserLabel('Digests', true);
     await h.api.syncLabels({ requestId: op() });
     deliver(h, MAILS.newsletterEn, T0);
     await h.step(T0 + 5 * MINUTE);
@@ -589,7 +589,7 @@ describe('the owner’s own Gmail labels are never taken over', () => {
   it('a write never adopts: the owner’s Gmail label of the path leaves the label out of Gmail until the owner’s sync adopts it', async () => {
     // The owner made 订阅 in Gmail and has a mail filed under it that stays in the inbox. In shadow two uncertain
     // mails (the model's 0.5) wait in the review queue, one of them with the owner's label.
-    own = h.up.gmail.createUserLabel('订阅', true);
+    own = h.up.gmail.createUserLabel('Digests', true);
     await setMode(h, Mode.SHADOW);
     await roomInReview(h, now);
     h.up.ai.confidence = 0.5;
@@ -644,39 +644,30 @@ describe('the owner’s own Gmail labels are never taken over', () => {
     expect(gmailLabels(h, 'e1000000000000e0')).toEqual(['CATEGORY_UPDATES', 'INBOX', 'UNREAD']);
   });
 
-  it('a Gmail label with labels nested under it is never adopted, not even a parent mailsort made', async () => {
-    // The owner's 社团 holds 社团/活动: a label 社团 here stays out of Gmail, and the sync leaves it so.
-    h.up.gmail.createUserLabel('社团');
-    h.up.gmail.createUserLabel('社团/活动');
-    const club = await h.api.createLabel({ label: create(LabelSchema, { displayName: '社团', description: '社团的活动与通知' }), requestId: op() });
+  it('a Gmail label with children is never adopted, including a grouping label created by the old app', async () => {
+    h.up.gmail.createUserLabel('Clubs');
+    h.up.gmail.createUserLabel('Clubs/Events');
+    const club = await h.api.createLabel({ label: create(LabelSchema, { displayName: 'Clubs', description: '社团的活动与通知' }), requestId: op() });
     expect(club).toMatchObject({ gmailLabelId: '', gmailState: Label_GmailState.NAME_TAKEN });
     expect(await h.api.syncLabels({ requestId: op() })).toMatchObject({ linkedCount: 0 });
     expect(await h.api.getLabel({ name: club.name })).toMatchObject({ gmailLabelId: '', gmailState: Label_GmailState.NAME_TAKEN });
-    // 学校 was made here as the parent of 学校/作业; that label is deleted, its Gmail label stays under 学校.
-    const homework = await h.api.createLabel({ label: create(LabelSchema, { displayName: '学校/作业', description: '作业提交与成绩通知' }), requestId: op() });
-    expect(homework.gmailState).toBe(Label_GmailState.LINKED);
-    await h.api.deleteLabel({ name: homework.name, requestId: op() });
-    const school = await h.api.createLabel({ label: create(LabelSchema, { displayName: '学校', description: '学校的其他通知' }), requestId: op() });
+    const parent = h.up.gmail.createUserLabel('School');
+    h.up.gmail.createUserLabel('School/Homework');
+    await h.sql('INSERT INTO gmail_parents (gmail_id, create_time) VALUES (?, ?)', parent, now);
+    const school = await h.api.createLabel({ label: create(LabelSchema, { displayName: 'School', description: '学校的其他通知' }), requestId: op() });
     expect(school).toMatchObject({ gmailLabelId: '', gmailState: Label_GmailState.NAME_TAKEN });
     expect(await h.api.syncLabels({ requestId: op() })).toMatchObject({ linkedCount: 0 });
     expect(await h.api.getLabel({ name: school.name })).toMatchObject({ gmailState: Label_GmailState.NAME_TAKEN });
   });
 
-  it('a label made in Gmail between the list and the create is the owner’s: a parent is not recorded, a leaf’s name is taken', async () => {
-    // The owner makes 旅行 right after mailsort read Gmail's labels: mailsort's create gets a 409.
-    const after = (name: string) => {
-      h.up.gmail.afterCall = (method, url) => {
-        if (method !== 'GET' || !url.pathname.endsWith('/labels')) return;
-        h.up.gmail.afterCall = null;
-        h.up.gmail.createUserLabel(name);
-      };
+  it('a label created externally between list and create remains unowned after the conflict', async () => {
+    h.up.gmail.afterCall = (method, url) => {
+      if (method !== 'GET' || !url.pathname.endsWith('/labels')) return;
+      h.up.gmail.afterCall = null;
+      h.up.gmail.createUserLabel('Passports');
     };
-    after('旅行');
-    const visa = await h.api.createLabel({ label: create(LabelSchema, { displayName: '旅行/签证', description: '签证申请与预约' }), requestId: op() });
-    expect(visa.gmailState).toBe(Label_GmailState.LINKED);
-    expect(await h.sql(`SELECT count(*) AS n FROM gmail_parents WHERE gmail_id = ?`, h.up.gmail.labelIdByName('旅行') ?? '')).toEqual([{ n: 0 }]);
-    after('旅行/护照');
-    const passport = await h.api.createLabel({ label: create(LabelSchema, { displayName: '旅行/护照', description: '护照办理与续签' }), requestId: op() });
-    expect(passport).toMatchObject({ gmailLabelId: '', gmailState: Label_GmailState.NAME_TAKEN });
+    const label = await h.api.createLabel({ label: create(LabelSchema, { displayName: 'Passports', description: '护照办理与续签' }), requestId: op() });
+    expect(label).toMatchObject({ gmailLabelId: '', gmailState: Label_GmailState.NAME_TAKEN });
+    expect(await h.sql('SELECT count(*) AS n FROM gmail_parents WHERE gmail_id = ?', h.up.gmail.labelIdByName('Passports') ?? '')).toEqual([{ n: 0 }]);
   });
 });

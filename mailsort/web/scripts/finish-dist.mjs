@@ -7,9 +7,10 @@
 // - the JavaScript against its size budget (js-budget.mjs).
 import { copyFileSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { join, relative } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { jsBudgetProblem, jsSize } from './js-budget.mjs'
 
-const web = new URL('../', import.meta.url).pathname
+const web = fileURLToPath(new URL('../', import.meta.url))
 const dist = join(web, 'dist')
 copyFileSync(join(web, '_headers'), join(dist, '_headers'))
 

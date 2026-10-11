@@ -31,6 +31,7 @@ import { applyFeedback } from './feedback.ts';
 import { countFlow, skipOutcome, stageOf, type FlowOutcome } from './flow.ts';
 import { GmailRefused, GoogleError, isMessageId, type AccessToken, type GmailClient, type HistoryPage } from './gmail.ts';
 import { timeId } from './ids.ts';
+import { labelMergeStep, mergeWritesToday, migrationActive } from './label-merge.ts';
 import { gather, judge, modelUnavailable, retryDelay, reviewQuotaOn, shownOn, type Judgement } from './judge.ts';
 import {
   ALARM_BACKLOG_MS,
@@ -238,7 +239,7 @@ export function alarmGate(store: Store, ceiling: ModeName, counter: { runWrites:
     }
     const settings = readSettings(store);
     const at = now();
-    if (store.usage(utcDay(at)).applied >= settings.dailyWriteLimit) {
+    if (store.usage(utcDay(at)).applied + mergeWritesToday(store, utcDay(at)) >= settings.dailyWriteLimit) {
       tripBreaker(store, 'daily_limit', at);
       return 'daily_limit';
     }
@@ -480,11 +481,11 @@ function writeContext(ctx: Pick<MailContext, 'store' | 'gmail' | 'budget' | 'now
 /** The breaker's share rule: one label's share of today's writes jumped far above its last week's share. */
 export function checkLabelShare(store: Store, now: number): void {
   const dayStart = Math.floor(now / DAY) * DAY;
-  const today = store.all<{ label_id: string; n: number }>(`SELECT label_id, count(*) AS n FROM decisions WHERE outcome = 'applied' AND decided_at >= ? GROUP BY label_id`, dayStart);
+  const today = store.all<{ label_id: string; n: number }>(`SELECT coalesce(a.target_id, d.label_id) AS label_id, count(*) AS n FROM decisions d LEFT JOIN label_aliases a ON a.source_id = d.label_id WHERE outcome = 'applied' AND decided_at >= ? GROUP BY coalesce(a.target_id, d.label_id)`, dayStart);
   const total = today.reduce((sum, row) => sum + row.n, 0);
   if (total < SHARE_MIN_WRITES) return;
   const week = store.all<{ label_id: string; n: number }>(
-    `SELECT label_id, count(*) AS n FROM decisions WHERE outcome = 'applied' AND decided_at >= ? AND decided_at < ? GROUP BY label_id`,
+    `SELECT coalesce(a.target_id, d.label_id) AS label_id, count(*) AS n FROM decisions d LEFT JOIN label_aliases a ON a.source_id = d.label_id WHERE outcome = 'applied' AND decided_at >= ? AND decided_at < ? GROUP BY coalesce(a.target_id, d.label_id)`,
     dayStart - 7 * DAY,
     dayStart,
   );
@@ -529,10 +530,11 @@ export function daily(store: Store, now: number): void {
   const counts = store.exampleCounts();
   for (const row of weak) {
     store.run(`UPDATE decisions SET verdict = 'weak', verdict_label = label_id, verdict_source = 'auto', verdict_at = ? WHERE message_id = ?`, now, row.message_id);
-    const count = counts.get(row.label_id) ?? 0;
+    const labelId = store.canonicalLabelId(row.label_id);
+    const count = counts.get(labelId) ?? 0;
     if (row.summary !== null && row.summary !== '' && count < WEAK_EXAMPLES_BELOW && store.one(`SELECT 1 AS x FROM examples WHERE message_id = ?`, row.message_id) === undefined) {
-      putExample(store, row.message_id, row.label_id, row.summary, 'weak_accept', now);
-      counts.set(row.label_id, count + 1);
+      putExample(store, row.message_id, labelId, row.summary, 'weak_accept', now);
+      counts.set(labelId, count + 1);
     }
   }
   store.setMeta('daily_done', day);
@@ -555,7 +557,7 @@ export async function runPass(deps: PassDeps): Promise<PassResult> {
   const budget = new Budget(ALARM_SUBREQUESTS);
   const session = await openSession({ store, env: deps.env, fetch: deps.fetch, now: deps.now, budget, token: deps.token });
   if ('reason' in session) {
-    transact(() => { daily(store, now); });
+    if (!migrationActive(store)) transact(() => { daily(store, now); });
     return { next: idle, mode, synced: 0, decided: 0, applied: 0, deferred: 0, code: session.reason };
   }
   const gmail = session.client;
@@ -572,6 +574,14 @@ export async function runPass(deps: PassDeps): Promise<PassResult> {
     const read = await sync(store, gmail, budget, deps.now, transact);
     synced = read.queued;
     backlog ||= read.more;
+    if (migrationActive(store)) {
+      await labelMergeStep({ store, gmail, budget, now: deps.now, transact, canWrite: () => {
+        const current = readSettings(store);
+        return effectiveMode(current, modeCeiling(deps.env)) !== 'off' && current.breaker === '' && store.getMeta('write_scope') === '1';
+      } });
+      return { next: deps.now() + ALARM_BACKLOG_MS, mode, synced, decided: 0, applied: 0, deferred: 0, code: 'label_consolidation' };
+    }
+
     const owned = new Map(store.labels().flatMap((label) => (label.gmail_state === 'linked' && label.gmail_id !== null ? [[label.gmail_id, label.id] as const] : [])));
     transact(() => applyFeedback(store, owned, deps.now()));
 

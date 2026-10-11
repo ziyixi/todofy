@@ -4,7 +4,7 @@
  *
  *   /           待审: the few uncertain mails the model asks about (its options, 都不是, 其他…, 跳过; by keyboard too)
  *   /overview   概览: what the mode does, today and 7 days, the flow of mail, the 7 days per label, the model budget
- *   /labels     标签: the labels as a tree, each with its description, 归档, trusted domains, examples and switches
+ *   /labels     标签: the labels as a flat list, each with its description, 归档, trusted domains, examples and switches
  *   /settings   设置: the mode, the range undo, the sync with Gmail
  *
  * Mobile first, light and dark from the system, plain DOM (no framework), and nothing but the page's own API.

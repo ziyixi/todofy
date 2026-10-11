@@ -1,8 +1,6 @@
 /**
- * Label paths (../../docs/design.md §3.1). A label's display name is its path, and its Gmail name is that path: one to
- * LABEL_DEPTH_MAX segments joined by `/`, which Gmail shows as nested labels (`开发/CI通知` under `开发`). Only leaves
- * are labels: a mail gets exactly one label, so no label's path may be the parent of another's, and the parents exist
- * in Gmail only as grouping labels (created as needed, writes.ts ensureGmailLabel).
+ * Label names (../../docs/design.md §3.1). New names are flat English text. Legacy path helpers remain for existing
+ * records and their stable model keys until the owner finishes consolidating labels; they do not validate new input.
  *
  * The same path gives a label its stable, meaningful identifiers: the ID CreateLabel and the import derive when none
  * is given, and the option key the decision model sees (ai.ts). Clef reads each option as `key` with the criterion
@@ -10,7 +8,7 @@
  * like `finance-invest` repeats the meaning in the alphabet the model's instructions are in. Chinese words become
  * English through a small fixed glossary; a word outside it becomes a short hash of itself, still stable.
  */
-import { DISPLAY_NAME_MAX, LABEL_DEPTH_MAX, LABEL_ID_PATTERN, LABEL_SEGMENT_MAX, LEGACY_LABEL_PREFIX, LEGACY_LABEL_ROOT, NONE } from './limits.ts';
+import { DISPLAY_NAME_MAX, LABEL_DEPTH_MAX, LABEL_ID_PATTERN, LABEL_NAME_MAX, LABEL_SEGMENT_MAX, LEGACY_LABEL_ROOT, NONE } from './limits.ts';
 
 /** Whether `text` has a control character (C0, DEL or C1). */
 function hasControlChar(text: string): boolean {
@@ -24,8 +22,7 @@ function hasControlChar(text: string): boolean {
 /**
  * The normalized path of `raw` (segments trimmed, empty input refused), or null when it breaks a rule: at most
  * LABEL_DEPTH_MAX non-empty segments of LABEL_SEGMENT_MAX characters, no control characters, DISPLAY_NAME_MAX in all,
- * and a first segment other than the legacy root `分拣`: every entry point reads `分拣/x` as `x` (ownerPath), so a
- * label `分拣/x` could never be imported back from its own export.
+ * and a first segment other than the legacy root `分拣`. This accepts old stored paths, not new owner input.
  */
 export function normalizePath(raw: string): string | null {
   if (hasControlChar(raw)) return null;
@@ -37,20 +34,17 @@ export function normalizePath(raw: string): string | null {
   return Array.from(path).length <= DISPLAY_NAME_MAX ? path : null;
 }
 
-/**
- * A label's path as the owner wrote it: typed in 标签 (CreateLabel, a rename) or named in an import. The legacy prefix
- * is read as nothing (`分拣/金融/投资` is `金融/投资`, as the owner's rule file and older exports write it), so every
- * entry point agrees. Null as normalizePath.
- */
+/** A new or renamed label: a flat English name, preserving the owner's casing and punctuation. */
 export function ownerPath(raw: string): string | null {
-  const trimmed = raw.trim();
-  return normalizePath(trimmed.startsWith(LEGACY_LABEL_PREFIX) ? trimmed.slice(LEGACY_LABEL_PREFIX.length) : trimmed);
+  if (hasControlChar(raw)) return null;
+  const name = raw.trim();
+  if (name.length > LABEL_NAME_MAX || !/[A-Za-z]/.test(name) || !/^[A-Za-z0-9 &'().,+_-]+$/.test(name)) return null;
+  return name;
 }
 
-/** The path a Gmail label name is (`开发/CI通知`), or null when the name is not a path as normalizePath writes one. */
+/** Gmail's exact spelling must also be a valid flat English label name. */
 export function pathOfGmailName(name: string): string | null {
-  // Only the normalized spelling: `出行 ` and `a/ b` are other Gmail labels than `出行` and `a/b`.
-  return normalizePath(name) === name ? name : null;
+  return ownerPath(name) === name ? name : null;
 }
 
 /** The Gmail names of a path's parents, outermost first: `生活/汽车/保养` -> [`生活`, `生活/汽车`]; none for `出行`. */

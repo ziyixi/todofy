@@ -95,7 +95,7 @@ describe('nothing is wider than a phone', () => {
   it('keeps a setting’s text beside its button, and the tree’s hairlines between its rows only', () => {
     const text = rule('.setting > div')
     expect([text.get('flex'), text.get('min-width')]).toEqual(['1 1 0', '0'])
-    expect(rule('.tree > li + li,\n.branch > ul > li + li').get('border-top')).toBe('1px solid var(--line)')
+    expect(rule('.label-list > li + li').get('border-top')).toBe('1px solid var(--line)')
     // Not between the trusted-domain and example lines of an open label.
     expect(() => rule('.tree li + li')).toThrow()
   })

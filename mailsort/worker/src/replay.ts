@@ -104,7 +104,7 @@ export function numbersOf(decision: Decision, view1: View | null, view2: View | 
 }
 
 /**
- * Starts a replay evaluation at `now`, replacing the previous one (and its rows), still running or finished: answers
+ * Starts a replay evaluation at `now`, replacing the previous completed evaluation (the API refuses a running one): answers
  * the new job's ID. Run inside a transaction (the API's, with its request log entry).
  */
 export function startReplay(store: Store, now: number): string {
@@ -125,7 +125,7 @@ export function startReplay(store: Store, now: number): string {
       `INSERT INTO replay (job_id, message_id, state, owner_label, as_of, create_time) VALUES (?, ?, 'pending', ?, ?, ?)`,
       jobId,
       item.message_id,
-      item.resolved_label ?? '',
+      item.resolved_label === null ? '' : store.canonicalLabelId(item.resolved_label),
       item.as_of,
       now,
     );
@@ -293,15 +293,15 @@ export function replaySummary(store: Store): ReplaySummary | null {
   if (job === undefined) return null;
   const counts = store.one<Record<string, number | null>>(
     `SELECT count(*) AS total, sum(state = 'evaluated') AS evaluated, sum(state = 'skipped') AS skipped,
-       sum(outcome = 'label') AS auto, sum(outcome = 'label' AND label = owner_label) AS auto_match,
+       sum(outcome = 'label') AS auto, sum(outcome = 'label' AND coalesce((SELECT target_id FROM label_aliases WHERE source_id = replay.label), label) = coalesce((SELECT target_id FROM label_aliases WHERE source_id = replay.owner_label), owner_label)) AS auto_match,
        sum(outcome = 'none') AS none, sum(outcome = 'none' AND owner_label = '') AS none_match,
        sum(outcome = 'unsure') AS unsure, sum(outcome = 'unsure' AND shown = 1) AS shown
      FROM replay WHERE job_id = ? AND message_id != ''`,
     job.job_id,
   ) ?? {};
   const mismatches = store.all<{ decided: string; owner: string; n: number }>(
-    `SELECT CASE outcome WHEN 'label' THEN label ELSE '' END AS decided, owner_label AS owner, count(*) AS n FROM replay
-     WHERE job_id = ? AND message_id != '' AND state = 'evaluated' AND ((outcome = 'label' AND label != owner_label) OR (outcome = 'none' AND owner_label != ''))
+    `SELECT CASE outcome WHEN 'label' THEN coalesce((SELECT target_id FROM label_aliases WHERE source_id = replay.label), label) ELSE '' END AS decided, coalesce((SELECT target_id FROM label_aliases WHERE source_id = replay.owner_label), owner_label) AS owner, count(*) AS n FROM replay
+     WHERE job_id = ? AND message_id != '' AND state = 'evaluated' AND ((outcome = 'label' AND coalesce((SELECT target_id FROM label_aliases WHERE source_id = replay.label), label) != coalesce((SELECT target_id FROM label_aliases WHERE source_id = replay.owner_label), owner_label)) OR (outcome = 'none' AND owner_label != ''))
      GROUP BY decided, owner ORDER BY n DESC, decided, owner`,
     job.job_id,
   );
@@ -331,10 +331,10 @@ export function replaySummary(store: Store): ReplaySummary | null {
     shown: n('shown'),
     mismatches: mismatches.map((row) => ({ decided: row.decided, owner: row.owner, count: row.n })),
     cases: cases.map((row) => ({
-      owner: row.owner_label ?? '',
+      owner: row.owner_label === null ? '' : store.canonicalLabelId(row.owner_label),
       outcome: row.outcome === 'label' || row.outcome === 'none' ? row.outcome : 'unsure',
       reason: row.reason,
-      topOption: row.top_option,
+      topOption: row.top_option === null ? null : store.canonicalLabelId(row.top_option),
       topP: row.top_p,
       runnerUpP: row.runner_up_p,
       view2P: row.view2_p,

@@ -48,6 +48,7 @@ import "google/api/resource.proto";
 import "google/protobuf/empty.proto";
 import "google/protobuf/field_mask.proto";
 import "google/protobuf/timestamp.proto";
+import "mailsort/ui/v2/consolidation.proto";
 import "mailsort/ui/v2/flow.proto";
 import "mailsort/ui/v2/label.proto";
 import "mailsort/ui/v2/replay.proto";
@@ -127,6 +128,38 @@ service MailsortUiService {
       post: "/api/v2/labels:sync"
       body: "*"
     };
+  }
+
+  // The latest frozen label consolidation; NOT_FOUND before the first plan.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc GetLabelConsolidation(GetLabelConsolidationRequest) returns (LabelConsolidation) {
+    option (google.api.http) = {get: "/api/v2/{name=labelConsolidation}"};
+    option (google.api.method_signature) = "name";
+  }
+
+  // Freezes a complete private plan and starts its durable alarm work. Refused while another plan or replay
+  // is running. Sources are existing owned labels; the first source in each group remains the target.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc StartLabelConsolidation(StartLabelConsolidationRequest) returns (LabelConsolidation) {
+    option (google.api.http) = {
+      post: "/api/v2/{name=labelConsolidation}:start"
+      body: "*"
+    };
+    option (google.api.method_signature) = "name,groups";
+  }
+
+  // Continues the current blocked plan from its durable phase; it never starts a new plan or replays a
+  // confirmed membership write. A current etag is required.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc ResumeLabelConsolidation(ResumeLabelConsolidationRequest) returns (LabelConsolidation) {
+    option (google.api.http) = {
+      post: "/api/v2/{name=labelConsolidation}:resume"
+      body: "*"
+    };
+    option (google.api.method_signature) = "name,etag";
   }
 
   // Takes one domain off a label's trusted domains (Label.trusted_domains). There is no add: a domain is learned
@@ -277,7 +310,8 @@ service MailsortUiService {
   }
 
   // Starts a replay evaluation over the review items the owner resolved in the last 14 days, replacing the
-  // previous one (running or finished). The alarm re-reads each mail with the read grant and decides it again
+  // previous finished one. A running replay is returned for the same request ID; another start is refused.
+  // The alarm re-reads each mail with the read grant and decides it again
   // without writing anything to Gmail and without making verdicts or examples. Needs a mode that reads Gmail (shadow
   // or live) to make progress.
   // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
@@ -391,6 +425,47 @@ message DeleteLabelRequest {
 message SyncLabelsRequest {
   // The idempotency key (AIP-155); see MailsortUiService.
   string request_id = 1 [
+    (google.api.field_info).format = UUID4,
+    (google.api.field_behavior) = OPTIONAL
+  ];
+}
+
+// Input of GetLabelConsolidation.
+message GetLabelConsolidationRequest {
+  // Always `labelConsolidation`.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "sort.ziyixi.science/LabelConsolidation"
+  ];
+}
+
+// Input of StartLabelConsolidation.
+message StartLabelConsolidationRequest {
+  // Always `labelConsolidation`.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "sort.ziyixi.science/LabelConsolidation"
+  ];
+  // The complete frozen mapping, at most 24 groups and 24 distinct sources.
+  repeated LabelConsolidationGroup groups = 2 [(google.api.field_behavior) = REQUIRED];
+  // AIP-155: repeat this UUID to recover the original response after losing it.
+  string request_id = 3 [
+    (google.api.field_info).format = UUID4,
+    (google.api.field_behavior) = OPTIONAL
+  ];
+}
+
+// Input of ResumeLabelConsolidation.
+message ResumeLabelConsolidationRequest {
+  // Always `labelConsolidation`.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "sort.ziyixi.science/LabelConsolidation"
+  ];
+  // The current plan's etag (AIP-154); a stale one is ETAG_MISMATCH.
+  string etag = 2 [(google.api.field_behavior) = REQUIRED];
+  // AIP-155: a fresh UUID for this resume, retained when retrying a lost response.
+  string request_id = 3 [
     (google.api.field_info).format = UUID4,
     (google.api.field_behavior) = OPTIONAL
   ];

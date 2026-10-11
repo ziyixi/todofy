@@ -98,7 +98,7 @@ async function seed(h: Harness): Promise<void> {
        VALUES (?, ?, ?, ?, 1, 0, 'pending', ?, ?, 'e')`,
       `label-${String(i)}`,
       i + 1,
-      `标签${String(i)}`,
+      `Category ${String(i)}`,
       `描述 ${String(i)}：weekly digest 订阅 receipt 订单 `.repeat(6).slice(0, 300),
       T0,
       T0,

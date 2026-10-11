@@ -13,9 +13,7 @@
  * one metadata read before the write: if the owner has meanwhile archived it or filed it under a label of their own,
  * mailsort's label would be a second label on mail no longer in the inbox, so the row fails (`mail_changed`).
  *
- * Labels are created in Gmail (named by their path) just before the first write that needs them, after the gate, with
- * the parents Gmail nests them under (`开发` for `开发/CI通知`) when those do not exist yet. The parents only group:
- * they are never linked, so the guard never lets a write add one to a mail (one label per mail, always a leaf). A
+ * Labels are created in Gmail by their single English name just before the first write that needs them. A
  * write never takes over a Gmail label this app did not make: when Gmail already has a label of a label's exact path,
  * the label stays pending (`gmail_name_taken`) and the row fails (`label_name_taken`) until the owner renames the
  * label or adopts that Gmail label (从 Gmail 同步, api.ts syncLabels, the only place a label is adopted).
@@ -30,11 +28,13 @@
  * the undo then gives nothing back to the inbox. A row recorded to archive keeps instead when its label keeps its mail
  * by the time it goes out (keepIfLabelKeeps).
  */
+import { effectiveLedgerRow } from './label-identity.ts';
+import { migrationActive } from './label-merge.ts';
 import { setCurrentLabels } from './feedback.ts';
 import { countFlow, stageOf } from './flow.ts';
 import { GmailRefused, GoogleError, isUserLabelId, type GmailClient, type GmailLabel } from './gmail.ts';
 import { WRITE_ATTEMPTS_MAX } from './limits.ts';
-import { parentGmailNames } from './paths.ts';
+import { ownerPath } from './paths.ts';
 import { noteGoogleError } from './session.ts';
 import { timeId } from './ids.ts';
 import { utcDay, type LabelRow, type LedgerRow, type Store } from './store.ts';
@@ -100,9 +100,9 @@ export function intendUndo(store: Store, row: LedgerRow): void {
   store.run(`UPDATE ledger SET state = 'undo_intended', attempts = 0 WHERE id = ? AND state = 'applied'`, row.id);
 }
 
-/** The Gmail requests ensureGmailLabel may make for `label`: the list, the parents and the label itself. */
+/** The Gmail requests ensureGmailLabel may make: list existing labels, then create one. */
 export function labelCreationCost(label: Pick<LabelRow, 'display_name' | 'gmail_state' | 'gmail_id'>): number {
-  return label.gmail_state === 'linked' && label.gmail_id !== null ? 0 : 1 + parentGmailNames(label.display_name).length + 1;
+  return label.gmail_state === 'linked' && label.gmail_id !== null ? 0 : 2;
 }
 
 /**
@@ -131,23 +131,7 @@ async function createUnlessTaken(gmail: GmailClient, name: string): Promise<stri
   }
 }
 
-/**
- * Makes sure Gmail has the parents of a label's path (`开发` for `开发/CI通知`), outermost first, so it shows the label
- * nested. A parent this app creates is recorded (`gmail_parents`): a label later linked to it (the owner adds `开发` by
- * hand once its children are gone) is the app's own, not adopted. A parent Gmail already had, or one made meanwhile
- * (a 409), is the owner's: used to nest under as it is, never recorded.
- */
-export async function ensureGmailParents(gmail: GmailClient, path: string, existing: Map<string, string>, store: Store, now: number): Promise<void> {
-  for (const parent of parentGmailNames(path)) {
-    if (existing.has(parent)) continue;
-    const id = await createUnlessTaken(gmail, parent);
-    if (id === null) continue;
-    existing.set(parent, id);
-    store.run(`INSERT OR IGNORE INTO gmail_parents (gmail_id, create_time) VALUES (?, ?)`, id, now);
-  }
-}
-
-/** Whether this app created the Gmail label `gmailId` as a parent (ensureGmailParents). */
+/** Whether this app created the Gmail label `gmailId` as a parent (legacy grouping record). */
 export function isOwnParent(store: Store, gmailId: string): boolean {
   return store.one(`SELECT 1 AS x FROM gmail_parents WHERE gmail_id = ?`, gmailId) !== undefined;
 }
@@ -172,14 +156,14 @@ export function setNameTaken(store: Store, labelId: string, taken: boolean, now:
 }
 
 /**
- * The label's Gmail ID, creating the label (and its parents) in Gmail when it is still pending. Null when it went
+ * The label's Gmail ID, creating the label in Gmail when it is still pending. Null when it went
  * missing, or when its path is taken (`gmail_name_taken`): Gmail has a label of that name that is not its own (the
  * owner's, a system label, another label's here renamed to it in Gmail). Such a label is never adopted here, only by
  * the owner's 从 Gmail 同步. The one exception is a parent this app made, with no sublabels left: its own, so linked.
  */
 export async function ensureGmailLabel(ctx: WriteContext, label: LabelRow): Promise<string | null> {
   if (label.gmail_state === 'linked' && label.gmail_id !== null) return label.gmail_id;
-  if (label.gmail_state === 'missing') return null;
+  if (label.gmail_state === 'missing' || ownerPath(label.display_name) !== label.display_name) return null;
   // One read of Gmail's labels, then only what is missing.
   const labels = await ctx.gmail.labels();
   const existing = userLabelsByName(labels);
@@ -187,7 +171,6 @@ export async function ensureGmailLabel(ctx: WriteContext, label: LabelRow): Prom
   const there = labels.find((item) => item.name === path);
   let id: string | null;
   if (there === undefined) {
-    await ensureGmailParents(ctx.gmail, path, existing, ctx.store, ctx.now());
     id = await createUnlessTaken(ctx.gmail, path);
   } else {
     // Taken, unless it is a parent this app made that nests nothing any more.
@@ -259,6 +242,7 @@ function keepIfLabelKeeps(store: Store, row: LedgerRow): LedgerRow {
  */
 export async function executeWrites(ctx: WriteContext, ids: readonly string[] | null, limit: number): Promise<WriteOutcome> {
   const { store } = ctx;
+  if (migrationActive(store)) return { applied: 0, undone: 0, failed: 0, stopped: true };
   const rows =
     ids === null
       ? store.all<LedgerRow>(`SELECT * FROM ledger WHERE state IN ('intended', 'undo_intended') ORDER BY id LIMIT ?`, limit)
@@ -270,7 +254,7 @@ export async function executeWrites(ctx: WriteContext, ids: readonly string[] | 
   let undone = 0;
   let failed = 0;
   for (const original of rows) {
-    let row = original;
+    let row = effectiveLedgerRow(store, original);
     const recheck = row.state === 'intended' && row.origin === 'auto' && (ids === null || row.attempts > 0);
     const label = store.label(row.label_id);
     // The owner's own label, adopted: the mail's labels are read right before the write (alreadyLabelled).
@@ -281,7 +265,7 @@ export async function executeWrites(ctx: WriteContext, ids: readonly string[] | 
     if (!ctx.budget.has(1 + (recheck || adopted ? 1 : 0) + creation)) break;
     try {
       if (row.state === 'intended') {
-        if (label === undefined) {
+        if (label === undefined || label.problem !== '' || store.canonicalLabelId(row.label_id) !== row.label_id) {
           ctx.transact(() => { fail(store, row, 'label_deleted'); });
           failed++;
           continue;
@@ -329,6 +313,11 @@ export async function executeWrites(ctx: WriteContext, ids: readonly string[] | 
         });
         applied++;
       } else {
+        if (row.superseded === 1) {
+          ctx.transact(() => store.run(`UPDATE ledger SET state = 'applied', last_code = 'merge_undo_unsafe' WHERE id = ?`, row.id));
+          failed++;
+          continue;
+        }
         if (row.gmail_label_id === null) {
           ctx.transact(() => store.run(`UPDATE ledger SET state = 'undone', undo_time = ? WHERE id = ?`, ctx.now(), row.id));
           continue;

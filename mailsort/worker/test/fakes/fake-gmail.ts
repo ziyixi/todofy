@@ -37,7 +37,7 @@ const gmailError = (status: number, reason: string) => json({ error: { code: sta
 
 export class FakeGmail {
   readonly messages = new Map<string, FakeMessage>();
-  readonly labels = new Map<string, { id: string; name: string; type: 'system' | 'user' }>();
+  readonly labels = new Map<string, { id: string; name: string; type: 'system' | 'user'; labelListVisibility?: string; messageListVisibility?: string }>();
   /** User labels the Worker created (labels.create). */
   readonly createdByWorker = new Set<string>();
   /** User labels the test's owner made with the name of a label of mailsort's, for mailsort to adopt. */
@@ -184,13 +184,16 @@ export class FakeGmail {
     }
     if (method === 'GET' && path === 'messages') {
       const since = this.clock() - 2 * 86_400_000;
-      const ids = [...this.messages.values()].filter((m) => m.labelIds.has('INBOX') && m.internalDate >= since).map((m) => ({ id: m.id, threadId: m.threadId }));
+      const label = url.searchParams.get('labelIds') ?? 'INBOX';
+      const migration = url.searchParams.has('fields');
+      const ids = [...this.messages.values()].filter((m) => m.labelIds.has(label) && (migration || m.internalDate >= since)).map((m) => ({ id: m.id, ...(migration ? {} : { threadId: m.threadId }) }));
       return json({ messages: ids.slice(0, Number(url.searchParams.get('maxResults') ?? '100')), resultSizeEstimate: ids.length });
     }
     if (method === 'GET' && parts[0] === 'messages' && parts.length === 2) {
       const message = this.messages.get(parts[1] ?? '');
       if (message === undefined) return gmailError(404, 'notFound');
       const format = url.searchParams.get('format');
+      if (format === 'minimal') return json({ id: message.id, labelIds: [...message.labelIds], historyId: String(this.historyId) });
       const payload = format === 'metadata' ? { mimeType: (message.payload as { mimeType?: string }).mimeType, headers: (message.payload as { headers?: unknown }).headers } : message.payload;
       return json({ id: message.id, threadId: message.threadId, labelIds: [...message.labelIds], snippet: message.snippet, internalDate: String(message.internalDate), payload });
     }
@@ -207,7 +210,9 @@ export class FakeGmail {
       if (!writable) return gmailError(403, 'insufficientPermissions');
       const label = this.labels.get(parts[1] ?? '');
       if (label === undefined || label.type !== 'user') return gmailError(404, 'notFound');
-      const { name } = JSON.parse(body) as { name: string };
+      const patch = JSON.parse(body) as { name?: string; labelListVisibility?: string; messageListVisibility?: string };
+      if (patch.name === undefined) { Object.assign(label, patch); return json(label); }
+      const name = patch.name;
       if ([...this.labels.values()].some((other) => other.id !== label.id && other.name === name)) return gmailError(409, 'duplicate');
       label.name = name;
       return json(label);

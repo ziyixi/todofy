@@ -855,14 +855,13 @@ kbd {
   overflow-wrap: anywhere;
 }
 
-/* 标签 (views/labels.ts, label-detail.ts): one tree of labels in a card, a hairline between rows, the top-level
-   groups as quiet headings with their labels indented under them, and a label's detail opened under its row. */
-.tree-box {
+/* 标签 (views/labels.ts, label-detail.ts): one flat list with a hairline between rows and the detail opened under its row. */
+.label-list-box {
   display: grid;
   gap: var(--space-2);
 }
 
-.tree-head {
+.label-list-head {
   display: flex;
   justify-content: space-between;
   gap: var(--space-2);
@@ -871,32 +870,22 @@ kbd {
   font-size: 13px;
 }
 
-.tree,
-.branch > ul {
+.label-list {
   margin: 0;
   padding: 0;
   list-style: none;
 }
 
-.tree {
+.label-list {
   overflow: hidden;
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: var(--surface);
 }
 
-/* Between the tree's rows only, never between the lines inside an open label. */
-.tree > li + li,
-.branch > ul > li + li {
+/* Between label rows only, never between lines inside an open detail. */
+.label-list > li + li {
   border-top: 1px solid var(--line);
-}
-
-.branch-name {
-  display: block;
-  padding: 12px var(--space-3) var(--space-1);
-  color: var(--muted);
-  font-size: 13px;
-  font-weight: 600;
 }
 
 .leaf-row {
@@ -937,10 +926,6 @@ kbd {
 
 .leaf-main:focus-visible {
   outline-offset: -2px;
-}
-
-.branch .leaf-main {
-  padding-left: var(--space-5);
 }
 
 .leaf-name {
@@ -987,12 +972,6 @@ kbd {
   padding: var(--space-3);
   border-top: 1px solid var(--line);
   background: var(--bg);
-}
-
-@media (min-width: 520px) {
-  .branch .detail {
-    padding-left: var(--space-5);
-  }
 }
 
 .desc {
@@ -1148,4 +1127,15 @@ kbd {
   height: 8px;
   margin-right: 6px;
   border-radius: 2px;
+}
+
+/* Owner plans and replay label pairs can contain long legacy names. */
+.consolidation-preview li,
+.replay-mismatches li {
+  overflow-wrap: anywhere;
+}
+
+.replay-results {
+  display: grid;
+  gap: var(--space-2);
 }

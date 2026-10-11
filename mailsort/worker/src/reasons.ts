@@ -28,16 +28,20 @@ export const REASONS: Readonly<Record<Reason, { readonly code: Code; readonly me
   INVALID_LABEL: {
     code: Code.INVALID_ARGUMENT,
     message: 'a label ID or name breaks its rules',
-    zh: '标签 ID 只能用小写字母、数字和连字符（字母开头，最多 40 个字符）；名称是最多三级的路径（如“金融/投资”），每级 1–40 个字符；只有末级是标签，不能和已有标签互为上下级',
+    zh: '标签 ID 只能用小写字母、数字和连字符（字母开头，最多 40 个字符）；名称须为单层英文，1–40 个字符，不能含斜杠',
   },
   INVALID_SETTINGS: { code: Code.INVALID_ARGUMENT, message: 'a setting is outside its range', zh: '设置超出允许范围' },
   LIMIT_REACHED: { code: Code.FAILED_PRECONDITION, message: 'the store holds the most items it may', zh: '数量已达上限' },
   ALREADY_RESOLVED: { code: Code.FAILED_PRECONDITION, message: 'the review item is resolved', zh: '这封邮件已经处理过了' },
-  NOT_UNDOABLE: { code: Code.FAILED_PRECONDITION, message: 'the ledger entry cannot be undone', zh: '这条记录不能撤销（不是本应用加的标签、已经撤销，或你已在 Gmail 里改过）' },
+  NOT_UNDOABLE: { code: Code.FAILED_PRECONDITION, message: 'the ledger entry cannot be undone', zh: '这条记录不能撤销（已合并的历史记录、非本应用添加、已撤销，或 Gmail 标记已改变）' },
   GMAIL_NOT_AUTHORIZED: { code: Code.FAILED_PRECONDITION, message: 'Gmail is not authorized', zh: 'Gmail 尚未授权或授权已失效' },
   GMAIL_WRITE_NOT_ALLOWED: { code: Code.FAILED_PRECONDITION, message: 'the mode or the grant does not allow Gmail writes', zh: '当前模式或授权不允许修改 Gmail' },
   DEPENDENCY_UNAVAILABLE: { code: Code.UNAVAILABLE, message: 'Gmail or Workers AI did not answer; repeat the request', zh: 'Gmail 或模型暂时不可用，请稍后再试' },
   RELOAD_REQUIRED: { code: Code.FAILED_PRECONDITION, message: 'mailsort was updated: reload the page', zh: '邮件分拣已更新，请刷新页面' },
+  CONSOLIDATION_ACTIVE: { code: Code.FAILED_PRECONDITION, message: 'a label consolidation owns these writes', zh: '标签整理尚未完成，请先查看整理进度；完成后可继续修改' },
+  CONSOLIDATION_NOT_BLOCKED: { code: Code.FAILED_PRECONDITION, message: 'only a blocked consolidation can resume', zh: '这次标签整理没有暂停，无需恢复' },
+  REPLAY_ACTIVE: { code: Code.FAILED_PRECONDITION, message: 'a replay evaluation is already running', zh: '回放评估正在运行，请等待它完成' },
+  CONSOLIDATION_PENDING_WRITES: { code: Code.FAILED_PRECONDITION, message: 'existing mail processing and Gmail writes must finish before consolidation', zh: '当前邮件处理或 Gmail 写入还未结束，请稍后重新开始整理' },
 };
 
 export function isReason(value: string): value is Reason {

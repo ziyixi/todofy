@@ -189,25 +189,19 @@ export const ERRORS_KEPT = 8;
 
 // ---- the owner API -----------------------------------------------------------------------------------------------------
 
-/** A request body at most: the largest is a label with its description. */
+/** Maximum owner request body, including a bounded private consolidation plan. */
 export const MAX_BODY_BYTES = 16 * 1024;
 export const PAGE = 50;
 export const LABEL_ID_PATTERN = /^[a-z][a-z0-9-]{0,39}$/;
 export const ID_PATTERN = /^[a-z0-9-]{1,40}$/;
-/**
- * A label's path (Label.display_name), which is also its Gmail name: at most LABEL_DEPTH_MAX segments of
- * LABEL_SEGMENT_MAX characters each, DISPLAY_NAME_MAX in all. Gmail shows `开发/CI通知` nested under `开发`.
- */
+/** New labels use a single English name. Older paths remain readable during label consolidation. */
+export const LABEL_NAME_MAX = 40;
+/** Legacy path limits; never used to accept a new owner-supplied label name. */
 export const LABEL_DEPTH_MAX = 3;
 export const LABEL_SEGMENT_MAX = 40;
 export const DISPLAY_NAME_MAX = 100;
 export const DESCRIPTION_MAX = 300;
-/**
- * The prefix the labels had in Gmail until 2026-10-07 (`分拣/开发/CI通知`). It is never written; on input (a path typed
- * in 标签) it is read as nothing, so `分拣/x` is `x` at every entry point.
- */
-export const LEGACY_LABEL_PREFIX = '分拣/';
-/** The legacy prefix's own segment: no path starts with it, so `分拣/x` always reads as `x`. */
+/** Reserved former grouping root, used only while reading legacy paths. */
 export const LEGACY_LABEL_ROOT = '分拣';
 /** The flow counters (flow.ts) are kept this many UTC days, like the daily usage. */
 export const FLOW_KEPT_DAYS = 400;

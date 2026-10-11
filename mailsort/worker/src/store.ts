@@ -16,11 +16,12 @@
  * through the owner API behind Access, and the masked text only to Workers AI.
  */
 import { sharedMailbox } from './decide.ts';
+import { effectiveLedgerRow } from './label-identity.ts';
 import { newEtag } from './ids.ts';
 import { CONTENT_KEPT_MS, DAY, DECISIONS_KEPT_MS, ERRORS_KEPT, FLOW_KEPT_DAYS, REPLAY_KEPT_MS, REQUEST_ID_TTL_MS, TRUSTED_DOMAINS_PER_LABEL_MAX } from './limits.ts';
 import { senderHash } from './mask.ts';
 
-export const SCHEMA_VERSION = 6;
+export const SCHEMA_VERSION = 7;
 
 export const SCHEMA_V1: readonly string[] = [
   `CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)`,
@@ -397,6 +398,28 @@ export const SCHEMA_V6: readonly string[] = [
   `ALTER TABLE replay ADD COLUMN trust INTEGER`,
 ];
 
+/** Version 7: private, resumable label consolidation; old identities and original ledgers stay intact. */
+export const SCHEMA_V7: readonly string[] = [
+  `ALTER TABLE labels ADD COLUMN problem TEXT NOT NULL DEFAULT ''`,
+  `CREATE TABLE label_aliases (source_id TEXT PRIMARY KEY, target_id TEXT NOT NULL)`,
+  `CREATE TABLE label_merge_jobs (
+    id TEXT PRIMARY KEY, state TEXT NOT NULL, phase TEXT NOT NULL, plan TEXT NOT NULL,
+    group_index INTEGER NOT NULL DEFAULT 0, source_index INTEGER NOT NULL DEFAULT 1,
+    parents TEXT NOT NULL DEFAULT '[]', error_code TEXT NOT NULL DEFAULT '',
+    create_time INTEGER NOT NULL, update_time INTEGER NOT NULL, etag TEXT NOT NULL
+  )`,
+  `CREATE TABLE label_merge_items (
+    job_id TEXT NOT NULL, message_id TEXT NOT NULL, source_id TEXT NOT NULL, target_id TEXT NOT NULL,
+    source_gmail_id TEXT NOT NULL, target_gmail_id TEXT NOT NULL,
+    state TEXT NOT NULL DEFAULT 'pending', before_labels TEXT,
+    history_start TEXT, history_end TEXT,
+    PRIMARY KEY (job_id, message_id, source_id)
+  )`,
+  `CREATE INDEX label_merge_pending ON label_merge_items (job_id, state, source_id)`,
+  `CREATE INDEX label_merge_message ON label_merge_items (message_id, source_gmail_id)`,
+  `CREATE TABLE label_merge_hides (job_id TEXT NOT NULL, gmail_id TEXT NOT NULL, state TEXT NOT NULL DEFAULT 'pending', PRIMARY KEY(job_id, gmail_id))`,
+];
+
 export type Value = string | number | null | ArrayBuffer;
 
 export interface RowMeter {
@@ -425,6 +448,8 @@ export interface LabelRow extends Record<string, SqlStorageValue> {
   gmail_adopted: number;
   /** 1: pending, and Gmail has a label of its path that is not its own (the owner's): nothing is written with it. */
   gmail_name_taken: number;
+  /** A current Gmail name/tree conflict; stops new writes without losing identity. */
+  problem: string;
 }
 
 export type Outcome = 'applied' | 'suggested' | 'none' | 'unsure' | 'skipped';
@@ -569,6 +594,7 @@ export class Store {
         for (const [messageId, hash] of senderHashes) this.sql.exec(`UPDATE decisions SET sender_hash = ? WHERE message_id = ? AND sender_hash IS NULL`, hash, messageId);
       }
       if (version < 6) for (const statement of SCHEMA_V6) this.sql.exec(statement);
+      if (version < 7) for (const statement of SCHEMA_V7) this.sql.exec(statement);
       if (version !== SCHEMA_VERSION) this.setMeta('schema_version', String(SCHEMA_VERSION));
     });
   }
@@ -662,7 +688,16 @@ export class Store {
   // ---- labels -----------------------------------------------------------------------------------------------------------
 
   labels(): LabelRow[] {
-    return this.all<LabelRow>(`SELECT * FROM labels ORDER BY seq`);
+    return this.all<LabelRow>(`SELECT * FROM labels WHERE id NOT IN (SELECT source_id FROM label_aliases) ORDER BY seq`);
+  }
+
+  /** Retired merge identities resolve only on reads; frozen prediction/ledger rows are never rewritten. */
+  canonicalLabelId(id: string): string {
+    return this.one<{ target_id: string }>(`SELECT target_id FROM label_aliases WHERE source_id = ?`, id)?.target_id ?? id;
+  }
+
+  labelAliases(): Map<string, string> {
+    return new Map(this.all<{ source_id: string; target_id: string }>(`SELECT source_id, target_id FROM label_aliases`).map((row) => [row.source_id, row.target_id]));
   }
 
   label(id: string): LabelRow | undefined {
@@ -753,7 +788,7 @@ export class Store {
 
   /** Paths of every label (the tree rule: paths.ts treeConflict). */
   labelPaths(exceptId = ''): string[] {
-    return this.all<{ display_name: string }>(`SELECT display_name FROM labels WHERE id != ?`, exceptId).map((row) => row.display_name);
+    return this.all<{ display_name: string }>(`SELECT display_name FROM labels WHERE id != ? AND id NOT IN (SELECT source_id FROM label_aliases)`, exceptId).map((row) => row.display_name);
   }
 
   // ---- decisions ---------------------------------------------------------------------------------------------------------
@@ -775,12 +810,14 @@ export class Store {
   // ---- ledger ------------------------------------------------------------------------------------------------------------
 
   ledgerRow(id: string): LedgerRow | undefined {
-    return this.one<LedgerRow>(`SELECT * FROM ledger WHERE id = ?`, id);
+    const row = this.one<LedgerRow>(`SELECT * FROM ledger WHERE id = ?`, id);
+    return row === undefined ? undefined : effectiveLedgerRow(this, row);
   }
 
   /** The newest ledger row that adds `labelId` (a Gmail label ID) to `messageId`. */
   ledgerFor(messageId: string, gmailLabelId: string): LedgerRow | undefined {
-    return this.one<LedgerRow>(`SELECT * FROM ledger WHERE message_id = ? AND gmail_label_id = ? ORDER BY create_time DESC, id DESC LIMIT 1`, messageId, gmailLabelId);
+    return this.one<LedgerRow>(`SELECT * FROM ledger WHERE message_id = ? AND gmail_label_id = ? AND superseded = 0
+      AND label_id NOT IN (SELECT source_id FROM label_aliases) ORDER BY create_time DESC, id DESC LIMIT 1`, messageId, gmailLabelId);
   }
 
   // ---- the request log (AIP-155) -------------------------------------------------------------------------------------------

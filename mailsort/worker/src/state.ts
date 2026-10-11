@@ -47,6 +47,8 @@ const api = new HttpTranscoder(MailsortUiService, handlers, {
 export class MailsortState extends DurableObject<Env> {
   private readonly store: Store;
   private chain: Promise<unknown> = Promise.resolve();
+  private passRunning = false;
+  private mutationsInFlight = 0;
   private testClock: number | null = null;
   /** The Gmail access token, cached in memory only (never stored): a new isolate refreshes it once. */
   private token: AccessToken | null = null;
@@ -93,32 +95,37 @@ export class MailsortState extends DurableObject<Env> {
   /** One pass at `now`, then the next alarm (one pass at a time). */
   async step(now: number): Promise<PassResult | { next: number; code: string }> {
     const run = this.chain.then(async () => {
-      if (this.manual()) this.testClock = now;
-      let result: PassResult | { next: number; code: string };
-      let pass: PassResult;
+      this.passRunning = true;
       try {
-        pass = await runPass({
-          store: this.store,
-          env: this.env,
-          fetch: upstreamFetch(this.env),
-          ai: aiRunner(this.env),
-          now: () => this.now(),
-          transact: this.transact,
-          token: this.token,
-          saveToken: (token) => {
-            this.token = token;
-          },
-          shed: activeShed(this.store, this.now()) !== null,
-        });
-        // Counts and codes only: never a subject, a sender or a label name.
-        console.log(JSON.stringify({ event: 'alarm', mode: pass.mode, synced: pass.synced, decided: pass.decided, applied: pass.applied, deferred: pass.deferred, code: pass.code }));
-        result = pass;
-      } catch {
-        console.log(JSON.stringify({ event: 'alarm_failed', code: 'pass_error' }));
-        result = { next: now + ALARM_ERROR_RETRY_MS, code: 'pass_error' };
+        if (this.manual()) this.testClock = now;
+        let result: PassResult | { next: number; code: string };
+        let pass: PassResult;
+        try {
+          pass = await runPass({
+            store: this.store,
+            env: this.env,
+            fetch: upstreamFetch(this.env),
+            ai: aiRunner(this.env),
+            now: () => this.now(),
+            transact: this.transact,
+            token: this.token,
+            saveToken: (token) => {
+              this.token = token;
+            },
+            shed: activeShed(this.store, this.now()) !== null,
+          });
+          // Counts and codes only: never a subject, a sender or a label name.
+          console.log(JSON.stringify({ event: 'alarm', mode: pass.mode, synced: pass.synced, decided: pass.decided, applied: pass.applied, deferred: pass.deferred, code: pass.code }));
+          result = pass;
+        } catch {
+          console.log(JSON.stringify({ event: 'alarm_failed', code: 'pass_error' }));
+          result = { next: now + ALARM_ERROR_RETRY_MS, code: 'pass_error' };
+        }
+        if (!this.manual()) await this.ctx.storage.setAlarm(Math.max(result.next, Date.now() + WAKE_MS));
+        return result;
+      } finally {
+        this.passRunning = false;
       }
-      if (!this.manual()) await this.ctx.storage.setAlarm(Math.max(result.next, Date.now() + WAKE_MS));
-      return result;
     });
     this.chain = run.catch(() => undefined);
     return run;
@@ -179,6 +186,8 @@ export class MailsortState extends DurableObject<Env> {
       alarmAt: () => this.ctx.storage.getAlarm(),
       budget,
       shed: activeShed(this.store, now) !== null,
+      // This Start request is itself one mutation. Reads and emergency settings stay responsive.
+      consolidationBusy: () => this.passRunning || this.mutationsInFlight > 1,
       gmail: async () => {
         const session = await openSession({ store: this.store, env: this.env, fetch: upstreamFetch(this.env), now: () => this.now(), budget, token: this.token });
         if ('reason' in session) return session.reason;
@@ -191,7 +200,14 @@ export class MailsortState extends DurableObject<Env> {
         return session.client;
       },
     };
-    const result = await api.handle(request, ctx, requestId);
+    const mutation = request.method !== 'GET' && request.method !== 'HEAD' && request.method !== 'OPTIONS';
+    if (mutation) this.mutationsInFlight++;
+    let result;
+    try {
+      result = await api.handle(request, ctx, requestId);
+    } finally {
+      if (mutation) this.mutationsInFlight--;
+    }
     if (result === null) return api.errorResponse(new RpcError(REASONS.NOT_FOUND.code, 'NOT_FOUND', REASONS.NOT_FOUND.message), requestId, request.method === 'HEAD');
     if (result.error !== undefined) {
       // One line per refused request: the request ID, status and reason only (never a path, query or body).

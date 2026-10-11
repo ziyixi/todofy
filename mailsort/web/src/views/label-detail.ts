@@ -18,6 +18,7 @@ import { disclosure, growing, toggle } from '../components.ts'
 import { button, el, fill, toast } from '../dom.ts'
 import { when } from '../format.ts'
 import type { Host } from '../app.ts'
+import { LABEL_PROBLEMS, labelNameInput, labelNameProblem } from './label-name.ts'
 import { act } from './common.ts'
 
 /** The fields of a label the detail and its row change. */
@@ -26,6 +27,7 @@ export type LabelFields = Partial<Pick<Label, 'displayName' | 'description' | 'e
 /** What the detail needs from the page (labels.ts). */
 export interface DetailPage {
   readonly host: Host
+  readonly readOnly: boolean
   /** The label as the page holds it now: its etag follows every save. */
   readonly label: () => Label
   /** What stays open while this label is: 高级 (`more` is kept for the page's memory). */
@@ -34,7 +36,7 @@ export interface DetailPage {
   readonly save: (fields: LabelFields, paths: readonly string[], done: string) => Promise<Label | null>
   /** Reads the labels again and repaints, this label still open; then focuses the control marked `focus`. */
   readonly refresh: (focus: string) => Promise<void>
-  /** Repaints from what the page holds (a rename moves the label in the tree); then focuses `focus`. */
+  /** Repaints from what the page holds (a rename updates the label in the list); then focuses `focus`. */
   readonly repaint: (focus: string) => void
 }
 
@@ -61,6 +63,7 @@ interface SwitchOptions {
 function fieldSwitch(page: DetailPage, name: string, hint: string, field: 'keepInInbox' | 'trustImplying' | 'sensitive', path: string, options: SwitchOptions = {}): HTMLLabelElement {
   const { inverted = false, ask, after } = options
   const [box, input] = toggle(name, page.label()[field] !== inverted, hint)
+  input.disabled = page.readOnly
   input.addEventListener('change', () => {
     const on = input.checked
     if (ask !== undefined && !ask(on)) {
@@ -80,7 +83,7 @@ function fieldSwitch(page: DetailPage, name: string, hint: string, field: 'keepI
 /** The description: it grows with its text and is saved on blur, or with 保存 (shown while it differs). */
 function descriptionBox(page: DetailPage): HTMLElement {
   let saved = page.label().description
-  const area = growing(el('textarea', { rows: '2', maxlength: '300', 'aria-label': '说明', placeholder: '这类邮件是什么。没写说明，模型不会选它', 'data-focus': 'description' }, saved))
+  const area = growing(el('textarea', { rows: '2', disabled: page.readOnly, maxlength: '300', 'aria-label': '说明', placeholder: '这类邮件是什么。没写说明，模型不会选它', 'data-focus': 'description' }, saved))
   const store = async () => {
     const value = area.value
     if (value === saved) return
@@ -115,7 +118,7 @@ function domainsPart(page: DetailPage): HTMLElement {
     el('h3', {}, '可信域名', el('span', { class: 'meta' }, ` ${String(label.trustedDomains.length)}`)),
     label.trustedDomains.length === 0
       ? el('p', { class: 'hint' }, '还没有，所以这个标签还不会自动打。在待审里选它、且发件人身份经 Gmail 验证（DMARC 通过）时，发件域会记在这里')
-      : el('ul', { class: 'example-list' }, ...label.trustedDomains.map((domain) => el('li', {}, el('p', { class: 'mono' }, domain), button('删除', () => { remove(domain) }, { class: 'quiet small danger', 'aria-label': `删除 ${domain}` })))),
+      : el('ul', { class: 'example-list' }, ...label.trustedDomains.map((domain) => el('li', {}, el('p', { class: 'mono' }, domain), button('删除', () => { remove(domain) }, { class: 'quiet small danger', 'aria-label': `删除 ${domain}`, disabled: page.readOnly })))),
   )
 }
 
@@ -141,7 +144,7 @@ function examplesPart(page: DetailPage): HTMLElement {
       show.focus()
     }
     const remove = () => void act((requestId) => api.deleteExample({ name: example.name, requestId }), '例子已删除', gone)
-    const node = el('li', {}, el('p', {}, example.summary), el('span', { class: 'meta' }, when(example.createTime)), button('删除', remove, { class: 'quiet small danger', 'aria-label': '删除这个例子' }))
+    const node = el('li', {}, el('p', {}, example.summary), el('span', { class: 'meta' }, when(example.createTime)), button('删除', remove, { class: 'quiet small danger', 'aria-label': '删除这个例子', disabled: page.readOnly }))
     return node
   }
   const load = async (pageToken: string) => {
@@ -177,10 +180,18 @@ interface Redraw {
 /** 高级: 可信, 敏感 (which deletes the examples), rename, the Gmail state while not simply linked, and delete. */
 function advanced(page: DetailPage, redraw: Redraw): HTMLDetailsElement {
   const label = page.label()
-  const path = el('input', { value: label.displayName, maxlength: '100', 'aria-label': '路径', 'data-focus': 'rename' })
+  const path = labelNameInput(label.displayName, '名称')
+  path.dataset['focus'] = 'rename'
+  path.disabled = page.readOnly
   const rename = async () => {
     const value = path.value.trim()
-    if (value === '' || value === page.label().displayName) return
+    if (value === page.label().displayName) return
+    const problem = labelNameProblem(path.value)
+    if (problem !== null) {
+      toast(problem)
+      path.focus()
+      return
+    }
     if ((await page.save({ displayName: value }, ['display_name'], '已改名')) !== null) page.repaint('rename')
   }
   const remove = () => {
@@ -195,9 +206,9 @@ function advanced(page: DetailPage, redraw: Redraw): HTMLDetailsElement {
     { class: 'more-body' },
     fieldSwitch(page, '可信', '只给身份经过验证、且域名在可信域名里的发件人打它', 'trustImplying', 'trust_implying', { after: redraw.domains }),
     fieldSwitch(page, '敏感', '不留这类邮件的例子', 'sensitive', 'sensitive', { ask: deletesExamples, after: redraw.examples }),
-    el('div', { class: 'actions' }, path, button('改名', () => void rename())),
+    el('div', { class: 'actions' }, path, button('改名', () => void rename(), { disabled: page.readOnly })),
     gmail === undefined ? null : el('p', { class: 'hint' }, `Gmail：${gmail}`),
-    el('div', { class: 'actions' }, button('删除标签', remove, { class: 'small danger' })),
+    el('div', { class: 'actions' }, button('删除标签', remove, { class: 'small danger', disabled: page.readOnly })),
   )
   const details = disclosure('高级', body)
   details.open = page.memory.advanced
@@ -223,7 +234,7 @@ export function labelDetail(page: DetailPage): HTMLElement[] {
       examples = next
     },
   }
-  const problem = GMAIL_PROBLEMS[page.label().gmailState]
+  const problem = GMAIL_PROBLEMS[page.label().gmailState] ?? LABEL_PROBLEMS[page.label().problem]
   return [
     ...(problem === undefined ? [] : [el('p', { class: 'hint warn', role: 'note' }, problem)]),
     descriptionBox(page),

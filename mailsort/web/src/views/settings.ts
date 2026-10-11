@@ -1,5 +1,5 @@
 /**
- * 设置 (`/settings`): three cards only.
+ * 设置 (`/settings`): mode, undo, Gmail and replay evaluation.
  *
  * - 模式: 关闭, 影子 or 正式, and one line on what is in force (the deployment's MAILSORT_MODE ceiling or the breaker may
  *   lower the owner's choice; 解除熔断 once the breaker tripped; 正式 with a read-only Gmail grant writes nothing, and
@@ -20,6 +20,8 @@ import { card, segmented } from '../components.ts'
 import { button, el, toast } from '../dom.ts'
 import { BREAKER_REASONS, labelText, MODE_HINTS, MODE_NAMES, ms } from '../format.ts'
 import type { Host, ViewContext } from '../app.ts'
+import { consolidationPanel } from './consolidation.ts'
+import { replayCard } from './replay.ts'
 import { act, allLabels, frame, labelSelect } from './common.ts'
 
 const MODES: readonly (readonly [Mode, string])[] = [Mode.OFF, Mode.SHADOW, Mode.LIVE].map((mode) => [mode, MODE_NAMES[mode] ?? ''] as const)
@@ -218,11 +220,12 @@ function undoCard(labels: readonly Label[], host: Host): HTMLElement {
   )
 }
 
-function gmailCard(): HTMLElement {
+async function gmailCard(labels: readonly Label[]): Promise<HTMLElement> {
   return card(
     'Gmail',
     '',
     setting('从 Gmail 同步', '跟上你在 Gmail 里的改名和删除，沿用同名标签', button('同步', () => void act((requestId) => api.syncLabels({ requestId }), syncMessage, () => Promise.resolve()))),
+    await consolidationPanel(labels),
   )
 }
 
@@ -230,6 +233,6 @@ export async function renderSettings(ctx: ViewContext): Promise<void> {
   const reload: () => Promise<void> = await frame(ctx.main, '设置', async (body) => {
     // The header's status (its grant) only adds a line: without it the page still works.
     const [settings, labels, status] = await Promise.all([api.getSettings({ name: 'settings' }), allLabels(), ctx.status().catch(() => null)])
-    body.replaceChildren(modeCard(settings, status, ctx, () => reload()), undoCard(labels, ctx.host), gmailCard())
+    body.replaceChildren(modeCard(settings, status, ctx, () => reload()), undoCard(labels, ctx.host), await gmailCard(labels), await replayCard(labels))
   })
 }
