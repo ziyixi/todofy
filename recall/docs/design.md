@@ -347,12 +347,14 @@ and its label at the time, so the feed has no device records of its own.
 ### 3.10 Distribution and updates
 
 CI builds the extension into `recall-extension-<sha>.zip` (an artifact kept 30 days; nothing personal in it: the host is
-a public build constant, the token is pasted later), with the short commit as `version_name` and the build time (UTC)
-as the version `<year>.<month × 100 + day>.<hour × 100 + minute>`: 5 January 09:03 is `2026.105.903`, which still sorts
-after `2026.104.2359`. (Chrome refuses a version part with a leading zero, so `2026.0105.0903` would not load; the
-manifest test builds 5 January 09:03 and 31 December 23:59.) The owner puts it into a stable folder outside Google
-Drive (a cloud-only placeholder file would fail to load; `~/recall-extension` is suggested), loads it unpacked once
-(Developer mode stays on: since Chrome 134 an unpacked extension runs only then), pastes the token and sets the label.
+a public build constant, the token is pasted later; on `main` a change to `extension/` or `shared/` also publishes it as
+the GitHub Release `recall-extension-v<version>`, kept for good), with the short commit as `version_name` and the build
+time (UTC) as the version `<year>.<month × 100 + day>.<hour × 100 + minute>`: 5 January 09:03 is `2026.105.903`, which
+still sorts after `2026.104.2359`. (Chrome refuses a version part with a leading zero, so `2026.0105.0903` would not
+load; the manifest test builds 5 January 09:03 and 31 December 23:59.) The owner puts it into a stable folder outside
+Google Drive (a cloud-only placeholder file would fail to load; `~/recall-extension` is suggested), loads it unpacked
+once (Developer mode stays on: since Chrome 134 an unpacked extension runs only then), pastes the token and sets the
+label.
 
 Updates never replace files under a running extension. `npm run install-extension` (in `recall/extension`, from a
 build or a downloaded artifact) unpacks into the sibling `~/recall-extension.next`, checks it, swaps it in with two

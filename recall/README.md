@@ -12,7 +12,7 @@ recall's runs on the NAS. Every owner step is a click. Chinese UI, mobile first.
 
 | Path | What it is |
 | --- | --- |
-| `extension/` | The Chrome extension (Manifest V3, no runtime dependency): visits and focus, captures, scrub, the outbox and uploads, self-update; built by CI into an artifact ([README](extension/README.md)) |
+| `extension/` | The Chrome extension (Manifest V3, no runtime dependency): visits and focus, captures, scrub, the outbox and uploads, self-update; built by CI, each new version a GitHub Release `recall-extension-v<version>` ([README](extension/README.md)) |
 | `shared/` | The code the extension and the Worker both run: URL normalization and the page ID, the scrubber, the denylist, the bigram segmenter |
 | `worker/` | The Worker `recall`: the fetch handler (the three machine routes with their own tokens, then Access and CSRF, the Dropbox callback) and `RecallState` (ingest, storage, search, the change feed, the machine tokens, the archive's writer to Dropbox, the owner API, ops-v1, the alarm) |
 | `web/` | The UI (时间线 · 搜索 · 设置), built into `web/dist` and served by the Worker |
@@ -77,6 +77,11 @@ after `CI gate`, in the `production` environment, through `deploy/deploy-vars.mj
 the three machine routes) and the bucket on 2026-10-10; recall is live since its go-live commit (`ee02b62`), and a change
 to recall deploys it, and Home after it (design §11).
 
+The extension is never deployed. Its builds are on GitHub: a change under `extension/` or `shared/` that reaches `main`
+publishes the build CI tested as the Release `recall-extension-v<version>` with its zip (`Recall extension release`,
+after `CI gate`; a version whose tag exists is skipped), and `npm run install-extension -- <downloaded zip>` installs
+one ([extension README](extension/README.md#builds-github-releases)).
+
 The wrapper writes the Worker secrets `ACCESS_OWNER` and `ACCESS_OWNER_ALIASES` (from the dashboard's secrets: one
 owner) and `CSRF_SIGNING_KEY` (from `RECALL_CSRF_SIGNING_KEY`), and sets `BUILD_SHA`. recall has no operational switch.
 No deploy carries a machine token or anything of Dropbox: the owner makes the tokens in 设置 (RecallState keeps their
@@ -87,11 +92,13 @@ accepted as well, and `wrangler deploy --secrets-file` keeps it (`deploy/test/se
 ### The owner's setup: clicks only
 
 1. **The extension's token.** recall → 设置 → 插件口令 → **生成** → **复制** (shown this once).
-2. **The extension.** The agent builds it on the owner's Mac into a fixed folder (`npm run install-extension` in
-   `extension/`: `~/recall-extension`). Then Chrome → `chrome://extensions` → **开发者模式** on → **加载已解压的扩展程序**
-   → choose that folder; click the extension's icon (the puzzle-piece menu → recall) to open its options: the server is
-   already `https://recall.ziyixi.science`; paste the token, type the device label, **保存**. Within five minutes of
-   browsing, 设置 → 设备 shows the device's upload.
+2. **The extension.** The agent installs the newest release on the owner's Mac into a fixed folder
+   (`npm run install-extension -- <downloaded zip>` in `extension/`: `~/recall-extension`). Then Chrome →
+   `chrome://extensions` → **开发者模式** on → **加载已解压的扩展程序** → choose that folder; click the extension's icon
+   (the puzzle-piece menu → recall) to open its options: the server is already `https://recall.ziyixi.science`; paste
+   the token, type the device label, **保存**. Within five minutes of browsing, 设置 → 设备 shows the device's upload.
+   Later versions need no click: the agent installs each new release into the same folder and the running extension
+   reloads into it within a minute.
 3. **The Dropbox app** (once, at dropbox.com/developers/apps): **Create app** → **Scoped access** → **App folder** →
    any name (it becomes the folder `Apps/<name>`) → **Create app**. On its **Permissions** tab tick
    `files.content.write` and `files.content.read` → **Submit**. On its **Settings** tab, under **OAuth 2** →

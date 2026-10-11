@@ -20,9 +20,27 @@ public key in `src/manifest.json`; the private half was never kept).
 The uploads are `recall.ingest.v1` wire JSON, typed by the generated `ingest_wire.ts` (types only, nothing in the
 bundle); `test/contract.test.ts` reads what the extension builds with the generated strict codec, as the Worker does.
 
-## Build and install
+## Builds: GitHub Releases
 
-Building is the agent's (or a developer's) part, on the owner's Mac or from CI:
+Every version is kept on GitHub. A push to `main` that changes `extension/` or `../shared/` publishes the build CI
+tested as the Release `recall-extension-v<version>` (the repository's Releases page): its zip
+`recall-extension-v<version>.zip`, and the commit and the CI run in its notes. A version is published once (CI skips a
+tag that exists) and CI never deletes one. Nothing personal is in a build: recall's host is public and the token
+is pasted into the installed extension, so a download cannot write to recall. CI also keeps every commit's build,
+branches included, as the artifact `recall-extension-<sha>` for 30 days; the release job publishes that artifact, so a
+release holds exactly the files CI tested.
+
+## Install and update
+
+Installing is the agent's part, on the owner's Mac (from `recall/extension`):
+
+```sh
+gh release list --repo ziyixi/todofy --limit 5     # the newest recall-extension-v<version>
+gh release download recall-extension-v<version> --repo ziyixi/todofy --dir <a new empty folder>
+npm run install-extension -- <that folder>/recall-extension-v<version>.zip
+```
+
+or from a build of its own:
 
 ```sh
 npm ci
@@ -30,13 +48,14 @@ npm run build                 # dist/extension/ (the unpacked extension) and dis
 npm run install-extension     # into ~/recall-extension (or: -- <folder or zip> [--target <folder>])
 ```
 
-`install-extension` takes this package's build, a build folder or zip, or the CI artifact `recall-extension-<sha>.zip`
-as downloaded; it needs no `npm ci`. It unpacks beside the target, checks the files, the version and the key, swaps
-the folders with two renames (the old one becomes `~/recall-extension.prev`) and writes `BUILD` last. The running
-extension reloads into the new build on its next tick. Keep the folder outside Google Drive (a cloud-only file there
-would fail to load) and in the same place, so Chrome finds it again after an update.
+`install-extension` takes this package's build, a build folder or zip, a release's zip or the CI artifact
+`recall-extension-<sha>.zip` as downloaded; it needs no `npm ci`. It unpacks beside the target, checks the files, the
+version and the key, swaps the folders with two renames (the old one becomes `~/recall-extension.prev`) and writes
+`BUILD` last. The running extension reloads into the new build on its next tick, so an update needs nothing from the
+owner. Keep the folder outside Google Drive (a cloud-only file there would fail to load) and in the same place, so
+Chrome finds it again after an update.
 
-The owner's part, clicks only, once the folder is in place:
+The owner's part, clicks only and once, after the first install:
 
 1. Chrome → `chrome://extensions` → turn on **开发者模式** (Developer mode) → **加载已解压的扩展程序** (Load unpacked) →
    choose the folder (`~/recall-extension`; `⌘⇧G` types a path in the picker).

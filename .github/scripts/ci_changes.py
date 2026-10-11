@@ -25,6 +25,12 @@ Outputs (GITHUB_OUTPUT, "true"/"false"):
                     website/relay/ (the Notion relay Worker, its own wrangler.toml) changed: deploy
                     the relay. A change only there checks the website but does not release the site;
                     a website change elsewhere releases the site but does not redeploy the relay.
+  recall_extension_publish
+                    recall/extension/ or recall/shared/ (the Chrome extension and the code it bundles) changed:
+                    publish the build "Recall checks" made as the GitHub Release recall-extension-v<version>
+                    (main only; a version whose tag exists is skipped). Any file there counts, a README too: an
+                    extra release is harmless, a missed one is not. A dispatch for recall (or all) and a run of
+                    everything publish too. The extension is never deployed.
   FlowDay (flowday/) is checked and deployed like the other apps since F2 (flowday/docs/design.md section 11). It uses
   no contract (NO_CONTRACTS) and compiles in packages/edge-auth and the TypeScript proto runtime with
   proto/flowday/ui/ (its owner API, flowday.ui.v1), so a change to those checks and deploys it too. The links app
@@ -91,7 +97,9 @@ skipped), checks_reused=true names that run, and the deploy outputs are unchange
 a skipped check job only together with checks_reused; the gate passes and prints the run. The same SHA is
 the same tree and the same ci.yml, and no check job uses a secret, so the branch run's verdict holds
 (test_wrangler_configs.py: no job before the deploys reads a secret, has an environment or deploys for real).
-Anything else (no such run, a check it did not run, an API error, workflow_dispatch) runs the checks.
+A publication of something that run built (the Newsletter and Platform images, the recall extension) also needs
+its same-SHA artifact there, not expired. Anything else (no such run, a check it did not run, a missing artifact,
+an API error, workflow_dispatch) runs the checks.
 tools/ (CI, test and build tooling: the deploy hostname guard, and the bundle budgets and CPU meter that the
 apps' build scripts and tests import, which no bundle carries: test_app_isolation.py) counts as
 .github/: every app is re-checked, none deployed. The exception is tools/infra-plan-summary/, which belongs to
@@ -156,6 +164,7 @@ KEYS = (
     "platform_deploy",
     "mailsort_deploy",
     "recall_deploy",
+    "recall_extension_publish",
 )
 DISPATCH = {
     "both": ("todofy", "mail-hero"),
@@ -175,6 +184,9 @@ DISPATCH = {
 }
 # The website's Notion relay Worker deploys on its own (website_relay_deploy).
 RELAY = "website/relay/"
+# recall's Chrome extension and the shared code its bundle compiles in: a change publishes its build as a GitHub
+# Release (recall_extension_publish).
+EXTENSION = ("recall/extension/", "recall/shared/")
 # Apps that neither provide nor consume a contract: their own changes do not run Contracts.
 NO_CONTRACTS = {"flowday", "links", "newsletter"}
 # The OpenTofu configuration (infra/README.md) and its plan-summary tool: checked here without a token; only
@@ -333,7 +345,7 @@ MAX_BASE_CANDIDATES = 50
 
 
 def everything() -> dict[str, bool]:
-    return outputs(APPS, APPS, contracts=True, packages=True, relay=True, infra=True, proto=True)
+    return outputs(APPS, APPS, contracts=True, packages=True, relay=True, infra=True, proto=True, extension=True)
 
 
 def outputs(
@@ -344,6 +356,7 @@ def outputs(
     relay: bool = False,
     infra: bool = False,
     proto: bool = False,
+    extension: bool = False,
 ) -> dict[str, bool]:
     checked, deployed = set(checked), set(deployed)
     # This release profile takes two independently tested images of the same source SHA. Any publication/VPS
@@ -357,6 +370,7 @@ def outputs(
         "infra": infra,
         "proto": proto,
         "website_relay_deploy": relay,
+        "recall_extension_publish": extension,
     }
     for app in APPS:
         result[f"{PREFIX[app]}_check"] = app in checked
@@ -457,6 +471,7 @@ def classify(paths: Iterable[str]) -> dict[str, bool]:
         relay=relay,
         infra=any(path.startswith((".github/", *INFRA)) for path in paths),
         proto=ci or bool(proto_checked) or any(path.startswith(PROTO_READS) for path in paths),
+        extension=any(path.startswith(EXTENSION) for path in paths),
     )
 
 
@@ -467,7 +482,7 @@ def dispatched(app: str) -> dict[str, bool]:
     if "newsletter" in apps and "platform" not in apps:
         apps = (*apps, "platform")
     website = "website" in apps
-    return outputs(checked=apps, deployed=apps, contracts=True, packages=True, relay=website, proto=True)
+    return outputs(checked=apps, deployed=apps, contracts=True, packages=True, relay=website, proto=True, extension="recall" in apps)
 
 
 MAIN = "refs/heads/main"
@@ -573,18 +588,20 @@ def find_reusable(
         if int(jobs.get("total_count", 0)) > 100:
             continue
         if jobs_cover(jobs.get("jobs", []), names):
-            image_artifacts = []
+            tested_artifacts = []
             if result["newsletter_deploy"]:
-                image_artifacts.append(f"newsletter-image-{sha}")
+                tested_artifacts.append(f"newsletter-image-{sha}")
             if result["platform_publish"]:
-                image_artifacts.append(f"platform-image-{sha}")
-            if image_artifacts:
-                # Publishing must load the exact image this branch tested. An expired or missing
-                # artifact falls back to this main run's checks/build, never an untested rebuild.
+                tested_artifacts.append(f"platform-image-{sha}")
+            if result["recall_extension_publish"]:
+                tested_artifacts.append(f"recall-extension-{sha}")
+            if tested_artifacts:
+                # Publishing must load the exact image (or extension build) this branch tested. An expired or
+                # missing artifact falls back to this main run's checks/build, never an untested rebuild.
                 artifacts = get(f"/repos/{repository}/actions/runs/{run['id']}/artifacts?per_page=100")
                 available = {a.get("name") for a in artifacts.get("artifacts", [])
                              if isinstance(a, dict) and a.get("expired") is False}
-                if not set(image_artifacts) <= available:
+                if not set(tested_artifacts) <= available:
                     continue
             return run, names, f"reusing the green branch run {run.get('html_url', run['id'])} of this commit"
     if not candidates:

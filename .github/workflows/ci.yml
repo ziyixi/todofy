@@ -8,7 +8,8 @@
 # file it bundles, or was dispatched), after the gate passes; the watch app deploys after Todofy (its TODOFY
 # binding) and the dashboard after every app whose Ops entrypoint it binds. A push to main whose commit already passed every
 # needed check in a branch push run reuses that run: the checks are skipped, the gate and the deploys still run
-# (ci_changes.py find_reusable). Every deploy that applies routes runs tools/cf-guard first.
+# (ci_changes.py find_reusable). Every deploy that applies routes runs tools/cf-guard first. recall's Chrome extension
+# is never deployed: each new version is kept as a GitHub Release (Recall extension release).
 # See docs/ci-cd.md.
 name: CI and deploy
 
@@ -83,6 +84,7 @@ jobs:
       platform_deploy: ${{ steps.decide.outputs.platform_deploy }}
       mailsort_deploy: ${{ steps.decide.outputs.mailsort_deploy }}
       recall_deploy: ${{ steps.decide.outputs.recall_deploy }}
+      recall_extension_publish: ${{ steps.decide.outputs.recall_extension_publish }}
       # A push to main that reuses a green branch run of the same commit (all check outputs above are false).
       checks_reused: ${{ steps.decide.outputs.checks_reused }}
       reused_run_url: ${{ steps.decide.outputs.reused_run_url }}
@@ -877,8 +879,8 @@ jobs:
   # TypeScript proto runtime with proto/recall/ui/, proto/recall/ingest/, proto/recall/archive/ and proto/ops/; Contracts
   # runs its ops-v1 tests. No step reaches the network: the workerd suite runs a real SQLite RecallState and a local R2
   # bucket, and the smoke run drives wrangler dev on loopback.
-  # The Chrome extension (recall/extension) is checked and built here too, into an artifact the owner installs; it is
-  # never deployed.
+  # The Chrome extension (recall/extension) is checked and built here too, into an artifact; it is never deployed, and
+  # "Recall extension release" publishes that artifact on main as a GitHub Release.
   recall-checks:
     name: Recall checks
     needs: changes
@@ -970,7 +972,9 @@ jobs:
           npm test
       # The unpacked build, nothing personal in it (recall's host is a public constant; the token is pasted in the
       # options later). GitHub serves the artifact as recall-extension-<sha>.zip, which `npm run install-extension`
-      # takes as it is (recall/docs/design.md section 3.10).
+      # takes as it is (recall/docs/design.md section 3.10). It carries every commit's build, branches included, for 30
+      # days, and it is what "Recall extension release" publishes on main (no rebuild); the releases are the lasting
+      # record.
       - name: Build the extension
         working-directory: recall/extension
         run: npm run build
@@ -1982,6 +1986,78 @@ jobs:
       app: recall
       source_sha: ${{ github.sha }}
     secrets: inherit
+
+  # recall's Chrome extension, kept for good: each new version becomes the GitHub Release recall-extension-v<version>
+  # with its zip (owner request 2026-10-11, recall/extension/README.md). On main, after the gate, when recall/extension/
+  # or recall/shared/ changed (recall_extension_publish), it publishes the build "Recall checks" tested: its artifact,
+  # from the reused branch run when the checks were reused. A version whose tag exists is skipped, so a rerun publishes
+  # nothing twice. The build holds nothing personal (recall's host is public; the token is pasted into the installed
+  # extension) and the job reads no secret: GITHUB_TOKEN and the runner's gh. No job needs this one, so neither the gate
+  # nor a deploy waits for it; a failure fails the run, so the next push to main retries it (cumulative diff). It lives
+  # here, not in a workflow_run file, because only this run knows whether the extension changed and which run built it.
+  recall-extension-release:
+    name: Recall extension release
+    needs: [changes, recall-checks, gate]
+    # Explicit status function and results, as for the deploys (implicit success() and skipped ancestors).
+    if: >-
+      ${{ !cancelled()
+      && needs.changes.result == 'success'
+      && (needs.recall-checks.result == 'success' || (needs.changes.outputs.checks_reused == 'true' && needs.recall-checks.result == 'skipped'))
+      && needs.gate.result == 'success'
+      && github.ref == 'refs/heads/main'
+      && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+      && needs.changes.outputs.recall_extension_publish == 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      # The tag and the release; actions: read for the artifact of a reused branch run.
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: recall-extension-${{ github.sha }}
+          path: ${{ runner.temp }}/recall-extension
+          github-token: ${{ github.token }}
+          run-id: ${{ needs.changes.outputs.reused_run_id || github.run_id }}
+      - name: Publish the extension's version unless its tag exists
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          BUILD_DIR: ${{ runner.temp }}/recall-extension
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          REUSED_RUN_URL: ${{ needs.changes.outputs.reused_run_url }}
+        run: |
+          set -euo pipefail
+          # The version is the build's UTC time (recall/extension/scripts/manifest.mjs), its name the short commit.
+          version=$(jq -r '.version' "$BUILD_DIR/manifest.json")
+          version_name=$(jq -r '.version_name' "$BUILD_DIR/manifest.json")
+          if [[ ! "$version" =~ ^[0-9]+(\.[0-9]+){0,3}$ || "$version_name" != "${GITHUB_SHA:0:7}" ]]; then
+            echo "::error::The artifact is not this commit's extension build"
+            exit 1
+          fi
+          tag="recall-extension-v$version"
+          # The API lists every tag that starts with the name; only the exact one counts.
+          refs=$(gh api "repos/$GH_REPO/git/matching-refs/tags/$tag" --jq '.[].ref')
+          if grep -Fxq "refs/tags/$tag" <<< "$refs"; then
+            echo "::notice::$tag exists: nothing to publish"
+            exit 0
+          fi
+          zip="$RUNNER_TEMP/recall-extension-v$version.zip"
+          (cd "$BUILD_DIR" && zip -X -D -q -r "$zip" .)
+          {
+            echo "recall's Chrome extension $version, built from commit $GITHUB_SHA."
+            echo
+            echo "CI run: $RUN_URL"
+            if [ -n "$REUSED_RUN_URL" ]; then
+              echo "Checked and built in: $REUSED_RUN_URL"
+            fi
+            echo
+            echo 'Install: `npm run install-extension -- <this zip>` in recall/extension (recall/extension/README.md).'
+          } > "$RUNNER_TEMP/release-notes.md"
+          gh release create "$tag" "$zip" --target "$GITHUB_SHA" --title "recall extension $version" \
+            --notes-file "$RUNNER_TEMP/release-notes.md"
+          echo "Published $tag" >> "$GITHUB_STEP_SUMMARY"
 
   fleet-deploy:
     name: Fleet deploy

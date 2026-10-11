@@ -11,6 +11,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
@@ -57,6 +58,7 @@ def expect(
     mailsort_deploy=False,
     recall_check=False,
     recall_deploy=False,
+    recall_extension_publish=False,
 ):
     # The bootstrap mask (ci_changes.outputs): an app in CHECK_ONLY never deploys, and neither does Home while an app it
     # binds is one. Mailsort was CHECK_ONLY until its Access application existed (mailsort/docs/design.md §12), recall
@@ -98,6 +100,7 @@ def expect(
         "platform_deploy": platform_deploy,
         "mailsort_deploy": mailsort_deploy,
         "recall_deploy": recall_deploy,
+        "recall_extension_publish": recall_extension_publish,
     }
 
 
@@ -247,6 +250,22 @@ class Classify(unittest.TestCase):
                     self.assertFalse(result["dashboard_deploy"])
         finally:
             ci_changes.CHECK_ONLY = saved
+
+    def test_the_extension_publishes_when_its_folder_or_the_shared_code_changes(self):
+        """recall/extension/ and recall/shared/ (which its bundle compiles in) publish the extension's build as a GitHub
+        Release; any file there counts. The rest of recall, CI and a dispatch for another app publish none."""
+        for path in ("recall/extension/src/sw.ts", "recall/extension/package-lock.json", "recall/extension/README.md", "recall/shared/scrub.ts"):
+            with self.subTest(path=path):
+                self.assertEqual(push([path]), expect(F, F, T, F, F, **RECALL, recall_extension_publish=T))
+                # The same output on a branch; the release job itself runs only on main.
+                self.assertTrue(push([path], ref=BRANCH)["recall_extension_publish"])
+        for paths in (["recall/worker/src/state.ts"], ["recall/web/src/main.ts"], ["recall/extension.md"], [".github/workflows/ci.yml"],
+                      ["packages/edge-auth/src/access.ts"], ["proto/recall/ingest/v1/ingest.proto"]):
+            with self.subTest(paths=paths):
+                self.assertFalse(push(paths)["recall_extension_publish"])
+        self.assertTrue(ci_changes.everything()["recall_extension_publish"])
+        self.assertTrue(ci_changes.dispatched("all")["recall_extension_publish"])
+        self.assertFalse(ci_changes.dispatched("both")["recall_extension_publish"])
 
     def test_mailsort_deploys_and_holding_it_back_would_hold_home_too(self):
         """Mailsort deploys like any app since its Access application exists; were it CHECK_ONLY again, Home, which
@@ -869,8 +888,9 @@ class Dispatch(unittest.TestCase):
         self.assertEqual(self.dispatch(""), expect(T, T, T, T, T, packages=T, proto=T))
         self.assertEqual(
             self.dispatch("all"),
-            expect(T, T, T, T, T, packages=T, proto=T, **EVERY, website_relay_deploy=T),
+            expect(T, T, T, T, T, packages=T, proto=T, **EVERY, website_relay_deploy=T, recall_extension_publish=T),
         )
+        self.assertEqual(self.dispatch("recall"), expect(F, F, T, F, F, packages=T, proto=T, **RECALL, recall_extension_publish=T))
         self.assertEqual(self.dispatch("todofy"), expect(T, F, T, T, F, packages=T, proto=T))
         self.assertEqual(self.dispatch("mail-hero"), expect(F, T, T, F, T, packages=T, proto=T))
         self.assertEqual(self.dispatch("dashboard"), expect(F, F, T, F, F, packages=T, proto=T, **DASH))
@@ -1002,7 +1022,7 @@ class RealGit(unittest.TestCase):
         expected = {**dict.fromkeys(ci_changes.KEYS, "true"), "packages": "false", "infra": "false", "proto": "false"}
         expected.update(dashboard_check="false", dashboard_deploy="false")
         expected.update(website_check="false", website_deploy="false", website_relay_deploy="false")
-        expected.update(flowday_check="false", flowday_deploy="false", links_check="false", links_deploy="false", watch_check="false", watch_deploy="false", newsletter_check="false", newsletter_deploy="false", fleet_check="false", fleet_deploy="false", platform_check="false", platform_publish="false", platform_deploy="false", mailsort_check="false", mailsort_deploy="false", recall_check="false", recall_deploy="false")
+        expected.update(flowday_check="false", flowday_deploy="false", links_check="false", links_deploy="false", watch_check="false", watch_deploy="false", newsletter_check="false", newsletter_deploy="false", fleet_check="false", fleet_deploy="false", platform_check="false", platform_publish="false", platform_deploy="false", mailsort_check="false", mailsort_deploy="false", recall_check="false", recall_deploy="false", recall_extension_publish="false")
         self.assertEqual(outputs, expected)
 
     def test_a_failed_package_run_on_main_deploys_both_apps_next_time(self):
@@ -1010,7 +1030,7 @@ class RealGit(unittest.TestCase):
         self.commit("packages/edge-auth/src/access.ts")
         after = self.commit("README.md.orig")
         outputs = self.main_run(after, green)
-        unaffected = {"website_check", "website_deploy", "website_relay_deploy", "newsletter_check", "newsletter_deploy", "platform_check", "platform_publish", "platform_deploy"}
+        unaffected = {"website_check", "website_deploy", "website_relay_deploy", "newsletter_check", "newsletter_deploy", "platform_check", "platform_publish", "platform_deploy", "recall_extension_publish"}
         # An app that compiles edge-auth in but is CHECK_ONLY does not deploy (none now), nor Home while it binds one.
         bootstrap = {f"{ci_changes.PREFIX[app]}_deploy" for app in ci_changes.CHECK_ONLY & set(ci_changes.PACKAGE_USERS["edge-auth"])}
         if ci_changes.HOME_BOUND & ci_changes.CHECK_ONLY:
@@ -1289,6 +1309,7 @@ class DeployConditions(unittest.TestCase):
                 "fleet-deploy",
                 "mailsort-deploy",
                 "recall-deploy",
+                "recall-extension-release",
                 "platform-image",
                 "vps-deploy",
                 "vps-bootstrap-bundle",
@@ -1392,6 +1413,7 @@ class DeployConditions(unittest.TestCase):
             ("fleet-deploy", "fleet-checks", "fleet_deploy"),
             ("mailsort-deploy", "mailsort-checks", "mailsort_deploy"),
             ("recall-deploy", "recall-checks", "recall_deploy"),
+            ("recall-extension-release", "recall-checks", "recall_extension_publish"),
             ("platform-image", "platform-checks", "platform_publish"),
             ("vps-deploy", "platform-checks", "platform_deploy"),
         ):
@@ -1452,6 +1474,141 @@ class DeployConditions(unittest.TestCase):
 
     def test_shared_packages_run_only_when_flagged(self):
         self.assertEqual(self.condition(self.jobs()["shared-packages"]), "needs.changes.outputs.packages == 'true'")
+
+
+class RecallExtensionRelease(unittest.TestCase):
+    """recall's Chrome extension is never deployed; "Recall extension release" keeps each new version as a GitHub
+    Release (recall/extension/README.md). It publishes the build Recall checks tested, only on main, with the one write
+    permission in ci.yml, and nothing waits for it. Its step runs here against a stubbed gh and a synthetic build."""
+
+    JOB = "recall-extension-release"
+    STEP = "Publish the extension's version unless its tag exists"
+    VERSION = "2026.1011.1234"
+    TAG = f"recall-extension-v{VERSION}"
+
+    @property
+    def run_url(self):
+        return f"https://github.com/{REPOSITORY}/actions/runs/{RUN_ID}"
+
+    def test_it_has_the_only_write_permission_and_nothing_waits_for_it(self):
+        blocks = workflow_jobs()
+        block = blocks[self.JOB]
+        self.assertIn("    permissions:\n      # ", block)
+        self.assertEqual(re.findall(r"^      (\w+): (\w+)$", block.split("    permissions:\n", 1)[1].split("    steps:", 1)[0], re.M),
+                         [("contents", "write"), ("actions", "read")])
+        self.assertEqual([name for name, other in blocks.items() if "contents: write" in other], [self.JOB])
+        self.assertRegex(effective_ci(), r"\npermissions:\n  contents: read\n")
+        # GITHUB_TOKEN only: no secret, no deployment environment.
+        self.assertNotIn("secrets", block)
+        self.assertNotRegex(block, r"(?m)^ +environment:")
+        for name, other in blocks.items():
+            with self.subTest(job=name):
+                self.assertNotIn(self.JOB, DeployConditions().needs(other))
+        condition = DeployConditions().condition(block)
+        self.assertIn("github.ref == 'refs/heads/main'", condition)
+        self.assertIn("(github.event_name == 'push' || github.event_name == 'workflow_dispatch')", condition)
+
+    def test_it_publishes_the_artifact_recall_checks_built(self):
+        block = workflow_jobs()[self.JOB]
+        for action in re.findall(r"^\s+(?:- )?uses: (\S+)", block, re.M):
+            self.assertRegex(action, r"^[\w.-]+/[\w.-]+@[0-9a-f]{40}$")
+        self.assertIn("name: recall-extension-${{ github.sha }}\n", block)
+        self.assertIn("run-id: ${{ needs.changes.outputs.reused_run_id || github.run_id }}\n", block)
+        upload = workflow_jobs()["recall-checks"].split("- name: Keep the extension's build\n", 1)[1]
+        self.assertIn("name: recall-extension-${{ github.sha }}\n", upload)
+        self.assertIn("path: recall/extension/dist/extension/\n", upload)
+        self.assertIn("retention-days: 30\n", upload)
+        script = workflow_run_step(self.JOB, self.STEP)[0]
+        self.assertLess(script.index("git/matching-refs/tags/"), script.index("gh release create"))
+
+    def publish(self, refs="", version_name=SHA[:7], fail_api=False, reused=""):
+        """Runs the step on a synthetic build. Returns (exit code, output, gh calls, the published zip's names, notes)."""
+        if (shutil.which("jq") is None or shutil.which("zip") is None) and os.environ.get("GITHUB_ACTIONS") != "true":
+            self.skipTest("needs jq and zip (the runner has both)")
+        with tempfile.TemporaryDirectory() as root:
+            build = Path(root, "recall-extension")
+            (build / "icons").mkdir(parents=True)
+            manifest = {"manifest_version": 3, "name": "recall", "version": self.VERSION, "version_name": version_name}
+            (build / "manifest.json").write_text(json.dumps(manifest))
+            for name in ("sw.js", "capture.js", "options.html", "options.js", "options.css", "icons/16.png"):
+                (build / name).write_text("synthetic\n")
+            bin_dir = Path(root, "bin")
+            bin_dir.mkdir()
+            Path(root, "refs.txt").write_text(refs)
+            gh = bin_dir / "gh"
+            gh.write_text(
+                "#!/usr/bin/env bash\n"
+                f'echo "$*" >> "{root}/calls"\n'
+                'case "$1 $2" in\n'
+                f'  "api repos/{REPOSITORY}/git/matching-refs/tags/{self.TAG}") '
+                + ("exit 1 ;;\n" if fail_api else f'cat "{root}/refs.txt" ;;\n')
+                + f'  "release create") cp "$4" "{root}/published.zip"; cp "${{10}}" "{root}/notes.md" ;;\n'
+                '  *) echo "unexpected gh call" >&2; exit 3 ;;\n'
+                "esac\n"
+            )
+            gh.chmod(0o755)
+            runner_temp = Path(root, "runner")
+            runner_temp.mkdir()
+            env = {
+                **os.environ,
+                "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
+                "GH_TOKEN": "synthetic-token",
+                "GH_REPO": REPOSITORY,
+                "BUILD_DIR": str(build),
+                "RUN_URL": self.run_url,
+                "REUSED_RUN_URL": reused,
+                "GITHUB_SHA": SHA,
+                "RUNNER_TEMP": str(runner_temp),
+                "GITHUB_STEP_SUMMARY": str(Path(root, "summary.md")),
+            }
+            script, directory = workflow_run_step(self.JOB, self.STEP)
+            self.assertEqual(directory, Path("."))
+            result = subprocess.run(["bash", "-e", "-o", "pipefail", "-c", script], cwd=root, env=env, capture_output=True, text=True, check=False)
+            calls = Path(root, "calls").read_text().splitlines() if Path(root, "calls").exists() else []
+            names, notes = [], ""
+            if Path(root, "published.zip").exists():
+                with zipfile.ZipFile(Path(root, "published.zip")) as archive:
+                    names = sorted(archive.namelist())
+                notes = Path(root, "notes.md").read_text()
+            return result.returncode, result.stdout + result.stderr, calls, names, notes
+
+    def test_a_new_version_is_published_with_its_zip_commit_and_run(self):
+        # A longer tag that only starts with this one is another version.
+        for refs in ("", f"refs/tags/{self.TAG}5\n"):
+            with self.subTest(refs=refs):
+                code, output, calls, names, notes = self.publish(refs=refs)
+                self.assertEqual(code, 0, output)
+                self.assertEqual(calls[0], f"api repos/{REPOSITORY}/git/matching-refs/tags/{self.TAG} --jq .[].ref")
+                self.assertRegex(
+                    calls[1],
+                    rf"^release create {re.escape(self.TAG)} \S+/recall-extension-v{re.escape(self.VERSION)}\.zip "
+                    rf"--target {SHA} --title recall extension {re.escape(self.VERSION)} --notes-file \S+$",
+                )
+                # The files at the zip's root, as `npm run install-extension -- <zip>` reads them.
+                self.assertEqual(names, ["capture.js", "icons/16.png", "manifest.json", "options.css", "options.html", "options.js", "sw.js"])
+                self.assertIn(SHA, notes)
+                self.assertIn(f"CI run: {self.run_url}", notes)
+                self.assertIn("npm run install-extension -- <this zip>", notes)
+                self.assertNotIn("Checked and built in", notes)
+        reused = f"https://github.com/{REPOSITORY}/actions/runs/800"
+        _, _, _, _, notes = self.publish(reused=reused)
+        self.assertIn(f"Checked and built in: {reused}", notes)
+
+    def test_an_existing_tag_publishes_nothing(self):
+        code, output, calls, names, _ = self.publish(refs=f"refs/tags/{self.TAG}\n")
+        self.assertEqual(code, 0, output)
+        self.assertIn(f"{self.TAG} exists: nothing to publish", output)
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(names, [])
+
+    def test_another_commits_build_or_an_unknown_tag_state_publishes_nothing(self):
+        code, output, calls, _, _ = self.publish(version_name="c" * 7)
+        self.assertEqual(code, 1, output)
+        self.assertIn("not this commit's extension build", output)
+        self.assertEqual(calls, [])
+        code, output, calls, _, _ = self.publish(fail_api=True)
+        self.assertNotEqual(code, 0, output)
+        self.assertEqual(len(calls), 1)
 
 
 class InfraJob(unittest.TestCase):
@@ -2497,7 +2654,7 @@ def fake_github(runs, jobs_by_run, artifacts_by_run=None):
             return {"total_count": len(jobs), "jobs": jobs}
         match = re.fullmatch(rf"/repos/{re.escape(REPOSITORY)}/actions/runs/(\d+)/artifacts\?per_page=100", path)
         if match:
-            artifacts = (artifacts_by_run or {}).get(int(match.group(1)), [{"name": f"newsletter-image-{SHA}", "expired": False}, {"name": f"platform-image-{SHA}", "expired": False}])
+            artifacts = (artifacts_by_run or {}).get(int(match.group(1)), [{"name": f"{prefix}-{SHA}", "expired": False} for prefix in ("newsletter-image", "platform-image", "recall-extension")])
             return {"artifacts": artifacts}
         raise AssertionError(f"unexpected read {path}")
 
@@ -2624,6 +2781,23 @@ class Reuse(unittest.TestCase):
                 self.assertEqual(result["platform_check"], not reused)
                 self.assertTrue(result["platform_publish"])
                 self.assertTrue(result["platform_deploy"])
+
+    def test_extension_reuse_requires_the_live_same_sha_build_artifact(self):
+        needed = push(["recall/extension/src/sw.ts"])
+        for artifacts, reused in (([], False), ([{"name": f"recall-extension-{SHA}", "expired": True}], False),
+                                  ([{"name": "recall-extension-other", "expired": False}], False),
+                                  ([{"name": f"recall-extension-{SHA}", "expired": False}], True)):
+            with self.subTest(artifacts=artifacts):
+                get = fake_github([branch_run()], {800: green_jobs("Recall checks", "Contracts")}, {800: artifacts})
+                result, extra, _ = ci_changes.try_reuse("push", MAIN, SHA, needed, ENV, get)
+                self.assertEqual(extra["checks_reused"], str(reused).lower())
+                self.assertEqual(result["recall_check"], not reused)
+                self.assertTrue(result["recall_extension_publish"])
+                self.assertEqual(extra["reused_run_id"], "800" if reused else "")
+        # A recall change without the extension needs no artifact.
+        get = fake_github([branch_run()], {800: green_jobs("Recall checks", "Contracts")}, {800: []})
+        _, extra, _ = ci_changes.try_reuse("push", MAIN, SHA, push(["recall/worker/src/state.ts"]), ENV, get)
+        self.assertEqual(extra["checks_reused"], "true")
 
     def test_every_deploy_decision_survives_reuse(self):
         needed = ci_changes.everything()
