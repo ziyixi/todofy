@@ -9,7 +9,7 @@ Its old waiting lists and release identities are historical, not instructions to
 
 ## Current work
 
-`codex/mailsort-flat-labels` implements single-level English labels, consolidation of existing label memberships,
+Mailsort implementation `63292ff` adds single-level English labels, consolidation of existing label memberships,
 and Settings' classification-effect check. Labels, review choices, overview statistics, ledger filters and replay
 results resolve historical IDs to current English labels. The private production mapping is not committed.
 The owner explicitly removed reverse migration and special historical undo from scope: merged source operations
@@ -19,8 +19,11 @@ models and budgets are unchanged. No new service or dependency was introduced.
 Local checks passed: Worker lint/typecheck, 114 unit tests, 87 workerd tests including CPU and concurrent-start
 cases; UI lint/typecheck/build and 97 tests; 26 deployment-tool tests; proto lint/API lint/breaking; synthetic
 Wrangler smoke with 67 allowed Google calls. Desktop and mobile browser checks used isolated fake data; a
-zero-sample effect check finished without Gmail writes. Branch CI, same-SHA Actions release and the authorized
-production consolidation are still pending. No production label has changed yet.
+zero-sample effect check finished without Gmail writes. [Full branch CI](https://github.com/ziyixi/todofy/actions/runs/38174789429)
+passed; main's [same-SHA run](https://github.com/ziyixi/todofy/actions/runs/38175367440) passed the gate but could not
+load the existing Mailsort release composite: it directly referenced the unsupported `vars` context.
+`codex/mailsort-flat-labels-verification` fixes that release input boundary and the remaining stale documentation.
+Worker upload and the authorized production consolidation remain pending. No production label has changed yet.
 [Operation and verification](mailsort/docs/label-consolidation.md) describes the private input and current behavior.
 
 No implementation remains open from the October 11 maintenance task. `codex/maintenance-simplification`
@@ -70,6 +73,11 @@ Update each verification document through the normal branch CI and same-SHA rele
 
 ### Remaining observations and separate follow-ups
 
+- The October 11 Mailsort release exposed unsupported direct `vars` expressions in release composites. Its
+  own action now inherits the existing workflow job environment. The same direct-expression pattern remains in
+  `release-todofy`, `release-mail-hero`, `release-dashboard` and `release-brief`; those were not changed or deployed
+  by this task. Review their input boundaries before their next actual upload; a preflight/no-op does not test
+  loading the skipped composite.
 - Brief's fresh Ops status and Actions inventory passed, but Home's daily REST Worker list still predates its first
   deploy. Observe the normal inventory starting **2026-10-12 02:00 UTC / October 11 19:00 PDT**; it should add Brief
   before the per-Worker checks finish. A usage refresh alone does not refresh this list.

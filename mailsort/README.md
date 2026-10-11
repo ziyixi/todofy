@@ -97,9 +97,9 @@ npm run dev                                # wrangler dev on http://127.0.0.1:87
 ## Deploy
 
 Only from GitHub Actions: `Mailsort deploy` (`.github/workflows/ci.yml`) on `main` after `CI gate`, in the
-`production` environment, through `deploy/deploy-vars.mjs` (never a plain `wrangler deploy`). Until the Access
-application `mailsort` exists, `mailsort` is in `CHECK_ONLY` (`.github/scripts/ci_changes.py`): its checks run, its
-deploy and Home's (which binds `MAILSORT`) do not. The steps that lift it are in `docs/design.md` §12.
+`production` environment, through `deploy/deploy-vars.mjs` (never a plain `wrangler deploy`). Mailsort is already
+enabled for release; `CHECK_ONLY` is empty. A new environment needs the Access application, generated resource
+configuration and deployment inputs described in `docs/design.md` §12 and the root rebuild runbook.
 
 The wrapper writes the Worker secrets `ACCESS_OWNER` and `ACCESS_OWNER_ALIASES` (from the dashboard's secrets: one
 owner) and `CSRF_SIGNING_KEY` (from `MAILSORT_CSRF_SIGNING_KEY`), and sets `MODE` from the GitHub variable
@@ -121,6 +121,7 @@ daily drift check compares the Worker with `dashboard/worker/src/drift-desired.j
 ### Rollback
 
 A code-only revert is the normal path. To stop the Gmail side effects at once: 设置 → 关闭 (or `MAILSORT_MODE=off`
-and a deploy), and revoke the grant at https://myaccount.google.com/permissions. Writes already made can be undone
-from 设置 → 撤销 while the app runs. Deleting the Worker deletes `MailsortState` (labels, trusted domains, examples,
+and a deploy), and revoke the grant at https://myaccount.google.com/permissions. Eligible writes can be undone
+from 设置 → 撤销 while the app runs; merged source history is read-only, with no reverse consolidation.
+Same-ID renames and new classifications retain ordinary undo. Deleting the Worker deletes `MailsortState` (labels, trusted domains, examples,
 ledger) for good.

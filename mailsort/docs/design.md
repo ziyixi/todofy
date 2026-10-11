@@ -74,7 +74,6 @@ Two walls, neither of them a prompt:
    | labels_create | `POST users/me/labels`, a single-level English name planned by the store |
    | labels_patch | `PATCH users/me/labels/{owned id}`, the name only, exactly the name the store or frozen consolidation plans for that label |
    | message_modify | classify: `addLabelIds = [one owned label]`, `removeLabelIds = [] or [INBOX]`, for a ledger row in `intended`/`applied` whose archive flag matches; undo: `removeLabelIds = [that owned label]`, `addLabelIds = [] or [INBOX]` (INBOX exactly when the row archived), for a row in `undo_intended` |
-
    | merge_list | `GET users/me/messages`, one frozen source label or recorded app-created grouping label; IDs only, bounded first page, including archived mail |
    | merge_metadata | `GET users/me/messages/{id}`, only `id,labelIds,historyId`, for a persisted consolidation item |
    | merge_modify | one frozen source label removed and its frozen target added, only with a persisted pending intent; no INBOX or other labels |
@@ -704,10 +703,9 @@ framework; Chinese, short plain words, at most one hint line where needed.
   the stages before 2026-10-10 (规则, 向量近邻) stay until pruned (a correction of such a decision still counts there)
   and are left out of GetMailFlow's answers. Pruned after 400 days. GetMailFlow sums a fixed range of UTC days (at most 2,000 counters; the UI
   reads `today`). 概览 draws it as a Sankey diagram (d3-sankey for the layout only; SVG in the page's light and dark
-  tokens, labels grouped and colored by their top-level segment: each group has a home hue in the labels' order,
-  enabled labels' groups first, and the first eight keep theirs every day; a later group the day shows borrows a hue
-  whose home group the day does not show (`flowchart.ts` groupSlots), so ten groups of labels never run out, and
-  only a day showing more than eight groups has gray ones, which the legend says; every node named with its count;
+  tokens, each complete label name gets its own color slot in label order, enabled labels first.
+  The first eight keep their colors; later visible labels reuse colors absent from that day's graph.
+  More than eight visible labels use gray for the remainder, explained by the legend; every node has its count;
   hover or focus for exact numbers and shares, and for an outcome what it means; no motion under
   prefers-reduced-motion; on a phone it scrolls inside its own box). On the right, under the labels written to Gmail:
   都不是（留在收件箱） in the pipeline's neutral color (a decision, not a warning), 拿不准 in the warning color and split
@@ -824,12 +822,11 @@ Before the first deploy (the repository side, as the watch app's W2): "Infra app
 `mailsort` (`infra/access.tf`); its AUD goes into `config/resources.toml` `[access_audiences]` (then
 `tools/cloud-config/generate.py` writes `ACCESS_AUDIENCE` into `wrangler.toml`) and its id into `infra/ids.tf`; the
 GitHub production secret `MAILSORT_CSRF_SIGNING_KEY` (64 hex) and variable `MAILSORT_MODE` (`shadow` to start) are
-created; then `mailsort` leaves `CHECK_ONLY` in `.github/scripts/ci_changes.py` (which also lets Home deploy with its
-`MAILSORT` binding). After the first deploy, the `MailsortState` namespace id goes into `config/resources.toml`
+created. Mailsort is already enabled in the release workflow (`CHECK_ONLY` is empty); follow the root rebuild
+runbook for a new environment. After the first deploy, the `MailsortState` namespace id goes into `config/resources.toml`
 `[durable_objects]` as `mailsort-state`.
 
-Then: run in shadow and answer the few uncertain mails 待审 shows; check the trust labels' trusted domains in 标签; run
-the replay evaluation from Settings (StartReplayEvaluation, then GetReplayEvaluation once it
-succeeded, §5.1) and read its matches and mismatching label pairs; then grant `gmail.modify` (mint-token
-`--scope modify`), set `MAILSORT_MODE=live` and choose 正式 in 设置. Every enabled label then writes; 设置 → 撤销 and
-the breaker stay the safety net.
+Start in shadow to check the model's recorded decisions; shadow does not create review items. For live sorting,
+grant `gmail.modify` (mint-token `--scope modify`), set `MAILSORT_MODE=live` and choose 正式 in 设置. Answer the
+uncertain samples in 待审, then use Settings' classification-effect check (§5.1) and inspect trusted domains in 标签.
+Every enabled label participates in live sorting. Eligible operations remain available in 设置 → 撤销.

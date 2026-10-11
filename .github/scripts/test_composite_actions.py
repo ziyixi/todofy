@@ -142,6 +142,31 @@ class CompositeActions(unittest.TestCase):
                         action_path,
                     )
 
+    def test_mailsort_inherits_the_production_mode_from_the_release_job(self):
+        job = workflow_data(ROOT / ".github/workflows/worker-release.yml")["jobs"][
+            "release"
+        ]
+        self.assertEqual(
+            job["env"]["MAILSORT_MODE"],
+            "${{ (inputs.app == 'mailsort' || inputs.app == 'brief') && vars.MAILSORT_MODE || '' }}",
+        )
+        call = next(
+            step for step in job["steps"]
+            if step.get("uses") == "./.github/actions/release-mailsort"
+        )
+        self.assertNotIn("MAILSORT_MODE", call.get("env", {}))
+        action = workflow_data(ROOT / ".github/actions/release-mailsort/action.yml")
+        # vars is a workflow context; a composite inherits the job's resolved environment.
+        expressions = " ".join(re.findall(r"\$\{\{(.*?)\}\}", str(action), re.S))
+        self.assertNotRegex(expressions, r"\bvars[.\[]")
+        deployments = [
+            step for step in action["runs"]["steps"]
+            if "deploy-vars.mjs exec" in step.get("run", "")
+        ]
+        self.assertEqual(len(deployments), 2)
+        for step in deployments:
+            self.assertEqual(step["env"]["MAILSORT_MODE"], "${{ env.MAILSORT_MODE }}")
+
     def test_runtime_shards_and_resume_are_passed_explicitly(self):
         ci = workflow_data(ROOT / ".github/workflows/ci.yml")["jobs"]
         runtime = next(

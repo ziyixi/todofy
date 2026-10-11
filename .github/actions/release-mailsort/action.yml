@@ -81,12 +81,13 @@ runs:
       shell: bash -e {0}
       run: node ../deploy/deploy-vars.mjs secrets "$RUNNER_TEMP/mailsort-secrets.json"
     # deploy-vars.mjs adds MODE and BUILD_SHA as --var and refuses a config without the Access AUD; the bundle that
-    # ships is held to the app's budget and the Workers Free limit (deploy/bundle-size.mjs).
+    # ships is held to the app's budget and the Workers Free limit (deploy/bundle-size.mjs). MAILSORT_MODE is inherited
+    # from the release workflow's production job environment.
     - name: Validate the bundle before changing production
       if: inputs.required == 'true'
       working-directory: .release-source/mailsort/worker
       env:
-        MAILSORT_MODE: ${{ vars.MAILSORT_MODE }}
+        MAILSORT_MODE: ${{ env.MAILSORT_MODE }}
       shell: bash -e {0}
       run: |
         node ../deploy/deploy-vars.mjs exec -- npx --no-install wrangler deploy --dry-run --config ../wrangler.toml \
@@ -111,7 +112,7 @@ runs:
       working-directory: .release-source/mailsort/worker
       env:
         CLOUDFLARE_API_TOKEN: ${{ inputs.cf-api-token }}
-        MAILSORT_MODE: ${{ vars.MAILSORT_MODE }}
+        MAILSORT_MODE: ${{ env.MAILSORT_MODE }}
       shell: bash -e {0}
       run: |
         test -n "$CLOUDFLARE_API_TOKEN"
