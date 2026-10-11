@@ -61,6 +61,8 @@ Four tabs under a header whose one status line shows the mode in force, the Gmai
   answered sample, not an accuracy estimate for the whole mailbox. A running evaluation cannot be replaced.
 - **整理标签** in Settings accepts a private mapping, previews it, and starts the bounded label consolidation.
   Existing mail changes labels without being classified again; its inbox/read/starred state stays unchanged.
+  Labels not yet created in Gmail can merge their stored examples and trusted domains; they have no Gmail members
+  to move. An uncreated target gets its final English name. Missing or ambiguous Gmail identities are still refused.
   [The consolidation runbook](docs/label-consolidation.md) covers progress, interrupted work and old-label visibility.
 - **API only**: embedding rebuild, single-entry undo, write limits and neuron budget. Stored limits are unchanged.
 - **What is kept**: decided mail's subject, sender and From domain, and the review queue, for 14 days (the daily

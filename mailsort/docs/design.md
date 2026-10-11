@@ -71,7 +71,7 @@ Two walls, neither of them a prompt:
    | messages_list | `GET users/me/messages?labelIds=INBOX&q=newer_than:2d` (the resync after a lost cursor) |
    | message_get | `GET users/me/messages/{id}`, `format=full` or `metadata` with the fixed header list and `fields` |
    | labels_list | `GET users/me/labels` |
-   | labels_create | `POST users/me/labels`, a single-level English name planned by the store |
+   | labels_create | `POST users/me/labels`, a single-level English name planned by the store, or the frozen consolidation target still without a Gmail ID in its rename phase |
    | labels_patch | `PATCH users/me/labels/{owned id}`, the name only, exactly the name the store or frozen consolidation plans for that label |
    | message_modify | classify: `addLabelIds = [one owned label]`, `removeLabelIds = [] or [INBOX]`, for a ledger row in `intended`/`applied` whose archive flag matches; undo: `removeLabelIds = [that owned label]`, `addLabelIds = [] or [INBOX]` (INBOX exactly when the row archived), for a row in `undo_intended` |
    | merge_list | `GET users/me/messages`, one frozen source label or recorded app-created grouping label; IDs only, bounded first page, including archived mail |
@@ -150,13 +150,20 @@ full name; their internal IDs do not change. Normal creation never creates a gro
 SyncLabels reads only labels the store already knows. It identifies them by Gmail ID, adopts an exact-name external
 label only on explicit sync, and never imports unrelated labels. A Chinese/nested external rename, or an owned label
 that now has children, is exposed as a specific `Label.problem` and blocks new classification writes for that label.
-The owner can rename it through its detail. A missing Gmail ID is marked missing. The old slug/path helpers remain for
+The owner can rename it through its detail. A previously linked ID that Gmail no longer returns is marked missing;
+a label not yet created in Gmail remains pending with a null ID. The old slug/path helpers remain for
 reading historical records and assigning stable IDs; they do not authorize a new nested label.
 
 The owner can consolidate labels in Settings with a private mapping. `label-merge.ts` journals bounded Alarm work;
 `label-identity.ts` maps old IDs for reports and replay while stored predictions, probabilities and ledger
-rows remain unchanged. One-to-one groups rename the same Gmail ID; merged sources transfer their members to the
-first source and are hidden when verified empty. Merged source ledger entries stay read-only; there is no reverse migration. Examples and trusted domains retain their learning times. The full
+rows remain unchanged. Existing targets keep their Gmail ID; merged sources transfer their members to the
+first source and are hidden when verified empty. A source with `gmail_state=pending`, a null Gmail ID and no name
+conflict has no Gmail members to move; its examples and trusted domains still merge. An uncreated target is created
+with its final English name during the rename phase, and its returned ID is stored and read back for verification.
+Missing labels, name conflicts and inconsistent state/ID pairs remain errors. Preflight checks both old source
+names and final target names against Gmail; consolidation never adopts an unowned label by name. If creation loses
+its response before an ID is recorded, the job stays blocked with the creation result unverified.
+Merged source ledger entries stay read-only; there is no reverse migration. Examples and trusted domains retain their learning times. The full
 preflight, pause, resume and validation procedure is in [label consolidation](label-consolidation.md).
 
 A label archives what it gets (removes INBOX, `UNREAD` untouched) unless its 归档 is off (`keep_in_inbox`): then the

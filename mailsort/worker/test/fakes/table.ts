@@ -8,14 +8,13 @@ export interface TableContext {
   /** Gmail IDs of mailsort's labels: the ones it created or adopted. */
   readonly owned: ReadonlySet<string>;
   /**
-   * The paths of mailsort's labels as its store plans them when the request is sent: labels.create may make one or a
-   * parent of one, labels.patch may rename an owned label to one.
+   * Exact single-level English names planned by the store. Creating grouping parents is forbidden.
    */
   readonly planned: ReadonlySet<string>;
   /** The ledger row's state and archive flag for (message, Gmail label), or null. */
   readonly ledger: (messageId: string, labelId: string) => { state: string; archived: boolean } | null;
   /** Independent test fixture's explicit migration scope, never inferred from a request. */
-  readonly merge?: { readonly labels: ReadonlySet<string>; readonly messages: ReadonlySet<string>; readonly swaps: ReadonlySet<string>; readonly hidden: ReadonlySet<string>; readonly names: ReadonlySet<string> };
+  readonly merge?: { readonly labels: ReadonlySet<string>; readonly messages: ReadonlySet<string>; readonly swaps: ReadonlySet<string>; readonly hidden: ReadonlySet<string>; readonly names: ReadonlySet<string>; readonly createNames?: ReadonlySet<string> };
 
 }
 
@@ -85,7 +84,8 @@ export function allowedOperation(method: string, rawUrl: string, body: string, c
   if (method === 'POST' && path.join('/') === 'labels') {
     const value = canonicalObject(body);
     if (value === null) return null;
-    return okCreateName(value['name'], ctx.planned) && Object.keys(value).every((key) => ['name', 'labelListVisibility', 'messageListVisibility'].includes(key)) ? 'labels_create' : null;
+    const planned = okCreateName(value['name'], ctx.planned) || (okName(value['name']) && ctx.merge?.createNames?.has(value['name']) === true);
+    return planned && value['labelListVisibility'] === 'labelShow' && value['messageListVisibility'] === 'show' && Object.keys(value).every((key) => ['name', 'labelListVisibility', 'messageListVisibility'].includes(key)) ? 'labels_create' : null;
   }
   if (method === 'PATCH' && path[0] === 'labels' && path.length === 2) {
     const value = canonicalObject(body);

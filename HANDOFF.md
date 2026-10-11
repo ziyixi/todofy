@@ -22,8 +22,16 @@ Wrangler smoke with 67 allowed Google calls. Desktop and mobile browser checks u
 zero-sample effect check finished without Gmail writes. [Full branch CI](https://github.com/ziyixi/todofy/actions/runs/38174789429)
 passed; main's [same-SHA run](https://github.com/ziyixi/todofy/actions/runs/38175367440) passed the gate but could not
 load the existing Mailsort release composite: it directly referenced the unsupported `vars` context.
-`codex/mailsort-flat-labels-verification` fixes that release input boundary and the remaining stale documentation.
-Worker upload and the authorized production consolidation remain pending. No production label has changed yet.
+`87098a5` fixes that release input boundary and the remaining stale documentation. Its
+[branch CI](https://github.com/ziyixi/todofy/actions/runs/38176132968) and
+[same-SHA main release](https://github.com/ziyixi/todofy/actions/runs/38176632237) passed. Mailsort Deployment
+`7002100665` verified Worker version `0f250d1e-4e69-4956-b84d-08773e423c8d`.
+The authorized production plan was rejected before creating a job: some valid labels still have `pending` Gmail
+state because no message has used them yet. No production label changed. `codex/mailsort-pending-labels` is fixing
+this case: uncreated sources have no Gmail memberships to transfer, while a needed target uses its final English
+name. Missing or ambiguous existing identities remain errors. Local 122 unit tests, typecheck, changed-file lint,
+workerd CPU and consolidation-pipeline checks passed; the bundle is 134.2 KiB within the unchanged 135 KiB limit.
+Release and production consolidation are pending.
 [Operation and verification](mailsort/docs/label-consolidation.md) describes the private input and current behavior.
 
 No implementation remains open from the October 11 maintenance task. `codex/maintenance-simplification`

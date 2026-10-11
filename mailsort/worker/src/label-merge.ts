@@ -21,7 +21,7 @@ export interface MergePlanItem {
 
 interface Source {
   id: string;
-  gmailId: string;
+  gmailId: string | null;
   name: string;
   etag: string;
 }
@@ -176,14 +176,19 @@ export function createLabelMerge(store: Store, input: readonly MergePlanItem[], 
     let target: LabelRow | undefined;
     const sources = group.sources.map((source) => {
       const row = active.find((label) => label.id === source.labelId);
-      if (row === undefined || ids.has(row.id) || row.gmail_state !== 'linked' || row.gmail_id === null || !isUserLabelId(row.gmail_id) || gmailIds.has(row.gmail_id)) {
+      if (row === undefined || ids.has(row.id)) {
+        throw new MergeError('MERGE_INVALID_PLAN');
+      }
+      const pending = row.gmail_state === 'pending' && row.gmail_id === null && row.gmail_name_taken === 0;
+      const linked = row.gmail_state === 'linked' && row.gmail_id !== null && isUserLabelId(row.gmail_id) && !gmailIds.has(row.gmail_id);
+      if (!pending && !linked) {
         throw new MergeError('MERGE_INVALID_PLAN');
       }
       if (row.etag !== source.etag) {
         throw new MergeError('MERGE_ETAG_MISMATCH');
       }
       ids.add(row.id);
-      gmailIds.add(row.gmail_id);
+      if (row.gmail_id !== null) gmailIds.add(row.gmail_id);
       target ??= row;
       if (row.trust !== target.trust || row.sensitive !== target.sensitive || row.keep_in_inbox !== target.keep_in_inbox || row.enabled !== target.enabled) {
         throw new MergeError('MERGE_INVALID_PLAN');
@@ -240,7 +245,7 @@ export function resumeLabelMerge(store: Store, jobId: string, now: number): Merg
 }
 
 /** The guard can only authorize the frozen plan, durable message intents, and freshly verified empty labels. */
-export function mergeOwnership(store: Store): Pick<Ownership, 'mergeListLabel' | 'mergeMessage' | 'mergeSwap' | 'mergeHide' | 'mergeRename'> {
+export function mergeOwnership(store: Store): Pick<Ownership, 'mergeListLabel' | 'mergeMessage' | 'mergeSwap' | 'mergeHide' | 'mergeRename' | 'mergeCreate'> {
   const running = () => {
     const job = latest(store);
     return job?.state === 'running' ? job : undefined;
@@ -265,6 +270,12 @@ export function mergeOwnership(store: Store): Pick<Ownership, 'mergeListLabel' |
     mergeRename: (id) => {
       const job = running();
       return job === undefined ? null : groups(job).find((group) => group.sources[0]?.gmailId === id)?.displayName ?? null;
+    },
+    mergeCreate: (name) => {
+      const job = running();
+      if (job?.phase !== 'rename') return false;
+      const group = groups(job)[job.group_index];
+      return group?.sources[0]?.gmailId === null && group.displayName === name;
     }
   };
 }
@@ -287,7 +298,10 @@ async function preflight(ctx: MergeContext, job: Job): Promise<void> {
   const plan = groups(job);
   for (const group of plan) {
     for (const source of group.sources) {
-      if (!labels.some((label) => label.id === source.gmailId && label.name === source.name && label.type !== 'system')) {
+      if (source.gmailId === null && labels.some((label) => label.name === source.name)) {
+        throw new MergeBlocked('label_name_taken');
+      }
+      if (source.gmailId !== null && !labels.some((label) => label.id === source.gmailId && label.name === source.name && label.type !== 'system')) {
         throw new MergeBlocked('label_changed');
       }
       if (labels.some((label) => label.name.startsWith(`${source.name}/`))) {
@@ -308,7 +322,7 @@ async function preflight(ctx: MergeContext, job: Job): Promise<void> {
   const parents = labels.filter((label) => ownParents.has(label.id) && allSources.some((source) => source.name.startsWith(`${label.name}/`))).map((label) => label.id);
   ctx.transact(() => {
     ctx.store.run(`UPDATE label_merge_jobs SET parents = ? WHERE id = ?`, JSON.stringify(parents), job.id);
-    for (const id of [...allSources.filter((source) => !plan.some((group) => group.targetLabelId === source.id)).map((source) => source.gmailId), ...parents]) {
+    for (const id of [...allSources.filter((source) => source.gmailId !== null && !plan.some((group) => group.targetLabelId === source.id)).map((source) => source.gmailId), ...parents]) {
       ctx.store.run(`INSERT OR IGNORE INTO label_merge_hides (job_id, gmail_id) VALUES (?, ?)`, job.id, id);
     }
     ctx.store.run(`UPDATE label_merge_jobs SET phase = 'rename', update_time = ?, etag = ? WHERE id = ?`, ctx.now(), newEtag(ctx.now()), job.id);
@@ -320,16 +334,28 @@ async function rename(ctx: MergeContext, job: Job, group: Group): Promise<void> 
     throw new MergeBlocked('plan_invalid');
   }
   const labels = await ctx.gmail.labels();
-  const actual = labels.find((label) => label.id === target.gmailId);
-  if (actual === undefined || (actual.name !== target.name && actual.name !== group.displayName)) {
-    throw new MergeBlocked('label_changed');
-  }
   if (labels.some((label) => label.name === group.displayName && label.id !== target.gmailId)) {
     throw new MergeBlocked('label_name_taken');
   }
-  if (actual.name !== group.displayName) {
+  if (target.gmailId === null) {
     reserveWrite(ctx);
-    await ctx.gmail.renameLabel(target.gmailId, group.displayName);
+    target.gmailId = await ctx.gmail.createLabel(group.displayName);
+    // Keep the returned identity before read-back; a retry must never adopt an unknown label by name.
+    const plan = groups(job);
+    plan[job.group_index] = group;
+    ctx.transact(() => {
+      ctx.store.run(`UPDATE label_merge_jobs SET plan = ? WHERE id = ?`, JSON.stringify(plan), job.id);
+      ctx.store.run(`UPDATE labels SET gmail_id = ?, gmail_state = 'linked', gmail_adopted = 0, gmail_name_taken = 0 WHERE id = ?`, target.gmailId, target.id);
+    });
+  } else {
+    const actual = labels.find((label) => label.id === target.gmailId);
+    if (actual === undefined || (actual.name !== target.name && actual.name !== group.displayName)) {
+      throw new MergeBlocked('label_changed');
+    }
+    if (actual.name !== group.displayName) {
+      reserveWrite(ctx);
+      await ctx.gmail.renameLabel(target.gmailId, group.displayName);
+    }
   }
   const verified = (await ctx.gmail.labels()).find((label) => label.id === target.gmailId);
   if (verified?.name !== group.displayName) {
@@ -386,6 +412,10 @@ function checkGroupIdentity(labels: readonly {
   name: string;
 }[], group: Group): void {
   for (const source of group.sources) {
+    if (source.gmailId === null) {
+      if (labels.some((label) => label.name === source.name)) throw new MergeBlocked('label_name_taken');
+      continue;
+    }
     const expected = source.id === group.targetLabelId ? group.displayName : source.name;
     if (!labels.some((label) => label.id === source.gmailId && label.name === expected)) {
       throw new MergeBlocked('label_changed');
@@ -402,8 +432,12 @@ async function move(ctx: MergeContext, job: Job, group: Group): Promise<void> {
     return;
   }
   const target = group.sources[0];
-  if (target === undefined) {
+  if (target === undefined || target.gmailId === null) {
     throw new MergeBlocked('plan_invalid');
+  }
+  if (source.gmailId === null) {
+    advance(ctx, job, 'move', job.group_index, job.source_index + 1);
+    return;
   }
   let pending = ctx.store.one<Item>(`SELECT * FROM label_merge_items WHERE job_id = ? AND source_id = ? AND state = 'pending' ORDER BY message_id LIMIT 1`, job.id, source.id);
   if (pending === undefined) {
@@ -430,7 +464,7 @@ async function move(ctx: MergeContext, job: Job, group: Group): Promise<void> {
 async function verify(ctx: MergeContext, job: Job, group: Group): Promise<void> {
   const source = group.sources[job.source_index];
   if (source !== undefined) {
-    if ((await ctx.gmail.mergeMessages(source.gmailId, 1)).length > 0) {
+    if (source.gmailId !== null && (await ctx.gmail.mergeMessages(source.gmailId, 1)).length > 0) {
       throw new MergeBlocked('source_not_empty');
     }
     advance(ctx, job, 'verify', job.group_index, job.source_index + 1);

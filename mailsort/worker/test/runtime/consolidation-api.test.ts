@@ -48,9 +48,21 @@ describe('label consolidation owner API', () => {
     for (const groups of [[group([first, first])], [group([first]), group([first])], [wrongTarget], [invalidName], []]) {
       expect(reasonOf(await rejection(h.api.startLabelConsolidation({ name: NAME, groups, requestId: op() })))).toBe('INVALID_LABEL');
     }
-    await h.sql(`UPDATE labels SET gmail_state = 'pending', gmail_id = NULL WHERE id = 'second'`);
+    await h.sql(`UPDATE labels SET gmail_state = 'missing', gmail_id = NULL WHERE id = 'second'`);
     expect(reasonOf(await rejection(h.api.startLabelConsolidation({ name: NAME, groups: [group()], requestId: op() })))).toBe('INVALID_LABEL');
     expect(await h.sql(`SELECT count(*) AS n FROM label_merge_jobs`)).toEqual([{ n: 0 }]);
+  });
+
+  it('accepts uncreated legacy labels through the owner API', async () => {
+    for (const label of [first, second]) h.up.gmail.labels.delete(label.gmailLabelId);
+    await h.sql(`UPDATE labels SET gmail_state = 'pending', gmail_id = NULL,
+      display_name = 'Legacy/' || id, problem = 'invalid_name' WHERE id IN ('first', 'second')`);
+    const callsBefore = h.up.gmail.calls.length;
+    const started = await h.api.startLabelConsolidation({ name: NAME, groups: [group()], requestId: op() });
+    expect(started).toMatchObject({ state: LabelConsolidation_State.RUNNING, phase: LabelConsolidation_Phase.PREFLIGHT,
+      groups: [{ targetLabel: first.name, sourceLabels: [first.name, second.name], displayName: 'Combined' }] });
+    expect(await h.api.getLabelConsolidation({ name: NAME })).toEqual(started);
+    expect(h.up.gmail.calls).toHaveLength(callsBefore);
   });
 
   it('freezes one private plan, replays its receipt and blocks conflicting mutations', async () => {

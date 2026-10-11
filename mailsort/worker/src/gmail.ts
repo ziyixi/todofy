@@ -99,6 +99,7 @@ export interface Ownership {
   mergeSwap?(messageId: string, sourceId: string, targetId: string): boolean;
   mergeHide?(labelId: string): boolean;
   mergeRename?(labelId: string): string | null;
+  mergeCreate?(name: string): boolean;
 
 }
 
@@ -305,7 +306,7 @@ export function checkRequest(request: GoogleRequest, ownership: Ownership): Gmai
       if (url.search !== '') refuse('query_param');
       const value = jsonBody(request.body, ['name', 'labelListVisibility', 'messageListVisibility']);
       const name = value['name'];
-      if (!flatName(name) || !ownership.plannedPaths().has(name) || value['labelListVisibility'] !== 'labelShow' || value['messageListVisibility'] !== 'show') refuse('labels_create');
+      if (!flatName(name) || (!ownership.plannedPaths().has(name) && ownership.mergeCreate?.(name) !== true) || value['labelListVisibility'] !== 'labelShow' || value['messageListVisibility'] !== 'show') refuse('labels_create');
       return 'labels_create';
     }
   }

@@ -38,7 +38,7 @@ function fixture(count = 1) {
   store.setMeta('write_scope', '1');
   let clock = NOW;
   let budget = new Budget(40);
-  let lost: 'rename' | 'swap' | null = null;
+  let lost: 'create' | 'rename' | 'swap' | null = null;
   const ownership: Ownership = {
     ...mergeOwnership(store), ownedLabelIds: () => store.ownedGmailIds(), plannedPaths: () => new Set(store.labelPaths()), plannedPath: (id) => store.labelByGmailId(id)?.display_name ?? null,
     ledger: (id, label) => { const row = store.ledgerFor(id, label); return row === undefined ? null : { state: row.state, archived: row.archived === 1 }; },
@@ -49,17 +49,23 @@ function fixture(count = 1) {
       const url = new URL(request.url);
       const method = request.method;
       const body = method === 'GET' ? '' : await request.text();
-      expect(allowedOperation(method, url.toString(), body, { owned: new Set([source, target]), planned: new Set(store.labelPaths()), ledger: (id, label) => ownership.ledger(id, label),
-        merge: { labels: new Set([source, target, parent]), messages: new Set(ids), swaps: new Set(ids.map((id) => `${id}:${source}:${target}`)), hidden: new Set([source, parent]), names: new Set(['Projects']) } })).not.toBeNull();
+      const targets = [target, ...gmail.createdByWorker];
+      expect(allowedOperation(method, url.toString(), body, { owned: new Set([source, ...targets]), planned: new Set(store.labelPaths()), ledger: (id, label) => ownership.ledger(id, label),
+        merge: { labels: new Set([source, ...targets, parent]), messages: new Set(ids), swaps: new Set(ids.flatMap((id) => targets.map((targetId) => `${id}:${source}:${targetId}`))), hidden: new Set([source, parent]), names: new Set(['Projects']), createNames: new Set(['Projects']) } })).not.toBeNull();
       const response = gmail.handle(method, url, new Headers(init?.headers), body);
-      if ((lost === 'rename' && method === 'PATCH' && body.includes('Projects')) || (lost === 'swap' && url.pathname.endsWith('/modify'))) { lost = null; throw new Error('synthetic response lost'); }
+      if ((lost === 'create' && method === 'POST' && url.pathname.endsWith('/labels')) || (lost === 'rename' && method === 'PATCH' && body.includes('Projects')) || (lost === 'swap' && url.pathname.endsWith('/modify'))) { lost = null; throw new Error('synthetic response lost'); }
       return response;
     } });
   const ctx: MergeContext = { store, gmail: client, get budget() { return budget; }, now: () => clock, transact, canWrite: () => true };
   const create = () => transact(() => createLabelMerge(store, [{ sources: [{ labelId: 'target', etag: required(store.label('target')).etag }, { labelId: 'source', etag: required(store.label('source')).etag }], targetLabelId: 'target', displayName: 'Projects' }], clock, 'synthetic-job'));
   const pass = async () => { clock += 1000; budget = new Budget(40); await labelMergeStep(ctx); expect(budget.left).toBeGreaterThanOrEqual(0); };
   const complete = async () => { for (let i = 0; i < 100 && labelMergeSummary(store)?.state === 'running'; i++) await pass(); expect(labelMergeSummary(store)?.state).toBe('succeeded'); };
-  return { store, gmail, target, source, parent, foreign, ids, ctx, ownership, create, pass, complete, lose: (kind: 'rename' | 'swap') => { lost = kind; } };
+  return { store, gmail, target, source, parent, foreign, ids, ctx, ownership, create, pass, complete, lose: (kind: 'create' | 'rename' | 'swap') => { lost = kind; } };
+}
+
+function pending(h: ReturnType<typeof fixture>, id: 'target' | 'source'): void {
+  h.gmail.labels.delete(h[id]);
+  h.store.run(`UPDATE labels SET gmail_state = 'pending', gmail_id = NULL, problem = 'invalid_name' WHERE id = ?`, id);
 }
 
 function originalLedger(h: ReturnType<typeof fixture>, targetPresent = false): LedgerRow {
@@ -71,6 +77,101 @@ function originalLedger(h: ReturnType<typeof fixture>, targetPresent = false): L
 }
 
 describe('private label consolidation', () => {
+  it('merges an unmaterialized source without creating its old label and preserves its learning', async () => {
+    const h = fixture(0);
+    pending(h, 'source');
+    h.store.run(`INSERT INTO trusted_domains (label_id, domain, origin, subdomains, create_time) VALUES ('source', 'synthetic.test', 'owner', 0, ?)`, NOW);
+    h.store.run(`INSERT INTO examples (id, label_id, summary, origin, create_time) VALUES ('example', 'source', 'synthetic example', 'correction', ?)`, NOW);
+    h.create();
+    await h.complete();
+    expect(h.store.trustedDomains('target')).toEqual(['synthetic.test']);
+    expect(h.store.one(`SELECT label_id, create_time FROM examples WHERE id = 'example'`)).toEqual({ label_id: 'target', create_time: NOW });
+    expect(h.store.label('source')).toMatchObject({ gmail_id: null, enabled: 0 });
+    expect(h.gmail.calls.filter((call) => call.method === 'POST' && call.url.endsWith('/labels'))).toHaveLength(0);
+    expect(labelMergeSummary(h.store)?.processedCount).toBe(0);
+  });
+
+  it('creates only the final English target when both sources are unmaterialized', async () => {
+    const h = fixture(0);
+    pending(h, 'source');
+    pending(h, 'target');
+    h.create();
+    await h.complete();
+    const created = h.gmail.calls.filter((call) => call.method === 'POST' && call.url.endsWith('/labels'));
+    expect(created.map((call) => call.body)).toEqual([JSON.stringify({ name: 'Projects', labelListVisibility: 'labelShow', messageListVisibility: 'show' })]);
+    expect(h.store.label('target')).toMatchObject({ gmail_id: h.gmail.labelIdByName('Projects'), gmail_state: 'linked', problem: '' });
+  });
+
+  it('moves a linked source into a newly created target while preserving other message labels', async () => {
+    const h = fixture();
+    pending(h, 'target');
+    const before = new Set(required(h.gmail.messages.get(required(h.ids[0]))).labelIds);
+    h.create();
+    await h.complete();
+    before.delete(h.source);
+    before.add(required(h.gmail.labelIdByName('Projects')));
+    expect(required(h.gmail.messages.get(required(h.ids[0]))).labelIds).toEqual(before);
+    expect(labelMergeSummary(h.store)?.processedCount).toBe(1);
+  });
+
+  it('refuses missing, name-taken and inconsistent pending identities before starting', () => {
+    for (const [state, gmailId, taken] of [['missing', null, 0], ['pending', null, 1], ['pending', 'Label_999', 0], ['linked', null, 0]] as const) {
+      const h = fixture(0);
+      h.store.run(`UPDATE labels SET gmail_state = ?, gmail_id = ?, gmail_name_taken = ? WHERE id = 'source'`, state, gmailId, taken);
+      expect(h.create).toThrow('MERGE_INVALID_PLAN');
+      expect(labelMergeSummary(h.store)).toBeNull();
+    }
+  });
+
+  it('does not adopt an unknown label occupying either a pending source or final target name', async () => {
+    for (const name of ['Synthetic/Tools', 'Projects']) {
+      const h = fixture(0);
+      pending(h, 'source');
+      pending(h, 'target');
+      const foreign = h.gmail.createUserLabel(name);
+      h.create();
+      await h.pass();
+      expect(labelMergeSummary(h.store)).toMatchObject({ state: 'blocked', errorCode: 'label_name_taken' });
+      expect(h.store.ownedGmailIds().has(foreign)).toBe(false);
+      expect(h.gmail.calls.filter((call) => call.method === 'POST' && call.url.endsWith('/labels'))).toHaveLength(0);
+    }
+  });
+
+  it('keeps an uncertain create blocked instead of adopting its name after a lost response', async () => {
+    const h = fixture(0);
+    pending(h, 'source');
+    pending(h, 'target');
+    h.create();
+    h.lose('create');
+    await h.pass();
+    expect(labelMergeSummary(h.store)?.state).toBe('blocked');
+    expect(h.store.label('target')?.gmail_id).toBeNull();
+    resumeLabelMerge(h.store, 'synthetic-job', NOW + 2000);
+    await h.pass();
+    expect(labelMergeSummary(h.store)).toMatchObject({ state: 'blocked', errorCode: 'label_name_taken' });
+    expect(h.gmail.calls.filter((call) => call.method === 'POST' && call.url.endsWith('/labels'))).toHaveLength(1);
+  });
+
+  it('resumes a created target by its saved ID when its read-back failed', async () => {
+    const h = fixture(0);
+    pending(h, 'source');
+    pending(h, 'target');
+    h.create();
+    h.gmail.afterCall = (method, url) => {
+      if (method === 'POST' && url.pathname.endsWith('/labels')) {
+        h.gmail.failWhen = (nextMethod, nextUrl) => nextMethod === 'GET' && nextUrl.pathname.endsWith('/labels') ? 503 : null;
+      }
+    };
+    await h.pass();
+    expect(labelMergeSummary(h.store)?.state).toBe('blocked');
+    expect(h.store.label('target')?.gmail_id).toBe(h.gmail.labelIdByName('Projects'));
+    h.gmail.failWhen = null;
+    h.gmail.afterCall = null;
+    resumeLabelMerge(h.store, 'synthetic-job', NOW + 2000);
+    await h.complete();
+    expect(h.gmail.calls.filter((call) => call.method === 'POST' && call.url.endsWith('/labels'))).toHaveLength(1);
+  });
+
   it('renames IDs, moves all historical mail in bounded first pages, preserves other labels, and hides empty legacy labels', async () => {
     const h = fixture(27);
     const before = h.ids.map((id) => new Set(required(h.gmail.messages.get(id)).labelIds));
@@ -217,5 +318,19 @@ describe('private label consolidation', () => {
     expect(() => checkRequest({ method: 'PATCH', url: `${base}/labels/${h.source}`, body: JSON.stringify({ labelListVisibility: 'labelHide', messageListVisibility: 'hide' }) }, h.ownership)).toThrow(GmailRefused);
     expect(() => checkRequest({ method: 'GET', url: `${base}/messages?labelIds=${h.foreign}&maxResults=10&fields=messages/id,nextPageToken,resultSizeEstimate&includeSpamTrash=true` }, h.ownership)).toThrow(GmailRefused);
     expect(() => checkRequest({ method: 'GET', url: `${base}/messages/a00000?format=minimal&fields=id,labelIds,historyId` }, h.ownership)).toThrow(GmailRefused);
+  });
+
+  it('guard only permits creating the current unmaterialized target by its final name', () => {
+    const h = fixture(0);
+    pending(h, 'target');
+    h.create();
+    const request = (name: string) => ({ method: 'POST', url: 'https://gmail.googleapis.com/gmail/v1/users/me/labels', body: JSON.stringify({ name, labelListVisibility: 'labelShow', messageListVisibility: 'show' }) });
+    expect(() => checkRequest(request('Projects'), h.ownership)).toThrow(GmailRefused);
+    h.store.run(`UPDATE label_merge_jobs SET phase = 'rename'`);
+    expect(checkRequest(request('Projects'), h.ownership)).toBe('labels_create');
+    expect(() => checkRequest(request('Synthetic/Builds'), h.ownership)).toThrow(GmailRefused);
+    expect(() => checkRequest(request('Unplanned'), h.ownership)).toThrow(GmailRefused);
+    h.store.run(`UPDATE label_merge_jobs SET state = 'blocked'`);
+    expect(() => checkRequest(request('Projects'), h.ownership)).toThrow(GmailRefused);
   });
 });
