@@ -11,7 +11,7 @@ import type { SaveAnswer, SaveRequest, Status } from './messages.ts';
 import type { Denylist } from './page.ts';
 import { getDevice, lastError, ownerDenylist, setDevice, uploadState, type Device } from './store.ts';
 
-/** An ingest token as deploy/mint-tokens.mjs makes it: 32 random bytes in base64url after the prefix. */
+/** An ingest token as recall's 设置 → 插件口令 makes it: 32 random bytes in base64url after the prefix. */
 const INGEST_TOKEN = /^recall_ingest_[A-Za-z0-9_-]{43}$/;
 const EXPORT_TOKEN = /^recall_export_/;
 const LOOPBACK = new Set(['localhost', '127.0.0.1', '[::1]']);

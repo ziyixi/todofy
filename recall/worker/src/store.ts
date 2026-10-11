@@ -1,7 +1,7 @@
 /**
  * RecallState's SQLite storage (../../docs/design.md §5.1): devices, sites, pages, visits, documents (the metadata;
- * the texts are in R2), the full-text index, tombstones, deleted pages waiting for the alarm, archive consumers, the
- * daily usage and the AIP-155 request log, in the Durable Object's own database. Synchronous (the Durable Object's
+ * the texts are in R2), the full-text index, tombstones, deleted pages waiting for the alarm, feed consumers, the
+ * daily usage, the AIP-155 request log and what the archive wrote to Dropbox, in the Durable Object's own database. Synchronous (the Durable Object's
  * SQL API), so the writes of one `transactionSync` are atomic.
  *
  * The change feed is the records' own rows: every write of a visit, document or tombstone row takes the next `seq`
@@ -16,7 +16,7 @@
  */
 import { ACTIVE_MS, DAY, ERRORS_KEPT, REQUEST_ID_TTL_MS, USAGE_KEPT_DAYS } from './limits.ts';
 
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
 export const SCHEMA_V1: readonly string[] = [
   `CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)`,
@@ -139,6 +139,25 @@ export const SCHEMA_V1: readonly string[] = [
     over_budget INTEGER NOT NULL DEFAULT 0
   )`,
   `CREATE TABLE IF NOT EXISTS requests (request_id TEXT PRIMARY KEY, method TEXT NOT NULL, resource TEXT NOT NULL, answer TEXT NOT NULL, time_ms INTEGER NOT NULL)`,
+];
+
+/**
+ * Version 2: the archive recall writes to Dropbox (archive.ts, backup.ts). `archive_days`: each UTC day that holds
+ * changes, by their commit time (seq_ms), with the range of their seqs (the day's rows are read by seq, which is
+ * indexed, then filtered by seq_ms), whether its file must be written again, and the Dropbox content hash of what was
+ * written. `archive_blobs`: the blobs written to Dropbox, by path, with the connection (`target`) they were written to,
+ * so nothing is written twice and a new Dropbox writes everything again without a delete.
+ */
+export const SCHEMA_V2: readonly string[] = [
+  `CREATE TABLE IF NOT EXISTS archive_days (
+    day TEXT PRIMARY KEY,
+    min_seq INTEGER NOT NULL,
+    max_seq INTEGER NOT NULL,
+    dirty INTEGER NOT NULL DEFAULT 1,
+    content_hash TEXT
+  )`,
+  `CREATE INDEX IF NOT EXISTS archive_days_dirty ON archive_days (day) WHERE dirty = 1`,
+  `CREATE TABLE IF NOT EXISTS archive_blobs (path TEXT PRIMARY KEY, target TEXT NOT NULL, content_hash TEXT NOT NULL)`,
 ];
 
 export type Value = string | number | null | ArrayBuffer;
@@ -324,6 +343,7 @@ export class Store {
       if (this.getMeta('feed_id') === null) this.setMeta('feed_id', crypto.randomUUID());
       if (this.getMeta('seq') === null) this.setMeta('seq', '0');
     }
+    if (version < 2) for (const statement of SCHEMA_V2) this.sql.exec(statement);
     if (version !== SCHEMA_VERSION) this.setMeta('schema_version', String(SCHEMA_VERSION));
     // The migration's rows are no request's: neither the meter nor the budgets count them.
     this.meter = { read: 0, written: 0 };

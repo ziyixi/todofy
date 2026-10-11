@@ -5,14 +5,18 @@ questions: **what did I do on day X**, and **where did I read that**. A Chrome e
 dependencies) records each page's visits with the time it actually had the focus, and the page's text once it was read
 for ten seconds; it scrubs secrets and uploads to the Worker `recall`, which keeps everything in one SQLite Durable
 Object and a private R2 bucket, indexes it for full-text search (Chinese included), and serves a timeline and a search
-UI behind Access. A durable copy leaves Cloudflare through an open, versioned change feed
-([`contracts/recall-archive-v1`](../../contracts/recall-archive-v1/README.md)) that a small container on the home NAS
-pulls into plain files; any other store can take the NAS's place.
+UI behind Access. A durable copy leaves Cloudflare as plain files in an open, versioned layout
+([`contracts/recall-archive-v1`](../../contracts/recall-archive-v1/README.md)) that recall itself writes into the
+owner's own Dropbox app folder (§7.2); the home NAS syncs that folder with its own Dropbox support, so no code of
+recall's runs on the NAS or the owner's Mac, and any other file store can take Dropbox's place. Programs can read the
+same records as a change feed.
 
 The owner's requests of 2026-10-10 shape v1: a very good UI (easy search with conditions such as dates, site and type;
 a timeline; not bloated; the design language of their other apps); generic protocols and contracts so the NAS can be
 replaced later; everything built first, the owner's steps (tokens, Infra apply, loading the extension, the NAS
-container) at the end. Measured volume: about 300 visits, 190 distinct URLs and 90 pages with at least ten seconds of
+container) at the end. On 2026-10-11 the owner asked that they run no command at all: the machine tokens are made in
+设置 (§2.2), the archive is pushed to Dropbox by recall (§7.2) instead of pulled by a NAS container, and every owner
+step is a click (§11). Measured volume: about 300 visits, 190 distinct URLs and 90 pages with at least ten seconds of
 focus a day. Chrome keeps 90 days of history; recall keeps everything from its first day (no backfill).
 
 Status: branch `recall`, 2026-10-10. The design was revised the same day after an independent review, and the built
@@ -20,11 +24,11 @@ code after a second one (safety, correctness and UI: the daily read budget and b
 denylist, the owner's site-only list, no silent losses for hosts with `_` or a newer extension, back keeping the
 owner's place); §12 notes what was not adopted. The owner API (`proto/recall/ui/v1`), the upload (`proto/recall/ingest/v1`) and the archive
 contract (IDL, generated schema, fixtures and their codec test in `proto/test/`) are written; `shared/`, the Worker
-(`worker/`), `deploy/`, the extension (`extension/`, built by CI into an artifact), the UI (`web/`) and the reference
-consumer (`sync/`, with its image workflow) are built and tested, and the smoke run (§10) drives them together from an
-upload to an archive. recall landed check-only (§11, step 1), the owner's "Infra apply" created its Access applications
-and bucket (step 2), and the go-live commit (step 3) lets CI deploy it; nothing is deployed yet, and none of it has run
-in a real Chrome, Cloudflare account or NAS.
+(`worker/`), `deploy/`, the extension (`extension/`, built by CI into an artifact) and the UI (`web/`) are built and
+tested, and the smoke run (§10) drives them together from an upload to the archive in a fake Dropbox. recall landed check-only (§11, step 1), the owner's "Infra apply" created its Access applications
+and bucket (step 2), and the go-live commit (step 3, `ee02b62`) deployed it; its namespace is recorded (`5086599`).
+Branch `recall-dropbox-archive` (2026-10-11) replaces the NAS container (`sync/`, never published) with the Dropbox
+writer and moves the tokens into 设置; none of it has run yet in a real Chrome, Dropbox or NAS.
 
 ## 1. Shape
 
@@ -40,16 +44,18 @@ R2 bucket, `recall-store`. The structure is mailsort's:
 | `worker/src/ingest.ts` | One upload: strict read, the server's own scrub and denylist, R2 then one transaction (§4) |
 | `worker/src/search.ts`, `segment.ts` | The index, the bigram segmenter, queries, snippets (§6) |
 | `worker/src/feed.ts` | Feed pages, each change rendered from its record's row (§7) |
+| `worker/src/tokens.ts` | The machine tokens made in 设置: their digests, grace and revocation (§2.2) |
+| `worker/src/archive.ts`, `backup.ts`, `dropbox.ts` | The archive's files, the Dropbox connection and the alarm's pass that writes them (§7.2) |
 | `web/` | The Chinese, mobile-first UI (no framework) over `recall.ui.v1` (§8) |
-| `sync/` | The reference archive consumer: one Python file, standard library only, its Dockerfile (§7.2) |
-| `deploy/` | `deploy-vars.mjs`, `bundle-size.mjs`, `mint-tokens.mjs` (§2.2) and their tests |
+| `deploy/` | `deploy-vars.mjs`, `bundle-size.mjs` and their tests |
 | `../proto/recall/ui/v1/` | The owner API (AIP resources and one custom method) |
 | `../proto/recall/archive/v1/`, `../contracts/recall-archive-v1/` | The change feed and archive contract |
 
 The flow: the extension uploads batches to `POST /api/machine/v1/batches` → the Worker checks the token and forwards
 the body unread → `RecallState` decompresses, validates, scrubs and filters again, writes the text to R2, then commits
-the rows (each new or changed record with the feed's next seq) and the index entries in one transaction. The UI reads
-`/api/v1/*`; archive consumers read `GET /api/machine/v1/changes` and `/blobs/*`.
+the rows (each new or changed record with the feed's next seq) and the index entries in one transaction; about an hour
+later the alarm writes the changes to the owner's Dropbox. The UI reads `/api/v1/*`; programs may read
+`GET /api/machine/v1/changes` and `/blobs/*`.
 
 No D1, KV, queue or cron. Why a Durable Object rather than D1: D1 refuses to export a database with FTS5 tables and caps
 a database at 500 MB, and an ingest that tokenizes 64 KiB texts needs the object's 30 s of CPU, not a Worker request's
@@ -69,7 +75,8 @@ Browsing history is the most personal data the owner has. Four walls, from the b
    and high-entropy path segments in URLs. The Worker runs the same `shared/` code on every upload, so an older
    extension build or a newer denylist entry cannot let text through.
 3. **Private storage.** R2 is private (no public bucket, no r2.dev); the owner API is behind Access; the feed needs the
-   export token. Texts are shown as text only (`textContent`), never as HTML: v1 stores no HTML.
+   export token; the archive goes only to the app folder of the owner's own Dropbox app, which they authorize and can
+   revoke. Texts are shown as text only (`textContent`), never as HTML: v1 stores no HTML.
 4. **Nothing in logs.** Logs and errors hold request IDs, counts, status codes and reason codes: never a URL, host,
    title or text (the Worker's invocation logs are off, as mailsort's).
 
@@ -82,7 +89,8 @@ is put misleading words in its own title and text.
 | --- | --- | --- |
 | The owner's browser | `/api/v1/*`, `/api/csrf`, the UI | The whole-host Access application (`kind = "owner"`) and `packages/edge-auth` in the Worker (JWT, owner, Origin, CSRF on mutations), unchanged |
 | The extension | `POST /api/machine/v1/batches` | `Authorization: Bearer <ingest token>`: write-only |
-| Archive consumers | `GET /api/machine/v1/changes`, `GET /api/machine/v1/blobs/<path>` | `Authorization: Bearer <export token>`: read-only |
+| A program reading the feed (optional) | `GET /api/machine/v1/changes`, `GET /api/machine/v1/blobs/<path>` | `Authorization: Bearer <export token>`: read-only |
+| The owner's browser back from Dropbox | `GET /api/dropbox/callback` | The whole-host Access application, like the UI, and the one-time `state` of the connection the owner started (§7.2) |
 
 An Access **Bypass** application with exactly three destinations, `recall.ziyixi.science/api/machine/v1/batches`,
 `…/api/machine/v1/changes` and `…/api/machine/v1/blobs/*`, lets the two machine callers through Access (edge-auth
@@ -93,41 +101,47 @@ the `/api/internal/` of Mail Hero's backup and Fleet's receipt: it is part of a 
 and it names the callers (machines with their own tokens). The Worker checks every machine request itself, strictly
 and cheaply, since Bypass traffic counts against the account's Worker requests: before any Durable Object call it
 accepts exactly the three method-and-path pairs above, refuses a body over 1 MiB (`Content-Length` first, then while
-streaming), and compares the bearer's SHA-256 with the current and previous digest of that route's token
-(`INGEST_TOKEN_SHA256`, `INGEST_TOKEN_SHA256_PREVIOUS`, `EXPORT_TOKEN_SHA256`, `EXPORT_TOKEN_SHA256_PREVIOUS`,
-constant-time). Anything else is answered by the Worker alone: 404, 405, 413, 401, or 503 `not_configured` while no
-digest is set. The blob route reads R2 itself and asks the object only when R2 has no such object (§7). A machine token
+streaming), and compares the bearer's SHA-256, constant-time, with the digests of that route's token: those RecallState
+holds (§2.2), which the Worker keeps in memory for a minute (a refused bearer asks the object again at most every 10
+seconds, to see a token made since), and those a Worker secret may hold (`INGEST_TOKEN_SHA256`,
+`INGEST_TOKEN_SHA256_PREVIOUS`, `EXPORT_TOKEN_SHA256`, `EXPORT_TOKEN_SHA256_PREVIOUS`, put by hand). Anything else is
+answered by the Worker alone: 404, 405, 413, 401, or 503 `not_configured` while no digest exists. The blob route reads R2 itself and asks the object only when R2 has no such object (§7). A machine token
 never reaches the owner API, and an Access JWT never replaces a machine token.
 
-### 2.2 Tokens: the owner mints them, nobody else sees them
+### 2.2 Tokens: made in 设置, shown once, kept as digests
 
-`deploy/mint-tokens.mjs`, run by the owner on their machine after `npx wrangler login` (the pattern of mailsort's
-`mint-token.mjs`):
+The owner makes the machine tokens in 设置 → 插件口令 (`RegenerateMachineToken` of `recall.ui.v1`, a mutation behind
+Access, Origin and the CSRF token), with no command:
 
-- makes two tokens of 32 random bytes, `recall_ingest_<base64url>` and `recall_export_<base64url>` (the prefixes let
-  the scrubber and secret scanners recognize them);
-- puts each SHA-256 digest into the Worker with `wrangler secret put` through stdin (owner-machine secrets in
-  `app.toml`: never in GitHub, kept by every deploy, expected optional by the drift check);
-- writes the export token into a new file `recall-sync.env` (mode 0600, `RECALL_EXPORT_TOKEN=...`; by default in the
-  home directory, outside the repository, which may sit in a synced folder) and prints its path, for the NAS container
-  (or, with `--keychain`, into the macOS Keychain instead, through `security -i` on stdin);
-- copies the ingest token to the clipboard (`pbcopy` through stdin), waits for Enter while the owner pastes it into the
-  extension's options, then clears the clipboard.
+- RecallState makes a token of 32 random bytes, `recall_ingest_<base64url>` (the extension's, write-only) or
+  `recall_export_<base64url>` (a feed program's, read-only; optional: the Dropbox backup needs none), keeps only its
+  SHA-256 in meta (`token_ingest`, `token_export`), and answers the token once, in that response (`MachineToken.token`,
+  OUTPUT_ONLY). The AIP-155 request log keeps the answer without the token, so a repeated request answers without it
+  (the UI then asks for another); the status lists the tokens without them; nothing logs one. The prefixes let the
+  scrubber and secret scanners recognize a token.
+- The UI shows the token in a read-only field with 复制 and the line 只显示这一次; the owner pastes it into the extension's
+  options (whose server is already `https://recall.ziyixi.science`).
+- 重新生成 keeps the replaced token working for 24 hours (`TOKEN_GRACE_MS`), so the extension uploads until it has the
+  new one; the daily alarm drops it after. A token that leaked must stop at once: ⋯ → 旧口令泄露：立即作废并重新生成
+  (`revoke_previous`) leaves only the new token. ⋯ → 停用 (`DeleteMachineToken`) stops the route (503).
+- The Worker keeps RecallState's digests in memory for a minute (`TOKEN_CACHE_MS`), so a token made, revoked or
+  stopped holds everywhere within a minute, and a refused bearer reaches the object at most once per 10 seconds per
+  isolate (`TOKEN_RECHECK_MS`).
+- A digest put by hand as a Worker secret (`wrangler secret put INGEST_TOKEN_SHA256`, and the others: the way before
+  2026-10-11, by the script `deploy/mint-tokens.mjs`, now removed) is still accepted; a deploy keeps it
+  (`deploy/test/secrets-kept.test.mjs`), the status says one exists (`MachineToken.worker_secret`), and only deleting
+  that secret stops it.
 
-No token passes through a command line, a log, a chat or this repository. `--rotate ingest|export` moves the current
-digest to `_PREVIOUS` and sets a new one (both work until the extension or the container has the new token);
-`--retire ingest|export` deletes `_PREVIOUS`. A rotation keeps the old token working, so it is not the answer to a
-leak: `--revoke ingest|export` puts a new token's digest over the current one and deletes `_PREVIOUS` in one run, so
-only the new token works (the extension or the container stops until it has it). Worker secrets cannot be read back, so the script keeps the digests it
-put, and only them (a digest of a random 256-bit token opens nothing), in `~/.config/recall/token-digests.json`
-(mode 0600). Deleting a route's digests stops that route at once (503).
+No token passes through a command line, a log, a chat or this repository.
 
 ### 2.3 Deletion and retention
 
 recall keeps everything in Cloudflare: visits and texts. The owner deletes a page in its detail view (DeletePage). One
 transaction removes the page's row and its index entry, takes its totals off its site, and commits one tombstone,
 `pages/<page id>`, to the change feed: from then on the page's visits and texts are gone from the UI, the search and the
-feed, and every archive that applies the tombstone deletes them too (§7). Right after the transaction the page's texts
+feed. The Dropbox archive only grows (§7.2): it gains the tombstone's line within the hour and keeps the page's earlier
+lines and blobs, which the owner deletes there by hand if they want them gone from the copies (the UI's confirmation
+says so). Right after the transaction the page's texts
 leave R2 (deletes are free and write no row, and the blob route reads R2 without asking the object). The rows are
 removed by the alarm, at most 500 rows a run and within the day's maintenance allowance (§5.4), so a page visited
 every day for years costs no unbounded call and no other app's writes. The
@@ -137,15 +151,17 @@ page's deletion and uploaded later is dropped. Bounded on purpose:
 | What | Kept |
 | --- | --- |
 | Pages, visits, texts (R2) | until the owner deletes them |
-| Tombstones (one small row per deleted page) | always: they keep a deleted page deleted, in recall and in every archive |
+| Tombstones (one small row per deleted page) | always: they keep a deleted page deleted, in recall and in every reader of the archive |
 | The search index's text of a page (its first 32 KiB) | until the indexed text passes 500 MiB or the database 850 MiB; then the oldest pages keep only their title and URL in the index (§5.3) |
 | The answers to the owner's mutations, by request ID | 1 day |
 | Daily usage counters (rows written, uploads, refused items by reason) | 400 days |
-| Recent error codes, archive consumers | the last 8 of each |
+| Recent error codes, feed consumers | the last 8 of each |
+| The machine tokens' digests | the current one until replaced or stopped; a replaced one 24 hours |
+| The Dropbox connection (App key, refresh token, account name) and what the archive wrote (days, blob paths) | until 断开 (the App key and what was written stay, for the same app again) |
 
-The feed is not a table of its own (§5.1), so it never outgrows the records. Pruning R2's texts once every archive
-holds them is a later, owner-enabled option. The hook is designed (each consumer's sync position, and the contract's
-410 for a blob recall no longer holds) and not built.
+The feed is not a table of its own (§5.1), so it never outgrows the records. Pruning R2's texts once the Dropbox
+archive holds them is a later, owner-enabled option, not built (the archive records what it wrote, and the contract's
+410 covers a blob recall no longer holds).
 
 ## 3. The extension
 
@@ -397,7 +413,7 @@ Schema version 1 (`store.ts`, migrated in `blockConcurrencyWhile`):
 
 | Table | Columns (indexes) |
 | --- | --- |
-| `meta` | `key`, `value`: schema version, `feed_id` (a UUID made by the first migration), `seq` (the feed's counter), settings (denylist JSON, etag), budget counters, `oldest_indexed_text_ms` |
+| `meta` | `key`, `value`: schema version, `feed_id` (a UUID made by the first migration), `seq` (the feed's counter), settings (denylist JSON, etag), budget counters, `oldest_indexed_text_ms`, the machine tokens' digests (`token_ingest`, `token_export`), the Dropbox connection (`dropbox_*`) and the archive's progress (`archive_*`: the scanned and the written seq, the target, the last upload, the last failure and its retry time) |
 | `devices` | `id`, `label`, `extension_version`, `first_seen_ms`, `last_seen_ms`, `queued_count`, `last_error_code`, `clock_skew_s` |
 | `sites` | `host`, `host_key` (labels reversed, `com.github.gist.`; unique), `first_visit_ms`, `last_visit_ms`, `visit_count`, `focus_seconds` (index `focus_seconds`) |
 | `pages` | `rowid` (`INTEGER PRIMARY KEY AUTOINCREMENT`, never reused; the index's rowid), `id` (32 hex, unique), `url`, `url_truncated`, `title`, `host_key`, `first_visit_ms`, `last_visit_ms` (never null: a page a capture makes takes the capture's time until its visit arrives), `visit_count`, `focus_seconds`, `document_count`, `latest_document`, `latest_text_sha256`, `text_indexed` (indexes `last_visit_ms`; `host_key, last_visit_ms`) |
@@ -406,7 +422,9 @@ Schema version 1 (`store.ts`, migrated in `blockConcurrencyWhile`):
 | `fts` | `fts5(title, url, body, content='', contentless_delete=1, tokenize='unicode61 remove_diacritics 2')`; rowid = `pages.rowid` (§6) |
 | `tombstones` | `id`, `seq` (unique), `seq_ms`, `page_id` (indexed): the feed's deletions, and the ledger that keeps a deleted page deleted (§2.3) |
 | `purges` | `page_rowid`, `page_id`, `started_ms`: deleted pages whose rows and R2 objects the alarm is still removing |
-| `consumers` | `name`, `synced_seq`, `last_pull_ms`: at most 8; one that has not pulled for 30 days is dropped by the daily alarm |
+| `consumers` | `name`, `synced_seq`, `last_pull_ms`: at most 8 feed consumers; one that has not pulled for 30 days is dropped by the daily alarm |
+| `archive_days` (schema 2) | `day` (UTC), `min_seq`, `max_seq` (the range of the day's seqs, by which its rows are read), `dirty` (partial index), `content_hash` (Dropbox's, of the file written) |
+| `archive_blobs` (schema 2) | `path`, `target` (the connection it was written to), `content_hash`: every blob written to Dropbox, so none is written twice |
 | `usage` | `day`, `rows_written`, `rows_read`, `batches`, `items`, `visits`, `long_visits` (of pages that keep their text), `captures` (that arrived for them: kept, or skipped as a text recall had), `texts`, `refused` (counts by reason), `over_budget` |
 | `requests` | the AIP-155 request log: `request_id`, `method`, `resource`, `answer`, `time_ms` |
 
@@ -425,15 +443,16 @@ A site's resource ID is its host; its `host_key` turns "this host and its subdom
 One private bucket, `recall-store` (binding `STORE`; `infra/storage.tf` `r2_buckets`). An object's key is its archive
 path: `blobs/2026/10/<document uuid>.txt.gz` (UTC month of the capture), gzip of the scrubbed UTF-8 text, written with
 `sha256` and read back only by the object (snippets, the reader view) and the blob route. The archive layout and the
-store's layout are the same, so a copy of the bucket is a copy of `blobs/`.
+store's layout are the same: the archive's writer copies each object to the same path under `blobs/` in Dropbox.
 
 ### 5.3 Budgets
 
 | Resource (Free, shared by the account) | recall's expected day | Bound |
 | --- | --- | --- |
-| Worker requests (100,000/day) | about 700: uploads every 5 minutes at most per device, 48 heartbeats, a pull every 15 minutes plus about 60 blob reads, the owner's use | machine refusals never reach the object; the blob route wakes it only when R2 misses |
+| Worker requests (100,000/day) | about 600: uploads every 5 minutes at most per device, 48 heartbeats, the owner's use | machine refusals reach the object at most once per 10 s and isolate (the token digests kept in memory); the blob route wakes it only when R2 misses |
+| Subrequests (50 per invocation) and Dropbox | an archive pass about hourly while changes come: a token refresh, the day's file, state.json and each new text (an R2 read and an upload): about 100 Dropbox calls a day | at most 40 subrequests and 5 minutes a pass; a backlog goes on a minute later; Dropbox's 429 and Retry-After are kept |
 | Durable Object rows written (100,000/day) | 4,000 to 13,000: a visit revision about 6 (its row, its indexes and seq, the page, the site), about 600 revisions; a kept text about 8 plus FTS5's writes (1 counted locally, possibly 20-100 in production for 32 KiB of Chinese), about 60 kept texts; a batch 2 | 20,000/day, then 429 (§4); measured on the first day |
-| Durable Object rows read (5 million/day) | timeline days of a few hundred rows; the status a few dozen; a search a few thousand (at most about 6,000 without a range, 62,000 over the longest range: §6.3, measured at two years); a feed page about 2,500 | 1,500,000/day, then searches refuse (the feed stops at 1,000,000), §4 |
+| Durable Object rows read (5 million/day) | timeline days of a few hundred rows; the status a few dozen (at most about 1,000 with Dropbox far behind); a search a few thousand (at most about 6,000 without a range, 62,000 over the longest range: §6.3, measured at two years); an archive pass today's changes and their pages, about 1,000 at the end of a day | 1,500,000/day, then searches refuse (the feed stops at 1,000,000), §4; an archive pass scans at most 10,000 changes a table and renders at most 20,000 changes |
 | Durable Object storage (5 GB account; 1 GB per object in one line of the docs, 10 GB in another) | the index, about 1.1 bytes per byte of indexed text (at most 32 KiB a page), at most about 550 MiB; the tables, about 0.15 GB a year | budget 900 MiB; the oldest pages' texts leave the index while it holds over 500 MiB of text or the database passes 850 MiB (title and URL stay; R2 and every archive keep the text); a warning at 850 MiB |
 | R2 (10 GB-month, 1 M Class A, 10 M Class B a month) | about 0.2 GB a year; about 3,000 writes and 10,000 reads a month | shown in 设置 |
 | CPU: 10 ms per Worker request, 30 s per object call | the Worker never parses an upload; the object's heaviest call (an upload of 50 items with 10 texts) is expected well under 1 s | CPU tests (§10) |
@@ -446,14 +465,16 @@ index keeps many more years (`databaseSize` after the first week tells). Either 
 
 ### 5.4 The alarm
 
-Once a day (04:00 UTC, and armed again by any call that finds none), and a minute later again while work is left:
+Once a day (04:00 UTC, and armed again by any call that finds none), about an hour after an upload or deletion
+committed changes while Dropbox is connected, at once after a connection, and a minute later again while work is left:
 remove a deleted page's rows (`purges`), at most 500 rows a run, with their R2 objects again (deletes are free; the
 deletion already removed them), then its `purges` row; drop the request log older than a day, usage older than 400
-days and archive consumers that have not pulled for 30 days; while the index holds over 500 MiB of text or the database
+days, feed consumers that have not pulled for 30 days and replaced token digests past their grace; while the index holds over 500 MiB of text or the database
 passes 850 MiB, move the oldest pages' index rows to title and URL only, 2,000 pages a run, and record
 `oldest_indexed_text_ms`. Purges and demotions write rows, so both stop for the day once today's rows written reach
 10,000 (half the daily budget, so that uploads keep the other half) and go on at the next daily run; rows that wait are
-hidden by the join already. Nothing else runs on a schedule.
+hidden by the join already. Then the archive's pass (§7.2), which writes few rows and runs whatever the allowance:
+a failure waits for its retry time. Nothing else runs on a schedule.
 
 ## 6. Search
 
@@ -548,10 +569,12 @@ condition (one indexed read per candidate), sorts them and keeps its first 200 r
   measured the earlier single statements at 67,000 to 152,000 rows for the same searches.
 - **Budget**: past 1,500,000 rows read in the UTC day, SearchPages answers SEARCH_OVER_BUDGET (§4).
 
-## 7. The change feed
+## 7. The archive and the change feed
 
-[`contracts/recall-archive-v1`](../../contracts/recall-archive-v1/README.md) is the protocol: the routes, the records,
-the guarantees, the archive layout and how another consumer or store implements it. What recall does to keep it:
+[`contracts/recall-archive-v1`](../../contracts/recall-archive-v1/README.md) is the protocol: the archive layout and
+its reading rules, the records, the feed's routes, the guarantees and how another store or consumer fits. recall writes
+the archive itself, to the owner's Dropbox (§7.2); the feed serves the same records to programs. What recall does to
+keep the feed:
 
 - **Compacted.** The feed is the `seq` of the `visits`, `documents` and `tombstones` rows (§5.1): a record's write takes
   the next seq in its transaction, a revision moves the record to a new seq, and DeletePage takes a page's visits and
@@ -569,10 +592,11 @@ the guarantees, the archive layout and how another consumer or store implements 
   the seqs after the restore point would be handed out again under the same one; recall v1 has no restore path (only
   code can restore a Durable Object), and the code that adds one writes a marker outside the object (an R2 key) before
   `onNextSessionRestoreBookmark`, so that the first session after the restore sets a new `feed_id` and deletes it.
-- **Sync positions.** Each request's `after` is that consumer's sync position (`consumers`); 设置 shows when it last
-  pulled, the changes above it (counted up to 500 while it pulls; a consumer silent for a day is not counted) and the
-  commit time of the oldest of them (`seq_ms`, one indexed read per table), so the status costs a few rows however far
-  behind an archive is. A consumer silent for 30 days is dropped.
+- **Sync positions.** Each request's `after` is that consumer's sync position (`consumers`); 设置 lists the feed's
+  consumers under the Dropbox backup with when each last pulled, the changes above it (counted up to 500 while it
+  pulls; a consumer silent for a day is not counted) and the commit time of the oldest of them (`seq_ms`, one indexed
+  read per table), so the status costs a few rows however far behind a consumer is. A consumer silent for 30 days is
+  dropped. They raise no ops-v1 signal: the archive recall answers for is Dropbox's.
 - **Budget.** Once today's rows read pass 1,000,000 the feed answers 429 with `Retry-After` until the next UTC day, so
   an archive catching up from far behind (about 2,500 rows a page of 500) takes several days and leaves the rest to the
   owner's searches.
@@ -583,41 +607,64 @@ the guarantees, the archive layout and how another consumer or store implements 
 
 ### 7.1 Visits and the archive's time
 
-A visit's `event_time` is its start. A consumer files changes by the day it applied them, not by the visit's day, so a
-day's file changes only on that day (but for a tombstone's purge), and there is one file a day. "What did I do on day X"
+A visit's `event_time` is its start. The archive files changes by the day recall committed them (`seq_ms`), not by the
+visit's day, so a day's file changes only while that day lasts, and there is one file a day. "What did I do on day X"
 reads the visits' own times (the contract shows the `jq` line).
 
-### 7.2 The reference consumer `recall/sync/`
+### 7.2 The archive in Dropbox
 
-`recall_sync.py`, one file, Python's standard library only, so it runs on any Python 3.12+ for decades; its unit tests
-(`sync/test_recall_sync.py`) also check it against the contract's fixtures and the generated schema, which it does not
-import at run time; the generated TypeScript codec reads the archive it fills in the smoke run (§10), as there is no
-Python codec of `recall.archive.v1`. It is §4 of the contract with:
+The owner's request of 2026-10-11: the backup must be generic and must not depend on recall's code running on the NAS
+or their Mac, and they run no command. UGREEN's UGOS cannot pull an S3-compatible store (its Cloud Drives take AWS S3
+only, without an endpoint), but syncs Dropbox. So recall pushes the archive into the app folder of the owner's own
+Dropbox app, and the NAS syncs that folder one way (Dropbox to NAS) with Cloud Drives. The reference consumer that
+pulled the feed into a NAS container (`sync/`, its image workflow; never published) was removed.
 
-- configuration from the environment: `RECALL_BASE_URL` (`https://recall.ziyixi.science`), `RECALL_EXPORT_TOKEN` (or
-  `RECALL_EXPORT_TOKEN_FILE`), `RECALL_ARCHIVE_DIR` (`/archive`), `RECALL_CONSUMER` (`nas`), `RECALL_INTERVAL_SECONDS`
-  (900);
-- HTTPS only, redirects refused, `limit=500`, a 30 s timeout per request, `Retry-After` honored; 401 stops pulling and
-  says `export_token_refused` once an hour, and a page of another feed (`feed_changed`), 409 `cursor_ahead` and 410
-  `cursor_expired` stop it with that code until the operator points it at a new archive root (the contract's §5); its
-  health check fails and recall's 设置 and Home show the archive going stale;
-- a store driver interface of five operations (`read`, `write_atomic`, `exists`, `delete`, `list`) with `dir` (a mounted
-  directory: temporary file, fsync, rename, fsync of the directory); an `s3` or `webdav` driver is a new class of the
-  same five operations;
-- `--once` (one catch-up, then exit) and `--check` (exit 0 when `state.json` is younger than three intervals: the
-  container's health check);
-- as built: a long catch-up applies its pages in batches of up to 64 MiB of new lines (one rewrite of the day file per
-  batch, `state.json` after each batch); a page over 64 MiB and a blob over 256 MiB end the run unread; a 401 is asked
-  again once an hour with the token read again; a stop (`feed_changed`, `cursor_ahead`, `cursor_expired`) keeps the
-  process alive and logs its code once an hour, so Docker does not restart it in a loop; the archive root is never
-  created (a share that is not mounted stays an error) and files are written mode 0644 for the owner's SMB reads.
+**The connection** (`backup.ts`, `dropbox.ts`), OAuth 2 with PKCE for an App-folder app, so no app secret exists:
 
-Its image: `recall/sync/Dockerfile` (a pinned `python:3.12-slim` base, the one file, `USER 10001:10001`, no ports, no
-shell needs), tested and published to `ghcr.io/ziyixi/recall-sync` by a manual workflow `recall-sync-image.yml` (the
-pattern of `mail-hero-backup-image.yml`), pulled on the NAS by digest. The owner runs it in the NAS's Docker: the image
-digest, the env file from `mint-tokens.mjs`, a share mounted at `/archive` (owned by uid 10001), read-only root
-filesystem, no capabilities, restart unless stopped. It only connects out; the NAS opens no port. The NAS's own names,
-paths and how it is reached stay out of this public repository.
+- 设置 → 备份到 Dropbox: the owner pastes the App key and presses 连接. `ConnectDropboxBackup` keeps the App key, the
+  SHA-256 of a fresh `state` (32 random bytes) and a PKCE verifier (48 random bytes) for 15 minutes in meta, and
+  answers `https://www.dropbox.com/oauth2/authorize?client_id=…&response_type=code&code_challenge=…&code_challenge_method=S256&token_access_type=offline&redirect_uri=https://recall.ziyixi.science/api/dropbox/callback&state=…`,
+  where the browser goes.
+- Dropbox sends the browser back to `GET /api/dropbox/callback?code=…&state=…`, behind the whole-host Access
+  application like every owner path (the browser carries the owner's Access cookie, so no Bypass is needed; Dropbox's
+  servers never call recall). The Worker checks the owner's Access JWT, and RecallState checks the state once, in
+  constant time, against the connection the owner started (CSRF: no one else can start one, since that is a mutation
+  behind Origin and the CSRF token, and the state works once), exchanges the code with the App key and the verifier for
+  a refresh token (`/oauth2/token`), reads the account's display name (`users/get_current_account`), and answers the
+  browser 303 to `/settings?dropbox=connected` (or `denied`, `expired`, `failed`), so the code leaves the address bar.
+- The refresh token stays in meta: no answer carries it, nothing logs it. Access tokens live in the object's memory,
+  refreshed (App key and refresh token) when they near their end. Dropbox refusing the refresh token (the owner
+  removed the app) disconnects (`dropbox_refused`), and Home warns.
+- 断开 (`DisconnectDropboxBackup`) revokes the token at Dropbox (`/2/auth/token/revoke`, which also revokes the refresh
+  token) and forgets it; the App key and what was written stay, so connecting the same app and account again goes on
+  where it stopped. Another app or account (a new `target`) gets the whole archive written again; a folder whose
+  `state.json` names another feed is never written into (`dropbox_other_feed`).
+
+**The pass** (`archive.ts`, `backup.ts`), part of every alarm run while connected; the alarm comes about an hour after
+an upload or deletion commits changes (`ARCHIVE_INTERVAL_MS`), at once after a connection, and a minute later while
+work is left:
+
+1. A scan of the changes above `archive_scan_seq` (their seq and commit time only, at most 10,000 of each table a
+   pass) marks the days they were committed on dirty in `archive_days`, widening each day's seq range. Writing waits
+   until the scan reached the head, so no day's file is written while a record it lost is not yet in a later one.
+2. With at most 40 subrequests (R2 reads and Dropbox calls; Free allows 50 an invocation) and 5 minutes of wall time:
+   on a new target, the folder's `state.json` is read (another feed's stops the pass) and `VERSION` written; then each
+   dirty day, newest first, is rendered whole from the rows its range holds (the same code as the feed), after the
+   blobs its lines refer to: each read from R2, checked against its size and digest, written once with mode `add`
+   (Dropbox's content hash sent and checked), recorded in `archive_blobs`; the day's file is written (`overwrite`) only
+   when its content hash changed. A pass starts no new day after 20,000 rendered changes. Last, `state.json` with the
+   scanned seq.
+3. Nothing is ever deleted or moved at Dropbox: a deletion is its tombstone's line; a blob whose path holds another
+   file is left as it is (`dropbox_conflict`). Writing the same bytes again changes nothing, and what was written is
+   recorded, so a pass repeated after a crash writes nothing twice.
+4. A failure records its code (the status shows it in words) and waits: Dropbox's `Retry-After` for 429 and
+   `too_many_write_operations`, else a minute doubled up to an hour; 401 drops the access token for a refresh;
+   `dropbox_refused` disconnects. Calls have a 30 s timeout. Logs hold codes only.
+
+The status (`ServiceStatus.dropbox_backup`) says whether it is connected, the account, the last upload, the seq written,
+the changes waiting (counted up to 500) and the oldest of them, and the last failure. ops-v1 raises
+`archive_not_connected` until it is connected and `archive_behind` when a change has waited more than 24 hours,
+counted from the connection at the earliest (a first upload of an old store is no lag).
 
 ## 8. The owner API and the UI
 
@@ -665,8 +712,8 @@ names. What they share:
 ### 8.3 The shell
 
 A sticky header: 浏览记录 and, on the same row (under it on a phone), one quiet status line from GetServiceStatus:
-`上传 3 分钟前 · NAS 已同步`, or the problem in the warning color (`MacBook 2 天没有上传`, `NAS 3 天没有同步`,
-`存储接近上限`); under it three tabs, 时间线 · 搜索 · 设置, the current one underlined in the accent. The page detail
+`上传 3 分钟前 · Dropbox 已备份` (or `Dropbox 待备份 12 条`), or the problem in the warning color (`MacBook 2 天没有上传`,
+`Dropbox 备份未连接`, `Dropbox 落后 500+ 条` once a change waited a day since the connection, `存储接近上限`); under it three tabs, 时间线 · 搜索 · 设置, the current one underlined in the accent. The page detail
 opens over the tab it came from (the tab stays marked). The status is read once per navigation. Routes: `/` (today),
 `/day/2026-10-09`, `/search?q=…&site=…&after=…&before=…&type=read&dwell=120&sort=recent`, `/pages/<id>`, `/settings`;
 the URL always holds the state, so reload and back work. Back returns to where the owner was: each history entry keeps
@@ -728,7 +775,7 @@ restoration is off). `/` anywhere focuses the search box.
   is typed.
 - **No results**: 没有找到, with one button per set chip to drop it (`去掉 网站：github.com`), the line 正文只搜每页前
   32 KB, and when the index lost old texts (`oldest_indexed_text_time`), the line 正文搜索覆盖 2025年3月 起，更早的页面只按
-  标题和网址搜索（全文在 NAS 归档里）.
+  标题和网址搜索（全文仍在页面详情和 Dropbox 归档里）.
 
 ### 8.6 页面详情 (`/pages/<id>`)
 
@@ -736,7 +783,8 @@ restoration is off). `/` anywhere focuses the search box.
   has `[redacted]`, a hint: 网址里的敏感部分已去掉; when it was cut, 网址太长，只保存了开头), then
   `第一次 2026-09-01 · 最近 今天 14:20 · 12 次 · 共停留 1 小时 5 分`.
 - **Actions** behind ⋯: 打开原网页, 以后不保存这个网站的正文 (adds the host to the denylist; asks first), 删除这个页面
-  的记录 (asks first: 访问和正文会从 recall 和 NAS 归档里一起删除，不能恢复).
+  的记录 (asks first: 访问和正文会从 recall 删除，不能恢复；Dropbox 备份只增不删，会多一条删除记录，原来的文件要在
+  Dropbox 里自己删).
 - **正文**: the latest capture's text in the reader style, paragraphs split on blank lines, the query's matches marked
   when the page came from a search (`第 1/5 处` with ↑ ↓ and the keys n and N, in a bar that sticks under the header;
   the first match is scrolled to only when it is below the screen); `10月9日保存 · 共 3 次` when there were earlier, different
@@ -747,19 +795,29 @@ restoration is off). `/` anywhere focuses the search box.
 
 ### 8.7 设置 (`/settings`)
 
-Four cards, in the owner's words (a code stays in a tooltip only):
+Five cards, in the owner's words (a code stays in a tooltip only):
 
 - **设备**: one row per device: the label, `最近上传 3 分钟前` (in the warning color after 24 hours, with the line 检查
   Chrome 是否开着、扩展是否启用（开发者模式）), the version, `待上传 0`, the last error as a sentence that says what to
   do (`outbox_full`: 扩展存储已满，新页面的正文没有保存：打开扩展的选项检查, in the warning color; `capture_failed`,
   `upload_failed` quieter), and `时钟差 1 小时` in the warning color when its clock is off. Without a device: the three
-  steps to connect one (run `mint-tokens.mjs`, load the extension, paste the token). Under the devices, when uploads
+  steps to connect one, clicks only (插件口令 → 生成; `chrome://extensions` → 开发者模式 → 加载已解压的扩展程序; paste the
+  token and a device name in the extension's options, whose server is filled in already). Under the devices, when uploads
   lost items in the last 7 days, one warning line per reason (`7 天内有 3 条上传被拒（格式不对），已丢失：扩展可能有问题`),
   and a quiet line for items waiting for a newer recall (`unsupported_item`).
-- **归档**: one row per consumer: its name, `2 分钟前同步` (the seq in a tooltip), `已全部同步` or `落后 32 条（最早一条
-  3 小时前）` (`500+` past the count), in the warning color when late; a stale one (24 hours) says how old its oldest
-  change not archived is. Without one: 还没有归档连上 and the contract's README as a repository path (shipped code holds
-  no absolute URL: `no-external.test.ts`).
+- **插件口令** (§2.2): the extension's token: without one, what it is for and 生成; with one, `7 天前生成`, 重新生成
+  (asks first: the old one works 24 hours more, `旧口令 24 小时内仍可用` while it does), and behind ⋯ 旧口令泄露：立即作废并
+  重新生成 and 停用 (each asks first). A new token shows once, in a read-only field with 复制, the warning line 只显示这一次
+  and the server address to set in the extension. The export token, optional, is folded under `导出口令（可选）` with the
+  same controls and the line that only programs reading the change feed need it.
+- **备份到 Dropbox** (§7.2): not connected, one line of what it does, the four steps at Dropbox (the apps page, Scoped
+  access and App folder, the two permissions, the exact Redirect URI built from the page's own origin, the App key)
+  and the App key field with 连接; connected, `Dropbox · <account>` with `20 分钟前上传` (the seq in a tooltip),
+  `已全部备份` or `待备份 32 条（最早一条 3 小时前）` (in the warning color once a change waited a day since the
+  connection), the last failure as a sentence that says what to do (the code in a tooltip), the line that the backup
+  only grows, and 断开 (asks first). The browser's return from Dropbox (`?dropbox=connected|denied|expired|failed`) is a
+  toast, then leaves the address. Under it, only when the feed has consumers, `读取变更 feed 的程序`: one row per consumer
+  (its name, `2 分钟前同步`, `已全部同步` or `落后 32 条（最早一条 3 小时前）`, late or stale in the warning color).
 - **存储**: meters: the object's database against its budget, the texts in the cloud, today's records written against
   20,000 and read against 1,500,000 (each with what happens when it runs out); the counts of pages, visits and texts;
   the index's reach (`正文搜索覆盖全部` or `覆盖 2025年3月 起`).
@@ -782,9 +840,10 @@ likewise (`deploy/bundle-size.mjs`).
 
 - **Status** lives in recall's 设置 and header line, and reaches Home through ops-v1: an `Ops` entrypoint, built in
   phase 1b as mailsort's is, with codes and counts only. Signals: `device_stale` (warning: a device seen in the last 30
-  days without an upload for 24 hours), `archive_behind` (warning: a consumer seen in the last 30 days without a pull
-  for 24 hours, or with an unarchived change older than 24 hours), `no_captures` (warning: yesterday had visits of ten
-  seconds or more on pages that keep their text and no capture of them arrived, not even one recall skipped as a text
+  days without an upload for 24 hours), `archive_not_connected` (warning: the Dropbox backup is not connected, or
+  Dropbox refused its token), `archive_behind` (warning, `hours`: a change has waited more than 24 hours for Dropbox,
+  counted from the connection at the earliest; the feed's consumers raise nothing), `no_captures` (warning: yesterday
+  had visits of ten seconds or more on pages that keep their text and no capture of them arrived, not even one recall skipped as a text
   it had: site-only and no-text pages, and texts that did not change, raise nothing), `items_rejected` (warning:
   uploads lost items in the last 24 hours; an `unsupported_item` waits and is not lost), `storage_high` (warning past
   850 MiB, critical at the budget), `upload_over_budget` (warning: today's row budget ran out), `reads_over_budget`
@@ -793,12 +852,14 @@ likewise (`deploy/bundle-size.mjs`).
   the extension's outbox. Home's entry had `status.type = "none"` while recall was check-only and has its `RECALL`
   binding and `"ops_v1"` since the go-live commit (§11), because Home's deploy waits for every service it binds.
 - **Logs**: one line per upload (batch ID, items accepted and rejected, rows written, a code), per refused machine
-  request (request ID, status, reason), per feed pull (consumer, after, count) and per alarm. Never a URL, host, title
-  or text.
-- **Emergency stops**, fastest first: the extension's switch in `chrome://extensions` (recording stops); deleting the
-  ingest digests from the owner's machine (`wrangler secret delete`: every upload 503); `mint-tokens.mjs --revoke` for
-  a leaked token (only the new token works; `--rotate` would keep the leaked one working until `--retire`); DeletePage
-  for something that should not have been kept.
+  request (request ID, status, reason), per feed pull (request ID, status), per alarm (with the archive pass's state),
+  per Dropbox connection (its outcome) and per archive failure (its code). Never a URL, host, title, text, token, code
+  or path.
+- **Emergency stops**, fastest first: the extension's switch in `chrome://extensions` (recording stops); 设置 → 插件口令
+  → ⋯ → 停用 (every upload 503 within a minute); → 旧口令泄露：立即作废并重新生成 for a leaked token (only the new token
+  works; a plain 重新生成 keeps the old one 24 hours); 设置 → 备份到 Dropbox → 断开 (revoked at Dropbox; the files stay);
+  DeletePage for something that should not have been kept (and, if it must leave the copies too, the files deleted in
+  Dropbox by hand).
 - **Cost guard**: nothing here can bill on Workers Free except R2 past its free tier, which §5.3 keeps far away; Home's
   quota bars show the account's use.
 
@@ -815,7 +876,11 @@ the tests, synthetic tokens of every scrubbed shape.
   the API key consoles, hash routes, trailing dots and the owner's two lists; the segmenter (CJK runs, mixed runs, lone
   characters, NFKC) and query building (phrases, quote doubling, a lone CJK character beside Latin letters, the term
   and length bounds, QUERY_NOT_SEARCHABLE); ingest validation; rendering a change from its row against the contract's
-  fixtures.
+  fixtures; the archive's day file, `state.json` and `VERSION` against `fixtures/archive/` byte for byte, the bounded
+  scan and a change filed by its own commit day (`archive.test.ts`); the Dropbox client (RFC 7636's PKCE example, the
+  authorization URL, the content hash over 4 MiB blocks, ASCII Dropbox-API-Arg, every failure's code and Retry-After:
+  `dropbox.test.ts`); the machine tokens (their shape, only the digest kept, the grace and the revocation, the Worker's
+  minute of memory and the 10-second recheck: `tokens.test.ts`).
 - `worker/test/runtime/*.test.ts` (workerd with a real SQLite RecallState and R2 binding, like mailsort's harness):
   upload to feed to blob end to end; idempotent retries (a visit's older revision, a second capture, a capture with the
   latest text's digest, a replayed document, a visit that began before its page's deletion); the denylist levels and
@@ -833,17 +898,29 @@ the tests, synthetic tokens of every scrubbed shape.
   with an archive far behind and one gone, ops-v1, each held to a bound); ops-v1's `no_captures` and `items_rejected`
   not raised for pages without text, unchanged texts or an `unsupported_item`; the timeline's overlap
   scan; **the rows written per visit revision, per text and per FTS5 insert of 32 KiB of Chinese, measured**; pages
-  against the contract's fixtures; ops-v1's signals; the machine routes' refusals never reaching the object; CPU
-  (`tools/workerd-cpu`): the Worker's requests, the heaviest upload, both search paths, a timeline day of 500 visits.
-- `worker/test/smoke/smoke.mts` (`npm run test:smoke`, in "Recall checks"): the real `wrangler dev` on loopback with
-  synthetic tokens. The extension's own code (`extension/test/smoke-upload.ts`, under its fake `chrome.*`, only the
-  network real) uploads a session; the owner's two lists set through the owner API come back in the upload's answer and
+  against the contract's fixtures; ops-v1's signals; the machine routes' refusals never reaching the object; the
+  machine tokens made in 设置 (`tokens.test.ts`: 503 before one, shown once, only the digest in meta and none in the
+  request log or the status, a repeated request without the token, the grace of 24 hours, `revoke_previous`, delete,
+  Origin and CSRF required, a Worker-secret digest still accepted); the archive pushed to a fake Dropbox
+  (`archive.test.ts`, `fake-dropbox.ts`: the PKCE connection with the App key alone, the state used once and expiring,
+  the refresh token never answered or logged; the first pass writes exactly `fixtures/archive/`; a pass with nothing new
+  makes no call; later changes write their day and state.json, each blob once with `add`; a deletion adds its tombstone
+  and deletes nothing; a large first upload in passes of at most 40 calls, newest day first; 429 with Retry-After,
+  `too_many_write_operations`, doubling backoff; an expired access token refreshed; a refused refresh token
+  disconnecting with `archive_not_connected`; disconnecting, the same app resuming, another app getting everything; a
+  folder of another feed never written into); `scale.test.ts` also connects Dropbox to the two-year store (the status
+  and each archive pass held to a bound); CPU (`tools/workerd-cpu`): the Worker's requests, the heaviest upload, both
+  search paths, a timeline day of 500 visits, the alarm and the archive's passes.
+- `worker/test/smoke/smoke.mts` (`npm run test:smoke`, in "Recall checks"): the real `wrangler dev` on loopback; the
+  owner API makes both machine tokens. The extension's own code (`extension/test/smoke-upload.ts`, under its fake
+  `chrome.*`, only the network real) uploads a session; the owner's two lists set through the owner API come back in the upload's answer and
   the no-text one holds on the server for a text sent before the extension knew it; a host with an underscore and one
   written with a trailing dot are recorded; each token opens its own route only; the feed
   carries every uploaded record and the blob route its bytes and digest; the owner API answers the UI's calls (status,
-  timeline, a Chinese search with a snippet, the page's text); `sync/recall_sync.py --once` fills a fresh archive that
-  the generated codec and the contract's §3 rules accept, line for line and blob for blob; a second pull changes
-  nothing; a DeletePage reaches the archive at the next pull; the dev server's log holds no URL, title, text or token.
+  timeline, a Chinese search with a snippet, the page's text); Dropbox is connected through its OAuth flow (a loopback
+  fake, `DEV_DROPBOX_ORIGIN`), and the archive the alarm writes there is accepted by the generated codec and, read by
+  the contract's rules, holds exactly the feed's records with their blobs; after a DeletePage it gains the tombstone and
+  keeps every file; no delete is ever called; the dev server's log holds no URL, title, text or token.
 - `extension/test/` (Node, fake `chrome.*` APIs and a fake clock): the focus state machine (window and tab changes,
   idle backdating, lock, worker restarts, sleep gaps), visit splitting and revisions (one queued on focus loss,
   coalesced), the capture's rules (no text read on another route of the same document), the outbox (coalescing,
@@ -858,22 +935,22 @@ the tests, synthetic tokens of every scrubbed shape.
   results, snippets, more and its focus, the caps' lines, the coverage lines, a dropped single character named, the
   read budget's line, a typed domain taking the picker's Enter, presets of the last n days, a single custom day, back
   showing the results as they were without a search), the page detail (marks, n and N, the first match scrolled to only
-  below the screen, the capture lines, visits, delete and denylist confirmations), 设置 (stale devices and archives,
-  errors and refusals in words, clock skew, lost and waiting items, meters, the owner's two lists with mask and etag);
+  below the screen, the capture lines, visits, delete and denylist confirmations), 设置 (stale devices, errors and
+  refusals in words, clock skew, lost and waiting items, 插件口令 generated, shown once and copied, regenerated with its
+  grace, revoked, stopped and the export token folded, 备份到 Dropbox's steps, 连接, the outcome toast, the connected state
+  and its failures, 断开, the feed's consumers, meters, the owner's two lists with mask and etag), the header's backup
+  line (connected, waiting, a day behind since the connection, not connected);
   `check-layout.test.ts` (the outlined empty hours, the two-line session rows, the sticky match bar among mailsort's
   rules) and `no-external.test.ts` as mailsort's.
-- `sync/test_recall_sync.py` (unittest, a loopback fake of the two routes): the contract's consumer tests (the golden
-  archive, the same page applied twice, the future change archived whole, every invalid fixture refused, a tombstone's
-  purge across day files, a page of another feed, a crash between every two steps), redirects refused, 401, 409, 410,
-  429, a digest mismatch, a 410 blob skipped and a 404 blob stopping, paths outside the format refused.
 - `proto/test/recall-archive.test.ts` runs already: the contract's fixtures against the codec (the contract's §7).
-- `deploy/test/*.test.mjs`: the production config, the wrapper, secrets kept by a deploy, the owner-machine secrets
-  left out of GitHub, `mint-tokens.mjs` with a fake wrangler, pbcopy and Keychain.
+- `deploy/test/*.test.mjs`: the production config, the wrapper, Worker secrets kept by a deploy, the owner-machine
+  secrets left out of GitHub.
 
 ## 11. Rollout and owner steps
 
-**Phases.** 1a: the extension, ingest, the object and R2, the change feed, `recall-ingest-v1`'s IDL, the reference
-consumer and its image. 1b: the UI. 2, only after a week of 1a's measured sizes: stars (a full snapshot with inlined
+**Phases.** 1a: the extension, ingest, the object and R2, the change feed, `recall-ingest-v1`'s IDL (and, until
+2026-10-11, a reference consumer for the NAS; since then the archive's writer to Dropbox and the tokens in 设置). 1b:
+the UI. 2, only after a week of 1a's measured sizes: stars (a full snapshot with inlined
 images, a screenshot and a note; a `star` kind and the `读过 · 收藏` type, both compatible additions), shown in a
 sandboxed frame (`<iframe sandbox="">` from a raw route answering with `default-src 'none'; img-src data:; style-src
 'unsafe-inline' data:; font-src data:; form-action 'none'; base-uri 'none'`, and a matching `frame-src` in the page's
@@ -903,24 +980,35 @@ CSP).
    without it the deploy stops at its secrets step, and Home's with it.
 4. **After the first deploy**: the object's namespace ID as `[durable_objects]["recall-state"]`, `FIRST_DEPLOY_PENDING`
    emptied and the reconcile matrix's `exclude` removed in the same commit (the inventory refuses a recorded ID while
-   the entry remains, and a guard test holds the exclude equal to it), the generated inventories refreshed.
+   the entry remains, and a guard test holds the exclude equal to it), the generated inventories refreshed (done:
+   `5086599`).
+5. **The archive to Dropbox and the tokens in 设置** (branch `recall-dropbox-archive`, 2026-10-11): schema 2
+   (`archive_days`, `archive_blobs`), the owner API's ConnectDropboxBackup, DisconnectDropboxBackup,
+   RegenerateMachineToken and DeleteMachineToken (additive), the callback route, the ops-v1 signals, and the removal of
+   `sync/`, its image workflow and `deploy/mint-tokens.mjs`. Its deploy changes nothing the owner set: a digest put
+   before stays accepted.
 
-**The owner's steps**, at the end, in their own terminal and browser, in this order:
+**The owner's steps**, all clicks, in this order (the agent builds the extension into its folder first:
+`npm run install-extension` in `recall/extension`, into `~/recall-extension`):
 
-1. Dispatch "Infra apply" (step 2 above; done 2026-10-10), then, before the go-live commit lands, set the CSRF key
-   without seeing it (the go-live commit and its deploy follow):
-   `openssl rand -hex 32 | gh secret set RECALL_CSRF_SIGNING_KEY -R ziyixi/todofy --env production`.
-2. After the first deploy (`wrangler secret put` needs the Worker): `node recall/deploy/mint-tokens.mjs`.
-3. Put the extension into `~/recall-extension` (`npm run install-extension` in `recall/extension`, or the CI artifact
-   unzipped), open `chrome://extensions`, turn on Developer mode, Load unpacked (`⌘⇧G` and the path), paste the token,
-   set the label.
-4. On the NAS, in its Docker: the image by digest, the env file, the archive share at `/archive`
-   (`sync/README.md`). The agent can drive the NAS's web UI in the owner's logged-in browser, confirming each step.
+1. recall → 设置 → 插件口令 → **生成** → **复制** (shown once).
+2. Chrome → `chrome://extensions` → **开发者模式** → **加载已解压的扩展程序** → the folder; the extension's icon (the
+   puzzle-piece menu → recall) opens its options: paste the token, type the device label (the server is filled in),
+   **保存**.
+3. dropbox.com/developers/apps → **Create app** → **Scoped access** → **App folder** → any name → **Create app**;
+   **Permissions**: tick `files.content.write` and `files.content.read` → **Submit**; **Settings** → **OAuth 2** →
+   **Redirect URIs**: add `https://recall.ziyixi.science/api/dropbox/callback`; copy the **App key**.
+4. recall → 设置 → 备份到 Dropbox → paste the App key → **连接** → at Dropbox **Allow**.
+5. The NAS (UGOS) → **Cloud Drives** → add **Dropbox** (the same account) → a sync task from `Apps/<app name>` to a
+   shared folder, direction cloud → NAS.
+
+The CSRF key was set before the go-live commit (`gh secret set RECALL_CSRF_SIGNING_KEY`, done).
 
 **Checks after go-live**: an upload within five minutes of browsing, the device's heartbeat in 设置 and recall's tile
-on Home, the first texts searchable (a Chinese phrase among them), the NAS consumer caught up with a blob whose digest
-matches, the day's rows written against the estimate (FTS5's writes in production decide between 32 and 16 KiB of
-indexed text), and after a week the texts' sizes and `databaseSize` against §5.3.
+on Home, the first texts searchable (a Chinese phrase among them), 设置 → 备份到 Dropbox `已全部备份` with the app
+folder holding `VERSION`, `state.json`, a day file and the texts (and the NAS's shared folder the same after its sync),
+the day's rows written against the estimate (FTS5's writes in production decide between 32 and 16 KiB of indexed
+text), and after a week the texts' sizes and `databaseSize` against §5.3.
 
 ## 12. Defaults to confirm, and review notes
 

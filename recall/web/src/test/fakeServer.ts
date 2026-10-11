@@ -5,7 +5,9 @@
  * where the UI depends on it: SearchPages filters by every field (the words in titles, URLs and texts, ignoring case;
  * the range by overlapping visits; the site with its subdomains) in pages of 10 with a reported cap, and refuses a
  * query of lone CJK characters; ListVisits overlaps its range and pages; UpdateSettings needs an explicit mask and
- * refuses a stale etag. Every request must be a same-origin /api path, and a mutation must carry the CSRF header.
+ * refuses a stale etag; RegenerateMachineToken answers a new token once (a repeated request_id without it);
+ * ConnectDropboxBackup answers an authorization URL and DisconnectDropboxBackup forgets the connection. Every request
+ * must be a same-origin /api path, and a mutation must carry the CSRF header.
  */
 import { vi } from 'vitest'
 import { updatePaths } from '@ziyixi/proto/field-mask'
@@ -28,6 +30,7 @@ import {
   type Visit,
 } from '@ziyixi/proto/recall/ui/v1/page_pb'
 import {
+  ConnectDropboxBackupResponseSchema,
   ListSitesResponseSchema,
   ListVisitsResponseSchema,
   PageType,
@@ -35,7 +38,16 @@ import {
   SearchPagesResponseSchema,
   SortOrder,
 } from '@ziyixi/proto/recall/ui/v1/recall_ui_service_pb'
-import { ServiceStatusSchema, SettingsSchema, type ServiceStatus, type Settings } from '@ziyixi/proto/recall/ui/v1/status_pb'
+import {
+  DropboxBackupSchema,
+  MachineTokenSchema,
+  ServiceStatusSchema,
+  SettingsSchema,
+  type DropboxBackup,
+  type MachineToken,
+  type ServiceStatus,
+  type Settings,
+} from '@ziyixi/proto/recall/ui/v1/status_pb'
 import { searchable } from '../../../shared/segment.ts'
 import { resetClientForTests } from '../api.ts'
 import { splitTerms } from '../marks.ts'
@@ -157,6 +169,23 @@ export class FakeServer {
   status: Partial<ServiceStatus> = {}
   /** GetServiceStatus answers UNAVAILABLE this many more times. */
   statusFailures = 0
+  /** The Dropbox backup (ServiceStatus.dropbox_backup): connected and caught up unless a test sets it. */
+  backup: DropboxBackup = create(DropboxBackupSchema, {
+    name: 'dropboxBackup',
+    appKey: 'syntheticappkey1',
+    connected: true,
+    accountDisplayName: '合成 Dropbox',
+    connectTime: timestampFromMs(at('2026-10-01 10:00')),
+    lastUploadTime: timestampFromMs(NOW - 20 * MINUTE),
+    syncedSeq: 10432,
+  })
+  /** The machine tokens (ServiceStatus.machine_tokens): an ingest token made a week ago, no export token. */
+  tokens: MachineToken[] = [
+    create(MachineTokenSchema, { name: 'machineTokens/ingest', createTime: timestampFromMs(NOW - 7 * 24 * HOUR) }),
+    create(MachineTokenSchema, { name: 'machineTokens/export' }),
+  ]
+  /** The tokens RegenerateMachineToken made, by request_id (a repeated request answers without the token). */
+  private readonly made = new Map<string, MachineToken>()
   settings: Settings = create(SettingsSchema, {
     name: 'settings',
     denylistPatterns: ['bank.example'],
@@ -273,7 +302,6 @@ export class FakeServer {
             create(ServiceStatusSchema, {
               name: 'serviceStatus',
               devices: [{ deviceId: '00000000-0000-4000-8000-0000000000aa', label: 'MacBook · 工作', extensionVersion: '2026.1009.1200', firstSeenTime: timestampFromMs(at('2026-09-01 10:00')), lastHeartbeatTime: timestampFromMs(NOW - 3 * MINUTE) }],
-              archiveConsumers: [{ consumer: 'nas', syncedSeq: 10432, lastPullTime: timestampFromMs(NOW - 2 * MINUTE) }],
               headSeq: 10432,
               firstVisitTime: timestampFromMs(at('2026-09-01 10:00')),
               pageCount: 1234,
@@ -287,10 +315,42 @@ export class FakeServer {
               rowsReadTodayCount: 52000,
               dailyReadBudget: 1500000,
               build: '0123456789abcdef',
+              dropboxBackup: this.backup,
+              machineTokens: this.tokens,
             }),
             this.status,
           ),
         )
+      },
+      connectDropboxBackup: (request) => {
+        if (!/^[a-z0-9]{8,32}$/.test(request.appKey)) throw new RpcError(Code.INVALID_ARGUMENT, 'INVALID_APP_KEY', 'app key')
+        return Promise.resolve(create(ConnectDropboxBackupResponseSchema, { authorizeUrl: `/oauth2/authorize?client_id=${request.appKey}&state=s` }))
+      },
+      disconnectDropboxBackup: () => {
+        this.backup = create(DropboxBackupSchema, { name: 'dropboxBackup', appKey: this.backup.appKey, syncedSeq: this.backup.syncedSeq, lastUploadTime: this.backup.lastUploadTime })
+        return Promise.resolve(this.backup)
+      },
+      regenerateMachineToken: (request) => {
+        const route = request.name.split('/')[1] ?? ''
+        if (!['ingest', 'export'].includes(route)) notFound()
+        const before = this.made.get(request.requestId)
+        if (before !== undefined) return Promise.resolve(create(MachineTokenSchema, { ...before, token: '' }))
+        const previous = this.tokens.find((item) => item.name === request.name)
+        const token = create(MachineTokenSchema, {
+          name: request.name,
+          token: `recall_${route}_${'T'.repeat(43)}`,
+          createTime: timestampFromMs(NOW),
+          ...(previous?.createTime !== undefined && !request.revokePrevious ? { previousExpireTime: timestampFromMs(NOW + 24 * HOUR) } : {}),
+        })
+        this.made.set(request.requestId, token)
+        this.tokens = [...this.tokens.filter((item) => item.name !== request.name), create(MachineTokenSchema, { ...token, token: '' })]
+        return Promise.resolve(token)
+      },
+      deleteMachineToken: (request) => {
+        const current = this.tokens.find((item) => item.name === request.name)
+        if (current?.createTime === undefined) notFound()
+        this.tokens = [...this.tokens.filter((item) => item.name !== request.name), create(MachineTokenSchema, { name: request.name })]
+        return Promise.resolve(create(EmptySchema, {}))
       },
     }
     this.transcoder = new HttpTranscoder(RecallUiService, handlers, {

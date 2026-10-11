@@ -9,5 +9,3 @@ extension/dist/
 worker/.wrangler/
 .dev.vars*
 !.dev.vars.example
-# Files mint-tokens.mjs writes for the NAS container (mode 0600), never committed
-recall-sync.env

@@ -30,7 +30,10 @@ export const MINUTE = 60 * SECOND;
 export const HOUR = 60 * MINUTE;
 export const DAY = 24 * HOUR;
 
-/** Synthetic machine tokens (the shape mint-tokens.mjs makes), and their digests as the Worker holds them. */
+/**
+ * Synthetic machine tokens (the shape 设置 makes: tokens.ts), and their digests as Worker secrets (the older way, still
+ * accepted). A harness started with these bindings undefined has only the tokens RecallState makes.
+ */
 export const INGEST_TOKEN = `recall_ingest_${'S'.repeat(20)}ynthetic${'I'.repeat(15)}`;
 export const EXPORT_TOKEN = `recall_export_${'S'.repeat(20)}ynthetic${'E'.repeat(15)}`;
 export const sha256 = (text: string | Uint8Array) => createHash('sha256').update(text).digest('hex');
@@ -80,6 +83,8 @@ export interface HarnessOptions {
   readonly bindings?: Record<string, string | undefined>;
   /** Extra outbound routes by URL (the Access certs endpoint). */
   readonly routes?: Map<string, () => Response>;
+  /** Every other outbound request (a fake Dropbox: fake-dropbox.ts). */
+  readonly outbound?: (request: Request) => Promise<Response>;
   readonly inspectorPort?: number;
   /** Runs RecallState in a Worker of its own, as Cloudflare runs a Durable Object apart from its caller. */
   readonly splitObject?: boolean;
@@ -90,6 +95,7 @@ export interface StepResult {
   readonly purging: boolean;
   readonly demoting: boolean;
   readonly deferred: boolean;
+  readonly archive: 'idle' | 'done' | 'more' | 'retry';
   readonly code: string;
 }
 
@@ -119,7 +125,7 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
   const temp = await mkdtemp(join(tmpdir(), 'recall-runtime-'));
   const script = await workerBundle();
   const logs: string[] = [];
-  const outbound = (request: Request) => options.routes?.get(request.url)?.() ?? new Response('no network in tests', { status: 599 });
+  const outbound = async (request: Request) => options.routes?.get(request.url)?.() ?? (await options.outbound?.(request)) ?? new Response('no network in tests', { status: 599 });
   const bindings = Object.fromEntries(Object.entries({ ...SYNTHETIC_BINDINGS, ...options.bindings }).filter((entry): entry is [string, string] => entry[1] !== undefined));
   const recall = (name: string, split: boolean) => ({
     name,

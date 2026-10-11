@@ -1409,8 +1409,9 @@ jobs:
   # recall (recall/, docs in recall/docs/design.md): the Worker "recall" on the Custom Domain recall.ziyixi.science, the
   # whole host behind the Access application "recall" and its three machine routes behind the Bypass application
   # "recall machine routes" (infra/). One SQLite Durable Object, RecallState, and the private R2 bucket recall-store; no
-  # D1, no service binding. The machine tokens' digests are not part of this job: the owner puts them with
-  # recall/deploy/mint-tokens.mjs, and --secrets-file keeps them (recall/deploy/test/secrets-kept.test.mjs). recall has
+  # D1, no service binding. The machine tokens are not part of this job: the owner makes them in recall's 设置 (only their
+  # digests, in RecallState), and --secrets-file keeps any digest put by hand as a Worker secret
+  # (recall/deploy/test/secrets-kept.test.mjs). recall has
   # no operational switch (its emergency stops are the owner's, recall/docs/design.md section 9). "Infra apply" created
   # both Access applications and the bucket (2026-10-10); the go-live commit added the AUD and emptied CHECK_ONLY.
   recall-deploy:
@@ -1574,7 +1575,7 @@ jobs:
             /api/machine/v1/other
       # The three machine routes reach the Worker without an Access login, through the Bypass application "recall
       # machine routes" (recall/docs/design.md section 2.1), and the Worker refuses a request without a token itself:
-      # 401 UNAUTHORIZED once the owner put the tokens' digests (mint-tokens.mjs), 503 NOT_CONFIGURED before, each a
+      # 401 UNAUTHORIZED once the owner made the route's token in 设置, 503 NOT_CONFIGURED before, each a
       # google.rpc.Status in JSON. A 302 to the Access login page means the Bypass does not cover that route. Only "no
       # connection" and a 5xx that is not the Worker's own answer are retried (10 x 15 s); nothing is followed, and only
       # the path, the status and the reason are printed.

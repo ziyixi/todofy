@@ -22,20 +22,27 @@ bundle); `test/contract.test.ts` reads what the extension builds with the genera
 
 ## Build and install
 
+Building is the agent's (or a developer's) part, on the owner's Mac or from CI:
+
 ```sh
 npm ci
-npm run build                 # dist/extension/ and dist/recall-extension-<commit>.zip
+npm run build                 # dist/extension/ (the unpacked extension) and dist/recall-extension-<commit>.zip
 npm run install-extension     # into ~/recall-extension (or: -- <folder or zip> [--target <folder>])
 ```
 
 `install-extension` takes this package's build, a build folder or zip, or the CI artifact `recall-extension-<sha>.zip`
 as downloaded; it needs no `npm ci`. It unpacks beside the target, checks the files, the version and the key, swaps
 the folders with two renames (the old one becomes `~/recall-extension.prev`) and writes `BUILD` last. The running
-extension reloads into the new build on its next tick.
+extension reloads into the new build on its next tick. Keep the folder outside Google Drive (a cloud-only file there
+would fail to load) and in the same place, so Chrome finds it again after an update.
 
-The first time: `chrome://extensions`, Developer mode on, Load unpacked, `~/recall-extension` (outside Google Drive: a
-cloud-only file there would fail to load). Then open the extension's options, paste the ingest token from
-`node recall/deploy/mint-tokens.mjs` and set the device label.
+The owner's part, clicks only, once the folder is in place:
+
+1. Chrome → `chrome://extensions` → turn on **开发者模式** (Developer mode) → **加载已解压的扩展程序** (Load unpacked) →
+   choose the folder (`~/recall-extension`; `⌘⇧G` types a path in the picker).
+2. recall → 设置 → **插件口令** → **生成**, then **复制** (the token is shown this once).
+3. Click the extension's icon (Chrome's puzzle-piece menu → recall): its options page opens. The server is already
+   `https://recall.ziyixi.science`; paste the token, set the device label (`MacBook · 工作`), **保存**.
 
 ## Checks
 

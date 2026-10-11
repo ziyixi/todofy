@@ -3,14 +3,16 @@ import { mountApp, type Host } from '../app.ts'
 import { NOW, settle, type FakeServer } from './fakeServer.ts'
 
 export interface TestHost extends Host {
-  /** The URLs `open` was asked for, and the questions `confirm` was asked. */
+  /** The URLs `open` and `navigate` were asked for, and the questions `confirm` was asked. */
   readonly opened: string[]
+  readonly navigated: string[]
   readonly asked: string[]
 }
 
 /** A host at NOW that answers every confirmation with `yes`. */
 export function testHost(yes = true, desktop = false): TestHost {
   const opened: string[] = []
+  const navigated: string[] = []
   const asked: string[] = []
   return {
     now: () => NOW,
@@ -21,8 +23,12 @@ export function testHost(yes = true, desktop = false): TestHost {
     open: (url) => {
       opened.push(url)
     },
+    navigate: (url) => {
+      navigated.push(url)
+    },
     desktop: () => desktop,
     opened,
+    navigated,
     asked,
   }
 }

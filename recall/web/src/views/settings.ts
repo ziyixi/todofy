@@ -1,24 +1,30 @@
 /**
- * 设置 (`/settings`, ../../docs/design.md §8.7): four cards and the build, in the owner's words (a code stays in a
+ * 设置 (`/settings`, ../../docs/design.md §8.7): five cards and the build, in the owner's words (a code stays in a
  * tooltip only).
  *
  * - 设备: each device's label, latest upload (warning after 24 hours, with what to check), version, outbox, its last
- *   error as a sentence that says what to do, and clock skew; without one, the three steps to connect one; items
- *   uploads lost in the last 7 days, and items waiting for a recall that reads them.
- * - 归档: each archive consumer's last pull and how far behind it is; without one, where the archive contract lives.
+ *   error as a sentence that says what to do, and clock skew; without one, the three steps to connect one (clicks
+ *   only); items uploads lost in the last 7 days, and items waiting for a recall that reads them.
+ * - 插件口令: the extension's token: 生成 or 重新生成 (the old one works 24 hours more), ⋯ to revoke the old one at once
+ *   or to stop uploads; a new token is shown once, to copy into the extension's options. The export token of the
+ *   change feed, optional, folded under it.
+ * - 备份到 Dropbox: not connected, the four steps at Dropbox and the App key field with 连接 (the browser goes to
+ *   Dropbox and comes back here with `?dropbox=<outcome>`); connected, the account, the last upload, what waits, the
+ *   last failure in words and 断开. The feed's own consumers, if any, under it.
  * - 存储: the database against its budget, the texts kept in the cloud, today's records written and read against the
  *   daily budgets, the counts and how far back the text index reaches.
  * - 网站名单: the owner's patterns in two lists, 只记网站 (no title or path: their own banks) and 不存正文, each with
  *   ✕, an add field with its list chosen, the built-in lists folded. Every change sends only the two lists with the
  *   settings' etag.
  */
-import type { ServiceStatus, Settings } from '@ziyixi/proto/recall/ui/v1/status_pb'
+import { create } from '@ziyixi/proto/protobuf'
+import { MachineTokenSchema, type ArchiveConsumer, type DropboxBackup, type MachineToken, type ServiceStatus, type Settings } from '@ziyixi/proto/recall/ui/v1/status_pb'
 import { api } from '../api.ts'
-import { card, disclosure, emptyState, kpi, meter, segmented } from '../components.ts'
+import { card, disclosure, kpi, menu, meter, segmented } from '../components.ts'
 import { button, el, fill, toast } from '../dom.ts'
 import { ago, compact, count, monthText, ms, span } from '../format.ts'
 import type { ViewContext } from '../app.ts'
-import { behindText, consumerName, late, STORAGE_HIGH_MIB } from '../health.ts'
+import { backupLate, behindText, consumerName, late, STORAGE_HIGH_MIB } from '../health.ts'
 import { act, frame } from './common.ts'
 
 /** R2's free storage, shared by every app of the account (10 GB-month). */
@@ -37,16 +43,48 @@ const REFUSALS: Readonly<Record<string, string>> = {
   id_conflict: '编号冲突',
 }
 
+/** The Dropbox backup's last failure in words, and whether it needs the owner. */
+const BACKUP_ERRORS: Readonly<Record<string, readonly [string, boolean]>> = {
+  dropbox_refused: ['Dropbox 撤销了授权（或应用被删除了）：重新连接', true],
+  dropbox_permission: ['Dropbox 应用缺少权限：在应用的 Permissions 里勾选 files.content.write 和 files.content.read，断开后再连接', true],
+  dropbox_full: ['Dropbox 空间不足：腾出空间后会自动继续', true],
+  dropbox_other_feed: ['这个 Dropbox 应用文件夹里已有另一份 recall 的归档：新建一个 Dropbox 应用，断开后用它的 App key 连接', true],
+  dropbox_conflict: ['Dropbox 里有同名但内容不同的文件，没有覆盖它', true],
+  dropbox_bad_request: ['Dropbox 拒绝了请求：断开后检查 App key 再连接', true],
+  dropbox_revoke_failed: ['已断开，但 Dropbox 那边的授权没能撤销：可在 Dropbox 网站的 设置 → 已连接的应用 里移除', false],
+  dropbox_rate_limited: ['Dropbox 暂时限流，稍后自动继续', false],
+  dropbox_unavailable: ['暂时连不上 Dropbox，稍后自动重试', false],
+  dropbox_token: ['Dropbox 的访问令牌到期了，正在自动续期', false],
+  r2_unavailable: ['云端存储暂时不可用，稍后自动重试', false],
+}
+
+/** What the browser came back from Dropbox with (/settings?dropbox=<outcome>). */
+const CONNECT_OUTCOMES: Readonly<Record<string, string>> = {
+  connected: '已连接 Dropbox：几分钟内开始备份',
+  denied: '你在 Dropbox 取消了授权，没有连接',
+  expired: '这次连接已过期：请再点一次 连接',
+  failed: '没有连上 Dropbox：检查 App key 和 Redirect URI 后再试',
+}
+
 export async function renderSettings(ctx: ViewContext): Promise<void> {
   const now = ctx.host.now()
+  const outcome = new URLSearchParams(window.location.search).get('dropbox')
+  if (outcome !== null) {
+    // Once: the outcome leaves the address, so a reload says nothing again.
+    ctx.replace('/settings')
+    toast(CONNECT_OUTCOMES[outcome] ?? CONNECT_OUTCOMES['failed'] ?? '')
+  }
   await frame(ctx.main, '设置', async (body) => {
     const [status, settings] = await Promise.all([ctx.status(), api.getSettings({ name: 'settings' })])
     const denylist = el('div', { class: 'denylist' })
     paintDenylist(denylist, settings)
+    const tokens = el('div', { class: 'tokens' })
+    paintTokens(ctx, tokens, status.machineTokens)
     fill(
       body,
       devicesCard(status, now),
-      archiveCard(status, now),
+      card('插件口令', '', tokens),
+      backupCard(ctx, status, now),
       storageCard(status),
       card('网站名单', `${String(settings.siteOnlyPatterns.length + settings.denylistPatterns.length)} 条`, denylist),
       status.build === '' ? null : el('p', { class: 'meta build' }, `版本 ${status.build.slice(0, 7)}`),
@@ -68,9 +106,9 @@ function devicesCard(status: ServiceStatus, now: number): HTMLElement {
       el(
         'ol',
         { class: 'steps' },
-        el('li', {}, '在自己的电脑上运行 ', el('code', { class: 'mono' }, 'node recall/deploy/mint-tokens.mjs'), '，生成上传令牌（已复制到剪贴板）'),
-        el('li', {}, '在 Chrome 打开 ', el('code', { class: 'mono' }, 'chrome://extensions'), '，打开开发者模式，加载扩展的文件夹'),
-        el('li', {}, '在扩展的选项里粘贴令牌，填上设备名'),
+        el('li', {}, '在下面的 插件口令 里点 生成，复制口令'),
+        el('li', {}, '在 Chrome 打开 ', el('code', { class: 'mono' }, 'chrome://extensions'), '，打开 开发者模式，点 加载已解压的扩展程序，选扩展的文件夹'),
+        el('li', {}, '在扩展的选项里粘贴口令，填上设备名（服务器地址已经填好）'),
       ),
       ...notes,
     )
@@ -105,34 +143,212 @@ function devicesCard(status: ServiceStatus, now: number): HTMLElement {
   )
 }
 
-function archiveCard(status: ServiceStatus, now: number): HTMLElement {
-  if (status.archiveConsumers.length === 0) {
-    return card('归档', '', emptyState('还没有归档连上', ''), el('p', { class: 'hint' }, '归档的接口与格式见仓库里的 ', el('code', { class: 'mono' }, 'contracts/recall-archive-v1/README.md')))
+/** The two machine tokens' words. */
+const TOKEN_WORDS = {
+  ingest: {
+    name: '插件口令',
+    none: '还没有口令：生成后粘贴到扩展的选项里，扩展才能上传。',
+    regenerate: '重新生成插件口令？旧口令 24 小时内仍可用，在这之前把新口令粘贴到扩展的选项里。',
+    revoke: '旧口令会立即失效，扩展换上新口令前无法上传。继续？',
+    remove: '停用插件口令？扩展会立即无法上传，直到你再生成一个。',
+    secret: '另有一个在 Worker 密钥里设置的口令同样有效，只有删除那个密钥才能停用它。',
+  },
+  export: {
+    name: '导出口令',
+    none: '只给通过变更 feed 读取全部记录的程序用；Dropbox 备份不需要它。',
+    regenerate: '重新生成导出口令？旧口令 24 小时内仍可用。',
+    revoke: '旧导出口令会立即失效。继续？',
+    remove: '停用导出口令？读取变更 feed 的程序会立即失去访问。',
+    secret: '另有一个在 Worker 密钥里设置的导出口令同样有效，只有删除那个密钥才能停用它。',
+  },
+} as const
+
+type Route = keyof typeof TOKEN_WORDS
+
+/** The 插件口令 card's body: the extension's token, and the optional export token folded under it. */
+function paintTokens(ctx: ViewContext, box: HTMLElement, tokens: readonly MachineToken[], shown: { readonly route: Route; readonly token: string } | null = null): void {
+  const of = (route: Route) => tokens.find((item) => item.name === `machineTokens/${route}`) ?? create(MachineTokenSchema, { name: `machineTokens/${route}` })
+  const repaint = (route: Route, next: MachineToken, token: string | null) => {
+    paintTokens(ctx, box, [...tokens.filter((item) => item.name !== next.name), next], token === null || token === '' ? null : { route, token })
   }
+  const controls = (route: Route): HTMLElement[] => {
+    const token = of(route)
+    const words = TOKEN_WORDS[route]
+    const made = ms(token.createTime)
+    const regenerate = async (revokePrevious: boolean) => {
+      await act(
+        (requestId) => api.regenerateMachineToken({ name: token.name, revokePrevious, requestId }),
+        `已生成新的${words.name}`,
+        (answer) => {
+          // A repeated request answers without the token (it is shown once): the owner makes another.
+          if (answer.token === '') toast(`没有收到新${words.name}：请再生成一次`)
+          repaint(route, answer, answer.token)
+        },
+      )
+    }
+    const remove = async () => {
+      if (!ctx.host.confirm(words.remove)) return
+      await act((requestId) => api.deleteMachineToken({ name: token.name, requestId }), `已停用${words.name}`, () => {
+        repaint(route, create(MachineTokenSchema, { name: token.name, workerSecret: token.workerSecret }), null)
+      })
+    }
+    const until = ms(token.previousExpireTime)
+    const parts: HTMLElement[] = []
+    if (made === null) {
+      parts.push(el('p', { class: 'hint' }, words.none), el('div', { class: 'actions' }, button('生成', () => void regenerate(false))))
+    } else {
+      parts.push(
+        el(
+          'div',
+          { class: 'row-head' },
+          el('span', { class: 'row-title' }, words.name),
+          el('span', { class: 'meta' }, `${ago(made, ctx.host.now())}生成`),
+          menu(`${words.name}的更多操作`, [
+            [
+              '旧口令泄露：立即作废并重新生成',
+              () => {
+                if (ctx.host.confirm(words.revoke)) void regenerate(true)
+              },
+              'danger',
+            ],
+            ['停用', () => void remove(), 'danger'],
+          ]),
+        ),
+      )
+      if (until !== null) parts.push(el('p', { class: 'hint' }, `旧口令 ${span(until - ctx.host.now())}内仍可用`))
+      parts.push(
+        el(
+          'div',
+          { class: 'actions' },
+          button('重新生成', () => {
+            if (ctx.host.confirm(words.regenerate)) void regenerate(false)
+          }),
+        ),
+      )
+    }
+    if (token.workerSecret) parts.push(el('p', { class: 'hint' }, words.secret))
+    if (shown !== null && shown.route === route) parts.push(onceBox(shown.token, words.name))
+    return parts
+  }
+  fill(box, ...controls('ingest'), disclosure('导出口令（可选）', ...controls('export')))
+  if (shown?.route === 'export') box.querySelector('details')?.setAttribute('open', '')
+}
+
+/** A new token, shown this once: read-only, selected, with 复制 and what to do with it. */
+function onceBox(token: string, name: string): HTMLElement {
+  const field = el('input', { type: 'text', readonly: true, value: token, class: 'mono', 'aria-label': `新的${name}`, spellcheck: 'false', autocomplete: 'off' })
+  const copy = async () => {
+    field.select()
+    try {
+      await navigator.clipboard.writeText(token)
+      toast(`已复制${name}`)
+    } catch {
+      toast('没能复制：已选中口令，请手动复制')
+    }
+  }
+  return el(
+    'div',
+    { class: 'token-once', role: 'note' },
+    el('p', { class: 'hint warn' }, `新的${name}只显示这一次：现在复制，粘贴到扩展的选项里。离开或刷新这一页后不会再显示。`),
+    el('div', { class: 'actions' }, field, button('复制', () => void copy())),
+    el('p', { class: 'hint' }, `扩展里的服务器地址：${window.location.origin}`),
+  )
+}
+
+/** The 备份到 Dropbox card: the connection or the steps to make one, and the feed's own consumers under it. */
+function backupCard(ctx: ViewContext, status: ServiceStatus, now: number): HTMLElement {
+  const backup = status.dropboxBackup
+  const body = backup?.connected === true ? connectedBackup(ctx, backup, now) : connectBackup(ctx, backup)
+  const consumers = status.archiveConsumers
   return card(
-    '归档',
+    '备份到 Dropbox',
     '',
+    ...body,
+    consumers.length === 0 ? null : el('h3', {}, '读取变更 feed 的程序'),
+    consumers.length === 0 ? null : el('ul', { class: 'rows' }, ...consumers.map((consumer) => consumerRow(consumer, now))),
+  )
+}
+
+function errorLine(backup: DropboxBackup | undefined): HTMLElement | null {
+  if (backup === undefined || backup.errorCode === '') return null
+  const [text, urgent] = BACKUP_ERRORS[backup.errorCode] ?? ['备份到 Dropbox 时出错，稍后自动重试', false]
+  return el('p', { class: urgent ? 'hint warn' : 'hint', title: backup.errorCode }, text)
+}
+
+/** Not connected: the steps at Dropbox, the App key and 连接. */
+function connectBackup(ctx: ViewContext, backup: DropboxBackup | undefined): HTMLElement[] {
+  const field = el('input', { type: 'text', placeholder: 'App key', 'aria-label': 'Dropbox App key', autocomplete: 'off', spellcheck: 'false', autocapitalize: 'none', value: backup?.appKey ?? '' })
+  const connect = async () => {
+    const appKey = field.value.trim()
+    if (appKey === '') {
+      toast('先粘贴 Dropbox 应用的 App key')
+      return
+    }
+    await act((requestId) => api.connectDropboxBackup({ name: 'dropboxBackup', appKey, requestId }), '正在前往 Dropbox…', (answer) => {
+      ctx.host.navigate(answer.authorizeUrl)
+    })
+  }
+  field.addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter') return
+    event.preventDefault()
+    void connect()
+  })
+  return [
+    errorLine(backup),
+    el('p', {}, '还没有连接。recall 会把归档（访问记录、正文和删除记录）大约每小时写进你自己的 Dropbox 应用文件夹；NAS 再用 Cloud Drives 把它同步下来。连接一次：'),
     el(
-      'ul',
-      { class: 'rows' },
-      ...status.archiveConsumers.map((consumer) => {
-        const pulled = ms(consumer.lastPullTime)
-        const oldest = ms(consumer.oldestUnsyncedTime)
-        // A stale archive is not counted: its oldest change not archived says how far behind it is.
-        const behind = oldest === null ? '已全部同步' : consumer.stale ? `最早一条没同步的是 ${ago(oldest, now)}` : `落后 ${behindText(consumer.behindCount)}（最早一条 ${ago(oldest, now)}）`
-        return el(
-          'li',
-          {},
-          el(
-            'div',
-            { class: 'row-head' },
-            el('span', { class: 'row-title' }, consumerName(consumer.consumer)),
-            el('span', { class: consumer.stale ? 'meta warn' : 'meta', title: `seq ${String(consumer.syncedSeq)}` }, pulled === null ? '还没同步' : `${ago(pulled, now)}同步`),
-          ),
-          el('p', { class: consumer.stale || late(oldest, now) ? 'facts warn' : 'facts' }, behind),
-        )
-      }),
+      'ol',
+      { class: 'steps' },
+      el('li', {}, '在 Dropbox 网站打开 ', el('code', { class: 'mono' }, 'dropbox.com/developers/apps'), '，Create app：Scoped access → App folder → 任意名字'),
+      el('li', {}, '在应用的 Permissions 里勾选 files.content.write 和 files.content.read，点 Submit'),
+      el('li', {}, '在 Settings → OAuth 2 → Redirect URIs 里加上 ', el('code', { class: 'mono' }, `${window.location.origin}/api/dropbox/callback`)),
+      el('li', {}, '复制同一页的 App key，粘贴到这里，点 连接，在 Dropbox 里允许'),
     ),
+    el('div', { class: 'actions' }, field, button('连接', () => void connect())),
+  ].filter((node): node is HTMLElement => node !== null)
+}
+
+/** Connected: the account, the last upload, what waits, the last failure, 断开. */
+function connectedBackup(ctx: ViewContext, backup: DropboxBackup, now: number): HTMLElement[] {
+  const uploaded = ms(backup.lastUploadTime)
+  const oldest = ms(backup.oldestPendingTime)
+  const behind = backupLate(backup.oldestPendingTime, backup.connectTime, now)
+  const disconnect = async () => {
+    if (!ctx.host.confirm('断开 Dropbox？已经备份的文件留在 Dropbox 里；之后的新记录不再上传，直到重新连接。')) return
+    await act((requestId) => api.disconnectDropboxBackup({ name: 'dropboxBackup', requestId }), '已断开 Dropbox', async () => {
+      await ctx.go('/settings')
+    })
+  }
+  return [
+    el(
+      'div',
+      { class: 'row-head' },
+      el('span', { class: 'row-title' }, backup.accountDisplayName === '' ? 'Dropbox' : `Dropbox · ${backup.accountDisplayName}`),
+      el('span', { class: 'meta', title: `seq ${String(backup.syncedSeq)}` }, uploaded === null ? '还没上传' : `${ago(uploaded, now)}上传`),
+    ),
+    el('p', { class: behind ? 'facts warn' : 'facts' }, oldest === null ? '已全部备份' : `待备份 ${behindText(backup.pendingCount)}（最早一条 ${ago(oldest, now)}）`),
+    errorLine(backup),
+    el('p', { class: 'hint' }, '只增不删：删除页面后，备份里多一条删除记录，原来的文件留在 Dropbox 里。'),
+    el('div', { class: 'actions' }, button('断开', () => void disconnect(), { class: 'quiet' })),
+  ].filter((node): node is HTMLElement => node !== null)
+}
+
+/** A feed consumer: its name, its last pull and how far behind it is. */
+function consumerRow(consumer: ArchiveConsumer, now: number): HTMLElement {
+  const pulled = ms(consumer.lastPullTime)
+  const oldest = ms(consumer.oldestUnsyncedTime)
+  // A stale consumer is not counted: its oldest change not taken says how far behind it is.
+  const behind = oldest === null ? '已全部同步' : consumer.stale ? `最早一条没同步的是 ${ago(oldest, now)}` : `落后 ${behindText(consumer.behindCount)}（最早一条 ${ago(oldest, now)}）`
+  return el(
+    'li',
+    {},
+    el(
+      'div',
+      { class: 'row-head' },
+      el('span', { class: 'row-title' }, consumerName(consumer.consumer)),
+      el('span', { class: consumer.stale ? 'meta warn' : 'meta', title: `seq ${String(consumer.syncedSeq)}` }, pulled === null ? '还没同步' : `${ago(pulled, now)}同步`),
+    ),
+    el('p', { class: consumer.stale || late(oldest, now) ? 'facts warn' : 'facts' }, behind),
   )
 }
 

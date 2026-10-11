@@ -315,5 +315,5 @@ export async function harness(options: { storageUsage?: number } = {}): Promise<
   return { browser, net, clock, ctx };
 }
 
-/** A synthetic ingest token in mint-tokens.mjs's shape. */
+/** A synthetic ingest token in the shape recall's 设置 makes. */
 export const INGEST_TOKEN = `recall_ingest_${'A'.repeat(43)}`;

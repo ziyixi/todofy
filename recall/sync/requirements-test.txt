@@ -1,9 +1,0 @@
-# The reference JSON Schema validator for test_recall_sync.py's GeneratedSchemaTest only (recall_sync.py itself needs
-# nothing outside the standard library). Pinned to the versions of todofy/uv.lock. Recall checks runs:
-#   uv run --no-project --python 3.12 --with-requirements sync/requirements-test.txt python -m unittest discover -s sync
-jsonschema==4.26.0
-jsonschema-specifications==2025.9.1
-referencing==0.37.0
-attrs==26.1.0
-rpds-py==2026.6.3
-typing-extensions==4.16.0

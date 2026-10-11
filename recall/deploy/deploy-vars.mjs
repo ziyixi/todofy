@@ -10,7 +10,8 @@
 //   like mailsort) and the key from recall's own RECALL_CSRF_SIGNING_KEY.
 //
 // The digests of the two machine tokens (INGEST_TOKEN_SHA256, EXPORT_TOKEN_SHA256 and their _PREVIOUS) are never part
-// of a deploy: the owner puts them from their own machine (mint-tokens.mjs). The secrets file never names them, and
+// of a deploy: the owner makes the tokens in recall's 设置 (RecallState keeps their digests), and a digest put by hand
+// as a Worker secret stays accepted. The secrets file never names them, and
 // this wrapper refuses a RECALL_WORKER_SECRETS map that does, so they can neither come from GitHub nor be overwritten
 // by a deploy; and `wrangler deploy --secrets-file` keeps every secret the file does not name
 // (test/secrets-kept.test.mjs checks the pinned wrangler), so a deploy never deletes them either.
@@ -53,7 +54,7 @@ export class SettingError extends Error {
 /** Worker var <- environment name. An absent or empty value is refused. */
 export const INJECTED = [{ name: 'BUILD_SHA', from: 'GITHUB_SHA', kind: 'build', pattern: /^[0-9a-f]{40}$/ }]
 
-/** The machine tokens' digests: put by mint-tokens.mjs from the owner's machine, never by a deploy. */
+/** The machine tokens' optional Worker-secret digests: put by hand, never by a deploy. */
 export const OWNER_ONLY_SECRETS = ['INGEST_TOKEN_SHA256', 'INGEST_TOKEN_SHA256_PREVIOUS', 'EXPORT_TOKEN_SHA256', 'EXPORT_TOKEN_SHA256_PREVIOUS']
 
 function checked(env, name, pattern) {

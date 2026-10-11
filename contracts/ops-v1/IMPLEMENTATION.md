@@ -584,7 +584,9 @@ mailsort (`mailsort/`, Worker `mailsort`, `mailsort/docs/design.md` §10) joined
 
 recall (`recall/`, Worker `recall`, `recall/docs/design.md` §9) joined `OpsStatus.app` (an open list) as `recall`, so
 that its `Ops` entrypoint writes a valid status; fixtures `OpsStatus/recall-ok.json` and `OpsStatus/recall-degraded.json`
-(also its golden bytes, `recall/worker/test/ops-golden.test.ts`). Nothing of the other apps' surface changed. Until its
+(also its golden bytes, `recall/worker/test/ops-golden.test.ts`). Nothing of the other apps' surface changed. On
+2026-10-11 its archive moved to its own writer into the owner's Dropbox: `archive_behind` now measures that writer
+(`hours`, `since`) instead of feed consumers, and `archive_not_connected` is new (signal codes are open). Until its
 go-live commit the dashboard's `UNBOUND_OPS_APPS` (`dashboard/worker/src/ops-client.ts`) kept it out of the apps it
 calls; since then the dashboard binds `RECALL` (Home's deploy waits for every service it binds). recall has no guard:
 it lists no capability, `setGuard` rejects with `invalid_input` as Fleet's does, and the dashboard never sends it one.

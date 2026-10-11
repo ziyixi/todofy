@@ -164,12 +164,13 @@ const SIGNALS: Readonly<Record<string, string>> = {
   ai_quota_exhausted: 'Workers AI 今日额度已用完，邮件顺延到明天',
   // recall
   device_stale: '有浏览器超过 24 小时未上传',
-  archive_behind: '归档落后超过 24 小时',
+  archive_not_connected: '浏览记录还没连上 Dropbox 备份',
+  archive_behind: 'Dropbox 备份落后超过 24 小时',
   no_captures: '昨天读过的页面没有收到正文',
   items_rejected: '近 24 小时有上传条目被拒收',
   storage_high: '存储接近预算',
   upload_over_budget: '今日写入额度已用完，上传顺延',
-  reads_over_budget: '今日读取额度已用完，归档已暂停',
+  reads_over_budget: '今日读取额度已用完，变更 feed 已暂停',
   no_device: '尚无浏览器上传',
   // dashboard digest items
   usage_unavailable: '用量数据获取失败',

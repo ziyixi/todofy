@@ -26,6 +26,44 @@ export const FEED_MAX_LIMIT = 500;
 /** Archive consumers recorded at most (the one unseen longest goes first). */
 export const CONSUMERS_MAX = 8;
 
+// ---- the machine tokens (tokens.ts, machine.ts) -------------------------------------------------------------------
+
+/** A regenerated token's predecessor keeps working this long, so the extension uploads until it has the new one. */
+export const TOKEN_GRACE_MS = DAY;
+/**
+ * The Worker keeps RecallState's token digests in memory this long: a new, revoked or deleted token holds everywhere
+ * within it. A bearer the kept digests refuse asks RecallState again once they are TOKEN_RECHECK_MS old, so a new token
+ * works within seconds while refused requests reach the object at most once per TOKEN_RECHECK_MS and isolate.
+ */
+export const TOKEN_CACHE_MS = MINUTE;
+export const TOKEN_RECHECK_MS = 10 * SECOND;
+
+// ---- the archive and its backup to Dropbox (archive.ts, backup.ts, dropbox.ts) ---------------------------------------
+
+/** A change waits about this long for the archive: the alarm comes this soon after a change, unless it is due sooner. */
+export const ARCHIVE_INTERVAL_MS = HOUR;
+/** Changes of each table one pass reads (their seq and commit time only) to find the days they touched. */
+export const ARCHIVE_SCAN_ROWS = 10_000;
+/**
+ * Subrequests one pass may make: R2 reads and Dropbox calls (Workers Free allows 50 per invocation; the purge in the
+ * same alarm takes one or two).
+ */
+export const ARCHIVE_SUBREQUESTS = 40;
+/** A pass starts no new day after rendering this many changes (CPU), nor any call after this long (wall time). */
+export const ARCHIVE_RENDER_MAX = 20_000;
+export const ARCHIVE_PASS_MS = 5 * MINUTE;
+/** The backoff after a failed pass: the first, doubled up to the last; Dropbox's Retry-After when it gives one. */
+export const ARCHIVE_RETRY_FIRST_MS = MINUTE;
+export const ARCHIVE_RETRY_MAX_MS = HOUR;
+/** ops-v1's archive_behind: a change committed longer ago than this is not in Dropbox yet. */
+export const ARCHIVE_BEHIND_MS = DAY;
+/** A Dropbox call's timeout. */
+export const DROPBOX_TIMEOUT_MS = 30 * SECOND;
+/** An access token is refreshed this long before Dropbox said it expires. */
+export const DROPBOX_TOKEN_MARGIN_MS = 5 * MINUTE;
+/** A connection the owner started and did not finish at Dropbox expires after this. */
+export const DROPBOX_CONNECT_MS = 15 * MINUTE;
+
 // ---- ingest (ingest.ts) -------------------------------------------------------------------------------------------
 
 /** An item's time may be at most this far after its batch's sent_time (the same clock). */
@@ -111,7 +149,7 @@ export const VISIT_PAGE_MAX = 500;
 /** ListSites: the default and the most per page. */
 export const SITE_PAGE_DEFAULT = 100;
 export const SITE_PAGE_MAX = 200;
-/** ServiceStatus: changes behind a consumer that pulled within STALE_MS are counted up to this. */
+/** ServiceStatus: changes behind a consumer that pulled within STALE_MS, or behind Dropbox, are counted up to this. */
 export const BEHIND_COUNT_MAX = 500;
 /** A device or a consumer without news for this long is stale; one seen within ACTIVE_MS is watched by ops-v1. */
 export const STALE_MS = DAY;

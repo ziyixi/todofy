@@ -45,7 +45,7 @@ test('one SQLite Durable Object, RecallState, and one private R2 bucket; no D1, 
   for (const key of ['d1_databases', 'kv_namespaces', 'queues', 'ai', 'browser', 'services']) assert.equal(config[key], undefined, key)
 })
 
-test("no secret is declared required: a deploy before the owner's first mint-tokens run must work, and keeps the digests", () => {
+test('no secret is declared required: the machine tokens live in RecallState, and a deploy keeps any digest put by hand', () => {
   assert.equal(config.secrets, undefined)
   for (const name of OWNER_ONLY_SECRETS) assert.ok(!values.includes(name), name)
 })

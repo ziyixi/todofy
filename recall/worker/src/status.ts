@@ -1,37 +1,20 @@
 /**
  * The state of recording, archiving and storage (ServiceStatus of proto/recall/ui/v1/status.proto, ../../docs/design.md
  * §8.7, §9), built from bounded reads: the running counters in meta (never a count of a large table), the devices,
- * at most CONSUMERS_MAX consumers (the oldest change each has not archived, one indexed read per table; the changes
- * behind one that pulled within STALE_MS counted up to BEHIND_COUNT_MAX), and a week of usage rows. The UI reads it on
- * every navigation, so a consumer far behind or long gone costs a few reads, never a count of the feed. Codes, counts,
- * labels and times only. The same facts feed ops-v1 (ops-status.ts).
+ * the Dropbox backup and at most CONSUMERS_MAX feed consumers (the oldest change each has not taken, one indexed read
+ * per table; the changes behind counted up to BEHIND_COUNT_MAX: for the backup while connected, for a consumer that
+ * pulled within STALE_MS), the machine tokens (meta rows, never a token) and a week of usage rows. The UI reads it on
+ * every navigation, so an archive far behind or a consumer long gone costs a few reads, never a count of the feed.
+ * Codes, counts, labels and times only. The same facts feed ops-v1 (ops-status.ts).
  */
 import { create } from '@ziyixi/proto/protobuf';
 import { ArchiveConsumerSchema, DeviceStatusSchema, RejectedItemsSchema, ServiceStatusSchema, type ArchiveConsumer, type DeviceStatus, type RejectedItems, type ServiceStatus } from '@ziyixi/proto/recall/ui/v1/status_pb';
-import { BEHIND_COUNT_MAX, DAILY_READ_BUDGET, DAILY_ROW_BUDGET, DAY, MIB, REJECTED_WINDOW_DAYS, STALE_MS, STORAGE_BUDGET_MIB } from './limits.ts';
+import { backupMessage } from './backup.ts';
+import { behindCount, oldestUnsynced } from './feed.ts';
+import { DAILY_READ_BUDGET, DAILY_ROW_BUDGET, DAY, MIB, REJECTED_WINDOW_DAYS, STALE_MS, STORAGE_BUDGET_MIB } from './limits.ts';
 import { time } from './model.ts';
 import { utcDay, type ConsumerRow, type DeviceRow, type Store } from './store.ts';
-
-/** The changes above a seq: live visits and documents, and tombstones. */
-const CHANGES_ABOVE = ['visits r JOIN pages p ON p.rowid = r.page_rowid WHERE r.seq > ?', 'documents r JOIN pages p ON p.rowid = r.page_rowid WHERE r.seq > ?', 'tombstones r WHERE r.seq > ?'];
-
-/** The commit time of the oldest change above a seq (null when there is none): one indexed read per table. */
-export function oldestUnsynced(store: Store, seq: number): number | null {
-  const times = CHANGES_ABOVE.map((from) => store.one<{ seq_ms: number }>(`SELECT r.seq_ms AS seq_ms FROM ${from} ORDER BY r.seq LIMIT 1`, seq)?.seq_ms).filter(
-    (ms): ms is number => ms !== undefined,
-  );
-  return times.length === 0 ? null : Math.min(...times);
-}
-
-/** The changes above a seq, counted up to BEHIND_COUNT_MAX. */
-export function behindCount(store: Store, seq: number): number {
-  let count = 0;
-  for (const from of CHANGES_ABOVE) {
-    if (count >= BEHIND_COUNT_MAX) break;
-    count += store.count(`SELECT count(*) AS n FROM (SELECT 1 FROM ${from} LIMIT ?)`, seq, BEHIND_COUNT_MAX - count);
-  }
-  return count;
-}
+import { TOKEN_ROUTES, tokenMessage, type TokenRoute } from './tokens.ts';
 
 export function devices(store: Store): DeviceRow[] {
   return store.all<DeviceRow>(`SELECT * FROM devices ORDER BY last_seen_ms DESC, id`);
@@ -86,7 +69,8 @@ function consumerMessage(store: Store, row: ConsumerRow, now: number): ArchiveCo
   });
 }
 
-export function serviceStatus(store: Store, now: number, build: string): ServiceStatus {
+/** `secrets`: whether a Worker secret holds a digest of each route's token too. */
+export function serviceStatus(store: Store, now: number, build: string, secrets: Readonly<Record<TokenRoute, boolean>>): ServiceStatus {
   const oldestIndexed = store.getMeta('oldest_indexed_text_ms');
   const today = store.usage(utcDay(now));
   const rejected: RejectedItems[] = rejectedItems(store, now).map((item) => create(RejectedItemsSchema, { reason: item.reason, count: item.count, lastTime: time(item.lastMs) }));
@@ -110,5 +94,7 @@ export function serviceStatus(store: Store, now: number, build: string): Service
     recentErrorCodes: store.errors(),
     build,
     rejectedItems: rejected,
+    dropboxBackup: backupMessage(store),
+    machineTokens: TOKEN_ROUTES.map((route) => tokenMessage(store, route, now, secrets[route])),
   });
 }

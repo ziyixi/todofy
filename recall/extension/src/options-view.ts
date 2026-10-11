@@ -62,5 +62,5 @@ export const SAVE_ERRORS: Readonly<Record<Extract<SaveAnswer, { ok: false }>['er
   server_invalid: '服务器要是 https 地址（只有本机可以用 http），不带路径，例如 https://recall.ziyixi.science',
   label_invalid: '设备名称要有 1 到 64 个字',
   token_invalid: '这不是 recall 的上传令牌：它以 recall_ingest_ 开头',
-  token_export: '这是归档用的导出令牌：这里要粘贴上传令牌（recall_ingest_ 开头）',
+  token_export: '这是读取变更 feed 用的导出口令：这里要粘贴插件口令（recall_ingest_ 开头）',
 };

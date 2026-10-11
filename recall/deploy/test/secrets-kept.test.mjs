@@ -1,6 +1,7 @@
-// A deploy never removes the machine tokens' digests (../../docs/design.md §2.2): `wrangler deploy --secrets-file`
-// uploads the file's secrets and asks the API to keep every other secret binding (keep_bindings: secret_text,
-// secret_key). This test pins that behaviour in the wrangler the deploy runs (worker/node_modules), so an upgrade that
+// A deploy never removes a machine token digest put as a Worker secret (../../docs/design.md §2.2: the tokens live in
+// RecallState since 设置 → 插件口令, and a digest put by hand with `wrangler secret put` is still accepted):
+// `wrangler deploy --secrets-file` uploads the file's secrets and asks the API to keep every other secret binding
+// (keep_bindings: secret_text, secret_key). This test pins that behaviour in the wrangler the deploy runs (worker/node_modules), so an upgrade that
 // changes it fails here before it can reach production. (The config declares no [secrets] required list:
 // wrangler-config.test.mjs; every recall deploy step passes --secrets-file: .github/scripts/test_wrangler_configs.py.)
 import test from 'node:test'
@@ -20,8 +21,4 @@ test(`wrangler ${version}: --secrets-file keeps the secrets the file does not na
   assert.match(cli, /if \(keepSecrets\) \{\s*keep_bindings \?\?= \[\];\s*keep_bindings\.push\("secret_text", "secret_key"\);/)
   // The file's entries become secret_text bindings (replacing only those names).
   assert.match(cli, /for \(const \[secretName, secretValue\] of Object\.entries\(\s*secretsResult\.content\s*\)\) \{\s*bindings\[secretName\] = \{\s*type: "secret_text",/)
-})
-
-test(`wrangler ${version}: secret put reads its value from stdin when stdin is not a terminal (mint-tokens.mjs)`, () => {
-  assert.match(cli, /isInteractive\d* \? await prompt\d*\("Enter a secret value:", \{ isSecret: true \}\) : await readFromStdin\(\)/)
 })

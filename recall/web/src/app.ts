@@ -1,12 +1,12 @@
 /**
  * The UI's shell (../../docs/design.md §8.3): a sticky header with the name and one quiet status line (the latest
- * upload and the archive's sync, or the problem in the warning color), three tabs, a toast, and a router over the
+ * upload and the Dropbox backup, or the problem in the warning color), three tabs, a toast, and a router over the
  * page's paths, whose URL always holds the state (reload and back work):
  *
  *   /, /day/<YYYY-MM-DD>   时间线: a day's hours and sessions (/ is today; ?hour=9 opens at that hour)
  *   /search?q=…&site=…     搜索: words and filters (query.ts)
  *   /pages/<id>?q=…        a page's detail, over the tab it came from (the tab stays marked)
- *   /settings              设置: devices, archives, storage, the denylist
+ *   /settings              设置: devices, the extension's token, the Dropbox backup, storage, the denylist
  *
  * `/` anywhere focuses the search box. Back returns to where the owner was: each history entry keeps its scroll
  * position and what its view kept of itself (the search's results, the timeline's open session), in memory, and the
@@ -30,6 +30,8 @@ export interface Host {
   readonly confirm: (message: string) => boolean
   /** Opens a page's own URL in a new tab, without a referrer. */
   readonly open: (url: string) => void
+  /** Leaves the UI for `url` in this tab (Dropbox's authorization page, which comes back to /settings). */
+  readonly navigate: (url: string) => void
   /** A fine pointer that hovers (a desktop): the search box takes the focus on arrival there. */
   readonly desktop: () => boolean
 }
@@ -39,6 +41,9 @@ const browserHost: Host = {
   confirm: (message) => window.confirm(message),
   open: (url) => {
     window.open(url, '_blank', 'noopener,noreferrer')
+  },
+  navigate: (url) => {
+    window.location.assign(url)
   },
   desktop: () => typeof window.matchMedia === 'function' && window.matchMedia('(hover: hover) and (pointer: fine)').matches,
 }

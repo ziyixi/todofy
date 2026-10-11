@@ -297,19 +297,24 @@ describe('ops-v1', () => {
     await h.dispose();
   });
 
-  it('says no_device before the first upload, lists no capability, and refuses a guard', async () => {
+  it('says no_device and archive_not_connected before the first upload and the connection, lists no capability, and refuses a guard', async () => {
     const status = await h.opsStatus();
-    expect(status).toMatchObject({ version: 'ops-v1', app: 'recall', health: 'ok', modes: { maintenance: false }, capabilities: [], ui_url: 'https://recall.example.com/' });
-    expect((status['signals'] as { code: string }[]).map((s) => s.code)).toEqual(['no_device']);
+    expect(status).toMatchObject({ version: 'ops-v1', app: 'recall', health: 'degraded', modes: { maintenance: false }, capabilities: [], ui_url: 'https://recall.example.com/' });
+    expect((status['signals'] as { code: string }[]).map((s) => s.code)).toEqual(['archive_not_connected', 'no_device']);
     await expect(h.opsSetGuard({ level: 'shed', reason: 'd1_reads_high', until: new Date(T0 + HOUR).toISOString() })).rejects.toThrow('invalid_input');
   });
 
   it('raises device_stale, archive_behind, no_captures, items_rejected and upload_over_budget', async () => {
-    // Yesterday: a device's last upload (a visit of ten minutes, no text) and the archive's last pull.
+    // Dropbox connected three days ago (its meta as backup.ts keeps it); yesterday a device's last upload (a visit of
+    // ten minutes, no text), which never reached Dropbox.
+    for (const [key, value] of [['dropbox_app_key', 'syntheticappkey1'], ['dropbox_refresh_token', 'synthetic-refresh'], ['dropbox_connected_ms', String(T0 - 3 * DAY)], ['archive_target', 'dbid:synthetic syntheticappkey1']]) {
+      await h.sql(`INSERT INTO meta (key, value) VALUES (?, ?)`, key ?? '', value ?? '');
+    }
     const yesterday = T0 - DAY;
     await h.clock(yesterday);
     const long = await visit({ id: uuid(1), url: 'https://example.com/long', spans: [[yesterday - 10 * MINUTE, yesterday - MINUTE]] });
     expect((await h.upload(batch([long], { sentMs: yesterday }))).status).toBe(200);
+    // A feed consumer far behind raises nothing.
     await h.changes('?after=0&consumer=nas');
     // Today: another device uploads an item recall refuses.
     await h.clock(T0);
@@ -326,6 +331,7 @@ describe('ops-v1', () => {
       ['no_captures', 'warning'],
       ['upload_over_budget', 'warning'],
     ]);
+    expect((status['signals'] as { code: string; metrics: unknown }[]).find((s) => s.code === 'archive_behind')?.metrics).toEqual({ hours: 26 });
     expect(status['counters']).toEqual({ visits_today: 0, texts_today: 0, rows_written_today: expect.any(Number) as number, rows_read_today: expect.any(Number) as number });
   });
 

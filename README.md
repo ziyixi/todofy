@@ -17,7 +17,7 @@ Home is the daily starting point. Services run and release independently, sharin
 | Links | 私人短链接 / Personal short links | Cloudflare Worker + D1 | [links/](links/README.md) |
 | Watch | 网页变化收件箱 / Web change inbox | Cloudflare Worker + DO | [watch/](watch/README.md) |
 | Mailsort | Gmail 自动分拣 / Gmail sorting by label | Cloudflare Worker + DO + Workers AI | [mailsort/](mailsort/README.md) |
-| Recall | 浏览记录、全文搜索与 NAS 归档 / Browsing record, full-text search and a NAS archive | Cloudflare Worker + DO + R2, Chrome extension | [recall/](recall/README.md) |
+| Recall | 浏览记录、全文搜索与 Dropbox 归档 / Browsing record, full-text search and an archive in Dropbox (synced to the NAS) | Cloudflare Worker + DO + R2, Chrome extension | [recall/](recall/README.md) |
 | Website | Notion 驱动的个人网站 / Personal website from Notion | Cloudflare static assets + relay | [website/](website/README.md) |
 | Newsletter | 生成并发送简报 / Build and send the newsletter | VPS k3s, separate image | [newsletter/](newsletter/README.md) |
 | Fleet | VPS、daemon 与发布状态 / VPS, daemons and release status | Cloudflare Worker + DO | [fleet/](fleet/README.md) |

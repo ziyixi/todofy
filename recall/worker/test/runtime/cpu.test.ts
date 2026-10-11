@@ -8,8 +8,9 @@
  *   forwarded unparsed), both search paths, a timeline day of 500 visits, a feed page of 500 changes, a blob read from
  *   R2 without the object, the status and a settings update;
  * - RecallState (30 s per invocation): those calls, the heaviest upload above all (50 items with 10 texts of 64 KiB,
- *   gzip, scrub, R2 and the index), and an alarm pass at its bounds (a purge of 500 rows and 2,000 pages moved out of
- *   the text index).
+ *   gzip, scrub, R2 and the index), an alarm pass at its bounds (a purge of 500 rows and 2,000 pages moved out of the
+ *   text index), and the archive's passes to a fake Dropbox (a scan of 10,000 changes a table, then days of about 300
+ *   visits and the texts of 64 KiB, each pass at its subrequests).
  *
  * No dev bypass: Access is verified as in production. Bounds are milliseconds of the reference machine.
  */
@@ -27,9 +28,10 @@ import {
   type Isolate,
   type Measurement,
 } from '../../../../tools/workerd-cpu/workerd-cpu.mts';
-import { DEMOTE_BATCH, PURGE_BATCH } from '../../src/limits.ts';
+import { ARCHIVE_SCAN_ROWS, DEMOTE_BATCH, PURGE_BATCH } from '../../src/limits.ts';
 import { accessClaims, testIssuer } from '../jwt.ts';
 import { batch, document, iso, text, uuid, visit } from './data.ts';
+import { FakeDropbox } from './fake-dropbox.ts';
 import { DAY, MINUTE, OBJECT_WORKER, PUBLIC_HOST, startHarness, SYNTHETIC_BINDINGS, T0, type Harness } from './harness.ts';
 
 const FREE_OBJECT_CPU_MS = 30_000;
@@ -45,6 +47,7 @@ const HANDLER = 'fetch handler';
 const OBJECT = 'RecallState';
 const UPLOAD = 'POST batches (50 items, 10 texts of 64 KiB)';
 const ALARM = `alarm pass: a purge of ${String(PURGE_BATCH)} rows, ${String(DEMOTE_BATCH)} pages out of the text index`;
+const ARCHIVE = `archive pass: a scan of ${String(ARCHIVE_SCAN_ROWS)} changes a table, or a pass of days and texts to Dropbox`;
 const COLD_LABEL = "GET /api/csrf as the fetch handler's very first request";
 const ISSUER = SYNTHETIC_BINDINGS['ACCESS_ISSUER'] ?? '';
 const AUDIENCE = SYNTHETIC_BINDINGS['ACCESS_AUDIENCE'] ?? '';
@@ -53,6 +56,7 @@ const DAY0 = Date.parse('2026-10-09T00:00:00Z');
 interface RecallIsolate extends Isolate {
   readonly h: Harness;
   readonly object: CpuMeter;
+  readonly dropbox: FakeDropbox;
 }
 
 let token = '';
@@ -64,11 +68,13 @@ async function startIsolate(): Promise<RecallIsolate> {
     token = await issuer.sign(accessClaims(ISSUER, AUDIENCE, 'owner@example.com'));
     jwks = issuer.jwks;
   }
+  const dropbox = new FakeDropbox();
   const h = await startHarness({
     inspectorPort: 0,
     splitObject: true,
     bindings: { DEV_AUTH_BYPASS: undefined },
     routes: new Map([[`${ISSUER}/cdn-cgi/access/certs`, () => Response.json(jwks)]]),
+    outbound: (request) => dropbox.handle(request),
   });
   try {
     const meter = await connectCpuMeter(h.mf, 'recall');
@@ -77,6 +83,7 @@ async function startIsolate(): Promise<RecallIsolate> {
       h,
       meter,
       object,
+      dropbox,
       async dispose() {
         meter.close();
         object.close();
@@ -106,8 +113,9 @@ async function seed(h: Harness): Promise<void> {
   await h.sql(
     `WITH RECURSIVE n(i) AS (SELECT 0 UNION ALL SELECT i + 1 FROM n WHERE i < 17499)
      INSERT INTO visits (id, seq, seq_ms, page_rowid, device_id, device_label, url, title, start_ms, end_ms, focus_seconds, spans, revision)
-     SELECT printf('eeeeeeee-0000-4000-8000-%012x', i), 1 + i, 0, 1 + (i * 7919) % 5000, '5d0c3b52-8a5e-4f8e-9b8e-2d7c1a6f4e10', 'MacBook', 'https://site.example.com/a', '文章',
+     SELECT printf('eeeeeeee-0000-4000-8000-%012x', i), 1 + i, ? + i * 288000, 1 + (i * 7919) % 5000, '5d0c3b52-8a5e-4f8e-9b8e-2d7c1a6f4e10', 'MacBook', 'https://site.example.com/a', '文章',
             ? + i * 288000, ? + i * 288000 + 120000, 120, '[[0,1]]', 1 FROM n`,
+    DAY0 - 59 * DAY,
     DAY0 - 59 * DAY,
     DAY0 - 59 * DAY,
   );
@@ -142,7 +150,7 @@ async function heaviestUpload(run: number): Promise<Uint8Array> {
   return bytes;
 }
 
-async function session({ h, meter: worker, object }: RecallIsolate, index: number): Promise<Measurement[]> {
+async function session({ h, meter: worker, object, dropbox }: RecallIsolate, index: number): Promise<Measurement[]> {
   const headers = { 'cf-access-jwt-assertion': token };
   let csrf = new Response();
   const cold = await worker.measure(COLD_LABEL, async () => {
@@ -217,7 +225,24 @@ async function session({ h, meter: worker, object }: RecallIsolate, index: numbe
     }),
   ]);
   expect(pass.demoting).toBe(true);
-  return [cold, ...measured, alarm];
+
+  // The archive's passes once Dropbox is connected: the scan of the whole store, then days and texts at the
+  // subrequests a pass may make. The heaviest pass of them is held to the alarm's bound.
+  const connect = await h.fetch('/api/v1/dropboxBackup:connect', { method: 'POST', headers: mutationHeaders, body: JSON.stringify({ app_key: dropbox.appKey }) });
+  const { authorize_url: authorizeUrl } = await connect.json<{ authorize_url: string }>();
+  const back = await h.fetch(`/api/dropbox/callback${dropbox.approve(authorizeUrl).query}`, { headers });
+  if (back.headers.get('location') !== '/settings?dropbox=connected') throw new Error('dropbox: not connected');
+  const samples: number[] = [];
+  for (let run = 0; run < 12 && dropbox.callsTo('/2/files/upload').length < 60; run++) {
+    samples.push(
+      await object.cpu(async () => {
+        await h.step(T0 + (run + 2) * MINUTE);
+      }),
+    );
+  }
+  expect(dropbox.callsTo('/2/files/upload').length).toBeGreaterThan(30);
+  const archive = summarize(ARCHIVE, [Math.max(...samples)]);
+  return [cold, ...measured, alarm, archive];
 }
 
 describe('CPU (Workers Free: 10 ms per request, 30 s per Durable Object invocation)', () => {
@@ -244,6 +269,7 @@ describe('CPU (Workers Free: 10 ms per request, 30 s per Durable Object invocati
       }
     }
     expect(get(ALARM).first, ALARM).toBeLessThan(OBJECT_ALARM_BOUND_MS);
-    expect(reference.size).toBe(1 + 1 + 2 * 8 + 1);
+    expect(get(ARCHIVE).first, ARCHIVE).toBeLessThan(OBJECT_ALARM_BOUND_MS);
+    expect(reference.size).toBe(1 + 1 + 2 * 8 + 1 + 1);
   });
 });

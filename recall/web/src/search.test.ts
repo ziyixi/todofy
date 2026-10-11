@@ -448,7 +448,7 @@ describe('results', () => {
     const root = await open(fake, '/search?q=durable&site=docs.example&type=read')
     expect(root.querySelector('.empty strong')?.textContent).toBe('没有找到')
     expect([...root.querySelectorAll('.empty button')].map((node) => node.textContent)).toEqual(['去掉 网站：docs.example', '去掉 类型：读过'])
-    expect([...root.querySelectorAll('.empty p.hint')].map((node) => node.textContent)).toEqual(['正文只搜每页前 32 KB', '正文搜索覆盖 2025年3月 起，更早的页面只按标题和网址搜索（全文在 NAS 归档里）'])
+    expect([...root.querySelectorAll('.empty p.hint')].map((node) => node.textContent)).toEqual(['正文只搜每页前 32 KB', '正文搜索覆盖 2025年3月 起，更早的页面只按标题和网址搜索（全文仍在页面详情和 Dropbox 归档里）'])
     buttonNamed(root, '去掉 网站：docs.example').click()
     await settled()
     expect(titles(root)).toEqual(['Durable alarm retries'])

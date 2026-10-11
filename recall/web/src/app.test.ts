@@ -1,7 +1,7 @@
 /**
  * The shell against the fake API: the three tabs (only marked, so a tab chosen by keyboard keeps the focus), the quiet
- * status line and its problems (a device or an archive that stopped, storage near its budget; a retired one stops
- * warning), an unknown path, `/` focusing the search box, a page's detail over the tab it came from, and back.
+ * status line and its problems (a device that stopped, the Dropbox backup not connected or a day behind, storage near
+ * its budget; a retired device stops warning), an unknown path, `/` focusing the search box, a page's detail over the tab it came from, and back.
  */
 import { timestampFromMs } from '@ziyixi/proto/protobuf/wkt'
 import { FakeServer, HOUR, MINUTE, NOW, page, pageId, textOf } from './test/fakeServer.ts'
@@ -28,12 +28,12 @@ describe('the shell', () => {
     expect(root.querySelector('.tabs a[aria-current]')).toBeNull()
     expect(line(root)).toEqual([
       ['上传 3 分钟前', ''],
-      ['NAS 已同步', ''],
+      ['Dropbox 已备份', ''],
     ])
     expect(root.textContent).toContain('找不到这个页面')
   })
 
-  it('says in the warning color what stopped: a device, an archive, the storage', async () => {
+  it('says in the warning color what stopped: a device, the backup, the storage', async () => {
     const fake = new FakeServer()
     fake.status = {
       devices: [
@@ -41,37 +41,38 @@ describe('the shell', () => {
         // Retired long ago: no longer watched.
         { $typeName: 'recall.ui.v1.DeviceStatus', deviceId: 'b', label: 'Old', extensionVersion: '1', lastHeartbeatTime: timestampFromMs(NOW - 40 * DAY), queuedCount: 0, lastErrorCode: '', stale: true, clockSkewSeconds: 0 },
       ],
+      // A feed consumer far behind is 设置's business only.
       archiveConsumers: [{ $typeName: 'recall.ui.v1.ArchiveConsumer', consumer: 'nas', syncedSeq: 1, lastPullTime: timestampFromMs(NOW - 3 * DAY), behindCount: 50, oldestUnsyncedTime: timestampFromMs(NOW - 3 * DAY), stale: true }],
       storageUsedMib: 850,
     }
+    fake.backup.connected = false
     const root = await open(fake, '/')
     expect(line(root)).toEqual([
       ['MacBook 2 天没有上传', 'problem'],
-      ['NAS 3 天没有同步', 'problem'],
+      ['Dropbox 备份未连接', 'problem'],
       ['存储接近上限', 'problem'],
     ])
   })
 
-  it('tells an archive waiting on its next pull from one that fell a day behind', async () => {
+  it('tells changes waiting for the next hourly backup from a backup a day behind, counted from the connection', async () => {
     const fake = new FakeServer()
-    fake.status = {
-      archiveConsumers: [
-        { $typeName: 'recall.ui.v1.ArchiveConsumer', consumer: 'nas', syncedSeq: 1, lastPullTime: timestampFromMs(NOW - 10 * MINUTE), behindCount: 12, oldestUnsyncedTime: timestampFromMs(NOW - 20 * MINUTE), stale: false },
-        { $typeName: 'recall.ui.v1.ArchiveConsumer', consumer: 'backup-disk', syncedSeq: 1, lastPullTime: timestampFromMs(NOW - 10 * MINUTE), behindCount: 120, oldestUnsyncedTime: timestampFromMs(NOW - 2 * DAY), stale: false },
-      ],
-    }
-    const root = await open(fake, '/')
-    expect(line(root).slice(1)).toEqual([
-      ['NAS 待同步 12 条', ''],
-      ['backup-disk 落后 120 条', 'problem'],
-    ])
+    Object.assign(fake.backup, { pendingCount: 12, oldestPendingTime: timestampFromMs(NOW - 20 * MINUTE) })
+    expect(line(await open(fake, '/')).slice(1)).toEqual([['Dropbox 待备份 12 条', '']])
+    Object.assign(fake.backup, { pendingCount: 500, oldestPendingTime: timestampFromMs(NOW - 2 * DAY) })
+    expect(line(await open(fake, '/')).slice(1)).toEqual([['Dropbox 落后 500+ 条', 'problem']])
+    // Connected an hour ago to a store whose changes are older: its first upload is no lag.
+    Object.assign(fake.backup, { connectTime: timestampFromMs(NOW - HOUR) })
+    expect(line(await open(fake, '/')).slice(1)).toEqual([['Dropbox 待备份 500+ 条', '']])
   })
 
   it('before the first upload, says so quietly', async () => {
     const fake = new FakeServer()
-    fake.status = { devices: [], archiveConsumers: [] }
+    fake.status = { devices: [] }
     const root = await open(fake, '/settings')
-    expect(line(root)).toEqual([['还没有上传', '']])
+    expect(line(root)).toEqual([
+      ['还没有上传', ''],
+      ['Dropbox 已备份', ''],
+    ])
   })
 
   it('keeps the focus on a tab chosen by keyboard: the tabs are only marked, never drawn again', async () => {

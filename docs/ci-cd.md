@@ -174,10 +174,9 @@ The [legacy collector image workflow](../.github/workflows/mail-hero-backup-imag
 no push automatically publishes a VPS collector. Existing v1 ciphertext and recovery tools remain compatible.
 Neither Newsletter nor the Platform observer claims backup coverage through process health.
 
-recall's reference archive consumer follows that collector's pattern: its
-[image workflow](../.github/workflows/recall-sync-image.yml) is manual-only, tests the consumer, builds and tests the
-image on a branch without publishing, and on main publishes `ghcr.io/ziyixi/recall-sync` and prints the digest the NAS
-pins ([sync README](../recall/sync/README.md)).
+recall builds no image: its Worker writes the archive to the owner's Dropbox itself (recall/docs/design.md §7.2), and
+the NAS syncs it with its own Dropbox support. Its former NAS container and image workflow were removed on 2026-10-11
+before they were ever published.
 
 ## VPS releases and runtime verification
 

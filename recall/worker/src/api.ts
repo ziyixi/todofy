@@ -15,6 +15,7 @@ import { create, type DescMessage, type JsonValue, type MessageShape } from '@zi
 import { EmptySchema, timestampMs, type Timestamp } from '@ziyixi/proto/protobuf/wkt';
 import { SearchResultSchema, TextSegmentSchema } from '@ziyixi/proto/recall/ui/v1/page_pb';
 import {
+  ConnectDropboxBackupResponseSchema,
   ListSitesResponseSchema,
   ListVisitsResponseSchema,
   PageType,
@@ -22,12 +23,15 @@ import {
   SortOrder,
   type RecallUiService,
 } from '@ziyixi/proto/recall/ui/v1/recall_ui_service_pb';
-import { SettingsSchema, type Settings } from '@ziyixi/proto/recall/ui/v1/status_pb';
+import { DropboxBackupSchema, MachineTokenSchema, SettingsSchema, type Settings } from '@ziyixi/proto/recall/ui/v1/status_pb';
 import { fromWire, toWire } from '@ziyixi/proto/wire-json';
 import { builtinNoTextPatterns, OWNER_PATTERNS_MAX, parsePattern, patternText, SITE_ONLY_PATTERNS } from '../../shared/denylist.ts';
-import { readText } from './blobs.ts';
+import { APP_KEY, backupMessage, startConnect } from './backup.ts';
+import { readText, sha256Hex } from './blobs.ts';
+import { pkceChallenge, randomText, type DropboxEndpoints } from './dropbox.ts';
 import {
   DAILY_READ_BUDGET,
+  DROPBOX_CONNECT_MS,
   MIN_FOCUS_MAX_SECONDS,
   SEARCH_MAX_RESULTS,
   SEARCH_PAGE_SIZE,
@@ -45,6 +49,7 @@ import { readDenylist, writeDenylist, type Denylist } from './settings.ts';
 import { serviceStatus } from './status.ts';
 import { hostOfKey, utcDay, type DocumentRow, type PageRow, type SiteRow, type Store } from './store.ts';
 import { getVisit, listVisits } from './timeline.ts';
+import { deleteToken, newToken, storeToken, tokenDigest, tokenMessage, tokenRoute, type TokenRoute } from './tokens.ts';
 
 /** What every handler gets from RecallState. */
 export interface ApiContext {
@@ -58,6 +63,10 @@ export interface ApiContext {
   readonly wake: () => Promise<void>;
   /** Answered searches, for their next pages. */
   readonly searches: SearchCache;
+  /** The Dropbox backup's connection: Dropbox's endpoints, recall's host (null: not configured), the disconnection. */
+  readonly dropbox: { readonly endpoints: DropboxEndpoints; readonly host: string | null; readonly disconnect: () => Promise<void> };
+  /** Whether a Worker secret holds a digest of each route's token too. */
+  readonly secretTokens: Readonly<Record<TokenRoute, boolean>>;
 }
 
 /** The Settings fields an update mask may name; only denylist_patterns and site_only_patterns are writable. */
@@ -114,6 +123,11 @@ function timeRange(startTime: Timestamp | undefined, endTime: Timestamp | undefi
 }
 
 // ---- AIP-155 ---------------------------------------------------------------------------------------------------------
+
+/** Whether a request_id was answered already (within REQUEST_ID_TTL_MS): `once` then answers it again. */
+function answered(ctx: ApiContext, requestId: string): boolean {
+  return requestId !== '' && ctx.store.request(requestId, ctx.now) !== undefined;
+}
 
 /** A mutation once per request_id: the mutation, its log entry and its rows' charge are one transaction. */
 function once<Desc extends DescMessage>(ctx: ApiContext, requestId: string, method: string, resource: string, schema: Desc, run: () => MessageShape<Desc>): MessageShape<Desc> {
@@ -389,6 +403,53 @@ export const handlers: ServiceHandlers<ShapeOf<typeof RecallUiService>, ApiConte
 
   getServiceStatus(request, ctx) {
     if (request.name !== 'serviceStatus') fail('NOT_FOUND');
-    return Promise.resolve(serviceStatus(ctx.store, ctx.now, ctx.build));
+    return Promise.resolve(serviceStatus(ctx.store, ctx.now, ctx.build, ctx.secretTokens));
+  },
+
+  async connectDropboxBackup(request, ctx) {
+    if (request.name !== 'dropboxBackup') fail('NOT_FOUND');
+    const appKey = request.appKey.trim();
+    if (!APP_KEY.test(appKey)) fail('INVALID_APP_KEY');
+    const host = ctx.dropbox.host ?? fail('NOT_CONFIGURED');
+    // A fresh state (its SHA-256 kept) and PKCE verifier (kept, for the exchange) per connection.
+    const state = randomText(32);
+    const verifier = randomText(48);
+    const [challenge, stateSha256] = await Promise.all([pkceChallenge(verifier), sha256Hex(new TextEncoder().encode(state))]);
+    return once(ctx, request.requestId, 'ConnectDropboxBackup', request.name, ConnectDropboxBackupResponseSchema, () =>
+      create(ConnectDropboxBackupResponseSchema, {
+        authorizeUrl: startConnect(ctx.store, ctx.dropbox.endpoints, host, { appKey, state, stateSha256, verifier, challenge, expiresMs: ctx.now + DROPBOX_CONNECT_MS }),
+      }),
+    );
+  },
+
+  async disconnectDropboxBackup(request, ctx) {
+    if (request.name !== 'dropboxBackup') fail('NOT_FOUND');
+    if (!answered(ctx, request.requestId)) await ctx.dropbox.disconnect();
+    return once(ctx, request.requestId, 'DisconnectDropboxBackup', request.name, DropboxBackupSchema, () => backupMessage(ctx.store));
+  },
+
+  async regenerateMachineToken(request, ctx) {
+    const route = tokenRoute(request.name) ?? fail('NOT_FOUND');
+    // A repeated request changes nothing and answers without the token: it is shown once, and never stored.
+    if (answered(ctx, request.requestId)) return once(ctx, request.requestId, 'RegenerateMachineToken', request.name, MachineTokenSchema, () => fail('INTERNAL'));
+    const token = newToken(route);
+    const digest = await tokenDigest(token);
+    const stored = once(ctx, request.requestId, 'RegenerateMachineToken', request.name, MachineTokenSchema, () => {
+      storeToken(ctx.store, route, digest, ctx.now, request.revokePrevious);
+      return tokenMessage(ctx.store, route, ctx.now, ctx.secretTokens[route]);
+    });
+    // The token goes into this answer only, after the request log kept the answer without it.
+    stored.token = token;
+    return stored;
+  },
+
+  deleteMachineToken(request, ctx) {
+    const route = tokenRoute(request.name) ?? fail('NOT_FOUND');
+    return Promise.resolve(
+      once(ctx, request.requestId, 'DeleteMachineToken', request.name, EmptySchema, () => {
+        if (!deleteToken(ctx.store, route)) fail('NOT_FOUND');
+        return create(EmptySchema);
+      }),
+    );
   },
 };

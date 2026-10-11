@@ -470,7 +470,7 @@ export async function renderSearch(ctx: ViewContext): Promise<void> {
       set.length === 0 ? null : el('div', { class: 'actions center' }, ...set.map(([filter, value]) => button(`去掉 ${FILTER_NAMES[filter]}：${value}`, () => choose(clearFilter(state, filter), false)))),
       capped ? el('p', { class: 'hint warn cap' }, capText(asked)) : null,
       el('p', { class: 'hint' }, '正文只搜每页前 32 KB'),
-      oldest === null ? null : el('p', { class: 'hint' }, `正文搜索覆盖 ${monthText(oldest)} 起，更早的页面只按标题和网址搜索（全文在 NAS 归档里）`),
+      oldest === null ? null : el('p', { class: 'hint' }, `正文搜索覆盖 ${monthText(oldest)} 起，更早的页面只按标题和网址搜索（全文仍在页面详情和 Dropbox 归档里）`),
     )
   }
 

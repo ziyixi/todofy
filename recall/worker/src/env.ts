@@ -29,8 +29,9 @@ export interface Env {
   /** 64 hex characters: HMAC key of the recall_csrf tokens. */
   readonly CSRF_SIGNING_KEY?: string;
 
-  // secrets the owner puts from their own machine (deploy/mint-tokens.mjs, `wrangler secret put`): the SHA-256 (hex) of
-  // each machine token, the current one and the one before a rotation. Never in GitHub; a deploy keeps them.
+  // optional secrets a machine token's SHA-256 (hex) may also come from, put by hand with `wrangler secret put` (the
+  // tokens live in RecallState since 设置 → 插件口令, tokens.ts): the current one and the one before a rotation. Never in
+  // GitHub; a deploy keeps them, and only deleting them stops their token.
   readonly INGEST_TOKEN_SHA256?: string;
   readonly INGEST_TOKEN_SHA256_PREVIOUS?: string;
   readonly EXPORT_TOKEN_SHA256?: string;
@@ -40,6 +41,11 @@ export interface Env {
   readonly DEV_AUTH_BYPASS?: string;
   /** `true`: RecallState never arms its alarm and reads a clock the tests set; the tests call `step(now)`. */
   readonly DEV_MANUAL_ALARMS?: string;
+  /**
+   * A loopback http origin (`http://127.0.0.1:<port>`) standing in for Dropbox's three hosts (the smoke run's fake);
+   * ignored unless DEV_AUTH_BYPASS is `true` as well.
+   */
+  readonly DEV_DROPBOX_ORIGIN?: string;
 }
 
 /** The lower-case public host, or null when it is not a plain host name. */

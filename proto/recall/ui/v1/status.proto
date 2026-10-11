@@ -96,6 +96,85 @@ message ServiceStatus {
   // Its daily budget: past it, SearchPages is SEARCH_OVER_BUDGET until the next UTC day; the change feed stops
   // earlier (at two thirds of it), so that an archive catching up leaves room for the owner's searches.
   int32 daily_read_budget = 19 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The archive's backup to the owner's Dropbox.
+  // (-- api-linter: core::0122::embedded-resource=disabled
+  //     aip.dev/not-precedent: the status is the one read of 设置 and the header line; the backup is a singleton
+  //     without a Get of its own, read here with the rest. --)
+  DropboxBackup dropbox_backup = 20 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The two machine tokens, `machineTokens/ingest` then `machineTokens/export`, never with their `token`.
+  // (-- api-linter: core::0122::embedded-resource=disabled
+  //     aip.dev/not-precedent: two fixed tokens without a Get or List of their own, read here with the rest of 设置. --)
+  repeated MachineToken machine_tokens = 21 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// The backup of the archive (contracts/recall-archive-v1) to the owner's Dropbox: recall writes the archive's files
+// into the app folder of the owner's own Dropbox app, about hourly while there are changes, and never deletes there
+// (a deletion is a tombstone line). Connected with OAuth 2 and PKCE: the owner gives the app's key, and recall keeps
+// only a refresh token, which no answer carries. A singleton, read as ServiceStatus.dropbox_backup.
+message DropboxBackup {
+  option (google.api.resource) = {
+    type: "recall.ziyixi.science/DropboxBackup"
+    pattern: "dropboxBackup"
+    singular: "dropboxBackup"
+    plural: "dropboxBackups"
+  };
+
+  // Always `dropboxBackup`.
+  string name = 1 [(google.api.field_behavior) = IDENTIFIER];
+  // The App key of the owner's Dropbox app (public, not a secret); empty before the first ConnectDropboxBackup.
+  string app_key = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // recall holds a refresh token and uploads. False before the first connection, after DisconnectDropboxBackup, and
+  // once Dropbox refused the refresh token (error_code `dropbox_refused`): the owner connects again.
+  bool connected = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The Dropbox account's display name, as Dropbox gave it at the connection; empty when it did not.
+  string account_display_name = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // When the owner connected it.
+  google.protobuf.Timestamp connect_time = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The last file recall wrote to Dropbox.
+  google.protobuf.Timestamp last_upload_time = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Every change of the feed up to this seq is in Dropbox (the archive's state.json says the same).
+  int32 synced_seq = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Changes above synced_seq, not in Dropbox yet, counted up to 500.
+  int32 pending_count = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // When recall committed the oldest change not in Dropbox yet; unset when there is none.
+  google.protobuf.Timestamp oldest_pending_time = 9 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Why the last attempt failed, when it failed after the last complete upload: `dropbox_refused` (the authorization
+  // was revoked or the app deleted: connect again), `dropbox_permission` (the app lacks files.content.write or
+  // files.content.read: tick it, then connect again),
+  // `dropbox_full` (no space left), `dropbox_other_feed` (the app folder holds another recall's archive),
+  // `dropbox_conflict` (a file of another content holds a blob's path, left as it is), `dropbox_rate_limited`,
+  // `dropbox_unavailable`, `dropbox_revoke_failed` (DisconnectDropboxBackup could not revoke at Dropbox); empty when
+  // none. recall retries by itself, with backoff, but after `dropbox_refused`.
+  string error_code = 10 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // When that failure happened.
+  google.protobuf.Timestamp error_time = 11 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// A machine token: the bearer token of the machine routes under /api/machine/v1 (recall/docs/design.md §2.2).
+// `machineTokens/ingest` is the extension's (write-only: uploads), `machineTokens/export` a feed consumer's (read-only:
+// the change feed and its blobs; optional, the Dropbox backup needs none). recall keeps only each token's SHA-256.
+message MachineToken {
+  option (google.api.resource) = {
+    type: "recall.ziyixi.science/MachineToken"
+    pattern: "machineTokens/{machine_token}"
+    singular: "machineToken"
+    plural: "machineTokens"
+  };
+
+  // machineTokens/ingest or machineTokens/export.
+  string name = 1 [(google.api.field_behavior) = IDENTIFIER];
+  // The token itself, `recall_ingest_` or `recall_export_` and 43 URL-safe characters. Set only in the response of
+  // RegenerateMachineToken, the one time it is shown: recall stores its SHA-256 alone and never answers it again.
+  string token = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // When the current token was made; unset while there is none (the route answers 503 unless a Worker secret holds
+  // a digest).
+  google.protobuf.Timestamp create_time = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Until when the token it replaced is still accepted (24 hours after a regeneration, so the extension uploads until
+  // it has the new one); unset when only the current token is.
+  google.protobuf.Timestamp previous_expire_time = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // A digest put as a Worker secret by hand (INGEST_TOKEN_SHA256 or EXPORT_TOKEN_SHA256 and their _PREVIOUS) is
+  // accepted as well; only deleting that secret stops it.
+  bool worker_secret = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
 }
 
 // Items of uploads that recall refused, for one reason, over 7 days. recall refuses an item only when it breaks the

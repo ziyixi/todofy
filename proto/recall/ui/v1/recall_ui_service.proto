@@ -149,6 +149,46 @@ service RecallUiService {
     option (google.api.http) = {get: "/api/v1/{name=serviceStatus}"};
     option (google.api.method_signature) = "name";
   }
+
+  // Starts connecting the owner's Dropbox (AIP-136): keeps the App key, a fresh `state` and a PKCE code verifier for
+  // 15 minutes, and answers the Dropbox authorization URL the browser goes to. Dropbox sends the owner back to
+  // GET /api/dropbox/callback (transport, behind Access like every path), which takes the code once, exchanges it with
+  // the verifier for a refresh token and returns to /settings. A new call replaces a connection not finished.
+  rpc ConnectDropboxBackup(ConnectDropboxBackupRequest) returns (ConnectDropboxBackupResponse) {
+    option (google.api.http) = {
+      post: "/api/v1/{name=dropboxBackup}:connect"
+      body: "*"
+    };
+  }
+
+  // Disconnects Dropbox (AIP-136): revokes the token at Dropbox and forgets it. The files in Dropbox stay; the App key
+  // and what was uploaded are kept, so connecting the same app again goes on where it stopped.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  rpc DisconnectDropboxBackup(DisconnectDropboxBackupRequest) returns (DropboxBackup) {
+    option (google.api.http) = {
+      post: "/api/v1/{name=dropboxBackup}:disconnect"
+      body: "*"
+    };
+  }
+
+  // Makes a new machine token (AIP-136) and answers it, the one time it is shown (MachineToken.token). recall keeps
+  // its SHA-256 only. The token it replaces keeps working for 24 hours, or stops at once with `revoke_previous`.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  rpc RegenerateMachineToken(RegenerateMachineTokenRequest) returns (MachineToken) {
+    option (google.api.http) = {
+      post: "/api/v1/{name=machineTokens/*}:regenerate"
+      body: "*"
+    };
+  }
+
+  // Deletes a machine token (AIP-135): its route stops accepting the current and the previous token at once (within a
+  // minute everywhere) and answers 503 until a new one is made, unless a Worker secret holds a digest.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc DeleteMachineToken(DeleteMachineTokenRequest) returns (google.protobuf.Empty) {
+    option (google.api.http) = {delete: "/api/v1/{name=machineTokens/*}"};
+    option (google.api.method_signature) = "name";
+  }
 }
 
 // Input of GetPage.
@@ -329,6 +369,74 @@ message GetServiceStatusRequest {
   string name = 1 [
     (google.api.field_behavior) = REQUIRED,
     (google.api.resource_reference).type = "recall.ziyixi.science/ServiceStatus"
+  ];
+}
+
+// Input of ConnectDropboxBackup.
+message ConnectDropboxBackupRequest {
+  // Always `dropboxBackup`.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "recall.ziyixi.science/DropboxBackup"
+  ];
+  // The App key of the owner's Dropbox app (its settings page at Dropbox, "App key"): lower-case letters and digits,
+  // 8 to 32 characters. With PKCE no app secret is needed, and none is ever asked for.
+  string app_key = 2 [(google.api.field_behavior) = REQUIRED];
+  // The idempotency key (AIP-155), in the body; see RecallUiService.
+  string request_id = 3 [
+    (google.api.field_info).format = UUID4,
+    (google.api.field_behavior) = OPTIONAL
+  ];
+}
+
+// Output of ConnectDropboxBackup.
+message ConnectDropboxBackupResponse {
+  // https://www.dropbox.com/oauth2/authorize with the App key, the PKCE challenge (S256), an offline token, the
+  // address to come back to (https://<recall's host>/api/dropbox/callback) and the state: where the browser goes next.
+  string authorize_url = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// Input of DisconnectDropboxBackup.
+message DisconnectDropboxBackupRequest {
+  // Always `dropboxBackup`.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "recall.ziyixi.science/DropboxBackup"
+  ];
+  // The idempotency key (AIP-155), in the body; see RecallUiService.
+  string request_id = 2 [
+    (google.api.field_info).format = UUID4,
+    (google.api.field_behavior) = OPTIONAL
+  ];
+}
+
+// Input of RegenerateMachineToken.
+message RegenerateMachineTokenRequest {
+  // machineTokens/ingest or machineTokens/export.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "recall.ziyixi.science/MachineToken"
+  ];
+  // The token being replaced stops working at once (a token that leaked), instead of 24 hours later.
+  bool revoke_previous = 2 [(google.api.field_behavior) = OPTIONAL];
+  // The idempotency key (AIP-155), in the body; see RecallUiService. A repeated request answers the same token.
+  string request_id = 3 [
+    (google.api.field_info).format = UUID4,
+    (google.api.field_behavior) = OPTIONAL
+  ];
+}
+
+// Input of DeleteMachineToken.
+message DeleteMachineTokenRequest {
+  // machineTokens/ingest or machineTokens/export.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "recall.ziyixi.science/MachineToken"
+  ];
+  // The idempotency key (AIP-155), a query parameter; see RecallUiService.
+  string request_id = 2 [
+    (google.api.field_info).format = UUID4,
+    (google.api.field_behavior) = OPTIONAL
   ];
 }
 

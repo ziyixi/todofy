@@ -162,10 +162,11 @@ accepted report nor a ready deployment receipt proves successful Newsletter deli
 - **recall:** one SQLite DO (records, the bigram FTS5 index, the compacted change feed) and one private R2 bucket (the
   texts), no D1 and no cron. A Chrome extension (never in incognito) records visits with their focus time and a page's
   text after ten seconds; both it and the Worker scrub secrets and apply the denylist with the same `recall/shared/`
-  code, and sensitive sites are kept by their site alone. Logs never hold a URL, title or text. The NAS pulls the feed
-  with `recall/sync/` (one standard-library Python file in its own image); any store implementing the contract can
-  replace it. Its Access applications and bucket exist since 2026-10-10 and CI deploys it like any app; Home binds
-  its Ops entrypoint. See [AGENTS](../recall/AGENTS.md) and [design](../recall/docs/design.md).
+  code, and sensitive sites are kept by their site alone. Logs never hold a URL, title or text. The machine tokens are
+  made in its 设置 and kept as digests. Its alarm writes the archive (`contracts/recall-archive-v1`) into the owner's
+  Dropbox app folder (OAuth with PKCE, connected in 设置), which the NAS syncs with its own Dropbox support: nothing of
+  recall's runs on the NAS. Its Access applications and bucket exist since 2026-10-10 and CI deploys it like any app;
+  Home binds its Ops entrypoint. See [AGENTS](../recall/AGENTS.md) and [design](../recall/docs/design.md).
 - **Newsletter:** runs as an independent k3s image because its workflow uses Codex CLI. It reads Todofy's machine
   reports through existing HTTPS/Basic auth and keeps its own persistent state. It does not import Todofy's
   implementation. Its external `ziyixi-protos`/wire JSON runtime and private drain/monitor adapters stay intact.

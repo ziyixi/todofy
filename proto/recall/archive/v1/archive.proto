@@ -1,6 +1,7 @@
 // recall-archive-v1 as a protobuf IDL (proto/README.md; contracts/recall-archive-v1/README.md is the contract's
-// text): the change feed recall serves to archive consumers (GET /api/machine/v1/changes) and the records an archive
-// keeps, one JSON line per change, plus the archive's own cursor file (state.json).
+// text): the records an archive keeps, one JSON line per change, and the archive's own cursor file (state.json), in
+// the archive recall writes to the owner's Dropbox; and the change feed recall serves to programmatic consumers
+// (GET /api/machine/v1/changes), whose pages carry the same records.
 //
 // This file is the one description of the records: their fields and value rules (common.wire.v1), from which
 // contracts/recall-archive-v1/recall-archive-v1.schema.json is generated (proto/tools/gen_schema.py: a consumer's
@@ -418,25 +419,27 @@ message Tombstone {
   ];
 }
 
-// An archive's cursor: its state.json, written last and atomically after everything up to synced_seq is durable.
+// An archive's cursor: its state.json, written last and atomically after everything up to synced_seq is durable. Its
+// keeper writes it: recall in the archive it writes to Dropbox, a feed consumer in its own.
 message ArchiveState {
   // Always recall-archive-v1.
   string version = 1 [
     (google.api.field_behavior) = REQUIRED,
     (common.wire.v1.field).allowed = "recall-archive-v1"
   ];
-  // The feed this archive follows (ChangePage.feed_id): set by the first page applied to an empty archive, then
-  // compared with every page.
+  // The feed this archive follows (ChangePage.feed_id): set when the archive is started, then never changed; an
+  // archive holds one feed only.
   string feed_id = 2 [
     (google.api.field_behavior) = REQUIRED,
     (common.wire.v1.field).format = "Uuid"
   ];
-  // The origin of the recall deployment the consumer last pulled from (informational: the feed is named by feed_id).
+  // The origin of the recall deployment the archive last came from (informational: the feed is named by feed_id).
   string source = 3 [
     (google.api.field_behavior) = REQUIRED,
     (common.wire.v1.field).format = "Origin"
   ];
-  // The consumer that keeps this archive (the feed's `consumer` parameter).
+  // Who keeps this archive: `dropbox` for the archive recall writes to Dropbox, else the feed consumer's name (the
+  // feed's `consumer` parameter).
   string consumer = 4 [
     (google.api.field_behavior) = REQUIRED,
     (common.wire.v1.field).format = "Consumer"
@@ -446,7 +449,7 @@ message ArchiveState {
     (google.api.field_behavior) = REQUIRED,
     (common.wire.v1.field).minimum = 0
   ];
-  // When the consumer last wrote this file.
+  // When its keeper last wrote this file.
   google.protobuf.Timestamp update_time = 6 [
     (google.api.field_behavior) = REQUIRED,
     (common.wire.v1.field).non_null = true

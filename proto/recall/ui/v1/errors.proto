@@ -33,4 +33,6 @@ enum ErrorReason {
   // RESOURCE_EXHAUSTED (429): today's read budget is used up (ServiceStatus.daily_read_budget); searches work again
   // after the next UTC midnight. The timeline and the pages still answer.
   ERROR_REASON_SEARCH_OVER_BUDGET = 5;
+  // INVALID_ARGUMENT (400): the Dropbox App key breaks its rule (ConnectDropboxBackupRequest.app_key).
+  ERROR_REASON_INVALID_APP_KEY = 6;
 }

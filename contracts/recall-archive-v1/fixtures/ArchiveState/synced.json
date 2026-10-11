@@ -2,7 +2,7 @@
   "version": "recall-archive-v1",
   "feed_id": "0b6f3c1e-7d2a-4e5b-9c8d-1a2b3c4d5e6f",
   "source": "https://recall.example.com",
-  "consumer": "nas",
+  "consumer": "dropbox",
   "synced_seq": 5,
   "update_time": "2026-10-10T02:15:07Z"
 }

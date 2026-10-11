@@ -45,8 +45,9 @@
         "code": "archive_behind",
         "severity": "warning",
         "metrics": {
-          "count": 1
-        }
+          "hours": 26
+        },
+        "since": "2026-10-09T12:00:00Z"
       },
       {
         "code": "device_stale",
@@ -107,7 +108,7 @@
     "version": "ops-v1",
     "app": "recall",
     "generated_at": "2026-10-10T14:00:00Z",
-    "health": "ok",
+    "health": "degraded",
     "modes": {
       "maintenance": false
     },
@@ -119,6 +120,11 @@
       "deferred": []
     },
     "signals": [
+      {
+        "code": "archive_not_connected",
+        "severity": "warning",
+        "metrics": {}
+      },
       {
         "code": "no_device",
         "severity": "info",
@@ -155,8 +161,67 @@
         "code": "archive_behind",
         "severity": "warning",
         "metrics": {
-          "count": 1
-        }
+          "hours": 48
+        },
+        "since": "2026-10-08T14:00:00Z"
+      }
+    ],
+    "counters": {
+      "visits_today": 0,
+      "texts_today": 0,
+      "rows_written_today": 0,
+      "rows_read_today": 0
+    },
+    "last_backup_at": null,
+    "ui_url": "https://recall.example.com/",
+    "capabilities": []
+  },
+  "status/archive-catching-up": {
+    "version": "ops-v1",
+    "app": "recall",
+    "generated_at": "2026-10-10T14:00:00Z",
+    "health": "ok",
+    "modes": {
+      "maintenance": false
+    },
+    "guard": {
+      "level": "normal",
+      "reason": null,
+      "until": null,
+      "set_at": null,
+      "deferred": []
+    },
+    "signals": [],
+    "counters": {
+      "visits_today": 0,
+      "texts_today": 0,
+      "rows_written_today": 0,
+      "rows_read_today": 0
+    },
+    "last_backup_at": null,
+    "ui_url": "https://recall.example.com/",
+    "capabilities": []
+  },
+  "status/archive-not-connected": {
+    "version": "ops-v1",
+    "app": "recall",
+    "generated_at": "2026-10-10T14:00:00Z",
+    "health": "degraded",
+    "modes": {
+      "maintenance": false
+    },
+    "guard": {
+      "level": "normal",
+      "reason": null,
+      "until": null,
+      "set_at": null,
+      "deferred": []
+    },
+    "signals": [
+      {
+        "code": "archive_not_connected",
+        "severity": "warning",
+        "metrics": {}
       }
     ],
     "counters": {

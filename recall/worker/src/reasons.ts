@@ -36,6 +36,11 @@ export const REASONS: Readonly<Record<Reason, { readonly code: Code; readonly me
     message: "today's read budget is used up; searches work again after the next UTC midnight",
     zh: '今天的搜索额度用完了，明天（UTC 零点后）再搜；时间线和页面照常能看',
   },
+  INVALID_APP_KEY: {
+    code: Code.INVALID_ARGUMENT,
+    message: 'the Dropbox App key breaks its rule',
+    zh: 'App key 格式不对：在 Dropbox 应用的设置页复制 App key（小写字母和数字），不是 App secret',
+  },
 };
 
 export function isReason(value: string): value is Reason {

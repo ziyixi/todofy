@@ -25,12 +25,13 @@ Owner decision (2026-10-11): a mail mailsort labels leaves the inbox and is foun
 read. Deployed in `a49349d`: the needs_action exception and question are gone; only a label's 归档 switch
 (`keep_in_inbox`) keeps its mail in the inbox (the owner turned it off on every label, so all of them archive).
 
-## In flight (2026-10-10, Claude): recall, the browsing recorder (live since 2026-10-11, owner setup pending)
+## In flight (2026-10-10, Claude): recall, the browsing recorder (live since 2026-10-11; branch `recall-dropbox-archive` to land; owner setup pending)
 
 Owner request (2026-10-10): record what the owner reads in Chrome (visits with real focus time, the page's text after
 ten seconds), with a very good timeline and search UI, and keep a durable copy on the NAS through a generic protocol
 so the store can change later. New app `recall/` (Worker `recall`, host `recall.ziyixi.science`, one SQLite DO
-`RecallState`, private R2 bucket `recall-store`, a MV3 extension, a NAS pull container); design in
+`RecallState`, private R2 bucket `recall-store`, a MV3 extension; the NAS copy was a pull container until 2026-10-11,
+now recall pushes the archive to the owner's Dropbox); design in
 `recall/docs/design.md`, rules in `recall/AGENTS.md`, use and deploy in `recall/README.md`. Owner defaults of §12
 kept: sensitive sites by their site alone, Google Docs/Drive IDs kept by the scrubber.
 
@@ -50,7 +51,7 @@ Landed on `main` at `eaeddf4` (branch `recall`), all built and checked, nothing 
 - `recall/web/` (时间线 · 搜索 · 设置, mailsort's design system with a violet accent; 53.6 KiB of JavaScript gzip
   against 62 KiB).
 - `recall/sync/` (the reference consumer, one standard-library Python file, its Dockerfile) and the manual workflow
-  `recall-sync-image.yml` (`ghcr.io/ziyixi/recall-sync`; never dispatched yet).
+  `recall-sync-image.yml` (`ghcr.io/ziyixi/recall-sync`; never dispatched): removed by `recall-dropbox-archive`.
 - The smoke run `recall/worker/test/smoke/smoke.mts` (`npm run test:smoke`, in "Recall checks"): the extension's own
   code uploads to a real `wrangler dev`, the owner API answers the UI's calls, `recall_sync.py --once` fills an archive
   that the generated codec and the contract accept, a second pull changes nothing and a DeletePage reaches it.
@@ -96,12 +97,39 @@ Bypass application `recall machine routes` keeps its AUD and id out of the repos
 checks the machine tokens itself; fleet_receipt's id is recorded only for a rebuild by import, which would also need
 its policy's id). `FIRST_DEPLOY_PENDING` and the reconcile `exclude` stay until the commit after the first deploy.
 
-Verify, in `recall/worker`: `npm run lint`, `npm run typecheck`, `npm test`, `npm run test:runtime`,
-`npm run test:smoke` (after the UI build; `RECALL_SMOKE_PYTHON` names a Python 3.12+); in `recall/web` and
-`recall/extension`: `npm run lint`, `npm run typecheck`, `npm test`, `npm run build`; in `recall`:
-`node --test deploy/test/*.test.mjs` and the consumer's tests (`recall/README.md` "Develop"); the root guards
-(`python3 -m unittest discover -s .github/scripts`, the tools' tests, `generate.py --check`, `catalog.py --check`,
-`inventory.py --check`, cf-guard's tests).
+Branch `recall-dropbox-archive` (2026-10-11, one commit on `5086599`; owner decisions of 2026-10-11: the NAS backup
+must not depend on code of ours on the NAS or the Mac, UGOS syncs Dropbox but cannot pull an S3 endpoint, and the
+owner runs no command):
+
+- The archive is pushed by recall: the alarm writes `contracts/recall-archive-v1`'s layout into the app folder of the
+  owner's own Dropbox app (`worker/src/archive.ts`, `backup.ts`, `dropbox.ts`; schema 2: `archive_days`,
+  `archive_blobs`), about an hour after changes, at most 40 subrequests and 5 minutes a pass, newest day first, each
+  blob once (`add`), day files and `state.json` whole (`overwrite`), Dropbox's content hash checked, 429/Retry-After
+  and backoff, never a delete (a deletion is its tombstone line; the archive only grows). Connected in 设置 → 备份到
+  Dropbox with the App key alone (OAuth 2 PKCE, `token_access_type=offline`), callback `GET /api/dropbox/callback`
+  behind Access (no Bypass), state once and 15 minutes, the refresh token only in the DO; 断开 revokes it.
+  `fixtures/archive/state.json` and `ArchiveState/synced.json` now say `consumer: dropbox` (never consumed before).
+- The machine tokens are made in 设置 → 插件口令 (`RegenerateMachineToken`, `DeleteMachineToken`; `worker/src/tokens.ts`):
+  shown once, only the SHA-256 kept, 24 h grace on regenerate, `revoke_previous` for a leak; the Worker keeps the
+  DO's digests a minute (a refused bearer rechecks after 10 s); Worker-secret digests stay accepted. The export token is
+  optional. `deploy/mint-tokens.mjs` and its test are deleted; the extension's options point at 设置.
+- The owner API additions (additive, api-linter clean, no breaking change against `main`): `DropboxBackup`,
+  `MachineToken`, `ServiceStatus.dropbox_backup` and `.machine_tokens`, `ERROR_REASON_INVALID_APP_KEY`.
+- ops-v1: `archive_behind` now measures the Dropbox writer (`hours`, `since`; 24 h, from the connection at the
+  earliest), `archive_not_connected` is new (warning until connected); feed consumers raise nothing.
+  `OpsStatus/recall-degraded.json`, recall's and Home's ops goldens and Home's Chinese labels follow.
+- Removed: `recall/sync/`, `.github/workflows/recall-sync-image.yml`, the consumer and Python steps of "Recall checks".
+  The UI: 设置's 插件口令 and 备份到 Dropbox cards, the header's backup line, the delete confirmation's wording.
+
+Verify, in `recall/worker`: `npm run lint`, `npm run typecheck`, `npm test`, `npm run test:runtime` (workerd, a fake
+Dropbox), `npm run test:smoke` (after the UI build; a loopback fake Dropbox); in `recall/web` and `recall/extension`:
+`npm run lint`, `npm run typecheck`, `npm test`, `npm run build`; in `recall`: `node --test deploy/test/*.test.mjs`;
+in `proto`: `npm run lint`, `npm run api-lint`, `npm run breaking -- origin/main`, `npm test`; Home's
+`dashboard/worker` and `dashboard/web` tests; the root guards (`python3 -m unittest discover -s .github/scripts`, the
+tools' tests, `generate.py --check`, `catalog.py --check`, `inventory.py --check`, cf-guard's tests).
+
+After its deploy: the release probes as before (the machine routes answer 503 until a token exists, then 401);
+设置 shows 插件口令 and 备份到 Dropbox; Home's 浏览记录 tile warns `archive_not_connected` until the owner connects.
 
 Next, in order:
 
@@ -118,11 +146,17 @@ Next, in order:
    (`recall-state`, read with the read-only admin helper), `FIRST_DEPLOY_PENDING` emptied and the reconcile matrix's
    `exclude` removed in the same commit (the inventory and `test_reconcile_workflow.py` refuse anything else), then
    `generate.py` (Home's resource identities) and `inventory.py --generate`; as mailsort's `6f5f93e`.
-4. Owner: `node recall/deploy/mint-tokens.mjs` (needs the deployed Worker) and the extension loaded unpacked. The
-   NAS copy changes (owner, 2026-10-11): recall writes the archive layout to the owner's Dropbox and the owner syncs
-   Dropbox to the NAS with the NAS's own cloud-drive app; no container and no command (branch in progress). Phase 1a's first checks in a real Chrome (design §3.10,
-   `recall/extension/README.md`): one focus switch, one capture, the badge, the options page, and whether Chrome
-   serves an unpacked extension's files as they are on disk (the self-update relies on it).
+4. Land `recall-dropbox-archive` (its push deploys recall, then Home).
+5. Agent: build the extension on the owner's Mac into `~/recall-extension` (`npm run install-extension` in
+   `recall/extension`).
+6. Owner, clicks only (`recall/README.md` "The owner's setup"): 设置 → 插件口令 → 生成 → 复制; `chrome://extensions` →
+   开发者模式 → 加载已解压的扩展程序 → `~/recall-extension`, the icon → options: paste the token, the device label, 保存;
+   dropbox.com/developers/apps → Create app (Scoped access, App folder) → Permissions `files.content.write` and
+   `files.content.read` → Redirect URI `https://recall.ziyixi.science/api/dropbox/callback` → copy the App key; 设置 →
+   备份到 Dropbox → App key → 连接 → Allow; UGOS Cloud Drives → Dropbox → sync `Apps/<app name>` to a shared folder,
+   cloud → NAS. Phase 1a's first checks in a real Chrome (design §3.10, `recall/extension/README.md`): one focus
+   switch, one capture, the badge, the options page, and whether Chrome serves an unpacked extension's files as they
+   are on disk (the self-update relies on it); then 设置 → 备份到 Dropbox `已全部备份` and the files in the app folder.
 
 ## Done (2026-10-10, Claude): mailsort model-first, calibrated and live
 

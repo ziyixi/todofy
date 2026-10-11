@@ -9,6 +9,9 @@
  *     Origin and the signed double-submit CSRF token, checked here before the body is read; the request then goes to
  *     RecallState, whose transcoder answers it;
  *   - GET /api/csrf: the CSRF token and its cookie (transport, not part of the service);
+ *   - GET /api/dropbox/callback: where Dropbox sends the owner's browser back after its authorization page (transport:
+ *     the browser follows Dropbox's redirect with the owner's Access cookie, so it needs no Bypass); RecallState checks
+ *     the state once and keeps the token, and the browser goes on to /settings?dropbox=<outcome> (303);
  *   - everything else (GET and HEAD): the UI's static files, through the single-page fallback.
  *
  * Every response carries the private headers (no-store, nosniff, no referrer, never framed, the strict CSP). A refusal
@@ -18,6 +21,7 @@ import { issueCsrf, STRICT_CSP, withPrivateHeaders } from '@ziyixi/edge-auth';
 import { RpcError } from '@ziyixi/proto/rpc-status';
 import { machineError, toResponse } from './answers.ts';
 import { authenticate, checkCsrf, CSRF_COOKIE, csrfKey } from './auth.ts';
+import { CALLBACK_PATH } from './backup.ts';
 import { buildSha, RECALL_OBJECT, REQUEST_ID_HEADER, type Env } from './env.ts';
 import { newRequestId } from './ids.ts';
 import { MAX_BODY_BYTES } from './limits.ts';
@@ -79,6 +83,17 @@ async function route(request: Request, env: Env, url: URL, requestId: string): P
     const response = Response.json({ token: issued.token });
     response.headers.set('set-cookie', issued.setCookie);
     return { response, asset: false };
+  }
+  if (url.pathname === CALLBACK_PATH) {
+    if (request.method !== 'GET' && !head) return fail(methodNotAllowed('GET, HEAD'));
+    let outcome = 'failed';
+    try {
+      if (!head) outcome = await env.RECALL.get(env.RECALL.idFromName(RECALL_OBJECT)).dropboxCallback(url.search, requestId);
+    } catch {
+      // RecallState failed: the browser goes back with 'failed'.
+    }
+    // A fixed same-origin path: the code and the state leave the address bar.
+    return { response: new Response(null, { status: 303, headers: { location: `/settings?dropbox=${outcome}` } }), asset: false };
   }
   if (url.pathname === '/api/v1' || url.pathname.startsWith(API_PREFIX)) {
     if (!SAFE.has(request.method)) {

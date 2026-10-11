@@ -17,7 +17,7 @@ import { timestampFromMs } from '@ziyixi/proto/protobuf/wkt';
 import { toWire } from '@ziyixi/proto/wire-json';
 import { machineError, machineJson, type MachineAnswer } from './answers.ts';
 import { TEXT_MEDIA_TYPE } from './blobs.ts';
-import { CONSUMERS_MAX, FEED_DEFAULT_LIMIT, FEED_MAX_LIMIT, FEED_READ_LIMIT, OVER_BUDGET_JITTER_MS } from './limits.ts';
+import { BEHIND_COUNT_MAX, CONSUMERS_MAX, FEED_DEFAULT_LIMIT, FEED_MAX_LIMIT, FEED_READ_LIMIT, OVER_BUDGET_JITTER_MS } from './limits.ts';
 import { hostOfKey, nextUtcMidnight, utcDay, type DocumentRow, type Store, type TombstoneRow, type VisitRow } from './store.ts';
 
 export const ARCHIVE_VERSION = 'recall-archive-v1';
@@ -120,6 +120,27 @@ export function readChanges(store: Store, after: number, limit: number): { chang
     .slice(0, limit);
   const last = changes[changes.length - 1];
   return { changes, lastSeq: changes.length === limit && last !== undefined ? last.seq : head, headSeq: head };
+}
+
+/** The changes above a seq: live visits and documents, and tombstones. */
+const CHANGES_ABOVE = ['visits r JOIN pages p ON p.rowid = r.page_rowid WHERE r.seq > ?', 'documents r JOIN pages p ON p.rowid = r.page_rowid WHERE r.seq > ?', 'tombstones r WHERE r.seq > ?'];
+
+/** The commit time of the oldest change above a seq (null when there is none): one indexed read per table. */
+export function oldestUnsynced(store: Store, seq: number): number | null {
+  const times = CHANGES_ABOVE.map((from) => store.one<{ seq_ms: number }>(`SELECT r.seq_ms AS seq_ms FROM ${from} ORDER BY r.seq LIMIT 1`, seq)?.seq_ms).filter(
+    (ms): ms is number => ms !== undefined,
+  );
+  return times.length === 0 ? null : Math.min(...times);
+}
+
+/** The changes above a seq, counted up to BEHIND_COUNT_MAX. */
+export function behindCount(store: Store, seq: number): number {
+  let count = 0;
+  for (const from of CHANGES_ABOVE) {
+    if (count >= BEHIND_COUNT_MAX) break;
+    count += store.count(`SELECT count(*) AS n FROM (SELECT 1 FROM ${from} LIMIT ?)`, seq, BEHIND_COUNT_MAX - count);
+  }
+  return count;
 }
 
 /** Records a consumer's sync position (its `after`); a ninth name replaces the one unseen longest. */

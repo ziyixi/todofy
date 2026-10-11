@@ -8,12 +8,12 @@
  * never binds recall, so the answers are checked against the generated schema, not the legacy one.
  */
 import { readFileSync, writeFileSync } from 'node:fs';
-import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
 import { expect, test } from 'vitest';
 import { validate } from '../../../contracts/ops-v1/validate.mjs';
 import { DAY, HOUR, MIB, MINUTE } from '../src/limits.ts';
 import { recallStatus, uiUrl } from '../src/ops-status.ts';
-import { Store, utcDay } from '../src/store.ts';
+import { utcDay, type Store } from '../src/store.ts';
+import { memoryStore } from './sqlite.ts';
 
 const path = (relative: string): string => decodeURIComponent(new URL(relative, import.meta.url).pathname);
 const GOLDEN = path('golden/ops-v1.json');
@@ -26,26 +26,8 @@ const HOST = 'recall.example.com';
 const TODAY = utcDay(NOW);
 const YESTERDAY = utcDay(NOW - DAY);
 
-function sqlStorage(databaseSize: number): SqlStorage {
-  const db = new DatabaseSync(':memory:');
-  return {
-    databaseSize,
-    exec(query: string, ...params: SQLInputValue[]) {
-      const statement = db.prepare(query);
-      if (statement.columns().length > 0) {
-        const rows = statement.all(...params).map((row) => ({ ...row }));
-        return { toArray: () => rows, rowsRead: rows.length, rowsWritten: 0 };
-      }
-      const { changes } = statement.run(...params);
-      return { toArray: () => [], rowsRead: 0, rowsWritten: Number(changes) };
-    },
-  } as unknown as SqlStorage;
-}
-
 function store(databaseSize = 48 * MIB): Store {
-  const value = new Store(sqlStorage(databaseSize));
-  value.migrate();
-  return value;
+  return memoryStore(databaseSize);
 }
 
 function device(target: Store, id: string, lastSeenMs: number): void {
@@ -56,10 +38,36 @@ function usage(target: Store, day: string, row: Readonly<Record<string, number |
   target.insert('usage', { day, ...row });
 }
 
+/** The Dropbox backup connected at `connectedMs`, with every change up to `syncedSeq` written (backup.ts's meta). */
+function dropbox(target: Store, connectedMs: number, syncedSeq: number): void {
+  for (const [key, value] of Object.entries({
+    dropbox_app_key: 'syntheticappkey1',
+    dropbox_refresh_token: 'synthetic-refresh-token',
+    dropbox_account_name: '合成账户',
+    dropbox_connected_ms: String(connectedMs),
+    archive_target: 'dbid:synthetic syntheticappkey1',
+    archive_seq: String(syncedSeq),
+  })) {
+    target.setMeta(key, value);
+  }
+}
+
+/** One change committed at `seqMs` (a visit of a synthetic page), seq 1. */
+function change(target: Store, seqMs: number): void {
+  target.insert('pages', { id: 'synthetic-page', url: 'https://example.com/', host_key: 'com.example.' });
+  target.insert('visits', {
+    id: 'synthetic-visit', seq: 1, seq_ms: seqMs, page_rowid: 1, device_id: 'device-a', device_label: '合成设备', url: 'https://example.com/',
+    title: '合成页面', start_ms: seqMs, end_ms: seqMs + MINUTE, focus_seconds: 60, spans: '[]', revision: 1,
+  });
+  target.setMeta('seq', '1');
+}
+
 function cases(): Record<string, unknown> {
   const ok = store();
   device(ok, 'device-a', NOW - 10 * MINUTE);
-  ok.insert('consumers', { name: 'nas-archive', synced_seq: 0, last_pull_ms: NOW - 20 * MINUTE });
+  dropbox(ok, NOW - 3 * DAY, 0);
+  // A feed consumer far behind raises nothing: the archive recall answers for is Dropbox's.
+  ok.insert('consumers', { name: 'nas-archive', synced_seq: 0, last_pull_ms: NOW - 26 * HOUR });
   usage(ok, TODAY, { rows_written: 4210, rows_read: 18_200, batches: 41, items: 260, visits: 120, long_visits: 38, captures: 36, texts: 34 });
   usage(ok, YESTERDAY, { rows_written: 9100, rows_read: 52_000, visits: 290, long_visits: 90, captures: 88, texts: 85 });
 
@@ -67,24 +75,31 @@ function cases(): Record<string, unknown> {
   device(degraded, 'device-a', NOW - 30 * HOUR);
   // Seen more than 30 days ago: given up, it raises nothing.
   device(degraded, 'device-b', NOW - 40 * DAY);
-  degraded.insert('consumers', { name: 'nas-archive', synced_seq: 0, last_pull_ms: NOW - 26 * HOUR });
+  dropbox(degraded, NOW - 3 * DAY, 0);
+  change(degraded, NOW - 26 * HOUR);
   const refused = { invalid_item: { count: 3, last_ms: NOW - 2 * HOUR }, unsupported_item: { count: 5, last_ms: NOW - HOUR } };
   usage(degraded, TODAY, { rows_written: 20_001, rows_read: 1_000_000, batches: 12, items: 80, visits: 64, long_visits: 20, captures: 0, texts: 0, refused: JSON.stringify(refused), over_budget: 1 });
   usage(degraded, YESTERDAY, { rows_written: 3000, visits: 70, long_visits: 12, captures: 0 });
 
-  // An archive that pulled an hour ago but has not taken a change committed two days ago.
+  // Dropbox connected three days ago has not taken a change committed two days ago.
   const behind = store();
   device(behind, 'device-a', NOW - 5 * MINUTE);
-  behind.insert('pages', { id: 'synthetic-page', url: 'https://example.com/', host_key: 'com.example.' });
-  behind.insert('visits', {
-    id: 'synthetic-visit', seq: 1, seq_ms: NOW - 2 * DAY, page_rowid: 1, device_id: 'device-a', device_label: '合成设备', url: 'https://example.com/',
-    title: '合成页面', start_ms: NOW - 2 * DAY, end_ms: NOW - 2 * DAY + MINUTE, focus_seconds: 60, spans: '[]', revision: 1,
-  });
-  behind.setMeta('seq', '1');
-  behind.insert('consumers', { name: 'nas-archive', synced_seq: 0, last_pull_ms: NOW - HOUR });
+  dropbox(behind, NOW - 3 * DAY, 0);
+  change(behind, NOW - 2 * DAY);
+
+  // Connected an hour ago, writing a store whose changes are older: a first upload is no lag.
+  const catchingUp = store();
+  device(catchingUp, 'device-a', NOW - 5 * MINUTE);
+  dropbox(catchingUp, NOW - HOUR, 0);
+  change(catchingUp, NOW - 2 * DAY);
+
+  // Never connected (or Dropbox refused the token).
+  const notConnected = store();
+  device(notConnected, 'device-a', NOW - 5 * MINUTE);
 
   const full = store(900 * MIB);
   device(full, 'device-a', NOW - 5 * MINUTE);
+  dropbox(full, NOW - 3 * DAY, 0);
 
   const broken = store();
   broken.run('DROP TABLE usage');
@@ -93,6 +108,8 @@ function cases(): Record<string, unknown> {
     'status/degraded': recallStatus(degraded, HOST, NOW),
     'status/first-day': recallStatus(store(), HOST, NOW),
     'status/archive-behind': recallStatus(behind, HOST, NOW),
+    'status/archive-catching-up': recallStatus(catchingUp, HOST, NOW),
+    'status/archive-not-connected': recallStatus(notConnected, HOST, NOW),
     'status/storage-full': recallStatus(full, HOST, NOW),
     'status/no-host': recallStatus(ok, null, NOW),
     'status/unavailable': recallStatus(broken, HOST, NOW),
@@ -134,16 +151,20 @@ test('the signals: warnings make the status degraded, a first day is only inform
   // One device is stale (the other was given up); only the lost items count, not the newer extension's.
   expect(degraded.signals.find((s) => s.code === 'device_stale')?.metrics).toEqual({ count: 1, hours: 30 });
   expect(degraded.signals.find((s) => s.code === 'items_rejected')?.metrics).toEqual({ count: 3 });
+  // A change has waited 26 hours for Dropbox.
+  expect(degraded.signals.find((s) => s.code === 'archive_behind')?.metrics).toEqual({ hours: 26 });
   expect(all['status/ok']).toMatchObject({ health: 'ok', signals: [] });
-  expect(all['status/first-day']).toMatchObject({ health: 'ok', signals: [{ code: 'no_device', severity: 'info' }] });
-  expect(all['status/archive-behind']).toMatchObject({ health: 'degraded', signals: [{ code: 'archive_behind', metrics: { count: 1 } }] });
+  expect(all['status/first-day']).toMatchObject({ health: 'degraded', signals: [{ code: 'archive_not_connected', severity: 'warning' }, { code: 'no_device', severity: 'info' }] });
+  expect(all['status/archive-behind']).toMatchObject({ health: 'degraded', signals: [{ code: 'archive_behind', metrics: { hours: 48 }, since: '2026-10-08T14:00:00Z' }] });
+  expect(all['status/archive-catching-up']).toMatchObject({ health: 'ok', signals: [] });
+  expect(all['status/archive-not-connected']).toMatchObject({ health: 'degraded', signals: [{ code: 'archive_not_connected', severity: 'warning', metrics: {} }] });
   expect(all['status/storage-full']).toMatchObject({ health: 'degraded', signals: [{ code: 'storage_high', severity: 'critical' }] });
   expect(all['status/unavailable']).toMatchObject({ health: 'down', signals: [{ code: 'status_unavailable', severity: 'critical' }] });
 });
 
-test('a status holds counts and codes only: never a URL, a title, a device label or a consumer name', () => {
+test('a status holds counts and codes only: never a URL, a title, a device label, a consumer name or anything of Dropbox', () => {
   const text = JSON.stringify(cases());
-  for (const leak of ['https://example.com', '合成', 'device-a', 'nas-archive', 'synthetic-']) expect(text).not.toContain(leak);
+  for (const leak of ['https://example.com', '合成', 'device-a', 'nas-archive', 'synthetic', 'dbid:']) expect(text).not.toContain(leak);
   expect(text).toContain(`"ui_url":"https://${HOST}/"`);
 });
 

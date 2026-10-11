@@ -236,7 +236,7 @@ const ENTRIES: readonly EntryDef[] = [
   {
     id: 'recall',
     name: '浏览记录',
-    description: '浏览时间线、读过内容的全文搜索与 NAS 归档',
+    description: '浏览时间线、读过内容的全文搜索与 Dropbox 归档',
     group: 'apps',
     icon: 'notebook-pen',
     accent: 'violet',

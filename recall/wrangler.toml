@@ -8,11 +8,12 @@
 # ACCESS_OWNER, ACCESS_OWNER_ALIASES and CSRF_SIGNING_KEY as Worker secrets with --secrets-file. A plain
 # `wrangler deploy` of this file DELETES BUILD_SHA.
 #
-# The machine tokens' digests (INGEST_TOKEN_SHA256, EXPORT_TOKEN_SHA256 and their _PREVIOUS) are NOT deployed: the owner
-# puts them from their own machine with deploy/mint-tokens.mjs (`wrangler secret put`), and they never enter GitHub. A
-# deploy keeps them: `wrangler deploy --secrets-file` keeps every secret the file does not name
-# (deploy/test/secrets-kept.test.mjs), and no [secrets] required list is declared here. Until they are put, the machine
-# routes answer 503.
+# The machine tokens are NOT deployed: the owner makes them in recall's 设置 → 插件口令, and RecallState keeps only their
+# digests. Digests put by hand as Worker secrets (INGEST_TOKEN_SHA256, EXPORT_TOKEN_SHA256 and their _PREVIOUS) are
+# accepted too and never enter GitHub; a deploy keeps them: `wrangler deploy --secrets-file` keeps every secret the file
+# does not name (deploy/test/secrets-kept.test.mjs), and no [secrets] required list is declared here. Until a token
+# exists, its machine route answers 503. The archive goes to the owner's Dropbox (connected in 设置, OAuth with PKCE:
+# no Dropbox secret is configured anywhere).
 #
 # The Access applications (the whole host, and the Bypass of the three machine routes) and the bucket are created by
 # infra/ and "Infra apply"; the whole host's AUD is committed below as ACCESS_AUDIENCE (deploy/deploy-vars.mjs refuses a

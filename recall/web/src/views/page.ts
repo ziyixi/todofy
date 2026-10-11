@@ -189,6 +189,6 @@ async function denySite(ctx: ViewContext, site: string): Promise<void> {
 
 /** Deletes the page's record (asks first), then leaves for where it was opened from. */
 async function deletePage(ctx: ViewContext, page: Page): Promise<void> {
-  if (!ctx.host.confirm('删除这个页面的记录？访问和正文会从 recall 和 NAS 归档里一起删除，不能恢复。')) return
+  if (!ctx.host.confirm('删除这个页面的记录？访问和正文会从 recall 删除，不能恢复；Dropbox 备份只增不删，会多一条删除记录，原来的文件要在 Dropbox 里自己删。')) return
   await act((requestId) => api.deletePage({ name: page.name, requestId }), '已删除这个页面的记录', () => ctx.back())
 }

@@ -4,10 +4,12 @@
  * recall has no guard (its daily write budget already caps its share, and an upload it refuses waits in the
  * extension's outbox), so it lists no capability and refuses setGuard.
  *
- * Signals: `device_stale` (warning: a device seen in the last 30 days without an upload for 24 hours), `archive_behind`
- * (warning: a consumer seen in the last 30 days without a pull for 24 hours, or with an unarchived change older than
- * 24 hours), `no_captures` (warning: yesterday had visits of ten seconds or more on pages that keep their text, and no
- * capture of them arrived, not even one recall skipped as a text it had), `items_rejected` (warning: uploads lost
+ * Signals: `device_stale` (warning: a device seen in the last 30 days without an upload for 24 hours),
+ * `archive_not_connected` (warning: the Dropbox backup is not connected, or Dropbox refused its token), `archive_behind`
+ * (warning: a change has waited more than 24 hours for Dropbox, counted from the connection at the earliest; the feed's
+ * own consumers are shown in 设置 and raise nothing), `no_captures` (warning: yesterday had visits of ten seconds or
+ * more on pages that keep their text, and no capture of them arrived, not even one recall skipped as a text it had),
+ * `items_rejected` (warning: uploads lost
  * items in the last 24 hours; an `unsupported_item` is not lost), `storage_high` (warning past STORAGE_HIGH_MIB,
  * critical at the budget), `upload_over_budget` (warning: today's write budget ran out), `reads_over_budget` (warning:
  * today's reads stopped the change feed, or the searches too) and `no_device` (information, before the first upload);
@@ -18,8 +20,9 @@ import { file_ops_v1_ops, GuardLevel, Health, OpsStatusSchema, Severity, SignalS
 import type * as wire from '@ziyixi/proto/ops/v1/ops_wire';
 import { fieldRules, formatMatches, toWire } from '@ziyixi/proto/wire-json';
 import { LOST_REASONS } from './ingest.ts';
-import { ACTIVE_MS, DAILY_READ_BUDGET, DAY, FEED_READ_LIMIT, MIB, STALE_MS, STORAGE_BUDGET_MIB, STORAGE_HIGH_MIB } from './limits.ts';
-import { consumers, devices, oldestUnsynced, rejectedItems } from './status.ts';
+import { connected, waitingSince } from './backup.ts';
+import { ACTIVE_MS, ARCHIVE_BEHIND_MS, DAILY_READ_BUDGET, DAY, FEED_READ_LIMIT, HOUR, MIB, STALE_MS, STORAGE_BUDGET_MIB, STORAGE_HIGH_MIB } from './limits.ts';
+import { devices, rejectedItems } from './status.ts';
 import { utcDay, type Store } from './store.ts';
 
 const MAX_SIGNALS = fieldRules(OpsStatusSchema.field.signals).maxItems;
@@ -53,16 +56,9 @@ export function signals(store: Store, now: number): Signal[] {
     const since = Math.min(...staleDevices.map((row) => row.last_seen_ms));
     out.push(signal('device_stale', Severity.WARNING, { count: staleDevices.length, hours: Math.floor((now - since) / (DAY / 24)) }, since));
   }
-  let behindArchives = 0;
-  for (const row of consumers(store)) {
-    if (now - row.last_pull_ms > ACTIVE_MS) continue;
-    if (now - row.last_pull_ms > STALE_MS) behindArchives += 1;
-    else {
-      const oldest = oldestUnsynced(store, row.synced_seq);
-      if (oldest !== null && now - oldest > STALE_MS) behindArchives += 1;
-    }
-  }
-  if (behindArchives > 0) out.push(signal('archive_behind', Severity.WARNING, { count: behindArchives }));
+  if (!connected(store)) out.push(signal('archive_not_connected', Severity.WARNING, {}));
+  const waiting = waitingSince(store);
+  if (waiting !== null && now - waiting > ARCHIVE_BEHIND_MS) out.push(signal('archive_behind', Severity.WARNING, { hours: Math.floor((now - waiting) / HOUR) }, waiting));
   const yesterday = store.usage(utcDay(now - DAY));
   if (yesterday.long_visits > 0 && yesterday.captures === 0) out.push(signal('no_captures', Severity.WARNING, { visits: yesterday.long_visits }));
   const lost = rejectedItems(store, now).filter((item) => LOST_REASONS.includes(item.reason) && now - item.lastMs <= DAY);

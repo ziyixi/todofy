@@ -1,13 +1,17 @@
 /**
  * 设置 against the fake API, in the owner's words: devices (the latest upload, stale with what to check, version,
  * outbox, the last error as a sentence, clock skew), the steps without one, lost items and items waiting for a newer
- * recall; archives (the last pull, behind, late, a stale one not counted); storage (counts, meters, the day's budgets,
+ * recall; the extension's token (生成, shown once with 复制, 重新生成 with its grace, revoked at once, stopped; the
+ * export token folded); the Dropbox backup (the steps and the App key, 连接 to Dropbox, the outcome it came back with,
+ * connected with what waits and its failures in words, 断开) and the feed's own consumers; storage (counts, meters, the day's budgets,
  * the index's reach); the owner's two lists (add to either, a pattern moving between them, remove, only the lists with
  * the etag, a stale etag, the server's refusal, the built-in lists) and the build.
  */
+import { create } from '@ziyixi/proto/protobuf'
 import { timestampFromMs } from '@ziyixi/proto/protobuf/wkt'
+import { DropboxBackupSchema, MachineTokenSchema } from '@ziyixi/proto/recall/ui/v1/status_pb'
 import { at, FakeServer, HOUR, MINUTE, NOW } from './test/fakeServer.ts'
-import { buttonNamed, open, toastText, type } from './test/helpers.ts'
+import { buttonNamed, open, testHost, toastText, type, urlParams } from './test/helpers.ts'
 
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0))
 async function settled(): Promise<void> {
@@ -47,20 +51,161 @@ describe('设备', () => {
     ])
   })
 
-  it('without a device, gives the three steps to connect one', async () => {
+  it('without a device, gives the three steps to connect one, clicks only', async () => {
     const fake = new FakeServer()
     fake.status = { devices: [] }
     const root = await open(fake, '/settings')
     expect([...card(root, '设备').querySelectorAll('ol.steps li')].map((node) => node.textContent)).toEqual([
-      '在自己的电脑上运行 node recall/deploy/mint-tokens.mjs，生成上传令牌（已复制到剪贴板）',
-      '在 Chrome 打开 chrome://extensions，打开开发者模式，加载扩展的文件夹',
-      '在扩展的选项里粘贴令牌，填上设备名',
+      '在下面的 插件口令 里点 生成，复制口令',
+      '在 Chrome 打开 chrome://extensions，打开 开发者模式，点 加载已解压的扩展程序，选扩展的文件夹',
+      '在扩展的选项里粘贴口令，填上设备名（服务器地址已经填好）',
     ])
   })
 })
 
-describe('归档', () => {
-  it('shows when each archive last pulled and how far behind it is, late or stale in the warning color', async () => {
+describe('插件口令', () => {
+  it('generates the first token and shows it once, with 复制 and the server address', async () => {
+    const fake = new FakeServer()
+    fake.tokens = [create(MachineTokenSchema, { name: 'machineTokens/ingest' }), create(MachineTokenSchema, { name: 'machineTokens/export' })]
+    const root = await open(fake, '/settings')
+    const tokens = card(root, '插件口令')
+    expect(tokens.querySelector(':scope > .tokens > p.hint')?.textContent).toBe('还没有口令：生成后粘贴到扩展的选项里，扩展才能上传。')
+    buttonNamed(tokens, '生成').click()
+    await settled()
+    const call = fake.calls.find((item) => item.path === '/api/v1/machineTokens/ingest:regenerate')
+    expect(call?.method).toBe('POST')
+    expect(call?.headers['x-csrf-token']).toBe('csrf-token')
+    const once = tokens.querySelector('.token-once')
+    expect(once?.querySelector('input')?.value).toBe(`recall_ingest_${'T'.repeat(43)}`)
+    expect(once?.querySelector('.hint.warn')?.textContent).toBe('新的插件口令只显示这一次：现在复制，粘贴到扩展的选项里。离开或刷新这一页后不会再显示。')
+    expect(once?.querySelector('.hint:not(.warn)')?.textContent).toBe(`扩展里的服务器地址：${window.location.origin}`)
+    expect(tokens.querySelector('.row-head')?.textContent).toContain('刚刚生成')
+    expect(toastText(root)).toBe('已生成新的插件口令')
+    // Never shown again: the status carries no token, and the page drawn again has none.
+    const again = await open(fake, '/settings')
+    expect(card(again, '插件口令').querySelector('.token-once')).toBeNull()
+  })
+
+  it('asks before 重新生成, and says how long the old token still works', async () => {
+    const fake = new FakeServer()
+    const host = testHost()
+    const root = await open(fake, '/settings', host)
+    const tokens = card(root, '插件口令')
+    expect(tokens.querySelector('.row-head')?.textContent).toContain('7 天前生成')
+    buttonNamed(tokens, '重新生成').click()
+    await settled()
+    expect(host.asked).toEqual(['重新生成插件口令？旧口令 24 小时内仍可用，在这之前把新口令粘贴到扩展的选项里。'])
+    expect(fake.calls.find((item) => item.path.endsWith(':regenerate'))?.body).toMatchObject({ request_id: expect.any(String) as string })
+    expect(tokens.querySelector(':scope > .tokens > p.hint')?.textContent).toBe('旧口令 24 小时内仍可用')
+  })
+
+  it('revokes a leaked token at once, or stops uploads, from its ⋯ menu', async () => {
+    const fake = new FakeServer()
+    const host = testHost()
+    const root = await open(fake, '/settings', host)
+    const tokens = card(root, '插件口令')
+    buttonNamed(tokens, '插件口令的更多操作').click()
+    buttonNamed(tokens, '旧口令泄露：立即作废并重新生成').click()
+    await settled()
+    expect(host.asked).toEqual(['旧口令会立即失效，扩展换上新口令前无法上传。继续？'])
+    expect(fake.calls.find((item) => item.path.endsWith(':regenerate'))?.body).toMatchObject({ revoke_previous: true })
+    expect(tokens.querySelector('.token-once input')).not.toBeNull()
+    buttonNamed(tokens, '插件口令的更多操作').click()
+    buttonNamed(tokens, '停用').click()
+    await settled()
+    expect(fake.calls.find((item) => item.method === 'DELETE')?.path).toMatch(/^\/api\/v1\/machineTokens\/ingest\?request_id=/)
+    expect(tokens.querySelector(':scope > .tokens > p.hint')?.textContent).toBe('还没有口令：生成后粘贴到扩展的选项里，扩展才能上传。')
+    expect(tokens.querySelector('.token-once')).toBeNull()
+  })
+
+  it('folds the optional export token, says what it is for, and shows a new one open', async () => {
+    const fake = new FakeServer()
+    const root = await open(fake, '/settings')
+    const folded = card(root, '插件口令').querySelector('details')
+    expect(folded?.querySelector('summary')?.textContent).toBe('导出口令（可选）')
+    expect(folded?.querySelector('p.hint')?.textContent).toBe('只给通过变更 feed 读取全部记录的程序用；Dropbox 备份不需要它。')
+    if (folded === null || folded === undefined) throw new Error('no export token')
+    buttonNamed(folded, '生成').click()
+    await settled()
+    const opened = card(root, '插件口令').querySelector('details')
+    expect(opened?.hasAttribute('open')).toBe(true)
+    expect(opened?.querySelector('.token-once input')?.getAttribute('value')).toBe(`recall_export_${'T'.repeat(43)}`)
+  })
+})
+
+describe('备份到 Dropbox', () => {
+  it('not connected: the steps at Dropbox with the exact Redirect URI, and 连接 goes to Dropbox with the App key', async () => {
+    const fake = new FakeServer()
+    fake.backup = create(DropboxBackupSchema, { name: 'dropboxBackup' })
+    const host = testHost()
+    const root = await open(fake, '/settings', host)
+    const backup = card(root, '备份到 Dropbox')
+    expect([...backup.querySelectorAll('ol.steps li')].map((node) => node.textContent)).toEqual([
+      '在 Dropbox 网站打开 dropbox.com/developers/apps，Create app：Scoped access → App folder → 任意名字',
+      '在应用的 Permissions 里勾选 files.content.write 和 files.content.read，点 Submit',
+      `在 Settings → OAuth 2 → Redirect URIs 里加上 ${window.location.origin}/api/dropbox/callback`,
+      '复制同一页的 App key，粘贴到这里，点 连接，在 Dropbox 里允许',
+    ])
+    const field = backup.querySelector<HTMLInputElement>('input[aria-label="Dropbox App key"]')
+    if (field === null) throw new Error('no field')
+    type(field, ' syntheticappkey1 ')
+    buttonNamed(backup, '连接').click()
+    await settled()
+    expect(fake.calls.find((item) => item.path === '/api/v1/dropboxBackup:connect')?.body).toMatchObject({ app_key: 'syntheticappkey1' })
+    expect(host.navigated).toEqual(['/oauth2/authorize?client_id=syntheticappkey1&state=s'])
+    expect(root.querySelector('.status-line .problem')?.textContent).toBe('Dropbox 备份未连接')
+  })
+
+  it("shows the server's refusal of an App key, and says when Dropbox refused the token", async () => {
+    const fake = new FakeServer()
+    fake.backup = create(DropboxBackupSchema, { name: 'dropboxBackup', appKey: 'syntheticappkey1', errorCode: 'dropbox_refused', errorTime: timestampFromMs(NOW - HOUR) })
+    const host = testHost()
+    const root = await open(fake, '/settings', host)
+    const backup = card(root, '备份到 Dropbox')
+    expect(backup.querySelector('p.hint.warn')?.textContent).toBe('Dropbox 撤销了授权（或应用被删除了）：重新连接')
+    const field = backup.querySelector<HTMLInputElement>('input[aria-label="Dropbox App key"]')
+    expect(field?.value).toBe('syntheticappkey1')
+    if (field === null) throw new Error('no field')
+    type(field, 'App Secret!')
+    buttonNamed(backup, '连接').click()
+    await settled()
+    expect(host.navigated).toEqual([])
+  })
+
+  it('says how the connection went when Dropbox sends the browser back, once', async () => {
+    for (const [outcome, said] of [
+      ['connected', '已连接 Dropbox：几分钟内开始备份'],
+      ['denied', '你在 Dropbox 取消了授权，没有连接'],
+      ['expired', '这次连接已过期：请再点一次 连接'],
+      ['other', '没有连上 Dropbox：检查 App key 和 Redirect URI 后再试'],
+    ]) {
+      const root = await open(new FakeServer(), `/settings?dropbox=${outcome}`)
+      expect(toastText(root), outcome).toBe(said)
+      expect(urlParams().has('dropbox')).toBe(false)
+      root.remove()
+    }
+  })
+
+  it('connected: the account, the last upload, what waits (late in the warning color), a failure in words, 断开', async () => {
+    const fake = new FakeServer()
+    Object.assign(fake.backup, { pendingCount: 32, oldestPendingTime: timestampFromMs(NOW - 26 * HOUR), errorCode: 'dropbox_full', errorTime: timestampFromMs(NOW - HOUR) })
+    const host = testHost()
+    const root = await open(fake, '/settings', host)
+    const backup = card(root, '备份到 Dropbox')
+    expect(backup.querySelector('.row-head')?.textContent).toBe('Dropbox · 合成 Dropbox20 分钟前上传')
+    expect(backup.querySelector('.row-head .meta')?.getAttribute('title')).toBe('seq 10432')
+    const facts = backup.querySelector('.facts')
+    expect([facts?.textContent, facts?.classList.contains('warn')]).toEqual(['待备份 32 条（最早一条 26 小时前）', true])
+    expect(backup.querySelector('p.hint.warn')?.textContent).toBe('Dropbox 空间不足：腾出空间后会自动继续')
+    expect(backup.querySelector('p.hint.warn')?.getAttribute('title')).toBe('dropbox_full')
+    buttonNamed(backup, '断开').click()
+    await settled()
+    expect(host.asked).toEqual(['断开 Dropbox？已经备份的文件留在 Dropbox 里；之后的新记录不再上传，直到重新连接。'])
+    expect(fake.calls.some((item) => item.path === '/api/v1/dropboxBackup:disconnect')).toBe(true)
+    expect(card(root, '备份到 Dropbox').querySelector('ol.steps')).not.toBeNull()
+  })
+
+  it('lists the feed’s own consumers under it: the last pull and how far behind, late or stale in the warning color', async () => {
     const fake = new FakeServer()
     fake.status = {
       archiveConsumers: [
@@ -71,7 +216,7 @@ describe('归档', () => {
       ],
     }
     const root = await open(fake, '/settings')
-    const rows = [...card(root, '归档').querySelectorAll('.rows > li')]
+    const rows = [...card(root, '备份到 Dropbox').querySelectorAll('.rows > li')]
     expect(rows.map((row) => row.textContent)).toEqual([
       'NAS2 分钟前同步已全部同步',
       'backup-disk3 天前同步最早一条没同步的是 3 天前',
@@ -85,13 +230,9 @@ describe('归档', () => {
     expect(rows[3]?.querySelector('.facts')?.classList.contains('warn')).toBe(true)
   })
 
-  it('without one, says where the archive contract is', async () => {
-    const fake = new FakeServer()
-    fake.status = { archiveConsumers: [] }
-    const root = await open(fake, '/settings')
-    const archive = card(root, '归档')
-    expect(archive.querySelector('.empty strong')?.textContent).toBe('还没有归档连上')
-    expect(archive.querySelector('code')?.textContent).toBe('contracts/recall-archive-v1/README.md')
+  it('without one, lists none', async () => {
+    const root = await open(new FakeServer(), '/settings')
+    expect(card(root, '备份到 Dropbox').querySelector('h3')).toBeNull()
   })
 })
 
@@ -235,7 +376,7 @@ describe('a failure', () => {
     expect(root.querySelector('#view .error-line span')?.textContent).toBe('服务暂时不可用，请稍后再试')
     buttonNamed(root, '重试').click()
     await settled()
-    expect(cards(root).map((node) => node.querySelector('h2')?.textContent)).toEqual(['设备', '归档', '存储', '网站名单'])
-    expect(root.querySelector('.status-line')?.textContent).toBe('上传 3 分钟前NAS 已同步')
+    expect(cards(root).map((node) => node.querySelector('h2')?.textContent)).toEqual(['设备', '插件口令', '备份到 Dropbox', '存储', '网站名单'])
+    expect(root.querySelector('.status-line')?.textContent).toBe('上传 3 分钟前Dropbox 已备份')
   })
 })

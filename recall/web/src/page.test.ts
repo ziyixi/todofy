@@ -181,7 +181,7 @@ describe('the ⋯ actions', () => {
     buttonNamed(root, '页面操作').click()
     buttonNamed(root, '删除这个页面的记录').click()
     await settled()
-    expect(host.asked).toEqual(['删除这个页面的记录？访问和正文会从 recall 和 NAS 归档里一起删除，不能恢复。'])
+    expect(host.asked).toEqual(['删除这个页面的记录？访问和正文会从 recall 删除，不能恢复；Dropbox 备份只增不删，会多一条删除记录，原来的文件要在 Dropbox 里自己删。'])
     const removal = fake.calls.find((call) => call.method === 'DELETE')
     expect(removal?.path).toMatch(new RegExp(`^/api/v1/pages/${ID}\\?request_id=[0-9a-f-]{36}$`))
     expect(fake.pages).toEqual([])

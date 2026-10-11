@@ -2,13 +2,15 @@
 // of the pages with a text, the word "weekly" in every text. Every row a call reads counts against the account's daily
 // 5 million (shared by every app), so each search path, a search's next page, the status and ops-v1 are held to a
 // bound here, whatever the store's size: a common word with and without a range, a rare word, Chinese, 最近读过, a
-// site, a minimum of focus that no page reaches (the scan's bound, reported), an old week's read pages, a long range.
+// site, a minimum of focus that no page reaches (the scan's bound, reported), an old week's read pages, a long range;
+// and the archive's passes to Dropbox when it is connected to the whole store at once (the scan, then the days).
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { MessageInitShape } from '@ziyixi/proto/protobuf';
 import { timestampFromMs } from '@ziyixi/proto/protobuf/wkt';
 import { PageType, SortOrder, type SearchPagesRequestSchema } from '@ziyixi/proto/recall/ui/v1/recall_ui_service_pb';
-import { BEHIND_COUNT_MAX, SEARCH_MAX_MATCHES, SEARCH_MAX_VISITS, SEARCH_SCAN_PAGES } from '../../src/limits.ts';
-import { DAY, HOUR, startHarness, type Harness } from './harness.ts';
+import { ARCHIVE_RENDER_MAX, ARCHIVE_SCAN_ROWS, BEHIND_COUNT_MAX, MINUTE, SEARCH_MAX_MATCHES, SEARCH_MAX_VISITS, SEARCH_SCAN_PAGES } from '../../src/limits.ts';
+import { FakeDropbox } from './fake-dropbox.ts';
+import { DAY, HOUR, op, startHarness, type Harness } from './harness.ts';
 
 const ts = timestampFromMs;
 const START = Date.parse('2024-10-10T00:00:00Z');
@@ -26,8 +28,9 @@ type Request = MessageInitShape<typeof SearchPagesRequestSchema>;
 
 describe('rows read on a synthetic two-year store', () => {
   let h: Harness;
+  const dropbox = new FakeDropbox();
   beforeAll(async () => {
-    h = await startHarness();
+    h = await startHarness({ outbound: (request) => dropbox.handle(request) });
     await h.sql(
       `WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < ${String(PAGES)})
        INSERT INTO pages (id, url, title, host_key, first_visit_ms, last_visit_ms, visit_count, focus_seconds, document_count, text_indexed)
@@ -41,7 +44,9 @@ describe('rows read on a synthetic two-year store', () => {
     await h.sql(
       `WITH RECURSIVE n(i) AS (SELECT 0 UNION ALL SELECT i + 1 FROM n WHERE i < ${String(VISITS - 1)})
        INSERT INTO visits (id, seq, seq_ms, page_rowid, device_id, device_label, url, title, start_ms, end_ms, focus_seconds, spans, revision)
-       SELECT printf('eeeeeeee-0000-4000-8000-%012x', i), 1 + i, 0, 1 + (i * 7919) % ${String(PAGES)}, 'x', 'x', 'u', 't', ? + i * ?, ? + i * ? + 600000, 600, '[]', 1 FROM n`,
+       SELECT printf('eeeeeeee-0000-4000-8000-%012x', i), 1 + i, ? + i * ? + 600000, 1 + (i * 7919) % ${String(PAGES)}, '5d0c3b52-8a5e-4f8e-9b8e-2d7c1a6f4e10', 'x', 'https://example.com/u', 't', ? + i * ?, ? + i * ? + 600000, 600, '[]', 1 FROM n`,
+      START,
+      VISIT_EVERY_MS,
       START,
       VISIT_EVERY_MS,
       START,
@@ -90,12 +95,35 @@ describe('rows read on a synthetic two-year store', () => {
   }
 
   it('reads the status and ops-v1 with a few rows, however far behind an archive is', async () => {
+    // Dropbox connected to the whole store at once: every change waits for it.
+    const { authorizeUrl } = await h.api.connectDropboxBackup({ name: 'dropboxBackup', appKey: dropbox.appKey, requestId: op() });
+    expect((await h.fetch(`/api/dropbox/callback${dropbox.approve(authorizeUrl).query}`)).headers.get('location')).toBe('/settings?dropbox=connected');
     await h.rows();
     const status = await h.api.getServiceStatus({ name: 'serviceStatus' });
-    expect((await h.rows()).read).toBeLessThan(3 * BEHIND_COUNT_MAX + 100);
+    expect((await h.rows()).read).toBeLessThan(5 * BEHIND_COUNT_MAX + 100);
     expect(status.archiveConsumers.find((c) => c.consumer === 'nas')).toMatchObject({ behindCount: BEHIND_COUNT_MAX, stale: false });
     expect(status.archiveConsumers.find((c) => c.consumer === 'old')).toMatchObject({ behindCount: 0, stale: true });
+    expect(status.dropboxBackup).toMatchObject({ connected: true, pendingCount: BEHIND_COUNT_MAX });
     await h.opsStatus();
     expect((await h.rows()).read).toBeLessThan(100);
   });
+
+  it('scans the store in passes of a bounded read, then writes its days, each pass bounded', async () => {
+    const reads: number[] = [];
+    let writing = 0;
+    for (let pass = 0; pass < 40 && writing < 2; pass++) {
+      const uploadsBefore = dropbox.callsTo('/2/files/upload').length;
+      await h.rows();
+      const result = await h.step(NOW + (pass + 1) * MINUTE);
+      reads.push((await h.rows()).read);
+      expect(result.code).toBe('ok');
+      if (dropbox.callsTo('/2/files/upload').length > uploadsBefore) writing += 1;
+    }
+    expect(writing).toBe(2);
+    // A scan pass: its three reads of ARCHIVE_SCAN_ROWS at most; a writing pass: the days it renders (each change and
+    // its page) up to ARCHIVE_RENDER_MAX, and its last day whole (about 300 changes here).
+    expect(Math.max(...reads)).toBeLessThan(3 * ARCHIVE_SCAN_ROWS + 2 * ARCHIVE_RENDER_MAX + 2000);
+    const days = dropbox.callsTo('/2/files/upload').filter((call) => call.path?.startsWith('/changes/'));
+    expect(days[0]?.path).toBe('/changes/2026/10/10.jsonl');
+  }, 120_000);
 });

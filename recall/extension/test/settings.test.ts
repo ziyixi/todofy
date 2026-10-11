@@ -19,7 +19,7 @@ describe('what the owner may type', () => {
     }
   });
 
-  it('an ingest token in mint-tokens.mjs\'s shape, and the export token told apart', () => {
+  it('an ingest token in the shape recall\'s 设置 makes, and the export token told apart', () => {
     expect(parseToken(` ${INGEST_TOKEN}\n`)).toEqual({ token: INGEST_TOKEN });
     expect(parseToken(`recall_export_${'A'.repeat(43)}`)).toEqual({ error: 'token_export' });
     for (const bad of ['', 'recall_ingest_short', `recall_ingest_${'A'.repeat(42)}!`, `Bearer ${INGEST_TOKEN}`]) {
