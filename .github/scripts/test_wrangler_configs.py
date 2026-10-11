@@ -12,7 +12,7 @@ value; these tests keep ci.yml, the wrappers and the configs in step. They read 
 why they live here and not in any app (root AGENTS.md). Standard library only.
 """
 
-from workflow_sources import effective_ci
+from workflow_sources import effective_ci, workflow_data
 
 import os
 import re
@@ -841,14 +841,22 @@ class Workflow(unittest.TestCase):
 
     def test_deploy_jobs_restate_every_switch_from_its_variable(self):
         """A deploy step that set a switch to a literal would overwrite the live pause or maintenance state:
-        in the deploy jobs each switch a step sets comes exactly from its GitHub variable."""
+        each switch comes from its GitHub variable, directly or through the release job's environment."""
+        release_job = workflow_data(REPO / ".github/workflows/worker-release.yml")["jobs"]["release"]
         seen = set()
         for job_name in DEPLOY_JOBS:
             for step in steps(self.jobs[job_name]):
                 for name in TOGGLES & set(step["env"]):
                     seen.add(name)
                     with self.subTest(job=job_name, step=step["name"], name=name):
-                        self.assertEqual(step["env"][name], f"${{{{ vars.{name} }}}}")
+                        if (job_name, name) == ("mailsort-deploy", "MAILSORT_MODE"):
+                            self.assertEqual(step["env"][name], "${{ env.MAILSORT_MODE }}")
+                            self.assertEqual(
+                                release_job["env"][name],
+                                "${{ (inputs.app == 'mailsort' || inputs.app == 'brief') && vars.MAILSORT_MODE || '' }}",
+                            )
+                        else:
+                            self.assertEqual(step["env"][name], f"${{{{ vars.{name} }}}}")
         self.assertEqual(seen, TOGGLES)
 
     def test_the_rollback_note_names_every_legacy_variable_and_ci_reads_none(self):
