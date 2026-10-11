@@ -48,7 +48,6 @@ const MESSAGES: Readonly<Partial<Record<Reason, string>>> = {
   CONSOLIDATION_ACTIVE: '标签正在整理；到设置查看进度，完成后再操作',
   CONSOLIDATION_NOT_BLOCKED: '该整理任务无需继续，请刷新状态',
   CONSOLIDATION_PENDING_WRITES: '等待已有 Gmail 写入完成后再开始整理',
-  CONSOLIDATION_UNDO_UNSAFE: '标签已合并，旧操作不可撤销',
   REPLAY_ACTIVE: '已有回放正在运行，请等待完成',
 }
 
