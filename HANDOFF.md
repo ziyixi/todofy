@@ -19,7 +19,7 @@ Rules for this file:
 Last updated: 2026-10-11.
 <!-- Active work is separate from the production evidence below. -->
 
-## In flight (2026-10-11): Brief resource registration and Home monitoring
+## Done (2026-10-11): Brief resource registration and Home monitoring
 
 First deployment confirmed: `7bea3ec`, [CI run 38128504001](https://github.com/ziyixi/todofy/actions/runs/38128504001).
 "Infra apply" created the Access applications `brief` and `brief-feedback`. A limited production check confirmed
@@ -28,11 +28,11 @@ First deployment confirmed: `7bea3ec`, [CI run 38128504001](https://github.com/z
 sources and can call the paid Claude API, but sends no email. Configured keys do not prove successful model calls or
 email delivery.
 
-Current work: `codex/brief-home-monitoring`, based on `7bea3ec`, registers the existing `brief-state` namespace,
+Released work: `codex/brief-home-monitoring`, based on `7bea3ec`, registers the existing `brief-state` namespace,
 regenerates the resource inventory, removes the first-deploy exceptions and connects Home's `BRIEF` Ops binding
 (`status.type = "ops_v1"`, status/guard fixtures and labels). CI must deploy Brief before Home at the same SHA.
-Implementation and local checks are complete; branch CI, release and production acceptance for this follow-up
-remain pending. Local verification: 435 repository checks (one skipped), 33 service-catalog and 17 cloud-config
+Implementation, branch CI, release and the bounded production checks below are complete.
+Local verification: 435 repository checks (one skipped), 33 service-catalog and 17 cloud-config
 tests; proto lint/breaking checks; Home's 267 unit, 97 workerd, 158 web and 17 deployment-configuration tests;
 Brief's six Ops tests and the workerd restart test preserving the saved budget. Home typecheck, lint and web build
 passed. A read-only comparison with the Cloudflare account found zero Worker, D1, DO or R2 inventory differences.
@@ -42,7 +42,28 @@ still test the original breaking-rule behavior. Under the repository's existing 
 test changes also select Mail Hero and Todofy for deployment; neither application's production code changed.
 Newsletter and VPS remain outside the release scope.
 
-The production settings page was checked read-only: version `7bea3ec`, archive mode and the owner's saved **$80**
+Production acceptance for `ebf33fe31ff9a0f33e031f8ec2396289b514dcee`:
+
+- [Branch CI 38131764083](https://github.com/ziyixi/todofy/actions/runs/38131764083) passed the full gate; the same SHA
+  was fast-forwarded to main and [release 38132200435](https://github.com/ziyixi/todofy/actions/runs/38132200435)
+  succeeded. Newsletter image publication, Platform image, VPS bootstrap bundle and VPS deploy were all skipped.
+- Brief's verified Deployment is `6994247454`, Worker version `b07c6fa9-f7ea-4f81-8a36-89397d4bf7a1`;
+  Home's is `6994270132`, version `d1b73e21-fc98-4bae-8564-8133134a4d26`. Both recorded success after checking the
+  running identity and configuration.
+- [Automatic reconcile 38132419031](https://github.com/ziyixi/todofy/actions/runs/38132419031) succeeded. Brief and
+  Home both returned `state=clean, changes=[]`; account inventory reported zero Worker, D1, DO or R2 differences.
+- The production Brief settings page showed version `ebf33fe`, archive mode and the saved $80 budget after deployment.
+  Home's bounded status refresh at 10:34 UTC returned Brief as healthy with no active signals, a US$80.00 monthly
+  budget, zero recent sends and the expected counters. Its independent guard controls are visible; no guard, pause,
+  budget or alert-dismissal control was changed. No real content was read and no model run or email was triggered.
+- Home's storage table labels `BriefState` as belonging to Brief. Its Worker list still uses the successful daily
+  REST inventory from before Brief's first deployment; the Worker detail is absent until that inventory refreshes.
+  This is separate from the fresh Ops check and the successful Actions inventory/reconcile above. Usage refresh
+  alone does not refresh that REST inventory; do not call the older daily UI snapshot a new drift verification.
+  The next scheduled inventory starts at 2026-10-12 02:00 UTC (2026-10-11 19:00 PDT); the account read updates the
+  list before the remaining per-Worker comparisons finish. This future refresh has not yet been observed.
+
+The production settings page was checked read-only before and after release: versions `7bea3ec` and `ebf33fe`, archive mode and the owner's saved **$80**
 monthly budget. Preserve this stored setting; the code's initial default remains $40, and the Claude Console limit
 is separate and unverified. Keep `MODE=archive`; Newsletter is unchanged by this work. The sender remains
 `onboarding@resend.dev`, as the newsletter's, so future mail can reach only
@@ -131,13 +152,9 @@ seismology and ML-for-geophysics topics 专业, the broader solid Earth 熟悉);
 spec's caching of the stable prefix (about $0.1 a month when it misses, design §7). The initial checks above used fake
 Claude responses. The prompts, efforts and Opus's length and format handling still need archive-day acceptance.
 
-Next, in order:
-
-1. Complete the resource and Home integration checks, then release the same green SHA through main CI.
-2. Confirm Brief and Home's build SHAs, the registered namespace and Home's real Ops status; verify `MODE=archive`
-   and the saved $80 budget remain in place. Record the exact CI run and production evidence here.
-3. Observe the archive days for source coverage, model quality and cost (design §16). Shadow mode, live sending and
-   Newsletter retirement require separate owner decisions.
+Remaining business acceptance: observe the archive days for source coverage, model quality and cost (design §16).
+Shadow mode, live sending and Newsletter retirement require separate owner decisions. The resource/Home integration
+and budget-preservation checks are complete; the evidence above does not claim editorial quality or mail delivery.
 
 
 ## Done (2026-10-11, Claude): mailsort archives every labelled mail
