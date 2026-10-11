@@ -10,6 +10,25 @@ waiting lists from `414925e`. Later observations in that snapshot supersede many
 remaining acceptance are in [HANDOFF](../HANDOFF.md); current rebuild steps and verified limits are in
 [Rebuild](rebuild.md) and [rebuild verification](rebuild-verification.md).
 
+## October 11 maintenance simplification
+
+`codex/maintenance-simplification` landed as `ccf2c27a12be509cbdeac057f888122da7c1b2d1` after
+[full branch CI 38161463808](https://github.com/ziyixi/todofy/actions/runs/38161463808).
+[Main CI 38162014695](https://github.com/ziyixi/todofy/actions/runs/38162014695) reused the same checked SHA
+and passed. All application releases, image publications, VPS bundle and VPS deployment were skipped.
+
+- HANDOFF now keeps current state and open acceptance; its previous 1,247 lines remain in the dated archive above.
+  Local verification compared the archive with the original text and checked 101 document targets.
+- Thirteen reviewed external test directories keep their checks without selecting production releases. Mixed
+  production changes and unknown paths retain the previous rules; source-import checks enforce the boundary.
+- Native workflow/composite assertions read parsed YAML fields. Formatting changes pass; altered release gates
+  and locks fail. Existing expanded recipe and shell behavior tests remain. Root tests use the existing pinned
+  uv version and pinned PyYAML, without changing application dependencies.
+- Local: 446 repository tests passed (one existing skip), 33 catalog and 17 cloud-config tests passed, targeted
+  actionlint passed, and nine Newsletter tooling tests passed after the installer correction. Independent review
+  also passed 93 targeted tests. An initial branch run caught the root installer violating the existing uv-only
+  workflow check; the final revision uses uv and passed the full gate. No Newsletter runtime or owner settings changed.
+
 ## Imported repositories
 
 Mail Hero and Todofy were separate repositories until 2026-09-29; the website joined on 2026-09-30.

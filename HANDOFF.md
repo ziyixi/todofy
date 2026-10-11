@@ -7,23 +7,15 @@ service entry points are in [README](README.md). Never put private content, cred
 The complete previous handoff is preserved in [the October 11 archive](docs/history/handoff-2026-10-11.md).
 Its old waiting lists and release identities are historical, not instructions to repeat completed work.
 
-## Active work
+## Current work
 
-Branch: `codex/maintenance-simplification`, based on `414925e`.
-The owner authorised these three maintenance changes on October 11:
-
-- Keep HANDOFF concise and preserve the old evidence in a dated archive.
-- Let narrowly identified test-only changes run checks without selecting production releases.
-- Replace the touched CI tests' dependence on YAML layout with assertions on parsed workflow fields or behavior.
-
-Implementation and local verification are complete; branch CI and same-SHA main promotion remain pending.
-Local: 446 repository tests passed (one existing skip), 33 service-catalog and 17 cloud-config tests passed;
-targeted actionlint and document links passed. The 13 explicit test directories retain checks without selecting
-releases; source imports across that boundary fail isolation checks. YAML boundary tests accept formatting changes
-and reject changed release gates/locks. PyYAML is pinned and installed in an isolated CI test environment.
-The current diff selects checks only. Record the actual branch/main results here before closing.
-No application behavior, Newsletter runtime, archive mode, budget or production data change belongs to this task.
-There is no second active branch recorded here; check for owner/agent changes before rebasing or landing.
+No implementation remains open from the October 11 maintenance task. `codex/maintenance-simplification`
+landed at `ccf2c27`: concise handoff, checked test-only release exclusions and parsed YAML boundary assertions.
+[Full branch CI](https://github.com/ziyixi/todofy/actions/runs/38161463808) and
+[same-SHA main CI](https://github.com/ziyixi/todofy/actions/runs/38162014695) passed. Main skipped every app
+release, image publication, VPS bundle and VPS deploy. Application settings and runtime code were unchanged.
+[Maintenance evidence](docs/history.md#october-11-maintenance-simplification) records the local checks and scope.
+The branch's final follow-up only records these verified results. Check for owner/agent changes before new work.
 
 ## Last verified releases
 
