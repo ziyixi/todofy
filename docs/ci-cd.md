@@ -17,6 +17,10 @@ main CI. Dispatch `check`, `repair` or an explicit VPS `resume`. Automatic routi
 `PERSONAL_CLOUD_AUTO_REPAIR=true`. Sensitive infrastructure changes use a saved encrypted plan,
 an `infra-review` reviewer gate, and the existing production secrets; no secrets are copied to the review
 environment. The apply reacquires the infrastructure lock and refuses a changed SHA/state/plan.
+An app before its first deploy has no verified deployment to compare: its Worker is in `FIRST_DEPLOY_PENDING`
+([inventory.py](../tools/service-catalog/inventory.py)), which lets the inventory check accept that Worker and its
+buckets absent and skip its namespaces (they have no id yet), and the reconcile matrix excludes the app. The commit
+after that deploy records the namespace ids and removes both; a guard test keeps the two lists equal.
 
 ## Before a release
 

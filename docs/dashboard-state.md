@@ -73,6 +73,8 @@ Home 的测试会逐项核对清单，遗漏会阻止 CI 通过。
 每天、成功 main 发布后以及手动运行 **Personal cloud reconcile** 时，
 “Verify complete account resource registration”检查 Worker、D1、DO namespace 和 R2 的实际身份。
 期望对象缺失或出现未登记对象都会失败；无法确认分页已经结束也会失败。
+唯一例外是首次部署前的应用（`inventory.py` 的 `FIRST_DEPLOY_PENDING`）：它的 Worker 和绑定的桶可以暂缺，
+DO namespace 还没有 id，既不期望也不报告；首次部署后的提交登记 id 并移除该项。
 公开 Actions 日志只显示差异计数，不输出 provider 原始响应。
 
 立即检查：

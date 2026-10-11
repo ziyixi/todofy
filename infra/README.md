@@ -591,7 +591,11 @@ AUD exists only once the application does, and the Worker must be deployed with 
    `output changes: 0`, and no outputs problem. Red with `vars.ACCESS_AUDIENCE differs from access_aud` means the
    committed AUD is wrong: read it again (step 4), fix it and push; the app's deploy job then ships the fix.
 
-Between steps 3 and 5 the application gates a host that no Worker serves yet, which is harmless.
+Between steps 3 and 5 the application gates a host that no Worker serves yet, which is harmless. Until the app's
+first deploy its Worker is also in `FIRST_DEPLOY_PENDING`
+([`inventory.py`](../tools/service-catalog/inventory.py)) and excluded from "Personal cloud reconcile"'s Worker
+matrix, so the daily checks wait for it; the commit after that deploy records its Durable Object namespace ids in
+`config/resources.toml` and removes both.
 
 ## Retiring an app
 

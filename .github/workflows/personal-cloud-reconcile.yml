@@ -223,6 +223,11 @@ jobs:
       max-parallel: 3
       matrix:
         app: [todofy, mail-hero, dashboard, flowday, links, watch, fleet, mailsort, recall, website-relay]
+        # Before its first deploy an app has no verified deployment to compare (VERIFIED_DEPLOYMENT_MISSING). Its
+        # Worker is in FIRST_DEPLOY_PENDING (tools/service-catalog/inventory.py), and the commit after that deploy
+        # removes it from both: recall's follows its go-live deploy (recall/docs/design.md section 11).
+        exclude:
+          - app: recall
     permissions:
       contents: read
       deployments: write

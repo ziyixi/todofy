@@ -1,11 +1,24 @@
 """Prevent automatic sensitive apply or unverified deployment in the reconciliation workflow."""
 
+import ast
 import re
+import tomllib
 import unittest
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
 WORKFLOW = REPO / ".github/workflows/personal-cloud-reconcile.yml"
+
+
+def constant(path, name):
+    """A module-level literal, read without importing the tool (its module names are generic)."""
+    for node in ast.parse((REPO / path).read_text()).body:
+        targets = getattr(node, "targets", None) or [getattr(node, "target", None)]
+        if any(isinstance(target, ast.Name) and target.id == name for target in targets):
+            if ast.unparse(node.value) == "set()":
+                return set()
+            return ast.literal_eval(node.value)
+    raise AssertionError(f"Missing {name} in {path}")
 
 
 def job(text, name):
@@ -136,6 +149,23 @@ class ReconcileWorkflow(unittest.TestCase):
         self.assertIn("fail-fast: false", block)
         self.assertIn("secrets: inherit", block)
         self.assertIn("website-relay", block)
+
+    def test_every_worker_app_is_compared_from_its_first_deploy_on(self):
+        """The matrix names every app of the release tool; an app whose Worker is in inventory.py's
+        FIRST_DEPLOY_PENDING has no verified deployment yet and is excluded, by name, until the commit after its first
+        deploy removes both (recall/docs/design.md section 11)."""
+        block = job(self.text, "workers")
+        matrix = block.split("      matrix:\n", 1)[1].split("\n    permissions:\n", 1)[0]
+        apps = re.search(r"^        app: \[([^\]]+)\]$", matrix, re.M).group(1).split(", ")
+        workers = constant("tools/cloud-release/control.py", "WORKERS")
+        self.assertEqual(sorted(apps), sorted(workers))
+        pending = constant("tools/service-catalog/inventory.py", "FIRST_DEPLOY_PENDING")
+        scripts = {app: {tomllib.loads((REPO / path).read_text())["name"] for path in paths}
+                   for app, paths in workers.items()}
+        self.assertLessEqual(pending, set().union(*scripts.values()))
+        excluded = re.findall(r"^          - app: (\S+)$", matrix, re.M)
+        self.assertEqual(excluded, sorted(app for app, names in scripts.items() if names & pending))
+        self.assertEqual("        exclude:" in matrix, bool(excluded))
 
     def test_vps_uses_only_typed_api_and_records_actual_evidence(self):
         block = job(self.text, "vps")

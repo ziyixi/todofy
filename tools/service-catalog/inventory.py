@@ -14,10 +14,15 @@ DO_KEYS = {
     "MailCoordinator": "mail-coordinator", "TodofyCore": "todofy-core-do", "WatchState": "watch-state",
     "MailsortState": "mailsort-state", "RecallState": "recall-state",
 }
-# Namespaces whose Worker has not had its first deploy: Cloudflare creates the namespace then, and that release's
-# commit records its id in config/resources.toml. Until then it is neither expected nor registered. recall's until its
-# first deploy (recall/docs/design.md section 11).
-FIRST_DEPLOY_PENDING: set[str] = {"recall-state"}
+# Workers (script names) before their first deploy, one entry per app: recall's until its go-live commit has deployed
+# (recall/docs/design.md section 11). Such a Worker and the buckets it binds stay registered (Home's registry names
+# them) but may be absent: "Infra apply" creates the bucket, the first deploy the Worker. Its Durable Object namespaces
+# get their ids only from that deploy, so they are neither expected nor registered, and an existing one is not
+# reported. The commit after the first deploy records those ids in config/resources.toml and removes the entry
+# (expected() refuses a recorded id while the entry remains; mailsort's left on 2026-10-07). The entry also keeps the
+# app out of "Personal cloud reconcile"'s Worker comparison, which needs a verified deployment (the matrix's exclude,
+# held equal by .github/scripts/test_reconcile_workflow.py).
+FIRST_DEPLOY_PENDING: set[str] = {"recall"}
 OUTPUT = "dashboard/worker/src/account-inventory.json"
 BUCKET_NAME = re.compile(r"[a-z0-9][a-z0-9-]{1,61}[a-z0-9]")
 PAGE_LIMIT = 100
@@ -27,13 +32,14 @@ def expected(root=REPO):
     catalog = load_catalog(root)
     identities = load_resources(root)
     result = {"workers": sorted(catalog.configs), "d1": [], "do": [], "r2": []}
-    for config in catalog.configs.values():
+    for script, config in catalog.configs.items():
         result["d1"].extend(b["database_id"] for b in config.get("d1_databases", []))
         result["r2"].extend(b["bucket_name"] for b in config.get("r2_buckets", []))
         for binding in config.get("durable_objects", {}).get("bindings", []):
             require(binding["class_name"] in DO_KEYS, "Durable Object inventory coverage")
             key = DO_KEYS[binding["class_name"]]
-            if key in FIRST_DEPLOY_PENDING and key not in identities["durable_objects"]:
+            if script in FIRST_DEPLOY_PENDING:
+                require(key not in identities["durable_objects"], "first-deploy pending namespace already recorded")
                 continue
             result["do"].append(identities["durable_objects"][key])
     extras = read_toml(root / "config/account-resources.toml")
@@ -56,15 +62,25 @@ def expected(root=REPO):
     return {kind: sorted(set(names)) for kind, names in result.items()}
 
 
-def compare(wanted, observed):
+def pending(root=REPO):
+    """The registered identities that may still be absent: each FIRST_DEPLOY_PENDING Worker and the buckets it binds."""
+    configs = load_catalog(root).configs
+    require(FIRST_DEPLOY_PENDING <= set(configs), "first-deploy pending Worker")
+    return {"workers": sorted(FIRST_DEPLOY_PENDING),
+            "r2": sorted(b["bucket_name"] for script in FIRST_DEPLOY_PENDING
+                         for b in configs[script].get("r2_buckets", []))}
+
+
+def compare(wanted, observed, may_be_absent=None):
+    allowed = may_be_absent or {}
     return [{"kind": kind, "identity": name, "change": change}
             for kind in wanted for change, values in (
-                ("missing", set(wanted[kind]) - set(observed[kind])),
+                ("missing", set(wanted[kind]) - set(observed[kind]) - set(allowed.get(kind, ()))),
                 ("unregistered", set(observed[kind]) - set(wanted[kind])))
             for name in sorted(values)]
 
 
-def observe(api, account):
+def observe(api, account, pending_scripts=frozenset()):
     base = "/accounts/" + account
     paths = {"workers": ("/workers/scripts", "id"), "d1": ("/d1/database?per_page=100", "uuid"),
              "do": ("/workers/durable_objects/namespaces?per_page=100", "id"), "r2": ("/r2/buckets?per_page=100", "name")}
@@ -91,7 +107,9 @@ def observe(api, account):
         require(all(isinstance(row, dict) and isinstance(row.get(key), str)
                     and 0 < len(row[key]) <= 256 for row in rows), "account inventory response: " + kind)
         require(len({row[key] for row in rows}) == len(rows), "duplicate account inventory: " + kind)
-        result[kind] = sorted(row[key] for row in rows)
+        # A FIRST_DEPLOY_PENDING Worker's namespace has no registered id yet.
+        result[kind] = sorted(row[key] for row in rows if not (
+            kind == "do" and isinstance(row.get("script"), str) and row["script"] in pending_scripts))
     return result
 
 
@@ -112,8 +130,9 @@ def main():
         sys.path.insert(0, str(REPO / "tools/cloud-release"))
         from api import Api, ReleaseError
         try:
-            observed = observe(Api("cloudflare", os.environ.get("CLOUDFLARE_API_TOKEN", "")), load_resources(REPO)["account_id"])
-            changes = compare(wanted, observed)
+            observed = observe(Api("cloudflare", os.environ.get("CLOUDFLARE_API_TOKEN", "")),
+                               load_resources(REPO)["account_id"], FIRST_DEPLOY_PENDING)
+            changes = compare(wanted, observed, pending())
             # Public logs contain counts only. Exact identities are already shown in the owner's Dashboard.
             print(json.dumps({"event": "account_inventory", "changes": len(changes),
                               "by_kind": {kind: sum(c["kind"] == kind for c in changes) for kind in wanted}}))

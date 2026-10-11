@@ -880,11 +880,14 @@ CSP).
 
 **Landing** (mailsort's four steps; the owner said to build everything first and grant access at the end):
 
-1. **Check-only.** 1a and 1b land with `recall` in `CHECK_ONLY` and `AHEAD_OF_DEPLOY`, `recall-state` in
-   `FIRST_DEPLOY_PENDING`, Home's entry 浏览记录 (group apps, icon `notebook-pen`, accent violet, `status.type = "none"`),
-   the bucket in `infra/storage.tf` and the Bypass application (its three destinations) in `infra/access.tf`, and the
-   "Recall deploy" job with its release recipe (the production, Access and Bypass probes) and the reconcile matrix
-   entry, which `CHECK_ONLY` keeps from running. The shared files are the ones every app is added to
+1. **Check-only.** 1a and 1b land with `recall` in `CHECK_ONLY`, `AHEAD_OF_DEPLOY` and `FIRST_DEPLOY_PENDING`,
+   Home's entry 浏览记录 (group apps, icon `notebook-pen`, accent violet, `status.type = "none"`), the bucket in
+   `infra/storage.tf` and the Bypass application (its three destinations) in `infra/access.tf`, and the "Recall
+   deploy" job with its release recipe (the production, Access and Bypass probes), which `CHECK_ONLY` keeps from
+   running, and the reconcile matrix entry. `FIRST_DEPLOY_PENDING` (`tools/service-catalog/inventory.py`) keeps the
+   daily checks quiet until the first deploy: the account inventory accepts the Worker and `recall-store` absent and
+   does not report `RecallState`'s namespace (it has no id yet), and "Personal cloud reconcile" excludes recall from
+   its Worker comparison, which needs a verified deployment. The shared files are the ones every app is added to
    (`infra/README.md` "Adding an app"; mailsort's commits are the template), each edit one entry; another branch
    changes some of them at the same time, so recall rebases onto it and keeps its edits minimal.
 2. **The owner dispatches "Infra apply"**: the Access applications (whole host, Bypass) and the bucket.
@@ -892,7 +895,8 @@ CSP).
    Home's entry becomes `status.type = "ops_v1"` with its `RECALL` binding (Home deploys after recall in that run). The
    CSRF key goes in by piping a random value straight into `gh secret set RECALL_CSRF_SIGNING_KEY`, never shown.
 4. **After the first deploy**: the object's namespace ID as `[durable_objects]["recall-state"]`, `FIRST_DEPLOY_PENDING`
-   emptied, the generated inventories refreshed.
+   emptied and the reconcile matrix's `exclude` removed in the same commit (the inventory refuses a recorded ID while
+   the entry remains, and a guard test holds the exclude equal to it), the generated inventories refreshed.
 
 **The owner's steps**, at the end, in their own terminal and browser, in this order:
 

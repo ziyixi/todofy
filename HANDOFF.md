@@ -42,7 +42,7 @@ so the store can change later. New app `recall/` (Worker `recall`, host `recall.
 `recall/docs/design.md`, rules in `recall/AGENTS.md`, use and deploy in `recall/README.md`. Owner defaults of §12
 kept: sensitive sites by their site alone, Google Docs/Drive IDs kept by the scrubber.
 
-On branch `recall`, all built and checked, nothing deployed:
+Landed on `main` at `eaeddf4` (branch `recall`), all built and checked, nothing deployed:
 
 - The contracts: the owner API `proto/recall/ui/v1`, the upload `proto/recall/ingest/v1` (the extension uses its
   generated wire types only: `recall.ingest.v1` is in `gen_wire_ts.py`'s `WIRE_PACKAGES`), and the archive contract
@@ -77,12 +77,19 @@ and "Recall deploy" jobs, the release recipe in `worker-release.yml` (production
 reconcile matrix, the release and bootstrap tools (`control.py`, `cloudflare.py`, `deployments.py`, `finalize.py`,
 `github_secrets.py`), cf-guard's committed-config test, `infra/` (the owner application, the Bypass application of the
 three machine routes and the bucket: 36 objects; `AHEAD_OF_DEPLOY`), the drift desired state, the account inventory
-(`FIRST_DEPLOY_PENDING = {"recall-state"}`) and ops-v1's `OpsStatus.app` (Home keeps recall out of the apps it calls:
-`UNBOUND_OPS_APPS`). Red or noisy by design until the first deploy: "Infra drift" (the four creates: two Access
-applications, the Bypass policy, the bucket), Home's 配置漂移 and the inventory (recall missing), and "Personal cloud
-reconcile", whose "Compare or repair recall" leg has no verified deployment to compare yet
-(`VERIFIED_DEPLOYMENT_MISSING`); if the owner's steps wait long, take recall out of that matrix until the go-live
-commit.
+and ops-v1's `OpsStatus.app` (Home keeps recall out of the apps it calls: `UNBOUND_OPS_APPS`). Red by design until
+"Infra apply": "Infra drift" (the four creates: two Access applications, the Bypass policy, the bucket). Home's
+配置漂移 shows recall missing until the first deploy (a view, no mail).
+
+On `main`, "Personal cloud reconcile" has failed since `eaeddf4`: its inventory job counts 2 changes (the
+Worker `recall` and the bucket `recall-store`, registered but not created) and "Compare or repair recall" ends
+`VERIFIED_DEPLOYMENT_MISSING` (never deployed). Branch `recall-release`, commit 1, makes both wait for the first
+deploy: `FIRST_DEPLOY_PENDING` in `tools/service-catalog/inventory.py` now names Workers (`{"recall"}`): the Worker
+and the buckets it binds may be absent, its namespace has no id and an existing one is not reported, and
+`expected()` refuses a recorded id while the entry remains; the reconcile matrix has `exclude: - app: recall`, held
+equal to that set (and its app list to `control.py`'s `WORKERS`) by `test_reconcile_workflow.py`. The release recipe
+itself was already complete on `main` (`ci.yml` `recall-deploy`, `worker-release.yml`, `control.py`, `cloudflare.py`,
+`deployments.py`, `finalize.py`, `github_secrets.py`; `RELEASE_PENDING` was removed before landing).
 
 Verify, in `recall/worker`: `npm run lint`, `npm run typecheck`, `npm test`, `npm run test:runtime`,
 `npm run test:smoke` (after the UI build; `RECALL_SMOKE_PYTHON` names a Python 3.12+); in `recall/web` and
@@ -91,15 +98,15 @@ Verify, in `recall/worker`: `npm run lint`, `npm run typecheck`, `npm test`, `np
 (`python3 -m unittest discover -s .github/scripts`, the tools' tests, `generate.py --check`, `catalog.py --check`,
 `inventory.py --check`, cf-guard's tests).
 
-Next, in order: owner review; land `recall` (its push's "Infra drift" is red with those four creates); the owner
-dispatches "Infra apply" and sets `RECALL_CSRF_SIGNING_KEY` (`openssl rand -hex 32 | gh secret set ...`, never shown);
-the go-live commit (the AUD and application ids into `config/resources.toml` and `infra/ids.tf` through
-`generate.py`, `CHECK_ONLY` and `AHEAD_OF_DEPLOY` emptied, Home's `RECALL` binding and `status.type = "ops_v1"` with
-`UNBOUND_OPS_APPS` emptied and ops-v1 golden fixtures for recall in `contracts/ops-v1` and Contracts, as mailsort's
-had); after the first deploy the namespace id (`FIRST_DEPLOY_PENDING` emptied); then the owner's `mint-tokens.mjs`,
-the extension loaded unpacked, the image dispatched and the NAS container. Phase 1a's first checks in a real Chrome
-(design §3.10, `recall/extension/README.md`): one focus switch, one capture, the badge, the options page, and whether
-Chrome serves an unpacked extension's files as they are on disk (the self-update relies on it).
+Next, in order: land `recall-release`; the owner dispatches "Infra apply" and sets `RECALL_CSRF_SIGNING_KEY`
+(`openssl rand -hex 32 | gh secret set ...`, never shown); the go-live commit (the AUD and application ids into
+`config/resources.toml` and `infra/ids.tf` through `generate.py`, `CHECK_ONLY` and `AHEAD_OF_DEPLOY` emptied, Home's
+`RECALL` binding and `status.type = "ops_v1"` with `UNBOUND_OPS_APPS` emptied and ops-v1 golden fixtures for recall
+in `contracts/ops-v1` and Contracts, as mailsort's had); after the first deploy the namespace id
+(`FIRST_DEPLOY_PENDING` emptied and the reconcile matrix's `exclude` removed, one commit); then the owner's
+`mint-tokens.mjs`, the extension loaded unpacked, the image dispatched and the NAS container. Phase 1a's first checks
+in a real Chrome (design §3.10, `recall/extension/README.md`): one focus switch, one capture, the badge, the options
+page, and whether Chrome serves an unpacked extension's files as they are on disk (the self-update relies on it).
 
 ## Done (2026-10-10, Claude): mailsort model-first, calibrated and live
 

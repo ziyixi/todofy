@@ -8,7 +8,8 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from catalog import CatalogError
-from inventory import compare, expected, observe
+import inventory
+from inventory import compare, expected, observe, pending
 
 SYNTHETIC = {
     "workers": {"result": [{"id": "demo"}]},
@@ -40,6 +41,49 @@ class InventoryTests(unittest.TestCase):
             changes = compare(wanted, actual)
             self.assertEqual(sum(item["change"] == "missing" for item in changes), len(wanted[kind]))
             self.assertEqual(changes[-1]["change"], "unregistered")
+
+    def test_a_worker_before_its_first_deploy_may_be_absent_but_nothing_else_may(self):
+        """FIRST_DEPLOY_PENDING: the Worker and its buckets stay registered, absent or present; its namespaces have no
+        id yet (recall/docs/design.md section 11, which the example follows)."""
+        wanted = expected()
+        self.assertLessEqual(set(pending()["workers"]), set(wanted["workers"]))
+        with patch.object(inventory, "FIRST_DEPLOY_PENDING", {"recall"}):
+            allowed = pending()
+        self.assertEqual(allowed, {"workers": ["recall"], "r2": ["recall-store"]})
+        self.assertLessEqual(set(allowed["r2"]), set(wanted["r2"]))
+        before = {kind: [name for name in names if name not in allowed.get(kind, ())]
+                  for kind, names in wanted.items()}
+        self.assertEqual(compare(wanted, before, allowed), [])
+        self.assertEqual(compare(wanted, wanted, allowed), [])
+        self.assertEqual({item["identity"] for item in compare(wanted, before)}, {"recall", "recall-store"})
+        for kind in wanted:
+            actual = {**before, kind: before[kind][1:] + ["synthetic-extra"]}
+            changes = compare(wanted, actual, allowed)
+            with self.subTest(kind=kind):
+                self.assertEqual([item["change"] for item in changes], ["missing", "unregistered"])
+
+    def test_a_pending_workers_namespace_is_not_reported_and_no_other_is_hidden(self):
+        rows = [{"id": "synthetic-pending", "script": "demo"}, {"id": "synthetic-other", "script": "other"},
+                {"id": "synthetic-unnamed"}, {"id": "synthetic-odd", "script": ["demo"]}]
+        api = FakeApi({**SYNTHETIC, "do": {"result": rows, "result_info": {"total_count": 4, "total_pages": 1}}})
+        self.assertEqual(observe(api, "synthetic-account", {"demo"})["do"],
+                         ["synthetic-odd", "synthetic-other", "synthetic-unnamed"])
+        self.assertEqual(len(observe(api, "synthetic-account")["do"]), 4)
+
+    def test_a_recorded_namespace_ends_the_pending_entry(self):
+        catalog = SimpleNamespace(configs={"demo": {"durable_objects": {"bindings": [{"class_name": "RecallState"}]}}},
+                                  entries=[{"id": "demo"}])
+        extras = {"version": 1, "r2": []}
+        with patch("inventory.load_catalog", return_value=catalog), patch("inventory.read_toml", return_value=extras), \
+             patch.object(inventory, "FIRST_DEPLOY_PENDING", {"demo"}):
+            with patch("inventory.load_resources", return_value={"durable_objects": {}}):
+                self.assertEqual(expected()["do"], [])
+            with patch("inventory.load_resources", return_value={"durable_objects": {"recall-state": "synthetic"}}), \
+                 self.assertRaisesRegex(CatalogError, "first-deploy pending namespace already recorded"):
+                expected()
+            with patch.object(inventory, "FIRST_DEPLOY_PENDING", {"unknown"}), \
+                 self.assertRaisesRegex(CatalogError, "first-deploy pending Worker"):
+                pending()
 
     def test_cannot_claim_complete_with_a_full_page(self):
         with self.assertRaisesRegex(ValueError, "bounded account inventory"):
