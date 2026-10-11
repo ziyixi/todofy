@@ -19,6 +19,11 @@
  * is written only when its bytes changed, and writing the same bytes again changes nothing at Dropbox. Nothing is ever
  * deleted at Dropbox. A failure records its code and waits (ARCHIVE_RETRY_FIRST_MS doubled up to ARCHIVE_RETRY_MAX_MS,
  * or Dropbox's Retry-After). Logs hold codes only.
+ *
+ * What the pass records is also the ledger the retention window trusts (retention.ts, archiveConfirmations): a blob in
+ * archive_blobs for this target with Dropbox's content hash (a blob whose path held another file is recorded without
+ * one), a day written since its last change, and state.json's seq. A text retention moved out of Cloudflare has no R2
+ * object: a pass skips its blob (the archive that confirmed it holds it; a new target gets its line without it).
  */
 import { constantTimeEqual } from '@ziyixi/edge-auth';
 import { create } from '@ziyixi/proto/protobuf';
@@ -117,6 +122,23 @@ export function connected(store: Store): boolean {
 /** Every change up to this seq is in Dropbox (0 before the target's first state.json). */
 export function syncedSeq(store: Store): number {
   return Number(store.getMeta(KEY.synced) ?? '0');
+}
+
+/**
+ * What retention may trust (retention.ts): the connection's target, whose archive_blobs rows confirm blobs, and the seq
+ * up to which state.json vouches for every change; null while not connected or while the last attempt failed (it
+ * retries by itself), when nothing leaves Cloudflare.
+ */
+export function archiveConfirmations(store: Store): { readonly target: string; readonly syncedSeq: number } | null {
+  const conn = connection(store);
+  if (conn === null || store.getMeta(KEY.failures) !== null || !stateWritten(store)) return null;
+  return { target: conn.target, syncedSeq: syncedSeq(store) };
+}
+
+/** Why retention removes nothing now: the backup not connected, or failing; '' while it may. */
+export function retentionPause(store: Store): '' | 'dropbox_not_connected' | 'dropbox_failing' {
+  if (!connected(store)) return 'dropbox_not_connected';
+  return store.getMeta(KEY.failures) !== null ? 'dropbox_failing' : '';
 }
 
 /** Whether the target holds a state.json of this store yet. */
@@ -335,13 +357,15 @@ async function writeBlobs(ctx: BackupContext, conn: Connection, token: string, b
       continue;
     }
     budget.spend();
-    const hash = await contentHash(bytes);
+    let hash = await contentHash(bytes);
     try {
       await put(ctx, token, `blobs/${blob.path}`, bytes, 'add', hash);
     } catch (error) {
-      // Another file holds the path: left as it is (a blob is never written over), and said.
+      // Another file holds the path: left as it is (a blob is never written over), and said. Recorded without a hash,
+      // so it is not tried again, and retention never takes the text for archived.
       if (!(error instanceof DropboxError && error.code === 'dropbox_conflict')) throw error;
       warn('dropbox_conflict');
+      hash = '';
     }
     ctx.transact(() => {
       store.run(

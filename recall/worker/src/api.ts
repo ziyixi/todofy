@@ -45,7 +45,7 @@ import { documentMessage, pageMessage, siteMessage, time, visitMessage } from '.
 import { recallError, type Reason } from './reasons.ts';
 import { deletePage, deletePageBlobs } from './retention.ts';
 import { QueryError, readQuery, search, snippetOf, type ResultRow, type SearchCache, type SearchInput } from './search.ts';
-import { readDenylist, writeDenylist, type Denylist } from './settings.ts';
+import { readDenylist, readRetention, validRetention, writeSettings, type Denylist } from './settings.ts';
 import { serviceStatus } from './status.ts';
 import { hostOfKey, utcDay, type DocumentRow, type PageRow, type SiteRow, type Store } from './store.ts';
 import { getVisit, listVisits } from './timeline.ts';
@@ -69,8 +69,8 @@ export interface ApiContext {
   readonly secretTokens: Readonly<Record<TokenRoute, boolean>>;
 }
 
-/** The Settings fields an update mask may name; only denylist_patterns and site_only_patterns are writable. */
-const SETTINGS_FIELDS = new Set(['name', 'denylist_patterns', 'builtin_denylist_patterns', 'etag', 'builtin_site_only_patterns', 'site_only_patterns']);
+/** The Settings fields an update mask may name; denylist_patterns, site_only_patterns and text_retention_days are writable. */
+const SETTINGS_FIELDS = new Set(['name', 'denylist_patterns', 'builtin_denylist_patterns', 'etag', 'builtin_site_only_patterns', 'site_only_patterns', 'text_retention_days']);
 const PAGE_ID = /^[0-9a-f]{32}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 /** A host as the archive's Site format has it (`_` included). */
@@ -156,15 +156,18 @@ function siteFilter(value: string): string | null {
   return site;
 }
 
-/** Snippets of the results with a text, read from R2 in parallel; a text R2 cannot give is left without one. */
+/**
+ * Snippets of the results with a text, read from R2 in parallel; a text R2 cannot give, or the retention window moved
+ * to the archive alone, is left without one.
+ */
 async function snippets(ctx: ApiContext, rows: readonly ResultRow[], terms: readonly string[]): Promise<Map<number, ReturnType<typeof snippetOf>>> {
   const out = new Map<number, ReturnType<typeof snippetOf>>();
   if (terms.length === 0) return out;
   await Promise.all(
     rows.map(async (row) => {
       if (row.document_count === 0 || row.latest_document === null) return;
-      const document = ctx.store.one<{ blob_path: string }>(`SELECT blob_path FROM documents WHERE id = ?`, row.latest_document);
-      if (document === undefined) return;
+      const document = ctx.store.one<{ blob_path: string; archived_ms: number | null }>(`SELECT blob_path, archived_ms FROM documents WHERE id = ?`, row.latest_document);
+      if (document === undefined || document.archived_ms !== null) return;
       try {
         const text = await readText(ctx.bucket, document.blob_path);
         if (text !== null) out.set(row.rowid, snippetOf(text, terms));
@@ -178,7 +181,7 @@ async function snippets(ctx: ApiContext, rows: readonly ResultRow[], terms: read
 
 // ---- settings ---------------------------------------------------------------------------------------------------------
 
-function settingsMessage(denylist: Denylist): Settings {
+function settingsMessage(denylist: Denylist, retentionDays: number | null): Settings {
   return create(SettingsSchema, {
     name: 'settings',
     denylistPatterns: [...denylist.patterns],
@@ -186,7 +189,13 @@ function settingsMessage(denylist: Denylist): Settings {
     etag: denylist.etag,
     builtinSiteOnlyPatterns: [...SITE_ONLY_PATTERNS],
     siteOnlyPatterns: [...denylist.siteOnly],
+    ...(retentionDays === null ? {} : { textRetentionDays: retentionDays }),
   });
+}
+
+/** The stored settings' message. */
+function currentSettings(store: Store): Settings {
+  return settingsMessage(readDenylist(store), readRetention(store));
 }
 
 /** One of the owner's lists, canonical (trimmed, lower case, without a trailing `/`) and without repeats. */
@@ -309,6 +318,8 @@ export const handlers: ServiceHandlers<ShapeOf<typeof RecallUiService>, ApiConte
     const { page, id } = childName(request.name, 'documents');
     const row =
       ctx.store.one<DocumentRow>(`SELECT d.* FROM documents d JOIN pages p ON p.rowid = d.page_rowid WHERE d.id = ? AND p.id = ?`, id, page) ?? fail('NOT_FOUND');
+    // Past the retention window and confirmed in the Dropbox archive: no R2 read, the archive's path instead.
+    if (row.archived_ms !== null) return documentMessage(row, page, '');
     let text: string | null;
     try {
       text = await readText(ctx.bucket, row.blob_path);
@@ -370,7 +381,7 @@ export const handlers: ServiceHandlers<ShapeOf<typeof RecallUiService>, ApiConte
 
   getSettings(request, ctx) {
     if (request.name !== 'settings') fail('NOT_FOUND');
-    return Promise.resolve(settingsMessage(readDenylist(ctx.store)));
+    return Promise.resolve(currentSettings(ctx.store));
   },
 
   updateSettings(request, ctx) {
@@ -389,14 +400,18 @@ export const handlers: ServiceHandlers<ShapeOf<typeof RecallUiService>, ApiConte
     for (const path of paths) if (!SETTINGS_FIELDS.has(path)) bad('update_mask names an unknown field');
     const patterns = paths.includes('denylist_patterns') ? checkPatterns(input.denylistPatterns) : undefined;
     const siteOnly = paths.includes('site_only_patterns') ? checkPatterns(input.siteOnlyPatterns) : undefined;
+    // Named without a value: every text stays in Cloudflare.
+    const retentionDays = paths.includes('text_retention_days') ? (input.textRetentionDays ?? null) : undefined;
+    if (retentionDays !== undefined && retentionDays !== null && !validRetention(retentionDays)) fail('INVALID_RETENTION');
     return Promise.resolve(
       once(ctx, request.requestId, 'UpdateSettings', 'settings', SettingsSchema, () => {
         const current = readDenylist(ctx.store);
-        if (input.etag !== '' && input.etag !== current.etag) throw recallError('ETAG_MISMATCH', [{ schema: SettingsSchema, message: settingsMessage(current) }]);
-        if (patterns === undefined && siteOnly === undefined) return settingsMessage(current);
+        if (input.etag !== '' && input.etag !== current.etag) throw recallError('ETAG_MISMATCH', [{ schema: SettingsSchema, message: currentSettings(ctx.store) }]);
+        if (patterns === undefined && siteOnly === undefined && retentionDays === undefined) return currentSettings(ctx.store);
         // The two lists hold at most OWNER_PATTERNS_MAX patterns together.
         if ((patterns ?? current.patterns).length + (siteOnly ?? current.siteOnly).length > OWNER_PATTERNS_MAX) fail('LIMIT_REACHED');
-        return settingsMessage(writeDenylist(ctx.store, { ...(patterns === undefined ? {} : { patterns }), ...(siteOnly === undefined ? {} : { siteOnly }) }, ctx.now));
+        writeSettings(ctx.store, { ...(patterns === undefined ? {} : { patterns }), ...(siteOnly === undefined ? {} : { siteOnly }), ...(retentionDays === undefined ? {} : { retentionDays }) }, ctx.now);
+        return currentSettings(ctx.store);
       }),
     );
   },

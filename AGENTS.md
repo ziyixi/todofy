@@ -84,7 +84,7 @@
   Gmail 授权只由 owner 本机写入，部署不碰；合成邮件与回环假服务，内容不进日志。
 - Recall：[AGENTS](recall/AGENTS.md)、[设计](recall/docs/design.md)。只用合成页面，URL、标题与正文不进日志；三条机器路由各凭
   自己的令牌摘要，令牌由 owner 在设置里生成、只显示一次；归档由 recall 只增不删地写进 owner 的 Dropbox，
-  布局与变更 feed 是 recall 拥有的公开合同 `recall-archive-v1`。
+  布局与变更 feed 是 recall 拥有的公开合同 `recall-archive-v1`；Cloudflare 只留保留窗口内的正文，且只在归档确认后移出。
 - Website：[架构约束](docs/architecture.md#website)、[架构](website/docs/architecture.md)、[发布](website/docs/release.md)。
   只用静态访客路径，内容不提交；不绕过发布身份、门禁、验收与回退。
 - Newsletter：[README](newsletter/README.md)。保持独立镜像、VPS 状态目录与业务排空边界，镜像发布不等于服务器升级或发送成功。

@@ -25,7 +25,7 @@ Owner decision (2026-10-11): a mail mailsort labels leaves the inbox and is foun
 read. Deployed in `a49349d`: the needs_action exception and question are gone; only a label's 归档 switch
 (`keep_in_inbox`) keeps its mail in the inbox (the owner turned it off on every label, so all of them archive).
 
-## In flight (2026-10-10, Claude): recall, the browsing recorder (live since 2026-10-11; branch `recall-dropbox-archive` to land; owner setup pending)
+## In flight (2026-10-10, Claude): recall, the browsing recorder (live since 2026-10-11, Dropbox archive since `c3e21b6`; branch `recall-retention` to land; owner setup pending)
 
 Owner request (2026-10-10): record what the owner reads in Chrome (visits with real focus time, the page's text after
 ten seconds), with a very good timeline and search UI, and keep a durable copy on the NAS through a generic protocol
@@ -132,6 +132,36 @@ tools' tests, `generate.py --check`, `catalog.py --check`, `inventory.py --check
 After its deploy: the release probes as before (the machine routes answer 503 until a token exists, then 401);
 设置 shows 插件口令 and 备份到 Dropbox; Home's 浏览记录 tile warns `archive_not_connected` until the owner connects.
 
+Branch `recall-retention` (2026-10-11, one commit on `c3e21b6`; owner request of 2026-10-11: everything is backed up
+to Dropbox, so Cloudflare keeps a rolling hot window of texts, not everything, to stay inside the free limits):
+
+- `Settings.text_retention_days` (365 by default, 30-3650, or unset = every text stays), edited in 设置 → 存储. The
+  alarm's retention step (`worker/src/retention.ts`, after the archive pass; at most 100 texts and one R2 call a run,
+  within the daily maintenance allowance) moves a text out of R2 and the FTS index only when its capture is older than
+  the window, its page is live, Dropbox is connected and not failing, and the archive ledger confirmed this exact
+  blob (`archive_blobs` for the current target with Dropbox's content hash; a `dropbox_conflict` is now recorded
+  without one), its day file written since, and `state.json`'s seq past it. The document row stays (`archived_ms`,
+  schema 3, same seq and blob path); pages and visits are never removed; no tombstone; the feed and the archive are
+  unchanged; the blob route answers 410 `blob_deleted` (the contract README says retention causes it and the Dropbox
+  copy remains). A new Dropbox target gets every line but not the texts only the old folder holds (documented).
+- Owner API, additive: `Settings.text_retention_days` (`optional`, mask-only), `Document.text_archived` and
+  `.archive_path`, `ServiceStatus.text_retention_days`, `.archived_text_count`, `.text_retention_paused_reason`
+  (`dropbox_not_connected`, `dropbox_failing`), `ERROR_REASON_INVALID_RETENTION`. No ops-v1 change:
+  `archive_not_connected` and `archive_behind` already cover a paused window.
+- UI: 设置 → 存储's window (a choice of 30 天 to 10 年 or 永久; shorter asks first; the counts in Cloudflare and only in
+  Dropbox; the pause in words; the settings etag shared with 网站名单), the page detail's 正文已归档到 Dropbox with the
+  archive path, the search's line that text search covers the last N days.
+
+Verify, in `recall/worker`: `npm run lint`, `npm run typecheck`, `npm test` (`test/retention.test.ts`),
+`npm run test:runtime` (`retention.test.ts`, the CPU and two-year scale tests with a retention step),
+`npm run test:smoke` (a late upload of a text read 400 days ago leaves Cloudflare right after the confirming pass);
+`recall/web` and `recall/extension` lint, typecheck, test, build; `node --test deploy/test/*.test.mjs`; `proto` lint,
+api-lint, breaking against `origin/main`, test; `.github/scripts` unit tests.
+
+After its deploy: 设置 → 存储 shows 正文在云端保留 1 年 and, until Dropbox is connected, the paused line; nothing leaves
+Cloudflare before the first texts are a year old (October 2027 at the default), so no early production check exists
+beyond the status fields; Home's tile is unchanged.
+
 Next, in order:
 
 1. Owner, before `recall-release` lands: the CSRF key, never shown, in their own terminal:
@@ -147,7 +177,8 @@ Next, in order:
    (`recall-state`, read with the read-only admin helper), `FIRST_DEPLOY_PENDING` emptied and the reconcile matrix's
    `exclude` removed in the same commit (the inventory and `test_reconcile_workflow.py` refuse anything else), then
    `generate.py` (Home's resource identities) and `inventory.py --generate`; as mailsort's `6f5f93e`.
-4. Land `recall-dropbox-archive` (its push deploys recall, then Home).
+4. Done (2026-10-11, `c3e21b6`): `recall-dropbox-archive` landed (its push deployed recall, then Home). Next, land
+   `recall-retention` (its push deploys recall, then Home); it does not touch `.github/workflows/ci.yml`.
 5. Agent: build the extension on the owner's Mac into `~/recall-extension` (`npm run install-extension` in
    `recall/extension`).
 6. Owner, clicks only (`recall/README.md` "The owner's setup"): 设置 → 插件口令 → 生成 → 复制; `chrome://extensions` →

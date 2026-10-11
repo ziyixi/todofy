@@ -1,12 +1,13 @@
 # `recall-archive-v1`: recall's archive and its change feed
 
-recall (`recall/`, the owner's browsing recorder) keeps every visit and captured page text in Cloudflare and writes a
-durable copy as plain files in a **layout** that any file store can hold and that plain tools (`find`, `zcat`, `grep`,
-`jq`) can read for decades. recall writes it itself: today into the app folder of the owner's own **Dropbox** app,
-about hourly while there are changes, from where the owner's NAS syncs it with its own Dropbox support (UGREEN's Cloud
-Drives); nothing of recall's runs on the NAS or the owner's Mac, and any store that holds files can take Dropbox's place
-(recall's writer is the only part to change). For programs, recall also serves the same records as one ordered
-**change feed**. recall owns the contract.
+recall (`recall/`, the owner's browsing recorder) keeps every visit in Cloudflare, and the captured page texts of a
+rolling window the owner chooses (a year by default), and writes a durable copy of everything as plain files in a
+**layout** that any file store can hold and that plain tools (`find`, `zcat`, `grep`, `jq`) can read for decades.
+recall writes it itself: today into the app folder of the owner's own **Dropbox** app, about hourly while there are
+changes, from where the owner's NAS syncs it with its own Dropbox support (UGREEN's Cloud Drives); nothing of recall's
+runs on the NAS or the owner's Mac, and any store that holds files can take Dropbox's place (recall's writer is the
+only part to change). For programs, recall also serves the same records as one ordered **change feed**. recall owns
+the contract.
 
 | File | Purpose |
 | --- | --- |
@@ -43,7 +44,9 @@ Drives); nothing of recall's runs on the NAS or the owner's Mac, and any store t
   so writing it again changes nothing. A day's file is not written again when a later change supersedes or deletes one
   of its records: the newer line, or the tombstone, is in a later day's file. About 365 files a year.
 - **`blobs/<Blob.path>`**: each blob as recall stores it (its path is its UTC month and record UUID), written once,
-  before any line that refers to it, after its size and digest were checked; never written over.
+  before any line that refers to it, after its size and digest were checked; never written over. (One exception, in a
+  second archive root of the same feed: a text recall's retention window had already moved out of Cloudflare is
+  written there as its line alone, its blob staying in the first root; §4.)
 - **Only growing.** recall never deletes or moves a file of the archive. When the owner deletes a page, the archive
   gains its tombstone line; the page's earlier lines and blobs stay where they are, and a blob that no line refers to
   any more belongs to a deleted record. The owner removes such files by hand if they want them gone from the copies.
@@ -136,9 +139,14 @@ The bytes of a blob, `<path>` exactly as a change's `Blob.path` gives it (`2026/
 `Content-Encoding` header, so the change's `sha256` holds on the wire and on disk. A consumer checks `size_bytes` and
 `sha256` itself, against the change, before it keeps a byte.
 
-**410 `blob_deleted`** is the only answer that lets a consumer go on without the blob: recall holds no live record with
-that blob, because the owner deleted it (its tombstone follows, or came already). Any other answer, 404 included (a
-wrong path, a route that does not exist, a store that lost the object), stops the run without advancing the cursor.
+**410 `blob_deleted`** is the only answer that lets a consumer go on without the blob: recall holds no copy of it,
+because the owner deleted its record (its tombstone follows, or came already), or because recall's **retention
+window** moved the text out of Cloudflare. Retention is not a deletion: recall moves a text out only after its own
+archive (the Dropbox folder of §1) confirmed holding that blob and the day file that names it, so the archive keeps the
+copy at `blobs/<path>`, the record stays live in the feed, and no tombstone follows. A consumer that wants every blob
+copies it while it is recent (the window is at least 30 days), or reads it from recall's archive. Any other answer, 404
+included (a wrong path, a route that does not exist, a store that lost the object), stops the run without advancing
+the cursor.
 
 ### What recall guarantees (the feed and the archive alike)
 
@@ -152,11 +160,13 @@ wrong path, a route that does not exist, a store that lost the object), stops th
 3. **Upserts.** An update of a record is a new change with the same `id` and a higher seq: the change with the highest
    seq is the record. Reading a seq again gives the same change (a newer recall may add optional fields to it).
 4. **Blobs first.** A change is committed only after all its blobs are stored.
-5. **Deletion.** The owner deletes a page in recall's UI: one tombstone is committed, `target: pages/<page id>`, and
-   from then on the page's visits and documents are not served (a consumer that starts later never sees them); their
-   blobs leave recall's store after it. A tombstone deletes every change with a lower seq whose `id` is its target, or
-   whose `page_id` is the page its target names, with those changes' blobs; lines and blobs an archive already holds
-   stay there, deleted by the tombstone line that follows them (§1).
+5. **Deletion and retention.** Retention (recall keeping only a window of texts in Cloudflare) deletes nothing: the
+   records stay in the feed and in the archive, and the archive keeps every blob; only the blob route answers 410 for a
+   text recall's archive alone holds. The owner deletes a page in recall's UI: one tombstone is committed,
+   `target: pages/<page id>`, and from then on the page's visits and documents are not served (a consumer that starts
+   later never sees them); their blobs leave recall's store after it. A tombstone deletes every change with a lower
+   seq whose `id` is its target, or whose `page_id` is the page its target names, with those changes' blobs; lines and
+   blobs an archive already holds stay there, deleted by the tombstone line that follows them (§1).
 6. **At-least-once.** A reader may see a change more than once (in two day files, or a feed page asked again after a
    crash) and applies it idempotently: by `id` and `seq` for records, by `path` and digest for blobs.
 
@@ -170,6 +180,9 @@ wrong path, a route that does not exist, a store that lost the object), stops th
   a page of another `feed_id`, 409 `cursor_ahead` and 410 `cursor_expired` mean a new feed: it starts again from
   `after=0`. One that keeps its own archive writes this layout with its own name in `state.json`, and may remove a
   deleted page's lines and blobs (recall's own archive keeps them).
+- **A new archive root for the same feed** (the owner connects another Dropbox app or account). recall writes every
+  line again, and every blob it still holds; a text its retention window already moved out of Cloudflare is in the
+  earlier root only, so the new root has its line without its blob. Keep the earlier root (and its copies).
 - **A new feed** (recall's store reset). The old archive stays as it is, readable and complete up to its `synced_seq`;
   the new feed is written into a new archive root (for Dropbox: a new app, whose folder is new). Records present in both
   are the same records (same ids), so a reader of both deduplicates by `id` and `seq` within each.
@@ -199,4 +212,6 @@ profile's breaking checks (`proto/tools/profile_breaking.py`) hold the IDL to th
   `fixtures/ChangePage/` (`recall/worker/test/feed.test.ts`) and `fixtures/archive/` (`test/archive.test.ts`, and in
   workerd `test/runtime/archive.test.ts`, which writes it to a fake Dropbox byte for byte) from synthetic records; the
   smoke run (`recall/worker/test/smoke/`) checks the archive a real `wrangler dev` writes to a loopback fake of Dropbox
-  against the codec and the reading rules above, before and after a deletion.
+  against the codec and the reading rules above, before and after a deletion, and that a text past the retention
+  window leaves recall's store only after the archive holds it (the blob route's 410, the feed unchanged);
+  `test/runtime/retention.test.ts` holds the same in workerd.

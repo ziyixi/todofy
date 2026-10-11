@@ -44,6 +44,12 @@ message Settings {
   // built-in site-only patterns are (the owner's own banks and other sensitive sites). The stricter list wins when a
   // page matches patterns of both.
   repeated string site_only_patterns = 6 [(google.api.field_behavior) = OPTIONAL];
+  // Days a captured text stays in Cloudflare after its capture, 30-3650 (365 until the owner changes it); unset: every
+  // text stays. Past the window, the alarm removes a text from Cloudflare (R2 and the search index) only once the
+  // Dropbox backup is connected and has confirmed holding it (its blob and the day file that names it); the page, its
+  // visits and the document's record stay, and the archive keeps the text (recall/docs/design.md §2.3). An update that
+  // names it without a value keeps every text; a value outside the range is INVALID_RETENTION.
+  optional int32 text_retention_days = 7 [(google.api.field_behavior) = OPTIONAL];
 }
 
 // The state of recording, archiving and storage. A singleton.
@@ -69,21 +75,23 @@ message ServiceStatus {
   int32 page_count = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
   // Visits kept.
   int32 visit_count = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Captured texts kept.
+  // Captured texts kept: in Cloudflare, or past the retention window only in the Dropbox archive
+  // (archived_text_count).
   int32 document_count = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
   // The Durable Object's SQLite database, in MiB.
   int32 storage_used_mib = 9 [(google.api.field_behavior) = OUTPUT_ONLY];
   // Its budget, in MiB (900). The oldest pages' texts leave the search index (oldest_indexed_text_time) while it holds
   // over 500 MiB of text (each page's first 32 KiB) or the database passes 850 MiB, where the status warns.
   int32 storage_budget_mib = 10 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // The captured texts in R2, in MiB (gzip, as stored).
+  // The captured texts in R2, in MiB (gzip, as stored): those retention has not moved to the archive alone.
   int32 blob_stored_mib = 11 [(google.api.field_behavior) = OUTPUT_ONLY];
   // Rows the Durable Object wrote today (UTC).
   int32 rows_written_today_count = 12 [(google.api.field_behavior) = OUTPUT_ONLY];
   // Its daily budget: past it, uploads are answered 429 until the next UTC day.
   int32 daily_row_budget = 13 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // The oldest capture whose text is still in the search index; unset while every capture's text is. Older pages
-  // are found by title and URL only (their texts are still kept and archived).
+  // The oldest capture whose text the storage budget left in the search index; unset while it left every one. Older
+  // pages are found by title and URL only (their texts are still kept and archived). Texts past the retention window
+  // leave the index as well (text_retention_days, archived_text_count).
   google.protobuf.Timestamp oldest_indexed_text_time = 14 [(google.api.field_behavior) = OUTPUT_ONLY];
   // The last few error codes, newest first, at most 8 (e.g. `r2_unavailable`, `upload_over_budget`).
   repeated string recent_error_codes = 15 [(google.api.field_behavior) = OUTPUT_ONLY];
@@ -105,6 +113,16 @@ message ServiceStatus {
   // (-- api-linter: core::0122::embedded-resource=disabled
   //     aip.dev/not-precedent: two fixed tokens without a Get or List of their own, read here with the rest of 设置. --)
   repeated MachineToken machine_tokens = 21 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Settings.text_retention_days, read here with the rest (the search's coverage line, 设置 → 存储); 0 while every
+  // text stays in Cloudflare.
+  int32 text_retention_days = 22 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Captured texts only in the Dropbox archive: past the retention window, recall removed them from Cloudflare after
+  // the archive confirmed holding them. document_count minus this many are in Cloudflare.
+  int32 archived_text_count = 23 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Why no text leaves Cloudflare now although the window is set: `dropbox_not_connected` (the backup is not
+  // connected) or `dropbox_failing` (its last attempt failed; it retries by itself); empty while retention runs or is
+  // off.
+  string text_retention_paused_reason = 24 [(google.api.field_behavior) = OUTPUT_ONLY];
 }
 
 // The backup of the archive (contracts/recall-archive-v1) to the owner's Dropbox: recall writes the archive's files

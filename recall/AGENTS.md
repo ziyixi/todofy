@@ -27,6 +27,13 @@
   过期，不需要 Bypass。只增不删：从不调用 Dropbox 的删除或移动；blob 用 `add` 写一次，日文件、`VERSION`、`state.json`
   整体覆盖；遇到 429 / `too_many_write_operations` 按 Retry-After 或退避重试；每次 pass 受子请求（40）、墙钟与渲染行数
   约束。改动这些时运行 `test/runtime/archive.test.ts`（假 Dropbox）与 smoke。
+- **正文保留窗口**（owner 2026-10-11：全部已备份到 Dropbox，Cloudflare 只留滚动窗口以守住免费额度）：
+  `Settings.text_retention_days` 默认 365，30–3650 或永久（不设）。窗口外的正文只有在页面未删除、Dropbox 已连接且
+  最近一次没有失败、并且归档账本确认了这一份（`archive_blobs` 里当前连接的记录带 Dropbox 内容哈希、它所在日文件此后
+  已写入、`state.json` 的 seq 已覆盖它）时，才由 alarm 的有界步骤（`retention.ts`，每次至多 100 条、一次 R2 调用、
+  受每日维护额度约束）移出 R2 和全文索引；documents 行保留（`archived_ms`，seq 与 blob 路径不变），页面与访问永不因此
+  删除。这不是删除：不写墓碑、不改 feed 与归档，blob 路由答 410 `blob_deleted`。任何放宽这些条件的改动都不允许；
+  改动保留、归档账本或 blob 路由时运行 `test/retention.test.ts`、`test/runtime/retention.test.ts` 与 smoke。
 - **Workers Free，$0**：不加 cron、D1、KV、Queues 或 Workflows；调度只用 `RecallState`（实例 `recall-v1`）的
   `setAlarm()`。fetch handler 只做路由、鉴权与一次对象调用（10 ms），从不解析上传、搜索或 feed；blob 路由直接读 R2，
   只在 R2 没有对象时才问对象。每日写入预算（20,000 行，之后 429）、每日读取预算（1,500,000 行，之后搜索拒绝；

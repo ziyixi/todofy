@@ -11,11 +11,15 @@
  * - 备份到 Dropbox: not connected, the four steps at Dropbox and the App key field with 连接 (the browser goes to
  *   Dropbox and comes back here with `?dropbox=<outcome>`); connected, the account, the last upload, what waits, the
  *   last failure in words and 断开. The feed's own consumers, if any, under it.
- * - 存储: the database against its budget, the texts kept in the cloud, today's records written and read against the
- *   daily budgets, the counts and how far back the text index reaches.
+ * - 存储: the database against its budget, the texts kept in the cloud, how long a text stays there (the retention
+ *   window, chosen from a short list; shortening it asks first), how many texts are in the cloud and how many only in
+ *   Dropbox, and a line while Dropbox keeps retention paused; today's records written and read against the daily
+ *   budgets, the counts and how far back the text index reaches.
  * - 网站名单: the owner's patterns in two lists, 只记网站 (no title or path: their own banks) and 不存正文, each with
  *   ✕, an add field with its list chosen, the built-in lists folded. Every change sends only the two lists with the
  *   settings' etag.
+ *
+ * The retention window and the lists share the settings' etag: each saves on top of the other's last change.
  */
 import { create } from '@ziyixi/proto/protobuf'
 import { MachineTokenSchema, type ArchiveConsumer, type DropboxBackup, type MachineToken, type ServiceStatus, type Settings } from '@ziyixi/proto/recall/ui/v1/status_pb'
@@ -58,6 +62,26 @@ const BACKUP_ERRORS: Readonly<Record<string, readonly [string, boolean]>> = {
   r2_unavailable: ['云端存储暂时不可用，稍后自动重试', false],
 }
 
+/** Why retention removes nothing now, in words (ServiceStatus.text_retention_paused_reason). */
+const RETENTION_PAUSES: Readonly<Record<string, string>> = {
+  dropbox_not_connected: 'Dropbox 备份未连接：暂不从云端移除正文，连接后自动开始',
+  dropbox_failing: 'Dropbox 备份最近失败：暂不从云端移除正文，备份恢复后自动继续',
+}
+
+/** The retention windows offered, in days; null keeps every text in the cloud. */
+const RETENTION_CHOICES: readonly (number | null)[] = [30, 90, 180, 365, 730, 1095, 1825, 3650, null]
+
+/** A retention window in words: `90 天`, `1 年`, `永久`. */
+function retentionName(days: number | null): string {
+  if (days === null) return '永久'
+  return days % 365 === 0 ? `${String(days / 365)} 年` : `${String(days)} 天`
+}
+
+/** The settings two cards change (the lists and the retention window): one etag, the latest answer of either. */
+interface SettingsBox {
+  current: Settings
+}
+
 /** What the browser came back from Dropbox with (/settings?dropbox=<outcome>). */
 const CONNECT_OUTCOMES: Readonly<Record<string, string>> = {
   connected: '已连接 Dropbox：几分钟内开始备份',
@@ -76,8 +100,9 @@ export async function renderSettings(ctx: ViewContext): Promise<void> {
   }
   await frame(ctx.main, '设置', async (body) => {
     const [status, settings] = await Promise.all([ctx.status(), api.getSettings({ name: 'settings' })])
+    const shared: SettingsBox = { current: settings }
     const denylist = el('div', { class: 'denylist' })
-    paintDenylist(denylist, settings)
+    paintDenylist(denylist, shared)
     const tokens = el('div', { class: 'tokens' })
     paintTokens(ctx, tokens, status.machineTokens)
     fill(
@@ -85,7 +110,7 @@ export async function renderSettings(ctx: ViewContext): Promise<void> {
       devicesCard(status, now),
       card('插件口令', '', tokens),
       backupCard(ctx, status, now),
-      storageCard(status),
+      storageCard(ctx, status, shared),
       card('网站名单', `${String(settings.siteOnlyPatterns.length + settings.denylistPatterns.length)} 条`, denylist),
       status.build === '' ? null : el('p', { class: 'meta build' }, `版本 ${status.build.slice(0, 7)}`),
     )
@@ -352,7 +377,70 @@ function consumerRow(consumer: ArchiveConsumer, now: number): HTMLElement {
   )
 }
 
-function storageCard(status: ServiceStatus): HTMLElement {
+/**
+ * The retention window: the choice (shortening it asks first), what it means, the texts in the cloud and only in
+ * Dropbox, and why nothing leaves the cloud while Dropbox keeps it paused.
+ */
+function retentionBlock(ctx: ViewContext, status: ServiceStatus, shared: SettingsBox): HTMLElement {
+  const box = el('div', { class: 'stack' })
+  const paint = () => {
+    const days = shared.current.textRetentionDays ?? null
+    // A window set through the API that the list does not offer is shown as it is.
+    const choices = days !== null && !RETENTION_CHOICES.includes(days) ? [days, ...RETENTION_CHOICES] : RETENTION_CHOICES
+    const select = el('select', { id: 'retention' }, ...choices.map((choice) => el('option', { value: choice === null ? 'off' : String(choice) }, retentionName(choice))))
+    select.value = days === null ? 'off' : String(days)
+    select.addEventListener('change', () => void choose(select.value === 'off' ? null : Number(select.value)))
+    const pause = days === null ? '' : (RETENTION_PAUSES[status.textRetentionPausedReason] ?? '')
+    // A choice repaints the block: the focus stays on the choice.
+    const focused = box.contains(document.activeElement)
+    fill(
+      box,
+      el('div', { class: 'retention' }, el('label', { for: 'retention' }, '正文在云端保留'), select),
+      el(
+        'p',
+        { class: 'hint' },
+        days === null
+          ? '所有正文都留在云端。'
+          : `只保留最近 ${retentionName(days)}保存的正文：更早的正文在 Dropbox 确认备份后从云端移除，只留在 Dropbox 归档里。页面和访问记录一直保留，标题和网址仍能搜到。`,
+      ),
+      el('p', { class: 'facts' }, el('span', {}, `云端 ${count(Math.max(0, status.documentCount - status.archivedTextCount))} 篇`), el('span', {}, `只在 Dropbox ${count(status.archivedTextCount)} 篇`)),
+      pause === '' ? null : el('p', { class: 'hint warn', role: 'note', title: status.textRetentionPausedReason }, pause),
+    )
+    if (focused) select.focus()
+  }
+  const choose = async (next: number | null) => {
+    const days = shared.current.textRetentionDays ?? null
+    const shorter = next !== null && (days === null || next < days)
+    if (shorter && !ctx.host.confirm(`改成保留 ${retentionName(next)}？更早保存的正文在 Dropbox 确认备份后会从云端移除（Dropbox 里仍有），页面和访问记录不变。`)) {
+      paint()
+      return
+    }
+    const saved = await act(
+      (requestId) =>
+        api.updateSettings({
+          settings: { name: 'settings', ...(next === null ? {} : { textRetentionDays: next }), etag: shared.current.etag },
+          updateMask: { paths: ['text_retention_days', 'etag'] },
+          requestId,
+        }),
+      next === null ? '正文会一直留在云端' : `正文在云端保留 ${retentionName(next)}`,
+      () => undefined,
+    )
+    if (saved !== null) shared.current = saved
+    else {
+      // Refused (another tab changed the settings, or the network): the toast said why; show what is stored now.
+      try {
+        shared.current = await api.getSettings({ name: 'settings' })
+      } catch {
+        // Painted as it was.
+      }
+    }
+    paint()
+  }
+  paint()
+  return box
+}
+
+function storageCard(ctx: ViewContext, status: ServiceStatus, shared: SettingsBox): HTMLElement {
   const used = status.storageUsedMib
   const budget = status.storageBudgetMib
   const written = status.rowsWrittenTodayCount
@@ -373,6 +461,7 @@ function storageCard(status: ServiceStatus): HTMLElement {
       used >= STORAGE_HIGH_MIB ? '接近上限：最早页面的正文会移出搜索索引（标题和网址仍能搜到，全文仍在云端和归档里）' : '',
     ),
     line('云端正文', `${count(status.blobStoredMib)} MB / 10 GB 免费（账户共用）`, meter(status.blobStoredMib, R2_FREE_MB, '云端正文用量')),
+    retentionBlock(ctx, status, shared),
     line(
       '今天写入',
       `${count(written)} / ${count(writeBudget)} 条记录`,
@@ -398,13 +487,14 @@ const LIST_NAMES: Readonly<Record<List, string>> = { siteOnly: '只记网站', n
  * The 网站名单 card's body: the owner's patterns of both lists with ✕, the add field and its list, the built-in lists
  * folded. After an addition the add field keeps the focus.
  */
-function paintDenylist(box: HTMLElement, settings: Settings, focusField = false, adding: List = 'siteOnly'): void {
+function paintDenylist(box: HTMLElement, shared: SettingsBox, focusField = false, adding: List = 'siteOnly'): void {
+  const settings = shared.current
   const lists: Record<List, readonly string[]> = { siteOnly: settings.siteOnlyPatterns, noText: settings.denylistPatterns }
   const save = async (next: Record<List, readonly string[]>, done: string, keepFocus: boolean) => {
     const saved = await act(
       (requestId) =>
         api.updateSettings({
-          settings: { name: 'settings', denylistPatterns: [...next.noText], siteOnlyPatterns: [...next.siteOnly], etag: settings.etag },
+          settings: { name: 'settings', denylistPatterns: [...next.noText], siteOnlyPatterns: [...next.siteOnly], etag: shared.current.etag },
           updateMask: { paths: ['denylist_patterns', 'site_only_patterns', 'etag'] },
           requestId,
         }),
@@ -420,7 +510,8 @@ function paintDenylist(box: HTMLElement, settings: Settings, focusField = false,
         return
       }
     }
-    paintDenylist(box, shown, keepFocus, list)
+    shared.current = shown
+    paintDenylist(box, shared, keepFocus, list)
     box.closest('.card')?.querySelector('.card-head .meta')?.replaceChildren(`${String(shown.siteOnlyPatterns.length + shown.denylistPatterns.length)} 条`)
   }
 

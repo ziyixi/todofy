@@ -9,8 +9,9 @@
  *   R2 without the object, the status and a settings update;
  * - RecallState (30 s per invocation): those calls, the heaviest upload above all (50 items with 10 texts of 64 KiB,
  *   gzip, scrub, R2 and the index), an alarm pass at its bounds (a purge of 500 rows and 2,000 pages moved out of the
- *   text index), and the archive's passes to a fake Dropbox (a scan of 10,000 changes a table, then days of about 300
- *   visits and the texts of 64 KiB, each pass at its subrequests).
+ *   text index), the archive's passes to a fake Dropbox (a scan of 10,000 changes a table, then days of about 300
+ *   visits and the texts of 64 KiB, each pass at its subrequests), and a retention step at its bound (100 texts past
+ *   the window, each its page's latest with 32 KiB of segmented text in the index).
  *
  * No dev bypass: Access is verified as in production. Bounds are milliseconds of the reference machine.
  */
@@ -28,7 +29,8 @@ import {
   type Isolate,
   type Measurement,
 } from '../../../../tools/workerd-cpu/workerd-cpu.mts';
-import { ARCHIVE_SCAN_ROWS, DEMOTE_BATCH, PURGE_BATCH } from '../../src/limits.ts';
+import { segment } from '../../../shared/segment.ts';
+import { ARCHIVE_SCAN_ROWS, DEMOTE_BATCH, INDEXED_TEXT_MAX_BYTES, PURGE_BATCH, RETENTION_BATCH } from '../../src/limits.ts';
 import { accessClaims, testIssuer } from '../jwt.ts';
 import { batch, document, iso, text, uuid, visit } from './data.ts';
 import { FakeDropbox } from './fake-dropbox.ts';
@@ -48,6 +50,7 @@ const OBJECT = 'RecallState';
 const UPLOAD = 'POST batches (50 items, 10 texts of 64 KiB)';
 const ALARM = `alarm pass: a purge of ${String(PURGE_BATCH)} rows, ${String(DEMOTE_BATCH)} pages out of the text index`;
 const ARCHIVE = `archive pass: a scan of ${String(ARCHIVE_SCAN_ROWS)} changes a table, or a pass of days and texts to Dropbox`;
+const RETENTION = `retention step: ${String(RETENTION_BATCH)} texts out of R2 and their index rows to title and URL`;
 const COLD_LABEL = "GET /api/csrf as the fetch handler's very first request";
 const ISSUER = SYNTHETIC_BINDINGS['ACCESS_ISSUER'] ?? '';
 const AUDIENCE = SYNTHETIC_BINDINGS['ACCESS_AUDIENCE'] ?? '';
@@ -242,7 +245,43 @@ async function session({ h, meter: worker, object, dropbox }: RecallIsolate, ind
   }
   expect(dropbox.callsTo('/2/files/upload').length).toBeGreaterThan(30);
   const archive = summarize(ARCHIVE, [Math.max(...samples)]);
-  return [cold, ...measured, alarm, archive];
+
+  // The retention step at its bound: RETENTION_BATCH texts past the window that the archive confirmed, each its page's
+  // latest with INDEXED_TEXT_MAX_BYTES of segmented text in the index, after a pass with nothing left to write.
+  const meta = async (key: string) => (await h.sql<{ value: string }>(`SELECT value FROM meta WHERE key = ?`, key))[0]?.value ?? '';
+  const target = await meta('archive_target');
+  const head = Number(await meta('seq'));
+  const old = T0 - 400 * DAY;
+  const body = segment(text(INDEXED_TEXT_MAX_BYTES, 7));
+  for (let i = 0; i < RETENTION_BATCH; i++) {
+    const pageRowid = 3 * (i + 1);
+    const id = uuid(i, 7);
+    const path = `2025/09/${id}.txt.gz`;
+    await h.sql(
+      `INSERT INTO documents (id, seq, seq_ms, page_rowid, visit, device_id, device_label, capture_ms, url, title, description, blob_path, sha256, stored_bytes, text_bytes, text_sha256)
+       VALUES (?, ?, ?, ?, ?, 'd', 'x', ?, 'https://example.com/', 't', '', ?, ?, 20000, ?, 'unused')`,
+      id, head + i + 1, old + MINUTE, pageRowid, uuid(i, 8), old, path, 'a'.repeat(64), INDEXED_TEXT_MAX_BYTES,
+    );
+    await h.sql(`UPDATE pages SET latest_document = ?, latest_capture_ms = ?, text_indexed = ? WHERE rowid = ?`, id, old, INDEXED_TEXT_MAX_BYTES, pageRowid);
+    await h.sql(`DELETE FROM fts WHERE rowid = ?`, pageRowid);
+    await h.sql(`INSERT INTO fts (rowid, title, url, body) VALUES (?, '文章 example', 'site example com articles', ?)`, pageRowid, body);
+    await h.sql(`INSERT INTO archive_blobs (path, target, content_hash) VALUES (?, ?, ?)`, path, target, 'b'.repeat(64));
+  }
+  await h.sql(`INSERT INTO archive_days (day, min_seq, max_seq, dirty, content_hash) VALUES (?, ?, ?, 0, ?)`, new Date(old + MINUTE).toISOString().slice(0, 10), head + 1, head + RETENTION_BATCH, 'c'.repeat(64));
+  // Everything written: the pass that comes first has nothing to do, and the index is within its budget.
+  await h.sql(`UPDATE archive_days SET dirty = 0, content_hash = coalesce(content_hash, 'c')`);
+  for (const key of ['seq', 'archive_scan_seq', 'archive_seq']) {
+    await h.sql(`INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value`, key, String(head + RETENTION_BATCH));
+  }
+  await h.sql(`UPDATE meta SET value = ? WHERE key = 'indexed_text_bytes'`, String(RETENTION_BATCH * INDEXED_TEXT_MAX_BYTES));
+  let retained = { retaining: false, archive: '' };
+  const retention = summarize(RETENTION, [
+    await object.cpu(async () => {
+      retained = await h.step(T0 + 30 * MINUTE);
+    }),
+  ]);
+  expect(retained).toMatchObject({ retaining: true, archive: 'done' });
+  return [cold, ...measured, alarm, archive, retention];
 }
 
 describe('CPU (Workers Free: 10 ms per request, 30 s per Durable Object invocation)', () => {
@@ -270,6 +309,7 @@ describe('CPU (Workers Free: 10 ms per request, 30 s per Durable Object invocati
     }
     expect(get(ALARM).first, ALARM).toBeLessThan(OBJECT_ALARM_BOUND_MS);
     expect(get(ARCHIVE).first, ARCHIVE).toBeLessThan(OBJECT_ALARM_BOUND_MS);
-    expect(reference.size).toBe(1 + 1 + 2 * 8 + 1 + 1);
+    expect(get(RETENTION).first, RETENTION).toBeLessThan(OBJECT_ALARM_BOUND_MS);
+    expect(reference.size).toBe(1 + 1 + 2 * 8 + 1 + 1 + 1);
   });
 });

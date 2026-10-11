@@ -4,7 +4,7 @@
  * (presets of the last n days, custom ranges and a single day, the site picker with a typed domain first and the
  * server's prefix filter, Escape and a click outside) and where the focus goes; the URL holding the state; results with
  * marked titles, snippets and their figures; 加载更多, the count and the focus; the caps' lines; no results with a drop
- * button per chip and the index's reach; a lone Chinese character, alone or beside other terms; the day's read budget;
+ * button per chip and the index's reach; the retention window's coverage line; a lone Chinese character, alone or beside other terms; the day's read budget;
  * the sort; the keyboard; back from a page showing the results as they were.
  */
 import { timestampFromMs } from '@ziyixi/proto/protobuf/wkt'
@@ -452,6 +452,28 @@ describe('results', () => {
     buttonNamed(root, '去掉 网站：docs.example').click()
     await settled()
     expect(titles(root)).toEqual(['Durable alarm retries'])
+  })
+
+  it('says the text search covers the last N days once texts were archived to Dropbox, for a search with words', async () => {
+    const fake = server()
+    const guide = fake.pages[1]
+    if (guide === undefined) throw new Error('no page')
+    // An archived text is no longer searched: its page is found by title and URL only.
+    fake.addText(guide, textOf('guide', '', { textArchived: true, archivePath: 'blobs/2025/09/x.txt.gz' }))
+    fake.status = { textRetentionDays: 365, archivedTextCount: 12 }
+    const line = '正文搜索覆盖最近 365 天保存的正文；更早的正文已归档到 Dropbox，那些页面仍能按标题和网址搜到'
+    let root = await open(fake, '/search?q=durable')
+    expect(titles(root)).toEqual(['Durable alarm retries', 'A durable headline'])
+    expect(root.querySelector('.results-area .coverage')?.textContent).toBe(line)
+    root = await open(fake, '/search?q=冷启动')
+    expect([...root.querySelectorAll('.empty p.hint')].map((node) => node.textContent)).toEqual(['正文只搜每页前 32 KB', line])
+    // 最近读过 searches no text: no line.
+    root = await open(fake, '/search')
+    expect(root.querySelector('.coverage')).toBeNull()
+    // Nothing archived yet, or every text kept: no line.
+    fake.status = { textRetentionDays: 365, archivedTextCount: 0 }
+    root = await open(fake, '/search?q=durable')
+    expect(root.querySelector('.coverage')).toBeNull()
   })
 
   it('moves between results with ↓ ↑ and j k, from and back to the box', async () => {

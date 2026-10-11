@@ -5,6 +5,7 @@
 import { create } from '@ziyixi/proto/protobuf';
 import { timestampFromMs, type Timestamp } from '@ziyixi/proto/protobuf/wkt';
 import { DocumentSchema, FocusSpanSchema, PageSchema, SiteSchema, VisitSchema, type Document, type Page, type Site, type Visit } from '@ziyixi/proto/recall/ui/v1/page_pb';
+import { blobKey } from './blobs.ts';
 import { spansOf } from './feed.ts';
 import { INDEXED_TEXT_MAX_BYTES } from './limits.ts';
 import { hostOfKey, type DocumentRow, type PageRow, type SiteRow, type VisitRow } from './store.ts';
@@ -47,7 +48,12 @@ export function visitMessage(row: VisitRow & { readonly page_id: string; readonl
   });
 }
 
+/**
+ * A captured text's message: `text` is the text R2 holds, '' for one the retention window moved to the Dropbox archive
+ * alone (then `archive_path` names where the archive keeps it: the same path as its R2 key).
+ */
 export function documentMessage(row: DocumentRow, pageId: string, text: string): Document {
+  const archived = row.archived_ms !== null;
   return create(DocumentSchema, {
     name: `pages/${pageId}/documents/${row.id}`,
     captureTime: timestampFromMs(row.capture_ms),
@@ -58,6 +64,8 @@ export function documentMessage(row: DocumentRow, pageId: string, text: string):
     textTruncated: row.truncated === 1,
     text,
     searchTruncated: row.text_bytes > INDEXED_TEXT_MAX_BYTES,
+    textArchived: archived,
+    archivePath: archived ? blobKey(row.blob_path) : '',
   });
 }
 

@@ -6,7 +6,8 @@
  *   以后不保存这个网站的正文 (adds the site to the denylist) and 删除这个页面的记录, each that changes something asking first.
  * - 正文: the latest capture's text in the reader style, paragraphs split on blank lines, the query's words marked
  *   when the page came from a search (`第 1/5 处` with ↑ ↓ and the keys n and N, in a bar that sticks under the header;
- *   the first match brought into sight when it is below it); what was cut or is not searched.
+ *   the first match brought into sight when it is below it); what was cut or is not searched. A text the retention
+ *   window moved to the Dropbox archive alone says 正文已归档到 Dropbox, with its path in the app folder.
  * - 访问: the visits, newest first, 20 at a time; a date opens that day's timeline at that hour.
  *
  * Titles, URLs and texts are untrusted page content: text nodes only, never HTML.
@@ -82,6 +83,15 @@ function textCard(ctx: ViewContext, page: Page, document: Document | null, words
   if (document === null) return card('正文', '', el('p', { class: 'hint' }, '停留不到 10 秒或在不保存正文的名单里，没有正文'))
   const captured = ms(document.captureTime)
   const meta = `${captured === null ? '' : `${dateText(captured, now)}保存`}${page.documentCount > 1 ? ` · 共 ${String(page.documentCount)} 次` : ''}`
+  if (document.textArchived) {
+    return card(
+      '正文',
+      meta,
+      el('p', { class: 'archived-title' }, '正文已归档到 Dropbox'),
+      el('p', { class: 'hint' }, '超过云端保留的天数，正文已从云端移除，只留在 Dropbox 归档里（gzip 压缩的纯文本）；页面和访问记录仍在这里，标题和网址仍能搜到。'),
+      el('p', { class: 'archive-path' }, 'Dropbox 应用文件夹里的 ', el('code', { class: 'mono' }, document.archivePath)),
+    )
+  }
   const reader = el(
     'div',
     { class: 'reader' },

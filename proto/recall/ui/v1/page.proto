@@ -50,8 +50,9 @@ message Page {
   int32 document_count = 9 [(google.api.field_behavior) = OUTPUT_ONLY];
   // The latest capture; unset when there is none.
   google.protobuf.Timestamp latest_capture_time = 10 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // The latest capture's text is in the search index. False without a capture, or when the storage budget left
-  // only the page's title and URL in the index (the text is still kept and archived).
+  // The latest capture's text is in the search index. False without a capture, when the storage budget left only
+  // the page's title and URL in the index (the text is still kept and archived), or when the retention window moved
+  // the text to the Dropbox archive alone (Document.text_archived).
   bool text_indexed = 11 [(google.api.field_behavior) = OUTPUT_ONLY];
   // The latest capture (GetDocument reads its text); empty when there is none.
   string latest_document = 12 [
@@ -124,10 +125,17 @@ message Document {
   int32 text_bytes = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
   // The page had more text than the 64 KiB kept: `text` is its beginning.
   bool text_truncated = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // The plain text (the page's innerText, scrubbed).
+  // The plain text (the page's innerText, scrubbed); empty when text_archived.
   string text = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
   // Only the text's first 32 KiB is in the search index; the rest is kept, shown and archived.
   bool search_truncated = 9 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The text is no longer in Cloudflare: it was captured before the retention window (Settings.text_retention_days)
+  // and the Dropbox archive confirmed holding it, so recall removed it from R2 and the search index. The archive keeps
+  // it at archive_path.
+  bool text_archived = 10 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Where the archive holds the text, relative to its root (the Dropbox app folder): `blobs/2026/10/<uuid>.txt.gz`,
+  // the gzip of the UTF-8 text (contracts/recall-archive-v1). Set only when text_archived.
+  string archive_path = 11 [(google.api.field_behavior) = OUTPUT_ONLY];
 }
 
 // A site: every page of one host.
@@ -175,7 +183,7 @@ message SearchResult {
   bool has_text = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
   // About 160 characters of the latest captured text around the first match, cut into plain and highlighted parts
   // (a highlight is an occurrence of a query term, ignoring case and width). Empty when the query matched only the
-  // title or URL, or there is no query.
+  // title or URL, there is no query, or the text is only in the Dropbox archive (Document.text_archived).
   repeated TextSegment snippet = 9 [(google.api.field_behavior) = OUTPUT_ONLY];
 }
 

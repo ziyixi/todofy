@@ -94,6 +94,7 @@ export interface StepResult {
   readonly next: number;
   readonly purging: boolean;
   readonly demoting: boolean;
+  readonly retaining: boolean;
   readonly deferred: boolean;
   readonly archive: 'idle' | 'done' | 'more' | 'retry';
   readonly code: string;

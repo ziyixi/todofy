@@ -41,6 +41,7 @@ export const REASONS: Readonly<Record<Reason, { readonly code: Code; readonly me
     message: 'the Dropbox App key breaks its rule',
     zh: 'App key 格式不对：在 Dropbox 应用的设置页复制 App key（小写字母和数字），不是 App secret',
   },
+  INVALID_RETENTION: { code: Code.INVALID_ARGUMENT, message: 'the retention window is outside 30-3650 days', zh: '正文在云端保留的天数要在 30 到 3650 之间，或选永久保留' },
 };
 
 export function isReason(value: string): value is Reason {

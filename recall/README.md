@@ -3,11 +3,12 @@
 The owner's browsing record on `recall.ziyixi.science`, to answer two questions years from now: what did I do on day X,
 and where did I read that. A Chrome extension records each page's visits with the time it really had the focus, and
 the page's text once it was read for ten seconds; it scrubs secrets and uploads to the Worker `recall`, which keeps
-everything in one SQLite Durable Object (`RecallState`) and the private R2 bucket `recall-store`, indexes it for
-full-text search (Chinese included) and serves a timeline and a search UI behind Access. A durable copy leaves
-Cloudflare as plain files ([`recall-archive-v1`](../contracts/recall-archive-v1/README.md)): recall writes them into the
-owner's own Dropbox app folder about hourly, and the NAS syncs that folder with its own Dropbox support, so nothing of
-recall's runs on the NAS. Every owner step is a click. Chinese UI, mobile first. Design:
+every visit in one SQLite Durable Object (`RecallState`) and the texts of a rolling window (a year by default) in the
+private R2 bucket `recall-store`, indexes them for full-text search (Chinese included) and serves a timeline and a
+search UI behind Access. A durable copy of everything leaves Cloudflare as plain files
+([`recall-archive-v1`](../contracts/recall-archive-v1/README.md)): recall writes them into the owner's own Dropbox app
+folder about hourly, and the NAS syncs that folder with its own Dropbox support, so nothing of recall's runs on the
+NAS. Every owner step is a click. Chinese UI, mobile first. Design:
 [`docs/design.md`](docs/design.md). Rules: [`AGENTS.md`](AGENTS.md).
 
 | Path | What it is |
@@ -28,19 +29,26 @@ recall's runs on the NAS. Every owner step is a click. Chinese UI, mobile first.
   网站, 类型 (读过) and 停留, or the operators `site:`, `after:` (`after:昨天` too), `before:`, `type:read` and `dwell:`
   typed in the box; 相关 · 最新. A single Chinese character is not searchable (the index is of character pairs). Each
   search reads a bounded number of rows, and searches stop for the rest of the UTC day once the day's read budget is
-  spent (design §6.3).
-- **页面详情**: the page's text in a reader view with the matches marked, its visits, and behind ⋯ 打开原网页,
+  spent (design §6.3). Texts older than the retention window are searched by title and URL only, and the search says
+  so once there are any.
+- **页面详情**: the page's text in a reader view with the matches marked (past the retention window: 正文已归档到
+  Dropbox, with the text's path in the app folder), its visits, and behind ⋯ 打开原网页,
   以后不保存这个网站的正文 and 删除这个页面的记录 (the visits and texts leave recall; the Dropbox archive only grows:
   it gains the deletion's tombstone line and keeps its files, which the owner removes there by hand if they want).
 - **设置**: devices (last upload, version, outbox, clock skew); 插件口令 (the extension's token: 生成, 重新生成 with
   24 hours' grace, revoke a leaked one at once, stop; shown once; the optional export token of the change feed folded
   under it); 备份到 Dropbox (connect with the App key, the account, the last upload, what waits, failures in words,
-  断开); storage and the day's budgets; and the owner's 网站名单: sites recorded by their name alone (their own banks)
+  断开); storage and the day's budgets, with 正文在云端保留 (the retention window: 30 天 to 10 年, 1 年 by default, or
+  永久; how many texts are in Cloudflare and how many only in Dropbox, and why nothing leaves while Dropbox is not
+  connected or failing); and the owner's 网站名单: sites recorded by their name alone (their own banks)
   or without their text (the owner's own lists live here, never in this repository).
 
 What is never recorded, and what is kept for how long, is in the design's §2 and §2.3: incognito windows, recall's own
 pages, visits under one second of focus; sensitive sites (mail, chats, banks, consoles, where API keys are made) and the
-owner's site-only list by their site alone; no text of a denylisted page or a page with a password field.
+owner's site-only list by their site alone; no text of a denylisted page or a page with a password field. Pages and
+visits stay in Cloudflare; a text leaves it after the retention window, and only once the Dropbox archive has
+confirmed holding it (never while Dropbox is not connected or failing): that is not a deletion, and the archive keeps
+every text.
 
 ## Develop
 
@@ -119,5 +127,7 @@ Fastest first: switch the extension off in `chrome://extensions`; 设置 → 插
 minute) or → 旧口令泄露：立即作废并重新生成 for a leaked token (only the new token works; a plain 重新生成 keeps the old
 one for 24 hours); 设置 → 备份到 Dropbox → 断开 (revokes the token at Dropbox; the files stay); DeletePage for something
 that should not have been kept (the Dropbox copy keeps its files: delete them there by hand). A code-only revert is the
-normal rollback. Deleting the Worker deletes `RecallState` (the index and every record) for good; the texts stay in
-`recall-store`, and every record in the Dropbox archive and its NAS copy.
+normal rollback (a revert to before the retention window leaves archived texts' records without their text: the page
+detail would then fail to read them, so revert the UI with it or set 正文在云端保留 to 永久 first, which stops further
+removals). Deleting the Worker deletes `RecallState` (the index and every record) for good; the window's texts stay in
+`recall-store`, and every record and text in the Dropbox archive and its NAS copy.

@@ -45,8 +45,8 @@ export const ARCHIVE_INTERVAL_MS = HOUR;
 /** Changes of each table one pass reads (their seq and commit time only) to find the days they touched. */
 export const ARCHIVE_SCAN_ROWS = 10_000;
 /**
- * Subrequests one pass may make: R2 reads and Dropbox calls (Workers Free allows 50 per invocation; the purge in the
- * same alarm takes one or two).
+ * Subrequests one pass may make: R2 reads and Dropbox calls (Workers Free allows 50 per invocation; the purge and the
+ * retention step in the same alarm take one or two each).
  */
 export const ARCHIVE_SUBREQUESTS = 40;
 /** A pass starts no new day after rendering this many changes (CPU), nor any call after this long (wall time). */
@@ -102,10 +102,25 @@ export const DEMOTE_BATCH = 2000;
 /** Rows (visits and documents) of deleted pages removed per alarm run, with their R2 objects. */
 export const PURGE_BATCH = 500;
 /**
- * The alarm's purges and index demotions stop for the day once today's rows written reach this (half the daily write
- * budget), so that uploads keep the other half; they go on the next day.
+ * The alarm's purges, index demotions and retention steps stop for the day once today's rows written reach this (half
+ * the daily write budget), so that uploads keep the other half; they go on the next day.
  */
 export const MAINTENANCE_ROW_LIMIT = DAILY_ROW_BUDGET / 2;
+/**
+ * Settings.text_retention_days: how long a captured text stays in Cloudflare after its capture, until the owner
+ * changes it, and the range they may choose (or none: every text stays). Past it a text leaves R2 and the index only
+ * once the Dropbox archive confirmed holding it (retention.ts).
+ */
+export const TEXT_RETENTION_DEFAULT_DAYS = 365;
+export const TEXT_RETENTION_MIN_DAYS = 30;
+export const TEXT_RETENTION_MAX_DAYS = 3650;
+/**
+ * Texts past the window one alarm run moves out of Cloudflare (their R2 objects in one call, a few rows written each),
+ * found among at most RETENTION_SCAN of the oldest texts still in Cloudflare (a text the archive never confirmed, a
+ * lost blob, stays among them and is looked at again).
+ */
+export const RETENTION_BATCH = 100;
+export const RETENTION_SCAN = 1000;
 /** The daily alarm's hour (UTC), and how soon the alarm comes back while work is left. */
 export const ALARM_HOUR_UTC = 4;
 export const ALARM_BACKLOG_MS = MINUTE;

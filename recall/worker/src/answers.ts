@@ -18,7 +18,7 @@ export const MACHINE_REASONS = {
   FEED_OVER_BUDGET: { code: Code.RESOURCE_EXHAUSTED, message: "today's read budget for the feed is used up; retry after Retry-After" },
   CURSOR_AHEAD: { code: Code.FAILED_PRECONDITION, message: 'after is above the head of the feed', httpStatus: 409 },
   CURSOR_EXPIRED: { code: Code.FAILED_PRECONDITION, message: 'after is below the oldest kept tombstone', httpStatus: 410 },
-  BLOB_DELETED: { code: Code.NOT_FOUND, message: 'no live record holds this blob', httpStatus: 410 },
+  BLOB_DELETED: { code: Code.NOT_FOUND, message: 'recall holds no copy of this blob: its record was deleted, or the retention window left it in the archive alone', httpStatus: 410 },
   BLOB_MISSING: { code: Code.DATA_LOSS, message: 'a live record holds this blob but the store has no object' },
   UNAVAILABLE: { code: Code.UNAVAILABLE, message: 'a dependency failed; retry after Retry-After' },
   INTERNAL: { code: Code.INTERNAL, message: 'internal error' },

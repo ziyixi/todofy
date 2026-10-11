@@ -1,5 +1,5 @@
 /**
- * Deletion and the alarm's bounded work (../../docs/design.md §2.3, §5.4).
+ * Deletion, the retention window and the alarm's bounded work (../../docs/design.md §2.3, §5.4).
  *
  * DeletePage is one transaction of a few rows, however many visits the page has: the page row and its index row go,
  * its totals leave its site and the running counters, and one tombstone `pages/<page id>` is committed to the feed.
@@ -7,15 +7,37 @@
  * feed at once; right after it the page's texts leave R2 (deletes are free and write no row, and the blob route reads
  * R2 without asking the object), and the alarm removes the rows later (PURGE_BATCH rows a run).
  *
+ * The retention window (Settings.text_retention_days) is not a deletion: Cloudflare keeps a rolling window of texts and
+ * the Dropbox archive keeps every one. A text captured before the window leaves R2 and the search index only when its
+ * page is live and the archive confirmed holding it (backup.ts archiveConfirmations: the backup connected and not
+ * failing, its blob written to this connection with Dropbox's content hash, the day file that names it written since,
+ * and state.json past its seq). Its document row stays, marked archived, with its seq: no tombstone, nothing in the feed
+ * or the archive changes, and the blob route answers 410 for it. Pages and visits are never removed by it.
+ *
  * The alarm runs once a day (ALARM_HOUR_UTC), and a minute later again while work is left: the purges, the small
- * tables' cleanup, and the index budget, which moves the oldest pages' texts out of the index (their title and URL
- * stay; R2 and every archive keep the text) while the index holds over INDEXED_TEXT_BUDGET_BYTES of text or the
- * database passes STORAGE_HIGH_MIB. Purges and demotions write rows, so both stop for the day once today's rows written
- * reach MAINTENANCE_ROW_LIMIT, leaving the rest of the daily budget to uploads, and go on the next day.
+ * tables' cleanup, the index budget, which moves the oldest pages' texts out of the index (their title and URL stay; R2
+ * and every archive keep the text) while the index holds over INDEXED_TEXT_BUDGET_BYTES of text or the database passes
+ * STORAGE_HIGH_MIB, and, after the archive's pass, the retention step. Purges, demotions and retention write rows, so
+ * they stop for the day once today's rows written reach MAINTENANCE_ROW_LIMIT, leaving the rest of the daily budget to
+ * uploads, and go on the next day.
  */
+import { archiveConfirmations } from './backup.ts';
 import { deleteBlobs } from './blobs.ts';
 import { deleteIndexRow, writeIndexRow } from './fts.ts';
-import { ALARM_HOUR_UTC, DAY, DEMOTE_BATCH, HOUR, INDEXED_TEXT_BUDGET_BYTES, MAINTENANCE_ROW_LIMIT, MIB, PURGE_BATCH, STORAGE_HIGH_MIB } from './limits.ts';
+import {
+  ALARM_HOUR_UTC,
+  DAY,
+  DEMOTE_BATCH,
+  HOUR,
+  INDEXED_TEXT_BUDGET_BYTES,
+  MAINTENANCE_ROW_LIMIT,
+  MIB,
+  PURGE_BATCH,
+  RETENTION_BATCH,
+  RETENTION_SCAN,
+  STORAGE_HIGH_MIB,
+} from './limits.ts';
+import { readRetention } from './settings.ts';
 import { utcDay, type PageRow, type Store } from './store.ts';
 
 /** Deletes a live page and answers its rowid (null when there is none); runs inside the caller's transaction. */
@@ -38,7 +60,15 @@ export function deletePage(store: Store, pageId: string, now: number): number | 
   store.run(`INSERT INTO tombstones (id, seq, seq_ms, page_id) VALUES (?, ?, ?, ?)`, crypto.randomUUID(), seqs.next(), now, page.id);
   seqs.commit();
   store.run(`INSERT INTO purges (page_rowid, page_id, started_ms) VALUES (?, ?, ?)`, page.rowid, page.id, now);
-  store.addCounters({ page_count: -1, visit_count: -page.visit_count, document_count: -page.document_count, indexed_text_bytes: -page.text_indexed });
+  // Its texts that only the archive holds leave that total too (at most one capture a day: a bounded read).
+  const archived = store.count(`SELECT count(*) AS n FROM documents WHERE page_rowid = ? AND archived_ms IS NOT NULL`, page.rowid);
+  store.addCounters({
+    page_count: -1,
+    visit_count: -page.visit_count,
+    document_count: -page.document_count,
+    indexed_text_bytes: -page.text_indexed,
+    archived_count: -archived,
+  });
   return page.rowid;
 }
 
@@ -47,7 +77,7 @@ export function deletePage(store: Store, pageId: string, now: number): number | 
  * any left, and again those whose delete failed here). Reads only.
  */
 export async function deletePageBlobs(store: Store, bucket: R2Bucket, pageRowid: number): Promise<void> {
-  const documents = store.all<{ blob_path: string }>(`SELECT blob_path FROM documents WHERE page_rowid = ? LIMIT ?`, pageRowid, PURGE_BATCH);
+  const documents = store.all<{ blob_path: string }>(`SELECT blob_path FROM documents WHERE page_rowid = ? AND archived_ms IS NULL LIMIT ?`, pageRowid, PURGE_BATCH);
   if (documents.length === 0) return;
   try {
     await deleteBlobs(bucket, documents.map((row) => row.blob_path));
@@ -63,21 +93,23 @@ export function maintenanceAllowed(store: Store, now: number): boolean {
 
 /**
  * One purge step: at most PURGE_BATCH rows of the oldest deleted page, its documents first (their R2 objects deleted
- * before their rows, so a failure leaves rows to try again), then its visits, then its purges row once nothing is
- * left. Answers whether purges remain. The caller checks maintenanceAllowed first.
+ * before their rows, so a failure leaves rows to try again; a text retention moved to the archive alone has none),
+ * then its visits, then its purges row once nothing is left. Answers whether purges remain. The caller checks
+ * maintenanceAllowed first.
  */
 export async function purgeStep(store: Store, bucket: R2Bucket, transact: <T>(fn: () => T) => T): Promise<boolean> {
   const purge = store.one<{ page_rowid: number }>(`SELECT page_rowid FROM purges ORDER BY started_ms, page_rowid LIMIT 1`);
   if (purge === undefined) return false;
-  const documents = store.all<{ id: string; blob_path: string; stored_bytes: number }>(
-    `SELECT id, blob_path, stored_bytes FROM documents WHERE page_rowid = ? LIMIT ?`,
+  const documents = store.all<{ id: string; blob_path: string; stored_bytes: number; archived_ms: number | null }>(
+    `SELECT id, blob_path, stored_bytes, archived_ms FROM documents WHERE page_rowid = ? LIMIT ?`,
     purge.page_rowid,
     PURGE_BATCH,
   );
-  if (documents.length > 0) await deleteBlobs(bucket, documents.map((row) => row.blob_path));
+  const inR2 = documents.filter((row) => row.archived_ms === null);
+  if (inR2.length > 0) await deleteBlobs(bucket, inR2.map((row) => row.blob_path));
   transact(() => {
     for (const row of documents) store.run(`DELETE FROM documents WHERE id = ?`, row.id);
-    store.addCounter('blob_bytes', -documents.reduce((sum, row) => sum + row.stored_bytes, 0));
+    store.addCounter('blob_bytes', -inR2.reduce((sum, row) => sum + row.stored_bytes, 0));
     const room = PURGE_BATCH - documents.length;
     if (room > 0) store.run(`DELETE FROM visits WHERE rowid IN (SELECT rowid FROM visits WHERE page_rowid = ? LIMIT ?)`, purge.page_rowid, room);
     const left =
@@ -118,6 +150,75 @@ export function demoteStep(store: Store, now: number): boolean {
     store.setMeta('oldest_indexed_text_ms', String(oldest ?? now));
   }
   return pages.length > 0 && indexOverBudget(store);
+}
+
+/** A text retention may move out of Cloudflare, with what its step needs. */
+interface Expired extends Record<string, SqlStorageValue> {
+  id: string;
+  blob_path: string;
+  stored_bytes: number;
+  page_rowid: number;
+}
+
+/**
+ * The texts captured before `cutoff` that retention may move out of Cloudflare, oldest first, at most `limit`, among
+ * the RETENTION_SCAN oldest texts R2 still holds: each of a live page, its blob written to the connection's target
+ * with Dropbox's content hash, the day file of its commit written since its last change, and its seq within
+ * state.json's. Reads only.
+ */
+export function expiredTexts(store: Store, cutoff: number, archive: { readonly target: string; readonly syncedSeq: number }, limit: number): Expired[] {
+  return store.all<Expired>(
+    `SELECT d.id AS id, d.blob_path AS blob_path, d.stored_bytes AS stored_bytes, d.page_rowid AS page_rowid
+     FROM (SELECT id, seq, seq_ms, page_rowid, blob_path, stored_bytes, capture_ms FROM documents
+           WHERE archived_ms IS NULL AND capture_ms < ? ORDER BY capture_ms LIMIT ?) d
+     JOIN pages p ON p.rowid = d.page_rowid
+     JOIN archive_blobs b ON b.path = d.blob_path AND b.target = ? AND b.content_hash <> ''
+     JOIN archive_days a ON a.day = strftime('%Y-%m-%d', d.seq_ms / 1000, 'unixepoch') AND a.dirty = 0 AND a.content_hash IS NOT NULL
+     WHERE d.seq <= ?
+     ORDER BY d.capture_ms LIMIT ?`,
+    cutoff,
+    RETENTION_SCAN,
+    archive.target,
+    archive.syncedSeq,
+    limit,
+  );
+}
+
+/**
+ * One retention step at `now`: up to RETENTION_BATCH texts past the window that the archive confirmed (expiredTexts)
+ * leave Cloudflare: their R2 objects in one call, then one transaction marks each document archived (its seq and blob
+ * path stay: the feed and the archive render the same change, and no tombstone is written), reduces its page's index
+ * row to title and URL when it was the page's latest text (and forgets that text's digest, so the same text read again
+ * is kept again), and moves the running totals. Nothing while the window is off, or the backup is not connected or
+ * failing. Answers whether a full batch went (more may wait). The caller checks maintenanceAllowed first.
+ */
+export async function retentionStep(store: Store, bucket: R2Bucket, transact: <T>(fn: () => T) => T, now: number): Promise<boolean> {
+  const days = readRetention(store);
+  if (days === null) return false;
+  const archive = archiveConfirmations(store);
+  if (archive === null) return false;
+  const texts = expiredTexts(store, now - days * DAY, archive, RETENTION_BATCH);
+  if (texts.length === 0) return false;
+  // R2 first: a failure leaves every row as it was, to try again; an object deleted before a crash is gone already.
+  await deleteBlobs(bucket, texts.map((row) => row.blob_path));
+  transact(() => {
+    let indexed = 0;
+    for (const row of texts) {
+      store.run(`UPDATE documents SET archived_ms = ? WHERE id = ?`, now, row.id);
+      const page = store.one<{ title: string; url: string; latest_document: string | null; text_indexed: number }>(
+        `SELECT title, url, latest_document, text_indexed FROM pages WHERE rowid = ?`,
+        row.page_rowid,
+      );
+      if (page === undefined || page.latest_document !== row.id) continue;
+      if (page.text_indexed > 0) {
+        writeIndexRow(store, row.page_rowid, page.title, page.url, '', true);
+        indexed += page.text_indexed;
+        store.run(`UPDATE pages SET text_indexed = 0, latest_text_sha256 = NULL WHERE rowid = ?`, row.page_rowid);
+      } else store.run(`UPDATE pages SET latest_text_sha256 = NULL WHERE rowid = ?`, row.page_rowid);
+    }
+    store.addCounters({ archived_count: texts.length, blob_bytes: -texts.reduce((sum, row) => sum + row.stored_bytes, 0), indexed_text_bytes: -indexed });
+  });
+  return texts.length === RETENTION_BATCH;
 }
 
 /** The next daily run: ALARM_HOUR_UTC today when it is still ahead, else tomorrow. */

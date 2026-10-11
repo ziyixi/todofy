@@ -3,16 +3,18 @@
  * §8.7, §9), built from bounded reads: the running counters in meta (never a count of a large table), the devices,
  * the Dropbox backup and at most CONSUMERS_MAX feed consumers (the oldest change each has not taken, one indexed read
  * per table; the changes behind counted up to BEHIND_COUNT_MAX: for the backup while connected, for a consumer that
- * pulled within STALE_MS), the machine tokens (meta rows, never a token) and a week of usage rows. The UI reads it on
+ * pulled within STALE_MS), the machine tokens (meta rows, never a token), the retention window (a meta row, a counter
+ * and whether the backup lets it run) and a week of usage rows. The UI reads it on
  * every navigation, so an archive far behind or a consumer long gone costs a few reads, never a count of the feed.
  * Codes, counts, labels and times only. The same facts feed ops-v1 (ops-status.ts).
  */
 import { create } from '@ziyixi/proto/protobuf';
 import { ArchiveConsumerSchema, DeviceStatusSchema, RejectedItemsSchema, ServiceStatusSchema, type ArchiveConsumer, type DeviceStatus, type RejectedItems, type ServiceStatus } from '@ziyixi/proto/recall/ui/v1/status_pb';
-import { backupMessage } from './backup.ts';
+import { backupMessage, retentionPause } from './backup.ts';
 import { behindCount, oldestUnsynced } from './feed.ts';
 import { DAILY_READ_BUDGET, DAILY_ROW_BUDGET, DAY, MIB, REJECTED_WINDOW_DAYS, STALE_MS, STORAGE_BUDGET_MIB } from './limits.ts';
 import { time } from './model.ts';
+import { readRetention } from './settings.ts';
 import { utcDay, type ConsumerRow, type DeviceRow, type Store } from './store.ts';
 import { TOKEN_ROUTES, tokenMessage, type TokenRoute } from './tokens.ts';
 
@@ -74,6 +76,7 @@ export function serviceStatus(store: Store, now: number, build: string, secrets:
   const oldestIndexed = store.getMeta('oldest_indexed_text_ms');
   const today = store.usage(utcDay(now));
   const rejected: RejectedItems[] = rejectedItems(store, now).map((item) => create(RejectedItemsSchema, { reason: item.reason, count: item.count, lastTime: time(item.lastMs) }));
+  const retention = readRetention(store);
   return create(ServiceStatusSchema, {
     name: 'serviceStatus',
     devices: devices(store).map((row) => deviceMessage(row, now)),
@@ -96,5 +99,8 @@ export function serviceStatus(store: Store, now: number, build: string, secrets:
     rejectedItems: rejected,
     dropboxBackup: backupMessage(store),
     machineTokens: TOKEN_ROUTES.map((route) => tokenMessage(store, route, now, secrets[route])),
+    textRetentionDays: retention ?? 0,
+    archivedTextCount: store.counter('archived_count'),
+    textRetentionPausedReason: retention === null ? '' : retentionPause(store),
   });
 }

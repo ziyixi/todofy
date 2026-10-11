@@ -15,8 +15,9 @@
  * Uploads, alarm runs and the Dropbox connection's changes go one at a time (they await R2 or Dropbox between their
  * reads and their transactions). The alarm runs once a day (ALARM_HOUR_UTC), a minute later again while work is left
  * (retention.ts, backup.ts), and about an hour after a change while Dropbox is connected (ARCHIVE_INTERVAL_MS: the
- * archive's pass); every call arms one when none is set. Every call but ops-v1's status and the token digests ends by
- * charging the rows it read and wrote to the day's usage (Store.chargeRows), which the daily budgets read.
+ * archive's pass, then the retention window's step); every call arms one when none is set. Every call but ops-v1's
+ * status and the token digests ends by charging the rows it read and wrote to the day's usage (Store.chargeRows),
+ * which the daily budgets read.
  *
  * Tests and local development: with DEV_MANUAL_ALARMS=true the object never arms an alarm and reads a clock the tests
  * set (`setClock`); `step(now)` runs one alarm pass at that clock. `sqlForTests`, `takeRowMeter` and `failNextCommit`
@@ -40,7 +41,7 @@ import { ingestBatch } from './ingest.ts';
 import { ALARM_BACKLOG_MS, ARCHIVE_INTERVAL_MS, MAX_BODY_BYTES, WAKE_MS } from './limits.ts';
 import { recallStatus } from './ops-status.ts';
 import { API_DOMAIN, localize, REASONS } from './reasons.ts';
-import { demoteStep, indexOverBudget, maintenanceAllowed, nextDailyRun, purgeStep } from './retention.ts';
+import { demoteStep, indexOverBudget, maintenanceAllowed, nextDailyRun, purgeStep, retentionStep } from './retention.ts';
 import { SearchCache } from './search.ts';
 import { Store, utcDay, type RowMeter } from './store.ts';
 import { heldDigests, pruneTokens, secretDigests, type RouteDigests, type TokenRoute } from './tokens.ts';
@@ -66,6 +67,8 @@ export interface StepResult {
   readonly next: number;
   readonly purging: boolean;
   readonly demoting: boolean;
+  /** The retention step moved a full batch of texts out of Cloudflare: more may wait. */
+  readonly retaining: boolean;
   /** Purges or demotions are left, but today's maintenance allowance is spent: the next daily run goes on. */
   readonly deferred: boolean;
   /** The archive's pass: not connected or nothing to write, all written, work left, or waiting after a failure. */
@@ -166,8 +169,9 @@ export class RecallState extends DurableObject<Env> {
 
   /**
    * One alarm pass at `now`: a purge step, the small tables' cleanup, an index budget step, the archive's pass to
-   * Dropbox; then the next alarm: a minute while work is left, the archive's retry time, an hour while changes wait for
-   * the archive, else the daily run.
+   * Dropbox, then a retention step (texts past the window the archive confirmed leave Cloudflare); then the next alarm:
+   * a minute while work is left, the archive's retry time, an hour while changes wait for the archive, else the daily
+   * run.
    */
   step(now: number): Promise<StepResult> {
     return this.serially(async () => {
@@ -187,20 +191,25 @@ export class RecallState extends DurableObject<Env> {
         const deferred = !allowed && (this.store.one(`SELECT 1 AS x FROM purges LIMIT 1`) !== undefined || indexOverBudget(this.store));
         const archive = await archivePass(this.backup(now));
         this.charge();
-        let next = purging || demoting ? now + ALARM_BACKLOG_MS : nextDailyRun(now);
+        // After the pass, so that what it just confirmed counts; within the same maintenance allowance.
+        const retaining = allowed && (await retentionStep(this.store, this.env.STORE, this.transact, now));
+        this.charge();
+        let next = purging || demoting || retaining ? now + ALARM_BACKLOG_MS : nextDailyRun(now);
         if (archive.state === 'more') next = Math.min(next, now + ALARM_BACKLOG_MS);
         else if (archive.state === 'retry') next = Math.min(next, archive.at);
         // A change committed while the pass ran (a deletion's tombstone) waits for the next hourly pass at most.
         else if (connected(this.store) && this.store.headSeq() > scannedSeq(this.store)) next = Math.min(next, now + ARCHIVE_INTERVAL_MS);
-        result = { next, purging, demoting, deferred, archive: archive.state, code: 'ok' };
+        result = { next, purging, demoting, retaining, deferred, archive: archive.state, code: 'ok' };
       } catch {
         this.transact(() => {
           this.store.pushError('alarm_failed');
         });
-        result = { next: now + ALARM_BACKLOG_MS, purging: false, demoting: false, deferred: false, archive: 'idle', code: 'alarm_failed' };
+        result = { next: now + ALARM_BACKLOG_MS, purging: false, demoting: false, retaining: false, deferred: false, archive: 'idle', code: 'alarm_failed' };
       }
       // Counts and codes only.
-      console.log(JSON.stringify({ event: 'alarm', purging: result.purging, demoting: result.demoting, deferred: result.deferred, archive: result.archive, code: result.code }));
+      console.log(
+        JSON.stringify({ event: 'alarm', purging: result.purging, demoting: result.demoting, retaining: result.retaining, deferred: result.deferred, archive: result.archive, code: result.code }),
+      );
       if (!this.manual()) await this.ctx.storage.setAlarm(Math.max(result.next, Date.now() + WAKE_MS));
       return result;
     });
@@ -257,14 +266,16 @@ export class RecallState extends DurableObject<Env> {
   }
 
   /**
-   * Why R2 has no object at a blob path: `deleted` when no live document holds it (its page was deleted: 410), else
-   * `missing` (a wrong binding or a lost object: 500, logged and kept among the recent error codes).
+   * Why R2 has no object at a blob path: `deleted` when no live document holds it in R2 (its page was deleted, or the
+   * retention window moved its text to the Dropbox archive alone: 410), else `missing` (a wrong binding or a lost
+   * object: 500, logged and kept among the recent error codes).
    */
   blobState(path: string): 'deleted' | 'missing' {
     const id = documentIdOfPath(path);
     const live =
       id !== null &&
-      this.store.one(`SELECT 1 AS x FROM documents d JOIN pages p ON p.rowid = d.page_rowid WHERE d.id = ? AND d.blob_path = ?`, id, path) !== undefined;
+      this.store.one(`SELECT 1 AS x FROM documents d JOIN pages p ON p.rowid = d.page_rowid WHERE d.id = ? AND d.blob_path = ? AND d.archived_ms IS NULL`, id, path) !==
+        undefined;
     if (!live) {
       this.charge();
       return 'deleted';

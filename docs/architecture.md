@@ -160,7 +160,8 @@ accepted report nor a ready deployment receipt proves successful Newsletter deli
   deployment variable `MODE` and the breaker can only lower the mode. The Gmail grant is put by the owner and never
   passes through GitHub. See [AGENTS](../mailsort/AGENTS.md) and [design](../mailsort/docs/design.md).
 - **recall:** one SQLite DO (records, the bigram FTS5 index, the compacted change feed) and one private R2 bucket (the
-  texts), no D1 and no cron. A Chrome extension (never in incognito) records visits with their focus time and a page's
+  texts of a rolling retention window, a year by default; a text leaves only after the Dropbox archive confirmed it), no
+  D1 and no cron. A Chrome extension (never in incognito) records visits with their focus time and a page's
   text after ten seconds; both it and the Worker scrub secrets and apply the denylist with the same `recall/shared/`
   code, and sensitive sites are kept by their site alone. Logs never hold a URL, title or text. The machine tokens are
   made in its 设置 and kept as digests. Its alarm writes the archive (`contracts/recall-archive-v1`) into the owner's

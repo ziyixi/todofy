@@ -11,8 +11,10 @@
  * Along the way: the owner's two lists set through the owner API reach the extension in the upload's answer, and the
  * no-text one holds on the server for a text the extension sent before it knew it; hosts with an underscore or a
  * trailing dot are recorded (the archive's Site format carries them); each machine token opens its own route only; the
- * owner API answers the calls the UI makes (status, timeline, search with a snippet, page and text); and a page deleted
- * in the owner API adds its tombstone line to the archive while Dropbox keeps every file (the archive only grows).
+ * owner API answers the calls the UI makes (status, timeline, search with a snippet, page and text); a text read 400
+ * days ago, past the retention window, leaves Cloudflare right after the pass that wrote it to Dropbox (the blob route's
+ * 410, the page detail's archive path, the search by title only, the feed unchanged); and a page deleted in the owner
+ * API adds its tombstone line to the archive while Dropbox keeps every file (the archive only grows).
  *
  * Run from worker/ after the UI's build (the dev server serves web/dist) and `npm ci` in ../extension:
  *
@@ -27,13 +29,14 @@ import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
-import { gunzipSync } from 'node:zlib';
+import { gunzipSync, gzipSync } from 'node:zlib';
 import { createHttpClient, type HttpCall } from '@ziyixi/proto/http-client';
 import { timestampFromMs } from '@ziyixi/proto/protobuf/wkt';
 import { ArchiveStateSchema, ChangePageSchema, ChangeSchema } from '@ziyixi/proto/recall/archive/v1/archive_pb';
 import type { IngestBatch } from '@ziyixi/proto/recall/ingest/v1/ingest_wire';
 import { RecallUiService } from '@ziyixi/proto/recall/ui/v1/recall_ui_service_pb';
 import { fromWire } from '@ziyixi/proto/wire-json';
+import { normalizeUrl, pageIdOf } from '../../../shared/url.ts';
 import { FakeDropbox } from '../runtime/fake-dropbox.ts';
 
 const WORKER = decodeURIComponent(new URL('../../', import.meta.url).pathname);
@@ -42,6 +45,11 @@ const DEVICE_LABEL = 'MacBook · 冒烟';
 const DENIED_SITE = 'notes.example.net';
 const SITE_ONLY = 'bank.example.net';
 const MINUTE = 60_000;
+const DAY = 24 * 60 * MINUTE;
+/** A page read 400 days ago (an old device's late upload), past the default retention window of 365 days. */
+const OLD_URL = 'https://archive.example.org/2025/notes';
+const OLD_TITLE = '旧笔记 Retention';
+const OLD_TEXT = '一年多以前读过的合成正文 quokka-retention。';
 /** The endpoints recall may call at Dropbox; anything else (a delete, a move) must never be called. */
 const DROPBOX_ALLOWED = new Set(['/oauth2/authorize', '/oauth2/token', '/2/users/get_current_account', '/2/auth/token/revoke', '/2/files/upload', '/2/files/download']);
 
@@ -152,7 +160,7 @@ async function main(): Promise<void> {
     const secrets = await run(origin, dropbox);
     // Logs hold IDs, counts and codes only (design §2): never a URL, host, title, text or token.
     const logged = output.replace(/--var \S+/g, '');
-    for (const secret of ['news.example.org', DENIED_SITE, 'my_team.example.com', 'guides.example.com', '中文分词', 'Durable Object storage', 'Private plan', 'synthetic-refresh', 'sl.synthetic', ...secrets]) {
+    for (const secret of ['news.example.org', DENIED_SITE, 'my_team.example.com', 'guides.example.com', 'archive.example.org', '中文分词', 'Durable Object storage', 'Private plan', 'quokka', '旧笔记', 'synthetic-refresh', 'sl.synthetic', ...secrets]) {
       if (logged.includes(secret)) throw new Error('smoke: the dev server logged a URL, title, text or token');
     }
     check(true, 'the dev server log holds no URL, title, text or token');
@@ -271,6 +279,34 @@ async function run(origin: string, dropbox: FakeDropbox): Promise<string[]> {
   const latest = await api.getDocument({ name: page.latestDocument });
   check(latest.text === text.text, "GetDocument (the page detail) gives the article's text");
 
+  // An old device's late upload: a page read 400 days ago with its text (nothing is refused for its age), past the
+  // retention window (365 days until the owner changes it). It waits for Dropbox: nothing leaves Cloudflare before.
+  const old = normalizeUrl(OLD_URL);
+  if (old === null) throw new Error('smoke: the old URL does not normalize');
+  const oldPage = await pageIdOf(old.url);
+  const sentMs = Date.now();
+  const readMs = sentMs - 400 * DAY;
+  const oldVisit = crypto.randomUUID();
+  const oldDocument = crypto.randomUUID();
+  const oldBatch = {
+    version: 'recall-ingest-v1',
+    batch_id: crypto.randomUUID(),
+    sent_time: new Date(sentMs).toISOString(),
+    device: { ...batch.device, queued_count: 0 },
+    items: [
+      { kind: 'visit', visit: { id: oldVisit, revision: 1, page_id: oldPage, url: old.url, title: OLD_TITLE, focus_spans: [{ start_time: new Date(readMs).toISOString(), end_time: new Date(readMs + MINUTE).toISOString() }] } },
+      { kind: 'document', document: { id: oldDocument, visit_id: oldVisit, page_id: oldPage, url: old.url, title: OLD_TITLE, description: '', capture_time: new Date(readMs + 15_000).toISOString(), text: OLD_TEXT } },
+    ],
+  };
+  const oldUpload = await machine('batches', INGEST_TOKEN, { method: 'POST', headers: { 'content-type': 'application/gzip' }, body: gzipSync(JSON.stringify(oldBatch)) });
+  check(oldUpload.status === 200 && (await oldUpload.json<{ accepted_count: number }>()).accepted_count === 2, 'a late upload of a page read 400 days ago is accepted');
+  const beforeArchive = await feed();
+  const oldBlob = beforeArchive.changes.find((change) => change.id === `documents/${oldDocument}`)?.blobs[0];
+  if (oldBlob === undefined) throw new Error('smoke: the old text is not in the feed');
+  const paused = await api.getServiceStatus({ name: 'serviceStatus' });
+  check(paused.textRetentionDays === 365 && paused.textRetentionPausedReason === 'dropbox_not_connected' && paused.archivedTextCount === 0, 'before Dropbox is connected, retention waits and says why');
+  check((await machine(`blobs/${oldBlob.path}`, EXPORT_TOKEN)).status === 200, 'the old text is still in Cloudflare');
+
   // 设置 → 备份到 Dropbox: the App key, 连接, Dropbox's page (the fake approves at once), back to the callback.
   const { authorizeUrl } = await api.connectDropboxBackup({ name: 'dropboxBackup', appKey: dropbox.appKey, requestId: crypto.randomUUID() });
   const approved = await fetch(authorizeUrl, { redirect: 'manual' });
@@ -287,11 +323,33 @@ async function run(origin: string, dropbox: FakeDropbox): Promise<string[]> {
       await new Promise((resolve) => setTimeout(resolve, 250));
     }
   };
-  await caughtUp(first.head_seq);
+  await caughtUp(beforeArchive.head_seq);
   check(true, "the alarm's first pass wrote the archive to Dropbox");
-  checkArchive(dropbox, first, null);
+  checkArchive(dropbox, beforeArchive, null);
   const synced = (await api.getServiceStatus({ name: 'serviceStatus' })).dropboxBackup;
-  check(synced?.connected === true && synced.syncedSeq === first.head_seq && synced.pendingCount === 0, 'GetServiceStatus shows Dropbox connected and caught up');
+  check(synced?.connected === true && synced.syncedSeq === beforeArchive.head_seq && synced.pendingCount === 0, 'GetServiceStatus shows Dropbox connected and caught up');
+
+  // The retention step right after that pass: the old text, now confirmed in Dropbox, leaves Cloudflare. Not a deletion.
+  const started = Date.now();
+  for (;;) {
+    const answer = await machine(`blobs/${oldBlob.path}`, EXPORT_TOKEN);
+    await answer.arrayBuffer();
+    if (answer.status === 410) break;
+    if (Date.now() - started > 30_000) throw new Error('smoke: the old text did not leave Cloudflare within 30 s of the pass');
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  check(true, 'after the pass that wrote it to Dropbox, the text past the window left Cloudflare: the blob route answers 410');
+  const archivedBytes = dropbox.files.get(`/blobs/${oldBlob.path}`);
+  check(archivedBytes !== undefined && sha256(archivedBytes) === oldBlob.sha256 && new TextDecoder().decode(gunzipSync(archivedBytes)) === OLD_TEXT, 'Dropbox holds the old text, byte for byte');
+  const archivedDetail = await api.getDocument({ name: `pages/${oldPage}/documents/${oldDocument}` });
+  check(archivedDetail.textArchived && archivedDetail.text === '' && archivedDetail.archivePath === `blobs/${oldBlob.path}`, 'GetDocument says the text is in the Dropbox archive, and where');
+  check((await api.getPage({ name: `pages/${oldPage}` })).visitCount === 1, 'the page and its visit stay');
+  const byTitle = await api.searchPages({ query: '旧笔记' });
+  check((await api.searchPages({ query: 'quokka-retention' })).results.length === 0 && byTitle.results.some((result) => result.page === `pages/${oldPage}`), 'the old text is no longer searched; its page is found by its title');
+  deepStrictEqual(await feed(), beforeArchive);
+  check(true, 'retention changed nothing in the feed: no tombstone, no new seq');
+  const retained = await api.getServiceStatus({ name: 'serviceStatus' });
+  check(retained.archivedTextCount === 1 && retained.documentCount === 2 && retained.textRetentionPausedReason === '', 'GetServiceStatus counts one text in Cloudflare and one only in Dropbox');
 
   // The owner deletes the article's page: its records leave the feed, a tombstone takes their place, and the next pass
   // adds the tombstone line; Dropbox keeps every file it had (the archive only grows).

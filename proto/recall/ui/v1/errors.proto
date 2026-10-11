@@ -35,4 +35,6 @@ enum ErrorReason {
   ERROR_REASON_SEARCH_OVER_BUDGET = 5;
   // INVALID_ARGUMENT (400): the Dropbox App key breaks its rule (ConnectDropboxBackupRequest.app_key).
   ERROR_REASON_INVALID_APP_KEY = 6;
+  // INVALID_ARGUMENT (400): the retention window is outside 30-3650 days (Settings.text_retention_days).
+  ERROR_REASON_INVALID_RETENTION = 7;
 }

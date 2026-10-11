@@ -248,6 +248,7 @@ function documentRow(plan: DocumentPlan, seq: number, now: number, pageRowid: nu
     text_bytes: plan.stored.textBytes,
     text_sha256: plan.stored.textSha256,
     truncated: plan.truncated ? 1 : 0,
+    archived_ms: null,
   };
 }
 

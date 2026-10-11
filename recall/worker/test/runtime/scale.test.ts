@@ -3,12 +3,23 @@
 // 5 million (shared by every app), so each search path, a search's next page, the status and ops-v1 are held to a
 // bound here, whatever the store's size: a common word with and without a range, a rare word, Chinese, 最近读过, a
 // site, a minimum of focus that no page reaches (the scan's bound, reported), an old week's read pages, a long range;
-// and the archive's passes to Dropbox when it is connected to the whole store at once (the scan, then the days).
+// the archive's passes to Dropbox when it is connected to the whole store at once (the scan, then the days); and the
+// retention window's step over two years of texts the archive confirmed.
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { MessageInitShape } from '@ziyixi/proto/protobuf';
 import { timestampFromMs } from '@ziyixi/proto/protobuf/wkt';
 import { PageType, SortOrder, type SearchPagesRequestSchema } from '@ziyixi/proto/recall/ui/v1/recall_ui_service_pb';
-import { ARCHIVE_RENDER_MAX, ARCHIVE_SCAN_ROWS, BEHIND_COUNT_MAX, MINUTE, SEARCH_MAX_MATCHES, SEARCH_MAX_VISITS, SEARCH_SCAN_PAGES } from '../../src/limits.ts';
+import {
+  ARCHIVE_RENDER_MAX,
+  ARCHIVE_SCAN_ROWS,
+  BEHIND_COUNT_MAX,
+  MINUTE,
+  RETENTION_BATCH,
+  RETENTION_SCAN,
+  SEARCH_MAX_MATCHES,
+  SEARCH_MAX_VISITS,
+  SEARCH_SCAN_PAGES,
+} from '../../src/limits.ts';
 import { FakeDropbox } from './fake-dropbox.ts';
 import { DAY, HOUR, op, startHarness, type Harness } from './harness.ts';
 
@@ -125,5 +136,40 @@ describe('rows read on a synthetic two-year store', () => {
     expect(Math.max(...reads)).toBeLessThan(3 * ARCHIVE_SCAN_ROWS + 2 * ARCHIVE_RENDER_MAX + 2000);
     const days = dropbox.callsTo('/2/files/upload').filter((call) => call.path?.startsWith('/changes/'));
     expect(days[0]?.path).toBe('/changes/2026/10/10.jsonl');
+  }, 120_000);
+
+  it('moves texts past the retention window out of Cloudflare with a bounded read, however many the store holds', async () => {
+    // A text for every third page over the two years, each confirmed by the archive (its blob and day file written,
+    // state.json past it), and nothing left for the archive's pass to write.
+    const target = (await h.sql<{ value: string }>(`SELECT value FROM meta WHERE key = 'archive_target'`))[0]?.value ?? '';
+    const texts = Math.floor(PAGES / 3);
+    const every = Math.floor((730 * DAY) / texts);
+    await h.sql(
+      `WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < ${String(texts)})
+       INSERT INTO documents (id, seq, seq_ms, page_rowid, visit, device_id, device_label, capture_ms, url, title, description, blob_path, sha256, stored_bytes, text_bytes, text_sha256)
+       SELECT printf('cccccccc-0000-4000-8000-%012x', i), ${String(VISITS)} + i, ? + i * ? + 60000, 3 * i, 'v', 'd', 'x', ? + i * ?, 'https://example.com/', 't', '',
+              printf('2025/01/cccccccc-0000-4000-8000-%012x.txt.gz', i), 'a', 1000, 3000, 'unused' FROM n`,
+      START,
+      every,
+      START,
+      every,
+    );
+    await h.sql(`INSERT INTO archive_blobs (path, target, content_hash) SELECT blob_path, ?, 'b' FROM documents`, target);
+    await h.sql(
+      `INSERT INTO archive_days (day, min_seq, max_seq, dirty, content_hash) SELECT strftime('%Y-%m-%d', seq_ms / 1000, 'unixepoch'), min(seq), max(seq), 0, 'c' FROM documents GROUP BY 1
+       ON CONFLICT (day) DO UPDATE SET dirty = 0, content_hash = 'c'`,
+    );
+    await h.sql(`UPDATE archive_days SET dirty = 0, content_hash = coalesce(content_hash, 'c')`);
+    for (const key of ['seq', 'archive_scan_seq', 'archive_seq']) {
+      await h.sql(`INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value`, key, String(VISITS + texts));
+    }
+    await h.rows();
+    const result = await h.step(NOW + 2 * HOUR);
+    const rows = await h.rows();
+    expect(result).toMatchObject({ code: 'ok', archive: 'done', retaining: true });
+    expect(rows.read).toBeLessThan(3 * RETENTION_SCAN + 1000);
+    expect(await h.sql(`SELECT count(*) AS n FROM documents WHERE archived_ms IS NOT NULL`)).toEqual([{ n: RETENTION_BATCH }]);
+    // The oldest went first: all of them captured in the first months of the two years.
+    expect(await h.sql(`SELECT max(capture_ms) < ? AS early FROM documents WHERE archived_ms IS NOT NULL`, START + 30 * DAY)).toEqual([{ early: 1 }]);
   }, 120_000);
 });

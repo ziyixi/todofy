@@ -13,7 +13,9 @@
  * items in the last 24 hours; an `unsupported_item` is not lost), `storage_high` (warning past STORAGE_HIGH_MIB,
  * critical at the budget), `upload_over_budget` (warning: today's write budget ran out), `reads_over_budget` (warning:
  * today's reads stopped the change feed, or the searches too) and `no_device` (information, before the first upload);
- * `status_unavailable` (critical) when the snapshot cannot be read.
+ * `status_unavailable` (critical) when the snapshot cannot be read. A paused retention window raises nothing of its
+ * own: it pauses only while the backup is not connected or failing, which `archive_not_connected` and `archive_behind`
+ * already report.
  */
 import { create } from '@ziyixi/proto/protobuf';
 import { file_ops_v1_ops, GuardLevel, Health, OpsStatusSchema, Severity, SignalSchema, type Signal } from '@ziyixi/proto/ops/v1/ops_pb';

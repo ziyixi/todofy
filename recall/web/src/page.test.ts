@@ -104,6 +104,20 @@ describe('正文', () => {
     expect(scrolled).toEqual(['alarm'])
   })
 
+  it('says the text is archived in Dropbox, and where, instead of the text', async () => {
+    const fake = new FakeServer()
+    const old = page('old', { documentCount: 2 })
+    fake.addText(old, textOf('old', '', { textArchived: true, archivePath: 'blobs/2025/09/00000000-0000-4000-8000-0000000000aa.txt.gz', captureTime: timestampFromMs(at('2025-09-01 10:00')) }))
+    fake.pages = [old]
+    const root = await open(fake, `/pages/${pageId('old')}?q=alarm`)
+    const text = [...root.querySelectorAll<HTMLElement>('.card')].find((node) => node.querySelector('h2')?.textContent === '正文')
+    expect(text?.querySelector('.card-head .meta')?.textContent).toBe('2025年9月1日保存 · 共 2 次')
+    expect(text?.querySelector('.archived-title')?.textContent).toBe('正文已归档到 Dropbox')
+    expect(text?.querySelector('.archive-path')?.textContent).toBe('Dropbox 应用文件夹里的 blobs/2025/09/00000000-0000-4000-8000-0000000000aa.txt.gz')
+    expect(text?.querySelector('.hint')?.textContent).toBe('超过云端保留的天数，正文已从云端移除，只留在 Dropbox 归档里（gzip 压缩的纯文本）；页面和访问记录仍在这里，标题和网址仍能搜到。')
+    expect([text?.querySelector('.reader'), root.querySelector('.find')]).toEqual([null, null])
+  })
+
   it('without a capture, says why there is no text', async () => {
     const fake = new FakeServer()
     fake.pages = [page('short')]

@@ -4,7 +4,8 @@
  * recall; the extension's token (生成, shown once with 复制, 重新生成 with its grace, revoked at once, stopped; the
  * export token folded); the Dropbox backup (the steps and the App key, 连接 to Dropbox, the outcome it came back with,
  * connected with what waits and its failures in words, 断开) and the feed's own consumers; storage (counts, meters, the day's budgets,
- * the index's reach); the owner's two lists (add to either, a pattern moving between them, remove, only the lists with
+ * the index's reach, the retention window: its choice, the texts in the cloud and only in Dropbox, a pause in words, a
+ * shorter window asked first, 永久, the etag it shares with the lists); the owner's two lists (add to either, a pattern moving between them, remove, only the lists with
  * the etag, a stale etag, the server's refusal, the built-in lists) and the build.
  */
 import { create } from '@ziyixi/proto/protobuf'
@@ -270,6 +271,90 @@ describe('存储', () => {
     expect([...storage.querySelectorAll('.kpi-value')].map((node) => node.textContent)).toEqual(['1.2 万', '22.0 万', '123 万'])
     expect(storage.querySelector(':scope > p.hint')?.textContent).toBe('正文搜索覆盖 2025年3月 起')
     expect(root.querySelector('.status-line .problem')?.textContent).toBe('存储接近上限')
+  })
+})
+
+describe('正文在云端保留', () => {
+  const retention = (root: HTMLElement) => card(root, '存储').querySelector<HTMLSelectElement>('[id="retention"]') ?? (() => { throw new Error('no choice') })()
+  const choose = async (root: HTMLElement, value: string) => {
+    const select = retention(root)
+    select.focus()
+    select.value = value
+    select.dispatchEvent(new Event('change', { bubbles: true }))
+    await settled()
+  }
+
+  it('shows the window, the texts in the cloud and only in Dropbox, and why nothing leaves the cloud now', async () => {
+    const fake = new FakeServer()
+    fake.status = { documentCount: 345, archivedTextCount: 45, textRetentionPausedReason: 'dropbox_not_connected' }
+    const root = await open(fake, '/settings')
+    const storage = card(root, '存储')
+    expect(storage.querySelector('label[for="retention"]')?.textContent).toBe('正文在云端保留')
+    expect(retention(root).value).toBe('365')
+    expect([...retention(root).options].map((node) => node.textContent)).toEqual(['30 天', '90 天', '180 天', '1 年', '2 年', '3 年', '5 年', '10 年', '永久'])
+    expect(storage.querySelector('.retention + p.hint')?.textContent).toBe(
+      '只保留最近 1 年保存的正文：更早的正文在 Dropbox 确认备份后从云端移除，只留在 Dropbox 归档里。页面和访问记录一直保留，标题和网址仍能搜到。',
+    )
+    expect([...storage.querySelectorAll('.stack .facts span')].map((node) => node.textContent)).toEqual(['云端 300 篇', '只在 Dropbox 45 篇'])
+    const pause = storage.querySelector('.stack p.hint.warn')
+    expect([pause?.textContent, pause?.getAttribute('title')]).toEqual(['Dropbox 备份未连接：暂不从云端移除正文，连接后自动开始', 'dropbox_not_connected'])
+  })
+
+  it('says when a failing backup keeps the texts in the cloud, and shows a window the list does not offer', async () => {
+    const fake = new FakeServer()
+    fake.settings.textRetentionDays = 400
+    fake.status = { textRetentionPausedReason: 'dropbox_failing' }
+    const root = await open(fake, '/settings')
+    expect(retention(root).value).toBe('400')
+    expect(retention(root).options[0]?.textContent).toBe('400 天')
+    expect(card(root, '存储').querySelector('.stack p.hint.warn')?.textContent).toBe('Dropbox 备份最近失败：暂不从云端移除正文，备份恢复后自动继续')
+  })
+
+  it('asks before a shorter window, sends only it with the etag, and the lists save on top of its change', async () => {
+    const fake = new FakeServer()
+    const host = testHost()
+    const root = await open(fake, '/settings', host)
+    await choose(root, '90')
+    expect(host.asked).toEqual(['改成保留 90 天？更早保存的正文在 Dropbox 确认备份后会从云端移除（Dropbox 里仍有），页面和访问记录不变。'])
+    const update = fake.calls.find((call) => call.method === 'PATCH')
+    expect(update?.path).toMatch(/^\/api\/v1\/settings\?update_mask=text_retention_days%2Cetag&request_id=[0-9a-f-]{36}$/)
+    expect(update?.body).toEqual({ text_retention_days: 90, etag: 's1' })
+    expect(fake.settings.textRetentionDays).toBe(90)
+    expect(toastText(root)).toBe('正文在云端保留 90 天')
+    expect(retention(root).value).toBe('90')
+    expect(document.activeElement).toBe(retention(root))
+    // The lists' next change carries the etag the window's change gave.
+    const list = card(root, '网站名单')
+    const field = list.querySelector<HTMLInputElement>('input')
+    if (field === null) throw new Error('no field')
+    type(field, 'wiki.example')
+    buttonNamed(list, '添加').click()
+    await settled()
+    expect(fake.calls.filter((call) => call.method === 'PATCH')[1]?.body).toMatchObject({ etag: 's1+' })
+    expect(fake.settings.siteOnlyPatterns).toEqual(['wiki.example'])
+    // A longer window asks nothing.
+    await choose(root, '730')
+    expect(host.asked).toHaveLength(1)
+    expect(fake.settings.textRetentionDays).toBe(730)
+  })
+
+  it('keeps the window when the owner says no, and keeps every text with 永久 without asking', async () => {
+    const fake = new FakeServer()
+    fake.status = { textRetentionPausedReason: 'dropbox_not_connected' }
+    const host = testHost(false)
+    const root = await open(fake, '/settings', host)
+    await choose(root, '30')
+    expect([host.asked.length, retention(root).value, fake.calls.some((call) => call.method === 'PATCH')]).toEqual([1, '365', false])
+    await choose(root, 'off')
+    expect(host.asked).toHaveLength(1)
+    const update = fake.calls.find((call) => call.method === 'PATCH')
+    expect(update?.path).toContain('update_mask=text_retention_days%2Cetag')
+    // Named in the mask without a value: kept forever.
+    expect(update?.body).toEqual({ etag: 's1' })
+    expect(fake.settings.textRetentionDays).toBeUndefined()
+    expect(toastText(root)).toBe('正文会一直留在云端')
+    const storage = card(root, '存储')
+    expect([retention(root).value, storage.querySelector('.retention + p.hint')?.textContent, storage.querySelector('.stack p.hint.warn')]).toEqual(['off', '所有正文都留在云端。', null])
   })
 })
 

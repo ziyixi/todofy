@@ -1,8 +1,9 @@
 /**
  * RecallState's SQLite storage (../../docs/design.md §5.1): devices, sites, pages, visits, documents (the metadata;
- * the texts are in R2), the full-text index, tombstones, deleted pages waiting for the alarm, feed consumers, the
- * daily usage, the AIP-155 request log and what the archive wrote to Dropbox, in the Durable Object's own database. Synchronous (the Durable Object's
- * SQL API), so the writes of one `transactionSync` are atomic.
+ * the texts are in R2 until the retention window moves them to the Dropbox archive alone), the full-text index,
+ * tombstones, deleted pages waiting for the alarm, feed consumers, the daily usage, the AIP-155 request log and what
+ * the archive wrote to Dropbox, in the Durable Object's own database. Synchronous (the Durable Object's SQL API), so
+ * the writes of one `transactionSync` are atomic.
  *
  * The change feed is the records' own rows: every write of a visit, document or tombstone row takes the next `seq`
  * of meta in its transaction (a revision moves its row to the new seq), so the feed holds no copy of a record and
@@ -16,7 +17,7 @@
  */
 import { ACTIVE_MS, DAY, ERRORS_KEPT, REQUEST_ID_TTL_MS, USAGE_KEPT_DAYS } from './limits.ts';
 
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
 export const SCHEMA_V1: readonly string[] = [
   `CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)`,
@@ -160,6 +161,16 @@ export const SCHEMA_V2: readonly string[] = [
   `CREATE TABLE IF NOT EXISTS archive_blobs (path TEXT PRIMARY KEY, target TEXT NOT NULL, content_hash TEXT NOT NULL)`,
 ];
 
+/**
+ * Version 3: the retention window (retention.ts). `documents.archived_ms`: when the text left Cloudflare (its R2
+ * object and its index entry) after the Dropbox archive confirmed holding it; null while R2 holds it. The row keeps
+ * its seq and blob path, so the feed and the archive render the same change. `documents_retention`: the texts still in
+ * Cloudflare, oldest capture first, the order retention takes them in. The column is added only when it is missing
+ * (migrate): a rollback to version 2's code writes version 2 back, and the next deploy migrates again.
+ */
+export const SCHEMA_V3_COLUMN = `ALTER TABLE documents ADD COLUMN archived_ms INTEGER`;
+export const SCHEMA_V3: readonly string[] = [`CREATE INDEX IF NOT EXISTS documents_retention ON documents (capture_ms) WHERE archived_ms IS NULL`];
+
 export type Value = string | number | null | ArrayBuffer;
 
 export interface RowMeter {
@@ -222,6 +233,8 @@ export interface DocumentRow extends Record<string, SqlStorageValue> {
   text_bytes: number;
   text_sha256: string;
   truncated: number;
+  /** When retention moved the text to the Dropbox archive alone (R2 no longer holds it); null while R2 does. */
+  archived_ms: number | null;
 }
 
 export interface TombstoneRow extends Record<string, SqlStorageValue> {
@@ -278,8 +291,11 @@ export interface UsageRow {
 
 export type UsageCounter = 'batches' | 'items' | 'visits' | 'long_visits' | 'captures' | 'texts';
 
-/** The running totals kept in meta, so the status never counts a large table. */
-export type Counter = 'page_count' | 'visit_count' | 'document_count' | 'blob_bytes' | 'indexed_text_bytes';
+/**
+ * The running totals kept in meta, so the status never counts a large table. `archived_count`: live documents whose
+ * text is only in the Dropbox archive (retention.ts); `blob_bytes` counts the texts R2 still holds.
+ */
+export type Counter = 'page_count' | 'visit_count' | 'document_count' | 'blob_bytes' | 'indexed_text_bytes' | 'archived_count';
 
 /** Changes to the running totals, gathered over a transaction and written once (addCounters). */
 export type CounterDeltas = Partial<Record<Counter, number>>;
@@ -344,6 +360,14 @@ export class Store {
       if (this.getMeta('seq') === null) this.setMeta('seq', '0');
     }
     if (version < 2) for (const statement of SCHEMA_V2) this.sql.exec(statement);
+    if (version < 3) {
+      try {
+        this.sql.exec(SCHEMA_V3_COLUMN);
+      } catch {
+        // The column exists: this store was at version 3 before a rollback wrote version 2 back.
+      }
+      for (const statement of SCHEMA_V3) this.sql.exec(statement);
+    }
     if (version !== SCHEMA_VERSION) this.setMeta('schema_version', String(SCHEMA_VERSION));
     // The migration's rows are no request's: neither the meter nor the budgets count them.
     this.meter = { read: 0, written: 0 };

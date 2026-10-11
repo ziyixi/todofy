@@ -1233,6 +1233,16 @@ h2.page-title {
   color: var(--accent-ink);
 }
 
+/* A text the retention window moved to the Dropbox archive alone: what happened, and where the archive keeps it. */
+.archived-title {
+  font-weight: 600;
+}
+
+.archive-path {
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+
 .visits {
   grid-template-columns: minmax(0, 1fr);
   display: grid;
@@ -1285,6 +1295,20 @@ h2.page-title {
   justify-content: space-between;
   gap: 0 var(--space-2);
   font-size: 14px;
+}
+
+/* 设置 → 存储: how long texts stay in Cloudflare, chosen from a short list. */
+.retention {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-2);
+  font-size: 14px;
+}
+
+.retention select {
+  width: auto;
+  min-width: 9em;
 }
 
 .patterns {

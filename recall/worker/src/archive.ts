@@ -99,7 +99,10 @@ export function anyDirty(store: Store): boolean {
   return store.one(`SELECT 1 AS x FROM archive_days WHERE dirty = 1 LIMIT 1`) !== undefined;
 }
 
-/** A day's file: its text (empty when it holds no change), how many changes it holds, and the blobs they refer to. */
+/**
+ * A day's file: its text (empty when it holds no change), how many changes it holds, and the blobs they refer to that
+ * R2 holds (not those retention moved to the archive alone).
+ */
 export function renderDay(store: Store, row: Pick<DayRow, 'day' | 'min_seq' | 'max_seq'>): { readonly text: string; readonly count: number; readonly blobs: DayBlob[] } {
   const start = Date.parse(`${row.day}T00:00:00Z`);
   const range = [row.min_seq, row.max_seq, start, start + DAY] as const;
@@ -119,7 +122,8 @@ export function renderDay(store: Store, row: Pick<DayRow, 'day' | 'min_seq' | 'm
   return {
     text: lines.length === 0 ? '' : `${lines.join('\n')}\n`,
     count: changes.length,
-    blobs: documents.map((document) => ({ path: document.blob_path, sha256: document.sha256, size: document.stored_bytes })),
+    // A text retention moved out of Cloudflare has no R2 object to copy: the archive that confirmed it holds it.
+    blobs: documents.filter((document) => document.archived_ms === null).map((document) => ({ path: document.blob_path, sha256: document.sha256, size: document.stored_bytes })),
   };
 }
 

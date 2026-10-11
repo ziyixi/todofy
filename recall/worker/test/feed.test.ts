@@ -57,6 +57,7 @@ const document: Joined<DocumentRow> = {
   text_bytes: 181,
   text_sha256: 'unused',
   truncated: 0,
+  archived_ms: null,
   page_id: '3cb732b26093d5571ec48a363db593b2',
   host_key: hostKey('docs.example.com'),
 };

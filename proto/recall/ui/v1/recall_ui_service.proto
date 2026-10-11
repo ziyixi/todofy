@@ -354,7 +354,8 @@ message UpdateSettingsRequest {
   Settings settings = 1 [(google.api.field_behavior) = REQUIRED];
   // AIP-134: the Settings fields to replace (a query parameter, `update_mask=denylist_patterns,etag`). Required here:
   // an update without a mask, an empty one or `*` is BAD_REQUEST, so a client that leaves the list out never empties
-  // the denylist by accident.
+  // the denylist by accident, nor changes the retention window. A named `text_retention_days` without a value keeps
+  // every text in Cloudflare.
   google.protobuf.FieldMask update_mask = 2 [(google.api.field_behavior) = OPTIONAL];
   // The idempotency key (AIP-155), a query parameter; see RecallUiService.
   string request_id = 3 [
