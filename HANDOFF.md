@@ -46,7 +46,8 @@ Landed on `main` at `eaeddf4` (branch `recall`), all built and checked, nothing 
   `RecallState`: the write and index budgets, the compacted feed with `feed_id` and tombstones, FTS5 search, the
   timeline, the owner API, ServiceStatus and ops-v1); `recall/deploy/` (deploy-vars, bundle budget, `mint-tokens.mjs`).
 - `recall/extension/` (focus, visits, captures, outbox, uploads, self-update through `BUILD`; CI builds the artifact
-  `recall-extension-<sha>`, kept 30 days; extension ID `kpehdcbafdhgghclgaeigokjoceemfhj`, from the committed public
+  `recall-extension-<sha>`, kept 30 days, and every main run that changes `recall/extension/` or `recall/shared/`
+  publishes a permanent GitHub Release `recall-extension-v<version>` with the zip (job `recall-extension-release`); extension ID `kpehdcbafdhgghclgaeigokjoceemfhj`, from the committed public
   key).
 - `recall/web/` (时间线 · 搜索 · 设置, mailsort's design system with a violet accent; 53.6 KiB of JavaScript gzip
   against 62 KiB).
