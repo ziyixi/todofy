@@ -67,8 +67,3 @@ runs:
       working-directory: watch
       shell: bash -e {0}
       run: rm -f "$RUNNER_TEMP/watch-secrets.json"
-
-# mailsort (mailsort/: the Worker "mailsort", its Durable Object MailsortState and the UI it serves; the Gmail sorting
-# on sort.ziyixi.science, mailsort/docs/design.md). It compiles in packages/edge-auth and the TypeScript proto runtime
-# with proto/mailsort/ui/ and proto/ops/; Contracts runs its ops-v1 tests. Checked only (CHECK_ONLY in ci_changes.py)
-# until its Access application exists. No step reaches Google or Workers AI: the fakes answer every request.

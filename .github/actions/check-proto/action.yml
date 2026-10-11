@@ -64,5 +64,3 @@ runs:
         npm run typecheck
         npx --no-install vitest run
         npm run test:python
-
-# Newsletter is a separate VPS engine and GHCR image. No production credentials or real model calls here.

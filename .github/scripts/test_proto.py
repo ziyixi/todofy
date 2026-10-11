@@ -1,4 +1,3 @@
-from workflow_sources import effective_ci
 """The rules of proto/ (proto/README.md, Rules) that live outside the buf module.
 
 python3 -m unittest discover -s .github/scripts (the Changes job, every push, which Proto checks needs). Standard
@@ -27,6 +26,8 @@ library only.
   the Go toolchain, go.sum every checksum); scripts/api-lint.sh builds it from there, and the Proto checks
   job installs exactly that toolchain and runs the script. Nothing else installs api-linter.
 """
+
+from workflow_sources import effective_ci
 
 import json
 import os

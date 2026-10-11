@@ -21,8 +21,3 @@ runs:
           found=1
         done
         test "$found" = 1
-
-# Todofy runs as three jobs: the static checks, the workerd runtime suite split into shards that run at
-# the same time, and "Todofy checks", which passes only when both passed and the shards together ran
-# every collected runtime test exactly once (todofy/docs/ci-cd.md). Every change that checks Todofy runs
-# all of them; "Todofy deploy" needs "Todofy checks".

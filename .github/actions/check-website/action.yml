@@ -77,11 +77,3 @@ runs:
       run: |
         pnpm exec wrangler deploy --dry-run --config wrangler.toml
         pnpm exec wrangler deploy --dry-run --config relay/wrangler.toml --outdir "$RUNNER_TEMP/relay-bundle"
-
-# infra/: the OpenTofu configuration (infra/README.md). No Cloudflare token, no state and no plan here: the
-# locked provider download, format and validation, the guards that keep infra/ free of code-running data
-# sources, provisioners, personal values and state, and the plan-summary and state-driver tests (fake tofu,
-# no network). The checks of infra/ against the apps' wrangler.toml files run in Changes
-# (.github/scripts/test_infra_config.py). The drift plan against the encrypted remote state is
-# .github/workflows/infra.yml and the apply is the manually dispatched infra-apply.yml; both hold the token, this
-# job never does.

@@ -64,7 +64,3 @@ runs:
       working-directory: dashboard
       shell: bash -e {0}
       run: rm -f "$RUNNER_TEMP/home-secrets.json"
-
-# FlowDay (flowday/: the Worker "flowday", its D1 schema and the Next.js static export it serves). "FlowDay deploy"
-# needs this job. It compiles in packages/edge-auth and the TypeScript proto runtime with proto/flowday/ui/ (its owner
-# API, flowday.ui.v1); no contract.

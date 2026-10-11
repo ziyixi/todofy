@@ -27,7 +27,8 @@ after that deploy records the namespace ids and removes both; a guard test keeps
 - Change triggers, dependencies, permissions, timeouts and the CI gate in
   [ci.yml](../.github/workflows/ci.yml). Job names remain stable because same-SHA check reuse reads them.
 - Change an application's checks in `.github/actions/check-<app>/action.yml`. Todofy retains separate static
-  and runtime actions; the runtime shard index/count are passed by the caller. Artifact names and retention
+  and runtime actions; the runtime shard index/count are passed by the caller. Recall and Mailsort retain
+  their smoke steps and subsequent packaging in the workflow because composites cannot set step timeouts. Artifact names and retention
   belong to these steps, and downstream consumers continue to require the exact tested artifacts.
 - Change an application's build, migration, secret-file creation and probes in
   `.github/actions/release-<app>/action.yml`. [worker-release.yml](../.github/workflows/worker-release.yml)

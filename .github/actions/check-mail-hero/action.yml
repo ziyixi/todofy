@@ -63,7 +63,3 @@ runs:
         node ../deploy/deploy-vars.mjs exec -- npx --no-install wrangler deploy --dry-run --config ../wrangler.toml \
           --secrets-file "$RUNNER_TEMP/mail-hero-secrets.json" --outdir "$RUNNER_TEMP/mail-hero-bundle"
         node ../deploy/bundle-size.mjs "$RUNNER_TEMP/mail-hero-bundle"
-
-# The home dashboard (Worker "home", docs in dashboard/docs). Everything runs from dashboard/ with synthetic data;
-# the runtime suite runs the real HomeState in workerd next to stub "mail-hero"/"todofy" Workers that serve
-# the contracts/ops-v1 fixtures over real Ops RPC, a fake GraphQL endpoint and a test Access JWKS.

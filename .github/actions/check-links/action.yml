@@ -65,8 +65,3 @@ runs:
       working-directory: links
       shell: bash -e {0}
       run: rm -f "$RUNNER_TEMP/links-secrets.json"
-
-# The watch app (watch/: the Worker "watch", its Durable Object WatchState and the UI it serves), deployed by "Watch
-# deploy" since W2 (watch/docs/design.md section 11). It compiles in packages/edge-auth and the TypeScript proto
-# runtime with proto/watch/ui/, proto/todofy/taskintent/ and proto/ops/; Contracts runs its task-intent-v1 and ops-v1
-# tests.

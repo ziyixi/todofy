@@ -29,8 +29,9 @@ Local checks: all 435 pre-existing repository tests passed (one skipped); the 39
 commands/order/input mappings against the original source. New guards cover the one-job release, explicit
 composite inputs, selected-source paths and the original shell behavior. Targeted actionlint 1.7.12 passed for
 CI, Worker release and reconcile. The unchanged website workflow's `queue: max` is not understood by that linter;
-this refactor does not change it. Pending: final new guard checks, branch CI, same-green-SHA promotion and actual
-run/reconcile inspection. No production validation of this refactor yet.
+this refactor does not change it. First branch run `38133748900` rejected Recall/Mailsort action manifests because composites do not support
+step-level timeouts. Their smoke steps (five minutes) and following packaging stay at the job boundary, with a
+new guard for this limitation. Pending: corrected branch CI, same-green-SHA promotion and actual run/reconcile inspection. No production validation of this refactor yet.
 
 ## Done (2026-10-11): Brief resource registration and Home monitoring
 

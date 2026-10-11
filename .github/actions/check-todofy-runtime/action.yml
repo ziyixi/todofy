@@ -109,9 +109,3 @@ runs:
           ${{ runner.temp }}/pytest-serial/**/dev.log
         if-no-files-found: ignore
         retention-days: 7
-
-# The one Todofy result "Todofy deploy" needs: both jobs above passed, and every runtime test pytest
-# collects on this commit ran exactly once across the shards, passed, and none was skipped
-# (todofy-runtime-expected-skips.txt lists allowed skips; it is empty). The collection must be clean
-# (no collection error or module-level skip, every test file under tests/runtime collected), and the
-# files of todofy-runtime-serial.txt must have run alone.

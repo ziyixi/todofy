@@ -120,9 +120,3 @@ runs:
       run: |
         npm ci --no-audit --no-fund
         npm test -- --run test/report.test.ts
-
-# The personal website (website/, docs in website/docs): a Next.js static export on the assets-only Worker
-# ziyixi-website (Custom Domains www and the apex), plus the Notion relay Worker ziyixi-notion-publish
-# (website/relay). No Notion secret: the builds use the committed synthetic fixture (and the empty
-# source), Playwright runs against the export under `wrangler dev` with the production wrangler.toml,
-# _headers and _redirects.

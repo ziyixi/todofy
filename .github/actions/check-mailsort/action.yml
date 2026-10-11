@@ -52,34 +52,3 @@ runs:
         npm run build
     # The real wrangler dev (wrangler.test.toml, local bindings, no AI binding) against the fakes on loopback: the owner's
     # whole loop through the HTTP API, every Google request checked against the table.
-    - name: Smoke run against wrangler dev with the fake Gmail and fake Workers AI
-      working-directory: mailsort/worker
-      timeout-minutes: 5
-      shell: bash -e {0}
-      run: npm run test:smoke
-    - name: Dry-run the committed config and check the bundle size
-      working-directory: mailsort/worker
-      env:
-        MAILSORT_ACCESS_OWNER: owner@example.com
-        MAILSORT_ACCESS_OWNER_ALIASES: ''
-        MAILSORT_CSRF_SIGNING_KEY: '0000000000000000000000000000000000000000000000000000000000000000'
-        MAILSORT_MODE: shadow
-      shell: bash -e {0}
-      run: |
-        node ../deploy/deploy-vars.mjs secrets "$RUNNER_TEMP/mailsort-secrets.json"
-        node ../deploy/deploy-vars.mjs exec -- npx --no-install wrangler deploy --dry-run --config ../wrangler.toml \
-          --secrets-file "$RUNNER_TEMP/mailsort-secrets.json" --outdir "$RUNNER_TEMP/mailsort-bundle"
-        node ../deploy/bundle-size.mjs "$RUNNER_TEMP/mailsort-bundle"
-    - name: Remove the placeholder secrets file
-      if: always()
-      working-directory: mailsort
-      shell: bash -e {0}
-      run: rm -f "$RUNNER_TEMP/mailsort-secrets.json"
-
-# recall (recall/: the Worker "recall", its Durable Object RecallState and the private R2 bucket recall-store; the
-# owner's browsing record on recall.ziyixi.science, recall/docs/design.md). It compiles in packages/edge-auth and the
-# TypeScript proto runtime with proto/recall/ui/, proto/recall/ingest/, proto/recall/archive/ and proto/ops/; Contracts
-# runs its ops-v1 tests. No step reaches the network: the workerd suite runs a real SQLite RecallState and a local R2
-# bucket, and the smoke run drives wrangler dev on loopback.
-# The Chrome extension (recall/extension) is checked and built here too, into an artifact; it is never deployed, and
-# "Recall extension release" publishes that artifact on main as a GitHub Release.

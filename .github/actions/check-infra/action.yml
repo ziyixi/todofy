@@ -51,7 +51,3 @@ runs:
       run: |
         python3 -m unittest discover -s ../tools/infra-plan-summary
         python3 -m unittest discover -s tests
-
-# The protobuf IDL of the cross-app contracts (proto/README.md). No secret; buf fetches the googleapis module
-# pinned in proto/buf.lock from buf.build. The apps that use the generated code (ci_changes.py PROTO_USERS)
-# are checked by their own jobs, whose installs generate it (an npm postinstall, uv's build of ziyixi-proto).

@@ -76,7 +76,3 @@ runs:
       working-directory: flowday
       shell: bash -e {0}
       run: rm -f "$RUNNER_TEMP/flowday-secrets.json"
-
-# The links app (links/: the Worker "links", its D1 schema and the launcher it serves under /_/), deployed by "Links
-# deploy" since L2 (links/docs/design.md section 11). It compiles in packages/edge-auth and the TypeScript proto
-# runtime with proto/links/ui/; no contract.

@@ -101,12 +101,3 @@ runs:
       working-directory: todofy
       shell: bash -e {0}
       run: rm -f "$RUNNER_TEMP/todofy-core-secrets.json" "$RUNNER_TEMP/todofy-gateway-secrets.json"
-
-# The workerd runtime suite (tests/runtime), split into shards of whole test files that run at the same
-# time. The plan (.github/scripts/pytest_shards.py) balances recorded seconds per file over every
-# pytest-xdist process of every shard and places each collected file in exactly one shard; inside a
-# shard, xdist gives each process whole files, heaviest first, and a file's tests run in file order
-# (the rootdir conftest.py refuses any per-test distribution). No test is selected, deselected or
-# retried here; "Todofy checks" proves that the shards together ran every collected test once. Changing
-# the shard list also needs the same count in "Todofy checks" (--shards), which
-# .github/scripts/test_ci_changes.py checks.

@@ -24,5 +24,3 @@ runs:
         if-no-files-found: error
         retention-days: 1
         compression-level: 6
-
-# The daemon/observer share one verified image; SSA also uses an isolated real k3s API.

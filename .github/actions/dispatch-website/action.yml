@@ -19,6 +19,3 @@ runs:
           -f operation=release -f confirmation="release:${SITE_URL#https://}" \
           -f force_build=false -f allow_empty=false -f trigger=push
         echo "::notice::Dispatched Website release (push); see Actions → Website release."
-
-# The Notion relay Worker ziyixi-notion-publish (website/relay): buttons and the change detector's cron.
-# Its secrets are Worker secrets (website/relay/README.md) and survive this deploy.
