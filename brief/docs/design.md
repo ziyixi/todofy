@@ -16,9 +16,9 @@ outcome; a private archive behind Access shows every issue, its sources, its quo
 GitHub variable `BRIEF_MODE` are `archive`: the pipeline can call the paid Claude API and archive issues, but sends
 no email. Real model quality and delivery remain separate acceptance steps (§16).
 
-The resource registration and Home Ops integration are being completed on `codex/brief-home-monitoring`; deployment
-of Brief and Home at the same commit and the production checks remain pending. [`HANDOFF.md`](../../HANDOFF.md)
-records that rollout and the initial synthetic validation. The production settings page confirms the owner's saved
+The resource registration and Home Ops integration were implemented on `codex/brief-home-monitoring`.
+[`HANDOFF.md`](../../HANDOFF.md) records their release status, production checks and the initial synthetic
+validation. The production settings page confirms the owner's saved
 $80 monthly budget; preserve it across deployment. This does not change the $40 initial default or establish the
 Console spend limit (§13). Newsletter continues unchanged, and its retirement remains a separate decision
 (root `AGENTS.md`).
@@ -850,10 +850,10 @@ Completed through the first deployment on 2026-10-11:
 - The production settings page confirms version `7bea3ec`, archive mode and the owner's saved $80 monthly budget.
   Preserve the persisted budget (§13); the UI's configured-provider indicators do not prove calls or delivery.
 
-Current repository follow-up (`codex/brief-home-monitoring`): register the existing `brief-state` namespace in
-`config/resources.toml` and the generated resource inventory; remove the first-deploy exceptions; connect Home's
+The repository follow-up (`codex/brief-home-monitoring`) registers the existing `brief-state` namespace in
+`config/resources.toml` and the generated resource inventory, removes the first-deploy exceptions and connects Home's
 `BRIEF` binding to Brief's `Ops`, including the bounded status/guard contracts and labels. CI must deploy Brief before
-Home at the same SHA. The release and production acceptance are pending; see [`HANDOFF.md`](../../HANDOFF.md).
+Home at the same SHA. Release and production acceptance evidence lives in [`HANDOFF.md`](../../HANDOFF.md).
 
 After that release, confirm both build SHAs, the registered namespace, Home's real Ops status, `MODE=archive` and the
 preserved $80 budget. Archive-day source coverage, model quality and costs still need observation (§16). A shadow

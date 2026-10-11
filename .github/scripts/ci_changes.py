@@ -52,8 +52,8 @@ Outputs (GITHUB_OUTPUT, "true"/"false"):
   runs its tests; Home binds its Ops entrypoint, HOME_BOUND) and compiles in packages/edge-auth and the TypeScript
   proto runtime with proto/recall/ui/, proto/recall/ingest/, proto/recall/archive/ and proto/ops/. The brief (brief/,
   the daily briefing on brief.ziyixi.science, brief/docs/design.md) is checked and deployed since "Infra apply" created
-  its Access applications (2026-10-11, design section 18): it answers ops-v1 (not HOME_BOUND: Home binds it in a later
-  commit) and compiles in packages/edge-auth and the TypeScript proto runtime with proto/brief/ui/ and
+  its Access applications (2026-10-11, design section 18): it answers ops-v1 (Home binds its Ops entrypoint,
+  HOME_BOUND) and compiles in packages/edge-auth and the TypeScript proto runtime with proto/brief/ui/ and
   proto/ops/.
 
 proto/ (the protobuf IDL, proto/README.md) checks every app in PROTO_USERS (an app that depends on @ziyixi/proto or

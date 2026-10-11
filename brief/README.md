@@ -9,7 +9,7 @@ only paid product. Design: [`docs/design.md`](docs/design.md). Rules: [`AGENTS.m
 **Status: deployed in archive mode** (2026-10-11). The first deployment, `7bea3ec`, passed
 [CI](https://github.com/ziyixi/todofy/actions/runs/38128504001). Production `MODE` and the GitHub variable `BRIEF_MODE`
 are both `archive`: sources are fetched and paid Claude API calls can run, but no email is sent. The follow-up
-resource registration and Home monitoring are in progress; their release and production checks are tracked in
+resource registration and Home monitoring are implemented; their release and production checks are tracked in
 [`HANDOFF.md`](../HANDOFF.md). Newsletter continues unchanged, and its retirement remains a separate decision.
 
 The owner has saved a monthly budget of **$80** in 设置, confirmed on the production settings page on 2026-10-11.

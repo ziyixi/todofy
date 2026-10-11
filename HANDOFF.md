@@ -36,7 +36,11 @@ remain pending. Local verification: 435 repository checks (one skipped), 33 serv
 tests; proto lint/breaking checks; Home's 267 unit, 97 workerd, 158 web and 17 deployment-configuration tests;
 Brief's six Ops tests and the workerd restart test preserving the saved budget. Home typecheck, lint and web build
 passed. A read-only comparison with the Cloudflare account found zero Worker, D1, DO or R2 inventory differences.
-The release classifier selects only Brief and Home; Newsletter, VPS and other applications are not selected.
+The first branch CI exposed two consumers' missing Brief mode profiles and two proto self-test mutations tied to the
+old guard-app list. The consumer profiles are now covered by 12 Mail Hero and 92 Todofy tests; the proto mutations
+still test the original breaking-rule behavior. Under the repository's existing path-based release rules, these
+test changes also select Mail Hero and Todofy for deployment; neither application's production code changed.
+Newsletter and VPS remain outside the release scope.
 
 The production settings page was checked read-only: version `7bea3ec`, archive mode and the owner's saved **$80**
 monthly budget. Preserve this stored setting; the code's initial default remains $40, and the Claude Console limit

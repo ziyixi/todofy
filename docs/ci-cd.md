@@ -46,10 +46,10 @@ migrating an account; their changed committed Wrangler outputs follow the affect
 While Fleet is in that set, both Fleet and Home deploy outputs remain false, including dispatch, full-run
 and same-SHA reuse. Complete the reviewed Access bootstrap, commit its real AUD/identity configuration and
 remove that explicit freeze together before enabling those releases. A placeholder dry-run is not evidence
-that the production identity exists. The brief is in the set now: its checks, deploy job and release recipe exist (the
-recipe builds the archive UI, `brief/web`), and its deploy output stays false until "Infra apply" has created its
-Access applications and the go-live commit adds the AUD ([brief design](../brief/docs/design.md) §18). recall left the
-set with its go-live commit (2026-10-10).
+that the production identity exists. `CHECK_ONLY` is currently empty. Brief left it with its first deployment,
+`7bea3ec` (2026-10-11), in archive mode; its recipe builds the archive UI, `brief/web`. The follow-up registers the
+existing namespace, removes the first-deploy exceptions and binds Home to Brief's `Ops`; rollout evidence is in
+[HANDOFF](../HANDOFF.md). recall left the set with its go-live commit (2026-10-10).
 
 | Job | Checks or release responsibility |
 | --- | --- |
@@ -70,7 +70,7 @@ set with its go-live commit (2026-10-10).
 | `Newsletter image publish`, `Platform image` | After main's gate and the required successful checks or verified same-SHA reuse, load and publish the tested artifacts to the catalog's image repositories. Publication does not rebuild or prove a VPS rollout. |
 | `Recall extension release` | After main's gate, when `recall/extension/` or `recall/shared/` changed (`recall_extension_publish`; also a dispatch for recall or all, and a run of everything): publish the extension artifact `Recall checks` tested (from the reused run on same-SHA reuse) as the GitHub Release `recall-extension-v<version>` with its zip, the commit and the CI run; a version whose tag exists is skipped. The only job with `contents: write`; it reads no secret, and no job needs it, so a failure delays no deploy (the failed run's diff is retried by the next push). |
 | Cloudflare app deploy jobs | After main's gate and app checks: build the verified UI, write private values, dry-run, enforce hostname safety, apply only the app's required D1 migrations and deploy its committed config. Each app retains its production probes and concurrency group. |
-| `Dashboard deploy` | Also waits for Todofy, Mail Hero, Watch, Fleet and website relay deploys to succeed or be skipped. Its `FLEET`/`NEWSLETTER` service bindings require Fleet's `Ops`/`NewsletterOps`; the bootstrap freeze prevents deploying these before Fleet exists. |
+| `Dashboard deploy` | Also waits for Todofy, Mail Hero, Watch, Fleet, Mailsort, Recall, Brief and website relay deploys to succeed or be skipped. Its `FLEET`/`NEWSLETTER` service bindings require Fleet's `Ops`/`NewsletterOps`, and `BRIEF` requires Brief's `Ops`; selected providers deploy before Home in the same SHA's release. |
 | `VPS deploy` | After both image publications and the gate, when `VPS_DEPLOY_ENABLED=true`: call the daemon's shared-proto release API and verify the durable result and fresh physical provenance. See the VPS section below. |
 
 On main, the diff base is the last successful push run of this workflow; failed/cancelled releases do not
@@ -164,7 +164,7 @@ also initializes missing operational variables without overwriting existing paus
 | Website release/relay | Website's settings stay in its workflow/config; optional `WEBSITE_BOOTSTRAP_APPROVAL` for an empty release registry | `CF_API_TOKEN`; release additionally uses `WEBSITE_NOTION_TOKEN`, `WEBSITE_NOTION_DATA_SOURCE_ID`; relay retains its existing Worker secrets |
 | FlowDay, Links, Watch deploys | Committed app configuration; owner pause settings remain app-owned | `CF_API_TOKEN`, `DASHBOARD_ACCESS_OWNER`, `DASHBOARD_ACCESS_OWNER_ALIASES`; respectively `FLOWDAY_CSRF_SIGNING_KEY` + `FLOWDAY_CREDENTIAL_KEY`, `LINKS_CSRF_SIGNING_KEY`, `WATCH_CSRF_SIGNING_KEY` |
 | `Recall deploy` | Committed config and `BUILD_SHA` from the release commit; no switch | `CF_API_TOKEN`, `DASHBOARD_ACCESS_OWNER`, `DASHBOARD_ACCESS_OWNER_ALIASES`, `RECALL_CSRF_SIGNING_KEY`; the machine tokens' digests are put from the owner's machine only, never through GitHub |
-| `Brief deploy` | `BRIEF_MODE` (`off`, `archive`, `shadow` or `live`) | `CF_API_TOKEN`, `DASHBOARD_ACCESS_OWNER`, `DASHBOARD_ACCESS_OWNER_ALIASES`, `BRIEF_CSRF_SIGNING_KEY`, `BRIEF_FEEDBACK_SIGNING_KEY`, `BRIEF_MAIL_FROM`, `BRIEF_MAIL_TO`; the Claude and Resend keys are put from the owner's machine only, never through GitHub |
+| `Brief deploy` | `BRIEF_MODE` (`off`, `archive`, `shadow` or `live`) | `CF_API_TOKEN`, `DASHBOARD_ACCESS_OWNER`, `DASHBOARD_ACCESS_OWNER_ALIASES`, `BRIEF_CSRF_SIGNING_KEY`, `BRIEF_FEEDBACK_SIGNING_KEY`, `BRIEF_MAIL_FROM`, `BRIEF_MAIL_TO`; the owner manages Claude and Resend keys in Cloudflare settings or with the local CLI, never through GitHub |
 | `Fleet deploy` | Committed config and `BUILD_SHA` from the release commit | `CF_API_TOKEN`, `FLEET_ACCESS_OWNER`, `FLEET_ACCESS_OWNER_ALIASES`, `FLEET_REPORT_HMAC_KEY` |
 | `Dashboard deploy` | Required boolean `DASHBOARD_CANARY_ENABLED` | `CF_API_TOKEN`, `DASHBOARD_ACCESS_OWNER`, `DASHBOARD_ACCESS_OWNER_ALIASES`, `DASHBOARD_CSRF_SIGNING_KEY`, `DASHBOARD_CF_ANALYTICS_TOKEN` (separate least-privilege read-only token; [setup](../dashboard/docs/setup.md) §4) |
 | `VPS deploy` | `VPS_DEPLOY_ENABLED`; dispatch may explicitly select resume | `PLATFORM_ACCESS_CLIENT_ID`, `PLATFORM_ACCESS_CLIENT_SECRET`, `PLATFORM_DEPLOY_TOKEN`; no SSH or Kubernetes credential |

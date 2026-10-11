@@ -129,8 +129,8 @@ case_ "remove a listed enum value (SOURCE_WATCH) and reserve its number and name
 case_ "remove a listed enum value without reserving it" breaking fail 's/  \/\/ The watch app[^\n]*\n[^\n]*\n  SOURCE_WATCH = 2;\n//' "$INTENT" "$RETIRE_WATCH_SOURCE"
 case_ "reuse a listed enum value's number (SOURCE_WATCH = 2 -> SOURCE_NEXT = 2)" breaking fail 's/SOURCE_WATCH = 2;/SOURCE_NEXT = 2;/' "$INTENT" "$RETIRE_WATCH_SOURCE"
 case_ "remove an unlisted enum value (ERROR_CODE_DAILY_LIMIT) and reserve it" breaking fail 's/(enum ErrorCode \{\n)/$1  reserved 11;\n  reserved "ERROR_CODE_DAILY_LIMIT";\n/; s/  \/\/ [^\n]*\n  ERROR_CODE_DAILY_LIMIT = 11;\n//'
-case_ "remove a listed allowed value of an input (OverrideGuardRequest.app watch)" breaking pass 's/,\n      "watch",\n      "mailsort"\n    \]/,\n      "mailsort"\n    ]/' "$GUARD" "$RETIRE_WATCH_GUARD"
-case_ "remove an unlisted allowed value of an input (OverrideGuardRequest.app watch)" breaking fail 's/,\n      "watch",\n      "mailsort"\n    \]/,\n      "mailsort"\n    ]/' "$GUARD"
+case_ "remove a listed allowed value of an input (OverrideGuardRequest.app watch)" breaking pass 's/^      "watch",\n//m' "$GUARD" "$RETIRE_WATCH_GUARD"
+case_ "remove an unlisted allowed value of an input (OverrideGuardRequest.app watch)" breaking fail 's/^      "watch",\n//m' "$GUARD"
 case_ "zero value without _UNSPECIFIED (MODE_UNSPECIFIED -> MODE_NONE)" lint fail 's/MODE_UNSPECIFIED = 0/MODE_NONE = 0/'
 case_ "enum value without its prefix (SOURCE_WATCH -> WATCH)" lint fail 's/SOURCE_WATCH = 2/WATCH = 2/'
 case_ "lowerCamelCase field (intent_id -> intentId)" lint fail 's/string intent_id = 3;/string intentId = 3;/; s/string intent_id = 3 /string intentId = 3 /'
