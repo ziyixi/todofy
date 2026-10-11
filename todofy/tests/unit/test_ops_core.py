@@ -465,6 +465,7 @@ DEPLOYMENT_MODES = {
     "newsletter": ["maintenance"],
     "notion-publish": ["maintenance"],
     "mailsort": ["maintenance", "mode_limited"],
+    "recall": ["maintenance"],
 }
 
 

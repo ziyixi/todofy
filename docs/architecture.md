@@ -95,8 +95,8 @@ the owner APIs moved to proto. Dated old-owner routes are listed in [history](hi
 ## Home
 
 Home is the owner launcher and operations console, not a second administrator of each application's storage.
-It calls only generated Ops methods through `MAIL_HERO`, `TODOFY`, `WATCH`, `MAILSORT`, `FLEET`, `NEWSLETTER` and
-`WEBSITE_SYNC` bindings. `FLEET` targets Fleet's `Ops`; `NEWSLETTER` targets its `NewsletterOps` projection of the latest
+It calls only generated Ops methods through `MAIL_HERO`, `TODOFY`, `WATCH`, `MAILSORT`, `RECALL`, `FLEET`,
+`NEWSLETTER` and `WEBSITE_SYNC` bindings. `FLEET` targets Fleet's `Ops`; `NEWSLETTER` targets its `NewsletterOps` projection of the latest
 bounded host report. Home does not call the VPS directly or read an application's D1, R2, private
 configuration or source. The four views are Home, Flows, Cloudflare and Ops.
 
@@ -164,8 +164,8 @@ accepted report nor a ready deployment receipt proves successful Newsletter deli
   text after ten seconds; both it and the Worker scrub secrets and apply the denylist with the same `recall/shared/`
   code, and sensitive sites are kept by their site alone. Logs never hold a URL, title or text. The NAS pulls the feed
   with `recall/sync/` (one standard-library Python file in its own image); any store implementing the contract can
-  replace it. Check-only until its Access applications exist. See [AGENTS](../recall/AGENTS.md) and
-  [design](../recall/docs/design.md).
+  replace it. Its Access applications and bucket exist since 2026-10-10 and CI deploys it like any app; Home binds
+  its Ops entrypoint. See [AGENTS](../recall/AGENTS.md) and [design](../recall/docs/design.md).
 - **Newsletter:** runs as an independent k3s image because its workflow uses Codex CLI. It reads Todofy's machine
   reports through existing HTTPS/Basic auth and keeps its own persistent state. It does not import Todofy's
   implementation. Its external `ziyixi-protos`/wire JSON runtime and private drain/monitor adapters stay intact.

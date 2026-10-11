@@ -14,9 +14,9 @@
 # (deploy/test/secrets-kept.test.mjs), and no [secrets] required list is declared here. Until they are put, the machine
 # routes answer 503.
 #
-# Check-only (recall in CHECK_ONLY of .github/scripts/ci_changes.py) until "Infra apply" has created the Access
-# applications (the whole host, and the Bypass of the three machine routes) and the bucket; the go-live commit then adds
-# ACCESS_AUDIENCE (deploy/deploy-vars.mjs refuses a real deploy without it). No workers.dev, no preview URL.
+# The Access applications (the whole host, and the Bypass of the three machine routes) and the bucket are created by
+# infra/ and "Infra apply"; the whole host's AUD is committed below as ACCESS_AUDIENCE (deploy/deploy-vars.mjs refuses a
+# real deploy without it). No workers.dev, no preview URL.
 #
 # Run wrangler from worker/ (the pinned wrangler lives in worker/node_modules) with --config ../wrangler.toml. Local
 # development uses ../wrangler.test.toml and recall/.dev.vars.
@@ -69,3 +69,9 @@ bucket_name = "recall-store"
 # The app's host: the only origin a mutation may come from (CSRF), and a host recall never records.
 PUBLIC_HOST = "recall.ziyixi.science"
 ACCESS_ISSUER = "https://ziyixi.cloudflareaccess.com"
+# The AUD tag of the Access application "recall" (the whole host; infra/access.tf owner_apps["recall"]), created by
+# "Infra apply" on 2026-10-10: config/resources.toml [access_audiences] holds it and tools/cloud-config/generate.py
+# writes it here; its application id is in infra/ids.tf. "Infra drift" compares this value with the application's
+# every day. The machine routes' Bypass application has its own AUD, which nothing checks: the Worker checks their
+# tokens itself.
+ACCESS_AUDIENCE = "6ebe1c2a23c8c54e49d4ea7c2c3d014d72b2835d8b045df00a12107d049bc8b1"

@@ -46,9 +46,8 @@ migrating an account; their changed committed Wrangler outputs follow the affect
 While Fleet is in that set, both Fleet and Home deploy outputs remain false, including dispatch, full-run
 and same-SHA reuse. Complete the reviewed Access bootstrap, commit its real AUD/identity configuration and
 remove that explicit freeze together before enabling those releases. A placeholder dry-run is not evidence
-that the production identity exists. recall is in the set now: its checks, deploy job and release recipe exist, and
-its deploy output stays false until "Infra apply" has created its Access applications and bucket and the go-live
-commit adds the AUD ([recall design](../recall/docs/design.md) §11).
+that the production identity exists. The set is empty since recall's go-live commit (2026-10-10), which followed
+"Infra apply" creating its Access applications and bucket ([recall design](../recall/docs/design.md) §11).
 
 | Job | Checks or release responsibility |
 | --- | --- |

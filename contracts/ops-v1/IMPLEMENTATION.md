@@ -583,10 +583,11 @@ mailsort (`mailsort/`, Worker `mailsort`, `mailsort/docs/design.md` §10) joined
 ## 3e. recall (added 2026-10-10, additive)
 
 recall (`recall/`, Worker `recall`, `recall/docs/design.md` §9) joined `OpsStatus.app` (an open list) as `recall`, so
-that its `Ops` entrypoint writes a valid status; nothing of the other apps' surface changed. Home does not bind it yet:
-the dashboard's `UNBOUND_OPS_APPS` (`dashboard/worker/src/ops-client.ts`) keeps it out of the apps it calls until
-recall's go-live commit adds the `RECALL` binding (Home's deploy waits for every service it binds). recall has no
-guard: it lists no capability and `setGuard` rejects with `invalid_input`, as Fleet's does.
+that its `Ops` entrypoint writes a valid status; fixtures `OpsStatus/recall-ok.json` and `OpsStatus/recall-degraded.json`
+(also its golden bytes, `recall/worker/test/ops-golden.test.ts`). Nothing of the other apps' surface changed. Until its
+go-live commit the dashboard's `UNBOUND_OPS_APPS` (`dashboard/worker/src/ops-client.ts`) kept it out of the apps it
+calls; since then the dashboard binds `RECALL` (Home's deploy waits for every service it binds). recall has no guard:
+it lists no capability, `setGuard` rejects with `invalid_input` as Fleet's does, and the dashboard never sends it one.
 
 - Files: `recall/worker/src/ops.ts` (the entrypoint, forwards to `RecallState`), `recall/worker/src/ops-status.ts`
   (over the object's SQLite, the same facts as the owner API's ServiceStatus). Rows read per `status()`: the devices,

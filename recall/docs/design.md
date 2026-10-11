@@ -22,8 +22,9 @@ owner's place); §12 notes what was not adopted. The owner API (`proto/recall/ui
 contract (IDL, generated schema, fixtures and their codec test in `proto/test/`) are written; `shared/`, the Worker
 (`worker/`), `deploy/`, the extension (`extension/`, built by CI into an artifact), the UI (`web/`) and the reference
 consumer (`sync/`, with its image workflow) are built and tested, and the smoke run (§10) drives them together from an
-upload to an archive. recall has landed check-only (§11, step 1: its deploy job exists, `CHECK_ONLY` holds it back);
-nothing is deployed, and none of it has run in a real Chrome, Cloudflare account or NAS yet.
+upload to an archive. recall landed check-only (§11, step 1), the owner's "Infra apply" created its Access applications
+and bucket (step 2), and the go-live commit (step 3) lets CI deploy it; nothing is deployed yet, and none of it has run
+in a real Chrome, Cloudflare account or NAS.
 
 ## 1. Shape
 
@@ -789,8 +790,8 @@ likewise (`deploy/bundle-size.mjs`).
   850 MiB, critical at the budget), `upload_over_budget` (warning: today's row budget ran out), `reads_over_budget`
   (warning: today's reads stopped the feed, or the searches too) and `no_device` (info, before the first upload).
   Counters: `visits_today`, `texts_today`, `rows_written_today`, `rows_read_today`. No guard: the daily row budget already caps recall's share, and an upload it refuses waits in
-  the extension's outbox. Home's entry has `status.type = "none"` while recall is check-only and gets its `RECALL`
-  binding and `"ops_v1"` with the go-live commit (§11), because Home's deploy waits for every service it binds.
+  the extension's outbox. Home's entry had `status.type = "none"` while recall was check-only and has its `RECALL`
+  binding and `"ops_v1"` since the go-live commit (§11), because Home's deploy waits for every service it binds.
 - **Logs**: one line per upload (batch ID, items accepted and rejected, rows written, a code), per refused machine
   request (request ID, status, reason), per feed pull (consumer, after, count) and per alarm. Never a URL, host, title
   or text.
@@ -890,18 +891,25 @@ CSP).
    its Worker comparison, which needs a verified deployment. The shared files are the ones every app is added to
    (`infra/README.md` "Adding an app"; mailsort's commits are the template), each edit one entry; another branch
    changes some of them at the same time, so recall rebases onto it and keeps its edits minimal.
-2. **The owner dispatches "Infra apply"**: the Access applications (whole host, Bypass) and the bucket.
-3. **Go-live commit**: the AUD and the application ID into `config/resources.toml`, `generate.py`; `CHECK_ONLY` emptied;
-   Home's entry becomes `status.type = "ops_v1"` with its `RECALL` binding (Home deploys after recall in that run). The
-   CSRF key goes in by piping a random value straight into `gh secret set RECALL_CSRF_SIGNING_KEY`, never shown.
+2. **The owner dispatches "Infra apply"** (done 2026-10-10): the Access applications (whole host, Bypass) and the
+   bucket.
+3. **Go-live commit** (branch `recall-release`): the whole host's AUD and application ID into `config/resources.toml`,
+   which `generate.py` writes into `recall/wrangler.toml` and `infra/ids.tf`; `CHECK_ONLY` and `AHEAD_OF_DEPLOY`
+   emptied; Home's entry becomes `status.type = "ops_v1"` with its `RECALL` binding (`UNBOUND_OPS_APPS` emptied, Home
+   deploys after recall in that run, and its tick budget grows to 31 outbound calls), with recall's ops-v1 fixtures
+   `OpsStatus/recall-ok.json` and `recall-degraded.json` and their golden test. The Bypass application's own AUD and ID
+   are not recorded: the Worker checks the machine tokens itself, and no check reads them. The CSRF key goes in before
+   the commit lands, by piping a random value straight into `gh secret set RECALL_CSRF_SIGNING_KEY`, never shown;
+   without it the deploy stops at its secrets step, and Home's with it.
 4. **After the first deploy**: the object's namespace ID as `[durable_objects]["recall-state"]`, `FIRST_DEPLOY_PENDING`
    emptied and the reconcile matrix's `exclude` removed in the same commit (the inventory refuses a recorded ID while
    the entry remains, and a guard test holds the exclude equal to it), the generated inventories refreshed.
 
 **The owner's steps**, at the end, in their own terminal and browser, in this order:
 
-1. Dispatch "Infra apply" (step 2 above), then set the CSRF key without seeing it:
-   `openssl rand -hex 32 | gh secret set RECALL_CSRF_SIGNING_KEY` (the go-live commit and its deploy follow).
+1. Dispatch "Infra apply" (step 2 above; done 2026-10-10), then, before the go-live commit lands, set the CSRF key
+   without seeing it (the go-live commit and its deploy follow):
+   `openssl rand -hex 32 | gh secret set RECALL_CSRF_SIGNING_KEY -R ziyixi/todofy --env production`.
 2. After the first deploy (`wrangler secret put` needs the Worker): `node recall/deploy/mint-tokens.mjs`.
 3. Put the extension into `~/recall-extension` (`npm run install-extension` in `recall/extension`, or the CI artifact
    unzipped), open `chrome://extensions`, turn on Developer mode, Load unpacked (`⌘⇧G` and the path), paste the token,

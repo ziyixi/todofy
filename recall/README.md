@@ -70,9 +70,9 @@ only). Local state is in `recall/.wrangler/` (delete it after a schema change).
 
 Only from GitHub Actions: `Recall deploy` (`.github/workflows/ci.yml`, the recipe in `worker-release.yml`) on `main`
 after `CI gate`, in the `production` environment, through `deploy/deploy-vars.mjs` (never a plain `wrangler deploy`).
-Until "Infra apply" has created the Access applications (`recall`, the whole host, and `recall machine routes`, the
-Bypass of the three machine routes) and the bucket, and the go-live commit has added the AUD, `recall` is in
-`CHECK_ONLY` (`.github/scripts/ci_changes.py`): its checks run, its deploy does not (design §11).
+"Infra apply" created the Access applications (`recall`, the whole host, and `recall machine routes`, the Bypass of
+the three machine routes) and the bucket on 2026-10-10; the go-live commit added the AUD and took `recall` out of
+`CHECK_ONLY` (`.github/scripts/ci_changes.py`), so a change to recall deploys it, and Home after it (design §11).
 
 The wrapper writes the Worker secrets `ACCESS_OWNER` and `ACCESS_OWNER_ALIASES` (from the dashboard's secrets: one
 owner) and `CSRF_SIGNING_KEY` (from `RECALL_CSRF_SIGNING_KEY`), and sets `BUILD_SHA`. recall has no operational switch.

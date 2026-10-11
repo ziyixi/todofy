@@ -624,6 +624,110 @@
       }
     }
   },
+  "read/OpsStatus/recall-degraded.json": {
+    "version": "ops-v1",
+    "app": "recall",
+    "generated_at": "2026-10-10T14:00:00Z",
+    "health": "degraded",
+    "modes": {
+      "maintenance": false
+    },
+    "guard": {
+      "level": "normal",
+      "reason": null,
+      "until": null,
+      "set_at": null,
+      "deferred": []
+    },
+    "signals": [
+      {
+        "code": "archive_behind",
+        "severity": "warning",
+        "metrics": {
+          "count": 1
+        }
+      },
+      {
+        "code": "device_stale",
+        "severity": "warning",
+        "metrics": {
+          "count": 1,
+          "hours": 30
+        },
+        "since": "2026-10-09T08:00:00Z"
+      },
+      {
+        "code": "items_rejected",
+        "severity": "warning",
+        "metrics": {
+          "count": 3
+        }
+      },
+      {
+        "code": "no_captures",
+        "severity": "warning",
+        "metrics": {
+          "visits": 12
+        }
+      },
+      {
+        "code": "reads_over_budget",
+        "severity": "warning",
+        "metrics": {
+          "rows_read": 1000000,
+          "budget": 1500000
+        }
+      },
+      {
+        "code": "storage_high",
+        "severity": "warning",
+        "metrics": {
+          "used_mib": 870,
+          "budget_mib": 900
+        }
+      },
+      {
+        "code": "upload_over_budget",
+        "severity": "warning",
+        "metrics": {}
+      }
+    ],
+    "counters": {
+      "visits_today": 64,
+      "texts_today": 0,
+      "rows_written_today": 20001,
+      "rows_read_today": 1000000
+    },
+    "last_backup_at": null,
+    "ui_url": "https://recall.example.com/",
+    "capabilities": []
+  },
+  "read/OpsStatus/recall-ok.json": {
+    "version": "ops-v1",
+    "app": "recall",
+    "generated_at": "2026-10-10T14:00:00Z",
+    "health": "ok",
+    "modes": {
+      "maintenance": false
+    },
+    "guard": {
+      "level": "normal",
+      "reason": null,
+      "until": null,
+      "set_at": null,
+      "deferred": []
+    },
+    "signals": [],
+    "counters": {
+      "visits_today": 120,
+      "texts_today": 34,
+      "rows_written_today": 4210,
+      "rows_read_today": 18200
+    },
+    "last_backup_at": null,
+    "ui_url": "https://recall.example.com/",
+    "capabilities": []
+  },
   "read/OpsStatus/status-unavailable.json": {
     "version": "ops-v1",
     "app": "todofy",

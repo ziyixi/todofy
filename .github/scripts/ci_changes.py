@@ -40,10 +40,10 @@ Outputs (GITHUB_OUTPUT, "true"/"false"):
   Access application was created (2026-10-07): it answers ops-v1 (Contracts runs its tests) and compiles in
   packages/edge-auth and the TypeScript proto runtime with proto/mailsort/ui/ and proto/ops/. Home binds its Ops
   entrypoint, so while an app Home binds is CHECK_ONLY, Home's deploy output stays false too (HOME_BOUND). recall
-  (recall/, the browsing record on recall.ziyixi.science, recall/docs/design.md) is CHECK_ONLY until "Infra apply" has
-  created its Access applications and its bucket and its AUD is committed (design section 11): it answers ops-v1
-  (Home binds it only with its go-live commit, so it is not HOME_BOUND yet) and compiles in packages/edge-auth and the
-  TypeScript proto runtime with proto/recall/ui/, proto/recall/ingest/, proto/recall/archive/ and proto/ops/.
+  (recall/, the browsing record on recall.ziyixi.science, recall/docs/design.md) is checked and deployed since "Infra
+  apply" created its Access applications and its bucket (2026-10-10, design section 11): it answers ops-v1 (Contracts
+  runs its tests; Home binds its Ops entrypoint, HOME_BOUND) and compiles in packages/edge-auth and the TypeScript
+  proto runtime with proto/recall/ui/, proto/recall/ingest/, proto/recall/archive/ and proto/ops/.
 
 proto/ (the protobuf IDL, proto/README.md) checks every app in PROTO_USERS (an app that depends on @ziyixi/proto or
 ziyixi-proto) and deploys only the apps whose bundle the changed path reaches (proto_deploys): PROTO_USERS[app] names
@@ -121,10 +121,10 @@ APPS = tuple(load_catalog(Path(__file__).resolve().parents[2]).apps)
 PREFIX = {app: app.replace("-", "_") for app in APPS}
 # A new app is checked but its deploy output stays false until its Cloudflare resources are ready. Keep its output
 # present so the workflow and same-SHA reuse have one stable interface.
-CHECK_ONLY: set[str] = {"recall"}
+CHECK_ONLY: set[str] = set()
 # Apps whose Ops entrypoint Home binds (dashboard/wrangler.toml): while one of them is CHECK_ONLY its Worker does not
 # exist yet, so Home's deploy (whose binding would name a missing service) waits too.
-HOME_BOUND = {"fleet", "mailsort"}
+HOME_BOUND = {"fleet", "mailsort", "recall"}
 KEYS = (
     "todofy_check",
     "mail_hero_check",
@@ -360,8 +360,8 @@ def outputs(
     }
     for app in APPS:
         result[f"{PREFIX[app]}_check"] = app in checked
-        # Home binds Fleet's and mailsort's entrypoints. Until such an app's resources are ready (CHECK_ONLY), neither its
-        # Worker nor Home can be published by full fallback, dispatch, a path diff or reused branch checks.
+        # Home binds Fleet's, mailsort's and recall's entrypoints. Until such an app's resources are ready (CHECK_ONLY),
+        # neither its Worker nor Home can be published by full fallback, dispatch, a path diff or reused branch checks.
         blocked = app in CHECK_ONLY or (app == "dashboard" and bool(HOME_BOUND & CHECK_ONLY))
         result[f"{PREFIX[app]}_deploy"] = app in deployed and not blocked
     result["platform_publish"] = result.get("platform_deploy", False)

@@ -38,10 +38,10 @@ export const OPS_MAX_JSON_CHARS = 32_768;
 
 /**
  * ops-v1 apps of the contract that this build does not bind yet: an app answers ops-v1 (its name is in OpsStatus.app's
- * allowed list, which it must be to write a valid status) before Home binds its entrypoint. recall until its go-live
- * commit, which adds its binding (recall/docs/design.md §9, §11).
+ * allowed list, which it must be to write a valid status) before Home binds its entrypoint. Empty since recall's go-live
+ * commit added its RECALL binding (recall/docs/design.md §9, §11).
  */
-export const UNBOUND_OPS_APPS: readonly string[] = ['recall'];
+export const UNBOUND_OPS_APPS: readonly string[] = [];
 /** Every ops-v1 app this dashboard calls, in the contract's order (OpsStatus.app's allowed list without the unbound). */
 export const OPS_APPS = fieldRules(OpsStatusSchema.field.app).allowed.filter((app) => !UNBOUND_OPS_APPS.includes(app)) as readonly OpsApp[];
 /** The guard's levels by wire name. */
@@ -174,9 +174,10 @@ export const CALLED_METHODS = {
   newsletter: ['status', 'setGuard'],
   'notion-publish': ['status', 'setGuard', 'getSyncStatus', 'requestSync', 'getSyncRequest'],
   mailsort: ['status', 'setGuard'],
+  recall: ['status', 'setGuard'],
 } as const;
 
-type Bindings = Pick<Env, 'MAIL_HERO' | 'TODOFY' | 'WATCH' | 'FLEET' | 'NEWSLETTER' | 'WEBSITE_SYNC' | 'MAILSORT'>;
+type Bindings = Pick<Env, 'MAIL_HERO' | 'TODOFY' | 'WATCH' | 'FLEET' | 'NEWSLETTER' | 'WEBSITE_SYNC' | 'MAILSORT' | 'RECALL'>;
 
 function missing(): Promise<never> {
   return Promise.reject(new MissingBinding('not_configured'));
@@ -190,12 +191,13 @@ export function opsStatus(env: Bindings, app: OpsApp): Promise<OpsCall<ops.OpsSt
     if (app === 'newsletter') return (env.NEWSLETTER as Bindings['NEWSLETTER'] | undefined)?.status() ?? missing();
     if (app === 'notion-publish') return (env.WEBSITE_SYNC as Bindings['WEBSITE_SYNC'] | undefined)?.status() ?? missing();
     if (app === 'mailsort') return (env.MAILSORT as Bindings['MAILSORT'] | undefined)?.status() ?? missing();
+    if (app === 'recall') return (env.RECALL as Bindings['RECALL'] | undefined)?.status() ?? missing();
     return (env.TODOFY as Bindings['TODOFY'] | undefined)?.status() ?? missing();
   }, asStatus(app));
 }
 
 export async function opsSetGuard(env: Bindings, app: OpsApp, input: ops.SetGuardInput): Promise<OpsCall<ops.GuardState>> {
-  if (app === 'fleet' || app === 'newsletter' || app === 'notion-publish') return refused;
+  if (app === 'fleet' || app === 'newsletter' || app === 'notion-publish' || app === 'recall') return refused;
   const args = encode(OpsService.method.setGuard, [input]);
   if (args === null) return refused;
   const sent = args[0] as ops.SetGuardInput;

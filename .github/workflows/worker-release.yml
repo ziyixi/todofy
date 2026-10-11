@@ -1411,8 +1411,8 @@ jobs:
   # "recall machine routes" (infra/). One SQLite Durable Object, RecallState, and the private R2 bucket recall-store; no
   # D1, no service binding. The machine tokens' digests are not part of this job: the owner puts them with
   # recall/deploy/mint-tokens.mjs, and --secrets-file keeps them (recall/deploy/test/secrets-kept.test.mjs). recall has
-  # no operational switch (its emergency stops are the owner's, recall/docs/design.md section 9). Held back by CHECK_ONLY
-  # until "Infra apply" has created both Access applications and the bucket and the go-live commit adds the AUD.
+  # no operational switch (its emergency stops are the owner's, recall/docs/design.md section 9). "Infra apply" created
+  # both Access applications and the bucket (2026-10-10); the go-live commit added the AUD and emptied CHECK_ONLY.
   recall-deploy:
     name: recall production release
     if: github.ref == 'refs/heads/main' && inputs.app == 'recall'

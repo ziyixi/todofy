@@ -1,0 +1,26 @@
+{
+  "version": "ops-v1",
+  "app": "recall",
+  "generated_at": "2026-10-10T14:00:00Z",
+  "health": "ok",
+  "modes": {
+    "maintenance": false
+  },
+  "guard": {
+    "level": "normal",
+    "reason": null,
+    "until": null,
+    "set_at": null,
+    "deferred": []
+  },
+  "signals": [],
+  "counters": {
+    "visits_today": 120,
+    "texts_today": 34,
+    "rows_written_today": 4210,
+    "rows_read_today": 18200
+  },
+  "last_backup_at": null,
+  "ui_url": "https://recall.example.com/",
+  "capabilities": []
+}

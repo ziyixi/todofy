@@ -874,10 +874,9 @@ jobs:
 
   # recall (recall/: the Worker "recall", its Durable Object RecallState and the private R2 bucket recall-store; the
   # owner's browsing record on recall.ziyixi.science, recall/docs/design.md). It compiles in packages/edge-auth and the
-  # TypeScript proto runtime with proto/recall/ui/, proto/recall/ingest/, proto/recall/archive/ and proto/ops/. Checked
-  # only (CHECK_ONLY in ci_changes.py) until its Access applications and its bucket exist (design section 11). No step
-  # reaches the network: the workerd suite runs a real SQLite RecallState and a local R2 bucket, and the smoke run
-  # drives wrangler dev on loopback.
+  # TypeScript proto runtime with proto/recall/ui/, proto/recall/ingest/, proto/recall/archive/ and proto/ops/; Contracts
+  # runs its ops-v1 tests. No step reaches the network: the workerd suite runs a real SQLite RecallState and a local R2
+  # bucket, and the smoke run drives wrangler dev on loopback.
   # The Chrome extension (recall/extension) is checked and built here too, into an artifact the owner installs; it is
   # never deployed.
   recall-checks:
@@ -1081,6 +1080,7 @@ jobs:
             watch/worker/package-lock.json
             fleet/worker/package-lock.json
             mailsort/worker/package-lock.json
+            recall/worker/package-lock.json
             proto/package-lock.json
       - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
@@ -1158,6 +1158,14 @@ jobs:
       # generated schema, and carry counts and codes only. Host only; Mailsort checks runs the entrypoint in workerd.
       - name: Mailsort answers ops-v1 as declared
         working-directory: mailsort/worker
+        run: |
+          npm ci --no-audit --no-fund
+          npx --no-install vitest run test/ops-golden.test.ts
+
+      # ops-v1: recall's status answers keep their golden bytes and the contract's recall fixtures, pass the generated
+      # schema, and carry counts and codes only. Host only; Recall checks runs the entrypoint in workerd.
+      - name: Recall answers ops-v1 as declared
+        working-directory: recall/worker
         run: |
           npm ci --no-audit --no-fund
           npx --no-install vitest run test/ops-golden.test.ts
@@ -1851,10 +1859,10 @@ jobs:
 
   dashboard-deploy:
     name: Dashboard deploy
-    # After the app deploys: the service bindings MAIL_HERO, TODOFY, WATCH, FLEET and MAILSORT name their "Ops"
+    # After the app deploys: the service bindings MAIL_HERO, TODOFY, WATCH, FLEET, MAILSORT and RECALL name their "Ops"
     # entrypoints, which must be live first. An app deploy that did not run (nothing of that app changed) is fine; one that
     # failed or was cancelled stops this job.
-    needs: [changes, dashboard-checks, gate, todofy-deploy, mail-hero-deploy, watch-deploy, fleet-deploy, mailsort-deploy, website-relay-deploy]
+    needs: [changes, dashboard-checks, gate, todofy-deploy, mail-hero-deploy, watch-deploy, fleet-deploy, mailsort-deploy, recall-deploy, website-relay-deploy]
     # Explicit status function and results, as for Todofy deploy (implicit success() and skipped ancestors).
     if: >-
       ${{ !cancelled()
@@ -1866,6 +1874,7 @@ jobs:
       && (needs.watch-deploy.result == 'success' || needs.watch-deploy.result == 'skipped')
       && (needs.fleet-deploy.result == 'success' || needs.fleet-deploy.result == 'skipped')
       && (needs.mailsort-deploy.result == 'success' || needs.mailsort-deploy.result == 'skipped')
+      && (needs.recall-deploy.result == 'success' || needs.recall-deploy.result == 'skipped')
       && (needs.website-relay-deploy.result == 'success' || needs.website-relay-deploy.result == 'skipped')
       && github.ref == 'refs/heads/main'
       && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
@@ -1964,9 +1973,8 @@ jobs:
       source_sha: ${{ github.sha }}
     secrets: inherit
 
-  # recall: CHECK_ONLY in ci_changes.py keeps recall_deploy false until "Infra apply" has created its Access
-  # applications and its bucket and the go-live commit adds the AUD (recall/docs/design.md section 11). Home does not
-  # bind recall before that commit, so Home's deploy does not wait for this job yet.
+  # recall: deployed since "Infra apply" created its Access applications and its bucket and the go-live commit added the
+  # AUD (recall/docs/design.md section 11). Home binds its Ops entrypoint (RECALL), so Home's deploy waits for this job.
   recall-deploy:
     name: Recall deploy
     needs: [changes, recall-checks, gate]

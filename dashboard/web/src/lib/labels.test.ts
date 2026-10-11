@@ -18,6 +18,8 @@ import mailHeroOk from '../../../../contracts/ops-v1/fixtures/OpsStatus/mail-her
 import todofyOk from '../../../../contracts/ops-v1/fixtures/OpsStatus/todofy-ok.json'
 import watchDegraded from '../../../../contracts/ops-v1/fixtures/OpsStatus/watch-degraded.json'
 import watchOk from '../../../../contracts/ops-v1/fixtures/OpsStatus/watch-ok.json'
+import recallDegraded from '../../../../contracts/ops-v1/fixtures/OpsStatus/recall-degraded.json'
+import recallOk from '../../../../contracts/ops-v1/fixtures/OpsStatus/recall-ok.json'
 import shedWatch from '../../../../contracts/ops-v1/fixtures/GuardState/shed-watch.json'
 import report from '../../../../contracts/ops-v1/fixtures/OpsReport/daily.json'
 
@@ -33,9 +35,9 @@ describe('labels', () => {
   })
 
   it('labels every code in the contract fixtures', () => {
-    const signals = [...mailHeroDegraded.signals, ...todofyDegraded.signals, ...watchDegraded.signals].map((signal) => signal.code)
+    const signals = [...mailHeroDegraded.signals, ...todofyDegraded.signals, ...watchDegraded.signals, ...recallDegraded.signals].map((signal) => signal.code)
     for (const code of [...signals, ...report.items.map((item) => item.code)]) expect(signalLabel(code)).not.toBe(code)
-    const counters = [mailHeroOk, todofyOk, watchOk, watchDegraded].flatMap((status) => Object.keys(status.counters))
+    const counters = [mailHeroOk, todofyOk, watchOk, watchDegraded, recallOk].flatMap((status) => Object.keys(status.counters))
     for (const name of counters) expect(counterInfo(name).label).not.toBe(name)
     const modes = [mailHeroOk, todofyOk, watchOk].flatMap((status) => Object.keys(status.modes))
     for (const name of modes) expect(modeInfo(name, false).label).not.toBe(name)

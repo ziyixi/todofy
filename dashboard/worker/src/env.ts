@@ -21,6 +21,8 @@ export interface Env {
   readonly WEBSITE_SYNC: Service<WebsiteSyncEntrypoint>;
   /** mailsort's Ops entrypoint: status() and setGuard() (counts and codes of the Gmail sorting). */
   readonly MAILSORT: Service<WatchOpsEntrypoint>;
+  /** recall's Ops entrypoint: status() (counts and codes of the browsing record); its setGuard always refuses. */
+  readonly RECALL: Service<WatchOpsEntrypoint>;
   readonly HOME: DurableObjectNamespace<HomeState>;
   readonly ASSETS: Fetcher;
 

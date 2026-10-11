@@ -90,11 +90,6 @@ _spec.loader.exec_module(generate)
 # The activation commit records the real Access IDs/AUD and removes CHECK_ONLY in the same change.
 AHEAD_OF_DEPLOY = ({"fleet": load_profile(REPO)["platform_hostname"]}
                   if "fleet" in test_wrangler_configs.ci_changes.CHECK_ONLY else {})
-# recall's applications (the whole host, and the Bypass of its machine routes) and its bucket are declared ahead of
-# its Worker's first deploy the same way (recall/docs/design.md section 11): its config names the host only until
-# "Infra apply" creates them and its AUD and application id are committed (and CHECK_ONLY is emptied).
-if "recall" in test_wrangler_configs.ci_changes.CHECK_ONLY:
-    AHEAD_OF_DEPLOY["recall"] = "recall." + load_profile(REPO)["zone"]
 # Hosts an Access application may still list although no wrangler.toml declares them. Empty since FlowDay's F3
 # staging host left both FlowDay applications after the F4 cutover (README.md "FlowDay"); a rollback that adds a host
 # back to an application adds it here in the same commit (test_retiring_hosts_are_exact).
@@ -371,8 +366,8 @@ class MatchesTheApps(unittest.TestCase):
                 self.assertNotIn(host, code.split("# --- FlowDay")[0], "only FlowDay's applications may list it")
 
     def test_ahead_of_deploy_is_exact(self):
-        """A first-phase app (Fleet and mailsort before, recall now) has no fake AUD and cannot deploy before the gated
-        Access creation, and neither can Home while it binds the app (recall's Ops binding comes with its go-live)."""
+        """A first-phase app (Fleet, mailsort and recall before; none now) has no fake AUD and cannot deploy before the
+        gated Access creation, and neither can Home while it binds the app."""
         owner = hcl_map((INFRA / "access.tf").read_text(), "owner_apps")
         self.assertEqual(set(AHEAD_OF_DEPLOY), set(test_wrangler_configs.ci_changes.CHECK_ONLY))
         for worker, host in AHEAD_OF_DEPLOY.items():

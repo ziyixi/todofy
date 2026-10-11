@@ -307,10 +307,10 @@ the strip's observed items, §4), the canary rows or the reminder ledger. The me
 older estimates; reads grow with retained decisions while views continue to poll every five minutes.
 A partial index (`canary_runs_active`) keeps the "run in progress" lookup at one row for ticks and views.
 
-Per tick: 6 `status()` (Mail Hero, Todofy, the watch app, the website relay, Fleet and Newsletter) + 3 probes (website,
-FlowDay, links) + 1 GraphQL + ≤ 3 `setGuard` + ≤ 2 canary calls + ≤ 1 `reportOps` + ≤ 12 read-only drift calls (§10) =
-28 outbound calls
-(`outboundPerTick`, tested ≤ 30 and asserted per tick in workerd; Free allows 50). The probes run in parallel with the
+Per tick: 8 `status()` (Mail Hero, Todofy, the watch app, the website relay, Fleet, Newsletter, mailsort and recall) +
+3 probes (website, FlowDay, links) + 1 GraphQL + ≤ 4 `setGuard` + ≤ 2 canary calls + ≤ 1 `reportOps` + ≤ 12 read-only
+drift calls (§10) = 31 outbound calls
+(`outboundPerTick`, tested ≤ `MAX_OUTBOUND_PER_TICK` = 31 and asserted per tick in workerd; Free allows 50). The probes run in parallel with the
 status polls. GraphQL stays one query per tick (48/day) plus refreshes ≤ 1/min. DO rows written grow by ~4 per tick
 (`cf_scripts` and one `probe:<entry>` per probe). The FlowDay and links probes are each one request of that app's Worker per tick (≤ 144 a day with refreshes, no D1 query); the website's is a static asset. Everything else as in
 [`limits.md`](limits.md).

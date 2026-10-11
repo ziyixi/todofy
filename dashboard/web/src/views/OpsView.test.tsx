@@ -69,8 +69,8 @@ describe('操作与记录', () => {
     // mailsort: its Ops entrypoint (counts and codes of the Gmail sorting).
     expect(rows[6]).toHaveTextContent('ops-v1 状态接口')
     expect(within(rows[6] as HTMLElement).getAllByRole('cell').at(-1)).toHaveTextContent('mailsort')
-    // recall: check-only, its Ops entrypoint bound only by its go-live commit.
-    expect(rows[7]).toHaveTextContent('未接入监控')
+    // recall: its Ops entrypoint (counts and codes of the browsing record).
+    expect(rows[7]).toHaveTextContent('ops-v1 状态接口')
     expect(within(rows[7] as HTMLElement).getAllByRole('cell').at(-1)).toHaveTextContent('recall')
     expect(rows[8]).toHaveTextContent('公开地址探测')
     expect(rows[10]).toHaveTextContent('ops-v1 状态接口')

@@ -242,7 +242,7 @@ const ENTRIES: readonly EntryDef[] = [
     accent: 'violet',
     url: 'https://recall.ziyixi.science/',
     access: true,
-    status: { type: 'none' },
+    status: { type: 'ops_v1', binding: 'RECALL', guard: false },
     tile_metric: null,
     app_only_signals: [],
     order: 10,

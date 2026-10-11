@@ -19,21 +19,13 @@ Rules for this file:
 Last updated: 2026-10-11.
 <!-- Active work is separate from the production evidence below. -->
 
-## In flight (2026-10-11, Claude): mailsort archives every labelled mail
+## Done (2026-10-11, Claude): mailsort archives every labelled mail
 
 Owner decision (2026-10-11): a mail mailsort labels leaves the inbox and is found under its label, and is never marked
-read. Branch `mailsort-archive-all` (one commit, not pushed or deployed yet): the needs_action exception is gone from
-the pipeline and the owner's review choices, Clef is no longer asked `needs_action` (two noul questions), and only a
-label's 归档 switch (`keep_in_inbox`) keeps its mail in the inbox. No migration and no proto removal: the decisions'
-`needs_action` column is written NULL and the replay's `needs_action_probability` stays unset (its comment says so).
-Docs: mailsort design §3.1, §4.4, §5, §7, §9, §11, README and AGENTS; UI copy (设置's 正式 question and line, 归档's
-hint). Checked locally: the Worker's lint, typecheck, unit, runtime (CPU included) and smoke runs, the UI's lint,
-typecheck, tests and build, the deploy tests and the bundle (124.3 KiB gzip), proto lint, api-lint and breaking, and
-`.github/scripts`. Left: push, `CI gate`, merge, `Mailsort deploy`. After the deploy: a newly labelled mail that asks
-for action (a pickup code, a payment) leaves the inbox under its label and stays unread; its ledger entry says
-`archived: true` while the label's 归档 is on.
+read. Deployed in `a49349d`: the needs_action exception and question are gone; only a label's 归档 switch
+(`keep_in_inbox`) keeps its mail in the inbox (the owner turned it off on every label, so all of them archive).
 
-## In flight (2026-10-10, Claude): recall, the browsing recorder (built, check-only)
+## In flight (2026-10-10, Claude): recall, the browsing recorder (go-live commit ready, not deployed)
 
 Owner request (2026-10-10): record what the owner reads in Chrome (visits with real focus time, the page's text after
 ten seconds), with a very good timeline and search UI, and keep a durable copy on the NAS through a generic protocol
@@ -77,9 +69,9 @@ and "Recall deploy" jobs, the release recipe in `worker-release.yml` (production
 reconcile matrix, the release and bootstrap tools (`control.py`, `cloudflare.py`, `deployments.py`, `finalize.py`,
 `github_secrets.py`), cf-guard's committed-config test, `infra/` (the owner application, the Bypass application of the
 three machine routes and the bucket: 36 objects; `AHEAD_OF_DEPLOY`), the drift desired state, the account inventory
-and ops-v1's `OpsStatus.app` (Home keeps recall out of the apps it calls: `UNBOUND_OPS_APPS`). Red by design until
-"Infra apply": "Infra drift" (the four creates: two Access applications, the Bypass policy, the bucket). Home's
-配置漂移 shows recall missing until the first deploy (a view, no mail).
+and ops-v1's `OpsStatus.app` (Home kept recall out of the apps it calls: `UNBOUND_OPS_APPS`). The owner's "Infra
+apply" (2026-10-10) created the four objects "Infra drift" had planned (two Access applications, the Bypass policy,
+the bucket). Home's 配置漂移 shows recall missing until the first deploy (a view, no mail).
 
 On `main`, "Personal cloud reconcile" has failed since `eaeddf4`: its inventory job counts 2 changes (the
 Worker `recall` and the bucket `recall-store`, registered but not created) and "Compare or repair recall" ends
@@ -91,6 +83,19 @@ equal to that set (and its app list to `control.py`'s `WORKERS`) by `test_reconc
 itself was already complete on `main` (`ci.yml` `recall-deploy`, `worker-release.yml`, `control.py`, `cloudflare.py`,
 `deployments.py`, `finalize.py`, `github_secrets.py`; `RELEASE_PENDING` was removed before landing).
 
+Branch `recall-release`, commit 2, is the go-live commit (design §11 step 3, mailsort's `0d74183` as the template):
+the AUD and application id of the Access application `recall` in `config/resources.toml`, written by `generate.py`
+into `recall/wrangler.toml` (`ACCESS_AUDIENCE`) and `infra/ids.tf`; `CHECK_ONLY` and `AHEAD_OF_DEPLOY` emptied,
+`recall` in `HOME_BOUND`; Home's `RECALL` binding to recall's `Ops` (`dashboard/wrangler.toml`, `status.type =
+"ops_v1"`, guard false, `UNBOUND_OPS_APPS` emptied, Chinese labels for recall's signals and counters), Home's deploy
+waiting for recall's in `ci.yml`, and Home's tick budget `MAX_OUTBOUND_PER_TICK` raised from 30 to 31 (eight
+`status()` calls now; Free allows 50 subrequests); recall's ops-v1 fixtures `OpsStatus/recall-ok.json` and
+`recall-degraded.json` with their golden test `recall/worker/test/ops-golden.test.ts` (a Contracts step), its
+deployment-mode profile in Mail Hero's and Todofy's contract tests, and the drift desired state regenerated. The
+Bypass application `recall machine routes` keeps its AUD and id out of the repository: nothing checks them (the Worker
+checks the machine tokens itself; fleet_receipt's id is recorded only for a rebuild by import, which would also need
+its policy's id). `FIRST_DEPLOY_PENDING` and the reconcile `exclude` stay until the commit after the first deploy.
+
 Verify, in `recall/worker`: `npm run lint`, `npm run typecheck`, `npm test`, `npm run test:runtime`,
 `npm run test:smoke` (after the UI build; `RECALL_SMOKE_PYTHON` names a Python 3.12+); in `recall/web` and
 `recall/extension`: `npm run lint`, `npm run typecheck`, `npm test`, `npm run build`; in `recall`:
@@ -98,15 +103,25 @@ Verify, in `recall/worker`: `npm run lint`, `npm run typecheck`, `npm test`, `np
 (`python3 -m unittest discover -s .github/scripts`, the tools' tests, `generate.py --check`, `catalog.py --check`,
 `inventory.py --check`, cf-guard's tests).
 
-Next, in order: land `recall-release`; the owner dispatches "Infra apply" and sets `RECALL_CSRF_SIGNING_KEY`
-(`openssl rand -hex 32 | gh secret set ...`, never shown); the go-live commit (the AUD and application ids into
-`config/resources.toml` and `infra/ids.tf` through `generate.py`, `CHECK_ONLY` and `AHEAD_OF_DEPLOY` emptied, Home's
-`RECALL` binding and `status.type = "ops_v1"` with `UNBOUND_OPS_APPS` emptied and ops-v1 golden fixtures for recall
-in `contracts/ops-v1` and Contracts, as mailsort's had); after the first deploy the namespace id
-(`FIRST_DEPLOY_PENDING` emptied and the reconcile matrix's `exclude` removed, one commit); then the owner's
-`mint-tokens.mjs`, the extension loaded unpacked, the image dispatched and the NAS container. Phase 1a's first checks
-in a real Chrome (design §3.10, `recall/extension/README.md`): one focus switch, one capture, the badge, the options
-page, and whether Chrome serves an unpacked extension's files as they are on disk (the self-update relies on it).
+Next, in order:
+
+1. Owner, before `recall-release` lands: the CSRF key, never shown, in their own terminal:
+   `openssl rand -hex 32 | gh secret set RECALL_CSRF_SIGNING_KEY -R ziyixi/todofy --env production`. Nothing else is
+   new: the owner addresses come from `DASHBOARD_ACCESS_OWNER(_ALIASES)`, `RECALL_WORKER_SECRETS` may stay unset, and
+   the machine tokens' digests are never a deploy's. Without the key, "Recall deploy" stops at "Write the Worker
+   secrets file" and Home's deploy (which needs it) does not run.
+2. Land `recall-release` (both commits): its push deploys recall for the first time, then Home with the `RECALL`
+   binding. Check: the release's production, Access and Bypass probes; `https://recall.ziyixi.science/` asks for the
+   Access login; after a tick Home's 浏览记录 tile shows recall's own status (正常, with the information `no_device`
+   until the first upload) instead of 未知.
+3. Agent, right after that deploy: the `RecallState` namespace id into `config/resources.toml` `[durable_objects]`
+   (`recall-state`, read with the read-only admin helper), `FIRST_DEPLOY_PENDING` emptied and the reconcile matrix's
+   `exclude` removed in the same commit (the inventory and `test_reconcile_workflow.py` refuse anything else), then
+   `generate.py` (Home's resource identities) and `inventory.py --generate`; as mailsort's `6f5f93e`.
+4. Owner: `node recall/deploy/mint-tokens.mjs` (needs the deployed Worker), the extension loaded unpacked, the sync
+   image dispatched and the NAS container. Phase 1a's first checks in a real Chrome (design §3.10,
+   `recall/extension/README.md`): one focus switch, one capture, the badge, the options page, and whether Chrome
+   serves an unpacked extension's files as they are on disk (the self-update relies on it).
 
 ## Done (2026-10-10, Claude): mailsort model-first, calibrated and live
 

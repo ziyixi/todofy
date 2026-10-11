@@ -238,6 +238,11 @@
           "source": "config"
         },
         {
+          "name": "RECALL",
+          "type": "service",
+          "source": "config"
+        },
+        {
           "name": "TODOFY",
           "type": "service",
           "source": "config"
@@ -555,6 +560,11 @@
       "routes": [],
       "crons": [],
       "bindings": [
+        {
+          "name": "ACCESS_AUDIENCE",
+          "type": "plain_text",
+          "source": "config"
+        },
         {
           "name": "ACCESS_ISSUER",
           "type": "plain_text",

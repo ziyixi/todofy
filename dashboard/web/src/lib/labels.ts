@@ -162,6 +162,15 @@ const SIGNALS: Readonly<Record<string, string>> = {
   breaker_tripped: '写入超限，已退回影子模式（只记录）',
   sync_stale: 'Gmail 同步已停止',
   ai_quota_exhausted: 'Workers AI 今日额度已用完，邮件顺延到明天',
+  // recall
+  device_stale: '有浏览器超过 24 小时未上传',
+  archive_behind: '归档落后超过 24 小时',
+  no_captures: '昨天读过的页面没有收到正文',
+  items_rejected: '近 24 小时有上传条目被拒收',
+  storage_high: '存储接近预算',
+  upload_over_budget: '今日写入额度已用完，上传顺延',
+  reads_over_budget: '今日读取额度已用完，归档已暂停',
+  no_device: '尚无浏览器上传',
   // dashboard digest items
   usage_unavailable: '用量数据获取失败',
   usage_not_configured: '未配置用量查询令牌',
@@ -414,6 +423,11 @@ const COUNTERS: Readonly<Record<string, { label: string; kind: CounterKind }>> =
   neurons_today: { label: '今日 neurons', kind: 'count' },
   neuron_budget: { label: 'neuron 预算', kind: 'count' },
   last_sync_minutes: { label: '距上次同步（分钟）', kind: 'count' },
+  // recall
+  visits_today: { label: '今日访问', kind: 'count' },
+  texts_today: { label: '今日正文', kind: 'count' },
+  rows_written_today: { label: '今日写入行', kind: 'count' },
+  rows_read_today: { label: '今日读取行', kind: 'count' },
 }
 
 export function counterInfo(name: string): { label: string; kind: CounterKind } {

@@ -59,8 +59,8 @@ def expect(
     recall_deploy=False,
 ):
     # The bootstrap mask (ci_changes.outputs): an app in CHECK_ONLY never deploys, and neither does Home while an app it
-    # binds is one. Mailsort was CHECK_ONLY until its Access application existed (mailsort/docs/design.md §12); recall is
-    # until its Access applications and bucket exist (recall/docs/design.md §11).
+    # binds is one. Mailsort was CHECK_ONLY until its Access application existed (mailsort/docs/design.md §12), recall
+    # until its Access applications and bucket existed (recall/docs/design.md §11).
     if "mailsort" in ci_changes.CHECK_ONLY:
         mailsort_deploy = False
     if "recall" in ci_changes.CHECK_ONLY:
@@ -194,9 +194,10 @@ class Classify(unittest.TestCase):
                 self.assertEqual(push([path], ref=BRANCH), expect(F, F, F, F, F, **FLOWDAY))
 
     def test_every_app_has_stable_check_and_deploy_outputs_during_bootstrap(self):
-        """CHECK_ONLY suppresses deployment, never the output that the workflow consumes. recall is the one app in it
-        until "Infra apply" creates its Access applications and its bucket (recall/docs/design.md section 11)."""
-        self.assertEqual(ci_changes.CHECK_ONLY, {"recall"})
+        """CHECK_ONLY suppresses deployment, never the output that the workflow consumes. No app is in it since "Infra
+        apply" created recall's Access applications and bucket (2026-10-10, recall/docs/design.md section 11); a new app
+        joins it until its resources are ready."""
+        self.assertEqual(ci_changes.CHECK_ONLY, set())
         for app in ci_changes.APPS:
             with self.subTest(app=app):
                 self.assertIn(f"{ci_changes.PREFIX[app]}_check", ci_changes.KEYS)
@@ -223,25 +224,27 @@ class Classify(unittest.TestCase):
         finally:
             ci_changes.CHECK_ONLY = saved
 
-    def test_recall_is_checked_but_never_deployed_until_its_resources_exist(self):
-        """recall is CHECK_ONLY until "Infra apply" creates its Access applications and its bucket
-        (recall/docs/design.md section 11): its deploy job and release recipe exist, its deploy output stays false.
-        Home does not bind it yet, so Home deploys as before; its owner API, upload and archive packages reach recall
-        alone."""
-        for result in (ci_changes.everything(), ci_changes.dispatched("all"), ci_changes.dispatched("recall"), push(["recall/worker/src/state.ts"])):
-            with self.subTest(result=result):
-                self.assertTrue(result["recall_check"])
-                self.assertFalse(result["recall_deploy"])
-        self.assertTrue(ci_changes.everything()["dashboard_deploy"])
+    def test_recall_deploys_and_holding_it_back_would_hold_home_too(self):
+        """recall deploys like any app since "Infra apply" created its Access applications and its bucket
+        (recall/docs/design.md section 11); were it CHECK_ONLY again, Home, which binds its Ops entrypoint, would wait
+        with it (HOME_BOUND). Its owner API, upload and archive packages reach recall alone."""
+        result = push(["recall/worker/src/state.ts"])
+        self.assertTrue(result["recall_deploy"])
+        self.assertFalse(result["dashboard_deploy"])
+        self.assertFalse(push(["recall/app.toml"])["recall_deploy"])
         self.assertFalse(push(["recall/shared/scrub.ts"])["dashboard_deploy"])
         for path in ("proto/recall/ui/v1/page.proto", "proto/recall/ingest/v1/ingest.proto", "proto/recall/archive/v1/archive.proto"):
             self.assertEqual(ci_changes.proto_deploys(path), {"recall"})
-        self.assertNotIn("recall", ci_changes.HOME_BOUND)
+        self.assertIn("recall", ci_changes.HOME_BOUND)
         saved = ci_changes.CHECK_ONLY
         try:
-            ci_changes.CHECK_ONLY = set()
-            self.assertTrue(push(["recall/worker/src/state.ts"])["recall_deploy"])
-            self.assertFalse(push(["recall/app.toml"])["recall_deploy"])
+            ci_changes.CHECK_ONLY = {"recall"}
+            for result in (ci_changes.everything(), ci_changes.dispatched("all"), ci_changes.dispatched("recall"),
+                           push(["recall/worker/src/state.ts", "dashboard/worker/src/index.ts"])):
+                with self.subTest(result=result):
+                    self.assertTrue(result["recall_check"])
+                    self.assertFalse(result["recall_deploy"])
+                    self.assertFalse(result["dashboard_deploy"])
         finally:
             ci_changes.CHECK_ONLY = saved
 
@@ -1008,7 +1011,7 @@ class RealGit(unittest.TestCase):
         after = self.commit("README.md.orig")
         outputs = self.main_run(after, green)
         unaffected = {"website_check", "website_deploy", "website_relay_deploy", "newsletter_check", "newsletter_deploy", "platform_check", "platform_publish", "platform_deploy"}
-        # An app that compiles edge-auth in but is CHECK_ONLY does not deploy (recall now), nor Home while it binds one.
+        # An app that compiles edge-auth in but is CHECK_ONLY does not deploy (none now), nor Home while it binds one.
         bootstrap = {f"{ci_changes.PREFIX[app]}_deploy" for app in ci_changes.CHECK_ONLY & set(ci_changes.PACKAGE_USERS["edge-auth"])}
         if ci_changes.HOME_BOUND & ci_changes.CHECK_ONLY:
             bootstrap.add("dashboard_deploy")
@@ -1232,6 +1235,7 @@ class DeployConditions(unittest.TestCase):
         ("dashboard-deploy", "watch-deploy"),
         ("dashboard-deploy", "fleet-deploy"),
         ("dashboard-deploy", "mailsort-deploy"),
+        ("dashboard-deploy", "recall-deploy"),
         ("dashboard-deploy", "website-relay-deploy"),
         ("watch-deploy", "todofy-deploy"),
     }
@@ -1334,7 +1338,8 @@ class DeployConditions(unittest.TestCase):
     def test_the_dashboard_deploys_after_the_apps_and_watch_after_todofy(self):
         self.assertLessEqual({"todofy-deploy"}, set(self.needs(self.jobs()["watch-deploy"])))
         block = self.jobs()["dashboard-deploy"]
-        self.assertLessEqual({"todofy-deploy", "mail-hero-deploy", "watch-deploy", "fleet-deploy"}, set(self.needs(block)))
+        self.assertLessEqual({"todofy-deploy", "mail-hero-deploy", "watch-deploy", "fleet-deploy", "mailsort-deploy", "recall-deploy"},
+                             set(self.needs(block)))
         self.assertIn("group: dashboard-production", block)
         # The only token: the one Todofy deploy uses; no other secret reaches wrangler's environment.
         # (the hostname guard's step and the deploy step).

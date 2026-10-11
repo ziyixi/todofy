@@ -132,8 +132,7 @@ describe('GetHomeView and RefreshHomeView', () => {
       newsletter: ['unknown', 'never_checked'],
       fleet: ['unknown', 'never_checked'],
       mailsort: ['unknown', 'never_checked'],
-      // Check-only: its tile links to the app and is not monitored before its go-live commit binds it.
-      recall: ['unmonitored', null],
+      recall: ['unknown', 'never_checked'],
     });
     expect(home.cloudflare).toMatchObject({ usage_status: 'unavailable', quota: [], workers: 0, errors_today: 0 });
     expect(h.outboundLog).toEqual([]);
@@ -400,6 +399,7 @@ describe('GetFlowsView, GetOpsView and the mutations', () => {
       ['newsletter', true, 'newsletter'],
       ['fleet', true, 'fleet'],
       ['mailsort', true, 'mailsort'],
+      ['recall', true, 'recall'],
     ]);
     expect(ops.canary).toMatchObject({ id: 'mail-todofy', enabled: true, manual_limit: 3 });
     expect(ops.digest.enabled).toBe(true);
