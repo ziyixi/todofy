@@ -45,7 +45,7 @@ except ModuleNotFoundError:
         raise
     raise unittest.SkipTest(
         f"test_proto needs Python 3.11+ (tomllib), this is {sys.version.split()[0]}: "
-        "uv run --no-project --python 3.12 python -m unittest discover -s .github/scripts"
+        "uv run --no-project --python 3.12 --with-requirements .github/scripts/requirements.txt python -m unittest discover -s .github/scripts"
     ) from None
 
 sys.path.insert(0, str(Path(__file__).parent))

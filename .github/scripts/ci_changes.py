@@ -80,7 +80,8 @@ so a change whose run was cancelled or failed is checked (and deployed) again by
   other branches base = git merge-base origin/main HEAD, so the head commit's gate covers every
                  change on the branch, not only the latest push.
   No usable base (no successful main run yet, API failure, base not an ancestor, no origin/main)
-  runs everything. An app's own directory checks and deploys it; contracts/ and .github/ re-check
+  runs everything. An app's own directory checks it and deploys it unless the changed paths are in the
+  explicitly reviewed APP_TEST_DIRECTORIES (checks still run); contracts/ and .github/ re-check
   every app but deploy none, except the contract files the TypeScript Workers bundle (BUNDLED_BY,
   e.g. OPS_LIMITS in contracts/ops-v1/ops-v1.ts, or TASK_INTENT_LIMITS in
   contracts/task-intent-v1/task-intent-v1.ts), which also deploy every app listed for them. A
@@ -94,7 +95,7 @@ so a change whose run was cancelled or failed is checked (and deployed) again by
 Newsletter remains an independent VPS image. newsletter_deploy publishes its tested image to GHCR; it does
 not upgrade the server. It still uses its locked external ziyixi-protos dependency, not the root proto runtime.
 platform/ checks and publishes its own independently tested daemon image; platform_deploy upgrades the VPS.
-Newsletter changes also check and publish Platform from the same source SHA before the VPS release.
+Newsletter production changes also check and publish Platform from the same source SHA before the VPS release.
 A push to main reuses a green branch run of the same commit (find_reusable): when a completed push run of
 this workflow on another branch has the same head SHA, concluded success, and its Changes, CI gate and
 every check job this push needs (CHECK_JOBS) succeeded, the check outputs are all false (those jobs are
@@ -203,6 +204,26 @@ INFRA = ("infra/", "tools/infra-plan-summary/")
 # These are source inputs to checked generators, not deployable Worker bundles. Generated app source changes are
 # classified through their own app directory; editing the central inputs alone cannot publish production.
 CLOUD_CONFIG = {"config/cloud.toml", "config/resources.toml", "config/account-resources.toml"}
+# Reviewed test directories outside production entrypoints and image inputs. Do not replace this with
+# a filename glob: fixtures and files named "test" inside production source can be shipped. Newsletter's
+# Docker COPY/.dockerignore and Platform's minimal context exclude their tests; Todofy's Python base_dir
+# is worker/. The TS Workers bundle src/ imports, not sibling test/. Production/config changes in the
+# same diff still deploy normally. test_app_isolation.py guards imports across this boundary.
+APP_TEST_DIRECTORIES = (
+    "newsletter/tests/",
+    "platform/tests/",
+    "todofy/tests/",
+    "todofy/gateway/test/",
+    "mail-hero/cloudflare/test/",
+    "dashboard/worker/test/",
+    "flowday/worker/test/",
+    "links/worker/test/",
+    "watch/worker/test/",
+    "fleet/worker/test/",
+    "mailsort/worker/test/",
+    "recall/worker/test/",
+    "brief/worker/test/",
+)
 # packages/<name>/ -> the apps whose Workers compile it in (a "file:../../packages/<name>" dependency).
 PACKAGE_USERS = {"edge-auth": ("todofy", "mail-hero", "dashboard", "flowday", "links", "watch", "fleet", "mailsort", "recall", "brief")}
 # The protobuf IDL (proto/README.md): app -> the languages ("ts", "python") whose generated code and runtime
@@ -440,8 +461,9 @@ def classify(paths: Iterable[str]) -> dict[str, bool]:
     # A Newsletter release also tests and publishes the independent monitor image from this source SHA.
     if "newsletter" in apps:
         apps.add("platform")
-    # Catalog metadata is verified/generated before the gate; an app.toml itself is not bundled.
+    # Catalog metadata and reviewed test directories are checked, but are not production inputs.
     direct_deploys = {app for app in apps if any(path.startswith(f"{app}/") and path != f"{app}/app.toml"
+                       and not path.startswith(APP_TEST_DIRECTORIES)
                        and not (app in {"newsletter", "platform"} and path.endswith(".md")) for path in paths)}
     if "newsletter" in direct_deploys:
         direct_deploys.add("platform")

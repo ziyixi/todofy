@@ -47,6 +47,9 @@ only in the steps that use them. Do not move secrets to a job-wide environment o
 The `Changes` job runs the workflow guards. `workflow_sources.py` follows local action steps so the existing
 command/credential/order assertions still inspect the executed recipes; `test_composite_actions.py` independently
 checks the real caller boundaries, input wiring and single-job release structure. Keep both kinds of checks.
+Native boundary assertions read YAML fields using pinned PyYAML, so indentation, quoting and key order do not
+change their result. The existing expanded recipe/script tests still check commands and release behavior;
+they are migrated only when touched. Install the root test dependencies from `.github/scripts/requirements.txt`.
 On failure, open the failed job and its named composite step; application commands retain their original step names.
 
 The 2026-10-11 refactor passed [full branch CI](https://github.com/ziyixi/todofy/actions/runs/38134080448),
@@ -75,6 +78,13 @@ is not bundled. Commit regenerated outputs together. A changed generated Home re
 `dashboard/` source and can release Home. `config/` and its generator are also checked without silently
 migrating an account; their changed committed Wrangler outputs follow the affected Worker's normal release.
 
+The explicit `APP_TEST_DIRECTORIES` directories in `ci_changes.py` run the same checks without selecting production
+releases. They are external test trees confirmed absent from runtime bundles/images; the source-import guard
+rejects production imports from them. Newsletter test-only edits still check Newsletter and Platform, but do not
+publish their images or deploy the VPS. Mixed changes containing production inputs still release normally.
+Unknown paths, collocated test files, Website/extension paths, dependencies, Dockerfiles and build/deploy inputs
+retain their existing release rules. Manual dispatch and the full-run fallback are unchanged.
+
 `CHECK_ONLY` in the classifier explicitly freezes new applications before their resources are ready.
 While Fleet is in that set, both Fleet and Home deploy outputs remain false, including dispatch, full-run
 and same-SHA reuse. Complete the reviewed Access bootstrap, commit its real AUD/identity configuration and
@@ -86,7 +96,7 @@ existing namespace, removes the first-deploy exceptions and binds Home to Brief'
 
 | Job | Checks or release responsibility |
 | --- | --- |
-| `Changes` | Runs the `.github/scripts` tests (among them [app isolation](../.github/scripts/test_app_isolation.py): every catalog app's imports resolve only to itself, `proto/`, `contracts/`, `packages/`, and `tools/` from tests and build/deploy scripts; the website uses only `proto/`; no bare specifier climbs with `..`; the Todofy UI source never names `mail-hero`/`mail_hero`) and shared deployment-tool tests, validates catalog/public config, then classifies the cumulative diff. Python 3.11+ is required; locally use `uv run --no-project --python 3.12 python -m unittest discover -s .github/scripts`. Dispatch options, `CHECK_JOBS` and release conditions are tested against the workflow. |
+| `Changes` | Runs the `.github/scripts` tests (among them [app isolation](../.github/scripts/test_app_isolation.py): every catalog app's imports resolve only to itself, `proto/`, `contracts/`, `packages/`, and `tools/` from tests and build/deploy scripts; the website uses only `proto/`; no bare specifier climbs with `..`; the Todofy UI source never names `mail-hero`/`mail_hero`) and shared deployment-tool tests, validates catalog/public config, then classifies the cumulative diff. Python 3.11+ is required; locally use `uv run --no-project --python 3.12 --with-requirements .github/scripts/requirements.txt python -m unittest discover -s .github/scripts`. Dispatch options, `CHECK_JOBS` and release conditions are tested against the workflow. |
 | `Shared packages` | Locked install, typecheck and tests for the independent `packages/*/` consumers. |
 | `Todofy static checks`, `Todofy runtime (1/3)`–`(3/3)`, `Todofy checks` | Host/gateway/UI checks, dry-runs and bundle/CPU budgets; real-binding tests in balanced shards with completeness and serial-test guards. All required shards must pass. |
 | `Mail Hero checks`, `Dashboard checks`, `FlowDay checks`, `Links checks`, `Watch checks` | Each application's config/wrapper checks, lint/typechecks, synthetic unit and real-binding runtime tests, UI build and production-config dry-run. Existing app-specific CPU, bundle and query budgets stay in their own jobs/runbooks. |

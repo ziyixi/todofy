@@ -33,12 +33,13 @@ except ModuleNotFoundError:
         raise
     raise unittest.SkipTest(
         f"test_app_isolation needs Python 3.11+ (tomllib), this is {sys.version.split()[0]}: "
-        "uv run --no-project --python 3.12 python -m unittest discover -s .github/scripts"
+        "uv run --no-project --python 3.12 --with-requirements .github/scripts/requirements.txt python -m unittest discover -s .github/scripts"
     ) from None
 
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "tools" / "service-catalog"))
 from catalog import load_catalog  # noqa: E402
+from ci_changes import APP_TEST_DIRECTORIES  # noqa: E402
 
 APPS = tuple(load_catalog(REPO).apps)
 SHARED = {"proto", "contracts", "packages"}
@@ -205,7 +206,10 @@ def violation(app: str, importer: PurePosixPath, target: Path) -> str | None:
     """Why `importer` (repository-relative, inside `app`) may not reach `target` (absolute), or None."""
     if not target.is_relative_to(REPO):
         return "leaves the repository"
-    parts = target.relative_to(REPO).parts
+    relative = target.relative_to(REPO)
+    if (relative.as_posix() + "/").startswith(APP_TEST_DIRECTORIES) and not NOT_SHIPPED & set(importer.parts[1:-1]):
+        return "ships, so it may not import a check-only test directory"
+    parts = relative.parts
     top = parts[0] if parts else ""
     if top == app or top in SHARED_FOR.get(app, SHARED):
         return None
@@ -423,6 +427,11 @@ class Rules(unittest.TestCase):
     def test_the_rule(self):
         cases = {
             ("watch", "watch/worker/src/a.ts", "watch/web/src/b.ts"): None,
+            ("watch", "watch/worker/src/a.ts", "watch/worker/test/fake.ts"): "ships, so it may not import a check-only test directory",
+            ("watch", "watch/worker/src/a.ts", "watch/worker/test"): "ships, so it may not import a check-only test directory",
+            ("watch", "watch/worker/test/a.test.ts", "watch/worker/test/fake.ts"): None,
+            ("watch", "watch/deploy/smoke.mjs", "watch/worker/test/fake.ts"): None,
+            ("newsletter", "newsletter/src/newsletter/service.py", "newsletter/tests/support/fakes.py"): "ships, so it may not import a check-only test directory",
             ("watch", "watch/worker/src/a.ts", "proto/ts/x.ts"): None,
             ("watch", "watch/worker/src/a.ts", "contracts/ops-v1/ops-v1.ts"): None,
             ("watch", "watch/worker/src/a.ts", "packages/edge-auth/src/index.ts"): None,

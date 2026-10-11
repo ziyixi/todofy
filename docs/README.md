@@ -13,14 +13,14 @@ The documents below have different jobs; keep one authoritative home for each fa
 | Change auth behavior / 修改鉴权 | [edge-auth SPEC](../packages/edge-auth/SPEC.md) |
 | Check or release code / 检查与发布 | [CI/CD](ci-cd.md), then the application's runbook |
 | Change Cloudflare resources / 修改云资源 | [infra](../infra/README.md) |
-| Recreate or recover the cloud / 重建与恢复 | [Rebuild](rebuild.md): current steps; [code audit](rebuild-audit.md): portability gaps, state/secret inventory and proposed improvements |
-| Understand older layouts / 查迁移背景 | [History](history.md), including dated old-client compatibility |
+| Recreate or recover the cloud / 重建与恢复 | [Rebuild](rebuild.md): current steps; [verification](rebuild-verification.md): tested scope and remaining exercises |
+| Understand older layouts / 查迁移背景 | [History](history.md), including dated old-client compatibility and archived handoffs |
 
 ## Where facts belong
 
 - **README:** an introduction and useful links, not a deployment manifest or test ledger.
 - **AGENTS:** mandatory collaboration, privacy, contract and release constraints; link implementation detail.
-- **HANDOFF:** current working state and recorded checks, not a second architecture specification.
+- **HANDOFF:** active work, latest release evidence and remaining acceptance; completed detail belongs in dated history.
 - **app.toml + Wrangler:** validated service declarations and committed Cloudflare configuration.
   The catalog references Wrangler hostnames/resources; it does not invent a parallel production configuration.
 - **proto + contracts:** the IDL and wire profile, consumer semantics and frozen compatibility evidence.

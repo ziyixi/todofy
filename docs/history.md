@@ -3,6 +3,13 @@
 This page records earlier layouts and the evidence that must survive cleanup. It is not a declaration of
 current production state; [HANDOFF](../HANDOFF.md) names the current rollout and remaining verification.
 
+## Archived handoffs
+
+[Handoff through October 11, 2026](history/handoff-2026-10-11.md) preserves the rollout evidence and earlier
+waiting lists from `414925e`. Later observations in that snapshot supersede many earlier entries. Current work and
+remaining acceptance are in [HANDOFF](../HANDOFF.md); current rebuild steps and verified limits are in
+[Rebuild](rebuild.md) and [rebuild verification](rebuild-verification.md).
+
 ## Imported repositories
 
 Mail Hero and Todofy were separate repositories until 2026-09-29; the website joined on 2026-09-30.

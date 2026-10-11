@@ -139,6 +139,79 @@ def push(paths, ref=MAIN, last_success=BASE, ancestor=True, merge_base=BASE):
 
 
 class Classify(unittest.TestCase):
+    def test_reviewed_test_directories_keep_checks_without_any_publication(self):
+        for directory in ci_changes.APP_TEST_DIRECTORIES:
+            app = directory.split("/", 1)[0]
+            with self.subTest(directory=directory):
+                self.assertTrue((REPO / directory).is_dir())
+                result = push([directory + "nested/fixture.json"])
+                self.assertTrue(result[f"{ci_changes.PREFIX[app]}_check"])
+                expected_checks = {f"{ci_changes.PREFIX[app]}_check"}
+                if app == "newsletter":
+                    expected_checks.add("platform_check")
+                self.assertEqual({key for key, value in result.items() if key.endswith("_check") and value}, expected_checks)
+                self.assertFalse(any(value for key, value in result.items() if key.endswith(("_deploy", "_publish"))))
+                self.assertEqual(result["contracts"], app not in ci_changes.NO_CONTRACTS or app == "newsletter")
+                self.assertEqual(push([directory + "nested/fixture.json"], ref=BRANCH), result)
+
+    def test_newsletter_and_platform_test_only_changes_do_not_release_the_vps_pair(self):
+        self.assertEqual(
+            push(["newsletter/tests/support/workflows.py", "platform/tests/deployment/test_release.py"]),
+            expect(F, F, T, F, F, newsletter_check=T, platform_check=T),
+        )
+        self.assertEqual(
+            push(["newsletter/tests/support/workflows.py", ".github/workflows/ci.yml"]),
+            expect(T, T, T, F, F, packages=T, infra=T, proto=T, **ALL_CHECKED),
+        )
+
+    def test_test_only_paths_do_not_hide_mixed_production_changes(self):
+        for path in (
+            "newsletter/src/newsletter/service.py",
+            "newsletter/src/newsletter/fixtures/sample.json",
+            "newsletter/uv.lock",
+            "newsletter/Dockerfile",
+            "newsletter/.dockerignore",
+            "platform/k3s/newsletter/deployment.yaml",
+            "platform/versions.json",
+            "platform/Dockerfile",
+        ):
+            with self.subTest(path=path):
+                self.assertEqual(push(["newsletter/tests/support/workflows.py", path]), expect(F, F, T, F, F, **VPS))
+        self.assertEqual(
+            push(["newsletter/tests/support/workflows.py", "dashboard/worker/src/index.ts"]),
+            expect(F, F, T, F, F, newsletter_check=T, platform_check=T, **DASH),
+        )
+        self.assertEqual(
+            push(["mail-hero/cloudflare/test/native-ops.test.mjs", "mail-hero/cloudflare/src/native/ops.ts"]),
+            expect(F, T, T, F, T),
+        )
+        self.assertTrue(push(["brief/worker/test/ops.test.ts", "brief/wrangler.toml"])["brief_deploy"])
+        self.assertTrue(push(["todofy/tests/unit/test_render.py", "todofy/pyproject.toml"])["todofy_deploy"])
+        shared = "contracts/ops-v1/ops-v1.ts"
+        result = push(["mail-hero/cloudflare/test/native-ops.test.mjs", shared])
+        self.assertEqual(
+            {app for app in ci_changes.APPS if result[f"{ci_changes.PREFIX[app]}_deploy"]},
+            set(ci_changes.BUNDLED_BY[shared]),
+        )
+
+    def test_test_filenames_and_unreviewed_directories_remain_deploy_inputs(self):
+        for path in (
+            "newsletter/test/new_test.py",
+            "newsletter/tests-new/test_rules.py",
+            "newsletter/src/newsletter/test_fixture.py",
+            "platform/new-tests/test_daemon.py",
+            "brief/worker/src/render.test.ts",
+            "brief/worker/tests/rules.test.ts",
+            "mail-hero/cloudflare/src/native/test-fixture.ts",
+            "todofy/worker/todofy/test_support.py",
+            "website/tests/unit/content.test.ts",
+        ):
+            app = path.split("/", 1)[0]
+            with self.subTest(path=path):
+                self.assertTrue(push([path])[f"{ci_changes.PREFIX[app]}_deploy"])
+        self.assertTrue(push(["recall/extension/test/popup.test.ts"])["recall_extension_publish"])
+        self.assertTrue(push(["website/relay/test/request.test.ts"])["website_relay_deploy"])
+
     def test_newsletter_is_an_independent_image_target(self):
         self.assertEqual(push(["newsletter/src/newsletter/service.py"]), expect(F, F, T, F, F, newsletter_check=T, newsletter_deploy=T, **PLATFORM))
         self.assertEqual(push(["newsletter/app.toml"]), expect(F, F, T, F, F, newsletter_check=T, platform_check=T))

@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 
 import ci_changes
-from workflow_sources import jobs, release_jobs
+from workflow_sources import jobs, release_jobs, workflow_data
 
 ROOT = Path(__file__).resolve().parents[2]
 APPS = ("todofy", "mail-hero", "dashboard", "flowday", "links", "watch", "fleet", "mailsort", "recall", "brief", "website-relay")
@@ -31,31 +31,32 @@ class WorkerReleaseWorkflow(unittest.TestCase):
         cls.release_text = (ROOT / ".github/workflows/worker-release.yml").read_text()
         cls.callers = jobs(cls.caller_text)
         cls.releases = release_jobs()
+        cls.caller_data = workflow_data(ROOT / ".github/workflows/ci.yml")["jobs"]
+        cls.release_data = workflow_data(ROOT / ".github/workflows/worker-release.yml")
 
     def test_each_app_calls_the_recipe_with_the_checked_sha_and_explicit_gate(self):
-        calls = {name for name, block in self.callers.items()
-                 if "uses: ./.github/workflows/worker-release.yml" in block}
+        calls = {name for name, job in self.caller_data.items()
+                 if job.get("uses") == "./.github/workflows/worker-release.yml"}
         self.assertEqual(calls, {app + "-deploy" for app in APPS})
         self.assertEqual(set(self.releases), calls)
         for app in APPS:
             with self.subTest(app=app):
-                caller = self.callers[app + "-deploy"]
-                self.assertIn("needs.gate.result == 'success'", caller)
-                self.assertIn("needs.changes.result == 'success'", caller)
-                self.assertIn("github.ref == 'refs/heads/main'", caller)
-                self.assertIn("!cancelled()", caller)
-                self.assertRegex(caller, r"(?m)^    needs: \[[^\n]*\bgate\b[^\n]*\]$")
-                self.assertIn("      app: " + app + "\n", caller)
-                self.assertIn("      source_sha: ${{ github.sha }}\n", caller)
-                self.assertIn("    secrets: inherit\n", caller)
+                caller = self.caller_data[app + "-deploy"]
+                self.assertIn("needs.gate.result == 'success'", caller["if"])
+                self.assertIn("needs.changes.result == 'success'", caller["if"])
+                self.assertIn("github.ref == 'refs/heads/main'", caller["if"])
+                self.assertIn("!cancelled()", caller["if"])
+                self.assertIn("gate", caller["needs"])
+                self.assertEqual(caller["with"]["app"], app)
+                self.assertEqual(caller["with"]["source_sha"], "${{ github.sha }}")
+                self.assertEqual(caller["secrets"], "inherit")
 
     def test_write_permission_is_granted_by_the_real_caller_and_recipe(self):
-        self.assertRegex(self.release_text, r"(?m)^permissions:\n  contents: read\n  deployments: write\n")
+        permissions = {"contents": "read", "deployments": "write"}
+        self.assertEqual(self.release_data["permissions"], permissions)
         for app in APPS:
             with self.subTest(app=app):
-                caller = self.callers[app + "-deploy"]
-                self.assertRegex(caller, r"(?m)^    permissions:\n      contents: read\n      deployments: write\n")
-                self.assertNotIn("write-all", caller)
+                self.assertEqual(self.caller_data[app + "-deploy"]["permissions"], permissions)
 
     def test_source_selection_is_inside_the_app_lock_and_production_environment(self):
         for app in APPS:

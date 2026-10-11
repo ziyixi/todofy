@@ -103,7 +103,9 @@ jobs:
           fetch-depth: 0
       - name: Test the change detection, public configuration and Wrangler configs
         run: |
-          python3 -m unittest discover -s .github/scripts
+          python3 -m venv "$RUNNER_TEMP/ci-checks"
+          "$RUNNER_TEMP/ci-checks/bin/python" -m pip install --disable-pip-version-check -r .github/scripts/requirements.txt
+          "$RUNNER_TEMP/ci-checks/bin/python" -m unittest discover -s .github/scripts
           python3 -m unittest discover -s tools/cloud-config/tests
           python3 -m unittest discover -s tools/cloud-release/tests
           python3 -m unittest discover -s tools/cloud-bootstrap/tests

@@ -2,7 +2,7 @@
 
 Needs Python 3.11+ (tomllib), as CI's ubuntu-24.04 python3 (3.12) has. With an older python3 (macOS ships
 3.9) this module is skipped with a message, and the other script tests still run; run all of them with
-    uv run --no-project --python 3.12 python -m unittest discover -s .github/scripts
+    uv run --no-project --python 3.12 --with-requirements .github/scripts/requirements.txt python -m unittest discover -s .github/scripts
 Under GitHub Actions a missing tomllib is an error, never a skip.
 
 Every Worker's production config is one committed file named wrangler.toml in the folder that names the
@@ -28,7 +28,7 @@ except ModuleNotFoundError:
         raise
     raise unittest.SkipTest(
         f"test_wrangler_configs needs Python 3.11+ (tomllib), this is {sys.version.split()[0]}: "
-        "uv run --no-project --python 3.12 python -m unittest discover -s .github/scripts"
+        "uv run --no-project --python 3.12 --with-requirements .github/scripts/requirements.txt python -m unittest discover -s .github/scripts"
     ) from None
 
 sys.path.insert(0, str(Path(__file__).parent))

@@ -21,7 +21,7 @@ ten times; anonymous 2xx, wrong redirects and other responses fail immediately.
 The workflow integration and adverse-response tests run in Changes:
 
 ```sh
-python3 -m unittest discover -s .github/scripts
+uv run --no-project --python 3.12 --with-requirements .github/scripts/requirements.txt python -m unittest discover -s .github/scripts
 ```
 
 App jobs retain their own tokens, gates, concurrency groups, and special checks

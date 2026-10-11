@@ -96,7 +96,7 @@ source SHA, release/request IDs, and ETag. Its receipt does not prove restoratio
 
 ```sh
 python3 -m unittest discover -s tools/cloud-release/tests
-python3 -m unittest discover -s .github/scripts -p test_worker_release_workflow.py
+uv run --no-project --python 3.12 --with-requirements .github/scripts/requirements.txt python -m unittest discover -s .github/scripts -p test_worker_release_workflow.py
 ```
 
 The independent workflow tests read the real CI caller and reusable recipe separately, including

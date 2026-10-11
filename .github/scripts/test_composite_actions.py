@@ -1,34 +1,45 @@
-"""Guard native workflow/composite boundaries, independently of the flattened safety view."""
+"""Guard native workflow/composite boundaries independently of the flattened safety view."""
 
+import copy
 import re
 import tempfile
 import unittest
 from pathlib import Path
 
-from workflow_sources import ROOT, expand_actions, jobs, steps
+import yaml
+
+from workflow_sources import ROOT, expand_actions, workflow_data
 
 
 class CompositeActions(unittest.TestCase):
-    def test_worker_calls_expand_one_release_job_not_all_apps(self):
-        release = jobs((ROOT / ".github/workflows/worker-release.yml").read_text())
-        self.assertEqual(set(release), {"release"})
-        job = release["release"]
-        self.assertIn("if: github.ref == 'refs/heads/main'", job)
-        self.assertIn("group: ${{ inputs.app }}-production", job)
-        self.assertIn("cancel-in-progress: false", job)
-        self.assertIn(
-            "timeout-minutes: ${{ inputs.app == 'website-relay' && 10 || 15 }}", job
+    def assert_release_boundaries(self, release):
+        self.assertEqual(set(release["jobs"]), {"release"})
+        job = release["jobs"]["release"]
+        self.assertEqual(job["if"], "github.ref == 'refs/heads/main'")
+        self.assertEqual(
+            job["concurrency"],
+            {
+                "group": "${{ inputs.app }}-production",
+                "cancel-in-progress": "false",
+            },
         )
-        self.assertIn("environment:\n      name: production", job)
-        sequence = steps(job.split("    steps:\n", 1)[1])
+        self.assertEqual(
+            job["timeout-minutes"], "${{ inputs.app == 'website-relay' && 10 || 15 }}"
+        )
+        self.assertEqual(job["environment"]["name"], "production")
+        sequence = job["steps"]
         preflight = next(
-            i for i, step in enumerate(sequence) if "id: preflight\n" in step
+            i for i, step in enumerate(sequence) if step.get("id") == "preflight"
         )
         record = next(
-            i for i, step in enumerate(sequence) if "control.py record " in step
+            i
+            for i, step in enumerate(sequence)
+            if "control.py record " in step.get("run", "")
         )
         calls = [
-            step for step in sequence if "uses: ./.github/actions/release-" in step
+            step
+            for step in sequence
+            if step.get("uses", "").startswith("./.github/actions/release-")
         ]
         apps = {
             path.parent.name.removeprefix("release-")
@@ -39,101 +50,164 @@ class CompositeActions(unittest.TestCase):
             call = next(
                 step
                 for step in calls
-                if f"uses: ./.github/actions/release-{app}\n" in step
+                if step["uses"] == f"./.github/actions/release-{app}"
             )
-            self.assertIn(
-                f"if: inputs.app == '{app}' && steps.preflight.outputs.required == 'true'",
-                call,
+            self.assertEqual(
+                call["if"],
+                f"inputs.app == '{app}' && steps.preflight.outputs.required == 'true'",
             )
-            self.assertIn("required: ${{ steps.preflight.outputs.required }}", call)
+            self.assertEqual(
+                call["with"]["required"], "${{ steps.preflight.outputs.required }}"
+            )
             self.assertLess(preflight, sequence.index(call))
             self.assertLess(sequence.index(call), record)
-        self.assertNotIn("secrets.", job.split("    steps:\n", 1)[0])
-        self.assertNotIn("continue-on-error:", job)
-        self.assertNotIn("always()", sequence[record])
+        self.assertNotIn(
+            "secrets.",
+            str({key: value for key, value in job.items() if key != "steps"}),
+        )
+        self.assertNotIn("continue-on-error", job)
+        for step in sequence:
+            self.assertNotIn("continue-on-error", step)
+        self.assertNotIn("always()", sequence[record]["if"])
+
+    def test_worker_calls_expand_one_release_job_not_all_apps(self):
+        self.assert_release_boundaries(
+            workflow_data(ROOT / ".github/workflows/worker-release.yml")
+        )
+
+    def test_release_guards_accept_layout_changes_and_reject_changed_locks_or_gates(
+        self,
+    ):
+        release = workflow_data(ROOT / ".github/workflows/worker-release.yml")
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "release.yml"
+            for style in ("'", '"'):
+                path.write_text(
+                    yaml.safe_dump(
+                        release, indent=4, sort_keys=True, default_style=style
+                    )
+                )
+                self.assert_release_boundaries(workflow_data(path))
+        for field, value in (
+            ("if", "always()"),
+            ("concurrency", {"group": "unrelated", "cancel-in-progress": "false"}),
+            (
+                "concurrency",
+                {"group": "${{ inputs.app }}-production", "cancel-in-progress": "true"},
+            ),
+        ):
+            changed = copy.deepcopy(release)
+            changed["jobs"]["release"][field] = value
+            with (
+                self.subTest(field=field, value=value),
+                self.assertRaises(AssertionError),
+            ):
+                self.assert_release_boundaries(changed)
 
     def test_local_actions_have_explicit_context_shell_and_directory(self):
         for path in (ROOT / ".github/actions").glob("*/action.yml"):
             with self.subTest(action=path.parent.name):
-                text = path.read_text()
-                self.assertIn("  using: composite\n", text)
-                self.assertNotIn("timeout-minutes:", text)
-                expressions = " ".join(re.findall(r"\$\{\{(.*?)\}\}", text, re.S))
+                action = workflow_data(path)
+                self.assertEqual(action["runs"]["using"], "composite")
+                expressions = " ".join(
+                    re.findall(r"\$\{\{(.*?)\}\}", path.read_text(), re.S)
+                )
                 self.assertNotRegex(expressions, r"\b(secrets|needs|matrix|strategy)\.")
-                declared = set(
-                    re.findall(r"^  ([a-z0-9-]+):$", text.split("runs:\n", 1)[0], re.M)
-                )
-                referenced = set(re.findall(r"\binputs\.([a-z0-9-]+)", text))
-                self.assertLessEqual(referenced, declared)
-                body = "\n".join(
-                    "  " + line for line in text.split("  steps:\n", 1)[1].splitlines()
-                )
-                for step in steps(body):
-                    if re.search(r"^        run:", step, re.M):
-                        # Matches Ubuntu's previous unspecified-shell behavior. Do not add pipefail in a refactor.
-                        self.assertIn("        shell: bash -e {0}\n", step)
-                        self.assertRegex(step, r"(?m)^        working-directory: .+$")
-                    if "uses:" in step:
-                        self.assertRegex(step, r"uses: [\w./-]+@[0-9a-f]{40}\b")
-                self.assertNotIn("persist-credentials: true", text)
+                referenced = set(re.findall(r"\binputs\.([a-z0-9-]+)", str(action)))
+                self.assertLessEqual(referenced, set(action.get("inputs", {})))
+                for step in action["runs"]["steps"]:
+                    self.assertNotIn("timeout-minutes", step)
+                    if "run" in step:
+                        self.assertEqual(step["shell"], "bash -e {0}")
+                        self.assertTrue(step["working-directory"])
+                    if "uses" in step:
+                        self.assertRegex(step["uses"], r"^[\w./-]+@[0-9a-f]{40}$")
+                    self.assertNotEqual(
+                        step.get("with", {}).get("persist-credentials"), "true"
+                    )
 
     def test_every_call_supplies_exact_declared_inputs(self):
         for filename in ("ci.yml", "worker-release.yml"):
-            for job in jobs(
-                (ROOT / ".github/workflows" / filename).read_text()
-            ).values():
-                if "    steps:\n" not in job:
-                    continue
-                for step in steps(job.split("    steps:\n", 1)[1]):
-                    match = re.search(r"uses: (\./\.github/actions/[a-z-]+)", step)
-                    if not match:
+            for job in workflow_data(ROOT / ".github/workflows" / filename)[
+                "jobs"
+            ].values():
+                for step in job.get("steps", []):
+                    action_path = step.get("uses", "")
+                    if not action_path.startswith("./.github/actions/"):
                         continue
-                    text = (ROOT / match.group(1) / "action.yml").read_text()
-                    header = text.split("runs:\n", 1)[0]
-                    declared = set()
-                    if "inputs:\n" in header:
-                        inputs = header.split("inputs:\n", 1)[1].split("outputs:\n", 1)[
-                            0
-                        ]
-                        declared = set(re.findall(r"^  ([a-z0-9-]+):$", inputs, re.M))
-                    passed = set(re.findall(r"^          ([a-z0-9-]+):", step, re.M))
-                    self.assertEqual(passed, declared, match.group(1))
+                    action = workflow_data(ROOT / action_path / "action.yml")
+                    self.assertEqual(
+                        set(step.get("with", {})),
+                        set(action.get("inputs", {})),
+                        action_path,
+                    )
 
     def test_runtime_shards_and_resume_are_passed_explicitly(self):
-        ci = jobs((ROOT / ".github/workflows/ci.yml").read_text())
-        self.assertIn("shard-index: ${{ strategy.job-index }}", ci["todofy-runtime"])
-        self.assertIn("shard-total: ${{ strategy.job-total }}", ci["todofy-runtime"])
-        self.assertIn(
-            "build-image: ${{ !(github.event_name == 'workflow_dispatch' && inputs.resume_vps_release) }}",
-            ci["platform-checks"],
+        ci = workflow_data(ROOT / ".github/workflows/ci.yml")["jobs"]
+        runtime = next(
+            step
+            for step in ci["todofy-runtime"]["steps"]
+            if step.get("uses") == "./.github/actions/check-todofy-runtime"
         )
-        action = (ROOT / ".github/actions/check-platform/action.yml").read_text()
-        self.assertEqual(action.count("if: ${{ fromJSON(inputs.build-image) }}"), 2)
-        for job in ("newsletter-deploy", "platform-image"):
-            self.assertIn("image: ${{ steps.publish.outputs.image }}", ci[job])
-            self.assertIn("id: publish", ci[job])
-            self.assertIn(
-                "artifact-run-id: ${{ needs.changes.outputs.reused_run_id || github.run_id }}",
-                ci[job],
+        self.assertEqual(runtime["with"]["shard-index"], "${{ strategy.job-index }}")
+        self.assertEqual(runtime["with"]["shard-total"], "${{ strategy.job-total }}")
+        platform = next(
+            step
+            for step in ci["platform-checks"]["steps"]
+            if step.get("uses") == "./.github/actions/check-platform"
+        )
+        self.assertEqual(
+            platform["with"]["build-image"],
+            "${{ !(github.event_name == 'workflow_dispatch' && inputs.resume_vps_release) }}",
+        )
+        action = workflow_data(ROOT / ".github/actions/check-platform/action.yml")
+        self.assertEqual(
+            sum(
+                step.get("if") == "${{ fromJSON(inputs.build-image) }}"
+                for step in action["runs"]["steps"]
+            ),
+            2,
+        )
+        for job_name in ("newsletter-deploy", "platform-image"):
+            job = ci[job_name]
+            self.assertEqual(
+                job["outputs"]["image"], "${{ steps.publish.outputs.image }}"
+            )
+            publish = next(step for step in job["steps"] if step.get("id") == "publish")
+            self.assertEqual(
+                publish["with"]["artifact-run-id"],
+                "${{ needs.changes.outputs.reused_run_id || github.run_id }}",
             )
 
     def test_smoke_checks_keep_native_step_timeouts_after_ui_build(self):
-        ci = jobs((ROOT / ".github/workflows/ci.yml").read_text())
+        ci = workflow_data(ROOT / ".github/workflows/ci.yml")["jobs"]
         for app in ("recall", "mailsort"):
-            job = ci[app + "-checks"]
-            self.assertLess(
-                job.index("uses: ./.github/actions/check-" + app),
-                job.index("run: npm run test:smoke"),
+            sequence = ci[app + "-checks"]["steps"]
+            check = next(
+                i
+                for i, step in enumerate(sequence)
+                if step.get("uses") == "./.github/actions/check-" + app
             )
-            self.assertLess(
-                job.index("run: npm run test:smoke"),
-                job.index("Dry-run the committed config"),
+            smoke = next(
+                i
+                for i, step in enumerate(sequence)
+                if step.get("run") == "npm run test:smoke"
             )
-            self.assertIn("        timeout-minutes: 5", job)
-            self.assertIn("if: always()", job)
-            self.assertIn(
-                "npm run build",
-                (ROOT / f".github/actions/check-{app}/action.yml").read_text(),
+            dry_run = next(
+                i
+                for i, step in enumerate(sequence)
+                if "wrangler deploy --dry-run" in step.get("run", "")
+            )
+            self.assertLess(check, smoke)
+            self.assertLess(smoke, dry_run)
+            self.assertEqual(sequence[smoke]["timeout-minutes"], "5")
+            self.assertTrue(any(step.get("if") == "always()" for step in sequence))
+            action = workflow_data(ROOT / f".github/actions/check-{app}/action.yml")
+            self.assertTrue(
+                any(
+                    "npm run build" in step.get("run", "")
+                    for step in action["runs"]["steps"]
+                )
             )
 
     def test_reader_follows_real_action_commands_and_refuses_missing_inputs(self):

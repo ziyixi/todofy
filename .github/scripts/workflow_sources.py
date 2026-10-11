@@ -11,6 +11,14 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 
 
+def workflow_data(path):
+    import yaml
+
+    # BaseLoader keeps Actions keys such as `on` and expression values as strings.
+    # It only constructs dictionaries, lists and strings, never Python objects.
+    return yaml.load(path.read_text(), Loader=yaml.BaseLoader)
+
+
 def jobs(text):
     body = text.split("\njobs:\n", 1)[1]
     parts = re.split(r"^  ([a-z][a-z0-9-]*):\n", body, flags=re.M)
