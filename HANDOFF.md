@@ -25,7 +25,7 @@ Owner decision (2026-10-11): a mail mailsort labels leaves the inbox and is foun
 read. Deployed in `a49349d`: the needs_action exception and question are gone; only a label's 归档 switch
 (`keep_in_inbox`) keeps its mail in the inbox (the owner turned it off on every label, so all of them archive).
 
-## In flight (2026-10-10, Claude): recall, the browsing recorder (go-live commit ready, not deployed)
+## In flight (2026-10-10, Claude): recall, the browsing recorder (live since 2026-10-11, owner setup pending)
 
 Owner request (2026-10-10): record what the owner reads in Chrome (visits with real focus time, the page's text after
 ten seconds), with a very good timeline and search UI, and keep a durable copy on the NAS through a generic protocol
@@ -110,16 +110,17 @@ Next, in order:
    new: the owner addresses come from `DASHBOARD_ACCESS_OWNER(_ALIASES)`, `RECALL_WORKER_SECRETS` may stay unset, and
    the machine tokens' digests are never a deploy's. Without the key, "Recall deploy" stops at "Write the Worker
    secrets file" and Home's deploy (which needs it) does not run.
-2. Land `recall-release` (both commits): its push deploys recall for the first time, then Home with the `RECALL`
+2. Done (2026-10-11, `ee02b62`): `recall-release` landed; its push deployed recall for the first time, then Home with the `RECALL`
    binding. Check: the release's production, Access and Bypass probes; `https://recall.ziyixi.science/` asks for the
    Access login; after a tick Home's 浏览记录 tile shows recall's own status (正常, with the information `no_device`
    until the first upload) instead of 未知.
-3. Agent, right after that deploy: the `RecallState` namespace id into `config/resources.toml` `[durable_objects]`
+3. Done (2026-10-11): the `RecallState` namespace id into `config/resources.toml` `[durable_objects]`
    (`recall-state`, read with the read-only admin helper), `FIRST_DEPLOY_PENDING` emptied and the reconcile matrix's
    `exclude` removed in the same commit (the inventory and `test_reconcile_workflow.py` refuse anything else), then
    `generate.py` (Home's resource identities) and `inventory.py --generate`; as mailsort's `6f5f93e`.
-4. Owner: `node recall/deploy/mint-tokens.mjs` (needs the deployed Worker), the extension loaded unpacked, the sync
-   image dispatched and the NAS container. Phase 1a's first checks in a real Chrome (design §3.10,
+4. Owner: `node recall/deploy/mint-tokens.mjs` (needs the deployed Worker) and the extension loaded unpacked. The
+   NAS copy changes (owner, 2026-10-11): recall writes the archive layout to the owner's Dropbox and the owner syncs
+   Dropbox to the NAS with the NAS's own cloud-drive app; no container and no command (branch in progress). Phase 1a's first checks in a real Chrome (design §3.10,
    `recall/extension/README.md`): one focus switch, one capture, the badge, the options page, and whether Chrome
    serves an unpacked extension's files as they are on disk (the self-update relies on it).
 

@@ -22,7 +22,7 @@ DO_KEYS = {
 # (expected() refuses a recorded id while the entry remains; mailsort's left on 2026-10-07). The entry also keeps the
 # app out of "Personal cloud reconcile"'s Worker comparison, which needs a verified deployment (the matrix's exclude,
 # held equal by .github/scripts/test_reconcile_workflow.py).
-FIRST_DEPLOY_PENDING: set[str] = {"recall"}
+FIRST_DEPLOY_PENDING: set[str] = set()
 OUTPUT = "dashboard/worker/src/account-inventory.json"
 BUCKET_NAME = re.compile(r"[a-z0-9][a-z0-9-]{1,61}[a-z0-9]")
 PAGE_LIMIT = 100
