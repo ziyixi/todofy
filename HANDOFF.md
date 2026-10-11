@@ -30,8 +30,10 @@ The authorized production plan was rejected before creating a job: some valid la
 state because no message has used them yet. No production label changed. `codex/mailsort-pending-labels` is fixing
 this case: uncreated sources have no Gmail memberships to transfer, while a needed target uses its final English
 name. Missing or ambiguous existing identities remain errors. Local 122 unit tests, typecheck, changed-file lint,
-workerd CPU and consolidation-pipeline checks passed; the bundle is 134.2 KiB within the unchanged 135 KiB limit.
-Release and production consolidation are pending.
+workerd CPU, consolidation-pipeline and nine API checks passed. Branch CI `38177371736` passed functional checks
+but measured 135.1 KiB gzip against the old 135 KiB application bundle budget (local measured 134.2 KiB).
+The budget is intentionally 140 KiB for the consolidation feature and modest build headroom; the 3 MiB platform
+limit, CPU, Gmail write and model budgets are unchanged. Release and production consolidation are pending.
 [Operation and verification](mailsort/docs/label-consolidation.md) describes the private input and current behavior.
 
 No implementation remains open from the October 11 maintenance task. `codex/maintenance-simplification`

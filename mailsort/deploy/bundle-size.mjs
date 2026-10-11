@@ -6,10 +6,12 @@
 // at about 1.2 times the measured bundle (110.0 KiB gzip: mailsort.ui.v1 and ops.v1, the protobuf-es runtime,
 // the HTTP runtime of proto/ts, packages/edge-auth and the pipeline). Raise it only in the commit that needs it, saying
 // why there. The UI's own budget is in ../web/scripts/js-budget.mjs.
+// 2026-10-11: flat-label consolidation adds the owner API and bounded Gmail work; Linux CI measures 135.1 KiB.
+// Use a 140 KiB budget with modest build headroom; the platform limit and CPU/model budgets are unchanged.
 //
 //   node ../deploy/bundle-size.mjs "$RUNNER_TEMP/mailsort-bundle"     (from worker/, after the dry run's --outdir)
 import { checkWorkerBundle, isMain } from '../../tools/bundle-size/bundle-size.mjs'
 
-export const BUDGET_GZIP_BYTES = 135 * 1024
+export const BUDGET_GZIP_BYTES = 140 * 1024
 
 if (isMain(import.meta.url)) process.exitCode = checkWorkerBundle('The mailsort app', process.argv[2], BUDGET_GZIP_BYTES)
