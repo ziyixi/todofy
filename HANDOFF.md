@@ -19,22 +19,40 @@ Rules for this file:
 Last updated: 2026-10-11.
 <!-- Active work is separate from the production evidence below. -->
 
-## In progress (2026-10-11): CI workflow structure
+## Done (2026-10-11): CI workflow structure
 
-Branch: `codex/ci-workflow-structure`, based on `efa4692`. Preserve the single CI/deploy run and all existing
-job identities, dependencies, release selection and production gates. Extract application check/release steps
-into local composite actions; the shared Worker release becomes one job rather than eleven mutually exclusive
-jobs per call. CI and reconcile keep calling the same recipe. No application, budget or operating mode changes.
-Local checks: all 435 pre-existing repository tests passed (one skipped); the 39 effective job recipes retain
-commands/order/input mappings against the original source. New guards cover the one-job release, explicit
-composite inputs, selected-source paths and the original shell behavior. Targeted actionlint 1.7.12 passed for
-CI, Worker release and reconcile. The unchanged website workflow's `queue: max` is not understood by that linter;
-this refactor does not change it. First branch run `38133748900` rejected Recall/Mailsort action manifests because composites do not support
-step-level timeouts. Their smoke steps (five minutes) and following packaging stay at the job boundary, with a
-new guard for this limitation. Newsletter's YAML test reader now follows local composites; its original
-quality-gate, content-config and tested-image assertions are unchanged. No Newsletter runtime code changed.
-The existing classifier treats that test-reader change as Newsletter source, so the eventual main run will
-publish the paired Newsletter/Platform images and use the normal verified VPS release path. Pending: corrected branch CI, same-green-SHA promotion and actual run/reconcile inspection. No production validation of this refactor yet.
+Implementation branch `codex/ci-workflow-structure` landed as `21c358f99bee3420448ae4e6bb317420232025c4`.
+[Branch CI 38134080448](https://github.com/ziyixi/todofy/actions/runs/38134080448) passed the full gate; the same SHA
+was fast-forwarded to main. [Main run 38134511298](https://github.com/ziyixi/todofy/actions/runs/38134511298)
+reused its checked artifacts and succeeded. Acceptance documentation branch: `codex/ci-workflow-verification`
+(documentation only, promoted through its own CI gate). No further implementation changes are pending.
+
+- `ci.yml` remains the single run and explicit dependency graph (2,254 → 1,121 lines). Application steps live in
+  local composite actions. `worker-release.yml` is one job (2,132 → 227 lines), shared by CI and reconcile.
+  Locks, permissions, source selection, same-SHA reuse, artifact identity, gate names and reachability remain unchanged.
+- Independent parsed-YAML comparison found all 39 native job contracts, 28 inline/check job recipes and 11 Worker
+  release recipes equivalent after resolving explicit inputs and the previous shell/directory defaults. Local:
+  441 repository tests passed (one existing skip), plus 85 Newsletter CI-reader tests; targeted actionlint 1.7.12
+  passed for CI/Worker release/reconcile. The unchanged website `queue: max` is unsupported by that linter.
+- Initial branch CI rejected two composite manifests: GitHub does not allow their original step-level timeout.
+  Recall/Mailsort's five-minute smoke steps and subsequent packaging now stay in the job. A regression guard covers
+  this boundary. Newsletter's YAML test reader follows composites while retaining its original assertions;
+  no Newsletter runtime code, model, send ledger or configuration changed.
+- That Newsletter test-reader path selects the paired image release under the existing classifier. Both tested
+  images were published without rebuilding; the bootstrap bundle and verified VPS deploy succeeded. Deployment
+  `6994687990` records `phase=ready` and both workloads at SHA `21c358f`:
+  Newsletter `sha256:f30f8ce7ef5b946c56189261ae64934c41a810c47a8f8d409c5f0113a430080f`,
+  Platform `sha256:84d6c6ae4df7fa00766cd588e15379a4c1aad056295fbb3cfbf0160103a91b1c`.
+- [Automatic reconcile 38134699837](https://github.com/ziyixi/todofy/actions/runs/38134699837) passed; all 11 Workers
+  returned `state=clean` and zero changes. Resource registration, infrastructure and VPS comparison jobs succeeded.
+  Compared with run `38132757820`, actual Worker job count fell from **121 to 11**, and the whole reconcile graph
+  from **128 to 18**. No operational switch, application budget, source content or alert control was changed.
+- This run selected no Worker uploads. Production preflight/no-op and manifest loading were exercised for every
+  app; build/migration/upload behavior is covered by branch dry-runs, synthetic guards and the recipe comparison.
+  Confirm the affected app's normal provider receipt on its next code-driven release; this is not a claim that
+  all 11 applications were uploaded during this refactor. Existing owner pause and Brief archive/$80 settings stay.
+
+Maintenance entry points and failure navigation: [CI/CD](docs/ci-cd.md#where-to-change-the-pipeline).
 
 ## Done (2026-10-11): Brief resource registration and Home monitoring
 

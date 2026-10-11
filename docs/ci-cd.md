@@ -49,6 +49,12 @@ command/credential/order assertions still inspect the executed recipes; `test_co
 checks the real caller boundaries, input wiring and single-job release structure. Keep both kinds of checks.
 On failure, open the failed job and its named composite step; application commands retain their original step names.
 
+The 2026-10-11 refactor passed [full branch CI](https://github.com/ziyixi/todofy/actions/runs/38134080448),
+[same-SHA main publication](https://github.com/ziyixi/todofy/actions/runs/38134511298) and
+[automatic reconcile](https://github.com/ziyixi/todofy/actions/runs/38134699837). The observed reconcile graph
+fell from 128 jobs to 18, with all 11 Workers reporting no drift. VPS publication verified both running digests;
+Worker uploads were not selected in that run. Detailed evidence and the next normal-release check are in HANDOFF.
+
 ## Before a release
 
 - The owner must have authorised publication/deployment in the task. A design request is not permission to deploy.
