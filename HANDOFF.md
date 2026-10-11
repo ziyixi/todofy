@@ -9,32 +9,17 @@ Its old waiting lists and release identities are historical, not instructions to
 
 ## Current work
 
-Mailsort implementation `63292ff` adds single-level English labels, consolidation of existing label memberships,
-and Settings' classification-effect check. Labels, review choices, overview statistics, ledger filters and replay
-results resolve historical IDs to current English labels. The private production mapping is not committed.
-The owner explicitly removed reverse migration and special historical undo from scope: merged source operations
-are read-only; same-ID renames and new classifications keep ordinary undo. The existing Alarm, write limits,
-models and budgets are unchanged. No new service or dependency was introduced.
-
-Local checks passed: Worker lint/typecheck, 114 unit tests, 87 workerd tests including CPU and concurrent-start
-cases; UI lint/typecheck/build and 97 tests; 26 deployment-tool tests; proto lint/API lint/breaking; synthetic
-Wrangler smoke with 67 allowed Google calls. Desktop and mobile browser checks used isolated fake data; a
-zero-sample effect check finished without Gmail writes. [Full branch CI](https://github.com/ziyixi/todofy/actions/runs/38174789429)
-passed; main's [same-SHA run](https://github.com/ziyixi/todofy/actions/runs/38175367440) passed the gate but could not
-load the existing Mailsort release composite: it directly referenced the unsupported `vars` context.
-`87098a5` fixes that release input boundary and the remaining stale documentation. Its
-[branch CI](https://github.com/ziyixi/todofy/actions/runs/38176132968) and
-[same-SHA main release](https://github.com/ziyixi/todofy/actions/runs/38176632237) passed. Mailsort Deployment
-`7002100665` verified Worker version `0f250d1e-4e69-4956-b84d-08773e423c8d`.
-The authorized production plan was rejected before creating a job: some valid labels still have `pending` Gmail
-state because no message has used them yet. No production label changed. `codex/mailsort-pending-labels` is fixing
-this case: uncreated sources have no Gmail memberships to transfer, while a needed target uses its final English
-name. Missing or ambiguous existing identities remain errors. Local 122 unit tests, typecheck, changed-file lint,
-workerd CPU, consolidation-pipeline and nine API checks passed. Branch CI `38177371736` passed functional checks
-but measured 135.1 KiB gzip against the old 135 KiB application bundle budget (local measured 134.2 KiB).
-The budget is intentionally 140 KiB for the consolidation feature and modest build headroom; the 3 MiB platform
-limit, CPU, Gmail write and model budgets are unchanged. Release and production consolidation are pending.
-[Operation and verification](mailsort/docs/label-consolidation.md) describes the private input and current behavior.
+Mailsort flat English labels and Settings' classification-effect check are deployed at `4a48878`.
+[Branch CI](https://github.com/ziyixi/todofy/actions/runs/38177634581) and the
+[same-SHA release](https://github.com/ziyixi/todofy/actions/runs/38177844303) passed; Deployment `7002296191`
+verified Worker version `8fad8b3c-c3a0-4a91-856f-42aafe9bb6a0`. The authorized private production consolidation
+completed on October 11 at 21:53 UTC: 15 internal categories became 12 active English labels. UI checks confirmed
+current labels in the list, overview, undo filter and existing replay results, retained learning/settings, and live
+mode with Gmail write access. The next natural sync was visible after completion. No production replay was started.
+The owner excluded reverse migration and special historical undo; there is no new service or dependency.
+[Operation and dated evidence](mailsort/docs/label-consolidation.md#2026-10-11-上线与生产整理) records the pending-label
+fix, validation limits and intentional 140 KiB application bundle budget. CPU, model and Gmail write budgets did
+not change. `codex/mailsort-label-verification` closes the documentation; no Mailsort implementation remains open.
 
 No implementation remains open from the October 11 maintenance task. `codex/maintenance-simplification`
 landed at `ccf2c27`: concise handoff, checked test-only release exclusions and parsed YAML boundary assertions.
@@ -54,7 +39,7 @@ These are dated observations, not a replacement for current GitHub Deployment re
 | VPS, October 11 | Deployment `6994687990` verified Newsletter and Platform at `21c358f`, `phase=ready`. Their exact digests are in the archive. No Newsletter runtime changed in that release. | [Release evidence](docs/history/handoff-2026-10-11.md#done-2026-10-11-ci-workflow-structure) |
 | Brief and Home, October 11 | `ebf33fe` deployed both applications. Brief's namespace is registered; Ops reports healthy. Read-only UI checks preserved `MODE=archive` and the owner's saved monthly budget of **$80**. | [Release](https://github.com/ziyixi/todofy/actions/runs/38132200435), [inventory/reconcile](https://github.com/ziyixi/todofy/actions/runs/38132419031), [detailed evidence](docs/history/handoff-2026-10-11.md#done-2026-10-11-brief-resource-registration-and-home-monitoring) |
 | Recall, October 11 | Device uploads and Dropbox archive progress were observed. The 365-day text-retention implementation landed at `2a6e241`; deletion waits for confirmed archive coverage. | [Recorded acceptance](docs/history/handoff-2026-10-11.md#live-2026-10-11-claude-recall-the-browsing-recorder), [runbook](recall/README.md) |
-| Mailsort, October 11 | Model-first live mode is recorded. At `a49349d`, labelled mail leaves the inbox unless its label keeps it there; mail is never marked read. | [Recorded change](docs/history/handoff-2026-10-11.md#done-2026-10-11-claude-mailsort-archives-every-labelled-mail), [runbook](mailsort/README.md) |
+| Mailsort, October 11 | `4a48878` verified 12 English labels after production consolidation; live mode and existing learning/settings retained. | [Release](https://github.com/ziyixi/todofy/actions/runs/38177844303), [dated evidence](mailsort/docs/label-consolidation.md#2026-10-11-上线与生产整理) |
 
 The CI refactor exercised every Worker's production preflight/no-op but selected no Worker uploads.
 On the next normal release of an affected app, check its verified provider receipt; do not deploy apps just to
@@ -106,8 +91,6 @@ Update each verification document through the normal branch CI and same-SHA rele
   FlowDay's owner setup/device check before F6 retirement, and Newsletter's natural provider/send acceptance after
   its last business change. Use the app runbooks and fresh status before treating an old waiting item as still open;
   do not restart Compose, replay a send or request credentials solely from an archived note.
-- The Mailsort flat-label branch handles owned labels that later gain sublabels: Gmail sync reports the conflict
-  and pauses writes for that label. This supersedes the older follow-up once the branch is released.
 
 ## Operating boundaries
 
