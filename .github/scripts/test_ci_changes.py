@@ -64,8 +64,8 @@ def expect(
 ):
     # The bootstrap mask (ci_changes.outputs): an app in CHECK_ONLY never deploys, and neither does Home while an app it
     # binds is one. Mailsort was CHECK_ONLY until its Access application existed (mailsort/docs/design.md §12), recall
-    # until its Access applications and bucket existed (recall/docs/design.md §11); the brief is until its Access
-    # applications exist (brief/docs/design.md §18).
+    # until its Access applications and bucket existed (recall/docs/design.md §11), the brief until its Access
+    # applications existed (brief/docs/design.md §18).
     if "mailsort" in ci_changes.CHECK_ONLY:
         mailsort_deploy = False
     if "recall" in ci_changes.CHECK_ONLY:
@@ -205,10 +205,10 @@ class Classify(unittest.TestCase):
                 self.assertEqual(push([path], ref=BRANCH), expect(F, F, F, F, F, **FLOWDAY))
 
     def test_every_app_has_stable_check_and_deploy_outputs_during_bootstrap(self):
-        """CHECK_ONLY suppresses deployment, never the output that the workflow consumes. The brief is in it until "Infra
-        apply" creates its Access applications (brief/docs/design.md section 18); recall left it once its Access
-        applications and bucket existed (2026-10-10, recall/docs/design.md section 11)."""
-        self.assertEqual(ci_changes.CHECK_ONLY, {"brief"})
+        """CHECK_ONLY suppresses deployment, never the output that the workflow consumes. No app is in it since "Infra
+        apply" created the brief's Access applications (2026-10-11, brief/docs/design.md section 18); a new app joins it
+        until its resources are ready."""
+        self.assertEqual(ci_changes.CHECK_ONLY, set())
         for app in ci_changes.APPS:
             with self.subTest(app=app):
                 self.assertIn(f"{ci_changes.PREFIX[app]}_check", ci_changes.KEYS)
@@ -274,15 +274,14 @@ class Classify(unittest.TestCase):
         self.assertTrue(ci_changes.everything()["recall_extension_publish"])
         self.assertTrue(ci_changes.dispatched("all")["recall_extension_publish"])
         self.assertFalse(ci_changes.dispatched("both")["recall_extension_publish"])
-    def test_the_brief_is_checked_but_never_deployed_until_its_access_applications_exist(self):
-        """The brief is CHECK_ONLY until "Infra apply" creates its Access applications (brief/docs/design.md section
-        18): its deploy job and release recipe exist, its deploy output stays false. Its archive UI (brief/web) ships as
-        the Worker's static assets, so it checks and, once ready, deploys the brief. Home does not bind it yet, so Home
-        deploys as before; its owner API package reaches the brief alone."""
+    def test_the_brief_deploys_with_its_archive_ui_and_home_does_not_wait(self):
+        """The brief deploys since "Infra apply" created its Access applications (brief/docs/design.md section 18). Its
+        archive UI (brief/web) ships as the Worker's static assets, so it checks and deploys the brief. Home does not
+        bind it yet, so Home deploys as before; its owner API package reaches the brief alone."""
         for result in (ci_changes.everything(), ci_changes.dispatched("all"), ci_changes.dispatched("brief"), push(["brief/worker/src/state.ts"]), push(["brief/content-config/sources.yaml"]), push(["brief/web/src/views/issue.ts"])):
             with self.subTest(result=result):
                 self.assertTrue(result["brief_check"])
-                self.assertFalse(result["brief_deploy"])
+                self.assertTrue(result["brief_deploy"])
         self.assertTrue(ci_changes.everything()["dashboard_deploy"])
         self.assertFalse(push(["brief/worker/src/claude.ts"])["dashboard_deploy"])
         for path in ("proto/brief/ui/v1/brief_ui_service.proto", "proto/brief/ui/v1/issue.proto"):

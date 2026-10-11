@@ -51,9 +51,9 @@ Outputs (GITHUB_OUTPUT, "true"/"false"):
   apply" created its Access applications and its bucket (2026-10-10, design section 11): it answers ops-v1 (Contracts
   runs its tests; Home binds its Ops entrypoint, HOME_BOUND) and compiles in packages/edge-auth and the TypeScript
   proto runtime with proto/recall/ui/, proto/recall/ingest/, proto/recall/archive/ and proto/ops/. The brief (brief/,
-  the daily briefing on brief.ziyixi.science, brief/docs/design.md) is CHECK_ONLY until "Infra apply" has created its
-  Access applications and its AUD is committed (design section 18): it answers ops-v1 (not HOME_BOUND before its
-  go-live commit) and compiles in packages/edge-auth and the TypeScript proto runtime with proto/brief/ui/ and
+  the daily briefing on brief.ziyixi.science, brief/docs/design.md) is checked and deployed since "Infra apply" created
+  its Access applications (2026-10-11, design section 18): it answers ops-v1 (not HOME_BOUND: Home binds it in a later
+  commit) and compiles in packages/edge-auth and the TypeScript proto runtime with proto/brief/ui/ and
   proto/ops/.
 
 proto/ (the protobuf IDL, proto/README.md) checks every app in PROTO_USERS (an app that depends on @ziyixi/proto or
@@ -134,7 +134,7 @@ APPS = tuple(load_catalog(Path(__file__).resolve().parents[2]).apps)
 PREFIX = {app: app.replace("-", "_") for app in APPS}
 # A new app is checked but its deploy output stays false until its Cloudflare resources are ready. Keep its output
 # present so the workflow and same-SHA reuse have one stable interface.
-CHECK_ONLY: set[str] = {"brief"}
+CHECK_ONLY: set[str] = set()
 # Apps whose Ops entrypoint Home binds (dashboard/wrangler.toml): while one of them is CHECK_ONLY its Worker does not
 # exist yet, so Home's deploy (whose binding would name a missing service) waits too.
 HOME_BOUND = {"fleet", "mailsort", "recall"}

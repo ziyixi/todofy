@@ -19,7 +19,15 @@ Rules for this file:
 Last updated: 2026-10-11.
 <!-- Active work is separate from the production evidence below. -->
 
-## In flight (2026-10-10, Claude): the brief, built, landing check-only (branch `brief-land`)
+## In flight (2026-10-10, Claude): the brief, going live (first deploy in `archive` mode)
+
+2026-10-11: landed check-only in `0e48a59`; "Infra apply" created the Access applications `brief` and `brief-feedback`;
+the go-live commit (branch `brief-live`) records the AUD and application id, empties `CHECK_ONLY` and deploys with
+`BRIEF_MODE=archive` (no email). Left: the owner puts `ANTHROPIC_API_KEY` and `RESEND_API_KEY` in the Cloudflare
+dashboard (Workers → brief → Settings → Variables and Secrets, type Secret); the commit after the first deploy records
+the `brief-state` namespace id and empties `FIRST_DEPLOY_PENDING` and the reconcile exclude; Home's `BRIEF` binding
+(`status.type = "ops_v1"`, `UNBOUND_OPS_APPS` emptied, ops-v1 fixtures) comes later. The sender is
+`onboarding@resend.dev`, as the newsletter's, so mail reaches only the Resend account's own address.
 
 Owner request 2026-10-10: replace the newsletter with a cheaper, better briefing (design in `brief/docs/design.md`,
 rules in `brief/AGENTS.md`, use and deploy in `brief/README.md`). The owner's answers of 2026-10-10 are in the design

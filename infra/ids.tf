@@ -26,6 +26,7 @@ locals {
     "watch"    = "7d5134ca-1362-4fa3-9c84-d2ee9afb656c"
     "mailsort" = "3d8f08e0-1327-4408-99c8-2431abed5892"
     "recall"   = "abe1f041-0786-4a3d-9ce5-72ce418627a5"
+    "brief"    = "6005b0c0-ddc3-4812-8b28-322f3601a95a"
   }
   flowday_app_ids = {
     "flowday"        = "3d956afb-07ea-4b5e-802e-27fd29ca4587"

@@ -1641,8 +1641,8 @@ jobs:
   # "brief-feedback" (infra/). One SQLite Durable Object, BriefState, and Workers AI; no D1, R2 or service binding. The
   # Claude API key and the Resend key are not part of this job: the owner puts them from their own machine, and
   # --secrets-file keeps them (brief/deploy/test/secrets-kept.test.mjs). BRIEF_MODE is the deployment's ceiling (off,
-  # archive, shadow or live; brief/docs/design.md section 15). Held back by CHECK_ONLY until "Infra apply" has created
-  # both Access applications and the go-live commit adds the AUD.
+  # archive, shadow or live; brief/docs/design.md section 15). Both Access applications exist since 2026-10-11 and the
+  # AUD is committed.
   brief-deploy:
     name: brief production release
     if: github.ref == 'refs/heads/main' && inputs.app == 'brief'

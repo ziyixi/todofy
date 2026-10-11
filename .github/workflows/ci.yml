@@ -990,8 +990,8 @@ jobs:
 
   # The brief (brief/: the Worker "brief" and its Durable Object BriefState; the owner's daily research-and-world
   # briefing on brief.ziyixi.science, brief/docs/design.md). It compiles in packages/edge-auth, the Anthropic
-  # TypeScript SDK and the TypeScript proto runtime with proto/brief/ui/ and proto/ops/. Checked only (CHECK_ONLY in
-  # ci_changes.py) until its Access applications exist (design section 18). No step reaches the network or a model: the
+  # TypeScript SDK and the TypeScript proto runtime with proto/brief/ui/ and proto/ops/. Deployed since its Access
+  # applications exist (2026-10-11, design section 18). No step reaches the network or a model: the
   # workerd suite answers every feed, page, Claude, Workers AI and Resend request with synthetic fakes, and no key is
   # ever set here.
   brief-checks:
@@ -2144,9 +2144,8 @@ jobs:
             --notes-file "$RUNNER_TEMP/release-notes.md"
           echo "Published $tag" >> "$GITHUB_STEP_SUMMARY"
 
-  # The brief: CHECK_ONLY in ci_changes.py keeps brief_deploy false until "Infra apply" has created its Access
-  # applications and the go-live commit adds the AUD and the archive UI (brief/docs/design.md section 18). Home does
-  # not bind the brief before that commit, so Home's deploy does not wait for this job yet.
+  # The brief, with its archive UI as static assets (brief/docs/design.md section 18). Home does not bind the brief
+  # yet, so Home's deploy does not wait for this job.
   brief-deploy:
     name: Brief deploy
     needs: [changes, brief-checks, gate]

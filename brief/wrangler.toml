@@ -9,14 +9,14 @@
 # CSRF_SIGNING_KEY, FEEDBACK_SIGNING_KEY, MAIL_FROM and MAIL_TO as Worker secrets with --secrets-file. A plain
 # `wrangler deploy` of this file DELETES BUILD_SHA and MODE (the Worker then reads MODE as off: no model call, no send).
 #
-# The Claude API key (ANTHROPIC_API_KEY) and the Resend key (RESEND_API_KEY) are NOT deployed: the owner puts them from
-# their own machine with `wrangler secret put`, and they never enter GitHub. A deploy keeps them: `wrangler deploy
+# The Claude API key (ANTHROPIC_API_KEY) and the Resend key (RESEND_API_KEY) are NOT deployed: the owner puts them in the
+# Cloudflare dashboard (or with `wrangler secret put`), and they never enter GitHub. A deploy keeps them: `wrangler deploy
 # --secrets-file` keeps every secret the file does not name (deploy/test/secrets-kept.test.mjs), and no [secrets]
 # required list is declared here. Until the Claude key is put, no issue is made (ops-v1 anthropic_not_configured).
 #
-# Check-only (brief in CHECK_ONLY of .github/scripts/ci_changes.py) until "Infra apply" has created the Access
-# applications (the whole host, and the Bypass of exactly /feedback); the go-live commit then adds ACCESS_AUDIENCE
-# (deploy/deploy-vars.mjs refuses a real deploy without it). No workers.dev, no preview URL.
+# The Access applications (the whole host, and the Bypass of exactly /feedback) are created by infra/ and "Infra
+# apply"; the whole host's AUD is committed below as ACCESS_AUDIENCE (deploy/deploy-vars.mjs refuses a real deploy
+# without it). No workers.dev, no preview URL.
 #
 # Run wrangler from worker/ (the pinned wrangler lives in worker/node_modules) with --config ../wrangler.toml. Local
 # development uses ../wrangler.test.toml and brief/.dev.vars.
@@ -77,3 +77,8 @@ binding = "AI"
 # The app's host: the only origin a mutation may come from (CSRF), the feedback links' host, and a zone never fetched.
 PUBLIC_HOST = "brief.ziyixi.science"
 ACCESS_ISSUER = "https://ziyixi.cloudflareaccess.com"
+# The AUD tag of the Access application "brief" (the whole host; infra/access.tf owner_apps["brief"]), created by
+# "Infra apply" on 2026-10-11: config/resources.toml [access_audiences] holds it and tools/cloud-config/generate.py
+# writes it here; its application id is in infra/ids.tf. "Infra drift" compares this value with the application's
+# every day. The /feedback Bypass application has its own AUD, which nothing checks: the Worker checks its HMAC token.
+ACCESS_AUDIENCE = "d9dd5577cada54bc585a0add6f508663c8f27288cdf085cfbae70a24b54b7bfb"
