@@ -38,10 +38,10 @@ export const OPS_MAX_JSON_CHARS = 32_768;
 
 /**
  * ops-v1 apps of the contract that this build does not bind yet: an app answers ops-v1 (its name is in OpsStatus.app's
- * allowed list, which it must be to write a valid status) before Home binds its entrypoint. Empty since recall's go-live
- * commit added its RECALL binding (recall/docs/design.md §9, §11).
+ * allowed list, which it must be to write a valid status) before Home binds its entrypoint. The brief until its
+ * go-live commit, which adds its binding (brief/docs/design.md §15, §18); recall left with its go-live commit.
  */
-export const UNBOUND_OPS_APPS: readonly string[] = [];
+export const UNBOUND_OPS_APPS: readonly string[] = ['brief'];
 /** Every ops-v1 app this dashboard calls, in the contract's order (OpsStatus.app's allowed list without the unbound). */
 export const OPS_APPS = fieldRules(OpsStatusSchema.field.app).allowed.filter((app) => !UNBOUND_OPS_APPS.includes(app)) as readonly OpsApp[];
 /** The guard's levels by wire name. */

@@ -3,3 +3,5 @@ contracts/**/fixtures/**/*.json -text
 # recall-archive-v1's sample archive (fixtures/archive/: day file, VERSION, gzip blob) and future blobs, byte for byte.
 contracts/recall-archive-v1/fixtures/archive/** -text
 contracts/recall-archive-v1/fixtures/future/** -text
+# The brief's golden emails and ops-v1 answer (brief/worker/test/golden/), compared byte for byte.
+brief/worker/test/golden/** -text

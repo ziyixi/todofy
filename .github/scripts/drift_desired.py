@@ -66,6 +66,7 @@ WRAPPERS = {
     "fleet": {"language": "js", "file": "fleet/deploy/deploy-vars.mjs", "vars": "fleet", "secrets": "fleet"},
     "mailsort": {"language": "js", "file": "mailsort/deploy/deploy-vars.mjs", "vars": "mailsort", "secrets": "mailsort"},
     "recall": {"language": "js", "file": "recall/deploy/deploy-vars.mjs", "vars": "recall", "secrets": "recall"},
+    "brief": {"language": "js", "file": "brief/deploy/deploy-vars.mjs", "vars": "brief", "secrets": "brief"},
     "website-relay": {"language": "js", "file": "website/relay/deploy/deploy-vars.mjs", "vars": "ziyixi-notion-publish", "secrets": "ziyixi-notion-publish"},
     "todofy": {
         "language": "py",
@@ -84,8 +85,8 @@ MANUAL_SECRETS = {
     if worker.get("manual_secrets")
 }
 
-# Secrets only the owner puts from their own machine (mailsort's Gmail grant, recall's machine-token digests):
-# expected, optional, never deployed.
+# Secrets only the owner puts from their own machine (mailsort's Gmail grant, recall's machine-token digests, the
+# brief's Claude and Resend keys): expected, optional, never deployed.
 OWNER_MACHINE_SECRETS = owner_machine_secrets(REPO)
 
 # Wrapper kinds whose value is personal (must be a Worker secret on the live Worker).
@@ -106,6 +107,8 @@ PLAIN_KEYS = {
     "observability",
     "migrations",
     "triggers",
+    # Module rules (the brief bundles its content config as text): bundling only.
+    "rules",
 }
 
 
@@ -160,7 +163,7 @@ def config_bindings(worker: str, config: dict) -> list[dict]:
 def _placeholder(name: str) -> str:
     if name.endswith("_ALIASES"):
         return ""
-    if "OWNER" in name or "ADDRESS" in name:
+    if "OWNER" in name or "ADDRESS" in name or name.endswith(("_MAIL_FROM", "_MAIL_TO")):
         return "owner@example.com"
     if name.endswith("_PROJECT_ID"):
         return "placeholder"

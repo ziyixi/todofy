@@ -118,8 +118,8 @@ describe('only the methods of the services each app implements', () => {
   it('knows exactly the apps of the IDL (OpsStatus.app is open on the wire, OpsApp is this list), but those it does not bind yet', () => {
     expect(OPS_APPS).toEqual(['mail-hero', 'todofy', 'watch', 'fleet', 'newsletter', 'notion-publish', 'mailsort', 'recall'] satisfies readonly OpsApp[]);
     expect(Object.keys(CALLED_METHODS)).toEqual([...OPS_APPS]);
-    // An app may answer ops-v1 before Home binds it (recall did until its go-live commit); none does now.
-    expect(UNBOUND_OPS_APPS).toEqual([]);
+    // The brief answers ops-v1 before its go-live commit binds it (recall did until its own): Home calls it from then on.
+    expect(UNBOUND_OPS_APPS).toEqual(['brief']);
     expect(fieldRules(OpsStatusSchema.field.app).allowed).toEqual([...OPS_APPS, ...UNBOUND_OPS_APPS]);
   });
 

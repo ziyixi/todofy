@@ -24,6 +24,7 @@
 ## 服务隔离与共享代码
 
 - Cloudflare 应用各自拥有代码、资源、密钥和发布；Newsletter 入仓仍是独立 VPS 容器服务，不改成 Worker。
+  它的继任者 Brief 是另建的 Worker，替换与 Newsletter 的退役由 owner 另行决定。
 - 应用从不互相导入代码、配置或测试工具。允许共享的只有 `contracts/`、`proto/`、`packages/`；
   `tools/` 只供测试、构建和部署脚本使用，生产源码与包不得导入应用或这些工具。
 - `packages/<name>` 以 `file:` 依赖写进使用者的 package.json 和 lockfile，编译进各应用；不是独立服务。
@@ -85,9 +86,12 @@
 - Recall：[AGENTS](recall/AGENTS.md)、[设计](recall/docs/design.md)。只用合成页面，URL、标题与正文不进日志；三条机器路由各凭
   自己的令牌摘要，令牌由 owner 在设置里生成、只显示一次；归档由 recall 只增不删地写进 owner 的 Dropbox，
   布局与变更 feed 是 recall 拥有的公开合同 `recall-archive-v1`；Cloudflare 只留保留窗口内的正文，且只在归档确认后移出。
+- Brief：[AGENTS](brief/AGENTS.md)、[设计](brief/docs/design.md)。只经 `claude.ts` 调 Claude、只经 `send.ts` 经账本发信，
+  每天至多一封、unknown 不重发；Claude 与 Resend 密钥只由 owner 写入 Worker、不经 GitHub；测试只用合成网页与假客户端，标题和正文不进日志。
 - Website：[架构约束](docs/architecture.md#website)、[架构](website/docs/architecture.md)、[发布](website/docs/release.md)。
   只用静态访客路径，内容不提交；不绕过发布身份、门禁、验收与回退。
-- Newsletter：[README](newsletter/README.md)。保持独立镜像、VPS 状态目录与业务排空边界，镜像发布不等于服务器升级或发送成功。
+- Newsletter：[README](newsletter/README.md)。正由 Brief 替换（退役另行决定）；保持独立镜像、VPS 状态目录与业务排空边界，
+  镜像发布不等于服务器升级或发送成功。
   新包 `ghcr.io/ziyixi/todofy-newsletter` 由 monorepo Actions 创建/发布；不为旧 `newsletter` 包新增 monorepo Write 权限。
   现有 VPS 继续使用原镜像；切换必须符合任务授权并按 digest 验证。
 

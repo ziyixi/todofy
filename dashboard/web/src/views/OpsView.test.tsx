@@ -49,6 +49,7 @@ describe('操作与记录', () => {
       '服务器监控',
       '邮件分拣',
       '浏览记录',
+      '简报',
       '个人网站',
       '网站同步',
       'Newsletter',
@@ -72,11 +73,14 @@ describe('操作与记录', () => {
     // recall: its Ops entrypoint (counts and codes of the browsing record).
     expect(rows[7]).toHaveTextContent('ops-v1 状态接口')
     expect(within(rows[7] as HTMLElement).getAllByRole('cell').at(-1)).toHaveTextContent('recall')
-    expect(rows[8]).toHaveTextContent('公开地址探测')
-    expect(rows[10]).toHaveTextContent('ops-v1 状态接口')
+    // The brief: check-only the same way.
+    expect(rows[8]).toHaveTextContent('未接入监控')
+    expect(within(rows[8] as HTMLElement).getAllByRole('cell').at(-1)).toHaveTextContent('brief')
+    expect(rows[9]).toHaveTextContent('公开地址探测')
+    expect(rows[11]).toHaveTextContent('ops-v1 状态接口')
     // Hidden, with no Worker: it only names the self-hosted servers' backup bucket.
-    expect(rows[12]).toHaveTextContent('未接入监控')
-    expect(within(rows[12] as HTMLElement).getAllByRole('cell').at(-1)).toHaveTextContent('—')
+    expect(rows[13]).toHaveTextContent('未接入监控')
+    expect(within(rows[13] as HTMLElement).getAllByRole('cell').at(-1)).toHaveTextContent('—')
   })
 
   it('names a link-only entry of the registry as such', async () => {

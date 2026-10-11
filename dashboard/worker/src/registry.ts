@@ -247,6 +247,20 @@ const ENTRIES: readonly EntryDef[] = [
     app_only_signals: [],
     order: 10,
   },
+  {
+    id: 'brief',
+    name: '简报',
+    description: '每日研究前沿与世界简报、周六深读和归档',
+    group: 'apps',
+    icon: 'newspaper',
+    accent: 'amber',
+    url: 'https://brief.ziyixi.science/',
+    access: true,
+    status: { type: 'none' },
+    tile_metric: null,
+    app_only_signals: [],
+    order: 11,
+  },
   // END service-catalog entries
   {
     // Not a monorepo app: the self-hosted VPS and home server keep their backups in the account's R2
@@ -281,6 +295,7 @@ const WORKERS: readonly WorkerDef[] = [
   { script: 'fleet', entry: 'fleet', role: 'VPS 与后台服务监控' },
   { script: 'mailsort', entry: 'mailsort', role: 'Gmail 分拣与 UI' },
   { script: 'recall', entry: 'recall', role: '浏览记录、搜索与归档' },
+  { script: 'brief', entry: 'brief', role: '每日简报、深读与归档' },
   // END service-catalog workers
 ];
 
@@ -289,6 +304,7 @@ const RESOURCES: readonly ResourceDef[] = [
   { id: 'fleet-state', kind: 'do', name: 'FleetState', entry: 'fleet', script: 'fleet', match: RESOURCE_IDENTITIES['fleet-state'] ?? null, todo: '首次 Fleet 发布后，记录 DO namespace 到 config/resources.toml' },
   { id: 'mailsort-state', kind: 'do', name: 'MailsortState', entry: 'mailsort', script: 'mailsort', match: RESOURCE_IDENTITIES['mailsort-state'] ?? null, todo: '首次 mailsort 发布后，记录 DO namespace 到 config/resources.toml' },
   { id: 'recall-state', kind: 'do', name: 'RecallState', entry: 'recall', script: 'recall', match: RESOURCE_IDENTITIES['recall-state'] ?? null, todo: '首次 recall 发布后，记录 DO namespace 到 config/resources.toml' },
+  { id: 'brief-state', kind: 'do', name: 'BriefState', entry: 'brief', script: 'brief', match: RESOURCE_IDENTITIES['brief-state'] ?? null, todo: '首次简报发布后，记录 DO namespace 到 config/resources.toml' },
   { id: 'mail-hero-db', kind: 'd1', name: 'mail-hero 主库', entry: 'mail-hero', match: RESOURCE_IDENTITIES['mail-hero-db'] ?? null },
   { id: 'todofy-db', kind: 'd1', name: 'todofy 主库', entry: 'todofy', match: RESOURCE_IDENTITIES['todofy-db'] ?? null },
   { id: 'mail-coordinator', kind: 'do', name: 'MailCoordinator', entry: 'mail-hero', script: 'mail-hero', match: RESOURCE_IDENTITIES['mail-coordinator'] ?? null },

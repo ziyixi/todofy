@@ -119,7 +119,8 @@
             "newsletter",
             "notion-publish",
             "mailsort",
-            "recall"
+            "recall",
+            "brief"
           ]
         },
         "generated_at": {
@@ -923,7 +924,8 @@
         "newsletter",
         "notion-publish",
         "mailsort",
-        "recall"
+        "recall",
+        "brief"
       ]
     },
     "Counters": {

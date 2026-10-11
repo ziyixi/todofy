@@ -27,6 +27,7 @@ describe('首页', () => {
       '打开 服务器监控（新标签页），fleet.ziyixi.science',
       '打开 邮件分拣（新标签页），sort.ziyixi.science',
       '打开 浏览记录（新标签页），recall.ziyixi.science',
+      '打开 简报（新标签页），brief.ziyixi.science',
     ])
     for (const link of links) {
       expect(link).toHaveAttribute('target', '_blank')
@@ -36,7 +37,7 @@ describe('首页', () => {
     // The links tile opens its launcher, the Access-protected /_/ of the short-link host.
     expect(within(apps).getByRole('link', { name: /打开 短链接/ })).toHaveAttribute('href', 'https://s.ziyixi.science/_/')
     // Access-protected entries carry the lock with its own name; never an emoji.
-    expect(within(apps).getAllByRole('img', { name: '受 Access 保护' })).toHaveLength(8)
+    expect(within(apps).getAllByRole('img', { name: '受 Access 保护' })).toHaveLength(9)
 
     // Status lines are separate buttons (never inside the link).
     const mail = within(apps).getByRole('button', { name: 'Mail Hero 状态：正常，查看详情' })
@@ -44,9 +45,11 @@ describe('首页', () => {
     expect(within(apps).getByRole('button', { name: 'Todofy 状态：正常，查看详情' })).toHaveTextContent('24 小时 41 封')
     // The watch app's and Fleet's tiles have their own status buttons (their ops-v1 statuses are not in these
     // fixtures: 未知).
-    // mailsort's tile has its own status button too, and so has recall's (not in these fixtures either: 未知).
-    expect(within(apps).getAllByRole('button')).toHaveLength(8)
+    // mailsort's tile has its own status button too, and so have recall's and the brief's (not in these fixtures
+    // either: 未知).
+    expect(within(apps).getAllByRole('button')).toHaveLength(9)
     expect(within(apps).getByRole('button', { name: '浏览记录 状态：未知，查看详情' })).toBeInTheDocument()
+    expect(within(apps).getByRole('button', { name: '简报 状态：未知，查看详情' })).toBeInTheDocument()
     // FlowDay and the links app: their probe's latency, like the website.
     expect(within(apps).getByRole('button', { name: 'FlowDay 状态：正常，查看详情' })).toHaveTextContent('正常· 响应 95 ms')
     expect(within(apps).getByRole('button', { name: '短链接 状态：正常，查看详情' })).toHaveTextContent('正常· 响应 40 ms')
@@ -74,7 +77,7 @@ describe('首页', () => {
     const link = within(apps).getByRole('link', { name: '打开 Link Demo（新标签页），link-demo.ziyixi.science，未接入监控（仅链接）' })
     expect(link).toHaveAttribute('href', 'https://link-demo.ziyixi.science/')
     expect(link).toHaveAttribute('target', '_blank')
-    expect(within(apps).getAllByRole('img', { name: '受 Access 保护' })).toHaveLength(9)
+    expect(within(apps).getAllByRole('img', { name: '受 Access 保护' })).toHaveLength(10)
     expect(within(apps).queryByRole('button', { name: /Link Demo/ })).toBeNull()
   })
 

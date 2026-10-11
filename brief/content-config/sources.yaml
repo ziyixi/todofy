@@ -1,0 +1,475 @@
+# The brief's source registry (brief/docs/design.md §3). Owner-editable; public: no personal value, no key.
+# Every URL was fetched once from a home IP (2026-10-10; the sources marked "second check" later the same day); the
+# archive days re-check each from the Worker (design §16), and the disabled Crossref alternates stand in for a
+# publisher feed that blocks Workers.
+#
+# Fields (defaults below; the Worker refuses an unknown field or value):
+#   id                 stable, [a-z0-9-]; votes and learned weights are keyed by it, so never reuse one
+#   name               the venue as the source line shows it; also what counts as an independent source (§5.2)
+#   section            research | world (the gate gives each item one of profile.md's topics)
+#   kind               rss | atom | rdf | json | crossref | sitemap | geojson | arxiv_api
+#   url                {q} the url-encoded `query`, {start} the page offset, {date} YYYY-MM-DD (date_offset_days
+#                      before today, UTC)
+#   query              arxiv_api only; the Worker adds `AND submittedDate:[7 days ago TO now]` and reads every page of
+#                      that window (newest first, pages of 100, at most 5), so a paper announced days after it was
+#                      submitted is still found; IDs deduplicate
+#   path_prefixes      sitemap only: the paths whose new URLs are items (the first poll only records what exists)
+#   max_bytes          the body is read up to this size, then parsed as far as it got
+#   role               candidate: may be written up and cited | signal_only: raises a cluster's importance, never cited,
+#                      never runs without a candidate in its cluster
+#   text               what the writer may read: feed_full | feed_abstract | feed_summary | page_full | page_abstract |
+#                      headline. page_* is fetched only for shortlisted items, wherever the page is publicly reachable
+#                      and robots.txt does not close it to ziyixi-brief (a group naming it; AI-agent groups such as
+#                      Claude-User do not apply, §3.3); a paywall, a login or a short page falls back to the feed's
+#                      text, marked as such
+#   review             peer_reviewed | preprint | institution | commentary | news | government | data (the source
+#                      line's status; doi_review overrides it by DOI prefix)
+#   poll_per_day       1: the 18:30 round | 2: 18:30 and 03:30 | 4: every round (America/Los_Angeles)
+#   max_items          items read per poll, newest first (arxiv_api: see query)
+#   keywords           optional prefilter: an item runs only if its title or summary contains one as a whole word or
+#                      phrase; a trailing * matches the start of a word (fault* matches faults, not default); a
+#                      keyword written in capitals matches case-sensitively (AI matches AI, not said), others ignore case
+#   requires_abstract  skip items without an abstract (Crossref lists news and editorials as journal articles)
+#   enabled            false: kept here, never fetched
+
+version: 1
+
+defaults:
+  role: candidate
+  poll_per_day: 1
+  max_items: 50
+  max_bytes: 1048576
+  enabled: true
+
+sources:
+  # ---------- 研究前沿 · AI/LLM ----------
+  - id: arxiv-llm-architecture
+    name: arXiv
+    section: research
+    kind: arxiv_api
+    url: "https://export.arxiv.org/api/query?search_query={q}&sortBy=submittedDate&sortOrder=descending&start={start}&max_results=100"
+    # ti:transformer and ti:attention alone pull in vision, graph and time-series models: they need an LLM clause.
+    query: '(cat:cs.CL OR cat:cs.LG) AND (ti:"mixture of experts" OR ti:"state space" OR ti:"long context" OR ti:tokenizer OR ti:tokenization OR ti:"language model" OR ((ti:transformer OR ti:transformers OR ti:attention) AND (abs:"language model" OR abs:"language models" OR abs:LLM OR abs:LLMs OR ti:LLM OR ti:LLMs)))'
+    text: page_full # arxiv.org/html/<id> when it exists, else the abstract
+    review: preprint
+    max_items: 100 # 188 in the 7-day window on 2026-10-10 (246 before the LLM clause)
+  - id: arxiv-training-inference
+    name: arXiv
+    section: research
+    kind: arxiv_api
+    url: "https://export.arxiv.org/api/query?search_query={q}&sortBy=submittedDate&sortOrder=descending&start={start}&max_results=100"
+    # ti:inference alone is mostly Bayesian and causal inference, ti:kernel kernel methods: each needs a clause.
+    query: '(cat:cs.LG OR cat:cs.CL OR cat:cs.DC) AND (ti:"speculative decoding" OR ti:quantization OR ti:"KV cache" OR ti:pretraining OR ti:"scaling law" OR ti:"scaling laws" OR ti:GPU OR ti:GPUs OR ((ti:inference OR ti:serving OR ti:distillation) AND (abs:"language model" OR abs:"language models" OR abs:LLM OR abs:LLMs OR ti:LLM OR ti:LLMs)) OR (ti:kernel AND (abs:GPU OR abs:CUDA OR abs:Triton)))'
+    text: page_full
+    review: preprint
+    max_items: 100 # 122 in the 7-day window on 2026-10-10 (190 before the clauses)
+  - id: arxiv-llm-agents
+    name: arXiv
+    section: research
+    kind: arxiv_api
+    url: "https://export.arxiv.org/api/query?search_query={q}&sortBy=submittedDate&sortOrder=descending&start={start}&max_results=100"
+    query: '(cat:cs.CL OR cat:cs.AI) AND (ti:agent OR ti:agents OR ti:agentic) AND (abs:"language model" OR abs:LLM OR abs:LLMs)'
+    text: page_full
+    review: preprint
+    max_items: 100 # 208 in the 7-day window on 2026-10-10; about twice that without the abs: clause
+  - id: arxiv-search-recsys-ads
+    name: arXiv
+    section: research
+    kind: arxiv_api
+    url: "https://export.arxiv.org/api/query?search_query={q}&sortBy=submittedDate&sortOrder=descending&start={start}&max_results=100"
+    # ti:retrieval and ti:search only within cs.IR: in cs.LG they are mostly architecture search, tree search and RAG.
+    query: '(cat:cs.IR AND (ti:recommendation OR ti:recommender OR ti:ranking OR ti:reranking OR ti:"click-through" OR ti:advertising OR ti:retrieval OR ti:search)) OR (cat:cs.LG AND (ti:recommendation OR ti:recommender OR ti:"click-through" OR ti:advertising))'
+    text: page_full
+    review: preprint
+    max_items: 100 # 60 in the 7-day window on 2026-10-10 (120 before)
+  - id: hf-daily-papers
+    name: Hugging Face Daily Papers
+    section: research
+    kind: json
+    url: "https://huggingface.co/api/daily_papers?date={date}"
+    date_offset_days: 1 # yesterday's finished list
+    text: feed_abstract # a popularity signal too (upvotes); the same paper from arXiv merges by arXiv ID
+    review: preprint
+    # Undocumented public endpoint: the brief must work without it.
+  - id: anthropic-site
+    name: Anthropic
+    section: research
+    kind: sitemap # no RSS: new URLs under /research/, /news/, /engineering/ (lastmod is rewritten in bulk)
+    url: "https://www.anthropic.com/sitemap.xml"
+    path_prefixes: ["/research/", "/news/", "/engineering/"]
+    text: page_full
+    review: institution
+  - id: openai-news
+    name: OpenAI
+    section: research
+    kind: rss
+    url: "https://openai.com/news/rss.xml"
+    role: signal_only # about 150 characters per item; article pages answer 403
+    text: feed_summary
+    review: institution
+    max_bytes: 262144 # a 766 KB feed back to 2015: the newest items are first
+    max_items: 20
+  - id: google-deepmind-blog
+    name: Google DeepMind
+    section: research
+    kind: rss
+    url: "https://deepmind.google/blog/rss.xml"
+    text: page_full # the feed's description is empty
+    review: institution
+  - id: google-research-blog
+    name: Google Research
+    section: research
+    kind: rss
+    url: "https://research.google/blog/rss/"
+    text: page_full
+    review: institution
+  - id: microsoft-research-blog
+    name: Microsoft Research
+    section: research
+    kind: rss
+    url: "https://www.microsoft.com/en-us/research/feed/"
+    text: feed_full
+    review: institution
+  - id: interconnects
+    name: Interconnects
+    section: research
+    kind: rss
+    url: "https://www.interconnects.ai/feed"
+    text: feed_full
+    review: commentary
+  - id: import-ai
+    name: Import AI
+    section: research
+    kind: rss
+    url: "https://importai.substack.com/feed"
+    text: feed_full # weekly; mostly points at primary papers, and its links count as mentions (design §4)
+    review: commentary
+  - id: ahead-of-ai
+    name: Ahead of AI
+    section: research
+    kind: rss
+    url: "https://magazine.sebastianraschka.com/feed" # second check; 2.7 MB with 20 full posts, the newest first
+    text: feed_full
+    review: commentary
+  - id: thinking-machines
+    name: Thinking Machines
+    section: research
+    kind: rss
+    url: "https://thinkingmachines.ai/blog/index.xml"
+    text: feed_full
+    review: institution
+    max_bytes: 262144
+  - id: huggingface-blog
+    name: Hugging Face
+    section: research
+    kind: rss
+    url: "https://huggingface.co/blog/feed.xml"
+    text: page_full # many product posts too: the gate sorts them
+    review: institution
+  - id: pytorch-blog
+    name: PyTorch
+    section: research
+    kind: rss
+    url: "https://pytorch.org/feed/" # second check; 10 full posts, foundation and event news among them
+    text: feed_full
+    review: institution
+  - id: vllm-blog
+    name: vLLM
+    section: research
+    kind: rss
+    url: "https://vllm.ai/blog/rss.xml" # second check; a 200-character summary per post
+    text: page_full
+    review: institution
+  - id: nature-machine-intelligence
+    name: Nature Machine Intelligence
+    section: research
+    kind: rdf
+    url: "https://www.nature.com/natmachintell.rss"
+    text: page_abstract
+    review: peer_reviewed
+
+  # ---------- 研究前沿 · AI for science ----------
+  - id: nature-computational-science
+    name: Nature Computational Science
+    section: research
+    kind: rdf
+    url: "https://www.nature.com/natcomputsci.rss"
+    text: page_abstract
+    review: peer_reviewed
+  - id: arxiv-ai-for-science
+    name: arXiv
+    section: research
+    kind: arxiv_api
+    url: "https://export.arxiv.org/api/query?search_query={q}&sortBy=submittedDate&sortOrder=descending&start={start}&max_results=100"
+    query: '(cat:cs.LG OR cat:physics.comp-ph) AND (ti:"neural operator" OR ti:"physics-informed" OR ti:"scientific discovery" OR ti:"AI for science" OR ti:emulator OR ti:"foundation model for")'
+    text: page_full
+    review: preprint
+
+  # ---------- 研究前沿 · geophysics and seismology ----------
+  - id: arxiv-geophysics-seismology
+    name: arXiv
+    section: research
+    kind: arxiv_api
+    url: "https://export.arxiv.org/api/query?search_query={q}&sortBy=submittedDate&sortOrder=descending&start={start}&max_results=100"
+    # Not abs:tomography: it pulls in medical CT.
+    query: 'cat:physics.geo-ph OR abs:seismic OR abs:seismology OR abs:earthquake OR abs:earthquakes OR abs:seismogram OR abs:"waveform inversion"'
+    text: page_full
+    review: preprint
+  - id: nature
+    name: Nature
+    section: research
+    kind: rdf
+    url: "https://www.nature.com/nature.rss"
+    text: page_abstract
+    review: peer_reviewed
+    doi_review: { "10.1038/d41586": news } # news and views; research papers are 10.1038/s41586
+    poll_per_day: 2
+    keywords: [seism*, earthquake*, fault*, mantle, crust*, tectonic*, volcan*, geophysic*, "machine learning",
+               "deep learning", "neural network*", "language model*", "artificial intelligence", AI]
+  - id: nature-geoscience
+    name: Nature Geoscience
+    section: research
+    kind: rdf
+    url: "https://www.nature.com/ngeo.rss" # holds only the latest 8 items
+    text: page_abstract
+    review: peer_reviewed
+  - id: nature-subject-seismology
+    name: Nature Portfolio
+    section: research
+    kind: rss
+    url: "https://www.nature.com/subjects/seismology.rss" # Nat Commun, Commun Earth Environ, NGeo, Nature
+    text: page_full # titles only in the feed; Nat Commun and CEE are open access
+    review: peer_reviewed
+  - id: science
+    name: Science
+    section: research
+    kind: crossref
+    url: "https://api.crossref.org/journals/1095-9203/works?filter=from-created-date:{date},type:journal-article&sort=created&order=desc&rows=50&select=DOI,title,abstract,created,author,URL,subject"
+    date_offset_days: 3 # overlapping windows; DOIs deduplicate
+    text: feed_abstract # science.org pages answer 403
+    review: peer_reviewed
+    requires_abstract: true
+    keywords: [seism*, earthquake*, fault*, mantle, crust*, tectonic*, volcan*, geophysic*, "machine learning",
+               "deep learning", "neural network*", "language model*", "artificial intelligence", AI]
+  - id: jgr-solid-earth
+    name: JGR Solid Earth
+    section: research
+    kind: rss
+    url: "https://agupubs.onlinelibrary.wiley.com/feed/21699356/most-recent"
+    text: feed_abstract # article pages answer 403
+    review: peer_reviewed
+  - id: grl
+    name: Geophysical Research Letters
+    section: research
+    kind: rss
+    url: "https://agupubs.onlinelibrary.wiley.com/feed/19448007/most-recent"
+    text: feed_abstract
+    review: peer_reviewed
+    poll_per_day: 2
+    keywords: [seism*, earthquake*, fault*, mantle, crust*, tomograph*, waveform*, "machine learning", "deep learning",
+               "neural network*"]
+  - id: jgr-machine-learning-computation
+    name: JGR Machine Learning and Computation
+    section: research
+    kind: rss
+    url: "https://agupubs.onlinelibrary.wiley.com/feed/29935210/most-recent"
+    text: feed_abstract
+    review: peer_reviewed
+  - id: gji
+    name: Geophysical Journal International
+    section: research
+    kind: crossref
+    url: "https://api.crossref.org/journals/1365-246X/works?filter=from-created-date:{date},type:journal-article&sort=created&order=desc&rows=50&select=DOI,title,abstract,created,author,URL,subject"
+    date_offset_days: 3
+    text: feed_abstract # publisher pages answer 403
+    review: peer_reviewed
+    requires_abstract: true
+  - id: srl
+    name: Seismological Research Letters
+    section: research
+    kind: crossref
+    url: "https://api.crossref.org/journals/1938-2057/works?filter=from-created-date:{date},type:journal-article&sort=created&order=desc&rows=50&select=DOI,title,abstract,created,author,URL,subject"
+    date_offset_days: 3
+    text: feed_abstract
+    review: peer_reviewed
+    requires_abstract: true
+  - id: bssa
+    name: BSSA
+    section: research
+    kind: crossref
+    url: "https://api.crossref.org/journals/1943-3573/works?filter=from-created-date:{date},type:journal-article&sort=created&order=desc&rows=50&select=DOI,title,abstract,created,author,URL,subject"
+    date_offset_days: 3
+    text: feed_abstract
+    review: peer_reviewed
+    requires_abstract: true
+  - id: the-seismic-record
+    name: The Seismic Record
+    section: research
+    kind: crossref
+    url: "https://api.crossref.org/journals/2694-4006/works?filter=from-created-date:{date},type:journal-article&sort=created&order=desc&rows=50&select=DOI,title,abstract,created,author,URL,subject"
+    date_offset_days: 3
+    text: feed_abstract
+    review: peer_reviewed
+    requires_abstract: true
+  - id: seg-geophysics
+    name: Geophysics (SEG)
+    section: research
+    kind: crossref # second check: 8 of 8 recent records carry an abstract
+    url: "https://api.crossref.org/journals/1942-2156/works?filter=from-created-date:{date},type:journal-article&sort=created&order=desc&rows=50&select=DOI,title,abstract,created,author,URL,subject"
+    date_offset_days: 3
+    text: feed_abstract
+    review: peer_reviewed
+    requires_abstract: true
+  - id: seismica
+    name: Seismica
+    section: research
+    kind: atom # served as text/html: the format is read from the content
+    url: "https://seismica.library.mcgill.ca/gateway/plugin/WebFeedGatewayPlugin/atom"
+    text: page_full # diamond open access
+    review: peer_reviewed
+  - id: egu-solid-earth
+    name: Solid Earth (EGU)
+    section: research
+    kind: rss
+    url: "https://se.copernicus.org/xml/rss2_0.xml" # second check; 20 items with abstracts; open access
+    text: page_full
+    review: peer_reviewed
+  - id: eartharxiv
+    name: EarthArXiv
+    section: research
+    kind: rss
+    url: "https://eartharxiv.org/rss/preprints/" # holds 10 items; not eartharxiv.org/feed/ (another feed)
+    text: page_abstract
+    review: preprint
+    poll_per_day: 2
+    keywords: [seism*, earthquake*, fault*, mantle, crust*, tomograph*, waveform*, "machine learning", "deep learning",
+               "neural network*"]
+
+  # ---------- 世界与经济 ----------
+  - id: usgs-significant-earthquakes
+    name: USGS
+    section: world # clusters are per section: here it joins the news about the same earthquake and gives its numbers
+    kind: geojson
+    url: "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/significant_week.geojson"
+    text: feed_full
+    review: data
+  - id: bbc-world
+    name: BBC
+    section: world
+    kind: rss
+    url: "https://feeds.bbci.co.uk/news/world/rss.xml"
+    text: page_full # the feed has one sentence
+    review: news
+    poll_per_day: 2
+  - id: bbc-business
+    name: BBC
+    section: world
+    kind: rss
+    url: "https://feeds.bbci.co.uk/news/business/rss.xml"
+    text: page_full
+    review: news
+    poll_per_day: 2
+  - id: npr-world
+    name: NPR
+    section: world
+    kind: rss
+    url: "https://feeds.npr.org/1004/rss.xml" # holds 10 items
+    text: page_full
+    review: news
+    poll_per_day: 2
+  - id: guardian-world
+    name: The Guardian
+    section: world
+    kind: rss
+    url: "https://www.theguardian.com/world/rss"
+    text: page_full
+    review: news
+    poll_per_day: 2
+  - id: guardian-economics
+    name: The Guardian
+    section: world
+    kind: rss
+    url: "https://www.theguardian.com/business/economics/rss"
+    text: page_full
+    review: news
+    poll_per_day: 2
+  - id: dw-world
+    name: DW
+    section: world
+    kind: rdf
+    url: "https://rss.dw.com/rdf/rss-en-world"
+    text: page_full
+    review: news
+    poll_per_day: 2
+  - id: economist-world-this-week
+    name: The Economist
+    section: world
+    kind: rss
+    url: "https://www.economist.com/the-world-this-week/rss.xml"
+    role: signal_only # paywalled; its terms allow headlines only
+    text: headline
+    review: news
+  - id: ft-world
+    name: Financial Times
+    section: world
+    kind: rss
+    url: "https://www.ft.com/world?format=rss" # holds 25 items, all within a day
+    role: signal_only
+    text: headline
+    review: news
+    poll_per_day: 4
+  - id: fed-press
+    name: Federal Reserve
+    section: world
+    kind: rss
+    url: "https://www.federalreserve.gov/feeds/press_all.xml"
+    text: page_full
+    review: government
+  - id: aljazeera
+    name: Al Jazeera
+    section: world
+    kind: rss
+    url: "https://www.aljazeera.com/xml/rss/all.xml" # holds 25 items
+    text: page_full
+    review: news
+    poll_per_day: 4
+  - id: cna-asia
+    name: CNA
+    section: world
+    kind: rss
+    url: "https://www.channelnewsasia.com/api/v1/rss-outbound-feed?_format=xml&category=6511" # second check; Asia
+    text: page_full # Crawl-delay 10
+    review: news
+    poll_per_day: 2
+  - id: nikkei-asia
+    name: Nikkei Asia
+    section: world
+    kind: rdf
+    url: "https://asia.nikkei.com/rss/feed/nar" # second check; 50 headlines
+    role: signal_only # paywalled
+    text: headline
+    review: news
+    poll_per_day: 2
+
+  # ---------- Optional: fetched fine on 2026-10-10, off until the owner turns one on ----------
+  - { id: nyt-world, name: The New York Times, section: world, kind: rss, url: "https://rss.nytimes.com/services/xml/rss/nyt/World.xml", role: signal_only, text: headline, review: news, poll_per_day: 2, enabled: false }
+  - { id: un-news, name: UN News, section: world, kind: rss, url: "https://news.un.org/feed/subscribe/en/news/all/rss.xml", text: page_full, review: news, enabled: false }
+  - { id: npr-business, name: NPR, section: world, kind: rss, url: "https://feeds.npr.org/1006/rss.xml", text: page_full, review: news, poll_per_day: 2, enabled: false }
+  - { id: economist-finance, name: The Economist, section: world, kind: rss, url: "https://www.economist.com/finance-and-economics/rss.xml", role: signal_only, text: headline, review: news, enabled: false }
+  - { id: nature-subject-geophysics, name: Nature Portfolio, section: research, kind: rss, url: "https://www.nature.com/subjects/geophysics.rss", text: page_full, review: peer_reviewed, enabled: false }
+  - { id: nature-subject-ml, name: Nature Portfolio, section: research, kind: rss, url: "https://www.nature.com/subjects/machine-learning.rss", text: page_full, review: peer_reviewed, enabled: false }
+  - { id: agu-advances, name: AGU Advances, section: research, kind: rss, url: "https://agupubs.onlinelibrary.wiley.com/feed/2576604x/most-recent", text: feed_abstract, review: peer_reviewed, enabled: false }
+  - { id: science-advances, name: Science Advances, section: research, kind: rss, url: "https://www.science.org/action/showFeed?type=etoc&feed=rss&jc=sciadv", text: feed_summary, review: peer_reviewed, enabled: false }
+  - { id: eos, name: Eos, section: research, kind: rss, url: "https://eos.org/feed", text: feed_full, review: news, enabled: false }
+  - { id: hn-arxiv-stories, name: Hacker News, section: research, kind: json, url: "https://hn.algolia.com/api/v1/search_by_date?tags=story&query=arxiv.org&restrictSearchableAttributes=url&numericFilters=points%3E40&hitsPerPage=100", role: signal_only, text: headline, review: commentary, enabled: false }
+  - { id: nvidia-tech-blog, name: NVIDIA Technical Blog, section: research, kind: rss, url: "https://developer.nvidia.com/blog/feed", text: feed_full, review: institution, max_bytes: 262144, enabled: false }
+  - { id: bair-blog, name: BAIR, section: research, kind: rss, url: "https://bair.berkeley.edu/blog/feed.xml", text: feed_full, review: institution, enabled: false }
+  # CNA's world feed: mostly Reuters and AFP wire copy with full text, if BBC or DW block Workers (second check).
+  - { id: cna-world, name: CNA, section: world, kind: rss, url: "https://www.channelnewsasia.com/api/v1/rss-outbound-feed?_format=xml&category=6311", text: page_full, review: news, poll_per_day: 2, enabled: false }
+
+  # ---------- Alternates: if a publisher feed blocks Workers (design §3.1), disable it and enable its alternate ----------
+  # Crossref carried an abstract on 67 of 67 recent AGU records (second check). Nature's feeds have no such alternate:
+  # Crossref and OpenAlex carry abstracts for few recent Nature-family records (design §3.1).
+  - { id: jgr-solid-earth-crossref, name: JGR Solid Earth, section: research, kind: crossref, url: "https://api.crossref.org/journals/2169-9356/works?filter=from-created-date:{date},type:journal-article&sort=created&order=desc&rows=50&select=DOI,title,abstract,created,author,URL,subject", date_offset_days: 3, text: feed_abstract, review: peer_reviewed, requires_abstract: true, enabled: false }
+  - { id: grl-crossref, name: Geophysical Research Letters, section: research, kind: crossref, url: "https://api.crossref.org/journals/1944-8007/works?filter=from-created-date:{date},type:journal-article&sort=created&order=desc&rows=50&select=DOI,title,abstract,created,author,URL,subject", date_offset_days: 3, text: feed_abstract, review: peer_reviewed, requires_abstract: true, poll_per_day: 2, keywords: [seism*, earthquake*, fault*, mantle, crust*, tomograph*, waveform*, "machine learning", "deep learning", "neural network*"], enabled: false }
+  - { id: jgr-machine-learning-computation-crossref, name: JGR Machine Learning and Computation, section: research, kind: crossref, url: "https://api.crossref.org/journals/2993-5210/works?filter=from-created-date:{date},type:journal-article&sort=created&order=desc&rows=50&select=DOI,title,abstract,created,author,URL,subject", date_offset_days: 3, text: feed_abstract, review: peer_reviewed, requires_abstract: true, enabled: false }

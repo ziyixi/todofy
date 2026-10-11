@@ -23,6 +23,9 @@ flowchart LR
   Home -->|Ops bindings| Sort
   Chrome[Owner's Chrome extension] -->|recall.ingest.v1, ingest token| Recall[recall]
   Recall -->|recall-archive-v1 feed, export token| NAS[NAS archive]
+  Sources[Public feeds and pages] -->|polite polls, honest UA| Brief[Brief]
+  Brief -->|Messages API| Claude[Claude API]
+  Brief -->|one email a day, idempotency key| Resend[Resend]
   Home -->|Fleet and Newsletter Ops bindings| Fleet[Fleet]
   Observer[Observer CronJob] -->|signed fleet.report.v1| Fleet
   Actions[GitHub Actions] -->|Access and deploy Bearer, typed release API| Runtime[Platform runtime in k3s]
@@ -59,6 +62,7 @@ runtime. Newsletter keeps its own locked container dependencies and existing ext
 | Watch | `watch.ui.v1` | `/api/v1/` |
 | Mailsort | `mailsort.ui.v2` | `/api/v2/` |
 | recall | `recall.ui.v1` | `/api/v1/` |
+| Brief | `brief.ui.v1` | `/api/v1/` |
 | Fleet | `fleet.ui.v1` | `/api/v1/` |
 
 The [proto HTTP pattern](../proto/README.md#http-apis) owns route descriptors, request/response types and
@@ -168,6 +172,13 @@ accepted report nor a ready deployment receipt proves successful Newsletter deli
   Dropbox app folder (OAuth with PKCE, connected in 设置), which the NAS syncs with its own Dropbox support: nothing of
   recall's runs on the NAS. Its Access applications and bucket exist since 2026-10-10 and CI deploys it like any app;
   Home binds its Ops entrypoint. See [AGENTS](../recall/AGENTS.md) and [design](../recall/docs/design.md).
+- **Brief:** one SQLite DO that schedules itself with alarms (no D1, R2 or cron), plus the Workers AI binding (bge-m3
+  only). It fetches the registry's public feeds and pages itself (an honest user agent, per-host pacing, never a
+  paywall or a login), screens with Claude Haiku, picks and writes with Claude Opus through the official SDK (the only
+  caller is `claude.ts`), checks every quote and number in code, and sends at most one email a day through a ledger
+  (`send.ts`; an unknown outcome is never sent again). The Claude and Resend keys are put by the owner and never pass
+  through GitHub; `BRIEF_MODE` and 暂停 can only lower what it does. Check-only until its Access applications exist. See
+  [AGENTS](../brief/AGENTS.md) and [design](../brief/docs/design.md).
 - **Newsletter:** runs as an independent k3s image because its workflow uses Codex CLI. It reads Todofy's machine
   reports through existing HTTPS/Basic auth and keeps its own persistent state. It does not import Todofy's
   implementation. Its external `ziyixi-protos`/wire JSON runtime and private drain/monitor adapters stay intact.

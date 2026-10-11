@@ -120,7 +120,7 @@ const SCRIPT_OK: Record<string, LiveScript> = {
 
 describe('the bundled desired state', () => {
   it('names every production Worker, and the fake API built from it shows no drift', async () => {
-    expect(Object.keys(DESIRED.workers).sort()).toEqual(['fleet', 'flowday', 'home', 'links', 'mail-hero', 'mailsort', 'recall', 'todofy', 'todofy-core', 'watch', 'ziyixi-notion-publish', 'ziyixi-website']);
+    expect(Object.keys(DESIRED.workers).sort()).toEqual(['brief', 'fleet', 'flowday', 'home', 'links', 'mail-hero', 'mailsort', 'recall', 'todofy', 'todofy-core', 'watch', 'ziyixi-notion-publish', 'ziyixi-website']);
     expect(DESIRED.workers.home?.crons).toEqual(['*/30 * * * *']);
     const { doc } = await fullCheck();
     expect(doc.findings).toEqual([]);
@@ -270,8 +270,8 @@ describe('reading the API', () => {
 describe('a run across ticks', () => {
   it(`never makes more than DRIFT_CALLS_PER_TICK = ${String(DRIFT_CALLS_PER_TICK)} calls in one tick`, async () => {
     const { perTick } = await fullCheck();
-    // The account step (four calls) and two Workers, four Workers twice, then the last two.
-    expect(perTick).toEqual([10, 12, 12, 6]);
+    // The account step (four calls) and two Workers, four Workers twice, then the last three.
+    expect(perTick).toEqual([10, 12, 12, 9]);
     expect(Math.max(...perTick)).toBeLessThanOrEqual(DRIFT_CALLS_PER_TICK);
     // The account step always leaves room for at least one Worker, so every tick makes progress.
     expect(accountStepCalls() + SCRIPT_STEP_CALLS).toBeLessThanOrEqual(DRIFT_CALLS_PER_TICK);
@@ -283,8 +283,8 @@ describe('a run across ticks', () => {
     const first = await advanceRun(run, TOKEN, SYNTHETIC_ACCOUNT, flaky.fetcher);
     expect(first.error).toMatchObject({ code: 'http_500', step: 'script' });
     expect(first.run.account).not.toBeNull();
-    // fleet failed; the other Worker of the batch is kept.
-    expect(Object.keys(first.run.scripts).sort()).toEqual(['flowday']);
+    // fleet failed; the other Worker of the batch (brief, first in name order) is kept.
+    expect(Object.keys(first.run.scripts).sort()).toEqual(['brief']);
     run = first.run;
     for (let attempt = 2; attempt <= DRIFT_MAX_ATTEMPTS; attempt++) {
       const next = await advanceRun(run, TOKEN, SYNTHETIC_ACCOUNT, flaky.fetcher);
@@ -415,7 +415,7 @@ describe('storage bound', () => {
 describe('the view', () => {
   it('says not_configured without the token, never_checked before the first check, and lists at most DRIFT_VIEW_FINDINGS_MAX', () => {
     expect(driftView(NO_DRIFT, false, AT('03:00')).status).toBe('not_configured');
-    expect(driftView(NO_DRIFT, true, AT('03:00'))).toMatchObject({ status: 'never_checked', in_progress: false, desired_workers: 12 });
+    expect(driftView(NO_DRIFT, true, AT('03:00'))).toMatchObject({ status: 'never_checked', in_progress: false, desired_workers: 13 });
     expect(driftView({ ...NO_DRIFT, running_day: DAY }, true, AT('03:00')).in_progress).toBe(true);
     const many = Array.from({ length: 40 }, (_, i) => ({ category: 'bindings' as const, script: 'alpha', name: `B_${String(i)}`, kind: 'extra' as const, actual: 'plain_text' }));
     const view = driftView({ ...NO_DRIFT, checked_at: AT('02:30'), counts: countFindings(many), findings: many }, true, AT('03:00'));

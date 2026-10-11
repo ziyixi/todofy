@@ -1,5 +1,6 @@
 {
   "workers": [
+    "brief",
     "fleet",
     "flowday",
     "home",

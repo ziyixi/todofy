@@ -72,10 +72,10 @@ Nothing unrelated is imported, declared, read or modelled, not even read-only.
 [`test_infra_guard.py`](../.github/scripts/test_infra_guard.py) tests the guard itself against
 configurations built to slip past it.
 
-### Managed here (36 objects)
+### Managed here (39 objects)
 
-This is the maximum declared count. Fresh bootstrap creates 34 objects before the first Worker release,
-then adds its exact mail rule (35). An adopted account retains the frozen legacy backup app (36).
+This is the maximum declared count. Fresh bootstrap creates 37 objects before the first Worker release,
+then adds its exact mail rule (38). An adopted account retains the frozen legacy backup app (39).
 Objects being retired ([Retiring an app](#retiring-an-app)) are not counted: [`retired.tf`](retired.tf) moves them
 out of the managed addresses so that the next apply deletes them.
 Older private inputs can temporarily keep the existing external IdP references; bootstrap captures and
@@ -100,6 +100,9 @@ imports their actual IDs before switching to the managed references.
 | `cloudflare_zero_trust_access_application.owner["recall"]` | Access app "recall" | `recall.ziyixi.science` (the whole host), session 24h, the two shared policies. **Created** here before recall's first deploy, not imported; its AUD and id are then committed ([Adding an app](#adding-an-app)) |
 | `cloudflare_zero_trust_access_application.recall_machine` | recall machine routes | Only the exact `/api/machine/v1/batches` and `/api/machine/v1/changes` and the blobs under `/api/machine/v1/blobs/*`; the Worker checks each route's own bearer token (recall/docs/design.md §2.1) |
 | `cloudflare_zero_trust_access_policy.recall_machine` | recall machine routes only | Bypass policy attached only to the machine-routes application; no owner API bypass |
+| `cloudflare_zero_trust_access_application.owner["brief"]` | Access app "brief" | `brief.ziyixi.science` (the whole host), session 24h, the two shared policies. **Created** here before the brief's first deploy, not imported; its AUD and id are then committed ([Adding an app](#adding-an-app)) |
+| `cloudflare_zero_trust_access_application.brief_feedback` | brief-feedback | Only the exact `/feedback` path (the email's vote links); the Worker verifies each link's signed token (brief/docs/design.md §10) |
+| `cloudflare_zero_trust_access_policy.brief_feedback` | brief feedback only | Bypass policy attached only to the feedback application; no owner API bypass |
 | `cloudflare_zero_trust_access_application.fleet_receipt` | Fleet machine receipt | Only the exact `/api/internal/fleet/v1/receipt` path; Worker independently validates signed POST receipts |
 | `cloudflare_zero_trust_access_policy.fleet_receipt` | Fleet signed receipt only | Bypass policy attached only to the exact receipt application; no owner API bypass |
 | `cloudflare_zero_trust_access_service_token.platform_deploy` | Deployment machine identity | Dedicated token in encrypted state and encrypted one-time handoff; never an owner identity |

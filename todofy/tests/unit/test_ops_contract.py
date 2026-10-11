@@ -28,10 +28,10 @@ ROOT = mail_contract.TODOFY.parent / "contracts" / "ops-v1"
 SCHEMA = json.loads((ROOT / "ops-v1.schema.json").read_text())
 LEGACY = json.loads((ROOT / "legacy" / "ops-v1.schema.json").read_text())
 # The apps that joined ops-v1 after the hand-written schema was frozen (OpsStatus.app is an open list): Watch,
-# Fleet, Newsletter, Notion publish, mailsort and recall. No dashboard that validates with the legacy schema binds one,
-# so it is compared with the generated one as if its App list had grown the same way. New optional evidence is checked
-# below.
-JOINED_APPS = ["watch", "fleet", "newsletter", "notion-publish", "mailsort", "recall"]
+# Fleet, Newsletter, Notion publish, mailsort, recall and the brief. No dashboard that validates with the legacy schema
+# binds one, so it is compared with the generated one as if its App list had grown the same way. New optional evidence
+# is checked below.
+JOINED_APPS = ["watch", "fleet", "newsletter", "notion-publish", "mailsort", "recall", "brief"]
 LEGACY_GROWN = {
     **LEGACY,
     "$defs": {**LEGACY["$defs"], "App": {"enum": [*LEGACY["$defs"]["App"]["enum"], *JOINED_APPS]}},

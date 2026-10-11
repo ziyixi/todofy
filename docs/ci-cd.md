@@ -46,8 +46,10 @@ migrating an account; their changed committed Wrangler outputs follow the affect
 While Fleet is in that set, both Fleet and Home deploy outputs remain false, including dispatch, full-run
 and same-SHA reuse. Complete the reviewed Access bootstrap, commit its real AUD/identity configuration and
 remove that explicit freeze together before enabling those releases. A placeholder dry-run is not evidence
-that the production identity exists. The set is empty since recall's go-live commit (2026-10-10), which followed
-"Infra apply" creating its Access applications and bucket ([recall design](../recall/docs/design.md) §11).
+that the production identity exists. The brief is in the set now: its checks, deploy job and release recipe exist (the
+recipe builds the archive UI, `brief/web`), and its deploy output stays false until "Infra apply" has created its
+Access applications and the go-live commit adds the AUD ([brief design](../brief/docs/design.md) §18). recall left the
+set with its go-live commit (2026-10-10).
 
 | Job | Checks or release responsibility |
 | --- | --- |
@@ -56,6 +58,7 @@ that the production identity exists. The set is empty since recall's go-live com
 | `Todofy static checks`, `Todofy runtime (1/3)`–`(3/3)`, `Todofy checks` | Host/gateway/UI checks, dry-runs and bundle/CPU budgets; real-binding tests in balanced shards with completeness and serial-test guards. All required shards must pass. |
 | `Mail Hero checks`, `Dashboard checks`, `FlowDay checks`, `Links checks`, `Watch checks` | Each application's config/wrapper checks, lint/typechecks, synthetic unit and real-binding runtime tests, UI build and production-config dry-run. Existing app-specific CPU, bundle and query budgets stay in their own jobs/runbooks. |
 | `Recall checks` | Worker lint/typecheck/unit and workerd runtime tests (a real SQLite DO and R2, CPU bounds), the UI's tests and build, the archive consumer's tests on Python 3.12 (its rules against the generated schema), the smoke run (the extension's own upload through `wrangler dev` into an archive checked against `recall-archive-v1`), the dry run with the bundle budget, and the extension's checks and build, kept 30 days as the artifact `recall-extension-<sha>` (the extension is never deployed; `Recall extension release` publishes it). |
+| `Brief checks` | The deploy wrapper and production config tests, Worker lint/typecheck/unit tests (the real Anthropic SDK over a fake stream, the grounding check, the feeds' parsers, the ops-v1 golden bytes), the workerd runtime tests (a real SQLite DO with a synthetic web and fake Claude, Workers AI and Resend: a weekday and a Saturday, the end-to-end dry run of a shadow weekday with exactly one send, every failure wall, the rows read and written and the CPU at the bounds), the archive UI's tests and build (its JavaScript budget) and the dry run with the bundle budget. No key and no network. |
 | `Fleet checks` | Worker and UI lint/typecheck/tests, real SQLite DO signed-receipt runtime tests, UI build, config/wrapper checks and dry-run bundle budget. The observer's Python tests run with Platform, not from a retired Fleet host executable. |
 | `Website checks` | Synthetic Notion/source fixtures, static export and Playwright, relay/release tests and both Worker dry-runs; no production content or credentials. |
 | `Contracts` | Generated schemas, frozen golden bytes, both sides' consumer tests and Home's generated Ops caller. Mail receipt legacy compatibility, task-intent value rules and Ops fixtures remain checked. Apps' own jobs run real-binding tests. |
@@ -161,6 +164,7 @@ also initializes missing operational variables without overwriting existing paus
 | Website release/relay | Website's settings stay in its workflow/config; optional `WEBSITE_BOOTSTRAP_APPROVAL` for an empty release registry | `CF_API_TOKEN`; release additionally uses `WEBSITE_NOTION_TOKEN`, `WEBSITE_NOTION_DATA_SOURCE_ID`; relay retains its existing Worker secrets |
 | FlowDay, Links, Watch deploys | Committed app configuration; owner pause settings remain app-owned | `CF_API_TOKEN`, `DASHBOARD_ACCESS_OWNER`, `DASHBOARD_ACCESS_OWNER_ALIASES`; respectively `FLOWDAY_CSRF_SIGNING_KEY` + `FLOWDAY_CREDENTIAL_KEY`, `LINKS_CSRF_SIGNING_KEY`, `WATCH_CSRF_SIGNING_KEY` |
 | `Recall deploy` | Committed config and `BUILD_SHA` from the release commit; no switch | `CF_API_TOKEN`, `DASHBOARD_ACCESS_OWNER`, `DASHBOARD_ACCESS_OWNER_ALIASES`, `RECALL_CSRF_SIGNING_KEY`; the machine tokens' digests are put from the owner's machine only, never through GitHub |
+| `Brief deploy` | `BRIEF_MODE` (`off`, `archive`, `shadow` or `live`) | `CF_API_TOKEN`, `DASHBOARD_ACCESS_OWNER`, `DASHBOARD_ACCESS_OWNER_ALIASES`, `BRIEF_CSRF_SIGNING_KEY`, `BRIEF_FEEDBACK_SIGNING_KEY`, `BRIEF_MAIL_FROM`, `BRIEF_MAIL_TO`; the Claude and Resend keys are put from the owner's machine only, never through GitHub |
 | `Fleet deploy` | Committed config and `BUILD_SHA` from the release commit | `CF_API_TOKEN`, `FLEET_ACCESS_OWNER`, `FLEET_ACCESS_OWNER_ALIASES`, `FLEET_REPORT_HMAC_KEY` |
 | `Dashboard deploy` | Required boolean `DASHBOARD_CANARY_ENABLED` | `CF_API_TOKEN`, `DASHBOARD_ACCESS_OWNER`, `DASHBOARD_ACCESS_OWNER_ALIASES`, `DASHBOARD_CSRF_SIGNING_KEY`, `DASHBOARD_CF_ANALYTICS_TOKEN` (separate least-privilege read-only token; [setup](../dashboard/docs/setup.md) §4) |
 | `VPS deploy` | `VPS_DEPLOY_ENABLED`; dispatch may explicitly select resume | `PLATFORM_ACCESS_CLIENT_ID`, `PLATFORM_ACCESS_CLIENT_SECRET`, `PLATFORM_DEPLOY_TOKEN`; no SSH or Kubernetes credential |

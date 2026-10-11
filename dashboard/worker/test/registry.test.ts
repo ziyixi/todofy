@@ -75,7 +75,7 @@ describe('the registry', () => {
 
   it('registers the entries of the design, in their groups and order', () => {
     const byGroup = (group: string) => REGISTRY.entries.filter((e) => e.group === group).sort((a, b) => a.order - b.order).map((e) => e.id);
-    expect(byGroup('apps')).toEqual(['mail-hero', 'todofy', 'flowday', 'links', 'watch', 'fleet', 'mailsort', 'recall']);
+    expect(byGroup('apps')).toEqual(['mail-hero', 'todofy', 'flowday', 'links', 'watch', 'fleet', 'mailsort', 'recall', 'brief']);
     expect(byGroup('sites')).toEqual(['website']);
     expect(byGroup('services')).toEqual(['notion-publish', 'newsletter']);
     expect(byGroup('hidden')).toEqual(['home', 'self-hosted', 'platform-runtime']);
@@ -92,6 +92,8 @@ describe('the registry', () => {
       fleet: 'ops_v1',
       mailsort: 'ops_v1',
       recall: 'ops_v1',
+      // Check-only until its go-live commit binds its Ops entrypoint (brief/docs/design.md §18).
+      brief: 'none',
       home: 'self',
       'self-hosted': 'none',
       'platform-runtime': 'none',
@@ -140,9 +142,11 @@ describe('the registry', () => {
     expect(resourceByMatch('r2', 'vultr-backup')).toMatchObject({ id: 'vps-backup', name: 'VPS 备份', entry: 'self-hosted' });
     expect(REGISTRY.entries.find((e) => e.id === 'self-hosted')).toMatchObject({ group: 'hidden', url: null, status: { type: 'none' } });
     expect(REGISTRY.workers.filter((w) => w.entry === 'self-hosted')).toEqual([]);
-    // Fleet's, mailsort's and recall's new namespaces are recorded in config/resources.toml after their first deploys.
+    // Fleet's, mailsort's, recall's and the brief's new namespaces are recorded in config/resources.toml after their first
+    // deploys.
     const unmatched = REGISTRY.resources.filter((r) => r.match === null).map((r) => r.id);
-    expect(unmatched.filter((id) => id !== 'fleet-state' && id !== 'mailsort-state' && id !== 'recall-state')).toEqual([]);
+    expect(unmatched.filter((id) => id !== 'fleet-state' && id !== 'mailsort-state' && id !== 'recall-state' && id !== 'brief-state')).toEqual([]);
+    expect(REGISTRY.resources.find((r) => r.id === 'brief-state')).toMatchObject({ kind: 'do', entry: 'brief', script: 'brief' });
     expect(REGISTRY.resources.find((r) => r.id === 'recall-state')).toMatchObject({ kind: 'do', entry: 'recall', script: 'recall' });
     expect(resourceByMatch('r2', 'recall-store')).toMatchObject({ id: 'recall-store', entry: 'recall' });
     expect(REGISTRY.resources.find((r) => r.id === 'mailsort-state')).toMatchObject({ kind: 'do', entry: 'mailsort', script: 'mailsort' });
@@ -352,7 +356,7 @@ describe('validateRegistry', () => {
 });
 
 it('registers every configured account resource, including bootstrap state', () => {
-  // A namespace its Worker's first deploy has not created yet (recall-state) has no identity on either side.
+  // A namespace its Worker's first deploy has not created yet (recall-state, brief-state) has no identity on either side.
   for (const kind of ['d1', 'do', 'r2'] as const) expect(REGISTRY.resources.filter(r => r.kind === kind && r.match !== null).map(r => r.match).sort()).toEqual(inventory[kind]);
   expect(REGISTRY.workers.map(w => w.script).sort()).toEqual(inventory.workers);
 });

@@ -1,0 +1,47 @@
+version = 1
+id = "brief"
+target = "cloudflare"
+
+[[workers]]
+config = "brief/wrangler.toml"
+personal_secrets = ["ACCESS_OWNER", "ACCESS_OWNER_ALIASES", "CSRF_SIGNING_KEY", "FEEDBACK_SIGNING_KEY", "MAIL_FROM", "MAIL_TO"]
+manual_secrets = []
+optional_secrets = ["ACCESS_OWNER_ALIASES"]
+# The Claude API key (its own Console workspace with a spend limit) and the Resend key (sending access only), put from
+# the owner's machine with `wrangler secret put` and kept by every deploy (docs/design.md §1, §18). Owner-machine secrets
+# are not part of the GitHub map BRIEF_WORKER_SECRETS (tools/cloud-config/worker-secrets.json leaves them out,
+# deploy/deploy-vars.mjs refuses them); the drift check expects them, optional: without the Claude key no issue is
+# made (ops-v1 `anthropic_not_configured`), without the Resend key nothing is sent (`mail_not_configured`).
+owner_machine_secrets = ["ANTHROPIC_API_KEY", "RESEND_API_KEY"]
+hosts = ["brief"]
+entry = "brief"
+role = "每日简报、深读与归档"
+position = 14
+
+[[entries]]
+id = "brief"
+name = "简报"
+description = "每日研究前沿与世界简报、周六深读和归档"
+group = "apps"
+icon = "newspaper"
+accent = "amber"
+access = true
+app_only_signals = []
+order = 11
+worker = "brief"
+url_path = "/"
+position = 16
+[entries.status]
+# Check-only until its go-live commit (docs/design.md §18): then ops_v1 with Home's BRIEF binding (codes and counts
+# only; Home's guard defers its embedding, learning and source probes).
+type = "none"
+
+# The whole host behind the owner's Access application. The exact path /feedback (the email's vote links) has its own
+# Bypass application in infra/access.tf, and the Worker verifies each link's signed token itself (docs/design.md §10).
+[[access]]
+key = "brief"
+kind = "owner"
+worker = "brief"
+name = "brief"
+paths = [""]
+session = "24h"

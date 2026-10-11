@@ -268,12 +268,14 @@ SAFETY_BUDGET = "10"
                 cloud_profile.worker_secret_specs(root)
 
     def test_owner_machine_secrets_never_reach_the_github_maps_in_the_repository(self):
-        """mailsort's Gmail grant and recall's machine-token digests are put by the owner from their own machine only."""
+        """mailsort's Gmail grant, recall's machine-token digests and the brief's Claude and Resend keys are put by the
+        owner from their own machine only."""
         source = TOOL.parents[1]
         grant = ['GMAIL_CLIENT_ID', 'GMAIL_CLIENT_SECRET', 'GMAIL_REFRESH_TOKEN']
         digests = ['EXPORT_TOKEN_SHA256', 'EXPORT_TOKEN_SHA256_PREVIOUS', 'INGEST_TOKEN_SHA256', 'INGEST_TOKEN_SHA256_PREVIOUS']
-        self.assertEqual(cloud_profile.owner_machine_secrets(source), {'mailsort': grant, 'recall': digests})
-        for worker, names in (('mailsort', grant), ('recall', digests)):
+        keys = ['ANTHROPIC_API_KEY', 'RESEND_API_KEY']
+        self.assertEqual(cloud_profile.owner_machine_secrets(source), {'brief': keys, 'mailsort': grant, 'recall': digests})
+        for worker, names in (('mailsort', grant), ('recall', digests), ('brief', keys)):
             spec = cloud_profile.worker_secret_specs(source)[worker]
             self.assertFalse(set(names) & set(spec['required'] + spec['optional']), worker)
 

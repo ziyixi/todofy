@@ -19,13 +19,109 @@ Rules for this file:
 Last updated: 2026-10-11.
 <!-- Active work is separate from the production evidence below. -->
 
+## In flight (2026-10-10, Claude): the brief, built, landing check-only (branch `brief-land`)
+
+Owner request 2026-10-10: replace the newsletter with a cheaper, better briefing (design in `brief/docs/design.md`,
+rules in `brief/AGENTS.md`, use and deploy in `brief/README.md`). The owner's answers of 2026-10-10 are in the design
+(§3.3, §6, §19): the LLM topics 熟悉 (seismology and ML for geophysics 专业, the rest 通俗); full text wherever it is
+public as the owner's browser would reach it (AI-agent robots blocks do not apply, a group naming `ziyixi-brief`
+does; pacing, the honest UA and arXiv's 1 request / 3 s stay; never a paywall or a login); the spend approved in
+principle ($40 budget, $50 Console limit); 06:30 weekdays and 07:30 Saturday; `brief.ziyixi.science`; the deep read at
+`high` effort. The newsletter's retirement stays a separate decision (root `AGENTS.md` now names the brief as its
+successor in progress).
+
+Squashed onto `main` at `2a6e241` as one commit on branch `brief-land` (the design, the Worker, the archive UI, the
+email's render, the dry run and the review fixes of 2026-10-11), nothing deployed:
+
+- `brief/worker/`: the fetch handler (Access, CSRF, `/feedback` with its HMAC token before anything else) and
+  `BriefState` (`brief-v1`): the alarm chain with per-step budgets (40 subrequests, a 4-minute step wall with its own
+  AbortSignal under the 15-minute alarm, crash counters, deploy-interrupted steps and calls not counted), the registry
+  loader, the fetchers (RSS/Atom/RDF, the arXiv API at 1 request / 3 s, JSON, GeoJSON, sitemaps, full text through
+  HTMLRewriter, per-host pacing, robots.txt for the brief's own token), dedup and world clusters (Workers AI bge-m3), the
+  Haiku gate, the Opus pick and write (the official SDK, streaming with `finalMessage`, structured outputs, adaptive
+  thinking with explicit effort, server-side fallbacks for Opus, refusals, bisection, cost from usage), the grounding
+  check in code, the Saturday deep read, the render, the Resend ledger (one send a day, unknown never replayed), the
+  votes and weekly learning, the monthly budget, ops-v1 and the owner API `proto/brief/ui/v1`.
+- The email (`worker/src/render.ts`): one column of at most 600 px, every style inline, a dark scheme for the clients
+  that honour it and mid-tone colours for Gmail's forced inversion, Chinese typesetting in the email only, the source
+  line from the registry, 👍 · 👎 · 多来点 per item, the quiet-day note; golden files `test/golden/email-*` byte for
+  byte (`.gitattributes`). Checked as screenshots in headless Chromium at 375 and 800 px, light and dark; never in a
+  real Gmail, Apple Mail or Outlook client. The writer's prompts (`worker/src/prompts.ts`): `policy.md` then
+  `profile.md` as one frozen first block with the one cache breakpoint, shared by the write, the bisection, the repair
+  and the deep read (design §7); `policy.md` and `profile.md` tightened (熟悉 is "less background, more of what is
+  new"; length limits for titles and `why`; full-width punctuation). The issue's items keep the pick's order after a
+  repair or a bisection, and `ok_source_count` no longer counts sources never polled (来源's 未抓取).
+- `brief/deploy/` (`deploy-vars.mjs` with `BRIEF_MODE`, the owner-machine keys refused; `bundle-size.mjs`, 340 KiB gzip
+  against 274.3 KiB measured) and their tests; `brief/app.toml`.
+- `brief/web/`: the archive UI (期刊 · 来源 · 偏好 · 设置, mailsort's and recall's design system with the amber of
+  Home's tile and a red for problems; plain TypeScript, Vite, no framework): the issues with their state chips, an
+  issue as in the email with each `[n]` opening its quote, document and entailment verdict, the votes (VoteItem), 还有,
+  成本明细; the sources' health and weights; the topic weights and 重置; 暂停, 恢复调用 and the monthly budget. 47 jsdom
+  tests over a fake of `brief.ui.v1` on the shared transcoder; 47.7 KiB of JavaScript gzip against 57 KiB. Checked by
+  hand at 360 px, light and dark, in a browser against the real Worker in Miniflare (the runtime harness's synthetic web
+  and fake Claude and Resend, a week of alarms, loopback only; its CSP, CSRF, VoteItem, 暂停 and the budget), and the
+  local loop (`npm run dev` in `worker/` and `web/`: reads and a CSRF mutation through Vite's proxy); not against
+  Cloudflare.
+- Review fixes (2026-10-11, design §4-§8, §15): 暂停 and `BRIEF_MODE=off` stop an issue already running (checked at
+  every model call; the step waits without an attempt and ends at 12:00); no call or retry past the send cutoff, and an
+  earlier day's run never holds up the next; an answer that is no JSON is never re-read; a write or deep read out of
+  tokens or time is halved or shortened, not repeated; a failing sitemap page ends its round; the read never waits on
+  a host backing off; headings and links are checked, quantities within 10%, negations in aligned quotes, magnitudes,
+  分/秒 and 近万-style words; world stories and 还有 never repeat (whole clusters run, the hold-back at the cutoff);
+  cards keep every topic's best (the 专业 topics' 5); 8 items in all; old feed entries and early mentions handled; a
+  failed gate call leaves its candidates pending; the feedback body read capped; a page's hidden elements dropped; the
+  Guardian and NPR read as pages.
+- Tests: 105 unit tests (the SDK over a fake SSE stream, every 4xx class, the grounding check's synthetic Chinese and
+  English sets, the ops-v1 golden bytes, the prompts, the golden emails) and 40 workerd tests (a weekday and a Saturday
+  end to end, every failure wall, owner API, ops-v1, `rows.test.ts` and `cpu.test.ts` at the bounds of
+  `test/runtime/bulk.ts`, and `dry-run.test.ts`: a shadow weekday from synthetic feeds and article pages through the
+  gate, a fake Opus that picks across topics and writes plausible Chinese items with verbatim quotes and the quotes'
+  numbers, one overstated number repaired, the render in the pick's order and exactly one send through the fake Resend
+  though the day runs on and an alarm runs twice). Measured on 2026-10-11 (reference ms): a collect alarm of 40 polls of
+  1 MiB 523, the embedding and gate 96, the pick with its hold-back 35, the check over 68 aligned quotes 137; a day at
+  the bounds about 36,000 rows read and 6,500 written.
+
+Landed check-only (recall's pattern, each list one entry): the catalog (`brief/app.toml`, Home's tile with
+`status.type = "none"`), `CHECK_ONLY` in `ci_changes.py`, the "Brief checks" and "Brief deploy" jobs, the release recipe
+in `worker-release.yml` (it builds `brief/web`; `CHECK_ONLY` keeps it from running), the reconcile matrix, the release
+and bootstrap tools, cf-guard's committed-config test, `infra/` (the owner application `brief` and the Bypass
+application `brief-feedback` of exactly `/feedback` with its policy: 39 objects; `AHEAD_OF_DEPLOY`), the drift desired
+state (with `rules` taught as a bundling key), the account inventory and the reconcile matrix
+(`FIRST_DEPLOY_PENDING = {"brief"}` and the matrix's `exclude`, so neither fails before the first deploy) and ops-v1's
+`OpsStatus.app` (`UNBOUND_OPS_APPS` adds `brief`). Noisy by design until "Infra apply": "Infra drift" (three creates)
+and Home's 配置漂移.
+
+Verify, in `brief/worker`: `npm run lint`, `npm run typecheck`, `npm test`, `npm run test:runtime`; in `brief/web`:
+`npm run lint`, `npm run typecheck`, `npm test`, `npm run build` (the JavaScript budget); in `brief`:
+`node --test deploy/test/*.test.mjs`; the dry run of "Brief checks"; the root guards (`.github/scripts`, the tools'
+tests, `generate.py --check`, `catalog.py --check`, `inventory.py --check`, `drift_desired.py --check`, cf-guard's
+tests); `proto/`: lint, api-lint, breaking, the rules self-test, the codecs' tests; the dashboard's Worker and UI tests.
+
+Open for the owner: whether `geo.earth` stays 熟悉 (the design's reading of "seismology and geophysics stay 专业": the
+seismology and ML-for-geophysics topics 专业, the broader solid Earth 熟悉); the writer's cache breakpoint follows the
+spec's caching of the stable prefix (about $0.1 a month when it misses, design §7). Nothing has called the real Claude
+API: the prompts, the efforts and how well Opus keeps the length and format rules wait for the archive days.
+
+Next, in order: land (CI); the owner steps of design §18 (Console workspace and key, Resend key, "Infra apply",
+the GitHub secrets `BRIEF_CSRF_SIGNING_KEY`, `BRIEF_FEEDBACK_SIGNING_KEY`, `BRIEF_MAIL_FROM`, `BRIEF_MAIL_TO` and
+`BRIEF_MODE=archive`); the go-live commit (AUD and ids through `generate.py`, `CHECK_ONLY`/`AHEAD_OF_DEPLOY` emptied,
+Home's `BRIEF` binding and `status.type = "ops_v1"`, `UNBOUND_OPS_APPS` emptied, ops-v1 fixtures in `contracts/ops-v1`);
+after the first deploy the namespace id (and `FIRST_DEPLOY_PENDING` and the reconcile exclude emptied); then the archive days and the shadow week (design §16).
+
+
 ## Done (2026-10-11, Claude): mailsort archives every labelled mail
 
 Owner decision (2026-10-11): a mail mailsort labels leaves the inbox and is found under its label, and is never marked
 read. Deployed in `a49349d`: the needs_action exception and question are gone; only a label's 归档 switch
 (`keep_in_inbox`) keeps its mail in the inbox (the owner turned it off on every label, so all of them archive).
 
-## In flight (2026-10-10, Claude): recall, the browsing recorder (live since 2026-10-11, Dropbox archive since `c3e21b6`; branch `recall-retention` to land; owner setup pending)
+## Live (2026-10-11, Claude): recall, the browsing recorder
+
+Status 2026-10-11 08:11Z: the owner's device uploads (extension from the GitHub Releases), the Dropbox archive is
+connected and its hourly pass verified (`ServiceStatus.dropbox_backup`: `last_upload_time` advances, `synced_seq` grows;
+a pass comes one hour after the first change since the last one, so up to about an hour pending is normal), and the
+rolling text retention (365 days, only after Dropbox confirms) is deployed in `2a6e241`. The history below is how it
+got there.
 
 Owner request (2026-10-10): record what the owner reads in Chrome (visits with real focus time, the page's text after
 ten seconds), with a very good timeline and search UI, and keep a durable copy on the NAS through a generic protocol

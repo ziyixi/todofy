@@ -15,6 +15,7 @@ APPS = {
     "fleet",
     "mailsort",
     "recall",
+    "brief",
     "website-relay",
     "platform",
     "website",

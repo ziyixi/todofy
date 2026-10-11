@@ -600,6 +600,23 @@ it lists no capability, `setGuard` rejects with `invalid_input` as Fleet's does,
 - Counters: `visits_today`, `texts_today`, `rows_written_today`, `rows_read_today`. Signals in README. Never a URL,
   host, title or text.
 
+## 3f. the brief (added 2026-10-10, additive)
+
+The brief (`brief/`, Worker `brief`, `brief/docs/design.md` §15) joined `OpsStatus.app` (an open list) as `brief`, so
+that its `Ops` entrypoint writes a valid status; nothing of the other apps' surface changed. Home does not bind it yet:
+the dashboard's `UNBOUND_OPS_APPS` keeps it out of the apps it calls until the brief's go-live commit adds the `BRIEF`
+binding.
+
+- Files: `brief/worker/src/ops.ts` (the entrypoint, forwards to `BriefState`), `brief/worker/src/ops-status.ts` (over
+  the object's SQLite, the same facts as the owner API's ServiceStatus). Rows read per `status()`: the sources' rows
+  (the registry's size), the month's calls by its index, the latest issue, 14 daily usage rows and a few meta rows. Its
+  one write: an alarm when none is set.
+- Counters: `items_today`, `candidates_today`, `gate_refused_today`, `sources_failing`, `sources_stale`,
+  `issues_sent_7d`, `last_issue_age_hours` (absent before the first issue), `cost_today_cents`, `cost_month_cents`,
+  `budget_month_cents`, `neurons_today`. Signals in README. Never a title, a text, a token or an address.
+- Guard: a shed defers `embedding` (items deduplicate by key only), `learning` (the Sunday weights) and
+  `source_probe` (the daily retry of paused sources). An issue is never deferred.
+
 ## 3b. The move onto proto/ (2026-10-01, no wire change)
 
 The contract's source of truth became the IDL [`proto/ops/v1/ops.proto`](../../proto/ops/v1/ops.proto)

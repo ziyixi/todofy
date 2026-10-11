@@ -1,0 +1,93 @@
+// A source of the registry (brief/content-config/sources.yaml) with its health and what feedback taught about it
+// (brief/docs/design.md §3, §10). Read-only: the registry is edited in the repository.
+
+syntax = "proto3";
+
+package brief.ui.v1;
+
+import "brief/ui/v1/issue.proto";
+import "google/api/field_behavior.proto";
+import "google/api/resource.proto";
+import "google/protobuf/timestamp.proto";
+
+option java_multiple_files = true;
+option java_outer_classname = "SourceProto";
+option java_package = "science.ziyixi.brief.ui.v1";
+
+// One feed or API of the registry.
+message Source {
+  option (google.api.resource) = {
+    type: "brief.ziyixi.science/Source"
+    pattern: "sources/{source}"
+    singular: "source"
+    plural: "sources"
+  };
+
+  // What an item of the source may be used for.
+  enum Role {
+    // Never written.
+    ROLE_UNSPECIFIED = 0;
+    // May be written up and cited.
+    ROLE_CANDIDATE = 1;
+    // Only raises a story's importance (a paywalled headline); never cited, never runs alone.
+    ROLE_SIGNAL_ONLY = 2;
+  }
+
+  // The source's health (AIP-216).
+  enum State {
+    // Never written.
+    STATE_UNSPECIFIED = 0;
+    // Its last poll worked and it brings items at its usual pace.
+    STATE_OK = 1;
+    // Its last polls failed (`failure_count` in a row, `last_error_code`); it is still polled.
+    STATE_FAILING = 2;
+    // Paused after 5 failed polls in a row: tried once a day, and back to OK when that works.
+    STATE_PAUSED = 3;
+    // `enabled: false` in the registry: never polled.
+    STATE_DISABLED = 4;
+    // It answers, but no item was accepted for 3 times its usual gap (at least 7 days; 30 for a source with fewer
+    // than 4 accepted items in 60 days): a moved or frozen feed, or a filter that rejects everything.
+    STATE_STALE = 5;
+    // Never polled yet (a new source, before its first round).
+    STATE_NEW = 6;
+  }
+
+  // sources/{source}, where {source} is the registry's `id` (`arxiv-llm-agents`).
+  string name = 1 [(google.api.field_behavior) = IDENTIFIER];
+  // The venue as the source line shows it.
+  string display_name = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The section its items compete in.
+  Section section = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // What its items may be used for.
+  Role role = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Its review status.
+  Review review = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The source's health.
+  State state = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The feed or API it polls (public; a query's parameters included).
+  string uri = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Polls that failed in a row.
+  int32 failure_count = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The last failure's code (`http_403`, `timeout`, `parse_error`, `too_large`); empty after a success.
+  string last_error_code = 9 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The last poll that worked.
+  google.protobuf.Timestamp last_success_time = 10 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // New items it gave in the last 7 days, after deduplication and its keyword filter.
+  int32 recent_item_count = 11 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The learned weight its items' scores are multiplied by, 0.6 to 1.4 (1 before any feedback).
+  double weight = 12 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Its items that ran in the last 8 weeks.
+  int32 shown_count = 13 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Of those, the 👍 votes.
+  int32 up_count = 14 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Of those, the 👎 votes.
+  int32 down_count = 15 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Of those, the 多来点 votes.
+  int32 more_count = 16 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The title of the last item it gave that passed its filters (untrusted text from the feed).
+  string last_item_title = 17 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // When that item was accepted.
+  google.protobuf.Timestamp last_item_time = 18 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The median gap between its accepted items over the last 60 days, in hours; 0 with fewer than two.
+  double usual_gap_hours = 19 [(google.api.field_behavior) = OUTPUT_ONLY];
+}

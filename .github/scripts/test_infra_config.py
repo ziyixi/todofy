@@ -77,6 +77,7 @@ PRODUCTION = {
     "fleet": "fleet/wrangler.toml",
     "mailsort": "mailsort/wrangler.toml",
     "recall": "recall/wrangler.toml",
+    "brief": "brief/wrangler.toml",
 }
 from cloud_profile import load_profile, load_resources  # noqa: E402
 
@@ -90,6 +91,11 @@ _spec.loader.exec_module(generate)
 # The activation commit records the real Access IDs/AUD and removes CHECK_ONLY in the same change.
 AHEAD_OF_DEPLOY = ({"fleet": load_profile(REPO)["platform_hostname"]}
                   if "fleet" in test_wrangler_configs.ci_changes.CHECK_ONLY else {})
+# The brief's applications (the whole host, and the Bypass of exactly /feedback) are declared ahead of its Worker's
+# first deploy the same way (brief/docs/design.md section 18): its config names the host only until "Infra apply"
+# creates them and its AUD and application id are committed (and CHECK_ONLY is emptied). No bucket, no D1.
+if "brief" in test_wrangler_configs.ci_changes.CHECK_ONLY:
+    AHEAD_OF_DEPLOY["brief"] = "brief." + load_profile(REPO)["zone"]
 # Hosts an Access application may still list although no wrangler.toml declares them. Empty since FlowDay's F3
 # staging host left both FlowDay applications after the F4 cutover (README.md "FlowDay"); a rollback that adds a host
 # back to an application adds it here in the same commit (test_retiring_hosts_are_exact).
@@ -290,7 +296,7 @@ class MatchesTheApps(unittest.TestCase):
         flowday = self.flowday_apps(code)
         self.assertEqual(set(flowday), {"flowday", "flowday-bypass"})
         destinations.update({key: value for key, value in flowday.items()})
-        self.assertEqual(set(owner), {"mail-hero", "todofy", "home", "links", "watch", "fleet", "mailsort", "recall"})
+        self.assertEqual(set(owner), {"mail-hero", "todofy", "home", "links", "watch", "fleet", "mailsort", "recall", "brief"})
         for key, uris in destinations.items():
             worker = "flowday" if key.startswith("flowday") else key
             if worker in AHEAD_OF_DEPLOY:
@@ -366,8 +372,9 @@ class MatchesTheApps(unittest.TestCase):
                 self.assertNotIn(host, code.split("# --- FlowDay")[0], "only FlowDay's applications may list it")
 
     def test_ahead_of_deploy_is_exact(self):
-        """A first-phase app (Fleet, mailsort and recall before; none now) has no fake AUD and cannot deploy before the
-        gated Access creation, and neither can Home while it binds the app."""
+        """A first-phase app (Fleet, mailsort and recall before, the brief now) has no fake AUD and cannot deploy before
+        the gated Access creation, and neither can Home while it binds the app (the brief's Ops binding comes with its
+        go-live commit)."""
         owner = hcl_map((INFRA / "access.tf").read_text(), "owner_apps")
         self.assertEqual(set(AHEAD_OF_DEPLOY), set(test_wrangler_configs.ci_changes.CHECK_ONLY))
         for worker, host in AHEAD_OF_DEPLOY.items():
@@ -407,6 +414,30 @@ class MatchesTheApps(unittest.TestCase):
         for route in ("batches", "changes", "blobs/"):
             self.assertIn(f"${{V1}}{route}", machine)
         self.assertIn('domain = "recall.ziyixi.science", more = []', hcl_map(code, "owner_apps")["recall"])
+
+    def test_brief_feedback_bypasses_only_its_exact_path(self):
+        """The Bypass of the brief's feedback links (brief/docs/design.md section 10): its own everyone-bypass policy and
+        exactly /feedback, never a wildcard, the owner API, the archive or the whole host."""
+        code = (INFRA / "access.tf").read_text()
+        application = re.search(r'resource "cloudflare_zero_trust_access_application" "brief_feedback" \{(.*?)^\}',
+                                code, re.S | re.M).group(1)
+        policy = re.search(r'resource "cloudflare_zero_trust_access_policy" "brief_feedback" \{(.*?)^\}',
+                           code, re.S | re.M).group(1)
+        self.assertEqual(re.findall(r'uri = "([^"]+)"', application), ["brief.ziyixi.science/feedback"])
+        self.assertIn('domain     = "brief.ziyixi.science/feedback"', application)
+        self.assertIn('name       = "brief-feedback"', application)
+        self.assertNotIn("*", application)
+        self.assertEqual(re.findall(r"policy\.(\w+)\.id", application), ["brief_feedback"])
+        self.assertIn('decision   = "bypass"', policy)
+        self.assertIn("include    = [{ everyone = {} }]", policy)
+        self.assertIn("app_launcher_visible        = false", application)
+        # The policy is attached to this application only.
+        self.assertEqual(code.count("cloudflare_zero_trust_access_policy.brief_feedback.id"), 1)
+        # The route is the Worker's (brief/worker/src/http.ts): the token first, every other path below it a 404.
+        http = (REPO / "brief" / "worker" / "src" / "http.ts").read_text()
+        self.assertIn("url.pathname === '/feedback'", http)
+        self.assertIn("url.pathname.startsWith('/feedback/')", http)
+        self.assertIn('domain = "brief.ziyixi.science", more = []', hcl_map(code, "owner_apps")["brief"])
 
     def test_fleet_receipt_bypasses_only_the_exact_signed_machine_path(self):
         code = (INFRA / "access.tf").read_text()

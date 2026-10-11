@@ -1,0 +1,358 @@
+{
+  "status/ok": {
+    "version": "ops-v1",
+    "app": "brief",
+    "generated_at": "2026-10-13T16:00:00Z",
+    "health": "ok",
+    "modes": {
+      "maintenance": false,
+      "paused": false,
+      "mode_limited": false
+    },
+    "guard": {
+      "level": "normal",
+      "reason": null,
+      "until": null,
+      "set_at": null,
+      "deferred": []
+    },
+    "signals": [],
+    "counters": {
+      "items_today": 212,
+      "candidates_today": 118,
+      "gate_refused_today": 2,
+      "sources_failing": 0,
+      "sources_stale": 0,
+      "issues_sent_7d": 5,
+      "cost_today_cents": 76,
+      "cost_month_cents": 986,
+      "budget_month_cents": 4000,
+      "neurons_today": 61,
+      "last_issue_age_hours": 4
+    },
+    "last_backup_at": null,
+    "ui_url": "https://brief.example.org/",
+    "capabilities": [
+      "guard"
+    ]
+  },
+  "status/shadow-without-mail": {
+    "version": "ops-v1",
+    "app": "brief",
+    "generated_at": "2026-10-13T16:00:00Z",
+    "health": "degraded",
+    "modes": {
+      "maintenance": false,
+      "paused": false,
+      "mode_limited": true
+    },
+    "guard": {
+      "level": "normal",
+      "reason": null,
+      "until": null,
+      "set_at": null,
+      "deferred": []
+    },
+    "signals": [
+      {
+        "code": "mail_not_configured",
+        "severity": "warning",
+        "metrics": {}
+      }
+    ],
+    "counters": {
+      "items_today": 212,
+      "candidates_today": 118,
+      "gate_refused_today": 2,
+      "sources_failing": 0,
+      "sources_stale": 0,
+      "issues_sent_7d": 5,
+      "cost_today_cents": 76,
+      "cost_month_cents": 986,
+      "budget_month_cents": 4000,
+      "neurons_today": 61,
+      "last_issue_age_hours": 4
+    },
+    "last_backup_at": null,
+    "ui_url": "https://brief.example.org/",
+    "capabilities": [
+      "guard"
+    ]
+  },
+  "status/degraded": {
+    "version": "ops-v1",
+    "app": "brief",
+    "generated_at": "2026-10-13T16:00:00Z",
+    "health": "degraded",
+    "modes": {
+      "maintenance": false,
+      "paused": false,
+      "mode_limited": false
+    },
+    "guard": {
+      "level": "shed",
+      "reason": "ai_neurons_high",
+      "until": "2026-10-14T01:00:00Z",
+      "set_at": "2026-10-13T15:30:00Z",
+      "deferred": [
+        "embedding",
+        "learning",
+        "source_probe"
+      ]
+    },
+    "signals": [
+      {
+        "code": "anthropic_rejected",
+        "severity": "critical",
+        "metrics": {
+          "status": 402,
+          "billing_error": 1
+        }
+      },
+      {
+        "code": "send_unknown",
+        "severity": "critical",
+        "metrics": {}
+      },
+      {
+        "code": "gate_refused_high",
+        "severity": "warning",
+        "metrics": {
+          "refused": 9,
+          "screened": 60
+        }
+      },
+      {
+        "code": "ground_drop_high",
+        "severity": "warning",
+        "metrics": {
+          "dropped": 3
+        }
+      },
+      {
+        "code": "guard_shed",
+        "severity": "info",
+        "metrics": {
+          "seconds_left": 32400
+        }
+      },
+      {
+        "code": "packet_refused",
+        "severity": "info",
+        "metrics": {}
+      },
+      {
+        "code": "pick_fallback",
+        "severity": "info",
+        "metrics": {}
+      }
+    ],
+    "counters": {
+      "items_today": 90,
+      "candidates_today": 60,
+      "gate_refused_today": 9,
+      "sources_failing": 0,
+      "sources_stale": 0,
+      "issues_sent_7d": 0,
+      "cost_today_cents": 0,
+      "cost_month_cents": 0,
+      "budget_month_cents": 4000,
+      "neurons_today": 0,
+      "last_issue_age_hours": 4
+    },
+    "last_backup_at": null,
+    "ui_url": "https://brief.example.org/",
+    "capabilities": [
+      "guard"
+    ]
+  },
+  "status/archive-without-keys": {
+    "version": "ops-v1",
+    "app": "brief",
+    "generated_at": "2026-10-13T16:00:00Z",
+    "health": "degraded",
+    "modes": {
+      "maintenance": false,
+      "paused": false,
+      "mode_limited": true
+    },
+    "guard": {
+      "level": "normal",
+      "reason": null,
+      "until": null,
+      "set_at": null,
+      "deferred": []
+    },
+    "signals": [
+      {
+        "code": "anthropic_not_configured",
+        "severity": "warning",
+        "metrics": {}
+      }
+    ],
+    "counters": {
+      "items_today": 0,
+      "candidates_today": 0,
+      "gate_refused_today": 0,
+      "sources_failing": 0,
+      "sources_stale": 0,
+      "issues_sent_7d": 0,
+      "cost_today_cents": 0,
+      "cost_month_cents": 0,
+      "budget_month_cents": 4000,
+      "neurons_today": 0
+    },
+    "last_backup_at": null,
+    "ui_url": "https://brief.example.org/",
+    "capabilities": [
+      "guard"
+    ]
+  },
+  "status/off": {
+    "version": "ops-v1",
+    "app": "brief",
+    "generated_at": "2026-10-13T16:00:00Z",
+    "health": "ok",
+    "modes": {
+      "maintenance": false,
+      "paused": false,
+      "mode_limited": true
+    },
+    "guard": {
+      "level": "normal",
+      "reason": null,
+      "until": null,
+      "set_at": null,
+      "deferred": []
+    },
+    "signals": [],
+    "counters": {
+      "items_today": 0,
+      "candidates_today": 0,
+      "gate_refused_today": 0,
+      "sources_failing": 0,
+      "sources_stale": 0,
+      "issues_sent_7d": 0,
+      "cost_today_cents": 0,
+      "cost_month_cents": 0,
+      "budget_month_cents": 4000,
+      "neurons_today": 0
+    },
+    "last_backup_at": null,
+    "ui_url": "https://brief.example.org/",
+    "capabilities": [
+      "guard"
+    ]
+  },
+  "status/paused-budget-spent": {
+    "version": "ops-v1",
+    "app": "brief",
+    "generated_at": "2026-10-13T16:00:00Z",
+    "health": "ok",
+    "modes": {
+      "maintenance": false,
+      "paused": true,
+      "mode_limited": false
+    },
+    "guard": {
+      "level": "normal",
+      "reason": null,
+      "until": null,
+      "set_at": null,
+      "deferred": []
+    },
+    "signals": [
+      {
+        "code": "budget_spent",
+        "severity": "info",
+        "metrics": {
+          "budget_cents": 500
+        }
+      }
+    ],
+    "counters": {
+      "items_today": 0,
+      "candidates_today": 0,
+      "gate_refused_today": 0,
+      "sources_failing": 0,
+      "sources_stale": 0,
+      "issues_sent_7d": 0,
+      "cost_today_cents": 0,
+      "cost_month_cents": 520,
+      "budget_month_cents": 500,
+      "neurons_today": 0
+    },
+    "last_backup_at": null,
+    "ui_url": "https://brief.example.org/",
+    "capabilities": [
+      "guard"
+    ]
+  },
+  "status/unavailable": {
+    "version": "ops-v1",
+    "app": "brief",
+    "generated_at": "2026-10-13T16:00:00Z",
+    "health": "down",
+    "modes": {
+      "maintenance": false,
+      "mode_limited": false
+    },
+    "guard": {
+      "level": "normal",
+      "reason": null,
+      "until": null,
+      "set_at": null,
+      "deferred": []
+    },
+    "signals": [
+      {
+        "code": "status_unavailable",
+        "severity": "critical",
+        "metrics": {}
+      }
+    ],
+    "counters": {},
+    "last_backup_at": null,
+    "ui_url": "https://brief.example.org/",
+    "capabilities": [
+      "guard"
+    ]
+  },
+  "guard/normal": {
+    "ok": {
+      "level": "normal",
+      "reason": null,
+      "until": null,
+      "set_at": null,
+      "deferred": []
+    }
+  },
+  "guard/set-shed": {
+    "ok": {
+      "level": "shed",
+      "reason": "ai_neurons_high",
+      "until": "2026-10-14T01:00:00Z",
+      "set_at": "2026-10-13T15:30:00Z",
+      "deferred": [
+        "embedding",
+        "learning",
+        "source_probe"
+      ]
+    }
+  },
+  "guard/cleared": {
+    "ok": {
+      "level": "normal",
+      "reason": null,
+      "until": null,
+      "set_at": null,
+      "deferred": []
+    }
+  },
+  "guard/refused-too-far": {
+    "error": "invalid_input"
+  },
+  "guard/refused-shape": {
+    "error": "invalid_input"
+  }
+}

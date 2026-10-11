@@ -14,6 +14,7 @@ DO_KEYS = {
     "WatchState": "watch-state",
     "MailsortState": "mailsort-state",
     "RecallState": "recall-state",
+    "BriefState": "brief-state",
 }
 
 

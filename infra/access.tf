@@ -46,12 +46,16 @@ resource "cloudflare_zero_trust_access_policy" "github_owner" {
 #
 # recall's application ("recall", recall.ziyixi.science) is created the same way (recall/docs/design.md section 11),
 # with the Bypass application of its three machine routes below.
+#
+# The brief's application ("brief", brief.ziyixi.science) is created the same way (brief/docs/design.md section 18),
+# with the Bypass application of exactly its feedback path below.
 
 # The key is the Worker's name, which is also the key of the access_aud output (outputs.tf). `domain` is the first
 # destination; `more` lists any further destinations (the links app also gates the exact path /_).
 locals {
   owner_apps = {
     # BEGIN service-catalog owner
+    "brief"     = { name = "brief", domain = "brief.ziyixi.science", more = [], session = "24h" }
     "home"      = { name = "Home", domain = "home.ziyixi.science", more = [], session = "24h" }
     "fleet"     = { name = "Fleet", domain = "fleet.ziyixi.science", more = [], session = "24h" }
     "links"     = { name = "links", domain = "s.ziyixi.science/_/*", more = ["s.ziyixi.science/_"], session = "168h" }
@@ -159,6 +163,46 @@ resource "cloudflare_zero_trust_access_application" "recall_machine" {
   options_preflight_bypass    = false
   session_duration            = "24h"
   policies                    = [{ id = cloudflare_zero_trust_access_policy.recall_machine.id, precedence = 1 }]
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+# --- brief feedback -----------------------------------------------------------------------------------
+# Exactly the brief's feedback path bypasses interactive Access (brief/docs/design.md section 10): the vote links of
+# the daily email, opened from a phone's mail client. Each link carries an HMAC-signed token (issue, item, vote, expiry
+# in 30 days) that the Worker verifies before anything else, answering a bad token and every other path below
+# /feedback itself (404); a GET only shows a confirmation page and the vote is its form's POST, so a link scanner
+# records nothing. The owner API and the archive stay behind the application "brief". The exact path, as Fleet's
+# receipt has.
+resource "cloudflare_zero_trust_access_policy" "brief_feedback" {
+  account_id = var.account_id
+  name       = "brief feedback only"
+  decision   = "bypass"
+  include    = [{ everyone = {} }]
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+resource "cloudflare_zero_trust_access_application" "brief_feedback" {
+  account_id = var.account_id
+  name       = "brief-feedback"
+  type       = "self_hosted"
+  domain     = "brief.ziyixi.science/feedback"
+  destinations = [
+    { type = "public", uri = "brief.ziyixi.science/feedback" },
+  ]
+  allow_authenticate_via_warp = false
+  app_launcher_visible        = false
+  auto_redirect_to_identity   = false
+  enable_binding_cookie       = false
+  http_only_cookie_attribute  = true
+  options_preflight_bypass    = false
+  session_duration            = "24h"
+  policies                    = [{ id = cloudflare_zero_trust_access_policy.brief_feedback.id, precedence = 1 }]
 
   lifecycle {
     prevent_destroy = true
