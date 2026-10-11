@@ -114,7 +114,9 @@ describe('the replay evaluation', () => {
     // The fake model gives its top 0.92 and the rest an equal share. View 2 ran over view 1's three most likely labels
     // and none, to which view 1 gave 0.98: on view 1's scale its 0.92 is worth 0.9016, and the mean is 0.9108.
     const [newsletter, , none, bank] = summary.cases;
-    expect(bank).toMatchObject({ authenticated: true, trustImplying: true, suspiciousProbability: 0.05, needsActionProbability: 0.05 });
+    expect(bank).toMatchObject({ authenticated: true, trustImplying: true, suspiciousProbability: 0.05 });
+    // The model is no longer asked needs_action (2026-10-11): the optional field stays unset.
+    expect(summary.cases.every((c) => c.needsActionProbability === undefined)).toBe(true);
     expect(bank?.topProbability).toBeCloseTo(0.92, 10);
     expect(bank?.runnerUpProbability).toBeCloseTo(0.02, 10);
     expect(bank?.secondViewProbability).toBeCloseTo(0.92, 10);
@@ -144,7 +146,7 @@ describe('the replay evaluation', () => {
     expect(text).toContain('"reason_counts":{"untrusted_sender":1}');
     for (const secret of ['digest', 'Receipt', 'bank.example.com', 'Lunch', 'example', ...Object.values(mails).map((mail) => mail.id)]) expect(text).not.toContain(secret);
     const fields = ['owner_label', 'outcome', 'top_label', 'top_probability', 'runner_up_probability', 'second_view_probability', 'combined_probability',
-      'suspicious_probability', 'needs_action_probability', 'authenticated', 'trust_implying', 'reason'];
+      'suspicious_probability', 'authenticated', 'trust_implying', 'reason'];
     const cases = (JSON.parse(text) as { cases: Record<string, unknown>[] }).cases;
     expect(cases).toHaveLength(4);
     for (const c of cases) expect(fields).toEqual(expect.arrayContaining(Object.keys(c)));

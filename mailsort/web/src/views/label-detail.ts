@@ -6,7 +6,7 @@
  * - The description, what the model reads as `path: description` (without one the model never picks the label): it
  *   grows with its text and is saved when it loses the focus, or with 保存.
  * - 归档: on (the default), the label's mail leaves the inbox; off (`keep_in_inbox`), the label is only added and the
- *   mail stays (账号安全, 政府法律). A mail that asks the owner to act soon stays either way.
+ *   mail stays. Nothing else keeps a labelled mail in the inbox (the owner's decision of 2026-10-11).
  * - A trust label's trusted domains (learned from the owner's review choices, never typed), each with 删除.
  * - Its examples (masked summaries, kept until deleted): the count, the list on demand, and deleting one.
  * - 高级, folded: 可信, 敏感, rename, the Gmail state while it is not simply linked, and delete. (启用 is on the row.)
@@ -227,7 +227,7 @@ export function labelDetail(page: DetailPage): HTMLElement[] {
   return [
     ...(problem === undefined ? [] : [el('p', { class: 'hint warn', role: 'note' }, problem)]),
     descriptionBox(page),
-    fieldSwitch(page, '归档', '打标签后移出收件箱；关掉则留在收件箱。要你处理的邮件总会留下', 'keepInInbox', 'keep_in_inbox', { inverted: true }),
+    fieldSwitch(page, '归档', '打标签后移出收件箱；关掉则留在收件箱', 'keepInInbox', 'keep_in_inbox', { inverted: true }),
     domains,
     examples,
     advanced(page, redraw),

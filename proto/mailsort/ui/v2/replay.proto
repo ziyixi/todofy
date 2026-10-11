@@ -78,7 +78,8 @@ message ReplayEvaluation {
     optional double combined_probability = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
     // The higher p(suspicious) of the two views; unset when view 1 did not answer.
     optional double suspicious_probability = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
-    // The higher p(needs_action) of the two views; unset when view 1 did not answer.
+    // The higher p(needs_action) of the two views. Never set since 2026-10-11: the decision no longer asks the
+    // question (a labelled mail is archived unless its label keeps it in the inbox); the field stays for compatibility.
     optional double needs_action_probability = 9 [(google.api.field_behavior) = OUTPUT_ONLY];
     // The sender passed DMARC aligned with its From domain.
     bool authenticated = 10 [(google.api.field_behavior) = OUTPUT_ONLY];

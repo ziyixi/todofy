@@ -25,10 +25,10 @@
  * mail themselves) the ones the mail has right before the write. A retry whose earlier try reached Gmail with its
  * answer lost fails that way too for an adopted label: the label stays, as one the owner may have put there.
  *
- * An applied label keeps its mail in the inbox when the ledger row says so (`archived` = 0: the label's keep-in-inbox,
- * or a mail that asks the owner to act soon); the guard checks the modify against that flag, and the undo then gives
- * nothing back to the inbox. A row recorded to archive keeps instead when its label keeps its mail by the time it goes
- * out (keepIfLabelKeeps).
+ * An applied label keeps its mail in the inbox when the ledger row says so (`archived` = 0: the label's keep-in-inbox;
+ * before 2026-10-11 also a mail that asked the owner to act soon); the guard checks the modify against that flag, and
+ * the undo then gives nothing back to the inbox. A row recorded to archive keeps instead when its label keeps its mail
+ * by the time it goes out (keepIfLabelKeeps).
  */
 import { setCurrentLabels } from './feedback.ts';
 import { countFlow, stageOf } from './flow.ts';
@@ -236,8 +236,8 @@ function fail(store: Store, row: LedgerRow, code: string): void {
 /**
  * Lowers an `intended` row from archive to keep when its label keeps its mail in the inbox now (归档 turned off since
  * the intent, for a write a 429 or 5xx left for a retry): keeping is the direction the owner just chose, and the safe
- * one, so the retry only adds the label. Never the other way: a row that keeps (a mail that asks the owner to act, or
- * a label that kept then) never starts archiving. The flow's count of an automatic write moves with it. Answers the row as it is now.
+ * one, so the retry only adds the label. Never the other way: a row that keeps (a label that kept then, or before
+ * 2026-10-11 a mail that asked the owner to act) never starts archiving. The flow's count of an automatic write moves with it. Answers the row as it is now.
  * Run inside the gate's transaction, so the guard checks the modify against the flag the row now has.
  */
 function keepIfLabelKeeps(store: Store, row: LedgerRow): LedgerRow {

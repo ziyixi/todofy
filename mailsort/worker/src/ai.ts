@@ -2,7 +2,7 @@
  * Workers AI (../../docs/design.md §4.1-§4.2): the decision model Clef (27B, or Clef-flash past FLASH_SWITCH_SHARE of
  * the day's neuron budget) and the embedding model bge-m3. Up to two Clef calls per mail, the two views of decide.ts:
  * each one `choice` question over its labels plus "none" (the first over every offered label, the second over the
- * first's three most likely, in reverse order) and the same three `noul` questions (suspicious, bulk, needs_action).
+ * first's three most likely, in reverse order) and the same two `noul` questions (suspicious, bulk).
  * The answer is untrusted: its keys must be exactly the questions asked and the options offered, its probabilities in
  * [0, 1] summing to 1, or the call failed.
  *
@@ -130,8 +130,6 @@ export interface ClefAnswer {
   readonly top: string;
   readonly suspicious: number;
   readonly bulk: number;
-  /** p(the mail asks the owner to act soon). */
-  readonly needsAction: number;
   readonly inputTokens: number;
   readonly neurons: number;
 }
@@ -139,8 +137,7 @@ export interface ClefAnswer {
 export const QUESTION_LABEL = 'label';
 export const QUESTION_SUSPICIOUS = 'suspicious';
 export const QUESTION_BULK = 'bulk';
-export const QUESTION_NEEDS_ACTION = 'needs_action';
-const QUESTIONS = [QUESTION_BULK, QUESTION_LABEL, QUESTION_NEEDS_ACTION, QUESTION_SUSPICIOUS].sort();
+const QUESTIONS = [QUESTION_BULK, QUESTION_LABEL, QUESTION_SUSPICIOUS].sort();
 
 /**
  * The request body of one Clef call (the input schema of @cf/cloudflare/clef): the options in the order given (the
@@ -167,10 +164,6 @@ export function clefInput(model: string, state: ClefState, options: readonly Cle
       [QUESTION_BULK]: {
         type: 'noul',
         instructions: 'Is this a bulk or automated email (a newsletter, marketing, or an automatic notification)?',
-      },
-      [QUESTION_NEEDS_ACTION]: {
-        type: 'noul',
-        instructions: 'Does this email ask the owner to act soon: a pickup or verification code, a payment due, a deadline, or a reply wanted?',
       },
     },
   };
@@ -221,7 +214,6 @@ export function readClefAnswer(model: string, answer: unknown, optionIds: readon
     top,
     suspicious: noul(QUESTION_SUSPICIOUS),
     bulk: noul(QUESTION_BULK),
-    needsAction: noul(QUESTION_NEEDS_ACTION),
     inputTokens: tokens,
     neurons: (tokens * (NEURONS_PER_M_TOKENS[model] ?? NEURONS_PER_M_TOKENS[CLEF] ?? 0)) / 1_000_000,
   };

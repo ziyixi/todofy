@@ -1,7 +1,7 @@
 /**
  * The pipeline in workerd with a real SQLite MailsortState, the fake Gmail and the fake Workers AI
  * (../../../docs/design.md §4-§7): no backfill, the model's two views, shadow decisions only recorded, live label +
- * archive with UNREAD untouched, confident none left in the inbox, needs_action keeping a labelled mail in the inbox,
+ * archive with UNREAD untouched, confident none left in the inbox, a mail asking for action archived like any other,
  * undo, a Gmail correction becoming an example, a trust label waiting for a trusted domain that a review choice
  * teaches, the review queue's daily quota, skips, the history resync, the auth-failure stop, the neuron budget's switch
  * to Clef-flash and the quota deferral. After every test, every request Google got is checked against the independent
@@ -91,16 +91,21 @@ describe('the pipeline, shadow then live', () => {
     expect(await h.sql(`SELECT outcome, n FROM flow WHERE outcome = 'no_label'`)).toEqual([{ outcome: 'no_label', n: 1 }]);
   });
 
-  it('a mail that asks the owner to act soon keeps its label in the inbox', async () => {
+  it('a mail that asks the owner to act soon is filed like any other: label added, INBOX removed, UNREAD untouched', async () => {
+    const from = h.up.ai.calls.length;
     deliver(h, { ...MAILS.receiptZh, id: 'a1000000000000b1', subject: '订单已到快递柜', text: '订单包裹已到快递柜，凭取件码 1234 取件。' }, now);
     now += 5 * MINUTE;
     await h.step(now);
     const receipt = h.up.gmail.labelIdByName('收据');
-    expect(gmailLabels(h, 'a1000000000000b1')).toEqual(['CATEGORY_UPDATES', 'INBOX', receipt, 'UNREAD'].sort());
-    expect((await decision(h, 'a1000000000000b1'))?.['needs_action']).toBeGreaterThanOrEqual(0.6);
+    expect(gmailLabels(h, 'a1000000000000b1')).toEqual(['CATEGORY_UPDATES', receipt, 'UNREAD'].sort());
+    // Neither view asks whether the mail needs action (the owner's decision of 2026-10-11), and the column stays NULL.
+    const questions = h.up.ai.calls.slice(from).filter((call) => call.model.includes('clef')).map((call) => Object.keys(call.input['questions'] as object).sort());
+    expect(questions).toEqual([['bulk', 'label', 'suspicious'], ['bulk', 'label', 'suspicious']]);
+    expect(await decision(h, 'a1000000000000b1')).toMatchObject({ outcome: 'applied', label_id: 'receipt', needs_action: null });
     const entry = (await h.api.listLedgerEntries({})).ledgerEntries.find((item) => item.messageId === 'a1000000000000b1');
-    expect(entry).toMatchObject({ archived: false });
-    expect(await h.sql(`SELECT n FROM flow WHERE outcome = 'kept_in_inbox' AND label = 'receipt'`)).toEqual([{ n: 1 }]);
+    expect(entry).toMatchObject({ archived: true });
+    expect(await h.sql(`SELECT n FROM flow WHERE outcome = 'archived' AND label = 'receipt'`)).toEqual([{ n: 1 }]);
+    expect(await h.sql(`SELECT coalesce(sum(n), 0) AS n FROM flow WHERE outcome = 'kept_in_inbox'`)).toEqual([{ n: 0 }]);
   });
 
   it('undo removes exactly what it added and restores INBOX', async () => {

@@ -216,7 +216,6 @@ function replayCase(c: ReplayCase): ReplayEvaluation_Case {
     secondViewProbability: optional(c.view2P),
     combinedProbability: optional(c.combined),
     suspiciousProbability: optional(c.suspicious),
-    needsActionProbability: optional(c.needsAction),
     authenticated: c.authenticated,
     trustImplying: c.trust,
     reason: c.reason,

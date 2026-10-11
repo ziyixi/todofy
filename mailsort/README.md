@@ -3,10 +3,10 @@
 Gmail sorting for the owner's own mailbox on `sort.ziyixi.science`: each new INBOX mail is decided by the Workers AI
 decision model Clef, asked twice (two views), with the masked mail, whether its sender is authenticated, the nearest
 corrected examples and what the sender's earlier mail got. In live mode a confident mail gets one label (a leaf of up
-to three levels, `金融/投资`, at Gmail's top level) and leaves the inbox (archived) unless its label keeps it there or it
-asks you to act soon (a code, a payment, a reply), and is never marked read; a mail no label fits, or an uncertain one,
-gets no label and stays in the inbox, and a few uncertain ones a day (about 1 in 20) wait in the review queue. Shadow
-mode (the default) only records. Chinese, mobile first. Design: [`docs/design.md`](docs/design.md). Rules:
+to three levels, `金融/投资`, at Gmail's top level) and leaves the inbox (archived, so you find it under its label)
+unless you turned that label's 归档 off, and is never marked read; a mail no label fits, or an uncertain one, gets no
+label and stays in the inbox, and a few uncertain ones a day (about 1 in 20) wait in the review queue. Shadow mode (the
+default) only records. Chinese, mobile first. Design: [`docs/design.md`](docs/design.md). Rules:
 [`AGENTS.md`](AGENTS.md).
 
 | Path | What it is |

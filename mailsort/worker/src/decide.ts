@@ -4,7 +4,7 @@
  * the model decides every mail.
  *
  * 1. View 1 asks Clef one `choice` over the enabled labels with a description plus `none`, and the `noul` questions
- *    suspicious, bulk and needs_action.
+ *    suspicious and bulk.
  * 2. View 2 runs only when view 1's top option is a label with p >= SECOND_VIEW_MIN: the same state and questions, over
  *    view 1's three most likely labels plus `none`, in reverse order (secondViewLabels).
  * 3. Accept label L when both views' top is L, the mean of their p(L) reaches AUTO_THRESHOLD (view 2's put on view 1's
@@ -23,7 +23,6 @@ import type { ClefAnswer } from './ai.ts';
 import {
   AUTO_THRESHOLD,
   INFORMATIVE_MIN,
-  NEEDS_ACTION_KEEP,
   NONE,
   NONE_CONFIDENT,
   REVIEW_QUOTA_MAX,
@@ -42,8 +41,8 @@ export interface LabelFacts {
   readonly trust: boolean;
 }
 
-/** One view of the model: its probabilities by label ID (and `none`), its top option and two of its noul answers. */
-export type View = Pick<ClefAnswer, 'probabilities' | 'top' | 'suspicious' | 'needsAction'>;
+/** One view of the model: its probabilities by label ID (and `none`), its top option and its p(suspicious). */
+export type View = Pick<ClefAnswer, 'probabilities' | 'top' | 'suspicious'>;
 
 export interface Candidate {
   readonly label: string;
@@ -91,13 +90,8 @@ export function secondViewLabels(view1: View): string[] | null {
 }
 
 /** The higher of the two views' answers to a noul question (a view that did not run answers nothing). */
-export function higher(view1: View, view2: View | null, question: 'suspicious' | 'needsAction'): number {
+export function higher(view1: View, view2: View | null, question: 'suspicious'): number {
   return Math.max(view1[question], view2?.[question] ?? 0);
-}
-
-/** Whether a mail stays in the inbox with its label: it asks the owner to act soon (a code, a payment, a reply). */
-export function needsAction(probability: number | null): boolean {
-  return probability !== null && probability >= NEEDS_ACTION_KEEP;
 }
 
 /**

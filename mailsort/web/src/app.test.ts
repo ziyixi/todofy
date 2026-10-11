@@ -371,7 +371,7 @@ describe('设置', () => {
     const root = await open(server, '/settings', { now: () => NOW, confirm: (message) => (asked.push(message), true) })
     buttonNamed(root, '正式').click()
     await settle()
-    expect(asked).toEqual(['切到正式？启用的标签会在 Gmail 里给有把握的邮件打标签（按归档设置移出收件箱，要你处理的留下），待审里的选择也会写入。'])
+    expect(asked).toEqual(['切到正式？启用的标签会在 Gmail 里给有把握的邮件打标签（按归档设置移出收件箱），待审里的选择也会写入。'])
     const patch = server.calls.find((call) => call.method === 'PATCH')
     expect(decodeURIComponent(patch?.path ?? '')).toContain('update_mask=mode,etag')
     expect(patch?.body).toMatchObject({ mode: 'live', etag: 's1' })
@@ -394,7 +394,7 @@ describe('设置', () => {
     // With the write grant, what live does.
     server.status = { writeScope: true }
     const again = await open(server, '/settings')
-    expect(again.querySelector('.card p.hint')?.textContent).toBe('有把握的邮件打上标签，按归档设置移出收件箱，要你处理的留下；从不标为已读')
+    expect(again.querySelector('.card p.hint')?.textContent).toBe('有把握的邮件打上标签，按归档设置移出收件箱；从不标为已读')
   })
 
   it('explains the deployment’s ceiling in one line', async () => {

@@ -79,9 +79,9 @@ message Label {
   // AIP-154: changes with every change. UpdateLabel, DeleteLabel and RemoveTrustedDomain that carry an etag are
   // refused with ETAG_MISMATCH when the label changed since.
   string etag = 12 [(google.api.field_behavior) = OPTIONAL];
-  // When the label is applied, the mail stays in the inbox: the label is added and INBOX is not removed (for
-  // account security or government mail). False (the default): the mail is archived with its label, unless the
-  // model found that it asks the owner to act soon.
+  // When the label is applied, the mail stays in the inbox: the label is added and INBOX is not removed. False
+  // (the default): the mail is archived with its label; nothing else keeps a labelled mail in the inbox (since
+  // 2026-10-11, no exception for a mail that asks the owner to act soon).
   // (-- api-linter: core::0140::prepositions=disabled
   //     aip.dev/not-precedent: "keep in inbox" is the owner's own name for the switch. --)
   bool keep_in_inbox = 13 [(google.api.field_behavior) = OPTIONAL];

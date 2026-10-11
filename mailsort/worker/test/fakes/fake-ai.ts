@@ -5,10 +5,9 @@
  * Clef: an option scores when a word of its description (two or more characters, split at spaces and Chinese or
  * ASCII punctuation) occurs in the state's subject, snippet or body; the best option gets `confidence`, the rest share
  * what is left, and with no match "none" gets it. `suspicious` is high for the phrases of the synthetic phishing mail,
- * `needs_action` for a pickup or verification code, a payment due or a deadline, `bulk` for a mailing list. bge-m3: a
- * hashed bag of character trigrams, normalized (similar text, similar vector). `quota` makes every call fail like the
- * account's exhausted daily allocation; `choiceOverride` answers a view's `choice` as a test sets it (by the options
- * it was offered).
+ * `bulk` for a mailing list. bge-m3: a hashed bag of character trigrams, normalized (similar text, similar vector).
+ * `quota` makes every call fail like the account's exhausted daily allocation; `choiceOverride` answers a view's
+ * `choice` as a test sets it (by the options it was offered).
  */
 
 export interface ClefCall {
@@ -26,7 +25,6 @@ function words(text: string): string[] {
 }
 
 const SUSPICIOUS = ['verify your account', 'password expires', '账户异常', '立即验证', 'suspended'];
-const NEEDS_ACTION = ['取件码', 'verification code', '验证码', 'payment due', 'please reply', 'deadline'];
 
 export class FakeAi {
   /** The best option's probability (the decision's confidence). */
@@ -85,8 +83,7 @@ export class FakeAi {
         const probabilities = Object.fromEntries(options.map((option) => [option, option === top ? this.confidence : rest]));
         answers[id] = { type: 'choice', choice: top, probabilities, confidence: this.confidence };
       } else if (question.type === 'noul') {
-        const phrases = id === 'suspicious' ? SUSPICIOUS : id === 'needs_action' ? NEEDS_ACTION : null;
-        const yes = phrases !== null ? phrases.some((phrase) => text.includes(phrase)) : typeof state['list'] === 'string' && state['list'] !== '';
+        const yes = id === 'suspicious' ? SUSPICIOUS.some((phrase) => text.includes(phrase)) : typeof state['list'] === 'string' && state['list'] !== '';
         answers[id] = { type: 'noul', noul: yes ? 0.9 : 0.05 };
       }
     }

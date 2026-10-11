@@ -1,6 +1,6 @@
 /**
  * The decision's pure parts (../../docs/design.md §4): the two views and their decision table (view 2 on view 1's
- * scale, the trust gate, needs_action, confident none), view 2's labels, the review queue's quota and its informative
+ * scale, the trust gate, confident none), view 2's labels, the review queue's quota and its informative
  * band, what a review answer may teach (never a public mailbox provider), the sender history's text, DMARC from
  * Gmail's own header (forged From headers), Clef's request and the strict read of its answer; the neuron estimate,
  * quota detection, the per-mail backoff and the mode lowering.
@@ -13,7 +13,6 @@ import {
   historyText,
   informative,
   joinsReview,
-  needsAction,
   reviewQuota,
   secondViewLabels,
   sharedMailbox,
@@ -41,10 +40,10 @@ const labels = new Map<string, LabelFacts>([
   ['off', { id: 'off', enabled: false, trust: false }],
 ]);
 
-/** A view of the model: its probabilities (the top is the most likely), p(suspicious) and p(needs_action). */
-function view(probabilities: Record<string, number>, suspicious = 0.02, needs = 0.05): View {
+/** A view of the model: its probabilities (the top is the most likely) and p(suspicious). */
+function view(probabilities: Record<string, number>, suspicious = 0.02): View {
   const top = Object.entries(probabilities).sort((a, b) => b[1] - a[1])[0]?.[0] ?? NONE;
-  return { probabilities, top, suspicious, needsAction: needs };
+  return { probabilities, top, suspicious };
 }
 
 /** A sender that passed DMARC, trusted for the bank label; one that did not; one authenticated but not trusted. */
@@ -120,12 +119,6 @@ describe('the decision table', () => {
     expect(secondViewLabels(view({ travel: 0.39, receipt: 0.31, none: 0.3 }))).toBeNull();
     expect(secondViewLabels(view({ none: 0.5, travel: 0.4, receipt: 0.1 }))).toBeNull();
     expect(secondViewLabels(view({ travel: 0.9, none: 0.1 }))).toEqual(['travel']);
-  });
-
-  it('keeps a mail in the inbox when it asks the owner to act soon (p(needs_action) >= 0.6)', () => {
-    expect(needsAction(0.6)).toBe(true);
-    expect(needsAction(0.59)).toBe(false);
-    expect(needsAction(null)).toBe(false);
   });
 
   it('reads DMARC from Gmail’s topmost Authentication-Results only: a forged From is not authenticated', async () => {
@@ -262,14 +255,14 @@ describe('Clef', () => {
   ];
   const state = { from: 'Digest <news.example.com>', to: 'to-abc123', list: 'mailing list', subject: 'Your weekly digest', snippet: '', body: '', gmail_category: 'updates', similar_examples: [] };
 
-  it('asks one choice over the labels plus none, and three noul questions (needs_action among them)', () => {
+  it('asks one choice over the labels plus none, and two noul questions (never needs_action since 2026-10-11)', () => {
     const input = clefInput(CLEF, state, options);
     expect(input['model']).toBe('clef');
     expect(clefInput(CLEF_FLASH, state, options)['model']).toBe('clef-flash');
     const questions = input['questions'] as Record<string, { type: string; criteria?: Record<string, string>; instructions?: string }>;
-    expect(Object.keys(questions).sort()).toEqual(['bulk', 'label', 'needs_action', 'suspicious']);
-    expect(questions['needs_action']).toMatchObject({ type: 'noul' });
-    expect(questions['needs_action']?.instructions).toContain('pickup or verification code');
+    expect(Object.keys(questions).sort()).toEqual(['bulk', 'label', 'suspicious']);
+    expect(questions['suspicious']).toMatchObject({ type: 'noul' });
+    expect(questions['bulk']).toMatchObject({ type: 'noul' });
     expect(Object.keys(questions['label']?.criteria ?? {})).toEqual(['subscriptions', 'receipts', NONE]);
     expect(questions['label']?.criteria?.['subscriptions']).toBe('订阅: newsletter weekly digest');
     expect(JSON.stringify(input)).not.toContain('"newsletter":');
@@ -308,7 +301,7 @@ describe('Clef', () => {
     const ai = new FakeAi();
     const answer = readClefAnswer(CLEF, ai.run(CLEF, clefInput(CLEF, state, options)), ['subscriptions', 'receipts']);
     expect(answer.top).toBe('subscriptions');
-    expect(answer.needsAction).toBeLessThan(0.6);
+    expect(Object.keys(answer)).not.toContain('needsAction');
     expect(answer.neurons).toBeCloseTo(2000 * 0.021818, 3);
     const flash = readClefAnswer(CLEF_FLASH, ai.run(CLEF_FLASH, clefInput(CLEF_FLASH, state, options)), ['subscriptions', 'receipts']);
     expect(flash.neurons).toBeCloseTo(2000 * 0.008182, 3);
@@ -320,7 +313,9 @@ describe('Clef', () => {
     const variants: unknown[] = [
       null,
       { ...good, answers: { ...answers, extra: { type: 'noul', noul: 0.5 } } },
-      { ...good, answers: { label: answers['label'], bulk: answers['bulk'], suspicious: answers['suspicious'] } },
+      { ...good, answers: { label: answers['label'], suspicious: answers['suspicious'] } },
+      // A question no longer asked (needs_action, until 2026-10-11) is an extra key like any other.
+      { ...good, answers: { ...answers, needs_action: { type: 'noul', noul: 0.1 } } },
       { ...good, answers: { ...answers, label: { ...answers['label'], probabilities: { subscriptions: 0.5, receipts: 0.5 } } } },
       { ...good, answers: { ...answers, label: { ...answers['label'], probabilities: { subscriptions: 0.9, receipts: 0.9, none: 0.9 } } } },
       { ...good, answers: { ...answers, label: { ...answers['label'], probabilities: { subscriptions: 2, receipts: -1, none: 0 } } } },

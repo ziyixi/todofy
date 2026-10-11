@@ -96,8 +96,6 @@ export const NONE_CONFIDENT = 0.6;
 export const SUSPICIOUS_MAX = 0.6;
 /** ... and no trust label while it reaches this (real bank and account notices scored 0.8–0.9 there). */
 export const TRUST_SUSPICIOUS_MAX = 0.95;
-/** A mail whose p(needs_action), the higher of the two views', reaches this stays in the inbox with its label. */
-export const NEEDS_ACTION_KEEP = 0.6;
 /** Sender history: the labels of the sender's earlier mail this far back, the most frequent this many. */
 export const SENDER_HISTORY_MS = 180 * DAY;
 export const SENDER_HISTORY_TOP = 3;

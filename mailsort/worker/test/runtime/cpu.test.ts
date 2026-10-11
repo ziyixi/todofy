@@ -180,10 +180,10 @@ async function seedReplay(h: Harness): Promise<void> {
   await h.sql(
     `WITH RECURSIVE n(i) AS (SELECT 0 UNION ALL SELECT i + 1 FROM n WHERE i < ?)
      INSERT INTO replay (job_id, message_id, state, owner_label, as_of, outcome, label, reason, shown, create_time, done_time, top_option, top_p, runner_up_p,
-       view2_p, combined, suspicious, needs_action, authenticated, trust)
+       view2_p, combined, suspicious, authenticated, trust)
      SELECT 'job0', printf('dddd%012d', i), 'evaluated', 'label-' || (i % 7), ?, CASE i % 3 WHEN 0 THEN 'label' WHEN 1 THEN 'none' ELSE 'unsure' END, 'label-' || (i % 5),
        CASE i % 3 WHEN 2 THEN 'views_disagree' ELSE '' END, i % 2, ?, ?, 'label-' || (i % 5), 0.61 + i / 1000.0, 0.21 - i / 2000.0, 0.57 + i / 3000.0,
-       0.59 + i / 1500.0, 0.013 * (i % 7), 0.6 * (i % 2), i % 2, i % 3 = 0
+       0.59 + i / 1500.0, 0.013 * (i % 7), i % 2, i % 3 = 0
      FROM n`,
     REPLAY_ITEMS_MAX - 1,
     T0,

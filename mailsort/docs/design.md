@@ -10,20 +10,24 @@ nothing is fine-tuned.
 
 The owner's decisions of 2026-10-06 shape v1: one label per mail (always a leaf of the label tree); labels nested up to
 three levels (`金融/投资`), at Gmail's top level since 2026-10-07 (under `分拣/` before: only mailsort sorts this
-mailbox, so the prefix only added a level); confident mail labelled AND archived, unless its label keeps it in the
-inbox (账号安全, 政府法律), `UNREAD` never touched; no backfill of history (the sync starts at the install-time history
-ID); Clef (27B) by default, Clef-flash for the rest of a UTC day past 70 % of the daily neuron budget, and a deferral
-(never a failure) when Workers AI's quota is used up.
+mailbox, so the prefix only added a level); confident mail labelled AND archived, unless its label keeps it in the inbox
+(账号安全, 政府法律 then; since 2026-10-11 only the owner's 归档 switch does, below), `UNREAD` never touched; no
+backfill of history (the sync starts at the install-time history ID); Clef (27B) by default, Clef-flash for the rest of
+a UTC day past 70 % of the daily neuron budget, and a deferral (never a failure) when Workers AI's quota is used up.
 
 The owner's decisions of 2026-10-10 make it model-first (mailsort.ui.v2): sender-address rules sorted badly (one bank
 sends statements and promotions alike), so there are no rules and the neighbours never decide on their own; the model
 decides every mail, asked twice for precision; the owner no longer reviews every mail, only a daily quota of uncertain
-ones (about 1 in 20); a label writes in live mode whenever it is enabled (no per-label 正式打, no precision gate); a mail
-that asks the owner to act soon (a code, a payment, a reply) keeps its label in the inbox; a trust label also needs an
-authenticated sender of a trusted domain, learned from the owner's answers. Measured in shadow before (2026-10-07 to
-10-10, about 30 mails a day), the single view with a threshold of 0.8 was confident for about one mail in nine it saw,
-and the owner's review of every item confirmed nearly all of the model's top choices; the replay evaluation (§5.1)
-checks the new decision against those answers before Gmail labelling goes live.
+ones (about 1 in 20); a label writes in live mode whenever it is enabled (no per-label 正式打, no precision gate); a
+trust label also needs an authenticated sender of a trusted domain, learned from the owner's answers. Measured in shadow
+before (2026-10-07 to 10-10, about 30 mails a day), the single view with a threshold of 0.8 was confident for about one
+mail in nine it saw, and the owner's review of every item confirmed nearly all of the model's top choices; the replay
+evaluation (§5.1) checks the new decision against those answers before Gmail labelling goes live.
+
+The owner's decision of 2026-10-11: a labelled mail belongs under its label, not in the inbox, and is never marked read.
+Every confident label archives its mail unless the label's 归档 switch is off (`keep_in_inbox`, the owner's explicit
+control, §3.1); the exception of 2026-10-10 that kept a mail asking the owner to act soon (a code, a payment, a reply)
+in the inbox is gone, and so is the model's `needs_action` question, which nothing else used (§4.4).
 
 ## 1. Shape
 
@@ -184,14 +188,14 @@ is retired (`retired_labels`, until its decisions and flow counters are pruned):
 rows and counters still name it, so a new label of the same path gets `finance-invest-2` instead of inheriting that
 history, and CreateLabel refuses it as an explicit ID.
 
-A label archives what it gets (removes INBOX) unless its 归档 is off (`keep_in_inbox`): then the label is added and the
-mail stays in the inbox. A mail the model finds asks the owner to act soon (`needs_action` at least 0.6: a pickup or
-verification code, a payment due, a deadline, a reply wanted) keeps its label in the inbox too, whatever the label
-says; nothing can make a keeping label archive, since keeping is the safe direction. The owner's review choices follow
-the label and the mail's `needs_action` the same way. The ledger records the choice per write (`archived`), the guard
-checks the modify against it, and an undo of a kept mail only removes the label. A sensitive label (敏感) keeps no
-example: its mail's masked summary would otherwise outlive the 14 days of content. Turning a label sensitive
-(UpdateLabel) deletes the examples it has, embeddings and all, in the same transaction.
+A label archives what it gets (removes INBOX, `UNREAD` untouched) unless its 归档 is off (`keep_in_inbox`): then the
+label is added and the mail stays in the inbox. Nothing else keeps a labelled mail in the inbox (the owner's decision of
+2026-10-11: until then a mail the model found asked the owner to act soon, `needs_action` at least 0.6, kept its label
+in the inbox whatever the label said). New labels archive by default; 归档 is the owner's switch. The owner's review
+choices follow the label the same way. The ledger records the choice per write (`archived`), the guard checks the modify
+against it, and an undo of a kept mail only removes the label. A sensitive label (敏感) keeps no example: its mail's
+masked summary would otherwise outlive the 14 days of content. Turning a label sensitive (UpdateLabel) deletes the
+examples it has, embeddings and all, in the same transaction.
 
 A label's description is what the model reads (`path: description`); a label without one is never offered, so it never
 gets a mail. One language and 60-120 characters, saying what belongs and, between close labels, what does not, keep
@@ -231,7 +235,7 @@ former exact-address rule to a whole domain and made one answer for a shared pro
 | --- | --- | --- | --- |
 | off | no | no | no |
 | shadow (default) | yes | yes: confident decisions only recorded and counted; a few uncertain ones asked in the review queue (§5) | no |
-| live | yes | yes | confident decisions of enabled labels (label, and archive unless the label or the mail keeps it), and the owner's review choices |
+| live | yes | yes | confident decisions of enabled labels (label, and archive unless the label keeps it), and the owner's review choices |
 
 A label is live when it is enabled and the mode in force is live: there is no per-label 正式打 and no precision gate
 since 2026-10-10 (they waited for verdicts the owner no longer gives on every mail); the replay evaluation (§5.1) is
@@ -309,8 +313,8 @@ The alarm runs every 5 minutes, every 30 s while a backlog waits. A pass may mak
    - the outcome, recorded in one transaction with its flow counter: a confident label is written to Gmail (live in
      force now and a write grant; the caps are the gate's) or only recorded (`suggested`); a confident none is left in
      the inbox (`none`); an uncertain mail joins the review queue while today's quota has room (§5) or is left in the
-     inbox (`unsure`, shown or not). Every decision records both views' probabilities, the higher p(suspicious) and
-     p(needs_action), the reason, whether it was shown, the model, and the description versions of the labels.
+     inbox (`unsure`, shown or not). Every decision records both views' probabilities, the higher p(suspicious), the
+     reason, whether it was shown, the model, and the description versions of the labels.
 6. **Embeddings** of new examples, 8 per pass (one batched call).
 7. **The replay evaluation**, when one runs (§5.1): last, with the subrequests the pass has left.
 8. **Daily** (once per UTC day): weak accepts (§6) and the retention cleanup.
@@ -365,15 +369,13 @@ teaches no trusted domain from it (§3.2).
 
 `decide.ts` decideViews, over what `judge.ts` gathered:
 
-1. **View 1**: one Clef call with a `choice` over the offered labels plus `none`, and three `noul` questions:
-   `suspicious` (phishing, a scam, an impersonation), `bulk` (recorded, not decided on) and `needs_action` (the mail
-   asks the owner to act soon: a pickup or verification code, a payment due, a deadline, a reply wanted).
+1. **View 1**: one Clef call with a `choice` over the offered labels plus `none`, and two `noul` questions:
+   `suspicious` (phishing, a scam, an impersonation) and `bulk` (recorded, not decided on).
 2. **View 2**, only when view 1's top option is a label with p ≥ 0.4: a second call with the same state and the same
-   three noul questions, over view 1's three most likely labels plus `none`, in reverse order (an answer that only
+   two noul questions, over view 1's three most likely labels plus `none`, in reverse order (an answer that only
    follows the options' order cannot agree with itself). The same noul questions in both views, chosen over none in
-   view 2: the trust gate reads the higher p(suspicious) of the two (a second opinion on phishing), and keeping in the
-   inbox the higher p(needs_action); they cost little next to the labels' criteria, and the code reads both answers
-   the same way.
+   view 2: the trust gate reads the higher p(suspicious) of the two (a second opinion on phishing); they cost little
+   next to the labels' criteria, and the code reads both answers the same way.
 3. **Accept label L** (confident) when both views' top is L, the mean of their p(L) is at least `AUTO_THRESHOLD` (0.7,
    a constant in `limits.ts`, not owner-facing), L is enabled and, for a sender that is not authenticated (§4.3),
    the higher p(suspicious) is below 0.6. The mean is
@@ -392,8 +394,11 @@ teaches no trusted domain from it (§3.2).
    the retries; `no_labels` when no enabled label has a description (nothing to ask, never shown). A none top of view 1
    below 0.6 is `low_confidence` too. Its combined probability is that of view 1's top label as in step 3 (view 1's
    alone when view 2 did not run).
-6. **needs_action**: the higher p(needs_action) at least 0.6 keeps a labelled mail in the inbox (the label is still
-   added; a label's 归档 switch still applies, and keeping wins). It replaced the rules' subject carve-outs.
+6. **Archive**: a confident label is added and the mail archived (`UNREAD` untouched) unless the label's 归档 is off
+   (§3.1). Until 2026-10-11 both views also asked `needs_action` (a pickup or verification code, a payment due, a
+   deadline, a reply wanted) and a mail at p ≥ 0.6 kept its label in the inbox; the owner's decision of that day
+   dropped the exception and the question with it. The decisions' `needs_action` column stays, written NULL since
+   (dropping it needs a migration for nothing), and the replay leaves its `needs_action_probability` unset (§5.1).
 
 ## 5. The review queue
 
@@ -416,7 +421,7 @@ the others from 5 %; §9).
 The owner's choices (ResolveReviewItem, SkipReviewItem): a label (the top candidates first), 都不是, or 跳过. A label
 or 都不是 is a verdict (§6): with a label it makes an example, and for a trust label it adds the item's teachable domain
 (authenticated, not suspicious, not a public mailbox provider's) to that label's trusted domains (§3.2). In live mode a label is also written to Gmail
-(added, and INBOX removed unless the label or the mail's needs_action keeps it); 都不是 writes nothing. 跳过 leaves the
+(added, and INBOX removed unless the label keeps it); 都不是 writes nothing. 跳过 leaves the
 mail without a verdict.
 
 ### 5.1 The replay evaluation
@@ -439,7 +444,7 @@ Before Gmail labelling goes live, the owner checks the new decision against thei
   taught is uncertain (`untrusted_sender`), and the summary does not count answers the model was shown. Each row keeps
   the decision's numbers, never content (`replay.ts` numbersOf, schema version 6): view 1's top option and its
   probability, the runner-up's probability, view 2's probability of that label as it answered, the combined
-  probability, the higher p(suspicious) and p(needs_action), whether the sender was authenticated, whether the top
+  probability, the higher p(suspicious), whether the sender was authenticated, whether the top
   label is a trust label, and the uncertain reason. It writes nothing to Gmail and makes no decision, verdict,
   example, review item, ledger row or flow count: only its own rows and the day's usage (Gmail calls, neurons). It
   also records whether the review quota of the mail's own day would have shown an uncertain decision, the replayed
@@ -505,8 +510,8 @@ An automatic row that fails for good, in its first pass or a later retry, leaves
 (`suggested`); the mail stays as it is. A
 request the guard refuses (its label no longer owned) is permanent for that row only: the run goes on with the next.
 
-A row archives (removes INBOX) unless its label or the mail's needs_action keeps the mail in the inbox (§3.1); the
-owner's review choices follow the same two. Undo removes exactly the row's label and restores INBOX when it archived. It is refused (`NOT_UNDOABLE`, before any
+A row archives (removes INBOX) unless its label keeps the mail in the inbox (its 归档 off, §3.1); the owner's review
+choices follow the same switch. Undo removes exactly the row's label and restores INBOX when it archived. It is refused (`NOT_UNDOABLE`, before any
 intent is written) for a mail the owner has since moved to another label, and for a label that is no longer the
 app's: deleted in 标签 (the Gmail label and its mails stay as they are) or missing in Gmail. Each entry says whether
 it is `undoable`, with the mail's masked subject and sender while they are kept. 设置's 撤销 undoes a time range (1
@@ -701,7 +706,7 @@ framework; Chinese, short plain words, at most one hint line where needed.
   deleted: `Gmail 里已没有这个标签，不再打它；在 Gmail 建回同名标签后到 设置 → 从 Gmail 同步`); the description, a
   textarea that grows with its text (the placeholder says the model never picks a label without one), saved on blur
   or with a small 保存 shown while it differs; the 归档 switch (on by default; off saves `keep_in_inbox`, and its hint
-  says a mail that asks the owner to act stays in the inbox either way, §3.1); for a trust label, 可信域名 with its
+  says the mail then stays in the inbox, §3.1); for a trust label, 可信域名 with its
   count, one line per domain in mono with 删除 (RemoveTrustedDomain with the etag; no add), or, with none yet, the line
   that the label is not written automatically until an answer in 待审 for a sender whose identity Gmail verified (DMARC
   passed) teaches one;
@@ -714,7 +719,7 @@ framework; Chinese, short plain words, at most one hint line where needed.
   at all the page is one empty state, 还没有标签, with + 新标签. Light and dark from the same tokens; at 360 px the rows
   keep one line and the detail loses its indent.
 - **设置** (`/settings`): three cards and nothing else. 模式: a segmented 关闭 · 影子 · 正式 (正式 asks first: 启用的标签会在
-  Gmail 里给有把握的邮件打标签（按归档设置移出收件箱，要你处理的留下），待审里的选择也会写入; a choice sends only
+  Gmail 里给有把握的邮件打标签（按归档设置移出收件箱），待审里的选择也会写入; a choice sends only
   `mode` and the etag) and one line: what the mode does, or the
   deployment's ceiling (`受部署上限限制，按影子运行`), or the tripped breaker in words with 解除熔断, or, for 正式 with a
   read-only grant, `Gmail 只读授权，还不会写入：在本机运行 mint-token.mjs --scope modify` in the warning color (§12).
@@ -767,10 +772,10 @@ the fake Gmail (`fake-gmail.ts`) and fake Workers AI (`fake-ai.ts`, Clef and bge
   to its label's planned path), masking, MIME, DMARC (forged and look-alike From, planted results); `decide.test.ts`
   the decision table (both views agreeing, the mean at the threshold, view 2 on view 1's scale, views that disagree,
   view 2 not run, suspicious in either view, confident none, the trust gate: authenticated, trusted domain,
-  p(suspicious) below 0.95, an unauthenticated sender's p(suspicious), a disabled label), view 2's labels, needs_action, the review quota and its informative band
-  (a none top with a label in the band among it), the teachable domain and the public mailbox providers, the sender
-  history's text, Clef's
-  request (three noul questions, the options' order, path keys, lean state with the sender evidence) and strict read;
+  p(suspicious) below 0.95, an unauthenticated sender's p(suspicious), a disabled label), view 2's labels, the review
+  quota and its informative band (a none top with a label in the band among it), the teachable domain and the public
+  mailbox providers, the sender history's text, Clef's request (two noul questions, never needs_action, the options'
+  order, path keys, lean state with the sender evidence) and strict read (a needs_action answer is an extra key);
   `store.test.ts` over the store's SQL on Node's SQLite: paths, IDs and option keys, the schema migrations (version 4
   to 5 seeds the trusted domains from the right rules, exact for an address rule and with subdomains for a domain rule,
   never a public mailbox provider, drops the rules, keeps labels and decisions with the sender as its hash and none
@@ -784,11 +789,11 @@ the fake Gmail (`fake-gmail.ts`) and fake Workers AI (`fake-ai.ts`, Clef and bge
   golden bytes (two are contract fixtures).
 - `worker/test/runtime/*.test.ts` (workerd, a real SQLite MailsortState): `pipeline.test.ts` the pipeline in shadow and
   live (two views, view 2 over view 1's three labels reversed, only recorded in shadow, label and archive in live,
-  confident none left in the inbox, needs_action keeping a label in the inbox), undo, a Gmail correction into an
-  example, a trust label waiting until the owner's review choice teaches its domain (the item's teachable domain, the
-  next mail written, the sender history in the model's state, a forged copy uncertain and reading no history), the
-  daily review quota, skips, the resync, the auth stop, the
-  Clef-flash switch with two views a mail, the quota deferral, the breaker (a refused write only recorded), a read-only
+  confident none left in the inbox, a mail asking for action archived like any other and no needs_action asked), undo,
+  a Gmail correction into an example, a trust label waiting until the owner's review choice teaches its domain (the
+  item's teachable domain, the next mail written, the sender history in the model's state, a forged copy uncertain and
+  reading no history), the daily review quota, skips, the resync, the auth stop, the Clef-flash switch with two views a
+  mail, the quota deferral, the breaker (a refused write only recorded), a read-only
   grant; `replay.test.ts` the replay evaluation (no write even in live mode, no decision, verdict, example, review item,
   ledger row or flow count; the evidence as of each mail: an older example as a neighbour, never the mail's own or a
   later one, and a trust domain its own answer taught not yet trusted; a deleted mail skipped; a model outage backing
@@ -808,11 +813,12 @@ the fake Gmail (`fake-gmail.ts`) and fake Workers AI (`fake-ai.ts`, Clef and bge
   cleanup after 20 days off; the owner's own Gmail labels never taken over (a write never adopts, a label already on
   the mail is never written so its undo cannot take it off, no adoption of a label with sublabels, a 409 is the
   owner's); `cpu.test.ts` the CPU bounds (§8).
-- `worker/test/smoke/smoke.mts`: the real `wrangler dev` (`../wrangler.test.toml`) against the fakes on loopback,
-  the owner's whole loop through the HTTP API: two views in shadow, live labels, confident none, needs_action, undo, a
-  trust label's domain learned from the review queue and a forged From, Gmail corrections into examples, an adoption, a
-  nested label, the replay evaluation, the Clef-flash switch, the quota deferral, the flow API, the legacy `分拣/x`, the
-  parents' record, a label-filtered range undo, the old `/api/v1` paths' 410 and the auth failure.
+- `worker/test/smoke/smoke.mts`: the real `wrangler dev` (`../wrangler.test.toml`) against the fakes on loopback, the
+  owner's whole loop through the HTTP API: two views in shadow, live labels, confident none, a pickup code archived and
+  a label with 归档 off keeping its mail in the inbox, undo, a trust label's domain learned from the review queue and a
+  forged From, Gmail corrections into examples, an adoption, a nested label, the replay evaluation, the Clef-flash
+  switch, the quota deferral, the flow API, the legacy `分拣/x`, the parents' record, a label-filtered range undo, the
+  old `/api/v1` paths' 410 and the auth failure.
 - `web/src/*.test.ts`: the views against a fake API on the shared transcoder: `app.test.ts` the shell (four tabs, the
   focus kept on a tab, the status line, 马上, the queue's count), 待审 (the one-tap answers in the model's order with
   their probabilities and the 5 % floor, 都不是 ranked or appended, ResolveReviewItem with a label or 都不是 and

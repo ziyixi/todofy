@@ -16,8 +16,22 @@ Rules for this file:
   what is done, what is left, how to verify it and what to check after its deploy. Link to the app docs for
   design detail instead of copying it.
 
-Last updated: 2026-10-10.
+Last updated: 2026-10-11.
 <!-- Active work is separate from the production evidence below. -->
+
+## In flight (2026-10-11, Claude): mailsort archives every labelled mail
+
+Owner decision (2026-10-11): a mail mailsort labels leaves the inbox and is found under its label, and is never marked
+read. Branch `mailsort-archive-all` (one commit, not pushed or deployed yet): the needs_action exception is gone from
+the pipeline and the owner's review choices, Clef is no longer asked `needs_action` (two noul questions), and only a
+label's 归档 switch (`keep_in_inbox`) keeps its mail in the inbox. No migration and no proto removal: the decisions'
+`needs_action` column is written NULL and the replay's `needs_action_probability` stays unset (its comment says so).
+Docs: mailsort design §3.1, §4.4, §5, §7, §9, §11, README and AGENTS; UI copy (设置's 正式 question and line, 归档's
+hint). Checked locally: the Worker's lint, typecheck, unit, runtime (CPU included) and smoke runs, the UI's lint,
+typecheck, tests and build, the deploy tests and the bundle (124.3 KiB gzip), proto lint, api-lint and breaking, and
+`.github/scripts`. Left: push, `CI gate`, merge, `Mailsort deploy`. After the deploy: a newly labelled mail that asks
+for action (a pickup code, a payment) leaves the inbox under its label and stays unread; its ledger entry says
+`archived: true` while the label's 归档 is on.
 
 ## In flight (2026-10-10, Claude): recall, the browsing recorder (built, check-only)
 

@@ -50,8 +50,8 @@ message MailFlow {
     OUTCOME_UNSPECIFIED = 0;
     // A confident label, written to Gmail, and the mail archived.
     OUTCOME_ARCHIVED = 1;
-    // A confident label, written to Gmail, and the mail kept in the inbox (the label keeps its mail, or the mail
-    // asks the owner to act soon).
+    // A confident label, written to Gmail, and the mail kept in the inbox (the label keeps its mail; before
+    // 2026-10-11 also a mail that asked the owner to act soon).
     OUTCOME_KEPT_IN_INBOX = 2;
     // A confident label that was only recorded: shadow mode, or a write that failed.
     OUTCOME_SUGGESTED = 3;

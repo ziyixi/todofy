@@ -61,6 +61,7 @@ export interface ReplayRow extends Record<string, SqlStorageValue> {
   view2_p: number | null;
   combined: number | null;
   suspicious: number | null;
+  /** p(needs_action): never written since 2026-10-11 (the question is no longer asked), so NULL. */
   needs_action: number | null;
   /** 1: DMARC passed aligned with the From domain. Set for every mail evaluated since schema version 6. */
   authenticated: number | null;
@@ -76,7 +77,6 @@ export interface ReplayNumbers {
   readonly view2P: number | null;
   readonly combined: number | null;
   readonly suspicious: number | null;
-  readonly needsAction: number | null;
   readonly authenticated: boolean;
   readonly trust: boolean;
 }
@@ -84,12 +84,11 @@ export interface ReplayNumbers {
 /**
  * The numbers of a judgement: view 1's top option (a label ID or `none`), its probability and the next most likely
  * option's, view 2's probability of that label as it answered, the combined probability the threshold reads (view 1's
- * p(none) for a none top), the higher p(suspicious) and p(needs_action) of the two views, and whether the sender is
- * authenticated and the top label a trust label (`isTrust`). Without view 1 (the model unavailable, no label to offer)
- * only the last two.
+ * p(none) for a none top), the higher p(suspicious) of the two views, and whether the sender is authenticated and the
+ * top label a trust label (`isTrust`). Without view 1 (the model unavailable, no label to offer) only the last two.
  */
 export function numbersOf(decision: Decision, view1: View | null, view2: View | null, authenticated: boolean, isTrust: (labelId: string) => boolean): ReplayNumbers {
-  if (view1 === null) return { topOption: null, topP: null, runnerUpP: null, view2P: null, combined: null, suspicious: null, needsAction: null, authenticated, trust: false };
+  if (view1 === null) return { topOption: null, topP: null, runnerUpP: null, view2P: null, combined: null, suspicious: null, authenticated, trust: false };
   const top = view1.top;
   const runnerUp = Object.entries(view1.probabilities).reduce((best, [option, p]) => (option === top ? best : Math.max(best, p)), 0);
   return {
@@ -99,7 +98,6 @@ export function numbersOf(decision: Decision, view1: View | null, view2: View | 
     view2P: view2 === null || top === NONE ? null : (view2.probabilities[top] ?? 0),
     combined: decision.confidence,
     suspicious: higher(view1, view2, 'suspicious'),
-    needsAction: higher(view1, view2, 'needsAction'),
     authenticated,
     trust: top !== NONE && isTrust(top),
   };
@@ -169,7 +167,7 @@ function finish(store: Store, row: ReplayRow, now: number, evaluated: { readonly
   const n = evaluated === null ? null : numbersOf(evaluated.judgement.decision, evaluated.judgement.view1, evaluated.judgement.view2, evaluated.authenticated, (id) => store.label(id)?.trust === 1);
   store.run(
     `UPDATE replay SET state = ?, outcome = ?, label = ?, reason = ?, shown = ?, done_time = ?, top_option = ?, top_p = ?, runner_up_p = ?, view2_p = ?, combined = ?,
-       suspicious = ?, needs_action = ?, authenticated = ?, trust = ? WHERE job_id = ? AND message_id = ?`,
+       suspicious = ?, authenticated = ?, trust = ? WHERE job_id = ? AND message_id = ?`,
     evaluated === null ? 'skipped' : 'evaluated',
     verdict.outcome,
     verdict.label,
@@ -182,7 +180,6 @@ function finish(store: Store, row: ReplayRow, now: number, evaluated: { readonly
     n?.view2P ?? null,
     n?.combined ?? null,
     n?.suspicious ?? null,
-    n?.needsAction ?? null,
     n === null ? null : n.authenticated ? 1 : 0,
     n === null ? null : n.trust ? 1 : 0,
     row.job_id,
@@ -343,7 +340,6 @@ export function replaySummary(store: Store): ReplaySummary | null {
       view2P: row.view2_p,
       combined: row.combined,
       suspicious: row.suspicious,
-      needsAction: row.needs_action,
       authenticated: row.authenticated === 1,
       trust: row.trust === 1,
     })),

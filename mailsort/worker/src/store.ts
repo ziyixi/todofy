@@ -448,6 +448,7 @@ export interface DecisionRow extends Record<string, SqlStorageValue> {
   /** The higher of the two views' answers. */
   suspicious: number | null;
   bulk: number | null;
+  /** p(needs_action), the higher of the two views', for decisions before 2026-10-11; NULL since (no longer asked). */
   needs_action: number | null;
   /** The top option's combined probability (decide.ts). */
   confidence: number | null;

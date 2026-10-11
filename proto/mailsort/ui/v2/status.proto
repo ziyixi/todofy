@@ -167,6 +167,6 @@ enum Mode {
   // asked in the review queue. Nothing is written to Gmail.
   MODE_SHADOW = 2;
   // Confident decisions of enabled labels are applied in Gmail (the label added, INBOX removed unless the label
-  // or the mail keeps it; UNREAD never touched), and so are the owner's review choices.
+  // keeps it; UNREAD never touched), and so are the owner's review choices.
   MODE_LIVE = 3;
 }

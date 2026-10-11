@@ -10,8 +10,8 @@
  * 5. drain: at most DRAIN_MAX pending mails, while the subrequest budget lasts: read, skip what is not the owner's
  *    incoming mail, gather the evidence and ask the model's two views (judge.ts), decide (decide.ts), record (with the
  *    flow counters, flow.ts; an uncertain mail joins the review queue while its daily quota has room), and in live
- *    mode write a confident label through the ledger: the label added, INBOX removed unless the label keeps it or the
- *    mail asks the owner to act soon;
+ *    mode write a confident label through the ledger: the label added, INBOX removed unless the label keeps it (its
+ *    归档 off), UNREAD never touched;
  * 6. embeddings of new examples; the replay evaluation with what the pass leaves (replay.ts); and once per UTC day,
  *    weak accepts and the retention cleanup.
  *
@@ -24,7 +24,7 @@
  * The pass answers when it wants to run again: soon while a backlog waits, else ALARM_IDLE_MS.
  */
 import { AiError, AiQuotaError, embed, toBlob, type ClefAnswer } from './ai.ts';
-import { higher, joinsReview, needsAction, type Decision } from './decide.ts';
+import { higher, joinsReview, type Decision } from './decide.ts';
 import { modeCeiling, type AiRunner, type Env, type ModeName } from './env.ts';
 import { putExample, storeEmbedding, unembedded } from './examples.ts';
 import { applyFeedback } from './feedback.ts';
@@ -376,10 +376,9 @@ async function decideMail(ctx: MailContext, messageId: string, attempts: number)
   const label = decision.kind === 'label' ? labels.find((item) => item.id === decision.label) : undefined;
   // A label missing from Gmail, or whose path names a Gmail label not its own, writes nothing until the owner acts.
   const apply = label !== undefined && label.gmail_state !== 'missing' && label.gmail_name_taken !== 1 && writesLive(store, ctx.ceiling);
-  const keepAction = view1 === null ? null : higher(view1, view2, 'needsAction');
-  // Archive (remove INBOX) unless the label keeps its mail in the inbox or the mail asks the owner to act soon:
-  // keeping is the safe direction, so either one is enough.
-  const archive = !(label?.keep_in_inbox === 1 || needsAction(keepAction));
+  // A labelled mail is filed under its label: archived (INBOX removed) unless the label's 归档 is off (keep_in_inbox).
+  // There is no exception for a mail that asks the owner to act (the owner's decision of 2026-10-11).
+  const archive = label?.keep_in_inbox !== 1;
   const intent: { id: string | null } = { id: null };
   ctx.transact(() => {
     // An uncertain mail joins the review queue while today's quota has room (decide.ts joinsReview).
@@ -438,15 +437,16 @@ interface Recorded {
 }
 
 /**
- * The decision's row: both views' probabilities, the higher p(suspicious) and p(needs_action), the reason, whether it
- * was shown, the sender's hash and (for 14 days) its domain and the masked content. Run inside a transaction.
+ * The decision's row: both views' probabilities, the higher p(suspicious), the reason, whether it was shown, the
+ * sender's hash and (for 14 days) its domain and the masked content (`needs_action` stays NULL: no longer asked since
+ * 2026-10-11). Run inside a transaction.
  */
 function recordDecision(store: Store, read: { id: string; threadId: string; receivedAt: number }, g: Awaited<ReturnType<typeof gather>>, now: number, r: Recorded): void {
   const { decision, view1, view2 } = r;
   store.run(
     `INSERT OR REPLACE INTO decisions (message_id, thread_id, received_at, decided_at, outcome, label_id, top_label, decider, unsure_reason, probabilities, probabilities2,
-       suspicious, bulk, needs_action, confidence, shown, model, versions, dmarc, sender_hash, sender_domain, subject, sender, summary, current_labels)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '[]')`,
+       suspicious, bulk, confidence, shown, model, versions, dmarc, sender_hash, sender_domain, subject, sender, summary, current_labels)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '[]')`,
     read.id,
     read.threadId,
     read.receivedAt,
@@ -460,7 +460,6 @@ function recordDecision(store: Store, read: { id: string; threadId: string; rece
     JSON.stringify(view2?.probabilities ?? {}),
     view1 === null ? null : higher(view1, view2, 'suspicious'),
     view1?.bulk ?? null,
-    view1 === null ? null : higher(view1, view2, 'needsAction'),
     view1 === null ? null : decision.confidence,
     r.shown ? 1 : 0,
     view1?.model ?? '',

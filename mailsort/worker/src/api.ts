@@ -30,7 +30,7 @@ import { create, type DescMessage, type JsonValue, type MessageShape } from '@zi
 import { EmptySchema, timestampFromMs, timestampMs } from '@ziyixi/proto/protobuf/wkt';
 import { RpcError } from '@ziyixi/proto/rpc-status';
 import { fromWire, toWire } from '@ziyixi/proto/wire-json';
-import { needsAction, teachableDomain } from './decide.ts';
+import { teachableDomain } from './decide.ts';
 import type { ModeName } from './env.ts';
 import { deleteExample, deleteExamplesOfLabel, dropEmbeddings } from './examples.ts';
 import { setVerdict } from './feedback.ts';
@@ -308,10 +308,8 @@ function choose(ctx: ApiContext, item: ReviewRow, decision: DecisionRow, chosen:
     // As in the pipeline: a label missing from Gmail, or whose name is taken there, writes nothing.
     if (label !== undefined && label.gmail_state !== 'missing' && label.gmail_name_taken !== 1) {
       // The decision keeps its own label and outcome (the report is about the decision); the ledger row is the owner's.
-      // A label that keeps its mail in the inbox does so for the owner's choice too, and so does a mail that asks the
-      // owner to act soon.
-      const keep = label.keep_in_inbox === 1 || needsAction(decision.needs_action);
-      ids.push(intend(store, decision.message_id, label, !keep, 'owner', ctx.now));
+      // As in the pipeline, the mail is archived unless the label's 归档 is off (keep_in_inbox).
+      ids.push(intend(store, decision.message_id, label, label.keep_in_inbox !== 1, 'owner', ctx.now));
     }
   }
   return ids;

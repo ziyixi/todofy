@@ -6,9 +6,10 @@
  *
  * It walks the owner's whole loop through the HTTP API the UI uses (mailsort.ui.v2): a shadow decision from the model's
  * two views, only recorded; live label + archive with UNREAD untouched; a confident none left in the inbox; a mail that
- * asks for action kept in the inbox with its label; undo; a trust label waiting for a trusted domain until the owner's
- * review choice teaches it, a forged From never getting it; Gmail corrections becoming examples; an owner's Gmail label
- * of a label's path adopted; a nested label created in Gmail with its parents; the neuron budget's switch to
+ * asks for action archived like any other, and only a label's 归档 off keeping its mail in the inbox; undo; a trust
+ * label waiting for a trusted domain until the owner's review choice teaches it, a forged From never getting it; Gmail
+ * corrections becoming examples; an owner's Gmail label of a label's path adopted; a nested label created in Gmail
+ * with its parents; the neuron budget's switch to
  * Clef-flash and the quota deferral; the flow API (deferred mail counted once, while it waits); the legacy 分拣/x read
  * as x, a former parent not imported by the sync, a range undo of one label; the replay evaluation (nothing written,
  * the evidence as of the mail's time); the old /api/v1 paths answering 410; and last the auth failure. Run from
@@ -181,8 +182,8 @@ async function run(origin: string, up: FakeUpstream, setClock: (now: number) => 
   const views = up.ai.calls.slice(before).filter((call) => call.model.includes('clef'));
   check(views.length === 2 && (await api.listReviewItems({})).reviewItems.length === 0 && modifies() === 0, 'shadow: two views of the model agree; the decision is only recorded, nothing waits for review, nothing is written');
 
-  // Live: label + archive, UNREAD untouched; a mail no label fits stays in the inbox; one that asks for action keeps
-  // its label in the inbox.
+  // Live: label + archive, UNREAD untouched; a mail no label fits stays in the inbox; one that asks for action is
+  // filed like any other (no needs_action exception since 2026-10-11).
   await api.updateSettings({ settings: create(SettingsSchema, { name: 'settings', mode: Mode.LIVE }), updateMask: { paths: ['mode'] }, requestId: id() });
   deliver(MAILS.newsletterZh);
   deliver(MAILS.unsure);
@@ -194,7 +195,18 @@ async function run(origin: string, up: FakeUpstream, setClock: (now: number) => 
   const none = labelsOf(MAILS.unsure.id);
   check(none.includes('INBOX') && none.every((label) => !label.startsWith('Label_')), 'confident none: the mail keeps INBOX and gets no label');
   const pickup = labelsOf('a1000000000000b1');
-  check(pickup.includes(up.gmail.labelIdByName('收据') ?? '-') && pickup.includes('INBOX'), 'needs action: a pickup code keeps its label in the inbox');
+  check(pickup.includes(up.gmail.labelIdByName('收据') ?? '-') && !pickup.includes('INBOX') && pickup.includes('UNREAD'), 'a pickup code is labelled and archived like any other, UNREAD untouched');
+  // Only a label's 归档 switch keeps its mail in the inbox: off (keep_in_inbox), the label is only added.
+  const keepInInbox = async (on: boolean) => {
+    const receipt = await api.getLabel({ name: 'labels/receipt' });
+    await api.updateLabel({ label: create(LabelSchema, { name: receipt.name, keepInInbox: on, etag: receipt.etag }), updateMask: { paths: ['keep_in_inbox', 'etag'] }, requestId: id() });
+  };
+  await keepInInbox(true);
+  deliver({ ...MAILS.receiptZh, id: 'a1000000000000b2', subject: '订单 b2 已发货' });
+  await step();
+  const kept = labelsOf('a1000000000000b2');
+  check(kept.includes(up.gmail.labelIdByName('收据') ?? '-') && kept.includes('INBOX') && kept.includes('UNREAD'), '归档 off: the label is added and the mail stays in the inbox, UNREAD untouched');
+  await keepInInbox(false);
 
   // Undo.
   const entry = (await api.listLedgerEntries({})).ledgerEntries.find((item) => item.messageId === MAILS.newsletterZh.id);
