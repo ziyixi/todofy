@@ -1,0 +1,24 @@
+name: dispatch-website
+description: "dispatch-website; called by the repository workflow."
+runs:
+  using: composite
+  steps:
+    - name: Read the configured website URL
+      id: urls
+      working-directory: .
+      shell: bash -e {0}
+      run: python3 tools/cloud-config/outputs.py --github-output "$GITHUB_OUTPUT"
+    - name: Dispatch the website release
+      env:
+        GH_TOKEN: ${{ github.token }}
+        SITE_URL: ${{ steps.urls.outputs.website_url }}
+      working-directory: .
+      shell: bash -e {0}
+      run: |
+        gh workflow run website-release.yml --repo "$GITHUB_REPOSITORY" --ref main \
+          -f operation=release -f confirmation="release:${SITE_URL#https://}" \
+          -f force_build=false -f allow_empty=false -f trigger=push
+        echo "::notice::Dispatched Website release (push); see Actions → Website release."
+
+# The Notion relay Worker ziyixi-notion-publish (website/relay): buttons and the change detector's cron.
+# Its secrets are Worker secrets (website/relay/README.md) and survive this deploy.

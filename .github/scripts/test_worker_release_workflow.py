@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 
 import ci_changes
-from workflow_sources import jobs
+from workflow_sources import jobs, release_jobs
 
 ROOT = Path(__file__).resolve().parents[2]
 APPS = ("todofy", "mail-hero", "dashboard", "flowday", "links", "watch", "fleet", "mailsort", "recall", "brief", "website-relay")
@@ -30,7 +30,7 @@ class WorkerReleaseWorkflow(unittest.TestCase):
         cls.caller_text = (ROOT / ".github/workflows/ci.yml").read_text()
         cls.release_text = (ROOT / ".github/workflows/worker-release.yml").read_text()
         cls.callers = jobs(cls.caller_text)
-        cls.releases = jobs(cls.release_text)
+        cls.releases = release_jobs()
 
     def test_each_app_calls_the_recipe_with_the_checked_sha_and_explicit_gate(self):
         calls = {name for name, block in self.callers.items()
@@ -61,7 +61,6 @@ class WorkerReleaseWorkflow(unittest.TestCase):
         for app in APPS:
             with self.subTest(app=app):
                 block = self.releases[app + "-deploy"]
-                self.assertIn("inputs.app == '" + app + "'", block)
                 self.assertIn("github.ref == 'refs/heads/main'", block)
                 self.assertRegex(block, r"(?m)^    environment:\n      name: production\n")
                 self.assertIn("      group: " + app + "-production\n", block)

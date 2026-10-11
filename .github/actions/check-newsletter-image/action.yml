@@ -1,0 +1,28 @@
+name: check-newsletter-image
+description: "check-newsletter-image; called by the repository workflow."
+runs:
+  using: composite
+  steps:
+    - name: Test the independent image without credentials or external calls
+      working-directory: newsletter
+      shell: bash -e {0}
+      run: |
+        python3 scripts/smoke_image.py --audit-source
+        docker build --platform linux/amd64 --build-arg BUILD_SHA="$GITHUB_SHA" \
+          --build-arg SOURCE_REPOSITORY="https://github.com/$GITHUB_REPOSITORY" --tag "newsletter-ci:$GITHUB_SHA" .
+        tested_image=$(docker image inspect --format '{{.Id}}' "newsletter-ci:$GITHUB_SHA")
+        python3 scripts/smoke_image.py --image "$tested_image" --platform linux/amd64
+        python3 scripts/publish_content_config.py validate \
+          --image "$tested_image" --engine-sha "$GITHUB_SHA" --revision "$GITHUB_SHA" \
+          --source "$GITHUB_WORKSPACE/newsletter/content-config" --output "$RUNNER_TEMP/validated-content-config"
+        python3 ../tools/container-release/image.py save --image "$tested_image" --sha "$GITHUB_SHA" \
+          --directory "$RUNNER_TEMP/newsletter-image"
+    - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      with:
+        name: newsletter-image-${{ github.sha }}
+        path: ${{ runner.temp }}/newsletter-image/
+        if-no-files-found: error
+        retention-days: 1
+        compression-level: 6
+
+# The daemon/observer share one verified image; SSA also uses an isolated real k3s API.

@@ -1,0 +1,198 @@
+name: release-recall
+description: "release-recall; called by the repository workflow."
+inputs:
+  cf-api-token:
+    description: "cf api token"
+    required: false
+    default: ''
+  dashboard-access-owner:
+    description: "dashboard access owner"
+    required: false
+    default: ''
+  dashboard-access-owner-aliases:
+    description: "dashboard access owner aliases"
+    required: false
+    default: ''
+  recall-csrf-signing-key:
+    description: "recall csrf signing key"
+    required: false
+    default: ''
+  recall-worker-secrets:
+    description: "recall worker secrets"
+    required: false
+    default: ''
+  required:
+    description: "required"
+    required: false
+    default: ''
+outputs:
+  url:
+    description: "url"
+    value: ${{ steps.config.outputs.url }}
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+      if: inputs.required == 'true'
+      with:
+        node-version: '26'
+        cache: npm
+        cache-dependency-path: |
+          .release-source/recall/worker/package-lock.json
+          .release-source/recall/web/package-lock.json
+          .release-source/proto/package-lock.json
+    # Every static production value (account, host, Access, the bucket) is committed in recall/wrangler.toml; the
+    # environment URL and the probes read it there.
+    - name: Read the host and the Access issuer from the committed config
+      if: inputs.required == 'true'
+      id: config
+      working-directory: .release-source/recall
+      shell: bash -e {0}
+      run: |
+        python3 - >> "$GITHUB_OUTPUT" <<'EOF'
+        import tomllib
+        with open("wrangler.toml", "rb") as file:
+            variables = tomllib.load(file)["vars"]
+        print("url=https://" + variables["PUBLIC_HOST"])
+        print("host=" + variables["PUBLIC_HOST"])
+        print("access_issuer=" + variables["ACCESS_ISSUER"])
+        EOF
+    # The UI's build (web/dist) is the one that ships; its JavaScript budget is checked by the build. The extension is
+    # never deployed (CI keeps its build as an artifact the owner installs).
+    - name: Build the verified revision
+      if: inputs.required == 'true'
+      working-directory: .release-source/recall
+      shell: bash -e {0}
+      run: |
+        npm ci --prefix worker --no-audit --no-fund
+        npm ci --prefix web --no-audit --no-fund
+        npm run build --prefix web
+    # The owner's addresses and the CSRF key are environment secrets (masked in this public log) and reach the Worker
+    # as secrets through --secrets-file; wrangler prints plain vars. recall's owner is the dashboard's owner (one
+    # person, the same Access identities), so the addresses come from the dashboard's secrets; the CSRF key is
+    # recall's own. The machine tokens' digests never come from here. recall/README.md "Deploy".
+    - name: Write the Worker secrets file
+      if: inputs.required == 'true'
+      working-directory: .release-source/recall/worker
+      env:
+        RECALL_WORKER_SECRETS: ${{ inputs.recall-worker-secrets }}
+        RECALL_ACCESS_OWNER: ${{ inputs.dashboard-access-owner }}
+        RECALL_ACCESS_OWNER_ALIASES: ${{ inputs.dashboard-access-owner-aliases }}
+        RECALL_CSRF_SIGNING_KEY: ${{ inputs.recall-csrf-signing-key }}
+      shell: bash -e {0}
+      run: node ../deploy/deploy-vars.mjs secrets "$RUNNER_TEMP/recall-secrets.json"
+    # deploy-vars.mjs adds BUILD_SHA as --var and refuses a config without the Access AUD; the bundle that ships is
+    # held to the app's budget and the Workers Free limit (deploy/bundle-size.mjs).
+    - name: Validate the bundle before changing production
+      if: inputs.required == 'true'
+      working-directory: .release-source/recall/worker
+      shell: bash -e {0}
+      run: |
+        node ../deploy/deploy-vars.mjs exec -- npx --no-install wrangler deploy --dry-run --config ../wrangler.toml \
+          --secrets-file "$RUNNER_TEMP/recall-secrets.json" --outdir "$RUNNER_TEMP/recall-bundle"
+        node ../deploy/bundle-size.mjs "$RUNNER_TEMP/recall-bundle"
+    # tools/cf-guard (read-only GETs; prints listed hostnames, counts, PASS/FAIL): wrangler applies a config's Custom
+    # Domains (or zone routes) as the Worker's complete set, so stop before any production change when a live
+    # hostname would be detached or another Worker's hostname or DNS record taken over. For an intentional
+    # change, set the exact hostnames here (space-separated) in the same commit that changes wrangler.toml.
+    # recall.ziyixi.science has no DNS record before the first deploy, which attaches the Custom Domain.
+    - name: Check the hostnames against production
+      if: inputs.required == 'true'
+      working-directory: .release-source
+      env:
+        CLOUDFLARE_API_TOKEN: ${{ inputs.cf-api-token }}
+        CF_GUARD_ALLOW_REMOVE: ''
+        CF_GUARD_ALLOW_CONFLICT: ''
+      shell: bash -e {0}
+      run: node tools/cf-guard/cf-guard.mjs --config recall/wrangler.toml
+    # The first deploy creates RecallState's namespace (migration v1) next to the existing bucket recall-store; its id
+    # is committed afterwards (recall/docs/design.md section 11, step 4).
+    - name: Deploy the Worker recall
+      if: inputs.required == 'true'
+      working-directory: .release-source/recall/worker
+      env:
+        CLOUDFLARE_API_TOKEN: ${{ inputs.cf-api-token }}
+      shell: bash -e {0}
+      run: |
+        test -n "$CLOUDFLARE_API_TOKEN"
+        node ../deploy/deploy-vars.mjs exec -- npx --no-install wrangler deploy --config ../wrangler.toml \
+          --secrets-file "$RUNNER_TEMP/recall-secrets.json"
+    # Nothing anonymous on the host shows BUILD_SHA (the UI and /health are behind Access, the machine routes need a
+    # token), so production is read through the API with the deploy token (GETs only), as mailsort's is.
+    - name: Check that production runs this commit
+      if: inputs.required == 'true'
+      working-directory: .release-source/recall/worker
+      env:
+        CLOUDFLARE_API_TOKEN: ${{ inputs.cf-api-token }}
+      shell: bash -e {0}
+      run: |
+        bash "$GITHUB_WORKSPACE/.release-source/tools/deploy-probes/production.sh" recall ../wrangler.toml
+    # Cloudflare Access ("recall", the whole host) must answer every unauthenticated request with a 302 to its login
+    # page for this host: the timeline /, the owner API, the settings page, and a path under /api/machine/v1/ that is
+    # none of the three machine routes (the Bypass is exact), exactly as the dashboard's probe checks (same script).
+    - name: Check that Access answers unauthenticated requests
+      if: inputs.required == 'true'
+      env:
+        ACCESS_ISSUER: ${{ steps.config.outputs.access_issuer }}
+        PUBLIC_HOST: ${{ steps.config.outputs.host }}
+      working-directory: .release-source/recall
+      shell: bash -e {0}
+      run: |
+        bash "$GITHUB_WORKSPACE/.release-source/tools/deploy-probes/access.sh" / /api/v1/serviceStatus /settings \
+          /api/machine/v1/other
+    # The three machine routes reach the Worker without an Access login, through the Bypass application "recall
+    # machine routes" (recall/docs/design.md section 2.1), and the Worker refuses a request without a token itself:
+    # 401 UNAUTHORIZED once the owner made the route's token in 设置, 503 NOT_CONFIGURED before, each a
+    # google.rpc.Status in JSON. A 302 to the Access login page means the Bypass does not cover that route. Only "no
+    # connection" and a 5xx that is not the Worker's own answer are retried (10 x 15 s); nothing is followed, and only
+    # the path, the status and the reason are printed.
+    - name: Check that only the machine routes bypass Access
+      if: inputs.required == 'true'
+      env:
+        ACCESS_ISSUER: ${{ steps.config.outputs.access_issuer }}
+        PUBLIC_HOST: ${{ steps.config.outputs.host }}
+      working-directory: .release-source/recall
+      shell: bash -e {0}
+      run: |
+        issuer=$ACCESS_ISSUER
+        host=$PUBLIC_HOST
+        test -n "$issuer" && test -n "$host"
+        body="$RUNNER_TEMP/recall-probe-body"
+        for check in 'POST /api/machine/v1/batches' 'GET /api/machine/v1/changes' \
+          'GET /api/machine/v1/blobs/2026/10/00000000-0000-4000-8000-000000000000.txt.gz'; do
+          read -r method path <<<"$check"
+          for attempt in $(seq 1 10); do
+            rm -f "$body"
+            answer=$(curl -sS -o "$body" --max-time 15 --proto '=https' -X "$method" \
+              -w '%{http_code}|%{content_type}|%{redirect_url}' "https://$host$path" 2>/dev/null) || true
+            IFS='|' read -r code media location <<<"$answer"
+            media=${media%%;*}
+            reason=$(grep -oE '"reason": ?"(UNAUTHORIZED|NOT_CONFIGURED)"' "$body" 2>/dev/null | grep -oE '[A-Z_]+' || true)
+            if [ "$code" = 302 ] && [[ "$location" == "$issuer/cdn-cgi/access/login/"* ]]; then
+              echo "$method $path: Access answered instead of the Worker: the Bypass does not cover this route." >&2
+              exit 1
+            fi
+            if { [ "$code" = 401 ] && [ "$reason" = UNAUTHORIZED ]; } || { [ "$code" = 503 ] && [ "$reason" = NOT_CONFIGURED ]; }; then
+              if [ "$media" = application/json ]; then
+                echo "$method $path: $code $reason from the Worker without an Access login (attempt $attempt)."
+                continue 2
+              fi
+            fi
+            case "$code" in
+              ''|000|5??)
+                sleep 15
+                continue
+                ;;
+            esac
+            echo "$method $path was answered with $code ${media:-(no media type)}, not the Worker's 401 or 503." >&2
+            exit 1
+          done
+          echo "$method $path never reached the Worker (last status ${code:-none})." >&2
+          exit 1
+        done
+        rm -f "$body"
+    - name: Remove the secrets file
+      if: always() && inputs.required == 'true'
+      working-directory: .release-source/recall
+      shell: bash -e {0}
+      run: rm -f "$RUNNER_TEMP/recall-secrets.json"

@@ -1,3 +1,4 @@
+from workflow_sources import effective_ci
 """The rules of proto/ (proto/README.md, Rules) that live outside the buf module.
 
 python3 -m unittest discover -s .github/scripts (the Changes job, every push, which Proto checks needs). Standard
@@ -320,7 +321,7 @@ class ApiLinter(unittest.TestCase):
         self.assertEqual(offenders, [])
 
     def test_the_proto_checks_job_installs_the_modules_toolchain_and_runs_the_linter(self):
-        job = WORKFLOW.read_text().split("\n  proto-checks:\n", 1)[1].split("\n  gate:\n", 1)[0]
+        job = effective_ci().split("\n  proto-checks:\n", 1)[1].split("\n  gate:\n", 1)[0]
         self.assertIn("go-version-file: proto/tools/api-linter/go.mod", job)
         self.assertIn("cache-dependency-path: proto/tools/api-linter/go.sum", job)
         self.assertNotIn("go-version:", job)
@@ -367,7 +368,7 @@ class Users(unittest.TestCase):
         cache is keyed on a user's lockfile must also key it on proto/package-lock.json, or a proto lockfile change
         restores a stale cache and downloads proto's packages on every run."""
         user_locks = {str((manifest.parent / "package-lock.json").relative_to(REPO)) for manifest in ts_users()}
-        lines = WORKFLOW.read_text().splitlines()
+        lines = effective_ci().splitlines()
         blocks = []
         for index, line in enumerate(lines):
             key, _, value = line.strip().partition("cache-dependency-path:")

@@ -1,0 +1,146 @@
+name: release-dashboard
+description: "release-dashboard; called by the repository workflow."
+inputs:
+  cf-api-token:
+    description: "cf api token"
+    required: false
+    default: ''
+  dashboard-access-owner:
+    description: "dashboard access owner"
+    required: false
+    default: ''
+  dashboard-access-owner-aliases:
+    description: "dashboard access owner aliases"
+    required: false
+    default: ''
+  dashboard-cf-analytics-token:
+    description: "dashboard cf analytics token"
+    required: false
+    default: ''
+  dashboard-csrf-signing-key:
+    description: "dashboard csrf signing key"
+    required: false
+    default: ''
+  dashboard-worker-secrets:
+    description: "dashboard worker secrets"
+    required: false
+    default: ''
+  required:
+    description: "required"
+    required: false
+    default: ''
+outputs:
+  url:
+    description: "url"
+    value: ${{ steps.config.outputs.url }}
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+      if: inputs.required == 'true'
+      with:
+        node-version: '26'
+        cache: npm
+        cache-dependency-path: |
+          .release-source/dashboard/worker/package-lock.json
+          .release-source/dashboard/web/package-lock.json
+          .release-source/proto/package-lock.json
+    # Every static production value (account, host, Access, canary hour) is committed in
+    # dashboard/wrangler.toml; the environment URL and the Access probe read it there.
+    - name: Read the host and the Access issuer from the committed config
+      if: inputs.required == 'true'
+      id: config
+      working-directory: .release-source/dashboard
+      shell: bash -e {0}
+      run: |
+        python3 - >> "$GITHUB_OUTPUT" <<'EOF'
+        import tomllib
+        with open("wrangler.toml", "rb") as file:
+            variables = tomllib.load(file)["vars"]
+        print("url=https://" + variables["PUBLIC_HOST"])
+        print("host=" + variables["PUBLIC_HOST"])
+        print("access_issuer=" + variables["ACCESS_ISSUER"])
+        EOF
+    - name: Build the verified revision
+      if: inputs.required == 'true'
+      working-directory: .release-source/dashboard
+      shell: bash -e {0}
+      run: |
+        npm ci --prefix worker --no-audit --no-fund
+        npm ci --prefix web --no-audit --no-fund
+        npm run build --prefix web
+    # The owner's addresses, the CSRF key and the analytics token are environment secrets (masked in this
+    # public log) and reach the Worker as secrets through --secrets-file; wrangler prints plain vars.
+    # CF_API_TOKEN is passed only so deploy-vars.mjs can warn when it is reused as the analytics token
+    # (it never writes it); the owner allowed that reuse until a read-only token is saved.
+    - name: Write the Worker secrets file
+      if: inputs.required == 'true'
+      working-directory: .release-source/dashboard/worker
+      env:
+        DASHBOARD_WORKER_SECRETS: ${{ inputs.dashboard-worker-secrets }}
+        DASHBOARD_ACCESS_OWNER: ${{ inputs.dashboard-access-owner }}
+        DASHBOARD_ACCESS_OWNER_ALIASES: ${{ inputs.dashboard-access-owner-aliases }}
+        DASHBOARD_CSRF_SIGNING_KEY: ${{ inputs.dashboard-csrf-signing-key }}
+        DASHBOARD_CF_ANALYTICS_TOKEN: ${{ inputs.dashboard-cf-analytics-token }}
+        CF_API_TOKEN: ${{ inputs.cf-api-token }}
+      shell: bash -e {0}
+      run: node ../deploy/deploy-vars.mjs secrets "$RUNNER_TEMP/home-secrets.json"
+    # deploy-vars.mjs adds BUILD_SHA and the canary switch (production variable DASHBOARD_CANARY_ENABLED,
+    # unset means true) as --var and refuses an invalid value (a deploy without a var deletes it).
+    - name: Validate the bundle before deploying
+      if: inputs.required == 'true'
+      working-directory: .release-source/dashboard/worker
+      env:
+        DASHBOARD_CANARY_ENABLED: ${{ vars.DASHBOARD_CANARY_ENABLED }}
+      shell: bash -e {0}
+      run: |
+        node ../deploy/deploy-vars.mjs exec -- npx --no-install wrangler deploy --dry-run --config ../wrangler.toml \
+          --secrets-file "$RUNNER_TEMP/home-secrets.json" --outdir "$RUNNER_TEMP/home-bundle"
+        node ../deploy/bundle-size.mjs "$RUNNER_TEMP/home-bundle"
+    # tools/cf-guard (read-only GETs; prints listed hostnames, counts, PASS/FAIL): wrangler applies a config's Custom
+    # Domains (or zone routes) as the Worker's complete set, so stop before any production change when a live
+    # hostname would be detached or another Worker's hostname or DNS record taken over. For an intentional
+    # change, set the exact hostnames here (space-separated) in the same commit that changes wrangler.toml.
+    - name: Check the hostnames against production
+      if: inputs.required == 'true'
+      working-directory: .release-source
+      env:
+        CLOUDFLARE_API_TOKEN: ${{ inputs.cf-api-token }}
+        CF_GUARD_ALLOW_REMOVE: ''
+        CF_GUARD_ALLOW_CONFLICT: ''
+      shell: bash -e {0}
+      run: node tools/cf-guard/cf-guard.mjs --config dashboard/wrangler.toml
+    # No D1 and no migration step: the HomeState class migration (v1, new_sqlite_classes) is in the config.
+    - name: Deploy the Worker home
+      if: inputs.required == 'true'
+      working-directory: .release-source/dashboard/worker
+      env:
+        CLOUDFLARE_API_TOKEN: ${{ inputs.cf-api-token }}
+        DASHBOARD_CANARY_ENABLED: ${{ vars.DASHBOARD_CANARY_ENABLED }}
+      shell: bash -e {0}
+      run: |
+        test -n "$CLOUDFLARE_API_TOKEN"
+        node ../deploy/deploy-vars.mjs exec -- npx --no-install wrangler deploy --config ../wrangler.toml \
+          --secrets-file "$RUNNER_TEMP/home-secrets.json"
+    # Cloudflare Access ("Home") must answer every unauthenticated request with a 302 to its login page
+    # for this host, <issuer>/cdn-cgi/access/login/<host> (then end, "?" or "/"); the app itself must
+    # never answer one. Any other 302, even one to the team domain's root (a zone Redirect Rule to the
+    # App Launcher runs before Access and the Worker), fails. A first deploy waits for the Custom
+    # Domain's DNS and certificate, so only "no connection" and 5xx are retried (10 x 15 s). Any other
+    # answer, a 2xx or 4xx from the app or a redirect elsewhere, fails at once. Nothing is followed or
+    # printed except the status code. This proves Access guards the host, not that the Worker runs:
+    # /health (BUILD_SHA) needs an owner login (docs/verification.md).
+    - name: Check that Access answers unauthenticated requests
+      if: inputs.required == 'true'
+      env:
+        ACCESS_ISSUER: ${{ steps.config.outputs.access_issuer }}
+        PUBLIC_HOST: ${{ steps.config.outputs.host }}
+      working-directory: .release-source/dashboard
+      shell: bash -e {0}
+      run: |
+        bash "$GITHUB_WORKSPACE/.release-source/tools/deploy-probes/access.sh" / /api/v1/homeView
+    - name: Remove the secrets file
+      if: always() && inputs.required == 'true'
+      working-directory: .release-source/dashboard
+      shell: bash -e {0}
+      run: rm -f "$RUNNER_TEMP/home-secrets.json"

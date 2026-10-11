@@ -1,0 +1,207 @@
+name: release-links
+description: "release-links; called by the repository workflow."
+inputs:
+  cf-api-token:
+    description: "cf api token"
+    required: false
+    default: ''
+  dashboard-access-owner:
+    description: "dashboard access owner"
+    required: false
+    default: ''
+  dashboard-access-owner-aliases:
+    description: "dashboard access owner aliases"
+    required: false
+    default: ''
+  links-csrf-signing-key:
+    description: "links csrf signing key"
+    required: false
+    default: ''
+  links-worker-secrets:
+    description: "links worker secrets"
+    required: false
+    default: ''
+  required:
+    description: "required"
+    required: false
+    default: ''
+outputs:
+  url:
+    description: "url"
+    value: ${{ steps.config.outputs.url }}
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+      if: inputs.required == 'true'
+      with:
+        node-version: '26'
+        cache: npm
+        cache-dependency-path: |
+          .release-source/links/worker/package-lock.json
+          .release-source/links/web/package-lock.json
+          .release-source/proto/package-lock.json
+    # Every static production value (account, D1, host, Access) is committed in links/wrangler.toml; the environment
+    # URL and the host probes read it there.
+    - name: Read the host and the Access issuer from the committed config
+      if: inputs.required == 'true'
+      id: config
+      working-directory: .release-source/links
+      shell: bash -e {0}
+      run: |
+        python3 - >> "$GITHUB_OUTPUT" <<'EOF'
+        import tomllib
+        with open("wrangler.toml", "rb") as file:
+            variables = tomllib.load(file)["vars"]
+        print("url=https://" + variables["PUBLIC_HOST"])
+        print("host=" + variables["PUBLIC_HOST"])
+        print("access_issuer=" + variables["ACCESS_ISSUER"])
+        EOF
+    # The launcher's build (web/dist) is the one that ships; its JavaScript budget is checked by the build.
+    - name: Build the verified revision
+      if: inputs.required == 'true'
+      working-directory: .release-source/links
+      shell: bash -e {0}
+      run: |
+        npm ci --prefix worker --no-audit --no-fund
+        npm ci --prefix web --no-audit --no-fund
+        npm run build --prefix web
+    # The owner's addresses and the CSRF key are environment secrets (masked in this public log) and reach the Worker
+    # as secrets through --secrets-file; wrangler prints plain vars. The links app's owner is the dashboard's owner
+    # (one person, the same Access identities), so the addresses come from the dashboard's secrets, as for
+    # FlowDay; the CSRF key is the links app's own. links/README.md "Deploy".
+    - name: Write the Worker secrets file
+      if: inputs.required == 'true'
+      working-directory: .release-source/links/worker
+      env:
+        LINKS_WORKER_SECRETS: ${{ inputs.links-worker-secrets }}
+        LINKS_ACCESS_OWNER: ${{ inputs.dashboard-access-owner }}
+        LINKS_ACCESS_OWNER_ALIASES: ${{ inputs.dashboard-access-owner-aliases }}
+        LINKS_CSRF_SIGNING_KEY: ${{ inputs.links-csrf-signing-key }}
+      shell: bash -e {0}
+      run: node ../deploy/deploy-vars.mjs secrets "$RUNNER_TEMP/links-secrets.json"
+    # deploy-vars.mjs adds BUILD_SHA as --var and refuses the all-zeros D1 id or Access AUD; the bundle that ships is
+    # held to the app's budget and the Workers Free limit (deploy/bundle-size.mjs).
+    - name: Validate the bundle before changing D1
+      if: inputs.required == 'true'
+      working-directory: .release-source/links/worker
+      shell: bash -e {0}
+      run: |
+        node ../deploy/deploy-vars.mjs exec -- npx --no-install wrangler deploy --dry-run --config ../wrangler.toml \
+          --secrets-file "$RUNNER_TEMP/links-secrets.json" --outdir "$RUNNER_TEMP/links-bundle"
+        node ../deploy/bundle-size.mjs "$RUNNER_TEMP/links-bundle"
+    # tools/cf-guard (read-only GETs; prints listed hostnames, counts, PASS/FAIL): wrangler applies a config's Custom
+    # Domains (or zone routes) as the Worker's complete set, so stop before any production change when a live
+    # hostname would be detached or another Worker's hostname or DNS record taken over. For an intentional
+    # change, set the exact hostnames here (space-separated) in the same commit that changes wrangler.toml.
+    # s.ziyixi.science had no DNS record before L2, so its first deploy attaches the Custom Domain without either.
+    - name: Check the hostnames against production
+      if: inputs.required == 'true'
+      working-directory: .release-source
+      env:
+        CLOUDFLARE_API_TOKEN: ${{ inputs.cf-api-token }}
+        CF_GUARD_ALLOW_REMOVE: ''
+        CF_GUARD_ALLOW_CONFLICT: ''
+      shell: bash -e {0}
+      run: node tools/cf-guard/cf-guard.mjs --config links/wrangler.toml
+    - name: Apply D1 migrations, then deploy the Worker links
+      if: inputs.required == 'true'
+      working-directory: .release-source/links/worker
+      env:
+        CLOUDFLARE_API_TOKEN: ${{ inputs.cf-api-token }}
+      shell: bash -e {0}
+      run: |
+        test -n "$CLOUDFLARE_API_TOKEN"
+        npx --no-install wrangler d1 migrations apply DB --remote --config ../wrangler.toml
+        node ../deploy/deploy-vars.mjs exec -- npx --no-install wrangler deploy --config ../wrangler.toml \
+          --secrets-file "$RUNNER_TEMP/links-secrets.json"
+    # Nothing anonymous on the host shows BUILD_SHA (the owner's half is behind Access), so production is read through
+    # the API with the deploy token (GETs and one D1 read of the migrations table): the Worker serves exactly one
+    # version at 100%, that version's BUILD_SHA is this commit, and no D1 migration is pending. wrangler's JSON answers
+    # are parsed, never printed (they name the token's account email); only the version id and the results are.
+    - name: Check that production runs this commit
+      if: inputs.required == 'true'
+      working-directory: .release-source/links/worker
+      env:
+        CLOUDFLARE_API_TOKEN: ${{ inputs.cf-api-token }}
+      shell: bash -e {0}
+      run: |
+        bash "$GITHUB_WORKSPACE/.release-source/tools/deploy-probes/production.sh" links ../wrangler.toml DB
+    # Cloudflare Access ("links", path-scoped) must answer every unauthenticated request for the owner's half with a
+    # 302 to its login page for this host: its exact destination /_, the launcher /_/ and the owner API, exactly as
+    # the dashboard's probe checks (same script; test_ci_changes.py runs it).
+    - name: Check that Access answers unauthenticated requests
+      if: inputs.required == 'true'
+      env:
+        ACCESS_ISSUER: ${{ steps.config.outputs.access_issuer }}
+        PUBLIC_HOST: ${{ steps.config.outputs.host }}
+      working-directory: .release-source/links
+      shell: bash -e {0}
+      run: |
+        bash "$GITHUB_WORKSPACE/.release-source/tools/deploy-probes/access.sh" /_ /_/ /_/api/v1/links
+    # The rest of the host is outside Access and the Worker answers it itself, anonymously (docs/design.md §2, §4):
+    # /robots.txt with its own text (200, text/plain, "Disallow: /" for every agent), and a key no link uses with the
+    # 302 to /_/k/<key> on this host that a private, deleted or expired key gets too (the enumeration rule), both with
+    # Cache-Control no-store and X-Robots-Tag noindex. A 302 to the Access login page means that the Access
+    # application covers more than /_/*. Only "no connection" and 5xx are retried (10 x 15 s); nothing is followed,
+    # and only the path, the status and the media type are printed.
+    - name: Check that the Worker answers short links without Access
+      if: inputs.required == 'true'
+      env:
+        ACCESS_ISSUER: ${{ steps.config.outputs.access_issuer }}
+        PUBLIC_HOST: ${{ steps.config.outputs.host }}
+      working-directory: .release-source/links
+      shell: bash -e {0}
+      run: |
+        issuer=$ACCESS_ISSUER
+        host=$PUBLIC_HOST
+        test -n "$issuer" && test -n "$host"
+        body="$RUNNER_TEMP/links-probe-body"
+        for check in '/robots.txt 200' '/some-unknown-key 302'; do
+          read -r path want <<<"$check"
+          for attempt in $(seq 1 10); do
+            rm -f "$body"
+            answer=$(curl -sS -o "$body" --max-time 15 --proto '=https' \
+              -w '%{http_code}|%{content_type}|%{redirect_url}|%header{cache-control}|%header{x-robots-tag}' \
+              "https://$host$path" 2>/dev/null) || true
+            IFS='|' read -r code media location cache robots <<<"$answer"
+            media=${media%%;*}
+            case "$code" in
+              ''|000|5??)
+                sleep 15
+                continue
+                ;;
+            esac
+            if [ "$code" = 302 ] && [[ "$location" == "$issuer/cdn-cgi/access/login/"* ]]; then
+              echo "$path: Access answered instead of the Worker: the Access app links covers more than /_/*." >&2
+              exit 1
+            fi
+            if [ "$code" != "$want" ]; then
+              echo "$path was answered with $code ${media:-(no media type)}, not $want." >&2
+              exit 1
+            fi
+            if [[ "$cache" != *no-store* ]] || [[ "$robots" != *noindex* ]]; then
+              echo "$path: $code without Cache-Control no-store and X-Robots-Tag noindex." >&2
+              exit 1
+            fi
+            if [ "$want" = 200 ]; then
+              if [ "$media" != text/plain ] || ! printf 'User-agent: *\nDisallow: /\n' | cmp -s - "$body"; then
+                echo "$path: 200 ${media:-(no media type)} is not the Worker's robots.txt." >&2
+                exit 1
+              fi
+            elif [ "$location" != "https://$host/_/k${path}" ]; then
+              echo "$path: 302 to somewhere other than this host's /_/k${path}." >&2
+              exit 1
+            fi
+            echo "$path: $code ${media:-(no body)} from the Worker without an Access login (attempt $attempt)."
+            continue 2
+          done
+          echo "$path never reached the Worker (last status ${code:-none})." >&2
+          exit 1
+        done
+        rm -f "$body"
+    - name: Remove the secrets file
+      if: always() && inputs.required == 'true'
+      working-directory: .release-source/links
+      shell: bash -e {0}
+      run: rm -f "$RUNNER_TEMP/links-secrets.json"

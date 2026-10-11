@@ -150,27 +150,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
-        with:
-          node-version: '26'
-          cache: npm
-          cache-dependency-path: packages/*/package-lock.json
-      - name: Typecheck and test every package
-        run: |
-          found=0
-          for manifest in packages/*/package.json; do
-            dir=${manifest%/package.json}
-            echo "::group::$dir"
-            (cd "$dir" && npm ci --no-audit --no-fund && npm run typecheck && npm test)
-            echo "::endgroup::"
-            found=1
-          done
-          test "$found" = 1
+      - name: Run shared-packages steps
+        uses: ./.github/actions/check-shared-packages
 
-  # Todofy runs as three jobs: the static checks, the workerd runtime suite split into shards that run at
-  # the same time, and "Todofy checks", which passes only when both passed and the shards together ran
-  # every collected runtime test exactly once (todofy/docs/ci-cd.md). Every change that checks Todofy runs
-  # all of them; "Todofy deploy" needs "Todofy checks".
   todofy-static:
     name: Todofy static checks
     needs: changes
@@ -184,101 +166,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
-        with:
-          node-version-file: todofy/.nvmrc
-          cache: npm
-          cache-dependency-path: |
-            todofy/package-lock.json
-            todofy/gateway/package-lock.json
-            todofy/web/package-lock.json
-            proto/package-lock.json
-      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
-        with:
-          version: '0.12.10'
-          working-directory: todofy
-          enable-cache: true
-      - name: Install locked dependencies
-        run: |
-          npm ci --no-audit --no-fund
-          uv sync --locked
-      - name: Lint and format
-        run: |
-          uv run ruff check worker tests tools deploy
-          uv run ruff format --check worker tests tools deploy
-      - name: Host tests (core, fakes, migration tools, production configs and deploy values)
-        run: uv run pytest tests/unit tests/fakes tools deploy
-      # The gateway Worker "todofy" (TypeScript); the root wrangler bundles it for the tests and the deploy. Its workerd
-      # suite (test/runtime) runs it in Miniflare next to a stand-in TodofyCore: the CPU of the owner API's heaviest
-      # requests against Workers Free's 10 ms, in calibrated reference ms (tools/workerd-cpu).
-      - name: Check and test the gateway
-        working-directory: todofy/gateway
-        run: |
-          npm ci --no-audit --no-fund
-          npm run lint
-          npm run typecheck
-          npm test
-          npm run test:runtime
-      # Builds uiassets/dist, which the dry-run serves; the build fails over the UI's JavaScript budget
-      # (scripts/js-budget.mjs).
-      - name: Check, test and build the UI
-        working-directory: todofy/web
-        run: |
-          npm ci --no-audit --no-fund
-          npm run typecheck
-          npm test
-          npm run build
-      # The committed production configs (wrangler.toml, gateway/wrangler.toml), run exactly as the deploy
-      # runs them, with placeholder values for what the deploy adds (deploy/deploy_vars.py). No token is
-      # needed for --dry-run.
-      - name: Dry-run the committed production configs
-        env:
-          TODOFY_ACCESS_OWNER: owner@example.com
-          TODOFY_ACCESS_OWNER_ALIASES: ''
-          TODOFY_TODOIST_DEFAULT_PROJECT_ID: placeholder
-          TODOFY_REMINDER_ENABLED: 'false'
-          TODOFY_MAINTENANCE_MODE: 'false'
-          TODOFY_PROCESSING_PAUSED: 'false'
-          TODOFY_FORCE_PAUSE_TODOIST: 'false'
-          TODOFY_GTD_REVIEW_ENABLED: 'false'
-          # The optional projects: one unset (uploaded as unset) and one set, so both paths are written.
-          TODOFY_TODOIST_OPS_PROJECT_ID: ''
-          TODOFY_TODOIST_REVIEW_PROJECT_ID: placeholder
-        run: |
-          uv run python deploy/deploy_vars.py secrets core "$RUNNER_TEMP/todofy-core-secrets.json"
-          uv run python deploy/deploy_vars.py secrets gateway "$RUNNER_TEMP/todofy-gateway-secrets.json"
-          uv run python deploy/deploy_vars.py exec core -- uv run pywrangler deploy --dry-run --config wrangler.toml \
-            --secrets-file "$RUNNER_TEMP/todofy-core-secrets.json" --outdir "$RUNNER_TEMP/todofy-core-bundle"
-          # The workers SDK and the generated task-intent-v1, report (todofy.report.v1), ops-v1, mail.received.v1 and owner
-          # API (todofy.ui.v1) packages
-          # (ziyixi_proto, proto/README.md) are vendored next to the core config; a bundle without them cannot start.
-          # Only the packages a Python Worker imports are generated, and the runtimes' fixtures stay out of the wheel
-          # (proto/tools/gen_py.py).
-          test -d "$RUNNER_TEMP/todofy-core-bundle/python_modules/workers"
-          test -f "$RUNNER_TEMP/todofy-core-bundle/python_modules/ziyixi_proto/todofy/taskintent/v1/task_intent_pb.py"
-          test -f "$RUNNER_TEMP/todofy-core-bundle/python_modules/ziyixi_proto/ops/v1/ops_pb.py"
-          test -f "$RUNNER_TEMP/todofy-core-bundle/python_modules/ziyixi_proto/todofy/report/v1/report_pb.py"
-          test -f "$RUNNER_TEMP/todofy-core-bundle/python_modules/ziyixi_proto/mailhero/webhook/v1/mail_received_pb.py"
-          test -f "$RUNNER_TEMP/todofy-core-bundle/python_modules/ziyixi_proto/todofy/ui/v1/todofy_ui_service_pb.py"
-          test ! -e "$RUNNER_TEMP/todofy-core-bundle/python_modules/ziyixi_proto/prototest"
-          uv run python deploy/deploy_vars.py exec gateway -- npx --no-install wrangler deploy --dry-run \
-            --config gateway/wrangler.toml --secrets-file "$RUNNER_TEMP/todofy-gateway-secrets.json" \
-            --outdir "$RUNNER_TEMP/todofy-gateway-bundle"
-          # The gateway's bundle against its budget and the Workers Free limit (deploy/bundle-size.mjs).
-          node --test deploy/test/*.test.mjs
-          node deploy/bundle-size.mjs "$RUNNER_TEMP/todofy-gateway-bundle"
-      - name: Remove the placeholder secrets files
-        if: always()
-        run: rm -f "$RUNNER_TEMP/todofy-core-secrets.json" "$RUNNER_TEMP/todofy-gateway-secrets.json"
+      - name: Run todofy-static steps
+        uses: ./.github/actions/check-todofy-static
 
-  # The workerd runtime suite (tests/runtime), split into shards of whole test files that run at the same
-  # time. The plan (.github/scripts/pytest_shards.py) balances recorded seconds per file over every
-  # pytest-xdist process of every shard and places each collected file in exactly one shard; inside a
-  # shard, xdist gives each process whole files, heaviest first, and a file's tests run in file order
-  # (the rootdir conftest.py refuses any per-test distribution). No test is selected, deselected or
-  # retried here; "Todofy checks" proves that the shards together ran every collected test once. Changing
-  # the shard list also needs the same count in "Todofy checks" (--shards), which
-  # .github/scripts/test_ci_changes.py checks.
   todofy-runtime:
     name: Todofy runtime (${{ matrix.shard }}/3)
     needs: changes
@@ -297,103 +187,12 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+      - name: Run todofy-runtime steps
+        uses: ./.github/actions/check-todofy-runtime
         with:
-          node-version-file: todofy/.nvmrc
-          cache: npm
-          cache-dependency-path: |
-            todofy/package-lock.json
-            todofy/gateway/package-lock.json
-            todofy/web/package-lock.json
-            proto/package-lock.json
-      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
-        with:
-          version: '0.12.10'
-          working-directory: todofy
-          enable-cache: true
-          # pylock.toml pins the Workers SDK that `pywrangler sync` installs through uv.
-          cache-dependency-glob: |
-            uv.lock
-            pyproject.toml
-            pylock.toml
-      # The tests serve the real UI build (without it the harness would serve a placeholder page), and
-      # the gateway's own dependencies are bundled into every test server.
-      - name: Install locked dependencies and build the UI the tests serve
-        run: |
-          npm ci --no-audit --no-fund
-          uv sync --locked
-          npm ci --prefix gateway --no-audit --no-fund
-          npm ci --prefix web --no-audit --no-fund
-          npm run build --prefix web
-      # The Pyodide bundle workerd downloads (~14 MB) into the harness's disk cache. Exact key, no
-      # restore-keys: a hit is a directory saved by a passing shard of the same workerd (package-lock), the
-      # same launcher (harness.py) and the same test configs, so test_routing's cached-bundle check means
-      # what it means on a cold cache. On a miss, the next step downloads it through that launcher and
-      # fails if the launcher did not cache it. Only the runtime shards use this cache; no deploy does.
-      - name: Restore the Pyodide bundle
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: todofy/.wrangler/pyodide-cache
-          key: todofy-pyodide-${{ runner.os }}-${{ hashFiles('todofy/package-lock.json', 'todofy/tests/runtime/harness.py', 'todofy/wrangler.test.toml', 'todofy/gateway/wrangler.test*.toml') }}
-      # Once, before the pytest-xdist processes start: `pywrangler sync` (the vendored python_modules/
-      # every server shares) and one server start and stop through the harness, so the Pyodide bundle is
-      # in the disk cache (up to 3 tries; a slow download is not a test failure). It runs no test.
-      - name: Prepare the test servers
-        run: uv run python -m tests.runtime.warm_up
-      - name: Plan this shard
-        run: |
-          uv run pytest tests/runtime --collect-only -q -p no:cacheprovider > "$RUNNER_TEMP/collected.txt"
-          python3 ../.github/scripts/pytest_shards.py --collected "$RUNNER_TEMP/collected.txt" \
-            --durations ../.github/scripts/todofy-runtime-durations.json --workers 4 \
-            --serial ../.github/scripts/todofy-runtime-serial.txt --serial-out "$RUNNER_TEMP/serial-files.txt" \
-            --index "${{ strategy.job-index }}" --total "${{ strategy.job-total }}" > "$RUNNER_TEMP/shard-files.txt"
-          cat "$RUNNER_TEMP/shard-files.txt"
-          echo "Alone, afterwards:"
-          cat "$RUNNER_TEMP/serial-files.txt"
-      # Each server runs the gateway and todofy-core in one process (docs/gateway-contract.md §7). Four
-      # pytest processes on the runner's 4 vCPUs, each with its own ports (tests/runtime/harness.py). Then
-      # this shard's files of todofy-runtime-serial.txt (timing assertions with no margin for a busy CPU)
-      # in one plain pytest process, with no other test server running. Both runs always run; either
-      # failing fails the step.
-      - name: Runtime tests (workerd with the gateway, real D1, Durable Object, alarms, cron and assets)
-        run: |
-          mkdir -p "$RUNNER_TEMP/junit"
-          status=0
-          uv run pytest -n 4 --dist loadfile --no-loadscope-reorder -o junit_family=xunit2 \
-            --junitxml="$RUNNER_TEMP/junit/runtime-${{ strategy.job-index }}.xml" \
-            --basetemp="$RUNNER_TEMP/pytest" $(cat "$RUNNER_TEMP/shard-files.txt") || status=$?
-          # Guarded: pytest without paths would run every testpath.
-          if [ -s "$RUNNER_TEMP/serial-files.txt" ]; then
-            uv run pytest -o junit_family=xunit2 \
-              --junitxml="$RUNNER_TEMP/junit/runtime-${{ strategy.job-index }}-serial.xml" \
-              --basetemp="$RUNNER_TEMP/pytest-serial" $(cat "$RUNNER_TEMP/serial-files.txt") || status=$?
-          fi
-          exit "$status"
-      - name: Keep this shard's results for Todofy checks
-        if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: todofy-runtime-junit-${{ strategy.job-index }}
-          path: ${{ runner.temp }}/junit/
-          if-no-files-found: error
-          retention-days: 7
-      # Every test server's workerd log (synthetic data only), for a failed shard.
-      - name: Keep the test servers' logs
-        if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: todofy-runtime-logs-${{ strategy.job-index }}
-          path: |
-            ${{ runner.temp }}/pytest/**/dev.log
-            ${{ runner.temp }}/pytest-serial/**/dev.log
-          if-no-files-found: ignore
-          retention-days: 7
+          shard-index: ${{ strategy.job-index }}
+          shard-total: ${{ strategy.job-total }}
 
-  # The one Todofy result "Todofy deploy" needs: both jobs above passed, and every runtime test pytest
-  # collects on this commit ran exactly once across the shards, passed, and none was skipped
-  # (todofy-runtime-expected-skips.txt lists allowed skips; it is empty). The collection must be clean
-  # (no collection error or module-level skip, every test file under tests/runtime collected), and the
-  # files of todofy-runtime-serial.txt must have run alone.
   todofy-checks:
     name: Todofy checks
     needs: [changes, todofy-static, todofy-runtime]
@@ -457,62 +256,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
-        with:
-          node-version: '26'
-          cache: npm
-          cache-dependency-path: |
-            mail-hero/cloudflare/package-lock.json
-            mail-hero/web/package-lock.json
-            proto/package-lock.json
-      - name: Install locked dependencies
-        run: |
-          npm ci --prefix cloudflare
-          npm ci --prefix web
-      - name: Validate deployment configuration
-        run: |
-          node --test deploy/test/*.test.mjs
-          gpg --version
-          python3 -m unittest discover -s deploy/backup -p 'test_*.py'
-      # Includes test/contract-fixtures.test.mjs: the golden mail.received.v1 payloads in contracts/.
-      - name: Check and test the Worker, including workerd bindings
-        working-directory: mail-hero/cloudflare
-        run: |
-          npm run typecheck
-          npm test
-      # Alone and serially: the other workerd suites of `npm test` would share the CPU the meter calibrates. The Ops
-      # calls, building a mail.received.v1 event (the generated message and the wire codec) and the owner API's
-      # heaviest mailhero.ui.v2 requests (the transcoder, and the reads the coordinator answers).
-      - name: Hold the Ops entrypoint's, the event builder's and the owner API's CPU to their bounds (workerd)
-        working-directory: mail-hero/cloudflare
-        run: npm run test:cpu
-      - name: Check, test and build the UI
-        working-directory: mail-hero/web
-        run: |
-          npm run typecheck
-          npm test
-          npm run build
-      # The committed production config (mail-hero/wrangler.toml), run exactly as the deploy runs it, with
-      # placeholder values for what the deploy adds (deploy/deploy-vars.mjs). No token is needed for --dry-run. The
-      # bundle it writes is held to Mail Hero's budget and the Workers Free limit (deploy/bundle-size.mjs).
-      - name: Dry-run the committed production config
-        working-directory: mail-hero/cloudflare
-        env:
-          MAIL_HERO_RECEIVE_ADDRESS: inbox@mail-hero.example.com
-          MAIL_HERO_ACCESS_OWNER: owner@example.com
-          MAIL_HERO_ACCESS_OWNER_ALIASES: ''
-          MAIL_HERO_FORCE_SEND_PAUSED: 'true'
-          MAIL_HERO_MAINTENANCE_MODE: 'false'
-          MAIL_HERO_NATIVE_BACKUP_ENABLED: 'true'
-        run: |
-          node ../deploy/deploy-vars.mjs secrets "$RUNNER_TEMP/mail-hero-secrets.json"
-          node ../deploy/deploy-vars.mjs exec -- npx --no-install wrangler deploy --dry-run --config ../wrangler.toml \
-            --secrets-file "$RUNNER_TEMP/mail-hero-secrets.json" --outdir "$RUNNER_TEMP/mail-hero-bundle"
-          node ../deploy/bundle-size.mjs "$RUNNER_TEMP/mail-hero-bundle"
+      - name: Run mail-hero-checks steps
+        uses: ./.github/actions/check-mail-hero
 
-  # The home dashboard (Worker "home", docs in dashboard/docs). Everything runs from dashboard/ with synthetic data;
-  # the runtime suite runs the real HomeState in workerd next to stub "mail-hero"/"todofy" Workers that serve
-  # the contracts/ops-v1 fixtures over real Ops RPC, a fake GraphQL endpoint and a test Access JWKS.
   dashboard-checks:
     name: Dashboard checks
     needs: changes
@@ -526,61 +272,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
-        with:
-          node-version: '26'
-          cache: npm
-          cache-dependency-path: |
-            dashboard/worker/package-lock.json
-            dashboard/web/package-lock.json
-            proto/package-lock.json
-      - name: Install locked dependencies
-        run: |
-          npm ci --prefix worker --no-audit --no-fund
-          npm ci --prefix web --no-audit --no-fund
-      # The config test reads wrangler.toml with the pinned wrangler (worker/node_modules), hence after npm ci.
-      - name: Test the production config and deploy values
-        run: node --test deploy/test/*.test.mjs
-      - name: Lint, typecheck and test the Worker
-        working-directory: dashboard/worker
-        run: |
-          npm run lint
-          npm run typecheck
-          npm test
-      - name: Runtime tests (workerd with the real HomeState, stub Ops apps, fake GraphQL and Access)
-        working-directory: dashboard/worker
-        run: npm run test:runtime
-      # Builds web/dist, which the dry-run below serves as static assets.
-      - name: Lint, typecheck, test and build the UI
-        working-directory: dashboard/web
-        run: |
-          npm run lint
-          npm run typecheck
-          npm test
-          npm run build
-      # The committed production config (dashboard/wrangler.toml), run exactly as the deploy runs it, with
-      # placeholder values for what the deploy adds (deploy/deploy-vars.mjs). No token is needed for --dry-run. The
-      # bundle it writes is held to the dashboard's budget and the Workers Free limit (deploy/bundle-size.mjs).
-      - name: Dry-run the committed production config
-        working-directory: dashboard/worker
-        env:
-          DASHBOARD_CANARY_ENABLED: 'true'
-          DASHBOARD_ACCESS_OWNER: owner@example.com
-          DASHBOARD_ACCESS_OWNER_ALIASES: ''
-          DASHBOARD_CSRF_SIGNING_KEY: '0000000000000000000000000000000000000000000000000000000000000000'
-          DASHBOARD_CF_ANALYTICS_TOKEN: placeholder-analytics-token-0000000000
-        run: |
-          node ../deploy/deploy-vars.mjs secrets "$RUNNER_TEMP/home-secrets.json"
-          node ../deploy/deploy-vars.mjs exec -- npx --no-install wrangler deploy --dry-run --config ../wrangler.toml \
-            --secrets-file "$RUNNER_TEMP/home-secrets.json" --outdir "$RUNNER_TEMP/home-bundle"
-          node ../deploy/bundle-size.mjs "$RUNNER_TEMP/home-bundle"
-      - name: Remove the placeholder secrets file
-        if: always()
-        run: rm -f "$RUNNER_TEMP/home-secrets.json"
+      - name: Run dashboard-checks steps
+        uses: ./.github/actions/check-dashboard
 
-  # FlowDay (flowday/: the Worker "flowday", its D1 schema and the Next.js static export it serves). "FlowDay deploy"
-  # needs this job. It compiles in packages/edge-auth and the TypeScript proto runtime with proto/flowday/ui/ (its owner
-  # API, flowday.ui.v1); no contract.
   flowday-checks:
     name: FlowDay checks
     needs: changes
@@ -594,71 +288,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
-        with:
-          node-version: '26'
-          cache: npm
-          cache-dependency-path: |
-            flowday/worker/package-lock.json
-            flowday/web/package-lock.json
-            proto/package-lock.json
-      - name: Install locked dependencies
-        run: |
-          npm ci --prefix worker --no-audit --no-fund
-          npm ci --prefix web --no-audit --no-fund
-      # The config test reads wrangler.toml with the pinned wrangler (worker/node_modules), hence after npm ci.
-      - name: Test the production config and deploy values
-        run: node --test deploy/test/*.test.mjs
-      # The F4 import tool (deploy/migrate, docs/design.md section 11) on synthetic container-era files: export with the
-      # WAL applied to a private copy, import into a local D1 with the committed migrations (the pinned wrangler, so a
-      # missing one fails here instead of skipping), verify, reset. Never a real database.
-      - name: Test the D1 import tool
-        env:
-          FLOWDAY_MIGRATE_REQUIRE_WRANGLER: '1'
-        run: python3 -m unittest discover -s deploy/migrate -p 'test_*.py'
-      - name: Lint, typecheck and test the Worker
-        working-directory: flowday/worker
-        run: |
-          npm run lint
-          npm run typecheck
-          npm test
-      # Real D1 with the migrations, a fake Todoist Sync API, Access and CSRF; also the write budget of a simulated
-      # day and the CPU of the heaviest handlers against Workers Free's 10 ms.
-      - name: Runtime tests (workerd with real D1)
-        working-directory: flowday/worker
-        run: npm run test:runtime
-      # Builds web/out, which the dry-run below serves as static assets, and checks it holds no test code and that its
-      # JavaScript fits its budget (web/scripts/js-budget.mjs).
-      - name: Lint, typecheck, test and build the UI
-        working-directory: flowday/web
-        run: |
-          npm run lint
-          npm run typecheck
-          npm run test:imports
-          npm test
-          npm run build
-          npm run check:export
-      # The committed config, run exactly as the deploy runs it but with --dry-run and placeholder values for what
-      # the deploy adds (deploy/deploy-vars.mjs). No token is needed. Then the bundle's size.
-      - name: Dry-run the committed config and check the bundle size
-        working-directory: flowday/worker
-        env:
-          FLOWDAY_ACCESS_OWNER: owner@example.com
-          FLOWDAY_ACCESS_OWNER_ALIASES: ''
-          FLOWDAY_CSRF_SIGNING_KEY: '0000000000000000000000000000000000000000000000000000000000000000'
-          FLOWDAY_CREDENTIAL_KEY: '0000000000000000000000000000000000000000000000000000000000000000'
-        run: |
-          node ../deploy/deploy-vars.mjs secrets "$RUNNER_TEMP/flowday-secrets.json"
-          node ../deploy/deploy-vars.mjs exec -- npx --no-install wrangler deploy --dry-run --config ../wrangler.toml \
-            --secrets-file "$RUNNER_TEMP/flowday-secrets.json" --outdir "$RUNNER_TEMP/flowday-bundle"
-          node scripts/bundle-size.mjs "$RUNNER_TEMP/flowday-bundle"
-      - name: Remove the placeholder secrets file
-        if: always()
-        run: rm -f "$RUNNER_TEMP/flowday-secrets.json"
+      - name: Run flowday-checks steps
+        uses: ./.github/actions/check-flowday
 
-  # The links app (links/: the Worker "links", its D1 schema and the launcher it serves under /_/), deployed by "Links
-  # deploy" since L2 (links/docs/design.md section 11). It compiles in packages/edge-auth and the TypeScript proto
-  # runtime with proto/links/ui/; no contract.
   links-checks:
     name: Links checks
     needs: changes
@@ -672,63 +304,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
-        with:
-          node-version: '26'
-          cache: npm
-          cache-dependency-path: |
-            links/worker/package-lock.json
-            links/web/package-lock.json
-            proto/package-lock.json
-      - name: Install locked dependencies
-        run: |
-          npm ci --prefix worker --no-audit --no-fund
-          npm ci --prefix web --no-audit --no-fund
-      # The config test reads wrangler.toml with the pinned wrangler (worker/node_modules), hence after npm ci.
-      - name: Test the production config and deploy values
-        run: node --test deploy/test/*.test.mjs
-      - name: Lint, typecheck and test the Worker
-        working-directory: links/worker
-        run: |
-          npm run lint
-          npm run typecheck
-          npm test
-      # Real D1 with the migrations and a synthetic Access issuer: redirects, visibility and the enumeration rule,
-      # passthrough and open-redirect attempts, the owner API, the D1 writes per action and the CPU of the redirect
-      # and the heaviest owner requests against bounds scaled by the machine's measured speed (tools/workerd-cpu).
-      - name: Runtime tests (workerd with real D1)
-        working-directory: links/worker
-        run: npm run test:runtime
-      # Builds web/dist, which the dry-run below serves as static assets, and holds its JavaScript to its budget.
-      - name: Lint, typecheck, test and build the UI
-        working-directory: links/web
-        run: |
-          npm run lint
-          npm run typecheck
-          npm test
-          npm run build
-      # The committed config, run exactly as the deploy runs it but with --dry-run and placeholder values for what the
-      # deploy adds (deploy/deploy-vars.mjs). No token is needed. The bundle it writes is held to the app's budget and
-      # the Workers Free limit (deploy/bundle-size.mjs).
-      - name: Dry-run the committed config and check the bundle size
-        working-directory: links/worker
-        env:
-          LINKS_ACCESS_OWNER: owner@example.com
-          LINKS_ACCESS_OWNER_ALIASES: ''
-          LINKS_CSRF_SIGNING_KEY: '0000000000000000000000000000000000000000000000000000000000000000'
-        run: |
-          node ../deploy/deploy-vars.mjs secrets "$RUNNER_TEMP/links-secrets.json"
-          node ../deploy/deploy-vars.mjs exec -- npx --no-install wrangler deploy --dry-run --config ../wrangler.toml \
-            --secrets-file "$RUNNER_TEMP/links-secrets.json" --outdir "$RUNNER_TEMP/links-bundle"
-          node ../deploy/bundle-size.mjs "$RUNNER_TEMP/links-bundle"
-      - name: Remove the placeholder secrets file
-        if: always()
-        run: rm -f "$RUNNER_TEMP/links-secrets.json"
+      - name: Run links-checks steps
+        uses: ./.github/actions/check-links
 
-  # The watch app (watch/: the Worker "watch", its Durable Object WatchState and the UI it serves), deployed by "Watch
-  # deploy" since W2 (watch/docs/design.md section 11). It compiles in packages/edge-auth and the TypeScript proto
-  # runtime with proto/watch/ui/, proto/todofy/taskintent/ and proto/ops/; Contracts runs its task-intent-v1 and ops-v1
-  # tests.
   watch-checks:
     name: Watch checks
     needs: changes
@@ -742,65 +320,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
-        with:
-          node-version: '26'
-          cache: npm
-          cache-dependency-path: |
-            watch/worker/package-lock.json
-            watch/web/package-lock.json
-            proto/package-lock.json
-      - name: Install locked dependencies
-        run: |
-          npm ci --prefix worker --no-audit --no-fund
-          npm ci --prefix web --no-audit --no-fund
-      # The config test reads wrangler.toml with the pinned wrangler (worker/node_modules), hence after npm ci.
-      - name: Test the production config and deploy values
-        run: node --test deploy/test/*.test.mjs
-      - name: Lint, typecheck and test the Worker
-        working-directory: watch/worker
-        run: |
-          npm run lint
-          npm run typecheck
-          npm test
-      # A real SQLite WatchState and synthetic sites behind Miniflare's outbound service (no network): every fetch
-      # tier, the etiquette, every stage of the noise pipeline, the triggers, confirmation and flicker, BROKEN and the
-      # auto-pause, GBK pages, masks, shadow mode, the owner API, real alarms, the Todofy sink against a stub of
-      # Todofy's Ops entrypoint, the app's own Ops entrypoint over a service binding, and the CPU of the fetch handler
-      # and of WatchState (its alarm path too) against bounds scaled by the machine's measured speed (tools/workerd-cpu).
-      - name: Runtime tests (workerd with a real Durable Object)
-        working-directory: watch/worker
-        run: npm run test:runtime
-      # Builds web/dist, which the dry-run below serves as static assets, and holds its JavaScript to its budget.
-      - name: Lint, typecheck, test and build the UI
-        working-directory: watch/web
-        run: |
-          npm run lint
-          npm run typecheck
-          npm test
-          npm run build
-      # The committed config, run exactly as the deploy runs it but with --dry-run and placeholder values for what the
-      # deploy adds (deploy/deploy-vars.mjs). No token is needed. The bundle it writes is held to the app's budget and
-      # the Workers Free limit (deploy/bundle-size.mjs).
-      - name: Dry-run the committed config and check the bundle size
-        working-directory: watch/worker
-        env:
-          WATCH_ACCESS_OWNER: owner@example.com
-          WATCH_ACCESS_OWNER_ALIASES: ''
-          WATCH_CSRF_SIGNING_KEY: '0000000000000000000000000000000000000000000000000000000000000000'
-        run: |
-          node ../deploy/deploy-vars.mjs secrets "$RUNNER_TEMP/watch-secrets.json"
-          node ../deploy/deploy-vars.mjs exec -- npx --no-install wrangler deploy --dry-run --config ../wrangler.toml \
-            --secrets-file "$RUNNER_TEMP/watch-secrets.json" --outdir "$RUNNER_TEMP/watch-bundle"
-          node ../deploy/bundle-size.mjs "$RUNNER_TEMP/watch-bundle"
-      - name: Remove the placeholder secrets file
-        if: always()
-        run: rm -f "$RUNNER_TEMP/watch-secrets.json"
+      - name: Run watch-checks steps
+        uses: ./.github/actions/check-watch
 
-  # mailsort (mailsort/: the Worker "mailsort", its Durable Object MailsortState and the UI it serves; the Gmail sorting
-  # on sort.ziyixi.science, mailsort/docs/design.md). It compiles in packages/edge-auth and the TypeScript proto runtime
-  # with proto/mailsort/ui/ and proto/ops/; Contracts runs its ops-v1 tests. Checked only (CHECK_ONLY in ci_changes.py)
-  # until its Access application exists. No step reaches Google or Workers AI: the fakes answer every request.
   mailsort-checks:
     name: Mailsort checks
     needs: changes
@@ -814,75 +336,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
-        with:
-          node-version: '26'
-          cache: npm
-          cache-dependency-path: |
-            mailsort/worker/package-lock.json
-            mailsort/web/package-lock.json
-            proto/package-lock.json
-      - name: Install locked dependencies
-        run: |
-          npm ci --prefix worker --no-audit --no-fund
-          npm ci --prefix web --no-audit --no-fund
-      # The config test reads wrangler.toml with the pinned wrangler (worker/node_modules), hence after npm ci; the
-      # secrets test pins how that wrangler keeps the owner's Gmail grant on a deploy.
-      - name: Test the production config, the deploy values and the token script
-        run: node --test deploy/test/*.test.mjs
-      # The closed table of Gmail operations (every recorded call against an independent copy, and a fuzz), masking,
-      # DMARC, the decision table of the two views, the review quota, the schema migrations, Clef's strict answer and
-      # ops-v1's golden bytes.
-      - name: Lint, typecheck and test the Worker
-        working-directory: mailsort/worker
-        run: |
-          npm run lint
-          npm run typecheck
-          npm test
-      # A real SQLite MailsortState with the fake Gmail and fake Workers AI behind Miniflare's outbound service (no
-      # network): the pipeline in shadow and live, unsure, undo, feedback into examples, trust labels and their domains,
-      # the replay evaluation, the resync, the auth stop, the Clef-flash switch, the quota deferral, the breaker, the
-      # owner API, ops-v1 over a service binding, and the CPU of the fetch handler and of MailsortState (its alarm path
-      # at its bounds) against bounds scaled by the machine's measured speed (tools/workerd-cpu).
-      - name: Runtime tests (workerd with a real Durable Object)
-        working-directory: mailsort/worker
-        run: npm run test:runtime
-      - name: Lint, typecheck, test and build the UI
-        working-directory: mailsort/web
-        run: |
-          npm run lint
-          npm run typecheck
-          npm test
-          npm run build
-      # The real wrangler dev (wrangler.test.toml, local bindings, no AI binding) against the fakes on loopback: the owner's
-      # whole loop through the HTTP API, every Google request checked against the table.
-      - name: Smoke run against wrangler dev with the fake Gmail and fake Workers AI
-        working-directory: mailsort/worker
-        timeout-minutes: 5
-        run: npm run test:smoke
-      - name: Dry-run the committed config and check the bundle size
-        working-directory: mailsort/worker
-        env:
-          MAILSORT_ACCESS_OWNER: owner@example.com
-          MAILSORT_ACCESS_OWNER_ALIASES: ''
-          MAILSORT_CSRF_SIGNING_KEY: '0000000000000000000000000000000000000000000000000000000000000000'
-          MAILSORT_MODE: shadow
-        run: |
-          node ../deploy/deploy-vars.mjs secrets "$RUNNER_TEMP/mailsort-secrets.json"
-          node ../deploy/deploy-vars.mjs exec -- npx --no-install wrangler deploy --dry-run --config ../wrangler.toml \
-            --secrets-file "$RUNNER_TEMP/mailsort-secrets.json" --outdir "$RUNNER_TEMP/mailsort-bundle"
-          node ../deploy/bundle-size.mjs "$RUNNER_TEMP/mailsort-bundle"
-      - name: Remove the placeholder secrets file
-        if: always()
-        run: rm -f "$RUNNER_TEMP/mailsort-secrets.json"
+      - name: Run mailsort-checks steps
+        uses: ./.github/actions/check-mailsort
 
-  # recall (recall/: the Worker "recall", its Durable Object RecallState and the private R2 bucket recall-store; the
-  # owner's browsing record on recall.ziyixi.science, recall/docs/design.md). It compiles in packages/edge-auth and the
-  # TypeScript proto runtime with proto/recall/ui/, proto/recall/ingest/, proto/recall/archive/ and proto/ops/; Contracts
-  # runs its ops-v1 tests. No step reaches the network: the workerd suite runs a real SQLite RecallState and a local R2
-  # bucket, and the smoke run drives wrangler dev on loopback.
-  # The Chrome extension (recall/extension) is checked and built here too, into an artifact; it is never deployed, and
-  # "Recall extension release" publishes that artifact on main as a GitHub Release.
   recall-checks:
     name: Recall checks
     needs: changes
@@ -896,104 +352,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
-        with:
-          node-version: '26'
-          cache: npm
-          cache-dependency-path: |
-            recall/worker/package-lock.json
-            recall/extension/package-lock.json
-            recall/web/package-lock.json
-            proto/package-lock.json
-      - name: Install locked dependencies
-        run: |
-          npm ci --prefix worker --no-audit --no-fund
-          npm ci --prefix extension --no-audit --no-fund
-          npm ci --prefix web --no-audit --no-fund
-      # The config test reads wrangler.toml with the pinned wrangler (worker/node_modules), hence after npm ci; the
-      # secrets test pins how that wrangler keeps a machine token digest put as a Worker secret on a deploy.
-      - name: Test the production config and the deploy values
-        run: node --test deploy/test/*.test.mjs
-      # The shared URL normalization, scrubber (with long hostile inputs), denylist and segmenter, query building,
-      # snippets, the feed's and the archive's lines against the contract's fixtures, and the Dropbox client.
-      - name: Lint, typecheck and test the Worker
-        working-directory: recall/worker
-        run: |
-          npm run lint
-          npm run typecheck
-          npm test
-      # A real SQLite RecallState and a local R2 bucket behind Miniflare: uploads to the feed and the blob route, the
-      # server's own scrub and denylist, refusals, the write budget, deletion and the alarm's purge, the machine tokens
-      # made in 设置, the archive pushed to a fake Dropbox (OAuth with PKCE, refresh, uploads, 429), search and the
-      # timeline at their read bounds, the owner API, ops-v1 over a service binding, and the CPU of the fetch handler and
-      # of RecallState against bounds scaled by the machine's measured speed (tools/workerd-cpu).
-      - name: Runtime tests (workerd with a real Durable Object and R2)
-        working-directory: recall/worker
-        run: npm run test:runtime
-      # The UI's views against a fake of the owner API on the shared transcoder (jsdom), the layout rules a phone depends
-      # on, no request but to its own origin, and the build held to its JavaScript budget (web/scripts/js-budget.mjs).
-      # The dry run below serves this build (static assets do not count against the Worker bundle).
-      - name: Lint, typecheck, test and build the UI
-        working-directory: recall/web
-        run: |
-          npm run lint
-          npm run typecheck
-          npm test
-          npm run build
-      # The real wrangler dev (wrangler.test.toml, local Durable Object and R2) on loopback: the owner API makes the
-      # machine tokens, the extension's own code uploads a browsing session, the owner API answers the calls the UI
-      # makes, and the archive reaches a loopback fake of Dropbox (connected through its OAuth flow), checked against
-      # contracts/recall-archive-v1 with the generated codec; a deleted page adds its tombstone and deletes nothing.
-      # Needs the UI's build (the dev server serves web/dist).
-      - name: Smoke run from the extension through wrangler dev to the archive
-        working-directory: recall/worker
-        timeout-minutes: 5
-        run: npm run test:smoke
-      - name: Dry-run the committed config and check the bundle size
-        working-directory: recall/worker
-        env:
-          RECALL_ACCESS_OWNER: owner@example.com
-          RECALL_ACCESS_OWNER_ALIASES: ''
-          RECALL_CSRF_SIGNING_KEY: '0000000000000000000000000000000000000000000000000000000000000000'
-        run: |
-          node ../deploy/deploy-vars.mjs secrets "$RUNNER_TEMP/recall-secrets.json"
-          node ../deploy/deploy-vars.mjs exec -- npx --no-install wrangler deploy --dry-run --config ../wrangler.toml \
-            --secrets-file "$RUNNER_TEMP/recall-secrets.json" --outdir "$RUNNER_TEMP/recall-bundle"
-          node ../deploy/bundle-size.mjs "$RUNNER_TEMP/recall-bundle"
-      - name: Remove the placeholder secrets file
-        if: always()
-        run: rm -f "$RUNNER_TEMP/recall-secrets.json"
-      # The focus state machine, visits, captures, the outbox and every upload answer over a hand-written fake of
-      # chrome.* and fake-indexeddb; the uploads read by recall.ingest.v1's strict codec as the Worker reads them; the
-      # update check, the manifest, the build and install-extension's swap.
-      - name: Lint, typecheck and test the extension
-        working-directory: recall/extension
-        run: |
-          npm run lint
-          npm run typecheck
-          npm test
-      # The unpacked build, nothing personal in it (recall's host is a public constant; the token is pasted in the
-      # options later). GitHub serves the artifact as recall-extension-<sha>.zip, which `npm run install-extension`
-      # takes as it is (recall/docs/design.md section 3.10). It carries every commit's build, branches included, for 30
-      # days, and it is what "Recall extension release" publishes on main (no rebuild); the releases are the lasting
-      # record.
-      - name: Build the extension
-        working-directory: recall/extension
-        run: npm run build
-      - name: Keep the extension's build
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: recall-extension-${{ github.sha }}
-          path: recall/extension/dist/extension/
-          if-no-files-found: error
-          retention-days: 30
+      - name: Run recall-checks steps
+        uses: ./.github/actions/check-recall
 
-  # The brief (brief/: the Worker "brief" and its Durable Object BriefState; the owner's daily research-and-world
-  # briefing on brief.ziyixi.science, brief/docs/design.md). It compiles in packages/edge-auth, the Anthropic
-  # TypeScript SDK and the TypeScript proto runtime with proto/brief/ui/ and proto/ops/. Deployed since its Access
-  # applications exist (2026-10-11, design section 18). No step reaches the network or a model: the
-  # workerd suite answers every feed, page, Claude, Workers AI and Resend request with synthetic fakes, and no key is
-  # ever set here.
   brief-checks:
     name: Brief checks
     needs: changes
@@ -1007,68 +368,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
-        with:
-          node-version: '26'
-          cache: npm
-          cache-dependency-path: |
-            brief/worker/package-lock.json
-            brief/web/package-lock.json
-            proto/package-lock.json
-      - name: Install locked dependencies
-        run: |
-          npm ci --prefix worker --no-audit --no-fund
-          npm ci --prefix web --no-audit --no-fund
-      # The config test reads wrangler.toml with the pinned wrangler (worker/node_modules), hence after npm ci; the
-      # secrets test pins how that wrangler keeps the Claude and Resend keys on a deploy.
-      - name: Test the production config and the deploy values
-        run: node --test deploy/test/*.test.mjs
-      # The registry and the profile as bundled, the schedule across both DST changes, the feeds' parsers and robots.txt,
-      # the grounding check and the number classifier, the model calls through the real SDK over a fake stream (every
-      # refusal, fallback and 4xx class), the render, the ledger, the feedback token and the learning.
-      - name: Lint, typecheck and test the Worker
-        working-directory: brief/worker
-        run: |
-          npm run lint
-          npm run typecheck
-          npm test
-      # A real SQLite BriefState behind Miniflare with a synthetic web, a fake Claude API, a fake Workers AI and a fake
-      # Resend: a whole weekday and a Saturday, the end-to-end dry run of a shadow weekday (plausible answers, one repair,
-      # exactly one send), a deploy in the middle of every step, the refusal and budget walls, paused and archive modes,
-      # the owner API, ops-v1 over a service binding, the rows read and written at the bounds, and the CPU of the fetch
-      # handler and of BriefState against bounds scaled by the machine's measured speed (tools/workerd-cpu).
-      - name: Runtime tests (workerd with a real Durable Object)
-        working-directory: brief/worker
-        run: npm run test:runtime
-      # The archive UI's views against a fake of the owner API on the shared transcoder (jsdom), the layout rules a phone
-      # depends on, no request but to its own origin, and the build held to its JavaScript budget
-      # (web/scripts/js-budget.mjs). The dry run below serves this build (static assets do not count against the Worker
-      # bundle).
-      - name: Lint, typecheck, test and build the UI
-        working-directory: brief/web
-        run: |
-          npm run lint
-          npm run typecheck
-          npm test
-          npm run build
-      - name: Dry-run the committed config and check the bundle size
-        working-directory: brief/worker
-        env:
-          BRIEF_MODE: 'off'
-          BRIEF_ACCESS_OWNER: owner@example.com
-          BRIEF_ACCESS_OWNER_ALIASES: ''
-          BRIEF_CSRF_SIGNING_KEY: '0000000000000000000000000000000000000000000000000000000000000000'
-          BRIEF_FEEDBACK_SIGNING_KEY: '0000000000000000000000000000000000000000000000000000000000000000'
-          BRIEF_MAIL_FROM: brief@example.com
-          BRIEF_MAIL_TO: owner@example.com
-        run: |
-          node ../deploy/deploy-vars.mjs secrets "$RUNNER_TEMP/brief-secrets.json"
-          node ../deploy/deploy-vars.mjs exec -- npx --no-install wrangler deploy --dry-run --config ../wrangler.toml \
-            --secrets-file "$RUNNER_TEMP/brief-secrets.json" --outdir "$RUNNER_TEMP/brief-bundle"
-          node ../deploy/bundle-size.mjs "$RUNNER_TEMP/brief-bundle"
-      - name: Remove the placeholder secrets file
-        if: always()
-        run: rm -f "$RUNNER_TEMP/brief-secrets.json"
+      - name: Run brief-checks steps
+        uses: ./.github/actions/check-brief
 
   fleet-checks:
     name: Fleet checks
@@ -1083,56 +384,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
-        with:
-          node-version: '26'
-          cache: npm
-          cache-dependency-path: |
-            fleet/worker/package-lock.json
-            fleet/web/package-lock.json
-            proto/package-lock.json
-      - name: Install locked dependencies
-        run: |
-          npm ci --prefix worker --no-audit --no-fund
-          npm ci --prefix web --no-audit --no-fund
-      # The config test reads wrangler.toml with the pinned wrangler (worker/node_modules), hence after npm ci.
-      - name: Test the production config and deploy values
-        run: node --test deploy/test/deploy-vars.test.mjs deploy/test/wrangler-config.test.mjs
-      - name: Lint, typecheck and test the Worker
-        working-directory: fleet/worker
-        run: |
-          npm run lint
-          npm run typecheck
-          npm test
-      # A real SQLite FleetState with synthetic signed receipts; no server credentials or network.
-      - name: Runtime tests (workerd with a real Durable Object)
-        working-directory: fleet/worker
-        run: npm run test:runtime
-      # Builds web/dist, which the dry-run below serves as static assets, and holds its JavaScript to its budget.
-      - name: Lint, typecheck, test and build the UI
-        working-directory: fleet/web
-        run: |
-          npm run lint
-          npm run typecheck
-          npm test
-          npm run build
-      # The committed config, run exactly as the deploy runs it but with --dry-run and placeholder values for what the
-      # deploy adds (deploy/deploy-vars.mjs). No token is needed. The bundle it writes is held to the app's budget and
-      # the Workers Free limit (deploy/bundle-size.mjs).
-      - name: Dry-run the committed config and check the bundle size
-        working-directory: fleet/worker
-        env:
-          FLEET_ACCESS_OWNER: owner@example.com
-          FLEET_ACCESS_OWNER_ALIASES: ''
-          FLEET_REPORT_HMAC_KEY: '0000000000000000000000000000000000000000000000000000000000000000'
-        run: |
-          node ../deploy/deploy-vars.mjs secrets "$RUNNER_TEMP/fleet-secrets.json"
-          node ../deploy/deploy-vars.mjs exec -- npx --no-install wrangler deploy --dry-run --config ../wrangler.toml \
-            --secrets-file "$RUNNER_TEMP/fleet-secrets.json" --outdir "$RUNNER_TEMP/fleet-bundle"
-          node ../deploy/bundle-size.mjs "$RUNNER_TEMP/fleet-bundle"
-      - name: Remove the placeholder secrets file
-        if: always()
-        run: rm -f "$RUNNER_TEMP/fleet-secrets.json"
+      - name: Run fleet-checks steps
+        uses: ./.github/actions/check-fleet
 
   contracts:
     name: Contracts
@@ -1144,120 +397,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
-        with:
-          node-version: '26'
-          cache: npm
-          cache-dependency-path: |
-            mail-hero/cloudflare/package-lock.json
-            todofy/gateway/package-lock.json
-            dashboard/worker/package-lock.json
-            watch/worker/package-lock.json
-            fleet/worker/package-lock.json
-            mailsort/worker/package-lock.json
-            recall/worker/package-lock.json
-            proto/package-lock.json
-      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
-        with:
-          version: '0.12.10'
-          working-directory: todofy
-          enable-cache: true
-      # ops-v1's JSON Schema is generated from proto/ops/v1/ops.proto: a hand edit, or an IDL change without
-      # `npm run schema`, fails here (the Python steps below give every fixture the reference validator's verdict on it).
-      - name: The contracts' JSON Schemas are generated from the IDL
-        working-directory: proto
-        run: |
-          npm ci --no-audit --no-fund
-          npm run check:schema
-      # Producer: Mail Hero's parser and payload builder (the generated mail.received.v1 message, written by the wire
-      # codec) must still emit every golden fixture byte for byte; the generated schema's "not blank" differs from the
-      # hand-written one in ECMAScript only where the IDL says (contract-schema-dialect).
-      # ops-v1: every answer Mail Hero's Ops code derives (status, guard, canary) keeps its golden bytes, passes the
-      # contract's rules (the wire codec) and the legacy schema older dashboards check. Host only, no workerd.
-      - name: Mail Hero builds the golden mail.received.v1 fixtures and checks ops-v1
-        working-directory: mail-hero/cloudflare
-        run: |
-          npm ci
-          node --test test/contract-fixtures.test.mjs test/contract-schema-dialect.test.mjs test/ops-golden.test.mjs test/native-ops.test.mjs
-      # Consumer: Todofy validates every fixture (current and legacy) against the schema and parses it with the generated
-      # codec; the generated mail.received.v1 schema gives the frozen hand-written one's verdict, and the parser the frozen
-      # parser's, on every fixture and ~9,000 mutations (test_mail_received_*_legacy);
-      # ops-v1 fixtures get the reference JSON Schema validator's verdict on the generated schema (the Python wire
-      # codec agrees with it), and every value core/ops.py derives (status, guard, canary result, report, digest
-      # items) keeps its golden bytes, the contract's rules and the legacy schema older dashboards check. task-intent-v1:
-      # the generated types and the Python wire JSON codec agree with the schema on every fixture, the core
-      # (strict read plus value rules) gives the schema's verdict, and every result it builds passes it. The newsletter
-      # reports (todofy.report.v1): every report keeps its golden bytes and the generated schemas give the frozen
-      # hand-written ones' verdict.
-      - name: Todofy accepts every fixture and checks ops-v1
-        working-directory: todofy
-        run: |
-          uv sync --locked
-          uv run pytest tests/unit/test_mail_hero_compat.py tests/unit/test_contract.py tests/unit/test_machine_api.py \
-            tests/unit/test_mail_received_schema_legacy.py tests/unit/test_mail_received_parser_legacy.py \
-            tests/unit/test_ops_contract.py tests/unit/test_ops_core.py tests/unit/test_ops_golden.py \
-            tests/unit/test_task_intent_contract.py tests/unit/test_report_wire.py tests/unit/test_report_schemas.py \
-            tests/unit/test_report_schema_legacy.py
-      # The gateway's Ops entrypoint (what the dashboard binds) forwards to todofy-core and returns values the
-      # wire codec reads strictly (the generated services type it).
-      - name: Todofy's Ops entrypoint returns ops-v1 values
-        working-directory: todofy/gateway
-        run: |
-          npm ci --no-audit --no-fund
-          npx --no-install vitest run test/ops.test.ts
-      # Caller: the dashboard calls only the methods of each app's generated ops-v1 services, handles every
-      # declared error code plus timeouts and invalid output, accepts the valid fixtures and refuses the
-      # invalid ones, keeps the bytes it read and sent before the move onto proto/ (ops-golden), and every value
-      # it sends (SetGuardInput, StartCanaryInput, OpsReport) passes the contract's rules. Host only (vitest in
-      # Node); Dashboard checks runs the workerd flows.
-      - name: The dashboard calls ops-v1 as declared
-        working-directory: dashboard/worker
-        run: |
-          npm ci --no-audit --no-fund
-          npx --no-install vitest run test/ops-client.test.ts test/ops-golden.test.ts test/guard.test.ts test/canary.test.ts test/digest.test.ts
-      # task-intent-v1, the watch app's notification sink (W3): every fixture gets validate.mjs's verdict (Todofy's step
-      # above gives the same fixtures the Python jsonschema verdict), the generated types and the TypeScript codec agree
-      # with the schema on every fixture, and the ts constants match it (task-intent-contract.test.ts); its daily digest and an urgent change keep the bytes of
-      # the contract's watch fixtures (which Todofy's step above accepts and pins), every intent it can build passes
-      # validate.mjs with only the owner's names, trigger types, counts and links to the app, and every result Todofy
-      # may give maps to recorded, refused or a retry. ops-v1: its status and guard answers keep their golden bytes and
-      # the contract's watch fixtures, pass the generated schema, and carry counts and codes only. Host only; Watch
-      # checks runs the sink with a stub Todofy and the Ops entrypoint over a service binding in workerd.
-      - name: The watch app proposes task-intent-v1 and answers ops-v1 as declared
-        working-directory: watch/worker
-        run: |
-          npm ci --no-audit --no-fund
-          npx --no-install vitest run test/task-intent-contract.test.ts test/todofy.test.ts test/ops-golden.test.ts
+      - name: Run contracts steps
+        uses: ./.github/actions/check-contracts
 
-      # ops-v1: mailsort's status and guard answers keep their golden bytes and the contract's mailsort fixtures, pass the
-      # generated schema, and carry counts and codes only. Host only; Mailsort checks runs the entrypoint in workerd.
-      - name: Mailsort answers ops-v1 as declared
-        working-directory: mailsort/worker
-        run: |
-          npm ci --no-audit --no-fund
-          npx --no-install vitest run test/ops-golden.test.ts
-
-      # ops-v1: recall's status answers keep their golden bytes and the contract's recall fixtures, pass the generated
-      # schema, and carry counts and codes only. Host only; Recall checks runs the entrypoint in workerd.
-      - name: Recall answers ops-v1 as declared
-        working-directory: recall/worker
-        run: |
-          npm ci --no-audit --no-fund
-          npx --no-install vitest run test/ops-golden.test.ts
-
-      # Both ends of the signed content-free report validate the synthetic telemetry contract.
-      # Home's caller step above also checks Fleet and Newsletter ops-v1 values; runtime tests live in Fleet checks.
-      - name: Fleet accepts the telemetry contract
-        working-directory: fleet/worker
-        run: |
-          npm ci --no-audit --no-fund
-          npm test -- --run test/report.test.ts
-
-  # The personal website (website/, docs in website/docs): a Next.js static export on the assets-only Worker
-  # ziyixi-website (Custom Domains www and the apex), plus the Notion relay Worker ziyixi-notion-publish
-  # (website/relay). No Notion secret: the builds use the committed synthetic fixture (and the empty
-  # source), Playwright runs against the export under `wrangler dev` with the production wrangler.toml,
-  # _headers and _redirects.
   website-checks:
     name: Website checks
     needs: changes
@@ -1271,74 +413,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
-        with:
-          node-version-file: website/.nvmrc
-      - name: Install the shared proto toolchain
-        run: npm ci --prefix ../proto --no-audit --no-fund
-      - name: Install the pinned pnpm and locked dependencies
-        run: |
-          corepack enable
-          pnpm --version
-          pnpm install --frozen-lockfile
-      - name: Format, lint, typecheck and unit tests (release and daily sync included)
-        run: |
-          pnpm content:prepare:empty
-          pnpm check
-      # The browser download is cached by the locked Playwright version; the system libraries it needs are
-      # installed on every run (install-deps), so a cache hit only skips the download.
-      - name: Read the locked Playwright version
-        id: playwright
-        run: echo "version=$(pnpm exec playwright --version | awk '{print $2}')" >> "$GITHUB_OUTPUT"
-      - name: Restore the Playwright browser
-        id: playwright-cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-chromium-${{ runner.os }}-${{ steps.playwright.outputs.version }}
-      - name: Install the pinned Playwright browser
-        run: |
-          if [ "$CACHE_HIT" = true ]; then
-            pnpm exec playwright install-deps chromium
-          else
-            pnpm exec playwright install --with-deps chromium
-          fi
-        env:
-          CACHE_HIT: ${{ steps.playwright-cache.outputs.cache-hit }}
-      # Each source builds the export and runs the browser suite against it (pnpm start = wrangler dev on
-      # out/). The fixture also runs the release's route contract (every route, asset hash, redirect, 404).
-      - name: Build and test the static export (empty and fixture content)
-        run: |
-          for mode in empty fixture; do
-            echo "::group::$mode"
-            pnpm "content:prepare:$mode"
-            pnpm content:validate --source="$mode"
-            CODE_SHA="$GITHUB_SHA" pnpm build:site
-            CONTENT_MODE="$mode" pnpm test:e2e
-            echo "::endgroup::"
-          done
-          pnpm start > "$RUNNER_TEMP/wrangler-dev.log" 2>&1 &
-          server=$!
-          trap 'kill "$server" 2>/dev/null || true' EXIT
-          for attempt in $(seq 1 60); do
-            curl -fs -o /dev/null http://127.0.0.1:4173/build-info.json && break
-            sleep 1
-          done
-          ALLOW_FIXTURE_DEPLOYMENT_TESTS=true DEPLOYMENT_BASE_URL=http://127.0.0.1:4173 \
-            EXPECTED_BUILD_INFO_PATH=out/build-info.json pnpm test:deployment
-      # The two Workers' production configs, as the deploy jobs use them. No token is needed for --dry-run.
-      - name: Dry-run the two Workers
-        run: |
-          pnpm exec wrangler deploy --dry-run --config wrangler.toml
-          pnpm exec wrangler deploy --dry-run --config relay/wrangler.toml --outdir "$RUNNER_TEMP/relay-bundle"
+      - name: Run website-checks steps
+        uses: ./.github/actions/check-website
 
-  # infra/: the OpenTofu configuration (infra/README.md). No Cloudflare token, no state and no plan here: the
-  # locked provider download, format and validation, the guards that keep infra/ free of code-running data
-  # sources, provisioners, personal values and state, and the plan-summary and state-driver tests (fake tofu,
-  # no network). The checks of infra/ against the apps' wrangler.toml files run in Changes
-  # (.github/scripts/test_infra_config.py). The drift plan against the encrypted remote state is
-  # .github/workflows/infra.yml and the apply is the manually dispatched infra-apply.yml; both hold the token, this
-  # job never does.
   infra-checks:
     name: Infra checks
     needs: changes
@@ -1352,50 +429,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2.0.2
-        with:
-          tofu_version: 1.12.6
-          # The wrapper would copy tofu's output into step outputs; plans must never be captured.
-          tofu_wrapper: false
-          github_token: ${{ github.token }}
-      # File names only for the email check, so a committed address is not repeated in the log. The greps are
-      # a quick first line; infra_guard.py reads the HCL structure (bare labels, nested blocks, every config
-      # file kind) and is the authority. Quoted or bare labels, any file except the docs.
-      - name: Guards (data sources, provisioners, providers, email addresses, file kinds, structure)
-        run: |
-          failed=0
-          if grep -rnE --exclude='*.md' --exclude-dir=.terraform '^[[:space:]]*data[[:space:]]+"?(external|http)"?[[:space:]]' .; then
-            echo "::error::external/http data sources can run code or send data out"; failed=1
-          fi
-          if grep -rnE --exclude='*.md' --exclude-dir=.terraform '(^|[[:space:]{])provisioner[[:space:]]+"?[A-Za-z_-]+"?[[:space:]]*\{' .; then
-            echo "::error::provisioners are not allowed in infra/"; failed=1
-          fi
-          if [ "$(grep -c '^provider ' .terraform.lock.hcl)" != 1 ] || ! grep -q '^provider "registry.opentofu.org/cloudflare/cloudflare"' .terraform.lock.hcl; then
-            echo "::error::the lock file must hold exactly the Cloudflare provider"; failed=1
-          fi
-          if grep -rlIE '[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}' .; then
-            echo "::error::email addresses come from sensitive variables, never from files in infra/"; failed=1
-          fi
-          # An allowlist of committed file kinds: a state, plan, values or log file fails whatever its name.
-          if git ls-files -- . | grep -vE '^([A-Za-z0-9_-]+\.tf|\.terraform\.lock\.hcl|\.gitignore|README\.md|local\.tfvars\.example|(scripts|tests)/[A-Za-z0-9_]+\.py)$'; then
-            echo "::error::only *.tf, the lock file, docs, the example values and the scripts are committed in infra/"; failed=1
-          fi
-          python3 ../.github/scripts/infra_guard.py . || failed=1
-          exit "$failed"
-      - name: Format
-        run: tofu fmt -check -recursive -diff
-      - name: Validate (downloads the locked provider only; no backend, no credentials)
-        run: |
-          tofu init -backend=false -input=false -lockfile=readonly
-          tofu validate
-      - name: Plan-summary, local-values and state-driver tests
-        run: |
-          python3 -m unittest discover -s ../tools/infra-plan-summary
-          python3 -m unittest discover -s tests
+      - name: Run infra-checks steps
+        uses: ./.github/actions/check-infra
 
-  # The protobuf IDL of the cross-app contracts (proto/README.md). No secret; buf fetches the googleapis module
-  # pinned in proto/buf.lock from buf.build. The apps that use the generated code (ci_changes.py PROTO_USERS)
-  # are checked by their own jobs, whose installs generate it (an npm postinstall, uv's build of ziyixi-proto).
   proto-checks:
     name: Proto checks
     needs: changes
@@ -1411,48 +447,11 @@ jobs:
           persist-credentials: false
           # The breaking-change base (the Changes job's diff base) must be in the clone.
           fetch-depth: 0
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+      - name: Run proto-checks steps
+        uses: ./.github/actions/check-proto
         with:
-          node-version: '26'
-          cache: npm
-          cache-dependency-path: proto/package-lock.json
-      # Python 3.14 (todofy-core's) for the Python codec's tests.
-      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
-        with:
-          version: '0.12.10'
-          working-directory: proto
-      # Go for Google's api-linter, the Go toolchain proto/tools/api-linter/go.mod names (its go.sum pins every
-      # module checksum; scripts/api-lint.sh builds the linter from it).
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: proto/tools/api-linter/go.mod
-          cache-dependency-path: proto/tools/api-linter/go.sum
-      - name: Install the pinned toolchain (buf, protoc-gen-es, the protobuf-es runtime)
-        run: npm ci --no-audit --no-fund
-      - name: Format and lint (STANDARD and COMMENTS)
-        run: npm run lint
-      - name: Google's api-linter (AIP rules) on every package but the runtimes' test fixtures
-        run: npm run api-lint
-      # Against the commit the Changes job diffed from: the last successful main run on main, the merge base
-      # with origin/main on a branch. Empty (Changes found no usable base and runs everything, or a dispatch):
-      # breaking.sh compares with HEAD~1 and says so in the log.
-      - name: No breaking change (buf FILE rules and the wire profile rules) against the diff base
-        env:
-          BASE: ${{ needs.changes.outputs.base }}
-        run: sh scripts/breaking.sh "$BASE"
-      - name: The lint and breaking rules still bite
-        run: sh scripts/rules-selftest.sh
-      - name: Generation is deterministic
-        run: node tools/ensure.mjs --check-deterministic
-      - name: The contracts' JSON Schemas are generated from the IDL (tools/gen_schema.py)
-        run: npm run check:schema
-      - name: Typecheck and test both codecs (the shared edge cases in TypeScript and Python)
-        run: |
-          npm run typecheck
-          npx --no-install vitest run
-          npm run test:python
+          base-sha: ${{ needs.changes.outputs.base }}
 
-  # Newsletter is a separate VPS engine and GHCR image. No production credentials or real model calls here.
   newsletter-checks:
     name: Newsletter checks
     needs: changes
@@ -1466,21 +465,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
-        with:
-          version: '0.12.10'
-          working-directory: newsletter
-          enable-cache: true
-      - name: Install deterministic CJK test fonts
-        run: sudo apt-get update && sudo apt-get install -y fonts-noto-cjk
-      - name: Check the locked engine
-        run: |
-          make setup
-          make check
-          make smoke-codex
-          make smoke
-          make build
-          uv run --locked --extra codex python scripts/smoke_wheel.py
+      - name: Run newsletter-checks steps
+        uses: ./.github/actions/check-newsletter
 
   newsletter-image:
     name: Newsletter image checks
@@ -1495,27 +481,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Test the independent image without credentials or external calls
-        run: |
-          python3 scripts/smoke_image.py --audit-source
-          docker build --platform linux/amd64 --build-arg BUILD_SHA="$GITHUB_SHA" \
-            --build-arg SOURCE_REPOSITORY="https://github.com/$GITHUB_REPOSITORY" --tag "newsletter-ci:$GITHUB_SHA" .
-          tested_image=$(docker image inspect --format '{{.Id}}' "newsletter-ci:$GITHUB_SHA")
-          python3 scripts/smoke_image.py --image "$tested_image" --platform linux/amd64
-          python3 scripts/publish_content_config.py validate \
-            --image "$tested_image" --engine-sha "$GITHUB_SHA" --revision "$GITHUB_SHA" \
-            --source "$GITHUB_WORKSPACE/newsletter/content-config" --output "$RUNNER_TEMP/validated-content-config"
-          python3 ../tools/container-release/image.py save --image "$tested_image" --sha "$GITHUB_SHA" \
-            --directory "$RUNNER_TEMP/newsletter-image"
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: newsletter-image-${{ github.sha }}
-          path: ${{ runner.temp }}/newsletter-image/
-          if-no-files-found: error
-          retention-days: 1
-          compression-level: 6
+      - name: Run newsletter-image steps
+        uses: ./.github/actions/check-newsletter-image
 
-  # The daemon/observer share one verified image; SSA also uses an isolated real k3s API.
   platform-checks:
     name: Platform checks
     needs: changes
@@ -1526,102 +494,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+      - name: Run platform-checks steps
+        uses: ./.github/actions/check-platform
         with:
-          node-version: '26'
-          cache: npm
-          cache-dependency-path: proto/package-lock.json
-      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
-        with:
-          version: '0.12.10'
-          working-directory: platform
-          enable-cache: true
-      - name: Install locked contracts and daemon dependencies
-        run: |
-          npm ci --prefix proto --no-audit --no-fund
-          node proto/tools/ensure.mjs
-          uv sync --project platform --locked
-      - name: Install the pinned manifest compiler
-        run: |
-          mkdir -p "$RUNNER_TEMP/kubectl-bin"
-          version=$(python3 -c 'import json; print(json.load(open("platform/versions.json"))["kubectl"]["version"])')
-          checksum=$(python3 -c 'import json; print(json.load(open("platform/versions.json"))["kubectl"]["linux_amd64_sha256"])')
-          curl --fail --silent --show-error --location "https://dl.k8s.io/release/$version/bin/linux/amd64/kubectl" --output "$RUNNER_TEMP/kubectl-bin/kubectl"
-          printf '%s  %s\n' "$checksum" "$RUNNER_TEMP/kubectl-bin/kubectl" | sha256sum --check --status
-          chmod 755 "$RUNNER_TEMP/kubectl-bin/kubectl"
-          echo "$RUNNER_TEMP/kubectl-bin" >> "$GITHUB_PATH"
-      - name: Compile the pinned observer AppArmor policy without loading it
-        run: |
-          test -x /usr/sbin/apparmor_parser
-          /usr/sbin/apparmor_parser --skip-kernel-load --skip-cache --quiet \
-            platform/apparmor/personal-cloud-systemd-observer-v1
-      - name: Check deployment, status and observer contracts
-        run: |
-          uv run --project platform --locked ruff check platform/src platform/tests tools/platform-build tools/vps-release tools/vps-bootstrap
-          uv run --project platform --locked ruff format --check platform/src platform/tests tools/platform-build tools/vps-release tools/vps-bootstrap
-          uv run --project platform --locked pytest platform/tests tools/platform-build/tests tools/vps-release/tests tools/vps-bootstrap/tests
-      - name: Build and verify the independent runtime image
-        if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.resume_vps_release) }}
-        run: |
-          uv run --project platform --locked python tools/platform-build/build.py --sha "$GITHUB_SHA" --output "$RUNNER_TEMP/platform-build"
-          docker build --platform linux/amd64 --build-arg BUILD_SHA="$GITHUB_SHA" \
-            --build-arg SOURCE_REPOSITORY="https://github.com/$GITHUB_REPOSITORY" \
-            --tag "platform-ci:$GITHUB_SHA" "$RUNNER_TEMP/platform-build"
-          tested_image=$(docker image inspect --format '{{.Id}}' "platform-ci:$GITHUB_SHA")
-          docker run --rm --network none "$tested_image" identity | python3 -c 'import json, os, sys; assert json.load(sys.stdin)["source_sha"] == os.environ["GITHUB_SHA"]'
-          docker run --rm --network none --entrypoint python "$tested_image" \
-            -c 'import personal_cloud.status_daemon.server, personal_cloud.observer.cli, pydantic_core'
-          docker run --rm -i --network none --read-only --cap-drop ALL \
-            --security-opt no-new-privileges --user 65534:10001 \
-            --tmpfs /run/observer-systemd:rw,size=65536,uid=65534,gid=10001,mode=0770 \
-            --entrypoint python "$tested_image" - < tools/platform-build/smoke_systemd.py
-          python3 tools/container-release/image.py save --image "$tested_image" --sha "$GITHUB_SHA" \
-            --directory "$RUNNER_TEMP/platform-image"
-      - name: Verify real Kubernetes SSA in an isolated API-only k3s
-        env:
-          K3S_ACCEPTANCE_DIR: ${{ runner.temp }}/k3s-acceptance
-        run: |
-          mkdir -m 700 "$K3S_ACCEPTANCE_DIR"
-          version=$(python3 -c 'import json; print(json.load(open("platform/versions.json"))["k3s"]["version"])')
-          tag=${version/+/-}
-          # This digest pins only the isolated CI fixture, not the VPS installer.
-          image="docker.io/rancher/k3s:$tag@sha256:ca7f37d993d82ef0dcdcfecb2e0e2618ea541dbaffc620c8cedebe01a82acd0d"
-          docker run --detach --privileged --name k3s-acceptance --platform linux/amd64 \
-            --publish 127.0.0.1:6443:6443 --tmpfs /run --tmpfs /var/run \
-            --mount type=volume,source=k3s-acceptance,target=/var/lib/rancher/k3s \
-            "$image" server --disable-agent \
-            --disable=traefik,servicelb,metrics-server,local-storage,coredns
-          actual=$(docker exec k3s-acceptance k3s --version)
-          case "$actual" in "k3s version $version ("*) ;; *) exit 1 ;; esac
-          # The image exposes kubectl via its direct multicall symlink.
-          for attempt in $(seq 1 60); do
-            if docker exec --env KUBECONFIG=/etc/rancher/k3s/k3s.yaml k3s-acceptance /bin/kubectl get --raw=/readyz >/dev/null 2>&1; then break; fi
-            sleep 2
-          done
-          docker exec --env KUBECONFIG=/etc/rancher/k3s/k3s.yaml k3s-acceptance /bin/kubectl get --raw=/readyz >/dev/null
-          docker cp platform/k3s/bootstrap/namespace.yaml k3s-acceptance:/tmp/namespace.yaml
-          docker cp platform/k3s/bootstrap/rbac.yaml k3s-acceptance:/tmp/rbac.yaml
-          docker exec --env KUBECONFIG=/etc/rancher/k3s/k3s.yaml k3s-acceptance /bin/kubectl apply -f /tmp/namespace.yaml -f /tmp/rbac.yaml
-          docker cp k3s-acceptance:/etc/rancher/k3s/k3s.yaml "$K3S_ACCEPTANCE_DIR/kubeconfig"
-          docker cp k3s-acceptance:/var/lib/rancher/k3s/server/tls/server-ca.crt "$K3S_ACCEPTANCE_DIR/ca.crt"
-          docker exec --env KUBECONFIG=/etc/rancher/k3s/k3s.yaml k3s-acceptance /bin/kubectl -n personal-cloud create token platform-controller \
-            --duration=10m > "$K3S_ACCEPTANCE_DIR/token"
-          chmod 600 "$K3S_ACCEPTANCE_DIR/"*
-          uv run --project platform --locked pytest -q platform/tests/deployment/test_k3s_acceptance.py
-      - name: Remove the isolated k3s fixture
-        if: always()
-        run: |
-          docker rm --force k3s-acceptance >/dev/null 2>&1 || true
-          docker volume rm k3s-acceptance >/dev/null 2>&1 || true
-          rm -rf "$RUNNER_TEMP/k3s-acceptance"
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.resume_vps_release) }}
-        with:
-          name: platform-image-${{ github.sha }}
-          path: ${{ runner.temp }}/platform-image/
-          if-no-files-found: error
-          retention-days: 1
-          compression-level: 6
+          build-image: ${{ !(github.event_name == 'workflow_dispatch' && inputs.resume_vps_release) }}
 
   gate:
     name: CI gate
@@ -1711,22 +587,11 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: newsletter-image-${{ github.sha }}
-          path: ${{ runner.temp }}/newsletter-image
-          github-token: ${{ github.token }}
-          run-id: ${{ needs.changes.outputs.reused_run_id || github.run_id }}
-      - name: Log in for image publication
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: printf '%s' "$GH_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
-      - name: Verify and publish the tested image
+      - name: Run publish-newsletter steps
         id: publish
-        run: python3 tools/container-release/image.py publish --sha "$GITHUB_SHA" --directory "$RUNNER_TEMP/newsletter-image" --github-output
-      - name: Log out
-        if: always()
-        run: docker logout ghcr.io
+        uses: ./.github/actions/publish-newsletter
+        with:
+          artifact-run-id: ${{ needs.changes.outputs.reused_run_id || github.run_id }}
 
   platform-image:
     name: Platform image
@@ -1756,22 +621,11 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: platform-image-${{ github.sha }}
-          path: ${{ runner.temp }}/platform-image
-          github-token: ${{ github.token }}
-          run-id: ${{ needs.changes.outputs.reused_run_id || github.run_id }}
-      - name: Log in for image publication
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: printf '%s' "$GH_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
-      - name: Verify and publish the tested image
+      - name: Run publish-platform steps
         id: publish
-        run: python3 tools/container-release/image.py publish --service platform --sha "$GITHUB_SHA" --directory "$RUNNER_TEMP/platform-image" --github-output
-      - name: Log out
-        if: always()
-        run: docker logout ghcr.io
+        uses: ./.github/actions/publish-platform
+        with:
+          artifact-run-id: ${{ needs.changes.outputs.reused_run_id || github.run_id }}
 
   vps-bootstrap-bundle:
     name: VPS bootstrap bundle
@@ -1789,32 +643,11 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+      - name: Run package-vps steps
+        uses: ./.github/actions/package-vps
         with:
-          node-version: '26'
-      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
-        with:
-          version: '0.12.10'
-          working-directory: platform
-      - name: Install the locked bundle renderer
-        run: |
-          npm ci --prefix proto --no-audit --no-fund
-          node proto/tools/ensure.mjs
-          uv sync --project platform --locked
-      - name: Package this commit and both verified image digests
-        env:
-          NEWSLETTER_IMAGE: ${{ needs.newsletter-deploy.outputs.image }}
-          PLATFORM_IMAGE: ${{ needs.platform-image.outputs.image }}
-        run: |
-          uv run --project platform --locked python tools/vps-bootstrap/prepare.py --sha "$GITHUB_SHA" \
-            --newsletter-image "$NEWSLETTER_IMAGE" --platform-image "$PLATFORM_IMAGE" \
-            --output "$RUNNER_TEMP/vps-bootstrap-bundle"
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: vps-bootstrap-${{ github.sha }}
-          path: ${{ runner.temp }}/vps-bootstrap-bundle
-          if-no-files-found: error
-          retention-days: 30
+          newsletter-image: ${{ needs.newsletter-deploy.outputs.image }}
+          platform-image: ${{ needs.platform-image.outputs.image }}
 
   vps-deploy:
     name: VPS deploy
@@ -1848,41 +681,16 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+      - name: Run deploy-vps steps
+        uses: ./.github/actions/deploy-vps
         with:
-          node-version: '26'
-      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
-        with:
-          version: '0.12.10'
-          working-directory: platform
-          enable-cache: true
-      - name: Install the locked release client
-        run: |
-          npm ci --prefix proto --no-audit --no-fund
-          node proto/tools/ensure.mjs
-          uv sync --project platform --locked
-      - name: Request deployment and verify the physical running versions
-        env:
-          PLATFORM_ACCESS_CLIENT_ID: ${{ secrets.PLATFORM_ACCESS_CLIENT_ID }}
-          PLATFORM_ACCESS_CLIENT_SECRET: ${{ secrets.PLATFORM_ACCESS_CLIENT_SECRET }}
-          PLATFORM_DEPLOY_TOKEN: ${{ secrets.PLATFORM_DEPLOY_TOKEN }}
-          NEWSLETTER_IMAGE: ${{ needs.newsletter-deploy.outputs.image }}
-          PLATFORM_IMAGE: ${{ needs.platform-image.outputs.image }}
-          RESUME_RELEASE: ${{ inputs.resume_vps_release && 'true' || 'false' }}
-          RELEASE_SOURCE_SHA: ${{ inputs.resume_vps_release && inputs.resume_source_sha || github.sha }}
-        run: |
-          args=()
-          if [ "$RESUME_RELEASE" = true ]; then
-            args+=(--resume)
-          else
-            args+=(--newsletter-image "$NEWSLETTER_IMAGE" --platform-image "$PLATFORM_IMAGE")
-          fi
-          uv run --project platform --locked python tools/vps-release/deploy.py \
-            --source-sha "$RELEASE_SOURCE_SHA" --evidence-file "$RUNNER_TEMP/vps-release-evidence.json" "${args[@]}"
-      - name: Record the physically verified VPS release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: python3 tools/cloud-release/vps_record.py --evidence-file "$RUNNER_TEMP/vps-release-evidence.json"
+          platform-access-client-id: ${{ secrets.PLATFORM_ACCESS_CLIENT_ID }}
+          platform-access-client-secret: ${{ secrets.PLATFORM_ACCESS_CLIENT_SECRET }}
+          platform-deploy-token: ${{ secrets.PLATFORM_DEPLOY_TOKEN }}
+          newsletter-image: ${{ needs.newsletter-deploy.outputs.image }}
+          platform-image: ${{ needs.platform-image.outputs.image }}
+          resume-release: ${{ inputs.resume_vps_release && 'true' || 'false' }}
+          source-sha: ${{ inputs.resume_vps_release && inputs.resume_source_sha || github.sha }}
 
   todofy-deploy:
     name: Todofy deploy
@@ -2190,7 +998,7 @@ jobs:
     secrets: inherit
 
   # The site release: dispatches website-release.yml (docs in website/docs/release.md), the same workflow the
-  # Notion buttons and the relay's detector dispatch, and returns at once. The release's job holds the one
+  # daily Cron and Home's sync button dispatch, and returns at once. The release's job holds the one
   # concurrency group "website-production" and the production environment; this CI run neither waits for a
   # queued release nor ties other apps' deploys to it, and the relay sees the release like any other run.
   # The release builds the newest main commit whose push run passed the CI gate (this one, once it is green).
@@ -2217,21 +1025,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Read the configured website URL
-        id: urls
-        run: python3 tools/cloud-config/outputs.py --github-output "$GITHUB_OUTPUT"
-      - name: Dispatch the website release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          SITE_URL: ${{ steps.urls.outputs.website_url }}
-        run: |
-          gh workflow run website-release.yml --repo "$GITHUB_REPOSITORY" --ref main \
-            -f operation=release -f confirmation="release:${SITE_URL#https://}" \
-            -f force_build=false -f allow_empty=false -f trigger=push
-          echo "::notice::Dispatched Website release (push); see Actions → Website release."
+      - name: Run dispatch-website steps
+        uses: ./.github/actions/dispatch-website
 
-  # The Notion relay Worker ziyixi-notion-publish (website/relay): buttons and the change detector's cron.
-  # Its secrets are Worker secrets (website/relay/README.md) and survive this deploy.
   website-relay-deploy:
     name: Website relay deploy
     needs: [changes, website-checks, gate]

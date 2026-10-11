@@ -1,0 +1,85 @@
+name: check-mailsort
+description: "check-mailsort; called by the repository workflow."
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+      with:
+        node-version: '26'
+        cache: npm
+        cache-dependency-path: |
+          mailsort/worker/package-lock.json
+          mailsort/web/package-lock.json
+          proto/package-lock.json
+    - name: Install locked dependencies
+      working-directory: mailsort
+      shell: bash -e {0}
+      run: |
+        npm ci --prefix worker --no-audit --no-fund
+        npm ci --prefix web --no-audit --no-fund
+    # The config test reads wrangler.toml with the pinned wrangler (worker/node_modules), hence after npm ci; the
+    # secrets test pins how that wrangler keeps the owner's Gmail grant on a deploy.
+    - name: Test the production config, the deploy values and the token script
+      working-directory: mailsort
+      shell: bash -e {0}
+      run: node --test deploy/test/*.test.mjs
+    # The closed table of Gmail operations (every recorded call against an independent copy, and a fuzz), masking,
+    # DMARC, the decision table of the two views, the review quota, the schema migrations, Clef's strict answer and
+    # ops-v1's golden bytes.
+    - name: Lint, typecheck and test the Worker
+      working-directory: mailsort/worker
+      shell: bash -e {0}
+      run: |
+        npm run lint
+        npm run typecheck
+        npm test
+    # A real SQLite MailsortState with the fake Gmail and fake Workers AI behind Miniflare's outbound service (no
+    # network): the pipeline in shadow and live, unsure, undo, feedback into examples, trust labels and their domains,
+    # the replay evaluation, the resync, the auth stop, the Clef-flash switch, the quota deferral, the breaker, the
+    # owner API, ops-v1 over a service binding, and the CPU of the fetch handler and of MailsortState (its alarm path
+    # at its bounds) against bounds scaled by the machine's measured speed (tools/workerd-cpu).
+    - name: Runtime tests (workerd with a real Durable Object)
+      working-directory: mailsort/worker
+      shell: bash -e {0}
+      run: npm run test:runtime
+    - name: Lint, typecheck, test and build the UI
+      working-directory: mailsort/web
+      shell: bash -e {0}
+      run: |
+        npm run lint
+        npm run typecheck
+        npm test
+        npm run build
+    # The real wrangler dev (wrangler.test.toml, local bindings, no AI binding) against the fakes on loopback: the owner's
+    # whole loop through the HTTP API, every Google request checked against the table.
+    - name: Smoke run against wrangler dev with the fake Gmail and fake Workers AI
+      working-directory: mailsort/worker
+      timeout-minutes: 5
+      shell: bash -e {0}
+      run: npm run test:smoke
+    - name: Dry-run the committed config and check the bundle size
+      working-directory: mailsort/worker
+      env:
+        MAILSORT_ACCESS_OWNER: owner@example.com
+        MAILSORT_ACCESS_OWNER_ALIASES: ''
+        MAILSORT_CSRF_SIGNING_KEY: '0000000000000000000000000000000000000000000000000000000000000000'
+        MAILSORT_MODE: shadow
+      shell: bash -e {0}
+      run: |
+        node ../deploy/deploy-vars.mjs secrets "$RUNNER_TEMP/mailsort-secrets.json"
+        node ../deploy/deploy-vars.mjs exec -- npx --no-install wrangler deploy --dry-run --config ../wrangler.toml \
+          --secrets-file "$RUNNER_TEMP/mailsort-secrets.json" --outdir "$RUNNER_TEMP/mailsort-bundle"
+        node ../deploy/bundle-size.mjs "$RUNNER_TEMP/mailsort-bundle"
+    - name: Remove the placeholder secrets file
+      if: always()
+      working-directory: mailsort
+      shell: bash -e {0}
+      run: rm -f "$RUNNER_TEMP/mailsort-secrets.json"
+
+# recall (recall/: the Worker "recall", its Durable Object RecallState and the private R2 bucket recall-store; the
+# owner's browsing record on recall.ziyixi.science, recall/docs/design.md). It compiles in packages/edge-auth and the
+# TypeScript proto runtime with proto/recall/ui/, proto/recall/ingest/, proto/recall/archive/ and proto/ops/; Contracts
+# runs its ops-v1 tests. No step reaches the network: the workerd suite runs a real SQLite RecallState and a local R2
+# bucket, and the smoke run drives wrangler dev on loopback.
+# The Chrome extension (recall/extension) is checked and built here too, into an artifact; it is never deployed, and
+# "Recall extension release" publishes that artifact on main as a GitHub Release.

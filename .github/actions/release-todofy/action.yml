@@ -1,0 +1,211 @@
+name: release-todofy
+description: "release-todofy; called by the repository workflow."
+inputs:
+  cf-api-token:
+    description: "cf api token"
+    required: false
+    default: ''
+  todofy-access-owner:
+    description: "todofy access owner"
+    required: false
+    default: ''
+  todofy-access-owner-aliases:
+    description: "todofy access owner aliases"
+    required: false
+    default: ''
+  todofy-core-worker-secrets:
+    description: "todofy core worker secrets"
+    required: false
+    default: ''
+  todofy-todoist-default-project-id:
+    description: "todofy todoist default project id"
+    required: false
+    default: ''
+  todofy-todoist-ops-project-id:
+    description: "todofy todoist ops project id"
+    required: false
+    default: ''
+  todofy-todoist-review-project-id:
+    description: "todofy todoist review project id"
+    required: false
+    default: ''
+  todofy-worker-secrets:
+    description: "todofy worker secrets"
+    required: false
+    default: ''
+  required:
+    description: "required"
+    required: false
+    default: ''
+outputs:
+  url:
+    description: "url"
+    value: ${{ steps.config.outputs.url }}
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+      if: inputs.required == 'true'
+      with:
+        node-version-file: .release-source/todofy/.nvmrc
+        cache: npm
+        cache-dependency-path: |
+          .release-source/todofy/package-lock.json
+          .release-source/todofy/gateway/package-lock.json
+          .release-source/todofy/web/package-lock.json
+          .release-source/proto/package-lock.json
+    - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+      if: inputs.required == 'true'
+      with:
+        version: '0.12.10'
+        working-directory: .release-source/todofy
+        enable-cache: true
+    # Every static production value (account, D1, hosts, Access, limits) is committed in wrangler.toml
+    # (todofy-core) and gateway/wrangler.toml; the environment URL and the probes read the hosts there.
+    - name: Read the hosts from the committed gateway config
+      if: inputs.required == 'true'
+      id: config
+      working-directory: .release-source/todofy
+      shell: bash -e {0}
+      run: |
+        python3 - >> "$GITHUB_OUTPUT" <<'EOF'
+        import tomllib
+        with open("gateway/wrangler.toml", "rb") as file:
+            variables = tomllib.load(file)["vars"]
+        print("url=https://" + variables["TODOFY_PUBLIC_HOST"])
+        print("hooks_host=" + variables["TODOFY_HOOKS_HOSTS"].split(",")[0])
+        EOF
+    - name: Build the verified revision
+      if: inputs.required == 'true'
+      working-directory: .release-source/todofy
+      shell: bash -e {0}
+      run: |
+        npm ci --no-audit --no-fund
+        uv sync --locked
+        npm ci --prefix gateway --no-audit --no-fund
+        npm ci --prefix web --no-audit --no-fund
+        npm run build --prefix web
+    # deploy/deploy_vars.py adds what is never committed and refuses a missing or invalid value (a deploy
+    # without a var deletes it). The switches (production variables) and BUILD_SHA are --var on both
+    # Workers. The personal values are environment secrets (masked in this public log) and reach the
+    # Workers as Worker secrets through --secrets-file, in the same upload as the code (wrangler and the
+    # Cloudflare dashboard show plain vars): the Todoist projects on the core, the owner's email addresses
+    # on the gateway. Only this step reads the personal secrets.
+    - name: Write the Worker secrets files
+      if: inputs.required == 'true'
+      env:
+        TODOFY_WORKER_SECRETS: ${{ inputs.todofy-worker-secrets }}
+        TODOFY_CORE_WORKER_SECRETS: ${{ inputs.todofy-core-worker-secrets }}
+        TODOFY_ACCESS_OWNER: ${{ inputs.todofy-access-owner }}
+        TODOFY_ACCESS_OWNER_ALIASES: ${{ inputs.todofy-access-owner-aliases }}
+        TODOFY_TODOIST_DEFAULT_PROJECT_ID: ${{ inputs.todofy-todoist-default-project-id }}
+        TODOFY_TODOIST_OPS_PROJECT_ID: ${{ inputs.todofy-todoist-ops-project-id }}
+        TODOFY_TODOIST_REVIEW_PROJECT_ID: ${{ inputs.todofy-todoist-review-project-id }}
+      working-directory: .release-source/todofy
+      shell: bash -e {0}
+      run: |
+        uv run python deploy/deploy_vars.py secrets core "$RUNNER_TEMP/todofy-core-secrets.json"
+        uv run python deploy/deploy_vars.py secrets gateway "$RUNNER_TEMP/todofy-gateway-secrets.json"
+    - name: Validate both bundles before changing D1
+      if: inputs.required == 'true'
+      env:
+        TODOFY_REMINDER_ENABLED: ${{ vars.TODOFY_REMINDER_ENABLED }}
+        TODOFY_MAINTENANCE_MODE: ${{ vars.TODOFY_MAINTENANCE_MODE }}
+        TODOFY_PROCESSING_PAUSED: ${{ vars.TODOFY_PROCESSING_PAUSED }}
+        TODOFY_FORCE_PAUSE_TODOIST: ${{ vars.TODOFY_FORCE_PAUSE_TODOIST }}
+        TODOFY_GTD_REVIEW_ENABLED: ${{ vars.TODOFY_GTD_REVIEW_ENABLED }}
+      working-directory: .release-source/todofy
+      shell: bash -e {0}
+      run: |
+        uv run python deploy/deploy_vars.py exec core -- uv run pywrangler deploy --dry-run --config wrangler.toml \
+          --secrets-file "$RUNNER_TEMP/todofy-core-secrets.json"
+        uv run python deploy/deploy_vars.py exec gateway -- npx --no-install wrangler deploy --dry-run \
+          --config gateway/wrangler.toml --secrets-file "$RUNNER_TEMP/todofy-gateway-secrets.json"
+    # tools/cf-guard (read-only GETs; prints listed hostnames, counts, PASS/FAIL): wrangler applies a config's Custom
+    # Domains (or zone routes) as the Worker's complete set, so stop before any production change when a live
+    # hostname would be detached or another Worker's hostname or DNS record taken over. For an intentional
+    # change, set the exact hostnames here (space-separated) in the same commit that changes wrangler.toml.
+    - name: Check the hostnames against production
+      if: inputs.required == 'true'
+      working-directory: .release-source
+      env:
+        CLOUDFLARE_API_TOKEN: ${{ inputs.cf-api-token }}
+        CF_GUARD_ALLOW_REMOVE: ''
+        CF_GUARD_ALLOW_CONFLICT: ''
+      shell: bash -e {0}
+      run: node tools/cf-guard/cf-guard.mjs --config todofy/wrangler.toml --config todofy/gateway/wrangler.toml
+    # todofy-core first: the Durable Object class and every route a new gateway calls must exist before
+    # the gateway that binds and calls them goes live.
+    - name: Apply D1 migrations, then deploy todofy-core
+      if: inputs.required == 'true'
+      env:
+        CLOUDFLARE_API_TOKEN: ${{ inputs.cf-api-token }}
+        TODOFY_REMINDER_ENABLED: ${{ vars.TODOFY_REMINDER_ENABLED }}
+        TODOFY_MAINTENANCE_MODE: ${{ vars.TODOFY_MAINTENANCE_MODE }}
+        TODOFY_PROCESSING_PAUSED: ${{ vars.TODOFY_PROCESSING_PAUSED }}
+        TODOFY_FORCE_PAUSE_TODOIST: ${{ vars.TODOFY_FORCE_PAUSE_TODOIST }}
+        TODOFY_GTD_REVIEW_ENABLED: ${{ vars.TODOFY_GTD_REVIEW_ENABLED }}
+      working-directory: .release-source/todofy
+      shell: bash -e {0}
+      run: |
+        test -n "$CLOUDFLARE_API_TOKEN"
+        npx --no-install wrangler d1 migrations apply DB --remote --config wrangler.toml
+        uv run python deploy/deploy_vars.py exec core -- uv run pywrangler deploy --config wrangler.toml \
+          --secrets-file "$RUNNER_TEMP/todofy-core-secrets.json"
+    - name: Deploy the gateway todofy
+      if: inputs.required == 'true'
+      env:
+        CLOUDFLARE_API_TOKEN: ${{ inputs.cf-api-token }}
+        TODOFY_MAINTENANCE_MODE: ${{ vars.TODOFY_MAINTENANCE_MODE }}
+      working-directory: .release-source/todofy
+      shell: bash -e {0}
+      run: |
+        test -n "$CLOUDFLARE_API_TOKEN"
+        uv run python deploy/deploy_vars.py exec gateway -- npx --no-install wrangler deploy \
+          --config gateway/wrangler.toml --secrets-file "$RUNNER_TEMP/todofy-gateway-secrets.json"
+    # A first deploy waits for the Custom Domain certificate and DNS, hence 10 tries x 15 s. /health is
+    # answered by the gateway alone, so this proves the gateway build; the next step proves the core.
+    - name: Wait until the hooks host serves this commit
+      if: inputs.required == 'true'
+      env:
+        HOOKS_HOST: ${{ steps.config.outputs.hooks_host }}
+      working-directory: .release-source/todofy
+      shell: bash -e {0}
+      run: |
+        host=$HOOKS_HOST
+        for attempt in $(seq 1 10); do
+          if build=$(curl -fsS --max-time 10 "https://$host/health" | jq -er .build) && [ "$build" = "$BUILD_SOURCE_SHA" ]; then
+            echo "The hooks host serves ${BUILD_SOURCE_SHA:-$GITHUB_SHA} (attempt $attempt)."
+            exit 0
+          fi
+          sleep 15
+        done
+        echo "The hooks host never reported build ${BUILD_SOURCE_SHA:-$GITHUB_SHA}." >&2
+        exit 1
+    # /health never reaches todofy-core. A wrong newsletter credential does: the gateway forwards it to
+    # the object's newsletter_auth_failure(), which reads and writes D1 and answers 401 (or 429 once
+    # this hour's 20 failures are spent). A broken core, binding or D1 gives 503. The correct credential
+    # never reads the counter, so this probe cannot lock the newsletter out.
+    - name: Check that the gateway reaches todofy-core
+      if: inputs.required == 'true'
+      env:
+        HOOKS_HOST: ${{ steps.config.outputs.hooks_host }}
+      working-directory: .release-source/todofy
+      shell: bash -e {0}
+      run: |
+        host=$HOOKS_HOST
+        for attempt in $(seq 1 5); do
+          code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 -u ci-probe:wrong "https://$host/api/summary")
+          if [ "$code" = 401 ] || [ "$code" = 429 ]; then
+            echo "todofy-core answered $code (attempt $attempt)."
+            exit 0
+          fi
+          sleep 10
+        done
+        echo "The gateway did not reach todofy-core (last status $code)." >&2
+        exit 1
+    - name: Remove the secrets files
+      if: always() && inputs.required == 'true'
+      working-directory: .release-source/todofy
+      shell: bash -e {0}
+      run: rm -f "$RUNNER_TEMP/todofy-core-secrets.json" "$RUNNER_TEMP/todofy-gateway-secrets.json"

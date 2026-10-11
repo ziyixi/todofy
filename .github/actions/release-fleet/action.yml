@@ -1,0 +1,139 @@
+name: release-fleet
+description: "release-fleet; called by the repository workflow."
+inputs:
+  cf-api-token:
+    description: "cf api token"
+    required: false
+    default: ''
+  fleet-access-owner:
+    description: "fleet access owner"
+    required: false
+    default: ''
+  fleet-access-owner-aliases:
+    description: "fleet access owner aliases"
+    required: false
+    default: ''
+  fleet-report-hmac-key:
+    description: "fleet report hmac key"
+    required: false
+    default: ''
+  fleet-worker-secrets:
+    description: "fleet worker secrets"
+    required: false
+    default: ''
+  required:
+    description: "required"
+    required: false
+    default: ''
+outputs:
+  url:
+    description: "url"
+    value: ${{ steps.config.outputs.url }}
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+      if: inputs.required == 'true'
+      with:
+        node-version: '26'
+        cache: npm
+        cache-dependency-path: |
+          .release-source/fleet/worker/package-lock.json
+          .release-source/fleet/web/package-lock.json
+          .release-source/proto/package-lock.json
+    # Every static production value (account, host, Access) is committed in fleet/wrangler.toml; the environment URL
+    # and the Access probe read it there.
+    - name: Read the host and the Access issuer from the committed config
+      if: inputs.required == 'true'
+      id: config
+      working-directory: .release-source/fleet
+      shell: bash -e {0}
+      run: |
+        python3 - >> "$GITHUB_OUTPUT" <<'EOF'
+        import tomllib
+        with open("wrangler.toml", "rb") as file:
+            variables = tomllib.load(file)["vars"]
+        print("url=https://" + variables["PUBLIC_HOST"])
+        print("host=" + variables["PUBLIC_HOST"])
+        print("access_issuer=" + variables["ACCESS_ISSUER"])
+        EOF
+    # The UI's build (web/dist) is the one that ships; its JavaScript budget is checked by the build.
+    - name: Build the verified revision
+      if: inputs.required == 'true'
+      working-directory: .release-source/fleet
+      shell: bash -e {0}
+      run: |
+        npm ci --prefix worker --no-audit --no-fund
+        npm ci --prefix web --no-audit --no-fund
+        npm run build --prefix web
+    # Owner identities and the receipt HMAC key are independent production secrets.
+    - name: Write the Worker secrets file
+      if: inputs.required == 'true'
+      working-directory: .release-source/fleet/worker
+      env:
+        FLEET_WORKER_SECRETS: ${{ inputs.fleet-worker-secrets }}
+        FLEET_ACCESS_OWNER: ${{ inputs.fleet-access-owner }}
+        FLEET_ACCESS_OWNER_ALIASES: ${{ inputs.fleet-access-owner-aliases }}
+        FLEET_REPORT_HMAC_KEY: ${{ inputs.fleet-report-hmac-key }}
+      shell: bash -e {0}
+      run: node ../deploy/deploy-vars.mjs secrets "$RUNNER_TEMP/fleet-secrets.json"
+    # deploy-vars.mjs adds BUILD_SHA as --var and refuses the all-zeros Access AUD; the bundle that ships is held to
+    # the app's budget and the Workers Free limit (deploy/bundle-size.mjs).
+    - name: Validate the bundle before changing production
+      if: inputs.required == 'true'
+      working-directory: .release-source/fleet/worker
+      shell: bash -e {0}
+      run: |
+        node ../deploy/deploy-vars.mjs exec -- npx --no-install wrangler deploy --dry-run --config ../wrangler.toml \
+          --secrets-file "$RUNNER_TEMP/fleet-secrets.json" --outdir "$RUNNER_TEMP/fleet-bundle"
+        node ../deploy/bundle-size.mjs "$RUNNER_TEMP/fleet-bundle"
+    # tools/cf-guard (read-only GETs; prints listed hostnames, counts, PASS/FAIL): wrangler applies a config's Custom
+    # Domains (or zone routes) as the Worker's complete set, so stop before any production change when a live
+    # hostname would be detached or another Worker's hostname or DNS record taken over. For an intentional
+    # change, set the exact hostnames here (space-separated) in the same commit that changes wrangler.toml.
+    - name: Check the hostnames against production
+      if: inputs.required == 'true'
+      working-directory: .release-source
+      env:
+        CLOUDFLARE_API_TOKEN: ${{ inputs.cf-api-token }}
+        CF_GUARD_ALLOW_REMOVE: ''
+        CF_GUARD_ALLOW_CONFLICT: ''
+      shell: bash -e {0}
+      run: node tools/cf-guard/cf-guard.mjs --config fleet/wrangler.toml
+    - name: Deploy the Worker fleet
+      if: inputs.required == 'true'
+      working-directory: .release-source/fleet/worker
+      env:
+        CLOUDFLARE_API_TOKEN: ${{ inputs.cf-api-token }}
+      shell: bash -e {0}
+      run: |
+        test -n "$CLOUDFLARE_API_TOKEN"
+        node ../deploy/deploy-vars.mjs exec -- npx --no-install wrangler deploy --config ../wrangler.toml \
+          --secrets-file "$RUNNER_TEMP/fleet-secrets.json"
+    # Nothing anonymous on the host shows BUILD_SHA (all of it is behind Access), so production is read through the
+    # API with the deploy token (GETs only): the Worker serves exactly one version at 100% and that version's
+    # BUILD_SHA is this commit. wrangler's JSON answers are parsed, never printed (they name the token's account
+    # email); only the version id and the result are. (FlowDay's and the links app's check without their D1 part.)
+    - name: Check that production runs this commit
+      if: inputs.required == 'true'
+      working-directory: .release-source/fleet/worker
+      env:
+        CLOUDFLARE_API_TOKEN: ${{ inputs.cf-api-token }}
+      shell: bash -e {0}
+      run: |
+        bash "$GITHUB_WORKSPACE/.release-source/tools/deploy-probes/production.sh" fleet ../wrangler.toml
+    # The whole owner host stays behind Access; the sole receipt path uses independent HMAC authentication.
+    - name: Check that Access answers unauthenticated requests
+      if: inputs.required == 'true'
+      env:
+        ACCESS_ISSUER: ${{ steps.config.outputs.access_issuer }}
+        PUBLIC_HOST: ${{ steps.config.outputs.host }}
+      working-directory: .release-source/fleet
+      shell: bash -e {0}
+      run: |
+        bash "$GITHUB_WORKSPACE/.release-source/tools/deploy-probes/access.sh" / /api/v1/fleetStatus
+    - name: Remove the secrets file
+      if: always() && inputs.required == 'true'
+      working-directory: .release-source/fleet
+      shell: bash -e {0}
+      run: rm -f "$RUNNER_TEMP/fleet-secrets.json"

@@ -1,0 +1,142 @@
+name: release-mail-hero
+description: "release-mail-hero; called by the repository workflow."
+inputs:
+  mail-hero-access-owner:
+    description: "mail hero access owner"
+    required: false
+    default: ''
+  mail-hero-access-owner-aliases:
+    description: "mail hero access owner aliases"
+    required: false
+    default: ''
+  mail-hero-cf-api-token:
+    description: "mail hero cf api token"
+    required: false
+    default: ''
+  mail-hero-receive-address:
+    description: "mail hero receive address"
+    required: false
+    default: ''
+  mail-hero-worker-secrets:
+    description: "mail hero worker secrets"
+    required: false
+    default: ''
+  required:
+    description: "required"
+    required: false
+    default: ''
+outputs:
+  url:
+    description: "url"
+    value: ${{ steps.config.outputs.url }}
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+      if: inputs.required == 'true'
+      with:
+        node-version: '26'
+        cache: npm
+        cache-dependency-path: |
+          .release-source/mail-hero/cloudflare/package-lock.json
+          .release-source/mail-hero/web/package-lock.json
+          .release-source/proto/package-lock.json
+    # Every static production value (account, D1, buckets, host, Access, limits) is committed in
+    # mail-hero/wrangler.toml; the environment URL reads the host there.
+    - name: Read the host from the committed config
+      if: inputs.required == 'true'
+      id: config
+      working-directory: .release-source/mail-hero
+      shell: bash -e {0}
+      run: |
+        python3 - >> "$GITHUB_OUTPUT" <<'EOF'
+        import tomllib
+        with open("wrangler.toml", "rb") as file:
+            values = tomllib.load(file)["vars"]
+            print("url=https://" + values["PUBLIC_HOST"])
+            print("host=" + values["PUBLIC_HOST"])
+            print("access_issuer=" + values["ACCESS_ISSUER"])
+        EOF
+    - name: Build the verified revision
+      if: inputs.required == 'true'
+      working-directory: .release-source/mail-hero
+      shell: bash -e {0}
+      run: |
+        npm ci --prefix cloudflare
+        npm ci --prefix web
+        npm run build --prefix web
+    # deploy/deploy-vars.mjs adds what is never committed and refuses a missing or invalid value (a deploy
+    # without a var deletes it). The receive address and the owner's addresses are environment secrets (masked
+    # in this public log) and reach the Worker as Worker secrets through --secrets-file, in the same upload as
+    # the code (wrangler and the Cloudflare dashboard show plain vars); the pause and maintenance switches
+    # (production variables) and BUILD_SHA are --var. Only this step reads the personal secrets.
+    - name: Write the Worker secrets file
+      if: inputs.required == 'true'
+      working-directory: .release-source/mail-hero/cloudflare
+      env:
+        MAIL_HERO_WORKER_SECRETS: ${{ inputs.mail-hero-worker-secrets }}
+        MAIL_HERO_RECEIVE_ADDRESS: ${{ inputs.mail-hero-receive-address }}
+        MAIL_HERO_ACCESS_OWNER: ${{ inputs.mail-hero-access-owner }}
+        MAIL_HERO_ACCESS_OWNER_ALIASES: ${{ inputs.mail-hero-access-owner-aliases }}
+      shell: bash -e {0}
+      run: node ../deploy/deploy-vars.mjs secrets "$RUNNER_TEMP/mail-hero-secrets.json"
+    - name: Validate the native deployment bundle before changing D1
+      if: inputs.required == 'true'
+      working-directory: .release-source/mail-hero/cloudflare
+      env:
+        MAIL_HERO_FORCE_SEND_PAUSED: ${{ vars.MAIL_HERO_FORCE_SEND_PAUSED }}
+        MAIL_HERO_MAINTENANCE_MODE: ${{ vars.MAIL_HERO_MAINTENANCE_MODE }}
+        MAIL_HERO_NATIVE_BACKUP_ENABLED: ${{ vars.MAIL_HERO_NATIVE_BACKUP_ENABLED }}
+      shell: bash -e {0}
+      run: |
+        node ../deploy/deploy-vars.mjs exec -- npx --no-install wrangler deploy --dry-run --config ../wrangler.toml \
+          --secrets-file "$RUNNER_TEMP/mail-hero-secrets.json" --outdir "$RUNNER_TEMP/mail-hero-bundle"
+        node ../deploy/bundle-size.mjs "$RUNNER_TEMP/mail-hero-bundle"
+    # tools/cf-guard (read-only GETs; prints listed hostnames, counts, PASS/FAIL): wrangler applies a config's Custom
+    # Domains (or zone routes) as the Worker's complete set, so stop before any production change when a live
+    # hostname would be detached or another Worker's hostname or DNS record taken over. For an intentional
+    # change, set the exact hostnames here (space-separated) in the same commit that changes wrangler.toml.
+    - name: Check the hostnames against production
+      if: inputs.required == 'true'
+      working-directory: .release-source
+      env:
+        CLOUDFLARE_API_TOKEN: ${{ inputs.mail-hero-cf-api-token }}
+        CF_GUARD_ALLOW_REMOVE: ''
+        CF_GUARD_ALLOW_CONFLICT: ''
+      shell: bash -e {0}
+      run: node tools/cf-guard/cf-guard.mjs --config mail-hero/wrangler.toml
+    # Mail Hero's own token: this environment also holds Todofy's CF_API_TOKEN.
+    - name: Apply migrations, then deploy the native Worker
+      if: inputs.required == 'true'
+      working-directory: .release-source/mail-hero/cloudflare
+      env:
+        CLOUDFLARE_API_TOKEN: ${{ inputs.mail-hero-cf-api-token }}
+        MAIL_HERO_FORCE_SEND_PAUSED: ${{ vars.MAIL_HERO_FORCE_SEND_PAUSED }}
+        MAIL_HERO_MAINTENANCE_MODE: ${{ vars.MAIL_HERO_MAINTENANCE_MODE }}
+        MAIL_HERO_NATIVE_BACKUP_ENABLED: ${{ vars.MAIL_HERO_NATIVE_BACKUP_ENABLED }}
+      shell: bash -e {0}
+      run: |
+        test -n "$CLOUDFLARE_API_TOKEN"
+        npx --no-install wrangler d1 migrations apply DB --remote --config ../wrangler.toml
+        node ../deploy/deploy-vars.mjs exec -- npx --no-install wrangler deploy --config ../wrangler.toml \
+          --secrets-file "$RUNNER_TEMP/mail-hero-secrets.json"
+    - name: Verify the deployed build and completed D1 migrations
+      if: inputs.required == 'true'
+      working-directory: .release-source/mail-hero/cloudflare
+      env:
+        CLOUDFLARE_API_TOKEN: ${{ inputs.mail-hero-cf-api-token }}
+      shell: bash -e {0}
+      run: bash "$GITHUB_WORKSPACE/.release-source/tools/deploy-probes/production.sh" mail-hero ../wrangler.toml DB
+    - name: Check that Access answers unauthenticated requests
+      if: inputs.required == 'true'
+      env:
+        ACCESS_ISSUER: ${{ steps.config.outputs.access_issuer }}
+        PUBLIC_HOST: ${{ steps.config.outputs.host }}
+      working-directory: .release-source/mail-hero
+      shell: bash -e {0}
+      run: bash "$GITHUB_WORKSPACE/.release-source/tools/deploy-probes/access.sh" / /api/v2/messages
+    - name: Remove the secrets file
+      if: always() && inputs.required == 'true'
+      working-directory: .release-source/mail-hero
+      shell: bash -e {0}
+      run: rm -f "$RUNNER_TEMP/mail-hero-secrets.json"

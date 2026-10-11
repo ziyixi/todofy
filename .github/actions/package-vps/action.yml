@@ -1,0 +1,44 @@
+name: package-vps
+description: "package-vps; called by the repository workflow."
+inputs:
+  newsletter-image:
+    description: "newsletter image"
+    required: false
+    default: ''
+  platform-image:
+    description: "platform image"
+    required: false
+    default: ''
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+      with:
+        node-version: '26'
+    - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+      with:
+        version: '0.12.10'
+        working-directory: platform
+    - name: Install the locked bundle renderer
+      working-directory: .
+      shell: bash -e {0}
+      run: |
+        npm ci --prefix proto --no-audit --no-fund
+        node proto/tools/ensure.mjs
+        uv sync --project platform --locked
+    - name: Package this commit and both verified image digests
+      env:
+        NEWSLETTER_IMAGE: ${{ inputs.newsletter-image }}
+        PLATFORM_IMAGE: ${{ inputs.platform-image }}
+      working-directory: .
+      shell: bash -e {0}
+      run: |
+        uv run --project platform --locked python tools/vps-bootstrap/prepare.py --sha "$GITHUB_SHA" \
+          --newsletter-image "$NEWSLETTER_IMAGE" --platform-image "$PLATFORM_IMAGE" \
+          --output "$RUNNER_TEMP/vps-bootstrap-bundle"
+    - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      with:
+        name: vps-bootstrap-${{ github.sha }}
+        path: ${{ runner.temp }}/vps-bootstrap-bundle
+        if-no-files-found: error
+        retention-days: 30

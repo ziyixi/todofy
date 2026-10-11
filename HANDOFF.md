@@ -19,6 +19,19 @@ Rules for this file:
 Last updated: 2026-10-11.
 <!-- Active work is separate from the production evidence below. -->
 
+## In progress (2026-10-11): CI workflow structure
+
+Branch: `codex/ci-workflow-structure`, based on `efa4692`. Preserve the single CI/deploy run and all existing
+job identities, dependencies, release selection and production gates. Extract application check/release steps
+into local composite actions; the shared Worker release becomes one job rather than eleven mutually exclusive
+jobs per call. CI and reconcile keep calling the same recipe. No application, budget or operating mode changes.
+Local checks: all 435 pre-existing repository tests passed (one skipped); the 39 effective job recipes retain
+commands/order/input mappings against the original source. New guards cover the one-job release, explicit
+composite inputs, selected-source paths and the original shell behavior. Targeted actionlint 1.7.12 passed for
+CI, Worker release and reconcile. The unchanged website workflow's `queue: max` is not understood by that linter;
+this refactor does not change it. Pending: final new guard checks, branch CI, same-green-SHA promotion and actual
+run/reconcile inspection. No production validation of this refactor yet.
+
 ## Done (2026-10-11): Brief resource registration and Home monitoring
 
 First deployment confirmed: `7bea3ec`, [CI run 38128504001](https://github.com/ziyixi/todofy/actions/runs/38128504001).

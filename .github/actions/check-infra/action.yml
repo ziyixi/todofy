@@ -1,0 +1,57 @@
+name: check-infra
+description: "check-infra; called by the repository workflow."
+runs:
+  using: composite
+  steps:
+    - uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2.0.2
+      with:
+        tofu_version: 1.12.6
+        # The wrapper would copy tofu's output into step outputs; plans must never be captured.
+        tofu_wrapper: false
+        github_token: ${{ github.token }}
+    # File names only for the email check, so a committed address is not repeated in the log. The greps are
+    # a quick first line; infra_guard.py reads the HCL structure (bare labels, nested blocks, every config
+    # file kind) and is the authority. Quoted or bare labels, any file except the docs.
+    - name: Guards (data sources, provisioners, providers, email addresses, file kinds, structure)
+      working-directory: infra
+      shell: bash -e {0}
+      run: |
+        failed=0
+        if grep -rnE --exclude='*.md' --exclude-dir=.terraform '^[[:space:]]*data[[:space:]]+"?(external|http)"?[[:space:]]' .; then
+          echo "::error::external/http data sources can run code or send data out"; failed=1
+        fi
+        if grep -rnE --exclude='*.md' --exclude-dir=.terraform '(^|[[:space:]{])provisioner[[:space:]]+"?[A-Za-z_-]+"?[[:space:]]*\{' .; then
+          echo "::error::provisioners are not allowed in infra/"; failed=1
+        fi
+        if [ "$(grep -c '^provider ' .terraform.lock.hcl)" != 1 ] || ! grep -q '^provider "registry.opentofu.org/cloudflare/cloudflare"' .terraform.lock.hcl; then
+          echo "::error::the lock file must hold exactly the Cloudflare provider"; failed=1
+        fi
+        if grep -rlIE '[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}' .; then
+          echo "::error::email addresses come from sensitive variables, never from files in infra/"; failed=1
+        fi
+        # An allowlist of committed file kinds: a state, plan, values or log file fails whatever its name.
+        if git ls-files -- . | grep -vE '^([A-Za-z0-9_-]+\.tf|\.terraform\.lock\.hcl|\.gitignore|README\.md|local\.tfvars\.example|(scripts|tests)/[A-Za-z0-9_]+\.py)$'; then
+          echo "::error::only *.tf, the lock file, docs, the example values and the scripts are committed in infra/"; failed=1
+        fi
+        python3 ../.github/scripts/infra_guard.py . || failed=1
+        exit "$failed"
+    - name: Format
+      working-directory: infra
+      shell: bash -e {0}
+      run: tofu fmt -check -recursive -diff
+    - name: Validate (downloads the locked provider only; no backend, no credentials)
+      working-directory: infra
+      shell: bash -e {0}
+      run: |
+        tofu init -backend=false -input=false -lockfile=readonly
+        tofu validate
+    - name: Plan-summary, local-values and state-driver tests
+      working-directory: infra
+      shell: bash -e {0}
+      run: |
+        python3 -m unittest discover -s ../tools/infra-plan-summary
+        python3 -m unittest discover -s tests
+
+# The protobuf IDL of the cross-app contracts (proto/README.md). No secret; buf fetches the googleapis module
+# pinned in proto/buf.lock from buf.build. The apps that use the generated code (ci_changes.py PROTO_USERS)
+# are checked by their own jobs, whose installs generate it (an npm postinstall, uv's build of ziyixi-proto).

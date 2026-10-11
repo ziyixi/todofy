@@ -1,0 +1,65 @@
+name: check-fleet
+description: "check-fleet; called by the repository workflow."
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+      with:
+        node-version: '26'
+        cache: npm
+        cache-dependency-path: |
+          fleet/worker/package-lock.json
+          fleet/web/package-lock.json
+          proto/package-lock.json
+    - name: Install locked dependencies
+      working-directory: fleet
+      shell: bash -e {0}
+      run: |
+        npm ci --prefix worker --no-audit --no-fund
+        npm ci --prefix web --no-audit --no-fund
+    # The config test reads wrangler.toml with the pinned wrangler (worker/node_modules), hence after npm ci.
+    - name: Test the production config and deploy values
+      working-directory: fleet
+      shell: bash -e {0}
+      run: node --test deploy/test/deploy-vars.test.mjs deploy/test/wrangler-config.test.mjs
+    - name: Lint, typecheck and test the Worker
+      working-directory: fleet/worker
+      shell: bash -e {0}
+      run: |
+        npm run lint
+        npm run typecheck
+        npm test
+    # A real SQLite FleetState with synthetic signed receipts; no server credentials or network.
+    - name: Runtime tests (workerd with a real Durable Object)
+      working-directory: fleet/worker
+      shell: bash -e {0}
+      run: npm run test:runtime
+    # Builds web/dist, which the dry-run below serves as static assets, and holds its JavaScript to its budget.
+    - name: Lint, typecheck, test and build the UI
+      working-directory: fleet/web
+      shell: bash -e {0}
+      run: |
+        npm run lint
+        npm run typecheck
+        npm test
+        npm run build
+    # The committed config, run exactly as the deploy runs it but with --dry-run and placeholder values for what the
+    # deploy adds (deploy/deploy-vars.mjs). No token is needed. The bundle it writes is held to the app's budget and
+    # the Workers Free limit (deploy/bundle-size.mjs).
+    - name: Dry-run the committed config and check the bundle size
+      working-directory: fleet/worker
+      env:
+        FLEET_ACCESS_OWNER: owner@example.com
+        FLEET_ACCESS_OWNER_ALIASES: ''
+        FLEET_REPORT_HMAC_KEY: '0000000000000000000000000000000000000000000000000000000000000000'
+      shell: bash -e {0}
+      run: |
+        node ../deploy/deploy-vars.mjs secrets "$RUNNER_TEMP/fleet-secrets.json"
+        node ../deploy/deploy-vars.mjs exec -- npx --no-install wrangler deploy --dry-run --config ../wrangler.toml \
+          --secrets-file "$RUNNER_TEMP/fleet-secrets.json" --outdir "$RUNNER_TEMP/fleet-bundle"
+        node ../deploy/bundle-size.mjs "$RUNNER_TEMP/fleet-bundle"
+    - name: Remove the placeholder secrets file
+      if: always()
+      working-directory: fleet
+      shell: bash -e {0}
+      run: rm -f "$RUNNER_TEMP/fleet-secrets.json"

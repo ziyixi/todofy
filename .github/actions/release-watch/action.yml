@@ -1,0 +1,147 @@
+name: release-watch
+description: "release-watch; called by the repository workflow."
+inputs:
+  cf-api-token:
+    description: "cf api token"
+    required: false
+    default: ''
+  dashboard-access-owner:
+    description: "dashboard access owner"
+    required: false
+    default: ''
+  dashboard-access-owner-aliases:
+    description: "dashboard access owner aliases"
+    required: false
+    default: ''
+  watch-csrf-signing-key:
+    description: "watch csrf signing key"
+    required: false
+    default: ''
+  watch-worker-secrets:
+    description: "watch worker secrets"
+    required: false
+    default: ''
+  required:
+    description: "required"
+    required: false
+    default: ''
+outputs:
+  url:
+    description: "url"
+    value: ${{ steps.config.outputs.url }}
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+      if: inputs.required == 'true'
+      with:
+        node-version: '26'
+        cache: npm
+        cache-dependency-path: |
+          .release-source/watch/worker/package-lock.json
+          .release-source/watch/web/package-lock.json
+          .release-source/proto/package-lock.json
+    # Every static production value (account, host, Access) is committed in watch/wrangler.toml; the environment URL
+    # and the Access probe read it there.
+    - name: Read the host and the Access issuer from the committed config
+      if: inputs.required == 'true'
+      id: config
+      working-directory: .release-source/watch
+      shell: bash -e {0}
+      run: |
+        python3 - >> "$GITHUB_OUTPUT" <<'EOF'
+        import tomllib
+        with open("wrangler.toml", "rb") as file:
+            variables = tomllib.load(file)["vars"]
+        print("url=https://" + variables["PUBLIC_HOST"])
+        print("host=" + variables["PUBLIC_HOST"])
+        print("access_issuer=" + variables["ACCESS_ISSUER"])
+        EOF
+    # The UI's build (web/dist) is the one that ships; its JavaScript budget is checked by the build.
+    - name: Build the verified revision
+      if: inputs.required == 'true'
+      working-directory: .release-source/watch
+      shell: bash -e {0}
+      run: |
+        npm ci --prefix worker --no-audit --no-fund
+        npm ci --prefix web --no-audit --no-fund
+        npm run build --prefix web
+    # The owner's addresses and the CSRF key are environment secrets (masked in this public log) and reach the Worker
+    # as secrets through --secrets-file; wrangler prints plain vars. The watch app's owner is the dashboard's owner
+    # (one person, the same Access identities), so the addresses come from the dashboard's secrets, as for
+    # FlowDay and the links app; the CSRF key is the watch app's own. watch/README.md "Deploy".
+    - name: Write the Worker secrets file
+      if: inputs.required == 'true'
+      working-directory: .release-source/watch/worker
+      env:
+        WATCH_WORKER_SECRETS: ${{ inputs.watch-worker-secrets }}
+        WATCH_ACCESS_OWNER: ${{ inputs.dashboard-access-owner }}
+        WATCH_ACCESS_OWNER_ALIASES: ${{ inputs.dashboard-access-owner-aliases }}
+        WATCH_CSRF_SIGNING_KEY: ${{ inputs.watch-csrf-signing-key }}
+      shell: bash -e {0}
+      run: node ../deploy/deploy-vars.mjs secrets "$RUNNER_TEMP/watch-secrets.json"
+    # deploy-vars.mjs adds BUILD_SHA as --var and refuses the all-zeros Access AUD; the bundle that ships is held to
+    # the app's budget and the Workers Free limit (deploy/bundle-size.mjs).
+    - name: Validate the bundle before changing production
+      if: inputs.required == 'true'
+      working-directory: .release-source/watch/worker
+      shell: bash -e {0}
+      run: |
+        node ../deploy/deploy-vars.mjs exec -- npx --no-install wrangler deploy --dry-run --config ../wrangler.toml \
+          --secrets-file "$RUNNER_TEMP/watch-secrets.json" --outdir "$RUNNER_TEMP/watch-bundle"
+        node ../deploy/bundle-size.mjs "$RUNNER_TEMP/watch-bundle"
+    # tools/cf-guard (read-only GETs; prints listed hostnames, counts, PASS/FAIL): wrangler applies a config's Custom
+    # Domains (or zone routes) as the Worker's complete set, so stop before any production change when a live
+    # hostname would be detached or another Worker's hostname or DNS record taken over. For an intentional
+    # change, set the exact hostnames here (space-separated) in the same commit that changes wrangler.toml.
+    # watch.ziyixi.science had no DNS record before W2, so its first deploy attaches the Custom Domain without either.
+    - name: Check the hostnames against production
+      if: inputs.required == 'true'
+      working-directory: .release-source
+      env:
+        CLOUDFLARE_API_TOKEN: ${{ inputs.cf-api-token }}
+        CF_GUARD_ALLOW_REMOVE: ''
+        CF_GUARD_ALLOW_CONFLICT: ''
+      shell: bash -e {0}
+      run: node tools/cf-guard/cf-guard.mjs --config watch/wrangler.toml
+    - name: Deploy the Worker watch
+      if: inputs.required == 'true'
+      working-directory: .release-source/watch/worker
+      env:
+        CLOUDFLARE_API_TOKEN: ${{ inputs.cf-api-token }}
+      shell: bash -e {0}
+      run: |
+        test -n "$CLOUDFLARE_API_TOKEN"
+        node ../deploy/deploy-vars.mjs exec -- npx --no-install wrangler deploy --config ../wrangler.toml \
+          --secrets-file "$RUNNER_TEMP/watch-secrets.json"
+    # Nothing anonymous on the host shows BUILD_SHA (all of it is behind Access), so production is read through the
+    # API with the deploy token (GETs only): the Worker serves exactly one version at 100% and that version's
+    # BUILD_SHA is this commit. wrangler's JSON answers are parsed, never printed (they name the token's account
+    # email); only the version id and the result are. (FlowDay's and the links app's check without their D1 part.)
+    - name: Check that production runs this commit
+      if: inputs.required == 'true'
+      working-directory: .release-source/watch/worker
+      env:
+        CLOUDFLARE_API_TOKEN: ${{ inputs.cf-api-token }}
+      shell: bash -e {0}
+      run: |
+        bash "$GITHUB_WORKSPACE/.release-source/tools/deploy-probes/production.sh" watch ../wrangler.toml
+    # Cloudflare Access ("watch", the whole host) must answer every unauthenticated request with a 302 to its login
+    # page for this host: the inbox /, the owner API and the add-from-phone page /new, exactly as the dashboard's
+    # probe checks (same script; test_ci_changes.py runs it). /health is behind Access too (no bypass application),
+    # so no anonymous request reaches the Worker. Whether WatchState's alarm is armed cannot be seen from here: the
+    # first owner API call and the dashboard's status() arm it (watch/README.md "Deploy", the post-deploy check).
+    - name: Check that Access answers unauthenticated requests
+      if: inputs.required == 'true'
+      env:
+        ACCESS_ISSUER: ${{ steps.config.outputs.access_issuer }}
+        PUBLIC_HOST: ${{ steps.config.outputs.host }}
+      working-directory: .release-source/watch
+      shell: bash -e {0}
+      run: |
+        bash "$GITHUB_WORKSPACE/.release-source/tools/deploy-probes/access.sh" / /api/v1/watches /new
+    - name: Remove the secrets file
+      if: always() && inputs.required == 'true'
+      working-directory: .release-source/watch
+      shell: bash -e {0}
+      run: rm -f "$RUNNER_TEMP/watch-secrets.json"

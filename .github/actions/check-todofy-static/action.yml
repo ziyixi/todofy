@@ -1,0 +1,112 @@
+name: check-todofy-static
+description: "check-todofy-static; called by the repository workflow."
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+      with:
+        node-version-file: todofy/.nvmrc
+        cache: npm
+        cache-dependency-path: |
+          todofy/package-lock.json
+          todofy/gateway/package-lock.json
+          todofy/web/package-lock.json
+          proto/package-lock.json
+    - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+      with:
+        version: '0.12.10'
+        working-directory: todofy
+        enable-cache: true
+    - name: Install locked dependencies
+      working-directory: todofy
+      shell: bash -e {0}
+      run: |
+        npm ci --no-audit --no-fund
+        uv sync --locked
+    - name: Lint and format
+      working-directory: todofy
+      shell: bash -e {0}
+      run: |
+        uv run ruff check worker tests tools deploy
+        uv run ruff format --check worker tests tools deploy
+    - name: Host tests (core, fakes, migration tools, production configs and deploy values)
+      working-directory: todofy
+      shell: bash -e {0}
+      run: uv run pytest tests/unit tests/fakes tools deploy
+    # The gateway Worker "todofy" (TypeScript); the root wrangler bundles it for the tests and the deploy. Its workerd
+    # suite (test/runtime) runs it in Miniflare next to a stand-in TodofyCore: the CPU of the owner API's heaviest
+    # requests against Workers Free's 10 ms, in calibrated reference ms (tools/workerd-cpu).
+    - name: Check and test the gateway
+      working-directory: todofy/gateway
+      shell: bash -e {0}
+      run: |
+        npm ci --no-audit --no-fund
+        npm run lint
+        npm run typecheck
+        npm test
+        npm run test:runtime
+    # Builds uiassets/dist, which the dry-run serves; the build fails over the UI's JavaScript budget
+    # (scripts/js-budget.mjs).
+    - name: Check, test and build the UI
+      working-directory: todofy/web
+      shell: bash -e {0}
+      run: |
+        npm ci --no-audit --no-fund
+        npm run typecheck
+        npm test
+        npm run build
+    # The committed production configs (wrangler.toml, gateway/wrangler.toml), run exactly as the deploy
+    # runs them, with placeholder values for what the deploy adds (deploy/deploy_vars.py). No token is
+    # needed for --dry-run.
+    - name: Dry-run the committed production configs
+      env:
+        TODOFY_ACCESS_OWNER: owner@example.com
+        TODOFY_ACCESS_OWNER_ALIASES: ''
+        TODOFY_TODOIST_DEFAULT_PROJECT_ID: placeholder
+        TODOFY_REMINDER_ENABLED: 'false'
+        TODOFY_MAINTENANCE_MODE: 'false'
+        TODOFY_PROCESSING_PAUSED: 'false'
+        TODOFY_FORCE_PAUSE_TODOIST: 'false'
+        TODOFY_GTD_REVIEW_ENABLED: 'false'
+        # The optional projects: one unset (uploaded as unset) and one set, so both paths are written.
+        TODOFY_TODOIST_OPS_PROJECT_ID: ''
+        TODOFY_TODOIST_REVIEW_PROJECT_ID: placeholder
+      working-directory: todofy
+      shell: bash -e {0}
+      run: |
+        uv run python deploy/deploy_vars.py secrets core "$RUNNER_TEMP/todofy-core-secrets.json"
+        uv run python deploy/deploy_vars.py secrets gateway "$RUNNER_TEMP/todofy-gateway-secrets.json"
+        uv run python deploy/deploy_vars.py exec core -- uv run pywrangler deploy --dry-run --config wrangler.toml \
+          --secrets-file "$RUNNER_TEMP/todofy-core-secrets.json" --outdir "$RUNNER_TEMP/todofy-core-bundle"
+        # The workers SDK and the generated task-intent-v1, report (todofy.report.v1), ops-v1, mail.received.v1 and owner
+        # API (todofy.ui.v1) packages
+        # (ziyixi_proto, proto/README.md) are vendored next to the core config; a bundle without them cannot start.
+        # Only the packages a Python Worker imports are generated, and the runtimes' fixtures stay out of the wheel
+        # (proto/tools/gen_py.py).
+        test -d "$RUNNER_TEMP/todofy-core-bundle/python_modules/workers"
+        test -f "$RUNNER_TEMP/todofy-core-bundle/python_modules/ziyixi_proto/todofy/taskintent/v1/task_intent_pb.py"
+        test -f "$RUNNER_TEMP/todofy-core-bundle/python_modules/ziyixi_proto/ops/v1/ops_pb.py"
+        test -f "$RUNNER_TEMP/todofy-core-bundle/python_modules/ziyixi_proto/todofy/report/v1/report_pb.py"
+        test -f "$RUNNER_TEMP/todofy-core-bundle/python_modules/ziyixi_proto/mailhero/webhook/v1/mail_received_pb.py"
+        test -f "$RUNNER_TEMP/todofy-core-bundle/python_modules/ziyixi_proto/todofy/ui/v1/todofy_ui_service_pb.py"
+        test ! -e "$RUNNER_TEMP/todofy-core-bundle/python_modules/ziyixi_proto/prototest"
+        uv run python deploy/deploy_vars.py exec gateway -- npx --no-install wrangler deploy --dry-run \
+          --config gateway/wrangler.toml --secrets-file "$RUNNER_TEMP/todofy-gateway-secrets.json" \
+          --outdir "$RUNNER_TEMP/todofy-gateway-bundle"
+        # The gateway's bundle against its budget and the Workers Free limit (deploy/bundle-size.mjs).
+        node --test deploy/test/*.test.mjs
+        node deploy/bundle-size.mjs "$RUNNER_TEMP/todofy-gateway-bundle"
+    - name: Remove the placeholder secrets files
+      if: always()
+      working-directory: todofy
+      shell: bash -e {0}
+      run: rm -f "$RUNNER_TEMP/todofy-core-secrets.json" "$RUNNER_TEMP/todofy-gateway-secrets.json"
+
+# The workerd runtime suite (tests/runtime), split into shards of whole test files that run at the same
+# time. The plan (.github/scripts/pytest_shards.py) balances recorded seconds per file over every
+# pytest-xdist process of every shard and places each collected file in exactly one shard; inside a
+# shard, xdist gives each process whole files, heaviest first, and a file's tests run in file order
+# (the rootdir conftest.py refuses any per-test distribution). No test is selected, deselected or
+# retried here; "Todofy checks" proves that the shards together ran every collected test once. Changing
+# the shard list also needs the same count in "Todofy checks" (--shards), which
+# .github/scripts/test_ci_changes.py checks.

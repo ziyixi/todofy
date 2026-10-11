@@ -1,0 +1,28 @@
+name: check-shared-packages
+description: "check-shared-packages; called by the repository workflow."
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+      with:
+        node-version: '26'
+        cache: npm
+        cache-dependency-path: packages/*/package-lock.json
+    - name: Typecheck and test every package
+      working-directory: .
+      shell: bash -e {0}
+      run: |
+        found=0
+        for manifest in packages/*/package.json; do
+          dir=${manifest%/package.json}
+          echo "::group::$dir"
+          (cd "$dir" && npm ci --no-audit --no-fund && npm run typecheck && npm test)
+          echo "::endgroup::"
+          found=1
+        done
+        test "$found" = 1
+
+# Todofy runs as three jobs: the static checks, the workerd runtime suite split into shards that run at
+# the same time, and "Todofy checks", which passes only when both passed and the shards together ran
+# every collected runtime test exactly once (todofy/docs/ci-cd.md). Every change that checks Todofy runs
+# all of them; "Todofy deploy" needs "Todofy checks".

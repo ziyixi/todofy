@@ -22,6 +22,32 @@ An app before its first deploy has no verified deployment to compare: its Worker
 buckets absent and skip its namespaces (they have no id yet), and the reconcile matrix excludes the app. The commit
 after that deploy records the namespace ids and removes both; a guard test keeps the two lists equal.
 
+## Where to change the pipeline
+
+- Change triggers, dependencies, permissions, timeouts and the CI gate in
+  [ci.yml](../.github/workflows/ci.yml). Job names remain stable because same-SHA check reuse reads them.
+- Change an application's checks in `.github/actions/check-<app>/action.yml`. Todofy retains separate static
+  and runtime actions; the runtime shard index/count are passed by the caller. Artifact names and retention
+  belong to these steps, and downstream consumers continue to require the exact tested artifacts.
+- Change an application's build, migration, secret-file creation and probes in
+  `.github/actions/release-<app>/action.yml`. [worker-release.yml](../.github/workflows/worker-release.yml)
+  owns one job: the application lock, source selection, preflight, selected action and verified Deployment record.
+  CI and reconcile call this same workflow. A call shows one release job rather than eleven app jobs, ten skipped.
+- Image publication and VPS packaging/deployment have their own actions (`publish-newsletter`, `publish-platform`,
+  `package-vps`, `deploy-vps`). They retain separate jobs, permissions, locks and digest outputs. Website content
+  publication remains in its independent workflow; `dispatch-website` only starts it.
+
+The root checkout supplies orchestration; `.release-source` supplies the chosen app revision, including repair
+of an older verified SHA. Keep that distinction when editing paths. Every composite run step names its directory
+and uses `bash -e {0}`, matching the previous Ubuntu unspecified shell; adding `pipefail` would change behavior.
+Composite actions receive explicit inputs for job-only context and secrets. Secrets become environment variables
+only in the steps that use them. Do not move secrets to a job-wide environment or read production credentials in checks.
+
+The `Changes` job runs the workflow guards. `workflow_sources.py` follows local action steps so the existing
+command/credential/order assertions still inspect the executed recipes; `test_composite_actions.py` independently
+checks the real caller boundaries, input wiring and single-job release structure. Keep both kinds of checks.
+On failure, open the failed job and its named composite step; application commands retain their original step names.
+
 ## Before a release
 
 - The owner must have authorised publication/deployment in the task. A design request is not permission to deploy.
