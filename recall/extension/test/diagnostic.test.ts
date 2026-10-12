@@ -59,6 +59,28 @@ describe('one-shot Orion capture diagnostic', () => {
     expect((await sentBatch(h)).diagnostic).toMatchObject({ alarm_event_count: 2, tab_event_count: 1, steps: [{ stage: 'open_test_page', state: 'pending' }, { stage: 'alarm_setup', state: 'returned', result: 'created' }] });
   });
 
+  it('snapshots only unfinished native calls, retaining a concurrent call after callback and catch both finish', async () => {
+    const h = await setup();
+    const callbacks: ((tabs: chrome.tabs.Tab[]) => void)[] = [];
+    Object.assign(h.browser.api.tabs, { query: (_query: unknown, callback: (tabs: chrome.tabs.Tab[]) => void) => { callbacks.push(callback); } });
+    const pending = queryTabs(h.ctx, { active: true });
+    const failed = queryTabs(h.ctx, { active: true });
+    const failure = expect(failed).rejects.toThrow('synthetic native failure');
+    await vi.waitFor(() => { expect(callbacks).toHaveLength(2); });
+    Object.assign(h.browser.api.runtime, { lastError: { message: 'synthetic native failure' } });
+    callbacks[1]?.([]);
+    delete (h.browser.api.runtime as unknown as Record<string, unknown>)['lastError'];
+    await failure;
+    await startDiagnostic(h.ctx);
+    expect((await diagnosticStatus(h.ctx)).diagnostic.steps).toContainEqual({ stage: 'active_tabs', state: 'pending', initially_pending: true });
+    callbacks[0]?.([]);
+    await pending;
+    // This remains the historical Start observation; it does not adopt an old call as a test-page result.
+    expect((await diagnosticStatus(h.ctx)).diagnostic.steps).toContainEqual({ stage: 'active_tabs', state: 'pending', initially_pending: true });
+    await startDiagnostic(h.ctx);
+    expect((await diagnosticStatus(h.ctx)).diagnostic.steps.some((step) => step.stage === 'active_tabs')).toBe(false);
+  });
+
   it('retains completed foreground observations when returning to native extension management', async () => {
     const h = await setup();
     await startDiagnostic(h.ctx);

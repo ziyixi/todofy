@@ -18,9 +18,9 @@ const SENDER_LABELS = { same: '本扩展', missing: '未提供', null: 'null', f
 
 /** Fixed metadata only; API return shapes stay explicit for diagnosis. */
 export function diagnosticStepSummary(step: CaptureDiagnosticStep): string {
-  const parts = [DIAGNOSTIC_STAGE_LABELS[step.stage] ?? step.stage, DIAGNOSTIC_STATE_LABELS[step.state] ?? step.state];
+  const parts = [DIAGNOSTIC_STAGE_LABELS[step.stage] ?? step.stage, step.initially_pending === true ? '诊断开始时已有调用尚未返回' : DIAGNOSTIC_STATE_LABELS[step.state] ?? step.state];
   if (step.result !== undefined) parts.push(`结果 ${step.result}`);
-  if (step.stage === 'active_tabs') parts.push(`匹配 ${String(step.count ?? 0)} 个`);
+  if (step.stage === 'active_tabs' && step.state === 'returned' && step.result === 'array') parts.push(`匹配 ${String(step.count ?? 0)} 个`);
   if (step.selection !== undefined) parts.push(`选择 ${SELECTION_LABELS[step.selection]}`);
   if (step.visibility !== undefined) parts.push(`页面 ${VISIBILITY_LABELS[step.visibility]}`);
   if (step.stored_visibility !== undefined) parts.push(`记忆状态 ${VISIBILITY_LABELS[step.stored_visibility]}`);

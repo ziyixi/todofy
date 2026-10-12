@@ -215,6 +215,8 @@ describe('the service worker', () => {
 
   it('starts and sends an owner diagnostic while the phone focus queue is blocked', async () => {
     vi.stubGlobal('RECALL_ORION', true);
+    browser.alarms.set('tick', { name: 'tick', periodInMinutes: 1 });
+    Object.assign(browser.api.alarms, { get: (name: string, callback: (value: unknown) => void) => { queueMicrotask(() => { callback(browser.alarms.get(name)); }); } });
     await start();
     const db = await openDb();
     await setToken(db, INGEST_TOKEN);
@@ -224,9 +226,17 @@ describe('the service worker', () => {
     browser.events.activated.emit({ tabId: tab.id, windowId: 1 });
     await vi.waitFor(() => { expect(query).toHaveBeenCalled(); });
     expect(await message({ type: 'diagnostic-start' })).toMatchObject({ ok: true, diagnostic: { state: 'running' } });
+    const current = [...browser.tabs.values()].find((value) => value.active);
+    if (current === undefined) throw new Error('synthetic diagnostic tab missing');
+    for (let n = 0; n < 8; n++) browser.events.activated.emit({ tabId: current.id, windowId: current.windowId });
+    browser.events.alarm.emit({ name: 'tick' });
+    browser.events.alarm.emit({ name: 'tick' });
+    await vi.waitFor(async () => { expect(await message({ type: 'diagnostic-status' })).toMatchObject({ diagnostic: { tabEvents: 8, alarmEvents: 2 } }); });
     expect(await message({ type: 'diagnostic-send' })).toMatchObject({ ok: true, diagnostic: { state: 'sent' } });
     expect((await batch(0)).items).toEqual([]);
     expect((await batch(0)).diagnostic?.run_id).toMatch(/^[0-9a-f-]{36}$/);
+    expect((await batch(0)).diagnostic?.steps).toContainEqual({ stage: 'active_tabs', state: 'pending', initially_pending: true });
+    expect(query).toHaveBeenCalledOnce(); // Start does not issue a diagnostic query or unblock business work.
     db.close();
   });
 

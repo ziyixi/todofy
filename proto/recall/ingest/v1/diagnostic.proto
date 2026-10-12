@@ -67,7 +67,7 @@ message CaptureDiagnosticStep {
     (common.wire.v1.field).allowed = "capture_store",
     (common.wire.v1.field).allowed = "alarm_setup"
   ];
-  // Pending means the native callback has not answered, not a guessed timeout.
+  // Pending means the native callback had not answered at observation time, not a guessed timeout.
   string state = 2 [
     (google.api.field_behavior) = REQUIRED,
     (common.wire.v1.field) = {
@@ -143,4 +143,6 @@ message CaptureDiagnosticStep {
       "unknown"
     ]
   }];
+  // This pending call was already in progress when diagnosis started. It is a historical start snapshot, not a test-page result.
+  bool initially_pending = 9;
 }

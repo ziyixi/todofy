@@ -70,6 +70,8 @@ describe('one-shot capture diagnostic', () => {
       { ...good, steps: [{ stage: 'probe_reply', state: 'failed', error: 'must-not-be-retained' }] },
       { ...good, steps: [{ stage: 'probe_reply', state: 'failed', result: 'must-not-be-retained' }] },
       { ...good, steps: [{ stage: 'probe_reply', state: 'returned', count: 101 }] },
+      { ...good, steps: [{ stage: 'active_tabs', state: 'pending', initially_pending: 'true' }] },
+      { ...good, steps: [{ stage: 'active_tabs', state: 'returned', initially_pending: true }] },
       { ...good, tab_event_count: 1001 },
       { ...good, alarm_event_count: -1 },
       { ...good, steps: Array.from({ length: 13 }, () => ({ stage: 'probe_reply', state: 'pending' })) },
@@ -87,5 +89,14 @@ describe('one-shot capture diagnostic', () => {
     expect((await h.api.getServiceStatus({ name: 'serviceStatus' })).captureDiagnostic).toEqual(before);
     expect(JSON.stringify(await h.sql(`SELECT value FROM meta WHERE key = 'capture_diagnostic'`))).not.toContain('must-not-be-retained');
     expect(h.logs.join('\n')).not.toContain('must-not-be-retained');
+  });
+
+  it('preserves a historical pending call from before diagnosis without presenting it as a test-page result', async () => {
+    const historical = { ...diagnostic(), steps: [{ stage: 'active_tabs', state: 'pending', initially_pending: true }] };
+    expect((await h.upload(reportBatch(historical))).status).toBe(200);
+    const status = await h.api.getServiceStatus({ name: 'serviceStatus' });
+    expect(status.captureDiagnostic?.diagnostic?.steps).toEqual([
+      expect.objectContaining({ stage: 'active_tabs', state: 'pending', initiallyPending: true, selection: '' }),
+    ]);
   });
 });

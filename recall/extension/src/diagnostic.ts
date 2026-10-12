@@ -24,6 +24,19 @@ interface Run {
 // A separate storage write queue cannot be held by focus queries, content callbacks or normal uploads.
 const runs = new WeakMap<typeof chrome, Promise<Run | null>>();
 
+type NativeStage = 'active_tabs' | 'tab_lookup' | 'probe_injection' | 'probe_reply' | 'capture_reply' | 'screenshot';
+const nativeCalls = new WeakMap<typeof chrome, Set<{ readonly stage: NativeStage }>>();
+
+/** Only unfinished native calls: no arguments, browsing values or event history. Finishing twice is harmless. */
+export function beginNativeCall(ctx: Context, stage: NativeStage): () => void {
+  if (!ctx.mobile) return () => undefined;
+  const calls = nativeCalls.get(ctx.chrome) ?? new Set<{ readonly stage: NativeStage }>();
+  nativeCalls.set(ctx.chrome, calls);
+  const call = { stage };
+  calls.add(call);
+  return () => { calls.delete(call); };
+}
+
 async function read(ctx: Context): Promise<Run | null> {
   if (!ctx.mobile) return null;
   if (!runs.has(ctx.chrome)) {
@@ -121,7 +134,9 @@ export async function startDiagnostic(ctx: Context): Promise<DiagnosticAnswer> {
   if (!ctx.mobile) return { ok: false, error: 'unsupported', diagnostic: view(ctx, null) };
   if (await getToken(ctx.db) === '') return { ok: false, error: 'token_missing', diagnostic: view(ctx, await read(ctx)) };
   const at = ctx.now();
-  const run: Run = { expiresAt: at + DURATION_MS, stopped: false, sentAt: 0, report: { run_id: ctx.uuid(), start_time: isoTime(at), report_time: isoTime(at), steps: [{ stage: 'open_test_page', state: 'pending' }], tab_event_count: 0, alarm_event_count: 0 } };
+  const pendingStages = new Set(Array.from(nativeCalls.get(ctx.chrome) ?? [], (call) => call.stage));
+  const beforeStart: CaptureDiagnosticStep[] = Array.from(pendingStages, (stage) => ({ stage, state: 'pending', initially_pending: true }));
+  const run: Run = { expiresAt: at + DURATION_MS, stopped: false, sentAt: 0, report: { run_id: ctx.uuid(), start_time: isoTime(at), report_time: isoTime(at), steps: [{ stage: 'open_test_page', state: 'pending' }, ...beforeStart], tab_event_count: 0, alarm_event_count: 0 } };
   await change(ctx, () => run);
   // Do not await a native callback here: an unresponsive browser must still allow Send diagnostic.
   try {

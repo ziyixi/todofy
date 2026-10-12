@@ -9,6 +9,17 @@ Its old waiting lists and release identities are historical, not instructions to
 
 ## Current work
 
+`codex/recall-startup-diagnostic` repairs a reproduced observation gap in the one-shot tool.
+The owner's 812 report arrived through normal authentication with 8 tab events and 2 alarms, but only
+open-test-page and Alarm-setup results. No private browsing content or production credential was read.
+The existing local SW harness reproduces that exact two-stage pattern when a native active-tab call hangs
+before Start; the same hang after Start is visible as pending. This identifies a diagnostic gap, not the exact
+native failing API on the phone. Track only in-flight fixed native stage names in memory, and snapshot those
+already waiting at Start with an explicit historical flag. Do not restart the queue, add probes, retry native
+calls, change privacy or touch owner Chrome. Local checks pass: 141 extension tests, 134 owner UI tests, focused real workerd diagnostic tests, and proto lint/API-lint/breaking/schema.
+The built WebKit check now hangs the native bridge query before Start, verifies the historical marker and confirms
+normal status/outbox are untouched. Full branch CI, final artifact checks and the Actions release are pending.
+
 `codex/recall-mobile-diagnostic` implements the authorized one-shot Orion capture diagnosis.
 The owner still reports no visits or samples on `611`, Orion 1.5.5 (3), iOS 27.0.1; heartbeat works.
 It records closed stage metadata on a fixed public test page and sends an empty authenticated batch independently

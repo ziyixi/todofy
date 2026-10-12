@@ -22,6 +22,26 @@ The Worker strictly validates closed values, bounds, unique stages and time orde
 report in existing meta. Ordinary heartbeats preserve it. The existing owner status exposes the receipt, device
 identity and receive time; Settings shows details only when a report exists. Receipt is not capture success.
 
+## Startup observation gap
+
+The owner's phone returned the 812 diagnostic: eight native tab events and two minute alarms, but only
+`open_test_page=returned/object` and `alarm_setup=returned/object`. No browsing content was read. A local SW
+reproduction produces exactly that report when a native active-tab query hangs before Start; the same hang
+started during diagnosis produces `active_tabs=pending`. This is evidence of an observation gap; it does not
+identify the actual failing API on the phone.
+
+The correction retains only unfinished native stage names in memory. Start copies their distinct names into
+pending steps with `initially_pending=true`, labeled as calls already waiting when diagnosis began. This is a
+historical start snapshot and carries no test-page selection. Native callbacks clear their own handle; an error
+or duplicate finish cannot erase another unfinished call. The business queue, probes, callback behavior,
+privacy gates and desktop path stay unchanged. There is no retry, additional native request or persistent log.
+
+The pre-start regression fails against the old core and passes with this correction. All 141 extension tests,
+134 owner UI tests and three focused real workerd diagnostic cases pass, along with typecheck/lint/build and
+proto lint/API-lint/breaking/schema. The built WebKit check was strengthened to hang query before Start; it
+verifies the historical marker in the UI and sent gzip while normal status/outbox remain unchanged.
+An unanswered query does not display a guessed zero-match count. Full CI and the new artifact receipt are pending.
+
 ## Verified locally
 
 - Worker lint/typecheck and 45 real workerd tests passed across diagnostics, ingest, owner API, devices, CPU

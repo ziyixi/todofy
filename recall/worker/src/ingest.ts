@@ -198,6 +198,7 @@ function readEnvelope(text: string): Envelope {
   if (diagnostic !== undefined && (
     items.length !== 0 || diagnostic.startTime === undefined || diagnostic.reportTime === undefined ||
     timestampMs(diagnostic.reportTime) < timestampMs(diagnostic.startTime) ||
+    diagnostic.steps.some((step) => step.initiallyPending && step.state !== 'pending') ||
     new Set(diagnostic.steps.map((step) => step.stage)).size !== diagnostic.steps.length
   )) throw new BatchError('BAD_REQUEST');
   return {

@@ -3,7 +3,7 @@ import type { Context } from './context.ts';
 import { pageOf } from './page.ts';
 import { currentDenylist } from './settings.ts';
 import { lastError } from './store.ts';
-import { diagnosticRunId, observe, observeTabs, resultType } from './diagnostic.ts';
+import { beginNativeCall, diagnosticRunId, observe, observeTabs, resultType } from './diagnostic.ts';
 
 export interface PageProbe {
   readonly documentId: string;
@@ -39,13 +39,16 @@ function receive<T>(ctx: Context, resolve: (value: T) => void, reject: (error: E
 export async function getTab(ctx: Context, tabId: number): Promise<chrome.tabs.Tab> {
   if (!ctx.mobile) return ctx.chrome.tabs.get(tabId);
   const runId = await observe(ctx, { stage: 'tab_lookup', state: 'pending' }, tabId);
+  const finish = beginNativeCall(ctx, 'tab_lookup');
   return new Promise<chrome.tabs.Tab>((resolve, reject) => {
     ctx.chrome.tabs.get(tabId, (tab) => {
       const failed = ctx.chrome.runtime.lastError !== undefined;
+      finish();
       void observe(ctx, { stage: 'tab_lookup', state: failed ? 'failed' : 'returned', result: failed ? 'api_error' : resultType(tab) }, tabId, runId);
       receive(ctx, resolve, reject, tab);
     });
   }).catch(async (error: unknown) => {
+    finish();
     await observe(ctx, { stage: 'tab_lookup', state: 'failed', result: 'api_error' }, tabId, runId);
     await lastError.set(ctx.chrome, 'page_tab_failed', ctx.now());
     throw error;
@@ -55,13 +58,16 @@ export async function getTab(ctx: Context, tabId: number): Promise<chrome.tabs.T
 export async function queryTabs(ctx: Context, query: chrome.tabs.QueryInfo): Promise<chrome.tabs.Tab[]> {
   if (!ctx.mobile) return ctx.chrome.tabs.query(query);
   const runId = await observe(ctx, { stage: 'active_tabs', state: 'pending' });
+  const finish = beginNativeCall(ctx, 'active_tabs');
   return new Promise<chrome.tabs.Tab[]>((resolve, reject) => {
     ctx.chrome.tabs.query(query, (tabs) => {
       const failed = ctx.chrome.runtime.lastError !== undefined;
+      finish();
       void (failed ? observe(ctx, { stage: 'active_tabs', state: 'failed', result: 'api_error' }, undefined, runId) : Array.isArray(tabs) ? observeTabs(ctx, tabs, runId) : observe(ctx, { stage: 'active_tabs', state: 'returned', result: resultType(tabs) }, undefined, runId));
       receive(ctx, resolve, reject, tabs);
     });
   }).catch(async (error: unknown) => {
+    finish();
     await observe(ctx, { stage: 'active_tabs', state: 'failed', result: 'api_error' }, undefined, runId);
     await lastError.set(ctx.chrome, 'page_query_failed', ctx.now());
     throw error;
@@ -71,13 +77,16 @@ export async function queryTabs(ctx: Context, query: chrome.tabs.QueryInfo): Pro
 export async function captureViewport(ctx: Context, windowId: number, tabId?: number): Promise<string> {
   if (!ctx.mobile) return ctx.chrome.tabs.captureVisibleTab(windowId, { format: 'png' });
   const runId = await observe(ctx, { stage: 'screenshot', state: 'pending' }, tabId);
+  const finish = beginNativeCall(ctx, 'screenshot');
   return new Promise<string>((resolve, reject) => {
     ctx.chrome.tabs.captureVisibleTab({ format: 'png' }, (data) => {
       const failed = ctx.chrome.runtime.lastError !== undefined;
+      finish();
       void observe(ctx, { stage: 'screenshot', state: failed ? 'failed' : 'returned', result: failed ? 'api_error' : resultType(data) }, tabId, runId);
       receive(ctx, resolve, reject, data);
     });
   }).catch(async (error: unknown) => {
+    finish();
     await observe(ctx, { stage: 'screenshot', state: 'failed', result: 'api_error' }, tabId, runId);
     throw error;
   });
@@ -105,27 +114,33 @@ export async function executeFile(ctx: Context, tabId: number, file: 'probe.js' 
   if (ctx.mobile && features.tabs.executeScript !== undefined) {
     const execute = features.tabs.executeScript;
     const runId = await observe(ctx, { stage: 'probe_injection', state: 'pending' }, tabId);
+    const finishInjection = beginNativeCall(ctx, 'probe_injection');
     // Orion's file-injection completion did not yield a usable probe. Use the standard content-message reply.
     await new Promise<void>((resolve, reject) => {
       void execute.call(ctx.chrome.tabs, tabId, { file: 'probe.js', runAt: 'document_start' }, (value) => {
         const failed = ctx.chrome.runtime.lastError !== undefined;
+        finishInjection();
         void observe(ctx, { stage: 'probe_injection', state: failed ? 'failed' : 'returned', result: failed ? 'api_error' : resultType(value) }, tabId, runId);
         receive(ctx, resolve, reject, undefined);
       });
     }).catch(async (error: unknown) => {
+      finishInjection();
       await observe(ctx, { stage: 'probe_injection', state: 'failed', result: 'api_error' }, tabId, runId);
       throw error;
     });
     void probeContext(ctx, tabId).catch(() => undefined);
     const stage = file === 'probe.js' ? 'probe_reply' : 'capture_reply';
     await observe(ctx, { stage, state: 'pending' }, tabId, runId);
+    const finishReply = beginNativeCall(ctx, stage);
     return new Promise<unknown>((resolve, reject) => {
       ctx.chrome.tabs.sendMessage(tabId, { type: file === 'probe.js' ? 'recall-probe' : 'recall-capture' }, (value: unknown) => {
         const failed = ctx.chrome.runtime.lastError !== undefined;
+        finishReply();
         void observe(ctx, { stage, state: failed ? 'failed' : 'returned', result: failed ? 'api_error' : resultType(value) }, tabId, runId);
         receive(ctx, resolve, reject, value);
       });
     }).catch(async (error: unknown) => {
+      finishReply();
       await observe(ctx, { stage, state: 'failed', result: 'api_error' }, tabId, runId);
       throw error;
     });

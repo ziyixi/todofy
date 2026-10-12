@@ -435,9 +435,14 @@ export async function checkOrionOptions({ webkit, expect, folder }) {
           };
         });
       });
-      await h.options.locator('#diagnostic-start').click();
+      await h.page.evaluate(() => window.__test.emit('activated', { tabId: 1, windowId: 1 }));
       await h.page.waitForFunction(() => window.__test.queryStalled);
-      await expect.poll(() => getDiagnostic(h)).toMatchObject({ state: 'running', steps: expect.arrayContaining([expect.objectContaining({ stage: 'active_tabs', state: 'pending' })]) });
+      const before = await getStatus(h);
+      await h.options.locator('#diagnostic-start').click();
+      await expect.poll(() => getDiagnostic(h)).toMatchObject({ state: 'running', steps: expect.arrayContaining([expect.objectContaining({ stage: 'active_tabs', state: 'pending', initially_pending: true })]) });
+      await h.options.locator('#diagnostic-details summary').click();
+      await expect(h.options.locator('#diagnostic-steps')).toContainText('诊断开始时已有调用尚未返回');
+      await expect.poll(() => getDiagnostic(h)).toMatchObject({ steps: expect.arrayContaining([expect.objectContaining({ stage: 'open_test_page', state: 'returned' })]) });
       await expect(h.options.locator('#diagnostic-send')).toBeEnabled();
       await h.options.locator('#diagnostic-send').click();
       await expect(h.options.locator('#diagnostic-feedback')).toContainText('诊断已发送');
@@ -445,14 +450,15 @@ export async function checkOrionOptions({ webkit, expect, folder }) {
       expect(batch.items).toEqual([]);
       expect(batch.device.queued_count).toBe(1);
       expect(batch.diagnostic.steps).toEqual(expect.arrayContaining([
-        expect.objectContaining({ stage: 'active_tabs', state: 'pending' }),
+        expect.objectContaining({ stage: 'active_tabs', state: 'pending', initially_pending: true }),
         expect.objectContaining({ stage: 'open_test_page', state: 'returned' }),
       ]));
       for (const content of [token, diagnosticUrl, 'not part of diagnosis', 'Synthetic diagnostic page']) expect(JSON.stringify(batch.diagnostic)).not.toContain(content);
-      expect((await getStatus(h)).queued).toBe(1);
+      expect({ ...await getStatus(h), now: before.now }).toEqual(before);
       await expect(h.options.locator('button[type=submit]')).toBeEnabled();
       expect(h.errors).toEqual([]);
-      results.push({ case: 'hung native query still sends a bounded diagnostic, not the outbox', passed: true, stage: 'active_tabs', state: 'pending', queuedUnchanged: 1 });
+      await h.page.screenshot({ path: join(folder, 'diagnostic-pending-webkit.png'), fullPage: true });
+      results.push({ case: 'native query hung before Start is visible in the sent diagnostic', passed: true, stage: 'active_tabs', state: 'pending', initiallyPending: true, queuedUnchanged: 1, normalStatusUnchanged: true });
       await h.context.close();
     }
     {
