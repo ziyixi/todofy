@@ -16,10 +16,12 @@ the approved 32×32 comparison skips minor picture changes and compares against 
 [same-SHA release](https://github.com/ziyixi/todofy/actions/runs/38185811434) passed. The first release attempt
 uploaded successfully but its version-detail read failed; attempt 2 verified version
 `5ff5cde9-11cb-4160-97d6-04c7648b25c3`, Deployment `7003619381`. Extension `2026.1011.2346` is installed
-and its displayed SHA was checked. Real Chrome capture acceptance awaits actual owner input: Chrome still
-reports `idle` during native automation, so an empty queue is not duplicate-omission evidence. The owner was
-asked to move the mouse or press a key, then leave the prepared public page in front for two minutes.
-[Verification and remaining step](docs/recall-snapshot-verification.md). No new service, dependency or budget change.
+and its displayed SHA was checked. On October 12 UTC, authorized temporary idle simulation in real Chrome
+verified capture/upload/display, equal rendered reader text with changed scrolling screenshots, and no repeated snapshots:
+three snapshots, newest at 01:08 UTC, despite a later eligible attempt at 01:10:21.453 UTC. Both stored and actual
+idle were restored to `idle`, with no open visit; no formal privacy setting or application code changed.
+[Verification and its simulation boundary](docs/recall-snapshot-verification.md). No owner-input step remains
+pending. No new service, dependency or budget change.
 
 Mailsort flat English labels and Settings' classification-effect check are deployed at `4a48878`.
 [Branch CI](https://github.com/ziyixi/todofy/actions/runs/38177634581) and the
@@ -50,7 +52,7 @@ These are dated observations, not a replacement for current GitHub Deployment re
 | CI structure, October 11 | `21c358f` passed branch CI and the same SHA on main. Local composite actions retain explicit job dependencies and release boundaries. Reconcile fell from 128 jobs to 18. | [Branch](https://github.com/ziyixi/todofy/actions/runs/38134080448), [main](https://github.com/ziyixi/todofy/actions/runs/38134511298), [reconcile](https://github.com/ziyixi/todofy/actions/runs/38134699837) |
 | VPS, October 11 | Deployment `6994687990` verified Newsletter and Platform at `21c358f`, `phase=ready`. Their exact digests are in the archive. No Newsletter runtime changed in that release. | [Release evidence](docs/history/handoff-2026-10-11.md#done-2026-10-11-ci-workflow-structure) |
 | Brief and Home, October 11 | `ebf33fe` deployed both applications. Brief's namespace is registered; Ops reports healthy. Read-only UI checks preserved `MODE=archive` and the owner's saved monthly budget of **$80**. | [Release](https://github.com/ziyixi/todofy/actions/runs/38132200435), [inventory/reconcile](https://github.com/ziyixi/todofy/actions/runs/38132419031), [detailed evidence](docs/history/handoff-2026-10-11.md#done-2026-10-11-brief-resource-registration-and-home-monitoring) |
-| Recall, October 11 | `de4d561` deployed the snapshot UI and seven-day hot files; CI includes real DO/R2 and fake-Dropbox cold reads. Extension updated; physical browsing acceptance remains open. | [Release](https://github.com/ziyixi/todofy/actions/runs/38185811434), [verification](docs/recall-snapshot-verification.md), [runbook](recall/README.md) |
+| Recall, October 11/12 UTC | `de4d561` deployed the snapshot UI and seven-day hot files; CI includes real DO/R2 and fake-Dropbox cold reads. Updated extension passed real Chrome capture, visual-change and deduplication checks with an authorized temporary idle simulation, since removed. | [Release](https://github.com/ziyixi/todofy/actions/runs/38185811434), [verification](docs/recall-snapshot-verification.md), [runbook](recall/README.md) |
 | Mailsort, October 11 | `4a48878` verified 12 English labels after production consolidation; live mode and existing learning/settings retained. | [Release](https://github.com/ziyixi/todofy/actions/runs/38177844303), [dated evidence](mailsort/docs/label-consolidation.md#2026-10-11-上线与生产整理) |
 
 The CI refactor exercised every Worker's production preflight/no-op but selected no Worker uploads.

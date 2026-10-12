@@ -20,15 +20,27 @@ Implementation: `de4d561f36473cc68b4bea0af3206241eec8b2b9`, October 11, 2026.
   was installed into the existing stable folder. Chrome's settings page displays `2026.1011.2346 · de4d561`;
   the existing device settings and saved token remain in place.
 
-## Remaining browser acceptance
+## Chrome acceptance, October 12 UTC
 
-Native automation left the public Example Domain test page in front, but Chrome returned
-`idle=idle, window_focused=true`. Its empty outbox therefore does not prove capture or deduplication.
-The owner has been asked for actual mouse/keyboard input and two minutes on that public page.
+The owner explicitly approved temporarily simulating `idle=active` in the extension's session state because
+native automation did not reset Chrome's system idle timer. The installed release used real Chrome screenshot
+capture, its natural minute Alarm, the existing upload and production detail UI. No application code or privacy
+setting changed; no private browsing records were inspected.
 
-After that input, upload normally and open only the prepared synthetic page's detail. Check the screenshot,
-capture time and snapshot count across minute samples; then verify an image-only public page. Record actual
-results here. Do not disable the idle/privacy rules or inspect private history to finish this check.
+- One public long page with a separate test query produced three snapshots, shown at `00:59`, `01:05` and
+  `01:08 UTC`. The original tab/document was retained throughout; two scroll operations changed its viewport.
+- The first screenshot loaded as a `1920×697` WebP, about 95 KiB. After the browser controller changed the
+  viewport height once, the next two screenshots both loaded at `1920×655`. Those two images differed, and
+  visual inspection confirmed the new scrolled content. The three rendered reader texts were exactly equal
+  (rendered reader `.textContent.length=65178`), so the later captures preserved visual changes alone.
+- The unchanged final viewport stayed in front for more than two minutes. A read-only lookup restricted to this
+  test tab's visit confirmed `lastAttemptAt=2026-10-12T01:10:21.453Z`; the final detail still contained only the
+  three snapshots, with the newest at `01:08 UTC`. No additional snapshot was saved during the later eligible checks.
+- At the end, the extension's stored idle and Chrome's real idle both reported `idle`, with no open visit.
+  DevTools was closed. The temporary simulation was removed, and existing credentials/settings were retained.
+
+This completes capture, visual-change and deduplication acceptance under the authorized idle simulation. It does
+not claim verification of physical-input idle transitions or an empty-body image page; those were not exercised.
 
 Production seven-day cleanup and owner Dropbox cold reads have not been forced; real history was not altered
 or aged for testing. They remain distinct from the local end-to-end archive evidence above.
