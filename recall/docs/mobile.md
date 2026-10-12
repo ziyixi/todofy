@@ -3,6 +3,9 @@
 电脑和手机连接同一个 Recall。每次独立安装都有自己的设备 ID、访问记录和待上传队列；云端统一搜索，
 Dropbox 统一归档。手机不需要连接 Dropbox，也不用复制电脑的扩展目录或本地数据库。
 
+当前已发布：[2026.1012.158](https://github.com/ziyixi/todofy/releases/tag/recall-extension-v2026.1012.158)，
+实现提交 `0fe663a`。[直接下载 Orion ZIP](https://github.com/ziyixi/todofy/releases/download/recall-extension-v2026.1012.158/recall-orion-v2026.1012.158.zip)。
+
 ## 手机安装
 
 1. 在 [GitHub Releases](https://github.com/ziyixi/todofy/releases) 下载当前版本的
@@ -45,7 +48,12 @@ Dropbox 统一归档。手机不需要连接 Dropbox，也不用复制电脑的�
 
 ## 验证边界
 
+[完整分支 CI](https://github.com/ziyixi/todofy/actions/runs/38193778901) 与
+[同 SHA 发布](https://github.com/ziyixi/todofy/actions/runs/38194203995) 已通过。
 本次准备覆盖双设备上传、口令独立停用、设备筛选、截图去重、JPEG 处理以及真实 DO/R2 配合假 Dropbox 的归档读取。
+Orion 非持久后台重建及 pagehide 的停留时间、并发相同请求只返回一次有效口令均有针对性测试。
+线上版本 `0c9f27be-d2c9-4556-8a7a-333b8a55d834` 已由部署流程核验，Deployment 为 `7004923541`。
+线上只读取了先前的公开测试页面和空的合成设备筛选，没有读取其他浏览正文或改变口令。
 本机构建的 Worker gzip 约 125.2 KiB，代码体积预算从 125 调到 130 KiB；运行配额和每日写入预算未变。
 
 这些检查不证明 Orion 真机的扩展安装、页面可见性事件、原生截图和文件更新行为；最后一轮手机验证专门确认这些边界。

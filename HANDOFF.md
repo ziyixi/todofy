@@ -9,13 +9,19 @@ Its old waiting lists and release identities are historical, not instructions to
 
 ## Current work
 
-Recall mobile and multi-device preparation is in progress on `codex/recall-mobile-devices`: named upload tokens,
-device-aware timeline/status, an Orion file-install build, and native JPEG fallback for browsers without WebP encoding.
-The existing Chrome identity, shared token, privacy rules, snapshot deduplication and unified Dropbox archive remain.
-Local Worker, UI, extension, proto and smoke checks passed; branch CI and release are the remaining preparation.
-Actual iPhone compatibility remains an owner acceptance step in [the mobile runbook](recall/docs/mobile.md).
-No new service or dependency. The measured 125.2 KiB Worker bundle intentionally raises its code-size budget
-from 125 to 130 KiB; runtime, daily write and monetary budgets are unchanged.
+Recall mobile and multi-device preparation is deployed at `0fe663a`: independent named upload tokens,
+device-aware timeline/status, an Orion file-install build and bounded native JPEG fallback. Existing Chrome identity,
+shared token, privacy rules, snapshot deduplication and the unified Dropbox archive remain.
+[Full branch CI](https://github.com/ziyixi/todofy/actions/runs/38193778901) and
+[same-SHA release](https://github.com/ziyixi/todofy/actions/runs/38194203995) passed. GitHub Deployment `7004923541`
+verified Worker `0c9f27be-d2c9-4556-8a7a-333b8a55d834`. Both extension assets are version `2026.1012.158`, built
+from this SHA. The Mac's stable installation files were updated with its existing key and settings retained; the
+browser tool blocks extension-scheme URLs, so its newly running version was not independently read from Chrome.
+Read-only production UI checks confirmed the existing public test snapshot still renders and an empty synthetic
+device filter reveals no other device's visits. No production token was created or changed for testing.
+Actual iPhone installation, visible/hidden events, capture and upload remain the short owner acceptance step in
+[the mobile runbook](recall/docs/mobile.md). No new service or dependency. The measured 125.2 KiB Worker bundle
+intentionally raises its code-size budget from 125 to 130 KiB; runtime, daily write and monetary budgets are unchanged.
 
 Recall's personal snapshot update is deployed at `de4d561`: first capture after ten seconds, minute sampling,
 viewport WebP, seven-day R2 files with FTS kept, and Dropbox reads for archived content. With unchanged text,
