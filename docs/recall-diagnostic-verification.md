@@ -48,7 +48,10 @@ confirmation is recorded below once complete; the earlier local report is not ev
 
 ## Release and phone boundary
 
-Full branch CI, same-SHA Actions publication and downloaded-package confirmation are pending.
+The first full branch run reached a UI size failure: 62.2 KiB against the previous 62 KiB budget.
+The requested diagnostic view raises only that artifact budget to 64 KiB, with the reason recorded beside it.
+Worker gzip remains 126.5 KiB within its unchanged 130 KiB budget. Full branch CI, same-SHA Actions publication
+and downloaded-package confirmation are pending.
 Mac Orion and the WebKit bridge cannot establish iOS behavior. The owner should update the existing Orion extension,
 start one diagnostic, keep its public page foreground for about a minute, then return and Send. No token rotation or
 uninstallation is needed. Only after the actual phone receipt arrives can the platform/selection/injection failure

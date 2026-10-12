@@ -6,7 +6,9 @@
 // saying why there.
 import { assetsJsSize, uiProblem } from '../../../tools/bundle-size/bundle-size.mjs'
 
-export const JS_BUDGET_GZIP_BYTES = 62 * 1024
+// October 12: the requested one-shot diagnostic view and its closed proto fields measure 62.2 KiB in CI.
+// A 64 KiB budget covers that addition; Worker runtime and cost budgets are unchanged.
+export const JS_BUDGET_GZIP_BYTES = 64 * 1024
 
 /** Raw and gzip bytes of every .js file directly in `assetsDir`. */
 export const jsSize = assetsJsSize

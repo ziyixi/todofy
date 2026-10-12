@@ -18,7 +18,9 @@ Chrome's running browser and installed extension files remain untouched. Local c
 The real WebKit options harness passes eight cases, including Send while native query never returns. Real Orion
 macOS returned eleven closed stages, a native minute alarm and a saved text/image capture through a strict loopback
 consumer. That run exposed completed/foreground observations being overwritten on return; the small correction has
-a regression. Full branch CI, same-SHA Actions release and final published-package native check remain pending.
+a regression. CI measured the requested UI at 62.2 KiB; its artifact budget is deliberately 64 KiB,
+while Worker/runtime/cost limits remain unchanged. Full branch CI, same-SHA Actions release and final published-package
+native check remain pending.
 [Diagnostic evidence](docs/recall-diagnostic-verification.md) separates synthetic/native Mac checks from the phone
 result still needed. Do not claim iOS capture is fixed.
 
