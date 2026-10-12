@@ -74,7 +74,7 @@ export async function checkOrionOptions({ webkit, expect, folder }) {
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   const base = `http://127.0.0.1:${server.address().port}`;
   const results = [];
-  async function start() {
+  async function start(permissionCase = {}) {
     const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
     const page = await context.newPage();
     await page.clock.install({ time: new Date('2026-10-12T00:00:00Z') });
@@ -124,6 +124,7 @@ export async function checkOrionOptions({ webkit, expect, folder }) {
       });
     });
     await page.goto(base + '/harness.html');
+    await page.evaluate((value) => { window.__test.permissionCase = value; }, permissionCase);
     await page.evaluate(() => {
       const frame = document.createElement('iframe');
       frame.id = 'background';
@@ -354,7 +355,8 @@ export async function checkOrionOptions({ webkit, expect, folder }) {
       await fillAndSave(h);
       await expect(h.options.locator('#toast')).toHaveText('已保存');
       await expect(h.options.locator('button[type=submit]')).toBeEnabled();
-      await expect(h.options.locator('button[type=submit]')).toHaveText('保存');
+      await expect(h.options.locator('button[type=submit]')).toHaveText('保存并申请网页权限');
+      await expect(h.options.locator('#permission-status')).toHaveText('浏览器报告已授权；采集结果见“最近采样”。');
       await expect(h.options.locator('#token')).toHaveValue('');
       if (!(await storedToken(h.page))) throw Error('native_webkit_idb_token_missing');
       expect(h.errors).toEqual([]);
@@ -392,7 +394,7 @@ export async function checkOrionOptions({ webkit, expect, folder }) {
       await h.page.clock.fastForward(2200);
       await h.page.clock.fastForward(10000);
       await expect(h.options.locator('#form-error')).toContainText('保存尚未确认：仍在等待设备信息写入');
-      await expect(h.options.locator('button[type=submit]')).toHaveText('保存');
+      await expect(h.options.locator('button[type=submit]')).toHaveText('保存并申请网页权限');
       await expect(h.options.locator('button[type=submit]')).toBeEnabled();
       await expect(h.options.locator('#token')).toHaveValue(token);
       expect(h.errors).toEqual([]);
@@ -412,11 +414,68 @@ export async function checkOrionOptions({ webkit, expect, folder }) {
       await h.page.waitForFunction(() => window.__test.statusRequests > 1);
       await expect(h.options.locator('#toast')).toHaveText('已保存');
       await expect(h.options.locator('button[type=submit]')).toBeEnabled();
-      await expect(h.options.locator('button[type=submit]')).toHaveText('保存');
+      await expect(h.options.locator('button[type=submit]')).toHaveText('保存并申请网页权限');
       if (!(await storedToken(h.page))) throw Error('refresh_stall_token_missing');
       expect(h.errors).toEqual([]);
       results.push({ case: 'unanswered success refresh does not hold Save button', passed: true, errors: h.errors });
       await h.page.screenshot({ path: join(folder, 'options-webkit.png'), fullPage: true });
+      await h.context.close();
+    }
+    {
+      const h = await start({ initial: 'pending', request: false });
+      await h.page.waitForFunction(() => typeof window.__test.answerInitialPermission === 'function');
+      await h.page.clock.fastForward(12010);
+      await expect(h.options.locator('#permission-status')).toHaveText('网页权限检查尚未收到浏览器回复；保存时仍会尝试申请。');
+      await fillAndSave(h);
+      await expect(h.options.locator('#toast')).toHaveText('已保存');
+      await expect(h.options.locator('#permission-status')).toHaveText('浏览器没有批准本次网页权限申请；设置保存会单独进行。');
+      await h.page.evaluate(() => window.__test.answerInitialPermission(true));
+      await expect(h.options.locator('#permission-status')).toHaveText('浏览器没有批准本次网页权限申请；设置保存会单独进行。');
+      expect(await h.page.evaluate(() => ({ gesture: window.__test.permissionGesture, origins: window.__test.requestedOrigins, order: window.__test.permissionOrder }))).toEqual({ gesture: true, origins: ['<all_urls>'], order: ['permission-request', 'save'] });
+      expect(await storedToken(h.page)).toBe(true);
+      expect(h.errors).toEqual([]);
+      results.push({ case: 'Save requests permission on the submit stack; refusal and stale contains do not block persistence', passed: true });
+      await h.context.close();
+    }
+    {
+      const h = await start({ request: 'pending' });
+      await fillAndSave(h);
+      await expect(h.options.locator('#toast')).toHaveText('已保存');
+      expect(await storedToken(h.page)).toBe(true);
+      await h.page.clock.fastForward(12010);
+      await expect(h.options.locator('#permission-status')).toHaveText('网页权限申请尚未收到浏览器回复；请同时查看设置保存结果。');
+      await expect(h.options.locator('button[type=submit]')).toBeEnabled();
+      await expect(h.options.locator('button[type=submit]')).toHaveText('保存并申请网页权限');
+      await h.options.locator('button[type=submit]').click();
+      await expect(h.options.locator('#toast')).toHaveText('已保存');
+      expect(await h.page.evaluate(() => window.__test.permissionRequests)).toBe(1);
+      await h.page.evaluate(() => window.__test.answerPermission(true));
+      await expect(h.options.locator('#permission-status')).toHaveText('浏览器报告已授权；采集结果见“最近采样”。');
+      expect(await storedToken(h.page)).toBe(true);
+      expect(h.errors).toEqual([]);
+      await h.page.screenshot({ path: join(folder, 'permission-options-webkit.png'), fullPage: true });
+      results.push({ case: 'unanswered permission is bounded, does not repeat or hold Save, and accepts a late native callback', passed: true });
+      await h.context.close();
+    }
+    {
+      const h = await start({ unavailable: true });
+      await expect(h.options.locator('#permission-status')).toHaveText('浏览器未提供网页权限检查接口；保存时仍会尝试申请。');
+      await fillAndSave(h);
+      await expect(h.options.locator('#toast')).toHaveText('已保存');
+      await expect(h.options.locator('#permission-status')).toHaveText('浏览器未提供网页权限申请接口；设置保存会单独进行。');
+      expect(await storedToken(h.page)).toBe(true);
+      expect(h.errors).toEqual([]);
+      results.push({ case: 'missing native permission namespace is explicit and does not hold Save', passed: true });
+      await h.context.close();
+    }
+    {
+      const h = await start({ request: 'error' });
+      await fillAndSave(h);
+      await expect(h.options.locator('#toast')).toHaveText('已保存');
+      await expect(h.options.locator('#permission-status')).toHaveText('浏览器的网页权限申请失败；设置保存会单独进行。');
+      expect(await storedToken(h.page)).toBe(true);
+      expect(h.errors).toEqual([]);
+      results.push({ case: 'native permission error is fixed copy and does not hold Save', passed: true });
       await h.context.close();
     }
     {

@@ -7,6 +7,9 @@ import type { DiagnosticAnswer, DiagnosticStatus, Request, SaveAnswer, SaveProgr
 import { buildLine, diagnosticRows, DIAGNOSTIC_ERRORS, SAVE_ERRORS, statusRows } from './options-view.ts';
 import { diagnosticStepSummary } from '../../shared/diagnostic.ts';
 import { UPLOAD_TIMEOUT_MS } from './limits.ts';
+import { checkWebsitePermission, requestWebsitePermission } from './permission-setup.ts';
+
+declare const RECALL_ORION: boolean;
 
 const REFRESH_MS = 30_000;
 const TOAST_MS = 6000;
@@ -35,6 +38,7 @@ const server = byId('server', HTMLInputElement);
 const token = byId('token', HTMLInputElement);
 const label = byId('label', HTMLInputElement);
 const formError = byId('form-error', HTMLParagraphElement);
+const permissionStatus = byId('permission-status', HTMLParagraphElement);
 const rows = byId('upload-status', HTMLDListElement);
 const flushButton = byId('flush', HTMLButtonElement);
 const updateButton = byId('check-update', HTMLButtonElement);
@@ -160,6 +164,7 @@ form.addEventListener('submit', (event) => {
   event.preventDefault();
   const submit = form.querySelector<HTMLButtonElement>('button[type="submit"]');
   if (submit === null) return;
+  if (RECALL_ORION) requestWebsitePermission(permissionStatus);
   formError.hidden = true;
   submit.textContent = '保存中…';
   void busy(submit, async () => {
@@ -192,7 +197,7 @@ form.addEventListener('submit', (event) => {
       clearTimeout(progressTimer);
       clearTimeout(timeout);
     }
-  }).finally(() => { submit.textContent = '保存'; });
+  }).finally(() => { submit.textContent = RECALL_ORION ? '保存并申请网页权限' : '保存'; });
 });
 
 flushButton.addEventListener('click', () => {
@@ -211,6 +216,13 @@ updateButton.addEventListener('click', () => {
 
 diagnosticStart.addEventListener('click', () => { void runDiagnostic('diagnostic-start'); });
 diagnosticSend.addEventListener('click', () => { void runDiagnostic('diagnostic-send'); });
+
+if (RECALL_ORION) {
+  permissionStatus.hidden = false;
+  const submit = form.querySelector<HTMLButtonElement>('button[type="submit"]');
+  if (submit !== null) submit.textContent = '保存并申请网页权限';
+  checkWebsitePermission(permissionStatus);
+}
 
 refresh(true).then(refreshDiagnostic).catch(() => {
   toast('扩展没有响应，请稍后再试');

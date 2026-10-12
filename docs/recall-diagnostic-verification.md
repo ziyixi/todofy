@@ -83,6 +83,26 @@ as supported on iOS, but does not establish their connection to Orion's website-
 a user gesture and can request required permissions withheld by the browser. Any enable action must run directly
 from that click, report the real answer and avoid treating a permission response as capture success.
 
+## Direct permission setup
+
+The phone installer screenshot lists only browsing history and unlimited storage. The actual required host
+declaration is already present; the screenshot alone cannot establish that Orion withheld website access.
+A disposable native Mac fixture with only `https://example.org/*` permission returned `granted` callbacks from
+contains, request and the subsequent contains. No API results were replaced. Since the public site already had a
+grant, this verifies callback availability, not a new grant or its effect on iOS collection.
+
+Orion's Save button now directly requests its declared `<all_urls>` before any await or background message.
+Initial contains and request replies are shown separately from settings persistence and actual sampling.
+Unavailable/error/nonboolean replies remain unconfirmed; after twelve seconds without a reply the UI says so,
+keeps Save usable and avoids a second pending permission prompt. A late native reply may update that status.
+An earlier contains reply cannot overwrite a later request result. Chrome compilation removes this permission
+code; manifest, extension identity, capture core, upload, proto and backend remain unchanged.
+
+Local typecheck, lint, build and 141 extension tests pass. The existing built-options WebKit harness passes twelve
+cases. New cases exercise trusted submit ordering before the actual Save message, refused/error/missing/unanswered
+permissions with native IDB persistence, initial-check timeout, stale initial replies and a late request reply.
+The bridge supplies permission replies; these tests do not establish Orion iOS permission behavior.
+
 ## Release and phone boundary
 
 The first full branch run reached a UI size failure: 62.2 KiB against the previous 62 KiB budget.
@@ -110,7 +130,5 @@ Orion ZIP SHA-256: `cfd83dc2f0cb06ccfd72d20fe1836c931347396b9177f0f477ba63f33c62
 [Published Orion ZIP](https://github.com/ziyixi/todofy/releases/download/recall-extension-v2026.1012.812/recall-orion-v2026.1012.812.zip).
 No owner Chrome installation update or Chrome interaction was performed. The disposable Orion test extension was
 uninstalled (the native manager is empty), and its exact loopback consumer process was stopped; the port is closed.
-Mac Orion and the WebKit bridge cannot establish iOS behavior. The owner should update the existing Orion extension,
-start one diagnostic, keep its public page foreground for about a minute, then return and Send. No token rotation or
-uninstallation is needed. Only after the actual phone receipt arrives can the platform/selection/injection failure
-be diagnosed from native evidence.
+Mac Orion and the WebKit bridge cannot establish iOS behavior. The subsequent phone receipt and permission
+investigation are recorded above. No token rotation, repeated reinstallation or invented iOS menu path is required.

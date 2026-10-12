@@ -45,6 +45,7 @@ window.chrome = {
         shared.statusRequests++;
         if (shared.stallRefresh && shared.statusRequests > 1) return new Promise(() => {});
       }
+      if (request.type === 'save') (shared.permissionOrder ??= []).push('save');
       return new Promise((resolve) => {
         const listener = shared.listeners.message?.[0];
         if (!listener) throw Error('background_not_ready');
@@ -54,6 +55,31 @@ window.chrome = {
     },
   },
   storage: { local: area },
+  permissions: {
+    contains(details, callback) {
+      if (shared.permissionCase?.initial === 'pending') {
+        shared.answerInitialPermission = callback;
+        return undefined;
+      }
+      queueMicrotask(() => callback(false));
+      return undefined;
+    },
+    request(details, callback) {
+      shared.permissionRequests = (shared.permissionRequests ?? 0) + 1;
+      shared.permissionGesture = shared.submitEvent?.isTrusted === true && shared.submitEvent.eventPhase !== 0;
+      shared.requestedOrigins = details.origins;
+      (shared.permissionOrder ??= []).push('permission-request');
+      shared.answerPermission = callback;
+      const result = shared.permissionCase?.request ?? true;
+      if (result === 'pending') return undefined;
+      queueMicrotask(() => {
+        if (result === 'error') window.chrome.runtime.lastError = { message: 'synthetic_permission_error' };
+        callback(result === 'error' ? undefined : result);
+        delete window.chrome.runtime.lastError;
+      });
+      return undefined;
+    },
+  },
   tabs: {
     onActivated: event('activated'),
     onUpdated: event('updated'),
@@ -147,6 +173,10 @@ window.chrome = {
     setTitle: () => Promise.resolve(),
   },
 };
+if (shared.permissionCase?.unavailable) delete window.chrome.permissions;
+if (location.pathname === '/options.html') {
+  document.addEventListener('submit', (event) => { shared.submitEvent = event; }, true);
+}
 if (location.pathname === '/background.html') {
   shared.emit = (name, ...args) => {
     for (const listener of shared.listeners[name] ?? []) listener(...args);

@@ -9,7 +9,7 @@ Its old waiting lists and release identities are historical, not instructions to
 
 ## Current work
 
-`codex/recall-orion-permission-verification` records the follow-up native investigation; no new app version is released.
+`codex/recall-permission-setup` adds a direct website-permission request to Orion's Save button; release pending.
 The owner 812 receipt has 8 tab events, 2 alarms and only open-test-page/Alarm-setup results. A fresh native Mac
 Orion test reproduced that pattern. Temporary closed phase observations showed state/mirror reads completing and
 execution waiting in the native active-tab query. The browser displayed a site-access prompt for the public fixture.
@@ -22,8 +22,14 @@ permission issue or send the owner to a macOS-only menu. Current ZIP already dec
 `codex/recall-startup-diagnostic` at `d04501a` passed CI but is unmerged and never released. Its proposed in-flight
 tracker did not explain the native result, and a start/observe timing gap remains; do not promote it as a phone fix.
 The test extension is removed, loopback consumer stopped and port closed. Owner Chrome and production remain unchanged.
-Next: validate the standard permissions API from a direct extension-page user gesture using a minimal public-site
-native fixture before implementing an enable action; Orion's iOS support table alone is not execution proof.
+The minimal native Mac probe returned `granted` through callbacks for contains/request on example.org. That site
+was already granted; this verifies API replies, not a grant transition or the iOS website-access gate.
+Orion options now asks for its already-declared `<all_urls>` synchronously on Save, before messages or awaits.
+Permission replies and settings persistence are independent; unavailable, refused and unanswered replies never
+claim capture works. No manifest, capture core, proto or backend changes. Chrome options excludes the native calls.
+Local type/lint/build, 141 extension tests and twelve WebKit cases pass, including actual IDB Save with refused or
+unanswered permissions, stale initial replies and trusted submit ordering. Next: exact-artifact CI/native UI check,
+then same-SHA Actions release. Do not ask the owner to hunt for a Mac-only menu or repeatedly reinstall.
 
 
 `codex/recall-mobile-diagnostic` implements the authorized one-shot Orion capture diagnosis.

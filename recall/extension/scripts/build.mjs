@@ -92,6 +92,7 @@ export async function buildExtension({ dist = DIST, time = new Date(), commit = 
   }
   const mobile = { ...common, target: 'safari17', define: { ...common.define, RECALL_ORION: 'true' }, outdir: orionFolder };
   await build({ ...mobile, entryPoints: { sw: join(ROOT, 'src/sw.ts') }, format: 'iife' });
+  await build({ ...mobile, entryPoints: { options: join(ROOT, 'src/options.ts') }, format: 'esm' });
   await build({ ...mobile, entryPoints: { probe: join(ROOT, 'src/probe-script.ts') }, format: 'iife', globalName: 'recallProbe', footer: { js: 'recallProbe.result;' } });
   writeFileSync(join(orionFolder, 'manifest.json'), `${JSON.stringify(buildOrionManifest(readTemplate(), { version, versionName: short }), null, 2)}\n`);
   const orionZip = join(dist, `recall-orion-${short}.zip`);

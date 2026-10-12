@@ -67,6 +67,15 @@ describe('the build', () => {
     });
   });
 
+  it('keeps native permission setup out of Chrome and includes it only in Orion options', () => {
+    const desktop = readFileSync(join(built.folder, 'options.js'), 'utf8');
+    const mobile = readFileSync(join(built.orionFolder, 'options.js'), 'utf8');
+    expect(desktop).not.toContain('chrome.permissions.request');
+    expect(desktop).not.toContain('chrome.permissions.contains');
+    expect(mobile).toContain('chrome.permissions.request');
+    expect(mobile).toContain('chrome.permissions.contains');
+  });
+
   it('reports visibility through callback-only MV2 messaging without throwing on a closed response port', async () => {
     const code = readFileSync(join(built.orionFolder, 'probe.js'), 'utf8');
     const documentEvents = new Map();
