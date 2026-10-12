@@ -9,20 +9,25 @@ Its old waiting lists and release identities are historical, not instructions to
 
 ## Current work
 
-`codex/recall-orion-event-capture` fixes a reproduced application deadlock: one unanswered mobile native query
-held every later focus/capture event while heartbeat remained independent. Activation/navigation/visibility events
-now supply their tab IDs, checked for active+visible state; the current span is reused before enumeration. Mobile
-callbacks have a five-second bound, with no added retries; normal later events/minute ticks can continue.
-Start uses the ID returned from creating its fixed public page, including an ID-only native reply, and feeds the
-same normal focus path. No proto, database, permissions or static scripts are added. Desktop behavior is unchanged.
-Local regressions prove actual visit/text/upload with an unanswered enumeration, background isolation, mirror
-resume and recovery after the old startup call times out. Type/lint/build and 148 extension tests pass. The same
-WebKit DOM/IDB/JPEG/gzip regression fails on published 812 and passes on the local correction (nine harness cases).
-Exact CI artifact checks and native A/B remain before release. Native testing is currently paused by the Mac lock;
-CUA requires the owner to unlock manually, and the owner has been asked. Do not bypass through another UI channel.
-Do not claim phone success until actual mobile receipt. No live Chrome interaction or installation update.
+Recall's mobile deadlock correction is released at `1c1e0b5` (`2026.1012.1736`). Known event tab IDs and the current
+span precede enumeration, with fresh active/visible/privacy checks; unanswered mobile callbacks release after five
+seconds. The diagnostic-created ID enters the same capture path. No new permissions, proto, resources or retries.
+[Branch CI](https://github.com/ziyixi/todofy/actions/runs/38284967839) and
+[same-SHA release](https://github.com/ziyixi/todofy/actions/runs/38295443553) pass. Local type/lint/build, 148 tests and
+nine exact-CI WebKit cases pass; the same stalled-query recording regression fails on released 812.
+Fresh real Orion Mac A/B also passes: 812 remains at zero content after its public-site grant, with injection pending;
+1736 automatically uploads one nonempty document and one image, then an ended visit, without manual reload/restart.
+Three native minute alarms leave document/image counts at one and report capture_store=unchanged. Actual native
+options verifies 1736 and sends the report. Both downloaded release ZIPs match all twelve corresponding CI files.
+Deployment `7021502888` verifies Worker `90d14ea6-052a-42eb-8045-defeb6bd05da`; every other app/VPS deploy is skipped.
+Test extensions are removed, the exact consumer stopped and port closed. Owner Chrome remains untouched.
+Phone iOS acceptance remains open: update the existing Orion ZIP, Start, keep the fixed public page foreground about
+one minute, then Send. Do not infer phone success from Mac, heartbeat or an empty outbox. See
+[verification](docs/recall-diagnostic-verification.md). The permission-button and startup-tracker experiments stay unmerged.
+After phone capture is confirmed, the owner's requested connection-list cleanup and token-name UI review remain separate work.
 
-`codex/recall-permission-api-verification` records the native permission investigation; application release is held.
+The earlier `codex/recall-permission-api-verification` records the native permission investigation; its proposed
+permission-button release remains held.
 The owner 812 receipt has 8 tab events, 2 alarms and only open-test-page/Alarm-setup results. A fresh native Mac
 Orion test reproduced that pattern. Temporary closed phase observations showed state/mirror reads completing and
 execution waiting in the native active-tab query. The browser displayed a site-access prompt for the public fixture.

@@ -122,7 +122,7 @@ until a native execution test establishes that it enables website access. No new
 
 ## Release and phone boundary
 
-### Event-path correction in progress
+### Event-path correction
 
 The two-stage phone report exposed an application deadlock in addition to the unresolved platform behavior.
 The first mobile focus initialization queried active tabs for a window ID that mobile selection did not use.
@@ -134,10 +134,43 @@ The correction uses event-provided tab IDs and the current span, with fresh acti
 enumerating tabs. Known targets that cannot prove foreground state return no target. Mobile callbacks have a
 five-second bound; no new retry mechanism is introduced. The created diagnostic tab ID feeds the ordinary focus
 path even when native creation omits its URL. Existing native callbacks, minute tick, upload and deduplication remain.
-No permissions, static scripts, proto fields or production resources change. Desktop calls retain their original path.
+No permissions, static scripts, proto fields or new production resources are added. Desktop calls retain their original path.
 Regression tests failed before the corresponding fix and now save a real IDB visit, text and upload while native
 enumeration never answers. Separate checks cover hidden/background pages, mirror resume and startup queue recovery.
 Native Mac and final iOS results must be recorded independently; these application regressions do not prove phone success.
+
+Full [branch CI](https://github.com/ziyixi/todofy/actions/runs/38284967839) passed for
+`1c1e0b5bbf6f34bd825452c54d496070d23d5cac`. All 148 extension tests pass. The same WebKit recording regression fails
+on actual released 812 and passes on the exact CI artifact `2026.1012.1736`, along with all nine existing options,
+diagnostic and capture cases. It checks actual DOM text, native IDB, JPEG, gzip receipt and automatic minute dedup.
+
+A fresh native Orion Mac comparison used independent test identities, only example.org/loopback host scopes and
+the same disposable consumer. Business script bytes are recoverable exactly after removing the two loopback
+constants and test owner invocation. No native API results were replaced. The helper invoked Start through the
+unchanged owner handler; Send was clicked in native options. Neither run manually reloaded/restarted the extension.
+The only website grant was example.org for one day, through the native toolbar prompt.
+
+- Released 812 started at **18:59:35.395Z**. Its **19:01:38.796Z** pre-reload snapshot has zero ordinary uploads,
+  documents and images. The native toolbar subsequently opened options without another permission prompt, confirming
+  the grant. Send at **19:03:02.047Z** reports 21 tab events, three alarms, returned active-tab/lookup calls and pending
+  probe injection; content counts remain zero.
+- Exact CI 1736 started at **19:04:50.408Z**. Before any manual reload, the consumer had one nonempty text document
+  and one image in the saved snapshot at **19:06:29.610Z**, and still one of each at **19:07:26.457Z**. Native options shows one local visit,
+  JPEG and unchanged sampling. Send at **19:08:15.586Z** reports 21 tab events, three alarms and eleven stages;
+  injection, capture and screenshot have returned, visibility is visible and capture_store is unchanged. The final
+  ordinary uploads contain one document, one image and the ended visit. All times in this comparison are UTC.
+
+[Same-SHA main release](https://github.com/ziyixi/todofy/actions/runs/38295443553) passed. Both Recall Worker release
+and extension release succeeded; all other app/image/VPS deployment jobs were skipped. Deployment `7021502888`
+records verified Worker `90d14ea6-052a-42eb-8045-defeb6bd05da`, with latest status success at **19:08:12Z**.
+The downloaded public Orion and Chrome ZIPs each match all twelve corresponding tested CI files byte for byte.
+Orion ZIP SHA-256: `31faaed020049f97e208f48ff0490cef33cf588b3e5d736b55cb21f8022de5ac`.
+[Published Orion ZIP](https://github.com/ziyixi/todofy/releases/download/recall-extension-v2026.1012.1736/recall-orion-v2026.1012.1736.zip).
+The native manager verifies both tested versions and an empty list after cleanup; the exact consumer is stopped and
+port 18793 closed. Owner Chrome was neither operated nor updated. iOS capture success still requires the phone's
+next receipt; no permission menu path is prescribed.
+
+### Initial one-shot diagnostic release
 
 The first full branch run reached a UI size failure: 62.2 KiB against the previous 62 KiB budget.
 The requested diagnostic view raises only that artifact budget to 64 KiB, with the reason recorded beside it.
