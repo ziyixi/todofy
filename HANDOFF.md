@@ -9,16 +9,17 @@ Its old waiting lists and release identities are historical, not instructions to
 
 ## Current work
 
-`codex/recall-activity-snapshots` implements the owner-authorized personal Recall update: first capture after
-10 seconds, minute sampling, optional viewport screenshots on existing documents, seven-day R2 retention
-with the search index kept, and Dropbox reads for archived content. Extension, Worker and UI changes are
-implemented; the owner also approved a small 32×32 image comparison to ignore minor clocks/cursors when text is
-unchanged. It compares with the last saved image; at least 8% of pixels must differ by 24 or more in an RGB channel.
-Local checks passed: proto lint/API lint/breaking and TS/Python suites, extension 103 tests, UI 128 tests,
-Worker 153 unit tests and 93 real DO/R2 runtime tests, deployment 18 tests, and the existing full smoke flow.
-Runtime checks include screenshot storage, duplicate omission, metadata pagination, retained FTS, and byte-for-byte
-Dropbox reads after both R2 blobs are removed. Branch CI, production release and real Chrome acceptance remain pending.
-No new service, dependency or separate screenshot pipeline was added; existing CPU, storage and bundle budgets remain.
+Recall's personal snapshot update is deployed at `de4d561`: first capture after ten seconds, minute sampling,
+viewport WebP, seven-day R2 files with FTS kept, and Dropbox reads for archived content. With unchanged text,
+the approved 32×32 comparison skips minor picture changes and compares against the last saved image.
+[Full branch CI](https://github.com/ziyixi/todofy/actions/runs/38185361002) and the
+[same-SHA release](https://github.com/ziyixi/todofy/actions/runs/38185811434) passed. The first release attempt
+uploaded successfully but its version-detail read failed; attempt 2 verified version
+`5ff5cde9-11cb-4160-97d6-04c7648b25c3`, Deployment `7003619381`. Extension `2026.1011.2346` is installed
+and its displayed SHA was checked. Real Chrome capture acceptance awaits actual owner input: Chrome still
+reports `idle` during native automation, so an empty queue is not duplicate-omission evidence. The owner was
+asked to move the mouse or press a key, then leave the prepared public page in front for two minutes.
+[Verification and remaining step](docs/recall-snapshot-verification.md). No new service, dependency or budget change.
 
 Mailsort flat English labels and Settings' classification-effect check are deployed at `4a48878`.
 [Branch CI](https://github.com/ziyixi/todofy/actions/runs/38177634581) and the
@@ -49,7 +50,7 @@ These are dated observations, not a replacement for current GitHub Deployment re
 | CI structure, October 11 | `21c358f` passed branch CI and the same SHA on main. Local composite actions retain explicit job dependencies and release boundaries. Reconcile fell from 128 jobs to 18. | [Branch](https://github.com/ziyixi/todofy/actions/runs/38134080448), [main](https://github.com/ziyixi/todofy/actions/runs/38134511298), [reconcile](https://github.com/ziyixi/todofy/actions/runs/38134699837) |
 | VPS, October 11 | Deployment `6994687990` verified Newsletter and Platform at `21c358f`, `phase=ready`. Their exact digests are in the archive. No Newsletter runtime changed in that release. | [Release evidence](docs/history/handoff-2026-10-11.md#done-2026-10-11-ci-workflow-structure) |
 | Brief and Home, October 11 | `ebf33fe` deployed both applications. Brief's namespace is registered; Ops reports healthy. Read-only UI checks preserved `MODE=archive` and the owner's saved monthly budget of **$80**. | [Release](https://github.com/ziyixi/todofy/actions/runs/38132200435), [inventory/reconcile](https://github.com/ziyixi/todofy/actions/runs/38132419031), [detailed evidence](docs/history/handoff-2026-10-11.md#done-2026-10-11-brief-resource-registration-and-home-monitoring) |
-| Recall, October 11 | Device uploads and Dropbox archive progress were observed. The 365-day text-retention implementation landed at `2a6e241`; deletion waits for confirmed archive coverage. | [Recorded acceptance](docs/history/handoff-2026-10-11.md#live-2026-10-11-claude-recall-the-browsing-recorder), [runbook](recall/README.md) |
+| Recall, October 11 | `de4d561` deployed the snapshot UI and seven-day hot files; CI includes real DO/R2 and fake-Dropbox cold reads. Extension updated; physical browsing acceptance remains open. | [Release](https://github.com/ziyixi/todofy/actions/runs/38185811434), [verification](docs/recall-snapshot-verification.md), [runbook](recall/README.md) |
 | Mailsort, October 11 | `4a48878` verified 12 English labels after production consolidation; live mode and existing learning/settings retained. | [Release](https://github.com/ziyixi/todofy/actions/runs/38177844303), [dated evidence](mailsort/docs/label-consolidation.md#2026-10-11-上线与生产整理) |
 
 The CI refactor exercised every Worker's production preflight/no-op but selected no Worker uploads.
