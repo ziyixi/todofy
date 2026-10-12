@@ -73,7 +73,12 @@ Orion 使用文件注入安装顶层监听器，再由 `tabs.sendMessage` 请求
 
 上述消费者请求由本地测试截获，不访问生产 Recall。扩展 API 桥接与 `chrome.storage.local` 是 fixture；
 DOM、脚本执行、IndexedDB、图片压缩与 gzip 是真实 WebKit。它不能证明 Orion 自己的 API 实现或 iOS 前后台挂起行为。
-本机未安装 Xcode、iOS Simulator 或 Orion。发布后先下载实际 ZIP 重跑同一检查，再交给 owner 做一次最小真机确认。
+本机已安装真实 Orion macOS 1.1.3/build 152，使用独立的空测试环境，不导入浏览记录或登录。
+原生检查使用临时扩展副本，只允许 localhost/127.0.0.1，上传到本机合成消费者；业务脚本沿用发布产物，
+仅替换服务器常量和追加安全字段观察器。必须核对实际导入的包，不能把点击“Reload from Disk”当成新 ZIP 已加载。
+先确认真实 Alarm 和消息回调，再检查正文、图片、访问上传及下一分钟无重复快照。
+观察器不伪造回调或事件，但可能影响非持久后台寿命；Mac 结果不能证明 iOS 的挂起行为。
+本机仍没有 Xcode 或 iOS Simulator。原生失败及修复证据见[验收记录](../../docs/recall-mobile-verification.md)。
 
 设置里的“当前记录”描述当前前台页面；设置页本身不采集。“活动检查”能确认后台是否检查过页面，
 “最近采样”始终显示结果或“尚未采样”，不再让空白状态掩盖尚未开始采集。最近错误只显示固定阶段码，

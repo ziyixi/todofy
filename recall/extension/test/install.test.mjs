@@ -124,8 +124,12 @@ describe('the build', () => {
     for (let i = 0; i < 10; i++) runInContext(code, context);
     expect(listeners.size).toBe(1);
     const replies = [];
-    const message = (type, id = runtime.id) => listeners.values().next().value({ type }, { id }, (reply) => replies.push(reply));
+    const message = (type, id = runtime.id) => listeners.values().next().value({ type }, id === null ? {} : { id }, (reply) => replies.push(reply));
     message('recall-probe');
+    expect(replies.at(-1)).toEqual({ documentId: 'synthetic-document', visible: true, url: document.location.href });
+    // Native Orion delivers this internal message without MessageSender.id.
+    message('recall-probe', null);
+    expect(replies).toHaveLength(2);
     expect(replies.at(-1)).toEqual({ documentId: 'synthetic-document', visible: true, url: document.location.href });
     body.innerText = 'Updated synthetic text';
     message('recall-capture');
@@ -135,7 +139,7 @@ describe('the build', () => {
     expect(replies.at(-1).visible).toBe(false);
     message('recall-capture', 'other-extension');
     message('unrelated');
-    expect(replies).toHaveLength(3);
+    expect(replies).toHaveLength(4);
     listeners.clear();
     runInNewContext(code, { document, window: { top: window }, chrome: { runtime } });
     expect(listeners.size).toBe(0);

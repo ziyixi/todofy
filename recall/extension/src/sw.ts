@@ -127,15 +127,15 @@ async function updateIfInstalled(trigger: 'tick' | 'owner'): Promise<boolean> {
 }
 
 async function ensureAlarm(): Promise<void> {
-  // MV2 get returns no Promise. Reading its callback preserves the existing alarm across event-page wakeups.
-  const alarm = MOBILE ? await new Promise<chrome.alarms.Alarm | undefined>((resolve, reject) => {
+  // MV2 get answers through its callback; Orion returns null for a missing alarm.
+  const alarm = MOBILE ? await new Promise<chrome.alarms.Alarm | null | undefined>((resolve, reject) => {
     chrome.alarms.get(TICK, (value) => {
       const error = chrome.runtime.lastError;
       if (error !== undefined) reject(new Error(error.message ?? 'browser_api_failed'));
       else resolve(value);
     });
   }) : await chrome.alarms.get(TICK);
-  if (alarm === undefined) await chrome.alarms.create(TICK, { periodInMinutes: TICK_MINUTES });
+  if (alarm === undefined || alarm === null) await chrome.alarms.create(TICK, { periodInMinutes: TICK_MINUTES });
 }
 
 async function onTick(at: number): Promise<void> {

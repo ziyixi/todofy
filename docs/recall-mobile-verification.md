@@ -1,47 +1,61 @@
 # Recall Orion capture verification
 
-Implementation: `e397f517349bd6d447eb6efff8a398b2a503442b`, October 12, 2026 UTC.
+## Native reproduction, October 12, 2026 UTC
 
-## Observed failure
+The owner's phone still failed on `2026.1012.429 / e397f51`: no activity check, local visit or sample was shown.
+Earlier WebKit checks used a synthetic extension API bridge and did not establish native Orion compatibility.
+A successful connection or empty upload queue is not proof of captured content.
 
-The owner confirmed Save works, but the phone reported `page_probe_invalid_result` and no sampling.
-Read-only Recall Settings showed the phone running `2026.1012.403` and reporting an extension error.
-A connection timestamp can be an empty heartbeat; it does not prove capture or content upload.
-The screenshot identifies an unusable probe result, not its native type or Orion's internal cause.
+Orion macOS **1.1.3/build 152** was installed from Kagi's official full macOS package into Applications.
+The small installer repeatedly failed in its updater; the full browser launches normally. No browsing data or
+credentials were imported. All native checks used one window and a synthetic loopback article/HTTP consumer.
 
-## Change and local checks
+A temporary copy of the actual released `429` ZIP kept the business scripts, replacing only the two server
+constants and its test identity/host permissions. Observers passed through real native callbacks and events;
+they recorded types, booleans and counts, never URLs, page text or credentials. Synthetic credentials stayed local.
 
-Orion now injects the existing top-frame probe to install a single content listener, then uses native MV2
-`tabs.sendMessage` callbacks to request fresh visibility or text. It ignores file-injection completion values.
-Reinjection replaces the listener while preserving document identity. Desktop keeps its file-result path.
-The existing URL, password, foreground, build, document identity and snapshot deduplication checks remain.
-No dependency, service, retries or budget setting was added.
+| Actual native observation | Consequence |
+| --- | --- |
+| Missing `alarms.get('tick')` replies `null`, with no `lastError`. | The `undefined`-only check never creates the minute Alarm. |
+| `tabs.executeScript` replies with a valid probe; the following content-message reply is `null`. | File execution itself works in this Mac check. |
+| The content listener receives the request, has its own runtime ID, receives no string sender ID, returns `false` and never calls `sendResponse`. | The exact sender-ID guard rejects Orion's internal message. |
+| The local consumer receives only empty heartbeat batches. | The native failure reproduces the phone's connection-without-content symptom. |
 
-- All 127 extension tests, typecheck, lint and both builds passed.
-- The corrected isolated WebKit harness deliberately discards the file completion value. The downloaded old
-  `403 / fe419a4` fails with `not_focused:page_probe_invalid_result`; this test does not assume frameId rejection.
-- All six cases pass for the fix: four Save checks and two automatic capture paths. Each capture path reads
-  updated DOM after listener installation, uploads one native JPEG/text document and one visit through native
-  IndexedDB/gzip, and omits the next unchanged snapshot. Repeated injection keeps one listener; pagehide ends focus.
-- The real WebKit DOM, scripts, image compression, IndexedDB and gzip are exercised. The native extension API
-  bridge and storage.local remain synthetic. These results do not prove Orion's native API behavior on the phone.
+The baseline ZIP and content-free diagnostics were retained locally before changing source.
+Native Mac reproduction identifies concrete compatibility bugs; it does not prove the phone has identical API values.
 
-## Release evidence
+## Minimal correction and checks
 
-- [Full branch CI](https://github.com/ziyixi/todofy/actions/runs/38203713036) passed.
-- [Same-SHA main release](https://github.com/ziyixi/todofy/actions/runs/38204085384) passed. Deployment `7006529755`
-  verified Worker `e97a57e4-815e-4b9b-bd61-4424bc9298f2`; Recall's live UI displayed `e397f51`.
-- Both downloaded release ZIPs verified version `2026.1012.429` and commit `e397f51`. The exact downloaded Orion
-  ZIP passed all six WebKit checks above, with discarded completion, standard message replies and no page errors.
-- Mac installation files were updated in the existing folder, preserving identity/settings. Its running Chrome
-  version was not independently read.
+- Treat `null` and `undefined` as a missing Alarm; keep an existing Alarm.
+- In the Orion top-frame content listener, accept the optional missing sender ID and still reject a present foreign ID.
+  Background settings/control and visibility authentication remain unchanged. Chrome documents `tabs.sendMessage`
+  as routing to the current extension's content scripts, and `MessageSender.id` as optional.
+- Preserve the existing URL exclusions, password/foreground/build/document checks, screenshot limits and deduplication.
+  No new service, dependency, retry mechanism, permissions or budget change.
 
-[Orion ZIP](https://github.com/ziyixi/todofy/releases/download/recall-extension-v2026.1012.429/recall-orion-v2026.1012.429.zip).
+Both targeted regressions failed before the corresponding fix. All **128 extension tests**, typecheck and lint passed.
+The compiled-script regression checks a genuinely absent sender property and retains foreign-ID rejection.
 
-## Phone acceptance still open
+The fresh corrected build was imported into real Orion and verified in its native extension manager as
+`2026.1012.601`. The temporary observer still used real extension APIs, IndexedDB, screenshot encoding and gzip:
 
-Update the existing extension without uninstalling or generating another token. Browse one public page in the
-foreground for twenty seconds, then use the existing Upload now button. Confirm a sampling result and check the
-phone's actual timeline entry. Read-only verification must not open private page bodies for diagnosis.
-No phone capture or upload has yet been accepted for this release. A successful local fixture, empty queue or
-heartbeat does not close that acceptance.
+- A natural native Alarm fired and probe/capture messages returned valid current-page objects.
+- At **06:03:50.109Z**, the consumer received one synthetic text document and one actual JPEG, verified from its bytes.
+- Another native screenshot/capture at **06:04:39Z** created no second document for the unchanged page.
+- Navigating away ended the visit; at **06:05:39.509Z**, the consumer received one visit and no new document.
+
+This is native browser evidence, not a fake API success. Observers and the synthetic seed can affect event-page
+lifetime; iOS app switching, suspension and screenshots still need phone acceptance. Temporary test code is not shipped.
+
+## Release and phone acceptance
+
+The correction is on `codex/recall-orion-native-capture`; branch CI and same-SHA Actions publication are pending.
+No new phone trial is requested until the published package has been checked locally.
+
+After publication, update the existing phone extension from its file-import/update entry without uninstalling or
+creating another token. A final public-page check must confirm an actual sample and a matching phone timeline entry.
+No phone capture/upload success has yet been accepted. Previous `429` release and synthetic checks remain historical
+at [its Actions run](https://github.com/ziyixi/todofy/actions/runs/38204085384).
+
+References: [Chrome tabs.sendMessage](https://developer.chrome.com/docs/extensions/reference/api/tabs#method-sendMessage),
+[MessageSender](https://developer.chrome.com/docs/extensions/reference/api/runtime#type-MessageSender).

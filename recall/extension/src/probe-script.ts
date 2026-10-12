@@ -42,7 +42,9 @@ if (RECALL_ORION && topFrame && globalThis.recallPageProbe !== undefined) {
   // Replace the listener on reinjection so it uses this build, while preserving the document token.
   if (state.listener !== undefined) chrome.runtime.onMessage.removeListener(state.listener);
   state.listener = (message: unknown, sender, sendResponse) => {
-    if (sender.id !== chrome.runtime.id || typeof message !== 'object' || message === null || !('type' in message)) return false;
+    // tabs.sendMessage targets this extension; native Orion omits the optional sender ID.
+    if (sender.id !== undefined && sender.id !== chrome.runtime.id) return false;
+    if (typeof message !== 'object' || message === null || !('type' in message)) return false;
     if (message.type === 'recall-probe') sendResponse(probe());
     if (message.type === 'recall-capture') sendResponse(readPage(document, RECALL_BUILD));
     return false;

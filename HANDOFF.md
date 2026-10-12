@@ -14,9 +14,12 @@ Real Orion macOS 1.1.3/build 152 now runs in a dedicated empty test environment,
 copy of the released extension and a synthetic HTTP consumer. Native callbacks reproduce two differences
 missed by the synthetic bridge: a missing minute alarm is `null` (so `ensureAlarm` never creates it), and
 file injection returns a valid page probe while the subsequent content-message callback is `null`.
-The baseline is retained locally; message delivery is still being investigated before a correction.
-No phone capture success is claimed. Native Mac checks cannot establish iOS lifecycle behavior.
-Only the observed Alarm regression is being fixed; no production or credential changes have been made.
+Both fixes now have regressions that failed before correction; all 128 extension tests, typecheck and lint pass.
+The fresh build was visibly imported as `2026.1012.601`. Real native Alarm/message/IndexedDB/image/gzip checks
+received one text/JPEG document at 06:03:50.109Z, omitted the next unchanged snapshot, and received the ended
+visit at 06:05:39.509Z. [Native evidence](docs/recall-mobile-verification.md) distinguishes this from the old fake bridge.
+No phone capture success is claimed. Native Mac checks cannot establish iOS lifecycle behavior. Branch CI and
+same-SHA Actions publication are next; no production or credential changes have been made.
 
 Recall Orion content-message capture fix is released at `e397f51` (extension `2026.1012.429`).
 The owner's `403` screenshot reports `page_probe_invalid_result`; it identifies an unusable probe result,
