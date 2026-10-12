@@ -247,7 +247,12 @@ export async function checkOrionOptions({ webkit, expect, folder }) {
     } else {
       await h.page.evaluate(() => window.__test.emit('updated', 1, { status: 'complete' }));
     }
-    await expect.poll(() => getStatus(h)).toMatchObject({ focused: true });
+    await expect
+      .poll(async () => {
+        const status = await getStatus(h);
+        return status.focused ? 'focused' : 'not_focused:' + (status.lastError?.code ?? 'none');
+      })
+      .toBe('focused');
     await h.article.locator('#article').evaluate((element) => {
       element.textContent += ' Fresh DOM after listener installation.';
     });
@@ -295,9 +300,11 @@ export async function checkOrionOptions({ webkit, expect, folder }) {
     expect(await h.article.evaluate(() => window.__test.listeners.message.length)).toBe(1);
     const nativeBoundary = await h.page.evaluate(() => ({
       completionDiscarded: window.__test.discardedCompletions > 0,
+      defaultTopFrame: window.__test.injectionKeys.every((keys) => !keys.includes('frameId')),
       messageRequests: [...new Set(window.__test.pageRequests)],
     }));
     expect(nativeBoundary.completionDiscarded).toBe(true);
+    expect(nativeBoundary.defaultTopFrame).toBe(true);
     expect(nativeBoundary.messageRequests).toEqual(expect.arrayContaining(['recall-probe', 'recall-capture']));
     await h.page.evaluate(() => {
       window.__test.tab.active = false;

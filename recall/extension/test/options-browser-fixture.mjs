@@ -74,7 +74,7 @@ window.chrome = {
     },
     executeScript(id, details, callback) {
       shared.calls.execute++;
-      if (Object.hasOwn(details, 'frameId')) throw Error('mobile_injection_must_use_default_top_frame');
+      (shared.injectionKeys ??= []).push(Object.keys(details));
       if (shared.injectWhileLoading) {
         shared.loadingRefusal = true;
         window.chrome.runtime.lastError = { message: 'Cannot access page while loading' };

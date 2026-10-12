@@ -21,7 +21,9 @@ Top-frame self-check and existing URL, visibility, build, document and privacy g
 messages accept an omitted frameId; known child frames and other senders remain rejected.
 All 127 extension tests, typecheck, lint and both builds pass. The isolated WebKit check passes all six cases,
 including discarded injection completion, real fresh DOM/text/JPEG upload, one visit and no repeated snapshot.
-The native browser API bridge remains synthetic; phone capture/upload acceptance is open. Release is pending.
+The identical corrected harness on the downloaded `2026.1012.403` fails with
+`not_focused:page_probe_invalid_result` when the completion value is discarded; it does not assume frameId
+rejection. The native browser API bridge remains synthetic; phone capture/upload acceptance is open. Release is pending.
 Do not infer phone success from a heartbeat, queue length or synthetic API fixture.
 
 Recall Orion capture fixes are released at `fe419a4` (extension `2026.1012.403`).
