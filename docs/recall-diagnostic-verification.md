@@ -43,15 +43,36 @@ identity and receive time; Settings shows details only when a report exists. Rec
 
 This native run also exposed a diagnostic accuracy issue: restarting the background could replace completed
 stages with fresh pending calls, and leaving the page could overwrite its foreground observations. The correction
-preserves completed/foreground evidence. The regression and the full extension suite pass. Published-package
-confirmation is recorded below once complete; the earlier local report is not evidence for that later correction.
+preserves completed/foreground evidence. The regression and the full extension suite pass. The final artifact
+confirmation is recorded below; the earlier local report is not evidence for that later correction.
 
 ## Release and phone boundary
 
 The first full branch run reached a UI size failure: 62.2 KiB against the previous 62 KiB budget.
 The requested diagnostic view raises only that artifact budget to 64 KiB, with the reason recorded beside it.
-Worker gzip remains 126.5 KiB within its unchanged 130 KiB budget. Full branch CI, same-SHA Actions publication
-and downloaded-package confirmation are pending.
+Worker gzip remains 126.5 KiB within its unchanged 130 KiB budget.
+
+The final [full branch CI](https://github.com/ziyixi/todofy/actions/runs/38221876740) passed for
+`3fb51d25250d982ab49244bc7761987627bdff68`. The
+[same-SHA main release](https://github.com/ziyixi/todofy/actions/runs/38222892688) reused those checks and artifacts;
+Recall deploy and extension publication succeeded. No other application deploy ran. Deployment `7009598383` records
+Worker `9d200fff-7bb8-471a-b67f-878f4bf9ed0d` with status `success`, after running identity/configuration verification.
+
+The exact CI files (`2026.1012.812 · 3fb51d2`) passed all eight WebKit options cases. A disposable loopback copy
+was visibly imported as that version into real Orion macOS. Its strict consumer received a diagnostic at
+**08:18:30.720Z** with eleven closed stages and three native minute alarms. `active_tabs` selected the test page;
+`focus_target` remained visible; both current/stored visibility remained visible; sender identity was missing.
+The completed Alarm answer remained `returned/object` after reloading the background. Ordinary synthetic uploads
+contained one nonempty text document and one real image; the later capture reported `unchanged`. The diagnostic
+itself contained no business items. Test-only Start/Send invocation is separate from the UI clicks exercised in
+WebKit; no native API results were replaced.
+
+Both actual release ZIPs were downloaded. All twelve files in each match the corresponding tested CI artifact
+byte for byte; version and short SHA match. The desktop script contains no mobile diagnostic target.
+Orion ZIP SHA-256: `cfd83dc2f0cb06ccfd72d20fe1836c931347396b9177f0f477ba63f33c62c46a`.
+[Published Orion ZIP](https://github.com/ziyixi/todofy/releases/download/recall-extension-v2026.1012.812/recall-orion-v2026.1012.812.zip).
+No owner Chrome installation update or Chrome interaction was performed. The disposable Orion test extension was
+uninstalled (the native manager is empty), and its exact loopback consumer process was stopped; the port is closed.
 Mac Orion and the WebKit bridge cannot establish iOS behavior. The owner should update the existing Orion extension,
 start one diagnostic, keep its public page foreground for about a minute, then return and Send. No token rotation or
 uninstallation is needed. Only after the actual phone receipt arrives can the platform/selection/injection failure

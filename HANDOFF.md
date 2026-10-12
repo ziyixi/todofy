@@ -19,10 +19,20 @@ The real WebKit options harness passes eight cases, including Send while native 
 macOS returned eleven closed stages, a native minute alarm and a saved text/image capture through a strict loopback
 consumer. That run exposed completed/foreground observations being overwritten on return; the small correction has
 a regression. CI measured the requested UI at 62.2 KiB; its artifact budget is deliberately 64 KiB,
-while Worker/runtime/cost limits remain unchanged. Full branch CI, same-SHA Actions release and final published-package
-native check remain pending.
+while Worker/runtime/cost limits remain unchanged.
+[Full branch CI](https://github.com/ziyixi/todofy/actions/runs/38221876740) and the
+[same-SHA release](https://github.com/ziyixi/todofy/actions/runs/38222892688) passed at `3fb51d2`.
+Deployment `7009598383` verified Recall Worker `9d200fff-7bb8-471a-b67f-878f4bf9ed0d`; other app deploys were skipped.
+The exact CI artifact `2026.1012.812` passed eight WebKit cases and was visibly imported into real Orion macOS.
+At 08:18:30.720Z the native consumer received eleven stages and three alarms; foreground/completed observations
+survived returning to management. Synthetic uploads included nonempty text and an image, with the next unchanged
+capture deduplicated. All files of both downloaded release ZIPs match the tested artifacts byte for byte.
+[Orion ZIP](https://github.com/ziyixi/todofy/releases/download/recall-extension-v2026.1012.812/recall-orion-v2026.1012.812.zip).
+The temporary Orion extension is uninstalled, the consumer stopped and its port closed. Chrome remains untouched.
+`codex/recall-diagnostic-verification` records these receipts in root docs only, without another application release.
 [Diagnostic evidence](docs/recall-diagnostic-verification.md) separates synthetic/native Mac checks from the phone
-result still needed. Do not claim iOS capture is fixed.
+result still needed. Owner updates the existing Orion extension, Starts, stays on the public test page about one
+minute, then Sends and reports back; no token rotation or uninstall. Do not claim iOS capture is fixed.
 
 The native Orion fixes from `codex/recall-orion-native-capture` are released at `88bbc3d` (`2026.1012.611`).
 Real Orion macOS 1.1.3/build 152 now runs in a dedicated empty test environment, with a loopback-only
