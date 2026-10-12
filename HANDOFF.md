@@ -9,7 +9,7 @@ Its old waiting lists and release identities are historical, not instructions to
 
 ## Current work
 
-`codex/recall-orion-native-capture` is investigating the owner's still-failing Orion `429` capture.
+The native Orion fixes from `codex/recall-orion-native-capture` are released at `88bbc3d` (`2026.1012.611`).
 Real Orion macOS 1.1.3/build 152 now runs in a dedicated empty test environment, with a loopback-only
 copy of the released extension and a synthetic HTTP consumer. Native callbacks reproduce two differences
 missed by the synthetic bridge: a missing minute alarm is `null` (so `ensureAlarm` never creates it), and
@@ -18,8 +18,16 @@ Both fixes now have regressions that failed before correction; all 128 extension
 The fresh build was visibly imported as `2026.1012.601`. Real native Alarm/message/IndexedDB/image/gzip checks
 received one text/JPEG document at 06:03:50.109Z, omitted the next unchanged snapshot, and received the ended
 visit at 06:05:39.509Z. [Native evidence](docs/recall-mobile-verification.md) distinguishes this from the old fake bridge.
-No phone capture success is claimed. Native Mac checks cannot establish iOS lifecycle behavior. Branch CI and
-same-SHA Actions publication are next; no production or credential changes have been made.
+No phone capture success is claimed. Native Mac checks cannot establish iOS lifecycle behavior.
+[Branch CI](https://github.com/ziyixi/todofy/actions/runs/38211057207) and the
+[same-SHA release](https://github.com/ziyixi/todofy/actions/runs/38211415292) passed. Deployment `7007714439`
+verified Worker `8c3b0ddc-2623-4509-b852-e978dfe24d5c`; Home release was skipped. The actual published ZIP has been
+downloaded and visibly imported in Orion; its loopback test copy received a text/JPEG document at 06:22:46.218Z
+and an ended visit at 06:23:40.801Z. Native content-message sender ID is explicitly `undefined`.
+Root-docs-only branch `codex/recall-orion-native-verification` records these receipts; no further application
+change or release. No credential changes. Owner explicitly requires leaving their active
+Chrome and its installed extension files untouched; no Chrome interaction or installation update was performed.
+The temporary Orion test extension was removed and its loopback consumer stopped; only local safe evidence remains.
 
 Recall Orion content-message capture fix is released at `e397f51` (extension `2026.1012.429`).
 The owner's `403` screenshot reports `page_probe_invalid_result`; it identifies an unusable probe result,

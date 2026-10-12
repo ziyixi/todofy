@@ -47,10 +47,35 @@ The fresh corrected build was imported into real Orion and verified in its nativ
 This is native browser evidence, not a fake API success. Observers and the synthetic seed can affect event-page
 lifetime; iOS app switching, suspension and screenshots still need phone acceptance. Temporary test code is not shipped.
 
-## Release and phone acceptance
+## Release evidence
 
-The correction is on `codex/recall-orion-native-capture`; branch CI and same-SHA Actions publication are pending.
-No new phone trial is requested until the published package has been checked locally.
+Implementation: `88bbc3d020cb8437f02c6af9ebc7447866768dcd`.
+
+- [Full branch CI](https://github.com/ziyixi/todofy/actions/runs/38211057207) passed, including Recall checks and CI gate.
+- [Same-SHA main release](https://github.com/ziyixi/todofy/actions/runs/38211415292) passed. Deployment `7007714439`
+  verified Worker `8c3b0ddc-2623-4509-b852-e978dfe24d5c`. Home/Dashboard deployment was explicitly skipped.
+- The actual downloaded Orion ZIP verifies version `2026.1012.611`, commit `88bbc3d`, and SHA-256
+  `9a793b13919aa03c539e3cb1c613ed5b7fb8547187bad35ddd3f5088f19821de`.
+- Its loopback-only native test copy retains the original probe body, capture and options scripts, with only the
+  two server constants changed in the background script plus test observers/seed. Orion's native manager shows `611`.
+- This published code received one synthetic text/actual-JPEG document at **06:22:46.218Z** and one ended visit
+  at **06:23:40.801Z**. Native content-message metadata explicitly reports sender ID type `undefined`, and the
+  listener replies successfully. Snapshot deduplication was verified above on the same source's `601` build;
+  no separate sustained-focus dedup claim is made for this second visit.
+- No owner Chrome interaction, reload, capture test or installed-extension file update was performed in this task.
+- The temporary native test extension was disabled and uninstalled; Orion's toolbar and extension menu confirm
+  its removal. The loopback consumer was stopped. Local baseline ZIPs and safe diagnostics remain for reference.
+
+## CI scope
+
+The two native differences now have mandatory regressions in the existing Recall CI job. The existing WebKit
+full-chain check also passes all six cases locally; its extension API bridge remains synthetic. It is not a native
+Orion job. No new hosted Mac job, self-hosted runner, device farm or test framework was introduced. A native Orion
+cloud gate would need a separately proven automation path and would still not establish iOS suspension behavior.
+
+## Phone acceptance still open
+
+[Orion ZIP 2026.1012.611](https://github.com/ziyixi/todofy/releases/download/recall-extension-v2026.1012.611/recall-orion-v2026.1012.611.zip).
 
 After publication, update the existing phone extension from its file-import/update entry without uninstalling or
 creating another token. A final public-page check must confirm an actual sample and a matching phone timeline entry.
