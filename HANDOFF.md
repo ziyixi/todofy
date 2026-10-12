@@ -9,7 +9,7 @@ Its old waiting lists and release identities are historical, not instructions to
 
 ## Current work
 
-Recall Orion capture follow-up is on `codex/recall-orion-capture-check` (not released yet).
+Recall Orion capture fixes are released at `fe419a4` (extension `2026.1012.403`).
 Owner confirmed Save now works, but no sampling result appeared. Read-only production UI selected the phone device:
 its timeline had no visits today or link to an earlier recorded day. The settings timestamp is a heartbeat, not
 proof of content upload; there is no per-device document count in that view. Do not infer all uploads succeeded.
@@ -23,7 +23,19 @@ the owner's exact native Orion failure or proves live phone capture. Local statu
 ongoing visit count, explicit not-yet-sampled state and fixed error codes without content. Heartbeat labels no
 longer promise content upload. No new service, dependency, retry mechanism, privacy change or budget change.
 Local checks passed: all 123 extension tests, all 133 web tests, typecheck/lint, both extension builds and the web build.
-Pending: full branch CI, same-SHA main release, downloaded ZIP verification, then minimal phone check.
+[Full branch CI](https://github.com/ziyixi/todofy/actions/runs/38202046041) and the
+[same-SHA main release](https://github.com/ziyixi/todofy/actions/runs/38202298241) passed. Deployment `7006241331`
+verified Worker `337f8be9-879a-43ab-8021-106e2d50f983`. Both downloaded ZIPs verified `2026.1012.403` / `fe419a4`.
+The exact downloaded Orion ZIP passed all six WebKit checks, with one text/JPEG document and one visit per capture
+case, no duplicate snapshot and zero page errors. Re-running the same harness on the previous downloaded
+`2026.1012.322` reproduced failure to enter focus after page-load completion. Production Settings showed build
+`fe419a4`, the corrected connection labels and heartbeat explanation; only device metadata was read.
+Mac installation files were updated while preserving identity/settings; its running version was not independently
+read. [Phone ZIP](https://github.com/ziyixi/todofy/releases/download/recall-extension-v2026.1012.403/recall-orion-v2026.1012.403.zip).
+Pending only owner update of the existing phone extension and actual phone capture/upload acceptance. Do not mark
+that passed from local fixtures or from a heartbeat. Owner can browse normally after updating; check its timeline,
+and if still empty use the new activity-check, sampling and fixed-error fields instead of another blind trial.
+`codex/recall-orion-capture-verification` records these receipts; root documentation only, no further app release.
 
 Recall's Save isolation and MV2 callback fixes are released at `5d476a0`.
 The owner's screenshot of `354db53` proves phone mode now works but Save remains pending and token status is false.
