@@ -2,6 +2,7 @@
 import type { Context } from './context.ts';
 import { pageOf } from './page.ts';
 import { currentDenylist } from './settings.ts';
+import { lastError } from './store.ts';
 
 export interface PageProbe {
   readonly documentId: string;
@@ -36,15 +37,21 @@ function receive<T>(ctx: Context, resolve: (value: T) => void, reject: (error: E
 /** MV2 callbacks are the native contract; desktop Chrome keeps its Promise calls. */
 export function getTab(ctx: Context, tabId: number): Promise<chrome.tabs.Tab> {
   if (!ctx.mobile) return ctx.chrome.tabs.get(tabId);
-  return new Promise((resolve, reject) => {
+  return new Promise<chrome.tabs.Tab>((resolve, reject) => {
     ctx.chrome.tabs.get(tabId, (tab) => { receive(ctx, resolve, reject, tab); });
+  }).catch(async (error: unknown) => {
+    await lastError.set(ctx.chrome, 'page_tab_failed', ctx.now());
+    throw error;
   });
 }
 
 export function queryTabs(ctx: Context, query: chrome.tabs.QueryInfo): Promise<chrome.tabs.Tab[]> {
   if (!ctx.mobile) return ctx.chrome.tabs.query(query);
-  return new Promise((resolve, reject) => {
+  return new Promise<chrome.tabs.Tab[]>((resolve, reject) => {
     ctx.chrome.tabs.query(query, (tabs) => { receive(ctx, resolve, reject, tabs); });
+  }).catch(async (error: unknown) => {
+    await lastError.set(ctx.chrome, 'page_query_failed', ctx.now());
+    throw error;
   });
 }
 
@@ -77,15 +84,20 @@ export async function executeFile(ctx: Context, tabId: number, file: string, doc
 
 /** Do not inject even this small probe on excluded pages. No text, title or input values are read. */
 export async function probePage(ctx: Context, tabId: number): Promise<PageProbe | null> {
+  let failureCode = 'page_tab_failed';
   try {
     const tab = await getTab(ctx, tabId);
+    failureCode = 'page_probe_failed';
     if (tab.incognito || await pageOf(tab.url ?? '', await currentDenylist(ctx)) === null) return null;
     const value = await executeFile(ctx, tabId, 'probe.js');
-    if (typeof value !== 'object' || value === null) return null;
-    const probe = value as Record<string, unknown>;
-    return typeof probe['documentId'] === 'string' && typeof probe['visible'] === 'boolean' && typeof probe['url'] === 'string'
-      ? probe as unknown as PageProbe : null;
+    if (typeof value === 'object' && value !== null) {
+      const probe = value as Record<string, unknown>;
+      if (typeof probe['documentId'] === 'string' && typeof probe['visible'] === 'boolean' && typeof probe['url'] === 'string') return probe as unknown as PageProbe;
+    }
+    await lastError.set(ctx.chrome, 'page_probe_invalid_result', ctx.now());
+    return null;
   } catch {
+    await lastError.set(ctx.chrome, failureCode, ctx.now());
     return null;
   }
 }

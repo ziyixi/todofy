@@ -8,7 +8,7 @@ public key in `src/manifest.json`; the private half was never kept).
 
 | File | What |
 | --- | --- |
-| `src/sw.ts` | The service worker: every listener at the top level, one queue for the state, the one-minute `tick` |
+| `src/sw.ts` | The service worker: every listener at the top level, focus/capture queue, independent settings writes, the one-minute `tick` |
 | `src/browser.ts`, `src/probe-script.ts` | Orion/iOS top-frame identity and visibility, MV2 file injection |
 | `src/focus.ts`, `src/visits.ts` | The focus state machine and visits (§3.2, §3.3) |
 | `src/capture.ts`, `src/capture-script.ts`, `src/page-text.ts` | Captures and the script injected into one document (§3.4) |
@@ -47,10 +47,11 @@ The browser can suspend the extension while another app is open or the phone is 
 existing queue; phone batches flush within a minute while active. This does not record activity in other apps.
 
 Screenshots use native WebP where supported, otherwise verified native JPEG, with the same size and deduplication
-limits. Settings show the latest sampling outcome, screenshot format/failure, and queued uploads. iOS capture
+limits. Settings show the latest sampling outcome, screenshot format/failure, activity check, and queued uploads. A successful connection may only be an empty heartbeat; it does not prove a page was recorded. iOS capture
 support still needs the owner's one-time device check; tests over a fake browser do not prove Orion behavior.
-The [local WebKit check](../docs/mobile.md#本地验证) runs the built settings/background scripts with native IndexedDB
-and callback-only MV2 fixtures before phone acceptance. To update the phone, install the newer Orion ZIP; there is
+The [local WebKit check](../docs/mobile.md#本地验证) runs the built settings/background/probe/capture scripts with native IndexedDB, JPEG and gzip,
+callback-only MV2 fixtures and automatic minute alarms before phone acceptance. It checks the synthetic consumer
+receives actual text and one visit without duplicate snapshots; no production upload is made. To update the phone, install the newer Orion ZIP; there is
 no unpacked-folder self-update on iOS.
 
 ## Mac: install and update

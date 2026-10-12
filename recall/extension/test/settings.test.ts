@@ -1,10 +1,11 @@
 // The options (src/settings.ts, src/options-view.ts): what the owner may type, where the token is kept, and what the
 // page says about the uploads. Synthetic tokens only.
 import { describe, expect, it } from 'vitest';
-import { getToken, queueItem } from '../src/db.ts';
+import { deleteVisit, getToken, queueItem, setToken } from '../src/db.ts';
+import { reconcile } from '../src/focus.ts';
 import { statusRows, ago, buildLine, SAVE_ERRORS } from '../src/options-view.ts';
 import { currentDenylist, parseLabel, parseServer, parseToken, saveSettings, status } from '../src/settings.ts';
-import { getDevice, lastError, uploadState, INITIAL_UPLOAD } from '../src/store.ts';
+import { focusState, getDevice, lastError, uploadState, INITIAL_UPLOAD } from '../src/store.ts';
 import type { Status } from '../src/messages.ts';
 import { harness, INGEST_TOKEN, MINUTE, T0 } from './fake-chrome.ts';
 
@@ -80,7 +81,7 @@ describe('the options page\'s status', () => {
 
   it('says when the last upload was, and what waits', () => {
     expect(statusRows(base).map((row) => [row.label, row.value])).toEqual([
-      ['状态', '最近上传 3 分钟前'],
+      ['状态', '最近连接 3 分钟前（可能仅心跳）'],
       ['待上传', '3 条（移除扩展会删除还没上传的记录）'],
       ['设备 ID', base.deviceId],
     ]);
@@ -105,6 +106,37 @@ describe('the options page\'s status', () => {
     await uploadState.set(ctx.chrome, { ...INITIAL_UPLOAD, lastUploadAt: T0 - MINUTE });
     await lastError.set(ctx.chrome, 'upload_failed', T0);
     expect(await status(ctx)).toMatchObject({ version: '2026.1010.900', versionName: 'abc1234', tokenSet: false, queued: 1, lastError: { code: 'upload_failed' } });
+  });
+
+  it('shows activity checks and the native visit count without returning page details or credentials', async () => {
+    const { ctx, browser } = await harness();
+    const tab = browser.open('https://blog.example.org/synthetic-diagnostic-page', { title: 'Synthetic diagnostic title' });
+    await setToken(ctx.db, INGEST_TOKEN);
+    await reconcile(ctx, T0);
+    const report = await status({ ...ctx, mobile: true });
+    expect(report).toMatchObject({ lastFocusCheckAt: T0, localVisitCount: 1, capture: null });
+    const json = JSON.stringify(report);
+    for (const privateValue of [tab.url, tab.title, tab.documentId, INGEST_TOKEN]) expect(json).not.toContain(privateValue);
+    expect(statusRows(report)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ label: '活动检查', value: '刚刚' }),
+      expect.objectContaining({ label: '本地访问', value: '1 条进行中的访问（不等于待上传数）' }),
+      expect.objectContaining({ label: '最近采样', value: '尚未采样' }),
+      expect.objectContaining({ label: '采集环境', value: 'Orion · iOS，仅前台记录；正文读取接口已提供，截图接口已提供' }),
+    ]));
+    const open = await focusState.get(ctx.chrome);
+    if (open?.open === null || open?.open === undefined) throw new Error('missing_synthetic_visit');
+    await deleteVisit(ctx.db, open.open.visitId);
+    expect((await status(ctx)).localVisitCount).toBe(0);
+  });
+
+  it('explains that opening extension settings pauses the current page while retaining the last check', () => {
+    const rows = statusRows({ ...base, mobile: true, focused: false, capabilities: { script: true, screenshot: false }, lastFocusCheckAt: T0 - MINUTE, localVisitCount: 0 });
+    expect(rows).toEqual(expect.arrayContaining([
+      expect.objectContaining({ label: '当前记录', value: '当前未识别到可记录网页（扩展设置页不采集）' }),
+      expect.objectContaining({ label: '活动检查', value: '1 分钟前' }),
+      expect.objectContaining({ label: '最近采样', value: '尚未采样' }),
+      expect.objectContaining({ label: '采集环境', value: 'Orion · iOS，仅前台记录；正文读取接口已提供，截图接口未提供' }),
+    ]));
   });
 
   it('formats times and explains every refused save', () => {

@@ -117,6 +117,11 @@ export function visitOfTab(db: IDBDatabase, tabId: number): Promise<Visit | unde
   return transact(db, 'visits', 'readonly', (store) => result(store.index('tabId').get(tabId) as IDBRequest<Visit | undefined>));
 }
 
+/** A count of ongoing visits for local capture diagnostics, without reading their contents. */
+export function countVisits(db: IDBDatabase): Promise<number> {
+  return transact(db, 'visits', 'readonly', (store) => result(store.count()));
+}
+
 export function allVisits(db: IDBDatabase): Promise<Visit[]> {
   return transact(db, 'visits', 'readonly', (store) => result(store.getAll() as IDBRequest<Visit[]>));
 }

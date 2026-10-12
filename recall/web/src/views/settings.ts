@@ -2,7 +2,7 @@
  * 设置 (`/settings`, ../../docs/design.md §8.7): five cards and the build, in the owner's words (a code stays in a
  * tooltip only).
  *
- * - 设备: each device's label, latest upload (desktop warning after 24 hours; mobile foreground-only note), version, outbox, its last
+ * - 设备: each device's label, latest connection (desktop warning after 24 hours; mobile foreground-only note), version, outbox, its last
  *   error as a sentence that says what to do, and clock skew; without one, the three steps to connect one (clicks
  *   only); items uploads lost in the last 7 days, and items waiting for a recall that reads them.
  * - 插件口令: the extension's token: 生成 or 重新生成 (the old one works 24 hours more), ⋯ to revoke the old one at once
@@ -128,7 +128,7 @@ function devicesCard(status: ServiceStatus, now: number): HTMLElement {
     return card(
       '设备',
       '',
-      el('p', {}, '还没有设备上传。连上一台：'),
+      el('p', {}, '还没有设备连接。连上一台：'),
       el(
         'ol',
         { class: 'steps' },
@@ -153,7 +153,7 @@ function devicesCard(status: ServiceStatus, now: number): HTMLElement {
         return el(
           'li',
           {},
-          el('div', { class: 'row-head' }, el('span', { class: 'row-title' }, device.label), el('span', { class: stale ? 'meta warn' : 'meta' }, `最近上传 ${heard === null ? '—' : ago(heard, now)}`)),
+          el('div', { class: 'row-head' }, el('span', { class: 'row-title' }, device.label), el('span', { class: stale ? 'meta warn' : 'meta' }, `最近连接 ${heard === null ? '—' : ago(heard, now)}`)),
           stale ? el('p', { class: 'hint warn' }, '检查 Chrome 是否开着、扩展是否启用（开发者模式）') : null,
           device.mobile ? el('p', { class: 'hint' }, '手机仅在浏览器前台运行，打开后继续采集和上传。') : null,
           error === '' ? null : el('p', { class: urgent ? 'hint warn' : 'hint', title: device.lastErrorCode }, error),
@@ -167,6 +167,7 @@ function devicesCard(status: ServiceStatus, now: number): HTMLElement {
         )
       }),
     ),
+    el('p', { class: 'hint' }, '连接成功可能只是心跳；实际记录见时间线。'),
     ...notes,
   )
 }

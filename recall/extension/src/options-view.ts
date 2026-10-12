@@ -34,7 +34,7 @@ function uploadRow({ now, tokenSet, upload }: Status): Row {
   const wait = upload.nextAttemptAt - now;
   if (upload.failingSince !== 0) return row(`上传失败，${wait > 0 ? `${within(wait)}后重试` : '下次检查时重试'}（从 ${ago(now - upload.failingSince)}开始）`, true);
   if (wait > 0) return row(`recall 暂停接收，${within(wait)}后继续`, false);
-  return row(upload.lastUploadAt === 0 ? '还没有上传' : `最近上传 ${ago(now - upload.lastUploadAt)}`, false);
+  return row(upload.lastUploadAt === 0 ? '尚未连接服务器' : `最近连接 ${ago(now - upload.lastUploadAt)}（可能仅心跳）`, false);
 }
 
 export function statusRows(status: Status): Row[] {
@@ -50,8 +50,13 @@ export function statusRows(status: Status): Row[] {
     rows.push({ label: '最近错误', value: `${error.code}（${ago(status.now - error.at)}）`, warn: false });
   }
   if (status.capabilities !== undefined) {
-    rows.push({ label: '采集环境', value: `${status.mobile ? 'Orion · iOS，仅前台记录' : '桌面浏览器'}；正文读取${status.capabilities.script ? '可用' : '不可用'}，截图${status.capabilities.screenshot ? '可用' : '不可用'}`, warn: !status.capabilities.script });
-    rows.push({ label: '当前记录', value: status.focused ? '有网页在前台记录' : '暂停：打开普通网页后继续', warn: false });
+    rows.push({ label: '采集环境', value: `${status.mobile ? 'Orion · iOS，仅前台记录' : '桌面浏览器'}；正文读取接口${status.capabilities.script ? '已提供' : '未提供'}，截图接口${status.capabilities.screenshot ? '已提供' : '未提供'}`, warn: !status.capabilities.script });
+    rows.push({ label: '当前记录', value: status.focused ? '有网页在前台记录' : '当前未识别到可记录网页（扩展设置页不采集）', warn: false });
+  }
+  if (status.mobile) {
+    if (status.lastFocusCheckAt !== undefined) rows.push({ label: '活动检查', value: status.lastFocusCheckAt > 0 ? ago(status.now - status.lastFocusCheckAt) : '尚未检查', warn: false });
+    if (status.localVisitCount !== undefined) rows.push({ label: '本地访问', value: `${String(status.localVisitCount)} 条进行中的访问（不等于待上传数）`, warn: false });
+    if (status.capture === undefined || status.capture === null) rows.push({ label: '最近采样', value: '尚未采样', warn: false });
   }
   if (status.capture !== undefined && status.capture !== null) {
     const text = { saved: '正文已保存', empty: '正文为空', failed: '正文读取失败', excluded: '页面已切换或不允许采集', unchanged: '内容未变，未重复保存' }[status.capture.text];

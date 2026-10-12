@@ -1,6 +1,6 @@
 /**
- * The service status in the header's words (../../docs/design.md §8.3): the latest upload, or the device that stopped
- * uploading; the Dropbox backup, not connected or how far it fell behind; storage near its budget. Problems in the
+ * The service status in the header's words (../../docs/design.md §8.3): the latest connection, or the device that stopped
+ * connecting; the Dropbox backup, not connected or how far it fell behind; storage near its budget. Problems in the
  * warning color, as ops-v1 raises them (§9): a device counts while it was heard from in the last 30 days, so a retired
  * one stops warning. Phones do not warn merely for being closed. The backup is late once a change has waited a day,
  * counted from the connection at the earliest.
@@ -48,9 +48,9 @@ export function statusParts(status: ServiceStatus, now: number): HTMLElement[] {
   const parts: HTMLElement[] = []
   const stale = status.devices.filter((device) => device.stale && !device.mobile && watched(ms(device.lastHeartbeatTime)))
   const latest = Math.max(...status.devices.map((device) => ms(device.lastHeartbeatTime) ?? 0))
-  if (stale.length > 0) parts.push(...stale.map((device) => problem(`${device.label} ${span(now - (ms(device.lastHeartbeatTime) ?? now))}没有上传`)))
-  else if (status.devices.length > 0) parts.push(quiet(`上传 ${ago(latest, now)}`))
-  else parts.push(quiet('还没有上传'))
+  if (stale.length > 0) parts.push(...stale.map((device) => problem(`${device.label} ${span(now - (ms(device.lastHeartbeatTime) ?? now))}没有连接`)))
+  else if (status.devices.length > 0) parts.push(quiet(`最近连接 ${ago(latest, now)}`))
+  else parts.push(quiet('还没有设备连接'))
   const backup = status.dropboxBackup
   if (backup === undefined || !backup.connected) parts.push(problem('Dropbox 备份未连接'))
   else if (backupLate(backup.oldestPendingTime, backup.connectTime, now)) parts.push(problem(`Dropbox 落后 ${behindText(backup.pendingCount)}`))

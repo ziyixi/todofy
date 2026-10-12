@@ -29,6 +29,9 @@ export interface Status {
   readonly capture?: CaptureStatus | null;
   readonly capabilities?: { readonly script: boolean; readonly screenshot: boolean };
   readonly focused?: boolean;
+  readonly lastFocusCheckAt?: number;
+  /** Ongoing local visits; uploaded items leave the separate outbox. */
+  readonly localVisitCount?: number;
   readonly version: string;
   /** The build's short commit. */
   readonly versionName: string;

@@ -67,6 +67,43 @@ describe('the build', () => {
     });
   });
 
+  it('reports visibility through callback-only MV2 messaging without throwing on a closed response port', async () => {
+    const code = readFileSync(join(built.orionFolder, 'probe.js'), 'utf8');
+    const documentEvents = new Map();
+    const windowEvents = new Map();
+    const messages = [];
+    let lastErrorReads = 0;
+    const runtime = {
+      get lastError() { lastErrorReads++; return { message: 'The message port closed before a response was received.' }; },
+      sendMessage(message, callback) {
+        messages.push(message);
+        globalThis.queueMicrotask(() => callback?.());
+        return undefined;
+      },
+    };
+    const document = { visibilityState: 'visible', addEventListener: (name, listener) => documentEvents.set(name, listener) };
+    const result = runInNewContext(code, {
+      document,
+      window: { addEventListener: (name, listener) => windowEvents.set(name, listener) },
+      location: { href: 'https://example.org/mobile' },
+      crypto: { randomUUID: () => 'synthetic-document' },
+      chrome: { runtime },
+    });
+    expect(result).toEqual({ documentId: 'synthetic-document', visible: true, url: 'https://example.org/mobile' });
+    expect(() => windowEvents.get('pagehide')()).not.toThrow();
+    document.visibilityState = 'hidden';
+    expect(() => documentEvents.get('visibilitychange')()).not.toThrow();
+    document.visibilityState = 'visible';
+    expect(() => windowEvents.get('pageshow')()).not.toThrow();
+    await Promise.resolve();
+    expect(messages.map(({ type, documentId, visible }) => ({ type, documentId, visible }))).toEqual([
+      { type: 'page-visibility', documentId: 'synthetic-document', visible: false },
+      { type: 'page-visibility', documentId: 'synthetic-document', visible: false },
+      { type: 'page-visibility', documentId: 'synthetic-document', visible: true },
+    ]);
+    expect(lastErrorReads).toBe(3);
+  });
+
   it('builds an Orion file ZIP from the same source with a nonpersistent plain background script', () => {
     const manifest = JSON.parse(readFileSync(join(built.orionFolder, 'manifest.json'), 'utf8'));
     expect(manifest.manifest_version).toBe(2);

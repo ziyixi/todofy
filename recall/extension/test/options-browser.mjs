@@ -1,115 +1,17 @@
 // Actual built Orion background + options in isolated WebKit, using native IndexedDB.
-// Only the browser extension bridge is synthetic; there is no owner profile or network upload.
-/* global window, document, indexedDB */
+// Uploads are intercepted by a local fake consumer; no production network or owner profile is used.
+/* global document, indexedDB, location, window */
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { gunzipSync } from 'node:zlib';
+import { fixtureScript } from './options-browser-fixture.mjs';
 
 /** `folder` contains already-built extension/ and orion/ artifacts; pass existing Playwright exports. */
 export async function checkOrionOptions({ webkit, expect, folder }) {
   const token = 'recall_ingest_' + 'A'.repeat(43);
   const manifest = JSON.parse(await readFile(join(folder, 'orion/manifest.json'), 'utf8'));
-  const fixture = String.raw`
-const shared = parent.__test;
-const event = (name) => ({
-  addListener(fn) {
-    (shared.listeners[name] ??= []).push(fn);
-  },
-});
-const area = {
-  get(key) {
-    return Promise.resolve(shared.local[key] === undefined ? {} : { [key]: structuredClone(shared.local[key]) });
-  },
-  set(items) {
-    if (shared.stallStorage && items.device) {
-      shared.storageStalled = true;
-      return new Promise(() => {});
-    }
-    Object.assign(shared.local, structuredClone(items));
-    return Promise.resolve();
-  },
-};
-window.chrome = {
-  runtime: {
-    id: 'synthetic-recall-extension',
-    getManifest: () => shared.manifest,
-    getURL: (path) => location.origin + '/' + path,
-    onStartup: event('startup'),
-    onInstalled: event('installed'),
-    onMessage: event('message'),
-    reload() {},
-    openOptionsPage: () => Promise.resolve(),
-    sendMessage(request) {
-      if (request.type === 'status') {
-        shared.statusRequests++;
-        if (shared.stallRefresh && shared.statusRequests > 1) return new Promise(() => {});
-      }
-      return new Promise((resolve) => {
-        const listener = shared.listeners.message?.[0];
-        if (!listener) throw Error('background_not_ready');
-        listener(request, { id: 'synthetic-recall-extension' }, resolve);
-      });
-    },
-  },
-  storage: { local: area },
-  tabs: {
-    onActivated: event('activated'),
-    onUpdated: event('updated'),
-    onRemoved: event('removed'),
-    query(query, callback) {
-      shared.calls.query++;
-      if (shared.stallQuery) {
-        shared.queryStalled = true;
-        return undefined;
-      }
-      queueMicrotask(() =>
-        callback([
-          { id: 1, windowId: 1, active: true, incognito: false, url: 'https://example.org/', title: 'Synthetic page' },
-        ]),
-      );
-      return undefined;
-    },
-    get(id, callback) {
-      shared.calls.get++;
-      queueMicrotask(() =>
-        callback({
-          id,
-          windowId: 1,
-          active: true,
-          incognito: false,
-          url: 'https://example.org/',
-          title: 'Synthetic page',
-        }),
-      );
-      return undefined;
-    },
-    executeScript(id, details, callback) {
-      shared.calls.execute++;
-      queueMicrotask(() =>
-        callback([{ documentId: 'synthetic-document', visible: true, url: 'https://example.org/' }]),
-      );
-      return undefined;
-    },
-    captureVisibleTab(options, callback) {
-      queueMicrotask(() => callback('data:image/png;base64,synthetic'));
-      return undefined;
-    },
-  },
-  alarms: { get: () => Promise.resolve(undefined), create: () => Promise.resolve(), onAlarm: event('alarm') },
-  browserAction: {
-    onClicked: event('clicked'),
-    setBadgeText: () => Promise.resolve(),
-    setBadgeBackgroundColor: () => Promise.resolve(),
-    setTitle: () => Promise.resolve(),
-  },
-};
-if (location.pathname === '/background.html') {
-  window.fetch = () => new Promise(() => {});
-  shared.emit = (name, ...args) => {
-    for (const listener of shared.listeners[name] ?? []) listener(...args);
-  };
-}
-`;
+  const fixture = fixtureScript(manifest);
   const server = createServer(async (req, res) => {
     try {
       const path = new URL(req.url, 'http://localhost').pathname;
@@ -121,7 +23,7 @@ if (location.pathname === '/background.html') {
       if (path === '/harness.html') {
         res.setHeader('content-type', 'text/html');
         res.end(
-          `<!doctype html><body><script>window.__test={manifest:${JSON.stringify(manifest)},local:{},listeners:{},calls:{query:0,get:0,execute:0},statusRequests:0};</script></body>`,
+          '<!doctype html><body><script>window.__test={local:{},listeners:{},calls:{query:0,get:0,execute:0},visibility:[],statusRequests:0};</script></body>',
         );
         return;
       }
@@ -141,8 +43,20 @@ if (location.pathname === '/background.html') {
         );
         return;
       }
+      if (path === '/article.html') {
+        res.setHeader('content-type', 'text/html');
+        res.end(
+          '<!doctype html><html><head><title>Actual DOM capture test</title><meta name="description" content="Synthetic description"></head><body style="background:#8ecae6;padding:20px;font:20px system-ui"><h1>Synthetic article title</h1><p id="article">Actual visible DOM text from the published capture script.</p><script src="fixture.js"></script></body></html>',
+        );
+        return;
+      }
+      if (path === '/blank.html') {
+        res.setHeader('content-type', 'text/html');
+        res.end('<!doctype html><title>Previous article left the foreground</title>');
+        return;
+      }
       const file = path.slice(1);
-      if (!['sw.js', 'options.js', 'options.css'].includes(file)) {
+      if (!['sw.js', 'options.js', 'options.css', 'probe.js', 'capture.js'].includes(file)) {
         res.statusCode = 404;
         res.end();
         return;
@@ -154,6 +68,7 @@ if (location.pathname === '/background.html') {
       res.end(String(e));
     }
   });
+  // Launch first: a browser startup failure must not leave the HTTP listener running.
   const browser = await webkit.launch({ headless: true });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   const base = `http://127.0.0.1:${server.address().port}`;
@@ -161,12 +76,52 @@ if (location.pathname === '/background.html') {
   async function start() {
     const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
     const page = await context.newPage();
+    await page.clock.install({ time: new Date('2026-10-12T00:00:00Z') });
+    const batches = [];
+    const completions = [];
     const errors = [];
     page.on('pageerror', (e) => errors.push(e.message));
+    await context.route('**/*', async (route) => {
+      const url = new URL(route.request().url());
+      if (url.origin === base) {
+        await route.continue();
+        return;
+      }
+      // This URL is intercepted locally, never contacted. Reject every other remote request.
+      if (url.href !== 'https://recall.ziyixi.science/api/machine/v1/batches') {
+        await route.abort();
+        throw Error('unexpected_remote_request');
+      }
+      const cors = {
+        'access-control-allow-origin': '*',
+        'access-control-allow-headers': 'authorization,content-type',
+        'access-control-allow-methods': 'POST',
+      };
+      if (route.request().method() === 'OPTIONS') {
+        await route.fulfill({ status: 204, headers: cors });
+        return;
+      }
+      const body = route.request().postDataBuffer();
+      if (!body) throw Error('missing_gzip_body');
+      const batch = JSON.parse(gunzipSync(body).toString('utf8'));
+      batches.push(batch);
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        headers: cors,
+        body: JSON.stringify({
+          accepted_count: batch.items.length,
+          rejected: [],
+          denylist_patterns: [],
+          denylist_etag: 'synthetic-e1',
+        }),
+      });
+    });
     await page.goto(base + '/harness.html');
     await page.evaluate(() => {
       const frame = document.createElement('iframe');
       frame.id = 'background';
+      frame.hidden = true;
       frame.src = '/background.html';
       document.body.append(frame);
     });
@@ -184,11 +139,45 @@ if (location.pathname === '/background.html') {
       frame.style = 'width:390px;height:1000px;border:0';
       document.body.append(frame);
     });
+    const navigation = page.waitForEvent('framenavigated', {
+      predicate: (frame) => frame.url().endsWith('/article.html'),
+    });
+    await page.evaluate(() => {
+      const frame = document.createElement('iframe');
+      frame.id = 'article';
+      frame.src = '/article.html';
+      frame.style = 'width:390px;height:844px;border:0';
+      document.body.prepend(frame);
+    });
+    const article = await navigation;
+    await article.waitForSelector('#article');
+    await page.exposeFunction('executePublishedFile', async (file) => {
+      const source = await readFile(join(folder, 'orion', file), 'utf8');
+      const value = await article.evaluate(source);
+      completions.push({ file, value });
+      return value;
+    });
+    await page.exposeFunction('capturePublishedPage', async () => {
+      const png = await article.locator('body').screenshot({ type: 'png' });
+      return 'data:image/png;base64,' + png.toString('base64');
+    });
+    await page.evaluate(() => {
+      window.__test.executeFile = window.executePublishedFile;
+      window.__test.captureVisibleTab = window.capturePublishedPage;
+      window.__test.tab = {
+        id: 1,
+        windowId: 1,
+        active: true,
+        incognito: false,
+        url: location.origin + '/article.html',
+        title: 'Actual DOM capture test',
+      };
+    });
     const options = page.frameLocator('#options');
     await expect(options.locator('#server')).toHaveValue('https://recall.ziyixi.science');
     await expect(options.locator('#label')).toHaveValue('iPhone · Orion');
     await expect(options.locator('#upload-status')).toContainText('Orion · iOS');
-    return { context, page, options, errors };
+    return { context, page, options, errors, batches, completions };
   }
   async function storedToken(page) {
     return page.evaluate(
@@ -211,6 +200,94 @@ if (location.pathname === '/background.html') {
     await h.options.locator('#token').fill(token);
     await h.options.locator('#label').fill('iPhone test');
     await h.options.locator('button[type=submit]').click();
+  }
+
+  async function getStatus(h) {
+    return h.page.evaluate(
+      () =>
+        new Promise((resolve) =>
+          window.__test.listeners.message[0]({ type: 'status' }, { id: 'synthetic-recall-extension' }, resolve),
+        ),
+    );
+  }
+  async function captureCase(waitForMinute) {
+    const h = await start();
+    await fillAndSave(h);
+    await h.page.waitForFunction(() => window.__test.local.upload?.lastUploadAt > 0);
+    await h.page.evaluate(() => {
+      window.__test.injectWhileLoading = true;
+      window.__test.emit('activated', { tabId: 1, windowId: 1 });
+    });
+    await h.page.waitForFunction(() => window.__test.loadingRefusal);
+    await h.page.evaluate(() => {
+      window.__test.injectWhileLoading = false;
+    });
+    if (waitForMinute) {
+      await h.page.clock.fastForward(60000);
+    } else {
+      await h.page.evaluate(() => window.__test.emit('updated', 1, { status: 'complete' }));
+    }
+    await expect.poll(() => getStatus(h)).toMatchObject({ focused: true });
+    await h.page.clock.fastForward(11000);
+    await expect.poll(() => h.page.evaluate(() => window.__test.local.capture_status)).toMatchObject({ text: 'saved' });
+    if (!waitForMinute) {
+      const queued = await h.page.evaluate(
+        () =>
+          new Promise((resolve) => {
+            const request = indexedDB.open('recall');
+            request.onsuccess = () => {
+              const db = request.result;
+              const tx = db.transaction('outbox', 'readonly');
+              const get = tx.objectStore('outbox').getAll();
+              get.onsuccess = () => resolve(get.result.map((row) => JSON.parse(row.json)));
+              tx.oncomplete = () => db.close();
+            };
+          }),
+      );
+      expect(queued.find((item) => item.kind === 'document')?.document.text).toContain('Actual visible DOM text');
+    }
+    await h.page.clock.fastForward(51000);
+    await expect
+      .poll(() => h.batches.flatMap((batch) => batch.items).filter((item) => item.kind === 'document').length)
+      .toBe(1);
+    await expect
+      .poll(() => h.page.evaluate(() => window.__test.local.capture_status))
+      .toMatchObject({ text: 'unchanged' });
+    const document = h.batches.flatMap((batch) => batch.items).find((item) => item.kind === 'document').document;
+    expect(document.text).toContain('Actual visible DOM text from the published capture script.');
+    expect(document.title).toBe('Actual DOM capture test');
+    expect(document.screenshot_width).toBeGreaterThan(0);
+    expect(document.screenshot_jpeg_base64 || document.screenshot_webp_base64).toBeTruthy();
+    expect(h.completions.some(({ file, value }) => file === 'probe.js' && value.visible && value.documentId)).toBe(
+      true,
+    );
+    expect(
+      h.completions.some(
+        ({ file, value }) => file === 'capture.js' && value.build === manifest.version && value.visible,
+      ),
+    ).toBe(true);
+    await h.page.evaluate(() => {
+      window.__test.tab.active = false;
+      document.getElementById('article').src = '/blank.html';
+    });
+    await h.page.waitForFunction(() => window.__test.visibility.includes(false));
+    await expect.poll(() => getStatus(h)).toMatchObject({ focused: false });
+    await h.page.clock.fastForward(61000);
+    await expect
+      .poll(() => h.batches.flatMap((batch) => batch.items).filter((item) => item.kind === 'visit').length)
+      .toBe(1);
+    expect(h.batches.flatMap((batch) => batch.items).filter((item) => item.kind === 'document')).toHaveLength(1);
+    expect(h.errors).toEqual([]);
+    results.push({
+      case: waitForMinute
+        ? 'automatic minute alarm recovers a missed load event'
+        : 'load complete recovers initial injection refusal',
+      passed: true,
+      documents: 1,
+      visits: 1,
+      screenshotFormat: document.screenshot_jpeg_base64 ? 'jpeg' : 'webp',
+    });
+    await h.context.close();
   }
   try {
     {
@@ -249,7 +326,6 @@ if (location.pathname === '/background.html') {
     }
     {
       const h = await start();
-      await h.page.clock.install();
       await h.page.evaluate(() => {
         window.__test.stallStorage = true;
       });
@@ -286,7 +362,14 @@ if (location.pathname === '/background.html') {
       await h.page.screenshot({ path: join(folder, 'options-webkit.png'), fullPage: true });
       await h.context.close();
     }
-    return { engine: 'WebKit; synthetic MV2 API bridge; native IndexedDB', results };
+    await captureCase(false);
+    await captureCase(true);
+    return {
+      version: manifest.version,
+      sha: manifest.version_name,
+      engine: 'WebKit; synthetic MV2 API bridge; native IndexedDB',
+      results,
+    };
   } finally {
     await browser.close();
     await new Promise((resolve) => server.close(resolve));

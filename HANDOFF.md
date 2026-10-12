@@ -9,6 +9,22 @@ Its old waiting lists and release identities are historical, not instructions to
 
 ## Current work
 
+Recall Orion capture follow-up is on `codex/recall-orion-capture-check` (not released yet).
+Owner confirmed Save now works, but no sampling result appeared. Read-only production UI selected the phone device:
+its timeline had no visits today or link to an earlier recorded day. The settings timestamp is a heartbeat, not
+proof of content upload; there is no per-device document count in that view. Do not infer all uploads succeeded.
+Callback-only MV2 tests reproduced `alarms.get` failing to read or preserve the minute alarm; the mobile path now
+reads its callback. Mobile `tabs.onUpdated(status=complete)` retries the existing focus check after loading.
+The built probe now reports page visibility with the MV2 callback instead of calling `.catch` on a void return.
+The identical full WebKit chain failed against released `2026.1012.322` and passed the fixes: real built probe/capture,
+native IndexedDB and JPEG, automatic alarms, native gzip, consumer text/visit receipt and unchanged-snapshot dedup.
+Four Save checks remain. Only the extension API bridge and storage.local are synthetic; no evidence yet identifies
+the owner's exact native Orion failure or proves live phone capture. Local status now exposes activity checks,
+ongoing visit count, explicit not-yet-sampled state and fixed error codes without content. Heartbeat labels no
+longer promise content upload. No new service, dependency, retry mechanism, privacy change or budget change.
+Local checks passed: all 123 extension tests, all 133 web tests, typecheck/lint, both extension builds and the web build.
+Pending: full branch CI, same-SHA main release, downloaded ZIP verification, then minimal phone check.
+
 Recall's Save isolation and MV2 callback fixes are released at `5d476a0`.
 The owner's screenshot of `354db53` proves phone mode now works but Save remains pending and token status is false.
 A browser focus query can still hold the original global queue before settings write; the missing regression
@@ -27,8 +43,7 @@ verified Worker `3668aa37-e6e8-436e-a07b-aae0c1329d82`. Both downloaded assets v
 `2026.1012.322`, commit `5d476a0`. The actual downloaded Orion ZIP passed all four real WebKit/native IndexedDB
 checks with zero page errors. [Phone ZIP](https://github.com/ziyixi/todofy/releases/download/recall-extension-v2026.1012.322/recall-orion-v2026.1012.322.zip).
 Mac installation files were updated preserving its settings/identity; no running Chrome version was independently
-read. Final Orion phone Save acceptance remains pending; report the exact twelve-second pending-step message
-if confirmation still fails. No new runtime dependency or service.
+read. Owner has since confirmed phone Save works; capture acceptance is tracked above. No new runtime dependency or service.
 
 The earlier Orion phone-mode/upload-wait fixes were released at `354db53`. The owner confirmed the correct old phone artifact loaded
 settings but selected desktop mode. The dedicated iPhone/iPad build now selects mobile mode directly; Save

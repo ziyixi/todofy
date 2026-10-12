@@ -58,6 +58,21 @@ describe('the service worker', () => {
     expect(browser.alarms.get('tick')).toEqual({ name: 'tick', periodInMinutes: 1 });
   });
 
+  it('preserves an existing minute alarm when MV2 get answers only through its callback', async () => {
+    vi.stubGlobal('RECALL_ORION', true);
+    browser.alarms.set('tick', { name: 'tick', periodInMinutes: 1 });
+    const create = vi.spyOn(browser.api.alarms, 'create');
+    Object.assign(browser.api.alarms, { get: (name: string, callback?: (alarm: chrome.alarms.Alarm | undefined) => void) => {
+      queueMicrotask(() => { callback?.(browser.alarms.get(name) as chrome.alarms.Alarm | undefined); });
+    } });
+    await start();
+    expect(create).not.toHaveBeenCalled();
+    browser.alarms.delete('tick');
+    browser.events.installed.emit({ reason: 'update' });
+    await vi.waitFor(() => { expect(create).toHaveBeenCalledOnce(); });
+    expect(browser.alarms.get('tick')).toEqual({ name: 'tick', periodInMinutes: 1 });
+  });
+
   it('turns tab events into a visit, and the options page\'s save into an upload', async () => {
     await start();
     const first = browser.open('https://docs.example.com/guide', { title: 'Guide' });

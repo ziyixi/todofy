@@ -1,8 +1,8 @@
 /**
  * The service worker (sw.js, ../../docs/design.md §3). Every listener is registered at the top level, as Manifest V3
- * requires: a worker woken by an event registers them again before the event is dispatched. Every handler that reads
- * or writes the state runs in one queue, one at a time, with the time its event arrived; the network (uploads, the
- * update check) and the page reads (captures) run outside it, so a slow answer never delays a focus event.
+ * requires: a worker woken by an event registers them again before the event is dispatched. Focus and capture writes
+ * run in one queue with their event times; owner settings have an independent write queue. Network requests and page
+ * reads run outside those queues, so they do not hold settings or focus transitions.
  *
  * Logs hold the handler's name and the error's name only: never a URL, host, title or text.
  */
@@ -127,7 +127,15 @@ async function updateIfInstalled(trigger: 'tick' | 'owner'): Promise<boolean> {
 }
 
 async function ensureAlarm(): Promise<void> {
-  if ((await chrome.alarms.get(TICK)) === undefined) await chrome.alarms.create(TICK, { periodInMinutes: TICK_MINUTES });
+  // MV2 get returns no Promise. Reading its callback preserves the existing alarm across event-page wakeups.
+  const alarm = MOBILE ? await new Promise<chrome.alarms.Alarm | undefined>((resolve, reject) => {
+    chrome.alarms.get(TICK, (value) => {
+      const error = chrome.runtime.lastError;
+      if (error !== undefined) reject(new Error(error.message ?? 'browser_api_failed'));
+      else resolve(value);
+    });
+  }) : await chrome.alarms.get(TICK);
+  if (alarm === undefined) await chrome.alarms.create(TICK, { periodInMinutes: TICK_MINUTES });
 }
 
 async function onTick(at: number): Promise<void> {
@@ -199,7 +207,8 @@ features.webNavigation?.onHistoryStateUpdated.addListener(navigated);
 features.webNavigation?.onReferenceFragmentUpdated.addListener(navigated);
 
 chrome.tabs.onUpdated.addListener((tabId, change) => {
-  if (change.title === undefined && change.url === undefined) return;
+  // A phone tab can become scriptable after its activation/URL event; retry when loading finishes.
+  if (change.title === undefined && change.url === undefined && !(MOBILE && change.status === 'complete')) return;
   const at = Date.now();
   transition('tab_updated', (ctx) => tabChanged(ctx, tabId, at));
 });

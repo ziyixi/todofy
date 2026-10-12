@@ -27,7 +27,7 @@ describe('the shell', () => {
     ])
     expect(root.querySelector('.tabs a[aria-current]')).toBeNull()
     expect(line(root)).toEqual([
-      ['上传 3 分钟前', ''],
+      ['最近连接 3 分钟前', ''],
       ['Dropbox 已备份', ''],
     ])
     expect(root.textContent).toContain('找不到这个页面')
@@ -48,7 +48,7 @@ describe('the shell', () => {
     fake.backup.connected = false
     const root = await open(fake, '/')
     expect(line(root)).toEqual([
-      ['MacBook 2 天没有上传', 'problem'],
+      ['MacBook 2 天没有连接', 'problem'],
       ['Dropbox 备份未连接', 'problem'],
       ['存储接近上限', 'problem'],
     ])
@@ -65,12 +65,12 @@ describe('the shell', () => {
     expect(line(await open(fake, '/')).slice(1)).toEqual([['Dropbox 待备份 500+ 条', '']])
   })
 
-  it('before the first upload, says so quietly', async () => {
+  it('before the first device connection, says so quietly', async () => {
     const fake = new FakeServer()
     fake.status = { devices: [] }
     const root = await open(fake, '/settings')
     expect(line(root)).toEqual([
-      ['还没有上传', ''],
+      ['还没有设备连接', ''],
       ['Dropbox 已备份', ''],
     ])
   })

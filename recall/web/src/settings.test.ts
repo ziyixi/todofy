@@ -1,5 +1,5 @@
 /**
- * 设置 against the fake API, in the owner's words: devices (the latest upload, stale with what to check, version,
+ * 设置 against the fake API, in the owner's words: devices (the latest connection, stale with what to check, version,
  * outbox, the last error as a sentence, clock skew), the steps without one, lost items and items waiting for a newer
  * recall; the extension's token (生成, shown once with 复制, 重新生成 with its grace, revoked at once, stopped; the
  * export token folded); the Dropbox backup (the steps and the App key, 连接 to Dropbox, the outcome it came back with,
@@ -23,7 +23,7 @@ const cards = (root: HTMLElement) => [...root.querySelectorAll<HTMLElement>('.ca
 const card = (root: HTMLElement, title: string) => cards(root).find((node) => node.querySelector('h2')?.textContent === title) ?? (() => { throw new Error(`no card ${title}`) })()
 
 describe('设备', () => {
-  it('shows each device’s latest upload, version, outbox, error and clock skew; a stale one says what to check', async () => {
+  it('shows each device’s latest connection, version, outbox, error and clock skew; a stale one says what to check', async () => {
     const fake = new FakeServer()
     fake.status = {
       devices: [
@@ -38,15 +38,16 @@ describe('设备', () => {
     const root = await open(fake, '/settings')
     const devices = card(root, '设备')
     const [mac, mini] = [...devices.querySelectorAll('.rows > li')]
-    expect(mac?.querySelector('.row-head')?.textContent).toBe('MacBook · 工作最近上传 3 分钟前')
+    expect(mac?.querySelector('.row-head')?.textContent).toBe('MacBook · 工作最近连接 3 分钟前')
     expect([...(mac?.querySelectorAll('.facts > span') ?? [])].map((node) => node.textContent)).toEqual(['版本 2026.1009.1200', '待上传 0', '时钟差 1 小时'])
     expect(mac?.querySelector('.facts .warn')?.textContent).toBe('时钟差 1 小时')
-    expect(mini?.querySelector('.row-head .meta.warn')?.textContent).toBe('最近上传 2 天前')
+    expect(mini?.querySelector('.row-head .meta.warn')?.textContent).toBe('最近连接 2 天前')
     // The last error as what it means and what to do, in the warning color when it needs the owner; the code in a tooltip.
     expect([...(mini?.querySelectorAll('p.hint.warn') ?? [])].map((node) => node.textContent)).toEqual(['检查 Chrome 是否开着、扩展是否启用（开发者模式）', '扩展存储已满，新页面的内容没有保存：打开扩展的选项检查'])
     expect(mini?.querySelectorAll('p.hint.warn')[1]?.getAttribute('title')).toBe('outbox_full')
     expect([...(mini?.querySelectorAll('.facts > span') ?? [])].map((node) => node.textContent)).toEqual(['版本 2026.1001.900', '待上传 12'])
     expect([...devices.querySelectorAll(':scope > p.hint')].map((node) => [node.textContent, node.classList.contains('warn')])).toEqual([
+      ['连接成功可能只是心跳；实际记录见时间线。', false],
       ['7 天内有 3 条上传被拒（格式不对），已丢失：扩展可能有问题', true],
       ['7 天内有 2 条记录来自比 recall 新的扩展，正在扩展里等 recall 更新后再上传', false],
     ])
@@ -61,7 +62,7 @@ describe('设备', () => {
     }] }
     const root = await open(fake, '/settings')
     const phone = card(root, '设备').querySelector('.rows > li')
-    expect(phone?.textContent).toContain('最近上传 2 天前')
+    expect(phone?.textContent).toContain('最近连接 2 天前')
     expect(phone?.textContent).toContain('手机仅在浏览器前台运行，打开后继续采集和上传。')
     expect(phone?.textContent).toContain('待上传 4')
     expect(phone?.textContent).toContain('上传失败过，扩展会自动重试')
@@ -507,6 +508,6 @@ describe('a failure', () => {
     buttonNamed(root, '重试').click()
     await settled()
     expect(cards(root).map((node) => node.querySelector('h2')?.textContent)).toEqual(['设备', '插件口令', '备份到 Dropbox', '存储', '网站名单'])
-    expect(root.querySelector('.status-line')?.textContent).toBe('上传 3 分钟前Dropbox 已备份')
+    expect(root.querySelector('.status-line')?.textContent).toBe('最近连接 3 分钟前Dropbox 已备份')
   })
 })

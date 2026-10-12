@@ -104,7 +104,7 @@ export class FakeBrowser {
 
   readonly events = {
     activated: new FakeEvent<[{ tabId: number; windowId: number }]>(),
-    updated: new FakeEvent<[number, { title?: string; url?: string }]>(),
+    updated: new FakeEvent<[number, { title?: string; url?: string; status?: 'loading' | 'complete' }]>(),
     removed: new FakeEvent<[number]>(),
     focusChanged: new FakeEvent<[number]>(),
     idleChanged: new FakeEvent<['active' | 'idle' | 'locked']>(),

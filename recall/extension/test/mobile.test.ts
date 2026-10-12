@@ -1,12 +1,12 @@
 /** iPhone behavior over the existing fake: visibility ends focus, reload changes identity, JPEG and resume uploads. */
 import { describe, expect, it, vi } from 'vitest';
-import { executeFile, probePage } from '../src/browser.ts';
+import { executeFile, probePage, queryTabs } from '../src/browser.ts';
 import { captureDue, readTab, storeCapture } from '../src/capture.ts';
 import type { Context } from '../src/context.ts';
 import { setToken } from '../src/db.ts';
 import { beat, pageVisibility, reconcile } from '../src/focus.ts';
 import { compressScreenshot } from '../src/screenshot.ts';
-import { INITIAL_UPLOAD, uploadState } from '../src/store.ts';
+import { INITIAL_UPLOAD, lastError, uploadState } from '../src/store.ts';
 import { batchOf, flush } from '../src/upload.ts';
 import { harness, INGEST_TOKEN, MINUTE, SECOND, T0, type FakeTab } from './fake-chrome.ts';
 import { openSpan, queuedDocuments, queuedVisits, spansOf } from './helpers.ts';
@@ -106,6 +106,7 @@ describe('Orion iPhone foreground capture', () => {
     h.hide();
     await reconcile(h.ctx, T0);
     expect(await openSpan(h.ctx, T0)).toBeNull();
+    expect(await lastError.get(h.ctx.chrome)).toBeNull();
     h.show();
     await reconcile(h.ctx, T0 + SECOND);
     const job = await captureDue(h.ctx, T0 + 11 * SECOND);
@@ -140,6 +141,37 @@ describe('Orion iPhone foreground capture', () => {
     } });
     await expect(executeFile(h.ctx, h.tab.id, 'probe.js')).rejects.toThrow('Cannot access contents of this page');
     expect(await probePage(h.ctx, h.tab.id)).toBeNull();
+    expect(await lastError.get(h.ctx.chrome)).toEqual({ code: 'page_probe_failed', at: T0 });
+    expect(JSON.stringify(h.browser.local.values.get('error'))).not.toContain('Cannot access');
+  });
+
+  it('reports a malformed probe with a fixed error code, without treating excluded pages as errors', async () => {
+    const h = await phone();
+    h.browser.script = () => ({ visible: true, url: h.tab.url });
+    expect(await probePage(h.ctx, h.tab.id)).toBeNull();
+    expect(await lastError.get(h.ctx.chrome)).toEqual({ code: 'page_probe_invalid_result', at: T0 });
+    expect(JSON.stringify(h.browser.local.values.get('error'))).not.toContain(h.tab.url);
+    const excluded = await phone();
+    excluded.browser.navigate(excluded.tab.id, 'chrome-extension://synthetic/options.html');
+    expect(await probePage(excluded.ctx, excluded.tab.id)).toBeNull();
+    expect(await lastError.get(excluded.ctx.chrome)).toBeNull();
+  });
+
+  it('retains native tab lookup and query failures as fixed diagnostic codes', async () => {
+    const h = await phone();
+    h.browser.close(h.tab.id);
+    expect(await probePage(h.ctx, h.tab.id)).toBeNull();
+    expect(await lastError.get(h.ctx.chrome)).toEqual({ code: 'page_tab_failed', at: T0 });
+    Object.assign(h.browser.api.tabs, { query: (_query: unknown, callback: (value?: unknown[]) => void) => {
+      queueMicrotask(() => {
+        Object.assign(h.browser.api.runtime, { lastError: { message: 'Synthetic failure on https://example.org/' } });
+        callback();
+        delete (h.browser.api.runtime as unknown as Record<string, unknown>)['lastError'];
+      });
+    } });
+    await expect(queryTabs(h.ctx, { active: true })).rejects.toThrow('Synthetic failure');
+    expect(await lastError.get(h.ctx.chrome)).toEqual({ code: 'page_query_failed', at: T0 });
+    expect(JSON.stringify(h.browser.local.values.get('error'))).not.toContain('example.org');
   });
 
   it('uploads queued phone content within a minute and labels its report mobile', async () => {

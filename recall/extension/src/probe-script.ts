@@ -13,7 +13,12 @@ if (globalThis.recallPageProbe === undefined) {
   globalThis.recallPageProbe = state;
   const report = (visible: boolean) => {
     state.visible = visible;
-    void chrome.runtime.sendMessage({ type: 'page-visibility', documentId: state.documentId, visible, at: Date.now() }).catch(() => undefined);
+    try {
+      // The MV2 callback consumes a closed response port; sendMessage itself returns no Promise.
+      chrome.runtime.sendMessage({ type: 'page-visibility', documentId: state.documentId, visible, at: Date.now() }, () => { if (chrome.runtime.lastError !== undefined) return; });
+    } catch {
+      // Navigation or an extension update can invalidate this content-script context.
+    }
   };
   document.addEventListener('visibilitychange', () => { report(document.visibilityState === 'visible'); });
   window.addEventListener('pagehide', () => { report(false); });

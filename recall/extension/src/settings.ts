@@ -6,11 +6,11 @@
 import { compilePatterns, RECALL_HOST } from '../../shared/denylist.ts';
 import type { Context } from './context.ts';
 import { browserFeatures } from './browser.ts';
-import { countHeld, countItems, getToken, setToken } from './db.ts';
+import { countHeld, countItems, countVisits, getToken, setToken } from './db.ts';
 import { LABEL_MAX_CHARS } from './limits.ts';
 import type { SaveAnswer, SavePhase, SaveProgress, SaveRequest, Status } from './messages.ts';
 import type { Denylist } from './page.ts';
-import { captureStatus, focusState, getDevice, lastError, ownerDenylist, setDevice, uploadState, type Device } from './store.ts';
+import { captureStatus, focusState, getDevice, lastError, mirror, ownerDenylist, setDevice, uploadState, type Device } from './store.ts';
 
 /** An ingest token as recall's 设置 → 插件口令 makes it: 32 random bytes in base64url after the prefix. */
 const INGEST_TOKEN = /^recall_ingest_[A-Za-z0-9_-]{43}$/;
@@ -95,13 +95,15 @@ export async function saveSettings(ctx: Context, request: SaveRequest): Promise<
 /** What the options page shows. */
 export async function status(ctx: Context): Promise<Status> {
   const now = ctx.now();
-  const [device, upload, error, token, queued, held] = await Promise.all([
+  const [device, upload, error, token, queued, held, localVisitCount, savedFocus] = await Promise.all([
     getDevice(ctx.chrome, ctx.uuid),
     uploadState.get(ctx.chrome),
     lastError.get(ctx.chrome),
     getToken(ctx.db),
     countItems(ctx.db),
     countHeld(ctx.db, now),
+    countVisits(ctx.db),
+    mirror.get(ctx.chrome),
   ]);
   const manifest = ctx.chrome.runtime.getManifest();
   const features = browserFeatures(ctx.chrome);
@@ -111,6 +113,8 @@ export async function status(ctx: Context): Promise<Status> {
     mobile: ctx.mobile === true,
     capture: await captureStatus.get(ctx.chrome),
     focused: focus?.open !== null && focus?.open !== undefined,
+    lastFocusCheckAt: savedFocus.lastBeat,
+    localVisitCount,
     capabilities: { script: features.scripting !== undefined || features.tabs.executeScript !== undefined, screenshot: features.tabs.captureVisibleTab !== undefined },
     version: manifest.version,
     versionName: manifest.version_name ?? '',
