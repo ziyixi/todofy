@@ -9,6 +9,13 @@ Its old waiting lists and release identities are historical, not instructions to
 
 ## Current work
 
+`codex/recall-mobile-diagnostic` implements the authorized one-shot Orion capture diagnosis.
+The owner still reports no visits or samples on `611`, Orion 1.5.5 (3), iOS 27.0.1; heartbeat works.
+It records closed stage metadata on a fixed public test page and sends an empty authenticated batch independently
+of the capture queue. Only one latest report is retained through existing meta/status, with no content or credentials.
+Chrome's running browser and installed extension files remain untouched. Native local verification and full branch
+CI are required before the same-SHA Actions release; no phone success is claimed from Mac tests.
+
 The native Orion fixes from `codex/recall-orion-native-capture` are released at `88bbc3d` (`2026.1012.611`).
 Real Orion macOS 1.1.3/build 152 now runs in a dedicated empty test environment, with a loopback-only
 copy of the released extension and a synthetic HTTP consumer. Native callbacks reproduce two differences

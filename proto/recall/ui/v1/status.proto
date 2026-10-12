@@ -8,6 +8,7 @@ package recall.ui.v1;
 import "google/api/field_behavior.proto";
 import "google/api/resource.proto";
 import "google/protobuf/timestamp.proto";
+import "recall/ingest/v1/diagnostic.proto";
 
 option java_multiple_files = true;
 option java_outer_classname = "StatusProto";
@@ -123,6 +124,20 @@ message ServiceStatus {
   // connected) or `dropbox_failing` (its last attempt failed; it retries by itself); empty while retention runs or is
   // off.
   string text_retention_paused_reason = 24 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The most recently received one-shot capture diagnostic, without browsing content.
+  CaptureDiagnosticReport capture_diagnostic = 25 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// The latest one-shot diagnostic and the existing device identity that sent it.
+message CaptureDiagnosticReport {
+  // The extension's device UUID.
+  string device_id = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // When the Worker received this diagnostic.
+  google.protobuf.Timestamp receive_time = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The closed, content-free observations.
+  // (-- api-linter: core::0215::foreign-type-reference=disabled
+  //     aip.dev/not-precedent: owner status exposes the same closed diagnostic received by ingest, without a second contract. --)
+  recall.ingest.v1.CaptureDiagnostic diagnostic = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
 }
 
 // The backup of the archive (contracts/recall-archive-v1) to the owner's Dropbox: recall writes the archive's files

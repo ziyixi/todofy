@@ -1,0 +1,146 @@
+// One owner-started capture diagnostic: fixed stages and values only, never browsing content.
+syntax = "proto3";
+
+package recall.ingest.v1;
+
+import "common/wire/v1/wire.proto";
+import "google/api/field_behavior.proto";
+import "google/protobuf/timestamp.proto";
+
+option java_multiple_files = true;
+option java_outer_classname = "DiagnosticProto";
+option java_package = "science.ziyixi.recall.ingest.v1";
+option (common.wire.v1.formats) = {
+  name: "DiagnosticRunId"
+  pattern: "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+  description: "The UUID of one owner-started capture diagnostic."
+};
+
+// The latest observations of one five-minute diagnostic on a fixed public test page.
+message CaptureDiagnostic {
+  // A UUID for this owner-started run, unchanged when sending it again.
+  string run_id = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "DiagnosticRunId"
+  ];
+  // When the owner started the diagnostic.
+  google.protobuf.Timestamp start_time = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).non_null = true
+  ];
+  // When the owner sent this snapshot; it does not imply successful capture.
+  google.protobuf.Timestamp report_time = 3 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).non_null = true
+  ];
+  // One latest observation per stage, in observation order, at most twelve.
+  repeated CaptureDiagnosticStep steps = 4 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).max_items = 12
+  ];
+  // Native tab events observed during this run, capped at 1000.
+  int32 tab_event_count = 5 [(common.wire.v1.field) = {
+    minimum: 0
+    maximum: 1000
+  }];
+  // Native minute alarms observed during this run, capped at 1000.
+  int32 alarm_event_count = 6 [(common.wire.v1.field) = {
+    minimum: 0
+    maximum: 1000
+  }];
+}
+
+// An observed native call or capture stage. No arbitrary text is accepted.
+message CaptureDiagnosticStep {
+  // The fixed stage being observed.
+  string stage = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).allowed = "open_test_page",
+    (common.wire.v1.field).allowed = "active_tabs",
+    (common.wire.v1.field).allowed = "tab_lookup",
+    (common.wire.v1.field).allowed = "probe_injection",
+    (common.wire.v1.field).allowed = "probe_reply",
+    (common.wire.v1.field).allowed = "probe_context",
+    (common.wire.v1.field).allowed = "focus_target",
+    (common.wire.v1.field).allowed = "capture_reply",
+    (common.wire.v1.field).allowed = "screenshot",
+    (common.wire.v1.field).allowed = "capture_store",
+    (common.wire.v1.field).allowed = "alarm_setup"
+  ];
+  // Pending means the native callback has not answered, not a guessed timeout.
+  string state = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field) = {
+      allowed: [
+        "pending",
+        "returned",
+        "failed",
+        "skipped"
+      ]
+    }
+  ];
+  // A closed result type or reason; never an exception message or captured value.
+  string result = 3 [(common.wire.v1.field) = {
+    allowed: [
+      "undefined",
+      "null",
+      "array",
+      "object",
+      "string",
+      "boolean",
+      "other",
+      "api_error",
+      "unsupported",
+      "invalid_result",
+      "saved",
+      "unchanged",
+      "empty",
+      "excluded",
+      "failed",
+      "visible",
+      "hidden",
+      "none",
+      "created"
+    ]
+  }];
+  // Returned matches, capped at 100. Zero also applies to stages without a count.
+  int32 count = 4 [(common.wire.v1.field) = {
+    minimum: 0
+    maximum: 100
+  }];
+  // What the first selected tab represents; no tab ID or URL leaves the extension.
+  string selection = 5 [(common.wire.v1.field) = {
+    allowed: [
+      "test_page",
+      "extension_page",
+      "other_page",
+      "none"
+    ]
+  }];
+  // The document's current visibility when the probe ran.
+  string visibility = 6 [(common.wire.v1.field) = {
+    allowed: [
+      "visible",
+      "hidden",
+      "unknown"
+    ]
+  }];
+  // The visibility remembered by the content script, for comparison with current visibility.
+  string stored_visibility = 7 [(common.wire.v1.field) = {
+    allowed: [
+      "visible",
+      "hidden",
+      "unknown"
+    ]
+  }];
+  // The native sender's identity category, never its actual value.
+  string sender_identity = 8 [(common.wire.v1.field) = {
+    allowed: [
+      "same",
+      "missing",
+      "null",
+      "foreign",
+      "unknown"
+    ]
+  }];
+}

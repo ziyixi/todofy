@@ -27,6 +27,7 @@ package recall.ingest.v1;
 import "common/wire/v1/wire.proto";
 import "google/api/field_behavior.proto";
 import "google/protobuf/timestamp.proto";
+import "recall/ingest/v1/diagnostic.proto";
 
 option java_multiple_files = true;
 option java_outer_classname = "IngestProto";
@@ -87,6 +88,8 @@ message IngestBatch {
     (google.api.field_behavior) = REQUIRED,
     (common.wire.v1.field).max_items = 50
   ];
+  // Optional owner-started diagnostic, sent with no business items through the existing heartbeat route.
+  CaptureDiagnostic diagnostic = 6;
 }
 
 // The device (one browser profile running the extension) as it describes itself in every upload.
