@@ -1,9 +1,10 @@
 import type { IngestBatch } from '@ziyixi/proto/recall/ingest/v1/ingest_wire';
 import { describe, expect, it, vi } from 'vitest';
-import { executeFile, queryTabs } from '../src/browser.ts';
+import { executeFile, getTab, queryTabs } from '../src/browser.ts';
 import { countItems, queueItem, setToken } from '../src/db.ts';
 import { DIAGNOSTIC_URL, diagnosticEvent, diagnosticStatus, observe, observeTabs, startDiagnostic, submitDiagnostic } from '../src/diagnostic.ts';
 import { INITIAL_UPLOAD, uploadState } from '../src/store.ts';
+import { BROWSER_REPLY_TIMEOUT_MS } from '../src/limits.ts';
 import { flush } from '../src/upload.ts';
 import { harness, INGEST_TOKEN, MINUTE, T0, type FakeTab } from './fake-chrome.ts';
 
@@ -23,6 +24,53 @@ async function sentBatch(h: Awaited<ReturnType<typeof setup>>): Promise<IngestBa
 }
 
 describe('one-shot Orion capture diagnostic', () => {
+  it('retains the created public tab ID before native URL metadata arrives', async () => {
+    const h = await setup();
+    let created!: number;
+    Object.assign(h.browser.api.tabs, { create: ({ url }: { url: string }, callback: (tab: { id: number }) => void) => {
+      const tab = h.browser.open(url);
+      callback({ id: tab.id });
+    } });
+    await startDiagnostic(h.ctx, (tabId) => { created = tabId; });
+    await vi.waitFor(() => { expect(created).toBeTypeOf('number'); });
+    await observe(h.ctx, { stage: 'tab_lookup', state: 'pending' }, created);
+    expect((await diagnosticStatus(h.ctx)).diagnostic.steps).toContainEqual({ stage: 'tab_lookup', state: 'pending' });
+  });
+
+  it('stops the public diagnostic when an event-selected tab navigates away without enumeration', async () => {
+    const h = await setup();
+    await startDiagnostic(h.ctx);
+    const tab = [...h.browser.tabs.values()][0];
+    if (tab === undefined) throw new Error('test tab missing');
+    const get = h.browser.api.tabs.get;
+    Object.assign(h.browser.api.tabs, { get: (id: number, callback: (value: FakeTab) => void) => { void get(id).then(callback); } });
+    h.browser.navigate(tab.id, 'https://private.example.net/secret');
+    await getTab(h.ctx, tab.id);
+    await vi.waitFor(async () => { expect((await diagnosticStatus(h.ctx)).diagnostic.state).toBe('stopped'); });
+    await observe(h.ctx, { stage: 'capture_reply', state: 'returned', result: 'object' }, tab.id);
+    const report = (await diagnosticStatus(h.ctx)).diagnostic;
+    expect(report.steps.some((step) => step.stage === 'capture_reply' || (step.stage === 'tab_lookup' && step.state !== 'pending'))).toBe(false);
+    expect(JSON.stringify(report)).not.toContain('private.example');
+  });
+
+  it.each(['query', 'injection'] as const)('bounds an unanswered native %s without claiming its callback failed', async (kind) => {
+    const h = await setup();
+    await startDiagnostic(h.ctx);
+    const tab = [...h.browser.tabs.values()][0];
+    if (tab === undefined) throw new Error('test tab missing');
+    Object.assign(h.browser.api.tabs, kind === 'query' ? { query: () => undefined } : { executeScript: () => undefined });
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      const call = kind === 'query' ? queryTabs(h.ctx, { active: true }) : executeFile(h.ctx, tab.id, 'probe.js');
+      const rejected = expect(call).rejects.toThrow('browser_reply_timeout');
+      await vi.advanceTimersByTimeAsync(BROWSER_REPLY_TIMEOUT_MS + 1);
+      await rejected;
+      expect((await diagnosticStatus(h.ctx)).diagnostic.steps).toContainEqual({ stage: kind === 'query' ? 'active_tabs' : 'probe_injection', state: 'pending' });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('starts and sends even when the native active-tab callback never answers, without changing normal uploads', async () => {
     const h = await setup();
     Object.assign(h.browser.api.tabs, { query: () => undefined });
@@ -30,7 +78,7 @@ describe('one-shot Orion capture diagnostic', () => {
     expect(started.diagnostic.state).toBe('running');
     expect([...h.browser.tabs.values()].map((tab) => tab.url)).toEqual([DIAGNOSTIC_URL]);
     // This is the same pending call that can block the normal focus queue on the phone.
-    void queryTabs(h.ctx, { active: true });
+    void queryTabs(h.ctx, { active: true }).catch(() => undefined);
     await vi.waitFor(async () => { expect((await diagnosticStatus(h.ctx)).diagnostic.latestState).toBe('pending'); });
     const item = { id: 'synthetic-item', kind: 'visit' as const, json: '{"kind":"visit","id":"synthetic-item"}', version: 1 };
     await queueItem(h.ctx.db, item, T0);

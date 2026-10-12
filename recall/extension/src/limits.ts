@@ -17,6 +17,8 @@ export const IDLE_SECONDS = 180;
 export const TICK_MINUTES = 1;
 /** A longer silence (Chrome closed, the Mac asleep, the worker killed) closes an open span at the last beat. */
 export const GAP_MS = 2 * MINUTE;
+/** An unanswered Orion callback must not hold later focus events forever. */
+export const BROWSER_REPLY_TIMEOUT_MS = 5 * SECOND;
 
 // ---- visits (visits.ts) ----------------------------------------------------------------------------------------------
 

@@ -186,7 +186,10 @@ async function answer(request: Request): Promise<Status | SaveAnswer | SaveProgr
     case 'diagnostic-status':
       return diagnosticStatus(ctx);
     case 'diagnostic-start': {
-      const started = await startDiagnostic(ctx);
+      const started = await startDiagnostic(ctx, (tabId) => {
+        const at = Date.now();
+        transition('diagnostic_page', (current) => reconcile(current, at, { tabId }));
+      });
       if (started.ok) void ensureAlarm().catch(() => undefined);
       return started;
     }
@@ -205,10 +208,10 @@ function navigated(details: { readonly tabId: number; readonly frameId?: number;
 
 if (!MOBILE) features.idle?.setDetectionInterval(IDLE_SECONDS);
 
-chrome.tabs.onActivated.addListener(() => {
+chrome.tabs.onActivated.addListener((info) => {
   if (MOBILE) void ready.then((ctx) => diagnosticEvent(ctx, 'tab')).catch(() => undefined);
   const at = Date.now();
-  transition('tab_activated', (ctx) => reconcile(ctx, at));
+  transition('tab_activated', (ctx) => reconcile(ctx, at, ctx.mobile ? { tabId: info.tabId } : {}));
 });
 
 features.windows?.onFocusChanged.addListener((windowId) => {

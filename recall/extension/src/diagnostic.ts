@@ -113,11 +113,18 @@ export async function diagnosticRunId(ctx: Context, tabId: number): Promise<stri
   return active(ctx, run) && run.tabId === tabId ? run.report.run_id : null;
 }
 
+/** Event-selected tabs must stop the public diagnostic on navigation too, even without a tabs.query call. */
+export async function observeTabLocation(ctx: Context, tab: chrome.tabs.Tab | undefined, expectedRunId: string | null): Promise<void> {
+  if (!ctx.mobile || expectedRunId === null || tab?.url === undefined || tab.url === '' || tab.url === 'about:blank') return;
+  await change(ctx, (run) => active(ctx, run) && run.report.run_id === expectedRunId && run.tabId === tab.id && !isDiagnosticPage(tab.url)
+    ? { ...run, stopped: true } : run);
+}
+
 export async function diagnosticStatus(ctx: Context): Promise<DiagnosticAnswer> {
   return { ok: true, diagnostic: view(ctx, await read(ctx)) };
 }
 
-export async function startDiagnostic(ctx: Context): Promise<DiagnosticAnswer> {
+export async function startDiagnostic(ctx: Context, inspect?: (tabId: number) => void): Promise<DiagnosticAnswer> {
   if (!ctx.mobile) return { ok: false, error: 'unsupported', diagnostic: view(ctx, null) };
   if (await getToken(ctx.db) === '') return { ok: false, error: 'token_missing', diagnostic: view(ctx, await read(ctx)) };
   const at = ctx.now();
@@ -132,7 +139,11 @@ export async function startDiagnostic(ctx: Context): Promise<DiagnosticAnswer> {
         const current = await read(ctx);
         if (!active(ctx, current) || current.report.run_id !== run.report.run_id) return;
         const tabId = tab?.id;
-        if (!failed && tab !== undefined && tabId !== undefined && !tab.incognito && isDiagnosticPage(tab.url)) await change(ctx, (latest) => active(ctx, latest) && latest.report.run_id === run.report.run_id ? { ...latest, tabId } : latest);
+        // This ID comes from creating our fixed URL; native create may omit URL until navigation completes.
+        if (!failed && tab !== undefined && typeof tabId === 'number' && !tab.incognito && (tab.url === undefined || isDiagnosticPage(tab.url))) {
+          await change(ctx, (latest) => active(ctx, latest) && latest.report.run_id === run.report.run_id ? { ...latest, tabId } : latest);
+          inspect?.(tabId);
+        }
         await observe(ctx, { stage: 'open_test_page', state: failed ? 'failed' : 'returned', result: failed ? 'api_error' : resultType(tab) }, undefined, run.report.run_id);
       })().catch(() => undefined);
     });

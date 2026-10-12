@@ -6,10 +6,10 @@ import type { Context } from '../src/context.ts';
 import { setToken } from '../src/db.ts';
 import { beat, pageVisibility, reconcile } from '../src/focus.ts';
 import { compressScreenshot } from '../src/screenshot.ts';
-import { INITIAL_UPLOAD, lastError, uploadState } from '../src/store.ts';
+import { focusState, INITIAL_UPLOAD, lastError, uploadState } from '../src/store.ts';
 import { batchOf, flush } from '../src/upload.ts';
 import { harness, INGEST_TOKEN, MINUTE, SECOND, T0, type FakeTab } from './fake-chrome.ts';
-import { openSpan, queuedDocuments, queuedVisits, spansOf } from './helpers.ts';
+import { openSpan, openVisits, queuedDocuments, queuedVisits, spansOf } from './helpers.ts';
 
 vi.mock('../src/screenshot.ts', async (original) => ({ ...await original<typeof import('../src/screenshot.ts')>(), compressScreenshot: vi.fn() }));
 
@@ -56,6 +56,36 @@ async function phone() {
 }
 
 describe('Orion iPhone foreground capture', () => {
+  it('records the event tab and its text when the native active-tab query never answers', async () => {
+    const h = await phone();
+    Object.assign(h.browser.api.tabs, { query: () => undefined });
+    const following = reconcile(h.ctx, T0, { tabId: h.tab.id });
+    await vi.waitFor(async () => { expect((await focusState.get(h.ctx.chrome))?.open?.tabId).toBe(h.tab.id); });
+    await following;
+    const job = await captureDue(h.ctx, T0 + 10 * SECOND);
+    expect(job).not.toBeNull();
+    if (job !== null) await storeCapture(h.ctx, job, await readTab(h.ctx, job), T0 + 10 * SECOND);
+    expect(await queuedDocuments(h.ctx)).toMatchObject([{ text: 'A synthetic article.' }]);
+  });
+
+  it('keeps visible focus during a background update and closes it when the document hides', async () => {
+    const h = await phone();
+    Object.assign(h.browser.api.tabs, { query: () => undefined });
+    const following = reconcile(h.ctx, T0, { tabId: h.tab.id });
+    await vi.waitFor(async () => { expect((await focusState.get(h.ctx.chrome))?.open?.tabId).toBe(h.tab.id); });
+    await following;
+    const background = h.browser.open('https://example.org/background', { active: false });
+    await reconcile(h.ctx, T0 + SECOND, { tabId: background.id });
+    expect((await focusState.get(h.ctx.chrome))?.open?.tabId).toBe(h.tab.id);
+    expect((await openVisits(h.ctx)).map((visit) => visit.tabId)).toEqual([h.tab.id]);
+    h.hide();
+    const closing = reconcile(h.ctx, T0 + 2 * SECOND, { tabId: h.tab.id });
+    await vi.waitFor(async () => { expect((await focusState.get(h.ctx.chrome))?.open).toBeNull(); });
+    await closing;
+    expect((await focusState.get(h.ctx.chrome))?.open).toBeNull();
+    expect((await queuedVisits(h.ctx)).flatMap(spansOf)).toEqual([[T0, T0 + 2 * SECOND]]);
+  });
+
   it('captures callback-only MV2 text/JPEG at ten seconds, omits unchanged content and stops at pagehide', async () => {
     const h = await phone();
     h.browser.screenshot = 'data:image/png;base64,synthetic';
@@ -89,10 +119,13 @@ describe('Orion iPhone foreground capture', () => {
     delete (h.browser.api.storage as unknown as Record<string, unknown>)['session'];
     await reconcile(h.ctx, T0);
     const original = await openSpan(h.ctx, T0);
+    const query = h.browser.api.tabs.query;
+    Object.assign(h.browser.api.tabs, { query: () => undefined });
     const recreated: Context = { ...h.ctx, chrome: { ...h.ctx.chrome } };
     await reconcile(recreated, T0 + 30 * SECOND);
     expect(await openSpan(recreated, T0 + 30 * SECOND)).toEqual(original);
     expect(await captureDue(recreated, T0 + 30 * SECOND)).not.toBeNull();
+    Object.assign(h.browser.api.tabs, { query });
     h.hide();
     const hidden: Context = { ...h.ctx, chrome: { ...h.ctx.chrome } };
     await pageVisibility(hidden, h.tab.id, h.tab.documentId, false, T0 + MINUTE);

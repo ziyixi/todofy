@@ -9,6 +9,19 @@ Its old waiting lists and release identities are historical, not instructions to
 
 ## Current work
 
+`codex/recall-orion-event-capture` fixes a reproduced application deadlock: one unanswered mobile native query
+held every later focus/capture event while heartbeat remained independent. Activation/navigation/visibility events
+now supply their tab IDs, checked for active+visible state; the current span is reused before enumeration. Mobile
+callbacks have a five-second bound, with no added retries; normal later events/minute ticks can continue.
+Start uses the ID returned from creating its fixed public page, including an ID-only native reply, and feeds the
+same normal focus path. No proto, database, permissions or static scripts are added. Desktop behavior is unchanged.
+Local regressions prove actual visit/text/upload with an unanswered enumeration, background isolation, mirror
+resume and recovery after the old startup call times out. Type/lint/build and 148 extension tests pass. The same
+WebKit DOM/IDB/JPEG/gzip regression fails on published 812 and passes on the local correction (nine harness cases).
+Exact CI artifact checks and native A/B remain before release. Native testing is currently paused by the Mac lock;
+CUA requires the owner to unlock manually, and the owner has been asked. Do not bypass through another UI channel.
+Do not claim phone success until actual mobile receipt. No live Chrome interaction or installation update.
+
 `codex/recall-permission-api-verification` records the native permission investigation; application release is held.
 The owner 812 receipt has 8 tab events, 2 alarms and only open-test-page/Alarm-setup results. A fresh native Mac
 Orion test reproduced that pattern. Temporary closed phase observations showed state/mirror reads completing and

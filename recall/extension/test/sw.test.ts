@@ -174,8 +174,8 @@ describe('the service worker', () => {
     const query = vi.spyOn(browser.api.tabs, 'query').mockImplementation((info, callback?: (tabs: FakeTab[]) => void) => new Promise<FakeTab[]>((resolve) => {
       resume = () => { void originalQuery(info).then((tabs) => { callback?.(tabs); resolve(tabs); }); };
     }));
-    const tab = browser.open('https://docs.example.com/guide');
-    browser.events.activated.emit({ tabId: tab.id, windowId: 1 });
+    browser.open('https://docs.example.com/guide');
+    browser.events.installed.emit({ reason: 'update' });
     await vi.waitFor(() => { expect(query).toHaveBeenCalled(); });
     let saved: unknown;
     const response = message({ type: 'save', server: 'https://recall.ziyixi.science', label: 'iPhone', token: INGEST_TOKEN })
@@ -220,8 +220,8 @@ describe('the service worker', () => {
     await setToken(db, INGEST_TOKEN);
     const query = vi.spyOn(browser.api.tabs, 'query').mockImplementation(() => new Promise<FakeTab[]>(() => undefined));
     Object.assign(browser.api.tabs, { create: ({ url }: { url: string }, callback: (tab: FakeTab) => void) => { callback(browser.open(url)); } });
-    const tab = browser.open('https://example.net/normal');
-    browser.events.activated.emit({ tabId: tab.id, windowId: 1 });
+    browser.open('https://example.net/normal');
+    browser.events.installed.emit({ reason: 'update' });
     await vi.waitFor(() => { expect(query).toHaveBeenCalled(); });
     expect(await message({ type: 'diagnostic-start' })).toMatchObject({ ok: true, diagnostic: { state: 'running' } });
     expect(await message({ type: 'diagnostic-send' })).toMatchObject({ ok: true, diagnostic: { state: 'sent' } });
@@ -229,6 +229,40 @@ describe('the service worker', () => {
     expect((await batch(0)).diagnostic?.run_id).toMatch(/^[0-9a-f-]{36}$/);
     db.close();
   });
+
+  it.each([false, true])('captures and uploads the activated phone tab with an earlier blocked startup query=%s', async (blockedStartup) => {
+    vi.stubGlobal('RECALL_ORION', true);
+    const get = browser.api.tabs.get;
+    Object.assign(browser.api.tabs, {
+      get: (id: number, callback: (tab: FakeTab) => void) => { void get(id).then(callback); },
+      captureVisibleTab: (_options: unknown, callback: (data: string) => void) => { callback('data:image/png;base64,c3ludGhldGlj'); },
+    });
+    const query = vi.spyOn(browser.api.tabs, 'query').mockImplementation(() => new Promise<FakeTab[]>(() => undefined));
+    browser.script = ({ tabId, files }) => {
+      const tab = browser.tab(tabId);
+      return files?.[0] === 'probe.js'
+        ? { documentId: tab.documentId, visible: true, url: tab.url }
+        : { build: browser.manifest.version, documentId: tab.documentId, visible: true, url: tab.url, title: tab.title, description: '', text: 'Synthetic event-driven capture.', textTruncated: false, hasPasswordField: false };
+    };
+    await start();
+    const db = await openDb();
+    await setToken(db, INGEST_TOKEN);
+    const tab = browser.open('https://example.org/article', { title: 'Synthetic article' });
+    if (blockedStartup) {
+      browser.events.installed.emit({ reason: 'update' });
+      await vi.waitFor(() => { expect(query).toHaveBeenCalledOnce(); });
+    }
+    browser.events.activated.emit({ tabId: tab.id, windowId: 1 });
+    await vi.waitFor(async () => { expect((await focus())?.open?.tabId).toBe(tab.id); }, { timeout: 7000 });
+    const visitId = (await focus())?.open?.visitId;
+    expect(visitId === undefined ? undefined : await getVisit(db, visitId)).toMatchObject({ tabId: tab.id, title: 'Synthetic article' });
+    vi.setSystemTime(T0 + 11 * SECOND);
+    browser.events.alarm.emit({ name: 'tick' });
+    await vi.waitFor(() => { expect(net.requests).toHaveLength(1); });
+    expect((await batch(0)).items).toMatchObject([{ kind: 'document', document: { text: 'Synthetic event-driven capture.', url: 'https://example.org/article' } }]);
+    expect(query).toHaveBeenCalledTimes(blockedStartup ? 1 : 0);
+    db.close();
+  }, 10_000);
 
   it('follows only an active main document: no prerender, cached page or frame', async () => {
     await start();

@@ -370,7 +370,8 @@ export async function checkOrionOptions({ webkit, expect, folder }) {
       const h = await start();
       await h.page.evaluate(() => {
         window.__test.stallQuery = true;
-        window.__test.emit('activated', { tabId: 1, windowId: 1 });
+        // Installation has no tab ID, so it must discover the foreground tab.
+        window.__test.emit('installed');
       });
       await h.page.waitForFunction(() => window.__test.queryStalled);
       await fillAndSave(h);
@@ -379,6 +380,36 @@ export async function checkOrionOptions({ webkit, expect, folder }) {
       if (!(await storedToken(h.page))) throw Error('blocked_focus_prevented_save');
       expect(h.errors).toEqual([]);
       results.push({ case: 'unanswered tabs.query does not block Save', passed: true, errors: h.errors });
+      await h.context.close();
+    }
+    {
+      const h = await start();
+      await fillAndSave(h);
+      await h.page.waitForFunction(() => window.__test.local.upload?.lastUploadAt > 0);
+      await h.article.bringToFront();
+      await h.page.evaluate(() => {
+        window.__test.stallQuery = true;
+        window.__test.emit('installed');
+      });
+      await h.page.waitForFunction(() => window.__test.queryStalled);
+      // A later real tab event must get past that unanswered startup query.
+      await h.page.evaluate(() => window.__test.emit('activated', { tabId: 1, windowId: 1 }));
+      await h.page.clock.fastForward(5100);
+      await expect.poll(() => getStatus(h)).toMatchObject({ focused: true });
+      await h.page.clock.fastForward(11000);
+      await expect.poll(() => h.page.evaluate(() => window.__test.local.capture_status)).toMatchObject({ text: 'saved' });
+      await expect.poll(() => getStatus(h)).toMatchObject({ queued: 1 });
+      // Mobile uploads retain their normal minute cadence after the Save heartbeat.
+      await h.page.clock.fastForward(60000);
+      await expect.poll(() => h.page.evaluate(() => window.__test.local.capture_status)).toMatchObject({ text: 'unchanged' });
+      await expect.poll(() => h.batches.flatMap((batch) => batch.items).filter((item) => item.kind === 'document').length).toBe(1);
+      const document = h.batches.flatMap((batch) => batch.items).find((item) => item.kind === 'document').document;
+      expect(document.text).toContain('Actual visible DOM text from the published capture script.');
+      expect(document.screenshot_width).toBeGreaterThan(0);
+      expect(document.screenshot_jpeg_base64 || document.screenshot_webp_base64).toBeTruthy();
+      expect(h.batches.flatMap((batch) => batch.items).filter((item) => item.kind === 'document')).toHaveLength(1);
+      expect(h.errors).toEqual([]);
+      results.push({ case: 'unanswered startup query cannot prevent event-driven DOM and screenshot upload', passed: true, documents: 1, duplicateDocuments: 0, errors: h.errors });
       await h.context.close();
     }
     {
@@ -425,6 +456,7 @@ export async function checkOrionOptions({ webkit, expect, folder }) {
       await h.page.waitForFunction(() => window.__test.local.upload?.lastUploadAt > 0);
       await h.page.evaluate(() => {
         window.__test.stallQuery = true;
+        window.__test.emit('installed');
         return new Promise((resolve) => {
           const request = indexedDB.open('recall');
           request.onsuccess = () => {
@@ -435,9 +467,14 @@ export async function checkOrionOptions({ webkit, expect, folder }) {
           };
         });
       });
-      await h.options.locator('#diagnostic-start').click();
       await h.page.waitForFunction(() => window.__test.queryStalled);
-      await expect.poll(() => getDiagnostic(h)).toMatchObject({ state: 'running', steps: expect.arrayContaining([expect.objectContaining({ stage: 'active_tabs', state: 'pending' })]) });
+      await h.options.locator('#diagnostic-start').click();
+      await h.page.clock.fastForward(5100);
+      await expect.poll(() => getStatus(h)).toMatchObject({ focused: true });
+      await h.page.clock.fastForward(11000);
+      await expect.poll(() => h.page.evaluate(() => window.__test.local.capture_status)).toMatchObject({ text: 'saved' });
+      await h.page.clock.fastForward(60000);
+      await expect.poll(() => getStatus(h)).toMatchObject({ queued: 1 });
       await expect(h.options.locator('#diagnostic-send')).toBeEnabled();
       await h.options.locator('#diagnostic-send').click();
       await expect(h.options.locator('#diagnostic-feedback')).toContainText('诊断已发送');
@@ -445,14 +482,14 @@ export async function checkOrionOptions({ webkit, expect, folder }) {
       expect(batch.items).toEqual([]);
       expect(batch.device.queued_count).toBe(1);
       expect(batch.diagnostic.steps).toEqual(expect.arrayContaining([
-        expect.objectContaining({ stage: 'active_tabs', state: 'pending' }),
         expect.objectContaining({ stage: 'open_test_page', state: 'returned' }),
+        expect.objectContaining({ stage: 'capture_store', state: 'returned' }),
       ]));
       for (const content of [token, diagnosticUrl, 'not part of diagnosis', 'Synthetic diagnostic page']) expect(JSON.stringify(batch.diagnostic)).not.toContain(content);
       expect((await getStatus(h)).queued).toBe(1);
       await expect(h.options.locator('button[type=submit]')).toBeEnabled();
       expect(h.errors).toEqual([]);
-      results.push({ case: 'hung native query still sends a bounded diagnostic, not the outbox', passed: true, stage: 'active_tabs', state: 'pending', queuedUnchanged: 1 });
+      results.push({ case: 'diagnostic created tab captures beyond a pre-start unanswered query and preserves held outbox', passed: true, queuedUnchanged: 1 });
       await h.context.close();
     }
     {

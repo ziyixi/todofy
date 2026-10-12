@@ -44,8 +44,10 @@ interface Target {
 async function tabPage(ctx: Context, tabId: number): Promise<TabPage | null> {
   try {
     if (ctx.mobile) {
-      const [tab, probe] = await Promise.all([getTab(ctx, tabId), probePage(ctx, tabId)]);
-      return probe?.visible && !tab.incognito ? { tabId, documentId: probe.documentId, url: probe.url, title: tab.title ?? '' } : null;
+      const tab = await getTab(ctx, tabId);
+      if (!tab.active || tab.incognito) return null;
+      const probe = await probePage(ctx, tabId);
+      return probe?.visible ? { tabId, documentId: probe.documentId, url: probe.url, title: tab.title ?? '' } : null;
     }
     const [tab, frame] = await Promise.all([ctx.chrome.tabs.get(tabId), ctx.chrome.webNavigation.getFrame({ tabId, frameId: 0 })]);
     if (frame === null || frame.documentLifecycle !== 'active' || tab.incognito) return null;
@@ -58,7 +60,6 @@ async function tabPage(ctx: Context, tabId: number): Promise<TabPage | null> {
 /** The window in front, or WINDOW_ID_NONE when another app is. */
 async function focusedWindow(ctx: Context): Promise<number> {
   try {
-    if (ctx.mobile) return (await queryTabs(ctx, { active: true }))[0]?.windowId ?? -1;
     const window = await ctx.chrome.windows.getLastFocused();
     return window.focused && window.id !== undefined ? window.id : ctx.chrome.windows.WINDOW_ID_NONE;
   } catch {
@@ -67,23 +68,36 @@ async function focusedWindow(ctx: Context): Promise<number> {
 }
 
 /** The span's target: the focused window's active tab while the owner is active, on a page recall records. */
-async function focusTarget(ctx: Context, state: FocusState): Promise<Target | null> {
+async function focusTarget(ctx: Context, state: FocusState, candidateTabId?: number): Promise<Target | null> {
   if (!ctx.mobile && (state.idle !== 'active' || state.windowId === -1)) return null;
-  let tabs: chrome.tabs.Tab[];
-  try {
-    tabs = await queryTabs(ctx, { active: true, ...(ctx.mobile ? {} : { windowId: state.windowId }) });
-  } catch {
-    return null;
+  let tab: TabPage | null = null;
+  if (ctx.mobile) {
+    // The event already identifies a tab. Recheck its current foreground state before querying Orion again.
+    if (candidateTabId !== undefined) tab = await tabPage(ctx, candidateTabId);
+    if (tab === null && state.open !== null && state.open.tabId !== candidateTabId) tab = await tabPage(ctx, state.open.tabId);
+    if (tab === null && (candidateTabId !== undefined || state.open !== null)) {
+      if (candidateTabId !== undefined) await observe(ctx, { stage: 'focus_target', state: 'returned', result: 'hidden' }, candidateTabId);
+      if (state.open !== null && state.open.tabId !== candidateTabId) await observe(ctx, { stage: 'focus_target', state: 'returned', result: 'hidden' }, state.open.tabId);
+      return null;
+    }
   }
-  const id = tabs[0]?.id;
-  if (id === undefined) return null;
-  const tab = await tabPage(ctx, id);
   if (tab === null) {
-    await observe(ctx, { stage: 'focus_target', state: 'returned', result: 'hidden' }, id);
-    return null;
+    let tabs: chrome.tabs.Tab[];
+    try {
+      tabs = await queryTabs(ctx, { active: true, ...(ctx.mobile ? {} : { windowId: state.windowId }) });
+    } catch {
+      return null;
+    }
+    const id = tabs[0]?.id;
+    if (id === undefined) return null;
+    tab = await tabPage(ctx, id);
+    if (tab === null) {
+      await observe(ctx, { stage: 'focus_target', state: 'returned', result: 'hidden' }, id);
+      return null;
+    }
   }
   const page = await pageOf(tab.url, await currentDenylist(ctx));
-  await observe(ctx, { stage: 'focus_target', state: 'returned', result: page === null ? 'excluded' : 'visible' }, id);
+  await observe(ctx, { stage: 'focus_target', state: 'returned', result: page === null ? 'excluded' : 'visible' }, tab.tabId);
   return page === null ? null : { tab, page };
 }
 
@@ -95,14 +109,14 @@ async function saveFocus(ctx: Context, state: FocusState, at: number): Promise<v
  * The focus state. When storage.session has none (the browser restarted, the extension reloaded), a fresh one from
  * Chrome, after closing the span the mirror still holds at its last beat.
  */
-export async function loadFocus(ctx: Context, at: number): Promise<FocusState> {
+export async function loadFocus(ctx: Context, at: number, candidateTabId?: number): Promise<FocusState> {
   const state = await focusState.get(ctx.chrome);
   if (state !== undefined) return state;
   const stale = await mirror.get(ctx.chrome);
-  const fresh: FocusState = { open: null, windowId: await focusedWindow(ctx), idle: ctx.mobile ? 'active' : await ctx.chrome.idle.queryState(IDLE_SECONDS) };
+  const fresh: FocusState = { open: null, windowId: ctx.mobile ? -1 : await focusedWindow(ctx), idle: ctx.mobile ? 'active' : await ctx.chrome.idle.queryState(IDLE_SECONDS) };
   // An iOS event page may be recreated between minute beats while the same document remains visible.
   if (ctx.mobile && stale.open !== null && at >= stale.lastBeat && at - stale.lastBeat <= GAP_MS) {
-    const target = await focusTarget(ctx, fresh);
+    const target = await focusTarget(ctx, { ...fresh, open: stale.open }, candidateTabId);
     if (target !== null && await keepsSpan(ctx, stale.open, target, at)) {
       const resumed = { ...fresh, open: stale.open };
       await saveFocus(ctx, resumed, at);
@@ -168,13 +182,14 @@ async function keepsSpan(ctx: Context, open: Span, target: Target, at: number): 
  * Makes the open span follow Chrome's state at `at`: `change` is what the event said (the focused window, the idle
  * state), `endAt` an earlier end for a span that closes (going idle).
  */
-export async function reconcile(ctx: Context, at: number, change: Partial<Pick<FocusState, 'windowId' | 'idle'>> = {}, endAt?: number): Promise<void> {
-  const state: FocusState = { ...(await loadFocus(ctx, at)), ...change };
+export async function reconcile(ctx: Context, at: number, change: Partial<Pick<FocusState, 'windowId' | 'idle'>> & { readonly tabId?: number } = {}, endAt?: number): Promise<void> {
+  const { tabId, ...stateChange } = change;
+  const state: FocusState = { ...(await loadFocus(ctx, at, tabId)), ...stateChange };
   const { lastBeat } = await mirror.get(ctx.chrome);
   // After a silence the focus is known to have held only until the last beat.
   let end = endAt ?? at;
   if (state.open !== null && at - lastBeat > GAP_MS) end = Math.min(end, lastBeat);
-  const target = await focusTarget(ctx, state);
+  const target = await focusTarget(ctx, state, tabId);
   if (state.open !== null && target !== null && end === at && (await keepsSpan(ctx, state.open, target, at))) {
     await saveFocus(ctx, state, at);
     return;
@@ -194,7 +209,7 @@ export async function idleChanged(ctx: Context, idle: IdleState, at: number): Pr
  * and page ends (a background tab's too); a title change is the visit's new title.
  */
 export async function tabChanged(ctx: Context, tabId: number, at: number): Promise<void> {
-  await reconcile(ctx, at);
+  await reconcile(ctx, at, ctx.mobile ? { tabId } : {});
   const visit = await visitOfTab(ctx.db, tabId);
   if (visit === undefined || (await loadFocus(ctx, at)).open?.visitId === visit.id) return;
   const tab = await tabPage(ctx, tabId);
@@ -269,5 +284,5 @@ export async function pageVisibility(ctx: Context, tabId: number, documentId: st
     await saveFocus(ctx, { open: null, windowId: state?.windowId ?? -1, idle: 'active' }, at);
     return;
   }
-  await reconcile(ctx, at);
+  await reconcile(ctx, at, { tabId });
 }

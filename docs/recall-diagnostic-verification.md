@@ -122,6 +122,23 @@ until a native execution test establishes that it enables website access. No new
 
 ## Release and phone boundary
 
+### Event-path correction in progress
+
+The two-stage phone report exposed an application deadlock in addition to the unresolved platform behavior.
+The first mobile focus initialization queried active tabs for a window ID that mobile selection did not use.
+An unanswered callback held the serial focus queue indefinitely. Later events, capture and tick work queued behind
+it; heartbeat, settings and the diagnostic's counters used independent paths. A native call started before Start
+also carried no run identity, so its pending stage was absent from that diagnostic.
+
+The correction uses event-provided tab IDs and the current span, with fresh active/visible/privacy checks, before
+enumerating tabs. Known targets that cannot prove foreground state return no target. Mobile callbacks have a
+five-second bound; no new retry mechanism is introduced. The created diagnostic tab ID feeds the ordinary focus
+path even when native creation omits its URL. Existing native callbacks, minute tick, upload and deduplication remain.
+No permissions, static scripts, proto fields or production resources change. Desktop calls retain their original path.
+Regression tests failed before the corresponding fix and now save a real IDB visit, text and upload while native
+enumeration never answers. Separate checks cover hidden/background pages, mirror resume and startup queue recovery.
+Native Mac and final iOS results must be recorded independently; these application regressions do not prove phone success.
+
 The first full branch run reached a UI size failure: 62.2 KiB against the previous 62 KiB budget.
 The requested diagnostic view raises only that artifact budget to 64 KiB, with the reason recorded beside it.
 Worker gzip remains 126.5 KiB within its unchanged 130 KiB budget.
