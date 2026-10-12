@@ -9,6 +9,31 @@ Its old waiting lists and release identities are historical, not instructions to
 
 ## Current work
 
+`codex/recall-permission-api-verification` records the native permission investigation; application release is held.
+The owner 812 receipt has 8 tab events, 2 alarms and only open-test-page/Alarm-setup results. A fresh native Mac
+Orion test reproduced that pattern. Temporary closed phase observations showed state/mirror reads completing and
+execution waiting in the native active-tab query. The browser displayed a site-access prompt for the public fixture.
+Granting example.org access for one day and reloading the same test extension restored text/image uploads.
+The actual published 812 files were then tested with the grant: its 09:47:30.794Z receipt has 11 stages, 13 tab events
+and 3 alarms; uploads added one nonempty text document and one image. No private browsing content was read.
+This establishes macOS behavior only. The owner could not find the proposed permission entry on iOS, and a full
+Orion restart/public-page test still produced zero records. Do not describe the phone failure as a confirmed
+permission issue or send the owner to a macOS-only menu. Current ZIP already declares required `<all_urls>`.
+`codex/recall-startup-diagnostic` at `d04501a` passed CI but is unmerged and never released. Its proposed in-flight
+tracker did not explain the native result, and a start/observe timing gap remains; do not promote it as a phone fix.
+The test extension is removed, loopback consumer stopped and port closed. Owner Chrome and production remain unchanged.
+The minimal native Mac probe returned `granted` through contains/request callbacks, but actual `executeScript`
+of constant `42` in its newly created public tab remained unanswered. Granting only example.org for one day through
+Orion's toolbar, refreshing options and creating the same public tab made that identical script return `[42]`.
+This is native execution evidence that the standard permission reply does not open the Mac site-access gate.
+It does not establish the iOS cause or an iOS fix.
+`codex/recall-permission-setup` at `33ded73` keeps the direct Save-request experiment, unmerged and unreleased.
+[Full branch CI](https://github.com/ziyixi/todofy/actions/runs/38236788381), local type/lint/build, 141 tests and twelve
+WebKit cases pass. Those checks establish UI/save behavior, not activation of Orion's site-access gate. Do not merge
+or publish this as a phone fix without native execution evidence. Keep ordinary Save simple in production.
+Do not ask the owner to hunt for a Mac-only menu or repeatedly reinstall; owner Chrome remains untouched.
+
+
 `codex/recall-mobile-diagnostic` implements the authorized one-shot Orion capture diagnosis.
 The owner still reports no visits or samples on `611`, Orion 1.5.5 (3), iOS 27.0.1; heartbeat works.
 It records closed stage metadata on a fixed public test page and sends an empty authenticated batch independently
@@ -31,8 +56,8 @@ capture deduplicated. All files of both downloaded release ZIPs match the tested
 The temporary Orion extension is uninstalled, the consumer stopped and its port closed. Chrome remains untouched.
 `codex/recall-diagnostic-verification` records these receipts in root docs only, without another application release.
 [Diagnostic evidence](docs/recall-diagnostic-verification.md) separates synthetic/native Mac checks from the phone
-result still needed. Owner updates the existing Orion extension, Starts, stays on the public test page about one
-minute, then Sends and reports back; no token rotation or uninstall. Do not claim iOS capture is fixed.
+receipt already received; the follow-up above supersedes the earlier phone test instructions. Do not repeat them or
+claim iOS capture is fixed.
 
 The native Orion fixes from `codex/recall-orion-native-capture` are released at `88bbc3d` (`2026.1012.611`).
 Real Orion macOS 1.1.3/build 152 now runs in a dedicated empty test environment, with a loopback-only

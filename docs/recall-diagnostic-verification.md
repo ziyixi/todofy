@@ -46,6 +46,80 @@ stages with fresh pending calls, and leaving the page could overwrite its foregr
 preserves completed/foreground evidence. The regression and the full extension suite pass. The final artifact
 confirmation is recorded below; the earlier local report is not evidence for that later correction.
 
+## Permission investigation after the phone receipt
+
+The owner sent an 812 report with eight tab events and two alarms, but only open-test-page and Alarm-setup
+results. No real browsing content was read. A local SW simulation could produce that shape with an earlier
+unanswered query; that was a hypothesis, not identification of the phone's failing API.
+
+A fresh real Orion macOS installation then reproduced the same two-stage report. Temporary test-only observations
+recorded fixed phase names and return-type categories, without altering native API results. An atomic snapshot
+showed focus/session and mirror reads completing, entry into focus-target selection, and completion of the
+query's diagnostic observation. The native active-tab query had not answered. The toolbar showed that the test
+extension was not permitted on the public fixture and offered a website-access prompt.
+
+After granting only example.org for one day and reloading the same extension, the consumer received nonempty text
+and images. The current published 812 files were rechecked against the downloaded ZIP and visibly imported.
+With the site grant retained, that version produced eleven stages at **09:47:30.794Z**, with thirteen tab events
+and three alarms. Its run added one nonempty text document and one image beyond the recorded pre-import baseline.
+The original script is recoverable byte for byte after removing test identity, loopback constants and owner
+invocation. The temporary phase statements were not included in this final 812 check.
+
+The proposed tracker on `d04501a` passed [branch CI](https://github.com/ziyixi/todofy/actions/runs/38227995048),
+but was not merged or released. The native investigation exposed an observation/start timing gap; the branch is
+not a phone fix. The test extension was uninstalled and the exact loopback process stopped; port 18793 is closed.
+No owner Chrome files, production code, credentials or permissions were changed.
+
+The owner reports no visible permission entry on iOS and no records after restarting Orion and testing the public
+page. macOS permission behavior therefore cannot establish the phone cause. Official [website settings](https://help.kagi.com/orion/features/website-settings.html)
+document per-site extension permissions for macOS; the [iOS extension guide](https://help.kagi.com/orion/browser-extensions/ios-ipados-extensions.html)
+does not document that control. Do not invent an iOS menu path from the Mac UI.
+
+The actual 812 MV2 manifest already declares required `<all_urls>`, tabs, webNavigation, alarms, storage and
+unlimitedStorage; there are no optional permissions. A manifest declaration is distinct from actual browser access.
+The [Orion API table](https://browser.kagi.com/WebExtensions-API-Support.html) lists permissions.contains/getAll/request
+as supported on iOS, but does not establish their connection to Orion's website-access gate. Standard
+[permission requests](https://developer.chrome.com/docs/extensions/reference/api/permissions#method-request) require
+a user gesture and can request required permissions withheld by the browser. Any enable action must run directly
+from that click, report the real answer and avoid treating a permission response as capture success.
+
+## Unreleased permission experiment
+
+The phone installer screenshot lists only browsing history and unlimited storage. The actual required host
+declaration is already present; the screenshot alone cannot establish that Orion withheld website access.
+A disposable native Mac fixture with only `https://example.org/*` permission returned `granted` callbacks from
+contains, request and the subsequent contains. No API results were replaced. On returning to and refreshing the
+public page, its toolbar still reported the extension not permitted there. An API grant therefore does not establish
+that the website-access control changed. The toolbar alone also cannot prove actual script execution is blocked.
+
+A second minimal fixture (1.0.1, ZIP SHA-256
+`654164c4d604acd0cda7f8c55a0c8bccf9c86c76c24a5138420443441551c3c3`) checked actual execution. Its only permission
+is `https://example.org/*`, with no background, storage, history or tabs permission. A button created a fixed public
+tab and retained only its returned ID; another directly called native `tabs.executeScript` with constant `42`.
+It did not query existing tabs or read content. After contains/request/contains all answered `granted`, script
+completion remained unanswered beyond the eight-second observation window, including after visiting the target.
+No website prompt appeared automatically. The toolbar's own prompt then granted example.org for one day. After
+refreshing options and creating another fixed public tab, the identical sentinel callback answered and exactly
+matched `[42]`, without another permission request. No native return values were replaced. This establishes a Mac
+execution difference under the separate website control; it is not iOS execution evidence.
+The native manager verified fixture version 1.0.1 before cleanup and an empty extension list afterwards.
+The original ZIPs remain available locally; no owner Chrome interaction or installation update occurred.
+
+The experiment on `codex/recall-permission-setup` (`33ded73`) directly requests the declared `<all_urls>` on Save,
+before any await or background message. It is unmerged and unreleased.
+Initial contains and request replies are shown separately from settings persistence and actual sampling.
+Unavailable/error/nonboolean replies remain unconfirmed; after twelve seconds without a reply the UI says so,
+keeps Save usable and avoids a second pending permission prompt. A late native reply may update that status.
+An earlier contains reply cannot overwrite a later request result. Chrome compilation removes this permission
+code; manifest, extension identity, capture core, upload, proto and backend remain unchanged.
+
+Local typecheck, lint, build and 141 extension tests pass. The existing built-options WebKit harness passes twelve
+cases. New cases exercise trusted submit ordering before the actual Save message, refused/error/missing/unanswered
+permissions with native IDB persistence, initial-check timeout, stale initial replies and a late request reply.
+The [full branch CI](https://github.com/ziyixi/todofy/actions/runs/38236788381) also passed. The bridge supplies
+permission replies; these tests do not establish Orion iOS permission behavior. Keep the experiment out of production
+until a native execution test establishes that it enables website access. No new phone download is requested.
+
 ## Release and phone boundary
 
 The first full branch run reached a UI size failure: 62.2 KiB against the previous 62 KiB budget.
@@ -73,7 +147,5 @@ Orion ZIP SHA-256: `cfd83dc2f0cb06ccfd72d20fe1836c931347396b9177f0f477ba63f33c62
 [Published Orion ZIP](https://github.com/ziyixi/todofy/releases/download/recall-extension-v2026.1012.812/recall-orion-v2026.1012.812.zip).
 No owner Chrome installation update or Chrome interaction was performed. The disposable Orion test extension was
 uninstalled (the native manager is empty), and its exact loopback consumer process was stopped; the port is closed.
-Mac Orion and the WebKit bridge cannot establish iOS behavior. The owner should update the existing Orion extension,
-start one diagnostic, keep its public page foreground for about a minute, then return and Send. No token rotation or
-uninstallation is needed. Only after the actual phone receipt arrives can the platform/selection/injection failure
-be diagnosed from native evidence.
+Mac Orion and the WebKit bridge cannot establish iOS behavior. The subsequent phone receipt and permission
+investigation are recorded above. No token rotation, repeated reinstallation or invented iOS menu path is required.
