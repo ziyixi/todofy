@@ -9,6 +9,15 @@ Its old waiting lists and release identities are historical, not instructions to
 
 ## Current work
 
+`codex/recall-orion-native-capture` is investigating the owner's still-failing Orion `429` capture.
+Real Orion macOS 1.1.3/build 152 now runs in a dedicated empty test environment, with a loopback-only
+copy of the released extension and a synthetic HTTP consumer. Native callbacks reproduce two differences
+missed by the synthetic bridge: a missing minute alarm is `null` (so `ensureAlarm` never creates it), and
+file injection returns a valid page probe while the subsequent content-message callback is `null`.
+The baseline is retained locally; message delivery is still being investigated before a correction.
+No phone capture success is claimed. Native Mac checks cannot establish iOS lifecycle behavior.
+Only the observed Alarm regression is being fixed; no production or credential changes have been made.
+
 Recall Orion content-message capture fix is released at `e397f51` (extension `2026.1012.429`).
 The owner's `403` screenshot reports `page_probe_invalid_result`; it identifies an unusable probe result,
 not the exact native shape or Orion implementation defect. The mobile path now ignores file-injection
