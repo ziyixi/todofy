@@ -3,18 +3,23 @@
  * 立即上传 and 检查更新. Every change goes through the service worker (messages.ts), which validates it; the token is
  * never shown again once saved. Text is only ever set as text.
  */
-import type { Request, SaveAnswer, SaveProgress, Status, UpdateAnswer } from './messages.ts';
-import { buildLine, SAVE_ERRORS, statusRows } from './options-view.ts';
+import type { DiagnosticAnswer, DiagnosticStatus, Request, SaveAnswer, SaveProgress, Status, UpdateAnswer } from './messages.ts';
+import { buildLine, diagnosticRows, DIAGNOSTIC_ERRORS, SAVE_ERRORS, statusRows } from './options-view.ts';
+import { diagnosticStepSummary } from '../../shared/diagnostic.ts';
+import { UPLOAD_TIMEOUT_MS } from './limits.ts';
 
 const REFRESH_MS = 30_000;
 const TOAST_MS = 6000;
 const SAVE_TIMEOUT_MS = 12_000;
+const DIAGNOSTIC_TIMEOUT_MS = 12_000;
+const DIAGNOSTIC_REFRESH_MS = 5000;
 const SAVE_PHASES: Record<SaveProgress['phase'], string> = { idle: '保存回执', device: '设备信息写入', token: '口令写入', 'upload-state': '上传状态写入' };
 
 function send(request: { readonly type: 'status' } | { readonly type: 'flush' }): Promise<Status>;
 function send(request: Extract<Request, { type: 'save' }>): Promise<SaveAnswer>;
 function send(request: { readonly type: 'save-progress' }): Promise<SaveProgress>;
 function send(request: { readonly type: 'check-update' }): Promise<UpdateAnswer>;
+function send(request: { readonly type: 'diagnostic-start' | 'diagnostic-send' | 'diagnostic-status' }): Promise<DiagnosticAnswer>;
 function send(request: Request): Promise<unknown> {
   return chrome.runtime.sendMessage(request);
 }
@@ -35,8 +40,18 @@ const flushButton = byId('flush', HTMLButtonElement);
 const updateButton = byId('check-update', HTMLButtonElement);
 const toastBox = byId('toast', HTMLDivElement);
 const footer = byId('build', HTMLElement);
+const diagnosticCard = byId('diagnostic', HTMLElement);
+const diagnosticStatus = byId('diagnostic-status', HTMLDListElement);
+const diagnosticDetails = byId('diagnostic-details', HTMLDetailsElement);
+const diagnosticSteps = byId('diagnostic-steps', HTMLOListElement);
+const diagnosticFeedback = byId('diagnostic-feedback', HTMLParagraphElement);
+const diagnosticStart = byId('diagnostic-start', HTMLButtonElement);
+const diagnosticSend = byId('diagnostic-send', HTMLButtonElement);
 
 let toastTimer: ReturnType<typeof setTimeout> | undefined;
+let startingDiagnostic = false;
+let sendingDiagnostic = false;
+let diagnosticRunning = false;
 
 function toast(message: string): void {
   clearTimeout(toastTimer);
@@ -64,7 +79,65 @@ function render(status: Status, fillForm: boolean): void {
     }),
   );
   updateButton.hidden = status.mobile === true;
+  diagnosticCard.hidden = status.mobile !== true;
   footer.textContent = buildLine(status);
+}
+
+function renderDiagnostic(status: DiagnosticStatus): void {
+  diagnosticRunning = status.state === 'running' && status.expiresAt > Date.now();
+  diagnosticStatus.replaceChildren(...diagnosticRows(status, Date.now()).flatMap((row) => {
+    const term = document.createElement('dt');
+    term.textContent = row.label;
+    const detail = document.createElement('dd');
+    detail.textContent = row.value;
+    if (row.warn) detail.className = 'warn';
+    return [term, detail];
+  }));
+  diagnosticStart.disabled = startingDiagnostic || status.state === 'running';
+  diagnosticSend.disabled = sendingDiagnostic || status.state === 'idle' || status.state === 'sent';
+  diagnosticDetails.hidden = status.steps.length === 0;
+  diagnosticSteps.replaceChildren(...status.steps.map((step) => {
+    const item = document.createElement('li');
+    item.textContent = diagnosticStepSummary(step);
+    return item;
+  }));
+}
+
+async function refreshDiagnostic(): Promise<void> {
+  if (diagnosticCard.hidden) return;
+  renderDiagnostic((await send({ type: 'diagnostic-status' })).diagnostic);
+}
+
+async function runDiagnostic(type: 'diagnostic-start' | 'diagnostic-send'): Promise<void> {
+  if (type === 'diagnostic-start') startingDiagnostic = true;
+  else sendingDiagnostic = true;
+  const button = type === 'diagnostic-start' ? diagnosticStart : diagnosticSend;
+  button.disabled = true;
+  diagnosticFeedback.hidden = false;
+  diagnosticFeedback.textContent = type === 'diagnostic-start' ? '正在打开测试页…' : '正在发送诊断…';
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const answer = await Promise.race([
+      send({ type }),
+      new Promise<never>((_, reject) => {
+        timeout = setTimeout(() => { reject(new Error('diagnostic_unconfirmed')); }, type === 'diagnostic-send' ? UPLOAD_TIMEOUT_MS + 5000 : DIAGNOSTIC_TIMEOUT_MS);
+      }),
+    ]);
+    renderDiagnostic(answer.diagnostic);
+    diagnosticFeedback.textContent = answer.ok
+      ? type === 'diagnostic-start' ? '保持测试页前台约一分钟，再回这里点“发送诊断”。' : '诊断已发送，回到聊天告诉我即可。'
+      : answer.error === undefined ? '诊断没有完成，请重新打开设置检查。' : DIAGNOSTIC_ERRORS[answer.error];
+  } catch {
+    diagnosticFeedback.textContent = type === 'diagnostic-start'
+      ? '开始尚未确认，请检查下方诊断状态；已有诊断时仍可发送。'
+      : '发送尚未确认，诊断仍保留在本机，可以再次点“发送诊断”。';
+  } finally {
+    clearTimeout(timeout);
+    if (type === 'diagnostic-start') startingDiagnostic = false;
+    else sendingDiagnostic = false;
+    button.disabled = false;
+    refreshDiagnostic().catch(() => undefined);
+  }
 }
 
 async function refresh(fillForm = false): Promise<void> {
@@ -136,9 +209,15 @@ updateButton.addEventListener('click', () => {
   });
 });
 
-refresh(true).catch(() => {
+diagnosticStart.addEventListener('click', () => { void runDiagnostic('diagnostic-start'); });
+diagnosticSend.addEventListener('click', () => { void runDiagnostic('diagnostic-send'); });
+
+refresh(true).then(refreshDiagnostic).catch(() => {
   toast('扩展没有响应，请稍后再试');
 });
 setInterval(() => {
   refresh().catch(() => undefined);
 }, REFRESH_MS);
+setInterval(() => {
+  if (document.visibilityState === 'visible' && (diagnosticRunning || startingDiagnostic || sendingDiagnostic)) refreshDiagnostic().catch(() => undefined);
+}, DIAGNOSTIC_REFRESH_MS);

@@ -175,6 +175,21 @@ button:focus-visible {
   overflow-wrap: anywhere;
 }
 
+.diagnostic-rows:not(:empty),
+#diagnostic-feedback {
+  margin-top: var(--space-2);
+}
+
+#diagnostic-details {
+  margin-top: var(--space-2);
+  font-size: 13px;
+}
+
+#diagnostic-steps {
+  padding-left: var(--space-4);
+  overflow-wrap: anywhere;
+}
+
 .warn {
   color: var(--warn);
 }

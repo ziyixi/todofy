@@ -33,7 +33,7 @@ message CaptureDiagnostic {
     (google.api.field_behavior) = REQUIRED,
     (common.wire.v1.field).non_null = true
   ];
-  // One latest observation per stage, in observation order, at most twelve.
+  // One observation per stage, at most twelve. Completed and foreground observations survive reopening settings.
   repeated CaptureDiagnosticStep steps = 4 [
     (google.api.field_behavior) = REQUIRED,
     (common.wire.v1.field).max_items = 12

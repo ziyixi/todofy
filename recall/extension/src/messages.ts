@@ -3,6 +3,7 @@
  * pages only): the status, saving the settings, 立即上传 and 检查更新.
  */
 import type { CaptureStatus, LastError, UploadState } from './store.ts';
+import type { CaptureDiagnosticStep } from '@ziyixi/proto/recall/ingest/v1/diagnostic_wire';
 
 export interface SaveRequest {
   readonly server: string;
@@ -16,7 +17,28 @@ export type Request =
   | { readonly type: 'save-progress' }
   | ({ readonly type: 'save' } & SaveRequest)
   | { readonly type: 'flush' }
-  | { readonly type: 'check-update' };
+  | { readonly type: 'check-update' }
+  | { readonly type: 'diagnostic-start' | 'diagnostic-send' | 'diagnostic-status' };
+
+export interface DiagnosticStatus {
+  readonly state: 'idle' | 'running' | 'stopped' | 'sent';
+  readonly runId: string;
+  readonly startedAt: number;
+  readonly expiresAt: number;
+  readonly stepCount: number;
+  readonly tabEvents: number;
+  readonly alarmEvents: number;
+  readonly sentAt: number;
+  readonly latestStage: string;
+  readonly latestState: string;
+  readonly steps: readonly CaptureDiagnosticStep[];
+}
+
+export interface DiagnosticAnswer {
+  readonly ok: boolean;
+  readonly error?: 'unsupported' | 'token_missing' | 'open_failed' | 'send_failed' | 'no_run';
+  readonly diagnostic: DiagnosticStatus;
+}
 
 export type SaveAnswer = { readonly ok: true } | { readonly ok: false; readonly error: 'server_invalid' | 'label_invalid' | 'token_invalid' | 'token_export' };
 
@@ -59,5 +81,5 @@ export function isRequest(value: unknown): value is Request {
     const { server, label, token } = value as Partial<Record<keyof SaveRequest, unknown>>;
     return typeof server === 'string' && typeof label === 'string' && typeof token === 'string';
   }
-  return type === 'status' || type === 'save-progress' || type === 'flush' || type === 'check-update';
+  return type === 'status' || type === 'save-progress' || type === 'flush' || type === 'check-update' || type === 'diagnostic-start' || type === 'diagnostic-send' || type === 'diagnostic-status';
 }

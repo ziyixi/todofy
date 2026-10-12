@@ -3,10 +3,10 @@
 import { describe, expect, it } from 'vitest';
 import { deleteVisit, getToken, queueItem, setToken } from '../src/db.ts';
 import { reconcile } from '../src/focus.ts';
-import { statusRows, ago, buildLine, SAVE_ERRORS } from '../src/options-view.ts';
+import { statusRows, ago, buildLine, diagnosticRows, SAVE_ERRORS } from '../src/options-view.ts';
 import { currentDenylist, parseLabel, parseServer, parseToken, saveSettings, status } from '../src/settings.ts';
 import { focusState, getDevice, lastError, uploadState, INITIAL_UPLOAD } from '../src/store.ts';
-import type { Status } from '../src/messages.ts';
+import type { DiagnosticStatus, Status } from '../src/messages.ts';
 import { harness, INGEST_TOKEN, MINUTE, T0 } from './fake-chrome.ts';
 
 describe('what the owner may type', () => {
@@ -33,6 +33,21 @@ describe('what the owner may type', () => {
     expect(parseLabel('😀'.repeat(64))).toBe('😀'.repeat(64));
     expect(parseLabel('😀'.repeat(65))).toBeNull();
     expect(parseLabel('   ')).toBeNull();
+  });
+});
+
+describe('the one-shot diagnostic summary', () => {
+  it('distinguishes an unanswered native call from a sent report without claiming capture succeeded', () => {
+    const diagnostic: DiagnosticStatus = {
+      state: 'running', runId: '8b377e4d-b3c1-4b4e-b625-7484ca8c19f1', startedAt: T0,
+      expiresAt: T0 + 5 * MINUTE, sentAt: 0, stepCount: 2, tabEvents: 1, alarmEvents: 0,
+      latestStage: 'active_tabs', latestState: 'pending', steps: [{ stage: 'active_tabs', state: 'pending' }],
+    };
+    expect(diagnosticRows(diagnostic, T0)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ label: '最近步骤', value: '读取活动标签：等待回调' }),
+      expect.objectContaining({ label: '已记录', value: '2 个步骤；1 次页面事件；0 次分钟检查' }),
+    ]));
+    expect(diagnosticRows({ ...diagnostic, state: 'sent', sentAt: T0 }, T0)[0]).toMatchObject({ value: '已发送（刚刚）' });
   });
 });
 

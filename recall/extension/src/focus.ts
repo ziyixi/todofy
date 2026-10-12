@@ -25,6 +25,7 @@ import { pageOf, titleOf, type PageInfo } from './page.ts';
 import { currentDenylist } from './settings.ts';
 import { focusState, mirror, type FocusState, type IdleState, type Span } from './store.ts';
 import { endVisit, firstFocus, newVisit, queueVisit, visitOver } from './visits.ts';
+import { observe } from './diagnostic.ts';
 
 /** What a tab shows: its document as webNavigation knows it, its URL and title as the tabs API does. */
 interface TabPage {
@@ -77,8 +78,12 @@ async function focusTarget(ctx: Context, state: FocusState): Promise<Target | nu
   const id = tabs[0]?.id;
   if (id === undefined) return null;
   const tab = await tabPage(ctx, id);
-  if (tab === null) return null;
+  if (tab === null) {
+    await observe(ctx, { stage: 'focus_target', state: 'returned', result: 'hidden' }, id);
+    return null;
+  }
   const page = await pageOf(tab.url, await currentDenylist(ctx));
+  await observe(ctx, { stage: 'focus_target', state: 'returned', result: page === null ? 'excluded' : 'visible' }, id);
   return page === null ? null : { tab, page };
 }
 

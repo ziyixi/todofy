@@ -30,6 +30,7 @@ import type { ViewContext } from '../app.ts'
 import { backupLate, behindText, consumerName, late, STORAGE_HIGH_MIB } from '../health.ts'
 import { act, frame } from './common.ts'
 import { paintTokens } from './tokens.ts'
+import { captureDiagnosticCard } from './diagnostic.ts'
 
 /** R2's free storage, shared by every app of the account (10 GB-month). */
 const R2_FREE_MB = 10 * 1024
@@ -109,6 +110,7 @@ export async function renderSettings(ctx: ViewContext): Promise<void> {
     fill(
       body,
       devicesCard(status, now),
+      captureDiagnosticCard(status.captureDiagnostic, status.devices, now),
       card('插件口令', '', tokens),
       backupCard(ctx, status, now),
       storageCard(ctx, status, shared),

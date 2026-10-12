@@ -3,7 +3,7 @@
 export function fixtureScript(manifest) {
   return `
 /* global parent, window, location, queueMicrotask, setInterval, structuredClone */
-const contentPage = location.pathname === '/article.html';
+const contentPage = location.pathname === '/article.html' || location.href === 'https://example.org/?recall-diagnostic=1';
 const shared = contentPage ? (window.__test = { local: {}, listeners: {} }) : parent.__test;
 const event = (name) => ({
   addListener(fn) {
@@ -58,6 +58,16 @@ window.chrome = {
     onActivated: event('activated'),
     onUpdated: event('updated'),
     onRemoved: event('removed'),
+    create(details, callback) {
+      shared.createdUrl = details.url;
+      shared.tab = { ...shared.tab, url: details.url, active: true };
+      shared.openTestPage(details.url).then(() => {
+        callback(shared.tab);
+        shared.emit('activated', { tabId: shared.tab.id, windowId: shared.tab.windowId });
+        shared.emit('updated', shared.tab.id, { status: 'complete' });
+      });
+      return undefined;
+    },
     query(query, callback) {
       shared.calls.query++;
       if (shared.stallQuery) {
@@ -119,7 +129,8 @@ window.chrome = {
         shared.alarmContractError = true;
         throw Error('MV2_alarm_get_requires_callback');
       }
-      queueMicrotask(() => callback(shared.alarm));
+      // Missing alarms returned null in native Orion, not undefined.
+      queueMicrotask(() => callback(shared.alarm ?? null));
       return undefined;
     },
     create(name, options) {

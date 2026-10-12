@@ -24,6 +24,7 @@
  * Logs hold the batch ID, counts and codes only: never a URL, host, title or text.
  */
 import { ChangeSchema, type Change } from '@ziyixi/proto/recall/archive/v1/archive_pb';
+import type { CaptureDiagnostic } from '@ziyixi/proto/recall/ingest/v1/diagnostic_pb';
 import { IngestBatchSchema, IngestItem_Kind, IngestItemSchema, IngestResultSchema, RejectedItemSchema, type DocumentItem, type IngestItem, type VisitItem } from '@ziyixi/proto/recall/ingest/v1/ingest_pb';
 import { create } from '@ziyixi/proto/protobuf';
 import { timestampMs } from '@ziyixi/proto/protobuf/wkt';
@@ -33,6 +34,7 @@ import { scrubText, scrubUrl } from '../../shared/scrub.ts';
 import { cutText, cutUrl, cutUtf8, DOCUMENT_MAX_BYTES, pageIdOf, rootUrl, siteOf } from '../../shared/url.ts';
 import { machineError, machineJson, type MachineAnswer } from './answers.ts';
 import { blobKey, deleteBlobs, putText, sha256Hex, storedText, textBlobPath, type StoredText } from './blobs.ts';
+import { saveCaptureDiagnostic } from './diagnostic.ts';
 import { documentChange, visitChange } from './feed.ts';
 import { indexedPart, writeIndexRow } from './fts.ts';
 import { BATCH_MAX_JSON_BYTES, CLOCK_SKEW_RECORDED_MS, DAILY_ROW_BUDGET, ITEM_CLOCK_LEEWAY_MS, OVER_BUDGET_JITTER_MS, VERSION_PART_MAX, VISIT_MAX_MS } from './limits.ts';
@@ -69,6 +71,7 @@ interface Envelope {
   readonly sentMs: number;
   readonly device: Device & { readonly version: string; readonly queued: number; readonly lastError: string; readonly mobile: boolean };
   readonly items: readonly unknown[];
+  readonly diagnostic: CaptureDiagnostic | undefined;
 }
 
 interface VisitPlan {
@@ -191,11 +194,18 @@ function readEnvelope(text: string): Envelope {
   if (device === undefined || sentTime === undefined || device.extensionVersion.split('.').some((part) => Number(part) > VERSION_PART_MAX)) {
     throw new BatchError('BAD_REQUEST');
   }
+  const diagnostic = batch.diagnostic;
+  if (diagnostic !== undefined && (
+    items.length !== 0 || diagnostic.startTime === undefined || diagnostic.reportTime === undefined ||
+    timestampMs(diagnostic.reportTime) < timestampMs(diagnostic.startTime) ||
+    new Set(diagnostic.steps.map((step) => step.stage)).size !== diagnostic.steps.length
+  )) throw new BatchError('BAD_REQUEST');
   return {
     batchId: batch.batchId,
     sentMs: timestampMs(sentTime),
     device: { id: device.deviceId, label: device.label, version: device.extensionVersion, queued: device.queuedCount, lastError: device.lastErrorCode, mobile: device.mobile },
     items,
+    diagnostic,
   };
 }
 
@@ -681,6 +691,7 @@ export async function ingestBatch(ctx: IngestContext, body: ArrayBuffer): Promis
       Math.abs(skew) > CLOCK_SKEW_RECORDED_MS ? Math.round(skew / 1000) : 0,
       envelope.device.mobile ? 1 : 0,
     );
+    if (envelope.diagnostic !== undefined) saveCaptureDiagnostic(store, envelope.device.id, envelope.diagnostic, now);
     let visits = 0;
     let longVisits = 0;
     let captures = 0;

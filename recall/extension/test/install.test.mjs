@@ -140,6 +140,15 @@ describe('the build', () => {
     message('recall-capture', 'other-extension');
     message('unrelated');
     expect(replies).toHaveLength(4);
+    // The phone report needs the native sender category even if the normal content guard rejects it.
+    const listener = listeners.values().next().value;
+    const diagnostic = { type: 'recall-diagnostic-context', runId: '00000000-0000-4000-8000-000000000001' };
+    listener(diagnostic, { id: null }, (reply) => replies.push(reply));
+    expect(replies).toHaveLength(4); // This ordinary page is outside the fixed diagnostic target.
+    document.location.href = 'https://example.org/?recall-diagnostic=1';
+    listener(diagnostic, { id: null }, (reply) => replies.push(reply));
+    expect(replies.at(-1)).toEqual({ visibility: 'hidden', stored_visibility: 'visible', sender_identity: 'null' });
+    expect(JSON.stringify(replies.at(-1))).not.toContain('synthetic');
     listeners.clear();
     runInNewContext(code, { document, window: { top: window }, chrome: { runtime } });
     expect(listeners.size).toBe(0);

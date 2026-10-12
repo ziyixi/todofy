@@ -3,7 +3,8 @@
  * the items recall refused, the last error, and the messages of a refused save.
  */
 import { DAY, ERROR_REPORTED_MS, HOUR, MINUTE } from './limits.ts';
-import type { SaveAnswer, Status } from './messages.ts';
+import type { DiagnosticAnswer, DiagnosticStatus, SaveAnswer, Status } from './messages.ts';
+import { DIAGNOSTIC_STAGE_LABELS, DIAGNOSTIC_STATE_LABELS } from '../../shared/diagnostic.ts';
 
 export interface Row {
   readonly label: string;
@@ -71,6 +72,31 @@ export function statusRows(status: Status): Row[] {
 export function buildLine(status: Status): string {
   return status.versionName === '' ? `版本 ${status.version}` : `版本 ${status.version} · ${status.versionName}`;
 }
+
+export function diagnosticRows(status: DiagnosticStatus, now: number): Row[] {
+  const states = {
+    idle: '尚未开始',
+    running: `采集中（${within(status.expiresAt - now)}后自动停止）`,
+    stopped: '已停止，等待发送',
+    sent: `已发送（${ago(now - status.sentAt)}）`,
+  };
+  const rows: Row[] = [{ label: '诊断状态', value: states[status.state], warn: false }];
+  if (status.state === 'idle') return rows;
+  rows.push({ label: '已记录', value: `${String(status.stepCount)} 个步骤；${String(status.tabEvents)} 次页面事件；${String(status.alarmEvents)} 次分钟检查`, warn: false });
+  if (status.latestStage !== '') {
+    rows.push({ label: '最近步骤', value: `${DIAGNOSTIC_STAGE_LABELS[status.latestStage] ?? '未提供步骤'}：${DIAGNOSTIC_STATE_LABELS[status.latestState] ?? '未提供结果'}`, warn: status.latestState === 'failed' });
+  }
+  rows.push({ label: '诊断编号', value: status.runId, warn: false });
+  return rows;
+}
+
+export const DIAGNOSTIC_ERRORS: Readonly<Record<NonNullable<DiagnosticAnswer['error']>, string>> = {
+  unsupported: '这个诊断只用于 Orion 手机扩展。',
+  token_missing: '先保存现有插件口令，再开始诊断。',
+  open_failed: '测试页未能打开，已保留诊断；可以直接发送。',
+  send_failed: '发送失败，诊断仍保留在本机；可以再次发送。',
+  no_run: '还没有诊断，请先点“开始诊断”。',
+};
 
 export const SAVE_ERRORS: Readonly<Record<Extract<SaveAnswer, { ok: false }>['error'], string>> = {
   server_invalid: '服务器要是 https 地址（只有本机可以用 http），不带路径，例如 https://recall.ziyixi.science',

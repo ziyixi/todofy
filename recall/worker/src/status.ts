@@ -11,6 +11,7 @@
 import { create } from '@ziyixi/proto/protobuf';
 import { ArchiveConsumerSchema, DeviceStatusSchema, RejectedItemsSchema, ServiceStatusSchema, type ArchiveConsumer, type DeviceStatus, type RejectedItems, type ServiceStatus } from '@ziyixi/proto/recall/ui/v1/status_pb';
 import { backupMessage, retentionPause } from './backup.ts';
+import { readCaptureDiagnostic } from './diagnostic.ts';
 import { behindCount, oldestUnsynced } from './feed.ts';
 import { DAILY_READ_BUDGET, DAILY_ROW_BUDGET, DAY, MIB, REJECTED_WINDOW_DAYS, STALE_MS, STORAGE_BUDGET_MIB } from './limits.ts';
 import { time } from './model.ts';
@@ -103,5 +104,6 @@ export function serviceStatus(store: Store, now: number, build: string, secrets:
     textRetentionDays: retention ?? 0,
     archivedTextCount: store.counter('archived_count'),
     textRetentionPausedReason: retention === null ? '' : retentionPause(store),
+    captureDiagnostic: readCaptureDiagnostic(store),
   });
 }

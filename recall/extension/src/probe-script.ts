@@ -42,6 +42,11 @@ if (RECALL_ORION && topFrame && globalThis.recallPageProbe !== undefined) {
   // Replace the listener on reinjection so it uses this build, while preserving the document token.
   if (state.listener !== undefined) chrome.runtime.onMessage.removeListener(state.listener);
   state.listener = (message: unknown, sender, sendResponse) => {
+    if (typeof message === 'object' && message !== null && 'type' in message && message.type === 'recall-diagnostic-context' && 'runId' in message && typeof message.runId === 'string' && /^[0-9a-f-]{36}$/.test(message.runId) && location.href === 'https://example.org/?recall-diagnostic=1') {
+      const identity: unknown = sender.id;
+      sendResponse({ visibility: document.visibilityState === 'visible' ? 'visible' : 'hidden', stored_visibility: state.visible ? 'visible' : 'hidden', sender_identity: identity === undefined ? 'missing' : identity === null ? 'null' : identity === chrome.runtime.id ? 'same' : 'foreign' });
+      return false;
+    }
     // tabs.sendMessage targets this extension; native Orion omits the optional sender ID.
     if (sender.id !== undefined && sender.id !== chrome.runtime.id) return false;
     if (typeof message !== 'object' || message === null || !('type' in message)) return false;

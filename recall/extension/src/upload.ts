@@ -17,6 +17,7 @@
  * Nothing in the outbox expires. A tick flushes only when items that are not held are due (or for the heartbeat).
  */
 import type { IngestBatch, IngestItem, IngestResult } from '@ziyixi/proto/recall/ingest/v1/ingest_wire';
+import type { CaptureDiagnostic } from '@ziyixi/proto/recall/ingest/v1/diagnostic_wire';
 import type { Context } from './context.ts';
 import { browserFeatures } from './browser.ts';
 import { countItems, getToken, oldestItems, settleItems, type OutboxItem } from './db.ts';
@@ -83,6 +84,22 @@ export function batchOf(header: BatchHeader, items: readonly OutboxItem[]): Inge
 export async function gzip(text: string): Promise<ArrayBuffer> {
   const stream = new Blob([text]).stream().pipeThrough(new CompressionStream('gzip'));
   return new Response(stream).arrayBuffer();
+}
+
+/** An owner diagnostic uses the existing authenticated route, without taking or settling any outbox items. */
+export async function sendDiagnostic(ctx: Context, diagnostic: CaptureDiagnostic): Promise<boolean> {
+  const [token, device, queued] = await Promise.all([getToken(ctx.db), getDevice(ctx.chrome, ctx.uuid), countItems(ctx.db)]);
+  if (token === '') return false;
+  const batch: IngestBatch = { ...batchOf({ batchId: ctx.uuid(), sentMs: ctx.now(), device, version: ctx.build, queued, errorCode: '', mobile: true }, []), diagnostic };
+  try {
+    const response = await ctx.fetch(`${device.server}${BATCHES_PATH}`, {
+      method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/gzip' }, body: await gzip(JSON.stringify(batch)),
+      credentials: 'omit', cache: 'no-store', redirect: 'error', signal: AbortSignal.timeout(UPLOAD_TIMEOUT_MS),
+    });
+    return response.status === 200 && await readResult(response) !== null;
+  } catch {
+    return false;
+  }
 }
 
 /** A Retry-After header (seconds or an HTTP date) in milliseconds from `at`, or null. */

@@ -1,6 +1,6 @@
 # Handoff
 
-Updated 2026-10-11. Keep this file focused on active work, open acceptance and dated compatibility constraints.
+Updated 2026-10-12. Keep this file focused on active work, open acceptance and dated compatibility constraints.
 Move completed rollout detail to a dated record and link it here. Repository rules are in [AGENTS](AGENTS.md);
 service entry points are in [README](README.md). Never put private content, credentials or raw production output here.
 
@@ -13,8 +13,14 @@ Its old waiting lists and release identities are historical, not instructions to
 The owner still reports no visits or samples on `611`, Orion 1.5.5 (3), iOS 27.0.1; heartbeat works.
 It records closed stage metadata on a fixed public test page and sends an empty authenticated batch independently
 of the capture queue. Only one latest report is retained through existing meta/status, with no content or credentials.
-Chrome's running browser and installed extension files remain untouched. Native local verification and full branch
-CI are required before the same-SHA Actions release; no phone success is claimed from Mac tests.
+Chrome's running browser and installed extension files remain untouched. Local checks pass: 140 extension tests,
+134 owner UI tests, 45 real workerd tests, typecheck/lint/build, protocol checks and the existing end-to-end smoke.
+The real WebKit options harness passes eight cases, including Send while native query never returns. Real Orion
+macOS returned eleven closed stages, a native minute alarm and a saved text/image capture through a strict loopback
+consumer. That run exposed completed/foreground observations being overwritten on return; the small correction has
+a regression. Full branch CI, same-SHA Actions release and final published-package native check remain pending.
+[Diagnostic evidence](docs/recall-diagnostic-verification.md) separates synthetic/native Mac checks from the phone
+result still needed. Do not claim iOS capture is fixed.
 
 The native Orion fixes from `codex/recall-orion-native-capture` are released at `88bbc3d` (`2026.1012.611`).
 Real Orion macOS 1.1.3/build 152 now runs in a dedicated empty test environment, with a loopback-only

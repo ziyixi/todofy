@@ -4,10 +4,11 @@
 import type { IngestBatch } from '@ziyixi/proto/recall/ingest/v1/ingest_wire';
 import { IDBFactory } from 'fake-indexeddb';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { getVisit, oldestItems, openDb, saveVisit } from '../src/db.ts';
+import { getVisit, oldestItems, openDb, saveVisit, setToken } from '../src/db.ts';
 import { pageOf } from '../src/page.ts';
 import type { FocusState } from '../src/store.ts';
 import { newVisit } from '../src/visits.ts';
+import type { DiagnosticAnswer } from '../src/messages.ts';
 import { EXTENSION_ID, FakeBrowser, FakeFetch, INGEST_TOKEN, SECOND, T0, type FakeTab } from './fake-chrome.ts';
 
 let browser: FakeBrowser;
@@ -74,6 +75,31 @@ describe('the service worker', () => {
     browser.events.installed.emit({ reason: 'update' });
     await vi.waitFor(() => { expect(create).toHaveBeenCalledOnce(); });
     expect(browser.alarms.get('tick')).toEqual({ name: 'tick', periodInMinutes: 1 });
+  });
+
+  it('retains a native alarm callback error as failed instead of pending in the diagnostic', async () => {
+    vi.stubGlobal('RECALL_ORION', true);
+    await start();
+    const db = await openDb();
+    await setToken(db, INGEST_TOKEN);
+    Object.assign(browser.api.tabs, { create: () => undefined });
+    Object.assign(browser.api.alarms, { get: (_name: string, callback: (alarm?: chrome.alarms.Alarm) => void) => {
+      queueMicrotask(() => {
+        Object.assign(browser.api.runtime, { lastError: { message: 'Synthetic native failure on https://private.example.org/' } });
+        callback();
+        delete (browser.api.runtime as unknown as Record<string, unknown>)['lastError'];
+      });
+    } });
+    expect(await message({ type: 'diagnostic-start' })).toMatchObject({ ok: true });
+    await vi.waitFor(async () => {
+      const state = await message({ type: 'diagnostic-status' }) as DiagnosticAnswer;
+      expect(state.diagnostic.steps).toContainEqual({ stage: 'alarm_setup', state: 'failed', result: 'api_error' });
+    });
+    await message({ type: 'diagnostic-send' });
+    const diagnostic = (await batch(0)).diagnostic;
+    expect(diagnostic?.steps).toContainEqual({ stage: 'alarm_setup', state: 'failed', result: 'api_error' });
+    expect(JSON.stringify(diagnostic)).not.toContain('private.example');
+    db.close();
   });
 
   it.each([
@@ -185,6 +211,23 @@ describe('the service worker', () => {
     }
     expect(await message({ type: 'save-progress' })).toEqual({ phase: 'idle' });
     expect(await message({ type: 'save-progress' }, 'another-extension')).toBe('not answered');
+  });
+
+  it('starts and sends an owner diagnostic while the phone focus queue is blocked', async () => {
+    vi.stubGlobal('RECALL_ORION', true);
+    await start();
+    const db = await openDb();
+    await setToken(db, INGEST_TOKEN);
+    const query = vi.spyOn(browser.api.tabs, 'query').mockImplementation(() => new Promise<FakeTab[]>(() => undefined));
+    Object.assign(browser.api.tabs, { create: ({ url }: { url: string }, callback: (tab: FakeTab) => void) => { callback(browser.open(url)); } });
+    const tab = browser.open('https://example.net/normal');
+    browser.events.activated.emit({ tabId: tab.id, windowId: 1 });
+    await vi.waitFor(() => { expect(query).toHaveBeenCalled(); });
+    expect(await message({ type: 'diagnostic-start' })).toMatchObject({ ok: true, diagnostic: { state: 'running' } });
+    expect(await message({ type: 'diagnostic-send' })).toMatchObject({ ok: true, diagnostic: { state: 'sent' } });
+    expect((await batch(0)).items).toEqual([]);
+    expect((await batch(0)).diagnostic?.run_id).toMatch(/^[0-9a-f-]{36}$/);
+    db.close();
   });
 
   it('follows only an active main document: no prerender, cached page or frame', async () => {

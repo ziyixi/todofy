@@ -18,6 +18,7 @@ import { compressScreenshot, visiblyChanged, type Screenshot } from './screensho
 import { currentDenylist } from './settings.ts';
 import { captureStatus, focusState, lastError } from './store.ts';
 import { focusMs, isoTime } from './visits.ts';
+import { observe } from './diagnostic.ts';
 
 export interface CaptureJob {
   readonly visitId: string;
@@ -113,7 +114,7 @@ export async function readTab(ctx: Context, job: CaptureJob): Promise<ReadOutcom
   if (text === null) return { kind: 'failed' };
   if (!(await allowedPage(ctx, job, text)) || !(await sameFocus(ctx, job))) return { kind: 'text', text };
   try {
-    const png = await captureViewport(ctx, job.windowId);
+    const png = await captureViewport(ctx, job.windowId, job.tabId);
     if (!(await sameFocus(ctx, job))) return { kind: 'text', text };
     // An in-page sign-in dialog may have appeared without a navigation while Chrome captured the viewport.
     const after = await readPage(ctx, job);
@@ -127,17 +128,21 @@ export async function readTab(ctx: Context, job: CaptureJob): Promise<ReadOutcom
 
 /** Queue changed content; an empty page or failed read leaves the next tick free to try again. */
 export async function storeCapture(ctx: Context, job: CaptureJob, outcome: ReadOutcome, at: number): Promise<void> {
+  await observe(ctx, { stage: 'capture_store', state: 'pending' }, job.tabId);
   if (outcome.kind === 'not_scriptable') {
+    await observe(ctx, { stage: 'capture_store', state: 'skipped', result: 'excluded' }, job.tabId);
     await captureStatus.set(ctx.chrome, { at, text: 'excluded', screenshot: 'excluded' });
     return;
   }
   if (outcome.kind === 'failed') {
+    await observe(ctx, { stage: 'capture_store', state: 'failed', result: 'failed' }, job.tabId);
     await lastError.set(ctx.chrome, 'capture_failed', at);
     await captureStatus.set(ctx.chrome, { at, text: 'failed', screenshot: 'none' });
     return;
   }
   const { text } = outcome;
   if (!(await allowedPage(ctx, job, text))) {
+    await observe(ctx, { stage: 'capture_store', state: 'skipped', result: 'excluded' }, job.tabId);
     await captureStatus.set(ctx.chrome, { at, text: 'excluded', screenshot: 'excluded' });
     return;
   }
@@ -147,6 +152,7 @@ export async function storeCapture(ctx: Context, job: CaptureJob, outcome: ReadO
   let imageStatus: 'webp' | 'jpeg' | 'failed' | 'none' = outcome.screenshotFailed ? 'failed' : 'none';
   if (screenshot !== undefined) imageStatus = screenshot.mediaType === 'image/jpeg' ? 'jpeg' : 'webp';
   if (body.text.trim() === '' && screenshot === undefined) {
+    await observe(ctx, { stage: 'capture_store', state: 'returned', result: 'empty' }, job.tabId);
     await captureStatus.set(ctx.chrome, { at, text: 'empty', screenshot: imageStatus });
     return;
   }
@@ -154,6 +160,7 @@ export async function storeCapture(ctx: Context, job: CaptureJob, outcome: ReadO
   const snapshotTextHash = Array.from(hash, (byte) => byte.toString(16).padStart(2, '0')).join('');
   const visit = await getVisit(ctx.db, job.visitId);
   if (visit?.snapshotTextHash === snapshotTextHash && (screenshot === undefined || !visiblyChanged(visit.screenshotPreview, screenshot.preview))) {
+    await observe(ctx, { stage: 'capture_store', state: 'returned', result: 'unchanged' }, job.tabId);
     await captureStatus.set(ctx.chrome, { at, text: 'unchanged', screenshot: imageStatus });
     return;
   }
@@ -175,6 +182,7 @@ export async function storeCapture(ctx: Context, job: CaptureJob, outcome: ReadO
     },
   };
   await queueItem(ctx.db, { id, kind: 'document', json: JSON.stringify(item), version: 1 }, at);
+  await observe(ctx, { stage: 'capture_store', state: 'returned', result: 'saved' }, job.tabId);
   await captureStatus.set(ctx.chrome, { at, text: body.text.trim() === '' ? 'empty' : 'saved', screenshot: imageStatus });
   if (visit !== undefined) await saveVisit(ctx.db, { ...visit, snapshotTextHash, ...(screenshot === undefined ? {} : { screenshotPreview: screenshot.preview }) });
 }

@@ -12,7 +12,8 @@ import { browserFeatures } from './browser.ts';
 import { openDb } from './db.ts';
 import { beat, browserStarted, idleChanged, pageVisibility, reconcile, releaseFocus, tabChanged, tabRemoved } from './focus.ts';
 import { IDLE_SECONDS, TICK_MINUTES } from './limits.ts';
-import { isRequest, type Request, type SaveAnswer, type SaveProgress, type Status, type UpdateAnswer } from './messages.ts';
+import { isRequest, type DiagnosticAnswer, type Request, type SaveAnswer, type SaveProgress, type Status, type UpdateAnswer } from './messages.ts';
+import { diagnosticEvent, diagnosticStatus, observe, resultType, startDiagnostic, submitDiagnostic } from './diagnostic.ts';
 import { saveProgress, saveSettings, status } from './settings.ts';
 import { getDevice, reloadedFor } from './store.ts';
 import { installedUpdate } from './update.ts';
@@ -127,15 +128,24 @@ async function updateIfInstalled(trigger: 'tick' | 'owner'): Promise<boolean> {
 }
 
 async function ensureAlarm(): Promise<void> {
+  const ctx = MOBILE ? await ready : null;
+  const runId = ctx === null ? null : await observe(ctx, { stage: 'alarm_setup', state: 'pending' });
   // MV2 get answers through its callback; Orion returns null for a missing alarm.
   const alarm = MOBILE ? await new Promise<chrome.alarms.Alarm | null | undefined>((resolve, reject) => {
     chrome.alarms.get(TICK, (value) => {
       const error = chrome.runtime.lastError;
-      if (error !== undefined) reject(new Error(error.message ?? 'browser_api_failed'));
+      if (error !== undefined) {
+        if (ctx !== null) void observe(ctx, { stage: 'alarm_setup', state: 'failed', result: 'api_error' }, undefined, runId);
+        reject(new Error(error.message ?? 'browser_api_failed'));
+      }
       else resolve(value);
     });
   }) : await chrome.alarms.get(TICK);
-  if (alarm === undefined || alarm === null) await chrome.alarms.create(TICK, { periodInMinutes: TICK_MINUTES });
+  if (ctx !== null) await observe(ctx, { stage: 'alarm_setup', state: 'returned', result: resultType(alarm) }, undefined, runId);
+  if (alarm === undefined || alarm === null) {
+    await chrome.alarms.create(TICK, { periodInMinutes: TICK_MINUTES });
+    if (ctx !== null) await observe(ctx, { stage: 'alarm_setup', state: 'returned', result: 'created' }, undefined, runId);
+  }
 }
 
 async function onTick(at: number): Promise<void> {
@@ -153,7 +163,7 @@ async function onStartup(at: number): Promise<void> {
   await upload('startup');
 }
 
-async function answer(request: Request): Promise<Status | SaveAnswer | SaveProgress | UpdateAnswer> {
+async function answer(request: Request): Promise<Status | SaveAnswer | SaveProgress | UpdateAnswer | DiagnosticAnswer> {
   const ctx = await ready;
   switch (request.type) {
     case 'status':
@@ -173,11 +183,21 @@ async function answer(request: Request): Promise<Status | SaveAnswer | SaveProgr
       return status(ctx);
     case 'check-update':
       return { reloading: await updateIfInstalled('owner') };
+    case 'diagnostic-status':
+      return diagnosticStatus(ctx);
+    case 'diagnostic-start': {
+      const started = await startDiagnostic(ctx);
+      if (started.ok) void ensureAlarm().catch(() => undefined);
+      return started;
+    }
+    case 'diagnostic-send':
+      return submitDiagnostic(ctx);
   }
 }
 
 /** A navigation of a tab's main document: not a prerender, a page from the back/forward cache or a frame's. */
 function navigated(details: { readonly tabId: number; readonly frameId?: number; readonly frameType?: string; readonly documentLifecycle?: string }): void {
+  if (MOBILE) void ready.then((ctx) => diagnosticEvent(ctx, 'tab')).catch(() => undefined);
   if (MOBILE ? details.frameId !== 0 : details.frameType !== 'outermost_frame' || details.documentLifecycle !== 'active') return;
   const at = Date.now();
   transition('navigation', (ctx) => tabChanged(ctx, details.tabId, at));
@@ -186,6 +206,7 @@ function navigated(details: { readonly tabId: number; readonly frameId?: number;
 if (!MOBILE) features.idle?.setDetectionInterval(IDLE_SECONDS);
 
 chrome.tabs.onActivated.addListener(() => {
+  if (MOBILE) void ready.then((ctx) => diagnosticEvent(ctx, 'tab')).catch(() => undefined);
   const at = Date.now();
   transition('tab_activated', (ctx) => reconcile(ctx, at));
 });
@@ -207,6 +228,7 @@ features.webNavigation?.onHistoryStateUpdated.addListener(navigated);
 features.webNavigation?.onReferenceFragmentUpdated.addListener(navigated);
 
 chrome.tabs.onUpdated.addListener((tabId, change) => {
+  if (MOBILE) void ready.then((ctx) => diagnosticEvent(ctx, 'tab')).catch(() => undefined);
   // A phone tab can become scriptable after its activation/URL event; retry when loading finishes.
   if (change.title === undefined && change.url === undefined && !(MOBILE && change.status === 'complete')) return;
   const at = Date.now();
@@ -214,12 +236,14 @@ chrome.tabs.onUpdated.addListener((tabId, change) => {
 });
 
 chrome.tabs.onRemoved.addListener((tabId) => {
+  if (MOBILE) void ready.then((ctx) => diagnosticEvent(ctx, 'tab')).catch(() => undefined);
   const at = Date.now();
   transition('tab_removed', (ctx) => tabRemoved(ctx, tabId, at));
 });
 
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name !== TICK) return;
+  if (MOBILE) void ready.then((ctx) => diagnosticEvent(ctx, 'alarm')).catch(() => undefined);
   onTick(Date.now()).catch((error: unknown) => {
     report('tick', error);
   });
