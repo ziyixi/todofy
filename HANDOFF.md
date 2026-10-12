@@ -9,6 +9,18 @@ Its old waiting lists and release identities are historical, not instructions to
 
 ## Current work
 
+Recall Orion Save follow-up is on `codex/recall-orion-save`. The owner confirmed the actual Orion artifact
+`2026.1012.158 / 0fe663a` loaded settings but showed device `Chrome` and the desktop update response.
+That establishes desktop mode was selected in the phone package. A synthetic desktop-identity navigator reproduces
+this exactly; the dedicated iPhone/iPad build now selects mobile mode at build time without a UA heuristic.
+A second regression proves Save used to wait for an unfinished first upload after persisting the settings.
+Save now acknowledges persistence immediately and starts the existing upload separately; the button shows progress.
+Both regressions failed before their fixes. No new dependency, retry mechanism, credential or backend change.
+Typecheck, lint, all 114 extension tests and both package builds passed. A synthetic DOM check of the built
+options page exercised click/progress/success, token clearing, mobile controls and validation errors.
+Branch CI and the replacement phone asset are pending. The iPhone Save/capture check still needs
+owner acceptance after updating the existing extension; do not claim synthetic tests verify an actual phone.
+
 Recall mobile and multi-device preparation is deployed at `0fe663a`: independent named upload tokens,
 device-aware timeline/status, an Orion file-install build and bounded native JPEG fallback. Existing Chrome identity,
 shared token, privacy rules, snapshot deduplication and the unified Dropbox archive remain.

@@ -8,7 +8,7 @@
  */
 import { captureDelay, captureDue, readTab, storeCapture } from './capture.ts';
 import type { Context } from './context.ts';
-import { browserFeatures, isIOS } from './browser.ts';
+import { browserFeatures } from './browser.ts';
 import { openDb } from './db.ts';
 import { beat, browserStarted, idleChanged, pageVisibility, reconcile, releaseFocus, tabChanged, tabRemoved } from './focus.ts';
 import { IDLE_SECONDS, TICK_MINUTES } from './limits.ts';
@@ -20,7 +20,8 @@ import { flush, showBadge, type FlushReason } from './upload.ts';
 
 declare const RECALL_ORION: boolean;
 
-const MOBILE = typeof RECALL_ORION !== 'undefined' && RECALL_ORION && isIOS(navigator);
+// This artifact targets iPhone/iPad; Orion's background navigator can report a desktop identity.
+const MOBILE = typeof RECALL_ORION !== 'undefined' && RECALL_ORION;
 const features = browserFeatures(chrome);
 const TICK = 'tick';
 
@@ -149,7 +150,8 @@ async function answer(request: Request): Promise<Status | SaveAnswer | UpdateAns
       return status(ctx);
     case 'save': {
       const saved = await serial((current) => saveSettings(current, request));
-      if (saved.ok) await upload('manual');
+      // A saved setting is independent of the network and browser badge APIs.
+      if (saved.ok) void upload('manual').catch((error: unknown) => { report('save_upload', error); });
       return saved;
     }
     case 'flush':

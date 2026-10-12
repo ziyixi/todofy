@@ -26,10 +26,6 @@ export function browserFeatures(api: typeof chrome) {
   return subset;
 }
 
-export function isIOS(nav: { readonly userAgent: string; readonly platform: string; readonly maxTouchPoints: number }): boolean {
-  return /iPhone|iPad|iPod/.test(nav.userAgent) || (nav.platform === 'MacIntel' && nav.maxTouchPoints > 1);
-}
-
 /** MV2 Orion exposes tabs.executeScript; modern browsers use scripting. Both inject only the main frame. */
 export async function executeFile(ctx: Context, tabId: number, file: string, documentId?: string): Promise<unknown> {
   const features = browserFeatures(ctx.chrome);

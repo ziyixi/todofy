@@ -84,6 +84,8 @@ form.addEventListener('submit', (event) => {
   event.preventDefault();
   const submit = form.querySelector<HTMLButtonElement>('button[type="submit"]');
   if (submit === null) return;
+  formError.hidden = true;
+  submit.textContent = '保存中…';
   void busy(submit, async () => {
     const answer = await send({ type: 'save', server: server.value, label: label.value, token: token.value });
     formError.hidden = answer.ok;
@@ -94,7 +96,7 @@ form.addEventListener('submit', (event) => {
     token.value = '';
     toast('已保存');
     await refresh(true);
-  });
+  }).finally(() => { submit.textContent = '保存'; });
 });
 
 flushButton.addEventListener('click', () => {

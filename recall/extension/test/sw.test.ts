@@ -69,11 +69,30 @@ describe('the service worker', () => {
     await settle();
 
     expect(await message({ type: 'save', server: 'https://recall.ziyixi.science', label: 'MacBook', token: INGEST_TOKEN })).toEqual({ ok: true });
+    await vi.waitFor(() => { expect(net.requests).toHaveLength(1); });
     const sent = await batch(0);
     expect(sent.device.label).toBe('MacBook');
     expect(sent.items).toHaveLength(1);
     expect(sent.items[0]).toMatchObject({ kind: 'visit', visit: { url: 'https://docs.example.com/guide', title: 'Guide', revision: 1 } });
     expect(browser.badge).toBe('');
+  });
+
+  it('confirms persisted settings while the first upload is still pending', async () => {
+    await start();
+    let finishUpload!: (response: Response) => void;
+    net.answer = () => new Promise<Response>((resolve) => { finishUpload = resolve; });
+    let saved: unknown;
+    const response = message({ type: 'save', server: 'https://recall.ziyixi.science', label: 'iPhone', token: INGEST_TOKEN })
+      .then((answer) => { saved = answer; });
+    try {
+      await vi.waitFor(() => { expect(saved).toEqual({ ok: true }); });
+      expect(await message({ type: 'status' })).toMatchObject({ label: 'iPhone', tokenSet: true, upload: { lastUploadAt: 0 } });
+      await vi.waitFor(() => { expect(net.requests).toHaveLength(1); });
+    } finally {
+      finishUpload(new Response(JSON.stringify({ accepted_count: 0, rejected: [], denylist_patterns: [], denylist_etag: 'e1' })));
+      await response;
+      await settle();
+    }
   });
 
   it('follows only an active main document: no prerender, cached page or frame', async () => {
@@ -132,6 +151,13 @@ describe('the service worker', () => {
     expect(browser.reloads).toBe(1);
     expect(await message({ type: 'check-update' })).toEqual({ reloading: true });
     expect(browser.reloads).toBe(2);
+  });
+
+  it('uses phone mode in the Orion package even when its background reports a desktop identity', async () => {
+    vi.stubGlobal('RECALL_ORION', true);
+    vi.stubGlobal('navigator', { userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X)', platform: 'MacIntel', maxTouchPoints: 0 });
+    await start();
+    expect(await message({ type: 'status' })).toMatchObject({ mobile: true, label: 'iPhone · Orion', server: 'https://recall.ziyixi.science' });
   });
 
   it('makes the device once, before any handler runs', async () => {

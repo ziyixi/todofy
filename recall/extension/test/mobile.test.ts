@@ -1,6 +1,6 @@
 /** iPhone behavior over the existing fake: visibility ends focus, reload changes identity, JPEG and resume uploads. */
 import { describe, expect, it, vi } from 'vitest';
-import { executeFile, isIOS } from '../src/browser.ts';
+import { executeFile } from '../src/browser.ts';
 import { captureDue, readTab, storeCapture } from '../src/capture.ts';
 import type { Context } from '../src/context.ts';
 import { setToken } from '../src/db.ts';
@@ -30,12 +30,6 @@ async function phone() {
 }
 
 describe('Orion iPhone foreground capture', () => {
-  it('selects mobile only from actual iOS identity, including iPad desktop UA', () => {
-    expect(isIOS({ userAgent: 'iPhone', platform: 'iPhone', maxTouchPoints: 5 })).toBe(true);
-    expect(isIOS({ userAgent: 'Safari', platform: 'MacIntel', maxTouchPoints: 5 })).toBe(true);
-    expect(isIOS({ userAgent: 'Chrome', platform: 'MacIntel', maxTouchPoints: 0 })).toBe(false);
-  });
-
   it('captures visible text/JPEG at ten seconds, omits unchanged content and stops at pagehide', async () => {
     const h = await phone();
     h.browser.screenshot = 'data:image/png;base64,synthetic';

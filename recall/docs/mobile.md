@@ -3,9 +3,6 @@
 电脑和手机连接同一个 Recall。每次独立安装都有自己的设备 ID、访问记录和待上传队列；云端统一搜索，
 Dropbox 统一归档。手机不需要连接 Dropbox，也不用复制电脑的扩展目录或本地数据库。
 
-当前已发布：[2026.1012.158](https://github.com/ziyixi/todofy/releases/tag/recall-extension-v2026.1012.158)，
-实现提交 `0fe663a`。[直接下载 Orion ZIP](https://github.com/ziyixi/todofy/releases/download/recall-extension-v2026.1012.158/recall-orion-v2026.1012.158.zip)。
-
 ## 手机安装
 
 1. 在 [GitHub Releases](https://github.com/ziyixi/todofy/releases) 下载当前版本的
@@ -13,10 +10,13 @@ Dropbox 统一归档。手机不需要连接 Dropbox，也不用复制电脑的�
 2. Orion → `…` → 设置，允许 Chrome 扩展；再进入 `…` → 扩展 → `+` → 从文件安装，选择该 ZIP。
 3. 在手机打开 Recall → 设置 → 插件口令，填写 `iPhone`，点“添加设备口令”，复制。
    打开 Orion 的 Recall 扩展设置，粘贴口令，设备名称填 `iPhone`，保存。服务器地址已经填好。
+   保存只确认本机设置已写入，上传结果在下方单独显示。手机包固定使用手机模式，不依赖浏览器标识。
 
 口令只显示一次，不要发到聊天。电脑原有口令继续可用。手机丢失或不再使用时，停用这条独立口令即可，
 不影响其他口令或已上传的记录。独立口令是上传凭据，名称便于辨认；同一口令若被复制到多个设备，
 停用时这些设备都会停止上传。
+
+已安装的设备名称会保留；如果旧版曾默认显示 `Chrome`，改成 `iPhone` 再保存即可。
 
 文件安装版的手机更新仍需下载新 Orion 包。先在扩展管理里使用当前扩展的更新入口（若该版本提供）；
 不要先卸载，卸载会删除尚未上传的本地记录。Orion 是否保留安装身份和设置需要首次真机验收，
