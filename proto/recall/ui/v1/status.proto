@@ -109,9 +109,9 @@ message ServiceStatus {
   //     aip.dev/not-precedent: the status is the one read of 设置 and the header line; the backup is a singleton
   //     without a Get of its own, read here with the rest. --)
   DropboxBackup dropbox_backup = 20 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // The two machine tokens, `machineTokens/ingest` then `machineTokens/export`, never with their `token`.
+  // The legacy ingest and export tokens, then up to 16 named upload tokens, never with their `token`.
   // (-- api-linter: core::0122::embedded-resource=disabled
-  //     aip.dev/not-precedent: two fixed tokens without a Get or List of their own, read here with the rest of 设置. --)
+  //     aip.dev/not-precedent: a bounded set without a Get or List of their own, read here with the rest of 设置. --)
   repeated MachineToken machine_tokens = 21 [(google.api.field_behavior) = OUTPUT_ONLY];
   // Settings.text_retention_days, read here with the rest (the search's coverage line, 设置 → 存储); 0 while every
   // text stays in Cloudflare.
@@ -170,7 +170,8 @@ message DropboxBackup {
 
 // A machine token: the bearer token of the machine routes under /api/machine/v1 (recall/docs/design.md §2.2).
 // `machineTokens/ingest` is the extension's (write-only: uploads), `machineTokens/export` a feed consumer's (read-only:
-// the change feed and its blobs; optional, the Dropbox backup needs none). recall keeps only each token's SHA-256.
+// the change feed and its blobs; optional, the Dropbox backup needs none). Named machineTokens/{uuid} are independent
+// upload credentials, not device registrations. recall keeps only each token's SHA-256.
 message MachineToken {
   option (google.api.resource) = {
     type: "recall.ziyixi.science/MachineToken"
@@ -179,10 +180,10 @@ message MachineToken {
     plural: "machineTokens"
   };
 
-  // machineTokens/ingest or machineTokens/export.
+  // machineTokens/ingest, machineTokens/export, or machineTokens/{uuid} for a named upload credential.
   string name = 1 [(google.api.field_behavior) = IDENTIFIER];
   // The token itself, `recall_ingest_` or `recall_export_` and 43 URL-safe characters. Set only in the response of
-  // RegenerateMachineToken, the one time it is shown: recall stores its SHA-256 alone and never answers it again.
+  // CreateMachineToken or RegenerateMachineToken, the one time it is shown: recall stores its SHA-256 alone.
   string token = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
   // When the current token was made; unset while there is none (the route answers 503 unless a Worker secret holds
   // a digest).
@@ -193,6 +194,8 @@ message MachineToken {
   // A digest put as a Worker secret by hand (INGEST_TOKEN_SHA256 or EXPORT_TOKEN_SHA256 and their _PREVIOUS) is
   // accepted as well; only deleting that secret stops it.
   bool worker_secret = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // A named upload credential's label, 1-80 characters after trimming. Empty for the legacy route tokens.
+  string label = 6 [(google.api.field_behavior) = OPTIONAL];
 }
 
 // Items of uploads that recall refused, for one reason, over 7 days. recall refuses an item only when it breaks the
@@ -224,7 +227,7 @@ message DeviceStatus {
   int32 queued_count = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
   // The extension's last error code at that upload (e.g. `capture_failed`); empty when none.
   string last_error_code = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // No upload for more than 24 hours.
+  // No upload for more than 24 hours. Always false for mobile devices, which upload only while used.
   bool stale = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
   // Its clock minus recall's at its latest upload, in seconds, when they differ by more than 2 minutes (its visits'
   // times are as its clock gave them); 0 otherwise.
@@ -232,6 +235,8 @@ message DeviceStatus {
   //     aip.dev/not-precedent: a duration in whole seconds, not a time; the wire profile has no
   //     google.protobuf.Duration. --)
   int32 clock_skew_seconds = 9 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // A mobile browser, as reported by its uploads; inactivity alone is not a health failure.
+  bool mobile = 10 [(google.api.field_behavior) = OUTPUT_ONLY];
 }
 
 // An archive consumer of the change feed (contracts/recall-archive-v1), as its requests describe it.

@@ -53,7 +53,7 @@ export function signals(store: Store, now: number): Signal[] {
   const out: Signal[] = [];
   const known = devices(store);
   if (known.length === 0) out.push(signal('no_device', Severity.INFO, {}));
-  const staleDevices = known.filter((row) => now - row.last_seen_ms <= ACTIVE_MS && now - row.last_seen_ms > STALE_MS);
+  const staleDevices = known.filter((row) => row.mobile === 0 && now - row.last_seen_ms <= ACTIVE_MS && now - row.last_seen_ms > STALE_MS);
   if (staleDevices.length > 0) {
     const since = Math.min(...staleDevices.map((row) => row.last_seen_ms));
     out.push(signal('device_stale', Severity.WARNING, { count: staleDevices.length, hours: Math.floor((now - since) / (DAY / 24)) }, since));

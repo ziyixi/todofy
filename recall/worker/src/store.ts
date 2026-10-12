@@ -17,7 +17,7 @@
  */
 import { ACTIVE_MS, DAY, ERRORS_KEPT, REQUEST_ID_TTL_MS, USAGE_KEPT_DAYS } from './limits.ts';
 
-export const SCHEMA_VERSION = 4;
+export const SCHEMA_VERSION = 5;
 
 export const SCHEMA_V1: readonly string[] = [
   `CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)`,
@@ -185,6 +185,12 @@ export const SCHEMA_V4: readonly string[] = [
   `CREATE INDEX documents_page ON documents (page_rowid, capture_ms, id)`,
 ];
 
+/** Version 5: mobile heartbeat policy and indexed per-device timeline reads. */
+export const SCHEMA_V5: readonly string[] = [
+  `ALTER TABLE devices ADD COLUMN mobile INTEGER NOT NULL DEFAULT 0`,
+  `CREATE INDEX IF NOT EXISTS visits_device ON visits (device_id, start_ms, id)`,
+];
+
 export type Value = string | number | null | ArrayBuffer;
 
 export interface RowMeter {
@@ -273,6 +279,7 @@ export interface DeviceRow extends Record<string, SqlStorageValue> {
   queued_count: number;
   last_error_code: string;
   clock_skew_s: number;
+  mobile: number;
 }
 
 export interface SiteRow extends Record<string, SqlStorageValue> {
@@ -398,6 +405,10 @@ export class Store {
       }
       this.setMeta('text_retention_days', '7');
       this.setMeta('denylist_etag', crypto.randomUUID());
+    }
+    if (version < 5) {
+      const hasMobile = this.sql.exec<{ name: string }>(`PRAGMA table_info(devices)`).toArray().some((row) => row.name === 'mobile');
+      for (const statement of SCHEMA_V5) if (!statement.startsWith('ALTER TABLE') || !hasMobile) this.sql.exec(statement);
     }
     if (version !== SCHEMA_VERSION) this.setMeta('schema_version', String(SCHEMA_VERSION));
     // The migration's rows are no request's: neither the meter nor the budgets count them.

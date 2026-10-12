@@ -44,3 +44,17 @@ export function extensionIdOf(key) {
   const digest = createHash('sha256').update(Buffer.from(key, 'base64')).digest();
   return Array.from(digest.subarray(0, 16), (byte) => String.fromCharCode(97 + (byte >> 4), 97 + (byte & 15))).join('');
 }
+
+/** Orion's file installer can run a nonpersistent MV2 background script, without module service workers. */
+export function buildOrionManifest(template, identity) {
+  const { minimum_chrome_version: ignoredChromeVersion, host_permissions: hosts, background: ignoredBackground, action, ...base } = buildManifest(template, identity);
+  void ignoredChromeVersion;
+  void ignoredBackground;
+  return {
+    ...base,
+    manifest_version: 2,
+    permissions: [...base.permissions.filter((permission) => permission !== 'idle' && permission !== 'scripting'), ...hosts],
+    background: { scripts: ['sw.js'], persistent: false },
+    browser_action: action,
+  };
+}

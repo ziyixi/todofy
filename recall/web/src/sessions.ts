@@ -18,6 +18,8 @@ export interface Span {
   readonly site: string
   readonly title: string
   readonly url: string
+  readonly deviceId: string
+  readonly deviceLabel: string
 }
 
 export interface SessionPage {
@@ -29,6 +31,8 @@ export interface SessionPage {
 
 export interface Session {
   readonly site: string
+  readonly deviceId: string
+  readonly deviceLabel: string
   readonly start: number
   readonly end: number
   /** Seconds of focus (the union of its spans). */
@@ -56,7 +60,7 @@ export function daySpans(visits: readonly Visit[], start: number, end: number): 
     for (const focus of visit.focusSpans) {
       const from = Math.max(start, ms(focus.startTime) ?? 0)
       const to = Math.min(end, ms(focus.endTime) ?? 0)
-      if (to > from) spans.push({ start: from, end: to, page: pageOf(visit.name), site: visit.site, title: visit.title, url: visit.url })
+      if (to > from) spans.push({ start: from, end: to, page: pageOf(visit.name), site: visit.site, title: visit.title, url: visit.url, deviceId: visit.deviceId, deviceLabel: visit.deviceLabel })
     }
   }
   return spans.sort((a, b) => a.start - b.start || a.end - b.end)
@@ -92,18 +96,20 @@ export function hourSeconds(spans: readonly Span[], key: string): number[] {
   return hours
 }
 
-/** The day's sessions, oldest first: consecutive focus on one site, gaps of up to SESSION_GAP_MS merged. */
+/** The day's sessions, oldest first: each device's consecutive focus on one site, merging gaps up to SESSION_GAP_MS. */
 export function sessions(spans: readonly Span[]): Session[] {
   const groups: Span[][] = []
-  let end = -Infinity
+  const currentByDevice = new Map<string, { spans: Span[]; end: number }>()
   for (const span of spans) {
-    const current = groups[groups.length - 1]
-    if (current !== undefined && current[0]?.site === span.site && span.start - end <= SESSION_GAP_MS) {
-      current.push(span)
-      end = Math.max(end, span.end)
+    const device = span.deviceId || span.deviceLabel
+    const current = currentByDevice.get(device)
+    if (current !== undefined && current.spans[0]?.site === span.site && span.start - current.end <= SESSION_GAP_MS) {
+      current.spans.push(span)
+      current.end = Math.max(current.end, span.end)
     } else {
-      groups.push([span])
-      end = span.end
+      const group = [span]
+      groups.push(group)
+      currentByDevice.set(device, { spans: group, end: span.end })
     }
   }
   return groups.map((group) => {
@@ -111,6 +117,8 @@ export function sessions(spans: readonly Span[]): Session[] {
     for (const span of group) pages.set(span.page, [...(pages.get(span.page) ?? []), span])
     return {
       site: group[0]?.site ?? '',
+      deviceId: group[0]?.deviceId ?? '',
+      deviceLabel: group[group.length - 1]?.deviceLabel ?? '',
       start: group[0]?.start ?? 0,
       end: Math.max(...group.map((span) => span.end)),
       seconds: unionSeconds(group),

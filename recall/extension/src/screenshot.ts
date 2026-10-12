@@ -3,38 +3,66 @@ import { SCREENSHOT_MAX_BYTES, SCREENSHOT_MAX_EDGE, SCREENSHOT_QUALITY } from '.
 
 export interface Screenshot {
   readonly base64: string;
+  readonly mediaType?: 'image/webp' | 'image/jpeg';
   readonly preview: string;
   readonly width: number;
   readonly height: number;
 }
 
-/** A viewport-sized PNG from Chrome, resized and encoded with the browser's native WebP encoder. */
+type CaptureCanvas = OffscreenCanvas | HTMLCanvasElement;
+
+function makeCanvas(width: number, height: number): CaptureCanvas {
+  if (typeof OffscreenCanvas !== 'undefined') return new OffscreenCanvas(width, height);
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  return canvas;
+}
+
+function encode(canvas: CaptureCanvas, type: string): Promise<Blob | null> {
+  if ('convertToBlob' in canvas) return canvas.convertToBlob({ type, quality: SCREENSHOT_QUALITY });
+  return new Promise((resolve) => { canvas.toBlob(resolve, type, SCREENSHOT_QUALITY); });
+}
+
+async function decode(png: string): Promise<ImageBitmap | HTMLImageElement> {
+  if (typeof createImageBitmap !== 'undefined') return createImageBitmap(await (await fetch(png)).blob());
+  const image = new Image();
+  await new Promise<void>((resolve, reject) => {
+    image.onload = () => { resolve(); };
+    image.onerror = () => { reject(new Error('screenshot_decode')); };
+    image.src = png;
+  });
+  return image;
+}
+
+/** Resize natively. WebKit may encode unsupported WebP as PNG; then request and verify JPEG explicitly. */
 export async function compressScreenshot(png: string): Promise<Screenshot | null> {
   if (!png.startsWith('data:image/png;base64,')) return null;
-  const bitmap = await createImageBitmap(await (await fetch(png)).blob());
+  const bitmap = await decode(png);
   try {
     if (bitmap.width <= 0 || bitmap.height <= 0) return null;
     const scale = Math.min(1, SCREENSHOT_MAX_EDGE / Math.max(bitmap.width, bitmap.height));
     const width = Math.max(1, Math.round(bitmap.width * scale));
     const height = Math.max(1, Math.round(bitmap.height * scale));
-    const canvas = new OffscreenCanvas(width, height);
-    const context = canvas.getContext('2d');
+    const canvas = makeCanvas(width, height);
+    const context = canvas.getContext('2d') as CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D | null;
     if (context === null) return null;
     context.drawImage(bitmap, 0, 0, width, height);
-    const blob = await canvas.convertToBlob({ type: 'image/webp', quality: SCREENSHOT_QUALITY });
-    if (blob.type !== 'image/webp' || blob.size === 0 || blob.size > SCREENSHOT_MAX_BYTES) return null;
+    let blob = await encode(canvas, 'image/webp');
+    if (blob?.type !== 'image/webp') blob = await encode(canvas, 'image/jpeg');
+    if (blob === null || (blob.type !== 'image/webp' && blob.type !== 'image/jpeg') || blob.size === 0 || blob.size > SCREENSHOT_MAX_BYTES) return null;
     const bytes = new Uint8Array(await blob.arrayBuffer());
     let binary = '';
     for (const byte of bytes) binary += String.fromCharCode(byte);
-    const tiny = new OffscreenCanvas(32, 32);
-    const tinyContext = tiny.getContext('2d');
+    const tiny = makeCanvas(32, 32);
+    const tinyContext = tiny.getContext('2d') as CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D | null;
     if (tinyContext === null) return null;
     tinyContext.drawImage(bitmap, 0, 0, 32, 32);
     const pixels = tinyContext.getImageData(0, 0, 32, 32).data;
     const preview = `${String(width)}x${String(height)}:${btoa(String.fromCharCode(...pixels))}`;
-    return { base64: btoa(binary), preview, width, height };
+    return { base64: btoa(binary), preview, width, height, mediaType: blob.type };
   } finally {
-    bitmap.close();
+    if ('close' in bitmap) bitmap.close();
   }
 }
 

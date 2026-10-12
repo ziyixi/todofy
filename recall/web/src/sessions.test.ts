@@ -33,6 +33,18 @@ describe('a day of spans', () => {
     expect(hours.reduce((sum, value) => sum + value, 0)).toBe(60 * 60)
   })
 
+  it('keeps simultaneous devices separate while joining each device’s own consecutive visits', () => {
+    const spans = daySpans([
+      visit('desktop-a', [['09:00', '09:10']], { deviceId: 'mac', deviceLabel: 'Mac' }),
+      visit('phone', [['09:02', '09:08']], { deviceId: 'phone', deviceLabel: 'iPhone' }),
+      visit('desktop-b', [['09:12', '09:20']], { deviceId: 'mac', deviceLabel: 'Mac' }),
+    ], start, end)
+    expect(sessions(spans).map((session) => [session.deviceLabel, session.seconds, session.pages.length])).toEqual([
+      ['Mac', 18 * 60, 2], ['iPhone', 6 * 60, 1],
+    ])
+    expect(unionSeconds(spans)).toBe(18 * 60)
+  })
+
   it('splits a span that crosses an hour', () => {
     const hours = hourSeconds(daySpans([visit('a', [['10:50', '11:20']])], start, end), DAY)
     expect([hours[10], hours[11]]).toEqual([600, 1200])

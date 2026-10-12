@@ -18,6 +18,49 @@ import type { Store } from './store.ts';
 
 export type TokenRoute = 'ingest' | 'export';
 export const TOKEN_ROUTES: readonly TokenRoute[] = ['ingest', 'export'];
+export const NAMED_TOKEN_MAX = 16;
+const NAMED_TOKEN_KEY = 'token_devices';
+const TOKEN_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+interface NamedToken {
+  readonly id: string;
+  readonly label: string;
+  readonly digest: string;
+  readonly created_ms: number;
+}
+
+/** A bounded list of independent upload credentials; no bearer bytes are stored. */
+export function namedTokens(store: Store): NamedToken[] {
+  const value: unknown = JSON.parse(store.getMeta(NAMED_TOKEN_KEY) ?? '[]');
+  if (!Array.isArray(value) || value.length > NAMED_TOKEN_MAX) throw new Error('invalid named token list');
+  return value as NamedToken[];
+}
+
+/** The UUID of a named token resource, or null for legacy/invalid names. */
+export function namedTokenId(name: string): string | null {
+  const id = name.startsWith('machineTokens/') ? name.slice('machineTokens/'.length) : '';
+  return TOKEN_ID.test(id) ? id : null;
+}
+
+export function namedTokenMessage(stored: NamedToken): MachineToken {
+  return create(MachineTokenSchema, { name: `machineTokens/${stored.id}`, label: stored.label, createTime: time(stored.created_ms) });
+}
+
+export function addNamedToken(store: Store, label: string, digest: string, now: number): MachineToken | null {
+  const current = namedTokens(store);
+  if (current.length >= NAMED_TOKEN_MAX) return null;
+  const made: NamedToken = { id: crypto.randomUUID(), label, digest, created_ms: now };
+  store.setMeta(NAMED_TOKEN_KEY, JSON.stringify([...current, made]));
+  return namedTokenMessage(made);
+}
+
+export function deleteNamedToken(store: Store, id: string): boolean {
+  const current = namedTokens(store);
+  const kept = current.filter((token) => token.id !== id);
+  if (kept.length === current.length) return false;
+  store.setMeta(NAMED_TOKEN_KEY, JSON.stringify(kept));
+  return true;
+}
 
 /** What RecallState keeps of a route's token. */
 interface StoredToken {
@@ -99,7 +142,7 @@ export function heldDigests(store: Store, now: number): RouteDigests {
     if (token === null) return [];
     return token.previous !== null && (token.previous_until_ms ?? 0) > now ? [token.digest, token.previous] : [token.digest];
   };
-  return { ingest: of('ingest'), export: of('export') };
+  return { ingest: [...of('ingest'), ...namedTokens(store).map((token) => token.digest)], export: of('export') };
 }
 
 /** The configured Worker-secret digests of a route (current, then previous), lower-case hex only. */

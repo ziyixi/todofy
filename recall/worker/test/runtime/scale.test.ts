@@ -105,6 +105,16 @@ describe('rows read on a synthetic two-year store', () => {
     });
   }
 
+  it('reads a device timeline without scanning other devices, including a device with no visits', async () => {
+    await h.rows();
+    const empty = await h.api.listVisits({ parent: 'pages/-', deviceId: '911e6d72-e917-4a44-a84e-1a6b3a8a0f11' });
+    expect(empty.visits).toEqual([]);
+    expect((await h.rows()).read).toBeLessThan(100);
+    const known = await h.api.listVisits({ parent: 'pages/-', deviceId: '5d0c3b52-8a5e-4f8e-9b8e-2d7c1a6f4e10', pageSize: 50 });
+    expect(known.visits).toHaveLength(50);
+    expect((await h.rows()).read).toBeLessThan(300);
+  });
+
   it('reads the status and ops-v1 with a few rows, however far behind an archive is', async () => {
     // Dropbox connected to the whole store at once: every change waits for it.
     const { authorizeUrl } = await h.api.connectDropboxBackup({ name: 'dropboxBackup', appKey: dropbox.appKey, requestId: op() });

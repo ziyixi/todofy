@@ -23,6 +23,10 @@ NAS. Every owner step is a click. Chinese UI, mobile first. Design:
 
 ## Use
 
+iPhone/Orion installation and the short owner check: [mobile and multiple devices](docs/mobile.md).
+Each install has its own identity and queue; named upload tokens can be stopped independently. All devices use
+the same Recall storage and Dropbox archive. The existing shared token remains valid.
+
 - **时间线**: a day at a time (‹ ›, the date, 今天; ← → t): the summary, 24 hour cells shaded by focus (a tap jumps to
   the hour), and the day's sessions by site, each opening to its pages.
 - **搜索**: words and phrases over titles, URLs and the first 32 KiB of each page's latest text, with the chips 时间,
@@ -55,7 +59,7 @@ existing budget, and the archive keeps every snapshot.
 Each eligible foreground visit is captured after ten seconds and then sampled on the existing minute tick. Empty
 text or a temporary failure does not permanently stop later samples. Within the same visit, identical text and a visibly unchanged
 screenshot do not create another snapshot; visit times continue to be recorded. Screenshots show one visible
-viewport, not an entire page. They use browser-native WebP compression (longest edge 1920 pixels, quality 0.75,
+viewport, not an entire page. They use browser-native WebP compression (JPEG when WebP encoding is unavailable) (longest edge 1920 pixels, quality 0.75,
 at most 384 KiB) and the existing sensitive-site/password-page exclusions. Text is scrubbed; screenshot pixels are not.
 
 Text and images share the existing document, upload and Dropbox archive. R2 keeps seven days of confirmed archived

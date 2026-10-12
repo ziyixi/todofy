@@ -98,9 +98,26 @@ async function write(area: chrome.storage.StorageArea, key: string, value: unkno
   await area.set({ [key]: value });
 }
 
+// MV2 has no storage.session. Keep the current background session in memory; the existing local mirror
+// closes its last span when a nonpersistent background page is recreated.
+const mobileFocus = new WeakMap<typeof chrome, FocusState>();
 export const focusState = {
-  get: (api: typeof chrome) => read<FocusState>(api.storage.session, 'focus'),
-  set: (api: typeof chrome, state: FocusState) => write(api.storage.session, 'focus', state),
+  get: (api: typeof chrome): Promise<FocusState | undefined> => (api.storage.session as chrome.storage.StorageArea | undefined) === undefined ? Promise.resolve(mobileFocus.get(api)) : read<FocusState>(api.storage.session, 'focus'),
+  set: (api: typeof chrome, state: FocusState): Promise<void> => {
+    if ((api.storage.session as chrome.storage.StorageArea | undefined) !== undefined) return write(api.storage.session, 'focus', state);
+    mobileFocus.set(api, state);
+    return Promise.resolve();
+  },
+};
+
+export interface CaptureStatus {
+  readonly at: number;
+  readonly text: 'saved' | 'empty' | 'failed' | 'excluded' | 'unchanged';
+  readonly screenshot: 'webp' | 'jpeg' | 'failed' | 'excluded' | 'none';
+}
+export const captureStatus = {
+  get: async (api: typeof chrome): Promise<CaptureStatus | null> => (await read<CaptureStatus>(api.storage.local, 'capture_status')) ?? null,
+  set: (api: typeof chrome, value: CaptureStatus) => write(api.storage.local, 'capture_status', value),
 };
 
 export const mirror = {
@@ -133,12 +150,12 @@ export const lastError = {
  * The device, made on first use (a UUID, the default label and recall's public origin). The service worker makes it
  * before its first handler runs (sw.ts), so two handlers never make two.
  */
-export async function getDevice(api: typeof chrome, uuid: () => string): Promise<Device> {
+export async function getDevice(api: typeof chrome, uuid: () => string, defaultLabel = DEFAULT_LABEL): Promise<Device> {
   const stored = await read<Partial<Device>>(api.storage.local, 'device');
   if (typeof stored?.id === 'string' && stored.id !== '') {
     return { id: stored.id, label: stored.label ?? DEFAULT_LABEL, server: stored.server ?? DEFAULT_SERVER };
   }
-  const device: Device = { id: uuid(), label: DEFAULT_LABEL, server: DEFAULT_SERVER };
+  const device: Device = { id: uuid(), label: defaultLabel, server: DEFAULT_SERVER };
   await write(api.storage.local, 'device', device);
   return device;
 }

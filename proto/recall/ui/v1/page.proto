@@ -90,6 +90,8 @@ message Visit {
   int32 focus_seconds = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
   // When the page had the focus, in time order, at most 200.
   repeated FocusSpan focus_spans = 9 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Stable installation identity; labels may be shared or renamed.
+  string device_id = 10 [(google.api.field_behavior) = OUTPUT_ONLY];
 }
 
 // A stretch of focus: the page's tab was active in the focused window and the owner was not idle.
@@ -149,6 +151,10 @@ message Document {
     (google.api.field_behavior) = OUTPUT_ONLY,
     (google.api.resource_reference).type = "recall.ziyixi.science/Visit"
   ];
+  // Native JPEG viewport bytes when the browser could not encode WebP. Returned only by GetDocument.
+  // (-- api-linter: core::0140::base64=disabled
+  //     aip.dev/not-precedent: The shared wire JSON profile has no bytes scalar; keep the bounded image opaque. --)
+  string screenshot_jpeg_base64 = 17 [(google.api.field_behavior) = OUTPUT_ONLY];
 }
 
 // A site: every page of one host.

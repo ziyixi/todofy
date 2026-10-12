@@ -113,6 +113,8 @@ message DeviceReport {
   ];
   // The extension's last error code (`capture_failed`); empty when none.
   string last_error_code = 5 [(common.wire.v1.field).format = "Code"];
+  // A phone or tablet that uploads only while its browser is in use.
+  bool mobile = 6;
 }
 
 // One item of an upload: a visit or a captured text.
@@ -238,16 +240,20 @@ message DocumentItem {
   // (-- api-linter: core::0140::base64=disabled
   //     aip.dev/not-precedent: The shared wire JSON profile has no bytes scalar; keep the bounded image opaque. --)
   string screenshot_webp_base64 = 11;
-  // The screenshot's pixel width, required with screenshot_webp_base64, from 1 to 1920.
+  // The screenshot's pixel width, required with either screenshot format, from 1 to 1920.
   int32 screenshot_width = 12 [(common.wire.v1.field) = {
     minimum: 1
     maximum: 1920
   }];
-  // The screenshot's pixel height, required with screenshot_webp_base64, from 1 to 1920.
+  // The screenshot's pixel height, required with either screenshot format, from 1 to 1920.
   int32 screenshot_height = 13 [(common.wire.v1.field) = {
     minimum: 1
     maximum: 1920
   }];
+  // Optional native JPEG when WebP encoding is unavailable. Same byte limit; only one image format is sent.
+  // (-- api-linter: core::0140::base64=disabled
+  //     aip.dev/not-precedent: The shared wire JSON profile has no bytes scalar; keep the bounded image opaque. --)
+  string screenshot_jpeg_base64 = 14;
 }
 
 // The Worker's answer to an upload it took (HTTP 200): every item is either accepted (stored, or skipped as already

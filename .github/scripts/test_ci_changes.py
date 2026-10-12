@@ -1640,7 +1640,7 @@ class RecallExtensionRelease(unittest.TestCase):
         script = workflow_run_step(self.JOB, self.STEP)[0]
         self.assertLess(script.index("git/matching-refs/tags/"), script.index("gh release create"))
 
-    def publish(self, refs="", version_name=SHA[:7], fail_api=False, reused=""):
+    def publish(self, refs="", version_name=SHA[:7], fail_api=False, reused="", orion_version=None):
         """Runs the step on a synthetic build. Returns (exit code, output, gh calls, the published zip's names, notes)."""
         if (shutil.which("jq") is None or shutil.which("zip") is None) and os.environ.get("GITHUB_ACTIONS") != "true":
             self.skipTest("needs jq and zip (the runner has both)")
@@ -1651,6 +1651,10 @@ class RecallExtensionRelease(unittest.TestCase):
             (build / "manifest.json").write_text(json.dumps(manifest))
             for name in ("sw.js", "capture.js", "options.html", "options.js", "options.css", "icons/16.png"):
                 (build / name).write_text("synthetic\n")
+            orion = Path(root, "recall-orion")
+            shutil.copytree(build, orion)
+            orion_manifest = {**manifest, "manifest_version": 2, "version": orion_version or self.VERSION}
+            (orion / "manifest.json").write_text(json.dumps(orion_manifest))
             bin_dir = Path(root, "bin")
             bin_dir.mkdir()
             Path(root, "refs.txt").write_text(refs)
@@ -1661,7 +1665,7 @@ class RecallExtensionRelease(unittest.TestCase):
                 'case "$1 $2" in\n'
                 f'  "api repos/{REPOSITORY}/git/matching-refs/tags/{self.TAG}") '
                 + ("exit 1 ;;\n" if fail_api else f'cat "{root}/refs.txt" ;;\n')
-                + f'  "release create") cp "$4" "{root}/published.zip"; cp "${{10}}" "{root}/notes.md" ;;\n'
+                + f'  "release create") cp "$4" "{root}/published.zip"; cp "$5" "{root}/orion.zip"; cp "${{11}}" "{root}/notes.md" ;;\n'
                 '  *) echo "unexpected gh call" >&2; exit 3 ;;\n'
                 "esac\n"
             )
@@ -1674,6 +1678,7 @@ class RecallExtensionRelease(unittest.TestCase):
                 "GH_TOKEN": "synthetic-token",
                 "GH_REPO": REPOSITORY,
                 "BUILD_DIR": str(build),
+                "ORION_DIR": str(orion),
                 "RUN_URL": self.run_url,
                 "REUSED_RUN_URL": reused,
                 "GITHUB_SHA": SHA,
@@ -1689,6 +1694,9 @@ class RecallExtensionRelease(unittest.TestCase):
                 with zipfile.ZipFile(Path(root, "published.zip")) as archive:
                     names = sorted(archive.namelist())
                 notes = Path(root, "notes.md").read_text()
+                with zipfile.ZipFile(Path(root, "orion.zip")) as archive:
+                    self.assertEqual(json.loads(archive.read("manifest.json"))["manifest_version"], 2)
+                    self.assertIn("sw.js", archive.namelist())
             return result.returncode, result.stdout + result.stderr, calls, names, notes
 
     def test_a_new_version_is_published_with_its_zip_commit_and_run(self):
@@ -1701,7 +1709,7 @@ class RecallExtensionRelease(unittest.TestCase):
                 self.assertRegex(
                     calls[1],
                     rf"^release create {re.escape(self.TAG)} \S+/recall-extension-v{re.escape(self.VERSION)}\.zip "
-                    rf"--target {SHA} --title recall extension {re.escape(self.VERSION)} --notes-file \S+$",
+                    rf"\S+/recall-orion-v{re.escape(self.VERSION)}\.zip --target {SHA} --title recall extension {re.escape(self.VERSION)} --notes-file \S+$",
                 )
                 # The files at the zip's root, as `npm run install-extension -- <zip>` reads them.
                 self.assertEqual(names, ["capture.js", "icons/16.png", "manifest.json", "options.css", "options.html", "options.js", "sw.js"])
@@ -1712,6 +1720,12 @@ class RecallExtensionRelease(unittest.TestCase):
         reused = f"https://github.com/{REPOSITORY}/actions/runs/800"
         _, _, _, _, notes = self.publish(reused=reused)
         self.assertIn(f"Checked and built in: {reused}", notes)
+
+    def test_a_mismatched_orion_build_publishes_nothing(self):
+        code, output, calls, _, _ = self.publish(orion_version="2026.1010.900")
+        self.assertEqual(code, 1, output)
+        self.assertIn("not the same tested build", output)
+        self.assertEqual(calls, [])
 
     def test_an_existing_tag_publishes_nothing(self):
         code, output, calls, names, _ = self.publish(refs=f"refs/tags/{self.TAG}\n")
@@ -2773,7 +2787,7 @@ def fake_github(runs, jobs_by_run, artifacts_by_run=None):
             return {"total_count": len(jobs), "jobs": jobs}
         match = re.fullmatch(rf"/repos/{re.escape(REPOSITORY)}/actions/runs/(\d+)/artifacts\?per_page=100", path)
         if match:
-            artifacts = (artifacts_by_run or {}).get(int(match.group(1)), [{"name": f"{prefix}-{SHA}", "expired": False} for prefix in ("newsletter-image", "platform-image", "recall-extension")])
+            artifacts = (artifacts_by_run or {}).get(int(match.group(1)), [{"name": f"{prefix}-{SHA}", "expired": False} for prefix in ("newsletter-image", "platform-image", "recall-extension", "recall-orion")])
             return {"artifacts": artifacts}
         raise AssertionError(f"unexpected read {path}")
 
@@ -2905,7 +2919,8 @@ class Reuse(unittest.TestCase):
         needed = push(["recall/extension/src/sw.ts"])
         for artifacts, reused in (([], False), ([{"name": f"recall-extension-{SHA}", "expired": True}], False),
                                   ([{"name": "recall-extension-other", "expired": False}], False),
-                                  ([{"name": f"recall-extension-{SHA}", "expired": False}], True)):
+                                  ([{"name": f"recall-extension-{SHA}", "expired": False}], False),
+                                  ([{"name": f"recall-extension-{SHA}", "expired": False}, {"name": f"recall-orion-{SHA}", "expired": False}], True)):
             with self.subTest(artifacts=artifacts):
                 get = fake_github([branch_run()], {800: green_jobs("Recall checks", "Contracts")}, {800: artifacts})
                 result, extra, _ = ci_changes.try_reuse("push", MAIN, SHA, needed, ENV, get)

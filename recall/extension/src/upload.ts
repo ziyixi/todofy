@@ -18,6 +18,7 @@
  */
 import type { IngestBatch, IngestItem, IngestResult } from '@ziyixi/proto/recall/ingest/v1/ingest_wire';
 import type { Context } from './context.ts';
+import { browserFeatures } from './browser.ts';
 import { countItems, getToken, oldestItems, settleItems, type OutboxItem } from './db.ts';
 import {
   BACKOFF_MAX_MS,
@@ -57,6 +58,7 @@ export interface BatchHeader {
   readonly queued: number;
   /** The last error code of the past day, or ''. */
   readonly errorCode: string;
+  readonly mobile?: boolean;
 }
 
 /** A batch of outbox items, as recall.ingest.v1 wire JSON. */
@@ -68,6 +70,7 @@ export function batchOf(header: BatchHeader, items: readonly OutboxItem[]): Inge
     sent_time: isoTime(header.sentMs),
     device: {
       device_id: device.id,
+      ...(header.mobile ? { mobile: true } : {}),
       label: device.label,
       extension_version: header.version,
       queued_count: header.queued,
@@ -131,10 +134,10 @@ function afterRefusal(upload: UploadState, response: Response, sent: number, at:
 }
 
 /** Whether the flush has something to send: items that are due (`ready` of them are not held), or a heartbeat. */
-function due(reason: FlushReason, ready: number, upload: UploadState, at: number): boolean {
+function due(reason: FlushReason, ready: number, upload: UploadState, at: number, mobile: boolean): boolean {
   if (reason !== 'tick') return true;
   const sinceUpload = at - upload.lastUploadAt;
-  return ready > 0 ? ready >= FLUSH_ITEMS || sinceUpload >= FLUSH_INTERVAL_MS : sinceUpload >= HEARTBEAT_MS;
+  return ready > 0 ? ready >= FLUSH_ITEMS || sinceUpload >= (mobile ? 60_000 : FLUSH_INTERVAL_MS) : sinceUpload >= HEARTBEAT_MS;
 }
 
 /** One upload, when one is due: the outbox's oldest items, or the heartbeat. */
@@ -142,9 +145,10 @@ export async function flush(ctx: Context, at: number, reason: FlushReason): Prom
   const [token, upload, queued] = await Promise.all([getToken(ctx.db), uploadState.get(ctx.chrome), countItems(ctx.db)]);
   if (token === '' || upload.tokenRefused || (reason !== 'manual' && at < upload.nextAttemptAt)) return { kind: 'idle' };
   let items = queued === 0 ? [] : await oldestItems(ctx.db, upload.batchLimit, BATCH_MAX_JSON_BYTES - ENVELOPE_BYTES, at);
-  if (!due(reason, items.length, upload, at)) return { kind: 'idle' };
+  if (!due(reason, items.length, upload, at, ctx.mobile === true)) return { kind: 'idle' };
   const [device, error] = await Promise.all([getDevice(ctx.chrome, ctx.uuid), lastError.get(ctx.chrome)]);
   const header: BatchHeader = {
+    mobile: ctx.mobile === true,
     batchId: ctx.uuid(),
     sentMs: at,
     device,
@@ -210,11 +214,14 @@ export async function showBadge(ctx: Context, at: number): Promise<void> {
   const upload = await uploadState.get(ctx.chrome);
   const failing = upload.failingSince !== 0 && at - upload.failingSince >= FAILING_BADGE_MS;
   const text = upload.tokenRefused || failing ? '!' : '';
-  await ctx.chrome.action.setBadgeText({ text });
+  const features = browserFeatures(ctx.chrome);
+  const action = features.action ?? features.browserAction;
+  if (action === undefined) return;
+  await action.setBadgeText({ text });
   if (text !== '') {
-    await ctx.chrome.action.setBadgeBackgroundColor({ color: '#9a5b08' });
-    await ctx.chrome.action.setTitle({ title: upload.tokenRefused ? 'recall：令牌无效' : 'recall：上传失败' });
+    await action.setBadgeBackgroundColor({ color: '#9a5b08' });
+    await action.setTitle({ title: upload.tokenRefused ? 'recall：令牌无效' : 'recall：上传失败' });
   } else {
-    await ctx.chrome.action.setTitle({ title: 'recall' });
+    await action.setTitle({ title: 'recall' });
   }
 }

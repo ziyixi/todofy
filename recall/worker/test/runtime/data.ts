@@ -3,6 +3,8 @@
  * extension sends them (normalized, scrubbed, with the page ID of the whole normalized URL). Pages on example.com,
  * example.org and example.net; texts written for the tests.
  */
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { normalizeUrl, pageIdOf } from '../../../shared/url.ts';
 import { T0 } from './harness.ts';
 
@@ -15,7 +17,7 @@ export function uuid(n: number, kind = 0): string {
 
 export const iso = (ms: number) => new Date(ms).toISOString();
 
-export function batch(items: readonly unknown[], options: { sentMs?: number; device?: Partial<typeof DEVICE> & { last_error_code?: string }; batchId?: string } = {}): unknown {
+export function batch(items: readonly unknown[], options: { sentMs?: number; device?: Partial<typeof DEVICE> & { last_error_code?: string; mobile?: boolean }; batchId?: string } = {}): unknown {
   return {
     version: 'recall-ingest-v1',
     batch_id: options.batchId ?? crypto.randomUUID(),
@@ -69,6 +71,7 @@ export interface DocumentInput {
   readonly text: string;
   readonly truncated?: boolean;
   readonly screenshot?: string;
+  readonly screenshotMediaType?: 'image/webp' | 'image/jpeg';
 }
 
 export async function document(input: DocumentInput): Promise<unknown> {
@@ -84,7 +87,7 @@ export async function document(input: DocumentInput): Promise<unknown> {
       description: input.description ?? '',
       capture_time: iso(input.captureMs),
       text: input.text,
-      ...(input.screenshot === undefined ? {} : { screenshot_webp_base64: input.screenshot, screenshot_width: 1, screenshot_height: 1 }),
+      ...(input.screenshot === undefined ? {} : { [input.screenshotMediaType === 'image/jpeg' ? 'screenshot_jpeg_base64' : 'screenshot_webp_base64']: input.screenshot, screenshot_width: 1, screenshot_height: 1 }),
       ...(input.truncated === true ? { text_truncated: true } : {}),
     },
   };
@@ -132,3 +135,6 @@ export function text(bytes: number, seed = 0): string {
 
 /** Synthetic 1x1 still WebP used to check byte-for-byte screenshot storage. */
 export const WEBP = 'UklGRiIAAABXRUJQVlA4IBYAAAAwAQCdASoBAAEADsD+JaQAA3AAAAAA';
+
+/** Native-encoded solid one-pixel fixture; never browser content. */
+export const JPEG = btoa(String.fromCharCode(...readFileSync(fileURLToPath(new URL('../fixtures/screenshot-1x1.jpg', import.meta.url).href))));

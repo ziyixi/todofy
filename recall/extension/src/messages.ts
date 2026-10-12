@@ -2,7 +2,7 @@
  * The messages between the options page and the service worker (chrome.runtime.sendMessage, from the extension's own
  * pages only): the status, saving the settings, 立即上传 and 检查更新.
  */
-import type { LastError, UploadState } from './store.ts';
+import type { CaptureStatus, LastError, UploadState } from './store.ts';
 
 export interface SaveRequest {
   readonly server: string;
@@ -21,6 +21,10 @@ export type SaveAnswer = { readonly ok: true } | { readonly ok: false; readonly 
 
 export interface Status {
   readonly now: number;
+  readonly mobile?: boolean;
+  readonly capture?: CaptureStatus | null;
+  readonly capabilities?: { readonly script: boolean; readonly screenshot: boolean };
+  readonly focused?: boolean;
   readonly version: string;
   /** The build's short commit. */
   readonly versionName: string;

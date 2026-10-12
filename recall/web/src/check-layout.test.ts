@@ -83,7 +83,7 @@ describe('nothing is wider than a phone', () => {
     const root = await open(fake, '/day/2026-10-09')
     const row = root.querySelector('.session')
     expect([...(row?.children ?? [])].map((child) => child.className)).toEqual(['session-main', 'session-pages'])
-    expect([...(row?.querySelector('.session-line')?.children ?? [])].map((child) => child.classList[0])).toEqual(['badge', 'session-site', 'meta', 'session-figures'])
+    expect([...(row?.querySelector('.session-line')?.children ?? [])].map((child) => child.classList[0])).toEqual(['badge', 'session-site', 'meta', 'meta', 'session-figures'])
   })
 })
 

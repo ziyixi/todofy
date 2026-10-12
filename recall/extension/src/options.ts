@@ -60,6 +60,7 @@ function render(status: Status, fillForm: boolean): void {
       return [term, detail];
     }),
   );
+  updateButton.hidden = status.mobile === true;
   footer.textContent = buildLine(status);
 }
 

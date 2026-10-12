@@ -17,7 +17,7 @@ import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
 import { ICON_SIZES, iconPng } from './icons.mjs';
-import { buildManifest, isChromeVersion, readTemplate, versionOf } from './manifest.mjs';
+import { buildManifest, buildOrionManifest, isChromeVersion, readTemplate, versionOf } from './manifest.mjs';
 import { writeZip } from './zip.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -63,7 +63,7 @@ export async function buildExtension({ dist = DIST, time = new Date(), commit = 
     platform: 'browser',
     legalComments: 'none',
     logLevel: 'warning',
-    define: { RECALL_BUILD: JSON.stringify(version) },
+    define: { RECALL_BUILD: JSON.stringify(version), RECALL_ORION: 'false' },
   };
   await build({ ...common, entryPoints: { sw: join(ROOT, 'src/sw.ts'), options: join(ROOT, 'src/options.ts') }, format: 'esm', outdir: out });
   await build({
@@ -75,6 +75,8 @@ export async function buildExtension({ dist = DIST, time = new Date(), commit = 
     outdir: out,
   });
 
+  await build({ ...common, entryPoints: { probe: join(ROOT, 'src/probe-script.ts') }, format: 'iife', globalName: 'recallProbe', footer: { js: 'recallProbe.result;' }, outdir: out });
+
   for (const name of ['options.html', 'options.css']) copyFileSync(join(ROOT, 'src', name), join(out, name));
   copyFileSync(join(ROOT, '..', 'shared', 'NOTICE'), join(out, 'NOTICE'));
   for (const size of ICON_SIZES) writeFileSync(join(out, 'icons', `${String(size)}.png`), iconPng(size));
@@ -82,11 +84,21 @@ export async function buildExtension({ dist = DIST, time = new Date(), commit = 
 
   const zip = join(dist, `recall-extension-${short}.zip`);
   writeFileSync(zip, writeZip(filesUnder(out).map((name) => ({ name, data: readFileSync(join(out, name)) }))));
-  return { version, commit: short, folder: out, zip };
+  const orionFolder = join(dist, 'orion');
+  mkdirSync(orionFolder, { recursive: true });
+  for (const name of filesUnder(out)) {
+    mkdirSync(dirname(join(orionFolder, name)), { recursive: true });
+    copyFileSync(join(out, name), join(orionFolder, name));
+  }
+  await build({ ...common, target: 'safari17', define: { ...common.define, RECALL_ORION: 'true' }, entryPoints: { sw: join(ROOT, 'src/sw.ts') }, format: 'iife', outdir: orionFolder });
+  writeFileSync(join(orionFolder, 'manifest.json'), `${JSON.stringify(buildOrionManifest(readTemplate(), { version, versionName: short }), null, 2)}\n`);
+  const orionZip = join(dist, `recall-orion-${short}.zip`);
+  writeFileSync(orionZip, writeZip(filesUnder(orionFolder).map((name) => ({ name, data: readFileSync(join(orionFolder, name)) }))));
+  return { version, commit: short, folder: out, zip, orionFolder, orionZip };
 }
 
 if (import.meta.main) {
   const time = process.env.RECALL_BUILD_TIME ? new Date(process.env.RECALL_BUILD_TIME) : new Date();
   const built = await buildExtension({ time });
-  console.log(`recall extension ${built.version} (${built.commit}): ${relative(process.cwd(), built.folder)}/ and ${relative(process.cwd(), built.zip)}`);
+  console.log(`recall extension ${built.version} (${built.commit}): ${relative(process.cwd(), built.folder)}/ and ${relative(process.cwd(), built.zip)}; Orion ${relative(process.cwd(), built.orionZip)}`);
 }

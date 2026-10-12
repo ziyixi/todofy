@@ -37,9 +37,9 @@ describe('the shell', () => {
     const fake = new FakeServer()
     fake.status = {
       devices: [
-        { $typeName: 'recall.ui.v1.DeviceStatus', deviceId: 'a', label: 'MacBook', extensionVersion: '1', lastHeartbeatTime: timestampFromMs(NOW - 2 * DAY), queuedCount: 0, lastErrorCode: '', stale: true, clockSkewSeconds: 0 },
+        { $typeName: 'recall.ui.v1.DeviceStatus', deviceId: 'a', label: 'MacBook', extensionVersion: '1', lastHeartbeatTime: timestampFromMs(NOW - 2 * DAY), queuedCount: 0, lastErrorCode: '', stale: true, mobile: false, clockSkewSeconds: 0 },
         // Retired long ago: no longer watched.
-        { $typeName: 'recall.ui.v1.DeviceStatus', deviceId: 'b', label: 'Old', extensionVersion: '1', lastHeartbeatTime: timestampFromMs(NOW - 40 * DAY), queuedCount: 0, lastErrorCode: '', stale: true, clockSkewSeconds: 0 },
+        { $typeName: 'recall.ui.v1.DeviceStatus', deviceId: 'b', label: 'Old', extensionVersion: '1', lastHeartbeatTime: timestampFromMs(NOW - 40 * DAY), queuedCount: 0, lastErrorCode: '', stale: true, mobile: false, clockSkewSeconds: 0 },
       ],
       // A feed consumer far behind is 设置's business only.
       archiveConsumers: [{ $typeName: 'recall.ui.v1.ArchiveConsumer', consumer: 'nas', syncedSeq: 1, lastPullTime: timestampFromMs(NOW - 3 * DAY), behindCount: 50, oldestUnsyncedTime: timestampFromMs(NOW - 3 * DAY), stale: true }],

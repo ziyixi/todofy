@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Env } from '../src/env.ts';
 import { DAY, HOUR, MINUTE, SECOND } from '../src/limits.ts';
 import { checkBearer, forgetHeldDigests } from '../src/machine.ts';
-import { deleteToken, heldDigests, newToken, pruneTokens, secretDigests, storeToken, tokenDigest, tokenMessage, tokenRoute, type RouteDigests } from '../src/tokens.ts';
+import { addNamedToken, deleteNamedToken, deleteToken, heldDigests, newToken, pruneTokens, secretDigests, storeToken, tokenDigest, tokenMessage, tokenRoute, type RouteDigests } from '../src/tokens.ts';
 import { memoryStore } from './sqlite.ts';
 
 const digest = (token: string) => createHash('sha256').update(token).digest('hex');
@@ -94,6 +94,24 @@ describe("the Worker's check", () => {
     // The revoked token works at most a minute in an isolate that kept it.
     vi.setSystemTime(T0 + 10 * SECOND + MINUTE);
     expect(await checkBearer(request('recall_ingest_old'), env, 'ingest')).toBe('refused');
+  });
+
+  it('expires a revoked named credential from the cache without stopping the other device or legacy token', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(T0);
+    const store = memoryStore();
+    storeToken(store, 'ingest', digest('recall_ingest_legacy'), T0, false);
+    const phone = addNamedToken(store, 'Phone', digest('recall_ingest_phone'), T0);
+    addNamedToken(store, 'Desktop', digest('recall_ingest_desktop'), T0);
+    const { env } = worker(() => heldDigests(store, Date.now()));
+    expect(await checkBearer(request('recall_ingest_phone'), env, 'ingest')).toBe('ok');
+    expect(deleteNamedToken(store, phone?.name.split('/')[1] ?? '')).toBe(true);
+    // Existing isolate cache has the documented one-minute revocation window.
+    expect(await checkBearer(request('recall_ingest_phone'), env, 'ingest')).toBe('ok');
+    vi.setSystemTime(T0 + MINUTE);
+    expect(await checkBearer(request('recall_ingest_phone'), env, 'ingest')).toBe('refused');
+    expect(await checkBearer(request('recall_ingest_desktop'), env, 'ingest')).toBe('ok');
+    expect(await checkBearer(request('recall_ingest_legacy'), env, 'ingest')).toBe('ok');
   });
 
   it('answers none (503) when no digest exists anywhere, also without a bearer', async () => {

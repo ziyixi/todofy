@@ -37,7 +37,7 @@ describe('the build', () => {
   it('holds the extension\'s files, its version and commit, no BUILD and no protobuf code', () => {
     expect(built.version).toBe('2026.105.903');
     const files = readZip(readFileSync(built.zip)).map((file) => file.name);
-    expect(files).toEqual(['NOTICE', 'capture.js', 'icons/128.png', 'icons/16.png', 'icons/32.png', 'icons/48.png', 'manifest.json', 'options.css', 'options.html', 'options.js', 'sw.js']);
+    expect(files).toEqual(['NOTICE', 'capture.js', 'icons/128.png', 'icons/16.png', 'icons/32.png', 'icons/48.png', 'manifest.json', 'options.css', 'options.html', 'options.js', 'probe.js', 'sw.js']);
     const manifest = JSON.parse(readFileSync(join(built.folder, 'manifest.json'), 'utf8'));
     expect([manifest.version, manifest.version_name]).toEqual(['2026.105.903', 'abc1234']);
     expect(built.zip.endsWith('recall-extension-abc1234.zip')).toBe(true);
@@ -65,6 +65,23 @@ describe('the build', () => {
       textTruncated: false,
       hasPasswordField: false,
     });
+  });
+
+  it('builds an Orion file ZIP from the same source with a nonpersistent plain background script', () => {
+    const manifest = JSON.parse(readFileSync(join(built.orionFolder, 'manifest.json'), 'utf8'));
+    expect(manifest.manifest_version).toBe(2);
+    expect(manifest.key).toBe(JSON.parse(readFileSync(join(built.folder, 'manifest.json'), 'utf8')).key);
+    expect(manifest.background).toEqual({ scripts: ['sw.js'], persistent: false });
+    expect(manifest.permissions).not.toContain('idle');
+    expect(manifest.permissions).not.toContain('scripting');
+    expect(manifest.permissions).toContain('<all_urls>');
+    expect(manifest.browser_action.default_title).toBe('recall');
+    expect(manifest.content_scripts).toBeUndefined();
+    expect(manifest.incognito).toBe('not_allowed');
+    const code = readFileSync(join(built.orionFolder, 'sw.js'), 'utf8');
+    expect(code).not.toMatch(/^import |^export /m);
+    expect(readZip(readFileSync(built.orionZip)).map((file) => file.name)).toContain('probe.js');
+    expect(readFileSync(join(built.orionFolder, 'capture.js'))).toEqual(readFileSync(join(built.folder, 'capture.js')));
   });
 
   it('draws the icons as PNG files', () => {

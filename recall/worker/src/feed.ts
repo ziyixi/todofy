@@ -73,7 +73,7 @@ export function documentChange(row: Joined<DocumentRow>): Change {
         sha256: row.sha256,
         sizeBytes: row.stored_bytes,
       }),
-      ...(row.screenshot_path === '' ? [] : [create(BlobSchema, { role: 'screenshot', path: row.screenshot_path, mediaType: 'image/webp', sha256: row.screenshot_sha256, sizeBytes: row.screenshot_bytes })]),
+      ...(row.screenshot_path === '' ? [] : [create(BlobSchema, { role: 'screenshot', path: row.screenshot_path, mediaType: row.screenshot_path.endsWith('.jpg') ? 'image/jpeg' : 'image/webp', sha256: row.screenshot_sha256, sizeBytes: row.screenshot_bytes })]),
     ],
     document: create(DocumentSchema, {
       visit: `visits/${row.visit}`,

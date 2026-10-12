@@ -53,7 +53,7 @@ import { readDenylist, readRetention, validRetention, writeSettings, type Denyli
 import { serviceStatus } from './status.ts';
 import { hostOfKey, utcDay, type DocumentRow, type PageRow, type SiteRow, type Store } from './store.ts';
 import { getVisit, listVisits } from './timeline.ts';
-import { deleteToken, newToken, storeToken, tokenDigest, tokenMessage, tokenRoute, type TokenRoute } from './tokens.ts';
+import { addNamedToken, deleteNamedToken, deleteToken, namedTokenId, newToken, storeToken, tokenDigest, tokenMessage, tokenRoute, type TokenRoute } from './tokens.ts';
 
 /** What every handler gets from RecallState. */
 export interface ApiContext {
@@ -320,11 +320,13 @@ export const handlers: ServiceHandlers<ShapeOf<typeof RecallUiService>, ApiConte
     if (!['', 'start_time', 'start_time desc'].includes(order)) bad('order_by is `start_time` or `start_time desc`');
     const descending = order === 'start_time desc';
     const { start, end } = timeRange(request.startTime, request.endTime);
-    const parameters = { parent: request.parent, order, start: start ?? '', end: end ?? '' };
+    const deviceId = request.deviceId === '' ? null : request.deviceId;
+    if (deviceId !== null && !UUID.test(deviceId)) bad('device_id is not a lower-case UUID');
+    const parameters = { parent: request.parent, order, start: start ?? '', end: end ?? '', device: deviceId ?? '' };
     const after = cursorOf(request.pageToken, parameters, (cursor) =>
       Array.isArray(cursor) && cursor.length === 2 && typeof cursor[0] === 'number' && typeof cursor[1] === 'string' && UUID.test(cursor[1]) ? ([cursor[0], cursor[1]] as const) : null,
     );
-    const rows = listVisits(ctx.store, { pageRowid, start, end, descending, after, size });
+    const rows = listVisits(ctx.store, { pageRowid, deviceId, start, end, descending, after, size });
     const page = rows.slice(0, size);
     const last = page[page.length - 1];
     return Promise.resolve(
@@ -479,26 +481,48 @@ export const handlers: ServiceHandlers<ShapeOf<typeof RecallUiService>, ApiConte
     return once(ctx, request.requestId, 'DisconnectDropboxBackup', request.name, DropboxBackupSchema, () => backupMessage(ctx.store));
   },
 
+  async createMachineToken(request, ctx) {
+    const label = request.machineToken?.label.trim() ?? '';
+    if (label.length === 0 || label.length > 80 || Array.from(label).some((character) => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127)) bad('label must be 1-80 characters');
+    if (answered(ctx, request.requestId)) return once(ctx, request.requestId, 'CreateMachineToken', 'machineTokens', MachineTokenSchema, () => fail('INTERNAL'));
+    const token = newToken('ingest');
+    const digest = await tokenDigest(token);
+    const created = { value: false };
+    const stored = once(ctx, request.requestId, 'CreateMachineToken', 'machineTokens', MachineTokenSchema, () => {
+      const made = addNamedToken(ctx.store, label, digest, ctx.now) ?? fail('LIMIT_REACHED');
+      created.value = true;
+      return made;
+    });
+    // A matching request may finish during hashing; only the transaction that created it can show the bearer.
+    if (created.value) stored.token = token;
+    return stored;
+  },
+
   async regenerateMachineToken(request, ctx) {
     const route = tokenRoute(request.name) ?? fail('NOT_FOUND');
     // A repeated request changes nothing and answers without the token: it is shown once, and never stored.
     if (answered(ctx, request.requestId)) return once(ctx, request.requestId, 'RegenerateMachineToken', request.name, MachineTokenSchema, () => fail('INTERNAL'));
     const token = newToken(route);
     const digest = await tokenDigest(token);
+    const created = { value: false };
     const stored = once(ctx, request.requestId, 'RegenerateMachineToken', request.name, MachineTokenSchema, () => {
       storeToken(ctx.store, route, digest, ctx.now, request.revokePrevious);
+      created.value = true;
       return tokenMessage(ctx.store, route, ctx.now, ctx.secretTokens[route]);
     });
-    // The token goes into this answer only, after the request log kept the answer without it.
-    stored.token = token;
+    // Replays return the saved metadata without attaching a token this transaction did not store.
+    if (created.value) stored.token = token;
     return stored;
   },
 
   deleteMachineToken(request, ctx) {
-    const route = tokenRoute(request.name) ?? fail('NOT_FOUND');
+    const route = tokenRoute(request.name);
+    const namedId = namedTokenId(request.name);
+    if (route === null && namedId === null) fail('NOT_FOUND');
     return Promise.resolve(
       once(ctx, request.requestId, 'DeleteMachineToken', request.name, EmptySchema, () => {
-        if (!deleteToken(ctx.store, route)) fail('NOT_FOUND');
+        const deleted = route === null ? deleteNamedToken(ctx.store, namedId ?? '') : deleteToken(ctx.store, route);
+        if (!deleted) fail('NOT_FOUND');
         return create(EmptySchema);
       }),
     );

@@ -83,9 +83,45 @@ describe('tokens made in 设置', () => {
     expect(reasonOf(await rejection(h.api.regenerateMachineToken({ name: 'machineTokens/other', requestId: op() })))).toBe('NOT_FOUND');
   });
 
+  it('keeps independent named upload credentials and the existing global token valid', async () => {
+    const legacy = await h.api.regenerateMachineToken({ name: 'machineTokens/ingest', requestId: op() });
+    const requestId = op();
+    const phone = await h.api.createMachineToken({ machineToken: { label: 'iPhone' }, requestId });
+    const desktop = await h.api.createMachineToken({ machineToken: { label: 'Mac Studio' }, requestId: op() });
+    expect(phone.name).toMatch(/^machineTokens\/[0-9a-f-]{36}$/);
+    expect(phone.token).toMatch(/^recall_ingest_[A-Za-z0-9_-]{43}$/);
+    expect(desktop.name).not.toBe(phone.name);
+    expect(await upload(h, legacy.token)).toBe(200);
+    expect(await upload(h, phone.token)).toBe(200);
+    expect(await upload(h, desktop.token)).toBe(200);
+    const replay = await h.api.createMachineToken({ machineToken: { label: 'iPhone' }, requestId });
+    expect(replay).toMatchObject({ name: phone.name, label: 'iPhone', token: '' });
+    const status = await h.api.getServiceStatus({ name: 'serviceStatus' });
+    expect(status.machineTokens.slice(2).map((token) => token.label)).toEqual(['iPhone', 'Mac Studio']);
+    const stored = JSON.stringify(await h.sql(`SELECT * FROM meta`)) + JSON.stringify(await h.sql(`SELECT * FROM requests`));
+    expect(stored).not.toContain(phone.token);
+    expect(stored).not.toContain(desktop.token);
+    expect(status.machineTokens.every((token) => token.token === '')).toBe(true);
+    await h.api.deleteMachineToken({ name: phone.name, requestId: op() });
+    expect(await upload(h, phone.token)).toBe(401);
+    expect(await upload(h, desktop.token)).toBe(200);
+    expect(await upload(h, legacy.token)).toBe(200);
+    expect((await h.api.getServiceStatus({ name: 'serviceStatus' })).machineTokens.map((token) => token.name)).not.toContain(phone.name);
+    await h.api.deleteMachineToken({ name: desktop.name, requestId: op() });
+  });
+
+  it('rejects empty labels and bounds the named credential list', async () => {
+    expect(reasonOf(await rejection(h.api.createMachineToken({ machineToken: { label: '  ' }, requestId: op() })))).toBe('BAD_REQUEST');
+    const made = [];
+    for (let i = 0; i < 16; i++) made.push(await h.api.createMachineToken({ machineToken: { label: `Device ${String(i)}` }, requestId: op() }));
+    expect(reasonOf(await rejection(h.api.createMachineToken({ machineToken: { label: 'Too many' }, requestId: op() })))).toBe('LIMIT_REACHED');
+    for (const token of made) await h.api.deleteMachineToken({ name: token.name, requestId: op() });
+  });
+
   it('needs Origin and the CSRF token to make or delete one', async () => {
     for (const [method, path] of [
       ['POST', '/api/v1/machineTokens/ingest:regenerate'],
+      ['POST', '/api/v1/machineTokens'],
       ['DELETE', '/api/v1/machineTokens/ingest'],
     ] as const) {
       const bare = await h.fetch(path, { method, headers: { 'content-type': 'application/json' }, ...(method === 'POST' ? { body: '{}' } : {}) });
@@ -112,5 +148,10 @@ describe('a digest put as a Worker secret', () => {
     const made = await h.api.regenerateMachineToken({ name: 'machineTokens/ingest', revokePrevious: true, requestId: op() });
     expect(await upload(h, made.token)).toBe(200);
     expect(await upload(h, INGEST_TOKEN)).toBe(200);
+    const named = await h.api.createMachineToken({ machineToken: { label: 'Phone' }, requestId: op() });
+    expect(await upload(h, named.token)).toBe(200);
+    await h.api.deleteMachineToken({ name: named.name, requestId: op() });
+    expect(await upload(h, INGEST_TOKEN)).toBe(200);
+    expect(await upload(h, made.token)).toBe(200);
   });
 });

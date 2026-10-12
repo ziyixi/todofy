@@ -1,8 +1,8 @@
-/** Bounded still WebP screenshots from the extension's canvas; no image decoding in the Worker. */
+/** Bounded native WebP or JPEG screenshots; validate dimensions without decoding an image in the Worker. */
 import { SCREENSHOT_MAX_BYTES, SCREENSHOT_MAX_EDGE } from '../../shared/url.ts';
 
 /** Checks RIFF/chunk bounds and the encoded dimensions, so client metadata cannot bypass the pixel limit. */
-export function screenshotBytes(base64: string, width: number, height: number): Uint8Array | null {
+export function screenshotBytes(base64: string, width: number, height: number, mediaType: 'image/webp' | 'image/jpeg' = 'image/webp'): Uint8Array | null {
   if (!Number.isInteger(width) || !Number.isInteger(height) || width < 1 || height < 1 || width > SCREENSHOT_MAX_EDGE || height > SCREENSHOT_MAX_EDGE) return null;
   if (base64.length > Math.ceil(SCREENSHOT_MAX_BYTES / 3) * 4 || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(base64)) return null;
   let bytes: Uint8Array;
@@ -12,6 +12,7 @@ export function screenshotBytes(base64: string, width: number, height: number): 
     return null;
   }
   if (bytes.length < 26 || bytes.length > SCREENSHOT_MAX_BYTES) return null;
+  if (mediaType === 'image/jpeg') return jpegDimensions(bytes, width, height) ? bytes : null;
   const view = new DataView(bytes.buffer);
   const tag = (at: number) => String.fromCharCode(...bytes.subarray(at, at + 4));
   if (tag(0) !== 'RIFF' || tag(8) !== 'WEBP' || view.getUint32(4, true) + 8 !== bytes.length) return null;
@@ -45,6 +46,26 @@ export function screenshotBytes(base64: string, width: number, height: number): 
     at = end;
   }
   return image ? bytes : null;
+}
+
+/** Canvas JPEGs are baseline or progressive. Check their SOF dimensions and segment bounds before scan data. */
+function jpegDimensions(bytes: Uint8Array, width: number, height: number): boolean {
+  if (bytes[0] !== 0xff || bytes[1] !== 0xd8 || bytes[bytes.length - 2] !== 0xff || bytes[bytes.length - 1] !== 0xd9) return false;
+  const view = new DataView(bytes.buffer);
+  let matched = false;
+  for (let at = 2; at + 4 <= bytes.length;) {
+    if (bytes[at] !== 0xff) return false;
+    const marker = bytes[at + 1];
+    const size = view.getUint16(at + 2);
+    if (size < 2 || at + size + 2 > bytes.length - 2) return false;
+    if (marker === 0xc0 || marker === 0xc2) {
+      if (size < 8 || bytes[at + 4] !== 8 || view.getUint16(at + 5) !== height || view.getUint16(at + 7) !== width) return false;
+      matched = true;
+    }
+    if (marker === 0xda) return matched;
+    at += size + 2;
+  }
+  return false;
 }
 
 export function base64Of(bytes: Uint8Array): string {

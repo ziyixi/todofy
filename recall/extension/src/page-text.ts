@@ -9,6 +9,8 @@ import { cutUtf8, DOCUMENT_MAX_BYTES } from '../../shared/url.ts';
 export interface PageText {
   /** The build of the script that read it: the service worker drops a result of another build. */
   readonly build: string;
+  readonly documentId?: string;
+  readonly visible?: boolean;
   /** The document's URL when it was read (location.href). */
   readonly url: string;
   readonly title: string;
@@ -19,12 +21,13 @@ export interface PageText {
 }
 
 export function readPage(doc: Document, build: string): PageText {
-  const hasPasswordField = Array.from(doc.querySelectorAll('input[type="password" i]')).some((field) => field.checkVisibility());
+  const hasPasswordField = Array.from(doc.querySelectorAll('input[type="password" i]')).some((field) => typeof field.checkVisibility === 'function' ? field.checkVisibility() : field.getClientRects().length > 0);
   const description = doc.querySelector('meta[name="description" i]')?.getAttribute('content') ?? '';
   // A document without a body (an XML document, a frameset) has no text.
   const body = doc.querySelector('body');
   const text = hasPasswordField ? { text: '', truncated: false } : cutUtf8(body?.innerText ?? '', DOCUMENT_MAX_BYTES);
-  return { build, url: doc.location.href, title: doc.title, description, text: text.text, textTruncated: text.truncated, hasPasswordField };
+  const probe = globalThis.recallPageProbe;
+  return { build, ...(probe === undefined ? {} : { documentId: probe.documentId, visible: probe.visible && doc.visibilityState === 'visible' }), url: doc.location.href, title: doc.title, description, text: text.text, textTruncated: text.truncated, hasPasswordField };
 }
 
 /** Whether a value is a PageText (an executeScript result is whatever the page's world left). */

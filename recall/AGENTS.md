@@ -21,13 +21,14 @@
   Worker 把对象里的摘要在内存里缓存一分钟（被拒的令牌每 10 秒最多再问一次对象）；手工放进 Worker secret 的摘要
   （`INGEST_TOKEN_SHA256` 等）仍然有效，部署不覆盖也不删除（`deploy/test/secrets-kept.test.mjs`）。导出令牌可选：
   Dropbox 备份不需要它。机器令牌从不进入 owner API，Access JWT 也不能代替机器令牌。
+- **多设备与手机**：独立安装使用自己的设备 ID 和队列；新增的具名上传口令可独立停用，现有共享/Worker secret 口令继续有效。三条机器路由不扩展。Orion 文件包与 Chrome 包共用采集核心；手机按页面可见性采集，不把 API 缺失当作前台证明，不假定 iOS 后台定时运行。正文和截图沿用隐私规则，原生 WebP 不可编码时可用同预算的 JPEG。不增加配对服务或按设备备份。实机未验行为须明确留待 owner，见 `docs/mobile.md`。
 - **Dropbox 备份**：归档由 alarm 写进 owner 自己的 Dropbox 应用文件夹（App folder，`backup.ts`、`dropbox.ts`），NAS
   用自带的 Dropbox 同步，NAS 与 owner 的 Mac 上不运行 recall 的代码。连接只用 App key 与 OAuth 2 PKCE（无 app secret）；
   refresh token 只存在对象里，从不返回、不进日志；回调 `GET /api/dropbox/callback` 在 Access 后面，state 一次有效、15 分钟
   过期，不需要 Bypass。只增不删：从不调用 Dropbox 的删除或移动；blob 用 `add` 写一次，日文件、`VERSION`、`state.json`
   整体覆盖；遇到 429 / `too_many_write_operations` 按 Retry-After 或退避重试；每次 pass 受子请求（40）、墙钟与渲染行数
   约束。改动这些时运行 `test/runtime/archive.test.ts`（假 Dropbox）与 smoke。
-- **快照与保留窗口**（owner 2026-10-11）：前台累计 10 秒首次采集，之后复用一分钟 tick 补采；同一次访问的文字未变、截图无明显变化时省略重复快照，不再按天限制。Document 可带可见区域 WebP，复用现有上传、R2 和 Dropbox 归档；
+- **快照与保留窗口**（owner 2026-10-11）：前台累计 10 秒首次采集，之后复用一分钟 tick 补采；同一次访问的文字未变、截图无明显变化时省略重复快照，不再按天限制。Document 可带可见区域 WebP 或原生 JPEG，复用现有上传、R2 和 Dropbox 归档；
   截图继承正文的站点和密码页排除规则，文字脱敏不处理图片像素。
   `Settings.text_retention_days` 默认 7，7–3650 或永久（不设），同时适用于正文和截图文件。只有页面仍有效、
   Dropbox 已连接且最近一次没有失败、当前连接已确认快照全部 blob 的内容哈希、日期文件已写入并由 state.json 覆盖时，

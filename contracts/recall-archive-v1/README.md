@@ -80,7 +80,7 @@ the record belongs to; absent for a tombstone), `blobs` (`[]` when none), and on
 | Kind | `id` | `event_time` | Body | Blobs |
 | --- | --- | --- | --- | --- |
 | `visit` | `visits/<uuid>` | the visit's start | `visit`: URL, title, site, device ID and label, start, end, focus seconds, focus spans | none |
-| `document` | `documents/<uuid>` | the capture | `document`: visit, URL, title, description, site, device ID and label, capture time, text size, truncated | `text`: UTF-8, gzip; optional `screenshot`: WebP viewport |
+| `document` | `documents/<uuid>` | the capture | `document`: visit, URL, title, description, site, device ID and label, capture time, text size, truncated | `text`: UTF-8, gzip; optional `screenshot`: WebP or JPEG viewport |
 | `tombstone` | `tombstones/<uuid>` | the deletion | `tombstone`: `target`, `pages/<page id>` (or a record's id) | none |
 
 - **A visit** is one page in one tab, from its first focus to its last (it ends when the tab leaves the page or
@@ -88,7 +88,7 @@ the record belongs to; absent for a tombstone), `blobs` (`[]` when none), and on
   exist. A long visit is uploaded again while it grows: an upsert. A page of a sensitive kind (mail, chat, banking, a
   password manager, a console) is recorded by its site alone: the URL is the site's root and the title is empty.
 - **A document** is a page snapshot after ten seconds of focus or a later minute sample. Its `text` blob is the
-  page's scrubbed `innerText`, at most 64 KiB; an optional `screenshot` blob has media type `image/webp` and no
+  page's scrubbed `innerText`, at most 64 KiB; an optional `screenshot` blob has media type `image/webp` or `image/jpeg` and no
   content encoding. Optional `screenshot_width`/`screenshot_height` describe it. Image-only snapshots have an empty
   text blob. Identical snapshots within the same visit may be omitted; there is no daily limit. Existing text-only
   documents and their stored bytes remain valid.

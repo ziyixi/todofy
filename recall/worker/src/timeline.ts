@@ -13,6 +13,8 @@ export type Joined = VisitRow & { readonly page_id: string; readonly host_key: s
 export interface VisitQuery {
   /** A page's rowid, or null for every page. */
   readonly pageRowid: number | null;
+  /** One browser profile, or null for every device. */
+  readonly deviceId: string | null;
   readonly start: number | null;
   readonly end: number | null;
   readonly descending: boolean;
@@ -28,6 +30,10 @@ export function listVisits(store: Store, query: VisitQuery): Joined[] {
   if (query.pageRowid !== null) {
     conditions.push('v.page_rowid = ?');
     params.push(query.pageRowid);
+  }
+  if (query.deviceId !== null) {
+    conditions.push('v.device_id = ?');
+    params.push(query.deviceId);
   }
   if (query.start !== null) {
     conditions.push('v.start_ms >= ? AND v.end_ms > ?');

@@ -114,6 +114,7 @@ export function visit(name: string, spans: readonly (readonly [string, string])[
     title: `页面 ${name}`,
     site,
     deviceLabel: 'MacBook · 工作',
+    deviceId: '00000000-0000-4000-8000-0000000000aa',
     startTime: focus[0]?.startTime,
     endTime: focus[focus.length - 1]?.endTime,
     focusSeconds: Math.round(seconds),
@@ -265,6 +266,7 @@ export class FakeServer {
         const end = request.endTime === undefined ? Infinity : timestampMs(request.endTime)
         const own = this.visits
           .filter((item) => request.parent === 'pages/-' || item.name.startsWith(`${request.parent}/`))
+          .filter((item) => request.deviceId === '' || item.deviceId === request.deviceId)
           .filter((item) => timestampMs(item.startTime!) < end && timestampMs(item.endTime!) > start)
           .sort((a, b) => timestampMs(a.startTime!) - timestampMs(b.startTime!))
         if (request.orderBy === 'start_time desc') own.reverse()
@@ -275,7 +277,7 @@ export class FakeServer {
         const documents = [...this.documents.values()].filter((item) => item.name.startsWith(`${request.parent}/`)).sort((a, b) => timestampMs(b.captureTime!) - timestampMs(a.captureTime!))
         const { items, next } = slice(documents, request.pageSize || 20, request.pageToken)
         return Promise.resolve(create(ListDocumentsResponseSchema, {
-          documents: items.map((item) => create(DocumentSchema, { ...item, text: '', screenshotWebpBase64: '', contentError: '' })), nextPageToken: next,
+          documents: items.map((item) => create(DocumentSchema, { ...item, text: '', screenshotWebpBase64: '', screenshotJpegBase64: '', contentError: '' })), nextPageToken: next,
         }))
       },
       getDocument: (request) => Promise.resolve(this.documents.get(request.name) ?? notFound()),
@@ -353,6 +355,19 @@ export class FakeServer {
         this.backup = create(DropboxBackupSchema, { name: 'dropboxBackup', appKey: this.backup.appKey, syncedSeq: this.backup.syncedSeq, lastUploadTime: this.backup.lastUploadTime })
         return Promise.resolve(this.backup)
       },
+      createMachineToken: (request) => {
+        const previous = this.made.get(request.requestId)
+        if (previous !== undefined) return Promise.resolve(create(MachineTokenSchema, { ...previous, token: '' }))
+        const token = create(MachineTokenSchema, {
+          name: `machineTokens/${uuid()}`,
+          label: request.machineToken?.label ?? '',
+          token: `recall_ingest_${'N'.repeat(43)}`,
+          createTime: timestampFromMs(NOW),
+        })
+        this.made.set(request.requestId, token)
+        this.tokens = [...this.tokens, create(MachineTokenSchema, { ...token, token: '' })]
+        return Promise.resolve(token)
+      },
       regenerateMachineToken: (request) => {
         const route = request.name.split('/')[1] ?? ''
         if (!['ingest', 'export'].includes(route)) notFound()
@@ -372,7 +387,8 @@ export class FakeServer {
       deleteMachineToken: (request) => {
         const current = this.tokens.find((item) => item.name === request.name)
         if (current?.createTime === undefined) notFound()
-        this.tokens = [...this.tokens.filter((item) => item.name !== request.name), create(MachineTokenSchema, { name: request.name })]
+        this.tokens = this.tokens.filter((item) => item.name !== request.name)
+        if (['machineTokens/ingest', 'machineTokens/export'].includes(request.name)) this.tokens.push(create(MachineTokenSchema, { name: request.name }))
         return Promise.resolve(create(EmptySchema, {}))
       },
     }

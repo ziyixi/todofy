@@ -1,7 +1,8 @@
 // Real DO/R2: changed visual samples share the existing Document and feed, with history metadata separate from bytes.
 import { expect, it } from 'vitest';
-import { batch, document, page, uuid, WEBP, type ChangePage } from './data.ts';
-import { MINUTE, startHarness, T0 } from './harness.ts';
+import { batch, document, page, uuid, WEBP, JPEG, type ChangePage } from './data.ts';
+import { DAY, MINUTE, op, startHarness, T0 } from './harness.ts';
+import { FakeDropbox } from './fake-dropbox.ts';
 
 it('keeps screenshot snapshots, skips consecutive duplicates, and keeps text searchable after an image-only capture', async () => {
   const h = await startHarness();
@@ -38,6 +39,40 @@ it('keeps screenshot snapshots, skips consecutive duplicates, and keeps text sea
     if (stored === null) throw new Error('screenshot not in R2');
     expect(new Uint8Array(await stored.arrayBuffer())).toEqual(Uint8Array.from(atob(WEBP), (byte) => byte.charCodeAt(0)));
     expect(await r2.head(`blobs/2026/10/${uuid(3)}.webp`)).toBeNull();
+  } finally {
+    await h.dispose();
+  }
+});
+
+
+it('archives both devices together and reads JPEG and WebP after the hot window expires', async () => {
+  const dropbox = new FakeDropbox();
+  const h = await startHarness({ outbound: (request) => dropbox.handle(request) });
+  try {
+    const url = 'https://example.org/multiple-devices';
+    for (const [id, image, mediaType, label] of [[101, WEBP, 'image/webp', 'Desktop'], [102, JPEG, 'image/jpeg', 'Phone']] as const) {
+      const item = await document({ id: uuid(id), visitId: uuid(id + 10), url, captureMs: T0 - MINUTE, text: 'Synthetic shared page zephyr.', screenshot: image, screenshotMediaType: mediaType });
+      const response = await h.upload(batch([item], { device: { device_id: uuid(id + 20), label, ...(label === 'Phone' ? { mobile: true } : {}) } }));
+      expect(await response.json()).toMatchObject({ accepted_count: 1, rejected: [] });
+    }
+    const parent = `pages/${(await page(url)).pageId}`;
+    expect((await h.api.getPage({ name: parent })).documentCount).toBe(2);
+    const { authorizeUrl } = await h.api.connectDropboxBackup({ name: 'dropboxBackup', appKey: dropbox.appKey, requestId: op() });
+    expect((await h.fetch(`/api/dropbox/callback${dropbox.approve(authorizeUrl).query}`)).status).toBe(303);
+    const later = T0 + 8 * DAY;
+    await h.clock(later);
+    await h.step(later);
+    for (const [id, image, suffix, field] of [[101, WEBP, 'webp', 'screenshotWebpBase64'], [102, JPEG, 'jpg', 'screenshotJpegBase64']] as const) {
+      const path = `blobs/2026/10/${uuid(id)}.${suffix}`;
+      expect(dropbox.files.has(`/${path}`)).toBe(true);
+      expect(await (await h.r2()).head(path)).toBeNull();
+      expect(await h.api.getDocument({ name: `${parent}/documents/${uuid(id)}` })).toMatchObject({ textArchived: true, [field]: image, contentError: '' });
+    }
+    expect((await h.api.searchPages({ query: 'zephyr' })).results.map((item) => item.page)).toEqual([parent]);
+    const days = [...dropbox.files.entries()].filter(([path]) => path.startsWith('/changes/')).map(([, bytes]) => new TextDecoder().decode(bytes)).join('');
+    expect(days).toContain('"device_label":"Desktop"');
+    expect(days).toContain('"device_label":"Phone"');
+    expect(days).toContain('"media_type":"image/jpeg"');
   } finally {
     await h.dispose();
   }

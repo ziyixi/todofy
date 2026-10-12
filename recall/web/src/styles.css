@@ -1386,3 +1386,22 @@ h2.page-title {
     opacity: 1;
   }
 }
+
+.device-filter {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.device-filter select {
+  max-width: 100%;
+}
+
+.session-device {
+  min-width: 0;
+  max-width: 8rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

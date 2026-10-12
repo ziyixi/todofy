@@ -67,7 +67,7 @@ interface Device {
 interface Envelope {
   readonly batchId: string;
   readonly sentMs: number;
-  readonly device: Device & { readonly version: string; readonly queued: number; readonly lastError: string };
+  readonly device: Device & { readonly version: string; readonly queued: number; readonly lastError: string; readonly mobile: boolean };
   readonly items: readonly unknown[];
 }
 
@@ -108,7 +108,7 @@ interface DocumentPlan {
   readonly truncated: boolean;
   readonly stored: StoredText;
   readonly blobPath: string;
-  readonly screenshot: { readonly bytes: Uint8Array; readonly sha256: string; readonly path: string; readonly width: number; readonly height: number } | null;
+  readonly screenshot: { readonly bytes: Uint8Array; readonly sha256: string; readonly path: string; readonly width: number; readonly height: number; readonly mediaType: 'image/webp' | 'image/jpeg' } | null;
 }
 
 type Plan = VisitPlan | DocumentPlan;
@@ -194,7 +194,7 @@ function readEnvelope(text: string): Envelope {
   return {
     batchId: batch.batchId,
     sentMs: timestampMs(sentTime),
-    device: { id: device.deviceId, label: device.label, version: device.extensionVersion, queued: device.queuedCount, lastError: device.lastErrorCode },
+    device: { id: device.deviceId, label: device.label, version: device.extensionVersion, queued: device.queuedCount, lastError: device.lastErrorCode, mobile: device.mobile },
     items,
   };
 }
@@ -347,10 +347,12 @@ async function planDocument(item: DocumentItem, { envelope, patterns, ownHosts, 
   if (denyLevel(parsed.host, parsed.paths, patterns, ownHosts) !== 'record') return SKIP;
   const url = cutUrl(scrubUrl(item.url));
   const text = cutUtf8(scrubText(item.text), DOCUMENT_MAX_BYTES);
-  const image = item.screenshotWebpBase64;
+  if (item.screenshotWebpBase64 !== '' && item.screenshotJpegBase64 !== '') return INVALID;
+  const mediaType = item.screenshotJpegBase64 === '' ? 'image/webp' : 'image/jpeg';
+  const image = item.screenshotWebpBase64 || item.screenshotJpegBase64;
   const width = item.screenshotWidth;
   const height = item.screenshotHeight;
-  const bytes = image === '' ? null : screenshotBytes(image, width, height);
+  const bytes = image === '' ? null : screenshotBytes(image, width, height, mediaType);
   if ((image !== '' && bytes === null) || (image === '' && (width !== 0 || height !== 0)) || (image === '' && text.text.trim() === '')) return INVALID;
   const blobPath = textBlobPath(captureMs, item.id);
   const plan: DocumentPlan = {
@@ -369,7 +371,7 @@ async function planDocument(item: DocumentItem, { envelope, patterns, ownHosts, 
     truncated: item.textTruncated || text.truncated,
     stored: await storedText(text.text),
     blobPath,
-    screenshot: bytes === null ? null : { bytes, width, height, sha256: await sha256Hex(bytes), path: blobPath.replace('.txt.gz', '.webp') },
+    screenshot: bytes === null ? null : { bytes, width, height, mediaType, sha256: await sha256Hex(bytes), path: blobPath.replace('.txt.gz', mediaType === 'image/jpeg' ? '.jpg' : '.webp') },
   };
   const row = documentRow(plan, 1, 0, 0, envelope.device);
   return renders(() => documentChange({ ...row, page_id: plan.pageId, host_key: hostKey(plan.site) })) ? { kind: 'plan', plan } : INVALID;
@@ -640,7 +642,7 @@ export async function ingestBatch(ctx: IngestContext, body: ArrayBuffer): Promis
       if (outcome.kind === 'plan' && outcome.plan.kind === 'document') {
         await putText(ctx.bucket, outcome.plan.blobPath, outcome.plan.stored);
         const image = outcome.plan.screenshot;
-        if (image !== null) await ctx.bucket.put(blobKey(image.path), image.bytes, { sha256: image.sha256, httpMetadata: { contentType: 'image/webp' } });
+        if (image !== null) await ctx.bucket.put(blobKey(image.path), image.bytes, { sha256: image.sha256, httpMetadata: { contentType: image.mediaType } });
       }
     }
   } catch {
@@ -666,9 +668,9 @@ export async function ingestBatch(ctx: IngestContext, body: ArrayBuffer): Promis
     const totals: CounterDeltas = {};
     const skew = envelope.sentMs - now;
     store.run(
-      `INSERT INTO devices (id, label, extension_version, first_seen_ms, last_seen_ms, queued_count, last_error_code, clock_skew_s) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO devices (id, label, extension_version, first_seen_ms, last_seen_ms, queued_count, last_error_code, clock_skew_s, mobile) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT (id) DO UPDATE SET label = excluded.label, extension_version = excluded.extension_version, last_seen_ms = excluded.last_seen_ms,
-         queued_count = excluded.queued_count, last_error_code = excluded.last_error_code, clock_skew_s = excluded.clock_skew_s`,
+         queued_count = excluded.queued_count, last_error_code = excluded.last_error_code, clock_skew_s = excluded.clock_skew_s, mobile = excluded.mobile`,
       envelope.device.id,
       envelope.device.label,
       envelope.device.version,
@@ -677,6 +679,7 @@ export async function ingestBatch(ctx: IngestContext, body: ArrayBuffer): Promis
       envelope.device.queued,
       envelope.device.lastError,
       Math.abs(skew) > CLOCK_SKEW_RECORDED_MS ? Math.round(skew / 1000) : 0,
+      envelope.device.mobile ? 1 : 0,
     );
     let visits = 0;
     let longVisits = 0;

@@ -56,6 +56,9 @@ option java_package = "science.ziyixi.recall.ui.v1";
 // (-- api-linter: core::0121::resource-must-support-list=disabled
 //     aip.dev/not-precedent: SearchPages is the pages' list: a search with filters, which without a query lists the
 //     pages by their latest visit. A second, plain page list would say nothing more. --)
+// (-- api-linter: core::0121::resource-must-support-get=disabled
+//     aip.dev/not-precedent: ServiceStatus already lists every credential without its secret; a separate Get
+//     would return the same metadata and must never return a stored bearer. --)
 service RecallUiService {
   option (google.api.default_host) = "recall.ziyixi.science";
 
@@ -176,9 +179,22 @@ service RecallUiService {
     };
   }
 
+  // Creates an independent upload credential. Only its label is input; the server chooses its UUID and shows the
+  // token once. At most 16 named upload credentials; existing route tokens remain valid.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc CreateMachineToken(CreateMachineTokenRequest) returns (MachineToken) {
+    option (google.api.http) = {
+      post: "/api/v1/machineTokens"
+      body: "machine_token"
+    };
+    option (google.api.method_signature) = "machine_token";
+  }
+
   // Makes a new machine token (AIP-136) and answers it, the one time it is shown (MachineToken.token). recall keeps
   // its SHA-256 only. The token it replaces keeps working for 24 hours, or stops at once with `revoke_previous`.
   // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
   rpc RegenerateMachineToken(RegenerateMachineTokenRequest) returns (MachineToken) {
     option (google.api.http) = {
       post: "/api/v1/{name=machineTokens/*}:regenerate"
@@ -186,8 +202,8 @@ service RecallUiService {
     };
   }
 
-  // Deletes a machine token (AIP-135): its route stops accepting the current and the previous token at once (within a
-  // minute everywhere) and answers 503 until a new one is made, unless a Worker secret holds a digest.
+  // Deletes a machine token (AIP-135): the named credential or the legacy current/previous tokens stop working
+  // within one minute. Other upload credentials and Worker-secret digests remain valid.
   // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
   // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
   rpc DeleteMachineToken(DeleteMachineTokenRequest) returns (google.protobuf.Empty) {
@@ -279,8 +295,8 @@ message GetVisitRequest {
 
 // Input of ListVisits.
 // (-- api-linter: core::0132::request-unknown-fields=disabled
-//     aip.dev/not-precedent: start_time and end_time are the one restriction a visit list takes (the timeline's day);
-//     two typed fields instead of an AIP-160 filter language that would hold nothing else. --)
+//     aip.dev/not-precedent: typed time bounds and a device UUID are the timeline's only filters;
+//     no expression language is needed. --)
 message ListVisitsRequest {
   // pages/{page}, or `pages/-` for every page.
   string parent = 1 [
@@ -297,6 +313,8 @@ message ListVisitsRequest {
   google.protobuf.Timestamp start_time = 5 [(google.api.field_behavior) = OPTIONAL];
   // The range's end, after start_time; unset: no upper bound.
   google.protobuf.Timestamp end_time = 6 [(google.api.field_behavior) = OPTIONAL];
+  // Only this browser profile's visits; a lower-case UUID. Empty includes every device.
+  string device_id = 7 [(google.api.field_behavior) = OPTIONAL];
 }
 
 // Output of ListVisits.
@@ -437,6 +455,19 @@ message DisconnectDropboxBackupRequest {
   ];
 }
 
+// Input of CreateMachineToken.
+// (-- api-linter: core::0133::request-id-field=disabled
+//     aip.dev/not-precedent: credential UUIDs are server-generated; callers supply only a human label. --)
+message CreateMachineTokenRequest {
+  // Only label is input. The server generates the name and token.
+  MachineToken machine_token = 1 [(google.api.field_behavior) = REQUIRED];
+  // The idempotency key (AIP-155), a query parameter. Replays return the resource without its one-time token.
+  string request_id = 2 [
+    (google.api.field_info).format = UUID4,
+    (google.api.field_behavior) = OPTIONAL
+  ];
+}
+
 // Input of RegenerateMachineToken.
 message RegenerateMachineTokenRequest {
   // machineTokens/ingest or machineTokens/export.
@@ -446,7 +477,7 @@ message RegenerateMachineTokenRequest {
   ];
   // The token being replaced stops working at once (a token that leaked), instead of 24 hours later.
   bool revoke_previous = 2 [(google.api.field_behavior) = OPTIONAL];
-  // The idempotency key (AIP-155), in the body; see RecallUiService. A repeated request answers the same token.
+  // The idempotency key (AIP-155), in the body; see RecallUiService. A replay answers metadata without the token.
   string request_id = 3 [
     (google.api.field_info).format = UUID4,
     (google.api.field_behavior) = OPTIONAL
@@ -455,7 +486,7 @@ message RegenerateMachineTokenRequest {
 
 // Input of DeleteMachineToken.
 message DeleteMachineTokenRequest {
-  // machineTokens/ingest or machineTokens/export.
+  // machineTokens/ingest, machineTokens/export, or machineTokens/{uuid}.
   string name = 1 [
     (google.api.field_behavior) = REQUIRED,
     (google.api.resource_reference).type = "recall.ziyixi.science/MachineToken"

@@ -77,7 +77,7 @@ class Area {
   }
 }
 
-export type ScriptAnswer = (target: { tabId: number; documentIds?: string[] }) => unknown;
+export type ScriptAnswer = (target: { tabId: number; documentIds?: string[]; files?: string[] }) => unknown;
 
 export class FakeBrowser {
   readonly tabs = new Map<number, FakeTab>();
@@ -214,7 +214,7 @@ export class FakeBrowser {
       executeScript: async (injection: { target: { tabId: number; documentIds?: string[] }; files?: string[] }) => {
         this.scriptCalls.push({ ...injection.target, ...(injection.files === undefined ? {} : { files: injection.files }) });
         await Promise.resolve();
-        const answer = this.script(injection.target);
+        const answer = this.script({ ...injection.target, ...(injection.files === undefined ? {} : { files: injection.files }) });
         const result = typeof answer === 'object' && answer !== null ? { url: this.tabs.get(injection.target.tabId)?.url ?? '', ...answer } : answer;
         return [{ frameId: 0, documentId: injection.target.documentIds?.[0] ?? '', result }];
       },

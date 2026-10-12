@@ -2,7 +2,8 @@
  * The service status in the header's words (../../docs/design.md §8.3): the latest upload, or the device that stopped
  * uploading; the Dropbox backup, not connected or how far it fell behind; storage near its budget. Problems in the
  * warning color, as ops-v1 raises them (§9): a device counts while it was heard from in the last 30 days, so a retired
- * one stops warning; the backup is late once a change has waited a day, counted from the connection at the earliest.
+ * one stops warning. Phones do not warn merely for being closed. The backup is late once a change has waited a day,
+ * counted from the connection at the earliest.
  * The feed's own consumers are shown in 设置 only.
  */
 import type { Timestamp } from '@ziyixi/proto/protobuf/wkt'
@@ -45,7 +46,7 @@ export function statusParts(status: ServiceStatus, now: number): HTMLElement[] {
   const problem = (text: string) => el('span', { class: 'problem' }, text)
   const watched = (at: number | null) => at !== null && now - at <= WATCHED_MS
   const parts: HTMLElement[] = []
-  const stale = status.devices.filter((device) => device.stale && watched(ms(device.lastHeartbeatTime)))
+  const stale = status.devices.filter((device) => device.stale && !device.mobile && watched(ms(device.lastHeartbeatTime)))
   const latest = Math.max(...status.devices.map((device) => ms(device.lastHeartbeatTime) ?? 0))
   if (stale.length > 0) parts.push(...stale.map((device) => problem(`${device.label} ${span(now - (ms(device.lastHeartbeatTime) ?? now))}没有上传`)))
   else if (status.devices.length > 0) parts.push(quiet(`上传 ${ago(latest, now)}`))

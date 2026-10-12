@@ -1123,3 +1123,15 @@ Enter, focus lost on redraws). Every finding was taken; where its fix was a choi
   always.
 - **The read budget**: 1,500,000 rows a day for the searches, and the feed stopping at 1,000,000, so that an archive
   catching up never takes the owner's searches for the day.
+
+
+## Mobile and multiple devices (October 12)
+
+Each browser install keeps its own device UUID and upload queue. Named ingest credentials can be created and
+stopped independently while the existing shared credential remains valid. Device identity remains client-reported;
+credential labels are not a pairing protocol. Timeline filtering uses the stored device ID, not its editable label.
+Orion uses a file-install build of the same capture core and probes top-frame visibility/document identity on iOS.
+Native JPEG is accepted when WebP encoding is unavailable, within the same byte/pixel limits. Both formats use
+the existing R2, feed and single Dropbox archive; hot removal requires the same archive confirmations.
+Mobile inactivity alone is not an Ops warning. Installation, foreground/background and update verification are
+kept in the short [mobile runbook](mobile.md); no phone compatibility is claimed from fake browser tests alone.

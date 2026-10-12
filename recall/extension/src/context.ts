@@ -5,6 +5,8 @@
  */
 
 export interface Context {
+  /** True only for the Orion build running on iOS, never inferred from a missing API. */
+  readonly mobile?: boolean;
   /** Chrome's extension APIs. */
   readonly chrome: typeof chrome;
   /** The extension's IndexedDB (db.ts): the open visits, the outbox and the token. */

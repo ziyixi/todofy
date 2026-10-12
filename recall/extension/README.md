@@ -1,4 +1,4 @@
-# recall's Chrome extension
+# recall browser extension
 
 Records each page's visits with its actual focus time, and a text/viewport snapshot after ten seconds, then on the
 minute tick while focused. Unchanged snapshots in the same visit are skipped; empty text or a failed capture can be
@@ -9,6 +9,7 @@ public key in `src/manifest.json`; the private half was never kept).
 | File | What |
 | --- | --- |
 | `src/sw.ts` | The service worker: every listener at the top level, one queue for the state, the one-minute `tick` |
+| `src/browser.ts`, `src/probe-script.ts` | Orion/iOS top-frame identity and visibility, MV2 file injection |
 | `src/focus.ts`, `src/visits.ts` | The focus state machine and visits (§3.2, §3.3) |
 | `src/capture.ts`, `src/capture-script.ts`, `src/page-text.ts` | Captures and the script injected into one document (§3.4) |
 | `src/page.ts` | What is recorded of a URL and title, through `../shared/` (§3.5-§3.7) |
@@ -31,7 +32,25 @@ is pasted into the installed extension, so a download cannot write to recall. CI
 branches included, as the artifact `recall-extension-<sha>` for 30 days; the release job publishes that artifact, so a
 release holds exactly the files CI tested.
 
-## Install and update
+## iPhone: Orion
+
+The same CI build also produces `recall-orion-v<version>.zip`. Download this file on the iPhone, then Orion →
+**••• → Extensions → + → file-based extension**, and select the ZIP. In Recall's web settings, add a separate
+plugin token named `iPhone`; paste it into the extension's settings and save. The default device label is
+`iPhone · Orion`. Keep the Mac's existing token.
+
+The Orion package uses the same capture/queue code with a nonpersistent MV2 background script. A dynamically
+injected top-frame probe provides a per-document identity and reports `visibilitychange` / `pagehide` / `pageshow`.
+Only a visible foreground document records focus; no missing desktop API is treated as proof of activity.
+The browser can suspend the extension while another app is open or the phone is locked. Returning resumes the
+existing queue; phone batches flush within a minute while active. This does not record activity in other apps.
+
+Screenshots use native WebP where supported, otherwise verified native JPEG, with the same size and deduplication
+limits. Settings show the latest sampling outcome, screenshot format/failure, and queued uploads. iOS capture
+support still needs the owner's one-time device check; tests over a fake browser do not prove Orion behavior.
+To update the phone, install the newer Orion ZIP; there is no unpacked-folder self-update on iOS.
+
+## Mac: install and update
 
 Installing is the agent's part, on the owner's Mac (from `recall/extension`):
 
@@ -45,7 +64,7 @@ or from a build of its own:
 
 ```sh
 npm ci
-npm run build                 # dist/extension/ (the unpacked extension) and dist/recall-extension-<commit>.zip
+npm run build                 # desktop folder/ZIP, plus dist/orion/ and dist/recall-orion-<commit>.zip
 npm run install-extension     # into ~/recall-extension (or: -- <folder or zip> [--target <folder>])
 ```
 

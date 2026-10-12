@@ -120,6 +120,16 @@ describe('正文', () => {
     expect(fake.calls.filter((call) => /\/documents\//u.test(call.path))).toHaveLength(1)
   })
 
+  it('displays an archived JPEG screenshot with its actual media type', async () => {
+    const fake = new FakeServer()
+    const item = page('phone')
+    fake.addText(item, textOf('phone', '合成手机页面', { screenshotJpegBase64: '/9j/2Q==', screenshotWidth: 320, screenshotHeight: 640, textArchived: true }))
+    fake.pages = [item]
+    const root = await open(fake, `/pages/${pageId('phone')}`)
+    expect(root.querySelector('img.snapshot-image')?.getAttribute('src')).toBe('data:image/jpeg;base64,/9j/2Q==')
+    expect(root.querySelector('.snapshot-content')?.textContent).toContain('内容来源：Dropbox 归档')
+  })
+
   it.each([
     ['archive_not_connected', '内容已归档，请在设置中连接 Dropbox 后重试。'],
     ['archive_other_target', '这份内容在原来的 Dropbox 应用或账户中，请连接原归档后重试。'],

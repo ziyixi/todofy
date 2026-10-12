@@ -111,8 +111,9 @@ function documentCard(document: Document, words: readonly string[], now: number,
     window.document.addEventListener('keydown', onKey)
     cleanup = () => window.document.removeEventListener('keydown', onKey)
   }
-  const picture = document.screenshotWebpBase64 === '' ? null : el('img', {
-    class: 'snapshot-image', src: `data:image/webp;base64,${document.screenshotWebpBase64}`, alt: '采集时的可见页面截图',
+  const image = document.screenshotWebpBase64 !== '' ? `data:image/webp;base64,${document.screenshotWebpBase64}` : document.screenshotJpegBase64 !== '' ? `data:image/jpeg;base64,${document.screenshotJpegBase64}` : ''
+  const picture = image === '' ? null : el('img', {
+    class: 'snapshot-image', src: image, alt: '采集时的可见页面截图',
     width: String(document.screenshotWidth), height: String(document.screenshotHeight),
   })
   return {

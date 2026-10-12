@@ -9,6 +9,14 @@ Its old waiting lists and release identities are historical, not instructions to
 
 ## Current work
 
+Recall mobile and multi-device preparation is in progress on `codex/recall-mobile-devices`: named upload tokens,
+device-aware timeline/status, an Orion file-install build, and native JPEG fallback for browsers without WebP encoding.
+The existing Chrome identity, shared token, privacy rules, snapshot deduplication and unified Dropbox archive remain.
+Local Worker, UI, extension, proto and smoke checks passed; branch CI and release are the remaining preparation.
+Actual iPhone compatibility remains an owner acceptance step in [the mobile runbook](recall/docs/mobile.md).
+No new service or dependency. The measured 125.2 KiB Worker bundle intentionally raises its code-size budget
+from 125 to 130 KiB; runtime, daily write and monetary budgets are unchanged.
+
 Recall's personal snapshot update is deployed at `de4d561`: first capture after ten seconds, minute sampling,
 viewport WebP, seven-day R2 files with FTS kept, and Dropbox reads for archived content. With unchanged text,
 the approved 32×32 comparison skips minor picture changes and compares against the last saved image.

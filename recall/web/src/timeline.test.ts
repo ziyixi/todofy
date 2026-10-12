@@ -6,7 +6,7 @@
  */
 import { onTestFinished, vi } from 'vitest'
 import { homeSlot } from './sessions.ts'
-import { FakeServer, page, pageId, visit } from './test/fakeServer.ts'
+import { FakeServer, page, pageId, visit, settle } from './test/fakeServer.ts'
 import { buttonNamed, open, press } from './test/helpers.ts'
 
 /** A day of synthetic browsing on 9 October: github.com in two sessions, docs, and two short visits at 11. */
@@ -36,6 +36,34 @@ describe('a day', () => {
     expect(asked?.searchParams.get('end_time')).toBe('2026-10-09T16:00:00Z')
     expect(asked?.searchParams.get('page_size')).toBe('500')
     expect(asked?.searchParams.get('order_by')).toBe('start_time')
+  })
+
+  it('filters every server page by device and keeps the selection when changing days', async () => {
+    const fake = new FakeServer()
+    const phone = '00000000-0000-4000-8000-0000000000bb'
+    fake.status = { devices: [{
+      $typeName: 'recall.ui.v1.DeviceStatus', deviceId: phone, label: 'iPhone', mobile: true,
+      extensionVersion: '1', queuedCount: 0, lastErrorCode: '', stale: false, clockSkewSeconds: 0,
+    }] }
+    fake.visits = [
+      ...Array.from({ length: 600 }, (_, i) => visit(`desktop${String(i)}`, [['09:00', '09:10']])),
+      ...Array.from({ length: 501 }, (_, i) => visit(`phone${String(i)}`, [['10:00', '10:10']], { deviceId: phone, deviceLabel: 'iPhone' })),
+    ]
+    const root = await open(fake, `/?device=${phone}`)
+    const requests = fake.searches('/api/v1/pages/-/visits')
+    expect(requests.map((request) => [request.searchParams.get('device_id'), request.searchParams.get('page_token')])).toEqual([[phone, null], [phone, '500']])
+    expect(root.querySelector('.day-summary')?.textContent).toContain('501 个页面')
+    expect(root.querySelector<HTMLSelectElement>('#timeline-device')?.value).toBe(phone)
+    expect(root.querySelector('.session-device')?.textContent).toBe('iPhone')
+    buttonNamed(root, '前一天').click()
+    await settle()
+    expect(window.location.search).toBe(`?device=${phone}`)
+    expect(fake.searches('/api/v1/pages/-/visits').every((request) => request.searchParams.get('device_id') === phone)).toBe(true)
+    const select = root.querySelector<HTMLSelectElement>('#timeline-device')!
+    select.value = ''
+    select.dispatchEvent(new Event('change'))
+    await settle()
+    expect(window.location.search).toBe('')
   })
 
   it('sums up the day and searches within it', async () => {

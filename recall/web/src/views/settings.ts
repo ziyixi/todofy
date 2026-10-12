@@ -2,7 +2,7 @@
  * 设置 (`/settings`, ../../docs/design.md §8.7): five cards and the build, in the owner's words (a code stays in a
  * tooltip only).
  *
- * - 设备: each device's label, latest upload (warning after 24 hours, with what to check), version, outbox, its last
+ * - 设备: each device's label, latest upload (desktop warning after 24 hours; mobile foreground-only note), version, outbox, its last
  *   error as a sentence that says what to do, and clock skew; without one, the three steps to connect one (clicks
  *   only); items uploads lost in the last 7 days, and items waiting for a recall that reads them.
  * - 插件口令: the extension's token: 生成 or 重新生成 (the old one works 24 hours more), ⋯ to revoke the old one at once
@@ -21,15 +21,15 @@
  *
  * The retention window and the lists share the settings' etag: each saves on top of the other's last change.
  */
-import { create } from '@ziyixi/proto/protobuf'
-import { MachineTokenSchema, type ArchiveConsumer, type DropboxBackup, type MachineToken, type ServiceStatus, type Settings } from '@ziyixi/proto/recall/ui/v1/status_pb'
+import type { ArchiveConsumer, DropboxBackup, ServiceStatus, Settings } from '@ziyixi/proto/recall/ui/v1/status_pb'
 import { api } from '../api.ts'
-import { card, disclosure, kpi, menu, meter, segmented } from '../components.ts'
+import { card, disclosure, kpi, meter, segmented } from '../components.ts'
 import { button, el, fill, toast } from '../dom.ts'
 import { ago, compact, count, monthText, ms, span } from '../format.ts'
 import type { ViewContext } from '../app.ts'
 import { backupLate, behindText, consumerName, late, STORAGE_HIGH_MIB } from '../health.ts'
 import { act, frame } from './common.ts'
+import { paintTokens } from './tokens.ts'
 
 /** R2's free storage, shared by every app of the account (10 GB-month). */
 const R2_FREE_MB = 10 * 1024
@@ -132,7 +132,7 @@ function devicesCard(status: ServiceStatus, now: number): HTMLElement {
       el(
         'ol',
         { class: 'steps' },
-        el('li', {}, '在下面的 插件口令 里点 生成，复制口令'),
+        el('li', {}, '在下面的 插件口令 填写设备名，点 添加设备口令 并复制'),
         el('li', {}, '在 Chrome 打开 ', el('code', { class: 'mono' }, 'chrome://extensions'), '，打开 开发者模式，点 加载已解压的扩展程序，选扩展的文件夹'),
         el('li', {}, '在扩展的选项里粘贴口令，填上设备名（服务器地址已经填好）'),
       ),
@@ -148,12 +148,14 @@ function devicesCard(status: ServiceStatus, now: number): HTMLElement {
       ...status.devices.map((device) => {
         const heard = ms(device.lastHeartbeatTime)
         const skew = device.clockSkewSeconds
+        const stale = device.stale && !device.mobile
         const [error, urgent] = device.lastErrorCode === '' ? ['', false] : (DEVICE_ERRORS[device.lastErrorCode] ?? ['扩展报告了一个错误', false])
         return el(
           'li',
           {},
-          el('div', { class: 'row-head' }, el('span', { class: 'row-title' }, device.label), el('span', { class: device.stale ? 'meta warn' : 'meta' }, `最近上传 ${heard === null ? '—' : ago(heard, now)}`)),
-          device.stale ? el('p', { class: 'hint warn' }, '检查 Chrome 是否开着、扩展是否启用（开发者模式）') : null,
+          el('div', { class: 'row-head' }, el('span', { class: 'row-title' }, device.label), el('span', { class: stale ? 'meta warn' : 'meta' }, `最近上传 ${heard === null ? '—' : ago(heard, now)}`)),
+          stale ? el('p', { class: 'hint warn' }, '检查 Chrome 是否开着、扩展是否启用（开发者模式）') : null,
+          device.mobile ? el('p', { class: 'hint' }, '手机仅在浏览器前台运行，打开后继续采集和上传。') : null,
           error === '' ? null : el('p', { class: urgent ? 'hint warn' : 'hint', title: device.lastErrorCode }, error),
           el(
             'p',
@@ -166,118 +168,6 @@ function devicesCard(status: ServiceStatus, now: number): HTMLElement {
       }),
     ),
     ...notes,
-  )
-}
-
-/** The two machine tokens' words. */
-const TOKEN_WORDS = {
-  ingest: {
-    name: '插件口令',
-    none: '还没有口令：生成后粘贴到扩展的选项里，扩展才能上传。',
-    regenerate: '重新生成插件口令？旧口令 24 小时内仍可用，在这之前把新口令粘贴到扩展的选项里。',
-    revoke: '旧口令会立即失效，扩展换上新口令前无法上传。继续？',
-    remove: '停用插件口令？扩展会立即无法上传，直到你再生成一个。',
-    secret: '另有一个在 Worker 密钥里设置的口令同样有效，只有删除那个密钥才能停用它。',
-  },
-  export: {
-    name: '导出口令',
-    none: '只给通过变更 feed 读取全部记录的程序用；Dropbox 备份不需要它。',
-    regenerate: '重新生成导出口令？旧口令 24 小时内仍可用。',
-    revoke: '旧导出口令会立即失效。继续？',
-    remove: '停用导出口令？读取变更 feed 的程序会立即失去访问。',
-    secret: '另有一个在 Worker 密钥里设置的导出口令同样有效，只有删除那个密钥才能停用它。',
-  },
-} as const
-
-type Route = keyof typeof TOKEN_WORDS
-
-/** The 插件口令 card's body: the extension's token, and the optional export token folded under it. */
-function paintTokens(ctx: ViewContext, box: HTMLElement, tokens: readonly MachineToken[], shown: { readonly route: Route; readonly token: string } | null = null): void {
-  const of = (route: Route) => tokens.find((item) => item.name === `machineTokens/${route}`) ?? create(MachineTokenSchema, { name: `machineTokens/${route}` })
-  const repaint = (route: Route, next: MachineToken, token: string | null) => {
-    paintTokens(ctx, box, [...tokens.filter((item) => item.name !== next.name), next], token === null || token === '' ? null : { route, token })
-  }
-  const controls = (route: Route): HTMLElement[] => {
-    const token = of(route)
-    const words = TOKEN_WORDS[route]
-    const made = ms(token.createTime)
-    const regenerate = async (revokePrevious: boolean) => {
-      await act(
-        (requestId) => api.regenerateMachineToken({ name: token.name, revokePrevious, requestId }),
-        `已生成新的${words.name}`,
-        (answer) => {
-          // A repeated request answers without the token (it is shown once): the owner makes another.
-          if (answer.token === '') toast(`没有收到新${words.name}：请再生成一次`)
-          repaint(route, answer, answer.token)
-        },
-      )
-    }
-    const remove = async () => {
-      if (!ctx.host.confirm(words.remove)) return
-      await act((requestId) => api.deleteMachineToken({ name: token.name, requestId }), `已停用${words.name}`, () => {
-        repaint(route, create(MachineTokenSchema, { name: token.name, workerSecret: token.workerSecret }), null)
-      })
-    }
-    const until = ms(token.previousExpireTime)
-    const parts: HTMLElement[] = []
-    if (made === null) {
-      parts.push(el('p', { class: 'hint' }, words.none), el('div', { class: 'actions' }, button('生成', () => void regenerate(false))))
-    } else {
-      parts.push(
-        el(
-          'div',
-          { class: 'row-head' },
-          el('span', { class: 'row-title' }, words.name),
-          el('span', { class: 'meta' }, `${ago(made, ctx.host.now())}生成`),
-          menu(`${words.name}的更多操作`, [
-            [
-              '旧口令泄露：立即作废并重新生成',
-              () => {
-                if (ctx.host.confirm(words.revoke)) void regenerate(true)
-              },
-              'danger',
-            ],
-            ['停用', () => void remove(), 'danger'],
-          ]),
-        ),
-      )
-      if (until !== null) parts.push(el('p', { class: 'hint' }, `旧口令 ${span(until - ctx.host.now())}内仍可用`))
-      parts.push(
-        el(
-          'div',
-          { class: 'actions' },
-          button('重新生成', () => {
-            if (ctx.host.confirm(words.regenerate)) void regenerate(false)
-          }),
-        ),
-      )
-    }
-    if (token.workerSecret) parts.push(el('p', { class: 'hint' }, words.secret))
-    if (shown !== null && shown.route === route) parts.push(onceBox(shown.token, words.name))
-    return parts
-  }
-  fill(box, ...controls('ingest'), disclosure('导出口令（可选）', ...controls('export')))
-  if (shown?.route === 'export') box.querySelector('details')?.setAttribute('open', '')
-}
-
-/** A new token, shown this once: read-only, selected, with 复制 and what to do with it. */
-function onceBox(token: string, name: string): HTMLElement {
-  const field = el('input', { type: 'text', readonly: true, value: token, class: 'mono', 'aria-label': `新的${name}`, spellcheck: 'false', autocomplete: 'off' })
-  const copy = async () => {
-    field.select()
-    try {
-      await navigator.clipboard.writeText(token)
-      toast(`已复制${name}`)
-    } catch {
-      toast('没能复制：已选中口令，请手动复制')
-    }
-  }
-  return el(
-    'div',
-    { class: 'token-once', role: 'note' },
-    el('p', { class: 'hint warn' }, `新的${name}只显示这一次：现在复制，粘贴到扩展的选项里。离开或刷新这一页后不会再显示。`),
-    el('div', { class: 'actions' }, field, button('复制', () => void copy())),
-    el('p', { class: 'hint' }, `扩展里的服务器地址：${window.location.origin}`),
   )
 }
 

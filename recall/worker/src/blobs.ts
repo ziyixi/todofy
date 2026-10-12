@@ -25,7 +25,7 @@ export function blobKey(path: string): string {
 
 /** The document UUID a text blob path names, or null. */
 export function documentIdOfPath(path: string): string | null {
-  return (TEXT_BLOB_PATH.test(path) || /^[0-9]{4}\/(0[1-9]|1[0-2])\/[0-9a-f-]{36}\.webp$/.test(path)) ? (path.split('/')[2] ?? '').slice(0, 36) : null;
+  return (TEXT_BLOB_PATH.test(path) || /^[0-9]{4}\/(0[1-9]|1[0-2])\/[0-9a-f-]{36}\.(?:webp|jpg)$/.test(path)) ? (path.split('/')[2] ?? '').slice(0, 36) : null;
 }
 
 export function hex(bytes: ArrayBuffer | Uint8Array): string {

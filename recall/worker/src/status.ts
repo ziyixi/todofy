@@ -16,7 +16,7 @@ import { DAILY_READ_BUDGET, DAILY_ROW_BUDGET, DAY, MIB, REJECTED_WINDOW_DAYS, ST
 import { time } from './model.ts';
 import { readRetention } from './settings.ts';
 import { utcDay, type ConsumerRow, type DeviceRow, type Store } from './store.ts';
-import { TOKEN_ROUTES, tokenMessage, type TokenRoute } from './tokens.ts';
+import { namedTokenMessage, namedTokens, TOKEN_ROUTES, tokenMessage, type TokenRoute } from './tokens.ts';
 
 export function devices(store: Store): DeviceRow[] {
   return store.all<DeviceRow>(`SELECT * FROM devices ORDER BY last_seen_ms DESC, id`);
@@ -52,7 +52,8 @@ function deviceMessage(row: DeviceRow, now: number): DeviceStatus {
     lastHeartbeatTime: time(row.last_seen_ms),
     queuedCount: row.queued_count,
     lastErrorCode: row.last_error_code,
-    stale: now - row.last_seen_ms > STALE_MS,
+    stale: row.mobile === 0 && now - row.last_seen_ms > STALE_MS,
+    mobile: row.mobile !== 0,
     clockSkewSeconds: row.clock_skew_s,
   });
 }
@@ -98,7 +99,7 @@ export function serviceStatus(store: Store, now: number, build: string, secrets:
     build,
     rejectedItems: rejected,
     dropboxBackup: backupMessage(store),
-    machineTokens: TOKEN_ROUTES.map((route) => tokenMessage(store, route, now, secrets[route])),
+    machineTokens: [...TOKEN_ROUTES.map((route) => tokenMessage(store, route, now, secrets[route])), ...namedTokens(store).map(namedTokenMessage)],
     textRetentionDays: retention ?? 0,
     archivedTextCount: store.counter('archived_count'),
     textRetentionPausedReason: retention === null ? '' : retentionPause(store),

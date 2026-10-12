@@ -27,8 +27,8 @@ describe('设备', () => {
     const fake = new FakeServer()
     fake.status = {
       devices: [
-        { $typeName: 'recall.ui.v1.DeviceStatus', deviceId: 'a', label: 'MacBook · 工作', extensionVersion: '2026.1009.1200', lastHeartbeatTime: timestampFromMs(NOW - 3 * MINUTE), queuedCount: 0, lastErrorCode: '', stale: false, clockSkewSeconds: 3600 },
-        { $typeName: 'recall.ui.v1.DeviceStatus', deviceId: 'b', label: 'Mini · 家', extensionVersion: '2026.1001.900', lastHeartbeatTime: timestampFromMs(NOW - 50 * HOUR), queuedCount: 12, lastErrorCode: 'outbox_full', stale: true, clockSkewSeconds: 0 },
+        { $typeName: 'recall.ui.v1.DeviceStatus', deviceId: 'a', label: 'MacBook · 工作', extensionVersion: '2026.1009.1200', lastHeartbeatTime: timestampFromMs(NOW - 3 * MINUTE), queuedCount: 0, lastErrorCode: '', stale: false, mobile: false, clockSkewSeconds: 3600 },
+        { $typeName: 'recall.ui.v1.DeviceStatus', deviceId: 'b', label: 'Mini · 家', extensionVersion: '2026.1001.900', lastHeartbeatTime: timestampFromMs(NOW - 50 * HOUR), queuedCount: 12, lastErrorCode: 'outbox_full', stale: true, mobile: false, clockSkewSeconds: 0 },
       ],
       rejectedItems: [
         { $typeName: 'recall.ui.v1.RejectedItems', reason: 'invalid_item', count: 3, lastTime: timestampFromMs(NOW - HOUR) },
@@ -52,12 +52,29 @@ describe('设备', () => {
     ])
   })
 
+  it('shows a phone’s pending uploads and error without a warning for being closed', async () => {
+    const fake = new FakeServer()
+    fake.status = { devices: [{
+      $typeName: 'recall.ui.v1.DeviceStatus', deviceId: 'phone', label: 'iPhone', mobile: true,
+      extensionVersion: '1', queuedCount: 4, lastErrorCode: 'upload_failed', stale: true,
+      clockSkewSeconds: 0, lastHeartbeatTime: timestampFromMs(NOW - 50 * HOUR),
+    }] }
+    const root = await open(fake, '/settings')
+    const phone = card(root, '设备').querySelector('.rows > li')
+    expect(phone?.textContent).toContain('最近上传 2 天前')
+    expect(phone?.textContent).toContain('手机仅在浏览器前台运行，打开后继续采集和上传。')
+    expect(phone?.textContent).toContain('待上传 4')
+    expect(phone?.textContent).toContain('上传失败过，扩展会自动重试')
+    expect(phone?.querySelector('.warn')).toBeNull()
+    expect(root.querySelector('.status-line .problem')).toBeNull()
+  })
+
   it('without a device, gives the three steps to connect one, clicks only', async () => {
     const fake = new FakeServer()
     fake.status = { devices: [] }
     const root = await open(fake, '/settings')
     expect([...card(root, '设备').querySelectorAll('ol.steps li')].map((node) => node.textContent)).toEqual([
-      '在下面的 插件口令 里点 生成，复制口令',
+      '在下面的 插件口令 填写设备名，点 添加设备口令 并复制',
       '在 Chrome 打开 chrome://extensions，打开 开发者模式，点 加载已解压的扩展程序，选扩展的文件夹',
       '在扩展的选项里粘贴口令，填上设备名（服务器地址已经填好）',
     ])
@@ -65,12 +82,38 @@ describe('设备', () => {
 })
 
 describe('插件口令', () => {
+  it('adds independent device credentials, shows each secret once, and stops only the chosen one', async () => {
+    const fake = new FakeServer()
+    const phone = create(MachineTokenSchema, { name: 'machineTokens/00000000-0000-4000-8000-0000000000bb', label: 'iPhone', createTime: timestampFromMs(NOW - HOUR) })
+    fake.tokens.push(phone)
+    const host = testHost()
+    const root = await open(fake, '/settings', host)
+    const tokens = card(root, '插件口令')
+    const field = tokens.querySelector<HTMLInputElement>('input[aria-label="口令名称"]')!
+    type(field, ' iPad ')
+    buttonNamed(tokens, '添加设备口令').click()
+    await settled()
+    const call = fake.calls.find((item) => item.method === 'POST' && item.path.startsWith('/api/v1/machineTokens?'))
+    expect(call?.body).toEqual({ label: 'iPad' })
+    expect(call?.path).toMatch(/request_id=[0-9a-f-]{36}/u)
+    expect(call?.headers['x-csrf-token']).toBe('csrf-token')
+    expect(tokens.querySelector('.named-tokens .token-once input')?.getAttribute('value')).toBe(`recall_ingest_${'N'.repeat(43)}`)
+    expect([...tokens.querySelectorAll('.named-tokens .row-title')].map((row) => row.textContent)).toEqual(['iPhone', 'iPad'])
+    buttonNamed(tokens, '停用 iPhone').click()
+    await settled()
+    expect(host.asked).toEqual(['停用“iPhone”的上传口令？使用这个口令的设备会停止上传，已记录内容保留。'])
+    expect(fake.tokens.map((token) => token.label || token.name)).toEqual(['machineTokens/ingest', 'machineTokens/export', 'iPad'])
+    expect(tokens.querySelector('.shared-token')?.textContent).toContain('共享插件口令')
+    const again = await open(fake, '/settings')
+    expect(card(again, '插件口令').querySelector('.token-once')).toBeNull()
+  })
+
   it('generates the first token and shows it once, with 复制 and the server address', async () => {
     const fake = new FakeServer()
     fake.tokens = [create(MachineTokenSchema, { name: 'machineTokens/ingest' }), create(MachineTokenSchema, { name: 'machineTokens/export' })]
     const root = await open(fake, '/settings')
     const tokens = card(root, '插件口令')
-    expect(tokens.querySelector(':scope > .tokens > p.hint')?.textContent).toBe('还没有口令：生成后粘贴到扩展的选项里，扩展才能上传。')
+    expect(tokens.querySelector('.shared-token > p.hint')?.textContent).toBe('还没有口令：生成后粘贴到扩展的选项里，扩展才能上传。')
     buttonNamed(tokens, '生成').click()
     await settled()
     const call = fake.calls.find((item) => item.path === '/api/v1/machineTokens/ingest:regenerate')
@@ -78,10 +121,10 @@ describe('插件口令', () => {
     expect(call?.headers['x-csrf-token']).toBe('csrf-token')
     const once = tokens.querySelector('.token-once')
     expect(once?.querySelector('input')?.value).toBe(`recall_ingest_${'T'.repeat(43)}`)
-    expect(once?.querySelector('.hint.warn')?.textContent).toBe('新的插件口令只显示这一次：现在复制，粘贴到扩展的选项里。离开或刷新这一页后不会再显示。')
+    expect(once?.querySelector('.hint.warn')?.textContent).toBe('新的共享插件口令只显示这一次：现在复制，粘贴到扩展的选项里。离开或刷新这一页后不会再显示。')
     expect(once?.querySelector('.hint:not(.warn)')?.textContent).toBe(`扩展里的服务器地址：${window.location.origin}`)
     expect(tokens.querySelector('.row-head')?.textContent).toContain('刚刚生成')
-    expect(toastText(root)).toBe('已生成新的插件口令')
+    expect(toastText(root)).toBe('已生成新的共享插件口令')
     // Never shown again: the status carries no token, and the page drawn again has none.
     const again = await open(fake, '/settings')
     expect(card(again, '插件口令').querySelector('.token-once')).toBeNull()
@@ -95,9 +138,9 @@ describe('插件口令', () => {
     expect(tokens.querySelector('.row-head')?.textContent).toContain('7 天前生成')
     buttonNamed(tokens, '重新生成').click()
     await settled()
-    expect(host.asked).toEqual(['重新生成插件口令？旧口令 24 小时内仍可用，在这之前把新口令粘贴到扩展的选项里。'])
+    expect(host.asked).toEqual(['重新生成共享插件口令？旧口令 24 小时内仍可用，在这之前把新口令粘贴到扩展的选项里。'])
     expect(fake.calls.find((item) => item.path.endsWith(':regenerate'))?.body).toMatchObject({ request_id: expect.any(String) as string })
-    expect(tokens.querySelector(':scope > .tokens > p.hint')?.textContent).toBe('旧口令 24 小时内仍可用')
+    expect(tokens.querySelector('.shared-token > p.hint')?.textContent).toBe('旧口令 24 小时内仍可用')
   })
 
   it('revokes a leaked token at once, or stops uploads, from its ⋯ menu', async () => {
@@ -105,17 +148,17 @@ describe('插件口令', () => {
     const host = testHost()
     const root = await open(fake, '/settings', host)
     const tokens = card(root, '插件口令')
-    buttonNamed(tokens, '插件口令的更多操作').click()
+    buttonNamed(tokens, '共享插件口令的更多操作').click()
     buttonNamed(tokens, '旧口令泄露：立即作废并重新生成').click()
     await settled()
     expect(host.asked).toEqual(['旧口令会立即失效，扩展换上新口令前无法上传。继续？'])
     expect(fake.calls.find((item) => item.path.endsWith(':regenerate'))?.body).toMatchObject({ revoke_previous: true })
     expect(tokens.querySelector('.token-once input')).not.toBeNull()
-    buttonNamed(tokens, '插件口令的更多操作').click()
+    buttonNamed(tokens, '共享插件口令的更多操作').click()
     buttonNamed(tokens, '停用').click()
     await settled()
     expect(fake.calls.find((item) => item.method === 'DELETE')?.path).toMatch(/^\/api\/v1\/machineTokens\/ingest\?request_id=/)
-    expect(tokens.querySelector(':scope > .tokens > p.hint')?.textContent).toBe('还没有口令：生成后粘贴到扩展的选项里，扩展才能上传。')
+    expect(tokens.querySelector('.shared-token > p.hint')?.textContent).toBe('还没有口令：生成后粘贴到扩展的选项里，扩展才能上传。')
     expect(tokens.querySelector('.token-once')).toBeNull()
   })
 

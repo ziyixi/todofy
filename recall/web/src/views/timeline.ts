@@ -42,19 +42,19 @@ export function shade(seconds: number): number {
   return seconds <= 0 ? 0 : Math.min(5, Math.ceil(seconds / STEP_SECONDS))
 }
 
-async function dayVisits(day: string): Promise<Visit[]> {
+async function dayVisits(day: string, deviceId: string): Promise<Visit[]> {
   const startTime = timestampFromMs(dayStart(day))
   const endTime = timestampFromMs(dayStart(addDays(day, 1)))
   return listAll(async (pageToken) => {
-    const page = await api.listVisits({ parent: 'pages/-', startTime, endTime, orderBy: 'start_time', pageSize: 500, pageToken })
+    const page = await api.listVisits({ parent: 'pages/-', startTime, endTime, orderBy: 'start_time', pageSize: 500, pageToken, deviceId })
     return { items: page.visits, next: page.nextPageToken }
   }, VISIT_PAGES)
 }
 
 /** The nearest days with a visit before and after `day` (ListVisits ending at its start, or starting at its end). */
-async function nearestDays(day: string, today: string): Promise<{ readonly before: string | null; readonly after: string | null }> {
+async function nearestDays(day: string, today: string, deviceId: string): Promise<{ readonly before: string | null; readonly after: string | null }> {
   const first = async (request: Parameters<typeof api.listVisits>[0]) => {
-    const visit = (await api.listVisits({ parent: 'pages/-', pageSize: 1, ...request })).visits[0]
+    const visit = (await api.listVisits({ parent: 'pages/-', pageSize: 1, deviceId, ...request })).visits[0]
     const start = ms(visit?.startTime)
     return start === null ? null : dayKey(start)
   }
@@ -69,8 +69,11 @@ export async function renderTimeline(ctx: ViewContext, key: string | null): Prom
   const now = ctx.host.now()
   const today = dayKey(now)
   const day = key ?? today
-  const hour = new URLSearchParams(window.location.search).get('hour')
-  const open = (target: string) => void ctx.go(target === today ? '/' : `/day/${target}`)
+  const params = new URLSearchParams(window.location.search)
+  const hour = params.get('hour')
+  const deviceId = params.get('device') ?? ''
+  const path = (target: string, device: string) => `${target === today ? '/' : `/day/${target}`}${device === '' ? '' : `?device=${encodeURIComponent(device)}`}`
+  const open = (target: string) => void ctx.go(path(target, deviceId))
 
   // The day bar.
   const picker = el('input', { type: 'date', class: 'visually-hidden', tabindex: '-1', 'aria-hidden': 'true', value: day, max: today })
@@ -89,8 +92,14 @@ export async function renderTimeline(ctx: ViewContext, key: string | null): Prom
     }
   }, { class: 'day-title', 'aria-label': `${title}，选择日期` })
   const bar = el('div', { class: 'day-bar' }, earlier, el('span', { class: 'day-pick' }, date, picker), later, day === today ? null : button('今天', () => open(today), { class: 'small' }))
+  const devices = el('select', { id: 'timeline-device', 'aria-label': '时间线设备' }, el('option', { value: '' }, '全部设备'))
+  devices.addEventListener('change', () => void ctx.go(path(day, devices.value)))
+  const deviceFilter = el('div', { class: 'device-filter' }, el('label', { for: 'timeline-device' }, '设备'), devices)
   void ctx.status().then(
     (status) => {
+      devices.append(...status.devices.map((device) => el('option', { value: device.deviceId }, device.label)))
+      if (deviceId !== '' && !status.devices.some((device) => device.deviceId === deviceId)) devices.append(el('option', { value: deviceId }, '已移除的设备'))
+      devices.value = deviceId
       const first = ms(status.firstVisitTime)
       if (first === null) return
       picker.min = dayKey(first)
@@ -100,7 +109,7 @@ export async function renderTimeline(ctx: ViewContext, key: string | null): Prom
   )
 
   const content = el('div', { class: 'stack' })
-  ctx.main.replaceChildren(el('h1', { class: 'visually-hidden' }, '时间线'), el('div', { class: 'body' }, bar, content))
+  ctx.main.replaceChildren(el('h1', { class: 'visually-hidden' }, '时间线'), el('div', { class: 'body' }, bar, deviceFilter, content))
 
   const onKey = (event: KeyboardEvent) => {
     // ← → inside the hour grid move between its hours, not between days.
@@ -124,9 +133,9 @@ export async function renderTimeline(ctx: ViewContext, key: string | null): Prom
 
   await loadInto(content, 6, async (box) => {
     const start = dayStart(day)
-    const spans = daySpans(await dayVisits(day), start, dayStart(addDays(day, 1)))
+    const spans = daySpans(await dayVisits(day, deviceId), start, dayStart(addDays(day, 1)))
     if (spans.length === 0) {
-      fill(box, await emptyDay(ctx, day, today, open))
+      fill(box, await emptyDay(ctx, day, today, deviceId, open))
       return
     }
     fill(box, ...dayView(ctx, day, spans))
@@ -141,12 +150,12 @@ export async function renderTimeline(ctx: ViewContext, key: string | null): Prom
 }
 
 /** A day without visits: 这天没有记录 and the nearest days that have some; before any upload, where to start. */
-async function emptyDay(ctx: ViewContext, day: string, today: string, open: (day: string) => void): Promise<HTMLElement> {
+async function emptyDay(ctx: ViewContext, day: string, today: string, deviceId: string, open: (day: string) => void): Promise<HTMLElement> {
   const status = await ctx.status()
   if (status.firstVisitTime === undefined) {
     return emptyState('还没有记录', '浏览器扩展开始上传后，这里按天显示去过的网站。', el('div', { class: 'actions center' }, button('去设置里连接扩展', () => void ctx.go('/settings'))))
   }
-  const near = await nearestDays(day, today)
+  const near = await nearestDays(day, today, deviceId)
   return emptyState(
     '这天没有记录',
     '',
@@ -266,6 +275,7 @@ function sessionRow(ctx: ViewContext, session: Session, slot: number, id: string
       siteBadge(session.site, slot),
       el('span', { class: 'session-site' }, session.site.replace(/^www\./, '')),
       el('span', { class: 'meta session-time' }, `${clock(session.start)}–${clock(session.end)}`),
+      session.deviceLabel === '' ? null : el('span', { class: 'meta session-device', title: session.deviceLabel }, session.deviceLabel),
       el('span', { class: 'session-figures' }, `${duration(session.seconds)} · ${String(session.pages.length)} 页`),
     ),
     () => {

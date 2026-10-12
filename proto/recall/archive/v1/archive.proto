@@ -253,7 +253,7 @@ message Blob {
     (google.api.field_behavior) = REQUIRED,
     (common.wire.v1.field).format = "BlobPath"
   ];
-  // The media type once content_encoding is undone: text/plain; charset=utf-8 or image/webp.
+  // The media type once content_encoding is undone: text/plain; charset=utf-8, image/webp or image/jpeg.
   string media_type = 3 [
     (google.api.field_behavior) = REQUIRED,
     (common.wire.v1.field).format = "MediaType"

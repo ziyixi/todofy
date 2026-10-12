@@ -628,7 +628,7 @@ def find_reusable(
             if result["platform_publish"]:
                 tested_artifacts.append(f"platform-image-{sha}")
             if result["recall_extension_publish"]:
-                tested_artifacts.append(f"recall-extension-{sha}")
+                tested_artifacts.extend([f"recall-extension-{sha}", f"recall-orion-{sha}"])
             if tested_artifacts:
                 # Publishing must load the exact image (or extension build) this branch tested. An expired or
                 # missing artifact falls back to this main run's checks/build, never an untested rebuild.

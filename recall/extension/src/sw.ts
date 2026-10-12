@@ -8,8 +8,9 @@
  */
 import { captureDelay, captureDue, readTab, storeCapture } from './capture.ts';
 import type { Context } from './context.ts';
+import { browserFeatures, isIOS } from './browser.ts';
 import { openDb } from './db.ts';
-import { beat, browserStarted, idleChanged, reconcile, releaseFocus, tabChanged, tabRemoved } from './focus.ts';
+import { beat, browserStarted, idleChanged, pageVisibility, reconcile, releaseFocus, tabChanged, tabRemoved } from './focus.ts';
 import { IDLE_SECONDS, TICK_MINUTES } from './limits.ts';
 import { isRequest, type Request, type SaveAnswer, type Status, type UpdateAnswer } from './messages.ts';
 import { saveSettings, status } from './settings.ts';
@@ -17,11 +18,16 @@ import { getDevice, reloadedFor } from './store.ts';
 import { installedUpdate } from './update.ts';
 import { flush, showBadge, type FlushReason } from './upload.ts';
 
+declare const RECALL_ORION: boolean;
+
+const MOBILE = typeof RECALL_ORION !== 'undefined' && RECALL_ORION && isIOS(navigator);
+const features = browserFeatures(chrome);
 const TICK = 'tick';
 
 /** The context every handler waits for: the database open and the device made (on the first run). */
 const ready: Promise<Context> = (async () => {
   const ctx: Context = {
+    mobile: MOBILE,
     chrome,
     db: await openDb(),
     now: () => Date.now(),
@@ -39,7 +45,7 @@ const ready: Promise<Context> = (async () => {
     },
     build: chrome.runtime.getManifest().version,
   };
-  await getDevice(ctx.chrome, ctx.uuid);
+  await getDevice(ctx.chrome, ctx.uuid, ctx.mobile ? 'iPhone · Orion' : undefined);
   return ctx;
 })();
 
@@ -62,6 +68,7 @@ async function capture(): Promise<void> {
   if (job === null) return;
   const outcome = await readTab(await ready, job);
   await serial((ctx) => storeCapture(ctx, job, outcome, ctx.now()));
+  if ((await ready).mobile) await upload('tick');
 }
 
 /** Sets the capture's timer for the focused visit, if a capture is to come. */
@@ -154,32 +161,34 @@ async function answer(request: Request): Promise<Status | SaveAnswer | UpdateAns
 }
 
 /** A navigation of a tab's main document: not a prerender, a page from the back/forward cache or a frame's. */
-function navigated(details: { readonly tabId: number; readonly frameType: string; readonly documentLifecycle: string }): void {
-  if (details.frameType !== 'outermost_frame' || details.documentLifecycle !== 'active') return;
+function navigated(details: { readonly tabId: number; readonly frameId?: number; readonly frameType?: string; readonly documentLifecycle?: string }): void {
+  if (MOBILE ? details.frameId !== 0 : details.frameType !== 'outermost_frame' || details.documentLifecycle !== 'active') return;
   const at = Date.now();
   transition('navigation', (ctx) => tabChanged(ctx, details.tabId, at));
 }
 
-chrome.idle.setDetectionInterval(IDLE_SECONDS);
+if (!MOBILE) features.idle?.setDetectionInterval(IDLE_SECONDS);
 
 chrome.tabs.onActivated.addListener(() => {
   const at = Date.now();
   transition('tab_activated', (ctx) => reconcile(ctx, at));
 });
 
-chrome.windows.onFocusChanged.addListener((windowId) => {
+features.windows?.onFocusChanged.addListener((windowId) => {
   const at = Date.now();
   transition('window_focus', (ctx) => reconcile(ctx, at, { windowId }));
 });
 
-chrome.idle.onStateChanged.addListener((idle) => {
-  const at = Date.now();
-  transition('idle', (ctx) => idleChanged(ctx, idle, at));
-});
+if (!MOBILE) {
+  features.idle?.onStateChanged.addListener((idle) => {
+    const at = Date.now();
+    transition('idle', (ctx) => idleChanged(ctx, idle, at));
+  });
+}
 
-chrome.webNavigation.onCommitted.addListener(navigated);
-chrome.webNavigation.onHistoryStateUpdated.addListener(navigated);
-chrome.webNavigation.onReferenceFragmentUpdated.addListener(navigated);
+features.webNavigation?.onCommitted.addListener(navigated);
+features.webNavigation?.onHistoryStateUpdated.addListener(navigated);
+features.webNavigation?.onReferenceFragmentUpdated.addListener(navigated);
 
 chrome.tabs.onUpdated.addListener((tabId, change) => {
   if (change.title === undefined && change.url === undefined) return;
@@ -214,7 +223,19 @@ chrome.runtime.onInstalled.addListener(() => {
 });
 
 chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) => {
-  if (sender.id !== chrome.runtime.id || !isRequest(message)) return false;
+  if (sender.id !== chrome.runtime.id) return false;
+  if (typeof message === 'object' && message !== null && 'type' in message && message.type === 'page-visibility') {
+    const value = message as Record<string, unknown>;
+    if (sender.frameId !== 0 || sender.tab?.id === undefined || sender.tab.incognito || typeof value['documentId'] !== 'string' || typeof value['visible'] !== 'boolean' || typeof value['at'] !== 'number' || !Number.isFinite(value['at'])) return false;
+    const tabId = sender.tab.id;
+    const documentId = value['documentId'];
+    const visible = value['visible'];
+    const at = Math.min(Date.now(), value['at']);
+    transition('page_visibility', (ctx) => pageVisibility(ctx, tabId, documentId, visible, at));
+    ready.then((ctx) => { if (ctx.mobile && visible) return upload('startup'); }).catch((error: unknown) => { report('resume_upload', error); });
+    return false;
+  }
+  if (!isRequest(message)) return false;
   answer(message).then(sendResponse, (error: unknown) => {
     report(message.type, error);
     sendResponse(null);
@@ -222,7 +243,7 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) =>
   return true;
 });
 
-chrome.action.onClicked.addListener(() => {
+(features.action ?? features.browserAction)?.onClicked.addListener(() => {
   chrome.runtime.openOptionsPage().catch((error: unknown) => {
     report('options', error);
   });

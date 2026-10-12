@@ -49,7 +49,16 @@ export function statusRows(status: Status): Row[] {
   if (error !== null && status.now - error.at < ERROR_REPORTED_MS) {
     rows.push({ label: '最近错误', value: `${error.code}（${ago(status.now - error.at)}）`, warn: false });
   }
-  rows.push({ label: '设备 ID', value: status.deviceId, warn: false });
+  if (status.capabilities !== undefined) {
+    rows.push({ label: '采集环境', value: `${status.mobile ? 'Orion · iOS，仅前台记录' : '桌面浏览器'}；正文读取${status.capabilities.script ? '可用' : '不可用'}，截图${status.capabilities.screenshot ? '可用' : '不可用'}`, warn: !status.capabilities.script });
+    rows.push({ label: '当前记录', value: status.focused ? '有网页在前台记录' : '暂停：打开普通网页后继续', warn: false });
+  }
+  if (status.capture !== undefined && status.capture !== null) {
+    const text = { saved: '正文已保存', empty: '正文为空', failed: '正文读取失败', excluded: '页面已切换或不允许采集', unchanged: '内容未变，未重复保存' }[status.capture.text];
+    const image = { webp: 'WebP', jpeg: 'JPEG', failed: '失败', excluded: '排除', none: '无' }[status.capture.screenshot];
+    rows.push({ label: '最近采样', value: `${ago(status.now - status.capture.at)}：${text}；截图 ${image}`, warn: status.capture.text === 'failed' || status.capture.screenshot === 'failed' });
+  }
+  rows.push({ label: '设备 ID' , value: status.deviceId, warn: false });
   return rows;
 }
 

@@ -47,7 +47,9 @@ describe('rows written', () => {
       `rows written: new visit ${String(newVisit)}, revision ${String(revision)}/${String(secondRevision)} alone and ${String(perRevision)} in a batch of ten, ` +
         `32 KiB text ${String(text)}, heartbeat ${String(heartbeat)}; expected day ${String(day)} of ${String(DAILY_ROW_BUDGET)}`,
     );
-    expect(perRevision).toBeLessThanOrEqual(7);
+    // The per-device timeline index adds one SQLite write per visit revision (measured 7.3 vs 6.3
+    // without it). Keep the daily 20,000-row budget and the expected-day guard unchanged.
+    expect(perRevision).toBeLessThanOrEqual(8);
     expect(revision).toBeLessThanOrEqual(10);
     expect(newVisit).toBeLessThanOrEqual(25);
     expect(text).toBeLessThanOrEqual(20);
