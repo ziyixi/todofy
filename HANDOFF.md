@@ -9,7 +9,7 @@ Its old waiting lists and release identities are historical, not instructions to
 
 ## Current work
 
-Recall's remaining Orion Save hang is being fixed on `codex/recall-orion-save-isolation`.
+Recall's Save isolation and MV2 callback fixes are released at `5d476a0`.
 The owner's screenshot of `354db53` proves phone mode now works but Save remains pending and token status is false.
 A browser focus query can still hold the original global queue before settings write; the missing regression
 failed on that code. Settings now use an independent write queue. Mobile tabs get/query/execute/capture use native
@@ -21,9 +21,16 @@ Typecheck, lint, all 117 extension tests and both builds passed. An isolated rea
 options + background scripts and native IndexedDB passed normal Save, blocked focus query, stalled local storage,
 and stalled post-save status refresh. The browser API bridge remains synthetic; Orion/iOS lifecycle needs final
 owner acceptance. The reusable browser check and its exact command are in the mobile runbook.
-Branch CI, the replacement Release and the final phone check are pending. No new runtime dependency or service.
+[Full branch CI](https://github.com/ziyixi/todofy/actions/runs/38199278131) and the
+[same-SHA release](https://github.com/ziyixi/todofy/actions/runs/38199601005) passed. Deployment `7005804573`
+verified Worker `3668aa37-e6e8-436e-a07b-aae0c1329d82`. Both downloaded assets verified version
+`2026.1012.322`, commit `5d476a0`. The actual downloaded Orion ZIP passed all four real WebKit/native IndexedDB
+checks with zero page errors. [Phone ZIP](https://github.com/ziyixi/todofy/releases/download/recall-extension-v2026.1012.322/recall-orion-v2026.1012.322.zip).
+Mac installation files were updated preserving its settings/identity; no running Chrome version was independently
+read. Final Orion phone Save acceptance remains pending; report the exact twelve-second pending-step message
+if confirmation still fails. No new runtime dependency or service.
 
-Recall Orion Save fixes are released at `354db53`. The owner confirmed the correct old phone artifact loaded
+The earlier Orion phone-mode/upload-wait fixes were released at `354db53`. The owner confirmed the correct old phone artifact loaded
 settings but selected desktop mode. The dedicated iPhone/iPad build now selects mobile mode directly; Save
 acknowledges local persistence without waiting for the first upload. Both targeted regressions failed before fixing.
 [Full branch CI](https://github.com/ziyixi/todofy/actions/runs/38197332604) and the
