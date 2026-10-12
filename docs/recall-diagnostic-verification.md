@@ -46,6 +46,43 @@ stages with fresh pending calls, and leaving the page could overwrite its foregr
 preserves completed/foreground evidence. The regression and the full extension suite pass. The final artifact
 confirmation is recorded below; the earlier local report is not evidence for that later correction.
 
+## Permission investigation after the phone receipt
+
+The owner sent an 812 report with eight tab events and two alarms, but only open-test-page and Alarm-setup
+results. No real browsing content was read. A local SW simulation could produce that shape with an earlier
+unanswered query; that was a hypothesis, not identification of the phone's failing API.
+
+A fresh real Orion macOS installation then reproduced the same two-stage report. Temporary test-only observations
+recorded fixed phase names and return-type categories, without altering native API results. An atomic snapshot
+showed focus/session and mirror reads completing, entry into focus-target selection, and completion of the
+query's diagnostic observation. The native active-tab query had not answered. The toolbar showed that the test
+extension was not permitted on the public fixture and offered a website-access prompt.
+
+After granting only example.org for one day and reloading the same extension, the consumer received nonempty text
+and images. The current published 812 files were rechecked against the downloaded ZIP and visibly imported.
+With the site grant retained, that version produced eleven stages at **09:47:30.794Z**, with thirteen tab events
+and three alarms. Its run added one nonempty text document and one image beyond the recorded pre-import baseline.
+The original script is recoverable byte for byte after removing test identity, loopback constants and owner
+invocation. The temporary phase statements were not included in this final 812 check.
+
+The proposed tracker on `d04501a` passed [branch CI](https://github.com/ziyixi/todofy/actions/runs/38227995048),
+but was not merged or released. The native investigation exposed an observation/start timing gap; the branch is
+not a phone fix. The test extension was uninstalled and the exact loopback process stopped; port 18793 is closed.
+No owner Chrome files, production code, credentials or permissions were changed.
+
+The owner reports no visible permission entry on iOS and no records after restarting Orion and testing the public
+page. macOS permission behavior therefore cannot establish the phone cause. Official [website settings](https://help.kagi.com/orion/features/website-settings.html)
+document per-site extension permissions for macOS; the [iOS extension guide](https://help.kagi.com/orion/browser-extensions/ios-ipados-extensions.html)
+does not document that control. Do not invent an iOS menu path from the Mac UI.
+
+The actual 812 MV2 manifest already declares required `<all_urls>`, tabs, webNavigation, alarms, storage and
+unlimitedStorage; there are no optional permissions. A manifest declaration is distinct from actual browser access.
+The [Orion API table](https://browser.kagi.com/WebExtensions-API-Support.html) lists permissions.contains/getAll/request
+as supported on iOS, but does not establish their connection to Orion's website-access gate. Standard
+[permission requests](https://developer.chrome.com/docs/extensions/reference/api/permissions#method-request) require
+a user gesture and can request required permissions withheld by the browser. Any enable action must run directly
+from that click, report the real answer and avoid treating a permission response as capture success.
+
 ## Release and phone boundary
 
 The first full branch run reached a UI size failure: 62.2 KiB against the previous 62 KiB budget.

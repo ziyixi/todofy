@@ -9,6 +9,23 @@ Its old waiting lists and release identities are historical, not instructions to
 
 ## Current work
 
+`codex/recall-orion-permission-verification` records the follow-up native investigation; no new app version is released.
+The owner 812 receipt has 8 tab events, 2 alarms and only open-test-page/Alarm-setup results. A fresh native Mac
+Orion test reproduced that pattern. Temporary closed phase observations showed state/mirror reads completing and
+execution waiting in the native active-tab query. The browser displayed a site-access prompt for the public fixture.
+Granting example.org access for one day and reloading the same test extension restored text/image uploads.
+The actual published 812 files were then tested with the grant: its 09:47:30.794Z receipt has 11 stages, 13 tab events
+and 3 alarms; uploads added one nonempty text document and one image. No private browsing content was read.
+This establishes macOS behavior only. The owner could not find the proposed permission entry on iOS, and a full
+Orion restart/public-page test still produced zero records. Do not describe the phone failure as a confirmed
+permission issue or send the owner to a macOS-only menu. Current ZIP already declares required `<all_urls>`.
+`codex/recall-startup-diagnostic` at `d04501a` passed CI but is unmerged and never released. Its proposed in-flight
+tracker did not explain the native result, and a start/observe timing gap remains; do not promote it as a phone fix.
+The test extension is removed, loopback consumer stopped and port closed. Owner Chrome and production remain unchanged.
+Next: validate the standard permissions API from a direct extension-page user gesture using a minimal public-site
+native fixture before implementing an enable action; Orion's iOS support table alone is not execution proof.
+
+
 `codex/recall-mobile-diagnostic` implements the authorized one-shot Orion capture diagnosis.
 The owner still reports no visits or samples on `611`, Orion 1.5.5 (3), iOS 27.0.1; heartbeat works.
 It records closed stage metadata on a fixed public test page and sends an empty authenticated batch independently
