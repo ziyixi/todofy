@@ -9,17 +9,21 @@ Its old waiting lists and release identities are historical, not instructions to
 
 ## Current work
 
-Recall Orion Save follow-up is on `codex/recall-orion-save`. The owner confirmed the actual Orion artifact
-`2026.1012.158 / 0fe663a` loaded settings but showed device `Chrome` and the desktop update response.
-That establishes desktop mode was selected in the phone package. A synthetic desktop-identity navigator reproduces
-this exactly; the dedicated iPhone/iPad build now selects mobile mode at build time without a UA heuristic.
-A second regression proves Save used to wait for an unfinished first upload after persisting the settings.
-Save now acknowledges persistence immediately and starts the existing upload separately; the button shows progress.
-Both regressions failed before their fixes. No new dependency, retry mechanism, credential or backend change.
-Typecheck, lint, all 114 extension tests and both package builds passed. A synthetic DOM check of the built
-options page exercised click/progress/success, token clearing, mobile controls and validation errors.
-Branch CI and the replacement phone asset are pending. The iPhone Save/capture check still needs
-owner acceptance after updating the existing extension; do not claim synthetic tests verify an actual phone.
+Recall Orion Save fixes are released at `354db53`. The owner confirmed the correct old phone artifact loaded
+settings but selected desktop mode. The dedicated iPhone/iPad build now selects mobile mode directly; Save
+acknowledges local persistence without waiting for the first upload. Both targeted regressions failed before fixing.
+[Full branch CI](https://github.com/ziyixi/todofy/actions/runs/38197332604) and the
+[same-SHA release](https://github.com/ziyixi/todofy/actions/runs/38197579283) passed. Deployment `7005477101`
+verified Worker `ab5b5c92-3185-4e0c-beac-33003215c162`. Both downloaded extension assets verified version
+`2026.1012.252`, commit `354db53`, the correct desktop/phone modes and the Save fix.
+[Phone ZIP](https://github.com/ziyixi/todofy/releases/download/recall-extension-v2026.1012.252/recall-orion-v2026.1012.252.zip).
+Typecheck, lint, all 114 extension tests and both builds passed; the built options page also passed a synthetic DOM
+click/progress/success, token clearing, mobile controls and validation-error check. Mac installation files were
+updated preserving its identity and settings; its running version was not independently read from Chrome.
+Actual phone acceptance remains: update the existing extension without uninstalling, set its retained `Chrome` label
+to `iPhone`, then check Save confirms immediately and the environment says Orion · iOS. Previously saved token can
+stay blank. Capture/upload acceptance remains in [the mobile runbook](recall/docs/mobile.md).
+No new dependency, credential, retry mechanism, backend behavior or budget change.
 
 Recall mobile and multi-device preparation is deployed at `0fe663a`: independent named upload tokens,
 device-aware timeline/status, an Orion file-install build and bounded native JPEG fallback. Existing Chrome identity,
@@ -28,7 +32,7 @@ shared token, privacy rules, snapshot deduplication and the unified Dropbox arch
 [same-SHA release](https://github.com/ziyixi/todofy/actions/runs/38194203995) passed. GitHub Deployment `7004923541`
 verified Worker `0c9f27be-d2c9-4556-8a7a-333b8a55d834`. Both extension assets are version `2026.1012.158`, built
 from this SHA. Documentation follow-up `935254c` also ran the repository's Recall release rule successfully:
-[main run](https://github.com/ziyixi/todofy/actions/runs/38194829673), current Worker
+[main run](https://github.com/ziyixi/todofy/actions/runs/38194829673), then-verified Worker
 `1f377641-0f18-4191-9ad9-6938f622b7c8`, Deployment `7005025557`; application code and extension assets are unchanged.
 The Mac's stable installation files were updated with its existing key and settings retained; the
 browser tool blocks extension-scheme URLs, so its newly running version was not independently read from Chrome.
