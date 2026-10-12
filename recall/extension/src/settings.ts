@@ -8,7 +8,7 @@ import type { Context } from './context.ts';
 import { browserFeatures } from './browser.ts';
 import { countHeld, countItems, getToken, setToken } from './db.ts';
 import { LABEL_MAX_CHARS } from './limits.ts';
-import type { SaveAnswer, SaveRequest, Status } from './messages.ts';
+import type { SaveAnswer, SavePhase, SaveProgress, SaveRequest, Status } from './messages.ts';
 import type { Denylist } from './page.ts';
 import { captureStatus, focusState, getDevice, lastError, ownerDenylist, setDevice, uploadState, type Device } from './store.ts';
 
@@ -56,6 +56,10 @@ export async function currentDenylist(ctx: Context): Promise<Denylist> {
   return { patterns: { siteOnly: compilePatterns(owner.siteOnly), noText: compilePatterns(owner.patterns) }, ownHosts: ownHosts(device.server) };
 }
 
+// Transient diagnostics contain no settings or token values and never touch browser storage.
+let savingPhase: SavePhase = 'idle';
+export const saveProgress = (): SaveProgress => ({ phase: savingPhase });
+
 /** Saves the options. A new token or server lifts a refused token's stop and the backoff, so the next flush uploads. */
 export async function saveSettings(ctx: Context, request: SaveRequest): Promise<SaveAnswer> {
   const server = parseServer(request.server);
@@ -68,15 +72,24 @@ export async function saveSettings(ctx: Context, request: SaveRequest): Promise<
     if ('error' in parsed) return { ok: false, error: parsed.error };
     token = parsed.token;
   }
-  const device = await getDevice(ctx.chrome, ctx.uuid);
-  const next: Device = { ...device, server, label };
-  await setDevice(ctx.chrome, next);
-  if (token !== null) await setToken(ctx.db, token);
-  if (token !== null || server !== device.server) {
-    const upload = await uploadState.get(ctx.chrome);
-    await uploadState.set(ctx.chrome, { ...upload, tokenRefused: false, nextAttemptAt: 0, backoffMs: 0 });
+  try {
+    savingPhase = 'device';
+    const device = await getDevice(ctx.chrome, ctx.uuid);
+    const next: Device = { ...device, server, label };
+    await setDevice(ctx.chrome, next);
+    if (token !== null) {
+      savingPhase = 'token';
+      await setToken(ctx.db, token);
+    }
+    if (token !== null || server !== device.server) {
+      savingPhase = 'upload-state';
+      const upload = await uploadState.get(ctx.chrome);
+      await uploadState.set(ctx.chrome, { ...upload, tokenRefused: false, nextAttemptAt: 0, backoffMs: 0 });
+    }
+    return { ok: true };
+  } finally {
+    savingPhase = 'idle';
   }
-  return { ok: true };
 }
 
 /** What the options page shows. */

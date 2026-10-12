@@ -9,6 +9,20 @@ Its old waiting lists and release identities are historical, not instructions to
 
 ## Current work
 
+Recall's remaining Orion Save hang is being fixed on `codex/recall-orion-save-isolation`.
+The owner's screenshot of `354db53` proves phone mode now works but Save remains pending and token status is false.
+A browser focus query can still hold the original global queue before settings write; the missing regression
+failed on that code. Settings now use an independent write queue. Mobile tabs get/query/execute/capture use native
+MV2 callbacks; the callback-only tests failed before the correction and now save actual synthetic text/JPEG.
+No evidence identifies the exact Orion native call that hung on the owner's phone; do not present that as confirmed.
+Save has a twelve-second unconfirmed state with a content-free pending-step diagnostic and keeps the pasted token;
+status refresh after successful persistence cannot hold the button. No automatic retry or new credential is added.
+Typecheck, lint, all 117 extension tests and both builds passed. An isolated real WebKit check of actual Orion
+options + background scripts and native IndexedDB passed normal Save, blocked focus query, stalled local storage,
+and stalled post-save status refresh. The browser API bridge remains synthetic; Orion/iOS lifecycle needs final
+owner acceptance. The reusable browser check and its exact command are in the mobile runbook.
+Branch CI, the replacement Release and the final phone check are pending. No new runtime dependency or service.
+
 Recall Orion Save fixes are released at `354db53`. The owner confirmed the correct old phone artifact loaded
 settings but selected desktop mode. The dedicated iPhone/iPad build now selects mobile mode directly; Save
 acknowledges local persistence without waiting for the first upload. Both targeted regressions failed before fixing.

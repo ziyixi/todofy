@@ -12,8 +12,8 @@ import { browserFeatures } from './browser.ts';
 import { openDb } from './db.ts';
 import { beat, browserStarted, idleChanged, pageVisibility, reconcile, releaseFocus, tabChanged, tabRemoved } from './focus.ts';
 import { IDLE_SECONDS, TICK_MINUTES } from './limits.ts';
-import { isRequest, type Request, type SaveAnswer, type Status, type UpdateAnswer } from './messages.ts';
-import { saveSettings, status } from './settings.ts';
+import { isRequest, type Request, type SaveAnswer, type SaveProgress, type Status, type UpdateAnswer } from './messages.ts';
+import { saveProgress, saveSettings, status } from './settings.ts';
 import { getDevice, reloadedFor } from './store.ts';
 import { installedUpdate } from './update.ts';
 import { flush, showBadge, type FlushReason } from './upload.ts';
@@ -55,6 +55,8 @@ function report(name: string, error: unknown): void {
 }
 
 let queue: Promise<unknown> = Promise.resolve();
+// Owner settings serialize with each other, independently of browser focus and page inspection.
+let settingsWrites: Promise<unknown> = Promise.resolve();
 
 /** Runs `work` after every earlier one. */
 function serial<T>(work: (ctx: Context) => Promise<T>): Promise<T> {
@@ -143,13 +145,17 @@ async function onStartup(at: number): Promise<void> {
   await upload('startup');
 }
 
-async function answer(request: Request): Promise<Status | SaveAnswer | UpdateAnswer> {
+async function answer(request: Request): Promise<Status | SaveAnswer | SaveProgress | UpdateAnswer> {
   const ctx = await ready;
   switch (request.type) {
     case 'status':
       return status(ctx);
+    case 'save-progress':
+      return saveProgress();
     case 'save': {
-      const saved = await serial((current) => saveSettings(current, request));
+      const write = settingsWrites.then(() => saveSettings(ctx, request));
+      settingsWrites = write.catch(() => undefined);
+      const saved = await write;
       // A saved setting is independent of the network and browser badge APIs.
       if (saved.ok) void upload('manual').catch((error: unknown) => { report('save_upload', error); });
       return saved;

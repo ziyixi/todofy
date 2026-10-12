@@ -8,7 +8,7 @@ import type { IngestItem } from '@ziyixi/proto/recall/ingest/v1/ingest_wire';
 import { scrubText } from '../../shared/scrub.ts';
 import { cutText, cutUtf8, DOCUMENT_MAX_BYTES } from '../../shared/url.ts';
 import type { Context } from './context.ts';
-import { executeFile, probePage } from './browser.ts';
+import { captureViewport, executeFile, getTab, probePage } from './browser.ts';
 import { getVisit, queueItem, saveVisit } from './db.ts';
 import { loadFocus } from './focus.ts';
 import { CAPTURE_FOCUS_MS, CAPTURE_INTERVAL_MS, CAPTURE_STORAGE_MAX_BYTES } from './limits.ts';
@@ -70,7 +70,7 @@ export async function captureDue(ctx: Context, at: number): Promise<CaptureJob |
 async function sameFocus(ctx: Context, job: CaptureJob): Promise<boolean> {
   try {
     if (ctx.mobile) {
-      const [state, tab, probe] = await Promise.all([focusState.get(ctx.chrome), ctx.chrome.tabs.get(job.tabId), probePage(ctx, job.tabId)]);
+      const [state, tab, probe] = await Promise.all([focusState.get(ctx.chrome), getTab(ctx, job.tabId), probePage(ctx, job.tabId)]);
       if (state?.open?.visitId !== job.visitId || state.open.start !== job.focusStart || !tab.active || tab.incognito || !probe?.visible || probe.documentId !== job.documentId) return false;
       const page = await pageOf(probe.url, await currentDenylist(ctx));
       return page?.pageId === job.page.pageId && page.level === 'record';
@@ -113,7 +113,7 @@ export async function readTab(ctx: Context, job: CaptureJob): Promise<ReadOutcom
   if (text === null) return { kind: 'failed' };
   if (!(await allowedPage(ctx, job, text)) || !(await sameFocus(ctx, job))) return { kind: 'text', text };
   try {
-    const png = ctx.mobile ? await ctx.chrome.tabs.captureVisibleTab({ format: 'png' }) : await ctx.chrome.tabs.captureVisibleTab(job.windowId, { format: 'png' });
+    const png = await captureViewport(ctx, job.windowId);
     if (!(await sameFocus(ctx, job))) return { kind: 'text', text };
     // An in-page sign-in dialog may have appeared without a navigation while Chrome captured the viewport.
     const after = await readPage(ctx, job);

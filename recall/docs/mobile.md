@@ -11,6 +11,7 @@ Dropbox 统一归档。手机不需要连接 Dropbox，也不用复制电脑的�
 3. 在手机打开 Recall → 设置 → 插件口令，填写 `iPhone`，点“添加设备口令”，复制。
    打开 Orion 的 Recall 扩展设置，粘贴口令，设备名称填 `iPhone`，保存。服务器地址已经填好。
    保存只确认本机设置已写入，上传结果在下方单独显示。手机包固定使用手机模式，不依赖浏览器标识。
+   超过十二秒未收到回执会显示“保存尚未确认”和等待步骤，并保留输入的口令；不要重新生成口令。
 
 口令只显示一次，不要发到聊天。电脑原有口令继续可用。手机丢失或不再使用时，停用这条独立口令即可，
 不影响其他口令或已上传的记录。独立口令是上传凭据，名称便于辨认；同一口令若被复制到多个设备，
@@ -45,6 +46,25 @@ Dropbox 统一归档。手机不需要连接 Dropbox，也不用复制电脑的�
 - 所有设备共用七天热文件窗口及同一 Dropbox 归档。只有正文和截图已确认归档后才从 R2 移出；
   搜索索引保留，旧快照直接从 Dropbox 读取。增加设备不需要增加备份服务。
 - 手机显示最近上传、待上传和实际错误。一天没有打开浏览器不算上传故障。
+
+## 本地验证
+
+Agent 先运行现有扩展测试，再用本机真实 WebKit 打开实际构建的设置页与后台脚本。
+浏览器检查使用原生 IndexedDB 和只通过 callback 返回的 MV2 tabs fixture，覆盖正常保存、
+采集查询卡住、设置写入卡住、保存后的状态刷新卡住。未确认不能显示成功，输入口令保留，按钮必须恢复可用。
+没有新增测试框架或依赖；复用仓库已有的 Playwright。以下命令在仓库根目录执行（本机须已有 WebKit）：
+
+```sh
+npm --prefix recall/extension run build
+node --input-type=module <<'JS'
+import { webkit, expect } from './website/node_modules/@playwright/test/index.mjs';
+import { checkOrionOptions } from './recall/extension/test/options-browser.mjs';
+console.log(await checkOrionOptions({ webkit, expect, folder: './recall/extension/dist' }));
+JS
+```
+
+这能检查真实 WebKit 的表单、消息与数据库路径；fixture 不能证明 Orion 自己的 API 实现或 iOS 前后台挂起行为。
+本次本机未安装 Xcode、iOS Simulator 或 Orion；手机最后只确认扩展保存、前台采样与返回前台上传。
 
 ## 验证边界
 

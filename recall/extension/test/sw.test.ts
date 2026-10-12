@@ -5,7 +5,7 @@ import type { IngestBatch } from '@ziyixi/proto/recall/ingest/v1/ingest_wire';
 import { IDBFactory } from 'fake-indexeddb';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { FocusState } from '../src/store.ts';
-import { EXTENSION_ID, FakeBrowser, FakeFetch, INGEST_TOKEN, SECOND, T0 } from './fake-chrome.ts';
+import { EXTENSION_ID, FakeBrowser, FakeFetch, INGEST_TOKEN, SECOND, T0, type FakeTab } from './fake-chrome.ts';
 
 let browser: FakeBrowser;
 let net: FakeFetch;
@@ -93,6 +93,53 @@ describe('the service worker', () => {
       await response;
       await settle();
     }
+  });
+
+  it('saves settings while a phone focus query is still waiting for the browser', async () => {
+    vi.stubGlobal('RECALL_ORION', true);
+    await start();
+    const originalQuery = browser.api.tabs.query;
+    let resume!: () => void;
+    const query = vi.spyOn(browser.api.tabs, 'query').mockImplementation((info, callback?: (tabs: FakeTab[]) => void) => new Promise<FakeTab[]>((resolve) => {
+      resume = () => { void originalQuery(info).then((tabs) => { callback?.(tabs); resolve(tabs); }); };
+    }));
+    const tab = browser.open('https://docs.example.com/guide');
+    browser.events.activated.emit({ tabId: tab.id, windowId: 1 });
+    await vi.waitFor(() => { expect(query).toHaveBeenCalled(); });
+    let saved: unknown;
+    const response = message({ type: 'save', server: 'https://recall.ziyixi.science', label: 'iPhone', token: INGEST_TOKEN })
+      .then((answer) => { saved = answer; });
+    try {
+      await vi.waitFor(() => { expect(saved).toEqual({ ok: true }); });
+      expect(await message({ type: 'status' })).toMatchObject({ label: 'iPhone', tokenSet: true });
+    } finally {
+      query.mockRestore();
+      resume();
+      await response;
+      await settle();
+    }
+  });
+
+  it('reports a pending local settings write without waiting for storage', async () => {
+    await start();
+    const originalSet = browser.local.set.bind(browser.local);
+    let resume!: () => void;
+    const set = vi.spyOn(browser.local, 'set').mockImplementation(async (items) => {
+      await originalSet(items);
+      if ('device' in items) await new Promise<void>((resolve) => { resume = resolve; });
+    });
+    const response = message({ type: 'save', server: 'https://recall.ziyixi.science', label: 'iPhone', token: INGEST_TOKEN });
+    try {
+      await vi.waitFor(async () => { expect(await message({ type: 'save-progress' })).toEqual({ phase: 'device' }); });
+      expect(await message({ type: 'status' })).toMatchObject({ tokenSet: false });
+    } finally {
+      set.mockRestore();
+      resume();
+      expect(await response).toEqual({ ok: true });
+      await settle();
+    }
+    expect(await message({ type: 'save-progress' })).toEqual({ phase: 'idle' });
+    expect(await message({ type: 'save-progress' }, 'another-extension')).toBe('not answered');
   });
 
   it('follows only an active main document: no prerender, cached page or frame', async () => {

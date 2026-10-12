@@ -37,7 +37,8 @@ release holds exactly the files CI tested.
 The same CI build also produces `recall-orion-v<version>.zip`. Download this file on the iPhone, then Orion →
 **••• → Extensions → + → file-based extension**, and select the ZIP. In Recall's web settings, add a separate
 plugin token named `iPhone`; paste it into the extension's settings and save. The default device label is
-`iPhone · Orion`. Keep the Mac's existing token.
+`iPhone · Orion`. Keep the Mac's existing token. Saving settings is independent of page capture and upload;
+an unconfirmed save shows its pending step after twelve seconds and keeps the pasted token.
 
 The Orion package uses the same capture/queue code with a nonpersistent MV2 background script. A dynamically
 injected top-frame probe provides a per-document identity and reports `visibilitychange` / `pagehide` / `pageshow`.
@@ -48,7 +49,9 @@ existing queue; phone batches flush within a minute while active. This does not 
 Screenshots use native WebP where supported, otherwise verified native JPEG, with the same size and deduplication
 limits. Settings show the latest sampling outcome, screenshot format/failure, and queued uploads. iOS capture
 support still needs the owner's one-time device check; tests over a fake browser do not prove Orion behavior.
-To update the phone, install the newer Orion ZIP; there is no unpacked-folder self-update on iOS.
+The [local WebKit check](../docs/mobile.md#本地验证) runs the built settings/background scripts with native IndexedDB
+and callback-only MV2 fixtures before phone acceptance. To update the phone, install the newer Orion ZIP; there is
+no unpacked-folder self-update on iOS.
 
 ## Mac: install and update
 

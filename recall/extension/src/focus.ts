@@ -18,7 +18,7 @@
  *   mirror (the browser restarted, the extension reloaded) is closed at that beat.
  */
 import type { Context } from './context.ts';
-import { probePage } from './browser.ts';
+import { getTab, probePage, queryTabs } from './browser.ts';
 import { allVisits, getVisit, saveVisit, visitOfTab, deleteVisit, type Visit } from './db.ts';
 import { GAP_MS, IDLE_SECONDS, VISIT_MAX_MS, VISIT_REQUEUE_MS } from './limits.ts';
 import { pageOf, titleOf, type PageInfo } from './page.ts';
@@ -43,7 +43,7 @@ interface Target {
 async function tabPage(ctx: Context, tabId: number): Promise<TabPage | null> {
   try {
     if (ctx.mobile) {
-      const [tab, probe] = await Promise.all([ctx.chrome.tabs.get(tabId), probePage(ctx, tabId)]);
+      const [tab, probe] = await Promise.all([getTab(ctx, tabId), probePage(ctx, tabId)]);
       return probe?.visible && !tab.incognito ? { tabId, documentId: probe.documentId, url: probe.url, title: tab.title ?? '' } : null;
     }
     const [tab, frame] = await Promise.all([ctx.chrome.tabs.get(tabId), ctx.chrome.webNavigation.getFrame({ tabId, frameId: 0 })]);
@@ -57,7 +57,7 @@ async function tabPage(ctx: Context, tabId: number): Promise<TabPage | null> {
 /** The window in front, or WINDOW_ID_NONE when another app is. */
 async function focusedWindow(ctx: Context): Promise<number> {
   try {
-    if (ctx.mobile) return (await ctx.chrome.tabs.query({ active: true }))[0]?.windowId ?? -1;
+    if (ctx.mobile) return (await queryTabs(ctx, { active: true }))[0]?.windowId ?? -1;
     const window = await ctx.chrome.windows.getLastFocused();
     return window.focused && window.id !== undefined ? window.id : ctx.chrome.windows.WINDOW_ID_NONE;
   } catch {
@@ -70,7 +70,7 @@ async function focusTarget(ctx: Context, state: FocusState): Promise<Target | nu
   if (!ctx.mobile && (state.idle !== 'active' || state.windowId === -1)) return null;
   let tabs: chrome.tabs.Tab[];
   try {
-    tabs = await ctx.chrome.tabs.query({ active: true, ...(ctx.mobile ? {} : { windowId: state.windowId }) });
+    tabs = await queryTabs(ctx, { active: true, ...(ctx.mobile ? {} : { windowId: state.windowId }) });
   } catch {
     return null;
   }

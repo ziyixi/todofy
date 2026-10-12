@@ -1,6 +1,6 @@
 /** iPhone behavior over the existing fake: visibility ends focus, reload changes identity, JPEG and resume uploads. */
 import { describe, expect, it, vi } from 'vitest';
-import { executeFile } from '../src/browser.ts';
+import { executeFile, probePage } from '../src/browser.ts';
 import { captureDue, readTab, storeCapture } from '../src/capture.ts';
 import type { Context } from '../src/context.ts';
 import { setToken } from '../src/db.ts';
@@ -8,7 +8,7 @@ import { beat, pageVisibility, reconcile } from '../src/focus.ts';
 import { compressScreenshot } from '../src/screenshot.ts';
 import { INITIAL_UPLOAD, uploadState } from '../src/store.ts';
 import { batchOf, flush } from '../src/upload.ts';
-import { harness, INGEST_TOKEN, MINUTE, SECOND, T0 } from './fake-chrome.ts';
+import { harness, INGEST_TOKEN, MINUTE, SECOND, T0, type FakeTab } from './fake-chrome.ts';
 import { openSpan, queuedDocuments, queuedVisits, spansOf } from './helpers.ts';
 
 vi.mock('../src/screenshot.ts', async (original) => ({ ...await original<typeof import('../src/screenshot.ts')>(), compressScreenshot: vi.fn() }));
@@ -21,6 +21,28 @@ async function phone() {
   h.browser.script = ({ files }) => files?.[0] === 'probe.js'
     ? { documentId: tab.documentId, visible, url: tab.url }
     : { build: ctx.build, documentId: tab.documentId, visible, title: tab.title, description: '', text: 'A synthetic article.', textTruncated: false, hasPasswordField: false };
+  // MV2 APIs answer asynchronously through callbacks and return no Promise.
+  const { get, query, captureVisibleTab } = h.browser.api.tabs;
+  const answer = <T>(work: Promise<T>, callback?: (value: T) => void) => {
+    void work.then((value) => callback?.(value), (error: unknown) => {
+      Object.assign(h.browser.api.runtime, { lastError: { message: error instanceof Error ? error.message : 'browser_api_failed' } });
+      callback?.(undefined as T);
+      delete (h.browser.api.runtime as unknown as Record<string, unknown>)['lastError'];
+    });
+  };
+  Object.assign(h.browser.api.tabs, {
+    get: (id: number, callback?: (value: FakeTab) => void) => { answer(get(id), callback); },
+    query: (info: { active?: boolean; windowId?: number }, callback?: (value: FakeTab[]) => void) => { answer(query(info), callback); },
+    captureVisibleTab: (_details: { format: 'png' }, callback?: (value: string) => void) => { answer(captureVisibleTab(), callback); },
+    executeScript: (id: number, details: { file: string }, callback?: (value: unknown[]) => void) => {
+      const target = { tabId: id, files: [details.file] };
+      h.browser.scriptCalls.push(target);
+      answer(Promise.resolve().then(() => {
+        const value = h.browser.script(target);
+        return [typeof value === 'object' && value !== null ? { url: h.browser.tab(id).url, ...value } : value];
+      }), callback);
+    },
+  });
   // iOS does not supply these desktop namespaces or Chrome document/lifecycle metadata.
   const api = h.browser.api as unknown as Record<string, unknown>;
   delete api['windows'];
@@ -30,7 +52,7 @@ async function phone() {
 }
 
 describe('Orion iPhone foreground capture', () => {
-  it('captures visible text/JPEG at ten seconds, omits unchanged content and stops at pagehide', async () => {
+  it('captures callback-only MV2 text/JPEG at ten seconds, omits unchanged content and stops at pagehide', async () => {
     const h = await phone();
     h.browser.screenshot = 'data:image/png;base64,synthetic';
     vi.mocked(compressScreenshot).mockResolvedValue({ base64: 'cGhvdG8=', preview: '390x844:' + btoa('a'.repeat(4096)), width: 390, height: 844, mediaType: 'image/jpeg' });
@@ -42,9 +64,10 @@ describe('Orion iPhone foreground capture', () => {
       if (job !== null) await storeCapture(h.ctx, job, await readTab(h.ctx, job), at);
     };
     await capture(T0 + 10 * SECOND);
+    expect(compressScreenshot).toHaveBeenCalledWith('data:image/png;base64,synthetic');
     await capture(T0 + MINUTE);
     expect(await queuedDocuments(h.ctx)).toHaveLength(1);
-    expect((await queuedDocuments(h.ctx))[0]).toMatchObject({ screenshot_jpeg_base64: 'cGhvdG8=', screenshot_width: 390, screenshot_height: 844 });
+    expect((await queuedDocuments(h.ctx))[0]).toMatchObject({ text: 'A synthetic article.', screenshot_jpeg_base64: 'cGhvdG8=', screenshot_width: 390, screenshot_height: 844 });
     expect((await queuedDocuments(h.ctx))[0]?.screenshot_webp_base64).toBeUndefined();
     h.hide();
     await pageVisibility(h.ctx, h.tab.id, h.tab.documentId, false, T0 + MINUTE + 2 * SECOND);
@@ -97,9 +120,26 @@ describe('Orion iPhone foreground capture', () => {
     const h = await phone();
     // Namespace presence is not permission: MV2 must use its permitted legacy method.
     const calls: unknown[] = [];
-    Object.assign(h.browser.api.tabs, { executeScript: (tabId: number, details: unknown) => { calls.push({ tabId, details }); return Promise.resolve([{ probe: true }]); } });
+    Object.assign(h.browser.api.tabs, { executeScript: (tabId: number, details: unknown, callback?: (value: unknown[]) => void) => {
+      calls.push({ tabId, details });
+      queueMicrotask(() => callback?.([{ probe: true }]));
+    } });
     expect(await executeFile(h.ctx, h.tab.id, 'probe.js')).toEqual({ probe: true });
     expect(calls).toEqual([{ tabId: h.tab.id, details: { file: 'probe.js', frameId: 0, runAt: 'document_start' } }]);
+  });
+
+  it('reads the callback result of the visible document and rejects native API errors', async () => {
+    const h = await phone();
+    expect(await probePage(h.ctx, h.tab.id)).toEqual({ documentId: h.tab.documentId, visible: true, url: h.tab.url });
+    Object.assign(h.browser.api.tabs, { executeScript: (_tabId: number, _details: unknown, callback: (value?: unknown[]) => void) => {
+      queueMicrotask(() => {
+        Object.assign(h.browser.api.runtime, { lastError: { message: 'Cannot access contents of this page' } });
+        callback();
+        delete (h.browser.api.runtime as unknown as Record<string, unknown>)['lastError'];
+      });
+    } });
+    await expect(executeFile(h.ctx, h.tab.id, 'probe.js')).rejects.toThrow('Cannot access contents of this page');
+    expect(await probePage(h.ctx, h.tab.id)).toBeNull();
   });
 
   it('uploads queued phone content within a minute and labels its report mobile', async () => {
