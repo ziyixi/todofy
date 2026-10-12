@@ -15,7 +15,10 @@ shared token, privacy rules, snapshot deduplication and the unified Dropbox arch
 [Full branch CI](https://github.com/ziyixi/todofy/actions/runs/38193778901) and
 [same-SHA release](https://github.com/ziyixi/todofy/actions/runs/38194203995) passed. GitHub Deployment `7004923541`
 verified Worker `0c9f27be-d2c9-4556-8a7a-333b8a55d834`. Both extension assets are version `2026.1012.158`, built
-from this SHA. The Mac's stable installation files were updated with its existing key and settings retained; the
+from this SHA. Documentation follow-up `935254c` also ran the repository's Recall release rule successfully:
+[main run](https://github.com/ziyixi/todofy/actions/runs/38194829673), current Worker
+`1f377641-0f18-4191-9ad9-6938f622b7c8`, Deployment `7005025557`; application code and extension assets are unchanged.
+The Mac's stable installation files were updated with its existing key and settings retained; the
 browser tool blocks extension-scheme URLs, so its newly running version was not independently read from Chrome.
 Read-only production UI checks confirmed the existing public test snapshot still renders and an empty synthetic
 device filter reveals no other device's visits. No production token was created or changed for testing.
