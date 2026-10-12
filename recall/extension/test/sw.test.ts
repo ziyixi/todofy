@@ -4,7 +4,10 @@
 import type { IngestBatch } from '@ziyixi/proto/recall/ingest/v1/ingest_wire';
 import { IDBFactory } from 'fake-indexeddb';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { getVisit, oldestItems, openDb, saveVisit } from '../src/db.ts';
+import { pageOf } from '../src/page.ts';
 import type { FocusState } from '../src/store.ts';
+import { newVisit } from '../src/visits.ts';
 import { EXTENSION_ID, FakeBrowser, FakeFetch, INGEST_TOKEN, SECOND, T0, type FakeTab } from './fake-chrome.ts';
 
 let browser: FakeBrowser;
@@ -71,6 +74,33 @@ describe('the service worker', () => {
     browser.events.installed.emit({ reason: 'update' });
     await vi.waitFor(() => { expect(create).toHaveBeenCalledOnce(); });
     expect(browser.alarms.get('tick')).toEqual({ name: 'tick', periodInMinutes: 1 });
+  });
+
+  it.each([
+    { mobile: true, frameId: undefined, closes: true },
+    { mobile: true, frameId: 3, closes: false },
+    { mobile: false, frameId: undefined, closes: false },
+  ])('handles pagehide with mobile=$mobile and frameId=$frameId', async ({ mobile, frameId, closes }) => {
+    vi.stubGlobal('RECALL_ORION', mobile);
+    await start();
+    const tab = browser.open('https://docs.example.com/guide');
+    const db = await openDb();
+    const page = await pageOf(tab.url, { patterns: { noText: [], siteOnly: [] }, ownHosts: [] });
+    if (page === null) throw new Error('synthetic page excluded');
+    const visit = newVisit('synthetic-visit', tab.id, tab.documentId, page, 'Synthetic guide', T0);
+    await saveVisit(db, visit);
+    const open = { visitId: visit.id, tabId: tab.id, documentId: tab.documentId, start: T0 };
+    await browser.session.set({ focus: { open, windowId: 1, idle: 'active' } });
+    await browser.local.set({ mirror: { open, lastBeat: T0 } });
+    vi.setSystemTime(T0 + 5 * SECOND);
+    const sender = { id: EXTENSION_ID, tab, ...(frameId === undefined ? {} : { frameId }) };
+    browser.events.message.emit({ type: 'page-visibility', documentId: tab.documentId, visible: false, at: Date.now() }, sender, () => undefined);
+    await settle();
+    expect((await focus())?.open).toEqual(closes ? null : open);
+    expect((await getVisit(db, visit.id))?.spans).toEqual(closes ? [[T0, T0 + 5 * SECOND]] : []);
+    const queued = await oldestItems(db, 10, Number.MAX_SAFE_INTEGER, Date.now());
+    expect(queued.map((item) => item.kind)).toEqual(closes ? ['visit'] : []);
+    db.close();
   });
 
   it('turns tab events into a visit, and the options page\'s save into an upload', async () => {

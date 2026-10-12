@@ -41,7 +41,8 @@ plugin token named `iPhone`; paste it into the extension's settings and save. Th
 an unconfirmed save shows its pending step after twelve seconds and keeps the pasted token.
 
 The Orion package uses the same capture/queue code with a nonpersistent MV2 background script. A dynamically
-injected top-frame probe provides a per-document identity and reports `visibilitychange` / `pagehide` / `pageshow`.
+injected top-frame probe answers fresh visibility/text through callback-based `tabs.sendMessage`, without
+using its file-injection completion value. Reinjection replaces its listener and preserves the document identity. It reports `visibilitychange` / `pagehide` / `pageshow`.
 Only a visible foreground document records focus; no missing desktop API is treated as proof of activity.
 The browser can suspend the extension while another app is open or the phone is locked. Returning resumes the
 existing queue; phone batches flush within a minute while active. This does not record activity in other apps.
@@ -49,8 +50,8 @@ existing queue; phone batches flush within a minute while active. This does not 
 Screenshots use native WebP where supported, otherwise verified native JPEG, with the same size and deduplication
 limits. Settings show the latest sampling outcome, screenshot format/failure, activity check, and queued uploads. A successful connection may only be an empty heartbeat; it does not prove a page was recorded. iOS capture
 support still needs the owner's one-time device check; tests over a fake browser do not prove Orion behavior.
-The [local WebKit check](../docs/mobile.md#本地验证) runs the built settings/background/probe/capture scripts with native IndexedDB, JPEG and gzip,
-callback-only MV2 fixtures and automatic minute alarms before phone acceptance. It checks the synthetic consumer
+The [local WebKit check](../docs/mobile.md#本地验证) runs the built settings/background/probe scripts with native IndexedDB, JPEG and gzip,
+callback-only MV2 fixtures, discarded injection completion values and automatic minute alarms before phone acceptance. It checks the synthetic consumer
 receives actual text and one visit without duplicate snapshots; no production upload is made. To update the phone, install the newer Orion ZIP; there is
 no unpacked-folder self-update on iOS.
 

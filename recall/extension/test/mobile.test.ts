@@ -34,12 +34,16 @@ async function phone() {
     get: (id: number, callback?: (value: FakeTab) => void) => { answer(get(id), callback); },
     query: (info: { active?: boolean; windowId?: number }, callback?: (value: FakeTab[]) => void) => { answer(query(info), callback); },
     captureVisibleTab: (_details: { format: 'png' }, callback?: (value: string) => void) => { answer(captureVisibleTab(), callback); },
-    executeScript: (id: number, details: { file: string }, callback?: (value: unknown[]) => void) => {
+    executeScript: (id: number, details: { file: string }, callback?: (value?: unknown[]) => void) => {
       const target = { tabId: id, files: [details.file] };
       h.browser.scriptCalls.push(target);
+      // Injection only acknowledges completion; the native bridge need not return the script's value.
+      answer(Promise.resolve(undefined), callback);
+    },
+    sendMessage: (id: number, message: { type: string }, callback?: (value: unknown) => void) => {
       answer(Promise.resolve().then(() => {
-        const value = h.browser.script(target);
-        return [typeof value === 'object' && value !== null ? { url: h.browser.tab(id).url, ...value } : value];
+        const value = h.browser.script({ tabId: id, files: [message.type === 'recall-probe' ? 'probe.js' : 'capture.js'] });
+        return typeof value === 'object' && value !== null ? { url: h.browser.tab(id).url, ...value } : value;
       }), callback);
     },
   });
@@ -117,19 +121,20 @@ describe('Orion iPhone foreground capture', () => {
     expect(h.browser.screenshotCalls).toBe(0);
   });
 
-  it('can inject only top-frame files through MV2 tabs.executeScript', async () => {
+  it('ignores unusable file completion values and reads through the callback-only content channel', async () => {
     const h = await phone();
     // Namespace presence is not permission: MV2 must use its permitted legacy method.
     const calls: unknown[] = [];
-    Object.assign(h.browser.api.tabs, { executeScript: (tabId: number, details: unknown, callback?: (value: unknown[]) => void) => {
+    Object.assign(h.browser.api.tabs, { executeScript: (tabId: number, details: unknown, callback?: (value?: unknown[]) => void) => {
       calls.push({ tabId, details });
-      queueMicrotask(() => callback?.([{ probe: true }]));
+      queueMicrotask(() => callback?.([null]));
     } });
-    expect(await executeFile(h.ctx, h.tab.id, 'probe.js')).toEqual({ probe: true });
-    expect(calls).toEqual([{ tabId: h.tab.id, details: { file: 'probe.js', frameId: 0, runAt: 'document_start' } }]);
+    expect(await executeFile(h.ctx, h.tab.id, 'probe.js')).toEqual({ documentId: h.tab.documentId, visible: true, url: h.tab.url });
+    expect(await executeFile(h.ctx, h.tab.id, 'capture.js')).toMatchObject({ text: 'A synthetic article.', documentId: h.tab.documentId });
+    expect(calls).toEqual(Array.from({ length: 2 }, () => ({ tabId: h.tab.id, details: { file: 'probe.js', runAt: 'document_start' } })));
   });
 
-  it('reads the callback result of the visible document and rejects native API errors', async () => {
+  it('reads the current document through messages and rejects native injection errors', async () => {
     const h = await phone();
     expect(await probePage(h.ctx, h.tab.id)).toEqual({ documentId: h.tab.documentId, visible: true, url: h.tab.url });
     Object.assign(h.browser.api.tabs, { executeScript: (_tabId: number, _details: unknown, callback: (value?: unknown[]) => void) => {

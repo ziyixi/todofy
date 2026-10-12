@@ -3,10 +3,14 @@
 export function fixtureScript(manifest) {
   return `
 /* global parent, window, location, queueMicrotask, setInterval, structuredClone */
-const shared = parent.__test;
+const contentPage = location.pathname === '/article.html';
+const shared = contentPage ? (window.__test = { local: {}, listeners: {} }) : parent.__test;
 const event = (name) => ({
   addListener(fn) {
     (shared.listeners[name] ??= []).push(fn);
+  },
+  removeListener(fn) {
+    shared.listeners[name] = (shared.listeners[name] ?? []).filter((listener) => listener !== fn);
   },
 });
 const area = {
@@ -33,25 +37,18 @@ window.chrome = {
     reload() {},
     openOptionsPage: () => Promise.resolve(),
     sendMessage(request, callback) {
+      if (contentPage) {
+        window.sendToBackground(request).then(() => callback?.());
+        return undefined;
+      }
       if (request.type === 'status') {
         shared.statusRequests++;
         if (shared.stallRefresh && shared.statusRequests > 1) return new Promise(() => {});
       }
-      if (request.type === 'page-visibility') {
-        shared.visibility.push(request.visible);
-        const listener = shared.listeners.message?.[0];
-        listener(request, { id: 'synthetic-recall-extension', frameId: 0, tab: shared.tab }, () => {});
-        queueMicrotask(() => callback?.());
-        return undefined;
-      }
       return new Promise((resolve) => {
         const listener = shared.listeners.message?.[0];
         if (!listener) throw Error('background_not_ready');
-        const sender =
-          location.pathname === '/article.html'
-            ? { id: 'synthetic-recall-extension', frameId: 0, tab: shared.tab }
-            : { id: 'synthetic-recall-extension' };
-        const keep = listener(request, sender, resolve);
+        const keep = listener(request, { id: 'synthetic-recall-extension' }, resolve);
         if (keep !== true) resolve();
       });
     },
@@ -77,6 +74,7 @@ window.chrome = {
     },
     executeScript(id, details, callback) {
       shared.calls.execute++;
+      if (Object.hasOwn(details, 'frameId')) throw Error('mobile_injection_must_use_default_top_frame');
       if (shared.injectWhileLoading) {
         shared.loadingRefusal = true;
         window.chrome.runtime.lastError = { message: 'Cannot access page while loading' };
@@ -85,7 +83,23 @@ window.chrome = {
         return undefined;
       }
       shared.executeFile(details.file).then(
-        (value) => callback([value]),
+        () => {
+          // Deliberately discard completion: Orion's observed response was unusable, its exact shape is unknown.
+          shared.discardedCompletions = (shared.discardedCompletions ?? 0) + 1;
+          callback(undefined);
+        },
+        (error) => {
+          window.chrome.runtime.lastError = { message: error.message };
+          callback(undefined);
+          delete window.chrome.runtime.lastError;
+        },
+      );
+      return undefined;
+    },
+    sendMessage(id, request, callback) {
+      (shared.pageRequests ??= []).push(request.type);
+      window.sendToContent(request).then(
+        (value) => callback(structuredClone(value)),
         (error) => {
           window.chrome.runtime.lastError = { message: error.message };
           callback(undefined);

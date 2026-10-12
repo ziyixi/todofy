@@ -51,10 +51,11 @@ Dropbox 统一归档。手机不需要连接 Dropbox，也不用复制电脑的�
 
 Agent 先运行现有扩展测试，再用本机真实 WebKit 打开实际构建的设置、后台和公开测试页面。
 四项保存检查覆盖正常保存、采集查询卡住、设置写入卡住、保存后的状态刷新卡住。
-两项采集检查分别验证加载完成事件和自动分钟 Alarm 能启动采集：执行产物里的真实 `probe.js` 与
-`capture.js`，通过原生 IndexedDB 保存正文，原生画布压缩 JPEG，再解开实际 gzip 请求核对假消费者收到的内容。
+两项采集检查分别验证加载完成事件和自动分钟 Alarm 能启动采集：执行产物里的真实 `probe.js`，
+通过标准扩展消息读取当前 DOM，通过原生 IndexedDB 保存正文，原生画布压缩 JPEG，再解开实际 gzip 请求核对假消费者收到的内容。
 同一页面的下一次采样不能多存快照；页面离开必须结束访问，消费者最终只收到一份正文和一条访问。
-这些检查不手动发出 Alarm，不用手写 probe 返回值代替注入脚本。
+测试故意丢弃文件注入的完成值，仍须经实际脚本的消息监听器取得正文；不手动发出 Alarm，
+不用手写 probe 或正文返回值代替注入脚本。桌面 Chrome 继续使用原来的文件执行结果。
 没有新增测试框架或依赖；复用仓库已有的 Playwright。以下命令在仓库根目录执行（本机须已有 WebKit）：
 
 ```sh
@@ -65,6 +66,10 @@ import { checkOrionOptions } from './recall/extension/test/options-browser.mjs';
 console.log(await checkOrionOptions({ webkit, expect, folder: './recall/extension/dist' }));
 JS
 ```
+
+Orion 使用文件注入安装顶层监听器，再由 `tabs.sendMessage` 请求当前可见性或正文。
+每次注入替换监听器，保留文档身份；不依赖本次故障中的文件完成值，也不猜测它是字符串、空数组还是其他形状。
+此接口在 [Orion 官方支持表](https://browser.kagi.com/WebExtensions-API-Support.html)列为 iOS 支持；手机实际通信仍需确认。
 
 上述消费者请求由本地测试截获，不访问生产 Recall。扩展 API 桥接与 `chrome.storage.local` 是 fixture；
 DOM、脚本执行、IndexedDB、图片压缩与 gzip 是真实 WebKit。它不能证明 Orion 自己的 API 实现或 iOS 前后台挂起行为。

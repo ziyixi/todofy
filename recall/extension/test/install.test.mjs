@@ -4,7 +4,7 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { runInNewContext } from 'node:vm';
+import { createContext, runInContext, runInNewContext } from 'node:vm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildExtension } from '../scripts/build.mjs';
 import { checkBuild, installExtension } from '../scripts/install.mjs';
@@ -74,6 +74,8 @@ describe('the build', () => {
     const messages = [];
     let lastErrorReads = 0;
     const runtime = {
+      id: 'synthetic-extension',
+      onMessage: { addListener() {}, removeListener() {} },
       get lastError() { lastErrorReads++; return { message: 'The message port closed before a response was received.' }; },
       sendMessage(message, callback) {
         messages.push(message);
@@ -82,9 +84,11 @@ describe('the build', () => {
       },
     };
     const document = { visibilityState: 'visible', addEventListener: (name, listener) => documentEvents.set(name, listener) };
+    const window = { addEventListener: (name, listener) => windowEvents.set(name, listener) };
+    window.top = window;
     const result = runInNewContext(code, {
       document,
-      window: { addEventListener: (name, listener) => windowEvents.set(name, listener) },
+      window,
       location: { href: 'https://example.org/mobile' },
       crypto: { randomUUID: () => 'synthetic-document' },
       chrome: { runtime },
@@ -102,6 +106,39 @@ describe('the build', () => {
       { type: 'page-visibility', documentId: 'synthetic-document', visible: true },
     ]);
     expect(lastErrorReads).toBe(3);
+  });
+
+  it('answers current top-frame DOM over messages even when the injection result is discarded', () => {
+    const code = readFileSync(join(built.orionFolder, 'probe.js'), 'utf8');
+    const listeners = new Set();
+    const runtime = { id: 'synthetic-extension', onMessage: { addListener: (fn) => listeners.add(fn), removeListener: (fn) => listeners.delete(fn) } };
+    const body = { innerText: 'First synthetic text' };
+    const document = {
+      title: 'A synthetic page', location: { href: 'https://example.org/mobile' }, visibilityState: 'visible',
+      addEventListener() {}, querySelectorAll: () => [], querySelector: (selector) => selector === 'body' ? body : null,
+    };
+    const window = { addEventListener() {} };
+    window.top = window;
+    const context = createContext({ document, window, location: document.location, crypto: { randomUUID: () => 'synthetic-document' }, chrome: { runtime } });
+    // No completion value crosses the native injection bridge. Only onMessage can answer the background.
+    for (let i = 0; i < 10; i++) runInContext(code, context);
+    expect(listeners.size).toBe(1);
+    const replies = [];
+    const message = (type, id = runtime.id) => listeners.values().next().value({ type }, { id }, (reply) => replies.push(reply));
+    message('recall-probe');
+    expect(replies.at(-1)).toEqual({ documentId: 'synthetic-document', visible: true, url: document.location.href });
+    body.innerText = 'Updated synthetic text';
+    message('recall-capture');
+    expect(replies.at(-1)).toMatchObject({ build: built.version, documentId: 'synthetic-document', text: body.innerText });
+    document.visibilityState = 'hidden';
+    message('recall-probe');
+    expect(replies.at(-1).visible).toBe(false);
+    message('recall-capture', 'other-extension');
+    message('unrelated');
+    expect(replies).toHaveLength(3);
+    listeners.clear();
+    runInNewContext(code, { document, window: { top: window }, chrome: { runtime } });
+    expect(listeners.size).toBe(0);
   });
 
   it('builds an Orion file ZIP from the same source with a nonpersistent plain background script', () => {

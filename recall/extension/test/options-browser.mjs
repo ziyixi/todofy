@@ -79,6 +79,7 @@ export async function checkOrionOptions({ webkit, expect, folder }) {
     await page.clock.install({ time: new Date('2026-10-12T00:00:00Z') });
     const batches = [];
     const completions = [];
+    const responses = [];
     const errors = [];
     page.on('pageerror', (e) => errors.push(e.message));
     await context.route('**/*', async (route) => {
@@ -139,17 +140,35 @@ export async function checkOrionOptions({ webkit, expect, folder }) {
       frame.style = 'width:390px;height:1000px;border:0';
       document.body.append(frame);
     });
-    const navigation = page.waitForEvent('framenavigated', {
-      predicate: (frame) => frame.url().endsWith('/article.html'),
+    // A real top-level page exercises the script's top-frame guard and native pagehide navigation.
+    const article = await context.newPage();
+    article.on('pageerror', (error) => errors.push(error.message));
+    await article.exposeFunction('sendToBackground', async (request) =>
+      page.evaluate(
+        (request) =>
+          new Promise((resolve) => {
+            if (request.type === 'page-visibility') window.__test.visibility.push(request.visible);
+            const listener = window.__test.listeners.message[0];
+            const sender = { id: 'synthetic-recall-extension', frameId: 0, tab: window.__test.tab };
+            if (listener(request, sender, resolve) !== true) resolve();
+          }),
+        request,
+      ),
+    );
+    await page.exposeFunction('sendToContent', async (request) => {
+      const value = await article.evaluate(
+        (request) =>
+          new Promise((resolve) => {
+            const listener = window.__test.listeners.message?.[0];
+            if (!listener) throw Error('content_listener_not_installed');
+            if (listener(request, { id: 'synthetic-recall-extension' }, resolve) !== true) resolve();
+          }),
+        request,
+      );
+      responses.push({ type: request.type, value });
+      return value;
     });
-    await page.evaluate(() => {
-      const frame = document.createElement('iframe');
-      frame.id = 'article';
-      frame.src = '/article.html';
-      frame.style = 'width:390px;height:844px;border:0';
-      document.body.prepend(frame);
-    });
-    const article = await navigation;
+    await article.goto(base + '/article.html');
     await article.waitForSelector('#article');
     await page.exposeFunction('executePublishedFile', async (file) => {
       const source = await readFile(join(folder, 'orion', file), 'utf8');
@@ -158,7 +177,7 @@ export async function checkOrionOptions({ webkit, expect, folder }) {
       return value;
     });
     await page.exposeFunction('capturePublishedPage', async () => {
-      const png = await article.locator('body').screenshot({ type: 'png' });
+      const png = await article.screenshot({ type: 'png' });
       return 'data:image/png;base64,' + png.toString('base64');
     });
     await page.evaluate(() => {
@@ -177,7 +196,7 @@ export async function checkOrionOptions({ webkit, expect, folder }) {
     await expect(options.locator('#server')).toHaveValue('https://recall.ziyixi.science');
     await expect(options.locator('#label')).toHaveValue('iPhone · Orion');
     await expect(options.locator('#upload-status')).toContainText('Orion · iOS');
-    return { context, page, options, errors, batches, completions };
+    return { context, page, article, options, errors, batches, completions, responses };
   }
   async function storedToken(page) {
     return page.evaluate(
@@ -214,6 +233,7 @@ export async function checkOrionOptions({ webkit, expect, folder }) {
     const h = await start();
     await fillAndSave(h);
     await h.page.waitForFunction(() => window.__test.local.upload?.lastUploadAt > 0);
+    await h.article.bringToFront();
     await h.page.evaluate(() => {
       window.__test.injectWhileLoading = true;
       window.__test.emit('activated', { tabId: 1, windowId: 1 });
@@ -228,6 +248,9 @@ export async function checkOrionOptions({ webkit, expect, folder }) {
       await h.page.evaluate(() => window.__test.emit('updated', 1, { status: 'complete' }));
     }
     await expect.poll(() => getStatus(h)).toMatchObject({ focused: true });
+    await h.article.locator('#article').evaluate((element) => {
+      element.textContent += ' Fresh DOM after listener installation.';
+    });
     await h.page.clock.fastForward(11000);
     await expect.poll(() => h.page.evaluate(() => window.__test.local.capture_status)).toMatchObject({ text: 'saved' });
     if (!waitForMinute) {
@@ -258,18 +281,28 @@ export async function checkOrionOptions({ webkit, expect, folder }) {
     expect(document.title).toBe('Actual DOM capture test');
     expect(document.screenshot_width).toBeGreaterThan(0);
     expect(document.screenshot_jpeg_base64 || document.screenshot_webp_base64).toBeTruthy();
-    expect(h.completions.some(({ file, value }) => file === 'probe.js' && value.visible && value.documentId)).toBe(
+    expect(document.text).toContain('Fresh DOM after listener installation.');
+    expect(h.completions.length).toBeGreaterThan(0);
+    expect(h.completions.every(({ file }) => file === 'probe.js')).toBe(true);
+    expect(h.responses.some(({ type, value }) => type === 'recall-probe' && value.visible && value.documentId)).toBe(
       true,
     );
     expect(
-      h.completions.some(
-        ({ file, value }) => file === 'capture.js' && value.build === manifest.version && value.visible,
+      h.responses.some(
+        ({ type, value }) => type === 'recall-capture' && value.build === manifest.version && value.visible,
       ),
     ).toBe(true);
+    expect(await h.article.evaluate(() => window.__test.listeners.message.length)).toBe(1);
+    const nativeBoundary = await h.page.evaluate(() => ({
+      completionDiscarded: window.__test.discardedCompletions > 0,
+      messageRequests: [...new Set(window.__test.pageRequests)],
+    }));
+    expect(nativeBoundary.completionDiscarded).toBe(true);
+    expect(nativeBoundary.messageRequests).toEqual(expect.arrayContaining(['recall-probe', 'recall-capture']));
     await h.page.evaluate(() => {
       window.__test.tab.active = false;
-      document.getElementById('article').src = '/blank.html';
     });
+    await h.article.goto(base + '/blank.html');
     await h.page.waitForFunction(() => window.__test.visibility.includes(false));
     await expect.poll(() => getStatus(h)).toMatchObject({ focused: false });
     await h.page.clock.fastForward(61000);
@@ -286,6 +319,7 @@ export async function checkOrionOptions({ webkit, expect, folder }) {
       documents: 1,
       visits: 1,
       screenshotFormat: document.screenshot_jpeg_base64 ? 'jpeg' : 'webp',
+      ...nativeBoundary,
     });
     await h.context.close();
   }

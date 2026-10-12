@@ -20,7 +20,7 @@ export function browserFeatures(api: typeof chrome) {
     readonly action?: typeof chrome.action;
     readonly browserAction?: typeof chrome.browserAction;
     readonly tabs: {
-      readonly executeScript?: (tabId: number, details: { file: string; frameId: number; runAt: 'document_start' }, callback?: (results?: unknown[]) => void) => Promise<unknown[] | undefined> | undefined;
+      readonly executeScript?: (tabId: number, details: { file: string; frameId?: number; runAt: 'document_start' }, callback?: (results?: unknown[]) => void) => Promise<unknown[] | undefined> | undefined;
       readonly captureVisibleTab?: typeof chrome.tabs.captureVisibleTab;
     };
   };
@@ -63,14 +63,17 @@ export function captureViewport(ctx: Context, windowId: number): Promise<string>
 }
 
 /** MV2 Orion exposes tabs.executeScript; modern browsers use scripting. Both inject only the main frame. */
-export async function executeFile(ctx: Context, tabId: number, file: string, documentId?: string): Promise<unknown> {
+export async function executeFile(ctx: Context, tabId: number, file: 'probe.js' | 'capture.js', documentId?: string): Promise<unknown> {
   const features = browserFeatures(ctx.chrome);
   if (ctx.mobile && features.tabs.executeScript !== undefined) {
     const execute = features.tabs.executeScript;
-    const results = await new Promise<unknown[] | undefined>((resolve, reject) => {
-      void execute.call(ctx.chrome.tabs, tabId, { file, frameId: 0, runAt: 'document_start' }, (values) => { receive(ctx, resolve, reject, values); });
+    // Orion's file-injection completion did not yield a usable probe. Use the standard content-message reply.
+    await new Promise<void>((resolve, reject) => {
+      void execute.call(ctx.chrome.tabs, tabId, { file: 'probe.js', runAt: 'document_start' }, () => { receive(ctx, resolve, reject, undefined); });
     });
-    return results?.[0];
+    return new Promise<unknown>((resolve, reject) => {
+      ctx.chrome.tabs.sendMessage(tabId, { type: file === 'probe.js' ? 'recall-probe' : 'recall-capture' }, (value: unknown) => { receive(ctx, resolve, reject, value); });
+    });
   }
   if (features.scripting !== undefined) {
     const [first] = await features.scripting.executeScript({

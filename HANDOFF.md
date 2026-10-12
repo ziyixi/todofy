@@ -9,6 +9,21 @@ Its old waiting lists and release identities are historical, not instructions to
 
 ## Current work
 
+`codex/recall-orion-page-messages` addresses the owner's new `page_probe_invalid_result` screenshot:
+connection succeeds but sampling has not started. This identifies an unusable file-injection result, not its
+native type or exact Orion implementation defect. Local WebKit repeated injection and JSON/structured-clone
+checks found no script syntax, global-name or ordinary-object serialization error. The old browser fixture
+manufactured a successful `[value]` completion, so it did not exercise this native API boundary.
+The mobile path now injects the existing top-frame probe, ignores its completion value and requests fresh probe
+or text through standard callback-based `tabs.sendMessage`. One replaced listener preserves document identity
+without retaining an old build; desktop injection behavior stays unchanged. No new dependency, retries or service.
+Top-frame self-check and existing URL, visibility, build, document and privacy gates remain. Mobile visibility
+messages accept an omitted frameId; known child frames and other senders remain rejected.
+All 127 extension tests, typecheck, lint and both builds pass. The isolated WebKit check passes all six cases,
+including discarded injection completion, real fresh DOM/text/JPEG upload, one visit and no repeated snapshot.
+The native browser API bridge remains synthetic; phone capture/upload acceptance is open. Release is pending.
+Do not infer phone success from a heartbeat, queue length or synthetic API fixture.
+
 Recall Orion capture fixes are released at `fe419a4` (extension `2026.1012.403`).
 Owner confirmed Save now works, but no sampling result appeared. Read-only production UI selected the phone device:
 its timeline had no visits today or link to an earlier recorded day. The settings timestamp is a heartbeat, not
@@ -32,7 +47,7 @@ case, no duplicate snapshot and zero page errors. Re-running the same harness on
 `fe419a4`, the corrected connection labels and heartbeat explanation; only device metadata was read.
 Mac installation files were updated while preserving identity/settings; its running version was not independently
 read. [Phone ZIP](https://github.com/ziyixi/todofy/releases/download/recall-extension-v2026.1012.403/recall-orion-v2026.1012.403.zip).
-Pending only owner update of the existing phone extension and actual phone capture/upload acceptance. Do not mark
+The subsequent owner screenshot reports `page_probe_invalid_result`; this release did not establish phone capture. Pending actual phone capture/upload acceptance. Do not mark
 that passed from local fixtures or from a heartbeat. Owner can browse normally after updating; check its timeline,
 and if still empty use the new activity-check, sampling and fixed-error fields instead of another blind trial.
 `codex/recall-orion-capture-verification` records these receipts; root documentation only, no further app release.

@@ -243,7 +243,7 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) =>
   if (sender.id !== chrome.runtime.id) return false;
   if (typeof message === 'object' && message !== null && 'type' in message && message.type === 'page-visibility') {
     const value = message as Record<string, unknown>;
-    if (sender.frameId !== 0 || sender.tab?.id === undefined || sender.tab.incognito || typeof value['documentId'] !== 'string' || typeof value['visible'] !== 'boolean' || typeof value['at'] !== 'number' || !Number.isFinite(value['at'])) return false;
+    if ((sender.frameId !== 0 && !(MOBILE && sender.frameId === undefined)) || sender.tab?.id === undefined || sender.tab.incognito || typeof value['documentId'] !== 'string' || typeof value['visible'] !== 'boolean' || typeof value['at'] !== 'number' || !Number.isFinite(value['at'])) return false;
     const tabId = sender.tab.id;
     const documentId = value['documentId'];
     const visible = value['visible'];
