@@ -9,22 +9,23 @@ Its old waiting lists and release identities are historical, not instructions to
 
 ## Current work
 
-`codex/recall-orion-page-messages` addresses the owner's new `page_probe_invalid_result` screenshot:
-connection succeeds but sampling has not started. This identifies an unusable file-injection result, not its
-native type or exact Orion implementation defect. Local WebKit repeated injection and JSON/structured-clone
-checks found no script syntax, global-name or ordinary-object serialization error. The old browser fixture
-manufactured a successful `[value]` completion, so it did not exercise this native API boundary.
-The mobile path now injects the existing top-frame probe, ignores its completion value and requests fresh probe
-or text through standard callback-based `tabs.sendMessage`. One replaced listener preserves document identity
-without retaining an old build; desktop injection behavior stays unchanged. No new dependency, retries or service.
-Top-frame self-check and existing URL, visibility, build, document and privacy gates remain. Mobile visibility
-messages accept an omitted frameId; known child frames and other senders remain rejected.
-All 127 extension tests, typecheck, lint and both builds pass. The isolated WebKit check passes all six cases,
-including discarded injection completion, real fresh DOM/text/JPEG upload, one visit and no repeated snapshot.
-The identical corrected harness on the downloaded `2026.1012.403` fails with
-`not_focused:page_probe_invalid_result` when the completion value is discarded; it does not assume frameId
-rejection. The native browser API bridge remains synthetic; phone capture/upload acceptance is open. Release is pending.
-Do not infer phone success from a heartbeat, queue length or synthetic API fixture.
+Recall Orion content-message capture fix is released at `e397f51` (extension `2026.1012.429`).
+The owner's `403` screenshot reports `page_probe_invalid_result`; it identifies an unusable probe result,
+not the exact native shape or Orion implementation defect. The mobile path now ignores file-injection
+completion and requests fresh visibility/text through callback-based `tabs.sendMessage`. One replaced top-frame,
+own-extension listener preserves document identity; desktop behavior, privacy and deduplication stay unchanged.
+All 127 extension tests, typecheck, lint and builds pass. The same corrected WebKit harness reproduces
+`not_focused:page_probe_invalid_result` with downloaded `403`; it passes all six cases on the actual downloaded
+`429` ZIP, including fresh DOM/JPEG, native IndexedDB/gzip, automatic alarms, one visit and no repeated snapshot.
+The API bridge is synthetic, so phone capture/upload acceptance remains open. Do not infer success from heartbeats.
+[Branch CI](https://github.com/ziyixi/todofy/actions/runs/38203713036) and the
+[same-SHA release](https://github.com/ziyixi/todofy/actions/runs/38204085384) passed. Deployment `7006529755`
+verified Worker `e97a57e4-815e-4b9b-bd61-4424bc9298f2`; the live UI displayed `e397f51`.
+Mac installation files were updated preserving settings; its running version was not independently read.
+[Evidence and minimal phone check](docs/recall-mobile-verification.md),
+[phone ZIP](https://github.com/ziyixi/todofy/releases/download/recall-extension-v2026.1012.429/recall-orion-v2026.1012.429.zip).
+`codex/recall-orion-page-messages-verification` records receipts only; no further application change or release.
+No new dependency, service, retries, token or budget change.
 
 Recall Orion capture fixes are released at `fe419a4` (extension `2026.1012.403`).
 Owner confirmed Save now works, but no sampling result appeared. Read-only production UI selected the phone device:
