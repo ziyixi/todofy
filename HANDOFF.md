@@ -27,16 +27,16 @@ at `03:45:02.388Z`, before any manual upload or diagnostic Send. The test fixtur
 These are Mac results, not iOS proof. [Diagnostic evidence](docs/recall-diagnostic-verification.md).
 
 The owner-authorized six empty old phone test connections were removed through the production inline confirmation.
-Settings now has two groups/two connections: the recorded phone `45` and Mac `429`. Credentials and all historical
+Cleanup left two groups/two connections: the recorded phone `45` and Mac `429`. Credentials and all historical
 records remain. Token names are editable without rotation; same-name installs fold without merging identities.
 The synthetic Settings preview is stopped. [Settings evidence](docs/recall-settings-verification.md).
 
-**Remaining owner step:** load the [Orion 337 ZIP](https://github.com/ziyixi/todofy/releases/download/recall-extension-v2026.1013.337/recall-orion-v2026.1013.337.zip)
-on the phone, disabling the old instance without resetting its token. Start the existing diagnostic, keep the fixed
-public page foreground about a minute, return and Send. Do not click Immediate Upload for this check. Then inspect
-only the diagnostic and fixed public-test receipts for automatic text/image/visit uploads. Phone 45 previously proved
-text and a visit only after manual flush; screenshots and unattended upload are still unverified. Do not ask for
-another blind reinstall or hunt for a Mac-only permissions menu. The owner's active Chrome remains off limits.
+**Phone acceptance complete:** real Orion `337` automatically uploaded and displayed the fixed public test's
+905-character text, loaded 883 × 1920 screenshot and 55-second ended visit. The owner explicitly did not click
+Immediate Upload. Only one new snapshot was observed; old records remain. The new installation leaves two groups
+and three connections, including recorded phone `45`. Queue metadata can lag upload settlement. This verifies the
+foreground repair, not all iOS background behavior. No further phone test is requested; owner Chrome remains off limits.
+[Dated phone evidence](docs/recall-diagnostic-verification.md#october-12-ios-follow-up-automatic-text-image-and-visit-receipt).
 
 The permission-button (`33ded73`) and startup-tracker (`d04501a`) experiments remain unmerged and unreleased;
 the evidence did not justify them. Superseded Recall rollout details are in the

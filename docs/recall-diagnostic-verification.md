@@ -309,6 +309,25 @@ the inline control; both recorded connections and the credentials remain, as rec
 [settings verification](recall-settings-verification.md#october-13-inline-removal-follow-up). New iOS capture and
 automatic-upload acceptance remain open.
 
+### October 12 iOS follow-up: automatic text, image and visit receipt
+
+On October 12 (America/Los_Angeles), the owner sent the real `2026.1013.337` diagnostic without clicking Immediate
+Upload. It reports thirteen page events and one Alarm; focus and current/stored visibility are visible, probe/capture
+replies are objects, screenshot is a string and sender is this extension. Injection completion is still pending while
+`capture_store=saved`.
+
+The production search restricted to `https://example.org/?recall-diagnostic=1` shows a 21:55–21:56 phone visit with
+55 seconds of focus and one new snapshot at 21:56. Its reader has 905 characters; the image is loaded at natural
+883 × 1920 dimensions and visibly shows the public test page. Only one new snapshot was observed. The earlier
+18:15 snapshot and 40-second visit remain.
+
+The latest version, matching time, owner's confirmation and rendered public receipt establish automatic phone
+text/image/ended-visit upload and display for this foreground test; no exact device-UUID/document join was read.
+The initial queue count of one was sampled before upload settlement and can lag success; the device reports no error.
+The new installation leaves two groups/three connections, retaining recorded phone `45`. Private content, credentials,
+UUIDs and image bytes are omitted. This repair's owner acceptance is complete; no further phone test is needed.
+All iOS background/suspension scenarios are not established. Mobile recording remains foreground-only.
+
 ### Initial one-shot diagnostic release
 
 The first full branch run reached a UI size failure: 62.2 KiB against the previous 62 KiB budget.
