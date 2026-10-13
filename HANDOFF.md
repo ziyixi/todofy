@@ -1,6 +1,6 @@
 # Handoff
 
-Updated 2026-10-12. Keep this file focused on active work, open acceptance and dated compatibility constraints.
+Updated 2026-10-13. Keep this file focused on active work, open acceptance and dated compatibility constraints.
 Move completed rollout detail to a dated record and link it here. Repository rules are in [AGENTS](AGENTS.md);
 service entry points are in [README](README.md). Never put private content, credentials or raw production output here.
 
@@ -9,43 +9,26 @@ Its old waiting lists and release identities are historical, not instructions to
 
 ## Current work
 
-`codex/recall-orion-cleanup` removes obsolete save-phase polling, the extra diagnostic-context message,
-unused injection fallbacks and the desktop capture file from Orion packages. Orion minute ticks no longer check
-Chrome's disk-update marker. Required native callbacks, time bounds, guarded capture, deduplication, automatic
-upload and the owner-started diagnostic remain. Typecheck/lint, 164 units and all fifteen isolated built-artifact
-WebKit cases pass; the two touched test files also pass after privacy/assertion review. Same-identity build comparison
-keeps desktop capture.js, manifest, HTML and CSS byte-identical; probe.js differs only in the unreachable Orion
-diagnostic branch. Independent review found no normal Chrome/337 behavior change. No installed Chrome or phone
-files changed. Pending: branch CI and same-SHA publication.
+Recall cleanup is released at `bc0adffdc1d8ee018b0663737c77e8de701de0aa`, extension `2026.1013.654`.
+[Full branch CI](https://github.com/ziyixi/todofy/actions/runs/38359057094) and the
+[same-SHA main release](https://github.com/ziyixi/todofy/actions/runs/38359638951) pass. Only Recall and extension
+publication ran; other app/image/VPS releases skipped. Deployment `7032157796` verifies Worker
+`1b278c1f-4891-4ed0-a366-1bca48d1a443` at `2026-10-13T06:58:14Z`. Published ZIPs match every CI file: twelve
+for Chrome and eleven for Orion, which no longer includes the unused desktop capture.js.
 
-Recall is released at `566858edc1d4f65fdd9f1a6572b573660cee9806`, Orion extension `2026.1013.337`.
-[Full branch CI](https://github.com/ziyixi/todofy/actions/runs/38342293896) and the
-[same-SHA main release](https://github.com/ziyixi/todofy/actions/runs/38343212917) pass.
-Only Recall and its extension publish; other app/image/VPS deploys skip. Deployment `7029536483` verifies
-Worker `3f20c580-27f1-47e8-8a31-3cd357ec439b` at `2026-10-13T03:47:07Z`; live Settings shows `566858e`.
-The published Orion ZIP matches all twelve tested CI files.
+The cleanup removes obsolete save-phase polling, extra diagnostic-context messages and unused injection fallbacks.
+Orion skips Chrome's disk-update marker. Required native callbacks/time bounds, independent settings writes,
+guarded capture, deduplication, automatic upload, server backoff and the owner-started diagnostic remain.
+Typecheck/lint, 164 units and fifteen isolated built-artifact WebKit cases pass. Independent review found no normal
+capture/upload regression. No new dependency, IDL, storage, credential or budget change. Installed Chrome and phone
+files were not updated; no phone experiment is requested. [Cleanup evidence](docs/recall-diagnostic-verification.md#cleanup-after-the-successful-phone-check).
 
-Established mobile capture now uses the installed listener instead of repeating injection waits. A current-document
-command checks identity, raw URL, build and visibility before reading text. New snapshots and ended visits upload
-after persistence, outside serial state work; unchanged snapshots send no empty batch and server backoff remains.
-Probe failures have fixed, specific codes, and diagnostic Send preserves recent error metadata. No new runtime
-service, permission or retry mechanism. Desktop capture and the owner's active Chrome/install files were untouched.
-Extension checks include 165 units and fifteen built-artifact WebKit cases. The existing WebKit check now also
-blocks CI artifact publication. Real Mac Orion received nonempty text/JPEG at `03:44:30.776Z` and an ended visit
-at `03:45:02.388Z`, before any manual upload or diagnostic Send. The test fixture is removed and its consumer stopped.
-These are Mac results, not iOS proof. [Diagnostic evidence](docs/recall-diagnostic-verification.md).
-
-The owner-authorized six empty old phone test connections were removed through the production inline confirmation.
-Cleanup left two groups/two connections: the recorded phone `45` and Mac `429`. Credentials and all historical
-records remain. Token names are editable without rotation; same-name installs fold without merging identities.
-The synthetic Settings preview is stopped. [Settings evidence](docs/recall-settings-verification.md).
-
-**Phone acceptance complete:** real Orion `337` automatically uploaded and displayed the fixed public test's
-905-character text, loaded 883 × 1920 screenshot and 55-second ended visit. The owner explicitly did not click
-Immediate Upload. Only one new snapshot was observed; old records remain. The new installation leaves two groups
-and three connections, including recorded phone `45`. Queue metadata can lag upload settlement. This verifies the
-foreground repair, not all iOS background behavior. No further phone test is requested; owner Chrome remains off limits.
-[Dated phone evidence](docs/recall-diagnostic-verification.md#october-12-ios-follow-up-automatic-text-image-and-visit-receipt).
+The preceding real Orion `337` phone check confirmed automatic public-test text, JPEG and a 55-second ended visit
+without Immediate Upload. It establishes the foreground repair, not a physical-phone run of cleanup `654`.
+[Phone evidence](docs/recall-diagnostic-verification.md#october-12-ios-follow-up-automatic-text-image-and-visit-receipt).
+Six empty old test connections were removed; the new phone install leaves two groups/three connections, preserving
+recorded phone `45` and Mac `429`. Token names can change without rotation; same-name installs fold without merging
+history. [Settings evidence](docs/recall-settings-verification.md).
 
 The permission-button (`33ded73`) and startup-tracker (`d04501a`) experiments remain unmerged and unreleased;
 the evidence did not justify them. Superseded Recall rollout details are in the

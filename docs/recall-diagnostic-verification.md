@@ -347,6 +347,13 @@ the desktop probe diff only removes the unreachable mobile diagnostic branch. In
 to normal Chrome/337 capture, privacy, deduplication or upload. The running owner browsers were not used or updated.
 This cleanup's checks do not replace the earlier phone 337 receipt, and no new phone test is requested.
 
+[Full branch CI](https://github.com/ziyixi/todofy/actions/runs/38359057094) and the
+[same-SHA main release](https://github.com/ziyixi/todofy/actions/runs/38359638951) pass for
+`bc0adffdc1d8ee018b0663737c77e8de701de0aa`. Only Recall Worker and extension publication ran. Deployment
+`7032157796` verifies Worker `1b278c1f-4891-4ed0-a366-1bca48d1a443`, success at `2026-10-13T06:58:14Z`.
+Version `2026.1013.654` is published; both ZIPs match their tested CI artifacts byte for byte (twelve Chrome files,
+eleven Orion files). The installed owner extensions remain unchanged; no physical-phone 654 result is claimed.
+
 ### Initial one-shot diagnostic release
 
 The first full branch run reached a UI size failure: 62.2 KiB against the previous 62 KiB budget.
