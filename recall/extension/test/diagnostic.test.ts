@@ -192,20 +192,19 @@ describe('one-shot Orion capture diagnostic', () => {
     const tab = [...h.browser.tabs.values()][0];
     if (tab === undefined) throw new Error('test tab missing');
     await observeTabs(h.ctx, [tab as unknown as chrome.tabs.Tab]);
-    const context = { stage: 'probe_context', state: 'returned', result: 'object', visibility: 'visible', stored_visibility: 'visible', sender_identity: 'missing' } as const;
+    const reply = { stage: 'probe_reply', state: 'returned', result: 'object' } as const;
     await observe(h.ctx, { stage: 'alarm_setup', state: 'returned', result: 'object' });
-    await observe(h.ctx, context, tab.id);
+    await observe(h.ctx, reply, tab.id);
     await observe(h.ctx, { stage: 'focus_target', state: 'returned', result: 'visible' }, tab.id);
     // A recreated background rechecks its alarm while the native test UI hides the public document.
     await observe(h.ctx, { stage: 'alarm_setup', state: 'pending' });
-    await observe(h.ctx, { stage: 'probe_context', state: 'pending' }, tab.id);
-    await observe(h.ctx, { ...context, visibility: 'hidden', stored_visibility: 'hidden' }, tab.id);
+    await observe(h.ctx, { stage: 'probe_reply', state: 'pending' }, tab.id);
     await observe(h.ctx, { stage: 'focus_target', state: 'returned', result: 'hidden' }, tab.id);
     await observe(h.ctx, { stage: 'focus_target', state: 'skipped', result: 'excluded' }, tab.id);
     await submitDiagnostic(h.ctx);
     const steps = (await sentBatch(h)).diagnostic?.steps;
     expect(steps).toContainEqual({ stage: 'alarm_setup', state: 'returned', result: 'object' });
-    expect(steps).toContainEqual(context);
+    expect(steps).toContainEqual(reply);
     expect(steps).toContainEqual({ stage: 'focus_target', state: 'returned', result: 'visible' });
     expect(steps?.some((step) => step.state === 'pending')).toBe(false);
   });
@@ -273,19 +272,18 @@ describe('one-shot Orion capture diagnostic', () => {
     expect(stepsAtStop).toContainEqual({ stage: 'alarm_setup', state: 'returned', result: 'object' });
   });
 
-  it('keeps page-only context and native return types, never page values, exceptions or screenshots', async () => {
+  it('keeps native return types, never page values, exceptions or screenshots', async () => {
     const h = await setup();
     await startDiagnostic(h.ctx);
     const tab = [...h.browser.tabs.values()][0];
     if (tab === undefined) throw new Error('test tab missing');
     await observeTabs(h.ctx, [tab as unknown as chrome.tabs.Tab]);
+    const reply = { documentId: 'synthetic-document', visible: true, url: 'https://private.example.net/secret', text: 'private body', screenshot: 'data:image/png;base64,c3ludGhldGlj' };
     Object.assign(h.browser.api.tabs, {
       executeScript: (_id: number, _details: unknown, callback: (value: unknown[]) => void) => { callback([null]); },
-      sendMessage: (_id: number, message: { type: string }, callback: (value: unknown) => void) => {
-        callback(message.type === 'recall-diagnostic-context' ? { visibility: 'hidden', stored_visibility: 'visible', sender_identity: 'null', url: 'https://private.example.net/secret', text: 'private body' } : null);
-      },
+      sendMessage: (_id: number, _message: unknown, callback: (value: unknown) => void) => { callback(reply); },
     });
-    expect(await executeFile(h.ctx, tab.id, 'probe.js')).toBeNull();
+    expect(await executeFile(h.ctx, tab.id, 'probe.js')).toEqual(reply);
     await vi.waitFor(async () => { expect((await diagnosticStatus(h.ctx)).diagnostic.stepCount).toBeGreaterThan(3); });
     const privateTab = h.browser.open('https://private.example.net/secret', { title: 'Private title', incognito: true });
     await observe(h.ctx, { stage: 'capture_reply', state: 'returned', result: 'string' }, privateTab.id);
@@ -296,8 +294,7 @@ describe('one-shot Orion capture diagnostic', () => {
     await observe(h.ctx, { stage: 'probe_reply', state: 'returned', result: 'object' }, tab.id);
     await submitDiagnostic(h.ctx);
     const report = (await sentBatch(h)).diagnostic;
-    expect(report?.steps).toContainEqual({ stage: 'probe_context', state: 'returned', result: 'object', visibility: 'hidden', stored_visibility: 'visible', sender_identity: 'null' });
-    expect(report?.steps).toContainEqual({ stage: 'probe_reply', state: 'returned', result: 'null' });
+    expect(report?.steps).toContainEqual({ stage: 'probe_reply', state: 'returned', result: 'object' });
     expect(report?.steps).toContainEqual({ stage: 'active_tabs', state: 'returned', result: 'array', count: 1, selection: 'test_page' });
     const json = JSON.stringify(report);
     for (const secret of ['private.example', 'Private title', 'private body', 'data:image', INGEST_TOKEN, DIAGNOSTIC_URL]) expect(json).not.toContain(secret);

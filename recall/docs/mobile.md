@@ -11,7 +11,7 @@ Dropbox 统一归档。手机不需要连接 Dropbox，也不用复制电脑的�
 3. 在手机打开 Recall → 设置 → 插件口令，填写 `iPhone`，点“添加口令”，复制。
    打开 Orion 的 Recall 扩展设置，粘贴口令，设备名称沿用现有名称（例如 `iPhone · Orion`），保存。服务器地址已经填好。
    保存只确认本机设置已写入，上传结果在下方单独显示。手机包固定使用手机模式，不依赖浏览器标识。
-   超过十二秒未收到回执会显示“保存尚未确认”和等待步骤，并保留输入的口令；不要重新生成口令。
+   超过十二秒未收到回执会显示“保存尚未确认”，并保留输入的口令；不要重新生成口令。
 
 口令只显示一次，不要发到聊天。电脑原有口令继续可用。手机丢失或不再使用时，停用这条独立口令即可，
 不影响其他口令或已上传的记录。独立口令是上传凭据，名称便于辨认；同一口令若被复制到多个设备，
@@ -27,9 +27,9 @@ ZIP 文件名包含版本号，正式包内的扩展显示名仍是 recall。
 
 ## 当前手机验收
 
-`2026.1013.45` 已收到一份手机正文和访问记录，但那次使用了“立即上传”，没有截图。
-新版减少同一文档中的重复注入等待，新快照及已结束的访问入队后立即上传；网络失败仍保留队列。
-手机验收要确认自动上传、截图与去重，不用手动上传替代这些结果。
+`2026.1013.337` 已在真实手机确认：不点“立即上传”，正文、JPEG 截图和结束访问仍会自动上传。
+本次固定测试页只新增一份快照，旧记录保留，见[手机实测记录](../../docs/recall-diagnostic-verification.md#october-12-ios-follow-up-automatic-text-image-and-visit-receipt)。
+日常使用无需开启诊断；诊断只在排查问题时手动运行。
 
 ## 手机采集诊断
 
@@ -101,16 +101,11 @@ Orion 使用文件注入安装顶层监听器，再由 `tabs.sendMessage` 请求
 初次前台识别和分钟恢复检查安装监听器；同一采集中的正文、截图复核复用已安装的监听器。
 正文读取前在内容脚本同步核对文档身份、已验证的网址、可见性及构建版本，页面跳转时不读取新页面。
 注入未收到完成通知时仍需实际页面回复；界面不会把这条通知当作采集成功或失败。
-此接口在 [Orion 官方支持表](https://browser.kagi.com/WebExtensions-API-Support.html)列为 iOS 支持；手机实际通信仍需确认。
 
 上述消费者请求由本地测试截获，不访问生产 Recall。扩展 API 桥接与 `chrome.storage.local` 是 fixture；
 DOM、脚本执行、IndexedDB、图片压缩与 gzip 是真实 WebKit。它不能证明 Orion 自己的 API 实现或 iOS 前后台挂起行为。
-本机已安装真实 Orion macOS 1.1.3/build 152，使用独立的空测试环境，不导入浏览记录或登录。
-原生检查使用临时扩展副本，只允许 localhost/127.0.0.1，上传到本机合成消费者；业务脚本沿用发布产物，
-仅替换服务器常量和追加安全字段观察器。必须核对实际导入的包，不能把点击“Reload from Disk”当成新 ZIP 已加载。
-先确认真实 Alarm 和消息回调，再检查正文、图片、访问上传及下一分钟无重复快照。
-观察器不伪造回调或事件，但可能影响非持久后台寿命；Mac 结果不能证明 iOS 的挂起行为。
-本机仍没有 Xcode 或 iOS Simulator。原生失败及修复证据见[验收记录](../../docs/recall-mobile-verification.md)。
+原生 Mac 与手机的分阶段验证见[验收记录](../../docs/recall-diagnostic-verification.md)。
+临时观察包没有进入正式源码；当前回归使用已有 WebKit 检查，不需要安装测试扩展到日常浏览器。
 
 设置里的“当前记录”描述当前前台页面；设置页本身不采集。“活动检查”能确认后台是否检查过页面，
 “最近采样”始终显示结果或“尚未采样”，不再让空白状态掩盖尚未开始采集。最近错误只显示固定阶段码，
@@ -118,16 +113,6 @@ DOM、脚本执行、IndexedDB、图片压缩与 gzip 是真实 WebKit。它不�
 
 ## 验证边界
 
-[完整分支 CI](https://github.com/ziyixi/todofy/actions/runs/38193778901) 与
-[同 SHA 发布](https://github.com/ziyixi/todofy/actions/runs/38194203995) 已通过。
-本次准备覆盖双设备上传、口令独立停用、设备筛选、截图去重、JPEG 处理以及真实 DO/R2 配合假 Dropbox 的归档读取。
-Orion 非持久后台重建及 pagehide 的停留时间、并发相同请求只返回一次有效口令均有针对性测试。
-线上版本 `0c9f27be-d2c9-4556-8a7a-333b8a55d834` 已由部署流程核验，Deployment 为 `7004923541`。
-线上只读取了先前的公开测试页面和空的合成设备筛选，没有读取其他浏览正文或改变口令。
-本机构建的 Worker gzip 约 125.2 KiB，代码体积预算从 125 调到 130 KiB；运行配额和每日写入预算未变。
-
-这些检查不证明 Orion 真机的扩展安装、页面可见性事件、原生截图和文件更新行为；最后一轮手机验证专门确认这些边界。
-
-参考：[Orion iOS 文件扩展](https://help.kagi.com/orion/browser-extensions/ios-ipados-extensions.html)、
-[API 支持表](https://browser.kagi.com/WebExtensions-API-Support.html)、
-[Apple 前后台生命周期](https://developer.apple.com/documentation/uikit/preparing-your-ui-to-run-in-the-background)。
+`337` 的前台正文、截图及自动上传已经手机实测。WebKit 检查覆盖正常采集、空正文后继续、内容去重、
+页面跳转、保存与上传隔离及既有回调差异。手机后台挂起不保证运行；扩展仍只记录浏览器前台活动。
+历史发布和各阶段证据见[验证记录](../../docs/recall-mobile-verification.md)与[诊断验证记录](../../docs/recall-diagnostic-verification.md)。

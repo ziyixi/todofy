@@ -12,9 +12,9 @@ import { browserFeatures } from './browser.ts';
 import { openDb } from './db.ts';
 import { beat, browserStarted, idleChanged, pageVisibility, reconcile, releaseFocus, tabChanged, tabRemoved } from './focus.ts';
 import { IDLE_SECONDS, TICK_MINUTES } from './limits.ts';
-import { isRequest, type DiagnosticAnswer, type Request, type SaveAnswer, type SaveProgress, type Status, type UpdateAnswer } from './messages.ts';
+import { isRequest, type DiagnosticAnswer, type Request, type SaveAnswer, type Status, type UpdateAnswer } from './messages.ts';
 import { diagnosticEvent, diagnosticStatus, observe, resultType, startDiagnostic, submitDiagnostic } from './diagnostic.ts';
-import { saveProgress, saveSettings, status } from './settings.ts';
+import { saveSettings, status } from './settings.ts';
 import { getDevice, reloadedFor } from './store.ts';
 import { installedUpdate } from './update.ts';
 import { flush, showBadge, type FlushReason } from './upload.ts';
@@ -118,6 +118,7 @@ async function upload(reason: FlushReason): Promise<void> {
  * version: should Chrome come back with the old code, it would otherwise reload every minute (检查更新 still can).
  */
 async function updateIfInstalled(trigger: 'tick' | 'owner'): Promise<boolean> {
+  if (MOBILE) return false;
   const ctx = await ready;
   const version = await installedUpdate(ctx);
   if (version === null || (trigger === 'tick' && (await reloadedFor.get(ctx.chrome)) === version)) return false;
@@ -163,13 +164,11 @@ async function onStartup(at: number): Promise<void> {
   await upload('startup');
 }
 
-async function answer(request: Request): Promise<Status | SaveAnswer | SaveProgress | UpdateAnswer | DiagnosticAnswer> {
+async function answer(request: Request): Promise<Status | SaveAnswer | UpdateAnswer | DiagnosticAnswer> {
   const ctx = await ready;
   switch (request.type) {
     case 'status':
       return status(ctx);
-    case 'save-progress':
-      return saveProgress();
     case 'save': {
       const write = settingsWrites.then(() => saveSettings(ctx, request));
       settingsWrites = write.catch(() => undefined);

@@ -101,22 +101,6 @@ export async function captureViewport(ctx: Context, windowId: number, tabId?: nu
   });
 }
 
-/** A separate, content-free reply exposes native sender and page visibility even when the normal guard rejects it. */
-async function probeContext(ctx: Context, tabId: number): Promise<void> {
-  const runId = await diagnosticRunId(ctx, tabId);
-  if (runId === null) return;
-  await observe(ctx, { stage: 'probe_context', state: 'pending' }, tabId);
-  ctx.chrome.tabs.sendMessage(tabId, { type: 'recall-diagnostic-context', runId }, (value: unknown) => {
-    const failed = ctx.chrome.runtime.lastError !== undefined;
-    const fields = typeof value === 'object' && value !== null ? value as Record<string, unknown> : {};
-    const visibility = fields['visibility'] === 'visible' || fields['visibility'] === 'hidden' ? fields['visibility'] : 'unknown';
-    const stored = fields['stored_visibility'] === 'visible' || fields['stored_visibility'] === 'hidden' ? fields['stored_visibility'] : 'unknown';
-    const identity = fields['sender_identity'];
-    const sender = identity === 'same' || identity === 'missing' || identity === 'null' || identity === 'foreign' ? identity : 'unknown';
-    void observe(ctx, { stage: 'probe_context', state: failed ? 'failed' : 'returned', result: failed ? 'api_error' : resultType(value), visibility, stored_visibility: stored, sender_identity: sender }, tabId, runId);
-  });
-}
-
 type PageCommand = { readonly type: 'recall-probe' } | {
   readonly type: 'recall-capture-current';
   readonly expectedDocumentId: string;
@@ -127,7 +111,6 @@ type PageCommand = { readonly type: 'recall-probe' } | {
 /** Read the listener already installed for a known mobile document, without repeating file injection. */
 export async function readInstalledPage(ctx: Context, tabId: number, command: PageCommand): Promise<unknown> {
   const runId = await diagnosticRunId(ctx, tabId);
-  void probeContext(ctx, tabId).catch(() => undefined);
   const stage = command.type === 'recall-probe' ? 'probe_reply' : 'capture_reply';
   await observe(ctx, { stage, state: 'pending' }, tabId, runId);
   return nativeReply<unknown>((resolve, reject) => {
@@ -142,48 +125,44 @@ export async function readInstalledPage(ctx: Context, tabId: number, command: Pa
   });
 }
 
-/** MV2 Orion exposes tabs.executeScript; modern browsers use scripting. Both inject only the main frame. */
+/** Chrome MV3 uses scripting; Orion MV2 installs its guarded top-frame listener through tabs.executeScript. */
 export async function executeFile(ctx: Context, tabId: number, file: 'probe.js' | 'capture.js', documentId?: string): Promise<unknown> {
-  const features = browserFeatures(ctx.chrome);
-  if (ctx.mobile && file !== 'probe.js') throw new Error('mobile_capture_requires_guard');
-  if (ctx.mobile && features.tabs.executeScript !== undefined) {
-    const execute = features.tabs.executeScript;
-    const runId = await observe(ctx, { stage: 'probe_injection', state: 'pending' }, tabId);
-    // Orion's file-injection completion did not yield a usable probe. Use the standard content-message reply.
-    await nativeReply<undefined>((resolve, reject) => {
-      let completed = false;
-      const complete = (value: unknown, error?: Error) => {
-        if (completed) return;
-        completed = true;
-        void observe(ctx, { stage: 'probe_injection', state: error === undefined ? 'returned' : 'failed', result: error === undefined ? resultType(value) : 'api_error' }, tabId, runId);
-        if (error === undefined) resolve(undefined);
-        else reject(error);
-      };
-      const execution = execute.call(ctx.chrome.tabs, tabId, { file: 'probe.js', runAt: 'document_start' }, (value) => {
-        const error = ctx.chrome.runtime.lastError;
-        complete(value, error === undefined ? undefined : new Error(error.message ?? 'browser_api_failed'));
-      });
-      if (typeof execution?.then === 'function') {
-        void execution.then((value) => { complete(value); }, (error: unknown) => {
-          complete(undefined, error instanceof Error ? error : new Error('browser_api_failed'));
-        });
-      }
-    }).catch(async (error: unknown) => {
-      // An unanswered completion does not establish whether the listener was installed. Ask it once below.
-      if (timedOut(error)) return;
-      await observe(ctx, { stage: 'probe_injection', state: 'failed', result: 'api_error' }, tabId, runId);
-      throw error;
-    });
-    return readInstalledPage(ctx, tabId, { type: 'recall-probe' });
-  }
-  if (features.scripting !== undefined) {
-    const [first] = await features.scripting.executeScript({
+  if (!ctx.mobile) {
+    const [first] = await ctx.chrome.scripting.executeScript({
       target: { tabId, ...(documentId === undefined ? { frameIds: [0] } : { documentIds: [documentId] }) }, files: [file],
     });
     return first?.result;
   }
-  const results = await features.tabs.executeScript?.(tabId, { file, frameId: 0, runAt: 'document_start' });
-  return results?.[0];
+  if (file !== 'probe.js') throw new Error('mobile_capture_requires_guard');
+  const execute = browserFeatures(ctx.chrome).tabs.executeScript;
+  if (execute === undefined) throw new Error('browser_api_unavailable');
+  const runId = await observe(ctx, { stage: 'probe_injection', state: 'pending' }, tabId);
+  // Orion's file-injection completion did not yield a usable probe. Use the standard content-message reply.
+  await nativeReply<undefined>((resolve, reject) => {
+    let completed = false;
+    const complete = (value: unknown, error?: Error) => {
+      if (completed) return;
+      completed = true;
+      void observe(ctx, { stage: 'probe_injection', state: error === undefined ? 'returned' : 'failed', result: error === undefined ? resultType(value) : 'api_error' }, tabId, runId);
+      if (error === undefined) resolve(undefined);
+      else reject(error);
+    };
+    const execution = execute.call(ctx.chrome.tabs, tabId, { file: 'probe.js', runAt: 'document_start' }, (value) => {
+      const error = ctx.chrome.runtime.lastError;
+      complete(value, error === undefined ? undefined : new Error(error.message ?? 'browser_api_failed'));
+    });
+    if (typeof execution?.then === 'function') {
+      void execution.then((value) => { complete(value); }, (error: unknown) => {
+        complete(undefined, error instanceof Error ? error : new Error('browser_api_failed'));
+      });
+    }
+  }).catch(async (error: unknown) => {
+    // An unanswered completion does not establish whether the listener was installed. Ask it once below.
+    if (timedOut(error)) return;
+    await observe(ctx, { stage: 'probe_injection', state: 'failed', result: 'api_error' }, tabId, runId);
+    throw error;
+  });
+  return readInstalledPage(ctx, tabId, { type: 'recall-probe' });
 }
 
 /** A fixed field failure identifies malformed native replies without retaining any returned values. */

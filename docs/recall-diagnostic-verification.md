@@ -329,6 +329,24 @@ The new installation leaves two groups/three connections, retaining recorded pho
 UUIDs and image bytes are omitted. This repair's owner acceptance is complete; no further phone test is needed.
 All iOS background/suspension scenarios are not established. Mobile recording remains foreground-only.
 
+### Cleanup after the successful phone check
+
+`codex/recall-orion-cleanup` retires the extra `recall-diagnostic-context` message, unused local diagnostic start
+field and temporary `save-progress` query/state. Save still has its independent write queue, twelve-second
+unconfirmed response and input retention. Chrome uses its MV3 injection API directly; Orion retains callback/Promise
+completion handling, the five-second bound, current-document capture guards and immediate upload. The unused
+desktop capture.js is omitted from Orion ZIPs; Orion skips Chrome's disk-update marker. Legacy diagnostic fields
+and old error labels remain readable. No IDL, storage, token, budget or server behavior changes.
+
+Local typecheck/lint, 164 units and fifteen isolated WebKit cases pass. A removed unit tested only the retired
+save-phase state; the real WebKit storage-wait/input-retention case remains. Diagnostic privacy coverage feeds
+synthetic extra body/image fields through the normal reply and verifies that only its type enters the report.
+The update guard is checked by an awaited owner request, while the existing desktop reload test remains.
+With fixed build metadata, desktop capture.js, manifest, HTML and CSS match the pre-cleanup build byte for byte;
+the desktop probe diff only removes the unreachable mobile diagnostic branch. Independent review found no change
+to normal Chrome/337 capture, privacy, deduplication or upload. The running owner browsers were not used or updated.
+This cleanup's checks do not replace the earlier phone 337 receipt, and no new phone test is requested.
+
 ### Initial one-shot diagnostic release
 
 The first full branch run reached a UI size failure: 62.2 KiB against the previous 62 KiB budget.

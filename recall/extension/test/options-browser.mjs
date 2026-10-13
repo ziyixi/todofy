@@ -57,7 +57,7 @@ export async function checkOrionOptions({ webkit, expect, folder }) {
         return;
       }
       const file = path.slice(1);
-      if (!['sw.js', 'options.js', 'options.css', 'probe.js', 'capture.js'].includes(file)) {
+      if (!['sw.js', 'options.js', 'options.css', 'probe.js'].includes(file)) {
         res.statusCode = 404;
         res.end();
         return;
@@ -165,14 +165,14 @@ export async function checkOrionOptions({ webkit, expect, folder }) {
         sender: window.__test.omitSenderIdentity ? {} : { id: 'synthetic-recall-extension' },
         captureRace: window.__test.captureRace,
       }));
-      if (['recall-capture', 'recall-capture-current'].includes(request.type) && captureRace === 'navigation') {
+      if (request.type === 'recall-capture-current' && captureRace === 'navigation') {
         await article.goto(base + '/article.html?capture-race=1');
         await article.evaluate(await readFile(join(folder, 'orion/probe.js'), 'utf8'));
       }
       const value = await article.evaluate(
         ({ request, sender, captureRace }) =>
           new Promise((resolve) => {
-            if (['recall-capture', 'recall-capture-current'].includes(request.type) && captureRace) {
+            if (request.type === 'recall-capture-current' && captureRace) {
               if (captureRace === 'spa') history.replaceState({}, '', '/account?capture-race=1');
               const innerText = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'innerText').get;
               window.__test.captureBodyReads = 0;
@@ -423,13 +423,13 @@ export async function checkOrionOptions({ webkit, expect, folder }) {
       await expect(h.options.locator('button[type=submit]')).toHaveText('保存中…');
       await h.page.clock.fastForward(2200);
       await h.page.clock.fastForward(10000);
-      await expect(h.options.locator('#form-error')).toContainText('保存尚未确认：仍在等待设备信息写入');
+      await expect(h.options.locator('#form-error')).toContainText('保存尚未确认');
       await expect(h.options.locator('button[type=submit]')).toHaveText('保存');
       await expect(h.options.locator('button[type=submit]')).toBeEnabled();
       await expect(h.options.locator('#token')).toHaveValue(token);
       expect(h.errors).toEqual([]);
       results.push({
-        case: 'stalled storage produces bounded phase-specific UI and retains input',
+        case: 'stalled storage releases Save and retains input',
         passed: true,
         errors: h.errors,
       });
@@ -510,7 +510,7 @@ export async function checkOrionOptions({ webkit, expect, folder }) {
       await expect(h.options.locator('#diagnostic-feedback')).toContainText('诊断已发送');
       const report = h.batches.find((batch) => batch.diagnostic).diagnostic;
       expect(report.steps).toEqual(expect.arrayContaining([
-        expect.objectContaining({ stage: 'probe_context', state: 'returned', sender_identity: 'missing' }),
+        expect.objectContaining({ stage: 'probe_reply', state: 'returned', result: 'object' }),
         expect.objectContaining({ stage: 'capture_store', state: 'returned' }),
       ]));
       expect(report.alarm_event_count).toBe(1);
@@ -518,7 +518,7 @@ export async function checkOrionOptions({ webkit, expect, folder }) {
       expect(JSON.stringify(report)).not.toContain(token);
       expect(h.errors).toEqual([]);
       await h.page.screenshot({ path: join(folder, 'diagnostic-options-webkit.png'), fullPage: true });
-      results.push({ case: 'null alarm and omitted sender ID are observable in sent diagnostic', passed: true, alarmEvents: 1, senderIdentity: 'missing' });
+      results.push({ case: 'null alarm and omitted sender ID still capture and report', passed: true, alarmEvents: 1 });
       await h.context.close();
     }
     for (const reply of ['void', 'promise', 'not_injected']) {

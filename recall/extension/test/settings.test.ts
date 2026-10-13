@@ -39,7 +39,7 @@ describe('what the owner may type', () => {
 describe('the one-shot diagnostic summary', () => {
   it('distinguishes an unanswered native call from a sent report without claiming capture succeeded', () => {
     const diagnostic: DiagnosticStatus = {
-      state: 'running', runId: '8b377e4d-b3c1-4b4e-b625-7484ca8c19f1', startedAt: T0,
+      state: 'running', runId: '8b377e4d-b3c1-4b4e-b625-7484ca8c19f1',
       expiresAt: T0 + 5 * MINUTE, sentAt: 0, stepCount: 2, tabEvents: 1, alarmEvents: 0,
       latestStage: 'active_tabs', latestState: 'pending', steps: [{ stage: 'active_tabs', state: 'pending' }],
     };
@@ -136,7 +136,8 @@ describe('the options page\'s status', () => {
       expect.objectContaining({ label: '活动检查', value: '刚刚' }),
       expect.objectContaining({ label: '本地访问', value: '1 条进行中的访问（不等于待上传数）' }),
       expect.objectContaining({ label: '最近采样', value: '尚未采样' }),
-      expect.objectContaining({ label: '采集环境', value: 'Orion · iOS，仅前台记录；正文读取接口已提供，截图接口已提供' }),
+      // This desktop fixture has scripting, but no Orion tabs.executeScript.
+      expect.objectContaining({ label: '采集环境', value: 'Orion · iOS，仅前台记录；正文读取接口未提供，截图接口已提供' }),
     ]));
     const open = await focusState.get(ctx.chrome);
     if (open?.open === null || open?.open === undefined) throw new Error('missing_synthetic_visit');

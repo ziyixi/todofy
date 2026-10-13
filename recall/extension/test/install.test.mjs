@@ -156,15 +156,8 @@ describe('the build', () => {
     message(capture, 'other-extension');
     message('unrelated');
     expect(replies).toHaveLength(beforeIgnored);
-    // The phone report needs the native sender category even if the normal content guard rejects it.
-    const listener = listeners.values().next().value;
-    const diagnostic = { type: 'recall-diagnostic-context', runId: '00000000-0000-4000-8000-000000000001' };
-    listener(diagnostic, { id: null }, (reply) => replies.push(reply));
-    expect(replies).toHaveLength(beforeIgnored); // This ordinary page is outside the fixed diagnostic target.
-    document.location.href = 'https://example.org/?recall-diagnostic=1';
-    listener(diagnostic, { id: null }, (reply) => replies.push(reply));
-    expect(replies.at(-1)).toEqual({ visibility: 'hidden', stored_visibility: 'visible', sender_identity: 'null' });
-    expect(JSON.stringify(replies.at(-1))).not.toContain('synthetic');
+    message({ type: 'recall-diagnostic-context', runId: '00000000-0000-4000-8000-000000000001' });
+    expect(replies).toHaveLength(beforeIgnored);
     listeners.clear();
     runInNewContext(code, { document, window: { top: window }, chrome: { runtime } });
     expect(listeners.size).toBe(0);
@@ -184,7 +177,7 @@ describe('the build', () => {
     const code = readFileSync(join(built.orionFolder, 'sw.js'), 'utf8');
     expect(code).not.toMatch(/^import |^export /m);
     expect(readZip(readFileSync(built.orionZip)).map((file) => file.name)).toContain('probe.js');
-    expect(readFileSync(join(built.orionFolder, 'capture.js'))).toEqual(readFileSync(join(built.folder, 'capture.js')));
+    expect(readZip(readFileSync(built.orionZip)).map((file) => file.name)).not.toContain('capture.js');
   });
 
   it('draws the icons as PNG files', () => {

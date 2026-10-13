@@ -86,7 +86,7 @@ export async function buildExtension({ dist = DIST, time = new Date(), commit = 
   writeFileSync(zip, writeZip(filesUnder(out).map((name) => ({ name, data: readFileSync(join(out, name)) }))));
   const orionFolder = join(dist, 'orion');
   mkdirSync(orionFolder, { recursive: true });
-  for (const name of filesUnder(out)) {
+  for (const name of filesUnder(out).filter((name) => name !== 'capture.js')) {
     mkdirSync(dirname(join(orionFolder, name)), { recursive: true });
     copyFileSync(join(out, name), join(orionFolder, name));
   }

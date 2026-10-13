@@ -50,7 +50,7 @@ function view(ctx: Context, run: Run | null): DiagnosticStatus {
   const last = run?.report.steps.at(-1);
   return {
     state: run === null ? 'idle' : run.sentAt > 0 ? 'sent' : active(ctx, run) ? 'running' : 'stopped',
-    runId: run?.report.run_id ?? '', startedAt: run === null ? 0 : Date.parse(run.report.start_time), expiresAt: run?.expiresAt ?? 0,
+    runId: run?.report.run_id ?? '', expiresAt: run?.expiresAt ?? 0,
     stepCount: run?.report.steps.length ?? 0, tabEvents: run?.report.tab_event_count ?? 0, alarmEvents: run?.report.alarm_event_count ?? 0,
     sentAt: run?.sentAt ?? 0, latestStage: last?.stage ?? '', latestState: last?.state ?? '', steps: run?.report.steps ?? [],
   };
@@ -79,7 +79,6 @@ export async function observe(ctx: Context, step: CaptureDiagnosticStep, tabId?:
     // Reopening the test UI can start fresh native calls or hide the page. Keep the completed foreground evidence.
     if (previous !== undefined && previous.state !== 'pending' && step.state === 'pending') return run;
     if (step.stage === 'active_tabs' && previous?.selection === 'test_page' && step.selection !== 'test_page') return run;
-    if (step.stage === 'probe_context' && previous?.visibility === 'visible' && step.visibility === 'hidden') return run;
     if (step.stage === 'focus_target' && previous?.result === 'visible' && (step.result === 'hidden' || step.result === 'excluded')) return run;
     return { ...run, report: { ...run.report, steps: [...run.report.steps.filter((value) => value.stage !== step.stage), step] } };
   });

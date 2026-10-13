@@ -9,6 +9,15 @@ Its old waiting lists and release identities are historical, not instructions to
 
 ## Current work
 
+`codex/recall-orion-cleanup` removes obsolete save-phase polling, the extra diagnostic-context message,
+unused injection fallbacks and the desktop capture file from Orion packages. Orion minute ticks no longer check
+Chrome's disk-update marker. Required native callbacks, time bounds, guarded capture, deduplication, automatic
+upload and the owner-started diagnostic remain. Typecheck/lint, 164 units and all fifteen isolated built-artifact
+WebKit cases pass; the two touched test files also pass after privacy/assertion review. Same-identity build comparison
+keeps desktop capture.js, manifest, HTML and CSS byte-identical; probe.js differs only in the unreachable Orion
+diagnostic branch. Independent review found no normal Chrome/337 behavior change. No installed Chrome or phone
+files changed. Pending: branch CI and same-SHA publication.
+
 Recall is released at `566858edc1d4f65fdd9f1a6572b573660cee9806`, Orion extension `2026.1013.337`.
 [Full branch CI](https://github.com/ziyixi/todofy/actions/runs/38342293896) and the
 [same-SHA main release](https://github.com/ziyixi/todofy/actions/runs/38343212917) pass.

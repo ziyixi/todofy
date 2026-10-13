@@ -14,7 +14,6 @@ export interface SaveRequest {
 
 export type Request =
   | { readonly type: 'status' }
-  | { readonly type: 'save-progress' }
   | ({ readonly type: 'save' } & SaveRequest)
   | { readonly type: 'flush' }
   | { readonly type: 'check-update' }
@@ -23,7 +22,6 @@ export type Request =
 export interface DiagnosticStatus {
   readonly state: 'idle' | 'running' | 'stopped' | 'sent';
   readonly runId: string;
-  readonly startedAt: number;
   readonly expiresAt: number;
   readonly stepCount: number;
   readonly tabEvents: number;
@@ -41,9 +39,6 @@ export interface DiagnosticAnswer {
 }
 
 export type SaveAnswer = { readonly ok: true } | { readonly ok: false; readonly error: 'server_invalid' | 'label_invalid' | 'token_invalid' | 'token_export' };
-
-export type SavePhase = 'idle' | 'device' | 'token' | 'upload-state';
-export interface SaveProgress { readonly phase: SavePhase }
 
 export interface Status {
   readonly now: number;
@@ -81,5 +76,5 @@ export function isRequest(value: unknown): value is Request {
     const { server, label, token } = value as Partial<Record<keyof SaveRequest, unknown>>;
     return typeof server === 'string' && typeof label === 'string' && typeof token === 'string';
   }
-  return type === 'status' || type === 'save-progress' || type === 'flush' || type === 'check-update' || type === 'diagnostic-start' || type === 'diagnostic-send' || type === 'diagnostic-status';
+  return type === 'status' || type === 'flush' || type === 'check-update' || type === 'diagnostic-start' || type === 'diagnostic-send' || type === 'diagnostic-status';
 }

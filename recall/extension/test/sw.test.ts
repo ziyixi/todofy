@@ -197,28 +197,6 @@ describe('the service worker', () => {
     }
   });
 
-  it('reports a pending local settings write without waiting for storage', async () => {
-    await start();
-    const originalSet = browser.local.set.bind(browser.local);
-    let resume!: () => void;
-    const set = vi.spyOn(browser.local, 'set').mockImplementation(async (items) => {
-      await originalSet(items);
-      if ('device' in items) await new Promise<void>((resolve) => { resume = resolve; });
-    });
-    const response = message({ type: 'save', server: 'https://recall.ziyixi.science', label: 'iPhone', token: INGEST_TOKEN });
-    try {
-      await vi.waitFor(async () => { expect(await message({ type: 'save-progress' })).toEqual({ phase: 'device' }); });
-      expect(await message({ type: 'status' })).toMatchObject({ tokenSet: false });
-    } finally {
-      set.mockRestore();
-      resume();
-      expect(await response).toEqual({ ok: true });
-      await settle();
-    }
-    expect(await message({ type: 'save-progress' })).toEqual({ phase: 'idle' });
-    expect(await message({ type: 'save-progress' }, 'another-extension')).toBe('not answered');
-  });
-
   it('starts and sends an owner diagnostic while the phone focus queue is blocked', async () => {
     vi.stubGlobal('RECALL_ORION', true);
     await start();
@@ -337,6 +315,10 @@ describe('the service worker', () => {
     vi.stubGlobal('navigator', { userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X)', platform: 'MacIntel', maxTouchPoints: 0 });
     await start();
     expect(await message({ type: 'status' })).toMatchObject({ mobile: true, label: 'iPhone · Orion', server: 'https://recall.ziyixi.science' });
+    browser.files.set('BUILD', '2026.1011.800\n');
+    browser.files.set('manifest.json', JSON.stringify({ version: '2026.1011.800' }));
+    expect(await message({ type: 'check-update' })).toEqual({ reloading: false });
+    expect(browser.reloads).toBe(0);
   });
 
   it('makes the device once, before any handler runs', async () => {
