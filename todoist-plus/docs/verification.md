@@ -2,7 +2,7 @@
 
 ## 本地检查
 
-2026-10-13 的本地工作树已通过：TypeScript、ESLint、19 个单元／交互／API 检查、生产构建、ZIP 构建，以及 3 个实际 MV3 Chromium 浏览器检查。发布 SHA 和真实账户验收由根 HANDOFF 单独记录。
+2026-10-13 的本地工作树已通过：TypeScript、ESLint、20 个单元／交互／API 检查、生产构建、ZIP 构建，以及 3 个实际 MV3 Chromium 浏览器检查。发布 SHA 和真实账户验收由根 HANDOFF 单独记录。
 
 - React 交互、计划派生和根 proto HTTP 客户端使用合成数据验证：父子任务计数、提醒保留、一次调整承诺、停止与真正完成的区别、完成重试身份、字段掩码、未知估时、跨午夜计时。
 - `test:browser` 加载 `.output/chrome-mv3` 实际构建包，在新建的临时 Chromium profile 运行；页面为合成 Todoist DOM，服务端通过 background 内的独立假响应提供。不访问真实任务或个人浏览器 profile。

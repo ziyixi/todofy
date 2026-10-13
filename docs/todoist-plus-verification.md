@@ -7,9 +7,9 @@ inputs are synthetic. The installed daily Chrome and production tasks were not u
 
 | Component | Evidence |
 | --- | --- |
-| Extension | 19 unit/component/API cases, three actual built-MV3 Chromium cases, types, lint and production build |
+| Extension | 20 unit/component/API cases, three actual built-MV3 Chromium cases, types, lint and production build |
 | Todofy | 549 real-workerd runtime cases, 1,653 Python units, 127 gateway cases, 93 owner-UI cases and builds |
-| FlowDay | 123 workerd/D1 cases, 21 worker units, 119 UI cases, all 51 desktop browser scenarios, migration preservation and static export |
+| FlowDay | 125 workerd/D1 cases, 21 worker units, 119 UI cases, all 51 desktop browser scenarios, migration preservation and static export |
 | Shared contracts | Buf lint, API lint, breaking/profile checks, type/schema checks; 495 TypeScript codec cases and 113 Python cases |
 | CI/configuration | 452 guard cases with one existing local skip; 34 catalog cases and portable-domain generation |
 
@@ -35,6 +35,17 @@ an 8.16 ms cold proxy sample against its initial 8 ms startup ratchet. The new-p
 is 9.5 ms; warm and existing-path limits remain unchanged. The same run also exposed the old
 container-import verifier's assumptions about new defaulted D1 columns and timer command receipts;
 the corrected import/verify/reset tools passed all 38 cases under Python 3.12 with mandatory local Wrangler/D1, including rejection of unexpected derived state. The next branch gate must verify this corrected SHA before publication.
+
+The corrected `fb245900` passed the complete branch gate in
+[run 38459315470](https://github.com/ziyixi/todofy/actions/runs/38459315470). Before publication,
+the upgrade was extended to refresh unchanged cached hierarchy/deadline fields once, using the
+existing bounded full-sync flow and preserving manual estimates, queue and timer state. Its
+marker survives late old-Worker sync state and clears only after the new pass completes.
+The two added real-D1 cases passed with the existing sync cases (26); the other 124 runtime cases
+and CPU checks also passed. The extension now requests the existing manual sync for an explicitly
+new task, and a throttled response blocks the following write with a visible retry instruction.
+Its 20 unit/API/component and three built-browser checks pass. The final branch gate must verify
+these last changes at their own source SHA before release.
 
 ## Production acceptance
 

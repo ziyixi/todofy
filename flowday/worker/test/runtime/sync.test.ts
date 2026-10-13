@@ -168,6 +168,44 @@ describe('incremental sync', () => {
     expect((await getAllTasks(h.db())).find((task) => task.id === 'td-1')).toMatchObject({ estimatedMins: null, parentId: 'parent-1', deadlineDate: '2026-05-20' });
   });
 
+  it('refreshes unchanged hierarchy after upgrade despite a late old-Worker token/full cursor, preserving manual state', async () => {
+    seedTodoist(2);
+    h.todoist.update('td-1', { parent_id: 'td-0', deadline: { date: '2026-05-20' } });
+    await sync(T0);
+    await updateTaskEstimate(h.db(), 'td-1', 45);
+    await h.sql('UPDATE tasks SET parent_id = NULL, deadline_date = NULL');
+    await h.sql("INSERT INTO settings(key,value) VALUES ('todoist_hierarchy_refresh','1')");
+    await h.sql("INSERT INTO settings(key,value) VALUES ('todoist_sync_pending',?)", JSON.stringify({ base: '*', token: String(h.todoist.revision), after: 'td-1' }));
+    await h.sql("INSERT INTO flow_tasks(id,flow_date,task_id,sort_order) VALUES ('planned','2026-04-13','td-1',0)");
+    await h.sql("INSERT INTO active_timer_session(id,task_id,status,session_saved_s) VALUES ('main','td-1','paused',120)");
+
+    const refreshed = await sync(T0 + AUTO_SYNC_MIN_INTERVAL_MS);
+    expect(refreshed).toMatchObject({ status: 'synced', fullSync: true });
+    expect(h.todoist.requests.at(-1)?.form['sync_token']).toBe('*');
+    expect((await getAllTasks(h.db())).find((task) => task.id === 'td-1')).toMatchObject({ parentId: 'td-0', deadlineDate: '2026-05-20', estimatedMins: 45 });
+    expect(await h.sql("SELECT value FROM settings WHERE key = 'todoist_hierarchy_refresh'")).toEqual([]);
+    expect(await h.sql('SELECT task_id,sort_order FROM flow_tasks')).toEqual([{ task_id: 'td-1', sort_order: 0 }]);
+    expect(await h.sql('SELECT task_id,status,session_saved_s FROM active_timer_session')).toEqual([{ task_id: 'td-1', status: 'paused', session_saved_s: 120 }]);
+    expect(await sync(T0 + 2 * AUTO_SYNC_MIN_INTERVAL_MS)).toMatchObject({ status: 'synced', fullSync: false, changed: 0, rowsWritten: 2 });
+  });
+
+  it('resumes the bounded hierarchy refresh and clears its marker only with the last full chunk', async () => {
+    seedTodoist(SYNC_CHUNK + 2);
+    for (let index = 0; index < SYNC_CHUNK + 2; index += 1) h.todoist.update(`td-${String(index)}`, { parent_id: 'parent', deadline: { date: '2026-05-20' } });
+    await syncFully(T0);
+    await h.sql('UPDATE tasks SET parent_id = NULL, deadline_date = NULL');
+    await h.sql("INSERT INTO settings(key,value) VALUES ('todoist_hierarchy_refresh','1')");
+
+    const refreshAt = T0 + AUTO_SYNC_MIN_INTERVAL_MS + 2000;
+    const first = await sync(refreshAt);
+    expect(first).toMatchObject({ status: 'partial', fullSync: true, changed: SYNC_CHUNK });
+    expect(await h.sql("SELECT value FROM settings WHERE key = 'todoist_hierarchy_refresh'")).toEqual([{ value: 'running' }]);
+    const last = await sync(refreshAt + 1000);
+    expect(last).toMatchObject({ status: 'synced', fullSync: true, changed: 2 });
+    expect(await h.sql("SELECT value FROM settings WHERE key IN ('todoist_hierarchy_refresh','todoist_sync_pending')")).toEqual([]);
+    expect((await getAllTasks(h.db())).every((task) => task.parentId === 'parent' && task.deadlineDate === '2026-05-20')).toBe(true);
+  });
+
   it('a renamed project renames exactly its tasks, even those that did not change', async () => {
     seedTodoist(20);
     await sync(T0);

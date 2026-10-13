@@ -1,5 +1,5 @@
 import { expect, it, vi } from "vitest";
-import { createApi, validOrigin } from "../src/api";
+import { createApi, publicError, validOrigin } from "../src/api";
 const json = (body: unknown) =>
   new Response(JSON.stringify(body), {
     headers: { "Content-Type": "application/json" },
@@ -115,7 +115,8 @@ it("does not present partial task pages as a complete plan", async () => {
   );
   await expect(api.load()).rejects.toThrow("incomplete");
 });
-it("sends wire field masks and imports missing Todoist children before queueing or estimating", async () => {
+it("manually finishes a partial sync before queueing or estimating new Todoist children", async () => {
+  let syncCount = 0;
   const calls: {
     path: string;
     mask: string | null;
@@ -132,8 +133,10 @@ it("sends wire field masks and imports missing Todoist children before queueing 
           ? (JSON.parse(String(init.body)) as Record<string, unknown>)
           : {},
       });
-      if (url.pathname.endsWith("/tasks:sync"))
-        return json({ state: "synced" });
+      if (url.pathname.endsWith("/tasks:sync")) {
+        syncCount++;
+        return json({ state: syncCount === 1 ? "partial" : "synced" });
+      }
       if (url.pathname.includes("/flows/"))
         return json({ name: "flows/2026-10-13", task_ids: ["new-child"] });
       return json({ name: "tasks/new-child", title: "New synthetic child" });
@@ -149,7 +152,9 @@ it("sends wire field masks and imports missing Todoist children before queueing 
   };
   await api.updateQueue(["new-child"], focus);
   expect(calls[0]?.path).toBe("/api/plus/flowday/api/v1/tasks:sync");
-  expect(calls[1]).toMatchObject({
+  expect(calls[0]?.body).toEqual({ mode: "manual" });
+  expect(calls[1]?.body).toEqual({ mode: "manual" });
+  expect(calls[2]).toMatchObject({
     mask: "task_ids",
     body: { task_ids: ["new-child"] },
   });
@@ -228,4 +233,25 @@ it("keeps a cleared FlowDay estimate unknown and resumes a timer on its original
   expect(focus.timer?.flowDate).toBe("2026-10-12");
   await api.timer("resume", "child", focus);
   expect(command.flow_date).toBe("2026-10-12");
+});
+
+it("shows an actionable throttled sync and does not attempt the following write", async () => {
+  const paths: string[] = [];
+  const api = createApi(
+    { apiOrigin: "https://api.example.test", token: "synthetic" },
+    vi.fn<typeof fetch>(async (input) => {
+      paths.push(new URL(String(input)).pathname);
+      return json({ state: "throttled" });
+    }),
+  );
+  let failure: unknown;
+  try {
+    await api.updateEstimate("new-child", 30);
+  } catch (error) {
+    failure = error;
+  }
+  expect(publicError(failure)).toBe(
+    "FlowDay just synced. Wait briefly and try adding or estimating this task again.",
+  );
+  expect(paths).toEqual(["/api/plus/flowday/api/v1/tasks:sync"]);
 });

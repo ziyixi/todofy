@@ -529,6 +529,9 @@ A failed settlement does not authorize another Todoist completion. Todofy keeps 
 Migration `0004` adds Todoist parent and actual deadline fields, distinct from due/scheduled dates. Explicitly setting
 or clearing a FlowDay estimate marks it as an override, so a later Todoist duration cannot replace it. Existing
 nonempty estimates are preserved on migration because their historical source is not available.
+Existing Todoist sync state also gets a one-shot hierarchy refresh marker. The new Worker starts a full pass
+through the existing bounded sync pipeline, ignoring old pending cursors, resumes its own partial pass, and clears
+the marker with the final batch. Fresh accounts already start with a full sync; estimates, queues and timers remain.
 The timer remains one session row; its command receipts and recorded time entries are included in the normal D1 backup.
 
 Local checks on October 13 passed Worker lint/typecheck, 21 unit tests, 123 real-D1/workerd cases (including timer

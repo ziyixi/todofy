@@ -141,7 +141,9 @@ ANSI = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]")
 # The Todoist key is never exported: the Worker reads only a key sealed under its own secret (docs/design.md 3).
 EXCLUDED_SETTINGS = ("todoist_api_key",)
 # Keys only the Worker's sync writes; the container never had them, so a source holding one is not a container file.
-WORKER_ONLY_SETTINGS = ("todoist_sync_token", "todoist_projects", "sync_claimed_at", "todoist_sync_pending")
+WORKER_ONLY_SETTINGS = (
+    "todoist_sync_token", "todoist_projects", "sync_claimed_at", "todoist_sync_pending", "todoist_hierarchy_refresh"
+)
 
 WAL_MAGIC = (0x377F0682, 0x377F0683)
 # A text holding a C0 control (newline and tab aside) or DEL is written as hex: SQL files carry no raw controls.

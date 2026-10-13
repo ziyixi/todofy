@@ -346,6 +346,7 @@ class SchemaTest(unittest.TestCase):
             db.execute(
                 "INSERT INTO active_timer_session(id,task_id,status,session_saved_s) VALUES ('main','known','paused',120)"
             )
+            db.execute("INSERT INTO settings(key,value) VALUES ('todoist_sync_token','old-token')")
             db.executescript((tool.MIGRATIONS / "0004_focus.sql").read_text())
             self.assertEqual(
                 db.execute("SELECT id,estimated_mins,estimate_override FROM tasks ORDER BY id").fetchall(),
@@ -355,6 +356,7 @@ class SchemaTest(unittest.TestCase):
                 db.execute("SELECT task_id,status,session_saved_s,etag FROM active_timer_session").fetchall(),
                 [("known", "paused", 120, "0")],
             )
+            self.assertEqual(db.execute("SELECT value FROM settings WHERE key='todoist_hierarchy_refresh'").fetchall(), [("1",)])
 
 
 class ExportTest(Scratch):
@@ -1036,6 +1038,7 @@ class FakeRemoteTest(Scratch):
             ("estimate_override", "UPDATE tasks SET estimate_override = 1 WHERE id = 'task-1'"),
             ("etag", "UPDATE active_timer_session SET etag = 'new-command'"),
             ("timer_commands", "INSERT INTO timer_commands VALUES ('new','synthetic','{}','2026-10-13')"),
+            ("settings", "INSERT INTO settings(key,value) VALUES ('todoist_hierarchy_refresh','1')"),
         ):
             with self.subTest(column=name):
                 with sqlite3.connect(self.d1) as db:

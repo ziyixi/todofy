@@ -41,6 +41,8 @@ export const KEY_PROJECTS = 'todoist_projects';
 export const KEY_CLAIMED_AT = 'sync_claimed_at';
 export const KEY_LAST_SYNC_AT = 'last_sync_at';
 export const KEY_PENDING = 'todoist_sync_pending';
+/** One-shot migration refresh; 'running' means the pending full pass used the new parser. */
+export const KEY_HIERARCHY_REFRESH = 'todoist_hierarchy_refresh';
 
 export type SyncMode = 'auto' | 'manual';
 
@@ -234,7 +236,7 @@ export interface SyncRequest {
 export async function runSync({ db, mode, credentialKey, now = new Date(), fetcher = fetch }: SyncRequest): Promise<SyncOutcome> {
   const nowMs = now.getTime();
   const nowIso = now.toISOString();
-  const stored = await getSettings(db, [KEY_API_KEY, KEY_SYNC_TOKEN, KEY_PROJECTS, KEY_CLAIMED_AT, KEY_LAST_SYNC_AT, KEY_PENDING]);
+  const stored = await getSettings(db, [KEY_API_KEY, KEY_SYNC_TOKEN, KEY_PROJECTS, KEY_CLAIMED_AT, KEY_LAST_SYNC_AT, KEY_PENDING, KEY_HIERARCHY_REFRESH]);
   const sealedKey = stored.get(KEY_API_KEY) ?? null;
   if (sealedKey === null || sealedKey === '') return { kind: 'no_key' };
   const key = await importCredentialKey(credentialKey);
@@ -248,7 +250,11 @@ export async function runSync({ db, mode, credentialKey, now = new Date(), fetch
   const lastSyncMs = Date.parse(stored.get(KEY_LAST_SYNC_AT) ?? '');
   const previousFailed = previous !== null && !(lastSyncMs >= previous.at);
   const failures = previousFailed ? Math.min(previous.failures + 1, 99) : 0;
-  const pending = parsePending(stored.get(KEY_PENDING));
+  const refresh = stored.has(KEY_HIERARCHY_REFRESH);
+  const previousPending = parsePending(stored.get(KEY_PENDING));
+  // A pre-migration pass (including a late old-Worker write) may have skipped the new fields already.
+  const pending = refresh && (stored.get(KEY_HIERARCHY_REFRESH) !== 'running' || previousPending?.base !== FULL_SYNC_TOKEN)
+    ? null : previousPending;
   // The next chunk of a pass runs right away, unless the previous request failed.
   const continuing = pending !== null && !previousFailed;
   const autoMs = continuing ? 0 : autoInterval(failures);
@@ -268,7 +274,7 @@ export async function runSync({ db, mode, credentialKey, now = new Date(), fetch
   }
 
   const storedToken = stored.get(KEY_SYNC_TOKEN) ?? '';
-  const requested = pending?.base ?? (storedToken === '' ? FULL_SYNC_TOKEN : storedToken);
+  const requested = pending?.base ?? (refresh || storedToken === '' ? FULL_SYNC_TOKEN : storedToken);
   let answer: SyncAnswer;
   try {
     answer = await fetchSync(apiKey, requested, fetcher);
@@ -281,6 +287,11 @@ export async function runSync({ db, mode, credentialKey, now = new Date(), fetch
   }
 
   const plan = planChunk(answer, requested, pending, parseProjects(stored.get(KEY_PROJECTS) ?? null), nowIso);
+  if (refresh && answer.fullSync) {
+    plan.settingStatements.push(plan.partial
+      ? setSettingSql(KEY_HIERARCHY_REFRESH, 'running')
+      : sql`DELETE FROM settings WHERE key = ${KEY_HIERARCHY_REFRESH}`);
+  }
   const results = await batchSql(db, [...plan.taskStatements, ...plan.settingStatements, setSettingSql(KEY_LAST_SYNC_AT, nowIso)]);
   const changed = results.slice(0, plan.taskStatements.length).reduce((sum, result) => sum + result.meta.changes, 0);
   return {

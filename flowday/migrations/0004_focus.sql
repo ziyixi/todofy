@@ -11,3 +11,9 @@ CREATE TABLE timer_commands (
   result TEXT NOT NULL,
   created_at TEXT NOT NULL
 );
+-- Old incremental tokens do not report unchanged hierarchy/deadline fields. Only the new Worker consumes this.
+INSERT INTO settings (key, value)
+SELECT 'todoist_hierarchy_refresh', '1'
+WHERE EXISTS (SELECT 1 FROM settings WHERE key IN ('todoist_sync_token', 'todoist_sync_pending'))
+   OR EXISTS (SELECT 1 FROM tasks WHERE todoist_id IS NOT NULL)
+ON CONFLICT(key) DO UPDATE SET value = '1';

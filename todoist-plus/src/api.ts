@@ -11,6 +11,7 @@ import {
   CommandTimerRequest_Action,
   FlowDayUiService,
   SyncTasksResponse_State,
+  SyncTasksRequest_Mode,
 } from "@ziyixi/proto/flowday/ui/v1/flowday_ui_service_pb";
 import { TimerSession_State } from "@ziyixi/proto/flowday/ui/v1/time_entry_pb";
 import type { FocusState, PlanningTask, PlusActions } from "./model";
@@ -32,7 +33,10 @@ export function validOrigin(input: string): string {
     throw new Error("Enter an HTTPS origin, without a path.");
   return url.origin;
 }
+class FlowdaySyncPendingError extends Error {}
+
 export function publicError(error: unknown): string {
+  if (error instanceof FlowdaySyncPendingError) return error.message;
   if (error instanceof RpcStatusError)
     return error.status.localizedMessage?.message ?? error.status.message;
   if (error instanceof HttpResponseError && error.httpStatus === 401)
@@ -101,10 +105,22 @@ export function createApi(
     )
       return;
     for (let page = 0; page < 10; page++) {
-      const result = await flowday.syncTasks({});
-      if (result.state !== SyncTasksResponse_State.PARTIAL) return;
+      const result = await flowday.syncTasks({
+        mode: SyncTasksRequest_Mode.MANUAL,
+      });
+      if (result.state === SyncTasksResponse_State.SYNCED) return;
+      if (result.state === SyncTasksResponse_State.THROTTLED)
+        throw new FlowdaySyncPendingError(
+          "FlowDay just synced. Wait briefly and try adding or estimating this task again.",
+        );
+      if (result.state !== SyncTasksResponse_State.PARTIAL)
+        throw new FlowdaySyncPendingError(
+          "FlowDay could not confirm this sync. Refresh and try again.",
+        );
     }
-    throw new Error("FlowDay is still importing tasks. Refresh and try again.");
+    throw new FlowdaySyncPendingError(
+      "FlowDay is still importing tasks. Refresh and try again.",
+    );
   }
   return {
     async load() {
