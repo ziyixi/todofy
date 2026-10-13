@@ -188,6 +188,8 @@ test("built MV3 mounts, restores native UI and sends task actions through its ba
     await setup(context, worker);
     const page = await context.newPage();
     await page.goto("https://app.todoist.com/app/today");
+    await expect(page.locator("#legacy")).toBeHidden();
+    await expect(page.locator("#native")).toBeVisible();
     await page.getByRole("button", { name: "Plan", exact: true }).click();
     await expect(
       page.getByText("Synthetic project", { exact: true }),

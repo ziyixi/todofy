@@ -47,6 +47,11 @@ new task, and a throttled response blocks the following write with a visible ret
 Its 20 unit/API/component and three built-browser checks pass. The final branch gate must verify
 these last changes at their own source SHA before release.
 
+The final native-startup browser check begins at ordinary `/app/today`: the exact replaced
+favorites hide after a successful connection lookup while native content remains visible.
+It then opens Plan and verifies native restoration. Mapping or authentication failures restore
+legacy controls. No additional endpoint or local cache was introduced for this startup behavior.
+
 ## Production acceptance
 
 Pending branch CI, same-SHA deployment, Chrome install, real Todoist layout/keyboard/navigation,

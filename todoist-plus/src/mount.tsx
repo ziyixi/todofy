@@ -263,6 +263,16 @@ export async function mountTodoist(ctx: ContentScriptContext) {
     cleanups.push(() => navUi.remove());
     mounting = false;
     render();
+    if (!view) {
+      void extensionActions
+        .load()
+        .then((next) => {
+          if (!disposed) ready(next.plan);
+        })
+        .catch(() => {
+          if (!disposed) ready();
+        });
+    }
   }
   async function mountDetails() {
     const modal = document.querySelector<HTMLElement>(
