@@ -34,6 +34,7 @@ DO SQLite holds only counters and schedule times that may be lost: every
 time then defaults to "due now" and the ledger stays in D1.
 """
 
+import asyncio
 import hashlib
 import json
 import math
@@ -82,6 +83,10 @@ from todofy.runtime import (
     ledger,
     metrics,
     ops,
+    plus_api,
+    plus_store,
+    plus_todoist,
+    plus_week,
     reminder,
     reports,
     retention,
@@ -171,6 +176,7 @@ class TodofyCore(DurableObject):
         for statement in (*DO_SCHEMA, *backup.DO_SCHEMA, *metrics.DO_SCHEMA, *ops.DO_SCHEMA, *gtd.DO_SCHEMA):
             self.sql.exec(statement)
         self.running = False
+        self.plus_lock = asyncio.Lock()
         # A wake-up that arrived while the alarm loop was busy; honoured when it finishes.
         self.woken = False
         # Whether a due task intent goes before due mail at the next step (they take turns).
@@ -190,6 +196,39 @@ class TodofyCore(DurableObject):
         except JsException:
             # The platform logs carry the details.
             return failed(503, ApiError.UNAVAILABLE).wire()
+
+    async def plus_auth(self, digest: str) -> bool:
+        """Only hashed extension credentials cross this RPC boundary."""
+        from todofy.core.sql import plus as plus_sql
+
+        if len(digest) != 64:
+            return False
+        return await plus_store.first(self.env.DB, plus_sql.CONNECTION, digest) is not None
+
+    async def plus_ui(self, method: str, request: str, owner: bool) -> dict[str, Any]:
+        return await plus_api.handle(self, method, request, owner=owner)
+
+    async def plus_focus_claim(self, action_id: str, value: str | None, replace_etag: str | None) -> str | None:
+        """Freeze one FlowDay settlement request after its Todoist completion receipt exists."""
+        from todofy.core.sql import plus as plus_sql
+
+        async with self.plus_lock:
+            if flag(self.env, "MAINTENANCE_MODE") or backup.holds_ledger(self.env, self.sql, now_s()):
+                raise RuntimeError("Plus state is temporarily held")
+            completed = await plus_store.first(self.env.DB, plus_sql.ACTION, action_id)
+            if not completed or completed["response"] is None:
+                return None
+            key = "focus:" + action_id
+            existing = await plus_store.first(self.env.DB, plus_sql.ACTION, key)
+            if existing and (replace_etag is None or json.loads(existing["commands"])["etag"] != replace_etag):
+                return existing["commands"]
+            if value is None:
+                return existing["commands"] if existing else None
+            if existing:
+                await self.env.DB.prepare(plus_sql.REPLACE_ACTION_COMMANDS).bind(value, key).run()
+            else:
+                await plus_store.start_action(self.env.DB, key, action_id, json.loads(value))
+            return value
 
     async def ingest(self, idempotency_key: str | None, body: Any) -> dict[str, Any]:
         """POST /hooks/mail after the gateway's checks: the Idempotency-Key header and the unread body stream."""
@@ -726,7 +765,9 @@ class TodofyCore(DurableObject):
         self._settle_interrupted_summaries()
         await ledger.recover_interrupted(env.DB, now, lookup_at=_after(self._lookup_delay()))
         may_start = ops.backup_defer_until(self.sql, now) is None
-        if (resume_at := await backup.run(env, self.sql, now, may_start=may_start)) is not None:
+        async with self.plus_lock:
+            resume_at = await backup.run(env, self.sql, now, may_start=may_start)
+        if resume_at is not None:
             # A backup job holds the ledger and the ticks until it ends (backup.py).
             await storage.setAlarm(resume_at)
             return
@@ -735,6 +776,10 @@ class TodofyCore(DurableObject):
             worked = await self._step(now, todoist_open=self._todoist_wait(now) is None)
         await self._ticks()
         await self._gtd_tick()
+        try:
+            await plus_week.tick(self)
+        except (plus_todoist.PlusError, JsException) as error:
+            _log(plus="weekly_check_failed", code=getattr(error, "reason", "UNAVAILABLE"))
         await storage.setAlarm(await self._next_alarm_ms(worked))
 
     async def _arm_watchdog(self) -> None:

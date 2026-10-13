@@ -21,6 +21,8 @@ export interface TaskRecord {
   isCompleted: boolean;
   completedAt: string | null;
   dueDate: string | null;
+  parentId?: string | null;
+  deadlineDate?: string | null;
   createdAt: string;
   deletedAt: string | null;
 }
@@ -61,6 +63,7 @@ export interface TimerSessionRecord {
   pomodoroFinishedFlowDate: string | null;
   pomodoroFinishedTargetS: number | null;
   updatedAt: string | null;
+  etag?: string;
 }
 
 /**

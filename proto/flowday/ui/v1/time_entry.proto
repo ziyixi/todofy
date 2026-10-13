@@ -64,8 +64,7 @@ message TimeEntry {
 }
 
 // The timer that is running, paused or finished right now, shared by every device: a timer started on one device
-// continues on another. The UI owns its state and writes it on every change (start, pause, resume, stop); the Worker
-// stores it as given.
+// continues on another. CommandTimer owns transitions and records segments atomically; clients render this state.
 message TimerSession {
   option (google.api.resource) = {
     type: "flowday.ziyixi.science/TimerSession"
@@ -76,8 +75,7 @@ message TimerSession {
 
   // What the timer is doing.
   // (-- api-linter: core::0216::state-field-output-only=disabled
-  //     aip.dev/not-precedent: the UI runs the timer and writes its state; the Worker only keeps it for the other
-  //     devices, so the state is the client's input. --)
+  //     aip.dev/not-precedent: TimerSession is a response-only shared timer; transitions use CommandTimer. --)
   enum State {
     // Not set: read as IDLE on input, never written.
     STATE_UNSPECIFIED = 0;
@@ -107,7 +105,7 @@ message TimerSession {
   string flow_date = 3 [(google.api.field_behavior) = OPTIONAL];
   // What the timer is doing (IDLE when unspecified).
   // (-- api-linter: core::0216::state-field-output-only=disabled
-  //     aip.dev/not-precedent: the UI runs the timer and writes its state (see State). --)
+  //     aip.dev/not-precedent: TimerSession is a response-only shared timer; transitions use CommandTimer. --)
   State state = 4 [(google.api.field_behavior) = OPTIONAL];
   // How the timer counts (COUNT_UP when unspecified).
   Mode mode = 5 [(google.api.field_behavior) = OPTIONAL];
@@ -125,4 +123,6 @@ message TimerSession {
   optional int32 finished_pomodoro_target_seconds = 11 [(google.api.field_behavior) = OPTIONAL];
   // When the session was last written; unset for an empty session (IDLE, no task and no finished pomodoro).
   google.protobuf.Timestamp update_time = 12 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Version required by CommandTimer; the empty initial session uses 0.
+  string etag = 13 [(google.api.field_behavior) = OUTPUT_ONLY];
 }

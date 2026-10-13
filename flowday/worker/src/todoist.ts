@@ -59,6 +59,8 @@ export interface TodoistItem {
   content: string;
   description: string;
   project_id: string;
+  parent_id?: string | null;
+  deadline?: { date: string } | null;
   priority: number;
   labels: string[];
   due: { date: string } | null;
@@ -171,6 +173,7 @@ function parseItem(raw: unknown): TodoistItem | null {
   const id = str(item?.['id']);
   if (item === null || id === null) return null;
   const due = record(item['due']);
+  const deadline = record(item['deadline']);
   const duration = record(item['duration']);
   const amount = duration?.['amount'];
   const unit = duration?.['unit'];
@@ -179,6 +182,8 @@ function parseItem(raw: unknown): TodoistItem | null {
     content: str(item['content']) ?? '',
     description: str(item['description']) ?? '',
     project_id: str(item['project_id']) ?? '',
+    parent_id: str(item['parent_id']),
+    deadline: deadline !== null && typeof deadline['date'] === 'string' ? { date: deadline['date'] } : null,
     priority: typeof item['priority'] === 'number' ? item['priority'] : 1,
     labels: Array.isArray(item['labels']) ? item['labels'].filter((label): label is string => typeof label === 'string') : [],
     due: due !== null && typeof due['date'] === 'string' ? { date: due['date'] } : null,
@@ -251,6 +256,8 @@ export function itemToRow(item: TodoistItem, projects: ReadonlyMap<string, Proje
     completed_at: item.completed_at,
     // "YYYY-MM-DD" or "YYYY-MM-DDTHH:MM:SS": FlowDay plans by day.
     due_date: item.due === null ? null : item.due.date.slice(0, 10),
+    parent_id: item.parent_id ?? null,
+    deadline_date: item.deadline?.date.slice(0, 10) ?? null,
     created_at: item.added_at,
     todoist_project_id: item.project_id === '' ? null : item.project_id,
   };

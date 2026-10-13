@@ -40,7 +40,7 @@ export async function storeTodoistKey(db: Db, token: string): Promise<void> {
   await setSetting(db, 'todoist_api_key', await sealCredential(key, 'todoist_api_key', token));
 }
 
-export const TABLES = ['flow_task_notes', 'completed_flow_tasks', 'flow_tasks', 'time_entries', 'tasks', 'settings', 'active_timer_session'] as const;
+export const TABLES = ['flow_task_notes', 'completed_flow_tasks', 'flow_tasks', 'time_entries', 'tasks', 'settings', 'active_timer_session', 'timer_commands'] as const;
 
 /** The page the fake ASSETS serves at /: two inline scripts (hashed into the CSP) and one external script. */
 export const TEST_PAGE =
@@ -54,6 +54,7 @@ function workerBundle(): Promise<string> {
     bundle: true,
     format: 'esm',
     platform: 'neutral',
+    external: ['cloudflare:workers'],
     target: 'es2024',
     mainFields: ['module', 'main'],
     conditions: ['workerd', 'worker', 'import'],
@@ -92,6 +93,8 @@ export interface FakeItem {
   priority?: number;
   labels?: string[];
   due?: { date: string } | null;
+  parent_id?: string | null;
+  deadline?: { date: string } | null;
   duration?: { amount: number; unit: string } | null;
   added_at?: string;
   completed_at?: string | null;
@@ -240,6 +243,7 @@ export interface Harness {
   readonly todoist: FakeTodoist;
   /** A request to "flowday" over loopback http (the dev bypass signs the owner in). */
   fetch(path: string, init?: RequestInit): Promise<Response>;
+  focusFetch(path: string, init?: RequestInit): Promise<Response>;
   /** JSON of a GET, asserting 200. */
   get<T>(path: string): Promise<T>;
   /** A mutation with a fresh CSRF token and the loopback Origin: status, JSON and the D1 rows it wrote. */
@@ -307,6 +311,7 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
           bindings: { ...SYNTHETIC_BINDINGS, ...options.bindings },
           outboundService: (request: Request) => outbound(request),
         },
+        { name: 'focus-client', modules: true, script: 'export default {fetch(request, env) { return env.FOCUS.fetch(request); }}', compatibilityDate: '2026-09-08', serviceBindings: { FOCUS: { name: 'flowday', entrypoint: 'FocusEntrypoint' } } },
       ],
     }),
   );
@@ -335,6 +340,10 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
   };
   const api: Api = createHttpClient(FlowDayUiService, send);
   const harness: Harness = {
+    async focusFetch(path, init) {
+      const worker = await mf.getWorker('focus-client');
+      return worker.fetch(`https://flowday.internal${path}`, init as never) as unknown as Promise<Response>;
+    },
     api,
     async call<T>(run: (client: Api) => Promise<T>): Promise<Call<T>> {
       lastRowsWritten = Number.NaN;

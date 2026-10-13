@@ -143,10 +143,13 @@ def load_catalog(root: Path = REPO, *, bootstrap: bool = False) -> Catalog:
                       {"version", "id", "target", "entries"}, f"{app}.manifest")
         require(type(data["version"]) is int and data["version"] == 1, f"{app}.version")
         require(identifier(data["id"], f"{app}.id") == app, f"{app}.id")
-        require(isinstance(data["target"], str) and data["target"] in {"cloudflare", "vps"}, f"{app}.target")
+        require(isinstance(data["target"], str) and data["target"] in {"cloudflare", "vps", "browser"}, f"{app}.target")
         for collection in ("workers", "access"):
             require(isinstance(data.get(collection, []), list), f"{app}.{collection}")
-        if data["target"] == "vps":
+        if data["target"] == "browser":
+            require(not data.get("workers") and not data.get("access") and "image" not in data, f"{app}.browser resources")
+            require(data["entries"] == [], f"{app}.browser entries")
+        elif data["target"] == "vps":
             require(not data.get("workers") and not data.get("access"), f"{app}.vps resources")
             if bootstrap:
                 data = {**data, "image": images.get(app)}
@@ -154,7 +157,7 @@ def load_catalog(root: Path = REPO, *, bootstrap: bool = False) -> Catalog:
                 require(data.get("image") == images.get(app), f"{app}.image")
         else:
             require("image" not in data and bool(data.get("workers")), f"{app}.workers")
-        require(isinstance(data["entries"], list) and bool(data["entries"]), f"{app}.entries")
+        require(isinstance(data["entries"], list) and (bool(data["entries"]) or data["target"] == "browser"), f"{app}.entries")
         apps[app] = data
         for raw in data.get("workers", []):
             worker = fields(raw, {"config", "hosts", "entry", "role", "position", "personal_secrets", "manual_secrets", "optional_secrets", "owner_machine_secrets"},

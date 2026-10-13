@@ -62,6 +62,7 @@ const TASK_ROW: typeof tasksTable.$inferSelect = {
   deletedAt: '2026-01-01T00:00:00.000Z',
   deletedSource: 'local',
   todoistProjectId: 'warmup-project',
+  parentId: null, deadlineDate: null, estimateOverride: 0,
 };
 
 const ENTRY_ROW: TimeEntryRecord = {

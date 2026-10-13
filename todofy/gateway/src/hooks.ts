@@ -1,4 +1,5 @@
 /** Machine endpoints on every TODOFY_HOOKS_HOSTS name: health, the Mail Hero webhook, newsletter reports. */
+import { plusExtension, plusPath } from './plus.ts';
 import { answer, type ReportKind } from './coordinator.ts';
 import { base64DecodeStrict, matchesAny, sha256Hex, utf8 } from './crypto.ts';
 import { csv, flag, variable } from './env.ts';
@@ -18,6 +19,7 @@ let lockedHour: string | null = null;
 export async function handleHooks(ctx: Context): Promise<Response> {
   const { method } = ctx.request;
   const path = ctx.url.pathname;
+  if (plusPath(path)) return plusExtension(ctx);
   if (method === 'POST' && path === '/hooks/mail') return mail(ctx);
   if (method === 'GET' && path === '/api/summary') return report(ctx, 'summary');
   if (method === 'GET' && path === '/api/recommendation') return report(ctx, 'recommendation');

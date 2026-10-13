@@ -1,0 +1,10 @@
+{
+  "extends": "./.wxt/tsconfig.json",
+  "compilerOptions": {
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "jsx": "react-jsx",
+    "types": ["vite/client", "node"]
+  },
+  "include": ["**/*.ts", "**/*.tsx", ".wxt/**/*.d.ts"]
+}

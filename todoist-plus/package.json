@@ -1,0 +1,53 @@
+{
+  "name": "@ziyixi/todoist-plus",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "engines": {
+    "node": ">=26"
+  },
+  "scripts": {
+    "postinstall": "node ../proto/tools/ensure.mjs",
+    "dev": "wxt --no-open",
+    "prototype": "vite --host 127.0.0.1 --port 18795 --strictPort",
+    "build": "wxt build",
+    "zip": "wxt zip",
+    "typecheck": "wxt prepare && tsc --noEmit",
+    "test": "vitest run",
+    "prepare": "wxt prepare",
+    "pretypecheck": "node ../proto/tools/ensure.mjs",
+    "pretest": "node ../proto/tools/ensure.mjs",
+    "prelint": "node ../proto/tools/ensure.mjs",
+    "prebuild": "node ../proto/tools/ensure.mjs",
+    "prezip": "node ../proto/tools/ensure.mjs",
+    "preprototype": "node ../proto/tools/ensure.mjs",
+    "lint": "eslint .",
+    "predev": "node ../proto/tools/ensure.mjs",
+    "test:browser": "playwright test",
+    "pretest:browser": "node ../proto/tools/ensure.mjs"
+  },
+  "dependencies": {
+    "@ziyixi/proto": "file:../proto/ts",
+    "lucide-react": "1.8.0",
+    "react": "19.2.4",
+    "react-dom": "19.2.4"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@playwright/test": "1.63.0",
+    "@testing-library/react": "16.3.2",
+    "@types/node": "26.6.3",
+    "@types/react": "19.2.14",
+    "@types/react-dom": "19.2.3",
+    "@vitejs/plugin-react": "6.1.2",
+    "@wxt-dev/module-react": "1.2.2",
+    "eslint": "10.11.0",
+    "jsdom": "29.1.1",
+    "prettier": "3.9.8",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.71.0",
+    "vite": "8.3.4",
+    "vitest": "4.1.11",
+    "wxt": "0.21.4"
+  }
+}

@@ -45,4 +45,8 @@ enum ErrorReason {
   // ALREADY_EXISTS (409): UndeleteTask of a task that is not deleted (AIP-164). The error carries the
   // flowday.ui.v1.Task.
   ERROR_REASON_TASK_NOT_DELETED = 5;
+  // ABORTED (409): another window changed the timer; reload its current state.
+  ERROR_REASON_TIMER_CONFLICT = 6;
+  // FAILED_PRECONDITION (400): an older client must reload before editing the timer.
+  ERROR_REASON_RELOAD_REQUIRED = 7;
 }

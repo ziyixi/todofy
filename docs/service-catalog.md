@@ -183,3 +183,7 @@ tested images of the same SHA; changing a catalog row alone does not start that 
 Special policies remain explicit: FlowDay's keys and policy attachment differ from owner applications;
 the backup application is frozen; Email Routing and the root mailbox are outside this catalog. Keep
 those exceptions in their owning contracts rather than adding general-purpose escape hatches here.
+
+Browser extensions use `target = "browser"`, with `entries = []` and no Workers, Access rules or image.
+Todoist Plus is checked and published as a ZIP by Actions, while its backend resources remain owned by
+Todofy and FlowDay. It does not create a Home health tile for a locally installed browser process.

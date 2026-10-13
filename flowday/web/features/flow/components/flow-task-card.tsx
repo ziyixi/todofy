@@ -109,7 +109,7 @@ export function FlowTaskCard({ task, index, isNext, date }: FlowTaskCardProps) {
   const handleComplete = async () => {
     if (!actionTaskId) return;
     if (isActive) {
-      await stopAndSave();
+      if (!(await stopAndSave())) return;
     }
     completeTask(actionTaskId, date);
     if (isQuickPlaceholder && quickTasks.length <= 1) {

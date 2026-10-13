@@ -57,11 +57,17 @@ deleted_classes = ["TodofyCoordinator"]
 binding = "METRICS"
 dataset = "todofy_metrics"
 
+[[services]]
+binding = "FLOWDAY_FOCUS"
+service = "flowday"
+entrypoint = "FocusEntrypoint"
+
 [triggers]
 crons = ["*/10 * * * *"]
 
 [vars]
 TODOFY_PUBLIC_HOST = "todofy.ziyixi.science"
+FLOWDAY_PUBLIC_URL = "https://flowday.ziyixi.science"
 TODOFY_HOOKS_HOSTS = "todofy-hooks.ziyixi.science,daily.ziyixi.science"
 ACCESS_ISSUER = "https://ziyixi.cloudflareaccess.com"
 ACCESS_AUDIENCE = "16e87af7af751dc7205a6995cfe43eee133736ea2a254efdbeb9e4334790eddd"

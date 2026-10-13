@@ -93,7 +93,7 @@ describe('item transform', () => {
     const base = { id: 't', content: 'Write', description: '', project_id: 'p1', priority: 9, labels: ['x'], due: { date: '2026-04-15T09:30:00' }, duration: null, added_at: '2026-04-10T00:00:00Z', completed_at: null, checked: false, is_deleted: false };
     expect(itemToRow(base, projects)).toEqual({
       id: 't', todoist_id: 't', title: 'Write', description: null, project_name: 'Inbox', project_color: '#ff9933', priority: 1, labels: '["x"]',
-      estimated_mins: null, is_completed: 0, completed_at: null, due_date: '2026-04-15', created_at: '2026-04-10T00:00:00Z', todoist_project_id: 'p1',
+      estimated_mins: null, is_completed: 0, completed_at: null, due_date: '2026-04-15', parent_id: null, deadline_date: null, created_at: '2026-04-10T00:00:00Z', todoist_project_id: 'p1',
     });
   });
 });

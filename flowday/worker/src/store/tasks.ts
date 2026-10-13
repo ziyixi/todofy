@@ -32,6 +32,8 @@ export function mapTaskRow(row: TaskRow): TaskRecord {
     isCompleted: row.isCompleted === 1,
     completedAt: row.completedAt,
     dueDate: row.dueDate,
+    parentId: row.parentId,
+    deadlineDate: row.deadlineDate,
     createdAt: row.createdAt ?? new Date().toISOString(),
     deletedAt: row.deletedAt ?? null,
   };
@@ -129,8 +131,8 @@ export async function restoreTask(db: Db, taskId: string): Promise<boolean> {
 export async function updateTaskEstimate(db: Db, taskId: string, estimatedMins: number | null): Promise<void> {
   await db
     .update(tasks)
-    .set({ estimatedMins })
-    .where(and(eq(tasks.id, taskId), sql`${tasks.estimatedMins} IS NOT ${estimatedMins}`));
+    .set({ estimatedMins, estimateOverride: 1 })
+    .where(and(eq(tasks.id, taskId), sql`(${tasks.estimatedMins} IS NOT ${estimatedMins} OR ${tasks.estimateOverride} = 0)`));
 }
 
 export async function updateTaskTitle(db: Db, taskId: string, title: string): Promise<void> {
@@ -233,6 +235,8 @@ export interface TaskUpsertRow {
   is_completed: 0 | 1;
   completed_at: string | null;
   due_date: string | null;
+  parent_id?: string | null;
+  deadline_date?: string | null;
   created_at: string | null;
   todoist_project_id: string | null;
 }
@@ -251,6 +255,8 @@ export function taskToUpsertRow(task: TaskRecord, todoistProjectId: string | nul
     is_completed: task.isCompleted ? 1 : 0,
     completed_at: task.completedAt,
     due_date: task.dueDate,
+    parent_id: task.parentId ?? null,
+    deadline_date: task.deadlineDate ?? null,
     created_at: task.createdAt,
     todoist_project_id: todoistProjectId,
   };
@@ -268,6 +274,8 @@ const PLAIN_COLUMNS = [
   'is_completed',
   'completed_at',
   'due_date',
+  'parent_id',
+  'deadline_date',
   'todoist_project_id',
 ] as const;
 
@@ -287,7 +295,7 @@ export function upsertStatements(rows: readonly TaskUpsertRow[], syncedAt: strin
   const differs = sql.raw(
     [
       ...PLAIN_COLUMNS.map((column) => `tasks.${column} IS NOT excluded.${column}`),
-      '(excluded.estimated_mins IS NOT NULL AND tasks.estimated_mins IS NOT excluded.estimated_mins)',
+      '(tasks.estimate_override = 0 AND excluded.estimated_mins IS NOT NULL AND tasks.estimated_mins IS NOT excluded.estimated_mins)',
     ].join(' OR '),
   );
   const assign = sql.raw(PLAIN_COLUMNS.map((column) => `${column} = excluded.${column}`).join(', '));
@@ -295,14 +303,14 @@ export function upsertStatements(rows: readonly TaskUpsertRow[], syncedAt: strin
   for (let start = 0; start < rows.length; start += UPSERT_CHUNK) {
     const json = JSON.stringify(rows.slice(start, start + UPSERT_CHUNK));
     out.push(sql`INSERT INTO tasks (id, todoist_id, title, description, project_name, project_color, priority, labels,
-        estimated_mins, is_completed, completed_at, due_date, created_at, synced_at, todoist_project_id)
+        estimated_mins, is_completed, completed_at, due_date, created_at, synced_at, todoist_project_id, parent_id, deadline_date)
       SELECT ${pick('id')}, ${pick('todoist_id')}, ${pick('title')}, ${pick('description')}, ${pick('project_name')},
         ${pick('project_color')}, ${pick('priority')}, ${pick('labels')}, ${pick('estimated_mins')},
         ${pick('is_completed')}, ${pick('completed_at')}, ${pick('due_date')}, ${pick('created_at')}, ${syncedAt},
-        ${pick('todoist_project_id')}
+        ${pick('todoist_project_id')}, ${pick('parent_id')}, ${pick('deadline_date')}
       FROM json_each(${json}) WHERE true
       ON CONFLICT(id) DO UPDATE SET ${assign},
-        estimated_mins = COALESCE(excluded.estimated_mins, tasks.estimated_mins), synced_at = excluded.synced_at
+        estimated_mins = CASE WHEN tasks.estimate_override = 1 THEN tasks.estimated_mins ELSE COALESCE(excluded.estimated_mins, tasks.estimated_mins) END, synced_at = excluded.synced_at
       WHERE ${differs}`);
   }
   out.push(sql`UPDATE tasks SET deleted_at = NULL, deleted_source = NULL

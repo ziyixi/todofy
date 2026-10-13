@@ -8,6 +8,7 @@
 import { FlowSchema, NoteSchema } from "@ziyixi/proto/flowday/ui/v1/flow_pb";
 import {
   FlowDayUiService,
+  CommandTimerRequest_Action as Action,
   ListFlowsResponseSchema,
   ListNotesResponseSchema,
   ListTasksResponseSchema,
@@ -107,6 +108,7 @@ class FakeWorker {
   notes = new Map<string, string>();
   settings = new Map<string, string>();
   session: TimerSession | null = null;
+  timerReceipts = new Map<string, TimerSession>();
   requests: FakeRequest[] = [];
   /** Tests set this to make the next write answer 403 CSRF_FAILED once (an expired token). */
   expireCsrfOnce = false;
@@ -285,7 +287,34 @@ const handlers: ServiceHandlers<ShapeOf<typeof FlowDayUiService>, Context> = {
     return create(EmptySchema);
   },
   async getTimerSession(_request, { fake }) {
-    return fake.session ?? create(TimerSessionSchema, { name: "timerSession", state: TimerSession_State.IDLE, mode: TimerSession_Mode.COUNT_UP });
+    return fake.session ?? create(TimerSessionSchema, { name: "timerSession", state: TimerSession_State.IDLE, mode: TimerSession_Mode.COUNT_UP, etag: "0" });
+  },
+  async commandTimer(request, { fake }) {
+    const previous = fake.timerReceipts.get(request.requestId);
+    if (previous) return previous;
+    const base = fake.session ?? create(TimerSessionSchema, { name: "timerSession", state: TimerSession_State.IDLE, etag: "0" });
+    if (request.etag !== base.etag) throw new RpcError(Code.ABORTED, "TIMER_CONFLICT", "timer changed");
+    const now = Date.now();
+    let end = request.effectiveStopTime ? Math.min(now, timestampDate(request.effectiveStopTime).getTime()) : now;
+    let seconds = base.segmentStartTime ? Math.max(0, Math.floor((end - timestampDate(base.segmentStartTime).getTime()) / 1000)) : 0;
+    if (base.mode === TimerSession_Mode.POMODORO) seconds = Math.min(seconds, Math.max(0, (base.pomodoroTargetSeconds ?? 0) - base.savedSeconds));
+    if (!new Set<number>([Action.START, Action.PAUSE, Action.STOP, Action.FINISH_POMODORO, Action.SETTLE]).has(request.action)) seconds = 0;
+    if (request.action === Action.SETTLE && (request.taskId !== base.taskId || request.flowDate !== base.flowDate)) seconds = 0;
+    if (seconds > 0 && base.segmentStartTime && base.state === TimerSession_State.RUNNING) {
+      end = timestampDate(base.segmentStartTime).getTime() + seconds * 1000;
+      fake.entries.push({ id: request.requestId, taskId: base.taskId, flowDate: base.flowDate, startTime: timestampDate(base.segmentStartTime).toISOString(), endTime: new Date(end).toISOString(), durationS: seconds, source: "timer", createdAt: new Date(now).toISOString() });
+    }
+    let next = create(TimerSessionSchema, base);
+    if (request.action === Action.START) next = create(TimerSessionSchema, { name: "timerSession", taskId: request.taskId, flowDate: request.flowDate, state: TimerSession_State.RUNNING, mode: request.mode, pomodoroTargetSeconds: request.targetSeconds, segmentStartTime: timestampFromMs(now) });
+    if (request.action === Action.PAUSE) { next.state = TimerSession_State.PAUSED; next.savedSeconds += seconds; next.segmentStartTime = undefined; }
+    if (request.action === Action.RESUME) { next.state = TimerSession_State.RUNNING; next.segmentStartTime = timestampFromMs(now); }
+    if (new Set<number>([Action.STOP, Action.DISCARD, Action.FINISH_POMODORO]).has(request.action) || (request.action === Action.SETTLE && base.taskId === request.taskId && base.flowDate === request.flowDate)) next = create(TimerSessionSchema, { name: "timerSession", state: TimerSession_State.IDLE });
+    if (request.action === Action.FINISH_POMODORO) { next.finishedPomodoroTaskId = base.taskId; next.finishedPomodoroFlowDate = base.flowDate; next.finishedPomodoroTargetSeconds = base.pomodoroTargetSeconds; }
+    if (request.action === Action.DISMISS_POMODORO) { next.finishedPomodoroTaskId = ""; next.finishedPomodoroFlowDate = ""; next.finishedPomodoroTargetSeconds = undefined; }
+    if (request.action === Action.SETTLE) addCompletedFlowTask(request.flowDate, request.taskId);
+    next.etag = crypto.randomUUID(); next.updateTime = timestampFromMs(now);
+    fake.session = next; fake.timerReceipts.set(request.requestId, next);
+    return next;
   },
   async updateTimerSession({ timerSession }, { fake }) {
     const session = timerSession ?? create(TimerSessionSchema);

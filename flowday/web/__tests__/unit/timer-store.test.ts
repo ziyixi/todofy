@@ -1,3 +1,6 @@
+import { flowday, TimerAction } from "@/lib/client/flowday-api";
+import { useApiStatus } from "@/lib/client/api-status";
+import { clearTickInterval } from "@/features/timer/store/helpers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useTimerStore } from "@/features/timer/store";
 import { _getChimeCount, _resetChime } from "@/lib/utils/chime";
@@ -18,18 +21,18 @@ interface EntryPostBody {
 function createTimerFetchMock(options: { onEntryPost?: (body: EntryPostBody) => void; timerSession?: null } = {}) {
   if (options.timerSession === null) fakeWorker.session = null;
   return vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+    const before = fakeWorker.entries.length;
     const response = await fakeFetch(input, init);
-    if ((init?.method ?? "GET") === "POST" && String(input).startsWith("/api/v1/timeEntries?")) {
-      const body = JSON.parse(String(init?.body ?? "{}")) as { task_id: string; flow_date: string; duration_seconds: number; source: string };
-      options.onEntryPost?.({ taskId: body.task_id, flowDate: body.flow_date, durationS: body.duration_seconds, source: body.source });
-    }
+    for (const entry of fakeWorker.entries.slice(before)) options.onEntryPost?.({ taskId: entry.taskId, flowDate: entry.flowDate, durationS: entry.durationS ?? 0, source: entry.source });
     return response;
   });
 }
 
 function resetTimerStore() {
-  useTimerStore.getState().stopWithoutSaving();
+  clearTickInterval();
   useTimerStore.setState({
+    etag: null,
+    commandPending: false,
     activeTaskId: null,
     activeFlowDate: null,
     status: "idle",
@@ -178,7 +181,7 @@ describe("timer store", () => {
       pomodoroFinishedFlowDate: "2026-04-21",
       pomodoroFinishedTargetSeconds: 60,
     });
-    useTimerStore.getState().dismissPomodoroFinished();
+    await useTimerStore.getState().dismissPomodoroFinished();
     const state = useTimerStore.getState();
     expect(state.pomodoroFinishedTaskId).toBeNull();
     expect(state.pomodoroFinishedFlowDate).toBeNull();
@@ -220,6 +223,28 @@ describe("timer store", () => {
     expect(state.pomodoroFinishedTaskId).toBeNull();
     expect(state.pomodoroFinishedFlowDate).toBeNull();
     expect(state.pomodoroFinishedTargetSeconds).toBeNull();
+  });
+
+  it("refreshes another window's timer after a rejected stale action and reports the conflict", async () => {
+    vi.stubGlobal("fetch", createTimerFetchMock());
+    await useTimerStore.getState().startTimer("task-1", "2026-04-13");
+    await flowday.commandTimer({ name: "timerSession", requestId: crypto.randomUUID(), etag: useTimerStore.getState().etag ?? "", action: TimerAction.START, taskId: "task-2", flowDate: "2026-04-13" });
+    expect(await useTimerStore.getState().stopAndSave()).toBe(false);
+    expect(useTimerStore.getState()).toMatchObject({ activeTaskId: "task-2", status: "running" });
+    expect(useApiStatus.getState().error).not.toBeNull();
+  });
+
+  it("keeps the displayed timer ticking when a failed action cannot reload the server", async () => {
+    vi.stubGlobal("fetch", createTimerFetchMock());
+    await useTimerStore.getState().startTimer("task-1", "2026-04-13");
+    await vi.advanceTimersByTimeAsync(1000);
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("offline")));
+
+    expect(await useTimerStore.getState().stopAndSave()).toBe(false);
+    await vi.advanceTimersByTimeAsync(1000);
+
+    expect(useTimerStore.getState()).toMatchObject({ status: "running", displaySeconds: 2 });
+    expect(useApiStatus.getState().error).not.toBeNull();
   });
 
   it("does not chime for count-up timers regardless of elapsed time", async () => {

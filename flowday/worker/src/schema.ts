@@ -35,6 +35,9 @@ export const tasks = sqliteTable('tasks', {
   // Sync-deleted tasks come back by themselves when Todoist lists them again.
   deletedSource: text('deleted_source'),
   todoistProjectId: text('todoist_project_id'),
+  parentId: text('parent_id'),
+  deadlineDate: text('deadline_date'),
+  estimateOverride: integer('estimate_override').notNull().default(0),
 });
 
 export const settings = sqliteTable('settings', {
@@ -79,4 +82,5 @@ export const activeTimerSession = sqliteTable('active_timer_session', {
   pomodoroFinishedFlowDate: text('pomodoro_finished_flow_date'),
   pomodoroFinishedTargetS: integer('pomodoro_finished_target_s'),
   updatedAt: text('updated_at'),
+  etag: text('etag').notNull().default('0'),
 });

@@ -1,3 +1,4 @@
+import { CommandTimerRequest_Action as Action } from '@ziyixi/proto/flowday/ui/v1/flowday_ui_service_pb';
 /**
  * The D1 rows a typical day of using FlowDay writes through the owner API (../../../docs/design.md "Write budget"), as
  * D1 reports them (x-flowday-rows-written), each call made as the UI makes it (the shared typed client, update masks,
@@ -5,7 +6,7 @@
  * stay far below the 1,000 rows a day the owner set as FlowDay's ceiling (the account's Free allowance is 100,000
  * rows a day, shared by every app).
  */
-import { TimeEntry_Source, TimerSession_Mode, TimerSession_State } from '@ziyixi/proto/flowday/ui/v1/time_entry_pb';
+import { TimeEntry_Source, TimerSession_Mode } from '@ziyixi/proto/flowday/ui/v1/time_entry_pb';
 import { timestampFromDate } from '@ziyixi/proto/protobuf/wkt';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { TaskRecord } from '../../src/model.ts';
@@ -56,7 +57,7 @@ function task(n: number): TaskRecord {
 }
 
 describe('write budget of a day of use', () => {
-  it('planning, a dozen timer segments, notes, estimates and the review stay below 250 rows', async () => {
+  it('planning, a dozen timer segments, notes, estimates and the review stay below 300 rows with shared timer receipts', async () => {
     await h.reset();
     await upsertTasks(h.db(), Array.from({ length: 200 }, (_, n) => task(n)));
     const rows: Record<string, number> = {};
@@ -75,16 +76,17 @@ describe('write budget of a day of use', () => {
     for (const id of plan) add('estimates', await h.call((api) => api.updateTask({ task: { name: `tasks/${id}`, estimatedMinutes: 45 }, updateMask: { paths: ['estimated_minutes'] } })));
     add('planning done', await h.call((api) => api.updateFlow({ flow: { name: `flows/${DAY}`, planningCompleted: true }, updateMask: { paths: ['planning_completed'] } })));
 
-    // 12 timer segments: start (session), pause (session + entry), with a resume or a switch in between.
+    // 12 real server-owned segments. Backdating only advances the synthetic clock for this test.
+    let etag = '0';
     for (let n = 0; n < 12; n += 1) {
       const taskId = plan[n % plan.length] ?? 'td-0';
-      const start = `${DAY}T${String(8 + Math.floor(n / 2)).padStart(2, '0')}:${n % 2 === 0 ? '00' : '30'}:00.000Z`;
-      const session = { name: 'timerSession', taskId, flowDate: DAY, mode: TimerSession_Mode.POMODORO, pomodoroTargetSeconds: 1500 };
-      add('timer', await h.call((api) => api.updateTimerSession({ timerSession: { ...session, state: TimerSession_State.RUNNING, segmentStartTime: at(start), savedSeconds: 0 } })));
-      add('timer', await h.call((api) => api.createTimeEntry({ timeEntry: { taskId, flowDate: DAY, startTime: at(start), endTime: at(start.replace(':00.000Z', ':25.000Z')), durationSeconds: 1500, source: TimeEntry_Source.TIMER }, requestId: crypto.randomUUID() })));
-      add('timer', await h.call((api) => api.updateTimerSession({ timerSession: { ...session, state: TimerSession_State.PAUSED, savedSeconds: 1500 } })));
+      const start = await h.call((api) => api.commandTimer({ name: 'timerSession', requestId: crypto.randomUUID(), etag, action: Action.START, taskId, flowDate: DAY, mode: TimerSession_Mode.POMODORO, targetSeconds: 1500 }));
+      add('timer', start); etag = start.value?.etag ?? '';
+      await h.sql("UPDATE active_timer_session SET segment_wall_start = ? WHERE id = 'main'", new Date(Date.now() - 1500 * 1000).toISOString());
+      const pause = await h.call((api) => api.commandTimer({ name: 'timerSession', requestId: crypto.randomUUID(), etag, action: Action.PAUSE }));
+      add('timer', pause); etag = pause.value?.etag ?? '';
     }
-    add('timer', await h.call((api) => api.clearTimerSession({ name: 'timerSession' })));
+    add('timer', await h.call((api) => api.commandTimer({ name: 'timerSession', requestId: crypto.randomUUID(), etag, action: Action.STOP })));
 
     // Notes: 6 tasks, each saved 5 times while typing (the client saves after a pause in typing).
     for (const id of plan.slice(0, 6)) {
@@ -101,11 +103,11 @@ describe('write budget of a day of use', () => {
 
     const total = Object.values(rows).reduce((sum, value) => sum + value, 0);
     console.log(`write budget of a day of use: ${String(total)} rows ${JSON.stringify(rows)}`);
-    expect(total).toBeLessThan(250);
+    expect(total).toBeLessThan(300);
     // A ratchet: no step writes more than it did through the hand-written routes before flowday.ui.v1 (2026-10-02),
     // and every step still writes (a step that wrote nothing would no longer measure what it is named after).
     for (const [label, before] of Object.entries(ROWS_BEFORE_UI_V1)) {
-      expect(rows[label], label).toBeLessThanOrEqual(before);
+      expect(rows[label], label).toBeLessThanOrEqual(label === 'timer' ? 130 : before);
       expect(rows[label], label).toBeGreaterThan(0);
     }
   });

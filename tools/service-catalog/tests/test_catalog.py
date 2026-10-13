@@ -99,6 +99,12 @@ class CatalogTests(unittest.TestCase):
         self.assertEqual(loaded.apps["newsletter"]["target"], "vps")
         self.assertNotIn("newsletter", loaded.worker_configs())
 
+    def test_browser_extension_has_no_cloud_resources(self):
+        loaded = catalog.load_catalog()
+        self.assertEqual(loaded.apps["todoist-plus"]["target"], "browser")
+        self.assertEqual(loaded.apps["todoist-plus"]["entries"], [])
+        self.assertFalse(any(w["app"] == "todoist-plus" for w in loaded.workers))
+
     def test_access_values_are_unchanged_and_paths_are_derived(self):
         rules = {r["key"]: r for r in catalog.load_catalog().access}
         self.assertEqual(rules["links"]["destinations"], ["s.ziyixi.science/_/*", "s.ziyixi.science/_"])

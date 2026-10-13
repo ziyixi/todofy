@@ -101,6 +101,10 @@ def test_tables_and_indexes_are_exactly_the_planned_ones(db):
         "gtd_reviews",
         "task_intents",
         "task_intent_tasks",
+        "plus_settings",
+        "plus_connections",
+        "plus_actions",
+        "plus_weeks",
     }
     assert {name for name, kind in objects.items() if kind == "index"} == {
         "mail_events_due",
@@ -119,6 +123,7 @@ def test_tables_and_indexes_are_exactly_the_planned_ones(db):
         "task_intents_due",
         "task_intents_updated",
         "task_intents_created",
+        "plus_weeks_ended",
     }
 
 

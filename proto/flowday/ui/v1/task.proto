@@ -51,7 +51,7 @@ message Task {
   // The labels, at most 50 (CreateTask keeps the first 50).
   repeated string labels = 8 [(google.api.field_behavior) = IMMUTABLE];
   // FlowDay's estimate in minutes, 0 to 100,000; unset when there is none. The sync sets it from a Todoist duration
-  // (a day counts 480 minutes) and keeps the owner's estimate when the Todoist task has none.
+  // (a day counts 480 minutes) unless the owner has deliberately set or cleared a FlowDay estimate.
   optional int32 estimated_minutes = 9 [(google.api.field_behavior) = OPTIONAL];
   // Whether the task is marked completed (rows of the container era; the sync hides a task Todoist completed
   // instead, so it leaves the lists).
@@ -65,4 +65,8 @@ message Task {
   // When the task was deleted in FlowDay (AIP-164), or hidden by the sync (GetTask and QueryAnalytics answer a
   // hidden task; no list does); unset while it is in the task list.
   google.protobuf.Timestamp delete_time = 14 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The Todoist parent ID; empty for a top-level or local task.
+  string parent_id = 15 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Actual Todoist deadline, YYYY-MM-DD; distinct from its scheduled due date.
+  string deadline_date = 16 [(google.api.field_behavior) = OUTPUT_ONLY];
 }

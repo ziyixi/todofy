@@ -16,7 +16,7 @@
  * isolates, on a heavy owner's history: the largest first page of each (the owner API's queries and answers run at
  * startup, ../../src/warmup.ts).
  */
-import { SyncTasksRequest_Mode, SyncTasksResponse_State } from '@ziyixi/proto/flowday/ui/v1/flowday_ui_service_pb';
+import { CommandTimerRequest_Action as Action, SyncTasksRequest_Mode, SyncTasksResponse_State } from '@ziyixi/proto/flowday/ui/v1/flowday_ui_service_pb';
 import { describe, expect, it } from 'vitest';
 import { COLD_ISOLATES, connectCpuMeter, CPU_TEST_TIMEOUT_MS, FREE_CPU_MS, measureInIsolates, type Isolate, type Measurement } from '../../../../tools/workerd-cpu/workerd-cpu.mts';
 import { Meter } from '../../src/db.ts';
@@ -102,7 +102,7 @@ async function session({ h, meter }: FlowDayIsolate, index: number): Promise<Mea
   console.log(`cpu: the full answer of ${String(MAX_SYNC_ITEMS)} items is ${(answerBytes / 1024).toFixed(0)} KiB (cap ${String(MAX_SYNC_BYTES / 1024)} KiB)`);
   expect(answerBytes).toBeLessThan(MAX_SYNC_BYTES);
   // Fetches the CSRF token outside the measurements (a mutation that writes nothing: there is no session).
-  await h.api.clearTimerSession({ name: 'timerSession' });
+  await h.api.updateFlow({ flow: { name: 'flows/2026-10-13', taskIds: [] }, updateMask: { paths: ['task_ids'] } });
   const sync = async (expected: SyncTasksResponse_State) => {
     const result = await h.call((api) => api.syncTasks({ mode: SyncTasksRequest_Mode.MANUAL }));
     if (result.value?.state !== expected) throw new Error(`sync ${String(result.status?.httpStatus)} ${String(result.value?.state)}`);
@@ -155,8 +155,12 @@ async function session({ h, meter }: FlowDayIsolate, index: number): Promise<Mea
   const entries = await meter.measure(`ListTimeEntries (a page of ${String(ENTRY_PAGE)} of a task's entries)`, () => h.fetch('/api/v1/timeEntries?task_id=td-busy').then((response) => response.text()));
   const stats = await meter.measure(`QueryAnalytics (every entry: a page of ${String(ANALYTICS_PAGE)} of 2,000, 1,000 hours)`, () => h.fetch('/api/v1/analytics:query').then((response) => response.text()));
   const week = await meter.measure('QueryAnalytics (one week)', () => h.fetch('/api/v1/analytics:query?start_date=2026-04-06&end_date=2026-04-12').then((response) => response.text()));
+  const timer = await meter.measure('CommandTimer START (version check and receipt)', async () => {
+    const current = await h.api.getTimerSession({ name: 'timerSession' });
+    await h.api.commandTimer({ name: 'timerSession', requestId: crypto.randomUUID(), etag: current.etag, action: Action.START, taskId: 'td-0', flowDate: '2026-10-13' });
+  });
   const page = await meter.measure('GET / (page CSP hashing)', () => h.fetch('/').then((response) => response.text()));
-  return [firstChunk, lastChunk, incremental, tasks, flows, entries, stats, week, page];
+  return [firstChunk, lastChunk, incremental, tasks, flows, entries, stats, week, timer, page];
 }
 
 /** A Todoist task with every field the list answers, stored as the sync stores it. */
@@ -275,7 +279,7 @@ describe('CPU per request (Workers Free: 10 ms)', () => {
     console.log(`cpu bounds (reference ms, medians of the isolates): first < ${COLD_BOUND_MS.toFixed(2)}, warm best < ${WARM_BOUND_MS.toFixed(2)}`);
     // The sync runs rarely, so it often lands on code the isolate has not run yet: its first run is bounded too.
     expect(reference.get(FIRST_CHUNK)?.first, `${FIRST_CHUNK}: first run`).toBeLessThan(COLD_BOUND_MS);
-    expect(reference.size).toBe(9);
+    expect(reference.size).toBe(10);
     for (const { label, best } of reference.values()) expect(best, `${label}: warm best`).toBeLessThan(WARM_BOUND_MS);
   });
 });

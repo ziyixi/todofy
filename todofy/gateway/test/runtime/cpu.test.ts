@@ -44,9 +44,23 @@ const AUDIENCE = SYNTHETIC_BINDINGS['ACCESS_AUDIENCE'] ?? '';
 const API_INIT = "GET /api/v1/serviceStatus as the isolate's first API request";
 const LEGACY = 'GET /api/v1/legacyTexts/{id} (1.9 MB of ASCII with escapes)';
 const REPORTS = 'GET /api/v1/latestReports (every report at its limits)';
+const PLUS = 'GET /api/plus/v1/tasks (200 tasks, token authenticated)';
+const FOCUS = 'GET /api/plus/flowday/api/v1/tasks (200 tasks, generated proxy)';
+// The generated FlowDay client decodes and the proxy re-encodes a full page. Its measured
+// 200-task page with 2,000-char titles and descriptions was 6.85 ms cold / 4.70 ms warm.
+// Keep this path's growth decision separate from the existing API ratchets and the Free 10 ms limit.
+const FOCUS_COLD_BOUND_MS = 0.8 * FREE_CPU_MS;
+const FOCUS_BOUND_MS = 0.6 * FREE_CPU_MS;
 const PASSED_THROUGH = new Set([LEGACY, REPORTS]);
 
 const ANSWERS = {
+  plus_ui: {
+    ListPlanningTasks: fixtures.ok({ planning_tasks: Array.from({ length: 200 }, (_, n) => ({
+      id: `task-${String(n)}`, title: 'Synthetic planning task '.repeat(20), project_id: 'test-project',
+      labels: ['office', 'deep', 'committed', 'lead_2w'], stage: 'committed', area: 'work',
+      deadline: '2026-10-27', due: '2026-10-13', lead_days: 14, estimated_minutes: 45, etag: 'a'.repeat(64),
+    })) }),
+  },
   owner_ui: {
     GetServiceStatus: fixtures.ok(fixtures.serviceStatus()),
     ListMailEvents: fixtures.ok(fixtures.eventPage(100), { at: 1_759_046_400, id: fixtures.UUID(99) }),
@@ -76,6 +90,13 @@ interface GatewayIsolate extends Isolate {
 async function startIsolate(): Promise<GatewayIsolate> {
   const h = await startHarness({
     answers: ANSWERS,
+    focusTasks: { tasks: Array.from({ length: 200 }, (_, n) => ({
+      name: `tasks/task-${String(n)}`, todoist_id: `task-${String(n)}`,
+      title: 'Synthetic Focus task '.repeat(100).slice(0, 2000), description: 'Synthetic description. '.repeat(100).slice(0, 2000),
+      project_display_name: 'Synthetic project', project_color: '#00ff00', priority: 4,
+      labels: ['office', 'deep', 'committed', 'lead_2w'], estimated_minutes: 45, due_date: '2026-10-13',
+      deadline_date: '2026-10-27', parent_id: 'parent-task', create_time: '2026-10-01T10:00:00Z',
+    })) },
     inspectorPort: 0,
     routes: new Map([[`${ISSUER}/cdn-cgi/access/certs`, () => Response.json(issuerJwks)]]),
   });
@@ -134,6 +155,15 @@ async function session({ h, meter }: GatewayIsolate): Promise<Measurement[]> {
   ];
   const measured: Measurement[] = [init];
   for (const [label, path, options] of requests) measured.push(await meter.measure(label, () => expectOk(h, path, options), RUNS));
+  for (const [label, path] of [[PLUS, '/api/plus/v1/tasks?page_size=200'], [FOCUS, '/api/plus/flowday/api/v1/tasks?page_size=200']]) {
+    measured.push(await meter.measure(label ?? '', async () => {
+      const response = await h.mf.dispatchFetch(`https://todofy-hooks.example.com${path ?? ''}`, {
+        headers: { authorization: `Bearer todofy_plus_${'a'.repeat(43)}` },
+      });
+      await response.arrayBuffer();
+      if (response.status !== 200) throw new Error(`${label ?? ''}: ${String(response.status)}`);
+    }, RUNS));
+  }
   return measured;
 }
 
@@ -149,11 +179,14 @@ describe('CPU per owner API request (Workers Free: 10 ms)', () => {
       else if (PASSED_THROUGH.has(label)) {
         expect(first, `${label}: first run`).toBeLessThan(PASSED_THROUGH_BOUND_MS);
         expect(median, `${label}: warm median`).toBeLessThan(PASSED_THROUGH_BOUND_MS);
+      } else if (label === FOCUS) {
+        expect(first, `${label}: first run`).toBeLessThan(FOCUS_COLD_BOUND_MS);
+        expect(median, `${label}: warm median`).toBeLessThan(FOCUS_BOUND_MS);
       } else {
         expect(first, `${label}: first run`).toBeLessThan(API_COLD_BOUND_MS);
         expect(median, `${label}: warm median`).toBeLessThan(API_BOUND_MS);
       }
     }
-    expect(reference.size).toBe(11);
+    expect(reference.size).toBe(13);
   });
 });

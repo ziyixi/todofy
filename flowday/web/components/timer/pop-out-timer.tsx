@@ -332,7 +332,7 @@ function PipTimerContent() {
   const handleComplete = async () => {
     const date = activeFlowDate;
     const taskId = activeTaskId;
-    await stopAndSave();
+    if (!(await stopAndSave())) return;
     if (isMiscTask) {
       closePopOut();
     } else if (date && taskId) {

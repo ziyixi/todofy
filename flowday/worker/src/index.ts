@@ -11,3 +11,5 @@ export default {
     return handleRequest(request, env);
   },
 } satisfies ExportedHandler<Env>;
+
+export { FocusEntrypoint } from './focus.ts';

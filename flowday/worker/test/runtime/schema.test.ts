@@ -21,15 +21,16 @@ const COLUMNS: Record<string, string[]> = {
     'id', 'todoist_id', 'title', 'project_name', 'project_color', 'priority', 'labels', 'estimated_mins', 'is_completed',
     'completed_at', 'due_date', 'created_at', 'synced_at', 'description', 'deleted_at', 'deleted_source',
     // 0002_incremental_sync.sql
-    'todoist_project_id',
+    'todoist_project_id', 'parent_id', 'deadline_date', 'estimate_override',
   ],
   settings: ['key', 'value'],
+  timer_commands: ['request_id', 'fingerprint', 'result', 'created_at'],
   flow_tasks: ['id', 'flow_date', 'task_id', 'sort_order'],
   completed_flow_tasks: ['id', 'flow_date', 'task_id'],
   flow_task_notes: ['id', 'task_id', 'flow_date', 'content', 'updated_at'],
   active_timer_session: [
     'id', 'task_id', 'flow_date', 'status', 'timer_mode', 'pomodoro_target_s', 'segment_wall_start', 'session_saved_s',
-    'pomodoro_finished_task_id', 'pomodoro_finished_flow_date', 'pomodoro_finished_target_s', 'updated_at',
+    'pomodoro_finished_task_id', 'pomodoro_finished_flow_date', 'pomodoro_finished_target_s', 'updated_at', 'etag',
   ],
 };
 
@@ -44,7 +45,7 @@ const INDEXES = [
 ];
 
 describe('schema', () => {
-  it('has exactly the seven container-era tables, their columns in order', async () => {
+  it('has the container-era tables plus timer receipts, their columns in order', async () => {
     const tables = await h.sql<{ name: string }>("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' AND name <> 'd1_migrations' ORDER BY name");
     expect(tables.map((table) => table.name)).toEqual(Object.keys(COLUMNS).sort());
     for (const [table, columns] of Object.entries(COLUMNS)) {
@@ -58,7 +59,7 @@ describe('schema', () => {
     expect(indexes.map((index) => index.name)).toEqual(INDEXES);
     const unique = await h.sql<{ tbl_name: string }>("SELECT tbl_name FROM sqlite_master WHERE type = 'index' AND name LIKE 'sqlite_autoindex_%' ORDER BY name");
     // One key index per table, plus the UNIQUE pairs of flow_tasks, completed_flow_tasks and flow_task_notes.
-    expect(unique).toHaveLength(7 + 3);
+    expect(unique).toHaveLength(8 + 3);
     expect(await h.sql("SELECT name FROM sqlite_master WHERE type = 'trigger'")).toEqual([]);
     for (const table of Object.keys(COLUMNS)) expect(await h.sql(`PRAGMA foreign_key_list(${table})`), table).toEqual([]);
   });

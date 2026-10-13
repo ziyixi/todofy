@@ -2,7 +2,7 @@
 
 The repository manages Cloudflare applications and the VPS's k3s image workloads from one source tree.
 The [service catalog](service-catalog.md) is the application inventory; it also distinguishes Cloudflare
-Workers from VPS image repositories. [HANDOFF](../HANDOFF.md) records deployment evidence and what remains
+Workers, VPS image repositories and browser extensions. [HANDOFF](../HANDOFF.md) records deployment evidence and what remains
 unverified. This page describes the committed architecture, not a fresh production check. Development
 entry points are in the [root README](../README.md).
 
@@ -16,6 +16,8 @@ flowchart LR
   Todo --> Todoist[Todoist]
   Todo -->|reports, HTTPS Basic auth| News[Newsletter on VPS]
   Todoist -->|read only| Flow[FlowDay]
+  Plus[Todoist Plus extension] -->|scoped extension token| Todo
+  Todo -->|private FocusEntrypoint binding| Flow
   Home[Home] -->|Ops bindings| MH
   Home -->|Ops bindings| Todo
   Home -->|Ops bindings| Watch
@@ -96,6 +98,24 @@ Schemas generated from IDL are consumer artifacts, not competing handwritten sou
 published bytes, while legacy fixtures/schemas prove compatibility with persisted older events. `task-intent-v1`
 still has handwritten value rules/schema checked against generated codecs. Do not delete these because
 the owner APIs moved to proto. Dated old-owner routes are listed in [history](history.md#owner-api-compatibility).
+
+## Todoist Plus
+
+`todoist-plus/` is a Chrome Manifest V3 extension for the Todoist web app and its Chrome-installed PWA.
+It renders Plan and Focus inside the existing page. Todoist owns tasks, labels, dates and deadlines;
+only Todofy writes those values. FlowDay owns daily order, estimates, timers and recorded work.
+The extension has no Worker, database or new model calls.
+
+The content script mounts native-style controls and maps visible task IDs. The extension background
+holds a separate revocable credential and calls `todofy.ui.v1.PlusService` on Todofy's hooks host. Owner setup
+keeps Access, Origin and CSRF; extension authentication does not grant access to the mail owner API.
+Todofy reaches FlowDay's restricted `FocusEntrypoint` by a same-account service binding. A confirmed
+Todoist close precedes FlowDay settlement, with a stable request identity across a lost response.
+
+The first mapping confirmation enables weekly rollover in the existing coordinator. Previous-week
+Bets are cleared; unfinished previous-week commitments return to weekly candidates. Counts remain
+soft limits. Native labels/filters remain available without the extension, and their UI is hidden only
+where a connected replacement is present. See the [extension guide](../todoist-plus/README.md).
 
 ## Home
 

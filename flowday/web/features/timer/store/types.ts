@@ -1,6 +1,8 @@
 export type TimerMode = "countup" | "pomodoro";
 
 export interface TimerState {
+  etag: string | null;
+  commandPending: boolean;
   activeTaskId: string | null;
   activeFlowDate: string | null;
   status: "idle" | "running" | "paused";
@@ -23,9 +25,9 @@ export interface TimerState {
   ) => Promise<void>;
   pauseTimer: (effectiveStopMs?: number) => Promise<void>;
   resumeTimer: () => void;
-  stopAndSave: () => Promise<void>;
+  stopAndSave: () => Promise<boolean>;
   stopWithoutSaving: () => void;
-  dismissPomodoroFinished: () => void;
+  dismissPomodoroFinished: () => Promise<void>;
   hydrateSession: () => Promise<void>;
   tick: () => void;
 }
@@ -42,4 +44,5 @@ export interface ServerSessionPayload {
   pomodoroFinishedFlowDate: string | null;
   pomodoroFinishedTargetS: number | null;
   updatedAt: string | null;
+  etag: string;
 }

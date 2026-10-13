@@ -61,6 +61,8 @@ def expect(
     recall_extension_publish=False,
     brief_check=False,
     brief_deploy=False,
+    todoist_plus_check=False,
+    todoist_plus_publish=False,
 ):
     # The bootstrap mask (ci_changes.outputs): an app in CHECK_ONLY never deploys, and neither does Home while an app it
     # binds is one. Mailsort was CHECK_ONLY until its Access application existed (mailsort/docs/design.md §12), recall
@@ -108,13 +110,15 @@ def expect(
         "recall_deploy": recall_deploy,
         "recall_extension_publish": recall_extension_publish,
         "brief_deploy": brief_deploy,
+        "todoist_plus_check": todoist_plus_check,
+        "todoist_plus_publish": todoist_plus_publish,
     }
 
 
 # Every app checked (a contracts/ or .github/ change, FlowDay, the links app and the watch app included); the dashboard
 # checked and deployed; the edge-auth apps (the website compiles in no package) are todofy and mail-hero plus
 # EDGE_AUTH; every app with the website Worker (the relay Worker is added where a test expects it).
-ALL_CHECKED = {"dashboard_check": True, "website_check": True, "flowday_check": True, "links_check": True, "watch_check": True, "newsletter_check": True, "fleet_check": True, "platform_check": True, "mailsort_check": True, "recall_check": True, "brief_check": True}
+ALL_CHECKED = {"dashboard_check": True, "website_check": True, "flowday_check": True, "links_check": True, "watch_check": True, "newsletter_check": True, "fleet_check": True, "platform_check": True, "mailsort_check": True, "recall_check": True, "brief_check": True, "todoist_plus_check": True}
 DASH = {"dashboard_check": True, "dashboard_deploy": True}
 FLOWDAY = {"flowday_check": True, "flowday_deploy": True}
 LINKS = {"links_check": True, "links_deploy": True}
@@ -129,7 +133,7 @@ ALL = {**DASH}
 # Every app that compiles in packages/edge-auth besides Todofy and Mail Hero: the dashboard, FlowDay, the links app,
 # the watch app, Fleet, mailsort, recall and the brief, each checked and deployed.
 EDGE_AUTH = {**ALL, **FLOWDAY, **LINKS, **WATCH, **FLEET, **MAILSORT, **RECALL, **BRIEF}
-EVERY = {**ALL, "website_check": True, "website_deploy": True, **FLOWDAY, **LINKS, **WATCH, **FLEET, **MAILSORT, **RECALL, **BRIEF, **PLATFORM, "newsletter_check": True, "newsletter_deploy": True}
+EVERY = {**ALL, "todoist_plus_check": True, "todoist_plus_publish": True, "website_check": True, "website_deploy": True, **FLOWDAY, **LINKS, **WATCH, **FLEET, **MAILSORT, **RECALL, **BRIEF, **PLATFORM, "newsletter_check": True, "newsletter_deploy": True}
 
 
 def push(paths, ref=MAIN, last_success=BASE, ancestor=True, merge_base=BASE):
@@ -190,7 +194,7 @@ class Classify(unittest.TestCase):
         shared = "contracts/ops-v1/ops-v1.ts"
         result = push(["mail-hero/cloudflare/test/native-ops.test.mjs", shared])
         self.assertEqual(
-            {app for app in ci_changes.APPS if result[f"{ci_changes.PREFIX[app]}_deploy"]},
+            {app for app in ci_changes.APPS if result.get(f"{ci_changes.PREFIX[app]}_deploy", False)},
             set(ci_changes.BUNDLED_BY[shared]),
         )
 
@@ -285,7 +289,7 @@ class Classify(unittest.TestCase):
         for app in ci_changes.APPS:
             with self.subTest(app=app):
                 self.assertIn(f"{ci_changes.PREFIX[app]}_check", ci_changes.KEYS)
-                self.assertIn(f"{ci_changes.PREFIX[app]}_deploy", ci_changes.KEYS)
+                self.assertIn(f"{ci_changes.PREFIX[app]}_{'publish' if app in ci_changes.BROWSER_APPS else 'deploy'}", ci_changes.KEYS)
 
     def test_fleet_publishes_bundle_changes_after_resource_bootstrap(self):
         for path in ("fleet/app.toml", "fleet/worker/src/report.ts", "fleet/web/src/App.tsx", "fleet/observer/collector.py", "fleet/wrangler.toml"):
@@ -496,7 +500,7 @@ class Classify(unittest.TestCase):
 
     def test_contract_code_the_workers_bundle_deploys_every_app_that_bundles_it(self):
         """OPS_LIMITS and friends ship inside all three Workers, so a change must redeploy each."""
-        bundled = expect(T, T, T, T, T, **ALL, website_check=T, flowday_check=T, links_check=T, **WATCH, newsletter_check=T, fleet_check=T, platform_check=T, **MAILSORT, recall_check=T, **BRIEF, proto=T)
+        bundled = expect(T, T, T, T, T, **ALL, website_check=T, flowday_check=T, links_check=T, **WATCH, newsletter_check=T, fleet_check=T, platform_check=T, **MAILSORT, recall_check=T, **BRIEF, proto=T, todoist_plus_check=T)
         self.assertEqual(push(["contracts/ops-v1/ops-v1.ts"]), bundled)
         self.assertEqual(push(["contracts/ops-v1/ops-v1.ts", "todofy/gateway/src/ops.ts"]), bundled)
         self.assertEqual(push(["contracts/ops-v1/ops-v1.ts"], ref=BRANCH), bundled)
@@ -518,6 +522,7 @@ class Classify(unittest.TestCase):
             "mailsort": [REPO / "mailsort" / "worker" / "src", REPO / "mailsort" / "web" / "src"],
             "recall": [REPO / "recall" / "worker" / "src", REPO / "recall" / "web" / "src", REPO / "recall" / "shared"],
             "brief": [REPO / "brief" / "worker" / "src", REPO / "brief" / "web" / "src"],
+            "todoist-plus": [REPO / "todoist-plus" / "src"],
         }
         self.assertEqual(set(roots), set(ci_changes.APPS))
         importers = {}
@@ -588,11 +593,12 @@ class Classify(unittest.TestCase):
                 "mailsort": ("ts",),
                 "recall": ("ts",),
                 "brief": ("ts",),
+                "todoist-plus": ("ts",),
             },
         )
         # Todofy is both: todofy-core vendors the Python package, its gateway and UI bundle the TypeScript
         # (todofy.ui.v1).
-        ts, python = {"mail-hero", "dashboard", "flowday", "links", "watch", "todofy", "fleet", "website", "mailsort", "recall", "brief"}, {"todofy", "platform"}
+        ts, python = {"mail-hero", "dashboard", "flowday", "links", "watch", "todofy", "fleet", "website", "mailsort", "recall", "brief", "todoist-plus"}, {"todofy", "platform"}
         every, none = ts | python, set()
         cases = {
             # task-intent-v1, bundled by the watch app's TypeScript and todofy-core's Python.
@@ -601,8 +607,8 @@ class Classify(unittest.TestCase):
             # todofy.ui.v1's answers.
             "proto/todofy/report/v1/report.proto": {"todofy"},
             # Todofy's owner API: its core answers it, its gateway serves it and its UI calls it.
-            "proto/todofy/ui/v1/todofy_ui_service.proto": {"todofy"},
-            "proto/todofy/ui/v1/mail_event.proto": {"todofy"},
+            "proto/todofy/ui/v1/todofy_ui_service.proto": {"todofy", "todoist-plus"},
+            "proto/todofy/ui/v1/mail_event.proto": {"todofy", "todoist-plus"},
             # ops-v1: the Ops entrypoints that bundle its generated code (Todofy's gateway takes its types only, its
             # core reads ops.v1 in Python).
             "proto/ops/v1/ops.proto": {"mail-hero", "todofy", "dashboard", "watch", "website", "mailsort", "recall", "brief"},
@@ -619,8 +625,8 @@ class Classify(unittest.TestCase):
             # mail.received.v1: Mail Hero builds every event, todofy-core reads every body.
             "proto/mailhero/webhook/v1/mail_received.proto": {"mail-hero", "todofy"},
             # FlowDay's UI API reaches only FlowDay.
-            "proto/flowday/ui/v1/flowday_ui_service.proto": {"flowday"},
-            "proto/flowday/ui/v1/task.proto": {"flowday"},
+            "proto/flowday/ui/v1/flowday_ui_service.proto": {"flowday", "todofy", "todoist-plus"},
+            "proto/flowday/ui/v1/task.proto": {"flowday", "todofy", "todoist-plus"},
             # The links app's UI API reaches only the links app.
             "proto/links/ui/v1/links_ui_service.proto": {"links"},
             # The watch app's UI API reaches only the watch app.
@@ -709,6 +715,8 @@ class Classify(unittest.TestCase):
                 recall_deploy="recall" in deployed,
                 brief_check=T,
                 brief_deploy="brief" in deployed,
+                todoist_plus_check=T,
+                todoist_plus_publish="todoist-plus" in deployed,
             )
 
         for path, deployed in cases.items():
@@ -721,7 +729,7 @@ class Classify(unittest.TestCase):
             checked_and({"todofy", "links", "platform"}),
         )
         self.assertEqual(ci_changes.proto_deploys("proto/ts/http-transcoder.ts"), ts)
-        self.assertEqual(ci_changes.proto_deploys("proto/flowday/ui/v1/flow.proto"), {"flowday"})
+        self.assertEqual(ci_changes.proto_deploys("proto/flowday/ui/v1/flow.proto"), {"flowday", "todofy", "todoist-plus"})
         self.assertEqual(ci_changes.proto_deploys("proto/links/ui/v1/link.proto"), {"links"})
         self.assertEqual(ci_changes.proto_deploys("proto/watch/ui/v1/watch.proto"), {"watch"})
         self.assertEqual(ci_changes.proto_deploys("proto/fleet/ui/v1/fleet_ui_service.proto"), {"fleet"})
@@ -835,7 +843,7 @@ class Classify(unittest.TestCase):
         ]
         self.assertEqual(
             push(paths),
-            expect(T, T, T, F, F, packages=T, infra=T, proto=T, **DASH, website_check=T, flowday_check=T, links_check=T, watch_check=T, newsletter_check=T, fleet_check=T, platform_check=T, mailsort_check=T, recall_check=T, brief_check=T),
+            expect(T, T, T, F, F, packages=T, infra=T, proto=T, **DASH, website_check=T, flowday_check=T, links_check=T, watch_check=T, newsletter_check=T, fleet_check=T, platform_check=T, mailsort_check=T, recall_check=T, brief_check=T, todoist_plus_check=T),
         )
 
     def test_a_package_change_with_one_app_still_deploys_every_user(self):
@@ -1134,7 +1142,7 @@ class RealGit(unittest.TestCase):
         p3 = self.commit("mail-hero/docs/b.md")
         outputs = self.main_run(p3, p0)
         expected = {**dict.fromkeys(ci_changes.KEYS, "true"), "packages": "false", "infra": "false", "proto": "false"}
-        expected.update(dashboard_check="false", dashboard_deploy="false")
+        expected.update(dashboard_check="false", dashboard_deploy="false", todoist_plus_check="false", todoist_plus_publish="false")
         expected.update(website_check="false", website_deploy="false", website_relay_deploy="false")
         expected.update(flowday_check="false", flowday_deploy="false", links_check="false", links_deploy="false", watch_check="false", watch_deploy="false", newsletter_check="false", newsletter_deploy="false", fleet_check="false", fleet_deploy="false", platform_check="false", platform_publish="false", platform_deploy="false", mailsort_check="false", mailsort_deploy="false", recall_check="false", recall_deploy="false", recall_extension_publish="false", brief_check="false", brief_deploy="false")
         self.assertEqual(outputs, expected)
@@ -1144,7 +1152,7 @@ class RealGit(unittest.TestCase):
         self.commit("packages/edge-auth/src/access.ts")
         after = self.commit("README.md.orig")
         outputs = self.main_run(after, green)
-        unaffected = {"website_check", "website_deploy", "website_relay_deploy", "newsletter_check", "newsletter_deploy", "platform_check", "platform_publish", "platform_deploy", "recall_extension_publish"}
+        unaffected = {"todoist_plus_check", "todoist_plus_publish", "website_check", "website_deploy", "website_relay_deploy", "newsletter_check", "newsletter_deploy", "platform_check", "platform_publish", "platform_deploy", "recall_extension_publish"}
         # An app that compiles edge-auth in but is CHECK_ONLY does not deploy (none now), nor Home while it binds one.
         bootstrap = {f"{ci_changes.PREFIX[app]}_deploy" for app in ci_changes.CHECK_ONLY & set(ci_changes.PACKAGE_USERS["edge-auth"])}
         if ci_changes.HOME_BOUND & ci_changes.CHECK_ONLY:
@@ -1243,7 +1251,7 @@ class PackageUsers(unittest.TestCase):
             if "node_modules" not in manifest.parts
         }
         catalog = ci_changes.load_catalog(REPO)
-        cf_apps = {app for app, config in catalog.apps.items() if config["target"] == "cloudflare"}
+        cf_apps = {app for app, config in catalog.apps.items() if config["target"] in {"cloudflare", "browser"}}
         self.assertEqual(tops - {"packages", "contracts", "proto"}, cf_apps)
         self.assertTrue((REPO / "newsletter" / "pyproject.toml").is_file())
         self.assertEqual(set(catalog.apps), set(ci_changes.APPS))
@@ -1373,6 +1381,9 @@ class DeployConditions(unittest.TestCase):
         ("dashboard-deploy", "brief-deploy"),
         ("dashboard-deploy", "website-relay-deploy"),
         ("watch-deploy", "todofy-deploy"),
+        ("todofy-deploy", "flowday-deploy"),
+        ("todoist-plus-release", "todofy-deploy"),
+        ("todoist-plus-release", "flowday-deploy"),
     }
 
     # Check jobs a deploy may also find skipped, but only when this push to main reuses a green branch run of
@@ -1394,6 +1405,7 @@ class DeployConditions(unittest.TestCase):
         "mailsort-checks",
         "recall-checks",
         "brief-checks",
+        "todoist-plus-checks",
     }
 
     def jobs(self):
@@ -1426,6 +1438,7 @@ class DeployConditions(unittest.TestCase):
                 "mailsort-deploy",
                 "recall-deploy",
                 "recall-extension-release",
+                "todoist-plus-release",
                 "brief-deploy",
                 "platform-image",
                 "vps-deploy",
@@ -1615,7 +1628,7 @@ class RecallExtensionRelease(unittest.TestCase):
         self.assertIn("    permissions:\n      # ", block)
         self.assertEqual(re.findall(r"^      (\w+): (\w+)$", block.split("    permissions:\n", 1)[1].split("    steps:", 1)[0], re.M),
                          [("contents", "write"), ("actions", "read")])
-        self.assertEqual([name for name, other in blocks.items() if "contents: write" in other], [self.JOB])
+        self.assertEqual([name for name, other in blocks.items() if "contents: write" in other], [self.JOB, "todoist-plus-release"])
         self.assertRegex(effective_ci(), r"\npermissions:\n  contents: read\n")
         # GITHUB_TOKEN only: no secret, no deployment environment.
         self.assertNotIn("secrets", block)
@@ -2790,7 +2803,7 @@ def fake_github(runs, jobs_by_run, artifacts_by_run=None):
             return {"total_count": len(jobs), "jobs": jobs}
         match = re.fullmatch(rf"/repos/{re.escape(REPOSITORY)}/actions/runs/(\d+)/artifacts\?per_page=100", path)
         if match:
-            artifacts = (artifacts_by_run or {}).get(int(match.group(1)), [{"name": f"{prefix}-{SHA}", "expired": False} for prefix in ("newsletter-image", "platform-image", "recall-extension", "recall-orion")])
+            artifacts = (artifacts_by_run or {}).get(int(match.group(1)), [{"name": f"{prefix}-{SHA}", "expired": False} for prefix in ("newsletter-image", "platform-image", "recall-extension", "recall-orion", "todoist-plus")])
             return {"artifacts": artifacts}
         raise AssertionError(f"unexpected read {path}")
 
@@ -2950,6 +2963,7 @@ class Reuse(unittest.TestCase):
             "Mailsort checks",
             "Recall checks",
             "Brief checks",
+            "Todoist Plus checks",
             "Platform checks",
             "Newsletter checks",
             "Newsletter image checks",

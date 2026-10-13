@@ -1,0 +1,5 @@
+# Local browser extension; it owns no cloud resources or Home service entry.
+version = 1
+id = "todoist-plus"
+target = "browser"
+entries = []

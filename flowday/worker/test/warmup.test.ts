@@ -24,6 +24,7 @@ describe('warm-up', () => {
       isCompleted: false,
       completedAt: '2026-01-01T00:00:00.000000Z',
       dueDate: '2026-01-01',
+      parentId: null, deadlineDate: null,
       createdAt: '2026-01-01T00:00:00Z',
       deletedAt: '2026-01-01T00:00:00.000Z',
     };

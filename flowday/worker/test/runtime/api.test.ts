@@ -6,7 +6,7 @@
  */
 import { TaskSchema } from '@ziyixi/proto/flowday/ui/v1/task_pb';
 import { SyncTasksRequest_Mode, SyncTasksResponse_State } from '@ziyixi/proto/flowday/ui/v1/flowday_ui_service_pb';
-import { TimeEntry_Source, TimerSession_Mode, TimerSession_State } from '@ziyixi/proto/flowday/ui/v1/time_entry_pb';
+import { TimeEntry_Source, TimerSession_State } from '@ziyixi/proto/flowday/ui/v1/time_entry_pb';
 import { timestampDate, timestampFromDate } from '@ziyixi/proto/protobuf/wkt';
 import { HttpEncodeError } from '@ziyixi/proto/http-client';
 import { readDetail } from '@ziyixi/proto/rpc-status';
@@ -438,33 +438,11 @@ describe('settings', () => {
   });
 });
 
-describe('the timer session', () => {
-  const session = {
-    name: 'timerSession',
-    taskId: 'task-1',
-    flowDate: '2026-04-21',
-    state: TimerSession_State.RUNNING,
-    mode: TimerSession_Mode.POMODORO,
-    pomodoroTargetSeconds: 1800,
-    segmentStartTime: at('2026-04-21T09:00:00.000Z'),
-    savedSeconds: 120,
-  };
-
-  it('empty without one; UpdateTimerSession stores it (one row); a partial mask keeps the rest; ClearTimerSession empties it', async () => {
-    expect(await h.api.getTimerSession({ name: 'timerSession' })).toMatchObject({ taskId: '', state: TimerSession_State.IDLE, mode: TimerSession_Mode.COUNT_UP, savedSeconds: 0 });
-    const stored = await h.call((api) => api.updateTimerSession({ timerSession: session }));
-    expect(stored.rowsWritten).toBe(2);
-    const read = await h.api.getTimerSession({ name: 'timerSession' });
-    expect(read).toMatchObject({ taskId: 'task-1', flowDate: '2026-04-21', state: TimerSession_State.RUNNING, mode: TimerSession_Mode.POMODORO, pomodoroTargetSeconds: 1800, savedSeconds: 120 });
-    expect([iso(read.segmentStartTime), read.updateTime !== undefined]).toEqual(['2026-04-21T09:00:00.000Z', true]);
-    const paused = await h.call((api) => api.updateTimerSession({ timerSession: { name: 'timerSession', state: TimerSession_State.PAUSED, savedSeconds: 300 }, updateMask: { paths: ['state', 'saved_seconds', 'segment_start_time'] } }));
-    expect(paused.rowsWritten).toBe(1);
-    const pausedRead = await h.api.getTimerSession({ name: 'timerSession' });
-    expect(pausedRead).toMatchObject({ taskId: 'task-1', state: TimerSession_State.PAUSED, mode: TimerSession_Mode.POMODORO, savedSeconds: 300 });
-    expect(pausedRead.segmentStartTime).toBeUndefined();
-    expect((await h.call((api) => api.updateTimerSession({ timerSession: { name: 'timerSession', flowDate: '21.04.2026' }, updateMask: { paths: ['flow_date'] } }))).status?.reason).toBe('BAD_REQUEST');
-    expect((await h.api.clearTimerSession({ name: 'timerSession' })).taskId).toBe('');
-    expect((await h.api.getTimerSession({ name: 'timerSession' })).state).toBe(TimerSession_State.IDLE);
+describe('legacy timer writes', () => {
+  it('requires old tabs to reload instead of overwriting a server-owned timer', async () => {
+    expect((await h.call((api) => api.updateTimerSession({ timerSession: { name: 'timerSession' } }))).status?.reason).toBe('RELOAD_REQUIRED');
+    expect((await h.call((api) => api.clearTimerSession({ name: 'timerSession' }))).status?.reason).toBe('RELOAD_REQUIRED');
+    expect(await h.api.getTimerSession({ name: 'timerSession' })).toMatchObject({ etag: '0', state: TimerSession_State.IDLE });
   });
 });
 

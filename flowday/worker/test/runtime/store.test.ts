@@ -20,7 +20,8 @@ import {
   updateTaskEstimate,
   upsertTasks,
 } from '../../src/store/tasks.ts';
-import { clearActiveTimerSession, getActiveTimerSession, saveActiveTimerSession } from '../../src/store/timer-session.ts';
+import { activeTimerSession } from '../../src/schema.ts';
+import { getActiveTimerSession } from '../../src/store/timer-session.ts';
 import { startHarness, type Harness } from './harness.ts';
 
 let h: Harness;
@@ -174,7 +175,7 @@ describe('tasks', () => {
     expect((await getAllTasks(db))[0]?.estimatedMins).toBeNull();
   });
 
-  it('upsert rules: rescheduled, cleared due day, Todoist duration over the local estimate, completion', async () => {
+  it('upsert rules: rescheduled, cleared due day, manual estimate kept over Todoist duration, completion', async () => {
     const db = h.db();
     await upsertTasks(db, [makeTask({ id: 't1', todoistId: 'todoist-1', dueDate: '2026-04-16' })]);
     await upsertTasks(db, [makeTask({ id: 't1', todoistId: 'todoist-1', dueDate: '2026-04-23' })]);
@@ -185,7 +186,7 @@ describe('tasks', () => {
     await upsertTasks(db, [makeTask({ id: 't1', todoistId: 'todoist-1', estimatedMins: null })]);
     expect((await getAllTasks(db))[0]?.estimatedMins).toBe(45);
     await upsertTasks(db, [makeTask({ id: 't1', todoistId: 'todoist-1', estimatedMins: 20 })]);
-    expect((await getAllTasks(db))[0]?.estimatedMins).toBe(20);
+    expect((await getAllTasks(db))[0]?.estimatedMins).toBe(45);
     await upsertTasks(db, [makeTask({ id: 't1', todoistId: 'todoist-1', isCompleted: true, completedAt: '2026-04-13T10:00:00Z' })]);
     expect((await getAllTasks(db))[0]).toMatchObject({ isCompleted: true, completedAt: '2026-04-13T10:00:00Z' });
   });
@@ -320,22 +321,16 @@ describe('active timer session', () => {
     pomodoroFinishedTargetS: null,
   };
 
-  it('round-trips a session and refreshes updatedAt on overwrite (one row each)', async () => {
+  it('reads a legacy stored session with the initial version', async () => {
     const db = h.db();
-    await saveActiveTimerSession(db, base, new Date('2026-04-21T09:00:00.000Z'));
-    expect(await getActiveTimerSession(db)).toEqual({ ...base, updatedAt: '2026-04-21T09:00:00.000Z' });
-    const meter = new Meter();
-    await saveActiveTimerSession(h.db(meter), { ...base, status: 'paused', segmentWallStart: null, sessionSavedS: 300 }, new Date('2026-04-21T09:05:00.000Z'));
-    expect(meter.rowsWritten).toBe(1);
-    expect(await getActiveTimerSession(db)).toMatchObject({ status: 'paused', sessionSavedS: 300, segmentWallStart: null, updatedAt: '2026-04-21T09:05:00.000Z' });
+    await db.insert(activeTimerSession).values({ id: 'main', ...base, updatedAt: '2026-04-21T09:00:00.000Z' });
+    expect(await getActiveTimerSession(db)).toEqual({ ...base, updatedAt: '2026-04-21T09:00:00.000Z', etag: '0' });
   });
 
-  it('hides the empty idle shape and clears the row', async () => {
+  it('distinguishes a stored idle version from an uninitialized timer', async () => {
     const db = h.db();
-    await saveActiveTimerSession(db, { ...base, taskId: null, flowDate: null, status: 'idle', timerMode: 'countup', pomodoroTargetS: null, segmentWallStart: null, sessionSavedS: 0 });
     expect(await getActiveTimerSession(db)).toBeNull();
-    await saveActiveTimerSession(db, base);
-    await clearActiveTimerSession(db);
-    expect(await getActiveTimerSession(db)).toBeNull();
+    await db.insert(activeTimerSession).values({ id: 'main', etag: 'synthetic-version' });
+    expect(await getActiveTimerSession(db)).toMatchObject({ status: 'idle', etag: 'synthetic-version' });
   });
 });

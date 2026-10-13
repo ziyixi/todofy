@@ -57,7 +57,7 @@ owner's English copy as its `LocalizedMessage`. A failed D1 call is `UNAVAILABLE
 | `flows/{day}` | `GET flows`, `GET`, `PATCH`, `POST :completeTask`, `POST :reopenTask`, `POST :rollover` | Every day with a flow (pages), its planned tasks in order, its done tasks and its planning flag; `task_ids` or `planning_completed` (`update_mask`); done marks; rollover of the listed tasks, or of every unfinished one only with `all_unfinished` (an empty list moves nothing) |
 | `flows/{day}/notes/{task}` | `GET {parent}/notes`, `GET`, `PATCH` | One markdown note per task and day; one never written reads as empty |
 | `timeEntries/{entry}` | `GET timeEntries?task_id&flow_date`, `GET`, `POST timeEntries`, `PATCH`, `DELETE` | Time entries by task, day or both (pages); a new one (its `request_id` is its ID); start and end (the duration follows) |
-| `timerSession` | `GET`, `PATCH`, `POST :clear` | The cross-device active timer (one row) |
+| `timerSession` | `GET`, `POST :command` | Server-owned start, pause, resume, stop and pomodoro transitions with an etag and request ID |
 | `settings` | `GET`, `PATCH` | Whether a sealed Todoist key is stored (never the key), the day's capacity, the last sync |
 | (analytics) | `GET analytics:query?start_date&end_date` | Raw rows of a range of days (planned tasks, done tasks, time entries), or every time entry without one, at most 200 rows a page with the tasks they name. See section 8 |
 
@@ -69,9 +69,10 @@ CPU limit even in an isolate's first request (section 6), and reads about its ow
 resource (its `REQUIRED` fields must be there), and an `IMMUTABLE` field (a task's description, priority, labels and
 due day; an entry's task, day and source) may only repeat its stored value; a different one is `INVALID_ARGUMENT`,
 never silently dropped. A local task's description over 2,000 characters is refused, like its title.
-There is no request log and no etag, because each would cost a D1 row write on every mutation (section 5): the two
-creates take a `request_id` that becomes the new resource's ID, so a repeat finds it and writes nothing, and every
-other mutation sets a state. The routes before `flowday.ui.v1` (`/api/tasks`, `/api/flows`, ...) answer 410 with the
+Timer commands use an etag and request receipt because two windows can otherwise save the same segment or overwrite
+one another. A D1 batch changes the session, creates the elapsed entry and saves the result together; retries reuse
+the request ID. The old timer PATCH and `:clear` return `RELOAD_REQUIRED`. Other mutations keep their existing
+small state-setting behavior; creates retain their resource request IDs. The routes before `flowday.ui.v1` (`/api/tasks`, `/api/flows`, ...) answer 410 with the
 old envelope `{error: {code: "reload_required", message, request_id}}` until 2026-11-02, so a tab still running the
 old UI shows "FlowDay has been updated. Reload the page" on its next write and changes nothing.
 
@@ -511,3 +512,27 @@ first (`cd ../web && npm run build`), and apply the migrations locally:
     application is managed by `infra/` (with `prevent_destroy`): it leaves through its own reviewed `infra/` change
     and a confirmed "Infra apply" (`infra/README.md` "FlowDay", F6), never by a dashboard delete, which the next
     plan would turn into a `create`. Keep the Worker's PWA exceptions only if the narrow bypass is kept.
+
+## Todoist Plus integration
+
+`FocusEntrypoint` is a same-account service binding used by Todofy after its extension authentication. It permits
+paged tasks/time entries, daily flow reads and order changes, estimate edits, read-only sync and timer commands.
+It does not expose settings, credentials, local-task creation/deletion or the public owner authentication bypass.
+The normal Worker fetch still checks Access, Origin and CSRF.
+
+Todofy completes the Todoist task first, then sends `SETTLE` with a stable request ID and the observed timer etag.
+FlowDay records local completion and saves a matching timer segment; an unrelated active task keeps running.
+A failed settlement does not authorize another Todoist completion. Todofy keeps that success and retries settlement.
+`STOP` and `PAUSE` never complete tasks. Ordinary FlowDay completion remains local to its day flow.
+
+Migration `0004` adds Todoist parent and actual deadline fields, distinct from due/scheduled dates. Explicitly setting
+or clearing a FlowDay estimate marks it as an override, so a later Todoist duration cannot replace it. Existing
+nonempty estimates are preserved on migration because their historical source is not available.
+The timer remains one session row; its command receipts and recorded time entries are included in the normal D1 backup.
+
+Local checks on October 13 passed Worker lint/typecheck, 21 unit tests, 123 real-D1/workerd cases (including timer
+CPU and the daily write budget), UI lint/typecheck, 119 unit/integration cases, import checks and the production
+static export. All 51 existing desktop browser scenarios passed against synthetic local data; the count-up case
+was rerun after its time-control helper was changed to wait for the accepted asynchronous resume.
+A separate SQLite upgrade check preserved existing estimates, an unknown estimate and a paused timer through
+`0004`. These checks do not establish a production deployment or a Todoist PWA installation.

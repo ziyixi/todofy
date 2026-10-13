@@ -136,6 +136,7 @@ PREFIX = {app: app.replace("-", "_") for app in APPS}
 # A new app is checked but its deploy output stays false until its Cloudflare resources are ready. Keep its output
 # present so the workflow and same-SHA reuse have one stable interface.
 CHECK_ONLY: set[str] = set()
+BROWSER_APPS = {"todoist-plus"}  # Published as tested ZIPs; no cloud deployment.
 # Apps whose Ops entrypoint Home binds (dashboard/wrangler.toml): while one of them is CHECK_ONLY its Worker does not
 # exist yet, so Home's deploy (whose binding would name a missing service) waits too.
 HOME_BOUND = {"fleet", "mailsort", "recall", "brief"}
@@ -153,6 +154,7 @@ KEYS = (
     "mailsort_check",
     "recall_check",
     "brief_check",
+    "todoist_plus_check",
     "contracts",
     "packages",
     "infra",
@@ -173,6 +175,7 @@ KEYS = (
     "recall_deploy",
     "recall_extension_publish",
     "brief_deploy",
+    "todoist_plus_publish",
 )
 DISPATCH = {
     "both": ("todofy", "mail-hero"),
@@ -190,6 +193,7 @@ DISPATCH = {
     "mailsort": ("mailsort",),
     "recall": ("recall",),
     "brief": ("brief",),
+    "todoist-plus": ("todoist-plus",),
 }
 # The website's Notion relay Worker deploys on its own (website_relay_deploy).
 RELAY = "website/relay/"
@@ -197,7 +201,7 @@ RELAY = "website/relay/"
 # Release (recall_extension_publish).
 EXTENSION = ("recall/extension/", "recall/shared/")
 # Apps that neither provide nor consume a contract: their own changes do not run Contracts.
-NO_CONTRACTS = {"flowday", "links", "newsletter"}
+NO_CONTRACTS = {"flowday", "links", "newsletter", "todoist-plus"}
 # The OpenTofu configuration (infra/README.md) and its plan-summary tool: checked here without a token; only
 # .github/workflows/infra.yml plans it against Cloudflare, and only the manually dispatched infra-apply.yml applies it.
 INFRA = ("infra/", "tools/infra-plan-summary/")
@@ -243,6 +247,7 @@ PROTO_USERS: dict[str, tuple[str, ...]] = {
     "mailsort": ("ts",),
     "recall": ("ts",),
     "brief": ("ts",),
+    "todoist-plus": ("ts",),
 }
 # The hand-written runtimes and generators: a change reaches every user of each language listed. The wire
 # profile's own options (common/wire/v1: value rules, map order, binding arguments) are part of both runtimes:
@@ -265,8 +270,8 @@ PROTO_PACKAGES: dict[str, tuple[str, ...]] = {
     "proto/todofy/report/": ("todofy",),
     # Todofy's owner API (todofy.ui.v1): todofy-core writes every answer with it, the gateway serves it through the
     # shared transcoder and Todofy's UI calls it through the shared client.
-    "proto/todofy/ui/": ("todofy",),
-    "proto/flowday/ui/": ("flowday",),
+    "proto/todofy/ui/": ("todofy", "todoist-plus"),
+    "proto/flowday/ui/": ("flowday", "todofy", "todoist-plus"),
     "proto/links/ui/": ("links",),
     "proto/watch/ui/": ("watch",),
     # mailsort's owner API (mailsort.ui.v2, after v1): its Worker serves it, its UI calls it.
@@ -364,6 +369,7 @@ CHECK_JOBS = {
     "mailsort_check": ("Mailsort checks",),
     "recall_check": ("Recall checks",),
     "brief_check": ("Brief checks",),
+    "todoist_plus_check": ("Todoist Plus checks",),
     "contracts": ("Contracts",),
     "packages": ("Shared packages",),
     "infra": ("Infra checks",),
@@ -404,12 +410,13 @@ def outputs(
         "proto": proto,
         "website_relay_deploy": relay,
         "recall_extension_publish": extension,
+        "todoist_plus_publish": "todoist-plus" in deployed,
     }
     for app in APPS:
         result[f"{PREFIX[app]}_check"] = app in checked
         # Home binds Fleet's, mailsort's and recall's entrypoints. Until such an app's resources are ready (CHECK_ONLY),
         # neither its Worker nor Home can be published by full fallback, dispatch, a path diff or reused branch checks.
-        blocked = app in CHECK_ONLY or (app == "dashboard" and bool(HOME_BOUND & CHECK_ONLY))
+        blocked = app in BROWSER_APPS or app in CHECK_ONLY or (app == "dashboard" and bool(HOME_BOUND & CHECK_ONLY))
         result[f"{PREFIX[app]}_deploy"] = app in deployed and not blocked
     result["platform_publish"] = result.get("platform_deploy", False)
     return {key: result[key] for key in KEYS}
@@ -627,6 +634,8 @@ def find_reusable(
                 tested_artifacts.append(f"newsletter-image-{sha}")
             if result["platform_publish"]:
                 tested_artifacts.append(f"platform-image-{sha}")
+            if result["todoist_plus_publish"]:
+                tested_artifacts.append(f"todoist-plus-{sha}")
             if result["recall_extension_publish"]:
                 tested_artifacts.extend([f"recall-extension-{sha}", f"recall-orion-{sha}"])
             if tested_artifacts:

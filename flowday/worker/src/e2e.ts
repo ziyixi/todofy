@@ -56,7 +56,7 @@ interface SeedPayload {
   settings?: Record<string, string | number | boolean>;
 }
 
-const TABLES = ['flow_task_notes', 'completed_flow_tasks', 'flow_tasks', 'time_entries', 'tasks', 'settings', 'active_timer_session'];
+const TABLES = ['flow_task_notes', 'completed_flow_tasks', 'flow_tasks', 'time_entries', 'tasks', 'settings', 'active_timer_session', 'timer_commands'];
 
 export async function clearAll(db: Db): Promise<void> {
   await runStatements(db, TABLES.map((table) => sql.raw(`DELETE FROM ${table}`)));
@@ -130,6 +130,13 @@ export async function e2eRoute(request: Request, env: Env, db: Db, pathname: str
       const payload = (await readBody(request)) as SeedPayload;
       if (payload.resetFirst !== false) await clearAll(db);
       await seed(db, payload, env.CREDENTIAL_KEY);
+      return jsonResponse({ ok: true });
+    }
+    case 'POST /api/test/timer-elapsed': {
+      const body = await readBody(request);
+      const seconds = body['seconds'];
+      if (typeof seconds !== 'number' || !Number.isFinite(seconds) || seconds < 0 || seconds > 21600) throw flowdayError('BAD_REQUEST');
+      await db.run(sql`UPDATE active_timer_session SET segment_wall_start = ${new Date(Date.now() - seconds * 1000).toISOString()} WHERE id = 'main' AND status = 'running'`);
       return jsonResponse({ ok: true });
     }
     case 'POST /api/test/sync-orphans': {

@@ -30,7 +30,7 @@ cron */10 ----------> scheduled() -------------------------> wake() (RPC)
 | Host | Serves | Auth |
 |---|---|---|
 | `TODOFY_PUBLIC_HOST` (`todofy.ziyixi.science`) | owner UI and its API todofy.ui.v1 under `/api/v1/*` ([`proto/todofy/ui/v1`](../proto/todofy/ui/v1), served by the shared transcoder) | Cloudflare Access app on the whole host, and the gateway verifies the Access JWT itself (RS256 signature, issuer, audience, expiry, not-before, subject, owner or alias); writes also need Origin, the CSRF token and a `request_id` |
-| each of `TODOFY_HOOKS_HOSTS` (`todofy-hooks.ziyixi.science`; `daily.ziyixi.science` is added at cutover so Mail Hero's and the newsletter's existing URLs keep working) | exactly `POST /hooks/mail`, `GET /api/summary`, `GET /api/recommendation`, `GET /health` | webhook: Bearer (SHA-256 digest compared in constant time); newsletter: Basic; `/health` returns the build SHA with `service`/`status` (the gateway answers it without the Durable Object) |
+| each of `TODOFY_HOOKS_HOSTS` (`todofy-hooks.ziyixi.science`; `daily.ziyixi.science` is added at cutover so Mail Hero's and the newsletter's existing URLs keep working) | `POST /hooks/mail`, newsletter reports, `/health`, and the narrow `/api/plus/*` extension API | webhook: Bearer; newsletter: Basic; Plus: its own revocable connection token; `/health` returns the build SHA without the Durable Object |
 
 Any other host or path is a 404. `workers.dev` and preview URLs are off.
 
@@ -106,6 +106,21 @@ usable snapshot it is exactly the 24 h report. Every Sunday from 17:00 UTC one r
 carries the week's counts, trends and links. The owner UI's GTD page shows the trends; ops-v1 status
 carries the counters and the dashboard shows them as the "GTD 循环" flow
 ([docs/gtd-features.md](docs/gtd-features.md)).
+
+## Todoist Plus
+
+[Todoist Plus](../todoist-plus/) adds Plan and Focus inside Todoist's Chrome website/PWA.
+Open the owner's `/plus` page to check the discovered label mapping, explicitly enable weekly
+rollover, and issue a named extension connection token. Opening the page or issuing a token does not
+enable task writes. The extension never receives the Todoist API key.
+
+Todoist remains the task store. Todofy is the only Todoist writer: planning labels, true deadlines,
+explicit child creation and task completion use replay-safe Sync commands. FlowDay owns the day queue,
+estimates and shared timer, reached through a private service binding. The existing ten-minute cron
+returns recorded previous-week commitments to weekly candidates and removes previous-week Bets after
+Monday 00:00 in the account timezone. This continues when the browser is closed.
+
+The [backend contract](docs/todoist-plus.md) covers setup, pause controls and retry behavior.
 
 ## Backups
 

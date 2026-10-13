@@ -1,7 +1,7 @@
 // FlowDay's owner API: the HTTP/JSON interface between FlowDay's UI (flowday/web, a Next.js static export) and the
 // Worker "flowday" (flowday/worker), which keeps everything in D1 and reads Todoist (never writes it).
 //
-// Callers. Only FlowDay's own UI calls it (same origin, flowday.ziyixi.science). No other app calls these routes.
+// Callers. FlowDay's own UI uses its owner routes. Todofy uses the narrow FocusEntrypoint service binding.
 //
 // Transport. google.api.http bindings under the prefix /api/v1, served by the shared transcoder
 // (proto/ts/http-transcoder.ts) and called through the shared client (proto/ts/http-client.ts). Bodies, query
@@ -17,14 +17,9 @@
 // (header X-CSRF-Token, cookie flowday_csrf), issued by GET /api/csrf, which is transport, not part of this
 // service, as are /health and the exact PWA files.
 //
-// Repeated requests (AIP-155). The Worker keeps no request log: D1's daily write allowance is shared by every app of
-// the account, and a log would cost a row write (and its index entry) on every mutation, about doubling FlowDay's
-// writes. So the two creates take a `request_id` that becomes the new resource's ID (`local-<request_id>`,
-// `timeEntries/<request_id>`): a repeated request finds it and answers it, writing nothing. Every other mutation
-// sets a state (a flow's tasks, a note's text, the timer session, a setting), so repeating it changes nothing more;
-// a repeated Delete or Undelete answers NOT_FOUND or TASK_NOT_DELETED like any second one. There are no etags
-// (AIP-154): the owner's tabs and devices write last-writer-wins, as before; every change is small and the UI
-// reloads what it shows after a failure.
+// Repeated requests (AIP-155). Creates use request_id as their new resource ID. Timer commands additionally
+// require an etag and atomically save their receipt, elapsed segment and new session; stale commands are ABORTED.
+// Other mutations set a state and retain their existing last-writer-wins behavior.
 //
 // Write budget. Every mutation writes only rows whose values change (flowday/AGENTS.md, flowday/docs/design.md
 // "Write budget"), and every response carries the header x-flowday-rows-written (transport, not part of a message).
@@ -279,8 +274,17 @@ service FlowDayUiService {
     option (google.api.method_signature) = "name";
   }
 
-  // The shared timer (AIP-131, AIP-156): an empty session (IDLE, no task) when none is stored. Replaces GET
-  // /api/timer/session.
+  // Applies one server-owned timer transition and records its elapsed segment atomically.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc CommandTimer(CommandTimerRequest) returns (TimerSession) {
+    option (google.api.http) = {
+      post: "/api/v1/{name=timerSession}:command"
+      body: "*"
+    };
+  }
+
+  // Reads the versioned shared timer; an uninitialized timer has etag 0.
   // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
   // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
   rpc GetTimerSession(GetTimerSessionRequest) returns (TimerSession) {
@@ -288,8 +292,7 @@ service FlowDayUiService {
     option (google.api.method_signature) = "name";
   }
 
-  // Stores the timer's state (AIP-134): the fields `update_mask` names, or all of them without one. One row write.
-  // Replaces PUT /api/timer/session.
+  // Legacy client compatibility: returns RELOAD_REQUIRED. Use CommandTimer.
   // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
   // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
   rpc UpdateTimerSession(UpdateTimerSessionRequest) returns (TimerSession) {
@@ -300,7 +303,7 @@ service FlowDayUiService {
     option (google.api.method_signature) = "timer_session,update_mask";
   }
 
-  // Empties the shared timer (no task, IDLE) and answers the empty session. Replaces DELETE /api/timer/session.
+  // Legacy client compatibility: returns RELOAD_REQUIRED. Use CommandTimer with STOP or DISCARD.
   // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
   // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
   rpc ClearTimerSession(ClearTimerSessionRequest) returns (TimerSession) {
@@ -738,4 +741,53 @@ message QueryAnalyticsResponse {
   repeated Task tasks = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
   // The day's capacity setting (Settings.day_capacity_minutes).
   int32 day_capacity_minutes = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// One timer transition. A stale etag is ABORTED; retries reuse request_id.
+message CommandTimerRequest {
+  // Timer transitions; STOP saves elapsed time without completing a task.
+  enum Action {
+    // Required action was omitted.
+    ACTION_UNSPECIFIED = 0;
+    // Start a task, saving an existing running segment first.
+    ACTION_START = 1;
+    // Save elapsed time and pause.
+    ACTION_PAUSE = 2;
+    // Resume the paused task.
+    ACTION_RESUME = 3;
+    // Save elapsed time and stop.
+    ACTION_STOP = 4;
+    // Mark this day task done and stop its timer, after Todofy confirms Todoist completion.
+    ACTION_SETTLE = 5;
+    // Discard the current unrecorded segment, preserving already saved time.
+    ACTION_DISCARD = 6;
+    // Save only the remaining pomodoro time and show its finished marker.
+    ACTION_FINISH_POMODORO = 7;
+    // Clear the finished pomodoro marker.
+    ACTION_DISMISS_POMODORO = 8;
+  }
+  // Always timerSession.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "flowday.ziyixi.science/TimerSession"
+  ];
+  // Stable UUID for this user action.
+  string request_id = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.field_info).format = UUID4
+  ];
+  // Version of the timer the user acted upon.
+  string etag = 3 [(google.api.field_behavior) = REQUIRED];
+  // Transition to apply.
+  Action action = 4 [(google.api.field_behavior) = REQUIRED];
+  // Task for START or SETTLE.
+  string task_id = 5 [(google.api.field_behavior) = OPTIONAL];
+  // Day for START or SETTLE, YYYY-MM-DD.
+  string flow_date = 6 [(google.api.field_behavior) = OPTIONAL];
+  // Mode for START; defaults to COUNT_UP.
+  TimerSession.Mode mode = 7 [(google.api.field_behavior) = OPTIONAL];
+  // Positive length for a pomodoro START.
+  optional int32 target_seconds = 8 [(google.api.field_behavior) = OPTIONAL];
+  // Optional idle detection cutoff for PAUSE, bounded by the running segment and server time.
+  google.protobuf.Timestamp effective_stop_time = 9 [(google.api.field_behavior) = OPTIONAL];
 }

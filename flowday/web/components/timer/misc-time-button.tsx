@@ -68,7 +68,7 @@ export function MiscTimeButton() {
   };
 
   const handleSave = async () => {
-    await stopAndSave();
+    if (!(await stopAndSave())) return;
     closePopOut();
     setOpen(false);
   };

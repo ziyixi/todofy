@@ -1,0 +1,323 @@
+// Todoist Plus planning API. Owner setup uses Access, same-origin and CSRF. The
+// extension calls only this API on the hooks host with its own revocable token.
+syntax = "proto3";
+package todofy.ui.v1;
+
+import "google/api/annotations.proto";
+import "google/api/client.proto";
+import "google/api/field_behavior.proto";
+import "google/api/field_info.proto";
+
+option java_multiple_files = true;
+option java_outer_classname = "PlusServiceProto";
+option java_package = "science.ziyixi.todofy.ui.v1";
+
+// Personal planning, backed by Todoist tasks and the owner's existing labels.
+service PlusService {
+  option (google.api.default_host) = "todofy.ziyixi.science";
+  // Account week and the discovered label/filter mapping, without task content.
+  // (-- api-linter: core::0131::synonyms=disabled
+  //     aip.dev/not-precedent: returns a live external-account projection, not a resource in this service. --)
+  rpc ReadPlan(ReadPlanRequest) returns (ReadPlanResponse) {
+    option (google.api.http) = {get: "/api/plus/v1/plan:read"};
+  }
+  // A bounded page of active Todoist tasks. Read all pages before showing counts.
+  rpc ListPlanningTasks(ListPlanningTasksRequest) returns (ListPlanningTasksResponse) {
+    option (google.api.http) = {get: "/api/plus/v1/tasks"};
+  }
+  // Replaces the selected planning fields only; unrelated labels are retained.
+  // (-- api-linter: core::0134::synonyms=disabled
+  //     aip.dev/not-precedent: this action changes external Todoist labels, not a stored Plan resource. --)
+  rpc SetTaskPlan(SetTaskPlanRequest) returns (SetTaskPlanResponse) {
+    option (google.api.http) = {
+      post: "/api/plus/v1/tasks:setTaskPlan"
+      body: "*"
+    };
+  }
+  // Appends up to 20 child tasks using stable Todoist Sync command UUIDs.
+  rpc AppendTaskSteps(AppendTaskStepsRequest) returns (AppendTaskStepsResponse) {
+    option (google.api.http) = {
+      post: "/api/plus/v1/tasks:appendTaskSteps"
+      body: "*"
+    };
+  }
+  // Updates the true deadline and lead window, leaving scheduled date unchanged.
+  // (-- api-linter: core::0134::synonyms=disabled
+  //     aip.dev/not-precedent: this action updates a Todoist deadline and labels together. --)
+  rpc SetTaskLead(SetTaskLeadRequest) returns (SetTaskLeadResponse) {
+    option (google.api.http) = {
+      post: "/api/plus/v1/tasks:setTaskLead"
+      body: "*"
+    };
+  }
+  // Todoist item_close: complete an ordinary task or advance one recurrence.
+  rpc CompleteTask(CompleteTaskRequest) returns (CompleteTaskResponse) {
+    option (google.api.http) = {
+      post: "/api/plus/v1/tasks:completeTask"
+      body: "*"
+    };
+  }
+  // Owner-only: accept the current mapping and enable the weekly reset.
+  rpc ConfirmPlanMapping(ConfirmPlanMappingRequest) returns (ConfirmPlanMappingResponse) {
+    option (google.api.http) = {
+      post: "/api/plus/v1/plan:confirmPlanMapping"
+      body: "*"
+    };
+  }
+  // Owner-only: a token is returned once; only its digest is stored.
+  rpc IssueExtensionConnection(IssueExtensionConnectionRequest) returns (IssueExtensionConnectionResponse) {
+    option (google.api.http) = {
+      post: "/api/plus/v1/connections:issueExtensionConnection"
+      body: "*"
+    };
+  }
+  // Owner-only: connection names and IDs, never token values or digests.
+  // (-- api-linter: core::0131::synonyms=disabled
+  //     aip.dev/not-precedent: bounded credential settings, no paginated collection or individual Get. --)
+  rpc ReadExtensionConnections(ReadExtensionConnectionsRequest) returns (ReadExtensionConnectionsResponse) {
+    option (google.api.http) = {get: "/api/plus/v1/connections:read"};
+  }
+  // Owner-only: disables one token without changing task or planning history.
+  rpc RevokeExtensionConnection(RevokeExtensionConnectionRequest) returns (RevokeExtensionConnectionResponse) {
+    option (google.api.http) = {
+      post: "/api/plus/v1/connections:revokeExtensionConnection"
+      body: "*"
+    };
+  }
+}
+
+// One known planning label, discovered from the owner's Todoist account.
+message LabelMapping {
+  // Logical role: office, home, bets, committed, focus, candiate or lead_*.
+  string role = 1;
+  // Exact Todoist label ID.
+  string id = 2;
+  // Current Todoist label name.
+  string label = 3;
+}
+// Account-local planning settings.
+message Plan {
+  // IANA timezone supplied by Todoist.
+  // (-- api-linter: core::0143::standardized-codes=disabled
+  //     aip.dev/not-precedent: matches Todoist's timezone property and existing app naming. --)
+  string timezone = 1;
+  // Monday's account-local calendar date, YYYY-MM-DD.
+  string week_start = 2;
+  // Whether the owner confirmed this mapping and enabled planning writes/reset.
+  bool enabled = 3;
+  // Discovered known labels. Missing roles are listed separately.
+  repeated LabelMapping labels = 4;
+  // Exact filter IDs whose UI is replaced; unrelated favorites remain visible.
+  repeated string hidden_filter_ids = 5;
+  // Label roles that must be created in Todoist before confirmation.
+  repeated string missing_labels = 6;
+  // Fingerprint of the discovered label IDs/names and timezone.
+  string etag = 7;
+  // Account-local YYYY-MM-DD for deadline calculations.
+  string today = 8;
+  // Configured owner FlowDay URL for local tasks that have no native Todoist page.
+  string flowday_url = 9;
+}
+// An active Todoist task with derived planning fields. No description is fetched for display.
+message PlanningTask {
+  // Todoist task ID; never a title match or temporary browser ID.
+  string id = 1;
+  // Unmodified task title. Display-only marker cleanup belongs in the extension.
+  string title = 2;
+  // Empty for a root task.
+  string parent_id = 3;
+  // Todoist project ID.
+  string project_id = 4;
+  // Existing labels, including labels the extension does not manage.
+  repeated string labels = 5;
+  // none, monthly, weekly or committed. Committed takes display precedence.
+  string stage = 6;
+  // work, personal or unassigned (including ambiguous office+home).
+  string area = 7;
+  // Whether the task carries the current Bets label.
+  bool bet = 8;
+  // True deadline calendar date; empty when absent.
+  string deadline = 9;
+  // Scheduled date or date-time; independent of deadline.
+  string due = 10;
+  // 0, 1, 3, 7, 14 or 30 days; zero when absent.
+  int32 lead_days = 11;
+  // Absent means unknown, not zero minutes.
+  optional int32 estimated_minutes = 12;
+  // Fingerprint checked before task mutations.
+  string etag = 13;
+  // The existing Must Start filter's deadline/lead and exclusion semantics.
+  bool must_start = 14;
+  // A true deadline has no lead and is neither active nor parked.
+  bool missing_lead = 15;
+  // Todoist priority, 1 to 4.
+  int32 priority = 16;
+}
+// Reads the singleton plan.
+message ReadPlanRequest {}
+// Account metadata without task content.
+message ReadPlanResponse {
+  // Current account planning metadata.
+  Plan plan = 1;
+}
+// A page of active tasks; maximum page_size is 200.
+message ListPlanningTasksRequest {
+  // Default 100, maximum 200.
+  int32 page_size = 1 [(google.api.field_behavior) = OPTIONAL];
+  // Opaque cursor from the preceding response.
+  string page_token = 2 [(google.api.field_behavior) = OPTIONAL];
+}
+// A page is never a complete task count when next_page_token is present.
+message ListPlanningTasksResponse {
+  // Tasks from this page.
+  repeated PlanningTask planning_tasks = 1;
+  // Empty only when all active tasks have been returned.
+  string next_page_token = 2;
+}
+// A deliberate planning change. Omitted optional fields remain unchanged.
+message SetTaskPlanRequest {
+  // Todoist task ID.
+  string task_id = 1 [(google.api.field_behavior) = REQUIRED];
+  // Fingerprint of the task shown to the user.
+  string etag = 2 [(google.api.field_behavior) = REQUIRED];
+  // UUID reused when repeating this action.
+  string request_id = 3 [
+    (google.api.field_behavior) = OPTIONAL,
+    (google.api.field_info).format = UUID4
+  ];
+  // none, monthly, weekly or committed.
+  optional string stage = 4;
+  // work, personal or unassigned.
+  optional string area = 5;
+  // Adds/removes Bets without changing stage unless stage is also provided.
+  optional bool bet = 6;
+}
+// The task after a successful planning change.
+message SetTaskPlanResponse {
+  // Current task values.
+  PlanningTask task = 1;
+}
+// A child title and optional estimate.
+message TaskStep {
+  // Nonempty title, at most 500 characters.
+  string title = 1 [(google.api.field_behavior) = REQUIRED];
+  // Absent is unknown. Two hours and above are a UI warning, not rejected.
+  optional int32 estimated_minutes = 2;
+}
+// Creates only explicitly submitted child tasks, with at most 20 per action.
+message AppendTaskStepsRequest {
+  // Existing Todoist parent task.
+  string parent_id = 1 [(google.api.field_behavior) = REQUIRED];
+  // Stable action UUID.
+  string request_id = 2 [
+    (google.api.field_behavior) = OPTIONAL,
+    (google.api.field_info).format = UUID4
+  ];
+  // In entered order.
+  repeated TaskStep steps = 3 [(google.api.field_behavior) = REQUIRED];
+}
+// IDs returned by Todoist for this action, in entered order.
+message AppendTaskStepsResponse {
+  // Created child IDs in entered order.
+  repeated string task_ids = 1;
+}
+// Sets lead and deadline together; an empty deadline explicitly clears it.
+message SetTaskLeadRequest {
+  // Existing Todoist task.
+  string task_id = 1 [(google.api.field_behavior) = REQUIRED];
+  // Fingerprint of the task shown to the user.
+  string etag = 2 [(google.api.field_behavior) = REQUIRED];
+  // Stable action UUID.
+  string request_id = 3 [
+    (google.api.field_behavior) = OPTIONAL,
+    (google.api.field_info).format = UUID4
+  ];
+  // True calendar deadline YYYY-MM-DD, or empty to clear.
+  string deadline = 4 [(google.api.field_behavior) = OPTIONAL];
+  // 0 clears; allowed windows are 1, 3, 7, 14 and 30 days.
+  int32 lead_days = 5 [(google.api.field_behavior) = OPTIONAL];
+}
+// Updated deadline and label values.
+message SetTaskLeadResponse {
+  // Current task values.
+  PlanningTask task = 1;
+}
+// Completes one task, using Todoist's recurring-task semantics.
+message CompleteTaskRequest {
+  // Task ID, never a parent automatically chosen by the server.
+  string task_id = 1 [(google.api.field_behavior) = REQUIRED];
+  // Stable action UUID protects a recurring task from advancing twice.
+  string request_id = 2 [
+    (google.api.field_behavior) = OPTIONAL,
+    (google.api.field_info).format = UUID4
+  ];
+  // Focus day to settle after Todoist confirms completion; empty outside Focus.
+  // (-- api-linter: core::0142::time-field-type=disabled
+  //     aip.dev/not-precedent: account-local calendar day, not an instant; same field as FlowDay. --)
+  string flow_date = 3 [(google.api.field_behavior) = OPTIONAL];
+}
+// Acknowledges the actual Todoist command, not a local optimistic completion.
+message CompleteTaskResponse {
+  // The task whose close command succeeded.
+  string task_id = 1;
+}
+// Owner confirmation binds the exact discovered labels/timezone.
+message ConfirmPlanMappingRequest {
+  // Fingerprint returned by ReadPlan.
+  string etag = 1 [(google.api.field_behavior) = REQUIRED];
+  // Stable action UUID.
+  string request_id = 2 [
+    (google.api.field_behavior) = OPTIONAL,
+    (google.api.field_info).format = UUID4
+  ];
+}
+// The mapping after explicit confirmation.
+message ConfirmPlanMappingResponse {
+  // Current account planning metadata.
+  Plan plan = 1;
+}
+// Owner creates a named, independently revocable extension credential.
+message IssueExtensionConnectionRequest {
+  // Human readable device name, 1 to 60 characters.
+  string display_name = 1 [(google.api.field_behavior) = REQUIRED];
+  // Stable action UUID; a repeated create never returns the token again.
+  string request_id = 2 [
+    (google.api.field_behavior) = OPTIONAL,
+    (google.api.field_info).format = UUID4
+  ];
+}
+// Metadata for one extension connection.
+message ExtensionConnection {
+  // Opaque ID.
+  string id = 1;
+  // Owner supplied device name.
+  string display_name = 2;
+  // Whether the credential has been revoked.
+  bool revoked = 3;
+}
+// The credential is present on the first successful create only.
+message IssueExtensionConnectionResponse {
+  // Connection metadata.
+  ExtensionConnection connection = 1;
+  // One-time plaintext credential; never logged or saved by the server.
+  string token = 2;
+}
+// Lists at most 30 connection records; revoked records are included.
+message ReadExtensionConnectionsRequest {}
+// Named connections without credentials.
+message ReadExtensionConnectionsResponse {
+  // Up to 30 named connections.
+  repeated ExtensionConnection connections = 1;
+}
+// Revokes precisely one connection.
+message RevokeExtensionConnectionRequest {
+  // ID returned at creation or in the list.
+  string connection_id = 1 [(google.api.field_behavior) = REQUIRED];
+  // Stable action UUID.
+  string request_id = 2 [
+    (google.api.field_behavior) = OPTIONAL,
+    (google.api.field_info).format = UUID4
+  ];
+}
+// Revocation is idempotent.
+message RevokeExtensionConnectionResponse {}

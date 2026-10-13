@@ -152,7 +152,7 @@ describe('incremental sync', () => {
     expect((await getDeletedTasks(h.db())).map((task) => task.id)).toEqual(['td-1']);
   });
 
-  it('keeps the estimate set in FlowDay when Todoist has no duration; a Todoist duration replaces it', async () => {
+  it('keeps an explicit FlowDay estimate even when Todoist changes its duration', async () => {
     seedTodoist(2);
     await sync(T0);
     await updateTaskEstimate(h.db(), 'td-1', 45);
@@ -161,7 +161,11 @@ describe('incremental sync', () => {
     expect((await getAllTasks(h.db())).find((task) => task.id === 'td-1')?.estimatedMins).toBe(45);
     h.todoist.update('td-1', { duration: { amount: 30, unit: 'minute' } });
     await sync(T0 + 2 * AUTO_SYNC_MIN_INTERVAL_MS);
-    expect((await getAllTasks(h.db())).find((task) => task.id === 'td-1')?.estimatedMins).toBe(30);
+    expect((await getAllTasks(h.db())).find((task) => task.id === 'td-1')?.estimatedMins).toBe(45);
+    await updateTaskEstimate(h.db(), 'td-1', null);
+    h.todoist.update('td-1', { duration: { amount: 60, unit: 'minute' }, parent_id: 'parent-1', deadline: { date: '2026-05-20' } });
+    await sync(T0 + 3 * AUTO_SYNC_MIN_INTERVAL_MS);
+    expect((await getAllTasks(h.db())).find((task) => task.id === 'td-1')).toMatchObject({ estimatedMins: null, parentId: 'parent-1', deadlineDate: '2026-05-20' });
   });
 
   it('a renamed project renames exactly its tasks, even those that did not change', async () => {

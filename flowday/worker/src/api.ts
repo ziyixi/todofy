@@ -47,7 +47,6 @@ import {
   MAX_IDS,
   MAX_LABELS,
   MAX_NOTE,
-  MAX_SESSION_ID,
   MAX_TITLE,
   MAX_TODOIST_KEY,
   NOTE_PAGE,
@@ -72,7 +71,8 @@ import {
 import { getNote, listNotes, upsertNote } from './store/notes.ts';
 import { getPlanningDaysBetween, getSetting, getSettings, planningKey, setSettingQuery, setSettingSql } from './store/settings.ts';
 import { createLocalTask, getTask, listTasks, restoreTask, runStatements, softDeleteTask, updateTaskEstimate, updateTaskTitle } from './store/tasks.ts';
-import { clearActiveTimerSession, getActiveTimerSession, saveActiveTimerSession } from './store/timer-session.ts';
+import { getActiveTimerSession } from './store/timer-session.ts';
+import { commandTimer } from './store/timer-commands.ts';
 import { KEY_API_KEY, KEY_CLAIMED_AT, KEY_LAST_SYNC_AT, KEY_PENDING, KEY_PROJECTS, KEY_SYNC_TOKEN, runSync } from './sync.ts';
 
 /** What every handler gets: ./router.ts authenticated the owner (and the transcoder checked CSRF) before routing. */
@@ -257,6 +257,8 @@ export function taskMessage(task: TaskRecord): Task {
     completed: task.isCompleted,
     completeTime: storedTime(task.completedAt),
     dueDate: task.dueDate ?? '',
+    parentId: task.parentId ?? '',
+    deadlineDate: task.deadlineDate ?? '',
     createTime: storedTime(task.createdAt),
     deleteTime: storedTime(task.deletedAt),
   });
@@ -300,7 +302,7 @@ const EMPTY_SESSION: Omit<TimerSessionRecord, 'updatedAt'> = {
   pomodoroFinishedTargetS: null,
 };
 
-function sessionMessage(session: TimerSessionRecord | null): TimerSession {
+export function sessionMessage(session: TimerSessionRecord | null): TimerSession {
   const s = session ?? { ...EMPTY_SESSION, updatedAt: null };
   return create(TimerSessionSchema, {
     name: 'timerSession',
@@ -315,6 +317,7 @@ function sessionMessage(session: TimerSessionRecord | null): TimerSession {
     finishedPomodoroFlowDate: s.pomodoroFinishedFlowDate ?? '',
     ...(s.pomodoroFinishedTargetS === null ? {} : { finishedPomodoroTargetSeconds: s.pomodoroFinishedTargetS }),
     updateTime: storedTime(s.updatedAt),
+    etag: s.etag ?? '0',
   });
 }
 
@@ -353,46 +356,6 @@ function title(value: string): string {
 
 function minutes(value: number): number {
   return value < 0 || value > MAX_ESTIMATE_MINUTES ? bad() : value;
-}
-
-/** The timer session fields an update may replace (every field the UI sets). */
-const SESSION_MASK = [
-  'task_id',
-  'flow_date',
-  'state',
-  'mode',
-  'pomodoro_target_seconds',
-  'segment_start_time',
-  'saved_seconds',
-  'finished_pomodoro_task_id',
-  'finished_pomodoro_flow_date',
-  'finished_pomodoro_target_seconds',
-] as const;
-
-function sessionId(value: string): string | null {
-  if (value.length > MAX_SESSION_ID) bad();
-  return value === '' ? null : value;
-}
-
-function sessionDay(value: string): string | null {
-  if (value !== '' && !isDay(value)) bad();
-  return value === '' ? null : value;
-}
-
-/** The record of `message`'s masked fields over `base`. */
-function sessionRecord(message: TimerSession, base: Omit<TimerSessionRecord, 'updatedAt'>, mask: ReadonlySet<string>): Omit<TimerSessionRecord, 'updatedAt'> {
-  const out = { ...base };
-  if (mask.has('task_id')) out.taskId = sessionId(message.taskId);
-  if (mask.has('flow_date')) out.flowDate = sessionDay(message.flowDate);
-  if (mask.has('state')) out.status = message.state === TimerSession_State.RUNNING ? 'running' : message.state === TimerSession_State.PAUSED ? 'paused' : 'idle';
-  if (mask.has('mode')) out.timerMode = message.mode === TimerSession_Mode.POMODORO ? 'pomodoro' : 'countup';
-  if (mask.has('pomodoro_target_seconds')) out.pomodoroTargetS = message.pomodoroTargetSeconds ?? null;
-  if (mask.has('segment_start_time')) out.segmentWallStart = message.segmentStartTime === undefined ? null : timeText(message.segmentStartTime);
-  if (mask.has('saved_seconds')) out.sessionSavedS = Math.max(message.savedSeconds, 0);
-  if (mask.has('finished_pomodoro_task_id')) out.pomodoroFinishedTaskId = sessionId(message.finishedPomodoroTaskId);
-  if (mask.has('finished_pomodoro_flow_date')) out.pomodoroFinishedFlowDate = sessionDay(message.finishedPomodoroFlowDate);
-  if (mask.has('finished_pomodoro_target_seconds')) out.pomodoroFinishedTargetS = message.finishedPomodoroTargetSeconds ?? null;
-  return out;
 }
 
 export const handlers: ServiceHandlers<ShapeOf<typeof FlowDayUiService>, ApiContext> = {
@@ -661,21 +624,16 @@ export const handlers: ServiceHandlers<ShapeOf<typeof FlowDayUiService>, ApiCont
     return sessionMessage(await getActiveTimerSession(db));
   },
 
-  async updateTimerSession(request, { db, now }) {
-    const input = request.timerSession ?? bad();
-    const mask = maskOf(request.updateMask, SESSION_MASK, ['name', 'update_time']).fields;
-    // A partial mask keeps the other stored fields (one read); the UI always replaces the whole session.
-    const base = mask.size === SESSION_MASK.length ? EMPTY_SESSION : ((await getActiveTimerSession(db)) ?? EMPTY_SESSION);
-    const session = sessionRecord(input, base, mask);
-    const at = now();
-    await saveActiveTimerSession(db, session, at);
-    return sessionMessage({ ...session, updatedAt: at.toISOString() });
+  async commandTimer(request, { db, now }) {
+    return sessionMessage(await commandTimer(db, request, now()));
   },
 
-  async clearTimerSession(request, { db }) {
-    if (request.name !== 'timerSession') notFound();
-    await clearActiveTimerSession(db);
-    return sessionMessage(null);
+  updateTimerSession() {
+    return Promise.reject(flowdayError('RELOAD_REQUIRED'));
+  },
+
+  clearTimerSession() {
+    return Promise.reject(flowdayError('RELOAD_REQUIRED'));
   },
 
   // ---- settings ----

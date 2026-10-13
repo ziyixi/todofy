@@ -9,6 +9,25 @@ Its old waiting lists and release identities are historical, not instructions to
 
 ## Current work
 
+Todoist Plus is implemented on `codex/todoist-plus` in an isolated worktree. The extension in
+`todoist-plus/` provides native-style Plan, batch steps and Focus. Todofy remains the Todoist writer;
+FlowDay owns queue, estimates and server-owned timer commands. Planning writes and weekly rollover
+remain disabled until owner mapping confirmation. No production planning writes or Chrome install
+has occurred at this checkpoint.
+
+Local verification covers 549 Python/workerd runtime cases; 1,653 Python units; 127 gateway tests;
+93 owner-UI tests; FlowDay's 123 workerd, 21 worker-unit, 119 UI and 51 desktop-browser scenarios;
+and the extension's 19 unit/API/component and three actual built-MV3 browser cases. Existing route
+budgets pass; the new 200-task Focus proxy has measured 6.85 ms cold / 4.70 ms warm and its own 8/6 ms
+regression bounds, below Workers Free's 10 ms. Gateway gzip is 81.9/86 KiB. Proto lint/API-lint,
+breaking, types, schemas and codec checks pass; CI/config guards pass with one existing local skip.
+[Acceptance record](docs/todoist-plus-verification.md) distinguishes synthetic and production evidence.
+
+Next: complete full branch `CI gate`, release the same SHA (FlowDay, Todofy, Home's binding inventory,
+and the separate extension ZIP), then use the owner's authorized Chrome installation for live
+Todoist/PWA acceptance. No Newsletter, VPS or Recall release is intended. The old FlowDay timer
+replace/clear methods return `RELOAD_REQUIRED` and stay until at least 2026-11-13.
+
 Recall cleanup is released at `bc0adffdc1d8ee018b0663737c77e8de701de0aa`, extension `2026.1013.654`.
 [Full branch CI](https://github.com/ziyixi/todofy/actions/runs/38359057094) and the
 [same-SHA main release](https://github.com/ziyixi/todofy/actions/runs/38359638951) pass. Only Recall and extension

@@ -218,6 +218,7 @@ def generated_files(root: Path) -> dict[str, str]:
             "TODOFY_PUBLIC_HOST": "todofy." + profile["zone"],
             "TODOFY_HOOKS_HOSTS": "todofy-hooks." + profile["zone"] + ",daily." + profile["zone"],
             "HOME_URL": "https://home." + profile["zone"] + "/",
+            "FLOWDAY_PUBLIC_URL": "https://flowday." + profile["zone"],
             "GITHUB_REPOSITORY": profile["repository"],
             "CANONICAL_HOST": "www." + profile["zone"],
         }

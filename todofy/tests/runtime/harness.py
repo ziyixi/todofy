@@ -55,7 +55,7 @@ CORE_CONFIG = ROOT / "wrangler.test.toml"
 # Vars only the gateway reads; SHARED_VARS go to both Workers, everything else to the core.
 GATEWAY_VARS = re.compile(
     r"TODOFY_HOOKS_HOSTS|ACCESS_\w+|CSRF_SIGNING_KEY|MAIL_WEBHOOK_TOKEN_SHA256\w*|REPORT_BASIC_AUTH_SHA256"
-    r"|DEV_\w+|JWKS_REFRESH_COOLDOWN_MS"
+    r"|DEV_\w+|JWKS_REFRESH_COOLDOWN_MS|FLOWDAY_PUBLIC_URL"
 )
 SHARED_VARS = {"MAINTENANCE_MODE", "BUILD_SHA", "TODOFY_PUBLIC_HOST"}
 PUBLIC_HOST = "todofy.localhost"

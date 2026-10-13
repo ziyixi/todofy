@@ -45,6 +45,8 @@ export class TodofyCore extends DurableObject {
   owner_ui(owner, method, request, cursor) { count('owner_ui'); return ANSWERS.owner_ui[method] ?? { error: 'NOT_FOUND', detail: null, retry_after: null }; }
   owner_api(owner, method, path) { count('owner_api'); return ANSWERS.owner_api[path] ?? { status: 404, body: null, error: { code: 'not_found', message: 'x' }, retry_after: null }; }
   setup() { count('setup'); return ANSWERS.setup; }
+  plus_auth() { count('plus_auth'); return true; }
+  plus_ui(method) { count('plus_ui'); return ANSWERS.plus_ui[method] ?? { error: 'NOT_FOUND', detail: null, retry_after: null }; }
   calls() { return calls; }
 }
 export default { fetch() { return new Response('not found', { status: 404 }); } };
@@ -57,6 +59,7 @@ export interface CoreAnswers {
   /** By path (`/api/v1/events`): a CoreResult. */
   readonly owner_api?: Readonly<Record<string, unknown>>;
   readonly setup?: unknown;
+  readonly plus_ui?: Readonly<Record<string, unknown>>;
 }
 
 let bundle: Promise<string> | undefined;
@@ -88,6 +91,7 @@ export interface Harness {
 }
 
 export interface HarnessOptions {
+  readonly focusTasks?: unknown;
   readonly answers: CoreAnswers;
   readonly bindings?: Record<string, string>;
   /** Outbound routes (the Access certs endpoint), by URL. */
@@ -100,7 +104,7 @@ export async function startHarness(options: HarnessOptions): Promise<Harness> {
   const temp = await mkdtemp(join(tmpdir(), 'todofy-gateway-runtime-'));
   const outbound = (request: Request): Response => options.routes?.get(request.url)?.() ?? new Response('no outbound fetch expected', { status: 599 });
   const assets = (): Response => new Response('<!doctype html>', { headers: { 'content-type': 'text/html; charset=utf-8' } });
-  const answers = { owner_ui: {}, owner_api: {}, setup: null, ...options.answers };
+  const answers = { owner_ui: {}, owner_api: {}, plus_ui: {}, setup: null, ...options.answers };
   const mf = new Miniflare(
     convertV4MiniflareOptions({
       host: '127.0.0.1',
@@ -117,7 +121,7 @@ export async function startHarness(options: HarnessOptions): Promise<Harness> {
           script: await gatewayBundle(),
           compatibilityDate: '2026-09-08',
           durableObjects: { COORDINATOR: { className: 'TodofyCore', scriptName: 'todofy-core' } },
-          serviceBindings: { ASSETS: () => assets() },
+          serviceBindings: { ASSETS: () => assets(), FLOWDAY_FOCUS: () => Response.json(options.focusTasks ?? {}) },
           bindings: { ...SYNTHETIC_BINDINGS, ...options.bindings },
           outboundService: (request: Request) => outbound(request),
         },

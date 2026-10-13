@@ -1,378 +1,102 @@
 import { create } from "zustand";
+import { timestampFromDate } from "@ziyixi/proto/protobuf/wkt";
+import { TimerSession_Mode } from "@ziyixi/proto/flowday/ui/v1/time_entry_pb";
+import { commandTimerSession, loadTimerSession, TimerAction } from "@/lib/client/flowday-api";
 import { playCompletionChime } from "@/lib/utils/chime";
-import {
-  clearPersistedTimerSession,
-  fetchPriorSeconds,
-  loadPersistedTimerSession,
-  persistCurrentSession,
-  saveTimerSegment,
-  snapshotSessionState,
-} from "./persistence";
-import {
-  clearTickInterval,
-  currentSegmentSeconds,
-  pomodoroRemainingSeconds,
-  resetState,
-  STALE_FINISHED_MARKER_MS,
-  STALE_RUNNING_SEGMENT_MS,
-  startTickInterval,
-  totalSeconds,
-} from "./helpers";
+import { fetchPriorSeconds } from "./persistence";
+import { clearTickInterval, pomodoroRemainingSeconds, resetState, STALE_FINISHED_MARKER_MS, STALE_RUNNING_SEGMENT_MS, startTickInterval, totalSeconds } from "./helpers";
 import type { ServerSessionPayload, TimerState } from "./types";
 
-async function clearCurrentTimerForStart(state: TimerState): Promise<void> {
-  if (state.status === "idle") return;
+type TimerInput = Omit<Parameters<typeof commandTimerSession>[0], "requestId" | "etag">;
 
+async function applySession(session: ServerSessionPayload | null, current: () => boolean = () => true): Promise<void> {
+  if (session === null) return;
+  const recorded = session.taskId ? await fetchPriorSeconds(session.taskId) : 0;
+  if (!current()) return;
   clearTickInterval();
-
-  if (state.status === "running") {
-    await saveTimerSegment(state);
-    useTimerStore.setState((prev) => ({
-      ...resetState(),
-      entryRevision: prev.entryRevision + 1,
-    }));
-    return;
-  }
-
-  useTimerStore.setState((prev) => ({
-    ...resetState(),
-    entryRevision: prev.entryRevision,
+  // Recorded entries already include the paused segments of this session.
+  const priorSeconds = Math.max(0, recorded - session.sessionSavedS);
+  useTimerStore.setState((state) => ({
+    ...resetState(), etag: session.etag, entryRevision: state.entryRevision + 1,
+    activeTaskId: session.taskId, activeFlowDate: session.flowDate, status: session.status,
+    timerMode: session.timerMode, pomodoroTargetSeconds: session.pomodoroTargetS,
+    segmentWallStart: session.segmentWallStart,
+    segmentStartedAt: session.segmentWallStart ? Date.parse(session.segmentWallStart) : null,
+    sessionSavedSeconds: session.sessionSavedS, priorSeconds,
+    pomodoroFinishedTaskId: session.pomodoroFinishedTaskId,
+    pomodoroFinishedFlowDate: session.pomodoroFinishedFlowDate,
+    pomodoroFinishedTargetSeconds: session.pomodoroFinishedTargetS,
+    displaySeconds: session.timerMode === "pomodoro" ? Math.max(0, (session.pomodoroTargetS ?? 0) - session.sessionSavedS) : recorded,
   }));
+  if (session.status === "running") {
+    useTimerStore.getState().tick();
+    startTickInterval(() => useTimerStore.getState().tick());
+  }
+}
+
+/** Serialize local clicks; the etag also protects against another device or window. */
+let commands: Promise<unknown> = Promise.resolve();
+function command(input: Partial<TimerInput> & Pick<TimerInput, "action">): Promise<boolean> {
+  const run = async () => {
+    useTimerStore.setState({ commandPending: true });
+    try {
+      if (useTimerStore.getState().etag === null) await applySession(await loadTimerSession(true));
+      const etag = useTimerStore.getState().etag;
+      if (etag === null) return false;
+      const session = await commandTimerSession({
+        taskId: "", flowDate: "", mode: TimerSession_Mode.COUNT_UP,
+        ...input, requestId: crypto.randomUUID(), etag,
+      });
+      await applySession(session);
+      if (input.action === TimerAction.FINISH_POMODORO) playCompletionChime();
+      return true;
+    } catch {
+      // The transport displays the failure. Read the winner; never overwrite a newer timer.
+      await applySession(await loadTimerSession());
+      return false;
+    } finally {
+      useTimerStore.setState({ commandPending: false });
+    }
+  };
+  const next = commands.then(run, run);
+  commands = next;
+  return next;
 }
 
 export const useTimerStore = create<TimerState>()((set, get) => ({
-  activeTaskId: null,
-  activeFlowDate: null,
-  status: "idle",
-  timerMode: "countup",
-  pomodoroTargetSeconds: null,
-  segmentWallStart: null,
-  segmentStartedAt: null,
-  sessionSavedSeconds: 0,
-  priorSeconds: 0,
-  displaySeconds: 0,
-  entryRevision: 0,
-  pomodoroFinishedTaskId: null,
-  pomodoroFinishedFlowDate: null,
-  pomodoroFinishedTargetSeconds: null,
-
-  startTimer: async (taskId, flowDate) => {
-    const state = get();
-    if (state.status !== "idle" && state.activeTaskId !== taskId) {
-      await clearCurrentTimerForStart(state);
-    }
-
-    const prior = await fetchPriorSeconds(taskId);
-    const current = get();
-    if (
-      current.activeTaskId &&
-      current.activeTaskId !== taskId &&
-      current.status === "running"
-    ) {
-      return;
-    }
-
-    const now = Date.now();
-    set({
-      activeTaskId: taskId,
-      activeFlowDate: flowDate,
-      status: "running",
-      timerMode: "countup",
-      pomodoroTargetSeconds: null,
-      segmentWallStart: new Date(now).toISOString(),
-      segmentStartedAt: now,
-      sessionSavedSeconds: 0,
-      priorSeconds: prior,
-      displaySeconds: prior,
-      pomodoroFinishedTaskId: null,
-      pomodoroFinishedFlowDate: null,
-      pomodoroFinishedTargetSeconds: null,
-    });
-
-    persistCurrentSession(snapshotSessionState(get()));
-    startTickInterval(() => get().tick());
-  },
-
-  startPomodoro: async (taskId, flowDate, targetSeconds) => {
-    if (!Number.isFinite(targetSeconds) || targetSeconds <= 0) return;
-
-    const state = get();
-    if (state.status !== "idle") {
-      await clearCurrentTimerForStart(state);
-    }
-
-    const prior = await fetchPriorSeconds(taskId);
-    const current = get();
-    if (
-      current.activeTaskId &&
-      current.activeTaskId !== taskId &&
-      current.status === "running"
-    ) {
-      return;
-    }
-
-    const now = Date.now();
-    set({
-      activeTaskId: taskId,
-      activeFlowDate: flowDate,
-      status: "running",
-      timerMode: "pomodoro",
-      pomodoroTargetSeconds: targetSeconds,
-      segmentWallStart: new Date(now).toISOString(),
-      segmentStartedAt: now,
-      sessionSavedSeconds: 0,
-      priorSeconds: prior,
-      displaySeconds: targetSeconds,
-      pomodoroFinishedTaskId: null,
-      pomodoroFinishedFlowDate: null,
-      pomodoroFinishedTargetSeconds: null,
-    });
-
-    persistCurrentSession(snapshotSessionState(get()));
-    startTickInterval(() => get().tick());
-  },
-
-  dismissPomodoroFinished: () => {
-    set({
-      pomodoroFinishedTaskId: null,
-      pomodoroFinishedFlowDate: null,
-      pomodoroFinishedTargetSeconds: null,
-    });
-    persistCurrentSession(snapshotSessionState(get()));
-  },
-
-  pauseTimer: async (effectiveStopMs) => {
-    const state = get();
-    if (state.status !== "running") return;
-
-    const segmentSeconds =
-      effectiveStopMs != null && state.segmentStartedAt != null
-        ? Math.max(
-            Math.floor((effectiveStopMs - state.segmentStartedAt) / 1000),
-            0
-          )
-        : currentSegmentSeconds(state);
-    clearTickInterval();
-
-    await saveTimerSegment(state, segmentSeconds);
-    const nextSessionSaved = state.sessionSavedSeconds + segmentSeconds;
-    const nextDisplay =
-      state.timerMode === "pomodoro"
-        ? Math.max((state.pomodoroTargetSeconds ?? 0) - nextSessionSaved, 0)
-        : state.priorSeconds + nextSessionSaved;
-    set((prev) => ({
-      status: "paused",
-      sessionSavedSeconds: nextSessionSaved,
-      segmentWallStart: null,
-      segmentStartedAt: null,
-      displaySeconds: nextDisplay,
-      entryRevision: prev.entryRevision + 1,
-    }));
-    persistCurrentSession(snapshotSessionState(get()));
-  },
-
-  resumeTimer: () => {
-    const state = get();
-    if (state.status !== "paused") return;
-    if (
-      state.timerMode === "pomodoro" &&
-      state.pomodoroTargetSeconds != null &&
-      state.sessionSavedSeconds >= state.pomodoroTargetSeconds
-    ) {
-      return;
-    }
-
-    set({
-      status: "running",
-      segmentWallStart: new Date().toISOString(),
-      segmentStartedAt: Date.now(),
-    });
-
-    persistCurrentSession(snapshotSessionState(get()));
-    startTickInterval(() => get().tick());
-  },
-
-  stopAndSave: async () => {
-    const state = get();
-    if (state.status === "idle") return;
-
-    clearTickInterval();
-    if (state.status === "running") {
-      await saveTimerSegment(state);
-    }
-    set((prev) => ({
-      ...resetState(),
-      entryRevision:
-        state.status === "running" ? prev.entryRevision + 1 : prev.entryRevision,
-    }));
-    persistCurrentSession(snapshotSessionState(get()));
-  },
-
-  stopWithoutSaving: () => {
-    clearTickInterval();
-    set((prev) => ({ ...resetState(), entryRevision: prev.entryRevision }));
-    persistCurrentSession(snapshotSessionState(get()));
-  },
-
+  ...resetState(), etag: null, commandPending: false, entryRevision: 0,
+  pomodoroFinishedTaskId: null, pomodoroFinishedFlowDate: null, pomodoroFinishedTargetSeconds: null,
+  startTimer: async (taskId, flowDate) => { await command({ action: TimerAction.START, taskId, flowDate }); },
+  startPomodoro: async (taskId, flowDate, targetSeconds) => { await command({ action: TimerAction.START, taskId, flowDate, mode: TimerSession_Mode.POMODORO, targetSeconds }); },
+  pauseTimer: async (effectiveStopMs) => { await command({ action: TimerAction.PAUSE, ...(effectiveStopMs === undefined ? {} : { effectiveStopTime: timestampFromDate(new Date(effectiveStopMs)) }) }); },
+  resumeTimer: () => { void command({ action: TimerAction.RESUME }); },
+  stopAndSave: () => command({ action: TimerAction.STOP }),
+  stopWithoutSaving: () => { void command({ action: TimerAction.DISCARD }); },
+  dismissPomodoroFinished: async () => { await command({ action: TimerAction.DISMISS_POMODORO }); },
   hydrateSession: async () => {
-    const clearHydratedSession = () => {
-      clearTickInterval();
-      set((prev) => ({
-        ...resetState(),
-        entryRevision: prev.entryRevision,
-        pomodoroFinishedTaskId: null,
-        pomodoroFinishedFlowDate: null,
-        pomodoroFinishedTargetSeconds: null,
-      }));
-    };
-
-    let session: ServerSessionPayload | null = null;
-    try {
-      session = await loadPersistedTimerSession();
-    } catch {
-      return;
-    }
-    if (!session) {
-      clearHydratedSession();
-      return;
-    }
-
-    const {
-      taskId,
-      flowDate,
-      status,
-      timerMode,
-      pomodoroTargetS,
-      segmentWallStart,
-      sessionSavedS,
-      pomodoroFinishedTaskId,
-      pomodoroFinishedFlowDate,
-      pomodoroFinishedTargetS,
-      updatedAt,
-    } = session;
-
-    clearTickInterval();
-
-    if (status === "idle" && pomodoroFinishedTaskId) {
-      if (updatedAt) {
-        const age = Date.now() - Date.parse(updatedAt);
-        if (age > STALE_FINISHED_MARKER_MS) {
-          clearHydratedSession();
-          clearPersistedTimerSession();
-          return;
-        }
-      }
-      set((prev) => ({
-        ...resetState(),
-        entryRevision: prev.entryRevision,
-        pomodoroFinishedTaskId,
-        pomodoroFinishedFlowDate,
-        pomodoroFinishedTargetSeconds: pomodoroFinishedTargetS,
-      }));
-      return;
-    }
-
-    if (!taskId || !flowDate) {
-      clearHydratedSession();
-      return;
-    }
-
-    if (status === "running" && segmentWallStart) {
-      const age = Date.now() - Date.parse(segmentWallStart);
-      if (age > STALE_RUNNING_SEGMENT_MS) {
-        clearHydratedSession();
-        clearPersistedTimerSession();
-        return;
-      }
-    }
-
-    const prior = await fetchPriorSeconds(taskId);
-
-    if (status === "running" && segmentWallStart) {
-      const segmentStartedAt = Date.parse(segmentWallStart);
-      set({
-        activeTaskId: taskId,
-        activeFlowDate: flowDate,
-        status: "running",
-        timerMode,
-        pomodoroTargetSeconds: pomodoroTargetS,
-        segmentWallStart,
-        segmentStartedAt,
-        sessionSavedSeconds: sessionSavedS,
-        priorSeconds: prior,
-        displaySeconds:
-          timerMode === "pomodoro"
-            ? Math.max((pomodoroTargetS ?? 0) - sessionSavedS, 0)
-            : prior + sessionSavedS,
-        pomodoroFinishedTaskId: null,
-        pomodoroFinishedFlowDate: null,
-        pomodoroFinishedTargetSeconds: null,
-      });
-      get().tick();
-      startTickInterval(() => get().tick());
-      return;
-    }
-
-    if (status === "paused") {
-      set({
-        activeTaskId: taskId,
-        activeFlowDate: flowDate,
-        status: "paused",
-        timerMode,
-        pomodoroTargetSeconds: pomodoroTargetS,
-        segmentWallStart: null,
-        segmentStartedAt: null,
-        sessionSavedSeconds: sessionSavedS,
-        priorSeconds: prior,
-        displaySeconds:
-          timerMode === "pomodoro"
-            ? Math.max((pomodoroTargetS ?? 0) - sessionSavedS, 0)
-            : prior + sessionSavedS,
-        pomodoroFinishedTaskId: null,
-        pomodoroFinishedFlowDate: null,
-        pomodoroFinishedTargetSeconds: null,
-      });
+    if (get().commandPending) return;
+    const previousEtag = get().etag;
+    const session = await loadTimerSession();
+    const current = () => !get().commandPending && get().etag === previousEtag;
+    if (!current() || session === null) return;
+    await applySession(session, current);
+    if (get().etag !== session.etag || get().commandPending) return;
+    if (session.status === "running" && session.segmentWallStart && Date.now() - Date.parse(session.segmentWallStart) > STALE_RUNNING_SEGMENT_MS) {
+      await command({ action: TimerAction.DISCARD });
+    } else if (session.pomodoroFinishedTaskId && session.updatedAt && Date.now() - Date.parse(session.updatedAt) > STALE_FINISHED_MARKER_MS) {
+      await command({ action: TimerAction.DISMISS_POMODORO });
     }
   },
-
   tick: () => {
     const state = get();
     if (state.status !== "running") return;
-
     if (state.timerMode === "pomodoro") {
       const remaining = pomodoroRemainingSeconds(state);
-      if (remaining <= 0) {
+      if (remaining <= 0 && !state.commandPending) {
         clearTickInterval();
-        playCompletionChime();
-        const segmentSecondsToSave = Math.max(
-          (state.pomodoroTargetSeconds ?? 0) - state.sessionSavedSeconds,
-          0
-        );
-        const finishedTaskId = state.activeTaskId;
-        const finishedFlowDate = state.activeFlowDate;
-        const finishedTarget = state.pomodoroTargetSeconds;
-
-        void (async () => {
-          if (segmentSecondsToSave > 0) {
-            await saveTimerSegment(state, segmentSecondsToSave);
-          }
-
-          set((prev) => ({
-            ...resetState(),
-            entryRevision: prev.entryRevision + (segmentSecondsToSave > 0 ? 1 : 0),
-            pomodoroFinishedTaskId: finishedTaskId,
-            pomodoroFinishedFlowDate: finishedFlowDate,
-            pomodoroFinishedTargetSeconds: finishedTarget,
-          }));
-          persistCurrentSession(snapshotSessionState(get()));
-        })();
-        return;
+        void command({ action: TimerAction.FINISH_POMODORO });
       }
-
       set({ displaySeconds: remaining });
-      return;
-    }
-
-    set({ displaySeconds: totalSeconds(state) });
+    } else set({ displaySeconds: totalSeconds(state) });
   },
 }));

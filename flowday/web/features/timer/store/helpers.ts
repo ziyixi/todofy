@@ -39,6 +39,8 @@ export function pomodoroRemainingSeconds(state: TimerState): number {
 
 export function resetState(): Omit<
   TimerState,
+  | "etag"
+  | "commandPending"
   | "entryRevision"
   | "pomodoroFinishedTaskId"
   | "pomodoroFinishedFlowDate"

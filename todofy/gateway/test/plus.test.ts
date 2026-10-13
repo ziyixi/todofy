@@ -1,0 +1,130 @@
+import { describe, expect, it } from 'vitest';
+import { CommandTimerRequest_Action } from '@ziyixi/proto/flowday/ui/v1/flowday_ui_service_pb';
+import { fakes, hooks, owner, uiOk } from './helpers.ts';
+import type { Env } from '../src/env.ts';
+
+const TOKEN = `todofy_plus_${'a'.repeat(43)}`;
+const HEADERS = { authorization: `Bearer ${TOKEN}`, 'content-type': 'application/json' };
+const ID = '80a84747-6794-442a-8fb0-82c2910b54ab';
+const COMPLETE = { task_id: 'task-one', request_id: ID, flow_date: '2026-10-13' };
+
+function api(method: string, body: unknown) { return { method, headers: HEADERS, body: JSON.stringify(body) }; }
+
+describe('Todoist Plus transport boundaries', () => {
+  it('does not call the core or read a body without the separate extension credential', async () => {
+    const { env, core } = fakes();
+    expect((await hooks(env, '/api/plus/v1/plan:read')).status).toBe(401);
+    expect(core).toHaveLength(0);
+  });
+  it('passes only a SHA256 credential to the core and does not grant owner-only setup', async () => {
+    const { env, core } = fakes({}, call => call.method === 'plus_auth' ? true : uiOk({ plan: {} }));
+    const response = await hooks(env, '/api/plus/v1/plan:read', { headers: HEADERS });
+    expect(response.status).toBe(200);
+    expect(core[0]?.args[0]).toMatch(/^[0-9a-f]{64}$/);
+    expect(JSON.stringify(core)).not.toContain(TOKEN);
+    expect((await hooks(env, '/api/plus/v1/connections:issueExtensionConnection', api('POST', { display_name: 'Test', request_id: ID }))).status).toBe(401);
+    expect(core.filter(call => call.method === 'plus_ui')).toHaveLength(1);
+  });
+  it('keeps owner setup behind the existing CSRF check', async () => {
+    const { env, core } = fakes();
+    expect((await owner(env, '/api/plus/v1/plan:confirmPlanMapping', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ etag: 'mapping', request_id: ID }) })).status).toBe(403);
+    expect(core).toHaveLength(0);
+  });
+  it('accepts an omitted optional request ID with the same fresh-identity behavior as the owner API', async () => {
+    const { env, core } = fakes({}, call => call.method === 'plus_auth' ? true : uiOk({ task_id: 'task-one' }));
+    expect((await hooks(env, '/api/plus/v1/tasks:completeTask', api('POST', { task_id: 'task-one' }))).status).toBe(200);
+    const call = core.find(row => row.method === 'plus_ui');
+    expect((JSON.parse(String(call?.args[1])) as { request_id: string }).request_id).toMatch(/^[0-9a-f-]{36}$/);
+  });
+  it('returns the configured FlowDay link without coupling the extension to one domain', async () => {
+    const { env } = fakes({ FLOWDAY_PUBLIC_URL: 'https://focus.example.org' }, call => call.method === 'plus_auth' ? true : uiOk({ plan: {} }));
+    expect((await hooks(env, '/api/plus/v1/plan:read', { headers: HEADERS })).status).toBe(200);
+    const response = await hooks(env, '/api/plus/v1/plan:read', { headers: HEADERS });
+    expect((await response.json<{ plan: { flowday_url: string } }>()).plan.flowday_url).toBe('https://focus.example.org');
+  });
+  it('preserves actionable FlowDay conflicts through the narrow proxy', async () => {
+    const { env } = fakes({}, () => true);
+    const connected = { ...env, FLOWDAY_FOCUS: { fetch: () => Promise.resolve(Response.json({ error: {
+      code: 409, status: 'ABORTED', message: 'timer version changed',
+      details: [{ '@type': 'type.googleapis.com/google.rpc.ErrorInfo', reason: 'TIMER_CONFLICT', domain: 'flowday.ziyixi.science' }],
+    } }, { status: 409 })) } as unknown as Fetcher };
+    const response = await hooks(connected, '/api/plus/flowday/api/v1/timerSession:command', api('POST', {
+      name: 'timerSession', action: 'pause', etag: 'old', request_id: ID,
+    }));
+    expect(response.status).toBe(409);
+    expect(await response.text()).toContain('TIMER_CONFLICT');
+  });
+  it('rejects invalid completion day before issuing the Todoist command', async () => {
+    const { env, core } = fakes({}, () => true);
+    expect((await hooks(env, '/api/plus/v1/tasks:completeTask', api('POST', { ...COMPLETE, flow_date: '2026-02-30' }))).status).toBe(400);
+    expect(core.filter(call => call.method === 'plus_ui')).toHaveLength(0);
+  });
+  it('does not accept client-requested SETTLE or oversized bodies on the FlowDay proxy', async () => {
+    let calls = 0;
+    const { env } = fakes({}, () => true);
+    const connected = { ...env, FLOWDAY_FOCUS: { fetch: () => { calls++; return Promise.resolve(Response.json({})); } } as unknown as Fetcher };
+    const settle = await hooks(connected, '/api/plus/flowday/api/v1/timerSession:command', api('POST', { name: 'timerSession', action: 'settle', etag: '0', request_id: ID, task_id: 'task-one', flow_date: '2026-10-13' }));
+    expect(CommandTimerRequest_Action.SETTLE).toBeGreaterThan(0);
+    expect(settle.status).toBe(400);
+    expect((await hooks(connected, '/api/plus/flowday/api/v1/timerSession:command', api('POST', { padding: 'x'.repeat(40000) }))).status).toBe(400);
+    expect(calls).toBe(0);
+  });
+  it('reuses the frozen settlement request after a lost response and never creates another close identity', async () => {
+    let frozen: string | null = null;
+    const closeIds: string[] = [];
+    const settlements: string[] = [];
+    const { env } = fakes({}, call => {
+      if (call.method === 'plus_auth') return true;
+      if (call.method === 'plus_ui') { closeIds.push((JSON.parse(String(call.args[1])) as { request_id: string }).request_id); return uiOk({ task_id: 'task-one' }); }
+      if (call.method === 'plus_focus_claim') { frozen ??= call.args[1] as string | null; return frozen; }
+      throw Error('unexpected core operation');
+    });
+    const connected: Env = { ...env, FLOWDAY_FOCUS: { fetch: async (request: Request) => {
+      if (request.method === 'GET') return Response.json({ name: 'timerSession', state: 'empty', etag: '7' });
+      settlements.push(await request.text());
+      if (settlements.length === 1) throw Error('response lost');
+      return Response.json({ name: 'timerSession', state: 'empty', etag: '8' });
+    } } as unknown as Fetcher };
+    expect((await hooks(connected, '/api/plus/v1/tasks:completeTask', api('POST', COMPLETE))).status).toBe(503);
+    expect((await hooks(connected, '/api/plus/v1/tasks:completeTask', api('POST', COMPLETE))).status).toBe(200);
+    expect(closeIds).toEqual([ID, ID]);
+    expect(settlements).toHaveLength(2);
+    expect(settlements[1]).toBe(settlements[0]);
+  });
+  it('refreshes a stale settlement etag once without issuing another Todoist close', async () => {
+    let frozen: string | null = null;
+    const settlements: { request_id: string; etag: string }[] = [];
+    let closes = 0;
+    let reads = 0;
+    const { env } = fakes({}, call => {
+      if (call.method === 'plus_auth') return true;
+      if (call.method === 'plus_ui') { closes++; return uiOk({ task_id: 'task-one' }); }
+      if (call.method === 'plus_focus_claim') {
+        if (typeof call.args[1] === 'string' && (!frozen || call.args[2] === (JSON.parse(frozen) as { etag: string }).etag)) frozen = call.args[1];
+        return frozen;
+      }
+      throw Error('unexpected core operation');
+    });
+    const connected = { ...env, FLOWDAY_FOCUS: { fetch: async (request: Request) => {
+      if (request.method === 'GET') return Response.json({ name: 'timerSession', state: 'empty', etag: String(++reads) });
+      settlements.push(await request.json<{ request_id: string; etag: string }>());
+      if (settlements.length === 1) return Response.json({ error: { code: 409, status: 'ABORTED', message: 'timer version changed' } }, { status: 409 });
+      return Response.json({ name: 'timerSession', state: 'empty', etag: '3' });
+    } } as unknown as Fetcher };
+    expect((await hooks(connected, '/api/plus/v1/tasks:completeTask', api('POST', COMPLETE))).status).toBe(200);
+    expect(closes).toBe(1);
+    expect(settlements.map(item => item.etag)).toEqual(['1', '2']);
+    expect(settlements[0]?.request_id).not.toBe(settlements[1]?.request_id);
+  });
+  it('reports a temporarily held settlement claim as unavailable after the successful Todoist close', async () => {
+    const { env } = fakes({}, call => {
+      if (call.method === 'plus_auth') return true;
+      if (call.method === 'plus_ui') return uiOk({ task_id: 'task-one' });
+      if (call.method === 'plus_focus_claim') throw Error('synthetic backup hold');
+      throw Error('unexpected core operation');
+    });
+    const response = await hooks(env, '/api/plus/v1/tasks:completeTask', api('POST', COMPLETE));
+    expect(response.status).toBe(503);
+    expect(await response.text()).toContain('UNAVAILABLE');
+  });
+});

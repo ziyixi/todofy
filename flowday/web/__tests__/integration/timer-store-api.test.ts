@@ -1,3 +1,4 @@
+import { clearTickInterval } from "@/features/timer/store/helpers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createTimeEntry, fakeFetch, getEntriesByTask } from "../helpers/fake-worker";
 import { useTimerStore } from "@/features/timer/store";
@@ -6,8 +7,10 @@ import { _getChimeCount, _resetChime } from "@/lib/utils/chime";
 import { buildMiscTaskId } from "@/lib/utils/misc-task";
 
 function resetTimerStore() {
-  useTimerStore.getState().stopWithoutSaving();
+  clearTickInterval();
   useTimerStore.setState({
+    etag: null,
+    commandPending: false,
     activeTaskId: null,
     activeFlowDate: null,
     status: "idle",

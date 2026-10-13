@@ -1,3 +1,4 @@
+import { CommandTimerRequest_Action, type CommandTimerRequest } from '@ziyixi/proto/flowday/ui/v1/flowday_ui_service_pb';
 /**
  * FlowDay's owner API as the UI uses it: FlowDayUiService (proto/flowday/ui/v1) through the shared typed client
  * (proto/ts/http-client.ts), built from the same descriptors the Worker's transcoder routes with, over the transport of
@@ -356,12 +357,9 @@ export function deleteTimeEntry(id: string): Promise<boolean> {
 
 // ---- the timer session --------------------------------------------------------------------------------------------
 
-const STATES = { idle: TimerSession_State.IDLE, running: TimerSession_State.RUNNING, paused: TimerSession_State.PAUSED } as const;
-
-/** The shared timer as the timer store reads it; null for an empty session (IDLE, no task, no finished pomodoro). */
-export function sessionFromMessage(session: TimerSession): ServerSessionPayload | null {
+/** The shared timer, including the initial idle session's version. */
+export function sessionFromMessage(session: TimerSession): ServerSessionPayload {
   const status = session.state === TimerSession_State.RUNNING ? "running" : session.state === TimerSession_State.PAUSED ? "paused" : "idle";
-  if (status === "idle" && session.taskId === "" && session.finishedPomodoroTaskId === "") return null;
   return {
     taskId: orNull(session.taskId),
     flowDate: orNull(session.flowDate),
@@ -374,40 +372,22 @@ export function sessionFromMessage(session: TimerSession): ServerSessionPayload 
     pomodoroFinishedFlowDate: orNull(session.finishedPomodoroFlowDate),
     pomodoroFinishedTargetS: session.finishedPomodoroTargetSeconds ?? null,
     updatedAt: iso(session.updateTime),
+    etag: session.etag,
   };
 }
 
-/** The shared timer session (null when empty or when it could not be read). */
-export async function loadTimerSession(): Promise<ServerSessionPayload | null> {
-  const session = await readOrNull(() => flowday.getTimerSession({ name: "timerSession" }));
+/** The shared timer session; null only when it could not be read. */
+export async function loadTimerSession(report = false): Promise<ServerSessionPayload | null> {
+  const session = report ? await read(() => flowday.getTimerSession({ name: "timerSession" }), { report: true }) : await readOrNull(() => flowday.getTimerSession({ name: "timerSession" }));
   return session === null ? null : sessionFromMessage(session);
 }
 
-/** Stores the shared timer session (every field): true when it was saved (the banner shows a failure). */
-export function saveTimerSession(session: Omit<ServerSessionPayload, "updatedAt">): Promise<boolean> {
-  return writeOk(() =>
-    flowday.updateTimerSession({
-      timerSession: {
-        name: "timerSession",
-        taskId: session.taskId ?? "",
-        flowDate: session.flowDate ?? "",
-        state: STATES[session.status],
-        mode: session.timerMode === "pomodoro" ? TimerSession_Mode.POMODORO : TimerSession_Mode.COUNT_UP,
-        ...(session.pomodoroTargetS === null ? {} : { pomodoroTargetSeconds: Math.trunc(session.pomodoroTargetS) }),
-        ...(session.segmentWallStart === null ? {} : { segmentStartTime: timestampFromDate(new Date(session.segmentWallStart)) }),
-        savedSeconds: Math.max(Math.trunc(session.sessionSavedS), 0),
-        finishedPomodoroTaskId: session.pomodoroFinishedTaskId ?? "",
-        finishedPomodoroFlowDate: session.pomodoroFinishedFlowDate ?? "",
-        ...(session.pomodoroFinishedTargetS === null ? {} : { finishedPomodoroTargetSeconds: Math.trunc(session.pomodoroFinishedTargetS) }),
-      },
-    })
-  );
+/** The server owns transitions and recorded segments; an old version is rejected visibly. */
+export async function commandTimerSession(input: Omit<CommandTimerRequest, "$typeName" | "name">): Promise<ServerSessionPayload> {
+  const session = await write(() => flowday.commandTimer({ ...input, name: "timerSession" }));
+  return sessionFromMessage(session);
 }
-
-/** Empties the shared timer session: true when it was saved (the banner shows a failure). */
-export function clearTimerSession(): Promise<boolean> {
-  return writeOk(() => flowday.clearTimerSession({ name: "timerSession" }));
-}
+export { CommandTimerRequest_Action as TimerAction };
 
 // ---- analytics ----------------------------------------------------------------------------------------------------
 

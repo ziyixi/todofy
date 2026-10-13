@@ -93,7 +93,7 @@ async function csrf(): Promise<string> {
  * The transport of every call. A mutation carries the CSRF token; a 403 CSRF_FAILED (an expired token, a lost
  * cookie) drops the token and sends once more with a fresh one (the same body, so the same request_id).
  */
-async function send(call: HttpCall): Promise<Response> {
+export async function send(call: HttpCall): Promise<Response> {
   for (let attempt = 0; ; attempt += 1) {
     const headers: Record<string, string> = { Accept: 'application/json' }
     if (call.body !== undefined) headers['Content-Type'] = 'application/json'

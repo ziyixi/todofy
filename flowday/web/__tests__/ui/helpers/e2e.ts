@@ -659,6 +659,10 @@ export async function waitForFlowdayE2EBridge(page: Page) {
 
 export async function setRunningTimerElapsed(page: Page, seconds: number) {
   await waitForFlowdayE2EBridge(page);
+  // Resume is now a server command; wait for its accepted state before changing test time.
+  await page.waitForFunction(() => window.__FLOWDAY_E2E__?.getTimerState().status === "running");
+  const response = await page.request.post("/api/test/timer-elapsed", { data: { seconds } });
+  expect(response.ok()).toBe(true);
   await page.evaluate((elapsedSeconds) => {
     const bridge = window.__FLOWDAY_E2E__;
     if (!bridge) throw new Error("FlowDay E2E bridge is not installed");
