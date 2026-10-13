@@ -211,10 +211,40 @@ and checks were unchanged. Final verified Deployment `7027350758` records Worker
 also succeeds; unrelated app/image/VPS deploy jobs are skipped. Both public ZIPs match all twelve tested CI files.
 Orion ZIP SHA-256: `c3fdfb8382df3814a2247ace8fa97c82760342b52bf3e8d43254afeea9dce67f`.
 [Published Orion ZIP](https://github.com/ziyixi/todofy/releases/download/recall-extension-v2026.1013.45/recall-orion-v2026.1013.45.zip).
-Phone acceptance remains open. A pending injection completion is not itself failure if actual page replies and
-storage succeed. Require matching uploaded test-document metadata; do not use heartbeat, zero outbox or the
-absence of a reported error as proof. The test manager is empty, verified consumer PID 29534 is stopped and
-port 18793 is closed. Owner Chrome remains untouched.
+The first real phone text receipt is recorded below. Screenshot and unattended mobile upload acceptance remain
+open. A pending injection completion is not itself failure if actual page replies and storage succeed. Do not use
+heartbeat, zero outbox or the absence of a reported error as proof. The test manager is empty, verified consumer
+PID 29534 is stopped and port 18793 is closed. Owner Chrome remains untouched.
+
+### Real iOS text and visit receipt
+
+On October 12 (America/Los_Angeles), the owner's actual `2026.1013.45` report records eight page events and one
+minute alarm. Foreground selection is visible; page and capture replies return objects; current and stored page
+visibility are visible and the sender is this extension. Injection completion remains pending, while
+`capture_store` returns `saved`. This proves progress past the previous completion dependency, without treating the
+pending callback as a new injection failure.
+
+The report's device header initially shows two queued items. Sending the diagnostic uses an empty business batch
+and does not drain the queue. A search restricted to the fixed public example.org test and the relevant dates
+initially finds no page. The owner then clicks the existing Immediate Upload once, without another installation
+or token change. The same restricted search now finds one public test page. Its detail visibly shows:
+
+- One iPhone/Orion visit at 18:14–18:15, with 40 seconds of focus.
+- One iPhone/Orion snapshot at 18:15; the rendered plain-text reader contains 905 characters.
+- No screenshot element for that snapshot.
+
+The latest `2026.1013.45` device card subsequently reports zero queued items. Combined with the actual stored page,
+visit and rendered text, this establishes phone text/visit ingestion and display after manual upload. The label
+alone is not a unique device identity: direct navigation to the bounded ListDocuments metadata endpoint was blocked
+by the browser client, and no alternate credential or network path was attempted. The exact device-UUID/document
+join and text byte count were not independently read. Private browsing pages, bodies, images and credentials were
+not read; device and diagnostic identifiers are omitted here.
+
+This run does not establish screenshot capture or automatic minute uploads. A foreground recheck can preserve
+valid text while skipping an image, and the diagnostic keeps one observation per stage across multiple attempts;
+its missing screenshot stage does not identify the precise cause or prove that Orion iOS lacks the API. Keep those
+acceptance items open rather than counting native Mac/WebKit results as phone evidence. No application change,
+permission change, new resource or owner Chrome operation was made during this verification.
 
 ### Initial one-shot diagnostic release
 

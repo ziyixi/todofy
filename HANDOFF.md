@@ -23,10 +23,15 @@ manual reload. This is a normal-native regression; missing-completion cases use 
 succeeded but immediate verification still saw the old SHA; only the failed Recall job was rerun, without changing
 checks. Deployment `7027350758` verifies Worker `88849e08-3452-4218-9285-60c53ea95a22`; unrelated deploys are skipped.
 Downloaded release ZIPs each match all twelve corresponding CI files. The native manager is empty, the verified
-test consumer is stopped and its port is closed. Next phone receipt remains required: disable the old instance, load the new ZIP from file,
-Start, stay on the fixed public page about a minute, Send. Injection completion may remain pending while an actual
-probe/capture reply succeeds; require capture/store and device-matched uploaded document metadata before declaring
-phone success. The owner requested connection/token UI cleanup after phone capture is confirmed; it remains separate.
+test consumer is stopped and its port is closed. The real iOS 45 receipt now reaches visible focus, page/capture
+replies and capture_store=saved despite pending injection completion. Its two queued items were not sent by the
+content-free diagnostic. After the owner's single Immediate Upload click, the limited public-test search finds
+one 40-second iPhone/Orion visit and one snapshot; the nonempty rendered reader contains 905 characters and no
+screenshot element. The latest 45 device queue subsequently reports zero. This establishes real phone text and
+visit ingestion/display after manual flush, not screenshot capture or unattended minute uploads. Direct bounded
+metadata navigation was client-blocked, so no exact device-UUID/document join or byte count is claimed. Do not ask
+for another reinstall or infer image support/failure from this run. See the dated phone receipt in
+[verification](docs/recall-diagnostic-verification.md). Connection/token UI cleanup remains separate work.
 
 Recall's mobile deadlock correction is released at `1c1e0b5` (`2026.1012.1736`). Known event tab IDs and the current
 span precede enumeration, with fresh active/visible/privacy checks; unanswered mobile callbacks release after five
