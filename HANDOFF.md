@@ -19,8 +19,8 @@ and secret inputs are unchanged. [Acceptance record](docs/todoist-plus-verificat
 receipts and distinguishes synthetic, packaged-browser and live evidence.
 
 The live owner `/plus` page recognized all existing labels. Its mapping and Monday rollover were
-confirmed on October 13; the page shows enabled in `US/Pacific`. No real Todoist task edits or
-extension credential issuance has occurred at this checkpoint. The owner-authorized Chrome install
+confirmed on October 13; the page shows enabled in `US/Pacific`. The agent has made no real Todoist task edits or
+extension credential issuance at this checkpoint. The owner-authorized Chrome install
 is waiting on one manual load/connect step: browser tooling blocks Chrome's internal extensions
 manager and forbids alternate control methods. The dedicated installation folder matches all seven
 files of the published, CI-tested ZIP, version `2026.1013.1271.20788`. Do not replace Recall's folder.
@@ -30,9 +30,13 @@ owner replies connected. Preserve any real running timer. The first natural week
 a future observation, independent of synthetic scheduler tests. The old FlowDay timer replace/clear
 methods return `RELOAD_REQUIRED` and stay until at least 2026-11-13.
 
-The acceptance branch `codex/todoist-plus-acceptance` also applies existing button/field styles to the
-owner connection page, where real Chrome review found unstyled controls. This is presentational;
-its UI checks, branch gate and publication must be recorded separately from the released extension.
+The owner-page control styles are released at `d657985df185821a9154829db7c9bd214058ef1c` after
+[branch CI 38471249025](https://github.com/ziyixi/todofy/actions/runs/38471249025) and
+[main release 38472126635](https://github.com/ziyixi/todofy/actions/runs/38472126635) passed.
+Only Todofy was published. All 93 UI cases, types and build pass; real Chrome confirms the existing
+40-pixel green button and styled device input. The original one-time-token tab was preserved.
+This presentation change leaves the published extension and API contract unchanged. Remaining
+work is the owner load/connect step and actual installed-extension acceptance, not another release.
 
 Recall cleanup is released at `bc0adffdc1d8ee018b0663737c77e8de701de0aa`, extension `2026.1013.654`.
 [Full branch CI](https://github.com/ziyixi/todofy/actions/runs/38359057094) and the

@@ -94,6 +94,20 @@ writes, FlowDay cross-view state and Chrome PWA verification. Record each after 
 natural weekly rollover is a separate future observation; synthetic rollover checks do not establish
 that production event.
 
-Real Chrome review also found that the owner connection page's new buttons and device input omitted
-the application's existing control classes. The acceptance branch applies those styles without changing
-connection, mapping or timer behavior; its publication is separate from the extension release above.
+## Owner-page presentation follow-up
+
+Real Chrome review found that the owner connection page's buttons and device input omitted the
+application's existing control classes. The presentation-only correction at
+`d657985df185821a9154829db7c9bd214058ef1c` passed all 93 UI cases, types and production build
+(175.7/208 KiB JavaScript gzip),
+[branch CI 38471249025](https://github.com/ziyixi/todofy/actions/runs/38471249025) and the
+[same-SHA main release 38472126635](https://github.com/ziyixi/todofy/actions/runs/38472126635).
+
+Only Todofy was published. Deployment `7050788716` verified core
+`21c820d0-08ed-4892-9585-bedc71da115c` and gateway `1067eacb-92ca-4f71-b08f-35dcc5d49cd2`
+at `2026-10-13T21:40:50Z`. Home, FlowDay, the extension ZIP and all unrelated services were skipped.
+A separate real Chrome tab confirmed the enabled mapping and existing green 40-pixel primary button,
+with the styled device input. The original token page was preserved, and no token was generated.
+The published extension and API contract are unchanged. This check covers the owner connection page;
+it does not replace the pending installed-extension Todoist/PWA checks above.
+
