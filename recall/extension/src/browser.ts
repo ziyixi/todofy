@@ -125,13 +125,27 @@ export async function executeFile(ctx: Context, tabId: number, file: 'probe.js' 
     const runId = await observe(ctx, { stage: 'probe_injection', state: 'pending' }, tabId);
     // Orion's file-injection completion did not yield a usable probe. Use the standard content-message reply.
     await nativeReply<undefined>((resolve, reject) => {
-      void execute.call(ctx.chrome.tabs, tabId, { file: 'probe.js', runAt: 'document_start' }, (value) => {
-        const failed = ctx.chrome.runtime.lastError !== undefined;
-        void observe(ctx, { stage: 'probe_injection', state: failed ? 'failed' : 'returned', result: failed ? 'api_error' : resultType(value) }, tabId, runId);
-        receive(ctx, resolve, reject, undefined);
+      let completed = false;
+      const complete = (value: unknown, error?: Error) => {
+        if (completed) return;
+        completed = true;
+        void observe(ctx, { stage: 'probe_injection', state: error === undefined ? 'returned' : 'failed', result: error === undefined ? resultType(value) : 'api_error' }, tabId, runId);
+        if (error === undefined) resolve(undefined);
+        else reject(error);
+      };
+      const execution = execute.call(ctx.chrome.tabs, tabId, { file: 'probe.js', runAt: 'document_start' }, (value) => {
+        const error = ctx.chrome.runtime.lastError;
+        complete(value, error === undefined ? undefined : new Error(error.message ?? 'browser_api_failed'));
       });
+      if (typeof execution?.then === 'function') {
+        void execution.then((value) => { complete(value); }, (error: unknown) => {
+          complete(undefined, error instanceof Error ? error : new Error('browser_api_failed'));
+        });
+      }
     }).catch(async (error: unknown) => {
-      if (!timedOut(error)) await observe(ctx, { stage: 'probe_injection', state: 'failed', result: 'api_error' }, tabId, runId);
+      // An unanswered completion does not establish whether the listener was installed. Ask it once below.
+      if (timedOut(error)) return;
+      await observe(ctx, { stage: 'probe_injection', state: 'failed', result: 'api_error' }, tabId, runId);
       throw error;
     });
     void probeContext(ctx, tabId).catch(() => undefined);

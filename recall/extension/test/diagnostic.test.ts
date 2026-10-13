@@ -53,22 +53,82 @@ describe('one-shot Orion capture diagnostic', () => {
     expect(JSON.stringify(report)).not.toContain('private.example');
   });
 
-  it.each(['query', 'injection'] as const)('bounds an unanswered native %s without claiming its callback failed', async (kind) => {
+  it('bounds an unanswered native query without claiming its callback failed', async () => {
+    const h = await setup();
+    await startDiagnostic(h.ctx);
+    Object.assign(h.browser.api.tabs, { query: () => undefined });
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      const call = queryTabs(h.ctx, { active: true });
+      const rejected = expect(call).rejects.toThrow('browser_reply_timeout');
+      await vi.advanceTimersByTimeAsync(BROWSER_REPLY_TIMEOUT_MS + 1);
+      await rejected;
+      expect((await diagnosticStatus(h.ctx)).diagnostic.steps).toContainEqual({ stage: 'active_tabs', state: 'pending' });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it.each([undefined, null])('asks the existing listener after unanswered injection with return %s', async (result) => {
     const h = await setup();
     await startDiagnostic(h.ctx);
     const tab = [...h.browser.tabs.values()][0];
     if (tab === undefined) throw new Error('test tab missing');
-    Object.assign(h.browser.api.tabs, kind === 'query' ? { query: () => undefined } : { executeScript: () => undefined });
+    const probe = { documentId: 'synthetic-document', visible: true, url: DIAGNOSTIC_URL };
+    Object.assign(h.browser.api.tabs, {
+      executeScript: () => result,
+      sendMessage: (_id: number, _request: unknown, callback: (value: unknown) => void) => { callback(probe); },
+    });
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     try {
-      const call = kind === 'query' ? queryTabs(h.ctx, { active: true }) : executeFile(h.ctx, tab.id, 'probe.js');
-      const rejected = expect(call).rejects.toThrow('browser_reply_timeout');
+      const call = executeFile(h.ctx, tab.id, 'probe.js');
       await vi.advanceTimersByTimeAsync(BROWSER_REPLY_TIMEOUT_MS + 1);
-      await rejected;
-      expect((await diagnosticStatus(h.ctx)).diagnostic.steps).toContainEqual({ stage: kind === 'query' ? 'active_tabs' : 'probe_injection', state: 'pending' });
+      expect(await call).toEqual(probe);
+      const steps = (await diagnosticStatus(h.ctx)).diagnostic.steps;
+      expect(steps).toContainEqual({ stage: 'probe_injection', state: 'pending' });
+      expect(steps).toContainEqual({ stage: 'probe_reply', state: 'returned', result: 'object' });
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('accepts real Promise completion, reads the content reply and ignores a later duplicate callback failure', async () => {
+    const h = await setup();
+    await startDiagnostic(h.ctx);
+    const tab = [...h.browser.tabs.values()][0];
+    if (tab === undefined) throw new Error('test tab missing');
+    let lateCallback!: (value: unknown[]) => void;
+    const probe = { documentId: 'synthetic-document', visible: true, url: DIAGNOSTIC_URL };
+    Object.assign(h.browser.api.tabs, {
+      executeScript: (_id: number, _details: unknown, callback: (value: unknown[]) => void) => {
+        lateCallback = callback;
+        return Promise.resolve(['not a page probe']);
+      },
+      sendMessage: (_id: number, _request: unknown, callback: (value: unknown) => void) => { callback(probe); },
+    });
+    expect(await executeFile(h.ctx, tab.id, 'probe.js')).toEqual(probe);
+    Object.assign(h.browser.api.runtime, { lastError: { message: 'synthetic_late_failure' } });
+    lateCallback([]);
+    delete (h.browser.api.runtime as unknown as Record<string, unknown>)['lastError'];
+    expect((await diagnosticStatus(h.ctx)).diagnostic.steps).toContainEqual({ stage: 'probe_injection', state: 'returned', result: 'array' });
+  });
+
+  it.each(['callback', 'promise'] as const)('does not ask the page after a genuine injection %s error', async (channel) => {
+    const h = await setup();
+    await startDiagnostic(h.ctx);
+    const tab = [...h.browser.tabs.values()][0];
+    if (tab === undefined) throw new Error('test tab missing');
+    const send = vi.fn();
+    Object.assign(h.browser.api.tabs, { sendMessage: send, executeScript: (_id: number, _details: unknown, callback: (value?: unknown[]) => void) => {
+      if (channel === 'promise') return Promise.reject(new Error('synthetic_injection_denied'));
+      Object.assign(h.browser.api.runtime, { lastError: { message: 'synthetic_injection_denied' } });
+      callback();
+      delete (h.browser.api.runtime as unknown as Record<string, unknown>)['lastError'];
+      return undefined;
+    } });
+    await expect(executeFile(h.ctx, tab.id, 'probe.js')).rejects.toThrow('synthetic_injection_denied');
+    expect(send).not.toHaveBeenCalled();
+    expect((await diagnosticStatus(h.ctx)).diagnostic.steps).toContainEqual({ stage: 'probe_injection', state: 'failed', result: 'api_error' });
   });
 
   it('starts and sends even when the native active-tab callback never answers, without changing normal uploads', async () => {

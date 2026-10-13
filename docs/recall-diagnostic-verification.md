@@ -170,6 +170,26 @@ The native manager verifies both tested versions and an empty list after cleanup
 port 18793 closed. Owner Chrome was neither operated nor updated. iOS capture success still requires the phone's
 next receipt; no permission menu path is prescribed.
 
+### Phone injection completion follow-up
+
+The owner sent the 1736 phone report after file installation. The Settings diagnostic card and device metadata
+confirm version 2026.1012.1736: eight tab events, two alarms, returned query/lookup, pending injection and hidden
+foreground selection. No probe reply, capture, screenshot or store stage was reached. No browsing body or private
+website list was read. Connection and an empty queue do not establish successful capture.
+
+A targeted test using actual released 1736 executes the real probe into WebKit and installs its listener, while
+withholding only the injection completion callback. The product never sends its content request and captures nothing,
+although an independent listener request returns the visible document. Returning a resolved native Promise without
+calling the callback has the same failure. The earlier fixture discarded the callback value but always invoked it.
+This establishes an application dependency/test gap; it does not prove that the phone installed its listener.
+
+The scoped correction consumes a real Promise completion as well as a callback, once. A completion timeout alone
+now proceeds to the existing bounded content request, whose actual response remains required. Genuine API errors
+still stop; document/build/URL/visibility checks remain. No new message channel, readiness state, polling, permissions
+or storage is added. Tests also require no content when the probe never installed. Native/exact-artifact release
+checks and the next phone receipt remain to be recorded. Phone file-loading instructions now match the owner's
+actual workflow; in-place update or identity preservation is not assumed.
+
 ### Initial one-shot diagnostic release
 
 The first full branch run reached a UI size failure: 62.2 KiB against the previous 62 KiB budget.

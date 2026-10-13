@@ -92,11 +92,12 @@ window.chrome = {
         delete window.chrome.runtime.lastError;
         return undefined;
       }
-      shared.executeFile(details.file).then(
+      if (shared.skipInjection) return undefined;
+      const completion = shared.executeFile(details.file).then(
         () => {
           // Deliberately discard completion: Orion's observed response was unusable, its exact shape is unknown.
           shared.discardedCompletions = (shared.discardedCompletions ?? 0) + 1;
-          callback(undefined);
+          if (!shared.withholdInjectionCallback) callback(undefined);
         },
         (error) => {
           window.chrome.runtime.lastError = { message: error.message };
@@ -104,7 +105,7 @@ window.chrome = {
           delete window.chrome.runtime.lastError;
         },
       );
-      return undefined;
+      return shared.injectionReturnsPromise ? completion : undefined;
     },
     sendMessage(id, request, callback) {
       (shared.pageRequests ??= []).push(request.type);

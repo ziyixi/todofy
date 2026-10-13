@@ -9,6 +9,16 @@ Its old waiting lists and release identities are historical, not instructions to
 
 ## Current work
 
+`codex/recall-orion-injection-reply` continues the unresolved iOS capture fix. The actual 1736 phone receipt has
+8 tab events and 2 alarms: query and lookup return, injection completion remains pending and foreground selection
+returns hidden. No capture/store/screenshot stage is reached. Device metadata confirms 1736; connection is not capture.
+The existing bridge executed the real probe but always answered completion; new real-DOM tests reproduce a usable
+installed listener that 1736 never asks because completion is withheld, including a resolved-Promise-only reply.
+The scoped correction accepts an actual native Promise as well as callback; after only an unanswered completion,
+it tries the existing bounded content reply once. Genuine API failures still stop. No new permissions, channel,
+retry, proto or storage. Chrome remains untouched. Type/lint/build and 152 tests pass; local WebKit exercises the
+real listener/text/image pipeline under missing callbacks. Exact-artifact/native verification and release are pending.
+
 Recall's mobile deadlock correction is released at `1c1e0b5` (`2026.1012.1736`). Known event tab IDs and the current
 span precede enumeration, with fresh active/visible/privacy checks; unanswered mobile callbacks release after five
 seconds. The diagnostic-created ID enters the same capture path. No new permissions, proto, resources or retries.
@@ -21,7 +31,7 @@ Three native minute alarms leave document/image counts at one and report capture
 options verifies 1736 and sends the report. Both downloaded release ZIPs match all twelve corresponding CI files.
 Deployment `7021502888` verifies Worker `90d14ea6-052a-42eb-8045-defeb6bd05da`; every other app/VPS deploy is skipped.
 Test extensions are removed, the exact consumer stopped and port closed. Owner Chrome remains untouched.
-Phone iOS acceptance remains open: update the existing Orion ZIP, Start, keep the fixed public page foreground about
+Phone iOS acceptance remains open: disable the old instance, load the new ZIP from file, Start, keep the public page foreground about
 one minute, then Send. Do not infer phone success from Mac, heartbeat or an empty outbox. See
 [verification](docs/recall-diagnostic-verification.md). The permission-button and startup-tracker experiments stay unmerged.
 After phone capture is confirmed, the owner's requested connection-list cleanup and token-name UI review remain separate work.

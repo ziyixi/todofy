@@ -520,6 +520,60 @@ export async function checkOrionOptions({ webkit, expect, folder }) {
       results.push({ case: 'null alarm and omitted sender ID are observable in sent diagnostic', passed: true, alarmEvents: 1, senderIdentity: 'missing' });
       await h.context.close();
     }
+    for (const reply of ['void', 'promise', 'not_injected']) {
+      const h = await start();
+      await fillAndSave(h);
+      await h.page.waitForFunction(() => window.__test.local.upload?.lastUploadAt > 0);
+      await h.article.bringToFront();
+      await h.page.evaluate((reply) => {
+        window.__test.withholdInjectionCallback = true;
+        window.__test.injectionReturnsPromise = reply === 'promise';
+        window.__test.skipInjection = reply === 'not_injected';
+        window.__test.emit('activated', { tabId: 1, windowId: 1 });
+      }, reply);
+      await h.page.waitForFunction(() => window.__test.calls.execute > 0);
+      if (reply === 'not_injected') {
+        await h.page.clock.fastForward(5100);
+        await expect.poll(() => getStatus(h)).toMatchObject({ focused: false, queued: 0 });
+        await expect.poll(() => getStatus(h)).toMatchObject({ lastError: { code: 'page_probe_failed' } });
+        expect(await h.article.evaluate(() => window.__test.listeners.message?.length ?? 0)).toBe(0);
+        await h.page.clock.fastForward(61000);
+        expect(h.batches.flatMap((batch) => batch.items)).toEqual([]);
+        expect((await getStatus(h)).queued).toBe(0);
+      } else {
+        if (reply === 'promise') {
+          // A resolved native Promise must work before the callback timeout is advanced.
+          await expect.poll(() => getStatus(h)).toMatchObject({ focused: true });
+        } else {
+          await expect.poll(async () => {
+            await h.page.clock.fastForward(5100);
+            return (await getStatus(h)).focused;
+          }, { timeout: 15000 }).toBe(true);
+        }
+        await h.page.clock.fastForward(11000);
+        await expect.poll(async () => {
+          await h.page.clock.fastForward(5100);
+          return h.page.evaluate(() => window.__test.local.capture_status?.text);
+        }, { timeout: 15000 }).toBe('saved');
+        // The real storage read observes the actual captured document before the next upload tick.
+        await expect.poll(() => getStatus(h)).toMatchObject({ queued: 1 });
+        await h.page.clock.fastForward(60000);
+        await expect.poll(async () => {
+          await h.page.clock.fastForward(5100);
+          return h.page.evaluate(() => window.__test.local.capture_status?.text);
+        }, { timeout: 15000 }).toBe('unchanged');
+        await expect.poll(() => h.batches.flatMap((batch) => batch.items).filter((item) => item.kind === 'document').length).toBe(1);
+        const document = h.batches.flatMap((batch) => batch.items).find((item) => item.kind === 'document').document;
+        expect(document.text).toContain('Actual visible DOM text from the published capture script.');
+        expect(document.screenshot_width).toBeGreaterThan(0);
+        expect(document.screenshot_jpeg_base64 || document.screenshot_webp_base64).toBeTruthy();
+        expect(await h.article.evaluate(() => window.__test.listeners.message.length)).toBe(1);
+        expect(h.batches.flatMap((batch) => batch.items).filter((item) => item.kind === 'document')).toHaveLength(1);
+      }
+      expect(h.errors).toEqual([]);
+      results.push({ case: reply === 'not_injected' ? 'no injection or completion cannot save content' : 'actual DOM capture with ' + reply + ' return and no injection callback', passed: true, documents: reply === 'not_injected' ? 0 : 1, duplicateDocuments: 0 });
+      await h.context.close();
+    }
     await captureCase(false);
     await captureCase(true);
     return {
