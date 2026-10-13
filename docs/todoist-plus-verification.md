@@ -53,29 +53,47 @@ legacy controls. No additional endpoint or local cache was introduced for this s
 
 ## Release evidence, October 13
 
-The final implementation SHA `2f3b9b92a86bdeccc39a8304fe7b968c7eb3e4a0` passed
+The initial implementation SHA `2f3b9b92a86bdeccc39a8304fe7b968c7eb3e4a0` passed
 [full branch CI 38464767419](https://github.com/ziyixi/todofy/actions/runs/38464767419) and was pushed
-unchanged to main. The tested extension artifact is `todoist-plus-2f3b9b92a86bdeccc39a8304fe7b968c7eb3e4a0`;
-manifest version `2026.1013.1240.12091`, source identity `2f3b9b9`. Its seven files were copied to a
-separate installation folder and checked byte-for-byte against that artifact.
+unchanged to main. [Main run 38466487763](https://github.com/ziyixi/todofy/actions/runs/38466487763)
+deployed FlowDay but failed before Todofy upload because an old release composite directly referenced
+unsupported `vars` expressions. Home and the ZIP publication were skipped.
 
-[Main release 38466487763](https://github.com/ziyixi/todofy/actions/runs/38466487763) deployed FlowDay
-successfully (Deployment `7050040218`, Worker `b40c201b-919d-4e97-abd4-cb589b8877e7`,
-provider identity/configuration verified at `2026-10-13T21:04:09Z`), then failed before Todofy upload: GitHub rejected the old composite action's direct
-`vars` expressions. The workflow caller already passes these settings as job environment variables.
-Home and the extension release were skipped. The correction removes the duplicate expressions;
-its own branch CI and main release must be recorded before claiming production completion.
+The correction removes those duplicate expressions and inherits the caller's existing resolved job
+environment. All 453 repository guards pass with one existing local skip. The corrected SHA
+`51342322e473c4073bfb395a61c867995a9ac902` passed
+[full branch CI 38468696858](https://github.com/ziyixi/todofy/actions/runs/38468696858) and the
+[same-SHA main release 38469896460](https://github.com/ziyixi/todofy/actions/runs/38469896460).
+
+| Application | Verified Deployment | Worker identity | Verified at (UTC) |
+| --- | --- | --- | --- |
+| FlowDay | `7050422665` | `675b3116-ac82-4320-8621-ef33fa57ad8c` | 2026-10-13 21:23:06 |
+| Todofy | `7050459573` | core `01680253-f596-44cf-b587-916b77ef856d`; gateway `a57f62e4-7159-4361-9428-370a94458d81` | 2026-10-13 21:24:54 |
+| Home | `7050487447` | `957e44a3-a32d-49a3-9087-2adbd4484df7` | 2026-10-13 21:26:09 |
+
+The [published extension ZIP](https://github.com/ziyixi/todofy/releases/download/todoist-plus-v2026.1013.1271.20788/todoist-plus-v2026.1013.1271.20788.zip)
+is version `2026.1013.1271.20788`, source identity `5134232`, 182,611 bytes. Its SHA-256 is
+`836cc8cd5484bb590708421246f82367b55a30b96f4c856f2c51d7c16ca91bc5`. Every one of its seven files matches
+the passed CI artifact and the dedicated local installation folder. Newsletter, VPS, Recall and other
+services were skipped in the final Changes outputs and actual publication jobs.
 
 ## Production acceptance
 
-Pending complete same-SHA deployment, Chrome install, real Todoist layout/keyboard/navigation,
-explicit synthetic task writes, FlowDay cross-view state and Chrome PWA verification. Record each
-result and actual release identity here after checking it. The first natural weekly rollover is a
-separate future observation; synthetic rollover checks do not establish that production event.
+The owner authorized Chrome installation and real-page acceptance on October 13. The live `/plus`
+page loaded under the existing owner login, recognized the existing labels and confirmed the approved
+mapping/weekly rule in `US/Pacific`; the result visibly shows enabled. No extension token was issued
+by the agent and no real task content or priorities were edited.
 
-The owner authorized Chrome installation and real-page acceptance on October 13. The exact tested
-files are prepared, but browser tooling blocks `chrome://extensions/` and explicitly disallows
-alternate control methods. The owner must load the dedicated folder and save the connection once;
+Browser tooling blocks `chrome://extensions/` and explicitly disallows alternate control methods.
+The owner must load the dedicated folder and save the connection once. That manual step is pending;
 ordinary Todoist HTTPS pages remain available for subsequent agent-led checks. Existing labels and
-filters stay in Todoist; confirmation of the mapping enables weekly rollover. Tests must not change
-real task priorities or use private task content in public evidence.
+filters stay in Todoist. Tests use synthetic Inbox tasks and preserve any real active FlowDay timer.
+
+Pending: real Todoist layout/keyboard/navigation with the installed extension, explicit synthetic task
+writes, FlowDay cross-view state and Chrome PWA verification. Record each after checking it. The first
+natural weekly rollover is a separate future observation; synthetic rollover checks do not establish
+that production event.
+
+Real Chrome review also found that the owner connection page's new buttons and device input omitted
+the application's existing control classes. The acceptance branch applies those styles without changing
+connection, mapping or timer behavior; its publication is separate from the extension release above.

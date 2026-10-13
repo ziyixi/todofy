@@ -9,28 +9,30 @@ Its old waiting lists and release identities are historical, not instructions to
 
 ## Current work
 
-Todoist Plus is implemented at `2f3b9b92a86bdeccc39a8304fe7b968c7eb3e4a0`, merged to main after
-[full branch CI 38464767419](https://github.com/ziyixi/todofy/actions/runs/38464767419) passed. The extension
-in `todoist-plus/` provides native-style Plan, batch steps and Focus. Todofy remains the Todoist writer;
-FlowDay owns queue, estimates and server-owned timer commands. Planning writes and weekly rollover
-remain disabled until owner mapping confirmation. No production planning writes or Chrome install
-has occurred at this checkpoint.
+Todoist Plus is released at `51342322e473c4073bfb395a61c867995a9ac902` after
+[full branch CI 38468696858](https://github.com/ziyixi/todofy/actions/runs/38468696858) and the
+[same-SHA main release 38469896460](https://github.com/ziyixi/todofy/actions/runs/38469896460) passed.
+Todofy, FlowDay, Home's binding inventory and the independent Plus ZIP were the only publications;
+Newsletter, VPS, Recall and other services were skipped. The old release-composite `vars` parsing
+error is corrected by inheriting the workflow's existing resolved environment. Operational switches
+and secret inputs are unchanged. [Acceptance record](docs/todoist-plus-verification.md) has provider
+receipts and distinguishes synthetic, packaged-browser and live evidence.
 
-The first [main release 38466487763](https://github.com/ziyixi/todofy/actions/runs/38466487763) deployed
-FlowDay, then failed to parse the old Todofy composite action's `vars` expressions. Home and the
-extension publication did not run. The caller already supplies these operational switches as job
-environment variables; the correction removes unsupported duplicate references in the release
-actions and adds a focused guard. Existing switches, secret inputs and release locks stay intact.
-The corrected SHA still needs branch CI and a same-SHA main release.
+The live owner `/plus` page recognized all existing labels. Its mapping and Monday rollover were
+confirmed on October 13; the page shows enabled in `US/Pacific`. No real Todoist task edits or
+extension credential issuance has occurred at this checkpoint. The owner-authorized Chrome install
+is waiting on one manual load/connect step: browser tooling blocks Chrome's internal extensions
+manager and forbids alternate control methods. The dedicated installation folder matches all seven
+files of the published, CI-tested ZIP, version `2026.1013.1271.20788`. Do not replace Recall's folder.
 
-[Acceptance record](docs/todoist-plus-verification.md) lists local, packaged-browser and production
-evidence separately. The exact tested extension files are prepared in a dedicated local folder.
-The owner authorized installation and real-page checks. Browser tooling blocks Chrome's internal
-extensions manager and explicitly forbids alternate control methods; the owner must load the folder
-and connect once. After that, continue live Todoist layout, synthetic task writes, FlowDay cross-view
-and PWA checks. No Newsletter, VPS or Recall release is intended. The old FlowDay timer replace/clear
-methods return `RELOAD_REQUIRED` and stay until at least 2026-11-13. The first natural weekly rollover
-remains a future observation, independent of synthetic scheduler tests.
+Continue real Todoist layout, synthetic task writes, FlowDay cross-view and PWA checks after the
+owner replies connected. Preserve any real running timer. The first natural weekly rollover remains
+a future observation, independent of synthetic scheduler tests. The old FlowDay timer replace/clear
+methods return `RELOAD_REQUIRED` and stay until at least 2026-11-13.
+
+The acceptance branch `codex/todoist-plus-acceptance` also applies existing button/field styles to the
+owner connection page, where real Chrome review found unstyled controls. This is presentational;
+its UI checks, branch gate and publication must be recorded separately from the released extension.
 
 Recall cleanup is released at `bc0adffdc1d8ee018b0663737c77e8de701de0aa`, extension `2026.1013.654`.
 [Full branch CI](https://github.com/ziyixi/todofy/actions/runs/38359057094) and the

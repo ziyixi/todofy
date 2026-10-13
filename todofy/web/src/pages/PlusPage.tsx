@@ -36,16 +36,19 @@ export function PlusPage() {
           <p>{plan.labels.map(label => `${label.role} → ${label.label}`).join(' · ')}</p>
           <p>时区：{plan.timezone}。每周一 00:00 后的下一次十分钟检查，将上周未完成的承诺移回本周候选，清除上周 Bets；其他标签、日期和任务内容保留。</p>
           {plan.missingLabels.length > 0 && <p>缺少标签：{plan.missingLabels.join('、')}。请先在 Todoist 创建。</p>}
-          <button disabled={busy || plan.missingLabels.length > 0 || plan.enabled} onClick={() => void work(async () => { await plus.confirmPlanMapping({ etag: plan.etag, requestId: crypto.randomUUID() }); await load() })}>{plan.enabled ? '已启用' : '确认映射并启用每周整理'}</button>
+          <button className="btn btn-primary" disabled={busy || plan.missingLabels.length > 0 || plan.enabled} onClick={() => void work(async () => { await plus.confirmPlanMapping({ etag: plan.etag, requestId: crypto.randomUUID() }); await load() })}>{plan.enabled ? '已启用' : '确认映射并启用每周整理'}</button>
         </> : <p>读取中…</p>}
       </Section>
       <Section title="插件连接">
         {host && <p>服务器：<code>https://{host}</code> <CopyButton value={`https://${host}`} label="服务器" /></p>}
-        <label>设备名称 <input value={device} maxLength={60} onChange={event => setDevice(event.target.value)} /></label>
-        <p><button disabled={busy || !device.trim()} onClick={() => void work(async () => { const result = await plus.issueExtensionConnection({ displayName: device, requestId: crypto.randomUUID() }); setToken(result.token); await load() })}>生成连接口令</button></p>
+        <div className="field">
+          <label htmlFor="plus-device">设备名称</label>
+          <input id="plus-device" value={device} maxLength={60} onChange={event => setDevice(event.target.value)} />
+        </div>
+        <p><button className="btn btn-primary" disabled={busy || !device.trim()} onClick={() => void work(async () => { const result = await plus.issueExtensionConnection({ displayName: device, requestId: crypto.randomUUID() }); setToken(result.token); await load() })}>生成连接口令</button></p>
         {token && <p><code className="wrap">{token}</code> <CopyButton value={token} label="插件口令" /></p>}
         <p>口令只显示一次，粘贴到 Todoist Plus 的设置页。扩展不会取得 Todoist API 密钥。</p>
-        <ul>{connections.map(connection => <li key={connection.id}>{connection.displayName} {connection.revoked ? '已撤销' : <button disabled={busy} onClick={() => void work(async () => { await plus.revokeExtensionConnection({ connectionId: connection.id, requestId: crypto.randomUUID() }); await load() })}>撤销</button>}</li>)}</ul>
+        <ul>{connections.map(connection => <li key={connection.id}>{connection.displayName} {connection.revoked ? '已撤销' : <button className="btn btn-ghost" disabled={busy} onClick={() => void work(async () => { await plus.revokeExtensionConnection({ connectionId: connection.id, requestId: crypto.randomUUID() }); await load() })}>撤销</button>}</li>)}</ul>
       </Section>
       {message && <p role="alert">{message}</p>}
     </div>
