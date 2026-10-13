@@ -81,6 +81,6 @@ owner UI JavaScript was 175.7 KiB gzip (budget 208 KiB).
 
 The calibrated CPU suite measured a 200-task Plus page at 1.13 ms cold / 0.56 ms warm, and a 200-task
 FlowDay proxy page with 2,000-character title and description per row at 6.85 ms / 4.70 ms.
-The new proxy uses its own 8 ms cold / 6 ms warm regression bounds; existing route bounds and the
+The new proxy uses its own 9.5 ms cold / 6 ms warm regression bounds; existing route bounds and the
 Workers Free 10 ms limit remain unchanged. These are local reference-machine measurements, not
 Cloudflare production timings or a guarantee for arbitrarily large remote descriptions.

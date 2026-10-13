@@ -36,7 +36,7 @@ export
     a long text is inserted empty and appended in chunks (UPDATE ... SET c = c || '...').
     WORKDIR/manifest.json holds only counts, lengths and SHA-256 digests.
 check-empty
-    The 7 tables exist with the committed schema, every committed migration is applied, and no table has a row.
+    The committed tables and schema exist, every committed migration is applied, and no table has a row.
 import
     check-empty, the daily write budget (below), then (--remote) the current Time Travel bookmark of the empty D1
     saved to WORKDIR/d1-bookmark-import-<UTC time>.json (only its path is printed), then
@@ -48,15 +48,16 @@ verify
     Per table: count(*), total(length(col)) per text or BLOB column and the SHA-256 of the sorted canonical row
     dump, from D1 (read-only SELECTs, paged by primary key: WHERE pk > last ORDER BY pk LIMIT n, so every row is
     read once) against the manifest and against WORKDIR/snapshot.db again. Also: no todoist_api_key row in D1,
-    and the D1-only columns (tasks.todoist_project_id) all NULL. Prints only counts and equal/DIFFERENT.
+    and the explicit D1 import baseline: nullable sync fields stay NULL, existing estimates are overrides, the
+    timer's etag is "0", and the new timer command table is empty. Prints only counts and equal/DIFFERENT.
 reset
     --bookmark-env NAME restores the D1 Time Travel bookmark held in that environment variable, or
     --bookmark-file FILE the one import or reset saved (never printed; a reset's bookmark undoes that reset, and
     only the row counts are printed instead of check-empty); or --delete-all-rows --workdir WORKDIR
-    deletes every row of the 7 tables (one atomic file; d1_migrations stays), within the daily write budget, after
+    deletes every row of the committed tables (one atomic file; d1_migrations stays), within the daily write budget, after
     saving the current bookmark to WORKDIR/d1-bookmark-reset-<UTC time>.json. It deletes only what looks like this
     work directory's own import: no table may hold more rows than the manifest says, and no row only the Worker
-    writes (its sync settings, tasks.todoist_project_id) may exist; otherwise only --confirm-database flowday
+    writes (its sync settings, changed import baseline or timer commands) may exist; otherwise only --confirm-database flowday
     deletes the rows anyway. Then check-empty.
 
 Daily write budget: the account's Free allowance is 100,000 D1 rows written per UTC day, shared by every app, and
@@ -221,6 +222,29 @@ def source_schema() -> dict[str, Table]:
 def target_schema() -> dict[str, Table]:
     """D1's tables after every committed migration."""
     return schema(migration_files())
+
+
+def import_baseline_checks(tables: dict[str, Table], target: dict[str, Table]) -> list[tuple[str, str]]:
+    """Explicit derived values after importing the old schema into the current one."""
+    conditions = {
+        ("tasks", "todoist_project_id"): '"todoist_project_id" IS NOT NULL',
+        ("tasks", "parent_id"): '"parent_id" IS NOT NULL',
+        ("tasks", "deadline_date"): '"deadline_date" IS NOT NULL',
+        ("tasks", "estimate_override"): '"estimate_override" IS NOT CASE WHEN "estimated_mins" IS NULL THEN 0 ELSE 1 END',
+        ("active_timer_session", "etag"): "\"etag\" IS NOT '0'",
+    }
+    extra = [(name, column) for name in tables for column in target[name].columns if column not in tables[name].columns]
+    if set(extra) != set(conditions) or set(target) - set(tables) != {"timer_commands"}:
+        raise ToolError("the D1 import baseline needs updating for the committed schema")
+    checks = [
+        (
+            f"table {name}: D1-only column {column} differs from its import baseline",
+            f"SELECT count(*) AS n FROM {ident(name)} WHERE {conditions[name, column]}",
+        )
+        for name, column in extra
+    ]
+    checks.append(("table timer_commands: commands exist after the import", 'SELECT count(*) AS n FROM "timer_commands"'))
+    return checks
 
 
 # --- SQL text --------------------------------------------------------------------------------------------------
@@ -648,13 +672,16 @@ def export(
         with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as out:
             for table in tables.values():
                 names = ", ".join(map(ident, table.columns))
+                import_columns = table.columns + (("estimate_override",) if table.name == "tasks" else ())
                 query = (
                     f"SELECT {names} FROM {ident(table.name)}{source_filter(table)} ORDER BY {ident(table.primary_key)}"
                 )
                 for row in db.execute(query):
                     if sum(size(value) for value in row) > D1_MAX_VALUE_BYTES:
                         raise ToolError(f"a row of {table.name} exceeds D1's {D1_MAX_VALUE_BYTES}-byte row limit")
-                    for text in row_statements(table, table.columns, row):
+                    if table.name == "tasks":
+                        row = (*row, int(row[table.columns.index("estimated_mins")] is not None))
+                    for text in row_statements(table, import_columns, row):
                         out.write(text + "\n")
                         statements += 1
                         rows_written += 1 + target[table.name].indexes
@@ -1110,21 +1137,21 @@ def verify(workdir: Path, d1: D1, log: Callable[[str], None]) -> None:
     if again != manifest["tables"]:
         raise Failure("the snapshot no longer matches the manifest")
     keys = ", ".join(text_literal(key) for key in EXCLUDED_SETTINGS)
-    extra = [(name, column) for name in tables for column in target[name].columns if column not in tables[name].columns]
+    baseline = import_baseline_checks(tables, target)
     checks = [f"SELECT count(*) AS n FROM settings WHERE key IN ({keys})"]
-    checks += [f"SELECT count(*) AS n FROM {ident(name)} WHERE {ident(column)} IS NOT NULL" for name, column in extra]
+    checks += [query for _, query in baseline]
     remote, answers = d1_summaries(d1, tables, checks)
     ok = all([compare(name, manifest["tables"][name], remote[name], log) for name in tables])
     if answers[0][0]["n"]:
         log("settings: a todoist_api_key row exists in D1")
         ok = False
-    for (name, column), [row] in zip(extra, answers[1:]):
+    for (description, _), [row] in zip(baseline, answers[1:]):
         if row["n"]:
-            log(f"table {name}: {row['n']} row(s) with the D1-only column {column} set")
+            log(f"{description}: {row['n']} row(s)")
             ok = False
     if not ok:
         raise Failure("D1 differs from the snapshot")
-    log(f"D1 equals the snapshot: {len(tables)} tables, no todoist_api_key row, D1-only columns empty.")
+    log(f"D1 equals the snapshot: {len(tables)} original tables, no todoist_api_key row, D1 import baseline verified.")
 
 
 def bookmark_from(bookmark_env: str | None, bookmark_file: Path | None) -> tuple[str, str | None]:
@@ -1149,18 +1176,17 @@ def check_own_import(d1: D1, workdir: Path, confirm_database: str | None, log: C
     """D1's row count per table (target schema order), refusing a D1 that holds more than WORKDIR's own import.
 
     The rows may be deleted when no table holds more rows than the manifest of WORKDIR, and no row exists that
-    only the Worker writes (its Todoist sync settings, tasks.todoist_project_id): then D1 holds nothing written
-    after the import. Otherwise, after the cutover, they are production data, and only `--confirm-database
+    only the Worker writes (its Todoist sync settings, changed import baseline or timer commands): then D1 holds
+    nothing written after the import. Otherwise, after the cutover, they are production data, and only `--confirm-database
     flowday` deletes them.
     """
     target = target_schema()
+    baseline = import_baseline_checks(source_schema(), target)
     worker_only = ", ".join(text_literal(key) for key in WORKER_ONLY_SETTINGS)
     answers = d1.query(
         [f"SELECT count(*) AS n FROM {ident(name)}" for name in target]
-        + [
-            f"SELECT count(*) AS n FROM settings WHERE key IN ({worker_only})",
-            "SELECT count(*) AS n FROM tasks WHERE todoist_project_id IS NOT NULL",
-        ]
+        + [f"SELECT count(*) AS n FROM settings WHERE key IN ({worker_only})"]
+        + [query for _, query in baseline]
     )
     counts = [int(rows[0]["n"]) for rows in answers[: len(target)]]
     worker_rows = sum(int(rows[0]["n"]) for rows in answers[len(target) :])

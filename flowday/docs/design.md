@@ -28,7 +28,7 @@ browser ── Cloudflare Access ── Worker "flowday" ──┬── ASSETS:
 | --- | --- |
 | `wrangler.toml` | The production config: top level only, `workers_dev = false`, `preview_urls = false`; the real D1 id and Access AUD since F2; one Custom Domain and `PUBLIC_HOST` naming it: the staging host `flowday-next.ziyixi.science` in F3, the production host `flowday.ziyixi.science` since F4 |
 | `worker/src/` | `index.ts` (handler) → `router.ts` (Access, PWA exceptions, logging) → `api.ts` (routes) → `store/*` (D1), `sync.ts` + `todoist.ts` (Todoist), `credentials.ts` (the sealed Todoist key), `assets.ts` (static files, CSP), `e2e.ts` (test routes) |
-| `migrations/` | `0001_init.sql`: the container-era SQLite schema, unchanged. `0002_incremental_sync.sql`: `tasks.todoist_project_id`. `0003_fewer_task_indexes.sql`: drops four indexes no query needs |
+| `migrations/` | `0001_init.sql`: the container-era SQLite schema, unchanged. `0002_incremental_sync.sql`: `tasks.todoist_project_id`. `0003_fewer_task_indexes.sql`: drops four indexes no query needs. `0004_focus.sql`: hierarchy/deadline fields, estimate ownership and timer command versions/receipts |
 | `web/` | The Next.js UI as a static export (`output: "export"`). It has no server code; `lib/client/http.ts` is its only `fetch` |
 | `deploy/deploy-vars.mjs` | The deploy wrapper, the dashboard's shape: `BUILD_SHA` as a var, the owner and both keys as Worker secrets. It refuses a real deploy while the D1 id or the Access AUD is the all-zeros placeholder (a guard against a revert to the F1 config) |
 
@@ -424,12 +424,13 @@ first (`cd ../web && npm run build`), and apply the migrations locally:
     total length of each column's text and BLOBs, and the SHA-256 of the sorted canonical rows (reals exactly, ±Inf
     included), from read-only SELECTs paged by primary key (`WHERE pk > :last ORDER BY pk LIMIT 1000`: each row is
     read once, where LIMIT/OFFSET would read the skipped rows again on every page), and checks that D1 holds no
-    `todoist_api_key` row and no `todoist_project_id` yet. `reset` empties D1 again: `--bookmark-env NAME` or
+    `todoist_api_key` row. The D1-only sync, parent and deadline fields must remain NULL; nonempty imported estimates
+    become overrides, the timer's initial etag is `0`, and `timer_commands` stays empty. `reset` empties D1 again: `--bookmark-env NAME` or
     `--bookmark-file <saved file>` restores a Time Travel bookmark (writes no rows through SQL; the bookmark saved
     by a reset undoes that reset), and `--delete-all-rows --workdir <private>` saves the current bookmark in the
     work directory and deletes every row in one atomic file. It deletes only what is that work directory's own
     import: no table may hold more rows than its manifest, and no row that only the Worker writes (its sync
-    settings, `tasks.todoist_project_id`) may exist. After the cutover D1 is production data, which only an
+    settings, changed import baseline or timer commands) may exist. After the cutover D1 is production data, which only an
     explicit `--confirm-database flowday` deletes.
   - **The daily write budget.** The account's 100,000 rows written per UTC day are shared by every app, and a
     deletion costs about as many rows as the import did. `import` and `reset --delete-all-rows` each estimate their
@@ -536,3 +537,9 @@ static export. All 51 existing desktop browser scenarios passed against syntheti
 was rerun after its time-control helper was changed to wait for the accepted asynchronous resume.
 A separate SQLite upgrade check preserved existing estimates, an unknown estimate and a paused timer through
 `0004`. These checks do not establish a production deployment or a Todoist PWA installation.
+
+The container import tool also passed all 38 tests of its mandatory-Wrangler suite against synthetic local D1
+under Python 3.12, including the SQLite expression-limit test. Existing estimates import as
+overrides even when `0004` ran before the insert; verification still compares every original column exactly and
+checks the added state explicitly. Changed hierarchy, deadline, estimate ownership, timer version or timer command
+rows cause verification and reset without `--confirm-database flowday` to stop.

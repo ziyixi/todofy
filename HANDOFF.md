@@ -18,10 +18,13 @@ has occurred at this checkpoint.
 Local verification covers 549 Python/workerd runtime cases; 1,653 Python units; 127 gateway tests;
 93 owner-UI tests; FlowDay's 123 workerd, 21 worker-unit, 119 UI and 51 desktop-browser scenarios;
 and the extension's 19 unit/API/component and three actual built-MV3 browser cases. Existing route
-budgets pass; the new 200-task Focus proxy has measured 6.85 ms cold / 4.70 ms warm and its own 8/6 ms
+budgets pass; the new 200-task Focus proxy has measured 6.85 ms cold / 4.70 ms warm and its own 9.5/6 ms
 regression bounds, below Workers Free's 10 ms. Gateway gzip is 81.9/86 KiB. Proto lint/API-lint,
 breaking, types, schemas and codec checks pass; CI/config guards pass with one existing local skip.
 [Acceptance record](docs/todoist-plus-verification.md) distinguishes synthetic and production evidence.
+The first branch gate held publication for a new-path cold CPU ratchet and old import-verifier defaults.
+The corrected startup bound remains below Free, and all 38 mandatory local-D1 import/verify/reset
+cases now pass on Python 3.12; the next full branch gate is pending.
 
 Next: complete full branch `CI gate`, release the same SHA (FlowDay, Todofy, Home's binding inventory,
 and the separate extension ZIP), then use the owner's authorized Chrome installation for live

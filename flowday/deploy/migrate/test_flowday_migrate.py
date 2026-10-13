@@ -310,7 +310,7 @@ class LiteralTest(unittest.TestCase):
 
 
 class SchemaTest(unittest.TestCase):
-    def test_the_source_is_migration_0001_and_d1_adds_one_column(self) -> None:
+    def test_the_source_is_migration_0001_and_d1_has_explicit_added_state(self) -> None:
         source, target = tool.source_schema(), tool.target_schema()
         self.assertEqual(
             list(source),
@@ -324,11 +324,37 @@ class SchemaTest(unittest.TestCase):
                 "active_timer_session",
             ],
         )
-        self.assertEqual(list(target), list(source))
-        self.assertEqual(target["tasks"].columns, (*source["tasks"].columns, "todoist_project_id"))
+        self.assertEqual(list(target), [*source, "timer_commands"])
+        self.assertEqual(
+            target["tasks"].columns,
+            (*source["tasks"].columns, "todoist_project_id", "parent_id", "deadline_date", "estimate_override"),
+        )
+        self.assertEqual(target["active_timer_session"].columns, (*source["active_timer_session"].columns, "etag"))
+        self.assertEqual(target["timer_commands"].columns, ("request_id", "fingerprint", "result", "created_at"))
+        self.assertEqual(len(tool.import_baseline_checks(source, target)), 6)
         # 0003 left tasks with its primary key and deleted_at: a task row costs three D1 rows written.
         self.assertEqual(target["tasks"].indexes, 2)
         self.assertEqual(target["settings"].indexes, 1)
+
+    def test_focus_upgrade_preserves_existing_estimates_and_a_paused_timer(self) -> None:
+        with sqlite3.connect(":memory:") as db:
+            for path in tool.migration_files()[:3]:
+                db.executescript(path.read_text())
+            db.execute(
+                "INSERT INTO tasks(id,title,estimated_mins) VALUES ('known','Synthetic',45),('unknown','Synthetic',NULL)"
+            )
+            db.execute(
+                "INSERT INTO active_timer_session(id,task_id,status,session_saved_s) VALUES ('main','known','paused',120)"
+            )
+            db.executescript((tool.MIGRATIONS / "0004_focus.sql").read_text())
+            self.assertEqual(
+                db.execute("SELECT id,estimated_mins,estimate_override FROM tasks ORDER BY id").fetchall(),
+                [("known", 45, 1), ("unknown", None, 0)],
+            )
+            self.assertEqual(
+                db.execute("SELECT task_id,status,session_saved_s,etag FROM active_timer_session").fetchall(),
+                [("known", "paused", 120, "0")],
+            )
 
 
 class ExportTest(Scratch):
@@ -377,6 +403,8 @@ class ExportTest(Scratch):
         for path in tool.migration_files():
             db.executescript(path.read_text())
         db.executescript(sql)
+        for _, check in tool.import_baseline_checks(tool.source_schema(), tool.target_schema()):
+            self.assertEqual(db.execute(check).fetchone()[0], 0, check)
         snapshot = tool.open_snapshot(self.workdir / "snapshot.db")
         expected = tool.local_summaries(snapshot, tool.source_schema())
         snapshot.close()
@@ -996,6 +1024,33 @@ class FakeRemoteTest(Scratch):
         self.assertEqual(status, 1, output)
         self.assertIn("a todoist_api_key row exists in D1", output)
         self.assertNoContent(output)
+
+    def test_verify_and_reset_reject_changed_focus_baseline_or_timer_commands(self) -> None:
+        self.assertEqual(run("import", "--workdir", str(self.workdir), "--remote")[0], 0)
+        before = self.tmp / "baseline.sqlite"
+        shutil.copyfile(self.d1, before)
+        for name, statement in (
+            ("parent_id", "UPDATE tasks SET parent_id = 'external-parent' WHERE id = 'task-1'"),
+            ("deadline_date", "UPDATE tasks SET deadline_date = '2026-10-25' WHERE id = 'task-1'"),
+            ("estimate_override", "UPDATE tasks SET estimate_override = 0 WHERE id = 'task-0'"),
+            ("estimate_override", "UPDATE tasks SET estimate_override = 1 WHERE id = 'task-1'"),
+            ("etag", "UPDATE active_timer_session SET etag = 'new-command'"),
+            ("timer_commands", "INSERT INTO timer_commands VALUES ('new','synthetic','{}','2026-10-13')"),
+        ):
+            with self.subTest(column=name):
+                with sqlite3.connect(self.d1) as db:
+                    db.execute(statement)
+                status, output = run("verify", "--workdir", str(self.workdir), "--remote")
+                self.assertEqual(status, 1, output)
+                self.assertIn(name, output)
+                self.assertQuiet(output)
+                status, output = run("reset", "--remote", "--delete-all-rows", "--workdir", str(self.workdir))
+                self.assertEqual(status, 1, output)
+                self.assertIn("--confirm-database flowday", output)
+                self.assertEqual(self.count("tasks"), 9)
+                self.assertFalse(list(self.workdir.glob("d1-bookmark-reset-*")))
+                self.assertQuiet(output)
+                shutil.copyfile(before, self.d1)
 
     def test_a_reset_by_deletion_never_deletes_what_was_written_after_the_import(self) -> None:
         """After the cutover D1 is production: more rows than imported, or rows only the Worker writes, refuse."""

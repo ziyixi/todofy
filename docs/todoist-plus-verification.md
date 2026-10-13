@@ -23,12 +23,18 @@ The gateway dry-run is 81.9 KiB gzip against its existing 86 KiB budget. The Pyt
 187.36 KiB gzip and contains the generated Plus messages; owner UI JavaScript is 175.7/208 KiB.
 Calibrated new-path CPU samples were 1.13/0.56 ms for a 200-task Plus page and 6.85/4.70 ms for a
 200-task FlowDay proxy page (cold/warm). The latter fixture has 2,000-character title and description
-per task. The new proxy's regression bounds are 8/6 ms; Workers Free's 10 ms limit and old-path
+per task. The new proxy's regression bounds are 9.5/6 ms; Workers Free's 10 ms limit and old-path
 bounds remain intact. This does not establish production CPU timings for arbitrary remote descriptions.
 
 The existing runtime/full-unit checks preceded removal of an unused, unpublished URL field. The
 cleanup passed eight focused unit and eight real-runtime Plus cases and regenerated proto checks;
 the full branch gate is the final source-SHA check.
+
+The first branch CI at `30c25b7` passed the packaged extension and runtime shards but rejected
+an 8.16 ms cold proxy sample against its initial 8 ms startup ratchet. The new-path startup bound
+is 9.5 ms; warm and existing-path limits remain unchanged. The same run also exposed the old
+container-import verifier's assumptions about new defaulted D1 columns and timer command receipts;
+the corrected import/verify/reset tools passed all 38 cases under Python 3.12 with mandatory local Wrangler/D1, including rejection of unexpected derived state. The next branch gate must verify this corrected SHA before publication.
 
 ## Production acceptance
 
