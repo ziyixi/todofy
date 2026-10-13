@@ -9,19 +9,20 @@ Its old waiting lists and release identities are historical, not instructions to
 
 ## Current work
 
-`codex/recall-connections-ui` is implementing the owner-requested Recall settings cleanup: same-name installation
-connections fold under the latest, historical identities remain selectable, empty test connections can be removed
-only after server checks, and token labels can change without regenerating credentials. This does not touch the
-Chrome extension or its installed files, phone capture behavior, budgets or other services. Local checks pass:
-web type/lint/build and 144 tests, worker type/lint and 158 tests, related real-workerd token/connection/CPU/scale
-checks and the existing end-to-end smoke, plus proto lint/api-lint/breaking. A real local UI backed by the existing
-workerd harness shows eight synthetic connections as two collapsed groups; mobile width is 390px without horizontal
-overflow and token rename saves via the real API. The local empty-delete native confirmation blocked IAB tab 9;
-the owner is away from the computer, so do not require immediate desktop help. No real connection has been deleted.
-Review also covers Worker-secret-only credentials: rename is available without generating a new secret, and
-unsupported stop/rotation actions are not offered. Pending: final branch CI, same-SHA release and scoped
-production settings verification/empty-test cleanup. The phone's latest page_probe_invalid_result remains a separate
-open capture issue; this settings change does not claim to fix it.
+Recall settings cleanup is released at `1ab7cfc9`. The live footer confirms that SHA: eight connections display as
+two name groups with six old phone installs folded; old identities and timeline links remain separate. Empty
+connection removal is guarded by stored visits/snapshots and pending count, with schema 6 adding only an index.
+Token labels rename without rotating current/previous/Worker-secret credentials; Worker-secret-only credentials
+have a direct rename menu. [Full branch CI](https://github.com/ziyixi/todofy/actions/runs/38334672139) and
+[same-SHA release](https://github.com/ziyixi/todofy/actions/runs/38335237087) pass. Deployment `7028272346` verifies
+Worker `1bcd9109-a612-4520-b0f0-35dc9d7a8fb4`; all other app/image/VPS releases and extension publication skip.
+Local web 144 tests, worker 158 tests, relevant real-workerd CPU/scale and existing smoke pass. The real local UI
+saves token rename and has no horizontal overflow at 390px. Production verification reads only Settings metadata.
+No production credential or connection was changed; six empty test connections are folded and expose removal.
+The synthetic empty-delete native confirmation blocked IAB tab 9; the owner is away, so do not require immediate
+desktop help. Its preview process is stopped. The phone's recurring page_probe_invalid_result and screenshot/auto-upload
+acceptance remain open; this release does not fix capture. `codex/recall-settings-verification` records release
+and UI evidence in root docs only, with no further app deployment. See [verification](docs/recall-settings-verification.md).
 
 Recall's injection-completion correction is released at `bafbac85` (`2026.1013.45`). The actual 1736 phone receipt
 had eight tab events/two alarms, returned query+lookup and pending injection, without capture/store/screenshot.
@@ -45,7 +46,7 @@ screenshot element. The latest 45 device queue subsequently reports zero. This e
 visit ingestion/display after manual flush, not screenshot capture or unattended minute uploads. Direct bounded
 metadata navigation was client-blocked, so no exact device-UUID/document join or byte count is claimed. Do not ask
 for another reinstall or infer image support/failure from this run. See the dated phone receipt in
-[verification](docs/recall-diagnostic-verification.md). Connection/token UI cleanup remains separate work.
+[verification](docs/recall-diagnostic-verification.md). The settings cleanup above is released; capture acceptance remains separate.
 
 Recall's mobile deadlock correction is released at `1c1e0b5` (`2026.1012.1736`). Known event tab IDs and the current
 span precede enumeration, with fresh active/visible/privacy checks; unanswered mobile callbacks release after five
@@ -62,7 +63,7 @@ Test extensions are removed, the exact consumer stopped and port closed. Owner C
 Phone iOS acceptance remains open: disable the old instance, load the new ZIP from file, Start, keep the public page foreground about
 one minute, then Send. Do not infer phone success from Mac, heartbeat or an empty outbox. See
 [verification](docs/recall-diagnostic-verification.md). The permission-button and startup-tracker experiments stay unmerged.
-After phone capture is confirmed, the owner's requested connection-list cleanup and token-name UI review remain separate work.
+The settings cleanup above supersedes the earlier connection-list and token-name follow-up.
 
 The earlier `codex/recall-permission-api-verification` records the native permission investigation; its proposed
 permission-button release remains held.
