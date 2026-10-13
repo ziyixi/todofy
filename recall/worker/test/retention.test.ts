@@ -126,7 +126,7 @@ describe('schema 3', () => {
     expect(() => {
       store.migrate();
     }).not.toThrow();
-    expect([store.getMeta('schema_version'), archived(store, id)]).toEqual(['5', NOW]);
+    expect([store.getMeta('schema_version'), archived(store, id)]).toEqual(['6', NOW]);
   });
 });
 

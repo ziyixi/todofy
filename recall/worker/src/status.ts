@@ -19,8 +19,15 @@ import { readRetention } from './settings.ts';
 import { utcDay, type ConsumerRow, type DeviceRow, type Store } from './store.ts';
 import { namedTokenMessage, namedTokens, TOKEN_ROUTES, tokenMessage, type TokenRoute } from './tokens.ts';
 
-export function devices(store: Store): DeviceRow[] {
-  return store.all<DeviceRow>(`SELECT * FROM devices ORDER BY last_seen_ms DESC, id`);
+interface DeviceConnection extends DeviceRow {
+  has_records: number;
+}
+
+export function devices(store: Store): DeviceConnection[] {
+  return store.all<DeviceConnection>(`SELECT d.*,
+    EXISTS(SELECT 1 FROM visits v WHERE v.device_id = d.id) OR
+    EXISTS(SELECT 1 FROM documents s WHERE s.device_id = d.id) AS has_records
+    FROM devices d ORDER BY d.last_seen_ms DESC, d.id`);
 }
 
 export function consumers(store: Store): ConsumerRow[] {
@@ -44,7 +51,7 @@ export function firstVisitMs(store: Store): number | null {
   return store.one<{ start_ms: number }>(`SELECT v.start_ms AS start_ms FROM visits v JOIN pages p ON p.rowid = v.page_rowid ORDER BY v.start_ms LIMIT 1`)?.start_ms ?? null;
 }
 
-function deviceMessage(row: DeviceRow, now: number): DeviceStatus {
+function deviceMessage(row: DeviceConnection, now: number): DeviceStatus {
   return create(DeviceStatusSchema, {
     deviceId: row.id,
     label: row.label,
@@ -55,6 +62,7 @@ function deviceMessage(row: DeviceRow, now: number): DeviceStatus {
     lastErrorCode: row.last_error_code,
     stale: row.mobile === 0 && now - row.last_seen_ms > STALE_MS,
     mobile: row.mobile !== 0,
+    hasRecords: row.has_records !== 0,
     clockSkewSeconds: row.clock_skew_s,
   });
 }

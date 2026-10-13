@@ -25,29 +25,16 @@ import type { ArchiveConsumer, DropboxBackup, ServiceStatus, Settings } from '@z
 import { api } from '../api.ts'
 import { card, disclosure, kpi, meter, segmented } from '../components.ts'
 import { button, el, fill, toast } from '../dom.ts'
-import { ago, compact, count, monthText, ms, span } from '../format.ts'
+import { ago, compact, count, monthText, ms } from '../format.ts'
 import type { ViewContext } from '../app.ts'
 import { backupLate, behindText, consumerName, late, STORAGE_HIGH_MIB } from '../health.ts'
 import { act, frame } from './common.ts'
 import { paintTokens } from './tokens.ts'
+import { devicesCard } from './devices.ts'
 import { captureDiagnosticCard } from './diagnostic.ts'
 
 /** R2's free storage, shared by every app of the account (10 GB-month). */
 const R2_FREE_MB = 10 * 1024
-
-/** A device's last error code in words, and whether it needs the owner. */
-const DEVICE_ERRORS: Readonly<Record<string, readonly [string, boolean]>> = {
-  outbox_full: ['扩展存储已满，新页面的内容没有保存：打开扩展的选项检查', true],
-  capture_failed: ['有页面的正文没读到（页面不让扩展读取时会这样）', false],
-  screenshot_failed: ['有页面的截图没保存，已读取的正文仍会保存', false],
-  upload_failed: ['上传失败过，扩展会自动重试', false],
-}
-
-/** A refusal's reason in words. */
-const REFUSALS: Readonly<Record<string, string>> = {
-  invalid_item: '格式不对',
-  id_conflict: '编号冲突',
-}
 
 /** The Dropbox backup's last failure in words, and whether it needs the owner. */
 const BACKUP_ERRORS: Readonly<Record<string, readonly [string, boolean]>> = {
@@ -109,7 +96,7 @@ export async function renderSettings(ctx: ViewContext): Promise<void> {
     paintTokens(ctx, tokens, status.machineTokens)
     fill(
       body,
-      devicesCard(status, now),
+      devicesCard(ctx, status, now),
       captureDiagnosticCard(status.captureDiagnostic, status.devices, now),
       card('插件口令', '', tokens),
       backupCard(ctx, status, now),
@@ -118,60 +105,6 @@ export async function renderSettings(ctx: ViewContext): Promise<void> {
       status.build === '' ? null : el('p', { class: 'meta build' }, `版本 ${status.build.slice(0, 7)}`),
     )
   })
-}
-
-function devicesCard(status: ServiceStatus, now: number): HTMLElement {
-  const notes = status.rejectedItems.map((item) =>
-    item.reason === 'unsupported_item'
-      ? el('p', { class: 'hint', role: 'note' }, `7 天内有 ${String(item.count)} 条记录来自比 recall 新的扩展，正在扩展里等 recall 更新后再上传`)
-      : el('p', { class: 'hint warn', role: 'note', title: item.reason }, `7 天内有 ${String(item.count)} 条上传被拒（${REFUSALS[item.reason] ?? '其他原因'}），已丢失：扩展可能有问题`),
-  )
-  if (status.devices.length === 0) {
-    return card(
-      '设备',
-      '',
-      el('p', {}, '还没有设备连接。连上一台：'),
-      el(
-        'ol',
-        { class: 'steps' },
-        el('li', {}, '在下面的 插件口令 填写设备名，点 添加设备口令 并复制'),
-        el('li', {}, '在 Chrome 打开 ', el('code', { class: 'mono' }, 'chrome://extensions'), '，打开 开发者模式，点 加载已解压的扩展程序，选扩展的文件夹'),
-        el('li', {}, '在扩展的选项里粘贴口令，填上设备名（服务器地址已经填好）'),
-      ),
-      ...notes,
-    )
-  }
-  return card(
-    '设备',
-    `${String(status.devices.length)} 台`,
-    el(
-      'ul',
-      { class: 'rows' },
-      ...status.devices.map((device) => {
-        const heard = ms(device.lastHeartbeatTime)
-        const skew = device.clockSkewSeconds
-        const stale = device.stale && !device.mobile
-        const [error, urgent] = device.lastErrorCode === '' ? ['', false] : (DEVICE_ERRORS[device.lastErrorCode] ?? ['扩展报告了一个错误', false])
-        return el(
-          'li',
-          {},
-          el('div', { class: 'row-head' }, el('span', { class: 'row-title' }, device.label), el('span', { class: stale ? 'meta warn' : 'meta' }, `最近连接 ${heard === null ? '—' : ago(heard, now)}`)),
-          stale ? el('p', { class: 'hint warn' }, '检查 Chrome 是否开着、扩展是否启用（开发者模式）') : null,
-          device.mobile ? el('p', { class: 'hint' }, '手机仅在浏览器前台运行，打开后继续采集和上传。') : null,
-          error === '' ? null : el('p', { class: urgent ? 'hint warn' : 'hint', title: device.lastErrorCode }, error),
-          el(
-            'p',
-            { class: 'facts' },
-            el('span', {}, `版本 ${device.extensionVersion}`),
-            el('span', {}, `待上传 ${count(device.queuedCount)}`),
-            skew === 0 ? null : el('span', { class: 'warn' }, `时钟差 ${span(skew * 1000)}`),
-          ),
-        )
-      }),
-    ),
-    el('p', { class: 'hint' }, '连接成功可能只是心跳；实际记录见时间线。'),
-    ...notes,
-  )
 }
 
 /** The 备份到 Dropbox card: the connection or the steps to make one, and the feed's own consumers under it. */

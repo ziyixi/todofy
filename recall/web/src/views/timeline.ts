@@ -97,7 +97,14 @@ export async function renderTimeline(ctx: ViewContext, key: string | null): Prom
   const deviceFilter = el('div', { class: 'device-filter' }, el('label', { for: 'timeline-device' }, '设备'), devices)
   void ctx.status().then(
     (status) => {
-      devices.append(...status.devices.map((device) => el('option', { value: device.deviceId }, device.label)))
+      const names = status.devices.map((device) => device.label)
+      devices.append(...status.devices.map((device) => {
+        const repeated = names.filter((name) => name === device.label).length > 1
+        const sameVersion = status.devices.filter((item) => item.label === device.label && item.extensionVersion === device.extensionVersion).length > 1
+        let label = repeated ? `${device.label} · ${device.extensionVersion || device.deviceId.slice(-6)}` : device.label
+        if (sameVersion && device.extensionVersion !== '') label += ` · ${device.deviceId.slice(-6)}`
+        return el('option', { value: device.deviceId, title: device.deviceId }, label)
+      }))
       if (deviceId !== '' && !status.devices.some((device) => device.deviceId === deviceId)) devices.append(el('option', { value: deviceId }, '已移除的设备'))
       devices.value = deviceId
       const first = ms(status.firstVisitTime)

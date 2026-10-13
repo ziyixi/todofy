@@ -9,6 +9,20 @@ Its old waiting lists and release identities are historical, not instructions to
 
 ## Current work
 
+`codex/recall-connections-ui` is implementing the owner-requested Recall settings cleanup: same-name installation
+connections fold under the latest, historical identities remain selectable, empty test connections can be removed
+only after server checks, and token labels can change without regenerating credentials. This does not touch the
+Chrome extension or its installed files, phone capture behavior, budgets or other services. Local checks pass:
+web type/lint/build and 144 tests, worker type/lint and 158 tests, related real-workerd token/connection/CPU/scale
+checks and the existing end-to-end smoke, plus proto lint/api-lint/breaking. A real local UI backed by the existing
+workerd harness shows eight synthetic connections as two collapsed groups; mobile width is 390px without horizontal
+overflow and token rename saves via the real API. The local empty-delete native confirmation blocked IAB tab 9;
+the owner is away from the computer, so do not require immediate desktop help. No real connection has been deleted.
+Review also covers Worker-secret-only credentials: rename is available without generating a new secret, and
+unsupported stop/rotation actions are not offered. Pending: final branch CI, same-SHA release and scoped
+production settings verification/empty-test cleanup. The phone's latest page_probe_invalid_result remains a separate
+open capture issue; this settings change does not claim to fix it.
+
 Recall's injection-completion correction is released at `bafbac85` (`2026.1013.45`). The actual 1736 phone receipt
 had eight tab events/two alarms, returned query+lookup and pending injection, without capture/store/screenshot.
 New code consumes real Promise or callback completion; completion timeout alone asks the existing listener once.

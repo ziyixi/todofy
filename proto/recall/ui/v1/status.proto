@@ -209,7 +209,7 @@ message MachineToken {
   // A digest put as a Worker secret by hand (INGEST_TOKEN_SHA256 or EXPORT_TOKEN_SHA256 and their _PREVIOUS) is
   // accepted as well; only deleting that secret stops it.
   bool worker_secret = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // A named upload credential's label, 1-80 characters after trimming. Empty for the legacy route tokens.
+  // The display label, 1-80 characters after trimming. Empty for route tokens that have not been named.
   string label = 6 [(google.api.field_behavior) = OPTIONAL];
 }
 
@@ -252,6 +252,9 @@ message DeviceStatus {
   int32 clock_skew_seconds = 9 [(google.api.field_behavior) = OUTPUT_ONLY];
   // A mobile browser, as reported by its uploads; inactivity alone is not a health failure.
   bool mobile = 10 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // True if this installation has stored visits or snapshots, including historical activity.
+  // Absence means an older server has not checked; it must not be treated as an empty connection.
+  optional bool has_records = 11 [(google.api.field_behavior) = OUTPUT_ONLY];
 }
 
 // An archive consumer of the change feed (contracts/recall-archive-v1), as its requests describe it.

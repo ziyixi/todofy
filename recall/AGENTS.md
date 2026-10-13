@@ -22,6 +22,7 @@
   （`INGEST_TOKEN_SHA256` 等）仍然有效，部署不覆盖也不删除（`deploy/test/secrets-kept.test.mjs`）。导出令牌可选：
   Dropbox 备份不需要它。机器令牌从不进入 owner API，Access JWT 也不能代替机器令牌。
 - **多设备与手机**：独立安装使用自己的设备 ID 和队列；新增的具名上传口令可独立停用，现有共享/Worker secret 口令继续有效。三条机器路由不扩展。Orion 文件包与 Chrome 包共用采集核心；手机按页面可见性采集，不把 API 缺失当作前台证明，不假定 iOS 后台定时运行。正文和截图沿用隐私规则，原生 WebP 不可编码时可用同预算的 JPEG。不增加配对服务或按设备备份。实机未验行为须明确留待 owner，见 `docs/mobile.md`。Orion 采集改动先用现有 WebKit 检查实际构建的 probe/capture、自动 Alarm、IndexedDB、图片和 gzip 消费结果；手写 probe 返回值或仅检查函数调用不能代替这条链路。
+- **连接与口令名称**：同名安装只在 UI 折叠，不合并设备 ID 或历史。`DeleteDevice` 只删除无访问、无快照且 `queued_count=0` 的连接元数据；离线时间不能作为删除依据。实际 ingest 可重新登记连接，request ID 重放不能再次删除。`UpdateMachineToken` 只修改显示 label，保留 ID、摘要、创建时间、旧口令宽限期和 Worker secret；不建立口令与设备绑定。
 - **Dropbox 备份**：归档由 alarm 写进 owner 自己的 Dropbox 应用文件夹（App folder，`backup.ts`、`dropbox.ts`），NAS
   用自带的 Dropbox 同步，NAS 与 owner 的 Mac 上不运行 recall 的代码。连接只用 App key 与 OAuth 2 PKCE（无 app secret）；
   refresh token 只存在对象里，从不返回、不进日志；回调 `GET /api/dropbox/callback` 在 Access 后面，state 一次有效、15 分钟

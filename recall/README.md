@@ -39,7 +39,8 @@ the same Recall storage and Dropbox archive. The existing shared token remains v
   Dropbox when opened. The page also shows its visits, and behind ⋯ 打开原网页,
   以后不保存这个网站的正文 and 删除这个页面的记录 (the visits and texts leave recall; the Dropbox archive only grows:
   it gains the deletion's tombstone line and keeps its files, which the owner removes there by hand if they want).
-- **设置**: devices (last upload, version, outbox, clock skew); 插件口令 (the extension's token: 生成, 重新生成 with
+- **设置**: connections (latest per name, folded older installs, historical-record links and empty-test cleanup);
+  插件口令 (a compact list, rename without changing the token, 重新生成 with
   24 hours' grace, revoke a leaked one at once, stop; shown once; the optional export token of the change feed folded
   under it); 备份到 Dropbox (connect with the App key, the account, the last upload, what waits, failures in words,
   断开); storage and the day's budgets, with 快照在云端保留 (the retention window: 7 天 to 10 年, 7 天 by default, or

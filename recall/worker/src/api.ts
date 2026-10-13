@@ -53,7 +53,7 @@ import { readDenylist, readRetention, validRetention, writeSettings, type Denyli
 import { serviceStatus } from './status.ts';
 import { hostOfKey, utcDay, type DocumentRow, type PageRow, type SiteRow, type Store } from './store.ts';
 import { getVisit, listVisits } from './timeline.ts';
-import { addNamedToken, deleteNamedToken, deleteToken, namedTokenId, newToken, storeToken, tokenDigest, tokenMessage, tokenRoute, type TokenRoute } from './tokens.ts';
+import { addNamedToken, deleteNamedToken, deleteToken, namedTokenId, namedTokenMessage, namedTokens, newToken, renameToken, storeToken, tokenDigest, tokenMessage, tokenRoute, type TokenRoute } from './tokens.ts';
 
 /** What every handler gets from RecallState. */
 export interface ApiContext {
@@ -78,6 +78,12 @@ export interface ApiContext {
 const SETTINGS_FIELDS = new Set(['name', 'denylist_patterns', 'builtin_denylist_patterns', 'etag', 'builtin_site_only_patterns', 'site_only_patterns', 'text_retention_days']);
 const PAGE_ID = /^[0-9a-f]{32}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+function tokenLabel(value: string): string {
+  const label = value.trim();
+  if (label.length === 0 || label.length > 80 || Array.from(label).some((character) => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127)) bad('label must be 1-80 characters');
+  return label;
+}
+
 /** A host as the archive's Site format has it (`_` included). */
 const HOST = /^[a-z0-9_]([a-z0-9._-]{0,251}[a-z0-9_])?$/;
 
@@ -481,9 +487,44 @@ export const handlers: ServiceHandlers<ShapeOf<typeof RecallUiService>, ApiConte
     return once(ctx, request.requestId, 'DisconnectDropboxBackup', request.name, DropboxBackupSchema, () => backupMessage(ctx.store));
   },
 
+  deleteDevice(request, ctx) {
+    const id = request.name.startsWith('devices/') ? request.name.slice('devices/'.length) : '';
+    if (!UUID.test(id)) bad('not a device name');
+    return Promise.resolve(once(ctx, request.requestId, 'DeleteDevice', request.name, EmptySchema, () => {
+      const row = ctx.store.one<{ queued_count: number; has_records: number }>(`SELECT d.queued_count,
+        EXISTS(SELECT 1 FROM visits v WHERE v.device_id = d.id) OR
+        EXISTS(SELECT 1 FROM documents s WHERE s.device_id = d.id) AS has_records
+        FROM devices d WHERE d.id = ?`, id) ?? fail('NOT_FOUND');
+      if (row.queued_count > 0 || row.has_records !== 0) fail('DEVICE_NOT_EMPTY');
+      ctx.store.run(`DELETE FROM devices WHERE id = ?`, id);
+      return create(EmptySchema);
+    }));
+  },
+
+  updateMachineToken(request, ctx) {
+    const token = request.machineToken ?? bad('machine_token is required');
+    let paths: '*' | readonly string[];
+    try {
+      paths = updatePaths(request.updateMask);
+    } catch (error) {
+      if (error instanceof FieldMaskError) bad('update_mask must contain only label');
+      throw error;
+    }
+    if (paths === '*' || paths.length !== 1 || paths[0] !== 'label') bad('update_mask must contain only label');
+    const label = tokenLabel(token.label);
+    const route = tokenRoute(token.name);
+    const id = namedTokenId(token.name);
+    if (route === null && id === null) fail('NOT_FOUND');
+    return Promise.resolve(once(ctx, request.requestId, 'UpdateMachineToken', token.name, MachineTokenSchema, () => {
+      if (!renameToken(ctx.store, token.name, label)) fail('NOT_FOUND');
+      if (route !== null) return tokenMessage(ctx.store, route, ctx.now, ctx.secretTokens[route]);
+      const stored = namedTokens(ctx.store).find((current) => current.id === id) ?? fail('NOT_FOUND');
+      return namedTokenMessage(stored);
+    }));
+  },
+
   async createMachineToken(request, ctx) {
-    const label = request.machineToken?.label.trim() ?? '';
-    if (label.length === 0 || label.length > 80 || Array.from(label).some((character) => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127)) bad('label must be 1-80 characters');
+    const label = tokenLabel(request.machineToken?.label ?? '');
     if (answered(ctx, request.requestId)) return once(ctx, request.requestId, 'CreateMachineToken', 'machineTokens', MachineTokenSchema, () => fail('INTERNAL'));
     const token = newToken('ingest');
     const digest = await tokenDigest(token);

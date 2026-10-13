@@ -3,7 +3,7 @@ import { create } from '@ziyixi/proto/protobuf'
 import { MachineTokenSchema, type MachineToken } from '@ziyixi/proto/recall/ui/v1/status_pb'
 import { api } from '../api.ts'
 import type { ViewContext } from '../app.ts'
-import { disclosure, menu } from '../components.ts'
+import { disclosure, menu, type MenuAction } from '../components.ts'
 import { button, el, fill, toast } from '../dom.ts'
 import { ago, ms, span } from '../format.ts'
 import { act } from './common.ts'
@@ -30,74 +30,99 @@ const TOKEN_WORDS = {
 
 type Route = keyof typeof TOKEN_WORDS
 
-/** The 插件口令 card's body: the extension's token, and the optional export token folded under it. */
-export function paintTokens(ctx: ViewContext, box: HTMLElement, tokens: readonly MachineToken[], shown: { readonly name: string; readonly token: string } | null = null): void {
+type ShownToken = { readonly name: string; readonly token: string } | null
+
+/** One list for upload credentials; export access remains optional and folded. */
+export function paintTokens(ctx: ViewContext, box: HTMLElement, tokens: readonly MachineToken[], shown: ShownToken = null): void {
   const of = (route: Route) => tokens.find((item) => item.name === `machineTokens/${route}`) ?? create(MachineTokenSchema, { name: `machineTokens/${route}` })
-  const repaint = (next: MachineToken, token: string | null) => {
-    paintTokens(ctx, box, [...tokens.filter((item) => item.name !== next.name), next], token === null || token === '' ? null : { name: next.name, token })
+  const repaint = (next: MachineToken | null, name: string, secret: ShownToken = shown) => {
+    let updated: readonly MachineToken[]
+    if (next === null) updated = tokens.filter((item) => item.name !== name)
+    else if (tokens.some((item) => item.name === name)) updated = tokens.map((item) => item.name === name ? next : item)
+    else updated = [...tokens, next]
+    paintTokens(ctx, box, updated, secret)
   }
-  const controls = (route: Route): HTMLElement[] => {
-    const token = of(route)
-    const words = TOKEN_WORDS[route]
-    const made = ms(token.createTime)
-    const regenerate = async (revokePrevious: boolean) => {
-      await act(
-        (requestId) => api.regenerateMachineToken({ name: token.name, revokePrevious, requestId }),
-        `已生成新的${words.name}`,
-        (answer) => {
-          // A repeated request answers without the token (it is shown once): the owner makes another.
-          if (answer.token === '') toast(`没有收到新${words.name}：请再生成一次`)
-          repaint(answer, answer.token)
-        },
-      )
-    }
-    const remove = async () => {
-      if (!ctx.host.confirm(words.remove)) return
-      await act((requestId) => api.deleteMachineToken({ name: token.name, requestId }), `已停用${words.name}`, () => {
-        repaint(create(MachineTokenSchema, { name: token.name, workerSecret: token.workerSecret }), null)
-      })
-    }
-    const until = ms(token.previousExpireTime)
-    const parts: HTMLElement[] = []
-    if (made === null) {
-      parts.push(el('p', { class: 'hint' }, words.none), el('div', { class: 'actions' }, button('生成', () => void regenerate(false))))
-    } else {
-      parts.push(
-        el(
-          'div',
-          { class: 'row-head' },
-          el('span', { class: 'row-title' }, words.name),
-          el('span', { class: 'meta' }, `${ago(made, ctx.host.now())}生成`),
-          menu(`${words.name}的更多操作`, [
-            [
-              '旧口令泄露：立即作废并重新生成',
-              () => {
-                if (ctx.host.confirm(words.revoke)) void regenerate(true)
-              },
-              'danger',
-            ],
-            ['停用', () => void remove(), 'danger'],
-          ]),
-        ),
-      )
-      if (until !== null) parts.push(el('p', { class: 'hint' }, `旧口令 ${span(until - ctx.host.now())}内仍可用`))
-      parts.push(
-        el(
-          'div',
-          { class: 'actions' },
-          button('重新生成', () => {
-            if (ctx.host.confirm(words.regenerate)) void regenerate(false)
-          }),
-        ),
-      )
-    }
-    if (token.workerSecret) parts.push(el('p', { class: 'hint' }, words.secret))
-    if (shown !== null && shown.name === token.name) parts.push(onceBox(shown.token, words.name))
-    return parts
+  const row = (token: MachineToken) => tokenRow(ctx, token, shown, (next, secret = shown) => repaint(next, token.name, secret))
+  const shared = of('ingest')
+  const exported = of('export')
+  const sharedExists = ms(shared.createTime) !== null || shared.workerSecret
+  const active = tokens.filter((item) => !['machineTokens/ingest', 'machineTokens/export'].includes(item.name))
+  if (sharedExists) active.push(shared)
+  const exportBox = disclosure('导出口令（可选）', el('ul', { class: 'rows token-list' }, row(exported)))
+  if (shown?.name === exported.name) exportBox.open = true
+  fill(box,
+    el('p', { class: 'hint' }, '为口令命名，方便辨认和单独停用。一个口令可用于多台设备。'),
+    active.length === 0 ? null : el('ul', { class: 'rows token-list' }, ...active.map(row)),
+    addToken(tokens, (next, secret) => paintTokens(ctx, box, next, secret)),
+    sharedExists ? null : disclosure('共享插件口令（兼容现有设备）', el('ul', { class: 'rows token-list' }, row(shared))),
+    exportBox,
+  )
+}
+
+/** One credential, with naming and dangerous actions in the same menu. */
+function tokenRow(ctx: ViewContext, token: MachineToken, shown: ShownToken, repaint: (next: MachineToken | null, secret?: ShownToken) => void): HTMLElement {
+  const route: Route | null = token.name === 'machineTokens/ingest' ? 'ingest' : token.name === 'machineTokens/export' ? 'export' : null
+  const words = route === null ? null : TOKEN_WORDS[route]
+  const label = token.label || words?.name || '插件口令'
+  const made = ms(token.createTime)
+  const configuredOnly = words !== null && token.workerSecret && made === null
+  const regenerate = async (revokePrevious: boolean) => {
+    if (words === null) return
+    await act((requestId) => api.regenerateMachineToken({ name: token.name, revokePrevious, requestId }), `已生成新的${words.name}`, (answer) => {
+      if (answer.token === '') toast(`没有收到新${words.name}：请再生成一次`)
+      repaint(answer, answer.token === '' ? null : { name: answer.name, token: answer.token })
+    })
   }
-  const named = namedTokens(ctx, tokens, shown, (next, token) => paintTokens(ctx, box, next, token))
-  fill(box, named, el('section', { class: 'shared-token' }, el('h3', {}, '共享插件口令'), ...controls('ingest')), disclosure('导出口令（可选）', ...controls('export')))
-  if (shown?.name === 'machineTokens/export') box.querySelector('details')?.setAttribute('open', '')
+  const remove = () => {
+    if (!ctx.host.confirm(words?.remove ?? `停用“${label}”的上传口令？使用这个口令的设备会停止上传，已记录内容保留。`)) return
+    void act((requestId) => api.deleteMachineToken({ name: token.name, requestId }), '已停用口令', () => {
+      const next = route === null ? null : create(MachineTokenSchema, { name: token.name, label: token.label, workerSecret: token.workerSecret })
+      repaint(next, shown?.name === token.name ? null : shown)
+    })
+  }
+  const field = el('input', { type: 'text', value: label, 'aria-label': `修改 ${label} 的名称`, maxlength: '80', autocomplete: 'off' })
+  const cancel = button('取消', () => { rename.hidden = true; field.value = label }, { class: 'quiet small' })
+  const save = el('button', { type: 'submit', class: 'small' }, '保存名称')
+  const rename = el('form', { class: 'actions token-rename', hidden: true, 'aria-label': `修改 ${label} 的名称` }, field, save, cancel)
+  rename.addEventListener('submit', (event) => {
+    event.preventDefault()
+    const nextLabel = field.value.trim()
+    if (nextLabel === '') { toast('先填写口令名称'); field.focus(); return }
+    if (save.disabled) return
+    save.disabled = cancel.disabled = true
+    void act((requestId) => api.updateMachineToken({ machineToken: { name: token.name, label: nextLabel }, updateMask: { paths: ['label'] }, requestId }), '已修改口令名称', (answer) => repaint(answer))
+      .finally(() => { save.disabled = cancel.disabled = false })
+  })
+  const actions: MenuAction[] = [
+    ['改名', () => { rename.hidden = false; field.focus(); field.select() }],
+  ]
+  if (configuredOnly) {
+    actions.push(['生成可管理口令', () => {
+      if (ctx.host.confirm('生成一个可在此管理的新口令？当前 Worker 配置的口令继续有效。')) void regenerate(false)
+    }])
+  } else {
+    if (words !== null) actions.push(
+      ['重新生成', () => { if (ctx.host.confirm(words.regenerate)) void regenerate(false) }],
+      ['旧口令泄露：立即作废并重新生成', () => { if (ctx.host.confirm(words.revoke)) void regenerate(true) }, 'danger'],
+    )
+    actions.push(['停用', remove, 'danger'])
+  }
+  const until = ms(token.previousExpireTime)
+  let generated = '生成时间未知'
+  if (configuredOnly) generated = 'Worker 配置 · 生成时间未知'
+  else if (made !== null) generated = `${ago(made, ctx.host.now())}生成`
+  return el('li', { class: `token-row${route === null ? '' : route === 'ingest' ? ' shared-token' : ' export-token'}` },
+    made === null && words !== null && !configuredOnly
+      ? el('div', {}, el('p', { class: 'hint' }, words.none), button('生成', () => void regenerate(false), { class: 'small' }))
+      : el('div', {},
+        el('div', { class: 'row-head' }, el('span', { class: 'row-title' }, label), menu(`${label}的更多操作`, actions)),
+        el('p', { class: 'meta token-meta' }, `${route === 'export' ? '导出口令' : route === 'ingest' ? '共享上传口令' : '上传口令'} · ${generated}`),
+        rename,
+      ),
+    until === null ? null : el('p', { class: 'hint' }, `旧口令 ${span(until - ctx.host.now())}内仍可用`),
+    token.workerSecret && words !== null ? el('p', { class: 'hint' }, configuredOnly ? '这个口令在 Worker 密钥里配置；改名不会更换它，停用需要删除对应密钥。' : words.secret) : null,
+    shown?.name === token.name ? onceBox(shown.token, route === null ? `${label} 的口令` : label) : null,
+  )
 }
 
 /** A new token, shown this once: read-only, selected, with 复制 and what to do with it. */
@@ -121,50 +146,21 @@ function onceBox(token: string, name: string): HTMLElement {
   )
 }
 
-/** Independent upload credentials let the owner stop one device without changing the others. */
-function namedTokens(
-  ctx: ViewContext,
-  tokens: readonly MachineToken[],
-  shown: { readonly name: string; readonly token: string } | null,
-  repaint: (tokens: readonly MachineToken[], shown: { readonly name: string; readonly token: string } | null) => void,
-): HTMLElement {
-  const own = tokens.filter((token) => !['machineTokens/ingest', 'machineTokens/export'].includes(token.name))
-  const field = el('input', { type: 'text', placeholder: '例如 iPhone', 'aria-label': '口令名称', maxlength: '80', autocomplete: 'off' })
-  const make = button('添加设备口令', () => {
+/** Add an upload credential; its name does not bind it to a single device. */
+function addToken(tokens: readonly MachineToken[], repaint: (tokens: readonly MachineToken[], shown: ShownToken) => void): HTMLElement {
+  const field = el('input', { type: 'text', placeholder: '例如 日常浏览', 'aria-label': '口令名称', maxlength: '80', autocomplete: 'off' })
+  const make = el('button', { type: 'submit', class: 'small' }, '添加口令')
+  const form = el('form', { class: 'actions token-add', 'aria-label': '添加插件口令' }, field, make)
+  form.addEventListener('submit', (event) => {
+    event.preventDefault()
     const label = field.value.trim()
-    if (label === '') {
-      toast('先填写口令名称，例如 iPhone')
-      field.focus()
-      return
-    }
+    if (label === '') { toast('先填写口令名称'); field.focus(); return }
+    if (make.disabled) return
     make.disabled = true
-    void act(
-      (requestId) => api.createMachineToken({ machineToken: { label }, requestId }),
-      '已添加设备口令',
-      (answer) => {
-        if (answer.token === '') toast('没有收到新口令：请停用这条口令后重新添加')
-        repaint([...tokens, answer], answer.token === '' ? null : { name: answer.name, token: answer.token })
-      },
-    ).finally(() => { make.disabled = false })
+    void act((requestId) => api.createMachineToken({ machineToken: { label }, requestId }), '已添加上传口令', (answer) => {
+      if (answer.token === '') toast('没有收到新口令：请停用这条口令后重新添加')
+      repaint([...tokens, answer], answer.token === '' ? null : { name: answer.name, token: answer.token })
+    }).finally(() => { make.disabled = false })
   })
-  const rows = own.map((token) => {
-    const made = ms(token.createTime)
-    return el('li', {},
-      el('div', { class: 'row-head' },
-        el('span', { class: 'row-title' }, token.label),
-        el('span', { class: 'meta' }, made === null ? '生成时间未知' : `${ago(made, ctx.host.now())}生成`),
-        button('停用', () => {
-          if (!ctx.host.confirm(`停用“${token.label}”的上传口令？使用这个口令的设备会停止上传，已记录内容保留。`)) return
-          void act((requestId) => api.deleteMachineToken({ name: token.name, requestId }), '已停用设备口令', () => repaint(tokens.filter((item) => item.name !== token.name), null))
-        }, { class: 'quiet small danger', 'aria-label': `停用 ${token.label}` }),
-      ),
-      shown?.name === token.name ? onceBox(shown.token, `${token.label} 的口令`) : null,
-    )
-  })
-  return el('section', { class: 'named-tokens stack' },
-    el('h3', {}, '设备口令'),
-    el('p', { class: 'hint' }, '每台设备可用独立口令。停用一条口令不会影响其他设备，电脑现有口令继续有效。'),
-    rows.length === 0 ? null : el('ul', { class: 'rows' }, ...rows),
-    el('div', { class: 'actions' }, field, make),
-  )
+  return form
 }

@@ -17,7 +17,7 @@
  */
 import { ACTIVE_MS, DAY, ERRORS_KEPT, REQUEST_ID_TTL_MS, USAGE_KEPT_DAYS } from './limits.ts';
 
-export const SCHEMA_VERSION = 5;
+export const SCHEMA_VERSION = 6;
 
 export const SCHEMA_V1: readonly string[] = [
   `CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)`,
@@ -189,6 +189,11 @@ export const SCHEMA_V4: readonly string[] = [
 export const SCHEMA_V5: readonly string[] = [
   `ALTER TABLE devices ADD COLUMN mobile INTEGER NOT NULL DEFAULT 0`,
   `CREATE INDEX IF NOT EXISTS visits_device ON visits (device_id, start_ms, id)`,
+];
+
+/** Version 6: bounded presence checks for historical snapshots on a device connection. */
+export const SCHEMA_V6: readonly string[] = [
+  `CREATE INDEX IF NOT EXISTS documents_device ON documents (device_id)`,
 ];
 
 export type Value = string | number | null | ArrayBuffer;
@@ -410,6 +415,7 @@ export class Store {
       const hasMobile = this.sql.exec<{ name: string }>(`PRAGMA table_info(devices)`).toArray().some((row) => row.name === 'mobile');
       for (const statement of SCHEMA_V5) if (!statement.startsWith('ALTER TABLE') || !hasMobile) this.sql.exec(statement);
     }
+    if (version < 6) for (const statement of SCHEMA_V6) this.sql.exec(statement);
     if (version !== SCHEMA_VERSION) this.setMeta('schema_version', String(SCHEMA_VERSION));
     // The migration's rows are no request's: neither the meter nor the budgets count them.
     this.meter = { read: 0, written: 0 };

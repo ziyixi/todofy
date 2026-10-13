@@ -50,6 +50,13 @@ import "recall/ui/v1/status.proto";
 option java_multiple_files = true;
 option java_outer_classname = "RecallUiServiceProto";
 option java_package = "science.ziyixi.recall.ui.v1";
+// Device connection metadata is listed by ServiceStatus; deleting it never deletes recorded activity.
+option (google.api.resource_definition) = {
+  type: "recall.ziyixi.science/Device"
+  pattern: "devices/{device}"
+  singular: "device"
+  plural: "devices"
+};
 
 // The owner's browsing record: the timeline of visits, the search over pages and their captured texts, a page's
 // visits and latest text, the sites, the settings and the status.
@@ -177,6 +184,27 @@ service RecallUiService {
       post: "/api/v1/{name=dropboxBackup}:disconnect"
       body: "*"
     };
+  }
+
+  // Removes an empty device connection. A device with visits, snapshots or pending uploads is retained.
+  // Its token and archive are unchanged; a later upload registers the connection again.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc DeleteDevice(DeleteDeviceRequest) returns (google.protobuf.Empty) {
+    option (google.api.http) = {delete: "/api/v1/{name=devices/*}"};
+    option (google.api.method_signature) = "name";
+  }
+
+  // Changes only a credential's display label, without rotating or revealing its token.
+  // Display names use last-write-wins; no credential or device identity changes.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc UpdateMachineToken(UpdateMachineTokenRequest) returns (MachineToken) {
+    option (google.api.http) = {
+      patch: "/api/v1/{machine_token.name=machineTokens/*}"
+      body: "machine_token"
+    };
+    option (google.api.method_signature) = "machine_token,update_mask";
   }
 
   // Creates an independent upload credential. Only its label is input; the server chooses its UUID and shows the
@@ -450,6 +478,33 @@ message DisconnectDropboxBackupRequest {
   ];
   // The idempotency key (AIP-155), in the body; see RecallUiService.
   string request_id = 2 [
+    (google.api.field_info).format = UUID4,
+    (google.api.field_behavior) = OPTIONAL
+  ];
+}
+
+// Input of DeleteDevice.
+message DeleteDeviceRequest {
+  // devices/{uuid}, the installation identity shown in DeviceStatus.device_id.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "recall.ziyixi.science/Device"
+  ];
+  // The idempotency key (AIP-155), a query parameter; a replay does not remove a newly reconnected device.
+  string request_id = 2 [
+    (google.api.field_info).format = UUID4,
+    (google.api.field_behavior) = OPTIONAL
+  ];
+}
+
+// Input of UpdateMachineToken.
+message UpdateMachineTokenRequest {
+  // Existing resource name and the new display label, trimmed to 1-80 characters.
+  MachineToken machine_token = 1 [(google.api.field_behavior) = REQUIRED];
+  // Only label may be named. Missing, empty, wildcard or other paths are BAD_REQUEST.
+  google.protobuf.FieldMask update_mask = 2 [(google.api.field_behavior) = OPTIONAL];
+  // The idempotency key (AIP-155), a query parameter; replay returns metadata without a bearer token.
+  string request_id = 3 [
     (google.api.field_info).format = UUID4,
     (google.api.field_behavior) = OPTIONAL
   ];

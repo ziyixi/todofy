@@ -41,6 +41,7 @@ export const REASONS: Readonly<Record<Reason, { readonly code: Code; readonly me
     message: 'the Dropbox App key breaks its rule',
     zh: 'App key 格式不对：在 Dropbox 应用的设置页复制 App key（小写字母和数字），不是 App secret',
   },
+  DEVICE_NOT_EMPTY: { code: Code.FAILED_PRECONDITION, message: 'the device has recorded activity or pending uploads', zh: '这台设备仍有历史记录或待上传内容，不能移除连接' },
   INVALID_RETENTION: { code: Code.INVALID_ARGUMENT, message: 'the retention window is outside 30-3650 days', zh: '正文在云端保留的天数要在 30 到 3650 之间，或选永久保留' },
 };
 

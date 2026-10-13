@@ -440,11 +440,11 @@ retention metadata, and version 4 the optional screenshot metadata and seven-day
 | Table | Columns (indexes) |
 | --- | --- |
 | `meta` | `key`, `value`: schema version, `feed_id` (a UUID made by the first migration), `seq` (the feed's counter), settings (denylist JSON, etag, `text_retention_days`: days or `off`), the running totals (`archived_count`: texts only in the archive), budget counters, `oldest_indexed_text_ms`, the machine tokens' digests (`token_ingest`, `token_export`), the Dropbox connection (`dropbox_*`) and the archive's progress (`archive_*`: the scanned and the written seq, the target, the last upload, the last failure and its retry time) |
-| `devices` | `id`, `label`, `extension_version`, `first_seen_ms`, `last_seen_ms`, `queued_count`, `last_error_code`, `clock_skew_s` |
+| `devices` | `id`, `label`, `extension_version`, `first_seen_ms`, `last_seen_ms`, `queued_count`, `last_error_code`, `clock_skew_s`, `mobile` |
 | `sites` | `host`, `host_key` (labels reversed, `com.github.gist.`; unique), `first_visit_ms`, `last_visit_ms`, `visit_count`, `focus_seconds` (index `focus_seconds`) |
 | `pages` | `rowid` (`INTEGER PRIMARY KEY AUTOINCREMENT`, never reused; the index's rowid), `id` (32 hex, unique), `url`, `url_truncated`, `title`, `host_key`, `first_visit_ms`, `last_visit_ms` (never null: a page a capture makes takes the capture's time until its visit arrives), `visit_count`, `focus_seconds`, `document_count`, `latest_document`, `latest_text_document`, `latest_text_sha256`, `text_indexed` (indexes `last_visit_ms`; `host_key, last_visit_ms`) |
-| `visits` | `id`, `seq` (unique), `seq_ms`, `page_rowid`, `device_id`, `device_label`, `url`, `url_truncated`, `title`, `start_ms`, `end_ms`, `focus_seconds`, `spans` (JSON, at most 200 pairs), `revision` (indexes `start_ms`; `page_rowid, start_ms`) |
-| `documents` | `id`, `seq` (unique), `seq_ms`, `page_rowid`, `visit`, `device_id`, `device_label`, `capture_ms`, `url`, `url_truncated`, `title`, `description`, `blob_path`, `sha256`, `stored_bytes`, `text_bytes`, `text_sha256`, `truncated`, optional `screenshot_path`, `screenshot_sha256`, `screenshot_bytes`, `screenshot_width`, `screenshot_height`, `archived_ms` (schema 3: when retention moved the text to the archive alone; null while R2 holds it) (indexes `page_rowid, capture_ms`; `capture_ms` where `archived_ms` is null, schema 3) |
+| `visits` | `id`, `seq` (unique), `seq_ms`, `page_rowid`, `device_id`, `device_label`, `url`, `url_truncated`, `title`, `start_ms`, `end_ms`, `focus_seconds`, `spans` (JSON, at most 200 pairs), `revision` (indexes `start_ms`; `page_rowid, start_ms`; `device_id, start_ms, id`) |
+| `documents` | `id`, `seq` (unique), `seq_ms`, `page_rowid`, `visit`, `device_id`, `device_label`, `capture_ms`, `url`, `url_truncated`, `title`, `description`, `blob_path`, `sha256`, `stored_bytes`, `text_bytes`, `text_sha256`, `truncated`, optional `screenshot_path`, `screenshot_sha256`, `screenshot_bytes`, `screenshot_width`, `screenshot_height`, `archived_ms` (schema 3: when retention moved the text to the archive alone; null while R2 holds it) (indexes `page_rowid, capture_ms`; `device_id`, schema 6; `capture_ms` where `archived_ms` is null, schema 3) |
 | `fts` | `fts5(title, url, body, content='', contentless_delete=1, tokenize='unicode61 remove_diacritics 2')`; rowid = `pages.rowid` (§6) |
 | `tombstones` | `id`, `seq` (unique), `seq_ms`, `page_id` (indexed): the feed's deletions, and the ledger that keeps a deleted page deleted (§2.3) |
 | `purges` | `page_rowid`, `page_id`, `started_ms`: deleted pages whose rows and R2 objects the alarm is still removing |
@@ -839,19 +839,17 @@ restoration is off). `/` anywhere focuses the search box.
 
 Five cards, in the owner's words (a code stays in a tooltip only):
 
-- **设备**: one row per device: the label, `最近上传 3 分钟前` (in the warning color after 24 hours, with the line 检查
-  Chrome 是否开着、扩展是否启用（开发者模式）), the version, `待上传 0`, the last error as a sentence that says what to
-  do (`outbox_full`: 扩展存储已满，新页面的正文没有保存：打开扩展的选项检查, in the warning color; `capture_failed`,
-  `upload_failed` quieter), and `时钟差 1 小时` in the warning color when its clock is off. Without a device: the three
-  steps to connect one, clicks only (插件口令 → 生成; `chrome://extensions` → 开发者模式 → 加载已解压的扩展程序; paste the
-  token and a device name in the extension's options, whose server is filled in already). Under the devices, when uploads
-  lost items in the last 7 days, one warning line per reason (`7 天内有 3 条上传被拒（格式不对），已丢失：扩展可能有问题`),
-  and a quiet line for items waiting for a newer recall (`unsupported_item`).
-- **插件口令** (§2.2): the extension's token: without one, what it is for and 生成; with one, `7 天前生成`, 重新生成
-  (asks first: the old one works 24 hours more, `旧口令 24 小时内仍可用` while it does), and behind ⋯ 旧口令泄露：立即作废并
-  重新生成 and 停用 (each asks first). A new token shows once, in a read-only field with 复制, the warning line 只显示这一次
-  and the server address to set in the extension. The export token, optional, is folded under `导出口令（可选）` with the
-  same controls and the line that only programs reading the change feed need it.
+- **设备**: same-name installations form a display group. The latest connection is visible; older connections
+  are folded under 同名旧连接 with their own version, status and 访问记录 link. Labels do not merge identities.
+  Timeline options retain every ID and distinguish repeated names by version. 移除空连接 is offered only when
+  the server explicitly reports no stored activity and no pending uploads. DeleteDevice rechecks visits, snapshots
+  and queued_count in the transaction, then removes only connection metadata; tokens and archives stay unchanged.
+  A later upload registers the installation again. Offline age never authorizes deletion.
+- **插件口令** (§2.2): named and active shared upload credentials use one compact list, with a name and ⋯ above
+  type and creation time. 改名 saves only label through UpdateMachineToken and an explicit update mask; digest,
+  creation time, previous-token grace and Worker-secret credentials stay unchanged. Display names use
+  last-write-wins; labels do not bind credentials to devices. New secrets still show once, with 复制. Adding a
+  credential uses one form; rotation and stop actions remain in ⋯, and optional export access stays folded.
 - **备份到 Dropbox** (§7.2): not connected, one line of what it does, the four steps at Dropbox (the apps page, Scoped
   access and App folder, the two permissions, the exact Redirect URI built from the page's own origin, the App key)
   and the App key field with 连接; connected, `Dropbox · <account>` with `20 分钟前上传` (the seq in a tooltip),
@@ -1130,6 +1128,8 @@ Enter, focus lost on redraws). Every finding was taken; where its fix was a choi
 Each browser install keeps its own device UUID and upload queue. Named ingest credentials can be created and
 stopped independently while the existing shared credential remains valid. Device identity remains client-reported;
 credential labels are not a pairing protocol. Timeline filtering uses the stored device ID, not its editable label.
+Settings folds repeated installation names for display only. Empty connections can be removed; every connection
+with retained visits or snapshots is protected, including old computers. Label changes never rotate a credential.
 Orion uses a file-install build of the same capture core and probes top-frame visibility/document identity on iOS.
 Native JPEG is accepted when WebP encoding is unavailable, within the same byte/pixel limits. Both formats use
 the existing R2, feed and single Dropbox archive; hot removal requires the same archive confirmations.

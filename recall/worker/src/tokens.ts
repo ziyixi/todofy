@@ -119,6 +119,21 @@ export function storeToken(store: Store, route: TokenRoute, digest: string, now:
   store.setMeta(`token_${route}`, JSON.stringify(stored));
 }
 
+/** Changes only a display label; authentication digests and their lifetimes stay untouched. */
+export function renameToken(store: Store, name: string, label: string): boolean {
+  const route = tokenRoute(name);
+  if (route !== null) {
+    store.setMeta(`token_label_${route}`, label);
+    return true;
+  }
+  const id = namedTokenId(name);
+  if (id === null) return false;
+  const current = namedTokens(store);
+  if (!current.some((token) => token.id === id)) return false;
+  store.setMeta(NAMED_TOKEN_KEY, JSON.stringify(current.map((token) => token.id === id ? { ...token, label } : token)));
+  return true;
+}
+
 /** Forgets a route's token and its previous (inside the caller's transaction); false when there was none. */
 export function deleteToken(store: Store, route: TokenRoute): boolean {
   if (store.getMeta(`token_${route}`) === null) return false;
@@ -160,6 +175,7 @@ export function tokenMessage(store: Store, route: TokenRoute, now: number, worke
   const grace = stored !== null && stored.previous !== null && (stored.previous_until_ms ?? 0) > now ? stored.previous_until_ms : null;
   return create(MachineTokenSchema, {
     name: `machineTokens/${route}`,
+    label: store.getMeta(`token_label_${route}`) ?? '',
     token,
     createTime: time(stored?.created_ms ?? null),
     previousExpireTime: time(grace),

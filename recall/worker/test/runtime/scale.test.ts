@@ -182,4 +182,26 @@ describe('rows read on a synthetic two-year store', () => {
     // The oldest went first: all of them captured in the first months of the two years.
     expect(await h.sql(`SELECT max(capture_ms) < ? AS early FROM documents WHERE archived_ms IS NOT NULL`, START + 30 * DAY)).toEqual([{ early: 1 }]);
   }, 120_000);
+
+  it('checks connection history and removes an empty device without scanning visits or snapshots', async () => {
+    const known = '5d0c3b52-8a5e-4f8e-9b8e-2d7c1a6f4e10';
+    const empty = '911e6d72-e917-4a44-a84e-1a6b3a8a0f11';
+    // Existing archive aggregates have their own bounded reads; measure only the connections' added cost.
+    await h.rows();
+    await h.api.getServiceStatus({ name: 'serviceStatus' });
+    const baseline = (await h.rows()).read;
+    // The existing two-year fixture has 220,000 visits on known and over 20,000 snapshots on d.
+    for (const id of [known, 'd', empty]) {
+      await h.sql(`INSERT INTO devices (id, label, extension_version, first_seen_ms, last_seen_ms) VALUES (?, 'Synthetic device', 'test', ?, ?)`, id, START, NOW);
+    }
+    await h.rows();
+    const status = await h.api.getServiceStatus({ name: 'serviceStatus' });
+    expect((await h.rows()).read - baseline).toBeLessThan(100);
+    expect(status.devices.find((device) => device.deviceId === known)?.hasRecords).toBe(true);
+    expect(status.devices.find((device) => device.deviceId === 'd')?.hasRecords).toBe(true);
+    expect(status.devices.find((device) => device.deviceId === empty)?.hasRecords).toBe(false);
+    await h.api.deleteDevice({ name: `devices/${empty}`, requestId: op() });
+    expect((await h.rows()).read).toBeLessThan(100);
+    expect(await h.sql(`SELECT id FROM devices WHERE id = ?`, empty)).toEqual([]);
+  });
 });

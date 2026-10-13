@@ -152,6 +152,7 @@ const fold = (text: string) => text.normalize('NFKC').toLowerCase()
 /** The LocalizedMessage of the reasons the fake answers and the UI shows as they are. */
 const LOCALIZED: Readonly<Record<string, string>> = {
   NOT_FOUND: '找不到这一项（可能已被删除）',
+  DEVICE_NOT_EMPTY: '这个连接有记录或待上传内容，不能移除',
   UNAVAILABLE: '服务暂时不可用，请稍后再试',
   INVALID_SETTINGS: '网站格式不对',
   INVALID_RETENTION: '正文和截图在云端保留的天数要在 7 到 3650 之间，或选永久保留',
@@ -316,6 +317,16 @@ export class FakeServer {
         }
         return Promise.resolve(this.settings)
       },
+      deleteDevice: (request) => {
+        const id = request.name.slice('devices/'.length)
+        const device = this.status.devices?.find((item) => item.deviceId === id)
+        if (device === undefined) notFound()
+        if (device!.hasRecords || device!.queuedCount > 0 || this.visits.some((item) => item.deviceId === id)) {
+          throw new RpcError(Code.FAILED_PRECONDITION, 'DEVICE_NOT_EMPTY', 'connection has records or pending uploads')
+        }
+        this.status = { ...this.status, devices: this.status.devices?.filter((item) => item.deviceId !== id) ?? [] }
+        return Promise.resolve(create(EmptySchema))
+      },
       getServiceStatus: () => {
         if (this.statusFailures > 0) {
           this.statusFailures -= 1
@@ -368,6 +379,21 @@ export class FakeServer {
         this.tokens = [...this.tokens, create(MachineTokenSchema, { ...token, token: '' })]
         return Promise.resolve(token)
       },
+      updateMachineToken: (request) => {
+        const input = request.machineToken
+        const paths = updatePaths(request.updateMask)
+        if (paths === '*' || paths.length !== 1 || paths[0] !== 'label') throw new RpcError(Code.INVALID_ARGUMENT, 'BAD_REQUEST', 'only label can change')
+        const previous = this.made.get(request.requestId)
+        if (previous !== undefined) return Promise.resolve(previous)
+        const current = this.tokens.find((item) => item.name === input?.name)
+        if (current === undefined) notFound()
+        const label = input?.label.trim() ?? ''
+        if (label.length === 0 || label.length > 80) throw new RpcError(Code.INVALID_ARGUMENT, 'BAD_REQUEST', 'invalid label')
+        const next = create(MachineTokenSchema, { ...current!, label, token: '' })
+        this.tokens = this.tokens.map((item) => item.name === next.name ? next : item)
+        this.made.set(request.requestId, next)
+        return Promise.resolve(next)
+      },
       regenerateMachineToken: (request) => {
         const route = request.name.split('/')[1] ?? ''
         if (!['ingest', 'export'].includes(route)) notFound()
@@ -376,6 +402,7 @@ export class FakeServer {
         const previous = this.tokens.find((item) => item.name === request.name)
         const token = create(MachineTokenSchema, {
           name: request.name,
+          label: previous?.label ?? '',
           token: `recall_${route}_${'T'.repeat(43)}`,
           createTime: timestampFromMs(NOW),
           ...(previous?.createTime !== undefined && !request.revokePrevious ? { previousExpireTime: timestampFromMs(NOW + 24 * HOUR) } : {}),
