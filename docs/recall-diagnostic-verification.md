@@ -316,14 +316,15 @@ Upload. It reports thirteen page events and one Alarm; focus and current/stored 
 replies are objects, screenshot is a string and sender is this extension. Injection completion is still pending while
 `capture_store=saved`.
 
-The production search restricted to `https://example.org/?recall-diagnostic=1` shows a 21:55–21:56 phone visit with
-55 seconds of focus and one new snapshot at 21:56. Its reader has 905 characters; the image is loaded at natural
-883 × 1920 dimensions and visibly shows the public test page. Only one new snapshot was observed. The earlier
+A search restricted to example.org and the test dates locates `https://example.org/?recall-diagnostic=1`. Its detail
+shows a 21:55–21:56 phone visit with 55 seconds of focus and one new snapshot at 21:56. Its reader has 905 characters;
+the JPEG is loaded at natural 883 × 1920 dimensions and visibly shows the public test page. Only one new snapshot was observed. The earlier
 18:15 snapshot and 40-second visit remain.
 
 The latest version, matching time, owner's confirmation and rendered public receipt establish automatic phone
 text/image/ended-visit upload and display for this foreground test; no exact device-UUID/document join was read.
-The initial queue count of one was sampled before upload settlement and can lag success; the device reports no error.
+The device initially reports one queued item and no error. Reports sample the queue before sending and can lag
+completed uploads; this count alone does not establish failure. The specific queued item was not inspected.
 The new installation leaves two groups/three connections, retaining recorded phone `45`. Private content, credentials,
 UUIDs and image bytes are omitted. This repair's owner acceptance is complete; no further phone test is needed.
 All iOS background/suspension scenarios are not established. Mobile recording remains foreground-only.
