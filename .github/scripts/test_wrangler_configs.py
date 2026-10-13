@@ -270,6 +270,12 @@ def workflow_jobs() -> dict[str, str]:
     return dict(zip(parts[1::2], parts[2::2], strict=True))
 
 
+def job_environment(job: str) -> dict[str, str]:
+    return dict(re.findall(
+        r"^      ([A-Z0-9_]+): ?(.*)$", job.split("    steps:\n", 1)[0], re.M
+    ))
+
+
 def steps(job: str) -> list[dict]:
     """Each step of a job: its name, env (NAME -> raw value) and run script."""
     found = []
@@ -705,7 +711,7 @@ class Workflow(unittest.TestCase):
         return {name: block for name, block in self.jobs.items() if name.startswith(f"{app}-")}
 
     def test_every_wrapper_call_sets_every_input(self):
-        """A missing --var deletes that var: each step that runs a wrapper declares each input of that call
+        """A missing --var deletes that var: each wrapper receives each input through the job or step env
         (GITHUB_* come from Actions itself), and each app's checks and deploy both call it."""
         for app, (wrapper, pattern, _) in WRAPPERS.items():
             inputs = markers(wrapper)
@@ -717,7 +723,7 @@ class Workflow(unittest.TestCase):
                         needed = {name for name in inputs[mode] if not name.startswith("GITHUB_")}
                         calls += 1
                         with self.subTest(job=job_name, step=step["name"], call=call):
-                            self.assertLessEqual(needed, set(step["env"]))
+                            self.assertLessEqual(needed, set(job_environment(job)) | set(step["env"]))
             self.assertGreaterEqual(calls, 2, app)
 
     def test_every_production_deploy_of_these_apps_runs_through_its_wrapper(self):
@@ -846,17 +852,25 @@ class Workflow(unittest.TestCase):
         seen = set()
         for job_name in DEPLOY_JOBS:
             for step in steps(self.jobs[job_name]):
-                for name in TOGGLES & set(step["env"]):
+                environment = job_environment(self.jobs[job_name]) | step["env"]
+                for name in TOGGLES & set(environment):
                     seen.add(name)
                     with self.subTest(job=job_name, step=step["name"], name=name):
-                        if (job_name, name) == ("mailsort-deploy", "MAILSORT_MODE"):
-                            self.assertEqual(step["env"][name], "${{ env.MAILSORT_MODE }}")
+                        if name == "MAILSORT_MODE":
+                            value = environment[name]
+                            if value == "${{ env.MAILSORT_MODE }}":
+                                value = release_job["env"][name]
                             self.assertEqual(
-                                release_job["env"][name],
+                                value,
                                 "${{ (inputs.app == 'mailsort' || inputs.app == 'brief') && vars.MAILSORT_MODE || '' }}",
                             )
+                        elif name == "BRIEF_MODE":
+                            self.assertEqual(
+                                environment[name],
+                                "${{ inputs.app == 'brief' && vars.BRIEF_MODE || '' }}",
+                            )
                         else:
-                            self.assertEqual(step["env"][name], f"${{{{ vars.{name} }}}}")
+                            self.assertEqual(environment[name], f"${{{{ vars.{name} }}}}")
         self.assertEqual(seen, TOGGLES)
 
     def test_the_rollback_note_names_every_legacy_variable_and_ci_reads_none(self):

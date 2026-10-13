@@ -101,8 +101,6 @@ runs:
     - name: Validate the bundle before changing production
       if: inputs.required == 'true'
       working-directory: .release-source/brief/worker
-      env:
-        BRIEF_MODE: ${{ vars.BRIEF_MODE }}
       shell: bash -e {0}
       run: |
         node ../deploy/deploy-vars.mjs exec -- npx --no-install wrangler deploy --dry-run --config ../wrangler.toml \
@@ -129,7 +127,6 @@ runs:
       working-directory: .release-source/brief/worker
       env:
         CLOUDFLARE_API_TOKEN: ${{ inputs.cf-api-token }}
-        BRIEF_MODE: ${{ vars.BRIEF_MODE }}
       shell: bash -e {0}
       run: |
         test -n "$CLOUDFLARE_API_TOKEN"

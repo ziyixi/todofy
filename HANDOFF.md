@@ -9,30 +9,28 @@ Its old waiting lists and release identities are historical, not instructions to
 
 ## Current work
 
-Todoist Plus is implemented on `codex/todoist-plus` in an isolated worktree. The extension in
-`todoist-plus/` provides native-style Plan, batch steps and Focus. Todofy remains the Todoist writer;
+Todoist Plus is implemented at `2f3b9b92a86bdeccc39a8304fe7b968c7eb3e4a0`, merged to main after
+[full branch CI 38464767419](https://github.com/ziyixi/todofy/actions/runs/38464767419) passed. The extension
+in `todoist-plus/` provides native-style Plan, batch steps and Focus. Todofy remains the Todoist writer;
 FlowDay owns queue, estimates and server-owned timer commands. Planning writes and weekly rollover
 remain disabled until owner mapping confirmation. No production planning writes or Chrome install
 has occurred at this checkpoint.
 
-Local verification covers 549 Python/workerd runtime cases; 1,653 Python units; 127 gateway tests;
-93 owner-UI tests; FlowDay's 125 workerd, 21 worker-unit, 119 UI and 51 desktop-browser scenarios;
-and the extension's 20 unit/API/component and three actual built-MV3 browser cases. Existing route
-budgets pass; the new 200-task Focus proxy has measured 6.85 ms cold / 4.70 ms warm and its own 9.5/6 ms
-regression bounds, below Workers Free's 10 ms. Gateway gzip is 81.9/86 KiB. Proto lint/API-lint,
-breaking, types, schemas and codec checks pass; CI/config guards pass with one existing local skip.
-[Acceptance record](docs/todoist-plus-verification.md) distinguishes synthetic and production evidence.
-The first branch gate held publication for a new-path cold CPU ratchet and old import-verifier defaults.
-The corrected startup bound remains below Free, and all 38 mandatory local-D1 import/verify/reset
-cases now pass on Python 3.12. `fb245900` passed the complete branch gate
-([run](https://github.com/ziyixi/todofy/actions/runs/38459315470)). The final upgrade adds a one-shot
-bounded refresh of unchanged Todoist hierarchy/deadlines and explicit manual-sync throttling
-feedback in the extension; the final source SHA still needs its full gate before publication.
+The first [main release 38466487763](https://github.com/ziyixi/todofy/actions/runs/38466487763) deployed
+FlowDay, then failed to parse the old Todofy composite action's `vars` expressions. Home and the
+extension publication did not run. The caller already supplies these operational switches as job
+environment variables; the correction removes unsupported duplicate references in the release
+actions and adds a focused guard. Existing switches, secret inputs and release locks stay intact.
+The corrected SHA still needs branch CI and a same-SHA main release.
 
-Next: complete full branch `CI gate`, release the same SHA (FlowDay, Todofy, Home's binding inventory,
-and the separate extension ZIP), then use the owner's authorized Chrome installation for live
-Todoist/PWA acceptance. No Newsletter, VPS or Recall release is intended. The old FlowDay timer
-replace/clear methods return `RELOAD_REQUIRED` and stay until at least 2026-11-13.
+[Acceptance record](docs/todoist-plus-verification.md) lists local, packaged-browser and production
+evidence separately. The exact tested extension files are prepared in a dedicated local folder.
+The owner authorized installation and real-page checks. Browser tooling blocks Chrome's internal
+extensions manager and explicitly forbids alternate control methods; the owner must load the folder
+and connect once. After that, continue live Todoist layout, synthetic task writes, FlowDay cross-view
+and PWA checks. No Newsletter, VPS or Recall release is intended. The old FlowDay timer replace/clear
+methods return `RELOAD_REQUIRED` and stay until at least 2026-11-13. The first natural weekly rollover
+remains a future observation, independent of synthetic scheduler tests.
 
 Recall cleanup is released at `bc0adffdc1d8ee018b0663737c77e8de701de0aa`, extension `2026.1013.654`.
 [Full branch CI](https://github.com/ziyixi/todofy/actions/runs/38359057094) and the

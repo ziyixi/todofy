@@ -28,13 +28,13 @@ bounds remain intact. This does not establish production CPU timings for arbitra
 
 The existing runtime/full-unit checks preceded removal of an unused, unpublished URL field. The
 cleanup passed eight focused unit and eight real-runtime Plus cases and regenerated proto checks;
-the full branch gate is the final source-SHA check.
+the final full branch gate verifies the source SHA.
 
 The first branch CI at `30c25b7` passed the packaged extension and runtime shards but rejected
 an 8.16 ms cold proxy sample against its initial 8 ms startup ratchet. The new-path startup bound
 is 9.5 ms; warm and existing-path limits remain unchanged. The same run also exposed the old
 container-import verifier's assumptions about new defaulted D1 columns and timer command receipts;
-the corrected import/verify/reset tools passed all 38 cases under Python 3.12 with mandatory local Wrangler/D1, including rejection of unexpected derived state. The next branch gate must verify this corrected SHA before publication.
+the corrected import/verify/reset tools passed all 38 cases under Python 3.12 with mandatory local Wrangler/D1, including rejection of unexpected derived state. The corrected branch gate passed, as recorded below.
 
 The corrected `fb245900` passed the complete branch gate in
 [run 38459315470](https://github.com/ziyixi/todofy/actions/runs/38459315470). Before publication,
@@ -44,21 +44,38 @@ marker survives late old-Worker sync state and clears only after the new pass co
 The two added real-D1 cases passed with the existing sync cases (26); the other 124 runtime cases
 and CPU checks also passed. The extension now requests the existing manual sync for an explicitly
 new task, and a throttled response blocks the following write with a visible retry instruction.
-Its 20 unit/API/component and three built-browser checks pass. The final branch gate must verify
-these last changes at their own source SHA before release.
+Its 20 unit/API/component and three built-browser checks pass. The final branch gate subsequently passed at its own source SHA.
 
 The final native-startup browser check begins at ordinary `/app/today`: the exact replaced
 favorites hide after a successful connection lookup while native content remains visible.
 It then opens Plan and verifies native restoration. Mapping or authentication failures restore
 legacy controls. No additional endpoint or local cache was introduced for this startup behavior.
 
+## Release evidence, October 13
+
+The final implementation SHA `2f3b9b92a86bdeccc39a8304fe7b968c7eb3e4a0` passed
+[full branch CI 38464767419](https://github.com/ziyixi/todofy/actions/runs/38464767419) and was pushed
+unchanged to main. The tested extension artifact is `todoist-plus-2f3b9b92a86bdeccc39a8304fe7b968c7eb3e4a0`;
+manifest version `2026.1013.1240.12091`, source identity `2f3b9b9`. Its seven files were copied to a
+separate installation folder and checked byte-for-byte against that artifact.
+
+[Main release 38466487763](https://github.com/ziyixi/todofy/actions/runs/38466487763) deployed FlowDay
+successfully (Deployment `7050040218`, Worker `b40c201b-919d-4e97-abd4-cb589b8877e7`,
+provider identity/configuration verified at `2026-10-13T21:04:09Z`), then failed before Todofy upload: GitHub rejected the old composite action's direct
+`vars` expressions. The workflow caller already passes these settings as job environment variables.
+Home and the extension release were skipped. The correction removes the duplicate expressions;
+its own branch CI and main release must be recorded before claiming production completion.
+
 ## Production acceptance
 
-Pending branch CI, same-SHA deployment, Chrome install, real Todoist layout/keyboard/navigation,
+Pending complete same-SHA deployment, Chrome install, real Todoist layout/keyboard/navigation,
 explicit synthetic task writes, FlowDay cross-view state and Chrome PWA verification. Record each
 result and actual release identity here after checking it. The first natural weekly rollover is a
 separate future observation; synthetic rollover checks do not establish that production event.
 
-The owner authorized Chrome installation and real-page acceptance on October 13. Existing labels
-and filters stay in Todoist; confirmation of the mapping enables weekly rollover. Tests must not
-change real task priorities or use private task content in public evidence.
+The owner authorized Chrome installation and real-page acceptance on October 13. The exact tested
+files are prepared, but browser tooling blocks `chrome://extensions/` and explicitly disallows
+alternate control methods. The owner must load the dedicated folder and save the connection once;
+ordinary Todoist HTTPS pages remain available for subsequent agent-led checks. Existing labels and
+filters stay in Todoist; confirmation of the mapping enables weekly rollover. Tests must not change
+real task priorities or use private task content in public evidence.

@@ -108,12 +108,6 @@ runs:
         uv run python deploy/deploy_vars.py secrets gateway "$RUNNER_TEMP/todofy-gateway-secrets.json"
     - name: Validate both bundles before changing D1
       if: inputs.required == 'true'
-      env:
-        TODOFY_REMINDER_ENABLED: ${{ vars.TODOFY_REMINDER_ENABLED }}
-        TODOFY_MAINTENANCE_MODE: ${{ vars.TODOFY_MAINTENANCE_MODE }}
-        TODOFY_PROCESSING_PAUSED: ${{ vars.TODOFY_PROCESSING_PAUSED }}
-        TODOFY_FORCE_PAUSE_TODOIST: ${{ vars.TODOFY_FORCE_PAUSE_TODOIST }}
-        TODOFY_GTD_REVIEW_ENABLED: ${{ vars.TODOFY_GTD_REVIEW_ENABLED }}
       working-directory: .release-source/todofy
       shell: bash -e {0}
       run: |
@@ -140,11 +134,6 @@ runs:
       if: inputs.required == 'true'
       env:
         CLOUDFLARE_API_TOKEN: ${{ inputs.cf-api-token }}
-        TODOFY_REMINDER_ENABLED: ${{ vars.TODOFY_REMINDER_ENABLED }}
-        TODOFY_MAINTENANCE_MODE: ${{ vars.TODOFY_MAINTENANCE_MODE }}
-        TODOFY_PROCESSING_PAUSED: ${{ vars.TODOFY_PROCESSING_PAUSED }}
-        TODOFY_FORCE_PAUSE_TODOIST: ${{ vars.TODOFY_FORCE_PAUSE_TODOIST }}
-        TODOFY_GTD_REVIEW_ENABLED: ${{ vars.TODOFY_GTD_REVIEW_ENABLED }}
       working-directory: .release-source/todofy
       shell: bash -e {0}
       run: |
@@ -156,7 +145,6 @@ runs:
       if: inputs.required == 'true'
       env:
         CLOUDFLARE_API_TOKEN: ${{ inputs.cf-api-token }}
-        TODOFY_MAINTENANCE_MODE: ${{ vars.TODOFY_MAINTENANCE_MODE }}
       working-directory: .release-source/todofy
       shell: bash -e {0}
       run: |

@@ -112,7 +112,9 @@ class CompositeActions(unittest.TestCase):
                 expressions = " ".join(
                     re.findall(r"\$\{\{(.*?)\}\}", path.read_text(), re.S)
                 )
-                self.assertNotRegex(expressions, r"\b(secrets|needs|matrix|strategy)\.")
+                self.assertNotRegex(
+                    expressions, r"\b(secrets|needs|matrix|strategy|vars)[.\[]"
+                )
                 referenced = set(re.findall(r"\binputs\.([a-z0-9-]+)", str(action)))
                 self.assertLessEqual(referenced, set(action.get("inputs", {})))
                 for step in action["runs"]["steps"]:
@@ -166,6 +168,36 @@ class CompositeActions(unittest.TestCase):
         self.assertEqual(len(deployments), 2)
         for step in deployments:
             self.assertEqual(step["env"]["MAILSORT_MODE"], "${{ env.MAILSORT_MODE }}")
+
+    def test_release_switches_inherit_the_resolved_workflow_environment(self):
+        job = workflow_data(ROOT / ".github/workflows/worker-release.yml")["jobs"][
+            "release"
+        ]
+        switches = {
+            "todofy": (
+                "TODOFY_REMINDER_ENABLED", "TODOFY_MAINTENANCE_MODE",
+                "TODOFY_PROCESSING_PAUSED", "TODOFY_FORCE_PAUSE_TODOIST",
+                "TODOFY_GTD_REVIEW_ENABLED",
+            ),
+            "dashboard": ("DASHBOARD_CANARY_ENABLED",),
+            "mail-hero": (
+                "MAIL_HERO_FORCE_SEND_PAUSED", "MAIL_HERO_MAINTENANCE_MODE",
+                "MAIL_HERO_NATIVE_BACKUP_ENABLED",
+            ),
+            "brief": ("BRIEF_MODE",),
+        }
+        for app, names in switches.items():
+            call = next(
+                step for step in job["steps"]
+                if step.get("uses") == f"./.github/actions/release-{app}"
+            )
+            action = workflow_data(ROOT / f".github/actions/release-{app}/action.yml")
+            for name in names:
+                with self.subTest(app=app, switch=name):
+                    self.assertIn(f"vars.{name}", job["env"][name])
+                    self.assertNotIn(name, call.get("env", {}))
+                    for step in action["runs"]["steps"]:
+                        self.assertNotIn(name, step.get("env", {}))
 
     def test_runtime_shards_and_resume_are_passed_explicitly(self):
         ci = workflow_data(ROOT / ".github/workflows/ci.yml")["jobs"]

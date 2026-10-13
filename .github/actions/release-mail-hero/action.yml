@@ -83,10 +83,6 @@ runs:
     - name: Validate the native deployment bundle before changing D1
       if: inputs.required == 'true'
       working-directory: .release-source/mail-hero/cloudflare
-      env:
-        MAIL_HERO_FORCE_SEND_PAUSED: ${{ vars.MAIL_HERO_FORCE_SEND_PAUSED }}
-        MAIL_HERO_MAINTENANCE_MODE: ${{ vars.MAIL_HERO_MAINTENANCE_MODE }}
-        MAIL_HERO_NATIVE_BACKUP_ENABLED: ${{ vars.MAIL_HERO_NATIVE_BACKUP_ENABLED }}
       shell: bash -e {0}
       run: |
         node ../deploy/deploy-vars.mjs exec -- npx --no-install wrangler deploy --dry-run --config ../wrangler.toml \
@@ -111,9 +107,6 @@ runs:
       working-directory: .release-source/mail-hero/cloudflare
       env:
         CLOUDFLARE_API_TOKEN: ${{ inputs.mail-hero-cf-api-token }}
-        MAIL_HERO_FORCE_SEND_PAUSED: ${{ vars.MAIL_HERO_FORCE_SEND_PAUSED }}
-        MAIL_HERO_MAINTENANCE_MODE: ${{ vars.MAIL_HERO_MAINTENANCE_MODE }}
-        MAIL_HERO_NATIVE_BACKUP_ENABLED: ${{ vars.MAIL_HERO_NATIVE_BACKUP_ENABLED }}
       shell: bash -e {0}
       run: |
         test -n "$CLOUDFLARE_API_TOKEN"
