@@ -37,3 +37,28 @@ are omitted. The synthetic preview process was stopped; a blocked temporary loca
 
 The browser extensions and their installed files were untouched. The phone's recurring `page_probe_invalid_result`,
 screenshot capture and unattended upload acceptance remain separate open work; this release changes settings only.
+
+## October 13 inline removal follow-up
+
+Implementation `566858edc1d4f65fdd9f1a6572b573660cee9806` replaces the blocking native empty-connection prompt with
+an inline confirmation. The first click shows the explanation, Confirm removal and Cancel; only the second click
+requests deletion. Cancellation restores the original control. A server refusal leaves the controls usable and
+does not start another UI request automatically. The existing mutation helper and backend guard are unchanged.
+
+Focused synthetic checks cover confirmation, cancellation and a pending-upload refusal before a later explicit
+retry. Historical links remain, and only connections explicitly reporting no records and zero queued items offer
+removal. The server independently checks visits, snapshots and the last reported queue before deleting only the
+connection row. No token or historical record is removed.
+
+[Full branch CI](https://github.com/ziyixi/todofy/actions/runs/38342293896) and
+[same-SHA main release](https://github.com/ziyixi/todofy/actions/runs/38343212917) pass. Only Recall Worker and
+extension publication ran; other app/image/VPS jobs were skipped. Deployment `7029536483` verifies Worker
+`3f20c580-27f1-47e8-8a31-3cd357ec439b`, success at `2026-10-13T03:47:07Z`. The live Settings footer shows `566858e`.
+
+With the owner's existing authorization, six empty phone test connections were removed individually using the
+inline confirmation, waiting for the displayed count to update after each. Their extension versions were
+`2026.1012.1736`, `2026.1012.812`, `2026.1012.611`, `2026.1012.429`, `2026.1012.403` and `2026.1012.322`.
+The live card now shows two groups and two connections. The current phone (`2026.1013.45`) and desktop
+(`2026.1012.429`) remain and offer no removal button. No token was changed, and historical records were not deleted.
+Private connection IDs and credentials are omitted. This verifies the guarded production cleanup, not the new
+phone extension's capture, screenshots or automatic uploads. The earlier dated settings evidence remains unchanged.

@@ -277,6 +277,38 @@ A native Mac observation on the fixed public page returned undefined before its 
 probe/capture replies and a text/image upload. Its visibility sender has a string ID and top-frame numeric ID;
 no sender guard was relaxed. Those observations do not identify the phone's malformed-reply cause.
 
+### October 13 native follow-up: automatic capture and visit upload
+
+[Full branch CI](https://github.com/ziyixi/todofy/actions/runs/38342293896) passed for
+`566858edc1d4f65fdd9f1a6572b573660cee9806`. The exact tested Orion artifact is `2026.1013.337 · 566858e`.
+A disposable real Mac Orion fixture changes only its test identity/host scope, loopback constants and automatic
+owner Start invocation; the business script is unchanged and native API results are not replaced.
+
+On October 13 UTC, Start ran at `03:44:15.231Z`. The strict loopback consumer then observed:
+
+| Time | Observation |
+| --- | --- |
+| `03:44:30.776Z` | One new nonempty text document and one JPEG, automatically uploaded before any manual upload or reload. |
+| `03:45:02.388Z` | Switching to another tab was followed by automatic upload of one ended visit. |
+
+Send at `03:46:03.580Z` submitted only the separate diagnostic. It records probe, capture and screenshot replies,
+`capture_store=saved` and one Alarm. It is not the source of the ordinary receipts above. No additional native
+measurement establishes a later minute's deduplication in this run; the CI WebKit cases cover that behavior.
+
+The fixture was uninstalled, the native extension manager is empty and the exact consumer process is stopped.
+This is native Mac evidence. It does not establish iOS screenshots or automatic mobile uploads; the earlier phone
+text/visit receipt remains the phone evidence. Owner Chrome was not operated or updated.
+
+[Same-SHA main release](https://github.com/ziyixi/todofy/actions/runs/38343212917) passes. Only Recall Worker and
+extension publication ran; other app/image/VPS releases were skipped. Deployment `7029536483` records verified
+Worker `3f20c580-27f1-47e8-8a31-3cd357ec439b`, success at `2026-10-13T03:47:07Z`. All twelve files in the published
+Orion ZIP match the branch CI artifact byte for byte.
+[Published Orion ZIP](https://github.com/ziyixi/todofy/releases/download/recall-extension-v2026.1013.337/recall-orion-v2026.1013.337.zip).
+The live Settings footer shows `566858e`. Six empty production test connections were individually removed through
+the inline control; both recorded connections and the credentials remain, as recorded in
+[settings verification](recall-settings-verification.md#october-13-inline-removal-follow-up). New iOS capture and
+automatic-upload acceptance remain open.
+
 ### Initial one-shot diagnostic release
 
 The first full branch run reached a UI size failure: 62.2 KiB against the previous 62 KiB budget.
