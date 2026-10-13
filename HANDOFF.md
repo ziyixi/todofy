@@ -9,15 +9,24 @@ Its old waiting lists and release identities are historical, not instructions to
 
 ## Current work
 
-`codex/recall-orion-injection-reply` continues the unresolved iOS capture fix. The actual 1736 phone receipt has
-8 tab events and 2 alarms: query and lookup return, injection completion remains pending and foreground selection
-returns hidden. No capture/store/screenshot stage is reached. Device metadata confirms 1736; connection is not capture.
-The existing bridge executed the real probe but always answered completion; new real-DOM tests reproduce a usable
-installed listener that 1736 never asks because completion is withheld, including a resolved-Promise-only reply.
-The scoped correction accepts an actual native Promise as well as callback; after only an unanswered completion,
-it tries the existing bounded content reply once. Genuine API failures still stop. No new permissions, channel,
-retry, proto or storage. Chrome remains untouched. Type/lint/build and 152 tests pass; local WebKit exercises the
-real listener/text/image pipeline under missing callbacks. Exact-artifact/native verification and release are pending.
+Recall's injection-completion correction is released at `bafbac85` (`2026.1013.45`). The actual 1736 phone receipt
+had eight tab events/two alarms, returned query+lookup and pending injection, without capture/store/screenshot.
+New code consumes real Promise or callback completion; completion timeout alone asks the existing listener once.
+Real API failures still stop and actual document/build/URL/visibility validation remains. No new permissions,
+readiness state, channel, retry, proto or storage. Chrome remains untouched.
+[Branch CI](https://github.com/ziyixi/todofy/actions/runs/38328527602), type/lint/build and 152 extension tests pass.
+Twelve exact-CI WebKit cases pass, including missing callbacks with actual installed DOM listeners, Promise-only
+completion, text/image/IDB/gzip and minute dedup; 1736 fails the new missing-completion regression.
+Native Mac normal capture also passes: one nonempty document/image, two alarms and unchanged sampling, without
+manual reload. This is a normal-native regression; missing-completion cases use the WebKit API bridge, not native iOS.
+[Main release](https://github.com/ziyixi/todofy/actions/runs/38329158703) attempt 2 passes at the same SHA. First upload
+succeeded but immediate verification still saw the old SHA; only the failed Recall job was rerun, without changing
+checks. Deployment `7027350758` verifies Worker `88849e08-3452-4218-9285-60c53ea95a22`; unrelated deploys are skipped.
+Downloaded release ZIPs each match all twelve corresponding CI files. The native manager is empty, the verified
+test consumer is stopped and its port is closed. Next phone receipt remains required: disable the old instance, load the new ZIP from file,
+Start, stay on the fixed public page about a minute, Send. Injection completion may remain pending while an actual
+probe/capture reply succeeds; require capture/store and device-matched uploaded document metadata before declaring
+phone success. The owner requested connection/token UI cleanup after phone capture is confirmed; it remains separate.
 
 Recall's mobile deadlock correction is released at `1c1e0b5` (`2026.1012.1736`). Known event tab IDs and the current
 span precede enumeration, with fresh active/visible/privacy checks; unanswered mobile callbacks release after five

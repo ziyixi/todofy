@@ -186,9 +186,35 @@ This establishes an application dependency/test gap; it does not prove that the 
 The scoped correction consumes a real Promise completion as well as a callback, once. A completion timeout alone
 now proceeds to the existing bounded content request, whose actual response remains required. Genuine API errors
 still stop; document/build/URL/visibility checks remain. No new message channel, readiness state, polling, permissions
-or storage is added. Tests also require no content when the probe never installed. Native/exact-artifact release
-checks and the next phone receipt remain to be recorded. Phone file-loading instructions now match the owner's
-actual workflow; in-place update or identity preservation is not assumed.
+or storage is added. Tests also require no content when the probe never installed. Phone file-loading instructions
+now match the owner's actual workflow; in-place update or identity preservation is not assumed.
+
+[Full branch CI](https://github.com/ziyixi/todofy/actions/runs/38328527602) passes at
+`bafbac851a0bfc1096ae960e1e95b609ea2ed0ee`, version `2026.1013.45`: type/lint/build, 152 extension tests and twelve
+exact-artifact WebKit cases. Missing callbacks with void completion and resolved-Promise-only completion both reach
+actual DOM text/image, native IDB and gzip receipt, with no duplicate next minute. A missing listener stores/uploads
+nothing; genuine callback and Promise errors stop before content requests. The Promise case must focus before the
+five-second timeout advances. Unknown native null/undefined returns remain unknown, rather than fake completion.
+
+A fresh native Mac fixture preserves the exact business script after reversing only test identity/host scopes,
+loopback constants and the test owner invocation; no native API replies are altered. It started at
+`2026-10-13T00:48:12.900Z`, and before manual reload had one nonempty document/image in the saved
+`00:49:38.448Z` snapshot. Actual native options verifies 45/bafbac8, JPEG and unchanged sampling. Its Send at
+`00:50:41.782Z` records 21 tab events, two alarms, returned probe/capture/screenshot and capture_store=unchanged.
+This native run verifies normal API compatibility; it does not establish the phone's missing-completion behavior.
+
+[Same-SHA main release](https://github.com/ziyixi/todofy/actions/runs/38329158703) passes on attempt 2. The first
+Worker upload succeeded, but its immediate identity check about two seconds later still observed old version
+90d14ea6-052a-42eb-8045-defeb6bd05da and rejected the old SHA. Only the failed Recall release job was rerun; source
+and checks were unchanged. Final verified Deployment `7027350758` records Worker
+`88849e08-3452-4218-9285-60c53ea95a22`, latest status success at `2026-10-13T00:54:34Z`. Recall extension release
+also succeeds; unrelated app/image/VPS deploy jobs are skipped. Both public ZIPs match all twelve tested CI files.
+Orion ZIP SHA-256: `c3fdfb8382df3814a2247ace8fa97c82760342b52bf3e8d43254afeea9dce67f`.
+[Published Orion ZIP](https://github.com/ziyixi/todofy/releases/download/recall-extension-v2026.1013.45/recall-orion-v2026.1013.45.zip).
+Phone acceptance remains open. A pending injection completion is not itself failure if actual page replies and
+storage succeed. Require matching uploaded test-document metadata; do not use heartbeat, zero outbox or the
+absence of a reported error as proof. The test manager is empty, verified consumer PID 29534 is stopped and
+port 18793 is closed. Owner Chrome remains untouched.
 
 ### Initial one-shot diagnostic release
 
