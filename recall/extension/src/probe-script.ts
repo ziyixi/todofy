@@ -51,7 +51,18 @@ if (RECALL_ORION && topFrame && globalThis.recallPageProbe !== undefined) {
     if (sender.id !== undefined && sender.id !== chrome.runtime.id) return false;
     if (typeof message !== 'object' || message === null || !('type' in message)) return false;
     if (message.type === 'recall-probe') sendResponse(probe());
-    if (message.type === 'recall-capture') sendResponse(readPage(document, RECALL_BUILD));
+    if (message.type === 'recall-capture-current') {
+      if (
+        !('expectedDocumentId' in message) || message.expectedDocumentId !== state.documentId ||
+        !('url' in message) || message.url !== location.href ||
+        !('build' in message) || message.build !== RECALL_BUILD ||
+        !state.visible || document.visibilityState !== 'visible'
+      ) {
+        sendResponse(undefined);
+        return false;
+      }
+      sendResponse(readPage(document, RECALL_BUILD));
+    }
     return false;
   };
   chrome.runtime.onMessage.addListener(state.listener);

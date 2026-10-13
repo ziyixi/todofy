@@ -246,6 +246,37 @@ its missing screenshot stage does not identify the precise cause or prove that O
 acceptance items open rather than counting native Mac/WebKit results as phone evidence. No application change,
 permission change, new resource or owner Chrome operation was made during this verification.
 
+### Capture reuse and automatic mobile upload
+
+The 45 phone report established that a listener could answer while injection completion stayed pending. Repeating
+that injection inside the same capture therefore incurred repeated five-second waits. The exact published 45 in
+actual WebKit queues one text/image document only around 35 seconds after activation, with no document upload
+before the next minute. This is an application timing dependency, independent of machine speed.
+
+The correction reuses the current document's installed listener for capture checks. Initial and minute recovery
+still install a probe. Only a newly persisted mobile snapshot triggers immediate upload; pagehide persists the
+closed visit before starting its upload outside serial state work. Existing backoff remains, and an already-drained
+queue does not send an empty capture batch. The visibility message stays open for its fixed acknowledgement.
+
+Review also found that an old capture could read a newly navigated page before rejecting its result. In the same
+actual WebKit SPA race, published 45 reads the new body's getter once and then excludes the result. The corrected
+content command requires the expected document, already-validated raw URL, build and visible state synchronously
+before reading. SPA and full-navigation regressions each have zero new-body reads and no saved/uploaded document.
+Old unguarded capture commands no longer read. Desktop file capture is unchanged.
+
+Local typecheck/lint/build, 165 extension tests and 15 actual WebKit cases pass. The cases verify real DOM/JPEG,
+IndexedDB settlement, automatic gzip document/ended-visit receipt before the next minute, and unchanged-snapshot
+deduplication. They use a synthetic extension API bridge; they do not establish native iOS behavior. The same runner
+is now a CI step before extension artifact upload, using a pinned development dependency already used in this
+repository. It does not add a production dependency or test service.
+
+Malformed replies now produce one of eight fixed missing/type reason codes, without original values or arbitrary
+keys. Diagnostic submission retains the recent fixed error in the existing device header instead of clearing it.
+Pending injection completion is labelled as an unreceived completion notice, independently of actual capture results.
+A native Mac observation on the fixed public page returned undefined before its site grant, then correctly typed
+probe/capture replies and a text/image upload. Its visibility sender has a string ID and top-frame numeric ID;
+no sender guard was relaxed. Those observations do not identify the phone's malformed-reply cause.
+
 ### Initial one-shot diagnostic release
 
 The first full branch run reached a UI size failure: 62.2 KiB against the previous 62 KiB budget.

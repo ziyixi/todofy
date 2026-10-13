@@ -2,7 +2,7 @@ import { create } from '@ziyixi/proto/protobuf'
 import { timestampFromMs } from '@ziyixi/proto/protobuf/wkt'
 import { DeviceStatusSchema } from '@ziyixi/proto/recall/ui/v1/status_pb'
 import { FakeServer, HOUR, NOW, visit, settle } from './test/fakeServer.ts'
-import { buttonNamed, open } from './test/helpers.ts'
+import { buttonNamed, open, testHost, toastText } from './test/helpers.ts'
 
 const NEW = '00000000-0000-4000-8000-000000000001'
 const OLD = '00000000-0000-4000-8000-000000000002'
@@ -43,8 +43,12 @@ it('folds same-name installs under the latest without hiding historical device I
 
 it('removes an empty test connection without deleting another installation’s records', async () => {
   const fake = connections()
-  const root = await open(fake, '/settings')
+  const host = testHost(false)
+  const root = await open(fake, '/settings', host)
   buttonNamed(root, '移除空连接 iPhone · Orion 2').click()
+  expect(host.asked).toEqual([])
+  expect(fake.calls.filter((item) => item.method === 'DELETE')).toHaveLength(0)
+  buttonNamed(root, '确认移除').click()
   await settle()
   const call = fake.calls.find((item) => item.method === 'DELETE')
   expect(call?.path).toMatch(new RegExp(`/api/v1/devices/${EMPTY}\\?request_id=[0-9a-f-]{36}$`))
@@ -62,4 +66,38 @@ it('offers no empty-connection removal for recorded, pending or legacy unknown s
   fake.status = { devices: [fake.status.devices![0]!, pending, unknown] }
   const root = await open(fake, '/settings')
   expect(root.querySelectorAll('.device-actions button')).toHaveLength(0)
+})
+
+it('cancels inline removal without a request or native confirmation', async () => {
+  const fake = connections()
+  const host = testHost(false)
+  const root = await open(fake, '/settings', host)
+  const clear = buttonNamed(root, '移除空连接 iPhone · Orion 2')
+  clear.click()
+  expect(clear.hidden).toBe(true)
+  buttonNamed(root, '取消').click()
+  expect(clear.hidden).toBe(false)
+  expect(host.asked).toEqual([])
+  expect(fake.calls.filter((item) => item.method === 'DELETE')).toHaveLength(0)
+  expect(fake.status.devices).toHaveLength(3)
+})
+
+it('keeps inline removal usable after a server refusal and only retries on another click', async () => {
+  const fake = connections()
+  const root = await open(fake, '/settings')
+  buttonNamed(root, '移除空连接 iPhone · Orion 2').click()
+  fake.status = { ...fake.status, devices: fake.status.devices?.map((item) => item.deviceId === EMPTY ? create(DeviceStatusSchema, { ...item, queuedCount: 1 }) : item) }
+  buttonNamed(root, '确认移除').click()
+  await settle()
+  expect(toastText(root)).toBe('这个连接有记录或待上传内容，不能移除')
+  expect(buttonNamed(root, '确认移除').disabled).toBe(false)
+  expect(fake.calls.filter((item) => item.method === 'DELETE')).toHaveLength(1)
+  await settle()
+  expect(fake.calls.filter((item) => item.method === 'DELETE')).toHaveLength(1)
+  fake.status = { ...fake.status, devices: fake.status.devices?.map((item) => item.deviceId === EMPTY ? create(DeviceStatusSchema, { ...item, queuedCount: 0 }) : item) }
+  buttonNamed(root, '确认移除').click()
+  await settle()
+  expect(fake.calls.filter((item) => item.method === 'DELETE')).toHaveLength(2)
+  expect(fake.status.devices?.map((item) => item.deviceId)).toEqual([OLD, NEW])
+  expect(fake.visits).toHaveLength(1)
 })

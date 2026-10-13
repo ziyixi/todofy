@@ -117,9 +117,35 @@ async function probeContext(ctx: Context, tabId: number): Promise<void> {
   });
 }
 
+type PageCommand = { readonly type: 'recall-probe' } | {
+  readonly type: 'recall-capture-current';
+  readonly expectedDocumentId: string;
+  readonly url: string;
+  readonly build: string;
+};
+
+/** Read the listener already installed for a known mobile document, without repeating file injection. */
+export async function readInstalledPage(ctx: Context, tabId: number, command: PageCommand): Promise<unknown> {
+  const runId = await diagnosticRunId(ctx, tabId);
+  void probeContext(ctx, tabId).catch(() => undefined);
+  const stage = command.type === 'recall-probe' ? 'probe_reply' : 'capture_reply';
+  await observe(ctx, { stage, state: 'pending' }, tabId, runId);
+  return nativeReply<unknown>((resolve, reject) => {
+    ctx.chrome.tabs.sendMessage(tabId, command, (value: unknown) => {
+      const failed = ctx.chrome.runtime.lastError !== undefined;
+      void observe(ctx, { stage, state: failed ? 'failed' : 'returned', result: failed ? 'api_error' : resultType(value) }, tabId, runId);
+      receive(ctx, resolve, reject, value);
+    });
+  }).catch(async (error: unknown) => {
+    if (!timedOut(error)) await observe(ctx, { stage, state: 'failed', result: 'api_error' }, tabId, runId);
+    throw error;
+  });
+}
+
 /** MV2 Orion exposes tabs.executeScript; modern browsers use scripting. Both inject only the main frame. */
 export async function executeFile(ctx: Context, tabId: number, file: 'probe.js' | 'capture.js', documentId?: string): Promise<unknown> {
   const features = browserFeatures(ctx.chrome);
+  if (ctx.mobile && file !== 'probe.js') throw new Error('mobile_capture_requires_guard');
   if (ctx.mobile && features.tabs.executeScript !== undefined) {
     const execute = features.tabs.executeScript;
     const runId = await observe(ctx, { stage: 'probe_injection', state: 'pending' }, tabId);
@@ -148,19 +174,7 @@ export async function executeFile(ctx: Context, tabId: number, file: 'probe.js' 
       await observe(ctx, { stage: 'probe_injection', state: 'failed', result: 'api_error' }, tabId, runId);
       throw error;
     });
-    void probeContext(ctx, tabId).catch(() => undefined);
-    const stage = file === 'probe.js' ? 'probe_reply' : 'capture_reply';
-    await observe(ctx, { stage, state: 'pending' }, tabId, runId);
-    return nativeReply<unknown>((resolve, reject) => {
-      ctx.chrome.tabs.sendMessage(tabId, { type: file === 'probe.js' ? 'recall-probe' : 'recall-capture' }, (value: unknown) => {
-        const failed = ctx.chrome.runtime.lastError !== undefined;
-        void observe(ctx, { stage, state: failed ? 'failed' : 'returned', result: failed ? 'api_error' : resultType(value) }, tabId, runId);
-        receive(ctx, resolve, reject, value);
-      });
-    }).catch(async (error: unknown) => {
-      if (!timedOut(error)) await observe(ctx, { stage, state: 'failed', result: 'api_error' }, tabId, runId);
-      throw error;
-    });
+    return readInstalledPage(ctx, tabId, { type: 'recall-probe' });
   }
   if (features.scripting !== undefined) {
     const [first] = await features.scripting.executeScript({
@@ -172,20 +186,37 @@ export async function executeFile(ctx: Context, tabId: number, file: 'probe.js' 
   return results?.[0];
 }
 
-/** Do not inject even this small probe on excluded pages. No text, title or input values are read. */
-export async function probePage(ctx: Context, tabId: number): Promise<PageProbe | null> {
+/** A fixed field failure identifies malformed native replies without retaining any returned values. */
+function probeError(value: unknown): string | null {
+  if (value === null || value === undefined) return 'page_probe_missing_reply';
+  if (typeof value !== 'object' || Array.isArray(value)) return 'page_probe_invalid_reply_type';
+  const probe = value as Record<string, unknown>;
+  if (probe['documentId'] === undefined) return 'page_probe_missing_document_id';
+  if (typeof probe['documentId'] !== 'string') return 'page_probe_invalid_document_id';
+  if (probe['visible'] === undefined) return 'page_probe_missing_visibility';
+  if (typeof probe['visible'] !== 'boolean') return 'page_probe_invalid_visibility';
+  if (probe['url'] === undefined) return 'page_probe_missing_url';
+  if (typeof probe['url'] !== 'string') return 'page_probe_invalid_url';
+  return null;
+}
+
+/** Initial focus installs a probe; capture rechecks only the listener for its established document. */
+export async function probePage(ctx: Context, tabId: number, expectedDocumentId?: string): Promise<PageProbe | null> {
   let failureCode = 'page_tab_failed';
   try {
     const tab = await getTab(ctx, tabId);
     failureCode = 'page_probe_failed';
     if (tab.incognito || await pageOf(tab.url ?? '', await currentDenylist(ctx)) === null) return null;
-    const value = await executeFile(ctx, tabId, 'probe.js');
-    if (typeof value === 'object' && value !== null) {
-      const probe = value as Record<string, unknown>;
-      if (typeof probe['documentId'] === 'string' && typeof probe['visible'] === 'boolean' && typeof probe['url'] === 'string') return probe as unknown as PageProbe;
+    const value = ctx.mobile && expectedDocumentId !== undefined
+      ? await readInstalledPage(ctx, tabId, { type: 'recall-probe' })
+      : await executeFile(ctx, tabId, 'probe.js');
+    const error = probeError(value);
+    if (error !== null) {
+      await lastError.set(ctx.chrome, error, ctx.now());
+      return null;
     }
-    await lastError.set(ctx.chrome, 'page_probe_invalid_result', ctx.now());
-    return null;
+    const probe = value as PageProbe;
+    return expectedDocumentId !== undefined && probe.documentId !== expectedDocumentId ? null : probe;
   } catch (error) {
     await lastError.set(ctx.chrome, timedOut(error) ? failureCode.replace('_failed', '_timeout') : failureCode, ctx.now());
     return null;

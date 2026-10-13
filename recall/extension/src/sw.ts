@@ -71,8 +71,8 @@ async function capture(): Promise<void> {
   const job = await serial((ctx) => captureDue(ctx, ctx.now()));
   if (job === null) return;
   const outcome = await readTab(await ready, job);
-  await serial((ctx) => storeCapture(ctx, job, outcome, ctx.now()));
-  if ((await ready).mobile) await upload('tick');
+  const queued = await serial((ctx) => storeCapture(ctx, job, outcome, ctx.now()));
+  if (queued && (await ready).mobile) await upload('capture');
 }
 
 /** Sets the capture's timer for the focused visit, if a capture is to come. */
@@ -275,9 +275,16 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) =>
     const documentId = value['documentId'];
     const visible = value['visible'];
     const at = Math.min(Date.now(), value['at']);
-    transition('page_visibility', (ctx) => pageVisibility(ctx, tabId, documentId, visible, at));
-    ready.then((ctx) => { if (ctx.mobile && visible) return upload('startup'); }).catch((error: unknown) => { report('resume_upload', error); });
-    return false;
+    void serial((ctx) => pageVisibility(ctx, tabId, documentId, visible, at))
+      .then(async () => {
+        if (visible) await scheduleCapture();
+        if ((await ready).mobile) await upload(visible ? 'startup' : 'capture');
+      })
+      .then(() => { sendResponse({ ok: true }); }, (error: unknown) => {
+        report('page_visibility', error);
+        sendResponse({ ok: false });
+      });
+    return true;
   }
   if (!isRequest(message)) return false;
   answer(message).then(sendResponse, (error: unknown) => {

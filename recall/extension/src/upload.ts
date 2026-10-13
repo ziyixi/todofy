@@ -2,8 +2,9 @@
  * Uploads (../../docs/design.md §3.8-§3.9): `POST /api/machine/v1/batches` with the ingest token, one batch of the
  * outbox's oldest items (at most 50 and 1 MiB of JSON, gzipped with CompressionStream: `Content-Type:
  * application/gzip`, no Content-Encoding), `credentials: 'omit'` and a 25 s timeout. The tick alarm flushes when the
- * outbox holds items and the last upload was five minutes ago or more, or when it holds 25; startup and the options
- * page's 立即上传 flush at once. When nothing was uploaded for 30 minutes an empty batch goes: the heartbeat, which
+ * outbox holds items and the last upload was five minutes ago (one minute on mobile), or when it holds 25. A new
+ * mobile capture, startup and the options page's 立即上传 flush at once. Non-manual flushes retain server backoff.
+ * When nothing was uploaded for 30 minutes an empty batch goes: the heartbeat, which
  * also carries the device's label, version, outbox size and last error.
  *
  * | Answer | The extension |
@@ -43,7 +44,7 @@ export const BATCHES_PATH = '/api/machine/v1/batches';
 /** Room left in a batch's JSON for its envelope (the device's report, at most a few hundred bytes). */
 const ENVELOPE_BYTES = 4096;
 
-export type FlushReason = 'tick' | 'startup' | 'manual';
+export type FlushReason = 'tick' | 'startup' | 'manual' | 'capture';
 
 /** What a flush did: nothing (`idle`), or the HTTP status of its upload (`network` when none came). */
 export type FlushOutcome = { readonly kind: 'idle' } | { readonly kind: 'sent'; readonly items: number; readonly status: number | 'network' };
@@ -88,9 +89,11 @@ export async function gzip(text: string): Promise<ArrayBuffer> {
 
 /** An owner diagnostic uses the existing authenticated route, without taking or settling any outbox items. */
 export async function sendDiagnostic(ctx: Context, diagnostic: CaptureDiagnostic): Promise<boolean> {
-  const [token, device, queued] = await Promise.all([getToken(ctx.db), getDevice(ctx.chrome, ctx.uuid), countItems(ctx.db)]);
+  const [token, device, queued, error] = await Promise.all([getToken(ctx.db), getDevice(ctx.chrome, ctx.uuid), countItems(ctx.db), lastError.get(ctx.chrome)]);
   if (token === '') return false;
-  const batch: IngestBatch = { ...batchOf({ batchId: ctx.uuid(), sentMs: ctx.now(), device, version: ctx.build, queued, errorCode: '', mobile: true }, []), diagnostic };
+  const at = ctx.now();
+  const errorCode = error !== null && at - error.at < ERROR_REPORTED_MS ? error.code : '';
+  const batch: IngestBatch = { ...batchOf({ batchId: ctx.uuid(), sentMs: at, device, version: ctx.build, queued, errorCode, mobile: true }, []), diagnostic };
   try {
     const response = await ctx.fetch(`${device.server}${BATCHES_PATH}`, {
       method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/gzip' }, body: await gzip(JSON.stringify(batch)),
@@ -152,6 +155,7 @@ function afterRefusal(upload: UploadState, response: Response, sent: number, at:
 
 /** Whether the flush has something to send: items that are due (`ready` of them are not held), or a heartbeat. */
 function due(reason: FlushReason, ready: number, upload: UploadState, at: number, mobile: boolean): boolean {
+  if (reason === 'capture') return ready > 0;
   if (reason !== 'tick') return true;
   const sinceUpload = at - upload.lastUploadAt;
   return ready > 0 ? ready >= FLUSH_ITEMS || sinceUpload >= (mobile ? 60_000 : FLUSH_INTERVAL_MS) : sinceUpload >= HEARTBEAT_MS;

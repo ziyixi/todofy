@@ -1633,6 +1633,9 @@ class RecallExtensionRelease(unittest.TestCase):
             self.assertRegex(action, r"^[\w.-]+/[\w.-]+@[0-9a-f]{40}$")
         self.assertIn("name: recall-extension-${{ github.sha }}\n", block)
         self.assertIn("run-id: ${{ needs.changes.outputs.reused_run_id || github.run_id }}\n", block)
+        checks = workflow_jobs()["recall-checks"]
+        self.assertLess(checks.index("- name: Build the extension\n"), checks.index("- name: Test the actual Orion build in WebKit\n"))
+        self.assertLess(checks.index("- name: Test the actual Orion build in WebKit\n"), checks.index("- name: Keep the extension's build\n"))
         upload = workflow_jobs()["recall-checks"].split("- name: Keep the extension's build\n", 1)[1]
         self.assertIn("name: recall-extension-${{ github.sha }}\n", upload)
         self.assertIn("path: recall/extension/dist/extension/\n", upload)

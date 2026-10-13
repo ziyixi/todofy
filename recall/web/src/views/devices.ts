@@ -1,4 +1,5 @@
 /** Connection display only: same-name installs fold together, while every historical identity stays separate. */
+import { PAGE_PROBE_ERRORS } from '../../../shared/diagnostic.ts'
 import type { DeviceStatus, ServiceStatus } from '@ziyixi/proto/recall/ui/v1/status_pb'
 import type { ViewContext } from '../app.ts'
 import { api } from '../api.ts'
@@ -12,7 +13,6 @@ const DEVICE_ERRORS: Readonly<Record<string, readonly [string, boolean]>> = {
   capture_failed: ['有页面的正文没读到（页面不让扩展读取时会这样）', false],
   screenshot_failed: ['有页面的截图没保存，已读取的正文仍会保存', false],
   upload_failed: ['上传失败过，扩展会自动重试', false],
-  page_probe_invalid_result: ['有页面的状态探测失败，部分采集可能跳过', false],
 }
 const REFUSALS: Readonly<Record<string, string>> = { invalid_item: '格式不对', id_conflict: '编号冲突' }
 
@@ -56,19 +56,33 @@ export function devicesCard(ctx: ViewContext, status: ServiceStatus, now: number
 function deviceRow(ctx: ViewContext, device: DeviceStatus, now: number, removed: (id: string) => void): HTMLLIElement {
   const heard = ms(device.lastHeartbeatTime)
   const stale = device.stale && !device.mobile
-  const [error, urgent] = device.lastErrorCode === '' ? ['', false] : (DEVICE_ERRORS[device.lastErrorCode] ?? ['扩展报告了一个错误', false])
+  const [error, urgent] = device.lastErrorCode === '' ? ['', false] : (DEVICE_ERRORS[device.lastErrorCode] ?? [PAGE_PROBE_ERRORS[device.lastErrorCode] ?? '扩展报告了一个错误', false])
   const href = `/?device=${encodeURIComponent(device.deviceId)}`
   const visits = el('a', { href, class: 'small' }, '访问记录')
   visits.addEventListener('click', (event) => { event.preventDefault(); void ctx.go(href) })
   const actions = el('div', { class: 'device-actions' }, visits)
   if (device.hasRecords === false && device.queuedCount === 0) {
     const clear = button('移除空连接', () => {
-      if (!ctx.host.confirm('移除这个没有记录的连接？口令不变；扩展再次连接时会重新出现。')) return
-      clear.disabled = true
-      void act((requestId) => api.deleteDevice({ name: `devices/${device.deviceId}`, requestId }), '已移除空连接', () => removed(device.deviceId))
-        .finally(() => { clear.disabled = false })
+      clear.hidden = true
+      confirmation.hidden = false
+      confirm.focus()
     }, { class: 'quiet small', 'aria-label': `移除空连接 ${device.label} ${device.extensionVersion}` })
-    actions.append(clear)
+    const cancel = button('取消', () => {
+      confirmation.hidden = true
+      clear.hidden = false
+      clear.focus()
+    }, { class: 'quiet small' })
+    const confirm = button('确认移除', () => {
+      if (confirm.disabled) return
+      confirm.disabled = cancel.disabled = true
+      void act((requestId) => api.deleteDevice({ name: `devices/${device.deviceId}`, requestId }), '已移除空连接', () => removed(device.deviceId))
+        .finally(() => { confirm.disabled = cancel.disabled = false })
+    }, { class: 'small danger' })
+    const confirmation = el('div', { class: 'device-remove-confirm', hidden: true },
+      el('p', { class: 'hint' }, '只移除这个空连接。口令不变；扩展再次连接时会重新出现。'),
+      el('div', { class: 'actions' }, confirm, cancel),
+    )
+    actions.append(clear, confirmation)
   }
   return el('li', {},
     el('div', { class: 'row-head' }, el('span', { class: 'row-title' }, device.label || '未命名连接'),

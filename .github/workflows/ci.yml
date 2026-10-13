@@ -422,6 +422,16 @@ jobs:
         working-directory: recall/extension
         shell: bash -e {0}
         run: npm run build
+      - name: Install the pinned WebKit test browser
+        working-directory: recall/extension
+        timeout-minutes: 5
+        shell: bash -e {0}
+        run: npx --no-install playwright install --with-deps webkit
+      - name: Test the actual Orion build in WebKit
+        working-directory: recall/extension
+        timeout-minutes: 5
+        shell: bash -e {0}
+        run: npm run test:browser
       - name: Keep the extension's build
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:

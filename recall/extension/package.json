@@ -17,13 +17,15 @@
     "test": "vitest run",
     "prebuild": "node ../../proto/tools/ensure.mjs",
     "build": "tsc --noEmit && node scripts/build.mjs",
-    "install-extension": "node scripts/install.mjs"
+    "install-extension": "node scripts/install.mjs",
+    "test:browser": "node test/options-browser-runner.mjs"
   },
   "dependencies": {
     "@ziyixi/proto": "file:../../proto/ts"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
+    "@playwright/test": "1.63.0",
     "@types/chrome": "0.3.0",
     "@types/node": "26.6.3",
     "esbuild": "0.28.1",

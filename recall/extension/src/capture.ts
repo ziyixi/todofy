@@ -8,7 +8,7 @@ import type { IngestItem } from '@ziyixi/proto/recall/ingest/v1/ingest_wire';
 import { scrubText } from '../../shared/scrub.ts';
 import { cutText, cutUtf8, DOCUMENT_MAX_BYTES } from '../../shared/url.ts';
 import type { Context } from './context.ts';
-import { captureViewport, executeFile, getTab, probePage } from './browser.ts';
+import { captureViewport, executeFile, getTab, probePage, readInstalledPage } from './browser.ts';
 import { getVisit, queueItem, saveVisit } from './db.ts';
 import { loadFocus } from './focus.ts';
 import { CAPTURE_FOCUS_MS, CAPTURE_INTERVAL_MS, CAPTURE_STORAGE_MAX_BYTES } from './limits.ts';
@@ -71,7 +71,7 @@ export async function captureDue(ctx: Context, at: number): Promise<CaptureJob |
 async function sameFocus(ctx: Context, job: CaptureJob): Promise<boolean> {
   try {
     if (ctx.mobile) {
-      const [state, tab, probe] = await Promise.all([focusState.get(ctx.chrome), getTab(ctx, job.tabId), probePage(ctx, job.tabId)]);
+      const [state, tab, probe] = await Promise.all([focusState.get(ctx.chrome), getTab(ctx, job.tabId), probePage(ctx, job.tabId, job.documentId)]);
       if (state?.open?.visitId !== job.visitId || state.open.start !== job.focusStart || !tab.active || tab.incognito || !probe?.visible || probe.documentId !== job.documentId) return false;
       const page = await pageOf(probe.url, await currentDenylist(ctx));
       return page?.pageId === job.page.pageId && page.level === 'record';
@@ -93,7 +93,15 @@ async function sameFocus(ctx: Context, job: CaptureJob): Promise<boolean> {
 }
 
 async function readPage(ctx: Context, job: CaptureJob): Promise<PageText | null> {
-  const value = await executeFile(ctx, job.tabId, 'capture.js', ctx.mobile ? undefined : job.documentId);
+  if (!ctx.mobile) {
+    const value = await executeFile(ctx, job.tabId, 'capture.js', job.documentId);
+    return isPageText(value) ? value : null;
+  }
+  const probe = await probePage(ctx, job.tabId, job.documentId);
+  if (probe === null || !probe.visible) return null;
+  const page = await pageOf(probe.url, await currentDenylist(ctx));
+  if (page?.pageId !== job.page.pageId || page.level !== 'record') return null;
+  const value = await readInstalledPage(ctx, job.tabId, { type: 'recall-capture-current', expectedDocumentId: job.documentId, url: probe.url, build: ctx.build });
   return isPageText(value) ? value : null;
 }
 
@@ -127,24 +135,24 @@ export async function readTab(ctx: Context, job: CaptureJob): Promise<ReadOutcom
 }
 
 /** Queue changed content; an empty page or failed read leaves the next tick free to try again. */
-export async function storeCapture(ctx: Context, job: CaptureJob, outcome: ReadOutcome, at: number): Promise<void> {
+export async function storeCapture(ctx: Context, job: CaptureJob, outcome: ReadOutcome, at: number): Promise<boolean> {
   await observe(ctx, { stage: 'capture_store', state: 'pending' }, job.tabId);
   if (outcome.kind === 'not_scriptable') {
     await observe(ctx, { stage: 'capture_store', state: 'skipped', result: 'excluded' }, job.tabId);
     await captureStatus.set(ctx.chrome, { at, text: 'excluded', screenshot: 'excluded' });
-    return;
+    return false;
   }
   if (outcome.kind === 'failed') {
     await observe(ctx, { stage: 'capture_store', state: 'failed', result: 'failed' }, job.tabId);
     await lastError.set(ctx.chrome, 'capture_failed', at);
     await captureStatus.set(ctx.chrome, { at, text: 'failed', screenshot: 'none' });
-    return;
+    return false;
   }
   const { text } = outcome;
   if (!(await allowedPage(ctx, job, text))) {
     await observe(ctx, { stage: 'capture_store', state: 'skipped', result: 'excluded' }, job.tabId);
     await captureStatus.set(ctx.chrome, { at, text: 'excluded', screenshot: 'excluded' });
-    return;
+    return false;
   }
   if (outcome.screenshotFailed) await lastError.set(ctx.chrome, 'screenshot_failed', at);
   const screenshot = outcome.screenshot !== undefined && await sameFocus(ctx, job) ? outcome.screenshot : undefined;
@@ -154,7 +162,7 @@ export async function storeCapture(ctx: Context, job: CaptureJob, outcome: ReadO
   if (body.text.trim() === '' && screenshot === undefined) {
     await observe(ctx, { stage: 'capture_store', state: 'returned', result: 'empty' }, job.tabId);
     await captureStatus.set(ctx.chrome, { at, text: 'empty', screenshot: imageStatus });
-    return;
+    return false;
   }
   const hash = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(body.text)));
   const snapshotTextHash = Array.from(hash, (byte) => byte.toString(16).padStart(2, '0')).join('');
@@ -162,7 +170,7 @@ export async function storeCapture(ctx: Context, job: CaptureJob, outcome: ReadO
   if (visit?.snapshotTextHash === snapshotTextHash && (screenshot === undefined || !visiblyChanged(visit.screenshotPreview, screenshot.preview))) {
     await observe(ctx, { stage: 'capture_store', state: 'returned', result: 'unchanged' }, job.tabId);
     await captureStatus.set(ctx.chrome, { at, text: 'unchanged', screenshot: imageStatus });
-    return;
+    return false;
   }
   const id = ctx.uuid();
   const item: IngestItem = {
@@ -185,4 +193,5 @@ export async function storeCapture(ctx: Context, job: CaptureJob, outcome: ReadO
   await observe(ctx, { stage: 'capture_store', state: 'returned', result: 'saved' }, job.tabId);
   await captureStatus.set(ctx.chrome, { at, text: body.text.trim() === '' ? 'empty' : 'saved', screenshot: imageStatus });
   if (visit !== undefined) await saveVisit(ctx.db, { ...visit, snapshotTextHash, ...(screenshot === undefined ? {} : { screenshotPreview: screenshot.preview }) });
+  return true;
 }

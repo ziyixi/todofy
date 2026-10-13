@@ -1,6 +1,6 @@
 /** iPhone behavior over the existing fake: visibility ends focus, reload changes identity, JPEG and resume uploads. */
 import { describe, expect, it, vi } from 'vitest';
-import { executeFile, probePage, queryTabs } from '../src/browser.ts';
+import { executeFile, probePage, queryTabs, readInstalledPage } from '../src/browser.ts';
 import { captureDue, readTab, storeCapture } from '../src/capture.ts';
 import type { Context } from '../src/context.ts';
 import { setToken } from '../src/db.ts';
@@ -43,7 +43,7 @@ async function phone() {
     sendMessage: (id: number, message: { type: string }, callback?: (value: unknown) => void) => {
       answer(Promise.resolve().then(() => {
         const value = h.browser.script({ tabId: id, files: [message.type === 'recall-probe' ? 'probe.js' : 'capture.js'] });
-        return typeof value === 'object' && value !== null ? { url: h.browser.tab(id).url, ...value } : value;
+        return typeof value === 'object' && value !== null && !Array.isArray(value) ? { url: h.browser.tab(id).url, ...value } : value;
       }), callback);
     },
   });
@@ -114,6 +114,19 @@ describe('Orion iPhone foreground capture', () => {
     expect((await openSpan(h.ctx, T0 + 11 * MINUTE))?.start).toBe(T0 + 11 * MINUTE);
   });
 
+  it('captures text and image through the established listener when injection no longer answers', async () => {
+    const h = await phone();
+    h.browser.screenshot = 'data:image/png;base64,synthetic';
+    vi.mocked(compressScreenshot).mockResolvedValue({ base64: 'cGhvdG8=', preview: '390x844:' + btoa('a'.repeat(4096)), width: 390, height: 844, mediaType: 'image/jpeg' });
+    await reconcile(h.ctx, T0);
+    const job = await captureDue(h.ctx, T0 + 10 * SECOND);
+    expect(job).not.toBeNull();
+    Object.assign(h.browser.api.tabs, { executeScript: () => undefined });
+    if (job !== null) await storeCapture(h.ctx, job, await readTab(h.ctx, job), T0 + 10 * SECOND);
+    expect(await queuedDocuments(h.ctx)).toMatchObject([{ text: 'A synthetic article.', screenshot_jpeg_base64: 'cGhvdG8=' }]);
+    expect(await lastError.get(h.ctx.chrome)).toBeNull();
+  });
+
   it('retains recent visible focus across a sessionless background recreation, but not a hidden page or long gap', async () => {
     const h = await phone();
     delete (h.browser.api.storage as unknown as Record<string, unknown>)['session'];
@@ -163,8 +176,9 @@ describe('Orion iPhone foreground capture', () => {
       queueMicrotask(() => callback?.([null]));
     } });
     expect(await executeFile(h.ctx, h.tab.id, 'probe.js')).toEqual({ documentId: h.tab.documentId, visible: true, url: h.tab.url });
-    expect(await executeFile(h.ctx, h.tab.id, 'capture.js')).toMatchObject({ text: 'A synthetic article.', documentId: h.tab.documentId });
-    expect(calls).toEqual(Array.from({ length: 2 }, () => ({ tabId: h.tab.id, details: { file: 'probe.js', runAt: 'document_start' } })));
+    expect(await readInstalledPage(h.ctx, h.tab.id, { type: 'recall-capture-current', expectedDocumentId: h.tab.documentId, url: h.tab.url, build: h.ctx.build })).toMatchObject({ text: 'A synthetic article.', documentId: h.tab.documentId });
+    await expect(executeFile(h.ctx, h.tab.id, 'capture.js')).rejects.toThrow('mobile_capture_requires_guard');
+    expect(calls).toEqual([{ tabId: h.tab.id, details: { file: 'probe.js', runAt: 'document_start' } }]);
   });
 
   it('reads the current document through messages and rejects native injection errors', async () => {
@@ -183,16 +197,45 @@ describe('Orion iPhone foreground capture', () => {
     expect(JSON.stringify(h.browser.local.values.get('error'))).not.toContain('Cannot access');
   });
 
+  it('uses the established document listener without accepting a navigated document as the old one', async () => {
+    const h = await phone();
+    await reconcile(h.ctx, T0);
+    const original = h.tab.documentId;
+    Object.assign(h.browser.api.tabs, { executeScript: () => { throw new Error('unexpected reinjection'); } });
+    h.hide();
+    expect(await probePage(h.ctx, h.tab.id, original)).toMatchObject({ documentId: original, visible: false });
+    h.show();
+    h.browser.navigate(h.tab.id, h.tab.url);
+    expect(await probePage(h.ctx, h.tab.id, original)).toBeNull();
+    expect(await lastError.get(h.ctx.chrome)).toBeNull();
+  });
+
   it('reports a malformed probe with a fixed error code, without treating excluded pages as errors', async () => {
     const h = await phone();
     h.browser.script = () => ({ visible: true, url: h.tab.url });
     expect(await probePage(h.ctx, h.tab.id)).toBeNull();
-    expect(await lastError.get(h.ctx.chrome)).toEqual({ code: 'page_probe_invalid_result', at: T0 });
+    expect(await lastError.get(h.ctx.chrome)).toEqual({ code: 'page_probe_missing_document_id', at: T0 });
     expect(JSON.stringify(h.browser.local.values.get('error'))).not.toContain(h.tab.url);
     const excluded = await phone();
     excluded.browser.navigate(excluded.tab.id, 'chrome-extension://synthetic/options.html');
     expect(await probePage(excluded.ctx, excluded.tab.id)).toBeNull();
     expect(await lastError.get(excluded.ctx.chrome)).toBeNull();
+  });
+
+  it.each([
+    [undefined, 'page_probe_missing_reply'],
+    [[], 'page_probe_invalid_reply_type'],
+    [{ documentId: 5, visible: true }, 'page_probe_invalid_document_id'],
+    [{ documentId: 'document' }, 'page_probe_missing_visibility'],
+    [{ documentId: 'document', visible: 'visible' }, 'page_probe_invalid_visibility'],
+    [{ documentId: 'document', visible: true, url: undefined }, 'page_probe_missing_url'],
+    [{ documentId: 'document', visible: true, url: 5 }, 'page_probe_invalid_url'],
+  ])('reports malformed probe fields with %s as %s', async (value, code) => {
+    const h = await phone();
+    h.browser.script = () => value;
+    expect(await probePage(h.ctx, h.tab.id)).toBeNull();
+    expect(await lastError.get(h.ctx.chrome)).toEqual({ code, at: T0 });
+    expect(JSON.stringify(h.browser.local.values.get('error'))).not.toContain(h.tab.url);
   });
 
   it('retains native tab lookup and query failures as fixed diagnostic codes', async () => {

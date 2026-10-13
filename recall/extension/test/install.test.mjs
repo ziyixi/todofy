@@ -112,7 +112,9 @@ describe('the build', () => {
     const code = readFileSync(join(built.orionFolder, 'probe.js'), 'utf8');
     const listeners = new Set();
     const runtime = { id: 'synthetic-extension', onMessage: { addListener: (fn) => listeners.add(fn), removeListener: (fn) => listeners.delete(fn) } };
-    const body = { innerText: 'First synthetic text' };
+    let bodyText = 'First synthetic text';
+    let bodyReads = 0;
+    const body = { get innerText() { bodyReads++; return bodyText; } };
     const document = {
       title: 'A synthetic page', location: { href: 'https://example.org/mobile' }, visibilityState: 'visible',
       addEventListener() {}, querySelectorAll: () => [], querySelector: (selector) => selector === 'body' ? body : null,
@@ -124,27 +126,41 @@ describe('the build', () => {
     for (let i = 0; i < 10; i++) runInContext(code, context);
     expect(listeners.size).toBe(1);
     const replies = [];
-    const message = (type, id = runtime.id) => listeners.values().next().value({ type }, id === null ? {} : { id }, (reply) => replies.push(reply));
+    const message = (command, id = runtime.id) => listeners.values().next().value(typeof command === 'string' ? { type: command } : command, id === null ? {} : { id }, (reply) => replies.push(reply));
     message('recall-probe');
     expect(replies.at(-1)).toEqual({ documentId: 'synthetic-document', visible: true, url: document.location.href });
     // Native Orion delivers this internal message without MessageSender.id.
     message('recall-probe', null);
     expect(replies).toHaveLength(2);
     expect(replies.at(-1)).toEqual({ documentId: 'synthetic-document', visible: true, url: document.location.href });
-    body.innerText = 'Updated synthetic text';
+    bodyText = 'Updated synthetic text';
+    const capture = { type: 'recall-capture-current', expectedDocumentId: 'synthetic-document', url: document.location.href, build: built.version };
+    message(capture);
+    expect(replies.at(-1)).toMatchObject({ build: built.version, documentId: 'synthetic-document', text: bodyText });
+    expect(bodyReads).toBe(1);
+    const beforeLegacy = replies.length;
     message('recall-capture');
-    expect(replies.at(-1)).toMatchObject({ build: built.version, documentId: 'synthetic-document', text: body.innerText });
+    expect(replies).toHaveLength(beforeLegacy);
+    for (const mismatch of [{ expectedDocumentId: 'replaced-document' }, { url: 'https://example.org/account' }, { build: 'older-build' }]) {
+      message({ ...capture, ...mismatch });
+      expect(replies.at(-1)).toBeUndefined();
+      expect(bodyReads).toBe(1);
+    }
     document.visibilityState = 'hidden';
+    message(capture);
+    expect(replies.at(-1)).toBeUndefined();
+    expect(bodyReads).toBe(1);
     message('recall-probe');
     expect(replies.at(-1).visible).toBe(false);
-    message('recall-capture', 'other-extension');
+    const beforeIgnored = replies.length;
+    message(capture, 'other-extension');
     message('unrelated');
-    expect(replies).toHaveLength(4);
+    expect(replies).toHaveLength(beforeIgnored);
     // The phone report needs the native sender category even if the normal content guard rejects it.
     const listener = listeners.values().next().value;
     const diagnostic = { type: 'recall-diagnostic-context', runId: '00000000-0000-4000-8000-000000000001' };
     listener(diagnostic, { id: null }, (reply) => replies.push(reply));
-    expect(replies).toHaveLength(4); // This ordinary page is outside the fixed diagnostic target.
+    expect(replies).toHaveLength(beforeIgnored); // This ordinary page is outside the fixed diagnostic target.
     document.location.href = 'https://example.org/?recall-diagnostic=1';
     listener(diagnostic, { id: null }, (reply) => replies.push(reply));
     expect(replies.at(-1)).toEqual({ visibility: 'hidden', stored_visibility: 'visible', sender_identity: 'null' });

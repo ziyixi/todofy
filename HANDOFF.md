@@ -9,6 +9,22 @@ Its old waiting lists and release identities are historical, not instructions to
 
 ## Current work
 
+`codex/recall-orion-probe-fix` fixes two reproduced mobile capture delays and a reviewed privacy race. Established
+capture uses the installed listener instead of repeating five-second injection waits. New snapshots and closed
+visits upload immediately after persistence, outside serial state work, respecting existing server backoff; unchanged
+captures send no empty batch. A guarded content command checks document, raw URL, build and visibility before
+reading text; legacy unguarded reads are ignored. Eight fixed probe error codes replace the opaque result error,
+and sending a diagnostic now retains recent error metadata. Desktop capture and installed Chrome remain untouched.
+Inline empty-connection confirmation replaces the blocked native dialog; real local API deletion reduces only the
+synthetic connection count and retains all visits. Local extension type/lint/build, 165 units and 15 actual WebKit
+cases pass; web type/lint/build and 146 tests pass. The original published 45 demonstrably queues without automatic
+upload and reads the new body's getter during a SPA race; the new body-read count is zero. WebKit now runs in CI
+before artifact upload, using the extension's own locked existing Playwright version; CI policy tests pass (190,
+one optional local skip). Mac native observation found undefined replies before public-site permission and valid
+replies plus text/image afterwards; sender metadata is valid, so no sender/auth guard was relaxed. This is not iOS
+proof. Pending: final candidate native check, branch CI/same-SHA release, six guarded empty-test removals and phone
+acceptance of automatic text/image/visit uploads. Do not ask for desktop help for the old temporary IAB dialog.
+
 Recall settings cleanup is released at `1ab7cfc9`. The live footer confirms that SHA: eight connections display as
 two name groups with six old phone installs folded; old identities and timeline links remain separate. Empty
 connection removal is guarded by stored visits/snapshots and pending count, with schema 6 adding only an index.

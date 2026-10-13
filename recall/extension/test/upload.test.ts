@@ -53,6 +53,27 @@ async function ready(options: { token?: boolean } = {}): Promise<Harness> {
 }
 
 describe('a flush', () => {
+  it('sends newly queued mobile items immediately after capture and respects the resulting 429 backoff', async () => {
+    const h = await ready();
+    const ctx = { ...h.ctx, mobile: true };
+    h.net.answer = () => answer(200);
+    await uploadState.set(ctx.chrome, { ...(await uploadState.get(ctx.chrome)), lastUploadAt: T0 - 15 * SECOND });
+    await queueVisits(ctx, 1);
+    expect(await flush(ctx, T0, 'tick')).toEqual({ kind: 'idle' });
+    expect(await flush(ctx, T0, 'capture')).toEqual({ kind: 'sent', items: 1, status: 200 });
+    expect(await countItems(ctx.db)).toBe(0);
+    await queueVisits(ctx, 1, T0 + SECOND);
+    h.net.answer = () => answer(429, {}, { 'retry-after': '120' });
+    expect(await flush(ctx, T0 + SECOND, 'capture')).toMatchObject({ kind: 'sent', items: 1, status: 429 });
+    expect((await uploadState.get(ctx.chrome)).nextAttemptAt).toBe(T0 + SECOND + 2 * MINUTE);
+    expect(await flush(ctx, T0 + MINUTE, 'capture')).toEqual({ kind: 'idle' });
+    expect(h.net.requests).toHaveLength(2);
+    expect(await countItems(ctx.db)).toBe(1);
+    h.net.answer = () => answer(200);
+    expect(await flush(ctx, T0 + SECOND + 2 * MINUTE, 'capture')).toMatchObject({ kind: 'sent', items: 1, status: 200 });
+    expect(await countItems(ctx.db)).toBe(0);
+  });
+
   it('posts the oldest items gzipped, with the bearer token and no credentials, and removes them on 200', async () => {
     const h = await ready();
     const ids = await queueVisits(h.ctx, 3);
@@ -157,6 +178,15 @@ describe('a flush', () => {
     expect(await flush(h.ctx, T0, 'manual')).toEqual({ kind: 'idle' });
     expect(h.net.requests).toEqual([]);
   });
+});
+
+it('does not send an empty capture batch after another upload drained the queue', async () => {
+  const h = await ready();
+  h.net.answer = () => answer(200);
+  await queueVisits(h.ctx, 1);
+  expect(await flush(h.ctx, T0, 'startup')).toMatchObject({ kind: 'sent', items: 1 });
+  expect(await flush(h.ctx, T0, 'capture')).toEqual({ kind: 'idle' });
+  expect(h.net.requests).toHaveLength(1);
 });
 
 describe('the heartbeat', () => {

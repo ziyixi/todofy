@@ -1,6 +1,6 @@
 // Actual built Orion background + options in isolated WebKit, using native IndexedDB.
 // Uploads are intercepted by a local fake consumer; no production network or owner profile is used.
-/* global document, indexedDB, location, window */
+/* global document, history, HTMLElement, indexedDB, location, window */
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -161,15 +161,31 @@ export async function checkOrionOptions({ webkit, expect, folder }) {
       ),
     );
     await page.exposeFunction('sendToContent', async (request) => {
-      const sender = await page.evaluate(() => window.__test.omitSenderIdentity ? {} : { id: 'synthetic-recall-extension' });
+      const { sender, captureRace } = await page.evaluate(() => ({
+        sender: window.__test.omitSenderIdentity ? {} : { id: 'synthetic-recall-extension' },
+        captureRace: window.__test.captureRace,
+      }));
+      if (['recall-capture', 'recall-capture-current'].includes(request.type) && captureRace === 'navigation') {
+        await article.goto(base + '/article.html?capture-race=1');
+        await article.evaluate(await readFile(join(folder, 'orion/probe.js'), 'utf8'));
+      }
       const value = await article.evaluate(
-        ({ request, sender }) =>
+        ({ request, sender, captureRace }) =>
           new Promise((resolve) => {
+            if (['recall-capture', 'recall-capture-current'].includes(request.type) && captureRace) {
+              if (captureRace === 'spa') history.replaceState({}, '', '/account?capture-race=1');
+              const innerText = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'innerText').get;
+              window.__test.captureBodyReads = 0;
+              Object.defineProperty(document.body, 'innerText', { configurable: true, get() {
+                window.__test.captureBodyReads++;
+                return innerText.call(this);
+              } });
+            }
             const listener = window.__test.listeners.message?.[0];
             if (!listener) throw Error('content_listener_not_installed');
             if (listener(request, sender, resolve) !== true) resolve();
           }),
-        { request, sender },
+        { request, sender, captureRace },
       );
       responses.push({ type: request.type, value });
       return value;
@@ -274,22 +290,8 @@ export async function checkOrionOptions({ webkit, expect, folder }) {
     });
     await h.page.clock.fastForward(11000);
     await expect.poll(() => h.page.evaluate(() => window.__test.local.capture_status)).toMatchObject({ text: 'saved' });
-    if (!waitForMinute) {
-      const queued = await h.page.evaluate(
-        () =>
-          new Promise((resolve) => {
-            const request = indexedDB.open('recall');
-            request.onsuccess = () => {
-              const db = request.result;
-              const tx = db.transaction('outbox', 'readonly');
-              const get = tx.objectStore('outbox').getAll();
-              get.onsuccess = () => resolve(get.result.map((row) => JSON.parse(row.json)));
-              tx.oncomplete = () => db.close();
-            };
-          }),
-      );
-      expect(queued.find((item) => item.kind === 'document')?.document.text).toContain('Actual visible DOM text');
-    }
+    await expect.poll(() => h.batches.flatMap((batch) => batch.items).filter((item) => item.kind === 'document').length).toBe(1);
+    await expect.poll(() => getStatus(h)).toMatchObject({ queued: 0 });
     await h.page.clock.fastForward(51000);
     await expect
       .poll(() => h.batches.flatMap((batch) => batch.items).filter((item) => item.kind === 'document').length)
@@ -310,7 +312,7 @@ export async function checkOrionOptions({ webkit, expect, folder }) {
     );
     expect(
       h.responses.some(
-        ({ type, value }) => type === 'recall-capture' && value.build === manifest.version && value.visible,
+        ({ type, value }) => type === 'recall-capture-current' && value.build === manifest.version && value.visible,
       ),
     ).toBe(true);
     expect(await h.article.evaluate(() => window.__test.listeners.message.length)).toBe(1);
@@ -321,7 +323,7 @@ export async function checkOrionOptions({ webkit, expect, folder }) {
     }));
     expect(nativeBoundary.completionDiscarded).toBe(true);
     expect(nativeBoundary.defaultTopFrame).toBe(true);
-    expect(nativeBoundary.messageRequests).toEqual(expect.arrayContaining(['recall-probe', 'recall-capture']));
+    expect(nativeBoundary.messageRequests).toEqual(expect.arrayContaining(['recall-probe', 'recall-capture-current']));
     await h.page.evaluate(() => {
       window.__test.tab.active = false;
     });
@@ -398,11 +400,10 @@ export async function checkOrionOptions({ webkit, expect, folder }) {
       await expect.poll(() => getStatus(h)).toMatchObject({ focused: true });
       await h.page.clock.fastForward(11000);
       await expect.poll(() => h.page.evaluate(() => window.__test.local.capture_status)).toMatchObject({ text: 'saved' });
-      await expect.poll(() => getStatus(h)).toMatchObject({ queued: 1 });
-      // Mobile uploads retain their normal minute cadence after the Save heartbeat.
+      await expect.poll(() => h.batches.flatMap((batch) => batch.items).filter((item) => item.kind === 'document').length).toBe(1);
+      await expect.poll(() => getStatus(h)).toMatchObject({ queued: 0 });
       await h.page.clock.fastForward(60000);
       await expect.poll(() => h.page.evaluate(() => window.__test.local.capture_status)).toMatchObject({ text: 'unchanged' });
-      await expect.poll(() => h.batches.flatMap((batch) => batch.items).filter((item) => item.kind === 'document').length).toBe(1);
       const document = h.batches.flatMap((batch) => batch.items).find((item) => item.kind === 'document').document;
       expect(document.text).toContain('Actual visible DOM text from the published capture script.');
       expect(document.screenshot_width).toBeGreaterThan(0);
@@ -525,11 +526,13 @@ export async function checkOrionOptions({ webkit, expect, folder }) {
       await fillAndSave(h);
       await h.page.waitForFunction(() => window.__test.local.upload?.lastUploadAt > 0);
       await h.article.bringToFront();
-      await h.page.evaluate((reply) => {
+      const activatedAt = await h.page.evaluate((reply) => {
         window.__test.withholdInjectionCallback = true;
         window.__test.injectionReturnsPromise = reply === 'promise';
         window.__test.skipInjection = reply === 'not_injected';
+        const at = Date.now();
         window.__test.emit('activated', { tabId: 1, windowId: 1 });
+        return at;
       }, reply);
       await h.page.waitForFunction(() => window.__test.calls.execute > 0);
       if (reply === 'not_injected') {
@@ -550,13 +553,14 @@ export async function checkOrionOptions({ webkit, expect, folder }) {
             return (await getStatus(h)).focused;
           }, { timeout: 15000 }).toBe(true);
         }
-        await h.page.clock.fastForward(11000);
-        await expect.poll(async () => {
-          await h.page.clock.fastForward(5100);
-          return h.page.evaluate(() => window.__test.local.capture_status?.text);
-        }, { timeout: 15000 }).toBe('saved');
-        // The real storage read observes the actual captured document before the next upload tick.
-        await expect.poll(() => getStatus(h)).toMatchObject({ queued: 1 });
+        // Stop at the first capture deadline; jumping past its message timeout would outrun real DOM I/O.
+        const untilCapture = activatedAt + 10100 - await h.page.evaluate(() => Date.now());
+        if (untilCapture > 0) await h.page.clock.fastForward(untilCapture);
+        // No further five-second injection timeout or owner upload action is advanced here.
+        await expect.poll(() => h.page.evaluate(() => window.__test.local.capture_status?.text)).toBe('saved');
+        await expect.poll(() => h.batches.flatMap((batch) => batch.items).filter((item) => item.kind === 'document').length).toBe(1);
+        await expect.poll(() => getStatus(h)).toMatchObject({ queued: 0 });
+        const emptyUploads = h.batches.filter((batch) => batch.items.length === 0).length;
         await h.page.clock.fastForward(60000);
         await expect.poll(async () => {
           await h.page.clock.fastForward(5100);
@@ -569,9 +573,63 @@ export async function checkOrionOptions({ webkit, expect, folder }) {
         expect(document.screenshot_jpeg_base64 || document.screenshot_webp_base64).toBeTruthy();
         expect(await h.article.evaluate(() => window.__test.listeners.message.length)).toBe(1);
         expect(h.batches.flatMap((batch) => batch.items).filter((item) => item.kind === 'document')).toHaveLength(1);
+        expect(h.batches.filter((batch) => batch.items.length === 0)).toHaveLength(emptyUploads);
       }
       expect(h.errors).toEqual([]);
-      results.push({ case: reply === 'not_injected' ? 'no injection or completion cannot save content' : 'actual DOM capture with ' + reply + ' return and no injection callback', passed: true, documents: reply === 'not_injected' ? 0 : 1, duplicateDocuments: 0 });
+      results.push({ case: reply === 'not_injected' ? 'no injection or completion cannot save content' : 'actual DOM capture with ' + reply + ' return and no injection callback', passed: true, documents: reply === 'not_injected' ? 0 : 1, duplicateDocuments: 0, automaticUpload: reply !== 'not_injected' });
+      await h.context.close();
+    }
+    {
+      const h = await start();
+      await fillAndSave(h);
+      await h.page.waitForFunction(() => window.__test.local.upload?.lastUploadAt > 0);
+      await h.article.bringToFront();
+      const activatedAt = await h.page.evaluate(() => {
+        const at = Date.now();
+        window.__test.emit('activated', { tabId: 1, windowId: 1 });
+        return at;
+      });
+      await expect.poll(() => getStatus(h)).toMatchObject({ focused: true });
+      const untilCapture = activatedAt + 10100 - await h.page.evaluate(() => Date.now());
+      if (untilCapture > 0) await h.page.clock.fastForward(untilCapture);
+      await expect.poll(() => h.batches.flatMap((batch) => batch.items).filter((item) => item.kind === 'document').length).toBe(1);
+      const document = h.batches.flatMap((batch) => batch.items).find((item) => item.kind === 'document').document;
+      expect(document.text).toContain('Actual visible DOM text from the published capture script.');
+      expect(document.screenshot_jpeg_base64 || document.screenshot_webp_base64).toBeTruthy();
+      await h.page.evaluate(() => { window.__test.tab.active = false; });
+      await h.article.goto(base + '/blank.html');
+      await h.page.waitForFunction(() => window.__test.visibility.includes(false));
+      // No minute alarm or manual upload is advanced after the actual pagehide.
+      await expect.poll(() => h.batches.flatMap((batch) => batch.items).filter((item) => item.kind === 'visit').length).toBe(1);
+      await expect.poll(() => getStatus(h)).toMatchObject({ focused: false, queued: 0 });
+      const items = h.batches.flatMap((batch) => batch.items);
+      expect(items.filter((item) => item.kind === 'document')).toHaveLength(1);
+      const visit = items.find((item) => item.kind === 'visit').visit;
+      expect(Date.parse(visit.focus_spans.at(-1).end_time) - activatedAt).toBeLessThan(60000);
+      expect(h.errors).toEqual([]);
+      results.push({ case: 'actual pagehide uploads the ended visit before the next minute without duplicating its text or image', passed: true, documents: 1, images: 1, visits: 1, automaticUpload: true });
+      await h.context.close();
+    }
+    for (const captureRace of ['spa', 'navigation']) {
+      const h = await start();
+      await fillAndSave(h);
+      await h.page.waitForFunction(() => window.__test.local.upload?.lastUploadAt > 0);
+      await h.article.bringToFront();
+      const activatedAt = await h.page.evaluate(() => {
+        const at = Date.now();
+        window.__test.emit('activated', { tabId: 1, windowId: 1 });
+        return at;
+      });
+      await expect.poll(() => getStatus(h)).toMatchObject({ focused: true });
+      await h.page.evaluate((race) => { window.__test.captureRace = race; }, captureRace);
+      const untilCapture = activatedAt + 10100 - await h.page.evaluate(() => Date.now());
+      if (untilCapture > 0) await h.page.clock.fastForward(untilCapture);
+      await expect.poll(() => h.page.evaluate(() => window.__test.local.capture_status?.text)).toBe('failed');
+      // The real listener saw the changed URL/document before readPage could touch the body getter.
+      expect(await h.article.evaluate(() => window.__test.captureBodyReads)).toBe(0);
+      expect(h.batches.flatMap((batch) => batch.items).filter((item) => item.kind === 'document')).toEqual([]);
+      expect(h.errors).toEqual([]);
+      results.push({ case: captureRace + ' between probe and guarded capture never reads the new body', passed: true, bodyReads: 0, documents: 0 });
       await h.context.close();
     }
     await captureCase(false);

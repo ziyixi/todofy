@@ -3,8 +3,8 @@ import { describe, expect, it, vi } from 'vitest';
 import { executeFile, getTab, queryTabs } from '../src/browser.ts';
 import { countItems, queueItem, setToken } from '../src/db.ts';
 import { DIAGNOSTIC_URL, diagnosticEvent, diagnosticStatus, observe, observeTabs, startDiagnostic, submitDiagnostic } from '../src/diagnostic.ts';
-import { INITIAL_UPLOAD, uploadState } from '../src/store.ts';
-import { BROWSER_REPLY_TIMEOUT_MS } from '../src/limits.ts';
+import { INITIAL_UPLOAD, lastError, uploadState } from '../src/store.ts';
+import { BROWSER_REPLY_TIMEOUT_MS, ERROR_REPORTED_MS } from '../src/limits.ts';
 import { flush } from '../src/upload.ts';
 import { harness, INGEST_TOKEN, MINUTE, T0, type FakeTab } from './fake-chrome.ts';
 
@@ -24,6 +24,25 @@ async function sentBatch(h: Awaited<ReturnType<typeof setup>>): Promise<IngestBa
 }
 
 describe('one-shot Orion capture diagnostic', () => {
+  it.each([false, true])('preserves an unexpired device error without uploading queued content; expired=%s', async (expired) => {
+    const h = await setup();
+    await startDiagnostic(h.ctx);
+    const errorAt = expired ? T0 - ERROR_REPORTED_MS : T0 - MINUTE;
+    await lastError.set(h.ctx.chrome, 'page_probe_invalid_result', errorAt);
+    // Sending the diagnostic must not even parse this deliberately invalid business JSON.
+    await queueItem(h.ctx.db, { id: 'private-queued-item', kind: 'visit', json: 'PRIVATE_BODY_MUST_NOT_UPLOAD', version: 1 }, T0);
+    const uploadBefore = await uploadState.get(h.ctx.chrome);
+    expect(await submitDiagnostic(h.ctx)).toMatchObject({ ok: true });
+    const sent = await sentBatch(h);
+    expect(sent.device.last_error_code).toBe(expired ? undefined : 'page_probe_invalid_result');
+    expect(sent.device.queued_count).toBe(1);
+    expect(sent.items).toEqual([]);
+    expect(JSON.stringify(sent)).not.toContain('PRIVATE_BODY_MUST_NOT_UPLOAD');
+    expect(await countItems(h.ctx.db)).toBe(1);
+    expect(await lastError.get(h.ctx.chrome)).toEqual({ code: 'page_probe_invalid_result', at: errorAt });
+    expect(await uploadState.get(h.ctx.chrome)).toEqual(uploadBefore);
+  });
+
   it('retains the created public tab ID before native URL metadata arrives', async () => {
     const h = await setup();
     let created!: number;

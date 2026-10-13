@@ -12,13 +12,27 @@ export const DIAGNOSTIC_STATE_LABELS: Readonly<Record<string, string>> = {
   pending: '等待回调', returned: '已返回', failed: '失败', skipped: '已跳过',
 };
 
+/** Fixed failure codes only; no browser-returned values are displayed or uploaded. */
+export const PAGE_PROBE_ERRORS: Readonly<Record<string, string>> = {
+  page_probe_invalid_result: '有页面的状态探测失败，部分采集可能跳过',
+  page_probe_missing_reply: 'Orion 没有返回页面状态',
+  page_probe_invalid_reply_type: 'Orion 返回的页面状态类型不正确',
+  page_probe_missing_document_id: '页面状态缺少文档标识',
+  page_probe_invalid_document_id: '页面状态中的文档标识类型不正确',
+  page_probe_missing_visibility: '页面状态缺少可见性',
+  page_probe_invalid_visibility: '页面状态中的可见性类型不正确',
+  page_probe_missing_url: '页面状态缺少网址',
+  page_probe_invalid_url: '页面状态中的网址类型不正确',
+};
+
 const SELECTION_LABELS = { test_page: '测试页', extension_page: '扩展设置页', other_page: '其他网页', none: '无标签' };
 const VISIBILITY_LABELS = { visible: '可见', hidden: '不可见', unknown: '未知' };
 const SENDER_LABELS = { same: '本扩展', missing: '未提供', null: 'null', foreign: '其他扩展', unknown: '未知' };
 
 /** Fixed metadata only; API return shapes stay explicit for diagnosis. */
 export function diagnosticStepSummary(step: CaptureDiagnosticStep): string {
-  const parts = [DIAGNOSTIC_STAGE_LABELS[step.stage] ?? step.stage, DIAGNOSTIC_STATE_LABELS[step.state] ?? step.state];
+  const state = step.stage === 'probe_injection' && step.state === 'pending' ? '未收到完成通知' : DIAGNOSTIC_STATE_LABELS[step.state] ?? step.state;
+  const parts = [DIAGNOSTIC_STAGE_LABELS[step.stage] ?? step.stage, state];
   if (step.result !== undefined) parts.push(`结果 ${step.result}`);
   if (step.stage === 'active_tabs') parts.push(`匹配 ${String(step.count ?? 0)} 个`);
   if (step.selection !== undefined) parts.push(`选择 ${SELECTION_LABELS[step.selection]}`);

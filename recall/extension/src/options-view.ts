@@ -4,7 +4,7 @@
  */
 import { DAY, ERROR_REPORTED_MS, HOUR, MINUTE } from './limits.ts';
 import type { DiagnosticAnswer, DiagnosticStatus, SaveAnswer, Status } from './messages.ts';
-import { DIAGNOSTIC_STAGE_LABELS, DIAGNOSTIC_STATE_LABELS } from '../../shared/diagnostic.ts';
+import { DIAGNOSTIC_STAGE_LABELS, DIAGNOSTIC_STATE_LABELS, PAGE_PROBE_ERRORS } from '../../shared/diagnostic.ts';
 
 export interface Row {
   readonly label: string;
@@ -48,12 +48,15 @@ export function statusRows(status: Status): Row[] {
   }
   const error = status.lastError;
   if (error !== null && status.now - error.at < ERROR_REPORTED_MS) {
-    const timeouts: Readonly<Record<string, string>> = {
+    const pageErrors: Readonly<Record<string, string>> = {
+      ...PAGE_PROBE_ERRORS,
       page_query_timeout: 'Orion 未回复网页查询，已释放采集队列',
       page_tab_timeout: 'Orion 未回复页面信息查询，后续页面事件会继续检查',
       page_probe_timeout: 'Orion 未回复页面读取，后续采样会继续尝试',
     };
-    rows.push({ label: '最近错误', value: `${timeouts[error.code] ?? error.code}（${ago(status.now - error.at)}）`, warn: error.code in timeouts });
+    const description = pageErrors[error.code];
+    const detail = description === undefined ? error.code : `${description} [${error.code}]`;
+    rows.push({ label: '最近错误', value: `${detail}（${ago(status.now - error.at)}）`, warn: description !== undefined });
   }
   if (status.capabilities !== undefined) {
     rows.push({ label: '采集环境', value: `${status.mobile ? 'Orion · iOS，仅前台记录' : '桌面浏览器'}；正文读取接口${status.capabilities.script ? '已提供' : '未提供'}，截图接口${status.capabilities.screenshot ? '已提供' : '未提供'}`, warn: !status.capabilities.script });

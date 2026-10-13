@@ -120,12 +120,18 @@ describe('the service worker', () => {
     await browser.local.set({ mirror: { open, lastBeat: T0 } });
     vi.setSystemTime(T0 + 5 * SECOND);
     const sender = { id: EXTENSION_ID, tab, ...(frameId === undefined ? {} : { frameId }) };
-    browser.events.message.emit({ type: 'page-visibility', documentId: tab.documentId, visible: false, at: Date.now() }, sender, () => undefined);
-    await settle();
+    await setToken(db, INGEST_TOKEN);
+    const response = await new Promise((resolve) => {
+      const kept = browser.events.message.emit({ type: 'page-visibility', documentId: tab.documentId, visible: false, at: Date.now() }, sender, resolve);
+      if (kept !== true) resolve('not answered');
+    });
+    expect(response).toEqual(closes ? { ok: true } : 'not answered');
     expect((await focus())?.open).toEqual(closes ? null : open);
     expect((await getVisit(db, visit.id))?.spans).toEqual(closes ? [[T0, T0 + 5 * SECOND]] : []);
     const queued = await oldestItems(db, 10, Number.MAX_SAFE_INTEGER, Date.now());
-    expect(queued.map((item) => item.kind)).toEqual(closes ? ['visit'] : []);
+    expect(queued).toEqual([]);
+    if (closes) expect((await batch(0)).items).toMatchObject([{ kind: 'visit', visit: { focus_spans: [{ start_time: new Date(T0).toISOString(), end_time: new Date(T0 + 5 * SECOND).toISOString() }] } }]);
+    else expect(net.requests).toEqual([]);
     db.close();
   });
 
@@ -236,6 +242,10 @@ describe('the service worker', () => {
     Object.assign(browser.api.tabs, {
       get: (id: number, callback: (tab: FakeTab) => void) => { void get(id).then(callback); },
       captureVisibleTab: (_options: unknown, callback: (data: string) => void) => { callback('data:image/png;base64,c3ludGhldGlj'); },
+      executeScript: (_id: number, _details: unknown, callback: (value?: unknown[]) => void) => { queueMicrotask(() => { callback(undefined); }); },
+      sendMessage: (id: number, request: { type: string }, callback: (value: unknown) => void) => {
+        queueMicrotask(() => { callback(browser.script({ tabId: id, files: [request.type === 'recall-probe' ? 'probe.js' : 'capture.js'] })); });
+      },
     });
     const query = vi.spyOn(browser.api.tabs, 'query').mockImplementation(() => new Promise<FakeTab[]>(() => undefined));
     browser.script = ({ tabId, files }) => {
