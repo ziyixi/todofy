@@ -42,6 +42,16 @@
   color: var(--plus-muted);
   font-size: 12px;
 }
+.review-lane-header > small {
+  margin-left: auto;
+  max-width: 55%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--plus-muted);
+}
 .review-lane-cards {
   display: grid;
   gap: 7px;
@@ -51,7 +61,7 @@
   align-items: flex-start;
   gap: 7px;
   width: 100%;
-  min-height: 64px;
+  min-height: 60px;
   padding: 8px;
   border: 1px solid var(--plus-line) !important;
   border-left: 3px solid var(--outcome-color) !important;
@@ -124,11 +134,6 @@
   -webkit-box-orient: vertical;
   overflow: hidden;
   overflow-wrap: anywhere;
-}
-.planning-outcome-bet {
-  color: var(--plus-accent);
-  flex: 0 0 auto;
-  margin-top: 3px;
 }
 .planning-outcome-start {
   color: #a56e21;

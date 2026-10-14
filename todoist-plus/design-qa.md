@@ -33,7 +33,7 @@ layouts differ intentionally. Private source pixels remain outside Git.
 - Layout: all commitments are grouped above scheduling, and only the selected parent's steps expand.
   Full-width days, ordinary dividers and restrained card borders replace the permanently narrow pool.
 - Tokens: existing green accent, pale selection, light backgrounds and dark tokens are reused. Selected
-  parent, Bets and native priority marks are distinct without new status categories.
+  parent and native priority marks are distinct without new status categories.
 - Assets: existing Lucide icons and ordinary form primitives; no raster assets or generated artwork.
 - Copy: English task and planning controls match the current Todoist locale; all task content is synthetic.
 
@@ -48,3 +48,21 @@ alone. Browser viewport overrides were reset. No actionable P0/P1/P2 issue remai
 
 Remaining boundary: saving to the real services, label-role configuration and automatic weekly rotation
 await a separate implementation. Reload resets the local synthetic state.
+
+## October 14 feedback correction
+
+The owner's requested reference change makes Bet an overall weekly goal. The two editable current-week
+goals now sit above Review/Week, with larger goal text; task-level Bet marks and toggles were removed.
+The execution commitments remain eight. Quarter and the other columns have editable local label names,
+with the saved mapping displayed in the header. The modal is four simple inputs, not a column/rule builder.
+
+The old timer only changed its icon. The revised Focus shows one active strip with elapsed HH:MM:SS,
+Running/Paused and Pause/Resume/Stop. Its strip remains reachable when the item leaves the daily queue.
+Actual Chrome elapsed time advanced, paused unchanged, and continued when switching views; Stop and
+completion behaved separately. The 1000 px active strip did not overflow horizontally.
+
+Feedback captures: `02-weekly-goals.jpg`, `01-timer-paused.jpg`, `03-label-mapping.jpg` in
+`/private/tmp/plus-prototype-feedback-20261014/`. The 2560 × 873 Review frame kept the final commitment
+bottom at 868 px after natural card minimum was reduced to 60 px. Existing system fonts/tokens and icons
+remain in use; goals are 16 px and the clock is 22 px. No actionable P0/P1/P2 issue remains in these checks.
+These are local prototype changes; real services, tasks, labels and the installed extension were not modified.

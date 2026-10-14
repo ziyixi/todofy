@@ -1,6 +1,6 @@
 # Handoff
 
-Updated 2026-10-13. Keep this file focused on active work, open acceptance and dated compatibility constraints.
+Updated 2026-10-14. Keep this file focused on active work, open acceptance and dated compatibility constraints.
 Move completed rollout detail to a dated record and link it here. Repository rules are in [AGENTS](AGENTS.md);
 service entry points are in [README](README.md). Never put private content, credentials or raw production output here.
 
@@ -17,6 +17,15 @@ no real task was relabeled, scheduled or completed. Native Chrome lane/day/inser
 overview, editor dismissal and seven/three/one-day layouts passed; types/lint, 39 tests and standalone
 build pass. [Prototype verification](docs/todoist-plus-planning-prototype.md) records the actual checks
 and boundaries. This branch is local and is not a production release; no installed files were updated.
+October 14 owner feedback separates weekly Bets from execution commitments: editable work/personal goals
+sit above the board, without task-level Bet stars/toggles. The local stopwatch has visible elapsed time,
+pause/resume/stop and one active session across views; its Stop remains reachable if the task leaves today.
+The four-column label panel now saves a local mapping, rejects empty/duplicate labels and shows the mapped
+name in each Review header. These are prototype-only values and reset on reload. Updated checks: 45 tests,
+types/lint and standalone build pass. Chrome confirmed independent goal editing (still eight commitments),
+custom Quarter mapping/save/reopen and a named duplicate error, ticking elapsed time, a frozen paused
+readout, continued time across Plan/Focus, Stop without completion and completion stopping the active timer.
+Review and Focus with a timer had no horizontal overflow at 1000 px; Chrome sizing was reset.
 
 `codex/todoist-plus-interaction-fix` corrects the owner's installed weekly-version feedback. Plan now owns
 week navigation, day arrangement and estimates; Focus only executes today's queue. View switching avoids

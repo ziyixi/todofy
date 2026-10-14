@@ -28,6 +28,10 @@ function outcome(
 
 export function planningFixture(): PlanningData {
   return {
+    weeklyGoals: {
+      work: "Make the next release ready to share",
+      personal: "Have a calmer place to work at home",
+    },
     outcomes: [
       outcome(
         "website",
@@ -40,7 +44,7 @@ export function planningFixture(): PlanningData {
           "Check the mobile layout",
           "Publish the final changes",
         ],
-        { bet: true, priority: 4, deadline: "2026-10-23" },
+        { priority: 4, deadline: "2026-10-23" },
       ),
       outcome(
         "research",
@@ -83,7 +87,6 @@ export function planningFixture(): PlanningData {
         "committed",
         "#aa8b63",
         ["Measure the space for a lamp", "Compare two desk lamps"],
-        { bet: true },
       ),
       outcome(
         "trip",

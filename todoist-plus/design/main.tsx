@@ -16,12 +16,14 @@ import {
   Settings2,
   Sun,
   Target,
-  X,
 } from "lucide-react";
 import { ReviewBoard } from "./ReviewBoard";
 import { PlanningWeek } from "./PlanningWeek";
 import { PlanningDetails } from "./PlanningDetails";
 import { PrototypeFocus } from "./PrototypeFocus";
+import { usePrototypeTimer } from "./usePrototypeTimer";
+import { WeeklyGoals } from "./WeeklyGoals";
+import { BoardLabels } from "./BoardLabels";
 import { planningFixture } from "./planning-fixture";
 import {
   CURRENT_WEEK,
@@ -43,7 +45,8 @@ function Prototype() {
   const [week, setWeek] = useState(CURRENT_WEEK);
   const [dark, setDark] = useState(false);
   const [selected, setSelected] = useState("");
-  const [runningStep, setRunningStep] = useState("");
+  const [lanes, setLanes] = useState(LANES);
+  const stopwatch = usePrototypeTimer();
   const dialog = useRef<HTMLDialogElement>(null);
   const selectedOutcome = data.outcomes.find(
     (outcome) => outcome.id === selected,
@@ -81,7 +84,8 @@ function Prototype() {
     setData(planningFixture());
     setWeek(CURRENT_WEEK);
     setArea("all");
-    setRunningStep("");
+    setLanes(LANES);
+    stopwatch.stop();
   }
 
   return (
@@ -187,6 +191,12 @@ function Prototype() {
           </header>
           {view === "plan" ? (
             <>
+              <WeeklyGoals
+                goals={data.weeklyGoals}
+                onSave={(weeklyGoals) =>
+                  setData((current) => ({ ...current, weeklyGoals }))
+                }
+              />
               <div className="planning-toolbar">
                 <nav className="planning-view-tabs" aria-label="Planning view">
                   <button
@@ -227,6 +237,7 @@ function Prototype() {
               </div>
               {mode === "review" ? (
                 <ReviewBoard
+                  lanes={lanes}
                   outcomes={data.outcomes}
                   queues={data.queues}
                   area={area}
@@ -265,8 +276,7 @@ function Prototype() {
             <PrototypeFocus
               outcomes={data.outcomes}
               ids={data.queues[TODAY] ?? []}
-              running={runningStep}
-              onRunning={setRunningStep}
+              stopwatch={stopwatch}
               onSave={saveOutcome}
               onEdit={setSelected}
               onPlan={showWeek}
@@ -290,31 +300,11 @@ function Prototype() {
             onClose={() => setSelected("")}
           />
         ) : selected === "labels" ? (
-          <section className="planning-labels">
-            <header>
-              <h2>Board labels</h2>
-              <button
-                className="plus-icon"
-                aria-label="Close"
-                onClick={() => setSelected("")}
-              >
-                <X size={18} />
-              </button>
-            </header>
-            <p>
-              One column, one Todoist label. Quarter is a manual candidate pool.
-            </p>
-            {LANES.map((lane) => (
-              <div key={lane.id}>
-                <span>{lane.title}</span>
-                <code>{lane.label}</code>
-              </div>
-            ))}
-            <p className="planning-demo-note">
-              This prototype simulates labels. Existing tasks and labels are not
-              changed.
-            </p>
-          </section>
+          <BoardLabels
+            lanes={lanes}
+            onSave={setLanes}
+            onClose={() => setSelected("")}
+          />
         ) : null}
       </dialog>
     </div>

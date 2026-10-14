@@ -15,7 +15,6 @@ export interface Outcome {
   area: Area;
   lane: Lane;
   priority: number;
-  bet?: boolean;
   mustStart?: boolean;
   deadline?: string;
   color: string;
@@ -23,12 +22,19 @@ export interface Outcome {
 }
 
 export interface PlanningData {
+  weeklyGoals: Record<Area, string>;
   outcomes: Outcome[];
   queues: Record<string, string[]>;
 }
 
+export interface BoardLane {
+  id: Lane;
+  title: string;
+  label: string;
+}
+
 // One personal board, backed by four ordinary labels in the eventual integration.
-export const LANES: { id: Lane; title: string; label: string }[] = [
+export const LANES: BoardLane[] = [
   { id: "quarter", title: "Quarter", label: "quarter" },
   { id: "month", title: "Month", label: "candiate" },
   { id: "week", title: "Week", label: "focus" },

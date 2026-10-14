@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Star, X } from "lucide-react";
+import { X } from "lucide-react";
 import { LANES, minutesLabel, type Outcome } from "./planning-model";
 
 interface Props {
@@ -57,14 +57,6 @@ export function PlanningDetails({ outcome, onSave, onClose }: Props) {
             <option value={1}>P4</option>
           </select>
         </label>
-        <button
-          className={`planning-bet-button ${draft.bet ? "selected" : ""}`}
-          aria-pressed={Boolean(draft.bet)}
-          onClick={() => setDraft({ ...draft, bet: !draft.bet })}
-        >
-          <Star size={15} fill={draft.bet ? "currentColor" : "none"} /> This
-          week's bet
-        </button>
       </div>
       <h3>
         Next steps <span>{draft.steps.length}</span>

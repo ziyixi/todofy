@@ -19,6 +19,7 @@ it("moving an outcome lane preserves its steps, deadline and existing day queues
     before.outcomes.filter((outcome) => outcome.id !== "website"),
   );
   expect(result.queues).toEqual(before.queues);
+  expect(result.weeklyGoals).toEqual(before.weeklyGoals);
   expect(data).toEqual(before);
 });
 
@@ -51,6 +52,7 @@ it("moving and reordering steps preserves outcome lanes and deadlines", () => {
     "website-1",
   ]);
   expect(reordered.outcomes).toEqual(before.outcomes);
+  expect(reordered.weeklyGoals).toEqual(before.weeklyGoals);
   expect(reordered.queues["2026-10-12"]).toEqual(before.queues["2026-10-12"]);
   expect(reordered.queues["2026-10-17"]).toEqual(before.queues["2026-10-17"]);
   expect(data).toEqual(before);

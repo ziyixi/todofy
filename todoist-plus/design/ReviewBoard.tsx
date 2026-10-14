@@ -5,11 +5,12 @@ import {
   useDraggable,
   useDroppable,
 } from "@dnd-kit/react";
-import { Flag, GripVertical, Star } from "lucide-react";
-import { LANES, type Lane, type Outcome } from "./planning-model";
+import { Flag, GripVertical } from "lucide-react";
+import { type BoardLane, type Lane, type Outcome } from "./planning-model";
 import "./review.css";
 
 interface Props {
+  lanes: BoardLane[];
   outcomes: Outcome[];
   queues: Record<string, string[]>;
   area: "all" | "work" | "personal";
@@ -51,14 +52,6 @@ export function OutcomeCard({
           <strong className="planning-outcome-title" title={outcome.title}>
             {outcome.title}
           </strong>
-          {outcome.bet && (
-            <Star
-              size={12}
-              className="planning-outcome-bet"
-              fill="currentColor"
-              aria-label="Weekly bet"
-            />
-          )}
           {outcome.mustStart && (
             <Flag
               size={12}
@@ -125,7 +118,7 @@ function ReviewLane({
   scheduledIds,
   onEdit,
 }: {
-  lane: (typeof LANES)[number];
+  lane: BoardLane;
   outcomes: Outcome[];
   scheduledIds: Set<string>;
   onEdit: Props["onEdit"];
@@ -145,6 +138,7 @@ function ReviewLane({
       <header className="review-lane-header">
         <h2>{lane.title}</h2>
         <span>{outcomes.length}</span>
+        <small title={`Todoist label: ${lane.label}`}>@{lane.label}</small>
       </header>
       <div className="review-lane-cards">
         {outcomes.map((outcome) => (
@@ -167,7 +161,14 @@ function ReviewLane({
   );
 }
 
-export function ReviewBoard({ outcomes, queues, area, onMove, onEdit }: Props) {
+export function ReviewBoard({
+  lanes,
+  outcomes,
+  queues,
+  area,
+  onMove,
+  onEdit,
+}: Props) {
   const scheduledIds = new Set(Object.values(queues).flat());
   const visible = outcomes.filter(
     (outcome) => area === "all" || outcome.area === area,
@@ -185,7 +186,7 @@ export function ReviewBoard({ outcomes, queues, area, onMove, onEdit }: Props) {
     >
       <div className="review-board">
         <div className="review-lanes">
-          {LANES.map((lane) => (
+          {lanes.map((lane) => (
             <ReviewLane
               key={lane.id}
               lane={lane}

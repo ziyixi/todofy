@@ -95,12 +95,10 @@
 .planning-dialog::backdrop {
   background: #0005;
 }
-.planning-details,
-.planning-labels {
+.planning-details {
   padding: 22px 25px;
 }
-.planning-details header,
-.planning-labels header {
+.planning-details header {
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -136,20 +134,6 @@
   border: 1px solid var(--plus-line);
   border-radius: 5px;
   font-size: 13px;
-}
-.planning-bet-button {
-  display: flex;
-  gap: 6px;
-  align-items: center;
-  background: none;
-  border: 0;
-  padding: 7px;
-  border-radius: 4px;
-  font-size: 12px !important;
-}
-.planning-bet-button.selected {
-  color: var(--plus-accent);
-  background: var(--plus-selected);
 }
 .planning-details h3 {
   font-size: 14px;
@@ -193,26 +177,6 @@
 .planning-details footer span {
   color: var(--plus-muted);
   font-size: 12px;
-}
-.planning-labels h2 {
-  font-size: 18px;
-  margin: 0;
-}
-.planning-labels p {
-  color: var(--plus-muted);
-  font-size: 13px;
-}
-.planning-labels > div {
-  display: flex;
-  justify-content: space-between;
-  padding: 11px 0;
-  border-bottom: 1px solid var(--plus-line);
-}
-.planning-labels code {
-  font-size: 12px;
-  background: var(--plus-hover);
-  padding: 3px 6px;
-  border-radius: 4px;
 }
 .planning-focus-root {
   max-width: 850px;
@@ -301,8 +265,7 @@
   .planning-detail-fields {
     flex-wrap: wrap;
   }
-  .planning-details,
-  .planning-labels {
+  .planning-details {
     padding: 18px;
   }
 }
