@@ -9,6 +9,15 @@ Its old waiting lists and release identities are historical, not instructions to
 
 ## Current work
 
+`codex/plus-planning-prototype` implements the owner's next design as a local, synthetic-only prototype.
+Review moves parent outcomes between Quarter/Month/Week/Committed; Week shows all commitments together and
+arranges their leaf steps. Production extension source, contracts, backend, connection and installed files
+remain unchanged. The only authorized real-account write was creation of one empty `quarter` label;
+no real task was relabeled, scheduled or completed. Native Chrome lane/day/insertion dragging, eight-item
+overview, editor dismissal and seven/three/one-day layouts passed; types/lint, 39 tests and standalone
+build pass. [Prototype verification](docs/todoist-plus-planning-prototype.md) records the actual checks
+and boundaries. This branch is local and is not a production release; no installed files were updated.
+
 `codex/todoist-plus-interaction-fix` corrects the owner's installed weekly-version feedback. Plan now owns
 week navigation, day arrangement and estimates; Focus only executes today's queue. View switching avoids
 full reads, timer/queue operations apply confirmed responses, and queue checks read only displayed days.
@@ -28,9 +37,10 @@ Correction `b51413a02bdfec608dee5762e412a86c0adf35bf` passed branch CI 385161520
 release 38516495384. Only Plus was published; every Worker, image, VPS and other extension publication skipped.
 Version `2026.1014.320.46356` is installed in the existing `~/Documents/chrome_extensions/todoist-plus` folder;
 all seven files match the green artifact and public ZIP. Old generated assets were removed, permissions
-are unchanged and Chrome-stored connection data was not touched. The owner has been asked for one extension
-Reload followed by Todoist page refresh. **Pending:** that step, then real corrected-version response/drag
-acceptance. Browser tooling blocks the internal extension manager and forbids alternate methods. Preserve
+are unchanged and Chrome-stored connection data was not touched. The owner toggled the extension off/on
+and refreshed; the active Plan tab and its Focus view were read-only checked on October 13: new week controls,
+Adjust plan and no old Choose tasks. **Pending:** corrected-version real drag acceptance. Browser tooling
+blocks the internal extension manager and forbids alternate methods. Preserve
 this fixed folder and connection; do not ask for a reinstall or token rotation. PWA and natural Monday
 rollover remain separate observations. Legacy FlowDay timer replace/clear stays `RELOAD_REQUIRED` until
 at least 2026-11-13.

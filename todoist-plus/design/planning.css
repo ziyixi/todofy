@@ -1,0 +1,308 @@
+.planning-root {
+  padding: 38px 36px 48px;
+  max-width: 1900px;
+  margin: 0 auto;
+  font-size: 14px;
+  line-height: 1.4;
+}
+.planning-root button,
+.planning-dialog button,
+.planning-dialog input,
+.planning-dialog select {
+  font: inherit;
+  color: inherit;
+}
+.planning-root button,
+.planning-dialog button {
+  cursor: pointer;
+}
+.planning-root button:focus-visible,
+.planning-dialog button:focus-visible,
+.planning-dialog input:focus-visible,
+.planning-dialog select:focus-visible {
+  outline: 2px solid var(--plus-accent);
+  outline-offset: 3px;
+}
+.planning-page-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 22px;
+}
+.planning-page-header h1 {
+  font-size: 26px;
+  line-height: 34px;
+  letter-spacing: -0.5px;
+  margin: 0;
+}
+.planning-page-header p {
+  color: var(--plus-muted);
+  font-size: 12px;
+  margin: 5px 0 0;
+}
+.planning-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  margin-bottom: 22px;
+  min-height: 34px;
+}
+.planning-toolbar > span {
+  margin-left: auto;
+  color: var(--plus-muted);
+  font-size: 12px;
+}
+.planning-view-tabs {
+  display: flex;
+  gap: 2px;
+  background: var(--plus-hover);
+  border-radius: 6px;
+  padding: 3px;
+}
+.planning-view-tabs button {
+  padding: 5px 15px;
+  border-radius: 4px;
+  font-weight: 550;
+}
+.planning-view-tabs button[aria-selected="true"] {
+  background: var(--plus-bg);
+  box-shadow: 0 1px 3px #00000012;
+}
+.planning-area-tabs {
+  display: flex;
+  gap: 4px;
+}
+.planning-area-tabs button {
+  padding: 5px 9px;
+  border-radius: 4px;
+  color: var(--plus-muted);
+  font-size: 12px;
+}
+.planning-area-tabs button[aria-selected="true"] {
+  color: var(--plus-accent);
+  background: var(--plus-selected);
+}
+.planning-dialog {
+  background: var(--plus-bg);
+  color: var(--plus-text);
+  border: 1px solid var(--plus-line);
+  border-radius: 10px;
+  box-shadow: 0 12px 40px #0002;
+  width: min(610px, calc(100vw - 32px));
+  padding: 0;
+  max-height: 85vh;
+}
+.planning-dialog::backdrop {
+  background: #0005;
+}
+.planning-details,
+.planning-labels {
+  padding: 22px 25px;
+}
+.planning-details header,
+.planning-labels header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+.planning-context {
+  font-size: 12px;
+  color: var(--plus-muted);
+}
+.planning-title-input {
+  width: 100%;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  font-size: 20px !important;
+  font-weight: 650;
+  margin: 12px 0 20px;
+}
+.planning-detail-fields {
+  display: flex;
+  align-items: flex-end;
+  gap: 14px;
+}
+.planning-detail-fields label {
+  display: grid;
+  gap: 6px;
+  color: var(--plus-muted);
+  font-size: 12px;
+}
+.planning-dialog select {
+  padding: 6px 9px;
+  background: var(--plus-bg);
+  border: 1px solid var(--plus-line);
+  border-radius: 5px;
+  font-size: 13px;
+}
+.planning-bet-button {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  background: none;
+  border: 0;
+  padding: 7px;
+  border-radius: 4px;
+  font-size: 12px !important;
+}
+.planning-bet-button.selected {
+  color: var(--plus-accent);
+  background: var(--plus-selected);
+}
+.planning-details h3 {
+  font-size: 14px;
+  margin: 24px 0 8px;
+}
+.planning-details h3 span {
+  color: var(--plus-muted);
+  font-weight: 400;
+  margin-left: 8px;
+}
+.planning-detail-steps {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.planning-detail-steps li {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--plus-line);
+}
+.planning-detail-steps li span {
+  flex: 1;
+}
+.planning-detail-steps select {
+  font-size: 12px;
+}
+.planning-detail-deadline {
+  font-size: 12px;
+  color: var(--plus-muted);
+  margin: 18px 0;
+}
+.planning-details footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-top: 22px;
+}
+.planning-details footer span {
+  color: var(--plus-muted);
+  font-size: 12px;
+}
+.planning-labels h2 {
+  font-size: 18px;
+  margin: 0;
+}
+.planning-labels p {
+  color: var(--plus-muted);
+  font-size: 13px;
+}
+.planning-labels > div {
+  display: flex;
+  justify-content: space-between;
+  padding: 11px 0;
+  border-bottom: 1px solid var(--plus-line);
+}
+.planning-labels code {
+  font-size: 12px;
+  background: var(--plus-hover);
+  padding: 3px 6px;
+  border-radius: 4px;
+}
+.planning-focus-root {
+  max-width: 850px;
+}
+.planning-adjust {
+  color: var(--plus-accent) !important;
+  padding: 0;
+  font-size: 12px !important;
+  margin: 0 0 18px;
+}
+.planning-today-step {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  border-bottom: 1px solid var(--plus-line);
+  padding: 17px 0;
+}
+.planning-today-title {
+  flex: 1;
+  display: grid;
+  gap: 4px;
+  text-align: left;
+  padding: 0;
+}
+.planning-today-title strong {
+  font-weight: 500;
+}
+.planning-today-title small {
+  color: var(--plus-muted);
+  font-size: 12px;
+}
+.planning-complete {
+  display: grid;
+  place-items: center;
+  width: 19px;
+  height: 19px;
+  border-radius: 50%;
+  border: 1px solid #a3a39b !important;
+  padding: 0;
+}
+.planning-complete svg {
+  opacity: 0;
+}
+.planning-complete:hover svg,
+.completed .planning-complete svg {
+  opacity: 1;
+}
+.planning-today-step.completed .planning-today-title {
+  opacity: 0.5;
+}
+.planning-today-step.completed .planning-today-title strong {
+  text-decoration: line-through;
+}
+.planning-demo-note {
+  color: var(--plus-muted);
+  font-size: 12px;
+  margin-top: 20px;
+}
+.prototype-controls > div button {
+  gap: 6px;
+}
+.prototype-sidebar .prototype-native-item {
+  cursor: default;
+}
+.prototype-sidebar .prototype-add-task,
+.prototype-sidebar .prototype-add-task svg {
+  color: var(--plus-accent);
+}
+@media (max-width: 1100px) {
+  .planning-root {
+    padding: 30px 24px 40px;
+  }
+  .planning-toolbar {
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .planning-toolbar > span {
+    width: 100%;
+    margin: 0;
+  }
+}
+@media (max-width: 650px) {
+  .planning-root {
+    padding: 24px 16px;
+  }
+  .planning-detail-fields {
+    flex-wrap: wrap;
+  }
+  .planning-details,
+  .planning-labels {
+    padding: 18px;
+  }
+}

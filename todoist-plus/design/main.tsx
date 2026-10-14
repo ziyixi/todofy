@@ -1,31 +1,89 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   Calendar,
   CalendarDays,
-  CheckCheck,
   ChevronDown,
   Hash,
   Inbox,
   LayoutList,
+  ListFilter,
   Moon,
+  MoreHorizontal,
+  PlusCircle,
+  RotateCcw,
   Search,
+  Settings2,
   Sun,
   Target,
+  X,
 } from "lucide-react";
-import { App } from "../src/App";
-import { words } from "../src/i18n";
-import type { Language, View } from "../src/model";
-import { createPrototype } from "./fixture";
+import { ReviewBoard } from "./ReviewBoard";
+import { PlanningWeek } from "./PlanningWeek";
+import { PlanningDetails } from "./PlanningDetails";
+import { PrototypeFocus } from "./PrototypeFocus";
+import { planningFixture } from "./planning-fixture";
+import {
+  CURRENT_WEEK,
+  LANES,
+  TODAY,
+  moveOutcome,
+  moveStep,
+  type Outcome,
+} from "./planning-model";
 import "../src/styles.css";
 import "./prototype.css";
-const actions = createPrototype();
+import "./planning.css";
+
 function Prototype() {
-  const [view, setView] = useState<View>("plan");
-  const [language, setLanguage] = useState<Language>("en");
+  const [data, setData] = useState(planningFixture);
+  const [view, setView] = useState<"plan" | "focus">("plan");
+  const [mode, setMode] = useState<"review" | "week">("review");
+  const [area, setArea] = useState<"all" | "work" | "personal">("all");
+  const [week, setWeek] = useState(CURRENT_WEEK);
   const [dark, setDark] = useState(false);
-  const [nativeId, setNativeId] = useState("");
-  const text = words(language);
+  const [selected, setSelected] = useState("");
+  const [runningStep, setRunningStep] = useState("");
+  const dialog = useRef<HTMLDialogElement>(null);
+  const selectedOutcome = data.outcomes.find(
+    (outcome) => outcome.id === selected,
+  );
+  const commitments = data.outcomes.filter(
+    (outcome) => outcome.lane === "committed",
+  );
+  const workCount = commitments.filter(
+    (outcome) => outcome.area === "work",
+  ).length;
+  const personalCount = commitments.filter(
+    (outcome) => outcome.area === "personal",
+  ).length;
+
+  useEffect(() => {
+    if (selected) dialog.current?.showModal();
+    else dialog.current?.close();
+  }, [selected]);
+
+  function saveOutcome(outcome: Outcome) {
+    setData((current) => ({
+      ...current,
+      outcomes: current.outcomes.map((item) =>
+        item.id === outcome.id ? outcome : item,
+      ),
+    }));
+  }
+
+  function showWeek() {
+    setView("plan");
+    setMode("week");
+  }
+
+  function resetDemo() {
+    setData(planningFixture());
+    setWeek(CURRENT_WEEK);
+    setArea("all");
+    setRunningStep("");
+  }
+
   return (
     <div className="plus-prototype" data-theme={dark ? "dark" : "light"}>
       <aside className="prototype-sidebar">
@@ -34,60 +92,63 @@ function Prototype() {
           <ChevronDown size={13} />
         </div>
         <nav>
-          <button>
+          <button className="prototype-native-item prototype-add-task">
+            <PlusCircle size={19} />
+            Add task
+          </button>
+          <div className="prototype-nav-gap" />
+          <button className="prototype-native-item">
             <Search size={19} />
-            {language === "zh" ? "搜索" : "Search"}
+            Search
           </button>
-          <button>
+          <button className="prototype-native-item">
             <Inbox size={19} />
-            {language === "zh" ? "收件箱" : "Inbox"}
-            <small>8</small>
+            Inbox
           </button>
-          <button>
+          <button onClick={() => setView("focus")}>
             <Calendar size={19} />
-            {text.today}
-            <small>3</small>
+            Today<small>{(data.queues[TODAY] ?? []).length}</small>
           </button>
-          <button>
+          <button onClick={showWeek}>
             <CalendarDays size={19} />
-            {language === "zh" ? "预览" : "Upcoming"}
+            Upcoming
+          </button>
+          <button className="prototype-native-item">
+            <ListFilter size={19} />
+            Filters & Labels
+          </button>
+          <button className="prototype-native-item">
+            <MoreHorizontal size={19} />
+            More
           </button>
           <div className="prototype-nav-gap" />
           <button
             className={view === "plan" ? "active" : ""}
             onClick={() => setView("plan")}
           >
-            <span className="plus-nav-icon" aria-hidden="true">
+            <span className="plus-nav-icon">
               <LayoutList size={18} />
             </span>
-            {text.plan}
+            Plan
           </button>
           <button
             className={view === "focus" ? "active" : ""}
             onClick={() => setView("focus")}
           >
-            <span className="plus-nav-icon" aria-hidden="true">
+            <span className="plus-nav-icon">
               <Target size={18} />
             </span>
-            {text.focus}
+            Focus
           </button>
-          <div className="prototype-nav-heading">
-            {language === "zh" ? "收藏" : "Favorites"}
-          </div>
-          <button>
+          <div className="prototype-nav-heading">Favorites</div>
+          <div className="prototype-nav-heading">My projects</div>
+          <button className="prototype-native-item">
             <Hash size={19} />
-            Email Inbox
+            Work
           </button>
-          <div className="prototype-nav-heading">
-            {language === "zh" ? "我的项目" : "My projects"}
-          </div>
-          <button>
+          <button className="prototype-native-item">
             <Hash size={19} />
-            {language === "zh" ? "工作" : "Work"}
-          </button>
-          <button>
-            <Hash size={19} />
-            {language === "zh" ? "生活" : "Personal"}
+            Personal
           </button>
         </nav>
         <div className="prototype-controls">
@@ -96,34 +157,168 @@ function Prototype() {
             <button onClick={() => setDark(!dark)} aria-label="Switch theme">
               {dark ? <Sun size={16} /> : <Moon size={16} />}
             </button>
-            <button
-              onClick={() => setLanguage(language === "en" ? "zh" : "en")}
-            >
-              {language === "en" ? "中文" : "English"}
+            <button onClick={resetDemo}>
+              <RotateCcw size={14} />
+              Reset demo
             </button>
           </div>
         </div>
       </aside>
       <main>
-        <App
-          actions={actions}
-          view={view}
-          onViewChange={setView}
-          language={language}
-          onOpenTask={setNativeId}
-          onSettings={() => setNativeId("settings")}
-        />
-        {nativeId && (
-          <div className="prototype-native-message" role="status">
-            <CheckCheck size={15} />
-            {nativeId === "settings"
-              ? "Prototype: connection is simulated."
-              : "Prototype: native Todoist task opens here."}
-            <button onClick={() => setNativeId("")}>×</button>
-          </div>
-        )}
+        <div
+          className={`planning-root ${view === "focus" ? "planning-focus-root" : ""}`}
+        >
+          <header className="planning-page-header">
+            <div>
+              <h1>{view === "plan" ? "Plan" : "Focus"}</h1>
+              <p>
+                {view === "plan"
+                  ? `This week · ${workCount} work / ${personalCount} personal commitments`
+                  : "Tuesday, October 13 · Your planned steps"}
+              </p>
+            </div>
+            <button
+              className="plus-icon"
+              aria-label="Board labels"
+              onClick={() => setSelected("labels")}
+            >
+              <Settings2 size={18} />
+            </button>
+          </header>
+          {view === "plan" ? (
+            <>
+              <div className="planning-toolbar">
+                <nav className="planning-view-tabs" aria-label="Planning view">
+                  <button
+                    aria-selected={mode === "review"}
+                    onClick={() => setMode("review")}
+                  >
+                    Review
+                  </button>
+                  <button
+                    aria-selected={mode === "week"}
+                    onClick={() => setMode("week")}
+                  >
+                    Week
+                  </button>
+                </nav>
+                {mode === "review" && (
+                  <nav className="planning-area-tabs" aria-label="Task area">
+                    {(["all", "work", "personal"] as const).map((value) => (
+                      <button
+                        key={value}
+                        aria-selected={area === value}
+                        onClick={() => setArea(value)}
+                      >
+                        {value === "all"
+                          ? "All"
+                          : value === "work"
+                            ? "Work"
+                            : "Personal"}
+                      </button>
+                    ))}
+                  </nav>
+                )}
+                <span>
+                  {mode === "review"
+                    ? "Move outcomes between planning labels"
+                    : "Arrange steps · Todoist dates stay as they are"}
+                </span>
+              </div>
+              {mode === "review" ? (
+                <ReviewBoard
+                  outcomes={data.outcomes}
+                  queues={data.queues}
+                  area={area}
+                  onMove={(id, lane) =>
+                    setData((current) => moveOutcome(current, id, lane))
+                  }
+                  onEdit={setSelected}
+                />
+              ) : (
+                <PlanningWeek
+                  outcomes={data.outcomes}
+                  queues={data.queues}
+                  week={week}
+                  onWeekChange={setWeek}
+                  onMove={(id, date, sourceDate, beforeId) =>
+                    setData((current) =>
+                      moveStep(current, id, date, sourceDate, beforeId),
+                    )
+                  }
+                  onRemove={(id, date) =>
+                    setData((current) => ({
+                      ...current,
+                      queues: {
+                        ...current.queues,
+                        [date]: (current.queues[date] ?? []).filter(
+                          (stepId) => stepId !== id,
+                        ),
+                      },
+                    }))
+                  }
+                  onEdit={setSelected}
+                />
+              )}
+            </>
+          ) : (
+            <PrototypeFocus
+              outcomes={data.outcomes}
+              ids={data.queues[TODAY] ?? []}
+              running={runningStep}
+              onRunning={setRunningStep}
+              onSave={saveOutcome}
+              onEdit={setSelected}
+              onPlan={showWeek}
+            />
+          )}
+        </div>
       </main>
+      <dialog
+        className="planning-dialog"
+        ref={dialog}
+        onCancel={() => setSelected("")}
+        onClick={(event) => {
+          if (event.target === event.currentTarget) setSelected("");
+        }}
+      >
+        {selectedOutcome ? (
+          <PlanningDetails
+            key={selectedOutcome.id}
+            outcome={selectedOutcome}
+            onSave={saveOutcome}
+            onClose={() => setSelected("")}
+          />
+        ) : selected === "labels" ? (
+          <section className="planning-labels">
+            <header>
+              <h2>Board labels</h2>
+              <button
+                className="plus-icon"
+                aria-label="Close"
+                onClick={() => setSelected("")}
+              >
+                <X size={18} />
+              </button>
+            </header>
+            <p>
+              One column, one Todoist label. Quarter is a manual candidate pool.
+            </p>
+            {LANES.map((lane) => (
+              <div key={lane.id}>
+                <span>{lane.title}</span>
+                <code>{lane.label}</code>
+              </div>
+            ))}
+            <p className="planning-demo-note">
+              This prototype simulates labels. Existing tasks and labels are not
+              changed.
+            </p>
+          </section>
+        ) : null}
+      </dialog>
     </div>
   );
 }
+
 createRoot(document.getElementById("root")!).render(<Prototype />);
