@@ -88,6 +88,7 @@ export function NativeTaskTools({
               busy={busy}
               run={run}
               actions={extensionActions}
+              todayTaskIds={data.focus.taskIds}
               addFocus={(id) => {
                 if (!data.focus.taskIds.includes(id))
                   void run(() =>

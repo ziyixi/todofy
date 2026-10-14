@@ -132,6 +132,32 @@ and 128 gateway units plus its CPU checks; source types/lint and proto lint/API-
 scenarios prove drag outcomes and reloaded order rather than counting event-handler calls. The original
 prototype's duplicate width rules were removed after the real Chrome preview exposed unreadable columns.
 
-At this checkpoint branch CI, the new same-SHA release and the owner's new-directory load are pending.
-The requested destination is `Documents/chrome_extensions/todoist-plus`; preserve the existing installation
-until the switch. Natural Monday rollover and actual PWA acceptance remain separate pending observations.
+The weekly planner commit `ba149ec541136666ef1e25b5cbad4fa5ada574fe` passed
+[branch CI 38503430909](https://github.com/ziyixi/todofy/actions/runs/38503430909) and the
+[same-SHA main release 38504086473](https://github.com/ziyixi/todofy/actions/runs/38504086473).
+FlowDay Deployment `7055729792` verified version `bf436b36-04c7-4f56-9e95-9646f0b7a2fb`;
+Todofy Deployment `7055754395` verified core `1ff43ae3-0006-49aa-8026-a2481ff04dcf` and gateway
+`c7a22151-400d-4162-b228-20731d56fcb8`. Extension `2026.1014.173.47636` targets the same source.
+All other application publications, Newsletter image and VPS deployment were skipped.
+
+## Real synthetic task check and stale-view correction
+
+Using the owner's currently installed extension, one synthetic Inbox parent and two 30-minute steps were
+created. Batch creation, adding the first step to today's FlowDay queue, its completion from Plus Focus,
+and the corresponding native Todoist completion were verified. The parent and remaining step were then
+completed: its native checkbox showed checked, both children showed 2/2 completed, and the parent disappeared
+from active Inbox. No timer was started, and no real task was edited. Screenshots containing private data
+remain local; this record contains only synthetic results.
+
+The real check exposed a stale queue when returning from native Todoist to the same Focus view. Refresh
+showed the saved step; the component had remained mounted while hidden. The correction unmounts it only
+when leaving the custom views, reloads on return, and refreshes between Plan and Focus. Switching directly
+between those two retains the selected date. Already-queued steps now have a disabled “In today” check mark.
+The actual built-MV3 regression failed against the old artifact and passes after the fix without Refresh.
+All seven packaged-browser scenarios and 26 unit/component/API checks pass locally, with types and lint.
+
+The extension-only follow-up CI/release and the owner's new-directory load are still pending. The requested
+destination is `Documents/chrome_extensions/todoist-plus`; preserve the existing installation until the
+switch. The new drag UI has been exercised in isolated Chromium and the synthetic Chrome preview, but not
+yet as the updated extension on the owner's real Todoist page. Natural Monday rollover and actual PWA
+acceptance remain separate pending observations.

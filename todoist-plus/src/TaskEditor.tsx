@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { ExternalLink, Plus, X } from "lucide-react";
+import { Check, ExternalLink, Plus, X } from "lucide-react";
 import { displayedTitle, startDate } from "./domain";
 import { words } from "./i18n";
 import type { Language, PlanningTask, PlusActions, StepDraft } from "./model";
@@ -11,6 +11,7 @@ interface Props {
   busy: boolean;
   run: (operation: () => Promise<void>) => Promise<boolean>;
   actions: PlusActions;
+  todayTaskIds: readonly string[];
   addFocus: (id: string) => void;
   onOpenTask: (id: string) => void;
   onClose?: () => void;
@@ -23,6 +24,7 @@ export function TaskEditor({
   busy,
   run,
   actions,
+  todayTaskIds,
   addFocus,
   onOpenTask,
   onClose,
@@ -36,6 +38,7 @@ export function TaskEditor({
   const [area, setArea] = useState(task.area);
   const requestId = useRef(crypto.randomUUID());
   const children = tasks.filter((item) => item.parentId === task.id);
+  const plannedToday = new Set(todayTaskIds);
   const drafts: StepDraft[] = lines
     .split("\n")
     .map((title) => title.trim())
@@ -142,12 +145,12 @@ export function TaskEditor({
             </span>
             <button
               className="plus-icon"
-              title={text.addFocus}
-              aria-label={`${text.addFocus}: ${displayedTitle(child.title)}`}
-              disabled={busy}
+              title={plannedToday.has(child.id) ? text.inToday : text.addFocus}
+              aria-label={`${plannedToday.has(child.id) ? text.inToday : text.addFocus}: ${displayedTitle(child.title)}`}
+              disabled={busy || plannedToday.has(child.id)}
               onClick={() => addFocus(child.id)}
             >
-              <Plus size={16} />
+              {plannedToday.has(child.id) ? <Check size={16} /> : <Plus size={16} />}
             </button>
           </li>
         ))}

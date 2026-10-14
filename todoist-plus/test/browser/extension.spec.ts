@@ -54,6 +54,7 @@ async function setup(context: BrowserContext, worker: Worker) {
       failCompletion: true,
       failTimer: true,
       timerEtag: "7",
+      focusTaskIds: ["child", "local-one", "__flowday_misc__:2026-10-13"],
     };
     Object.assign(globalThis, { testState: state });
     globalThis.fetch = async (input, init) => {
@@ -128,10 +129,7 @@ async function setup(context: BrowserContext, worker: Worker) {
       if (flowDate)
         return json({
           name: `flows/${flowDate}`,
-          task_ids:
-            flowDate === "2026-10-13"
-              ? ["child", "local-one", "__flowday_misc__:2026-10-13"]
-              : [],
+          task_ids: flowDate === "2026-10-13" ? state.focusTaskIds : [],
           completed_task_ids:
             flowDate === "2026-10-13" && state.completed ? ["child"] : [],
         });
@@ -330,6 +328,48 @@ test("built MV3 mounts, restores native UI and sends task actions through its ba
   }
 });
 
+test("returning from a native page reloads Focus after an external queue change", async () => {
+  const extensionPath = resolve(".output/chrome-mv3");
+  const context = await chromium.launchPersistentContext("", {
+    channel: "chromium",
+    headless: true,
+    args: [
+      `--disable-extensions-except=${extensionPath}`,
+      `--load-extension=${extensionPath}`,
+    ],
+  });
+  try {
+    const worker =
+      context.serviceWorkers()[0] ??
+      (await context.waitForEvent("serviceworker"));
+    await setup(context, worker);
+    await worker.evaluate(() => {
+      (
+        globalThis as unknown as { testState: { focusTaskIds: string[] } }
+      ).testState.focusTaskIds = [];
+    });
+    const page = await context.newPage();
+    await page.goto("https://app.todoist.com/app/today");
+    await page.getByRole("button", { name: "Focus", exact: true }).click();
+    const queuedStep = page.locator('.plus-focus-stack [data-task-id="child"]');
+    await expect(page.locator(".plus-focus-stack")).toBeVisible();
+    await expect(queuedStep).toHaveCount(0);
+    await page.getByRole("link", { name: "Today", exact: true }).click();
+    await expect(page.locator("#native")).toBeVisible();
+    await worker.evaluate(() => {
+      (
+        globalThis as unknown as { testState: { focusTaskIds: string[] } }
+      ).testState.focusTaskIds = ["child"];
+    });
+    await page.getByRole("button", { name: "Focus", exact: true }).click();
+    await expect(queuedStep).toBeVisible();
+    await expect(queuedStep).toContainText("Synthetic small step");
+    await expect(page.locator("#native")).toBeHidden();
+  } finally {
+    await context.close();
+  }
+});
+
 test("native task detail keeps work labels, hides replaced labels only with controls, and follows dark theme", async () => {
   const extensionPath = resolve(".output/chrome-mv3");
   const context = await chromium.launchPersistentContext("", {
@@ -362,6 +402,9 @@ test("native task detail keeps work labels, hides replaced labels only with cont
     await expect(
       page.getByText("Synthetic small step", { exact: true }),
     ).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "In today: Synthetic small step" }),
+    ).toBeDisabled();
     await expect(page.locator("#commit-badge")).toBeHidden();
     await expect(page.locator("#office-badge")).toBeVisible();
     expect(

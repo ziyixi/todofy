@@ -90,7 +90,7 @@ export function App({
   );
   useEffect(() => {
     void run(async () => {});
-  }, [run]);
+  }, [run, view]);
   useEffect(() => {
     const visible = () => {
       if (document.visibilityState === "visible" && !lock.current)
@@ -311,6 +311,7 @@ export function App({
             busy={busy}
             run={run}
             actions={actions}
+            todayTaskIds={data.focus.taskIds}
             addFocus={(id) => void addFocus(id, data.focus)}
             onOpenTask={onOpenTask}
             onClose={() => {

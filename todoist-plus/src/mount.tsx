@@ -301,7 +301,9 @@ export async function mountTodoist(ctx: ContentScriptContext) {
   function render() {
     if (!content || !mainRoot || !mainHost) return;
     restore();
-    view = currentView();
+    const nextView = currentView();
+    if (view && !nextView) mainRoot.render(null);
+    view = nextView;
     language = languageOf(document);
     mainHost.style.display = view ? "block" : "none";
     if (view) {

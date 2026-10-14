@@ -23,11 +23,18 @@ normal owner UI and sealed by FlowDay; key-saved and Sync-complete states plus a
 observed. No key was generated, logged, committed or put in the extension. Real task content/priorities and
 running timers were not changed by the audit.
 
-Local checks pass: 26 extension cases, six actual built-MV3 Chromium scenarios; FlowDay's 21 unit and
+Local checks pass: 26 extension cases, seven actual built-MV3 Chromium scenarios; FlowDay's 21 unit and
 127 real-D1/runtime cases; gateway's 128 units and runtime CPU check; types/lint and proto lint/API-lint,
 regeneration/schema/types. Real Chrome synthetic previews caught and removed a prototype-only layout
-override. Pending: final branch CI, same-SHA release, place the tested artifact under
-`Documents/chrome_extensions/todoist-plus`, then owner loads/connects that new directory for live acceptance.
+override. Weekly planner `ba149ec541136666ef1e25b5cbad4fa5ada574fe` passed branch CI 38503430909 and
+same-SHA main release 38504086473; FlowDay, Todofy and Plus were published and verified, other application
+publications and VPS/image releases skipped. A real synthetic Inbox parent/two steps proved creation,
+today placement and Focus completion; all test tasks were completed afterward, with no timer started.
+This check caught stale hidden App state on native-page return. The small extension-only follow-up
+unmounts on native exit, refreshes on custom-view switches, and marks already-queued steps as In today;
+its built-browser regression failed before the fix and now passes. Pending: follow-up branch CI/release,
+place the tested artifact under `Documents/chrome_extensions/todoist-plus`, then owner loads/connects
+that new directory for live drag acceptance.
 Keep the current home-folder installation working until that switch; do not alter Chrome's private profile.
 
 
