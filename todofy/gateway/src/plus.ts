@@ -127,7 +127,7 @@ async function settleCompleted(env: Env, input: { request_id: string; task_id: s
   throw uiError('UNAVAILABLE');
 }
 
-const FOCUS_METHODS = new Set(['getTask', 'listTasks', 'getFlow', 'getTimerSession', 'commandTimer', 'syncTasks', 'listTimeEntries', 'updateTask', 'updateFlow']);
+const FOCUS_METHODS = new Set(['getTask', 'listTasks', 'getFlow', 'getTimerSession', 'commandTimer', 'syncTasks', 'listTimeEntries', 'updateTask', 'updateFlow', 'rolloverFlow']);
 function focusHandlers(): ServiceHandlers<ShapeOf<typeof FlowDayUiService>, PlusContext> {
   const handlers: Record<string, unknown> = {};
   for (const method of FlowDayUiService.methods) {

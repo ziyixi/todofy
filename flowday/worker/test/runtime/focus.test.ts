@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { startHarness, type Harness } from './harness.ts';
+import { setFlowTaskIds } from '../../src/store/flows.ts';
 let h: Harness;
 beforeAll(async () => { h = await startHarness({ bindings: { DEV_AUTH_BYPASS: 'false' } }); });
 afterAll(async () => { await h.dispose(); });
@@ -18,5 +19,19 @@ describe('private Focus entrypoint', () => {
     expect((await h.focusFetch('/api/v1/tasks', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' })).status).toBe(404);
     const mutation = { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ title: 'Unrelated edit' }) };
     expect((await h.focusFetch('/api/v1/tasks/synthetic?update_mask=title', mutation)).status).toBe(400);
+  });
+
+  it('moves only the dragged step between days while preserving local queue entries', async () => {
+    await setFlowTaskIds(h.db(), '2026-10-13', ['local-one', 'step']);
+    await setFlowTaskIds(h.db(), '2026-10-14', ['local-two', 'other-step']);
+    const response = await h.focusFetch('/api/v1/flows/2026-10-13:rollover', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ destination: 'flows/2026-10-14', task_ids: ['step'] }),
+    });
+    expect(response.status).toBe(200);
+    const result = await response.json<{ flow: { task_ids: string[] }; destination_flow: { task_ids: string[] } }>();
+    expect(result.flow.task_ids).toEqual(['local-one']);
+    expect(result.destination_flow.task_ids).toEqual(['step', 'local-two', 'other-step']);
+    expect((await h.focusFetch('/api/v1/settings')).status).toBe(404);
   });
 });

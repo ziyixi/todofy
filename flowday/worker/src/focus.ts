@@ -30,7 +30,7 @@ const focusApi = new HttpTranscoder<ShapeOf<typeof FlowDayUiService>, ApiContext
   maxBodyBytes: MAX_BODY_BYTES,
   localize,
   authorize(_request, route) {
-    if (!new Set(['GetTask', 'ListTasks', 'GetFlow', 'GetTimerSession', 'CommandTimer', 'SyncTasks', 'ListTimeEntries', 'UpdateTask', 'UpdateFlow']).has(route.method.name)) throw flowdayError('NOT_FOUND');
+    if (!new Set(['GetTask', 'ListTasks', 'GetFlow', 'GetTimerSession', 'CommandTimer', 'SyncTasks', 'ListTimeEntries', 'UpdateTask', 'UpdateFlow', 'RolloverFlow']).has(route.method.name)) throw flowdayError('NOT_FOUND');
   },
   onUnexpected: (error) => flowdayError(isStorageError(error) ? 'UNAVAILABLE' : 'INTERNAL'),
 });

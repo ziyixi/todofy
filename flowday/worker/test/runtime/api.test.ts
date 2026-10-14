@@ -274,6 +274,18 @@ describe('flows', () => {
     expect(await getAllFlows(h.db())).toEqual({ '2026-04-13': ['t1'] });
   });
 
+  it('RolloverFlow rejects the same source and destination without removing tasks', async () => {
+    await setFlowTaskIds(h.db(), '2026-04-13', ['t1', 'local-one', 't2']);
+    await addCompletedFlowTask(h.db(), '2026-04-13', 't2');
+    const result = await h.call((api) => api.rolloverFlow({
+      name: 'flows/2026-04-13', destination: 'flows/2026-04-13', taskIds: ['t1'],
+    }));
+    expect([result.status?.reason, result.rowsWritten]).toEqual(['BAD_REQUEST', 0]);
+    const day = await h.api.getFlow({ name: 'flows/2026-04-13' });
+    expect(day.taskIds).toEqual(['t1', 'local-one', 't2']);
+    expect(day.completedTaskIds).toEqual(['t2']);
+  });
+
   it('RolloverFlow with an empty task_ids and no all_unfinished moves nothing; both together are INVALID_ARGUMENT', async () => {
     await setFlowTaskIds(h.db(), '2026-04-13', ['t1', 't2']);
     const empty = await h.call((api) => api.rolloverFlow({ name: 'flows/2026-04-13', destination: 'flows/2026-04-14', taskIds: [] }));

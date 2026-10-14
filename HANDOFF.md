@@ -9,6 +9,28 @@ Its old waiting lists and release identities are historical, not instructions to
 
 ## Current work
 
+`codex/todoist-plus-week-planner` replaces the first Plus flat lists after the owner's actual Chrome audit.
+The owner has installed and connected the released extension. Plan now expands outcomes/steps beside a
+seven-day FlowDay board; Focus uses ordered duration blocks, parent paths and day switching. Day placement
+only changes FlowDay queues, as the owner explicitly chose; Todoist due dates and Deadlines stay intact.
+Native selection/spacing and locally collapsed utility favorites are corrected without editing account
+favorites. The existing RolloverFlow method is narrowly allowed; same-day calls are rejected to avoid the
+old destructive behavior. No new service or storage was added. Source and live evidence are in
+[Plus verification](docs/todoist-plus-verification.md) and [the application checks](todoist-plus/docs/verification.md).
+
+FlowDay's old migration had excluded its Todoist key. The existing credential was restored through the
+normal owner UI and sealed by FlowDay; key-saved and Sync-complete states plus a fresh sync time were
+observed. No key was generated, logged, committed or put in the extension. Real task content/priorities and
+running timers were not changed by the audit.
+
+Local checks pass: 26 extension cases, six actual built-MV3 Chromium scenarios; FlowDay's 21 unit and
+127 real-D1/runtime cases; gateway's 128 units and runtime CPU check; types/lint and proto lint/API-lint,
+regeneration/schema/types. Real Chrome synthetic previews caught and removed a prototype-only layout
+override. Pending: final branch CI, same-SHA release, place the tested artifact under
+`Documents/chrome_extensions/todoist-plus`, then owner loads/connects that new directory for live acceptance.
+Keep the current home-folder installation working until that switch; do not alter Chrome's private profile.
+
+
 Todoist Plus is released at `51342322e473c4073bfb395a61c867995a9ac902` after
 [full branch CI 38468696858](https://github.com/ziyixi/todofy/actions/runs/38468696858) and the
 [same-SHA main release 38469896460](https://github.com/ziyixi/todofy/actions/runs/38469896460) passed.
@@ -20,13 +42,13 @@ receipts and distinguishes synthetic, packaged-browser and live evidence.
 
 The live owner `/plus` page recognized all existing labels. Its mapping and Monday rollover were
 confirmed on October 13; the page shows enabled in `US/Pacific`. The agent has made no real Todoist task edits or
-extension credential issuance at this checkpoint. The owner-authorized Chrome install
-is waiting on one manual load/connect step: browser tooling blocks Chrome's internal extensions
+extension credential issuance at this checkpoint. The owner completed the initial Chrome install and connection. Future directory changes still need
+one manual load/connect step: browser tooling blocks Chrome's internal extensions
 manager and forbids alternate control methods. The dedicated installation folder matches all seven
 files of the published, CI-tested ZIP, version `2026.1013.1271.20788`. Do not replace Recall's folder.
 
-Continue real Todoist layout, synthetic task writes, FlowDay cross-view and PWA checks after the
-owner replies connected. Preserve any real running timer. The first natural weekly rollover remains
+Continue real Todoist synthetic task writes, FlowDay cross-view and PWA checks after the
+new directory is loaded and connected. Preserve any real running timer. The first natural weekly rollover remains
 a future observation, independent of synthetic scheduler tests. The old FlowDay timer replace/clear
 methods return `RELOAD_REQUIRED` and stay until at least 2026-11-13.
 
@@ -35,8 +57,8 @@ The owner-page control styles are released at `d657985df185821a9154829db7c9bd214
 [main release 38472126635](https://github.com/ziyixi/todofy/actions/runs/38472126635) passed.
 Only Todofy was published. All 93 UI cases, types and build pass; real Chrome confirms the existing
 40-pixel green button and styled device input. The original one-time-token tab was preserved.
-This presentation change leaves the published extension and API contract unchanged. Remaining
-work is the owner load/connect step and actual installed-extension acceptance, not another release.
+This presentation change leaves the published extension and API contract unchanged. The owner subsequently completed the initial connection; the new weekly-planning revision above
+now owns the remaining release and installed-extension acceptance.
 
 Recall cleanup is released at `bc0adffdc1d8ee018b0663737c77e8de701de0aa`, extension `2026.1013.654`.
 [Full branch CI](https://github.com/ziyixi/todofy/actions/runs/38359057094) and the

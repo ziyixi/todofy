@@ -87,6 +87,28 @@ export function displayedTitle(title: string): string {
   );
 }
 
+export function taskAncestors(
+  task: PlanningTask,
+  tasks: PlanningTask[],
+): PlanningTask[] {
+  const byId = new Map(tasks.map((item) => [item.id, item]));
+  const result: PlanningTask[] = [];
+  const seen = new Set([task.id]);
+  let parent = byId.get(task.parentId);
+  while (parent && !seen.has(parent.id)) {
+    result.unshift(parent);
+    seen.add(parent.id);
+    parent = byId.get(parent.parentId);
+  }
+  return result;
+}
+
+export function formattedMinutes(minutes: number): string {
+  return minutes >= 60
+    ? `${Math.floor(minutes / 60)}h${minutes % 60 ? ` ${minutes % 60}m` : ""}`
+    : `${minutes}m`;
+}
+
 export function moveTask(ids: string[], id: string, offset: number): string[] {
   const from = ids.indexOf(id);
   const to = from + offset;

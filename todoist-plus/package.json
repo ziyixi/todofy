@@ -27,6 +27,7 @@
     "pretest:browser": "node ../proto/tools/ensure.mjs"
   },
   "dependencies": {
+    "@dnd-kit/react": "0.3.2",
     "@ziyixi/proto": "file:../proto/ts",
     "lucide-react": "1.8.0",
     "react": "19.2.4",

@@ -1,3 +1,6 @@
+@import "./planner.css";
+@import "./focus.css";
+
 :host,
 .plus-prototype,
 body {
@@ -112,52 +115,6 @@ body {
   background: var(--plus-hover);
   color: var(--plus-text) !important;
 }
-.plus-tabs {
-  display: flex;
-  gap: 21px;
-  border-bottom: 1px solid var(--plus-line);
-  margin-bottom: 22px;
-}
-.plus-tabs button {
-  padding: 0 0 11px;
-  position: relative;
-  color: var(--plus-muted);
-}
-.plus-tabs button[aria-selected="true"] {
-  color: var(--plus-text);
-  font-weight: 600;
-}
-.plus-tabs button[aria-selected="true"]::after {
-  content: "";
-  height: 2px;
-  position: absolute;
-  bottom: -1px;
-  left: 0;
-  right: 0;
-  background: var(--plus-accent);
-}
-.plus-bets {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  margin: 0 0 24px;
-  font-size: 13px;
-}
-.plus-bets > svg {
-  color: var(--plus-accent);
-}
-.plus-bet-titles {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-left: 7px;
-}
-.plus-bet-titles button {
-  background: var(--plus-selected) !important;
-  border-radius: 5px;
-  padding: 4px 9px;
-  font-size: 12px;
-}
 .plus-muted {
   color: var(--plus-muted);
   font-size: 12px;
@@ -177,29 +134,10 @@ body {
   font-weight: 400;
 }
 .plus-task-list,
-.plus-steps,
-.plus-attention ul {
+.plus-steps {
   list-style: none;
   padding: 0;
   margin: 0;
-}
-.plus-plan-row {
-  display: flex;
-  gap: 9px;
-  align-items: center;
-  min-height: 60px;
-  border-bottom: 1px solid var(--plus-line);
-}
-.plus-bet-toggle {
-  width: 25px;
-  flex: 0 0 25px;
-  align-self: flex-start;
-  margin-top: 19px;
-  padding: 0;
-  color: #b0b0a6 !important;
-}
-.plus-bet-toggle.active {
-  color: var(--plus-accent) !important;
 }
 .plus-task-main {
   display: flex;
@@ -221,29 +159,6 @@ body {
   line-height: 1.4;
   text-wrap: pretty;
 }
-.plus-row-actions {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-}
-.plus-row-actions select {
-  font-size: 11px;
-  max-width: 135px;
-  padding: 5px 3px;
-  border: 0;
-  background: transparent;
-  color: var(--plus-muted);
-}
-.plus-row-actions select:hover {
-  background: var(--plus-hover);
-}
-.plus-row-actions > .plus-icon {
-  opacity: 0;
-}
-.plus-plan-row:hover .plus-row-actions > .plus-icon,
-.plus-plan-row:focus-within .plus-row-actions > .plus-icon {
-  opacity: 1;
-}
 .plus-disclosure {
   display: flex;
   align-items: center;
@@ -251,36 +166,6 @@ body {
   padding: 0;
   width: 100%;
   text-align: left;
-}
-.plus-monthly {
-  margin-top: 28px;
-}
-.plus-attention {
-  border-bottom: 1px solid var(--plus-line);
-  padding: 0 0 12px;
-  margin-bottom: 25px;
-  font-size: 12px;
-}
-.plus-attention .plus-disclosure {
-  color: var(--plus-muted);
-}
-.plus-attention ul {
-  margin-top: 10px;
-}
-.plus-attention li {
-  display: flex;
-  gap: 12px;
-  justify-content: space-between;
-  padding: 6px 0;
-}
-.plus-attention li button {
-  padding: 0;
-  text-align: left;
-}
-.plus-attention li span {
-  color: var(--plus-muted);
-  font-size: 11px;
-  flex-shrink: 0;
 }
 .plus-footer-note {
   color: var(--plus-muted);
@@ -453,31 +338,6 @@ body {
   justify-content: flex-end;
   margin: 12px 0;
 }
-.plus-focus-summary {
-  display: flex;
-  gap: 18px;
-  align-items: center;
-  font-size: 12px;
-  color: var(--plus-muted);
-  margin: 7px 0 22px;
-  flex-wrap: wrap;
-}
-.plus-focus-summary button {
-  margin-left: auto;
-}
-.plus-focus-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-height: 78px;
-  border-bottom: 1px solid var(--plus-line);
-}
-.plus-drag-handle {
-  color: var(--plus-muted);
-  opacity: 0.45;
-  cursor: grab;
-  flex: 0 0 auto;
-}
 .plus-checkbox {
   width: 18px;
   height: 18px;
@@ -499,40 +359,8 @@ body {
   color: var(--plus-accent);
   border-color: var(--plus-accent) !important;
 }
-.plus-inline-estimate select {
-  width: 107px;
-  font-size: 11px !important;
-  border: 0 !important;
-  color: var(--plus-muted);
-  padding: 4px !important;
-}
 .plus-play {
   color: var(--plus-accent) !important;
-}
-.plus-focus-tools {
-  display: flex;
-  gap: 0;
-  opacity: 0;
-}
-.plus-focus-row:hover .plus-focus-tools,
-.plus-focus-row:focus-within .plus-focus-tools {
-  opacity: 1;
-}
-.plus-focus-tools .plus-icon {
-  width: 20px;
-}
-.is-timing {
-  background: var(--plus-selected);
-  margin: 0 -12px;
-  padding: 0 12px;
-  border-radius: 6px;
-}
-.plus-available-row {
-  display: flex;
-  align-items: center;
-  gap: 15px;
-  border-bottom: 1px solid var(--plus-line);
-  min-height: 64px;
 }
 .plus-timer-bar {
   position: fixed;
@@ -595,22 +423,10 @@ body {
   .plus-root {
     padding: 30px 27px 110px;
   }
-  .plus-row-actions select {
-    max-width: 95px;
-  }
-  .plus-focus-tools {
-    display: none;
-  }
 }
 @media (max-width: 650px) {
   .plus-root {
     padding: 25px 18px 110px;
-  }
-  .plus-row-actions select {
-    max-width: 85px;
-  }
-  .plus-row-actions > .plus-icon {
-    display: none;
   }
   .plus-timer-bar {
     left: 50%;
@@ -619,23 +435,14 @@ body {
   .plus-subtitle > span {
     display: none;
   }
-  .plus-bets {
-    flex-wrap: wrap;
-  }
   .plus-task-editor {
     padding: 20px;
-  }
-  .plus-inline-estimate select {
-    width: 78px;
-  }
-  .plus-attention li {
-    flex-direction: column;
-    gap: 3px;
   }
 }
 .plus-extension-nav {
   display: grid;
-  margin: 10px 0;
+  margin: 0;
+  width: var(--plus-nav-width, 100%);
   font-family: inherit;
   font-size: 13px;
   color: inherit;
@@ -643,25 +450,37 @@ body {
 .plus-extension-nav button {
   border: 0;
   border-radius: 5px;
-  padding: 8px 12px;
+  min-height: 34px;
+  padding: 5px;
   display: flex;
   align-items: center;
-  gap: 11px;
+  gap: 0;
   background: none;
   color: inherit;
   text-align: left;
   font: inherit;
   cursor: pointer;
 }
+.plus-extension-nav svg {
+  flex: 0 0 24px;
+  stroke-width: 2;
+}
+.plus-extension-nav button:hover {
+  background: var(--plus-hover, #f7f7f3);
+}
 .plus-extension-nav button[aria-current="page"] {
   background: var(--plus-selected, #f0f6df);
   color: var(--plus-accent, #557921);
 }
-.plus-extension-nav svg {
-  stroke-width: 1.65;
+.plus-other-views button {
+  width: 100%;
+  color: var(--plus-muted);
 }
-.plus-extension-nav button:hover {
-  background: var(--plus-hover, #f7f7f3);
+.plus-other-count {
+  margin-left: auto;
+  padding-right: 5px;
+  font-size: 11px;
+  color: var(--plus-muted);
 }
 .plus-native-tools.plus-root {
   padding: 15px 0;

@@ -104,6 +104,7 @@ function Prototype() {
         <App
           actions={actions}
           view={view}
+          onViewChange={setView}
           language={language}
           onOpenTask={setNativeId}
           onSettings={() => setNativeId("settings")}

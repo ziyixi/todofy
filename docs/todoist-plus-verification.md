@@ -111,3 +111,27 @@ with the styled device input. The original token page was preserved, and no toke
 The published extension and API contract are unchanged. This check covers the owner connection page;
 it does not replace the pending installed-extension Todoist/PWA checks above.
 
+
+## Installed-version audit and weekly planner revision
+
+On October 13 the owner confirmed Chrome connection. Actual Chrome inspection reproduced the sparse flat
+Plan, missing inline steps, simultaneous native Today/Plus selection, technical favorite clutter and the
+list-only Focus experience. FlowDay's settings showed an absent Todoist key and a July sync. The old migration
+intentionally excluded that credential; its existing owner setting was restored using the current credential,
+then key-saved, Sync-complete and a fresh sync time were confirmed. No credential was generated or stored in
+the extension; no private task content, key or real-data screenshot is committed.
+
+The owner chose day placement only in FlowDay. The revised Plan expands parent tasks and places leaf steps
+in seven day columns; Focus shows the same parent context, ordered duration blocks and timer controls.
+It reuses the existing daily flow resources and RolloverFlow, with a same-day guard. No new database,
+service, scheduled job or billing setting was introduced. Favorites are collapsed only in the page;
+original objects and project shortcuts remain. Existing task dates and Deadlines are preserved.
+
+Local evidence: 26 extension cases and six actual built-MV3 browser scenarios; 127 FlowDay runtime cases
+and 128 gateway units plus its CPU checks; source types/lint and proto lint/API-lint/schema/types. Browser
+scenarios prove drag outcomes and reloaded order rather than counting event-handler calls. The original
+prototype's duplicate width rules were removed after the real Chrome preview exposed unreadable columns.
+
+At this checkpoint branch CI, the new same-SHA release and the owner's new-directory load are pending.
+The requested destination is `Documents/chrome_extensions/todoist-plus`; preserve the existing installation
+until the switch. Natural Monday rollover and actual PWA acceptance remain separate pending observations.

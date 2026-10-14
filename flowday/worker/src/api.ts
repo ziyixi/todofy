@@ -514,6 +514,7 @@ export const handlers: ServiceHandlers<ShapeOf<typeof FlowDayUiService>, ApiCont
   async rolloverFlow(request, { db }) {
     const fromDate = day(resourceId(request.name, 'flows'));
     const toDate = day(resourceId(request.destination, 'flows'));
+    if (fromDate === toDate) bad();
     // The broad action only when asked for by name: an empty list moves nothing (the zero value of a repeated field).
     if (request.allUnfinished) {
       if (request.taskIds.length > 0) bad();

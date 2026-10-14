@@ -30,11 +30,13 @@ export interface PlanState {
   managedLabelNames: string[];
   managedLabels: { role: string; id: string; label: string }[];
 }
-export interface FocusState {
+export interface FlowDayPlan {
   date: string;
-  timerEtag: string;
   taskIds: string[];
   completedTaskIds: string[];
+}
+export interface FocusState extends FlowDayPlan {
+  timerEtag: string;
   estimates: Record<string, number>;
   flowTasks: Record<
     string,
@@ -53,8 +55,13 @@ export interface StepDraft {
   title: string;
   estimatedMinutes?: number;
 }
+export interface PlusData {
+  plan: PlanState;
+  focus: FocusState;
+  days: FlowDayPlan[];
+}
 export interface PlusActions {
-  load(): Promise<{ plan: PlanState; focus: FocusState }>;
+  load(): Promise<PlusData>;
   updateTask(
     task: PlanningTask,
     update: { stage?: Stage; area?: Area; bet?: boolean },
@@ -74,7 +81,13 @@ export interface PlusActions {
     requestId: string,
     flowDate: string,
   ): Promise<void>;
-  updateQueue(taskIds: string[], focus: FocusState): Promise<void>;
+  updateQueue(taskIds: string[], day: FlowDayPlan): Promise<void>;
+  moveTaskToDay(
+    taskId: string,
+    source: FlowDayPlan | undefined,
+    target: FlowDayPlan,
+    beforeId?: string,
+  ): Promise<void>;
   updateEstimate(taskId: string, minutes: number): Promise<void>;
   timer(
     action: "start" | "pause" | "resume" | "stop",

@@ -1,7 +1,7 @@
 import { createRoot, type Root } from "react-dom/client";
 import { createShadowRootUi } from "wxt/utils/content-script-ui/shadow-root";
 import type { ContentScriptContext } from "wxt/utils/content-script-context";
-import { LayoutList, Target } from "lucide-react";
+import { ChevronDown, ChevronRight, LayoutList, Target } from "lucide-react";
 import { App } from "./App";
 import { todoistTaskUrl } from "./domain";
 import { NativeTaskTools } from "./NativeTaskTools";
@@ -10,6 +10,8 @@ import { words } from "./i18n";
 import type { Language, PlanState, View } from "./model";
 
 const viewParam = "todoist-plus";
+const sidebarSelector =
+  "[data-testid=app-sidebar-scrollable-container], #left_menu";
 export function taskIdFromElement(element: Element): string | undefined {
   const item = element.closest("[data-item-id], [data-selection-id]");
   const id =
@@ -54,12 +56,22 @@ function applyTheme(host: HTMLElement, source: HTMLElement) {
     host.style.fontFamily = computed.fontFamily;
 }
 
+function applyNavigationLayout(host: HTMLElement, reference: HTMLElement) {
+  const computed = getComputedStyle(reference);
+  const width = reference.getBoundingClientRect().width;
+  if (width) host.style.setProperty("--plus-nav-width", `${width}px`);
+  host.style.fontSize = computed.fontSize;
+  host.style.lineHeight = computed.lineHeight;
+  host.style.fontWeight = computed.fontWeight;
+}
+
 export async function mountTodoist(ctx: ContentScriptContext) {
   const hidden = new Map<
     HTMLElement,
     { hidden: string | null; display: string; priority: string }
   >();
   const themeHosts = new Map<HTMLElement, HTMLElement>();
+  const nativeCurrent = new Set<HTMLElement>();
   const cleanups: (() => void)[] = [];
   let content: HTMLElement | undefined;
   let mainHost: HTMLElement | undefined;
@@ -75,6 +87,46 @@ export async function mountTodoist(ctx: ContentScriptContext) {
   let detailCleanup: (() => void) | undefined;
   let detailPending = false;
   let detailsReady = false;
+  let otherViewsOpen = false;
+  let favoritesRoot: Root | undefined;
+  let favoritesHost: HTMLElement | undefined;
+  let favoritesCleanup: (() => void) | undefined;
+  let favoritesPending = false;
+  let favoritesKey = "";
+
+  const selectionStyle = document.createElement("style");
+  selectionStyle.textContent = `
+    [data-todoist-plus-native-current],
+    [data-todoist-plus-native-current] > a {
+      background-color: transparent !important;
+      color: var(--product-library-display-primary-idle-tint, inherit) !important;
+    }
+    [data-todoist-plus-native-current] svg {
+      color: var(--product-library-display-primary-idle-tint, inherit) !important;
+    }
+  `;
+  document.head.append(selectionStyle);
+  cleanups.push(() => selectionStyle.remove());
+
+  function syncNativeSelection() {
+    const selected = new Set(
+      view && plan?.configured
+        ? (document
+            .querySelector(sidebarSelector)
+            ?.querySelectorAll<HTMLElement>("li.current") ?? [])
+        : [],
+    );
+    for (const element of nativeCurrent) {
+      if (!selected.has(element)) {
+        element.removeAttribute("data-todoist-plus-native-current");
+        nativeCurrent.delete(element);
+      }
+    }
+    for (const element of selected) {
+      element.setAttribute("data-todoist-plus-native-current", "");
+      nativeCurrent.add(element);
+    }
+  }
 
   function hide(element: HTMLElement) {
     if (hidden.has(element)) return;
@@ -100,43 +152,137 @@ export async function mountTodoist(ctx: ContentScriptContext) {
     const value = new URL(location.href).searchParams.get(viewParam);
     return value === "plan" || value === "focus" ? value : undefined;
   }
+  function favoriteRows() {
+    const first = document
+      .querySelector(sidebarSelector)
+      ?.querySelector<HTMLAnchorElement>(
+        "a[href*='/app/filter/'], a[href*='/app/label/']",
+      );
+    const list = first?.closest("ul");
+    if (!list) return [];
+    return Array.from(list.querySelectorAll<HTMLAnchorElement>("a[href]"))
+      .map((link) => {
+        const match = new URL(link.href).pathname.match(
+          /\/app\/(filter|label)\/([^/]+)$/u,
+        );
+        let row = link.closest<HTMLElement>("li") ?? link;
+        while (
+          row.parentElement &&
+          row.parentElement !== list &&
+          row.parentElement.children.length === 1
+        )
+          row = row.parentElement;
+        return match
+          ? { row, link, kind: match[1], slug: match[2]! }
+          : undefined;
+      })
+      .filter((row) => row !== undefined);
+  }
+  function matchesId(slug: string, ids: string[]) {
+    return ids.some((id) => slug === id || slug.endsWith(`-${id}`));
+  }
+  async function showOtherViews(rows: HTMLElement[]) {
+    if (!favoritesHost?.isConnected && !favoritesPending && rows.length) {
+      favoritesCleanup?.();
+      favoritesPending = true;
+      const anchor = rows[0]!;
+      const ui = await createShadowRootUi(ctx, {
+        inheritStyles: true,
+        name: "todoist-plus-other-views",
+        position: "inline",
+        anchor,
+        append: "before",
+        onMount(container) {
+          const root = createRoot(container);
+          favoritesRoot = root;
+          return root;
+        },
+        onRemove(root) {
+          root?.unmount();
+        },
+      });
+      favoritesPending = false;
+      if (disposed || !anchor.isConnected) return;
+      ui.mount();
+      favoritesHost = ui.shadowHost;
+      favoritesKey = "";
+      const reference = document.querySelector<HTMLElement>(
+        "#top-menu a[href$='/upcoming']",
+      );
+      if (reference) {
+        themeHosts.set(favoritesHost, reference);
+        applyTheme(favoritesHost, reference);
+        applyNavigationLayout(favoritesHost, reference);
+      }
+      favoritesCleanup = () => {
+        themeHosts.delete(ui.shadowHost);
+        ui.remove();
+      };
+    }
+    if (!favoritesRoot || !favoritesHost) return;
+    const visible = Boolean(plan?.configured && rows.length);
+    const display = visible ? "block" : "none";
+    if (favoritesHost.style.display !== display)
+      favoritesHost.style.display = display;
+    const key = `${visible}:${otherViewsOpen}:${rows.length}:${languageOf(document)}`;
+    if (key === favoritesKey) return;
+    favoritesKey = key;
+    favoritesRoot.render(
+      <div className="plus-extension-nav plus-other-views">
+        <button
+          aria-expanded={otherViewsOpen}
+          onClick={() => {
+            otherViewsOpen = !otherViewsOpen;
+            restore();
+            hideReplaced();
+          }}
+        >
+          {otherViewsOpen ? (
+            <ChevronDown size={24} />
+          ) : (
+            <ChevronRight size={24} />
+          )}
+          {languageOf(document) === "zh" ? "其他视图" : "Other views"}
+          <span className="plus-other-count">{rows.length}</span>
+        </button>
+      </div>,
+    );
+  }
   function hideReplaced() {
+    syncNativeSelection();
     if (view && content && mainHost) {
       for (const child of Array.from(content.children))
         if (child instanceof HTMLElement && child !== mainHost) hide(child);
     }
-    if (!plan?.configured || !mainHost?.isConnected) return;
-    for (const link of document.querySelectorAll<HTMLAnchorElement>(
-      "[data-testid=app-sidebar-scrollable-container] a[href], #left_menu a[href]",
-    )) {
-      const slug = new URL(link.href).pathname.match(
-        /\/app\/filter\/([^/]+)$/u,
-      )?.[1];
-      if (
-        slug &&
-        plan.hiddenFilterIds.some(
-          (id) => slug === id || slug.endsWith(`-${id}`),
-        )
-      )
-        hide(link.closest("li") ?? link);
+    if (!plan?.configured || !mainHost?.isConnected) {
+      void showOtherViews([]);
+      return;
     }
+    const labelIds = plan.managedLabels
+      .filter((label) => !["office", "home"].includes(label.role))
+      .map((label) => label.id);
+    const extras: HTMLElement[] = [];
+    for (const { row, link, kind, slug } of favoriteRows()) {
+      if (
+        (kind === "filter" && matchesId(slug, plan.hiddenFilterIds)) ||
+        (kind === "label" && matchesId(slug, labelIds)) ||
+        /^[-_]{3,}$/u.test(link.textContent?.trim() ?? "")
+      ) {
+        hide(row);
+      } else {
+        extras.push(row);
+        if (!otherViewsOpen) hide(row);
+      }
+    }
+    void showOtherViews(extras);
     if (!detailsReady || !detailHost?.isConnected) return;
-    const labels = plan.managedLabels.filter(
-      (label) => !["office", "home"].includes(label.role),
-    );
     for (const link of document.querySelectorAll<HTMLAnchorElement>(
       "[data-testid=task-details-modal] a[href*='/app/label/']",
     )) {
       const slug = new URL(link.href).pathname.match(
         /\/app\/label\/([^/]+)$/u,
       )?.[1];
-      if (
-        slug &&
-        labels.some(
-          (label) => slug === label.id || slug.endsWith(`-${label.id}`),
-        )
-      )
-        hide(link);
+      if (slug && matchesId(slug, labelIds)) hide(link);
     }
   }
   const ready = (next?: PlanState) => {
@@ -168,6 +314,7 @@ export async function mountTodoist(ctx: ContentScriptContext) {
           onOpenTask={(id) => location.assign(todoistTaskUrl(id))}
           onSettings={openOptions}
           onReady={ready}
+          onViewChange={navigate}
         />,
       );
     }
@@ -182,10 +329,7 @@ export async function mountTodoist(ctx: ContentScriptContext) {
   }
   async function mount() {
     if (mainHost || mounting || disposed) return;
-    const sidebar =
-      document.querySelector<HTMLElement>(
-        "[data-testid=app-sidebar-scrollable-container]",
-      ) ?? document.querySelector<HTMLElement>("#left_menu");
+    const sidebar = document.querySelector<HTMLElement>(sidebarSelector);
     content =
       document.querySelector<HTMLElement>("#content") ??
       document.querySelector<HTMLElement>("main") ??
@@ -240,9 +384,9 @@ export async function mountTodoist(ctx: ContentScriptContext) {
                   onClick={() => navigate(item)}
                 >
                   {item === "plan" ? (
-                    <LayoutList size={19} />
+                    <LayoutList size={24} />
                   ) : (
-                    <Target size={19} />
+                    <Target size={24} />
                   )}
                   {text[item]}
                 </button>
@@ -258,8 +402,10 @@ export async function mountTodoist(ctx: ContentScriptContext) {
       },
     });
     navUi.mount();
-    themeHosts.set(navUi.shadowHost, sidebar);
-    applyTheme(navUi.shadowHost, sidebar);
+    const navReference = upcoming ?? sidebar;
+    themeHosts.set(navUi.shadowHost, navReference);
+    applyTheme(navUi.shadowHost, navReference);
+    if (upcoming) applyNavigationLayout(navUi.shadowHost, upcoming);
     cleanups.push(() => navUi.remove());
     mounting = false;
     render();
@@ -357,8 +503,11 @@ export async function mountTodoist(ctx: ContentScriptContext) {
     disposed = true;
     observer.disconnect();
     detailCleanup?.();
+    favoritesCleanup?.();
     for (const cleanup of cleanups) cleanup();
     restore();
+    for (const element of nativeCurrent)
+      element.removeAttribute("data-todoist-plus-native-current");
   });
   await mount();
 }

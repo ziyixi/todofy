@@ -10,11 +10,22 @@ import { resolve } from "node:path";
 const fixture = `<!doctype html><html lang="en"><head><style>
 body { margin:0; color:#202020; background:white; font-family:system-ui }
 body.dark { color:#e5e5e5; background:#1e1e1e }
-aside { width:280px; background:#fcfcf8; position:fixed; top:0; bottom:0 }
+aside { width:280px; padding:12px; box-sizing:border-box; background:#fcfcf8; position:fixed; top:0; bottom:0 }
 body.dark aside { background:#24251f }
 main { margin-left:280px; min-height:100vh; color:inherit }
 a { color:inherit } [hidden] { display:none !important }
-</style></head><body><aside data-testid="app-sidebar-scrollable-container"><ul id="top-menu"><li><a href="/app/today">Today</a></li><li><a href="/app/upcoming">Upcoming</a></li></ul><ul><li id="legacy"><a href="/app/filter/committed-f1">Legacy commitment filter</a></li><li><a href="/app/project/email-inbox">Email Inbox</a></li></ul></aside><main id="content"><section id="native"><h1>Native task list</h1></section></main><script>
+aside ul { margin:0; padding:0; list-style:none }
+#top-menu a { display:flex; align-items:center; box-sizing:border-box; width:230px; height:34px; padding:5px; font-size:13px; line-height:20px; font-weight:400; text-decoration:none }
+#top-menu svg { width:24px; height:24px }
+#top-menu .current > a { background:#f0f6df; color:#557921 }
+</style></head><body><aside data-testid="app-sidebar-scrollable-container"><ul id="top-menu"><li id="native-today" class="current"><a href="/app/today"><svg aria-hidden="true"></svg><span>Today</span></a></li><li><a href="/app/upcoming"><svg aria-hidden="true"></svg><span>Upcoming</span></a></li></ul><ul id="favorites">
+<div><li><div><div><a href="/app/project/email-inbox">Email Inbox</a><span>0</span></div></div></li></div>
+<div id="legacy-wrapper"><li id="legacy"><div><div><a href="/app/filter/committed-f1">Legacy commitment filter</a><span>0</span></div></div></li></div>
+<div id="extra-filter-wrapper"><li><div><div><a href="/app/filter/waiting-f2">Waiting / Blocked</a><span>0</span></div></div></li></div>
+<div id="managed-label-wrapper"><li><div><div><a href="/app/label/committed-l1">committed</a></div></div></li></div>
+<div id="extra-label-wrapper"><li><div><div><a href="/app/label/context-l3">Custom context</a></div></div></li></div>
+<div id="separator-wrapper"><li><div><div><a href="/app/filter/separator-f3">--------</a></div></div></li></div>
+</ul></aside><main id="content"><section id="native"><h1>Native task list</h1></section></main><script>
 document.querySelector('a[href="/app/today"]').addEventListener('click',e=>{e.preventDefault();history.pushState(null,'','/app/today');window.dispatchEvent(new PopStateEvent('popstate'));});
 </script></body></html>`;
 
@@ -111,11 +122,18 @@ async function setup(context: BrowserContext, worker: Worker) {
               : []),
           ],
         });
-      if (url.pathname.endsWith("/flows/2026-10-13"))
+      const flowDate = url.pathname.match(
+        /\/flows\/(\d{4}-\d{2}-\d{2})$/u,
+      )?.[1];
+      if (flowDate)
         return json({
-          name: "flows/2026-10-13",
-          task_ids: ["child", "local-one", "__flowday_misc__:2026-10-13"],
-          completed_task_ids: state.completed ? ["child"] : [],
+          name: `flows/${flowDate}`,
+          task_ids:
+            flowDate === "2026-10-13"
+              ? ["child", "local-one", "__flowday_misc__:2026-10-13"]
+              : [],
+          completed_task_ids:
+            flowDate === "2026-10-13" && state.completed ? ["child"] : [],
         });
       if (url.pathname.endsWith("/timerSession"))
         return json({
@@ -190,18 +208,46 @@ test("built MV3 mounts, restores native UI and sends task actions through its ba
     await page.goto("https://app.todoist.com/app/today");
     await expect(page.locator("#legacy")).toBeHidden();
     await expect(page.locator("#native")).toBeVisible();
+    await expect(page.locator("#extra-filter-wrapper")).toBeHidden();
+    await expect(page.locator("#extra-label-wrapper")).toBeHidden();
+    await page.getByRole("button", { name: /^Other views\s*2$/u }).click();
+    await expect(page.locator("#extra-filter-wrapper")).toBeVisible();
+    await expect(page.locator("#extra-label-wrapper")).toBeVisible();
+    await expect(page.locator("#legacy-wrapper")).toBeHidden();
+    await expect(page.locator("#managed-label-wrapper")).toBeHidden();
+    await expect(page.locator("#separator-wrapper")).toBeHidden();
+    await expect(page.locator("#favorites > div")).toHaveCount(6);
+    await page.getByRole("button", { name: /^Other views\s*2$/u }).click();
+    await expect(page.locator("#extra-filter-wrapper")).toBeHidden();
     await page.getByRole("button", { name: "Plan", exact: true }).click();
-    await expect(
-      page.getByText("Synthetic project", { exact: true }),
-    ).toBeVisible();
+    const parentTask = page.locator(
+      '.plus-family-row[data-task-id="parent"] .plus-family-title',
+    );
+    await expect(parentTask).toBeVisible();
     await expect(page.locator("#native")).toBeHidden();
     await expect(page.locator("#legacy")).toBeHidden();
+    const planButton = page.getByRole("button", { name: "Plan", exact: true });
+    await planButton.hover();
+    await expect(planButton).toHaveCSS(
+      "background-color",
+      "rgb(240, 246, 223)",
+    );
+    await expect(planButton).toHaveCSS("padding", "5px");
+    await expect(planButton).toHaveCSS("width", "230px");
+    await expect(planButton).toHaveCSS("font-size", "13px");
+    await expect(page.locator("#native-today")).toHaveClass("current");
+    await expect(page.locator("#native-today > a")).toHaveCSS(
+      "background-color",
+      "rgba(0, 0, 0, 0)",
+    );
     await expect(page.getByRole("link", { name: "Email Inbox" })).toBeVisible();
     await page.getByRole("link", { name: "Today", exact: true }).click();
     await expect(page.locator("#native")).toBeVisible();
-    await expect(
-      page.getByText("Synthetic project", { exact: true }),
-    ).toBeHidden();
+    await expect(page.locator("#native-today > a")).toHaveCSS(
+      "background-color",
+      "rgb(240, 246, 223)",
+    );
+    await expect(parentTask).toBeHidden();
     await page.getByRole("button", { name: "Focus", exact: true }).click();
     await expect(
       page.getByText("Local planning note", { exact: true }),
@@ -274,7 +320,7 @@ test("built MV3 mounts, restores native UI and sends task actions through its ba
       ),
     ).toBe(false);
     await page.getByRole("button", { name: "Plan", exact: true }).click();
-    await page.getByText("Synthetic project", { exact: true }).click();
+    await parentTask.click();
     await page
       .getByRole("button", { name: "Open in Todoist", exact: true })
       .click();
@@ -366,7 +412,16 @@ test("restores legacy controls when mapping or the extension connection becomes 
     });
     await page.getByRole("button", { name: "Refresh", exact: true }).click();
     await expect(page.locator("#legacy")).toBeVisible();
+    await expect(page.locator("#managed-label-wrapper")).toBeVisible();
+    await expect(page.locator("#extra-filter-wrapper")).toBeVisible();
+    await expect(page.locator("#extra-label-wrapper")).toBeVisible();
+    await expect(page.locator("#separator-wrapper")).toBeVisible();
+    await expect(page.locator("todoist-plus-other-views")).toBeHidden();
     await expect(page.locator("#native")).toBeHidden();
+    await expect(page.locator("#native-today > a")).toHaveCSS(
+      "background-color",
+      "rgb(240, 246, 223)",
+    );
     await worker.evaluate(() => {
       (
         globalThis as unknown as { testState: { enabled: boolean } }

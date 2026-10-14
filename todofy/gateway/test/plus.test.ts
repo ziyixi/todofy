@@ -54,6 +54,20 @@ describe('Todoist Plus transport boundaries', () => {
     expect(response.status).toBe(409);
     expect(await response.text()).toContain('TIMER_CONFLICT');
   });
+  it('passes a day move through the authenticated Focus binding without a Todoist task write', async () => {
+    const forwarded: unknown[] = [];
+    const { env, core } = fakes({}, () => true);
+    const connected = { ...env, FLOWDAY_FOCUS: { fetch: async (request: Request) => {
+      forwarded.push(await request.json());
+      return Response.json({ flow: { name: 'flows/2026-10-13', task_ids: ['local-one'] },
+        destination_flow: { name: 'flows/2026-10-14', task_ids: ['step', 'local-two'] } });
+    } } as unknown as Fetcher };
+    const response = await hooks(connected, '/api/plus/flowday/api/v1/flows/2026-10-13:rollover',
+      api('POST', { destination: 'flows/2026-10-14', task_ids: ['step'] }));
+    expect(response.status).toBe(200);
+    expect(forwarded).toEqual([expect.objectContaining({ destination: 'flows/2026-10-14', task_ids: ['step'] })]);
+    expect(core.filter(call => call.method === 'plus_ui')).toHaveLength(0);
+  });
   it('rejects invalid completion day before issuing the Todoist command', async () => {
     const { env, core } = fakes({}, () => true);
     expect((await hooks(env, '/api/plus/v1/tasks:completeTask', api('POST', { ...COMPLETE, flow_date: '2026-02-30' }))).status).toBe(400);

@@ -525,7 +525,7 @@ message RolloverFlowRequest {
     (google.api.field_behavior) = REQUIRED,
     (google.api.resource_reference).type = "flowday.ziyixi.science/Flow"
   ];
-  // flows/{flow}: the day the tasks go to, at the top in their order.
+  // flows/{flow}: a different day the tasks go to, at the top in their order.
   string destination = 2 [
     (google.api.field_behavior) = REQUIRED,
     (google.api.resource_reference).type = "flowday.ziyixi.science/Flow"

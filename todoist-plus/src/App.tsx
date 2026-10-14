@@ -14,11 +14,11 @@ import { PlanView } from "./PlanView";
 import { FocusView } from "./FocusView";
 import { TaskEditor } from "./TaskEditor";
 import type {
-  FocusState,
   Language,
   PlanState,
   PlanningTask,
   PlusActions,
+  PlusData,
   View,
 } from "./model";
 
@@ -30,6 +30,7 @@ interface Props {
   onSettings: () => void;
   onReady?: (plan?: PlanState) => void;
   externalTaskId?: string;
+  onViewChange?: (view: View) => void;
 }
 export function App({
   actions,
@@ -39,8 +40,10 @@ export function App({
   onSettings,
   onReady,
   externalTaskId,
+  onViewChange,
 }: Props) {
-  const [data, setData] = useState<{ plan: PlanState; focus: FocusState }>();
+  const [data, setData] = useState<PlusData>();
+  const [selectedDate, setSelectedDate] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const lock = useRef(false);
@@ -97,9 +100,10 @@ export function App({
     return () => document.removeEventListener("visibilitychange", visible);
   }, [run]);
   useEffect(() => {
+    if (data?.focus.timer?.status !== "running") return;
     const id = window.setInterval(() => tick((value) => value + 1), 1000);
     return () => clearInterval(id);
-  }, []);
+  }, [data?.focus.timer?.status]);
   useEffect(() => {
     if (externalTaskId) setSelectedId(externalTaskId);
   }, [externalTaskId]);
@@ -108,11 +112,13 @@ export function App({
       dialog.current.showModal();
   }, [selectedId]);
 
-  async function addFocus(id: string) {
-    if (!data || data.focus.taskIds.includes(id)) return;
-    await run(() =>
-      actions.updateQueue([...data.focus.taskIds, id], data.focus),
-    );
+  const selectedDay =
+    data?.days.find((day) => day.date === selectedDate) ?? data?.focus;
+  const currentFocus =
+    data && selectedDay ? { ...data.focus, ...selectedDay } : undefined;
+  async function addFocus(id: string, day = selectedDay) {
+    if (!data || !day || day.taskIds.includes(id)) return;
+    await run(() => actions.updateQueue([...day.taskIds, id], day));
   }
   function complete(task: PlanningTask) {
     let id = completionIds.current.get(task.id);
@@ -127,7 +133,7 @@ export function App({
         requestId,
         data?.focus.timer?.taskId === task.id
           ? data.focus.timer.flowDate
-          : (data?.focus.date ?? ""),
+          : (currentFocus?.date ?? ""),
       ),
     ).then((ok) => {
       if (ok) completionIds.current.delete(task.id);
@@ -138,13 +144,17 @@ export function App({
     (task) => task.id === data.focus.timer?.taskId,
   );
   return (
-    <div className="plus-root">
+    <div className={`plus-root plus-root-${view}`}>
       <header className="plus-page-header">
         <div>
           <h1>{view === "plan" ? text.plan : text.focus}</h1>
           <div className="plus-subtitle">
             <CalendarDays size={13} />
-            {data ? (view === "plan" ? data.plan.week : data.focus.date) : ""}
+            {data
+              ? view === "plan"
+                ? data.plan.week
+                : currentFocus?.date
+              : ""}
             {data && <span> · {data.plan.timezone}</span>}
           </div>
         </div>
@@ -194,17 +204,27 @@ export function App({
           {view === "plan" ? (
             <PlanView
               plan={data.plan}
+              days={data.days}
+              flowTasks={data.focus.flowTasks}
+              timer={data.focus.timer}
+              currentDate={data.focus.date}
+              onOpenFocus={(date) => {
+                setSelectedDate(date);
+                onViewChange?.("focus");
+              }}
               language={language}
               busy={busy || !data.plan.configured}
               run={run}
               actions={actions}
               editTask={(task) => setSelectedId(task.id)}
-              addFocus={(id) => void addFocus(id)}
             />
           ) : (
             <FocusView
               plan={data.plan}
-              focus={data.focus}
+              focus={currentFocus!}
+              days={data.days}
+              today={data.focus.date}
+              onDateChange={setSelectedDate}
               language={language}
               busy={busy || !data.plan.configured}
               run={run}
@@ -291,7 +311,7 @@ export function App({
             busy={busy}
             run={run}
             actions={actions}
-            addFocus={(id) => void addFocus(id)}
+            addFocus={(id) => void addFocus(id, data.focus)}
             onOpenTask={onOpenTask}
             onClose={() => {
               dialog.current?.close();

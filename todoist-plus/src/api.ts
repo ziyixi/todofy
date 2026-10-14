@@ -14,7 +14,12 @@ import {
   SyncTasksRequest_Mode,
 } from "@ziyixi/proto/flowday/ui/v1/flowday_ui_service_pb";
 import { TimerSession_State } from "@ziyixi/proto/flowday/ui/v1/time_entry_pb";
-import type { FocusState, PlanningTask, PlusActions } from "./model";
+import type {
+  FlowDayPlan,
+  FocusState,
+  PlanningTask,
+  PlusActions,
+} from "./model";
 
 export interface Connection {
   apiOrigin: string;
@@ -140,10 +145,24 @@ export function createApi(
       }
       if (pageToken)
         throw new Error("Task list is incomplete. Counts have not been shown.");
-      const [flow, timer] = await Promise.all([
-        flowday.getFlow({ name: `flows/${plan.today}` }),
+      const dates = Array.from({ length: 7 }, (_, index) => {
+        const date = new Date(`${plan.weekStart}T12:00:00Z`);
+        date.setUTCDate(date.getUTCDate() + index);
+        return date.toISOString().slice(0, 10);
+      });
+      const [flows, timer] = await Promise.all([
+        Promise.all(
+          dates.map((date) => flowday.getFlow({ name: `flows/${date}` })),
+        ),
         flowday.getTimerSession({ name: "timerSession" }),
       ]);
+      const days: FlowDayPlan[] = flows.map((flow, index) => ({
+        date: dates[index]!,
+        taskIds: flow.taskIds,
+        completedTaskIds: flow.completedTaskIds,
+      }));
+      const today = days.find((day) => day.date === plan.today);
+      if (!today) throw new Error("Today's planning day is missing.");
       const estimates: Record<string, number> = {};
       const flowTasks: FocusState["flowTasks"] = {};
       let flowToken = "";
@@ -175,10 +194,8 @@ export function createApi(
         ? new Date(Number(timer.segmentStartTime.seconds) * 1000).toISOString()
         : new Date().toISOString();
       const focus: FocusState = {
-        date: plan.today,
+        ...today,
         timerEtag,
-        taskIds: flow.taskIds,
-        completedTaskIds: flow.completedTaskIds,
         estimates,
         flowTasks,
         ...(timer.taskId &&
@@ -220,6 +237,7 @@ export function createApi(
           })),
         },
         focus,
+        days,
       };
     },
     async updateTask(task, update) {
@@ -249,6 +267,36 @@ export function createApi(
       await ensureSynced(taskIds);
       await flowday.updateFlow({
         flow: { name: `flows/${focus.date}`, taskIds },
+        updateMask: { paths: ["task_ids"] },
+      });
+    },
+    async moveTaskToDay(taskId, source, target, beforeId) {
+      if (source?.date === target.date && beforeId === taskId) return;
+      await ensureSynced([taskId]);
+      const destination =
+        source && source.date !== target.date
+          ? (
+              await flowday.rolloverFlow({
+                name: `flows/${source.date}`,
+                destination: `flows/${target.date}`,
+                taskIds: [taskId],
+              })
+            ).destinationFlow
+          : await flowday.getFlow({ name: `flows/${target.date}` });
+      if (!destination)
+        throw new Error("The destination day could not be read.");
+      if (source && !destination.taskIds.includes(taskId))
+        throw new Error("This step has moved. Refresh the plan and try again.");
+      const taskIds = destination.taskIds.filter((id) => id !== taskId);
+      const before = beforeId ? taskIds.indexOf(beforeId) : -1;
+      taskIds.splice(before < 0 ? taskIds.length : before, 0, taskId);
+      if (
+        taskIds.every((id, index) => destination.taskIds[index] === id) &&
+        taskIds.length === destination.taskIds.length
+      )
+        return;
+      await flowday.updateFlow({
+        flow: { name: `flows/${target.date}`, taskIds },
         updateMask: { paths: ["task_ids"] },
       });
     },

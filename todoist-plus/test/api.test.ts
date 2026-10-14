@@ -51,6 +51,8 @@ it("loads complete pages and uses the authoritative timer etag for subsequent ac
           });
     if (url.pathname.endsWith("/flows/2026-10-13"))
       return json({ name: "flows/2026-10-13", task_ids: ["child"] });
+    if (url.pathname.includes("/flows/"))
+      return json({ name: `flows/${url.pathname.split("/").at(-1)}` });
     if (url.pathname.endsWith("/timerSession"))
       return json({ name: "timerSession", state: "idle", etag: "42" });
     if (url.pathname.endsWith("/tasks"))
@@ -74,7 +76,16 @@ it("loads complete pages and uses the authoritative timer etag for subsequent ac
     { apiOrigin: "https://api.example.test", token: "synthetic-token" },
     fetcher,
   );
-  const { plan, focus } = await api.load();
+  const { plan, focus, days } = await api.load();
+  expect(days.map((day) => day.date)).toEqual([
+    "2026-10-12",
+    "2026-10-13",
+    "2026-10-14",
+    "2026-10-15",
+    "2026-10-16",
+    "2026-10-17",
+    "2026-10-18",
+  ]);
   expect(plan.tasks.map((task) => task.id)).toEqual(["parent", "child"]);
   expect(focus.estimates.child).toBe(45);
   expect(focus.timerEtag).toBe("42");
@@ -196,7 +207,12 @@ it("keeps a cleared FlowDay estimate unknown and resumes a timer on its original
       const path = new URL(String(input)).pathname;
       if (path.endsWith("/plan:read"))
         return json({
-          plan: { timezone: "UTC", today: "2026-10-13", enabled: true },
+          plan: {
+            timezone: "UTC",
+            week_start: "2026-10-12",
+            today: "2026-10-13",
+            enabled: true,
+          },
         });
       if (path === "/api/plus/v1/tasks")
         return json({
@@ -206,6 +222,8 @@ it("keeps a cleared FlowDay estimate unknown and resumes a timer on its original
         });
       if (path.endsWith("/flows/2026-10-13"))
         return json({ name: "flows/2026-10-13", task_ids: ["child"] });
+      if (path.includes("/flows/"))
+        return json({ name: `flows/${path.split("/").at(-1)}` });
       if (path.endsWith("/timerSession"))
         return json({
           name: "timerSession",

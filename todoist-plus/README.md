@@ -2,21 +2,25 @@
 
 把周计划和 FlowDay 放进 Todoist 的 Chrome 扩展。支持普通网页与同一 Chrome profile 安装的 PWA；Todoist 原生桌面、手机应用不能安装它。
 
-- **Plan**：工作／生活的本周承诺、候选、重点和启动窗口；一次选择调整对应标签。
+- **Plan**：左侧按父任务展开本周承诺和候选，右侧把小步骤拖到周一至周日；支持跨日移动和当天排序。
 - **步骤与时间**：批量添加小步骤、估时，编辑真实 Deadline 和提前开始窗口。
-- **Focus**：沿用 FlowDay 的今天队列与计时器。勾选完成真实 Todoist 子任务；暂停、结束计时不会完成任务。
+- **Focus**：按估时排列当天步骤，显示所属父任务和累计预计用时；拖动排序、开始计时、勾选完成。暂停或结束计时不会完成任务。
 
-现有标签和筛选器保留。连接成功后只隐藏已确认被界面替代的项；停用扩展并刷新，恢复 Todoist 原界面。FlowDay 的本地任务和杂项时间保留在队列中，点击链接回 FlowDay 处理。
+拖到某天只改 FlowDay 队列，保留 Todoist 的计划日期和 Deadline。父任务数量按承诺计算，子任务可以单独安排；正在计时的步骤先结束计时再移动。
+
+现有标签和筛选器保留。替代的规划项在本地隐藏，其他筛选器和标签收藏收进“Other views”；项目收藏保持可见。停用扩展并刷新即恢复原界面。FlowDay 的本地任务和杂项时间仍保留。
 
 ## 安装和连接
 
-1. 下载 GitHub Release 的 `todoist-plus-*.zip`，解压到固定的 **Todoist Plus 专用目录**。不要放进 Recall 的扩展目录。
+1. 下载 GitHub Release 的 `todoist-plus-*.zip`，解压到固定的专用目录，例如 macOS 的 `~/Documents/chrome_extensions/todoist-plus`。不要混用 Recall 的目录。
 2. 打开 `chrome://extensions`，启用开发者模式，选择“加载已解压的扩展程序”，选中包含 `manifest.json` 的目录。
 3. 打开 Todofy owner 页面 `/plus`，核对标签映射并确认；生成一个命名的扩展连接。
 4. 打开 Todoist Plus 扩展设置，粘贴该页面给出的 API origin 和一次性口令。只授权这个 API origin，然后连接。
 5. 刷新 Todoist，侧边栏出现 **Plan / Focus**。
 
-更新时把新版本解压覆盖同一个目录，在 `chrome://extensions` 点击该扩展的重新加载；连接保存在扩展本地存储中。换目录或卸载可能改变扩展身份，需要重新连接。口令可在 Todofy 的 `/plus` 单独撤销。
+更新时把新版本解压覆盖同一个目录，在 `chrome://extensions` 点击该扩展的重新加载；连接保存在扩展本地存储中。换目录或卸载可能改变扩展身份，需要重新连接。口令可在 Todofy 的 `/plus` 单独撤销。从旧目录切换时先停用旧扩展，避免两个版本同时运行。
+
+扩展只用一个连接口令。FlowDay 仍需其原有的 Todoist 只读连接；如果缓存旧或无法加入新步骤，在 FlowDay 设置检查同步状态。Todoist API key 不进入扩展。
 
 ## 本地开发
 

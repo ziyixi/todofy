@@ -19,6 +19,8 @@ export const extensionActions: PlusActions = {
     call({ kind: "action", method: "completeTask", args }),
   updateQueue: (...args) =>
     call({ kind: "action", method: "updateQueue", args }),
+  moveTaskToDay: (...args) =>
+    call({ kind: "action", method: "moveTaskToDay", args }),
   updateEstimate: (...args) =>
     call({ kind: "action", method: "updateEstimate", args }),
   timer: (...args) => call({ kind: "action", method: "timer", args }),

@@ -71,6 +71,8 @@ export function registerBackground() {
             return client.completeTask(...message.args);
           case "updateQueue":
             return client.updateQueue(...message.args);
+          case "moveTaskToDay":
+            return client.moveTaskToDay(...message.args);
           case "updateEstimate":
             return client.updateEstimate(...message.args);
           case "timer":

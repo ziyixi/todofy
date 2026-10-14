@@ -1,5 +1,6 @@
 import type {
   FocusState,
+  FlowDayPlan,
   PlanState,
   PlanningTask,
   PlusActions,
@@ -27,7 +28,7 @@ const task = (
 });
 export function createPrototype(): PlusActions {
   let plan: PlanState = {
-    week: "Oct 12–18",
+    week: "2026-10-12",
     timezone: "America/Los_Angeles",
     configured: true,
     hiddenFilterIds: [],
@@ -95,9 +96,22 @@ export function createPrototype(): PlusActions {
     estimates: {},
     flowTasks: {},
   };
+  let days: FlowDayPlan[] = Array.from({ length: 7 }, (_, index) => ({
+    date: `2026-10-${12 + index}`,
+    taskIds:
+      index === 0
+        ? ["layout"]
+        : index === 1
+          ? [...focus.taskIds]
+          : index === 2
+            ? ["cleanup"]
+            : [],
+    completedTaskIds: [],
+  }));
   return {
     async load() {
-      return structuredClone({ plan, focus });
+      focus = { ...focus, ...days.find((day) => day.date === focus.date)! };
+      return structuredClone({ plan, focus, days });
     },
     async updateTask(item, update) {
       plan = {
@@ -130,19 +144,43 @@ export function createPrototype(): PlusActions {
         ),
       };
     },
-    async completeTask(item) {
+    async completeTask(item, _requestId, flowDate) {
       plan = {
         ...plan,
         tasks: plan.tasks.filter((task) => task.id !== item.id),
       };
       focus = {
         ...focus,
-        completedTaskIds: [...focus.completedTaskIds, item.id],
         timer: focus.timer?.taskId === item.id ? undefined : focus.timer,
       };
+      days = days.map((day) =>
+        day.date === flowDate
+          ? {
+              ...day,
+              completedTaskIds: [
+                ...new Set([...day.completedTaskIds, item.id]),
+              ],
+            }
+          : day,
+      );
     },
-    async updateQueue(taskIds) {
-      focus = { ...focus, taskIds };
+    async updateQueue(taskIds, target) {
+      days = days.map((day) =>
+        day.date === target.date ? { ...day, taskIds } : day,
+      );
+    },
+    async moveTaskToDay(id, source, target, beforeId) {
+      days = days.map((day) => {
+        if (day.date === target.date) {
+          const taskIds = day.taskIds.filter((value) => value !== id);
+          const before = beforeId ? taskIds.indexOf(beforeId) : -1;
+          taskIds.splice(before < 0 ? taskIds.length : before, 0, id);
+          return { ...day, taskIds };
+        }
+        return source?.date === day.date
+          ? { ...day, taskIds: day.taskIds.filter((value) => value !== id) }
+          : day;
+      });
     },
     async updateEstimate(taskId, minutes) {
       focus = {
@@ -150,7 +188,7 @@ export function createPrototype(): PlusActions {
         estimates: { ...focus.estimates, [taskId]: minutes },
       };
     },
-    async timer(action, taskId) {
+    async timer(action, taskId, target) {
       const seconds = focus.timer
         ? focus.timer.elapsedSeconds +
           (focus.timer.status === "running"
@@ -166,7 +204,10 @@ export function createPrototype(): PlusActions {
             ? undefined
             : {
                 taskId,
-                flowDate: focus.date,
+                flowDate:
+                  action === "start"
+                    ? target.date
+                    : (focus.timer?.flowDate ?? target.date),
                 status: action === "pause" ? "paused" : "running",
                 elapsedSeconds: seconds,
                 startedAt: new Date().toISOString(),

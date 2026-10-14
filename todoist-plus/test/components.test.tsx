@@ -3,6 +3,7 @@ import {
   fireEvent,
   render,
   screen,
+  within,
   waitFor,
 } from "@testing-library/react";
 import { afterEach, beforeAll, expect, it, vi } from "vitest";
@@ -29,7 +30,11 @@ it("commits a candidate in one action and moves it into the committed group", as
       onSettings={() => {}}
     />,
   );
-  await screen.findByText("Clear out the old development branch");
+  await screen.findByRole("complementary", { name: "Outcomes and steps" });
+  const pool = within(
+    screen.getByRole("complementary", { name: "Outcomes and steps" }),
+  );
+  expect(pool.getByText("Clear out the old development branch")).toBeTruthy();
   fireEvent.change(
     screen.getByLabelText("Planning: Clear out the old development branch"),
     { target: { value: "committed" } },
@@ -44,22 +49,30 @@ it("commits a candidate in one action and moves it into the committed group", as
 });
 it("preserves a child deadline in attention when its parent occupies the commitment quota", async () => {
   const actions = createPrototype();
-  const { plan } = await actions.load();
+  const { plan, focus, days } = await actions.load();
   const child = plan.tasks.find((task) => task.id === "copy")!;
   child.mustStart = true;
   child.area = "unassigned";
   render(
     <PlanView
       plan={plan}
+      days={days}
+      currentDate={focus.date}
+      flowTasks={focus.flowTasks}
+      onOpenFocus={vi.fn()}
       language="en"
       busy={false}
       actions={actions}
       run={vi.fn()}
       editTask={vi.fn()}
-      addFocus={vi.fn()}
     />,
   );
-  expect(screen.getByText("Write the introduction")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: /Needs a look/ }));
+  expect(
+    within(screen.getByRole("list", { name: "Needs a look" })).getByText(
+      "Write the introduction",
+    ),
+  ).toBeTruthy();
   expect(screen.getByText("3 / 5")).toBeTruthy();
 });
 it("stopping a session preserves the task and queue; checkbox completes it", async () => {

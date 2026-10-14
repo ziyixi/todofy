@@ -104,11 +104,6 @@ body {
   flex: 1;
   min-width: 0;
 }
-.plus-prototype .plus-root {
-  max-width: 800px;
-  margin: auto;
-  padding: 64px 0 120px;
-}
 .plus-prototype[data-theme="dark"] .prototype-sidebar {
   background: #24251f;
 }
@@ -146,10 +141,6 @@ body {
   .plus-prototype > main {
     margin-left: 190px;
   }
-  .plus-prototype .plus-root {
-    padding-left: 25px;
-    padding-right: 25px;
-  }
 }
 @media (max-width: 600px) {
   .prototype-sidebar {
@@ -157,8 +148,5 @@ body {
   }
   .plus-prototype > main {
     margin: 0;
-  }
-  .plus-prototype .plus-root {
-    padding: 25px 15px 110px;
   }
 }
