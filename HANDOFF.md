@@ -9,63 +9,37 @@ Its old waiting lists and release identities are historical, not instructions to
 
 ## Current work
 
-`codex/todoist-plus-week-planner` replaces the first Plus flat lists after the owner's actual Chrome audit.
-The owner has installed and connected the released extension. Plan now expands outcomes/steps beside a
-seven-day FlowDay board; Focus uses ordered duration blocks, parent paths and day switching. Day placement
-only changes FlowDay queues, as the owner explicitly chose; Todoist due dates and Deadlines stay intact.
-Native selection/spacing and locally collapsed utility favorites are corrected without editing account
-favorites. The existing RolloverFlow method is narrowly allowed; same-day calls are rejected to avoid the
-old destructive behavior. No new service or storage was added. Source and live evidence are in
-[Plus verification](docs/todoist-plus-verification.md) and [the application checks](todoist-plus/docs/verification.md).
+Todoist Plus weekly planning is released at `e4fd23a855c7ea4fa12e42a89fd322cd67f64b9e` after
+[branch CI 38507168961](https://github.com/ziyixi/todofy/actions/runs/38507168961) and
+[same-SHA main release 38507404630](https://github.com/ziyixi/todofy/actions/runs/38507404630).
+Its preceding commit `ba149ec` released the narrowly allowed FlowDay RolloverFlow and same-day guard;
+FlowDay and Todofy deployment receipts are in [Plus verification](docs/todoist-plus-verification.md).
+The final extension-only release skipped every Worker, image and VPS publication. No unrelated service,
+operational switch, billing setting or existing running timer was changed.
 
-FlowDay's old migration had excluded its Todoist key. The existing credential was restored through the
-normal owner UI and sealed by FlowDay; key-saved and Sync-complete states plus a fresh sync time were
-observed. No key was generated, logged, committed or put in the extension. Real task content/priorities and
-running timers were not changed by the audit.
+Plan expands parent outcomes and child steps beside a seven-day board. The owner chose day placement
+only in FlowDay queues; Todoist due dates and Deadlines stay intact. Focus shows ordered duration blocks,
+parent paths and day switching. Native selection/spacing and local utility-favorite collapse are corrected
+without changing account favorites. Returning from native Todoist reloads current queues; Plan-to-Focus
+switches keep the selected date. Already-queued steps show a disabled In today mark.
 
-Local checks pass: 26 extension cases, seven actual built-MV3 Chromium scenarios; FlowDay's 21 unit and
+FlowDay's migration had excluded its Todoist key. Its existing credential was restored through the normal
+owner UI: key-saved, Sync-complete and a fresh sync time were observed. No key was generated, logged,
+committed or put in the extension. A real synthetic Inbox parent and two 30-minute steps verified creation,
+today placement and Focus completion. All test tasks were completed afterward; no timer was started.
+
+Local checks pass: 26 extension cases and seven actual built-MV3 Chromium scenarios; FlowDay's 21 unit and
 127 real-D1/runtime cases; gateway's 128 units and runtime CPU check; types/lint and proto lint/API-lint,
-regeneration/schema/types. Real Chrome synthetic previews caught and removed a prototype-only layout
-override. Weekly planner `ba149ec541136666ef1e25b5cbad4fa5ada574fe` passed branch CI 38503430909 and
-same-SHA main release 38504086473; FlowDay, Todofy and Plus were published and verified, other application
-publications and VPS/image releases skipped. A real synthetic Inbox parent/two steps proved creation,
-today placement and Focus completion; all test tasks were completed afterward, with no timer started.
-This check caught stale hidden App state on native-page return. The small extension-only follow-up
-unmounts on native exit, refreshes on custom-view switches, and marks already-queued steps as In today;
-its built-browser regression failed before the fix and now passes. Pending: follow-up branch CI/release,
-place the tested artifact under `Documents/chrome_extensions/todoist-plus`, then owner loads/connects
-that new directory for live drag acceptance.
-Keep the current home-folder installation working until that switch; do not alter Chrome's private profile.
+schema/types. Chrome synthetic previews exposed a prototype-only width override, now removed. The stale
+Focus regression failed against the old artifact and passes without manual Refresh after the fix.
 
-
-Todoist Plus is released at `51342322e473c4073bfb395a61c867995a9ac902` after
-[full branch CI 38468696858](https://github.com/ziyixi/todofy/actions/runs/38468696858) and the
-[same-SHA main release 38469896460](https://github.com/ziyixi/todofy/actions/runs/38469896460) passed.
-Todofy, FlowDay, Home's binding inventory and the independent Plus ZIP were the only publications;
-Newsletter, VPS, Recall and other services were skipped. The old release-composite `vars` parsing
-error is corrected by inheriting the workflow's existing resolved environment. Operational switches
-and secret inputs are unchanged. [Acceptance record](docs/todoist-plus-verification.md) has provider
-receipts and distinguishes synthetic, packaged-browser and live evidence.
-
-The live owner `/plus` page recognized all existing labels. Its mapping and Monday rollover were
-confirmed on October 13; the page shows enabled in `US/Pacific`. The agent has made no real Todoist task edits or
-extension credential issuance at this checkpoint. The owner completed the initial Chrome install and connection. Future directory changes still need
-one manual load/connect step: browser tooling blocks Chrome's internal extensions
-manager and forbids alternate control methods. The dedicated installation folder matches all seven
-files of the published, CI-tested ZIP, version `2026.1013.1271.20788`. Do not replace Recall's folder.
-
-Continue real Todoist synthetic task writes, FlowDay cross-view and PWA checks after the
-new directory is loaded and connected. Preserve any real running timer. The first natural weekly rollover remains
-a future observation, independent of synthetic scheduler tests. The old FlowDay timer replace/clear
-methods return `RELOAD_REQUIRED` and stay until at least 2026-11-13.
-
-The owner-page control styles are released at `d657985df185821a9154829db7c9bd214058ef1c` after
-[branch CI 38471249025](https://github.com/ziyixi/todofy/actions/runs/38471249025) and
-[main release 38472126635](https://github.com/ziyixi/todofy/actions/runs/38472126635) passed.
-Only Todofy was published. All 93 UI cases, types and build pass; real Chrome confirms the existing
-40-pixel green button and styled device input. The original one-time-token tab was preserved.
-This presentation change leaves the published extension and API contract unchanged. The owner subsequently completed the initial connection; the new weekly-planning revision above
-now owns the remaining release and installed-extension acceptance.
+Published extension `2026.1014.216.58621` and the passed CI artifact match all seven files in
+`~/Documents/chrome_extensions/todoist-plus`. The old home-folder installation remains intact. The owner
+has been asked to disable it, load the new directory, reconnect once and refresh Todoist. Browser tooling
+blocks Chrome's internal extension manager and forbids alternate control methods. **Pending:** new-directory
+load/connect, then actual installed-version drag acceptance and PWA checks. Do not claim the synthetic
+preview is that installed-version check. Natural Monday rollover remains a separate future observation.
+The old FlowDay timer replace/clear methods return `RELOAD_REQUIRED` until at least 2026-11-13.
 
 Recall cleanup is released at `bc0adffdc1d8ee018b0663737c77e8de701de0aa`, extension `2026.1013.654`.
 [Full branch CI](https://github.com/ziyixi/todofy/actions/runs/38359057094) and the

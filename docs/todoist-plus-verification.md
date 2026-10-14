@@ -156,8 +156,22 @@ between those two retains the selected date. Already-queued steps now have a dis
 The actual built-MV3 regression failed against the old artifact and passes after the fix without Refresh.
 All seven packaged-browser scenarios and 26 unit/component/API checks pass locally, with types and lint.
 
-The extension-only follow-up CI/release and the owner's new-directory load are still pending. The requested
-destination is `Documents/chrome_extensions/todoist-plus`; preserve the existing installation until the
-switch. The new drag UI has been exercised in isolated Chromium and the synthetic Chrome preview, but not
-yet as the updated extension on the owner's real Todoist page. Natural Monday rollover and actual PWA
-acceptance remain separate pending observations.
+The new drag UI has been exercised in isolated Chromium and the synthetic Chrome preview. The owner's
+new-directory load and actual installed-version drag/PWA acceptance remain pending, as does the separate
+natural Monday rollover observation.
+
+## Final extension release and fixed local folder
+
+Correction `e4fd23a855c7ea4fa12e42a89fd322cd67f64b9e` passed
+[branch CI 38507168961](https://github.com/ziyixi/todofy/actions/runs/38507168961) and the
+[same-SHA main release 38507404630](https://github.com/ziyixi/todofy/actions/runs/38507404630).
+Only the Plus extension was published; all Worker, image, VPS and unrelated extension publications skipped.
+The [published ZIP](https://github.com/ziyixi/todofy/releases/download/todoist-plus-v2026.1014.216.58621/todoist-plus-v2026.1014.216.58621.zip)
+is version `2026.1014.216.58621`, source `e4fd23a`, 221,747 bytes, SHA-256
+`f372b66edc6c8d8f680cb83afc1963a3797510d0c1ca0f5d1c2d2d2487033d72`.
+
+All seven files match the branch's tested CI artifact and the newly created
+`~/Documents/chrome_extensions/todoist-plus` folder byte for byte. No credentials or profile data were
+copied. The existing installation was preserved. The owner must disable the old instance, load this
+new directory and reconnect once because the unpacked path can change extension identity. Future updates
+use the same directory and Chrome Reload. The tool's blocked internal extensions page was not bypassed.
