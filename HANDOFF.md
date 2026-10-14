@@ -9,6 +9,12 @@ Its old waiting lists and release identities are historical, not instructions to
 
 ## Current work
 
+`codex/todoist-plus-interaction-fix` is correcting the owner's installed-version feedback: repeated full
+reads and disabled UI, duplicate Focus planning controls, missing week navigation, narrow-screen overflow
+and weak task hierarchy. Work is confined to the extension. Initial Chrome observation found a stale
+invalidated old content script; a page reload mounted the actual weekly release. Do not treat that stale
+page as current-version performance evidence. The previous release remains live while this branch is checked.
+
 Todoist Plus weekly planning is released at `e4fd23a855c7ea4fa12e42a89fd322cd67f64b9e` after
 [branch CI 38507168961](https://github.com/ziyixi/todofy/actions/runs/38507168961) and
 [same-SHA main release 38507404630](https://github.com/ziyixi/todofy/actions/runs/38507404630).
