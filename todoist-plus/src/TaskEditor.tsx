@@ -106,13 +106,13 @@ export function TaskEditor({
             onChange={(event) => setStage(event.target.value as typeof stage)}
             disabled={busy}
           >
-            {(["none", "monthly", "weekly", "committed"] as const).map(
-              (value) => (
-                <option key={value} value={value}>
-                  {text[value]}
-                </option>
-              ),
-            )}
+            {(
+              ["none", "quarterly", "monthly", "weekly", "committed"] as const
+            ).map((value) => (
+              <option key={value} value={value}>
+                {text[value]}
+              </option>
+            ))}
           </select>
         </label>
         <label>

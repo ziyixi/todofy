@@ -104,3 +104,103 @@ def test_only_replaced_filter_queries_are_hidden():
         )
         == []
     )
+    assert plus.replaced_filters([{"id": "quick", "query": "@quick & (no date | 3 days)"}]) == []
+
+
+def mapping():
+    return [{"role": role, "id": "id-" + role, "label": "custom-" + role} for role in (*plus.ROLES, "quarter")]
+
+
+def test_saved_legacy_mapping_keeps_its_identity_when_optional_quarter_appears():
+    labels = [{"id": "id-" + role, "name": role} for role in plus.ROLES]
+    old = plus.discover(labels, "UTC")
+    actual = plus.discover([*labels, {"id": "quarter-id", "name": "quarter"}], "UTC", old["labels"])
+    assert actual["etag"] == old["etag"]
+    assert actual["labels"] == old["labels"]
+    assert not actual["missing_labels"]
+    assert {"id": "quarter-id", "label": "quarter"} in actual["available_labels"]
+
+
+def test_saved_ids_detect_rename_and_do_not_adopt_a_new_same_name_label():
+    labels = [{"id": "id-" + role, "name": role} for role in plus.ROLES]
+    saved = plus.discover(labels, "UTC")
+    renamed = [{**label, "name": "new-commit"} if label["name"] == "committed" else label for label in labels]
+    actual = plus.discover([*renamed, {"id": "other-id", "name": "committed"}], "UTC", saved["labels"])
+    assert actual["etag"] != saved["etag"]
+    assert next(label for label in actual["labels"] if label["role"] == "committed") == {
+        "role": "committed",
+        "id": "id-committed",
+        "label": "new-commit",
+    }
+    missing = plus.discover([label for label in renamed if label["id"] != "id-committed"], "UTC", saved["labels"])
+    assert missing["missing_labels"] == ["committed"]
+
+
+def test_configured_names_drive_stages_areas_bets_leads_and_preserve_other_labels():
+    bindings = mapping()
+    source = task(
+        labels=["custom-quarter", "custom-office", "custom-bets", "custom-lead_1w", "deep"],
+        due={"date": TODAY},
+        deadline={"date": TODAY},
+    )
+    view = plus.task_view(source, TODAY, bindings)
+    assert view["stage"] == "quarterly" and view["area"] == "work" and view["bet"]
+    assert view["lead_days"] == 7 and view["must_start"]
+    assert plus.plan_labels(source, {"stage": "weekly"}, bindings) == [
+        "custom-bets",
+        "custom-focus",
+        "custom-lead_1w",
+        "custom-office",
+        "deep",
+    ]
+    assert plus.lead_args(source, TODAY, 14, bindings)["labels"] == [
+        "custom-bets",
+        "custom-lead_2w",
+        "custom-office",
+        "custom-quarter",
+        "deep",
+    ]
+    assert source["due"] == {"date": TODAY}
+    assert source["labels"] == ["custom-quarter", "custom-office", "custom-bets", "custom-lead_1w", "deep"]
+
+
+def test_configured_week_reset_keeps_quarter_and_uses_the_bound_commitment_names():
+    bindings = mapping()
+    assert plus.reset_labels(
+        task(labels=["custom-quarter", "custom-bets", "deep"]), {"committed": 0, "bet": 1}, bindings
+    ) == [
+        "custom-quarter",
+        "deep",
+    ]
+    assert plus.reset_labels(
+        task(labels=["custom-committed", "custom-candiate", "custom-bets", "deep"]),
+        {"committed": 1, "bet": 1},
+        bindings,
+    ) == ["custom-focus", "deep"]
+
+
+def test_column_binding_updates_keep_other_roles_and_reject_reused_or_unknown_id():
+    current = mapping()
+    available = [{"id": label["id"], "label": label["label"]} for label in current]
+    selected = [label for label in current if label["role"] in plus.PLANNING_ROLES]
+    updated = plus.replace_planning_labels(current, selected, available)
+    assert updated == current
+    assert (
+        plus.replace_planning_labels(current, [label for label in selected if label["role"] != "quarter"], available)
+        == current[:-1]
+    )
+    for replacement in (
+        {"id": "id-office", "label": "custom-office"},
+        {"id": "unknown", "label": "custom-quarter"},
+        {"id": "id-quarter", "label": "wrong-name"},
+    ):
+        invalid = [{**label, **replacement} if label["role"] == "quarter" else label for label in selected]
+        with pytest.raises(ValueError, match="BAD_REQUEST"):
+            plus.replace_planning_labels(current, invalid, available)
+
+
+def test_bets_do_not_enter_the_date_candidate_fallback_without_an_explicit_stage():
+    assert plus.task_view(task(labels=["bets"], due={"date": TODAY}), TODAY)["stage"] == "none"
+    assert plus.task_view(task(labels=["bets", "committed"], due={"date": TODAY}), TODAY)["stage"] == "committed"
+    assert plus.task_view(task(labels=["custom-bets"], deadline={"date": TODAY}), TODAY, mapping())["stage"] == "none"
+    assert plus.task_etag(task(), mapping()) != plus.task_etag(task(), mapping()[:-1])

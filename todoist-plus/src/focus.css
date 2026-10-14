@@ -48,10 +48,15 @@
   justify-content: space-between;
   gap: 10px;
 }
-.plus-root .plus-focus-block-top .plus-task-breadcrumb {
-  margin: 0;
+.plus-focus-parent {
+  display: block;
+  margin: 0 0 5px;
   font-size: 12px;
-  color: var(--plus-text);
+  line-height: 1.4;
+  color: var(--plus-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .plus-focus-status {
   font-size: 12px;
@@ -84,7 +89,7 @@
   font-size: 12px;
 }
 .plus-focus-block-footer output {
-  font-size: 12px;
+  font-size: 14px;
   font-variant-numeric: tabular-nums;
   color: var(--plus-accent);
 }
@@ -93,13 +98,20 @@
   align-items: center;
   gap: 4px;
 }
-.plus-focus-timer-controls .plus-play {
-  width: 34px;
-  height: 34px;
-  color: var(--plus-accent) !important;
+.plus-focus-timer-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-height: 32px;
+  padding: 5px 8px !important;
+  font-size: 12px !important;
   border: 1px solid var(--plus-line) !important;
-  border-radius: 50%;
+  border-radius: 5px;
   background: var(--plus-bg) !important;
+}
+.plus-focus-timer-action.is-primary {
+  color: var(--plus-accent) !important;
 }
 .plus-focus-empty {
   padding: 24px 0;

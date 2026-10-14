@@ -1,5 +1,11 @@
 @import "./planner.css";
 @import "./focus.css";
+@import "./planning-board.css";
+@import "./weekly-goals.css";
+
+.plus-root.plus-root-plan {
+  max-width: 1900px;
+}
 
 :host,
 .plus-prototype,
@@ -418,6 +424,42 @@ body {
   clip: rect(0, 0, 0, 0) !important;
   white-space: nowrap !important;
   border: 0 !important;
+}
+.plus-board-labels {
+  padding: 24px 28px;
+}
+.plus-board-labels header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+.plus-board-labels header h2 {
+  font-size: 20px;
+}
+.plus-board-labels form {
+  display: grid;
+  gap: 12px;
+  margin-top: 20px;
+}
+.plus-board-labels label {
+  display: grid;
+  grid-template-columns: 120px minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+  font-size: 14px;
+}
+.plus-board-labels select {
+  width: 100%;
+}
+.plus-board-labels footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  border-top: 1px solid var(--plus-line);
+  padding-top: 16px;
+  margin-top: 8px;
 }
 @media (max-width: 1000px) {
   .plus-root {

@@ -3,7 +3,10 @@ import { afterEach, expect, it, vi } from "vitest";
 import { createPrototype } from "../design/fixture";
 import { FocusView } from "../src/FocusView";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});
 
 it("shows cleaned parent context and local records with execution controls only", async () => {
   const { plan, focus } = await createPrototype().load();
@@ -39,9 +42,10 @@ it("shows cleaned parent context and local records with execution controls only"
       onTimer={onTimer}
     />,
   );
-  expect(
-    screen.getByText("Synthetic outcome › Synthetic phase", { exact: true }),
-  ).toBeTruthy();
+  const context = screen.getByText("Synthetic outcome", { exact: true });
+  expect(context.getAttribute("title")).toBe(
+    "Synthetic outcome › Synthetic phase",
+  );
   expect(screen.getByText("Synthetic leaf", { exact: true })).toBeTruthy();
   expect(screen.queryByText(/\[TASK\]|<k:/)).toBeNull();
   expect(
@@ -61,8 +65,70 @@ it("shows cleaned parent context and local records with execution controls only"
   fireEvent.click(
     screen.getByRole("button", { name: "Start: Synthetic leaf" }),
   );
+  expect(
+    screen.getByRole("button", { name: "Start: Synthetic leaf" }).textContent,
+  ).toBe("Start");
   expect(onTimer).toHaveBeenCalledWith("start", "copy");
   expect(complete).not.toHaveBeenCalled();
+});
+
+it("shows confirmed elapsed time and distinct pause, resume and stop controls", async () => {
+  vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-10-13T12:00:05Z"));
+  const { plan, focus } = await createPrototype().load();
+  focus.timer = {
+    taskId: "copy",
+    flowDate: focus.date,
+    status: "running",
+    elapsedSeconds: 80,
+    startedAt: new Date(Date.now() - 5000).toISOString(),
+    etag: "synthetic-timer-2",
+  };
+  const onTimer = vi.fn();
+  const complete = vi.fn();
+  const props = {
+    plan,
+    focus,
+    language: "en" as const,
+    busy: false,
+    editTask: vi.fn(),
+    complete,
+    onOpenPlan: vi.fn(),
+    onTimer,
+  };
+  const { rerender } = render(<FocusView {...props} />);
+  expect(screen.getByLabelText("Time focused").textContent).toBe("01:25");
+  const pause = screen.getByRole("button", {
+    name: "Pause: Write the introduction",
+  });
+  expect(pause.textContent).toBe("Pause");
+  fireEvent.click(pause);
+  expect(onTimer).toHaveBeenLastCalledWith("pause", "copy");
+  rerender(
+    <FocusView
+      {...props}
+      focus={{
+        ...focus,
+        timer: { ...focus.timer, status: "paused", elapsedSeconds: 85 },
+      }}
+    />,
+  );
+  expect(screen.getByLabelText("Time focused").textContent).toBe("01:25");
+  const resume = screen.getByRole("button", {
+    name: "Resume: Write the introduction",
+  });
+  expect(resume.textContent).toBe("Resume");
+  fireEvent.click(resume);
+  expect(onTimer).toHaveBeenLastCalledWith("resume", "copy");
+  const stop = screen.getByRole("button", {
+    name: "Stop session: Write the introduction",
+  });
+  expect(stop.textContent).toBe("Stop");
+  fireEvent.click(stop);
+  expect(onTimer).toHaveBeenLastCalledWith("stop", "copy");
+  expect(complete).not.toHaveBeenCalled();
+  rerender(<FocusView {...props} focus={{ ...focus, timer: undefined }} />);
+  expect(screen.queryByLabelText("Time focused")).toBeNull();
+  expect(screen.getByText("Write the introduction")).toBeTruthy();
 });
 
 it("sends an empty today queue back to Plan instead of presenting another task picker", async () => {
@@ -82,9 +148,7 @@ it("sends an empty today queue back to Plan instead of presenting another task p
     />,
   );
   expect(screen.getByText("No steps planned for today.")).toBeTruthy();
-  fireEvent.click(
-    screen.getByRole("button", { name: "Adjust plan" }),
-  );
+  fireEvent.click(screen.getByRole("button", { name: "Adjust plan" }));
   expect(onOpenPlan).toHaveBeenCalled();
   expect(screen.queryByRole("button", { name: "Choose tasks" })).toBeNull();
 });

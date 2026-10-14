@@ -223,3 +223,42 @@ permissions and folder identity are unchanged. Chrome-stored connection data was
 The owner has been asked to click the extension's Reload and refresh Todoist once. Actual corrected-version
 response and drag acceptance awaits that step; the old installed-version real check and new synthetic
 checks remain distinct. PWA and natural Monday rollover remain separate open observations.
+
+## Approved board promoted to production (October 14)
+
+`codex/plus-production-planning` connects the approved prototype to real Todoist label identities and
+FlowDay's existing queues/timer. Internal [design and screenshots](../todoist-plus/docs/planning-interface.md)
+show the actual production components with synthetic data. Review moves only a selected outcome's planning
+label; Week arranges leaf steps in daily queues; Focus executes today's confirmed queue. Weekly Bets are
+shown as overall goals above the board and no longer decorate each commitment.
+
+The label panel selects three required column IDs and an optional Quarter ID from current Todoist metadata.
+UpdatePlanLabels changes only configuration, preserves the other roles and settles the old account week
+with old bindings before remapping. Confirmed single-task results merge into the current UI without a full
+metadata reload. Dates, unrelated labels and completed FlowDay queue identities remain unchanged. A
+same-folder extension update preserves its connection and permissions; an old content script receives a
+specific refresh message before changed planning actions can run.
+
+Local checks: types, lint, production build, 56 unit/component/API checks and 11 actual built-MV3 Chromium
+cases pass. Todofy’s host suite passes 1808 checks with one existing legacy-migration check skipped
+because the separate historical protos checkout is absent. Those Chromium cases use temporary profiles, a synthetic Todoist DOM and independent protocol
+responses in the extension background. They prove current label/etag writes, queue-only day arrangement,
+pointer insertion/reorder with confirmed refresh, no full task read after day writes, seven/three/one-day
+layout, native navigation and confirmed timer behavior. Start advances across Plan/Focus, Pause freezes,
+Resume continues and Stop makes zero completion requests. Earlier-day timers keep their original day.
+
+Chrome's production-component preview separately confirmed eight commitments, an independent weekly-goal
+row, native pointer day movement, the precise label conflict message, click-outside
+modal dismissal and no horizontal overflow at 1900, 1440, 1000 and 700 px. Screenshots contain no private
+tasks or credentials. A first drag from the step tray adds another day's arrangement; dragging an existing
+day card moves its source-day entry. No real task or production timer was used for this check.
+
+The review removed the obsolete WeekPlanner and recursive TaskFamily implementation and kept the live
+TaskBreadcrumb. Its old planner CSS fell from 506 to 28 lines. Outcome color lookup uses only the task's
+ancestor chain. A date-derived weekly child stays in its parent's tray/context; a child explicitly assigned
+to another mapped stage remains independent. The original Quick filter remains available because the new
+board does not replace that view. No dependency, service, database or budget setting was added.
+
+Branch CI, same-SHA main deployment, exact ZIP identity, Quarter binding and the authorized tomorrow
+installation task are pending publication and will be recorded after verification. PWA and natural Monday
+rollover remain separate open observations; synthetic timer checks do not prove a real account session.

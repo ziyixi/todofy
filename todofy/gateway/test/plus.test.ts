@@ -30,6 +30,19 @@ describe('Todoist Plus transport boundaries', () => {
     expect((await owner(env, '/api/plus/v1/plan:confirmPlanMapping', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ etag: 'mapping', request_id: ID }) })).status).toBe(403);
     expect(core).toHaveLength(0);
   });
+  it('allows authenticated extension column configuration while keeping owner credential setup separate', async () => {
+    const { env, core } = fakes({}, call => call.method === 'plus_auth' ? true : uiOk({ plan: { etag: 'next', enabled: true } }));
+    const response = await hooks(env, '/api/plus/v1/plan:updatePlanLabels', api('POST', {
+      labels: [{ role: 'candiate', id: 'month-id', label: 'Next month' },
+        { role: 'focus', id: 'week-id', label: 'This week' }, { role: 'committed', id: 'commit-id', label: 'Commitments' }],
+      etag: 'shown', request_id: ID,
+    }));
+    expect(response.status).toBe(200);
+    const call = core.find(row => row.method === 'plus_ui');
+    expect(call?.args[0]).toBe('UpdatePlanLabels');
+    expect(call?.args[2]).toBe(false);
+    expect((await response.json<{ plan: { etag: string } }>()).plan.etag).toBe('next');
+  });
   it('accepts an omitted optional request ID with the same fresh-identity behavior as the owner API', async () => {
     const { env, core } = fakes({}, call => call.method === 'plus_auth' ? true : uiOk({ task_id: 'task-one' }));
     expect((await hooks(env, '/api/plus/v1/tasks:completeTask', api('POST', { task_id: 'task-one' }))).status).toBe(200);

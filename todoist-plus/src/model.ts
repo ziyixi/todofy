@@ -1,6 +1,6 @@
 // UI state. API messages are mapped from the root generated proto in api.ts.
 export type Area = "work" | "personal" | "unassigned";
-export type Stage = "none" | "monthly" | "weekly" | "committed";
+export type Stage = "none" | "quarterly" | "monthly" | "weekly" | "committed";
 export type View = "plan" | "focus";
 export type Language = "en" | "zh";
 export interface PlanningTask {
@@ -12,6 +12,7 @@ export interface PlanningTask {
   area: Area;
   stage: Stage;
   bet: boolean;
+  priority: number;
   deadline: string;
   leadDays: number;
   due: string;
@@ -29,6 +30,8 @@ export interface PlanState {
   flowdayUrl: string;
   managedLabelNames: string[];
   managedLabels: { role: string; id: string; label: string }[];
+  etag: string;
+  availableLabels: { id: string; label: string }[];
 }
 export interface FlowDayPlan {
   date: string;
@@ -36,7 +39,7 @@ export interface FlowDayPlan {
   completedTaskIds: string[];
 }
 export type RunOperation = (
-  operation: () => Promise<void | FlowDayPlan[]>,
+  operation: () => Promise<void | FlowDayPlan[] | PlanningTask>,
 ) => Promise<boolean>;
 export interface FocusState extends FlowDayPlan {
   timerEtag: string;
@@ -73,6 +76,10 @@ export interface PlusActions {
   updateTask(
     task: PlanningTask,
     update: { stage?: Stage; area?: Area; bet?: boolean },
+  ): Promise<PlanningTask>;
+  updateLabels(
+    labels: { role: string; id: string; label: string }[],
+    etag: string,
   ): Promise<void>;
   createSteps(
     task: PlanningTask,

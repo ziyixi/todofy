@@ -43,7 +43,7 @@ export function NativeTaskTools({
     setError("");
     try {
       const confirmed = await operation();
-      if (confirmed) {
+      if (Array.isArray(confirmed)) {
         setData((current) => {
           if (!current) return current;
           const today = confirmed.find(
@@ -53,6 +53,20 @@ export function NativeTaskTools({
             ? { ...current, focus: { ...current.focus, ...today } }
             : current;
         });
+      } else if (confirmed) {
+        setData((current) =>
+          current
+            ? {
+                ...current,
+                plan: {
+                  ...current.plan,
+                  tasks: current.plan.tasks.map((item) =>
+                    item.id === confirmed.id ? confirmed : item,
+                  ),
+                },
+              }
+            : current,
+        );
       } else {
         const next = await extensionActions.load();
         setData(next);

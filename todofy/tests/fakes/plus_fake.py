@@ -29,6 +29,7 @@ class PlusFake(FakeServer):
             )
         ]
         self.tasks = {}
+        self.filters = [{"id": "filter-bets", "name": "Synthetic Bets", "query": "@bets"}]
         self.receipts = {}
         self.closed = {}
         self.fail_commands_once = False
@@ -58,7 +59,7 @@ class PlusFake(FakeServer):
                 {
                     "user": {"tz_info": {"timezone": "UTC"}, "api_token": "synthetic-never-return"},
                     "labels": self.labels,
-                    "filters": [{"id": "filter-bets", "name": "Synthetic Bets", "query": "@bets"}],
+                    "filters": self.filters,
                 },
             )
         statuses, mapping = {}, {}

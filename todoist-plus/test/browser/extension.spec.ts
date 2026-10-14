@@ -225,7 +225,7 @@ test("built MV3 mounts, restores native UI and sends task actions through its ba
     await expect(page.locator("#extra-filter-wrapper")).toBeHidden();
     await page.getByRole("button", { name: "Plan", exact: true }).click();
     const parentTask = page.locator(
-      '.plus-family-row[data-task-id="parent"] .plus-family-title',
+      '.review-board [data-outcome-id="parent"]',
     );
     await expect(parentTask).toBeVisible();
     await expect(page.locator("#native")).toBeHidden();

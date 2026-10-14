@@ -1,6 +1,10 @@
 import { browser } from "wxt/browser";
 import { createApi, publicError, validOrigin, type Connection } from "./api";
-import type { BackgroundMessage, Result } from "./messages";
+import {
+  PLANNING_PROTOCOL,
+  type BackgroundMessage,
+  type Result,
+} from "./messages";
 import type { PlusActions } from "./model";
 const storageKey = "connection";
 let api: PlusActions | undefined;
@@ -57,6 +61,8 @@ export function registerBackground() {
         }
         if (message.kind !== "action")
           throw new Error("Unsupported extension operation.");
+        if (message.protocol !== PLANNING_PROTOCOL)
+          throw new Error("Extension updated. Reload Todoist to continue.");
         const client = await getApi();
         switch (message.method) {
           case "load":
@@ -65,6 +71,8 @@ export function registerBackground() {
             return client.loadDays(...message.args);
           case "updateTask":
             return client.updateTask(...message.args);
+          case "updateLabels":
+            return client.updateLabels(...message.args);
           case "createSteps":
             return client.createSteps(...message.args);
           case "updateLead":
@@ -90,7 +98,7 @@ export function registerBackground() {
             ok: false,
             error:
               error instanceof Error &&
-              /Connect Todoist Plus|connection token|HTTPS origin|Unsupported/.test(
+              /Connect Todoist Plus|connection token|HTTPS origin|Unsupported|Extension updated/.test(
                 error.message,
               )
                 ? error.message

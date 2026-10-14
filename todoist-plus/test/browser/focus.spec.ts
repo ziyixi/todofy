@@ -7,15 +7,18 @@ test("steps arranged in Plan appear directly in today's execution-only Focus", a
     const page = await context.newPage();
     await page.goto("https://app.todoist.com/app/today");
     await page.getByRole("button", { name: "Plan", exact: true }).click();
-    const today = page.locator('.plus-week-day[data-date="2026-10-13"]');
+    await page.getByRole("tab", { name: "Week", exact: true }).click();
+    const today = page.locator(
+      '.planning-calendar-day[data-date="2026-10-13"]',
+    );
     await dragPlanner(
       page,
       page
-        .getByRole("complementary", { name: "Outcomes and steps" })
+        .getByRole("region", { name: "Steps: Synthetic weekly outcome" })
         .getByRole("button", {
-          name: "Drag to schedule: Synthetic second step",
+          name: "Drag step: Synthetic second step",
         }),
-      today.locator(".plus-week-day-end"),
+      today.locator(".planning-day-end"),
     );
     await expect
       .poll(async () => (await plannerDays(worker))["2026-10-13"])
@@ -54,7 +57,7 @@ test("steps arranged in Plan appear directly in today's execution-only Focus", a
       .evaluate((slot) => ({
         title: getComputedStyle(slot.querySelector(".plus-focus-title")!)
           .fontSize,
-        parent: getComputedStyle(slot.querySelector(".plus-task-breadcrumb")!)
+        parent: getComputedStyle(slot.querySelector(".plus-focus-parent")!)
           .fontSize,
         estimate: getComputedStyle(slot.querySelector(".plus-focus-estimate")!)
           .fontSize,
@@ -75,6 +78,134 @@ test("steps arranged in Plan appear directly in today's execution-only Focus", a
       "local-one",
       "second",
     ]);
+  } finally {
+    await context.close();
+  }
+});
+
+test("confirmed FlowDay timer advances across views, pauses, resumes and stops without completing the task", async () => {
+  const { context, worker } = await launchPlanner();
+  try {
+    await worker.evaluate(() => {
+      const state = (
+        globalThis as unknown as {
+          plannerState: {
+            timer: Record<string, unknown>;
+            calls: {
+              path: string;
+              method: string;
+              body: Record<string, unknown>;
+            }[];
+          };
+        }
+      ).plannerState;
+      const existingFetch = globalThis.fetch;
+      globalThis.fetch = async (input, init) => {
+        const path = new URL(String(input)).pathname;
+        if (!path.endsWith("/timerSession:command"))
+          return existingFetch(input, init);
+        const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        state.calls.push({ path, method: init?.method ?? "GET", body });
+        if (body.etag !== state.timer.etag)
+          throw new Error("Synthetic timer etag conflict");
+        const action = body.action;
+        const saved =
+          Number(state.timer.saved_seconds ?? 0) +
+          (state.timer.state === "running"
+            ? Math.max(
+                0,
+                Math.floor(
+                  (Date.now() -
+                    Date.parse(String(state.timer.segment_start_time))) /
+                    1000,
+                ),
+              )
+            : 0);
+        const etag = String(Number(state.timer.etag) + 1);
+        if (action === "stop")
+          state.timer = { name: "timerSession", state: "idle", etag };
+        else if (["start", "pause", "resume"].includes(String(action)))
+          state.timer = {
+            name: "timerSession",
+            task_id: body.task_id,
+            flow_date: body.flow_date,
+            state: action === "pause" ? "paused" : "running",
+            etag,
+            saved_seconds: action === "start" ? 0 : saved,
+            ...(action !== "pause"
+              ? { segment_start_time: new Date().toISOString() }
+              : {}),
+          };
+        else throw new Error(`Unexpected synthetic timer action ${action}`);
+        return Response.json(state.timer);
+      };
+    });
+    const page = await context.newPage();
+    await page.goto("https://app.todoist.com/app/today");
+    await page.getByRole("button", { name: "Focus", exact: true }).click();
+    const task = page.locator('.plus-focus-slot[data-task-id="child"]');
+    await task
+      .getByRole("button", { name: "Start: Synthetic first step" })
+      .click();
+    await expect(
+      task.getByRole("button", { name: "Pause: Synthetic first step" }),
+    ).toHaveText("Pause");
+    const elapsed = task.getByLabel("Time focused");
+    await expect(elapsed).toHaveText(/^\d{2}:\d{2}$/);
+    const started = await elapsed.textContent();
+    await expect
+      .poll(async () => await elapsed.textContent())
+      .not.toBe(started);
+    await page
+      .getByRole("button", { name: "Adjust plan", exact: true })
+      .click();
+    const globalElapsed = page.locator(".plus-timer-bar output");
+    const before = await globalElapsed.textContent();
+    await expect
+      .poll(async () => await globalElapsed.textContent())
+      .not.toBe(before);
+    await page.getByRole("button", { name: "Focus", exact: true }).click();
+    await task
+      .getByRole("button", { name: "Pause: Synthetic first step" })
+      .click();
+    await expect(
+      task.getByRole("button", { name: "Resume: Synthetic first step" }),
+    ).toHaveText("Resume");
+    const paused = await elapsed.textContent();
+    await page.waitForTimeout(1200);
+    await expect(elapsed).toHaveText(paused!);
+    await task
+      .getByRole("button", { name: "Resume: Synthetic first step" })
+      .click();
+    await expect.poll(async () => await elapsed.textContent()).not.toBe(paused);
+    await task
+      .getByRole("button", { name: "Stop session: Synthetic first step" })
+      .click();
+    await expect(
+      task.getByRole("button", { name: "Start: Synthetic first step" }),
+    ).toHaveText("Start");
+    await expect(task.getByLabel("Time focused")).toHaveCount(0);
+    await expect(page.locator(".plus-timer-bar")).toHaveCount(0);
+    expect((await plannerDays(worker))["2026-10-13"]).toEqual([
+      "child",
+      "local-one",
+    ]);
+    const calls = await worker.evaluate(
+      () =>
+        (
+          globalThis as unknown as {
+            plannerState: {
+              calls: { path: string; body: Record<string, unknown> }[];
+            };
+          }
+        ).plannerState.calls,
+    );
+    expect(
+      calls
+        .filter((call) => call.path.endsWith("/timerSession:command"))
+        .map((call) => call.body.action),
+    ).toEqual(["start", "pause", "resume", "stop"]);
+    expect(calls.some((call) => call.path.includes(":complete"))).toBe(false);
   } finally {
     await context.close();
   }

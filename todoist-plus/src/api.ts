@@ -63,10 +63,11 @@ export function planningTask(task: ApiPlanningTask): PlanningTask {
     area: ["work", "personal"].includes(task.area)
       ? (task.area as PlanningTask["area"])
       : "unassigned",
-    stage: ["monthly", "weekly", "committed"].includes(task.stage)
+    stage: ["quarterly", "monthly", "weekly", "committed"].includes(task.stage)
       ? (task.stage as PlanningTask["stage"])
       : "none",
     bet: task.bet,
+    priority: task.priority || 1,
     deadline: task.deadline,
     due: task.due,
     leadDays: task.leadDays,
@@ -261,17 +262,34 @@ export function createApi(
             id: label.id,
             label: label.label,
           })),
+          etag: plan.etag,
+          availableLabels: plan.availableLabels.map((label) => ({
+            id: label.id,
+            label: label.label,
+          })),
         },
         focus,
         days,
       };
     },
     async updateTask(task, update) {
-      await plus.setTaskPlan({
+      const result = await plus.setTaskPlan({
         taskId: task.id,
         etag: task.etag,
         requestId: crypto.randomUUID(),
         ...update,
+      });
+      if (!result.task) throw new Error("The saved task could not be read.");
+      return {
+        ...planningTask(result.task),
+        estimatedMinutes: task.estimatedMinutes,
+      };
+    },
+    async updateLabels(labels, etag) {
+      await plus.updatePlanLabels({
+        labels,
+        etag,
+        requestId: crypto.randomUUID(),
       });
     },
     async createSteps(task, steps, requestId) {

@@ -19,3 +19,13 @@ it("keeps ordinary transport failures unchanged", async () => {
   await expect(extensionActions.loadDays("2026-10-19")).rejects.toBe(failure);
   expect(sendMessage).toHaveBeenCalledOnce();
 });
+it("marks new action messages so a stale content script cannot use changed planning semantics", async () => {
+  sendMessage.mockResolvedValue({ ok: true, value: [] });
+  await extensionActions.loadDays("2026-10-19");
+  expect(sendMessage).toHaveBeenCalledWith({
+    kind: "action",
+    protocol: 2,
+    method: "loadDays",
+    args: ["2026-10-19"],
+  });
+});

@@ -1,0 +1,129 @@
+.plus-weekly-goals {
+  border: 1px solid var(--plus-line);
+  border-radius: 7px;
+  padding: 10px 14px;
+  margin-bottom: 16px;
+}
+.plus-weekly-goals > header,
+.plus-weekly-goals h2,
+.plus-weekly-goal-actions {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.plus-weekly-goals > header {
+  margin-bottom: 9px;
+}
+.plus-weekly-goals > header > span {
+  color: var(--plus-muted);
+  font-size: 12px;
+}
+.plus-weekly-goals h2 {
+  font-size: 14px;
+}
+.plus-weekly-goal-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+}
+.plus-weekly-goal-context h3,
+.plus-weekly-goal-unassigned h3 {
+  color: var(--plus-muted);
+  font-size: 12px;
+  margin: 0 0 4px;
+}
+.plus-weekly-goal-context + .plus-weekly-goal-context {
+  border-left: 1px solid var(--plus-line);
+  padding-left: 18px;
+}
+.plus-weekly-goal + .plus-weekly-goal {
+  margin-top: 9px;
+}
+.plus-root .plus-weekly-goal-title {
+  text-align: left;
+  padding: 0;
+  font-size: 14px;
+  font-weight: 550;
+  line-height: 1.4;
+}
+.plus-weekly-goal > .plus-task-breadcrumb {
+  margin-top: 3px;
+}
+.plus-root .plus-weekly-goal-empty {
+  color: var(--plus-muted);
+  text-align: left;
+  padding: 0;
+  font-size: 13px;
+}
+.plus-root .plus-weekly-goal-actions button {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  color: var(--plus-muted);
+  padding: 0;
+  font-size: 12px;
+}
+.plus-weekly-goal-actions button:hover {
+  color: var(--plus-accent);
+  text-decoration: underline;
+}
+.plus-weekly-goal-actions {
+  margin-top: 5px;
+  flex-wrap: wrap;
+}
+.plus-weekly-goal-warning {
+  color: #a56e21;
+  font-size: 12px;
+  margin: 5px 0 0;
+}
+.plus-weekly-goal-unassigned {
+  border-top: 1px solid var(--plus-line);
+  padding-top: 9px;
+  margin-top: 9px;
+}
+.plus-weekly-goal-unassigned > p {
+  margin: 0 0 6px;
+  color: #a56e21;
+  font-size: 12px;
+}
+.plus-goal-picker form {
+  padding: 20px;
+}
+.plus-goal-picker header {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  justify-content: space-between;
+}
+.plus-goal-picker header h2 {
+  font-size: 18px;
+  line-height: 1.4;
+}
+.plus-goal-picker p {
+  color: var(--plus-muted);
+  font-size: 12px;
+}
+.plus-goal-picker input,
+.plus-goal-picker select {
+  width: 100%;
+  margin-bottom: 10px;
+}
+.plus-goal-picker option {
+  padding: 5px;
+}
+.plus-goal-picker footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+@media (max-width: 650px) {
+  .plus-weekly-goal-grid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
+  }
+  .plus-weekly-goal-context + .plus-weekly-goal-context {
+    border-left: 0;
+    border-top: 1px solid var(--plus-line);
+    padding: 9px 0 0;
+  }
+}

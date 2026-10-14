@@ -3,6 +3,7 @@
 import json
 from typing import Any
 
+from todofy.core import plus
 from todofy.core.sql import plus as sql
 from todofy.runtime.interop import now_s
 
@@ -25,14 +26,17 @@ async def settings(db: Any) -> dict[str, Any] | None:
     return await first(db, sql.SETTINGS)
 
 
-async def remember(db: Any, tasks: list[dict[str, Any]], week: str) -> None:
+async def remember(
+    db: Any, tasks: list[dict[str, Any]], week: str, mapping: list[dict[str, Any]] | None = None
+) -> None:
+    names = plus.role_labels(mapping)
     statements = []
     for task in tasks:
         labels = task.get("labels") or []
-        if "committed" in labels or "bets" in labels:
+        if names["committed"] in labels or names["bets"] in labels:
             statements.append(
                 db.prepare(sql.REMEMBER_WEEK).bind(
-                    str(task["id"]), week, int("committed" in labels), int("bets" in labels)
+                    str(task["id"]), week, int(names["committed"] in labels), int(names["bets"] in labels)
                 )
             )
     # Bounded pages and bounded D1 batches; only planning parents/explicit Bets are recorded.

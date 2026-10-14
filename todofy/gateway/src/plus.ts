@@ -35,7 +35,7 @@ function handlers(): ServiceHandlers<ShapeOf<typeof PlusService>, PlusContext> {
         try { await settleCompleted(ctx.env, wire as { request_id: string; task_id: string; flow_date: string }); }
         catch (error) { throw error instanceof RpcError ? error : uiError('UNAVAILABLE'); }
       }
-      if (method.name === 'ReadPlan' || method.name === 'ConfirmPlanMapping') {
+      if (method.name === 'ReadPlan' || method.name === 'ConfirmPlanMapping' || method.name === 'UpdatePlanLabels') {
         const output = JSON.parse(answer.ok) as { plan: Record<string, unknown> };
         output.plan['flowday_url'] = variable(ctx.env, 'FLOWDAY_PUBLIC_URL');
         return new PreEncoded(JSON.stringify(output));

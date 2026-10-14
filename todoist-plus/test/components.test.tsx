@@ -23,6 +23,8 @@ beforeAll(() => {
 afterEach(cleanup);
 it("commits a candidate in one action and moves it into the committed group", async () => {
   const actions = createPrototype();
+  const update = vi.spyOn(actions, "updateTask");
+  const load = vi.spyOn(actions, "load");
   render(
     <App
       actions={actions}
@@ -32,22 +34,32 @@ it("commits a candidate in one action and moves it into the committed group", as
       onSettings={() => {}}
     />,
   );
-  await screen.findByRole("complementary", { name: "Outcomes and steps" });
-  const pool = within(
-    screen.getByRole("complementary", { name: "Outcomes and steps" }),
+  fireEvent.click(
+    await screen.findByRole("button", {
+      name: /^Clear out the old development branch,/,
+    }),
   );
-  expect(pool.getByText("Clear out the old development branch")).toBeTruthy();
-  fireEvent.change(
-    screen.getByLabelText("Planning: Clear out the old development branch"),
-    { target: { value: "committed" } },
+  fireEvent.change(screen.getByRole("combobox", { name: "Planning" }), {
+    target: { value: "committed" },
+  });
+  fireEvent.click(
+    screen
+      .getAllByRole("button", { name: "Save" })
+      .find((button) => !(button as HTMLButtonElement).disabled)!,
   );
-  await waitFor(async () =>
+  await waitFor(() =>
     expect(
-      (await actions.load()).plan.tasks.find((task) => task.id === "cleanup")
-        ?.stage,
-    ).toBe("committed"),
+      within(screen.getByRole("region", { name: "Committed" })).getByText(
+        "Clear out the old development branch",
+      ),
+    ).toBeTruthy(),
   );
-  expect(screen.getByText("4 / 5")).toBeTruthy();
+  expect(update).toHaveBeenCalledOnce();
+  expect(update.mock.calls[0]?.[1]).toEqual({
+    stage: "committed",
+    area: "work",
+  });
+  expect(load).toHaveBeenCalledOnce();
 });
 it("preserves a child deadline in attention when its parent occupies the commitment quota", async () => {
   const actions = createPrototype();
@@ -69,13 +81,9 @@ it("preserves a child deadline in attention when its parent occupies the commitm
       editTask={vi.fn()}
     />,
   );
-  fireEvent.click(screen.getByRole("button", { name: /Needs a look/ }));
-  expect(
-    within(screen.getByRole("list", { name: "Needs a look" })).getByText(
-      "Write the introduction",
-    ),
-  ).toBeTruthy();
-  expect(screen.getByText("3 / 5")).toBeTruthy();
+  fireEvent.click(screen.getByText(/Needs a look/));
+  expect(screen.getByText("Write the introduction")).toBeTruthy();
+  expect(screen.getByText(/3\/5 work/)).toBeTruthy();
 });
 it("stopping a session preserves the task and queue; checkbox completes it", async () => {
   const actions = createPrototype();
@@ -99,7 +107,7 @@ it("stopping a session preserves the task and queue; checkbox completes it", asy
   expect(screen.getByText("Write the introduction")).toBeTruthy();
   expect(load).toHaveBeenCalledTimes(1);
   mounted.rerender(<App {...props} view="plan" />);
-  await screen.findByRole("complementary", { name: "Outcomes and steps" });
+  await screen.findByRole("region", { name: "Committed" });
   mounted.rerender(<App {...props} view="focus" />);
   expect(screen.getByLabelText("Start: Write the introduction")).toBeTruthy();
   expect(load).toHaveBeenCalledTimes(1);
@@ -189,14 +197,15 @@ it("keeps a confirmed refresh when older duplicate week reads finish late", asyn
       onSettings={() => {}}
     />,
   );
-  await screen.findByRole("complementary", { name: "Outcomes and steps" });
+  await screen.findByRole("region", { name: "Committed" });
+  fireEvent.click(screen.getByRole("tab", { name: "Week" }));
   fireEvent.click(screen.getByRole("button", { name: "Next week" }));
   fireEvent.click(screen.getByRole("button", { name: "Next week" }));
   expect(requests).toHaveLength(2);
   await actions.moveTaskToDay("copy", undefined, staleFuture[1]!);
   fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
   const scheduled =
-    '.plus-week-day[data-date="2026-10-20"] .plus-week-step[data-task-id="copy"]';
+    '.planning-calendar-day[data-date="2026-10-20"] .planning-calendar-step[data-task-id="copy"]';
   await waitFor(() => expect(document.querySelector(scheduled)).toBeTruthy());
   await act(async () => requests[1]!(structuredClone(staleFuture)));
   expect(document.querySelector(scheduled)).toBeTruthy();
@@ -229,16 +238,17 @@ it("keeps the latest week after navigating away and back while an older full ref
       onSettings={() => {}}
     />,
   );
-  await screen.findByRole("complementary", { name: "Outcomes and steps" });
+  await screen.findByRole("region", { name: "Committed" });
+  fireEvent.click(screen.getByRole("tab", { name: "Week" }));
   fireEvent.click(screen.getByRole("button", { name: "Next week" }));
   await waitFor(() =>
     expect(
-      document.querySelector('.plus-week-day[data-date="2026-10-19"]'),
+      document.querySelector('.planning-calendar-day[data-date="2026-10-19"]'),
     ).toBeTruthy(),
   );
   fireEvent.click(screen.getByRole("button", { name: "This week" }));
   const scheduled =
-    '.plus-week-day[data-date="2026-10-14"] .plus-week-step[data-task-id="copy"]';
+    '.planning-calendar-day[data-date="2026-10-14"] .planning-calendar-step[data-task-id="copy"]';
   await waitFor(() => expect(document.querySelector(scheduled)).toBeTruthy());
   actions.load = vi.fn(
     () =>
@@ -251,7 +261,7 @@ it("keeps the latest week after navigating away and back while an older full ref
   fireEvent.click(screen.getByRole("button", { name: "Next week" }));
   await waitFor(() =>
     expect(
-      document.querySelector('.plus-week-day[data-date="2026-10-19"]'),
+      document.querySelector('.planning-calendar-day[data-date="2026-10-19"]'),
     ).toBeTruthy(),
   );
   fireEvent.click(screen.getByRole("button", { name: "This week" }));

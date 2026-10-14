@@ -2,12 +2,14 @@
 
 把周计划和 FlowDay 放进 Todoist 的 Chrome 扩展。支持普通网页与同一 Chrome profile 安装的 PWA；Todoist 原生桌面、手机应用不能安装它。
 
-- **Plan**：按父任务展开本周承诺和候选，将小步骤拖到某天或调整顺序；支持上一周、下一周和回本周。窄窗口显示三日或单日，通过日期按钮切换。
+- **Plan / Review**：紧凑看板显示本季度、本月、本周待选和本周承诺，拖动事项调整规划范围。每列对应一个现有 Todoist 标签，可在“标签对应”中选择。
+- **Plan / Week**：先看本周承诺总览，再展开某个事项的小步骤，拖到具体日期或调整顺序；支持上一周、下一周和回本周。窄窗口显示三日或单日。
+- **本周目标**：工作和生活的整体目标单独显示，用现有任务的 Bets 标记；更换目标不会调整任务的承诺状态或日期。
 - **步骤与时间**：批量添加小步骤、修改已有任务估时，编辑真实 Deadline 和提前开始窗口。
 - **Focus**：执行今天已安排的步骤，查看父任务、估时并计时或完成；“调整计划”返回 Plan。暂停或结束计时不会完成任务。
 
 拖到某天只改 FlowDay 队列，保留 Todoist 的计划日期和 Deadline。父任务数量按承诺计算，子任务可以单独安排；正在计时的步骤先结束计时再移动。
-浏览其他周不改变当前承诺标签。父任务与其步骤使用同一色标，完整名称保留在详情中。
+浏览其他周不改变当前承诺或本周目标。每个承诺与其步骤使用同一色标；卡片先显示标题，下面保留简短的所属事项。
 
 现有标签和筛选器保留。替代的规划项在本地隐藏，其他筛选器和标签收藏收进“Other views”；项目收藏保持可见。停用扩展并刷新即恢复原界面。FlowDay 的本地任务和杂项时间仍保留。
 
@@ -29,7 +31,7 @@
 
 ```sh
 npm ci
-npm run prototype     # 纯合成内容，http://127.0.0.1:18795/
+npm run prototype     # 原型 /；正式组件合成预览 /production.html
 npm run typecheck
 npm run lint
 npm test
@@ -39,4 +41,4 @@ npm run test:browser  # 实际 MV3 包，临时 Chromium profile，合成 Todois
 npm run zip
 ```
 
-构建目录为 `.output/chrome-mv3`。浏览器测试不会访问个人 Chrome profile 或真实 Todoist 数据。发布与后端复用 monorepo 的 CI，详情见[设计](docs/design.md)和[验收记录](docs/verification.md)。
+构建目录为 `.output/chrome-mv3`。浏览器测试不会访问个人 Chrome profile 或真实 Todoist 数据。发布与后端复用 monorepo 的 CI，详情见[架构](docs/design.md)、[界面与接口说明](docs/planning-interface.md)和[验收记录](docs/verification.md)。

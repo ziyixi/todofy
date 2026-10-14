@@ -13,6 +13,8 @@ import { words } from "./i18n";
 import { PlanView } from "./PlanView";
 import { FocusView } from "./FocusView";
 import { TaskEditor } from "./TaskEditor";
+import { BoardLabels } from "./BoardLabels";
+import { WeeklyGoals } from "./WeeklyGoals";
 import type {
   Language,
   FlowDayPlan,
@@ -76,7 +78,7 @@ export function App({
   }, [actions, onReady]);
   const run = useCallback(
     async (
-      operation: () => Promise<void | FlowDayPlan[]>,
+      operation: () => Promise<void | FlowDayPlan[] | PlanningTask>,
       refresh = true,
     ): Promise<boolean> => {
       if (lock.current) return false;
@@ -85,7 +87,7 @@ export function App({
       setError("");
       try {
         const confirmed = await operation();
-        if (confirmed) {
+        if (Array.isArray(confirmed)) {
           setData((current) => {
             if (!current) return current;
             const today = confirmed.find(
@@ -101,6 +103,20 @@ export function App({
             };
           });
           if (confirmed.length) await changeWeek(displayedWeek.current);
+        } else if (confirmed) {
+          setData((current) =>
+            current
+              ? {
+                  ...current,
+                  plan: {
+                    ...current.plan,
+                    tasks: current.plan.tasks.map((task) =>
+                      task.id === confirmed.id ? confirmed : task,
+                    ),
+                  },
+                }
+              : current,
+          );
         } else if (refresh) await load();
         return true;
       } catch (failure) {
@@ -243,8 +259,8 @@ export function App({
           </button>
           <button
             className="plus-icon"
-            aria-label={text.manage}
-            onClick={onSettings}
+            aria-label={text.boardLabels}
+            onClick={() => setSelectedId("board-labels")}
           >
             <Settings size={17} />
           </button>
@@ -274,19 +290,31 @@ export function App({
           disabled={!data.plan.configured}
         >
           {view === "plan" ? (
-            <PlanView
-              plan={data.plan}
-              days={data.days}
-              flowTasks={data.focus.flowTasks}
-              timer={data.focus.timer}
-              currentDate={data.focus.date}
-              onWeekChange={changeWeek}
-              language={language}
-              busy={busy || weekLoading || !data.plan.configured}
-              run={run}
-              actions={actions}
-              editTask={(task) => setSelectedId(task.id)}
-            />
+            <>
+              <WeeklyGoals
+                plan={data.plan}
+                language={language}
+                busy={busy || !data.plan.configured}
+                run={run}
+                actions={actions}
+                editTask={(task) => setSelectedId(task.id)}
+                onOpenTask={onOpenTask}
+              />
+              <PlanView
+                plan={data.plan}
+                days={data.days}
+                flowTasks={data.focus.flowTasks}
+                timer={data.focus.timer}
+                currentDate={data.focus.date}
+                onWeekChange={changeWeek}
+                language={language}
+                busy={busy || weekLoading || !data.plan.configured}
+                run={run}
+                actions={actions}
+                editTask={(task) => setSelectedId(task.id)}
+                onLabels={() => setSelectedId("board-labels")}
+              />
+            </>
           ) : (
             <FocusView
               plan={data.plan}
@@ -359,7 +387,25 @@ export function App({
         ref={dialog}
         onClose={() => setSelectedId("")}
         onCancel={() => setSelectedId("")}
+        onClick={(event) => {
+          if (event.target === event.currentTarget) {
+            dialog.current?.close();
+            setSelectedId("");
+          }
+        }}
       >
+        {selectedId === "board-labels" && data && (
+          <BoardLabels
+            plan={data.plan}
+            language={language}
+            busy={busy}
+            onSave={(labels) =>
+              run(() => actions.updateLabels(labels, data.plan.etag))
+            }
+            onClose={() => dialog.current?.close()}
+            onConnection={onSettings}
+          />
+        )}
         {selected && data && (
           <TaskEditor
             key={selected.id}

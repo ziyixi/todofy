@@ -1,0 +1,98 @@
+@import "./review-board.css";
+@import "./planning-week.css";
+
+.planning-view {
+  min-width: 0;
+}
+.planning-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+.planning-toolbar > span {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--plus-muted);
+}
+.planning-view-tabs {
+  display: flex;
+  gap: 2px;
+  background: var(--plus-hover);
+  border-radius: 6px;
+  padding: 3px;
+}
+.plus-root .planning-view-tabs button {
+  padding: 5px 15px;
+  border-radius: 4px;
+  font-size: 14px;
+  font-weight: 550;
+}
+.planning-view-tabs button[aria-selected="true"] {
+  background: var(--plus-bg);
+  box-shadow: 0 1px 3px #00000012;
+}
+.plus-root .planning-label-button {
+  padding: 3px 0;
+  color: var(--plus-accent);
+  font-size: 12px;
+}
+.planning-view > .planning-area-filter {
+  margin-bottom: 14px;
+}
+.review-missing-label {
+  font-size: 12px;
+  color: var(--plus-muted);
+  padding: 2px 4px 10px;
+}
+.review-missing-label p {
+  margin: 0 0 7px;
+}
+.plus-root .review-missing-label button {
+  color: var(--plus-accent);
+  padding: 0;
+  text-align: left;
+  font-size: 12px;
+}
+.planning-attention {
+  margin-top: 20px;
+  font-size: 12px;
+  border-top: 1px solid var(--plus-line);
+  padding-top: 12px;
+}
+.planning-attention summary {
+  cursor: pointer;
+  list-style: none;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.planning-attention ul {
+  padding: 0;
+  list-style: none;
+  margin: 8px 0 0;
+}
+.planning-attention li {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 5px 0;
+}
+.planning-attention li button {
+  text-align: left;
+  padding: 0;
+  font-size: 13px;
+}
+.planning-attention li span {
+  color: var(--plus-muted);
+}
+.planning-reset-note {
+  color: var(--plus-muted);
+  font-size: 12px;
+  margin: 20px 0 0;
+}
+.planning-step-warning {
+  color: #a56e21 !important;
+}

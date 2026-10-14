@@ -10,13 +10,13 @@ from todofy.runtime import plus_todoist as todoist
 from todofy.runtime.interop import now_s
 
 
-async def remember_page(env: Any, items: list[dict[str, Any]], week: str) -> None:
+async def remember_page(env: Any, items: list[dict[str, Any]], week: str, mapping: list[dict[str, Any]]) -> None:
     settings = await store.settings(env.DB)
     if settings and settings["enabled"] and settings["week_start"] == week:
-        await store.remember(env.DB, items, week)
+        await store.remember(env.DB, items, week, mapping)
 
 
-async def reset_ended(core: Any, week: str) -> bool:
+async def reset_ended(core: Any, week: str, mapping: list[dict[str, Any]]) -> bool:
     """One bounded batch; a recorded new-week choice can never match this query."""
     env = core.env
     ended = await store.rows(env.DB, sql.ENDED_WEEK, week)
@@ -37,7 +37,7 @@ async def reset_ended(core: Any, week: str) -> bool:
                     raise
                 await store.run(env.DB, sql.FORGET_WEEK, task_id, record["week_start"])
                 continue
-            labels = plus.reset_labels(task, record)
+            labels = plus.reset_labels(task, record, mapping)
             commands = [
                 {"type": "item_update", "uuid": plus.command_id(request_id), "args": {"id": task_id, "labels": labels}}
             ]
@@ -66,14 +66,14 @@ async def tick(coordinator: Any) -> None:
         if settings["week_start"] != week:
             # Recheck identity before modifying any Todoist labels.
             metadata = await todoist.metadata(coordinator)
-            actual = plus.discover(metadata["labels"], metadata["timezone"])
+            actual = plus.discover(metadata["labels"], metadata["timezone"], json.loads(settings["mapping"])["labels"])
             if actual["etag"] != json.loads(settings["mapping"])["etag"]:
                 raise todoist.PlusError("ACTION_NOT_ALLOWED")
-            if not await reset_ended(coordinator, week):
+            if not await reset_ended(coordinator, week, actual["labels"]):
                 return
             await store.run(env.DB, sql.ADVANCE_WEEK, week)
         # Observe one active page per tick. Track existing commitments, no task-content storage.
         cursor = getattr(coordinator, "plus_task_cursor", "")
         items, following = await todoist.tasks(coordinator, cursor=cursor)
-        await store.remember(env.DB, items, week)
+        await store.remember(env.DB, items, week, json.loads(settings["mapping"])["labels"])
         coordinator.plus_task_cursor = following

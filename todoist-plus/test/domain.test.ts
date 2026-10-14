@@ -19,6 +19,7 @@ const task = (
   area: "work",
   stage: "none",
   bet: false,
+  priority: 1,
   deadline: "",
   leadDays: 0,
   due: "",

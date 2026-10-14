@@ -18,6 +18,7 @@ const task = (
   area: "work",
   stage: "none",
   bet: false,
+  priority: 1,
   deadline: "",
   due: "",
   leadDays: 0,
@@ -26,15 +27,38 @@ const task = (
   missingLead: false,
   ...value,
 });
-export function createPrototype(): PlusActions {
+export function createPrototype(fullBoard = false): PlusActions {
+  const roles = [
+    "office",
+    "home",
+    "bets",
+    "committed",
+    "focus",
+    "candiate",
+    "quarter",
+    "lead_1d",
+    "lead_3d",
+    "lead_1w",
+    "lead_2w",
+    "lead_1m",
+  ];
   let plan: PlanState = {
     week: "2026-10-12",
     timezone: "America/Los_Angeles",
     configured: true,
     hiddenFilterIds: [],
     flowdayUrl: "https://flowday.example.test",
-    managedLabelNames: [],
-    managedLabels: [],
+    managedLabelNames: [...roles],
+    managedLabels: roles.map((role) => ({
+      role,
+      id: `synthetic-${role}`,
+      label: role,
+    })),
+    etag: "synthetic-plan-1",
+    availableLabels: roles.map((role) => ({
+      id: `synthetic-${role}`,
+      label: role,
+    })),
     tasks: [
       task("release", "Ship the small website refresh", {
         stage: "committed",
@@ -88,6 +112,63 @@ export function createPrototype(): PlusActions {
       }),
     ],
   };
+  if (fullBoard) {
+    plan.tasks = plan.tasks.map((item) => ({
+      ...item,
+      bet: false,
+      priority: item.id === "release" ? 4 : item.priority,
+      parentId:
+        item.id === "release"
+          ? "work-goal"
+          : item.id === "desk"
+            ? "personal-goal"
+            : item.parentId,
+    }));
+    plan.tasks.push(
+      task("work-goal", "Make the next release easy to use", { bet: true }),
+      task("personal-goal", "Create more room for a quiet weekend", {
+        bet: true,
+        area: "personal",
+      }),
+      task("quarter-idea", "Simplify the research workspace", {
+        stage: "quarterly",
+      }),
+      task("month-idea", "Set up a small reading corner", {
+        stage: "monthly",
+        area: "personal",
+      }),
+      task("paper", "Finish the experiment outline", { stage: "committed" }),
+      task("paper-step", "Sketch the first comparison", {
+        parentId: "paper",
+        estimatedMinutes: 45,
+      }),
+      task("review", "Review the current data pipeline", {
+        stage: "committed",
+      }),
+      task("review-step", "List the two simplest improvements", {
+        parentId: "review",
+        estimatedMinutes: 30,
+      }),
+      task("trip", "Plan a short weekend walk", {
+        stage: "committed",
+        area: "personal",
+      }),
+      task("trip-step", "Choose a meeting point", {
+        parentId: "trip",
+        area: "personal",
+        estimatedMinutes: 15,
+      }),
+      task("home", "Clear a shelf for the new books", {
+        stage: "committed",
+        area: "personal",
+      }),
+      task("home-step", "Sort one shelf", {
+        parentId: "home",
+        area: "personal",
+        estimatedMinutes: 30,
+      }),
+    );
+  }
   let focus: FocusState = {
     date: "2026-10-13",
     timerEtag: "fixture",
@@ -134,6 +215,25 @@ export function createPrototype(): PlusActions {
         tasks: plan.tasks.map((task) =>
           task.id === item.id ? { ...task, ...update } : task,
         ),
+      };
+      return structuredClone(plan.tasks.find((task) => task.id === item.id)!);
+    },
+    async updateLabels(labels, etag) {
+      if (etag !== plan.etag) throw new Error("Synthetic mapping changed");
+      const managedLabels = [
+        ...plan.managedLabels.filter(
+          (binding) =>
+            !["quarter", "candiate", "focus", "committed"].includes(
+              binding.role,
+            ),
+        ),
+        ...labels,
+      ];
+      plan = {
+        ...plan,
+        managedLabels,
+        managedLabelNames: managedLabels.map((binding) => binding.label),
+        etag: crypto.randomUUID(),
       };
     },
     async createSteps(item, drafts) {

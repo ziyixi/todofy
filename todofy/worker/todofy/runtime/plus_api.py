@@ -23,7 +23,9 @@ OWNER_METHODS = frozenset(
     {"ConfirmPlanMapping", "IssueExtensionConnection", "ReadExtensionConnections", "RevokeExtensionConnection"}
 )
 READ_METHODS = frozenset({"ReadPlan", "ListPlanningTasks", "ReadExtensionConnections"})
-METHODS = READ_METHODS | OWNER_METHODS | {"SetTaskPlan", "SetTaskLead", "AppendTaskSteps", "CompleteTask"}
+METHODS = (
+    READ_METHODS | OWNER_METHODS | {"SetTaskPlan", "SetTaskLead", "AppendTaskSteps", "CompleteTask", "UpdatePlanLabels"}
+)
 
 
 def account_day(timezone: str) -> str:
@@ -34,12 +36,13 @@ def account_day(timezone: str) -> str:
     )
 
 
-async def plan(core: Any) -> dict[str, Any]:
+async def plan(core: Any, metadata: dict[str, Any] | None = None) -> dict[str, Any]:
     env = core.env
-    metadata = await todoist.metadata(core)
-    discovered = plus.discover(metadata["labels"], metadata["timezone"])
+    metadata = metadata if metadata is not None else await todoist.metadata(core)
     current = await store.settings(env.DB)
-    enabled = bool(current and current["enabled"] and json.loads(current["mapping"])["etag"] == discovered["etag"])
+    saved = json.loads(current["mapping"]) if current else None
+    discovered = plus.discover(metadata["labels"], metadata["timezone"], saved["labels"] if saved else None)
+    enabled = bool(current and current["enabled"] and saved["etag"] == discovered["etag"])
     today = account_day(metadata["timezone"])
     return {
         **discovered,
@@ -47,19 +50,19 @@ async def plan(core: Any) -> dict[str, Any]:
         "today": today,
         "week_start": plus.week_start(today),
         "enabled": enabled,
-        "hidden_filter_ids": plus.replaced_filters(metadata["filters"]),
+        "hidden_filter_ids": plus.replaced_filters(metadata["filters"], discovered["labels"]),
     }
 
 
-async def require_ready(core: Any) -> dict[str, Any]:
+async def require_ready(core: Any, current: dict[str, Any] | None = None) -> dict[str, Any]:
     env = core.env
-    current = await plan(core)
+    current = current if current is not None else await plan(core)
     if not current["enabled"]:
         raise todoist.PlusError("ACTION_NOT_ALLOWED")
     settings = await store.settings(env.DB)
     if settings["week_start"] != current["week_start"]:
         # New-week decisions wait for one bounded reset batch; they never inherit the old membership.
-        if not await plus_week.reset_ended(core, current["week_start"]):
+        if not await plus_week.reset_ended(core, current["week_start"], current["labels"]):
             raise todoist.PlusError("UNAVAILABLE")
         await store.run(env.DB, sql.ADVANCE_WEEK, current["week_start"])
     return current
@@ -85,7 +88,7 @@ async def confirm(core: Any, request: dict[str, Any]) -> dict[str, Any]:
             break
     if cursor:
         raise todoist.PlusError("ACTION_NOT_ALLOWED")
-    await store.remember(env.DB, tasks, current["week_start"])
+    await store.remember(env.DB, tasks, current["week_start"], current["labels"])
     await store.run(
         env.DB,
         sql.SAVE_SETTINGS,
@@ -95,6 +98,43 @@ async def confirm(core: Any, request: dict[str, Any]) -> dict[str, Any]:
     )
     current["enabled"] = True
     return {"plan": current}
+
+
+async def update_labels(core: Any, request: dict[str, Any]) -> dict[str, Any]:
+    env = core.env
+    request_id = request["request_id"]
+    digest = plus.fingerprint(["UpdatePlanLabels", request])
+    previous = await store.first(env.DB, sql.ACTION, request_id)
+    if previous:
+        if previous["request_hash"] != digest:
+            raise todoist.PlusError("BAD_REQUEST")
+        if previous["response"] is not None:
+            return json.loads(previous["response"])
+        raise todoist.PlusError("UNAVAILABLE")
+    metadata = await todoist.metadata(core)
+    current = await plan(core, metadata)
+    if request["etag"] != current["etag"]:
+        raise todoist.PlusError("ETAG_MISMATCH")
+    bindings = plus.replace_planning_labels(current["labels"], request["labels"], current["available_labels"])
+    # Settle old-week work using its old binding identities before changing configuration.
+    current = await require_ready(core, current)
+    updated = {
+        **current,
+        "labels": bindings,
+        "etag": plus.fingerprint([bindings, current["timezone"]]),
+        "hidden_filter_ids": plus.replaced_filters(metadata["filters"], bindings),
+    }
+    mapping = json.dumps({"etag": updated["etag"], "labels": bindings}, separators=(",", ":"))
+    response = {"plan": updated}
+    # Configuration and its immutable receipt commit together; a lost response cannot replay an older config.
+    await env.DB.batch(
+        [
+            env.DB.prepare(sql.START_ACTION).bind(request_id, digest, mapping, now_s()),
+            env.DB.prepare(sql.SAVE_SETTINGS).bind(mapping, current["timezone"], current["week_start"]),
+            env.DB.prepare(sql.FINISH_ACTION).bind(json.dumps(response, separators=(",", ":")), request_id),
+        ]
+    )
+    return response
 
 
 async def connections(env: Any, method: str, request: dict[str, Any]) -> dict[str, Any]:
@@ -127,7 +167,9 @@ async def connections(env: Any, method: str, request: dict[str, Any]) -> dict[st
     return {"connection": {"id": request["request_id"], "display_name": display_name, "revoked": False}, "token": token}
 
 
-async def build_commands(core: Any, method: str, request: dict[str, Any]) -> list[dict[str, Any]]:
+async def build_commands(
+    core: Any, method: str, request: dict[str, Any], mapping: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
     request_id = request["request_id"]
     task_id = plus.check_id(request.get("task_id") or request.get("parent_id", ""))
     if method == "CompleteTask":
@@ -163,12 +205,12 @@ async def build_commands(core: Any, method: str, request: dict[str, Any]) -> lis
                 }
             )
         return commands
-    if request.get("etag") != plus.task_etag(task):
+    if request.get("etag") != plus.task_etag(task, mapping):
         raise todoist.PlusError("ETAG_MISMATCH")
     args = (
-        {"labels": plus.plan_labels(task, request)}
+        {"labels": plus.plan_labels(task, request, mapping)}
         if method == "SetTaskPlan"
-        else plus.lead_args(task, request.get("deadline", ""), request.get("lead_days", 0))
+        else plus.lead_args(task, request.get("deadline", ""), request.get("lead_days", 0), mapping)
     )
     return [{"type": "item_update", "uuid": plus.command_id(request_id), "args": {"id": task_id, **args}}]
 
@@ -187,7 +229,7 @@ async def mutate(core: Any, method: str, request: dict[str, Any]) -> dict[str, A
     if previous:
         commands = json.loads(previous["commands"])
     else:
-        commands = await build_commands(core, method, request)
+        commands = await build_commands(core, method, request, current["labels"])
         await store.start_action(env.DB, request_id, digest, commands)
     result = await todoist.commands(core, commands)
     if method == "CompleteTask":
@@ -199,15 +241,15 @@ async def mutate(core: Any, method: str, request: dict[str, Any]) -> dict[str, A
             raise todoist.PlusError("UNAVAILABLE")
     else:
         task = await todoist.task(core, request["task_id"])
-        response = {"task": plus.task_view(task, current["today"])}
+        response = {"task": plus.task_view(task, current["today"], current["labels"])}
         # Every explicit new-week write replaces the membership; old resets cannot select it.
         await store.run(
             env.DB,
             sql.REMEMBER_WEEK,
             str(task["id"]),
             current["week_start"],
-            int("committed" in task.get("labels", [])),
-            int("bets" in task.get("labels", [])),
+            int(plus.role_labels(current["labels"])["committed"] in task.get("labels", [])),
+            int(plus.role_labels(current["labels"])["bets"] in task.get("labels", [])),
         )
     await store.run(env.DB, sql.FINISH_ACTION, json.dumps(response, separators=(",", ":")), request_id)
     return response
@@ -234,6 +276,8 @@ async def handle(coordinator: Any, method: str, text: str, *, owner: bool) -> di
                 response = {"plan": await plan(coordinator)}
             elif method == "ConfirmPlanMapping":
                 response = await confirm(coordinator, request)
+            elif method == "UpdatePlanLabels":
+                response = await update_labels(coordinator, request)
             elif method == "ListPlanningTasks":
                 current = await plan(coordinator)
                 size = request.get("page_size", 0) or 100
@@ -242,9 +286,9 @@ async def handle(coordinator: Any, method: str, text: str, *, owner: bool) -> di
                     raise todoist.PlusError("BAD_REQUEST")
                 tasks, following = await todoist.tasks(coordinator, size, cursor)
                 if current["enabled"] and not backup.holds_ledger(env, coordinator.sql, now_s()):
-                    await plus_week.remember_page(env, tasks, current["week_start"])
+                    await plus_week.remember_page(env, tasks, current["week_start"], current["labels"])
                 response = {
-                    "planning_tasks": [plus.task_view(task, current["today"]) for task in tasks],
+                    "planning_tasks": [plus.task_view(task, current["today"], current["labels"]) for task in tasks],
                     "next_page_token": following,
                 }
             else:

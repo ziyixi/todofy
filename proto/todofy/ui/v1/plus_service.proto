@@ -57,6 +57,17 @@ service PlusService {
       body: "*"
     };
   }
+  // Replaces the three planning-column bindings and optional Quarter binding.
+  // Configuration only: existing task labels and dates are not rewritten.
+  // (-- api-linter: core::0134=disabled
+  //     aip.dev/not-precedent: an atomic configuration action with etag and request identity,
+  //     rather than a field-mask update to a PlanLabels resource. --)
+  rpc UpdatePlanLabels(UpdatePlanLabelsRequest) returns (UpdatePlanLabelsResponse) {
+    option (google.api.http) = {
+      post: "/api/plus/v1/plan:updatePlanLabels"
+      body: "*"
+    };
+  }
   // Owner-only: accept the current mapping and enable the weekly reset.
   rpc ConfirmPlanMapping(ConfirmPlanMappingRequest) returns (ConfirmPlanMappingResponse) {
     option (google.api.http) = {
@@ -88,12 +99,19 @@ service PlusService {
 
 // One known planning label, discovered from the owner's Todoist account.
 message LabelMapping {
-  // Logical role: office, home, bets, committed, focus, candiate or lead_*.
+  // Logical role: office, home, bets, quarter, committed, focus, candiate or lead_*.
   string role = 1;
   // Exact Todoist label ID.
   string id = 2;
   // Current Todoist label name.
   string label = 3;
+}
+// One current Todoist label available for an explicit column binding.
+message AvailableLabel {
+  // Exact Todoist label ID.
+  string id = 1;
+  // Exact current name; identity selection uses id.
+  string label = 2;
 }
 // Account-local planning settings.
 message Plan {
@@ -117,6 +135,8 @@ message Plan {
   string today = 8;
   // Configured owner FlowDay URL for local tasks that have no native Todoist page.
   string flowday_url = 9;
+  // At most 500 current labels. No credential or other account metadata.
+  repeated AvailableLabel available_labels = 10;
 }
 // An active Todoist task with derived planning fields. No description is fetched for display.
 message PlanningTask {
@@ -130,7 +150,7 @@ message PlanningTask {
   string project_id = 4;
   // Existing labels, including labels the extension does not manage.
   repeated string labels = 5;
-  // none, monthly, weekly or committed. Committed takes display precedence.
+  // none, quarterly, monthly, weekly or committed. Explicit stages beat date fallback.
   string stage = 6;
   // work, personal or unassigned (including ambiguous office+home).
   string area = 7;
@@ -185,7 +205,7 @@ message SetTaskPlanRequest {
     (google.api.field_behavior) = OPTIONAL,
     (google.api.field_info).format = UUID4
   ];
-  // none, monthly, weekly or committed.
+  // none, quarterly, monthly, weekly or committed.
   optional string stage = 4;
   // work, personal or unassigned.
   optional string area = 5;
@@ -260,6 +280,36 @@ message CompleteTaskRequest {
 message CompleteTaskResponse {
   // The task whose close command succeeded.
   string task_id = 1;
+}
+// Replaces this bounded role set. Quarter may be omitted to leave it unbound.
+// (-- api-linter: core::0134=disabled
+//     aip.dev/not-precedent: the complete bounded binding set is replaced atomically,
+//     with no partial resource fields or update mask. --)
+message UpdatePlanLabelsRequest {
+  // Exactly candiate, focus and committed, plus optional quarter; at most four.
+  // Each ID and name must match a current label and cannot reuse another role's ID.
+  repeated PlanningLabelBinding labels = 1 [(google.api.field_behavior) = REQUIRED];
+  // Fingerprint returned by ReadPlan, checked before configuration writes.
+  string etag = 2 [(google.api.field_behavior) = REQUIRED];
+  // Stable action UUID; a repeated request returns the stored configuration receipt.
+  string request_id = 3 [
+    (google.api.field_behavior) = OPTIONAL,
+    (google.api.field_info).format = UUID4
+  ];
+}
+// An input binding for one planning column; every identity component is required.
+message PlanningLabelBinding {
+  // quarter, candiate, focus or committed.
+  string role = 1 [(google.api.field_behavior) = REQUIRED];
+  // Exact current Todoist label ID.
+  string id = 2 [(google.api.field_behavior) = REQUIRED];
+  // Exact current Todoist label name, checked together with id.
+  string label = 3 [(google.api.field_behavior) = REQUIRED];
+}
+// The verified mapping after a configuration-only update.
+message UpdatePlanLabelsResponse {
+  // Current account planning metadata.
+  Plan plan = 1;
 }
 // Owner confirmation binds the exact discovered labels/timezone.
 message ConfirmPlanMappingRequest {

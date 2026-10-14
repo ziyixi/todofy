@@ -5,11 +5,11 @@ import {
   duration,
   elapsed,
   formattedMinutes,
-  taskFamilyColor,
+  taskAncestors,
 } from "./domain";
-import { TaskBreadcrumb } from "./TaskFamily";
 import { words } from "./i18n";
 import type { FocusState, Language, PlanState, PlanningTask } from "./model";
+import { outcomeColor, outcomeForTask } from "./planning-outcomes";
 
 interface Props {
   taskId: string;
@@ -61,9 +61,15 @@ export function FocusBlock({
       status = language === "zh" ? "正在做" : "Now";
     timerAction = timer.status === "running" ? "pause" : "resume";
   }
-  const familyColor = task
-    ? taskFamilyColor(task, plan.tasks)
-    : "var(--plus-muted)";
+  const outcome = task
+    ? outcomeForTask(task, plan.tasks, plan.managedLabels)
+    : undefined;
+  const familyColor = outcome ? outcomeColor(outcome) : "var(--plus-muted)";
+  const parentPath = task
+    ? taskAncestors(task, plan.tasks)
+        .map((parent) => displayedTitle(parent.title))
+        .join(" › ")
+    : "";
   return (
     <li className="plus-focus-slot" data-task-id={taskId}>
       <article
@@ -83,18 +89,14 @@ export function FocusBlock({
         <div className="plus-focus-block-content">
           <div className="plus-focus-block-top">
             {task ? (
-              <TaskBreadcrumb
-                task={task}
-                tasks={plan.tasks}
-                language={language}
-              />
+              <button
+                className="plus-focus-title"
+                onClick={() => editTask(task)}
+              >
+                {title}
+              </button>
             ) : (
-              <span className="plus-muted">
-                {focus.flowTasks[taskId]?.local ||
-                taskId.startsWith("__flowday_")
-                  ? text.local
-                  : text.missingTask}
-              </span>
+              <span className="plus-focus-title">{title}</span>
             )}
             {status && (
               <span
@@ -104,12 +106,21 @@ export function FocusBlock({
               </span>
             )}
           </div>
-          {task ? (
-            <button className="plus-focus-title" onClick={() => editTask(task)}>
-              {title}
-            </button>
-          ) : (
-            <span className="plus-focus-title">{title}</span>
+          {outcome && outcome.id !== taskId && (
+            <span
+              className="plus-focus-parent"
+              aria-label={language === "zh" ? "父任务" : "Parent task"}
+              title={parentPath}
+            >
+              {displayedTitle(outcome.title)}
+            </span>
+          )}
+          {!task && (
+            <span className="plus-focus-parent">
+              {focus.flowTasks[taskId]?.local || taskId.startsWith("__flowday_")
+                ? text.local
+                : text.missingTask}
+            </span>
           )}
           <div className="plus-focus-block-footer">
             <span className="plus-focus-estimate">
@@ -137,7 +148,7 @@ export function FocusBlock({
         {task && (
           <div className="plus-focus-timer-controls">
             <button
-              className="plus-icon plus-play"
+              className="plus-focus-timer-action is-primary"
               aria-label={`${text[timerAction]}: ${title}`}
               disabled={busy || Boolean(focus.timer && !timer)}
               onClick={() => onTimer(timerAction, taskId)}
@@ -147,15 +158,17 @@ export function FocusBlock({
               ) : (
                 <Play size={17} />
               )}
+              {text[timerAction]}
             </button>
             {timer && (
               <button
-                className="plus-icon"
+                className="plus-focus-timer-action"
                 aria-label={`${text.stop}: ${title}`}
                 disabled={busy}
                 onClick={() => onTimer("stop", taskId)}
               >
                 <Square size={13} />
+                {language === "zh" ? "结束计时" : "Stop"}
               </button>
             )}
           </div>

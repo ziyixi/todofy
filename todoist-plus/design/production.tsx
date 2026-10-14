@@ -1,0 +1,106 @@
+import { useState } from "react";
+import { createRoot } from "react-dom/client";
+import {
+  Calendar,
+  ChevronDown,
+  Hash,
+  Inbox,
+  LayoutList,
+  Moon,
+  Search,
+  Sun,
+  Target,
+} from "lucide-react";
+import { App } from "../src/App";
+import type { View } from "../src/model";
+import { createPrototype } from "./fixture";
+import "../src/styles.css";
+import "./prototype.css";
+
+const actions = createPrototype(true);
+
+function ProductionPreview() {
+  const [view, setView] = useState<View>("plan");
+  const [dark, setDark] = useState(false);
+  const [notice, setNotice] = useState("");
+  return (
+    <div className="plus-prototype" data-theme={dark ? "dark" : "light"}>
+      <aside className="prototype-sidebar">
+        <div className="prototype-owner">
+          <span className="prototype-avatar">P</span>Personal{" "}
+          <ChevronDown size={13} />
+        </div>
+        <nav>
+          <button>
+            <Search size={19} />
+            Search
+          </button>
+          <button>
+            <Inbox size={19} />
+            Inbox
+          </button>
+          <button onClick={() => setView("focus")}>
+            <Calendar size={19} />
+            Today
+          </button>
+          <div className="prototype-nav-gap" />
+          <button
+            className={view === "plan" ? "active" : ""}
+            onClick={() => setView("plan")}
+          >
+            <span className="plus-nav-icon">
+              <LayoutList size={18} />
+            </span>
+            Plan
+          </button>
+          <button
+            className={view === "focus" ? "active" : ""}
+            onClick={() => setView("focus")}
+          >
+            <span className="plus-nav-icon">
+              <Target size={18} />
+            </span>
+            Focus
+          </button>
+          <div className="prototype-nav-heading">My projects</div>
+          <button>
+            <Hash size={19} />
+            Work
+          </button>
+          <button>
+            <Hash size={19} />
+            Personal
+          </button>
+        </nav>
+        <div className="prototype-controls">
+          <small>PRODUCTION COMPONENTS · SYNTHETIC DATA</small>
+          <button onClick={() => setDark(!dark)} aria-label="Switch theme">
+            {dark ? <Sun size={16} /> : <Moon size={16} />}
+          </button>
+        </div>
+      </aside>
+      <main>
+        <App
+          actions={actions}
+          view={view}
+          onViewChange={setView}
+          language="en"
+          onOpenTask={() =>
+            setNotice("Synthetic native task link. No real task is opened.")
+          }
+          onSettings={() =>
+            setNotice("Synthetic connection. No credentials are used.")
+          }
+        />
+        {notice && (
+          <div className="prototype-native-message" role="status">
+            {notice}
+            <button onClick={() => setNotice("")}>Close</button>
+          </div>
+        )}
+      </main>
+    </div>
+  );
+}
+
+createRoot(document.getElementById("root")!).render(<ProductionPreview />);
