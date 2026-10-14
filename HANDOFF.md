@@ -9,27 +9,36 @@ Its old waiting lists and release identities are historical, not instructions to
 
 ## Current work
 
-`codex/plus-production-planning` promotes the approved planning prototype into the real extension.
-Bets are actual Todoist weekly-goal marks above Review/Week; stage drag changes only the selected task's
-planning label, day drag writes only FlowDay queues, and Focus executes the confirmed today queue/timer.
-The four role bindings now use existing Todoist label IDs through UpdatePlanLabels; Quarter stays optional
-until explicitly bound, and configuration changes never relabel tasks. Existing credentials and permissions
-remain unchanged. The owner authorized branch CI, same-SHA main publication, downloading the released ZIP
-into the existing chrome_extensions/todoist-plus folder, and a tomorrow installation task with its real URL.
-No existing real task or timer has been changed. Local production-component screenshots and API/design
-boundaries are in [the internal guide](todoist-plus/docs/planning-interface.md). Final CI/release identity,
-Quarter binding and installation-task evidence are pending and must be recorded after actual verification.
+Todoist Plus's approved planning board is released at `bcd1d1426f7dcf16198d2e71aefddc62cd7a8a87`.
+[Full branch CI 38546241155](https://github.com/ziyixi/todofy/actions/runs/38546241155) and
+[same-SHA main 38547547283](https://github.com/ziyixi/todofy/actions/runs/38547547283) pass. Todofy and the
+Plus ZIP published; other applications, images, VPS and Recall publication skipped. Deployment `7062548541`
+verified core `8e11f818-526f-4613-ac05-2c8eff61b223` and gateway `6113d2c3-e6d6-4c22-96d8-c72bbc07d139`;
+public hooks health independently serves the same SHA.
 
-The approved synthetic planning prototype is preserved in
-[prototype verification](docs/todoist-plus-planning-prototype.md). Its goal text, local stopwatch and local
-label-name editor are design evidence; the production branch uses real Todoist/FlowDay APIs instead.
+Bets are actual weekly-goal task marks above Review/Week. Stage drag changes only the selected planning
+label; day drag writes only FlowDay queues; Focus runs today's confirmed queue/timer. UpdatePlanLabels binds
+existing label IDs, keeps other roles and does not relabel tasks. Quarter is explicitly bound in the owner UI.
+Date-only child candidates stay with their parent; explicitly different-stage children remain independent.
+The obsolete WeekPlanner/TaskFamily and unused CSS are removed. [Internal design and six synthetic screenshots](todoist-plus/docs/planning-interface.md)
+cover current behavior and API boundaries; [full verification](docs/todoist-plus-verification.md#approved-board-promoted-to-production-october-14)
+separates tests, Chrome synthetic checks, actual deployment and remaining owner acceptance.
 
-Before this release, installed version `2026.1014.320.46356` at
-`~/Documents/chrome_extensions/todoist-plus` comes from `b51413a` (branch CI 38516152038,
-main 38516495384). Preserve this fixed directory and Chrome-stored connection. Browser tooling blocks the
-internal extension manager and forbids alternate methods; the owner reloads the extension and refreshes
-Todoist after the published files are replaced. PWA and natural Monday rollover remain separate observations.
-Legacy FlowDay timer replace/clear stays `RELOAD_REQUIRED` until at least 2026-11-13.
+Version `2026.1014.598.48337` was downloaded from the actual public release. All seven files match the green
+artifact, ZIP and existing `~/Documents/chrome_extensions/todoist-plus` directory. Two obsolete generated
+assets were removed; directory identity, permissions and Chrome-stored connection remain. The only new
+real task is the authorized company-installation task due October 15, with actual release/ZIP URLs; no
+existing task or real timer was manually changed. No other credential, service or budget was altered.
+
+**Pending:** owner Reload in Chrome's extension manager and Refresh Todoist. Tooling blocks that internal
+page and alternate methods are forbidden. Do not ask for reinstall, folder changes or token rotation.
+PWA and natural Monday rollover remain separate observations. Legacy FlowDay timer replace/clear stays
+`RELOAD_REQUIRED` until at least 2026-11-13. `codex/plus-production-verification` only closes root docs and
+HANDOFF; application files must remain unchanged so this closure does not publish another ZIP.
+
+The earlier approved synthetic prototype is preserved in
+[prototype verification](docs/todoist-plus-planning-prototype.md); its local goal text and stopwatch are
+historical design evidence, while production uses Todoist/FlowDay APIs.
 
 Recall cleanup is released at `bc0adffdc1d8ee018b0663737c77e8de701de0aa`, extension `2026.1013.654`.
 [Full branch CI](https://github.com/ziyixi/todofy/actions/runs/38359057094) and the

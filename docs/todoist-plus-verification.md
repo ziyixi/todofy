@@ -259,6 +259,32 @@ ancestor chain. A date-derived weekly child stays in its parent's tray/context; 
 to another mapped stage remains independent. The original Quick filter remains available because the new
 board does not replace that view. No dependency, service, database or budget setting was added.
 
-Branch CI, same-SHA main deployment, exact ZIP identity, Quarter binding and the authorized tomorrow
-installation task are pending publication and will be recorded after verification. PWA and natural Monday
-rollover remain separate open observations; synthetic timer checks do not prove a real account session.
+Implementation `bcd1d1426f7dcf16198d2e71aefddc62cd7a8a87` passed
+[branch CI 38546241155](https://github.com/ziyixi/todofy/actions/runs/38546241155) and
+[same-SHA main 38547547283](https://github.com/ziyixi/todofy/actions/runs/38547547283).
+Todofy and the Plus ZIP were published; other applications, images, VPS and Recall publication skipped.
+The actual provider receipt, GitHub Deployment `7062548541`, reports success at
+`2026-10-14T10:11:31Z`: core version `8e11f818-526f-4613-ac05-2c8eff61b223`, gateway version
+`6113d2c3-e6d6-4c22-96d8-c72bbc07d139`. The public hooks health independently returned the full implementation
+SHA and healthy at `2026-10-14T10:17:35Z`; the authenticated owner page returned the new column controls.
+
+[Release 2026.1014.598.48337](https://github.com/ziyixi/todofy/releases/tag/todoist-plus-v2026.1014.598.48337)
+contains the [ZIP](https://github.com/ziyixi/todofy/releases/download/todoist-plus-v2026.1014.598.48337/todoist-plus-v2026.1014.598.48337.zip),
+226,870 bytes, source `bcd1d14`, SHA-256
+`682864500ab8cbe56b92cf50082756c7a92368e481dd34511ba35bce83df19ec`.
+All seven files match the tested branch artifact and the published ZIP. The existing
+`~/Documents/chrome_extensions/todoist-plus` folder was updated with those exact bytes; the ZIP is also
+beside it. Two obsolete generated assets were removed. Permission sets, installation directory and
+Chrome-stored connection were preserved; no Chrome profile or credential store was edited.
+
+The owner page explicitly bound the previously created Quarter label. Its refreshed response showed the
+four column selections, retained the eleven existing roles, kept planning enabled and disabled Save after
+confirmation. The new operation writes configuration; no existing task or production timer was manually
+changed. Only the separately authorized company-installation task was added: due October 15, estimate
+15 minutes, real versioned release/ZIP links and connection steps. A fetch confirmed these fields and no
+Deadline; private task identity/content are not committed here.
+
+**Still pending:** the owner clicks Reload in Chrome's extension manager and refreshes Todoist. The browser
+tool cannot operate that internal page; no alternate method was used. The installed bytes and owner API
+are verified, while activation of this version in the real account is not yet claimed. PWA and natural
+Monday rollover remain separate observations. Synthetic timer checks do not prove a real account session.
