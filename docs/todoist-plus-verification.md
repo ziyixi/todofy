@@ -209,6 +209,17 @@ Screenshots from the new Chrome prototype contain only synthetic content. A temp
 also supported normal pointer dragging; its files and an unsupported pointer-isolation experiment were removed.
 No permanent diagnostic, new dependency, service, database, API schema or billing change was introduced.
 
-At this checkpoint the correction's branch gate, same-SHA publication and owner's same-directory Reload are
-pending. This record distinguishes the old installed-version real check from the new package's synthetic
-checks. PWA and natural Monday rollover remain separate open observations.
+Correction `b51413a02bdfec608dee5762e412a86c0adf35bf` passed
+[branch CI 38516152038](https://github.com/ziyixi/todofy/actions/runs/38516152038) and the
+[same-SHA main release 38516495384](https://github.com/ziyixi/todofy/actions/runs/38516495384).
+Only the extension was published; all Worker, image, VPS and unrelated extension publications skipped.
+The [ZIP](https://github.com/ziyixi/todofy/releases/download/todoist-plus-v2026.1014.320.46356/todoist-plus-v2026.1014.320.46356.zip)
+is `2026.1014.320.46356`, source `b51413a`, 221,051 bytes, SHA-256
+`eee97cea132b8ad5f1210786b868f8ec54cbd657152e895abdacf5f227bc9f0a`.
+
+All seven files match the green branch artifact, the published ZIP and the updated existing
+`~/Documents/chrome_extensions/todoist-plus` directory. Two obsolete generated assets were removed;
+permissions and folder identity are unchanged. Chrome-stored connection data was not accessed or replaced.
+The owner has been asked to click the extension's Reload and refresh Todoist once. Actual corrected-version
+response and drag acceptance awaits that step; the old installed-version real check and new synthetic
+checks remain distinct. PWA and natural Monday rollover remain separate open observations.

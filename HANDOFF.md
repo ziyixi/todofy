@@ -24,13 +24,16 @@ One synthetic parent/two steps proved native day-to-day dragging eventually pers
 and scheduling were cleaned up and checked after Inbox Reload. No real timer was operated. The new layout
 was checked in Chrome's synthetic prototype; it is not installed-version production acceptance.
 
-Previous release `e4fd23a855c7ea4fa12e42a89fd322cd67f64b9e` remains the published installed build. The owner
-has loaded/connected `~/Documents/chrome_extensions/todoist-plus`; preserve that directory and connection.
-Pending: current branch CI, same-SHA extension publication, overwrite that fixed directory with the verified
-artifact, then owner clicks Reload in Chrome and refreshes Todoist. Browser tooling blocks the internal
-extension manager and forbids alternate methods. Continue actual updated-version response/drag acceptance
-after that step. PWA and natural Monday rollover are separate pending observations. Legacy FlowDay timer
-replace/clear remains `RELOAD_REQUIRED` until at least 2026-11-13.
+Correction `b51413a02bdfec608dee5762e412a86c0adf35bf` passed branch CI 38516152038 and same-SHA main
+release 38516495384. Only Plus was published; every Worker, image, VPS and other extension publication skipped.
+Version `2026.1014.320.46356` is installed in the existing `~/Documents/chrome_extensions/todoist-plus` folder;
+all seven files match the green artifact and public ZIP. Old generated assets were removed, permissions
+are unchanged and Chrome-stored connection data was not touched. The owner has been asked for one extension
+Reload followed by Todoist page refresh. **Pending:** that step, then real corrected-version response/drag
+acceptance. Browser tooling blocks the internal extension manager and forbids alternate methods. Preserve
+this fixed folder and connection; do not ask for a reinstall or token rotation. PWA and natural Monday
+rollover remain separate observations. Legacy FlowDay timer replace/clear stays `RELOAD_REQUIRED` until
+at least 2026-11-13.
 
 Recall cleanup is released at `bc0adffdc1d8ee018b0663737c77e8de701de0aa`, extension `2026.1013.654`.
 [Full branch CI](https://github.com/ziyixi/todofy/actions/runs/38359057094) and the
