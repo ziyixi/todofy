@@ -13,12 +13,17 @@ import {
   SyncTasksResponse_State,
   SyncTasksRequest_Mode,
 } from "@ziyixi/proto/flowday/ui/v1/flowday_ui_service_pb";
-import { TimerSession_State } from "@ziyixi/proto/flowday/ui/v1/time_entry_pb";
+import {
+  TimerSession_State,
+  type TimerSession,
+} from "@ziyixi/proto/flowday/ui/v1/time_entry_pb";
+import type { Flow } from "@ziyixi/proto/flowday/ui/v1/flow_pb";
 import type {
   FlowDayPlan,
   FocusState,
   PlanningTask,
   PlusActions,
+  TimerSnapshot,
 } from "./model";
 
 export interface Connection {
@@ -69,6 +74,45 @@ export function planningTask(task: ApiPlanningTask): PlanningTask {
     etag: task.etag,
     mustStart: task.mustStart,
     missingLead: task.missingLead,
+  };
+}
+function timerSnapshot(session: TimerSession): TimerSnapshot {
+  const timerEtag = session.etag || "0";
+  if (
+    !session.taskId ||
+    (session.state !== TimerSession_State.RUNNING &&
+      session.state !== TimerSession_State.PAUSED)
+  )
+    return { timerEtag };
+  return {
+    timerEtag,
+    timer: {
+      taskId: session.taskId,
+      flowDate: session.flowDate,
+      status:
+        session.state === TimerSession_State.RUNNING ? "running" : "paused",
+      elapsedSeconds: session.savedSeconds,
+      startedAt: session.segmentStartTime
+        ? new Date(
+            Number(session.segmentStartTime.seconds) * 1000,
+          ).toISOString()
+        : new Date().toISOString(),
+      etag: timerEtag,
+    },
+  };
+}
+function weekDates(weekStart: string): string[] {
+  return Array.from({ length: 7 }, (_, index) => {
+    const date = new Date(`${weekStart}T12:00:00Z`);
+    date.setUTCDate(date.getUTCDate() + index);
+    return date.toISOString().slice(0, 10);
+  });
+}
+function flowPlan(flow: Flow): FlowDayPlan {
+  return {
+    date: flow.name.slice("flows/".length),
+    taskIds: flow.taskIds,
+    completedTaskIds: flow.completedTaskIds,
   };
 }
 export function createApi(
@@ -127,94 +171,76 @@ export function createApi(
       "FlowDay is still importing tasks. Refresh and try again.",
     );
   }
+  async function loadPlanningTasks(): Promise<PlanningTask[]> {
+    const tasks: PlanningTask[] = [];
+    let pageToken = "";
+    for (let page = 0; page < 10; page++) {
+      const result = await plus.listPlanningTasks({ pageSize: 200, pageToken });
+      tasks.push(...result.planningTasks.map(planningTask));
+      pageToken = result.nextPageToken;
+      if (!pageToken) return tasks;
+    }
+    throw new Error("Task list is incomplete. Counts have not been shown.");
+  }
+  async function loadFlowTasks() {
+    const estimates: Record<string, number> = {};
+    const flowTasks: FocusState["flowTasks"] = {};
+    let pageToken = "";
+    for (let page = 0; page < 10; page++) {
+      const result = await flowday.listTasks({ pageSize: 200, pageToken });
+      for (const task of result.tasks) {
+        const id = task.name.slice("tasks/".length);
+        flowTasks[id] = {
+          title: task.title,
+          local: !task.todoistId,
+          estimatedMinutes: task.estimatedMinutes,
+        };
+        if (task.estimatedMinutes !== undefined)
+          estimates[task.todoistId || id] = task.estimatedMinutes;
+      }
+      pageToken = result.nextPageToken;
+      if (!pageToken) return { estimates, flowTasks };
+    }
+    throw new Error(
+      "FlowDay task list is incomplete. Refresh before planning.",
+    );
+  }
+  async function loadDays(weekStart: string): Promise<FlowDayPlan[]> {
+    const dates = weekDates(weekStart);
+    const flows = await Promise.all(
+      dates.map((date) => flowday.getFlow({ name: `flows/${date}` })),
+    );
+    return flows.map(flowPlan);
+  }
   return {
-    async load() {
-      const metadata = await plus.readPlan({});
+    loadDays,
+    async load(weekStart) {
+      const [metadata, tasks, { estimates, flowTasks }] = await Promise.all([
+        plus.readPlan({}),
+        loadPlanningTasks(),
+        loadFlowTasks(),
+      ]);
       if (!metadata.plan) throw new Error("Planning metadata is missing.");
       const plan = metadata.plan;
-      const tasks: PlanningTask[] = [];
-      let pageToken = "";
-      for (let page = 0; page < 10; page++) {
-        const result = await plus.listPlanningTasks({
-          pageSize: 200,
-          pageToken,
-        });
-        tasks.push(...result.planningTasks.map(planningTask));
-        pageToken = result.nextPageToken;
-        if (!pageToken) break;
-      }
-      if (pageToken)
-        throw new Error("Task list is incomplete. Counts have not been shown.");
-      const dates = Array.from({ length: 7 }, (_, index) => {
-        const date = new Date(`${plan.weekStart}T12:00:00Z`);
-        date.setUTCDate(date.getUTCDate() + index);
-        return date.toISOString().slice(0, 10);
-      });
-      const [flows, timer] = await Promise.all([
-        Promise.all(
-          dates.map((date) => flowday.getFlow({ name: `flows/${date}` })),
-        ),
+      const displayedWeek = weekStart || plan.weekStart;
+      const includesToday = weekDates(displayedWeek).includes(plan.today);
+      const [days, timer, todayFlow] = await Promise.all([
+        loadDays(displayedWeek),
         flowday.getTimerSession({ name: "timerSession" }),
+        includesToday
+          ? undefined
+          : flowday.getFlow({ name: `flows/${plan.today}` }),
       ]);
-      const days: FlowDayPlan[] = flows.map((flow, index) => ({
-        date: dates[index]!,
-        taskIds: flow.taskIds,
-        completedTaskIds: flow.completedTaskIds,
-      }));
-      const today = days.find((day) => day.date === plan.today);
+      const today =
+        days.find((day) => day.date === plan.today) ??
+        (todayFlow && flowPlan(todayFlow));
       if (!today) throw new Error("Today's planning day is missing.");
-      const estimates: Record<string, number> = {};
-      const flowTasks: FocusState["flowTasks"] = {};
-      let flowToken = "";
-      for (let page = 0; page < 10; page++) {
-        const result = await flowday.listTasks({
-          pageSize: 200,
-          pageToken: flowToken,
-        });
-        for (const task of result.tasks) {
-          const id = task.name.slice("tasks/".length);
-          flowTasks[id] = {
-            title: task.title,
-            local: !task.todoistId,
-            estimatedMinutes: task.estimatedMinutes,
-          };
-          if (task.estimatedMinutes !== undefined)
-            estimates[task.todoistId || id] = task.estimatedMinutes;
-        }
-        flowToken = result.nextPageToken;
-        if (!flowToken) break;
-      }
-      if (flowToken)
-        throw new Error(
-          "FlowDay task list is incomplete. Refresh before planning.",
-        );
       knownFlowTasks = new Set(Object.keys(flowTasks));
-      const timerEtag = timer.etag || "0";
-      const startedAt = timer.segmentStartTime
-        ? new Date(Number(timer.segmentStartTime.seconds) * 1000).toISOString()
-        : new Date().toISOString();
       const focus: FocusState = {
         ...today,
-        timerEtag,
+        ...timerSnapshot(timer),
         estimates,
         flowTasks,
-        ...(timer.taskId &&
-        (timer.state === TimerSession_State.RUNNING ||
-          timer.state === TimerSession_State.PAUSED)
-          ? {
-              timer: {
-                taskId: timer.taskId,
-                flowDate: timer.flowDate,
-                status:
-                  timer.state === TimerSession_State.RUNNING
-                    ? ("running" as const)
-                    : ("paused" as const),
-                elapsedSeconds: timer.savedSeconds,
-                startedAt,
-                etag: timerEtag,
-              },
-            }
-          : {}),
       };
       return {
         plan: {
@@ -265,26 +291,30 @@ export function createApi(
     },
     async updateQueue(taskIds, focus) {
       await ensureSynced(taskIds);
-      await flowday.updateFlow({
+      const confirmed = await flowday.updateFlow({
         flow: { name: `flows/${focus.date}`, taskIds },
         updateMask: { paths: ["task_ids"] },
       });
+      return [flowPlan(confirmed)];
     },
     async moveTaskToDay(taskId, source, target, beforeId) {
-      if (source?.date === target.date && beforeId === taskId) return;
+      if (source?.date === target.date && beforeId === taskId) return [];
       await ensureSynced([taskId]);
-      const destination =
-        source && source.date !== target.date
-          ? (
-              await flowday.rolloverFlow({
-                name: `flows/${source.date}`,
-                destination: `flows/${target.date}`,
-                taskIds: [taskId],
-              })
-            ).destinationFlow
-          : await flowday.getFlow({ name: `flows/${target.date}` });
-      if (!destination)
-        throw new Error("The destination day could not be read.");
+      let confirmedSource: FlowDayPlan | undefined;
+      let destination: Flow;
+      if (source && source.date !== target.date) {
+        const moved = await flowday.rolloverFlow({
+          name: `flows/${source.date}`,
+          destination: `flows/${target.date}`,
+          taskIds: [taskId],
+        });
+        if (!moved.flow || !moved.destinationFlow)
+          throw new Error("The moved day queues could not be read.");
+        confirmedSource = flowPlan(moved.flow);
+        destination = moved.destinationFlow;
+      } else {
+        destination = await flowday.getFlow({ name: `flows/${target.date}` });
+      }
       if (source && !destination.taskIds.includes(taskId))
         throw new Error("This step has moved. Refresh the plan and try again.");
       const taskIds = destination.taskIds.filter((id) => id !== taskId);
@@ -294,11 +324,15 @@ export function createApi(
         taskIds.every((id, index) => destination.taskIds[index] === id) &&
         taskIds.length === destination.taskIds.length
       )
-        return;
-      await flowday.updateFlow({
+        return confirmedSource ? [confirmedSource, flowPlan(destination)] : [];
+      const confirmed = await flowday.updateFlow({
         flow: { name: `flows/${target.date}`, taskIds },
         updateMask: { paths: ["task_ids"] },
       });
+      const confirmedTarget = flowPlan(confirmed);
+      return confirmedSource
+        ? [confirmedSource, confirmedTarget]
+        : [confirmedTarget];
     },
     async updateEstimate(taskId, minutes) {
       await ensureSynced([taskId]);
@@ -320,7 +354,7 @@ export function createApi(
       const key = `${action}:${taskId}:${focus.timerEtag}`;
       const requestId = timerRequests.get(key) ?? crypto.randomUUID();
       timerRequests.set(key, requestId);
-      await flowday.commandTimer({
+      const confirmed = await flowday.commandTimer({
         name: "timerSession",
         requestId,
         etag: focus.timerEtag,
@@ -330,6 +364,7 @@ export function createApi(
           action === "start" ? focus.date : focus.timer?.flowDate || focus.date,
       });
       timerRequests.delete(key);
+      return timerSnapshot(confirmed);
     },
   };
 }

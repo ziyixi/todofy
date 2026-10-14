@@ -42,12 +42,12 @@ body {
   place-items: center;
 }
 .prototype-sidebar nav > button {
-  width: 100%;
+  width: calc(100% - 26px);
   display: flex;
   align-items: center;
-  gap: 11px;
-  height: 35px;
-  padding: 0 12px;
+  gap: 0;
+  height: 34px;
+  padding: 5px;
   border-radius: 5px;
   text-align: left;
   font-size: 13px;
@@ -55,6 +55,16 @@ body {
 .prototype-sidebar nav > button svg {
   color: #73746b;
   stroke-width: 1.65;
+}
+.prototype-sidebar nav > button > svg {
+  flex: 0 0 24px;
+  width: 24px;
+  height: 19px;
+}
+.prototype-sidebar .plus-nav-icon svg {
+  width: 18px;
+  height: 18px;
+  stroke-width: 1.75;
 }
 .prototype-sidebar nav > button.active {
   background: #f0f6df;
@@ -132,15 +142,6 @@ body {
   background: none;
   color: inherit;
   cursor: pointer;
-}
-@media (max-width: 800px) {
-  .prototype-sidebar {
-    width: 190px;
-    flex-basis: 190px;
-  }
-  .plus-prototype > main {
-    margin-left: 190px;
-  }
 }
 @media (max-width: 600px) {
   .prototype-sidebar {

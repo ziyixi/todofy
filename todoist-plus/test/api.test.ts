@@ -67,7 +67,15 @@ it("loads complete pages and uses the authoritative timer etag for subsequent ac
         ],
       });
     if (url.pathname.endsWith("/timerSession:command"))
-      return json({ name: "timerSession", state: "running", etag: "43" });
+      return json({
+        name: "timerSession",
+        task_id: "child",
+        flow_date: "2026-10-13",
+        state: "running",
+        etag: "43",
+        saved_seconds: 5,
+        segment_start_time: "2026-10-13T12:00:00Z",
+      });
     if (url.pathname.endsWith(":completeTask"))
       return json({ task_id: "child" });
     throw new Error("Unexpected request " + url.pathname);
@@ -89,7 +97,20 @@ it("loads complete pages and uses the authoritative timer etag for subsequent ac
   expect(plan.tasks.map((task) => task.id)).toEqual(["parent", "child"]);
   expect(focus.estimates.child).toBe(45);
   expect(focus.timerEtag).toBe("42");
-  await api.timer("start", "child", focus);
+  const timerCallsStart = calls.length;
+  const confirmed = await api.timer("start", "child", focus);
+  expect(confirmed).toEqual({
+    timerEtag: "43",
+    timer: {
+      taskId: "child",
+      flowDate: "2026-10-13",
+      status: "running",
+      elapsedSeconds: 5,
+      startedAt: "2026-10-13T12:00:00.000Z",
+      etag: "43",
+    },
+  });
+  expect(calls.slice(timerCallsStart)).toHaveLength(1);
   const command = calls.find((call) => call.path.endsWith(":command"))!;
   expect(command.body.etag).toBe("42");
   expect(command.body.action).toBe("start");
@@ -104,6 +125,85 @@ it("loads complete pages and uses the authoritative timer etag for subsequent ac
     request_id: "d4a3e34e-54c9-48c0-9996-98a4f72bef74",
   });
   expect(calls.filter((call) => call.path.endsWith(":command")).length).toBe(1);
+
+  const futureCallsStart = calls.length;
+  const future = await api.load("2026-10-19");
+  expect(future.plan.week).toBe("2026-10-12");
+  expect(future.days.map((day) => day.date)).toEqual([
+    "2026-10-19",
+    "2026-10-20",
+    "2026-10-21",
+    "2026-10-22",
+    "2026-10-23",
+    "2026-10-24",
+    "2026-10-25",
+  ]);
+  expect(future.focus.date).toBe("2026-10-13");
+  expect(future.focus.taskIds).toEqual(["child"]);
+  expect(
+    calls
+      .slice(futureCallsStart)
+      .filter((call) => call.path.includes("/flows/"))
+      .map((call) => call.path.split("/").at(-1))
+      .sort(),
+  ).toEqual(["2026-10-13", ...future.days.map((day) => day.date)]);
+});
+it("reads only the selected week's seven queues when changing weeks", async () => {
+  const paths: string[] = [];
+  const api = createApi(
+    { apiOrigin: "https://api.example.test", token: "synthetic" },
+    vi.fn<typeof fetch>(async (input) => {
+      const path = new URL(String(input)).pathname;
+      paths.push(path);
+      if (!path.includes("/flows/"))
+        throw new Error(
+          "Week selection must not scan tasks or account metadata",
+        );
+      return json({
+        name: `flows/${path.split("/").at(-1)}`,
+        task_ids: ["synthetic-step"],
+        completed_task_ids: ["synthetic-completed"],
+      });
+    }),
+  );
+  const days = await api.loadDays("2026-10-19");
+  expect(paths).toHaveLength(7);
+  expect(days.map((day) => day.date)).toEqual([
+    "2026-10-19",
+    "2026-10-20",
+    "2026-10-21",
+    "2026-10-22",
+    "2026-10-23",
+    "2026-10-24",
+    "2026-10-25",
+  ]);
+  expect(days.every((day) => day.taskIds[0] === "synthetic-step")).toBe(true);
+  expect(
+    days.every((day) => day.completedTaskIds[0] === "synthetic-completed"),
+  ).toBe(true);
+});
+it("returns a confirmed stopped timer without reloading the task lists", async () => {
+  const fetcher = vi.fn<typeof fetch>(async (input) => {
+    expect(new URL(String(input)).pathname).toBe(
+      "/api/plus/flowday/api/v1/timerSession:command",
+    );
+    return json({ name: "timerSession", state: "idle", etag: "44" });
+  });
+  const api = createApi(
+    { apiOrigin: "https://api.example.test", token: "synthetic" },
+    fetcher,
+  );
+  const confirmed = await api.timer("stop", "child", {
+    date: "2026-10-13",
+    timerEtag: "43",
+    taskIds: ["child"],
+    completedTaskIds: [],
+    estimates: {},
+    flowTasks: {},
+  });
+  expect(confirmed).toEqual({ timerEtag: "44" });
+  expect(confirmed.timer).toBeUndefined();
+  expect(fetcher).toHaveBeenCalledOnce();
 });
 it("rejects connection origins with paths, credentials or insecure protocols", () => {
   for (const value of [

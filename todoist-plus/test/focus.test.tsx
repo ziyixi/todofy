@@ -1,13 +1,12 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { createPrototype } from "../design/fixture";
 import { FocusView } from "../src/FocusView";
 
 afterEach(cleanup);
 
-it("shows the cleaned full parent path and preserves local records without a Todoist completion control", async () => {
-  const actions = createPrototype();
-  const { plan, focus } = await actions.load();
+it("shows cleaned parent context and local records with execution controls only", async () => {
+  const { plan, focus } = await createPrototype().load();
   const parent = plan.tasks.find((task) => task.id === "release")!;
   parent.title = "[TASK] Synthetic outcome <k:synthetic.root>";
   plan.tasks.push({
@@ -26,20 +25,18 @@ it("shows the cleaned full parent path and preserves local records without a Tod
     local: true,
     estimatedMinutes: 15,
   };
+  const onTimer = vi.fn();
+  const complete = vi.fn();
   render(
     <FocusView
       plan={plan}
       focus={focus}
-      days={[focus]}
-      today={focus.date}
-      onDateChange={vi.fn()}
       language="en"
       busy={false}
-      run={vi.fn()}
-      actions={actions}
       editTask={vi.fn()}
-      addFocus={vi.fn()}
-      complete={vi.fn()}
+      complete={complete}
+      onOpenPlan={vi.fn()}
+      onTimer={onTimer}
     />,
   );
   expect(
@@ -56,8 +53,38 @@ it("shows the cleaned full parent path and preserves local records without a Tod
     }),
   ).toBeNull();
   expect(
-    screen.getByRole("button", {
-      name: "Remove from day: Synthetic local note",
+    screen.queryByRole("button", {
+      name: /Choose tasks|Drag step|Remove from day|Move up|Move down/,
     }),
-  ).toBeTruthy();
+  ).toBeNull();
+  expect(screen.queryByRole("combobox")).toBeNull();
+  fireEvent.click(
+    screen.getByRole("button", { name: "Start: Synthetic leaf" }),
+  );
+  expect(onTimer).toHaveBeenCalledWith("start", "copy");
+  expect(complete).not.toHaveBeenCalled();
+});
+
+it("sends an empty today queue back to Plan instead of presenting another task picker", async () => {
+  const { plan, focus } = await createPrototype().load();
+  focus.taskIds = [];
+  const onOpenPlan = vi.fn();
+  render(
+    <FocusView
+      plan={plan}
+      focus={focus}
+      language="en"
+      busy={false}
+      editTask={vi.fn()}
+      complete={vi.fn()}
+      onOpenPlan={onOpenPlan}
+      onTimer={vi.fn()}
+    />,
+  );
+  expect(screen.getByText("No steps planned for today.")).toBeTruthy();
+  fireEvent.click(
+    screen.getByRole("button", { name: "Adjust plan" }),
+  );
+  expect(onOpenPlan).toHaveBeenCalled();
+  expect(screen.queryByRole("button", { name: "Choose tasks" })).toBeNull();
 });

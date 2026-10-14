@@ -465,6 +465,19 @@ body {
   flex: 0 0 24px;
   stroke-width: 2;
 }
+.plus-nav-icon {
+  flex: 0 0 24px;
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+}
+.plus-extension-nav .plus-nav-icon svg {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  stroke-width: 1.75;
+}
 .plus-extension-nav button:hover {
   background: var(--plus-hover, #f7f7f3);
 }

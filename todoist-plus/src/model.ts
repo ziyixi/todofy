@@ -35,6 +35,9 @@ export interface FlowDayPlan {
   taskIds: string[];
   completedTaskIds: string[];
 }
+export type RunOperation = (
+  operation: () => Promise<void | FlowDayPlan[]>,
+) => Promise<boolean>;
 export interface FocusState extends FlowDayPlan {
   timerEtag: string;
   estimates: Record<string, number>;
@@ -60,8 +63,13 @@ export interface PlusData {
   focus: FocusState;
   days: FlowDayPlan[];
 }
+export interface TimerSnapshot {
+  timerEtag: string;
+  timer?: FocusState["timer"];
+}
 export interface PlusActions {
-  load(): Promise<PlusData>;
+  load(weekStart?: string): Promise<PlusData>;
+  loadDays(weekStart: string): Promise<FlowDayPlan[]>;
   updateTask(
     task: PlanningTask,
     update: { stage?: Stage; area?: Area; bet?: boolean },
@@ -81,17 +89,17 @@ export interface PlusActions {
     requestId: string,
     flowDate: string,
   ): Promise<void>;
-  updateQueue(taskIds: string[], day: FlowDayPlan): Promise<void>;
+  updateQueue(taskIds: string[], day: FlowDayPlan): Promise<FlowDayPlan[]>;
   moveTaskToDay(
     taskId: string,
     source: FlowDayPlan | undefined,
     target: FlowDayPlan,
     beforeId?: string,
-  ): Promise<void>;
+  ): Promise<FlowDayPlan[]>;
   updateEstimate(taskId: string, minutes: number): Promise<void>;
   timer(
     action: "start" | "pause" | "resume" | "stop",
     taskId: string,
     focus: FocusState,
-  ): Promise<void>;
+  ): Promise<TimerSnapshot>;
 }

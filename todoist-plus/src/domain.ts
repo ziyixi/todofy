@@ -58,26 +58,6 @@ export function topLevelBets(
   );
 }
 
-export function executionChoices(tasks: PlanningTask[]): PlanningTask[] {
-  const parents = new Set(tasks.map((task) => task.parentId).filter(Boolean));
-  const byId = new Map(tasks.map((task) => [task.id, task]));
-  return tasks.filter((task) => {
-    if (parents.has(task.id)) return false;
-    if (task.labels.includes("quick") || task.stage === "committed" || task.bet)
-      return true;
-    let parent = task.parentId;
-    const seen = new Set<string>();
-    while (parent && !seen.has(parent)) {
-      seen.add(parent);
-      const item = byId.get(parent);
-      if (!item) break;
-      if (item.stage === "committed" || item.bet) return true;
-      parent = item.parentId;
-    }
-    return false;
-  });
-}
-
 export function displayedTitle(title: string): string {
   return (
     title
@@ -109,14 +89,23 @@ export function formattedMinutes(minutes: number): string {
     : `${minutes}m`;
 }
 
-export function moveTask(ids: string[], id: string, offset: number): string[] {
-  const from = ids.indexOf(id);
-  const to = from + offset;
-  if (from < 0 || to < 0 || to >= ids.length) return ids;
-  const result = [...ids];
-  result.splice(from, 1);
-  result.splice(to, 0, id);
-  return result;
+export function taskFamilyColor(
+  task: PlanningTask,
+  tasks: PlanningTask[],
+): string {
+  const root = taskAncestors(task, tasks)[0] ?? task;
+  const colors = [
+    "#4379ad",
+    "#8d65ab",
+    "#b27a3b",
+    "#39877e",
+    "#ab6681",
+    "#6a8344",
+  ];
+  let hash = 0;
+  for (const character of root.id)
+    hash = (hash * 31 + character.charCodeAt(0)) >>> 0;
+  return colors[hash % colors.length]!;
 }
 
 export function startDate(deadline: string, leadDays: number): string {

@@ -4,7 +4,7 @@ import { extensionActions } from "./client";
 import { words } from "./i18n";
 import { todoistTaskUrl } from "./domain";
 import { TaskEditor } from "./TaskEditor";
-import type { FocusState, Language, PlanState } from "./model";
+import type { FocusState, Language, PlanState, RunOperation } from "./model";
 
 export function NativeTaskTools({
   taskId,
@@ -37,15 +37,27 @@ export function NativeTaskTools({
       })
       .finally(() => setBusy(false));
   }, [open, text.lastError, onReady, onUnavailable]);
-  const run = async (operation: () => Promise<void>): Promise<boolean> => {
+  const run: RunOperation = async (operation) => {
     if (busy) return false;
     setBusy(true);
     setError("");
     try {
-      await operation();
-      const next = await extensionActions.load();
-      setData(next);
-      onReady?.(next.plan);
+      const confirmed = await operation();
+      if (confirmed) {
+        setData((current) => {
+          if (!current) return current;
+          const today = confirmed.find(
+            (day) => day.date === current.focus.date,
+          );
+          return today
+            ? { ...current, focus: { ...current.focus, ...today } }
+            : current;
+        });
+      } else {
+        const next = await extensionActions.load();
+        setData(next);
+        onReady?.(next.plan);
+      }
       return true;
     } catch (failure) {
       onUnavailable?.();

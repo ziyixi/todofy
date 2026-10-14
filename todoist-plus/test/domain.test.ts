@@ -2,8 +2,6 @@ import { describe, expect, it } from "vitest";
 import {
   displayedTitle,
   effectiveArea,
-  executionChoices,
-  moveTask,
   startDate,
   topLevelChoices,
   topLevelBets,
@@ -31,7 +29,7 @@ const task = (
 });
 
 describe("planning choices", () => {
-  it("counts a committed parent once, keeping its children available for execution", () => {
+  it("counts a committed parent once and inherits its area for its child", () => {
     const tasks = [
       task("parent", { stage: "committed" }),
       task("child", {
@@ -47,10 +45,6 @@ describe("planning choices", () => {
       "candidate",
       "quick",
     ]);
-    expect(executionChoices(tasks).map((item) => item.id)).toEqual([
-      "child",
-      "quick",
-    ]);
     expect(effectiveArea(tasks[1]!, tasks)).toBe("work");
   });
   it("leaves unrelated title syntax intact while removing known display-only markers", () => {
@@ -62,14 +56,6 @@ describe("planning choices", () => {
   it("matches the existing exclusive deadline filter across year boundaries", () => {
     expect(startDate("2027-01-10", 30)).toBe("2026-12-12");
     expect(startDate("2027-01-10", 0)).toBe("");
-  });
-  it("reorders the chosen task while retaining every other queued ID", () => {
-    expect(moveTask(["a", "local-keep", "b"], "b", -1)).toEqual([
-      "a",
-      "b",
-      "local-keep",
-    ]);
-    expect(moveTask(["a", "b"], "a", -1)).toEqual(["a", "b"]);
   });
 });
 

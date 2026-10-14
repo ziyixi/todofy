@@ -57,14 +57,18 @@ function Prototype() {
             className={view === "plan" ? "active" : ""}
             onClick={() => setView("plan")}
           >
-            <LayoutList size={19} />
+            <span className="plus-nav-icon" aria-hidden="true">
+              <LayoutList size={18} />
+            </span>
             {text.plan}
           </button>
           <button
             className={view === "focus" ? "active" : ""}
             onClick={() => setView("focus")}
           >
-            <Target size={19} />
+            <span className="plus-nav-icon" aria-hidden="true">
+              <Target size={18} />
+            </span>
             {text.focus}
           </button>
           <div className="prototype-nav-heading">

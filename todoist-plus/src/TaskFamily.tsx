@@ -1,9 +1,15 @@
-import { useState } from "react";
+import { useState, type CSSProperties } from "react";
 import { useDraggable } from "@dnd-kit/react";
 import { ChevronDown, ChevronRight, GripVertical, Star } from "lucide-react";
-import { displayedTitle, formattedMinutes, taskAncestors } from "./domain";
+import {
+  displayedTitle,
+  formattedMinutes,
+  taskAncestors,
+  taskFamilyColor,
+} from "./domain";
 import { words } from "./i18n";
 import type {
+  RunOperation,
   FlowDayPlan,
   FocusState,
   Language,
@@ -25,6 +31,9 @@ export function TaskBreadcrumb({
   return (
     <small
       className="plus-task-breadcrumb"
+      style={
+        { "--plus-family-color": taskFamilyColor(task, tasks) } as CSSProperties
+      }
       aria-label={language === "zh" ? "所属任务" : "Parent task"}
       title={parents.map((parent) => displayedTitle(parent.title)).join(" › ")}
     >
@@ -42,7 +51,7 @@ interface Props {
   busy: boolean;
   timer?: FocusState["timer"];
   actions: PlusActions;
-  run: (operation: () => Promise<void>) => Promise<boolean>;
+  run: RunOperation;
   editTask: (task: PlanningTask) => void;
   depth?: number;
   familyStage?: PlanningTask["stage"];
@@ -81,10 +90,20 @@ export function TaskFamily({
       day.taskIds.includes(task.id) && !day.completedTaskIds.includes(task.id),
   );
   return (
-    <li className={`plus-family ${isDragSource ? "is-dragging" : ""}`}>
-      <div ref={ref} className="plus-family-row" data-task-id={task.id}>
+    <li
+      className={`plus-family ${depth === 0 ? "plus-family-root" : ""} ${isDragSource ? "is-dragging" : ""}`}
+      style={
+        { "--plus-family-color": taskFamilyColor(task, tasks) } as CSSProperties
+      }
+    >
+      <div
+        ref={leaf ? ref : undefined}
+        className="plus-family-row"
+        data-task-id={task.id}
+      >
         {leaf ? (
           <button
+            key="drag"
             ref={handleRef}
             className="plus-family-handle"
             aria-label={`${language === "zh" ? "拖动安排" : "Drag to schedule"}: ${displayedTitle(task.title)}`}
@@ -101,6 +120,7 @@ export function TaskFamily({
           </button>
         ) : (
           <button
+            key="expand"
             className="plus-family-handle"
             aria-label={`${open ? text.close : text.chooseStep}: ${displayedTitle(task.title)}`}
             aria-expanded={open}
@@ -168,7 +188,11 @@ export function TaskFamily({
               {(["none", "monthly", "weekly", "committed"] as const).map(
                 (stage) => (
                   <option key={stage} value={stage}>
-                    {text[stage]}
+                    {stage === "weekly"
+                      ? language === "zh"
+                        ? "本周待选"
+                        : "This week"
+                      : text[stage]}
                   </option>
                 ),
               )}

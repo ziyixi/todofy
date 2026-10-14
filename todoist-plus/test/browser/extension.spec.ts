@@ -177,7 +177,13 @@ async function setup(context: BrowserContext, worker: Worker) {
             409,
           );
         }
-        return json({ name: "timerSession", state: "running", etag: "9" });
+        return json({
+          name: "timerSession",
+          state: "running",
+          etag: "9",
+          task_id: body.task_id,
+          flow_date: body.flow_date,
+        });
       }
       throw new Error("Unexpected synthetic API path");
     };
@@ -233,6 +239,18 @@ test("built MV3 mounts, restores native UI and sends task actions through its ba
     await expect(planButton).toHaveCSS("padding", "5px");
     await expect(planButton).toHaveCSS("width", "230px");
     await expect(planButton).toHaveCSS("font-size", "13px");
+    await expect(planButton.locator(".plus-nav-icon")).toHaveCSS(
+      "width",
+      "24px",
+    );
+    await expect(planButton.locator(".plus-nav-icon svg")).toHaveCSS(
+      "width",
+      "18px",
+    );
+    await expect(planButton.locator(".plus-nav-icon svg")).toHaveCSS(
+      "height",
+      "18px",
+    );
     await expect(page.locator("#native-today")).toHaveClass("current");
     await expect(page.locator("#native-today > a")).toHaveCSS(
       "background-color",
@@ -268,6 +286,9 @@ test("built MV3 mounts, restores native UI and sends task actions through its ba
     await page
       .getByRole("button", { name: "Start: Synthetic small step" })
       .click();
+    await expect(
+      page.getByRole("button", { name: "Pause: Synthetic small step" }),
+    ).toBeVisible();
     await page
       .getByRole("button", { name: "Complete task: Synthetic small step" })
       .click();
@@ -352,7 +373,9 @@ test("returning from a native page reloads Focus after an external queue change"
     await page.goto("https://app.todoist.com/app/today");
     await page.getByRole("button", { name: "Focus", exact: true }).click();
     const queuedStep = page.locator('.plus-focus-stack [data-task-id="child"]');
-    await expect(page.locator(".plus-focus-stack")).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Adjust plan", exact: true }),
+    ).toBeVisible();
     await expect(queuedStep).toHaveCount(0);
     await page.getByRole("link", { name: "Today", exact: true }).click();
     await expect(page.locator("#native")).toBeVisible();

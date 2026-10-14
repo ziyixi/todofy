@@ -175,3 +175,40 @@ All seven files match the branch's tested CI artifact and the newly created
 copied. The existing installation was preserved. The owner must disable the old instance, load this
 new directory and reconnect once because the unpacked path can change extension identity. Future updates
 use the same directory and Chrome Reload. The tool's blocked internal extensions page was not bypassed.
+
+## Installed interaction feedback correction, October 13
+
+The owner loaded the fixed directory and reported sluggish task selection/dragging, duplicate planning in
+Focus, faint text, oversized navigation symbols, horizontal overflow and missing week navigation. A real
+Chrome observation initially showed an invalidated old content script; reloading mounted the weekly version.
+A synthetic Inbox parent with two 30-minute steps then exercised real scheduling and day-to-day dragging.
+The moved step was confirmed on the next day's Plan after rereading; the immediate post-drop observation
+had preceded the UI update. Test scheduling was removed and the parent/children completed. A fresh Inbox
+reload confirmed no active test task. No real task or running timer was changed.
+
+The source correction stays within the extension:
+
+- Plan owns arrangement and estimates; Focus executes today's already arranged steps. Its picker, dragging,
+  day planner and duplicate reorder controls are removed. Existing task estimates are edited in TaskEditor.
+- View switching uses current data. Confirmed timer and queue responses update the interface directly;
+  queue follow-up reads only the displayed seven days, and initial independent queries run concurrently.
+  A bounded reading identity prevents an older week response from overwriting a newer view.
+- Non-draggable parent rows no longer receive the draggable ref. The old package's semantic click regression
+  reported the entire row disabled; the fix proves parent expansion and task details remain operable.
+- The board browses previous/next weeks and returns to the current week without changing commitment tags,
+  Todoist dates or timer ownership. Available width determines seven, three or one visible day. Normal desktop
+  widths retain the pool beside the board; smaller widths stack them without horizontal overflow.
+- Root-family color marks, 14px body text and 12px metadata improve hierarchy. Navigation glyphs are 18px
+  inside the existing 24px slot, preserving native label alignment.
+
+Local checks pass: 35 units/component/API cases and nine actual built-MV3 browser scenarios, types, lint and
+production build. The browser scenarios verify persisted day order, no full task rescan after dragging,
+confirmed timer display, native semantic actions, future-week saving, readable narrow layout and restored
+navigation. Two stale-response regressions first failed and then passed; task estimates persist and clear.
+Screenshots from the new Chrome prototype contain only synthetic content. A temporary Shadow DOM comparison
+also supported normal pointer dragging; its files and an unsupported pointer-isolation experiment were removed.
+No permanent diagnostic, new dependency, service, database, API schema or billing change was introduced.
+
+At this checkpoint the correction's branch gate, same-SHA publication and owner's same-directory Reload are
+pending. This record distinguishes the old installed-version real check from the new package's synthetic
+checks. PWA and natural Monday rollover remain separate open observations.

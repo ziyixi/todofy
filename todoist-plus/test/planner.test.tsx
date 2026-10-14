@@ -27,7 +27,7 @@ it("shows a commitment's small steps inline while counting only the outcome", as
       actions={actions}
       run={vi.fn()}
       editTask={vi.fn()}
-      onOpenFocus={vi.fn()}
+      onWeekChange={vi.fn()}
     />,
   );
   const pool = within(
@@ -65,7 +65,7 @@ it("schedules a leaf step to its chosen FlowDay date without changing Todoist pl
         return true;
       }}
       editTask={vi.fn()}
-      onOpenFocus={vi.fn()}
+      onWeekChange={vi.fn()}
     />,
   );
   fireEvent.change(
@@ -126,7 +126,7 @@ it("keeps a running step in its day until its session is stopped", async () => {
       actions={actions}
       run={vi.fn()}
       editTask={vi.fn()}
-      onOpenFocus={vi.fn()}
+      onWeekChange={vi.fn()}
     />,
   );
   for (const button of screen.getAllByRole("button", {
@@ -148,4 +148,81 @@ it("keeps a running step in its day until its session is stopped", async () => {
     ).disabled,
   ).toBe(true);
   expect((await actions.load()).focus.taskIds).toContain("copy");
+});
+
+it("navigates calendar weeks without relabelling the current commitments or locking navigation during a save", async () => {
+  const actions = createPrototype();
+  const { plan, focus, days } = await actions.load();
+  const onWeekChange = vi.fn();
+  const props = {
+    plan,
+    days,
+    flowTasks: focus.flowTasks,
+    currentDate: focus.date,
+    language: "en" as const,
+    busy: true,
+    actions,
+    run: vi.fn(),
+    editTask: vi.fn(),
+    onWeekChange,
+  };
+  const view = render(<PlanView {...props} />);
+  const previous = screen.getByRole("button", { name: "Previous week" });
+  const next = screen.getByRole("button", { name: "Next week" });
+  expect((previous as HTMLButtonElement).disabled).toBe(false);
+  expect((next as HTMLButtonElement).disabled).toBe(false);
+  fireEvent.click(previous);
+  fireEvent.click(next);
+  expect(onWeekChange.mock.calls.map(([date]) => date)).toEqual([
+    "2026-10-05",
+    "2026-10-19",
+  ]);
+  const nextDays = days.map((day) => {
+    const date = new Date(`${day.date}T12:00:00Z`);
+    date.setUTCDate(date.getUTCDate() + 7);
+    return { ...day, date: date.toISOString().slice(0, 10) };
+  });
+  view.rerender(<PlanView {...props} days={nextDays} />);
+  fireEvent.click(screen.getByRole("button", { name: "This week" }));
+  expect(onWeekChange).toHaveBeenLastCalledWith("2026-10-12");
+  expect(
+    within(
+      screen.getByRole("complementary", { name: "Outcomes and steps" }),
+    ).getByText("3 / 5"),
+  ).toBeTruthy();
+});
+
+it("marks steps from the same outcome consistently and distinguishes another outcome", async () => {
+  const actions = createPrototype();
+  const { plan, focus, days } = await actions.load();
+  days[1]!.taskIds = ["copy", "layout", "outline", "missing-id"];
+  render(
+    <PlanView
+      plan={plan}
+      days={days}
+      flowTasks={focus.flowTasks}
+      currentDate={focus.date}
+      language="en"
+      busy={false}
+      actions={actions}
+      run={vi.fn()}
+      editTask={vi.fn()}
+      onWeekChange={vi.fn()}
+    />,
+  );
+  const card = (id: string) =>
+    document.querySelector<HTMLElement>(
+      `.plus-week-step[data-task-id="${id}"]`,
+    )!;
+  expect(
+    card("copy").querySelector('[aria-label="Parent task"]')?.textContent,
+  ).toBe("Ship the small website refresh");
+  expect(
+    card("outline").querySelector('[aria-label="Parent task"]')?.textContent,
+  ).toBe("Prepare the next research check-in");
+  const color = (id: string) =>
+    card(id).style.getPropertyValue("--plus-family-color");
+  expect(color("copy")).toBe(color("layout"));
+  expect(color("copy")).not.toBe(color("outline"));
+  expect(card("missing-id").textContent).toContain("Task unavailable");
 });

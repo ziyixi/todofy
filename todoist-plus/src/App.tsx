@@ -15,6 +15,7 @@ import { FocusView } from "./FocusView";
 import { TaskEditor } from "./TaskEditor";
 import type {
   Language,
+  FlowDayPlan,
   PlanState,
   PlanningTask,
   PlusActions,
@@ -43,9 +44,11 @@ export function App({
   onViewChange,
 }: Props) {
   const [data, setData] = useState<PlusData>();
-  const [selectedDate, setSelectedDate] = useState("");
+  const displayedWeek = useRef("");
+  const weekRequest = useRef(0);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [weekLoading, setWeekLoading] = useState(false);
   const lock = useRef(false);
   const [selectedId, setSelectedId] = useState(externalTaskId ?? "");
   const completionIds = useRef(new Map<string, string>());
@@ -53,24 +56,52 @@ export function App({
   const dialog = useRef<HTMLDialogElement>(null);
   const text = words(language);
   const load = useCallback(async () => {
+    const request = ++weekRequest.current;
     try {
-      const next = await actions.load();
-      setData(next);
+      const week = displayedWeek.current;
+      const next = await actions.load(week || undefined);
+      if (!displayedWeek.current) displayedWeek.current = next.plan.week;
+      setData((current) =>
+        current && request !== weekRequest.current
+          ? { ...next, days: current.days }
+          : next,
+      );
       onReady?.(next.plan);
     } catch (failure) {
       onReady?.();
       throw failure;
+    } finally {
+      if (request === weekRequest.current) setWeekLoading(false);
     }
   }, [actions, onReady]);
   const run = useCallback(
-    async (operation: () => Promise<void>): Promise<boolean> => {
+    async (
+      operation: () => Promise<void | FlowDayPlan[]>,
+      refresh = true,
+    ): Promise<boolean> => {
       if (lock.current) return false;
       lock.current = true;
       setBusy(true);
       setError("");
       try {
-        await operation();
-        await load();
+        const confirmed = await operation();
+        if (confirmed) {
+          setData((current) => {
+            if (!current) return current;
+            const today = confirmed.find(
+              (day) => day.date === current.focus.date,
+            );
+            return {
+              ...current,
+              days: current.days.map(
+                (day) =>
+                  confirmed.find((next) => next.date === day.date) ?? day,
+              ),
+              focus: today ? { ...current.focus, ...today } : current.focus,
+            };
+          });
+          if (confirmed.length) await changeWeek(displayedWeek.current);
+        } else if (refresh) await load();
         return true;
       } catch (failure) {
         setError(failure instanceof Error ? failure.message : text.lastError);
@@ -90,7 +121,7 @@ export function App({
   );
   useEffect(() => {
     void run(async () => {});
-  }, [run, view]);
+  }, [run]);
   useEffect(() => {
     const visible = () => {
       if (document.visibilityState === "visible" && !lock.current)
@@ -112,13 +143,48 @@ export function App({
       dialog.current.showModal();
   }, [selectedId]);
 
-  const selectedDay =
-    data?.days.find((day) => day.date === selectedDate) ?? data?.focus;
-  const currentFocus =
-    data && selectedDay ? { ...data.focus, ...selectedDay } : undefined;
-  async function addFocus(id: string, day = selectedDay) {
+  async function addFocus(id: string, day = data?.focus) {
     if (!data || !day || day.taskIds.includes(id)) return;
     await run(() => actions.updateQueue([...day.taskIds, id], day));
+  }
+  function changeWeek(week: string) {
+    const request = ++weekRequest.current;
+    displayedWeek.current = week;
+    setWeekLoading(true);
+    return actions
+      .loadDays(week)
+      .then((days) => {
+        if (weekRequest.current === request)
+          setData((current) => (current ? { ...current, days } : current));
+      })
+      .catch((failure) => {
+        if (weekRequest.current === request)
+          setError(failure instanceof Error ? failure.message : text.lastError);
+      })
+      .finally(() => {
+        if (weekRequest.current === request) setWeekLoading(false);
+      });
+  }
+  function commandTimer(
+    action: "start" | "pause" | "resume" | "stop",
+    taskId: string,
+  ) {
+    if (!data) return;
+    void run(async () => {
+      const confirmed = await actions.timer(action, taskId, data.focus);
+      setData((current) =>
+        current
+          ? {
+              ...current,
+              focus: {
+                ...current.focus,
+                timerEtag: confirmed.timerEtag,
+                timer: confirmed.timer,
+              },
+            }
+          : current,
+      );
+    }, false);
   }
   function complete(task: PlanningTask) {
     let id = completionIds.current.get(task.id);
@@ -133,7 +199,7 @@ export function App({
         requestId,
         data?.focus.timer?.taskId === task.id
           ? data.focus.timer.flowDate
-          : (currentFocus?.date ?? ""),
+          : (data?.focus.date ?? ""),
       ),
     ).then((ok) => {
       if (ok) completionIds.current.delete(task.id);
@@ -143,6 +209,11 @@ export function App({
   const timerTask = data?.plan.tasks.find(
     (task) => task.id === data.focus.timer?.taskId,
   );
+  function refresh() {
+    if (error === "Extension updated. Reload Todoist to continue.")
+      window.location.reload();
+    else void run(async () => {});
+  }
   return (
     <div className={`plus-root plus-root-${view}`}>
       <header className="plus-page-header">
@@ -152,8 +223,8 @@ export function App({
             <CalendarDays size={13} />
             {data
               ? view === "plan"
-                ? data.plan.week
-                : currentFocus?.date
+                ? (data.days[0]?.date ?? data.plan.week)
+                : data.focus.date
               : ""}
             {data && <span> · {data.plan.timezone}</span>}
           </div>
@@ -163,9 +234,12 @@ export function App({
             className="plus-icon"
             aria-label={text.refresh}
             disabled={busy}
-            onClick={() => void run(async () => {})}
+            onClick={refresh}
           >
-            <RefreshCw size={17} className={busy ? "plus-spin" : ""} />
+            <RefreshCw
+              size={17}
+              className={busy || weekLoading ? "plus-spin" : ""}
+            />
           </button>
           <button
             className="plus-icon"
@@ -179,9 +253,7 @@ export function App({
       {error && (
         <div className="plus-error" role="alert">
           <span>{error}</span>
-          <button onClick={() => void run(async () => {})}>
-            {text.refresh}
-          </button>
+          <button onClick={refresh}>{text.refresh}</button>
           <button onClick={onSettings}>{text.manage}</button>
         </div>
       )}
@@ -199,7 +271,7 @@ export function App({
       {data && (
         <fieldset
           className="plus-content-fieldset"
-          disabled={busy || !data.plan.configured}
+          disabled={!data.plan.configured}
         >
           {view === "plan" ? (
             <PlanView
@@ -208,12 +280,9 @@ export function App({
               flowTasks={data.focus.flowTasks}
               timer={data.focus.timer}
               currentDate={data.focus.date}
-              onOpenFocus={(date) => {
-                setSelectedDate(date);
-                onViewChange?.("focus");
-              }}
+              onWeekChange={changeWeek}
               language={language}
-              busy={busy || !data.plan.configured}
+              busy={busy || weekLoading || !data.plan.configured}
               run={run}
               actions={actions}
               editTask={(task) => setSelectedId(task.id)}
@@ -221,17 +290,13 @@ export function App({
           ) : (
             <FocusView
               plan={data.plan}
-              focus={currentFocus!}
-              days={data.days}
-              today={data.focus.date}
-              onDateChange={setSelectedDate}
+              focus={data.focus}
               language={language}
               busy={busy || !data.plan.configured}
-              run={run}
-              actions={actions}
               editTask={(task) => setSelectedId(task.id)}
-              addFocus={(id) => void addFocus(id)}
               complete={complete}
+              onOpenPlan={() => onViewChange?.("plan")}
+              onTimer={commandTimer}
             />
           )}
         </fieldset>
@@ -257,12 +322,9 @@ export function App({
               data.focus.timer.status === "running" ? text.pause : text.resume
             }
             onClick={() =>
-              void run(() =>
-                actions.timer(
-                  data.focus.timer?.status === "running" ? "pause" : "resume",
-                  data.focus.timer!.taskId,
-                  data.focus,
-                ),
+              commandTimer(
+                data.focus.timer?.status === "running" ? "pause" : "resume",
+                data.focus.timer!.taskId,
               )
             }
           >
@@ -276,11 +338,7 @@ export function App({
             className="plus-icon"
             disabled={busy}
             aria-label={text.stop}
-            onClick={() =>
-              void run(() =>
-                actions.timer("stop", data.focus.timer!.taskId, data.focus),
-              )
-            }
+            onClick={() => commandTimer("stop", data.focus.timer!.taskId)}
           >
             <Square size={15} />
           </button>

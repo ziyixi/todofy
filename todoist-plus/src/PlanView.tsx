@@ -10,6 +10,7 @@ import { TaskFamily } from "./TaskFamily";
 import { WeekPlanner } from "./WeekPlanner";
 import { words } from "./i18n";
 import type {
+  RunOperation,
   Area,
   FlowDayPlan,
   FocusState,
@@ -27,10 +28,10 @@ interface Props {
   currentDate: string;
   language: Language;
   busy: boolean;
-  run: (operation: () => Promise<void>) => Promise<boolean>;
+  run: RunOperation;
   actions: PlusActions;
   editTask: (task: PlanningTask) => void;
-  onOpenFocus: (date: string) => void;
+  onWeekChange: (weekStart: string) => void;
 }
 
 export function PlanView({
@@ -44,7 +45,7 @@ export function PlanView({
   run,
   actions,
   editTask,
-  onOpenFocus,
+  onWeekChange,
 }: Props) {
   const [area, setArea] = useState<Area>("work");
   const [monthlyOpen, setMonthlyOpen] = useState(false);
@@ -94,7 +95,7 @@ export function PlanView({
       actions={actions}
       run={run}
       editTask={editTask}
-      onOpenFocus={onOpenFocus}
+      onWeekChange={onWeekChange}
     >
       <div
         className="plus-pool-tabs"

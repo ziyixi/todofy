@@ -1,15 +1,16 @@
-import type { ReactNode } from "react";
+import { useState, type CSSProperties, type ReactNode } from "react";
 import {
   DragDropProvider,
   DragOverlay,
   useDraggable,
   useDroppable,
 } from "@dnd-kit/react";
-import { GripVertical, X } from "lucide-react";
-import { displayedTitle, formattedMinutes } from "./domain";
+import { ChevronLeft, ChevronRight, GripVertical, X } from "lucide-react";
+import { displayedTitle, formattedMinutes, taskFamilyColor } from "./domain";
 import { TaskBreadcrumb } from "./TaskFamily";
 import { words } from "./i18n";
 import type {
+  RunOperation,
   FlowDayPlan,
   FocusState,
   Language,
@@ -27,9 +28,9 @@ interface Props {
   language: Language;
   busy: boolean;
   actions: PlusActions;
-  run: (operation: () => Promise<void>) => Promise<boolean>;
+  run: RunOperation;
   editTask: (task: PlanningTask) => void;
-  onOpenFocus: (date: string) => void;
+  onWeekChange: (weekStart: string) => void;
   children: ReactNode;
 }
 
@@ -45,11 +46,33 @@ export function WeekPlanner(props: Props) {
     actions,
     run,
     editTask,
-    onOpenFocus,
+    onWeekChange,
     children,
   } = props;
   const byId = new Map(plan.tasks.map((task) => [task.id, task]));
-  const text = words(language);
+  const weekStart = days[0]?.date ?? plan.week;
+  const [selectedDate, setSelectedDate] = useState(currentDate);
+  const matchingIndex = days.findIndex((day) => day.date === selectedDate);
+  const todayIndex = days.findIndex((day) => day.date === currentDate);
+  const selectedIndex =
+    matchingIndex >= 0 ? matchingIndex : Math.max(0, todayIndex);
+  const windowStart = Math.min(
+    Math.max(0, selectedIndex - 1),
+    Math.max(0, days.length - 3),
+  );
+  const dateFormat = new Intl.DateTimeFormat(
+    language === "zh" ? "zh-CN" : "en",
+    { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" },
+  );
+  const range = dateFormat.formatRange(
+    new Date(`${weekStart}T12:00:00Z`),
+    new Date(`${days.at(-1)?.date ?? weekStart}T12:00:00Z`),
+  );
+  function changeWeek(offset: number) {
+    const date = new Date(`${weekStart}T12:00:00Z`);
+    date.setUTCDate(date.getUTCDate() + offset * 7);
+    onWeekChange(date.toISOString().slice(0, 10));
+  }
   return (
     <DragDropProvider
       onDragEnd={(event) => {
@@ -88,15 +111,57 @@ export function WeekPlanner(props: Props) {
           aria-label={language === "zh" ? "本周安排" : "Weekly schedule"}
         >
           <div className="plus-week-heading">
-            <strong>{language === "zh" ? "本周安排" : "This week"}</strong>
+            <nav
+              className="plus-week-navigation"
+              aria-label={language === "zh" ? "选择周" : "Choose week"}
+            >
+              <button
+                className="plus-icon"
+                onClick={() => changeWeek(-1)}
+                aria-label={language === "zh" ? "上一周" : "Previous week"}
+              >
+                <ChevronLeft size={17} />
+              </button>
+              <strong>{range}</strong>
+              <button
+                className="plus-icon"
+                onClick={() => changeWeek(1)}
+                aria-label={language === "zh" ? "下一周" : "Next week"}
+              >
+                <ChevronRight size={17} />
+              </button>
+              <button
+                className="plus-week-current"
+                disabled={weekStart === plan.week}
+                onClick={() => onWeekChange(plan.week)}
+              >
+                {language === "zh" ? "回本周" : "This week"}
+              </button>
+            </nav>
             <span>
               {language === "zh"
                 ? "拖到某天 · 不改变 Todoist 日期"
                 : "Drag to a day · Todoist dates stay as they are"}
             </span>
           </div>
+          <div
+            className="plus-week-day-picker"
+            role="tablist"
+            aria-label={language === "zh" ? "选择日期" : "Choose day"}
+          >
+            {days.map((day, index) => (
+              <DayPicker
+                key={day.date}
+                day={day}
+                selected={index === selectedIndex}
+                language={language}
+                busy={busy}
+                onSelect={() => setSelectedDate(day.date)}
+              />
+            ))}
+          </div>
           <div className="plus-week-columns">
-            {days.map((day) => (
+            {days.map((day, index) => (
               <DayColumn
                 key={day.date}
                 day={day}
@@ -104,10 +169,12 @@ export function WeekPlanner(props: Props) {
                 flowTasks={flowTasks}
                 timer={timer}
                 today={currentDate}
+                selected={index === selectedIndex}
+                inWindow={index >= windowStart && index < windowStart + 3}
                 language={language}
                 busy={busy}
                 editTask={editTask}
-                onOpenFocus={onOpenFocus}
+                onSelect={() => setSelectedDate(day.date)}
                 remove={(id) =>
                   void run(() =>
                     actions.updateQueue(
@@ -136,7 +203,11 @@ export function WeekPlanner(props: Props) {
                 />
               )}
               <strong>
-                {displayedTitle(task?.title ?? local?.title ?? text.local)}
+                {dayTaskTitle(
+                  taskId ?? "",
+                  task?.title ?? local?.title,
+                  language,
+                )}
               </strong>
             </div>
           );
@@ -146,16 +217,59 @@ export function WeekPlanner(props: Props) {
   );
 }
 
+function DayPicker({
+  day,
+  selected,
+  language,
+  busy,
+  onSelect,
+}: {
+  day: FlowDayPlan;
+  selected: boolean;
+  language: Language;
+  busy: boolean;
+  onSelect: () => void;
+}) {
+  const { ref, isDropTarget } = useDroppable({
+    id: `day-picker:${day.date}`,
+    accept: "plus-step",
+    disabled: busy,
+    collisionPriority: 2,
+    data: { date: day.date },
+  });
+  const date = new Date(`${day.date}T12:00:00Z`);
+  return (
+    <button
+      ref={ref}
+      role="tab"
+      aria-selected={selected}
+      aria-label={`${language === "zh" ? "显示" : "Show"} ${day.date}`}
+      className={isDropTarget ? "is-over" : ""}
+      onClick={onSelect}
+    >
+      <span>
+        {new Intl.DateTimeFormat(language === "zh" ? "zh-CN" : "en", {
+          weekday: "short",
+          timeZone: "UTC",
+        }).format(date)}
+      </span>
+      <strong>{date.getUTCDate()}</strong>
+    </button>
+  );
+}
+
 function DayColumn({
   day,
   plan,
   flowTasks,
   timer,
   today,
+  selected,
+  inWindow,
   language,
   busy,
   editTask,
-  onOpenFocus,
+  onSelect,
   remove,
 }: {
   day: FlowDayPlan;
@@ -163,10 +277,12 @@ function DayColumn({
   flowTasks: FocusState["flowTasks"];
   timer?: FocusState["timer"];
   today: string;
+  selected: boolean;
+  inWindow: boolean;
   language: Language;
   busy: boolean;
   editTask: Props["editTask"];
-  onOpenFocus: Props["onOpenFocus"];
+  onSelect: () => void;
   remove: (id: string) => void;
 }) {
   const byId = new Map(plan.tasks.map((task) => [task.id, task]));
@@ -192,13 +308,13 @@ function DayColumn({
   const date = new Date(`${day.date}T12:00:00Z`);
   return (
     <section
-      className={`plus-week-day ${day.date === today ? "is-today" : ""} ${isDropTarget ? "is-over" : ""}`}
+      className={`plus-week-day ${day.date === today ? "is-today" : ""} ${selected ? "is-selected" : ""} ${inWindow ? "is-window" : ""} ${isDropTarget ? "is-over" : ""}`}
       data-date={day.date}
     >
       <button
         className="plus-week-day-heading"
-        onClick={() => onOpenFocus(day.date)}
-        aria-label={`${language === "zh" ? "专注" : "Focus"}: ${day.date}`}
+        onClick={onSelect}
+        aria-label={`${language === "zh" ? "选择日期" : "Select day"}: ${day.date}`}
       >
         <span>
           {new Intl.DateTimeFormat(language === "zh" ? "zh-CN" : "en", {
@@ -262,9 +378,7 @@ function DayStep({
   editTask: Props["editTask"];
   remove: (id: string) => void;
 }) {
-  const title = displayedTitle(
-    task?.title ?? local?.title ?? words(language).local,
-  );
+  const title = dayTaskTitle(id, task?.title ?? local?.title, language);
   const { ref, handleRef, isDragSource } = useDraggable({
     id: `day-step:${day.date}:${id}`,
     type: "plus-step",
@@ -287,6 +401,13 @@ function DayStep({
       }}
       className={`plus-week-step ${isDragSource ? "is-dragging" : ""} ${isDropTarget && !isDragSource ? "is-insert" : ""}`}
       data-task-id={id}
+      style={
+        {
+          "--plus-family-color": task
+            ? taskFamilyColor(task, tasks)
+            : "var(--plus-muted)",
+        } as CSSProperties
+      }
     >
       <div className="plus-week-step-tools">
         <button
@@ -352,4 +473,15 @@ function DayEnd({
       {empty ? (language === "zh" ? "拖入步骤" : "Drop a step") : "+"}
     </div>
   );
+}
+
+function dayTaskTitle(
+  id: string,
+  title: string | undefined,
+  language: Language,
+): string {
+  if (title !== undefined) return displayedTitle(title);
+  if (id.startsWith("__flowday_misc__"))
+    return language === "zh" ? "杂项时间" : "Miscellaneous time";
+  return words(language).missingTask;
 }

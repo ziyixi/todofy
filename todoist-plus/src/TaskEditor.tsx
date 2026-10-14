@@ -1,15 +1,21 @@
 import { useRef, useState } from "react";
 import { Check, ExternalLink, Plus, X } from "lucide-react";
-import { displayedTitle, startDate } from "./domain";
+import { displayedTitle, formattedMinutes, startDate } from "./domain";
 import { words } from "./i18n";
-import type { Language, PlanningTask, PlusActions, StepDraft } from "./model";
+import type {
+  Language,
+  PlanningTask,
+  PlusActions,
+  RunOperation,
+  StepDraft,
+} from "./model";
 
 interface Props {
   task: PlanningTask;
   tasks: PlanningTask[];
   language: Language;
   busy: boolean;
-  run: (operation: () => Promise<void>) => Promise<boolean>;
+  run: RunOperation;
   actions: PlusActions;
   todayTaskIds: readonly string[];
   addFocus: (id: string) => void;
@@ -48,6 +54,17 @@ export function TaskEditor({
       ...(minutes ? { estimatedMinutes: Number(minutes) } : {}),
     }));
   const start = startDate(deadline, lead);
+  const estimateValues = [
+    ...new Set([
+      15,
+      30,
+      45,
+      60,
+      90,
+      120,
+      ...(task.estimatedMinutes ? [task.estimatedMinutes] : []),
+    ]),
+  ].sort((a, b) => a - b);
 
   async function addSteps() {
     if (!drafts.length) return;
@@ -112,6 +129,26 @@ export function TaskEditor({
             ))}
           </select>
         </label>
+        <label>
+          {text.estimate}
+          <select
+            aria-label={`${text.estimate}: ${displayedTitle(task.title)}`}
+            value={task.estimatedMinutes ?? 0}
+            disabled={busy}
+            onChange={(event) =>
+              void run(() =>
+                actions.updateEstimate(task.id, Number(event.target.value)),
+              )
+            }
+          >
+            <option value={0}>{text.unknown}</option>
+            {estimateValues.map((value) => (
+              <option key={value} value={value}>
+                {formattedMinutes(value)}
+              </option>
+            ))}
+          </select>
+        </label>
         <button
           className="plus-button"
           disabled={busy || (stage === task.stage && area === task.area)}
@@ -150,7 +187,11 @@ export function TaskEditor({
               disabled={busy || plannedToday.has(child.id)}
               onClick={() => addFocus(child.id)}
             >
-              {plannedToday.has(child.id) ? <Check size={16} /> : <Plus size={16} />}
+              {plannedToday.has(child.id) ? (
+                <Check size={16} />
+              ) : (
+                <Plus size={16} />
+              )}
             </button>
           </li>
         ))}

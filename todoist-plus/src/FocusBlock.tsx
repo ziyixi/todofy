@@ -1,129 +1,76 @@
-import { useDraggable, useDroppable } from "@dnd-kit/react";
-import {
-  ArrowDown,
-  ArrowUp,
-  Check,
-  GripVertical,
-  Pause,
-  Play,
-  Square,
-  X,
-} from "lucide-react";
+import { Check, Pause, Play, Square } from "lucide-react";
 import type { CSSProperties } from "react";
-import { displayedTitle, duration, elapsed, formattedMinutes } from "./domain";
+import {
+  displayedTitle,
+  duration,
+  elapsed,
+  formattedMinutes,
+  taskFamilyColor,
+} from "./domain";
 import { TaskBreadcrumb } from "./TaskFamily";
 import { words } from "./i18n";
-import type {
-  FlowDayPlan,
-  FocusState,
-  Language,
-  PlanState,
-  PlanningTask,
-  PlusActions,
-} from "./model";
+import type { FocusState, Language, PlanState, PlanningTask } from "./model";
 
 interface Props {
-  task: PlanningTask;
+  taskId: string;
+  task?: PlanningTask;
   plan: PlanState;
   focus: FocusState;
-  day: FlowDayPlan;
-  native: boolean;
   index: number;
-  queueIds: string[];
-  offset: number;
   minutes: number;
   language: Language;
-  today: string;
   busy: boolean;
-  actions: PlusActions;
-  run: (operation: () => Promise<void>) => Promise<boolean>;
+  onTimer: (
+    action: "start" | "pause" | "resume" | "stop",
+    taskId: string,
+  ) => void;
   editTask: (task: PlanningTask) => void;
   complete: (task: PlanningTask) => void;
 }
 
 export function FocusBlock({
+  taskId,
   task,
   plan,
   focus,
-  day,
-  native,
   index,
-  queueIds,
-  offset,
   minutes,
   language,
-  today,
   busy,
-  actions,
-  run,
+  onTimer,
   editTask,
   complete,
 }: Props) {
   const text = words(language);
-  const title = displayedTitle(task.title);
+  let fallbackTitle = text.missingTask;
+  if (taskId.startsWith("__flowday_misc__"))
+    fallbackTitle = language === "zh" ? "杂项时间" : "Miscellaneous time";
+  const title = displayedTitle(
+    task?.title ?? focus.flowTasks[taskId]?.title ?? fallbackTitle,
+  );
   const timer =
-    focus.timer?.taskId === task.id && focus.timer.flowDate === focus.date
+    focus.timer?.taskId === taskId && focus.timer.flowDate === focus.date
       ? focus.timer
       : undefined;
-  const { ref, handleRef, isDragSource } = useDraggable({
-    id: `focus-step:${focus.date}:${task.id}`,
-    type: "plus-step",
-    disabled: busy || Boolean(timer),
-    data: { taskId: task.id, sourceDate: focus.date },
-  });
-  const { ref: dropRef, isDropTarget } = useDroppable({
-    id: `focus-before:${focus.date}:${task.id}`,
-    type: "day",
-    accept: "plus-step",
-    disabled: busy,
-    data: { date: focus.date, beforeId: task.id },
-    collisionPriority: 2,
-  });
-  const estimateValues = [
-    ...new Set([15, 30, 45, 60, 90, 120, ...(minutes ? [minutes] : [])]),
-  ].sort((a, b) => a - b);
   let status = "";
   if (index === 0) status = language === "zh" ? "下一步" : "Up next";
   let timerAction: "start" | "pause" | "resume" = "start";
   if (timer) {
-    status =
-      timer.status === "running"
-        ? language === "zh"
-          ? "正在做"
-          : "Now"
-        : text.pause;
+    status = text.pause;
+    if (timer.status === "running")
+      status = language === "zh" ? "正在做" : "Now";
     timerAction = timer.status === "running" ? "pause" : "resume";
   }
+  const familyColor = task
+    ? taskFamilyColor(task, plan.tasks)
+    : "var(--plus-muted)";
   return (
-    <li
-      ref={dropRef}
-      data-task-id={task.id}
-      className={`plus-focus-slot ${isDropTarget && !isDragSource ? "is-drop-target" : ""}`}
-    >
-      <span
-        className="plus-focus-offset"
-        title={language === "zh" ? "累计预计用时" : "Cumulative estimated time"}
-      >
-        +{Math.floor(offset / 60)}:{String(offset % 60).padStart(2, "0")}
-      </span>
+    <li className="plus-focus-slot" data-task-id={taskId}>
       <article
-        ref={ref}
-        className={`plus-focus-block ${timer ? "is-current" : ""} ${isDragSource ? "is-dragging" : ""} ${native ? "" : "is-local"}`}
-        style={
-          {
-            "--plus-block-height": `${Math.max(84, Math.min(220, 60 + minutes))}px`,
-          } as CSSProperties
-        }
+        className={`plus-focus-block ${timer ? "is-current" : ""}`}
+        style={{ "--plus-family-color": familyColor } as CSSProperties}
       >
-        <button
-          ref={handleRef}
-          className="plus-focus-grip"
-          disabled={busy || Boolean(timer)}
-          aria-label={`${language === "zh" ? "拖动步骤" : "Drag step"}: ${title}`}
-        >
-          <GripVertical size={18} />
-        </button>
-        {native && (
+        {task && (
           <button
             className="plus-checkbox"
             aria-label={`${text.complete}: ${title}`}
@@ -135,7 +82,7 @@ export function FocusBlock({
         )}
         <div className="plus-focus-block-content">
           <div className="plus-focus-block-top">
-            {native ? (
+            {task ? (
               <TaskBreadcrumb
                 task={task}
                 tasks={plan.tasks}
@@ -143,8 +90,8 @@ export function FocusBlock({
               />
             ) : (
               <span className="plus-muted">
-                {focus.flowTasks[task.id]?.local ||
-                task.id.startsWith("__flowday_")
+                {focus.flowTasks[taskId]?.local ||
+                taskId.startsWith("__flowday_")
                   ? text.local
                   : text.missingTask}
               </span>
@@ -157,45 +104,17 @@ export function FocusBlock({
               </span>
             )}
           </div>
-          <button
-            className="plus-focus-title"
-            disabled={!native}
-            onClick={() => editTask(task)}
-          >
-            {title}
-          </button>
+          {task ? (
+            <button className="plus-focus-title" onClick={() => editTask(task)}>
+              {title}
+            </button>
+          ) : (
+            <span className="plus-focus-title">{title}</span>
+          )}
           <div className="plus-focus-block-footer">
-            {native ? (
-              <label className="plus-focus-estimate">
-                <span className="plus-sr-only">
-                  {text.estimate}: {title}
-                </span>
-                <select
-                  aria-label={`${text.estimate}: ${title}`}
-                  value={minutes}
-                  disabled={busy}
-                  onChange={(event) =>
-                    void run(() =>
-                      actions.updateEstimate(
-                        task.id,
-                        Number(event.target.value),
-                      ),
-                    )
-                  }
-                >
-                  <option value={0}>{text.unknown}</option>
-                  {estimateValues.map((value) => (
-                    <option key={value} value={value}>
-                      {formattedMinutes(value)}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            ) : (
-              <span className="plus-muted">
-                {minutes ? formattedMinutes(minutes) : text.unknown}
-              </span>
-            )}
+            <span className="plus-focus-estimate">
+              {minutes ? formattedMinutes(minutes) : text.unknown}
+            </span>
             {timer && (
               <output
                 aria-label={language === "zh" ? "已专注" : "Time focused"}
@@ -203,58 +122,7 @@ export function FocusBlock({
                 {duration(elapsed(focus))}
               </output>
             )}
-            <div className="plus-focus-block-tools">
-              <button
-                className="plus-icon"
-                aria-label={`${text.up}: ${title}`}
-                disabled={busy || index === 0}
-                onClick={() =>
-                  void run(() =>
-                    actions.moveTaskToDay(
-                      task.id,
-                      day,
-                      day,
-                      queueIds[index - 1],
-                    ),
-                  )
-                }
-              >
-                <ArrowUp size={13} />
-              </button>
-              <button
-                className="plus-icon"
-                aria-label={`${text.down}: ${title}`}
-                disabled={busy || index === queueIds.length - 1}
-                onClick={() =>
-                  void run(() =>
-                    actions.moveTaskToDay(
-                      task.id,
-                      day,
-                      day,
-                      queueIds[index + 2],
-                    ),
-                  )
-                }
-              >
-                <ArrowDown size={13} />
-              </button>
-              <button
-                className="plus-icon"
-                aria-label={`${language === "zh" ? "移出当天" : "Remove from day"}: ${title}`}
-                disabled={busy || Boolean(timer)}
-                onClick={() =>
-                  void run(() =>
-                    actions.updateQueue(
-                      day.taskIds.filter((id) => id !== task.id),
-                      day,
-                    ),
-                  )
-                }
-              >
-                <X size={13} />
-              </button>
-            </div>
-            {!native && plan.flowdayUrl && (
+            {!task && plan.flowdayUrl && (
               <a
                 className="plus-text-button"
                 href={plan.flowdayUrl}
@@ -266,19 +134,13 @@ export function FocusBlock({
             )}
           </div>
         </div>
-        {native && (
+        {task && (
           <div className="plus-focus-timer-controls">
             <button
               className="plus-icon plus-play"
               aria-label={`${text[timerAction]}: ${title}`}
-              disabled={
-                busy ||
-                Boolean(focus.timer && !timer) ||
-                (!timer && focus.date !== today)
-              }
-              onClick={() =>
-                void run(() => actions.timer(timerAction, task.id, focus))
-              }
+              disabled={busy || Boolean(focus.timer && !timer)}
+              onClick={() => onTimer(timerAction, taskId)}
             >
               {timer?.status === "running" ? (
                 <Pause size={17} />
@@ -291,9 +153,7 @@ export function FocusBlock({
                 className="plus-icon"
                 aria-label={`${text.stop}: ${title}`}
                 disabled={busy}
-                onClick={() =>
-                  void run(() => actions.timer("stop", task.id, focus))
-                }
+                onClick={() => onTimer("stop", taskId)}
               >
                 <Square size={13} />
               </button>

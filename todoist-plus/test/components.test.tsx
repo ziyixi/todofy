@@ -1,4 +1,5 @@
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -10,6 +11,7 @@ import { afterEach, beforeAll, expect, it, vi } from "vitest";
 import { App } from "../src/App";
 import { PlanView } from "../src/PlanView";
 import { createPrototype } from "../design/fixture";
+import type { FlowDayPlan, PlusData } from "../src/model";
 beforeAll(() => {
   HTMLDialogElement.prototype.showModal = function () {
     this.setAttribute("open", "");
@@ -59,7 +61,7 @@ it("preserves a child deadline in attention when its parent occupies the commitm
       days={days}
       currentDate={focus.date}
       flowTasks={focus.flowTasks}
-      onOpenFocus={vi.fn()}
+      onWeekChange={vi.fn()}
       language="en"
       busy={false}
       actions={actions}
@@ -77,24 +79,30 @@ it("preserves a child deadline in attention when its parent occupies the commitm
 });
 it("stopping a session preserves the task and queue; checkbox completes it", async () => {
   const actions = createPrototype();
-  render(
-    <App
-      actions={actions}
-      view="focus"
-      language="en"
-      onOpenTask={() => {}}
-      onSettings={() => {}}
-    />,
-  );
+  const load = vi.spyOn(actions, "load");
+  const props = {
+    actions,
+    language: "en" as const,
+    onOpenTask: () => {},
+    onSettings: () => {},
+  };
+  const mounted = render(<App {...props} view="focus" />);
   fireEvent.click(
     await screen.findByLabelText("Start: Write the introduction"),
   );
   await screen.findByLabelText("Stop session");
+  expect(load).toHaveBeenCalledTimes(1);
   fireEvent.click(screen.getByLabelText("Stop session"));
   await waitFor(() =>
     expect(screen.queryByLabelText("Stop session")).toBeNull(),
   );
   expect(screen.getByText("Write the introduction")).toBeTruthy();
+  expect(load).toHaveBeenCalledTimes(1);
+  mounted.rerender(<App {...props} view="plan" />);
+  await screen.findByRole("complementary", { name: "Outcomes and steps" });
+  mounted.rerender(<App {...props} view="focus" />);
+  expect(screen.getByLabelText("Start: Write the introduction")).toBeTruthy();
+  expect(load).toHaveBeenCalledTimes(1);
   fireEvent.click(
     screen.getByLabelText("Complete task: Write the introduction"),
   );
@@ -163,4 +171,125 @@ it("settles an active task using the timer’s original flow day after midnight"
   );
   await waitFor(() => expect(complete).toHaveBeenCalled());
   expect(complete.mock.calls[0]?.[2]).toBe("2026-10-12");
+});
+
+it("keeps a confirmed refresh when older duplicate week reads finish late", async () => {
+  const actions = createPrototype();
+  const staleFuture = await actions.loadDays("2026-10-19");
+  const requests: ((days: FlowDayPlan[]) => void)[] = [];
+  actions.loadDays = vi.fn(
+    () => new Promise<FlowDayPlan[]>((resolve) => requests.push(resolve)),
+  );
+  render(
+    <App
+      actions={actions}
+      view="plan"
+      language="en"
+      onOpenTask={() => {}}
+      onSettings={() => {}}
+    />,
+  );
+  await screen.findByRole("complementary", { name: "Outcomes and steps" });
+  fireEvent.click(screen.getByRole("button", { name: "Next week" }));
+  fireEvent.click(screen.getByRole("button", { name: "Next week" }));
+  expect(requests).toHaveLength(2);
+  await actions.moveTaskToDay("copy", undefined, staleFuture[1]!);
+  fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+  const scheduled =
+    '.plus-week-day[data-date="2026-10-20"] .plus-week-step[data-task-id="copy"]';
+  await waitFor(() => expect(document.querySelector(scheduled)).toBeTruthy());
+  await act(async () => requests[1]!(structuredClone(staleFuture)));
+  expect(document.querySelector(scheduled)).toBeTruthy();
+  await act(async () => requests[0]!(structuredClone(staleFuture)));
+  expect(document.querySelector(scheduled)).toBeTruthy();
+  expect(
+    (await actions.load("2026-10-19")).days.find(
+      (day) => day.date === "2026-10-20",
+    )?.taskIds,
+  ).toContain("copy");
+});
+
+it("keeps the latest week after navigating away and back while an older full refresh is pending", async () => {
+  const actions = createPrototype();
+  const stale = await actions.load();
+  const latest = structuredClone(stale.days);
+  latest[2]!.taskIds.push("copy");
+  const originalDays = actions.loadDays;
+  actions.loadDays = vi.fn(async (week) =>
+    week === "2026-10-12" ? structuredClone(latest) : originalDays(week),
+  );
+  const originalLoad = actions.load;
+  let finishRefresh!: (value: PlusData) => void;
+  render(
+    <App
+      actions={actions}
+      view="plan"
+      language="en"
+      onOpenTask={() => {}}
+      onSettings={() => {}}
+    />,
+  );
+  await screen.findByRole("complementary", { name: "Outcomes and steps" });
+  fireEvent.click(screen.getByRole("button", { name: "Next week" }));
+  await waitFor(() =>
+    expect(
+      document.querySelector('.plus-week-day[data-date="2026-10-19"]'),
+    ).toBeTruthy(),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "This week" }));
+  const scheduled =
+    '.plus-week-day[data-date="2026-10-14"] .plus-week-step[data-task-id="copy"]';
+  await waitFor(() => expect(document.querySelector(scheduled)).toBeTruthy());
+  actions.load = vi.fn(
+    () =>
+      new Promise<PlusData>((resolve) => {
+        finishRefresh = resolve;
+      }),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+  await waitFor(() => expect(actions.load).toHaveBeenCalledOnce());
+  fireEvent.click(screen.getByRole("button", { name: "Next week" }));
+  await waitFor(() =>
+    expect(
+      document.querySelector('.plus-week-day[data-date="2026-10-19"]'),
+    ).toBeTruthy(),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "This week" }));
+  await waitFor(() => expect(document.querySelector(scheduled)).toBeTruthy());
+  await act(async () => finishRefresh(structuredClone(stale)));
+  expect(document.querySelector(scheduled)).toBeTruthy();
+  actions.load = originalLoad;
+});
+
+it("persists and clears an existing step's estimate through the task editor", async () => {
+  const actions = createPrototype();
+  render(
+    <App
+      actions={actions}
+      view="focus"
+      language="en"
+      onOpenTask={() => {}}
+      onSettings={() => {}}
+    />,
+  );
+  fireEvent.click(
+    await screen.findByRole("button", {
+      name: "Write the introduction",
+    }),
+  );
+  const estimate = screen.getByLabelText(
+    "Estimate: Write the introduction",
+  ) as HTMLSelectElement;
+  fireEvent.change(estimate, { target: { value: "45" } });
+  await waitFor(() => expect(estimate.value).toBe("45"));
+  expect(
+    (await actions.load()).plan.tasks.find((task) => task.id === "copy")
+      ?.estimatedMinutes,
+  ).toBe(45);
+  fireEvent.change(estimate, { target: { value: "0" } });
+  await waitFor(() => expect(estimate.value).toBe("0"));
+  expect(
+    (await actions.load()).plan.tasks.find((task) => task.id === "copy")
+      ?.estimatedMinutes,
+  ).toBeUndefined();
 });

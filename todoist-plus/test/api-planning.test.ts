@@ -10,6 +10,7 @@ it("persists same-day sorting, cross-day movement and pool placement only in Flo
     ["2026-10-14", { taskIds: ["local-two", "c"], completed: [] as string[] }],
   ]);
   const writes: { path: string; body: Record<string, unknown> }[] = [];
+  const requests: { path: string; method: string }[] = [];
   const read = (date: string) =>
     flows.get(date) ?? { taskIds: [], completed: [] };
   const wire = (date: string) => ({
@@ -21,6 +22,7 @@ it("persists same-day sorting, cross-day movement and pool placement only in Flo
     { apiOrigin: "https://api.example.test", token: "synthetic" },
     async (input, init) => {
       const path = new URL(String(input)).pathname;
+      requests.push({ path, method: init?.method ?? "GET" });
       const body = init?.body
         ? (JSON.parse(String(init.body)) as Record<string, unknown>)
         : {};
@@ -47,11 +49,13 @@ it("persists same-day sorting, cross-day movement and pool placement only in Flo
         return reply({ name: "timerSession", etag: "0" });
       if (path.endsWith("/tasks"))
         return reply({
-          tasks: ["a", "b", "c", "d", "local-one", "local-two"].map((id) => ({
-            name: `tasks/${id}`,
-            todoist_id: id,
-            title: `Synthetic ${id}`,
-          })),
+          tasks: ["a", "b", "c", "d", "done", "local-one", "local-two"].map(
+            (id) => ({
+              name: `tasks/${id}`,
+              todoist_id: id,
+              title: `Synthetic ${id}`,
+            }),
+          ),
         });
       const day = path.match(/\/flows\/(\d{4}-\d{2}-\d{2})/u)?.[1];
       if (!day) throw new Error(`Unexpected request: ${path}`);
@@ -85,17 +89,91 @@ it("persists same-day sorting, cross-day movement and pool placement only in Flo
   const tuesday = initial.days.find((day) => day.date === "2026-10-13")!;
   const wednesday = initial.days.find((day) => day.date === "2026-10-14")!;
   const thursday = initial.days.find((day) => day.date === "2026-10-15")!;
-  await api.moveTaskToDay("b", tuesday, tuesday, "a");
+  const mutationStart = requests.length;
+  const sorted = await api.moveTaskToDay("b", tuesday, tuesday, "a");
+  expect(sorted).toEqual([
+    {
+      date: tuesday.date,
+      taskIds: ["local-one", "b", "a", "done"],
+      completedTaskIds: ["done"],
+    },
+  ]);
   expect(read(tuesday.date).taskIds).toEqual(["local-one", "b", "a", "done"]);
   expect(writes.some((write) => write.path.endsWith(":rollover"))).toBe(false);
-  await api.moveTaskToDay("a", tuesday, wednesday, "c");
+  const crossStart = requests.length;
+  const moved = await api.moveTaskToDay("a", tuesday, wednesday, "c");
+  expect(moved).toEqual([
+    {
+      date: tuesday.date,
+      taskIds: ["local-one", "b", "done"],
+      completedTaskIds: ["done"],
+    },
+    {
+      date: wednesday.date,
+      taskIds: ["local-two", "a", "c"],
+      completedTaskIds: [],
+    },
+  ]);
+  expect(requests.slice(crossStart).map((request) => request.method)).toEqual([
+    "POST",
+    "PATCH",
+  ]);
   expect(read(tuesday.date)).toEqual({
     taskIds: ["local-one", "b", "done"],
     completed: ["done"],
   });
   expect(read(wednesday.date).taskIds).toEqual(["local-two", "a", "c"]);
-  await api.moveTaskToDay("d", undefined, thursday);
-  expect(read(thursday.date).taskIds).toEqual(["d"]);
+  flows.set(thursday.date, { taskIds: ["local-unplanned"], completed: [] });
+  const placed = await api.moveTaskToDay("d", undefined, thursday);
+  expect(placed).toEqual([
+    {
+      date: thursday.date,
+      taskIds: ["local-unplanned", "d"],
+      completedTaskIds: [],
+    },
+  ]);
+  expect(read(thursday.date).taskIds).toEqual(["local-unplanned", "d"]);
+
+  const friday = initial.days.find((day) => day.date === "2026-10-16")!;
+  const rolloverStart = requests.length;
+  const withoutReorder = await api.moveTaskToDay("b", tuesday, friday);
+  expect(withoutReorder).toEqual([
+    {
+      date: tuesday.date,
+      taskIds: ["local-one", "done"],
+      completedTaskIds: ["done"],
+    },
+    { date: friday.date, taskIds: ["b"], completedTaskIds: [] },
+  ]);
+  expect(
+    requests.slice(rolloverStart).map((request) => request.method),
+  ).toEqual(["POST"]);
+  const noOpStart = requests.length;
+  expect(await api.moveTaskToDay("b", friday, friday, "b")).toEqual([]);
+  expect(requests).toHaveLength(noOpStart);
+
+  const queueStart = requests.length;
+  const updated = await api.updateQueue(
+    ["local-one", "done", "local-extra"],
+    withoutReorder[0]!,
+  );
+  expect(updated).toEqual([
+    {
+      date: tuesday.date,
+      taskIds: ["local-one", "done", "local-extra"],
+      completedTaskIds: ["done"],
+    },
+  ]);
+  expect(requests.slice(queueStart).map((request) => request.method)).toEqual([
+    "PATCH",
+  ]);
+  expect(
+    requests
+      .slice(mutationStart)
+      .every((request) =>
+        request.path.startsWith("/api/plus/flowday/api/v1/flows/"),
+      ),
+  ).toBe(true);
   const reloaded = await api.load();
   expect(
     reloaded.days.find((day) => day.date === wednesday.date)?.taskIds,

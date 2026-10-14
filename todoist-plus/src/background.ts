@@ -60,7 +60,9 @@ export function registerBackground() {
         const client = await getApi();
         switch (message.method) {
           case "load":
-            return client.load();
+            return client.load(...message.args);
+          case "loadDays":
+            return client.loadDays(...message.args);
           case "updateTask":
             return client.updateTask(...message.args);
           case "createSteps":

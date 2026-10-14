@@ -385,11 +385,13 @@ export async function mountTodoist(ctx: ContentScriptContext) {
                   aria-current={currentView() === item ? "page" : undefined}
                   onClick={() => navigate(item)}
                 >
-                  {item === "plan" ? (
-                    <LayoutList size={24} />
-                  ) : (
-                    <Target size={24} />
-                  )}
+                  <span className="plus-nav-icon" aria-hidden="true">
+                    {item === "plan" ? (
+                      <LayoutList size={18} />
+                    ) : (
+                      <Target size={18} />
+                    )}
+                  </span>
                   {text[item]}
                 </button>
               ))}

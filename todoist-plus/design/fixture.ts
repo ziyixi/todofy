@@ -108,10 +108,25 @@ export function createPrototype(): PlusActions {
             : [],
     completedTaskIds: [],
   }));
+  function weekDays(week: string) {
+    return Array.from({ length: 7 }, (_, index) => {
+      const date = new Date(`${week}T12:00:00Z`);
+      date.setUTCDate(date.getUTCDate() + index);
+      const value = date.toISOString().slice(0, 10);
+      const existing = days.find((day) => day.date === value);
+      if (existing) return existing;
+      const day = { date: value, taskIds: [], completedTaskIds: [] };
+      days = [...days, day];
+      return day;
+    });
+  }
   return {
-    async load() {
+    async load(week = plan.week) {
       focus = { ...focus, ...days.find((day) => day.date === focus.date)! };
-      return structuredClone({ plan, focus, days });
+      return structuredClone({ plan, focus, days: weekDays(week) });
+    },
+    async loadDays(week) {
+      return structuredClone(weekDays(week));
     },
     async updateTask(item, update) {
       plan = {
@@ -168,6 +183,7 @@ export function createPrototype(): PlusActions {
       days = days.map((day) =>
         day.date === target.date ? { ...day, taskIds } : day,
       );
+      return structuredClone(days.filter((day) => day.date === target.date));
     },
     async moveTaskToDay(id, source, target, beforeId) {
       days = days.map((day) => {
@@ -181,8 +197,21 @@ export function createPrototype(): PlusActions {
           ? { ...day, taskIds: day.taskIds.filter((value) => value !== id) }
           : day;
       });
+      return structuredClone(
+        days.filter(
+          (day) => day.date === target.date || day.date === source?.date,
+        ),
+      );
     },
     async updateEstimate(taskId, minutes) {
+      plan = {
+        ...plan,
+        tasks: plan.tasks.map((task) =>
+          task.id === taskId
+            ? { ...task, estimatedMinutes: minutes > 0 ? minutes : undefined }
+            : task,
+        ),
+      };
       focus = {
         ...focus,
         estimates: { ...focus.estimates, [taskId]: minutes },
@@ -199,6 +228,7 @@ export function createPrototype(): PlusActions {
         : 0;
       focus = {
         ...focus,
+        timerEtag: crypto.randomUUID(),
         timer:
           action === "stop"
             ? undefined
@@ -214,6 +244,7 @@ export function createPrototype(): PlusActions {
                 etag: crypto.randomUUID(),
               },
       };
+      return { timerEtag: focus.timerEtag, timer: focus.timer };
     },
   };
 }
