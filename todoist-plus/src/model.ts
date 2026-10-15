@@ -20,6 +20,8 @@ export interface PlanningTask {
   etag: string;
   mustStart: boolean;
   missingLead: boolean;
+  /** Todoist's last change to the task (ISO time); absent when Todoist does not say. */
+  updatedAt?: string;
 }
 export interface PlanState {
   tasks: PlanningTask[];
@@ -32,6 +34,12 @@ export interface PlanState {
   managedLabels: { role: string; id: string; label: string }[];
   etag: string;
   availableLabels: { id: string; label: string }[];
+  /** Todofy's mail project, for the weekly review's inbox line; empty when not configured. */
+  inboxProjectId: string;
+  /** Newest weekly review task Todofy created; the active task list says whether it is open. */
+  reviewTaskId: string;
+  /** Commitments and Bets chosen on this week's Sunday, which Monday's reset keeps. */
+  nextWeekTaskIds: string[];
 }
 /** Account planning settings without the task list. */
 export type PlanMetadata = Omit<PlanState, "tasks">;

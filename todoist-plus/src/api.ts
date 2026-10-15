@@ -86,6 +86,9 @@ export function planningTask(task: ApiPlanningTask): PlanningTask {
     etag: task.etag,
     mustStart: task.mustStart,
     missingLead: task.missingLead,
+    updatedAt:
+      task.updateTime &&
+      new Date(Number(task.updateTime.seconds) * 1000).toISOString(),
   };
 }
 function planMetadata(plan: ApiPlan): PlanMetadata {
@@ -106,6 +109,9 @@ function planMetadata(plan: ApiPlan): PlanMetadata {
       id: label.id,
       label: label.label,
     })),
+    inboxProjectId: plan.inboxProjectId,
+    reviewTaskId: plan.reviewTaskId,
+    nextWeekTaskIds: plan.nextWeekTaskIds,
   };
 }
 function timerSnapshot(session: TimerSession): TimerSnapshot {

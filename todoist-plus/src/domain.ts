@@ -174,3 +174,14 @@ export function planConfig(
 export function todoistTaskUrl(id: string): string {
   return `https://app.todoist.com/app/task/${encodeURIComponent(id)}`;
 }
+
+export function todoistProjectUrl(id: string): string {
+  return `https://app.todoist.com/app/project/${encodeURIComponent(id)}`;
+}
+
+/** The calendar date `days` after a YYYY-MM-DD date. */
+export function addDays(date: string, days: number): string {
+  const value = new Date(`${date}T12:00:00Z`);
+  value.setUTCDate(value.getUTCDate() + days);
+  return value.toISOString().slice(0, 10);
+}

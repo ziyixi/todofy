@@ -1,5 +1,6 @@
 @import "./review-board.css";
 @import "./planning-week.css";
+@import "./weekly-review.css";
 
 .planning-view {
   min-width: 0;

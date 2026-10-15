@@ -1,9 +1,11 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Flag } from "lucide-react";
 import { displayedTitle, effectiveArea } from "./domain";
 import { planningOutcomes } from "./planning-outcomes";
 import { ReviewBoard } from "./ReviewBoard";
 import { PlanningWeek } from "./PlanningWeek";
+import { WaitingList } from "./WaitingList";
+import { WeeklyReview } from "./WeeklyReview";
 import { words } from "./i18n";
 import type {
   RunOperation,
@@ -31,12 +33,38 @@ export interface PlanViewProps {
   editTask: (task: PlanningTask) => void;
   onWeekChange: (weekStart: string) => void;
   onLabels?: () => void;
+  todayTaskIds: readonly string[];
+  addFocus: (id: string) => void;
+  /** Opens the task's step editor, empty, for a follow-up step. */
+  addStep: (task: PlanningTask) => void;
+  onOpenTask: (id: string) => void;
+  completeReview: (task: PlanningTask) => Promise<boolean>;
+  /** Opened from the review task's link: start with the weekly review. */
+  reviewing?: boolean;
 }
 export function PlanView(props: PlanViewProps) {
   const { plan, language, editTask, onLabels } = props;
   const [mode, setMode] = useState<"review" | "week">("review");
   const [area, setArea] = useState<Area | "all">("all");
+  const [reviewing, setReviewing] = useState(Boolean(props.reviewing));
+  const [waitingOpen, setWaitingOpen] = useState(false);
+  // A review jump scrolls its target into view once; Week mounts at the first unplanned commitment.
+  const [jump, setJump] = useState<"waiting" | "runway">();
+  const section = useRef<HTMLElement>(null);
   const text = words(language);
+  useEffect(() => {
+    if (props.reviewing) setReviewing(true);
+  }, [props.reviewing]);
+  useEffect(() => {
+    if (!jump) return;
+    section.current
+      ?.querySelector(
+        jump === "waiting" ? ".planning-waiting" : ".planning-runway",
+      )
+      // jsdom has no layout, and so no scrollIntoView.
+      ?.scrollIntoView?.({ block: "nearest" });
+    setJump(undefined);
+  }, [jump]);
   const commitments = planningOutcomes(plan.tasks, plan.managedLabels).filter(
     (task) => task.stage === "committed",
   );
@@ -47,7 +75,7 @@ export function PlanView(props: PlanViewProps) {
     commitments.filter((task) => effectiveArea(task, plan.tasks) === area)
       .length;
   return (
-    <section className="planning-view">
+    <section className="planning-view" ref={section}>
       <div className="planning-toolbar">
         <div
           className="planning-view-tabs"
@@ -75,12 +103,45 @@ export function PlanView(props: PlanViewProps) {
           {count("work")}/5 {text.work.toLowerCase()} · {count("personal")}/3{" "}
           {text.personal.toLowerCase()}
         </span>
+        <button
+          className="planning-label-button"
+          aria-pressed={reviewing}
+          onClick={() => setReviewing(!reviewing)}
+        >
+          {text.weeklyReview}
+        </button>
         {onLabels && (
           <button className="planning-label-button" onClick={onLabels}>
             {language === "zh" ? "标签对应" : "Board labels"}
           </button>
         )}
       </div>
+      {reviewing && (
+        <WeeklyReview
+          // Ticks belong to one week; a Monday rollover starts the next week's list.
+          key={plan.week}
+          plan={plan}
+          days={props.days}
+          today={props.currentDate}
+          language={language}
+          busy={props.busy}
+          pending={props.pending}
+          run={props.run}
+          actions={props.actions}
+          editTask={editTask}
+          completeReview={props.completeReview}
+          onShowWaiting={() => {
+            setMode("review");
+            setWaitingOpen(true);
+            setJump("waiting");
+          }}
+          onShowRunway={() => {
+            setMode("week");
+            setJump("runway");
+          }}
+          onClose={() => setReviewing(false)}
+        />
+      )}
       {mode === "review" ? (
         <>
           <div
@@ -117,9 +178,21 @@ export function PlanView(props: PlanViewProps) {
             ))}
           </div>
           <ReviewBoard {...props} area={area} />
+          <WaitingList
+            tasks={plan.tasks}
+            language={language}
+            busy={props.busy}
+            todayTaskIds={props.todayTaskIds}
+            open={waitingOpen}
+            onToggle={setWaitingOpen}
+            editTask={editTask}
+            addStep={props.addStep}
+            addFocus={props.addFocus}
+            onOpenTask={props.onOpenTask}
+          />
         </>
       ) : (
-        <PlanningWeek {...props} />
+        <PlanningWeek {...props} startAtUnplanned={jump === "runway"} />
       )}
       {attention.length > 0 && (
         <details className="planning-attention">

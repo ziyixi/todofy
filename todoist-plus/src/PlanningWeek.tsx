@@ -16,6 +16,7 @@ import {
   planningOutcomes,
 } from "./planning-outcomes";
 import { pendingStep, predictMove } from "./plan-updates";
+import { unscheduledCommitments } from "./weekly-review";
 import { words } from "./i18n";
 import type {
   Area,
@@ -41,6 +42,8 @@ interface Props {
   run: RunOperation;
   editTask: (task: PlanningTask) => void;
   onWeekChange: (week: string) => void;
+  /** Opened from the weekly review: start at the first commitment with nothing planned. */
+  startAtUnplanned?: boolean;
 }
 export function PlanningWeek(props: Props) {
   const {
@@ -56,12 +59,17 @@ export function PlanningWeek(props: Props) {
     run,
     editTask,
     onWeekChange,
+    startAtUnplanned,
   } = props;
   const committed = planningOutcomes(plan.tasks, plan.managedLabels).filter(
     (task) => task.stage === "committed",
   );
+  // One quiet line, not a mark per card: commitments with nothing in these seven days.
+  const unplanned = unscheduledCommitments(plan, days);
   const [area, setArea] = useState<Area | "all">("all");
-  const [selectedId, setSelectedId] = useState(committed[0]?.id ?? "");
+  const [selectedId, setSelectedId] = useState(
+    (startAtUnplanned ? unplanned[0]?.id : undefined) ?? committed[0]?.id ?? "",
+  );
   const selected = committed.find((task) => task.id === selectedId);
   const shown = committed.filter(
     (task) => area === "all" || effectiveArea(task, plan.tasks) === area,
@@ -71,6 +79,13 @@ export function PlanningWeek(props: Props) {
       day.taskIds.filter((id) => !day.completedTaskIds.includes(id)),
     ),
   );
+  function selectNextUnplanned() {
+    const index = unplanned.findIndex((task) => task.id === selectedId);
+    const next = unplanned[(index + 1) % unplanned.length]!;
+    if (area !== "all" && effectiveArea(next, plan.tasks) !== area)
+      setArea("all");
+    setSelectedId(next.id);
+  }
   function selectArea(next: Area | "all") {
     setArea(next);
     if (
@@ -146,6 +161,13 @@ export function PlanningWeek(props: Props) {
             ))}
           </div>
         </header>
+        {unplanned.length > 0 && (
+          <button className="planning-runway" onClick={selectNextUnplanned}>
+            {language === "zh"
+              ? `${unplanned.length} 项承诺这 7 天还没有安排`
+              : `${unplanned.length} ${unplanned.length === 1 ? "commitment has" : "commitments have"} nothing planned in these 7 days`}
+          </button>
+        )}
         <div className="planning-commitment-grid">
           {shown.map((task) => (
             <OutcomeCard

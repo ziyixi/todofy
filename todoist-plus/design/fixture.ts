@@ -28,7 +28,10 @@ const task = (
   missingLead: false,
   ...value,
 });
-export function createPrototype(fullBoard = false): PlusActions {
+export function createPrototype(
+  fullBoard = false,
+  today = "2026-10-13",
+): PlusActions {
   const roles = [
     "office",
     "home",
@@ -60,6 +63,9 @@ export function createPrototype(fullBoard = false): PlusActions {
       id: `synthetic-${role}`,
       label: role,
     })),
+    inboxProjectId: "synthetic-mail",
+    reviewTaskId: "weekly-review",
+    nextWeekTaskIds: [],
     tasks: [
       task("release", "Ship the small website refresh", {
         stage: "committed",
@@ -110,6 +116,37 @@ export function createPrototype(fullBoard = false): PlusActions {
       task("receipt", "Download this month’s receipt", {
         labels: ["quick"],
         estimatedMinutes: 15,
+      }),
+      // Weekly review data: waiting, someday and unclarified mail tasks, and the review task.
+      task("venue", "Hear back about the venue quote", {
+        labels: ["waiting", "office"],
+        updatedAt: "2026-10-01T16:00:00Z",
+      }),
+      task("access", "Lab access approval", {
+        labels: ["blocked", "office"],
+        updatedAt: "2026-10-09T16:00:00Z",
+      }),
+      task("garden", "Plan a small balcony garden", {
+        labels: ["parked", "home"],
+        area: "personal",
+        updatedAt: "2026-08-20T16:00:00Z",
+      }),
+      task("course", "Look into an evening course", {
+        labels: ["onhold", "home"],
+        area: "personal",
+        updatedAt: "2026-09-12T16:00:00Z",
+      }),
+      task("mail-register", "Fwd: Conference registration opens", {
+        projectId: "synthetic-mail",
+        area: "unassigned",
+      }),
+      task("mail-notes", "Re: Shared notes for Friday", {
+        projectId: "synthetic-mail",
+        area: "unassigned",
+      }),
+      task("weekly-review", "Weekly review 2026-W42", {
+        projectId: "synthetic-mail",
+        area: "unassigned",
       }),
     ],
   };
@@ -171,7 +208,7 @@ export function createPrototype(fullBoard = false): PlusActions {
     );
   }
   let focus: FocusState = {
-    date: "2026-10-13",
+    date: today,
     timerEtag: "fixture",
     taskIds: ["copy", "outline", "receipt"],
     completedTaskIds: [],

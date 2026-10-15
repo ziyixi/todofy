@@ -17,7 +17,12 @@ import { createPrototype } from "./fixture";
 import "../src/styles.css";
 import "./prototype.css";
 
-const actions = createPrototype(true);
+// Synthetic preview options: ?lang=zh, ?review (the review task's link) and ?sunday.
+const options = new URLSearchParams(location.search);
+const actions = createPrototype(
+  true,
+  options.has("sunday") ? "2026-10-18" : undefined,
+);
 
 function ProductionPreview() {
   const [view, setView] = useState<View>("plan");
@@ -84,7 +89,8 @@ function ProductionPreview() {
           actions={actions}
           view={view}
           onViewChange={setView}
-          language="en"
+          language={options.get("lang") === "zh" ? "zh" : "en"}
+          review={options.has("review")}
           onOpenTask={() =>
             setNotice("Synthetic native task link. No real task is opened.")
           }

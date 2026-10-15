@@ -55,10 +55,8 @@ it("commits a candidate in one action and moves it into the committed group", as
     ).toBeTruthy(),
   );
   expect(update).toHaveBeenCalledOnce();
-  expect(update.mock.calls[0]?.[1]).toEqual({
-    stage: "committed",
-    area: "work",
-  });
+  // Only the edited field is written; the unchanged area is not sent again.
+  expect(update.mock.calls[0]?.[1]).toEqual({ stage: "committed" });
   expect(load).toHaveBeenCalledOnce();
 });
 it("preserves a child deadline in attention when its parent occupies the commitment quota", async () => {
@@ -79,6 +77,11 @@ it("preserves a child deadline in attention when its parent occupies the commitm
       actions={actions}
       run={vi.fn()}
       editTask={vi.fn()}
+      todayTaskIds={focus.taskIds}
+      addFocus={vi.fn()}
+      addStep={vi.fn()}
+      onOpenTask={vi.fn()}
+      completeReview={vi.fn()}
     />,
   );
   fireEvent.click(screen.getByText(/Needs a look/));

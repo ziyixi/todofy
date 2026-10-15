@@ -14,8 +14,15 @@ import {
   outcomeSteps,
   planningOutcomes,
 } from "../src/planning-outcomes";
+import {
+  inboxToClarify,
+  oldestUntouched,
+  SOMEDAY_LABELS,
+  unscheduledCommitments,
+  WAITING_LABELS,
+} from "../src/weekly-review";
 import { createPrototype } from "../design/fixture";
-import type { PlanningTask } from "../src/model";
+import type { PlanState, PlanningTask } from "../src/model";
 
 const planViewRenders = vi.hoisted(() => ({ count: 0 }));
 vi.mock("../src/PlanView", async (original) => {
@@ -107,7 +114,10 @@ function counted(tasks: PlanningTask[]) {
   });
   return { list, reads };
 }
-/** What one Plan render derives: goals, Review lanes and cards, Week cards and a goal search. */
+/**
+ * What one Plan render derives: goals, Review lanes and cards, Week cards, a goal search, the
+ * Waiting row, Week's runway line and the weekly review's lines.
+ */
 function planRender(tasks: PlanningTask[]) {
   for (const area of ["work", "personal", "unassigned"] as const)
     topLevelBets(tasks, area);
@@ -129,6 +139,16 @@ function planRender(tasks: PlanningTask[]) {
       effectiveArea(task, tasks) === "work" &&
       taskAncestors(task, tasks).length >= 0,
   );
+  const plan = {
+    tasks,
+    managedLabels: labels,
+    inboxProjectId: "synthetic",
+    reviewTaskId: "",
+  } as unknown as PlanState;
+  oldestUntouched(tasks, WAITING_LABELS);
+  oldestUntouched(tasks, SOMEDAY_LABELS);
+  inboxToClarify(plan);
+  unscheduledCommitments(plan, []);
 }
 
 it("derives a 2,000-task plan in linear work and reuses its indexes on the next render", () => {

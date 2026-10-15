@@ -119,6 +119,8 @@ async function setupPlanner(context: BrowserContext, worker: Worker) {
         string,
         unknown
       >,
+      // Weekly review IDs that ReadPlan adds to the plan (none by default).
+      review: {} as Record<string, unknown>,
       // While set, writes wait until a test releases them; failWrite rejects the next one.
       holdWrites: false,
       heldWrites: [] as (() => void)[],
@@ -173,6 +175,7 @@ async function setupPlanner(context: BrowserContext, worker: Worker) {
               label,
             })),
             hidden_filter_ids: [],
+            ...state.review,
           },
         });
       if (url.pathname === "/api/plus/v1/tasks")
@@ -206,6 +209,10 @@ async function setupPlanner(context: BrowserContext, worker: Worker) {
         }
         task.etag = `${String(task.id)}-2`;
         return json({ task });
+      }
+      if (url.pathname.endsWith("/tasks:completeTask")) {
+        state.tasks = state.tasks.filter((task) => task.id !== body.task_id);
+        return json({ task_id: body.task_id });
       }
       if (url.pathname.endsWith("/plan:updatePlanLabels")) {
         state.labels = body.labels as {

@@ -159,8 +159,14 @@ export function TaskEditor({
         <button
           className="plus-button"
           disabled={busy || (stage === task.stage && area === task.area)}
+          // Only what changed: a stage left as shown is not written again with a new area.
           onClick={() =>
-            void run(() => actions.updateTask(task, { stage, area }))
+            void run(() =>
+              actions.updateTask(task, {
+                ...(stage !== task.stage ? { stage } : {}),
+                ...(area !== task.area ? { area } : {}),
+              }),
+            )
           }
         >
           {text.save}

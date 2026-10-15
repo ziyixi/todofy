@@ -14,7 +14,8 @@ const en = {
   weekly: "If there’s room this week",
   monthly: "This month",
   none: "No plan",
-  reset: "Unfinished commitments return to candidates on Monday.",
+  reset:
+    "Unfinished commitments return to candidates on Monday; those chosen on Sunday stay for next week.",
   softLimit: "Above your usual limit. Keep it if this week needs it.",
   candidates: "candidates",
   attention: "Needs a look",
@@ -77,6 +78,11 @@ const en = {
   updating: "Updating…",
   restored: "Change not saved; restored.",
   notSent: "Later changes not sent:",
+  waiting: "Waiting",
+  followUp: "Add follow-up step",
+  weeklyReview: "Weekly review",
+  sundayRule:
+    "Commitments and goals chosen on Sunday stay for next week; the rest reset on Monday as usual.",
 };
 const zh: typeof en = {
   plan: "计划",
@@ -92,7 +98,7 @@ const zh: typeof en = {
   weekly: "本周有余力再做",
   monthly: "本月待选",
   none: "暂不安排",
-  reset: "每周一，未完成的承诺会回到待选。",
+  reset: "每周一，未完成的承诺会回到待选；周日选的承诺会留到下周。",
   softLimit: "超过平常的数量。这周需要的话可以保留。",
   candidates: "待选",
   attention: "看一眼",
@@ -155,6 +161,10 @@ const zh: typeof en = {
   updating: "正在更新…",
   restored: "更改未保存，已恢复。",
   notSent: "其后未发送的更改：",
+  waiting: "等待中",
+  followUp: "加跟进步骤",
+  weeklyReview: "周回顾",
+  sundayRule: "周日选的承诺和目标会留到下周；其余的周一照常重置。",
 };
 export function words(language: Language): typeof en {
   return language === "zh" ? zh : en;

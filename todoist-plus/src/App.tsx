@@ -48,6 +48,8 @@ interface Props {
   snapshot?: PlusSnapshot;
   /** The last confirmed data, or undefined once a remembered board is dropped. */
   onSnapshot?: (snapshot?: PlusSnapshot) => void;
+  /** Opened from the weekly review task's link: Plan starts with the review checklist. */
+  review?: boolean;
 }
 export function App({
   actions,
@@ -60,6 +62,7 @@ export function App({
   onViewChange,
   snapshot,
   onSnapshot,
+  review,
 }: Props) {
   // What the server confirmed, from reads and writes. Pending drags are drawn on top of it.
   const [confirmed, setConfirmed] = useState<PlusData | undefined>(
@@ -106,6 +109,8 @@ export function App({
   const rereadAfterWrites = useRef(false);
   const loadedAt = useRef(snapshot?.readAt ?? 0);
   const [selectedId, setSelectedId] = useState(externalTaskId ?? "");
+  // The task whose editor opens at the empty step entry (a follow-up step from Waiting).
+  const [stepsFor, setStepsFor] = useState("");
   const completionIds = useRef(new Map<string, string>());
   // Confirmed completions stay visible but disabled until a re-read shows the result.
   const [completing, setCompleting] = useState<ReadonlySet<string>>(new Set());
@@ -239,9 +244,15 @@ export function App({
     if (externalTaskId) setSelectedId(externalTaskId);
   }, [externalTaskId]);
   useEffect(() => {
-    if (selectedId && dialog.current && !dialog.current.open)
-      dialog.current.showModal();
-  }, [selectedId]);
+    if (!selectedId || !dialog.current) return;
+    if (!dialog.current.open) dialog.current.showModal();
+    if (stepsFor === selectedId)
+      dialog.current.querySelector<HTMLTextAreaElement>("textarea")?.focus();
+  }, [selectedId, stepsFor]);
+  function openTask(task: PlanningTask, steps = false) {
+    setStepsFor(steps ? task.id : "");
+    setSelectedId(task.id);
+  }
 
   async function addFocus(id: string, day = data?.focus) {
     if (!data || !day || day.taskIds.includes(id)) return;
@@ -274,21 +285,21 @@ export function App({
     if (!data) return;
     void run(() => actions.timer(action, taskId, data.focus));
   }
-  function complete(task: PlanningTask) {
+  /** Completes in Focus by default; an empty day (the weekly review task) settles no FlowDay day. */
+  function complete(
+    task: PlanningTask,
+    flowDate = data?.focus.timer?.taskId === task.id
+      ? data.focus.timer.flowDate
+      : (data?.focus.date ?? ""),
+  ) {
     let id = completionIds.current.get(task.id);
     if (!id) {
       id = crypto.randomUUID();
       completionIds.current.set(task.id, id);
     }
     const requestId = id;
-    void run(async () => {
-      await actions.completeTask(
-        task,
-        requestId,
-        data?.focus.timer?.taskId === task.id
-          ? data.focus.timer.flowDate
-          : (data?.focus.date ?? ""),
-      );
+    return run(async () => {
+      await actions.completeTask(task, requestId, flowDate);
       // Todoist may advance a recurring task, so only the following re-read shows the result.
       completionIds.current.delete(task.id);
       setCompleting((current) => new Set(current).add(task.id));
@@ -379,7 +390,7 @@ export function App({
                 pending={pendingCards}
                 run={run}
                 actions={actions}
-                editTask={(task) => setSelectedId(task.id)}
+                editTask={openTask}
                 onOpenTask={onOpenTask}
               />
               <PlanView
@@ -394,8 +405,14 @@ export function App({
                 pending={pendingCards}
                 run={run}
                 actions={actions}
-                editTask={(task) => setSelectedId(task.id)}
+                editTask={openTask}
                 onLabels={() => setSelectedId("board-labels")}
+                todayTaskIds={data.focus.taskIds}
+                addFocus={(id) => void addFocus(id, data.focus)}
+                addStep={(task) => openTask(task, true)}
+                onOpenTask={onOpenTask}
+                completeReview={(task) => complete(task, "")}
+                reviewing={review}
               />
             </>
           ) : (
@@ -406,8 +423,8 @@ export function App({
               busy={busy || !data.plan.configured}
               pending={pendingCards}
               completing={completing}
-              editTask={(task) => setSelectedId(task.id)}
-              complete={complete}
+              editTask={openTask}
+              complete={(task) => void complete(task)}
               onOpenPlan={() => onViewChange?.("plan")}
               onTimer={commandTimer}
             />
@@ -462,7 +479,7 @@ export function App({
               className="plus-icon"
               disabled={busy || timerSettling}
               aria-label={text.complete}
-              onClick={() => complete(timerTask)}
+              onClick={() => void complete(timerTask)}
             >
               <Check size={18} />
             </button>

@@ -161,8 +161,13 @@ export async function mountTodoist(ctx: ContentScriptContext) {
     }
     hidden.clear();
   }
+  function viewValue() {
+    return new URL(location.href).searchParams.get(viewParam);
+  }
   function currentView(): View | undefined {
-    const value = new URL(location.href).searchParams.get(viewParam);
+    const value = viewValue();
+    // The weekly review task links to `review`: Plan with its checklist open.
+    if (value === "review") return "plan";
     return value === "plan" || value === "focus" ? value : undefined;
   }
   function favoriteRows() {
@@ -331,6 +336,7 @@ export async function mountTodoist(ctx: ContentScriptContext) {
           onViewChange={navigate}
           snapshot={snapshot}
           onSnapshot={keepSnapshot}
+          review={viewValue() === "review"}
         />,
       );
     }
