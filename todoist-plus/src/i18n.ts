@@ -74,6 +74,7 @@ const en = {
   local: "FlowDay task",
   missingTask: "Task unavailable",
   openFlowday: "Open FlowDay",
+  updating: "Updating…",
 };
 const zh: typeof en = {
   plan: "计划",
@@ -149,6 +150,7 @@ const zh: typeof en = {
   local: "FlowDay 本地任务",
   missingTask: "任务暂不可用",
   openFlowday: "打开 FlowDay",
+  updating: "正在更新…",
 };
 export function words(language: Language): typeof en {
   return language === "zh" ? zh : en;

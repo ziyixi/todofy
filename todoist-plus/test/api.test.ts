@@ -373,3 +373,84 @@ it("shows an actionable throttled sync and does not attempt the following write"
   );
   expect(paths).toEqual(["/api/plus/flowday/api/v1/tasks:sync"]);
 });
+
+it("returns the confirmed lead task and label plan instead of requiring a full reload", async () => {
+  const paths: string[] = [];
+  const api = createApi(
+    { apiOrigin: "https://api.example.test", token: "synthetic" },
+    vi.fn<typeof fetch>(async (input) => {
+      const path = new URL(String(input)).pathname;
+      paths.push(path);
+      if (path.endsWith("/tasks:setTaskLead"))
+        return json({
+          task: {
+            id: "child",
+            title: "Synthetic step",
+            stage: "weekly",
+            deadline: "2026-10-30",
+            lead_days: 7,
+            etag: "child-2",
+            estimated_minutes: 480,
+          },
+        });
+      if (path.endsWith("/plan:updatePlanLabels"))
+        return json({
+          plan: {
+            timezone: "UTC",
+            week_start: "2026-10-12",
+            today: "2026-10-13",
+            enabled: true,
+            etag: "plan-2",
+            labels: [{ role: "committed", id: "l9", label: "now" }],
+            hidden_filter_ids: ["f1"],
+          },
+        });
+      throw new Error("Unexpected request " + path);
+    }),
+  );
+  const lead = await api.updateLead(
+    {
+      id: "child",
+      title: "Synthetic step",
+      parentId: "",
+      projectId: "",
+      labels: [],
+      area: "work",
+      stage: "weekly",
+      bet: false,
+      priority: 1,
+      deadline: "",
+      due: "",
+      leadDays: 0,
+      estimatedMinutes: 30,
+      etag: "child-1",
+      mustStart: false,
+      missingLead: false,
+    },
+    "2026-10-30",
+    7,
+  );
+  expect(lead).toMatchObject({
+    id: "child",
+    deadline: "2026-10-30",
+    leadDays: 7,
+    etag: "child-2",
+    // FlowDay's manual estimate stays authoritative over Todoist's duration.
+    estimatedMinutes: 30,
+  });
+  const plan = await api.updateLabels(
+    [{ role: "committed", id: "l9", label: "now" }],
+    "plan-1",
+  );
+  expect(plan).toMatchObject({
+    etag: "plan-2",
+    configured: true,
+    hiddenFilterIds: ["f1"],
+    managedLabels: [{ role: "committed", id: "l9", label: "now" }],
+  });
+  expect(plan).not.toHaveProperty("tasks");
+  expect(paths).toEqual([
+    "/api/plus/v1/tasks:setTaskLead",
+    "/api/plus/v1/plan:updatePlanLabels",
+  ]);
+});

@@ -1,10 +1,11 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { extensionActions } from "./client";
 import { words } from "./i18n";
 import { todoistTaskUrl } from "./domain";
+import { applyConfirmed, rereadsAfter } from "./plan-updates";
 import { TaskEditor } from "./TaskEditor";
-import type { FocusState, Language, PlanState, RunOperation } from "./model";
+import type { Language, PlanState, PlusData, RunOperation } from "./model";
 
 export function NativeTaskTools({
   taskId,
@@ -18,67 +19,46 @@ export function NativeTaskTools({
   onUnavailable?: () => void;
 }) {
   const [open, setOpen] = useState(false);
-  const [data, setData] = useState<{ plan: PlanState; focus: FocusState }>();
+  const [data, setData] = useState<PlusData>();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  // Changes when a write starts or ends; an overlapping read may predate the write.
+  const writes = useRef(0);
   const text = words(language);
+  const read = useCallback(async () => {
+    const version = writes.current;
+    try {
+      const next = await extensionActions.load();
+      if (version !== writes.current) return;
+      setData(next);
+      onReady?.(next.plan);
+    } catch (failure) {
+      onUnavailable?.();
+      setError(failure instanceof Error ? failure.message : text.lastError);
+    }
+  }, [text.lastError, onReady, onUnavailable]);
   useEffect(() => {
-    if (!open) return;
-    setBusy(true);
-    void extensionActions
-      .load()
-      .then((next) => {
-        setData(next);
-        onReady?.(next.plan);
-      })
-      .catch((failure) => {
-        onUnavailable?.();
-        setError(failure instanceof Error ? failure.message : text.lastError);
-      })
-      .finally(() => setBusy(false));
-  }, [open, text.lastError, onReady, onUnavailable]);
+    if (open) void read();
+  }, [open, read]);
   const run: RunOperation = async (operation) => {
     if (busy) return false;
+    writes.current++;
     setBusy(true);
     setError("");
+    let reread = false;
     try {
       const confirmed = await operation();
-      if (Array.isArray(confirmed)) {
-        setData((current) => {
-          if (!current) return current;
-          const today = confirmed.find(
-            (day) => day.date === current.focus.date,
-          );
-          return today
-            ? { ...current, focus: { ...current.focus, ...today } }
-            : current;
-        });
-      } else if (confirmed) {
-        setData((current) =>
-          current
-            ? {
-                ...current,
-                plan: {
-                  ...current.plan,
-                  tasks: current.plan.tasks.map((item) =>
-                    item.id === confirmed.id ? confirmed : item,
-                  ),
-                },
-              }
-            : current,
-        );
-      } else {
-        const next = await extensionActions.load();
-        setData(next);
-        onReady?.(next.plan);
-      }
+      setData((current) => current && applyConfirmed(current, confirmed));
+      reread = rereadsAfter(confirmed);
       return true;
     } catch (failure) {
       onUnavailable?.();
       setError(failure instanceof Error ? failure.message : text.lastError);
       return false;
     } finally {
+      writes.current++;
       setBusy(false);
+      if (reread) void read();
     }
   };
   const task = data?.plan.tasks.find((item) => item.id === taskId);
@@ -102,7 +82,7 @@ export function NativeTaskTools({
               {error}
             </p>
           )}
-          {busy && !data && <p className="plus-muted">{text.loading}</p>}
+          {!data && !error && <p className="plus-muted">{text.loading}</p>}
           {data && !data.plan.configured && (
             <p className="plus-muted">{text.setup}</p>
           )}

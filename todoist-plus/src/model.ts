@@ -33,13 +33,23 @@ export interface PlanState {
   etag: string;
   availableLabels: { id: string; label: string }[];
 }
+/** Account planning settings without the task list. */
+export type PlanMetadata = Omit<PlanState, "tasks">;
 export interface FlowDayPlan {
   date: string;
   taskIds: string[];
   completedTaskIds: string[];
 }
+/** A write's server-confirmed result; void means only a re-read can show it. */
+export type Confirmed =
+  | void
+  | FlowDayPlan[]
+  | PlanningTask
+  | PlanningTask[]
+  | PlanMetadata
+  | TimerSnapshot;
 export type RunOperation = (
-  operation: () => Promise<void | FlowDayPlan[] | PlanningTask>,
+  operation: () => Promise<Confirmed>,
 ) => Promise<boolean>;
 export interface FocusState extends FlowDayPlan {
   timerEtag: string;
@@ -80,7 +90,7 @@ export interface PlusActions {
   updateLabels(
     labels: { role: string; id: string; label: string }[],
     etag: string,
-  ): Promise<void>;
+  ): Promise<PlanMetadata>;
   createSteps(
     task: PlanningTask,
     steps: StepDraft[],
@@ -90,7 +100,7 @@ export interface PlusActions {
     task: PlanningTask,
     deadline: string,
     leadDays: number,
-  ): Promise<void>;
+  ): Promise<PlanningTask>;
   completeTask(
     task: PlanningTask,
     requestId: string,

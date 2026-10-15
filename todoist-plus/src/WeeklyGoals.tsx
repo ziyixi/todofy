@@ -146,9 +146,14 @@ export function WeeklyGoals({
           onClose={() => setPicker(undefined)}
           onChoose={async (next) => {
             await run(async () => {
+              const confirmed: PlanningTask[] = [];
               if (picker.previous && picker.previous.id !== next.id)
-                await actions.updateTask(picker.previous, { bet: false });
-              if (!next.bet) await actions.updateTask(next, { bet: true });
+                confirmed.push(
+                  await actions.updateTask(picker.previous, { bet: false }),
+                );
+              if (!next.bet)
+                confirmed.push(await actions.updateTask(next, { bet: true }));
+              return confirmed;
             });
             setPicker(undefined);
           }}

@@ -1,6 +1,6 @@
 import type { Connection } from "./api";
 import type { PlusActions } from "./model";
-export const PLANNING_PROTOCOL = 2;
+export const PLANNING_PROTOCOL = 3;
 export type ActionName = keyof PlusActions;
 export type ActionMessage = {
   [Key in ActionName]: {

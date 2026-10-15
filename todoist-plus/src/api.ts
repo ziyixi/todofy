@@ -5,6 +5,7 @@ import {
 } from "@ziyixi/proto/http-client";
 import {
   PlusService,
+  type Plan as ApiPlan,
   type PlanningTask as ApiPlanningTask,
 } from "@ziyixi/proto/todofy/ui/v1/plus_service_pb";
 import {
@@ -21,6 +22,7 @@ import type { Flow } from "@ziyixi/proto/flowday/ui/v1/flow_pb";
 import type {
   FlowDayPlan,
   FocusState,
+  PlanMetadata,
   PlanningTask,
   PlusActions,
   TimerSnapshot,
@@ -75,6 +77,26 @@ export function planningTask(task: ApiPlanningTask): PlanningTask {
     etag: task.etag,
     mustStart: task.mustStart,
     missingLead: task.missingLead,
+  };
+}
+function planMetadata(plan: ApiPlan): PlanMetadata {
+  return {
+    week: plan.weekStart,
+    timezone: plan.timezone,
+    configured: plan.enabled,
+    hiddenFilterIds: plan.hiddenFilterIds,
+    flowdayUrl: plan.flowdayUrl,
+    managedLabelNames: plan.labels.map((label) => label.label),
+    managedLabels: plan.labels.map((label) => ({
+      role: label.role,
+      id: label.id,
+      label: label.label,
+    })),
+    etag: plan.etag,
+    availableLabels: plan.availableLabels.map((label) => ({
+      id: label.id,
+      label: label.label,
+    })),
   };
 }
 function timerSnapshot(session: TimerSession): TimerSnapshot {
@@ -245,28 +267,13 @@ export function createApi(
       };
       return {
         plan: {
+          ...planMetadata(plan),
           tasks: tasks.map((task) => {
             const synced = flowTasks[task.id];
             return synced
               ? { ...task, estimatedMinutes: synced.estimatedMinutes }
               : task;
           }),
-          week: plan.weekStart,
-          timezone: plan.timezone,
-          configured: plan.enabled,
-          hiddenFilterIds: plan.hiddenFilterIds,
-          flowdayUrl: plan.flowdayUrl,
-          managedLabelNames: plan.labels.map((label) => label.label),
-          managedLabels: plan.labels.map((label) => ({
-            role: label.role,
-            id: label.id,
-            label: label.label,
-          })),
-          etag: plan.etag,
-          availableLabels: plan.availableLabels.map((label) => ({
-            id: label.id,
-            label: label.label,
-          })),
         },
         focus,
         days,
@@ -286,23 +293,30 @@ export function createApi(
       };
     },
     async updateLabels(labels, etag) {
-      await plus.updatePlanLabels({
+      const result = await plus.updatePlanLabels({
         labels,
         etag,
         requestId: crypto.randomUUID(),
       });
+      if (!result.plan) throw new Error("The saved labels could not be read.");
+      return planMetadata(result.plan);
     },
     async createSteps(task, steps, requestId) {
       await plus.appendTaskSteps({ parentId: task.id, steps, requestId });
     },
     async updateLead(task, deadline, leadDays) {
-      await plus.setTaskLead({
+      const result = await plus.setTaskLead({
         taskId: task.id,
         etag: task.etag,
         requestId: crypto.randomUUID(),
         deadline,
         leadDays,
       });
+      if (!result.task) throw new Error("The saved task could not be read.");
+      return {
+        ...planningTask(result.task),
+        estimatedMinutes: task.estimatedMinutes,
+      };
     },
     async completeTask(task, requestId, flowDate) {
       await plus.completeTask({ taskId: task.id, requestId, flowDate });

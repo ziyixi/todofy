@@ -10,6 +10,7 @@ import {
 import { words } from "./i18n";
 import type { FocusState, Language, PlanState, PlanningTask } from "./model";
 import { outcomeColor, outcomeForTask } from "./planning-outcomes";
+import { PendingMark } from "./StatusMarks";
 
 interface Props {
   taskId: string;
@@ -20,6 +21,8 @@ interface Props {
   minutes: number;
   language: Language;
   busy: boolean;
+  /** Completion is confirmed; the re-read decides whether a recurrence remains. */
+  settling?: boolean;
   onTimer: (
     action: "start" | "pause" | "resume" | "stop",
     taskId: string,
@@ -37,6 +40,7 @@ export function FocusBlock({
   minutes,
   language,
   busy,
+  settling = false,
   onTimer,
   editTask,
   complete,
@@ -73,17 +77,22 @@ export function FocusBlock({
   return (
     <li className="plus-focus-slot" data-task-id={taskId}>
       <article
-        className={`plus-focus-block ${timer ? "is-current" : ""}`}
+        className={`plus-focus-block ${timer ? "is-current" : ""} ${settling ? "is-pending" : ""}`}
         style={{ "--plus-family-color": familyColor } as CSSProperties}
+        aria-busy={settling || undefined}
       >
         {task && (
           <button
             className="plus-checkbox"
             aria-label={`${text.complete}: ${title}`}
-            disabled={busy}
+            disabled={busy || settling}
             onClick={() => complete(task)}
           >
-            <Check size={13} />
+            {settling ? (
+              <PendingMark language={language} />
+            ) : (
+              <Check size={13} />
+            )}
           </button>
         )}
         <div className="plus-focus-block-content">
@@ -150,7 +159,7 @@ export function FocusBlock({
             <button
               className="plus-focus-timer-action is-primary"
               aria-label={`${text[timerAction]}: ${title}`}
-              disabled={busy || Boolean(focus.timer && !timer)}
+              disabled={busy || settling || Boolean(focus.timer && !timer)}
               onClick={() => onTimer(timerAction, taskId)}
             >
               {timer?.status === "running" ? (
@@ -164,7 +173,7 @@ export function FocusBlock({
               <button
                 className="plus-focus-timer-action"
                 aria-label={`${text.stop}: ${title}`}
-                disabled={busy}
+                disabled={busy || settling}
                 onClick={() => onTimer("stop", taskId)}
               >
                 <Square size={13} />

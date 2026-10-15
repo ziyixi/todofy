@@ -20,6 +20,18 @@ async function readPlanCount(worker: Worker) {
       ).length,
   );
 }
+async function flowReads(worker: Worker) {
+  return worker.evaluate(
+    () =>
+      (
+        globalThis as unknown as {
+          plannerState: { calls: { path: string; method: string }[] };
+        }
+      ).plannerState.calls.filter(
+        (call) => call.method === "GET" && call.path.includes("/flows/"),
+      ).length,
+  );
+}
 async function cardIds(day: Locator) {
   return day
     .locator(".planning-calendar-step")
@@ -106,6 +118,7 @@ test("real pointer scheduling uses leaf steps and persists day moves without ful
       page.locator(".planning-commitment-grid [data-outcome-id]"),
     ).toHaveCount(1);
     const baseline = await readPlanCount(worker);
+    const flowBaseline = await flowReads(worker);
     const layout = await page
       .locator(".planning-calendar")
       .evaluate((element) => ({
@@ -158,6 +171,9 @@ test("real pointer scheduling uses leaf steps and persists day moves without ful
     await expect.poll(() => cardIds(thursday)).toEqual(["second", "child"]);
     await expect(page.locator(".plus-page-header .plus-spin")).toHaveCount(0);
     expect(await readPlanCount(worker)).toBe(baseline);
+    // Only the tray drop and the same-day reorder read their one target day; the confirmed
+    // queues are shown without reading the whole week again.
+    expect((await flowReads(worker)) - flowBaseline).toBe(2);
     await page.reload();
     await openWeek(page);
     await expect.poll(() => cardIds(thursday)).toEqual(["second", "child"]);

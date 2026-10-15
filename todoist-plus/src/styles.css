@@ -414,6 +414,14 @@ body {
     transform: rotate(360deg);
   }
 }
+/* A card waiting for its write, or for the re-read after it, stays visible but dimmed. */
+.is-pending {
+  opacity: 0.6;
+}
+.plus-pending-mark {
+  flex: none;
+  color: var(--plus-muted);
+}
 .plus-sr-only {
   position: absolute !important;
   width: 1px !important;

@@ -24,7 +24,7 @@ it("marks new action messages so a stale content script cannot use changed plann
   await extensionActions.loadDays("2026-10-19");
   expect(sendMessage).toHaveBeenCalledWith({
     kind: "action",
-    protocol: 2,
+    protocol: 3,
     method: "loadDays",
     args: ["2026-10-19"],
   });

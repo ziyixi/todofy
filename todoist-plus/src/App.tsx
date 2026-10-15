@@ -10,20 +10,24 @@ import {
 } from "lucide-react";
 import { displayedTitle, duration, elapsed } from "./domain";
 import { words } from "./i18n";
+import { applyConfirmed, rereadsAfter } from "./plan-updates";
 import { PlanView } from "./PlanView";
 import { FocusView } from "./FocusView";
 import { TaskEditor } from "./TaskEditor";
 import { BoardLabels } from "./BoardLabels";
 import { WeeklyGoals } from "./WeeklyGoals";
 import type {
+  Confirmed,
   Language,
-  FlowDayPlan,
   PlanState,
   PlanningTask,
   PlusActions,
   PlusData,
   View,
 } from "./model";
+
+/** Returning to the tab re-reads only when the last read is at least this old. */
+const VISIBLE_REREAD_MS = 60_000;
 
 interface Props {
   actions: PlusActions;
@@ -51,24 +55,36 @@ export function App({
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [weekLoading, setWeekLoading] = useState(false);
+  const [reading, setReading] = useState(0);
   const lock = useRef(false);
+  // Changes when a write starts or ends; a read that overlapped a write may predate it.
+  const writes = useRef(0);
+  const rereadAfterWrite = useRef(false);
+  const loadedAt = useRef(0);
   const [selectedId, setSelectedId] = useState(externalTaskId ?? "");
   const completionIds = useRef(new Map<string, string>());
+  // Confirmed completions stay visible but disabled until a re-read shows the result.
+  const [completing, setCompleting] = useState<ReadonlySet<string>>(new Set());
   const [, tick] = useState(0);
   const dialog = useRef<HTMLDialogElement>(null);
   const text = words(language);
-  const load = useCallback(async () => {
+  const load = useCallback(async (): Promise<boolean> => {
     const request = ++weekRequest.current;
+    const version = writes.current;
     try {
       const week = displayedWeek.current;
       const next = await actions.load(week || undefined);
+      if (version !== writes.current || lock.current) return false;
       if (!displayedWeek.current) displayedWeek.current = next.plan.week;
+      loadedAt.current = Date.now();
       setData((current) =>
         current && request !== weekRequest.current
           ? { ...next, days: current.days }
           : next,
       );
+      setCompleting(new Set());
       onReady?.(next.plan);
+      return true;
     } catch (failure) {
       onReady?.();
       throw failure;
@@ -76,76 +92,75 @@ export function App({
       if (request === weekRequest.current) setWeekLoading(false);
     }
   }, [actions, onReady]);
-  const run = useCallback(
-    async (
-      operation: () => Promise<void | FlowDayPlan[] | PlanningTask>,
-      refresh = true,
-    ): Promise<boolean> => {
-      if (lock.current) return false;
-      lock.current = true;
-      setBusy(true);
-      setError("");
+  // Reads never take the write lock or disable controls.
+  const revalidate = useCallback(
+    async (report = true) => {
+      setReading((count) => count + 1);
       try {
-        const confirmed = await operation();
-        if (Array.isArray(confirmed)) {
-          setData((current) => {
-            if (!current) return current;
-            const today = confirmed.find(
-              (day) => day.date === current.focus.date,
-            );
-            return {
-              ...current,
-              days: current.days.map(
-                (day) =>
-                  confirmed.find((next) => next.date === day.date) ?? day,
-              ),
-              focus: today ? { ...current.focus, ...today } : current.focus,
-            };
-          });
-          if (confirmed.length) await changeWeek(displayedWeek.current);
-        } else if (confirmed) {
-          setData((current) =>
-            current
-              ? {
-                  ...current,
-                  plan: {
-                    ...current.plan,
-                    tasks: current.plan.tasks.map((task) =>
-                      task.id === confirmed.id ? confirmed : task,
-                    ),
-                  },
-                }
-              : current,
-          );
-        } else if (refresh) await load();
-        return true;
-      } catch (failure) {
-        setError(failure instanceof Error ? failure.message : text.lastError);
-        // Another window may have changed the timer or task. Show its current state.
-        try {
-          await load();
-        } catch {
-          // Keep the last confirmed view and the original operation error.
+        while (!(await load())) {
+          // The read overlapped a write. A running write reads again when it ends.
+          if (lock.current) {
+            rereadAfterWrite.current = true;
+            return;
+          }
         }
-        return false;
+      } catch (failure) {
+        if (report)
+          setError(failure instanceof Error ? failure.message : text.lastError);
       } finally {
-        lock.current = false;
-        setBusy(false);
+        setReading((count) => count - 1);
       }
     },
     [load, text.lastError],
   );
+  const run = useCallback(
+    async (operation: () => Promise<Confirmed>): Promise<boolean> => {
+      if (lock.current) return false;
+      lock.current = true;
+      writes.current++;
+      setBusy(true);
+      setError("");
+      let reread = false;
+      let failed = false;
+      try {
+        const confirmed = await operation();
+        setData((current) => current && applyConfirmed(current, confirmed));
+        reread = rereadsAfter(confirmed);
+        return true;
+      } catch (failure) {
+        setError(failure instanceof Error ? failure.message : text.lastError);
+        // Another window may have changed the timer or task. Show its current state.
+        reread = failed = true;
+        return false;
+      } finally {
+        lock.current = false;
+        writes.current++;
+        setBusy(false);
+        if (reread || rereadAfterWrite.current) {
+          rereadAfterWrite.current = false;
+          // A failed re-read keeps the last confirmed view and the original operation error.
+          void revalidate(!failed);
+        }
+      }
+    },
+    [revalidate, text.lastError],
+  );
   useEffect(() => {
-    void run(async () => {});
-  }, [run]);
+    void revalidate();
+  }, [revalidate]);
   useEffect(() => {
     const visible = () => {
-      if (document.visibilityState === "visible" && !lock.current)
-        void run(async () => {});
+      if (
+        document.visibilityState === "visible" &&
+        Date.now() - loadedAt.current >= VISIBLE_REREAD_MS
+      ) {
+        setError("");
+        void revalidate();
+      }
     };
     document.addEventListener("visibilitychange", visible);
     return () => document.removeEventListener("visibilitychange", visible);
-  }, [run]);
+  }, [revalidate]);
   useEffect(() => {
     if (data?.focus.timer?.status !== "running") return;
     const id = window.setInterval(() => tick((value) => value + 1), 1000);
@@ -186,21 +201,7 @@ export function App({
     taskId: string,
   ) {
     if (!data) return;
-    void run(async () => {
-      const confirmed = await actions.timer(action, taskId, data.focus);
-      setData((current) =>
-        current
-          ? {
-              ...current,
-              focus: {
-                ...current.focus,
-                timerEtag: confirmed.timerEtag,
-                timer: confirmed.timer,
-              },
-            }
-          : current,
-      );
-    }, false);
+    void run(() => actions.timer(action, taskId, data.focus));
   }
   function complete(task: PlanningTask) {
     let id = completionIds.current.get(task.id);
@@ -209,26 +210,31 @@ export function App({
       completionIds.current.set(task.id, id);
     }
     const requestId = id;
-    void run(() =>
-      actions.completeTask(
+    void run(async () => {
+      await actions.completeTask(
         task,
         requestId,
         data?.focus.timer?.taskId === task.id
           ? data.focus.timer.flowDate
           : (data?.focus.date ?? ""),
-      ),
-    ).then((ok) => {
-      if (ok) completionIds.current.delete(task.id);
+      );
+      // Todoist may advance a recurring task, so only the following re-read shows the result.
+      completionIds.current.delete(task.id);
+      setCompleting((current) => new Set(current).add(task.id));
     });
   }
   const selected = data?.plan.tasks.find((task) => task.id === selectedId);
   const timerTask = data?.plan.tasks.find(
     (task) => task.id === data.focus.timer?.taskId,
   );
+  const timerSettling = Boolean(timerTask && completing.has(timerTask.id));
   function refresh() {
     if (error === "Extension updated. Reload Todoist to continue.")
       window.location.reload();
-    else void run(async () => {});
+    else {
+      setError("");
+      void revalidate();
+    }
   }
   return (
     <div className={`plus-root plus-root-${view}`}>
@@ -254,7 +260,7 @@ export function App({
           >
             <RefreshCw
               size={17}
-              className={busy || weekLoading ? "plus-spin" : ""}
+              className={busy || weekLoading || reading ? "plus-spin" : ""}
             />
           </button>
           <button
@@ -321,6 +327,7 @@ export function App({
               focus={data.focus}
               language={language}
               busy={busy || !data.plan.configured}
+              completing={completing}
               editTask={(task) => setSelectedId(task.id)}
               complete={complete}
               onOpenPlan={() => onViewChange?.("plan")}
@@ -345,7 +352,7 @@ export function App({
           <output>{duration(elapsed(data.focus))}</output>
           <button
             className="plus-icon"
-            disabled={busy}
+            disabled={busy || timerSettling}
             aria-label={
               data.focus.timer.status === "running" ? text.pause : text.resume
             }
@@ -364,7 +371,7 @@ export function App({
           </button>
           <button
             className="plus-icon"
-            disabled={busy}
+            disabled={busy || timerSettling}
             aria-label={text.stop}
             onClick={() => commandTimer("stop", data.focus.timer!.taskId)}
           >
@@ -373,7 +380,7 @@ export function App({
           {timerTask && (
             <button
               className="plus-icon"
-              disabled={busy}
+              disabled={busy || timerSettling}
               aria-label={text.complete}
               onClick={() => complete(timerTask)}
             >

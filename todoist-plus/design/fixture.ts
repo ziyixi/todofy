@@ -1,6 +1,7 @@
 import type {
   FocusState,
   FlowDayPlan,
+  PlanMetadata,
   PlanState,
   PlanningTask,
   PlusActions,
@@ -235,6 +236,9 @@ export function createPrototype(fullBoard = false): PlusActions {
         managedLabelNames: managedLabels.map((binding) => binding.label),
         etag: crypto.randomUUID(),
       };
+      const metadata: Partial<PlanState> = structuredClone(plan);
+      delete metadata.tasks;
+      return metadata as PlanMetadata;
     },
     async createSteps(item, drafts) {
       plan = {
@@ -258,6 +262,7 @@ export function createPrototype(fullBoard = false): PlusActions {
           task.id === item.id ? { ...task, deadline, leadDays } : task,
         ),
       };
+      return structuredClone(plan.tasks.find((task) => task.id === item.id)!);
     },
     async completeTask(item, _requestId, flowDate) {
       plan = {

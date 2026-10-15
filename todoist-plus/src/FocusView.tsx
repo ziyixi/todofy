@@ -9,6 +9,8 @@ interface Props {
   focus: FocusState;
   language: Language;
   busy: boolean;
+  /** Completed task IDs that wait for the re-read showing the result. */
+  completing?: ReadonlySet<string>;
   editTask: (task: PlanningTask) => void;
   complete: (task: PlanningTask) => void;
   onOpenPlan: () => void;
@@ -23,6 +25,7 @@ export function FocusView({
   focus,
   language,
   busy,
+  completing,
   editTask,
   complete,
   onOpenPlan,
@@ -76,6 +79,7 @@ export function FocusView({
               focus={focus}
               language={language}
               busy={busy}
+              settling={completing?.has(id) ?? false}
               onTimer={onTimer}
               editTask={editTask}
               complete={complete}
