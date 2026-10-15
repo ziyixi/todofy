@@ -3,11 +3,17 @@ import { createShadowRootUi } from "wxt/utils/content-script-ui/shadow-root";
 import type { ContentScriptContext } from "wxt/utils/content-script-context";
 import { ChevronDown, ChevronRight, LayoutList, Target } from "lucide-react";
 import { App } from "./App";
-import { todoistTaskUrl } from "./domain";
+import { planConfig, todoistTaskUrl } from "./domain";
 import { NativeTaskTools } from "./NativeTaskTools";
-import { extensionActions, openOptions } from "./client";
+import { cachedPlanConfig, extensionActions, openOptions } from "./client";
 import { words } from "./i18n";
-import type { Language, PlanState, View } from "./model";
+import type {
+  Language,
+  PlanConfig,
+  PlanMetadata,
+  PlusSnapshot,
+  View,
+} from "./model";
 
 const viewParam = "todoist-plus";
 const sidebarSelector =
@@ -76,7 +82,14 @@ export async function mountTodoist(ctx: ContentScriptContext) {
   let content: HTMLElement | undefined;
   let mainHost: HTMLElement | undefined;
   let mainRoot: Root | undefined;
-  let plan: PlanState | undefined;
+  let config: PlanConfig | undefined;
+  // The last confirmed data stays in this page's memory only, so returning to Plus paints at once.
+  let snapshot: PlusSnapshot | undefined;
+  const keepSnapshot = (next: PlusSnapshot) => {
+    snapshot = next;
+  };
+  // Started before the sidebar exists, so mounting rarely waits for it.
+  const savedConfig = cachedPlanConfig().catch(() => undefined);
   let view: View | undefined;
   let language = languageOf(document);
   let disposed = false;
@@ -110,7 +123,7 @@ export async function mountTodoist(ctx: ContentScriptContext) {
 
   function syncNativeSelection() {
     const selected = new Set(
-      view && plan?.configured
+      view && config?.configured
         ? (document
             .querySelector(sidebarSelector)
             ?.querySelectorAll<HTMLElement>("li.current") ?? [])
@@ -220,7 +233,7 @@ export async function mountTodoist(ctx: ContentScriptContext) {
       };
     }
     if (!favoritesRoot || !favoritesHost) return;
-    const visible = Boolean(plan?.configured && rows.length);
+    const visible = Boolean(config?.configured && rows.length);
     const display = visible ? "block" : "none";
     if (favoritesHost.style.display !== display)
       favoritesHost.style.display = display;
@@ -254,17 +267,15 @@ export async function mountTodoist(ctx: ContentScriptContext) {
       for (const child of Array.from(content.children))
         if (child instanceof HTMLElement && child !== mainHost) hide(child);
     }
-    if (!plan?.configured || !mainHost?.isConnected) {
+    if (!config?.configured || !mainHost?.isConnected) {
       void showOtherViews([]);
       return;
     }
-    const labelIds = plan.managedLabels
-      .filter((label) => !["office", "home"].includes(label.role))
-      .map((label) => label.id);
+    const labelIds = config.labelIds;
     const extras: HTMLElement[] = [];
     for (const { row, link, kind, slug } of favoriteRows()) {
       if (
-        (kind === "filter" && matchesId(slug, plan.hiddenFilterIds)) ||
+        (kind === "filter" && matchesId(slug, config.hiddenFilterIds)) ||
         (kind === "label" && matchesId(slug, labelIds)) ||
         /^[-_]{3,}$/u.test(link.textContent?.trim() ?? "")
       ) {
@@ -285,16 +296,17 @@ export async function mountTodoist(ctx: ContentScriptContext) {
       if (slug && matchesId(slug, labelIds)) hide(link);
     }
   }
-  const ready = (next?: PlanState) => {
-    plan = next;
+  const ready = (next?: PlanConfig) => {
+    config = next;
     if (!next?.configured) detailsReady = false;
     restore();
     hideReplaced();
   };
+  const planReady = (next?: PlanMetadata) => ready(next && planConfig(next));
   const unavailable = () => ready();
-  const detailReady = (next?: PlanState) => {
+  const detailReady = (next?: PlanMetadata) => {
     detailsReady = Boolean(next?.configured);
-    if (next) plan = next;
+    if (next) config = planConfig(next);
     restore();
     hideReplaced();
   };
@@ -315,8 +327,10 @@ export async function mountTodoist(ctx: ContentScriptContext) {
           language={languageOf(document)}
           onOpenTask={(id) => location.assign(todoistTaskUrl(id))}
           onSettings={openOptions}
-          onReady={ready}
+          onReady={planReady}
           onViewChange={navigate}
+          snapshot={snapshot}
+          onSnapshot={keepSnapshot}
         />,
       );
     }
@@ -411,13 +425,15 @@ export async function mountTodoist(ctx: ContentScriptContext) {
     applyTheme(navUi.shadowHost, navReference);
     if (upcoming) applyNavigationLayout(navUi.shadowHost, upcoming);
     cleanups.push(() => navUi.remove());
+    config ??= await savedConfig;
     mounting = false;
     render();
     if (!view) {
+      // Only the account settings are needed to arrange the sidebar, never the task list.
       void extensionActions
-        .load()
+        .readPlan()
         .then((next) => {
-          if (!disposed) ready(next.plan);
+          if (!disposed) ready(planConfig(next));
         })
         .catch(() => {
           if (!disposed) ready();
@@ -467,6 +483,8 @@ export async function mountTodoist(ctx: ContentScriptContext) {
             language={languageOf(document)}
             onReady={detailReady}
             onUnavailable={unavailable}
+            snapshot={snapshot}
+            onSnapshot={keepSnapshot}
           />,
         );
         return root;

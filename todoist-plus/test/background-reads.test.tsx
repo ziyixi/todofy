@@ -191,3 +191,76 @@ it("keeps a confirmed completion visible but pending until the re-read shows the
     expect(screen.queryByText("Write the introduction")).toBeNull(),
   );
 });
+
+it("paints remembered data at once on re-entry and re-reads it in the background", async () => {
+  const actions = createPrototype();
+  const data = await actions.load();
+  const kept = vi.fn();
+  const { reads, original } = held(actions);
+  render(
+    <App
+      actions={actions}
+      view="plan"
+      language="en"
+      onOpenTask={() => {}}
+      onSettings={() => {}}
+      snapshot={{ data, readAt: 0 }}
+      onSnapshot={kept}
+    />,
+  );
+  expect(screen.queryByText("Loading your plan…")).toBeNull();
+  const committed = within(screen.getByRole("region", { name: "Committed" }));
+  expect(actions.load).toHaveBeenCalledOnce();
+  expect(document.querySelector(".plus-page-header .plus-spin")).toBeTruthy();
+  expect(
+    (
+      screen.getAllByRole("button", {
+        name: /^Move outcome:/u,
+      })[0] as HTMLButtonElement
+    ).disabled,
+  ).toBe(false);
+  const fresh = await original();
+  fresh.plan.tasks = fresh.plan.tasks.map((task) =>
+    task.id === "cleanup" ? { ...task, stage: "committed" } : task,
+  );
+  await act(async () => reads[0]!(fresh));
+  expect(
+    committed.getByText("Clear out the old development branch"),
+  ).toBeTruthy();
+  expect(kept).toHaveBeenLastCalledWith({
+    data: fresh,
+    readAt: expect.any(Number),
+  });
+});
+
+it("keeps a remembered other week but follows the server's current week after a rollover", async () => {
+  const actions = createPrototype();
+  const browsed = await actions.load("2026-10-19");
+  const ended = await actions.load("2026-10-05");
+  ended.plan.week = "2026-10-05";
+  const dates = () =>
+    [...document.querySelectorAll(".planning-calendar-day")].map((day) =>
+      day.getAttribute("data-date"),
+    );
+  for (const [snapshot, first] of [
+    [browsed, "2026-10-19"],
+    [ended, "2026-10-12"],
+  ] as const) {
+    render(
+      <App
+        actions={actions}
+        view="plan"
+        language="en"
+        onOpenTask={() => {}}
+        onSettings={() => {}}
+        snapshot={{ data: snapshot, readAt: 0 }}
+      />,
+    );
+    fireEvent.click(screen.getByRole("tab", { name: "Week" }));
+    await waitFor(() =>
+      expect(document.querySelector(".plus-page-header .plus-spin")).toBeNull(),
+    );
+    expect(dates()[0]).toBe(first);
+    cleanup();
+  }
+});

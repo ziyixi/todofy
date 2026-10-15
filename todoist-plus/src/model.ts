@@ -35,6 +35,15 @@ export interface PlanState {
 }
 /** Account planning settings without the task list. */
 export type PlanMetadata = Omit<PlanState, "tasks">;
+/**
+ * What Plus replaces in native Todoist, by ID only. The background caches it on disk so the
+ * sidebar is arranged as soon as a page mounts; it never holds task content.
+ */
+export interface PlanConfig {
+  configured: boolean;
+  hiddenFilterIds: string[];
+  labelIds: string[];
+}
 export interface FlowDayPlan {
   date: string;
   taskIds: string[];
@@ -76,12 +85,19 @@ export interface PlusData {
   focus: FocusState;
   days: FlowDayPlan[];
 }
+/** The last confirmed data, kept only in content-script memory between visits. */
+export interface PlusSnapshot {
+  data: PlusData;
+  /** When the complete data was last read; confirmed writes may be merged since. */
+  readAt: number;
+}
 export interface TimerSnapshot {
   timerEtag: string;
   timer?: FocusState["timer"];
 }
 export interface PlusActions {
   load(weekStart?: string): Promise<PlusData>;
+  readPlan(): Promise<PlanMetadata>;
   loadDays(weekStart: string): Promise<FlowDayPlan[]>;
   updateTask(
     task: PlanningTask,

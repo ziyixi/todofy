@@ -1,4 +1,10 @@
-import type { Area, FocusState, PlanningTask } from "./model";
+import type {
+  Area,
+  FocusState,
+  PlanConfig,
+  PlanMetadata,
+  PlanningTask,
+} from "./model";
 
 const indexes = new WeakMap<
   readonly PlanningTask[],
@@ -150,6 +156,19 @@ export function elapsed(focus: FocusState, now = Date.now()): number {
 export function duration(seconds: number): string {
   const value = Math.max(0, Math.floor(seconds));
   return `${Math.floor(value / 3600) ? `${Math.floor(value / 3600)}:` : ""}${String(Math.floor(value / 60) % 60).padStart(2, "0")}:${String(value % 60).padStart(2, "0")}`;
+}
+
+export function planConfig(
+  plan: Pick<PlanMetadata, "configured" | "hiddenFilterIds" | "managedLabels">,
+): PlanConfig {
+  return {
+    configured: plan.configured,
+    hiddenFilterIds: plan.hiddenFilterIds,
+    // Work and personal context labels stay visible in native Todoist.
+    labelIds: plan.managedLabels
+      .filter((label) => !["office", "home"].includes(label.role))
+      .map((label) => label.id),
+  };
 }
 
 export function todoistTaskUrl(id: string): string {

@@ -210,6 +210,11 @@ export function createPrototype(fullBoard = false): PlusActions {
     async loadDays(week) {
       return structuredClone(weekDays(week));
     },
+    async readPlan() {
+      const metadata: Partial<PlanState> = structuredClone(plan);
+      delete metadata.tasks;
+      return metadata as PlanMetadata;
+    },
     async updateTask(item, update) {
       plan = {
         ...plan,

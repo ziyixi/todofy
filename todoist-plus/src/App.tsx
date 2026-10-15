@@ -10,7 +10,7 @@ import {
 } from "lucide-react";
 import { displayedTitle } from "./domain";
 import { words } from "./i18n";
-import { applyConfirmed, rereadsAfter } from "./plan-updates";
+import { applyConfirmed, REREAD_AFTER_MS, rereadsAfter } from "./plan-updates";
 import { Elapsed } from "./StatusMarks";
 import { PlanView } from "./PlanView";
 import { FocusView } from "./FocusView";
@@ -24,11 +24,9 @@ import type {
   PlanningTask,
   PlusActions,
   PlusData,
+  PlusSnapshot,
   View,
 } from "./model";
-
-/** Returning to the tab re-reads only when the last read is at least this old. */
-const VISIBLE_REREAD_MS = 60_000;
 
 interface Props {
   actions: PlusActions;
@@ -39,6 +37,9 @@ interface Props {
   onReady?: (plan?: PlanState) => void;
   externalTaskId?: string;
   onViewChange?: (view: View) => void;
+  /** Data from an earlier visit, shown at once while it is read again in the background. */
+  snapshot?: PlusSnapshot;
+  onSnapshot?: (snapshot: PlusSnapshot) => void;
 }
 export function App({
   actions,
@@ -49,9 +50,16 @@ export function App({
   onReady,
   externalTaskId,
   onViewChange,
+  snapshot,
+  onSnapshot,
 }: Props) {
-  const [data, setData] = useState<PlusData>();
-  const displayedWeek = useRef("");
+  const [data, setData] = useState<PlusData | undefined>(snapshot?.data);
+  // An empty week follows the server's current week, including a Monday rollover while away.
+  const displayedWeek = useRef(
+    snapshot && snapshot.data.days[0]?.date !== snapshot.data.plan.week
+      ? (snapshot.data.days[0]?.date ?? "")
+      : "",
+  );
   const weekRequest = useRef(0);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -61,7 +69,7 @@ export function App({
   // Changes when a write starts or ends; a read that overlapped a write may predate it.
   const writes = useRef(0);
   const rereadAfterWrite = useRef(false);
-  const loadedAt = useRef(0);
+  const loadedAt = useRef(snapshot?.readAt ?? 0);
   const [selectedId, setSelectedId] = useState(externalTaskId ?? "");
   const completionIds = useRef(new Map<string, string>());
   // Confirmed completions stay visible but disabled until a re-read shows the result.
@@ -152,7 +160,7 @@ export function App({
     const visible = () => {
       if (
         document.visibilityState === "visible" &&
-        Date.now() - loadedAt.current >= VISIBLE_REREAD_MS
+        Date.now() - loadedAt.current >= REREAD_AFTER_MS
       ) {
         setError("");
         void revalidate();
@@ -161,6 +169,9 @@ export function App({
     document.addEventListener("visibilitychange", visible);
     return () => document.removeEventListener("visibilitychange", visible);
   }, [revalidate]);
+  useEffect(() => {
+    if (data) onSnapshot?.({ data, readAt: loadedAt.current });
+  }, [data, onSnapshot]);
   useEffect(() => {
     if (externalTaskId) setSelectedId(externalTaskId);
   }, [externalTaskId]);

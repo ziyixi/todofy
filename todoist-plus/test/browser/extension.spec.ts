@@ -55,6 +55,9 @@ async function setup(context: BrowserContext, worker: Worker) {
       failTimer: true,
       timerEtag: "7",
       focusTaskIds: ["child", "local-one", "__flowday_misc__:2026-10-13"],
+      // While set, Plus API answers wait until a test releases them.
+      holdReads: false,
+      held: [] as (() => void)[],
     };
     Object.assign(globalThis, { testState: state });
     globalThis.fetch = async (input, init) => {
@@ -67,6 +70,8 @@ async function setup(context: BrowserContext, worker: Worker) {
         body,
         bearer: new Headers(init?.headers).get("authorization"),
       });
+      if (state.holdReads && url.pathname.startsWith("/api/plus/v1/"))
+        await new Promise<void>((resolve) => state.held.push(resolve));
       const json = (value: unknown, status = 200) =>
         Promise.resolve(
           new Response(JSON.stringify(value), {
@@ -380,11 +385,30 @@ test("returning from a native page reloads Focus after an external queue change"
     await page.getByRole("link", { name: "Today", exact: true }).click();
     await expect(page.locator("#native")).toBeVisible();
     await worker.evaluate(() => {
-      (
-        globalThis as unknown as { testState: { focusTaskIds: string[] } }
-      ).testState.focusTaskIds = ["child"];
+      const state = (
+        globalThis as unknown as {
+          testState: { focusTaskIds: string[]; holdReads: boolean };
+        }
+      ).testState;
+      state.focusTaskIds = ["child"];
+      state.holdReads = true;
     });
     await page.getByRole("button", { name: "Focus", exact: true }).click();
+    // The last confirmed view paints at once; the re-read runs without locking it.
+    await expect(
+      page.getByRole("button", { name: "Adjust plan", exact: true }),
+    ).toBeEnabled();
+    await expect(page.locator(".plus-page-header .plus-spin")).toHaveCount(1);
+    await expect(queuedStep).toHaveCount(0);
+    await worker.evaluate(() => {
+      const state = (
+        globalThis as unknown as {
+          testState: { holdReads: boolean; held: (() => void)[] };
+        }
+      ).testState;
+      state.holdReads = false;
+      for (const release of state.held.splice(0)) release();
+    });
     await expect(queuedStep).toBeVisible();
     await expect(queuedStep).toContainText("Synthetic small step");
     await expect(page.locator("#native")).toBeHidden();
@@ -504,6 +528,71 @@ test("restores legacy controls when mapping or the extension connection becomes 
     await expect(page.getByRole("alert")).toBeVisible();
     await expect(page.locator("#legacy")).toBeVisible();
     await expect(page.locator("#native")).toBeHidden();
+  } finally {
+    await context.close();
+  }
+});
+
+test("native pages read only plan settings and hide replaced items from the ID-only cache before it answers", async () => {
+  const extensionPath = resolve(".output/chrome-mv3");
+  const context = await chromium.launchPersistentContext("", {
+    channel: "chromium",
+    headless: true,
+    args: [
+      `--disable-extensions-except=${extensionPath}`,
+      `--load-extension=${extensionPath}`,
+    ],
+  });
+  try {
+    const worker =
+      context.serviceWorkers()[0] ??
+      (await context.waitForEvent("serviceworker"));
+    await setup(context, worker);
+    const page = await context.newPage();
+    await page.goto("https://app.todoist.com/app/today");
+    await expect(page.locator("#legacy")).toBeHidden();
+    await expect(page.locator("#extra-filter-wrapper")).toBeHidden();
+    const state = () =>
+      worker.evaluate(async () => {
+        const global = globalThis as unknown as {
+          testState: { calls: { path: string }[]; held: unknown[] };
+          chrome: {
+            storage: {
+              local: { get(key: string): Promise<Record<string, unknown>> };
+            };
+          };
+        };
+        return {
+          paths: global.testState.calls.map((call) => call.path),
+          held: global.testState.held.length,
+          cached: (await global.chrome.storage.local.get("planConfig"))
+            .planConfig,
+        };
+      });
+    const first = await state();
+    expect(first.paths).toEqual(["/api/plus/v1/plan:read"]);
+    expect(first.cached).toEqual({
+      configured: true,
+      hiddenFilterIds: ["f1"],
+      labelIds: ["l1"],
+    });
+    await worker.evaluate(() => {
+      (
+        globalThis as unknown as { testState: { holdReads: boolean } }
+      ).testState.holdReads = true;
+    });
+    await page.reload();
+    await expect(
+      page.getByRole("button", { name: /^Other views/u }),
+    ).toBeVisible();
+    await expect(page.locator("#legacy")).toBeHidden();
+    await expect(page.locator("#extra-filter-wrapper")).toBeHidden();
+    await expect(page.locator("#native")).toBeVisible();
+    const second = await state();
+    expect(second.held).toBe(1);
+    expect(second.paths.slice(first.paths.length)).toEqual([
+      "/api/plus/v1/plan:read",
+    ]);
   } finally {
     await context.close();
   }

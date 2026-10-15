@@ -1,5 +1,8 @@
 import type { Confirmed, FlowDayPlan, PlanningTask, PlusData } from "./model";
 
+/** Data at least this old is read again when the view comes back. */
+export const REREAD_AFTER_MS = 60_000;
+
 function withFlows(data: PlusData, flows: FlowDayPlan[]): PlusData {
   const today = flows.find((day) => day.date === data.focus.date);
   return {

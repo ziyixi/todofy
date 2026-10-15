@@ -15,6 +15,7 @@ export type BackgroundMessage =
   | { kind: "connect"; connection: Connection }
   | { kind: "connection" }
   | { kind: "disconnect" }
-  | { kind: "options" };
+  | { kind: "options" }
+  | { kind: "planConfig" };
 export type Result<T = unknown> =
   { ok: true; value: T } | { ok: false; error: string };

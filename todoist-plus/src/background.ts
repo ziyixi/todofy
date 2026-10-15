@@ -11,9 +11,11 @@ import {
   type BackgroundMessage,
   type Result,
 } from "./messages";
-import type { PlusActions } from "./model";
+import { planConfig } from "./domain";
+import type { PlanConfig, PlanMetadata, PlusActions } from "./model";
 const storageKey = "connection";
 const knownKey = "knownFlowTasks";
+const configKey = "planConfig";
 let api: PlusActions | undefined;
 // Session storage outlives an idle-stopped worker, not the browser session.
 const knownTasks: KnownTaskStore = {
@@ -34,6 +36,16 @@ async function getApi(): Promise<PlusActions> {
   api = createApi(connection, fetch, knownTasks);
   return api;
 }
+function rememberPlan(plan: PlanMetadata) {
+  void browser.storage.local
+    .set({ [configKey]: planConfig(plan) satisfies PlanConfig })
+    .catch(() => {});
+}
+async function forgetConnection() {
+  await browser.storage.local.remove([storageKey, configKey]);
+  await browser.storage.session.remove(knownKey);
+  api = undefined;
+}
 export function registerBackground() {
   // The content script can request narrow operations, but cannot read the credential.
   void browser.storage.local.setAccessLevel({
@@ -52,6 +64,10 @@ export function registerBackground() {
           await browser.runtime.openOptionsPage();
           return null;
         }
+        if (message.kind === "planConfig") {
+          const saved = await browser.storage.local.get(configKey);
+          return (saved[configKey] as PlanConfig | undefined) ?? null;
+        }
         if (message.kind === "connection" && options) {
           const saved = await browser.storage.local.get(storageKey);
           const connection = saved[storageKey] as Connection | undefined;
@@ -67,15 +83,12 @@ export function registerBackground() {
           };
           if (!connection.token || connection.token.length > 512)
             throw new Error("A connection token is required.");
+          await forgetConnection();
           await browser.storage.local.set({ [storageKey]: connection });
-          await browser.storage.session.remove(knownKey);
-          api = undefined;
           return null;
         }
         if (message.kind === "disconnect" && options) {
-          await browser.storage.local.remove(storageKey);
-          await browser.storage.session.remove(knownKey);
-          api = undefined;
+          await forgetConnection();
           return null;
         }
         if (message.kind !== "action")
@@ -84,14 +97,25 @@ export function registerBackground() {
           throw new Error("Extension updated. Reload Todoist to continue.");
         const client = await getApi();
         switch (message.method) {
-          case "load":
-            return client.load(...message.args);
+          case "load": {
+            const data = await client.load(...message.args);
+            rememberPlan(data.plan);
+            return data;
+          }
+          case "readPlan": {
+            const plan = await client.readPlan(...message.args);
+            rememberPlan(plan);
+            return plan;
+          }
           case "loadDays":
             return client.loadDays(...message.args);
           case "updateTask":
             return client.updateTask(...message.args);
-          case "updateLabels":
-            return client.updateLabels(...message.args);
+          case "updateLabels": {
+            const plan = await client.updateLabels(...message.args);
+            rememberPlan(plan);
+            return plan;
+          }
           case "createSteps":
             return client.createSteps(...message.args);
           case "updateLead":
@@ -112,18 +136,19 @@ export function registerBackground() {
       }
       void handle()
         .then((value) => sendResponse({ ok: true, value } satisfies Result))
-        .catch((error) =>
-          sendResponse({
-            ok: false,
-            error:
-              error instanceof Error &&
-              /Connect Todoist Plus|connection token|HTTPS origin|Unsupported|Extension updated/.test(
-                error.message,
-              )
-                ? error.message
-                : publicError(error),
-          } satisfies Result),
-        );
+        .catch((error) => {
+          const text =
+            error instanceof Error &&
+            /Connect Todoist Plus|connection token|HTTPS origin|Unsupported|Extension updated/.test(
+              error.message,
+            )
+              ? error.message
+              : publicError(error);
+          // Without a working connection, the next page load keeps native Todoist intact.
+          if (/Connect Todoist Plus|Connection expired/.test(text))
+            void browser.storage.local.remove(configKey).catch(() => {});
+          sendResponse({ ok: false, error: text } satisfies Result);
+        });
       return true;
     },
   );

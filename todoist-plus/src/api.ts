@@ -302,6 +302,11 @@ export function createApi(
         days,
       };
     },
+    async readPlan() {
+      const result = await plus.readPlan({});
+      if (!result.plan) throw new Error("Planning metadata is missing.");
+      return planMetadata(result.plan);
+    },
     async updateTask(task, update) {
       const result = await plus.setTaskPlan({
         taskId: task.id,

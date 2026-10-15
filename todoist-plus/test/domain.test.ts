@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   displayedTitle,
   effectiveArea,
+  planConfig,
   startDate,
   topLevelChoices,
   topLevelBets,
@@ -108,4 +109,22 @@ it("deduplicates Bets independently of commitment stages", () => {
       (item) => item.id,
     ),
   ).toEqual(["parent"]);
+});
+it("keeps only replaced filter and planning label IDs for the native sidebar cache", () => {
+  expect(
+    planConfig({
+      configured: true,
+      hiddenFilterIds: ["f1"],
+      managedLabels: [
+        { role: "committed", id: "l1", label: "committed" },
+        { role: "office", id: "l2", label: "office" },
+        { role: "home", id: "l3", label: "home" },
+        { role: "bets", id: "l4", label: "bets" },
+      ],
+    }),
+  ).toEqual({
+    configured: true,
+    hiddenFilterIds: ["f1"],
+    labelIds: ["l1", "l4"],
+  });
 });
