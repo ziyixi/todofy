@@ -24,8 +24,13 @@ The extension background calls these routes using host permission; page CORS is 
 ## Planning and completion
 
 `ReadPlan` returns mapping, account-local dates and IDs of exactly matching replaced filter queries.
+Every Plan answer (ReadPlan, ConfirmPlanMapping, UpdatePlanLabels) also carries the weekly review's IDs:
+the mail project (`TODOIST_DEFAULT_PROJECT_ID`), the newest review task the GTD ledger created for this or
+the previous ISO week (`gtd_reviews`, open or not) and at most 100 tasks already recorded for next week.
+They cost one D1 batch per Plan answer, never one per task page or write.
 `ListPlanningTasks` returns bounded active pages with the canonical Todoist task ID, labels, parent,
-scheduled date, true deadline, optional estimate and derived planning state. Counts require every page.
+scheduled date, true deadline, optional estimate, Todoist's last change (`update_time`, whole seconds,
+from the same page's `updated_at`) and derived planning state. Counts require every page.
 Task content is read from Todoist when requested; it is not kept as a second task database.
 The extension builds native links as `https://app.todoist.com/app/task/<v2_id>` from that ID;
 API v1 no longer returns a task URL. See the official [Task URLs contract](https://developer.todoist.com/api/v1/).
@@ -55,6 +60,15 @@ changing their candidate stage. Unrelated labels, task content, dates and histor
 New-week extension decisions wait for the old batch to finish and replace the remembered membership,
 so an old reset cannot clear those decisions. Repeating setup also settles an ended week first.
 
+A commitment or Bet chosen on Sunday is a choice for the next week. On the last day of the week in the
+account timezone, a SetTaskPlan that sets `stage = committed` or `bet = true` records the task under the
+next week's Monday, so the coming reset leaves both of its marks in place; the reset a week later treats
+it like any other commitment. Every other write, removing a mark included, stays in the current week, and
+an unfinished commitment made earlier in the week still resets. Membership never moves back to an older
+week (`REMEMBER_WEEK`), so neither the ten-minute page scan nor a later write that day can undo the choice.
+The extension sends only the fields the owner changed, so editing a committed task's area on Sunday does
+not keep it by accident; its weekly review offers "Keep for next week" for this week's commitments and Bets.
+
 Native Todoist remains editable. Marks made there are observed by the next page scan; a native decision
 made at the week boundary before that scan has no separate week identity. The extension's planning
 actions record that identity immediately. There is no title matching or guess about work/personal area.
@@ -67,10 +81,12 @@ Every Plus Todoist call shares `FORCE_PAUSE_TODOIST`, auth blocking and the exis
 
 ## Local verification
 
-`tests/unit/test_plus.py` covers classification and filter semantics. Gateway tests cover credential,
+`tests/unit/test_plus.py` covers classification and filter semantics, the Sunday rule and the
+never-backwards membership in SQLite. Gateway tests cover credential,
 CSRF, bounded proxy and frozen settlement behavior. `tests/runtime/test_plus.py` exercises the real
 gateway, Python Durable Object and D1 against synthetic Todoist Sync/REST responses, including lost
-responses, recurring completion, week rollover and shared pause/auth controls. The gateway CPU suite
+responses, recurring completion, week rollover (Sunday choices kept, earlier commitments reset, scans
+unable to move a choice back) and shared pause/auth controls. The gateway CPU suite
 includes full 200-task Plus and FlowDay-proxy pages. Production and browser acceptance are recorded
 separately in the extension's verification document; a local test result is not production evidence.
 

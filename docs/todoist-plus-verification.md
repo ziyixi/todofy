@@ -363,3 +363,51 @@ The research harness, re-run at 600 tasks and 100 ms, shows the board 42 ms afte
 842 ms), the Review drop card at 23 ms, Week drops at 7-21 ms and unchanged request counts. The content
 script is 362,109 bytes (115,318 gzip) and the background 135,702 bytes. Real-account behavior was not
 checked.
+
+## Waiting list, weekly review and Sunday commitments, local checks (October 15)
+
+The owner chose three items from the October 15 GTD research: the Waiting list, the weekly review checklist
+and the fix for Sunday commitments. They are on the same local branch, after the performance commits; not
+pushed, no branch CI, no release. All data below is synthetic; no Todoist, FlowDay or Cloudflare account
+was touched.
+
+- Waiting: a folded "Waiting (N)" row under the Review lanes lists `@waiting`/`@blocked` tasks, untouched
+  longest first ("N days untouched", from Todoist's `updated_at`), with Add follow-up step (the empty step
+  editor), Add to today and Open. It never removes a label or contacts anyone.
+- Weekly review: a toolbar entry and the Sunday review task's link (`?todoist-plus=review`, added to the
+  task body only once Plus is set up) open five lines with counts and jump targets. Ticks and kept
+  someday items are per ISO week in this browser's localStorage, IDs and line numbers only. Finish review
+  completes the review task only when clicked, without a FlowDay day.
+- Sunday rule: a SetTaskPlan that sets committed or Bet on the account week's last day is recorded for the
+  next week, and `REMEMBER_WEEK` never moves a row back, so Monday's reset and that day's scans keep it.
+  Task details now send only the changed stage or area.
+- Contract: additive `PlanningTask.update_time` (OUTPUT_ONLY Timestamp, the AIP name for Todoist's
+  `updated_at`) and `Plan.inbox_project_id`, `review_task_id`, `next_week_task_ids`, read once per Plan
+  answer; no new table or dependency.
+
+Local checks: proto format/lint, api-linter (69 files), breaking against the merge base `de8b93ac` and
+`origin/main` `1e88aa3c`, the rules self-test, deterministic generation (151 files), the schema check,
+495 TypeScript and 113 Python codec cases. Todofy: ruff check and format, 1,810 host cases (2 skipped as
+before) and 558 real-workerd runtime cases (556 in four processes, then the serial file). The new SQLite
+and runtime rollover cases fail against the old `REMEMBER_WEEK`: the page scan moved a Sunday choice back
+to the ending week. The runtime write case asserts whichever branch the real clock takes; the unit cases
+cover both. Gateway lint, types, 130 unit cases and the calibrated CPU suite pass with `update_time` in the
+200-task page; the gateway dry-run is 82.2 KiB gzip (budget 86 KiB) and the core dry-run 190.02 KiB gzip.
+The owner UI's types and 93 tests pass, and the 453 `.github/scripts` cases pass (1 skipped as before).
+
+The extension passes types, lint, 101 unit/component/API cases (was 91) and 15 built-MV3 Chromium cases
+(was 14). The new browser case opens Plan from the review link, keeps a tick across a reload, lists
+Waiting oldest first without any write, and sends exactly one CompleteTask (review ID, no `flow_date`).
+That build check first caught a real defect: Prettier had written the sort sentinel `￿` as a literal
+noncharacter, so Chrome refused the content script as not UTF-8. The comparator now uses times.
+
+A scratch benchmark (jsdom, synthetic tasks) measured per-render cost at 600 and 2,000 tasks: the Waiting
+row 0.03 and 0.08 ms, Week's unplanned line 0.02 and 0.03 ms, all five review lines 0.08 and 0.23 ms. The
+render-cost guard now includes these derivations. The content script is 372,556 bytes (118,124 with
+`gzip -9`), against 362,109 bytes before; the background is 136,055 bytes. The synthetic production
+preview at 1440 and 700 px, light and dark, English and Chinese, had no horizontal overflow and no console
+errors; two of its captures are in the [interface document](../todoist-plus/docs/planning-interface.md).
+
+Not verified: the real Todoist DOM and data, whether Todoist changes `updated_at` for comments or child
+edits, a real review task's link, the first natural Sunday-to-Monday rollover with a Plus choice, branch
+CI and release.

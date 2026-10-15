@@ -32,6 +32,36 @@ Work 和 Personal 各显示已有最高层 Bet 任务。Bet 的定义是本周�
 
 日历显示上一周、下一周、回本周。宽窗口显示七日，中等窗口显示三日，窄窗口显示单日；上方日期按钮仍可选日和投放。显示其他周不修改任务 Due 或 Deadline。日期队列变更不修改规划列。
 
+承诺总览上方有一行安静的文字“N 项承诺这 7 天还没有安排”：承诺本身和它未完成的步骤都不在所显示 7 天的队列中。只在 N 大于 0 时出现，没有逐卡标记；点击依次选中下一个这样的承诺，展开其步骤托盘。它只提示，不自动安排。
+
+### 等待中
+
+Review 四列下方有一行折叠的“等待中 (N)”，只在有 `@waiting` 或 `@blocked` 任务时出现。展开后按 Todoist 的最后修改时间排列，最久未变动的在前，显示“N 天未变动”。任何 Todoist 编辑都会重置这个时间，所以它不表示已等待多久，也不推断在等谁。每行只提供三个已有操作：
+
+- 加跟进步骤：打开该任务的步骤编辑器，输入框为空并获得焦点，由用户自己写。
+- 加入今天：与任务详情中的加入今天相同，只写 FlowDay 当天队列。
+- 打开：在原生 Todoist 中打开任务。
+
+它不移除标签、不联系任何人，也没有新的存储。标签按后端 Must Start 已使用的字面名称识别，不创建标签。
+
+### 周回顾
+
+工具栏的“周回顾”打开一个五行清单；Todofy 周日回顾任务的描述里有同一入口 `https://app.todoist.com/app/today?todoist-plus=review`，在装有扩展的 Todoist 中打开 Plan 并展开清单。每行显示数量和跳转目标：
+
+| 行           | 数量                                                                                                | 跳转或操作                                                        |
+| ------------ | --------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
+| 收件箱待理清 | 邮件项目里没有规划范围、Bet 及 waiting／blocked／parked／onhold／quick 标签的顶层任务，不含回顾任务 | 在 Todoist 打开该项目；不提供逐项理清                             |
+| 等待中       | 同“等待中”一行，另显示最久未变动的天数                                                              | 切到 Review 并展开“等待中”                                        |
+| 承诺无排期   | 同 Week 的“这 7 天还没有安排”                                                                       | 切到 Week，选中第一个这样的承诺                                   |
+| 将来／也许   | `@parked`、`@onhold` 任务，最久未变动的在前，一次显示 10 项                                         | 每项“移到本月”（SetTaskPlan，确认后保存）或“保留”（不写 Todoist） |
+| 下周承诺     | 显示周日规则；周日列出本周承诺和本周目标                                                            | 周日每项“留到下周”，见下节                                        |
+
+每行可以勾选。勾选和“保留”按 ISO 周只保存在这个浏览器的 localStorage，只含行号和任务 ID；换一周重新开始，保存时删除旧周记录。数据来自已读取的任务、七日队列和 ReadPlan，打开清单不增加请求。“完成回顾”只在点击时完成 Todofy 的回顾任务（CompleteTask，不带 FlowDay 日期），确认后才显示已完成；没有回顾任务或已完成时只显示状态。清单不预先选择、不自动应用，也不调用模型。
+
+### 周日选择留到下周
+
+在账户时区的周日，用 Plus 把事项设为本周承诺或本周目标，Todofy 把它记为下周的选择，周一 00:00 的重置会保留它的承诺和目标标记；再下一个周一按普通承诺处理。周日的其他写入（移除标记、改范围、改领域、改 Deadline）和本周更早做出的承诺照常在周一重置。周日想保留一个已在本周承诺或本周目标中的事项，就在清单第 5 行点“留到下周”，它再发送一次同样的承诺或目标写入。任务详情只发送用户改动的字段，周日只改领域不会把承诺误留到下周。看板底部的说明和清单第 5 行都写明这条规则；后端规则见 [Todofy 文档](../../todofy/docs/todoist-plus.md#weekly-rollover-and-controls)。
+
 ## Focus 与计时
 
 Focus 显示真实今天的未完成 FlowDay 队列，顺序与 Week 相同。卡片标题在上方，短所属事项、估时和计时信息在下方。空队列只有“调整计划”入口，不出现另一套任务挑选器。
@@ -65,7 +95,7 @@ Plus 只按已知真实对象 ID 隐藏被替代项。收藏项目保留，其�
 - “移出日期”不提前删除：卡片原位等待，FlowDay 确认后才消失。
 - 所有写入进入同一个先进先出队列，按操作顺序执行。FlowDay UpdateFlow 没有 etag、后写覆盖先写，所以移出日期和加入今天在执行时先 GetFlow 读取当前队列，只增删这一项，不写回屏幕上可能过时的队列；其他标签页刚加入的步骤和排在前面的移出都会保留。Todoist 写入仍检查 etag。确认后换成服务端返回的任务或队列。
 - 任一写入失败时，排在其后的写入不再发送，所有等待中的预期变化撤回；原有错误区域说明“更改未保存，已恢复”、实际失败和其后未发送的更改数，队列空闲后重新读取。等待中的卡片不显示为已保存。
-- 完成、添加小步骤、估时、提前开始、详情中的规划保存、标签对应、本周目标、加入今天和计时仍先确认，写入期间停用写入控件。
+- 完成、添加小步骤、估时、提前开始、详情中的规划保存、标签对应、本周目标、加入今天、计时以及周回顾中的移到本月、留到下周和完成回顾仍先确认，写入期间停用写入控件。
 
 读取不锁定看板，也不重复读取写入已返回的结果：
 
@@ -95,25 +125,30 @@ Plus 只按已知真实对象 ID 隐藏被替代项。收藏项目保留，其�
 | 计时                  | CommandTimer，etag 与稳定 request ID                                               | TimerSession 映射为 TimerSnapshot；idle 清除显示状态  |
 | 真正完成              | CompleteTask，再结算 FlowDay                                                       | Todoist 确认后后台重新读取，不靠本地删除              |
 | 提前开始              | SetTaskLead                                                                        | 确认后的 PlanningTask（Deadline、leadDays），Due 保留 |
+| 周回顾数据            | ReadPlan 的邮件项目、回顾任务和下周选择 ID；ListPlanningTasks 的 update_time       | 只有 ID 与时间，与加载一同读取                        |
+| 移到本月／留到下周    | SetTaskPlan（stage monthly／committed 或 bet true）                                | 当前 PlanningTask，合并单任务                         |
+| 完成回顾              | CompleteTask，不带 flow_date                                                       | Todoist 确认后后台重新读取                            |
 
 background 持有连接口令，content script 只发送封闭的类型化消息。升级沿用原目录和 storage.local 的 connection，不重置口令。当前内部操作消息使用 planning protocol 3（写入返回确认结果，新增 ReadPlan，加入今天与移出日期改为单项操作）；旧脚本收到明确刷新提示，刷新 Todoist 后使用新语义。初次读取并行获取独立数据；切周只读七天队列。App 合并确认任务、标签映射、队列和计时响应，原有读取序号保护正在查看的周，Plan／Focus 切换不扫描所有任务。离开自定义页面进入原生 Todoist 后卸载，返回时先显示内存中的上次确认数据，再后台重新读取；读取完成前不开放写入。
 
 ## 实现文件
 
-| 责任                  | 文件                                                       |
-| --------------------- | ---------------------------------------------------------- |
-| 整体页面与确认状态    | `src/App.tsx`                                              |
-| 确认结果与预期变化    | `src/plan-updates.ts`                                      |
-| 计时与等待标记        | `src/StatusMarks.tsx`                                      |
-| 本周整体目标          | `src/WeeklyGoals.tsx`、`src/weekly-goals.css`              |
-| Review 与事项卡       | `src/ReviewBoard.tsx`、`src/review-board.css`              |
-| Week 事项总览与小步骤 | `src/PlanningWeek.tsx`                                     |
-| 日期队列与投放位置    | `src/PlanningCalendar.tsx`、`src/planning-week.css`        |
-| 所属事项与色标        | `src/planning-outcomes.ts`                                 |
-| 标签对应              | `src/BoardLabels.tsx`                                      |
-| 今日执行与计时按钮    | `src/FocusView.tsx`、`src/FocusBlock.tsx`、`src/focus.css` |
-| 用户调用及服务端协议  | `src/api.ts`、`src/client.ts`、`src/background.ts`         |
-| 原生 Todoist 挂载     | `src/mount.tsx`                                            |
+| 责任                  | 文件                                                                    |
+| --------------------- | ----------------------------------------------------------------------- |
+| 整体页面与确认状态    | `src/App.tsx`                                                           |
+| 确认结果与预期变化    | `src/plan-updates.ts`                                                   |
+| 计时与等待标记        | `src/StatusMarks.tsx`                                                   |
+| 本周整体目标          | `src/WeeklyGoals.tsx`、`src/weekly-goals.css`                           |
+| Review 与事项卡       | `src/ReviewBoard.tsx`、`src/review-board.css`                           |
+| Week 事项总览与小步骤 | `src/PlanningWeek.tsx`                                                  |
+| 日期队列与投放位置    | `src/PlanningCalendar.tsx`、`src/planning-week.css`                     |
+| 所属事项与色标        | `src/planning-outcomes.ts`                                              |
+| 标签对应              | `src/BoardLabels.tsx`                                                   |
+| 今日执行与计时按钮    | `src/FocusView.tsx`、`src/FocusBlock.tsx`、`src/focus.css`              |
+| 用户调用及服务端协议  | `src/api.ts`、`src/client.ts`、`src/background.ts`                      |
+| 原生 Todoist 挂载     | `src/mount.tsx`                                                         |
+| 等待中                | `src/WaitingList.tsx`                                                   |
+| 周回顾与推导          | `src/WeeklyReview.tsx`、`src/weekly-review.ts`、`src/weekly-review.css` |
 
 ## 验收与截图
 
@@ -138,6 +173,14 @@ background 持有连接口令，content script 只发送封闭的类型化消息
 Focus 直接执行今日队列。暂停后显示 Resume／Stop 和固定的经过时间，全局计时条仍在。Stop 不完成任务。
 
 ![Focus 暂停状态](images/planning-focus.jpg)
+
+### 周回顾与等待中
+
+2026-10-15 的两张截图同样来自 `design/production.html`（合成任务，`?review` 打开清单）。清单展开了“将来／也许”；“等待中”在 Review 四列下方展开。天数随截图日期变化。
+
+![五行周回顾清单](images/planning-weekly-review.jpg)
+
+![等待中一行](images/planning-waiting.jpg)
 
 ### 列标签配置
 

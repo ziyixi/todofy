@@ -22,6 +22,16 @@ and 14 built-MV3 Chromium cases pass; synthetic before/after measurements are in
 Pending: push, full branch CI, owner review, same-SHA release and the owner's real-account check of drag feel.
 Research items 6 (backend metadata reads, measure first) and 7 (native observer, local trace first) remain open.
 
+The owner's GTD choices of October 15 are on the same branch, after those commits: a folded Waiting row
+(`@waiting`/`@blocked`, untouched longest first), a five-line weekly review checklist (Plan toolbar, and a
+link in Sunday review tasks created once Plus is set up), and the Sunday-commit fix: commitments and Bets
+chosen in Plus on the account week's last day are recorded for next week, and `REMEMBER_WEEK` never moves a
+row back. Only additive PlusService fields; no new table, dependency or budget. Local proto, Todofy (host,
+558 runtime, gateway with CPU), owner UI, extension (101 unit, 15 MV3 Chromium) and scripts checks pass
+([evidence](docs/todoist-plus-verification.md#waiting-list-weekly-review-and-sunday-commitments-local-checks-october-15)).
+Pending as above. After release, the real check is a Plus choice made on a Sunday that survives the next
+natural Monday rollover (metadata only).
+
 Recall's mobile queue correction is released at `eb2c9187095f22eeac4ef2ae1e7e886b2e9076f3`.
 [Full branch CI 38683400263](https://github.com/ziyixi/todofy/actions/runs/38683400263) and
 [same-SHA main release 38684233200](https://github.com/ziyixi/todofy/actions/runs/38684233200) pass.
@@ -173,6 +183,8 @@ Answered in chat; do not re-ask.
   ([dated note](docs/todoist-plus-verification.md#installed-version-audit-and-weekly-planner-revision)).
 - Recall keeps its seven-day cloud file window. `de4d561` deployed at `2026-10-11T23:55Z`; after about 2026-10-18,
   verify the first production file removal and one Dropbox cold read, recording metadata only, never page content.
+- GTD additions: the Waiting list, the weekly review checklist and the Sunday-commit fix. The one-card
+  Clarify queue was not chosen, so the checklist only counts the mail project's unplanned tasks and links it.
 - Todoist Plus's weekly rollover stays on. Its first natural run is the ten-minute cron after Monday 2026-10-19
   00:00 US/Pacific (07:00 UTC). Afterwards observe it by metadata only (old-week batch drained, week start
   advanced, no error code), never task content.
