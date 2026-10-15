@@ -71,6 +71,17 @@ function openReview() {
   fireEvent.click(screen.getByRole("button", { name: "Weekly review" }));
   return within(screen.getByRole("region", { name: "Weekly review" }));
 }
+function renderApp(actions: PlusActions) {
+  render(
+    <App
+      actions={actions}
+      view="plan"
+      language="en"
+      onOpenTask={() => {}}
+      onSettings={() => {}}
+    />,
+  );
+}
 function line(review: ReturnType<typeof openReview>, name: string) {
   return review.getByRole("checkbox", { name: `Reviewed: ${name}` })
     .parentElement!;
@@ -120,9 +131,9 @@ it("derives the review lines from loaded data only", async () => {
 it("lists waiting tasks oldest first behind one collapsed row, with the owner's own actions", async () => {
   const data = await props();
   render(<PlanView {...data} todayTaskIds={["access"]} />);
-  const row = screen.getByText("Waiting (2)").closest("details")!;
+  const row = screen.getByText("Waiting · 2").closest("details")!;
   expect(row.open).toBe(false);
-  fireEvent.click(screen.getByText("Waiting (2)"));
+  fireEvent.click(screen.getByText("Waiting · 2"));
   const list = within(screen.getByRole("list", { name: "Waiting" }));
   const items = list.getAllByRole("listitem");
   expect(items.map((item) => item.textContent)).toEqual([
@@ -164,9 +175,9 @@ it("counts the five review lines and keeps ticks for this ISO week only", async 
   const data = await props();
   const view = render(<PlanView {...data} />);
   let review = openReview();
-  expect(line(review, "Inbox to clarify").textContent).toContain("2");
+  expect(line(review, "Mail to clarify").textContent).toContain("2");
   expect(
-    within(line(review, "Inbox to clarify"))
+    within(line(review, "Mail to clarify"))
       .getByRole("link", { name: /Open in Todoist/u })
       .getAttribute("href"),
   ).toBe("https://app.todoist.com/app/project/synthetic-mail");
@@ -175,11 +186,17 @@ it("counts the five review lines and keeps ticks for this ISO week only", async 
   );
   expect(line(review, "Commitments not planned").textContent).toContain("2");
   expect(line(review, "Someday").textContent).toContain("2");
-  expect(line(review, "Next week's commitments").textContent).toContain(
-    "chosen on Sunday stay for next week",
-  );
+  // Before Sunday line 5 only says where the choice will be, with nothing to tick.
+  expect(
+    review.queryByRole("checkbox", {
+      name: "Reviewed: Next week's commitments",
+    }),
+  ).toBeNull();
+  expect(
+    review.getByText("On Sunday, choose here what stays for next week"),
+  ).toBeTruthy();
   const tick = review.getByRole("checkbox", {
-    name: "Reviewed: Inbox to clarify",
+    name: "Reviewed: Mail to clarify",
   });
   expect(tick).toHaveProperty("checked", false);
   fireEvent.click(tick);
@@ -194,22 +211,22 @@ it("counts the five review lines and keeps ticks for this ISO week only", async 
   render(<PlanView {...data} />);
   review = openReview();
   expect(
-    review.getByRole("checkbox", { name: "Reviewed: Inbox to clarify" }),
+    review.getByRole("checkbox", { name: "Reviewed: Mail to clarify" }),
   ).toHaveProperty("checked", true);
   // A week later the list starts again.
   cleanup();
   render(<PlanView {...data} plan={{ ...data.plan, week: "2026-10-19" }} />);
   review = openReview();
   expect(
-    review.getByRole("checkbox", { name: "Reviewed: Inbox to clarify" }),
+    review.getByRole("checkbox", { name: "Reviewed: Mail to clarify" }),
   ).toHaveProperty("checked", false);
 });
 
-it("reviews someday items oldest first: move one to this month or keep it", async () => {
+it("reviews someday items oldest first: keeping or moving one leaves the list and moves focus on", async () => {
   const actions = createPrototype();
   const update = vi.spyOn(actions, "updateTask");
-  const data = await props(actions);
-  render(<PlanView {...data} />);
+  renderApp(actions);
+  await screen.findByRole("region", { name: "Committed" });
   const review = openReview();
   const someday = within(line(review, "Someday"));
   // The list stays folded until asked for.
@@ -220,28 +237,51 @@ it("reviews someday items oldest first: move one to this month or keep it", asyn
       .getAllByRole("listitem")
       .map((item) => item.firstChild?.textContent),
   ).toEqual(["Plan a small balcony garden", "Look into an evening course"]);
-  fireEvent.click(someday.getAllByRole("button", { name: "Keep" })[0]!);
-  expect(someday.getAllByRole("listitem")).toHaveLength(1);
+  // Moved: once Todoist confirms it is in this month, it no longer counts as still to look at.
+  fireEvent.click(
+    someday.getByRole("button", {
+      name: "Move to this month: Plan a small balcony garden",
+    }),
+  );
+  await waitFor(() => expect(someday.getAllByRole("listitem")).toHaveLength(1));
+  expect(update.mock.calls[0]).toEqual([
+    expect.objectContaining({ id: "garden" }),
+    { stage: "monthly" },
+  ]);
+  expect(line(review, "Someday").textContent).toContain("Someday1");
+  const status = review.getByRole("status");
+  expect(status.textContent).toBe(
+    "Moved to this month: Plan a small balcony garden",
+  );
+  const keep = someday.getByRole("button", {
+    name: "Keep: Look into an evening course",
+  });
+  await waitFor(() => expect(document.activeElement).toBe(keep));
+  // Kept: nothing is written; with the list empty, focus stays on the line.
+  fireEvent.click(keep);
+  expect(someday.queryAllByRole("listitem")).toHaveLength(0);
+  expect(status.textContent).toBe("Kept: Look into an evening course");
+  expect(document.activeElement).toBe(
+    review.getByRole("checkbox", { name: "Reviewed: Someday" }),
+  );
   expect(
     JSON.parse(window.localStorage.getItem("todoist-plus:review:2026-W42")!)
       .kept,
-  ).toEqual(["garden"]);
-  fireEvent.click(someday.getByRole("button", { name: "Move to this month" }));
-  await waitFor(() => expect(update).toHaveBeenCalledOnce());
-  expect(update.mock.calls[0]).toEqual([
-    expect.objectContaining({ id: "course" }),
-    { stage: "monthly" },
-  ]);
+  ).toEqual(["course"]);
+  expect(update).toHaveBeenCalledOnce();
 });
 
-it("jumps to the Waiting row and to Week's first unplanned commitment", async () => {
+it("jumps to the Waiting row and to Week's first unplanned commitment, with focus", async () => {
   const data = await props();
   render(<PlanView {...data} />);
   const review = openReview();
   fireEvent.click(
     within(line(review, "Waiting")).getByRole("button", { name: "Show" }),
   );
-  expect(screen.getByText("Waiting (2)").closest("details")!.open).toBe(true);
+  expect(screen.getByText("Waiting · 2").closest("details")!.open).toBe(true);
+  expect(document.activeElement).toBe(
+    screen.getByText("Waiting · 2").closest("summary"),
+  );
   fireEvent.click(
     within(line(review, "Commitments not planned")).getByRole("button", {
       name: "Plan steps",
@@ -256,53 +296,61 @@ it("jumps to the Waiting row and to Week's first unplanned commitment", async ()
     }),
   ).toBeTruthy();
   // One quiet line, no per-card mark; each click selects the next one.
-  fireEvent.click(
-    screen.getByRole("button", {
-      name: "2 commitments have nothing planned in these 7 days",
-    }),
-  );
+  const runway = screen.getByRole("button", {
+    name: "2 commitments have nothing planned in these 7 days",
+  });
+  expect(document.activeElement).toBe(runway);
+  expect(runway.title).toBe("Select the next one");
+  fireEvent.click(runway);
   expect(
     screen.getByRole("region", {
       name: "Next steps: Make the home desk comfortable",
     }),
   ).toBeTruthy();
+  // Closing the checklist returns focus to the toolbar button that opened it.
+  fireEvent.click(review.getByRole("button", { name: "Close" }));
+  expect(document.activeElement).toBe(
+    screen.getByRole("button", { name: "Weekly review" }),
+  );
 });
 
 it("keeps this week's commitments and goals for next week only on Sunday, when clicked", async () => {
-  const actions = createPrototype();
+  const actions = createPrototype(false, "2026-10-18");
   const update = vi.spyOn(actions, "updateTask");
-  const data = await props(actions);
-  const template = data.plan.tasks[0]!;
-  data.plan.tasks.push({
-    ...template,
-    id: "goal",
-    title: "A goal without a commitment",
-    stage: "none",
-    bet: true,
-  });
-  data.plan.nextWeekTaskIds = ["notes"];
-  render(<PlanView {...data} />);
-  // On a weekday the line only states the rule.
-  expect(
-    within(line(openReview(), "Next week's commitments")).queryAllByRole(
-      "button",
-    ),
-  ).toHaveLength(0);
-  cleanup();
-  render(<PlanView {...data} currentDate="2026-10-18" />);
-  const next = within(line(openReview(), "Next week's commitments"));
-  // Notes is already recorded for next week: four of the five can still be kept.
-  fireEvent.click(next.getByRole("button", { name: "Choose what stays (4)" }));
-  const rows = next.getAllByRole("listitem");
-  const row = (title: string) =>
-    within(rows.find((item) => item.textContent?.startsWith(title))!);
-  expect(
-    row("Organize the experiment notes").getByText("Kept for next week"),
-  ).toBeTruthy();
-  expect(update).not.toHaveBeenCalled();
+  renderApp(actions);
+  await screen.findByRole("region", { name: "Committed" });
+  // A commitment saved on Sunday from the board is kept already: no second write is offered.
   fireEvent.click(
-    row("Prepare the next research check-in").getByRole("button", {
-      name: "Keep for next week",
+    screen.getByRole("button", { name: /^Try the new charting library,/u }),
+  );
+  const editor = within(screen.getByRole("region", { name: "Steps & timing" }));
+  fireEvent.change(editor.getByLabelText("Planning"), {
+    target: { value: "committed" },
+  });
+  fireEvent.click(
+    editor
+      .getAllByRole("button", { name: "Save" })
+      .find((button) => !(button as HTMLButtonElement).disabled)!,
+  );
+  await waitFor(() => expect(update).toHaveBeenCalledOnce());
+  fireEvent.click(editor.getByRole("button", { name: "Close" }));
+  const review = openReview();
+  const next = within(line(review, "Next week's commitments"));
+  expect(next.getByText(/chosen in Plus on Sunday/u)).toBeTruthy();
+  // Release, research, notes and desk are this week's; the charting library is kept.
+  fireEvent.click(next.getByRole("button", { name: "Choose what stays (4)" }));
+  const row = (title: string) =>
+    within(
+      next
+        .getAllByRole("listitem")
+        .find((item) => item.textContent?.startsWith(title))!,
+    );
+  expect(
+    row("Try the new charting library").getByText("Kept for next week"),
+  ).toBeTruthy();
+  fireEvent.click(
+    next.getByRole("button", {
+      name: "Keep for next week: Prepare the next research check-in",
     }),
   );
   await waitFor(() =>
@@ -310,15 +358,51 @@ it("keeps this week's commitments and goals for next week only on Sunday, when c
       row("Prepare the next research check-in").getByText("Kept for next week"),
     ).toBeTruthy(),
   );
+  expect(review.getByRole("status").textContent).toBe(
+    "Kept for next week: Prepare the next research check-in",
+  );
+  // Focus moves to the next item still to keep.
+  await waitFor(() =>
+    expect(document.activeElement).toBe(
+      next.getByRole("button", {
+        name: "Keep for next week: Organize the experiment notes",
+      }),
+    ),
+  );
+  expect(
+    next.getByRole("button", { name: "Hide" }).getAttribute("aria-expanded"),
+  ).toBe("true");
+  expect(update.mock.calls.map(([task, change]) => [task.id, change])).toEqual([
+    ["tools", { stage: "committed" }],
+    ["research", { stage: "committed" }],
+  ]);
+});
+
+it("offers to keep a goal without a commitment through its Bet", async () => {
+  const actions = createPrototype();
+  const update = vi.spyOn(actions, "updateTask");
+  const data = await props(actions);
+  data.plan.tasks.push({
+    ...data.plan.tasks[0]!,
+    id: "goal",
+    title: "A goal without a commitment",
+    stage: "none",
+    bet: true,
+  });
+  data.plan.nextWeekTaskIds = ["notes"];
+  render(<PlanView {...data} currentDate="2026-10-18" />);
+  const next = within(line(openReview(), "Next week's commitments"));
+  // Notes is already recorded for next week: four of the five can still be kept.
+  fireEvent.click(next.getByRole("button", { name: "Choose what stays (4)" }));
   fireEvent.click(
-    row("A goal without a commitment").getByRole("button", {
-      name: "Keep for next week",
+    next.getByRole("button", {
+      name: "Keep for next week: A goal without a commitment",
     }),
   );
-  await waitFor(() => expect(update).toHaveBeenCalledTimes(2));
-  expect(update.mock.calls.map(([task, change]) => [task.id, change])).toEqual([
-    ["research", { stage: "committed" }],
-    ["goal", { bet: true }],
+  await waitFor(() => expect(update).toHaveBeenCalledOnce());
+  expect(update.mock.calls[0]).toEqual([
+    expect.objectContaining({ id: "goal" }),
+    { bet: true },
   ]);
 });
 
@@ -348,21 +432,21 @@ it("completes the review task only when Finish review is clicked, outside Focus"
     "",
   ]);
   // The re-read no longer lists the closed task.
-  expect(await review.findByText("Review task completed")).toBeTruthy();
+  await waitFor(() =>
+    expect(review.getByRole("status").textContent).toBe(
+      "Review task completed",
+    ),
+  );
+  expect(review.getAllByText("Review task completed")).toHaveLength(2);
+  expect(document.activeElement).toBe(
+    review.getByRole("heading", { name: "Weekly review" }),
+  );
 });
 
 it("opens a waiting task's step editor empty, ready for a follow-up step", async () => {
   const actions = createPrototype();
-  render(
-    <App
-      actions={actions}
-      view="plan"
-      language="en"
-      onOpenTask={() => {}}
-      onSettings={() => {}}
-    />,
-  );
-  fireEvent.click(await screen.findByText("Waiting (2)"));
+  renderApp(actions);
+  fireEvent.click(await screen.findByText("Waiting · 2"));
   await act(async () => {
     fireEvent.click(
       screen.getByRole("button", {
@@ -423,4 +507,35 @@ it("maps Todoist's last change and the review IDs from the API", async () => {
     "2026-10-01T16:00:00.000Z",
     undefined,
   ]);
+});
+
+it("focuses the follow-up step entry once a running write no longer disables it", async () => {
+  const actions = createPrototype();
+  // Adding another task to today stays unconfirmed until released.
+  let release = () => {};
+  const released = new Promise<void>((resolve) => (release = resolve));
+  const addToDay = actions.addToDay.bind(actions);
+  vi.spyOn(actions, "addToDay").mockImplementation(async (id, date) => {
+    await released;
+    return addToDay(id, date);
+  });
+  renderApp(actions);
+  fireEvent.click(await screen.findByText("Waiting · 2"));
+  fireEvent.click(
+    screen.getByRole("button", {
+      name: "Add to today: Hear back about the venue quote",
+    }),
+  );
+  fireEvent.click(
+    screen.getByRole("button", {
+      name: "Add follow-up step: Lab access approval",
+    }),
+  );
+  const entry = screen
+    .getByRole("region", { name: "Steps & timing" })
+    .querySelector("textarea")!;
+  expect(entry.disabled).toBe(true);
+  expect(document.activeElement).not.toBe(entry);
+  await act(async () => release());
+  await waitFor(() => expect(document.activeElement).toBe(entry));
 });

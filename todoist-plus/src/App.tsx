@@ -16,6 +16,7 @@ import {
   remapsTasks,
   REREAD_AFTER_MS,
   rereadsAfter,
+  withNextWeek,
 } from "./plan-updates";
 import { Elapsed } from "./StatusMarks";
 import { PlanView } from "./PlanView";
@@ -116,6 +117,20 @@ export function App({
   const [completing, setCompleting] = useState<ReadonlySet<string>>(new Set());
   const dialog = useRef<HTMLDialogElement>(null);
   const text = words(language);
+  // A confirmed planning write on Sunday also changes next week's choices, which only ReadPlan lists.
+  const planActions = useMemo<PlusActions>(
+    () => ({
+      ...actions,
+      async updateTask(task, update) {
+        const saved = await actions.updateTask(task, update);
+        setConfirmed(
+          (current) => current && withNextWeek(current, update, saved),
+        );
+        return saved;
+      },
+    }),
+    [actions],
+  );
   const load = useCallback(async (): Promise<boolean> => {
     const request = ++weekRequest.current;
     const read = ++reads.current.started;
@@ -246,9 +261,16 @@ export function App({
   useEffect(() => {
     if (!selectedId || !dialog.current) return;
     if (!dialog.current.open) dialog.current.showModal();
-    if (stepsFor === selectedId)
-      dialog.current.querySelector<HTMLTextAreaElement>("textarea")?.focus();
-  }, [selectedId, stepsFor]);
+    // A follow-up step starts in the empty entry, once no running write disables it.
+    const entry =
+      stepsFor === selectedId
+        ? dialog.current.querySelector<HTMLTextAreaElement>("textarea")
+        : null;
+    if (entry && !entry.disabled) {
+      entry.focus();
+      setStepsFor("");
+    }
+  }, [selectedId, stepsFor, busy, pendingCards]);
   function openTask(task: PlanningTask, steps = false) {
     setStepsFor(steps ? task.id : "");
     setSelectedId(task.id);
@@ -389,7 +411,7 @@ export function App({
                 busy={busy || !data.plan.configured}
                 pending={pendingCards}
                 run={run}
-                actions={actions}
+                actions={planActions}
                 editTask={openTask}
                 onOpenTask={onOpenTask}
               />
@@ -404,7 +426,7 @@ export function App({
                 busy={busy || weekLoading || !data.plan.configured}
                 pending={pendingCards}
                 run={run}
-                actions={actions}
+                actions={planActions}
                 editTask={openTask}
                 onLabels={() => setSelectedId("board-labels")}
                 todayTaskIds={data.focus.taskIds}
@@ -520,7 +542,7 @@ export function App({
             busy={busy || selectedPending}
             pending={selectedPending}
             run={run}
-            actions={actions}
+            actions={planActions}
             todayTaskIds={data.focus.taskIds}
             addFocus={(id) => void addFocus(id, data.focus)}
             onOpenTask={onOpenTask}

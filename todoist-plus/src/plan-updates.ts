@@ -1,4 +1,6 @@
+import { isLastDay } from "./weekly-review";
 import type {
+  Area,
   Confirmed,
   FlowDayPlan,
   PlanningTask,
@@ -57,6 +59,28 @@ export function applyConfirmed(data: PlusData, confirmed: Confirmed): PlusData {
     };
   if ("id" in confirmed) return withTasks(data, [confirmed]);
   return { ...data, plan: { ...confirmed, tasks: data.plan.tasks } };
+}
+
+/**
+ * Mirrors how Todofy records a confirmed SetTaskPlan on the week's last day (core/plus.py
+ * membership_week, REMEMBER_WEEK, FORGET_TASK), until the next read lists next week's choices: a
+ * commitment or Bet chosen then is kept for next week, and a task left with neither mark is not.
+ */
+export function withNextWeek(
+  data: PlusData,
+  update: { stage?: Stage; area?: Area; bet?: boolean },
+  saved: PlanningTask,
+): PlusData {
+  const { plan } = data;
+  if (!isLastDay(plan.week, data.focus.date)) return data;
+  const others = plan.nextWeekTaskIds.filter((id) => id !== saved.id);
+  const chosen = update.stage === "committed" || update.bet === true;
+  const marked = saved.stage === "committed" || saved.bet;
+  const kept = chosen || (marked && plan.nextWeekTaskIds.includes(saved.id));
+  return {
+    ...data,
+    plan: { ...plan, nextWeekTaskIds: kept ? [...others, saved.id] : others },
+  };
 }
 
 /** A new label mapping changes every task's derived stage and etag. */

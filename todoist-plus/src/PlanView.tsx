@@ -48,21 +48,23 @@ export function PlanView(props: PlanViewProps) {
   const [area, setArea] = useState<Area | "all">("all");
   const [reviewing, setReviewing] = useState(Boolean(props.reviewing));
   const [waitingOpen, setWaitingOpen] = useState(false);
-  // A review jump scrolls its target into view once; Week mounts at the first unplanned commitment.
+  // A review jump focuses its target and scrolls it into view once; Week mounts at the first
+  // unplanned commitment.
   const [jump, setJump] = useState<"waiting" | "runway">();
   const section = useRef<HTMLElement>(null);
+  const reviewButton = useRef<HTMLButtonElement>(null);
   const text = words(language);
   useEffect(() => {
     if (props.reviewing) setReviewing(true);
   }, [props.reviewing]);
   useEffect(() => {
     if (!jump) return;
-    section.current
-      ?.querySelector(
-        jump === "waiting" ? ".planning-waiting" : ".planning-runway",
-      )
-      // jsdom has no layout, and so no scrollIntoView.
-      ?.scrollIntoView?.({ block: "nearest" });
+    const target = section.current?.querySelector<HTMLElement>(
+      jump === "waiting" ? ".planning-waiting > summary" : ".planning-runway",
+    );
+    target?.focus({ preventScroll: true });
+    // jsdom has no layout, and so no scrollIntoView.
+    target?.scrollIntoView?.({ block: "nearest" });
     setJump(undefined);
   }, [jump]);
   const commitments = planningOutcomes(plan.tasks, plan.managedLabels).filter(
@@ -104,6 +106,7 @@ export function PlanView(props: PlanViewProps) {
           {text.personal.toLowerCase()}
         </span>
         <button
+          ref={reviewButton}
           className="planning-label-button"
           aria-pressed={reviewing}
           onClick={() => setReviewing(!reviewing)}
@@ -139,7 +142,10 @@ export function PlanView(props: PlanViewProps) {
             setMode("week");
             setJump("runway");
           }}
-          onClose={() => setReviewing(false)}
+          onClose={() => {
+            setReviewing(false);
+            reviewButton.current?.focus();
+          }}
         />
       )}
       {mode === "review" ? (

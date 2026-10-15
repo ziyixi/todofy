@@ -54,11 +54,11 @@ test("the review task's link opens the checklist; ticks survive a reload and onl
       page.getByRole("button", { name: "Plan", exact: true }),
     ).toHaveAttribute("aria-current", "page");
     const inbox = review.getByRole("checkbox", {
-      name: "Reviewed: Inbox to clarify",
+      name: "Reviewed: Mail to clarify",
     });
     // The mail task counts; the review task in the same project does not.
     await expect(review.locator("li").first()).toContainText(
-      "Inbox to clarify1",
+      "Mail to clarify1",
     );
     await expect(
       review.getByRole("link", { name: /Open in Todoist/u }),
@@ -68,7 +68,7 @@ test("the review task's link opens the checklist; ticks survive a reload and onl
     await expect(
       page
         .getByRole("region", { name: "Weekly review" })
-        .getByRole("checkbox", { name: "Reviewed: Inbox to clarify" }),
+        .getByRole("checkbox", { name: "Reviewed: Mail to clarify" }),
     ).toBeChecked();
     await page
       .getByRole("region", { name: "Weekly review" })
@@ -96,6 +96,88 @@ test("the review task's link opens the checklist; ticks survive a reload and onl
         body: { task_id: "review", request_id: expect.any(String) },
       },
     ]);
+  } finally {
+    await context.close();
+  }
+});
+
+test("keyboard focus stays in the review after its actions, and Sunday's keep writes the commitment once", async () => {
+  const { context, worker } = await launchPlanner();
+  try {
+    await worker.evaluate(() => {
+      const state = (globalThis as unknown as { plannerState: ReviewState })
+        .plannerState;
+      const task = (id: string, title: string, fields = {}) => ({
+        id,
+        title,
+        area: "work",
+        stage: "none",
+        etag: `${id}-1`,
+        ...fields,
+      });
+      state.tasks.push(
+        task("wait", "Synthetic wait", { labels: ["waiting"] }),
+        task("idea-old", "Synthetic old idea", {
+          labels: ["parked"],
+          update_time: "2026-08-01T09:00:00Z",
+        }),
+        task("idea-new", "Synthetic new idea", {
+          labels: ["onhold"],
+          update_time: "2026-09-01T09:00:00Z",
+        }),
+      );
+      // The account's Sunday, the last day of the week of 2026-10-12.
+      state.review = { today: "2026-10-18" };
+    });
+    const page = await context.newPage();
+    await page.goto("https://app.todoist.com/app/today?todoist-plus=review");
+    const review = page.getByRole("region", { name: "Weekly review" });
+    await expect(review).toBeVisible();
+    await review.getByRole("button", { name: "Show" }).nth(1).click();
+    // Keeping an item moves focus to the next one, then to the line once none is left.
+    await review
+      .getByRole("button", { name: "Keep: Synthetic old idea" })
+      .press("Enter");
+    await expect(
+      review.getByRole("button", { name: "Keep: Synthetic new idea" }),
+    ).toBeFocused();
+    await expect(review.getByRole("status")).toHaveText(
+      "Kept: Synthetic old idea",
+    );
+    await page.keyboard.press("Enter");
+    await expect(
+      review.getByRole("checkbox", { name: "Reviewed: Someday" }),
+    ).toBeFocused();
+    // Sunday: keeping this week's commitment resends it; focus moves to the line's toggle.
+    await review.getByRole("button", { name: "Choose what stays (1)" }).click();
+    await review
+      .getByRole("button", {
+        name: "Keep for next week: Synthetic weekly outcome",
+      })
+      .press("Enter");
+    await expect(
+      review.getByText("Kept for next week", { exact: true }),
+    ).toBeVisible();
+    await expect(review.getByRole("button", { name: "Hide" })).toBeFocused();
+    expect(await writes(worker)).toEqual([
+      {
+        path: "/api/plus/v1/tasks:setTaskPlan",
+        method: "POST",
+        body: {
+          task_id: "parent",
+          etag: "parent-1",
+          request_id: expect.any(String),
+          stage: "committed",
+        },
+      },
+    ]);
+    // The Waiting jump focuses the opened row; closing returns to the toolbar button.
+    await review.getByRole("button", { name: "Show" }).first().press("Enter");
+    await expect(page.locator(".planning-waiting > summary")).toBeFocused();
+    await review.getByRole("button", { name: "Close" }).click();
+    await expect(
+      page.getByRole("button", { name: "Weekly review" }),
+    ).toBeFocused();
   } finally {
     await context.close();
   }

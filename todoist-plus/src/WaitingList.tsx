@@ -8,14 +8,17 @@ import {
 } from "./weekly-review";
 import type { Language, PlanningTask } from "./model";
 
-/** "12 天未变动": any Todoist edit resets it, so it never claims how long the wait has been. */
+/**
+ * "12 天未变动", in whole 24-hour periods: any Todoist edit resets it, so it never claims how
+ * long the wait has been.
+ */
 export function untouchedText(task: PlanningTask, language: Language): string {
   const days = untouchedDays(task);
   if (days === undefined) return "";
-  if (language === "zh") return days ? `${days} 天未变动` : "今天有变动";
+  if (language === "zh") return days ? `${days} 天未变动` : "1 天内有变动";
   return days
     ? `Untouched ${days} ${days === 1 ? "day" : "days"}`
-    : "Changed today";
+    : "Changed within a day";
 }
 
 interface Props {
@@ -60,7 +63,7 @@ export function WaitingList({
     >
       <summary>
         <Hourglass size={13} />
-        {text.waiting} ({waiting.length})
+        {text.waiting} · {waiting.length}
       </summary>
       <ul aria-label={text.waiting}>
         {waiting.map((task) => {

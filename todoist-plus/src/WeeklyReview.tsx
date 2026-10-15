@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { ExternalLink, ListChecks, X } from "lucide-react";
 import { displayedTitle, taskIndex, todoistProjectUrl } from "./domain";
 import { words } from "./i18n";
@@ -73,11 +73,16 @@ export function WeeklyReview({
   const [progress, setProgress] = useState<ReviewProgress>(() =>
     readProgress(week),
   );
-  // Choices kept in this visit, until the next read lists them among next week's.
-  const [keptNext, setKeptNext] = useState<ReadonlySet<string>>(new Set());
   const [reviewDone, setReviewDone] = useState(false);
   // The two item lists stay folded until asked for.
   const [shown, setShown] = useState<ReadonlySet<number>>(new Set());
+  // What the last action did, read out by screen readers.
+  const [announcement, setAnnouncement] = useState("");
+  // After an item's action, focus goes to the action now at the same place in that line's list,
+  // or to the line itself once none is left, instead of falling back to the page.
+  const [focusAt, setFocusAt] = useState<{ line: number; index: number }>();
+  const section = useRef<HTMLElement>(null);
+  const heading = useRef<HTMLHeadingElement>(null);
   function update(next: ReviewProgress) {
     setProgress(next);
     saveProgress(week, next);
@@ -89,16 +94,47 @@ export function WeeklyReview({
   const waiting = oldestUntouched(plan.tasks, WAITING_LABELS);
   const oldestWait = waiting[0] && untouchedDays(waiting[0]);
   const unscheduled = unscheduledCommitments(plan, days);
+  // Still to look at this week: neither kept nor already in this month.
   const someday = oldestUntouched(plan.tasks, SOMEDAY_LABELS).filter(
-    (task) => !progress.kept.includes(task.id),
+    (task) => task.stage !== "monthly" && !progress.kept.includes(task.id),
   );
   const sunday = isLastDay(plan.week, today);
-  const chosen = new Set([...plan.nextWeekTaskIds, ...keptNext]);
+  const chosen = new Set(plan.nextWeekTaskIds);
   const commitments = sunday ? weekChoices(plan) : [];
   const toKeep = commitments.filter((task) => !chosen.has(task.id));
   const reviewTask = plan.reviewTaskId
     ? taskIndex(plan.tasks).get(plan.reviewTaskId)
     : undefined;
+
+  useEffect(() => {
+    const review = section.current;
+    if (!focusAt || !review) return;
+    // Only where focus was lost or is still in the review; never pulled back from elsewhere.
+    const active = (review.getRootNode() as Document | ShadowRoot)
+      .activeElement;
+    if (active && active !== document.body && !review.contains(active)) {
+      setFocusAt(undefined);
+      return;
+    }
+    const row = review.querySelector(`[data-review-line="${focusAt.line}"]`);
+    const items = [
+      ...(row?.querySelectorAll<HTMLButtonElement>("[data-review-action]") ??
+        []),
+    ];
+    const target =
+      items[Math.min(focusAt.index, items.length - 1)] ??
+      row?.querySelector<HTMLElement>(".weekly-review-jump") ??
+      row?.querySelector<HTMLElement>("input");
+    // A running write disables the actions: focus moves once it settles.
+    if (target instanceof HTMLButtonElement && target.disabled) return;
+    target?.focus();
+    setFocusAt(undefined);
+  }, [focusAt, busy, plan, progress]);
+  /** Says what an item's action did and moves focus on in its list. */
+  function done(line: number, index: number, message: string) {
+    setAnnouncement(message);
+    setFocusAt({ line, index });
+  }
 
   function toggle(index: number, label: string) {
     const open = shown.has(index);
@@ -123,7 +159,7 @@ export function WeeklyReview({
   function line(index: number, title: string, body: ReactNode) {
     const ticked = progress.lines.includes(index);
     return (
-      <li className={ticked ? "is-ticked" : ""}>
+      <li className={ticked ? "is-ticked" : ""} data-review-line={index}>
         <input
           type="checkbox"
           checked={ticked}
@@ -146,9 +182,13 @@ export function WeeklyReview({
   }
 
   return (
-    <section className="weekly-review" aria-label={text.weeklyReview}>
+    <section
+      className="weekly-review"
+      aria-label={text.weeklyReview}
+      ref={section}
+    >
       <header>
-        <h2>
+        <h2 ref={heading} tabIndex={-1}>
           <ListChecks size={15} />
           {text.weeklyReview}
         </h2>
@@ -160,7 +200,7 @@ export function WeeklyReview({
       <ol>
         {line(
           1,
-          zh ? "收件箱待理清" : "Inbox to clarify",
+          zh ? "邮件待理清" : "Mail to clarify",
           plan.inboxProjectId ? (
             <>
               <span className="weekly-review-count">{inbox.length}</span>
@@ -199,7 +239,7 @@ export function WeeklyReview({
         )}
         {line(
           3,
-          zh ? "承诺无排期" : "Commitments not planned",
+          zh ? "承诺未安排" : "Commitments not planned",
           <>
             <span className="weekly-review-count">{unscheduled.length}</span>
             {unscheduled.length > 0 && (
@@ -220,100 +260,140 @@ export function WeeklyReview({
                 className="weekly-review-items"
                 aria-label={zh ? "将来 / 也许" : "Someday"}
               >
-                {someday.slice(0, SOMEDAY_SHOWN).map((task) => (
-                  <li key={task.id}>
-                    <button
-                      className="weekly-review-title"
-                      onClick={() => editTask(task)}
-                    >
-                      {displayedTitle(task.title)}
-                    </button>
-                    <span>{untouchedText(task, language)}</span>
-                    {task.stage === "monthly" ? (
-                      <span>{zh ? "已在本月" : "In this month"}</span>
-                    ) : (
+                {someday.slice(0, SOMEDAY_SHOWN).map((task, index) => {
+                  const title = displayedTitle(task.title);
+                  const move = zh ? "移到本月" : "Move to this month";
+                  const moved = zh ? "已移到本月" : "Moved to this month";
+                  const keep = zh ? "保留" : "Keep";
+                  return (
+                    <li key={task.id}>
                       <button
-                        disabled={waits(task)}
-                        onClick={() =>
-                          void run(() =>
-                            actions.updateTask(task, { stage: "monthly" }),
-                          )
-                        }
+                        className="weekly-review-title"
+                        onClick={() => editTask(task)}
                       >
-                        {zh ? "移到本月" : "Move to this month"}
+                        {title}
                       </button>
-                    )}
-                    <button
-                      onClick={() =>
-                        update({
-                          ...progress,
-                          kept: [...progress.kept, task.id],
-                        })
-                      }
-                    >
-                      {zh ? "保留" : "Keep"}
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </>,
-        )}
-        {line(
-          5,
-          zh ? "下周承诺" : "Next week's commitments",
-          <>
-            <span className="weekly-review-note">{text.sundayRule}</span>
-            {commitments.length > 0 &&
-              toggle(
-                5,
-                zh
-                  ? `选择留下的（${toKeep.length}）`
-                  : `Choose what stays (${toKeep.length})`,
-              )}
-            {shown.has(5) && (
-              <ul
-                className="weekly-review-items"
-                aria-label={zh ? "下周承诺" : "Next week's commitments"}
-              >
-                {commitments.map((task) => (
-                  <li key={task.id}>
-                    <span>{displayedTitle(task.title)}</span>
-                    {chosen.has(task.id) ? (
-                      <span>{zh ? "已留到下周" : "Kept for next week"}</span>
-                    ) : (
+                      <span>{untouchedText(task, language)}</span>
                       <button
                         disabled={waits(task)}
+                        aria-label={`${move}: ${title}`}
                         onClick={async () => {
-                          const kept = await run(() =>
-                            actions.updateTask(
-                              task,
-                              task.stage === "committed"
-                                ? { stage: "committed" }
-                                : { bet: true },
-                            ),
-                          );
-                          if (kept)
-                            setKeptNext((ids) => new Set(ids).add(task.id));
+                          if (
+                            await run(() =>
+                              actions.updateTask(task, { stage: "monthly" }),
+                            )
+                          )
+                            done(4, index, `${moved}: ${title}`);
                         }}
                       >
-                        {zh ? "留到下周" : "Keep for next week"}
+                        {move}
                       </button>
-                    )}
-                  </li>
-                ))}
+                      <button
+                        data-review-action
+                        aria-label={`${keep}: ${title}`}
+                        onClick={() => {
+                          update({
+                            ...progress,
+                            kept: [...progress.kept, task.id],
+                          });
+                          done(4, index, `${zh ? "已保留" : "Kept"}: ${title}`);
+                        }}
+                      >
+                        {keep}
+                      </button>
+                    </li>
+                  );
+                })}
               </ul>
             )}
           </>,
         )}
+        {sunday ? (
+          line(
+            5,
+            zh ? "下周承诺" : "Next week's commitments",
+            <>
+              <span className="weekly-review-note">{text.sundayRule}</span>
+              {commitments.length > 0 &&
+                toggle(
+                  5,
+                  zh
+                    ? `选要留到下周的（${toKeep.length}）`
+                    : `Choose what stays (${toKeep.length})`,
+                )}
+              {shown.has(5) && (
+                <ul
+                  className="weekly-review-items"
+                  aria-label={zh ? "下周承诺" : "Next week's commitments"}
+                >
+                  {commitments.map((task) => {
+                    const title = displayedTitle(task.title);
+                    const keep = zh ? "留到下周" : "Keep for next week";
+                    const kept = zh ? "已留到下周" : "Kept for next week";
+                    return (
+                      <li key={task.id}>
+                        <span>{title}</span>
+                        {chosen.has(task.id) ? (
+                          <span>{kept}</span>
+                        ) : (
+                          <button
+                            data-review-action
+                            disabled={waits(task)}
+                            aria-label={`${keep}: ${title}`}
+                            onClick={async () => {
+                              const index = toKeep.indexOf(task);
+                              // Sends the commitment or Bet again; for a stage the task already
+                              // shows, Todofy changes no label.
+                              if (
+                                await run(() =>
+                                  actions.updateTask(
+                                    task,
+                                    task.stage === "committed"
+                                      ? { stage: "committed" }
+                                      : { bet: true },
+                                  ),
+                                )
+                              )
+                                done(5, index, `${kept}: ${title}`);
+                            }}
+                          >
+                            {keep}
+                          </button>
+                        )}
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </>,
+          )
+        ) : (
+          // Nothing to tick before Sunday: only where the choice will be.
+          <li className="weekly-review-later">
+            <div className="weekly-review-line">
+              <strong>{zh ? "下周承诺" : "Next week's commitments"}</strong>
+              <span className="weekly-review-note">
+                {zh
+                  ? "周日可在这里选留到下周的承诺和目标"
+                  : "On Sunday, choose here what stays for next week"}
+              </span>
+            </div>
+          </li>
+        )}
       </ol>
+      <p className="plus-sr-only" role="status">
+        {announcement}
+      </p>
       <footer>
         {reviewTask && !reviewDone ? (
           <button
             className="plus-button plus-primary"
             disabled={waits(reviewTask)}
             onClick={async () => {
-              if (await completeReview(reviewTask)) setReviewDone(true);
+              if (!(await completeReview(reviewTask))) return;
+              setReviewDone(true);
+              setAnnouncement(zh ? "回顾任务已完成" : "Review task completed");
+              heading.current?.focus();
             }}
           >
             {zh ? "完成回顾" : "Finish review"}

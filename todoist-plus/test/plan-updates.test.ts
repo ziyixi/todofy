@@ -1,6 +1,10 @@
 import { expect, it } from "vitest";
 import { createPrototype } from "../design/fixture";
-import { applyConfirmed, rereadsAfter } from "../src/plan-updates";
+import {
+  applyConfirmed,
+  rereadsAfter,
+  withNextWeek,
+} from "../src/plan-updates";
 
 it("merges confirmed flows, tasks, plan settings and timer without a re-read", async () => {
   const data = await createPrototype().load();
@@ -55,4 +59,35 @@ it("re-reads only after void results and label mapping changes", async () => {
   expect(rereadsAfter([tasks[0]!])).toBe(false);
   expect(rereadsAfter([data.days[0]!])).toBe(false);
   expect(rereadsAfter({ timerEtag: "1" })).toBe(false);
+});
+
+it("mirrors Sunday's next-week choices from confirmed planning writes until the next read", async () => {
+  const sunday = await createPrototype(false, "2026-10-18").load();
+  const task = (id: string) =>
+    sunday.plan.tasks.find((item) => item.id === id)!;
+  const ids = (data: typeof sunday) => data.plan.nextWeekTaskIds;
+  // A commitment or Bet chosen on the last day is kept; a write leaving neither mark is not.
+  const committed = { ...task("tools"), stage: "committed" as const };
+  const kept = withNextWeek(sunday, { stage: "committed" }, committed);
+  expect(ids(kept)).toEqual(["tools"]);
+  const goal = withNextWeek(
+    kept,
+    { bet: true },
+    { ...task("walk"), bet: true },
+  );
+  expect(ids(goal)).toEqual(["tools", "walk"]);
+  expect(ids(withNextWeek(goal, { bet: false }, task("walk")))).toEqual([
+    "tools",
+  ]);
+  // Another change to a kept task leaves it kept while it has a mark; one to another task does not keep it.
+  expect(ids(withNextWeek(goal, { area: "personal" }, committed))).toEqual([
+    "walk",
+    "tools",
+  ]);
+  expect(ids(withNextWeek(sunday, {}, task("notes")))).toEqual([]);
+  // Any other day changes nothing.
+  const tuesday = await createPrototype().load();
+  expect(withNextWeek(tuesday, { stage: "committed" }, committed)).toBe(
+    tuesday,
+  );
 });

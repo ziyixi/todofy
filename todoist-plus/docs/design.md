@@ -52,7 +52,7 @@ Plan／Focus 直接切换使用已读数据；离开扩展到原生页面后再�
 
 ## 等待与周回顾
 
-两者都只用已读取的数据：任务的 `update_time`（Todoist 最后修改时间）和标签，加上 ReadPlan 返回的邮件项目、回顾任务和下周选择 ID。“等待中”按字面标签 `waiting`、`blocked` 显示“N 天未变动”，“将来／也许”按 `parked`、`onhold`。每个操作都是已有的单任务写入（SetTaskPlan、AppendTaskSteps 的步骤编辑器、加入今天、CompleteTask），只在点击时执行；不移除标签、不自动安排、不调用模型，也没有新的 D1 表。勾选状态按 ISO 周只存于本浏览器。Week 的承诺无排期提示是一行文字，不加逐卡标记。
+两者都只用已读取的数据：任务的 `update_time`（Todoist 最后修改时间）和标签，加上 ReadPlan 返回的邮件项目、回顾任务和下周选择 ID。“等待中”按字面标签 `waiting`、`blocked` 显示“N 天未变动”，“将来／也许”按 `parked`、`onhold`。每个操作都是已有的单任务写入（SetTaskPlan、AppendTaskSteps 的步骤编辑器、加入今天、CompleteTask），只在点击时执行；不移除标签、不自动安排、不调用模型，也没有新的 D1 表。勾选状态按 ISO 周只存于本浏览器。Week 的承诺未安排提示是一行文字，不加逐卡标记。
 
 ## 原生页面与发布
 
