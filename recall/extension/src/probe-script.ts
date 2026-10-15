@@ -34,7 +34,7 @@ if (topFrame && globalThis.recallPageProbe === undefined) {
 
 function probe() {
   const state = globalThis.recallPageProbe;
-  return state === undefined ? undefined : { documentId: state.documentId, visible: state.visible && document.visibilityState === 'visible', url: location.href };
+  return state === undefined ? undefined : { documentId: state.documentId, visible: state.visible && document.visibilityState === 'visible', url: location.href, ...(RECALL_ORION ? { build: RECALL_BUILD } : {}) };
 }
 
 if (RECALL_ORION && topFrame && globalThis.recallPageProbe !== undefined) {

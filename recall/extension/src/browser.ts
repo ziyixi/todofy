@@ -27,6 +27,8 @@ export interface PageProbe {
   readonly documentId: string;
   readonly visible: boolean;
   readonly url: string;
+  /** Only Orion echoes its installed script build; desktop keeps the existing execution result. */
+  readonly build?: string;
 }
 
 /** Chrome's typings mark all namespaces required; Orion's documented subset does not provide all of them. */
@@ -136,6 +138,14 @@ export async function executeFile(ctx: Context, tabId: number, file: 'probe.js' 
   if (file !== 'probe.js') throw new Error('mobile_capture_requires_guard');
   const execute = browserFeatures(ctx.chrome).tabs.executeScript;
   if (execute === undefined) throw new Error('browser_api_unavailable');
+  // Repeated tab events must not each wait for Orion's unanswered injection completion.
+  // New documents and scripts from an older install still need the current listener installed.
+  try {
+    const installed = await readInstalledPage(ctx, tabId, { type: 'recall-probe' });
+    if (probeError(installed) === null && (installed as PageProbe).build === ctx.build) return installed;
+  } catch {
+    // A new document has no receiver yet; the existing installation path follows.
+  }
   const runId = await observe(ctx, { stage: 'probe_injection', state: 'pending' }, tabId);
   // Orion's file-injection completion did not yield a usable probe. Use the standard content-message reply.
   await nativeReply<undefined>((resolve, reject) => {
@@ -195,6 +205,10 @@ export async function probePage(ctx: Context, tabId: number, expectedDocumentId?
       return null;
     }
     const probe = value as PageProbe;
+    if (ctx.mobile && probe.build !== ctx.build) {
+      await lastError.set(ctx.chrome, 'page_probe_failed', ctx.now());
+      return null;
+    }
     return expectedDocumentId !== undefined && probe.documentId !== expectedDocumentId ? null : probe;
   } catch (error) {
     await lastError.set(ctx.chrome, timedOut(error) ? failureCode.replace('_failed', '_timeout') : failureCode, ctx.now());

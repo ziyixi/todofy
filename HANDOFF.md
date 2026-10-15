@@ -9,6 +9,19 @@ Its old waiting lists and release identities are historical, not instructions to
 
 ## Current work
 
+`codex/recall-orion-reply` fixes a locally reproduced mobile capture delay, following the owner's October 14
+report on the existing 337 phone. Its fresh diagnostic has thirteen tab events, no Alarm, a valid visible probe,
+and no capture stages; private identifiers and content are omitted. The exact released 337 bundle reproduces
+that shape with a finite event burst and unanswered injection completion: no documents through sixty seconds,
+first capture around seventy-one. Current-build listeners are now reused; only missing/older listeners install.
+The added mobile build echo does not change desktop probe shape. Document/URL/visibility/privacy checks remain.
+Local 166 units, types/lint/build and sixteen built-WebKit cases pass; the same new content-result regression
+fails on 337. No user Chrome files, real browsing content, production settings, credentials or budgets changed.
+Pending: branch CI, native Mac candidate check, same-SHA publication, then one phone update/acceptance.
+The independent page_probe_invalid_reply_type cause is not established by this queue correction; do not claim
+all native reply anomalies are fixed. [Diagnostic evidence](docs/recall-diagnostic-verification.md#october-14-recurrence-and-repeated-installation-delay).
+
+
 Todoist Plus's approved planning board is released at `bcd1d1426f7dcf16198d2e71aefddc62cd7a8a87`.
 [Full branch CI 38546241155](https://github.com/ziyixi/todofy/actions/runs/38546241155) and
 [same-SHA main 38547547283](https://github.com/ziyixi/todofy/actions/runs/38547547283) pass. Todofy and the

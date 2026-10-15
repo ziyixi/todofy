@@ -217,19 +217,27 @@ describe('the service worker', () => {
   it.each([false, true])('captures and uploads the activated phone tab with an earlier blocked startup query=%s', async (blockedStartup) => {
     vi.stubGlobal('RECALL_ORION', true);
     const get = browser.api.tabs.get;
+    const installedDocuments = new Map<number, string>();
     Object.assign(browser.api.tabs, {
       get: (id: number, callback: (tab: FakeTab) => void) => { void get(id).then(callback); },
       captureVisibleTab: (_options: unknown, callback: (data: string) => void) => { callback('data:image/png;base64,c3ludGhldGlj'); },
-      executeScript: (_id: number, _details: unknown, callback: (value?: unknown[]) => void) => { queueMicrotask(() => { callback(undefined); }); },
+      executeScript: (id: number, _details: unknown, callback: (value?: unknown[]) => void) => {
+        installedDocuments.set(id, browser.tab(id).documentId);
+        queueMicrotask(() => { callback(undefined); });
+      },
       sendMessage: (id: number, request: { type: string }, callback: (value: unknown) => void) => {
-        queueMicrotask(() => { callback(browser.script({ tabId: id, files: [request.type === 'recall-probe' ? 'probe.js' : 'capture.js'] })); });
+        queueMicrotask(() => {
+          callback(installedDocuments.get(id) === browser.tab(id).documentId
+            ? browser.script({ tabId: id, files: [request.type === 'recall-probe' ? 'probe.js' : 'capture.js'] })
+            : undefined);
+        });
       },
     });
     const query = vi.spyOn(browser.api.tabs, 'query').mockImplementation(() => new Promise<FakeTab[]>(() => undefined));
     browser.script = ({ tabId, files }) => {
       const tab = browser.tab(tabId);
       return files?.[0] === 'probe.js'
-        ? { documentId: tab.documentId, visible: true, url: tab.url }
+        ? { documentId: tab.documentId, visible: true, url: tab.url, build: browser.manifest.version }
         : { build: browser.manifest.version, documentId: tab.documentId, visible: true, url: tab.url, title: tab.title, description: '', text: 'Synthetic event-driven capture.', textTruncated: false, hasPasswordField: false };
     };
     await start();

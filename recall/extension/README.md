@@ -43,7 +43,8 @@ an unconfirmed save shows its pending step after twelve seconds and keeps the pa
 The Orion package uses the same capture/queue code with a nonpersistent MV2 background script. A dynamically
 injected top-frame probe answers fresh visibility/text through callback-based `tabs.sendMessage`, without
 using its file-injection completion value. Reinjection replaces its listener and preserves the document identity. It reports `visibilitychange` / `pagehide` / `pageshow`.
-Only a visible foreground document records focus; no missing desktop API is treated as proof of activity.
+The installed current-build listener is reused on subsequent events; new documents or older scripts are installed
+once, so an unanswered injection completion does not delay every focus event. Only a visible foreground document records focus; no missing desktop API is treated as proof of activity.
 The browser can suspend the extension while another app is open or the phone is locked. Returning resumes the
 existing queue; phone batches flush within a minute while active. This does not record activity in other apps.
 

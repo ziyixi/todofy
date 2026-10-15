@@ -93,10 +93,11 @@ describe('one-shot Orion capture diagnostic', () => {
     await startDiagnostic(h.ctx);
     const tab = [...h.browser.tabs.values()][0];
     if (tab === undefined) throw new Error('test tab missing');
-    const probe = { documentId: 'synthetic-document', visible: true, url: DIAGNOSTIC_URL };
+    const probe = { documentId: 'synthetic-document', visible: true, url: DIAGNOSTIC_URL, build: h.ctx.build };
+    let installed = false;
     Object.assign(h.browser.api.tabs, {
-      executeScript: () => result,
-      sendMessage: (_id: number, _request: unknown, callback: (value: unknown) => void) => { callback(probe); },
+      executeScript: () => { installed = true; return result; },
+      sendMessage: (_id: number, _request: unknown, callback: (value: unknown) => void) => { callback(installed ? probe : undefined); },
     });
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     try {
@@ -117,13 +118,15 @@ describe('one-shot Orion capture diagnostic', () => {
     const tab = [...h.browser.tabs.values()][0];
     if (tab === undefined) throw new Error('test tab missing');
     let lateCallback!: (value: unknown[]) => void;
-    const probe = { documentId: 'synthetic-document', visible: true, url: DIAGNOSTIC_URL };
+    const probe = { documentId: 'synthetic-document', visible: true, url: DIAGNOSTIC_URL, build: h.ctx.build };
+    let installed = false;
     Object.assign(h.browser.api.tabs, {
       executeScript: (_id: number, _details: unknown, callback: (value: unknown[]) => void) => {
+        installed = true;
         lateCallback = callback;
         return Promise.resolve(['not a page probe']);
       },
-      sendMessage: (_id: number, _request: unknown, callback: (value: unknown) => void) => { callback(probe); },
+      sendMessage: (_id: number, _request: unknown, callback: (value: unknown) => void) => { callback(installed ? probe : undefined); },
     });
     expect(await executeFile(h.ctx, tab.id, 'probe.js')).toEqual(probe);
     Object.assign(h.browser.api.runtime, { lastError: { message: 'synthetic_late_failure' } });
@@ -132,12 +135,12 @@ describe('one-shot Orion capture diagnostic', () => {
     expect((await diagnosticStatus(h.ctx)).diagnostic.steps).toContainEqual({ stage: 'probe_injection', state: 'returned', result: 'array' });
   });
 
-  it.each(['callback', 'promise'] as const)('does not ask the page after a genuine injection %s error', async (channel) => {
+  it.each(['callback', 'promise'] as const)('does not ask the page again after a genuine injection %s error', async (channel) => {
     const h = await setup();
     await startDiagnostic(h.ctx);
     const tab = [...h.browser.tabs.values()][0];
     if (tab === undefined) throw new Error('test tab missing');
-    const send = vi.fn();
+    const send = vi.fn((_id: number, _request: unknown, callback: (value: unknown) => void) => { callback(undefined); });
     Object.assign(h.browser.api.tabs, { sendMessage: send, executeScript: (_id: number, _details: unknown, callback: (value?: unknown[]) => void) => {
       if (channel === 'promise') return Promise.reject(new Error('synthetic_injection_denied'));
       Object.assign(h.browser.api.runtime, { lastError: { message: 'synthetic_injection_denied' } });
@@ -146,7 +149,7 @@ describe('one-shot Orion capture diagnostic', () => {
       return undefined;
     } });
     await expect(executeFile(h.ctx, tab.id, 'probe.js')).rejects.toThrow('synthetic_injection_denied');
-    expect(send).not.toHaveBeenCalled();
+    expect(send).toHaveBeenCalledExactlyOnceWith(tab.id, { type: 'recall-probe' }, expect.any(Function));
     expect((await diagnosticStatus(h.ctx)).diagnostic.steps).toContainEqual({ stage: 'probe_injection', state: 'failed', result: 'api_error' });
   });
 
@@ -278,10 +281,11 @@ describe('one-shot Orion capture diagnostic', () => {
     const tab = [...h.browser.tabs.values()][0];
     if (tab === undefined) throw new Error('test tab missing');
     await observeTabs(h.ctx, [tab as unknown as chrome.tabs.Tab]);
-    const reply = { documentId: 'synthetic-document', visible: true, url: 'https://private.example.net/secret', text: 'private body', screenshot: 'data:image/png;base64,c3ludGhldGlj' };
+    const reply = { documentId: 'synthetic-document', visible: true, url: 'https://private.example.net/secret', build: h.ctx.build, text: 'private body', screenshot: 'data:image/png;base64,c3ludGhldGlj' };
+    let installed = false;
     Object.assign(h.browser.api.tabs, {
-      executeScript: (_id: number, _details: unknown, callback: (value: unknown[]) => void) => { callback([null]); },
-      sendMessage: (_id: number, _message: unknown, callback: (value: unknown) => void) => { callback(reply); },
+      executeScript: (_id: number, _details: unknown, callback: (value: unknown[]) => void) => { installed = true; callback([null]); },
+      sendMessage: (_id: number, _message: unknown, callback: (value: unknown) => void) => { callback(installed ? reply : undefined); },
     });
     expect(await executeFile(h.ctx, tab.id, 'probe.js')).toEqual(reply);
     await vi.waitFor(async () => { expect((await diagnosticStatus(h.ctx)).diagnostic.stepCount).toBeGreaterThan(3); });

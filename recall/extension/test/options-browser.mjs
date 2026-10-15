@@ -521,6 +521,42 @@ export async function checkOrionOptions({ webkit, expect, folder }) {
       results.push({ case: 'null alarm and omitted sender ID still capture and report', passed: true, alarmEvents: 1 });
       await h.context.close();
     }
+    {
+      const h = await start();
+      await fillAndSave(h);
+      await h.page.waitForFunction(() => window.__test.local.upload?.lastUploadAt > 0);
+      await h.page.evaluate(() => {
+        window.__test.withholdInjectionCallback = true;
+        window.__test.injectionReturnsPromise = false;
+      });
+      const startedAt = await h.page.evaluate(() => Date.now());
+      await h.options.locator('#diagnostic-start').click();
+      await expect.poll(() => h.page.evaluate(() => window.__test.createdUrl)).toBe(diagnosticUrl);
+      await h.page.evaluate(() => {
+        // Opening the diagnostic emits activation and completion; a finite loading burst adds eleven updates.
+        for (let i = 0; i < 11; i++) window.__test.emit('updated', 1, { status: 'complete' });
+      });
+      await h.page.waitForFunction(() => window.__test.discardedCompletions > 0);
+      // Only the first installation can wait for its unanswered native completion.
+      await h.page.clock.fastForward(5100);
+      await expect.poll(() => getStatus(h)).toMatchObject({ focused: true });
+      const untilCapture = startedAt + 10100 - await h.page.evaluate(() => Date.now());
+      if (untilCapture > 0) await h.page.clock.fastForward(untilCapture);
+      await expect.poll(() => h.batches.flatMap((batch) => batch.items).filter((item) => item.kind === 'document').length).toBe(1);
+      const snapshot = h.batches.flatMap((batch) => batch.items).find((item) => item.kind === 'document').document;
+      expect(snapshot.text).toContain('Synthetic public page for capture diagnostics.');
+      expect(snapshot.screenshot_jpeg_base64 || snapshot.screenshot_webp_base64).toBeTruthy();
+      expect(snapshot.screenshot_width).toBeGreaterThan(0);
+      expect((await getDiagnostic(h)).tabEvents).toBe(13);
+      expect((await getDiagnostic(h)).alarmEvents).toBe(0);
+      await expect.poll(() => getStatus(h)).toMatchObject({ queued: 0 });
+      await h.page.clock.fastForward(60000);
+      await expect.poll(() => h.page.evaluate(() => window.__test.local.capture_status?.text)).toBe('unchanged');
+      expect(h.batches.flatMap((batch) => batch.items).filter((item) => item.kind === 'document')).toHaveLength(1);
+      expect(h.errors).toEqual([]);
+      results.push({ case: 'thirteen tab events with unanswered injection completion still automatically upload real DOM and image at ten seconds', passed: true, tabEvents: 13, documents: 1, duplicateDocuments: 0 });
+      await h.context.close();
+    }
     for (const reply of ['void', 'promise', 'not_injected']) {
       const h = await start();
       await fillAndSave(h);

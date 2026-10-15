@@ -93,7 +93,7 @@ describe('the build', () => {
       crypto: { randomUUID: () => 'synthetic-document' },
       chrome: { runtime },
     });
-    expect(result).toEqual({ documentId: 'synthetic-document', visible: true, url: 'https://example.org/mobile' });
+    expect(result).toEqual({ documentId: 'synthetic-document', visible: true, url: 'https://example.org/mobile', build: built.version });
     expect(() => windowEvents.get('pagehide')()).not.toThrow();
     document.visibilityState = 'hidden';
     expect(() => documentEvents.get('visibilitychange')()).not.toThrow();
@@ -106,6 +106,16 @@ describe('the build', () => {
       { type: 'page-visibility', documentId: 'synthetic-document', visible: true },
     ]);
     expect(lastErrorReads).toBe(3);
+  });
+
+  it('keeps the desktop probe reply independent of the mobile build marker', () => {
+    const code = readFileSync(join(built.folder, 'probe.js'), 'utf8');
+    const document = { visibilityState: 'visible', addEventListener() {} };
+    const window = { addEventListener() {} };
+    expect(runInNewContext(code, {
+      document, window, location: { href: 'https://example.org/desktop' },
+      crypto: { randomUUID: () => 'synthetic-document' },
+    })).toEqual({ documentId: 'synthetic-document', visible: true, url: 'https://example.org/desktop' });
   });
 
   it('answers current top-frame DOM over messages even when the injection result is discarded', () => {
@@ -128,11 +138,11 @@ describe('the build', () => {
     const replies = [];
     const message = (command, id = runtime.id) => listeners.values().next().value(typeof command === 'string' ? { type: command } : command, id === null ? {} : { id }, (reply) => replies.push(reply));
     message('recall-probe');
-    expect(replies.at(-1)).toEqual({ documentId: 'synthetic-document', visible: true, url: document.location.href });
+    expect(replies.at(-1)).toEqual({ documentId: 'synthetic-document', visible: true, url: document.location.href, build: built.version });
     // Native Orion delivers this internal message without MessageSender.id.
     message('recall-probe', null);
     expect(replies).toHaveLength(2);
-    expect(replies.at(-1)).toEqual({ documentId: 'synthetic-document', visible: true, url: document.location.href });
+    expect(replies.at(-1)).toEqual({ documentId: 'synthetic-document', visible: true, url: document.location.href, build: built.version });
     bodyText = 'Updated synthetic text';
     const capture = { type: 'recall-capture-current', expectedDocumentId: 'synthetic-document', url: document.location.href, build: built.version };
     message(capture);

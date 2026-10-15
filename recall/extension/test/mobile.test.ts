@@ -18,6 +18,8 @@ async function phone() {
   const ctx: Context = { ...h.ctx, mobile: true };
   const tab = h.browser.open('https://blog.example.com/mobile', { title: 'Synthetic phone article' });
   let visible = true;
+  const listeners = new Map<string, string>();
+  const installListener = (id: number, build = ctx.build) => { listeners.set(h.browser.tab(id).documentId, build); };
   h.browser.script = ({ files }) => files?.[0] === 'probe.js'
     ? { documentId: tab.documentId, visible, url: tab.url }
     : { build: ctx.build, documentId: tab.documentId, visible, title: tab.title, description: '', text: 'A synthetic article.', textTruncated: false, hasPasswordField: false };
@@ -37,13 +39,19 @@ async function phone() {
     executeScript: (id: number, details: { file: string }, callback?: (value?: unknown[]) => void) => {
       const target = { tabId: id, files: [details.file] };
       h.browser.scriptCalls.push(target);
+      // A listener belongs to the injected build and document, and disappears on navigation.
+      installListener(id);
       // Injection only acknowledges completion; the native bridge need not return the script's value.
       answer(Promise.resolve(undefined), callback);
     },
-    sendMessage: (id: number, message: { type: string }, callback?: (value: unknown) => void) => {
+    sendMessage: (id: number, message: { type: string; expectedDocumentId?: string; build?: string }, callback?: (value: unknown) => void) => {
       answer(Promise.resolve().then(() => {
+        const tab = h.browser.tab(id);
+        const build = listeners.get(tab.documentId);
+        if (build === undefined) throw new Error('Could not establish connection. Receiving end does not exist.');
+        if (message.type === 'recall-capture-current' && (message.expectedDocumentId !== tab.documentId || message.build !== build)) return undefined;
         const value = h.browser.script({ tabId: id, files: [message.type === 'recall-probe' ? 'probe.js' : 'capture.js'] });
-        return typeof value === 'object' && value !== null && !Array.isArray(value) ? { url: h.browser.tab(id).url, ...value } : value;
+        return typeof value === 'object' && value !== null && !Array.isArray(value) ? { url: h.browser.tab(id).url, ...value, build } : value;
       }), callback);
     },
   });
@@ -52,7 +60,7 @@ async function phone() {
   delete api['windows'];
   delete api['idle'];
   delete api['webNavigation'];
-  return { ...h, ctx, tab, hide: () => { visible = false; }, show: () => { visible = true; } };
+  return { ...h, ctx, tab, installListener, hide: () => { visible = false; }, show: () => { visible = true; } };
 }
 
 describe('Orion iPhone foreground capture', () => {
@@ -173,17 +181,37 @@ describe('Orion iPhone foreground capture', () => {
     const calls: unknown[] = [];
     Object.assign(h.browser.api.tabs, { executeScript: (tabId: number, details: unknown, callback?: (value?: unknown[]) => void) => {
       calls.push({ tabId, details });
+      h.installListener(tabId);
       queueMicrotask(() => callback?.([null]));
     } });
-    expect(await executeFile(h.ctx, h.tab.id, 'probe.js')).toEqual({ documentId: h.tab.documentId, visible: true, url: h.tab.url });
+    expect(await executeFile(h.ctx, h.tab.id, 'probe.js')).toEqual({ documentId: h.tab.documentId, visible: true, url: h.tab.url, build: h.ctx.build });
     expect(await readInstalledPage(h.ctx, h.tab.id, { type: 'recall-capture-current', expectedDocumentId: h.tab.documentId, url: h.tab.url, build: h.ctx.build })).toMatchObject({ text: 'A synthetic article.', documentId: h.tab.documentId });
     await expect(executeFile(h.ctx, h.tab.id, 'capture.js')).rejects.toThrow('mobile_capture_requires_guard');
     expect(calls).toEqual([{ tabId: h.tab.id, details: { file: 'probe.js', runAt: 'document_start' } }]);
   });
 
+  it('reuses the current document listener and replaces an older build once', async () => {
+    const h = await phone();
+    expect(await probePage(h.ctx, h.tab.id)).toMatchObject({ build: h.ctx.build });
+    const original = h.tab.documentId;
+    for (let i = 0; i < 13; i++) await reconcile(h.ctx, T0 + i * SECOND, { tabId: h.tab.id });
+    expect(h.browser.scriptCalls).toHaveLength(1);
+    expect((await openSpan(h.ctx, T0 + 13 * SECOND))?.documentId).toBe(original);
+    h.installListener(h.tab.id, '2026.1010.1');
+    expect(await executeFile(h.ctx, h.tab.id, 'probe.js')).toMatchObject({ documentId: original, build: h.ctx.build });
+    expect(h.browser.scriptCalls).toHaveLength(2);
+    expect(await executeFile(h.ctx, h.tab.id, 'probe.js')).toMatchObject({ documentId: original, build: h.ctx.build });
+    expect(h.browser.scriptCalls).toHaveLength(2);
+    h.browser.navigate(h.tab.id, h.tab.url);
+    expect(await probePage(h.ctx, h.tab.id)).toMatchObject({ documentId: h.tab.documentId, build: h.ctx.build });
+    expect(h.tab.documentId).not.toBe(original);
+    expect(h.browser.scriptCalls).toHaveLength(3);
+  });
+
   it('reads the current document through messages and rejects native injection errors', async () => {
     const h = await phone();
-    expect(await probePage(h.ctx, h.tab.id)).toEqual({ documentId: h.tab.documentId, visible: true, url: h.tab.url });
+    expect(await probePage(h.ctx, h.tab.id)).toEqual({ documentId: h.tab.documentId, visible: true, url: h.tab.url, build: h.ctx.build });
+    h.browser.navigate(h.tab.id, h.tab.url);
     Object.assign(h.browser.api.tabs, { executeScript: (_tabId: number, _details: unknown, callback: (value?: unknown[]) => void) => {
       queueMicrotask(() => {
         Object.assign(h.browser.api.runtime, { lastError: { message: 'Cannot access contents of this page' } });
@@ -207,7 +235,7 @@ describe('Orion iPhone foreground capture', () => {
     h.show();
     h.browser.navigate(h.tab.id, h.tab.url);
     expect(await probePage(h.ctx, h.tab.id, original)).toBeNull();
-    expect(await lastError.get(h.ctx.chrome)).toBeNull();
+    expect(h.browser.scriptCalls).toHaveLength(1);
   });
 
   it('reports a malformed probe with a fixed error code, without treating excluded pages as errors', async () => {

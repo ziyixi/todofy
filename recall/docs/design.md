@@ -1136,6 +1136,8 @@ the existing R2, feed and single Dropbox archive; hot removal requires the same 
 Mobile snapshots upload immediately after a changed capture is durably queued; unchanged captures do not trigger
 an empty upload. Page visibility loss closes and queues the visit before starting its upload outside the serial
 state queue. Existing Retry-After and backoff remain. Established-document capture uses its installed listener,
-with document/URL/visibility/build checks before reading text; ordinary initial/minute recovery still injects a probe.
+with document/URL/visibility/build checks before reading text. Ordinary focus and minute checks first ask the
+installed current-build listener; only a new document, missing listener or older script needs installation. An
+unanswered injection completion is bounded once during that installation, not on every event.
 Mobile inactivity alone is not an Ops warning. Installation, foreground/background and update verification are
 kept in the short [mobile runbook](mobile.md); no phone compatibility is claimed from fake browser tests alone.

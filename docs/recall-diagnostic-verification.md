@@ -383,3 +383,39 @@ No owner Chrome installation update or Chrome interaction was performed. The dis
 uninstalled (the native manager is empty), and its exact loopback consumer process was stopped; the port is closed.
 Mac Orion and the WebKit bridge cannot establish iOS behavior. The subsequent phone receipt and permission
 investigation are recorded above. No token rotation, repeated reinstallation or invented iOS menu path is required.
+
+
+## October 14 recurrence and repeated installation delay
+
+The owner reports missing recent captures and `page_probe_invalid_reply_type`. The specified device's latest
+upload declares 337; its old successful diagnostic alone cannot explain the recurrence. Authorized owner-UI
+inspection of a newly sent report shows thirteen tab events, zero Alarms, injection completion still pending,
+probe replies as objects and current/stored visibility visible with the same-extension sender. It reaches a
+visible focus target but has no text, screenshot or stored-capture stage. The heartbeat still carries the probe
+error. No private pages, body text, credentials or raw API response were read or retained. This initial 337
+acceptance demonstrated one foreground test, not sustained operation across days.
+
+A finite reproduction uses the public 337 sw/probe bundle with the existing WebKit API bridge, real DOM,
+IndexedDB, image encoding and gzip consumer. Opening the diagnostic and eleven load-complete events produce
+thirteen tab events; the capture phase needs no Alarm. With normal injection completion, a real text/JPEG reaches
+the consumer around 11.9 seconds. With neither completion callback nor Promise, the same content is absent at
+10, 30 and 60 seconds, then arrives around 70.9 seconds. At sixty seconds the diagnostic shape matches the phone.
+The only changed variable is the observed missing completion, not CPU speed or network quality.
+
+Every mobile focus reconciliation had installed the probe again and waited its five-second callback bound in
+the serial focus queue. Scheduling the ten-second capture also waited at that queue's tail. The repair first
+asks the existing listener and reuses only a valid current-build reply. New documents and older scripts still
+use the existing bounded installation. The Orion probe echoes its own build; desktop retains the three-field
+reply and original execution API. Known-document capture still checks identity, URL, build and visibility before
+reading text. No cache layer, polling, retry queue, protocol migration, permission or storage was added.
+
+The new browser regression checks actual DOM text, a real image and automatic gzip delivery after the normal
+ten-second focus threshold, then no duplicate snapshot on the next minute. This same regression fails on the
+released 337 bundle at its real-document assertion (expected one, received zero). Its pass does not depend on a
+script-call counter. Local types/lint/build, 166 extension units and all sixteen existing/new built-WebKit cases
+pass. Focus, privacy, navigation, current-build replacement, native injection failures, desktop probe and upload
+checks remain. User Chrome and the installed extensions were not operated or updated.
+
+Branch CI, native Mac candidate testing, publication and renewed phone acceptance are pending. This correction
+establishes and repairs capture starvation; it does not identify every source of a malformed native reply.
+Keep `page_probe_invalid_reply_type` separate and do not silence it or decode arbitrary returned values.
