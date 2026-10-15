@@ -62,7 +62,11 @@ export function NativeTaskTools({
     readAt.current = remembered.readAt;
     setData(remembered.data);
     onReady?.(remembered.data.plan);
-    if (Date.now() - remembered.readAt >= REREAD_AFTER_MS) {
+    if (
+      Date.now() - remembered.readAt >= REREAD_AFTER_MS ||
+      // A task created or changed in Todoist since then needs its own current version.
+      !remembered.data.plan.tasks.some((task) => task.id === taskId)
+    ) {
       setStale(true);
       void read();
       return;
@@ -93,6 +97,9 @@ export function NativeTaskTools({
     } catch (failure) {
       onUnavailable?.();
       setError(failure instanceof Error ? failure.message : text.lastError);
+      // The task may have changed in Todoist (a version mismatch); never reuse this data.
+      readAt.current = 0;
+      reread = true;
       return false;
     } finally {
       writes.current++;
@@ -131,6 +138,9 @@ export function NativeTaskTools({
           {data && !data.plan.configured && (
             <p className="plus-muted">{text.setup}</p>
           )}
+          {data?.plan.configured && !task && !stale && (
+            <p className="plus-muted">{text.missingTask}</p>
+          )}
           {task && data?.plan.configured && (
             <TaskEditor
               task={task}
@@ -143,10 +153,7 @@ export function NativeTaskTools({
               addFocus={(id) => {
                 if (!data.focus.taskIds.includes(id))
                   void run(() =>
-                    extensionActions.updateQueue(
-                      [...data.focus.taskIds, id],
-                      data.focus,
-                    ),
+                    extensionActions.addToDay(id, data.focus.date),
                   );
               }}
               onOpenTask={(id) => location.assign(todoistTaskUrl(id))}

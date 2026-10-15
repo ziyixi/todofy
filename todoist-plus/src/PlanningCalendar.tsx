@@ -327,7 +327,9 @@ function CalendarStep({
         <button
           ref={handleRef}
           className="planning-drag-handle"
-          disabled={busy || timing || pending}
+          // A waiting handle stays focusable, so a keyboard reorder keeps focus on the card.
+          disabled={busy || timing}
+          aria-disabled={pending || undefined}
           title={
             timing
               ? language === "zh"
@@ -335,7 +337,7 @@ function CalendarStep({
                 : "Stop the current session before moving this step"
               : undefined
           }
-          aria-label={`${language === "zh" ? "拖动已安排步骤" : "Drag scheduled step"}: ${title}`}
+          aria-label={`${language === "zh" ? "拖动已安排步骤" : "Drag scheduled step"}: ${title}${pending ? `, ${words(language).updating}` : ""}`}
         >
           <GripVertical size={14} />
         </button>

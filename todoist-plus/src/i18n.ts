@@ -75,6 +75,8 @@ const en = {
   missingTask: "Task unavailable",
   openFlowday: "Open FlowDay",
   updating: "Updating…",
+  restored: "Change not saved; restored.",
+  notSent: "Later changes not sent:",
 };
 const zh: typeof en = {
   plan: "计划",
@@ -151,6 +153,8 @@ const zh: typeof en = {
   missingTask: "任务暂不可用",
   openFlowday: "打开 FlowDay",
   updating: "正在更新…",
+  restored: "更改未保存，已恢复。",
+  notSent: "其后未发送的更改：",
 };
 export function words(language: Language): typeof en {
   return language === "zh" ? zh : en;

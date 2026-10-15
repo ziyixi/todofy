@@ -51,10 +51,9 @@ beforeAll(() => {
 afterEach(cleanup);
 
 /** Holds one action's calls until the test answers them. */
-function hold<Name extends "updateTask" | "moveTaskToDay" | "updateQueue">(
-  actions: PlusActions,
-  name: Name,
-) {
+function hold<
+  Name extends "updateTask" | "moveTaskToDay" | "addToDay" | "removeFromDay",
+>(actions: PlusActions, name: Name) {
   const original = actions[name] as (...args: unknown[]) => Promise<unknown>;
   const calls: {
     args: unknown[];
@@ -122,20 +121,26 @@ it("shows a stage drag at once as one pending card, then the confirmed task", as
     .closest<HTMLElement>(".review-draggable")!;
   expect(card.getAttribute("aria-busy")).toBe("true");
   expect(within(card).getByRole("img", { name: "Updating…" })).toBeTruthy();
+  // Screen readers hear that it waits; its handle cannot drag but keeps keyboard focus.
   expect(
-    (
-      within(card).getByRole("button", {
-        name: /^Move outcome:/u,
-      }) as HTMLButtonElement
-    ).disabled,
-  ).toBe(true);
+    within(card).getByRole("button", {
+      name: "Clear out the old development branch, No priority, Updating…",
+    }),
+  ).toBeTruthy();
+  const handle = within(card).getByRole("button", {
+    name: "Move outcome: Clear out the old development branch, Updating…",
+  }) as HTMLButtonElement;
+  expect(handle.getAttribute("aria-disabled")).toBe("true");
+  expect(handle.disabled).toBe(false);
   // Only that card waits; the board and the next drag stay available.
   expect(
     (
       screen.getAllByRole("button", {
         name: /^Move outcome:/u,
       }) as HTMLButtonElement[]
-    ).filter((button) => !button.disabled).length,
+    ).filter(
+      (button) => !button.disabled && !button.hasAttribute("aria-disabled"),
+    ).length,
   ).toBeGreaterThan(0);
   expect(
     (screen.getByRole("button", { name: "Refresh" }) as HTMLButtonElement)
@@ -145,6 +150,7 @@ it("shows a stage drag at once as one pending card, then the confirmed task", as
   await act(() => writes[0]!.confirm());
   expect(card.isConnected).toBe(true);
   expect(card.getAttribute("aria-busy")).toBeNull();
+  expect(handle.hasAttribute("aria-disabled")).toBe(false);
   expect(
     within(screen.getByRole("region", { name: "Week" })).queryByText(
       "Clear out the old development branch",
@@ -192,7 +198,7 @@ it("queues day drags in order and rolls back every pending change when one fails
   // The failed drag and the one queued behind it both roll back; the earlier one stays.
   await waitFor(() =>
     expect(screen.getByRole("alert").textContent).toContain(
-      "Synthetic write failed",
+      "Change not saved; restored. Synthetic write failed Later changes not sent: 1",
     ),
   );
   expect(ids("2026-10-15")).toEqual(["layout"]);
@@ -205,7 +211,7 @@ it("queues day drags in order and rolls back every pending change when one fails
 
 it("keeps a removed card in place and pending until FlowDay confirms the removal", async () => {
   const actions = createPrototype();
-  const queue = hold(actions, "updateQueue");
+  const queue = hold(actions, "removeFromDay");
   await mountPlan(actions);
   fireEvent.click(screen.getByRole("tab", { name: "Week" }));
   const remove = screen.getByRole("button", {
@@ -263,4 +269,129 @@ it("predicts moves like moveTaskToDay, including today's Focus queue, and stage 
       stage: "committed",
     },
   ]);
+});
+
+function removeFrom(date: string, title: string) {
+  return screen.getByRole("button", {
+    name: `Remove from ${date}: ${title}`,
+  }) as HTMLButtonElement;
+}
+async function serverDay(actions: PlusActions, date: string) {
+  return (await actions.loadDays("2026-10-12")).find((day) => day.date === date)
+    ?.taskIds;
+}
+
+it("removes two steps from one day in quick succession without restoring the first", async () => {
+  const actions = createPrototype();
+  await mountPlan(actions);
+  fireEvent.click(screen.getByRole("tab", { name: "Week" }));
+  // The second removal is queued while the first card still waits in place.
+  fireEvent.click(removeFrom("2026-10-13", "Write the introduction"));
+  fireEvent.click(
+    removeFrom("2026-10-13", "Outline three questions for the check-in"),
+  );
+  await waitFor(() => expect(ids("2026-10-13")).toEqual(["receipt"]));
+  expect(await serverDay(actions, "2026-10-13")).toEqual(["receipt"]);
+});
+
+it("adds to today while a removal from today waits, keeping the removal", async () => {
+  const actions = createPrototype();
+  const removals = hold(actions, "removeFromDay");
+  await mountPlan(actions);
+  fireEvent.click(screen.getByRole("tab", { name: "Week" }));
+  await act(async () =>
+    fireEvent.click(removeFrom("2026-10-13", "Write the introduction")),
+  );
+  fireEvent.click(screen.getByRole("tab", { name: "Review" }));
+  fireEvent.click(
+    screen.getByRole("button", {
+      name: "Make the home desk comfortable, No priority",
+    }),
+  );
+  fireEvent.click(
+    screen.getByRole("button", {
+      name: "Add to today: Measure the desk for a new lamp",
+    }),
+  );
+  await act(() => removals[0]!.confirm());
+  await waitFor(() =>
+    expect(
+      screen.getByRole("button", {
+        name: "In today: Measure the desk for a new lamp",
+      }),
+    ).toBeTruthy(),
+  );
+  expect(await serverDay(actions, "2026-10-13")).toEqual([
+    "outline",
+    "receipt",
+    "measure",
+  ]);
+});
+
+it("keeps a step another tab added to a shown day when a step is removed from it", async () => {
+  const actions = createPrototype();
+  await mountPlan(actions);
+  fireEvent.click(screen.getByRole("tab", { name: "Week" }));
+  // FlowDay in another tab; this board has not read the day again.
+  await actions.addToDay("layout", "2026-10-13");
+  fireEvent.click(removeFrom("2026-10-13", "Write the introduction"));
+  await waitFor(() =>
+    expect(ids("2026-10-13")).toEqual(["outline", "receipt", "layout"]),
+  );
+  expect(await serverDay(actions, "2026-10-13")).toEqual([
+    "outline",
+    "receipt",
+    "layout",
+  ]);
+});
+
+it("keeps a pending card's details and weekly goal read-only until its drag settles", async () => {
+  const actions = createPrototype();
+  const writes = hold(actions, "updateTask");
+  await mountPlan(actions);
+  const release = (await actions.load()).plan.tasks.find(
+    (task) => task.id === "release",
+  )!;
+  await drop({ task: release }, { stage: "weekly" });
+  const goals = within(screen.getByRole("region", { name: "Weekly goals" }));
+  // Its etag is the one from before the drag, so these writes would be refused.
+  expect(
+    (
+      goals.getByRole("button", {
+        name: "Remove weekly goal: Ship the small website refresh",
+      }) as HTMLButtonElement
+    ).disabled,
+  ).toBe(true);
+  expect(
+    (
+      goals.getAllByRole("button", {
+        name: "Change goal",
+      })[0] as HTMLButtonElement
+    ).disabled,
+  ).toBe(true);
+  fireEvent.click(
+    screen.getByRole("button", {
+      name: "Ship the small website refresh, No priority, Updating…",
+    }),
+  );
+  const editor = () =>
+    within(screen.getByRole("region", { name: "Steps & timing" }));
+  const planning = () =>
+    editor().getByRole("combobox", { name: "Planning" }) as HTMLSelectElement;
+  const saves = () =>
+    editor()
+      .getAllByRole("button", { name: "Save" })
+      .map((button) => (button as HTMLButtonElement).disabled);
+  expect(editor().getByRole("img", { name: "Updating…" })).toBeTruthy();
+  expect(planning().disabled).toBe(true);
+  expect(saves()).toEqual([true, true]);
+  await act(async () => writes[0]!.fail());
+  // The drag was not saved: the details show the stage the server kept, with nothing to save.
+  await waitFor(() => expect(planning().disabled).toBe(false));
+  expect(planning().value).toBe("committed");
+  expect(editor().queryByRole("img", { name: "Updating…" })).toBeNull();
+  expect(saves()).toEqual([true, true]);
+  expect(screen.getByRole("alert").textContent).toContain(
+    "Change not saved; restored. Synthetic write failed",
+  );
 });

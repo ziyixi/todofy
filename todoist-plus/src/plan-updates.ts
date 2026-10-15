@@ -59,14 +59,19 @@ export function applyConfirmed(data: PlusData, confirmed: Confirmed): PlusData {
   return { ...data, plan: { ...confirmed, tasks: data.plan.tasks } };
 }
 
+/** A new label mapping changes every task's derived stage and etag. */
+export function remapsTasks(confirmed: Confirmed): boolean {
+  return confirmed
+    ? !Array.isArray(confirmed) && "managedLabels" in confirmed
+    : false;
+}
+
 /**
- * Void results (completion, new steps, estimates) are shown only by a re-read. A new label
- * mapping changes every task's derived stage, so its confirmed plan is followed by one too.
+ * Void results (completion, new steps, estimates) are shown only by a re-read, and so is the
+ * effect of a new label mapping on the tasks.
  */
 export function rereadsAfter(confirmed: Confirmed): boolean {
-  return (
-    !confirmed || (!Array.isArray(confirmed) && "managedLabels" in confirmed)
-  );
+  return !confirmed || remapsTasks(confirmed);
 }
 
 /** A Review card whose stage write is not yet confirmed. */

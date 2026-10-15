@@ -125,6 +125,50 @@ test("Review moves an explicit outcome between mapped stages using its identity 
   }
 });
 
+test("a keyboard drop leaves focus on the moved card, which says that it waits", async () => {
+  const { context, worker } = await launchPlanner();
+  try {
+    const page = await context.newPage();
+    await page.goto("https://app.todoist.com/app/today");
+    await page.getByRole("button", { name: "Plan", exact: true }).click();
+    const quarter = page.getByRole("region", { name: "Quarter", exact: true });
+    const month = page.getByRole("region", { name: "Month", exact: true });
+    const handle = quarter.getByRole("button", {
+      name: "Move outcome: Synthetic quarter outcome",
+    });
+    await expect(handle).toBeEnabled();
+    const from = (await handle.boundingBox())!;
+    const to = (await month.boundingBox())!;
+    await controlWrites(worker, { hold: true });
+    await handle.focus();
+    await page.keyboard.press("Space");
+    // Shift+arrow moves the dragged card 50 px at a time.
+    for (let step = 0; step * 50 < to.x - from.x; step++)
+      await page.keyboard.press("Shift+ArrowRight");
+    await page.keyboard.press("Space");
+    const moved = month.getByRole("button", {
+      name: "Move outcome: Synthetic quarter outcome, Updating…",
+    });
+    await expect(moved).toBeFocused();
+    await expect(moved).toBeDisabled();
+    await expect(
+      month.getByRole("button", {
+        name: "Synthetic quarter outcome, P1, Updating…",
+      }),
+    ).toBeVisible();
+    await controlWrites(worker, { hold: false, release: true });
+    await expect(page.locator("[aria-busy=true]")).toHaveCount(0);
+    await expect(
+      month.getByRole("button", {
+        name: "Move outcome: Synthetic quarter outcome",
+        exact: true,
+      }),
+    ).toBeFocused();
+  } finally {
+    await context.close();
+  }
+});
+
 test("real pointer scheduling uses leaf steps and persists day moves without full task reloads", async () => {
   const { context, worker } = await launchPlanner();
   try {
@@ -432,6 +476,18 @@ test("drops show at once while saves run in order, and a failed save rolls every
     await expect(
       second.getByRole("button", { name: /^Drag scheduled step/u }),
     ).toBeDisabled();
+    // Only the spinner and dimming mark the waiting card; reduced motion stops the spinner.
+    await second.hover();
+    await expect(second.locator(".planning-step-remove")).toHaveCSS(
+      "opacity",
+      "0",
+    );
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await expect(second.locator(".plus-pending-mark")).toHaveCSS(
+      "animation-name",
+      "none",
+    );
+    await page.emulateMedia({ reducedMotion: null });
     // The next drag starts while the first save is still held.
     await dragPlanner(
       page,

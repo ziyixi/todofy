@@ -85,7 +85,7 @@ export async function mountTodoist(ctx: ContentScriptContext) {
   let config: PlanConfig | undefined;
   // The last confirmed data stays in this page's memory only, so returning to Plus paints at once.
   let snapshot: PlusSnapshot | undefined;
-  const keepSnapshot = (next: PlusSnapshot) => {
+  const keepSnapshot = (next?: PlusSnapshot) => {
     snapshot = next;
   };
   // Started before the sidebar exists, so mounting rarely waits for it.

@@ -7,6 +7,7 @@ import {
   topLevelBets,
 } from "./domain";
 import { TaskBreadcrumb } from "./TaskBreadcrumb";
+import { pendingTask } from "./plan-updates";
 import { words } from "./i18n";
 import type {
   Area,
@@ -21,6 +22,8 @@ interface Props {
   plan: PlanState;
   language: Language;
   busy: boolean;
+  /** Tasks whose stage drag waits keep their old etag until it is confirmed. */
+  pending?: ReadonlySet<string>;
   run: RunOperation;
   actions: PlusActions;
   editTask: (task: PlanningTask) => void;
@@ -31,6 +34,7 @@ export function WeeklyGoals({
   plan,
   language,
   busy,
+  pending,
   run,
   actions,
   editTask,
@@ -43,6 +47,8 @@ export function WeeklyGoals({
   const unassigned = topLevelBets(plan.tasks, "unassigned");
   const zh = language === "zh";
   const text = words(language);
+  const waiting = (task: PlanningTask) =>
+    pending?.has(pendingTask(task.id)) ?? false;
   function goal(task: PlanningTask, area: Area) {
     return (
       <div key={task.id} className="plus-weekly-goal">
@@ -55,7 +61,7 @@ export function WeeklyGoals({
         <TaskBreadcrumb task={task} tasks={plan.tasks} language={language} />
         <div className="plus-weekly-goal-actions">
           <button
-            disabled={busy}
+            disabled={busy || waiting(task)}
             onClick={() => setPicker({ area, previous: task })}
           >
             {zh ? "更换目标" : "Change goal"}
@@ -70,7 +76,7 @@ export function WeeklyGoals({
             </button>
           )}
           <button
-            disabled={busy}
+            disabled={busy || waiting(task)}
             aria-label={`${zh ? "移除本周目标" : "Remove weekly goal"}: ${displayedTitle(task.title)}`}
             onClick={() =>
               void run(() => actions.updateTask(task, { bet: false }))
@@ -143,6 +149,7 @@ export function WeeklyGoals({
           previous={picker.previous}
           language={language}
           busy={busy}
+          waiting={waiting}
           onClose={() => setPicker(undefined)}
           onChoose={async (next) => {
             await run(async () => {
@@ -169,6 +176,7 @@ function GoalPicker({
   previous,
   language,
   busy,
+  waiting,
   onClose,
   onChoose,
 }: {
@@ -177,6 +185,7 @@ function GoalPicker({
   previous?: PlanningTask;
   language: Language;
   busy: boolean;
+  waiting: (task: PlanningTask) => boolean;
   onClose: () => void;
   onChoose: (task: PlanningTask) => Promise<void>;
 }) {
@@ -209,7 +218,8 @@ function GoalPicker({
       <form
         onSubmit={(event) => {
           event.preventDefault();
-          if (selected && selected.id !== previous?.id) void onChoose(selected);
+          if (selected && selected.id !== previous?.id && !waiting(selected))
+            void onChoose(selected);
         }}
       >
         <header>
@@ -271,7 +281,12 @@ function GoalPicker({
           <button
             className="plus-button plus-primary"
             type="submit"
-            disabled={busy || !selected || selected.id === previous?.id}
+            disabled={
+              busy ||
+              !selected ||
+              selected.id === previous?.id ||
+              waiting(selected)
+            }
           >
             {zh ? "设为本周目标" : "Use as weekly goal"}
           </button>

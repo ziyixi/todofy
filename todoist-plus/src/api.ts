@@ -54,10 +54,14 @@ class FlowdaySyncPendingError extends Error {}
 
 export function publicError(error: unknown): string {
   if (error instanceof FlowdaySyncPendingError) return error.message;
+  // The gateway refuses an unknown or revoked extension token with a 401 Status body.
+  if (
+    (error instanceof RpcStatusError && error.status.httpStatus === 401) ||
+    (error instanceof HttpResponseError && error.httpStatus === 401)
+  )
+    return "Connection expired or revoked. Open connection settings.";
   if (error instanceof RpcStatusError)
     return error.status.localizedMessage?.message ?? error.status.message;
-  if (error instanceof HttpResponseError && error.httpStatus === 401)
-    return "Connection expired or revoked. Open connection settings.";
   return "Could not confirm this operation. Refresh and try again.";
 }
 export function planningTask(task: ApiPlanningTask): PlanningTask {
@@ -251,6 +255,18 @@ export function createApi(
       "FlowDay task list is incomplete. Refresh before planning.",
     );
   }
+  // A queue shown on screen may be out of date (another tab, an earlier queued write), and
+  // UpdateFlow keeps the last write, so one-step edits start from FlowDay's current queue.
+  async function editDay(date: string, edit: (taskIds: string[]) => string[]) {
+    const current = await flowday.getFlow({ name: `flows/${date}` });
+    const taskIds = edit(current.taskIds);
+    if (taskIds.length === current.taskIds.length) return [flowPlan(current)];
+    const confirmed = await flowday.updateFlow({
+      flow: { name: `flows/${date}`, taskIds },
+      updateMask: { paths: ["task_ids"] },
+    });
+    return [flowPlan(confirmed)];
+  }
   async function loadDays(weekStart: string): Promise<FlowDayPlan[]> {
     const dates = weekDates(weekStart);
     const flows = await Promise.all(
@@ -349,13 +365,14 @@ export function createApi(
     async completeTask(task, requestId, flowDate) {
       await plus.completeTask({ taskId: task.id, requestId, flowDate });
     },
-    async updateQueue(taskIds, focus) {
-      await ensureSynced(taskIds);
-      const confirmed = await flowday.updateFlow({
-        flow: { name: `flows/${focus.date}`, taskIds },
-        updateMask: { paths: ["task_ids"] },
-      });
-      return [flowPlan(confirmed)];
+    async addToDay(taskId, date) {
+      await ensureSynced([taskId]);
+      return editDay(date, (taskIds) =>
+        taskIds.includes(taskId) ? taskIds : [...taskIds, taskId],
+      );
+    },
+    async removeFromDay(taskId, date) {
+      return editDay(date, (taskIds) => taskIds.filter((id) => id !== taskId));
     },
     async moveTaskToDay(taskId, source, target, beforeId) {
       if (source?.date === target.date && beforeId === taskId) return [];

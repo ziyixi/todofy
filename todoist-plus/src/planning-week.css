@@ -135,7 +135,8 @@
   cursor: grab;
   touch-action: none;
 }
-.planning-drag-handle:disabled {
+.planning-drag-handle:disabled,
+.planning-drag-handle[aria-disabled="true"] {
   opacity: 0.5;
   cursor: default;
 }
@@ -305,6 +306,10 @@
 .planning-calendar-step:hover .planning-step-remove,
 .planning-calendar-step:focus-within .planning-step-remove {
   opacity: 1;
+}
+/* A removal that cannot run now is not offered, even on hover. */
+.planning-week .planning-step-remove:disabled {
+  opacity: 0;
 }
 .planning-calendar-step.is-insert::before {
   content: "";

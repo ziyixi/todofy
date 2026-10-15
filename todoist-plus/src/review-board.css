@@ -188,6 +188,10 @@
 .review-drag-handle:active {
   cursor: grabbing;
 }
+.review-drag-handle[aria-disabled="true"] {
+  opacity: 0.45;
+  cursor: default;
+}
 .review-lane-empty {
   margin: 4px 0;
   padding: 12px 4px;

@@ -78,7 +78,7 @@ export function FocusBlock({
         {task && (
           <button
             className="plus-checkbox"
-            aria-label={`${text.complete}: ${title}`}
+            aria-label={`${text.complete}: ${title}${settling ? `, ${text.updating}` : ""}`}
             disabled={busy || settling}
             onClick={() => complete(task)}
           >

@@ -10,7 +10,7 @@ import {
 import { afterEach, beforeAll, expect, it, vi } from "vitest";
 import { App } from "../src/App";
 import { createPrototype } from "../design/fixture";
-import type { PlusActions, PlusData, View } from "../src/model";
+import type { PlusActions, PlusData, PlusSnapshot, View } from "../src/model";
 
 beforeAll(() => {
   HTMLDialogElement.prototype.showModal = function () {
@@ -22,7 +22,12 @@ beforeAll(() => {
 });
 afterEach(cleanup);
 
-function mount(actions: PlusActions, view: View = "plan") {
+function mount(
+  actions: PlusActions,
+  view: View = "plan",
+  snapshot?: PlusSnapshot,
+  onSnapshot?: (snapshot?: PlusSnapshot) => void,
+) {
   return render(
     <App
       actions={actions}
@@ -30,8 +35,15 @@ function mount(actions: PlusActions, view: View = "plan") {
       language="en"
       onOpenTask={() => {}}
       onSettings={() => {}}
+      snapshot={snapshot}
+      onSnapshot={onSnapshot}
     />,
   );
+}
+function moveButtons() {
+  return screen.getAllByRole("button", {
+    name: /^Move outcome:/u,
+  }) as HTMLButtonElement[];
 }
 function scheduled(date: string, id: string) {
   return document.querySelector(
@@ -166,6 +178,9 @@ it("keeps a confirmed completion visible but pending until the re-read shows the
   const { reads, original } = held(actions);
   fireEvent.click(checkbox);
   await waitFor(() => expect(checkbox.disabled).toBe(true));
+  expect(checkbox.getAttribute("aria-label")).toBe(
+    "Complete task: Write the introduction, Updating…",
+  );
   const block = document.querySelector(
     '.plus-focus-slot[data-task-id="copy"]',
   )!;
@@ -212,12 +227,11 @@ it("paints remembered data at once on re-entry and re-reads it in the background
   const committed = within(screen.getByRole("region", { name: "Committed" }));
   expect(actions.load).toHaveBeenCalledOnce();
   expect(document.querySelector(".plus-page-header .plus-spin")).toBeTruthy();
+  // It may predate a completion or midnight, so writes wait for this visit's read.
+  expect(moveButtons().every((button) => button.disabled)).toBe(true);
   expect(
-    (
-      screen.getAllByRole("button", {
-        name: /^Move outcome:/u,
-      })[0] as HTMLButtonElement
-    ).disabled,
+    (screen.getByRole("button", { name: "Refresh" }) as HTMLButtonElement)
+      .disabled,
   ).toBe(false);
   const fresh = await original();
   fresh.plan.tasks = fresh.plan.tasks.map((task) =>
@@ -227,6 +241,7 @@ it("paints remembered data at once on re-entry and re-reads it in the background
   expect(
     committed.getByText("Clear out the old development branch"),
   ).toBeTruthy();
+  expect(moveButtons().some((button) => button.disabled)).toBe(false);
   expect(kept).toHaveBeenLastCalledWith({
     data: fresh,
     readAt: expect.any(Number),
@@ -263,4 +278,89 @@ it("keeps a remembered other week but follows the server's current week after a 
     expect(dates()[0]).toBe(first);
     cleanup();
   }
+});
+
+it("does not complete a task again from a board remembered before its re-read landed", async () => {
+  const actions = createPrototype();
+  const complete = vi.spyOn(actions, "completeTask");
+  let kept: PlusSnapshot | undefined;
+  const keep = (next?: PlusSnapshot) => (kept = next);
+  mount(actions, "focus", undefined, keep);
+  const checkbox = await screen.findByRole("button", {
+    name: "Complete task: Write the introduction",
+  });
+  const { reads, original } = held(actions);
+  await act(async () => fireEvent.click(checkbox));
+  expect(complete).toHaveBeenCalledOnce();
+  // The owner leaves Plus before the re-read lands, then comes back.
+  cleanup();
+  mount(actions, "focus", kept, keep);
+  const again = screen.getByRole("button", {
+    name: "Complete task: Write the introduction",
+  }) as HTMLButtonElement;
+  expect(again.disabled).toBe(true);
+  fireEvent.click(again);
+  expect(
+    (
+      screen.getByRole("button", {
+        name: "Start: Write the introduction",
+      }) as HTMLButtonElement
+    ).disabled,
+  ).toBe(true);
+  const fresh = await original();
+  for (const read of reads) await act(async () => read(fresh));
+  await waitFor(() =>
+    expect(screen.queryByText("Write the introduction")).toBeNull(),
+  );
+  expect(complete).toHaveBeenCalledOnce();
+});
+
+it("shows only the error when the first read after re-entry fails, and forgets the remembered board", async () => {
+  const actions = createPrototype();
+  const data = await actions.load();
+  const keep = vi.fn();
+  actions.load = vi.fn(async () => {
+    throw new Error("Connection expired or revoked. Open connection settings.");
+  });
+  mount(actions, "plan", { data, readAt: 0 }, keep);
+  await screen.findByRole("alert");
+  expect(screen.queryByRole("region", { name: "Committed" })).toBeNull();
+  expect(keep).toHaveBeenLastCalledWith(undefined);
+});
+
+it("never lets an older overlapping read replace a newer one", async () => {
+  const actions = createPrototype();
+  mount(actions);
+  await screen.findByRole("region", { name: "Committed" });
+  const before = await actions.load();
+  const { reads, original } = held(actions);
+  const refresh = screen.getByRole("button", { name: "Refresh" });
+  fireEvent.click(refresh);
+  fireEvent.click(refresh);
+  expect(reads).toHaveLength(2);
+  // Another device commits a task between the two reads; the newer read lands first.
+  const newer = await original();
+  newer.plan.tasks = newer.plan.tasks.map((task) =>
+    task.id === "cleanup" ? { ...task, stage: "committed" } : task,
+  );
+  await act(async () => reads[1]!(newer));
+  await act(async () => reads[0]!(before));
+  expect(
+    within(screen.getByRole("region", { name: "Committed" })).getByText(
+      "Clear out the old development branch",
+    ),
+  ).toBeTruthy();
+});
+
+it("keeps writes disabled after a label mapping until the re-read brings the new task etags", async () => {
+  const actions = createPrototype();
+  mount(actions);
+  await screen.findByRole("region", { name: "Committed" });
+  const { reads, original } = held(actions);
+  fireEvent.click(screen.getByRole("button", { name: "Planning labels" }));
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+  await waitFor(() => expect(reads).toHaveLength(1));
+  expect(moveButtons().every((button) => button.disabled)).toBe(true);
+  await act(async () => reads[0]!(await original()));
+  expect(moveButtons().some((button) => button.disabled)).toBe(false);
 });

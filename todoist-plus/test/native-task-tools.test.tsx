@@ -75,3 +75,53 @@ it("reads the complete plan when this page has no remembered data", async () => 
   await screen.findByRole("heading", { name: "Write the introduction" });
   expect(actions.load).toHaveBeenCalledOnce();
 });
+
+it("reads again after a refused save, so a task edited in Todoist can be saved on reopening", async () => {
+  let edited = false;
+  const load = actions.load;
+  actions.load = vi.fn(async (week?: string) => {
+    const data = await load(week);
+    if (edited)
+      data.plan.tasks = data.plan.tasks.map((task) =>
+        task.id === "copy" ? { ...task, etag: "native-edit" } : task,
+      );
+    return data;
+  });
+  const update = actions.updateTask;
+  // Like SetTaskPlan's ETAG_MISMATCH after a rename or label change in native Todoist.
+  actions.updateTask = vi.fn(async (task, change) => {
+    if (edited && task.etag !== "native-edit")
+      throw new Error("Synthetic version mismatch");
+    return { ...(await update(task, change)), etag: "native-edit" };
+  });
+  open();
+  await waitFor(() => expect(stage().disabled).toBe(false));
+  edited = true;
+  const save = () => {
+    fireEvent.change(stage(), { target: { value: "weekly" } });
+    fireEvent.click(screen.getAllByRole("button", { name: "Save" })[0]!);
+  };
+  await act(async () => save());
+  await screen.findByRole("alert");
+  await waitFor(() => expect(actions.load).toHaveBeenCalledTimes(2));
+  const toggle = screen.getByRole("button", { name: "Steps & timing" });
+  fireEvent.click(toggle);
+  fireEvent.click(toggle);
+  await waitFor(() => expect(stage().disabled).toBe(false));
+  await act(async () => save());
+  await waitFor(() => expect(actions.updateTask).toHaveBeenCalledTimes(2));
+  expect(
+    await (actions.updateTask as ReturnType<typeof vi.fn>).mock.results[1]!
+      .value,
+  ).toMatchObject({ id: "copy", stage: "weekly" });
+});
+
+it("reads the complete plan for a task that recently read data does not include", async () => {
+  const data = await createPrototype().load();
+  data.plan.tasks = data.plan.tasks.filter((task) => task.id !== "copy");
+  open({ data, readAt: Date.now() });
+  expect(screen.getByRole("status").textContent).toBe("Updating…");
+  await screen.findByRole("heading", { name: "Write the introduction" });
+  expect(actions.load).toHaveBeenCalledOnce();
+  expect(stage().disabled).toBe(false);
+});

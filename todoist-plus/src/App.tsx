@@ -10,7 +10,13 @@ import {
 } from "lucide-react";
 import { displayedTitle } from "./domain";
 import { words } from "./i18n";
-import { applyConfirmed, REREAD_AFTER_MS, rereadsAfter } from "./plan-updates";
+import {
+  applyConfirmed,
+  pendingTask,
+  remapsTasks,
+  REREAD_AFTER_MS,
+  rereadsAfter,
+} from "./plan-updates";
 import { Elapsed } from "./StatusMarks";
 import { PlanView } from "./PlanView";
 import { FocusView } from "./FocusView";
@@ -40,7 +46,8 @@ interface Props {
   onViewChange?: (view: View) => void;
   /** Data from an earlier visit, shown at once while it is read again in the background. */
   snapshot?: PlusSnapshot;
-  onSnapshot?: (snapshot: PlusSnapshot) => void;
+  /** The last confirmed data, or undefined once a remembered board is dropped. */
+  onSnapshot?: (snapshot?: PlusSnapshot) => void;
 }
 export function App({
   actions,
@@ -79,10 +86,16 @@ export function App({
       : "",
   );
   const weekRequest = useRef(0);
+  // Reads can overlap (Refresh, returning to the tab); an older one never replaces a newer.
+  const reads = useRef({ started: 0, shown: 0 });
   const [error, setError] = useState("");
   // Confirm-first writes queued or running; they disable write controls.
   const [waiting, setWaiting] = useState(0);
-  const busy = waiting > 0;
+  // Shown data that needs a complete read before it is written: a remembered snapshot, which
+  // may predate a completion or midnight, and every task etag after a new label mapping.
+  const [stale, setStale] = useState(Boolean(snapshot));
+  const remembered = useRef(Boolean(snapshot));
+  const busy = waiting > 0 || stale;
   const [weekLoading, setWeekLoading] = useState(false);
   const [reading, setReading] = useState(0);
   // One queue runs every write in order: FlowDay queue updates keep the last write without an
@@ -100,19 +113,24 @@ export function App({
   const text = words(language);
   const load = useCallback(async (): Promise<boolean> => {
     const request = ++weekRequest.current;
+    const read = ++reads.current.started;
     const settled = writes.current.settled;
     try {
       const week = displayedWeek.current;
       const next = await actions.load(week || undefined);
       // A write confirmed during the read may be missing from it.
       if (settled !== writes.current.settled) return false;
+      if (read < reads.current.shown) return true;
+      reads.current.shown = read;
       if (!displayedWeek.current) displayedWeek.current = next.plan.week;
       loadedAt.current = Date.now();
+      remembered.current = false;
       setConfirmed((current) =>
         current && request !== weekRequest.current
           ? { ...next, days: current.days }
           : next,
       );
+      setStale(false);
       setCompleting(new Set());
       onReady?.(next.plan);
       return true;
@@ -137,6 +155,8 @@ export function App({
     } catch (failure) {
       const message =
         failure instanceof Error ? failure.message : text.lastError;
+      // A remembered board only bridges this visit's first read, as with a first load.
+      if (remembered.current) setConfirmed(undefined);
       // A failed write's error stays: it says what was not saved.
       setError((current) => current || message);
     } finally {
@@ -157,12 +177,24 @@ export function App({
           if (epoch !== writes.current.epoch) return false;
           const result = await operation();
           setConfirmed((current) => current && applyConfirmed(current, result));
+          // Every task etag changed, so writes wait for the re-read that follows.
+          if (remapsTasks(result)) setStale(true);
           reread = rereadsAfter(result);
           return true;
         } catch (failure) {
           writes.current.epoch++;
           setPending([]);
-          setError(failure instanceof Error ? failure.message : text.lastError);
+          // Every write queued behind this one is dropped by the epoch check.
+          const dropped = writes.current.queued - 1;
+          setError(
+            [
+              change && text.restored,
+              failure instanceof Error ? failure.message : text.lastError,
+              dropped > 0 && `${text.notSent} ${dropped}`,
+            ]
+              .filter(Boolean)
+              .join(" "),
+          );
           // Another window may have changed the timer, queue or task. Show its current state.
           reread = true;
           return false;
@@ -182,7 +214,7 @@ export function App({
       queue.current = write;
       return write;
     },
-    [revalidate, text.lastError],
+    [revalidate, text],
   );
   useEffect(() => {
     void revalidate();
@@ -201,7 +233,7 @@ export function App({
     return () => document.removeEventListener("visibilitychange", visible);
   }, [revalidate]);
   useEffect(() => {
-    if (confirmed) onSnapshot?.({ data: confirmed, readAt: loadedAt.current });
+    onSnapshot?.(confirmed && { data: confirmed, readAt: loadedAt.current });
   }, [confirmed, onSnapshot]);
   useEffect(() => {
     if (externalTaskId) setSelectedId(externalTaskId);
@@ -213,7 +245,7 @@ export function App({
 
   async function addFocus(id: string, day = data?.focus) {
     if (!data || !day || day.taskIds.includes(id)) return;
-    await run(() => actions.updateQueue([...day.taskIds, id], day));
+    await run(() => actions.addToDay(id, day.date));
   }
   function changeWeek(week: string): Promise<void> {
     const request = ++weekRequest.current;
@@ -263,12 +295,16 @@ export function App({
     });
   }
   const selected = data?.plan.tasks.find((task) => task.id === selectedId);
+  // A task whose stage drag waits still carries its old etag, so its editor waits too.
+  const selectedPending = Boolean(
+    selected && pendingCards.has(pendingTask(selected.id)),
+  );
   const timerTask = data?.plan.tasks.find(
     (task) => task.id === data.focus.timer?.taskId,
   );
   const timerSettling = Boolean(timerTask && completing.has(timerTask.id));
   function refresh() {
-    if (error === "Extension updated. Reload Todoist to continue.")
+    if (error.includes("Extension updated. Reload Todoist to continue."))
       window.location.reload();
     else {
       setError("");
@@ -294,12 +330,12 @@ export function App({
           <button
             className="plus-icon"
             aria-label={text.refresh}
-            disabled={busy}
+            disabled={waiting > 0}
             onClick={refresh}
           >
             <RefreshCw
               size={17}
-              className={busy || weekLoading || reading ? "plus-spin" : ""}
+              className={waiting || weekLoading || reading ? "plus-spin" : ""}
             />
           </button>
           <button
@@ -340,6 +376,7 @@ export function App({
                 plan={data.plan}
                 language={language}
                 busy={busy || !data.plan.configured}
+                pending={pendingCards}
                 run={run}
                 actions={actions}
                 editTask={(task) => setSelectedId(task.id)}
@@ -458,11 +495,13 @@ export function App({
         )}
         {selected && data && (
           <TaskEditor
-            key={selected.id}
+            // Once the drag settles, the fields show what the server kept.
+            key={`${selected.id}:${selectedPending}`}
             task={selected}
             tasks={data.plan.tasks}
             language={language}
-            busy={busy}
+            busy={busy || selectedPending}
+            pending={selectedPending}
             run={run}
             actions={actions}
             todayTaskIds={data.focus.taskIds}

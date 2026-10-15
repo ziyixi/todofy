@@ -289,11 +289,21 @@ export function createPrototype(fullBoard = false): PlusActions {
           : day,
       );
     },
-    async updateQueue(taskIds, target) {
+    async addToDay(id, date) {
       days = days.map((day) =>
-        day.date === target.date ? { ...day, taskIds } : day,
+        day.date === date && !day.taskIds.includes(id)
+          ? { ...day, taskIds: [...day.taskIds, id] }
+          : day,
       );
-      return structuredClone(days.filter((day) => day.date === target.date));
+      return structuredClone(days.filter((day) => day.date === date));
+    },
+    async removeFromDay(id, date) {
+      days = days.map((day) =>
+        day.date === date
+          ? { ...day, taskIds: day.taskIds.filter((value) => value !== id) }
+          : day,
+      );
+      return structuredClone(days.filter((day) => day.date === date));
     },
     async moveTaskToDay(id, source, target, beforeId) {
       days = days.map((day) => {

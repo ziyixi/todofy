@@ -135,7 +135,12 @@ export interface PlusActions {
     requestId: string,
     flowDate: string,
   ): Promise<void>;
-  updateQueue(taskIds: string[], day: FlowDayPlan): Promise<FlowDayPlan[]>;
+  /**
+   * Adds or removes one step in the day's current FlowDay queue, not in the copy on screen:
+   * UpdateFlow replaces the whole queue without an etag.
+   */
+  addToDay(taskId: string, date: string): Promise<FlowDayPlan[]>;
+  removeFromDay(taskId: string, date: string): Promise<FlowDayPlan[]>;
   moveTaskToDay(
     taskId: string,
     source: FlowDayPlan | undefined,

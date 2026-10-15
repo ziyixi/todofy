@@ -33,18 +33,27 @@ async function getApi(): Promise<PlusActions> {
   const connection = saved[storageKey] as Connection | undefined;
   if (!connection?.token)
     throw new Error("Connect Todoist Plus in extension settings.");
-  api = createApi(connection, fetch, knownTasks);
-  return api;
+  const client = createApi(connection, fetch, {
+    read: knownTasks.read,
+    // A call that outlives a disconnect or a new connection keeps its IDs to itself.
+    write: async (ids) => {
+      if (client === api) await knownTasks.write(ids);
+    },
+  });
+  api = client;
+  return client;
 }
-function rememberPlan(plan: PlanMetadata) {
+function rememberPlan(client: PlusActions, plan: PlanMetadata) {
+  if (client !== api) return;
   void browser.storage.local
     .set({ [configKey]: planConfig(plan) satisfies PlanConfig })
     .catch(() => {});
 }
 async function forgetConnection() {
+  // Cleared first, so a call still running cannot store its results after the removal.
+  api = undefined;
   await browser.storage.local.remove([storageKey, configKey]);
   await browser.storage.session.remove(knownKey);
-  api = undefined;
 }
 export function registerBackground() {
   // The content script can request narrow operations, but cannot read the credential.
@@ -99,12 +108,12 @@ export function registerBackground() {
         switch (message.method) {
           case "load": {
             const data = await client.load(...message.args);
-            rememberPlan(data.plan);
+            rememberPlan(client, data.plan);
             return data;
           }
           case "readPlan": {
             const plan = await client.readPlan(...message.args);
-            rememberPlan(plan);
+            rememberPlan(client, plan);
             return plan;
           }
           case "loadDays":
@@ -113,7 +122,7 @@ export function registerBackground() {
             return client.updateTask(...message.args);
           case "updateLabels": {
             const plan = await client.updateLabels(...message.args);
-            rememberPlan(plan);
+            rememberPlan(client, plan);
             return plan;
           }
           case "createSteps":
@@ -122,8 +131,10 @@ export function registerBackground() {
             return client.updateLead(...message.args);
           case "completeTask":
             return client.completeTask(...message.args);
-          case "updateQueue":
-            return client.updateQueue(...message.args);
+          case "addToDay":
+            return client.addToDay(...message.args);
+          case "removeFromDay":
+            return client.removeFromDay(...message.args);
           case "moveTaskToDay":
             return client.moveTaskToDay(...message.args);
           case "updateEstimate":

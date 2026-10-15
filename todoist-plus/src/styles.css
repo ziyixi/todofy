@@ -239,6 +239,10 @@ body {
   line-height: 1.4;
   letter-spacing: -0.2px;
 }
+.plus-editor-header h2 .plus-pending-mark {
+  margin-left: 8px;
+  vertical-align: middle;
+}
 .plus-native-note {
   margin: 12px 0 21px;
   line-height: 1.8;
@@ -421,6 +425,12 @@ body {
 .plus-pending-mark {
   flex: none;
   color: var(--plus-muted);
+}
+/* The dimmed card still shows that it waits. */
+@media (prefers-reduced-motion: reduce) {
+  .plus-pending-mark {
+    animation: none;
+  }
 }
 .plus-sr-only {
   position: absolute !important;

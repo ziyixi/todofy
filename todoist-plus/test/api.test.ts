@@ -1,5 +1,6 @@
 import { expect, it, vi } from "vitest";
 import { createApi, publicError, validOrigin } from "../src/api";
+import { Code, RpcError, statusBody } from "@ziyixi/proto/rpc-status";
 const json = (body: unknown) =>
   new Response(JSON.stringify(body), {
     headers: { "Content-Type": "application/json" },
@@ -249,23 +250,18 @@ it("manually finishes a partial sync before queueing or estimating new Todoist c
         return json({ state: syncCount === 1 ? "partial" : "synced" });
       }
       if (url.pathname.includes("/flows/"))
-        return json({ name: "flows/2026-10-13", task_ids: ["new-child"] });
+        return json({
+          name: "flows/2026-10-13",
+          task_ids: init?.method === "PATCH" ? ["new-child"] : [],
+        });
       return json({ name: "tasks/new-child", title: "New synthetic child" });
     }),
   );
-  const focus = {
-    date: "2026-10-13",
-    timerEtag: "0",
-    taskIds: [],
-    completedTaskIds: [],
-    estimates: {},
-    flowTasks: {},
-  };
-  await api.updateQueue(["new-child"], focus);
+  await api.addToDay("new-child", "2026-10-13");
   expect(calls[0]?.path).toBe("/api/plus/flowday/api/v1/tasks:sync");
   expect(calls[0]?.body).toEqual({ mode: "manual" });
   expect(calls[1]?.body).toEqual({ mode: "manual" });
-  expect(calls[2]).toMatchObject({
+  expect(calls[3]).toMatchObject({
     mask: "task_ids",
     body: { task_ids: ["new-child"] },
   });
@@ -372,6 +368,26 @@ it("shows an actionable throttled sync and does not attempt the following write"
     "FlowDay just synced. Wait briefly and try adding or estimating this task again.",
   );
   expect(paths).toEqual(["/api/plus/flowday/api/v1/tasks:sync"]);
+});
+
+it("names a token the gateway refuses as an expired connection, so the cached sidebar is dropped", async () => {
+  // What the gateway's plusExtension answers for an unknown or revoked token.
+  const body = statusBody(
+    new RpcError(
+      Code.UNAUTHENTICATED,
+      "UNAUTHORIZED",
+      "no valid Cloudflare Access login for the owner",
+    ),
+    { domain: "todofy.ziyixi.science" },
+  );
+  const api = createApi(
+    { apiOrigin: "https://api.example.test", token: "synthetic" },
+    vi.fn<typeof fetch>(async () => Response.json(body, { status: 401 })),
+  );
+  const failure = await api.readPlan().catch((error: unknown) => error);
+  expect(publicError(failure)).toBe(
+    "Connection expired or revoked. Open connection settings.",
+  );
 });
 
 it("returns the confirmed lead task and label plan instead of requiring a full reload", async () => {
@@ -491,7 +507,7 @@ it("remembers synced FlowDay tasks across writes and worker restarts, storing ID
     token: "synthetic",
   };
   const api = createApi(connection, fetcher, store);
-  await api.updateQueue(["new-child"], focus);
+  await api.addToDay("new-child", focus.date);
   await api.updateEstimate("new-child", 30);
   await api.moveTaskToDay("new-child", undefined, focus);
   expect(requests.filter((request) => request.endsWith(":sync"))).toHaveLength(

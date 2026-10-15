@@ -5,6 +5,7 @@ import {
   type Result,
 } from "../src/messages";
 import { registerBackground } from "../src/background";
+import type { KnownTaskStore } from "../src/api";
 
 const mocks = vi.hoisted(() => {
   const local = new Map<string, unknown>();
@@ -20,6 +21,8 @@ const mocks = vi.hoisted(() => {
     }),
     load: vi.fn(),
     readPlan: vi.fn(),
+    sessionSet: vi.fn(),
+    store: undefined as KnownTaskStore | undefined,
   };
 });
 vi.mock("wxt/browser", () => ({
@@ -36,12 +39,19 @@ vi.mock("wxt/browser", () => ({
         set: mocks.set,
         remove: mocks.remove,
       },
-      session: { get: vi.fn(async () => ({})), set: vi.fn(), remove: vi.fn() },
+      session: {
+        get: vi.fn(async () => ({})),
+        set: mocks.sessionSet,
+        remove: vi.fn(),
+      },
     },
   },
 }));
 vi.mock("../src/api", () => ({
-  createApi: () => ({ load: mocks.load, readPlan: mocks.readPlan }),
+  createApi: (_connection: unknown, _fetch: unknown, store: KnownTaskStore) => {
+    mocks.store = store;
+    return { load: mocks.load, readPlan: mocks.readPlan };
+  },
   publicError: (error: unknown) =>
     error instanceof Error ? error.message : "Synthetic failure",
   validOrigin: (origin: string) => origin,
@@ -52,14 +62,13 @@ beforeEach(() => {
   mocks.local.clear();
   registerBackground();
 });
-function send(message: BackgroundMessage | Record<string, unknown>) {
+function send(
+  message: BackgroundMessage | Record<string, unknown>,
+  url = "https://app.todoist.com/app/today",
+) {
   const receive = mocks.addListener.mock.calls[0]![0];
   return new Promise<Result>((resolve) =>
-    receive(
-      message,
-      { id: "synthetic", url: "https://app.todoist.com/app/today" },
-      resolve,
-    ),
+    receive(message, { id: "synthetic", url }, resolve),
   );
 }
 
@@ -137,4 +146,36 @@ it("forgets the cached configuration when the connection is revoked", async () =
   ).toMatchObject({ ok: false });
   await vi.waitFor(() => expect(mocks.local.has("planConfig")).toBe(false));
   expect(await send({ kind: "planConfig" })).toEqual({ ok: true, value: null });
+});
+
+it("does not store a read that finishes after a disconnect", async () => {
+  mocks.local.set("connection", {
+    apiOrigin: "https://api.example.test",
+    token: "synthetic",
+  });
+  let finish!: (plan: unknown) => void;
+  mocks.readPlan.mockReturnValue(new Promise((resolve) => (finish = resolve)));
+  const read = send({
+    kind: "action",
+    protocol: PLANNING_PROTOCOL,
+    method: "readPlan",
+    args: [],
+  });
+  await vi.waitFor(() => expect(mocks.readPlan).toHaveBeenCalledOnce());
+  expect(
+    await send(
+      { kind: "disconnect" },
+      "chrome-extension://synthetic/options.html",
+    ),
+  ).toEqual({ ok: true, value: null });
+  finish({
+    configured: true,
+    hiddenFilterIds: ["f1"],
+    managedLabels: [{ role: "committed", id: "l1", label: "committed" }],
+  });
+  expect(await read).toMatchObject({ ok: true });
+  // The old client's FlowDay IDs stay out of session storage too.
+  await mocks.store!.write(["synthetic-task"]);
+  expect(mocks.local.has("planConfig")).toBe(false);
+  expect(mocks.sessionSet).not.toHaveBeenCalled();
 });

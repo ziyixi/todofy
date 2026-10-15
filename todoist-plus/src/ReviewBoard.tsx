@@ -16,6 +16,7 @@ import {
 } from "./planning-outcomes";
 import { pendingTask, predictStage } from "./plan-updates";
 import { PendingMark } from "./StatusMarks";
+import { words } from "./i18n";
 import type {
   Area,
   FlowDayPlan,
@@ -64,7 +65,8 @@ export function OutcomeCard({
       style={{ "--outcome-color": outcomeColor(task) } as CSSProperties}
       data-outcome-id={task.id}
       onClick={onClick}
-      aria-label={`${title}, ${priority}`}
+      // The name replaces the content, so it carries the pending state too.
+      aria-label={`${title}, ${priority}${pending ? `, ${words(language).updating}` : ""}`}
     >
       <span
         className="planning-priority-circle"
@@ -313,8 +315,10 @@ function DraggableOutcome({
         ref={handleRef}
         type="button"
         className="review-drag-handle"
-        disabled={busy || pending}
-        aria-label={`${language === "zh" ? "移动事项" : "Move outcome"}: ${displayedTitle(task.title)}`}
+        // A waiting handle stays focusable, so a keyboard drop keeps focus on the moved card.
+        disabled={busy}
+        aria-disabled={pending || undefined}
+        aria-label={`${language === "zh" ? "移动事项" : "Move outcome"}: ${displayedTitle(task.title)}${pending ? `, ${words(language).updating}` : ""}`}
       >
         <GripVertical size={13} />
       </button>

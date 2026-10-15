@@ -2,6 +2,7 @@ import { useRef, useState } from "react";
 import { Check, ExternalLink, Plus, X } from "lucide-react";
 import { displayedTitle, formattedMinutes, startDate } from "./domain";
 import { words } from "./i18n";
+import { PendingMark } from "./StatusMarks";
 import type {
   Language,
   PlanningTask,
@@ -15,6 +16,8 @@ interface Props {
   tasks: PlanningTask[];
   language: Language;
   busy: boolean;
+  /** The task's own drag is not yet confirmed. */
+  pending?: boolean;
   run: RunOperation;
   actions: PlusActions;
   todayTaskIds: readonly string[];
@@ -28,6 +31,7 @@ export function TaskEditor({
   tasks,
   language,
   busy,
+  pending = false,
   run,
   actions,
   todayTaskIds,
@@ -77,7 +81,10 @@ export function TaskEditor({
   return (
     <section className="plus-task-editor" aria-label={text.details}>
       <header className="plus-editor-header">
-        <h2>{displayedTitle(task.title)}</h2>
+        <h2>
+          {displayedTitle(task.title)}
+          {pending && <PendingMark language={language} />}
+        </h2>
         {onClose && (
           <button
             className="plus-icon"

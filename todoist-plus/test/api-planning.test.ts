@@ -152,20 +152,37 @@ it("persists same-day sorting, cross-day movement and pool placement only in Flo
   expect(await api.moveTaskToDay("b", friday, friday, "b")).toEqual([]);
   expect(requests).toHaveLength(noOpStart);
 
+  // Another tab adds a step; one-step edits start from FlowDay's queue, so they keep it.
+  flows.set(tuesday.date, {
+    ...read(tuesday.date),
+    taskIds: [...read(tuesday.date).taskIds, "local-other"],
+  });
   const queueStart = requests.length;
-  const updated = await api.updateQueue(
-    ["local-one", "done", "local-extra"],
-    withoutReorder[0]!,
-  );
-  expect(updated).toEqual([
+  expect(await api.addToDay("local-extra", tuesday.date)).toEqual([
     {
       date: tuesday.date,
-      taskIds: ["local-one", "done", "local-extra"],
+      taskIds: ["local-one", "done", "local-other", "local-extra"],
       completedTaskIds: ["done"],
     },
   ]);
+  const removed = await api.removeFromDay("local-one", tuesday.date);
+  expect(removed).toEqual([
+    {
+      date: tuesday.date,
+      taskIds: ["done", "local-other", "local-extra"],
+      completedTaskIds: ["done"],
+    },
+  ]);
+  // A step already in the queue (or already removed) is not written again.
+  expect(await api.addToDay("local-extra", tuesday.date)).toEqual(removed);
+  expect(await api.removeFromDay("local-one", tuesday.date)).toEqual(removed);
   expect(requests.slice(queueStart).map((request) => request.method)).toEqual([
+    "GET",
     "PATCH",
+    "GET",
+    "PATCH",
+    "GET",
+    "GET",
   ]);
   expect(
     requests

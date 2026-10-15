@@ -221,14 +221,9 @@ export function PlanningWeek(props: Props) {
           onWeekChange={onWeekChange}
           onRemove={(day, id) =>
             // The card stays, marked pending, until FlowDay confirms the removal.
-            void run(
-              () =>
-                actions.updateQueue(
-                  day.taskIds.filter((taskId) => taskId !== id),
-                  day,
-                ),
-              { pending: [pendingStep(day.date, id)] },
-            )
+            void run(() => actions.removeFromDay(id, day.date), {
+              pending: [pendingStep(day.date, id)],
+            })
           }
         />
       </section>
