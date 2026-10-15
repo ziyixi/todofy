@@ -55,8 +55,8 @@ separates tests, Chrome synthetic checks, actual deployment and remaining owner 
 Version `2026.1014.598.48337` was downloaded from the actual public release. All seven files match the green
 artifact, ZIP and existing `~/Documents/chrome_extensions/todoist-plus` directory. Two obsolete generated
 assets were removed; directory identity, permissions and Chrome-stored connection remain. The only new
-real task is the authorized company-installation task due October 15, with actual release/ZIP URLs; no
-existing task or real timer was manually changed. No other credential, service or budget was altered.
+real task is one owner-authorized task; no existing task or real timer was manually changed. No other
+credential, service or budget was altered.
 
 **Pending:** owner Reload in Chrome's extension manager and Refresh Todoist. Tooling blocks that internal
 page and alternate methods are forbidden. Do not ask for reinstall, folder changes or token rotation.
@@ -104,6 +104,7 @@ The owner excluded reverse migration and special historical undo; there is no ne
 [Operation and dated evidence](mailsort/docs/label-consolidation.md#2026-10-11-上线与生产整理) records the pending-label
 fix, validation limits and intentional 140 KiB application bundle budget. CPU, model and Gmail write budgets did
 not change. `codex/mailsort-label-verification` closes the documentation; no Mailsort implementation remains open.
+Its docs-only `da3f519` then released identical code again, which is the latest Mailsort release (see below).
 
 No implementation remains open from the October 11 maintenance task. `codex/maintenance-simplification`
 landed at `ccf2c27`: concise handoff, checked test-only release exclusions and parsed YAML boundary assertions.
@@ -121,22 +122,23 @@ These are dated observations, not a replacement for current GitHub Deployment re
 | --- | --- | --- |
 | CI structure, October 11 | `21c358f` passed branch CI and the same SHA on main. Local composite actions retain explicit job dependencies and release boundaries. Reconcile fell from 128 jobs to 18. | [Branch](https://github.com/ziyixi/todofy/actions/runs/38134080448), [main](https://github.com/ziyixi/todofy/actions/runs/38134511298), [reconcile](https://github.com/ziyixi/todofy/actions/runs/38134699837) |
 | VPS, October 11 | Deployment `6994687990` verified Newsletter and Platform at `21c358f`, `phase=ready`. Their exact digests are in the archive. No Newsletter runtime changed in that release. | [Release evidence](docs/history/handoff-2026-10-11.md#done-2026-10-11-ci-workflow-structure) |
-| Brief and Home, October 11 | `ebf33fe` deployed both applications. Brief's namespace is registered; Ops reports healthy. Read-only UI checks preserved `MODE=archive` and the owner's saved monthly budget of **$80**. | [Release](https://github.com/ziyixi/todofy/actions/runs/38132200435), [inventory/reconcile](https://github.com/ziyixi/todofy/actions/runs/38132419031), [detailed evidence](docs/history/handoff-2026-10-11.md#done-2026-10-11-brief-resource-registration-and-home-monitoring) |
+| Brief and Home, October 11/13 | `ebf33fe` deployed both applications. Brief's namespace is registered; Ops reports healthy. Read-only UI checks preserved `MODE=archive` and the owner's saved monthly budget of **$80**. Brief has not been redeployed since. Home was redeployed at `5134232` on October 13: Deployment `7050487447`, Worker `957e44a3-a32d-49a3-9087-2adbd4484df7`. | [Release](https://github.com/ziyixi/todofy/actions/runs/38132200435), [inventory/reconcile](https://github.com/ziyixi/todofy/actions/runs/38132419031), [detailed evidence](docs/history/handoff-2026-10-11.md#done-2026-10-11-brief-resource-registration-and-home-monitoring), [Home release](https://github.com/ziyixi/todofy/actions/runs/38469896460) |
 | Recall, October 11/12 UTC | `de4d561` deployed the snapshot UI and seven-day hot files; CI includes real DO/R2 and fake-Dropbox cold reads. Updated extension passed real Chrome capture, visual-change and deduplication checks with an authorized temporary idle simulation, since removed. | [Release](https://github.com/ziyixi/todofy/actions/runs/38185811434), [verification](docs/recall-snapshot-verification.md), [runbook](recall/README.md) |
-| Mailsort, October 11 | `4a48878` verified 12 English labels after production consolidation; live mode and existing learning/settings retained. | [Release](https://github.com/ziyixi/todofy/actions/runs/38177844303), [dated evidence](mailsort/docs/label-consolidation.md#2026-10-11-上线与生产整理) |
+| Mailsort, October 11 | `4a48878` verified 12 English labels after production consolidation; live mode and existing learning/settings retained. The docs-only `da3f519` released identical code again and is the latest release: Deployment `7002434222`, Worker `cde09719-52a1-462b-8dd7-e6b894d36f17`, `2026-10-11T22:02Z`. Docs-only changes under `mailsort/` also release Mailsort. | [Release](https://github.com/ziyixi/todofy/actions/runs/38177844303), [`da3f519` release](https://github.com/ziyixi/todofy/actions/runs/38178679513), [dated evidence](mailsort/docs/label-consolidation.md#2026-10-11-上线与生产整理) |
 
 The CI refactor exercised every Worker's production preflight/no-op but selected no Worker uploads.
 On the next normal release of an affected app, check its verified provider receipt; do not deploy apps just to
-fill that evidence gap. The checked recipes and local/branch dry-runs are recorded in the archive.
+fill that evidence gap. The checked recipes and local/branch dry-runs are recorded in the archive. The apps
+still awaiting that check are listed under remaining observations below.
 
 ## Open acceptance
 
 ### Waiting for an existing permission request
 
-Both follow-ups below are blocked by the existing Cloudflare token's Observability/log-query permissions (403).
-The owner request is already pending. Stay quiet while it is unchanged: do not repeat denied queries, switch
-credentials or channels, recompute real content or substitute manual triggers. Once permission is confirmed,
-read only the specified invocation/log metadata; if the old window expired, observe the next natural task.
+Both follow-ups below are blocked on an owner permission request, which is already pending. Stay quiet while it
+is unchanged: do not repeat denied queries, switch credentials or channels, recompute real content or substitute
+manual triggers. Once permission is confirmed, read only the specified invocation/log metadata; if the old window
+expired, observe the next natural task.
 Update each verification document through the normal branch CI and same-SHA release, then stop its own follow-up.
 
 - **Todofy email models:** release `26c9662` keeps email/Canary on Lite 3.5, Flash 3.8, Flash 3.7; reports use
@@ -150,13 +152,46 @@ Update each verification document through the normal branch CI and same-SHA rele
   `daily_sync` log (`run_id`, `state`, `error_code`) to establish independent scheduled-controller provenance.
   [Website-sync evidence](docs/website-sync-verification.md). Do not alter reminder dismissal state.
 
+### Owner decisions, 2026-10-15
+
+Answered in chat; do not re-ask.
+
+- The FlowDay Todoist key restoration recorded in the Plus verification was owner-authorized
+  ([dated note](docs/todoist-plus-verification.md#installed-version-audit-and-weekly-planner-revision)).
+- Recall keeps its seven-day cloud file window. `de4d561` deployed at `2026-10-11T23:55Z`; after about 2026-10-18,
+  verify the first production file removal and one Dropbox cold read, recording metadata only, never page content.
+- Todoist Plus's weekly rollover stays on. Its first natural run is the ten-minute cron after Monday 2026-10-19
+  00:00 US/Pacific (07:00 UTC). Afterwards observe it by metadata only (old-week batch drained, week start
+  advanced, no error code), never task content.
+  Controls: [weekly rollover and controls](todofy/docs/todoist-plus.md#weekly-rollover-and-controls).
+- The 48 merged `codex/*` branches were pruned from origin after a local bundle backup, so branch names cited
+  above as closing documentation no longer exist. The three unmerged Recall experiment branches remain:
+  `codex/recall-permission-setup`, `codex/recall-startup-diagnostic` and `codex/recall-orion-permission-verification`.
+
+### Waiting for the owner
+
+- Install Recall Orion `2026.1015.451` on the phone; renewed phone acceptance follows it.
+- Brief's recorded sender is `onboarding@resend.dev`, which delivers only to the Resend account's own address.
+  Change it before any shadow or live sending.
+- Verify the Claude Console workspace spend limit against Brief's stored $80 runtime budget; it is unverified
+  (the original suggestion was $50).
+- Dedicated Cloudflare tokens for the infra workflows and a fresh deploy token
+  ([replacing the token](infra/README.md#replacing-the-token)); the infra workflows have not switched yet.
+
 ### Remaining observations and separate follow-ups
 
-- The October 11 Mailsort release exposed unsupported direct `vars` expressions in release composites. Its
-  own action now inherits the existing workflow job environment. The same direct-expression pattern remains in
-  `release-todofy`, `release-mail-hero`, `release-dashboard` and `release-brief`; those were not changed or deployed
-  by this task. Review their input boundaries before their next actual upload; a preflight/no-op does not test
-  loading the skipped composite.
+- `5134232` removed the direct `vars` expressions from the release composites; none remain under `.github/actions/`.
+  Todofy and Home uploaded through them in [run 38469896460](https://github.com/ziyixi/todofy/actions/runs/38469896460)
+  (Deployments `7050459573` and `7050487447`). The Mail Hero, Brief, Links, Watch, Fleet and
+  website-relay composites have not yet been loaded by a real upload; their latest Deployments predate the `dd7a6e8`
+  refactor. Check the first natural release of each; a preflight/no-op does not load the skipped composite.
+- The `Newsletter Content Config` workflow has failed after every main push since `b51413a`
+  ([first failure](https://github.com/ziyixi/todofy/actions/runs/38516577579); six runs through `1165411`): its plan
+  step compares HEAD with the oldest released engine, and that compare now exceeds the script's 2 MiB response cap
+  and raises. Nothing is lost (no content-config change is waiting; a config commit's own image skips the compare),
+  but every run is red. The fix (an oversized compare cannot prove compatibility, so the plan is not ready) touches
+  `newsletter/scripts/publish_content_config.py`, which CI releases as Newsletter and Platform, so it waits for the
+  owner's choice.
 - Brief's fresh Ops status and Actions inventory passed, but Home's daily REST Worker list still predates its first
   deploy. Observe the normal inventory starting **2026-10-12 02:00 UTC / October 11 19:00 PDT**; it should add Brief
   before the per-Worker checks finish. A usage refresh alone does not refresh this list.
@@ -175,6 +210,10 @@ Update each verification document through the normal branch CI and same-SHA rele
   FlowDay's owner setup/device check before F6 retirement, and Newsletter's natural provider/send acceptance after
   its last business change. Use the app runbooks and fresh status before treating an old waiting item as still open;
   do not restart Compose, replay a send or request credentials solely from an archived note.
+- Todoist Plus: review which planning-configuration methods belong with `ConfirmPlanMapping` among the
+  owner-only methods.
+- Recall: the free-tier storage and request cost estimates in [design §5.3](recall/docs/design.md#53-budgets)
+  predate minute snapshots with screenshots and have not been redone.
 
 ## Operating boundaries
 

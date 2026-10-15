@@ -121,6 +121,8 @@ intentionally excluded that credential; its existing owner setting was restored 
 then key-saved, Sync-complete and a fresh sync time were confirmed. No credential was generated or stored in
 the extension; no private task content, key or real-data screenshot is committed.
 
+On 2026-10-15 the owner confirmed in chat that they had authorized this FlowDay Todoist key restoration.
+
 The owner chose day placement only in FlowDay. The revised Plan expands parent tasks and places leaf steps
 in seven day columns; Focus shows the same parent context, ordered duration blocks and timer controls.
 It reuses the existing daily flow resources and RolloverFlow, with a same-day guard. No new database,
@@ -280,9 +282,8 @@ Chrome-stored connection were preserved; no Chrome profile or credential store w
 The owner page explicitly bound the previously created Quarter label. Its refreshed response showed the
 four column selections, retained the eleven existing roles, kept planning enabled and disabled Save after
 confirmation. The new operation writes configuration; no existing task or production timer was manually
-changed. Only the separately authorized company-installation task was added: due October 15, estimate
-15 minutes, real versioned release/ZIP links and connection steps. A fetch confirmed these fields and no
-Deadline; private task identity/content are not committed here.
+changed. Only one owner-authorized real task was added, and a fetch confirmed its intended fields.
+Private task identity/content are not committed here.
 
 **Still pending:** the owner clicks Reload in Chrome's extension manager and refreshes Todoist. The browser
 tool cannot operate that internal page; no alternate method was used. The installed bytes and owner API
