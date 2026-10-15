@@ -218,13 +218,11 @@ Answered in chat; do not re-ask.
   (Deployments `7050459573` and `7050487447`). The Mail Hero, Brief, Links, Watch, Fleet and
   website-relay composites have not yet been loaded by a real upload; their latest Deployments predate the `dd7a6e8`
   refactor. Check the first natural release of each; a preflight/no-op does not load the skipped composite.
-- The `Newsletter Content Config` workflow has failed after every main push since `b51413a`
-  ([first failure](https://github.com/ziyixi/todofy/actions/runs/38516577579); six runs through `1165411`): its plan
-  step compares HEAD with the oldest released engine, and that compare now exceeds the script's 2 MiB response cap
-  and raises. Nothing is lost (no content-config change is waiting; a config commit's own image skips the compare),
-  but every run is red. The fix (an oversized compare cannot prove compatibility, so the plan is not ready) touches
-  `newsletter/scripts/publish_content_config.py`, which CI releases as Newsletter and Platform, so it waits for the
-  owner's choice.
+- `Newsletter Content Config` failed after every main push from `b51413a` until `1e88aa3c` fixed it on 2026-10-15:
+  the plan's compare with the oldest released engine passed the script's 2 MiB response cap; an oversized compare
+  now cannot prove compatibility, so the plan ends not ready. The owner accepted the one Newsletter/Platform
+  re-release ([main 38764957974](https://github.com/ziyixi/todofy/actions/runs/38764957974), VPS deploy passed); the
+  following [content-config run](https://github.com/ziyixi/todofy/actions/runs/38765464322) passed.
 - Brief's fresh Ops status and Actions inventory passed, but Home's daily REST Worker list still predates its first
   deploy. Observe the normal inventory starting **2026-10-12 02:00 UTC / October 11 19:00 PDT**; it should add Brief
   before the per-Worker checks finish. A usage refresh alone does not refresh this list.
