@@ -9,6 +9,17 @@ Its old waiting lists and release identities are historical, not instructions to
 
 ## Current work
 
+Todoist Plus board performance (owner-approved plan, items 1-5 of the October 15 research) is implemented on
+local branch `claude/plus-perf-gtd`, based on `de8b93ac`; it is not pushed and has no branch CI or release.
+Reads run in the background, confirmed write results merge without full loads, task lookups are indexed,
+FlowDay task IDs survive worker restarts, native pages use ReadPlan plus an ID-only cache, and Review/Week
+drags show at once with one pending card and one ordered write queue (the owner-approved rule change).
+Planning protocol is now 3, so the normal update step applies: Reload in Chrome's extension manager and
+refresh Todoist. Local types, lint, build, 79 unit and 13 built-MV3 Chromium cases pass; synthetic
+before/after measurements are in [the verification record](docs/todoist-plus-verification.md#board-performance-branch-local-checks-october-15).
+Pending: push, full branch CI, owner review, same-SHA release and the owner's real-account check of drag feel.
+Research items 6 (backend metadata reads, measure first) and 7 (native observer, local trace first) remain open.
+
 Recall's mobile queue correction is released at `eb2c9187095f22eeac4ef2ae1e7e886b2e9076f3`.
 [Full branch CI 38683400263](https://github.com/ziyixi/todofy/actions/runs/38683400263) and
 [same-SHA main release 38684233200](https://github.com/ziyixi/todofy/actions/runs/38684233200) pass.

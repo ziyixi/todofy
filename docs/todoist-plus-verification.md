@@ -289,3 +289,47 @@ Private task identity/content are not committed here.
 tool cannot operate that internal page; no alternate method was used. The installed bytes and owner API
 are verified, while activation of this version in the real account is not yet claimed. PWA and natural
 Monday rollover remain separate observations. Synthetic timer checks do not prove a real account session.
+
+## Board performance branch, local checks (October 15)
+
+`claude/plus-perf-gtd` implements the owner-approved performance plan (items 1-5 of the October 15
+research; backend item 6 and observer item 7 are not part of it). It is local only: not pushed, no
+branch CI, no release, and the installed extension is unchanged. All data below is synthetic.
+
+- Reads no longer lock the board. Mount, Refresh, failed writes and void results re-read in the
+  background; returning to the tab re-reads only after 60 s. Confirmed SetTaskLead, UpdatePlanLabels and
+  weekly-goal tasks merge without a full load, and confirmed day queues no longer trigger a seven-day
+  re-read. Completion still re-reads (recurring tasks advance) and stays disabled until it lands.
+- One ID and one children index per task list replace the per-call maps; the running clock is a leaf.
+- FlowDay task IDs, never titles, are remembered after a SYNCED answer and mirrored to session storage.
+- Native pages call ReadPlan only and arrange the sidebar from an ID-only `storage.local` cache. The last
+  confirmed data stays in content-script memory, so re-entering Plus paints at once.
+- Owner-approved rule change: Review and Week drags show at once; only that card waits (dimmed, spinner,
+  not draggable). All writes share one FIFO queue; a failure drops the queued writes, rolls every
+  prediction back, shows the error and re-reads. Other writes stay confirm-first. Planning protocol is 3.
+
+Local checks: types, lint, production build, 79 unit/component/API cases (was 56) and 13 built-MV3
+Chromium cases (was 11). Eleven of the new cases also ran against the previous code and fail there.
+They cover discarded overlapping reads, one-minute refocus, pending completion, confirmed
+lead/label/goal merges, count-based derivation cost (16,011 element reads at 2,000 tasks against
+3,158,011 before; bound 40,000), a ticking timer without board renders, remembered FlowDay IDs after a
+fresh client, the ID-only cache hiding the sidebar while ReadPlan is held, instant re-entry, pending
+drops, queued order and rollback after a failed save.
+
+The research harness ran in a scratch copy against a baseline build of `de8b93ac` and this branch, same
+synthetic data and Chromium. At 600 tasks and 100 ms per synthetic request:
+
+| Action | Before | After |
+| --- | --- | --- |
+| Native page load | 13 requests, 4 stages | 1 request (ReadPlan) |
+| Re-enter Plan from a native page | board after 855 ms | board after 55 ms; read finishes in background |
+| Review stage drop | card and board after 122 ms | card after 18 ms; that card confirmed after 110 ms |
+| Week tray-to-day drop | 9 requests; card 216 ms, board 321 ms | 2 requests; card 21 ms; that card confirmed 213 ms |
+| Week day-to-day drop | 9 requests; card 214 ms, board 321 ms | 2 requests; card 23 ms; that card confirmed 213 ms |
+| Tab refocus within a minute | 13 requests, board locked | none |
+
+At 2,000 tasks with 0 ms requests, a running timer on Review caused five long tasks (409 ms) per 5 s
+before and none after; the Review drop's 65 ms long task is gone. Opening Plan took 163-190 ms before and
+139-154 ms after over four runs each. The content script grows from 357,235 to 361,110 bytes (113,330 to
+114,724 gzip) and the background from 134,003 to 135,324 bytes; no dependency or budget changed. Production
+latency, the real Todoist DOM and the installed extension were not measured.
