@@ -1,0 +1,170 @@
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+} from "@testing-library/react";
+import { afterEach, expect, it, vi } from "vitest";
+import { App } from "../src/App";
+import { effectiveArea, taskAncestors, topLevelBets } from "../src/domain";
+import {
+  outcomeArea,
+  outcomeForTask,
+  outcomeSteps,
+  planningOutcomes,
+} from "../src/planning-outcomes";
+import { createPrototype } from "../design/fixture";
+import type { PlanningTask } from "../src/model";
+
+const planViewRenders = vi.hoisted(() => ({ count: 0 }));
+vi.mock("../src/PlanView", async (original) => {
+  const actual = await original<typeof import("../src/PlanView")>();
+  return {
+    ...actual,
+    PlanView: (props: Parameters<typeof actual.PlanView>[0]) => {
+      planViewRenders.count++;
+      return actual.PlanView(props);
+    },
+  };
+});
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+});
+
+const labels = [
+  "office",
+  "home",
+  "bets",
+  "quarter",
+  "candiate",
+  "focus",
+  "committed",
+].map((role) => ({ role, id: role, label: role }));
+/** Synthetic outcomes with steps, plus unplanned tasks; some areas are only inherited. */
+function dataset(total: number): PlanningTask[] {
+  const base = {
+    projectId: "synthetic",
+    labels: [],
+    priority: 1,
+    deadline: "",
+    due: "",
+    leadDays: 0,
+    etag: "1",
+    mustStart: false,
+    missingLead: false,
+  };
+  const tasks: PlanningTask[] = [];
+  for (const [stage, count] of [
+    ["quarterly", 8],
+    ["monthly", 8],
+    ["weekly", 10],
+    ["committed", 8],
+  ] as const)
+    for (let n = 0; n < count; n++) {
+      const id = `${stage}-${n}`;
+      tasks.push({
+        ...base,
+        id,
+        title: id,
+        parentId: "",
+        area: n % 3 === 2 ? "unassigned" : n % 2 ? "personal" : "work",
+        stage,
+        bet: stage === "committed" && n < 2,
+      });
+      for (let step = 0; step < 4; step++)
+        tasks.push({
+          ...base,
+          id: `${id}-step-${step}`,
+          title: "step",
+          parentId: id,
+          area: "unassigned",
+          stage: "none",
+          bet: false,
+        });
+    }
+  for (let n = 0; tasks.length < total; n++)
+    tasks.push({
+      ...base,
+      id: `other-${n}`,
+      title: "other",
+      parentId: n % 4 === 3 ? `other-${n - 1}` : "",
+      area: (["unassigned", "work", "personal"] as const)[n % 3]!,
+      stage: "none",
+      bet: false,
+    });
+  return tasks;
+}
+/** Counts element reads of a task list, independent of machine speed. */
+function counted(tasks: PlanningTask[]) {
+  const reads = { count: 0 };
+  const list = new Proxy(tasks, {
+    get(target, key, receiver) {
+      if (typeof key === "string" && /^\d+$/u.test(key)) reads.count++;
+      return Reflect.get(target, key, receiver);
+    },
+  });
+  return { list, reads };
+}
+/** What one Plan render derives: goals, Review lanes and cards, Week cards and a goal search. */
+function planRender(tasks: PlanningTask[]) {
+  for (const area of ["work", "personal", "unassigned"] as const)
+    topLevelBets(tasks, area);
+  const outcomes = planningOutcomes(tasks, labels);
+  tasks.filter((task) => task.mustStart || task.missingLead);
+  tasks.some(
+    (task) =>
+      task.stage !== "none" && effectiveArea(task, tasks) === "unassigned",
+  );
+  for (const outcome of outcomes) {
+    outcomeSteps(outcome, tasks, labels);
+    outcomeArea(outcome, tasks, "en");
+  }
+  for (const outcome of outcomes.filter((task) => task.stage === "committed"))
+    for (const step of outcomeSteps(outcome, tasks, labels))
+      outcomeForTask(step, tasks, labels);
+  tasks.filter(
+    (task) =>
+      effectiveArea(task, tasks) === "work" &&
+      taskAncestors(task, tasks).length >= 0,
+  );
+}
+
+it("derives a 2,000-task plan in linear work and reuses its indexes on the next render", () => {
+  const { list, reads } = counted(dataset(2_000));
+  planRender(list);
+  // Rebuilding a lookup per task (the earlier code) needed millions of reads here.
+  expect(reads.count).toBeLessThan(20 * list.length);
+  const first = reads.count;
+  reads.count = 0;
+  planRender(list);
+  expect(reads.count).toBeLessThan(first);
+});
+
+it("ticks a running timer without re-rendering the planning board", async () => {
+  const actions = createPrototype();
+  const props = {
+    actions,
+    language: "en" as const,
+    onOpenTask: () => {},
+    onSettings: () => {},
+  };
+  const mounted = render(<App {...props} view="focus" />);
+  const start = await screen.findByRole("button", {
+    name: "Start: Write the introduction",
+  });
+  vi.useFakeTimers({ now: Date.parse("2026-10-13T12:00:00Z") });
+  await act(async () => {
+    fireEvent.click(start);
+  });
+  mounted.rerender(<App {...props} view="plan" />);
+  const clock = document.querySelector(".plus-timer-bar output")!;
+  expect(clock.textContent).toBe("00:00");
+  const before = planViewRenders.count;
+  act(() => {
+    vi.advanceTimersByTime(3_000);
+  });
+  expect(clock.textContent).toBe("00:03");
+  expect(planViewRenders.count).toBe(before);
+});

@@ -1,7 +1,12 @@
 import { useState, type CSSProperties } from "react";
 import { DragDropProvider, DragOverlay, useDraggable } from "@dnd-kit/react";
 import { GripVertical } from "lucide-react";
-import { displayedTitle, effectiveArea, formattedMinutes } from "./domain";
+import {
+  displayedTitle,
+  effectiveArea,
+  formattedMinutes,
+  taskIndex,
+} from "./domain";
 import { OutcomeCard } from "./ReviewBoard";
 import { PlanningCalendar, shortDay, taskTitle } from "./PlanningCalendar";
 import {
@@ -225,7 +230,7 @@ export function PlanningWeek(props: Props) {
       <DragOverlay dropAnimation={{ duration: 160, easing: "ease-out" }}>
         {(source) => {
           const id = String(source.data?.taskId ?? "");
-          const task = plan.tasks.find((task) => task.id === id);
+          const task = taskIndex(plan.tasks).get(id);
           const outcome = task
             ? outcomeForTask(task, plan.tasks, plan.managedLabels)
             : undefined;

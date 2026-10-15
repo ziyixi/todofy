@@ -1,5 +1,5 @@
 import { ArrowLeft } from "lucide-react";
-import { formattedMinutes } from "./domain";
+import { formattedMinutes, taskIndex } from "./domain";
 import { FocusBlock } from "./FocusBlock";
 import { words } from "./i18n";
 import type { FocusState, Language, PlanState, PlanningTask } from "./model";
@@ -32,7 +32,7 @@ export function FocusView({
   onTimer,
 }: Props) {
   const text = words(language);
-  const byId = new Map(plan.tasks.map((task) => [task.id, task]));
+  const byId = taskIndex(plan.tasks);
   const queue = focus.taskIds.filter(
     (id) => !focus.completedTaskIds.includes(id),
   );

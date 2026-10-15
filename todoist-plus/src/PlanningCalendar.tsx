@@ -1,7 +1,7 @@
 import { useState, type CSSProperties } from "react";
 import { useDraggable, useDroppable } from "@dnd-kit/react";
 import { ChevronLeft, ChevronRight, GripVertical, X } from "lucide-react";
-import { displayedTitle, formattedMinutes } from "./domain";
+import { displayedTitle, formattedMinutes, taskIndex } from "./domain";
 import { outcomeArea, outcomeColor, outcomeForTask } from "./planning-outcomes";
 import { words } from "./i18n";
 import type {
@@ -51,12 +51,10 @@ export function PlanningCalendar({
     Math.max(0, days.length - 3),
   );
   const week = days[0]?.date ?? plan.week;
-  const range = new Intl.DateTimeFormat(locale(language), {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-    timeZone: "UTC",
-  }).formatRange(dayDate(week), dayDate(days.at(-1)?.date ?? week));
+  const range = dateFormat(language, "range").formatRange(
+    dayDate(week),
+    dayDate(days.at(-1)?.date ?? week),
+  );
   function changeWeek(direction: number) {
     const date = dayDate(week);
     date.setUTCDate(date.getUTCDate() + direction * 7);
@@ -204,7 +202,7 @@ function CalendarDay({
   });
   const ids = day.taskIds.filter((id) => !day.completedTaskIds.includes(id));
   const estimate = (id: string) =>
-    plan.tasks.find((task) => task.id === id)?.estimatedMinutes ??
+    taskIndex(plan.tasks).get(id)?.estimatedMinutes ??
     flowTasks[id]?.estimatedMinutes;
   const minutes = ids.reduce((sum, id) => sum + (estimate(id) ?? 0), 0);
   const unknown = ids.filter((id) => estimate(id) === undefined).length;
@@ -272,7 +270,7 @@ function CalendarStep({
   editTask: Props["editTask"];
   onRemove: (id: string) => void;
 }) {
-  const task = plan.tasks.find((task) => task.id === id);
+  const task = taskIndex(plan.tasks).get(id);
   const outcome = task
     ? outcomeForTask(task, plan.tasks, plan.managedLabels)
     : undefined;
@@ -384,14 +382,24 @@ function EndDrop({
 function dayDate(date: string): Date {
   return new Date(`${date}T12:00:00Z`);
 }
-function locale(language: Language): string {
-  return language === "zh" ? "zh-CN" : "en";
+const dateFormats = new Map<string, Intl.DateTimeFormat>();
+/** Formatters are costly to construct, so each language and style is built once. */
+function dateFormat(language: Language, style: "weekday" | "range") {
+  const key = `${language}:${style}`;
+  let format = dateFormats.get(key);
+  if (!format) {
+    format = new Intl.DateTimeFormat(
+      language === "zh" ? "zh-CN" : "en",
+      style === "weekday"
+        ? { weekday: "short", timeZone: "UTC" }
+        : { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" },
+    );
+    dateFormats.set(key, format);
+  }
+  return format;
 }
 export function shortDay(date: string, language: Language): string {
-  return new Intl.DateTimeFormat(locale(language), {
-    weekday: "short",
-    timeZone: "UTC",
-  }).format(dayDate(date));
+  return dateFormat(language, "weekday").format(dayDate(date));
 }
 export function taskTitle(
   id: string,

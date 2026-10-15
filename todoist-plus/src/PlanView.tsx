@@ -93,8 +93,8 @@ export function PlanView(props: PlanViewProps) {
                 "personal",
                 ...(plan.tasks.some(
                   (task) =>
-                    effectiveArea(task, plan.tasks) === "unassigned" &&
-                    task.stage !== "none",
+                    task.stage !== "none" &&
+                    effectiveArea(task, plan.tasks) === "unassigned",
                 )
                   ? ["unassigned"]
                   : []),

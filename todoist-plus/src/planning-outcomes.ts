@@ -1,6 +1,25 @@
 import { effectiveArea, taskAncestors } from "./domain";
 import type { Language, PlanState, PlanningTask, Stage } from "./model";
 
+const childIndexes = new WeakMap<
+  readonly PlanningTask[],
+  Map<string, PlanningTask[]>
+>();
+/** Children by parent ID, built once per task list like `taskIndex`. */
+function childIndex(tasks: readonly PlanningTask[]) {
+  let children = childIndexes.get(tasks);
+  if (!children) {
+    children = new Map();
+    for (const task of tasks) {
+      const siblings = children.get(task.parentId) ?? [];
+      siblings.push(task);
+      children.set(task.parentId, siblings);
+    }
+    childIndexes.set(tasks, children);
+  }
+  return children;
+}
+
 function isDateCandidate(
   task: PlanningTask,
   labels: PlanState["managedLabels"],
@@ -48,12 +67,7 @@ export function outcomeSteps(
   tasks: PlanningTask[],
   labels: PlanState["managedLabels"] = [],
 ): PlanningTask[] {
-  const children = new Map<string, PlanningTask[]>();
-  for (const task of tasks) {
-    const siblings = children.get(task.parentId) ?? [];
-    siblings.push(task);
-    children.set(task.parentId, siblings);
-  }
+  const children = childIndex(tasks);
   const leaves: PlanningTask[] = [];
   const seen = new Set<string>();
   function visit(task: PlanningTask) {

@@ -8,9 +8,10 @@ import {
   Settings,
   Square,
 } from "lucide-react";
-import { displayedTitle, duration, elapsed } from "./domain";
+import { displayedTitle } from "./domain";
 import { words } from "./i18n";
 import { applyConfirmed, rereadsAfter } from "./plan-updates";
+import { Elapsed } from "./StatusMarks";
 import { PlanView } from "./PlanView";
 import { FocusView } from "./FocusView";
 import { TaskEditor } from "./TaskEditor";
@@ -65,7 +66,6 @@ export function App({
   const completionIds = useRef(new Map<string, string>());
   // Confirmed completions stay visible but disabled until a re-read shows the result.
   const [completing, setCompleting] = useState<ReadonlySet<string>>(new Set());
-  const [, tick] = useState(0);
   const dialog = useRef<HTMLDialogElement>(null);
   const text = words(language);
   const load = useCallback(async (): Promise<boolean> => {
@@ -161,11 +161,6 @@ export function App({
     document.addEventListener("visibilitychange", visible);
     return () => document.removeEventListener("visibilitychange", visible);
   }, [revalidate]);
-  useEffect(() => {
-    if (data?.focus.timer?.status !== "running") return;
-    const id = window.setInterval(() => tick((value) => value + 1), 1000);
-    return () => clearInterval(id);
-  }, [data?.focus.timer?.status]);
   useEffect(() => {
     if (externalTaskId) setSelectedId(externalTaskId);
   }, [externalTaskId]);
@@ -349,7 +344,9 @@ export function App({
                   text.focus)}
             </strong>
           </div>
-          <output>{duration(elapsed(data.focus))}</output>
+          <output>
+            <Elapsed focus={data.focus} />
+          </output>
           <button
             className="plus-icon"
             disabled={busy || timerSettling}

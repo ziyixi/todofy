@@ -1,8 +1,27 @@
 import type { Area, FocusState, PlanningTask } from "./model";
 
+const indexes = new WeakMap<
+  readonly PlanningTask[],
+  Map<string, PlanningTask>
+>();
+/**
+ * Tasks by ID, built once per task list. Every read and confirmed write replaces the list
+ * instead of changing it, so the index of a list never goes stale.
+ */
+export function taskIndex(
+  tasks: readonly PlanningTask[],
+): Map<string, PlanningTask> {
+  let index = indexes.get(tasks);
+  if (!index) {
+    index = new Map(tasks.map((task) => [task.id, task]));
+    indexes.set(tasks, index);
+  }
+  return index;
+}
+
 export function effectiveArea(task: PlanningTask, tasks: PlanningTask[]): Area {
   if (task.area !== "unassigned") return task.area;
-  const byId = new Map(tasks.map((item) => [item.id, item]));
+  const byId = taskIndex(tasks);
   const seen = new Set<string>();
   let parent = task.parentId;
   while (parent && !seen.has(parent)) {
@@ -36,7 +55,7 @@ export function topLevelChoices(
   tasks: PlanningTask[],
   area: Area,
 ): PlanningTask[] {
-  const byId = new Map(tasks.map((task) => [task.id, task]));
+  const byId = taskIndex(tasks);
   return tasks.filter(
     (task) =>
       effectiveArea(task, tasks) === area &&
@@ -49,7 +68,7 @@ export function topLevelBets(
   tasks: PlanningTask[],
   area: Area,
 ): PlanningTask[] {
-  const byId = new Map(tasks.map((task) => [task.id, task]));
+  const byId = taskIndex(tasks);
   return tasks.filter(
     (task) =>
       task.bet &&
@@ -71,7 +90,7 @@ export function taskAncestors(
   task: PlanningTask,
   tasks: PlanningTask[],
 ): PlanningTask[] {
-  const byId = new Map(tasks.map((item) => [item.id, item]));
+  const byId = taskIndex(tasks);
   const result: PlanningTask[] = [];
   const seen = new Set([task.id]);
   let parent = byId.get(task.parentId);

@@ -1,16 +1,10 @@
 import { Check, Pause, Play, Square } from "lucide-react";
 import type { CSSProperties } from "react";
-import {
-  displayedTitle,
-  duration,
-  elapsed,
-  formattedMinutes,
-  taskAncestors,
-} from "./domain";
+import { displayedTitle, formattedMinutes, taskAncestors } from "./domain";
 import { words } from "./i18n";
 import type { FocusState, Language, PlanState, PlanningTask } from "./model";
 import { outcomeColor, outcomeForTask } from "./planning-outcomes";
-import { PendingMark } from "./StatusMarks";
+import { Elapsed, PendingMark } from "./StatusMarks";
 
 interface Props {
   taskId: string;
@@ -139,7 +133,7 @@ export function FocusBlock({
               <output
                 aria-label={language === "zh" ? "已专注" : "Time focused"}
               >
-                {duration(elapsed(focus))}
+                <Elapsed focus={focus} />
               </output>
             )}
             {!task && plan.flowdayUrl && (
