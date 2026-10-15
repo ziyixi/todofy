@@ -454,3 +454,88 @@ it("returns the confirmed lead task and label plan instead of requiring a full r
     "/api/plus/v1/plan:updatePlanLabels",
   ]);
 });
+
+it("remembers synced FlowDay tasks across writes and worker restarts, storing IDs only", async () => {
+  const requests: string[] = [];
+  let synced = false;
+  // FlowDay allows one manual sync per 30 seconds; a second one is throttled.
+  const fetcher = vi.fn<typeof fetch>(async (input, init) => {
+    const url = new URL(String(input));
+    requests.push(`${init?.method ?? "GET"} ${url.pathname}`);
+    if (url.pathname.endsWith("/tasks:sync")) {
+      const state = synced ? "throttled" : "synced";
+      synced = true;
+      return json({ state });
+    }
+    if (url.pathname.includes("/flows/"))
+      return json({ name: "flows/2026-10-13", task_ids: ["new-child"] });
+    return json({ name: "tasks/new-child", title: "New synthetic child" });
+  });
+  let saved: string[] = [];
+  const store = {
+    read: vi.fn(async () => saved),
+    write: vi.fn(async (ids: string[]) => {
+      saved = ids;
+    }),
+  };
+  const focus = {
+    date: "2026-10-13",
+    timerEtag: "0",
+    taskIds: [],
+    completedTaskIds: [],
+    estimates: {},
+    flowTasks: {},
+  };
+  const connection = {
+    apiOrigin: "https://api.example.test",
+    token: "synthetic",
+  };
+  const api = createApi(connection, fetcher, store);
+  await api.updateQueue(["new-child"], focus);
+  await api.updateEstimate("new-child", 30);
+  await api.moveTaskToDay("new-child", undefined, focus);
+  expect(requests.filter((request) => request.endsWith(":sync"))).toHaveLength(
+    1,
+  );
+  expect(saved).toEqual(["new-child"]);
+
+  // A restarted worker creates a new client; the session copy still skips the sync.
+  const restarted = createApi(connection, fetcher, store);
+  const start = requests.length;
+  await restarted.updateEstimate("new-child", 45);
+  expect(requests.slice(start)).toEqual([
+    "PATCH /api/plus/flowday/api/v1/tasks/new-child",
+  ]);
+});
+
+it("replaces the remembered tasks with the complete FlowDay list on each load", async () => {
+  let saved = ["deleted-task"];
+  const api = createApi(
+    { apiOrigin: "https://api.example.test", token: "synthetic" },
+    vi.fn<typeof fetch>(async (input) => {
+      const path = new URL(String(input)).pathname;
+      if (path.endsWith("/plan:read"))
+        return json({
+          plan: { week_start: "2026-10-12", today: "2026-10-13" },
+        });
+      if (path === "/api/plus/v1/tasks") return json({});
+      if (path.endsWith("/api/v1/tasks"))
+        return json({
+          tasks: [
+            { name: "tasks/child", todoist_id: "child", title: "Synthetic" },
+          ],
+        });
+      if (path.endsWith("/timerSession"))
+        return json({ name: "timerSession", etag: "1" });
+      return json({ name: `flows/${path.split("/").at(-1)}` });
+    }),
+    {
+      read: async () => saved,
+      write: async (ids) => {
+        saved = ids;
+      },
+    },
+  );
+  await api.load();
+  expect(saved).toEqual(["child"]);
+});

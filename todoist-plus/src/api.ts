@@ -32,6 +32,11 @@ export interface Connection {
   apiOrigin: string;
   token: string;
 }
+/** Keeps FlowDay task IDs (never titles) beyond one background worker's lifetime. */
+export interface KnownTaskStore {
+  read(): Promise<string[]>;
+  write(ids: string[]): Promise<void>;
+}
 export function validOrigin(input: string): string {
   const url = new URL(input);
   if (
@@ -141,6 +146,7 @@ function flowPlan(flow: Flow): FlowDayPlan {
 export function createApi(
   connection: Connection,
   fetcher: typeof fetch = fetch,
+  knownStore?: KnownTaskStore,
 ): PlusActions {
   const transport =
     (prefix: string) =>
@@ -160,13 +166,27 @@ export function createApi(
       });
     };
   const timerRequests = new Map<string, string>();
+  // Tasks FlowDay already has, so queue and estimate writes skip its manual Todoist sync,
+  // which FlowDay throttles to one every 30 seconds.
   let knownFlowTasks = new Set<string>();
+  const restored = (knownStore?.read() ?? Promise.resolve([]))
+    .then((ids) => {
+      for (const id of ids) knownFlowTasks.add(id);
+    })
+    .catch(() => {});
+  async function remember(ids: Iterable<string>, replace = false) {
+    await restored;
+    knownFlowTasks = new Set([...(replace ? [] : knownFlowTasks), ...ids]);
+    // A lost copy only costs one extra sync, so the write never delays the action.
+    void knownStore?.write([...knownFlowTasks]).catch(() => {});
+  }
   const plus = createHttpClient(PlusService, transport(""));
   const flowday = createHttpClient(
     FlowDayUiService,
     transport("/api/plus/flowday"),
   );
   async function ensureSynced(ids: string[]) {
+    await restored;
     if (
       ids.every(
         (id) =>
@@ -180,7 +200,10 @@ export function createApi(
       const result = await flowday.syncTasks({
         mode: SyncTasksRequest_Mode.MANUAL,
       });
-      if (result.state === SyncTasksResponse_State.SYNCED) return;
+      if (result.state === SyncTasksResponse_State.SYNCED) {
+        await remember(ids);
+        return;
+      }
       if (result.state === SyncTasksResponse_State.THROTTLED)
         throw new FlowdaySyncPendingError(
           "FlowDay just synced. Wait briefly and try adding or estimating this task again.",
@@ -258,7 +281,7 @@ export function createApi(
         days.find((day) => day.date === plan.today) ??
         (todayFlow && flowPlan(todayFlow));
       if (!today) throw new Error("Today's planning day is missing.");
-      knownFlowTasks = new Set(Object.keys(flowTasks));
+      await remember(Object.keys(flowTasks), true);
       const focus: FocusState = {
         ...today,
         ...timerSnapshot(timer),

@@ -14,7 +14,10 @@ vi.mock("wxt/browser", () => ({
       getURL: () => "chrome-extension://synthetic/",
       onMessage: { addListener: mocks.addListener },
     },
-    storage: { local: { setAccessLevel: vi.fn(), get: mocks.get } },
+    storage: {
+      local: { setAccessLevel: vi.fn(), get: mocks.get },
+      session: { get: vi.fn(), set: vi.fn(), remove: vi.fn() },
+    },
   },
 }));
 vi.mock("../src/api", () => ({

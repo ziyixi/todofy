@@ -174,6 +174,23 @@ test("real pointer scheduling uses leaf steps and persists day moves without ful
     // Only the tray drop and the same-day reorder read their one target day; the confirmed
     // queues are shown without reading the whole week again.
     expect((await flowReads(worker)) - flowBaseline).toBe(2);
+    // FlowDay task IDs, never titles, survive an idle-stopped worker in session storage.
+    expect(
+      await worker.evaluate(async () => {
+        const storage = (
+          globalThis as unknown as {
+            chrome: {
+              storage: {
+                session: {
+                  get(key: string): Promise<Record<string, unknown>>;
+                };
+              };
+            };
+          }
+        ).chrome.storage;
+        return (await storage.session.get("knownFlowTasks")).knownFlowTasks;
+      }),
+    ).toEqual(["child", "second", "local-one"]);
     await page.reload();
     await openWeek(page);
     await expect.poll(() => cardIds(thursday)).toEqual(["second", "child"]);

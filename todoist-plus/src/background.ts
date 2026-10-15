@@ -1,5 +1,11 @@
 import { browser } from "wxt/browser";
-import { createApi, publicError, validOrigin, type Connection } from "./api";
+import {
+  createApi,
+  publicError,
+  validOrigin,
+  type Connection,
+  type KnownTaskStore,
+} from "./api";
 import {
   PLANNING_PROTOCOL,
   type BackgroundMessage,
@@ -7,14 +13,25 @@ import {
 } from "./messages";
 import type { PlusActions } from "./model";
 const storageKey = "connection";
+const knownKey = "knownFlowTasks";
 let api: PlusActions | undefined;
+// Session storage outlives an idle-stopped worker, not the browser session.
+const knownTasks: KnownTaskStore = {
+  async read() {
+    const saved = await browser.storage.session.get(knownKey);
+    return (saved[knownKey] as string[] | undefined) ?? [];
+  },
+  async write(ids) {
+    await browser.storage.session.set({ [knownKey]: ids });
+  },
+};
 async function getApi(): Promise<PlusActions> {
   if (api) return api;
   const saved = await browser.storage.local.get(storageKey);
   const connection = saved[storageKey] as Connection | undefined;
   if (!connection?.token)
     throw new Error("Connect Todoist Plus in extension settings.");
-  api = createApi(connection);
+  api = createApi(connection, fetch, knownTasks);
   return api;
 }
 export function registerBackground() {
@@ -51,11 +68,13 @@ export function registerBackground() {
           if (!connection.token || connection.token.length > 512)
             throw new Error("A connection token is required.");
           await browser.storage.local.set({ [storageKey]: connection });
+          await browser.storage.session.remove(knownKey);
           api = undefined;
           return null;
         }
         if (message.kind === "disconnect" && options) {
           await browser.storage.local.remove(storageKey);
+          await browser.storage.session.remove(knownKey);
           api = undefined;
           return null;
         }
