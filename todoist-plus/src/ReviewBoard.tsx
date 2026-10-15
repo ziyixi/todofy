@@ -14,6 +14,8 @@ import {
   planningOutcomes,
   reviewLanes,
 } from "./planning-outcomes";
+import { pendingTask, predictStage } from "./plan-updates";
+import { PendingMark } from "./StatusMarks";
 import type {
   Area,
   FlowDayPlan,
@@ -32,6 +34,8 @@ export interface OutcomeCardProps {
   scheduledIds: Set<string>;
   language: Language;
   selected?: boolean;
+  /** Its stage change is shown but not yet confirmed. */
+  pending?: boolean;
   onClick: () => void;
 }
 export function OutcomeCard({
@@ -41,6 +45,7 @@ export function OutcomeCard({
   scheduledIds,
   language,
   selected = false,
+  pending = false,
   onClick,
 }: OutcomeCardProps) {
   const steps = outcomeSteps(task, tasks, managedLabels);
@@ -72,6 +77,7 @@ export function OutcomeCard({
           <strong className="planning-outcome-title" title={title}>
             {title}
           </strong>
+          {pending && <PendingMark language={language} />}
           {task.mustStart && (
             <Flag
               size={12}
@@ -102,6 +108,7 @@ interface Props {
   area: Area | "all";
   language: Language;
   busy: boolean;
+  pending?: ReadonlySet<string>;
   actions: PlusActions;
   run: RunOperation;
   editTask: (task: PlanningTask) => void;
@@ -113,6 +120,7 @@ export function ReviewBoard({
   area,
   language,
   busy,
+  pending,
   actions,
   run,
   editTask,
@@ -132,8 +140,12 @@ export function ReviewBoard({
         if (canceled) return;
         const task = operation.source?.data?.task as PlanningTask | undefined;
         const stage = operation.target?.data?.stage as Stage | undefined;
+        // The card moves at once and waits in its new lane until Todoist confirms.
         if (task && stage && task.stage !== stage)
-          void run(() => actions.updateTask(task, { stage }));
+          void run(() => actions.updateTask(task, { stage }), {
+            pending: [pendingTask(task.id)],
+            predict: predictStage(task.id, stage),
+          });
       }}
     >
       <div className="review-board">
@@ -153,6 +165,7 @@ export function ReviewBoard({
                 scheduledIds={scheduledIds}
                 language={language}
                 busy={busy}
+                pending={pending}
                 editTask={editTask}
                 onLabels={onLabels}
               />
@@ -190,6 +203,7 @@ function ReviewLane({
   scheduledIds,
   language,
   busy,
+  pending,
   editTask,
   onLabels,
 }: {
@@ -201,6 +215,7 @@ function ReviewLane({
   scheduledIds: Set<string>;
   language: Language;
   busy: boolean;
+  pending?: ReadonlySet<string>;
   editTask: Props["editTask"];
   onLabels?: () => void;
 }) {
@@ -251,6 +266,7 @@ function ReviewLane({
             scheduledIds={scheduledIds}
             language={language}
             busy={busy}
+            pending={pending?.has(pendingTask(task.id)) ?? false}
             editTask={editTask}
           />
         ))}
@@ -270,6 +286,7 @@ function DraggableOutcome({
   scheduledIds,
   language,
   busy,
+  pending,
   editTask,
 }: {
   task: PlanningTask;
@@ -277,24 +294,26 @@ function DraggableOutcome({
   scheduledIds: Set<string>;
   language: Language;
   busy: boolean;
+  pending: boolean;
   editTask: Props["editTask"];
 }) {
   const { ref, handleRef, isDragSource } = useDraggable({
     id: `review-outcome:${task.id}`,
     type: "review-outcome",
-    disabled: busy,
+    disabled: busy || pending,
     data: { task },
   });
   return (
     <div
       ref={ref}
-      className={`review-draggable ${isDragSource ? "is-dragging" : ""}`}
+      className={`review-draggable ${isDragSource ? "is-dragging" : ""} ${pending ? "is-pending" : ""}`}
+      aria-busy={pending || undefined}
     >
       <button
         ref={handleRef}
         type="button"
         className="review-drag-handle"
-        disabled={busy}
+        disabled={busy || pending}
         aria-label={`${language === "zh" ? "移动事项" : "Move outcome"}: ${displayedTitle(task.title)}`}
       >
         <GripVertical size={13} />
@@ -305,6 +324,7 @@ function DraggableOutcome({
         managedLabels={plan.managedLabels}
         scheduledIds={scheduledIds}
         language={language}
+        pending={pending}
         onClick={() => editTask(task)}
       />
     </div>

@@ -123,6 +123,9 @@
   align-items: flex-start;
   gap: 4px;
 }
+.planning-outcome-title-row .plus-pending-mark {
+  margin-top: 4px;
+}
 .planning-outcome-title {
   flex: 1;
   min-width: 0;

@@ -15,6 +15,7 @@ import {
   outcomeSteps,
   planningOutcomes,
 } from "./planning-outcomes";
+import { pendingStep, predictMove } from "./plan-updates";
 import { words } from "./i18n";
 import type {
   Area,
@@ -35,6 +36,7 @@ interface Props {
   currentDate: string;
   language: Language;
   busy: boolean;
+  pending?: ReadonlySet<string>;
   actions: PlusActions;
   run: RunOperation;
   editTask: (task: PlanningTask) => void;
@@ -49,6 +51,7 @@ export function PlanningWeek(props: Props) {
     currentDate,
     language,
     busy,
+    pending,
     actions,
     run,
     editTask,
@@ -92,14 +95,12 @@ export function PlanningWeek(props: Props) {
         if (!source?.taskId || !day || source.taskId === target?.beforeId)
           return;
         const id = source.taskId;
-        void run(() =>
-          actions.moveTaskToDay(
-            id,
-            days.find((day) => day.date === source.sourceDate),
-            day,
-            target?.beforeId,
-          ),
-        );
+        const from = days.find((day) => day.date === source.sourceDate);
+        // The card shows in its new place at once and waits there until FlowDay confirms.
+        void run(() => actions.moveTaskToDay(id, from, day, target?.beforeId), {
+          pending: [pendingStep(day.date, id)],
+          predict: predictMove(id, from?.date, day.date, target?.beforeId),
+        });
       }}
     >
       <section
@@ -215,14 +216,18 @@ export function PlanningWeek(props: Props) {
           currentDate={currentDate}
           language={language}
           busy={busy}
+          pending={pending}
           editTask={editTask}
           onWeekChange={onWeekChange}
           onRemove={(day, id) =>
-            void run(() =>
-              actions.updateQueue(
-                day.taskIds.filter((taskId) => taskId !== id),
-                day,
-              ),
+            // The card stays, marked pending, until FlowDay confirms the removal.
+            void run(
+              () =>
+                actions.updateQueue(
+                  day.taskIds.filter((taskId) => taskId !== id),
+                  day,
+                ),
+              { pending: [pendingStep(day.date, id)] },
             )
           }
         />

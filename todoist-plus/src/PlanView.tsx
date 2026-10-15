@@ -24,6 +24,8 @@ export interface PlanViewProps {
   currentDate: string;
   language: Language;
   busy: boolean;
+  /** Cards whose drag or removal is not yet confirmed. */
+  pending?: ReadonlySet<string>;
   run: RunOperation;
   actions: PlusActions;
   editTask: (task: PlanningTask) => void;

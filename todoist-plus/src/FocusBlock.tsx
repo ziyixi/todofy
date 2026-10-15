@@ -15,7 +15,7 @@ interface Props {
   minutes: number;
   language: Language;
   busy: boolean;
-  /** Completion is confirmed; the re-read decides whether a recurrence remains. */
+  /** A queue change waits for confirmation, or a confirmed completion for its re-read. */
   settling?: boolean;
   onTimer: (
     action: "start" | "pause" | "resume" | "stop",

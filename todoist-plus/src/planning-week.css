@@ -269,7 +269,8 @@
   align-items: flex-start;
   gap: 6px;
 }
-.planning-calendar-step-top .planning-drag-handle {
+.planning-calendar-step-top .planning-drag-handle,
+.planning-calendar-step-top .plus-pending-mark {
   margin-top: 3px;
 }
 .planning-calendar-step-meta {

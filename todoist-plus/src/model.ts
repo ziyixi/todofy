@@ -57,8 +57,21 @@ export type Confirmed =
   | PlanningTask[]
   | PlanMetadata
   | TimerSnapshot;
+/**
+ * A write shown before it is confirmed. Only the named cards wait, dimmed and fixed in place,
+ * with the predicted change if any; a failure drops it again.
+ */
+export interface PendingChange {
+  pending: string[];
+  predict?: (data: PlusData) => PlusData;
+}
+/**
+ * Runs a write after the earlier ones. Without a pending change the write is confirm-first:
+ * write controls stay disabled until the server confirms it.
+ */
 export type RunOperation = (
   operation: () => Promise<Confirmed>,
+  change?: PendingChange,
 ) => Promise<boolean>;
 export interface FocusState extends FlowDayPlan {
   timerEtag: string;

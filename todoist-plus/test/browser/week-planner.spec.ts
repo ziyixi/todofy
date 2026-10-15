@@ -5,7 +5,12 @@ import {
   type Page,
   type Worker,
 } from "@playwright/test";
-import { dragPlanner, launchPlanner, plannerDays } from "./planner-setup";
+import {
+  controlWrites,
+  dragPlanner,
+  launchPlanner,
+  plannerDays,
+} from "./planner-setup";
 async function openWeek(page: Page) {
   await page.getByRole("button", { name: "Plan", exact: true }).click();
   await page.getByRole("tab", { name: "Week", exact: true }).click();
@@ -60,6 +65,7 @@ test("Review moves an explicit outcome between mapped stages using its identity 
         .locator('[data-outcome-id="parent"]'),
     ).toBeVisible();
     const baseline = await readPlanCount(worker);
+    await controlWrites(worker, { hold: true });
     await dragPlanner(
       page,
       quarter.getByRole("button", {
@@ -67,8 +73,25 @@ test("Review moves an explicit outcome between mapped stages using its identity 
       }),
       month,
     );
+    // The card moves before Todoist answers and waits, visibly, in its new lane.
     await expect(month.locator('[data-outcome-id="quarter"]')).toBeVisible();
     await expect(quarter.locator('[data-outcome-id="quarter"]')).toHaveCount(0);
+    await expect(
+      month.locator(".review-draggable[aria-busy=true]"),
+    ).toHaveCount(1);
+    await expect(
+      month.getByRole("button", {
+        name: "Move outcome: Synthetic quarter outcome",
+      }),
+    ).toBeDisabled();
+    await expect(
+      page.getByRole("button", {
+        name: "Move outcome: Synthetic week candidate",
+      }),
+    ).toBeEnabled();
+    await controlWrites(worker, { hold: false, release: true });
+    await expect(page.locator("[aria-busy=true]")).toHaveCount(0);
+    await expect(month.locator('[data-outcome-id="quarter"]')).toBeVisible();
     await expect(page.locator(".plus-page-header .plus-spin")).toHaveCount(0);
     const state = await worker.evaluate(
       () =>
@@ -375,6 +398,85 @@ test("outcome selection and child details stay accessible while a timed step can
         .getByRole("dialog")
         .getByRole("heading", { name: "Synthetic first step", exact: true }),
     ).toBeVisible();
+  } finally {
+    await context.close();
+  }
+});
+
+test("drops show at once while saves run in order, and a failed save rolls every pending drop back", async () => {
+  const { context, worker } = await launchPlanner();
+  try {
+    const page = await context.newPage();
+    await page.goto("https://app.todoist.com/app/today");
+    await openWeek(page);
+    const tray = page.getByRole("region", {
+      name: "Next steps: Synthetic weekly outcome",
+    });
+    const day = (date: string) =>
+      page.locator(`.planning-calendar-day[data-date="${date}"]`);
+    const tuesday = day("2026-10-13");
+    const thursday = day("2026-10-15");
+    const friday = day("2026-10-16");
+    await expect(
+      tray.getByRole("button", { name: /^Synthetic first step/u }),
+    ).toBeVisible();
+    await controlWrites(worker, { hold: true });
+    await dragPlanner(
+      page,
+      tray.getByRole("button", { name: "Drag step: Synthetic second step" }),
+      thursday.locator(".planning-day-end"),
+    );
+    await expect.poll(() => cardIds(thursday)).toEqual(["second"]);
+    const second = thursday.locator('[data-task-id="second"]');
+    await expect(second).toHaveAttribute("aria-busy", "true");
+    await expect(
+      second.getByRole("button", { name: /^Drag scheduled step/u }),
+    ).toBeDisabled();
+    // The next drag starts while the first save is still held.
+    await dragPlanner(
+      page,
+      tuesday.getByRole("button", {
+        name: "Drag scheduled step: Synthetic first step",
+      }),
+      second,
+    );
+    await expect.poll(() => cardIds(thursday)).toEqual(["child", "second"]);
+    await expect(thursday.locator("[aria-busy=true]")).toHaveCount(2);
+    await expect(page.locator(".plus-page-header .plus-spin")).toHaveCount(0);
+    expect(await controlWrites(worker, {})).toBe(1);
+    await controlWrites(worker, { hold: false, release: true });
+    await expect(page.locator("[aria-busy=true]")).toHaveCount(0);
+    expect(await cardIds(thursday)).toEqual(["child", "second"]);
+    const saved = await plannerDays(worker);
+    expect(saved["2026-10-15"]).toEqual(["child", "second"]);
+    expect(saved["2026-10-13"]).toEqual(["local-one"]);
+
+    await controlWrites(worker, { hold: true, fail: true });
+    await dragPlanner(
+      page,
+      thursday.getByRole("button", {
+        name: "Drag scheduled step: Synthetic second step",
+      }),
+      friday.locator(".planning-day-end"),
+    );
+    await expect.poll(() => cardIds(friday)).toEqual(["second"]);
+    await dragPlanner(
+      page,
+      thursday.getByRole("button", {
+        name: "Drag scheduled step: Synthetic first step",
+      }),
+      friday.locator(".planning-day-end"),
+    );
+    await expect.poll(() => cardIds(friday)).toEqual(["second", "child"]);
+    await controlWrites(worker, { hold: false, release: true });
+    // The failed save and the one queued behind it both return to the confirmed days.
+    await expect(page.getByRole("alert")).toContainText(
+      "Synthetic save unavailable",
+    );
+    await expect.poll(() => cardIds(friday)).toEqual([]);
+    expect(await cardIds(thursday)).toEqual(["child", "second"]);
+    await expect(page.locator("[aria-busy=true]")).toHaveCount(0);
+    expect((await plannerDays(worker))["2026-10-16"] ?? []).toEqual([]);
   } finally {
     await context.close();
   }

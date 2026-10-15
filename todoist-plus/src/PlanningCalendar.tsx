@@ -3,6 +3,8 @@ import { useDraggable, useDroppable } from "@dnd-kit/react";
 import { ChevronLeft, ChevronRight, GripVertical, X } from "lucide-react";
 import { displayedTitle, formattedMinutes, taskIndex } from "./domain";
 import { outcomeArea, outcomeColor, outcomeForTask } from "./planning-outcomes";
+import { pendingStep } from "./plan-updates";
+import { PendingMark } from "./StatusMarks";
 import { words } from "./i18n";
 import type {
   FlowDayPlan,
@@ -19,6 +21,7 @@ interface Props {
   currentDate: string;
   language: Language;
   busy: boolean;
+  pending?: ReadonlySet<string>;
   editTask: (task: PlanningTask) => void;
   onWeekChange: (week: string) => void;
   onRemove: (day: FlowDayPlan, id: string) => void;
@@ -31,6 +34,7 @@ export function PlanningCalendar({
   currentDate,
   language,
   busy,
+  pending,
   editTask,
   onWeekChange,
   onRemove,
@@ -121,6 +125,7 @@ export function PlanningCalendar({
             inWindow={index >= windowStart && index < windowStart + 3}
             language={language}
             busy={busy}
+            pending={pending}
             editTask={editTask}
             onSelect={() => setSelectedDate(day.date)}
             onRemove={(id) => onRemove(day, id)}
@@ -176,6 +181,7 @@ function CalendarDay({
   inWindow,
   language,
   busy,
+  pending,
   editTask,
   onSelect,
   onRemove,
@@ -189,6 +195,7 @@ function CalendarDay({
   inWindow: boolean;
   language: Language;
   busy: boolean;
+  pending?: ReadonlySet<string>;
   editTask: Props["editTask"];
   onSelect: () => void;
   onRemove: (id: string) => void;
@@ -234,6 +241,7 @@ function CalendarDay({
             timer={timer}
             language={language}
             busy={busy}
+            pending={pending?.has(pendingStep(day.date, id)) ?? false}
             editTask={editTask}
             onRemove={onRemove}
           />
@@ -257,6 +265,7 @@ function CalendarStep({
   timer,
   language,
   busy,
+  pending,
   editTask,
   onRemove,
 }: {
@@ -267,6 +276,8 @@ function CalendarStep({
   timer?: FocusState["timer"];
   language: Language;
   busy: boolean;
+  /** Its move or removal is shown but not yet confirmed. */
+  pending: boolean;
   editTask: Props["editTask"];
   onRemove: (id: string) => void;
 }) {
@@ -278,7 +289,7 @@ function CalendarStep({
   const { ref, handleRef, isDragSource } = useDraggable({
     id: `week-step:${day.date}:${id}`,
     type: "planning-step",
-    disabled: busy || timing,
+    disabled: busy || timing || pending,
     data: { taskId: id, sourceDate: day.date },
   });
   const { ref: dropRef, isDropTarget } = useDroppable({
@@ -301,8 +312,9 @@ function CalendarStep({
         ref(element);
         dropRef(element);
       }}
-      className={`planning-calendar-step ${isDragSource ? "is-dragging" : ""} ${isDropTarget && !isDragSource ? "is-insert" : ""}`}
+      className={`planning-calendar-step ${isDragSource ? "is-dragging" : ""} ${isDropTarget && !isDragSource ? "is-insert" : ""} ${pending ? "is-pending" : ""}`}
       data-task-id={id}
+      aria-busy={pending || undefined}
       style={
         {
           "--outcome-color": outcome
@@ -315,7 +327,7 @@ function CalendarStep({
         <button
           ref={handleRef}
           className="planning-drag-handle"
-          disabled={busy || timing}
+          disabled={busy || timing || pending}
           title={
             timing
               ? language === "zh"
@@ -334,9 +346,10 @@ function CalendarStep({
         >
           {title}
         </button>
+        {pending && <PendingMark language={language} />}
         <button
           className="planning-step-remove"
-          disabled={busy || timing}
+          disabled={busy || timing || pending}
           aria-label={`${language === "zh" ? "移出日期" : "Remove from"} ${day.date}: ${title}`}
           onClick={() => onRemove(id)}
         >

@@ -1,6 +1,7 @@
 import { ArrowLeft } from "lucide-react";
 import { formattedMinutes, taskIndex } from "./domain";
 import { FocusBlock } from "./FocusBlock";
+import { pendingStep } from "./plan-updates";
 import { words } from "./i18n";
 import type { FocusState, Language, PlanState, PlanningTask } from "./model";
 
@@ -9,6 +10,8 @@ interface Props {
   focus: FocusState;
   language: Language;
   busy: boolean;
+  /** Day cards whose queue write is not yet confirmed. */
+  pending?: ReadonlySet<string>;
   /** Completed task IDs that wait for the re-read showing the result. */
   completing?: ReadonlySet<string>;
   editTask: (task: PlanningTask) => void;
@@ -25,6 +28,7 @@ export function FocusView({
   focus,
   language,
   busy,
+  pending,
   completing,
   editTask,
   complete,
@@ -79,7 +83,10 @@ export function FocusView({
               focus={focus}
               language={language}
               busy={busy}
-              settling={completing?.has(id) ?? false}
+              settling={Boolean(
+                completing?.has(id) ||
+                pending?.has(pendingStep(focus.date, id)),
+              )}
               onTimer={onTimer}
               editTask={editTask}
               complete={complete}

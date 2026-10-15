@@ -119,6 +119,10 @@ async function setupPlanner(context: BrowserContext, worker: Worker) {
         string,
         unknown
       >,
+      // While set, writes wait until a test releases them; failWrite rejects the next one.
+      holdWrites: false,
+      heldWrites: [] as (() => void)[],
+      failWrite: false,
     };
     Object.assign(globalThis, { plannerState: state });
     globalThis.fetch = async (input, init) => {
@@ -128,6 +132,22 @@ async function setupPlanner(context: BrowserContext, worker: Worker) {
         : {};
       const method = init?.method ?? "GET";
       state.calls.push({ path: url.pathname, method, body });
+      if (method !== "GET" && !url.pathname.endsWith("/tasks:sync")) {
+        if (state.holdWrites)
+          await new Promise<void>((resolve) => state.heldWrites.push(resolve));
+        if (state.failWrite) {
+          state.failWrite = false;
+          return new Response(
+            JSON.stringify({
+              error: {
+                status: "UNAVAILABLE",
+                message: "Synthetic save unavailable",
+              },
+            }),
+            { status: 503, headers: { "Content-Type": "application/json" } },
+          );
+        }
+      }
       const json = (value: unknown) =>
         Promise.resolve(
           new Response(JSON.stringify(value), {
@@ -313,4 +333,26 @@ export async function dragPlanner(
     { steps: 18 },
   );
   await page.mouse.up();
+}
+
+type WriteControl = {
+  holdWrites: boolean;
+  heldWrites: (() => void)[];
+  failWrite: boolean;
+};
+/** Holds, releases or fails the synthetic backend's writes. */
+export async function controlWrites(
+  worker: Worker,
+  change: { hold?: boolean; release?: boolean; fail?: boolean },
+) {
+  return worker.evaluate((change) => {
+    const state = (globalThis as unknown as { plannerState: WriteControl })
+      .plannerState;
+    if (change.hold !== undefined) state.holdWrites = change.hold;
+    if (change.fail !== undefined) state.failWrite = change.fail;
+    const held = state.heldWrites.length;
+    if (change.release)
+      for (const release of state.heldWrites.splice(0)) release();
+    return held;
+  }, change);
 }

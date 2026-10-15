@@ -135,11 +135,11 @@ export function TaskEditor({
             aria-label={`${text.estimate}: ${displayedTitle(task.title)}`}
             value={task.estimatedMinutes ?? 0}
             disabled={busy}
-            onChange={(event) =>
-              void run(() =>
-                actions.updateEstimate(task.id, Number(event.target.value)),
-              )
-            }
+            onChange={(event) => {
+              // Read now: a queued write runs after the select shows its saved value again.
+              const minutes = Number(event.target.value);
+              void run(() => actions.updateEstimate(task.id, minutes));
+            }}
           >
             <option value={0}>{text.unknown}</option>
             {estimateValues.map((value) => (

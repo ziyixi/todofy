@@ -1,4 +1,10 @@
-import type { Confirmed, FlowDayPlan, PlanningTask, PlusData } from "./model";
+import type {
+  Confirmed,
+  FlowDayPlan,
+  PlanningTask,
+  PlusData,
+  Stage,
+} from "./model";
 
 /** Data at least this old is read again when the view comes back. */
 export const REREAD_AFTER_MS = 60_000;
@@ -61,4 +67,54 @@ export function rereadsAfter(confirmed: Confirmed): boolean {
   return (
     !confirmed || (!Array.isArray(confirmed) && "managedLabels" in confirmed)
   );
+}
+
+/** A Review card whose stage write is not yet confirmed. */
+export function pendingTask(taskId: string): string {
+  return `task:${taskId}`;
+}
+/** A day card whose queue write is not yet confirmed. */
+export function pendingStep(date: string, taskId: string): string {
+  return `${date}:${taskId}`;
+}
+
+/** Shows a stage drag at once; the confirmed task (labels, etag) replaces it. */
+export function predictStage(taskId: string, stage: Stage) {
+  return (data: PlusData): PlusData => ({
+    ...data,
+    plan: {
+      ...data.plan,
+      tasks: data.plan.tasks.map((task) =>
+        task.id === taskId ? { ...task, stage } : task,
+      ),
+    },
+  });
+}
+
+/**
+ * Shows a day drag at once, mirroring moveTaskToDay: the step leaves its source day and is
+ * inserted before `beforeId` in the target day, or appended.
+ */
+export function predictMove(
+  taskId: string,
+  sourceDate: string | undefined,
+  targetDate: string,
+  beforeId?: string,
+) {
+  const move = <Day extends FlowDayPlan>(day: Day): Day => {
+    if (day.date === targetDate) {
+      const taskIds = day.taskIds.filter((id) => id !== taskId);
+      const before = beforeId ? taskIds.indexOf(beforeId) : -1;
+      taskIds.splice(before < 0 ? taskIds.length : before, 0, taskId);
+      return { ...day, taskIds };
+    }
+    if (day.date === sourceDate)
+      return { ...day, taskIds: day.taskIds.filter((id) => id !== taskId) };
+    return day;
+  };
+  return (data: PlusData): PlusData => ({
+    ...data,
+    days: data.days.map(move),
+    focus: move(data.focus),
+  });
 }

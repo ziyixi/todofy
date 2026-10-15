@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   CalendarDays,
   Check,
@@ -18,13 +18,14 @@ import { TaskEditor } from "./TaskEditor";
 import { BoardLabels } from "./BoardLabels";
 import { WeeklyGoals } from "./WeeklyGoals";
 import type {
-  Confirmed,
   Language,
+  PendingChange,
   PlanState,
   PlanningTask,
   PlusActions,
   PlusData,
   PlusSnapshot,
+  RunOperation,
   View,
 } from "./model";
 
@@ -53,7 +54,24 @@ export function App({
   snapshot,
   onSnapshot,
 }: Props) {
-  const [data, setData] = useState<PlusData | undefined>(snapshot?.data);
+  // What the server confirmed, from reads and writes. Pending drags are drawn on top of it.
+  const [confirmed, setConfirmed] = useState<PlusData | undefined>(
+    snapshot?.data,
+  );
+  const [pending, setPending] = useState<readonly PendingChange[]>([]);
+  const data = useMemo(
+    () =>
+      confirmed &&
+      pending.reduce(
+        (shown, change) => change.predict?.(shown) ?? shown,
+        confirmed,
+      ),
+    [confirmed, pending],
+  );
+  const pendingCards = useMemo(
+    () => new Set(pending.flatMap((change) => change.pending)),
+    [pending],
+  );
   // An empty week follows the server's current week, including a Monday rollover while away.
   const displayedWeek = useRef(
     snapshot && snapshot.data.days[0]?.date !== snapshot.data.plan.week
@@ -62,13 +80,17 @@ export function App({
   );
   const weekRequest = useRef(0);
   const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
+  // Confirm-first writes queued or running; they disable write controls.
+  const [waiting, setWaiting] = useState(0);
+  const busy = waiting > 0;
   const [weekLoading, setWeekLoading] = useState(false);
   const [reading, setReading] = useState(0);
-  const lock = useRef(false);
-  // Changes when a write starts or ends; a read that overlapped a write may predate it.
-  const writes = useRef(0);
-  const rereadAfterWrite = useRef(false);
+  // One queue runs every write in order: FlowDay queue updates keep the last write without an
+  // etag, and a later Todoist write needs the etag an earlier one returns. A failure advances
+  // the epoch, which drops the writes queued behind it.
+  const queue = useRef<Promise<unknown>>(Promise.resolve());
+  const writes = useRef({ queued: 0, settled: 0, epoch: 0 });
+  const rereadAfterWrites = useRef(false);
   const loadedAt = useRef(snapshot?.readAt ?? 0);
   const [selectedId, setSelectedId] = useState(externalTaskId ?? "");
   const completionIds = useRef(new Map<string, string>());
@@ -78,14 +100,15 @@ export function App({
   const text = words(language);
   const load = useCallback(async (): Promise<boolean> => {
     const request = ++weekRequest.current;
-    const version = writes.current;
+    const settled = writes.current.settled;
     try {
       const week = displayedWeek.current;
       const next = await actions.load(week || undefined);
-      if (version !== writes.current || lock.current) return false;
+      // A write confirmed during the read may be missing from it.
+      if (settled !== writes.current.settled) return false;
       if (!displayedWeek.current) displayedWeek.current = next.plan.week;
       loadedAt.current = Date.now();
-      setData((current) =>
+      setConfirmed((current) =>
         current && request !== weekRequest.current
           ? { ...next, days: current.days }
           : next,
@@ -100,56 +123,64 @@ export function App({
       if (request === weekRequest.current) setWeekLoading(false);
     }
   }, [actions, onReady]);
-  // Reads never take the write lock or disable controls.
-  const revalidate = useCallback(
-    async (report = true) => {
-      setReading((count) => count + 1);
-      try {
-        while (!(await load())) {
-          // The read overlapped a write. A running write reads again when it ends.
-          if (lock.current) {
-            rereadAfterWrite.current = true;
-            return;
+  // Reads never wait for writes or disable controls.
+  const revalidate = useCallback(async () => {
+    setReading((count) => count + 1);
+    try {
+      while (!(await load())) {
+        // Read again now, or after the last queued write if any remain.
+        if (writes.current.queued) {
+          rereadAfterWrites.current = true;
+          return;
+        }
+      }
+    } catch (failure) {
+      const message =
+        failure instanceof Error ? failure.message : text.lastError;
+      // A failed write's error stays: it says what was not saved.
+      setError((current) => current || message);
+    } finally {
+      setReading((count) => count - 1);
+    }
+  }, [load, text.lastError]);
+  const run: RunOperation = useCallback(
+    (operation, change) => {
+      const epoch = writes.current.epoch;
+      writes.current.queued++;
+      if (change) setPending((list) => [...list, change]);
+      else setWaiting((count) => count + 1);
+      setError("");
+      const write = queue.current.then(async () => {
+        let reread = false;
+        try {
+          // An earlier failure rolled back the changes this write was based on.
+          if (epoch !== writes.current.epoch) return false;
+          const result = await operation();
+          setConfirmed((current) => current && applyConfirmed(current, result));
+          reread = rereadsAfter(result);
+          return true;
+        } catch (failure) {
+          writes.current.epoch++;
+          setPending([]);
+          setError(failure instanceof Error ? failure.message : text.lastError);
+          // Another window may have changed the timer, queue or task. Show its current state.
+          reread = true;
+          return false;
+        } finally {
+          if (change)
+            setPending((list) => list.filter((item) => item !== change));
+          else setWaiting((count) => count - 1);
+          writes.current.queued--;
+          writes.current.settled++;
+          if (reread) rereadAfterWrites.current = true;
+          if (rereadAfterWrites.current && !writes.current.queued) {
+            rereadAfterWrites.current = false;
+            void revalidate();
           }
         }
-      } catch (failure) {
-        if (report)
-          setError(failure instanceof Error ? failure.message : text.lastError);
-      } finally {
-        setReading((count) => count - 1);
-      }
-    },
-    [load, text.lastError],
-  );
-  const run = useCallback(
-    async (operation: () => Promise<Confirmed>): Promise<boolean> => {
-      if (lock.current) return false;
-      lock.current = true;
-      writes.current++;
-      setBusy(true);
-      setError("");
-      let reread = false;
-      let failed = false;
-      try {
-        const confirmed = await operation();
-        setData((current) => current && applyConfirmed(current, confirmed));
-        reread = rereadsAfter(confirmed);
-        return true;
-      } catch (failure) {
-        setError(failure instanceof Error ? failure.message : text.lastError);
-        // Another window may have changed the timer or task. Show its current state.
-        reread = failed = true;
-        return false;
-      } finally {
-        lock.current = false;
-        writes.current++;
-        setBusy(false);
-        if (reread || rereadAfterWrite.current) {
-          rereadAfterWrite.current = false;
-          // A failed re-read keeps the last confirmed view and the original operation error.
-          void revalidate(!failed);
-        }
-      }
+      });
+      queue.current = write;
+      return write;
     },
     [revalidate, text.lastError],
   );
@@ -170,8 +201,8 @@ export function App({
     return () => document.removeEventListener("visibilitychange", visible);
   }, [revalidate]);
   useEffect(() => {
-    if (data) onSnapshot?.({ data, readAt: loadedAt.current });
-  }, [data, onSnapshot]);
+    if (confirmed) onSnapshot?.({ data: confirmed, readAt: loadedAt.current });
+  }, [confirmed, onSnapshot]);
   useEffect(() => {
     if (externalTaskId) setSelectedId(externalTaskId);
   }, [externalTaskId]);
@@ -184,23 +215,25 @@ export function App({
     if (!data || !day || day.taskIds.includes(id)) return;
     await run(() => actions.updateQueue([...day.taskIds, id], day));
   }
-  function changeWeek(week: string) {
+  function changeWeek(week: string): Promise<void> {
     const request = ++weekRequest.current;
+    const settled = writes.current.settled;
     displayedWeek.current = week;
     setWeekLoading(true);
-    return actions
-      .loadDays(week)
-      .then((days) => {
-        if (weekRequest.current === request)
-          setData((current) => (current ? { ...current, days } : current));
-      })
-      .catch((failure) => {
-        if (weekRequest.current === request)
-          setError(failure instanceof Error ? failure.message : text.lastError);
-      })
-      .finally(() => {
-        if (weekRequest.current === request) setWeekLoading(false);
-      });
+    return actions.loadDays(week).then(
+      (days) => {
+        if (weekRequest.current !== request) return;
+        // A write confirmed during the read may be missing from these queues.
+        if (settled !== writes.current.settled) return changeWeek(week);
+        setConfirmed((current) => current && { ...current, days });
+        setWeekLoading(false);
+      },
+      (failure) => {
+        if (weekRequest.current !== request) return;
+        setError(failure instanceof Error ? failure.message : text.lastError);
+        setWeekLoading(false);
+      },
+    );
   }
   function commandTimer(
     action: "start" | "pause" | "resume" | "stop",
@@ -321,6 +354,7 @@ export function App({
                 onWeekChange={changeWeek}
                 language={language}
                 busy={busy || weekLoading || !data.plan.configured}
+                pending={pendingCards}
                 run={run}
                 actions={actions}
                 editTask={(task) => setSelectedId(task.id)}
@@ -333,6 +367,7 @@ export function App({
               focus={data.focus}
               language={language}
               busy={busy || !data.plan.configured}
+              pending={pendingCards}
               completing={completing}
               editTask={(task) => setSelectedId(task.id)}
               complete={complete}
