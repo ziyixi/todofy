@@ -257,6 +257,19 @@ async def mutate(core: Any, method: str, request: dict[str, Any]) -> dict[str, A
         commands = await build_commands(core, method, request, current["labels"])
         await store.start_action(env.DB, request_id, digest, commands)
     result = await todoist.commands(core, commands)
+    if method in ("SetTaskPlan", "SetTaskLead"):
+        # Every explicit new-week write replaces the membership; old resets cannot select it. A commitment
+        # or Bet chosen on the week's last day is recorded for the next week, so Monday's reset keeps it.
+        # Recorded from the labels just written, before the confirming read: if that read fails, the next
+        # page scan would remember a Sunday choice under the ending week.
+        written = commands[0]["args"]["labels"]
+        names = plus.role_labels(current["labels"])
+        marks = int(names["committed"] in written), int(names["bets"] in written)
+        if any(marks):
+            week = plus.membership_week(current["today"], current["week_start"], request)
+            await store.run(env.DB, sql.REMEMBER_WEEK, request["task_id"], week, *marks)
+        else:
+            await store.run(env.DB, sql.FORGET_TASK, request["task_id"])
     if method == "CompleteTask":
         response = {"task_id": request["task_id"]}
     elif method == "AppendTaskSteps":
@@ -267,16 +280,6 @@ async def mutate(core: Any, method: str, request: dict[str, Any]) -> dict[str, A
     else:
         task = await todoist.task(core, request["task_id"])
         response = {"task": plus.task_view(task, current["today"], current["labels"])}
-        # Every explicit new-week write replaces the membership; old resets cannot select it. A commitment
-        # or Bet chosen on the week's last day is recorded for the next week, so Monday's reset keeps it.
-        await store.run(
-            env.DB,
-            sql.REMEMBER_WEEK,
-            str(task["id"]),
-            plus.membership_week(current["today"], current["week_start"], request),
-            int(plus.role_labels(current["labels"])["committed"] in task.get("labels", [])),
-            int(plus.role_labels(current["labels"])["bets"] in task.get("labels", [])),
-        )
     await store.run(env.DB, sql.FINISH_ACTION, json.dumps(response, separators=(",", ":")), request_id)
     return response
 

@@ -29,6 +29,20 @@ def test_stage_change_retains_unrelated_labels_and_bet_does_not_promote():
     assert plus.plan_labels(source, {"area": "personal"}) == ["bets", "committed", "deep", "focus", "home", "lead_2w"]
 
 
+def test_choosing_the_stage_a_task_already_shows_removes_no_label():
+    """A Sunday keep resends the commitment; the owner's other horizon labels stay (no implicit removal)."""
+    source = task(labels=["committed", "quarter", "candiate", "office", "waiting"])
+    assert plus.plan_labels(source, {"stage": "committed"}) == ["candiate", "committed", "office", "quarter", "waiting"]
+    assert plus.membership_week("2026-10-18", "2026-10-12", {"stage": "committed"}) == "2026-10-19"
+    assert plus.plan_labels(task(labels=["quarter", "focus"]), {"stage": "quarterly"}) == ["focus", "quarter"]
+    # A stage the labels do not already give still replaces every planning label.
+    assert plus.plan_labels(task(labels=["committed", "quarter"]), {"stage": "weekly"}) == ["focus"]
+    assert plus.plan_labels(task(labels=["quarter", "focus"]), {"stage": "weekly"}) == ["focus"]
+    assert plus.plan_labels(task(labels=["focus", "quick"]), {"stage": "weekly"}) == ["focus", "quick"]
+    # A date-driven weekly candidate has no planning label: choosing weekly pins it with one.
+    assert plus.plan_labels(task(labels=[], due={"date": TODAY}), {"stage": "weekly"}) == ["focus"]
+
+
 def test_display_preserves_candidate_date_rule_and_deduplicates_commitments():
     assert plus.task_view(task(labels=["focus", "committed"]), TODAY)["stage"] == "committed"
     assert plus.task_view(task(due={"date": "2026-10-12"}), TODAY)["stage"] == "weekly"
@@ -106,7 +120,8 @@ def test_membership_never_moves_back_so_sunday_scans_cannot_undo_a_next_week_cho
     # The ten-minute scan on Sunday remembers both under the ending week.
     db.execute(sql.REMEMBER_WEEK, ("sunday", "2026-10-12", 1, 1))
     db.execute(sql.REMEMBER_WEEK, ("weekday", "2026-10-12", 1, 0))
-    assert week_of("sunday") == ("2026-10-19", 1, 0)
+    # The week stays; the marks follow what the scan saw (a Bet added since in native Todoist).
+    assert week_of("sunday") == ("2026-10-19", 1, 1)
     assert week_of("weekday") == ("2026-10-12", 1, 0)
     assert db.execute(sql.NEXT_WEEK, ("2026-10-12",)).fetchall() == [("sunday",)]
     # Monday's reset selects only the ending week's row, and the new week's scan may update the kept one.
@@ -116,6 +131,33 @@ def test_membership_never_moves_back_so_sunday_scans_cannot_undo_a_next_week_cho
     assert db.execute(sql.NEXT_WEEK, ("2026-10-19",)).fetchall() == []
     plan = " ".join(row[3] for row in db.execute("EXPLAIN QUERY PLAN " + sql.NEXT_WEEK, ("2026-10-12",)))
     assert "plus_weeks_ended" in plan and "TEMP B-TREE" not in plan
+
+
+def test_a_sunday_removal_updates_a_kept_choice_and_one_leaving_no_mark_forgets_it():
+    db = sqlite3.connect(":memory:")
+    db.executescript((Path(__file__).resolve().parents[2] / "migrations/0006_todoist_plus.sql").read_text())
+
+    def week_of(task_id):
+        return db.execute("SELECT week_start, committed, bet FROM plus_weeks WHERE task_id=?", (task_id,)).fetchone()
+
+    # Kept on Sunday with both marks; removing the Bet keeps the commitment for next week.
+    db.execute(sql.REMEMBER_WEEK, ("both", "2026-10-19", 1, 1))
+    db.execute(sql.REMEMBER_WEEK, ("both", "2026-10-12", 1, 0))
+    assert week_of("both") == ("2026-10-19", 1, 0)
+    # A kept goal whose Bet is removed again is no longer a choice.
+    db.execute(sql.REMEMBER_WEEK, ("goal", "2026-10-19", 0, 1))
+    db.execute(sql.FORGET_TASK, ("goal",))
+    assert week_of("goal") is None
+    assert db.execute(sql.NEXT_WEEK, ("2026-10-12",)).fetchall() == [("both",)]
+    # So a mark added again later that Sunday, here by a page scan, resets on Monday as usual.
+    db.execute(sql.REMEMBER_WEEK, ("goal", "2026-10-12", 0, 1))
+    assert week_of("goal") == ("2026-10-12", 0, 1)
+    assert [row[0] for row in db.execute(sql.ENDED_WEEK, ("2026-10-19",))] == ["goal"]
+    # An unchanged scan writes nothing.
+    changes = db.total_changes
+    db.execute(sql.REMEMBER_WEEK, ("both", "2026-10-12", 1, 0))
+    db.execute(sql.REMEMBER_WEEK, ("goal", "2026-10-12", 0, 1))
+    assert db.total_changes == changes
 
 
 def test_update_time_is_whole_seconds_utc_and_absent_when_unknown():

@@ -27,17 +27,22 @@ async def reset_ended(core: Any, week: str, mapping: list[dict[str, Any]]) -> bo
         if previous and previous["response"] is not None:
             await store.run(env.DB, sql.FORGET_WEEK, task_id, record["week_start"])
             continue
+        # Read first on a retry too: a task deleted since the stored update would otherwise fail it on every tick.
+        try:
+            task = await todoist.task(core, task_id)
+        except todoist.PlusError as error:
+            if error.reason != "NOT_FOUND":
+                raise
+            await store.run(env.DB, sql.FORGET_WEEK, task_id, record["week_start"])
+            continue
         if previous:
             commands = json.loads(previous["commands"])
         else:
-            try:
-                task = await todoist.task(core, task_id)
-            except todoist.PlusError as error:
-                if error.reason != "NOT_FOUND":
-                    raise
+            labels = plus.reset_labels(task, record, mapping)
+            if set(labels) == set(task.get("labels") or []):
+                # No mark left to reset: skip the Todoist write, which could still change its updated_at.
                 await store.run(env.DB, sql.FORGET_WEEK, task_id, record["week_start"])
                 continue
-            labels = plus.reset_labels(task, record, mapping)
             commands = [
                 {"type": "item_update", "uuid": plus.command_id(request_id), "args": {"id": task_id, "labels": labels}}
             ]

@@ -86,7 +86,8 @@ def membership_week(today: str, week: str, request: dict[str, Any]) -> str:
     """The week whose Monday reset a planning write's marks wait for.
 
     On the week's last day an explicit commitment or Bet is a choice for the next week, so the coming
-    reset leaves the task's marks in place. Every other write, removing a mark included, stays in this week.
+    reset leaves the task's marks in place: both of them, as a task has one membership row. Every other
+    write gives this week, which never moves a kept row back (REMEMBER_WEEK).
     """
     monday = datetime.strptime(week, "%Y-%m-%d").date()
     chosen = request.get("stage") == "committed" or request.get("bet") is True
@@ -171,23 +172,29 @@ def task_etag(task: dict[str, Any], mapping: list[dict[str, Any]] | None = None)
     return fingerprint(values)
 
 
+def label_stage(labels: set[str], names: dict[str, str]) -> str:
+    """The stage a task's planning labels give, the highest first; a Quick task is never weekly or monthly."""
+    if names.get("committed") in labels:
+        return "committed"
+    if names.get("quarter") in labels:
+        return "quarterly"
+    if names.get("focus") in labels and "quick" not in labels:
+        return "weekly"
+    if names.get("candiate") in labels and "quick" not in labels:
+        return "monthly"
+    return "none"
+
+
 def task_view(task: dict[str, Any], today: str, mapping: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     names = role_labels(mapping)
     labels = set(task.get("labels") or [])
     due = str((task.get("due") or {}).get("date") or "")
     deadline = str((task.get("deadline") or {}).get("date") or "")
     candidate_date = due[:10] if due else deadline
-    stage = "none"
-    if names.get("committed") in labels:
-        stage = "committed"
-    elif names.get("quarter") in labels:
-        stage = "quarterly"
-    elif names.get("focus") in labels and "quick" not in labels:
-        stage = "weekly"
-    elif names.get("candiate") in labels and "quick" not in labels:
-        stage = "monthly"
-    elif (
-        candidate_date
+    stage = label_stage(labels, names)
+    if (
+        stage == "none"
+        and candidate_date
         and not labels.intersection(
             {
                 "onhold",
@@ -248,12 +255,15 @@ def plan_labels(
         stage = request["stage"]
         if stage not in STAGES:
             raise ValueError("BAD_REQUEST")
-        labels -= {names[role] for role in PLANNING_ROLES if role in names}
-        if STAGES[stage]:
-            label = names.get(STAGES[stage])
-            if label is None:
-                raise ValueError("BAD_REQUEST")
-            labels.add(label)
+        # Only a change of stage replaces the planning labels. Choosing the stage the task already shows
+        # (a Sunday keep, a details save) leaves its other horizon labels, such as quarter, in place.
+        if label_stage(labels, names) != stage:
+            labels -= {names[role] for role in PLANNING_ROLES if role in names}
+            if STAGES[stage]:
+                label = names.get(STAGES[stage])
+                if label is None:
+                    raise ValueError("BAD_REQUEST")
+                labels.add(label)
     if "area" in request:
         area = request["area"]
         if area not in AREAS:

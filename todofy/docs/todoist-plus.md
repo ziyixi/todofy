@@ -56,18 +56,30 @@ and normal timer actions. Local/pseudo tasks retain their FlowDay identity and o
 Rollover is disabled until mapping confirmation. The existing ten-minute cron observes planning marks;
 after Monday 00:00 in the confirmed Todoist timezone, it processes up to five remembered old-week tasks
 per invocation. Unfinished old commitments become weekly candidates; old Bets are removed without
-changing their candidate stage. Unrelated labels, task content, dates and history remain intact.
+changing their candidate stage. Unrelated labels, task content, dates and history remain intact. A
+remembered task with no mark left to reset gets no Todoist write, and one deleted in Todoist is
+forgotten, including while its reset waits to be retried.
 New-week extension decisions wait for the old batch to finish and replace the remembered membership,
 so an old reset cannot clear those decisions. Repeating setup also settles an ended week first.
 
 A commitment or Bet chosen on Sunday is a choice for the next week. On the last day of the week in the
 account timezone, a SetTaskPlan that sets `stage = committed` or `bet = true` records the task under the
-next week's Monday, so the coming reset leaves both of its marks in place; the reset a week later treats
-it like any other commitment. Every other write, removing a mark included, stays in the current week, and
-an unfinished commitment made earlier in the week still resets. Membership never moves back to an older
-week (`REMEMBER_WEEK`), so neither the ten-minute page scan nor a later write that day can undo the choice.
+next week's Monday, so the coming reset leaves its marks in place; the reset a week later treats it like
+any other commitment. A task has one membership row, so both of its marks stay: an unfinished commitment
+made next week's Bet on Sunday stays committed, and a Bet committed on Sunday stays a Bet. Only Plus writes
+choose; a mark added in native Todoist on Sunday resets as usual, and so does an unfinished commitment made
+earlier in the week. The membership is recorded from the labels just written, right after the Sync write,
+so a failed confirming read cannot leave the choice to a page scan. If the Sync answer itself is lost,
+the extension's weekly review still lists the task as not kept, with "Keep for next week".
+
+While the task keeps a mark, its row never moves back to an older week (`REMEMBER_WEEK`), so neither the
+ten-minute page scan nor an unrelated write that day can undo the choice, although both update its marks.
+A Plus write that leaves a task with neither mark forgets its row: Monday has nothing to reset, a choice
+kept earlier that Sunday is undone, and a mark added again that day resets on Monday as usual. Choosing the stage a task already shows changes no label, so "Keep for next week" in the
+extension's weekly review, which sends the commitment or Bet again, never drops another horizon label.
 The extension sends only the fields the owner changed, so editing a committed task's area on Sunday does
-not keep it by accident; its weekly review offers "Keep for next week" for this week's commitments and Bets.
+not keep it by accident. Extension builds before this rule always send the stage from task details: reload
+the extension before the first Sunday after the backend is released.
 
 Native Todoist remains editable. Marks made there are observed by the next page scan; a native decision
 made at the week boundary before that scan has no separate week identity. The extension's planning

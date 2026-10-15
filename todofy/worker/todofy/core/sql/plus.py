@@ -16,14 +16,17 @@ REVOKE_CONNECTION = "UPDATE plus_connections SET revoked=1 WHERE id=?"
 ACTION = "SELECT * FROM plus_actions WHERE request_id=?"
 START_ACTION = "INSERT INTO plus_actions(request_id,request_hash,commands,created_at) VALUES(?,?,?,?)"
 FINISH_ACTION = "UPDATE plus_actions SET response=? WHERE request_id=?"
-# A row never moves back to an older week: a choice recorded for the next week on Sunday stays there
-# when that day's page scans or other writes remember the task under the ending week.
+# Only tasks with a mark are remembered. The marks follow the latest page scan or write, but a row never moves
+# back to an older week, so a choice recorded for the next week on Sunday survives that day's scans and later
+# writes, which remember the task under the ending week.
 REMEMBER_WEEK = (
     "INSERT INTO plus_weeks(task_id,week_start,committed,bet) VALUES(?,?,?,?) ON CONFLICT(task_id) DO UPDATE SET "
-    "week_start=excluded.week_start,committed=excluded.committed,bet=excluded.bet WHERE "
-    "plus_weeks.week_start<=excluded.week_start AND (plus_weeks.week_start!=excluded.week_start "
-    "OR plus_weeks.committed!=excluded.committed OR plus_weeks.bet!=excluded.bet)"
+    "week_start=MAX(plus_weeks.week_start,excluded.week_start),committed=excluded.committed,bet=excluded.bet "
+    "WHERE plus_weeks.week_start<excluded.week_start OR plus_weeks.committed!=excluded.committed "
+    "OR plus_weeks.bet!=excluded.bet"
 )
+# A write that leaves a task with neither mark: nothing for Monday to reset, and no choice kept for next week.
+FORGET_TASK = "DELETE FROM plus_weeks WHERE task_id=?"
 RESET_BATCH = 5
 ENDED_WEEK = f"SELECT * FROM plus_weeks WHERE week_start < ? ORDER BY week_start,task_id LIMIT {RESET_BATCH}"
 FORGET_WEEK = "DELETE FROM plus_weeks WHERE task_id=? AND week_start=?"

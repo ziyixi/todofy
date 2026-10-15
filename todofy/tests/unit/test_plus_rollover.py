@@ -1,0 +1,285 @@
+"""The Sunday rule through runtime/plus_api.handle and plus_week.tick with a controlled clock.
+
+workerd has no clock control, so tests/runtime only reaches the Sunday branch on a real Sunday. Here the
+runtime modules run on host CPython against D1 as SQLite (every migration), a fake Todoist that applies
+Sync commands once per UUID, and an account clock in US/Pacific. runtime/ imports the Pyodide modules, so
+they are stood in with minimal stubs and every module imported is removed afterwards (as in
+test_owner_ui_handle.py). Synthetic tasks only.
+"""
+
+import asyncio
+import json
+import sqlite3
+import sys
+import types
+import uuid
+from collections.abc import Iterator
+from datetime import datetime
+from pathlib import Path
+from typing import Any
+from zoneinfo import ZoneInfo
+
+import pytest
+
+TIMEZONE = "America/Los_Angeles"
+WEEK, NEXT = "2026-10-12", "2026-10-19"
+MIGRATIONS = Path(__file__).resolve().parents[2] / "migrations"
+LABELS = ("office", "home", "bets", "committed", "focus", "candiate", "quarter", "waiting")
+LABELS += ("lead_1d", "lead_3d", "lead_1w", "lead_2w", "lead_1m")
+
+
+class Statement:
+    def __init__(self, db: sqlite3.Connection, sql: str, args: tuple[Any, ...] = ()) -> None:
+        self.db, self.sql, self.args = db, sql, args
+
+    def bind(self, *args: Any) -> "Statement":
+        return Statement(self.db, self.sql, args)
+
+    def rows(self) -> list[dict[str, Any]]:
+        rows = [dict(row) for row in self.db.execute(self.sql, self.args).fetchall()]
+        self.db.commit()
+        return rows
+
+    async def run(self) -> None:
+        self.rows()
+
+    async def first(self) -> dict[str, Any] | None:
+        rows = self.rows()
+        return rows[0] if rows else None
+
+    async def all(self) -> Any:
+        return types.SimpleNamespace(results=self.rows())
+
+
+class D1:
+    def __init__(self) -> None:
+        self.db = sqlite3.connect(":memory:")
+        self.db.row_factory = sqlite3.Row
+        for path in sorted(MIGRATIONS.glob("*.sql")):
+            self.db.executescript(path.read_text())
+
+    def prepare(self, sql: str) -> Statement:
+        return Statement(self.db, sql)
+
+    async def batch(self, statements: list[Statement]) -> list[Any]:
+        return [types.SimpleNamespace(results=statement.rows()) for statement in statements]
+
+    def weeks(self) -> dict[str, tuple[str, int, int]]:
+        rows = self.db.execute("SELECT task_id, week_start, committed, bet FROM plus_weeks").fetchall()
+        return {row[0]: (row[1], row[2], row[3]) for row in rows}
+
+
+class Todoist:
+    """Tasks by ID; a Sync command applies once per UUID, and a missing item fails its command."""
+
+    def __init__(self, error: type[Exception]) -> None:
+        self.error = error
+        self.labels = [{"id": "id-" + role, "name": role} for role in LABELS]
+        self.tasks: dict[str, dict[str, Any]] = {}
+        self.applied: set[str] = set()
+        self.calls: list[str] = []
+        self.fail_sync = 0
+        self.fail_read_after_sync = 0
+
+    def add(self, task_id: str, labels: list[str]) -> None:
+        self.tasks[task_id] = {"id": task_id, "content": "Synthetic " + task_id, "labels": labels, "project_id": "p"}
+
+    def labels_of(self, task_id: str) -> list[str]:
+        return sorted(self.tasks[task_id]["labels"])
+
+    async def metadata(self, _core: Any) -> dict[str, Any]:
+        return {"timezone": TIMEZONE, "labels": self.labels, "filters": []}
+
+    async def list(self, _core: Any, limit: int = 200, cursor: str = "") -> tuple[list[dict[str, Any]], str]:
+        self.calls.append("list")
+        return [dict(task) for task in self.tasks.values()], ""
+
+    async def task(self, _core: Any, task_id: str) -> dict[str, Any]:
+        after_sync = self.calls[-1:] == ["sync"]
+        self.calls.append("task")
+        if after_sync and self.fail_read_after_sync:
+            self.fail_read_after_sync -= 1
+            raise self.error("UNAVAILABLE")
+        if task_id not in self.tasks:
+            raise self.error("NOT_FOUND")
+        return dict(self.tasks[task_id])
+
+    async def commands(self, _core: Any, commands: list[dict[str, Any]]) -> dict[str, Any]:
+        self.calls.append("sync")
+        if self.fail_sync:
+            self.fail_sync -= 1
+            raise self.error("UNAVAILABLE")
+        for command in commands:
+            if command["uuid"] in self.applied:
+                continue
+            if command["args"]["id"] not in self.tasks:
+                raise self.error("ACTION_NOT_ALLOWED")  # plus_todoist.commands on a non-ok item status
+            self.applied.add(command["uuid"])
+            self.tasks[command["args"]["id"]]["labels"] = list(command["args"]["labels"])
+        return {"sync_status": {command["uuid"]: "ok" for command in commands}, "temp_id_mapping": {}}
+
+
+class Stack:
+    def __init__(self, runtime: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+        self.runtime, self.clock = runtime, runtime.clock
+        self.d1 = D1()
+        self.todoist = Todoist(runtime.todoist.PlusError)
+        for name in ("metadata", "task", "commands"):
+            monkeypatch.setattr(runtime.todoist, name, getattr(self.todoist, name))
+        monkeypatch.setattr(runtime.todoist, "tasks", self.todoist.list)
+        monkeypatch.setattr(runtime.plus_api, "account_day", self.account_day)
+        monkeypatch.setattr(runtime.plus_api.backup, "holds_ledger", lambda *_: False)
+        env = types.SimpleNamespace(DB=self.d1, TODOIST_DEFAULT_PROJECT_ID="mail")
+        self.core = types.SimpleNamespace(env=env, plus_lock=asyncio.Lock(), todoist_wait=lambda _now: None, sql=None)
+
+    def at(self, local: str) -> None:
+        self.clock["ms"] = int(datetime.fromisoformat(local).replace(tzinfo=ZoneInfo(TIMEZONE)).timestamp() * 1000)
+
+    def account_day(self, timezone: str) -> str:
+        return datetime.fromtimestamp(self.clock["ms"] / 1000, ZoneInfo(timezone)).date().isoformat()
+
+    def call(self, method: str, **request: Any) -> dict[str, Any]:
+        result = asyncio.run(self.runtime.plus_api.handle(self.core, method, json.dumps(request), owner=True))
+        return {"error": result["error"]} if "error" in result else json.loads(result["ok"])
+
+    def plan(self) -> dict[str, Any]:
+        return self.call("ReadPlan")["plan"]
+
+    def scan(self) -> dict[str, dict[str, Any]]:
+        """The extension's task read, which remembers every marked task under the current week."""
+        return {task["id"]: task for task in self.call("ListPlanningTasks", page_size=200)["planning_tasks"]}
+
+    def set_plan(self, task_id: str, **change: Any) -> dict[str, Any]:
+        etag = self.scan()[task_id]["etag"]
+        return self.call("SetTaskPlan", task_id=task_id, etag=etag, request_id=str(uuid.uuid4()), **change)
+
+    def tick(self) -> None:
+        self.core.plus_next_tick = 0
+        asyncio.run(self.runtime.plus_week.tick(self.core))
+
+
+@pytest.fixture
+def stack(monkeypatch: pytest.MonkeyPatch) -> Iterator[Stack]:
+    before = set(sys.modules)
+    clock = {"ms": 0}
+    stubs = {name: types.ModuleType(name) for name in ("js", "pyodide", "pyodide.ffi", "workers")}
+    stubs["js"].Date = types.SimpleNamespace(now=lambda: clock["ms"])
+    stubs["js"].Object = types.SimpleNamespace(fromEntries=lambda entries: dict(entries))
+    stubs["pyodide.ffi"].to_js = lambda value, dict_converter=None: value
+    stubs["pyodide.ffi"].JsException = type("JsException", (Exception,), {})
+    stubs["workers"].fetch = None
+    for name, module in stubs.items():
+        monkeypatch.setitem(sys.modules, name, module)
+    from todofy.runtime import plus_api, plus_week
+    from todofy.runtime import plus_todoist as todoist
+
+    runtime = types.SimpleNamespace(plus_api=plus_api, plus_week=plus_week, todoist=todoist, clock=clock)
+    stack = Stack(runtime, monkeypatch)
+    stack.at("2026-10-14T09:00:00")  # Wednesday
+    stack.todoist.add("weekday", ["office", "candiate"])
+    stack.todoist.add("fresh", ["home", "focus"])
+    stack.todoist.add("goal", ["home"])
+    plan = stack.plan()
+    assert "plan" in stack.call("ConfirmPlanMapping", etag=plan["etag"], request_id=str(uuid.uuid4()))
+    assert stack.set_plan("weekday", stage="committed")["task"]["stage"] == "committed"
+    yield stack
+    for name in set(sys.modules) - before:
+        if name.startswith("todofy.runtime"):
+            del sys.modules[name]
+
+
+def test_sunday_choices_survive_monday_while_earlier_commitments_roll(stack: Stack) -> None:
+    stack.at("2026-10-18T20:00:00")  # Sunday evening
+    assert stack.set_plan("fresh", stage="committed")["task"]["stage"] == "committed"
+    assert stack.set_plan("goal", bet=True)["task"]["bet"] is True
+    stack.scan()
+    stack.tick()  # Sunday's page scans remember every marked task under the ending week
+    assert stack.d1.weeks() == {"weekday": (WEEK, 1, 0), "fresh": (NEXT, 1, 0), "goal": (NEXT, 0, 1)}
+    assert stack.plan()["next_week_task_ids"] == ["fresh", "goal"]
+    stack.at("2026-10-19T00:00:00")  # Monday 00:00
+    stack.tick()
+    assert stack.todoist.labels_of("weekday") == ["focus", "office"]
+    assert stack.todoist.labels_of("fresh") == ["committed", "home"]
+    assert stack.todoist.labels_of("goal") == ["bets", "home"]
+    # A week later they reset like any other commitment and Bet.
+    stack.at("2026-10-21T09:00:00")
+    stack.scan()
+    stack.at("2026-10-26T00:01:00")
+    stack.tick()
+    assert stack.todoist.labels_of("fresh") == ["focus", "home"]
+    assert stack.todoist.labels_of("goal") == ["home"]
+
+
+def test_a_sunday_bet_on_an_unfinished_commitment_keeps_both_of_its_marks(stack: Stack) -> None:
+    """One membership row per task: the documented rule, not a guess about which mark was meant."""
+    stack.at("2026-10-18T20:00:00")
+    stack.set_plan("weekday", bet=True)
+    stack.at("2026-10-19T00:05:00")
+    stack.tick()
+    assert stack.todoist.labels_of("weekday") == ["bets", "committed", "office"]
+
+
+def test_keeping_a_commitment_writes_no_label_change(stack: Stack) -> None:
+    stack.todoist.add("horizon", ["committed", "quarter", "office", "waiting"])
+    stack.at("2026-10-18T20:00:00")
+    assert stack.set_plan("horizon", stage="committed")["task"]["stage"] == "committed"
+    assert stack.todoist.labels_of("horizon") == ["committed", "office", "quarter", "waiting"]
+    assert "horizon" in stack.plan()["next_week_task_ids"]
+    stack.at("2026-10-19T00:05:00")
+    stack.tick()
+    assert stack.todoist.labels_of("horizon") == ["committed", "office", "quarter", "waiting"]
+
+
+def test_a_sunday_commit_whose_confirming_read_fails_is_still_kept(stack: Stack) -> None:
+    """Todoist applied the commit, then the follow-up read failed: the extension shows the error, does not
+    repeat the request and reads the page again, which shows the task committed."""
+    stack.at("2026-10-18T20:00:00")
+    stack.todoist.fail_read_after_sync = 1
+    assert stack.set_plan("fresh", stage="committed") == {"error": "UNAVAILABLE"}
+    assert stack.todoist.labels_of("fresh") == ["committed", "home"]
+    stack.scan()
+    stack.at("2026-10-19T00:05:00")
+    stack.tick()
+    assert stack.todoist.labels_of("fresh") == ["committed", "home"]
+
+
+def test_a_kept_choice_removed_again_on_sunday_resets_on_monday(stack: Stack) -> None:
+    stack.at("2026-10-18T20:00:00")
+    stack.set_plan("goal", bet=True)
+    stack.set_plan("goal", bet=False)
+    assert "next_week_task_ids" not in stack.plan()  # the wire profile omits an empty list
+    # The owner adds the Bet again in native Todoist; the page scan remembers it under the ending week.
+    stack.todoist.tasks["goal"]["labels"] = ["bets", "home"]
+    stack.scan()
+    stack.at("2026-10-19T00:05:00")
+    stack.tick()
+    assert stack.todoist.labels_of("goal") == ["home"]
+
+
+def test_monday_reset_touches_no_task_without_marks(stack: Stack) -> None:
+    stack.todoist.add("waiting", ["office", "waiting"])
+    stack.set_plan("waiting", stage="monthly")
+    # A commitment removed in native Todoist keeps its row until Monday, which then has nothing to write.
+    stack.todoist.add("dropped", ["home", "committed"])
+    stack.scan()
+    stack.todoist.tasks["dropped"]["labels"] = ["home"]
+    assert stack.d1.weeks() == {"weekday": (WEEK, 1, 0), "dropped": (WEEK, 1, 0)}
+    stack.at("2026-10-19T00:01:00")
+    stack.todoist.calls.clear()
+    stack.tick()
+    assert stack.todoist.calls.count("sync") == 1  # the unfinished commitment only
+    assert stack.d1.weeks() == {}
+    assert stack.todoist.labels_of("weekday") == ["focus", "office"]
+    assert stack.todoist.labels_of("dropped") == ["home"]
+
+
+def test_a_task_deleted_while_its_monday_reset_waits_does_not_block_the_rollover(stack: Stack) -> None:
+    stack.at("2026-10-19T00:01:00")
+    stack.todoist.fail_sync = 1
+    with pytest.raises(stack.runtime.todoist.PlusError):
+        stack.tick()  # the reset update is stored, then Todoist answers 429
+    del stack.todoist.tasks["weekday"]  # deleted in Todoist before the retry
+    stack.at("2026-10-19T00:11:00")
+    stack.tick()
+    assert stack.d1.weeks() == {}
+    assert stack.set_plan("fresh", stage="committed")["task"]["stage"] == "committed"
