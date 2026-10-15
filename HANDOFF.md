@@ -30,7 +30,15 @@ row back. Only additive PlusService fields; no new table, dependency or budget. 
 558 runtime, gateway with CPU), owner UI, extension (101 unit, 15 MV3 Chromium) and scripts checks pass
 ([evidence](docs/todoist-plus-verification.md#waiting-list-weekly-review-and-sunday-commitments-local-checks-october-15)).
 Pending as above. After release, the real check is a Plus choice made on a Sunday that survives the next
-natural Monday rollover (metadata only).
+natural Monday rollover (metadata only). GTD review fixes on the same branch: "Keep for next week" no longer
+drops other horizon labels (a stage the task already shows changes no label), Sunday choices are recorded
+before the confirming read and shown kept at once, a write that leaves no mark forgets the task, and the
+checklist keeps keyboard focus and names its actions
+([evidence](docs/todoist-plus-verification.md#gtd-review-fixes-local-checks-october-15)). Release step: the
+installed extension always sends the stage from task details, so reload it in Chrome before the first
+Sunday after the backend ships, or a Sunday area edit of a commitment keeps it for next week. Open for the
+owner: a Sunday Bet on an unfinished commitment keeps both marks (one row per task; splitting them needs a
+migration), and a deleted bound Quarter label still disables Plus with no in-product recovery.
 
 Recall's mobile queue correction is released at `eb2c9187095f22eeac4ef2ae1e7e886b2e9076f3`.
 [Full branch CI 38683400263](https://github.com/ziyixi/todofy/actions/runs/38683400263) and

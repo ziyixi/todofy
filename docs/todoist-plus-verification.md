@@ -411,3 +411,55 @@ errors; two of its captures are in the [interface document](../todoist-plus/docs
 Not verified: the real Todoist DOM and data, whether Todoist changes `updated_at` for comments or child
 edits, a real review task's link, the first natural Sunday-to-Monday rollover with a Plus choice, branch
 CI and release.
+
+### GTD review fixes, local checks (October 15)
+
+Two reviews of the GTD commits found one high, four medium and several low issues. They are fixed on the
+same local branch, still not pushed. All data is synthetic; no Todoist, FlowDay or Cloudflare account was
+touched.
+
+- Keep for next week removed labels: `plan_labels` replaced every planning label even when the requested
+  stage was the one the task already showed, so keeping a commitment that also carried `quarter` dropped
+  it. A stage the labels already give now changes no label; a real stage change still replaces them.
+- Sunday choices: the membership is recorded from the labels just written, right after the Sync write and
+  before the confirming read, so a failed read (or a same-ID replay after midnight) no longer leaves the
+  choice to the ending week's page scan. A Plus write that leaves neither mark deletes the task's row
+  (`FORGET_TASK`); otherwise the row keeps the later week while its marks follow scans and writes. So
+  `next_week_task_ids` lists only kept choices, and a mark added again in native Todoist that Sunday resets
+  as usual. Before retrying a stored reset update, the Monday reset reads the task again: a task deleted
+  meanwhile is forgotten instead of failing every tick. A row with no mark left gets no Todoist write.
+- Both marks stay: a task has one row, so a Sunday Bet on an unfinished commitment keeps it committed. The
+  checklist, the board note and both documents now say so; splitting the marks needs a migration, so it is
+  left to the owner.
+- Extension: a confirmed SetTaskPlan on Sunday updates next week's choices at once, following the server
+  rule until the next read, so a board drag or goal pick shows as kept and is not offered again. Someday
+  counts only items still to look at (neither kept nor already in this month). After Keep, Move, Keep for
+  next week and Finish review, focus moves to the next action, the line or the heading, and a
+  `role="status"` region reads the result. Closing returns focus to the toolbar, and the review jumps focus
+  the Waiting summary or the runway line. Item actions carry the task title and are 24 px tall. The runway
+  line says it selects the next one. The follow-up step entry gets focus once a running write no longer
+  disables it.
+- Copy: "Mail to clarify", "Waiting · N", 添加跟进步骤, 承诺未安排, 选要留到下周的（N）, "Changed within a
+  day", and one untickable note instead of line 5 before Sunday. Review rows wrap at 650 px and below; at
+  375 px they had overflowed.
+
+Not changed: excluding an older open review task from the mail line needs another Plan field, so the line
+is renamed and documented instead. A deleted bound Quarter label still disables Plus (pre-existing, needs
+a design choice). The deploy-order edge (the installed extension always sends the stage from task
+details) is a release step in the handoff.
+
+Local checks: Todofy ruff check and format, 1,820 host cases (1 skipped: no protos checkout), including a new
+host-level suite that drives `plus_api.handle` and `plus_week.tick` with a controlled clock, D1 on SQLite
+and a fake Todoist, and 558 real-workerd runtime cases (four processes). Eight of the new or changed host
+cases fail against the branch's previous code. The 453 `.github/scripts` cases pass (1 skipped as before).
+Proto, gateway and owner UI are unchanged. The extension passes types, lint, 104 unit/component/API
+cases (was 101) and 16 built-MV3 Chromium cases (was 15). The new Chromium case uses the keyboard in the
+real Shadow DOM: focus moves through Someday's Keep actions to the line, a Sunday keep sends exactly one
+SetTaskPlan, and focus returns to the toolbar on close. The content script is 374,657 bytes (118,802 with
+`gzip -9`), against 372,556 before. The synthetic preview at 1440, 700 and 375 px, English and the
+Chinese Sunday view, had no horizontal overflow and no console errors. The two interface captures were
+taken again.
+
+Not verified: real Todoist data, whether Todoist reports a deleted task's `item_update` as not found (the
+reset now reads first, so it does not depend on it), the first natural Sunday-to-Monday rollover with a
+Plus choice, branch CI and release.
