@@ -36,6 +36,10 @@ class ReleaseError(RuntimeError):
     """A safe failure that excludes credentials and candidate content."""
 
 
+class ResponseTooLargeError(ReleaseError):
+    """A GitHub response that cannot be read completely within the bound."""
+
+
 class NoRedirect(urllib_request.HTTPRedirectHandler):
     """Keep repository-scoped credentials on the requested GitHub endpoint."""
 
@@ -118,7 +122,9 @@ class GitHub:
             with self.opener.open(request, timeout=30) as response:
                 raw = response.read(MAX_RESPONSE + 1)
             if len(raw) > MAX_RESPONSE:
-                raise ReleaseError("GitHub response exceeds the release limit")
+                raise ResponseTooLargeError(
+                    "GitHub response exceeds the release limit"
+                )
             return json.loads(raw)
         except error.HTTPError as exc:
             if missing and exc.code == 404:
@@ -140,7 +146,13 @@ def config_only_difference(
     """Check that a complete comparison changes only authored configuration."""
     if base == head:
         return True
-    compared = api.request("GET", f"/compare/{sha(base)}...{sha(head)}")
+    try:
+        compared = api.request("GET", f"/compare/{sha(base)}...{sha(head)}")
+    except ResponseTooLargeError:
+        # An old engine's comparison grows with every unrelated monorepo
+        # commit and passed 2 MiB on 2026-10-14; an unreadable comparison
+        # cannot certify compatibility, like a truncated file list below.
+        return False
     # A PR may diverge because main advanced; its merge-base diff still tells
     # whether that PR changes only configuration. Engine reuse is stricter:
     # a tested engine must be the same commit or an ancestor of the revision.

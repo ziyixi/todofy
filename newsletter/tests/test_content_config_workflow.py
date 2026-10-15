@@ -252,6 +252,40 @@ def test_missing_or_truncated_compare_files_cannot_prove_compatibility(
     assert release.compatible_engine(api, NEW) is None
 
 
+def test_oversized_compare_cannot_prove_compatibility_or_fail_the_run(
+    release,
+):
+    # An old engine's compare grows with every unrelated monorepo commit; on
+    # 2026-10-14 it passed the response cap and every content-config run after a
+    # green main CI failed.
+    def respond(request, timeout):
+        path = request.full_url.removeprefix(api.prefix)
+        if path.startswith("/compare/"):
+            return io.BytesIO(b" " * (release.MAX_RESPONSE + 1))
+        if path.startswith("/actions/workflows/"):
+            value = {"workflow_runs": [run_record(OLD)]}
+        elif path.startswith("/actions/runs/"):
+            job = {"name": release.PUBLISH_JOB, "conclusion": "success"}
+            value = {"jobs": [job]}
+        else:
+            value = {"object": {"sha": NEW}}
+        return io.BytesIO(json.dumps(value).encode())
+
+    api = release.GitHub("ziyixi/newsletter", SECRET)
+    api.opener = mock.Mock()
+    api.opener.open.side_effect = respond
+    assert release.plan(
+        api, "workflow_run", {"workflow_run": run_record(NEW)}
+    ) == {"ready": "false", "reason": "candidate_engine_ci_required"}
+    event = {"pull_request": {"head": {"sha": PR}, "base": {"sha": NEW}}}
+    assert release.plan(api, "pull_request", event)["ready"] == "false"
+    # Every other endpoint still fails closed.
+    api.opener.open.side_effect = None
+    api.opener.open.return_value = io.BytesIO(b" " * (release.MAX_RESPONSE + 1))
+    with pytest.raises(release.ReleaseError):
+        api.main()
+
+
 @pytest.mark.parametrize(
     "bad",
     [
