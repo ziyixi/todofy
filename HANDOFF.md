@@ -1,6 +1,6 @@
 # Handoff
 
-Updated 2026-10-14. Keep this file focused on active work, open acceptance and dated compatibility constraints.
+Updated 2026-10-15. Keep this file focused on active work, open acceptance and dated compatibility constraints.
 Move completed rollout detail to a dated record and link it here. Repository rules are in [AGENTS](AGENTS.md);
 service entry points are in [README](README.md). Never put private content, credentials or raw production output here.
 
@@ -9,16 +9,31 @@ Its old waiting lists and release identities are historical, not instructions to
 
 ## Current work
 
-`codex/recall-orion-reply` fixes a locally reproduced mobile capture delay, following the owner's October 14
-report on the existing 337 phone. Its fresh diagnostic has thirteen tab events, no Alarm, a valid visible probe,
-and no capture stages; private identifiers and content are omitted. The exact released 337 bundle reproduces
-that shape with a finite event burst and unanswered injection completion: no documents through sixty seconds,
-first capture around seventy-one. Current-build listeners are now reused; only missing/older listeners install.
-The added mobile build echo does not change desktop probe shape. Document/URL/visibility/privacy checks remain.
-Local 166 units, types/lint/build and sixteen built-WebKit cases pass; the same new content-result regression
-fails on 337. No user Chrome files, real browsing content, production settings, credentials or budgets changed.
-Pending: branch CI, native Mac candidate check, same-SHA publication, then one phone update/acceptance.
-The independent page_probe_invalid_reply_type cause is not established by this queue correction; do not claim
+Recall's mobile queue correction is released at `eb2c9187095f22eeac4ef2ae1e7e886b2e9076f3`.
+[Full branch CI 38683400263](https://github.com/ziyixi/todofy/actions/runs/38683400263) and
+[same-SHA main release 38684233200](https://github.com/ziyixi/todofy/actions/runs/38684233200) pass.
+Only Recall Worker and extension publication ran. Deployment `7084275594` verified Worker
+`149d88fd-06b5-4ac4-bcb2-601d1578196b` at `2026-10-15T04:59:28Z`. Published Orion version
+`2026.1015.451 · eb2c918` has eleven files byte-identical to the green CI artifact; its ZIP digest matches
+GitHub. `codex/recall-orion-reply-verification` closes root documentation only, without another app release.
+
+The owner's fresh 337 report showed thirteen tab events, no Alarm, a valid visible probe and no capture stages.
+The exact released 337 bundle reproduced that shape with finite events and unanswered injection completion:
+no document through sixty seconds, first capture around seventy-one. Current-build listeners are now reused;
+only missing/older listeners install. Desktop probe shape and document/URL/visibility/privacy checks remain.
+Local 166 units, types/lint/build and sixteen built-WebKit cases pass; the content-result regression fails on 337.
+
+The disposable native Mac fixture used the exact CI code with example.org/loopback scope and native APIs.
+After example.org was granted Allow in native Permissions (other sites Ask), the strict loopback consumer
+recorded two ordinary batches at `2026-10-15T05:06:18.110202Z`: one nonempty text document with a JPEG,
+zero visits and zero diagnostic posts, before manual upload or reload. More than a minute later, the document
+count remained one. Native settings showed unchanged capture with JPEG after four minute checks; the final
+consumer recorded one ended visit as well. The temporary extension was removed (native manager empty), its
+new tabs closed and its loopback consumer stopped (port closed). User Chrome files, real browsing content,
+owner configuration, credentials and budgets were unchanged.
+
+Pending: renew phone acceptance; the latest phone report still declares 337.
+The independent `page_probe_invalid_reply_type` cause is not established by this queue correction. Do not claim
 all native reply anomalies are fixed. [Diagnostic evidence](docs/recall-diagnostic-verification.md#october-14-recurrence-and-repeated-installation-delay).
 
 

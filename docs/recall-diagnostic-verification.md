@@ -414,8 +414,41 @@ ten-second focus threshold, then no duplicate snapshot on the next minute. This 
 released 337 bundle at its real-document assertion (expected one, received zero). Its pass does not depend on a
 script-call counter. Local types/lint/build, 166 extension units and all sixteen existing/new built-WebKit cases
 pass. Focus, privacy, navigation, current-build replacement, native injection failures, desktop probe and upload
-checks remain. User Chrome and the installed extensions were not operated or updated.
+checks remain. The owner's Chrome and phone extensions were not operated or updated.
 
-Branch CI, native Mac candidate testing, publication and renewed phone acceptance are pending. This correction
-establishes and repairs capture starvation; it does not identify every source of a malformed native reply.
-Keep `page_probe_invalid_reply_type` separate and do not silence it or decode arbitrary returned values.
+[Full branch CI](https://github.com/ziyixi/todofy/actions/runs/38683400263) and the
+[same-SHA main release](https://github.com/ziyixi/todofy/actions/runs/38684233200) pass for
+`eb2c9187095f22eeac4ef2ae1e7e886b2e9076f3`. Recall checks and the complete gate passed on the branch;
+main reused that run's tested artifacts. Only Recall Worker and extension publication ran; other application,
+image, VPS and Todoist Plus releases skipped. Deployment `7084275594` records successful provider verification
+at `2026-10-15T04:59:28Z`, with Recall Worker version `149d88fd-06b5-4ac4-bcb2-601d1578196b` and the same SHA.
+
+The public Orion ZIP is `2026.1015.451 · eb2c918`, manifest v2. Its eleven files and exact file-name set match
+the original green CI artifact and the downloaded CI directory byte for byte. The artifact was also read
+independently in memory: ID `11949676082`, SHA-256
+`838e1932fbdf50ec707c98b1ef17ad72c39c0d5e9b38a5ce64c1cc4bf24eff7f`.
+The published ZIP's SHA-256 is `2f517dec439e098c41e67cd7363dac00b8a9473890a2b6d894606906662fc85c`,
+matching its GitHub asset digest.
+[Published Orion ZIP](https://github.com/ziyixi/todofy/releases/download/recall-extension-v2026.1015.451/recall-orion-v2026.1015.451.zip).
+
+A disposable real Orion macOS fixture used the tested CI code, limited to example.org and loopback, with no
+native API replacements. The native Permissions UI granted `Allow` to example.org; other sites remained
+`Ask`. At `2026-10-15T05:06:18.110202Z`, the strict loopback consumer had received two ordinary batches,
+containing one document with nonempty text and an embedded JPEG, and no visits or diagnostic posts.
+This receipt preceded any manual upload or reload, establishing native automatic text/image delivery.
+At `2026-10-15T05:07:19.129184Z`, the ordinary document/image counts were still one, before manual upload
+or reload. Native settings showed `内容未变，未重复保存；截图 JPEG`. The subsequent diagnostic contained
+four minute checks, twenty tab events, valid object capture/probe replies and `capture_store=unchanged`.
+The final strict consumer totals were three ordinary batches with one nonempty document/JPEG and one ended
+visit, plus one separate diagnostic post. The owner-facing Immediate Upload action was never used; the
+Send Diagnostic action submits only its closed diagnostic payload. An initial missing-reply warning remained
+from the pre-permission period; it was not treated as proof that successful later capture had failed.
+
+The temporary extension and its synthetic local state were uninstalled; the native Extensions manager was
+visibly empty. The new options/test tabs were closed, preserving the pre-existing tabs. The exact loopback
+consumer was stopped and its port was confirmed closed. This native check uses macOS, not physical iOS.
+
+The phone's fresh report above is still from `337`; renewed phone acceptance of `451` remains pending.
+This correction establishes and repairs the reproduced queue starvation. It does not identify every source of
+a malformed native reply: keep `page_probe_invalid_reply_type` separate, without silencing it or decoding
+arbitrary returned values. No current-version phone success is inferred from WebKit or macOS.
