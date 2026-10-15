@@ -15,8 +15,10 @@ Reads run in the background, confirmed write results merge without full loads, t
 FlowDay task IDs survive worker restarts, native pages use ReadPlan plus an ID-only cache, and Review/Week
 drags show at once with one pending card and one ordered write queue (the owner-approved rule change).
 Planning protocol is now 3, so the normal update step applies: Reload in Chrome's extension manager and
-refresh Todoist. Local types, lint, build, 79 unit and 13 built-MV3 Chromium cases pass; synthetic
-before/after measurements are in [the verification record](docs/todoist-plus-verification.md#board-performance-branch-local-checks-october-15).
+refresh Todoist. Review fixes on the same branch make queue edits start from FlowDay's current queue and keep
+remembered boards, label saves and pending cards read-only until confirmed. Local types, lint, build, 91 unit
+and 14 built-MV3 Chromium cases pass; synthetic before/after measurements are in
+[the verification record](docs/todoist-plus-verification.md#board-performance-branch-local-checks-october-15).
 Pending: push, full branch CI, owner review, same-SHA release and the owner's real-account check of drag feel.
 Research items 6 (backend metadata reads, measure first) and 7 (native observer, local trace first) remain open.
 

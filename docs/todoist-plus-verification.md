@@ -333,3 +333,33 @@ before and none after; the Review drop's 65 ms long task is gone. Opening Plan t
 139-154 ms after over four runs each. The content script grows from 357,235 to 361,110 bytes (113,330 to
 114,724 gzip) and the background from 134,003 to 135,324 bytes; no dependency or budget changed. Production
 latency, the real Todoist DOM and the installed extension were not measured.
+
+### Review fixes on the same branch (October 15)
+
+A branch review found write races that the old global lock had prevented. Each finding was reproduced
+with synthetic cases first; all were fixed, and the branch is still local only.
+
+- Removing a step and Add to today now read the day's current FlowDay queue (GetFlow) and send UpdateFlow
+  with only that one ID added or removed, one extra GET each. Two quick removals from one day, Add to today
+  while a removal waits, and a step added in another tab within the 60-second refocus window all survive.
+- A remembered board still paints at once but stays read-only until this visit's first read lands; if that
+  read fails, only the error is shown and the snapshot is dropped. This prevents a second CompleteTask for
+  a task completed just before leaving, and timer or queue writes against yesterday after midnight.
+- After a label-mapping save, writes wait for the re-read (every task etag changes). An older overlapping
+  read no longer replaces a newer one. A card whose stage drag waits has read-only details and weekly-goal
+  actions until it settles, then shows the stage the server kept.
+- Task details re-read fully after a refused save and when the remembered data lacks the task. The
+  gateway's 401 Status for a revoked token now reads "Connection expired or revoked" and clears the ID
+  cache; a call that ends after a disconnect no longer writes the cache or FlowDay IDs back.
+- Pending cards say "Updating…" in their accessible names. Pending handles use `aria-disabled`, so a
+  keyboard drop keeps focus on the moved card. Disabled remove buttons stay hidden, reduced motion stops the
+  pending spinner, and a rollback says "Change not saved; restored" with the count of later changes not sent.
+
+Local checks: types, lint, production build, 91 unit/component/API cases and 14 built-MV3 Chromium cases.
+All 12 new and 8 changed unit cases fail against the pre-fix source with the updated fixture. The three
+queue-race cases fail there only because the queue actions changed; equivalent scratch cases had shown
+those races on the pre-fix code. The two new browser checks fail against the pre-fix build.
+The research harness, re-run at 600 tasks and 100 ms, shows the board 42 ms after re-entry (read done at
+842 ms), the Review drop card at 23 ms, Week drops at 7-21 ms and unchanged request counts. The content
+script is 362,109 bytes (115,318 gzip) and the background 135,702 bytes. Real-account behavior was not
+checked.
