@@ -55,6 +55,12 @@ describe('Todoist Plus transport boundaries', () => {
     const response = await hooks(env, '/api/plus/v1/plan:read', { headers: HEADERS });
     expect((await response.json<{ plan: { flowday_url: string } }>()).plan.flowday_url).toBe('https://focus.example.org');
   });
+  it('passes the weekly review IDs from the core through next to the FlowDay link', async () => {
+    const plan = { inbox_project_id: 'inbox-project', review_task_id: 'review-task', next_week_task_ids: ['kept'] };
+    const { env } = fakes({ FLOWDAY_PUBLIC_URL: 'https://focus.example.org' }, call => call.method === 'plus_auth' ? true : uiOk({ plan }));
+    const response = await hooks(env, '/api/plus/v1/plan:read', { headers: HEADERS });
+    expect((await response.json<{ plan: unknown }>()).plan).toEqual({ ...plan, flowday_url: 'https://focus.example.org' });
+  });
   it('preserves actionable FlowDay conflicts through the narrow proxy', async () => {
     const { env } = fakes({}, () => true);
     const connected = { ...env, FLOWDAY_FOCUS: { fetch: () => Promise.resolve(Response.json({ error: {

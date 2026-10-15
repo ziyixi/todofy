@@ -60,6 +60,7 @@ const ANSWERS = {
       id: `task-${String(n)}`, title: 'Synthetic planning task '.repeat(20), project_id: 'test-project',
       labels: ['office', 'deep', 'committed', 'lead_2w'], stage: 'committed', area: 'work',
       deadline: '2026-10-27', due: '2026-10-13', lead_days: 14, estimated_minutes: 45, etag: 'a'.repeat(64),
+      update_time: '2026-10-14T09:30:05Z',
     })) }),
   },
   owner_ui: {

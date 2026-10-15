@@ -7,6 +7,8 @@ import uuid
 from datetime import datetime, timedelta
 from typing import Any
 
+from .gtd import parse_instant, rfc3339
+
 ROLES = (
     "office",
     "home",
@@ -78,6 +80,19 @@ def command_id(request_id: str, index: int = 0) -> str:
 def week_start(today: str) -> str:
     day = datetime.strptime(today, "%Y-%m-%d").date()
     return (day - timedelta(days=day.weekday())).isoformat()
+
+
+def membership_week(today: str, week: str, request: dict[str, Any]) -> str:
+    """The week whose Monday reset a planning write's marks wait for.
+
+    On the week's last day an explicit commitment or Bet is a choice for the next week, so the coming
+    reset leaves the task's marks in place. Every other write, removing a mark included, stays in this week.
+    """
+    monday = datetime.strptime(week, "%Y-%m-%d").date()
+    chosen = request.get("stage") == "committed" or request.get("bet") is True
+    if chosen and today == (monday + timedelta(days=6)).isoformat():
+        return (monday + timedelta(days=7)).isoformat()
+    return week
 
 
 def discover(
@@ -218,6 +233,9 @@ def task_view(task: dict[str, Any], today: str, mapping: list[dict[str, Any]] | 
     duration = task.get("duration")
     if duration and duration.get("amount"):
         result["estimated_minutes"] = int(duration["amount"]) * (480 if duration.get("unit") == "day" else 1)
+    updated = parse_instant(task.get("updated_at"))
+    if updated is not None:
+        result["update_time"] = rfc3339(updated)
     return result
 
 

@@ -82,6 +82,53 @@ def test_reset_clears_only_ended_week_marks_and_moves_only_commitments():
     assert db.execute(sql.ENDED_WEEK, ("2026-10-19",)).fetchall() == []
 
 
+def test_only_a_commitment_or_bet_chosen_on_the_last_day_waits_for_the_next_week():
+    week, sunday = "2026-10-12", "2026-10-18"
+    assert plus.membership_week(sunday, week, {"stage": "committed"}) == "2026-10-19"
+    assert plus.membership_week(sunday, week, {"bet": True, "task_id": "task1"}) == "2026-10-19"
+    # Removing a mark, other stages, an area or a deadline change on Sunday stay in the ending week.
+    for request in ({"bet": False}, {"stage": "weekly"}, {"area": "work"}, {"deadline": sunday, "lead_days": 7}):
+        assert plus.membership_week(sunday, week, request) == week
+    # A commitment made on any other day of the week ends with it.
+    for today in ("2026-10-12", "2026-10-14", "2026-10-17"):
+        assert plus.membership_week(today, week, {"stage": "committed", "bet": True}) == week
+
+
+def test_membership_never_moves_back_so_sunday_scans_cannot_undo_a_next_week_choice():
+    db = sqlite3.connect(":memory:")
+    db.executescript((Path(__file__).resolve().parents[2] / "migrations/0006_todoist_plus.sql").read_text())
+
+    def week_of(task_id):
+        return db.execute("SELECT week_start, committed, bet FROM plus_weeks WHERE task_id=?", (task_id,)).fetchone()
+
+    db.execute(sql.REMEMBER_WEEK, ("sunday", "2026-10-19", 1, 0))
+    db.execute(sql.REMEMBER_WEEK, ("weekday", "2026-10-12", 1, 1))
+    # The ten-minute scan on Sunday remembers both under the ending week.
+    db.execute(sql.REMEMBER_WEEK, ("sunday", "2026-10-12", 1, 1))
+    db.execute(sql.REMEMBER_WEEK, ("weekday", "2026-10-12", 1, 0))
+    assert week_of("sunday") == ("2026-10-19", 1, 0)
+    assert week_of("weekday") == ("2026-10-12", 1, 0)
+    assert db.execute(sql.NEXT_WEEK, ("2026-10-12",)).fetchall() == [("sunday",)]
+    # Monday's reset selects only the ending week's row, and the new week's scan may update the kept one.
+    assert [row[0] for row in db.execute(sql.ENDED_WEEK, ("2026-10-19",))] == ["weekday"]
+    db.execute(sql.REMEMBER_WEEK, ("sunday", "2026-10-19", 1, 1))
+    assert week_of("sunday") == ("2026-10-19", 1, 1)
+    assert db.execute(sql.NEXT_WEEK, ("2026-10-19",)).fetchall() == []
+    plan = " ".join(row[3] for row in db.execute("EXPLAIN QUERY PLAN " + sql.NEXT_WEEK, ("2026-10-12",)))
+    assert "plus_weeks_ended" in plan and "TEMP B-TREE" not in plan
+
+
+def test_update_time_is_whole_seconds_utc_and_absent_when_unknown():
+    assert plus.task_view(task(updated_at="2026-10-14T09:30:05.123456Z"), TODAY)["update_time"] == (
+        "2026-10-14T09:30:05Z"
+    )
+    assert plus.task_view(task(updated_at="2026-10-14T11:30:05+02:00"), TODAY)["update_time"] == (
+        "2026-10-14T09:30:05Z"
+    )
+    for value in (None, "", "yesterday", "2026-10-14T09:30:05"):
+        assert "update_time" not in plus.task_view(task(updated_at=value), TODAY)
+
+
 def test_command_identity_is_stable_and_temporary_dom_ids_are_rejected():
     assert plus.command_id(REQUEST, 0) == plus.command_id(REQUEST, 0)
     assert plus.command_id(REQUEST, 0) != plus.command_id(REQUEST, 1)

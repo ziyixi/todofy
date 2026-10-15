@@ -7,6 +7,7 @@ import "google/api/annotations.proto";
 import "google/api/client.proto";
 import "google/api/field_behavior.proto";
 import "google/api/field_info.proto";
+import "google/protobuf/timestamp.proto";
 
 option java_multiple_files = true;
 option java_outer_classname = "PlusServiceProto";
@@ -137,6 +138,15 @@ message Plan {
   string flowday_url = 9;
   // At most 500 current labels. No credential or other account metadata.
   repeated AvailableLabel available_labels = 10;
+  // Todoist project that receives Todofy's mail tasks, for the weekly review's inbox line.
+  // Empty when none is configured.
+  string inbox_project_id = 11;
+  // Newest weekly review task Todofy created, for this or the previous ISO week; empty when
+  // there is none. It may already be completed: only the active task list says it is open.
+  string review_task_id = 12;
+  // At most 100 tasks recorded for the next week: a commitment or Bet chosen on this
+  // week's last day, which the coming Monday reset leaves in place.
+  repeated string next_week_task_ids = 13;
 }
 // An active Todoist task with derived planning fields. No description is fetched for display.
 message PlanningTask {
@@ -172,6 +182,9 @@ message PlanningTask {
   bool missing_lead = 15;
   // Todoist priority, 1 to 4.
   int32 priority = 16;
+  // Todoist's last change to the task, in whole seconds; absent when Todoist does not say.
+  // Any edit resets it, so it means untouched since, not waiting since.
+  google.protobuf.Timestamp update_time = 17 [(google.api.field_behavior) = OUTPUT_ONLY];
 }
 // Reads the singleton plan.
 message ReadPlanRequest {}

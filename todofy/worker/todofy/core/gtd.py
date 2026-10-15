@@ -604,10 +604,14 @@ class ReviewFacts:
     dashboard_url: str | None
     # Up to REVIEW_OLDEST_LINKS IDs of the snapshot day's oldest inbox tasks, oldest first (links only).
     oldest_inbox: tuple[str, ...] = ()
+    # Todoist Plus is set up (plus_settings): link its weekly review checklist.
+    plus_review: bool = False
 
 
 REVIEW_OLDEST_LINKS = 3
 TASK_URL = "https://app.todoist.com/app/task/"
+# Opens Plan with the review checklist in Todoist, where the Plus extension is installed.
+PLUS_REVIEW_URL = "https://app.todoist.com/app/today?todoist-plus=review"
 TASK_ID = re.compile(r"[A-Za-z0-9_-]{1,64}", re.ASCII)
 
 
@@ -701,6 +705,8 @@ def review_body(facts: ReviewFacts, now: int) -> str:
         links.append(f"面板：{facts.dashboard_url}")
     if facts.public_host:
         links.append(f"Todofy GTD：https://{facts.public_host}/gtd")
+    if facts.plus_review:
+        links.append(f"Plus 周回顾：{PLUS_REVIEW_URL}")
     if links:
         lines.append("   ".join(links))
     body = "\n".join(lines) + "\n"

@@ -450,6 +450,20 @@ def test_the_review_goes_to_the_default_project_without_a_review_project(probe, 
     assert create.json()["description"].startswith("快照：本周没有可用的 Todoist 快照")
 
 
+def test_the_review_links_the_plus_checklist_once_plus_is_set_up(probe):
+    review(probe, SUNDAY)
+    assert "todoist-plus" not in probe.todoist.creates()[0].json()["description"]
+    probe.insert("plus_settings", id=1, mapping="{}", timezone="UTC", week_start="2026-09-28", enabled=1)
+    try:
+        review(probe, SUNDAY + 7 * DAY)
+    finally:
+        probe.sql("DELETE FROM plus_settings")
+    [_, later] = probe.todoist.creates()
+    assert later.json()["description"].endswith(
+        "   Plus 周回顾：https://app.todoist.com/app/today?todoist-plus=review\n"
+    )
+
+
 @pytest.mark.parametrize("status", [400, 401])
 def test_a_failed_review_is_retried_hourly_with_its_frozen_request(probe, status):
     for _ in range(5):

@@ -4,6 +4,7 @@ import json
 import uuid
 from collections.abc import Iterator
 from dataclasses import dataclass
+from datetime import date, timedelta
 
 import pytest
 
@@ -25,6 +26,14 @@ class Stack:
             headers={"authorization": "Bearer " + self.token},
         )
 
+    def plan(self):
+        response = self.worker.hooks.get("/api/plus/v1/plan:read", headers={"authorization": "Bearer " + self.token})
+        assert response.status_code == 200, response.text
+        return response.json()["plan"]
+
+    def weeks(self):
+        return {row.pop("task_id"): row for row in self.worker.d1("SELECT * FROM plus_weeks")}
+
     def tasks(self):
         records, cursor = [], ""
         while True:
@@ -43,7 +52,12 @@ class Stack:
 @pytest.fixture(scope="module")
 def stack(tmp_path_factory) -> Iterator[Stack]:
     upstream = PlusFake()
-    upstream.add("parent", labels=["office", "committed", "bets", "deep"], due={"date": "2026-10-01"})
+    upstream.add(
+        "parent",
+        labels=["office", "committed", "bets", "deep"],
+        due={"date": "2026-10-01"},
+        updated_at="2026-10-14T09:30:05.123456Z",
+    )
     upstream.add("recurring", labels=["home"], due={"date": "2026-10-13", "is_recurring": True})
     upstream.add("third", labels=["candiate", "home"])
     process = start_gateway(
@@ -53,6 +67,7 @@ def stack(tmp_path_factory) -> Iterator[Stack]:
             "TODOIST_API_KEY": "synthetic-plus-key",
             "PROCESSING_PAUSED": "true",
             "CSRF_SIGNING_KEY": CSRF_SIGNING_KEY,
+            "TODOIST_DEFAULT_PROJECT_ID": "inbox-project",
         },
     )
     try:
@@ -101,6 +116,8 @@ def test_paged_projection_preserves_native_ids_dates_and_private_credentials(sta
     assert parent["due"] == "2026-10-01" and not parent.get("deadline")
     assert parent["id"] == "parent"
     assert "estimated_minutes" not in parent
+    # Todoist's updated_at in whole seconds; a task without one has no update_time.
+    assert parent["update_time"] == "2026-10-14T09:30:05Z" and "update_time" not in tasks[1]
     assert (
         stack.worker.hooks.get(
             "/api/plus/v1/connections:read", headers={"authorization": "Bearer " + stack.token}
@@ -180,6 +197,83 @@ def test_late_week_reset_does_not_clear_a_recorded_new_week_decision(stack):
     assert result.status_code == 200, result.text
     assert stack.upstream.tasks["parent"]["labels"] == ["deep", "focus", "lead_2w", "office"]
     assert stack.upstream.tasks["third"]["labels"] == ["home", "bets", "committed"]
+
+
+def shifted(day: str, days: int) -> str:
+    return (date.fromisoformat(day) + timedelta(days=days)).isoformat()
+
+
+def iso_week(day: str) -> str:
+    return "{:04d}-W{:02d}".format(*date.fromisoformat(day).isocalendar()[:2])
+
+
+def test_plan_answers_carry_the_review_targets_ids_only(stack):
+    week = stack.plan()["week_start"]
+    stack.worker.d1(
+        "INSERT INTO gtd_reviews (week, state, project_id, task_id, subject, body, created_at, updated_at) VALUES "
+        f"('{iso_week(shifted(week, -7))}', 'created', 'inbox-project', 'review-before', 's', 'b', 1, 1),"
+        f"('{iso_week(week)}', 'unknown', 'inbox-project', '', 's', 'b', 1, 1);"
+    )
+    plan = stack.plan()
+    assert plan["inbox_project_id"] == "inbox-project"
+    # This week's review has no known task yet, so the newest created one is last week's.
+    assert plan["review_task_id"] == "review-before"
+    stack.worker.d1(f"UPDATE gtd_reviews SET state='created', task_id='review-now' WHERE week='{iso_week(week)}'")
+    assert stack.plan()["review_task_id"] == "review-now"
+    stack.worker.d1("DELETE FROM gtd_reviews")
+    assert "review_task_id" not in stack.plan()  # the wire profile omits an empty string
+
+
+def test_sunday_choices_survive_monday_while_ended_week_commitments_reset(stack):
+    stack.upstream.add("sunday-pick", labels=["home", "committed", "bets"])
+    stack.upstream.add("weekday-pick", labels=["office", "committed"])
+    stack.upstream.add("unfinished", labels=["office", "committed", "bets", "deep"])
+    week = stack.plan()["week_start"]
+    # On this week's Sunday: one choice recorded for next week, two commitments made earlier in the week.
+    stack.worker.d1(
+        f"UPDATE plus_settings SET week_start='{week}';"
+        f"INSERT OR REPLACE INTO plus_weeks VALUES ('sunday-pick', '{shifted(week, 7)}', 1, 1),"
+        f"('weekday-pick', '{week}', 1, 0), ('unfinished', '{week}', 1, 1);"
+    )
+    # Every task page and the cron's own page remember them under this week; the choice stays.
+    stack.tasks()
+    assert stack.worker.trigger_cron().status_code == 200
+    assert stack.weeks()["sunday-pick"] == {"week_start": shifted(week, 7), "committed": 1, "bet": 1}
+    assert stack.plan()["next_week_task_ids"] == ["sunday-pick"]
+    # The same rows one week earlier: their week has ended, and the reset runs before the next decision.
+    stack.worker.d1(
+        f"UPDATE plus_settings SET week_start='{shifted(week, -7)}';"
+        "UPDATE plus_weeks SET week_start=date(week_start, '-7 days')"
+        " WHERE task_id IN ('sunday-pick', 'weekday-pick', 'unfinished');"
+    )
+    plan = stack.plan()
+    result = stack.worker.post_owner(
+        "/api/plus/v1/plan:confirmPlanMapping", {"etag": plan["etag"], "request_id": str(uuid.uuid4())}
+    )
+    assert result.status_code == 200, result.text
+    assert stack.upstream.tasks["sunday-pick"]["labels"] == ["home", "committed", "bets"]
+    assert stack.upstream.tasks["weekday-pick"]["labels"] == ["focus", "office"]
+    assert stack.upstream.tasks["unfinished"]["labels"] == ["deep", "focus", "office"]
+    weeks = stack.weeks()
+    assert weeks["sunday-pick"]["week_start"] == week
+    assert "weekday-pick" not in weeks and "unfinished" not in weeks
+    assert "next_week_task_ids" not in stack.plan()
+
+
+def test_a_plus_commitment_waits_for_the_week_it_was_chosen_for(stack):
+    stack.upstream.add("chosen", labels=["office", "candiate"])
+    task = next(task for task in stack.tasks() if task["id"] == "chosen")
+    plan = stack.plan()
+    committed = stack.write("setTaskPlan", task_id="chosen", etag=task["etag"], stage="committed")
+    assert committed.status_code == 200, committed.text
+    # The real clock decides the branch: next week on the account's Sunday, this week on other days.
+    sunday = plan["today"] == shifted(plan["week_start"], 6)
+    expected = shifted(plan["week_start"], 7) if sunday else plan["week_start"]
+    assert stack.weeks()["chosen"] == {"week_start": expected, "committed": 1, "bet": 0}
+    # A later write that chooses nothing (here, the area) never moves the row back.
+    area = stack.write("setTaskPlan", task_id="chosen", etag=committed.json()["task"]["etag"], area="personal")
+    assert area.status_code == 200, area.text
+    assert stack.weeks()["chosen"] == {"week_start": expected, "committed": 1, "bet": 0}
 
 
 def test_revocation_stops_only_this_extension_connection(stack):

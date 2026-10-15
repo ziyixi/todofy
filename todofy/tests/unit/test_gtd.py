@@ -438,6 +438,10 @@ def test_the_review_body_is_counts_trends_and_links():
     ) in text
     assert "bad id" not in text
     assert gtd.review_title("2026-W40") == "每周回顾 2026-W40"
+    # With Todoist Plus set up, the links end with its review checklist.
+    assert gtd.review_body(replace(facts, plus_review=True), NOW + 4 * 3600).endswith(
+        "Todofy GTD：https://todofy.example/gtd   Plus 周回顾：https://app.todoist.com/app/today?todoist-plus=review\n"
+    )
 
 
 def test_a_review_without_a_snapshot_or_completions_says_so():

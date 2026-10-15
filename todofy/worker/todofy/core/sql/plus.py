@@ -16,14 +16,18 @@ REVOKE_CONNECTION = "UPDATE plus_connections SET revoked=1 WHERE id=?"
 ACTION = "SELECT * FROM plus_actions WHERE request_id=?"
 START_ACTION = "INSERT INTO plus_actions(request_id,request_hash,commands,created_at) VALUES(?,?,?,?)"
 FINISH_ACTION = "UPDATE plus_actions SET response=? WHERE request_id=?"
+# A row never moves back to an older week: a choice recorded for the next week on Sunday stays there
+# when that day's page scans or other writes remember the task under the ending week.
 REMEMBER_WEEK = (
     "INSERT INTO plus_weeks(task_id,week_start,committed,bet) VALUES(?,?,?,?) ON CONFLICT(task_id) DO UPDATE SET "
     "week_start=excluded.week_start,committed=excluded.committed,bet=excluded.bet WHERE "
-    "plus_weeks.week_start!=excluded.week_start OR plus_weeks.committed!=excluded.committed "
-    "OR plus_weeks.bet!=excluded.bet"
+    "plus_weeks.week_start<=excluded.week_start AND (plus_weeks.week_start!=excluded.week_start "
+    "OR plus_weeks.committed!=excluded.committed OR plus_weeks.bet!=excluded.bet)"
 )
 RESET_BATCH = 5
 ENDED_WEEK = f"SELECT * FROM plus_weeks WHERE week_start < ? ORDER BY week_start,task_id LIMIT {RESET_BATCH}"
 FORGET_WEEK = "DELETE FROM plus_weeks WHERE task_id=? AND week_start=?"
+# Choices already recorded for a week after the given one (the plus_weeks_ended index), IDs only.
+NEXT_WEEK = "SELECT task_id FROM plus_weeks WHERE week_start > ? ORDER BY week_start,task_id LIMIT 100"
 
 REPLACE_ACTION_COMMANDS = "UPDATE plus_actions SET commands=? WHERE request_id=?"

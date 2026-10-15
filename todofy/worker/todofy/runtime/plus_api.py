@@ -3,7 +3,7 @@
 import hashlib
 import json
 import secrets
-from datetime import date
+from datetime import date, timedelta
 from typing import Any
 
 import js
@@ -12,17 +12,19 @@ from ziyixi_proto.todofy.ui.v1 import plus_service_pb as pb
 from ziyixi_proto.wire_json import WireJsonError, from_wire, to_wire
 
 from todofy.core import plus
+from todofy.core.sql import gtd as gtd_sql
 from todofy.core.sql import plus as sql
 from todofy.runtime import backup, plus_week
 from todofy.runtime import plus_store as store
 from todofy.runtime import plus_todoist as todoist
-from todofy.runtime.config import flag
+from todofy.runtime.config import flag, var
 from todofy.runtime.interop import now_s, to_js
 
 OWNER_METHODS = frozenset(
     {"ConfirmPlanMapping", "IssueExtensionConnection", "ReadExtensionConnections", "RevokeExtensionConnection"}
 )
 READ_METHODS = frozenset({"ReadPlan", "ListPlanningTasks", "ReadExtensionConnections"})
+PLAN_METHODS = frozenset({"ReadPlan", "ConfirmPlanMapping", "UpdatePlanLabels"})
 METHODS = (
     READ_METHODS | OWNER_METHODS | {"SetTaskPlan", "SetTaskLead", "AppendTaskSteps", "CompleteTask", "UpdatePlanLabels"}
 )
@@ -51,6 +53,29 @@ async def plan(core: Any, metadata: dict[str, Any] | None = None) -> dict[str, A
         "week_start": plus.week_start(today),
         "enabled": enabled,
         "hidden_filter_ids": plus.replaced_filters(metadata["filters"], discovered["labels"]),
+    }
+
+
+async def review_targets(env: Any, week: str) -> dict[str, Any]:
+    """The weekly review's IDs, read with each Plan answer rather than with every task page or write:
+    Todofy's mail project, the newest review task it created (this or the previous ISO week; the
+    extension sees whether it is still open) and the choices already kept for next week."""
+    monday = date.fromisoformat(week)
+    statements = [
+        env.DB.prepare(gtd_sql.REVIEW_WEEK.sql).bind("{:04d}-W{:02d}".format(*day.isocalendar()[:2]))
+        for day in (monday, monday - timedelta(days=7))
+    ]
+    *reviews, chosen = await env.DB.batch([*statements, env.DB.prepare(sql.NEXT_WEEK).bind(week)])
+    created = [
+        str(row["task_id"])
+        for result in reviews
+        for row in (dict(item) for item in result.results)
+        if row["state"] == "created" and row["task_id"]
+    ]
+    return {
+        "inbox_project_id": var(env, "TODOIST_DEFAULT_PROJECT_ID"),
+        "review_task_id": created[0] if created else "",
+        "next_week_task_ids": [str(dict(row)["task_id"]) for row in chosen.results],
     }
 
 
@@ -242,12 +267,13 @@ async def mutate(core: Any, method: str, request: dict[str, Any]) -> dict[str, A
     else:
         task = await todoist.task(core, request["task_id"])
         response = {"task": plus.task_view(task, current["today"], current["labels"])}
-        # Every explicit new-week write replaces the membership; old resets cannot select it.
+        # Every explicit new-week write replaces the membership; old resets cannot select it. A commitment
+        # or Bet chosen on the week's last day is recorded for the next week, so Monday's reset keeps it.
         await store.run(
             env.DB,
             sql.REMEMBER_WEEK,
             str(task["id"]),
-            current["week_start"],
+            plus.membership_week(current["today"], current["week_start"], request),
             int(plus.role_labels(current["labels"])["committed"] in task.get("labels", [])),
             int(plus.role_labels(current["labels"])["bets"] in task.get("labels", [])),
         )
@@ -293,6 +319,8 @@ async def handle(coordinator: Any, method: str, text: str, *, owner: bool) -> di
                 }
             else:
                 response = await mutate(coordinator, method, request)
+            if method in PLAN_METHODS:
+                response = {"plan": {**response["plan"], **await review_targets(env, response["plan"]["week_start"])}}
             message = from_wire(response_type, response, strict=True).message
             return {"ok": json.dumps(to_wire(message), separators=(",", ":")), "next_cursor": None}
     except todoist.PlusError as error:
