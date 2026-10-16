@@ -90,7 +90,8 @@ TASK_EDGES = Query(
     sort_allowed=True,
 )
 # Gives tasks their Todofy IDs: bind the provider, the time, then a JSON array of external IDs. Only a task the
-# store has just confirmed active is registered, so one closed before (a reopened task) is open again.
+# store has just confirmed active is registered, so one closed before (a reopened task) is open again; settling
+# registers again a task recorded closed that the store lists, for the same reason.
 ADD_TASKS = Query(
     "INSERT INTO plan_tasks (provider, external_id, created_at) SELECT ?, value, ? FROM json_each(?) WHERE true"
     " ON CONFLICT (provider, external_id) DO UPDATE SET closed_at = NULL, closed_as = NULL"
@@ -98,11 +99,13 @@ ADD_TASKS = Query(
     TASKS_INDEX,
 )
 # Bind the baseline, the time, then the provider and ID of the task that waits and of its prerequisite. An edge
-# that exists keeps its first baseline.
+# that exists is a done one (the runtime answers one that still holds without a write): it starts over from this
+# baseline, in its own row.
 ADD_EDGE = Query(
     "INSERT INTO plan_edges (task_id, prerequisite_id, kind, baseline_count, created_at)"
     f" SELECT w.id, p.id, '{WAITS_FOR}', ?, ? FROM plan_tasks w, plan_tasks p"
-    " WHERE w.provider = ? AND w.external_id = ? AND p.provider = ? AND p.external_id = ? ON CONFLICT DO NOTHING",
+    " WHERE w.provider = ? AND w.external_id = ? AND p.provider = ? AND p.external_id = ?"
+    " ON CONFLICT (task_id, prerequisite_id, kind) DO UPDATE SET baseline_count = excluded.baseline_count",
     TASKS_INDEX,
 )
 # Bind the provider and ID of the task that waits, then of its prerequisite.

@@ -98,7 +98,8 @@ service PlusService {
   }
   // Adds or removes one dependency between two tasks. Kept only in Todofy's planning store: Todoist is never
   // written, so no title, description, comment, label or update time changes. A value write without a
-  // receipt: adding a dependency that exists keeps it as it is.
+  // receipt: adding a dependency that still holds keeps it as it is, and adding one that is done starts it
+  // over from the prerequisite's current completed_count.
   // (-- api-linter: core::0134::synonyms=disabled
   //     aip.dev/not-precedent: adds or removes one link between two external tasks, not a stored resource. --)
   rpc SetTaskDependency(SetTaskDependencyRequest) returns (SetTaskDependencyResponse) {
@@ -109,7 +110,8 @@ service PlusService {
   }
   // Settles the dependencies of tasks that a complete task read no longer lists, after Todoist confirms they
   // are not active: a task that waited has its dependencies removed; a prerequisite is recorded as completed,
-  // or, when it was deleted, the dependencies on it are removed. Todofy's store only; Todoist is only read.
+  // or, when it was deleted or Todoist does not say how it closed, the dependencies on it are removed. A task
+  // recorded closed that Todoist lists again is open again. Todofy's store only; Todoist is only read.
   rpc ResolveDependencies(ResolveDependenciesRequest) returns (ResolveDependenciesResponse) {
     option (google.api.http) = {
       post: "/api/plus/v1/tasks:resolveDependencies"
@@ -351,10 +353,11 @@ message SetTaskDependencyRequest {
   // The task that waits.
   string task_id = 1 [(google.api.field_behavior) = REQUIRED];
   // The task it waits for: another active task, not one that already waits for task_id, directly or through
-  // others. A recurring prerequisite needs Todoist's completed_count.
+  // others, by dependencies that are not done. A recurring prerequisite needs Todoist's completed_count.
   string prerequisite_id = 2 [(google.api.field_behavior) = REQUIRED];
-  // True adds the dependency, false (the default) removes it. A task waits for at most 5 tasks, and there
-  // are at most 300 dependencies in all.
+  // True adds the dependency, false (the default) removes it. A task waits for at most 5 tasks that are not
+  // done, and there are at most 300 dependencies in all; at either limit, the task's oldest done dependency
+  // gives way to the new one.
   bool waits = 3 [(google.api.field_behavior) = OPTIONAL];
   // Stable action UUID, for the transport; a dependency write is idempotent by value.
   string request_id = 4 [
@@ -383,6 +386,10 @@ message ResolveDependenciesResponse {
   repeated TaskDependency dependencies = 1;
   // Tasks whose dependency on a deleted task was removed in this call, for a one-time notice.
   repeated string dropped_task_ids = 2;
+  // Tasks whose dependency was removed in this call because what they waited for is no longer active and
+  // Todoist's activity log does not say that it was completed or deleted (a task in an archived project, say,
+  // or an account whose plan has no activity log), for a one-time notice that says only that.
+  repeated string released_task_ids = 3;
 }
 // Replaces this bounded role set. Quarter may be omitted to leave it unbound.
 // (-- api-linter: core::0134=disabled

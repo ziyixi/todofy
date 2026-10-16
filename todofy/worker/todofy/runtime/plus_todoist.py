@@ -20,6 +20,8 @@ FULL_SYNC_LIMIT = 20
 REFUSED_TOKEN = frozenset(range(400, 500)) - {401, 403, 429}
 # The activity log's events that say how a task left the active list; the newest one decides (closed_as).
 CLOSING_EVENTS = ("completed", "uncompleted", "deleted")
+# The task IDs one read of the active tasks (active) may name: Todoist's largest page.
+ACTIVE_READ = 200
 
 
 class PlusError(Exception):
@@ -145,8 +147,8 @@ async def task(core: Any, task_id: str) -> dict[str, Any]:
 
 
 async def active(core: Any, task_ids: list[str]) -> dict[str, dict[str, Any]]:
-    """The tasks among ``task_ids`` (at most 200) that Todoist lists as active, by ID, in one read. An incomplete
-    answer raises: a task missing from it would look closed."""
+    """The tasks among ``task_ids`` (at most ACTIVE_READ) that Todoist lists as active, by ID, in one read. An
+    incomplete answer raises: a task missing from it would look closed."""
     value = await call(core, "/api/v1/tasks?" + urlencode({"ids": ",".join(task_ids), "limit": len(task_ids)}))
     result = value.get("results")
     if not isinstance(result, list) or value.get("next_cursor"):
@@ -155,11 +157,12 @@ async def active(core: Any, task_ids: list[str]) -> dict[str, dict[str, Any]]:
     return {str(item["id"]): item for item in result if isinstance(item, dict) and str(item.get("id")) in wanted}
 
 
-async def closed_as(core: Any, task_id: str) -> str:
-    """How a task Todoist no longer lists as active closed: 'completed' when the newest of its completion,
-    reopening and deletion events in the activity log is a completion, else 'deleted' (also when the log holds
-    none of them, such as after the plan's log retention). Each event names its task, so the answer is filtered
-    here too. An account whose plan has no activity log gets a 403, which raises without blocking other calls."""
+async def closed_as(core: Any, task_id: str) -> str | None:
+    """How a task Todoist no longer lists as active closed, by the newest of its completion, reopening and deletion
+    events in the activity log: 'completed', 'deleted', or None when the log does not say (none of them, as for a
+    task in an archived project or after the plan's log retention, or a reopening). Each event names its task, so
+    the answer is filtered here too. An account whose plan has no activity log gets a 403, which raises without
+    blocking other calls."""
     query = {
         "object_type": "item",
         "object_id": task_id,
@@ -179,7 +182,9 @@ async def closed_as(core: Any, task_id: str) -> str:
         and event.get("event_type") in CLOSING_EVENTS
     ]
     newest = max(events, key=lambda event: str(event.get("event_date") or ""), default=None)
-    return plan.COMPLETED if newest is not None and newest["event_type"] == "completed" else plan.DELETED
+    if newest is None or newest["event_type"] == "uncompleted":
+        return None
+    return plan.COMPLETED if newest["event_type"] == "completed" else plan.DELETED
 
 
 async def commands(core: Any, commands: list[dict[str, Any]]) -> dict[str, Any]:

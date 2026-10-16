@@ -27,31 +27,40 @@ COMPLETED = "completed"
 DELETED = "deleted"
 
 
-def waits_for(edges: list[tuple[str, str]], task_id: str, prerequisite_id: str) -> bool:
-    """Whether ``task_id`` already waits for ``prerequisite_id``, directly or through other tasks. ``edges`` are
-    (task, prerequisite) pairs, at most MAX_EDGES."""
-    prerequisites: dict[str, list[str]] = {}
+def prerequisites(edges: list[tuple[str, str]], task_id: str) -> list[str]:
+    """Every task ``task_id`` waits for, directly or through other tasks, each once, the nearest first. ``edges``
+    are (task, prerequisite) pairs, at most MAX_EDGES; a cycle already in them (a restore, say) still ends."""
+    by_task: dict[str, list[str]] = {}
     for task, prerequisite in edges:
-        prerequisites.setdefault(task, []).append(prerequisite)
-    seen, pending = {task_id}, [task_id]
+        by_task.setdefault(task, []).append(prerequisite)
+    seen, found, pending = {task_id}, [], [task_id]
     while pending:
-        for prerequisite in prerequisites.get(pending.pop(), []):
-            if prerequisite == prerequisite_id:
-                return True
+        for prerequisite in by_task.get(pending.pop(0), []):
             if prerequisite not in seen:
                 seen.add(prerequisite)
+                found.append(prerequisite)
                 pending.append(prerequisite)
-    return False
+    return found
 
 
-def dependency_refusal(edges: list[tuple[str, str]], task_id: str, prerequisite_id: str) -> str | None:
-    """Why ``task_id`` may not start waiting for ``prerequisite_id``, or None: the task itself, a cycle (the
-    prerequisite already waits for the task, directly or not), or a limit (MAX_EDGES_PER_TASK, MAX_EDGES).
-    An edge that ``edges`` already holds is never refused: adding it again changes nothing."""
-    if (task_id, prerequisite_id) in edges:
-        return None
-    if task_id == prerequisite_id or waits_for(edges, prerequisite_id, task_id):
-        return "cycle"
-    if sum(task == task_id for task, _ in edges) >= MAX_EDGES_PER_TASK or len(edges) >= MAX_EDGES:
-        return "limit"
-    return None
+def waits_for(edges: list[tuple[str, str]], task_id: str, prerequisite_id: str) -> bool:
+    """Whether ``task_id`` already waits for ``prerequisite_id``, directly or through other tasks."""
+    return prerequisite_id in prerequisites(edges, task_id)
+
+
+def check_dependency(
+    edges: list[tuple[str, str]], holding: list[tuple[str, str]], task_id: str, prerequisite_id: str
+) -> tuple[str | None, tuple[str, str] | None]:
+    """Whether ``task_id`` may start waiting for ``prerequisite_id``: why not ("cycle": the task itself, or the
+    prerequisite already waits for the task, directly or not; "limit") and None, or None and the dependency that
+    gives way to it, if any. ``edges`` are every dependency, oldest first, and ``holding`` those that still hold
+    back their task. A done dependency neither closes a cycle nor counts toward MAX_EDGES_PER_TASK, and when the
+    store is at a limit (MAX_EDGES_PER_TASK rows for the task, MAX_EDGES in all) the task's oldest done one gives
+    way. One that is already there needs no room: a done one starts over in its own row."""
+    if task_id == prerequisite_id or waits_for(holding, prerequisite_id, task_id):
+        return "cycle", None
+    own = [edge for edge in edges if edge[0] == task_id]
+    if (task_id, prerequisite_id) in own or (len(own) < MAX_EDGES_PER_TASK and len(edges) < MAX_EDGES):
+        return None, None
+    done = [edge for edge in own if edge not in holding]
+    return (None, done[0]) if done else ("limit", None)

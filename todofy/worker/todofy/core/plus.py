@@ -253,6 +253,14 @@ def completed_count(task: dict[str, Any]) -> int | None:
     return count if isinstance(count, int) and not isinstance(count, bool) and 0 <= count < 2**31 else None
 
 
+def holds(baseline: int, prerequisite: dict[str, Any]) -> bool:
+    """Whether a dependency on an active task still holds back the task that waits (the extension's
+    dependencies.ts holds): a recurring prerequisite never leaves the active list, so its next completion, a
+    completed_count above the baseline, ends it."""
+    count = completed_count(prerequisite)
+    return not recurring(prerequisite) or count is None or count <= baseline
+
+
 def label_stage(labels: set[str], names: dict[str, str]) -> str:
     """The stage a task's planning labels give, the highest first; a Quick task is never weekly or monthly."""
     if names.get("committed") in labels:

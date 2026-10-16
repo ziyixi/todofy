@@ -41,12 +41,24 @@ async def dependencies(db: Any) -> list[dict[str, Any]]:
 
 
 async def add_dependency(
-    db: Any, provider: str, task_id: str, prerequisite_id: str, baseline: int, now: int
+    db: Any,
+    provider: str,
+    task_id: str,
+    prerequisite_id: str,
+    baseline: int,
+    now: int,
+    replaced: tuple[str, str] | None = None,
 ) -> list[dict[str, Any]]:
-    """Adds that ``task_id`` waits for ``prerequisite_id`` (both just confirmed active) and answers what it waits
-    for: one batch, so a task identity is never left without its edge."""
+    """Adds that ``task_id`` waits for ``prerequisite_id`` (both just confirmed active), or starts a done dependency
+    between them over from ``baseline``, and answers what it waits for. One batch, so a task identity is never left
+    without its edge, and a done dependency that gives way (``replaced``, core/plan.py check_dependency) goes in
+    the same write."""
+    statements = []
+    if replaced:
+        statements.append(db.prepare(sql.REMOVE_EDGE.sql).bind(provider, replaced[0], provider, replaced[1]))
     *_, edges_after = await db.batch(
         [
+            *statements,
             db.prepare(sql.ADD_TASKS.sql).bind(provider, now, json.dumps([task_id, prerequisite_id])),
             db.prepare(sql.ADD_EDGE.sql).bind(baseline, now, provider, task_id, provider, prerequisite_id),
             db.prepare(sql.TASK_EDGES.sql).bind(provider, task_id),
@@ -86,23 +98,48 @@ async def close_tasks(db: Any, provider: str, task_ids: list[str], closed_as: st
 
 
 async def settle(
-    db: Any, provider: str, now: int, *, gone: list[str], completed: list[str], deleted: list[str]
-) -> tuple[list[dict[str, Any]], list[str]]:
-    """Settles tasks the task store no longer lists, in one batch: what ``gone`` tasks waited for is removed,
-    ``completed`` prerequisites are recorded so, and ``deleted`` ones are recorded so with every dependency on
-    them removed. Answers every dependency after it and the tasks that waited for a deleted one."""
+    db: Any,
+    provider: str,
+    now: int,
+    *,
+    gone: list[str],
+    completed: list[str],
+    deleted: list[str],
+    released: list[str],
+    reopened: list[str],
+) -> tuple[list[dict[str, Any]], list[str], list[str]]:
+    """Settles what the task store says about tasks, in one batch: what ``gone`` tasks waited for is removed,
+    ``completed`` prerequisites are recorded so, ``deleted`` ones are recorded so with every dependency on them
+    removed, and the dependencies on ``released`` ones, whose closing the store does not say, are removed with
+    nothing recorded. ``reopened`` tasks, recorded closed but listed again, are open again. Answers every
+    dependency after it, and the tasks that waited for a deleted and for a released one."""
     statements = []
+    told: dict[str, int] = {}  # which result lists the waiters of the deleted, and of the released, tasks
     if deleted:
         ids = json.dumps(deleted)
+        told["deleted"] = len(statements)
         statements += [
             db.prepare(sql.WAITERS.sql).bind(provider, ids),
             db.prepare(sql.CLOSE_TASKS.sql).bind(now, plan.DELETED, provider, ids),
             db.prepare(sql.FORGET_PREREQUISITES.sql).bind(provider, ids),
         ]
+    if released:
+        ids = json.dumps(released)
+        told["released"] = len(statements)
+        statements += [
+            db.prepare(sql.WAITERS.sql).bind(provider, ids),
+            db.prepare(sql.FORGET_PREREQUISITES.sql).bind(provider, ids),
+        ]
     if completed:
         statements.append(db.prepare(sql.CLOSE_TASKS.sql).bind(now, plan.COMPLETED, provider, json.dumps(completed)))
+    if reopened:
+        statements.append(db.prepare(sql.ADD_TASKS.sql).bind(provider, now, json.dumps(reopened)))
     if gone:
         statements.append(db.prepare(sql.FORGET_WAITS.sql).bind(provider, json.dumps(gone)))
     results = await db.batch([*statements, db.prepare(sql.EDGES)])
-    waiters = [str(dict(row)["external_id"]) for row in results[0].results] if deleted else []
-    return dependency_rows(results[-1]), list(dict.fromkeys(waiters))
+
+    def waiters(kind: str) -> list[str]:
+        rows = results[told[kind]].results if kind in told else []
+        return list(dict.fromkeys(str(dict(row)["external_id"]) for row in rows))
+
+    return dependency_rows(results[-1]), waiters("deleted"), waiters("released")

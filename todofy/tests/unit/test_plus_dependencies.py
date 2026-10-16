@@ -29,27 +29,36 @@ LABELS += ("lead_1d", "lead_3d", "lead_1w", "lead_2w", "lead_1m")
 
 
 def test_waits_for_follows_dependencies_through_other_tasks():
-    edges = [("a", "b"), ("b", "c"), ("x", "y")]
+    edges = [("a", "b"), ("b", "c"), ("x", "y"), ("a", "d")]
     assert plan.waits_for(edges, "a", "c") and plan.waits_for(edges, "a", "b")
     assert not plan.waits_for(edges, "c", "a") and not plan.waits_for(edges, "a", "y")
+    assert plan.prerequisites(edges, "a") == ["b", "d", "c"]  # each once, the nearest first
     # A cycle already in the input (a restore, say) still ends.
     assert not plan.waits_for([("a", "b"), ("b", "a")], "a", "z")
 
 
+FIVE = [("a", f"p{n}") for n in range(5)]
+OTHERS = [(f"t{n}", "p") for n in range(299)]
+
+
 @pytest.mark.parametrize(
-    ("edges", "task", "prerequisite", "refusal"),
+    ("edges", "done", "task", "prerequisite", "expected"),
     [
-        pytest.param([], "a", "a", "cycle", id="itself"),
-        pytest.param([("b", "a")], "a", "b", "cycle", id="each_other"),
-        pytest.param([("c", "b"), ("b", "a")], "a", "c", "cycle", id="through_another"),
-        pytest.param([("a", f"p{n}") for n in range(5)], "a", "b", "limit", id="five_per_task"),
-        pytest.param([(f"t{n}", "p") for n in range(300)], "a", "b", "limit", id="three_hundred"),
-        pytest.param([("a", f"p{n}") for n in range(5)], "a", "p0", None, id="existing_edge_changes_nothing"),
-        pytest.param([("b", "c"), ("a", "c")], "a", "b", None, id="shared_prerequisite_is_no_cycle"),
+        pytest.param([], [], "a", "a", ("cycle", None), id="itself"),
+        pytest.param([("b", "a")], [], "a", "b", ("cycle", None), id="each_other"),
+        pytest.param([("c", "b"), ("b", "a")], [], "a", "c", ("cycle", None), id="through_another"),
+        pytest.param([("b", "a")], [("b", "a")], "a", "b", (None, None), id="a_done_one_closes_no_cycle"),
+        pytest.param(FIVE, [], "a", "b", ("limit", None), id="five_per_task"),
+        pytest.param(FIVE, [("a", "p3"), ("a", "p1")], "a", "b", (None, ("a", "p1")), id="oldest_done_gives_way"),
+        pytest.param([*OTHERS, ("x", "p")], [], "a", "b", ("limit", None), id="three_hundred"),
+        pytest.param([*OTHERS, ("a", "q")], [("a", "q")], "a", "b", (None, ("a", "q")), id="300_with_a_done_one"),
+        pytest.param(FIVE, [("a", "p0")], "a", "p0", (None, None), id="a_done_one_starts_over_in_its_row"),
+        pytest.param([("b", "c"), ("a", "c")], [], "a", "b", (None, None), id="shared_prerequisite_is_no_cycle"),
     ],
 )
-def test_dependency_refusal(edges, task, prerequisite, refusal):
-    assert plan.dependency_refusal(edges, task, prerequisite) == refusal
+def test_check_dependency(edges, done, task, prerequisite, expected):
+    holding = [edge for edge in edges if edge not in done]
+    assert plan.check_dependency(edges, holding, task, prerequisite) == expected
 
 
 # ---- the runtime over host SQLite --------------------------------------------------------------------------
@@ -215,8 +224,10 @@ def test_adding_again_changes_nothing_and_keeps_the_first_baseline(stack):
     stack.wait("invite", "venue")
     stack.todoist.tasks["venue"]["completed_count"] = 7
     stack.todoist.reads.clear()
+    stack.d1.statements.clear()
     assert stack.wait("invite", "venue")["dependencies"][0].get("baseline_completed_count", 0) == 0
-    assert stack.todoist.reads == []  # answered from the store
+    # One read tells that it still holds; the store is not written.
+    assert stack.todoist.reads == ["/api/v1/tasks"] and len(stack.d1.statements) == 2
     assert stack.edges() == [("invite", "venue", 0)]
 
 
@@ -241,12 +252,49 @@ def test_removing_reads_nothing_from_todoist_and_is_idempotent(stack):
         pytest.param([], "invite", "invite", id="itself"),
     ],
 )
-def test_the_server_refuses_a_cycle_without_reading_todoist(stack, existing, task, prerequisite):
+def test_the_server_refuses_a_cycle_after_one_read(stack, existing, task, prerequisite):
     for waiter, waited in existing:
         assert "dependencies" in stack.wait(waiter, waited)
     stack.todoist.reads.clear()
     assert stack.wait(task, prerequisite) == {"error": "ACTION_NOT_ALLOWED"}
-    assert stack.todoist.reads == [] and len(stack.edges()) == len(existing)
+    assert stack.todoist.reads == ["/api/v1/tasks"] and len(stack.edges()) == len(existing)
+
+
+def test_done_dependencies_neither_count_toward_the_limit_nor_close_a_cycle(stack):
+    """Review finding: five completed prerequisites used to fill the task for good, and a satisfied recurring one
+    refused a real dependency as a cycle."""
+    for n in range(6):
+        stack.todoist.add(f"p{n}")
+    for n in range(5):
+        assert "dependencies" in stack.wait("invite", f"p{n}")
+    for n in (3, 1):
+        stack.call("CompleteTask", task_id=f"p{n}")
+    stack.d1.statements.clear()
+    answer = stack.wait("invite", "p5")
+    # The oldest done one (p1) gave way in the same batch: still five rows, four of them holding.
+    assert [edge["prerequisite_id"] for edge in answer["dependencies"]] == ["p0", "p2", "p3", "p4", "p5"]
+    assert len(stack.d1.statements) == 6
+    stack.todoist.add("p6")
+    assert "dependencies" in stack.wait("invite", "p6")  # p3 gives way
+    stack.todoist.add("p7")
+    assert stack.wait("invite", "p7") == {"error": "ACTION_NOT_ALLOWED"}  # five that hold
+    # A waits for the recurring R; R's next completion satisfies it, so R may now wait for A.
+    stack.todoist.add("weekly", recurring=True, count=4)
+    assert "dependencies" in stack.wait("budget", "weekly")
+    assert stack.wait("weekly", "budget") == {"error": "ACTION_NOT_ALLOWED"}
+    stack.todoist.tasks["weekly"]["completed_count"] = 5
+    assert "dependencies" in stack.wait("weekly", "budget")
+
+
+def test_a_satisfied_recurring_prerequisite_starts_over_when_added_again(stack):
+    stack.todoist.add("weekly", recurring=True, count=4)
+    stack.wait("invite", "weekly")
+    stack.todoist.tasks["weekly"]["completed_count"] = 5
+    answer = stack.wait("invite", "weekly")
+    assert answer == {
+        "dependencies": [{"task_id": "invite", "prerequisite_id": "weekly", "baseline_completed_count": 5}]
+    }
+    assert stack.edges() == [("invite", "weekly", 5)]
 
 
 def test_a_task_waits_for_at_most_five(stack):
@@ -329,15 +377,18 @@ def test_a_recurring_task_completed_in_plus_keeps_what_it_waits_for(stack):
 
 
 @pytest.mark.parametrize(
-    ("events", "closed_as", "dropped"),
+    ("events", "closed_as", "told"),
     [
-        pytest.param([("completed", 10)], "completed", False, id="completed"),
-        pytest.param([("completed", 10), ("uncompleted", 11), ("completed", 12)], "completed", False, id="again"),
-        pytest.param([("completed", 10), ("deleted", 12)], "deleted", True, id="deleted_after"),
-        pytest.param([], "deleted", True, id="no_record"),
+        pytest.param([("completed", 10)], "completed", None, id="completed"),
+        pytest.param([("completed", 10), ("uncompleted", 11), ("completed", 12)], "completed", None, id="again"),
+        pytest.param([("completed", 10), ("deleted", 12)], "deleted", "dropped_task_ids", id="deleted_after"),
+        # No closing event (a task in an archived project, say) or a reopening last: the log does not say, so
+        # the dependencies go with a notice that claims neither, and nothing is recorded.
+        pytest.param([], None, "released_task_ids", id="no_record"),
+        pytest.param([("completed", 10), ("uncompleted", 11)], None, "released_task_ids", id="reopened_last"),
     ],
 )
-def test_a_prerequisite_closed_in_todoist_is_settled_from_the_activity_log(stack, events, closed_as, dropped):
+def test_a_prerequisite_closed_in_todoist_is_settled_from_the_activity_log(stack, events, closed_as, told):
     stack.wait("invite", "venue")
     stack.wait("budget", "venue")
     for event_type, day in events:
@@ -348,16 +399,16 @@ def test_a_prerequisite_closed_in_todoist_is_settled_from_the_activity_log(stack
     stack.todoist.reads.clear()
     answer = stack.call("ResolveDependencies", task_ids=["venue"])
     assert stack.closed()["venue"] == closed_as
-    if dropped:
-        assert answer == {"dropped_task_ids": ["invite", "budget"]} and stack.edges() == []
+    if told:
+        assert answer == {told: ["invite", "budget"]} and stack.edges() == []
     else:
         assert [edge["done"] for edge in answer["dependencies"]] == [True, True]
-        assert "dropped_task_ids" not in answer
+        assert "dropped_task_ids" not in answer and "released_task_ids" not in answer
     assert stack.todoist.reads == ["/api/v1/tasks", "/api/v1/activities"]
     # Settled once: asking again reads the active list only, or nothing once no dependency names the task.
     stack.todoist.reads.clear()
     stack.call("ResolveDependencies", task_ids=["venue"])
-    assert stack.todoist.reads == ([] if dropped else ["/api/v1/tasks"])
+    assert stack.todoist.reads == ([] if told else ["/api/v1/tasks"])
 
 
 def test_a_task_todoist_still_lists_is_left_as_it_is(stack):
@@ -369,16 +420,21 @@ def test_a_task_todoist_still_lists_is_left_as_it_is(stack):
     assert stack.todoist.reads == ["/api/v1/tasks"] and stack.closed() == {"invite": None, "venue": None}
 
 
-def test_an_unread_activity_log_changes_nothing_and_never_blocks_todoist(stack):
+def test_a_failed_activity_read_changes_nothing_and_a_plan_without_the_log_releases(stack):
     stack.wait("invite", "venue")
-    del stack.todoist.tasks["venue"]
-    stack.todoist.activity_status = 403  # a plan without the activity log
-    answer = stack.call("ResolveDependencies", task_ids=["venue"])
-    assert answer == {"dependencies": [{"task_id": "invite", "prerequisite_id": "venue"}]}
-    assert stack.blocked == [] and stack.closed()["venue"] is None
+    stack.wait("budget", "plan")
+    del stack.todoist.tasks["venue"], stack.todoist.tasks["plan"]
     stack.todoist.activity_status = 503
-    assert "dependencies" in stack.call("ResolveDependencies", task_ids=["venue"])
-    assert stack.closed()["venue"] is None
+    answer = stack.call("ResolveDependencies", task_ids=["venue", "plan"])
+    assert len(answer["dependencies"]) == 2 and stack.closed()["venue"] is None
+    # A plan without the activity log answers 403: nothing can tell a completion from a deletion, so every
+    # such prerequisite is released after the first refused read, and Todoist is never blocked.
+    stack.todoist.activity_status = 403
+    stack.todoist.reads.clear()
+    answer = stack.call("ResolveDependencies", task_ids=["venue", "plan"])
+    assert list(answer) == ["released_task_ids"] and sorted(answer["released_task_ids"]) == ["budget", "invite"]
+    assert stack.todoist.reads == ["/api/v1/tasks", "/api/v1/activities"]
+    assert stack.blocked == [] and stack.closed() == {"invite": None, "venue": None, "budget": None, "plan": None}
 
 
 def test_a_call_names_at_most_twenty_tasks_and_reads_at_most_ten_logs(stack):
@@ -389,6 +445,7 @@ def test_a_call_names_at_most_twenty_tasks_and_reads_at_most_ten_logs(stack):
         stack.todoist.add(task_id)
         stack.todoist.add("w" + task_id)
         stack.wait("w" + task_id, task_id)
+        stack.todoist.event(task_id, "deleted", 12)
         del stack.todoist.tasks[task_id]
     stack.todoist.reads.clear()
     stack.d1.statements.clear()
@@ -406,3 +463,39 @@ def test_a_reopened_task_linked_again_is_open_again(stack):
     stack.wait("budget", "venue")
     assert stack.closed()["venue"] is None
     assert [edge.get("done", False) for edge in stack.dependencies()] == [False, False]
+
+
+def test_a_reopened_prerequisite_is_open_again_so_a_later_deletion_is_told(stack):
+    """Review finding: a completion recorded in Plus outlived a reopening, so a later deletion was never told."""
+    stack.wait("invite", "venue")
+    stack.call("CompleteTask", task_id="venue")
+    stack.todoist.add("venue")  # reopened in Todoist; the extension's read lists it, with its dependency done
+    answer = stack.call("ResolveDependencies", task_ids=["venue"])
+    assert answer == {"dependencies": [{"task_id": "invite", "prerequisite_id": "venue"}]}
+    assert stack.closed()["venue"] is None
+    stack.todoist.event("venue", "completed", 10)
+    stack.todoist.event("venue", "uncompleted", 11)
+    stack.todoist.event("venue", "deleted", 12)
+    del stack.todoist.tasks["venue"]
+    assert stack.call("ResolveDependencies", task_ids=["venue"]) == {"dropped_task_ids": ["invite"]}
+    assert stack.edges() == [] and stack.closed()["venue"] == "deleted"
+
+
+def test_completing_succeeds_when_the_dependency_record_fails(stack, monkeypatch, capsys):
+    """Review finding: Todoist has closed the task, so a failed D1 record must not report the completion failed."""
+    stack.wait("invite", "venue")
+
+    async def broken(*_args):
+        raise RuntimeError("synthetic D1 failure")
+
+    monkeypatch.setattr(stack.runtime.plus_api.plan_store, "close_tasks", broken)
+    assert stack.call("CompleteTask", task_id="venue") == {"task_id": "venue"}
+    assert [command["type"] for command in stack.todoist.sent] == ["item_close"]
+    assert json.loads(capsys.readouterr().out.strip().splitlines()[-1]) == {
+        "plus": "completion_unrecorded",
+        "error_type": "RuntimeError",
+    }
+    # Without the record, settling reads the activity log as for a task completed in Todoist.
+    stack.todoist.event("venue", "completed", 10)
+    answer = stack.call("ResolveDependencies", task_ids=["venue"])
+    assert answer == {"dependencies": [{"task_id": "invite", "prerequisite_id": "venue", "done": True}]}

@@ -205,8 +205,8 @@ def test_dependency_statements_keep_the_store_consistent(db):
         return db.execute(query.sql, args).fetchall()
 
     run(sql.ADD_TASKS, "todoist", NOW, '["A", "B", "C"]')
-    run(sql.ADD_EDGE, 2, NOW, "todoist", "A", "todoist", "B")
-    run(sql.ADD_EDGE, 9, NOW, "todoist", "A", "todoist", "B")  # an existing edge keeps its first baseline
+    run(sql.ADD_EDGE, 9, NOW, "todoist", "A", "todoist", "B")
+    run(sql.ADD_EDGE, 2, NOW, "todoist", "A", "todoist", "B")  # an existing (done) edge starts over, in its row
     run(sql.ADD_EDGE, 0, NOW + 1, "todoist", "C", "todoist", "B")
     run(sql.ADD_EDGE, 0, NOW, "todoist", "A", "todoist", "missing")  # no identity, no edge
     assert db.execute(sql.EDGES).fetchall() == [("A", "B", 2, 0), ("C", "B", 0, 0)]

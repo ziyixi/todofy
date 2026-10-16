@@ -1,6 +1,7 @@
 """Dependencies through the real gateway, Python Durable Object and D1 with the extension's token: stored as
 plan_edges between Todofy's own task IDs, never written to Todoist, satisfied by a recurring prerequisite's
-next completion, and settled from Todoist's active list and activity log. All upstream data is synthetic."""
+next completion, giving way or starting over once done, and settled from Todoist's active list and activity log.
+All upstream data is synthetic."""
 
 import uuid
 from collections.abc import Iterator
@@ -190,8 +191,41 @@ def test_prerequisites_closed_in_todoist_are_settled_from_the_activity_log(stack
     assert stack.resolve("invite") == {}
 
 
+def test_a_done_dependency_gives_way_starts_over_and_reopens(stack):
+    for n in range(6):
+        stack.upstream.add(f"g{n}")
+    stack.upstream.add("gw")
+    for n in range(5):
+        assert stack.wait("gw", f"g{n}").status_code == 200
+    assert reason(stack.wait("gw", "g5")) == "ACTION_NOT_ALLOWED"
+    # g1 is completed: the oldest done dependency gives way to the sixth, in the same D1 batch.
+    assert stack.post("tasks:completeTask", task_id="g1").status_code == 200
+    added = stack.wait("gw", "g5")
+    assert added.status_code == 200, added.text
+    assert [edge["prerequisite_id"] for edge in added.json()["dependencies"]] == ["g0", "g2", "g3", "g4", "g5"]
+    # A recurring prerequisite's next completion satisfies it; adding it again starts over from the new count.
+    stack.upstream.add("gr", due={"date": "2026-10-20", "is_recurring": True}, completed_count=7)
+    stack.upstream.add("gx")
+    assert stack.wait("gx", "gr").json()["dependencies"][0]["baseline_completed_count"] == 7
+    assert stack.post("tasks:completeTask", task_id="gr").status_code == 200
+    again = stack.wait("gx", "gr")
+    assert again.json() == {"dependencies": [{"task_id": "gx", "prerequisite_id": "gr", "baseline_completed_count": 8}]}
+    rows = stack.worker.d1(
+        "SELECT e.baseline_count, p.closed_as FROM plan_edges e JOIN plan_tasks w ON w.id = e.task_id"
+        " JOIN plan_tasks p ON p.id = e.prerequisite_id WHERE w.external_id = 'gx'"
+    )
+    assert rows == [{"baseline_count": 8, "closed_as": None}]
+    # A prerequisite recorded completed in Plus and reopened in Todoist is open again once a check names it.
+    assert stack.post("tasks:completeTask", task_id="g2").status_code == 200
+    stack.upstream.add("g2")
+    assert ("gw", "g2") in {(edge["task_id"], edge["prerequisite_id"]) for edge in stack.resolve("g2")["dependencies"]}
+    assert stack.worker.d1("SELECT closed_as FROM plan_tasks WHERE external_id = 'g2'") == [{"closed_as": None}]
+    for waiter, prerequisite in [*(("gw", f"g{n}") for n in (0, 2, 3, 4, 5)), ("gx", "gr")]:
+        stack.wait(waiter, prerequisite, waits=False)
+
+
 @pytest.mark.parametrize("status", [403, 503])
-def test_an_unreadable_activity_log_leaves_the_prerequisite_and_never_blocks_todoist(stack, status):
+def test_an_unreadable_activity_log_never_blocks_todoist(stack, status):
     stack.upstream.add(f"s{status}")
     stack.upstream.add(f"w{status}")
     assert stack.wait(f"w{status}", f"s{status}").status_code == 200
@@ -201,10 +235,25 @@ def test_an_unreadable_activity_log_leaves_the_prerequisite_and_never_blocks_tod
         answer = stack.resolve(f"s{status}")
     finally:
         stack.upstream.activity_status = 200
-    assert {(edge["task_id"], edge["prerequisite_id"]) for edge in answer.get("dependencies", [])} == {
-        (f"w{status}", f"s{status}")
-    }
-    assert "dropped_task_ids" not in answer
-    # Todoist is not blocked for six hours: the next call reads it, and settles this time.
-    assert stack.resolve(f"s{status}") == {"dropped_task_ids": [f"w{status}"]}
+    if status == 403:
+        # A plan without the activity log: nothing tells a completion from a deletion, so the dependency goes with
+        # a notice that claims neither, and nothing is recorded about the task.
+        assert answer == {"released_task_ids": [f"w{status}"]}
+        assert stack.worker.d1("SELECT closed_as FROM plan_tasks WHERE external_id = 's403'") == [{"closed_as": None}]
+    else:
+        assert {(edge["task_id"], edge["prerequisite_id"]) for edge in answer.get("dependencies", [])} >= {
+            (f"w{status}", f"s{status}")
+        }
+        assert "dropped_task_ids" not in answer and "released_task_ids" not in answer
+        # The next check reads the log again, and settles this time.
+        stack.upstream.activity[f"s{status}"] = [
+            {
+                "object_type": "item",
+                "object_id": f"s{status}",
+                "event_type": "deleted",
+                "event_date": "2026-10-15T08:00:00Z",
+            }
+        ]
+        assert stack.resolve(f"s{status}") == {"dropped_task_ids": [f"w{status}"]}
+    # Todoist is not blocked for six hours: the next call reads it.
     assert f"w{status}" in stack.tasks()
