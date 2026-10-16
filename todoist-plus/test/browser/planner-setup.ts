@@ -7,6 +7,7 @@ import {
   type Locator,
 } from "@playwright/test";
 import { resolve } from "node:path";
+import { themeCss } from "./theme";
 
 /** A real built extension and only synthetic Todoist/FlowDay data. */
 export async function launchPlanner() {
@@ -294,7 +295,7 @@ async function setupPlanner(context: BrowserContext, worker: Worker) {
   await context.route("https://app.todoist.com/**", (route) =>
     route.fulfill({
       contentType: "text/html",
-      body: `<!doctype html><html lang="en"><head><style>body{margin:0;color:#202020;background:white;font-family:system-ui}aside{width:280px;position:fixed;inset:0 auto 0 0;background:#fcfcf8}main{margin-left:280px;min-height:100vh}#top-menu{padding:12px;list-style:none}#top-menu a{height:34px;padding:5px;display:flex;width:230px;font-size:13px;box-sizing:border-box}#top-menu svg{width:24px;height:24px}</style></head><body><aside data-testid="app-sidebar-scrollable-container"><ul id="top-menu"><li><a href="/app/today"><svg></svg><span>Today</span></a></li><li><a href="/app/upcoming"><svg></svg><span>Upcoming</span></a></li></ul></aside><main id="content"><h1>Native list</h1></main></body></html>`,
+      body: `<!doctype html><html lang="en" class="theme_kale"><head><style id="todoist-theme">${themeCss}</style><style>body{margin:0;color:var(--product-library-display-primary-idle-tint);background:var(--product-library-background-base-primary);font-family:system-ui}aside{width:280px;position:fixed;inset:0 auto 0 0;background:var(--product-library-background-base-secondary)}main{margin-left:280px;min-height:100vh}#top-menu{padding:12px;list-style:none}#top-menu a{height:34px;padding:5px;display:flex;width:230px;font-size:13px;box-sizing:border-box}#top-menu svg{width:24px;height:24px}</style></head><body><aside data-testid="app-sidebar-scrollable-container"><ul id="top-menu"><li><a href="/app/today"><svg></svg><span>Today</span></a></li><li><a href="/app/upcoming"><svg></svg><span>Upcoming</span></a></li></ul></aside><main id="content"><h1>Native list</h1></main></body></html>`,
     }),
   );
 }

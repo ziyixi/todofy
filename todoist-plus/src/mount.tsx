@@ -35,28 +35,10 @@ export function languageOf(document: Document): Language {
     ? "zh"
     : "en";
 }
-function applyTheme(host: HTMLElement, source: HTMLElement) {
-  const computed = getComputedStyle(source);
-  const rgb = computed.color.match(/\d+/gu)?.map(Number);
-  const theme =
-    rgb && rgb.length >= 3 && (rgb[0]! + rgb[1]! + rgb[2]!) / 3 > 160
-      ? "dark"
-      : "light";
-  if (host.dataset.theme !== theme) host.dataset.theme = theme;
-  const variables = {
-    "--plus-bg":
-      computed.backgroundColor === "rgba(0, 0, 0, 0)"
-        ? getComputedStyle(document.body).backgroundColor
-        : computed.backgroundColor,
-    "--plus-text": computed.color,
-  };
-  for (const [name, value] of Object.entries(variables))
-    if (host.style.getPropertyValue(name) !== value)
-      host.style.setProperty(name, value);
-  if (host.style.fontFamily !== computed.fontFamily)
-    host.style.fontFamily = computed.fontFamily;
-}
-
+/**
+ * Colours and theme need no copying: Todoist's theme tokens and color-scheme inherit into the
+ * shadow roots, and styles.css reads them. Only the native nav row's geometry is measured.
+ */
 function applyNavigationLayout(host: HTMLElement, reference: HTMLElement) {
   const computed = getComputedStyle(reference);
   const width = reference.getBoundingClientRect().width;
@@ -91,7 +73,6 @@ export async function mountTodoist(ctx: ContentScriptContext) {
     HTMLElement,
     { hidden: string | null; display: string; priority: string }
   >();
-  const themeHosts = new Map<HTMLElement, HTMLElement>();
   const nativeCurrent = new Set<HTMLElement>();
   const cleanups: (() => void)[] = [];
   let content: HTMLElement | undefined;
@@ -252,13 +233,8 @@ export async function mountTodoist(ctx: ContentScriptContext) {
       const reference = document.querySelector<HTMLElement>(
         "#top-menu a[href$='/upcoming']",
       );
-      if (reference) {
-        themeHosts.set(favoritesHost, reference);
-        applyTheme(favoritesHost, reference);
-        applyNavigationLayout(favoritesHost, reference);
-      }
+      if (reference) applyNavigationLayout(favoritesHost, reference);
       favoritesCleanup = () => {
-        themeHosts.delete(ui.shadowHost);
         ui.remove();
         favoritesRoot = undefined;
         favoritesHost = undefined;
@@ -362,7 +338,6 @@ export async function mountTodoist(ctx: ContentScriptContext) {
     language = languageOf(document);
     mainHost.style.display = view ? "block" : "none";
     if (view) {
-      applyTheme(mainHost, content);
       mainRoot.render(
         <PlusBoundary
           language={language}
@@ -420,11 +395,9 @@ export async function mountTodoist(ctx: ContentScriptContext) {
     mainUi = ui;
     mainHost = ui.shadowHost;
     content = anchor;
-    themeHosts.set(mainHost, anchor);
   }
   /** Todoist re-created the container: Plus leaves with it and native Todoist shows again. */
   function dropMain() {
-    if (mainUi) themeHosts.delete(mainUi.shadowHost);
     mainUi?.remove();
     mainUi = undefined;
     mainHost = undefined;
@@ -487,13 +460,9 @@ export async function mountTodoist(ctx: ContentScriptContext) {
     ui.mount();
     navUi = ui;
     navHost = ui.shadowHost;
-    const navReference = upcoming ?? sidebar;
-    themeHosts.set(navHost, navReference);
-    applyTheme(navHost, navReference);
     if (upcoming) applyNavigationLayout(navHost, upcoming);
   }
   function dropNav() {
-    if (navUi) themeHosts.delete(navUi.shadowHost);
     navUi?.remove();
     navUi = undefined;
     navHost = undefined;
@@ -604,10 +573,7 @@ export async function mountTodoist(ctx: ContentScriptContext) {
     if (disposed || !anchor.isConnected) return;
     ui.mount();
     detailHost = ui.shadowHost;
-    themeHosts.set(detailHost, anchor);
-    applyTheme(detailHost, anchor);
     detailCleanup = () => {
-      themeHosts.delete(ui.shadowHost);
       ui.remove();
     };
   }
@@ -631,7 +597,6 @@ export async function mountTodoist(ctx: ContentScriptContext) {
     if (mainHost && !mainHost.isConnected) dropMain();
     if (navHost && !navHost.isConnected) dropNav();
     navUpdate?.();
-    for (const [host, source] of themeHosts) applyTheme(host, source);
     if (!mainHost || !navHost) void mount();
     if (
       mainHost &&
@@ -655,7 +620,7 @@ export async function mountTodoist(ctx: ContentScriptContext) {
     subtree: true,
     childList: true,
     attributes: true,
-    attributeFilter: ["class", "style", "lang", "data-theme"],
+    attributeFilter: ["class", "style", "lang"],
   });
   ctx.addEventListener(window, "popstate", render);
   ctx.addEventListener(window, "wxt:locationchange", render);

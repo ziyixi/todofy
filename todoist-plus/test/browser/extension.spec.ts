@@ -6,18 +6,18 @@ import {
   type Worker,
 } from "@playwright/test";
 import { resolve } from "node:path";
+import { themeCss, tokenColor } from "./theme";
 
-const fixture = `<!doctype html><html lang="en"><head><style>
-body { margin:0; color:#202020; background:white; font-family:system-ui }
-body.dark { color:#e5e5e5; background:#1e1e1e }
-aside { width:280px; padding:12px; box-sizing:border-box; background:#fcfcf8; position:fixed; top:0; bottom:0 }
-body.dark aside { background:#24251f }
+// The owner's Kale theme; the other public themes switch by the <html> class.
+const fixture = `<!doctype html><html lang="en" class="theme_kale"><head><style id="todoist-theme">${themeCss}</style><style>
+body { margin:0; color:var(--product-library-display-primary-idle-tint); background:var(--product-library-background-base-primary); font-family:system-ui }
+aside { width:280px; padding:12px; box-sizing:border-box; background:var(--product-library-background-base-secondary); position:fixed; top:0; bottom:0 }
 main { margin-left:280px; min-height:100vh; color:inherit }
 a { color:inherit } [hidden] { display:none !important }
 aside ul { margin:0; padding:0; list-style:none }
 #top-menu a { display:flex; align-items:center; box-sizing:border-box; width:230px; height:34px; padding:5px; font-size:13px; line-height:20px; font-weight:400; text-decoration:none }
 #top-menu svg { width:24px; height:24px }
-#top-menu .current > a { background:#f0f6df; color:#557921 }
+#top-menu .current > a { background:var(--product-library-selectable-secondary-selected-fill); color:var(--product-library-selectable-secondary-on-selected-tint) }
 </style></head><body><aside data-testid="app-sidebar-scrollable-container"><ul id="top-menu"><li id="native-today" class="current"><a href="/app/today"><svg aria-hidden="true"></svg><span>Today</span></a></li><li><a href="/app/upcoming"><svg aria-hidden="true"></svg><span>Upcoming</span></a></li></ul><ul id="favorites">
 <div><li><div><div><a href="/app/project/email-inbox">Email Inbox</a><span>0</span></div></div></li></div>
 <div id="legacy-wrapper"><li id="legacy"><div><div><a href="/app/filter/committed-f1">Legacy commitment filter</a><span>0</span></div></div></li></div>
@@ -233,11 +233,16 @@ test("built MV3 mounts, restores native UI and sends task actions through its ba
     await expect(parentTask).toBeVisible();
     await expect(page.locator("#native")).toBeHidden();
     await expect(page.locator("#legacy")).toBeHidden();
+    const selected = await tokenColor(
+      page,
+      "selectable-secondary-selected-fill",
+    );
     const planButton = page.getByRole("button", { name: "Plan", exact: true });
     await planButton.hover();
+    await expect(planButton).toHaveCSS("background-color", selected);
     await expect(planButton).toHaveCSS(
-      "background-color",
-      "rgb(240, 246, 223)",
+      "color",
+      await tokenColor(page, "selectable-secondary-on-selected-tint"),
     );
     await expect(planButton).toHaveCSS("padding", "5px");
     await expect(planButton).toHaveCSS("width", "230px");
@@ -264,7 +269,7 @@ test("built MV3 mounts, restores native UI and sends task actions through its ba
     await expect(page.locator("#native")).toBeVisible();
     await expect(page.locator("#native-today > a")).toHaveCSS(
       "background-color",
-      "rgb(240, 246, 223)",
+      selected,
     );
     await expect(parentTask).toBeHidden();
     await page.getByRole("button", { name: "Focus", exact: true }).click();
@@ -415,7 +420,7 @@ test("returning from a native page reloads Focus after an external queue change"
   }
 });
 
-test("native task detail keeps work labels, hides replaced labels only with controls, and follows dark theme", async () => {
+test("native task detail keeps work labels, hides replaced labels only with controls, and follows the dark theme", async () => {
   const extensionPath = resolve(".output/chrome-mv3");
   const context = await chromium.launchPersistentContext("", {
     channel: "chromium",
@@ -433,7 +438,7 @@ test("native task detail keeps work labels, hides replaced labels only with cont
     const page = await context.newPage();
     await page.goto("https://app.todoist.com/app/task/parent");
     await page.evaluate(() => {
-      document.body.classList.add("dark");
+      document.documentElement.className = "theme_dark";
       document
         .querySelector("#content")!
         .insertAdjacentHTML(
@@ -452,15 +457,18 @@ test("native task detail keeps work labels, hides replaced labels only with cont
     ).toBeDisabled();
     await expect(page.locator("#commit-badge")).toBeHidden();
     await expect(page.locator("#office-badge")).toBeVisible();
+    // Todoist's dark text, on the modal's own surface.
     expect(
-      await page
-        .locator("todoist-plus-task-tools")
-        .evaluate(
-          (host) =>
-            getComputedStyle(host.shadowRoot!.querySelector(".plus-root")!)
-              .color,
-        ),
-    ).toBe("rgb(229, 229, 229)");
+      await page.locator("todoist-plus-task-tools").evaluate((host) => {
+        const style = getComputedStyle(
+          host.shadowRoot!.querySelector(".plus-root")!,
+        );
+        return [style.color, style.backgroundColor];
+      }),
+    ).toEqual([
+      await tokenColor(page, "display-primary-idle-tint"),
+      "rgba(0, 0, 0, 0)",
+    ]);
     await page
       .getByRole("button", { name: "Steps & timing", exact: true })
       .click();
@@ -626,7 +634,7 @@ test("restores legacy controls when mapping or the extension connection becomes 
     await expect(page.locator("#native")).toBeHidden();
     await expect(page.locator("#native-today > a")).toHaveCSS(
       "background-color",
-      "rgb(240, 246, 223)",
+      await tokenColor(page, "selectable-secondary-selected-fill"),
     );
     await worker.evaluate(() => {
       (
