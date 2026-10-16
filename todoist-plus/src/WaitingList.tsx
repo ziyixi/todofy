@@ -1,6 +1,6 @@
 import { ChevronRight } from "lucide-react";
 import { displayedTitle } from "./domain";
-import { deadlineTitle, waitingDeadline } from "./deadlines";
+import { waitingDeadline } from "./deadlines";
 import { Status } from "./DeadlineList";
 import { words } from "./i18n";
 import {
@@ -91,7 +91,8 @@ export function WaitingList({
                   text: untouched + separator + (deadline?.text ?? ""),
                   danger: deadline?.danger,
                 }}
-                title={task.deadline && deadlineTitle(task.deadline, language)}
+                deadline={task.deadline}
+                language={language}
               />
               <span className="planning-row-actions">
                 {/* Opening the editor writes nothing; its own controls wait while busy. */}

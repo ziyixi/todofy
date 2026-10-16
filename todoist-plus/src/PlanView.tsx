@@ -96,6 +96,7 @@ export function PlanView(props: PlanViewProps) {
       today={props.currentDate}
       language={language}
       busy={props.busy}
+      pending={props.pending}
       run={props.run}
       actions={props.actions}
       canMarkActive={canMarkActive(plan)}

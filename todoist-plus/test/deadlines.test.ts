@@ -6,6 +6,7 @@ import {
   detailStatus,
   isDue,
   rowStatus,
+  spokenDeadline,
   unplannedDue,
   unplannedText,
   waitingDeadline,
@@ -121,6 +122,31 @@ it("lists deadlines earliest first, then by priority, with one short status each
       "en",
     ),
   ).toEqual({ text: "Deadline today" });
+  // A @blocked task past its deadline without a lead says so, as past rows do.
+  const blocked = task("blocked", {
+    deadline: on(-2),
+    labels: ["blocked"],
+    missingLead: true,
+  });
+  expect(
+    rowStatus(
+      { task: blocked, state: deadlineState(blocked, TODAY)! },
+      TODAY,
+      "zh",
+    ),
+  ).toEqual({ text: "", danger: "已过 2 天" });
+});
+
+it("tells screen readers only the part of the deadline a status does not say", () => {
+  const spoken = (status: string, deadline: string, language: "zh" | "en") =>
+    spokenDeadline({ text: status }, deadline, language);
+  expect(spoken("11月30日截止", "2026-11-30", "zh")).toBe("，周一");
+  expect(spoken("Deadline Nov 30", "2026-11-30", "en")).toBe(", Mon");
+  expect(spoken("明天截止", on(1), "zh")).toBe("，10月16日周五");
+  expect(spoken("5 days left", on(5), "en")).toBe(", Tue, Oct 20");
+  expect(spokenDeadline({ text: "", danger: "已过 2 天" }, on(-2), "zh")).toBe(
+    "，10月13日周二",
+  );
 });
 
 it("says in task details where the deadline stands, from the fields as shown", () => {

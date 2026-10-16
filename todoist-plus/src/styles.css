@@ -349,6 +349,13 @@ svg.lucide > * {
   align-items: flex-end;
   gap: 12px;
 }
+/* In a narrow editor the buttons keep one line and move under the fields instead. */
+.plus-deadline-fields {
+  flex-wrap: wrap;
+}
+.plus-deadline-fields .plus-button {
+  white-space: nowrap;
+}
 .plus-task-editor label {
   display: flex;
   flex-direction: column;

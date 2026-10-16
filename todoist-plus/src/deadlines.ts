@@ -1,6 +1,6 @@
 import { startDate, taskIndex } from "./domain";
 import { words } from "./i18n";
-import { monthDay, readableDate } from "./PlanningCalendar";
+import { monthDay, readableDate, shortDay } from "./PlanningCalendar";
 import type { FlowDayPlan, Language, PlanState, PlanningTask } from "./model";
 
 /** The owner's literal in-progress label, as Todofy's Active Deadlines filter names it; never created. */
@@ -177,16 +177,37 @@ export function rowStatus(
   if (state.kind === "past")
     return { text: "", danger: pastText(state.days, language) };
   if (state.kind === "window") return { text: leftText(state.days, language) };
+  // A @blocked task can be past its deadline without a start-ahead choice.
   if (state.kind === "noLead")
-    return { text: deadlineDateText(task.deadline, today, language) };
+    return state.days < 0
+      ? { text: "", danger: pastText(state.days, language) }
+      : { text: deadlineDateText(task.deadline, today, language) };
   return activeStatus(state.days, language);
 }
 
-/** The deadline's full date, for a status's title and accessible name: "10月20日周二". */
+/** The deadline's full date, for a status's tooltip: "截止日期：10月20日周二". */
 export function deadlineTitle(deadline: string, language: Language): string {
   return language === "zh"
     ? `截止日期：${readableDate(deadline, language)}`
     : `Deadline: ${readableDate(deadline, language)}`;
+}
+
+/**
+ * What a status adds for screen readers: the deadline's weekday where the status already shows
+ * its date ("11月30日截止，周一"), otherwise its full date ("2 days past, Sun, Oct 11").
+ */
+export function spokenDeadline(
+  status: StatusText,
+  deadline: string,
+  language: Language,
+): string {
+  const shown = (status.text + (status.danger ?? "")).includes(
+    monthDay(deadline, language),
+  );
+  const date = shown
+    ? shortDay(deadline, language)
+    : readableDate(deadline, language);
+  return (language === "zh" ? "，" : ", ") + date;
 }
 
 /** "12 天未变动 · 10月22日截止" in Waiting, or "已过截止 2 天" in --plus-danger once past. */

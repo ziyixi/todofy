@@ -125,6 +125,9 @@ const rowText = (list: HTMLElement) =>
         item.querySelector(".planning-row-actions")!.textContent,
       ].join(" | "),
     );
+/** Deadlines' own status region, beside the list; dnd-kit adds another for drags. */
+const announced = () =>
+  document.querySelector('.planning-deadlines + [role="status"]')!.textContent;
 
 it("replaces Needs a look with Deadlines between Review and Waiting, open when something is due", async () => {
   const { props } = await setup();
@@ -155,10 +158,10 @@ it("replaces Needs a look with Deadlines between Review and Waiting, open when s
     "Move house | In progress · 12 days left | ",
     "Renew the car insurance | Deadline Nov 30 | Choose when to start",
   ]);
-  // Only the days past use the danger colour; the full date is the status's title and text.
-  const first = screen.getByRole("list", {
-    name: "Deadlines",
-  }).firstElementChild!;
+  // Only the days past use the danger colour. The full date is the status's tooltip; screen
+  // readers hear what the status does not already say.
+  const list = screen.getByRole("list", { name: "Deadlines" });
+  const first = list.firstElementChild!;
   expect(first.querySelector(".planning-danger-text")!.textContent).toBe(
     "2 days past",
   );
@@ -166,9 +169,18 @@ it("replaces Needs a look with Deadlines between Review and Waiting, open when s
   expect(
     first.querySelector(".planning-row-status")!.getAttribute("title"),
   ).toBe("Deadline: Sun, Oct 11");
-  expect(first.querySelector(".plus-sr-only")!.textContent).toBe(
-    ", Deadline: Sun, Oct 11",
-  );
+  expect(
+    [...list.querySelectorAll(".planning-row-status")].map(
+      (status) => status.textContent,
+    ),
+  ).toEqual([
+    "2 days past, Sun, Oct 11",
+    "Deadline tomorrow, Wed, Oct 14",
+    "2 days left, Thu, Oct 15",
+    "5 days left, Sun, Oct 18",
+    "In progress · 12 days left, Sun, Oct 25",
+    "Deadline Nov 30, Mon",
+  ]);
   // Actions are in the accessibility tree, named with their task.
   expect(
     screen.getByRole("button", {
@@ -252,12 +264,8 @@ it("marks a task in progress with one confirmed write, says so, and moves focus 
       }}
     />,
   );
-  // Its own status region; dnd-kit adds another for drags.
-  const deadlines = document.querySelector<HTMLElement>(".planning-deadlines")!;
   await waitFor(() =>
-    expect(within(deadlines).getByRole("status").textContent).toBe(
-      "Marked in progress: Submit the expense claim",
-    ),
+    expect(announced()).toBe("Marked in progress: Submit the expense claim"),
   );
   expect(rowText(screen.getByRole("list", { name: "Deadlines" }))[1]).toBe(
     "Submit the expense claim | In progress · Deadline tomorrow | ",
@@ -265,6 +273,79 @@ it("marks a task in progress with one confirmed write, says so, and moves focus 
   expect(document.activeElement?.getAttribute("aria-label")).toBe(
     "Mark in progress: Prepare the next research check-in",
   );
+});
+
+it("keeps Deadlines open once a row is acted on, also when its last due row is marked", async () => {
+  const actions = createPrototype();
+  vi.spyOn(actions, "updateTask").mockImplementation(async (task) => ({
+    ...task,
+    labels: [...task.labels, "active"],
+    mustStart: false,
+  }));
+  // One due row, beside an in-progress and a no-lead row.
+  const { props } = await setup((data) => {
+    data.plan.tasks = data.plan.tasks.filter(
+      (task) => !task.mustStart || task.id === "claim",
+    );
+  }, actions);
+  let merge: (saved: PlanningTask) => void = () => {};
+  function Visit() {
+    const [open, setOpen] = useState<boolean>();
+    const [tasks, setTasks] = useState(props.plan.tasks);
+    // As the App does: merge each confirmed task, without reading the list again.
+    merge = (saved) =>
+      setTasks((current) =>
+        current.map((task) => (task.id === saved.id ? saved : task)),
+      );
+    return (
+      <PlanView
+        {...props}
+        plan={{ ...props.plan, tasks }}
+        run={async (operation) => {
+          merge((await operation()) as PlanningTask);
+          return true;
+        }}
+        deadlinesOpen={open}
+        onDeadlinesToggle={setOpen}
+      />
+    );
+  }
+  const details = () =>
+    document.querySelector<HTMLDetailsElement>(".planning-deadlines")!;
+  const { unmount } = render(<Visit />);
+  expect(details().open).toBe(true);
+  const mark = screen.getByRole("button", {
+    name: "Mark in progress: Submit the expense claim",
+  });
+  mark.focus();
+  fireEvent.click(mark);
+  // Nothing is due any more, yet the row changes in place and focus moves to the next action.
+  await waitFor(() =>
+    expect(announced()).toBe("Marked in progress: Submit the expense claim"),
+  );
+  expect(details().open).toBe(true);
+  expect(rowText(screen.getByRole("list", { name: "Deadlines" }))).toEqual([
+    "Submit the expense claim | In progress · Deadline tomorrow | ",
+    "Move house | In progress · 12 days left | ",
+    "Renew the car insurance | Deadline Nov 30 | Choose when to start",
+  ]);
+  expect(document.activeElement?.getAttribute("aria-label")).toBe(
+    "Choose when to start: Renew the car insurance",
+  );
+  unmount();
+
+  // The editor's own mark, opened from the row's title: the list stays open for the way back.
+  render(<Visit />);
+  fireEvent.click(
+    screen.getByRole("button", { name: "Submit the expense claim" }),
+  );
+  expect(props.editTask).toHaveBeenCalledWith(
+    expect.objectContaining({ id: "claim" }),
+  );
+  const claim = props.plan.tasks.find((task) => task.id === "claim")!;
+  const saved = await actions.updateTask(claim, { active: true });
+  act(() => merge(saved));
+  expect(details().open).toBe(true);
 });
 
 it("offers no in-progress write while the account has no active label", async () => {

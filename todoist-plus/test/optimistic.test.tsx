@@ -395,3 +395,22 @@ it("keeps a pending card's details and weekly goal read-only until its drag sett
     "Change not saved; restored. Synthetic write failed",
   );
 });
+
+it("keeps a pending card's Mark in progress in Deadlines disabled until its drag settles", async () => {
+  const actions = createPrototype();
+  const writes = hold(actions, "updateTask");
+  await mountPlan(actions);
+  const research = (await actions.load()).plan.tasks.find(
+    (task) => task.id === "research",
+  )!;
+  const mark = () =>
+    screen.getByRole("button", {
+      name: "Mark in progress: Prepare the next research check-in",
+    }) as HTMLButtonElement;
+  expect(mark().disabled).toBe(false);
+  await drop({ task: research }, { stage: "weekly" });
+  // Its etag is the one from before the drag, so the write would be refused.
+  expect(mark().disabled).toBe(true);
+  await act(async () => writes[0]!.confirm());
+  await waitFor(() => expect(mark().disabled).toBe(false));
+});

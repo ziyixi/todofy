@@ -1,4 +1,10 @@
-import { expect, test, type Locator, type Worker } from "@playwright/test";
+import {
+  expect,
+  test,
+  type Locator,
+  type Page,
+  type Worker,
+} from "@playwright/test";
 import { addDeadlineTasks, launchPlanner } from "./planner-setup";
 
 type DeadlineState = {
@@ -22,6 +28,13 @@ async function reads(worker: Worker) {
 }
 const opacity = (locator: Locator) =>
   locator.evaluate((element) => getComputedStyle(element).opacity);
+/** Deadlines' own status region, beside the list so that it is read even while the list is closed. */
+const announced = (page: Page) =>
+  page.locator('.planning-deadlines + [role="status"]');
+const right = async (locator: Locator) => {
+  const box = (await locator.boundingBox())!;
+  return box.x + box.width;
+};
 
 test("Deadlines lists each status at rest, shows its one action on hover or focus, and marks a task in progress", async () => {
   const { context, worker } = await launchPlanner();
@@ -86,14 +99,16 @@ test("Deadlines lists each status at rest, shows its one action on hover or focu
     await expect(list.locator(".planning-row-status").nth(1)).toHaveText(
       /^In progress · Deadline tomorrow/u,
     );
-    await expect(deadlines.getByRole("status")).toHaveText(
+    await expect(announced(page)).toHaveText(
       "Marked in progress: Submit the expense claim",
     );
-    await expect(
-      list.getByRole("button", {
-        name: "Mark in progress: Prepare the visa documents",
-      }),
-    ).toBeFocused();
+    const next = list.getByRole("button", {
+      name: "Mark in progress: Prepare the visa documents",
+    });
+    await expect(next).toBeFocused();
+    // After a click, the focus left on the next row does not keep its action shown.
+    await page.mouse.move(0, 0);
+    expect(await opacity(actions.nth(2))).toBe("0");
     expect(await writes(worker)).toEqual([
       {
         path: "/api/plus/v1/tasks:setTaskPlan",
@@ -114,9 +129,15 @@ test("Deadlines lists each status at rest, shows its one action on hover or focu
     const waiting = page.getByRole("list", { name: "Waiting" });
     await expect(waiting.locator(".planning-row-status")).toHaveText([
       // The untouched age follows the real clock; the deadline follows the plan's today.
-      /^Untouched \d+ days · Deadline Oct 20, Deadline: Tue, Oct 20$/u,
+      /^Untouched \d+ days · Deadline Oct 20, Tue$/u,
       /^Untouched \d+ days$/u,
     ]);
+    // At rest every status ends against the edge, in both lists alike.
+    for (const rows of [list, waiting]) {
+      const edge = await right(rows);
+      for (const status of await rows.locator(".planning-row-status").all())
+        expect(Math.abs((await right(status)) - edge)).toBeLessThan(1);
+    }
     expect(
       await opacity(waiting.locator(".planning-row-actions").first()),
     ).toBe("0");
@@ -143,6 +164,43 @@ test("Deadlines lists each status at rest, shows its one action on hover or focu
     await expect(editor.getByLabel("Start ahead").locator("option")).toHaveText(
       ["Not set", "1 day", "3 days", "7 days", "14 days", "30 days"],
     );
+  } finally {
+    await context.close();
+  }
+});
+
+test("marking the last due row by keyboard keeps Deadlines open, with focus and the result announced", async () => {
+  const { context, worker } = await launchPlanner();
+  try {
+    // One row in its start window and one without a lead: the list opens by itself.
+    await addDeadlineTasks(worker, ["claim", "insurance"]);
+    const page = await context.newPage();
+    await page.goto("https://app.todoist.com/app/today?todoist-plus=plan");
+    const deadlines = page.locator(".planning-deadlines");
+    await expect(deadlines).toHaveAttribute("open", "");
+    const list = page.getByRole("list", { name: "Deadlines" });
+    await list
+      .getByRole("button", { name: "Submit the expense claim", exact: true })
+      .focus();
+    await page.keyboard.press("Tab");
+    await page.keyboard.press("Enter");
+    await expect(list.locator(".planning-row-status").first()).toHaveText(
+      /^In progress · Deadline tomorrow/u,
+    );
+    // Nothing is due any more; the list stays open and focus moves to the next row's action,
+    // which shows, as keyboard focus does.
+    await expect(deadlines).toHaveAttribute("open", "");
+    const next = list.getByRole("button", {
+      name: "Choose when to start: Renew the car insurance",
+    });
+    await expect(next).toBeFocused();
+    expect(await opacity(list.locator(".planning-row-actions").nth(1))).toBe(
+      "1",
+    );
+    await expect(announced(page)).toHaveText(
+      "Marked in progress: Submit the expense claim",
+    );
+    expect(await writes(worker)).toHaveLength(1);
   } finally {
     await context.close();
   }

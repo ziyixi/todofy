@@ -379,9 +379,15 @@ type DeadlineTasksState = {
   tasks: Record<string, unknown>[];
   extraLabels: { id: string; label: string }[];
 };
-/** Synthetic tasks for each Deadlines status and Waiting rows with deadlines; today is 2026-10-13. */
-export async function addDeadlineTasks(worker: Worker) {
-  await worker.evaluate(() => {
+/**
+ * Synthetic tasks for each Deadlines status and Waiting rows with deadlines, or `only` those IDs;
+ * today is 2026-10-13.
+ */
+export async function addDeadlineTasks(
+  worker: Worker,
+  only?: readonly string[],
+) {
+  await worker.evaluate((only) => {
     const state = (
       globalThis as unknown as { plannerState: DeadlineTasksState }
     ).plannerState;
@@ -393,7 +399,7 @@ export async function addDeadlineTasks(worker: Worker) {
       etag: `${id}-1`,
       ...fields,
     });
-    state.tasks.push(
+    const tasks = [
       task("draft", "Quarterly report draft", {
         deadline: "2026-10-11",
         lead_days: 7,
@@ -434,7 +440,10 @@ export async function addDeadlineTasks(worker: Worker) {
         labels: ["waiting"],
         update_time: "2026-10-10T09:00:00Z",
       }),
+    ];
+    state.tasks.push(
+      ...tasks.filter((item) => !only || only.includes(item.id)),
     );
     state.extraLabels = [{ id: "synthetic-active", label: "active" }];
-  });
+  }, only);
 }

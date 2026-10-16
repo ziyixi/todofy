@@ -85,7 +85,8 @@
 /*
  * Deadlines and Waiting rows: a title, one muted status and text actions. As on Todoist's own task
  * rows, the actions show on hover or keyboard focus; they stay in the tab order and the
- * accessibility tree, and keep their column, so nothing moves and the statuses line up.
+ * accessibility tree, and keep their column, so nothing moves. The status comes last on screen,
+ * against the edge in both lists; it stays before the actions in the markup, so it is read first.
  */
 .planning-rows {
   display: grid;
@@ -109,6 +110,7 @@
   font-size: 13px;
 }
 .planning-row-status {
+  order: 1;
   color: var(--plus-muted);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
@@ -124,8 +126,9 @@
   gap: 12px;
   opacity: 0;
 }
+/* Keyboard focus only: after a click, the focus left on a row does not keep its actions shown. */
 .planning-rows > li:hover .planning-row-actions,
-.planning-rows > li:focus-within .planning-row-actions {
+.planning-rows > li:has(:focus-visible) .planning-row-actions {
   opacity: 1;
 }
 @media (hover: none) {
@@ -154,6 +157,9 @@
   }
   .plus-root .planning-row-title {
     flex-basis: 100%;
+  }
+  .planning-row-status {
+    order: 0;
   }
 }
 .planning-reset-note {
