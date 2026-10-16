@@ -148,10 +148,10 @@ service PlusService {
   rpc ReadMailSummary(ReadMailSummaryRequest) returns (ReadMailSummaryResponse) {
     option (google.api.http) = {get: "/api/plus/v1/mailItems:readMailSummary"};
   }
-  // Files one mail by one of the owner's categories, in one Todoist write: the category's label
-  // (another area label goes), its priority, and a move to the project chosen for filed mail, which
-  // must still be active. A repeat sends the same write again only while the task and the label
-  // still give it; otherwise it answers ETAG_MISMATCH.
+  // Files one mail in one Todoist write: a move into the account's Todoist Inbox; with a category,
+  // its label (another area label goes) and its priority first; with category_id empty, the move
+  // alone. A repeat sends the same write again only while the task and the label still give it;
+  // otherwise it answers ETAG_MISMATCH.
   rpc FileMailItem(FileMailItemRequest) returns (FileMailItemResponse) {
     option (google.api.http) = {
       post: "/api/plus/v1/mailItems:fileMailItem"
@@ -170,19 +170,31 @@ service PlusService {
       body: "*"
     };
   }
-  // The mail categories, the project filed mail goes to and the projects to choose it from.
+  // The mail categories. Deprecated: it also answers the account Inbox as the destination and the
+  // only project, for extensions before planning protocol 6.
   // (-- api-linter: core::0131::synonyms=disabled
   //     aip.dev/not-precedent: bounded settings read with a live project list, not a stored resource. --)
   rpc ReadMailSettings(ReadMailSettingsRequest) returns (ReadMailSettingsResponse) {
     option (google.api.http) = {get: "/api/plus/v1/mailSettings:read"};
   }
-  // Replaces the mail categories (at most four) and the project filed mail goes to, by etag.
-  // Sending the saved settings answers them as saved, whatever the etag.
+  // Replaces the mail categories (at most four), by etag. Sending the saved categories answers them
+  // as saved, whatever the etag.
   // (-- api-linter: core::0134=disabled
   //     aip.dev/not-precedent: the complete bounded set is replaced atomically, with no update mask. --)
   rpc UpdateMailSettings(UpdateMailSettingsRequest) returns (UpdateMailSettingsResponse) {
     option (google.api.http) = {
       post: "/api/plus/v1/mailSettings:updateMailSettings"
+      body: "*"
+    };
+  }
+  // Reorders tasks. The given order of one Review lane is kept in Todofy's planning store. In Todoist,
+  // the moved task's siblings among the given tasks (same project, section and parent) have their
+  // existing child_order values permuted into the given order (item_reorder); no other task changes,
+  // and Waiting and Parked never change Todoist. One Sync under a receipt, and none when nothing
+  // changes.
+  rpc ReorderTasks(ReorderTasksRequest) returns (ReorderTasksResponse) {
+    option (google.api.http) = {
+      post: "/api/plus/v1/tasks:reorder"
       body: "*"
     };
   }
@@ -243,6 +255,16 @@ message Plan {
   // The Work and Personal Bets saved for the previous, this and the next account week,
   // at most six; a week and area with none is absent.
   repeated WeeklyBet weekly_bets = 15;
+  // The Review lanes the owner arranged (ReorderTasks), each with its tasks first to last, at
+  // most 100 each. A lane never arranged is absent. Left out of the BASIC view.
+  repeated LaneOrder lane_orders = 16;
+}
+// The owner's order of one Review lane.
+message LaneOrder {
+  // start, waiting, parked, quarterly, monthly, weekly or committed.
+  string lane = 1;
+  // Todoist task IDs, at most 100; the extension skips one that is no longer in the lane.
+  repeated string task_ids = 2;
 }
 // One task waits for another: task_id should not start before prerequisite_id is done. IDs are in the ID space
 // of the service that answers (PlusService: Todoist task IDs); Todofy stores the link by its own task IDs.
@@ -317,6 +339,12 @@ message PlanningTask {
   // Todoist's completion counter, which counts every completed recurrence and goes down when one is undone;
   // absent when Todoist does not say.
   optional int32 completed_count = 19;
+  // Todoist's legacy position among the tasks with the same project, section and parent. Absent when
+  // Todoist does not say. Not part of etag.
+  optional int32 child_order = 20;
+  // Todoist's fractional order key among the same siblings, compared bytewise; absent for a task
+  // Todoist has not migrated. Not part of etag.
+  optional string order_key = 21;
 }
 // Reads the singleton plan.
 message ReadPlanRequest {
@@ -363,6 +391,10 @@ message SetTaskPlanRequest {
   // Adds or removes the literal `active` label (in progress). It is never created: adding
   // it fails while the account has no label of that exact name.
   optional bool active = 7;
+  // Adds the literal `parked` label (set aside), removing every planning label and `active`;
+  // false removes `parked`. It is never created: adding it fails while the account has no label
+  // of that exact name.
+  optional bool parked = 8;
 }
 // The task after a successful planning change.
 message SetTaskPlanResponse {
@@ -645,7 +677,7 @@ message MailCategory {
   // P1 to P4.
   Priority priority = 3 [(google.api.field_behavior) = REQUIRED];
 }
-// An active project filed mail may go to.
+// Deprecated: not used for filing. The account Inbox, for extensions before planning protocol 6.
 message MailProject {
   // Todoist project ID.
   string id = 1;
@@ -667,7 +699,7 @@ message LookupMailItemsResponse {
   repeated MailCategory categories = 2;
   // Sent back by FileMailItem: the categories it files by.
   string categories_etag = 3;
-  // The project filed mail goes to; absent until the owner chooses one.
+  // Deprecated: not used for filing. The project an extension before planning protocol 6 saved.
   ExternalRef destination = 4;
 }
 // Reads one mail's summary.
@@ -691,14 +723,14 @@ message FileMailItemRequest {
     (google.api.field_behavior) = OPTIONAL,
     (google.api.field_info).format = UUID4
   ];
-  // MailCategory.id.
+  // MailCategory.id, or empty to move to the Inbox only.
   string category_id = 4 [(google.api.field_behavior) = REQUIRED];
-  // The categories_etag the category was shown with.
+  // The categories_etag the category was shown with; ignored when category_id is empty.
   string categories_etag = 5 [(google.api.field_behavior) = REQUIRED];
 }
 // The task after it was filed.
 message FileMailItemResponse {
-  // Current task values, now in the project filed mail goes to.
+  // Current task values, now in the account's Todoist Inbox.
   PlanningTask task = 1;
 }
 // The mail tasks the owner saw listed when asking to delete all.
@@ -723,15 +755,16 @@ message DeleteMailItemsResponse {
 }
 // Reads the mail settings.
 message ReadMailSettingsRequest {}
-// The mail settings and the projects to choose from.
+// The mail settings.
 message ReadMailSettingsResponse {
   // The owner's mail categories, in their order.
   repeated MailCategory categories = 1;
   // Sent back by UpdateMailSettings.
   string etag = 2;
-  // The project filed mail goes to; absent until the owner chooses one.
+  // Deprecated: the account Inbox only, for extensions before planning protocol 6; absent when
+  // Todoist lists none.
   ExternalRef destination = 3;
-  // The Inbox first, then the active projects, at most 200; the mail project is not one of them.
+  // Deprecated: the account Inbox only, for extensions before planning protocol 6.
   repeated MailProject projects = 4;
 }
 // Replaces the mail settings.
@@ -742,7 +775,8 @@ message UpdateMailSettingsRequest {
   // At most four, each a current label (not a planning, lead or in-progress one) and a priority,
   // no two the same.
   repeated MailCategory categories = 1 [(google.api.field_behavior) = OPTIONAL];
-  // The project filed mail goes to: an active project or the Inbox, not the mail project.
+  // Deprecated and ignored: filed mail always moves to the Inbox. Still REQUIRED on the wire; send
+  // any well-formed reference.
   ExternalRef destination = 2 [(google.api.field_behavior) = REQUIRED];
   // The etag of the settings shown.
   string etag = 3 [(google.api.field_behavior) = REQUIRED];
@@ -753,8 +787,29 @@ message UpdateMailSettingsResponse {
   repeated MailCategory categories = 1;
   // Sent back by the next UpdateMailSettings.
   string etag = 2;
-  // The project filed mail goes to.
+  // Deprecated: not used for filing. The project an extension before planning protocol 6 saved.
   ExternalRef destination = 3;
+}
+// A new order of tasks: one Review lane's, or a parent's sub-tasks.
+message ReorderTasksRequest {
+  // UUID reused when repeating this action.
+  string request_id = 1 [
+    (google.api.field_behavior) = OPTIONAL,
+    (google.api.field_info).format = UUID4
+  ];
+  // 1 to 100 distinct Todoist task IDs in their new order.
+  repeated string task_ids = 2 [(google.api.field_behavior) = REQUIRED];
+  // A LaneOrder lane, or empty to change only Todoist's order.
+  string lane = 3 [(google.api.field_behavior) = OPTIONAL];
+  // The task the owner moved, one of task_ids.
+  string task_id = 4 [(google.api.field_behavior) = REQUIRED];
+}
+// The tasks and the lane after the new order.
+message ReorderTasksResponse {
+  // The given tasks that are active, in the given order, as Todoist lists them now.
+  repeated PlanningTask tasks = 1;
+  // The lane's saved order; absent when lane is empty.
+  LaneOrder lane_order = 2;
 }
 
 // A priority in the domain's order, P1 the most urgent. The Todoist adapter writes API priority
@@ -777,7 +832,8 @@ enum PlanView {
   // FULL, the answer before views existed (extension builds that send no view).
   PLAN_VIEW_UNSPECIFIED = 0;
   // The mapping and dates only, for a native Todoist page: inbox_project_id, review_task_id,
-  // next_week_task_ids and dependencies are left out, which saves the weekly review's D1 read.
+  // next_week_task_ids, dependencies and lane_orders are left out, which saves the weekly
+  // review's D1 read.
   PLAN_VIEW_BASIC = 1;
   // Every field.
   PLAN_VIEW_FULL = 2;
