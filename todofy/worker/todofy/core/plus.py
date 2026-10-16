@@ -40,7 +40,7 @@ REPLACED_FILTER_QUERIES = {
         for label, days in LEADS.items()
     ),
     # Waiting with a deadline (two spellings), all waiting and in progress with a deadline: the extension's
-    # Waiting and Deadlines lists.
+    # Review board shows them in Waiting, or in their own stage lane, and an in-progress task needs no lane.
     "!nodeadline&(@blocked)&!@parked",
     "!nodeadline&@blocked&!@parked",
     "@blocked",

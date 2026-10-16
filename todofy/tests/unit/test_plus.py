@@ -274,24 +274,29 @@ def todoist_filter(query: str, task: dict, today: str) -> bool:
     return any(results)
 
 
-def listed_by_plus(view: dict) -> bool:
-    """Where the extension lists a task (todoist-plus src/deadlines.ts and WaitingList), from the API's fields.
+def on_review_board(view: dict) -> bool:
+    """Where the extension's Review board shows a task (todoist-plus src/review-lanes.ts), from the API's fields.
 
-    Deadlines: a deadline, not parked, and in progress (`active` without `blocked`), must start or
-    missing a lead. Waiting: any `waiting` or `blocked` label.
+    A `waiting` or `blocked` task is in Waiting and one that must start in Start now, or either in its own
+    stage lane, saying so; the extension's test/review-lanes.test.ts checks those lanes from the same fields.
+    An in-progress task (`active` without `blocked`) was acknowledged and may leave the board.
     """
     labels = set(view["labels"])
     in_progress = "active" in labels and "blocked" not in labels
-    deadlines = bool(view["deadline"]) and "parked" not in labels
-    deadlines = deadlines and (in_progress or view["must_start"] or view["missing_lead"])
-    return deadlines or bool(labels & {"waiting", "blocked"})
+    return bool(labels & {"waiting", "blocked"}) or view["must_start"] or in_progress
 
 
-def test_every_task_a_hidden_deadline_or_waiting_filter_shows_is_listed_in_plus():
-    """Consistency gate: a replaced filter is hidden only while Plus lists every task it would show."""
+def in_weekly_review(view: dict) -> bool:
+    """A deadline without a lead is only the weekly review's start-ahead line (src/weekly-review.ts withoutLead)."""
+    return view["missing_lead"]
+
+
+def test_every_task_a_hidden_deadline_or_waiting_filter_shows_is_visible_in_plus():
+    """Consistency gate: a replaced filter is hidden only while Plus shows every task the filter would."""
     queries = [query for query in plus.REPLACED_FILTER_QUERIES if "deadline" in query or "blocked" in query]
     # Must start, missing lead, waiting with a deadline (two spellings), all waiting and in progress with a deadline.
     assert len(queries) == 6
+    missing_lead = next(query for query in queries if query.startswith("!nodeadline&!@lead_1d"))
     marks = ["waiting", "blocked", "active", "parked"]
 
     def deadline(offset):
@@ -309,7 +314,8 @@ def test_every_task_a_hidden_deadline_or_waiting_filter_shows_is_listed_in_plus(
     for query in queries:
         shown = [source for source in tasks if todoist_filter(query, source, TODAY)]
         assert shown, query
-        missing = [source for source in shown if not listed_by_plus(plus.task_view(source, TODAY))]
+        visible = in_weekly_review if query == missing_lead else on_review_board
+        missing = [source for source in shown if not visible(plus.task_view(source, TODAY))]
         assert missing == [], query
 
 
