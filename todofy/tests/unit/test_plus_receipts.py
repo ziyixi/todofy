@@ -41,8 +41,8 @@ class Todoist:
         self.closed: dict[str, int] = {}
         self.fail_sync = 0
 
-    def add(self, task_id: str, labels: list[str]) -> None:
-        self.tasks[task_id] = {"id": task_id, "content": TITLE, "labels": labels, "project_id": "p"}
+    def add(self, task_id: str, labels: list[str], **fields: Any) -> None:
+        self.tasks[task_id] = {"id": task_id, "content": TITLE, "labels": labels, "project_id": "p", **fields}
 
     async def metadata(self, _core: Any, *, fresh: bool = False) -> dict[str, Any]:
         return {"timezone": "UTC", "labels": self.labels, "filters": []}
@@ -56,6 +56,10 @@ class Todoist:
     async def list(self, _core: Any, limit: int = 200, cursor: str = "") -> tuple[list[dict[str, Any]], str]:
         self.journal.append("list")
         return [dict(task) for task in self.tasks.values()], ""
+
+    async def active(self, _core: Any, task_ids: list[str]) -> dict[str, dict[str, Any]]:
+        self.journal.append("active")
+        return {task_id: dict(self.tasks[task_id]) for task_id in task_ids if task_id in self.tasks}
 
     async def commands(self, _core: Any, commands: list[dict[str, Any]]) -> dict[str, Any]:
         self.journal.append("sync")
@@ -72,6 +76,11 @@ class Todoist:
                 self.tasks[child] = {"id": child, "content": args["content"], "labels": [], "project_id": "p"}
                 self.applied[command["uuid"]] = child
                 continue
+            if command["type"] == "item_reorder":
+                self.applied[command["uuid"]] = ",".join(item["id"] for item in args["items"])
+                for item in args["items"]:
+                    self.tasks[item["id"]]["child_order"] = item["child_order"]
+                continue
             self.applied[command["uuid"]] = args["id"]
             if command["type"] == "item_close":
                 self.closed[args["id"]] = self.closed.get(args["id"], 0) + 1
@@ -87,7 +96,7 @@ class Stack:
         self.journal: list[str] = []
         self.d1 = D1()
         self.todoist = Todoist(runtime.todoist.PlusError, self.journal)
-        for name in ("metadata", "task", "commands"):
+        for name in ("metadata", "task", "commands", "active"):
             monkeypatch.setattr(runtime.todoist, name, getattr(self.todoist, name))
         monkeypatch.setattr(runtime.todoist, "tasks", self.todoist.list)
         monkeypatch.setattr(runtime.plus_api, "account_day", lambda _timezone: "2026-10-14")  # a Wednesday
@@ -154,6 +163,8 @@ def stack(monkeypatch: pytest.MonkeyPatch) -> Iterator[Stack]:
         stack = Stack(runtime, monkeypatch)
         stack.todoist.add("parent", ["office", "candiate"])
         stack.todoist.add("other", ["home"])
+        stack.todoist.add("step-a", [], parent_id="parent", child_order=1)
+        stack.todoist.add("step-b", [], parent_id="parent", child_order=2)
         plan = stack.call("ReadPlan")["plan"]
         assert "plan" in stack.call("ConfirmPlanMapping", etag=plan["etag"], request_id=str(uuid.uuid4()))
         stack.journal.clear()
@@ -176,6 +187,7 @@ def request_hash(stack: Stack, method: str, request: dict[str, Any]) -> str:
         pytest.param("SetTaskLead", {"task_id": "parent", "deadline": "2026-10-30", "lead_days": 7}, id="lead"),
         pytest.param("CompleteTask", {"task_id": "other"}, id="complete_task"),
         pytest.param("AppendTaskSteps", {"parent_id": "parent", "steps": [{"title": STEP}]}, id="steps"),
+        pytest.param("ReorderTasks", {"task_ids": ["step-b", "step-a"], "task_id": "step-b"}, id="reorder"),
     ],
 )
 def test_a_receipt_is_stored_before_todoist_and_keeps_only_ids_once_done(stack, method, body):
@@ -193,6 +205,8 @@ def test_a_receipt_is_stored_before_todoist_and_keeps_only_ids_once_done(stack, 
     assert TITLE not in receipt["result"] and STEP not in receipt["result"]
     if method == "AppendTaskSteps":
         assert stored == {"task_ids": answer["task_ids"]}
+    elif method == "ReorderTasks":
+        assert stored == {}  # a repeat reads the tasks again (plus_order.reorder)
     else:
         assert stored == {"task_id": body.get("task_id")}
     assert stack.legacy_rows() == 0  # nothing writes plus_actions

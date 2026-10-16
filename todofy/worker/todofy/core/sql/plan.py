@@ -14,6 +14,9 @@ reads no other table and that each count finds what it should.
 Dependencies are plan_edges rows between plan_tasks IDs; every statement here takes and answers the task store's
 own IDs ((provider, external_id), bound as two values), so callers never see Todofy's. ``EDGES`` is the other
 whole-table read: every dependency (at most MAX_EDGES), for a full Plan answer and the cycle check.
+
+The owner's order of the Review lanes is the one plan_settings document 'board' (core/plan.py arrange_lane), which
+keeps plan_tasks IDs; ``LANE_ORDERS`` reads it back as the task store's IDs, a bounded read like ``EDGES``.
 """
 
 from ..plan import (
@@ -172,6 +175,19 @@ REMOVE_EDGE = Query(
     " AND prerequisite_id = (SELECT id FROM plan_tasks WHERE provider = ? AND external_id = ?)"
     f" AND kind = '{WAITS_FOR}'",
     EDGES_INDEX,
+)
+# The Todofy IDs of the tasks named (bind the provider, then a JSON array of external IDs) that have one.
+TASK_ROWS = Query(
+    "SELECT id, external_id FROM plan_tasks WHERE provider = ? AND external_id IN (SELECT value FROM json_each(?))",
+    TASKS_INDEX,
+)
+# Every arranged lane's order: the one 'board' settings row by primary key, json_each over its document
+# (plan_store.save_lane_order, the only writer, keeps it at most len(LANES) × MAX_LANE_TASKS entries) and a rowid
+# lookup per entry; a deliberate bounded read. Python orders it (core/plan.py lane_orders).
+LANE_ORDERS = (
+    "SELECT l.key AS lane, k.key AS position, t.external_id AS task_id"
+    " FROM plan_settings s, json_each(s.value, '$.lanes') l, json_each(l.value) k JOIN plan_tasks t ON t.id = k.value"
+    " WHERE s.key = 'board'"
 )
 # Of the tasks named (bind the provider, then a JSON array of external IDs), those with a Todofy ID: whether each
 # waits for a task, is waited for, and what is recorded about its closing.

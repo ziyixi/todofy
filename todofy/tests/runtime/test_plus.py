@@ -395,6 +395,132 @@ def test_parking_writes_only_an_existing_parked_label_and_sets_the_task_aside(st
         stack.upstream.labels.pop()
 
 
+def siblings(stack: Stack, parent: str, *names: str) -> dict[str, int]:
+    """Sub-tasks of a new ``parent``, in Todoist's order, and their child_order values."""
+    stack.upstream.add(parent, labels=["committed"])
+    for name in names:
+        stack.upstream.add(name, parent_id=parent, labels=["committed"])
+    return {name: stack.upstream.tasks[name]["child_order"] for name in names}
+
+
+def reorders(stack: Stack, since: int) -> list[list[dict]]:
+    return stack.upstream.command_batches()[since:]
+
+
+def board(stack: Stack) -> dict:
+    rows = stack.worker.d1("SELECT value FROM plan_settings WHERE key = 'board'")
+    return json.loads(rows[0]["value"]) if rows else {}
+
+
+def test_a_lane_reorder_permutes_only_the_moved_tasks_siblings_and_saves_the_lane(stack):
+    order = siblings(stack, "order-parent", "order-a", "order-b", "order-c")
+    other = siblings(stack, "order-other", "order-x", "order-y")
+    # The Committed lane after the owner moved c first; x and y, another parent's steps, in an order Todoist does
+    # not have, keep their values.
+    lane = ["order-c", "order-y", "order-x", "order-a", "order-b"]
+    request_id = str(uuid.uuid4())
+    since = len(stack.upstream.command_batches())
+    answer = stack.write("reorder", task_ids=lane, task_id="order-c", lane="committed", request_id=request_id)
+    assert answer.status_code == 200, answer.text
+    items = [
+        {"id": "order-c", "child_order": order["order-a"]},
+        {"id": "order-a", "child_order": order["order-b"]},
+        {"id": "order-b", "child_order": order["order-c"]},
+    ]
+    assert reorders(stack, since) == [[plus.reorder_command(request_id, items)]]
+    assert {name: stack.upstream.tasks[name]["child_order"] for name in other} == other
+    body = answer.json()
+    assert [task["id"] for task in body["tasks"]] == lane
+    assert [task["child_order"] for task in body["tasks"]][:1] == [order["order-a"]]
+    assert body["lane_order"] == {"lane": "committed", "task_ids": lane}
+    # Kept by Todofy's IDs; ReadPlan answers the lanes in the board's order.
+    ids = {row["external_id"]: row["id"] for row in stack.worker.d1("SELECT id, external_id FROM plan_tasks")}
+    assert board(stack) == {"lanes": {"committed": [ids[name] for name in lane]}}
+    weekly = stack.write("reorder", task_ids=["order-x", "order-parent"], task_id="order-x", lane="weekly")
+    start = stack.write("reorder", task_ids=["order-b"], task_id="order-b", lane="start")
+    assert weekly.status_code == start.status_code == 200
+    assert stack.plan()["lane_orders"] == [
+        {"lane": "start", "task_ids": ["order-b"]},
+        {"lane": "weekly", "task_ids": ["order-x", "order-parent"]},
+        {"lane": "committed", "task_ids": ["order-c", "order-y", "order-a"]},
+    ]
+    # One task the parent alone: nothing to permute, nothing sent.
+    assert reorders(stack, since)[1:] == []
+
+
+def test_a_lost_reorder_answer_is_finished_by_the_same_request_without_a_second_sync(stack):
+    order = siblings(stack, "lost-parent", "lost-a", "lost-b")
+    request = {
+        "task_ids": ["lost-b", "lost-a"],
+        "task_id": "lost-b",
+        "lane": "monthly",
+        "request_id": str(uuid.uuid4()),
+    }
+    since = len(stack.upstream.command_batches())
+    stack.upstream.fail_commands_once = True
+    assert stack.write("reorder", **request).status_code == 503
+    assert "monthly" not in board(stack).get("lanes", {})
+    answer = stack.write("reorder", **request)
+    assert answer.status_code == 200, answer.text
+    assert len(reorders(stack, since)) == 1  # the first try landed: the retry reads and sends nothing
+    assert [stack.upstream.tasks[name]["child_order"] for name in ("lost-b", "lost-a")] == sorted(order.values())
+    assert answer.json()["lane_order"]["task_ids"] == ["lost-b", "lost-a"]
+    # Done: the same request sends nothing; another order under the same ID is refused.
+    assert stack.write("reorder", **request).status_code == 200 and len(reorders(stack, since)) == 1
+    changed = {**request, "task_ids": ["lost-a", "lost-b"]}
+    assert reason(stack.write("reorder", **changed)) == "BAD_REQUEST"
+
+
+def test_a_started_reorder_never_resends_values_todoist_has_changed_since(stack):
+    siblings(stack, "moved-parent", "moved-a", "moved-b")
+    request = {"task_ids": ["moved-b", "moved-a"], "task_id": "moved-b", "request_id": str(uuid.uuid4())}
+    stack.upstream.throttle_commands_once = True
+    assert reason(stack.write("reorder", **request)) == "UNAVAILABLE"
+    # Before the retry, a new sub-task added at the top in Todoist moves the others down.
+    for name in ("moved-a", "moved-b"):
+        stack.upstream.tasks[name]["child_order"] += 10
+    since = len(stack.upstream.command_batches())
+    assert reason(stack.write("reorder", **request)) == "ETAG_MISMATCH"
+    assert reorders(stack, since) == []
+    # The owner's next drop is a new request, from what Todoist has now.
+    assert stack.write("reorder", **{**request, "request_id": str(uuid.uuid4())}).status_code == 200
+    assert stack.upstream.tasks["moved-b"]["child_order"] < stack.upstream.tasks["moved-a"]["child_order"]
+
+
+def test_waiting_parked_and_lone_tasks_keep_todoists_order(stack):
+    siblings(stack, "kept-parent", "kept-a", "kept-b")
+    since = len(stack.upstream.command_batches())
+    for lane in ("waiting", "parked"):
+        answer = stack.write("reorder", task_ids=["kept-b", "kept-a"], task_id="kept-b", lane=lane)
+        assert answer.json()["lane_order"] == {"lane": lane, "task_ids": ["kept-b", "kept-a"]}
+    # A lane whose moved task has no sibling in it; and an inactive task, skipped and given no Todofy ID.
+    answer = stack.write("reorder", task_ids=["kept-b", "gone-task", "parent"], task_id="kept-b", lane="quarterly")
+    assert [task["id"] for task in answer.json()["tasks"]] == ["kept-b", "parent"]
+    assert answer.json()["lane_order"]["task_ids"] == ["kept-b", "parent"]
+    assert reorders(stack, since) == []
+    assert stack.worker.d1("SELECT count(*) AS n FROM plan_tasks WHERE external_id = 'gone-task'") == [{"n": 0}]
+    lanes = board(stack)["lanes"]
+    assert "waiting" not in lanes and len(lanes["parked"]) == 1  # each task is in one lane
+
+
+def test_reorder_takes_up_to_a_hundred_long_ids_and_refuses_malformed_requests(stack):
+    names = [f"{index:03d}" + "x" * 97 for index in range(100)]
+    siblings(stack, "long-parent", *names)
+    lane = names[::-1]
+    answer = stack.write("reorder", task_ids=lane, task_id=lane[0], lane="weekly")
+    assert answer.status_code == 200, answer.text
+    assert answer.json()["lane_order"]["task_ids"] == lane
+    assert sorted(names, key=lambda name: stack.upstream.tasks[name]["child_order"]) == lane
+    for body in (
+        {"task_ids": names[:2], "task_id": "elsewhere"},
+        {"task_ids": names[:2], "task_id": names[0], "lane": "nope"},
+        {"task_ids": [names[0], names[0]], "task_id": names[0]},
+        {"task_ids": [*names, "one-more"], "task_id": names[0]},
+        {"task_ids": [], "task_id": names[0]},
+    ):
+        assert reason(stack.write("reorder", **body)) == "BAD_REQUEST", body
+
+
 def test_revocation_stops_only_this_extension_connection(stack):
     [connection] = stack.worker.owner.get("/api/plus/v1/connections:read").json()["connections"]
     assert (

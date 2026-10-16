@@ -77,6 +77,17 @@ describe('Todoist Plus transport boundaries', () => {
     expect(call?.args[2]).toBe(false);
     expect((await response.json<{ plan: { etag: string } }>()).plan.etag).toBe('next');
   });
+  it('passes a reorder to the core as ReorderTasks with a generated request ID', async () => {
+    const answer = { tasks: [{ id: 'task-two', child_order: 1 }], lane_order: { lane: 'weekly', task_ids: ['task-two', 'task-one'] } };
+    const { env, core } = fakes({}, call => call.method === 'plus_auth' ? true : uiOk(answer));
+    const response = await hooks(env, '/api/plus/v1/tasks:reorder', api('POST', { task_ids: ['task-two', 'task-one'], task_id: 'task-two', lane: 'weekly' }));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual(answer);
+    const call = core.find(row => row.method === 'plus_ui');
+    expect(call?.args[0]).toBe('ReorderTasks');
+    const sent = JSON.parse(String(call?.args[1])) as { request_id: string; task_ids: string[]; task_id: string; lane: string };
+    expect(sent).toEqual({ request_id: expect.stringMatching(/^[0-9a-f-]{36}$/) as unknown, task_ids: ['task-two', 'task-one'], lane: 'weekly', task_id: 'task-two' });
+  });
   it('accepts an omitted optional request ID with the same fresh-identity behavior as the owner API', async () => {
     const { env, core } = fakes({}, call => call.method === 'plus_auth' ? true : uiOk({ task_id: 'task-one' }));
     expect((await hooks(env, '/api/plus/v1/tasks:completeTask', api('POST', { task_id: 'task-one' }))).status).toBe(200);

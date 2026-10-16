@@ -138,6 +138,69 @@ def test_deadline_is_not_scheduled_date_and_preserves_filter_boundaries():
     }
 
 
+def test_todoist_order_fields_are_answered_within_bounds_and_left_out_of_the_etag():
+    view = plus.task_view(task(child_order=3, order_key="a0V"), TODAY)
+    assert (view["child_order"], view["order_key"]) == (3, "a0V")
+    for value in (-(2**31), 0, 2**31 - 1):
+        assert plus.task_view(task(child_order=value), TODAY)["child_order"] == value
+    for value in (None, True, 2**31, -(2**31) - 1, "3", 1.5):
+        assert "child_order" not in plus.task_view(task(child_order=value), TODAY)
+    for value in (None, "", "a" * 101, "a-b", "a b", "ключ", 7):
+        assert "order_key" not in plus.task_view(task(order_key=value), TODAY)
+    assert plus.task_view(task(order_key="Z" * 100), TODAY)["order_key"] == "Z" * 100
+    assert plus.task_etag(task(child_order=1, order_key="a")) == plus.task_etag(task(child_order=2, order_key="b"))
+
+
+def step(task_id, order, parent="parent", project="project1", section=None):
+    return {"id": task_id, "child_order": order, "parent_id": parent, "project_id": project, "section_id": section}
+
+
+def test_a_reorder_permutes_the_moved_tasks_siblings_and_never_another_group():
+    a, b, c = step("a", 1), step("b", 4), step("c", 7)
+    other = [step("x", 5, parent="other"), step("y", 2, parent="other")]
+    # c moved first, in a lane that also holds another parent's steps in an order Todoist does not have: only c's
+    # siblings take their own values, smallest first, and the other group keeps its values.
+    assert plus.reorder_items([c, *other, a, b], "c") == [
+        {"id": "c", "child_order": 1},
+        {"id": "a", "child_order": 4},
+        {"id": "b", "child_order": 7},
+    ]
+    assert plus.reorder_items([b, *other, a, c], "b") == [{"id": "b", "child_order": 1}, {"id": "a", "child_order": 4}]
+    assert plus.reorder_items([a, b, c, *other], "x") == [{"id": "x", "child_order": 2}, {"id": "y", "child_order": 5}]
+    # Another section, project or parent is another group, and top-level tasks group by project and section.
+    apart = [step("s", 0, section="section1"), step("p", 0, project="project2"), step("t", 0, parent=None)]
+    assert plus.reorder_items([*apart, c, a, b], "c") == plus.reorder_items([c, a, b], "c")
+    assert plus.reorder_items([*apart, step("u", 9, parent=None)], "u") == []
+    tops = [step("t2", 6, parent=None), step("t1", 3, parent=None)]
+    assert plus.reorder_items(tops, "t2") == [{"id": "t2", "child_order": 3}, {"id": "t1", "child_order": 6}]
+
+
+@pytest.mark.parametrize(
+    ("tasks", "moved"),
+    [
+        pytest.param([step("a", 1), step("b", 2)], "a", id="todoists_order"),
+        pytest.param([step("a", 1)], "a", id="alone"),
+        pytest.param([step("b", 1), step("a", None)], "a", id="missing"),
+        pytest.param([step("b", 1), step("a", 2**31)], "a", id="not_int32"),
+        pytest.param([step("b", 0), step("a", True)], "a", id="a_bool"),
+        pytest.param([step("b", 3), step("a", 3)], "a", id="repeated"),
+        pytest.param([step("b", 2), step("a", 1)], "z", id="not_the_moved_task"),
+    ],
+)
+def test_a_reorder_writes_nothing_when_no_value_can_change(tasks, moved):
+    assert plus.reorder_items(tasks, moved) == []
+
+
+def test_the_order_is_one_item_reorder_command_under_the_request_identity():
+    items = [{"id": "a", "child_order": 1}]
+    assert plus.reorder_command(REQUEST, items) == {
+        "type": "item_reorder",
+        "uuid": plus.command_id(REQUEST),
+        "args": {"items": items},
+    }
+    assert plus.UNTOUCHED_LANES == ("waiting", "parked")
+
+
 def test_estimates_are_optional_and_two_hours_is_not_rejected():
     assert "estimated_minutes" not in plus.task_view(task(), TODAY)
     assert plus.task_view(task(duration={"amount": 180, "unit": "minute"}), TODAY)["estimated_minutes"] == 180

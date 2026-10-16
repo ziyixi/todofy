@@ -31,6 +31,8 @@ PLANNING_ROLES = ("quarter", "candiate", "focus", "committed")
 STAGES = {"none": None, "quarterly": "quarter", "monthly": "candiate", "weekly": "focus", "committed": "committed"}
 AREAS = {"unassigned": None, "work": "office", "personal": "home"}
 ID = re.compile(r"^[a-zA-Z0-9_-]{1,100}$")
+# Todoist's fractional order key among siblings (PlanningTask.order_key).
+ORDER_KEY = re.compile(r"^[0-9A-Za-z]{1,100}$")
 REPLACED_FILTER_QUERIES = {
     "@bets",
     "@committed",
@@ -58,6 +60,9 @@ REPLACED_FILTER_QUERIES = {
 ACTIVE = "active"
 # The owner's literal set-aside label, which Review's Parked lane shows. Plus never creates it either.
 PARKED = "parked"
+# Review lanes that show and sort by Todoist's update time ("N days untouched"): their order stays in Todofy only,
+# since a Todoist order write may count as an edit of each task it moves.
+UNTOUCHED_LANES = ("waiting", "parked")
 # plan_tasks.provider of a Todoist task ID (core/plan.py PROVIDERS).
 PROVIDER = "todoist"
 # The literal labels that clarify a mail task in place (waiting, someday or quick), as the extension's
@@ -276,6 +281,12 @@ def task_etag(task: dict[str, Any], mapping: list[dict[str, Any]] | None = None)
     return fingerprint(values)
 
 
+def child_order(task: dict[str, Any]) -> int | None:
+    """Todoist's legacy position among the task's siblings, or None when it does not give an int32 one."""
+    order = task.get("child_order")
+    return order if isinstance(order, int) and not isinstance(order, bool) and -(2**31) <= order < 2**31 else None
+
+
 def recurring(task: dict[str, Any]) -> bool:
     return bool((task.get("due") or {}).get("is_recurring"))
 
@@ -364,6 +375,10 @@ def task_view(task: dict[str, Any], today: str, mapping: list[dict[str, Any]] | 
     count = completed_count(task)
     if count is not None:
         result["completed_count"] = count
+    if (order := child_order(task)) is not None:
+        result["child_order"] = order
+    if isinstance(key := task.get("order_key"), str) and ORDER_KEY.fullmatch(key):
+        result["order_key"] = key
     duration = task.get("duration")
     if duration and duration.get("amount"):
         result["estimated_minutes"] = int(duration["amount"]) * (480 if duration.get("unit") == "day" else 1)
@@ -414,6 +429,36 @@ def plan_labels(
             labels.discard(ACTIVE)
             labels.add(PARKED)
     return sorted(labels)
+
+
+def _siblings(task: dict[str, Any]) -> tuple[str, str, str]:
+    """The group Todoist orders a task in: its project, section and parent."""
+    return str(task.get("project_id") or ""), str(task.get("section_id") or ""), str(task.get("parent_id") or "")
+
+
+def reorder_items(tasks: list[dict[str, Any]], moved: str) -> list[dict[str, Any]]:
+    """item_reorder's items for ``tasks`` in their new order: the group of Todoist siblings of ``moved`` among them
+    (same project, section and parent) gets its own child_order values, smallest first, in the given order; only the
+    items whose value changes. [] when that group has one task, or a value that is missing, not an int32, or
+    repeated (a permutation of equal values changes nothing). Other groups are never touched."""
+    task = next((task for task in tasks if str(task["id"]) == moved), None)
+    if task is None:
+        return []
+    group = [sibling for sibling in tasks if _siblings(sibling) == _siblings(task)]
+    orders = [child_order(sibling) for sibling in group]
+    if len(group) < 2 or None in orders or len(set(orders)) != len(orders):
+        return []
+    return [
+        {"id": str(sibling["id"]), "child_order": order}
+        for sibling, order in zip(group, sorted(orders), strict=True)
+        if sibling["child_order"] != order
+    ]
+
+
+def reorder_command(request_id: str, items: list[dict[str, Any]]) -> dict[str, Any]:
+    """The one Sync command that writes an order. item_reorder is deprecated by Todoist with no removal date; its
+    replacement (item_update with order_key) changes here alone."""
+    return {"type": "item_reorder", "uuid": command_id(request_id), "args": {"items": items}}
 
 
 def lead_args(

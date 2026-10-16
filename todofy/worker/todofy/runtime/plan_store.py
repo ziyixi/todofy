@@ -1,10 +1,11 @@
 """The planning store in D1 (migrations/0007_plan_store.sql): the only module that reads or writes plan_*.
 
 Owner-authored planning facts and Todofy's own task identities; never task content. Dependencies
-(docs/todoist-plus.md, "Dependencies"), the weekly Bets (plan_notes of kind 'bets') and the Mailbox's categories
-(plan_categories of scheme 'mail', with the Todoist adapter's binding in plan_settings 'todoist.mail') are the facts
-it keeps so far; the other tables wait for later steps (docs/todoist-plus.md, "Planning store"). Callers name tasks
-by the task store's own IDs, with its provider (core/plan.py PROVIDERS).
+(docs/todoist-plus.md, "Dependencies"), the weekly Bets (plan_notes of kind 'bets'), the Mailbox's categories
+(plan_categories of scheme 'mail', with the Todoist adapter's binding in plan_settings 'todoist.mail') and the order
+of the Review lanes (plan_settings 'board') are the facts it keeps so far; the other tables wait for later steps
+(docs/todoist-plus.md, "Planning store"). Callers name tasks by the task store's own IDs, with its provider
+(core/plan.py PROVIDERS).
 """
 
 import json
@@ -21,6 +22,8 @@ from todofy.core.sql import plan as sql
 #    "destination": "<Todoist project ID>"}
 # The destination is what an extension before planning protocol 6 chose; filed mail goes to the Inbox since then.
 MAIL_KEY = "todoist.mail"
+# The owner's order of the Review lanes (core/plan.py arrange_lane).
+BOARD_KEY = "board"
 
 
 async def verify(db: Any) -> dict[str, int]:
@@ -241,3 +244,35 @@ async def save_mail_settings(
     value = json.dumps(binding, ensure_ascii=False, separators=(",", ":"))
     statements.append(db.prepare(sql.SAVE_SETTING.sql).bind(MAIL_KEY, value, now))
     await db.batch(statements)
+
+
+def lane_orders_statement(db: Any) -> Any:
+    """Every arranged lane's order, as a statement for a caller's batch; lane_orders reads its result."""
+    return db.prepare(sql.LANE_ORDERS)
+
+
+def lane_orders(result: Any) -> list[dict[str, Any]]:
+    """Plan.lane_orders from the result of lane_orders_statement."""
+    rows = (dict(row) for row in result.results)
+    return plan.lane_orders((str(row["lane"]), int(row["position"]), str(row["task_id"])) for row in rows)
+
+
+async def save_lane_order(db: Any, provider: str, lane: str, external_ids: list[str], now: int) -> list[str]:
+    """Saves ``lane`` in the order of ``external_ids`` (tasks the store has just confirmed active, which get their
+    Todofy IDs) and answers it as saved: one batch that registers them and reads their IDs and the document, then
+    one write of the document."""
+    ids = json.dumps(external_ids)
+    _, rows, document = await db.batch(
+        [
+            db.prepare(sql.ADD_TASKS.sql).bind(provider, now, ids),
+            db.prepare(sql.TASK_ROWS.sql).bind(provider, ids),
+            db.prepare(sql.SETTING.sql).bind(BOARD_KEY),
+        ]
+    )
+    todofy_ids = {str(row["external_id"]): int(row["id"]) for row in (dict(item) for item in rows.results)}
+    saved = next((json.loads(dict(row)["value"]) for row in document.results), {"lanes": {}})
+    board = plan.arrange_lane(saved, lane, [todofy_ids[task] for task in external_ids if task in todofy_ids])
+    value = json.dumps(board, separators=(",", ":"))
+    await db.prepare(sql.SAVE_SETTING.sql).bind(BOARD_KEY, value, now).run()
+    external = {task_id: task for task, task_id in todofy_ids.items()}
+    return [external[task_id] for task_id in board["lanes"].get(lane, [])]

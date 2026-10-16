@@ -3,8 +3,10 @@
 A metadata Sync answers sync_token "*" (or a token this fake never issued) in full and an issued token with the
 labels and filters that changed since it, deleted ones with is_deleted, as Todoist's incremental Sync does. The
 task list takes Todoist's project_id and ids filters; a command whose task is gone answers ITEM_NOT_FOUND.
-Tasks carry completed_count: closing a task adds one, and a recurring task stays active. The activity log
-answers ``activity[task_id]`` (completed, uncompleted and deleted events), or ``activity_status`` when set.
+Tasks carry completed_count: closing a task adds one, and a recurring task stays active. Each new task takes the
+next child_order (a counter across the account; tests set order_key), and item_reorder sets the child_order of
+each item it names. The activity log answers ``activity[task_id]`` (completed, uncompleted and deleted events), or
+``activity_status`` when set.
 """
 
 import json
@@ -36,6 +38,7 @@ class PlusFake(FakeServer):
             )
         ]
         self.tasks = {}
+        self.orders = 0  # the child_order of the last task added
         self.filters = [{"id": "filter-bets", "name": "Synthetic Bets", "query": "@bets"}]
         self.receipts = {}
         self.closed = {}
@@ -58,16 +61,20 @@ class PlusFake(FakeServer):
         ]
 
     def add(self, task_id, **fields):
+        self.orders += 1
         self.tasks[task_id] = {
             "id": task_id,
             "content": "Synthetic task " + task_id,
             "project_id": "test-project",
+            "section_id": None,
             "labels": [],
             "priority": 1,
             "parent_id": None,
             "due": None,
             "deadline": None,
             "completed_count": 0,
+            "child_order": self.orders,
+            "order_key": None,
             **fields,
         }
 
@@ -84,7 +91,10 @@ class PlusFake(FakeServer):
             identity = command["uuid"]
             if identity not in self.receipts:
                 args = command["args"]
-                if command["type"] != "item_add" and args["id"] not in self.tasks:
+                named = (
+                    [item["id"] for item in args["items"]] if command["type"] == "item_reorder" else [args.get("id")]
+                )
+                if command["type"] != "item_add" and any(task_id not in self.tasks for task_id in named):
                     statuses[identity] = {"error": "Item not found", "error_tag": "ITEM_NOT_FOUND", "http_code": 404}
                     continue
                 if command["type"] == "item_add":
@@ -106,6 +116,10 @@ class PlusFake(FakeServer):
                     self.receipts[identity] = True
                 elif command["type"] == "item_delete":
                     del self.tasks[args["id"]]
+                    self.receipts[identity] = True
+                elif command["type"] == "item_reorder":
+                    for item in args["items"]:
+                        self.tasks[item["id"]]["child_order"] = item["child_order"]
                     self.receipts[identity] = True
                 else:
                     raise AssertionError("unexpected command")

@@ -45,9 +45,9 @@ const API_INIT = "GET /api/v1/serviceStatus as the isolate's first API request";
 const LEGACY = 'GET /api/v1/legacyTexts/{id} (1.9 MB of ASCII with escapes)';
 const REPORTS = 'GET /api/v1/latestReports (every report at its limits)';
 const PLUS = 'GET /api/plus/v1/tasks (200 tasks, token authenticated)';
-// A FULL Plan, which the gateway reads and writes again to add flowday_url: 500 labels, 300 dependencies and six Bets,
-// the most TodofyCore answers.
-const PLAN = 'GET /api/plus/v1/plan:read (500 labels, 300 dependencies, six Bets, token authenticated)';
+// A FULL Plan, which the gateway reads and writes again to add flowday_url: 500 labels, 300 dependencies, six Bets and
+// every Review lane's order (7 lanes of 100), the most TodofyCore answers.
+const PLAN = 'GET /api/plus/v1/plan:read (500 labels, 300 dependencies, six Bets, 700 lane order IDs, token authenticated)';
 // The Mailbox's two largest answers, passed through unread like the legacy text and the reports (first runs 0.4-1.0
 // and warm medians 0.6-0.9 ms measured on 2026-10-16): a decode of either again would show here. The lookup's 200
 // task IDs are the request the transcoder reads.
@@ -67,7 +67,7 @@ const ANSWERS = {
       id: `task-${String(n)}`, title: 'Synthetic planning task '.repeat(20), project_id: 'test-project',
       labels: ['office', 'deep', 'committed', 'lead_2w'], stage: 'committed', area: 'work',
       deadline: '2026-10-27', due: '2026-10-13', lead_days: 14, estimated_minutes: 45, etag: 'a'.repeat(64),
-      update_time: '2026-10-14T09:30:05Z',
+      update_time: '2026-10-14T09:30:05Z', child_order: n, order_key: `a${n.toString(36).padStart(8, '0')}`,
     })) }),
     ReadPlan: fixtures.ok({ plan: {
       timezone: 'America/Los_Angeles', week_start: '2026-10-12', today: '2026-10-13', enabled: true, etag: 'a'.repeat(64),
@@ -79,6 +79,9 @@ const ANSWERS = {
       weekly_bets: ['2026-10-05', '2026-10-12', '2026-10-19'].flatMap((week) => ['work', 'personal'].map((area) => ({
         week_start: week, area, text: 'Synthetic weekly Bet '.repeat(8).slice(0, 160), etag: '7', update_time: '2026-10-12T09:30:05Z',
       }))),
+      lane_orders: ['start', 'waiting', 'parked', 'quarterly', 'monthly', 'weekly', 'committed'].map((lane) => ({
+        lane, task_ids: Array.from({ length: 100 }, (_, n) => `6X7rM8997g3RQ${lane}${String(n).padStart(3, '0')}`),
+      })),
     } }),
     LookupMailItems: fixtures.ok(fixtures.mailLookup(200)),
     ReadMailSummary: fixtures.ok(fixtures.mailSummary()),

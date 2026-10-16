@@ -1,6 +1,7 @@
 """The planning store (migrations/0007_plan_store.sql) on host SQLite, synthetic rows only: its CHECKs, the
-partial Mailbox index and the owner's VerifyPlanStore counts (core/sql/plan.py)."""
+partial Mailbox index, the owner's VerifyPlanStore counts and the Review lanes' order (core/sql/plan.py)."""
 
+import json
 import re
 import sqlite3
 from collections.abc import Iterator
@@ -225,3 +226,54 @@ def test_dependency_statements_keep_the_store_consistent(db):
     run(sql.FORGET_PREREQUISITES, "todoist", '["A"]')
     assert db.execute(sql.EDGES).fetchall() == [] and anomalies(db) == {}
     assert counts(db)["task_row_count"] == 3  # identities are never deleted
+
+
+# ---- the Review lanes' order (plan_settings 'board'; the runtime path is tests/runtime/test_plus.py) ------------
+
+
+def test_the_board_is_a_known_setting(db):
+    db.execute("""INSERT INTO plan_settings VALUES ('board', '{"lanes": {"weekly": [1]}}', 1)""")
+    assert anomalies(db) == {}
+
+
+def test_every_lane_order_is_one_key_search_two_json_scans_and_rowid_lookups(db):
+    steps = [row[3] for row in db.execute(f"EXPLAIN QUERY PLAN {sql.LANE_ORDERS}")]
+    assert len(steps) == 4, steps
+    for step, prefix in zip(
+        steps,
+        (
+            "SEARCH s USING INDEX sqlite_autoindex_plan_settings_1",
+            "SCAN l VIRTUAL TABLE",
+            "SCAN k VIRTUAL TABLE",
+            "SEARCH t USING INTEGER PRIMARY KEY (rowid=?)",
+        ),
+        strict=True,
+    ):
+        assert step.startswith(prefix), steps
+
+
+def test_arranging_a_lane_takes_its_tasks_from_every_other_lane():
+    board = {"lanes": {"weekly": [1, 2, 3], "monthly": [4, 2], "waiting": [5]}}
+    assert plan.arrange_lane(board, "committed", [3, 2, 3]) == {
+        "lanes": {"weekly": [1], "monthly": [4], "waiting": [5], "committed": [3, 2]}
+    }
+    # A lane left empty leaves the document, an empty order removes its own lane, and the order is capped.
+    assert plan.arrange_lane(board, "start", [5])["lanes"].keys() == {"weekly", "monthly", "start"}
+    assert plan.arrange_lane(board, "weekly", []) == {"lanes": {"monthly": [4, 2], "waiting": [5]}}
+    many = list(range(1, plan.MAX_LANE_TASKS + 20))
+    assert plan.arrange_lane({}, "parked", many) == {"lanes": {"parked": many[: plan.MAX_LANE_TASKS]}}
+
+
+def test_lane_orders_follow_the_board_and_skip_what_this_build_does_not_know(db):
+    ids = {name: add_task(db, name) for name in ("A", "B", "C", "D")}
+    board = {"lanes": {"committed": [ids["C"], ids["A"]], "start": [ids["B"]], "later": [ids["D"]]}}
+    db.execute("INSERT INTO plan_settings VALUES ('board', ?, 1)", (json.dumps(board),))
+    rows = [(lane, int(position), task) for lane, position, task in db.execute(sql.LANE_ORDERS)]
+    assert plan.lane_orders(rows) == [
+        {"lane": "start", "task_ids": ["B"]},
+        {"lane": "committed", "task_ids": ["C", "A"]},
+    ]
+    assert plan.lane_orders([("weekly", plan.MAX_LANE_TASKS, "X"), ("weekly", 1, "B"), ("weekly", 0, "A")]) == [
+        {"lane": "weekly", "task_ids": ["A", "B"]}
+    ]
+    assert plan.lane_orders([]) == []

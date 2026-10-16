@@ -4,11 +4,12 @@
 SetTaskPlan, SetTaskLead, CompleteTask, AppendTaskSteps and each label update of the Monday reset record a
 receipt ``started`` with their frozen Sync commands, wait until the object's storage holds it, and only then
 send them. ``done`` drops the commands and keeps the answer's IDs, never a title; CompleteTask's also keeps the
-FlowDay settlement it froze, at ``$.focus``. A replay of a done request answers from those IDs, a started one
-resends the same commands, whose UUIDs (uuid5 of the request ID) Todoist runs at most once. So a lost receipt
-only turns a replay into a re-run that Todoist deduplicates: receipts may live in the object's SQLite, which
-no backup holds. A label write's started receipt also keeps the plan etag its labels were chosen under: once
-the binding has changed, its retry answers ETAG_MISMATCH instead of attaching a label by a stale name.
+FlowDay settlement it froze, at ``$.focus``, and ReorderTasks' keeps nothing (runtime/plus_order.py). A replay
+of a done request answers from those IDs, a started one resends the same commands, whose UUIDs (uuid5 of the
+request ID) Todoist runs at most once. So a lost receipt only turns a replay into a re-run that Todoist
+deduplicates: receipts may live in the object's SQLite, which no backup holds. A label write's started receipt
+also keeps the plan etag its labels were chosen under: once the binding has changed, its retry answers
+ETAG_MISMATCH instead of attaching a label by a stale name.
 
 A lookup reads only the receipts of the last MAX_AGE, and an older request ID starts over. Nothing deletes a
 receipt (the owner's rule: no automatic time-based deletion), so one that never finished keeps its commands,

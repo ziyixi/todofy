@@ -43,12 +43,15 @@ Every Plan answer (ReadPlan, ConfirmPlanMapping, UpdatePlanLabels) also carries 
 the mail project (`TODOIST_DEFAULT_PROJECT_ID`), the newest review task the GTD ledger created for this or
 the previous ISO week (`gtd_reviews`, open or not) and at most 100 tasks already recorded for next week,
 and the [weekly Bets](#weekly-bets) of the previous, this and the next account week (`weekly_bets`, at most
-six), besides every [dependency](#dependencies). They cost one D1 batch per Plan answer (five statements: the
-dependencies' one scan and the Bets by primary key among them), never one per task page or write; the BASIC
+six), besides every [dependency](#dependencies) and the Review lanes the owner arranged (`lane_orders`,
+[reordering](#reordering)). They cost one D1 batch per Plan answer (six statements: the dependencies' one scan,
+the Bets by primary key and the lanes' one document among them), never one per task page or write; the BASIC
 view of a native page reads none of them.
 `ListPlanningTasks` returns bounded active pages with the canonical Todoist task ID, labels, parent,
 scheduled date, true deadline, optional estimate, Todoist's last change (`update_time`, whole seconds,
-from the same page's `updated_at`) and derived planning state. Counts require every page.
+from the same page's `updated_at`), Todoist's sibling order (`child_order` when it is an int32, `order_key`
+when it is 1-100 ASCII letters and digits; neither is part of the etag) and derived planning state. Counts
+require every page.
 Task content is read from Todoist when requested; it is not kept as a second task database.
 The extension builds native links as `https://app.todoist.com/app/task/<v2_id>` from that ID;
 API v1 no longer returns a task URL. See the official [Task URLs contract](https://developer.todoist.com/api/v1/).
@@ -82,6 +85,30 @@ FlowDay timer-settlement command. Repeating a failed settlement retains the clos
 advance the recurring task again. A stale timer etag is refreshed once with a new settlement UUID.
 The extension cannot call settlement itself. Its other FlowDay writes are queue order, estimates
 and normal timer actions. Local/pseudo tasks retain their FlowDay identity and owner link.
+
+### Reordering
+
+`ReorderTasks` (`POST /api/plus/v1/tasks:reorder`, `{task_ids, task_id, lane, request_id}`) takes 1-100
+distinct task IDs in their new order and the one the owner moved (one of them), with a Review lane (`start`,
+`waiting`, `parked`, `quarterly`, `monthly`, `weekly`, `committed`: `core/plan.py LANES`) or none (Week's Next
+steps, which follow Todoist's own order); anything else is `BAD_REQUEST` (owner decision of 2026-10-17). It
+reads the given tasks once (`GET /api/v1/tasks?ids=`) and changes Todoist only among the moved task's siblings
+in the list (same project, section and parent; `core/plus.py reorder_items`): their existing `child_order`
+values are permuted into the given order, smallest first, by one `item_reorder` (`reorder_command`). No other
+task is written, a group whose values are missing, outside int32 or repeated is left alone, and so are the
+moved task's siblings in Waiting and Parked (`UNTOUCHED_LANES`): those lanes show and sort by Todoist's update
+time, which a Todoist order write may reset. The Sync goes under a [receipt](#receipts), and none is sent when
+nothing changes; the tasks are read again after it. With a lane, the order of the tasks still active is saved
+in the planning store's `board` document ([planning store](#planning-store)): they get their Todofy IDs, the
+lane is replaced, each task leaves any other lane it was in, and a lane left empty is dropped. The answer is the
+given tasks still active, in the given order, as Todoist lists them now (`child_order`, `order_key` and
+`update_time` may have changed), and the lane as saved. Every FULL Plan answer carries every arranged lane in
+`LANES` order (`lane_orders`), as Todoist IDs; a lane never arranged is absent, and the extension skips an ID
+that has left the lane. `item_reorder` is deprecated by Todoist with no removal date; its replacement
+(`item_update` with `order_key`) would change `reorder_command` alone. Cost per drop: the cached metadata (a
+Sync only after five minutes), two task reads and one Sync in Todoist; two settings reads, the D1 receipt
+fallback, one batch of three statements and one settings write in D1. Maintenance, the backup lease and a
+missing or unconfirmed setup hold it like every Plus write.
 
 ## Weekly Bets
 
@@ -342,6 +369,13 @@ under 10 MB a year. The FlowDay settlement frozen after a completion is part of 
 changes by compare-and-set: the first one frozen wins, and only the one whose timer etag FlowDay refused
 (409) is replaced.
 
+`ReorderTasks` ([reordering](#reordering)) freezes its one `item_reorder` the same way and finishes with no
+result at all (`{}`, so a 100-task order always fits the result's 4096 bytes). A repeat of a done one reads the
+tasks again and saves the same lane. A repeat of a started one reads the tasks and builds the items again: none
+left to change means its first try landed (the receipt finishes, nothing is sent); the same items resend the
+frozen command; anything else (a sibling moved, added or removed in Todoist since) is `ETAG_MISMATCH`, so a retry
+never writes `child_order` values that are no longer the group's, and the owner's next drag is a new request.
+
 `UpdatePlanLabels` changes only the binding in D1 and, like `ConfirmPlanMapping`, keeps no receipt (a week
 reset either settles first keeps its own). A request whose etag is outdated but whose binding is the saved
 one is a replay and answers the saved plan; any other outdated request is `ETAG_MISMATCH`, so an older
@@ -361,14 +395,18 @@ FlowDay's timer etag guards the settlement.
 
 Migration `0007_plan_store.sql` adds the store the planning features move onto, one step at a time: D1
 keeps only what cannot be found again (the owner's planning facts and Todofy's own task IDs), never task
-content; Todoist stays the task store. `plan_settings` holds three JSON documents (the account's timezone,
-the week in effect, the Todoist binding), `plan_tasks` Todofy's task IDs with their `(provider,
+content; Todoist stays the task store. `plan_settings` holds JSON documents (the account's timezone, the week
+in effect, the Todoist binding, the Mailbox's binding and the Review lanes' order), `plan_tasks` Todofy's task
+IDs with their `(provider,
 external_id)` reference (never deleted, IDs never reused), `plan_marks` week marks, `plan_edges`
 dependencies, `plan_notes` the owner's text per period and `plan_categories` the Mailbox triage
 categories; `summaries` gains `category_id` and `triaged_at` (unused so far: a filing's result is in Todoist).
 [Dependencies](#dependencies) (`plan_tasks` and `plan_edges`), the weekly Bets (`plan_notes` kind `bets`,
-[weekly Bets](#weekly-bets)) and the [Mailbox](#mailbox)'s categories (`plan_categories`, `plan_settings`
-`todoist.mail`) are its writers so far; `plan_marks` is not read or written yet. The
+[weekly Bets](#weekly-bets)), the [Mailbox](#mailbox)'s categories (`plan_categories`, `plan_settings`
+`todoist.mail`) and the order of the Review lanes (`plan_settings` `board`, [reordering](#reordering)) are its
+writers so far; `plan_marks` is not read or written yet, and 0007's reserved `plan_notes` kind `review` and
+`plan_marks` kind `kept` stay unused, since the weekly review's progress lives in the extension's
+`storage.local`. The
 migration is additive, so a code rollback leaves them idle (the release before ignores the Bets' rows). Never run its down DDL in production (dropping
 the columns rewrites every summaries row). The vocabularies and limits the CHECKs leave open are in
 `core/plan.py`; only `runtime/plan_store.py` touches the tables. No retention deletes their rows.
@@ -384,7 +422,16 @@ edges in its `plan_tasks` is the backup's lease, which holds Plus writes and the
 order alone would not, because `plan_marks` and `plan_edges` have no INTEGER PRIMARY KEY and a row added
 during a job can reuse a deleted row's rowid inside the snapshot. If the lease is ever relaxed, take
 `plan_tasks`' max rowid when its own export starts, and check `VerifyPlanStore`'s orphan counts after a
-restore. A job keeps the columns it was planned with, so a release during the Sunday backup (0007 adds two
+restore.
+
+`board` is `{"lanes": {"<lane>": [<plan_tasks.id>, …]}}`: each arranged lane first to last, at most 100 IDs, each
+ID in one lane at most (`core/plan.py arrange_lane`), so the document stays under 7 × 100 entries. Its one writer
+is `plan_store.save_lane_order` (one batch that registers the tasks just confirmed active and reads their IDs and
+the document, then one write), and `LANE_ORDERS` reads it back as Todoist IDs with one primary-key search,
+`json_each` over the document and a rowid lookup per entry, a deliberate bounded read like `EDGES`
+(`test_plan_store.py` pins its plan). No migration was needed. A build from before it counts the row in
+`VerifyPlanStore`'s `unknown_value_count` (1), which is expected after a rollback; the rolled-back extension
+ignores the order. A job keeps the columns it was planned with, so a release during the Sunday backup (0007 adds two
 `summaries` columns) cannot mix two row widths: a job the release before saved starts over under a new
 prefix. Restore inserts by column name, so a backup from before 0007 loads into the new schema with empty
 plan tables and NULL triage columns. `tools/backup_restore.py` leaves out `RETIRED_TABLES` (`plus_settings`,
@@ -469,15 +516,26 @@ is no receipt: settling twice gives the same rows.
 ## Local verification
 
 `tests/unit/test_plus.py` covers classification and filter semantics, the Sunday rule and the
-never-backwards membership in SQLite, the literal `active` label and the replaced-filter consistency gate.
+never-backwards membership in SQLite, the literal `active` and `parked` labels, the reorder rule (the moved
+group only, values left alone when missing, outside int32 or repeated), `child_order` and `order_key` bounds and
+the replaced-filter consistency gate, with quick and parked tasks, due dates as dates, floating and
+fixed-timezone date-times on both sides of the account's midnight. `test_plus_order.py` runs ReorderTasks
+through `plus_api.handle` (its Todoist and D1 cost, the gates), `test_plan_store.py` the `board` document and
+its read's plan, `test_plus_receipts.py` its receipt, and `test_plus_cache.py` a cache kept under another list
+of replaced queries. `tests/runtime/test_plus.py` also runs ReorderTasks in workerd (one `item_reorder` with
+the moved group only, the lane saved and answered by ReadPlan, a lost answer, a started receipt whose siblings
+changed, Waiting, Parked and lone tasks with no Sync, an inactive task skipped, 100 IDs of 100 characters, the
+refusals) and SetTaskPlan `parked`; `tests/runtime/test_plus_cache.py` a filter kept before the list changed.
 `tests/runtime/test_plus.py` also checks that `active` is refused without the label (no Sync write) and
 written and removed with it, keeping a Sunday choice's week. Gateway tests cover credential,
 CSRF, bounded proxy and frozen settlement behavior. `tests/runtime/test_plus.py` exercises the real
 gateway, Python Durable Object and D1 against synthetic Todoist Sync/REST responses, including lost
 responses, recurring completion, week rollover (Sunday choices kept, earlier commitments reset, scans
 unable to move a choice back) and shared pause/auth controls. The gateway CPU suite
-includes full 200-task Plus and FlowDay-proxy pages, a FULL Plan with 500 labels, 300 dependencies and six Bets,
-which the gateway reads and writes again (first runs 0.5-0.9 ms, warm medians 0.7 ms on 2026-10-16), and the
+includes full 200-task Plus and FlowDay-proxy pages (the Plus tasks with `child_order` and `order_key`), a FULL
+Plan with 500 labels, 300 dependencies, six Bets and 700 lane order IDs, which the gateway reads and writes
+again (first runs 0.5-0.9 ms, warm medians 0.7 ms on 2026-10-16; with the lane orders, first runs 0.7-0.9 ms and
+a warm median of 0.7 ms on the same day), and the
 Mailbox's two largest answers. Production and browser acceptance are recorded
 separately in the extension's verification document; a local test result is not production evidence.
 

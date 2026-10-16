@@ -15,7 +15,7 @@ from todofy.core import plan as planning
 from todofy.core import plus
 from todofy.core.sql import gtd as gtd_sql
 from todofy.core.sql import plus as sql
-from todofy.runtime import backup, plan_store, plus_cache, plus_mail, plus_week
+from todofy.runtime import backup, plan_store, plus_cache, plus_mail, plus_order, plus_week
 from todofy.runtime import plus_receipts as receipts
 from todofy.runtime import plus_store as store
 from todofy.runtime import plus_todoist as todoist
@@ -52,7 +52,7 @@ METHODS = (
     | OWNER_METHODS
     | DEPENDENCY_METHODS
     | VALUE_WRITES
-    | {"SetTaskPlan", "SetTaskLead", "AppendTaskSteps", "CompleteTask", "UpdatePlanLabels"}
+    | {"SetTaskPlan", "SetTaskLead", "AppendTaskSteps", "CompleteTask", "UpdatePlanLabels", "ReorderTasks"}
     | {"FileMailItem", "DeleteMailItems"}
 )
 # Methods that write labels or bind them sync Todoist's labels first, so a label renamed in Todoist is never
@@ -103,21 +103,22 @@ def _names(metadata: dict[str, Any]) -> set[str]:
 
 
 async def review_targets(env: Any, week: str) -> dict[str, Any]:
-    """The weekly review's IDs and the Bets, read with each Plan answer rather than with every task page or
-    write: Todofy's mail project, the newest review task it created (this or the previous ISO week; the
-    extension sees whether it is still open), the choices already kept for next week, every dependency and the
-    Bets of last, this and next week."""
+    """The weekly review's IDs, the Bets and the Review lanes' order, read with each Plan answer rather than with
+    every task page or write: Todofy's mail project, the newest review task it created (this or the previous ISO
+    week; the extension sees whether it is still open), the choices already kept for next week, every dependency,
+    the Bets of last, this and next week, and every lane the owner arranged."""
     monday = date.fromisoformat(week)
     statements = [
         env.DB.prepare(gtd_sql.REVIEW_WEEK.sql).bind("{:04d}-W{:02d}".format(*day.isocalendar()[:2]))
         for day in (monday, monday - timedelta(days=7))
     ]
-    *reviews, chosen, edges, bets = await env.DB.batch(
+    *reviews, chosen, edges, bets, lanes = await env.DB.batch(
         [
             *statements,
             env.DB.prepare(sql.NEXT_WEEK).bind(week),
             plan_store.edges(env.DB),
             plan_store.bets_statement(env.DB, week),
+            plan_store.lane_orders_statement(env.DB),
         ]
     )
     created = [
@@ -132,6 +133,7 @@ async def review_targets(env: Any, week: str) -> dict[str, Any]:
         "next_week_task_ids": [str(dict(row)["task_id"]) for row in chosen.results],
         "dependencies": plan_store.dependency_rows(edges),
         "weekly_bets": plan_store.weekly_bets(dict(row) for row in bets.results),
+        "lane_orders": plan_store.lane_orders(lanes),
     }
 
 
@@ -609,6 +611,9 @@ async def handle(coordinator: Any, method: str, text: str, *, owner: bool, diges
             elif method == "DeleteMailItems":
                 await require_ready(coordinator)
                 response = await plus_mail.delete(coordinator, request)
+            elif method == "ReorderTasks":
+                # The order writes no label: the cached metadata.
+                response = await plus_order.reorder(coordinator, request, await require_ready(coordinator))
             elif method == "ListPlanningTasks":
                 current = await plan(coordinator)
                 size = request.get("page_size", 0) or 100

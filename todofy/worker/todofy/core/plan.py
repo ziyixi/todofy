@@ -6,11 +6,15 @@ Todoist adapter's (core/plus.py).
 """
 
 import unicodedata
+from collections.abc import Iterable
 from datetime import date, timedelta
+from typing import Any
 
 # plan_settings keys, one JSON object each. 'todoist.mail' is the Todoist adapter's binding of the Mailbox: each mail
-# category's label and the project filed mail goes to (runtime/plan_store.py mail_settings).
-SETTING_KEYS = ("account", "week", "todoist", "todoist.mail")
+# category's label, and a project no longer used for filing (runtime/plan_store.py mail_settings). 'board' is
+# {"lanes": {"<lane>": [<plan_tasks.id>, …]}}: the Review lanes the owner arranged, at most MAX_LANE_TASKS each, each
+# ID in one lane at most (arrange_lane).
+SETTING_KEYS = ("account", "week", "todoist", "todoist.mail", "board")
 # plan_tasks.provider: the task store an external_id belongs to.
 PROVIDERS = ("todoist",)
 # plan_marks.kind: committed and bet are a week's last-day choices, kept a someday task kept in a weekly review.
@@ -22,6 +26,9 @@ EDGE_KINDS = (WAITS_FOR,)
 NOTE_KINDS = ("bets", "review")
 # plan_categories.scheme: the Mailbox triage.
 CATEGORY_SCHEMES = ("mail",)
+# The extension's Review lanes, in their order on the board; the owner's order of each is the 'board' document.
+LANES = ("start", "waiting", "parked", "quarterly", "monthly", "weekly", "committed")
+MAX_LANE_TASKS = 100
 
 MAX_EDGES_PER_TASK = 5
 MAX_EDGES = 300
@@ -101,3 +108,23 @@ def bet_writable(week: str, current: str) -> bool:
     this week and the next one only, so an ended week's Bet stays as it was."""
     _, this, following = bet_weeks(current)
     return week in (this, following)
+
+
+def arrange_lane(board: dict[str, Any], lane: str, task_ids: list[int]) -> dict[str, Any]:
+    """The 'board' document with ``lane`` in the order of ``task_ids`` (plan_tasks IDs, the first MAX_LANE_TASKS):
+    those IDs leave every other lane, since a task is in one lane, and a lane left empty leaves the document."""
+    arranged = list(dict.fromkeys(task_ids))[:MAX_LANE_TASKS]
+    taken = set(arranged)
+    lanes = {name: [task for task in tasks if task not in taken] for name, tasks in board.get("lanes", {}).items()}
+    lanes[lane] = arranged
+    return {"lanes": {name: tasks for name, tasks in lanes.items() if tasks}}
+
+
+def lane_orders(rows: Iterable[tuple[str, int, str]]) -> list[dict[str, Any]]:
+    """LaneOrder messages from (lane, position, task ID) rows of the 'board' document, in LANES order and each lane
+    first to last; an unknown lane and a position at or above MAX_LANE_TASKS are left out."""
+    found: dict[str, list[tuple[int, str]]] = {}
+    for lane, position, task_id in rows:
+        if lane in LANES and 0 <= position < MAX_LANE_TASKS:
+            found.setdefault(lane, []).append((position, task_id))
+    return [{"lane": lane, "task_ids": [task for _, task in sorted(found[lane])]} for lane in LANES if lane in found]
