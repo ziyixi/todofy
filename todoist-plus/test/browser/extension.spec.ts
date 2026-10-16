@@ -19,7 +19,7 @@ a { color:inherit } [hidden] { display:none !important }
 aside ul { margin:0; padding:0; list-style:none }
 #top-menu a { display:flex; align-items:center; box-sizing:border-box; width:230px; height:34px; padding:5px; font-size:13px; line-height:20px; font-weight:400; text-decoration:none }
 #top-menu svg { width:24px; height:24px }
-#top-menu .current > a { background:var(--product-library-selectable-secondary-selected-fill); color:var(--product-library-selectable-secondary-on-selected-tint) }
+#top-menu .current > a { background:var(--product-library-selectable-secondary-selected-fill); color:var(--product-library-selectable-secondary-on-selected-fill) }
 </style></head><body><aside data-testid="app-sidebar-scrollable-container"><ul id="top-menu"><li id="native-today" class="current"><a href="/app/today"><svg aria-hidden="true"></svg><span>Today</span></a></li><li><a href="/app/upcoming"><svg aria-hidden="true"></svg><span>Upcoming</span></a></li></ul><ul id="favorites">
 <div><li><div><div><a href="/app/project/email-inbox">Email Inbox</a><span>0</span></div></div></li></div>
 <div id="legacy-wrapper"><li id="legacy"><div><div><a href="/app/filter/committed-f1">Legacy commitment filter</a><span>0</span></div></div></li></div>
@@ -244,7 +244,7 @@ test("built MV3 mounts, restores native UI and sends task actions through its ba
     await expect(planButton).toHaveCSS("background-color", selected);
     await expect(planButton).toHaveCSS(
       "color",
-      await tokenColor(page, "selectable-secondary-on-selected-tint"),
+      await tokenColor(page, "selectable-secondary-on-selected-fill"),
     );
     await expect(planButton).toHaveCSS("padding", "5px");
     await expect(planButton).toHaveCSS("width", "230px");

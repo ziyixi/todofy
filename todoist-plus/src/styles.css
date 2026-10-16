@@ -64,6 +64,12 @@ body {
     --product-library-selectable-secondary-on-selected-tint,
     light-dark(#557921, #acc97b)
   );
+  /* The nav row copies the native sidebar exactly: on the live page Todoist's selected row text is this token (checked
+     in Kale and Dark on 2026-10-16). Board text on the selected fill keeps the darker --plus-selected-text for 4.5:1. */
+  --plus-nav-selected-text: var(
+    --product-library-selectable-secondary-on-selected-fill,
+    light-dark(#4c7a45, #acc97b)
+  );
   --plus-warning: var(
     --product-library-info-warning-primary-on-idle-tint,
     #a56e21
@@ -650,7 +656,7 @@ svg.lucide > * {
 }
 .plus-extension-nav button[aria-current="page"] {
   background: var(--plus-selected);
-  color: var(--plus-selected-text);
+  color: var(--plus-nav-selected-text);
 }
 .plus-other-views button {
   width: 100%;

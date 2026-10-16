@@ -530,3 +530,19 @@ live task modal's shape and URL form that the task lookup relies on, the Dark th
 the same-SHA release the owner runs the two content-free console lines in
 `todoist-plus/docs/verification.md` (theme in Kale and Dark; a task with sub-tasks and one of its
 sub-tasks) and records the results here.
+
+### Pre-release page check, October 16
+
+The agent ran console line 1 from `todoist-plus/docs/verification.md` in the owner's Chrome on Today: once in the owner's
+theme, once with `theme_dark` set on `<html>` in that tab only (no account setting changed). Only CSS values and booleans
+were read.
+
+- `colorScheme` was `light`, then `dark`; `plusDark` was `true` in Dark. All three `shadow-raised-*` values are box-shadows.
+- Todoist's selected sidebar row has `selectable-secondary-selected-fill` as its background. Its text is
+  `selectable-secondary-on-selected-fill`, not `-on-selected-tint`; that holds in both themes. The Plus nav row now uses that
+  token (`--plus-nav-selected-text`). Board text on the selected fill keeps `-on-selected-tint`, because the native pair is
+  4.47:1.
+- `navLabelShift` was 5 px, measured on the installed older build. This branch's nav icon slot is 24 px, like Todoist's.
+- Line 2 (task modal) was not run: it needs a real task with sub-tasks open. The C1 lookup hides Steps & timing on a
+  mismatch, so it can never write elsewhere. After the reload, the owner checks step 4 of the six-step list, and the Options
+  page check shows any mismatch.

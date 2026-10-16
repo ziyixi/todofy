@@ -15,6 +15,7 @@ const ROLES = {
   "on-accent": "actionable-primary-on-idle-tint",
   selected: "selectable-secondary-selected-fill",
   "selected-text": "selectable-secondary-on-selected-tint",
+  "nav-selected-text": "selectable-secondary-on-selected-fill",
   warning: "info-warning-primary-on-idle-tint",
   danger: "info-attention-primary-idle-tint",
   p1: "priorities-p1-primary-idle-tint",
@@ -119,7 +120,10 @@ test("Plus follows every Todoist theme through CSS alone, with readable text", a
       for (const [role, { plus, todoist: token }] of Object.entries(seen.roles))
         expect(plus, `${theme || "default"}: --plus-${role}`).toBe(token);
       expect(seen.root).toEqual([todoist("bg"), todoist("text")]);
-      expect(seen.nav).toEqual([todoist("selected"), todoist("selected-text")]);
+      expect(seen.nav).toEqual([
+        todoist("selected"),
+        todoist("nav-selected-text"),
+      ]);
       expect(seen.lane).toBe(todoist("surface"));
       expect(seen.muted).toBe(todoist("muted"));
       expect(seen.link).toBe(todoist("accent"));
