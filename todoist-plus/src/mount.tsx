@@ -404,10 +404,12 @@ export async function mountTodoist(ctx: ContentScriptContext) {
       append: "last",
       isolateEvents: ["keydown", "keyup", "keypress"],
       onMount(container) {
-        mainRoot = createRoot(container);
+        const root = createRoot(container);
+        mainRoot = root;
+        return root;
       },
-      onRemove() {
-        mainRoot?.unmount();
+      onRemove(root) {
+        root?.unmount();
       },
     });
     if (disposed || !anchor.isConnected) return;
