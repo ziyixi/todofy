@@ -83,14 +83,19 @@ async def metadata(core: Any, *, fresh: bool = False) -> dict[str, Any]:
     """The account's timezone, labels and the filters Plus replaces.
 
     From the object's cache when it was synced at most METADATA_MAX_AGE ago and ``fresh`` is not asked for,
-    else after one incremental Sync from the cached token; a full Sync only when there is no token. Under
-    PLUS_METADATA=full, a full Sync every call, as before the cache.
+    else after one incremental Sync from the cached token; a full Sync only when there is no token, or the cache
+    was kept under another list of replaced queries. Under PLUS_METADATA=full, a full Sync every call, as before
+    the cache.
     """
     if not plus_cache.enabled(core.env):
         answer = await call(core, "/api/v1/sync", {"sync_token": "*", "resource_types": RESOURCES})
         return plus.metadata_view(_merged(None, answer))
     now = now_s()
     cached = plus_cache.get(core.sql, "todoist")
+    if cached is not None and cached.value.get("queries") != plus.REPLACED_QUERIES_VERSION:
+        # Kept under another list of replaced queries (a release before): an incremental Sync would never list a
+        # filter that the list now names but that has not changed since, so this starts over in full.
+        cached = None
     max_age = integer(core.env, "PLUS_METADATA_MAX_AGE_MS", METADATA_MAX_AGE * 1000) / 1000  # tests shorten it
     if cached is not None and not fresh and now - cached.refreshed_at < max_age:
         return plus.metadata_view(cached.value)

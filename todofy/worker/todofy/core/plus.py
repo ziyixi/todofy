@@ -4,6 +4,7 @@ import hashlib
 import json
 import re
 import uuid
+from collections.abc import Collection
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -48,9 +49,15 @@ REPLACED_FILTER_QUERIES = {
     "!nodeadline&@blocked&!@parked",
     "@blocked",
     "@active&!nodeadline&!@blocked&!@parked",
+    # Quick tasks are Week's Quick source, parked tasks Review's Parked lane (the extension's quickTasks and
+    # boardLanes); @parked only while the account has a label of that name (replaced_filters).
+    "@quick&(nodate|3days)",
+    "@parked",
 }
 # The owner's literal in-progress label, as the in-progress deadline query names it. Plus never creates it.
 ACTIVE = "active"
+# The owner's literal set-aside label, which Review's Parked lane shows. Plus never creates it either.
+PARKED = "parked"
 # plan_tasks.provider of a Todoist task ID (core/plan.py PROVIDERS).
 PROVIDER = "todoist"
 # The literal labels that clarify a mail task in place (waiting, someday or quick), as the extension's
@@ -71,12 +78,17 @@ def replaced_query(query: Any) -> str | None:
     return normalised if normalised in REPLACED_FILTER_QUERIES else None
 
 
-def replaced_filters(filters: list[dict[str, Any]], mapping: list[dict[str, Any]] | None = None) -> list[str]:
-    """Match the existing view semantics; names and private filter IDs are never baked in."""
+def replaced_filters(
+    filters: list[dict[str, Any]], mapping: list[dict[str, Any]] | None = None, label_names: Collection[str] = ()
+) -> list[str]:
+    """Match the existing view semantics; names and private filter IDs are never baked in. ``label_names``: the
+    account's labels; @parked is replaced only while one is named parked, as the extension's Parked lane exists."""
     names = role_labels(mapping)
     result = []
     for row in filters:
         query = replaced_query(row.get("query", ""))
+        if query == "@" + PARKED and PARKED not in label_names:
+            continue
         if query is not None and all(names.get(role) == role for role in ROLES if "@" + role in query):
             result.append(str(row["id"]))
     return result
@@ -88,7 +100,8 @@ def merge_metadata(previous: dict[str, Any] | None, answer: dict[str, Any]) -> d
     ``previous`` is None for a full answer, which replaces the cache; an incremental answer lists only what
     changed since its token, merged by ID: an item with ``is_deleted`` leaves. The user object is reduced to its
     timezone, and only filters whose query REPLACED_FILTER_QUERIES lists are kept, normalised, so no private
-    filter text is stored; a kept filter whose query changes to any other leaves. Raises ValueError on an answer
+    filter text is stored; a kept filter whose query changes to any other leaves. ``queries`` names that list
+    (REPLACED_QUERIES_VERSION): a cache kept under another list starts over in full. Raises ValueError on an answer
     that does not have this shape.
     """
     token = answer.get("sync_token")
@@ -119,7 +132,13 @@ def merge_metadata(previous: dict[str, Any] | None, answer: dict[str, Any]) -> d
         timezone = previous["timezone"]
     if not isinstance(timezone, str) or not timezone or len(named) > MAX_METADATA_ITEMS:
         raise ValueError("user")
-    return {"sync_token": token, "timezone": timezone, "labels": list(named.items()), "filters": list(queries.items())}
+    return {
+        "sync_token": token,
+        "timezone": timezone,
+        "labels": list(named.items()),
+        "filters": list(queries.items()),
+        "queries": REPLACED_QUERIES_VERSION,
+    }
 
 
 def metadata_view(cached: dict[str, Any]) -> dict[str, Any]:
@@ -133,6 +152,11 @@ def metadata_view(cached: dict[str, Any]) -> dict[str, Any]:
 
 def fingerprint(value: Any) -> str:
     return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
+
+# The metadata cache keeps only the filters this list replaces: an incremental Sync lists a filter only when it
+# changes, so a cache kept under another list would never learn of an existing filter the list now names.
+REPLACED_QUERIES_VERSION = fingerprint(sorted(REPLACED_FILTER_QUERIES))
 
 
 def check_id(value: str) -> str:
@@ -381,6 +405,14 @@ def plan_labels(
         labels.discard(ACTIVE)
         if request["active"]:
             labels.add(ACTIVE)
+    if "parked" in request:
+        # Last, so it wins: a parked task has no planning stage (whatever label_stage says, so a Quick task's focus
+        # goes too) and is not in progress.
+        labels.discard(PARKED)
+        if request["parked"]:
+            labels -= {names[role] for role in PLANNING_ROLES if role in names}
+            labels.discard(ACTIVE)
+            labels.add(PARKED)
     return sorted(labels)
 
 

@@ -29,10 +29,16 @@ Besides the planning, must-start and missing-lead views, they include waiting wi
 (`!nodeadline&(@blocked)&!@parked`, also without the parentheses), all waiting (`@blocked`) and in progress
 with a deadline (`@active&!nodeadline&!@blocked&!@parked`). The extension's Review board shows a waiting or
 must-start task in its Waiting or Start now lane, or in its own stage lane saying so; an in-progress task was
-acknowledged and needs no lane, and a deadline without a lead is the weekly review's start-ahead line. The
-quick-task and parked views are not replaced. A query joins the set only with the consistency case in
-`tests/unit/test_plus.py`, which rebuilds each deadline or waiting query's task set over synthetic tasks and
-requires every task to be shown by the extension's rule, stated in API fields.
+acknowledged and needs no lane, and a deadline without a lead is the weekly review's start-ahead line. Since
+2026-10-17 the quick-task view (`@quick&(nodate|3days)`, Week's Quick tasks) and the parked view (`@parked`,
+Review's Parked lane, a task with the literal label `parked` whatever else it has) are replaced too, `@parked`
+only while the account has a label named exactly `parked` (`replaced_filters(…, label_names)`): without one the
+lane does not exist and the native view stays. A query joins the set only with the consistency case in
+`tests/unit/test_plus.py`, which rebuilds each deadline, waiting, quick or parked query's task set over synthetic
+tasks and requires every task to be shown by the extension's rule, stated in API fields. It reads `N days` as
+inclusively as Todoist may mean it (a due day or a deadline on or before the N-th day, overdue included; a
+fixed-timezone due date in the account timezone), so the extension's Quick rule loses no task the native view
+showed.
 Every Plan answer (ReadPlan, ConfirmPlanMapping, UpdatePlanLabels) also carries the weekly review's IDs:
 the mail project (`TODOIST_DEFAULT_PROJECT_ID`), the newest review task the GTD ledger created for this or
 the previous ISO week (`gtd_reviews`, open or not) and at most 100 tasks already recorded for next week,
@@ -53,6 +59,12 @@ progress"). It is never created: adding it while the account has no label of tha
 with `ACTION_NOT_ALLOWED` before any Sync write, because Todoist would create a label for an unknown
 name. It is no planning mark, so it never moves a Sunday choice (`REMEMBER_WEEK` keeps the later week).
 The `must_start` and `missing_lead` rules are unchanged; an `active` task is neither.
+SetTaskPlan's optional `parked` sets a task aside (the extension's drop into Review's Parked lane): `true` adds
+the literal `parked` label and removes every planning-role label and `active`, whatever stage the labels give
+(a Quick task's `focus` goes too) and whatever stage the same request names, since it is applied last
+(`core/plus.py plan_labels`); `false` removes `parked` (a drop out of Parked sends it with the target lane's
+stage). Like `active` it is never created: `true` without a label of that exact name is `ACTION_NOT_ALLOWED`
+before any write. A parked task keeps no commitment, so its week membership is forgotten.
 The date-driven candidate view uses scheduled date, or deadline when no scheduled date exists.
 Lead windows retain the existing filter's exclusive upper boundary; `lead_1m` remains 30 days.
 One Todoist duration day is 480 estimated work minutes, matching FlowDay. Unknown estimates are absent.
@@ -264,9 +276,13 @@ losing them only costs one read of where they came from.
   refuses instead (`ACTION_NOT_ALLOWED` for a renamed bound label, `ETAG_MISMATCH` for an outdated task
   etag), and the next read shows the change. An incremental answer is merged by ID (`core/plus.py`
   `merge_metadata`; `is_deleted` items leave); only the user's timezone and filters whose query is one of the
-  public `REPLACED_FILTER_QUERIES` are kept, so no credential or private filter text is stored. A full Sync
-  happens only with no cached token (a new or wiped object), when Todoist answers a token in full, or after
-  Todoist refuses a token (a 4xx other than 401/403/429); the object starts at most 20 per 15-minute window
+  public `REPLACED_FILTER_QUERIES` are kept, so no credential or private filter text is stored. The cache also
+  names that list (`queries`, `REPLACED_QUERIES_VERSION`): an incremental Sync lists a filter only when it
+  changes, so a cache kept under another list (the release before, which kept no `queries`) is treated as none,
+  and the first metadata read after a release that changes the list makes one full Sync. A full Sync
+  happens only with no cached token (a new or wiped object), when Todoist answers a token in full, after
+  Todoist refuses a token (a 4xx other than 401/403/429), or for that list change; the object starts at most 20
+  per 15-minute window
   (Todoist allows 100), and beyond that a call is `UNAVAILABLE`. The runtime tests' config sets
   `PLUS_METADATA_MAX_AGE_MS = 0`, so every test call syncs incrementally; production never sets it.
 - **Extension connections.** The non-revoked token digests of `plus_connections`, read again from D1 after

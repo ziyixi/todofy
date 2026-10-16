@@ -61,6 +61,8 @@ METHODS = (
 LABEL_WRITES = frozenset(
     {"SetTaskPlan", "SetTaskLead", "UpdatePlanLabels", "ConfirmPlanMapping", "FileMailItem", "UpdateMailSettings"}
 )
+# SetTaskPlan's fields that add one of the owner's literal labels when true (core/plus.plan_labels).
+LITERAL_LABELS = {"active": plus.ACTIVE, "parked": plus.PARKED}
 # How long the object trusts its copy of the non-revoked connection digests; Issue and Revoke drop it at once
 # (_change_connections).
 CONNECTIONS_MAX_AGE = 10 * 60
@@ -91,8 +93,13 @@ async def plan(core: Any, metadata: dict[str, Any] | None = None, *, fresh: bool
         "today": today,
         "week_start": plus.week_start(today),
         "enabled": enabled,
-        "hidden_filter_ids": plus.replaced_filters(metadata["filters"], discovered["labels"]),
+        "hidden_filter_ids": plus.replaced_filters(metadata["filters"], discovered["labels"], _names(metadata)),
     }
+
+
+def _names(metadata: dict[str, Any]) -> set[str]:
+    """The names of the account's labels."""
+    return {label["name"] for label in metadata["labels"]}
 
 
 async def review_targets(env: Any, week: str) -> dict[str, Any]:
@@ -207,7 +214,7 @@ async def update_labels(core: Any, request: dict[str, Any]) -> dict[str, Any]:
         **current,
         "labels": bindings,
         "etag": plus.fingerprint([bindings, current["timezone"]]),
-        "hidden_filter_ids": plus.replaced_filters(metadata["filters"], bindings),
+        "hidden_filter_ids": plus.replaced_filters(metadata["filters"], bindings, _names(metadata)),
     }
     mapping = json.dumps({"etag": updated["etag"], "labels": bindings}, separators=(",", ":"))
     await store.run(env.DB, sql.SAVE_SETTINGS, mapping, current["timezone"], current["week_start"])
@@ -499,7 +506,8 @@ async def mutate(core: Any, method: str, request: dict[str, Any]) -> dict[str, A
     if previous:
         commands = previous.commands
     else:
-        if request.get("active") and not any(label["label"] == plus.ACTIVE for label in current["available_labels"]):
+        available = {label["label"] for label in current["available_labels"]}
+        if any(request.get(field) and label not in available for field, label in LITERAL_LABELS.items()):
             # Todoist would create a label for an unknown name; Plus never creates one.
             raise todoist.PlusError("ACTION_NOT_ALLOWED")
         commands = await build_commands(core, method, request, current["labels"])

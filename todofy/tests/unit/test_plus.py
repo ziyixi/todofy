@@ -2,8 +2,9 @@
 
 import re
 import sqlite3
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -11,7 +12,10 @@ from todofy.core import plus
 from todofy.core.sql import plus as sql
 
 TODAY = "2026-10-13"
+# The account timezone the gate reads fixed-timezone due dates in (UTC-7 on TODAY).
+TIMEZONE = "America/Los_Angeles"
 REQUEST = "f4438dda-dc8d-4732-aa59-bdb1a4dc21fa"
+QUICK = "@quick&(nodate|3days)"
 
 
 def task(**values):
@@ -58,6 +62,26 @@ def test_in_progress_never_moves_a_kept_sunday_choice():
     # Marking it in progress that Sunday records its marks under the ending week, which never moves it back.
     db.execute(sql.REMEMBER_WEEK, ("task1", plus.membership_week(sunday, week, {"active": True}), 1, 0))
     assert db.execute("SELECT week_start FROM plus_weeks WHERE task_id='task1'").fetchone() == ("2026-10-19",)
+
+
+def test_parking_sets_a_task_aside_whatever_its_stage_and_unparking_removes_only_the_label():
+    source = task(labels=["committed", "quarter", "focus", "active", "office", "deep", "lead_1w"])
+    assert plus.plan_labels(source, {"parked": True}) == ["deep", "lead_1w", "office", "parked"]
+    # A Quick task's focus or candiate gives no stage (label_stage), and parking still removes it.
+    for planning in ("focus", "candiate"):
+        assert plus.label_stage({"quick", planning}, plus.role_labels()) == "none"
+        assert plus.plan_labels(task(labels=["quick", planning]), {"parked": True}) == ["parked", "quick"]
+    # Parked wins over a stage sent with it, and goes by the configured names.
+    assert plus.plan_labels(task(labels=["office"]), {"stage": "committed", "parked": True}) == ["office", "parked"]
+    custom = task(labels=["custom-committed", "custom-candiate", "custom-office", "custom-bets"])
+    assert plus.plan_labels(custom, {"parked": True}, mapping()) == ["custom-bets", "custom-office", "parked"]
+    # Out of Parked into a stage lane: the stage, and parked goes; alone, only parked goes.
+    assert plus.plan_labels(task(labels=["parked", "office"]), {"stage": "monthly", "parked": False}) == [
+        "candiate",
+        "office",
+    ]
+    assert plus.plan_labels(task(labels=["parked", "deep", "waiting"]), {"parked": False}) == ["deep", "waiting"]
+    assert plus.plan_labels(task(labels=["deep"]), {"parked": False}) == ["deep"]
 
 
 def test_a_start_now_drag_writes_the_stage_and_in_progress_in_one_request():
@@ -230,22 +254,39 @@ def test_only_replaced_filter_queries_are_hidden():
         {"id": "matched-" + str(index), "query": query.replace("&", " & ").replace("@", "%")}
         for index, query in enumerate(plus.REPLACED_FILTER_QUERIES)
     ]
-    assert len(plus.replaced_filters(filters)) == len(plus.REPLACED_FILTER_QUERIES)
+    assert len(plus.replaced_filters(filters, label_names={"parked"})) == len(plus.REPLACED_FILTER_QUERIES)
     assert plus.replaced_filters(
         [
             {"id": "waiting", "query": "@blocked"},
             {"id": "unfamiliar", "query": "@bets | @custom"},
         ]
     ) == ["waiting"]
-    # The quick-task and parked views stay native, in Other views.
-    assert plus.replaced_filters([{"id": "quick", "query": "@quick & (no date | 3 days)"}]) == []
-    assert plus.replaced_filters([{"id": "parked", "query": "@parked"}]) == []
+    # Quick tasks are Week's Quick source and parked ones Review's Parked lane, which exists only while the account
+    # has a label named parked: without one (a shared label, say) the parked view stays native.
+    quick = {"id": "quick", "query": "@quick & (no date | 3 days)"}
+    parked = {"id": "parked", "query": "@parked"}
+    assert plus.replaced_filters([quick, parked], label_names={"quick", "parked"}) == ["quick", "parked"]
+    assert plus.replaced_filters([quick, parked], label_names={"quick", "Parked"}) == ["quick"]
+    assert plus.replaced_filters([{"id": "quick-4", "query": "@quick & (no date | 4 days)"}]) == []
+    # The cache's name for this list changes with it (plus_todoist.metadata starts over in full).
+    assert plus.fingerprint(sorted(plus.REPLACED_FILTER_QUERIES)) == plus.REPLACED_QUERIES_VERSION
 
 
-def todoist_filter(query: str, task: dict, today: str) -> bool:
-    """The subset of Todoist's filter syntax the replaced deadline and waiting views use; `,` lists views."""
+def due_day(due: str, timezone: str) -> str:
+    """The account-local day of a Todoist due date: a fixed-timezone date-time (ending in Z) in the account timezone,
+    a date or a floating date-time as written."""
+    if due.endswith("Z"):
+        return datetime.fromisoformat(due).astimezone(ZoneInfo(timezone)).date().isoformat()
+    return due[:10]
+
+
+def todoist_filter(query: str, task: dict, today: str, timezone: str = TIMEZONE) -> bool:
+    """The subset of Todoist's filter syntax the replaced deadline, waiting, quick and parked views use; `,` lists
+    views. `N days` is read as inclusively as Todoist may mean it: a due day or a deadline on or before the N-th day
+    from today, overdue included."""
     day = date.fromisoformat(today)
     deadline = (task.get("deadline") or {}).get("date")
+    due = (task.get("due") or {}).get("date")
     labels = set(task.get("labels") or [])
 
     def term(word: str) -> bool:
@@ -253,6 +294,11 @@ def todoist_filter(query: str, task: dict, today: str) -> bool:
             return word[1:] in labels
         if word == "nodeadline":
             return not deadline
+        if word == "nodate":
+            return not due
+        if days := re.fullmatch(r"(\d+)days", word):
+            last = (day + timedelta(days=int(days[1]) - 1)).isoformat()
+            return (bool(due) and due_day(due, timezone) <= last) or (bool(deadline) and deadline <= last)
         before = re.fullmatch(r"deadlinebefore:(today|in(\d+)days?)", word)
         if before:
             bound = day + timedelta(days=int(before[2] or 0))
@@ -298,13 +344,30 @@ def todoist_filter(query: str, task: dict, today: str) -> bool:
 def on_review_board(view: dict) -> bool:
     """Where the extension's Review board shows a task (todoist-plus src/review-lanes.ts), from the API's fields.
 
-    A `waiting` or `blocked` task is in Waiting and one that must start in Start now, or either in its own
-    stage lane, saying so; the extension's test/review-lanes.test.ts checks those lanes from the same fields.
-    An in-progress task (`active` without `blocked`) was acknowledged and may leave the board.
+    A `parked` task is in Parked while the account has that label (rule 0), else in its lane by the rules below. A
+    `waiting` or `blocked` task is in Waiting and one that must start in Start now, or either in its own stage
+    lane, saying so; the extension's test/review-lanes.test.ts checks those lanes from the same fields. An
+    in-progress task (`active` without `blocked`) was acknowledged and may leave the board.
     """
     labels = set(view["labels"])
     in_progress = "active" in labels and "blocked" not in labels
-    return bool(labels & {"waiting", "blocked"}) or view["must_start"] or in_progress
+    return bool(labels & {"waiting", "blocked", "parked"}) or view["must_start"] or in_progress
+
+
+def in_parked_lane(view: dict) -> bool:
+    """Review's Parked lane, which exists while the account has the label, the only time @parked is hidden."""
+    return "parked" in view["labels"]
+
+
+def quick_visible(view: dict, today: str, timezone: str) -> bool:
+    """Week's Quick tasks (the extension's weekly-review.ts quickTasks), from the API's fields: the literal label
+    `quick`, and no due date, or a due day or a deadline at most two days ahead, overdue included. The extension's
+    test checks quickTasks over the same grid."""
+    last = (date.fromisoformat(today) + timedelta(days=2)).isoformat()
+    due, deadline = view["due"], view["deadline"]
+    return "quick" in view["labels"] and (
+        not due or due_day(due, timezone) <= last or (bool(deadline) and deadline <= last)
+    )
 
 
 def in_weekly_review(view: dict) -> bool:
@@ -312,31 +375,65 @@ def in_weekly_review(view: dict) -> bool:
     return view["missing_lead"]
 
 
-def test_every_task_a_hidden_deadline_or_waiting_filter_shows_is_visible_in_plus():
+def day_of(offset: int) -> str:
+    return (date.fromisoformat(TODAY) + timedelta(days=offset)).isoformat()
+
+
+def due_forms(offset: int) -> list[str]:
+    """A due date ``offset`` days from TODAY as Todoist writes it: a date, a floating date-time, and fixed-timezone
+    date-times half an hour after the day's local midnight and half an hour before the next one."""
+    local = datetime.fromisoformat(day_of(offset)).replace(tzinfo=ZoneInfo(TIMEZONE))
+    fixed = [local + timedelta(minutes=30), local + timedelta(hours=23, minutes=30)]
+    return [day_of(offset), day_of(offset) + "T09:00:00"] + [
+        moment.astimezone(ZoneInfo("UTC")).strftime("%Y-%m-%dT%H:%M:%SZ") for moment in fixed
+    ]
+
+
+def test_every_task_a_hidden_deadline_waiting_quick_or_parked_filter_shows_is_visible_in_plus():
     """Consistency gate: a replaced filter is hidden only while Plus shows every task the filter would."""
-    queries = [query for query in plus.REPLACED_FILTER_QUERIES if "deadline" in query or "blocked" in query]
-    # Must start, missing lead, waiting with a deadline (two spellings), all waiting and in progress with a deadline.
-    assert len(queries) == 6
+    queries = [
+        query
+        for query in plus.REPLACED_FILTER_QUERIES
+        if "deadline" in query or "blocked" in query or query in ("@parked", QUICK)
+    ]
+    # Must start, missing lead, waiting with a deadline (two spellings), all waiting, in progress with a deadline,
+    # parked and quick.
+    assert len(queries) == 8
     missing_lead = next(query for query in queries if query.startswith("!nodeadline&!@lead_1d"))
-    marks = ["waiting", "blocked", "active", "parked"]
+    visible = {
+        missing_lead: in_weekly_review,
+        "@parked": in_parked_lane,
+        QUICK: lambda view: quick_visible(view, TODAY, TIMEZONE),
+    }
+    marks = ["waiting", "blocked", "active", "parked", "quick"]
+
+    def labelled(combination):
+        return [mark for bit, mark in enumerate(marks) if combination >> bit & 1]
 
     def deadline(offset):
-        return None if offset is None else {"date": (date.fromisoformat(TODAY) + timedelta(days=offset)).isoformat()}
+        return None if offset is None else {"date": day_of(offset)}
 
     tasks = [
-        task(
-            labels=[mark for bit, mark in enumerate(marks) if combination >> bit & 1] + leads,
-            deadline=deadline(offset),
-        )
+        task(labels=labelled(combination) + leads, deadline=deadline(offset))
         for combination in range(1 << len(marks))
         for leads in ([], *[[role] for role in plus.LEADS], ["lead_1d", "lead_1m"])
         for offset in (None, -9, -1, 0, 1, 2, 3, 6, 7, 13, 14, 29, 30, 45)
     ]
+    tasks += [
+        task(labels=labelled(combination), due=due and {"date": due}, deadline=deadline(offset))
+        for combination in range(1 << len(marks))
+        for due in (None, *(form for days in (-2, 0, 2, 3, 8) for form in due_forms(days)))
+        for offset in (None, 0)
+    ]
+    # Half an hour before the local midnight after the window's last day is still in it, though its UTC day is not.
+    assert quick_visible({"labels": ["quick"], "due": due_forms(2)[3], "deadline": ""}, TODAY, TIMEZONE)
+    assert due_forms(2)[3][:10] == day_of(3)
+    assert not quick_visible({"labels": ["quick"], "due": due_forms(3)[2], "deadline": ""}, TODAY, TIMEZONE)
     for query in queries:
         shown = [source for source in tasks if todoist_filter(query, source, TODAY)]
         assert shown, query
-        visible = in_weekly_review if query == missing_lead else on_review_board
-        missing = [source for source in shown if not visible(plus.task_view(source, TODAY))]
+        check = visible.get(query, on_review_board)
+        missing = [source for source in shown if not check(plus.task_view(source, TODAY))]
         assert missing == [], query
 
 

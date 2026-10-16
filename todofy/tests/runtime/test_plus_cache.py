@@ -1,10 +1,14 @@
 """Todoist Plus's caches through the real gateway, Python Durable Object SQLite and D1, with production's five
 minutes for metadata reads (the shared test config syncs on every call): incremental metadata Syncs, the
-connection check folded into plus_ui, the BASIC view and the rollback switch PLUS_METADATA=full. Synthetic
-Todoist only; the clock-driven cases are tests/unit/test_plus_cache.py."""
+connection check folded into plus_ui, the BASIC view, a cache kept under another list of replaced filter queries
+and the rollback switch PLUS_METADATA=full. Synthetic Todoist only; the clock-driven cases are
+tests/unit/test_plus_cache.py."""
 
+import json
+import sqlite3
 import uuid
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
+from contextlib import closing
 from dataclasses import dataclass
 
 import pytest
@@ -125,6 +129,52 @@ def test_the_basic_view_leaves_out_the_weekly_review_ids(stack):
     assert stack.plan(view="full") == full
     invalid = stack.worker.hooks.get("/api/plus/v1/plan:read", params={"view": "BASIC"}, headers=stack.headers())
     assert reason(invalid) == "BAD_REQUEST"  # a wire enum name is lower case, without its prefix
+
+
+def rewrite_object_cache(worker: Worker, change: Callable[[dict], dict]) -> None:
+    """Rewrite the object's cached Todoist metadata in its SQLite on disk, with workerd stopped."""
+    worker.stop()
+    try:
+        rewritten = 0
+        for path in (worker.persist_to / "v3" / "do").rglob("*.sqlite"):
+            with closing(sqlite3.connect(path)) as db:
+                if db.execute("SELECT 1 FROM sqlite_master WHERE name = 'plus_cache'").fetchone() is None:
+                    continue
+                [value] = db.execute("SELECT value FROM plus_cache WHERE key = 'todoist'").fetchone()
+                db.execute(
+                    "UPDATE plus_cache SET value = ?, refreshed_at = 0 WHERE key = 'todoist'",
+                    (json.dumps(change(json.loads(value))),),
+                )
+                db.commit()
+                rewritten += 1
+        assert rewritten == 1, rewritten
+    finally:
+        worker.start()
+
+
+def test_a_filter_kept_before_the_replaced_queries_changed_is_hidden_after_one_full_sync(stack):
+    """The release before kept neither the quick nor the parked filter, and an incremental Sync lists a filter only
+    when it changes: the cache it left starts over in full, once."""
+    filters = [
+        {"id": "filter-quick", "name": "Synthetic quick", "query": "@quick & (no date | 3 days)"},
+        {"id": "filter-parked", "name": "Synthetic parked", "query": "@parked"},
+    ]
+    stack.upstream.labels.append({"id": "parked-label", "name": "parked"})
+    stack.upstream.filters += filters
+    # A label write syncs first: the token it keeps already knows both filters.
+    assert stack.set_plan("parent", area="work").status_code == 200
+    assert {"filter-quick", "filter-parked"} <= set(stack.plan()["hidden_filter_ids"])
+
+    def before(value: dict) -> dict:
+        kept = [row for row in value["filters"] if row[0] not in {"filter-quick", "filter-parked"}]
+        return {key: item for key, item in value.items() if key != "queries"} | {"filters": kept}
+
+    rewrite_object_cache(stack.worker, before)
+    full = stack.upstream.sync_requests().count("*")
+    assert {"filter-quick", "filter-parked"} <= set(stack.plan()["hidden_filter_ids"])
+    assert stack.upstream.sync_requests().count("*") == full + 1
+    stack.plan()
+    assert stack.upstream.sync_requests().count("*") == full + 1
 
 
 def test_the_rollback_switch_syncs_in_full_on_every_call(tmp_path):

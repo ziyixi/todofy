@@ -245,9 +245,32 @@ def test_the_rollback_switch_syncs_in_full_every_call_and_leaves_the_cache_alone
     assert rollback.cached("todoist") is None and rollback.cached("full_syncs") is None
 
 
+@pytest.mark.parametrize("kept", [None, "an-older-list"], ids=["release_before", "another_list"])
+def test_a_cache_kept_under_another_list_of_replaced_queries_starts_over_in_full_once(stack, kept):
+    """A filter that existed before the list named it never changes, so no incremental Sync would list it."""
+    stack.server.filters["f3"] = ("Synthetic quick", "@quick & (no date | 3 days)")
+    stack.metadata()
+    value = stack.cached("todoist")
+    assert value["queries"] == plus.REPLACED_QUERIES_VERSION
+    # The release before kept no "queries" (and could not keep the quick filter); another list names another one.
+    old = {key: item for key, item in value.items() if key != "queries"}
+    old["filters"] = [row for row in old["filters"] if row[0] != "f3"]
+    # Synced a moment ago, so only the list, not the age, sends the next read to Todoist.
+    stack.runtime.plus_cache.put(stack.sql, "todoist", old if kept is None else {**old, "queries": kept}, 1_760_000_000)
+    assert stack.metadata()["filters"] == [
+        {"id": "f1", "query": "@bets"},
+        {"id": "f3", "query": "@quick&(nodate|3days)"},
+    ]
+    assert stack.server.requests == ["*", "*"] and stack.cached("full_syncs")["count"] == 2
+    stack.later(301)
+    stack.metadata()
+    assert stack.server.requests == ["*", "*", "token-1"]  # incremental again
+
+
 def test_merge_keeps_an_unchanged_resource_and_refuses_a_partial_full_answer():
     full = {"sync_token": "a", "user": {"tz_info": {"timezone": "UTC"}}, "labels": [{"id": 1, "name": "x"}]}
     previous = plus.merge_metadata(None, {**full, "filters": []})
+    assert previous["queries"] == plus.REPLACED_QUERIES_VERSION
     assert plus.merge_metadata(previous, {"sync_token": "b"}) == {**previous, "sync_token": "b"}
     for broken in ({"sync_token": "c", "labels": []}, {"labels": [], "filters": []}, {"sync_token": ""}):
         with pytest.raises(ValueError):

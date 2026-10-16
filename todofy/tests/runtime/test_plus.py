@@ -373,6 +373,28 @@ def test_weekly_bets_are_text_in_d1_written_by_compare_and_set_without_todoist(s
     stack.worker.d1("DELETE FROM plan_notes")
 
 
+def test_parking_writes_only_an_existing_parked_label_and_sets_the_task_aside(stack):
+    stack.upstream.add("aside", labels=["office", "committed", "active", "deep"])
+    task = next(task for task in stack.tasks() if task["id"] == "aside")
+    before = len(stack.upstream.commands())
+    # The account has no `parked` label yet: nothing is written, and no label is created.
+    assert reason(stack.write("setTaskPlan", task_id="aside", etag=task["etag"], parked=True)) == "ACTION_NOT_ALLOWED"
+    assert len(stack.upstream.commands()) == before
+    stack.upstream.labels.append({"id": "parked-label", "name": "parked"})
+    try:
+        parked = stack.write("setTaskPlan", task_id="aside", etag=task["etag"], parked=True)
+        assert parked.status_code == 200, parked.text
+        assert stack.upstream.tasks["aside"]["labels"] == ["deep", "office", "parked"]
+        assert "aside" not in stack.weeks()  # no commitment left to reset
+        back = stack.write(
+            "setTaskPlan", task_id="aside", etag=parked.json()["task"]["etag"], stage="monthly", parked=False
+        )
+        assert back.status_code == 200, back.text
+        assert stack.upstream.tasks["aside"]["labels"] == ["candiate", "deep", "office"]
+    finally:
+        stack.upstream.labels.pop()
+
+
 def test_revocation_stops_only_this_extension_connection(stack):
     [connection] = stack.worker.owner.get("/api/plus/v1/connections:read").json()["connections"]
     assert (

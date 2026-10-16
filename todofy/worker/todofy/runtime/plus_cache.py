@@ -11,8 +11,9 @@ from typing import Any, NamedTuple
 from todofy.runtime.config import var
 
 # One JSON value per key, each with its own age:
-#   'todoist'      {"sync_token", "timezone", "labels": [[id, name]], "filters": [[id, query]]}: the incremental
-#                  Sync of user, labels and filters (core/plus.merge_metadata)
+#   'todoist'      {"sync_token", "timezone", "labels": [[id, name]], "filters": [[id, query]], "queries"}: the
+#                  incremental Sync of user, labels and filters (core/plus.merge_metadata); "queries" names the
+#                  replaced filter queries it was kept under (REPLACED_QUERIES_VERSION)
 #   'connections'  ["<token_sha256>", ...]: the non-revoked rows of D1 plus_connections
 #   'full_syncs'   {"window": <unix s>, "count": n}: full Syncs started in the current 15-minute window
 DO_SCHEMA = (
