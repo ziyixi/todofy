@@ -1,6 +1,6 @@
 # Handoff
 
-Updated 2026-10-15. Keep this file focused on active work, open acceptance and dated compatibility constraints.
+Updated 2026-10-16. Keep this file focused on active work, open acceptance and dated compatibility constraints.
 Move completed rollout detail to a dated record and link it here. Repository rules are in [AGENTS](AGENTS.md);
 service entry points are in [README](README.md). Never put private content, credentials or raw production output here.
 
@@ -8,6 +8,20 @@ The complete previous handoff is preserved in [the October 11 archive](docs/hist
 Its old waiting lists and release identities are historical, not instructions to repeat completed work.
 
 ## Current work
+
+Todoist Plus deadlines, version 1 of the owner-approved design (start window, favourite filters,
+`SetTaskPlan.active`), is on local branch `claude/plus-deadlines`, based on `60309fac`; not pushed, no branch CI
+or release. "Deadlines · N" replaces "Needs a look" (Review above Waiting, Week below the calendar), Waiting
+rows show deadlines, Focus has one quiet line, task details say where a deadline stands and can mark it in
+progress (the literal `active` label, never created), and Todofy also hides Wait but with ddl, Waiting /
+Blocked and Active Deadlines behind a consistency test. Row actions show on hover or keyboard focus only (owner
+decision); `--plus-danger` now reads Todoist's overdue colour, because the attention tint misses 4.5:1 as text.
+Other views remembers open or closed. Dependencies, native row marks and `@blocked` mirroring are not built.
+Local proto, Todofy (host, 559 runtime, gateway with CPU), owner UI, scripts and extension (158 unit, 23 MV3
+Chromium) checks pass ([evidence](docs/todoist-plus-verification.md#deadlines-version-1-local-checks-october-16)).
+Pending: push, full branch CI, owner review and same-SHA release; Todofy must ship with or before the extension
+(the hidden filters and `active` both live there). After release, confirm the account has an `active` label
+and the three filters disappear only from the extension's sidebar; reload the extension and refresh Todoist.
 
 Todoist Plus UI theme, safety and polish (owner-approved October 15: safety C1-C6, theming A1-A6, polish
 B1-B6) is on local branch `claude/plus-ui-theme`, based on `58908f64`; not pushed, no branch CI or release.

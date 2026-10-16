@@ -546,3 +546,61 @@ were read.
 - Line 2 (task modal) was not run: it needs a real task with sub-tasks open. The C1 lookup hides Steps & timing on a
   mismatch, so it can never write elsewhere. After the reload, the owner checks step 4 of the six-step list, and the Options
   page check shows any mismatch.
+
+## Deadlines, version 1, local checks (October 16)
+
+The owner approved version 1 of the deadlines and dependencies design (its §7): the start window (§1), the
+favourite filters (§3) and `SetTaskPlan.active` (§5). Binding owner choices of 2026-10-16: the row actions of
+Deadlines and Waiting show only on hover or keyboard focus; no `@blocked` mirroring; restrained visuals, with
+`--plus-danger` only for "N days past". Dependencies (§2) and native row marks (§4) are not built. Local branch
+`claude/plus-deadlines`, based on `origin/main` `60309fac`; not pushed, no branch CI, no release. All data is
+synthetic; Todoist, FlowDay and Cloudflare accounts were not touched.
+
+- Extension: `src/deadlines.ts` gives each task with a deadline one state from Todofy's unchanged `must_start` /
+  `missing_lead` and the literal `active`, `blocked`, `parked` labels. "Deadlines · N" replaces "Needs a look":
+  in Review below the lanes and above Waiting, in Week below the calendar; earliest deadline first, then
+  priority; open by itself when something is past or in its start window, otherwise the owner's toggle for the
+  visit. Each row is a title, one muted status and at most one text action ("Mark in progress", only when the
+  account has the `active` label; "Choose when to start", which focuses the editor's start-ahead select). The
+  actions are hidden by opacity only, so they stay in the tab order and the accessibility tree and keep their
+  column. Waiting rows add the deadline ("Deadline Oct 22", or "2 days past deadline"). Focus shows one quiet
+  line when a past or start-window task has nothing open planned this week, and it opens Review with Deadlines
+  focused. Task details state where the deadline stands from the fields shown, with "Mark in progress" / "Not
+  in progress"; the English select says "1 day". Cards name the start window in their accessible name and the
+  calendar-clock tooltip. Legacy `<k:… dep:…>` suffixes with spaces are hidden in Plus's own views. Other views
+  remembers open or closed in one `storage.local` boolean, cleared on disconnect.
+- `--plus-danger` now reads Todoist's `schedule-overdue-tint`, its own overdue-date colour. The attention tint it
+  read before is about 4.1:1 as 12 px text on the page background in all nine public themes, below 4.5:1, which
+  the design's fallback rule would have turned into plain text everywhere; the overdue tint is 4.54:1 (light) and
+  about 6.1:1 (dark). The error edge, the only other use, follows it.
+- Backend: additive `SetTaskPlanRequest.active` (field 7). `plan_labels` adds or removes only `active`; Todofy
+  refuses `active: true` with `ACTION_NOT_ALLOWED` before any Sync write while the account has no label of that
+  exact name. `REPLACED_FILTER_QUERIES` adds Wait but with ddl (two spellings), Waiting / Blocked and Active
+  Deadlines; Quick / Ops and Parked stay native. No table, migration, dependency or budget change.
+
+Local checks: proto format/lint, api-linter (69 files), breaking against `origin/main` `60309fac`, the rules
+self-test, deterministic generation (151 files), the schema check, 495 TypeScript and 113 Python codec cases.
+Todofy: ruff check and format, 1,823 host cases (1 skipped: no protos checkout) and 559 real-workerd runtime
+cases (557 in four processes, then the serial file). The replaced-filter consistency case evaluates each
+deadline or waiting query over 1,568 synthetic tasks with the real `task_view` and requires every selected task
+in Deadlines or Waiting; with Waiting's `blocked` or Deadlines' in-progress rule removed it fails on the matching
+query. The extension's matching case checks the same rule in API fields against `deadlines.ts` and the Waiting
+list. The runtime case refuses `active` without the label (no Sync command), then writes and removes it with the
+label, leaving the other labels, the deadline and a Sunday choice's week in place. Gateway lint, types, 130 unit
+cases and the calibrated CPU suite pass; gateway source is unchanged. The owner UI's types, 93 tests and build
+pass (176.8 KiB gzip, budget 208 KiB), and the 453 `.github/scripts` cases pass (1 skipped as before).
+
+The extension passes types, lint, Prettier, 158 unit/component/API cases (was 138) and 23 built-MV3 Chromium
+cases (was 19). The new Chromium cases: each status at rest with its action at opacity 0, shown on hover and
+reached by Tab from the title; one SetTaskPlan `{active: true}` and no further task read; focus moving to the
+next row's action; Focus's line opening Review with the Deadlines summary focused; rows wrapping under the
+title at 640 px without overflow; Other views kept across reloads; and `--plus-danger` on the background at
+4.5:1 or more in all nine themes. The content script is 384,912 bytes (121,816 with `gzip -9`), against 378,250
+(119,946) before; its CSS 32,938 against 32,424; the background 137,035 against 136,746. Screenshots of the
+built extension on the synthetic page in Kale, Default and Dark (Review and Week at rest and with a row
+hovered, Focus with its line, task details, and narrow Review) were reviewed locally; one is in the
+[interface document](../todoist-plus/docs/planning-interface.md).
+
+Not verified: the live Todoist page and data (including that the owner's filters normalize to exactly these
+queries and that the account has an `active` label), real Todoist's overdue colour in the owner's theme, the
+installed extension, the core and gateway production dry-runs, branch CI and release.

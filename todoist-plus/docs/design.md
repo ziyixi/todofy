@@ -36,6 +36,10 @@ Focus 固定显示今天的执行队列。卡片先显示步骤标题，再显�
 
 Must Start 的 `deadline before` 使用严格上界。提前 N 天标签的实际窗口从 Deadline − (N−1) 天开始；界面显示同一个日期，不改变既有筛选规则。`lead_1m` 沿用 30 天。任务详情修改真实 Deadline 与提前窗口，保留计划日期。
 
+## 截止日期
+
+截止日期按一条生命周期看：截止日期 → 启动窗口 → 进行中 → 完成。Todofy 的 `must_start`、`missing_lead` 规则不变；`src/deadlines.ts` 在完整读取后据此和字面标签 `active`、`blocked`、`parked` 给每个任务一个状态。Plan 的“截止日期”一行列出进行中、已过截止、已到启动窗口和未设提前开始的任务，每行一句状态和最多一个文字操作；Focus 只在该开始的事这周还没安排时显示一行文字；任务详情的截止日期段说明当前状态。“标为进行中”是 SetTaskPlan 的 `active` 字段，只增删账户已有的 `active` 标签，Plus 不改 Due 或 Deadline，也不创建标签。界面不加新页面、图标、徽章或颜色，只有“已过 N 天”用 `--plus-danger`；列表的文字操作只在悬停或键盘焦点时出现。依赖与原生行标记不在第一版。
+
 ## API 与状态更新
 
 独立扩展口令保存在 background 的 trusted local storage；网页 content script 只能提交有限操作，不能读出口令。连接使用 hooks API 和 FlowDay service binding；owner 设置沿用 Access、Origin、CSRF。扩展不保存 Todoist API key。
@@ -52,11 +56,11 @@ Plan／Focus 直接切换使用已读数据；离开扩展到原生页面后再�
 
 ## 等待与周回顾
 
-两者都只用已读取的数据：任务的 `update_time`（Todoist 最后修改时间）和标签，加上 ReadPlan 返回的邮件项目、回顾任务和下周选择 ID。“等待中”按字面标签 `waiting`、`blocked` 显示“N 天未变动”，“将来／也许”按 `parked`、`onhold`。每个操作都是已有的单任务写入（SetTaskPlan、AppendTaskSteps 的步骤编辑器、加入今天、CompleteTask），只在点击时执行；不移除标签、不自动安排、不调用模型，也没有新的 D1 表。勾选状态按 ISO 周只存于本浏览器。Week 的承诺未安排提示是一行文字，不加逐卡标记。
+两者都只用已读取的数据：任务的 `update_time`（Todoist 最后修改时间）、标签和截止日期，加上 ReadPlan 返回的邮件项目、回顾任务和下周选择 ID。“等待中”按字面标签 `waiting`、`blocked` 显示“N 天未变动”和截止日期，“将来／也许”按 `parked`、`onhold`。每个操作都是已有的单任务写入（SetTaskPlan、AppendTaskSteps 的步骤编辑器、加入今天、CompleteTask），只在点击时执行；不移除标签、不自动安排、不调用模型，也没有新的 D1 表。勾选状态按 ISO 周只存于本浏览器。Week 的承诺未安排提示是一行文字，不加逐卡标记。
 
 ## 原生页面与发布
 
-连接与映射确认后，扩展按精确 ID 隐藏被替代的筛选器和规划标签。原生页面只调用 ReadPlan；background 在 storage.local 保存只含 ID 的配置，下次加载 Todoist 时立即按它整理侧栏。其他筛选器／标签收藏在原位置收折，项目收藏保留；账户收藏对象不改。原生任务详情替代技术标签显示时，office／home 等领域标签继续显示。
+连接与映射确认后，扩展按精确 ID 隐藏被替代的筛选器和规划标签。哪些筛选器算被替代由 Todofy 按规范化查询认定，并由一致性测试守住：原查询会列出的每个合成任务都必须出现在 Plus 的“截止日期”或“等待中”。原生页面只调用 ReadPlan；background 在 storage.local 保存只含 ID 的配置，下次加载 Todoist 时立即按它整理侧栏。其他筛选器／标签收藏（如 Quick / Ops、Parked）在原位置收折进 Other views，它的开合是 storage.local 的一个布尔值，断开连接时清除；项目收藏保留；账户收藏对象不改。原生任务详情替代技术标签显示时，office／home 等领域标签继续显示。
 
 更新使用同一固定目录，先重新加载扩展，再刷新已打开的 Todoist 页面。旧注册脚本与新 CSS 可能混在同一页面，普通网页刷新不能代替扩展重新加载。停用或重新加载扩展后，回到已打开的 Todoist 标签页即恢复原生界面，无需刷新。扩展设置页的“Todoist 页面检测”一行说明最近一次页面检查是否全部正常，或哪项增强已关闭及原因，见[页面检测](planning-interface.md#页面检测)。
 

@@ -34,9 +34,41 @@ Work 和 Personal 各显示已有最高层 Bet 任务。Bet 的定义是本周�
 
 承诺总览上方有一行安静的文字“N 项承诺这 7 天还没有安排”：承诺本身和它未完成的步骤都不在所显示 7 天的队列中。只在 N 大于 0 时出现，没有逐卡标记；点击依次选中下一个这样的承诺，展开其步骤托盘，按钮提示“选中下一个”。它只提示，不自动安排。
 
+### 截止日期
+
+2026-10-16 owner 批准第一版（设计 §1、§3）。截止日期按一条生命周期看：截止日期 → 启动窗口 → 进行中 → 完成。没有新页面、新语法或新图标；唯一的颜色是“已过 N 天”的 `--plus-danger`。
+
+Review 四列下方、“等待中”上方有一行折叠的“截止日期 · N／Deadlines · N”，取代原来 Plan 底部的“需要关注”；Week 中它在日历下方。没有行时整行不渲染。`src/deadlines.ts` 在完整读取之后给每个有截止日期、且不是 `@parked` 的任务一个状态，取第一条命中的规则；Todofy 的 `must_start`、`missing_lead` 一字不改：
+
+| #   | 条件                                | 状态         | 行内文字（中文／English）                                                                 |
+| --- | ----------------------------------- | ------------ | ----------------------------------------------------------------------------------------- |
+| 1   | 字面标签 `active`，且没有 `blocked` | 进行中       | `进行中 · 还剩 12 天`／`In progress · 12 days left`；已过截止时 `已过 3 天` 一段为 danger |
+| 2   | `must_start`，截止日期早于今天      | 已过截止     | `已过 2 天`／`2 days past`（danger）                                                      |
+| 3   | `must_start`                        | 已到启动窗口 | `还剩 5 天`，今天、明天为 `今天截止`、`明天截止`                                          |
+| 4   | `missing_lead`                      | 未设提前开始 | `11月30日截止`／`Deadline Nov 30`                                                         |
+| 5   | 其余（窗口未到）                    | —            | 不列出，只在任务详情说明                                                                  |
+
+依赖（设计 §2）不在第一版，表中没有“在等”一行。行按截止日期从早到晚，同一天按优先级，不分组。N 是行数。有“已过截止”或“已到启动窗口”的行时默认展开，否则收起；本次访问中以 owner 手动开合为准，只存在页面内存里，Review 与 Week 共用，从 Focus 跳转时展开。
+
+每行是标题（13px，点击打开 Plus 编辑器）、一句 12px muted 状态（数字等宽，完整日期在 `title` 和读屏文字里）和最多一个文字操作：
+
+- 已过截止、已到启动窗口：`标为进行中／Mark in progress`，只在账户已有字面标签 `active` 时出现。它是先确认的 SetTaskPlan `{active: true}` 写入：确认后合并返回的任务，不再整表读取；该行原地变成“进行中 · …”，焦点移到下一行的操作，没有就回到 summary；`role="status"` 读出“已标为进行中：标题”。
+- 未设提前开始：`选择提前多久开始／Choose when to start`，打开编辑器并把焦点放在“提前开始”下拉框上，本身不写入。
+- 进行中：没有操作。
+
+2026-10-16 owner 决定：截止日期和等待中两个列表的文字操作只在鼠标悬停或键盘焦点进入该行时出现，和 Todoist 自己的任务行一样；平时一行只有标题和一句状态。操作只用透明度隐藏，仍在 Tab 顺序和可访问树里，可访问名称带任务标题；操作列宽度保留，所以显示时不挪动其他内容，各行状态对齐成一列；没有悬停能力的设备一直显示。窄窗口（≤650px）下状态和操作折到标题下一行。
+
+已过截止或已到启动窗口的任务本身和它未完成的小步骤都不在本周已读取的 7 天队列里时，Focus 摘要下方有一行安静文字，见[Focus 与计时](#focus-与计时)。Review／Week 事项卡上的日历时钟保持原样，可访问名称末尾加上 `, 已到启动窗口 · 还剩 5 天` 或 `, 已过截止 2 天`，图标的 tooltip 是同一句。不把启动窗口里的任务投进 Week 列。
+
+两种重叠来自原筛选器，按 owner 默认接受：已过截止的 `@waiting` 任务（原 Must Start 包含它）和没设提前量的 `@waiting`／`@blocked` 任务（原 Missing Lead 包含它）同时出现在“截止日期”和“等待中”；选好提前量后后者只剩一处。
+
+### 任务详情的截止日期
+
+Plan 编辑器和原生“步骤与时间”共用同一段。原来的“启动窗口：日期”换成一句按当前输入框计算的状态（12px muted，只有已过截止用 danger）：窗口未到时 `启动窗口: 10月24日周六`，窗口已开 `已到启动窗口 · 还剩 5 天`，已过截止 `已过截止 2 天`，进行中 `进行中 · 还剩 12 天`；未设提前开始时不加字，下拉框已显示“未设置”。“保存”后面有 32px 次要按钮“标为进行中”，任务已是 `@active` 时为“取消进行中／Not in progress”；只在任务有截止日期、且账户有 `active` 标签时出现，每次点击是一次写入，写入期间停用，结果由该段的 `role="status"` 读出。下拉框的英文单数写作 `1 day`。控件名不单独用“开始”，它是 Focus 计时器的 Start。
+
 ### 等待中
 
-Review 四列下方有一行折叠的“等待中 · N”，只在有 `@waiting` 或 `@blocked` 任务时出现。展开后按 Todoist 的最后修改时间排列，最久未变动的在前，显示“N 天未变动”（按满 24 小时计，不足一天为“1 天内有变动”）。任何 Todoist 编辑都会重置这个时间，所以它不表示已等待多久，也不推断在等谁。每行只提供三个已有操作，可访问名称带任务标题：
+Review 四列下方、“截止日期”之后有一行折叠的“等待中 · N”，只在有 `@waiting` 或 `@blocked` 任务时出现。展开后按 Todoist 的最后修改时间排列，最久未变动的在前，显示“N 天未变动”（按满 24 小时计，不足一天为“1 天内有变动”）；有截止日期的任务在同一句后加 `· 10月22日截止`，已过截止时写 `已过截止 2 天`（danger），由此承接原来的 Wait but with ddl 筛选器。任何 Todoist 编辑都会重置这个时间，所以它不表示已等待多久，也不推断在等谁。每行只提供三个已有操作，只在悬停或键盘焦点时出现（规则同上），可访问名称带任务标题：
 
 - 添加跟进步骤：打开该任务的步骤编辑器，输入框为空并获得焦点，由用户自己写；有写入正在确认时，输入框在写入结束后获得焦点。
 - 加入今天：与任务详情中的加入今天相同，只写 FlowDay 当天队列。
@@ -72,6 +104,8 @@ Review 四列下方有一行折叠的“等待中 · N”，只在有 `@waiting`
 
 Focus 显示真实今天的未完成 FlowDay 队列，顺序与 Week 相同。卡片标题在上方，短所属事项、估时和计时信息在下方。空队列只有“调整计划”入口，不出现另一套任务挑选器。
 
+摘要下方可能有一行安静文字（样式同 Week 的承诺提示，12px muted，悬停时强调色加下划线，没有图标），例如“1 项已过截止、2 项已到启动窗口，这周还没有安排”／“1 past deadline and 2 in their start window, not planned this week”。只有“已过截止”或“已到启动窗口”的任务本身和它未完成的小步骤都不在本周已读取的 7 天队列里时才出现，每个任务只数一次；Plan 正在看别的周时只看今天的队列；队列为空时也显示。点击打开 Plan › Review，展开“截止日期”并把焦点放在它的 summary 上，按钮提示“在计划中查看”。它只提示，不往队列里加任何东西。
+
 每个 Todoist 步骤显示独立的完成控件和 Start 按钮。完成控件是 Todoist 的优先级圆圈（P1 红、P2 橙、P3 蓝带浅色底，P4 灰），与 Review 卡片一致；没有完成控件的 FlowDay 记录保留同宽空位，标题对齐。运行后显示确认的经过时间及 Pause、Stop；暂停后状态写“已暂停／Paused”，按钮为 Resume、Stop。Stop 保存计时但不完成任务。全局计时条按 Plus 内容列居中，侧栏收起或调宽后仍居中。完成操作先由 Todofy 确认 Todoist 结果，再结算对应 FlowDay 日期。
 
 FlowDay 本地记录保持标题、估时和原应用入口，不创建 Todoist 完成请求。旧日期的活动计时不冒充今天同名 ID 的活动计时，也不允许今天另启一段覆盖它。全局计时条在 Plan／Focus 切换时保留，不新增浏览器本地计时存储。
@@ -88,11 +122,13 @@ FlowDay 本地记录保持标题、估时和原应用入口，不创建 Todoist 
 | 错误     | 原有错误区域显示实际失败；撤回全部等待中的变化并重新读取，不伪装操作成功                   |
 | 主题     | `--plus-*` 只读 Todoist 主题 token，见[主题](#主题)；各主题与深色只靠 CSS 切换             |
 | 图标     | Lucide，统一 1.5px 线宽；启动窗口用日历时钟，旗帜只表示优先级；可展开行用会转动的箭头      |
+| 颜色     | 不加徽章、chip 或计数气泡；`--plus-danger` 只用于“已过 N 天”和错误边线                     |
+| 行内操作 | 截止日期与等待中的文字操作在悬停或键盘焦点时出现，透明度隐藏，仍可 Tab 到达和被读屏读出    |
 | 日期     | 周：“第 42 周 · 10月12日起”／“Week 42 · from Oct 12”；单日：“10月12日周一”；ISO 只作存储键 |
 | 控件     | 输入框、下拉框和按钮同为 32px 高（列表、复选框和估时小按钮除外）                           |
 | 模态框   | Close、Escape、点击框外关闭；不依赖浏览器原生确认弹窗                                      |
 
-Plus 只按已知真实对象 ID 隐藏被替代项。收藏项目保留，其他标签和筛选器收在 Other views。Quick 的现有筛选器仍可从这里访问，Plan 不将它声明为已替代。停用或重新加载扩展后，回到已打开的 Todoist 标签页即恢复原控件，见[恢复](#恢复)；不删除 Todoist 筛选器、标签或收藏。
+Plus 只按已知真实对象 ID 隐藏被替代项。收藏项目保留，其他标签和筛选器收在 Other views。Todofy 按精确的规范化查询认定被替代的筛选器；2026-10-16 起另有 Wait but with ddl（`!nodeadline&(@blocked)&!@parked`，含不带括号的写法）、Waiting / Blocked（`@blocked`）和 Active Deadlines（`@active&!nodeadline&!@blocked&!@parked`），分别由“等待中”的截止日期文字、“等待中”和“截止日期”的“进行中”承接。Todofy 的一致性测试按原查询重建合成任务集合，断言每个任务都在“截止日期”或“等待中”出现，不通过就不隐藏。Quick / Ops 和 Parked 保持原生，留在 Other views；Plan 不将它们声明为已替代。Other views 的展开或收起存在 storage.local 的一个布尔值里，刷新后保持，断开或更换连接时清除。停用或重新加载扩展后，回到已打开的 Todoist 标签页即恢复原控件，见[恢复](#恢复)；不删除 Todoist 筛选器、标签或收藏。
 
 ### 主题
 
@@ -105,11 +141,11 @@ Plus 只按已知真实对象 ID 隐藏被替代项。收藏项目保留，其�
 | `selected` ／ `selected-text` | `selectable-secondary-selected-fill` ／ `-on-selected-tint`                          | 选中的导航、过滤、日期和当前 Focus 卡 |
 | `bg` ／ `surface` ／ `text`   | `background-base-primary` ／ `-tertiary`，`display-primary-idle-tint`                | 页面、列与日期列、正文                |
 | `muted` ／ `line` ／ `hover`  | `display-secondary-idle-tint`，`divider-primary`，`actionable-quaternary-hover-fill` | 次要文字、分隔线、悬停层              |
-| `warning` ／ `danger`         | `info-warning-primary-on-idle-tint`，`info-attention-primary-idle-tint`              | 提示文字、错误边线                    |
+| `warning` ／ `danger`         | `info-warning-primary-on-idle-tint`，`schedule-overdue-tint`                         | 提示文字；已过 N 天、错误边线         |
 | `p1`–`p4`                     | `priorities-pN-primary-idle-tint`（API 的 4 是 P1）                                  | Review 与 Focus 的优先级圆圈          |
 | `overlay`、`shadow-1`–`3`     | `background-overlay`，`shadow-raised-1`–`3`                                          | 弹窗背景、卡片／浮动条／弹窗阴影      |
 
-每项保留原值作后备，原有浅色和深色值用 `light-dark()`，由继承的 color-scheme 选择；扩展设置页声明 `light dark`，跟随系统。真实页面只确认了 Kale 的 color-scheme 为 `light`，所以保留一处后备：`<html>` 的主题类变化时（只在变化时）读一次原生正文颜色，文字偏亮就给各宿主加 `data-theme="dark"`，`:host([data-theme="dark"])` 设为 `color-scheme: dark`，表单控件、滚动条和后备色不会在深色页面上保持浅色。`surface` 是 Todoist 的第三层背景，各主题都带自己的色调（Default 与 Dark 偏暖，Kale 偏绿，Blueberry 偏蓝），Dark 中的暖棕色 `#322f2a` 来自 Todoist 的 token 本身，不是中性灰。任务详情里的“步骤与时间”背景透明，显示 Todoist 弹窗自身的底色。字体读 `--td-ui-font-family`。只有导航行的宽度和字号在挂载时测量。
+`danger` 读 Todoist 自己给逾期日期的颜色：它原来读的 `info-attention-primary-idle-tint` 作 12px 文字在九个公开主题里只有约 4.1:1，低于 4.5:1；`schedule-overdue-tint` 在浅色主题为 4.54:1，深色约 6.1:1。每项保留原值作后备，原有浅色和深色值用 `light-dark()`，由继承的 color-scheme 选择；扩展设置页声明 `light dark`，跟随系统。真实页面只确认了 Kale 的 color-scheme 为 `light`，所以保留一处后备：`<html>` 的主题类变化时（只在变化时）读一次原生正文颜色，文字偏亮就给各宿主加 `data-theme="dark"`，`:host([data-theme="dark"])` 设为 `color-scheme: dark`，表单控件、滚动条和后备色不会在深色页面上保持浅色。`surface` 是 Todoist 的第三层背景，各主题都带自己的色调（Default 与 Dark 偏暖，Kale 偏绿，Blueberry 偏蓝），Dark 中的暖棕色 `#322f2a` 来自 Todoist 的 token 本身，不是中性灰。任务详情里的“步骤与时间”背景透明，显示 Todoist 弹窗自身的底色。字体读 `--td-ui-font-family`。只有导航行的宽度和字号在挂载时测量。
 
 `@doist/product-libraries-tokens` 1.4.2（MIT，只含 CSS）是固定版本的开发依赖，只用于测试，不进入构建包。单元测试拒绝 src 中该包没有定义的 token 名，例外只有在真实页面确认过的 `shadow-raised-1`–`3`；`--td-ui-*` 只允许同一次核对见过的 `font-family` 和 `button-normal-height`，运行时拼接的名称同样拒绝。浏览器测试用它的公开主题 CSS 检查全部九个主题：Plus 实际组合的文字对比度至少 4.5:1，焦点框、插入线和投放边框至少 3:1，并在 Week 中实测今天的日期数字和选中事项的次要文字；还检查 Dark 不带 color-scheme 时宿主仍为深色。公开值与真实 Todoist 可能略有不同，所以断言比较页面自身的 token，而不是写死的颜色。Vite 的 CSS 目标为 Chrome 123，保留 `light-dark()`。
 
@@ -138,12 +174,12 @@ Plus 隐藏原生界面的前提是替代界面已挂载，失败路径都恢复
 - “移出日期”不提前删除：卡片原位等待，FlowDay 确认后才消失。
 - 所有写入进入同一个先进先出队列，按操作顺序执行。FlowDay UpdateFlow 没有 etag、后写覆盖先写，所以移出日期和加入今天在执行时先 GetFlow 读取当前队列，只增删这一项，不写回屏幕上可能过时的队列；其他标签页刚加入的步骤和排在前面的移出都会保留。Todoist 写入仍检查 etag。确认后换成服务端返回的任务或队列。
 - 任一写入失败时，排在其后的写入不再发送，所有等待中的预期变化撤回；原有错误区域说明“更改未保存，已恢复”、实际失败和其后未发送的更改数，队列空闲后重新读取。等待中的卡片不显示为已保存。
-- 完成、添加小步骤、估时、提前开始、详情中的规划保存、计划标签、本周目标、加入今天、计时以及周回顾中的移到本月、留到下周和完成回顾仍先确认，写入期间停用写入控件。
+- 完成、添加小步骤、估时、提前开始、标为进行中、详情中的规划保存、计划标签、本周目标、加入今天、计时以及周回顾中的移到本月、留到下周和完成回顾仍先确认，写入期间停用写入控件。
 
 读取不锁定看板，也不重复读取写入已返回的结果：
 
 - 打开、刷新按钮、返回标签页（距上次完整读取至少 60 秒）和写入后需要的读取都在后台进行，只转动标题栏刷新图标。与写入重叠的读取作废，队列空闲后再读，旧读取不会覆盖较新的确认结果；两次读取重叠时，先发出的读取晚到也不覆盖后发出的结果。
-- SetTaskPlan、SetTaskLead 的 PlanningTask、本周目标的两个确认任务和确认后的日期队列直接合并，不再读七天。UpdatePlanLabels 的映射直接合并；新映射会改变任务的规划范围投影和全部任务 etag，所以随后后台读取一次，读取完成前停用写入控件。
+- SetTaskPlan（含标为进行中）、SetTaskLead 的 PlanningTask、本周目标的两个确认任务和确认后的日期队列直接合并，不再读七天。UpdatePlanLabels 的映射直接合并；新映射会改变任务的规划范围投影和全部任务 etag，所以随后后台读取一次，读取完成前停用写入控件。
 - 完成任务后仍重新读取，不在本地删除：Todoist 关闭循环任务时会推进到下一次。读取完成前该步骤等待，不能再次完成。
 - 离开 Plan／Focus 时，上次确认的数据只留在当前页面内存中；返回时立即显示，再后台读取。它可能早于一次完成或跨过午夜，所以本次读取完成前不开放写入；这次读取失败时只显示错误，并丢弃这份内存数据。离开时显示本周的，返回后跟随服务端的当前周（含周一轮换）。
 - 原生页面只调用 ReadPlan。background 把 `{configured, hiddenFilterIds, labelIds}` 只按 ID 存入 storage.local，不含任务内容；下次打开 Todoist 时侧栏立即按缓存整理。连接缺失或失效时（包括网关对未知或已撤销口令的 401）清除缓存并提示打开连接设置；断开或换连接后仍在进行的请求不再写回缓存或 FlowDay ID。原生任务详情使用一分钟内读取、且包含该任务的内存数据时只调用 ReadPlan；更旧的或缺少该任务的先显示，完整读取完成前不开放写入。保存失败（例如任务已在 Todoist 中修改）后完整重读，不再复用旧数据。
@@ -158,6 +194,7 @@ Plus 隐藏原生界面的前提是替代界面已挂载，失败路径都恢复
 | 加载                  | ReadPlan、完整 ListPlanningTasks、FlowDay ListTasks、七日 GetFlow、GetTimerSession | 元数据、任务、所选周队列和真实今天计时                |
 | 原生页面              | ReadPlan                                                                           | 只按 ID 缓存配置，下次加载立即整理侧栏                |
 | 改规划范围／Bet／领域 | SetTaskPlan                                                                        | 当前 PlanningTask，合并单任务                         |
+| 标为／取消进行中      | SetTaskPlan 的 `active`：一次 `item_update`，只增删字面标签 `active`，从不创建它   | 当前 PlanningTask，合并单任务；账户无该标签时拒绝     |
 | 更换整体目标          | 原目标和新目标分别 SetTaskPlan                                                     | 合并两个确认任务，不新增 Goal RPC                     |
 | 保存列标签            | UpdatePlanLabels                                                                   | 带 etag 的精确标签映射，任务标签不改；后台重读投影    |
 | 创建小步骤            | AppendTaskSteps                                                                    | 原 Todoist 父 ID 下的新步骤，后台再读取               |
@@ -193,6 +230,7 @@ background 持有连接口令，content script 只发送封闭的类型化消息
 | Todoist 页面锚点      | `src/anchors.ts`                                                        |
 | 页面检测              | `src/page-status.ts`、`src/Options.tsx`                                 |
 | 主题桥接              | `src/styles.css` 开头                                                   |
+| 截止日期状态与文字    | `src/deadlines.ts`、`src/DeadlineList.tsx`                              |
 | 等待中                | `src/WaitingList.tsx`                                                   |
 | 周回顾与推导          | `src/WeeklyReview.tsx`、`src/weekly-review.ts`、`src/weekly-review.css` |
 
@@ -222,11 +260,15 @@ Focus 直接执行今日队列。暂停后显示 Resume／Stop 和固定的经�
 
 ### 周回顾与等待中
 
-2026-10-15 的两张截图同样来自 `design/production.html`（合成任务，`?review` 打开清单）。清单展开了“将来／也许”；“等待中”在 Review 四列下方展开。天数随截图日期变化。
+2026-10-15 的清单截图同样来自 `design/production.html`（合成任务，`?review` 打开清单），展开了“将来／也许”。天数随截图日期变化。
 
 ![五行周回顾清单](images/planning-weekly-review.jpg)
 
-![等待中一行](images/planning-waiting.jpg)
+### 截止日期与等待中
+
+2026-10-16 的截图来自实际 MV3 构建包和合成 Todoist 页面（Kale，鼠标停在第二行）。悬停的行显示它唯一的操作，其他行只有标题和状态；“等待中”的第一行带截止日期。
+
+![截止日期与等待中两行列表](images/planning-deadlines.jpg)
 
 ### 列标签配置
 
