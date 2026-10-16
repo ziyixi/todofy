@@ -8,6 +8,13 @@ body,
 body {
   background: #fff;
 }
+/* The previews have no Todoist tokens: the theme toggle picks which colour fallbacks apply. */
+.plus-prototype {
+  color-scheme: light;
+}
+.plus-prototype[data-theme="dark"] {
+  color-scheme: dark;
+}
 .plus-prototype {
   display: flex;
   min-height: 100vh;

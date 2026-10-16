@@ -11,7 +11,7 @@
   min-width: 0;
   min-height: 170px;
   padding: 9px 7px 12px;
-  background: var(--plus-hover);
+  background: var(--plus-surface);
   border: 1px solid var(--plus-line);
   border-radius: 7px;
   transition:
@@ -19,7 +19,7 @@
     background-color 160ms ease;
 }
 .review-lane.is-over {
-  border-color: var(--plus-accent);
+  border-color: var(--plus-accent-fill);
   background: color-mix(in srgb, var(--plus-selected) 65%, var(--plus-bg));
 }
 .review-lane-header {
@@ -31,7 +31,7 @@
   border-bottom: 2px solid transparent;
 }
 .review-lane.is-over .review-lane-header {
-  border-bottom-color: var(--plus-accent);
+  border-bottom-color: var(--plus-accent-fill);
 }
 .review-lane-header h2 {
   margin: 0;
@@ -70,17 +70,14 @@
   color: var(--plus-text);
   text-align: left;
   cursor: pointer;
-  box-shadow: 0 1px 2px #00000005;
+  box-shadow: var(--plus-shadow-1);
   transition:
     border-color 120ms ease,
     background-color 120ms ease;
 }
 .planning-outcome-card:hover {
-  background: color-mix(
-    in srgb,
-    var(--plus-hover) 55%,
-    var(--plus-bg)
-  ) !important;
+  background:
+    linear-gradient(var(--plus-hover), var(--plus-hover)), var(--plus-bg) !important;
 }
 .planning-outcome-card.is-selected {
   border-color: var(--plus-accent) !important;
@@ -97,20 +94,23 @@
   width: 14px;
   height: 14px;
   margin-top: 2px;
-  border: 1px solid var(--plus-muted);
+  border: 1px solid var(--plus-priority);
   border-radius: 50%;
+  --plus-priority: var(--plus-p4);
+}
+.planning-priority-circle[data-priority="4"],
+.planning-priority-circle[data-priority="3"],
+.planning-priority-circle[data-priority="2"] {
+  background: color-mix(in srgb, var(--plus-priority) 8%, transparent);
 }
 .planning-priority-circle[data-priority="4"] {
-  border-color: #d1453b;
-  background: #d1453b15;
+  --plus-priority: var(--plus-p1);
 }
 .planning-priority-circle[data-priority="3"] {
-  border-color: #eb8909;
-  background: #eb890915;
+  --plus-priority: var(--plus-p2);
 }
 .planning-priority-circle[data-priority="2"] {
-  border-color: #246fe0;
-  background: #246fe015;
+  --plus-priority: var(--plus-p3);
 }
 .planning-outcome-content {
   min-width: 0;
@@ -139,7 +139,7 @@
   overflow-wrap: anywhere;
 }
 .planning-outcome-start {
-  color: #a56e21;
+  color: var(--plus-warning);
   flex: 0 0 auto;
   margin-top: 3px;
 }
@@ -201,7 +201,7 @@
 .review-drag-preview {
   width: 244px;
   pointer-events: none;
-  box-shadow: 0 6px 20px #0002;
+  box-shadow: var(--plus-shadow-2);
 }
 @container review (max-width: 800px) {
   .review-lanes {

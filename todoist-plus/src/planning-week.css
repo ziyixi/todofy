@@ -11,7 +11,7 @@
   cursor: pointer;
 }
 .planning-week button:focus-visible {
-  outline: 2px solid var(--plus-accent, #557921);
+  outline: 2px solid var(--plus-accent);
   outline-offset: 3px;
 }
 .planning-commitment-heading {
@@ -34,7 +34,7 @@
 }
 .planning-commitment-heading span {
   font-size: 12px;
-  color: var(--plus-muted, #77766f);
+  color: var(--plus-muted);
 }
 .planning-area-filter {
   display: flex;
@@ -45,11 +45,11 @@
   padding: 5px 9px;
   font-size: 12px;
   border-radius: 5px;
-  color: var(--plus-muted, #77766f);
+  color: var(--plus-muted);
 }
 .planning-area-filter button[aria-selected="true"] {
-  color: var(--plus-accent, #557921);
-  background: var(--plus-selected, #f0f6df);
+  color: var(--plus-selected-text);
+  background: var(--plus-selected);
 }
 .planning-commitment-grid {
   display: grid;
@@ -58,8 +58,8 @@
   margin-bottom: 18px;
 }
 .planning-step-tray {
-  border-top: 1px solid var(--plus-line, #ecece6);
-  border-bottom: 1px solid var(--plus-line, #ecece6);
+  border-top: 1px solid var(--plus-line);
+  border-bottom: 1px solid var(--plus-line);
   padding: 12px 0;
   margin-bottom: 22px;
 }
@@ -80,7 +80,7 @@
 }
 .planning-step-tray header span {
   font-size: 12px;
-  color: var(--plus-muted, #77766f);
+  color: var(--plus-muted);
 }
 .planning-step-tray header strong {
   font-size: 14px;
@@ -89,7 +89,7 @@
 .planning-step-tray header button {
   flex: 0 0 auto;
   font-size: 12px;
-  color: var(--plus-accent, #557921);
+  color: var(--plus-accent);
   padding: 3px;
 }
 .planning-tray-steps {
@@ -103,8 +103,8 @@
   gap: 8px;
   min-width: 0;
   padding: 9px 10px;
-  background: var(--plus-hover, #f7f7f3);
-  border: 1px solid var(--plus-line, #ecece6);
+  background: var(--plus-surface);
+  border: 1px solid var(--plus-line);
   border-radius: 6px;
 }
 .planning-week .planning-step-title {
@@ -120,7 +120,7 @@
 }
 .planning-step-title small {
   font-size: 12px;
-  color: var(--plus-muted, #77766f);
+  color: var(--plus-muted);
   font-weight: 400;
 }
 .planning-week .planning-drag-handle {
@@ -131,7 +131,7 @@
   height: 22px;
   padding: 0;
   flex: 0 0 auto;
-  color: var(--plus-muted, #77766f);
+  color: var(--plus-muted);
   cursor: grab;
   touch-action: none;
 }
@@ -142,7 +142,7 @@
 }
 .planning-step-tray-empty {
   margin: 0 0 20px;
-  color: var(--plus-muted, #77766f);
+  color: var(--plus-muted);
   font-size: 13px;
 }
 .planning-calendar {
@@ -173,7 +173,7 @@
   border-radius: 5px;
 }
 .planning-calendar-heading nav button:hover {
-  background: var(--plus-hover, #f7f7f3);
+  background: var(--plus-hover);
 }
 .planning-calendar-heading strong {
   font-size: 14px;
@@ -183,7 +183,7 @@
 .planning-calendar-heading .planning-current-week {
   width: auto;
   padding: 0 8px;
-  border: 1px solid var(--plus-line, #ecece6);
+  border: 1px solid var(--plus-line);
   font-size: 12px;
 }
 .planning-current-week:disabled {
@@ -192,12 +192,12 @@
 }
 .planning-calendar-heading > span {
   font-size: 12px;
-  color: var(--plus-muted, #77766f);
+  color: var(--plus-muted);
 }
 .planning-calendar-columns {
   display: grid;
   grid-template-columns: repeat(7, minmax(0, 1fr));
-  border: 1px solid var(--plus-line, #ecece6);
+  border: 1px solid var(--plus-line);
   border-radius: 8px;
   overflow: hidden;
   min-height: 350px;
@@ -206,18 +206,14 @@
   min-width: 0;
   display: flex;
   flex-direction: column;
-  border-right: 1px solid var(--plus-line, #ecece6);
-  background: var(--plus-hover, #f7f7f3);
+  border-right: 1px solid var(--plus-line);
+  background: var(--plus-surface);
 }
 .planning-calendar-day:last-child {
   border-right: 0;
 }
 .planning-calendar-day.is-today {
-  background: color-mix(
-    in srgb,
-    var(--plus-selected, #f0f6df) 25%,
-    var(--plus-bg, #fff)
-  );
+  background: color-mix(in srgb, var(--plus-selected) 25%, var(--plus-bg));
 }
 .planning-week .planning-day-heading {
   display: grid;
@@ -226,10 +222,10 @@
   align-items: center;
   text-align: left;
   padding: 10px;
-  border-bottom: 1px solid var(--plus-line, #ecece6);
+  border-bottom: 1px solid var(--plus-line);
 }
 .planning-day-heading > span {
-  color: var(--plus-muted, #77766f);
+  color: var(--plus-muted);
   font-size: 12px;
 }
 .planning-day-heading > strong {
@@ -239,13 +235,13 @@
 .planning-day-heading > small {
   grid-column: 1/-1;
   font-size: 12px;
-  color: var(--plus-muted, #77766f);
+  color: var(--plus-muted);
 }
 .planning-calendar-day.is-today .planning-day-heading > strong {
-  color: var(--plus-accent, #557921);
+  color: var(--plus-accent);
 }
 .planning-calendar-day.is-selected .planning-day-heading {
-  background: var(--plus-selected, #f0f6df);
+  background: var(--plus-selected);
 }
 .planning-day-body {
   padding: 7px;
@@ -253,17 +249,17 @@
   min-height: 280px;
 }
 .planning-calendar-day.is-over .planning-day-body {
-  background: var(--plus-selected, #f0f6df);
+  background: var(--plus-selected);
 }
 .planning-calendar-step {
   position: relative;
   min-width: 0;
   margin-bottom: 8px;
   padding: 9px 8px;
-  border: 1px solid var(--plus-line, #ecece6);
+  border: 1px solid var(--plus-line);
   border-left: 3px solid var(--outcome-color);
   border-radius: 6px;
-  background: var(--plus-bg, #fff);
+  background: var(--plus-bg);
 }
 .planning-calendar-step-top {
   display: flex;
@@ -281,7 +277,7 @@
   gap: 8px;
   margin-top: 8px;
   font-size: 11px;
-  color: var(--plus-muted, #77766f);
+  color: var(--plus-muted);
 }
 .planning-calendar-step-meta > span {
   display: -webkit-box;
@@ -294,13 +290,13 @@
   flex: 0 0 auto;
   font-size: 12px;
   font-weight: 500;
-  color: var(--plus-text, #202020);
+  color: var(--plus-text);
 }
 .planning-week .planning-step-remove {
   display: flex;
   padding: 0;
   margin-top: 3px;
-  color: var(--plus-muted, #77766f);
+  color: var(--plus-muted);
   opacity: 0;
 }
 .planning-calendar-step:hover .planning-step-remove,
@@ -319,7 +315,7 @@
   right: -1px;
   height: 3px;
   border-radius: 2px;
-  background: var(--plus-accent, #557921);
+  background: var(--plus-accent-fill);
 }
 .planning-day-end {
   min-height: 42px;
@@ -327,13 +323,13 @@
   border-radius: 5px;
   padding: 12px 3px;
   text-align: center;
-  color: var(--plus-muted, #77766f);
+  color: var(--plus-muted);
   font-size: 12px;
 }
 .planning-day-end.is-over {
-  background: var(--plus-selected, #f0f6df);
-  border-color: var(--plus-accent, #557921);
-  color: var(--plus-accent, #557921);
+  background: var(--plus-selected);
+  border-color: var(--plus-accent-fill);
+  color: var(--plus-selected-text);
 }
 .planning-tray-step.is-dragging,
 .planning-calendar-step.is-dragging {
@@ -345,12 +341,12 @@
   padding: 10px 12px;
   display: grid;
   gap: 6px;
-  border: 1px solid var(--plus-line, #ecece6);
+  border: 1px solid var(--plus-line);
   border-left: 3px solid var(--outcome-color);
   border-radius: 6px;
-  background: var(--plus-bg, #fff);
-  color: var(--plus-text, #202020);
-  box-shadow: 0 5px 18px #0002;
+  background: var(--plus-bg);
+  color: var(--plus-text);
+  box-shadow: var(--plus-shadow-2);
 }
 .planning-step-overlay strong {
   font-size: 14px;
@@ -359,7 +355,7 @@
 }
 .planning-step-overlay small {
   font-size: 12px;
-  color: var(--plus-muted, #77766f);
+  color: var(--plus-muted);
 }
 .planning-compact-days {
   display: none;
@@ -377,8 +373,8 @@
 }
 .planning-compact-days button[aria-selected="true"],
 .planning-compact-days button.is-over {
-  background: var(--plus-selected, #f0f6df);
-  color: var(--plus-accent, #557921);
+  background: var(--plus-selected);
+  color: var(--plus-selected-text);
 }
 .planning-compact-days strong {
   font-size: 14px;

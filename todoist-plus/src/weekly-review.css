@@ -36,7 +36,7 @@
 }
 .weekly-review ol > li > input {
   margin: 3px 0 0;
-  accent-color: var(--plus-accent);
+  accent-color: var(--plus-accent-fill);
 }
 .weekly-review ol > li.weekly-review-later {
   /* Lines up with the ticked lines' text: checkbox width plus gap. */

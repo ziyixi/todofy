@@ -72,7 +72,7 @@
   flex-wrap: wrap;
 }
 .plus-weekly-goal-warning {
-  color: #a56e21;
+  color: var(--plus-warning);
   font-size: 12px;
   margin: 5px 0 0;
 }
@@ -83,7 +83,7 @@
 }
 .plus-weekly-goal-unassigned > p {
   margin: 0 0 6px;
-  color: #a56e21;
+  color: var(--plus-warning);
   font-size: 12px;
 }
 .plus-goal-picker form {

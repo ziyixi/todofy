@@ -7,36 +7,90 @@
   max-width: 1900px;
 }
 
+/*
+ * The one colour bridge. Todoist's theme tokens inherit from <html> into every shadow root, so
+ * each colour reads the token with the role Todoist gives it; the fallbacks keep the earlier
+ * look (light and dark through the inherited color-scheme) on a page without tokens.
+ */
 :host,
 .plus-prototype,
 body {
-  --plus-bg: var(--product-library-background-base-primary, #fff);
-  --plus-text: var(--product-library-display-primary-idle-tint, #202020);
-  --plus-muted: #77766f;
-  --plus-line: #ecece6;
-  --plus-hover: #f7f7f3;
-  --plus-accent: var(--product-library-actionable-primary-idle-tint, #557921);
-  --plus-selected: var(
-    --product-library-actionable-primary-selected-fill,
-    #f0f6df
+  --plus-bg: var(
+    --product-library-background-base-primary,
+    light-dark(#fff, #1e1e1e)
   );
+  /* Lanes, day columns and the tab track. */
+  --plus-surface: var(
+    --product-library-background-base-tertiary,
+    light-dark(#f7f7f3, #2a2b25)
+  );
+  --plus-text: var(
+    --product-library-display-primary-idle-tint,
+    light-dark(#202020, #e5e5e5)
+  );
+  --plus-muted: var(
+    --product-library-display-secondary-idle-tint,
+    light-dark(#77766f, #a3a39b)
+  );
+  --plus-line: var(
+    --product-library-divider-primary,
+    light-dark(#ecece6, #35352f)
+  );
+  /* A translucent layer over whatever is underneath. */
+  --plus-hover: var(
+    --product-library-actionable-quaternary-hover-fill,
+    light-dark(#f7f7f3, #2a2b25)
+  );
+  /* Text, links and focus rings. */
+  --plus-accent: var(
+    --product-library-actionable-tertiary-idle-tint,
+    light-dark(#557921, #acc97b)
+  );
+  /* Primary buttons, insert lines and drop targets; text on them is --plus-on-accent. */
+  --plus-accent-fill: var(
+    --product-library-actionable-primary-idle-fill,
+    light-dark(#557921, #acc97b)
+  );
+  --plus-on-accent: var(
+    --product-library-actionable-primary-on-idle-tint,
+    light-dark(#fff, #1e1e1e)
+  );
+  /* Todoist's selected sidebar row; text on it is --plus-selected-text. */
+  --plus-selected: var(
+    --product-library-selectable-secondary-selected-fill,
+    light-dark(#f0f6df, #323c24)
+  );
+  --plus-selected-text: var(
+    --product-library-selectable-secondary-on-selected-tint,
+    light-dark(#557921, #acc97b)
+  );
+  --plus-warning: var(
+    --product-library-info-warning-primary-on-idle-tint,
+    #a56e21
+  );
+  --plus-danger: var(
+    --product-library-info-attention-primary-idle-tint,
+    #c25546
+  );
+  /* Todoist's priorities; the API's priority 4 is P1. */
+  --plus-p1: var(--product-library-priorities-p1-primary-idle-tint, #d1453b);
+  --plus-p2: var(--product-library-priorities-p2-primary-idle-tint, #eb8909);
+  --plus-p3: var(--product-library-priorities-p3-primary-idle-tint, #246fe0);
+  --plus-p4: var(--product-library-priorities-p4-primary-idle-tint, #aaa);
+  --plus-overlay: var(--product-library-background-overlay, #0005);
+  /* Resting cards and tabs, floating bars and drag previews, dialogs. */
+  --plus-shadow-1: var(--product-library-shadow-raised-1, 0 1px 3px #00000012);
+  --plus-shadow-2: var(--product-library-shadow-raised-2, 0 4px 20px #0001);
+  --plus-shadow-3: var(--product-library-shadow-raised-3, 0 16px 55px #0003);
   font-family:
     -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", system-ui,
     sans-serif;
   font-size: 14px;
   color: var(--plus-text);
-  color-scheme: light;
 }
-:host([data-theme="dark"]),
-.plus-prototype[data-theme="dark"] {
-  --plus-bg: #1e1e1e;
-  --plus-text: #e5e5e5;
-  --plus-muted: #a3a39b;
-  --plus-line: #35352f;
-  --plus-hover: #2a2b25;
-  --plus-accent: #acc97b;
-  --plus-selected: #323c24;
-  color-scheme: dark;
+/* The options page has no Todoist theme; its fallbacks follow the system (color-scheme meta). */
+body {
+  background: var(--plus-bg);
 }
 * {
   box-sizing: border-box;
@@ -184,7 +238,7 @@ body {
   font-size: 13px;
 }
 .plus-warning {
-  color: #a56e21 !important;
+  color: var(--plus-warning) !important;
   font-size: 12px;
 }
 .plus-content-fieldset {
@@ -194,11 +248,11 @@ body {
   margin: 0;
 }
 .plus-error {
-  border-left: 3px solid #c25546;
+  border-left: 3px solid var(--plus-danger);
   padding: 10px 14px;
   margin: 15px 0;
   color: var(--plus-text);
-  background: var(--plus-hover);
+  background: var(--plus-surface);
   font-size: 12px;
   display: flex;
   align-items: center;
@@ -225,10 +279,10 @@ body {
   padding: 0;
   width: min(650px, calc(100vw - 40px));
   max-height: 85vh;
-  box-shadow: 0 16px 55px #0003;
+  box-shadow: var(--plus-shadow-3);
 }
 .plus-dialog::backdrop {
-  background: #0005;
+  background: var(--plus-overlay, #0005);
 }
 .plus-task-editor {
   padding: 25px 28px;
@@ -304,9 +358,9 @@ body {
   font-weight: 600 !important;
 }
 .plus-primary {
-  background: var(--plus-accent) !important;
-  color: var(--plus-bg) !important;
-  border-color: var(--plus-accent) !important;
+  background: var(--plus-accent-fill) !important;
+  color: var(--plus-on-accent) !important;
+  border-color: var(--plus-accent-fill) !important;
 }
 .plus-steps li {
   display: flex;
@@ -389,7 +443,7 @@ body {
   gap: 14px;
   border: 1px solid var(--plus-line);
   background: var(--plus-bg);
-  box-shadow: 0 4px 20px #0001;
+  box-shadow: var(--plus-shadow-2);
   border-radius: 8px;
   padding: 10px 15px;
 }
@@ -544,11 +598,11 @@ body {
   stroke-width: 1.75;
 }
 .plus-extension-nav button:hover {
-  background: var(--plus-hover, #f7f7f3);
+  background: var(--plus-hover);
 }
 .plus-extension-nav button[aria-current="page"] {
-  background: var(--plus-selected, #f0f6df);
-  color: var(--plus-accent, #557921);
+  background: var(--plus-selected);
+  color: var(--plus-selected-text);
 }
 .plus-other-views button {
   width: 100%;
@@ -559,6 +613,13 @@ body {
   padding-right: 5px;
   font-size: 11px;
   color: var(--plus-muted);
+}
+/* Inside Todoist's task modal the panel shows the modal's own surface. */
+.plus-native-tools.plus-root,
+.plus-native-tools input,
+.plus-native-tools select,
+.plus-native-tools textarea {
+  background: transparent;
 }
 .plus-native-tools.plus-root {
   padding: 15px 0;

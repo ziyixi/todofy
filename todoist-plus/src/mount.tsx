@@ -50,15 +50,6 @@ function applyTheme(host: HTMLElement, source: HTMLElement) {
         : computed.backgroundColor,
     "--plus-text": computed.color,
   };
-  const nativeAccent = computed
-    .getPropertyValue("--product-library-actionable-primary-idle-tint")
-    .trim();
-  const nativeSelected = computed
-    .getPropertyValue("--product-library-actionable-primary-selected-fill")
-    .trim();
-  if (nativeAccent) Object.assign(variables, { "--plus-accent": nativeAccent });
-  if (nativeSelected)
-    Object.assign(variables, { "--plus-selected": nativeSelected });
   for (const [name, value] of Object.entries(variables))
     if (host.style.getPropertyValue(name) !== value)
       host.style.setProperty(name, value);
