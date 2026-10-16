@@ -297,7 +297,8 @@ CSRF, bounded proxy and frozen settlement behavior. `tests/runtime/test_plus.py`
 gateway, Python Durable Object and D1 against synthetic Todoist Sync/REST responses, including lost
 responses, recurring completion, week rollover (Sunday choices kept, earlier commitments reset, scans
 unable to move a choice back) and shared pause/auth controls. The gateway CPU suite
-includes full 200-task Plus and FlowDay-proxy pages. Production and browser acceptance are recorded
+includes full 200-task Plus and FlowDay-proxy pages and a FULL Plan with 500 labels and 300 dependencies, which
+the gateway reads and writes again (0.8 ms first, 0.4-0.7 ms warm on 2026-10-16). Production and browser acceptance are recorded
 separately in the extension's verification document; a local test result is not production evidence.
 
 Dependencies: `tests/unit/test_plus_dependencies.py` runs the cycle and limit rules and both RPCs on host

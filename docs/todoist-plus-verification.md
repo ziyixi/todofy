@@ -736,3 +736,43 @@ owner's review. No production row count was taken: building `summaries_task` wri
 mail with a task (`imported = 0`, the rows of the last 90 days), none for the imported archive. After the
 release: `VerifyPlanStore` answers `{}`, the next Sunday manifest lists the six tables and `plus_actions`
 stops growing.
+
+## Dependencies, local checks (October 16)
+
+Task dependencies, from the owner-approved October 16 designs (plus-next §2 and §5, as adjusted by the
+data-layer design §5.1) and the owner's decisions of the same day, on local branch `claude/plus-dependencies`,
+based on `origin/main` `1e8e6863`; not pushed, no branch CI, no release. All data is synthetic; production D1,
+the Durable Object, Todoist, FlowDay and the owner's Todoist were not touched.
+
+- The recurring rule was chosen from Todoist's official API reference, read on 2026-10-16: the v1 Task object
+  (ItemSyncView, which `GET /api/v1/tasks` and the Sync API return) has a required `completed_count`, which goes
+  up with every completion, recurring occurrences included, and down when a recurring completion is undone. So
+  a recurring task can be a prerequisite, satisfied by its next completion after the dependency was added; one
+  without the counter is refused by Todofy and greyed in the picker. The same reference says the activity log's
+  availability and retention depend on the plan, so its 403 is answered without the six-hour Todoist block.
+  Neither was checked against a real account.
+- Todofy: additive `SetTaskDependency`, `ResolveDependencies`, `Plan.dependencies` (FULL answers),
+  `PlanningTask.recurring` and `completed_count`; `plan_edges` between `plan_tasks` IDs, no migration (0007 has
+  the tables), no receipt, no Todoist write; `CompleteTask` records the task completed.
+- Extension: the 「依赖 / Depends on」 section and inline picker in both task details, 等「B」 on board cards,
+  the Waiting lane, the ready state, the settle check after complete reads and the one-time deletion notice.
+
+Local checks, all passing: Todofy ruff and 1,953 host tests (one existing skip), among them the new
+`test_plus_dependencies.py` (the cycle and limit rules, both RPCs, the activity log through the real `call`,
+statement counts: 5 for an add, at most 8 for a check) and the dependency statements in `test_plan_store.py`;
+all 575 real-workerd runtime cases (573 in four processes, then the serial `test_alarm.py`), among them the six
+new `test_plus_dependencies.py` cases through the gateway with the extension token; the gateway's lint, types,
+134 unit cases and its CPU suite, which now includes a FULL ReadPlan with 500 labels and 300 dependencies
+(first runs 0.77-0.86 ms, warm medians 0.40-0.71 ms in three isolates; bounds 6 and 4 ms of Free's 10); both
+production dry-runs, the gateway at 82.9 KiB gzip (budget 86 KiB) and the core bundle with `plus_service_pb`;
+proto format, lint, api-linter (69 files), breaking against `1e8e6863`, deterministic generation, schemas and
+both codecs (495 TypeScript, 113 Python); `.github/scripts` (453, one existing skip); the owner UI's types and
+93 tests; the extension's lint, types, 182 unit cases, build and 31 built-MV3 Chromium cases on the synthetic
+Kale page, three of them new. Screenshots of the built extension on the synthetic page (Kale, light, Chinese
+synthetic titles) were taken for the owner's review and are not in the repository: the section with the
+picker open and a cycle candidate greyed, a card saying 等「订场地」 in Committed, the Waiting lane, and the
+ready state after the prerequisite completes.
+
+Not done: the native popup's collapsed Steps & timing suffix (`planMarks`, plus-next §4 v2). Not verified:
+branch CI, the release, a real account's `completed_count` and activity-log answers, the installed extension
+on real Todoist, and the owner's review.

@@ -43,6 +43,32 @@ the six tables and `plus_actions` stops growing. The `proto/todofy/ui/` change a
 with unchanged extension behaviour
 ([local evidence](docs/todoist-plus-verification.md#planning-store-caches-and-receipts-local-checks-october-16)).
 
+Todoist Plus task dependencies (owner-approved October 16: plus-next §2 and §5 as adjusted by the
+data-layer design §5.1, with the owner's decisions) are on local branch `claude/plus-dependencies`, based on
+`1e8e6863`; not pushed, no branch CI or release. Dependencies live only in Todofy, as `plan_edges` between
+`plan_tasks` IDs (no migration: 0007 has the tables), never in a Todoist title, description, comment or
+label, with no `@blocked` mirror. Additive PlusService: `SetTaskDependency` (a value write without a receipt;
+adding reads both tasks once, refuses a cycle or the 5/300 limits first), `ResolveDependencies` (after a
+complete read the extension names at most 20 tasks it missed; one ids read, at most 10 activity-log reads,
+a deleted prerequisite drops its dependencies and returns the waiters for a one-time notice; its 403 does not
+start the six-hour Todoist block), `Plan.dependencies` on FULL answers (one more statement in the review
+batch), `PlanningTask.recurring` and optional `completed_count`; `CompleteTask` records the task completed.
+The recurring rule follows Todoist's documented `completed_count` (the next completion after the dependency
+was added satisfies it; a recurring task without the counter cannot be chosen). The extension adds the
+「依赖 / Depends on」 section with an inline search-as-you-type picker in Plan's editor and the native Steps &
+timing (cycle candidates greyed, row actions on hover or focus), 等「B」 on board cards, the Waiting lane for a
+task waiting only for another and without a stage label, the ready state once the prerequisite is done
+(display only), and a quiet one-time notice above the board for a deleted prerequisite. The planning
+protocol stays 3. Not done: the native popup's collapsed Steps & timing suffix (`planMarks`, plus-next §4 v2).
+Rebase note: `claude/plus-bets-mailbox` also touches `review_targets` (its `weekly_bets` statement),
+`test_plus_cache.py`'s review-batch count, `plus_service.proto` (it uses Plan field 15; this branch 14 and
+PlanningTask 18-19) and the extension's model, api, client, background, i18n, fixture and planner setup.
+Pending: push, full branch CI, owner review of the screenshots, same-SHA release (core, gateway and the Plus
+ZIP; reload the extension, refresh Todoist); afterwards, the owner's real-account check that a recurring
+task's `completed_count` reaches the extension and that the activity log answers for a completed and a
+deleted task
+([local evidence](docs/todoist-plus-verification.md#dependencies-local-checks-october-16)).
+
 Todoist Plus UI theme, safety and polish (owner-approved October 15: safety C1-C6, theming A1-A6, polish
 B1-B6) is on local branch `claude/plus-ui-theme`, based on `58908f64`; not pushed, no branch CI or release.
 Colours follow Todoist's own theme tokens through CSS (the two names Plus read exist in no theme), native
