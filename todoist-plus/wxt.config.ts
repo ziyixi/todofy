@@ -11,9 +11,6 @@ const date = new Date(
 const version = `${date.getUTCFullYear()}.${(date.getUTCMonth() + 1) * 100 + date.getUTCDate()}.${date.getUTCHours() * 60 + date.getUTCMinutes()}.${parseInt(sha.slice(0, 4), 16)}`;
 export default defineConfig({
   modules: ["@wxt-dev/module-react"],
-  // Keeps light-dark(): an older CSS target swaps it for variables that only this stylesheet's
-  // own color-scheme rules would set, while Plus inherits Todoist's color-scheme instead.
-  vite: () => ({ build: { cssTarget: "chrome123" } }),
   manifest: {
     name: "Todoist Plus",
     version,

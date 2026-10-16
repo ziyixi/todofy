@@ -44,13 +44,6 @@ export function languageOf(document: Document): Language {
     ? "zh"
     : "en";
 }
-/** True when a computed colour such as "rgb(229, 229, 229)" is light text, as on a dark page. */
-function isLightText(color: string): boolean {
-  const rgb = color.match(/\d+/gu)?.map(Number);
-  return Boolean(
-    rgb && rgb.length >= 3 && (rgb[0]! + rgb[1]! + rgb[2]!) / 3 > 160,
-  );
-}
 /**
  * Colours need no copying: Todoist's theme tokens inherit into the shadow roots, and styles.css
  * reads them. Only the native nav row's geometry is measured.
@@ -133,9 +126,6 @@ export async function mountTodoist(ctx: ContentScriptContext) {
   let writes = 0;
   // While the Plus view shows its crash line, no re-mount clears that from the page check.
   let renderFailed = false;
-  // The <html> theme class last read for the dark fallback (syncScheme), and its result.
-  let themeClass: string | undefined;
-  let darkPage = false;
   // A hidden tab runs no frames; its startup check waits until the tab is shown.
   let startupWaiting = false;
   // What is off and why, from closed key sets; sent only when it changes.
@@ -189,26 +179,6 @@ export async function mountTodoist(ctx: ContentScriptContext) {
     }
   }
 
-  /**
-   * Todoist's Dark theme sets color-scheme on <html>, which inherits into the shadow roots. Until
-   * that is confirmed on the live page, light native text also marks each host dark (styles.css),
-   * so form controls and the light-dark() fallbacks never stay light on a dark page. The colour
-   * is read only when the theme class changes, never on every mutation.
-   */
-  function syncScheme() {
-    const theme = document.documentElement.className;
-    if (theme !== themeClass) {
-      themeClass = theme;
-      darkPage = isLightText(
-        getComputedStyle(find("content") ?? document.body).color,
-      );
-    }
-    for (const host of [mainHost, navHost, favoritesHost, detailHost]) {
-      if (!host || (host.dataset.theme === "dark") === darkPage) continue;
-      if (darkPage) host.dataset.theme = "dark";
-      else delete host.dataset.theme;
-    }
-  }
   function hide(element: HTMLElement) {
     if (hidden.has(element)) return;
     writes++;
@@ -291,7 +261,6 @@ export async function mountTodoist(ctx: ContentScriptContext) {
       ui.mount();
       favoritesHost = ui.shadowHost;
       favoritesKey = "";
-      syncScheme();
       const sidebar = find("sidebar");
       const reference = sidebar && find("upcoming", sidebar);
       if (reference) applyNavigationLayout(favoritesHost, reference);
@@ -580,7 +549,6 @@ export async function mountTodoist(ctx: ContentScriptContext) {
       mounting = false;
     }
     if (disposed) return;
-    syncScheme();
     render();
     if (mainHost && navHost && !renderFailed) note("views");
     if (started || !mainHost) return;
@@ -665,7 +633,6 @@ export async function mountTodoist(ctx: ContentScriptContext) {
     ui.mount();
     note("taskTools");
     detailHost = ui.shadowHost;
-    syncScheme();
     detailCleanup = () => {
       ui.remove();
     };
@@ -690,7 +657,6 @@ export async function mountTodoist(ctx: ContentScriptContext) {
     if (mainHost && !mainHost.isConnected) dropMain();
     if (navHost && !navHost.isConnected) dropNav();
     navUpdate?.();
-    syncScheme();
     if (!mainHost || !navHost) void mount();
     if (
       mainHost &&

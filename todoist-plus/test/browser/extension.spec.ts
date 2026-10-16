@@ -422,7 +422,7 @@ test("returning from a native page reloads Focus after an external queue change"
   }
 });
 
-test("native task detail keeps work labels, hides replaced labels only with controls, and follows the dark theme", async () => {
+test("native task detail keeps work labels, hides replaced labels only with controls, and uses Todoist's own text colour", async () => {
   const extensionPath = resolve(".output/chrome-mv3");
   const context = await chromium.launchPersistentContext("", {
     channel: "chromium",
@@ -440,7 +440,6 @@ test("native task detail keeps work labels, hides replaced labels only with cont
     const page = await context.newPage();
     await page.goto("https://app.todoist.com/app/task/parent");
     await page.evaluate(() => {
-      document.documentElement.className = "theme_dark";
       document
         .querySelector("#content")!
         .insertAdjacentHTML(
@@ -459,7 +458,7 @@ test("native task detail keeps work labels, hides replaced labels only with cont
     ).toBeDisabled();
     await expect(page.locator("#commit-badge")).toBeHidden();
     await expect(page.locator("#office-badge")).toBeVisible();
-    // Todoist's dark text, on the modal's own surface.
+    // Todoist's text, on the modal's own surface.
     expect(
       await page.locator("todoist-plus-task-tools").evaluate((host) => {
         const style = getComputedStyle(

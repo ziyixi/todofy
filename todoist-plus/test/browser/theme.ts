@@ -3,11 +3,10 @@ import { createRequire } from "node:module";
 import type { Page } from "@playwright/test";
 
 const require = createRequire(import.meta.url);
-/** Every theme class Todoist puts on <html>; "" is its default theme. */
+/** Every light theme class Todoist puts on <html>; "" is its default theme. Plus has no dark mode. */
 export const THEMES = [
   "",
   "kale",
-  "dark",
   "blueberry",
   "tangerine",
   "gold",

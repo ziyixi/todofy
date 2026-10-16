@@ -6,9 +6,7 @@ import {
   Hash,
   Inbox,
   LayoutList,
-  Moon,
   Search,
-  Sun,
   Target,
 } from "lucide-react";
 import { App } from "../src/App";
@@ -26,10 +24,9 @@ const actions = createPrototype(
 
 function ProductionPreview() {
   const [view, setView] = useState<View>("plan");
-  const [dark, setDark] = useState(false);
   const [notice, setNotice] = useState("");
   return (
-    <div className="plus-prototype" data-theme={dark ? "dark" : "light"}>
+    <div className="plus-prototype">
       <aside className="prototype-sidebar">
         <div className="prototype-owner">
           <span className="prototype-avatar">P</span>Personal{" "}
@@ -79,9 +76,6 @@ function ProductionPreview() {
         </nav>
         <div className="prototype-controls">
           <small>PRODUCTION COMPONENTS · SYNTHETIC DATA</small>
-          <button onClick={() => setDark(!dark)} aria-label="Switch theme">
-            {dark ? <Sun size={16} /> : <Moon size={16} />}
-          </button>
         </div>
       </aside>
       <main>

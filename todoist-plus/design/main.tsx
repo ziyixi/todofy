@@ -8,13 +8,11 @@ import {
   Inbox,
   LayoutList,
   ListFilter,
-  Moon,
   MoreHorizontal,
   PlusCircle,
   RotateCcw,
   Search,
   Settings2,
-  Sun,
   Target,
 } from "lucide-react";
 import { ReviewBoard } from "./ReviewBoard";
@@ -43,7 +41,6 @@ function Prototype() {
   const [mode, setMode] = useState<"review" | "week">("review");
   const [area, setArea] = useState<"all" | "work" | "personal">("all");
   const [week, setWeek] = useState(CURRENT_WEEK);
-  const [dark, setDark] = useState(false);
   const [selected, setSelected] = useState("");
   const [lanes, setLanes] = useState(LANES);
   const stopwatch = usePrototypeTimer();
@@ -89,7 +86,7 @@ function Prototype() {
   }
 
   return (
-    <div className="plus-prototype" data-theme={dark ? "dark" : "light"}>
+    <div className="plus-prototype">
       <aside className="prototype-sidebar">
         <div className="prototype-owner">
           <span className="prototype-avatar">P</span>Personal{" "}
@@ -158,9 +155,6 @@ function Prototype() {
         <div className="prototype-controls">
           <small>LOCAL · SYNTHETIC TASKS</small>
           <div>
-            <button onClick={() => setDark(!dark)} aria-label="Switch theme">
-              {dark ? <Sun size={16} /> : <Moon size={16} />}
-            </button>
             <button onClick={resetDemo}>
               <RotateCcw size={14} />
               Reset demo

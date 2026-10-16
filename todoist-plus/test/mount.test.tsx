@@ -504,28 +504,3 @@ it("keeps unrelated favourites visible when the plan read fails while their togg
       .display,
   ).toBe("none");
 });
-
-it("marks each Plus host dark when Todoist's theme class turns its text light", async () => {
-  const content = document.querySelector<HTMLElement>("#content")!;
-  const { ctx } = context();
-  await act(() => mountTodoist(ctx));
-  await settle();
-  const hosts = () =>
-    [
-      "todoist-plus-view",
-      "todoist-plus-navigation",
-      "todoist-plus-other-views",
-    ].map((name) => document.querySelector<HTMLElement>(name)!.dataset.theme);
-  expect(hosts()).toEqual([undefined, undefined, undefined]);
-  // Only a class change is read: a colour alone does not trigger it.
-  content.style.color = "rgb(229, 229, 229)";
-  await settle();
-  expect(hosts()).toEqual([undefined, undefined, undefined]);
-  document.documentElement.className = "theme_dark";
-  await settle();
-  expect(hosts()).toEqual(["dark", "dark", "dark"]);
-  content.style.color = "rgb(32, 32, 32)";
-  document.documentElement.className = "theme_kale";
-  await settle();
-  expect(hosts()).toEqual([undefined, undefined, undefined]);
-});

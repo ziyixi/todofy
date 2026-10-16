@@ -8,12 +8,9 @@ body,
 body {
   background: #fff;
 }
-/* The previews have no Todoist tokens: the theme toggle picks which colour fallbacks apply. */
+/* The previews have no Todoist tokens: the light colour fallbacks apply. */
 .plus-prototype {
   color-scheme: light;
-}
-.plus-prototype[data-theme="dark"] {
-  color-scheme: dark;
 }
 .plus-prototype {
   display: flex;
@@ -120,16 +117,6 @@ body {
   margin-left: 280px;
   flex: 1;
   min-width: 0;
-}
-.plus-prototype[data-theme="dark"] .prototype-sidebar {
-  background: #24251f;
-}
-.plus-prototype[data-theme="dark"] .prototype-sidebar nav > button.active {
-  background: #323c24;
-  color: #bbd991;
-}
-.plus-prototype[data-theme="dark"] .prototype-sidebar nav > button.active svg {
-  color: #bbd991;
 }
 .prototype-native-message {
   position: fixed;

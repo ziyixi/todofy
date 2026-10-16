@@ -52,7 +52,7 @@ function contrast(text: string, background: string) {
   return light! / dark!;
 }
 
-test("Plus follows every Todoist theme through CSS alone, with readable text", async () => {
+test("Plus follows every light Todoist theme through CSS alone, with readable text", async () => {
   const { context } = await launchPlanner();
   try {
     const page = await context.newPage();
@@ -142,7 +142,7 @@ test("Plus follows every Todoist theme through CSS alone, with readable text", a
         ["muted", "surface"],
         ["accent", "bg"],
         ["warning", "bg"],
-        // Days past a deadline, in Deadlines, Waiting and task details.
+        // Days past a deadline, on cards, in the weekly review and in task details.
         ["danger", "bg"],
         ["on-accent", "accent-fill"],
         ["selected-text", "selected"],
@@ -205,50 +205,25 @@ test("Plus follows every Todoist theme through CSS alone, with readable text", a
           `${theme || "default"}: ${name} ${text} on ${background}`,
         ).toBeGreaterThanOrEqual(4.5);
     }
-    // A Dark theme without its own color-scheme still makes every Plus host dark.
-    const scheme = (theme: string) =>
-      expect.poll(() =>
-        page.evaluate((theme) => {
-          document.documentElement.className = theme;
-          return ["todoist-plus-view", "todoist-plus-navigation"].map(
-            (name) =>
-              getComputedStyle(document.querySelector(name)!).colorScheme,
-          );
-        }, theme),
-      );
-    const noScheme = await page.addStyleTag({
-      content: ":root { color-scheme: normal !important }",
+    // Without any token, the fallbacks keep the earlier light look.
+    const fallback = await page.evaluate(() => {
+      document.querySelector<HTMLStyleElement>("#todoist-theme")!.disabled =
+        true;
+      document.documentElement.className = "";
+      const root = document.querySelector("todoist-plus-view")!.shadowRoot!;
+      const probe = root.appendChild(document.createElement("span"));
+      const colors = ["bg", "text", "selected", "accent"].map((role) => {
+        probe.style.color = `var(--plus-${role})`;
+        return getComputedStyle(probe).color;
+      });
+      probe.remove();
+      return colors;
     });
-    await scheme("theme_dark").toEqual(["dark", "dark"]);
-    await scheme("theme_kale").toEqual(["normal", "normal"]);
-    await noScheme.evaluate((style) => (style as HTMLStyleElement).remove());
-    // Without any token, the fallbacks keep the earlier look and follow color-scheme.
-    const fallback = (scheme: string) =>
-      page.evaluate((scheme) => {
-        document.querySelector<HTMLStyleElement>("#todoist-theme")!.disabled =
-          true;
-        document.documentElement.className = "";
-        document.documentElement.style.colorScheme = scheme;
-        const root = document.querySelector("todoist-plus-view")!.shadowRoot!;
-        const probe = root.appendChild(document.createElement("span"));
-        const colors = ["bg", "text", "selected", "accent"].map((role) => {
-          probe.style.color = `var(--plus-${role})`;
-          return getComputedStyle(probe).color;
-        });
-        probe.remove();
-        return colors;
-      }, scheme);
-    expect(await fallback("light")).toEqual([
+    expect(fallback).toEqual([
       "rgb(255, 255, 255)",
       "rgb(32, 32, 32)",
       "rgb(240, 246, 223)",
       "rgb(85, 121, 33)",
-    ]);
-    expect(await fallback("dark")).toEqual([
-      "rgb(30, 30, 30)",
-      "rgb(229, 229, 229)",
-      "rgb(50, 60, 36)",
-      "rgb(172, 201, 123)",
     ]);
   } finally {
     await context.close();

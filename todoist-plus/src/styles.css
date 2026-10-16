@@ -10,65 +10,47 @@
 /*
  * The one colour bridge. Todoist's theme tokens inherit from <html> into every shadow root, so
  * each colour reads the token with the role Todoist gives it; the fallbacks keep the earlier
- * look (light and dark through the inherited color-scheme) on a page without tokens.
+ * light look on a page without tokens. There is no dark mode of its own.
  */
 :host,
 .plus-prototype,
 body {
-  --plus-bg: var(
-    --product-library-background-base-primary,
-    light-dark(#fff, #1e1e1e)
-  );
+  --plus-bg: var(--product-library-background-base-primary, #fff);
   /* Lanes, day columns and the tab track. */
-  --plus-surface: var(
-    --product-library-background-base-tertiary,
-    light-dark(#f7f7f3, #2a2b25)
-  );
-  --plus-text: var(
-    --product-library-display-primary-idle-tint,
-    light-dark(#202020, #e5e5e5)
-  );
-  --plus-muted: var(
-    --product-library-display-secondary-idle-tint,
-    light-dark(#77766f, #a3a39b)
-  );
-  --plus-line: var(
-    --product-library-divider-primary,
-    light-dark(#ecece6, #35352f)
-  );
+  --plus-surface: var(--product-library-background-base-tertiary, #f7f7f3);
+  --plus-text: var(--product-library-display-primary-idle-tint, #202020);
+  --plus-muted: var(--product-library-display-secondary-idle-tint, #77766f);
+  --plus-line: var(--product-library-divider-primary, #ecece6);
   /* A translucent layer over whatever is underneath. */
   --plus-hover: var(
     --product-library-actionable-quaternary-hover-fill,
-    light-dark(#f7f7f3, #2a2b25)
+    #f7f7f3
   );
   /* Text, links, focus rings and drag indicators (insert lines, drop borders). */
-  --plus-accent: var(
-    --product-library-actionable-tertiary-idle-tint,
-    light-dark(#557921, #acc97b)
-  );
+  --plus-accent: var(--product-library-actionable-tertiary-idle-tint, #557921);
   /* Primary buttons and checkboxes; text on them is --plus-on-accent. */
   --plus-accent-fill: var(
     --product-library-actionable-primary-idle-fill,
-    light-dark(#557921, #acc97b)
+    #557921
   );
   --plus-on-accent: var(
     --product-library-actionable-primary-on-idle-tint,
-    light-dark(#fff, #1e1e1e)
+    #fff
   );
   /* Todoist's selected sidebar row; all text on it, muted too, is --plus-selected-text. */
   --plus-selected: var(
     --product-library-selectable-secondary-selected-fill,
-    light-dark(#f0f6df, #323c24)
+    #f0f6df
   );
   --plus-selected-text: var(
     --product-library-selectable-secondary-on-selected-tint,
-    light-dark(#557921, #acc97b)
+    #557921
   );
   /* The nav row copies the native sidebar exactly: on the live page Todoist's selected row text is this token (checked
-     in Kale and Dark on 2026-10-16). Board text on the selected fill keeps the darker --plus-selected-text for 4.5:1. */
+     in Kale on 2026-10-16). Board text on the selected fill keeps the darker --plus-selected-text for 4.5:1. */
   --plus-nav-selected-text: var(
     --product-library-selectable-secondary-on-selected-fill,
-    light-dark(#4c7a45, #acc97b)
+    #4c7a45
   );
   --plus-warning: var(
     --product-library-info-warning-primary-on-idle-tint,
@@ -99,14 +81,7 @@ body {
   font-size: 14px;
   color: var(--plus-text);
 }
-/*
- * Until Todoist's own color-scheme is confirmed in its live Dark theme, mount.tsx also marks a
- * host dark from the page's text colour, so form controls and fallbacks follow.
- */
-:host([data-theme="dark"]) {
-  color-scheme: dark;
-}
-/* The options page has no Todoist theme; its fallbacks follow the system (color-scheme meta). */
+/* The options page has no Todoist theme and uses the light fallbacks. */
 body {
   background: var(--plus-bg);
 }
