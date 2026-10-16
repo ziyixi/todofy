@@ -19,13 +19,18 @@ Focus has one quiet line, a deadline without a lead is one weekly review line, t
 stands and can mark it in progress, and Todofy also hides the three waiting and in-progress deadline filters, by
 exact query, behind a consistency test against the board. Plus has no dark mode any more (owner decision); its
 colours follow Todoist's light themes. `--plus-danger` reads Todoist's overdue colour; Other views remembers
-open or closed. Dependencies and native row marks are not built. Local extension checks (163 unit, 26 MV3
-Chromium), Todofy host and Plus runtime cases and scripts pass
+open or closed. Dependencies and native row marks are not built. Same-day review fixes are in (Focus's
+line skips waiting tasks, two-part statuses get their own row, medium windows keep the four stages in one row,
+Start takes no title room, the drag preview matches the card, Week keeps step counts). Local extension checks
+(167 unit, 28 MV3 Chromium), Todofy host and Plus runtime cases and scripts pass
 ([evidence](docs/todoist-plus-verification.md#start-now-and-waiting-lanes-local-checks-october-16)).
 Pending: owner review of the Kale screenshots, push, full branch CI and one same-SHA release. Deploy Todofy
 first, since `active` needs it, then reload the extension and refresh Todoist; the installed version's Waiting
 row covers the two waiting filters until then, and in-progress tasks need no list in either version. Confirm
-the account has an `active` label and the three filters disappear only from the extension's sidebar.
+the account has an `active` label and the three filters disappear only from the extension's sidebar. Open
+for the owner: a quiet deadline hint on acknowledged cards (none now, as specified), more than the screen-reader
+announcement when Start takes an unstaged card off the board, and the waiting card's past-deadline wording (now
+Start now's red "已过 N 天").
 
 Todoist Plus UI theme, safety and polish (owner-approved October 15: safety C1-C6, theming A1-A6, polish
 B1-B6) is on local branch `claude/plus-ui-theme`, based on `58908f64`; not pushed, no branch CI or release.

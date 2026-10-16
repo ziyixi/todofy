@@ -657,4 +657,20 @@ Screenshots of the built extension on the synthetic page, in Kale light only, we
 with both lanes, a Start now card dragged into Committed and pending after the drop, a hovered card showing
 Start, and the weekly review's start-ahead line; the interface document's images were retaken.
 
+Review fixes, same day. Focus's quiet line no longer counts a waiting task past its deadline, which the board
+shows in Waiting, so the line's numbers, its wording and its jump agree. A two-part status ("12 天未变动 ·
+10月22日截止") has its own row under the area and wraps only between its parts, so no line starts or ends with
+the separator; English reads "No change in 12 days" and "2 days late". A waiting card past its deadline says
+"已过 N 天" in the danger colour, the board's one red wording. Between about 800 and 1,260 px of content the four
+stages keep one row under Start now and Waiting, two columns each. Start no longer reserves room in the title
+row: it is drawn over the end of the title's first line on hover or keyboard focus. The drag preview takes the
+dragged card's size. Week's commitment overview keeps its step counts. A step dropped into its own outcome's
+lane, where it would come straight back to Start now or Waiting, writes nothing. The extension passes types,
+lint, Prettier, 167 unit/component/API cases and 28 built-MV3 Chromium cases; new cases cover the 1,440 px
+layout, the two-part status's wrap and its one-line Chinese, the preview's size, Start's free title width, the
+step drops and steps of a committed outcome in the client consistency grid. Todofy's unit cases add one
+`{stage, active}` request, with the Sunday next-week rule, and the `lead_3d` boundary. The content script is
+384,037 bytes (121,765 with `gzip -9`), its CSS 33,605. The Kale screenshots and the interface document's images
+were retaken.
+
 Not verified: the live Todoist page and data, the installed extension, branch CI and release.
