@@ -269,8 +269,10 @@ it("lists deadlines without a start-ahead choice in one line, with the editor's 
       review.queryByRole("checkbox", { name: /no start-ahead set$/u }),
     ).toBeNull(),
   );
-  expect(document.activeElement).toBe(
-    review.getByRole("heading", { name: "Weekly review" }),
+  await waitFor(() =>
+    expect(document.activeElement).toBe(
+      review.getByRole("heading", { name: "Weekly review" }),
+    ),
   );
 });
 

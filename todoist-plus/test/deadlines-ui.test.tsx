@@ -327,8 +327,11 @@ it("marks a card in progress from its Start, in one confirmed write, and moves f
   expect(cards("Start now")).toEqual([
     "Submit the expense claim, No priority, Deadline tomorrow, Wed, Oct 14",
   ]);
-  expect(document.activeElement?.getAttribute("aria-label")).toBe(
-    "Start: Submit the expense claim",
+  // Focus moves in an effect after the commit that says so.
+  await waitFor(() =>
+    expect(document.activeElement?.getAttribute("aria-label")).toBe(
+      "Start: Submit the expense claim",
+    ),
   );
   // A staged card stays in its lane, without the status or its Start.
   fireEvent.click(
