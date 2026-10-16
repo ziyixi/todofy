@@ -92,7 +92,9 @@
     border-color 120ms ease,
     background-color 120ms ease;
 }
-.planning-outcome-card:hover {
+/* A card stays lit while the pointer is on its handle or its Start. */
+.planning-outcome-card:hover,
+.review-draggable:hover > .planning-outcome-card {
   background:
     linear-gradient(var(--plus-hover), var(--plus-hover)), var(--plus-bg) !important;
 }
@@ -156,13 +158,6 @@
   overflow: hidden;
   overflow-wrap: anywhere;
 }
-/* Free room for the hover action drawn over it (.review-card-action), so the title never moves. */
-.planning-outcome-action-room {
-  flex: 0 0 auto;
-  visibility: hidden;
-  font-size: 12px;
-  line-height: 19.5px;
-}
 .planning-outcome-meta {
   display: flex;
   gap: 7px;
@@ -203,10 +198,37 @@
 .planning-outcome-status > span {
   white-space: nowrap;
 }
+/*
+ * A two-part status ("12 天未变动 · 10月22日截止") has its own row under the area. Where even that
+ * is too narrow it wraps between its parts, and the separator that would start the next line falls
+ * in the 1em clipped off at the left, so no line starts or ends with "·".
+ */
+.planning-outcome-status.is-row {
+  display: flex;
+  flex-wrap: wrap;
+  margin-left: -1em;
+  clip-path: inset(0 0 0 1em);
+  text-align: left;
+  color: var(--plus-muted);
+  font-size: 12px;
+  line-height: 16px;
+}
+.planning-outcome-status.is-row > span {
+  white-space: normal;
+}
+.planning-outcome-status.is-row > :first-child {
+  padding-left: 1em;
+}
+.planning-outcome-separator {
+  display: inline-block;
+  width: 1em;
+  text-align: center;
+}
 .review-draggable {
   position: relative;
 }
-.review-draggable > .planning-outcome-card {
+.review-draggable > .planning-outcome-card,
+.review-drag-preview > .planning-outcome-card {
   padding-left: 25px;
 }
 .review-draggable.is-dragging {
@@ -233,33 +255,35 @@
   cursor: default;
 }
 /*
- * Start, in the title row's free room at the card's top right (its border and padding, 9px in).
- * As on Todoist's own task rows it shows on hover or keyboard focus only; hidden by opacity alone,
- * it stays in the tab order and the accessibility tree.
+ * Start, over the end of the title's first line (the card's border and padding, 9px in), where the
+ * title fades into the card's own background. As on Todoist's own task rows it shows on hover or
+ * keyboard focus only, so at rest the title has the card's full width; hidden by opacity alone, it
+ * stays in the tab order and the accessibility tree. While it cannot be used it stays hidden.
  */
 .plus-root .review-card-action {
   position: absolute;
   top: 9px;
   right: 9px;
-  padding: 0;
+  padding: 0 0 0 14px;
   font-size: 12px;
   line-height: 19.5px;
   color: var(--plus-accent);
+  background: linear-gradient(to right, transparent, var(--plus-bg) 12px);
   white-space: nowrap;
   opacity: 0;
 }
 .plus-root .review-card-action:disabled {
   opacity: 0;
 }
-.plus-root
-  .review-draggable:is(:hover, :has(:focus-visible))
-  .review-card-action {
-  opacity: 1;
+.plus-root .review-draggable:hover .review-card-action {
+  background:
+    linear-gradient(to right, transparent, var(--plus-hover) 12px),
+    linear-gradient(to right, transparent, var(--plus-bg) 12px);
 }
 .plus-root
   .review-draggable:is(:hover, :has(:focus-visible))
-  .review-card-action:disabled {
-  opacity: 0.45;
+  .review-card-action:enabled {
+  opacity: 1;
 }
 .plus-root .review-card-action:hover {
   text-decoration: underline;
@@ -275,25 +299,43 @@
   color: var(--plus-muted);
   font-size: 12px;
 }
+/* As wide as the dragged card: dnd-kit gives the overlay the source's size. */
 .review-drag-preview {
-  width: 244px;
+  position: relative;
+  border-radius: 6px;
   pointer-events: none;
   box-shadow: var(--plus-shadow-2);
 }
-/* Five or six lanes wrap into three columns until each lane has about 200px. */
+/*
+ * Five or six lanes stay in one row until each lane has about 200px. Then the four stages keep
+ * their row, and Start now and Waiting share the row above it (one alone takes it whole), so a drag
+ * from them into a stage goes straight down. Two columns pair them again.
+ */
 @container review (max-width: 1260px) {
   .review-lanes[data-lanes="6"] {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+  .review-lanes[data-lanes="6"]
+    > :is([data-lane="start"], [data-lane="waiting"]) {
+    grid-column: span 2;
   }
 }
 @container review (max-width: 1050px) {
   .review-lanes[data-lanes="5"] {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+  .review-lanes[data-lanes="5"]
+    > :is([data-lane="start"], [data-lane="waiting"]) {
+    grid-column: 1 / -1;
   }
 }
 @container review (max-width: 800px) {
   .review-lanes[data-lanes] {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .review-lanes[data-lanes="6"]
+    > :is([data-lane="start"], [data-lane="waiting"]) {
+    grid-column: auto;
   }
 }
 @container review (max-width: 430px) {

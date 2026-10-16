@@ -45,6 +45,35 @@ const card = (page: Page, title: string) =>
   page.locator(".review-draggable", {
     has: page.getByRole("button", { name: new RegExp(`^${title},`, "u") }),
   });
+/**
+ * How a card's two-part status is laid out: its lines, whether each part's words start at the
+ * area's left edge, and whether the separator lies in the clipped margin left of that edge.
+ */
+const statusLines = (outcome: Locator) =>
+  outcome.evaluate((element) => {
+    const status = element.querySelector(".planning-outcome-status")!;
+    const edge = element
+      .querySelector(".planning-outcome-context")!
+      .getBoundingClientRect().left;
+    const words = [...status.children].map((part) => {
+      const range = document.createRange();
+      range.selectNodeContents(
+        [...part.childNodes].find((node) => node.nodeType === Node.TEXT_NODE)!,
+      );
+      return range.getBoundingClientRect();
+    });
+    const separator = status
+      .querySelector(".planning-outcome-separator")!
+      .getBoundingClientRect();
+    return {
+      lines: new Set(words.map((box) => Math.round(box.top))).size,
+      sameEdge:
+        Math.abs(words[0]!.left - edge) < 0.5 &&
+        (words[1]!.top === words[0]!.top ||
+          Math.abs(words[1]!.left - edge) < 0.5),
+      separatorHidden: separator.right <= edge + 0.5,
+    };
+  });
 
 test("Start now and Waiting lead the four stage lanes with the same cards, and Start marks a task in progress", async () => {
   const { context, worker } = await launchPlanner();
@@ -83,7 +112,7 @@ test("Start now and Waiting lead the four stage lanes with the same cards, and S
     ]);
     await expect(
       lane(page, "Start now").locator(".planning-outcome-status"),
-    ).toHaveText(["2 days past", "Deadline tomorrow"]);
+    ).toHaveText(["2 days late", "Deadline tomorrow"]);
     await expect(titles(page, "Committed")).toHaveText([
       "Synthetic weekly outcome",
       "Prepare the visa documents",
@@ -101,9 +130,17 @@ test("Start now and Waiting lead the four stage lanes with the same cards, and S
     await expect(
       lane(page, "Waiting").locator(".planning-outcome-status"),
     ).toHaveText([
-      /^Untouched \d+ days · Deadline Oct 20$/u,
-      /^Untouched \d+ days$/u,
+      /^No change in \d+ days · Deadline Oct 20$/u,
+      /^No change in \d+ days$/u,
     ]);
+    // A two-part status has its own row under the area. Here it wraps once, between its parts:
+    // both lines start at the area's edge, and the separator before the second part lies in the
+    // clipped margin left of it, so no line starts or ends with "·".
+    expect(
+      await statusLines(
+        card(page, "Contract signature").locator(".planning-outcome-card"),
+      ),
+    ).toEqual({ lines: 2, sameEdge: true, separatorHidden: true });
     // Cards never widen their lane, also with the longest English status: it wraps between its
     // parts instead.
     expect(
@@ -145,6 +182,15 @@ test("Start now and Waiting lead the four stage lanes with the same cards, and S
         ),
       ),
     );
+    // At rest Start takes no room: a Start now card's title is as wide as any other card's.
+    const titleWidth = (title: string) =>
+      card(page, title)
+        .locator(".planning-outcome-title")
+        .evaluate((element) => element.getBoundingClientRect().width);
+    expect(await titleWidth("Submit the expense claim")).toBeCloseTo(
+      await titleWidth("Synthetic weekly outcome"),
+      0,
+    );
     // The one colour is the days past.
     expect(
       await page
@@ -152,7 +198,7 @@ test("Start now and Waiting lead the four stage lanes with the same cards, and S
         .evaluateAll((elements) =>
           elements.map((element) => element.textContent),
         ),
-    ).toEqual(["2 days past"]);
+    ).toEqual(["2 days late"]);
     // Nothing is stacked under the board.
     await expect(page.locator(".planning-view details")).toHaveCount(0);
     // Start is hidden at rest, shows on hover without moving the title or the status, and is
@@ -232,11 +278,35 @@ test("dragging a Start now card into Committed sets the stage and in progress in
     await expect(titles(page, "Start now")).toHaveCount(2);
     await controlWrites(worker, { hold: true });
     const draft = card(page, "Quarterly report draft");
-    await dragPlanner(
-      page,
-      draft.locator(".review-drag-handle"),
-      lane(page, "Committed"),
+    // The floating card is the card it carries, at its size.
+    const source = (await draft.boundingBox())!;
+    const handle = (await draft.locator(".review-drag-handle").boundingBox())!;
+    await page.mouse.move(
+      handle.x + handle.width / 2,
+      handle.y + handle.height / 2,
     );
+    await page.mouse.down();
+    await page.mouse.move(
+      handle.x + handle.width / 2 + 8,
+      handle.y + handle.height / 2,
+      {
+        steps: 3,
+      },
+    );
+    const preview = page.locator("[data-dnd-overlay] .review-drag-preview");
+    await expect(preview).toBeVisible();
+    const floating = (await preview.boundingBox())!;
+    expect([floating.width, floating.height]).toEqual([
+      source.width,
+      source.height,
+    ]);
+    const committed = (await lane(page, "Committed").boundingBox())!;
+    await page.mouse.move(
+      committed.x + committed.width / 2,
+      committed.y + committed.height / 2,
+      { steps: 18 },
+    );
+    await page.mouse.up();
     // Shown at once in Committed, waiting there; Start now keeps the other card.
     const moved = lane(page, "Committed").locator(".review-draggable", {
       hasText: "Quarterly report draft",
@@ -289,7 +359,7 @@ test("dragging a Waiting card into Week sets only its stage; Start now and Waiti
     // In its stage lane, the card still says it waits.
     await expect(
       card(page, "Contract signature").locator(".planning-outcome-status"),
-    ).toHaveText(/^Untouched \d+ days · Deadline Oct 20$/u);
+    ).toHaveText(/^No change in \d+ days · Deadline Oct 20$/u);
     await expect
       .poll(async () => (await writes(worker)).map((call) => call.body))
       .toEqual([
@@ -380,6 +450,71 @@ test("the weekly review lists a deadline without a lead and sets it with the edi
         },
       },
     ]);
+  } finally {
+    await context.close();
+  }
+});
+
+test("a waiting card's two-part status fits one line in Chinese at this width", async () => {
+  const { context, worker } = await launchPlanner();
+  try {
+    await addDeadlineTasks(worker);
+    const page = await context.newPage();
+    await page.goto("https://app.todoist.com/app/today?todoist-plus=plan");
+    await page.evaluate(() => (document.documentElement.lang = "zh"));
+    const contract = card(page, "Contract signature");
+    await expect(contract.locator(".planning-outcome-status")).toHaveText(
+      /^\d+ 天未变动 · 10月20日截止$/u,
+    );
+    expect(
+      await statusLines(contract.locator(".planning-outcome-card")),
+    ).toEqual({
+      lines: 1,
+      sameEdge: true,
+      separatorHidden: false,
+    });
+  } finally {
+    await context.close();
+  }
+});
+
+test("medium windows keep the four stages in one row under Start now and Waiting", async () => {
+  const { context, worker } = await launchPlanner();
+  try {
+    await addDeadlineTasks(worker);
+    const page = await context.newPage();
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto("https://app.todoist.com/app/today?todoist-plus=plan");
+    await expect(lane(page, "Start now")).toBeVisible();
+    const box = async (name: string) => (await lane(page, name).boundingBox())!;
+    const start = await box("Start now");
+    const waiting = await box("Waiting");
+    const stages = [
+      await box("Quarter"),
+      await box("Month"),
+      await box("Week"),
+      await box("Committed"),
+    ];
+    // Start now and Waiting share the first row, two of the four columns each.
+    expect(waiting.y).toBeCloseTo(start.y, 0);
+    expect(start.x).toBeCloseTo(stages[0]!.x, 0);
+    expect(start.x + start.width).toBeCloseTo(
+      stages[1]!.x + stages[1]!.width,
+      0,
+    );
+    expect(waiting.x).toBeCloseTo(stages[2]!.x, 0);
+    expect(waiting.x + waiting.width).toBeCloseTo(
+      stages[3]!.x + stages[3]!.width,
+      0,
+    );
+    // The stages, in order, in one row below them.
+    for (const [index, stage] of stages.entries()) {
+      expect(stage.y).toBeCloseTo(stages[0]!.y, 0);
+      expect(stage.y).toBeGreaterThan(
+        Math.max(start.y + start.height, waiting.y + waiting.height),
+      );
+      if (index) expect(stage.x).toBeGreaterThan(stages[index - 1]!.x);
+    }
   } finally {
     await context.close();
   }

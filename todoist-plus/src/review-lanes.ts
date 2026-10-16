@@ -10,6 +10,7 @@ import {
   oldestUntouched,
   untouchedText,
   WAITING_LABELS,
+  waits,
 } from "./weekly-review";
 import type { Language, PlanState, PlanningTask, Stage } from "./model";
 
@@ -28,8 +29,7 @@ export function cardState(
   task: PlanningTask,
   today: string,
 ): CardState | undefined {
-  if (task.labels.some((label) => WAITING_LABELS.includes(label)))
-    return "waiting";
+  if (waits(task)) return "waiting";
   const state = deadlineState(task, today);
   return state && isDue(state) ? "start" : undefined;
 }
@@ -38,8 +38,10 @@ export function cardState(
  * Every task in at most one lane (owner, 2026-10-16). An outcome with its own stage label stays in
  * that lane, and its card says it waits or should start. Otherwise a waiting task is in Waiting and
  * one that should start is in Start now, also when only the 7-day date rule made it a Week
- * candidate; the other date-rule candidates stay in Week. Start now lists the earliest deadline
- * first, then the higher priority; Waiting the longest untouched first.
+ * candidate; the other date-rule candidates stay in Week. A step has no card in its outcome's lane,
+ * even with the same stage label, so one that waits or should start has its own card in Waiting or
+ * Start now. Start now lists the earliest deadline first, then the higher priority; Waiting the
+ * longest untouched first.
  */
 export function boardLanes(
   plan: Pick<PlanState, "tasks" | "managedLabels">,
@@ -76,8 +78,9 @@ export function boardLanes(
 
 /**
  * A card's one muted status, in parts that are shown joined by " · ": "还剩 5 天", "明天截止",
- * "今天截止" or "已过 2 天" (in --plus-danger) when it should start; "12 天未变动 · 10月22日截止"
- * or "12 天未变动" when it waits.
+ * "今天截止" or "已过 2 天" (in --plus-danger) when it should start; "12 天未变动 · 10月22日截止",
+ * "12 天未变动 · 已过 2 天" or "12 天未变动" when it waits. "已过 N 天" is the board's one red
+ * wording.
  */
 export function cardStatus(
   task: PlanningTask,
@@ -87,7 +90,10 @@ export function cardStatus(
 ): StatusText[] {
   if (state === "start") return [startStatus(task.deadline, today, language)];
   const untouched = untouchedText(task, language);
-  const deadline = deadlineStatus(task, today, language);
+  const deadline =
+    task.deadline && task.deadline < today
+      ? startStatus(task.deadline, today, language)
+      : deadlineStatus(task, today, language);
   return [
     ...(untouched ? [{ text: untouched }] : []),
     ...(deadline ? [deadline] : []),

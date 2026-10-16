@@ -12,7 +12,7 @@ import { afterEach, beforeAll, expect, it, vi } from "vitest";
 import { App } from "../src/App";
 import { createPrototype } from "../design/fixture";
 import { predictMove, predictStage } from "../src/plan-updates";
-import type { PlanningTask, PlusActions } from "../src/model";
+import type { PlanningTask, PlusActions, PlusData } from "../src/model";
 
 // jsdom has no layout for real pointer drags (covered by the packaged browser tests), so this
 // stand-in hands each drop straight to the board's own onDragEnd.
@@ -520,7 +520,7 @@ it("moves a Waiting card into a stage lane with its stage only, keeping its wait
       .getByRole("button", { name: /^Hear back about the venue quote,/u })
       .getAttribute("aria-label"),
   ).toMatch(
-    /^Hear back about the venue quote, No priority, Untouched \d+ days$/u,
+    /^Hear back about the venue quote, No priority, No change in \d+ days$/u,
   );
 });
 
@@ -556,4 +556,85 @@ it("drags Start now with the stage only without the active label; a drop on Star
   expect(writes).toHaveLength(1);
   expect(laneTitles("Start now")).toEqual(["Renew the passport"]);
   expect(laneTitles("Waiting")).toContain("Hear back about the venue quote");
+});
+
+/** Two steps of the committed research check-in: one waits, one should start. */
+function withResearchSteps(
+  actions: PlusActions,
+  change?: (data: PlusData) => void,
+) {
+  const load = actions.load.bind(actions);
+  vi.spyOn(actions, "load").mockImplementation(async (week) => {
+    const data = await load(week);
+    const outline = data.plan.tasks.find((task) => task.id === "outline")!;
+    data.plan.tasks.push(
+      {
+        ...outline,
+        id: "reply",
+        title: "Hear back from the reviewer",
+        labels: ["waiting"],
+      },
+      {
+        ...outline,
+        id: "slides",
+        title: "Draft the check-in slides",
+        deadline: "2026-10-14",
+        leadDays: 3,
+        mustStart: true,
+      },
+    );
+    change?.(data);
+    return data;
+  });
+}
+
+it("writes nothing for a step dropped into its outcome's lane, where it would come straight back", async () => {
+  const actions = createPrototype();
+  withResearchSteps(actions);
+  const writes = hold(actions, "updateTask");
+  await mountPlan(actions);
+  const step = async (id: string) =>
+    (await actions.load()).plan.tasks.find((task) => task.id === id)!;
+  expect(laneTitles("Waiting")).toContain("Hear back from the reviewer");
+  // With Committed's label it would still be a step of the research card, so it would still wait.
+  await drop(
+    { task: await step("reply"), lane: "waiting" },
+    { stage: "committed" },
+  );
+  expect(writes).toHaveLength(0);
+  expect(laneTitles("Waiting")).toContain("Hear back from the reviewer");
+  // Marked in progress as well, the step that should start does leave Start now.
+  expect(laneTitles("Start now")).toEqual(["Draft the check-in slides"]);
+  await drop(
+    { task: await step("slides"), lane: "start" },
+    { stage: "committed" },
+  );
+  expect(writes.map((write) => write.args[1])).toEqual([
+    { stage: "committed", active: true },
+  ]);
+  expect(screen.queryByRole("region", { name: "Start now" })).toBeNull();
+  // Into another stage, the waiting step becomes a card of its own there, queued after the first.
+  await drop(
+    { task: await step("reply"), lane: "waiting" },
+    { stage: "weekly" },
+  );
+  expect(laneTitles("Week")).toContain("Hear back from the reviewer");
+  expect(laneTitles("Waiting")).not.toContain("Hear back from the reviewer");
+});
+
+it("writes nothing for a step that should start dropped into its outcome's lane without the active label", async () => {
+  const actions = createPrototype();
+  withResearchSteps(actions, (data) => {
+    data.plan.availableLabels = data.plan.availableLabels.filter(
+      (label) => label.label !== "active",
+    );
+  });
+  const writes = hold(actions, "updateTask");
+  await mountPlan(actions);
+  const slides = (await actions.load()).plan.tasks.find(
+    (task) => task.id === "slides",
+  )!;
+  await drop({ task: slides, lane: "start" }, { stage: "committed" });
+  expect(writes).toHaveLength(0);
+  expect(laneTitles("Start now")).toEqual(["Draft the check-in slides"]);
 });

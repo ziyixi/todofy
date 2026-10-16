@@ -183,25 +183,23 @@ it("says each card's one status: how long is left, or how long untouched with th
     [[{ text: "明天截止" }], [{ text: "Deadline tomorrow" }]],
     [
       [{ text: "", danger: "已过 2 天" }],
-      [{ text: "", danger: "2 days past" }],
+      [{ text: "", danger: "2 days late" }],
     ],
     [
       [{ text: "12 天未变动" }, { text: "10月22日截止" }],
-      [{ text: "Untouched 12 days" }, { text: "Deadline Oct 22" }],
+      [{ text: "No change in 12 days" }, { text: "Deadline Oct 22" }],
     ],
-    [[{ text: "12 天未变动" }], [{ text: "Untouched 12 days" }]],
+    [[{ text: "12 天未变动" }], [{ text: "No change in 12 days" }]],
     [
-      [{ text: "1 天内有变动" }, { text: "", danger: "已过截止 2 天" }],
-      [
-        { text: "Changed within a day" },
-        { text: "", danger: "2 days past deadline" },
-      ],
+      // Past its deadline, the board's one red wording, as in Start now.
+      [{ text: "1 天内有变动" }, { text: "", danger: "已过 2 天" }],
+      [{ text: "Changed within a day" }, { text: "", danger: "2 days late" }],
     ],
   ]);
   // Shown, and named, as one line.
   expect(statusLine(status(contract, "zh"))).toBe("12 天未变动 · 10月22日截止");
   expect(statusLine(status(overdue, "en"))).toBe(
-    "Changed within a day · 2 days past deadline",
+    "Changed within a day · 2 days late",
   );
   // A wait of unknown age without a deadline says nothing.
   expect(status(task("plain", { labels: ["waiting"] }), "en")).toEqual([]);
@@ -212,51 +210,62 @@ it("says each card's one status: how long is left, or how long untouched with th
  * server half). From the API's fields alone, every task a replaced filter shows is on the board:
  * one with a `waiting` or `blocked` label in Waiting or in its own stage lane saying it waits; one
  * Todofy marks must start in Start now or in its own stage lane saying it should start; an
- * `active` one may stay off the board.
+ * `active` one may stay off the board. Top-level tasks and steps of a committed outcome alike: a
+ * step with its outcome's stage has no card in that lane, so it has one in Waiting or Start now.
  */
 it("shows every task the API marks for a replaced deadline or waiting filter on the board", () => {
   const marks = ["waiting", "blocked", "active", "parked"];
   const stages = [
     { stage: "none" as const, labels: [] },
     { stage: "committed" as const, labels: ["committed"] },
+    { stage: "monthly" as const, labels: ["candiate"] },
     // The date rule's Week candidate.
     { stage: "weekly" as const, labels: [], due: on(2) },
   ];
+  const outcome = task("outcome", {
+    stage: "committed",
+    labels: ["committed"],
+  });
   for (let combination = 0; combination < 1 << marks.length; combination++)
     for (const deadline of ["", on(-3), TODAY, on(5), on(40)])
       for (const plan of stages)
-        for (const mustStart of [false, true])
-          for (const missingLead of [false, true]) {
-            const labels = marks.filter((_, bit) => (combination >> bit) & 1);
-            // Todofy's must_start never comes with a missing deadline or these labels.
-            if (
-              mustStart &&
-              (!deadline ||
-                labels.some((label) =>
-                  ["active", "blocked", "parked"].includes(label),
-                ))
-            )
-              continue;
-            const item = task("grid", {
-              ...plan,
-              labels: [...plan.labels, ...labels],
-              deadline,
-              mustStart,
-              missingLead,
-            });
-            const lanes = boardLanes({ tasks: [item], managedLabels }, TODAY);
-            const shown = Object.values(lanes).filter((cards) =>
-              cards.includes(item),
-            ).length;
-            const name = JSON.stringify(item);
-            expect(shown, name).toBeLessThanOrEqual(1);
-            const waits =
-              labels.includes("waiting") || labels.includes("blocked");
-            if (waits || mustStart) {
-              expect(shown, name).toBe(1);
-              expect(cardState(item, TODAY), name).toBe(
-                waits ? "waiting" : "start",
+        for (const parentId of ["", outcome.id])
+          for (const mustStart of [false, true])
+            for (const missingLead of [false, true]) {
+              const labels = marks.filter((_, bit) => (combination >> bit) & 1);
+              // Todofy's must_start never comes with a missing deadline or these labels.
+              if (
+                mustStart &&
+                (!deadline ||
+                  labels.some((label) =>
+                    ["active", "blocked", "parked"].includes(label),
+                  ))
+              )
+                continue;
+              const item = task("grid", {
+                ...plan,
+                parentId,
+                labels: [...plan.labels, ...labels],
+                deadline,
+                mustStart,
+                missingLead,
+              });
+              const lanes = boardLanes(
+                { tasks: [outcome, item], managedLabels },
+                TODAY,
               );
+              const shown = Object.values(lanes).filter((cards) =>
+                cards.includes(item),
+              ).length;
+              const name = JSON.stringify(item);
+              expect(shown, name).toBeLessThanOrEqual(1);
+              const waits =
+                labels.includes("waiting") || labels.includes("blocked");
+              if (waits || mustStart) {
+                expect(shown, name).toBe(1);
+                expect(cardState(item, TODAY), name).toBe(
+                  waits ? "waiting" : "start",
+                );
+              }
             }
-          }
 });

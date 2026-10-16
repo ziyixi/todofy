@@ -136,7 +136,7 @@ it("puts Start now and then Waiting left of the four stage lanes, with nothing s
   // Start now: title, area and one status, earliest deadline first; screen readers also hear
   // the date the status does not say.
   expect(cards("Start now")).toEqual([
-    "Quarterly report draft, No priority, 2 days past, Sun, Oct 11",
+    "Quarterly report draft, No priority, 2 days late, Sun, Oct 11",
     "Submit the expense claim, No priority, Deadline tomorrow, Wed, Oct 14",
   ]);
   const draft = lane("Start now").querySelector(".planning-outcome-card")!;
@@ -144,7 +144,7 @@ it("puts Start now and then Waiting left of the four stage lanes, with nothing s
     "Work",
   );
   const status = draft.querySelector(".planning-outcome-status")!;
-  expect(status.textContent).toBe("2 days past");
+  expect(status.textContent).toBe("2 days late");
   expect(status.getAttribute("title")).toBe("Deadline: Sun, Oct 11");
   expect(draft.querySelector(".planning-outcome-counts")).toBeNull();
   // The one colour on the board: days past a deadline.
@@ -152,15 +152,15 @@ it("puts Start now and then Waiting left of the four stage lanes, with nothing s
     [...document.querySelectorAll(".planning-danger-text")].map(
       (item) => item.textContent,
     ),
-  ).toEqual(["2 days past"]);
+  ).toEqual(["2 days late"]);
   // Start now and Waiting have no label of their own and take no drops.
   expect(lane("Start now").querySelector(".review-lane-header small")).toBe(
     null,
   );
   expect(lane("Waiting").querySelector(".review-lane-header small")).toBe(null);
   expect(cards("Waiting")).toEqual([
-    "Hear back about the venue quote, No priority, Untouched 11 days",
-    "Lab access approval, No priority, Untouched 3 days",
+    "Hear back about the venue quote, No priority, No change in 11 days",
+    "Lab access approval, No priority, No change in 3 days",
   ]);
   // In progress and no-lead tasks are not on the board.
   for (const title of ["Move house", "Renew the car insurance"])
@@ -186,6 +186,21 @@ it("puts Start now and then Waiting left of the four stage lanes, with nothing s
   ]);
   expect(document.querySelectorAll("details")).toHaveLength(0);
   view.unmount();
+});
+
+it("keeps the step counts on Week's commitment cards, which say nothing of waiting or starting", async () => {
+  const { props } = await setup();
+  render(<PlanView {...props} />);
+  fireEvent.click(screen.getByRole("tab", { name: "Week" }));
+  const overview = document.querySelector(".planning-commitment-grid")!;
+  // Research and the visa are in their start windows; on the board they say so.
+  for (const id of ["research", "visa"])
+    expect(
+      overview.querySelector(
+        `[data-outcome-id="${id}"] .planning-outcome-counts`,
+      )?.textContent,
+    ).toMatch(/^\d+ steps? · \d+ planned$/u);
+  expect(overview.querySelector(".planning-outcome-status")).toBeNull();
 });
 
 it("hides Start now and Waiting while they have no cards", async () => {
@@ -230,7 +245,7 @@ it("keeps a staged task in its lane with one quiet status, and a date-rule candi
   expect(cards("Committed")).toEqual([
     "Ship the small website refresh, No priority",
     "Prepare the next research check-in, No priority, 2 days left, Thu, Oct 15",
-    "Organize the experiment notes, No priority, Untouched 7 days",
+    "Organize the experiment notes, No priority, No change in 7 days",
     "Prepare the visa documents, No priority, 5 days left, Sun, Oct 18",
     "Make the home desk comfortable, No priority",
   ]);
@@ -243,7 +258,7 @@ it("keeps a staged task in its lane with one quiet status, and a date-rule candi
   ).toEqual([
     "2 steps · 2 planned",
     "2 days left",
-    "Untouched 7 days",
+    "No change in 7 days",
     "5 days left",
     "1 step · 0 planned",
   ]);
@@ -292,14 +307,10 @@ it("marks a card in progress from its Start, in one confirmed write, and moves f
     "Start: Prepare the next research check-in",
     "Start: Prepare the visa documents",
   ]);
-  // The title row keeps the action's room free, so showing it moves nothing.
-  const room = lane("Start now").querySelector(
-    ".planning-outcome-action-room",
-  )!;
-  expect([room.textContent, room.getAttribute("aria-hidden")]).toEqual([
-    "Start",
-    "true",
-  ]);
+  // Start is drawn over the card on hover or focus only; the title row keeps no room for it.
+  expect(
+    lane("Start now").querySelector(".planning-outcome-title-row")!.textContent,
+  ).toBe("Quarterly report draft");
   const start = screen.getByRole("button", {
     name: "Start: Quarterly report draft",
   });
@@ -343,7 +354,6 @@ it("offers no Start while the account has no active label", async () => {
   render(<PlanView {...props} />);
   expect(cards("Start now")).toHaveLength(2);
   expect(document.querySelector(".review-card-action")).toBeNull();
-  expect(document.querySelector(".planning-outcome-action-room")).toBeNull();
 });
 
 it("shows Focus's quiet line only for due tasks with nothing planned, and opens Plan's Start now", async () => {
@@ -386,6 +396,38 @@ it("shows Focus's quiet line only for due tasks with nothing planned, and opens 
     />,
   );
   expect(document.querySelector(".plus-focus-runway")).toBeNull();
+});
+
+it("leaves a waiting task past its deadline out of Focus's line, as the board shows it in Waiting", async () => {
+  const { data, props } = await setup((data) => {
+    data.plan.tasks = data.plan.tasks.filter(
+      (task) => !["claim", "visa"].includes(task.id),
+    );
+    data.plan.tasks.find((task) => task.id === "draft")!.labels = ["waiting"];
+  });
+  const focus = render(
+    <FocusView
+      plan={data.plan}
+      focus={data.focus}
+      days={data.days}
+      language="en"
+      busy={false}
+      editTask={vi.fn()}
+      complete={vi.fn()}
+      onOpenPlan={vi.fn()}
+      onTimer={vi.fn()}
+      onShowStart={vi.fn()}
+    />,
+  );
+  expect(document.querySelector(".plus-focus-runway")).toBeNull();
+  focus.unmount();
+  render(<PlanView {...props} />);
+  expect(cards("Waiting")).toContainEqual(
+    expect.stringMatching(
+      /^Quarterly report draft, No priority, .*2 days late/u,
+    ),
+  );
+  expect(screen.queryByRole("region", { name: "Start now" })).toBeNull();
 });
 
 it("takes Focus's line to Plan's Review with Start now focused", async () => {

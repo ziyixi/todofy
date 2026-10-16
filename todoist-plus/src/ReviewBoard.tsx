@@ -1,10 +1,4 @@
-import {
-  Fragment,
-  useEffect,
-  useRef,
-  useState,
-  type CSSProperties,
-} from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import {
   DragDropProvider,
   DragOverlay,
@@ -20,8 +14,9 @@ import {
   outcomeSteps,
   reviewLanes,
 } from "./planning-outcomes";
-import { pendingTask, predictStage } from "./plan-updates";
+import { pendingTask, predictStage, withStage } from "./plan-updates";
 import {
+  boardLanes,
   cardState,
   cardStatus,
   statusLine,
@@ -46,19 +41,21 @@ export interface OutcomeCardProps {
   tasks: PlanningTask[];
   managedLabels: PlanState["managedLabels"];
   scheduledIds: Set<string>;
-  /** The account's today, for the card's status. */
-  today: string;
+  /**
+   * The account's today, on the Review board: there a card says that it waits or should start.
+   * Week's commitment overview leaves it out and always shows the step counts.
+   */
+  today?: string;
   language: Language;
   selected?: boolean;
   /** Its stage change is shown but not yet confirmed. */
   pending?: boolean;
-  /** The hover action shown over the card; the title row keeps its room free. */
-  action?: string;
   onClick: () => void;
 }
 /**
  * Title, area, and the step counts or, when the task waits or should start, one muted status in
- * their place. Only days past a deadline are drawn in --plus-danger.
+ * their place: beside the area, or in a row of its own when it has two parts. Only days past a
+ * deadline are drawn in --plus-danger.
  */
 export function OutcomeCard({
   task,
@@ -69,7 +66,6 @@ export function OutcomeCard({
   language,
   selected = false,
   pending = false,
-  action,
   onClick,
 }: OutcomeCardProps) {
   const steps = outcomeSteps(task, tasks, managedLabels);
@@ -81,13 +77,29 @@ export function OutcomeCard({
         ? "未设优先级"
         : "No priority";
   const title = displayedTitle(task.title);
-  const state = cardState(task, today);
-  const status = state ? cardStatus(task, state, today, language) : [];
+  const state = today ? cardState(task, today) : undefined;
+  const status = today && state ? cardStatus(task, state, today, language) : [];
   const line = statusLine(status);
   // Screen readers hear the status with the part of the deadline it does not already say.
   const spoken = line
     ? `, ${line}${task.deadline ? spokenDeadline({ text: line }, task.deadline, language) : ""}`
     : "";
+  const statusText = (
+    <span
+      className={`planning-outcome-status ${status.length > 1 ? "is-row" : ""}`}
+      title={task.deadline ? deadlineTitle(task.deadline, language) : undefined}
+    >
+      {status.map((part, index) => (
+        <span key={index}>
+          {index > 0 && <span className="planning-outcome-separator"> · </span>}
+          {part.text}
+          {part.danger && (
+            <span className="planning-danger-text">{part.danger}</span>
+          )}
+        </span>
+      ))}
+    </span>
+  );
   return (
     <button
       type="button"
@@ -110,49 +122,22 @@ export function OutcomeCard({
             {title}
           </strong>
           {pending && <PendingMark language={language} />}
-          {action && (
-            <span className="planning-outcome-action-room" aria-hidden="true">
-              {action}
-            </span>
-          )}
         </span>
         <span className={`planning-outcome-meta ${state ? "has-status" : ""}`}>
           <span className="planning-outcome-context">
             {outcomeArea(task, tasks, language)}
           </span>
-          {state ? (
-            <span
-              className="planning-outcome-status"
-              title={
-                task.deadline
-                  ? deadlineTitle(task.deadline, language)
-                  : undefined
-              }
-            >
-              {/* Each part stays whole; a long status wraps between them. */}
-              {status.map((part, index) => (
-                <Fragment key={index}>
-                  {index > 0 && " "}
-                  <span>
-                    {part.text}
-                    {part.danger && (
-                      <span className="planning-danger-text">
-                        {part.danger}
-                      </span>
-                    )}
-                    {index < status.length - 1 && " ·"}
-                  </span>
-                </Fragment>
-              ))}
-            </span>
-          ) : (
+          {!state ? (
             <span className="planning-outcome-counts">
               {language === "zh"
                 ? `${steps.length} 个步骤 · 已安排 ${planned}`
                 : `${steps.length} ${steps.length === 1 ? "step" : "steps"} · ${planned} planned`}
             </span>
+          ) : (
+            status.length < 2 && statusText
           )}
         </span>
+        {status.length > 1 && statusText}
       </span>
     </button>
   );
@@ -260,6 +245,13 @@ export function ReviewBoard({
         if (!task || !stage || from === stage) return;
         // Start now is acknowledged by the drag: the stage and the in-progress label in one write.
         const active = from === "start" && marks;
+        // A step that takes its outcome's own stage is a step of that card, not a card there, so
+        // Waiting or Start now would show it again at once: such a drop writes nothing.
+        const after = boardLanes(
+          withStage(plan, task.id, stage, active),
+          currentDate,
+        );
+        if (from && after[from].some((item) => item.id === task.id)) return;
         // The card moves at once and waits in its new lane until Todoist confirms.
         void run(
           () =>
@@ -301,7 +293,11 @@ export function ReviewBoard({
         {(source) => {
           const task = source.data?.task as PlanningTask | undefined;
           return task ? (
+            // The card as it is in its lane, with its handle: dnd-kit sizes the overlay to it.
             <div className="review-drag-preview" aria-hidden="true" inert>
+              <span className="review-drag-handle">
+                <GripVertical size={14} />
+              </span>
               <OutcomeCard
                 task={task}
                 tasks={plan.tasks}
@@ -479,7 +475,6 @@ function DraggableOutcome({
         today={today}
         language={language}
         pending={pending}
-        action={startable ? text.start : undefined}
         onClick={() => editTask(task)}
       />
       {startable && (

@@ -1,7 +1,7 @@
 import { startDate, taskIndex } from "./domain";
 import { words } from "./i18n";
 import { monthDay, readableDate, shortDay } from "./PlanningCalendar";
-import { ACTIVE_LABEL } from "./weekly-review";
+import { ACTIVE_LABEL, waits } from "./weekly-review";
 import type { FlowDayPlan, Language, PlanState, PlanningTask } from "./model";
 
 /**
@@ -53,8 +53,9 @@ export function canMarkActive(plan: Pick<PlanState, "availableLabels">) {
 }
 
 /**
- * Due tasks with nothing open planned in these queues: neither the task nor any of its steps.
- * Each task is counted once.
+ * Tasks that should start, as the Review board's cards say, with nothing open planned in these
+ * queues: neither the task nor any of its steps. A waiting task past its deadline waits there, so
+ * it is not counted. Each task is counted once.
  */
 export function unplannedDue(
   tasks: readonly PlanningTask[],
@@ -83,7 +84,7 @@ export function unplannedDue(
   const counts = { past: 0, window: 0 };
   for (const task of tasks) {
     const state = deadlineState(task, today);
-    if (state && isDue(state) && !planned.has(task.id))
+    if (state && isDue(state) && !waits(task) && !planned.has(task.id))
       counts[state.kind as "past" | "window"]++;
   }
   return counts;
@@ -101,11 +102,11 @@ function daysWord(days: number, language: Language) {
     ? `${days} 天`
     : `${days} ${days === 1 ? "day" : "days"}`;
 }
-/** "已过 2 天" / "2 days past". */
+/** "已过 2 天" / "2 days late". */
 function pastText(days: number, language: Language) {
   return language === "zh"
     ? `已过 ${daysWord(-days, language)}`
-    : `${daysWord(-days, language)} past`;
+    : `${daysWord(-days, language)} late`;
 }
 /** "今天截止", "明天截止" or "还剩 5 天". */
 function leftText(days: number, language: Language) {
@@ -145,7 +146,10 @@ function deadlineDateText(
     : `Deadline ${monthDay(deadline, language)}`;
 }
 
-/** A card that should start: "还剩 5 天", "明天截止", "今天截止", or "已过 2 天" in --plus-danger. */
+/**
+ * A card that should start: "还剩 5 天", "明天截止", "今天截止", or "已过 2 天" in --plus-danger,
+ * which a waiting card past its deadline says too.
+ */
 export function startStatus(
   deadline: string,
   today: string,
@@ -159,7 +163,7 @@ export function startStatus(
 
 /**
  * "10月22日截止" (today and tomorrow in words), or "已过截止 2 天" in --plus-danger once past: in
- * a waiting card's status and the weekly review's start-ahead line.
+ * a waiting card's status until then, and in the weekly review's start-ahead line.
  */
 export function deadlineStatus(
   task: PlanningTask,
@@ -181,7 +185,7 @@ export function deadlineTitle(deadline: string, language: Language): string {
 
 /**
  * What a status adds for screen readers: the deadline's weekday where the status already shows
- * its date ("11月30日截止，周一"), otherwise its full date ("2 days past, Sun, Oct 11").
+ * its date ("11月30日截止，周一"), otherwise its full date ("2 days late, Sun, Oct 11").
  */
 export function spokenDeadline(
   status: StatusText,

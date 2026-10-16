@@ -143,8 +143,8 @@ it("draws waiting tasks as cards in the lane left of the stage lanes, oldest unt
       .getAllByRole("button", { name: /, No priority/u })
       .map((card) => card.getAttribute("aria-label")),
   ).toEqual([
-    "Hear back about the venue quote, No priority, Untouched 11 days",
-    "Lab access approval, No priority, Untouched 3 days",
+    "Hear back about the venue quote, No priority, No change in 11 days",
+    "Lab access approval, No priority, No change in 3 days",
   ]);
   // A card opens the task's details; nothing was written: no label is removed and nobody is
   // contacted.

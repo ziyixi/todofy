@@ -69,7 +69,7 @@ it("says how long a task that should start has left, only days past in the dange
   expect(statuses).toEqual([
     [
       { text: "", danger: "已过 2 天" },
-      { text: "", danger: "2 days past" },
+      { text: "", danger: "2 days late" },
     ],
     [{ text: "今天截止" }, { text: "Deadline today" }],
     [{ text: "明天截止" }, { text: "Deadline tomorrow" }],
@@ -77,7 +77,7 @@ it("says how long a task that should start has left, only days past in the dange
   ]);
   expect(startStatus(on(-1), TODAY, "en")).toEqual({
     text: "",
-    danger: "1 day past",
+    danger: "1 day late",
   });
 });
 
@@ -130,7 +130,7 @@ it("names a deadline's date, today and tomorrow in words, and days past in the d
   ).toEqual({ text: "", danger: "已过截止 2 天" });
 });
 
-it("counts due tasks once, unless the task or an open step is planned in these queues", () => {
+it("counts tasks that should start once, unless the task or an open step is planned in these queues", () => {
   const tasks = [
     task("past", { deadline: on(-1), mustStart: true }),
     task("window", { deadline: on(3), leadDays: 7, mustStart: true }),
@@ -141,6 +141,8 @@ it("counts due tasks once, unless the task or an open step is planned in these q
     task("done-step", { parentId: "done-step-parent" }),
     task("noLead", { deadline: on(2), missingLead: true }),
     task("active", { deadline: on(2), labels: ["active"] }),
+    // Todofy marks a waiting task past its deadline must start, but the board shows it in Waiting.
+    task("waiting", { deadline: on(-2), labels: ["waiting"], mustStart: true }),
   ];
   const days = [
     {

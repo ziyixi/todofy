@@ -10,6 +10,11 @@ export const ACTIVE_LABEL = "active";
 const CLARIFIED_LABELS = [...WAITING_LABELS, ...SOMEDAY_LABELS, "quick"];
 const DAY_MS = 86_400_000;
 
+/** A task that waits: it has a `waiting` or `blocked` label. */
+export function waits(task: PlanningTask): boolean {
+  return task.labels.some((label) => WAITING_LABELS.includes(label));
+}
+
 /** Whole days since Todoist last changed the task; undefined when that is unknown. */
 export function untouchedDays(
   task: PlanningTask,
@@ -22,15 +27,15 @@ export function untouchedDays(
 }
 
 /**
- * "12 天未变动", in whole 24-hour periods: any Todoist edit resets it, so it never claims how
- * long the wait has been.
+ * "12 天未变动" / "No change in 12 days", in whole 24-hour periods: any Todoist edit resets it, so
+ * it never claims how long the wait has been.
  */
 export function untouchedText(task: PlanningTask, language: Language): string {
   const days = untouchedDays(task);
   if (days === undefined) return "";
   if (language === "zh") return days ? `${days} 天未变动` : "1 天内有变动";
   return days
-    ? `Untouched ${days} ${days === 1 ? "day" : "days"}`
+    ? `No change in ${days} ${days === 1 ? "day" : "days"}`
     : "Changed within a day";
 }
 
