@@ -1,10 +1,15 @@
 import { createRoot, type Root } from "react-dom/client";
-import { createShadowRootUi } from "wxt/utils/content-script-ui/shadow-root";
+import {
+  createShadowRootUi,
+  type ShadowRootContentScriptUi,
+} from "wxt/utils/content-script-ui/shadow-root";
 import type { ContentScriptContext } from "wxt/utils/content-script-context";
 import { ChevronDown, ChevronRight, LayoutList, Target } from "lucide-react";
 import { App } from "./App";
+import { detailTaskId, keepsVisible, matchesId } from "./anchors";
 import { planConfig, todoistTaskUrl } from "./domain";
 import { NativeTaskTools } from "./NativeTaskTools";
+import { PlusBoundary } from "./PlusBoundary";
 import { cachedPlanConfig, extensionActions, openOptions } from "./client";
 import { words } from "./i18n";
 import type {
@@ -18,14 +23,13 @@ import type {
 const viewParam = "todoist-plus";
 const sidebarSelector =
   "[data-testid=app-sidebar-scrollable-container], #left_menu";
-export function taskIdFromElement(element: Element): string | undefined {
-  const item = element.closest("[data-item-id], [data-selection-id]");
-  const id =
-    item?.getAttribute("data-item-id") ??
-    item?.getAttribute("data-selection-id") ??
-    "";
-  return id && !id.startsWith("tmp-") ? id : undefined;
-}
+// A flickering anchor must not turn into endless re-mounts.
+const MOUNTS_PER_MINUTE = 10;
+// One pass per frame at most; a style feedback loop runs one every frame without end, while
+// scrolling and drags come in bursts. Sustained beyond this, native Todoist wins.
+const PASS_LIMIT = 1500;
+const PASS_WINDOW_MS = 30_000;
+
 export function languageOf(document: Document): Language {
   return document.documentElement.lang.toLowerCase().startsWith("zh")
     ? "zh"
@@ -71,6 +75,26 @@ function applyNavigationLayout(host: HTMLElement, reference: HTMLElement) {
   host.style.fontWeight = computed.fontWeight;
 }
 
+/** Allows `limit` calls per fixed window of `windowMs`. */
+function limiter(limit: number, windowMs: number) {
+  let start = -Infinity;
+  let count = 0;
+  return () => {
+    const now = Date.now();
+    if (now - start >= windowMs) {
+      start = now;
+      count = 0;
+    }
+    return ++count <= limit;
+  };
+}
+
+type Ui = ShadowRootContentScriptUi<unknown>;
+
+/**
+ * Native Todoist stays hidden only while its replacement is attached: every failure path (a
+ * re-created container, a rejected mount, a render error, a disabled extension) shows it again.
+ */
 export async function mountTodoist(ctx: ContentScriptContext) {
   const hidden = new Map<
     HTMLElement,
@@ -80,8 +104,11 @@ export async function mountTodoist(ctx: ContentScriptContext) {
   const nativeCurrent = new Set<HTMLElement>();
   const cleanups: (() => void)[] = [];
   let content: HTMLElement | undefined;
+  let mainUi: Ui | undefined;
   let mainHost: HTMLElement | undefined;
   let mainRoot: Root | undefined;
+  let navUi: Ui | undefined;
+  let navHost: HTMLElement | undefined;
   let config: PlanConfig | undefined;
   // The last confirmed data stays in this page's memory only, so returning to Plus paints at once.
   let snapshot: PlusSnapshot | undefined;
@@ -94,12 +121,16 @@ export async function mountTodoist(ctx: ContentScriptContext) {
   let language = languageOf(document);
   let disposed = false;
   let mounting = false;
+  let started = false;
+  const mayMount = limiter(MOUNTS_PER_MINUTE, 60_000);
   let navUpdate: (() => void) | undefined;
   let detailId = "";
   let detailHost: HTMLElement | undefined;
   let detailCleanup: (() => void) | undefined;
   let detailPending = false;
   let detailsReady = false;
+  // The task whose tools failed to render stays native until its modal closes.
+  let detailFailed = "";
   let otherViewsOpen = false;
   let favoritesRoot: Root | undefined;
   let favoritesHost: HTMLElement | undefined;
@@ -196,34 +227,37 @@ export async function mountTodoist(ctx: ContentScriptContext) {
       })
       .filter((row) => row !== undefined);
   }
-  function matchesId(slug: string, ids: string[]) {
-    return ids.some((id) => slug === id || slug.endsWith(`-${id}`));
-  }
   async function showOtherViews(rows: HTMLElement[]) {
     if (!favoritesHost?.isConnected && !favoritesPending && rows.length) {
       favoritesCleanup?.();
       favoritesPending = true;
       const anchor = rows[0]!;
-      const ui = await createShadowRootUi(ctx, {
-        inheritStyles: true,
-        name: "todoist-plus-other-views",
-        position: "inline",
-        anchor,
-        append: "before",
-        onMount(container) {
-          const root = createRoot(container);
-          favoritesRoot = root;
-          return root;
-        },
-        onRemove(root) {
-          root?.unmount();
-        },
-      });
-      favoritesPending = false;
+      let ui: Ui;
+      try {
+        ui = await createShadowRootUi(ctx, {
+          inheritStyles: true,
+          name: "todoist-plus-other-views",
+          position: "inline",
+          anchor,
+          append: "before",
+          onMount(container) {
+            const root = createRoot(container);
+            favoritesRoot = root;
+            return root;
+          },
+          onRemove(root) {
+            root?.unmount();
+          },
+        });
+      } finally {
+        favoritesPending = false;
+      }
       if (disposed || !anchor.isConnected) return;
       ui.mount();
       favoritesHost = ui.shadowHost;
       favoritesKey = "";
+      // Extra favourites fold away only once their toggle is in place.
+      if (!otherViewsOpen) for (const row of rows) hide(row);
       const reference = document.querySelector<HTMLElement>(
         "#top-menu a[href$='/upcoming']",
       );
@@ -235,6 +269,8 @@ export async function mountTodoist(ctx: ContentScriptContext) {
       favoritesCleanup = () => {
         themeHosts.delete(ui.shadowHost);
         ui.remove();
+        favoritesRoot = undefined;
+        favoritesHost = undefined;
       };
     }
     if (!favoritesRoot || !favoritesHost) return;
@@ -268,11 +304,22 @@ export async function mountTodoist(ctx: ContentScriptContext) {
   }
   function hideReplaced() {
     syncNativeSelection();
-    if (view && content && mainHost) {
-      for (const child of Array.from(content.children))
-        if (child instanceof HTMLElement && child !== mainHost) hide(child);
+    if (!mainHost?.isConnected) {
+      // Nothing native stays hidden while the Plus view is not attached.
+      restore();
+      void showOtherViews([]);
+      return;
     }
-    if (!config?.configured || !mainHost?.isConnected) {
+    if (view && content) {
+      for (const child of Array.from(content.children))
+        if (
+          child instanceof HTMLElement &&
+          child !== mainHost &&
+          !keepsVisible(child)
+        )
+          hide(child);
+    }
+    if (!config?.configured) {
       void showOtherViews([]);
       return;
     }
@@ -287,7 +334,7 @@ export async function mountTodoist(ctx: ContentScriptContext) {
         hide(row);
       } else {
         extras.push(row);
-        if (!otherViewsOpen) hide(row);
+        if (!otherViewsOpen && favoritesHost?.isConnected) hide(row);
       }
     }
     void showOtherViews(extras);
@@ -326,18 +373,24 @@ export async function mountTodoist(ctx: ContentScriptContext) {
     if (view) {
       applyTheme(mainHost, content);
       mainRoot.render(
-        <App
-          actions={extensionActions}
-          view={view}
-          language={languageOf(document)}
-          onOpenTask={(id) => location.assign(todoistTaskUrl(id))}
-          onSettings={openOptions}
-          onReady={planReady}
-          onViewChange={navigate}
-          snapshot={snapshot}
-          onSnapshot={keepSnapshot}
-          review={viewValue() === "review"}
-        />,
+        <PlusBoundary
+          language={language}
+          className="plus-root"
+          onBack={leavePlus}
+        >
+          <App
+            actions={extensionActions}
+            view={view}
+            language={language}
+            onOpenTask={(id) => location.assign(todoistTaskUrl(id))}
+            onSettings={openOptions}
+            onReady={planReady}
+            onViewChange={navigate}
+            snapshot={snapshot}
+            onSnapshot={keepSnapshot}
+            review={viewValue() === "review"}
+          />
+        </PlusBoundary>,
       );
     }
     hideReplaced();
@@ -349,20 +402,19 @@ export async function mountTodoist(ctx: ContentScriptContext) {
     history.pushState(null, "", url);
     render();
   }
-  async function mount() {
-    if (mainHost || mounting || disposed) return;
-    const sidebar = document.querySelector<HTMLElement>(sidebarSelector);
-    content =
-      document.querySelector<HTMLElement>("#content") ??
-      document.querySelector<HTMLElement>("main") ??
-      undefined;
-    if (!sidebar || !content) return;
-    mounting = true;
-    const mainUi = await createShadowRootUi(ctx, {
+  /** Back to the native page the Plus view replaced. */
+  function leavePlus() {
+    const url = new URL(location.href);
+    url.searchParams.delete(viewParam);
+    history.pushState(null, "", url);
+    render();
+  }
+  async function mountMain(anchor: HTMLElement) {
+    const ui = await createShadowRootUi(ctx, {
       inheritStyles: true,
       name: "todoist-plus-view",
       position: "inline",
-      anchor: content,
+      anchor,
       append: "last",
       isolateEvents: ["keydown", "keyup", "keypress"],
       onMount(container) {
@@ -372,10 +424,25 @@ export async function mountTodoist(ctx: ContentScriptContext) {
         mainRoot?.unmount();
       },
     });
-    mainUi.mount();
-    mainHost = mainUi.shadowHost;
-    themeHosts.set(mainHost, content);
-    cleanups.push(() => mainUi.remove());
+    if (disposed || !anchor.isConnected) return;
+    ui.mount();
+    mainUi = ui;
+    mainHost = ui.shadowHost;
+    content = anchor;
+    themeHosts.set(mainHost, anchor);
+  }
+  /** Todoist re-created the container: Plus leaves with it and native Todoist shows again. */
+  function dropMain() {
+    if (mainUi) themeHosts.delete(mainUi.shadowHost);
+    mainUi?.remove();
+    mainUi = undefined;
+    mainHost = undefined;
+    mainRoot = undefined;
+    content = undefined;
+    view = undefined;
+    hideReplaced();
+  }
+  async function mountNav(sidebar: HTMLElement) {
     const upcoming = sidebar.querySelector<HTMLAnchorElement>(
       'a[href$="/upcoming"]',
     );
@@ -383,7 +450,7 @@ export async function mountTodoist(ctx: ContentScriptContext) {
       document.querySelector<HTMLElement>("#top-menu") ??
       upcoming?.closest("li") ??
       sidebar;
-    const navUi = await createShadowRootUi(ctx, {
+    const ui = await createShadowRootUi(ctx, {
       inheritStyles: true,
       name: "todoist-plus-navigation",
       position: "inline",
@@ -425,15 +492,48 @@ export async function mountTodoist(ctx: ContentScriptContext) {
         root?.unmount();
       },
     });
-    navUi.mount();
+    if (disposed || !anchor.isConnected) return;
+    ui.mount();
+    navUi = ui;
+    navHost = ui.shadowHost;
     const navReference = upcoming ?? sidebar;
-    themeHosts.set(navUi.shadowHost, navReference);
-    applyTheme(navUi.shadowHost, navReference);
-    if (upcoming) applyNavigationLayout(navUi.shadowHost, upcoming);
-    cleanups.push(() => navUi.remove());
-    config ??= await savedConfig;
-    mounting = false;
+    themeHosts.set(navHost, navReference);
+    applyTheme(navHost, navReference);
+    if (upcoming) applyNavigationLayout(navHost, upcoming);
+  }
+  function dropNav() {
+    if (navUi) themeHosts.delete(navUi.shadowHost);
+    navUi?.remove();
+    navUi = undefined;
+    navHost = undefined;
+    navUpdate = undefined;
+  }
+  async function mount() {
+    if (mounting || disposed) return;
+    const sidebar =
+      document.querySelector<HTMLElement>(sidebarSelector) ?? undefined;
+    const nextContent =
+      content ??
+      document.querySelector<HTMLElement>("#content") ??
+      document.querySelector<HTMLElement>("main") ??
+      undefined;
+    // The first mount waits for both; later each host comes back with its own anchor.
+    if (!started && (!sidebar || !nextContent)) return;
+    const main = mainHost ? undefined : nextContent;
+    const nav = navHost ? undefined : sidebar;
+    if ((!main && !nav) || !mayMount()) return;
+    mounting = true;
+    try {
+      if (main) await mountMain(main);
+      if (nav) await mountNav(nav);
+      config ??= await savedConfig;
+    } finally {
+      mounting = false;
+    }
+    if (disposed) return;
     render();
+    if (started || !mainHost) return;
+    started = true;
     if (!view) {
       // Only the account settings are needed to arrange the sidebar, never the task list.
       void extensionActions
@@ -446,60 +546,70 @@ export async function mountTodoist(ctx: ContentScriptContext) {
         });
     }
   }
+  function removeDetails() {
+    if (detailHost) {
+      detailCleanup?.();
+      detailHost = undefined;
+      detailsReady = false;
+      restore();
+      hideReplaced();
+    }
+    detailId = "";
+  }
   async function mountDetails() {
     const modal = document.querySelector<HTMLElement>(
       "[data-testid=task-details-modal]",
     );
-    // The first selected row is the edited task; later IDs belong to its children.
-    const selected = modal?.querySelector(
-      "[data-testid=task-selection-list-container] [data-item-id], [data-item-id]",
-    );
-    const id = selected ? taskIdFromElement(selected) : undefined;
+    if (!modal) detailFailed = "";
+    const id = modal ? detailTaskId(modal, location.href) : undefined;
     const anchor = modal?.querySelector<HTMLElement>(
       "[data-testid=task-main-content-container]",
     );
-    if (!id || !anchor) {
-      if (detailHost) {
-        detailCleanup?.();
-        detailHost = undefined;
-        detailsReady = false;
-        restore();
-        hideReplaced();
-      }
-      detailId = "";
-      return;
-    }
+    if (!id || !anchor || id === detailFailed) return removeDetails();
     if (detailPending || (detailId === id && detailHost?.isConnected)) return;
     detailCleanup?.();
     detailPending = true;
     detailsReady = false;
     detailId = id;
-    const ui = await createShadowRootUi(ctx, {
-      inheritStyles: true,
-      name: "todoist-plus-task-tools",
-      position: "inline",
-      anchor,
-      append: "last",
-      isolateEvents: ["keydown", "keyup", "keypress"],
-      onMount(container) {
-        const root = createRoot(container);
-        root.render(
-          <NativeTaskTools
-            taskId={id}
-            language={languageOf(document)}
-            onReady={detailReady}
-            onUnavailable={unavailable}
-            snapshot={snapshot}
-            onSnapshot={keepSnapshot}
-          />,
-        );
-        return root;
-      },
-      onRemove(root) {
-        root?.unmount();
-      },
-    });
-    detailPending = false;
+    let ui: Ui;
+    try {
+      ui = await createShadowRootUi(ctx, {
+        inheritStyles: true,
+        name: "todoist-plus-task-tools",
+        position: "inline",
+        anchor,
+        append: "last",
+        isolateEvents: ["keydown", "keyup", "keypress"],
+        onMount(container) {
+          const root = createRoot(container);
+          root.render(
+            <PlusBoundary
+              language={languageOf(document)}
+              className="plus-native-tools plus-root"
+              onBack={() => {
+                detailFailed = id;
+                removeDetails();
+              }}
+            >
+              <NativeTaskTools
+                taskId={id}
+                language={languageOf(document)}
+                onReady={detailReady}
+                onUnavailable={unavailable}
+                snapshot={snapshot}
+                onSnapshot={keepSnapshot}
+              />
+            </PlusBoundary>,
+          );
+          return root;
+        },
+        onRemove(root) {
+          root?.unmount();
+        },
+      });
+    } finally {
+      detailPending = false;
+    }
     if (disposed || !anchor.isConnected) return;
     ui.mount();
     detailHost = ui.shadowHost;
@@ -510,14 +620,45 @@ export async function mountTodoist(ctx: ContentScriptContext) {
       ui.remove();
     };
   }
-  const observer = new MutationObserver(() => {
+  function teardown() {
+    if (disposed) return;
+    disposed = true;
+    observer.disconnect();
+    detailCleanup?.();
+    favoritesCleanup?.();
+    dropMain();
+    dropNav();
+    for (const cleanup of cleanups) cleanup();
+    restore();
+    for (const element of nativeCurrent)
+      element.removeAttribute("data-todoist-plus-native-current");
+  }
+  const passAllowed = limiter(PASS_LIMIT, PASS_WINDOW_MS);
+  function pass() {
+    if (disposed || ctx.isInvalid) return;
+    if (!passAllowed()) return teardown();
+    if (mainHost && !mainHost.isConnected) dropMain();
+    if (navHost && !navHost.isConnected) dropNav();
     navUpdate?.();
     for (const [host, source] of themeHosts) applyTheme(host, source);
-    if (!mainHost) void mount();
-    else if (currentView() !== view || languageOf(document) !== language)
+    if (!mainHost || !navHost) void mount();
+    if (
+      mainHost &&
+      (currentView() !== view || languageOf(document) !== language)
+    )
       render();
     else hideReplaced();
     void mountDetails();
+  }
+  let frame = 0;
+  const observer = new MutationObserver(() => {
+    // Reading it fires onInvalidated once the extension is disabled, reloaded or updated.
+    if (ctx.isInvalid || frame) return;
+    // The window's own request: WXT's wrapper keeps a listener per frame until the page unloads.
+    frame = requestAnimationFrame(() => {
+      frame = 0;
+      pass();
+    });
   });
   observer.observe(document.documentElement, {
     subtree: true,
@@ -527,15 +668,10 @@ export async function mountTodoist(ctx: ContentScriptContext) {
   });
   ctx.addEventListener(window, "popstate", render);
   ctx.addEventListener(window, "wxt:locationchange", render);
-  ctx.onInvalidated(() => {
-    disposed = true;
-    observer.disconnect();
-    detailCleanup?.();
-    favoritesCleanup?.();
-    for (const cleanup of cleanups) cleanup();
-    restore();
-    for (const element of nativeCurrent)
-      element.removeAttribute("data-todoist-plus-native-current");
-  });
+  // Coming back to the tab after disabling or reloading the extension restores Todoist at once.
+  const checkValid = () => ctx.isInvalid;
+  ctx.addEventListener(document, "visibilitychange", checkValid);
+  ctx.addEventListener(window, "focus", checkValid);
+  ctx.onInvalidated(teardown);
   await mount();
 }

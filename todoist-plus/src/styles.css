@@ -212,6 +212,11 @@ body {
   color: var(--plus-accent);
   text-decoration: underline;
 }
+/* The one line a render failure leaves: back to Todoist, or reload. */
+.plus-crash button {
+  padding: 0;
+  text-decoration: underline;
+}
 .plus-dialog {
   border: 1px solid var(--plus-line);
   border-radius: 10px;

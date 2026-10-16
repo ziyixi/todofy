@@ -229,9 +229,7 @@ test("built MV3 mounts, restores native UI and sends task actions through its ba
     await page.getByRole("button", { name: /^Other views\s*2$/u }).click();
     await expect(page.locator("#extra-filter-wrapper")).toBeHidden();
     await page.getByRole("button", { name: "Plan", exact: true }).click();
-    const parentTask = page.locator(
-      '.review-board [data-outcome-id="parent"]',
-    );
+    const parentTask = page.locator('.review-board [data-outcome-id="parent"]');
     await expect(parentTask).toBeVisible();
     await expect(page.locator("#native")).toBeHidden();
     await expect(page.locator("#legacy")).toBeHidden();
@@ -471,6 +469,124 @@ test("native task detail keeps work labels, hides replaced labels only with cont
     await expect(
       page.getByRole("button", { name: "计划", exact: true }),
     ).toBeVisible();
+  } finally {
+    await context.close();
+  }
+});
+
+test("task tools bind to the edited task, never a breadcrumb or a task the link does not name", async () => {
+  const extensionPath = resolve(".output/chrome-mv3");
+  const context = await chromium.launchPersistentContext("", {
+    channel: "chromium",
+    headless: true,
+    args: [
+      `--disable-extensions-except=${extensionPath}`,
+      `--load-extension=${extensionPath}`,
+    ],
+  });
+  try {
+    const worker =
+      context.serviceWorkers()[0] ??
+      (await context.waitForEvent("serviceworker"));
+    await setup(context, worker);
+    const page = await context.newPage();
+    const openModal = () =>
+      page.evaluate(() => {
+        document.querySelector("[data-testid=task-details-modal]")?.remove();
+        // The parent's breadcrumb carries an ID and renders before the selection list.
+        document
+          .querySelector("#content")!
+          .insertAdjacentHTML(
+            "beforeend",
+            `<section data-testid="task-details-modal"><a data-item-id="parent" href="/app/task/parent">Synthetic project</a><div data-testid="task-selection-list-container"><div data-item-id="child"></div></div><div data-testid="task-main-content-container"><h2>Native detail</h2></div></section>`,
+          );
+      });
+    await page.goto("https://app.todoist.com/app/task/child");
+    await openModal();
+    await page
+      .getByRole("button", { name: "Steps & timing", exact: true })
+      .click();
+    await expect(
+      page.getByRole("combobox", { name: "Estimate: Synthetic small step" }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("combobox", { name: "Estimate: Synthetic project" }),
+    ).toHaveCount(0);
+    // A link that names another task: no tools at all, rather than the wrong task's.
+    await page.evaluate(() =>
+      history.replaceState(null, "", "/app/task/other"),
+    );
+    await openModal();
+    await expect(
+      page.getByRole("button", { name: "Steps & timing", exact: true }),
+    ).toHaveCount(0);
+    await expect(page.locator("todoist-plus-task-tools")).toHaveCount(0);
+  } finally {
+    await context.close();
+  }
+});
+
+test("Plan and Focus come back after Todoist re-creates its content and sidebar; its dialogs stay visible", async () => {
+  const extensionPath = resolve(".output/chrome-mv3");
+  const context = await chromium.launchPersistentContext("", {
+    channel: "chromium",
+    headless: true,
+    args: [
+      `--disable-extensions-except=${extensionPath}`,
+      `--load-extension=${extensionPath}`,
+    ],
+  });
+  try {
+    const worker =
+      context.serviceWorkers()[0] ??
+      (await context.waitForEvent("serviceworker"));
+    await setup(context, worker);
+    const page = await context.newPage();
+    await page.goto("https://app.todoist.com/app/today?todoist-plus=plan");
+    const parentTask = page.locator('.review-board [data-outcome-id="parent"]');
+    await expect(parentTask).toBeVisible();
+    await page.evaluate(() => {
+      const fresh = document.createElement("main");
+      fresh.id = "content";
+      fresh.innerHTML = `<section id="native-again"><h1>Native task list</h1></section>`;
+      document.querySelector("#content")!.replaceWith(fresh);
+    });
+    await expect(parentTask).toBeVisible();
+    await expect(page.locator("#native-again")).toBeHidden();
+    await page.evaluate(() => {
+      // A fresh sidebar, as a collapse and expand or the narrow-window drawer renders it.
+      const aside = document.querySelector("aside")!;
+      const fresh = aside.cloneNode(true) as HTMLElement;
+      for (const host of fresh.querySelectorAll(
+        "todoist-plus-navigation, todoist-plus-other-views",
+      ))
+        host.remove();
+      for (const element of fresh.querySelectorAll<HTMLElement>("[hidden]")) {
+        element.removeAttribute("hidden");
+        element.style.removeProperty("display");
+      }
+      aside.replaceWith(fresh);
+    });
+    await expect(page.locator("todoist-plus-navigation")).toHaveCount(1);
+    await expect(page.locator("#legacy")).toBeHidden();
+    await expect(page.locator("#extra-filter-wrapper")).toBeHidden();
+    await expect(
+      page.getByRole("button", { name: /^Other views\s*2$/u }),
+    ).toBeVisible();
+    await page.getByRole("button", { name: "Focus", exact: true }).click();
+    await expect(
+      page.getByText("Local planning note", { exact: true }),
+    ).toBeVisible();
+    await page.evaluate(() =>
+      document
+        .querySelector("#content")!
+        .insertAdjacentHTML(
+          "beforeend",
+          `<div id="todoist-dialog" role="dialog">Synthetic Todoist dialog</div><div id="todoist-row">Synthetic native row</div>`,
+        ),
+    );
+    await expect(page.locator("#todoist-dialog")).toBeVisible();
+    await expect(page.locator("#todoist-row")).toBeHidden();
   } finally {
     await context.close();
   }
