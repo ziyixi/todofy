@@ -66,3 +66,28 @@ Feedback captures: `02-weekly-goals.jpg`, `01-timer-paused.jpg`, `03-label-mappi
 bottom at 868 px after natural card minimum was reduced to 60 px. Existing system fonts/tokens and icons
 remain in use; goals are 16 px and the clock is 22 px. No actionable P0/P1/P2 issue remains in these checks.
 These are local prototype changes; real services, tasks, labels and the installed extension were not modified.
+
+## October 15 theme, safety and polish
+
+The owner approved the UI research's safety, theming and polish items. This is a production change, not
+a prototype; the checks below used the real MV3 build, synthetic tasks and Doist's public theme CSS
+(`@doist/product-libraries-tokens` 1.4.2), not live Todoist values.
+
+- Tokens: the earlier green accent and pale selection were Kale fallbacks behind two token names that no
+  Todoist theme defines. Every colour now reads the token with Todoist's own role (accent text, primary
+  fill with its on-colour, selected row with its text, surfaces, muted, lines, hover, warning, priorities,
+  overlay, shadows). Kale looks nearly the same; Default, Blueberry, Dark and Tangerine now match their own
+  sidebar. Text, muted, links, warning, button and selection text keep 4.5:1 in those five themes.
+- Copy and icons: "Paused" is a state and "Pause" a button; "1 step"; natural Chinese counts; one
+  "Planning labels" name; 需要关注; a calendar-clock for the start window (the flag means priority in
+  Todoist); chevrons on expandable rows; no inert '+' under planned days.
+- Dates: "Week 42 · from Oct 12" and "Mon, Oct 12" (Chinese "第 42 周 · 10月12日起", "10月12日周一").
+- Consistency: weights 600, nothing under 12 px, one 1.5 px icon stroke, one grip size, 32 px controls,
+  aligned FlowDay rows and a timer bar centred on the Plus column.
+- Recovery: a render failure leaves one line, "Back to Todoist / Reload"; native Todoist is never left
+  hidden without its replacement.
+
+Before/after captures (Kale in English and Chinese, Default, Blueberry, Dark and Tangerine; review,
+week, focus, collapsed sidebar, weekly review, task editor, native details and options) were reviewed
+locally and stay outside Git. No horizontal overflow or console errors were seen; the live Todoist page
+was not opened.

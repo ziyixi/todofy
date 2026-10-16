@@ -20,7 +20,7 @@ Work 和 Personal 各显示已有最高层 Bet 任务。Bet 的定义是本周�
 
 事项卡按以下顺序阅读：标题、工作／生活上下文与步骤及排程数量。Todoist 优先级保留其原值，整体目标不再以每张承诺卡的星标呈现。标题点击打开任务详情；单独抓手拖动卡片。落到同一列无变化，跨列仅调用该任务的规划范围写入。卡片不通过标签移动整棵子树。
 
-“标签对应”选择当前已存在的 Todoist 标签，不能输入一个不存在的标签名。每列选择不同 ID，保存检查元数据 etag。更改映射影响后续投影和操作，不搬动已有任务。设置面板点击外部、Close 或 Escape 关闭。连接管理仍回到已有 owner 页面。
+“计划标签”选择当前已存在的 Todoist 标签，不能输入一个不存在的标签名。每列选择不同 ID，保存检查元数据 etag。更改映射影响后续投影和操作，不搬动已有任务。设置面板点击外部、Close 或 Escape 关闭。连接管理仍回到已有 owner 页面。
 
 ### Week
 
@@ -72,24 +72,61 @@ Review 四列下方有一行折叠的“等待中 · N”，只在有 `@waiting`
 
 Focus 显示真实今天的未完成 FlowDay 队列，顺序与 Week 相同。卡片标题在上方，短所属事项、估时和计时信息在下方。空队列只有“调整计划”入口，不出现另一套任务挑选器。
 
-每个 Todoist 步骤显示独立的完成控件和 Start 按钮。运行后显示确认的经过时间及 Pause、Stop；暂停后显示 Resume、Stop。Stop 保存计时但不完成任务。完成操作先由 Todofy 确认 Todoist 结果，再结算对应 FlowDay 日期。
+每个 Todoist 步骤显示独立的完成控件和 Start 按钮。完成控件是 Todoist 的优先级圆圈（P1 红、P2 橙、P3 蓝带浅色底，P4 灰），与 Review 卡片一致；没有完成控件的 FlowDay 记录保留同宽空位，标题对齐。运行后显示确认的经过时间及 Pause、Stop；暂停后状态写“已暂停／Paused”，按钮为 Resume、Stop。Stop 保存计时但不完成任务。全局计时条按 Plus 内容列居中，侧栏收起或调宽后仍居中。完成操作先由 Todofy 确认 Todoist 结果，再结算对应 FlowDay 日期。
 
 FlowDay 本地记录保持标题、估时和原应用入口，不创建 Todoist 完成请求。旧日期的活动计时不冒充今天同名 ID 的活动计时，也不允许今天另启一段覆盖它。全局计时条在 Plan／Focus 切换时保留，不新增浏览器本地计时存储。
 
 ## 样式与交互约束
 
-| 项目     | 约束                                                                                   |
-| -------- | -------------------------------------------------------------------------------------- |
-| 挂载     | 使用现有 WXT Shadow DOM，导航与字体起点对齐原生 Todoist                                |
-| 标题     | 14px，先于上下文，完整内容可在详情查看                                                 |
-| 次要内容 | 12px，简短所属事项和估时保持可读                                                       |
-| 拖动     | 现有 `@dnd-kit/react`，抓手与标题点击分开，160ms 落下动画                              |
-| 反馈     | 可接受区域着色，卡片前插入显示位置；拖动与移出只让该卡等待，其他写入确认前停用写入控件 |
-| 错误     | 原有错误区域显示实际失败；撤回全部等待中的变化并重新读取，不伪装操作成功               |
-| 主题     | 使用当前 `--plus-*` 变量，保留浅色和深色主题                                           |
-| 模态框   | Close、Escape、点击框外关闭；不依赖浏览器原生确认弹窗                                  |
+| 项目     | 约束                                                                                       |
+| -------- | ------------------------------------------------------------------------------------------ |
+| 挂载     | 使用现有 WXT Shadow DOM，导航与字体起点对齐原生 Todoist                                    |
+| 标题     | 14px，先于上下文，完整内容可在详情查看                                                     |
+| 次要内容 | 12px，简短所属事项和估时保持可读；没有小于 12px 的文字，字重只用 400／500／600／700        |
+| 拖动     | 现有 `@dnd-kit/react`，抓手与标题点击分开，160ms 落下动画                                  |
+| 反馈     | 可接受区域着色，卡片前插入显示位置；拖动与移出只让该卡等待，其他写入确认前停用写入控件     |
+| 错误     | 原有错误区域显示实际失败；撤回全部等待中的变化并重新读取，不伪装操作成功                   |
+| 主题     | `--plus-*` 只读 Todoist 主题 token，见[主题](#主题)；各主题与深色只靠 CSS 切换             |
+| 图标     | Lucide，统一 1.5px 线宽；启动窗口用日历时钟，旗帜只表示优先级；可展开行用会转动的箭头      |
+| 日期     | 周：“第 42 周 · 10月12日起”／“Week 42 · from Oct 12”；单日：“10月12日周一”；ISO 只作存储键 |
+| 控件     | 输入框、下拉框和按钮同为 32px 高（列表、复选框和估时小按钮除外）                           |
+| 模态框   | Close、Escape、点击框外关闭；不依赖浏览器原生确认弹窗                                      |
 
-Plus 只按已知真实对象 ID 隐藏被替代项。收藏项目保留，其他标签和筛选器收在 Other views。Quick 的现有筛选器仍可从这里访问，Plan 不将它声明为已替代。禁用扩展并刷新恢复原控件，不删除 Todoist 筛选器、标签或收藏。
+Plus 只按已知真实对象 ID 隐藏被替代项。收藏项目保留，其他标签和筛选器收在 Other views。Quick 的现有筛选器仍可从这里访问，Plan 不将它声明为已替代。停用或重新加载扩展后，回到已打开的 Todoist 标签页即恢复原控件，见[恢复](#恢复)；不删除 Todoist 筛选器、标签或收藏。
+
+### 主题
+
+2026-10-15 owner 批准。Todoist 把主题写成 `<html>` 上的类，主题 token（`--product-library-*`）和 color-scheme 继承进每个 Shadow DOM。`styles.css` 开头的一处桥接让每个 `--plus-*` 颜色读取 Todoist 赋予同一角色的 token；不再用脚本复制颜色，主题切换在同一次样式计算中生效。
+
+| `--plus-*`                    | Todoist token                                                                        | 用途                                  |
+| ----------------------------- | ------------------------------------------------------------------------------------ | ------------------------------------- |
+| `accent`                      | `actionable-tertiary-idle-tint`                                                      | 文字链接、焦点框                      |
+| `accent-fill` ／ `on-accent`  | `actionable-primary-idle-fill` ／ `-on-idle-tint`                                    | 主按钮、插入线、投放目标及其上的文字  |
+| `selected` ／ `selected-text` | `selectable-secondary-selected-fill` ／ `-on-selected-tint`                          | 选中的导航、过滤、日期和当前 Focus 卡 |
+| `bg` ／ `surface` ／ `text`   | `background-base-primary` ／ `-tertiary`，`display-primary-idle-tint`                | 页面、列与日期列、正文                |
+| `muted` ／ `line` ／ `hover`  | `display-secondary-idle-tint`，`divider-primary`，`actionable-quaternary-hover-fill` | 次要文字、分隔线、悬停层              |
+| `warning` ／ `danger`         | `info-warning-primary-on-idle-tint`，`info-attention-primary-idle-tint`              | 提示文字、错误边线                    |
+| `p1`–`p4`                     | `priorities-pN-primary-idle-tint`（API 的 4 是 P1）                                  | Review 与 Focus 的优先级圆圈          |
+| `overlay`、`shadow-1`–`3`     | `background-overlay`，`shadow-raised-1`–`3`                                          | 弹窗背景、卡片／浮动条／弹窗阴影      |
+
+每项保留原值作后备，原有浅色和深色值用 `light-dark()`，由继承的 color-scheme 选择；扩展设置页声明 `light dark`，跟随系统。任务详情里的“步骤与时间”背景透明，显示 Todoist 弹窗自身的底色。字体读 `--td-ui-font-family`。只有导航行的宽度和字号在挂载时测量。
+
+`@doist/product-libraries-tokens` 1.4.2（MIT，只含 CSS）是固定版本的开发依赖，只用于测试，不进入构建包。单元测试拒绝 src 中该包没有定义的 token 名，例外只有在真实页面确认过的 `shadow-raised-1`–`3`；浏览器测试用它的公开主题 CSS 检查默认、Kale、Dark、Blueberry、Tangerine 五个主题。公开值与真实 Todoist 可能略有不同，所以断言比较页面自身的 token，而不是写死的颜色。Vite 的 CSS 目标为 Chrome 123，保留 `light-dark()`。
+
+### 恢复
+
+Plus 隐藏原生界面的前提是替代界面已挂载，失败路径都恢复原生 Todoist：
+
+- 任务详情只取选择列表的第一行，没有列表时才取其他行；页面地址是任务链接（`…/task/<id>`）时必须指向同一任务，否则不挂载“步骤与时间”，不会写到别的任务。
+- Todoist 重建 `#content` 或侧栏时，Plan／Focus 视图和导航重新挂载，每分钟最多 10 次；视图未挂载期间不隐藏任何原生项，其他视图收藏只在 Other views 开关挂好后收起。挂载失败不会卡住后续挂载。Todoist 加入 `#content` 的对话框、提示和 toast（role 为 dialog、alertdialog、alert、status 或 aria-modal）保持可见。
+- 渲染出错时只显示一行“返回 Todoist / 重新加载”；返回会去掉视图参数并恢复原生页面。
+- 页面观察每帧最多运行一次；30 秒内超过 1,500 次视为循环，Plus 卸下并恢复原生页面。每次运行、回到标签页和窗口获得焦点时检查扩展是否已停用或重新加载，是则立即恢复，无需刷新；加载新版本仍需刷新页面。
+
+所有 Todoist 选择器集中在 `src/anchors.ts` 的一张表中，每项按表中顺序逐个尝试；Todoist 更新后只改这一处。
+
+### 页面检测
+
+扩展设置页显示一行最近的页面检测，语言跟随 Todoist：“Todoist 页面检测：全部正常”，或例如“步骤与时间已关闭（任务 ID 与页面链接不一致）”。content script 只在状态变化时发送固定集合中的键：增强项（计划和专注、步骤与时间）及原因（找不到侧栏、主内容区、任务详情区域或任务行，任务 ID 不一致，重建过多，页面持续变化，显示出错）。background 拒绝含其他键或值的记录，只把最新一条存入 storage.local，只给设置页读取；不含任务内容、ID 或网址，也不离开浏览器。
 
 ## 写入与读取
 
@@ -101,7 +138,7 @@ Plus 只按已知真实对象 ID 隐藏被替代项。收藏项目保留，其�
 - “移出日期”不提前删除：卡片原位等待，FlowDay 确认后才消失。
 - 所有写入进入同一个先进先出队列，按操作顺序执行。FlowDay UpdateFlow 没有 etag、后写覆盖先写，所以移出日期和加入今天在执行时先 GetFlow 读取当前队列，只增删这一项，不写回屏幕上可能过时的队列；其他标签页刚加入的步骤和排在前面的移出都会保留。Todoist 写入仍检查 etag。确认后换成服务端返回的任务或队列。
 - 任一写入失败时，排在其后的写入不再发送，所有等待中的预期变化撤回；原有错误区域说明“更改未保存，已恢复”、实际失败和其后未发送的更改数，队列空闲后重新读取。等待中的卡片不显示为已保存。
-- 完成、添加小步骤、估时、提前开始、详情中的规划保存、标签对应、本周目标、加入今天、计时以及周回顾中的移到本月、留到下周和完成回顾仍先确认，写入期间停用写入控件。
+- 完成、添加小步骤、估时、提前开始、详情中的规划保存、计划标签、本周目标、加入今天、计时以及周回顾中的移到本月、留到下周和完成回顾仍先确认，写入期间停用写入控件。
 
 读取不锁定看板，也不重复读取写入已返回的结果：
 
@@ -149,10 +186,13 @@ background 持有连接口令，content script 只发送封闭的类型化消息
 | Week 事项总览与小步骤 | `src/PlanningWeek.tsx`                                                  |
 | 日期队列与投放位置    | `src/PlanningCalendar.tsx`、`src/planning-week.css`                     |
 | 所属事项与色标        | `src/planning-outcomes.ts`                                              |
-| 标签对应              | `src/BoardLabels.tsx`                                                   |
+| 计划标签              | `src/BoardLabels.tsx`                                                   |
 | 今日执行与计时按钮    | `src/FocusView.tsx`、`src/FocusBlock.tsx`、`src/focus.css`              |
 | 用户调用及服务端协议  | `src/api.ts`、`src/client.ts`、`src/background.ts`                      |
-| 原生 Todoist 挂载     | `src/mount.tsx`                                                         |
+| 原生 Todoist 挂载     | `src/mount.tsx`、`src/PlusBoundary.tsx`                                 |
+| Todoist 页面锚点      | `src/anchors.ts`                                                        |
+| 页面检测              | `src/page-status.ts`、`src/Options.tsx`                                 |
+| 主题桥接              | `src/styles.css` 开头                                                   |
 | 等待中                | `src/WaitingList.tsx`                                                   |
 | 周回顾与推导          | `src/WeeklyReview.tsx`、`src/weekly-review.ts`、`src/weekly-review.css` |
 

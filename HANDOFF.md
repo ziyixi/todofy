@@ -9,6 +9,19 @@ Its old waiting lists and release identities are historical, not instructions to
 
 ## Current work
 
+Todoist Plus UI theme, safety and polish (owner-approved October 15: safety C1-C6, theming A1-A6, polish
+B1-B6) is on local branch `claude/plus-ui-theme`, based on `58908f64`; not pushed, no branch CI or release.
+Colours follow Todoist's own theme tokens through CSS (the two names Plus read exist in no theme), native
+Todoist is never left hidden without Plus attached, the task tools refuse a task the link does not name,
+Plan/Focus survive Todoist re-creating its layout, disabling the extension restores Todoist without a
+refresh, and Options shows a content-free "Todoist 页面检测" line. Test-only devDependency
+`@doist/product-libraries-tokens` 1.4.2 (MIT, not bundled); Vite's CSS target is Chrome 123. Local types,
+lint, build, 130 unit and 19 built-MV3 Chromium cases pass
+([evidence](docs/todoist-plus-verification.md#ui-theme-safety-and-polish-local-checks-october-15)).
+Pending: push, full branch CI, owner review, same-SHA release, then the owner's real-Chrome check with the
+six-step list in [todoist-plus/docs/verification.md](todoist-plus/docs/verification.md) and one look in
+Dark (the live Dark `color-scheme` and the task-modal URL form are unverified).
+
 Todoist Plus board performance (owner-approved plan, items 1-5 of the October 15 research) is implemented on
 local branch `claude/plus-perf-gtd`, based on `de8b93ac`; it is not pushed and has no branch CI or release.
 Reads run in the background, confirmed write results merge without full loads, task lookups are indexed,
