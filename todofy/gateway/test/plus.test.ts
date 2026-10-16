@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { CommandTimerRequest_Action } from '@ziyixi/proto/flowday/ui/v1/flowday_ui_service_pb';
-import { fakes, hooks, owner, uiOk } from './helpers.ts';
+import { fakes, hooks, owner, uiOk, uiRefusal } from './helpers.ts';
 import type { Env } from '../src/env.ts';
 
 const TOKEN = `todofy_plus_${'a'.repeat(43)}`;
@@ -16,14 +16,39 @@ describe('Todoist Plus transport boundaries', () => {
     expect((await hooks(env, '/api/plus/v1/plan:read')).status).toBe(401);
     expect(core).toHaveLength(0);
   });
-  it('passes only a SHA256 credential to the core and does not grant owner-only setup', async () => {
+  it('passes only a SHA256 credential to the core, with the rpc, and does not grant owner-only setup', async () => {
     const { env, core } = fakes({}, call => call.method === 'plus_auth' ? true : uiOk({ plan: {} }));
     const response = await hooks(env, '/api/plus/v1/plan:read', { headers: HEADERS });
     expect(response.status).toBe(200);
-    expect(core[0]?.args[0]).toMatch(/^[0-9a-f]{64}$/);
+    // One core call: TodofyCore checks the digest itself.
+    expect(core.map(call => call.method)).toEqual(['plus_ui']);
+    const digest = [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(TOKEN)))]
+      .map(byte => byte.toString(16).padStart(2, '0')).join('');
+    expect(core[0]?.args.slice(2)).toEqual([false, digest]);
     expect(JSON.stringify(core)).not.toContain(TOKEN);
     expect((await hooks(env, '/api/plus/v1/connections:issueExtensionConnection', api('POST', { display_name: 'Test', request_id: ID }))).status).toBe(401);
+    expect((await hooks(env, '/api/plus/v1/plan:verifyPlanStore', { headers: HEADERS })).status).toBe(401);
     expect(core.filter(call => call.method === 'plus_ui')).toHaveLength(1);
+  });
+  it('answers the core refusing an unknown or revoked token as 401', async () => {
+    const { env } = fakes({}, call => call.method === 'plus_ui' ? uiRefusal('UNAUTHORIZED') : true);
+    const response = await hooks(env, '/api/plus/v1/plan:read', { headers: HEADERS });
+    expect(response.status).toBe(401);
+    expect(await response.text()).toContain('UNAUTHORIZED');
+  });
+  it('checks the token with plus_auth before the FlowDay proxy and stops at a refusal', async () => {
+    let forwarded = 0;
+    const { env, core } = fakes({}, call => call.method !== 'plus_auth');
+    const connected = { ...env, FLOWDAY_FOCUS: { fetch: () => { forwarded++; return Promise.resolve(Response.json({})); } } as unknown as Fetcher };
+    expect((await hooks(connected, '/api/plus/flowday/api/v1/timerSession', { headers: HEADERS })).status).toBe(401);
+    expect(core.map(call => call.method)).toEqual(['plus_auth']);
+    expect(core[0]?.args[0]).toMatch(/^[0-9a-f]{64}$/);
+    expect(forwarded).toBe(0);
+  });
+  it('passes no digest for the Access owner', async () => {
+    const { env, core } = fakes({}, () => uiOk({ plan: {} }));
+    expect((await owner(env, '/api/plus/v1/plan:read')).status).toBe(200);
+    expect(core.map(call => [call.method, ...call.args.slice(2)])).toEqual([['plus_ui', true, null]]);
   });
   it('keeps owner setup behind the existing CSRF check', async () => {
     const { env, core } = fakes();

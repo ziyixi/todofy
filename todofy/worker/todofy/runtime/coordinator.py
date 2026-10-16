@@ -84,7 +84,8 @@ from todofy.runtime import (
     metrics,
     ops,
     plus_api,
-    plus_store,
+    plus_cache,
+    plus_receipts,
     plus_todoist,
     plus_week,
     reminder,
@@ -173,10 +174,21 @@ class TodofyCore(DurableObject):
     def __init__(self, ctx: Any, env: Any) -> None:
         super().__init__(ctx, env)
         self.sql = ctx.storage.sql
-        for statement in (*DO_SCHEMA, *backup.DO_SCHEMA, *metrics.DO_SCHEMA, *ops.DO_SCHEMA, *gtd.DO_SCHEMA):
+        for statement in (
+            *DO_SCHEMA,
+            *backup.DO_SCHEMA,
+            *metrics.DO_SCHEMA,
+            *ops.DO_SCHEMA,
+            *gtd.DO_SCHEMA,
+            *plus_cache.DO_SCHEMA,
+            *plus_receipts.DO_SCHEMA,
+        ):
             self.sql.exec(statement)
         self.running = False
         self.plus_lock = asyncio.Lock()
+        # Issue and Revoke of an extension connection, counted so a token check whose D1 read one of them
+        # overlapped keeps no copy of what it read (plus_api.connected).
+        self.plus_connection_changes = 0
         # A wake-up that arrived while the alarm loop was busy; honoured when it finishes.
         self.woken = False
         # Whether a due task intent goes before due mail at the next step (they take turns).
@@ -198,37 +210,20 @@ class TodofyCore(DurableObject):
             return failed(503, ApiError.UNAVAILABLE).wire()
 
     async def plus_auth(self, digest: str) -> bool:
-        """Only hashed extension credentials cross this RPC boundary."""
-        from todofy.core.sql import plus as plus_sql
+        """The FlowDay proxy's check of an extension token. Only hashed credentials cross this RPC boundary."""
+        return await plus_api.connected(self, digest)
 
-        if len(digest) != 64:
-            return False
-        return await plus_store.first(self.env.DB, plus_sql.CONNECTION, digest) is not None
-
-    async def plus_ui(self, method: str, request: str, owner: bool) -> dict[str, Any]:
-        return await plus_api.handle(self, method, request, owner=owner)
+    async def plus_ui(self, method: str, request: str, owner: bool, digest: str | None = None) -> dict[str, Any]:
+        """One PlusService rpc: for the Access owner, or for the extension token whose SHA-256 is ``digest``,
+        which this checks (plus_api.handle). The gateway before this release sent no digest."""
+        return await plus_api.handle(self, method, request, owner=owner, digest=digest)
 
     async def plus_focus_claim(self, action_id: str, value: str | None, replace_etag: str | None) -> str | None:
-        """Freeze one FlowDay settlement request after its Todoist completion receipt exists."""
-        from todofy.core.sql import plus as plus_sql
-
+        """Freeze one FlowDay settlement request in its Todoist completion's receipt (plus_receipts.settle)."""
         async with self.plus_lock:
             if flag(self.env, "MAINTENANCE_MODE") or backup.holds_ledger(self.env, self.sql, now_s()):
                 raise RuntimeError("Plus state is temporarily held")
-            completed = await plus_store.first(self.env.DB, plus_sql.ACTION, action_id)
-            if not completed or completed["response"] is None:
-                return None
-            key = "focus:" + action_id
-            existing = await plus_store.first(self.env.DB, plus_sql.ACTION, key)
-            if existing and (replace_etag is None or json.loads(existing["commands"])["etag"] != replace_etag):
-                return existing["commands"]
-            if value is None:
-                return existing["commands"] if existing else None
-            if existing:
-                await self.env.DB.prepare(plus_sql.REPLACE_ACTION_COMMANDS).bind(value, key).run()
-            else:
-                await plus_store.start_action(self.env.DB, key, action_id, json.loads(value))
-            return value
+            return await plus_receipts.settle(self, action_id, value, replace_etag)
 
     async def ingest(self, idempotency_key: str | None, body: Any) -> dict[str, Any]:
         """POST /hooks/mail after the gateway's checks: the Idempotency-Key header and the unread body stream."""

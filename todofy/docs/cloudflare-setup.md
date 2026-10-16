@@ -95,6 +95,7 @@ vars, as is `BUILD_SHA`):
 | `TODOFY_PROCESSING_PAUSED` | `true` / `false` (required); core |
 | `TODOFY_FORCE_PAUSE_TODOIST` | `true` / `false` (required); core |
 | `TODOFY_GTD_REVIEW_ENABLED` | `true` / `false` (required); core. The Sunday review task ([gtd-features.md](gtd-features.md) §7); `false` stops it without a code change. The daily snapshot itself is committed (`GTD_COLLECT_UTC`) |
+| `TODOFY_PLUS_METADATA` | `cache` / `full` (optional, unset deploys `cache`); core. `full` is the rollback of Todoist Plus's caches ([todoist-plus.md](todoist-plus.md#caches)) |
 
 Every other setting is committed in the two production configs (top level = production; the repository
 is public, so nothing personal or secret goes there), and changing one is a commit:
@@ -258,7 +259,8 @@ locally too. Build the UI first (`npm run build --prefix web`).
 ```sh
 export GITHUB_SHA=$(git rev-parse HEAD) TODOFY_MAINTENANCE_MODE=false TODOFY_PROCESSING_PAUSED=false \
   TODOFY_FORCE_PAUSE_TODOIST=false TODOFY_REMINDER_ENABLED=false TODOFY_TODOIST_DEFAULT_PROJECT_ID=placeholder \
-  TODOFY_GTD_REVIEW_ENABLED=false TODOFY_ACCESS_OWNER=owner@example.com TODOFY_ACCESS_OWNER_ALIASES=
+  TODOFY_GTD_REVIEW_ENABLED=false TODOFY_PLUS_METADATA=cache TODOFY_ACCESS_OWNER=owner@example.com \
+  TODOFY_ACCESS_OWNER_ALIASES=
 secrets=$(mktemp -d)
 uv run python deploy/deploy_vars.py secrets core "$secrets/core.json"
 uv run python deploy/deploy_vars.py secrets gateway "$secrets/gateway.json"
@@ -345,7 +347,9 @@ coordinator may use a database at a time):
 2. Restore and `verify` as above until it prints `PASS`.
 3. Commit the restored database's `database_id` (and `database_name` if it has another name) to
    `[[d1_databases]]` in `wrangler.toml` on `main`; that push checks and deploys Todofy. Its
-   `migrations apply` finds every migration already applied.
+   `migrations apply` finds every migration already applied. Then open
+   `https://<owner host>/api/plus/v1/plan:verifyPlanStore` (Access login): every `*_row_count` equals its
+   `plan_*` table's rows in the manifest, and no other count is present ([todoist-plus.md](todoist-plus.md#planning-store)).
 4. Set `TODOFY_MAINTENANCE_MODE=false` and run the workflow on `main`. Mail Hero redelivers what it
    held during maintenance. Events Todofy acknowledged after the backup was taken are not in the
    restored database, and Mail Hero does not send an acknowledged event again: compare with Mail Hero's

@@ -14,6 +14,7 @@ import pytest
 
 from todofy.core import backup as layout
 from todofy.core.sql import backup as sql
+from tools import backup_restore
 from tools.backup_restore import (
     MANIFEST,
     MAX_STATEMENT_BYTES,
@@ -38,11 +39,11 @@ LONG_PAYLOAD = json.dumps({"text": "长邮件'正文'" * 40_000})  # about 600 K
 LEGACY_TEXT = "旧\x00文本 it's " * 30_000  # a NUL forces the hex form
 
 
-def database(*later: tuple[str, str]) -> sqlite3.Connection:
+def database(*later: tuple[str, str], migrations: list[Path] = MIGRATIONS) -> sqlite3.Connection:
     """The schema with its migrations recorded as `wrangler d1 migrations apply` does, plus ``later``."""
     connection = sqlite3.connect(":memory:")
     connection.execute("CREATE TABLE d1_migrations (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE)")
-    for name, statement in (*((migration.name, migration.read_text()) for migration in MIGRATIONS), *later):
+    for name, statement in (*((migration.name, migration.read_text()) for migration in migrations), *later):
         connection.executescript(statement)
         connection.execute("INSERT INTO d1_migrations (name) VALUES (?)", (name,))
     return connection
@@ -98,6 +99,21 @@ def seed(db: sqlite3.Connection) -> None:
     db.execute("INSERT INTO legacy_mail_text (event_id, created_at, text, expires_at) VALUES ('legacy:2', 2, 't', 9)")
 
 
+def seed_plan(db: sqlite3.Connection) -> None:
+    """Synthetic planning facts that keep their own IDs (a gap included) through a restore."""
+    db.execute("INSERT INTO plan_settings VALUES ('week', '{\"current\":\"2026-09-21\"}', 1)")
+    db.executemany(
+        "INSERT INTO plan_tasks (id, provider, external_id, created_at, closed_at, closed_as)"
+        " VALUES (?, ?, ?, 1, ?, ?)",
+        [(1, "todoist", "A", None, None), (2, "todoist", "B", 5, "completed"), (7, "todoist", "C", None, None)],
+    )
+    db.execute("INSERT INTO plan_marks VALUES (7, 'committed', '2026-09-28', 1)")
+    db.execute("INSERT INTO plan_edges (task_id, prerequisite_id, baseline_count, created_at) VALUES (1, 2, 3, 1)")
+    db.execute("INSERT INTO plan_notes VALUES ('2026-09-21', 'work', 'bets', ?, 2, 1)", ("Synthetic bet 'one'",))
+    db.execute("INSERT INTO plan_categories (id, name, priority, created_at, updated_at) VALUES (4, '回复', 1, 1, 1)")
+    db.execute("UPDATE summaries SET category_id = 4, triaged_at = 2 WHERE event_id = 'e01'")
+
+
 def export(db: sqlite3.Connection, root: Path, table: sql.Table, prefix: str, page_rows: int = 4) -> dict:
     """What runtime/backup.py stores for one table: its pages (and deferred values), a part per two pages."""
     db.row_factory = sqlite3.Row
@@ -131,8 +147,11 @@ def store(root: Path, prefix: str, table: sql.Table, part: layout.Part, seq: int
     return {"key": key, "rows": part.rows, "bytes": len(data), "sha256": digest}
 
 
-def backup_of(db: sqlite3.Connection, root: Path, schema_version: str = LATEST) -> None:
-    tables = [export(db, root, table, PREFIX) for table in sql.TABLES.values()]
+def backup_of(
+    db: sqlite3.Connection, root: Path, schema_version: str = LATEST, release: list[sql.Table] | None = None
+) -> None:
+    """A backup of the tables and columns of ``release`` (this one's by default)."""
+    tables = [export(db, root, table, PREFIX) for table in release or sql.TABLES.values()]
     data = layout.manifest(started_at=0, finished_at=60, schema_version=schema_version, tables=tables)
     (root / MANIFEST).write_bytes(data)
 
@@ -150,6 +169,7 @@ def dump(db: sqlite3.Connection) -> dict[str, list[tuple]]:
 def source() -> sqlite3.Connection:
     db = database()
     seed(db)
+    seed_plan(db)
     return db
 
 
@@ -167,6 +187,64 @@ def test_backup_round_trips_into_an_empty_database(source, tmp_path):
     for _ in range(2):
         target.executescript(out.read_text())
     assert dump(target) == dump(source)
+
+
+def test_restored_task_and_category_ids_are_never_handed_out_again(source, tmp_path):
+    backup_of(source, tmp_path)
+    write_sql(tmp_path, tmp_path / "restore.sql", legacy_text=True)
+    target = database()
+    target.executescript((tmp_path / "restore.sql").read_text())
+    task = target.execute("INSERT INTO plan_tasks (provider, external_id, created_at) VALUES ('todoist', 'D', 9)")
+    category = target.execute("INSERT INTO plan_categories (name, created_at, updated_at) VALUES ('Read', 9, 9)")
+    assert (task.lastrowid, category.lastrowid) == (8, 5)
+
+
+def test_a_backup_from_before_the_planning_store_restores_into_it(tmp_path):
+    """The restore names its columns, so the new summaries columns read NULL and the plan tables stay empty."""
+    before = [migration for migration in MIGRATIONS if migration.name < "0007"]
+    old = database(migrations=before)
+    seed(old)
+    then = [
+        table._replace(columns=table.columns[:-2]) if table is sql.SUMMARIES else table
+        for table in sql.TABLES.values()
+        if not table.name.startswith("plan_")
+    ]
+    backup_of(old, tmp_path, schema_version=before[-1].name, release=then)
+    write_sql(tmp_path, tmp_path / "restore.sql", legacy_text=True)
+    target = database()
+    target.executescript((tmp_path / "restore.sql").read_text())
+    assert target.execute("SELECT event_id, category_id, triaged_at FROM summaries").fetchall() == [("e01", None, None)]
+    assert target.execute("SELECT count(*) FROM plan_tasks").fetchone() == (0,)
+    ok, lines = verify(SqliteWrangler(target), "DB", tmp_path, legacy_text=True)
+    assert ok and lines[0] == f"PASS schema_version {before[-1].name} (later migrations applied: {LATEST})"
+
+
+def test_retired_tables_restore_until_a_migration_drops_them(source, tmp_path, monkeypatch):
+    source.execute("INSERT INTO plus_weeks VALUES ('A', '2026-09-28', 1, 0)")
+    backup_of(source, tmp_path)
+    assert backup_restore.retired_tables() == frozenset()
+    assert "PASS plus_weeks rows=1 statements=1" in write_sql(tmp_path, tmp_path / "now.sql", legacy_text=True)
+    # A later checkout whose migration drops one of them (a comment drops nothing).
+    drop = (
+        "9999_drop_plus_weeks.sql",
+        "-- DROP TABLE plus_settings\nDROP INDEX plus_weeks_ended; DROP TABLE plus_weeks;",
+    )
+    later = tmp_path / "migrations"
+    later.mkdir()
+    for migration in MIGRATIONS:
+        (later / migration.name).write_text(migration.read_text())
+    (later / drop[0]).write_text(drop[1])
+    monkeypatch.setattr(backup_restore, "MIGRATIONS_DIR", later)
+    assert backup_restore.retired_tables() == {"plus_weeks"}
+    lines = write_sql(tmp_path, tmp_path / "restore.sql", legacy_text=True)
+    assert lines[0] == "SKIP plus_weeks (retired)" and not any(" plus_weeks " in line for line in lines[1:])
+    target = database(drop)
+    target.executescript((tmp_path / "restore.sql").read_text())
+    task_rows = "SELECT * FROM plan_tasks ORDER BY id"
+    assert target.execute(task_rows).fetchall() == source.execute(task_rows).fetchall()
+    ok, checked = verify(SqliteWrangler(target), "DB", tmp_path, legacy_text=True)
+    assert ok and checked[1] == "SKIP plus_weeks (retired)"
+    assert all(line.startswith("PASS ") for line in checked[2:])
 
 
 def test_the_legacy_text_can_be_left_out(source, tmp_path):
@@ -237,13 +315,13 @@ def test_a_part_that_differs_from_the_manifest_is_refused(source, tmp_path, dama
 
 def test_long_values_are_appended_by_key_and_short_rows_stay_one_insert():
     table = {"name": "summaries", "columns": list(sql.SUMMARIES.columns), "key": ["event_id"]}
-    short = row_statements(table, ["e1", 1, "s", "x", "m", "", 0])
+    short = row_statements(table, ["e1", 1, "s", "x", "m", "", 0, 3, None])
     assert short == [
-        "INSERT INTO summaries (event_id, created_at, subject, summary, model, task_id, imported)"
-        " VALUES ('e1', 1, 's', 'x', 'm', '', 0) ON CONFLICT DO NOTHING;"
+        "INSERT INTO summaries (event_id, created_at, subject, summary, model, task_id, imported, category_id,"
+        " triaged_at) VALUES ('e1', 1, 's', 'x', 'm', '', 0, 3, NULL) ON CONFLICT DO NOTHING;"
     ]
-    statements = row_statements(table, ["e'1", 1, "s", "长" * 100_000, "m", "", 0])
-    assert statements[0].endswith("VALUES ('e''1', 1, 's', '', 'm', '', 0) ON CONFLICT DO NOTHING;")
+    statements = row_statements(table, ["e'1", 1, "s", "长" * 100_000, "m", "", 0, None, None])
+    assert statements[0].endswith("VALUES ('e''1', 1, 's', '', 'm', '', 0, NULL, NULL) ON CONFLICT DO NOTHING;")
     assert all("WHERE event_id = 'e''1' AND length(CAST(summary AS BLOB)) = " in line for line in statements[1:])
     assert len(statements) == 5  # 300,000 bytes in pieces of at most 80,000
 

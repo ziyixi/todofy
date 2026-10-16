@@ -5,6 +5,7 @@ from typing import Any
 
 from todofy.core import plus
 from todofy.core.sql import plus as sql
+from todofy.runtime import plus_receipts as receipts
 from todofy.runtime import plus_store as store
 from todofy.runtime import plus_todoist as todoist
 from todofy.runtime.interop import now_s
@@ -23,8 +24,8 @@ async def reset_ended(core: Any, week: str, mapping: list[dict[str, Any]]) -> bo
     for record in ended:
         task_id = record["task_id"]
         request_id = "week:" + record["week_start"] + ":" + task_id
-        previous = await store.first(env.DB, sql.ACTION, request_id)
-        if previous and previous["response"] is not None:
+        previous = await receipts.find(core, request_id)
+        if previous and previous.result is not None:
             await store.run(env.DB, sql.FORGET_WEEK, task_id, record["week_start"])
             continue
         # Read first on a retry too: a task deleted since the stored update would otherwise fail it on every tick.
@@ -36,7 +37,7 @@ async def reset_ended(core: Any, week: str, mapping: list[dict[str, Any]]) -> bo
             await store.run(env.DB, sql.FORGET_WEEK, task_id, record["week_start"])
             continue
         if previous:
-            commands = json.loads(previous["commands"])
+            commands = previous.commands
         else:
             labels = plus.reset_labels(task, record, mapping)
             if set(labels) == set(task.get("labels") or []):
@@ -46,9 +47,9 @@ async def reset_ended(core: Any, week: str, mapping: list[dict[str, Any]]) -> bo
             commands = [
                 {"type": "item_update", "uuid": plus.command_id(request_id), "args": {"id": task_id, "labels": labels}}
             ]
-            await store.start_action(env.DB, request_id, plus.fingerprint(record), commands)
+        await receipts.start(core, request_id, "WeekReset", plus.fingerprint(record), commands)
         await todoist.commands(core, commands)
-        await store.run(env.DB, sql.FINISH_ACTION, "{}", request_id)
+        receipts.finish(core.sql, request_id, {})
         await store.run(env.DB, sql.FORGET_WEEK, task_id, record["week_start"])
     return len(ended) < sql.RESET_BATCH
 
@@ -70,7 +71,7 @@ async def tick(coordinator: Any) -> None:
         week = plus.week_start(account_day(settings["timezone"]))
         if settings["week_start"] != week:
             # Recheck identity before modifying any Todoist labels.
-            metadata = await todoist.metadata(coordinator)
+            metadata = await todoist.metadata(coordinator, fresh=True)
             actual = plus.discover(metadata["labels"], metadata["timezone"], json.loads(settings["mapping"])["labels"])
             if actual["etag"] != json.loads(settings["mapping"])["etag"]:
                 raise todoist.PlusError("ACTION_NOT_ALLOWED")

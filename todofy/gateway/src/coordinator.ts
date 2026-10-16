@@ -68,8 +68,13 @@ export interface Coordinator extends Rpc.DurableObjectBranded {
    */
   owner_ui(owner: string, method: string, request: string, cursor: string | null): Promise<UiAnswer>;
   setup(): Promise<CoreSetup>;
+  /** Whether `digest` is the SHA-256 of a non-revoked extension token (the FlowDay proxy's check). */
   plus_auth(digest: string): Promise<boolean>;
-  plus_ui(method: string, request: string, owner: boolean): Promise<UiAnswer>;
+  /**
+   * One PlusService rpc for the Access owner (`owner`, `digest` null) or for the extension token whose SHA-256 is
+   * `digest`, which the core checks.
+   */
+  plus_ui(method: string, request: string, owner: boolean, digest: string | null): Promise<UiAnswer>;
   plus_focus_claim(actionId: string, value: string | null, replaceEtag: string | null): Promise<string | null>;
   // ops-v1 (the Ops entrypoint, src/ops.ts). Structured inputs travel as JSON text; the core reads them strictly and
   // writes every answer with the wire JSON profile (worker/todofy/core/ops.py).

@@ -50,15 +50,75 @@ REPLACED_FILTER_QUERIES = {
 ACTIVE = "active"
 
 
+MAX_METADATA_ITEMS = 500
+
+
+def replaced_query(query: Any) -> str | None:
+    """A filter's query in the normalised form REPLACED_FILTER_QUERIES lists, or None for any other query."""
+    if not isinstance(query, str):
+        return None
+    normalised = query.replace(" ", "").replace("%", "@")
+    return normalised if normalised in REPLACED_FILTER_QUERIES else None
+
+
 def replaced_filters(filters: list[dict[str, Any]], mapping: list[dict[str, Any]] | None = None) -> list[str]:
     """Match the existing view semantics; names and private filter IDs are never baked in."""
     names = role_labels(mapping)
     result = []
     for row in filters:
-        query = row.get("query", "").replace(" ", "").replace("%", "@")
-        if query in REPLACED_FILTER_QUERIES and all(names.get(role) == role for role in ROLES if "@" + role in query):
+        query = replaced_query(row.get("query", ""))
+        if query is not None and all(names.get(role) == role for role in ROLES if "@" + role in query):
             result.append(str(row["id"]))
     return result
+
+
+def merge_metadata(previous: dict[str, Any] | None, answer: dict[str, Any]) -> dict[str, Any]:
+    """The metadata cache after one Sync answer for user, labels and filters (runtime/plus_todoist.py).
+
+    ``previous`` is None for a full answer, which replaces the cache; an incremental answer lists only what
+    changed since its token, merged by ID: an item with ``is_deleted`` leaves. The user object is reduced to its
+    timezone, and only filters whose query REPLACED_FILTER_QUERIES lists are kept, normalised, so no private
+    filter text is stored; a kept filter whose query changes to any other leaves. Raises ValueError on an answer
+    that does not have this shape.
+    """
+    token = answer.get("sync_token")
+    if not isinstance(token, str) or not 1 <= len(token) <= 1024:
+        raise ValueError("sync_token")
+    # A full answer lists every label and filter; an incremental one leaves out a resource with no change.
+    unchanged = [] if previous is not None else None
+    labels, filters = answer.get("labels", unchanged), answer.get("filters", unchanged)
+    if not isinstance(labels, list) or not isinstance(filters, list):
+        raise ValueError("resources")
+    named = dict(previous["labels"]) if previous else {}
+    for label in labels:
+        key, name = str(label.get("id") or ""), label.get("name")
+        if label.get("is_deleted") or not isinstance(name, str) or not name:
+            named.pop(key, None)
+        elif key:
+            named[key] = name
+    queries = dict(previous["filters"]) if previous else {}
+    for row in filters:
+        key, query = str(row.get("id") or ""), replaced_query(row.get("query"))
+        if row.get("is_deleted") or query is None:
+            queries.pop(key, None)
+        elif key:
+            queries[key] = query
+    # The user object includes credentials and personal information: only its timezone is kept.
+    timezone = ((answer.get("user") or {}).get("tz_info") or {}).get("timezone")
+    if timezone is None and previous is not None:
+        timezone = previous["timezone"]
+    if not isinstance(timezone, str) or not timezone or len(named) > MAX_METADATA_ITEMS:
+        raise ValueError("user")
+    return {"sync_token": token, "timezone": timezone, "labels": list(named.items()), "filters": list(queries.items())}
+
+
+def metadata_view(cached: dict[str, Any]) -> dict[str, Any]:
+    """The cache as the Plus handlers read Todoist's metadata: the timezone, labels and the kept filters."""
+    return {
+        "timezone": cached["timezone"],
+        "labels": [{"id": key, "name": name} for key, name in cached["labels"]],
+        "filters": [{"id": key, "query": query} for key, query in cached["filters"]],
+    }
 
 
 def fingerprint(value: Any) -> str:

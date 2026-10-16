@@ -1,11 +1,9 @@
-"""D1 storage for connection revocation, weekly membership and replay-safe actions."""
+"""D1 storage for connection revocation and weekly membership (receipts: runtime/plus_receipts.py)."""
 
-import json
 from typing import Any
 
 from todofy.core import plus
 from todofy.core.sql import plus as sql
-from todofy.runtime.interop import now_s
 
 
 async def first(db: Any, statement: str, *args: Any) -> dict[str, Any] | None:
@@ -42,7 +40,3 @@ async def remember(
     # Bounded pages and bounded D1 batches; only planning parents/explicit Bets are recorded.
     for offset in range(0, len(statements), 25):
         await db.batch(statements[offset : offset + 25])
-
-
-async def start_action(db: Any, request_id: str, digest: str, commands: list[dict[str, Any]]) -> None:
-    await run(db, sql.START_ACTION, request_id, digest, json.dumps(commands, separators=(",", ":")), now_s())

@@ -52,10 +52,13 @@ LEASE_EXPIRED = "lease_expired"
 
 @dataclass
 class Cursor:
-    """One table of the running job."""
+    """One table of the running job, with the columns the code that planned the job exports: its pages and its
+    manifest entry hold those, so a release that adds a column while a job runs cannot mix two row widths in
+    one backup. A job saved without them, by the release before, does not load and starts over (_load)."""
 
     table: str
     max_rid: int
+    columns: list[str]
     last_rid: int = 0
     done: bool = False
     parts: list[dict[str, Any]] = field(default_factory=list)
@@ -243,14 +246,19 @@ async def _plan(db: Any, job: Job) -> None:
     results = await db.batch([db.prepare(sql.SCHEMA_VERSION), *(db.prepare(sql.max_rowid(t)) for t in tables)])
     job.schema_version = results[0].results[0]["name"]
     for table, result in zip(tables, results[1:], strict=True):
-        job.cursors.append(Cursor(table.name, int(result.results[0]["n"] or 0)))
+        job.cursors.append(Cursor(table.name, int(result.results[0]["n"] or 0), list(table.columns)))
     job.planned = True
     _log(planned=job.prefix, tables=len(tables))
 
 
+def _planned(cursor: Cursor) -> sql.Table:
+    """The cursor's table with the columns its job was planned with."""
+    return sql.TABLES[cursor.table]._replace(columns=tuple(cursor.columns))
+
+
 async def _export_part(db: Any, bucket: Any, prefix: str, cursor: Cursor, budget: Budget) -> None:
     """Pages of one table into one part, until the table ends or the budget is spent."""
-    table = sql.TABLES[cursor.table]
+    table = _planned(cursor)
     part = layout.Part()
     last, done = cursor.last_rid, False
     while not done and budget.left():
@@ -301,7 +309,7 @@ async def _finish(bucket: Any, state: State, job: Job, now: int) -> None:
     finished = now_ms() // 1000
     tables = []
     for cursor in job.cursors:
-        table = sql.TABLES[cursor.table]
+        table = _planned(cursor)
         tables.append(layout.table_entry(table.name, table.columns, table.key, cursor.max_rid, cursor.parts))
     data = layout.manifest(
         started_at=job.started_at, finished_at=finished, schema_version=job.schema_version, tables=tables

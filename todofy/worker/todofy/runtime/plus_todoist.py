@@ -4,13 +4,26 @@ import json
 from typing import Any
 from urllib.parse import urlencode
 
-from todofy.runtime.config import flag, var
+from todofy.core import plus
+from todofy.runtime import plus_cache
+from todofy.runtime.config import flag, integer, var
 from todofy.runtime.interop import fetch_with_timeout, now_s
+
+RESOURCES = ["user", "labels", "filters"]
+# How long a read may use the metadata the object synced; a label write always syncs first.
+METADATA_MAX_AGE = 5 * 60
+# Full Syncs (sync_token "*") the object starts per 15-minute window: Todoist allows 100, shared with every
+# other client of the account. A full Sync is needed only when the cache is empty or Todoist refused its token.
+FULL_SYNC_WINDOW = 15 * 60
+FULL_SYNC_LIMIT = 20
+# A client error on an incremental Sync other than authentication (the 6-hour block) and the rate limit.
+REFUSED_TOKEN = frozenset(range(400, 500)) - {401, 403, 429}
 
 
 class PlusError(Exception):
-    def __init__(self, reason: str) -> None:
+    def __init__(self, reason: str, status: int | None = None) -> None:
         self.reason = reason
+        self.status = status  # Todoist's HTTP status when it answered
         super().__init__(reason)
 
 
@@ -37,15 +50,16 @@ async def call(core: Any, path: str, data: dict[str, Any] | None = None) -> dict
         var(env, "TODOIST_API_BASE", "https://api.todoist.com").rstrip("/") + path, timeout_ms=12000, **options
     )
     if result.status == 404:
-        raise PlusError("NOT_FOUND")
+        raise PlusError("NOT_FOUND", result.status)
     if result.status in (401, 403):
         core.block_todoist(now_s())
-        raise PlusError("ACTION_NOT_ALLOWED")
+        raise PlusError("ACTION_NOT_ALLOWED", result.status)
     if not result.outcome().ok:
         raise PlusError(
             "UNAVAILABLE"
             if result.status is None or result.status == 429 or result.status >= 500
-            else "ACTION_NOT_ALLOWED"
+            else "ACTION_NOT_ALLOWED",
+            result.status,
         )
     try:
         value = json.loads(result.body)
@@ -56,16 +70,55 @@ async def call(core: Any, path: str, data: dict[str, Any] | None = None) -> dict
         raise PlusError("UNAVAILABLE") from error
 
 
-async def metadata(core: Any) -> dict[str, Any]:
-    result = await call(core, "/api/v1/sync", {"sync_token": "*", "resource_types": ["user", "labels", "filters"]})
-    # The user object includes credentials and personal information. Return only the one needed field.
-    timezone = (result.get("user") or {}).get("tz_info", {}).get("timezone")
-    if not isinstance(timezone, str) or not timezone:
+async def metadata(core: Any, *, fresh: bool = False) -> dict[str, Any]:
+    """The account's timezone, labels and the filters Plus replaces.
+
+    From the object's cache when it was synced at most METADATA_MAX_AGE ago and ``fresh`` is not asked for,
+    else after one incremental Sync from the cached token; a full Sync only when there is no token. Under
+    PLUS_METADATA=full, a full Sync every call, as before the cache.
+    """
+    if not plus_cache.enabled(core.env):
+        answer = await call(core, "/api/v1/sync", {"sync_token": "*", "resource_types": RESOURCES})
+        return plus.metadata_view(_merged(None, answer))
+    now = now_s()
+    cached = plus_cache.get(core.sql, "todoist")
+    max_age = integer(core.env, "PLUS_METADATA_MAX_AGE_MS", METADATA_MAX_AGE * 1000) / 1000  # tests shorten it
+    if cached is not None and not fresh and now - cached.refreshed_at < max_age:
+        return plus.metadata_view(cached.value)
+    token = cached.value["sync_token"] if cached is not None else "*"
+    if token == "*" and not _take_full_sync(core.sql, now):
         raise PlusError("UNAVAILABLE")
-    labels, filters = result.get("labels"), result.get("filters")
-    if not isinstance(labels, list) or not isinstance(filters, list) or len(labels) > 500 or len(filters) > 500:
-        raise PlusError("UNAVAILABLE")
-    return {"timezone": timezone, "labels": labels, "filters": filters}
+    try:
+        answer = await call(core, "/api/v1/sync", {"sync_token": token, "resource_types": RESOURCES})
+    except PlusError as error:
+        if token != "*" and error.status in REFUSED_TOKEN:
+            # Todoist refused the request itself (an expired token, say): the next call starts over in full.
+            plus_cache.drop(core.sql, "todoist")
+        raise
+    full = token == "*" or answer.get("full_sync") is True
+    if full and token != "*":
+        _take_full_sync(core.sql, now)  # Todoist answered in full: it counts against the same limit
+    value = _merged(None if full else cached.value, answer)
+    plus_cache.put(core.sql, "todoist", value, now)
+    return plus.metadata_view(value)
+
+
+def _merged(previous: dict[str, Any] | None, answer: dict[str, Any]) -> dict[str, Any]:
+    try:
+        return plus.merge_metadata(previous, answer)
+    except (ValueError, AttributeError, TypeError) as error:
+        raise PlusError("UNAVAILABLE") from error
+
+
+def _take_full_sync(store: Any, now: int) -> bool:
+    """Count one full Sync in the current window; False once the window's limit is used up."""
+    window = now - now % FULL_SYNC_WINDOW
+    counted = plus_cache.get(store, "full_syncs")
+    count = counted.value["count"] if counted is not None and counted.value["window"] == window else 0
+    if count >= FULL_SYNC_LIMIT:
+        return False
+    plus_cache.put(store, "full_syncs", {"window": window, "count": count + 1}, now)
+    return True
 
 
 async def tasks(core: Any, limit: int = 200, cursor: str = "") -> tuple[list[dict[str, Any]], str]:

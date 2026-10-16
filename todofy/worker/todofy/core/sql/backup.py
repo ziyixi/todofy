@@ -78,7 +78,10 @@ MAIL_REMINDERS = Table(
     500,
 )
 SUMMARIES = Table(
-    "summaries", ("event_id", "created_at", "subject", "summary", "model", "task_id", "imported"), ("event_id",), 200
+    "summaries",
+    ("event_id", "created_at", "subject", "summary", "model", "task_id", "imported", "category_id", "triaged_at"),
+    ("event_id",),
+    200,
 )
 DAILY_REPORTS = Table(
     "daily_reports",
@@ -227,6 +230,33 @@ PLUS_ACTIONS = Table(
     "plus_actions", ("request_id", "request_hash", "commands", "response", "created_at"), ("request_id",), 50
 )
 PLUS_WEEKS = Table("plus_weeks", ("task_id", "week_start", "committed", "bet"), ("task_id",), 500)
+# The planning store (migration 0007): owner facts and task identities, never task content. plan_tasks is the last
+# table, after those that hold its IDs. The order alone does not keep a backup's task IDs complete: the job takes
+# every table's max(rowid) when it starts, and plan_marks and plan_edges have no INTEGER PRIMARY KEY, so a row added
+# during the job can reuse a deleted row's rowid inside their snapshot while its task is outside plan_tasks'. What
+# does is the lease (runtime/backup.py), which holds Plus writes and the ticks for the whole job. If the lease is
+# ever relaxed, take plan_tasks' max(rowid) when its own export starts; VerifyPlanStore counts orphans after a
+# restore.
+PLAN_SETTINGS = Table("plan_settings", ("key", "value", "updated_at"), ("key",), 50)
+PLAN_MARKS = Table("plan_marks", ("task_id", "kind", "period", "created_at"), ("task_id", "kind", "period"), 500)
+PLAN_EDGES = Table(
+    "plan_edges",
+    ("task_id", "prerequisite_id", "kind", "baseline_count", "created_at"),
+    ("task_id", "prerequisite_id", "kind"),
+    500,
+)
+PLAN_NOTES = Table(
+    "plan_notes", ("period", "area", "kind", "body", "rev", "updated_at"), ("period", "area", "kind"), 200
+)
+PLAN_CATEGORIES = Table(
+    "plan_categories",
+    ("id", "scheme", "name", "priority", "sort_order", "archived_at", "created_at", "updated_at"),
+    ("id",),
+    100,
+)
+PLAN_TASKS = Table(
+    "plan_tasks", ("id", "provider", "external_id", "created_at", "closed_at", "closed_as"), ("id",), 500
+)
 
 TABLES = {
     table.name: table
@@ -250,6 +280,12 @@ TABLES = {
         PLUS_CONNECTIONS,
         PLUS_ACTIONS,
         PLUS_WEEKS,
+        PLAN_SETTINGS,
+        PLAN_MARKS,
+        PLAN_EDGES,
+        PLAN_NOTES,
+        PLAN_CATEGORIES,
+        PLAN_TASKS,
     )
 }
 

@@ -21,6 +21,8 @@
   npx wrangler d1 execute DB --remote --config <outside the repo>/todofy-restore.toml --file restore/restore.sql
   python3 tools/backup_restore.py verify --in restore/ --db DB --remote --config <outside the repo>/todofy-restore.toml
 
+A table a later migration drops (RETIRED_TABLES) is left out of an older backup's restore, and said so.
+
 Local dev and tests use `--local --persist-to <dir>` in place of `--remote`. Every statement is an
 ``INSERT ... ON CONFLICT DO NOTHING`` below D1's 100 KB statement limit; longer values are appended
 by UPDATEs guarded on the current byte length, so re-running the file after a partial run is safe.
@@ -60,6 +62,11 @@ APP = Path(__file__).resolve().parents[1]
 PRODUCTION_CONFIG = APP / "wrangler.toml"
 MIGRATIONS_DIR = APP / "migrations"
 UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
+# The tables the planning store (migration 0007) replaces. A backup made while one exists holds it, so once a
+# migration of this checkout drops one, restore leaves it out instead of failing on a table the schema no
+# longer has. Until that migration exists, they restore like every other table.
+RETIRED_TABLES = ("plus_settings", "plus_weeks", "plus_actions")
+DROP_TABLE = re.compile(r"\bDROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?(\w+)", re.IGNORECASE)
 
 
 class RestoreError(Exception):
@@ -216,9 +223,27 @@ def check_table(root: Path, table: dict[str, Any]) -> None:
         raise RestoreError(f"{table['name']}: parts hold {total} rows, manifest says {table['rows']}")
 
 
+def retired_tables() -> frozenset[str]:
+    """The RETIRED_TABLES that a migration of this checkout drops."""
+    code = "\n".join(re.sub(r"--[^\n]*", "", path.read_text()) for path in sorted(MIGRATIONS_DIR.glob("*.sql")))
+    dropped = {name.lower() for name in DROP_TABLE.findall(code)}
+    return frozenset(name for name in RETIRED_TABLES if name in dropped)
+
+
 def _tables(manifest: dict[str, Any], *, legacy_text: bool) -> list[dict[str, Any]]:
-    """The manifest's tables to restore: all of them, or all but the imported mail text."""
-    return [table for table in manifest["tables"] if legacy_text or table["name"] != LEGACY_TEXT]
+    """The manifest's tables to restore: all but the retired ones, and the imported mail text when asked."""
+    retired = retired_tables()
+    return [
+        table
+        for table in manifest["tables"]
+        if (legacy_text or table["name"] != LEGACY_TEXT) and table["name"] not in retired
+    ]
+
+
+def _skipped(manifest: dict[str, Any]) -> list[str]:
+    """One line for each retired table the backup holds (left out of the restore)."""
+    retired = retired_tables()
+    return [f"SKIP {table['name']} (retired)" for table in manifest["tables"] if table["name"] in retired]
 
 
 def load_tables(root: Path, *, legacy_text: bool) -> tuple[dict[str, Any], list[dict[str, Any]]]:
@@ -236,8 +261,10 @@ def download(wrangler: Wrangler, bucket: str, backup: str, root: Path, *, legacy
     for table in _tables(_read_manifest(root / MANIFEST), legacy_text=legacy_text):
         for part in table["parts"]:
             wrangler.get(bucket, part["key"], _part_path(root, part["key"]))
-    _, tables = load_tables(root, legacy_text=legacy_text)
-    return [f"PASS {table['name']} rows={table['rows']} parts={len(table['parts'])}" for table in tables]
+    manifest, tables = load_tables(root, legacy_text=legacy_text)
+    return _skipped(manifest) + [
+        f"PASS {table['name']} rows={table['rows']} parts={len(table['parts'])}" for table in tables
+    ]
 
 
 # ---------------------------------------------------------------- SQL output
@@ -308,7 +335,7 @@ def row_statements(table: dict[str, Any], row: Sequence[Any]) -> list[str]:
 
 def write_sql(root: Path, out: Path, *, legacy_text: bool) -> list[str]:
     manifest, tables = load_tables(root, legacy_text=legacy_text)
-    lines = []
+    lines = _skipped(manifest)
     with open(out, "w", encoding="utf-8", newline="\n", opener=_private_opener) as sql:
         sql.write(
             f"-- Todofy D1 restore from {WEEKLY_FORMAT} created {manifest['created_at']}, schema"
@@ -342,7 +369,7 @@ def verify(wrangler: Wrangler, db: str, root: Path, *, legacy_text: bool) -> tup
         note = f" (later migrations applied: {', '.join(later)})"
     else:
         note = ""
-    lines = [f"{'PASS' if ok else 'FAIL'} schema_version {version}{note}"]
+    lines = [f"{'PASS' if ok else 'FAIL'} schema_version {version}{note}", *_skipped(manifest)]
     counts = ", ".join(f"(SELECT count(*) FROM {table['name']}) AS {table['name']}" for table in tables)
     [found] = wrangler.query(db, f"SELECT {counts}")
     for table in tables:

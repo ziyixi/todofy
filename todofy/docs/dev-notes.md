@@ -125,7 +125,9 @@ migrations/0001_init.sql       the D1 schema; 0002_daily_metrics.sql adds the ow
                                0003_ops.sql adds mail_events.canary_run_id, mail_reminders.ops_count/ops_generated_at (§5, ops-v1);
                                0004_gtd.sql adds the GTD ledger (gtd_snapshots, gtd_snapshot_tasks, gtd_daily,
                                gtd_reviews) and mail_reminders.project_id (gtd-features.md);
-                               0005_task_intents.sql adds task_intents and task_intent_tasks (§5, task-intent-v1)
+                               0005_task_intents.sql adds task_intents and task_intent_tasks (§5, task-intent-v1);
+                               0006_todoist_plus.sql the Todoist Plus tables and 0007_plan_store.sql the planning
+                               store (todoist-plus.md)
 api/                           machine-api-v1.openapi.yaml (the hooks hosts' routes: webhook, newsletter,
                                health; the owner API is ../proto/todofy/ui/v1), newsletter report
                                schemas; the webhook body references ../contracts/mail-received-v1 (shared,
@@ -372,8 +374,9 @@ Vars (plain, with defaults): `MAIL_SOURCE_ID`, `GEMINI_API_BASE`, `GEMINI_MODELS
 `LEGACY_TEXT_RETENTION_DAYS`, `MAINTENANCE_MODE`, `PROCESSING_PAUSED`, `FORCE_PAUSE_TODOIST`,
 `BUILD_SHA`, `TODOFY_PUBLIC_HOST` (the reminder's link); the GTD ledger's `GTD_COLLECT_UTC` ("13:00", `off`
 in the test config), `GTD_REVIEW_ENABLED`, `REPORT_CARRYOVER_DAYS` (14; 0 turns the carryover off),
-`TODOIST_OPS_PROJECT_ID` and `TODOIST_REVIEW_PROJECT_ID` (optional; unset = the default project) and the
-test knob `GTD_PAGE_TIMEOUT_MS` (20000). Core secrets set by the owner: `GEMINI_API_KEY`,
+`TODOIST_OPS_PROJECT_ID` and `TODOIST_REVIEW_PROJECT_ID` (optional; unset = the default project),
+`PLUS_METADATA` (`cache`; `full` turns Todoist Plus's caches off, todoist-plus.md "Caches") and the
+test knobs `GTD_PAGE_TIMEOUT_MS` (20000) and `PLUS_METADATA_MAX_AGE_MS` (300000). Core secrets set by the owner: `GEMINI_API_KEY`,
 `TODOIST_API_KEY`. The gateway's vars and secrets (`ACCESS_*`, `TODOFY_HOOKS_HOSTS`,
 `MAIL_WEBHOOK_TOKEN_SHA256(_PREVIOUS)`, `REPORT_BASIC_AUTH_SHA256`, `CSRF_SIGNING_KEY`) are listed in
 gateway-contract.md §1. Test configs shorten `*_MS` values (including the gateway's
@@ -414,7 +417,9 @@ it owns: `control(next_reminder_check, next_report, next_maintenance, todoist_bl
 `llm_usage(day, reserved_tokens, used_tokens, calls)`, `llm_inflight(event_id, day, reserved)`,
 `todoist_calls(minute_bucket, count)`, `report_requests(hour_bucket, count)`,
 `report_failures(kind, top_n, day, count)`; `gtd_state` (runtime/gtd.py) holds the GTD ledger's schedule,
-collection cursor, ops facts and HMAC key as one JSON document. Budget helpers used by R:
+collection cursor, ops facts and HMAC key as one JSON document; `plus_cache` (runtime/plus_cache.py) Todoist
+Plus's rebuildable metadata and connection copies, `plus_receipts` (runtime/plus_receipts.py) its writes'
+replay receipts, IDs only once done, read for 30 days and never deleted. Budget helpers used by R:
 ```python
 def reserve_tokens(self, tokens: int, now: int) -> bool
 def settle_tokens(self, reserved: int, used: int, now: int) -> None
@@ -645,7 +650,10 @@ the alarm skips the ledger step and the ticks (the metrics flush included) and o
 that is what makes the pages one snapshot. A job that ends writes one `backup` metrics point (§6). At most `BACKUP_QUERY_BUDGET` (30; tests use 1) D1 statements and 24 MiB of rows per invocation.
 Retention, after each new manifest, keeps the newest 6 complete prefixes and deletes every incomplete
 one older than the new one (the leftovers of failed or lost jobs). The job state is a JSON document in
-the DO SQLite table `backup_state`; losing it only makes the next backup due now. Only
+the DO SQLite table `backup_state`; losing it only makes the next backup due now. Each table's cursor keeps
+the columns the job was planned with, and its parts and manifest entry hold exactly those, so a release that
+adds a column while a job runs cannot mix two row widths; a state another version wrote (a job saved without
+its columns, say) does not load, and the next backup is due now. Only
 `tests/runtime/test_backup.py` binds the bucket (the shared test config has none, so no other scenario
 pauses for a backup). `tools/backup_restore.py` downloads, checks, and turns a backup into SQL
 (docs/cloudflare-setup.md §7).

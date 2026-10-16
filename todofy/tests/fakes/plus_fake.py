@@ -1,4 +1,8 @@
-"""Synthetic Todoist Sync + REST v1 subset used by the real Plus runtime tests."""
+"""Synthetic Todoist Sync + REST v1 subset used by the real Plus runtime tests.
+
+A metadata Sync answers sync_token "*" (or a token this fake never issued) in full and an issued token with the
+labels and filters that changed since it, deleted ones with is_deleted, as Todoist's incremental Sync does.
+"""
 
 import json
 from copy import deepcopy
@@ -33,6 +37,7 @@ class PlusFake(FakeServer):
         self.receipts = {}
         self.closed = {}
         self.fail_commands_once = False
+        self.sync_tokens = {}  # token -> (labels, filters) by ID as they were when it was issued
         self.route("POST", r"/api/v1/sync", self.sync)
         self.route("GET", r"/api/v1/tasks", self.list_tasks)
         self.route("GET", r"/api/v1/tasks/([a-zA-Z0-9_-]+)", self.get_task)
@@ -54,14 +59,7 @@ class PlusFake(FakeServer):
         form = parse_qs(request.body.decode())
         commands = json.loads(form.get("commands", ["[]"])[0])
         if not commands:
-            return Reply(
-                200,
-                {
-                    "user": {"tz_info": {"timezone": "UTC"}, "api_token": "synthetic-never-return"},
-                    "labels": self.labels,
-                    "filters": self.filters,
-                },
-            )
+            return Reply(200, self.metadata(form.get("sync_token", ["*"])[0]))
         statuses, mapping = {}, {}
         for command in commands:
             identity = command["uuid"]
@@ -89,6 +87,37 @@ class PlusFake(FakeServer):
             self.fail_commands_once = False
             return Reply(503, {"error": "synthetic response lost after apply"})
         return Reply(200, {"sync_status": statuses, "temp_id_mapping": mapping})
+
+    def metadata(self, token: str) -> dict:
+        labels = {str(row["id"]): deepcopy(row) for row in self.labels}
+        filters = {str(row["id"]): deepcopy(row) for row in self.filters}
+        issued = f"synthetic-sync-{len(self.sync_tokens) + 1}"
+        previous = self.sync_tokens.get(token)
+        self.sync_tokens[issued] = (labels, filters)
+        if previous is None:
+            return {
+                "sync_token": issued,
+                "full_sync": True,
+                "user": {"tz_info": {"timezone": "UTC"}, "api_token": "synthetic-never-return"},
+                "labels": list(labels.values()),
+                "filters": list(filters.values()),
+            }
+
+        def changed(now: dict, then: dict) -> list:
+            gone = [{**row, "is_deleted": True} for key, row in then.items() if key not in now]
+            return [row for key, row in now.items() if then.get(key) != row] + gone
+
+        return {
+            "sync_token": issued,
+            "full_sync": False,
+            "labels": changed(labels, previous[0]),
+            "filters": changed(filters, previous[1]),
+        }
+
+    def sync_requests(self) -> list[str]:
+        """The sync_token of each metadata Sync, in order."""
+        forms = [parse_qs(request.body.decode()) for request in self.received("POST", "/api/v1/sync")]
+        return [form.get("sync_token", ["*"])[0] for form in forms if "commands" not in form]
 
     def list_tasks(self, request: Recorded, _match):
         start = int(request.param("cursor") or "0")

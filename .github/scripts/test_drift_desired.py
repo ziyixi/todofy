@@ -89,7 +89,10 @@ class DesiredState(unittest.TestCase):
             "todofy": ("ACCESS_OWNER", "ACCESS_OWNER_ALIASES"),
         }
         switches = {
-            "todofy-core": ("BUILD_SHA", "MAINTENANCE_MODE", "REMINDER_ENABLED", "PROCESSING_PAUSED", "FORCE_PAUSE_TODOIST", "GTD_REVIEW_ENABLED"),
+            "todofy-core": (
+                "BUILD_SHA", "MAINTENANCE_MODE", "REMINDER_ENABLED", "PROCESSING_PAUSED", "FORCE_PAUSE_TODOIST",
+                "GTD_REVIEW_ENABLED", "PLUS_METADATA",
+            ),
             "todofy": ("BUILD_SHA", "MAINTENANCE_MODE"),
         }
         for worker, names in workers.items():

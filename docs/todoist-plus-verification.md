@@ -684,3 +684,55 @@ k3s) did not run. The manifest's permissions are unchanged. On main the change w
 the Todoist Plus extension; nothing else releases.
 
 Not verified: the live Todoist page and data, the installed extension, branch CI and release.
+
+## Planning store, caches and receipts, local checks (October 16)
+
+Steps M1-M3 of the owner-approved October 16 data-layer design, on local branch `claude/plan-store-m1-m3`,
+based on `origin/main` `60309fac`; not pushed, no branch CI, no release. All data is synthetic; production D1,
+the Durable Object, Todoist and FlowDay were not touched. The owner's overrides hold: no shadow mode or
+observation period, the `summaries_task` index is the partial one on `task_id <> '' AND imported = 0`, no
+legacy table is dropped or rewritten, and `TODOFY_PLUS_METADATA=full` is the only switch.
+
+- M1: migration `0007_plan_store.sql`, the six tables' backup (`plan_tasks` last), `RETIRED_TABLES` in the
+  restore tool and the owner-only `VerifyPlanStore` (counts only); no behaviour change.
+- M2: Todoist metadata from the object's SQLite with an incremental Sync token (five minutes for reads, an
+  incremental Sync before every label write, at most 20 full Syncs per 15 minutes), the extension token checked
+  inside `plus_ui` (fail-closed for a non-owner call without a digest), `ReadPlanRequest.view`.
+- M3: replay receipts in the object's SQLite (`storage.sync()` before the Sync call, IDs only once done,
+  read for 30 days and never deleted, the FlowDay settlement by compare-and-set), D1 `plus_actions`
+  read-only for the last 30 days, `UpdatePlanLabels` replayed by value.
+- Review fixes: a token check that Issue or Revoke overlaps keeps no copy (an in-memory change count, and
+  the copy dropped before and after the D1 write); a started `SetTaskPlan` or `SetTaskLead` keeps its plan
+  etag and answers `ETAG_MISMATCH` once the binding changed; a Monday label write syncs once (also under
+  `full`); a backup job keeps the columns it was planned with, and one the release before saved starts over;
+  the automatic 30-day receipt deletion was removed (the owner's override), the 30-day lookup window stays.
+
+Local checks, all passing: Todofy ruff and 1,893 host tests (one existing skip), among them the new
+`test_plan_store.py`, `test_plus_cache.py`, `test_plus_receipts.py` and the restore round trips; all 567
+real-workerd runtime cases (565 in four processes, then the serial `test_alarm.py`), 25 of them Plus, among them
+the new `test_plus_cache.py` and `test_plus_receipts.py`; the gateway's lint, types, 133 unit cases and its
+CPU suite; both production dry-runs, the gateway at 82.5 KiB gzip (budget 86 KiB); proto format, lint,
+api-linter, breaking against `60309fac`, deterministic generation, schemas and both codecs (495 TypeScript,
+113 Python); `.github/scripts` (453, one existing skip), the cloud tools, generate, catalog, inventory and
+drift checks; the dashboard Worker's 267 unit and 97 runtime cases; the extension's lint, types, 138 unit
+cases, build and 19 built-MV3 Chromium cases (its behaviour is unchanged; the IDL change republishes it).
+
+After the review fixes, re-run and passing: Todofy ruff and 1,906 host tests (one existing skip), among them
+the new `test_backup_job.py` and the race, rebinding and Monday-Sync cases; all 568 real-workerd runtime cases
+in three shards of four processes plus the serial `test_alarm.py`, among them the rebinding case in
+`test_plus_labels.py`; both production dry-runs (the gateway still 82.5 KiB gzip); `.github/scripts` (453, one
+existing skip). The fixes touch no gateway, proto, dashboard or extension file, so those checks were not
+repeated.
+
+The runtime cases read the object's SQLite file and check that each receipt is done with IDs only and that
+D1 `plus_actions` gains no row; a done D1 receipt answers as stored, a started one is sent once and finishes
+in the object, and a completion's D1 settlement is copied into the object with it (in workerd's SQLite, whose
+JSON operators the settlement uses). The test servers have no FlowDay, so the settlement's compare-and-set
+itself is covered on host SQLite and by the gateway's settlement cases.
+
+Not verified: branch CI, the release, production D1 and Todoist (an incremental Sync's real answers, the
+first full Sync after the release), the deploy window between the core and gateway uploads, and the
+owner's review. No production row count was taken: building `summaries_task` writes one entry per delivered
+mail with a task (`imported = 0`, the rows of the last 90 days), none for the imported archive. After the
+release: `VerifyPlanStore` answers `{}`, the next Sunday manifest lists the six tables and `plus_actions`
+stops growing.

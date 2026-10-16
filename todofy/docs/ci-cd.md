@@ -209,8 +209,8 @@ that passed is what ships:
 
    `deploy/deploy_vars.py` adds what is never committed and refuses a missing or invalid value, because a
    deploy without a var deletes it. With `--var`: `BUILD_SHA` (the commit) and `MAINTENANCE_MODE` on both
-   Workers; `REMINDER_ENABLED`, `PROCESSING_PAUSED`, `FORCE_PAUSE_TODOIST` and `GTD_REVIEW_ENABLED` on the
-   core. With `--secrets-file`, as Worker secrets (wrangler and the Cloudflare dashboard show a plain var's
+   Workers; `REMINDER_ENABLED`, `PROCESSING_PAUSED`, `FORCE_PAUSE_TODOIST`, `GTD_REVIEW_ENABLED` and
+   `PLUS_METADATA` (`cache` while its variable is unset) on the core. With `--secrets-file`, as Worker secrets (wrangler and the Cloudflare dashboard show a plain var's
    value, and pywrangler echoes its command line): `TODOIST_DEFAULT_PROJECT_ID` (required),
    `TODOIST_OPS_PROJECT_ID` and `TODOIST_REVIEW_PROJECT_ID` (optional) on the core; `ACCESS_OWNER` and
    `ACCESS_OWNER_ALIASES` on the gateway. A deploy keeps every secret it does not upload, so an unset
@@ -275,9 +275,8 @@ The first deploy of the split replaces the old single Python Worker `todofy`; it
 ## Changing a switch
 
 Operational switches (`TODOFY_MAINTENANCE_MODE`, `TODOFY_PROCESSING_PAUSED`, `TODOFY_FORCE_PAUSE_TODOIST`,
-`TODOFY_REMINDER_ENABLED`, `TODOFY_GTD_REVIEW_ENABLED`) are the only GitHub environment variables the deploy
-reads, so a deploy never
-overwrites the operational state:
+`TODOFY_REMINDER_ENABLED`, `TODOFY_GTD_REVIEW_ENABLED`, `TODOFY_PLUS_METADATA`) are the only GitHub
+environment variables the deploy reads, so a deploy never overwrites the operational state:
 
 1. Settings → Environments → `production` → edit the variable.
 2. Actions → "CI and deploy" → Run workflow → branch `main`, app `todofy`.

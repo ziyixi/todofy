@@ -1,4 +1,10 @@
-/** Separate, token-authenticated extension API. Owner setup retains Access and CSRF. */
+/**
+ * Separate, token-authenticated extension API. Owner setup retains Access and CSRF.
+ *
+ * An extension call passes the SHA-256 of its token with the rpc to TodofyCore's plus_ui, which checks it
+ * against its copy of the non-revoked connections: one core call per rpc. The FlowDay proxy, which reaches no
+ * core rpc, checks the digest with plus_auth first.
+ */
 import { HttpTranscoder, PreEncoded, type ServiceHandlers, type ShapeOf } from '@ziyixi/proto/http-transcoder';
 import { Code, RpcError } from '@ziyixi/proto/rpc-status';
 import { PlusService } from '@ziyixi/proto/todofy/ui/v1/plus_service_pb';
@@ -12,8 +18,9 @@ import { flag, variable, type Env } from './env.ts';
 import { withPrivateHeaders, type Context } from './http.ts';
 import { API_DOMAIN, isReason, uiError } from './ui.ts';
 
-interface PlusContext { env: Env; owner: string | null }
-const OWNER_METHODS = new Set(['ConfirmPlanMapping', 'IssueExtensionConnection', 'ReadExtensionConnections', 'RevokeExtensionConnection']);
+/** The Access owner, or null for the extension, whose token's SHA-256 is `digest`. */
+interface PlusContext { env: Env; owner: string | null; digest: string | null }
+const OWNER_METHODS = new Set(['ConfirmPlanMapping', 'IssueExtensionConnection', 'ReadExtensionConnections', 'RevokeExtensionConnection', 'VerifyPlanStore']);
 const PREFIX = '/api/plus/v1/';
 const FLOW_PREFIX = '/api/plus/flowday';
 const DOMAIN = API_DOMAIN;
@@ -28,7 +35,7 @@ function handlers(): ServiceHandlers<ShapeOf<typeof PlusService>, PlusContext> {
       if (idempotent && wire['request_id'] === undefined) wire['request_id'] = crypto.randomUUID();
       if (method.name === 'CompleteTask' && wire['flow_date'] && !validDay(wire['flow_date'])) throw uiError('BAD_REQUEST');
       let answer;
-      try { answer = await coordinator(ctx.env).plus_ui(method.name, JSON.stringify(wire), ctx.owner !== null); }
+      try { answer = await coordinator(ctx.env).plus_ui(method.name, JSON.stringify(wire), ctx.owner !== null, ctx.digest); }
       catch { throw uiError('UNAVAILABLE'); }
       if ('error' in answer) throw uiError(isReason(answer.error) ? answer.error : 'INTERNAL');
       if (method.name === 'CompleteTask' && typeof wire['flow_date'] === 'string' && wire['flow_date']) {
@@ -61,8 +68,8 @@ export function plusPath(path: string): boolean {
   return path.startsWith(PREFIX) || path.startsWith(`${FLOW_PREFIX}/`);
 }
 
-export async function plusOwner(ctx: Context, owner: string | null): Promise<Response> {
-  const result = await api.handle(ctx.request, { env: ctx.env, owner }, ctx.requestId);
+export async function plusOwner(ctx: Context, owner: string | null, digest: string | null = null): Promise<Response> {
+  const result = await api.handle(ctx.request, { env: ctx.env, owner, digest }, ctx.requestId);
   return result?.response ?? api.errorResponse(uiError('NOT_FOUND'), ctx.requestId);
 }
 
@@ -71,13 +78,17 @@ export async function plusExtension(ctx: Context): Promise<Response> {
     // Browsers call through the extension background's host permission. We do not grant page CORS.
     const match = /^Bearer (todofy_plus_[A-Za-z0-9_-]{43})$/.exec(ctx.request.headers.get('authorization') ?? '');
     if (!match) throw uiError('UNAUTHORIZED');
-    let accepted: boolean;
-    try { accepted = await coordinator(ctx.env).plus_auth(await sha256Hex(utf8(match[1] ?? ''))); }
-    catch { throw uiError('UNAVAILABLE'); }
-    if (!accepted) throw uiError('UNAUTHORIZED');
+    const digest = await sha256Hex(utf8(match[1] ?? ''));
     let response: Response;
-    if (ctx.url.pathname.startsWith(`${FLOW_PREFIX}/`)) response = await proxyFocus(ctx);
-    else response = await plusOwner(ctx, null);
+    if (ctx.url.pathname.startsWith(`${FLOW_PREFIX}/`)) {
+      let accepted: boolean;
+      try { accepted = await coordinator(ctx.env).plus_auth(digest); }
+      catch { throw uiError('UNAVAILABLE'); }
+      if (!accepted) throw uiError('UNAUTHORIZED');
+      response = await proxyFocus(ctx);
+    } else {
+      response = await plusOwner(ctx, null, digest);
+    }
     return withPrivateHeaders(response, false);
   } catch (error) {
     return withPrivateHeaders(api.errorResponse(error instanceof RpcError ? error : uiError('INTERNAL'), ctx.requestId), false);
@@ -167,6 +178,6 @@ const focusApi = new HttpTranscoder(FlowDayUiService, focusHandlers(), {
 async function proxyFocus(ctx: Context): Promise<Response> {
   const path = ctx.url.pathname.slice(FLOW_PREFIX.length);
   const request = new Request(`https://flowday.internal${path}${ctx.url.search}`, ctx.request);
-  const result = await focusApi.handle(request, { env: ctx.env, owner: null }, ctx.requestId);
+  const result = await focusApi.handle(request, { env: ctx.env, owner: null, digest: null }, ctx.requestId);
   return result?.response ?? api.errorResponse(uiError('NOT_FOUND'), ctx.requestId);
 }

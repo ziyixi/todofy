@@ -145,6 +145,8 @@ TOGGLES = {
     "TODOFY_FORCE_PAUSE_TODOIST",
     "TODOFY_REMINDER_ENABLED",
     "TODOFY_GTD_REVIEW_ENABLED",
+    # Todoist Plus's caches (cache, or full to turn them off): todofy/docs/todoist-plus.md "Caches".
+    "TODOFY_PLUS_METADATA",
     "DASHBOARD_CANARY_ENABLED",
     # mailsort's ceiling (live, shadow or off): the emergency switch of mailsort/docs/design.md section 10.
     "MAILSORT_MODE",

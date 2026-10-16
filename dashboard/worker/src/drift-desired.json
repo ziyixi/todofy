@@ -929,6 +929,11 @@
           "source": "config"
         },
         {
+          "name": "PLUS_METADATA",
+          "type": "plain_text",
+          "source": "deploy"
+        },
+        {
           "name": "PROCESSING_PAUSED",
           "type": "plain_text",
           "source": "deploy"

@@ -6,7 +6,8 @@ The committed production configs are wrangler.toml (todofy-core) and gateway/wra
 
 - `--var NAME:value` (a plain_text var, exactly like a [vars] entry): BUILD_SHA (the commit) and the
   operational switches (GitHub environment variables; a release restates them and never overwrites them)
-  on both Workers.
+  on both Workers. Every switch is required except the core's rollback switch PLUS_METADATA, which deploys
+  `cache` while its variable is unset.
 - `--secrets-file` (Worker secrets: hidden in wrangler's output and in the Cloudflare dashboard and API,
   unlike a plain_text var), one owner-only file per Worker written by the `secrets` mode from GitHub
   environment secrets: the core's Todoist projects TODOIST_DEFAULT_PROJECT_ID (required) and the optional
@@ -39,7 +40,7 @@ deployments next to the var of the same name, not this atomic switch. Messages n
 # runs `exec core`, `exec gateway`, `secrets core` or `secrets gateway` must set each input of that mode
 # (modes core, gateway, secrets_core, secrets_gateway; Actions sets GITHUB_*).
 # deploy-vars-inputs core: GITHUB_SHA TODOFY_MAINTENANCE_MODE TODOFY_REMINDER_ENABLED TODOFY_PROCESSING_PAUSED
-# deploy-vars-inputs core: TODOFY_FORCE_PAUSE_TODOIST TODOFY_GTD_REVIEW_ENABLED
+# deploy-vars-inputs core: TODOFY_FORCE_PAUSE_TODOIST TODOFY_GTD_REVIEW_ENABLED TODOFY_PLUS_METADATA
 # deploy-vars-inputs gateway: GITHUB_SHA TODOFY_MAINTENANCE_MODE
 # deploy-vars-inputs secrets_core: TODOFY_TODOIST_DEFAULT_PROJECT_ID TODOFY_TODOIST_OPS_PROJECT_ID
 # deploy-vars-inputs secrets_core: TODOFY_TODOIST_REVIEW_PROJECT_ID
@@ -62,6 +63,7 @@ SECRET_SPECS = json.loads((ROOT.parent / "tools/cloud-config/worker-secrets.json
 # Printable ASCII only, as packages/edge-auth requires of the owner and aliases (SPEC.md #36).
 EMAIL = re.compile(r"(?=[\x21-\x7e]+\Z)[^\s@]+@[^\s@]+\.[^\s@]+")
 FLAG = re.compile(r"true|false")
+PLUS_METADATA = re.compile(r"cache|full")
 SHA = re.compile(r"[0-9a-f]{40}")
 PROJECT_ID = re.compile(r"[A-Za-z0-9_-]{1,64}")
 MAX_ALIASES = 8  # the gateway's Access check refuses more aliases, or more than MAX_LIST_CHARS of them
@@ -82,6 +84,8 @@ class Injected:
     source: str  # the environment variable CI sets
     kind: str  # "build", "toggle", "personal" or "optional" (a personal value that may be unset)
     pattern: re.Pattern[str]
+    # A rollback switch added after the others may be unset: an empty GitHub variable deploys this value.
+    default: str = ""
 
 
 def _shared() -> tuple[Injected, ...]:
@@ -100,6 +104,8 @@ INJECTED: dict[str, tuple[Injected, ...]] = {
         Injected("PROCESSING_PAUSED", "TODOFY_PROCESSING_PAUSED", "toggle", FLAG),
         Injected("FORCE_PAUSE_TODOIST", "TODOFY_FORCE_PAUSE_TODOIST", "toggle", FLAG),
         Injected("GTD_REVIEW_ENABLED", "TODOFY_GTD_REVIEW_ENABLED", "toggle", FLAG),
+        # docs/todoist-plus.md "Caches": `full` turns the Plus caches off (the reads before them).
+        Injected("PLUS_METADATA", "TODOFY_PLUS_METADATA", "toggle", PLUS_METADATA, default="cache"),
     ),
     "gateway": _shared(),
 }
@@ -121,7 +127,8 @@ SECRET_INPUTS = {worker: tuple(item.source for item in items) for worker, items 
 
 
 def _required(env: Mapping[str, str], name: str, pattern: re.Pattern[str]) -> str:
-    # GitHub passes an unset variable as "": no switch or identity has a default, so empty is missing too.
+    # GitHub passes an unset variable as "": no identity, and no switch but an Injected.default, has a default,
+    # so empty is missing too.
     value = env.get(name)
     if not value or not pattern.fullmatch(value):
         raise SettingError(name)
@@ -156,7 +163,9 @@ def _aliases(env: Mapping[str, str]) -> str:
 def injected_vars(worker: str, env: Mapping[str, str]) -> dict[str, str]:
     """{NAME: value} for every --var `worker` ("core" or "gateway") gets at deploy."""
     return {
-        item.name: _required(
+        item.name: item.default
+        if item.default and not env.get(item.source)
+        else _required(
             env,
             "BUILD_SOURCE_SHA" if item.kind == "build" and env.get("BUILD_SOURCE_SHA") else item.source,
             item.pattern,

@@ -14,20 +14,34 @@ from ziyixi_proto.wire_json import WireJsonError, from_wire, to_wire
 from todofy.core import plus
 from todofy.core.sql import gtd as gtd_sql
 from todofy.core.sql import plus as sql
-from todofy.runtime import backup, plus_week
+from todofy.runtime import backup, plan_store, plus_cache, plus_week
+from todofy.runtime import plus_receipts as receipts
 from todofy.runtime import plus_store as store
 from todofy.runtime import plus_todoist as todoist
 from todofy.runtime.config import flag, var
 from todofy.runtime.interop import now_s, to_js
 
 OWNER_METHODS = frozenset(
-    {"ConfirmPlanMapping", "IssueExtensionConnection", "ReadExtensionConnections", "RevokeExtensionConnection"}
+    {
+        "ConfirmPlanMapping",
+        "IssueExtensionConnection",
+        "ReadExtensionConnections",
+        "RevokeExtensionConnection",
+        "VerifyPlanStore",
+    }
 )
-READ_METHODS = frozenset({"ReadPlan", "ListPlanningTasks", "ReadExtensionConnections"})
+READ_METHODS = frozenset({"ReadPlan", "ListPlanningTasks", "ReadExtensionConnections", "VerifyPlanStore"})
 PLAN_METHODS = frozenset({"ReadPlan", "ConfirmPlanMapping", "UpdatePlanLabels"})
 METHODS = (
     READ_METHODS | OWNER_METHODS | {"SetTaskPlan", "SetTaskLead", "AppendTaskSteps", "CompleteTask", "UpdatePlanLabels"}
 )
+# Methods that write labels or bind them sync Todoist's labels first, so a label renamed in Todoist is never
+# written back under its old name; every other call reads the metadata the object synced in the last five
+# minutes (plus_todoist.metadata).
+LABEL_WRITES = frozenset({"SetTaskPlan", "SetTaskLead", "UpdatePlanLabels", "ConfirmPlanMapping"})
+# How long the object trusts its copy of the non-revoked connection digests; Issue and Revoke drop it at once
+# (_change_connections).
+CONNECTIONS_MAX_AGE = 10 * 60
 
 
 def account_day(timezone: str) -> str:
@@ -38,9 +52,9 @@ def account_day(timezone: str) -> str:
     )
 
 
-async def plan(core: Any, metadata: dict[str, Any] | None = None) -> dict[str, Any]:
+async def plan(core: Any, metadata: dict[str, Any] | None = None, *, fresh: bool = False) -> dict[str, Any]:
     env = core.env
-    metadata = metadata if metadata is not None else await todoist.metadata(core)
+    metadata = metadata if metadata is not None else await todoist.metadata(core, fresh=fresh)
     current = await store.settings(env.DB)
     saved = json.loads(current["mapping"]) if current else None
     discovered = plus.discover(metadata["labels"], metadata["timezone"], saved["labels"] if saved else None)
@@ -79,14 +93,21 @@ async def review_targets(env: Any, week: str) -> dict[str, Any]:
     }
 
 
-async def require_ready(core: Any, current: dict[str, Any] | None = None) -> dict[str, Any]:
+async def require_ready(core: Any, current: dict[str, Any] | None = None, *, synced: bool = False) -> dict[str, Any]:
+    """``current`` (else the plan from the cached metadata) once it is enabled and its week is settled.
+    ``synced``: ``current`` comes from labels synced in this call."""
     env = core.env
     current = current if current is not None else await plan(core)
     if not current["enabled"]:
         raise todoist.PlusError("ACTION_NOT_ALLOWED")
     settings = await store.settings(env.DB)
     if settings["week_start"] != current["week_start"]:
-        # New-week decisions wait for one bounded reset batch; they never inherit the old membership.
+        # New-week decisions wait for one bounded reset batch; they never inherit the old membership. The reset
+        # writes labels, so it starts from labels synced in this call (under PLUS_METADATA=full every plan is).
+        if not synced and plus_cache.enabled(env):
+            current = await plan(core, fresh=True)
+            if not current["enabled"]:
+                raise todoist.PlusError("ACTION_NOT_ALLOWED")
         if not await plus_week.reset_ended(core, current["week_start"], current["labels"]):
             raise todoist.PlusError("UNAVAILABLE")
         await store.run(env.DB, sql.ADVANCE_WEEK, current["week_start"])
@@ -95,14 +116,14 @@ async def require_ready(core: Any, current: dict[str, Any] | None = None) -> dic
 
 async def confirm(core: Any, request: dict[str, Any]) -> dict[str, Any]:
     env = core.env
-    current = await plan(core)
+    current = await plan(core, fresh=True)
     if current["etag"] != request["etag"]:
         raise todoist.PlusError("ETAG_MISMATCH")
     if current["missing_labels"]:
         raise todoist.PlusError("ACTION_NOT_ALLOWED")
     if current["enabled"]:
         # A repeated setup must still settle an ended week, never adopt its marks as fresh decisions.
-        return {"plan": await require_ready(core)}
+        return {"plan": await require_ready(core, current, synced=True)}
     # Complete the initial membership read before enabling Monday writes.
     tasks: list[dict[str, Any]] = []
     cursor = ""
@@ -125,24 +146,28 @@ async def confirm(core: Any, request: dict[str, Any]) -> dict[str, Any]:
     return {"plan": current}
 
 
+def _saved(current: dict[str, Any], request: dict[str, Any]) -> bool:
+    """Whether UpdatePlanLabels' ``request`` binds the labels ``current`` already has (a replay)."""
+    try:
+        bindings = plus.replace_planning_labels(current["labels"], request["labels"], current["available_labels"])
+    except ValueError:
+        return False
+    return bindings == current["labels"]
+
+
 async def update_labels(core: Any, request: dict[str, Any]) -> dict[str, Any]:
+    """Only the binding in D1 changes, no Todoist task, so there is no receipt: a request whose etag is outdated
+    is a replay when the binding it asks for is the saved one, and answers the saved plan."""
     env = core.env
-    request_id = request["request_id"]
-    digest = plus.fingerprint(["UpdatePlanLabels", request])
-    previous = await store.first(env.DB, sql.ACTION, request_id)
-    if previous:
-        if previous["request_hash"] != digest:
-            raise todoist.PlusError("BAD_REQUEST")
-        if previous["response"] is not None:
-            return json.loads(previous["response"])
-        raise todoist.PlusError("UNAVAILABLE")
-    metadata = await todoist.metadata(core)
+    metadata = await todoist.metadata(core, fresh=True)
     current = await plan(core, metadata)
     if request["etag"] != current["etag"]:
-        raise todoist.PlusError("ETAG_MISMATCH")
+        if not _saved(current, request):
+            raise todoist.PlusError("ETAG_MISMATCH")
+        return {"plan": await require_ready(core, current, synced=True)}
     bindings = plus.replace_planning_labels(current["labels"], request["labels"], current["available_labels"])
     # Settle old-week work using its old binding identities before changing configuration.
-    current = await require_ready(core, current)
+    current = await require_ready(core, current, synced=True)
     updated = {
         **current,
         "labels": bindings,
@@ -150,24 +175,55 @@ async def update_labels(core: Any, request: dict[str, Any]) -> dict[str, Any]:
         "hidden_filter_ids": plus.replaced_filters(metadata["filters"], bindings),
     }
     mapping = json.dumps({"etag": updated["etag"], "labels": bindings}, separators=(",", ":"))
-    response = {"plan": updated}
-    # Configuration and its immutable receipt commit together; a lost response cannot replay an older config.
-    await env.DB.batch(
-        [
-            env.DB.prepare(sql.START_ACTION).bind(request_id, digest, mapping, now_s()),
-            env.DB.prepare(sql.SAVE_SETTINGS).bind(mapping, current["timezone"], current["week_start"]),
-            env.DB.prepare(sql.FINISH_ACTION).bind(json.dumps(response, separators=(",", ":")), request_id),
-        ]
-    )
-    return response
+    await store.run(env.DB, sql.SAVE_SETTINGS, mapping, current["timezone"], current["week_start"])
+    return {"plan": updated}
 
 
-async def connections(env: Any, method: str, request: dict[str, Any]) -> dict[str, Any]:
+async def connected(core: Any, digest: str) -> bool:
+    """Whether ``digest`` is a non-revoked extension connection's: the object's copy of D1, read again after
+    CONNECTIONS_MAX_AGE. A failed D1 read raises (JsException) rather than trusting an older copy.
+
+    The check runs outside plus_lock and D1 is not the object's storage, so Issue or Revoke can commit while its
+    read is in flight: a read that one of them overlapped answers its own call but is not kept."""
+    env = core.env
+    if len(digest) != 64:
+        return False
+    if not plus_cache.enabled(env):
+        return await store.first(env.DB, sql.CONNECTION, digest) is not None
+    now = now_s()
+    cached = plus_cache.get(core.sql, "connections")
+    if cached is None or now - cached.refreshed_at > CONNECTIONS_MAX_AGE:
+        changes = core.plus_connection_changes
+        digests = [row["token_sha256"] for row in await store.rows(env.DB, sql.ACTIVE_DIGESTS)]
+        if core.plus_connection_changes == changes:
+            plus_cache.put(core.sql, "connections", digests, now)
+        return digest in digests
+    return digest in cached.value
+
+
+def _drop_connections(core: Any) -> None:
+    core.plus_connection_changes += 1
+    plus_cache.drop(core.sql, "connections")
+
+
+async def _change_connections(core: Any, statement: str, *args: Any) -> None:
+    """Issue's or Revoke's D1 write, so that it holds from the next token check on: the object's copy is dropped
+    before the write (none is left when its answer is lost) and after it, and the counter keeps a check whose
+    read overlapped the write from storing a copy (connected)."""
+    _drop_connections(core)
+    try:
+        await store.run(core.env.DB, statement, *args)
+    finally:
+        _drop_connections(core)
+
+
+async def connections(core: Any, method: str, request: dict[str, Any]) -> dict[str, Any]:
+    env = core.env
     if method == "ReadExtensionConnections":
         rows = await store.rows(env.DB, sql.CONNECTIONS)
         return {"connections": [{**row, "revoked": bool(row["revoked"])} for row in rows]}
     if method == "RevokeExtensionConnection":
-        await store.run(env.DB, sql.REVOKE_CONNECTION, plus.check_id(request["connection_id"]))
+        await _change_connections(core, sql.REVOKE_CONNECTION, plus.check_id(request["connection_id"]))
         return {}
     display_name = request["display_name"].strip()
     if not 1 <= len(display_name) <= 60:
@@ -181,8 +237,8 @@ async def connections(env: Any, method: str, request: dict[str, Any]) -> dict[st
     if len(rows) >= 30:
         raise todoist.PlusError("ACTION_NOT_ALLOWED")
     token = "todofy_plus_" + secrets.token_urlsafe(32)
-    await store.run(
-        env.DB,
+    await _change_connections(
+        core,
         sql.CREATE_CONNECTION,
         request["request_id"],
         display_name,
@@ -240,25 +296,41 @@ async def build_commands(
     return [{"type": "item_update", "uuid": plus.command_id(request_id), "args": {"id": task_id, **args}}]
 
 
+async def replayed(core: Any, method: str, result: dict[str, Any]) -> dict[str, Any]:
+    """The answer of a done receipt, from the IDs it keeps: a planning write reads its task again."""
+    if method in ("SetTaskPlan", "SetTaskLead"):
+        current = await plan(core)
+        task = await todoist.task(core, result["task_id"])
+        return {"task": plus.task_view(task, current["today"], current["labels"])}
+    return {key: value for key, value in result.items() if key != "focus"}
+
+
 async def mutate(core: Any, method: str, request: dict[str, Any]) -> dict[str, Any]:
+    """One write that changes Todoist, under its receipt (runtime/plus_receipts.py)."""
     env = core.env
     request_id = request["request_id"]
     digest = plus.fingerprint([method, request])
-    previous = await store.first(env.DB, sql.ACTION, request_id)
+    previous = await receipts.find(core, request_id)
     if previous:
-        if previous["request_hash"] != digest:
+        if previous.request_hash != digest:
             raise todoist.PlusError("BAD_REQUEST")
-        if previous["response"] is not None:
-            return json.loads(previous["response"])
-    current = await require_ready(core)
+        if previous.result is not None:
+            # A D1 receipt of the release before kept the whole answer.
+            return previous.result if previous.legacy else await replayed(core, method, previous.result)
+    synced = method in LABEL_WRITES
+    current = await require_ready(core, await plan(core, fresh=synced), synced=synced)
+    if previous and previous.plan_etag is not None and previous.plan_etag != current["etag"]:
+        # Its frozen labels were chosen under another binding: resending them could attach a label by a name
+        # that no longer has its role. The extension reads the task again.
+        raise todoist.PlusError("ETAG_MISMATCH")
     if previous:
-        commands = json.loads(previous["commands"])
+        commands = previous.commands
     else:
         if request.get("active") and not any(label["label"] == plus.ACTIVE for label in current["available_labels"]):
             # Todoist would create a label for an unknown name; Plus never creates one.
             raise todoist.PlusError("ACTION_NOT_ALLOWED")
         commands = await build_commands(core, method, request, current["labels"])
-        await store.start_action(env.DB, request_id, digest, commands)
+    await receipts.start(core, request_id, method, digest, commands, current["etag"] if synced else None)
     result = await todoist.commands(core, commands)
     if method in ("SetTaskPlan", "SetTaskLead"):
         # Every explicit new-week write replaces the membership; old resets cannot select it. A commitment
@@ -274,26 +346,37 @@ async def mutate(core: Any, method: str, request: dict[str, Any]) -> dict[str, A
         else:
             await store.run(env.DB, sql.FORGET_TASK, request["task_id"])
     if method == "CompleteTask":
-        response = {"task_id": request["task_id"]}
+        response = kept = {"task_id": request["task_id"]}
     elif method == "AppendTaskSteps":
         ids = result.get("temp_id_mapping", {})
-        response = {"task_ids": [str(ids.get(command["temp_id"], "")) for command in commands]}
+        response = kept = {"task_ids": [str(ids.get(command["temp_id"], "")) for command in commands]}
         if not all(response["task_ids"]):
             raise todoist.PlusError("UNAVAILABLE")
     else:
         task = await todoist.task(core, request["task_id"])
         response = {"task": plus.task_view(task, current["today"], current["labels"])}
-    await store.run(env.DB, sql.FINISH_ACTION, json.dumps(response, separators=(",", ":")), request_id)
+        kept = {"task_id": request["task_id"]}  # the task's title stays out of the receipt
+    receipts.finish(core.sql, request_id, kept)
     return response
 
 
-async def handle(coordinator: Any, method: str, text: str, *, owner: bool) -> dict[str, Any]:
+async def handle(coordinator: Any, method: str, text: str, *, owner: bool, digest: str | None = None) -> dict[str, Any]:
+    """One PlusService rpc for the Access owner (``owner``) or for the extension connection whose token's SHA-256
+    the gateway passes as ``digest``."""
     try:
+        if not owner:
+            if digest is None:
+                # Fail closed: only the gateway before this release calls without it, while CI deploys this core
+                # first; the next call, through the new gateway, is served.
+                raise todoist.PlusError("UNAVAILABLE")
+            if not await connected(coordinator, digest):
+                raise todoist.PlusError("UNAUTHORIZED")
         if method not in METHODS or (method in OWNER_METHODS and not owner):
             raise todoist.PlusError("UNAUTHORIZED")
         request_type = getattr(pb, method + "Request")
         response_type = getattr(pb, method + "Response")
-        request = to_wire(from_wire(request_type, json.loads(text), strict=True).message)
+        message = from_wire(request_type, json.loads(text), strict=True).message
+        request = to_wire(message)
         if method not in READ_METHODS:
             if flag(coordinator.env, "MAINTENANCE_MODE"):
                 raise todoist.PlusError("MAINTENANCE")
@@ -303,7 +386,9 @@ async def handle(coordinator: Any, method: str, text: str, *, owner: bool) -> di
             if method not in READ_METHODS and backup.holds_ledger(env, coordinator.sql, now_s()):
                 raise todoist.PlusError("MAINTENANCE")
             if method in {"IssueExtensionConnection", "ReadExtensionConnections", "RevokeExtensionConnection"}:
-                response = await connections(env, method, request)
+                response = await connections(coordinator, method, request)
+            elif method == "VerifyPlanStore":
+                response = await plan_store.verify(env.DB)
             elif method == "ReadPlan":
                 response = {"plan": await plan(coordinator)}
             elif method == "ConfirmPlanMapping":
@@ -325,7 +410,8 @@ async def handle(coordinator: Any, method: str, text: str, *, owner: bool) -> di
                 }
             else:
                 response = await mutate(coordinator, method, request)
-            if method in PLAN_METHODS:
+            # A native Todoist page asks for the BASIC view: the mapping without the weekly review's batch.
+            if method in PLAN_METHODS and not (method == "ReadPlan" and message.view == pb.PlanView.BASIC):
                 response = {"plan": {**response["plan"], **await review_targets(env, response["plan"]["week_start"])}}
             message = from_wire(response_type, response, strict=True).message
             return {"ok": json.dumps(to_wire(message), separators=(",", ":")), "next_cursor": None}

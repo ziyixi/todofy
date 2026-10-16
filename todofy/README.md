@@ -91,6 +91,10 @@ Set as GitHub variables on the `production` environment and applied by a deploy 
 | `TODOFY_REMINDER_ENABLED` | the daily attention reminder task is on |
 | `TODOFY_GTD_REVIEW_ENABLED` | the Sunday review task is on (one Todoist task per ISO week, [docs/gtd-features.md](docs/gtd-features.md)) |
 
+`TODOFY_PLUS_METADATA` takes `cache` (the default while unset) or `full`: `full` turns Todoist Plus's caches
+off, so every Plus call syncs Todoist's labels in full and checks the extension token in D1, as before them
+([docs/todoist-plus.md](docs/todoist-plus.md#caches)).
+
 Optional environment secrets `TODOFY_TODOIST_OPS_PROJECT_ID` and `TODOFY_TODOIST_REVIEW_PROJECT_ID` send the
 `[Todofy System]` reminder and the Sunday review to their own Todoist projects; unset, both go to the
 default project. Like `TODOFY_TODOIST_DEFAULT_PROJECT_ID`, they reach `todofy-core` as Worker secrets

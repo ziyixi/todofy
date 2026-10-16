@@ -112,7 +112,7 @@ def test_optional_quarter_keeps_the_confirmed_legacy_identity(account):
     assert {"id": "quarter-id", "label": "quarter"} in plan["available_labels"]
 
 
-def test_config_only_mapping_has_durable_receipts_and_does_not_retag_tasks(account):
+def test_config_only_mapping_replays_by_value_and_does_not_retag_tasks(account):
     worker, upstream, headers, _ = account
     old = read_plan(worker, headers)
     before = deepcopy(upstream.tasks)
@@ -121,6 +121,9 @@ def test_config_only_mapping_has_durable_receipts_and_does_not_retag_tasks(accou
     assert first.status_code == 200, first.text
     first_plan = first.json()["plan"]
     assert first_plan["hidden_filter_ids"] == ["filter-bets", "filter-committed"]
+    # A lost answer: the same request again asks for the binding now saved, so it is a replay (no receipt).
+    again = worker.hooks.post("/api/plus/v1/plan:updatePlanLabels", json=first_body, headers=headers)
+    assert again.status_code == 200 and again.json()["plan"]["etag"] == first_plan["etag"]
     replacements = {
         "candiate": ("month-id", "Next month"),
         "focus": ("week-id", "This week"),
@@ -136,9 +139,11 @@ def test_config_only_mapping_has_durable_receipts_and_does_not_retag_tasks(accou
     assert second.status_code == 200, second.text
     second_plan = second.json()["plan"]
     assert second_plan["hidden_filter_ids"] == ["filter-bets"]
-    replay = worker.hooks.post("/api/plus/v1/plan:updatePlanLabels", json=first_body, headers=headers)
-    assert replay.status_code == 200 and replay.json()["plan"]["etag"] == first_plan["etag"]
+    # After a later change, the first request is outdated, and its older binding is never written back.
+    late = worker.hooks.post("/api/plus/v1/plan:updatePlanLabels", json=first_body, headers=headers)
+    assert reason(late) == "ETAG_MISMATCH"
     assert read_plan(worker, headers)["etag"] == second_plan["etag"]
+    assert worker.d1("SELECT count(*) AS n FROM plus_actions") == [{"n": 0}]  # nothing writes it any more
     assert upstream.tasks == before and upstream.commands() == []
     saved = worker.d1("SELECT mapping FROM plus_settings WHERE id=1")[0]["mapping"]
     assert json.loads(saved)["labels"] == second_plan["labels"]
@@ -189,7 +194,15 @@ def test_stale_or_invalid_mapping_is_rejected_before_configuration_or_task_write
         invalid = [{**row, **replacement} if row["role"] == "quarter" else row for row in selected]
         response, _ = update(worker, headers, plan, invalid)
         assert reason(response) == "BAD_REQUEST"
-    stale, _ = update(worker, headers, {**plan, "etag": "stale"}, selected)
+    # With an outdated etag, asking for the saved binding is a replay (nothing to write); another one is refused.
+    replay, _ = update(worker, headers, {**plan, "etag": "stale"}, selected)
+    assert replay.status_code == 200 and replay.json()["plan"]["etag"] == plan["etag"]
+    bound = next(row["id"] for row in selected if row["role"] == "committed")
+    other = next(row for row in upstream.labels if row["name"] in {"committed", "Commitments"} and row["id"] != bound)
+    changed = [
+        {**row, "id": other["id"], "label": other["name"]} if row["role"] == "committed" else row for row in selected
+    ]
+    stale, _ = update(worker, headers, {**plan, "etag": "stale"}, changed)
     assert reason(stale) == "ETAG_MISMATCH"
     assert read_plan(worker, headers)["etag"] == plan["etag"] and upstream.tasks == before
 
@@ -216,3 +229,31 @@ def test_ended_week_uses_old_bound_names_before_a_configuration_change(account):
     assert upstream.tasks["ended-parent"]["labels"] == ["This week", "deep", "office"]
     assert upstream.tasks["quarter-task"] == quarter_before
     assert response.json()["plan"]["enabled"]
+
+
+def test_a_label_write_whose_answer_was_lost_is_not_resent_after_a_rebinding(account):
+    """Its started receipt keeps the plan etag its labels were chosen under (the object's SQLite): once the role
+    is bound to another label, the retry answers ETAG_MISMATCH and sends nothing."""
+    worker, upstream, headers, _ = account
+    upstream.add("lost-answer", labels=["home"])
+    plan = read_plan(worker, headers)
+    request = {
+        "task_id": "lost-answer",
+        "etag": tasks(worker, headers)["lost-answer"]["etag"],
+        "stage": "monthly",
+        "request_id": str(uuid.uuid4()),
+    }
+    upstream.fail_commands_once = True  # Todoist applies the update, then its answer is lost
+    lost = worker.hooks.post("/api/plus/v1/tasks:setTaskPlan", json=request, headers=headers)
+    assert reason(lost) == "UNAVAILABLE"
+    bound = next(row["label"] for row in plan["labels"] if row["role"] == "candiate")
+    assert bound in upstream.tasks["lost-answer"]["labels"]
+    moved = [
+        {**row, "id": "month-id", "label": "Next month"} if row["role"] == "candiate" else row for row in columns(plan)
+    ]
+    rebound, _ = update(worker, headers, plan, moved)
+    assert rebound.status_code == 200, rebound.text
+    sent = len(upstream.commands())
+    retry = worker.hooks.post("/api/plus/v1/tasks:setTaskPlan", json=request, headers=headers)
+    assert reason(retry) == "ETAG_MISMATCH"
+    assert len(upstream.commands()) == sent

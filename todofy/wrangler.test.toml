@@ -47,3 +47,6 @@ REPORT_PRECOMPUTE_UTC = "off"
 # No daily GTD snapshot and no weekly review task either (scenarios opt in, e.g. GTD_COLLECT_UTC = "00:00").
 GTD_COLLECT_UTC = "off"
 GTD_REVIEW_ENABLED = "false"
+# Plus reads sync Todoist's metadata again on every call (incrementally), so a test sees an upstream label change
+# at once; tests/runtime/test_plus_cache.py runs with production's five minutes.
+PLUS_METADATA_MAX_AGE_MS = "0"

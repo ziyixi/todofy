@@ -96,6 +96,10 @@ service PlusService {
       body: "*"
     };
   }
+  // Owner-only: counts that check the planning store after a restore or a migration, never its content.
+  rpc VerifyPlanStore(VerifyPlanStoreRequest) returns (VerifyPlanStoreResponse) {
+    option (google.api.http) = {get: "/api/plus/v1/plan:verifyPlanStore"};
+  }
 }
 
 // One known planning label, discovered from the owner's Todoist account.
@@ -187,7 +191,10 @@ message PlanningTask {
   google.protobuf.Timestamp update_time = 17 [(google.api.field_behavior) = OUTPUT_ONLY];
 }
 // Reads the singleton plan.
-message ReadPlanRequest {}
+message ReadPlanRequest {
+  // FULL by default (UNSPECIFIED), or BASIC.
+  PlanView view = 1 [(google.api.field_behavior) = OPTIONAL];
+}
 // Account metadata without task content.
 message ReadPlanResponse {
   // Current account planning metadata.
@@ -387,3 +394,41 @@ message RevokeExtensionConnectionRequest {
 }
 // Revocation is idempotent.
 message RevokeExtensionConnectionResponse {}
+// Reads the planning store's counts.
+message VerifyPlanStoreRequest {}
+// Rows per planning table, to compare with a backup manifest, and the rows that break one of the store's rules.
+// Every rule count is zero in a healthy store; an absent count is zero.
+message VerifyPlanStoreResponse {
+  // Rows of plan_settings.
+  int32 settings_row_count = 1;
+  // Rows of plan_tasks, Todofy's task identities.
+  int32 task_row_count = 2;
+  // Rows of plan_marks.
+  int32 mark_row_count = 3;
+  // Rows of plan_edges.
+  int32 edge_row_count = 4;
+  // Rows of plan_notes.
+  int32 note_row_count = 5;
+  // Rows of plan_categories.
+  int32 category_row_count = 6;
+  // Marks whose task identity is missing.
+  int32 orphan_mark_count = 7;
+  // Edges either of whose task identities is missing.
+  int32 orphan_edge_count = 8;
+  // Rows whose setting key, provider, kind or scheme this build does not know, and settings that are not a JSON
+  // object.
+  int32 unknown_value_count = 9;
+  // Tasks over the dependency limit, a dependency total over its limit, and schemes over the active category limit.
+  int32 limit_violation_count = 10;
+}
+
+// How much of the plan an answer carries (AIP-157).
+enum PlanView {
+  // FULL, the answer before views existed (extension builds that send no view).
+  PLAN_VIEW_UNSPECIFIED = 0;
+  // The mapping and dates only, for a native Todoist page: inbox_project_id, review_task_id and
+  // next_week_task_ids are left out, which saves the weekly review's D1 read.
+  PLAN_VIEW_BASIC = 1;
+  // Every field.
+  PLAN_VIEW_FULL = 2;
+}

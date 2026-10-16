@@ -9,29 +9,39 @@ Its old waiting lists and release identities are historical, not instructions to
 
 ## Current work
 
-Todoist Plus deadlines (start window, favourite filters, `SetTaskPlan.active`) are on local branch
-`claude/plus-deadlines`, based on `60309fac`; not pushed, no branch CI or release. The owner's final layout of
-October 16 replaced version 1's stacked lists: the Review board reads Start now | Waiting | Quarter | Month |
-Week | Committed, the first two hidden while empty, each task in one lane. Dragging a Start now card into a stage
-lane writes the stage and the literal `active` label (never created) in one write; a card's hover "Start" adds
-only `active`; a Waiting card dragged gets only the stage. Nothing is stacked under the board or the calendar;
-Focus has one quiet line, a deadline without a lead is one weekly review line, task details say where a deadline
-stands and can mark it in progress, and Todofy also hides the three waiting and in-progress deadline filters, by
-exact query, behind a consistency test against the board. Plus has no dark mode any more (owner decision); its
-colours follow Todoist's light themes. `--plus-danger` reads Todoist's overdue colour; Other views remembers
-open or closed. Dependencies and native row marks are not built. Same-day review fixes are in (Focus's
-line skips waiting tasks, two-part statuses get their own row, medium windows keep the four stages in one row,
-Start takes no title room, the drag preview matches the card, Week keeps step counts). A final local run of
-every check CI selects for the branch passes (extension 167 unit, 28 MV3 Chromium; Todofy 559 runtime; the
-proto change re-checks the other apps; Platform's Linux-only steps not run here)
-([evidence](docs/todoist-plus-verification.md#start-now-and-waiting-lanes-local-checks-october-16)).
-Pending: owner review of the Kale screenshots, push, full branch CI and one same-SHA release. Deploy Todofy
-first, since `active` needs it, then reload the extension and refresh Todoist; the installed version's Waiting
-row covers the two waiting filters until then, and in-progress tasks need no list in either version. Confirm
-the account has an `active` label and the three filters disappear only from the extension's sidebar. Open
-for the owner: a quiet deadline hint on acknowledged cards (none now, as specified), more than the screen-reader
-announcement when Start takes an unstaged card off the board, and the waiting card's past-deadline wording (now
-Start now's red "已过 N 天").
+Todoist Plus deadlines landed on 2026-10-16 at `8df1a99d` (branch CI 38908096030, main 38908907610; Todofy
+deploy and the extension release `todoist-plus-v2026.1016.808.36337`, installed in the owner's unpacked folder).
+The Review board reads Start now | Waiting | Quarter | Month | Week | Committed, the first two hidden while
+empty, each task in one lane; dragging a Start now card into a stage writes the stage and the literal `active`
+label in one write, a card's hover "Start" adds only `active`, a Waiting card dragged gets only the stage.
+Nothing is stacked under the board or the calendar; a deadline without a lead is one weekly review line; Todofy
+hides the three waiting and in-progress deadline filters by exact query, behind a consistency test; no dark
+mode. The FlowDay task proxy caps a page at 100 tasks (10.2 ms cold at 200 in CI). Pending for the owner:
+reload the extension and refresh Todoist; confirm the account has an `active` label.
+
+Todoist Plus planning store, steps M1-M3 of the owner-approved October 16 data-layer design, is on local
+branch `claude/plan-store-m1-m3`, based on `60309fac`; not pushed, no branch CI or release. M1 adds
+migration `0007_plan_store.sql` (six `plan_*` tables, two `summaries` triage columns, the partial
+`summaries_task` index on `imported = 0` rows), their backup, the restore tool's `RETIRED_TABLES` skip and
+the owner-only `VerifyPlanStore` counts; no behaviour change
+([planning store](todofy/docs/todoist-plus.md#planning-store)). M2 keeps Todoist's metadata in the core's
+SQLite with an incremental Sync token (reads trust it five minutes, label writes sync first, at most 20 full
+Syncs per 15 minutes), checks the extension token inside `plus_ui` (one core call; the previous gateway's
+3-argument extension calls get `UNAVAILABLE` until the gateway half of the release is up: if that step
+fails, rerun the release or release the previous SHA) and adds `ReadPlanRequest.view`; GitHub variable
+`TODOFY_PLUS_METADATA=full` (unset deploys `cache`) is the rollback
+([caches](todofy/docs/todoist-plus.md#caches)). M3 moves the replay receipts of the writes that change
+Todoist into the core's SQLite (`storage.sync()` before each Sync, IDs only once done, read for 30 days and
+never deleted, the FlowDay settlement by compare-and-set); D1 `plus_actions` is only read, for request IDs of
+the last 30 days, and `UpdatePlanLabels` replays by value ([receipts](todofy/docs/todoist-plus.md#receipts)).
+Review fixes: an overlapped token check keeps no copy, a started label write after a rebinding answers
+`ETAG_MISMATCH`, a Monday label write syncs once, a backup job keeps its planned columns. Receipts are never
+deleted (the no-automatic-deletion override; a 30-day expiry is a small change if the owner wants one). M8
+also removes the D1 fallback; a later extension release sends `view: BASIC`. Pending: push, full branch CI,
+owner review, same-SHA release; after release `VerifyPlanStore` answers `{}`, the next Sunday manifest lists
+the six tables and `plus_actions` stops growing. The `proto/todofy/ui/` change also republishes the Plus ZIP
+with unchanged extension behaviour
+([local evidence](docs/todoist-plus-verification.md#planning-store-caches-and-receipts-local-checks-october-16)).
 
 Todoist Plus UI theme, safety and polish (owner-approved October 15: safety C1-C6, theming A1-A6, polish
 B1-B6) is on local branch `claude/plus-ui-theme`, based on `58908f64`; not pushed, no branch CI or release.

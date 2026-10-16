@@ -8,14 +8,21 @@ SAVE_SETTINGS = (
 )
 ADVANCE_WEEK = "UPDATE plus_settings SET week_start=? WHERE id=1"
 CONNECTION = "SELECT id FROM plus_connections WHERE token_sha256=? AND revoked=0"
+# Every non-revoked digest: IssueExtensionConnection keeps the table at 30 rows, revoked ones included.
+ACTIVE_DIGESTS = "SELECT token_sha256 FROM plus_connections WHERE revoked=0 LIMIT 30"
 CONNECTIONS = "SELECT id,display_name,revoked FROM plus_connections ORDER BY created_at DESC LIMIT 30"
 CREATE_CONNECTION = (
     "INSERT INTO plus_connections(id,display_name,token_sha256,created_at) VALUES(?,?,?,?) ON CONFLICT DO NOTHING"
 )
 REVOKE_CONNECTION = "UPDATE plus_connections SET revoked=1 WHERE id=?"
-ACTION = "SELECT * FROM plus_actions WHERE request_id=?"
-START_ACTION = "INSERT INTO plus_actions(request_id,request_hash,commands,created_at) VALUES(?,?,?,?)"
-FINISH_ACTION = "UPDATE plus_actions SET response=? WHERE request_id=?"
+# The receipts the releases before runtime/plus_receipts.py wrote, read-only and by primary key, for request IDs
+# of its window (created_at >= ?). Nothing writes plus_actions any more.
+LEGACY_ACTION = "SELECT request_hash,commands,response FROM plus_actions WHERE request_id=? AND created_at>=?"
+# A CompleteTask receipt and the FlowDay settlement frozen for it ('focus:' + its request ID).
+LEGACY_COMPLETION = (
+    "SELECT request_id,request_hash,commands,response,created_at FROM plus_actions "
+    "WHERE request_id IN (?,?) AND created_at>=?"
+)
 # Only tasks with a mark are remembered. The marks follow the latest page scan or write, but a row never moves
 # back to an older week, so a choice recorded for the next week on Sunday survives that day's scans and later
 # writes, which remember the task under the ending week.
@@ -32,5 +39,3 @@ ENDED_WEEK = f"SELECT * FROM plus_weeks WHERE week_start < ? ORDER BY week_start
 FORGET_WEEK = "DELETE FROM plus_weeks WHERE task_id=? AND week_start=?"
 # Choices already recorded for a week after the given one (the plus_weeks_ended index), IDs only.
 NEXT_WEEK = "SELECT task_id FROM plus_weeks WHERE week_start > ? ORDER BY week_start,task_id LIMIT 100"
-
-REPLACE_ACTION_COMMANDS = "UPDATE plus_actions SET commands=? WHERE request_id=?"

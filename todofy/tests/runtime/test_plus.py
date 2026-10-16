@@ -224,6 +224,25 @@ def test_plan_answers_carry_the_review_targets_ids_only(stack):
     assert "review_task_id" not in stack.plan()  # the wire profile omits an empty string
 
 
+def test_only_the_owner_verifies_the_planning_store_and_gets_counts_only(stack):
+    path = "/api/plus/v1/plan:verifyPlanStore"
+    clean = stack.worker.owner.get(path)
+    assert clean.status_code == 200 and clean.json() == {}  # every count zero: the profile omits each
+    assert stack.worker.hooks.get(path, headers={"authorization": "Bearer " + stack.token}).status_code == 401
+    stack.worker.d1(
+        "INSERT INTO plan_tasks (provider, external_id, created_at) VALUES ('todoist', 'synthetic-a', 1);"
+        "INSERT INTO plan_marks VALUES (999, 'kept', '2026-10-12', 1);"
+    )
+    try:
+        assert stack.worker.owner.get(path).json() == {
+            "task_row_count": 1,
+            "mark_row_count": 1,
+            "orphan_mark_count": 1,
+        }
+    finally:
+        stack.worker.d1("DELETE FROM plan_marks; DELETE FROM plan_tasks;")
+
+
 def test_sunday_choices_survive_monday_while_ended_week_commitments_reset(stack):
     stack.upstream.add("sunday-pick", labels=["home", "committed", "bets"])
     stack.upstream.add("weekday-pick", labels=["office", "committed"])
