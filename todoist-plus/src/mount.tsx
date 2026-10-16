@@ -29,8 +29,9 @@ import type {
 const viewParam = "todoist-plus";
 // A flickering anchor must not turn into endless re-mounts.
 const MOUNTS_PER_MINUTE = 10;
-// One pass per frame at most; a style feedback loop runs one every frame without end, while
-// scrolling and drags come in bursts. Sustained beyond this, native Todoist wins.
+// One pass per frame at most. Only passes in which Plus changed the page count: a feedback loop
+// needs a change in every pass, while Todoist's own scrolling and drags change nothing of
+// Plus's. Sustained beyond this, native Todoist wins.
 const PASS_LIMIT = 1500;
 const PASS_WINDOW_MS = 30_000;
 // A page still missing an anchor after this long is reported in the options page.
@@ -41,9 +42,16 @@ export function languageOf(document: Document): Language {
     ? "zh"
     : "en";
 }
+/** True when a computed colour such as "rgb(229, 229, 229)" is light text, as on a dark page. */
+function isLightText(color: string): boolean {
+  const rgb = color.match(/\d+/gu)?.map(Number);
+  return Boolean(
+    rgb && rgb.length >= 3 && (rgb[0]! + rgb[1]! + rgb[2]!) / 3 > 160,
+  );
+}
 /**
- * Colours and theme need no copying: Todoist's theme tokens and color-scheme inherit into the
- * shadow roots, and styles.css reads them. Only the native nav row's geometry is measured.
+ * Colours need no copying: Todoist's theme tokens inherit into the shadow roots, and styles.css
+ * reads them. Only the native nav row's geometry is measured.
  */
 function applyNavigationLayout(host: HTMLElement, reference: HTMLElement) {
   const computed = getComputedStyle(reference);
@@ -116,6 +124,16 @@ export async function mountTodoist(ctx: ContentScriptContext) {
   let favoritesCleanup: (() => void) | undefined;
   let favoritesPending = false;
   let favoritesKey = "";
+  // Plus's own changes to Todoist's DOM (hiding, restoring, rendering, host display), so the
+  // loop breaker counts only passes that changed something.
+  let writes = 0;
+  // While the Plus view shows its crash line, no re-mount clears that from the page check.
+  let renderFailed = false;
+  // The <html> theme class last read for the dark fallback (syncScheme), and its result.
+  let themeClass: string | undefined;
+  let darkPage = false;
+  // A hidden tab runs no frames; its startup check waits until the tab is shown.
+  let startupWaiting = false;
   // What is off and why, from closed key sets; sent only when it changes.
   const off: PageStatus["off"] = {};
   let reported = "";
@@ -167,8 +185,29 @@ export async function mountTodoist(ctx: ContentScriptContext) {
     }
   }
 
+  /**
+   * Todoist's Dark theme sets color-scheme on <html>, which inherits into the shadow roots. Until
+   * that is confirmed on the live page, light native text also marks each host dark (styles.css),
+   * so form controls and the light-dark() fallbacks never stay light on a dark page. The colour
+   * is read only when the theme class changes, never on every mutation.
+   */
+  function syncScheme() {
+    const theme = document.documentElement.className;
+    if (theme !== themeClass) {
+      themeClass = theme;
+      darkPage = isLightText(
+        getComputedStyle(find("content") ?? document.body).color,
+      );
+    }
+    for (const host of [mainHost, navHost, favoritesHost, detailHost]) {
+      if (!host || (host.dataset.theme === "dark") === darkPage) continue;
+      if (darkPage) host.dataset.theme = "dark";
+      else delete host.dataset.theme;
+    }
+  }
   function hide(element: HTMLElement) {
     if (hidden.has(element)) return;
+    writes++;
     hidden.set(element, {
       hidden: element.getAttribute("hidden"),
       display: element.style.getPropertyValue("display"),
@@ -178,6 +217,7 @@ export async function mountTodoist(ctx: ContentScriptContext) {
     element.style.setProperty("display", "none", "important");
   }
   function restore() {
+    if (hidden.size) writes++;
     for (const [element, before] of hidden) {
       if (before.hidden === null) element.removeAttribute("hidden");
       else element.setAttribute("hidden", before.hidden);
@@ -247,8 +287,7 @@ export async function mountTodoist(ctx: ContentScriptContext) {
       ui.mount();
       favoritesHost = ui.shadowHost;
       favoritesKey = "";
-      // Extra favourites fold away only once their toggle is in place.
-      if (!otherViewsOpen) for (const row of rows) hide(row);
+      syncScheme();
       const sidebar = find("sidebar");
       const reference = sidebar && find("upcoming", sidebar);
       if (reference) applyNavigationLayout(favoritesHost, reference);
@@ -257,12 +296,18 @@ export async function mountTodoist(ctx: ContentScriptContext) {
         favoritesRoot = undefined;
         favoritesHost = undefined;
       };
+      // Extra favourites fold away only once their toggle is in place, and only from what the
+      // page and the settings are now: the rows and the config may have changed while it loaded.
+      hideReplaced();
+      return;
     }
     if (!favoritesRoot || !favoritesHost) return;
     const visible = Boolean(config?.configured && rows.length);
     const display = visible ? "block" : "none";
-    if (favoritesHost.style.display !== display)
+    if (favoritesHost.style.display !== display) {
+      writes++;
       favoritesHost.style.display = display;
+    }
     const key = `${visible}:${otherViewsOpen}:${rows.length}:${languageOf(document)}`;
     if (key === favoritesKey) return;
     favoritesKey = key;
@@ -350,6 +395,7 @@ export async function mountTodoist(ctx: ContentScriptContext) {
   };
   function render() {
     if (!content || !mainRoot || !mainHost) return;
+    writes++;
     restore();
     const nextView = currentView();
     if (view && !nextView) mainRoot.render(null);
@@ -361,7 +407,15 @@ export async function mountTodoist(ctx: ContentScriptContext) {
         <PlusBoundary
           language={language}
           className="plus-root"
-          onError={() => note("views", "renderError")}
+          resetKey={view}
+          onError={() => {
+            renderFailed = true;
+            note("views", "renderError");
+          }}
+          onRendered={() => {
+            renderFailed = false;
+            if (off.views === "renderError") note("views");
+          }}
           onBack={leavePlus}
         >
           <App
@@ -386,6 +440,8 @@ export async function mountTodoist(ctx: ContentScriptContext) {
     const url = new URL(location.href);
     url.searchParams.set(viewParam, next);
     history.pushState(null, "", url);
+    // A view the re-mount cap left out comes back on this click once the cap allows it.
+    if (!mainHost) void mount();
     render();
   }
   /** Back to the native page the Plus view replaced. */
@@ -518,8 +574,9 @@ export async function mountTodoist(ctx: ContentScriptContext) {
       mounting = false;
     }
     if (disposed) return;
+    syncScheme();
     render();
-    if (mainHost && navHost) note("views");
+    if (mainHost && navHost && !renderFailed) note("views");
     if (started || !mainHost) return;
     started = true;
     if (!view) {
@@ -602,6 +659,7 @@ export async function mountTodoist(ctx: ContentScriptContext) {
     ui.mount();
     note("taskTools");
     detailHost = ui.shadowHost;
+    syncScheme();
     detailCleanup = () => {
       ui.remove();
     };
@@ -622,13 +680,11 @@ export async function mountTodoist(ctx: ContentScriptContext) {
   const passAllowed = limiter(PASS_LIMIT, PASS_WINDOW_MS);
   function pass() {
     if (disposed || ctx.isInvalid) return;
-    if (!passAllowed()) {
-      note("views", "passLimited");
-      return teardown();
-    }
+    const before = writes;
     if (mainHost && !mainHost.isConnected) dropMain();
     if (navHost && !navHost.isConnected) dropNav();
     navUpdate?.();
+    syncScheme();
     if (!mainHost || !navHost) void mount();
     if (
       mainHost &&
@@ -637,6 +693,11 @@ export async function mountTodoist(ctx: ContentScriptContext) {
       render();
     else hideReplaced();
     void mountDetails();
+    // Todoist changing its own page (scrolling a long list, say) never counts.
+    if (writes !== before && !passAllowed()) {
+      note("views", "passLimited");
+      teardown();
+    }
   }
   let frame = 0;
   const observer = new MutationObserver(() => {
@@ -661,8 +722,22 @@ export async function mountTodoist(ctx: ContentScriptContext) {
   ctx.addEventListener(document, "visibilitychange", checkValid);
   ctx.addEventListener(window, "focus", checkValid);
   ctx.onInvalidated(teardown);
-  ctx.setTimeout(() => {
-    if (!started) note("views", find("sidebar") ? "content" : "sidebar");
-  }, STARTUP_GRACE_MS);
+  /** Names the anchor still missing once the page had time to render, if Plus has not started. */
+  function startupCheck() {
+    if (started || disposed) return;
+    // A hidden tab runs no frames, so no pass has looked yet; its grace starts when it is shown.
+    if (document.visibilityState === "hidden") {
+      startupWaiting = true;
+      return;
+    }
+    if (!find("sidebar")) note("views", "sidebar");
+    else if (!find("content")) note("views", "content");
+  }
+  ctx.addEventListener(document, "visibilitychange", () => {
+    if (!startupWaiting || document.visibilityState === "hidden") return;
+    startupWaiting = false;
+    ctx.setTimeout(startupCheck, STARTUP_GRACE_MS);
+  });
+  ctx.setTimeout(startupCheck, STARTUP_GRACE_MS);
   await mount();
 }

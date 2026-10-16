@@ -3,8 +3,18 @@ import { createRequire } from "node:module";
 import type { Page } from "@playwright/test";
 
 const require = createRequire(import.meta.url);
-/** Theme classes Todoist puts on <html>; "" is its default theme. */
-export const THEMES = ["", "kale", "dark", "blueberry", "tangerine"] as const;
+/** Every theme class Todoist puts on <html>; "" is its default theme. */
+export const THEMES = [
+  "",
+  "kale",
+  "dark",
+  "blueberry",
+  "tangerine",
+  "gold",
+  "lavender",
+  "moonstone",
+  "raspberry",
+] as const;
 
 /**
  * Doist's public theme CSS (@doist/product-libraries-tokens, not live Todoist values): the

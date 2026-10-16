@@ -8,7 +8,9 @@ import {
 import { resolve } from "node:path";
 import { themeCss, tokenColor } from "./theme";
 
-// The owner's Kale theme; the other public themes switch by the <html> class.
+// The owner's Kale theme; the other public themes switch by the <html> class. The native
+// selected row's token roles are an assumption until the live page check confirms them
+// (docs/verification.md), so a match with Plus's row here is no evidence on its own.
 const fixture = `<!doctype html><html lang="en" class="theme_kale"><head><style id="todoist-theme">${themeCss}</style><style>
 body { margin:0; color:var(--product-library-display-primary-idle-tint); background:var(--product-library-background-base-primary); font-family:system-ui }
 aside { width:280px; padding:12px; box-sizing:border-box; background:var(--product-library-background-base-secondary); position:fixed; top:0; bottom:0 }

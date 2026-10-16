@@ -25,9 +25,12 @@ const ROLES = {
 } as const;
 type Role = keyof typeof ROLES;
 
+/** "rgb(…)", "rgba(…)" or, from color-mix(), "color(srgb r g b / a)" with 0–1 channels. */
 function channels(color: string) {
-  const [r = 0, g = 0, b = 0, a = 1] = color.match(/[\d.]+/gu)!.map(Number);
-  return { r, g, b, a };
+  const values = color.match(/[\d.]+/gu)!.map(Number);
+  const scale = color.startsWith("color(srgb") ? 255 : 1;
+  const [r = 0, g = 0, b = 0] = values.map((value) => value * scale);
+  return { r, g, b, a: values[3] ?? 1 };
 }
 function luminance(color: string, under = "rgb(255, 255, 255)") {
   const top = channels(color);
@@ -125,9 +128,13 @@ test("Plus follows every Todoist theme through CSS alone, with readable text", a
         todoist("accent-fill"),
         todoist("on-accent"),
       ]);
-      // WCAG AA for 12-14px text.
+      // WCAG AA for 12-14px text, for each pair Plus composes. On the selected fill all text,
+      // muted too, is selected-text, so accent and muted never sit on it.
       for (const [text, background] of [
         ["text", "bg"],
+        ["text", "surface"],
+        ["text", "selected"],
+        ["muted", "bg"],
         ["muted", "surface"],
         ["accent", "bg"],
         ["warning", "bg"],
@@ -138,11 +145,77 @@ test("Plus follows every Todoist theme through CSS alone, with readable text", a
           contrast(todoist(text), todoist(background)),
           `${theme || "default"}: ${text} on ${background}`,
         ).toBeGreaterThanOrEqual(4.5);
+      // 3:1 for focus rings, insert lines and drop borders, on every surface they cross.
+      for (const background of ["bg", "surface", "selected"] as const)
+        expect(
+          contrast(todoist("accent"), todoist(background)),
+          `${theme || "default"}: accent line on ${background}`,
+        ).toBeGreaterThanOrEqual(3);
       await test.info().attach(`theme-${theme || "default"}`, {
         body: await page.screenshot(),
         contentType: "image/png",
       });
     }
+    // Week: today's number, the selected day's weekday and the selected outcome's meta,
+    // measured where Plus draws them.
+    await page.keyboard.press("Escape");
+    await page.getByRole("tab", { name: "Week", exact: true }).click();
+    await expect(
+      page.locator(".planning-calendar-day.is-today.is-selected"),
+    ).toBeVisible();
+    await expect(
+      page.locator(".planning-outcome-card.is-selected"),
+    ).toBeVisible();
+    for (const theme of THEMES) {
+      const pairs = await page.evaluate((theme) => {
+        document.documentElement.className = theme ? `theme_${theme}` : "";
+        const root = document.querySelector("todoist-plus-view")!.shadowRoot!;
+        // The colour, and the first opaque background behind it.
+        const seen = (selector: string) => {
+          const element = root.querySelector(selector)!;
+          let behind: Element | null = element;
+          let background = "rgba(0, 0, 0, 0)";
+          while (behind && /^rgba\(.*, 0\)$/u.test(background)) {
+            background = getComputedStyle(behind).backgroundColor;
+            behind = behind.parentElement;
+          }
+          return [getComputedStyle(element).color, background] as const;
+        };
+        return {
+          today: seen(
+            ".planning-calendar-day.is-today .planning-day-heading > strong",
+          ),
+          weekday: seen(
+            ".planning-calendar-day.is-selected .planning-day-heading > span",
+          ),
+          meta: seen(
+            ".planning-outcome-card.is-selected .planning-outcome-meta",
+          ),
+        };
+      }, theme);
+      for (const [name, [text, background]] of Object.entries(pairs))
+        expect(
+          contrast(text, background),
+          `${theme || "default"}: ${name} ${text} on ${background}`,
+        ).toBeGreaterThanOrEqual(4.5);
+    }
+    // A Dark theme without its own color-scheme still makes every Plus host dark.
+    const scheme = (theme: string) =>
+      expect.poll(() =>
+        page.evaluate((theme) => {
+          document.documentElement.className = theme;
+          return ["todoist-plus-view", "todoist-plus-navigation"].map(
+            (name) =>
+              getComputedStyle(document.querySelector(name)!).colorScheme,
+          );
+        }, theme),
+      );
+    const noScheme = await page.addStyleTag({
+      content: ":root { color-scheme: normal !important }",
+    });
+    await scheme("theme_dark").toEqual(["dark", "dark"]);
+    await scheme("theme_kale").toEqual(["normal", "normal"]);
+    await noScheme.evaluate((style) => (style as HTMLStyleElement).remove());
     // Without any token, the fallbacks keep the earlier look and follow color-scheme.
     const fallback = (scheme: string) =>
       page.evaluate((scheme) => {

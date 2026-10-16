@@ -5,10 +5,14 @@ interface Props {
   language: Language;
   /** The panel's own classes, so the line sits where the panel would. */
   className: string;
+  /** Another key (the other view, say) tries the children again after a failure. */
+  resetKey?: string;
   /** Leaves Plus and shows native Todoist again. */
   onBack: () => void;
   /** Told that it happened, never what: for the options page's status line. */
   onError?: () => void;
+  /** The children rendered: on mount, and when a new key recovers from a failure. */
+  onRendered?: () => void;
   children: ReactNode;
 }
 
@@ -17,6 +21,22 @@ export class PlusBoundary extends Component<Props, { failed: boolean }> {
   override state = { failed: false };
   static getDerivedStateFromError() {
     return { failed: true };
+  }
+  override componentDidMount() {
+    if (!this.state.failed) this.props.onRendered?.();
+  }
+  override componentDidUpdate(
+    previousProps: Props,
+    previous: { failed: boolean },
+  ) {
+    // Only a failure from an earlier update resets, so the update that failed never retries.
+    if (
+      previous.failed &&
+      this.state.failed &&
+      previousProps.resetKey !== this.props.resetKey
+    )
+      this.setState({ failed: false });
+    else if (previous.failed && !this.state.failed) this.props.onRendered?.();
   }
   override componentDidCatch() {
     this.props.onError?.();

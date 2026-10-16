@@ -37,8 +37,9 @@
 }
 .plus-focus-block.is-current {
   background: var(--plus-selected);
-  /* Accent text on the selected fill uses the colour Todoist pairs with it. */
+  /* Accent and muted text on the selected fill use the colour Todoist pairs with it. */
   --plus-accent: var(--plus-selected-text);
+  --plus-muted: var(--plus-selected-text);
 }
 .plus-focus-block-content {
   flex: 1;

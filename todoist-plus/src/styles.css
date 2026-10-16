@@ -41,12 +41,12 @@ body {
     --product-library-actionable-quaternary-hover-fill,
     light-dark(#f7f7f3, #2a2b25)
   );
-  /* Text, links and focus rings. */
+  /* Text, links, focus rings and drag indicators (insert lines, drop borders). */
   --plus-accent: var(
     --product-library-actionable-tertiary-idle-tint,
     light-dark(#557921, #acc97b)
   );
-  /* Primary buttons, insert lines and drop targets; text on them is --plus-on-accent. */
+  /* Primary buttons and checkboxes; text on them is --plus-on-accent. */
   --plus-accent-fill: var(
     --product-library-actionable-primary-idle-fill,
     light-dark(#557921, #acc97b)
@@ -55,7 +55,7 @@ body {
     --product-library-actionable-primary-on-idle-tint,
     light-dark(#fff, #1e1e1e)
   );
-  /* Todoist's selected sidebar row; text on it is --plus-selected-text. */
+  /* Todoist's selected sidebar row; all text on it, muted too, is --plus-selected-text. */
   --plus-selected: var(
     --product-library-selectable-secondary-selected-fill,
     light-dark(#f0f6df, #323c24)
@@ -93,6 +93,13 @@ body {
   );
   font-size: 14px;
   color: var(--plus-text);
+}
+/*
+ * Until Todoist's own color-scheme is confirmed in its live Dark theme, mount.tsx also marks a
+ * host dark from the page's text colour, so form controls and fallbacks follow.
+ */
+:host([data-theme="dark"]) {
+  color-scheme: dark;
 }
 /* The options page has no Todoist theme; its fallbacks follow the system (color-scheme meta). */
 body {
@@ -275,8 +282,9 @@ svg.lucide > * {
 .plus-error > span {
   flex: 1;
 }
+/* Accent text would be too faint on the lane surface in some themes; the underline marks it. */
 .plus-error button {
-  color: var(--plus-accent);
+  color: var(--plus-text);
   text-decoration: underline;
 }
 /* The one line a render failure leaves: back to Todoist, or reload. */

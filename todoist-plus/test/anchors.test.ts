@@ -29,6 +29,34 @@ it("takes the selection list's first row, not the first ID in the modal", () => 
   ).toEqual({ id: "child" });
 });
 
+// The other shape the live modal may have: the edited task's own row holds its content, and
+// the selection list beside it holds its sub-tasks.
+const subtaskList = modal(
+  `<a data-item-id="parent">Synthetic parent</a><div data-item-id="edited"><div data-testid="task-main-content-container"></div></div><div data-testid="task-selection-list-container"><div data-item-id="step-1"></div><div data-item-id="step-2"></div></div>`,
+);
+
+it("takes the row that holds the task's content before any list", () => {
+  expect(
+    detailTask(subtaskList, "https://app.todoist.com/app/task/write-it-edited"),
+  ).toEqual({ id: "edited" });
+  expect(detailTask(subtaskList, "https://app.todoist.com/app/today")).toEqual({
+    id: "edited",
+  });
+  expect(
+    detailTask(subtaskList, "https://app.todoist.com/app/task/step-1"),
+  ).toEqual({ off: "taskIdMismatch" });
+  // A row outside the modal (the list behind it) never counts.
+  const outer = document.createElement("div");
+  outer.setAttribute("data-item-id", "behind");
+  const inside = modal(
+    `<div data-testid="task-main-content-container"></div><div data-testid="task-selection-list-container"><div data-item-id="child"></div></div>`,
+  );
+  outer.append(inside);
+  expect(detailTask(inside, "https://app.todoist.com/app/today")).toEqual({
+    id: "child",
+  });
+});
+
 it("attaches nothing when the task link names another task", () => {
   expect(
     detailTask(breadcrumbFirst, "https://app.todoist.com/app/task/parent"),

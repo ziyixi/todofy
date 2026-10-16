@@ -19,7 +19,7 @@
     background-color 160ms ease;
 }
 .review-lane.is-over {
-  border-color: var(--plus-accent-fill);
+  border-color: var(--plus-accent);
   background: color-mix(in srgb, var(--plus-selected) 65%, var(--plus-bg));
 }
 .review-lane-header {
@@ -31,7 +31,7 @@
   border-bottom: 2px solid transparent;
 }
 .review-lane.is-over .review-lane-header {
-  border-bottom-color: var(--plus-accent-fill);
+  border-bottom-color: var(--plus-accent);
 }
 .review-lane-header h2 {
   margin: 0;
@@ -83,6 +83,7 @@
   border-color: var(--plus-accent) !important;
   border-left-color: var(--outcome-color) !important;
   background: var(--plus-selected) !important;
+  --plus-muted: var(--plus-selected-text);
 }
 .planning-outcome-card:focus-visible,
 .review-drag-handle:focus-visible {

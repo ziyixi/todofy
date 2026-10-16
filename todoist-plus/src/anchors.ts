@@ -20,6 +20,7 @@ export const ANCHORS = {
   detail: ["[data-testid=task-details-modal]"],
   // Inside the task details modal.
   detailMain: ["[data-testid=task-main-content-container]"],
+  // Tried only when no row holds detailMain (see detailTask).
   detailRow: [
     "[data-testid=task-selection-list-container] [data-item-id]",
     "[data-item-id]",
@@ -67,16 +68,19 @@ export function matchesId(slug: string, ids: readonly string[]): boolean {
 
 /**
  * The task the details modal edits; without one, `off` says why when that is a Todoist change (a
- * task not yet saved has neither). The selection list's first row comes first, any other row (a
- * parent breadcrumb, say) only when there is no list. When the page URL is a task link
- * (`…/task/<id>`), it must name the same task, so a reordered modal hides the tools instead of
- * writing to another task.
+ * task not yet saved has neither). The row that holds the task's own content comes first; then the
+ * selection list's first row, which may instead hold its sub-tasks; any other row (a parent
+ * breadcrumb, say) only when there is no list. The live modal's shape is not yet confirmed
+ * (docs/verification.md), so when the page URL is a task link (`…/task/<id>`), it must name the
+ * same task: a modal shaped otherwise hides the tools instead of writing to another task.
  */
 export function detailTask(
   modal: Element,
   url: string,
 ): { id?: string; off?: "detailRow" | "taskIdMismatch" } {
-  const row = find("detailRow", modal);
+  const own = find("detailMain", modal)?.closest("[data-item-id]");
+  const row =
+    (own && modal.contains(own) ? own : undefined) ?? find("detailRow", modal);
   if (!row) return { off: "detailRow" };
   const id = taskIdFromElement(row);
   const linked = new URL(url).pathname.match(/\/task\/([^/]+)\/?$/u)?.[1];

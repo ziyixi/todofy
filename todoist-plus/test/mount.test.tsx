@@ -8,7 +8,11 @@ import type { PageStatus } from "../src/page-status";
 // A synthetic Todoist shell; the real built extension runs in the packaged browser tests.
 const state = vi.hoisted(() => ({
   config: undefined as PlanConfig | undefined,
-  crash: false,
+  // Views whose render throws.
+  crash: [] as string[],
+  // While set, the Other views toggle waits for it (its CSS still loading).
+  holdOtherViews: undefined as Promise<void> | undefined,
+  readPlan: undefined as Promise<never> | undefined,
   rejectMounts: 0,
   mounted: [] as string[],
   reports: [] as PageStatus[],
@@ -25,6 +29,7 @@ vi.mock("wxt/utils/content-script-ui/shadow-root", () => ({
       onRemove?: (mounted: unknown) => void;
     },
   ) => {
+    if (options.name === "todoist-plus-other-views") await state.holdOtherViews;
     if (state.rejectMounts > 0) {
       state.rejectMounts--;
       throw new Error("Synthetic CSS fetch failure");
@@ -55,14 +60,14 @@ vi.mock("wxt/utils/content-script-ui/shadow-root", () => ({
 vi.mock("../src/client", () => ({
   cachedPlanConfig: async () => state.config,
   extensionActions: {
-    readPlan: () => new Promise(() => {}),
+    readPlan: () => state.readPlan ?? new Promise(() => {}),
   },
   openOptions: () => {},
   reportPage: (status: PageStatus) => state.reports.push(status),
 }));
 vi.mock("../src/App", () => ({
   App: ({ view }: { view: string }) => {
-    if (state.crash) throw new Error("Synthetic render failure");
+    if (state.crash.includes(view)) throw new Error("Synthetic render failure");
     return <p className="synthetic-app">{view}</p>;
   },
 }));
@@ -129,7 +134,9 @@ beforeEach(() => {
   });
   Object.assign(state, {
     config: { configured: true, hiddenFilterIds: ["f1"], labelIds: [] },
-    crash: false,
+    crash: [],
+    holdOtherViews: undefined,
+    readPlan: undefined,
     rejectMounts: 0,
     mounted: [],
     reports: [],
@@ -144,6 +151,7 @@ afterEach(() => {
     void ctx.isInvalid;
   }
   document.body.innerHTML = "";
+  document.documentElement.className = "";
 });
 
 it("comes back after Todoist re-creates its content and sidebar", async () => {
@@ -227,7 +235,7 @@ it("restores native Todoist once the extension is disabled or reloaded", async (
 
 it("turns a render failure into one way back to native Todoist", async () => {
   history.replaceState(null, "", "/app/today?todoist-plus=plan");
-  state.crash = true;
+  state.crash = ["plan"];
   vi.spyOn(console, "error").mockImplementation(() => {});
   const { ctx } = context();
   await act(() => mountTodoist(ctx));
@@ -258,21 +266,59 @@ it("caps re-mounts when an anchor keeps flickering", async () => {
   expect(visible("#native-2")).toBe(true);
 });
 
-it("stops and restores Todoist when its own passes never end", async () => {
+it("stops and restores Todoist when Plus and the page keep answering each other", async () => {
   history.replaceState(null, "", "/app/today?todoist-plus=plan");
   const { ctx } = context();
   await act(() => mountTodoist(ctx));
   await screen.findByText("plan");
+  // A page that re-creates whatever Plus hides: Plus changes the page in every pass.
+  const main = document.querySelector("#content")!;
+  let rebuilt = 0;
+  const rebuild = () => {
+    const child = main.querySelector<HTMLElement>(":scope > section[hidden]");
+    if (!child || rebuilt > 3000) return;
+    rebuilt++;
+    const fresh = document.createElement("section");
+    fresh.id = "native";
+    child.replaceWith(fresh);
+  };
+  const page = new MutationObserver(rebuild);
+  page.observe(main, { subtree: true, attributes: true });
   await act(async () => {
-    for (let index = 0; index < 1600; index++) {
-      document.body.classList.toggle("synthetic-loop");
+    rebuild();
+    for (
+      let index = 0;
+      index < 50 && document.querySelector("todoist-plus-view");
+      index++
+    )
+      await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+  page.disconnect();
+  expect(rebuilt).toBeGreaterThanOrEqual(1500);
+  expect(rebuilt).toBeLessThan(3000);
+  expect(document.querySelector("todoist-plus-view")).toBeNull();
+  expect(visible("#native")).toBe(true);
+  expect(visible("#replaced")).toBe(true);
+  expect(state.reports.at(-1)!.off.views).toBe("passLimited");
+});
+
+it("never tears down for Todoist's own activity, however long it lasts", async () => {
+  const { ctx } = context();
+  await act(() => mountTodoist(ctx));
+  await settle();
+  // A virtualised list swapping a row every frame while scrolling; Plus changes nothing.
+  const list = document.querySelector("#native")!;
+  await act(async () => {
+    for (let index = 0; index < 3000; index++) {
+      list.append(document.createElement("div"));
+      list.firstElementChild?.remove();
       await new Promise((resolve) => queueMicrotask(() => resolve(null)));
       await new Promise((resolve) => queueMicrotask(() => resolve(null)));
     }
   });
-  expect(document.querySelector("todoist-plus-view")).toBeNull();
-  expect(visible("#native")).toBe(true);
-  expect(visible("#replaced")).toBe(true);
+  expect(screen.getByRole("button", { name: "Plan" })).toBeTruthy();
+  expect(visible("#extra")).toBe(false);
+  expect(state.reports.at(-1)!.off.views).toBeUndefined();
 });
 
 it("reports which enhancement is off and why, in closed keys only", async () => {
@@ -319,4 +365,145 @@ it("reports which enhancement is off and why, in closed keys only", async () => 
   expect(document.querySelector("todoist-plus-task-tools")).toBeTruthy();
   expect(state.reports.at(-1)).toEqual({ language: "en", off: {} });
   expect(JSON.stringify(state.reports)).not.toMatch(/child|other|task\//u);
+});
+
+it("waits for a background tab to be shown before it reports a missing anchor", async () => {
+  // Todoist renders after the content script starts, in a tab that runs no frames yet.
+  document.body.innerHTML = "";
+  const frames: (() => void)[] = [];
+  vi.stubGlobal("requestAnimationFrame", (callback: () => void) => {
+    frames.push(callback);
+    return 1;
+  });
+  const visibility = vi
+    .spyOn(document, "visibilityState", "get")
+    .mockReturnValue("hidden");
+  const { ctx } = context();
+  await act(() => mountTodoist(ctx));
+  shell();
+  await settle();
+  for (const timer of state.timers.splice(0)) timer();
+  expect(state.reports).toEqual([]);
+  // Shown: the first frame mounts Plus, and the re-armed check finds nothing missing.
+  visibility.mockReturnValue("visible");
+  document.dispatchEvent(new Event("visibilitychange"));
+  await act(async () => {
+    for (const frame of frames.splice(0)) frame();
+  });
+  await settle();
+  for (const timer of state.timers.splice(0)) timer();
+  expect(document.querySelector("todoist-plus-navigation")).toBeTruthy();
+  expect(state.reports.at(-1)).toEqual({ language: "en", off: {} });
+});
+
+it("names the main content only when it is what is missing", async () => {
+  document.querySelector("#content")!.remove();
+  const { ctx } = context();
+  await act(() => mountTodoist(ctx));
+  for (const timer of state.timers.splice(0)) timer();
+  expect(state.reports.at(-1)).toEqual({
+    language: "en",
+    off: { views: "content" },
+  });
+});
+
+it("tries the other view after a render failure and clears the page check once it renders", async () => {
+  history.replaceState(null, "", "/app/today?todoist-plus=plan");
+  state.crash = ["plan"];
+  vi.spyOn(console, "error").mockImplementation(() => {});
+  const { ctx } = context();
+  await act(() => mountTodoist(ctx));
+  await screen.findByRole("button", { name: "Back to Todoist" });
+  expect(state.reports.at(-1)!.off.views).toBe("renderError");
+  // The sidebar coming back does not clear it while the crash line shows.
+  document.querySelector("aside")!.outerHTML = sidebar;
+  await settle();
+  expect(screen.getByRole("alert")).toBeTruthy();
+  expect(state.reports.at(-1)!.off.views).toBe("renderError");
+
+  fireEvent.click(screen.getByRole("button", { name: "Focus" }));
+  expect(await screen.findByText("focus")).toBeTruthy();
+  expect(screen.queryByRole("alert")).toBeNull();
+  expect(state.reports.at(-1)!.off.views).toBeUndefined();
+
+  // Plan fails again, then renders after Back and a fixed reopen.
+  fireEvent.click(screen.getByRole("button", { name: "Plan" }));
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Back to Todoist" }),
+  );
+  await settle();
+  expect(state.reports.at(-1)!.off.views).toBe("renderError");
+  state.crash = [];
+  fireEvent.click(screen.getByRole("button", { name: "Plan" }));
+  expect(await screen.findByText("plan")).toBeTruthy();
+  expect(state.reports.at(-1)!.off.views).toBeUndefined();
+});
+
+it("brings a capped view back on the next click once the cap allows it", async () => {
+  let now = 1_000_000;
+  vi.spyOn(Date, "now").mockImplementation(() => now);
+  const { ctx } = context();
+  await act(() => mountTodoist(ctx));
+  await settle();
+  for (let index = 0; index < 12; index++) {
+    replaceContent();
+    await settle();
+  }
+  expect(document.querySelector("todoist-plus-view")).toBeNull();
+  expect(state.reports.at(-1)!.off.views).toBe("remountLimited");
+  now += 61_000;
+  // Nothing else on the page changes: the click alone mounts the view.
+  fireEvent.click(screen.getByRole("button", { name: "Plan" }));
+  expect(await screen.findByText("plan")).toBeTruthy();
+  expect(visible("#native-2")).toBe(false);
+});
+
+it("keeps unrelated favourites visible when the plan read fails while their toggle loads", async () => {
+  let release!: () => void;
+  state.holdOtherViews = new Promise<void>((resolve) => (release = resolve));
+  let fail!: (error: Error) => void;
+  state.readPlan = new Promise<never>((_, reject) => (fail = reject));
+  const { ctx } = context();
+  await act(() => mountTodoist(ctx));
+  await settle();
+  expect(visible("#replaced")).toBe(false);
+  expect(visible("#extra")).toBe(true);
+  // Offline or a revoked token: Plus is off and everything shows again.
+  fail(new Error("Synthetic network failure"));
+  await settle();
+  expect(visible("#replaced")).toBe(true);
+  release();
+  await settle();
+  document.body.classList.add("later-change");
+  await settle();
+  expect(visible("#extra")).toBe(true);
+  expect(
+    document.querySelector<HTMLElement>("todoist-plus-other-views")!.style
+      .display,
+  ).toBe("none");
+});
+
+it("marks each Plus host dark when Todoist's theme class turns its text light", async () => {
+  const content = document.querySelector<HTMLElement>("#content")!;
+  const { ctx } = context();
+  await act(() => mountTodoist(ctx));
+  await settle();
+  const hosts = () =>
+    [
+      "todoist-plus-view",
+      "todoist-plus-navigation",
+      "todoist-plus-other-views",
+    ].map((name) => document.querySelector<HTMLElement>(name)!.dataset.theme);
+  expect(hosts()).toEqual([undefined, undefined, undefined]);
+  // Only a class change is read: a colour alone does not trigger it.
+  content.style.color = "rgb(229, 229, 229)";
+  await settle();
+  expect(hosts()).toEqual([undefined, undefined, undefined]);
+  document.documentElement.className = "theme_dark";
+  await settle();
+  expect(hosts()).toEqual(["dark", "dark", "dark"]);
+  content.style.color = "rgb(32, 32, 32)";
+  document.documentElement.className = "theme_kale";
+  await settle();
+  expect(hosts()).toEqual([undefined, undefined, undefined]);
 });

@@ -20,6 +20,8 @@ const LIVE_ONLY = new Set([
   "shadow-raised-2",
   "shadow-raised-3",
 ]);
+/** Todoist's component tokens (`--td-ui-*`) that Plus reads, each seen in the same live probe. */
+const TD_UI = new Set(["font-family", "button-normal-height"]);
 
 function tokenNames(text: string): Set<string> {
   return new Set(
@@ -43,17 +45,43 @@ function sources(directory: string) {
     .map((file) => ({ file, text: readFileSync(join(root, file), "utf8") }));
 }
 
-it("names only Todoist tokens that exist, so a typo or a removed token fails here", () => {
-  const unknown = sources("../src/").flatMap(({ file, text }) =>
-    [...tokenNames(text)]
+/**
+ * Token names in one file that Todoist does not define. A prefix followed by anything but a name
+ * (`${role}`, a closing quote) is a name built at runtime, which this check cannot read.
+ */
+function unknownNames(file: string, text: string): string[] {
+  return [
+    ...[...tokenNames(text)]
       .filter((name) => !published.has(name) && !LIVE_ONLY.has(name))
       .map((name) => `${file}: --product-library-${name}`),
-  );
-  expect(unknown).toEqual([]);
+    ...[...text.matchAll(/--td-ui-([a-z0-9-]+)/gu)]
+      .filter((match) => !TD_UI.has(match[1]!))
+      .map((match) => `${file}: ${match[0]}`),
+    ...[...text.matchAll(/--(?:product-library|td-ui)-(?![a-z0-9])/gu)].map(
+      (match) => `${file}: ${match[0]}…`,
+    ),
+  ];
+}
+
+it("names only Todoist tokens that exist, so a typo or a removed token fails here", () => {
+  expect(
+    sources("../src/").flatMap(({ file, text }) => unknownNames(file, text)),
+  ).toEqual([]);
   // The two names that once kept every theme Kale green would be caught.
   expect(published.has("actionable-primary-idle-tint")).toBe(false);
   expect(published.has("actionable-primary-selected-fill")).toBe(false);
   expect(published.has("actionable-tertiary-idle-tint")).toBe(true);
+  // So would a name built at runtime and a misspelt component token.
+  expect(
+    unknownNames(
+      "probe.ts",
+      "var(--product-library-${role}) '--product-library-' + role var(--td-ui-button-normal-hieght, 32px) var(--td-ui-font-family)",
+    ),
+  ).toEqual([
+    "probe.ts: --td-ui-button-normal-hieght",
+    "probe.ts: --product-library-…",
+    "probe.ts: --product-library-…",
+  ]);
 });
 
 it("never imports the token package into the extension", () => {
