@@ -55,6 +55,20 @@ def test_in_progress_never_moves_a_kept_sunday_choice():
     assert db.execute("SELECT week_start FROM plus_weeks WHERE task_id='task1'").fetchone() == ("2026-10-19",)
 
 
+def test_a_start_now_drag_writes_the_stage_and_in_progress_in_one_request():
+    """The Review board's drag from Start now into Committed sends {stage, active} together."""
+    source = task(labels=["lead_1w", "office", "focus"], deadline={"date": TODAY})
+    assert plus.task_view(source, TODAY)["must_start"]
+    labels = plus.plan_labels(source, {"stage": "committed", "active": True})
+    assert labels == ["active", "committed", "lead_1w", "office"]
+    view = plus.task_view({**source, "labels": labels}, TODAY)
+    assert view["stage"] == "committed" and not view["must_start"]
+    # On the week's last day it is a commitment for the next week, as without `active`.
+    request = {"stage": "committed", "active": True}
+    assert plus.membership_week("2026-10-18", "2026-10-12", request) == "2026-10-19"
+    assert plus.membership_week("2026-10-15", "2026-10-12", request) == "2026-10-12"
+
+
 def test_choosing_the_stage_a_task_already_shows_removes_no_label():
     """A Sunday keep resends the commitment; the owner's other horizon labels stay (no implicit removal)."""
     source = task(labels=["committed", "quarter", "candiate", "office", "waiting"])
@@ -83,6 +97,9 @@ def test_deadline_is_not_scheduled_date_and_preserves_filter_boundaries():
     assert not plus.task_view(task(due={"date": TODAY}, labels=["lead_2w"]), TODAY)["must_start"]
     assert plus.task_view(task(deadline={"date": "2026-10-26"}, labels=["lead_2w"]), TODAY)["must_start"]
     assert not plus.task_view(task(deadline={"date": "2026-10-27"}, labels=["lead_2w"]), TODAY)["must_start"]
+    # The same edge for lead_3d: two days ahead it must start, three days ahead not yet.
+    assert plus.task_view(task(deadline={"date": "2026-10-15"}, labels=["lead_3d"]), TODAY)["must_start"]
+    assert not plus.task_view(task(deadline={"date": "2026-10-16"}, labels=["lead_3d"]), TODAY)["must_start"]
     assert not plus.task_view(task(deadline={"date": TODAY}, labels=["lead_2w", "waiting"]), TODAY)["must_start"]
     assert plus.task_view(task(deadline={"date": "2026-10-12"}, labels=["waiting"]), TODAY)["must_start"]
     assert plus.task_view(task(deadline={"date": TODAY}), TODAY)["missing_lead"]
