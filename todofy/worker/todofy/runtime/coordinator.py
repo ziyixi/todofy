@@ -81,6 +81,7 @@ from todofy.runtime import (
     gtd,
     intents,
     ledger,
+    mail_briefs,
     metrics,
     ops,
     plus_api,
@@ -182,6 +183,7 @@ class TodofyCore(DurableObject):
             *gtd.DO_SCHEMA,
             *plus_cache.DO_SCHEMA,
             *plus_receipts.DO_SCHEMA,
+            *mail_briefs.DO_SCHEMA,
         ):
             self.sql.exec(statement)
         self.running = False
@@ -597,8 +599,9 @@ class TodofyCore(DurableObject):
 
     # ---- budgets (also used by reports.py) ------------------------------------------------
 
-    def reserve_tokens(self, tokens: int, now: int) -> bool:
-        """Reserve Gemini tokens for one call against the UTC day's budget."""
+    def reserve_tokens(self, tokens: int, now: int, *, share: float = 1.0) -> bool:
+        """Reserve Gemini tokens for one call against the UTC day's budget, or ``share`` of it (the brief
+        backfill's, which leaves the rest to new mail)."""
         day = _day(now)
         self.sql.exec("INSERT INTO llm_usage (day) VALUES (?) ON CONFLICT DO NOTHING", day)
         self.sql.exec("DELETE FROM llm_usage WHERE day < ?", _day(now - USAGE_KEEP_DAYS * DAY))
@@ -608,7 +611,7 @@ class TodofyCore(DurableObject):
             tokens,
             day,
             tokens,
-            self._token_budget(),
+            int(self._token_budget() * share),
         )
         return cursor.rowsWritten > 0
 
@@ -769,6 +772,8 @@ class TodofyCore(DurableObject):
         worked = False
         if not flag(env, "PROCESSING_PAUSED"):
             worked = await self._step(now, todoist_open=self._todoist_wait(now) is None)
+            if not worked:
+                await self._briefs_tick()
         await self._ticks()
         await self._gtd_tick()
         try:
@@ -1147,6 +1152,20 @@ class TodofyCore(DurableObject):
         if ops_rules.completed_run(finished, next_at, now, metrics.CONTINUE):
             ops.ran(self.sql, ops_rules.Job.METRICS_ROLLUP, now)
 
+    async def _briefs_tick(self) -> None:
+        """The one-time brief backfill (runtime/mail_briefs.py): a step when one is due, never during mail work."""
+        now = now_s()
+        due = mail_briefs.next_at(self.sql)
+        if due is None or due > now:
+            return
+        await self._arm_watchdog()
+        try:
+            await mail_briefs.tick(self, now)
+        except Exception as exc:
+            # Like the other ticks: one failure must not stall the ledger; the job resumes from its state later.
+            mail_briefs.postpone(self.sql, now)
+            _log(tick="mail_briefs", error=type(exc).__name__)
+
     async def _gtd_tick(self) -> None:
         """The GTD ledger's daily snapshot and weekly review (runtime/gtd.py), when either is due."""
         now = now_s()
@@ -1181,6 +1200,8 @@ class TodofyCore(DurableObject):
             # A backup an ops guard holds back is considered again when the guard allows it.
             times.append(max(backup_at, ops.backup_defer_until(self.sql, now) or 0))
         if not flag(self.env, "PROCESSING_PAUSED"):
+            if (briefs_at := mail_briefs.next_at(self.sql)) is not None:
+                times.append(briefs_at)
             wait = self._todoist_wait(now)
             if wait:
                 times.append(wait)

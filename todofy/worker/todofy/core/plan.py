@@ -5,8 +5,12 @@ rebuilding the table; the closed lists live here. Nothing here names a Todoist l
 Todoist adapter's (core/plus.py).
 """
 
-# plan_settings keys, one JSON object each.
-SETTING_KEYS = ("account", "week", "todoist")
+import unicodedata
+from datetime import date, timedelta
+
+# plan_settings keys, one JSON object each. 'todoist.mail' is the Todoist adapter's binding of the Mailbox: each mail
+# category's label and the project filed mail goes to (runtime/plan_store.py mail_settings).
+SETTING_KEYS = ("account", "week", "todoist", "todoist.mail")
 # plan_tasks.provider: the task store an external_id belongs to.
 PROVIDERS = ("todoist",)
 # plan_marks.kind: committed and bet are a week's last-day choices, kept a someday task kept in a weekly review.
@@ -64,3 +68,36 @@ def check_dependency(
         return None, None
     done = [edge for edge in own if edge not in holding]
     return (None, done[0]) if done else ("limit", None)
+
+
+# plan_notes kind 'bets': one line of the owner's text per account week (period: its Monday) and area.
+BET_AREAS = ("work", "personal")
+# In UTF-16 code units, as the extension's input counts them (an emoji outside the BMP takes two).
+MAX_BET_LENGTH = 160
+
+
+def bet_text(text: str) -> str:
+    """A Bet as it is stored: one line, each run of whitespace or control characters one space, trimmed.
+
+    Empty means no Bet. Raises ValueError("BAD_REQUEST") above MAX_BET_LENGTH UTF-16 code units, and
+    (UnicodeEncodeError) for a lone surrogate, which no text the extension sends contains.
+    """
+    line = " ".join("".join(" " if unicodedata.category(c) == "Cc" else c for c in text).split())
+    if len(line.encode("utf-16-le")) // 2 > MAX_BET_LENGTH:
+        raise ValueError("BAD_REQUEST")
+    return line
+
+
+def bet_weeks(week: str) -> tuple[str, str, str]:
+    """The weeks a plan shows Bets for, around the account week starting on Monday ``week``: the previous one
+    (Monday's "last week"), this one and the next one (written in Sunday's weekly review)."""
+    monday = date.fromisoformat(week)
+    week_before, week_after = monday - timedelta(days=7), monday + timedelta(days=7)
+    return week_before.isoformat(), monday.isoformat(), week_after.isoformat()
+
+
+def bet_writable(week: str, current: str) -> bool:
+    """Whether a Bet of the week starting on ``week`` may still be written while ``current`` is the account week:
+    this week and the next one only, so an ended week's Bet stays as it was."""
+    _, this, following = bet_weeks(current)
+    return week in (this, following)

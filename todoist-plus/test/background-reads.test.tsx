@@ -87,7 +87,7 @@ it("keeps the board usable during a refresh and never shows an older read over a
   ).toEqual([]);
 });
 
-it("shows confirmed queue, deadline and goal results without reading the week or plan again", async () => {
+it("shows confirmed queue, deadline and Bet results without reading the week or plan again", async () => {
   const actions = createPrototype();
   const load = vi.spyOn(actions, "load");
   const loadDays = vi.spyOn(actions, "loadDays");
@@ -119,18 +119,14 @@ it("shows confirmed queue, deadline and goal results without reading the week or
   expect(editor.getByText("Start window: Wed, Oct 28")).toBeTruthy();
   fireEvent.click(editor.getByRole("button", { name: "Close" }));
 
-  fireEvent.click(screen.getAllByRole("button", { name: "Change goal" })[0]!);
-  fireEvent.change(screen.getByRole("listbox", { name: "Goal task" }), {
-    target: { value: "notes" },
+  const goals = within(screen.getByRole("region", { name: "Weekly goals" }));
+  fireEvent.click(goals.getByRole("button", { name: /^Edit work goal:/u }));
+  const input = goals.getByRole("textbox");
+  fireEvent.change(input, { target: { value: "Shown from its answer" } });
+  fireEvent.keyDown(input, { key: "Enter" });
+  await goals.findByRole("button", {
+    name: "Edit work goal: Shown from its answer",
   });
-  fireEvent.click(screen.getByRole("button", { name: "Use as weekly goal" }));
-  await waitFor(() =>
-    expect(
-      within(screen.getByRole("region", { name: "Weekly goals" })).getByText(
-        "Organize the experiment notes",
-      ),
-    ).toBeTruthy(),
-  );
   expect(load).toHaveBeenCalledOnce();
   expect(loadDays).not.toHaveBeenCalled();
 });

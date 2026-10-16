@@ -1,0 +1,278 @@
+/*
+ * The Mailbox: a quiet list at Todoist's own list width (the default .plus-root 800px). Only
+ * text, muted and accent: no badge, count chip, warning or danger colour (--plus-danger reaches
+ * about 4.0:1 as 12px text in every theme, so Delete all's words carry the weight instead).
+ */
+.plus-root.plus-root-mailbox {
+  padding-top: 40px;
+}
+.plus-mailbox .plus-header-actions {
+  align-items: center;
+}
+.plus-root .plus-mailbox-delete-all {
+  height: 28px;
+  padding: 0 7px;
+  border-radius: 5px;
+  font-size: 12px;
+  color: var(--plus-muted);
+}
+.plus-root .plus-mailbox-delete-all:hover:not(:disabled) {
+  background: var(--plus-hover);
+  color: var(--plus-text);
+}
+/* The heading takes focus when the page opens (for screen readers), without a ring. */
+.plus-mailbox h1:focus {
+  outline: none;
+}
+/* The last write's result (filed, deleted, saved): always there, so a screen reader reads each new
+   one, and laid in the space under the header, so neither its text nor its change moves the list. */
+.plus-mailbox > .plus-page-header {
+  position: relative;
+}
+.plus-mailbox-status {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  margin: 0;
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--plus-muted);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.plus-mailbox-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.plus-mailbox-item {
+  position: relative;
+  border-bottom: 1px solid var(--plus-line);
+}
+.plus-root .plus-mailbox-row {
+  display: block;
+  width: 100%;
+  min-height: 24px;
+  padding: 10px 112px 10px 0;
+  text-align: left;
+  border-radius: 0;
+}
+.plus-mailbox-title {
+  display: block;
+  font-size: 14px;
+  line-height: 20px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.plus-mailbox-brief {
+  display: block;
+  margin-top: 2px;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--plus-muted);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+/* The time and the row's one action share a slot on a solid background, so nothing reflows. */
+.plus-mailbox-side {
+  position: absolute;
+  top: 10px;
+  right: 0;
+  height: 20px;
+  padding-left: 12px;
+  display: grid;
+  justify-items: end;
+  align-items: center;
+  background: var(--plus-bg);
+}
+.plus-mailbox-side > * {
+  grid-area: 1 / 1;
+}
+.plus-mailbox-time {
+  font-size: 12px;
+  line-height: 20px;
+  color: var(--plus-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.plus-root .plus-mailbox-file {
+  height: 24px;
+  padding: 0 6px;
+  margin-right: -6px;
+  border-radius: 4px;
+  font-size: 12px;
+  color: var(--plus-muted);
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+}
+.plus-root .plus-mailbox-file:hover:not(:disabled),
+.plus-root .plus-mailbox-file[aria-expanded="true"] {
+  color: var(--plus-text);
+  background: var(--plus-hover);
+}
+/* File shows in place of the time where the pointer or focus is, and always without hover. */
+.plus-mailbox-item:hover .plus-mailbox-file,
+.plus-mailbox-item:focus-within .plus-mailbox-file {
+  opacity: 1;
+  pointer-events: auto;
+}
+.plus-mailbox-item:hover .plus-mailbox-time:has(+ .plus-mailbox-file),
+.plus-mailbox-item:focus-within .plus-mailbox-time:has(+ .plus-mailbox-file) {
+  visibility: hidden;
+}
+@media (hover: none) {
+  .plus-root .plus-mailbox-file {
+    opacity: 1;
+    pointer-events: auto;
+  }
+  .plus-mailbox-time:has(+ .plus-mailbox-file) {
+    visibility: hidden;
+  }
+}
+/* A filing on its way: the row dims, and the mark takes the time's place. */
+.plus-mailbox-time:has(+ .plus-pending-mark) {
+  visibility: hidden;
+}
+/* Expanded: the brief gives way to the full Todofy summary, as plain text. */
+.plus-mailbox-item.is-open .plus-mailbox-row {
+  padding-bottom: 4px;
+}
+.plus-mailbox-detail {
+  padding: 0 0 14px;
+}
+.plus-mailbox-summary {
+  max-width: 68ch;
+  font-size: 13px;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+  color: var(--plus-text);
+}
+.plus-mailbox-summary p {
+  margin: 0;
+}
+.plus-mailbox-summary p + p {
+  margin-top: 6px;
+}
+.plus-mailbox-meta {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--plus-muted);
+}
+.plus-root .plus-mailbox-meta a,
+.plus-root .plus-mailbox-footer a {
+  color: var(--plus-accent);
+  text-decoration: none;
+}
+.plus-root .plus-mailbox-meta a:hover,
+.plus-root .plus-mailbox-footer a:hover {
+  text-decoration: underline;
+}
+.plus-mailbox-footer {
+  margin: 14px 0 0;
+  font-size: 12px;
+  color: var(--plus-muted);
+}
+.plus-mailbox .plus-empty:focus {
+  outline: none;
+}
+/* The File menu: Plus's dialog surface at menu size. */
+.plus-menu {
+  position: absolute;
+  z-index: 3;
+  top: 34px;
+  right: -6px;
+  min-width: 188px;
+  margin: 0;
+  padding: 4px;
+  border: 1px solid var(--plus-line);
+  border-radius: 7px;
+  background: var(--plus-bg);
+  box-shadow: var(--plus-shadow-2);
+}
+.plus-root .plus-menu button {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: 32px;
+  padding: 0 10px;
+  border-radius: 5px;
+  font-size: 13px;
+  text-align: left;
+  white-space: nowrap;
+}
+.plus-root .plus-menu button:hover,
+.plus-root .plus-menu button:focus-visible {
+  background: var(--plus-hover);
+}
+.plus-root .plus-menu button:focus-visible {
+  outline-offset: -2px;
+}
+.plus-menu [role="separator"] {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--plus-line);
+}
+.plus-root .plus-menu button.is-quiet {
+  color: var(--plus-muted);
+  font-size: 12px;
+}
+/* Delete all's confirmation: the ordinary dialog and two neutral buttons. */
+.plus-dialog.plus-confirm-dialog {
+  width: min(480px, calc(100vw - 40px));
+}
+.plus-confirm {
+  padding: 24px 28px 22px;
+}
+.plus-root .plus-confirm h2 {
+  font-size: 18px;
+  line-height: 1.4;
+}
+.plus-confirm p {
+  margin: 10px 0 0;
+  font-size: 13px;
+  line-height: 1.6;
+}
+.plus-confirm p.plus-muted {
+  font-size: 12px;
+}
+.plus-confirm footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 22px;
+}
+/* Mail categories: Planning labels' dialog, one row a category. */
+.plus-mail-category-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.plus-mail-category-list li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 88px 28px;
+  gap: 10px;
+  align-items: center;
+}
+.plus-mail-category-list li > p {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+.plus-mail-category-list select {
+  width: 100%;
+}
+.plus-root .plus-mail-category-add {
+  justify-self: start;
+}
+.plus-board-labels .plus-mail-destination {
+  margin-top: 4px;
+}
+.plus-board-labels > p.plus-muted {
+  margin: 10px 0 0;
+}

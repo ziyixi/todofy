@@ -45,6 +45,15 @@ describe('Todoist Plus transport boundaries', () => {
     expect(core[0]?.args[0]).toMatch(/^[0-9a-f]{64}$/);
     expect(forwarded).toBe(0);
   });
+  it('refuses writes in maintenance but still answers the reads, the mail lookup sent as POST included', async () => {
+    const { env, core } = fakes({ MAINTENANCE_MODE: 'true' }, call => call.method === 'plus_auth' ? true : uiOk({ items: [] }));
+    expect((await hooks(env, '/api/plus/v1/mailItems:lookup', api('POST', { task_ids: ['task-one'] }))).status).toBe(200);
+    expect(core.map(call => call.args[0])).toEqual(['LookupMailItems']);
+    const deletion = await hooks(env, '/api/plus/v1/mailItems:deleteMailItems', api('POST', { task_ids: ['task-one'], request_id: ID }));
+    expect(deletion.status).toBe(503);
+    expect(await deletion.text()).toContain('MAINTENANCE');
+    expect(core).toHaveLength(1);
+  });
   it('passes no digest for the Access owner', async () => {
     const { env, core } = fakes({}, () => uiOk({ plan: {} }));
     expect((await owner(env, '/api/plus/v1/plan:read')).status).toBe(200);

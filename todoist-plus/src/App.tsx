@@ -27,6 +27,7 @@ import { FocusView } from "./FocusView";
 import { TaskEditor } from "./TaskEditor";
 import { BoardLabels } from "./BoardLabels";
 import { WeeklyGoals } from "./WeeklyGoals";
+import { Mailbox } from "./Mailbox";
 import type {
   Language,
   PendingChange,
@@ -112,6 +113,8 @@ export function App({
   const writes = useRef({ queued: 0, settled: 0, epoch: 0 });
   const rereadAfterWrites = useRef(false);
   const loadedAt = useRef(snapshot?.readAt ?? 0);
+  // The same time as state: the Mailbox asks Todofy about the mail again after each complete read.
+  const [readAt, setReadAt] = useState(loadedAt.current);
   const [selectedId, setSelectedId] = useState(externalTaskId ?? "");
   // Focus's quiet line opens Plan at Start now.
   const [showStart, setShowStart] = useState(false);
@@ -193,6 +196,7 @@ export function App({
       reads.current.shown = read;
       if (!displayedWeek.current) displayedWeek.current = next.plan.week;
       loadedAt.current = Date.now();
+      setReadAt(loadedAt.current);
       remembered.current = false;
       setConfirmed((current) =>
         current && request !== weekRequest.current
@@ -395,6 +399,99 @@ export function App({
       void revalidate();
     }
   }
+  // Above every page's content: what failed, and what setup still needs.
+  const notices = (
+    <>
+      {error && (
+        <div className="plus-error" role="alert">
+          <span>{error}</span>
+          <button onClick={refresh}>{text.refresh}</button>
+          <button onClick={onSettings}>{text.manage}</button>
+        </div>
+      )}
+      {data && !data.plan.configured && (
+        <p className="plus-error">
+          {text.setup}
+          <button onClick={onSettings}>{text.manage}</button>
+        </p>
+      )}
+    </>
+  );
+  const timerBar = data?.focus.timer && (
+    <aside className="plus-timer-bar" aria-label={text.focus}>
+      <div>
+        <small>
+          {data.focus.timer.status === "running" ? text.focus : text.paused}
+        </small>
+        <strong>
+          {timerTask
+            ? displayedTitle(timerTask.title)
+            : (data.focus.flowTasks[data.focus.timer.taskId]?.title ??
+              text.focus)}
+        </strong>
+      </div>
+      <output>
+        <Elapsed focus={data.focus} />
+      </output>
+      <button
+        className="plus-icon"
+        disabled={busy || timerSettling}
+        aria-label={
+          data.focus.timer.status === "running" ? text.pause : text.resume
+        }
+        onClick={() =>
+          commandTimer(
+            data.focus.timer?.status === "running" ? "pause" : "resume",
+            data.focus.timer!.taskId,
+          )
+        }
+      >
+        {data.focus.timer.status === "running" ? (
+          <Pause size={17} />
+        ) : (
+          <Play size={17} />
+        )}
+      </button>
+      <button
+        className="plus-icon"
+        disabled={busy || timerSettling}
+        aria-label={text.stop}
+        onClick={() => commandTimer("stop", data.focus.timer!.taskId)}
+      >
+        <Square size={15} />
+      </button>
+      {timerTask && (
+        <button
+          className="plus-icon"
+          disabled={busy || timerSettling}
+          aria-label={text.complete}
+          onClick={() => void complete(timerTask)}
+        >
+          <Check size={18} />
+        </button>
+      )}
+    </aside>
+  );
+  if (view === "mailbox")
+    return (
+      <div className="plus-root plus-root-mailbox">
+        <Mailbox
+          data={data}
+          readAt={readAt}
+          language={language}
+          busy={busy || !data?.plan.configured}
+          pending={pendingCards}
+          run={run}
+          actions={actions}
+          refreshing={Boolean(waiting || reading)}
+          onRefresh={refresh}
+          onSettings={onSettings}
+          notices={notices}
+          failed={Boolean(error)}
+        />
+        {timerBar}
+      </div>
+    );
   return (
     <div className={`plus-root plus-root-${view}`}>
       <header className="plus-page-header">
@@ -431,22 +528,10 @@ export function App({
           </button>
         </div>
       </header>
-      {error && (
-        <div className="plus-error" role="alert">
-          <span>{error}</span>
-          <button onClick={refresh}>{text.refresh}</button>
-          <button onClick={onSettings}>{text.manage}</button>
-        </div>
-      )}
+      {notices}
       {!data && !error && (
         <p className="plus-muted" role="status">
           {text.loading}
-        </p>
-      )}
-      {data && !data.plan.configured && (
-        <p className="plus-error">
-          {text.setup}
-          <button onClick={onSettings}>{text.manage}</button>
         </p>
       )}
       {data && (
@@ -460,11 +545,8 @@ export function App({
                 plan={data.plan}
                 language={language}
                 busy={busy || !data.plan.configured}
-                pending={pendingCards}
                 run={run}
                 actions={planActions}
-                editTask={openTask}
-                onOpenTask={onOpenTask}
               />
               <PlanView
                 plan={data.plan}
@@ -483,6 +565,7 @@ export function App({
                 completeReview={(task) => complete(task, "")}
                 dependencyNotices={dependencyNotices}
                 onReviewShown={onReviewShown}
+                onOpenMailbox={() => onViewChange?.("mailbox")}
                 reviewing={review}
                 showStart={showStart}
                 onStartShown={() => setShowStart(false)}
@@ -512,61 +595,7 @@ export function App({
           )}
         </fieldset>
       )}
-      {data?.focus.timer && (
-        <aside className="plus-timer-bar" aria-label={text.focus}>
-          <div>
-            <small>
-              {data.focus.timer.status === "running" ? text.focus : text.paused}
-            </small>
-            <strong>
-              {timerTask
-                ? displayedTitle(timerTask.title)
-                : (data.focus.flowTasks[data.focus.timer.taskId]?.title ??
-                  text.focus)}
-            </strong>
-          </div>
-          <output>
-            <Elapsed focus={data.focus} />
-          </output>
-          <button
-            className="plus-icon"
-            disabled={busy || timerSettling}
-            aria-label={
-              data.focus.timer.status === "running" ? text.pause : text.resume
-            }
-            onClick={() =>
-              commandTimer(
-                data.focus.timer?.status === "running" ? "pause" : "resume",
-                data.focus.timer!.taskId,
-              )
-            }
-          >
-            {data.focus.timer.status === "running" ? (
-              <Pause size={17} />
-            ) : (
-              <Play size={17} />
-            )}
-          </button>
-          <button
-            className="plus-icon"
-            disabled={busy || timerSettling}
-            aria-label={text.stop}
-            onClick={() => commandTimer("stop", data.focus.timer!.taskId)}
-          >
-            <Square size={15} />
-          </button>
-          {timerTask && (
-            <button
-              className="plus-icon"
-              disabled={busy || timerSettling}
-              aria-label={text.complete}
-              onClick={() => void complete(timerTask)}
-            >
-              <Check size={18} />
-            </button>
-          )}
-        </aside>
-      )}
+      {timerBar}
       <dialog
         className="plus-dialog"
         ref={dialog}

@@ -19,33 +19,29 @@ hides the three waiting and in-progress deadline filters by exact query, behind 
 mode. The FlowDay task proxy caps a page at 100 tasks (10.2 ms cold at 200 in CI). Pending for the owner:
 reload the extension and refresh Todoist; confirm the account has an `active` label.
 
-Todoist Plus planning store, steps M1-M3 of the owner-approved October 16 data-layer design, is on local
-branch `claude/plan-store-m1-m3`, based on `60309fac`; not pushed, no branch CI or release. M1 adds
-migration `0007_plan_store.sql` (six `plan_*` tables, two `summaries` triage columns, the partial
+Todoist Plus planning store, steps M1-M3 of the owner-approved October 16 data-layer design, landed on
+2026-10-16 at `1e8e6863`, with the fix for a task modal Todoist replaces during a mount (branch CI
+38911481253, main 38912601726; Todofy deploy and the extension release `todoist-plus-v2026.1016.834.7822`).
+M1 adds migration `0007_plan_store.sql` (six `plan_*` tables, two `summaries` triage columns, the partial
 `summaries_task` index on `imported = 0` rows), their backup, the restore tool's `RETIRED_TABLES` skip and
-the owner-only `VerifyPlanStore` counts; no behaviour change
-([planning store](todofy/docs/todoist-plus.md#planning-store)). M2 keeps Todoist's metadata in the core's
-SQLite with an incremental Sync token (reads trust it five minutes, label writes sync first, at most 20 full
-Syncs per 15 minutes), checks the extension token inside `plus_ui` (one core call; the previous gateway's
-3-argument extension calls get `UNAVAILABLE` until the gateway half of the release is up: if that step
-fails, rerun the release or release the previous SHA) and adds `ReadPlanRequest.view`; GitHub variable
-`TODOFY_PLUS_METADATA=full` (unset deploys `cache`) is the rollback
-([caches](todofy/docs/todoist-plus.md#caches)). M3 moves the replay receipts of the writes that change
-Todoist into the core's SQLite (`storage.sync()` before each Sync, IDs only once done, read for 30 days and
-never deleted, the FlowDay settlement by compare-and-set); D1 `plus_actions` is only read, for request IDs of
-the last 30 days, and `UpdatePlanLabels` replays by value ([receipts](todofy/docs/todoist-plus.md#receipts)).
-Review fixes: an overlapped token check keeps no copy, a started label write after a rebinding answers
-`ETAG_MISMATCH`, a Monday label write syncs once, a backup job keeps its planned columns. Receipts are never
-deleted (the no-automatic-deletion override; a 30-day expiry is a small change if the owner wants one). M8
-also removes the D1 fallback; a later extension release sends `view: BASIC`. Pending: push, full branch CI,
-owner review, same-SHA release; after release `VerifyPlanStore` answers `{}`, the next Sunday manifest lists
-the six tables and `plus_actions` stops growing. The `proto/todofy/ui/` change also republishes the Plus ZIP
-with unchanged extension behaviour
+the owner-only `VerifyPlanStore` counts ([planning store](todofy/docs/todoist-plus.md#planning-store)). M2
+keeps Todoist's metadata in the core's SQLite with an incremental Sync token (reads trust it five minutes,
+label writes sync first, at most 20 full Syncs per 15 minutes), checks the extension token inside `plus_ui`
+and adds `ReadPlanRequest.view`; GitHub variable `TODOFY_PLUS_METADATA=full` (unset deploys `cache`) is the
+rollback ([caches](todofy/docs/todoist-plus.md#caches)). M3 moves the replay receipts of the writes that
+change Todoist into the core's SQLite (`storage.sync()` before each Sync, IDs only once done, read for 30
+days and never deleted, the FlowDay settlement by compare-and-set); D1 `plus_actions` is only read, for
+request IDs of the last 30 days, and `UpdatePlanLabels` replays by value
+([receipts](todofy/docs/todoist-plus.md#receipts)). Receipts are never deleted (the no-automatic-deletion
+override; a 30-day expiry is a small change if the owner wants one). M8 also removes the D1 fallback; a later
+extension release sends `view: BASIC`. Still to confirm after that release: `VerifyPlanStore` answers `{}`,
+the next Sunday manifest lists the six tables and `plus_actions` stops growing
 ([local evidence](docs/todoist-plus-verification.md#planning-store-caches-and-receipts-local-checks-october-16)).
 
 Todoist Plus task dependencies (owner-approved October 16: plus-next §2 and §5 as adjusted by the
-data-layer design §5.1, with the owner's decisions) are on local branch `claude/plus-dependencies`, based on
-`1e8e6863`; not pushed, no branch CI or release. Dependencies live only in Todofy, as `plan_edges` between
+data-layer design §5.1, with the owner's decisions) landed on 2026-10-16 at `6a465bee` (branch CI
+38943080369, main 38944144665; Todofy deploy and the extension release
+`todoist-plus-v2026.1016.1027.27206`). Dependencies live only in Todofy, as `plan_edges` between
 `plan_tasks` IDs (no migration: 0007 has the tables), never in a Todoist title, description, comment or
 label, with no `@blocked` mirror. Additive PlusService: `SetTaskDependency` (a value write without a receipt;
 adding reads Todoist once, refuses a cycle or the limits by the dependencies that still hold, and a done one
@@ -53,28 +49,65 @@ gives way or starts over), `ResolveDependencies` (once per complete read the Rev
 extension names at most 20 tasks to settle; one ids read, at most 10 activity-log reads; a deleted
 prerequisite drops its dependencies and returns the waiters in `dropped_task_ids`, one the log does not
 explain or a plan without the log (its 403 does not start the six-hour Todoist block) in
-`released_task_ids`; a reopened one is open again), `Plan.dependencies` on FULL answers (one more statement in the review
-batch), `PlanningTask.recurring` and optional `completed_count`; `CompleteTask` records the task completed (best
-effort: Todoist has closed it already).
-The recurring rule follows Todoist's documented `completed_count` (the next completion after the dependency
-was added satisfies it; a recurring task without the counter cannot be chosen). The extension adds the
-「依赖 / Depends on」 section with an inline search-as-you-type picker in Plan's editor and the native Steps &
-timing (cycle candidates greyed, row actions on hover or focus), 等「B」 on board cards, the Waiting lane for a
-task waiting only for another and without a stage label, the ready state once the prerequisite is done
-(display only, with a hover-only action that removes the done ones), and a quiet one-time notice under the
-board's lanes. The October 16 review findings are fixed on the branch (done dependencies blocking the limit,
-a cycle or a recurring re-pick; a notice used up outside Review; settling that could starve or leave an
-unexplained prerequisite unknown; a stale completion record; a long title breaking a card; picker focus and
-small layout points). The planning
-protocol stays 3. Not done: the native popup's collapsed Steps & timing suffix (`planMarks`, plus-next §4 v2).
-Rebase note: `claude/plus-bets-mailbox` also touches `review_targets` (its `weekly_bets` statement),
-`test_plus_cache.py`'s review-batch count, `plus_service.proto` (it uses Plan field 15; this branch 14 and
-PlanningTask 18-19) and the extension's model, api, client, background, i18n, fixture and planner setup.
-Pending: push, full branch CI, owner review of the screenshots, same-SHA release (core, gateway and the Plus
-ZIP; reload the extension, refresh Todoist); afterwards, the owner's real-account check that a recurring
-task's `completed_count` reaches the extension and that the activity log answers for a completed and a
-deleted task
+`released_task_ids`; a reopened one is open again), `Plan.dependencies` (field 14) on FULL answers,
+`PlanningTask.recurring` and optional `completed_count` (fields 18-19); `CompleteTask` records the task
+completed (best effort: Todoist has closed it already). The recurring rule follows Todoist's documented
+`completed_count` (the next completion after the dependency was added satisfies it; a recurring task without
+the counter cannot be chosen). The extension has the 「依赖 / Depends on」 section with an inline
+search-as-you-type picker in Plan's editor and the native Steps & timing, 等「B」 on board cards, the Waiting
+lane for a task waiting only for another and without a stage label, the ready state once the prerequisite
+is done (display only, with a hover-only action that removes the done ones), and a quiet one-time notice
+under the board's lanes. Not done: the native popup's collapsed Steps & timing suffix (`planMarks`,
+plus-next §4 v2). Pending for the owner: reload the extension and refresh Todoist (done once for this and
+the Bets and Mailbox release below), then the real-account check that a recurring task's `completed_count`
+reaches the extension and that the activity log answers for a completed and a deleted task
 ([local evidence](docs/todoist-plus-verification.md#dependencies-local-checks-october-16)).
+
+Todoist Plus text Bets and the Mailbox (the owner-approved October 16 Bets and Mailbox design, with the
+same-day review fixes) are one commit on local branch `claude/plus-bets-mailbox`, rebased on 2026-10-16 onto
+`origin/main` `6a465bee`: they build on the released dependencies and change none of them; not pushed, no
+branch CI or release. The week's Work and Personal Bets are one line of the owner's text each (at most 160
+UTF-16 units) in the planning store (`plan_notes`, kind `bets`), never in Todoist: the additive
+`SetWeeklyBet` writes D1 only (compare-and-set on the row's rev; the saved text answers as a replay; only
+this and next account week), with no Todoist call and no receipt, and every FULL Plan answer carries
+`weekly_bets` (Plan field 15) for last, this and next week, so the review batch now reads five statements
+(two review weeks, next week, the dependencies, the Bets) ([backend](todofy/docs/todoist-plus.md#weekly-bets)).
+The extension edits them in place in Plan (Enter or an in-page blur saves, Esc cancels, only Enter on an
+empty line clears, switching windows keeps the draft), shows last week's with Keep while this week's is
+empty, and writes next week's in Sunday's review line 5, "Next week's commitments and goals", whose keep
+list is commitments only ([interface](todoist-plus/docs/planning-interface.md#本周目标)). The Bets label is
+retired: `bets` is a legacy role (a saved binding is kept as saved and never checked; a new setup binds
+none), SetTaskPlan refuses `bet` with `BAD_REQUEST`, and `PlanningTask.bet` and `SetTaskPlanRequest.bet` are
+deprecated. Old `@bets` tasks are not converted: the Monday reset still removes the label while the binding
+remains, and the label and the Bets filter stay (the filter still hidden)
+([local evidence](docs/todoist-plus-verification.md#text-weekly-bets-local-checks-october-16)).
+
+The Mailbox: a sidebar entry 「邮件 / Mail」 under Plan and Focus opens a quiet list of the mail tasks still
+to clarify (title, a one-sentence brief, time; newest first), which a row click expands to the full Todofy
+summary as plain text. File (on hover or focus) writes the category's label and priority and moves the task
+to the one destination chosen in the category settings, in one Todoist Sync under a receipt; Delete all
+permanently deletes the frozen batch of listed, untouched mail (no dependency either way, among the rest)
+after Todofy reads it again, at most 100 deletions a Sync, never twice; a retry reads the frozen tasks again
+and keeps any the owner changed meanwhile, and the deleted mail's summaries go with it. Six additive RPCs,
+categories in `plan_categories` and `plan_settings` `todoist.mail` ([backend](todofy/docs/todoist-plus.md#mailbox),
+[interface](todoist-plus/docs/planning-interface.md#邮件)). The summary prompt gains one line (its first line
+is the brief), migration `0008_mail_briefs.sql` adds `summaries.brief`, and a one-time backfill writes a
+model brief for the mail in the Mailbox without one, within half of the day's token budget
+([briefs](todofy/docs/todoist-plus.md#briefs)). The daily retention no longer deletes summaries. The mail
+project's favourite hides only while a Plus page is open. Planning protocol is 5 (dependencies kept 3)
+([evidence](docs/todoist-plus-verification.md#mailbox-review-fixes-local-checks-october-16)). Owner item:
+confirm that Delete all should also delete the summaries of the mail it deletes (the reviewer's suggested
+default, now built; otherwise nothing could ever delete a summary). After the rebase, every check CI
+selects for the branch against `6a465bee` passes locally (extension 237 unit, 43 MV3 Chromium; Todofy 2,099
+host and 584 runtime; proto breaking against `6a465bee`: none; the proto change re-checks the other apps;
+local gaps as before: no GPG, Platform's Linux-only steps)
+([rebase evidence](docs/todoist-plus-verification.md#bets-and-mailbox-rebased-onto-the-dependencies-local-checks-october-16)).
+On main it deploys Todofy (`0008` first) and then publishes the extension. Pending: push, full branch CI,
+owner review, same-SHA release. After the release the owner reloads the extension in Chrome and refreshes
+Todoist (planning protocol 5; an old page asks for the reload), types this week's two Bets in Plan, and in
+the Mailbox's settings sets the mail categories and the one destination project (there are no defaults);
+unverified Todoist answers are listed in the
+[local evidence](docs/todoist-plus-verification.md#mailbox-briefs-and-summary-retention-local-checks-october-16).
 
 Todoist Plus UI theme, safety and polish (owner-approved October 15: safety C1-C6, theming A1-A6, polish
 B1-B6) is on local branch `claude/plus-ui-theme`, based on `58908f64`; not pushed, no branch CI or release.

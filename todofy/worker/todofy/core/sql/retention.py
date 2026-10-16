@@ -2,16 +2,12 @@
 
 Bind the cutoff, then the batch size. The inner select walks the named index;
 the outer delete then hits each row by rowid. ``mail_events`` is never cleaned:
-it is the webhook dedupe ledger.
+it is the webhook dedupe ledger; nor is ``summaries``, the Mailbox's mail, which
+only the owner deletes (its index summaries_expiring is left unused).
 """
 
 from . import Query
 
-EXPIRE_SUMMARIES = Query(
-    "DELETE FROM summaries WHERE rowid IN"
-    " (SELECT rowid FROM summaries WHERE imported = 0 AND created_at < ? ORDER BY created_at LIMIT ?)",
-    "summaries_expiring",
-)
 EXPIRE_REPORTS = Query(
     "DELETE FROM daily_reports WHERE rowid IN (SELECT rowid FROM daily_reports WHERE day < ? LIMIT ?)",
     "daily_reports_day",

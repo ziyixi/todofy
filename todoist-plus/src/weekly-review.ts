@@ -1,4 +1,4 @@
-import { addDays, topLevelBets } from "./domain";
+import { addDays } from "./domain";
 import { outcomeSteps, planningOutcomes } from "./planning-outcomes";
 import type { FlowDayPlan, Language, PlanState, PlanningTask } from "./model";
 
@@ -58,7 +58,7 @@ export function oldestUntouched(
 
 /**
  * Mail tasks still to clarify: top-level tasks in Todofy's mail project with no planning stage,
- * Bet, waiting, someday or quick mark. The review task itself is not one of them.
+ * waiting, someday or quick mark. The review task itself is not one of them.
  */
 export function inboxToClarify(plan: PlanState): PlanningTask[] {
   if (!plan.inboxProjectId) return [];
@@ -67,7 +67,6 @@ export function inboxToClarify(plan: PlanState): PlanningTask[] {
       task.projectId === plan.inboxProjectId &&
       !task.parentId &&
       task.stage === "none" &&
-      !task.bet &&
       task.id !== plan.reviewTaskId &&
       !task.labels.some((label) => CLARIFIED_LABELS.includes(label)),
   );
@@ -100,15 +99,11 @@ export function unscheduledCommitments(
   );
 }
 
-/** This week's commitments and top-level Bets (weekly goals), each once. */
+/** This week's commitments, the choices Sunday's review can keep for next week. */
 export function weekChoices(plan: PlanState): PlanningTask[] {
-  const choices = new Map<string, PlanningTask>();
-  for (const task of planningOutcomes(plan.tasks, plan.managedLabels))
-    if (task.stage === "committed") choices.set(task.id, task);
-  for (const area of ["work", "personal", "unassigned"] as const)
-    for (const task of topLevelBets(plan.tasks, area))
-      choices.set(task.id, task);
-  return [...choices.values()];
+  return planningOutcomes(plan.tasks, plan.managedLabels).filter(
+    (task) => task.stage === "committed",
+  );
 }
 
 /** Whether `today` is the last day of the account week starting on `week`. */

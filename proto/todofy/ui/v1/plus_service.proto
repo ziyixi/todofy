@@ -122,11 +122,76 @@ service PlusService {
   rpc VerifyPlanStore(VerifyPlanStoreRequest) returns (VerifyPlanStoreResponse) {
     option (google.api.http) = {get: "/api/plus/v1/plan:verifyPlanStore"};
   }
+  // Saves one week's Work or Personal Bet: the owner's own line of text, kept in Todofy's planning
+  // store and never written to Todoist. Only this account week and the next one take a write.
+  // (-- api-linter: core::0134::synonyms=disabled
+  //     aip.dev/not-precedent: saves the whole one-line text by compare-and-set, with no update mask. --)
+  rpc SetWeeklyBet(SetWeeklyBetRequest) returns (SetWeeklyBetResponse) {
+    option (google.api.http) = {
+      post: "/api/plus/v1/weeklyBets:setWeeklyBet"
+      body: "*"
+    };
+  }
+  // The Mailbox rows among up to 200 of the mail project's tasks: those a Mail Hero event created, each
+  // with its brief and receive time, and the owner's mail categories. No summary text but the brief.
+  // (-- api-linter: core::0131::synonyms=disabled
+  //     aip.dev/not-precedent: a bounded batch read of mail by task ID, not a Get of one resource. --)
+  rpc LookupMailItems(LookupMailItemsRequest) returns (LookupMailItemsResponse) {
+    option (google.api.http) = {
+      post: "/api/plus/v1/mailItems:lookup"
+      body: "*"
+    };
+  }
+  // One mail's full Todofy summary, as plain text the extension shows and never interprets.
+  // (-- api-linter: core::0131::synonyms=disabled
+  //     aip.dev/not-precedent: reads one field of a mail Todofy keeps, not a resource of this service. --)
+  rpc ReadMailSummary(ReadMailSummaryRequest) returns (ReadMailSummaryResponse) {
+    option (google.api.http) = {get: "/api/plus/v1/mailItems:readMailSummary"};
+  }
+  // Files one mail by one of the owner's categories, in one Todoist write: the category's label
+  // (another area label goes), its priority, and a move to the project chosen for filed mail, which
+  // must still be active. A repeat sends the same write again only while the task and the label
+  // still give it; otherwise it answers ETAG_MISMATCH.
+  rpc FileMailItem(FileMailItemRequest) returns (FileMailItemResponse) {
+    option (google.api.http) = {
+      post: "/api/plus/v1/mailItems:fileMailItem"
+      body: "*"
+    };
+  }
+  // Permanently deletes the listed mail tasks the owner has not touched, at most 200; Todofy reads
+  // them again first, and again on a repeat, and keeps every other one. Todoist cannot restore a
+  // deleted task; Todofy deletes the deleted mail's summaries with it.
+  // (-- api-linter: core::0135=disabled
+  //     aip.dev/not-precedent: a bounded batch action on external Todoist tasks with a request
+  //     identity and an answer per task, not the Delete of one resource of this service. --)
+  rpc DeleteMailItems(DeleteMailItemsRequest) returns (DeleteMailItemsResponse) {
+    option (google.api.http) = {
+      post: "/api/plus/v1/mailItems:deleteMailItems"
+      body: "*"
+    };
+  }
+  // The mail categories, the project filed mail goes to and the projects to choose it from.
+  // (-- api-linter: core::0131::synonyms=disabled
+  //     aip.dev/not-precedent: bounded settings read with a live project list, not a stored resource. --)
+  rpc ReadMailSettings(ReadMailSettingsRequest) returns (ReadMailSettingsResponse) {
+    option (google.api.http) = {get: "/api/plus/v1/mailSettings:read"};
+  }
+  // Replaces the mail categories (at most four) and the project filed mail goes to, by etag.
+  // Sending the saved settings answers them as saved, whatever the etag.
+  // (-- api-linter: core::0134=disabled
+  //     aip.dev/not-precedent: the complete bounded set is replaced atomically, with no update mask. --)
+  rpc UpdateMailSettings(UpdateMailSettingsRequest) returns (UpdateMailSettingsResponse) {
+    option (google.api.http) = {
+      post: "/api/plus/v1/mailSettings:updateMailSettings"
+      body: "*"
+    };
+  }
 }
 
 // One known planning label, discovered from the owner's Todoist account.
 message LabelMapping {
-  // Logical role: office, home, bets, quarter, committed, focus, candiate or lead_*.
+  // Logical role: office, home, quarter, committed, focus, candiate or lead_*; bets only while a setup
+  // confirmed before the Bets became text still carries that binding, which is kept as saved.
   string role = 1;
   // Exact Todoist label ID.
   string id = 2;
@@ -170,11 +235,14 @@ message Plan {
   // Newest weekly review task Todofy created, for this or the previous ISO week; empty when
   // there is none. It may already be completed: only the active task list says it is open.
   string review_task_id = 12;
-  // At most 100 tasks recorded for the next week: a commitment or Bet chosen on this
-  // week's last day, which the coming Monday reset leaves in place.
+  // At most 100 tasks recorded for the next week: a commitment chosen on this week's
+  // last day, which the coming Monday reset leaves in place.
   repeated string next_week_task_ids = 13;
   // Every dependency, at most 300, IDs only. Left out of the BASIC view.
   repeated TaskDependency dependencies = 14;
+  // The Work and Personal Bets saved for the previous, this and the next account week,
+  // at most six; a week and area with none is absent.
+  repeated WeeklyBet weekly_bets = 15;
 }
 // One task waits for another: task_id should not start before prerequisite_id is done. IDs are in the ID space
 // of the service that answers (PlusService: Todoist task IDs); Todofy stores the link by its own task IDs.
@@ -189,6 +257,21 @@ message TaskDependency {
   // Todofy confirmed that the prerequisite was completed, not deleted. The active task list comes first: a
   // prerequisite listed there is not done, whatever this says.
   bool done = 4;
+}
+// One week's Work or Personal Bet: the owner's line of text, independent of any task.
+message WeeklyBet {
+  // The account-local Monday of the week, YYYY-MM-DD.
+  // (-- api-linter: core::0142::time-field-type=disabled
+  //     aip.dev/not-precedent: an account-local calendar day, the same key as Plan.week_start. --)
+  string week_start = 1;
+  // work or personal.
+  string area = 2;
+  // One line of at most 160 UTF-16 code units, whitespace collapsed; empty means no Bet.
+  string text = 3;
+  // Compare-and-set version sent back by SetWeeklyBet; empty while the week and area have none.
+  string etag = 4;
+  // When the text was last saved.
+  google.protobuf.Timestamp update_time = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
 }
 // An active Todoist task with derived planning fields. No description is fetched for display.
 message PlanningTask {
@@ -206,8 +289,9 @@ message PlanningTask {
   string stage = 6;
   // work, personal or unassigned (including ambiguous office+home).
   string area = 7;
-  // Whether the task carries the current Bets label.
-  bool bet = 8;
+  // Deprecated: the weekly Bets are WeeklyBet text now. Whether the task carries the retired
+  // Bets label, while a setup confirmed before then still binds it.
+  bool bet = 8 [deprecated = true];
   // True deadline calendar date; empty when absent.
   string deadline = 9;
   // Scheduled date or date-time; independent of deadline.
@@ -222,7 +306,7 @@ message PlanningTask {
   bool must_start = 14;
   // A true deadline has no lead and is neither active nor parked.
   bool missing_lead = 15;
-  // Todoist priority, 1 to 4.
+  // Todoist's API priority, 1 to 4: 4 is P1 (MailCategory.priority is the domain order).
   int32 priority = 16;
   // Todoist's last change to the task, in whole seconds; absent when Todoist does not say.
   // Any edit resets it, so it means untouched since, not waiting since.
@@ -273,8 +357,9 @@ message SetTaskPlanRequest {
   optional string stage = 4;
   // work, personal or unassigned.
   optional string area = 5;
-  // Adds/removes Bets without changing stage unless stage is also provided.
-  optional bool bet = 6;
+  // Deprecated: the weekly Bets are text (SetWeeklyBet). A request that sets it is refused
+  // (BAD_REQUEST) and writes nothing.
+  optional bool bet = 6 [deprecated = true];
   // Adds or removes the literal `active` label (in progress). It is never created: adding
   // it fails while the account has no label of that exact name.
   optional bool active = 7;
@@ -507,6 +592,184 @@ message VerifyPlanStoreResponse {
   int32 unknown_value_count = 9;
   // Tasks over the dependency limit, a dependency total over its limit, and schemes over the active category limit.
   int32 limit_violation_count = 10;
+}
+// Saves the text of one week's Bet. Sending the text already saved answers it as saved,
+// whatever the etag, so a repeated request is safe without a request ID.
+message SetWeeklyBetRequest {
+  // The account-local Monday of this account week or the next one, YYYY-MM-DD.
+  // (-- api-linter: core::0142::time-field-type=disabled
+  //     aip.dev/not-precedent: an account-local calendar day, the same key as Plan.week_start. --)
+  string week_start = 1 [(google.api.field_behavior) = REQUIRED];
+  // work or personal.
+  string area = 2 [(google.api.field_behavior) = REQUIRED];
+  // The new text; empty clears the Bet. Saved as one line, whitespace collapsed, at most
+  // 160 UTF-16 code units.
+  string text = 3 [(google.api.field_behavior) = OPTIONAL];
+  // The etag of the Bet shown, empty when there was none.
+  string etag = 4 [(google.api.field_behavior) = OPTIONAL];
+}
+// The Bet as saved.
+message SetWeeklyBetResponse {
+  // Current values.
+  WeeklyBet weekly_bet = 1;
+}
+
+// A reference into the task store, by its own ID: provider todoist today.
+message ExternalRef {
+  // The store: todoist.
+  string provider = 1 [(google.api.field_behavior) = REQUIRED];
+  // The store's ID of the task, label or project.
+  string external_id = 2 [(google.api.field_behavior) = REQUIRED];
+}
+// One summarised mail: a Mail Hero event that created a task. Its title is the task's.
+message MailItem {
+  // The Mail Hero event ID, Todofy's own ID of the mail.
+  string id = 1;
+  // The mail's task.
+  ExternalRef task = 2;
+  // One plain sentence about the mail, at most 60 characters; empty when it has none.
+  string brief = 3;
+  // When Todofy received the mail.
+  google.protobuf.Timestamp receive_time = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Whether ReadMailSummary has its full summary.
+  bool has_summary = 5;
+}
+// One of the owner's mail categories: an existing label and a priority. Its name is generated
+// from them ("quick · P4"), so none is stored to rename.
+message MailCategory {
+  // Todofy's ID. Ignored by UpdateMailSettings, where a category with the label and priority of
+  // a saved one keeps that one's ID.
+  string id = 1 [(google.api.field_behavior) = OPTIONAL];
+  // The label, by ID.
+  ExternalRef label = 2 [(google.api.field_behavior) = REQUIRED];
+  // P1 to P4.
+  Priority priority = 3 [(google.api.field_behavior) = REQUIRED];
+}
+// An active project filed mail may go to.
+message MailProject {
+  // Todoist project ID.
+  string id = 1;
+  // Its current name, read from Todoist for this answer and never stored.
+  string display_name = 2;
+  // Whether it is the account's Inbox.
+  bool inbox = 3;
+}
+// Mail project task IDs, at most 200.
+message LookupMailItemsRequest {
+  // Todoist task IDs; the ones no Mail Hero event created are left out of the answer.
+  repeated string task_ids = 1 [(google.api.field_behavior) = REQUIRED];
+}
+// The mail among the tasks asked for, and the categories to file it by.
+message LookupMailItemsResponse {
+  // In no particular order.
+  repeated MailItem items = 1;
+  // The owner's mail categories, in their order.
+  repeated MailCategory categories = 2;
+  // Sent back by FileMailItem: the categories it files by.
+  string categories_etag = 3;
+  // The project filed mail goes to; absent until the owner chooses one.
+  ExternalRef destination = 4;
+}
+// Reads one mail's summary.
+message ReadMailSummaryRequest {
+  // The mail's ID (MailItem.id).
+  string id = 1 [(google.api.field_behavior) = REQUIRED];
+}
+// The summary as Todofy keeps it.
+message ReadMailSummaryResponse {
+  // Plain text, at most 64 KiB; empty when it is no longer available.
+  string summary = 1;
+}
+// Files one mail.
+message FileMailItemRequest {
+  // The mail's Todoist task, still in the mail project.
+  string task_id = 1 [(google.api.field_behavior) = REQUIRED];
+  // Fingerprint of the task shown to the user (PlanningTask.etag).
+  string etag = 2 [(google.api.field_behavior) = REQUIRED];
+  // UUID reused when repeating this action.
+  string request_id = 3 [
+    (google.api.field_behavior) = OPTIONAL,
+    (google.api.field_info).format = UUID4
+  ];
+  // MailCategory.id.
+  string category_id = 4 [(google.api.field_behavior) = REQUIRED];
+  // The categories_etag the category was shown with.
+  string categories_etag = 5 [(google.api.field_behavior) = REQUIRED];
+}
+// The task after it was filed.
+message FileMailItemResponse {
+  // Current task values, now in the project filed mail goes to.
+  PlanningTask task = 1;
+}
+// The mail tasks the owner saw listed when asking to delete all.
+// (-- api-linter: core::0135=disabled
+//     aip.dev/not-precedent: a batch action on external tasks, not the Delete of one resource. --)
+message DeleteMailItemsRequest {
+  // UUID reused when repeating this action: a repeat finishes the rest, deletes nothing twice and
+  // keeps a task changed since.
+  string request_id = 1 [
+    (google.api.field_behavior) = OPTIONAL,
+    (google.api.field_info).format = UUID4
+  ];
+  // 1 to 200 Todoist task IDs.
+  repeated string task_ids = 2 [(google.api.field_behavior) = REQUIRED];
+}
+// What happened to each task asked for.
+message DeleteMailItemsResponse {
+  // Permanently deleted, or already gone.
+  repeated string deleted_task_ids = 1;
+  // Kept: changed or planned, not mail, or no longer in the mail project.
+  repeated string kept_task_ids = 2;
+}
+// Reads the mail settings.
+message ReadMailSettingsRequest {}
+// The mail settings and the projects to choose from.
+message ReadMailSettingsResponse {
+  // The owner's mail categories, in their order.
+  repeated MailCategory categories = 1;
+  // Sent back by UpdateMailSettings.
+  string etag = 2;
+  // The project filed mail goes to; absent until the owner chooses one.
+  ExternalRef destination = 3;
+  // The Inbox first, then the active projects, at most 200; the mail project is not one of them.
+  repeated MailProject projects = 4;
+}
+// Replaces the mail settings.
+// (-- api-linter: core::0134=disabled
+//     aip.dev/not-precedent: the complete bounded set is replaced atomically, by etag,
+//     with no partial resource fields or update mask. --)
+message UpdateMailSettingsRequest {
+  // At most four, each a current label (not a planning, lead or in-progress one) and a priority,
+  // no two the same.
+  repeated MailCategory categories = 1 [(google.api.field_behavior) = OPTIONAL];
+  // The project filed mail goes to: an active project or the Inbox, not the mail project.
+  ExternalRef destination = 2 [(google.api.field_behavior) = REQUIRED];
+  // The etag of the settings shown.
+  string etag = 3 [(google.api.field_behavior) = REQUIRED];
+}
+// The mail settings as saved.
+message UpdateMailSettingsResponse {
+  // The saved categories, in their order.
+  repeated MailCategory categories = 1;
+  // Sent back by the next UpdateMailSettings.
+  string etag = 2;
+  // The project filed mail goes to.
+  ExternalRef destination = 3;
+}
+
+// A priority in the domain's order, P1 the most urgent. The Todoist adapter writes API priority
+// 5 - n (PlanningTask.priority).
+enum Priority {
+  // Never written.
+  PRIORITY_UNSPECIFIED = 0;
+  // P1.
+  PRIORITY_P1 = 1;
+  // P2.
+  PRIORITY_P2 = 2;
+  // P3.
+  PRIORITY_P3 = 3;
+  // P4, Todoist's default.
+  PRIORITY_P4 = 4;
 }
 
 // How much of the plan an answer carries (AIP-157).

@@ -5,7 +5,6 @@ import {
   planConfig,
   startDate,
   topLevelChoices,
-  topLevelBets,
 } from "../src/domain";
 import type { PlanningTask } from "../src/model";
 const task = (
@@ -19,7 +18,6 @@ const task = (
   labels: [],
   area: "work",
   stage: "none",
-  bet: false,
   priority: 1,
   deadline: "",
   leadDays: 0,
@@ -94,23 +92,7 @@ it("keeps a committed child visible below a weekly parent", () => {
     ["child", "committed"],
   ]);
 });
-it("deduplicates Bets independently of commitment stages", () => {
-  const parent = task("parent", { stage: "committed" });
-  const child = task("child", {
-    stage: "committed",
-    parentId: "parent",
-    bet: true,
-  });
-  expect(topLevelBets([parent, child], "work").map((item) => item.id)).toEqual([
-    "child",
-  ]);
-  expect(
-    topLevelBets([{ ...parent, bet: true }, child], "work").map(
-      (item) => item.id,
-    ),
-  ).toEqual(["parent"]);
-});
-it("keeps only replaced filter and planning label IDs for the native sidebar cache", () => {
+it("keeps only replaced filter and planning label IDs and the mail project for the native sidebar cache, a retired bets binding's too", () => {
   expect(
     planConfig({
       configured: true,
@@ -121,10 +103,21 @@ it("keeps only replaced filter and planning label IDs for the native sidebar cac
         { role: "home", id: "l3", label: "home" },
         { role: "bets", id: "l4", label: "bets" },
       ],
+      inboxProjectId: "p1",
     }),
   ).toEqual({
     configured: true,
     hiddenFilterIds: ["f1"],
     labelIds: ["l1", "l4"],
+    hiddenProjectIds: ["p1"],
   });
+  // Without a mail project there is no project to hide.
+  expect(
+    planConfig({
+      configured: true,
+      hiddenFilterIds: [],
+      managedLabels: [],
+      inboxProjectId: "",
+    }).hiddenProjectIds,
+  ).toEqual([]);
 });

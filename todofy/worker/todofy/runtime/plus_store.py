@@ -31,12 +31,10 @@ async def remember(
     statements = []
     for task in tasks:
         labels = task.get("labels") or []
-        if names["committed"] in labels or names["bets"] in labels:
-            statements.append(
-                db.prepare(sql.REMEMBER_WEEK).bind(
-                    str(task["id"]), week, int(names["committed"] in labels), int(names["bets"] in labels)
-                )
-            )
-    # Bounded pages and bounded D1 batches; only planning parents/explicit Bets are recorded.
+        # The retired Bets label is remembered while a setup still binds it, so Monday's reset removes it.
+        committed, bet = names["committed"] in labels, names.get("bets") in labels
+        if committed or bet:
+            statements.append(db.prepare(sql.REMEMBER_WEEK).bind(str(task["id"]), week, int(committed), int(bet)))
+    # Bounded pages and bounded D1 batches; only commitments and tasks still labelled Bets are recorded.
     for offset in range(0, len(statements), 25):
         await db.batch(statements[offset : offset + 25])

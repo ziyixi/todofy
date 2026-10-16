@@ -504,3 +504,73 @@ it("keeps unrelated favourites visible when the plan read fails while their togg
       .display,
   ).toBe("none");
 });
+
+it("adds Mail under Plan and Focus, and hides the mail project's favourite only while a Plus page is open", async () => {
+  state.config = {
+    configured: true,
+    hiddenFilterIds: ["f1"],
+    labelIds: [],
+    hiddenProjectIds: ["mailp"],
+  };
+  document
+    .querySelector("#favorites")!
+    .insertAdjacentHTML(
+      "beforeend",
+      `<li id="mail-project"><a href="/app/project/email-inbox-mailp">Email Inbox</a></li><li id="other-project"><a href="/app/project/work-p2">Work</a></li>`,
+    );
+  document
+    .querySelector("aside")!
+    .insertAdjacentHTML(
+      "beforeend",
+      `<ul id="projects"><li id="my-mail-project"><a href="/app/project/email-inbox-mailp">Email Inbox</a></li></ul>`,
+    );
+  const { ctx } = context();
+  await act(() => mountTodoist(ctx));
+  await settle();
+  const nav = screen.getByRole("navigation", { name: "Todoist Plus" });
+  expect(
+    [...nav.querySelectorAll("button")].map((button) => button.textContent),
+  ).toEqual(["Plan", "Focus", "Mail"]);
+  // A native page shows the favourite; a project favourite never folds into Other views.
+  expect(visible("#mail-project")).toBe(true);
+  expect(visible("#other-project")).toBe(true);
+  expect(screen.getByRole("button", { name: /Other views/u }).textContent).toBe(
+    "Other views1",
+  );
+
+  fireEvent.click(screen.getByRole("button", { name: "Mail" }));
+  expect(await screen.findByText("mailbox")).toBeTruthy();
+  expect(new URL(location.href).searchParams.get("todoist-plus")).toBe(
+    "mailbox",
+  );
+  await settle();
+  expect(
+    screen.getByRole("button", { name: "Mail" }).getAttribute("aria-current"),
+  ).toBe("page");
+  expect(visible("#mail-project")).toBe(false);
+  expect(visible("#other-project")).toBe(true);
+  // My projects keeps it.
+  expect(visible("#my-mail-project")).toBe(true);
+
+  history.pushState(null, "", "/app/today");
+  window.dispatchEvent(new PopStateEvent("popstate"));
+  await settle();
+  expect(visible("#mail-project")).toBe(true);
+});
+
+it("reads a configuration cached before the Mailbox as one with no project to hide", async () => {
+  state.config = { configured: true, hiddenFilterIds: ["f1"], labelIds: [] };
+  history.replaceState(null, "", "/app/today?todoist-plus=mailbox");
+  document
+    .querySelector("#favorites")!
+    .insertAdjacentHTML(
+      "beforeend",
+      `<li id="mail-project"><a href="/app/project/email-inbox-mailp">Email Inbox</a></li>`,
+    );
+  const { ctx } = context();
+  await act(() => mountTodoist(ctx));
+  expect(await screen.findByText("mailbox")).toBeTruthy();
+  await settle();
+  expect(visible("#mail-project")).toBe(true);
+  expect(visible("#replaced")).toBe(false);
+});

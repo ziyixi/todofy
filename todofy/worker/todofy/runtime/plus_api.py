@@ -15,7 +15,7 @@ from todofy.core import plan as planning
 from todofy.core import plus
 from todofy.core.sql import gtd as gtd_sql
 from todofy.core.sql import plus as sql
-from todofy.runtime import backup, plan_store, plus_cache, plus_week
+from todofy.runtime import backup, plan_store, plus_cache, plus_mail, plus_week
 from todofy.runtime import plus_receipts as receipts
 from todofy.runtime import plus_store as store
 from todofy.runtime import plus_todoist as todoist
@@ -31,20 +31,36 @@ OWNER_METHODS = frozenset(
         "VerifyPlanStore",
     }
 )
-READ_METHODS = frozenset({"ReadPlan", "ListPlanningTasks", "ReadExtensionConnections", "VerifyPlanStore"})
+READ_METHODS = frozenset(
+    {
+        "ReadPlan",
+        "ListPlanningTasks",
+        "ReadExtensionConnections",
+        "VerifyPlanStore",
+        "LookupMailItems",
+        "ReadMailSummary",
+        "ReadMailSettings",
+    }
+)
 PLAN_METHODS = frozenset({"ReadPlan", "ConfirmPlanMapping", "UpdatePlanLabels"})
 # Writes of Todofy's planning store only, by value: no receipt, no Todoist write (set_dependency, resolve).
 DEPENDENCY_METHODS = frozenset({"SetTaskDependency", "ResolveDependencies"})
+# Writes of D1 alone, by compare-and-set: resending one is safe by its value, so it carries no request ID.
+VALUE_WRITES = frozenset({"SetWeeklyBet", "UpdateMailSettings"})
 METHODS = (
     READ_METHODS
     | OWNER_METHODS
     | DEPENDENCY_METHODS
+    | VALUE_WRITES
     | {"SetTaskPlan", "SetTaskLead", "AppendTaskSteps", "CompleteTask", "UpdatePlanLabels"}
+    | {"FileMailItem", "DeleteMailItems"}
 )
 # Methods that write labels or bind them sync Todoist's labels first, so a label renamed in Todoist is never
 # written back under its old name; every other call reads the metadata the object synced in the last five
 # minutes (plus_todoist.metadata).
-LABEL_WRITES = frozenset({"SetTaskPlan", "SetTaskLead", "UpdatePlanLabels", "ConfirmPlanMapping"})
+LABEL_WRITES = frozenset(
+    {"SetTaskPlan", "SetTaskLead", "UpdatePlanLabels", "ConfirmPlanMapping", "FileMailItem", "UpdateMailSettings"}
+)
 # How long the object trusts its copy of the non-revoked connection digests; Issue and Revoke drop it at once
 # (_change_connections).
 CONNECTIONS_MAX_AGE = 10 * 60
@@ -80,16 +96,22 @@ async def plan(core: Any, metadata: dict[str, Any] | None = None, *, fresh: bool
 
 
 async def review_targets(env: Any, week: str) -> dict[str, Any]:
-    """The weekly review's IDs, read with each Plan answer rather than with every task page or write:
-    Todofy's mail project, the newest review task it created (this or the previous ISO week; the
-    extension sees whether it is still open), the choices already kept for next week and every dependency."""
+    """The weekly review's IDs and the Bets, read with each Plan answer rather than with every task page or
+    write: Todofy's mail project, the newest review task it created (this or the previous ISO week; the
+    extension sees whether it is still open), the choices already kept for next week, every dependency and the
+    Bets of last, this and next week."""
     monday = date.fromisoformat(week)
     statements = [
         env.DB.prepare(gtd_sql.REVIEW_WEEK.sql).bind("{:04d}-W{:02d}".format(*day.isocalendar()[:2]))
         for day in (monday, monday - timedelta(days=7))
     ]
-    *reviews, chosen, edges = await env.DB.batch(
-        [*statements, env.DB.prepare(sql.NEXT_WEEK).bind(week), plan_store.edges(env.DB)]
+    *reviews, chosen, edges, bets = await env.DB.batch(
+        [
+            *statements,
+            env.DB.prepare(sql.NEXT_WEEK).bind(week),
+            plan_store.edges(env.DB),
+            plan_store.bets_statement(env.DB, week),
+        ]
     )
     created = [
         str(row["task_id"])
@@ -102,6 +124,7 @@ async def review_targets(env: Any, week: str) -> dict[str, Any]:
         "review_task_id": created[0] if created else "",
         "next_week_task_ids": [str(dict(row)["task_id"]) for row in chosen.results],
         "dependencies": plan_store.dependency_rows(edges),
+        "weekly_bets": plan_store.weekly_bets(dict(row) for row in bets.results),
     }
 
 
@@ -189,6 +212,35 @@ async def update_labels(core: Any, request: dict[str, Any]) -> dict[str, Any]:
     mapping = json.dumps({"etag": updated["etag"], "labels": bindings}, separators=(",", ":"))
     await store.run(env.DB, sql.SAVE_SETTINGS, mapping, current["timezone"], current["week_start"])
     return {"plan": updated}
+
+
+async def set_weekly_bet(core: Any, request: dict[str, Any]) -> dict[str, Any]:
+    """SetWeeklyBet: one plan_notes row by compare-and-set, never a Todoist call or a receipt. The account week is
+    the confirmed timezone's; it needs no finished Monday reset, since a Bet changes no label. Sending the text already
+    saved answers the saved Bet, whatever the etag and the day: a replay after a lost answer, even across Sunday
+    midnight. Otherwise only this week and the next one take a write (ACTION_NOT_ALLOWED), from the etag shown
+    (ETAG_MISMATCH)."""
+    env = core.env
+    week, area = request.get("week_start", ""), request.get("area", "")
+    if area not in planning.BET_AREAS or date.fromisoformat(week).isoformat() != week:
+        raise todoist.PlusError("BAD_REQUEST")
+    text = planning.bet_text(request.get("text", ""))
+    setup, saved = await env.DB.batch([env.DB.prepare(sql.SETTINGS), plan_store.bet_statement(env.DB, week, area)])
+    settings = next((dict(row) for row in setup.results), None)
+    if settings is None or not settings["enabled"]:
+        raise todoist.PlusError("ACTION_NOT_ALLOWED")
+    unsaved = {"week_start": week, "area": area, "text": "", "etag": ""}
+    current = next((plan_store.weekly_bet(dict(row)) for row in saved.results), unsaved)
+    if current["text"] == text:
+        return {"weekly_bet": current}
+    if not planning.bet_writable(week, plus.week_start(account_day(settings["timezone"]))):
+        raise todoist.PlusError("ACTION_NOT_ALLOWED")
+    if request.get("etag", "") != current["etag"]:
+        raise todoist.PlusError("ETAG_MISMATCH")
+    written = await plan_store.save_bet(env.DB, week, area, text, int(current["etag"] or 0), now_s())
+    if written is None:
+        raise todoist.PlusError("ETAG_MISMATCH")
+    return {"weekly_bet": written}
 
 
 async def connected(core: Any, digest: str) -> bool:
@@ -455,12 +507,13 @@ async def mutate(core: Any, method: str, request: dict[str, Any]) -> dict[str, A
     result = await todoist.commands(core, commands)
     if method in ("SetTaskPlan", "SetTaskLead"):
         # Every explicit new-week write replaces the membership; old resets cannot select it. A commitment
-        # or Bet chosen on the week's last day is recorded for the next week, so Monday's reset keeps it.
+        # chosen on the week's last day is recorded for the next week, so Monday's reset keeps it.
         # Recorded from the labels just written, before the confirming read: if that read fails, the next
         # page scan would remember a Sunday choice under the ending week.
         written = commands[0]["args"]["labels"]
         names = plus.role_labels(current["labels"])
-        marks = int(names["committed"] in written), int(names["bets"] in written)
+        # A task still carrying the retired Bets label keeps that mark, so Monday's reset still removes it.
+        marks = int(names["committed"] in written), int(names.get("bets") in written)
         if any(marks):
             week = plus.membership_week(current["today"], current["week_start"], request)
             await store.run(env.DB, sql.REMEMBER_WEEK, request["task_id"], week, *marks)
@@ -509,7 +562,8 @@ async def handle(coordinator: Any, method: str, text: str, *, owner: bool, diges
         if method not in READ_METHODS:
             if flag(coordinator.env, "MAINTENANCE_MODE"):
                 raise todoist.PlusError("MAINTENANCE")
-            plus.action_id(request.get("request_id", ""))
+            if method not in VALUE_WRITES:
+                plus.action_id(request.get("request_id", ""))
         async with coordinator.plus_lock:
             env = coordinator.env
             if method not in READ_METHODS and backup.holds_ledger(env, coordinator.sql, now_s()):
@@ -528,6 +582,23 @@ async def handle(coordinator: Any, method: str, text: str, *, owner: bool, diges
                 response = await set_dependency(coordinator, request)
             elif method == "ResolveDependencies":
                 response = await resolve_dependencies(coordinator, request)
+            elif method == "SetWeeklyBet":
+                response = await set_weekly_bet(coordinator, request)
+            elif method == "LookupMailItems":
+                response = await plus_mail.lookup(coordinator, request)
+            elif method == "ReadMailSummary":
+                response = await plus_mail.read_summary(coordinator, request)
+            elif method == "ReadMailSettings":
+                response = await plus_mail.read_settings(coordinator)
+            elif method == "UpdateMailSettings":
+                current = await require_ready(coordinator, await plan(coordinator, fresh=True), synced=True)
+                response = await plus_mail.update_settings(coordinator, request, current)
+            elif method == "FileMailItem":
+                current = await require_ready(coordinator, await plan(coordinator, fresh=True), synced=True)
+                response = await plus_mail.file(coordinator, request, current)
+            elif method == "DeleteMailItems":
+                await require_ready(coordinator)
+                response = await plus_mail.delete(coordinator, request)
             elif method == "ListPlanningTasks":
                 current = await plan(coordinator)
                 size = request.get("page_size", 0) or 100

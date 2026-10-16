@@ -45,16 +45,21 @@ const API_INIT = "GET /api/v1/serviceStatus as the isolate's first API request";
 const LEGACY = 'GET /api/v1/legacyTexts/{id} (1.9 MB of ASCII with escapes)';
 const REPORTS = 'GET /api/v1/latestReports (every report at its limits)';
 const PLUS = 'GET /api/plus/v1/tasks (200 tasks, token authenticated)';
-// A FULL Plan, which the gateway reads and writes again to add flowday_url: 500 labels and 300 dependencies, the most
-// TodofyCore answers.
-const PLAN = 'GET /api/plus/v1/plan:read (500 labels, 300 dependencies, token authenticated)';
+// A FULL Plan, which the gateway reads and writes again to add flowday_url: 500 labels, 300 dependencies and six Bets,
+// the most TodofyCore answers.
+const PLAN = 'GET /api/plus/v1/plan:read (500 labels, 300 dependencies, six Bets, token authenticated)';
+// The Mailbox's two largest answers, passed through unread like the legacy text and the reports (first runs 0.4-1.0
+// and warm medians 0.6-0.9 ms measured on 2026-10-16): a decode of either again would show here. The lookup's 200
+// task IDs are the request the transcoder reads.
+const MAIL_LOOKUP = 'POST /api/plus/v1/mailItems:lookup (200 task IDs and items, token authenticated)';
+const MAIL_SUMMARY = 'GET /api/plus/v1/mailItems:readMailSummary (64 KiB summary, token authenticated)';
 const FOCUS = 'GET /api/plus/flowday/api/v1/tasks (100 tasks, the proxy\'s largest page)';
 // The generated FlowDay client decodes and the proxy re-encodes a full page. A 200-task page with 2,000-char titles
 // and descriptions reached 10.2 ms cold in CI, so the proxy caps a page at 100 tasks (plus.ts FOCUS_PAGE_MAX).
 // Keep this path's growth decision separate from the existing API ratchets and the Free 10 ms limit.
 const FOCUS_COLD_BOUND_MS = 0.8 * FREE_CPU_MS;
 const FOCUS_BOUND_MS = 0.6 * FREE_CPU_MS;
-const PASSED_THROUGH = new Set([LEGACY, REPORTS]);
+const PASSED_THROUGH = new Set([LEGACY, REPORTS, MAIL_LOOKUP, MAIL_SUMMARY]);
 
 const ANSWERS = {
   plus_ui: {
@@ -71,7 +76,12 @@ const ANSWERS = {
       dependencies: Array.from({ length: 300 }, (_, n) => ({
         task_id: `task-${String(n)}`, prerequisite_id: `task-${String(n + 1)}`, baseline_completed_count: n, done: n % 2 === 0,
       })),
+      weekly_bets: ['2026-10-05', '2026-10-12', '2026-10-19'].flatMap((week) => ['work', 'personal'].map((area) => ({
+        week_start: week, area, text: 'Synthetic weekly Bet '.repeat(8).slice(0, 160), etag: '7', update_time: '2026-10-12T09:30:05Z',
+      }))),
     } }),
+    LookupMailItems: fixtures.ok(fixtures.mailLookup(200)),
+    ReadMailSummary: fixtures.ok(fixtures.mailSummary()),
   },
   owner_ui: {
     GetServiceStatus: fixtures.ok(fixtures.serviceStatus()),
@@ -167,13 +177,23 @@ async function session({ h, meter }: GatewayIsolate): Promise<Measurement[]> {
   ];
   const measured: Measurement[] = [init];
   for (const [label, path, options] of requests) measured.push(await meter.measure(label, () => expectOk(h, path, options), RUNS));
-  for (const [label, path] of [[PLUS, '/api/plus/v1/tasks?page_size=200'], [PLAN, '/api/plus/v1/plan:read'], [FOCUS, '/api/plus/flowday/api/v1/tasks?page_size=100']]) {
-    measured.push(await meter.measure(label ?? '', async () => {
-      const response = await h.mf.dispatchFetch(`https://todofy-hooks.example.com${path ?? ''}`, {
-        headers: { authorization: `Bearer todofy_plus_${'a'.repeat(43)}` },
-      });
+  // The extension's requests, with the body of a POST read.
+  const extension: [string, string, string?][] = [
+    [PLUS, '/api/plus/v1/tasks?page_size=200'],
+    [PLAN, '/api/plus/v1/plan:read'],
+    [FOCUS, '/api/plus/flowday/api/v1/tasks?page_size=100'],
+    [MAIL_LOOKUP, '/api/plus/v1/mailItems:lookup',
+      JSON.stringify({ task_ids: Array.from({ length: 200 }, (_, n) => `6X7rM8997g3RQ${String(n).padStart(3, '0')}`) })],
+    [MAIL_SUMMARY, `/api/plus/v1/mailItems:readMailSummary?id=${fixtures.UUID(0)}`],
+  ];
+  const authorization = `Bearer todofy_plus_${'a'.repeat(43)}`;
+  for (const [label, path, body] of extension) {
+    measured.push(await meter.measure(label, async () => {
+      const response = await h.mf.dispatchFetch(`https://todofy-hooks.example.com${path}`, body === undefined
+        ? { headers: { authorization } }
+        : { method: 'POST', headers: { authorization, 'content-type': 'application/json' }, body });
       await response.arrayBuffer();
-      if (response.status !== 200) throw new Error(`${label ?? ''}: ${String(response.status)}`);
+      if (response.status !== 200) throw new Error(`${label}: ${String(response.status)}`);
     }, RUNS));
   }
   return measured;
@@ -184,7 +204,7 @@ describe('CPU per owner API request (Workers Free: 10 ms)', () => {
     const { reference } = await measureInIsolates(COLD_ISOLATES, startIsolate, session);
     console.log(
       `cpu bounds (reference ms, medians of ${String(COLD_ISOLATES)} isolates): API's first request < ${API_INIT_BOUND_MS.toFixed(2)}, ` +
-        `first < ${API_COLD_BOUND_MS.toFixed(2)}, median < ${API_BOUND_MS.toFixed(2)}, the legacy text and the reports < ${PASSED_THROUGH_BOUND_MS.toFixed(2)}`,
+        `first < ${API_COLD_BOUND_MS.toFixed(2)}, median < ${API_BOUND_MS.toFixed(2)}, the legacy text, the reports and the Mailbox's answers < ${PASSED_THROUGH_BOUND_MS.toFixed(2)}`,
     );
     for (const { label, first, median } of reference.values()) {
       if (label === API_INIT) expect(first, label).toBeLessThan(API_INIT_BOUND_MS);
@@ -199,6 +219,6 @@ describe('CPU per owner API request (Workers Free: 10 ms)', () => {
         expect(median, `${label}: warm median`).toBeLessThan(API_BOUND_MS);
       }
     }
-    expect(reference.size).toBe(14);
+    expect(reference.size).toBe(16);
   });
 });

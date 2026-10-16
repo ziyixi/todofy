@@ -5,8 +5,7 @@
   margin-bottom: 16px;
 }
 .plus-weekly-goals > header,
-.plus-weekly-goals h2,
-.plus-weekly-goal-actions {
+.plus-weekly-goals h2 {
   display: flex;
   align-items: center;
   gap: 7px;
@@ -26,8 +25,7 @@
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 18px;
 }
-.plus-weekly-goal-context h3,
-.plus-weekly-goal-unassigned h3 {
+.plus-weekly-goal-context h3 {
   color: var(--plus-muted);
   font-size: 12px;
   margin: 0 0 4px;
@@ -36,85 +34,158 @@
   border-left: 1px solid var(--plus-line);
   padding-left: 18px;
 }
-.plus-weekly-goal + .plus-weekly-goal {
-  margin-top: 9px;
+
+/* A Bet: the owner's line of text is its own edit button, swapped in place for a one-line input
+   of the same size, so nothing moves while editing. */
+.plus-bet {
+  min-width: 0;
 }
-.plus-root .plus-weekly-goal-title {
+.plus-root .plus-bet-text,
+.plus-root .plus-bet-empty {
+  display: block;
+  width: calc(100% + 14px);
+  margin: 0 -7px;
+  padding: 5px 6px;
+  border: 1px solid transparent;
+  border-radius: 4px;
   text-align: left;
-  padding: 0;
+  line-height: 20px;
+  overflow-wrap: anywhere;
+  cursor: text;
+}
+.plus-root .plus-bet-text {
   font-size: 14px;
   font-weight: 600;
-  line-height: 1.4;
 }
-.plus-weekly-goal > .plus-task-breadcrumb {
-  margin-top: 3px;
-}
-.plus-root .plus-weekly-goal-empty {
-  color: var(--plus-muted);
-  text-align: left;
-  padding: 0;
+.plus-root .plus-bet-empty {
   font-size: 13px;
-}
-.plus-root .plus-weekly-goal-actions button {
-  display: inline-flex;
-  gap: 4px;
-  align-items: center;
   color: var(--plus-muted);
+}
+/* The ring stays inside the line, clear of the column heading above it. */
+.plus-root .plus-bet-text:focus-visible,
+.plus-root .plus-bet-empty:focus-visible {
+  outline-offset: -1px;
+}
+.plus-root .plus-bet-text:hover:not(:disabled, [aria-disabled="true"]),
+.plus-root .plus-bet-empty:hover:not(:disabled, [aria-disabled="true"]) {
+  background: var(--plus-hover);
+}
+/* Waiting for another write: dimmed like a disabled button, but it keeps focus (BetText). Keep
+   keeps its own opacity, which shows it only on hover or focus, and only turns muted. */
+.plus-root .plus-bet-text[aria-disabled="true"],
+.plus-root .plus-bet-empty[aria-disabled="true"] {
+  opacity: 0.45;
+  cursor: default;
+}
+.plus-root .plus-bet-keep[aria-disabled="true"] {
+  color: var(--plus-muted);
+  cursor: default;
+}
+.plus-bet-field {
+  position: relative;
+}
+.plus-root input.plus-bet-input {
+  display: block;
+  width: calc(100% + 14px);
+  margin: 0 -7px;
+  padding: 0 6px;
+  border-radius: 4px;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 20px;
+  background: var(--plus-surface);
+}
+.plus-root input.plus-bet-input:focus-visible {
+  outline-offset: -1px;
+}
+/* A save in flight: the read-only input keeps its place and the mark sits at its end. */
+.plus-bet-field > .plus-pending-mark {
+  position: absolute;
+  right: 0;
+  top: 10px;
+}
+.plus-bet-hint,
+.plus-bet-notice {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--plus-muted);
+}
+.plus-bet-notice {
+  color: var(--plus-text);
+}
+/* In the Plan's goals, the hint takes the end of the column heading's line, so the panel keeps its
+   height and the board below never moves while a goal is edited. */
+.plus-weekly-goal-context {
+  position: relative;
+}
+.plus-weekly-goal-context .plus-bet-hint {
+  position: absolute;
+  top: 0;
+  right: 0;
+  margin: 0;
+  line-height: 16px;
+  max-width: 70%;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.plus-bet-previous {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--plus-muted);
+}
+.plus-bet-previous > span {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+/* Keep shows where the pointer or focus is, and always where there is no hover. */
+.plus-root .plus-bet-keep {
+  flex: none;
   padding: 0;
+  min-height: 24px;
   font-size: 12px;
-}
-.plus-weekly-goal-actions button:hover {
   color: var(--plus-accent);
-  text-decoration: underline;
+  opacity: 0;
 }
-.plus-weekly-goal-actions {
-  margin-top: 5px;
-  flex-wrap: wrap;
+.plus-weekly-goal-context:hover .plus-bet-keep,
+.plus-weekly-goal-context:focus-within .plus-bet-keep {
+  opacity: 1;
 }
-.plus-weekly-goal-warning {
-  color: var(--plus-warning);
-  font-size: 12px;
-  margin: 5px 0 0;
+@media (hover: none) {
+  .plus-root .plus-bet-keep {
+    opacity: 1;
+  }
 }
-.plus-weekly-goal-unassigned {
-  border-top: 1px solid var(--plus-line);
-  padding-top: 9px;
-  margin-top: 9px;
-}
-.plus-weekly-goal-unassigned > p {
-  margin: 0 0 6px;
-  color: var(--plus-warning);
-  font-size: 12px;
-}
-.plus-goal-picker form {
-  padding: 20px;
-}
-.plus-goal-picker header {
-  display: flex;
-  align-items: flex-start;
-  gap: 14px;
-  justify-content: space-between;
-}
-.plus-goal-picker header h2 {
-  font-size: 18px;
-  line-height: 1.4;
-}
-.plus-goal-picker p {
+
+/* Next week's two Bets in Sunday's weekly review, at the review's own text size. */
+.weekly-review-items.weekly-review-bets li > .weekly-review-bet-area {
+  flex: none;
+  min-width: 3em;
   color: var(--plus-muted);
   font-size: 12px;
 }
-.plus-goal-picker input,
-.plus-goal-picker select {
-  width: 100%;
-  margin-bottom: 10px;
+.weekly-review-bets .plus-bet {
+  flex: 1;
 }
-.plus-goal-picker option {
-  padding: 5px;
+.plus-root .weekly-review-bets .plus-bet-text,
+.plus-root .weekly-review-bets input.plus-bet-input {
+  font-size: 13px;
+  font-weight: 400;
 }
-.plus-goal-picker footer {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
+.plus-root .weekly-review-bets .plus-bet-text,
+.plus-root .weekly-review-bets .plus-bet-empty {
+  padding-block: 1px;
+}
+.plus-root .weekly-review-bets input.plus-bet-input {
+  height: 24px;
+}
+.weekly-review-bets .plus-bet-field > .plus-pending-mark {
+  top: 6px;
 }
 @media (max-width: 650px) {
   .plus-weekly-goal-grid {
@@ -125,5 +196,8 @@
     border-left: 0;
     border-top: 1px solid var(--plus-line);
     padding: 9px 0 0;
+  }
+  .plus-weekly-goal-context + .plus-weekly-goal-context .plus-bet-hint {
+    top: 9px;
   }
 }

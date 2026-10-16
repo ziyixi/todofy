@@ -70,19 +70,6 @@ export function topLevelChoices(
   );
 }
 
-export function topLevelBets(
-  tasks: PlanningTask[],
-  area: Area,
-): PlanningTask[] {
-  const byId = taskIndex(tasks);
-  return tasks.filter(
-    (task) =>
-      task.bet &&
-      effectiveArea(task, tasks) === area &&
-      !hasAncestor(task, byId, (ancestor) => ancestor.bet),
-  );
-}
-
 export function displayedTitle(title: string): string {
   return (
     title
@@ -160,7 +147,10 @@ export function duration(seconds: number): string {
 }
 
 export function planConfig(
-  plan: Pick<PlanMetadata, "configured" | "hiddenFilterIds" | "managedLabels">,
+  plan: Pick<
+    PlanMetadata,
+    "configured" | "hiddenFilterIds" | "managedLabels" | "inboxProjectId"
+  >,
 ): PlanConfig {
   return {
     configured: plan.configured,
@@ -169,6 +159,8 @@ export function planConfig(
     labelIds: plan.managedLabels
       .filter((label) => !["office", "home"].includes(label.role))
       .map((label) => label.id),
+    // The Mailbox replaces the mail project's favourite while a Plus page is open.
+    hiddenProjectIds: plan.inboxProjectId ? [plan.inboxProjectId] : [],
   };
 }
 

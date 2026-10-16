@@ -79,7 +79,18 @@ MAIL_REMINDERS = Table(
 )
 SUMMARIES = Table(
     "summaries",
-    ("event_id", "created_at", "subject", "summary", "model", "task_id", "imported", "category_id", "triaged_at"),
+    (
+        "event_id",
+        "created_at",
+        "subject",
+        "summary",
+        "model",
+        "task_id",
+        "imported",
+        "category_id",
+        "triaged_at",
+        "brief",
+    ),
     ("event_id",),
     200,
 )

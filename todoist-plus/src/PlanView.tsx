@@ -40,6 +40,8 @@ export interface PlanViewProps {
    * that asks Todofy to settle dependencies.
    */
   onReviewShown?: (plan: PlanState) => void;
+  /** The weekly review's mail line opens Plus's Mailbox. */
+  onOpenMailbox?: () => void;
   /** Opened from the review task's link: start with the weekly review. */
   reviewing?: boolean;
   /** Opened from Focus's quiet line: Review, with Start now focused. */
@@ -164,6 +166,7 @@ export function PlanView(props: PlanViewProps) {
           actions={props.actions}
           editTask={editTask}
           completeReview={props.completeReview}
+          onOpenMailbox={props.onOpenMailbox}
           onShowWaiting={() => showLane("waiting")}
           onShowRunway={() => {
             setMode("week");

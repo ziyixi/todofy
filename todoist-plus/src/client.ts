@@ -1,6 +1,12 @@
 import { browser } from "wxt/browser";
-import { PLANNING_PROTOCOL, type ActionMessage, type Result } from "./messages";
-import type { PlanConfig, PlusActions } from "./model";
+import { BetNotSaved } from "./bets";
+import {
+  PLANNING_PROTOCOL,
+  type ActionMessage,
+  type NotSaved,
+  type Result,
+} from "./messages";
+import type { PlanConfig, PlusActions, WeeklyBet } from "./model";
 import type { PageStatus } from "./page-status";
 async function call<T>(message: Omit<ActionMessage, "protocol">): Promise<T> {
   let response: Result<T>;
@@ -30,6 +36,15 @@ export const extensionActions: PlusActions = {
   readPlan: (...args) => call({ kind: "action", method: "readPlan", args }),
   loadDays: (...args) => call({ kind: "action", method: "loadDays", args }),
   updateTask: (...args) => call({ kind: "action", method: "updateTask", args }),
+  async setWeeklyBet(...args) {
+    const result = await call<WeeklyBet | NotSaved>({
+      kind: "action",
+      method: "setWeeklyBet",
+      args,
+    });
+    if ("notSaved" in result) throw new BetNotSaved(result.notSaved);
+    return result;
+  },
   updateLabels: (...args) =>
     call({ kind: "action", method: "updateLabels", args }),
   createSteps: (...args) =>
@@ -49,6 +64,15 @@ export const extensionActions: PlusActions = {
   updateEstimate: (...args) =>
     call({ kind: "action", method: "updateEstimate", args }),
   timer: (...args) => call({ kind: "action", method: "timer", args }),
+  lookupMail: (...args) => call({ kind: "action", method: "lookupMail", args }),
+  readMailSummary: (...args) =>
+    call({ kind: "action", method: "readMailSummary", args }),
+  readMailSettings: (...args) =>
+    call({ kind: "action", method: "readMailSettings", args }),
+  updateMailSettings: (...args) =>
+    call({ kind: "action", method: "updateMailSettings", args }),
+  fileMail: (...args) => call({ kind: "action", method: "fileMail", args }),
+  deleteMail: (...args) => call({ kind: "action", method: "deleteMail", args }),
 };
 /** The last confirmed ID-only configuration, read from disk without a network request. */
 export async function cachedPlanConfig(): Promise<PlanConfig | undefined> {
@@ -59,7 +83,9 @@ export async function cachedPlanConfig(): Promise<PlanConfig | undefined> {
   return config &&
     typeof config.configured === "boolean" &&
     Array.isArray(config.hiddenFilterIds) &&
-    Array.isArray(config.labelIds)
+    Array.isArray(config.labelIds) &&
+    (config.hiddenProjectIds === undefined ||
+      Array.isArray(config.hiddenProjectIds))
     ? config
     : undefined;
 }

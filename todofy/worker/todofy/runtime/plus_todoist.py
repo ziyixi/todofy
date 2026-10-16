@@ -130,8 +130,15 @@ def _take_full_sync(store: Any, now: int) -> bool:
     return True
 
 
-async def tasks(core: Any, limit: int = 200, cursor: str = "") -> tuple[list[dict[str, Any]], str]:
-    query: dict[str, Any] = {"limit": limit}
+# A project read for the Mailbox (its tasks, sub-tasks included) stops after this many pages of 200.
+PROJECT_PAGES = 5
+# Todoist runs at most 100 commands per Sync request.
+SYNC_COMMANDS = 100
+
+
+async def tasks(core: Any, limit: int = 200, cursor: str = "", **filters: str) -> tuple[list[dict[str, Any]], str]:
+    """One page of active tasks; ``filters`` are Todoist's own (project_id, ids)."""
+    query: dict[str, Any] = {**filters, "limit": limit}
     if cursor:
         query["cursor"] = cursor
     value = await call(core, "/api/v1/tasks?" + urlencode(query))
@@ -140,6 +147,42 @@ async def tasks(core: Any, limit: int = 200, cursor: str = "") -> tuple[list[dic
     if not isinstance(result, list) or len(result) > limit or not isinstance(following, str):
         raise PlusError("UNAVAILABLE")
     return result, following
+
+
+async def project_tasks(core: Any, project_id: str) -> list[dict[str, Any]]:
+    """Every active task of one project, at most PROJECT_PAGES pages; ACTION_NOT_ALLOWED beyond them, since a
+    partial read cannot say which tasks have sub-tasks."""
+    result: list[dict[str, Any]] = []
+    cursor = ""
+    for _ in range(PROJECT_PAGES):
+        page, cursor = await tasks(core, cursor=cursor, project_id=project_id)
+        result.extend(page)
+        if not cursor:
+            return result
+    raise PlusError("ACTION_NOT_ALLOWED")
+
+
+async def active_ids(core: Any, ids: list[str]) -> set[str]:
+    """Which of at most 200 task IDs are still active: one read of 200, at most PROJECT_PAGES if Todoist pages it."""
+    if not ids:
+        return set()
+    found: set[str] = set()
+    cursor = ""
+    for _ in range(PROJECT_PAGES):
+        page, cursor = await tasks(core, cursor=cursor, ids=",".join(ids))
+        found.update(str(task["id"]) for task in page)
+        if not cursor:
+            return found & set(ids)
+    raise PlusError("UNAVAILABLE")
+
+
+async def projects(core: Any) -> list[dict[str, Any]]:
+    """The account's projects, one page of at most 200."""
+    value = await call(core, "/api/v1/projects?" + urlencode({"limit": 200}))
+    result = value.get("results")
+    if not isinstance(result, list):
+        raise PlusError("UNAVAILABLE")
+    return result
 
 
 async def task(core: Any, task_id: str) -> dict[str, Any]:
@@ -187,10 +230,16 @@ async def closed_as(core: Any, task_id: str) -> str | None:
     return plan.COMPLETED if newest["event_type"] == "completed" else plan.DELETED
 
 
-async def commands(core: Any, commands: list[dict[str, Any]]) -> dict[str, Any]:
+async def commands(core: Any, commands: list[dict[str, Any]], *, gone_ok: bool = False) -> dict[str, Any]:
+    """One Sync request; every command must answer "ok". ``gone_ok`` (deletions only) also takes Todoist's
+    ITEM_NOT_FOUND, which its documentation calls not retryable: the task is gone, whoever deleted it."""
     response = await call(core, "/api/v1/sync", {"commands": commands, "resource_types": []})
     status = response.get("sync_status", {})
-    if any(status.get(command["uuid"]) != "ok" for command in commands):
+
+    def done(answer: Any) -> bool:
+        return answer == "ok" or (gone_ok and isinstance(answer, dict) and answer.get("error_tag") == "ITEM_NOT_FOUND")
+
+    if not all(done(status.get(command["uuid"])) for command in commands):
         # Partial batches are replayed with the exact command UUIDs; succeeded commands do not run twice.
         raise PlusError("ACTION_NOT_ALLOWED")
     return response

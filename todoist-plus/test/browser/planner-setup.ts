@@ -129,6 +129,20 @@ async function setupPlanner(context: BrowserContext, worker: Worker) {
       // completed.
       dependencies: [] as Record<string, unknown>[],
       deleted: [] as string[],
+      // WeeklyBets as Todofy keeps them (wire JSON), which SetWeeklyBet writes.
+      bets: [] as Record<string, unknown>[],
+      // Todofy's mail, as LookupMailItems answers it (wire JSON), each mail's summary by its ID,
+      // the mail settings and the projects ReadMailSettings lists.
+      mail: [] as Record<string, unknown>[],
+      summaries: {} as Record<string, string>,
+      mailSettings: { categories: [], etag: "mail-0" } as Record<
+        string,
+        unknown
+      >,
+      projects: [
+        { id: "account-inbox", display_name: "Inbox", inbox: true },
+        { id: "work-project", display_name: "Synthetic work" },
+      ],
       // While set, writes wait until a test releases them; failWrite rejects the next one.
       holdWrites: false,
       heldWrites: [] as (() => void)[],
@@ -183,6 +197,7 @@ async function setupPlanner(context: BrowserContext, worker: Worker) {
             ),
             hidden_filter_ids: [],
             dependencies: state.dependencies,
+            weekly_bets: state.bets,
             ...state.review,
           },
         });
@@ -256,6 +271,132 @@ async function setupPlanner(context: BrowserContext, worker: Worker) {
         task.missing_lead = Boolean(body.deadline) && !days;
         task.etag = `${String(task.id)}-2`;
         return json({ task });
+      }
+      if (url.pathname.endsWith("/weeklyBets:setWeeklyBet")) {
+        // As Todofy answers: the saved text is a replay; only this week and the next take a
+        // write, and only from the etag shown.
+        const refuse = (code: number, status: string, reason: string) =>
+          new Response(
+            JSON.stringify({
+              error: {
+                code,
+                status,
+                message: "Synthetic refusal",
+                details: [
+                  {
+                    "@type": "type.googleapis.com/google.rpc.ErrorInfo",
+                    reason,
+                    domain: "todofy.ziyixi.science",
+                  },
+                ],
+              },
+            }),
+            { status: code, headers: { "Content-Type": "application/json" } },
+          );
+        const same = (bet: Record<string, unknown>) =>
+          bet.week_start === body.week_start && bet.area === body.area;
+        const saved = state.bets.find(same) ?? {
+          week_start: body.week_start,
+          area: body.area,
+        };
+        const text = String(body.text ?? "")
+          .replace(/[\p{Cc}\s]+/gu, " ")
+          .trim();
+        if ((saved.text ?? "") === text) return json({ weekly_bet: saved });
+        if (!["2026-10-12", "2026-10-19"].includes(String(body.week_start)))
+          return refuse(400, "FAILED_PRECONDITION", "ACTION_NOT_ALLOWED");
+        if ((body.etag ?? "") !== (saved.etag ?? ""))
+          return refuse(409, "ABORTED", "ETAG_MISMATCH");
+        const bet = {
+          week_start: body.week_start,
+          area: body.area,
+          text,
+          etag: String(Number(saved.etag ?? 0) + 1),
+        };
+        state.bets = [...state.bets.filter((item) => !same(item)), bet];
+        return json({ weekly_bet: bet });
+      }
+      if (url.pathname.endsWith("/mailItems:lookup")) {
+        const ids = (body.task_ids as string[] | undefined) ?? [];
+        return json({
+          items: state.mail.filter((item) =>
+            ids.includes((item.task as { external_id: string }).external_id),
+          ),
+          categories: state.mailSettings.categories,
+          categories_etag: state.mailSettings.etag,
+          destination: state.mailSettings.destination,
+        });
+      }
+      if (url.pathname.endsWith("/mailItems:readMailSummary"))
+        return json({
+          summary: state.summaries[url.searchParams.get("id") ?? ""] ?? "",
+        });
+      if (url.pathname.endsWith("/mailSettings:read"))
+        return json({ ...state.mailSettings, projects: state.projects });
+      if (url.pathname.endsWith("/mailSettings:updateMailSettings")) {
+        const categories = (body.categories as Record<string, unknown>[]) ?? [];
+        state.mailSettings = {
+          categories: categories.map((category, index) => ({
+            id: `category-${index + 1}`,
+            ...category,
+          })),
+          etag: `mail-${Number(String(state.mailSettings.etag).slice(5)) + 1}`,
+          destination: body.destination,
+        };
+        return json(state.mailSettings);
+      }
+      if (url.pathname.endsWith("/mailItems:fileMailItem")) {
+        // As Todofy files: the category's label and priority, and the move, in one write.
+        const task = state.tasks.find((task) => task.id === body.task_id);
+        const category = (
+          state.mailSettings.categories as Record<string, unknown>[]
+        ).find((item) => item.id === body.category_id);
+        const label = [...state.labels, ...state.extraLabels].find(
+          (item) =>
+            item.id ===
+            (category?.label as { external_id: string } | undefined)
+              ?.external_id,
+        );
+        if (!task || !category || !label || task.etag !== body.etag)
+          return new Response(
+            JSON.stringify({
+              error: { status: "ABORTED", message: "Synthetic task changed" },
+            }),
+            { status: 409, headers: { "Content-Type": "application/json" } },
+          );
+        task.labels = [...((task.labels as string[]) ?? []), label.label];
+        task.priority = 5 - Number(String(category.priority).slice(1));
+        task.project_id = (
+          state.mailSettings.destination as { external_id: string }
+        ).external_id;
+        task.etag = `${String(task.id)}-2`;
+        return json({ task });
+      }
+      if (url.pathname.endsWith("/mailItems:deleteMailItems")) {
+        // Todofy's own check on a fresh read: only untouched mail goes.
+        const ids = body.task_ids as string[];
+        const mail = new Set(
+          state.mail.map(
+            (item) => (item.task as { external_id: string }).external_id,
+          ),
+        );
+        const deleted = state.tasks
+          .filter(
+            (task) =>
+              ids.includes(String(task.id)) &&
+              mail.has(String(task.id)) &&
+              !((task.labels as string[] | undefined) ?? []).length &&
+              (task.priority ?? 1) === 1 &&
+              !task.due,
+          )
+          .map((task) => String(task.id));
+        state.tasks = state.tasks.filter(
+          (task) => !deleted.includes(String(task.id)),
+        );
+        return json({
+          deleted_task_ids: deleted,
+          kept_task_ids: ids.filter((id) => !deleted.includes(id)),
+        });
       }
       if (url.pathname.endsWith("/tasks:completeTask")) {
         state.tasks = state.tasks.filter((task) => task.id !== body.task_id);

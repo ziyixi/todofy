@@ -8,7 +8,7 @@ import {
 import { afterEach, expect, it, vi } from "vitest";
 import { App } from "../src/App";
 import { unplannedDue } from "../src/deadlines";
-import { effectiveArea, taskAncestors, topLevelBets } from "../src/domain";
+import { effectiveArea, taskAncestors } from "../src/domain";
 import {
   outcomeArea,
   outcomeForTask,
@@ -46,7 +46,6 @@ afterEach(() => {
 const labels = [
   "office",
   "home",
-  "bets",
   "quarter",
   "candiate",
   "focus",
@@ -81,7 +80,6 @@ function dataset(total: number): PlanningTask[] {
         parentId: "",
         area: n % 3 === 2 ? "unassigned" : n % 2 ? "personal" : "work",
         stage,
-        bet: stage === "committed" && n < 2,
       });
       for (let step = 0; step < 4; step++)
         tasks.push({
@@ -91,7 +89,6 @@ function dataset(total: number): PlanningTask[] {
           parentId: id,
           area: "unassigned",
           stage: "none",
-          bet: false,
         });
     }
   for (let n = 0; tasks.length < total; n++)
@@ -102,7 +99,6 @@ function dataset(total: number): PlanningTask[] {
       parentId: n % 4 === 3 ? `other-${n - 1}` : "",
       area: (["unassigned", "work", "personal"] as const)[n % 3]!,
       stage: "none",
-      bet: false,
     });
   return tasks;
 }
@@ -118,13 +114,11 @@ function counted(tasks: PlanningTask[]) {
   return { list, reads };
 }
 /**
- * What one Plan render derives: goals, the Review board's lanes (Start now and Waiting too) and
- * cards, Week cards, a goal search, Week's runway line and the weekly review's lines; and Focus's
- * quiet deadline line.
+ * What one Plan render derives from the tasks: the Review board's lanes (Start now and Waiting
+ * too) and cards, Week cards, Week's runway line and the weekly review's lines; and Focus's quiet
+ * deadline line. The Bets are text and read no task.
  */
 function planRender(tasks: PlanningTask[]) {
-  for (const area of ["work", "personal", "unassigned"] as const)
-    topLevelBets(tasks, area);
   const outcomes = planningOutcomes(tasks, labels);
   boardLanes({ tasks, managedLabels: labels, dependencies: [] }, "2026-10-13");
   unplannedDue(tasks, [], "2026-10-13");

@@ -1,5 +1,5 @@
 """retention.tick in real workerd: bounded deletes of expired rows, imported and
-recent rows kept, and mail_events never touched."""
+recent rows kept, and mail_events and summaries never touched."""
 
 from tests.runtime.reports_support import NOW, Probe, clean_fixture, probe_fixture  # noqa: F401
 
@@ -59,8 +59,10 @@ def test_expired_rows_go_and_everything_else_stays(probe):
 
     assert probe.call("/retention/tick", now=NOW)["more"] is False
 
+    # Summaries are the Mailbox's mail: never deleted by age (the owner deletes mail).
     assert [row["event_id"] for row in probe.sql("SELECT event_id FROM summaries ORDER BY event_id")] == [
         "imported",
+        "old",
         "recent",
     ]
     assert [row["day"] for row in probe.sql("SELECT day FROM daily_reports")] == ["2026-09-01"]

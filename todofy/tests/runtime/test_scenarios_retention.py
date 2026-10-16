@@ -1,4 +1,4 @@
-"""Daily retention (v2 plan §5.3): expired rows go, boundary rows, imported summaries and the ledger stay."""
+"""Daily retention (v2 plan §5.3): expired rows go, boundary rows, every summary and the ledger stay."""
 
 import time
 import uuid
@@ -55,7 +55,8 @@ def test_first_sweep_removes_only_expired_rows(worker: Worker) -> None:
         return rows if rows[0]["a"] == 1 else None
 
     [row] = wait_until(swept, 30, "retention sweep")
-    assert set(row["s"].split(",")) == {ids["recent"], ids["imported"]}
+    # Summaries are the Mailbox's mail: never deleted by age.
+    assert set(row["s"].split(",")) == {ids["old"], ids["recent"], ids["imported"]}
     assert (row["r"], row["o"], row["a"], row["e"]) == (1, "recent", 1, 1)
     assert set(row["t"].split(",")) == {ids["forever"], ids["later"]}
     assert worker.owner.get(f"/api/v1/legacyTexts/{ids['gone']}").status_code == 404

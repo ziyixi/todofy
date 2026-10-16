@@ -4,6 +4,7 @@ Could you please provide a concise and comprehensive summary of the given email?
 	IMPORTANT: Try to follow markdown formatting as much as possible.
 	IMPORTANT: Please use chinese as response language.
 	IMPORTANT: Please try to be concise to 1-2 sentences.
+	IMPORTANT: Start with one plain sentence of at most 40 Chinese characters on its own line, saying what this email is and what it asks of me, if anything. No markdown or greeting on that line.
 	IMPORTANT: Avoid showing # symbol in the summary.
 
 	The email content you are to summarize is as follows:

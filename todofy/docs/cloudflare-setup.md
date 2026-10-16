@@ -290,9 +290,17 @@ finished early on a Sunday is not repeated at 10:00 the same day. While a backup
 30 at most) mail processing waits and owner writes answer 503; webhooks are still accepted.
 
 Rows that D1 retention deletes (legacy text by `expires_at` or `TODOFY_LEGACY_TEXT_RETENTION_DAYS`,
-summaries and reports after 90 days, owner actions after 180) stay in the backups made before the deletion until those
+reports after 90 days, owner actions after 180; since 2026-10 no summary, which only the owner deletes) stay in the backups made before the deletion until those
 rotate out: about 6 weeks while backups succeed, longer while they fail. A restore brings such rows back;
-the next daily retention tick deletes the ones whose time has passed again.
+the next daily retention tick deletes the ones whose time has passed again. The same holds for the summaries
+the owner's Delete all removes (todoist-plus.md, "Mailbox"); a restore brings those back too.
+
+Summaries are the one table that now only grows by itself: about 100 rows a day of a few KB (the subject, a
+summary of up to 64 KiB, usually 1-3 KB, and the brief) is roughly 40-70 MB a year in the database's 500 MB,
+which it shares with `mail_events` and the rest. Delete all deletes the summaries of the mail it deletes;
+mail filed or deleted in Todoist itself keeps its row. Watch the database size in the dashboard once a year;
+the unused partial index `summaries_expiring` (the old 90-day sweep's) still costs one index write a row,
+and a later migration may drop it.
 
 Cost, estimated rather than measured: a backup reads every row of every table once (about 250k D1 rows
 after a year of mail, out of the account's 5M a day shared with Mail Hero, plus one read per legacy text

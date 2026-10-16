@@ -11,6 +11,7 @@ from tests.fakes.todoist_fake import TodoistFake
 from tests.runtime.harness import Worker, mail_event, transitions
 from todofy.core.contract import parse_mail_event
 from todofy.core.gemini_wire import BEGIN, END
+from todofy.core.mailbox import brief_of
 from todofy.core.prompts import SUMMARY_EMAIL
 from todofy.core.render import content_notice
 
@@ -38,6 +39,9 @@ def test_summary_sends_the_go_prompt_and_fences_the_mail(
     assert (call.model, call.system, call.response_schema) == ("model-a", SUMMARY_EMAIL, None)
     assert call.user.index(f"\n{BEGIN}\n") < call.user.index(text) < call.user.rindex(f"\n{END}")
     assert (event["error_code"], event["crash_count"]) == (None, 0)
+    # The Mailbox's brief is the summary's first line, stored with it (no model call of its own).
+    [row] = worker.d1(f"SELECT summary, brief FROM summaries WHERE event_id = '{event_id}'")
+    assert row["brief"] == brief_of(row["summary"]) and row["brief"].startswith("合成摘要（model-a）")
     usage = worker.overview()["gemini"]
     assert usage["call_count"] >= 1 and usage["used_tokens"] > 0 and usage["models"] == ["model-a", "model-b"]
 

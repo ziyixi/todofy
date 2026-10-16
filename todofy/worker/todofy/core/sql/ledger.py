@@ -53,10 +53,10 @@ TRANSITION = Query(
     " WHERE source_id = ? AND event_id = ? AND version = ? AND changes() = 1",
     "sqlite_autoindex_mail_events_1",
 )
-# Runs right after TRANSITION (changes() is its insert).
+# Runs right after TRANSITION (changes() is its insert). brief: the summary's first line (core/mailbox.brief_of).
 COMPLETE_SUMMARY = Query(
-    "INSERT INTO summaries (event_id, created_at, subject, summary, model, task_id)"
-    " SELECT event_id, ?, ?, ?, ?, ? FROM mail_events"
+    "INSERT INTO summaries (event_id, created_at, subject, summary, model, task_id, brief)"
+    " SELECT event_id, ?, ?, ?, ?, ?, ? FROM mail_events"
     " WHERE source_id = ? AND event_id = ? AND version = ? AND state = 'complete' AND changes() = 1"
     " ON CONFLICT (event_id) DO NOTHING",
     "sqlite_autoindex_mail_events_1",

@@ -112,9 +112,12 @@ keeps Access, Origin and CSRF; extension authentication does not grant access to
 Todofy reaches FlowDay's restricted `FocusEntrypoint` by a same-account service binding. A confirmed
 Todoist close precedes FlowDay settlement, with a stable request identity across a lost response.
 
-The first mapping confirmation enables weekly rollover in the existing coordinator. Previous-week
-Bets are cleared; unfinished previous-week commitments return to weekly candidates. Counts remain
-soft limits. Native labels/filters remain available without the extension, and their UI is hidden only
+The first mapping confirmation enables weekly rollover in the existing coordinator. Unfinished
+previous-week commitments return to weekly candidates (and the retired Bets label leaves the tasks that
+still carry it). The weekly Work and Personal Bets are text in Todofy's D1 planning store, kept per week
+and never reset. The Mailbox page lists the mail tasks still to clarify from Todofy's own ledger and
+summaries, files one by an owner category (a label, a priority and a move, in one Todoist write) and can
+permanently delete the untouched ones, with their summaries. Counts remain soft limits. Native labels/filters remain available without the extension, and their UI is hidden only
 where a connected replacement is present. See the [extension guide](../todoist-plus/README.md).
 
 ## Home

@@ -126,15 +126,29 @@ class Stack:
         self.core.plus_next_tick = 0
         asyncio.run(self.runtime.plus_week.tick(self.core))
 
+    def bind_retired_bets(self) -> None:
+        """The saved setup as one confirmed before the Bets became text: it also binds the bets role."""
+        [saved] = self.d1.db.execute("SELECT mapping FROM plus_settings WHERE id = 1").fetchone()
+        labels = [*json.loads(saved)["labels"], {"role": "bets", "id": "id-bets", "label": "bets"}]
+        mapping = {"etag": self.runtime.plus.fingerprint([labels, TIMEZONE]), "labels": labels}
+        self.d1.db.execute("UPDATE plus_settings SET mapping = ? WHERE id = 1", (json.dumps(mapping),))
+        self.d1.db.commit()
+
 
 @pytest.fixture
 def stack(monkeypatch: pytest.MonkeyPatch) -> Iterator[Stack]:
     with stubbed_pyodide(monkeypatch) as stubs:
+        from todofy.core import plus
         from todofy.runtime import plus_api, plus_receipts, plus_week
         from todofy.runtime import plus_todoist as todoist
 
         runtime = types.SimpleNamespace(
-            plus_api=plus_api, plus_receipts=plus_receipts, plus_week=plus_week, todoist=todoist, clock=stubs["clock"]
+            plus=plus,
+            plus_api=plus_api,
+            plus_receipts=plus_receipts,
+            plus_week=plus_week,
+            todoist=todoist,
+            clock=stubs["clock"],
         )
         stack = Stack(runtime, monkeypatch)
         stack.at("2026-10-14T09:00:00")  # Wednesday
@@ -150,29 +164,59 @@ def stack(monkeypatch: pytest.MonkeyPatch) -> Iterator[Stack]:
 def test_sunday_choices_survive_monday_while_earlier_commitments_roll(stack: Stack) -> None:
     stack.at("2026-10-18T20:00:00")  # Sunday evening
     assert stack.set_plan("fresh", stage="committed")["task"]["stage"] == "committed"
-    assert stack.set_plan("goal", bet=True)["task"]["bet"] is True
     stack.scan()
     stack.tick()  # Sunday's page scans remember every marked task under the ending week
-    assert stack.d1.weeks() == {"weekday": (WEEK, 1, 0), "fresh": (NEXT, 1, 0), "goal": (NEXT, 0, 1)}
-    assert stack.plan()["next_week_task_ids"] == ["fresh", "goal"]
+    assert stack.d1.weeks() == {"weekday": (WEEK, 1, 0), "fresh": (NEXT, 1, 0)}
+    assert stack.plan()["next_week_task_ids"] == ["fresh"]
     stack.at("2026-10-19T00:00:00")  # Monday 00:00
     stack.tick()
     assert stack.todoist.labels_of("weekday") == ["focus", "office"]
     assert stack.todoist.labels_of("fresh") == ["committed", "home"]
-    assert stack.todoist.labels_of("goal") == ["bets", "home"]
-    # A week later they reset like any other commitment and Bet.
+    # A week later it resets like any other commitment.
     stack.at("2026-10-21T09:00:00")
     stack.scan()
     stack.at("2026-10-26T00:01:00")
     stack.tick()
     assert stack.todoist.labels_of("fresh") == ["focus", "home"]
+
+
+def test_a_new_setup_neither_writes_nor_resets_the_retired_bets_label(stack: Stack) -> None:
+    stack.todoist.tasks["goal"]["labels"] = ["bets", "home"]
+    stack.at("2026-10-18T20:00:00")
+    stack.todoist.calls.clear()
+    assert stack.set_plan("goal", bet=True) == {"error": "BAD_REQUEST"}
+    assert "sync" not in stack.todoist.calls
+    assert stack.d1.weeks() == {"weekday": (WEEK, 1, 0)}  # nothing remembers the label without a binding
+    stack.at("2026-10-19T00:05:00")
+    stack.tick()
+    assert stack.todoist.labels_of("goal") == ["bets", "home"]
+
+
+def test_a_setup_that_still_binds_bets_removes_the_label_at_mondays_reset(stack: Stack) -> None:
+    """Old @bets tasks are not converted: the existing reset removes the label, and nothing writes it again."""
+    stack.bind_retired_bets()
+    stack.todoist.tasks["goal"]["labels"] = ["bets", "home"]
+    # Renaming the retired label in Todoist leaves the binding as saved, so Plus stays enabled.
+    stack.todoist.labels = [
+        {**label, "name": "old goals"} if label["id"] == "id-bets" else label for label in stack.todoist.labels
+    ]
+    assert stack.plan()["enabled"] is True
+    stack.todoist.labels = [{"id": "id-" + role, "name": role} for role in LABELS]
+    stack.scan()
+    assert stack.d1.weeks()["goal"] == (WEEK, 0, 1)
+    stack.at("2026-10-18T20:00:00")
+    assert stack.set_plan("goal", bet=False) == {"error": "BAD_REQUEST"}
+    stack.at("2026-10-19T00:05:00")
+    stack.tick()
     assert stack.todoist.labels_of("goal") == ["home"]
 
 
-def test_a_sunday_bet_on_an_unfinished_commitment_keeps_both_of_its_marks(stack: Stack) -> None:
+def test_a_sunday_commitment_of_a_task_still_labelled_bets_keeps_both_marks(stack: Stack) -> None:
     """One membership row per task: the documented rule, not a guess about which mark was meant."""
+    stack.bind_retired_bets()
+    stack.todoist.tasks["weekday"]["labels"] = ["bets", "committed", "office"]
     stack.at("2026-10-18T20:00:00")
-    stack.set_plan("weekday", bet=True)
+    stack.set_plan("weekday", stage="committed")
     stack.at("2026-10-19T00:05:00")
     stack.tick()
     assert stack.todoist.labels_of("weekday") == ["bets", "committed", "office"]
@@ -204,15 +248,15 @@ def test_a_sunday_commit_whose_confirming_read_fails_is_still_kept(stack: Stack)
 
 def test_a_kept_choice_removed_again_on_sunday_resets_on_monday(stack: Stack) -> None:
     stack.at("2026-10-18T20:00:00")
-    stack.set_plan("goal", bet=True)
-    stack.set_plan("goal", bet=False)
+    stack.set_plan("fresh", stage="committed")
+    stack.set_plan("fresh", stage="weekly")
     assert "next_week_task_ids" not in stack.plan()  # the wire profile omits an empty list
-    # The owner adds the Bet again in native Todoist; the page scan remembers it under the ending week.
-    stack.todoist.tasks["goal"]["labels"] = ["bets", "home"]
+    # The owner commits it again in native Todoist; the page scan remembers it under the ending week.
+    stack.todoist.tasks["fresh"]["labels"] = ["committed", "home"]
     stack.scan()
     stack.at("2026-10-19T00:05:00")
     stack.tick()
-    assert stack.todoist.labels_of("goal") == ["home"]
+    assert stack.todoist.labels_of("fresh") == ["focus", "home"]
 
 
 def test_monday_reset_touches_no_task_without_marks(stack: Stack) -> None:

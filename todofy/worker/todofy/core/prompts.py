@@ -1,7 +1,9 @@
-"""The three Gemini prompts, byte-for-byte from the Go service.
+"""The Gemini prompts: three byte-for-byte from the Go service but for one line, and the brief backfill's.
 
 The summary prompts are utils/consts.go @ 6c46ed4; the recommendation prompt is the
-owner-approved uncommitted 2026-09-05 revision of that file.
+owner-approved uncommitted 2026-09-05 revision of that file. SUMMARY_EMAIL's brief line
+(the summary's first line is the Mailbox's one-sentence brief) was added on purpose in
+2026-10; the Go service never sent it.
 
 The leading tabs come from indented Go raw strings and are kept on purpose:
 tests/unit/golden holds the exact bytes the old service sent.
@@ -21,9 +23,22 @@ SUMMARY_EMAIL = (
     "\tIMPORTANT: Try to follow markdown formatting as much as possible.\n"
     "\tIMPORTANT: Please use chinese as response language.\n"
     "\tIMPORTANT: Please try to be concise to 1-2 sentences.\n"
+    # Added 2026-10 on purpose, not from Go: the Mailbox brief (core/mailbox.brief_of reads that first line).
+    "\tIMPORTANT: Start with one plain sentence of at most 40 Chinese characters on its own line, saying what this "
+    "email is and what it asks of me, if anything. No markdown or greeting on that line.\n"
     "\tIMPORTANT: Avoid showing # symbol in the summary.\n"
     "\n"
     "\tThe email content you are to summarize is as follows:"
+)
+
+# The one-time brief backfill (runtime/mail_briefs.py): one sentence for a mail summarised before SUMMARY_EMAIL
+# asked for it, from its stored subject and summary (fenced as untrusted, like every model input).
+BRIEF_EMAIL = (
+    "Below is the subject and the summary of an email I received. Write one plain sentence of at most 40 Chinese "
+    "characters, saying what this email is and what it asks of me, if anything.\n"
+    "\n"
+    "IMPORTANT: Reply with that one sentence only: no markdown, greeting, quotes or line breaks.\n"
+    "IMPORTANT: Please use chinese as response language.\n"
 )
 
 SUMMARY_RANGE = (

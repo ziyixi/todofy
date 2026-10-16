@@ -1,8 +1,14 @@
 import { holds } from "../src/dependencies";
+import { BetNotSaved, betText, weeklyBet, withBets } from "../src/bets";
+import { addDays } from "../src/domain";
+import { apiPriority } from "../src/mail";
 import { STAGE_ROLES } from "../src/planning-outcomes";
 import type {
   FocusState,
   FlowDayPlan,
+  MailCategories,
+  MailItem,
+  MailProject,
   PlanMetadata,
   PlanState,
   PlanningTask,
@@ -20,7 +26,6 @@ const task = (
   labels: [],
   area: "work",
   stage: "none",
-  bet: false,
   priority: 1,
   deadline: "",
   due: "",
@@ -37,7 +42,6 @@ export function createPrototype(
   const roles = [
     "office",
     "home",
-    "bets",
     "committed",
     "focus",
     "candiate",
@@ -70,10 +74,24 @@ export function createPrototype(
     reviewTaskId: "weekly-review",
     nextWeekTaskIds: [],
     dependencies: [],
+    // This week's Work Bet; the Personal one is empty, so last week's is offered to keep.
+    weeklyBets: [
+      {
+        weekStart: "2026-10-05",
+        area: "personal",
+        text: "A quiet, unhurried weekend",
+        etag: "1",
+      },
+      {
+        weekStart: "2026-10-12",
+        area: "work",
+        text: "Get the website refresh ready for review",
+        etag: "2",
+      },
+    ],
     tasks: [
       task("release", "Ship the small website refresh", {
         stage: "committed",
-        bet: true,
         deadline: "2026-10-23",
         leadDays: 7,
       }),
@@ -106,7 +124,6 @@ export function createPrototype(
       task("desk", "Make the home desk comfortable", {
         stage: "committed",
         area: "personal",
-        bet: true,
       }),
       task("measure", "Measure the desk for a new lamp", {
         parentId: "desk",
@@ -157,7 +174,6 @@ export function createPrototype(
   if (fullBoard) {
     plan.tasks = plan.tasks.map((item) => ({
       ...item,
-      bet: false,
       priority: item.id === "release" ? 4 : item.priority,
       parentId:
         item.id === "release"
@@ -169,9 +185,8 @@ export function createPrototype(
       ...(item.id === "venue" ? { deadline: "2026-10-22" } : {}),
     }));
     plan.tasks.push(
-      task("work-goal", "Make the next release easy to use", { bet: true }),
+      task("work-goal", "Make the next release easy to use"),
       task("personal-goal", "Create more room for a quiet weekend", {
-        bet: true,
         area: "personal",
       }),
       task("quarter-idea", "Simplify the research workspace", {
@@ -233,6 +248,40 @@ export function createPrototype(
       }),
     );
   }
+  // Todofy's mail: each mail task Mail Hero created, by task ID, and its summary by mail ID
+  // (synthetic text only).
+  const mail = new Map<string, MailItem>(
+    [
+      {
+        id: "event-register",
+        taskId: "mail-register",
+        brief: "Registration is open; the early price ends Oct 20.",
+        receivedAt: "2026-10-13T16:20:00Z",
+        hasSummary: true,
+      },
+      {
+        id: "event-notes",
+        taskId: "mail-notes",
+        brief: "Friday's shared notes were updated; add your part.",
+        receivedAt: "2026-10-12T09:05:00Z",
+        hasSummary: true,
+      },
+    ].map((item) => [item.taskId, item]),
+  );
+  const summaries: Record<string, string> = {
+    "event-register":
+      "Registration is open; the early price ends Oct 20.\n\n**Details**\n- The early price is 30% lower\n- Add dietary needs on the form",
+    "event-notes": "Friday's shared notes were updated; add your part.",
+  };
+  let mailSettings: MailCategories = {
+    categories: [],
+    etag: "mail-0",
+    destination: "",
+  };
+  const projects: MailProject[] = [
+    { id: "synthetic-inbox", name: "Inbox", inbox: true },
+    { id: "synthetic", name: "Synthetic projects", inbox: false },
+  ];
   let focus: FocusState = {
     date: today,
     timerEtag: "fixture",
@@ -311,6 +360,19 @@ export function createPrototype(
         ),
       };
       return structuredClone(plan.tasks.find((task) => task.id === item.id)!);
+    },
+    async setWeeklyBet(next) {
+      // As Todofy answers SetWeeklyBet: the saved text is a replay, only this week and the next
+      // take a write, and only from the etag shown.
+      const text = betText(next.text);
+      const saved = weeklyBet(plan.weeklyBets, next.weekStart, next.area);
+      if (saved.text === text) return structuredClone(saved);
+      if (![plan.week, addDays(plan.week, 7)].includes(next.weekStart))
+        throw new BetNotSaved("ended");
+      if (next.etag !== saved.etag) throw new BetNotSaved("changed");
+      const bet = { ...saved, text, etag: String(Number(saved.etag || 0) + 1) };
+      plan = { ...plan, weeklyBets: withBets(plan.weeklyBets, [bet]) };
+      return structuredClone(bet);
     },
     async updateLabels(labels, etag) {
       if (etag !== plan.etag) throw new Error("Synthetic mapping changed");
@@ -493,6 +555,96 @@ export function createPrototype(
               },
       };
       return { timerEtag: focus.timerEtag, timer: focus.timer };
+    },
+    async lookupMail(taskIds) {
+      const items = taskIds.flatMap((id) => mail.get(id) ?? []);
+      return structuredClone({ items, ...mailSettings });
+    },
+    async readMailSummary(id) {
+      return summaries[id] ?? "";
+    },
+    async readMailSettings() {
+      return structuredClone({ ...mailSettings, projects });
+    },
+    async updateMailSettings(categories, destination, etag) {
+      // As Todofy answers: the saved settings are a replay; a category keeps its ID by its pair.
+      const same =
+        destination === mailSettings.destination &&
+        JSON.stringify(categories) ===
+          JSON.stringify(
+            mailSettings.categories.map(({ labelId, priority }) => ({
+              labelId,
+              priority,
+            })),
+          );
+      if (same) return structuredClone(mailSettings);
+      if (etag !== mailSettings.etag)
+        throw new Error("Synthetic categories changed");
+      mailSettings = {
+        categories: categories.map((category) => ({
+          ...category,
+          id:
+            mailSettings.categories.find(
+              (saved) =>
+                saved.labelId === category.labelId &&
+                saved.priority === category.priority,
+            )?.id ?? crypto.randomUUID(),
+        })),
+        destination,
+        etag: crypto.randomUUID(),
+      };
+      return structuredClone(mailSettings);
+    },
+    async fileMail(item, category, etag) {
+      if (etag !== mailSettings.etag)
+        throw new Error("Synthetic categories changed");
+      const label = plan.availableLabels.find(
+        (choice) => choice.id === category.labelId,
+      )?.label;
+      if (!label) throw new Error("Synthetic label gone");
+      // The category's label; an area label replaces the other area label.
+      const areas = { office: "work", home: "personal" } as const;
+      const area = areas[label as keyof typeof areas];
+      plan = {
+        ...plan,
+        tasks: plan.tasks.map((task) =>
+          task.id === item.id
+            ? {
+                ...task,
+                labels: [
+                  ...task.labels.filter(
+                    (name) => !(area && name in areas) && name !== label,
+                  ),
+                  label,
+                ],
+                area: area ?? task.area,
+                priority: apiPriority(category.priority),
+                projectId: mailSettings.destination,
+              }
+            : task,
+        ),
+      };
+      return structuredClone(plan.tasks.find((task) => task.id === item.id)!);
+    },
+    async deleteMail(taskIds) {
+      // Todofy's own check on its fresh read: only untouched mail tasks go.
+      const deletable = (task: PlanningTask) =>
+        mail.has(task.id) &&
+        !task.labels.length &&
+        task.priority === 1 &&
+        !task.due &&
+        !task.deadline;
+      const deleted = plan.tasks
+        .filter((task) => taskIds.includes(task.id) && deletable(task))
+        .map((task) => task.id);
+      plan = {
+        ...plan,
+        tasks: plan.tasks.filter((task) => !deleted.includes(task.id)),
+      };
+      return {
+        deletedTaskIds: deleted,
+        keptTaskIds: taskIds.filter((id) => !deleted.includes(id)),
+      };
     },
   };
 }

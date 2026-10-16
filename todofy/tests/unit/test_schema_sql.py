@@ -346,9 +346,13 @@ def test_query_uses_its_index(db, name):
         return
     partial = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE sql LIKE '%INDEX%WHERE%'")}
     assert any(re.search(rf"\bINDEX {index}\b", step) for step in plan), plan
+    # Rows from one bound JSON array (the Mailbox's task IDs, at most 200): the scan reads only that value.
+    bound = {match for match in re.findall(r"FROM json_each\(\?\) AS (\w+)", sql)}
     for step in plan:
         used = re.search(r"INDEX (\w+)", step)
-        bounded = used is not None and used.group(1) in partial
+        bounded = (used is not None and used.group(1) in partial) or any(
+            step.startswith(f"SCAN {alias} VIRTUAL TABLE") for alias in bound
+        )
         # A SCAN reads a whole table or index (not the one constant row of a SELECT without
         # FROM, nor json_each over one bound JSON text, an IN list of the caller's values).
         # source_id is a constant, so a search on it alone does too, unless LIMIT stops an

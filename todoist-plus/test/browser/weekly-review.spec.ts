@@ -60,9 +60,8 @@ test("the review task's link opens the checklist; ticks survive a reload and onl
     await expect(review.locator("li").first()).toContainText(
       "Mail to clarify1",
     );
-    await expect(
-      review.getByRole("link", { name: /Open in Todoist/u }),
-    ).toHaveAttribute("href", "https://app.todoist.com/app/project/mail");
+    // The mail line opens Plus's Mailbox, not the native project (checked at the end).
+    await expect(review.getByRole("link")).toHaveCount(0);
     await inbox.check();
     await page.reload();
     await expect(
@@ -100,6 +99,16 @@ test("the review task's link opens the checklist; ticks survive a reload and onl
         body: { task_id: "review", request_id: expect.any(String) },
       },
     ]);
+    await page
+      .getByRole("region", { name: "Weekly review" })
+      .locator("li")
+      .first()
+      .getByRole("button", { name: "Open" })
+      .click();
+    await expect(page).toHaveURL(/todoist-plus=mailbox/u);
+    await expect(
+      page.getByRole("heading", { name: "Mail", level: 1 }),
+    ).toBeFocused();
   } finally {
     await context.close();
   }
@@ -153,7 +162,9 @@ test("keyboard focus stays in the review after its actions, and Sunday's keep wr
       review.getByRole("checkbox", { name: "Reviewed: Someday" }),
     ).toBeFocused();
     // Sunday: keeping this week's commitment resends it; focus moves to the line's toggle.
-    await review.getByRole("button", { name: "Choose what stays (1)" }).click();
+    await review
+      .getByRole("button", { name: "Choose commitments to keep (1)" })
+      .click();
     await review
       .getByRole("button", {
         name: "Keep for next week: Synthetic weekly outcome",

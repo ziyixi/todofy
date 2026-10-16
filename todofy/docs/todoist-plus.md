@@ -35,8 +35,11 @@ quick-task and parked views are not replaced. A query joins the set only with th
 requires every task to be shown by the extension's rule, stated in API fields.
 Every Plan answer (ReadPlan, ConfirmPlanMapping, UpdatePlanLabels) also carries the weekly review's IDs:
 the mail project (`TODOIST_DEFAULT_PROJECT_ID`), the newest review task the GTD ledger created for this or
-the previous ISO week (`gtd_reviews`, open or not) and at most 100 tasks already recorded for next week.
-They cost one D1 batch per Plan answer, never one per task page or write.
+the previous ISO week (`gtd_reviews`, open or not) and at most 100 tasks already recorded for next week,
+and the [weekly Bets](#weekly-bets) of the previous, this and the next account week (`weekly_bets`, at most
+six), besides every [dependency](#dependencies). They cost one D1 batch per Plan answer (five statements: the
+dependencies' one scan and the Bets by primary key among them), never one per task page or write; the BASIC
+view of a native page reads none of them.
 `ListPlanningTasks` returns bounded active pages with the canonical Todoist task ID, labels, parent,
 scheduled date, true deadline, optional estimate, Todoist's last change (`update_time`, whole seconds,
 from the same page's `updated_at`) and derived planning state. Counts require every page.
@@ -54,6 +57,9 @@ The date-driven candidate view uses scheduled date, or deadline when no schedule
 Lead windows retain the existing filter's exclusive upper boundary; `lead_1m` remains 30 days.
 One Todoist duration day is 480 estimated work minutes, matching FlowDay. Unknown estimates are absent.
 
+SetTaskPlan no longer takes `bet`: the weekly Bets are text now, so a request that sets it (an extension
+build from before) is refused with `BAD_REQUEST` and writes nothing.
+
 Append-steps creates at most 20 explicitly entered children. Each write freezes its command bytes
 and stable Todoist Sync UUID before sending ([receipts](#receipts)). A repeated request ID must carry the
 same input. Successful receipts are replayed; a lost upstream response resends the same commands.
@@ -65,23 +71,152 @@ advance the recurring task again. A stale timer etag is refreshed once with a ne
 The extension cannot call settlement itself. Its other FlowDay writes are queue order, estimates
 and normal timer actions. Local/pseudo tasks retain their FlowDay identity and owner link.
 
+## Weekly Bets
+
+The week's Work and Personal Bets are one line of the owner's own text each, per account week, in the
+planning store (`plan_notes`, kind `bets`, period = the account-local Monday, area `work` or `personal`),
+tied to no task and never written to Todoist (owner decision of 2026-10-16). `SetWeeklyBet`
+(`POST /api/plus/v1/weeklyBets:setWeeklyBet`, `{week_start, area, text, etag}`) is the one write:
+
+- `core/plan.py` `bet_text` stores one line: each run of whitespace or control characters becomes one space,
+  trimmed; empty means no Bet. Above 160 UTF-16 code units (the extension's `maxlength` counts the same
+  units, so an emoji outside the BMP takes two) or with a lone surrogate it is `BAD_REQUEST`, as are an
+  area other than `work`/`personal` and a `week_start` that is not a `YYYY-MM-DD` date.
+- One D1 batch reads `plus_settings` (a confirmed setup, else `ACTION_NOT_ALLOWED`) and the row. The text
+  already saved answers the saved Bet, whatever the etag and the day, so a resend after a lost answer, even
+  across Sunday midnight, is safe without a request ID or a receipt; clearing a week that has none writes
+  nothing either.
+- Otherwise only this account week and the next one take a write (`core/plan.py` `bet_writable`, from the
+  confirmed timezone, so a Bet needs no finished Monday reset: it is no label), else `ACTION_NOT_ALLOWED`;
+  and only from the etag shown (the row's `rev`, empty while it has none), else `ETAG_MISMATCH`.
+- The write is one upsert whose update applies only at that rev (`SAVE_BET`, `RETURNING`), so a writer that
+  slips in between is refused too. Clearing keeps the row with an empty body and the next rev: a deleted
+  row coming back at rev 1 would let an old tab's etag overwrite it unseen.
+
+It makes no Todoist call (not even a metadata Sync), keeps no receipt and logs nothing of the text;
+`MAINTENANCE_MODE` and the backup lease hold it like every Plus write. The rows are never deleted
+(about 104 a year) and travel in the weekly backup with the rest of `plan_notes`.
+
+The weekly Bets replaced the Bets label. A setup confirmed before keeps its `bets` binding exactly as saved
+(`core/plus.py` `LEGACY_ROLES`): it is never checked against Todoist, so renaming or deleting `@bets` changes
+no etag and never disables Plus, and `UpdatePlanLabels` keeps it. A new setup neither needs nor binds a
+`bets` label. Old `@bets` tasks are not converted: while the binding remains, page scans and writes still
+remember a task carrying the label, and the Monday reset still removes it, as before; the date-driven
+Candidate If fallback still leaves such a task out. `@bets` stays in `REPLACED_FILTER_QUERIES`, now hidden
+without checking any binding. `PlanningTask.bet` and `SetTaskPlanRequest.bet` are deprecated, not removed.
+
+## Mailbox
+
+The extension's Mailbox lists the mail Todofy turned into tasks that is still to clarify (owner design of
+2026-10-16). A mail item is a completed Mail Hero event's `summaries` row: its ID is the event ID, its task
+`summaries.task_id`, read through the partial index `summaries_task` (`task_id <> '' AND imported = 0`, which
+every Mailbox query repeats), so the imported archive is never listed. Since 2026-10 the daily retention
+deletes no summary (owner decision; it used to delete the delivered ones after 90 days): a summary is the
+Mailbox's mail, and only the owner deletes mail. Delete all is the owner's way to: the mail it deletes loses
+its `summaries` row (subject, summary and brief), and `mail_events`, the ledger of IDs and states, keeps its
+row. A mail task deleted in Todoist itself keeps its summary. The six RPCs (`runtime/plus_mail.py`, under
+`plus_lock` like every Plus call):
+
+- `LookupMailItems` (`POST /api/plus/v1/mailItems:lookup`, at most 200 task IDs; none answers the categories
+  alone): one D1 batch, no Todoist call. A read sent as POST for its body, it goes on in maintenance like the
+  GET reads (the gateway's `POST_READS`, the core's `READ_METHODS`). It answers the IDs Todofy knows as mail with each one's brief and
+  receive time (the ledger row's `created_at`), whether its summary is there, and the categories with their
+  etag and the destination. Other tasks of the mail project are left out; the extension counts them.
+- `ReadMailSummary` (`GET /api/plus/v1/mailItems:readMailSummary?id=`): one primary-key read of the full
+  summary, plain text the extension never interprets; empty when there is none.
+- `ReadMailSettings` (`GET /api/plus/v1/mailSettings:read`): the categories, their etag, the destination and
+  the projects to choose it from (one `GET /api/v1/projects` page: the Inbox first, then the active projects,
+  never the mail project; names are passed on, never stored).
+- `UpdateMailSettings` (`POST /api/plus/v1/mailSettings:updateMailSettings`): at most four categories, each
+  one current label (any but a planning stage's, the retired Bets', a lead window's or `active`; the two area
+  labels may) and a priority P1-P4, no pair twice, and one destination (required; no default). The saved
+  settings sent again answer as saved, whatever the etag (no request ID, no receipt); otherwise a stale etag
+  is `ETAG_MISMATCH` and a label or project gone is `ACTION_NOT_ALLOWED`. One D1 batch replaces the set:
+  `plan_categories` rows of scheme `mail` (a pair kept keeps its ID; a removed one is archived, never
+  deleted, so an ID is never reused) and the Todoist adapter's document `plan_settings` `todoist.mail`
+  (each category's label ID and name, and the destination's project ID). The name is generated from the
+  label and the priority (`office · P2`); the extension shows the area labels by their domain names.
+- `FileMailItem` (`POST /api/plus/v1/mailItems:fileMailItem`, `{task_id, etag, category_id, categories_etag,
+  request_id}`): one Todoist write under a [receipt](#receipts). It syncs the labels first, checks the
+  categories etag, that the destination is still an active project (one `GET /api/v1/projects` page; one
+  archived or deleted since it was chosen is `ACTION_NOT_ALLOWED`, and the extension opens the categories),
+  the task's etag and that the task is still a top-level task of the mail project, then freezes two commands
+  in one Sync: `item_update` (every label the task has plus the category's; an area label replaces the other
+  area label; priority `5 - P`) and `item_move` to the destination. A label gone is `ACTION_NOT_ALLOWED`:
+  Plus never creates a label. It answers the task read again. A repeat of a started receipt reads the task
+  first: once it has left the mail project the filing is done (the receipt finishes, nothing is sent);
+  otherwise the frozen commands go again only if the task, the category's label and the destination as they
+  are now build the same commands. A label renamed since (the plan etag covers only the role labels) or one
+  the owner added is `ETAG_MISMATCH`, so a retry never writes a name Todoist no longer has, which Todoist
+  would create, nor drops the owner's label; the extension's next choice is a new request.
+- `DeleteMailItems` (`POST /api/plus/v1/mailItems:deleteMailItems`, 1-200 task IDs and a request ID): a
+  permanent deletion of exactly the tasks the owner saw listed and left untouched. Todofy reads the mail
+  project again (at most five pages, else `ACTION_NOT_ALLOWED`) and keeps every task that is not an active
+  top-level mail task of the project with no label, priority P4, no due date, deadline or duration, no
+  sub-task, a comment count of 0 (an absent count keeps it), no dependency edge in the planning store and no
+  unfinished Plus write: a started receipt of the last 30 days whose commands name it (`plus_receipts.writing`,
+  a `json_each` over the started rows by the partial index `plus_receipts_started`; a started deletion does
+  not count), since its label, step or move may not be in Todoist yet. The deletable ones become
+  `item_delete` commands frozen in the receipt before any is sent, at most 100 a Sync; a deletion's
+  `ITEM_NOT_FOUND` counts as done (a dedicated `gone_ok` path, deletions only). A repeat of a started
+  receipt reads the frozen tasks again with the same checks and resends only the commands of those still
+  deletable, with their frozen UUIDs: a mail the owner labelled, commented on, dated, re-prioritised, moved
+  or gave a step to since the first try stays (Todoist would delete a new step with its parent). No ID is
+  ever added, so the batch first chosen bounds every deletion, and none is deleted twice. One confirming
+  read (`GET /api/v1/tasks?ids=`, the tasks sent and those the project read did not find) must find none of
+  those sent, else `UNAVAILABLE` and the same request finishes the rest. A listed task found nowhere is gone
+  already (deleted in Todoist, or by an earlier request whose answer was lost and whose confirmation the
+  owner then closed) and counts as deleted, as `ITEM_NOT_FOUND` does; one moved to another project is kept.
+  Then one D1 statement (`FORGET`) deletes the `summaries` rows of the deleted mail, before the receipt
+  finishes, so a repeat after a failure deletes them too. The receipt keeps only the indexes of the kept
+  tasks. The extension checks again, just before it sends and before each Try again, what Todofy cannot
+  see: a FlowDay estimate or day queue, the running timer and a write on its way.
+
+The receipts keep IDs only; logs carry method, counts and codes, never a subject, brief or summary.
+
+### Briefs
+
+Each row's second line is a one-sentence brief. `SUMMARY_EMAIL` has one deliberate line since 2026-10 (the
+rest is still the Go service's bytes, pinned by `tests/unit/golden/prompt_summary_email.txt`): the summary
+starts with one plain sentence of at most 40 Chinese characters on its own line. `core/mailbox.brief_of`, a
+pure function, reads it from the first 600 characters of any summary: the first line that is not blank, the
+truncation notice, an old description header or rule, or a heading-like line, without markdown, cut at its
+first sentence, at most 60 characters. It is the same call to the same models, with no JSON mode. Migration
+`0008_mail_briefs.sql` adds `summaries.brief`: a completed summary stores its brief there (`COMPLETE_SUMMARY`,
+empty when none is found); NULL means never derived, and a lookup then derives it from the summary at read
+time.
+
+The mail summarised before that line existed gets a model-written brief once (`runtime/mail_briefs.py`): the
+alarm, only when the ledger had no work, reads the mail project once Plus is set up, queues each mail in the
+Mailbox whose brief is NULL (the object's SQLite `mail_brief_queue`), and then asks the model for one mail
+per alarm (`prompts.BRIEF_EMAIL`, the stored subject and the summary's first 4,000 characters, fenced as
+untrusted like every model input). The answer goes through `brief_of` and is stored only over a NULL. Each
+call reserves its tokens against `GEMINI_DAILY_TOKEN_BUDGET`, and the backfill stops for the UTC day once it
+would take the day past half the budget, leaving the rest to new mail. Its calls are 30 seconds apart
+(`mail_briefs.PACE`; `MAIL_BRIEFS_PACE_MS` shortens it in tests), two a minute, so a large backlog stays
+under Gemini's per-minute limit, which new mail shares. Each attempt is counted before its call, so one that
+throws (the model's transport, or the D1 save after it) counts like one that fails: a mail tried three times
+keeps its read-time brief. Once the queue is empty the job is done and never runs again; a step that throws
+is tried again ten minutes later. `PROCESSING_PAUSED`, `MAINTENANCE_MODE` and the backup lease hold it like
+the ledger. Losing the object's SQLite only collects again, which finds what is still NULL.
+
 ## Weekly rollover and controls
 
 Rollover is disabled until mapping confirmation. The existing ten-minute cron observes planning marks;
 after Monday 00:00 in the confirmed Todoist timezone, it processes up to five remembered old-week tasks
-per invocation. Unfinished old commitments become weekly candidates; old Bets are removed without
-changing their candidate stage. Unrelated labels, task content, dates and history remain intact. A
+per invocation. Unfinished old commitments become weekly candidates; while a setup still binds the retired
+Bets label, it is removed from old tasks without changing their candidate stage. Unrelated labels, task content, dates and history remain intact. A
 remembered task with no mark left to reset gets no Todoist write, and one deleted in Todoist is
 forgotten, including while its reset waits to be retried.
 New-week extension decisions wait for the old batch to finish and replace the remembered membership,
 so an old reset cannot clear those decisions. Repeating setup also settles an ended week first.
 
-A commitment or Bet chosen on Sunday is a choice for the next week. On the last day of the week in the
-account timezone, a SetTaskPlan that sets `stage = committed` or `bet = true` records the task under the
-next week's Monday, so the coming reset leaves its marks in place; the reset a week later treats it like
-any other commitment. A task has one membership row, so both of its marks stay: an unfinished commitment
-made next week's Bet on Sunday stays committed, and a Bet committed on Sunday stays a Bet. Only Plus writes
-choose; a mark added in native Todoist on Sunday resets as usual, and so does an unfinished commitment made
+A commitment chosen on Sunday is a choice for the next week. On the last day of the week in the
+account timezone, a SetTaskPlan that sets `stage = committed` records the task under the next week's
+Monday, so the coming reset leaves its marks in place; the reset a week later treats it like any other
+commitment. A task has one membership row, so all of its marks stay: a task still labelled Bets that is
+committed on Sunday keeps the label for that week too. Next week's Bets are text, written in Sunday's
+weekly review with `SetWeeklyBet` ([weekly Bets](#weekly-bets)). Only Plus writes choose; a mark added in native Todoist on Sunday resets as usual, and so does an unfinished commitment made
 earlier in the week. The membership is recorded from the labels just written, right after the Sync write,
 so a failed confirming read cannot leave the choice to a page scan. If the Sync answer itself is lost,
 the extension's weekly review still lists the task as not kept, with "Keep for next week".
@@ -90,7 +225,7 @@ While the task keeps a mark, its row never moves back to an older week (`REMEMBE
 ten-minute page scan nor an unrelated write that day can undo the choice, although both update its marks.
 A Plus write that leaves a task with neither mark forgets its row: Monday has nothing to reset, a choice
 kept earlier that Sunday is undone, and a mark added again that day resets on Monday as usual. Choosing the stage a task already shows changes no label, so "Keep for next week" in the
-extension's weekly review, which sends the commitment or Bet again, never drops another horizon label.
+extension's weekly review, which sends the commitment again, never drops another horizon label.
 The extension sends only the fields the owner changed, so editing a committed task's area on Sunday does
 not keep it by accident. Extension builds before this rule always send the stage from task details: reload
 the extension before the first Sunday after the backend is released.
@@ -205,15 +340,19 @@ content; Todoist stays the task store. `plan_settings` holds three JSON document
 the week in effect, the Todoist binding), `plan_tasks` Todofy's task IDs with their `(provider,
 external_id)` reference (never deleted, IDs never reused), `plan_marks` week marks, `plan_edges`
 dependencies, `plan_notes` the owner's text per period and `plan_categories` the Mailbox triage
-categories; `summaries` gains `category_id` and `triaged_at`. Only [dependencies](#dependencies) write
-them so far (`plan_tasks` and `plan_edges`): the migration is additive, so a code rollback leaves them idle. Never run its down DDL in production (dropping
+categories; `summaries` gains `category_id` and `triaged_at` (unused so far: a filing's result is in Todoist).
+[Dependencies](#dependencies) (`plan_tasks` and `plan_edges`), the weekly Bets (`plan_notes` kind `bets`,
+[weekly Bets](#weekly-bets)) and the [Mailbox](#mailbox)'s categories (`plan_categories`, `plan_settings`
+`todoist.mail`) are its writers so far; `plan_marks` is not read or written yet. The
+migration is additive, so a code rollback leaves them idle (the release before ignores the Bets' rows). Never run its down DDL in production (dropping
 the columns rewrites every summaries row). The vocabularies and limits the CHECKs leave open are in
 `core/plan.py`; only `runtime/plan_store.py` touches the tables. No retention deletes their rows.
 
 The Mailbox's index `summaries_task` is partial on `task_id <> '' AND imported = 0`: building it writes an
 entry only for mail Mail Hero delivered, not for the imported archive (whose size was not counted before
-the release), and the Mailbox's queries will repeat both terms, so the Mailbox (a later step) never lists
-imported mail.
+the release), and the Mailbox's queries repeat both terms, so the Mailbox never lists imported mail.
+Migration `0008_mail_briefs.sql` adds `summaries.brief` ([Briefs](#briefs)); a backup from before it
+restores its mail with a NULL brief, which the read derives.
 
 The weekly backup carries all six tables, `plan_tasks` last. What keeps the task IDs of a backup's marks and
 edges in its `plan_tasks` is the backup's lease, which holds Plus writes and the ticks for the whole job; the
@@ -312,8 +451,9 @@ CSRF, bounded proxy and frozen settlement behavior. `tests/runtime/test_plus.py`
 gateway, Python Durable Object and D1 against synthetic Todoist Sync/REST responses, including lost
 responses, recurring completion, week rollover (Sunday choices kept, earlier commitments reset, scans
 unable to move a choice back) and shared pause/auth controls. The gateway CPU suite
-includes full 200-task Plus and FlowDay-proxy pages and a FULL Plan with 500 labels and 300 dependencies, which
-the gateway reads and writes again (0.8 ms first, 0.4-0.7 ms warm on 2026-10-16). Production and browser acceptance are recorded
+includes full 200-task Plus and FlowDay-proxy pages, a FULL Plan with 500 labels, 300 dependencies and six Bets,
+which the gateway reads and writes again (first runs 0.5-0.9 ms, warm medians 0.7 ms on 2026-10-16), and the
+Mailbox's two largest answers. Production and browser acceptance are recorded
 separately in the extension's verification document; a local test result is not production evidence.
 
 Dependencies: `tests/unit/test_plus_dependencies.py` runs the cycle and limit rules (a done dependency closing no
@@ -324,6 +464,36 @@ and `tests/runtime/test_plus_dependencies.py` the same paths through the gateway
 workerd: no Sync command, `plan_edges` by Todofy IDs, a recurring prerequisite's counter and its restart, a done
 dependency giving way, settling from the activity log, a 403 (released) or 503 log. The PlusFake answers `ids`
 lookups and the activity log.
+
+The weekly Bets have their own: `tests/unit/test_plus_bets.py` runs `bet_text` (whitespace, control characters,
+an emoji ZWJ sequence, 160 UTF-16 code units, a lone surrogate), the writable weeks across the Sunday
+midnight, and SetWeeklyBet and `weekly_bets` through `plus_api.handle` on host CPython (create, change,
+clear at the next rev, a stale etag refused, the saved text as a replay without a write, an ended week, a
+setup that is missing, bad areas and dates, maintenance and the backup lease, no Todoist call and no receipt);
+`test_plus.py` and `test_plus_rollover.py` the retired Bets label (refused, kept as saved through a rename,
+still reset on Monday while bound, neither written nor reset for a new setup); `tests/runtime/test_plus.py`
+the same write in workerd through the gateway with the extension token (D1 rows, no upstream call). The
+runtime Plus suite binds the retired label in its saved setup, as the owner's production setup does.
+
+The Mailbox has its own, synthetic mail only: `tests/unit/test_mailbox.py` (`brief_of` on new and old
+summaries, notices, headers, heading-like lines, English mail, length and empty answers; the generated names,
+kept IDs and etag of the categories; the membership, filing and untouched rules), `test_plus_mailbox.py` (the
+six RPCs through `plus_api.handle` on host CPython: D1-only reads, settings replayed by value and refused when
+a label or project is gone, one Sync for a filing under a receipt, a lost answer finished by the same request,
+a partial filing finished, a retry refused after a label rename or a label added, no move into a project
+archived since; Delete all's every keep rule, a repeat that reads the frozen tasks again and keeps one the
+owner labelled, commented on, re-prioritised, dated, moved or gave a step to since the first try, a mail an
+unfinished Plus write is changing, a mail already gone counted as deleted, the deleted mail's summaries
+gone with their ledger rows kept, the bounds, maintenance, and no mail text in the logs or receipts),
+`test_plus_receipts.py` (`writing`: the commands it names, the window, a started deletion and its index),
+`test_mail_briefs.py` (the backfill's collection, one mail per step, the budget share, the pace between calls,
+failures, a step that keeps throwing given up after three attempts, a postponed step, logs with counts only)
+and `tests/runtime/test_plus_mailbox.py` (the same in workerd through the gateway, with the backfill run once
+from the alarm, a Todoist 429 before a retry, and the unfinished-write guard over the object's own SQLite);
+`test_prompts.py` pins the prompt's one deliberate line and `test_reports_retention.py` and
+`test_scenarios_retention.py` keep every summary the owner did not delete. The gateway's `test/plus.test.ts`
+answers the POST lookup in maintenance and refuses a deletion, and its CPU suite measures the 200-item lookup
+and the 64 KiB summary read, both passed through unread.
 
 The planning store and the object's caches and receipts have their own tests, synthetic data only:
 `tests/unit/test_plan_store.py` (0007's CHECKs, the partial Mailbox index's plan, `VerifyPlanStore`'s counts)

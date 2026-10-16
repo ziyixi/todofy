@@ -6,9 +6,11 @@ import {
   type Connection,
   type KnownTaskStore,
 } from "./api";
+import { BetNotSaved } from "./bets";
 import {
   PLANNING_PROTOCOL,
   type BackgroundMessage,
+  type NotSaved,
   type Result,
 } from "./messages";
 import { planConfig } from "./domain";
@@ -145,6 +147,14 @@ export function registerBackground() {
             return client.loadDays(...message.args);
           case "updateTask":
             return client.updateTask(...message.args);
+          case "setWeeklyBet":
+            // A refusal crosses to the page as a value: an Error would arrive as text only.
+            try {
+              return await client.setWeeklyBet(...message.args);
+            } catch (error) {
+              if (!(error instanceof BetNotSaved)) throw error;
+              return { notSaved: error.reason } satisfies NotSaved;
+            }
           case "updateLabels": {
             const plan = await client.updateLabels(...message.args);
             rememberPlan(client, plan);
@@ -170,6 +180,18 @@ export function registerBackground() {
             return client.updateEstimate(...message.args);
           case "timer":
             return client.timer(...message.args);
+          case "lookupMail":
+            return client.lookupMail(...message.args);
+          case "readMailSummary":
+            return client.readMailSummary(...message.args);
+          case "readMailSettings":
+            return client.readMailSettings(...message.args);
+          case "updateMailSettings":
+            return client.updateMailSettings(...message.args);
+          case "fileMail":
+            return client.fileMail(...message.args);
+          case "deleteMail":
+            return client.deleteMail(...message.args);
           default:
             throw new Error("Unsupported extension operation.");
         }

@@ -380,7 +380,7 @@ it("keeps a step another tab added to a shown day when a step is removed from it
   ]);
 });
 
-it("keeps a pending card's details and weekly goal read-only until its drag settles", async () => {
+it("keeps a pending card's details read-only until its drag settles, and the Bets editable", async () => {
   const actions = createPrototype();
   const writes = hold(actions, "updateTask");
   await mountPlan(actions);
@@ -389,21 +389,14 @@ it("keeps a pending card's details and weekly goal read-only until its drag sett
   )!;
   await drop({ task: release }, { stage: "weekly" });
   const goals = within(screen.getByRole("region", { name: "Weekly goals" }));
-  // Its etag is the one from before the drag, so these writes would be refused.
+  // A Bet is text tied to no task, so a pending drag holds none of its writes.
   expect(
     (
       goals.getByRole("button", {
-        name: "Remove weekly goal: Ship the small website refresh",
+        name: /^Edit work goal:/u,
       }) as HTMLButtonElement
     ).disabled,
-  ).toBe(true);
-  expect(
-    (
-      goals.getAllByRole("button", {
-        name: "Change goal",
-      })[0] as HTMLButtonElement
-    ).disabled,
-  ).toBe(true);
+  ).toBe(false);
   fireEvent.click(
     screen.getByRole("button", {
       name: "Ship the small website refresh, No priority, Updating…",

@@ -433,7 +433,6 @@ it("returns the confirmed lead task and label plan instead of requiring a full r
       labels: [],
       area: "work",
       stage: "weekly",
-      bet: false,
       priority: 1,
       deadline: "",
       due: "",

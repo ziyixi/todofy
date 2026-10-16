@@ -1,13 +1,13 @@
-import type { Language } from "./model";
+import type { BetArea, Language } from "./model";
 const en = {
   plan: "Plan",
   focus: "Focus",
+  mailbox: "Mail",
   work: "Work",
   personal: "Personal",
   unassigned: "Unassigned",
   assignArea:
     "Choose Work or Personal in task details to include these in your weekly limits.",
-  bets: "Bets",
   quarterly: "This quarter",
   boardLabels: "Planning labels",
   committed: "Committed",
@@ -64,8 +64,6 @@ const en = {
   setup: "Confirm your labels in Todofy before making changes.",
   retry: "Try again",
   lastError: "Couldn’t save. Your change has not been confirmed.",
-  bet: "Make this a bet",
-  unbet: "Remove bet",
   planned: "planned",
   native: "Keep editing dates, descriptions and projects in Todoist.",
   add: "Add",
@@ -98,16 +96,16 @@ const en = {
   removedDoneDependencies: "Removed the done dependencies",
   weeklyReview: "Weekly review",
   sundayRule:
-    "Commitments and goals chosen in Plus on Sunday stay for next week, with both marks of that task; the rest reset on Monday as usual.",
+    "Commitments chosen in Plus on Sunday stay for next week; the rest reset on Monday as usual. Goals are saved for each week and never cleared.",
 };
 const zh: typeof en = {
   plan: "计划",
   focus: "专注",
+  mailbox: "邮件",
   work: "工作",
   personal: "生活",
   unassigned: "未分类",
   assignArea: "在任务详情中选择工作或生活后，计入对应的每周数量。",
-  bets: "本周目标",
   quarterly: "本季度待选",
   boardLabels: "计划标签",
   committed: "本周承诺",
@@ -163,8 +161,6 @@ const zh: typeof en = {
   setup: "先在 Todofy 确认标签对应关系，再调整任务。",
   retry: "重试",
   lastError: "未确认保存成功，请重试。",
-  bet: "设为本周目标",
-  unbet: "取消本周目标",
   planned: "已安排",
   native: "日期、描述和项目继续在 Todoist 中编辑。",
   add: "添加",
@@ -197,8 +193,182 @@ const zh: typeof en = {
   removedDoneDependencies: "已移除已完成的依赖",
   weeklyReview: "周回顾",
   sundayRule:
-    "在 Plus 中周日选的承诺和目标会留到下周，该任务的承诺和目标标记都保留；其余的周一照常重置。",
+    "在 Plus 中周日选的承诺会留到下周，其余的周一照常重置。目标按周保存，不会被清除。",
 };
 export function words(language: Language): typeof en {
   return language === "zh" ? zh : en;
 }
+
+/**
+ * The copy of one Bet line: `week` is "this" for the Plan's own week, "next" for the line that
+ * Sunday's weekly review writes.
+ */
+export function betWords(
+  language: Language,
+  area: BetArea,
+  week: "this" | "next",
+) {
+  const next = week === "next";
+  if (language === "zh") {
+    const name = area === "work" ? "工作" : "生活";
+    return {
+      empty: next ? `写下周的${name}目标` : `写下这周的${name}目标`,
+      label: next ? `下周${name}目标` : `本周${name}目标`,
+      edit: (text: string) => `编辑${next ? "下周" : ""}${name}目标：${text}`,
+      placeholder: next ? "下周最想推进的一件事" : "这周最想推进的一件事",
+      hint: "回车保存 · Esc 取消",
+      left: (count: number) => ` · 还可输入 ${count} 字`,
+      previous: (text: string) => `上周：${text}`,
+      keep: "沿用",
+      keepName: (text: string) => `沿用上周的${name}目标：${text}`,
+      changed:
+        "这条目标已在别处改过。再按回车会用你的文字替换它；按 Esc 查看最新内容。",
+      ended: "这一周已经结束，没有保存。",
+      saved: `已保存${next ? "下周" : ""}${name}目标`,
+      cleared: `已清空${next ? "下周" : ""}${name}目标`,
+      kept: `已沿用上周的${name}目标`,
+    };
+  }
+  const name = area === "work" ? "work" : "personal";
+  const title = area === "work" ? "Work" : "Personal";
+  return {
+    empty: next
+      ? `Write next week's ${name} goal`
+      : `Write this week's ${name} goal`,
+    label: next ? `Next week's ${name} goal` : `This week's ${name} goal`,
+    edit: (text: string) =>
+      `Edit ${next ? "next week's " : ""}${name} goal: ${text}`,
+    placeholder: next
+      ? "The one thing to move forward next week"
+      : "The one thing to move forward this week",
+    hint: "Enter to save · Esc to cancel",
+    left: (count: number) =>
+      ` · ${count} ${count === 1 ? "character" : "characters"} left`,
+    previous: (text: string) => `Last week: ${text}`,
+    keep: "Keep",
+    keepName: (text: string) => `Keep last week's ${name} goal: ${text}`,
+    changed:
+      "This goal was changed elsewhere. Press Enter again to replace it with your text, or Esc to see the latest.",
+    ended: "That week has ended, so this wasn't saved.",
+    saved: `${next ? "Next week's " + name : title} goal saved`,
+    cleared: `${next ? "Next week's " + name : title} goal cleared`,
+    kept: `Kept last week's ${name} goal`,
+  };
+}
+/** One Bet line's copy (betWords). */
+export type BetWords = ReturnType<typeof betWords>;
+
+/** The Mailbox's copy: the page, a row's File menu, Delete all and the Mail categories dialog. */
+export function mailWords(language: Language) {
+  if (language === "zh")
+    return {
+      count: (n: number) => `${n} 封`,
+      deleteAll: "全部删除",
+      categories: "邮件归类",
+      hint: "按 Tab 归类，回车展开",
+      loading: "正在读取邮件…",
+      empty: "邮件都处理完了",
+      noProject: "Todofy 没有设置邮件项目",
+      failed: "暂时读不到邮件。",
+      others: (n: number) => `邮件项目里还有 ${n} 个其他任务`,
+      file: "归入",
+      fileName: (title: string) => `归入：${title}`,
+      setUp: "设置归类",
+      setUpMenu: "设置归类…",
+      filed: (name: string, title: string) => `已归入「${name}」：${title}`,
+      received: (time: string) => `${time} 收到`,
+      summaryLoading: "正在读取摘要…",
+      summaryGone: "原始摘要已不可用。",
+      summaryFailed: "暂时读不到摘要。",
+      confirmTitle: (n: number) => `删除 ${n} 封邮件？`,
+      confirmBody: (n: number) =>
+        `Todoist 中这 ${n} 个任务会被永久删除，无法撤销。`,
+      confirmKept: (titles: string[]) =>
+        `有改动或已排进计划的 ${titles.length} 封会保留：${titles.slice(0, 3).join("、")}${titles.length > 3 ? ` 等 ${titles.length} 封` : ""}。`,
+      confirmLimit: "一次最多 200 封：先删最早的 200 封，其余留在列表里。",
+      deleteN: (n: number) => `删除 ${n} 封`,
+      deleting: "正在删除…",
+      deleteFailed: "未确认删除完成。重试会接着删完剩下的，不会重复删除。",
+      deleted: (n: number) => `已删除 ${n} 封邮件`,
+      deletedSome: (deleted: number, kept: number) =>
+        `已删除 ${deleted} 封；${kept} 封有改动，已保留`,
+      settingsHelp:
+        "每个归类是一个现有 Todoist 标签加一个优先级。归入后，任务移到下面选的项目。",
+      label: "标签",
+      priority: "优先级",
+      chooseLabel: "选择标签",
+      needLabel: "为每个归类选一个标签。",
+      remove: (name: string) => `删除归类：${name}`,
+      add: "添加归类",
+      addLimit: "最多 4 个",
+      destination: "归入后移到",
+      chooseProject: "选择项目",
+      inbox: "收件箱",
+      settingsLoading: "正在读取项目…",
+      settingsFailed: "暂时读不到邮件归类。",
+      duplicate: "已有相同的归类。",
+      labelGone: "这个标签已不存在，请重新选择。",
+      projectGone: "这个项目已不存在，请重新选择。",
+      needDestination: "选择归入后要移到的项目。",
+      saved: "已保存邮件归类",
+    };
+  const emails = (n: number) => `${n} ${n === 1 ? "email" : "emails"}`;
+  return {
+    count: emails,
+    deleteAll: "Delete all",
+    categories: "Mail categories",
+    hint: "Tab to file, Enter to expand",
+    loading: "Loading your mail…",
+    empty: "All caught up",
+    noProject: "Todofy has no mail project",
+    failed: "Couldn't read your mail.",
+    others: (n: number) =>
+      `${n} other ${n === 1 ? "task" : "tasks"} in the mail project`,
+    file: "File",
+    fileName: (title: string) => `File: ${title}`,
+    setUp: "Set up categories",
+    setUpMenu: "Mail categories…",
+    filed: (name: string, title: string) => `Filed as “${name}”: ${title}`,
+    received: (time: string) => `Received ${time}`,
+    summaryLoading: "Loading the summary…",
+    summaryGone: "The full summary is no longer available.",
+    summaryFailed: "Couldn't read the summary.",
+    confirmTitle: (n: number) => `Delete ${emails(n)}?`,
+    confirmBody: (n: number) =>
+      n === 1
+        ? "Its task will be permanently deleted from Todoist. This can't be undone."
+        : `Their ${n} tasks will be permanently deleted from Todoist. This can't be undone.`,
+    confirmKept: (titles: string[]) =>
+      `${titles.length} you've changed or planned ${titles.length === 1 ? "is" : "are"} kept: ${titles.slice(0, 3).join(", ")}${titles.length > 3 ? ` and ${titles.length - 3} more` : ""}.`,
+    confirmLimit:
+      "Up to 200 at a time: the oldest 200 go first; the rest stay listed.",
+    deleteN: (n: number) => `Delete ${n}`,
+    deleting: "Deleting…",
+    deleteFailed:
+      "Couldn't confirm the deletion. Trying again finishes the rest and never deletes twice.",
+    deleted: (n: number) => `Deleted ${emails(n)}`,
+    deletedSome: (deleted: number, kept: number) =>
+      `Deleted ${deleted}; ${kept} had changes and ${kept === 1 ? "was" : "were"} kept`,
+    settingsHelp:
+      "Each category is one existing Todoist label and a priority. Filed mail moves to the project chosen below.",
+    label: "Label",
+    priority: "Priority",
+    chooseLabel: "Choose a label",
+    needLabel: "Choose a label for each category.",
+    remove: (name: string) => `Remove category: ${name}`,
+    add: "Add a category",
+    addLimit: "Up to 4",
+    destination: "Filed mail goes to",
+    chooseProject: "Choose a project",
+    inbox: "Inbox",
+    settingsLoading: "Loading your projects…",
+    settingsFailed: "Couldn't read the mail categories.",
+    duplicate: "That category already exists.",
+    labelGone: "That label no longer exists. Choose another.",
+    projectGone: "That project no longer exists. Choose another.",
+    needDestination: "Choose where filed mail goes.",
+    saved: "Mail categories saved",
+  };
+}
+/** The Mailbox's copy (mailWords). */
+export type MailWords = ReturnType<typeof mailWords>;

@@ -1,9 +1,12 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { ExternalLink, ListChecks, X } from "lucide-react";
-import { displayedTitle, taskIndex, todoistProjectUrl } from "./domain";
+import { ListChecks, X } from "lucide-react";
+import { useAnnouncement } from "./announce";
+import { BET_AREAS, saveBet, weeklyBet } from "./bets";
+import { BetText } from "./BetText";
+import { addDays, displayedTitle, taskIndex } from "./domain";
 import { deadlineStatus } from "./deadlines";
 import { waitingTasks } from "./dependencies";
-import { words } from "./i18n";
+import { betWords, words } from "./i18n";
 import { pendingTask } from "./plan-updates";
 import { LeadSelect } from "./TaskEditor";
 import { weekLabel } from "./PlanningCalendar";
@@ -48,13 +51,16 @@ interface Props {
   onShowWaiting: () => void;
   onShowRunway: () => void;
   completeReview: (task: PlanningTask) => Promise<boolean>;
+  /** Opens Plus's Mailbox, which lists the mail of line 1. */
+  onOpenMailbox?: () => void;
   onClose: () => void;
 }
 
 /**
  * Five weekly review lines with counts and jump targets, and a sixth while deadlines lack a
  * start-ahead choice. It only guides: every write is one of the owner's existing single-task
- * actions, made when clicked. Ticks are kept per ISO week in this browser.
+ * actions, made when clicked, or on Sunday next week's two Bets. Ticks are kept per ISO week in
+ * this browser.
  */
 export function WeeklyReview({
   plan,
@@ -69,6 +75,7 @@ export function WeeklyReview({
   onShowWaiting,
   onShowRunway,
   completeReview,
+  onOpenMailbox,
   onClose,
 }: Props) {
   const text = words(language);
@@ -81,7 +88,7 @@ export function WeeklyReview({
   // The two item lists stay folded until asked for.
   const [shown, setShown] = useState<ReadonlySet<number>>(new Set());
   // What the last action did, read out by screen readers.
-  const [announcement, setAnnouncement] = useState("");
+  const [announcement, setAnnouncement] = useAnnouncement();
   // After an item's action, focus goes to the action now at the same place in that line's list,
   // or to the line itself once none is left, instead of falling back to the page.
   const [focusAt, setFocusAt] = useState<{ line: number; index: number }>();
@@ -104,6 +111,7 @@ export function WeeklyReview({
     (task) => task.stage !== "monthly" && !progress.kept.includes(task.id),
   );
   const sunday = isLastDay(plan.week, today);
+  const nextWeek = addDays(plan.week, 7);
   const chosen = new Set(plan.nextWeekTaskIds);
   const commitments = sunday ? weekChoices(plan) : [];
   const toKeep = commitments.filter((task) => !chosen.has(task.id));
@@ -218,13 +226,9 @@ export function WeeklyReview({
           plan.inboxProjectId ? (
             <>
               <span className="weekly-review-count">{inbox.length}</span>
-              <a
-                className="weekly-review-jump"
-                href={todoistProjectUrl(plan.inboxProjectId)}
-              >
-                {text.open}
-                <ExternalLink size={12} />
-              </a>
+              <button className="weekly-review-jump" onClick={onOpenMailbox}>
+                {zh ? "打开" : "Open"}
+              </button>
             </>
           ) : (
             <span className="weekly-review-note">
@@ -384,15 +388,15 @@ export function WeeklyReview({
         {sunday ? (
           line(
             5,
-            zh ? "下周承诺" : "Next week's commitments",
+            zh ? "下周承诺与目标" : "Next week's commitments and goals",
             <>
               <span className="weekly-review-note">{text.sundayRule}</span>
               {commitments.length > 0 &&
                 toggle(
                   5,
                   zh
-                    ? `选要留到下周的（${toKeep.length}）`
-                    : `Choose what stays (${toKeep.length})`,
+                    ? `选要留到下周的承诺（${toKeep.length}）`
+                    : `Choose commitments to keep (${toKeep.length})`,
                 )}
               {shown.has(5) && (
                 <ul
@@ -415,16 +419,13 @@ export function WeeklyReview({
                             aria-label={`${keep}: ${title}`}
                             onClick={async () => {
                               const index = toKeep.indexOf(task);
-                              // Sends the commitment or Bet again; for a stage the task already
-                              // shows, Todofy changes no label.
+                              // Sends the commitment again; for a stage the task already shows,
+                              // Todofy changes no label.
                               if (
                                 await run(() =>
-                                  actions.updateTask(
-                                    task,
-                                    task.stage === "committed"
-                                      ? { stage: "committed" }
-                                      : { bet: true },
-                                  ),
+                                  actions.updateTask(task, {
+                                    stage: "committed",
+                                  }),
                                 )
                               )
                                 done(5, index, `${kept}: ${title}`);
@@ -438,17 +439,38 @@ export function WeeklyReview({
                   })}
                 </ul>
               )}
+              {/* Next week's Bets, written here only: Monday's "Keep" is the one way to carry one on. */}
+              <ul
+                className="weekly-review-items weekly-review-bets"
+                aria-label={zh ? "下周目标" : "Next week's goals"}
+              >
+                {BET_AREAS.map((area) => (
+                  <li key={area}>
+                    <span className="weekly-review-bet-area">{text[area]}</span>
+                    <BetText
+                      bet={weeklyBet(plan.weeklyBets, nextWeek, area)}
+                      copy={betWords(language, area, "next")}
+                      language={language}
+                      disabled={busy}
+                      save={(bet) => saveBet(run, actions, bet)}
+                      announce={setAnnouncement}
+                    />
+                  </li>
+                ))}
+              </ul>
             </>,
           )
         ) : (
           // Nothing to tick before Sunday: only where the choice will be.
           <li className="weekly-review-later">
             <div className="weekly-review-line">
-              <strong>{zh ? "下周承诺" : "Next week's commitments"}</strong>
+              <strong>
+                {zh ? "下周承诺与目标" : "Next week's commitments and goals"}
+              </strong>
               <span className="weekly-review-note">
                 {zh
-                  ? "周日可在这里选留到下周的承诺和目标"
-                  : "On Sunday, choose here what stays for next week"}
+                  ? "周日可在这里选留到下周的承诺，并写下周目标"
+                  : "On Sunday, choose commitments to keep and write next week's goals here"}
               </span>
             </div>
           </li>

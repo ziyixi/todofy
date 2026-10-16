@@ -817,3 +817,208 @@ dependency ones now also check the notice leaving the board in place, a recurrin
 and long Chinese and English titles at 1600 and 1440 px). The screenshots for the owner's review were retaken
 (Kale, light, synthetic Chinese titles, not in the repository), with the done line's hover action, the notice
 under the lanes and long titles added.
+
+## Text weekly Bets, local checks (October 16)
+
+The first part of the owner-approved October 16 Bets and Mailbox design, on local branch
+`claude/plus-bets-mailbox`, based on `claude/plan-store-m1-m3` (`1a6d23d2`); not pushed, no branch CI, no
+release. All data is synthetic; production D1, the Durable Object, Todoist, FlowDay and the owner's Chrome
+were not touched. The owner's decisions hold: one Work and one Personal line of text per account week (at
+most 160 UTF-16 units), in the planning store and never in Todoist; Enter or an in-page blur saves, Esc
+cancels; an empty line offers last week's with Keep; Sunday's review writes next week's; old `@bets` tasks
+are not converted, and the label and the Bets filter are left alone; no dark mode, no shadow mode.
+
+- Todofy: `SetWeeklyBet` (additive RPC) writes one `plan_notes` row by compare-and-set on its rev, with no
+  Todoist call and no receipt; the saved text answers as a replay; only this and next account week take a
+  write; clearing keeps the row at the next rev. Every FULL Plan answer carries `weekly_bets` for last, this
+  and next week (one more primary-key statement in the review batch). The Bets label is a legacy role: a
+  saved binding is kept as saved and never checked, a new setup binds none, `SetTaskPlan` refuses `bet`, and
+  the Monday reset still removes `@bets` while the binding remains. `PlanningTask.bet` and
+  `SetTaskPlanRequest.bet` are deprecated. The owner page shows no retired role.
+- Extension: the in-place editor (`BetText`), Keep, Sunday's line 5 ("Next week's commitments and goals",
+  commitments only to keep), planning protocol 4 (a refused Bet crosses the message boundary as a value);
+  the goal picker, `topLevelBets` and the task `bet` field are gone. While another write waits, the lines
+  and Keep are only marked `aria-disabled`, so the focus Tab just moved to the other line stays.
+
+Local checks, all passing: Todofy ruff and 1,939 host tests (one existing skip), among them the new
+`test_plus_bets.py` and the reworked retired-label cases in `test_plus.py` and `test_plus_rollover.py`; all
+570 real-workerd runtime cases (three shards of four processes plus the serial `test_alarm.py`), the Plus
+files binding the retired label in their saved setup as production does, with a new SetWeeklyBet case through
+the gateway and the extension token; the gateway's lint, types, unit cases and its runtime CPU suite; both
+production dry-runs, the gateway at 82.7 KiB gzip (budget 86 KiB); the owner UI's types, tests and build
+(177.4 KiB gzip, budget 208 KiB); proto format, lint, api-linter, breaking against `1a6d23d2`, deterministic
+generation, schemas and both codecs (495 TypeScript, 113 Python); `.github/scripts` (453, one existing skip)
+and the cloud tools; the extension's lint, types, 184 unit cases, build and 33 built-MV3 Chromium cases (5
+new: the in-place save, Esc and key isolation from Todoist's document; blur saves and an emptied line
+restores; Keep on hover, focus and Enter, hidden while another write waits; a change from another tab; Sunday's
+next-week line). Headless Chromium keeps every page focused, so "switching windows keeps the draft" is
+covered by the unit cases only.
+
+Screenshots of the real built extension on the synthetic page (Kale light, Chinese) for the owner's review:
+the two lines at rest, editing, an empty line with last week's and Keep, and Sunday's next-week lines. The
+interface document's Review, Week, narrow, wide and weekly review images were retaken from
+`design/production.html`.
+
+Not verified: branch CI, the release, production D1 (the first `plan_notes` rows), the installed extension
+in the owner's Chrome and a real Monday reset after the release. After release: reload the extension, refresh
+Todoist, type this week's two Bets; the first check after Monday 00:00 removes `@bets` from the remaining
+tasks as before.
+
+## Mailbox, briefs and summary retention, local checks (October 16)
+
+The second part of the owner-approved October 16 Bets and Mailbox design, on the same local branch
+`claude/plus-bets-mailbox`; not pushed, no branch CI, no release. All data is synthetic; production D1, the
+Durable Object, Todoist, Gemini, FlowDay, real mail and the owner's Chrome were not touched. The owner's
+decisions hold: a quiet list (title, one muted brief, time), not cards; a sidebar entry 「邮件 / Mail」 under
+Plan and Focus with no count; the mail project's favourite hidden while a Plus page is open; File shown only
+on hover or focus; categories of one existing label and P1-P4 (at most four, names generated) filing in one
+Todoist write to one destination chosen before the first use; a permanent Delete all of the frozen, untouched
+listed mail behind a confirmation with the count, "永久删除，无法撤销" and the focus on Cancel; no dark
+mode, no shadow mode.
+
+- Todofy: six additive RPCs (`LookupMailItems`, `ReadMailSummary`, `ReadMailSettings`, `UpdateMailSettings`,
+  `FileMailItem`, `DeleteMailItems`) in `runtime/plus_mail.py`; the categories in `plan_categories` (scheme
+  `mail`) and the adapter document `plan_settings` `todoist.mail`; filing and deleting under receipts in the
+  object's SQLite, deletions frozen before the first Sync, at most 100 commands a Sync, `ITEM_NOT_FOUND`
+  counted as done for deletions only, a confirming read before the answer. `SUMMARY_EMAIL` gains one line
+  (the summary's first line is a one-sentence brief), `core/mailbox.brief_of` reads it, and migration
+  `0008_mail_briefs.sql` adds `summaries.brief`, stored at completion; `runtime/mail_briefs.py` gives the
+  mail then in the Mailbox without one a model-written brief once, within half of the day's token budget.
+  The daily retention no longer deletes summaries; everything else about retention is unchanged.
+- Extension: the Mailbox page (`Mailbox.tsx`, `MailCategories.tsx`, `mail.ts`, `mailbox.css`), the sidebar
+  entry, `PlanConfig.hiddenProjectIds`, the weekly review's mail line opening the Mailbox, planning protocol 5.
+
+Local checks, all passing: Todofy ruff and 2,031 host tests (one existing skip), among them the new
+`test_mailbox.py`, `test_plus_mailbox.py` and `test_mail_briefs.py`, the prompt's golden bytes and the
+retention cases that keep every summary; all 574 real-workerd runtime cases (three shards of four processes
+plus the serial `test_alarm.py`), with the new `test_plus_mailbox.py` through the gateway and the extension
+token (D1 alone for the reads, one Sync for a filing, a repeated deletion that deletes nothing twice, the
+backfill once from the alarm); the gateway's lint, types, 134 unit cases and its runtime CPU suite; both
+production dry-runs, the gateway at 83.7 KiB gzip (budget 86 KiB) and the core at 215.0 KiB gzip; the owner
+UI's types, 93 tests and build (178.4 KiB gzip, budget 208 KiB); proto format, lint, api-linter (no problems
+in 69 files), breaking against `1a6d23d2` (none), deterministic generation and both codecs (495 TypeScript,
+113 Python); `.github/scripts` (453, one existing skip) and the cloud tools; the extension's lint, types, 208
+unit cases, build and 38 built-MV3 Chromium cases (5 new: the sidebar entry and the favourite, File on hover
+and focus with keyboard filing and key isolation, the plain-text summary, Delete all's confirmation and frozen
+batch, the categories dialog).
+
+Screenshots of the real built extension on the synthetic page (Kale light, Chinese) for the owner's review:
+the sidebar with 邮件, the list at rest, a hovered row, an expanded row, the File menu, the categories dialog
+and the Delete all confirmation, besides the four Bets images retaken from the same build.
+
+Not verified: branch CI, the release, production D1 (`0008`, the first `todoist.mail` document, the brief
+backfill's run), Todoist's real answers for a missing task's `item_delete`, a replayed UUID and an
+`item_update` with an `item_move` in one request, whether its task list carries `note_count` (without it
+Delete all deletes nothing), the real summaries' first lines, and the installed extension in the owner's
+Chrome. Replaced filters stay hidden on native pages too, as before; only the mail project's favourite is
+limited to Plus pages, as the owner decided.
+
+## Mailbox review fixes, local checks (October 16)
+
+The same-day review of the Mailbox and Bets commit, on the same local branch; not pushed, no branch CI, no
+release, synthetic data only. Every finding that held up is fixed with a test:
+
+- Delete all's retry reads the frozen tasks again and resends only those still untouched, with their frozen
+  UUIDs; a mail the owner labelled, commented on, re-prioritised, dated, moved or gave a step to after a
+  failed first try stays, and no task is ever added. Todofy also keeps a mail an unfinished Plus write is
+  changing (`plus_receipts.writing`, a `json_each` over the started receipts in the object's SQLite, by the
+  new partial index `plus_receipts_started`), and counts a listed mail already gone as deleted. Before
+  sending and before each Try again the extension checks what Todofy cannot see (a FlowDay estimate or day
+  queue, the timer, a write on its way): the batch only shrinks, and a new count is shown before anything
+  is sent, under a new request.
+- Delete all deletes the `summaries` rows of the mail it deletes (subject, summary, brief); `mail_events`
+  keeps its rows. This is the suggested default for the owner's 「邮件由 owner 自己删除」 and is listed for the
+  owner's confirmation; nothing else deletes a summary, and their growth is recorded in
+  `todofy/docs/cloudflare-setup.md`.
+- A FileMailItem retry reads the task first: one that left the mail project is done; otherwise the frozen
+  commands go again only if the task, the label and the destination still build them, else `ETAG_MISMATCH`
+  (no label name Todoist no longer has, no label of the owner's dropped). A destination archived or deleted
+  since it was chosen is `ACTION_NOT_ALLOWED`, and the Mailbox then opens the categories.
+- The brief backfill counts each attempt before its call (a step that throws is given up after three) and
+  paces its calls 30 s apart.
+- The gateway answers the POST mail lookup in maintenance like the GET reads; its CPU suite measures the
+  200-item lookup and the 64 KiB summary read (first runs 0.4-1.0 ms, medians 0.6-0.9 ms, passed through).
+- Extension: the status line is always rendered in the space under the header and only its text changes
+  (the list no longer moves between filings; a live region exists before the first write); repeated
+  announcements are read again (`src/announce.ts`); the confirmation's `aria-describedby` names the warning
+  and the kept mail; the Mail categories close on save with focus back on their opener; the Bet hint sits at
+  the end of the column heading's line (the panel keeps its height) and the Bet focus ring is drawn inside;
+  the Mailbox heading has no ring; a row's name drops the brief's closing punctuation and the time is not
+  read twice.
+- Not changed: the docs' "other rows stay usable while one is filed" holds; a built-MV3 case files a second
+  mail while a write is held and finds the other rows' File enabled.
+
+Local checks, all passing: Todofy ruff and 2,048 host tests (one existing skip; 17 new); all 577
+real-workerd runtime cases in three shards plus the serial `test_alarm.py` (3 new: a delete retry after a
+Todoist 429 that keeps the changed mail, the unfinished-write guard over the object's own SQLite, a filing
+retry after a label rename and a filing into an archived project); the gateway's lint, types, 135 unit
+cases and its runtime CPU suite (15 requests); both production dry-runs (gateway 83.7 KiB gzip, budget 86
+KiB; core 216.5 KiB gzip); the owner UI's types, 93 tests and build; proto format, lint, api-linter (no
+problems in 69 files), breaking against `1a6d23d2` (none), deterministic generation and both codecs (495
+TypeScript, 113 Python); `.github/scripts` (453, one existing skip) and the cloud tools; the extension's
+lint, types, 218 unit cases (10 new), build and 39 built-MV3 Chromium cases (1 new, 3 extended). The eleven
+Kale-light screenshots of the built extension were retaken from the same build, and the interface
+document's File-menu image with them (the status line no longer pushes the list down).
+
+Not verified, besides the earlier list: what real Todoist answers for an `item_move` into an archived
+project, and a screen reader's reading of the new live regions (checked only through the DOM).
+
+
+Final branch check, same day, on the code at `2def9657`. Every job that CI's change detection selects against
+`1a6d23d2` (the merge base with `origin/main`) was run locally from the workflow's own steps and passes: the
+Changes job's tests, Todoist Plus (218 unit cases, 39 built-MV3 Chromium cases), Todofy static (2,048 host
+tests, one existing skip; both dry-runs, the gateway at 83.7 KiB gzip) and all three runtime shards (577 cases,
+each exactly once), Proto (breaking against `1a6d23d2`: none), Contracts, and the apps the proto change
+re-checks (Mail Hero, Home, FlowDay, links, watch, mailsort, recall, brief, Fleet, the website and Platform).
+One runtime case in a file this branch does not touch (`test_task_intents.py`) failed once when the harness's
+`wrangler d1 execute` read of the local D1 got a Miniflare internal error; its shard passed when run again,
+as did the file alone. Local gaps: no GPG here, so Mail Hero's crypto round-trip skipped, and Platform's
+Linux-only steps (manifest compiler, AppArmor, image build, k3s) did not run. The manifest's permissions are
+unchanged. On main the change would deploy Todofy (migration `0008_mail_briefs.sql` first) and then publish the
+Todoist Plus extension; nothing else releases. Main has since taken `1a6d23d2` and the dependency feature
+(`6a465bee`), so the branch is rebased onto it before it is pushed and these checks run again there.
+
+## Bets and Mailbox rebased onto the dependencies, local checks (October 16)
+
+The branch's four commits (`02b5b872`, `8559e3c0`, `2def9657`, `999899d9`) are squashed into one and rebased
+onto `origin/main` `6a465bee`, which has the planning store (`1e8e6863`, with the task-modal mount fix) and the
+dependencies; not pushed, no branch CI, no release; synthetic data only. Both features are kept as each was
+built and tested:
+
+- proto: `Plan.dependencies` stays field 14 and `PlanningTask.recurring` and `completed_count` 18-19;
+  `Plan.weekly_bets` is 15, with its own `WeeklyBet` message, and the Bets and Mailbox RPCs follow the
+  dependency RPCs. All of it is additive (breaking against `6a465bee`: none). The generated code was produced
+  again by `proto/tools/ensure.mjs`, never merged by hand.
+- Todofy: the review batch reads the two review weeks, next week, every dependency and the Bets, five
+  statements (`test_plus_cache.py`); the dispatcher serves both method sets (the dependency writes still carry
+  their request ID, SetWeeklyBet and UpdateMailSettings none); `plus_todoist` keeps the dependencies' `active`
+  and `closed_as` reads beside the Mailbox's paged reads and the `gone_ok` Sync; the PlusFake answers an `ids`
+  lookup in one page, as the dependencies expect, and filters a project read for the Mailbox. DeleteMailItems
+  already kept any mail with a dependency either way (`plan_edges` by `plan_tasks` IDs, as the dependencies
+  write them).
+- Extension: task details have the 依赖 section, Plan the Bet lines and the sidebar the Mailbox; the Review
+  board, the weekly review (Waiting counts the tasks that wait for another, the mail line opens the Mailbox,
+  line 5 writes next week's Bets), the browser cases' synthetic page and the design fixture carry both. The
+  mount fix of `1e8e6863` is unchanged. Planning protocol is 5.
+- Changed after the merge, besides the text: a dependency test's task no longer sets the retired `bet` field,
+  the Mailbox test's plan has `dependencies: []`, the gateway CPU suite's largest Plan carries six Bets beside
+  the 300 dependencies (first runs 0.47-0.86 ms, warm medians 0.70-0.71 ms in three isolates), `core/plan.py`
+  takes ruff's blank line, and the PlusFake's `ids` filter on paged reads, unreachable after the one-page
+  lookup, is gone.
+
+Local checks after the rebase, all passing, for every job `.github/scripts/ci_changes.py` selects against
+`6a465bee` (it deploys Todofy and publishes the extension; the proto change re-checks every app that uses the
+IDL): the Changes job's tests (453 `.github/scripts` tests, one existing skip; the cloud-config,
+cloud-release, cloud-bootstrap and service-catalog tests; the generate, catalog and inventory checks; the
+cf-guard, bundle-size and workerd-cpu tools); Proto (format, lint, api-linter with no problems in 69 files,
+breaking against `6a465bee`: none, the rule self-test, deterministic generation of 151 files, the schemas, 495
+TypeScript and 113 Python codec tests); Todofy static (ruff, 2,099 host tests with one existing skip, the
+gateway's lint, types, 135 unit cases and its CPU suite of 16 requests, the owner UI's types, 93 tests and build
+at 178.8 KiB gzip, both production dry-runs with the gateway at 84.2 KiB gzip of 86 KiB) and all 584 runtime
+cases in three shards plus the serial `test_alarm.py`, each exactly once; Todoist Plus (lint, types, 237 unit
+cases, build, 43 built-MV3 Chromium cases, the dependency, Bets and Mailbox ones among them); Contracts; and Mail
+Hero, Home, FlowDay, links, watch, mailsort, recall, brief, Fleet, the website and Platform. Local gaps as
+before: no GPG here, so Mail Hero's crypto round-trip is skipped, and Platform's Linux-only steps (manifest
+compiler, AppArmor, image build, k3s) did not run. The interface images were not retaken: the synthetic page
+has no dependency, so the board and the weekly review look as they did. Not verified: branch CI, the release
+and the owner's review.

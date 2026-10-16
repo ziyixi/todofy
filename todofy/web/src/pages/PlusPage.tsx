@@ -7,6 +7,8 @@ import { CopyButton, PageHeader, Section } from '../components/ui'
 
 const plus = createHttpClient(PlusService, send)
 const columns = [['quarter', 'Quarter'], ['candiate', 'Month'], ['focus', 'Week'], ['committed', 'Committed']] as const
+// A setup confirmed before the Bets became text keeps its retired bets binding as saved; it is not shown.
+const RETIRED_ROLES = new Set(['bets'])
 
 /** Explicit opt-in: opening this page or issuing a token never enables weekly writes. */
 export function PlusPage() {
@@ -47,10 +49,10 @@ export function PlusPage() {
     <div className="stack">
       <Section title="确认现有标签">
         {plan ? <>
-          <p>{plan.labels.map(label => `${label.role} → ${label.label}`).join(' · ')}</p>
+          <p>{plan.labels.filter(label => !RETIRED_ROLES.has(label.role)).map(label => `${label.role} → ${label.label}`).join(' · ')}</p>
           <p>Quarter 标签可选，可在扩展的列设置中绑定现有标签。更换列绑定只改配置，不改已有任务；未绑定 Quarter 时，每周整理照常运行。</p>
           <p>绑定 ID 丢失时，规划写入会暂停，需要人工恢复配置；不会自动采用新建的同名标签。标签改名后，请在此核对并重新确认。</p>
-          <p>时区：{plan.timezone}。每周一 00:00 后的下一次十分钟检查，将上周未完成的承诺移回本周候选，清除上周 Bets；其他标签、日期和任务内容保留。</p>
+          <p>时区：{plan.timezone}。每周一 00:00 后的下一次十分钟检查，将上周未完成的承诺移回本周候选；其他标签、日期和任务内容保留。本周目标是文字，按周保存在 Todofy，不会被重置。</p>
           {plan.missingLabels.length > 0 && <p>缺少标签绑定：{plan.missingLabels.join('、')}。请先在 Todoist 核对标签。</p>}
           <button className="btn btn-primary" disabled={busy || plan.missingLabels.length > 0 || plan.enabled} onClick={() => void work(async () => { await plus.confirmPlanMapping({ etag: plan.etag, requestId: crypto.randomUUID() }); await load() })}>{plan.enabled ? '已启用' : '确认映射并启用每周整理'}</button>
         </> : <p>读取中…</p>}

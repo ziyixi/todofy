@@ -3,6 +3,7 @@
 @import "./planning-board.css";
 @import "./weekly-goals.css";
 @import "./dependencies.css";
+@import "./mailbox.css";
 
 .plus-root.plus-root-plan {
   max-width: 1900px;

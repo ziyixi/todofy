@@ -149,7 +149,7 @@ def test_config_only_mapping_replays_by_value_and_does_not_retag_tasks(account):
     assert json.loads(saved)["labels"] == second_plan["labels"]
     assert [
         row for row in second_plan["labels"] if row["role"] not in replacements and row["role"] != "quarter"
-    ] == old["labels"][:3] + old["labels"][6:]
+    ] == old["labels"][:2] + old["labels"][5:]
 
 
 def test_bound_names_drive_projection_and_preserve_native_dates_and_unrelated_labels(account):
@@ -162,7 +162,8 @@ def test_bound_names_drive_projection_and_preserve_native_dates_and_unrelated_la
     )
     records = tasks(worker, headers)
     assert records["quarter-task"]["stage"] == "quarterly"
-    assert records["bet-task"]["stage"] == "none"
+    # A setup confirmed now binds no Bets label (retired), so a dated task labelled bets is an ordinary candidate.
+    assert records["bet-task"]["stage"] == "weekly" and not records["bet-task"].get("bet")
     assert records["configured-parent"]["stage"] == "committed"
     changed = worker.hooks.post(
         "/api/plus/v1/tasks:setTaskPlan",
@@ -226,7 +227,8 @@ def test_ended_week_uses_old_bound_names_before_a_configuration_change(account):
     ]
     response, _ = update(worker, headers, plan, selected)
     assert response.status_code == 200, response.text
-    assert upstream.tasks["ended-parent"]["labels"] == ["This week", "deep", "office"]
+    # A setup confirmed now binds no Bets label (retired), so the reset leaves that label alone.
+    assert upstream.tasks["ended-parent"]["labels"] == ["This week", "bets", "deep", "office"]
     assert upstream.tasks["quarter-task"] == quarter_before
     assert response.json()["plan"]["enabled"]
 

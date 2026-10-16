@@ -1,3 +1,4 @@
+import { withBets } from "./bets";
 import { STAGE_ROLES } from "./planning-outcomes";
 import { ACTIVE_LABEL, isLastDay } from "./weekly-review";
 import type {
@@ -9,6 +10,7 @@ import type {
   PlanningTask,
   PlusData,
   Stage,
+  WeeklyBet,
 } from "./model";
 
 /** Data at least this old is read again when the view comes back. */
@@ -53,19 +55,31 @@ function withDependencies(data: PlusData, result: DependencyResult): PlusData {
   return { ...data, plan: { ...data.plan, dependencies } };
 }
 
+function withWeeklyBets(data: PlusData, bets: WeeklyBet[]): PlusData {
+  if (!bets.length) return data;
+  return {
+    ...data,
+    plan: { ...data.plan, weeklyBets: withBets(data.plan.weeklyBets, bets) },
+  };
+}
+
 /** Shows a write's confirmed server result without reading everything again. */
 export function applyConfirmed(data: PlusData, confirmed: Confirmed): PlusData {
   if (!confirmed) return data;
   if (Array.isArray(confirmed)) {
-    const items: (FlowDayPlan | PlanningTask)[] = confirmed;
-    return withTasks(
-      withFlows(
-        data,
-        items.filter((item): item is FlowDayPlan => "date" in item),
+    const items: (FlowDayPlan | PlanningTask | WeeklyBet)[] = confirmed;
+    return withWeeklyBets(
+      withTasks(
+        withFlows(
+          data,
+          items.filter((item): item is FlowDayPlan => "date" in item),
+        ),
+        items.filter((item): item is PlanningTask => "id" in item),
       ),
-      items.filter((item): item is PlanningTask => "id" in item),
+      items.filter((item): item is WeeklyBet => "weekStart" in item),
     );
   }
+  if ("weekStart" in confirmed) return withWeeklyBets(data, [confirmed]);
   if ("timerEtag" in confirmed)
     return {
       ...data,
@@ -75,6 +89,16 @@ export function applyConfirmed(data: PlusData, confirmed: Confirmed): PlusData {
         timer: confirmed.timer,
       },
     };
+  if ("deletedTaskIds" in confirmed) {
+    const deleted = new Set(confirmed.deletedTaskIds);
+    return {
+      ...data,
+      plan: {
+        ...data.plan,
+        tasks: data.plan.tasks.filter((task) => !deleted.has(task.id)),
+      },
+    };
+  }
   if ("id" in confirmed) return withTasks(data, [confirmed]);
   if (!("managedLabels" in confirmed)) return withDependencies(data, confirmed);
   return { ...data, plan: { ...confirmed, tasks: data.plan.tasks } };
@@ -83,18 +107,18 @@ export function applyConfirmed(data: PlusData, confirmed: Confirmed): PlusData {
 /**
  * Mirrors how Todofy records a confirmed SetTaskPlan on the week's last day (core/plus.py
  * membership_week, REMEMBER_WEEK, FORGET_TASK), until the next read lists next week's choices: a
- * commitment or Bet chosen then is kept for next week, and a task left with neither mark is not.
+ * commitment chosen then is kept for next week, and a task no longer committed is not.
  */
 export function withNextWeek(
   data: PlusData,
-  update: { stage?: Stage; area?: Area; bet?: boolean; active?: boolean },
+  update: { stage?: Stage; area?: Area; active?: boolean },
   saved: PlanningTask,
 ): PlusData {
   const { plan } = data;
   if (!isLastDay(plan.week, data.focus.date)) return data;
   const others = plan.nextWeekTaskIds.filter((id) => id !== saved.id);
-  const chosen = update.stage === "committed" || update.bet === true;
-  const marked = saved.stage === "committed" || saved.bet;
+  const chosen = update.stage === "committed";
+  const marked = saved.stage === "committed";
   const kept = chosen || (marked && plan.nextWeekTaskIds.includes(saved.id));
   return {
     ...data,

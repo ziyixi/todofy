@@ -1,7 +1,8 @@
 """Synthetic Todoist Sync + REST v1 subset used by the real Plus runtime tests.
 
 A metadata Sync answers sync_token "*" (or a token this fake never issued) in full and an issued token with the
-labels and filters that changed since it, deleted ones with is_deleted, as Todoist's incremental Sync does.
+labels and filters that changed since it, deleted ones with is_deleted, as Todoist's incremental Sync does. The
+task list takes Todoist's project_id and ids filters; a command whose task is gone answers ITEM_NOT_FOUND.
 Tasks carry completed_count: closing a task adds one, and a recurring task stays active. The activity log
 answers ``activity[task_id]`` (completed, uncompleted and deleted events), or ``activity_status`` when set.
 """
@@ -38,7 +39,10 @@ class PlusFake(FakeServer):
         self.filters = [{"id": "filter-bets", "name": "Synthetic Bets", "query": "@bets"}]
         self.receipts = {}
         self.closed = {}
-        self.fail_commands_once = False
+        self.fail_commands_once = False  # the next Sync with commands applies them, then its answer is lost
+        self.throttle_commands_once = False  # the next Sync with commands is refused with 429, nothing applied
+        # Tasks per page, whatever the limit asked for: small, so the callers' paging is exercised.
+        self.page_limit = 2
         self.sync_tokens = {}  # token -> (labels, filters) by ID as they were when it was issued
         self.activity = {}  # task ID -> its activity log events
         self.activity_status = 200
@@ -46,6 +50,12 @@ class PlusFake(FakeServer):
         self.route("GET", r"/api/v1/tasks", self.list_tasks)
         self.route("GET", r"/api/v1/tasks/([a-zA-Z0-9_-]+)", self.get_task)
         self.route("GET", r"/api/v1/activities", self.activities)
+        self.route("GET", r"/api/v1/projects", self.list_projects)
+        self.projects = [
+            {"id": "account-inbox", "name": "Inbox", "inbox_project": True, "is_archived": False},
+            {"id": "inbox-project", "name": "Email Inbox", "inbox_project": False, "is_archived": False},
+            {"id": "work-project", "name": "Work", "inbox_project": False, "is_archived": False},
+        ]
 
     def add(self, task_id, **fields):
         self.tasks[task_id] = {
@@ -66,11 +76,17 @@ class PlusFake(FakeServer):
         commands = json.loads(form.get("commands", ["[]"])[0])
         if not commands:
             return Reply(200, self.metadata(form.get("sync_token", ["*"])[0]))
+        if self.throttle_commands_once:
+            self.throttle_commands_once = False
+            return Reply(429, {"error": "synthetic rate limit"})
         statuses, mapping = {}, {}
         for command in commands:
             identity = command["uuid"]
             if identity not in self.receipts:
                 args = command["args"]
+                if command["type"] != "item_add" and args["id"] not in self.tasks:
+                    statuses[identity] = {"error": "Item not found", "error_tag": "ITEM_NOT_FOUND", "http_code": 404}
+                    continue
                 if command["type"] == "item_add":
                     task_id = f"child-{len(self.tasks)}"
                     self.add(task_id, **args)
@@ -84,6 +100,12 @@ class PlusFake(FakeServer):
                     self.receipts[identity] = True
                 elif command["type"] == "item_update":
                     self.tasks[args["id"]].update(args)
+                    self.receipts[identity] = True
+                elif command["type"] == "item_move":
+                    self.tasks[args["id"]]["project_id"] = args["project_id"]
+                    self.receipts[identity] = True
+                elif command["type"] == "item_delete":
+                    del self.tasks[args["id"]]
                     self.receipts[identity] = True
                 else:
                     raise AssertionError("unexpected command")
@@ -134,8 +156,10 @@ class PlusFake(FakeServer):
                 200, {"results": [deepcopy(self.tasks[i]) for i in ids if i in self.tasks], "next_cursor": None}
             )
         start = int(request.param("cursor") or "0")
-        limit = min(int(request.param("limit") or 200), 2)
+        limit = min(int(request.param("limit") or 200), self.page_limit)
         tasks = list(self.tasks.values())
+        if project := request.param("project_id"):
+            tasks = [task for task in tasks if task["project_id"] == project]
         end = start + limit
         return Reply(
             200, {"results": deepcopy(tasks[start:end]), "next_cursor": str(end) if end < len(tasks) else None}
@@ -148,13 +172,20 @@ class PlusFake(FakeServer):
         assert json.loads(request.param("object_event_types")) == ["item:completed", "item:uncompleted", "item:deleted"]
         return Reply(200, {"results": deepcopy(self.activity.get(request.param("object_id"), [])), "next_cursor": None})
 
+    def list_projects(self, _request, _match):
+        return Reply(200, {"results": deepcopy(self.projects), "next_cursor": None})
+
     def get_task(self, _request, match):
         task = self.tasks.get(match[1])
         return Reply(200, deepcopy(task)) if task else Reply(404, {})
 
     def commands(self):
-        return [
-            command
+        return [command for batch in self.command_batches() for command in batch]
+
+    def command_batches(self):
+        """The commands of each Sync request that sent any, in order."""
+        batches = [
+            json.loads(parse_qs(request.body.decode()).get("commands", ["[]"])[0])
             for request in self.received("POST", "/api/v1/sync")
-            for command in json.loads(parse_qs(request.body.decode()).get("commands", ["[]"])[0])
         ]
+        return [batch for batch in batches if batch]

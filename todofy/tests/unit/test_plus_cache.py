@@ -351,8 +351,8 @@ def test_the_basic_view_skips_the_weekly_review_read(stack):
     stack.handle("ReadPlan", {"view": "basic"}, owner=True)
     basic = len(stack.d1.statements) - reads
     stack.handle("ReadPlan", {}, owner=True)
-    # The review batch: two weeks, next week and the dependencies.
-    assert len(stack.d1.statements) - reads - basic == basic + 4
+    # The review batch: two weeks' review tasks, next week's choices, the dependencies and the Bets of three weeks.
+    assert len(stack.d1.statements) - reads - basic == basic + 5
 
 
 def test_the_rollback_switch_checks_every_extension_call_in_d1(rollback):

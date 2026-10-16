@@ -141,7 +141,6 @@ it("gives the labels dialog one name and names Start now and Waiting in both lan
       id: "claim",
       title: "Submit the expense claim",
       stage: "none",
-      bet: false,
       deadline: "2026-10-14",
       leadDays: 3,
       mustStart: true,

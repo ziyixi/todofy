@@ -32,16 +32,15 @@ function openWeek() {
   fireEvent.click(screen.getByRole("tab", { name: /^Week$/u }));
 }
 
-it("opens Review with four real stages and keeps a Bet-only task outside the commitment count", async () => {
+it("opens Review with four real stages and keeps an unplanned task outside the commitment count", async () => {
   const data = await props();
   const template = data.plan.tasks[0]!;
   data.plan.tasks.push(
     {
       ...template,
-      id: "bet-only",
-      title: "Independent old bet",
+      id: "unplanned",
+      title: "Independent unplanned task",
       stage: "none",
-      bet: true,
       parentId: "",
     },
     {
@@ -49,7 +48,6 @@ it("opens Review with four real stages and keeps a Bet-only task outside the com
       id: "quarter-outcome",
       title: "Explore the next direction",
       stage: "quarterly",
-      bet: false,
       parentId: "",
     },
   );
@@ -61,9 +59,8 @@ it("opens Review with four real stages and keeps a Bet-only task outside the com
   expect(
     committed.getAllByRole("button", { name: /No priority/u }),
   ).toHaveLength(4);
-  expect(screen.queryByText("Independent old bet")).toBeNull();
+  expect(screen.queryByText("Independent unplanned task")).toBeNull();
   expect(screen.getByText("3/5 work · 1/3 personal")).toBeTruthy();
-  expect(screen.queryByRole("button", { name: /Make this a bet/u })).toBeNull();
 });
 
 it("expands one commitment into its real recursive leaf steps without absorbing an independent child stage", async () => {

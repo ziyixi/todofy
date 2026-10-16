@@ -35,7 +35,6 @@ const task = (id: string, value: Partial<PlanningTask> = {}): PlanningTask => ({
   labels: [],
   area: "work",
   stage: "none",
-  bet: false,
   priority: 1,
   deadline: "",
   due: "",

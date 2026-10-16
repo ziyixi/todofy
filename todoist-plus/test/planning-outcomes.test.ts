@@ -15,7 +15,6 @@ function task(id: string, changes: Partial<PlanningTask> = {}): PlanningTask {
     labels: [],
     area: "work",
     stage: "none",
-    bet: false,
     priority: 1,
     deadline: "",
     leadDays: 0,
@@ -28,7 +27,7 @@ function task(id: string, changes: Partial<PlanningTask> = {}): PlanningTask {
 }
 
 it("ties a same-stage child and its steps to the overall commitment", () => {
-  const goal = task("goal", { bet: true });
+  const goal = task("goal");
   const commitment = task("commitment", {
     parentId: goal.id,
     stage: "committed",
@@ -65,7 +64,7 @@ it("keeps an independently committed subtree under a quarterly goal distinct", (
 });
 
 it("uses the immediate parent when no task in the ancestry has a planning stage", () => {
-  const goal = task("goal", { bet: true });
+  const goal = task("goal");
   const parent = task("parent", { parentId: goal.id });
   const step = task("step", { parentId: parent.id });
   expect(outcomeForTask(step, [goal, parent, step]).id).toBe(parent.id);

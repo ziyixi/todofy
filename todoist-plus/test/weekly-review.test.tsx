@@ -194,7 +194,6 @@ it("lists deadlines without a start-ahead choice in one line, with the editor's 
       id: "insurance",
       title: "Renew the car insurance",
       stage: "none",
-      bet: false,
       deadline: "2026-11-30",
       leadDays: 0,
       missingLead: true,
@@ -204,7 +203,6 @@ it("lists deadlines without a start-ahead choice in one line, with the editor's 
       id: "permit",
       title: "Collect the parking permit",
       stage: "none",
-      bet: false,
       deadline: "2026-10-11",
       leadDays: 0,
       missingLead: true,
@@ -282,14 +280,20 @@ it("counts the five review lines and keeps ticks for this ISO week only", async 
     JSON.stringify({ lines: [1], kept: [] }),
   );
   const data = await props();
-  const view = render(<PlanView {...data} />);
+  const onOpenMailbox = vi.fn();
+  const view = render(<PlanView {...data} onOpenMailbox={onOpenMailbox} />);
   let review = openReview();
   expect(line(review, "Mail to clarify").textContent).toContain("2");
+  // Open shows Plus's Mailbox, which lists this line's mail, rather than the native project.
+  fireEvent.click(
+    within(line(review, "Mail to clarify")).getByRole("button", {
+      name: "Open",
+    }),
+  );
+  expect(onOpenMailbox).toHaveBeenCalledOnce();
   expect(
-    within(line(review, "Mail to clarify"))
-      .getByRole("link", { name: /Open in Todoist/u })
-      .getAttribute("href"),
-  ).toBe("https://app.todoist.com/app/project/synthetic-mail");
+    within(line(review, "Mail to clarify")).queryByRole("link"),
+  ).toBeNull();
   expect(line(review, "Waiting").textContent).toContain(
     "2oldest untouched 11 days",
   );
@@ -298,12 +302,15 @@ it("counts the five review lines and keeps ticks for this ISO week only", async 
   // Before Sunday line 5 only says where the choice will be, with nothing to tick.
   expect(
     review.queryByRole("checkbox", {
-      name: "Reviewed: Next week's commitments",
+      name: "Reviewed: Next week's commitments and goals",
     }),
   ).toBeNull();
   expect(
-    review.getByText("On Sunday, choose here what stays for next week"),
+    review.getByText(
+      "On Sunday, choose commitments to keep and write next week's goals here",
+    ),
   ).toBeTruthy();
+  expect(review.queryByRole("list", { name: "Next week's goals" })).toBeNull();
   const tick = review.getByRole("checkbox", {
     name: "Reviewed: Mail to clarify",
   });
@@ -428,7 +435,7 @@ it("jumps to the Waiting lane and to Week's first unplanned commitment, with foc
   );
 });
 
-it("keeps this week's commitments and goals for next week only on Sunday, when clicked", async () => {
+it("keeps this week's commitments for next week only on Sunday, when clicked", async () => {
   const actions = createPrototype(false, "2026-10-18");
   const update = vi.spyOn(actions, "updateTask");
   renderApp(actions);
@@ -449,10 +456,12 @@ it("keeps this week's commitments and goals for next week only on Sunday, when c
   await waitFor(() => expect(update).toHaveBeenCalledOnce());
   fireEvent.click(editor.getByRole("button", { name: "Close" }));
   const review = openReview();
-  const next = within(line(review, "Next week's commitments"));
+  const next = within(line(review, "Next week's commitments and goals"));
   expect(next.getByText(/chosen in Plus on Sunday/u)).toBeTruthy();
   // Release, research, notes and desk are this week's; the charting library is kept.
-  fireEvent.click(next.getByRole("button", { name: "Choose what stays (4)" }));
+  fireEvent.click(
+    next.getByRole("button", { name: "Choose commitments to keep (4)" }),
+  );
   const row = (title: string) =>
     within(
       next
@@ -492,32 +501,50 @@ it("keeps this week's commitments and goals for next week only on Sunday, when c
   ]);
 });
 
-it("offers to keep a goal without a commitment through its Bet", async () => {
-  const actions = createPrototype();
+it("writes next week's two Bets in Sunday's fifth line, apart from the commitments", async () => {
+  const actions = createPrototype(false, "2026-10-18");
+  const save = vi.spyOn(actions, "setWeeklyBet");
   const update = vi.spyOn(actions, "updateTask");
-  const data = await props(actions);
-  data.plan.tasks.push({
-    ...data.plan.tasks[0]!,
-    id: "goal",
-    title: "A goal without a commitment",
-    stage: "none",
-    bet: true,
-  });
-  data.plan.nextWeekTaskIds = ["notes"];
-  render(<PlanView {...data} currentDate="2026-10-18" />);
-  const next = within(line(openReview(), "Next week's commitments"));
-  // Notes is already recorded for next week: four of the five can still be kept.
-  fireEvent.click(next.getByRole("button", { name: "Choose what stays (4)" }));
-  fireEvent.click(
-    next.getByRole("button", {
-      name: "Keep for next week: A goal without a commitment",
-    }),
-  );
-  await waitFor(() => expect(update).toHaveBeenCalledOnce());
-  expect(update.mock.calls[0]).toEqual([
-    expect.objectContaining({ id: "goal" }),
-    { bet: true },
+  renderApp(actions);
+  await screen.findByRole("region", { name: "Committed" });
+  const review = openReview();
+  const next = within(line(review, "Next week's commitments and goals"));
+  // Only commitments are choices to keep; the goals are text.
+  expect(next.getByRole("button", { name: "Choose commitments to keep (4)" }));
+  const goals = within(next.getByRole("list", { name: "Next week's goals" }));
+  expect(
+    goals.getAllByRole("listitem").map((item) => item.textContent),
+  ).toEqual([
+    "WorkWrite next week's work goal",
+    "PersonalWrite next week's personal goal",
   ]);
+  fireEvent.click(
+    goals.getByRole("button", { name: "Write next week's work goal" }),
+  );
+  const input = goals.getByRole("textbox", { name: "Next week's work goal" });
+  expect(document.activeElement).toBe(input);
+  fireEvent.change(input, { target: { value: "Draft the  quarter plan " } });
+  fireEvent.keyDown(input, { key: "Enter" });
+  const saved = await goals.findByRole("button", {
+    name: "Edit next week's work goal: Draft the quarter plan",
+  });
+  expect(save.mock.calls).toEqual([
+    [
+      {
+        weekStart: "2026-10-19",
+        area: "work",
+        text: "Draft the quarter plan",
+        etag: "",
+      },
+    ],
+  ]);
+  await waitFor(() => expect(document.activeElement).toBe(saved));
+  expect(review.getByRole("status").textContent).toBe(
+    "Next week's work goal saved",
+  );
+  // No "keep this week's" here: carrying a goal on is Monday's Keep only.
+  expect(next.queryByRole("button", { name: /^Keep last week/u })).toBeNull();
+  expect(update).not.toHaveBeenCalled();
 });
 
 it("completes the review task only when Finish review is clicked, outside Focus", async () => {

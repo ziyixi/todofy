@@ -1,15 +1,25 @@
 """The planning store in D1 (migrations/0007_plan_store.sql): the only module that reads or writes plan_*.
 
-Owner-authored planning facts and Todofy's own task identities; never task content. Dependencies are the first
-facts written here (docs/todoist-plus.md, "Dependencies"); the other tables stay idle until their features move
-over. Callers name tasks by the task store's own IDs, with its provider (core/plan.py PROVIDERS).
+Owner-authored planning facts and Todofy's own task identities; never task content. Dependencies
+(docs/todoist-plus.md, "Dependencies"), the weekly Bets (plan_notes of kind 'bets') and the Mailbox's categories
+(plan_categories of scheme 'mail', with the Todoist adapter's binding in plan_settings 'todoist.mail') are the facts
+it keeps so far; the other tables wait for later steps (docs/todoist-plus.md, "Planning store"). Callers name tasks
+by the task store's own IDs, with its provider (core/plan.py PROVIDERS).
 """
 
 import json
+from collections.abc import Iterable
 from typing import Any
 
 from todofy.core import plan
+from todofy.core.gtd import rfc3339
+from todofy.core.mailbox import Category, MailSettings
 from todofy.core.sql import plan as sql
+
+# The Todoist adapter's binding of the Mailbox:
+#   {"categories": [{"id": <plan_categories.id>, "label_id": "<Todoist label ID>", "label": "<its name when saved>"}],
+#    "destination": "<Todoist project ID>"}
+MAIL_KEY = "todoist.mail"
 
 
 async def verify(db: Any) -> dict[str, int]:
@@ -143,3 +153,90 @@ async def settle(
         return list(dict.fromkeys(str(dict(row)["external_id"]) for row in rows))
 
     return dependency_rows(results[-1]), waiters("deleted"), waiters("released")
+
+
+def bets_statement(db: Any, week: str) -> Any:
+    """The Bets a plan of the account week starting on ``week`` shows (core/plan.bet_weeks), for its D1 batch."""
+    return db.prepare(sql.BETS.sql).bind(*plan.bet_weeks(week))
+
+
+def bet_statement(db: Any, week: str, area: str) -> Any:
+    """One week's Bet of one area, for a batch."""
+    return db.prepare(sql.BET.sql).bind(week, area)
+
+
+def weekly_bet(row: dict[str, Any]) -> dict[str, Any]:
+    """A plan_notes 'bets' row as a WeeklyBet (wire JSON): its rev is the etag, its body the text."""
+    return {
+        "week_start": row["period"],
+        "area": row["area"],
+        "text": row["body"],
+        "etag": str(int(row["rev"])),
+        "update_time": rfc3339(int(row["updated_at"])),
+    }
+
+
+def weekly_bets(rows: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The WeeklyBets of a BETS answer, by week, Work before Personal."""
+    ordered = sorted(rows, key=lambda row: (row["period"], plan.BET_AREAS.index(row["area"])))
+    return [weekly_bet(row) for row in ordered]
+
+
+async def save_bet(db: Any, week: str, area: str, text: str, rev: int, now: int) -> dict[str, Any] | None:
+    """Writes a Bet read at ``rev`` (0 when it had no row) and answers it as saved, or None when its row has another
+    rev by now: someone else saved it in between."""
+    row = await db.prepare(sql.SAVE_BET.sql).bind(week, area, text, now, rev).first()
+    return None if row is None else weekly_bet(dict(row))
+
+
+def mail_settings_statements(db: Any) -> list[Any]:
+    """The two reads of the Mailbox's settings, for a caller's batch (mail_settings_of reads their answers)."""
+    return [db.prepare(sql.MAIL_CATEGORIES.sql), db.prepare(sql.SETTING.sql).bind(MAIL_KEY)]
+
+
+async def mail_settings(db: Any) -> MailSettings:
+    """The Mailbox's categories and destination, one batch."""
+    return mail_settings_of(*await db.batch(mail_settings_statements(db)))
+
+
+def mail_settings_of(rows: Any, document: Any) -> MailSettings:
+    """The active category rows with their label binding, from the answers to mail_settings_statements."""
+    saved = next((json.loads(dict(row)["value"]) for row in document.results), {"categories": [], "destination": ""})
+    labels = {int(entry["id"]): entry for entry in saved["categories"]}
+    categories = []
+    for row in (dict(item) for item in rows.results):
+        # A category is saved with its binding in one batch; a row without one is ignored.
+        if (bound := labels.get(int(row["id"]))) is not None:
+            categories.append(Category(int(row["id"]), bound["label_id"], bound["label"], int(row["priority"])))
+    return MailSettings(tuple(categories), saved["destination"])
+
+
+async def next_category_id(db: Any) -> int:
+    row = await db.prepare(sql.NEXT_CATEGORY_ID.sql).first()
+    return int(row["id"])
+
+
+async def save_mail_settings(
+    db: Any, current: MailSettings, saved: MailSettings, archived: list[int], now: int
+) -> None:
+    """Replaces the Mailbox's settings in one batch: the archived categories go first (so a name they free can be
+    taken again), the kept ones take their new names and places, the new ones are added, and the binding follows."""
+    kept = {category.id for category in current.categories}
+    statements = [db.prepare(sql.ARCHIVE_CATEGORY.sql).bind(now, now, category_id) for category_id in archived]
+    for position, category in enumerate(saved.categories):
+        if category.id in kept:
+            statement = db.prepare(sql.KEEP_CATEGORY.sql).bind(category.name, position, now, category.id)
+        else:
+            statement = db.prepare(sql.ADD_CATEGORY.sql).bind(
+                category.id, category.name, category.priority, position, now, now
+            )
+        statements.append(statement)
+    binding = {
+        "categories": [
+            {"id": category.id, "label_id": category.label_id, "label": category.label} for category in saved.categories
+        ],
+        "destination": saved.destination,
+    }
+    value = json.dumps(binding, ensure_ascii=False, separators=(",", ":"))
+    statements.append(db.prepare(sql.SAVE_SETTING.sql).bind(MAIL_KEY, value, now))
+    await db.batch(statements)

@@ -22,6 +22,8 @@ const mocks = vi.hoisted(() => {
     }),
     load: vi.fn(),
     readPlan: vi.fn(),
+    setWeeklyBet: vi.fn(),
+    deleteMail: vi.fn(),
     sessionSet: vi.fn(),
     store: undefined as KnownTaskStore | undefined,
   };
@@ -51,7 +53,12 @@ vi.mock("wxt/browser", () => ({
 vi.mock("../src/api", () => ({
   createApi: (_connection: unknown, _fetch: unknown, store: KnownTaskStore) => {
     mocks.store = store;
-    return { load: mocks.load, readPlan: mocks.readPlan };
+    return {
+      load: mocks.load,
+      readPlan: mocks.readPlan,
+      setWeeklyBet: mocks.setWeeklyBet,
+      deleteMail: mocks.deleteMail,
+    };
   },
   publicError: (error: unknown) =>
     error instanceof Error ? error.message : "Synthetic failure",
@@ -101,6 +108,7 @@ it("caches only replaced IDs from ReadPlan and serves them to the next page with
     ],
     availableLabels: [{ id: "l1", label: "committed" }],
     timezone: "UTC",
+    inboxProjectId: "p1",
   });
   expect(
     await send({
@@ -114,6 +122,7 @@ it("caches only replaced IDs from ReadPlan and serves them to the next page with
     configured: true,
     hiddenFilterIds: ["f1"],
     labelIds: ["l1"],
+    hiddenProjectIds: ["p1"],
   };
   expect(mocks.local.get("planConfig")).toEqual(cached);
   mocks.readPlan.mockClear();
@@ -236,4 +245,53 @@ it("keeps only Other views' open state, for Todoist pages, and forgets it on dis
     "chrome-extension://synthetic/options.html",
   );
   expect(mocks.local.has("otherViewsOpen")).toBe(false);
+});
+
+it("passes a refused Bet to the page as a value, which an Error could not carry", async () => {
+  const { BetNotSaved } = await import("../src/bets");
+  mocks.local.set("connection", {
+    apiOrigin: "https://api.example.test",
+    token: "synthetic",
+  });
+  const message = {
+    kind: "action",
+    protocol: PLANNING_PROTOCOL,
+    method: "setWeeklyBet",
+    args: [{ weekStart: "2026-10-12", area: "work", text: "Goal", etag: "" }],
+  } as const;
+  mocks.setWeeklyBet.mockRejectedValueOnce(new BetNotSaved("changed"));
+  expect(await send(message)).toEqual({
+    ok: true,
+    value: { notSaved: "changed" },
+  });
+  mocks.setWeeklyBet.mockRejectedValueOnce(new Error("Synthetic outage"));
+  expect(await send(message)).toEqual({
+    ok: false,
+    error: "Synthetic outage",
+  });
+  // The Bet text never reaches the ID-only configuration cache.
+  expect(mocks.local.has("planConfig")).toBe(false);
+});
+
+it("passes a Mailbox action to Todofy with its arguments and answers its result", async () => {
+  mocks.local.set("connection", {
+    apiOrigin: "https://api.example.test",
+    token: "synthetic",
+  });
+  mocks.deleteMail.mockResolvedValue({
+    deletedTaskIds: ["m1"],
+    keptTaskIds: [],
+  });
+  expect(
+    await send({
+      kind: "action",
+      protocol: PLANNING_PROTOCOL,
+      method: "deleteMail",
+      args: [["m1"], "11111111-1111-4111-8111-111111111111"],
+    }),
+  ).toEqual({ ok: true, value: { deletedTaskIds: ["m1"], keptTaskIds: [] } });
+  expect(mocks.deleteMail).toHaveBeenCalledWith(
+    ["m1"],
+    "11111111-1111-4111-8111-111111111111",
+  );
 });

@@ -376,7 +376,7 @@ Vars (plain, with defaults): `MAIL_SOURCE_ID`, `GEMINI_API_BASE`, `GEMINI_MODELS
 in the test config), `GTD_REVIEW_ENABLED`, `REPORT_CARRYOVER_DAYS` (14; 0 turns the carryover off),
 `TODOIST_OPS_PROJECT_ID` and `TODOIST_REVIEW_PROJECT_ID` (optional; unset = the default project),
 `PLUS_METADATA` (`cache`; `full` turns Todoist Plus's caches off, todoist-plus.md "Caches") and the
-test knobs `GTD_PAGE_TIMEOUT_MS` (20000) and `PLUS_METADATA_MAX_AGE_MS` (300000). Core secrets set by the owner: `GEMINI_API_KEY`,
+test knobs `GTD_PAGE_TIMEOUT_MS` (20000), `PLUS_METADATA_MAX_AGE_MS` (300000) and `MAIL_BRIEFS_PACE_MS` (30000, between the brief backfill's model calls). Core secrets set by the owner: `GEMINI_API_KEY`,
 `TODOIST_API_KEY`. The gateway's vars and secrets (`ACCESS_*`, `TODOFY_HOOKS_HOSTS`,
 `MAIL_WEBHOOK_TOKEN_SHA256(_PREVIOUS)`, `REPORT_BASIC_AUTH_SHA256`, `CSRF_SIGNING_KEY`) are listed in
 gateway-contract.md §1. Test configs shorten `*_MS` values (including the gateway's
@@ -483,6 +483,11 @@ such as the truncation notice, goes before the fence. Summary step: `system=prom
 `models=gemini_email_models(env)`. Email and Canary prefer Flash-Lite; daily summaries and all
 recommendation sizes keep the default Flash-first chain. Both share the same deadline and daily
 token budget. A completed email keeps its frozen summary and model through a config change.
+`SUMMARY_EMAIL` differs from Go's bytes in one deliberate line (2026-10): the summary starts with a
+one-sentence brief, which `core/mailbox.brief_of` reads back and `COMPLETE_SUMMARY` stores in
+`summaries.brief`. The one-time brief backfill (`runtime/mail_briefs.py`, `system=prompts.BRIEF_EMAIL`,
+the stored subject and summary as `user`) reserves against at most half of the day's budget
+(`reserve_tokens(share=0.5)`); see `docs/todoist-plus.md`, "Briefs".
 
 ### todoist.py (P; used by R)
 ```python
@@ -572,12 +577,13 @@ at most `PRECOMPUTE_ATTEMPTS` (3) times a day. On-demand work runs in the object
 ```python
 async def tick(db, env, now: int) -> bool             # one bounded sweep; True if more work remains
 ```
-Uses only `core.sql.retention` batches (≤ 13 bounded writes per call, one D1 batch: summaries and reports
-after 90 days, owner actions after 180, auth failures after 30, imported legacy text at its `expires_at` and,
+Uses only `core.sql.retention` batches (≤ 12 bounded writes per call, one D1 batch: reports after 90 days,
+owner actions after 180, auth failures after 30, imported legacy text at its `expires_at` and,
 with `LEGACY_TEXT_RETENTION_DAYS`, after that many days; the GTD ledger's raw snapshot rows after 14 days,
 1000 a batch, its snapshots and aggregates after 120 days, its reviews after 400; a failed task intent's text
 after 30 days (an UPDATE), every finished intent and its task rows 400 days after its last change, task rows
-first); never deletes `mail_events`. `tests/unit/test_intents.py` checks this count against the code.
+first); never deletes `mail_events`, nor `summaries` (since 2026-10: a summary is the Mailbox's mail, which the
+owner deletes). `tests/unit/test_intents.py` checks this count against the code.
 
 ### Gateway (G; `gateway/src`)
 `access.ts` and `csrf.ts` are adapters over the shared package `packages/edge-auth` (the repository

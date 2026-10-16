@@ -4,7 +4,13 @@ import {
   type ShadowRootContentScriptUi,
 } from "wxt/utils/content-script-ui/shadow-root";
 import type { ContentScriptContext } from "wxt/utils/content-script-context";
-import { ChevronDown, ChevronRight, LayoutList, Target } from "lucide-react";
+import {
+  ChevronDown,
+  ChevronRight,
+  LayoutList,
+  Mail,
+  Target,
+} from "lucide-react";
 import { App } from "./App";
 import { detailTask, find, findAll, keepsVisible, matchesId } from "./anchors";
 import { planConfig, todoistTaskUrl } from "./domain";
@@ -29,6 +35,12 @@ import type {
 } from "./model";
 
 const viewParam = "todoist-plus";
+/** The Plus pages, in the sidebar's order, with their icons. */
+const VIEWS = [
+  { view: "plan", Icon: LayoutList },
+  { view: "focus", Icon: Target },
+  { view: "mailbox", Icon: Mail },
+] as const;
 // A flickering anchor must not turn into endless re-mounts.
 const MOUNTS_PER_MINUTE = 10;
 // One pass per frame at most. Only passes in which Plus changed the page count: a feedback loop
@@ -210,7 +222,7 @@ export async function mountTodoist(ctx: ContentScriptContext) {
     const value = viewValue();
     // The weekly review task links to `review`: Plan with its checklist open.
     if (value === "review") return "plan";
-    return value === "plan" || value === "focus" ? value : undefined;
+    return VIEWS.find((item) => item.view === value)?.view;
   }
   function favoriteRows() {
     const sidebar = find("sidebar");
@@ -219,7 +231,7 @@ export async function mountTodoist(ctx: ContentScriptContext) {
     return Array.from(list.querySelectorAll<HTMLAnchorElement>("a[href]"))
       .map((link) => {
         const match = new URL(link.href).pathname.match(
-          /\/app\/(filter|label)\/([^/]+)$/u,
+          /\/app\/(filter|label|project)\/([^/]+)$/u,
         );
         let row = link.closest<HTMLElement>("li") ?? link;
         while (
@@ -332,6 +344,12 @@ export async function mountTodoist(ctx: ContentScriptContext) {
     const labelIds = config.labelIds;
     const extras: HTMLElement[] = [];
     for (const { row, link, kind, slug } of favoriteRows()) {
+      if (kind === "project") {
+        // Only while a Plus page is open does the Mailbox replace the mail project's favourite;
+        // every other project favourite stays where it is, and none folds into Other views.
+        if (view && matchesId(slug, config.hiddenProjectIds ?? [])) hide(row);
+        continue;
+      }
       if (
         (kind === "filter" && matchesId(slug, config.hiddenFilterIds)) ||
         (kind === "label" && matchesId(slug, labelIds)) ||
@@ -493,18 +511,14 @@ export async function mountTodoist(ctx: ContentScriptContext) {
           const text = words(languageOf(document));
           root.render(
             <nav className="plus-extension-nav" aria-label="Todoist Plus">
-              {(["plan", "focus"] as const).map((item) => (
+              {VIEWS.map(({ view: item, Icon }) => (
                 <button
                   key={item}
                   aria-current={currentView() === item ? "page" : undefined}
                   onClick={() => navigate(item)}
                 >
                   <span className="plus-nav-icon" aria-hidden="true">
-                    {item === "plan" ? (
-                      <LayoutList size={18} />
-                    ) : (
-                      <Target size={18} />
-                    )}
+                    <Icon size={18} />
                   </span>
                   {text[item]}
                 </button>

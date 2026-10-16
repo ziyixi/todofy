@@ -734,7 +734,9 @@ Since 2026-10-05 the gateway passes every answer but a list's page through as To
 measured the same way: an event's detail 2.0 → 0.8-1.5 first and 1.7 → 0.7 warm, a reconcile 2.1 → 1.2-1.5 and
 1.6 → 0.8, the legacy text 6.0-6.4 → 1.0-1.3 and 5.3-5.7 → 1.1, the reports 4.6-5.2 → 1.2-1.6 and 4.7-5.0 → 1.1-1.2
 (bound 3, so a decode again fails it); the lists and the isolate's first request are unchanged. `src/warm.ts` warms
-only what the gateway still reads (the lists' messages and a refusal's MailEvent).
+only what the gateway still reads (the lists' messages and a refusal's MailEvent). The Todoist Plus Mailbox's two
+largest answers, measured with the extension token since 2026-10-16, are passed through under the same bound: a
+lookup of 200 task IDs and items 0.9-1.1 first and 0.9 warm, one mail's 64 KiB summary 0.2-0.7 and 0.6.
 
 Before that, the cost was the generated code reading and writing every answer again: a few tenths of a millisecond per
 small message, about 2 ms for a page of 100 events, the codec's text rules over a report's 230,000

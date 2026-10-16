@@ -719,6 +719,8 @@ test("native pages read only plan settings and hide replaced items from the ID-o
       configured: true,
       hiddenFilterIds: ["f1"],
       labelIds: ["l1"],
+      // This synthetic Todofy has no mail project, so no project favourite is replaced.
+      hiddenProjectIds: [],
     });
     await worker.evaluate(() => {
       (

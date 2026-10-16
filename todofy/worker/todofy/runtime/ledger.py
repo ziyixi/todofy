@@ -10,6 +10,7 @@ from enum import StrEnum
 from typing import Any
 
 from todofy.core.backoff import SUMMARY_CRASH_LIMIT
+from todofy.core.mailbox import brief_of
 from todofy.core.sql import ledger as sql
 from todofy.core.vocab import TERMINAL_STATES, Code, EventState
 
@@ -112,12 +113,16 @@ class OwnerAction:
 
 @dataclass(frozen=True, slots=True)
 class CompletedSummary:
-    """The report-cache row written when an event completes."""
+    """The report-cache row written when an event completes; its brief is the summary's first line."""
 
     subject: str
     summary: str
     model: str
     task_id: str
+
+    @property
+    def brief(self) -> str:
+        return brief_of(self.summary)
 
 
 async def ingest(
@@ -260,7 +265,14 @@ async def transition(
     if completed and completed.summary:
         statements.append(
             db.prepare(sql.COMPLETE_SUMMARY.sql).bind(
-                now, completed.subject, completed.summary, completed.model, completed.task_id, *key, version
+                now,
+                completed.subject,
+                completed.summary,
+                completed.model,
+                completed.task_id,
+                completed.brief,
+                *key,
+                version,
             )
         )
     if action:

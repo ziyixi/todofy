@@ -24,11 +24,16 @@ def task(**values):
     }
 
 
-def test_stage_change_retains_unrelated_labels_and_bet_does_not_promote():
+def test_stage_change_retains_unrelated_labels_and_the_retired_bet_is_refused():
     source = task(labels=["committed", "focus", "office", "deep", "lead_2w", "bets"])
     assert plus.plan_labels(source, {"stage": "monthly"}) == ["bets", "candiate", "deep", "lead_2w", "office"]
-    assert plus.plan_labels(task(), {"bet": True}) == ["bets", "deep", "office"]
     assert plus.plan_labels(source, {"area": "personal"}) == ["bets", "committed", "deep", "focus", "home", "lead_2w"]
+    # The weekly Bets are text: Plus never adds or removes the Bets label again, with or without a binding.
+    for request in ({"bet": True}, {"bet": False}, {"stage": "committed", "bet": True}):
+        with pytest.raises(ValueError, match="BAD_REQUEST"):
+            plus.plan_labels(source, request)
+        with pytest.raises(ValueError, match="BAD_REQUEST"):
+            plus.plan_labels(source, request, mapping())
 
 
 def test_in_progress_adds_or_removes_only_the_literal_active_label():
@@ -139,16 +144,15 @@ def test_reset_clears_only_ended_week_marks_and_moves_only_commitments():
     assert db.execute(sql.ENDED_WEEK, ("2026-10-19",)).fetchall() == []
 
 
-def test_only_a_commitment_or_bet_chosen_on_the_last_day_waits_for_the_next_week():
+def test_only_a_commitment_chosen_on_the_last_day_waits_for_the_next_week():
     week, sunday = "2026-10-12", "2026-10-18"
-    assert plus.membership_week(sunday, week, {"stage": "committed"}) == "2026-10-19"
-    assert plus.membership_week(sunday, week, {"bet": True, "task_id": "task1"}) == "2026-10-19"
-    # Removing a mark, other stages, an area or a deadline change on Sunday stay in the ending week.
-    for request in ({"bet": False}, {"stage": "weekly"}, {"area": "work"}, {"deadline": sunday, "lead_days": 7}):
+    assert plus.membership_week(sunday, week, {"stage": "committed", "task_id": "task1"}) == "2026-10-19"
+    # Other stages, an area or a deadline change on Sunday stay in the ending week.
+    for request in ({"stage": "weekly"}, {"area": "work"}, {"deadline": sunday, "lead_days": 7}):
         assert plus.membership_week(sunday, week, request) == week
     # A commitment made on any other day of the week ends with it.
     for today in ("2026-10-12", "2026-10-14", "2026-10-17"):
-        assert plus.membership_week(today, week, {"stage": "committed", "bet": True}) == week
+        assert plus.membership_week(today, week, {"stage": "committed"}) == week
 
 
 def test_membership_never_moves_back_so_sunday_scans_cannot_undo_a_next_week_choice():
@@ -337,7 +341,36 @@ def test_every_task_a_hidden_deadline_or_waiting_filter_shows_is_visible_in_plus
 
 
 def mapping():
-    return [{"role": role, "id": "id-" + role, "label": "custom-" + role} for role in (*plus.ROLES, "quarter")]
+    """A setup confirmed before the Bets became text: it still binds the retired bets role."""
+    roles = (*plus.ROLES, *plus.LEGACY_ROLES, "quarter")
+    return [{"role": role, "id": "id-" + role, "label": "custom-" + role} for role in roles]
+
+
+def test_a_new_setup_needs_no_bets_label_and_a_saved_bets_binding_is_kept_as_saved():
+    labels = [{"id": "id-" + role, "name": role} for role in plus.ROLES]
+    fresh = plus.discover(labels, "UTC")
+    assert not fresh["missing_labels"] and "bets" not in {binding["role"] for binding in fresh["labels"]}
+    # A label named bets is not adopted by a new setup.
+    assert plus.discover([*labels, {"id": "id-bets", "name": "bets"}], "UTC")["labels"] == fresh["labels"]
+    saved = [*fresh["labels"], {"role": "bets", "id": "id-bets", "label": "bets"}]
+    before = plus.discover([*labels, {"id": "id-bets", "name": "bets"}], "UTC", saved)
+    # Renaming or deleting the retired label in Todoist changes neither the binding nor the etag.
+    for current in ([*labels, {"id": "id-bets", "name": "old goals"}], labels):
+        after = plus.discover(current, "UTC", saved)
+        assert after["labels"] == before["labels"] == saved
+        assert after["etag"] == before["etag"] and not after["missing_labels"]
+
+
+def test_column_bindings_keep_the_retired_bets_binding_and_its_filter_stays_hidden():
+    current = mapping()
+    available = [{"id": label["id"], "label": label["label"]} for label in current]
+    selected = [label for label in current if label["role"] in plus.PLANNING_ROLES]
+    assert plus.replace_planning_labels(current, selected, available) == current
+    assert {"role": "bets", "id": "id-bets", "label": "custom-bets"} in current
+    # @bets was checked against the bets binding's name; with the role retired it is always replaced.
+    bets = [{"id": "bets-filter", "query": "@bets"}]
+    assert plus.replaced_filters(bets) == plus.replaced_filters(bets, current) == ["bets-filter"]
+    assert plus.replaced_filters(bets, current[:2]) == ["bets-filter"]
 
 
 def test_saved_legacy_mapping_keeps_its_identity_when_optional_quarter_appears():

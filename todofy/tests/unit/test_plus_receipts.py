@@ -377,7 +377,37 @@ def test_a_receipt_older_than_thirty_days_is_not_read_and_nothing_deletes_one(st
     # The owner's rule, no automatic time-based deletion: no statement of the module deletes a receipt.
     module = vars(stack.runtime.plus_receipts)
     statements = [value for name, value in module.items() if name.isupper() and isinstance(value, str)]
-    assert len(statements) == 6 and not any("DELETE" in statement for statement in statements)
+    assert len(statements) == 7 and not any("DELETE" in statement for statement in statements)
+
+
+def test_writing_names_the_tasks_of_unfinished_writes_of_the_window(stack):
+    """DeleteMailItems keeps these (runtime/plus_mail.py): an item_update, item_move or item_close names its task,
+    an item_add its parent; a done write, a started deletion and one older than the window do not count."""
+    sql, receipts = stack.sql, stack.runtime.plus_receipts
+
+    def started(method: str, *commands: dict[str, Any], at: int = NOW) -> str:
+        request_id = str(uuid.uuid4())
+        sql.exec(
+            "INSERT INTO plus_receipts (request_id, method, request_hash, state, commands, created_at)"
+            " VALUES (?, ?, 'h', 'started', ?, ?)",
+            request_id,
+            method,
+            json.dumps(list(commands)),
+            at,
+        )
+        return request_id
+
+    started("SetTaskPlan", {"type": "item_update", "args": {"id": "a", "labels": []}})
+    started("FileMailItem", {"type": "item_update", "args": {"id": "b"}}, {"type": "item_move", "args": {"id": "b"}})
+    started("AppendTaskSteps", {"type": "item_add", "args": {"content": "s", "parent_id": "c", "project_id": "p"}})
+    started("CompleteTask", {"type": "item_close", "args": {"id": "d"}})
+    started("DeleteMailItems", {"type": "item_delete", "args": {"id": "e"}})
+    started("SetTaskLead", {"type": "item_update", "args": {"id": "f"}}, at=NOW - 30 * DAY - 1)
+    receipts.finish(sql, started("SetTaskPlan", {"type": "item_update", "args": {"id": "g"}}), {"task_id": "g"})
+    assert receipts.writing(sql, list("abcdefgh")) == {"a", "b", "c", "d"}
+    assert receipts.writing(sql, ["b", "z"]) == {"b"} and receipts.writing(sql, []) == set()
+    plan = [row[3] for row in sql.db.execute(f"EXPLAIN QUERY PLAN {receipts.WRITING}", (NOW, "[]"))]
+    assert any("INDEX plus_receipts_started" in step for step in plan), plan
 
 
 # ---- the Monday reset and UpdatePlanLabels --------------------------------------------------------------

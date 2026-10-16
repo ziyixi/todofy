@@ -205,7 +205,7 @@ def test_a_backup_from_before_the_planning_store_restores_into_it(tmp_path):
     old = database(migrations=before)
     seed(old)
     then = [
-        table._replace(columns=table.columns[:-2]) if table is sql.SUMMARIES else table
+        table._replace(columns=table.columns[:7]) if table is sql.SUMMARIES else table
         for table in sql.TABLES.values()
         if not table.name.startswith("plan_")
     ]
@@ -213,10 +213,28 @@ def test_a_backup_from_before_the_planning_store_restores_into_it(tmp_path):
     write_sql(tmp_path, tmp_path / "restore.sql", legacy_text=True)
     target = database()
     target.executescript((tmp_path / "restore.sql").read_text())
-    assert target.execute("SELECT event_id, category_id, triaged_at FROM summaries").fetchall() == [("e01", None, None)]
+    assert target.execute("SELECT event_id, category_id, triaged_at, brief FROM summaries").fetchall() == [
+        ("e01", None, None, None)
+    ]
     assert target.execute("SELECT count(*) FROM plan_tasks").fetchone() == (0,)
     ok, lines = verify(SqliteWrangler(target), "DB", tmp_path, legacy_text=True)
-    assert ok and lines[0] == f"PASS schema_version {before[-1].name} (later migrations applied: {LATEST})"
+    later = ", ".join(migration.name for migration in MIGRATIONS if migration not in before)
+    assert ok and lines[0] == f"PASS schema_version {before[-1].name} (later migrations applied: {later})"
+
+
+def test_a_backup_from_before_the_briefs_restores_them_as_never_derived(tmp_path):
+    """0008 added summaries.brief: an older backup's mail reads NULL there, which the brief backfill fills."""
+    before = [migration for migration in MIGRATIONS if migration.name < "0008"]
+    old = database(migrations=before)
+    seed(old)
+    then = [
+        table._replace(columns=table.columns[:-1]) if table is sql.SUMMARIES else table for table in sql.TABLES.values()
+    ]
+    backup_of(old, tmp_path, schema_version=before[-1].name, release=then)
+    write_sql(tmp_path, tmp_path / "restore.sql", legacy_text=True)
+    target = database()
+    target.executescript((tmp_path / "restore.sql").read_text())
+    assert target.execute("SELECT event_id, summary, brief FROM summaries").fetchall() == [("e01", "摘要", None)]
 
 
 def test_retired_tables_restore_until_a_migration_drops_them(source, tmp_path, monkeypatch):
@@ -315,13 +333,13 @@ def test_a_part_that_differs_from_the_manifest_is_refused(source, tmp_path, dama
 
 def test_long_values_are_appended_by_key_and_short_rows_stay_one_insert():
     table = {"name": "summaries", "columns": list(sql.SUMMARIES.columns), "key": ["event_id"]}
-    short = row_statements(table, ["e1", 1, "s", "x", "m", "", 0, 3, None])
+    short = row_statements(table, ["e1", 1, "s", "x", "m", "", 0, 3, None, None])
     assert short == [
         "INSERT INTO summaries (event_id, created_at, subject, summary, model, task_id, imported, category_id,"
-        " triaged_at) VALUES ('e1', 1, 's', 'x', 'm', '', 0, 3, NULL) ON CONFLICT DO NOTHING;"
+        " triaged_at, brief) VALUES ('e1', 1, 's', 'x', 'm', '', 0, 3, NULL, NULL) ON CONFLICT DO NOTHING;"
     ]
-    statements = row_statements(table, ["e'1", 1, "s", "长" * 100_000, "m", "", 0, None, None])
-    assert statements[0].endswith("VALUES ('e''1', 1, 's', '', 'm', '', 0, NULL, NULL) ON CONFLICT DO NOTHING;")
+    statements = row_statements(table, ["e'1", 1, "s", "长" * 100_000, "m", "", 0, None, None, "短"])
+    assert statements[0].endswith("VALUES ('e''1', 1, 's', '', 'm', '', 0, NULL, NULL, '短') ON CONFLICT DO NOTHING;")
     assert all("WHERE event_id = 'e''1' AND length(CAST(summary AS BLOB)) = " in line for line in statements[1:])
     assert len(statements) == 5  # 300,000 bytes in pieces of at most 80,000
 

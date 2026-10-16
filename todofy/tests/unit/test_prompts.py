@@ -3,10 +3,24 @@ import pytest
 from todofy.core import prompts
 from todofy.core.report_schema import Recommendation, parse_recommendations
 
+BRIEF_LINE = (
+    "\tIMPORTANT: Start with one plain sentence of at most 40 Chinese characters on its own line, saying what this "
+    "email is and what it asks of me, if anything. No markdown or greeting on that line.\n"
+)
 
-def test_summary_prompts_are_byte_identical_to_go(golden):
+
+def test_summary_prompts_are_pinned(golden):
     assert prompts.SUMMARY_EMAIL.encode() == golden.bytes("prompt_summary_email.txt")
     assert prompts.SUMMARY_RANGE.encode() == golden.bytes("prompt_summary_range.txt")
+
+
+def test_the_email_prompt_is_go_s_but_for_the_brief_line():
+    """The one deliberate change since Go (2026-10): the summary starts with the Mailbox's brief, right after the
+    length rule. Deleting the line restores Go's bytes; reading the brief needs nothing else (core/mailbox.py)."""
+    assert prompts.SUMMARY_EMAIL.count(BRIEF_LINE) == 1
+    go = prompts.SUMMARY_EMAIL.replace(BRIEF_LINE, "")
+    assert "concise to 1-2 sentences.\n\tIMPORTANT: Avoid showing # symbol" in go
+    assert prompts.SUMMARY_EMAIL.index("1-2 sentences") < prompts.SUMMARY_EMAIL.index(BRIEF_LINE)
 
 
 @pytest.mark.parametrize("top_n", [1, 3, 10])

@@ -12,7 +12,6 @@ from .gtd import parse_instant, rfc3339
 ROLES = (
     "office",
     "home",
-    "bets",
     "committed",
     "focus",
     "candiate",
@@ -22,6 +21,10 @@ ROLES = (
     "lead_2w",
     "lead_1m",
 )
+# Roles a setup confirmed before their retirement may still bind. The binding is kept exactly as saved and never
+# checked against Todoist, so renaming or deleting the label changes no etag and never disables Plus; a new setup
+# binds none. The weekly Bets are text now (core/plan.py); a task still labelled Bets loses it at Monday's reset.
+LEGACY_ROLES = ("bets",)
 LEADS = {"lead_1d": 1, "lead_3d": 3, "lead_1w": 7, "lead_2w": 14, "lead_1m": 30}
 PLANNING_ROLES = ("quarter", "candiate", "focus", "committed")
 STAGES = {"none": None, "quarterly": "quarter", "monthly": "candiate", "weekly": "focus", "committed": "committed"}
@@ -50,6 +53,11 @@ REPLACED_FILTER_QUERIES = {
 ACTIVE = "active"
 # plan_tasks.provider of a Todoist task ID (core/plan.py PROVIDERS).
 PROVIDER = "todoist"
+# The literal labels that clarify a mail task in place (waiting, someday or quick), as the extension's
+# weekly-review.ts lists them: such a task has left the Mailbox, as one with a planning stage has.
+CLARIFIED_LABELS = frozenset({"waiting", "blocked", "parked", "onhold", "quick"})
+# Roles whose labels a mail category never uses: Plus writes them by other means (stages, the retired Bets, leads).
+NOT_MAIL_ROLES = frozenset({*PLANNING_ROLES, *LEGACY_ROLES, *LEADS})
 
 
 MAX_METADATA_ITEMS = 500
@@ -155,13 +163,12 @@ def week_start(today: str) -> str:
 def membership_week(today: str, week: str, request: dict[str, Any]) -> str:
     """The week whose Monday reset a planning write's marks wait for.
 
-    On the week's last day an explicit commitment or Bet is a choice for the next week, so the coming
-    reset leaves the task's marks in place: both of them, as a task has one membership row. Every other
-    write gives this week, which never moves a kept row back (REMEMBER_WEEK).
+    On the week's last day an explicit commitment is a choice for the next week, so the coming reset
+    leaves the task's marks in place: all of them, as a task has one membership row. Every other write
+    gives this week, which never moves a kept row back (REMEMBER_WEEK).
     """
     monday = datetime.strptime(week, "%Y-%m-%d").date()
-    chosen = request.get("stage") == "committed" or request.get("bet") is True
-    if chosen and today == (monday + timedelta(days=6)).isoformat():
+    if request.get("stage") == "committed" and today == (monday + timedelta(days=6)).isoformat():
         return (monday + timedelta(days=7)).isoformat()
     return week
 
@@ -181,6 +188,9 @@ def discover(
                 missing.append(role)
     else:
         for binding in mapping:
+            if binding["role"] in LEGACY_ROLES:
+                mapped.append(binding)
+                continue
             matches = [label for label in labels if str(label.get("id", "")) == binding["id"]]
             if len(matches) == 1 and matches[0].get("name"):
                 mapped.append({**binding, "label": matches[0]["name"]})
@@ -202,7 +212,7 @@ def discover(
 
 def role_labels(mapping: list[dict[str, Any]] | None = None) -> dict[str, str]:
     return (
-        {role: role for role in (*ROLES, "quarter")}
+        {role: role for role in (*ROLES, *LEGACY_ROLES, "quarter")}
         if mapping is None
         else {row["role"]: row["label"] for row in mapping}
     )
@@ -232,7 +242,7 @@ def replace_planning_labels(
         {binding["label"] for binding in values}
     ) != len(values):
         raise ValueError("BAD_REQUEST")
-    return [retained[role] for role in (*ROLES, "quarter") if role in retained]
+    return [retained[role] for role in (*ROLES, *LEGACY_ROLES, "quarter") if role in retained]
 
 
 def task_etag(task: dict[str, Any], mapping: list[dict[str, Any]] | None = None) -> str:
@@ -365,9 +375,8 @@ def plan_labels(
         if AREAS[area]:
             labels.add(names[AREAS[area]])
     if "bet" in request:
-        labels.discard(names["bets"])
-        if request["bet"]:
-            labels.add(names["bets"])
+        # Retired: the weekly Bets are text (SetWeeklyBet), and Plus never writes the Bets label again.
+        raise ValueError("BAD_REQUEST")
     if "active" in request:
         labels.discard(ACTIVE)
         if request["active"]:
@@ -400,6 +409,59 @@ def reset_labels(
     if record["committed"] and names.get("committed") in labels:
         labels -= {names["committed"], names["candiate"]}
         labels.add(names["focus"])
-    if record["bet"]:
+    if record["bet"] and names.get("bets") in labels:
         labels.discard(names["bets"])
     return sorted(labels)
+
+
+# ---- Mailbox (core/mailbox.py has the domain rules) -------------------------------------------------------------
+
+
+def api_priority(priority: int) -> int:
+    """Todoist's API priority of a domain priority: P1 (1) is 4, P4 is 1."""
+    return 5 - priority
+
+
+def in_mailbox(view: dict[str, Any], inbox_project_id: str) -> bool:
+    """Whether a task_view is still to clarify in the mail project, as the extension's inboxToClarify says: a
+    top-level task with no planning stage and none of CLARIFIED_LABELS. Whether it is mail is the ledger's to say."""
+    return (
+        bool(inbox_project_id)
+        and view["project_id"] == inbox_project_id
+        and not view["parent_id"]
+        and view["stage"] == "none"
+        and not CLARIFIED_LABELS.intersection(view["labels"])
+    )
+
+
+def mail_label(label: dict[str, str], mapping: list[dict[str, Any]] | None) -> bool:
+    """Whether a current label ({"id", "label"}) may be a mail category's: any but a planning stage's, the retired
+    Bets', a lead window's and the in-progress label. The two area labels may."""
+    reserved = {row["id"] for row in mapping or [] if row["role"] in NOT_MAIL_ROLES}
+    return label["id"] not in reserved and label["label"] != ACTIVE
+
+
+def filed_labels(task: dict[str, Any], label: str, mapping: list[dict[str, Any]] | None) -> list[str]:
+    """The labels a mail task keeps when it is filed by a category of ``label``: every one it has and the category's;
+    an area label replaces the other area label, so the two stay exclusive."""
+    names = role_labels(mapping)
+    labels = set(task.get("labels") or []) | {label}
+    areas = {names[role] for role in ("office", "home") if role in names}
+    if label in areas:
+        labels -= areas - {label}
+    return sorted(labels)
+
+
+def untouched(task: dict[str, Any], parents: set[str]) -> bool:
+    """Whether the owner left a mail task as Todofy created it, by Todoist's own fields: no label, priority P4, no
+    date, deadline or estimate, no sub-task (``parents`` holds the parent IDs of the project's tasks) and no
+    comment. A task whose comment count Todoist does not give is not untouched."""
+    return (
+        not task.get("labels")
+        and int(task.get("priority") or 1) == 1
+        and not task.get("due")
+        and not task.get("deadline")
+        and not task.get("duration")
+        and str(task["id"]) not in parents
+        and task.get("note_count") == 0
+    )

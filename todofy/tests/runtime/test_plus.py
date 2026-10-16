@@ -11,6 +11,7 @@ import pytest
 from tests.fakes.plus_fake import PlusFake
 from tests.fakes.server import Reply
 from tests.runtime.harness import CSRF_SIGNING_KEY, Worker, reason, start_gateway
+from todofy.core import plus
 
 
 @dataclass
@@ -47,6 +48,15 @@ class Stack:
             cursor = response.json().get("next_page_token", "")
             if not cursor:
                 return records
+
+
+def bind_retired_bets(worker: Worker) -> None:
+    """Make the saved setup the owner's: confirmed before the Bets became text, it also binds the bets label
+    (PlusFake's label 3), which Plus keeps as saved; a setup confirmed now binds none."""
+    [row] = worker.d1("SELECT mapping, timezone FROM plus_settings WHERE id=1")
+    labels = [*json.loads(row["mapping"])["labels"], {"role": "bets", "id": "3", "label": "bets"}]
+    mapping = json.dumps({"etag": plus.fingerprint([labels, row["timezone"]]), "labels": labels})
+    worker.d1(f"UPDATE plus_settings SET mapping='{mapping}' WHERE id=1")
 
 
 @pytest.fixture(scope="module")
@@ -95,6 +105,7 @@ def stack(tmp_path_factory) -> Iterator[Stack]:
             },
         )
         assert confirmed.status_code == 200, confirmed.text
+        bind_retired_bets(worker)
         request = {"display_name": "Synthetic Chrome", "request_id": str(uuid.uuid4())}
         issued = worker.post_owner("/api/plus/v1/connections:issueExtensionConnection", request)
         assert issued.status_code == 200, issued.text
@@ -127,7 +138,13 @@ def test_paged_projection_preserves_native_ids_dates_and_private_credentials(sta
 
 
 def test_planning_and_deadline_actions_preserve_other_labels_and_scheduled_date(stack):
+    assert stack.plan()["enabled"]
     parent = next(task for task in stack.tasks() if task["id"] == "parent")
+    assert parent["bet"]  # still labelled Bets, under the retired binding
+    # Plus never writes the retired Bets label again; the request writes nothing.
+    sent = len(stack.upstream.commands())
+    refused = stack.write("setTaskPlan", task_id="parent", etag=parent["etag"], bet=False)
+    assert reason(refused) == "BAD_REQUEST" and len(stack.upstream.commands()) == sent
     changed = stack.write("setTaskPlan", task_id="parent", etag=parent["etag"], stage="monthly")
     assert changed.status_code == 200, changed.text
     assert stack.upstream.tasks["parent"]["labels"] == ["bets", "candiate", "deep", "office"]
@@ -321,6 +338,39 @@ def test_mark_in_progress_writes_only_an_existing_active_label_and_keeps_a_sunda
         assert stack.weeks()["deadline"]["week_start"] == shifted(week, 7)
     finally:
         stack.upstream.labels.pop()
+
+
+def test_weekly_bets_are_text_in_d1_written_by_compare_and_set_without_todoist(stack):
+    def bet(**body):
+        response = stack.worker.hooks.post(
+            "/api/plus/v1/weeklyBets:setWeeklyBet", json=body, headers={"authorization": "Bearer " + stack.token}
+        )
+        return response.json()["weekly_bet"] if response.status_code == 200 else reason(response)
+
+    week = stack.plan()["week_start"]
+    following, ended = shifted(week, 7), shifted(week, -7)
+    calls = len(stack.upstream.received())
+    created = bet(week_start=week, area="work", text="  Ship the\nsynthetic draft ")
+    assert created["text"] == "Ship the synthetic draft" and created["etag"] == "1"
+    # Sending the saved text again (a lost answer) answers it as saved, whatever the etag.
+    assert bet(week_start=week, area="work", text="Ship the synthetic draft") == created
+    changed = bet(week_start=week, area="work", text="Ship it to review", etag="1")
+    assert changed["etag"] == "2"
+    assert bet(week_start=week, area="work", text="From an older tab", etag="1") == "ETAG_MISMATCH"
+    cleared = bet(week_start=week, area="work", text="", etag="2")
+    assert cleared["etag"] == "3" and "text" not in cleared
+    assert bet(week_start=following, area="personal", text="Next week's synthetic line")["etag"] == "1"
+    assert bet(week_start=ended, area="work", text="Too late") == "ACTION_NOT_ALLOWED"
+    assert bet(week_start=week, area="office", text="A label is no area") == "BAD_REQUEST"
+    assert len(stack.upstream.received()) == calls  # no Todoist call, no metadata Sync
+    # The cleared row stays at its rev, so an old etag can never overwrite it unseen.
+    assert stack.worker.d1("SELECT period, area, body, rev FROM plan_notes WHERE kind = 'bets' ORDER BY period") == [
+        {"period": week, "area": "work", "body": "", "rev": 3},
+        {"period": following, "area": "personal", "body": "Next week's synthetic line", "rev": 1},
+    ]
+    shown = [(row["week_start"], row["area"], row.get("text", "")) for row in stack.plan()["weekly_bets"]]
+    assert shown == [(week, "work", ""), (following, "personal", "Next week's synthetic line")]
+    stack.worker.d1("DELETE FROM plan_notes")
 
 
 def test_revocation_stops_only_this_extension_connection(stack):

@@ -1,11 +1,13 @@
 """Daily cleanup of expired rows (v2 plan §5.3), one bounded batch per table per call.
 
-Kept: non-imported summaries and daily reports 90 days, owner actions 180 days,
+Kept: daily reports 90 days, owner actions 180 days,
 auth-failure counters 30 days; imported legacy mail text until its
 ``expires_at`` and, when LEGACY_TEXT_RETENTION_DAYS is above 0, for that many
 days (0 keeps it); the GTD ledger's raw snapshot rows 14 days, its snapshots and
 daily aggregates 120 days and its weekly reviews 400 days (core/gtd.py).
-``mail_events`` is never deleted: it is the webhook dedupe ledger. Task intents
+``mail_events`` is never deleted: it is the webhook dedupe ledger. Nor are
+``summaries`` (since 2026-10, the owner's rule): a summary is the Mailbox's mail
+and goes only when the owner deletes it. Task intents
 (contracts/task-intent-v1): a failed intent's text 30 days, every finished intent
 (hash, counts, codes, request and Todoist IDs) 400 days after its last change, its
 task rows first.
@@ -22,7 +24,6 @@ from todofy.core.sql import retention as sql
 from todofy.runtime.config import integer
 from todofy.runtime.reports import failure_hour
 
-SUMMARY_DAYS = 90
 REPORT_DAYS = 90
 OWNER_ACTION_DAYS = 180
 AUTH_FAILURE_DAYS = 30
@@ -32,9 +33,8 @@ GTD_TASK_BATCH = 1000
 
 
 async def tick(db: Any, env: Any, now: int) -> bool:
-    """One sweep of at most thirteen bounded writes; True if a table still has expired rows."""
+    """One sweep of at most twelve bounded writes; True if a table still has expired rows."""
     batches = [
-        (sql.EXPIRE_SUMMARIES, now - SUMMARY_DAYS * DAY, BATCH),
         (sql.EXPIRE_REPORTS, _day(now - REPORT_DAYS * DAY), BATCH),
         (sql.EXPIRE_OWNER_ACTIONS, now - OWNER_ACTION_DAYS * DAY, BATCH),
         (sql.EXPIRE_AUTH_FAILURES, failure_hour(now - AUTH_FAILURE_DAYS * DAY), BATCH),

@@ -21,6 +21,8 @@ import { API_DOMAIN, isReason, uiError } from './ui.ts';
 /** The Access owner, or null for the extension, whose token's SHA-256 is `digest`. */
 interface PlusContext { env: Env; owner: string | null; digest: string | null }
 const OWNER_METHODS = new Set(['ConfirmPlanMapping', 'IssueExtensionConnection', 'ReadExtensionConnections', 'RevokeExtensionConnection', 'VerifyPlanStore']);
+/** Reads sent as POST for their body of task IDs: like the GET reads, they go on in maintenance (core READ_METHODS). */
+const POST_READS = new Set(['LookupMailItems']);
 const PREFIX = '/api/plus/v1/';
 const FLOW_PREFIX = '/api/plus/flowday';
 const DOMAIN = API_DOMAIN;
@@ -59,7 +61,7 @@ const api = new HttpTranscoder(PlusService, handlers(), {
   authorize: async (request, route, ctx) => {
     if (!route.safe) {
       if (ctx.owner !== null) await verifyCsrf(request, ctx.env, ctx.owner);
-      if (flag(ctx.env, 'MAINTENANCE_MODE')) throw uiError('MAINTENANCE');
+      if (flag(ctx.env, 'MAINTENANCE_MODE') && !POST_READS.has(route.method.name)) throw uiError('MAINTENANCE');
     }
   },
 });

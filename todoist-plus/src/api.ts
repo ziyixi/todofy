@@ -5,9 +5,12 @@ import {
 } from "@ziyixi/proto/http-client";
 import {
   PlusService,
+  type MailCategory as ApiMailCategory,
   type Plan as ApiPlan,
   type PlanningTask as ApiPlanningTask,
   type TaskDependency as ApiTaskDependency,
+  type Priority,
+  type WeeklyBet as ApiWeeklyBet,
 } from "@ziyixi/proto/todofy/ui/v1/plus_service_pb";
 import {
   CommandTimerRequest_Action,
@@ -20,14 +23,21 @@ import {
   type TimerSession,
 } from "@ziyixi/proto/flowday/ui/v1/time_entry_pb";
 import type { Flow } from "@ziyixi/proto/flowday/ui/v1/flow_pb";
+import { BET_AREAS, BetNotSaved } from "./bets";
+import { MAIL_BATCH } from "./mail";
 import type {
+  BetArea,
   FlowDayPlan,
   FocusState,
+  MailCategories,
+  MailCategory,
+  MailLookup,
   PlanMetadata,
   PlanningTask,
   PlusActions,
   TaskDependency,
   TimerSnapshot,
+  WeeklyBet,
 } from "./model";
 
 export interface Connection {
@@ -85,7 +95,6 @@ export function planningTask(task: ApiPlanningTask): PlanningTask {
     stage: ["quarterly", "monthly", "weekly", "committed"].includes(task.stage)
       ? (task.stage as PlanningTask["stage"])
       : "none",
-    bet: task.bet,
     priority: task.priority || 1,
     deadline: task.deadline,
     due: task.due,
@@ -126,6 +135,40 @@ function dependencyError(error: unknown): unknown {
     );
   return error;
 }
+function weeklyBet(bet: ApiWeeklyBet): WeeklyBet | undefined {
+  if (!BET_AREAS.includes(bet.area as BetArea)) return undefined;
+  return {
+    weekStart: bet.weekStart,
+    area: bet.area as BetArea,
+    text: bet.text,
+    etag: bet.etag,
+  };
+}
+/** The provider's ID in a reference: Todoist's today; empty for any other. */
+function todoistId(ref: { provider: string; externalId: string } | undefined) {
+  return ref?.provider === "todoist" ? ref.externalId : "";
+}
+function todoistRef(id: string) {
+  return { provider: "todoist", externalId: id };
+}
+function mailCategory(category: ApiMailCategory): MailCategory | undefined {
+  const labelId = todoistId(category.label);
+  // Priority's numbers are the domain's P1 (1) to P4 (4).
+  if (!labelId || category.priority < 1 || category.priority > 4)
+    return undefined;
+  return { id: category.id, labelId, priority: category.priority };
+}
+function mailCategories(answer: {
+  categories: ApiMailCategory[];
+  destination?: { provider: string; externalId: string };
+}): Omit<MailCategories, "etag"> {
+  return {
+    categories: answer.categories.flatMap(
+      (category) => mailCategory(category) ?? [],
+    ),
+    destination: todoistId(answer.destination),
+  };
+}
 function planMetadata(plan: ApiPlan): PlanMetadata {
   return {
     week: plan.weekStart,
@@ -148,6 +191,7 @@ function planMetadata(plan: ApiPlan): PlanMetadata {
     reviewTaskId: plan.reviewTaskId,
     nextWeekTaskIds: plan.nextWeekTaskIds,
     dependencies: plan.dependencies.map(taskDependency),
+    weeklyBets: plan.weeklyBets.flatMap((bet) => weeklyBet(bet) ?? []),
   };
 }
 function timerSnapshot(session: TimerSession): TimerSnapshot {
@@ -379,6 +423,22 @@ export function createApi(
         estimatedMinutes: task.estimatedMinutes,
       };
     },
+    async setWeeklyBet(bet) {
+      let result;
+      try {
+        result = await plus.setWeeklyBet(bet);
+      } catch (error) {
+        const reason =
+          error instanceof RpcStatusError ? error.status.reason : undefined;
+        if (reason === "ETAG_MISMATCH") throw new BetNotSaved("changed");
+        // The only write Todofy refuses for a configured plan: a week that has ended.
+        if (reason === "ACTION_NOT_ALLOWED") throw new BetNotSaved("ended");
+        throw error;
+      }
+      const saved = result.weeklyBet && weeklyBet(result.weeklyBet);
+      if (!saved) throw new Error("The saved goal could not be read.");
+      return saved;
+    },
     async updateLabels(labels, etag) {
       const result = await plus.updatePlanLabels({
         labels,
@@ -512,6 +572,91 @@ export function createApi(
       });
       timerRequests.delete(key);
       return timerSnapshot(confirmed);
+    },
+    async lookupMail(taskIds) {
+      const lookup: MailLookup = {
+        items: [],
+        categories: [],
+        etag: "",
+        destination: "",
+      };
+      const batches: string[][] = [];
+      for (let start = 0; start < taskIds.length; start += MAIL_BATCH)
+        batches.push(taskIds.slice(start, start + MAIL_BATCH));
+      // At least one request: with no task to ask about, it still answers the categories.
+      for (const batch of batches.length ? batches : [[]]) {
+        const result = await plus.lookupMailItems({ taskIds: batch });
+        lookup.items.push(
+          ...result.items.flatMap((item) => {
+            const taskId = todoistId(item.task);
+            return taskId && item.receiveTime
+              ? [
+                  {
+                    id: item.id,
+                    taskId,
+                    brief: item.brief,
+                    receivedAt: new Date(
+                      Number(item.receiveTime.seconds) * 1000,
+                    ).toISOString(),
+                    hasSummary: item.hasSummary,
+                  },
+                ]
+              : [];
+          }),
+        );
+        // The last answer's categories: the newest, should they change between requests.
+        Object.assign(lookup, mailCategories(result), {
+          etag: result.categoriesEtag,
+        });
+      }
+      return lookup;
+    },
+    async readMailSummary(id) {
+      return (await plus.readMailSummary({ id })).summary;
+    },
+    async readMailSettings() {
+      const result = await plus.readMailSettings({});
+      return {
+        ...mailCategories(result),
+        etag: result.etag,
+        projects: result.projects.map((project) => ({
+          id: project.id,
+          name: project.displayName,
+          inbox: project.inbox,
+        })),
+      };
+    },
+    async updateMailSettings(categories, destination, etag) {
+      const result = await plus.updateMailSettings({
+        categories: categories.map((category) => ({
+          label: todoistRef(category.labelId),
+          priority: category.priority as Priority,
+        })),
+        destination: todoistRef(destination),
+        etag,
+      });
+      return { ...mailCategories(result), etag: result.etag };
+    },
+    async fileMail(task, category, categoriesEtag, requestId) {
+      const result = await plus.fileMailItem({
+        taskId: task.id,
+        etag: task.etag,
+        requestId,
+        categoryId: category.id,
+        categoriesEtag,
+      });
+      if (!result.task) throw new Error("The filed task could not be read.");
+      return {
+        ...planningTask(result.task),
+        estimatedMinutes: task.estimatedMinutes,
+      };
+    },
+    async deleteMail(taskIds, requestId) {
+      const result = await plus.deleteMailItems({ taskIds, requestId });
+      return {
+        deletedTaskIds: result.deletedTaskIds,
+        keptTaskIds: result.keptTaskIds,
+      };
     },
   };
 }

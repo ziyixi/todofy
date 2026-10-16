@@ -44,6 +44,10 @@ an older config without `GEMINI_EMAIL_MODELS` inherits the default chain. The Bu
 both orders, and each result records the model that answered. Token budget and fallback rules
 remain shared; completed email summaries are not recomputed when the config changes.
 
+Since 2026-10 the email summary starts with a one-sentence brief on its own line (one deliberate prompt line,
+read back by a pure function, no new call); Todoist Plus's Mailbox shows it. Mail summarised before that line
+gets a model-written brief once, in the background, within half of the day's token budget.
+
 To restore Flash as the preferred email model, set `GEMINI_EMAIL_MODELS` to the same order as
 `GEMINI_MODELS` and publish through the normal branch CI and main Actions flow.
 
@@ -57,7 +61,7 @@ To restore Flash as the preferred email model, set `GEMINI_EMAIL_MODELS` to the 
 | `todo_sending` | Todoist create in flight |
 | `todo_unknown` | the create may or may not have happened; never resent automatically, a read-only footer lookup runs instead |
 | `todo_created` | the task exists (found by the lookup or confirmed by the owner); completes on the next step |
-| `complete` | done; the mail body is dropped, the summary row feeds the reports |
+| `complete` | done; the mail body is dropped, the summary row feeds the reports and the Plus Mailbox (no time-based deletion) |
 | `ignored` | dismissed by the owner; the ledger row stays as the dedupe record |
 | `failed_summary` | automatic summary attempts stopped (or Mail Hero flagged the mail for review) |
 
@@ -119,10 +123,17 @@ rollover, and issue a named extension connection token. Opening the page or issu
 enable task writes. The extension never receives the Todoist API key.
 
 Todoist remains the task store. Todofy is the only Todoist writer: planning labels, true deadlines,
-explicit child creation and task completion use replay-safe Sync commands. FlowDay owns the day queue,
-estimates and shared timer, reached through a private service binding. The existing ten-minute cron
-returns recorded previous-week commitments to weekly candidates and removes previous-week Bets after
-Monday 00:00 in the account timezone. This continues when the browser is closed.
+explicit child creation and task completion use replay-safe Sync commands. The weekly Work and Personal
+Bets are the owner's own lines of text in Todofy's planning store (D1), never written to Todoist.
+FlowDay owns the day queue, estimates and shared timer, reached through a private service binding. The
+existing ten-minute cron returns recorded previous-week commitments to weekly candidates after Monday
+00:00 in the account timezone, and removes the retired Bets label from tasks while a setup still binds
+it. This continues when the browser is closed.
+
+Plus's Mailbox lists the mail tasks still to clarify, each with its one-sentence brief. Filing one writes
+its category's label and priority and moves it in one Sync; Delete all permanently deletes the listed mail
+the owner left untouched, after Todofy has read it again (and again on a retry), with its summary. Nothing
+else deletes a summary.
 
 The [backend contract](docs/todoist-plus.md) covers setup, pause controls and retry behavior.
 
