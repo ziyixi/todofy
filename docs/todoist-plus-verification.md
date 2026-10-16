@@ -673,4 +673,14 @@ step drops and steps of a committed outcome in the client consistency grid. Todo
 384,037 bytes (121,765 with `gzip -9`), its CSS 33,605. The Kale screenshots and the interface document's images
 were retaken.
 
+Final branch check, same day, on the code at `5bc0f91a`. Every job that CI's change detection selects against
+`60309fac` was run locally from the workflow's own steps and passes: the Changes job's tests, Todoist Plus (167
+unit cases, 28 built-MV3 Chromium cases), Todofy static and all three runtime shards (559 cases, each exactly
+once), Proto, Contracts, and the apps the proto change re-checks (Mail Hero, Home, FlowDay, links, watch,
+mailsort, recall, brief, Fleet, the website and Platform). Two extension cases now wait for focus that moves in
+an effect after the announcing render; one had failed once in a full run under load. Local gaps: no GPG here, so
+Mail Hero's crypto round-trip skipped, and Platform's Linux-only steps (manifest compiler, AppArmor, image build,
+k3s) did not run. The manifest's permissions are unchanged. On main the change would deploy Todofy and publish
+the Todoist Plus extension; nothing else releases.
+
 Not verified: the live Todoist page and data, the installed extension, branch CI and release.

@@ -21,8 +21,9 @@ exact query, behind a consistency test against the board. Plus has no dark mode 
 colours follow Todoist's light themes. `--plus-danger` reads Todoist's overdue colour; Other views remembers
 open or closed. Dependencies and native row marks are not built. Same-day review fixes are in (Focus's
 line skips waiting tasks, two-part statuses get their own row, medium windows keep the four stages in one row,
-Start takes no title room, the drag preview matches the card, Week keeps step counts). Local extension checks
-(167 unit, 28 MV3 Chromium), Todofy host and Plus runtime cases and scripts pass
+Start takes no title room, the drag preview matches the card, Week keeps step counts). A final local run of
+every check CI selects for the branch passes (extension 167 unit, 28 MV3 Chromium; Todofy 559 runtime; the
+proto change re-checks the other apps; Platform's Linux-only steps not run here)
 ([evidence](docs/todoist-plus-verification.md#start-now-and-waiting-lanes-local-checks-october-16)).
 Pending: owner review of the Kale screenshots, push, full branch CI and one same-SHA release. Deploy Todofy
 first, since `active` needs it, then reload the extension and refresh Todoist; the installed version's Waiting
