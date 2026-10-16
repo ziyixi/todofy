@@ -742,3 +742,55 @@ test("native pages read only plan settings and hide replaced items from the ID-o
     await context.close();
   }
 });
+
+test("Other views stays as the owner left it across page loads", async () => {
+  const extensionPath = resolve(".output/chrome-mv3");
+  const context = await chromium.launchPersistentContext("", {
+    channel: "chromium",
+    headless: true,
+    args: [
+      `--disable-extensions-except=${extensionPath}`,
+      `--load-extension=${extensionPath}`,
+    ],
+  });
+  try {
+    const worker =
+      context.serviceWorkers()[0] ??
+      (await context.waitForEvent("serviceworker"));
+    await setup(context, worker);
+    const page = await context.newPage();
+    await page.goto("https://app.todoist.com/app/today");
+    const toggle = page.getByRole("button", { name: /^Other views\s*2$/u });
+    await expect(toggle).toHaveAttribute("aria-expanded", "false");
+    await expect(page.locator("#extra-filter-wrapper")).toBeHidden();
+    await toggle.click();
+    await expect(page.locator("#extra-filter-wrapper")).toBeVisible();
+    await page.reload();
+    await expect(toggle).toHaveAttribute("aria-expanded", "true");
+    await expect(page.locator("#extra-filter-wrapper")).toBeVisible();
+    await expect(page.locator("#legacy-wrapper")).toBeHidden();
+    // One boolean in storage.local, nothing else about the sidebar.
+    const saved = () =>
+      worker.evaluate(async () => {
+        const storage = (
+          globalThis as unknown as {
+            chrome: {
+              storage: {
+                local: { get(key: string): Promise<Record<string, unknown>> };
+              };
+            };
+          }
+        ).chrome.storage;
+        return (await storage.local.get("otherViewsOpen")).otherViewsOpen;
+      });
+    expect(await saved()).toBe(true);
+    await toggle.click();
+    await expect(page.locator("#extra-filter-wrapper")).toBeHidden();
+    await page.reload();
+    await expect(toggle).toHaveAttribute("aria-expanded", "false");
+    await expect(page.locator("#extra-filter-wrapper")).toBeHidden();
+    expect(await saved()).toBe(false);
+  } finally {
+    await context.close();
+  }
+});

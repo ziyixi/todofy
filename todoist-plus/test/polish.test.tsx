@@ -33,6 +33,7 @@ async function planProps(language: Language): Promise<PlanViewProps> {
     todayTaskIds: focus.taskIds,
     addFocus: vi.fn(),
     addStep: vi.fn(),
+    chooseLead: vi.fn(),
     onOpenTask: vi.fn(),
     completeReview: vi.fn(),
   };
@@ -69,6 +70,7 @@ it("counts steps in natural English and Chinese", async () => {
         tasks={[parent, ...tasks]}
         managedLabels={plan.managedLabels}
         scheduledIds={new Set(["one"])}
+        today="2026-10-13"
         language={language}
         onClick={vi.fn()}
       />,
@@ -138,12 +140,12 @@ it("names a paused timer as a state, colours checkboxes by priority and keeps Fl
 it("gives the labels dialog one name and marks expandable rows with a chevron", async () => {
   const { rerender } = render(<PlanView {...await planProps("en")} />);
   expect(screen.getByRole("button", { name: "Planning labels" })).toBeTruthy();
-  const attention = screen.getByText(/^Needs a look · \d+$/u);
-  expect(attention.querySelector("svg.lucide-chevron-right")).toBeTruthy();
-  expect(attention.querySelector("svg.lucide-flag")).toBeNull();
+  const deadlines = screen.getByText(/^Deadlines · \d+$/u);
+  expect(deadlines.querySelector("svg.lucide-chevron-right")).toBeTruthy();
+  expect(deadlines.querySelector("svg.lucide-flag")).toBeNull();
   rerender(<PlanView {...await planProps("zh")} />);
   expect(screen.getByRole("button", { name: "计划标签" })).toBeTruthy();
-  expect(screen.getByText(/^需要关注 · \d+$/u)).toBeTruthy();
+  expect(screen.getByText(/^截止日期 · \d+$/u)).toBeTruthy();
 });
 
 it("leaves the drop zone under a planned day blank and dates the weekly review", async () => {

@@ -140,6 +140,7 @@
   overflow-wrap: anywhere;
 }
 .planning-outcome-start {
+  display: flex;
   color: var(--plus-warning);
   flex: 0 0 auto;
   margin-top: 3px;

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import { ChevronRight } from "lucide-react";
-import { displayedTitle, effectiveArea } from "./domain";
+import { effectiveArea } from "./domain";
+import { canMarkActive } from "./deadlines";
+import { DeadlineList } from "./DeadlineList";
 import { planningOutcomes } from "./planning-outcomes";
 import { ReviewBoard } from "./ReviewBoard";
 import { PlanningWeek } from "./PlanningWeek";
@@ -37,10 +38,18 @@ export interface PlanViewProps {
   addFocus: (id: string) => void;
   /** Opens the task's step editor, empty, for a follow-up step. */
   addStep: (task: PlanningTask) => void;
+  /** Opens the task's editor at its start-ahead choice. */
+  chooseLead: (task: PlanningTask) => void;
   onOpenTask: (id: string) => void;
   completeReview: (task: PlanningTask) => Promise<boolean>;
   /** Opened from the review task's link: start with the weekly review. */
   reviewing?: boolean;
+  /** The owner's open or closed choice for Deadlines this visit; undefined follows the default. */
+  deadlinesOpen?: boolean;
+  onDeadlinesToggle?: (open: boolean) => void;
+  /** Opened from Focus's quiet line: Review, with Deadlines open and focused. */
+  showDeadlines?: boolean;
+  onDeadlinesShown?: () => void;
 }
 export function PlanView(props: PlanViewProps) {
   const { plan, language, editTask, onLabels } = props;
@@ -50,17 +59,28 @@ export function PlanView(props: PlanViewProps) {
   const [waitingOpen, setWaitingOpen] = useState(false);
   // A review jump focuses its target and scrolls it into view once; Week mounts at the first
   // unplanned commitment.
-  const [jump, setJump] = useState<"waiting" | "runway">();
+  const [jump, setJump] = useState<"waiting" | "runway" | "deadlines">();
   const section = useRef<HTMLElement>(null);
   const reviewButton = useRef<HTMLButtonElement>(null);
   const text = words(language);
   useEffect(() => {
     if (props.reviewing) setReviewing(true);
   }, [props.reviewing]);
+  const { showDeadlines, onDeadlinesShown } = props;
+  useEffect(() => {
+    if (!showDeadlines) return;
+    setMode("review");
+    setJump("deadlines");
+    onDeadlinesShown?.();
+  }, [showDeadlines, onDeadlinesShown]);
   useEffect(() => {
     if (!jump) return;
     const target = section.current?.querySelector<HTMLElement>(
-      jump === "waiting" ? ".planning-waiting > summary" : ".planning-runway",
+      {
+        waiting: ".planning-waiting > summary",
+        runway: ".planning-runway",
+        deadlines: ".planning-deadlines > summary",
+      }[jump],
     );
     target?.focus({ preventScroll: true });
     // jsdom has no layout, and so no scrollIntoView.
@@ -70,8 +90,20 @@ export function PlanView(props: PlanViewProps) {
   const commitments = planningOutcomes(plan.tasks, plan.managedLabels).filter(
     (task) => task.stage === "committed",
   );
-  const attention = plan.tasks.filter(
-    (task) => task.mustStart || task.missingLead,
+  const deadlines = (
+    <DeadlineList
+      tasks={plan.tasks}
+      today={props.currentDate}
+      language={language}
+      busy={props.busy}
+      run={props.run}
+      actions={props.actions}
+      canMarkActive={canMarkActive(plan)}
+      open={props.deadlinesOpen}
+      onToggle={(open) => props.onDeadlinesToggle?.(open)}
+      editTask={editTask}
+      chooseLead={props.chooseLead}
+    />
   );
   const count = (area: Area) =>
     commitments.filter((task) => effectiveArea(task, plan.tasks) === area)
@@ -184,8 +216,11 @@ export function PlanView(props: PlanViewProps) {
             ))}
           </div>
           <ReviewBoard {...props} area={area} />
+          {/* Daily first: Deadlines above the weekly Waiting row. */}
+          {deadlines}
           <WaitingList
             tasks={plan.tasks}
+            today={props.currentDate}
             language={language}
             busy={props.busy}
             todayTaskIds={props.todayTaskIds}
@@ -198,27 +233,10 @@ export function PlanView(props: PlanViewProps) {
           />
         </>
       ) : (
-        <PlanningWeek {...props} startAtUnplanned={jump === "runway"} />
-      )}
-      {attention.length > 0 && (
-        <details className="planning-attention">
-          <summary>
-            <ChevronRight size={14} aria-hidden="true" />
-            {text.attention} · {attention.length}
-          </summary>
-          <ul aria-label={text.attention}>
-            {attention.map((task) => (
-              <li key={task.id}>
-                <button onClick={() => editTask(task)}>
-                  {displayedTitle(task.title)}
-                </button>
-                <span>
-                  {task.mustStart ? text.mustStart : text.missingLead}
-                </span>
-              </li>
-            ))}
-          </ul>
-        </details>
+        <>
+          <PlanningWeek {...props} startAtUnplanned={jump === "runway"} />
+          {deadlines}
+        </>
       )}
       <p className="planning-reset-note">{text.reset}</p>
     </section>

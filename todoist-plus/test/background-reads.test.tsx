@@ -104,7 +104,7 @@ it("shows confirmed queue, deadline and goal results without reading the week or
   fireEvent.click(screen.getByRole("tab", { name: "Review" }));
   fireEvent.click(
     screen.getByRole("button", {
-      name: "Prepare the next research check-in, No priority",
+      name: "Prepare the next research check-in, No priority, Start window open · 2 days left",
     }),
   );
   const editor = within(screen.getByRole("region", { name: "Steps & timing" }));

@@ -15,6 +15,9 @@ const state = vi.hoisted(() => ({
   readPlan: undefined as Promise<never> | undefined,
   rejectMounts: 0,
   mounted: [] as string[],
+  // Other views' saved open state, and what was saved since.
+  otherViews: false,
+  savedOtherViews: [] as boolean[],
   reports: [] as PageStatus[],
   timers: [] as (() => void)[],
 }));
@@ -63,6 +66,8 @@ vi.mock("../src/client", () => ({
     readPlan: () => state.readPlan ?? new Promise(() => {}),
   },
   openOptions: () => {},
+  readOtherViews: async () => state.otherViews,
+  saveOtherViews: (open: boolean) => state.savedOtherViews.push(open),
   reportPage: (status: PageStatus) => state.reports.push(status),
 }));
 vi.mock("../src/App", () => ({
@@ -139,6 +144,8 @@ beforeEach(() => {
     readPlan: undefined,
     rejectMounts: 0,
     mounted: [],
+    otherViews: false,
+    savedOtherViews: [],
     reports: [],
     timers: [],
   });
@@ -189,6 +196,21 @@ it("shows native favourites again when the container goes away on a native page"
     document.querySelector<HTMLElement>("todoist-plus-other-views")!.style
       .display,
   ).toBe("none");
+});
+
+it("remembers whether Other views was left open", async () => {
+  state.otherViews = true;
+  const { ctx } = context();
+  await act(() => mountTodoist(ctx));
+  await settle();
+  const toggle = screen.getByRole("button", { name: /Other views/u });
+  expect(toggle.getAttribute("aria-expanded")).toBe("true");
+  expect(visible("#extra")).toBe(true);
+  expect(visible("#replaced")).toBe(false);
+  fireEvent.click(toggle);
+  await settle();
+  expect(visible("#extra")).toBe(false);
+  expect(state.savedOtherViews).toEqual([false]);
 });
 
 it("never hides a Todoist dialog or toast added beside the Plus view", async () => {

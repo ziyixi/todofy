@@ -28,6 +28,7 @@ async function props(): Promise<PlanViewProps> {
     todayTaskIds: focus.taskIds,
     addFocus: vi.fn(),
     addStep: vi.fn(),
+    chooseLead: vi.fn(),
     onOpenTask: vi.fn(),
     completeReview: vi.fn(),
   };

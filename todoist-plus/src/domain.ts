@@ -87,7 +87,8 @@ export function displayedTitle(title: string): string {
   return (
     title
       .replace(/^\[(?:TASK|EXP|COL)\]\s*/u, "")
-      .replace(/\s*<k:[A-Za-z0-9_.:-]+>/gu, "")
+      // Legacy key suffixes, such as "<k:report dep:draft,data>", show in Todoist only.
+      .replace(/\s*<k:[^<>]*>/gu, "")
       .trim() || title
   );
 }

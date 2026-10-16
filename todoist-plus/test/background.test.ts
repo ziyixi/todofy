@@ -206,3 +206,34 @@ it("keeps only a closed-set page status from Todoist and shows it to the options
     value: status,
   });
 });
+
+it("keeps only Other views' open state, for Todoist pages, and forgets it on disconnect", async () => {
+  expect(await send({ kind: "otherViews" })).toEqual({
+    ok: true,
+    value: false,
+  });
+  expect(await send({ kind: "otherViews", open: true })).toEqual({
+    ok: true,
+    value: null,
+  });
+  expect(mocks.local.get("otherViewsOpen")).toBe(true);
+  expect(await send({ kind: "otherViews" })).toEqual({ ok: true, value: true });
+  // A non-boolean is refused, not stored, and only Todoist pages may ask.
+  expect(
+    await send({ kind: "otherViews", open: "yes" } as Record<string, unknown>),
+  ).toMatchObject({
+    ok: false,
+  });
+  expect(mocks.local.get("otherViewsOpen")).toBe(true);
+  expect(
+    await send(
+      { kind: "otherViews" },
+      "chrome-extension://synthetic/options.html",
+    ),
+  ).toMatchObject({ ok: false });
+  await send(
+    { kind: "disconnect" },
+    "chrome-extension://synthetic/options.html",
+  );
+  expect(mocks.local.has("otherViewsOpen")).toBe(false);
+});

@@ -59,6 +59,22 @@ export async function cachedPlanConfig(): Promise<PlanConfig | undefined> {
     ? config
     : undefined;
 }
+/** Whether the owner left Other views open; false when unknown. */
+export async function readOtherViews(): Promise<boolean> {
+  const response = (await browser.runtime.sendMessage({
+    kind: "otherViews",
+  })) as Result<boolean> | undefined;
+  return response?.ok === true && response.value === true;
+}
+export function saveOtherViews(open: boolean) {
+  try {
+    void browser.runtime
+      .sendMessage({ kind: "otherViews", open })
+      .catch(() => {});
+  } catch {
+    // A disabled or reloaded extension keeps no preference.
+  }
+}
 export function openOptions() {
   void browser.runtime.sendMessage({ kind: "options" });
 }

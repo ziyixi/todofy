@@ -63,7 +63,7 @@ it("shows older remembered tasks at once but saves only after the complete re-re
     screen.getByRole("heading", { name: "Write the introduction" }),
   ).toBeTruthy();
   expect(stage().disabled).toBe(true);
-  expect(screen.getByRole("status").textContent).toBe("Updating…");
+  expect(screen.getByText("Updating…").getAttribute("role")).toBe("status");
   await act(async () => finish(await original()));
   expect(stage().disabled).toBe(false);
   expect(actions.readPlan).not.toHaveBeenCalled();
@@ -120,7 +120,7 @@ it("reads the complete plan for a task that recently read data does not include"
   const data = await createPrototype().load();
   data.plan.tasks = data.plan.tasks.filter((task) => task.id !== "copy");
   open({ data, readAt: Date.now() });
-  expect(screen.getByRole("status").textContent).toBe("Updating…");
+  expect(screen.getByText("Updating…").getAttribute("role")).toBe("status");
   await screen.findByRole("heading", { name: "Write the introduction" });
   expect(actions.load).toHaveBeenCalledOnce();
   expect(stage().disabled).toBe(false);

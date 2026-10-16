@@ -1,9 +1,9 @@
 import { useRef, useState } from "react";
 import { Check, ExternalLink, Plus, X } from "lucide-react";
-import { displayedTitle, formattedMinutes, startDate } from "./domain";
+import { displayedTitle, formattedMinutes } from "./domain";
+import { ACTIVE_LABEL, detailStatus } from "./deadlines";
 import { words } from "./i18n";
 import { PendingMark } from "./StatusMarks";
-import { readableDate } from "./PlanningCalendar";
 import type {
   Language,
   PlanningTask,
@@ -22,6 +22,10 @@ interface Props {
   run: RunOperation;
   actions: PlusActions;
   todayTaskIds: readonly string[];
+  /** The account's today, for the deadline's status. */
+  today: string;
+  /** Whether the account has the literal `active` label that "Mark in progress" writes. */
+  canMarkActive: boolean;
   addFocus: (id: string) => void;
   onOpenTask: (id: string) => void;
   onClose?: () => void;
@@ -36,6 +40,8 @@ export function TaskEditor({
   run,
   actions,
   todayTaskIds,
+  today,
+  canMarkActive,
   addFocus,
   onOpenTask,
   onClose,
@@ -47,6 +53,7 @@ export function TaskEditor({
   const [lead, setLead] = useState(task.leadDays);
   const [stage, setStage] = useState(task.stage);
   const [area, setArea] = useState(task.area);
+  const [announcement, setAnnouncement] = useState("");
   const requestId = useRef(crypto.randomUUID());
   const children = tasks.filter((item) => item.parentId === task.id);
   const plannedToday = new Set(todayTaskIds);
@@ -58,7 +65,9 @@ export function TaskEditor({
       title,
       ...(minutes ? { estimatedMinutes: Number(minutes) } : {}),
     }));
-  const start = startDate(deadline, lead);
+  // From the fields as shown, so a date being chosen already says where it stands.
+  const status = detailStatus(task, deadline, lead, today, language);
+  const active = task.labels.includes(ACTIVE_LABEL);
   const estimateValues = [
     ...new Set([
       15,
@@ -70,6 +79,14 @@ export function TaskEditor({
       ...(task.estimatedMinutes ? [task.estimatedMinutes] : []),
     ]),
   ].sort((a, b) => a - b);
+
+  async function toggleActive() {
+    const title = displayedTitle(task.title);
+    if (await run(() => actions.updateTask(task, { active: !active })))
+      setAnnouncement(
+        `${active ? text.unmarkedActive : text.markedActive}: ${title}`,
+      );
+  }
 
   async function addSteps() {
     if (!drafts.length) return;
@@ -279,6 +296,7 @@ export function TaskEditor({
         <label>
           {text.lead}
           <select
+            className="plus-lead-select"
             value={lead}
             onChange={(event) => setLead(Number(event.target.value))}
             disabled={busy}
@@ -286,7 +304,7 @@ export function TaskEditor({
             {[0, 1, 3, 7, 14, 30].map((value) => (
               <option key={value} value={value}>
                 {value
-                  ? `${value} ${language === "zh" ? "天" : "days"}`
+                  ? `${value} ${language === "zh" ? "天" : value === 1 ? "day" : "days"}`
                   : text.noLead}
               </option>
             ))}
@@ -303,12 +321,28 @@ export function TaskEditor({
         >
           {text.save}
         </button>
+        {/* Each click is one write of the literal label, which Plus never creates. */}
+        {task.deadline && canMarkActive && (
+          <button
+            className="plus-button"
+            disabled={busy}
+            onClick={() => void toggleActive()}
+          >
+            {active ? text.unmarkActive : text.markActive}
+          </button>
+        )}
       </div>
-      {start && (
+      {status && (
         <p className="plus-muted">
-          {text.starts}: {readableDate(start, language)}
+          {status.text}
+          {status.danger && (
+            <span className="planning-danger-text">{status.danger}</span>
+          )}
         </p>
       )}
+      <p className="plus-sr-only" role="status">
+        {announcement}
+      </p>
     </section>
   );
 }

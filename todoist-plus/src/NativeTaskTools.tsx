@@ -3,6 +3,7 @@ import { ChevronDown, ChevronRight } from "lucide-react";
 import { extensionActions } from "./client";
 import { words } from "./i18n";
 import { todoistTaskUrl } from "./domain";
+import { canMarkActive } from "./deadlines";
 import { applyConfirmed, REREAD_AFTER_MS, rereadsAfter } from "./plan-updates";
 import { TaskEditor } from "./TaskEditor";
 import type {
@@ -150,6 +151,8 @@ export function NativeTaskTools({
               run={run}
               actions={extensionActions}
               todayTaskIds={data.focus.taskIds}
+              today={data.focus.date}
+              canMarkActive={canMarkActive(data.plan)}
               addFocus={(id) => {
                 if (!data.focus.taskIds.includes(id))
                   void run(() =>

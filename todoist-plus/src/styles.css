@@ -74,10 +74,9 @@ body {
     --product-library-info-warning-primary-on-idle-tint,
     #a56e21
   );
-  --plus-danger: var(
-    --product-library-info-attention-primary-idle-tint,
-    #c25546
-  );
+  /* Todoist's own overdue-date colour: days past a deadline (12px text, 4.5:1 in every public
+     theme, which the attention tint misses) and the error edge. */
+  --plus-danger: var(--product-library-schedule-overdue-tint, #c25546);
   /* Todoist's priorities; the API's priority 4 is P1. */
   --plus-p1: var(--product-library-priorities-p1-primary-idle-tint, #d1453b);
   --plus-p2: var(--product-library-priorities-p2-primary-idle-tint, #eb8909);

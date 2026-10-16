@@ -18,6 +18,8 @@ export type BackgroundMessage =
   | { kind: "disconnect" }
   | { kind: "options" }
   | { kind: "planConfig" }
+  // Reads Other views' saved open state, or saves it when `open` is given.
+  | { kind: "otherViews"; open?: boolean }
   | { kind: "reportPage"; status: PageStatus }
   | { kind: "pageStatus" };
 export type Result<T = unknown> =

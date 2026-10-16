@@ -1,13 +1,24 @@
 import { ArrowLeft } from "lucide-react";
 import { formattedMinutes, taskIndex } from "./domain";
+import { unplannedDue, unplannedText } from "./deadlines";
 import { FocusBlock } from "./FocusBlock";
 import { pendingStep } from "./plan-updates";
 import { words } from "./i18n";
-import type { FocusState, Language, PlanState, PlanningTask } from "./model";
+import type {
+  FlowDayPlan,
+  FocusState,
+  Language,
+  PlanState,
+  PlanningTask,
+} from "./model";
 
 interface Props {
   plan: PlanState;
   focus: FocusState;
+  /** The queues the quiet deadline line looks in: this week's, or only today's. */
+  days?: readonly FlowDayPlan[];
+  /** Opens Plan's Review with Deadlines open. */
+  onShowDeadlines?: () => void;
   language: Language;
   busy: boolean;
   /** Day cards whose queue write is not yet confirmed. */
@@ -26,6 +37,8 @@ interface Props {
 export function FocusView({
   plan,
   focus,
+  days = [focus],
+  onShowDeadlines,
   language,
   busy,
   pending,
@@ -49,6 +62,8 @@ export function FocusView({
   const unknown = queue.filter((id) => !minutesOf(id)).length;
   let stepLabel = language === "zh" ? "个步骤" : "steps";
   if (language === "en" && queue.length === 1) stepLabel = "step";
+  // A hint only: something that should have started has nothing planned this week.
+  const due = unplannedDue(plan.tasks, days, focus.date);
   const openPlan = (
     <button className="plus-button" onClick={onOpenPlan}>
       <ArrowLeft size={15} />
@@ -69,6 +84,15 @@ export function FocusView({
         )}
         {queue.length > 0 && openPlan}
       </div>
+      {due.past + due.window > 0 && (
+        <button
+          className="planning-runway plus-focus-runway"
+          title={text.showInPlan}
+          onClick={onShowDeadlines}
+        >
+          {unplannedText(due, language)}
+        </button>
+      )}
       {queue.length > 0 ? (
         <ol
           className="plus-focus-stack"

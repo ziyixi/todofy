@@ -120,9 +120,10 @@ export interface PlusActions {
   load(weekStart?: string): Promise<PlusData>;
   readPlan(): Promise<PlanMetadata>;
   loadDays(weekStart: string): Promise<FlowDayPlan[]>;
+  /** `active` adds or removes the literal in-progress label, which the account must have. */
   updateTask(
     task: PlanningTask,
-    update: { stage?: Stage; area?: Area; bet?: boolean },
+    update: { stage?: Stage; area?: Area; bet?: boolean; active?: boolean },
   ): Promise<PlanningTask>;
   updateLabels(
     labels: { role: string; id: string; label: string }[],

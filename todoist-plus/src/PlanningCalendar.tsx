@@ -426,10 +426,14 @@ export function shortDay(date: string, language: Language): string {
 export function readableDate(date: string, language: Language): string {
   return dateFormat(language, "day").format(dayDate(date));
 }
+/** "Oct 12" or "10月12日". */
+export function monthDay(date: string, language: Language): string {
+  return dateFormat(language, "monthDay").format(dayDate(date));
+}
 /** "Week 42 · from Oct 12" or "第 42 周 · 10月12日起", with the ISO week number. */
 export function weekLabel(weekStart: string, language: Language): string {
   const week = Number(isoWeek(weekStart).split("-W")[1]);
-  const from = dateFormat(language, "monthDay").format(dayDate(weekStart));
+  const from = monthDay(weekStart, language);
   return language === "zh"
     ? `第 ${week} 周 · ${from}起`
     : `Week ${week} · from ${from}`;

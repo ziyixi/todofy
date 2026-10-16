@@ -59,7 +59,8 @@ export function createPrototype(
       label: role,
     })),
     etag: "synthetic-plan-1",
-    availableLabels: roles.map((role) => ({
+    // The account's labels: the planning roles and the literal in-progress label.
+    availableLabels: [...roles, "active"].map((role) => ({
       id: `synthetic-${role}`,
       label: role,
     })),
@@ -83,7 +84,7 @@ export function createPrototype(
       }),
       task("research", "Prepare the next research check-in", {
         stage: "committed",
-        deadline: "2026-10-16",
+        deadline: "2026-10-15",
         leadDays: 3,
         mustStart: true,
       }),
@@ -252,11 +253,24 @@ export function createPrototype(
       delete metadata.tasks;
       return metadata as PlanMetadata;
     },
-    async updateTask(item, update) {
+    async updateTask(item, { active, ...update }) {
+      // In progress is the literal label; Todofy then lists the task neither as must start nor
+      // as missing a lead.
+      const marked = (task: PlanningTask): PlanningTask =>
+        active === undefined
+          ? task
+          : {
+              ...task,
+              labels: [
+                ...task.labels.filter((label) => label !== "active"),
+                ...(active ? ["active"] : []),
+              ],
+              ...(active ? { mustStart: false, missingLead: false } : {}),
+            };
       plan = {
         ...plan,
         tasks: plan.tasks.map((task) =>
-          task.id === item.id ? { ...task, ...update } : task,
+          task.id === item.id ? marked({ ...task, ...update }) : task,
         ),
       };
       return structuredClone(plan.tasks.find((task) => task.id === item.id)!);

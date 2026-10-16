@@ -7,6 +7,7 @@ import {
 } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { App } from "../src/App";
+import { deadlineRows, unplannedDue } from "../src/deadlines";
 import { effectiveArea, taskAncestors, topLevelBets } from "../src/domain";
 import {
   outcomeArea,
@@ -116,13 +117,15 @@ function counted(tasks: PlanningTask[]) {
 }
 /**
  * What one Plan render derives: goals, Review lanes and cards, Week cards, a goal search, the
- * Waiting row, Week's runway line and the weekly review's lines.
+ * Deadlines and Waiting rows, Week's runway line and the weekly review's lines; and Focus's
+ * quiet deadline line.
  */
 function planRender(tasks: PlanningTask[]) {
   for (const area of ["work", "personal", "unassigned"] as const)
     topLevelBets(tasks, area);
   const outcomes = planningOutcomes(tasks, labels);
-  tasks.filter((task) => task.mustStart || task.missingLead);
+  deadlineRows(tasks, "2026-10-13");
+  unplannedDue(tasks, [], "2026-10-13");
   tasks.some(
     (task) =>
       task.stage !== "none" && effectiveArea(task, tasks) === "unassigned",

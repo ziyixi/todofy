@@ -9,6 +9,7 @@ import {
   Square,
 } from "lucide-react";
 import { displayedTitle } from "./domain";
+import { canMarkActive } from "./deadlines";
 import { words } from "./i18n";
 import { readableDate, weekLabel } from "./PlanningCalendar";
 import {
@@ -111,8 +112,15 @@ export function App({
   const rereadAfterWrites = useRef(false);
   const loadedAt = useRef(snapshot?.readAt ?? 0);
   const [selectedId, setSelectedId] = useState(externalTaskId ?? "");
-  // The task whose editor opens at the empty step entry (a follow-up step from Waiting).
-  const [stepsFor, setStepsFor] = useState("");
+  // The editor field that takes focus once it is enabled: the empty step entry for a follow-up
+  // step from Waiting, or the start-ahead choice from Deadlines.
+  const [focusField, setFocusField] = useState<{
+    id: string;
+    field: "steps" | "lead";
+  }>();
+  // Deadlines' open or closed choice for this visit, and Focus's jump to it.
+  const [deadlinesOpen, setDeadlinesOpen] = useState<boolean>();
+  const [showDeadlines, setShowDeadlines] = useState(false);
   const completionIds = useRef(new Map<string, string>());
   // Confirmed completions stay visible but disabled until a re-read shows the result.
   const [completing, setCompleting] = useState<ReadonlySet<string>>(new Set());
@@ -262,18 +270,20 @@ export function App({
   useEffect(() => {
     if (!selectedId || !dialog.current) return;
     if (!dialog.current.open) dialog.current.showModal();
-    // A follow-up step starts in the empty entry, once no running write disables it.
+    // The asked-for field takes focus once no running write disables it.
     const entry =
-      stepsFor === selectedId
-        ? dialog.current.querySelector<HTMLTextAreaElement>("textarea")
+      focusField?.id === selectedId
+        ? dialog.current.querySelector<HTMLTextAreaElement | HTMLSelectElement>(
+            focusField.field === "steps" ? "textarea" : ".plus-lead-select",
+          )
         : null;
     if (entry && !entry.disabled) {
       entry.focus();
-      setStepsFor("");
+      setFocusField(undefined);
     }
-  }, [selectedId, stepsFor, busy, pendingCards]);
-  function openTask(task: PlanningTask, steps = false) {
-    setStepsFor(steps ? task.id : "");
+  }, [selectedId, focusField, busy, pendingCards]);
+  function openTask(task: PlanningTask, field?: "steps" | "lead") {
+    setFocusField(field && { id: task.id, field });
     setSelectedId(task.id);
   }
 
@@ -432,16 +442,30 @@ export function App({
                 onLabels={() => setSelectedId("board-labels")}
                 todayTaskIds={data.focus.taskIds}
                 addFocus={(id) => void addFocus(id, data.focus)}
-                addStep={(task) => openTask(task, true)}
+                addStep={(task) => openTask(task, "steps")}
+                chooseLead={(task) => openTask(task, "lead")}
                 onOpenTask={onOpenTask}
                 completeReview={(task) => complete(task, "")}
                 reviewing={review}
+                deadlinesOpen={deadlinesOpen}
+                onDeadlinesToggle={setDeadlinesOpen}
+                showDeadlines={showDeadlines}
+                onDeadlinesShown={() => setShowDeadlines(false)}
               />
             </>
           ) : (
             <FocusView
               plan={data.plan}
               focus={data.focus}
+              // The quiet line looks at this week's queues; while Plan shows another week, at today's.
+              days={
+                data.days[0]?.date === data.plan.week ? data.days : [data.focus]
+              }
+              onShowDeadlines={() => {
+                setDeadlinesOpen(true);
+                setShowDeadlines(true);
+                onViewChange?.("plan");
+              }}
               language={language}
               busy={busy || !data.plan.configured}
               pending={pendingCards}
@@ -545,6 +569,8 @@ export function App({
             run={run}
             actions={planActions}
             todayTaskIds={data.focus.taskIds}
+            today={data.focus.date}
+            canMarkActive={canMarkActive(data.plan)}
             addFocus={(id) => void addFocus(id, data.focus)}
             onOpenTask={onOpenTask}
             onClose={() => {

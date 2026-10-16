@@ -16,6 +16,10 @@
   margin-left: auto;
   padding: 0 9px !important;
 }
+/* Week's quiet runway line, under the summary. */
+.plus-root .planning-runway.plus-focus-runway {
+  margin: -6px 0 14px;
+}
 .plus-focus-stack {
   list-style: none;
   padding: 0;

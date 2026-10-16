@@ -7,6 +7,7 @@ import {
 } from "@dnd-kit/react";
 import { CalendarClock, GripVertical } from "lucide-react";
 import { displayedTitle, effectiveArea } from "./domain";
+import { cardTitle, deadlineState, isDue } from "./deadlines";
 import {
   outcomeArea,
   outcomeColor,
@@ -33,6 +34,8 @@ export interface OutcomeCardProps {
   tasks: PlanningTask[];
   managedLabels: PlanState["managedLabels"];
   scheduledIds: Set<string>;
+  /** The account's today, for the start-window mark. */
+  today: string;
   language: Language;
   selected?: boolean;
   /** Its stage change is shown but not yet confirmed. */
@@ -44,6 +47,7 @@ export function OutcomeCard({
   tasks,
   managedLabels,
   scheduledIds,
+  today,
   language,
   selected = false,
   pending = false,
@@ -58,6 +62,8 @@ export function OutcomeCard({
         ? "未设优先级"
         : "No priority";
   const title = displayedTitle(task.title);
+  const state = deadlineState(task, today);
+  const mark = state && isDue(state) ? cardTitle(state, language) : "";
   return (
     <button
       type="button"
@@ -65,8 +71,8 @@ export function OutcomeCard({
       style={{ "--outcome-color": outcomeColor(task) } as CSSProperties}
       data-outcome-id={task.id}
       onClick={onClick}
-      // The name replaces the content, so it carries the pending state too.
-      aria-label={`${title}, ${priority}${pending ? `, ${words(language).updating}` : ""}`}
+      // The name replaces the content, so it carries the start window and pending state too.
+      aria-label={`${title}, ${priority}${mark ? `, ${mark}` : ""}${pending ? `, ${words(language).updating}` : ""}`}
     >
       <span
         className="planning-priority-circle"
@@ -80,14 +86,10 @@ export function OutcomeCard({
             {title}
           </strong>
           {pending && <PendingMark language={language} />}
-          {task.mustStart && (
-            <CalendarClock
-              size={13}
-              className="planning-outcome-start"
-              aria-label={
-                language === "zh" ? "已到启动窗口" : "Start window open"
-              }
-            />
+          {mark && (
+            <span className="planning-outcome-start" title={mark}>
+              <CalendarClock size={13} aria-hidden="true" />
+            </span>
           )}
         </span>
         <span className="planning-outcome-meta">
@@ -109,6 +111,7 @@ interface Props {
   plan: PlanState;
   days: FlowDayPlan[];
   area: Area | "all";
+  currentDate: string;
   language: Language;
   busy: boolean;
   pending?: ReadonlySet<string>;
@@ -121,6 +124,7 @@ export function ReviewBoard({
   plan,
   days,
   area,
+  currentDate,
   language,
   busy,
   pending,
@@ -166,6 +170,7 @@ export function ReviewBoard({
                 tasks={outcomes.filter((task) => task.stage === lane.stage)}
                 plan={plan}
                 scheduledIds={scheduledIds}
+                today={currentDate}
                 language={language}
                 busy={busy}
                 pending={pending}
@@ -186,6 +191,7 @@ export function ReviewBoard({
                 tasks={plan.tasks}
                 managedLabels={plan.managedLabels}
                 scheduledIds={scheduledIds}
+                today={currentDate}
                 language={language}
                 onClick={() => {}}
               />
@@ -204,6 +210,7 @@ function ReviewLane({
   tasks,
   plan,
   scheduledIds,
+  today,
   language,
   busy,
   pending,
@@ -216,6 +223,7 @@ function ReviewLane({
   tasks: PlanningTask[];
   plan: PlanState;
   scheduledIds: Set<string>;
+  today: string;
   language: Language;
   busy: boolean;
   pending?: ReadonlySet<string>;
@@ -267,6 +275,7 @@ function ReviewLane({
             task={task}
             plan={plan}
             scheduledIds={scheduledIds}
+            today={today}
             language={language}
             busy={busy}
             pending={pending?.has(pendingTask(task.id)) ?? false}
@@ -287,6 +296,7 @@ function DraggableOutcome({
   task,
   plan,
   scheduledIds,
+  today,
   language,
   busy,
   pending,
@@ -295,6 +305,7 @@ function DraggableOutcome({
   task: PlanningTask;
   plan: PlanState;
   scheduledIds: Set<string>;
+  today: string;
   language: Language;
   busy: boolean;
   pending: boolean;
@@ -328,6 +339,7 @@ function DraggableOutcome({
         tasks={plan.tasks}
         managedLabels={plan.managedLabels}
         scheduledIds={scheduledIds}
+        today={today}
         language={language}
         pending={pending}
         onClick={() => editTask(task)}

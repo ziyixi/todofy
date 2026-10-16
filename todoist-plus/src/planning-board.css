@@ -82,25 +82,79 @@
     transition: none;
   }
 }
-.planning-attention ul {
+/*
+ * Deadlines and Waiting rows: a title, one muted status and text actions. As on Todoist's own task
+ * rows, the actions show on hover or keyboard focus; they stay in the tab order and the
+ * accessibility tree, and keep their column, so nothing moves and the statuses line up.
+ */
+.planning-rows {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  column-gap: 12px;
   padding: 0;
   list-style: none;
   margin: 8px 0 0;
 }
-.planning-attention li {
-  display: flex;
+.planning-rows > li {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: subgrid;
   align-items: baseline;
-  justify-content: space-between;
-  gap: 12px;
   padding: 5px 0;
 }
-.planning-attention li button {
+.plus-root .planning-row-title {
+  min-width: 0;
   text-align: left;
   padding: 0;
   font-size: 13px;
 }
-.planning-attention li span {
+.planning-row-status {
   color: var(--plus-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  text-align: right;
+}
+/* The one colour: days past a deadline. */
+.planning-danger-text {
+  color: var(--plus-danger);
+}
+.planning-row-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  opacity: 0;
+}
+.planning-rows > li:hover .planning-row-actions,
+.planning-rows > li:focus-within .planning-row-actions {
+  opacity: 1;
+}
+@media (hover: none) {
+  .planning-row-actions {
+    opacity: 1;
+  }
+}
+.plus-root .planning-row-actions button {
+  padding: 0;
+  font-size: 12px;
+  color: var(--plus-accent);
+  white-space: nowrap;
+}
+.plus-root .planning-row-actions button:hover {
+  text-decoration: underline;
+}
+/* Narrow: the status and actions wrap under the title. */
+@media (max-width: 650px) {
+  .planning-rows {
+    display: block;
+  }
+  .planning-rows > li {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 2px 12px;
+  }
+  .plus-root .planning-row-title {
+    flex-basis: 100%;
+  }
 }
 .planning-reset-note {
   color: var(--plus-muted);

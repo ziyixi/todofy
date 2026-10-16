@@ -14,7 +14,9 @@ import {
   cachedPlanConfig,
   extensionActions,
   openOptions,
+  readOtherViews,
   reportPage,
+  saveOtherViews,
 } from "./client";
 import type { Enhancement, PageStatus, Reason } from "./page-status";
 import { words } from "./i18n";
@@ -102,8 +104,9 @@ export async function mountTodoist(ctx: ContentScriptContext) {
   const keepSnapshot = (next?: PlusSnapshot) => {
     snapshot = next;
   };
-  // Started before the sidebar exists, so mounting rarely waits for it.
+  // Started before the sidebar exists, so mounting rarely waits for them.
   const savedConfig = cachedPlanConfig().catch(() => undefined);
+  const savedOtherViews = readOtherViews().catch(() => false);
   let view: View | undefined;
   let language = languageOf(document);
   let disposed = false;
@@ -118,7 +121,8 @@ export async function mountTodoist(ctx: ContentScriptContext) {
   let detailsReady = false;
   // The task whose tools failed to render stays native until its modal closes.
   let detailFailed = "";
-  let otherViewsOpen = false;
+  // The owner's last open or closed choice, kept in storage.local; read once, at the first mount.
+  let otherViewsOpen: boolean | undefined;
   let favoritesRoot: Root | undefined;
   let favoritesHost: HTMLElement | undefined;
   let favoritesCleanup: (() => void) | undefined;
@@ -314,9 +318,10 @@ export async function mountTodoist(ctx: ContentScriptContext) {
     favoritesRoot.render(
       <div className="plus-extension-nav plus-other-views">
         <button
-          aria-expanded={otherViewsOpen}
+          aria-expanded={Boolean(otherViewsOpen)}
           onClick={() => {
             otherViewsOpen = !otherViewsOpen;
+            saveOtherViews(otherViewsOpen);
             restore();
             hideReplaced();
           }}
@@ -570,6 +575,7 @@ export async function mountTodoist(ctx: ContentScriptContext) {
       if (main) await mountMain(main);
       if (nav) await mountNav(nav);
       config ??= await savedConfig;
+      otherViewsOpen ??= await savedOtherViews;
     } finally {
       mounting = false;
     }

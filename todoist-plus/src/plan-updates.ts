@@ -68,7 +68,7 @@ export function applyConfirmed(data: PlusData, confirmed: Confirmed): PlusData {
  */
 export function withNextWeek(
   data: PlusData,
-  update: { stage?: Stage; area?: Area; bet?: boolean },
+  update: { stage?: Stage; area?: Area; bet?: boolean; active?: boolean },
   saved: PlanningTask,
 ): PlusData {
   const { plan } = data;

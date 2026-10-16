@@ -106,6 +106,8 @@ async function setupPlanner(context: BrowserContext, worker: Worker) {
         "focus",
         "committed",
       ].map((role) => ({ role, id: `synthetic-${role}`, label: role })),
+      // Account labels beyond the planning roles, such as the literal `active`.
+      extraLabels: [] as { id: string; label: string }[],
       planEtag: "plan-1",
       days: { "2026-10-13": ["child", "local-one"] } as Record<
         string,
@@ -171,10 +173,9 @@ async function setupPlanner(context: BrowserContext, worker: Worker) {
             enabled: true,
             labels: state.labels,
             etag: state.planEtag,
-            available_labels: state.labels.map(({ id, label }) => ({
-              id,
-              label,
-            })),
+            available_labels: [...state.labels, ...state.extraLabels].map(
+              ({ id, label }) => ({ id, label }),
+            ),
             hidden_filter_ids: [],
             ...state.review,
           },
@@ -207,6 +208,15 @@ async function setupPlanner(context: BrowserContext, worker: Worker) {
           if (roles[stage]) labels.push(roles[stage]!);
           task.stage = stage;
           task.labels = labels;
+        }
+        // The literal in-progress label; Todofy then lists the task as neither must start nor
+        // missing a lead.
+        if (body.active !== undefined) {
+          const labels = ((task.labels as string[]) ?? []).filter(
+            (label) => label !== "active",
+          );
+          task.labels = body.active ? [...labels, "active"] : labels;
+          if (body.active) task.must_start = task.missing_lead = false;
         }
         task.etag = `${String(task.id)}-2`;
         return json({ task });
@@ -363,4 +373,68 @@ export async function controlWrites(
       for (const release of state.heldWrites.splice(0)) release();
     return held;
   }, change);
+}
+
+type DeadlineTasksState = {
+  tasks: Record<string, unknown>[];
+  extraLabels: { id: string; label: string }[];
+};
+/** Synthetic tasks for each Deadlines status and Waiting rows with deadlines; today is 2026-10-13. */
+export async function addDeadlineTasks(worker: Worker) {
+  await worker.evaluate(() => {
+    const state = (
+      globalThis as unknown as { plannerState: DeadlineTasksState }
+    ).plannerState;
+    const task = (id: string, title: string, fields = {}) => ({
+      id,
+      title,
+      area: "work",
+      stage: "none",
+      etag: `${id}-1`,
+      ...fields,
+    });
+    state.tasks.push(
+      task("draft", "Quarterly report draft", {
+        deadline: "2026-10-11",
+        lead_days: 7,
+        labels: ["lead_1w"],
+        must_start: true,
+      }),
+      task("claim", "Submit the expense claim", {
+        deadline: "2026-10-14",
+        lead_days: 3,
+        labels: ["lead_3d"],
+        must_start: true,
+      }),
+      task("visa", "Prepare the visa documents", {
+        stage: "committed",
+        deadline: "2026-10-18",
+        lead_days: 7,
+        labels: ["committed", "lead_1w"],
+        must_start: true,
+      }),
+      task("move", "Move house", {
+        area: "personal",
+        deadline: "2026-10-25",
+        lead_days: 14,
+        labels: ["active", "lead_2w"],
+      }),
+      task("insurance", "Renew the car insurance", {
+        area: "personal",
+        deadline: "2026-11-30",
+        missing_lead: true,
+      }),
+      task("contract", "Contract signature", {
+        deadline: "2026-10-20",
+        lead_days: 7,
+        labels: ["waiting", "lead_1w"],
+        update_time: "2026-10-01T09:00:00Z",
+      }),
+      task("quote", "Quote reply", {
+        labels: ["waiting"],
+        update_time: "2026-10-10T09:00:00Z",
+      }),
+    );
+    state.extraLabels = [{ id: "synthetic-active", label: "active" }];
+  });
 }

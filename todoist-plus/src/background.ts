@@ -18,6 +18,7 @@ const storageKey = "connection";
 const knownKey = "knownFlowTasks";
 const configKey = "planConfig";
 const statusKey = "pageStatus";
+const otherViewsKey = "otherViewsOpen";
 let api: PlusActions | undefined;
 // Session storage outlives an idle-stopped worker, not the browser session.
 const knownTasks: KnownTaskStore = {
@@ -54,7 +55,7 @@ function rememberPlan(client: PlusActions, plan: PlanMetadata) {
 async function forgetConnection() {
   // Cleared first, so a call still running cannot store its results after the removal.
   api = undefined;
-  await browser.storage.local.remove([storageKey, configKey]);
+  await browser.storage.local.remove([storageKey, configKey, otherViewsKey]);
   await browser.storage.session.remove(knownKey);
 }
 export function registerBackground() {
@@ -78,6 +79,17 @@ export function registerBackground() {
         if (message.kind === "planConfig") {
           const saved = await browser.storage.local.get(configKey);
           return (saved[configKey] as PlanConfig | undefined) ?? null;
+        }
+        // One boolean: whether the owner left Other views open.
+        if (message.kind === "otherViews" && todoist) {
+          if (message.open === undefined) {
+            const saved = await browser.storage.local.get(otherViewsKey);
+            return saved[otherViewsKey] === true;
+          }
+          if (typeof message.open !== "boolean")
+            throw new Error("Unsupported extension operation.");
+          await browser.storage.local.set({ [otherViewsKey]: message.open });
+          return null;
         }
         // Only keys from closed sets are kept; anything else is refused, not stored.
         if (message.kind === "reportPage" && todoist) {

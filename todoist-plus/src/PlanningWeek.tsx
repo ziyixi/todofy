@@ -180,6 +180,7 @@ export function PlanningWeek(props: Props) {
               tasks={plan.tasks}
               managedLabels={plan.managedLabels}
               scheduledIds={scheduledIds}
+              today={currentDate}
               language={language}
               selected={selected?.id === task.id}
               onClick={() =>

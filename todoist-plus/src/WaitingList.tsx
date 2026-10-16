@@ -1,5 +1,7 @@
 import { ChevronRight } from "lucide-react";
 import { displayedTitle } from "./domain";
+import { deadlineTitle, waitingDeadline } from "./deadlines";
+import { Status } from "./DeadlineList";
 import { words } from "./i18n";
 import {
   oldestUntouched,
@@ -23,6 +25,8 @@ export function untouchedText(task: PlanningTask, language: Language): string {
 
 interface Props {
   tasks: PlanningTask[];
+  /** The account's today, for the deadline text. */
+  today: string;
   language: Language;
   busy: boolean;
   todayTaskIds: readonly string[];
@@ -35,11 +39,13 @@ interface Props {
 }
 
 /**
- * @waiting and @blocked tasks, untouched the longest first. It only shows them and offers the
- * owner's existing actions; it never removes a label or contacts anyone.
+ * @waiting and @blocked tasks, untouched the longest first, with their deadline. It only shows them
+ * and offers the owner's existing actions, on hover or keyboard focus; it never removes a label or
+ * contacts anyone.
  */
 export function WaitingList({
   tasks,
+  today,
   language,
   busy,
   todayTaskIds,
@@ -54,7 +60,7 @@ export function WaitingList({
   if (!waiting.length) return null;
   const text = words(language);
   const zh = language === "zh";
-  const today = new Set(todayTaskIds);
+  const queued = new Set(todayTaskIds);
   return (
     <details
       className="planning-attention planning-waiting"
@@ -65,20 +71,29 @@ export function WaitingList({
         <ChevronRight size={14} aria-hidden="true" />
         {text.waiting} · {waiting.length}
       </summary>
-      <ul aria-label={text.waiting}>
+      <ul className="planning-rows" aria-label={text.waiting}>
         {waiting.map((task) => {
           const title = displayedTitle(task.title);
-          const planned = today.has(task.id);
+          const planned = queued.has(task.id);
+          const untouched = untouchedText(task, language);
+          const deadline = waitingDeadline(task, today, language);
+          const separator = untouched && deadline ? " · " : "";
           return (
             <li key={task.id}>
               <button
-                className="planning-waiting-title"
+                className="planning-row-title"
                 onClick={() => editTask(task)}
               >
                 {title}
               </button>
-              <span>{untouchedText(task, language)}</span>
-              <span className="planning-waiting-actions">
+              <Status
+                status={{
+                  text: untouched + separator + (deadline?.text ?? ""),
+                  danger: deadline?.danger,
+                }}
+                title={task.deadline && deadlineTitle(task.deadline, language)}
+              />
+              <span className="planning-row-actions">
                 {/* Opening the editor writes nothing; its own controls wait while busy. */}
                 <button
                   aria-label={`${text.followUp}: ${title}`}

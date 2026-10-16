@@ -59,10 +59,12 @@ it("commits a candidate in one action and moves it into the committed group", as
   expect(update.mock.calls[0]?.[1]).toEqual({ stage: "committed" });
   expect(load).toHaveBeenCalledOnce();
 });
-it("preserves a child deadline in attention when its parent occupies the commitment quota", async () => {
+it("preserves a child deadline in Deadlines when its parent occupies the commitment quota", async () => {
   const actions = createPrototype();
   const { plan, focus, days } = await actions.load();
   const child = plan.tasks.find((task) => task.id === "copy")!;
+  child.deadline = "2026-10-14";
+  child.leadDays = 3;
   child.mustStart = true;
   child.area = "unassigned";
   render(
@@ -80,12 +82,15 @@ it("preserves a child deadline in attention when its parent occupies the commitm
       todayTaskIds={focus.taskIds}
       addFocus={vi.fn()}
       addStep={vi.fn()}
+      chooseLead={vi.fn()}
       onOpenTask={vi.fn()}
       completeReview={vi.fn()}
     />,
   );
-  fireEvent.click(screen.getByText(/Needs a look/));
-  expect(screen.getByText("Write the introduction")).toBeTruthy();
+  // Open by itself: something is in its start window.
+  const list = within(screen.getByRole("list", { name: "Deadlines" }));
+  expect(list.getByText("Write the introduction")).toBeTruthy();
+  expect(list.getByText("Deadline tomorrow")).toBeTruthy();
   expect(screen.getByText(/3\/5 work/)).toBeTruthy();
 });
 it("stopping a session preserves the task and queue; checkbox completes it", async () => {

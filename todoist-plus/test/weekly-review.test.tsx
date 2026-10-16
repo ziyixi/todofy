@@ -63,6 +63,7 @@ async function props(
     todayTaskIds: focus.taskIds,
     addFocus: vi.fn(),
     addStep: vi.fn(),
+    chooseLead: vi.fn(),
     onOpenTask: vi.fn(),
     completeReview: vi.fn(async () => true),
   };

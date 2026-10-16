@@ -17,7 +17,7 @@ const ROLES = {
   "selected-text": "selectable-secondary-on-selected-tint",
   "nav-selected-text": "selectable-secondary-on-selected-fill",
   warning: "info-warning-primary-on-idle-tint",
-  danger: "info-attention-primary-idle-tint",
+  danger: "schedule-overdue-tint",
   p1: "priorities-p1-primary-idle-tint",
   p2: "priorities-p2-primary-idle-tint",
   p3: "priorities-p3-primary-idle-tint",
@@ -142,6 +142,8 @@ test("Plus follows every Todoist theme through CSS alone, with readable text", a
         ["muted", "surface"],
         ["accent", "bg"],
         ["warning", "bg"],
+        // Days past a deadline, in Deadlines, Waiting and task details.
+        ["danger", "bg"],
         ["on-accent", "accent-fill"],
         ["selected-text", "selected"],
       ] as const)
