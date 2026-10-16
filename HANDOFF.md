@@ -9,23 +9,23 @@ Its old waiting lists and release identities are historical, not instructions to
 
 ## Current work
 
-Todoist Plus deadlines, version 1 of the owner-approved design (start window, favourite filters,
-`SetTaskPlan.active`), is on local branch `claude/plus-deadlines`, based on `60309fac`; not pushed, no branch CI
-or release. "Deadlines · N" replaces "Needs a look" (Review above Waiting, Week below the calendar), Waiting
-rows show deadlines, Focus has one quiet line, task details say where a deadline stands and can mark it in
-progress (the literal `active` label, never created), and Todofy also hides the three waiting and in-progress
-deadline filters, by exact query, behind a consistency test. Row actions show on hover or keyboard focus only (owner
-decision); `--plus-danger` now reads Todoist's overdue colour, because the attention tint misses 4.5:1 as text.
-Other views remembers open or closed. Dependencies, native row marks and `@blocked` mirroring are not built.
-Review fixes are in: Deadlines stays open once a row is acted on, statuses end at the right edge, a pending
-card's mark waits for its drag. Local proto, Todofy (host, 559 runtime, gateway with CPU), owner UI, scripts and
-extension (161 unit, 24 MV3 Chromium) checks pass
-([evidence](docs/todoist-plus-verification.md#deadlines-version-1-local-checks-october-16)).
-Pending: push, full branch CI, owner review and one same-SHA release. Deploy Todofy first, since `active` needs
-it, then reload the extension straight away, before using Todoist: until the reload, the installed extension
-already hides the three filters but has no in-progress list, so `@active` tasks with a deadline show in no list
-for those minutes (the order is forced by `active`). Then refresh Todoist and confirm the account has an
-`active` label and the three filters disappear only from the extension's sidebar.
+Todoist Plus deadlines (start window, favourite filters, `SetTaskPlan.active`) are on local branch
+`claude/plus-deadlines`, based on `60309fac`; not pushed, no branch CI or release. The owner's final layout of
+October 16 replaced version 1's stacked lists: the Review board reads Start now | Waiting | Quarter | Month |
+Week | Committed, the first two hidden while empty, each task in one lane. Dragging a Start now card into a stage
+lane writes the stage and the literal `active` label (never created) in one write; a card's hover "Start" adds
+only `active`; a Waiting card dragged gets only the stage. Nothing is stacked under the board or the calendar;
+Focus has one quiet line, a deadline without a lead is one weekly review line, task details say where a deadline
+stands and can mark it in progress, and Todofy also hides the three waiting and in-progress deadline filters, by
+exact query, behind a consistency test against the board. Plus has no dark mode any more (owner decision); its
+colours follow Todoist's light themes. `--plus-danger` reads Todoist's overdue colour; Other views remembers
+open or closed. Dependencies and native row marks are not built. Local extension checks (163 unit, 26 MV3
+Chromium), Todofy host and Plus runtime cases and scripts pass
+([evidence](docs/todoist-plus-verification.md#start-now-and-waiting-lanes-local-checks-october-16)).
+Pending: owner review of the Kale screenshots, push, full branch CI and one same-SHA release. Deploy Todofy
+first, since `active` needs it, then reload the extension and refresh Todoist; the installed version's Waiting
+row covers the two waiting filters until then, and in-progress tasks need no list in either version. Confirm
+the account has an `active` label and the three filters disappear only from the extension's sidebar.
 
 Todoist Plus UI theme, safety and polish (owner-approved October 15: safety C1-C6, theming A1-A6, polish
 B1-B6) is on local branch `claude/plus-ui-theme`, based on `58908f64`; not pushed, no branch CI or release.
@@ -33,14 +33,15 @@ Colours follow Todoist's own theme tokens through CSS (the two names Plus read e
 Todoist is never left hidden without Plus attached, the task tools refuse a task the link does not name,
 Plan/Focus survive Todoist re-creating its layout, disabling the extension restores Todoist without a
 refresh, and Options shows a content-free "Todoist 页面检测" line. Test-only devDependency
-`@doist/product-libraries-tokens` 1.4.2 (MIT, not bundled); Vite's CSS target is Chrome 123. Local types,
-lint, build, 138 unit and 19 built-MV3 Chromium cases pass, including the same-day review fixes
+`@doist/product-libraries-tokens` 1.4.2 (MIT, not bundled); the deadlines branch drops its Chrome 123 CSS
+target with dark mode. Local types, lint, build, 138 unit and 19 built-MV3 Chromium cases pass, including the
+same-day review fixes
 ([evidence](docs/todoist-plus-verification.md#ui-theme-safety-and-polish-local-checks-october-15)).
 Pending: push, full branch CI, owner review; before the same-SHA release the owner runs the two
 content-free console lines under "发布前页面核对" in
-[todoist-plus/docs/verification.md](todoist-plus/docs/verification.md) (theme in Kale and Dark; a task
-with sub-tasks and one of its sub-tasks; the live modal shape, Dark `color-scheme` and shadows are
-unverified); after release, the six-step list there.
+[todoist-plus/docs/verification.md](todoist-plus/docs/verification.md) (theme in Kale; a task
+with sub-tasks and one of its sub-tasks; the live modal shape and shadows are unverified); after release,
+the six-step list there.
 
 Todoist Plus board performance (owner-approved plan, items 1-5 of the October 15 research) is implemented on
 local branch `claude/plus-perf-gtd`, based on `de8b93ac`; it is not pushed and has no branch CI or release.

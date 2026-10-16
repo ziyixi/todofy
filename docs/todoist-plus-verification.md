@@ -549,6 +549,8 @@ were read.
 
 ## Deadlines, version 1, local checks (October 16)
 
+The owner's final layout of the same day replaced the two stacked lists below: see [the next section](#start-now-and-waiting-lanes-local-checks-october-16). `SetTaskPlan.active`, the three replaced filters, the task-details sentence and button, Other views' remembered state and `--plus-danger` stay.
+
 The owner approved version 1 of the deadlines and dependencies design (its §7): the start window (§1), the
 favourite filters (§3) and `SetTaskPlan.active` (§5). Binding owner choices of 2026-10-16: the row actions of
 Deadlines and Waiting show only on hover or keyboard focus; no `@blocked` mirroring; restrained visuals, with
@@ -621,3 +623,38 @@ details sentence, which describes dates and the in-progress label only.
 Not verified: the live Todoist page and data (including that the owner's filters normalize to exactly these
 queries and that the account has an `active` label), real Todoist's overdue colour in the owner's theme, the
 installed extension, the core and gateway production dry-runs, branch CI and release.
+
+## Start now and Waiting lanes, local checks (October 16)
+
+The owner's final layout of 2026-10-16 (restrained, no dark mode): no new tab. The Review board reads Start now |
+Waiting | Quarter | Month | Week | Committed; Start now and Waiting use the same lane and card components and are
+hidden while empty. Each task is in exactly one lane: its own stage label first (its card then says it waits or
+should start), then `@waiting`/`@blocked`, then an open start window or a passed deadline without `@active`
+(also for a Week candidate by the 7-day date rule), then the date rule. Dragging a Start now card into a stage lane
+writes that stage and `active` in one confirmed SetTaskPlan, through the existing pending card and FIFO queue
+with rollback; a card's hover "Start" adds only `active`; a Waiting card dragged into a stage lane gets only the
+stage. Start now and Waiting take no drops. Nothing is stacked under the board or the Week calendar any more;
+Focus's quiet line and the weekly review's Waiting jump focus the lane on Plan's Review. A deadline without a
+lead is only a weekly review line, with the editor's start-ahead select per task. The dark-mode code is removed:
+`syncScheme` and the `data-theme="dark"` host rule, the `light-dark()` fallbacks (light values kept), the options
+page's dark color-scheme, the prototype's theme toggle and the Dark test cases. Same local branch
+`claude/plus-deadlines`; not pushed, no branch CI, no release. All data is synthetic; Todoist, FlowDay and
+Cloudflare accounts were not touched.
+
+The extension passes types, lint, Prettier, 163 unit/component/API cases and 26 built-MV3 Chromium cases. New or
+changed cases cover the lane rule and order, a client-side consistency grid (every combination of the API's
+fields is in at most one lane, and a waiting or must-start task in exactly one, saying so), the drag from Start
+now (one write with the stage and `active`, the predicted labels, rollback, stage only without an `active`
+label), the Waiting drag (stage only, label kept), drops on Start now or Waiting writing nothing, Start's single
+write with its focus and announcement, the weekly review's start-ahead line, the jumps from Focus and the weekly
+review, and in Chromium the six lanes in one row with identical cards, Start hidden at rest and shown on hover
+without moving the title or status, the drag into Committed shown at once and confirmed, and the narrow
+stacking. The content script is 383,915 bytes (121,691 with `gzip -9`), its CSS 32,763; version 1 was 385,225
+(121,861) and 33,073. Todofy's consistency case now requires every task a replaced deadline or waiting query
+selects to be on the Review board (must start or waiting) or in progress, and every task of the missing-lead
+query to be in the weekly review's line; the query set and backend behaviour are unchanged (one comment).
+Screenshots of the built extension on the synthetic page, in Kale light only, were reviewed locally: the board
+with both lanes, a Start now card dragged into Committed and pending after the drop, a hovered card showing
+Start, and the weekly review's start-ahead line; the interface document's images were retaken.
+
+Not verified: the live Todoist page and data, the installed extension, branch CI and release.

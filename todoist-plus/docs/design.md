@@ -16,9 +16,9 @@ Bet 独立于规划范围。已有多个或未分类 Bet 保留并提示，由�
 
 ## 界面
 
-WXT + React 的三个 Shadow DOM 挂载点提供侧边导航、Plan/Focus 主内容和原生任务详情的“步骤与时间”。字体和颜色读取 Todoist 当前主题的 token，主题切换只经 CSS 生效，见[主题](planning-interface.md#主题)。焦点框有意使用文字强调色 `actionable-tertiary-idle-tint`，不用 Todoist 的 `actionable-focus-tint`：前者在九个公开主题中与背景至少 4.5:1，后者在 Dark 约 2:1，低于非文字元素的 3:1；Todoist 自身焦点框实际用哪种颜色待真实页面核对。DOM 用于挂载、取得真实 task ID 和暂时隐藏已替代项，选择器集中在 `src/anchors.ts`；替代界面未挂载时不隐藏原生项，见[恢复](planning-interface.md#恢复)。业务数据使用根 proto 的类型化 API。任务身份不依赖标题或 Todoist 的 React 内部状态。
+WXT + React 的三个 Shadow DOM 挂载点提供侧边导航、Plan/Focus 主内容和原生任务详情的“步骤与时间”。字体和颜色读取 Todoist 当前浅色主题的 token，主题切换只经 CSS 生效；Plus 没有深色模式，见[主题](planning-interface.md#主题)。焦点框有意使用文字强调色 `actionable-tertiary-idle-tint`，不用 Todoist 的 `actionable-focus-tint`：前者在八个公开浅色主题中与背景至少 4.5:1，后者在 Tangerine 约 2.9:1，低于非文字元素的 3:1；Todoist 自身焦点框实际用哪种颜色待真实页面核对。DOM 用于挂载、取得真实 task ID 和暂时隐藏已替代项，选择器集中在 `src/anchors.ts`；替代界面未挂载时不隐藏原生项，见[恢复](planning-interface.md#恢复)。业务数据使用根 proto 的类型化 API。任务身份不依赖标题或 Todoist 的 React 内部状态。
 
-Plan 顶部是 Work／Personal 两组本周目标。Review 在四列中显示紧凑的事项卡，优先显示任务标题，下面显示工作／生活上下文、步骤数和已排程数。优先级使用 Todoist 原值。Week 展示本周承诺总览，选中一个事项后出现其小步骤，再把步骤安排到具体日期。
+Plan 顶部是 Work／Personal 两组本周目标。Review 从左到右是“该开始”“等待中”（都只在有卡片时出现）和四个规划列，每个任务只在一列；各列用同一种紧凑的事项卡，优先显示任务标题，下面显示工作／生活上下文、步骤数和已排程数，该开始或在等的卡片换成一句状态。优先级使用 Todoist 原值。Week 展示本周承诺总览，选中一个事项后出现其小步骤，再把步骤安排到具体日期。
 
 卡片的所属事项由 `planning-outcomes.ts` 推导。没有独立规划范围的中间子任务提供层级上下文；显式使用不同范围的子任务按其自身规划显示，不批量改写后代标签。色标从所选事项的 ID 派生，避免一个宽泛祖先使所有承诺同色。完整祖先路径保留在 tooltip 和任务详情中。
 
@@ -38,7 +38,7 @@ Must Start 的 `deadline before` 使用严格上界。提前 N 天标签的实�
 
 ## 截止日期
 
-截止日期按一条生命周期看：截止日期 → 启动窗口 → 进行中 → 完成。Todofy 的 `must_start`、`missing_lead` 规则不变；`src/deadlines.ts` 在完整读取后据此和字面标签 `active`、`blocked`、`parked` 给每个任务一个状态。Plan 的“截止日期”一行列出进行中、已过截止、已到启动窗口和未设提前开始的任务，每行一句状态和最多一个文字操作；Focus 只在该开始的事这周还没安排时显示一行文字；任务详情的截止日期段说明当前状态。“标为进行中”是 SetTaskPlan 的 `active` 字段，只增删账户已有的 `active` 标签，Plus 不改 Due 或 Deadline，也不创建标签。界面不加新页面、图标、徽章或颜色，只有“已过 N 天”用 `--plus-danger`；列表的文字操作只在悬停或键盘焦点时出现。依赖与原生行标记不在第一版。
+截止日期按一条生命周期看：截止日期 → 启动窗口 → 进行中 → 完成。Todofy 的 `must_start`、`missing_lead` 规则不变；`src/deadlines.ts` 在完整读取后据此和字面标签 `active`、`blocked`、`parked` 给每个任务一个状态。启动窗口打开（截止日期前 N 天）或已过截止、又不是进行中的任务出现在 Review 最左的“该开始”，有自己规划标签的留在原列并写明状态；窗口打开前不出现。确认就是把卡片拖入某个规划列（规划标签和 `active` 一次写入），或用卡片悬停时的“开始”只加 `active`；之后它不再是该开始。没设提前量只在周回顾占一行；Focus 只在该开始的事这周还没安排时显示一行文字；任务详情的截止日期段说明当前状态。“标为进行中”和“开始”都是 SetTaskPlan 的 `active` 字段，只增删账户已有的 `active` 标签，Plus 不改 Due 或 Deadline，也不创建标签。界面不加新页面、标签页、图标、徽章或颜色，看板和日历下方不叠放列表，只有“已过 N 天”用 `--plus-danger`；“开始”只在悬停或键盘焦点时出现，不挪动布局。依赖与原生行标记不在这一版。
 
 ## API 与状态更新
 
@@ -56,11 +56,11 @@ Plan／Focus 直接切换使用已读数据；离开扩展到原生页面后再�
 
 ## 等待与周回顾
 
-两者都只用已读取的数据：任务的 `update_time`（Todoist 最后修改时间）、标签和截止日期，加上 ReadPlan 返回的邮件项目、回顾任务和下周选择 ID。“等待中”按字面标签 `waiting`、`blocked` 显示“N 天未变动”和截止日期，“将来／也许”按 `parked`、`onhold`。每个操作都是已有的单任务写入（SetTaskPlan、AppendTaskSteps 的步骤编辑器、加入今天、CompleteTask），只在点击时执行；不移除标签、不自动安排、不调用模型，也没有新的 D1 表。勾选状态按 ISO 周只存于本浏览器。Week 的承诺未安排提示是一行文字，不加逐卡标记。
+两者都只用已读取的数据：任务的 `update_time`（Todoist 最后修改时间）、标签和截止日期，加上 ReadPlan 返回的邮件项目、回顾任务和下周选择 ID。“等待中”是看板的一列，按字面标签 `waiting`、`blocked` 显示“N 天未变动”和截止日期，拖入规划列只写规划范围；“将来／也许”按 `parked`、`onhold`。每个操作都是已有的单任务写入（SetTaskPlan、SetTaskLead、CompleteTask），只在点击时执行；不移除标签、不自动安排、不调用模型，也没有新的 D1 表。勾选状态按 ISO 周只存于本浏览器。Week 的承诺未安排提示是一行文字，不加逐卡标记。
 
 ## 原生页面与发布
 
-连接与映射确认后，扩展按精确 ID 隐藏被替代的筛选器和规划标签。哪些筛选器算被替代由 Todofy 按规范化查询认定，并由一致性测试守住：原查询会列出的每个合成任务都必须出现在 Plus 的“截止日期”或“等待中”。原生页面只调用 ReadPlan；background 在 storage.local 保存只含 ID 的配置，下次加载 Todoist 时立即按它整理侧栏。其他筛选器／标签收藏（如 Quick 和 `@parked` 的筛选器）在原位置收折进 Other views，它的开合是 storage.local 的一个布尔值，断开连接时清除；项目收藏保留；账户收藏对象不改。原生任务详情替代技术标签显示时，office／home 等领域标签继续显示。
+连接与映射确认后，扩展按精确 ID 隐藏被替代的筛选器和规划标签。哪些筛选器算被替代由 Todofy 按规范化查询认定，并由一致性测试守住：原查询会列出的每个合成任务都必须在 Review 看板上（“该开始”“等待中”，或在自己的规划列写明状态）、已是进行中，或（没设提前量的查询）在周回顾那一行。原生页面只调用 ReadPlan；background 在 storage.local 保存只含 ID 的配置，下次加载 Todoist 时立即按它整理侧栏。其他筛选器／标签收藏（如 Quick 和 `@parked` 的筛选器）在原位置收折进 Other views，它的开合是 storage.local 的一个布尔值，断开连接时清除；项目收藏保留；账户收藏对象不改。原生任务详情替代技术标签显示时，office／home 等领域标签继续显示。
 
 更新使用同一固定目录，先重新加载扩展，再刷新已打开的 Todoist 页面。旧注册脚本与新 CSS 可能混在同一页面，普通网页刷新不能代替扩展重新加载。停用或重新加载扩展后，回到已打开的 Todoist 标签页即恢复原生界面，无需刷新。扩展设置页的“Todoist 页面检测”一行说明最近一次页面检查是否全部正常，或哪项增强已关闭及原因，见[页面检测](planning-interface.md#页面检测)。
 

@@ -52,19 +52,19 @@ Plan／Focus 导航图形缩至 18px，保留原生的 24px 布局槽和文字�
 owner 批准的安全（C1–C6）、主题（A1–A6）和细节（B1–B6）已在本地分支完成，未推送、无分支 CI 或发布。全部使用合成数据和公开主题 CSS，未打开真实 Todoist。
 
 - 单元／交互：jsdom 驱动 `mountTodoist` 与合成页面，覆盖重建 `#content` 和侧栏后重新挂载、挂载被拒后恢复、Todoist 对话框保持可见、停用扩展立即恢复、渲染出错的一行回退与切换视图后重试、重建次数上限及其后的点击恢复、观察循环上限（Plus 与页面互相改动时卸下，Todoist 自身持续变化时不卸下）、计划读取失败时其他收藏保持可见、后台标签页的启动检测、深色后备；任务详情的面包屑、小步骤列表与链接不一致；锚点表顺序；页面检测的固定键与拒绝未知键；token 名检查（含运行时拼接的名称和 `--td-ui-*`）。
-- 实际 MV3 构建包：任务工具不绑定面包屑或链接不符的任务，设置页说明原因；重建内容区和侧栏后 Plan／Focus 恢复；九个公开主题只靠 CSS 切换且 `--plus-*` 等于对应 token，Plus 组合的文字对比度至少 4.5:1、线条至少 3:1，Week 中今天的数字和选中事项的次要文字实测通过；Dark 不带 color-scheme 时宿主仍为深色；无 token 时浅色／深色后备；侧栏收起后计时条仍居中。
+- 实际 MV3 构建包：任务工具不绑定面包屑或链接不符的任务，设置页说明原因；重建内容区和侧栏后 Plan／Focus 恢复；九个公开主题只靠 CSS 切换且 `--plus-*` 等于对应 token，Plus 组合的文字对比度至少 4.5:1、线条至少 3:1，Week 中今天的数字和选中事项的次要文字实测通过；Dark 不带 color-scheme 时宿主仍为深色；无 token 时浅色／深色后备；侧栏收起后计时条仍居中。其中 Dark 和深色后备的部分已于 2026-10-16 随深色模式删除，见下文。
 
 ### 发布前页面核对
 
 同一 SHA 发布前，owner 在真实 Todoist 的 DevTools 控制台运行下面两行只读脚本，把结果记入根验收记录后再发布。它们只返回主题类名、CSS 值、布尔值和像素差，不读取任务内容。
 
-1. 主题，在 Today 等原生页面上，Kale 与 Dark 各一次：
+1. 主题，在 Today 等原生页面上，Kale 中一次：
 
    ```
-   (()=>{const h=document.documentElement,s=getComputedStyle(h),v=n=>s.getPropertyValue('--product-library-'+n).trim()||null,side=document.querySelector('[data-testid=app-sidebar-scrollable-container]'),nav=document.querySelector('todoist-plus-navigation'),rgb=c=>{const e=document.body.appendChild(document.createElement('i'));e.style.color=c;const r=getComputedStyle(e).color;e.remove();return r},left=e=>{const t=e&&document.createTreeWalker(e,NodeFilter.SHOW_TEXT).nextNode(),r=t&&document.createRange();if(!r)return null;r.selectNodeContents(t);return Math.round(r.getBoundingClientRect().left)},up=left(side?.querySelector('a[href$="/upcoming"]')),plan=left(nav?.shadowRoot?.querySelector('button')),cur=side?.querySelector('[aria-current=page]')??side?.querySelector('li.current > a'),c=cur&&getComputedStyle(cur);return JSON.stringify({theme:h.className.match(/theme_\w+/g)||[],colorScheme:s.colorScheme,plusDark:nav?.dataset.theme==='dark',shadows:[1,2,3].map(i=>v('shadow-raised-'+i)),focusTint:v('actionable-focus-tint'),selectedRowMatches:c?c.backgroundColor===rgb('var(--product-library-selectable-secondary-selected-fill)')&&c.color===rgb('var(--product-library-selectable-secondary-on-selected-tint)'):null,navLabelShift:up!==null&&plan!==null?up-plan:null})})()
+   (()=>{const h=document.documentElement,s=getComputedStyle(h),v=n=>s.getPropertyValue('--product-library-'+n).trim()||null,side=document.querySelector('[data-testid=app-sidebar-scrollable-container]'),nav=document.querySelector('todoist-plus-navigation'),rgb=c=>{const e=document.body.appendChild(document.createElement('i'));e.style.color=c;const r=getComputedStyle(e).color;e.remove();return r},left=e=>{const t=e&&document.createTreeWalker(e,NodeFilter.SHOW_TEXT).nextNode(),r=t&&document.createRange();if(!r)return null;r.selectNodeContents(t);return Math.round(r.getBoundingClientRect().left)},up=left(side?.querySelector('a[href$="/upcoming"]')),plan=left(nav?.shadowRoot?.querySelector('button')),cur=side?.querySelector('[aria-current=page]')??side?.querySelector('li.current > a'),c=cur&&getComputedStyle(cur);return JSON.stringify({theme:h.className.match(/theme_\w+/g)||[],shadows:[1,2,3].map(i=>v('shadow-raised-'+i)),focusTint:v('actionable-focus-tint'),selectedRowMatches:c?c.backgroundColor===rgb('var(--product-library-selectable-secondary-selected-fill)')&&c.color===rgb('var(--product-library-selectable-secondary-on-selected-tint)'):null,navLabelShift:up!==null&&plan!==null?up-plan:null})})()
    ```
 
-   通过条件：Dark 中 `colorScheme` 为 `dark`，或 `plusDark` 为 `true`；`shadows` 三项都是阴影（含 `px`），不是单个颜色，否则 Plus 的卡片阴影会消失；`selectedRowMatches` 为 `true`，即 Todoist 选中的侧栏行确实使用 Plus 读取的选中底色和文字色（测试夹具只是这样假设）；`navLabelShift` 为 0，否则 Plan／Focus 的文字比 Upcoming 靠左这么多像素，需调整导航槽。另看 Todoist 自己的焦点框是否为 `focusTint`，记录即可，Plus 的焦点框有意不用它（见[设计](design.md#界面)）。
+   通过条件：`shadows` 三项都是阴影（含 `px`），不是单个颜色，否则 Plus 的卡片阴影会消失；`selectedRowMatches` 为 `true`，即 Todoist 选中的侧栏行确实使用 Plus 读取的选中底色和文字色（测试夹具只是这样假设）；`navLabelShift` 为 0，否则 Plan／Focus 的文字比 Upcoming 靠左这么多像素，需调整导航槽。另看 Todoist 自己的焦点框是否为 `focusTint`，记录即可，Plus 的焦点框有意不用它（见[设计](design.md#界面)）。
 
 2. 任务弹窗，先打开一个有小步骤的任务，再从它打开一个小步骤，各运行一次：
 
@@ -83,11 +83,23 @@ Todoist 或 Plus 更新后，在真实 Chrome 中按顺序检查（只看界面�
 3. Other views 能展开和收起其他收藏，刷新后保持上次的开合。
 4. 打开一个有小步骤的任务，“步骤与时间”列出的是它自己的小步骤。
 5. 在步骤输入框中输入 q 或 a，不打开 Todoist 的快速添加。
-6. 切换一次 Todoist 主题或深色模式，Plus 立即跟随。
+6. 切换一次 Todoist 的浅色主题（如 Kale 与 Default），Plus 立即跟随；Plus 没有深色模式。
 
 ## 截止日期第一版（2026-10-16，本地）
+
+同日的 owner 定稿取代了本节的“截止日期 · N”和“等待中”两个列表，见下一节；`SetTaskPlan.active`、替代的三个筛选器、任务详情的状态句和按钮、Other views 的开合以及 `--plus-danger` 保留。
 
 owner 批准的设计第一版（§1 启动窗口、§3 收藏筛选器、§5 的 `SetTaskPlan.active`）在本地分支 `claude/plus-deadlines` 完成，未推送、无分支 CI 或发布。全部使用合成数据，未打开真实 Todoist、FlowDay 或 Cloudflare 账户。
 
 - 单元／交互：`deadlines.ts` 的规则表、排序和中英文状态；Focus 一行的计数（任务或未完成步骤已排进队列就不数，已完成的队列项不算排进）；客户端一致性（按 API 字段，“截止日期”和“等待中”恰好列出约定的任务）；“截止日期”的位置、默认展开、手动开合、标为进行中的单次写入、读屏结果和焦点移动；没有 `active` 标签时不出现该操作；“等待中”的截止日期文字；Focus 跳转；任务详情状态句、按钮和 `1 day`；事项卡的可访问名称；Other views 开合的保存、读取和断开清除。
 - 实际 MV3 构建包：五种状态的行在平时透明度为 0 的操作、悬停后出现、从标题 Tab 到操作；标为进行中只发一次 SetTaskPlan `{active: true}` 且不再读取任务列表；Focus 一行跳到 Review 并聚焦 summary；窄窗口折行无溢出；Other views 刷新后保持；九个主题中 `--plus-danger` 文字对背景至少 4.5:1。
+
+## 该开始与等待中两列（2026-10-16，本地）
+
+owner 当天的定稿：没有新标签页；Review 从左到右为“该开始”“等待中”和四个规划列，前两列没有卡片时隐藏，每个任务只在一列（自己的规划标签 → `@waiting`／`@blocked` → 启动窗口已开或已过截止 → 日期规则）；从“该开始”拖入规划列一次写入规划标签和 `active`，卡片悬停时的“开始”只加 `active`，从“等待中”拖入只写规划范围，两列都不接受投放；没设提前量只在周回顾占一行；看板和日历下方不再叠放任何列表；Plus 不再有深色模式。仍在本地分支 `claude/plus-deadlines`，未推送、无分支 CI 或发布；全部使用合成数据，未打开真实 Todoist、FlowDay 或 Cloudflare 账户。
+
+- 单元／交互（163 个）：`review-lanes.ts` 的列规则、两列的排序和中英文状态；客户端一致性（按 API 字段的每种组合，任务至多在一列，在等或该开始的任务恰好在一列并写明状态）；列顺序与隐藏；从“该开始”拖入时的预期标签、等待卡片和失败撤回，没有 `active` 标签时只写规划范围；从“等待中”拖入保留在等标签；“开始”的单次写入、读屏结果和焦点移动，拖动未确认时停用；周回顾提前量一行用编辑器的下拉框写入；Focus 一行和周回顾的跳转聚焦对应列；任务详情的状态句和按钮；看板和日历下方没有叠放的列表。
+- 实际 MV3 构建包（26 个 Chromium 用例，Kale 浅色）：六列一行、同宽、同样的卡片样式，只有“已过 N 天”用 danger；“开始”平时透明度为 0，悬停出现而标题和状态不动，从卡片 Tab 到达，只发一次 SetTaskPlan `{active: true}`、不再读取任务列表，焦点移到下一个“开始”；该开始的卡拖入本周承诺立即显示为等待确认的卡并只发一次 `{stage: committed, active: true}`；等待中的卡拖入本周只发 `{stage: weekly}`，卡片仍写明在等；落在两列上不写入；Focus 一行和周回顾的跳转聚焦对应列；提前量一行发一次 SetTaskLead 后消失；640px 下各列堆叠且无溢出；八个浅色主题的对比度和无 token 时的浅色后备。
+- Todofy：替代筛选器的一致性测试改为：每个查询选出的任务都在看板上（必须开始或在等），或已是进行中；没设提前量的查询改为周回顾那一行。查询集合和后端行为不变。
+
+截图（Kale 浅色，实际构建包和合成页面）供 owner 审阅：两列在最左的看板、该开始的卡拖向本周承诺和落下后等待确认、悬停显示“开始”、周回顾的提前量一行；界面文档的图片同日重截。真实 Todoist 页面、已安装的扩展、分支 CI 和发布均未验证。
