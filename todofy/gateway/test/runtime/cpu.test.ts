@@ -45,6 +45,9 @@ const API_INIT = "GET /api/v1/serviceStatus as the isolate's first API request";
 const LEGACY = 'GET /api/v1/legacyTexts/{id} (1.9 MB of ASCII with escapes)';
 const REPORTS = 'GET /api/v1/latestReports (every report at its limits)';
 const PLUS = 'GET /api/plus/v1/tasks (200 tasks, token authenticated)';
+// A FULL Plan, which the gateway reads and writes again to add flowday_url: 500 labels and 300 dependencies, the most
+// TodofyCore answers.
+const PLAN = 'GET /api/plus/v1/plan:read (500 labels, 300 dependencies, token authenticated)';
 const FOCUS = 'GET /api/plus/flowday/api/v1/tasks (100 tasks, the proxy\'s largest page)';
 // The generated FlowDay client decodes and the proxy re-encodes a full page. A 200-task page with 2,000-char titles
 // and descriptions reached 10.2 ms cold in CI, so the proxy caps a page at 100 tasks (plus.ts FOCUS_PAGE_MAX).
@@ -61,6 +64,14 @@ const ANSWERS = {
       deadline: '2026-10-27', due: '2026-10-13', lead_days: 14, estimated_minutes: 45, etag: 'a'.repeat(64),
       update_time: '2026-10-14T09:30:05Z',
     })) }),
+    ReadPlan: fixtures.ok({ plan: {
+      timezone: 'America/Los_Angeles', week_start: '2026-10-12', today: '2026-10-13', enabled: true, etag: 'a'.repeat(64),
+      available_labels: Array.from({ length: 500 }, (_, n) => ({ id: `label-${String(n)}`, label: `synthetic_label_${String(n)}` })),
+      next_week_task_ids: Array.from({ length: 100 }, (_, n) => `task-${String(n)}`),
+      dependencies: Array.from({ length: 300 }, (_, n) => ({
+        task_id: `task-${String(n)}`, prerequisite_id: `task-${String(n + 1)}`, baseline_completed_count: n, done: n % 2 === 0,
+      })),
+    } }),
   },
   owner_ui: {
     GetServiceStatus: fixtures.ok(fixtures.serviceStatus()),
@@ -156,7 +167,7 @@ async function session({ h, meter }: GatewayIsolate): Promise<Measurement[]> {
   ];
   const measured: Measurement[] = [init];
   for (const [label, path, options] of requests) measured.push(await meter.measure(label, () => expectOk(h, path, options), RUNS));
-  for (const [label, path] of [[PLUS, '/api/plus/v1/tasks?page_size=200'], [FOCUS, '/api/plus/flowday/api/v1/tasks?page_size=100']]) {
+  for (const [label, path] of [[PLUS, '/api/plus/v1/tasks?page_size=200'], [PLAN, '/api/plus/v1/plan:read'], [FOCUS, '/api/plus/flowday/api/v1/tasks?page_size=100']]) {
     measured.push(await meter.measure(label ?? '', async () => {
       const response = await h.mf.dispatchFetch(`https://todofy-hooks.example.com${path ?? ''}`, {
         headers: { authorization: `Bearer todofy_plus_${'a'.repeat(43)}` },
@@ -188,6 +199,6 @@ describe('CPU per owner API request (Workers Free: 10 ms)', () => {
         expect(median, `${label}: warm median`).toBeLessThan(API_BOUND_MS);
       }
     }
-    expect(reference.size).toBe(13);
+    expect(reference.size).toBe(14);
   });
 });

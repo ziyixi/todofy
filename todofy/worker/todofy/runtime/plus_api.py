@@ -270,8 +270,8 @@ async def _dependencies_enabled(env: Any) -> None:
 
 async def set_dependency(core: Any, request: dict[str, Any]) -> dict[str, Any]:
     """SetTaskDependency, under plus_lock. Adding reads both tasks once, to confirm they are active and to take
-    the prerequisite's completed_count as the baseline; removing reads nothing. Either is a value write: an edge
-    that is already there (or already gone) is answered without a write."""
+    the prerequisite's completed_count as the baseline; removing reads nothing. Either is a value write: adding
+    an edge that is already there answers it without a write, and removing one that is gone changes nothing."""
     env = core.env
     await _dependencies_enabled(env)
     task_id, prerequisite_id = plus.check_id(request["task_id"]), plus.check_id(request["prerequisite_id"])
