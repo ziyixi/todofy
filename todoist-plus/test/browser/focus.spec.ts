@@ -211,7 +211,7 @@ test("confirmed FlowDay timer advances across views, pauses, resumes and stops w
   }
 });
 
-test("today's Focus preserves an older timer without treating the same task as today's active session", async () => {
+test("today's Focus preserves an older timer without treating the same task as today's active session, and its bar stays centred", async () => {
   const { context, worker } = await launchPlanner();
   try {
     const before = await worker.evaluate(() => {
@@ -265,6 +265,26 @@ test("today's Focus preserves an older timer without treating the same task as t
     );
     expect(after).toEqual(before);
     expect((await plannerDays(worker))["2026-10-12"]).toEqual(["child"]);
+    // The floating bar stays centred on the Focus column when the sidebar collapses.
+    const offset = () =>
+      page.locator("todoist-plus-view").evaluate((host) => {
+        const root = host.shadowRoot!;
+        const column = root
+          .querySelector(".plus-root")!
+          .getBoundingClientRect();
+        const bar = root
+          .querySelector(".plus-timer-bar")!
+          .getBoundingClientRect();
+        return Math.abs(
+          bar.left + bar.width / 2 - (column.left + column.width / 2),
+        );
+      });
+    await expect.poll(offset).toBeLessThanOrEqual(1);
+    await page.evaluate(() => {
+      document.querySelector("aside")!.style.display = "none";
+      document.querySelector("main")!.style.marginLeft = "0";
+    });
+    await expect.poll(offset).toBeLessThanOrEqual(1);
   } finally {
     await context.close();
   }

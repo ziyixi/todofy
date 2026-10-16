@@ -30,7 +30,7 @@
 .planning-commitment-heading h2 {
   margin: 0;
   font-size: 15px;
-  font-weight: 650;
+  font-weight: 600;
 }
 .planning-commitment-heading span {
   font-size: 12px;
@@ -276,7 +276,7 @@
   justify-content: space-between;
   gap: 8px;
   margin-top: 8px;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--plus-muted);
 }
 .planning-calendar-step-meta > span {

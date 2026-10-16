@@ -6,6 +6,7 @@ import { outcomeArea, outcomeColor, outcomeForTask } from "./planning-outcomes";
 import { pendingStep } from "./plan-updates";
 import { PendingMark } from "./StatusMarks";
 import { words } from "./i18n";
+import { isoWeek } from "./weekly-review";
 import type {
   FlowDayPlan,
   FocusState,
@@ -390,31 +391,48 @@ function EndDrop({
       ref={ref}
       className={`planning-day-end ${isDropTarget ? "is-over" : ""}`}
     >
-      {empty ? (language === "zh" ? "拖入步骤" : "Drop a step") : "+"}
+      {/* A day with steps shows its drop zone only while a step is dragged over it. */}
+      {empty && (language === "zh" ? "拖入步骤" : "Drop a step")}
     </div>
   );
 }
 function dayDate(date: string): Date {
   return new Date(`${date}T12:00:00Z`);
 }
+const dateStyles = {
+  weekday: { weekday: "short" },
+  range: { month: "short", day: "numeric", year: "numeric" },
+  day: { weekday: "short", month: "short", day: "numeric" },
+  monthDay: { month: "short", day: "numeric" },
+} satisfies Record<string, Intl.DateTimeFormatOptions>;
 const dateFormats = new Map<string, Intl.DateTimeFormat>();
 /** Formatters are costly to construct, so each language and style is built once. */
-function dateFormat(language: Language, style: "weekday" | "range") {
+function dateFormat(language: Language, style: keyof typeof dateStyles) {
   const key = `${language}:${style}`;
   let format = dateFormats.get(key);
   if (!format) {
-    format = new Intl.DateTimeFormat(
-      language === "zh" ? "zh-CN" : "en",
-      style === "weekday"
-        ? { weekday: "short", timeZone: "UTC" }
-        : { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" },
-    );
+    format = new Intl.DateTimeFormat(language === "zh" ? "zh-CN" : "en", {
+      ...dateStyles[style],
+      timeZone: "UTC",
+    });
     dateFormats.set(key, format);
   }
   return format;
 }
 export function shortDay(date: string, language: Language): string {
   return dateFormat(language, "weekday").format(dayDate(date));
+}
+/** "Mon, Oct 12" or "10月12日周一"; ISO dates stay for storage keys. */
+export function readableDate(date: string, language: Language): string {
+  return dateFormat(language, "day").format(dayDate(date));
+}
+/** "Week 42 · from Oct 12" or "第 42 周 · 10月12日起", with the ISO week number. */
+export function weekLabel(weekStart: string, language: Language): string {
+  const week = Number(isoWeek(weekStart).split("-W")[1]);
+  const from = dateFormat(language, "monthDay").format(dayDate(weekStart));
+  return language === "zh"
+    ? `第 ${week} 周 · ${from}起`
+    : `Week ${week} · from ${from}`;
 }
 export function taskTitle(
   id: string,

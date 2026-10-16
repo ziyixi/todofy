@@ -116,7 +116,7 @@ it("shows confirmed queue, deadline and goal results without reading the week or
     .find((button) => !(button as HTMLButtonElement).disabled)!;
   fireEvent.click(save);
   await waitFor(() => expect((save as HTMLButtonElement).disabled).toBe(true));
-  expect(editor.getByText("Start window: 2026-10-28")).toBeTruthy();
+  expect(editor.getByText("Start window: Wed, Oct 28")).toBeTruthy();
   fireEvent.click(editor.getByRole("button", { name: "Close" }));
 
   fireEvent.click(screen.getAllByRole("button", { name: "Change goal" })[0]!);
@@ -357,7 +357,10 @@ it("keeps writes disabled after a label mapping until the re-read brings the new
   mount(actions);
   await screen.findByRole("region", { name: "Committed" });
   const { reads, original } = held(actions);
-  fireEvent.click(screen.getByRole("button", { name: "Planning labels" }));
+  // The header icon and the toolbar both open the one labels dialog.
+  fireEvent.click(
+    screen.getAllByRole("button", { name: "Planning labels" })[0]!,
+  );
   fireEvent.click(screen.getByRole("button", { name: "Save" }));
   await waitFor(() => expect(reads).toHaveLength(1));
   expect(moveButtons().every((button) => button.disabled)).toBe(true);

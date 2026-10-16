@@ -3,6 +3,7 @@ import { Check, ExternalLink, Plus, X } from "lucide-react";
 import { displayedTitle, formattedMinutes, startDate } from "./domain";
 import { words } from "./i18n";
 import { PendingMark } from "./StatusMarks";
+import { readableDate } from "./PlanningCalendar";
 import type {
   Language,
   PlanningTask,
@@ -305,7 +306,7 @@ export function TaskEditor({
       </div>
       {start && (
         <p className="plus-muted">
-          {text.starts}: {start}
+          {text.starts}: {readableDate(start, language)}
         </p>
       )}
     </section>

@@ -28,7 +28,7 @@
   padding: 5px 15px;
   border-radius: 4px;
   font-size: 14px;
-  font-weight: 550;
+  font-weight: 600;
 }
 .planning-view-tabs button[aria-selected="true"] {
   background: var(--plus-bg);
@@ -68,6 +68,19 @@
   display: flex;
   gap: 6px;
   align-items: center;
+}
+/* The chevron says the row expands, and turns when it does. */
+.planning-attention summary svg {
+  flex: none;
+  transition: transform 120ms ease;
+}
+.planning-attention[open] > summary svg {
+  transform: rotate(90deg);
+}
+@media (prefers-reduced-motion: reduce) {
+  .planning-attention summary svg {
+    transition: none;
+  }
 }
 .planning-attention ul {
   padding: 0;

@@ -79,6 +79,7 @@ export async function mountTodoist(ctx: ContentScriptContext) {
   let mainUi: Ui | undefined;
   let mainHost: HTMLElement | undefined;
   let mainRoot: Root | undefined;
+  let mainResize: ResizeObserver | undefined;
   let navUi: Ui | undefined;
   let navHost: HTMLElement | undefined;
   let config: PlanConfig | undefined;
@@ -395,9 +396,23 @@ export async function mountTodoist(ctx: ContentScriptContext) {
     mainUi = ui;
     mainHost = ui.shadowHost;
     content = anchor;
+    // The fixed timer bar centres on this column wherever the sidebar is, collapsed or resized.
+    const host = ui.shadowHost;
+    mainResize = new ResizeObserver(() => {
+      const box = host.getBoundingClientRect();
+      if (!box.width) return;
+      host.style.setProperty(
+        "--plus-content-center",
+        `${box.left + box.width / 2}px`,
+      );
+      host.style.setProperty("--plus-content-width", `${box.width}px`);
+    });
+    mainResize.observe(host);
   }
   /** Todoist re-created the container: Plus leaves with it and native Todoist shows again. */
   function dropMain() {
+    mainResize?.disconnect();
+    mainResize = undefined;
     mainUi?.remove();
     mainUi = undefined;
     mainHost = undefined;

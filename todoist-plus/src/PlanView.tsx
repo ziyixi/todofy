@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Flag } from "lucide-react";
+import { ChevronRight } from "lucide-react";
 import { displayedTitle, effectiveArea } from "./domain";
 import { planningOutcomes } from "./planning-outcomes";
 import { ReviewBoard } from "./ReviewBoard";
@@ -115,7 +115,7 @@ export function PlanView(props: PlanViewProps) {
         </button>
         {onLabels && (
           <button className="planning-label-button" onClick={onLabels}>
-            {language === "zh" ? "标签对应" : "Board labels"}
+            {text.boardLabels}
           </button>
         )}
       </div>
@@ -203,7 +203,7 @@ export function PlanView(props: PlanViewProps) {
       {attention.length > 0 && (
         <details className="planning-attention">
           <summary>
-            <Flag size={13} />
+            <ChevronRight size={14} aria-hidden="true" />
             {text.attention} · {attention.length}
           </summary>
           <ul aria-label={text.attention}>

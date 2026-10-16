@@ -48,7 +48,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 400;
   color: var(--plus-muted);
 }
@@ -130,7 +130,7 @@
   flex: 1;
   min-width: 0;
   font-size: 14px;
-  font-weight: 550;
+  font-weight: 600;
   line-height: 19.5px;
   display: -webkit-box;
   -webkit-line-clamp: 2;

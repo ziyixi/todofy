@@ -5,7 +5,7 @@ import {
   useDraggable,
   useDroppable,
 } from "@dnd-kit/react";
-import { Flag, GripVertical } from "lucide-react";
+import { CalendarClock, GripVertical } from "lucide-react";
 import { displayedTitle, effectiveArea } from "./domain";
 import {
   outcomeArea,
@@ -81,8 +81,8 @@ export function OutcomeCard({
           </strong>
           {pending && <PendingMark language={language} />}
           {task.mustStart && (
-            <Flag
-              size={12}
+            <CalendarClock
+              size={13}
               className="planning-outcome-start"
               aria-label={
                 language === "zh" ? "已到启动窗口" : "Start window open"
@@ -95,8 +95,9 @@ export function OutcomeCard({
             {outcomeArea(task, tasks, language)}
           </span>
           <span className="planning-outcome-counts">
-            {steps.length} {language === "zh" ? "下一步" : "steps"} · {planned}{" "}
-            {language === "zh" ? "已安排" : "planned"}
+            {language === "zh"
+              ? `${steps.length} 个步骤 · 已安排 ${planned}`
+              : `${steps.length} ${steps.length === 1 ? "step" : "steps"} · ${planned} planned`}
           </span>
         </span>
       </span>
@@ -320,7 +321,7 @@ function DraggableOutcome({
         aria-disabled={pending || undefined}
         aria-label={`${language === "zh" ? "移动事项" : "Move outcome"}: ${displayedTitle(task.title)}${pending ? `, ${words(language).updating}` : ""}`}
       >
-        <GripVertical size={13} />
+        <GripVertical size={14} />
       </button>
       <OutcomeCard
         task={task}

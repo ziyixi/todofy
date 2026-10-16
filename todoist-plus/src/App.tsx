@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { displayedTitle } from "./domain";
 import { words } from "./i18n";
+import { readableDate, weekLabel } from "./PlanningCalendar";
 import {
   applyConfirmed,
   pendingTask,
@@ -353,8 +354,8 @@ export function App({
             <CalendarDays size={13} />
             {data
               ? view === "plan"
-                ? (data.days[0]?.date ?? data.plan.week)
-                : data.focus.date
+                ? weekLabel(data.days[0]?.date ?? data.plan.week, language)
+                : readableDate(data.focus.date, language)
               : ""}
             {data && <span> · {data.plan.timezone}</span>}
           </div>
@@ -457,7 +458,7 @@ export function App({
         <aside className="plus-timer-bar" aria-label={text.focus}>
           <div>
             <small>
-              {data.focus.timer.status === "running" ? text.focus : text.pause}
+              {data.focus.timer.status === "running" ? text.focus : text.paused}
             </small>
             <strong>
               {timerTask

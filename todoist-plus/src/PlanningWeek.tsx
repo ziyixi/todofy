@@ -331,7 +331,7 @@ function TrayStep({
         }
         aria-label={`${language === "zh" ? "拖动步骤" : "Drag step"}: ${displayedTitle(task.title)}`}
       >
-        <GripVertical size={15} />
+        <GripVertical size={14} />
       </button>
       <button className="planning-step-title" onClick={() => editTask(task)}>
         <span>{displayedTitle(task.title)}</span>

@@ -4,6 +4,7 @@ import { displayedTitle, taskIndex, todoistProjectUrl } from "./domain";
 import { words } from "./i18n";
 import { pendingTask } from "./plan-updates";
 import { untouchedText } from "./WaitingList";
+import { weekLabel } from "./PlanningCalendar";
 import {
   inboxToClarify,
   isLastDay,
@@ -192,7 +193,7 @@ export function WeeklyReview({
           <ListChecks size={15} />
           {text.weeklyReview}
         </h2>
-        <span>{week}</span>
+        <span>{weekLabel(plan.week, language)}</span>
         <button className="plus-icon" aria-label={text.close} onClick={onClose}>
           <X size={16} />
         </button>

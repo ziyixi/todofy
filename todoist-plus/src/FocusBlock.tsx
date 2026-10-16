@@ -54,7 +54,7 @@ export function FocusBlock({
   if (index === 0) status = language === "zh" ? "下一步" : "Up next";
   let timerAction: "start" | "pause" | "resume" = "start";
   if (timer) {
-    status = text.pause;
+    status = text.paused;
     if (timer.status === "running")
       status = language === "zh" ? "正在做" : "Now";
     timerAction = timer.status === "running" ? "pause" : "resume";
@@ -75,9 +75,11 @@ export function FocusBlock({
         style={{ "--plus-family-color": familyColor } as CSSProperties}
         aria-busy={settling || undefined}
       >
-        {task && (
+        {task ? (
           <button
             className="plus-checkbox"
+            // Todoist's priority ring: the API's priority 4 is P1.
+            data-priority={task.priority}
             aria-label={`${text.complete}: ${title}${settling ? `, ${text.updating}` : ""}`}
             disabled={busy || settling}
             onClick={() => complete(task)}
@@ -88,6 +90,9 @@ export function FocusBlock({
               <Check size={13} />
             )}
           </button>
+        ) : (
+          // FlowDay rows keep their title in line with the rows above.
+          <span className="plus-checkbox-slot" aria-hidden="true" />
         )}
         <div className="plus-focus-block-content">
           <div className="plus-focus-block-top">

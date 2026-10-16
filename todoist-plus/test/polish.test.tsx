@@ -1,0 +1,164 @@
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  within,
+} from "@testing-library/react";
+import { afterEach, expect, it, vi } from "vitest";
+import { createPrototype } from "../design/fixture";
+import { FocusView } from "../src/FocusView";
+import { PlanView, type PlanViewProps } from "../src/PlanView";
+import { readableDate, weekLabel } from "../src/PlanningCalendar";
+import { OutcomeCard } from "../src/ReviewBoard";
+import type { Language, PlanningTask } from "../src/model";
+
+afterEach(cleanup);
+
+async function planProps(language: Language): Promise<PlanViewProps> {
+  const actions = createPrototype();
+  const { plan, focus, days } = await actions.load();
+  return {
+    plan,
+    days,
+    flowTasks: focus.flowTasks,
+    currentDate: focus.date,
+    language,
+    busy: false,
+    actions,
+    run: vi.fn(),
+    editTask: vi.fn(),
+    onWeekChange: vi.fn(),
+    onLabels: vi.fn(),
+    todayTaskIds: focus.taskIds,
+    addFocus: vi.fn(),
+    addStep: vi.fn(),
+    onOpenTask: vi.fn(),
+    completeReview: vi.fn(),
+  };
+}
+
+it("shows dates as people read them, with the ISO week number", () => {
+  expect(readableDate("2026-10-12", "en")).toBe("Mon, Oct 12");
+  expect(readableDate("2026-10-12", "zh")).toBe("10月12日周一");
+  expect(weekLabel("2026-10-12", "en")).toBe("Week 42 · from Oct 12");
+  expect(weekLabel("2026-10-12", "zh")).toBe("第 42 周 · 10月12日起");
+  // The week belongs to the year of its Thursday.
+  expect(weekLabel("2025-12-29", "en")).toBe("Week 1 · from Dec 29");
+});
+
+it("counts steps in natural English and Chinese", async () => {
+  const { plan } = await createPrototype().load();
+  const parent: PlanningTask = {
+    ...plan.tasks[0]!,
+    id: "outcome",
+    parentId: "",
+    stage: "committed",
+    labels: [],
+  };
+  const step = (id: string): PlanningTask => ({
+    ...parent,
+    id,
+    parentId: "outcome",
+    stage: "none",
+  });
+  const card = (language: Language, tasks: PlanningTask[]) =>
+    render(
+      <OutcomeCard
+        task={parent}
+        tasks={[parent, ...tasks]}
+        managedLabels={plan.managedLabels}
+        scheduledIds={new Set(["one"])}
+        language={language}
+        onClick={vi.fn()}
+      />,
+    );
+  card("en", [step("one")]);
+  expect(screen.getByText("1 step · 1 planned")).toBeTruthy();
+  cleanup();
+  card("en", [step("one"), step("two")]);
+  expect(screen.getByText("2 steps · 1 planned")).toBeTruthy();
+  cleanup();
+  card("zh", [step("one"), step("two"), step("three")]);
+  expect(screen.getByText("3 个步骤 · 已安排 1")).toBeTruthy();
+});
+
+it("names a paused timer as a state, colours checkboxes by priority and keeps FlowDay rows aligned", async () => {
+  const { plan, focus } = await createPrototype().load();
+  focus.timer = {
+    taskId: "copy",
+    flowDate: focus.date,
+    status: "paused",
+    elapsedSeconds: 85,
+    startedAt: "",
+    etag: "synthetic-timer",
+  };
+  focus.taskIds.push("local-note");
+  focus.flowTasks["local-note"] = {
+    title: "Synthetic local note",
+    local: true,
+  };
+  const props = {
+    plan,
+    focus,
+    busy: false,
+    editTask: vi.fn(),
+    complete: vi.fn(),
+    onOpenPlan: vi.fn(),
+    onTimer: vi.fn(),
+  };
+  const { rerender, container } = render(
+    <FocusView {...props} language="en" />,
+  );
+  const slot = (id: string) =>
+    container.querySelector(`[data-task-id="${id}"]`)!;
+  expect(slot("copy").querySelector(".plus-focus-status")!.textContent).toBe(
+    "Paused",
+  );
+  // The button keeps the verb.
+  expect(
+    screen.getByRole("button", { name: "Resume: Write the introduction" })
+      .textContent,
+  ).toBe("Resume");
+  const copy = plan.tasks.find((task) => task.id === "copy")!;
+  expect(
+    slot("copy").querySelector(".plus-checkbox")!.getAttribute("data-priority"),
+  ).toBe(String(copy.priority));
+  expect(
+    slot("local-note")
+      .querySelector(".plus-checkbox-slot")!
+      .getAttribute("aria-hidden"),
+  ).toBe("true");
+  rerender(<FocusView {...props} language="zh" />);
+  expect(slot("copy").querySelector(".plus-focus-status")!.textContent).toBe(
+    "已暂停",
+  );
+});
+
+it("gives the labels dialog one name and marks expandable rows with a chevron", async () => {
+  const { rerender } = render(<PlanView {...await planProps("en")} />);
+  expect(screen.getByRole("button", { name: "Planning labels" })).toBeTruthy();
+  const attention = screen.getByText(/^Needs a look · \d+$/u);
+  expect(attention.querySelector("svg.lucide-chevron-right")).toBeTruthy();
+  expect(attention.querySelector("svg.lucide-flag")).toBeNull();
+  rerender(<PlanView {...await planProps("zh")} />);
+  expect(screen.getByRole("button", { name: "计划标签" })).toBeTruthy();
+  expect(screen.getByText(/^需要关注 · \d+$/u)).toBeTruthy();
+});
+
+it("leaves the drop zone under a planned day blank and dates the weekly review", async () => {
+  const props = await planProps("en");
+  render(<PlanView {...props} reviewing />);
+  expect(
+    within(screen.getByRole("region", { name: "Weekly review" })).getByText(
+      "Week 42 · from Oct 12",
+    ),
+  ).toBeTruthy();
+  fireEvent.click(screen.getByRole("tab", { name: /^Week$/u }));
+  const ends = [...document.querySelectorAll(".planning-day-end")].map(
+    (end) => end.textContent,
+  );
+  expect(ends).toContain("Drop a step");
+  expect(ends).toContain("");
+  expect(ends).not.toContain("+");
+});

@@ -1,4 +1,4 @@
-import { Hourglass } from "lucide-react";
+import { ChevronRight } from "lucide-react";
 import { displayedTitle } from "./domain";
 import { words } from "./i18n";
 import {
@@ -62,7 +62,7 @@ export function WaitingList({
       onToggle={(event) => onToggle(event.currentTarget.open)}
     >
       <summary>
-        <Hourglass size={13} />
+        <ChevronRight size={14} aria-hidden="true" />
         {text.waiting} · {waiting.length}
       </summary>
       <ul aria-label={text.waiting}>

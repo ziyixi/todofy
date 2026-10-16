@@ -7,6 +7,7 @@ import {
   topLevelBets,
 } from "./domain";
 import { TaskBreadcrumb } from "./TaskBreadcrumb";
+import { weekLabel } from "./PlanningCalendar";
 import { pendingTask } from "./plan-updates";
 import { words } from "./i18n";
 import type {
@@ -98,9 +99,7 @@ export function WeeklyGoals({
           <Target size={15} />
           {zh ? "本周目标" : "Weekly goals"}
         </h2>
-        <span>
-          {zh ? "当前周" : "Week of"} {plan.week}
-        </span>
+        <span>{weekLabel(plan.week, language)}</span>
       </header>
       <div className="plus-weekly-goal-grid">
         {(["work", "personal"] as const).map((area) => {
