@@ -590,16 +590,32 @@ label, leaving the other labels, the deadline and a Sunday choice's week in plac
 cases and the calibrated CPU suite pass; gateway source is unchanged. The owner UI's types, 93 tests and build
 pass (176.8 KiB gzip, budget 208 KiB), and the 453 `.github/scripts` cases pass (1 skipped as before).
 
-The extension passes types, lint, Prettier, 158 unit/component/API cases (was 138) and 23 built-MV3 Chromium
+The extension passes types, lint, Prettier, 161 unit/component/API cases (was 138) and 24 built-MV3 Chromium
 cases (was 19). The new Chromium cases: each status at rest with its action at opacity 0, shown on hover and
 reached by Tab from the title; one SetTaskPlan `{active: true}` and no further task read; focus moving to the
-next row's action; Focus's line opening Review with the Deadlines summary focused; rows wrapping under the
-title at 640 px without overflow; Other views kept across reloads; and `--plus-danger` on the background at
-4.5:1 or more in all nine themes. The content script is 384,912 bytes (121,816 with `gzip -9`), against 378,250
-(119,946) before; its CSS 32,938 against 32,424; the background 137,035 against 136,746. Screenshots of the
-built extension on the synthetic page in Kale, Default and Dark (Review and Week at rest and with a row
-hovered, Focus with its line, task details, and narrow Review) were reviewed locally; one is in the
-[interface document](../todoist-plus/docs/planning-interface.md).
+next row's action; marking the last due row by keyboard; Focus's line opening Review with the Deadlines
+summary focused; rows wrapping under the title at 640 px without overflow; Other views kept across reloads;
+and `--plus-danger` on the background at 4.5:1 or more in all nine themes. The content script is 385,225 bytes
+(121,861 with `gzip -9`), against 378,250 (119,946) before; its CSS 33,073 against 32,424; the background
+137,035 against 136,746. Screenshots of the built extension on the synthetic page in Kale, Default and Dark
+(Review and Week at rest and with a row hovered, Focus with its line, task details, and narrow Review and
+details) were reviewed locally; one is in the [interface document](../todoist-plus/docs/planning-interface.md).
+
+Review fixes, the same day. Marking the last due row, in the list or in the editor opened from its title,
+closed the list when the owner had not toggled it, so focus fell to the page and the announcement was inside
+a closed `<details>`. Acting on a row now keeps the list open for the visit, and its `role="status"` sits just
+outside the list. A card whose stage drag is pending keeps its row's "Mark in progress" disabled, as its
+details already were, so the write cannot carry the pre-drag etag. Statuses come last on screen through CSS
+`order` (markup and reading order unchanged), so both lists end at one right edge, at rest and on hover; the
+actions show on `:has(:focus-visible)` instead of `:focus-within`, so a mouse click leaves no action shown.
+Screen readers hear only the part of the date a status lacks ("Deadline Nov 30, Mon"; "，" in Chinese); a
+`@blocked` task past its deadline without a lead reads "2 days past" in the danger colour; in a narrow editor
+"Mark in progress" keeps one line and wraps under the fields. The four `design/production.html` captures in
+the interface document still showed "Needs a look" and were retaken. Each new case was checked to fail on the
+previous code: the list staying open (unit and Chromium), the pending card, the right edge and the mouse
+reveal. Kept as they were, with reasons in the interface document: the empty third line of a Waiting row at
+about 350 px of content (the owner's hover rule), the app-wide ASCII colon in accessible names, and the
+details sentence, which describes dates and the in-progress label only.
 
 Not verified: the live Todoist page and data (including that the owner's filters normalize to exactly these
 queries and that the account has an `active` label), real Todoist's overdue colour in the owner's theme, the

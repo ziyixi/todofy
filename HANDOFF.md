@@ -17,11 +17,15 @@ progress (the literal `active` label, never created), and Todofy also hides Wait
 Blocked and Active Deadlines behind a consistency test. Row actions show on hover or keyboard focus only (owner
 decision); `--plus-danger` now reads Todoist's overdue colour, because the attention tint misses 4.5:1 as text.
 Other views remembers open or closed. Dependencies, native row marks and `@blocked` mirroring are not built.
-Local proto, Todofy (host, 559 runtime, gateway with CPU), owner UI, scripts and extension (158 unit, 23 MV3
-Chromium) checks pass ([evidence](docs/todoist-plus-verification.md#deadlines-version-1-local-checks-october-16)).
-Pending: push, full branch CI, owner review and same-SHA release; Todofy must ship with or before the extension
-(the hidden filters and `active` both live there). After release, confirm the account has an `active` label
-and the three filters disappear only from the extension's sidebar; reload the extension and refresh Todoist.
+Review fixes are in: Deadlines stays open once a row is acted on, statuses end at the right edge, a pending
+card's mark waits for its drag. Local proto, Todofy (host, 559 runtime, gateway with CPU), owner UI, scripts and
+extension (161 unit, 24 MV3 Chromium) checks pass
+([evidence](docs/todoist-plus-verification.md#deadlines-version-1-local-checks-october-16)).
+Pending: push, full branch CI, owner review and one same-SHA release. Deploy Todofy first, since `active` needs
+it, then reload the extension straight away, before using Todoist: until the reload, the installed extension
+already hides the three filters but has no in-progress list, so `@active` tasks with a deadline show in no list
+for those minutes (the order is forced by `active`). Then refresh Todoist and confirm the account has an
+`active` label and the three filters disappear only from the extension's sidebar.
 
 Todoist Plus UI theme, safety and polish (owner-approved October 15: safety C1-C6, theming A1-A6, polish
 B1-B6) is on local branch `claude/plus-ui-theme`, based on `58908f64`; not pushed, no branch CI or release.
