@@ -19,6 +19,7 @@ from todofy.core.sql import plan as sql
 # The Todoist adapter's binding of the Mailbox:
 #   {"categories": [{"id": <plan_categories.id>, "label_id": "<Todoist label ID>", "label": "<its name when saved>"}],
 #    "destination": "<Todoist project ID>"}
+# The destination is what an extension before planning protocol 6 chose; filed mail goes to the Inbox since then.
 MAIL_KEY = "todoist.mail"
 
 

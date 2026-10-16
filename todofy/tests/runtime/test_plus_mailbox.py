@@ -137,9 +137,15 @@ def test_lookup_and_summary_read_d1_alone(stack):
     assert stack.call("mailItems:lookup", {"task_ids": ["x"] * 201}) == "BAD_REQUEST"
 
 
+IGNORED = {"provider": "todoist", "external_id": "inbox"}  # what the extension sends since planning protocol 6
+
+
 def test_settings_are_saved_in_the_planning_store_and_filing_is_one_sync(stack):
+    # For an extension before protocol 6, the account Inbox is the only destination to choose.
     settings = stack.call("mailSettings:read")
-    assert [project["id"] for project in settings["projects"]] == ["account-inbox", "work-project"]
+    assert [project["id"] for project in settings["projects"]] == ["account-inbox"]
+    assert settings["destination"] == {"provider": "todoist", "external_id": "account-inbox"}
+    calls = len(stack.upstream.received("GET", "/api/v1/projects"))
     saved = stack.call(
         "mailSettings:updateMailSettings",
         {
@@ -147,27 +153,27 @@ def test_settings_are_saved_in_the_planning_store_and_filing_is_one_sync(stack):
                 {"label": {"provider": "todoist", "external_id": "1"}, "priority": "p2"},
                 {"label": {"provider": "todoist", "external_id": "40"}, "priority": "p4"},
             ],
-            "destination": {"provider": "todoist", "external_id": "work-project"},
+            "destination": IGNORED,
             "etag": settings["etag"],
         },
     )
-    assert [category["priority"] for category in saved["categories"]] == ["p2", "p4"]
+    assert [category["priority"] for category in saved["categories"]] == ["p2", "p4"] and "destination" not in saved
+    assert len(stack.upstream.received("GET", "/api/v1/projects")) == calls  # the destination is never checked
     assert stack.worker.d1("SELECT name, priority FROM plan_categories ORDER BY sort_order") == [
         {"name": "office · P2", "priority": 2},
         {"name": "quick · P4", "priority": 4},
     ]
     [binding] = stack.worker.d1("SELECT value FROM plan_settings WHERE key = 'todoist.mail'")
-    assert json.loads(binding["value"])["destination"] == "work-project"
+    assert json.loads(binding["value"])["destination"] == ""
     # A lookup of no task answers the categories alone (the Mailbox with nothing to ask about).
     assert stack.call("mailItems:lookup", {"task_ids": []}) == {
         "categories": saved["categories"],
         "categories_etag": saved["etag"],
-        "destination": {"provider": "todoist", "external_id": "work-project"},
     }
-    # The saved settings sent again are a replay, whatever the etag.
+    # The saved categories sent again are a replay, whatever the etag and the destination.
     replay = {
         "categories": [{"label": c["label"], "priority": c["priority"]} for c in saved["categories"]],
-        "destination": saved["destination"],
+        "destination": {"provider": "todoist", "external_id": "work-project"},
         "etag": "stale",
     }
     assert stack.call("mailSettings:updateMailSettings", replay) == saved
@@ -185,19 +191,19 @@ def test_settings_are_saved_in_the_planning_store_and_filing_is_one_sync(stack):
             "request_id": str(uuid.uuid4()),
         },
     )
-    assert filed["task"]["project_id"] == "work-project" and filed["task"]["area"] == "work"
+    assert filed["task"]["project_id"] == "account-inbox" and filed["task"]["area"] == "work"
     stored = stack.upstream.tasks["file-me"]
     assert (sorted(stored["labels"]), stored["priority"], stored["project_id"]) == (
         ["context", "office"],
         3,
-        "work-project",
+        "account-inbox",
     )
     sent = stack.upstream.command_batches()[batches:]
     assert [[command["type"] for command in commands] for commands in sent] == [["item_update", "item_move"]]
 
 
-def test_a_filing_retry_never_writes_a_renamed_label_nor_moves_mail_into_an_archived_project(stack):
-    """After the settings test: categories office · P2 and quick · P4 (label 40), filed mail to work-project."""
+def test_a_filing_retry_never_writes_a_renamed_label(stack):
+    """After the settings test: categories office · P2 and quick · P4 (label 40)."""
     saved = stack.call("mailItems:lookup", {"task_ids": []})
     quick = next(category for category in saved["categories"] if category["label"]["external_id"] == "40")
     mail(stack.worker, stack.upstream, "file-retry")
@@ -211,21 +217,37 @@ def test_a_filing_retry_never_writes_a_renamed_label_nor_moves_mail_into_an_arch
     stack.upstream.throttle_commands_once = True
     assert stack.call("mailItems:fileMailItem", request) == "UNAVAILABLE"
     label = next(label for label in stack.upstream.labels if label["id"] == "40")
-    work = next(project for project in stack.upstream.projects if project["id"] == "work-project")
     batches = len(stack.upstream.command_batches())
     try:
         # Renamed in Todoist before the same category is chosen again: the frozen name is never resent.
         label["name"] = "quick-later"
         assert stack.call("mailItems:fileMailItem", request) == "ETAG_MISMATCH"
-        label["name"] = "quick"
-        # The destination archived since the settings were saved: nothing moves into it.
-        work["is_archived"] = True
-        fresh = {**request, "request_id": str(uuid.uuid4())}
-        assert stack.call("mailItems:fileMailItem", fresh) == "ACTION_NOT_ALLOWED"
     finally:
-        label["name"], work["is_archived"] = "quick", False
+        label["name"] = "quick"
     assert stack.upstream.command_batches()[batches:] == []
     assert stack.upstream.tasks["file-retry"]["project_id"] == INBOX
+
+
+def test_filing_to_the_inbox_alone_is_one_move_and_a_retry_moves_nothing_twice(stack):
+    mail(stack.worker, stack.upstream, "to-inbox", labels=["home"], priority=3)
+    request = {
+        "task_id": "to-inbox",
+        "etag": stack.tasks()["to-inbox"]["etag"],
+        "category_id": "",
+        "categories_etag": "",
+        "request_id": str(uuid.uuid4()),
+    }
+    batches = len(stack.upstream.command_batches())
+    stack.upstream.fail_commands_once = True
+    assert stack.call("mailItems:fileMailItem", request) == "UNAVAILABLE"
+    filed = stack.call("mailItems:fileMailItem", request)
+    assert filed["task"]["project_id"] == "account-inbox" and filed["task"]["labels"] == ["home"]
+    assert stack.upstream.tasks["to-inbox"]["priority"] == 3
+    # The first try's move landed: the retry found the task out of the mail project and sent nothing.
+    sent = stack.upstream.command_batches()[batches:]
+    assert [[(command["type"], command["args"]) for command in commands] for commands in sent] == [
+        [("item_move", {"id": "to-inbox", "project_id": "account-inbox"})]
+    ]
 
 
 def deletes(stack: Stack) -> list[dict[str, Any]]:

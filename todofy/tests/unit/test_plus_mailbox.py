@@ -58,7 +58,7 @@ class Todoist:
         }
 
     async def metadata(self, _core: Any, *, fresh: bool = False) -> dict[str, Any]:
-        self.calls.append("metadata")
+        self.calls.append("metadata:fresh" if fresh else "metadata")
         return {"timezone": "UTC", "labels": deepcopy(self.labels), "filters": []}
 
     async def task(self, _core: Any, task_id: str) -> dict[str, Any]:
@@ -156,8 +156,9 @@ class Stack:
         )
         self.todoist.add(task_id)
 
-    def settings(self, *categories: tuple[str, str], destination: str = "work-p") -> dict[str, Any]:
-        current = self.call("ReadMailSettings")
+    def settings(self, *categories: tuple[str, str], destination: str = "inbox") -> dict[str, Any]:
+        """UpdateMailSettings from the etag a lookup answers (D1 alone)."""
+        etag = self.call("LookupMailItems", task_ids=[])["categories_etag"]
         return self.call(
             "UpdateMailSettings",
             categories=[
@@ -165,7 +166,7 @@ class Stack:
                 for label, priority in categories
             ],
             destination={"provider": "todoist", "external_id": destination},
-            etag=current["etag"],
+            etag=etag,
         )
 
     def task(self, task_id: str) -> dict[str, Any]:
@@ -231,14 +232,29 @@ def test_read_summary_answers_the_full_text_or_nothing(stack):
     assert stack.todoist.calls == []
 
 
-def test_settings_list_the_inbox_first_and_never_the_mail_project_or_an_archived_one(stack):
+def test_settings_answer_the_account_inbox_for_extensions_before_protocol_6(stack):
+    """Their categories dialog asks for a destination: the Inbox is the only one, so it can still save."""
+    inbox = {"provider": "todoist", "external_id": "inbox-p"}
     answer = stack.call("ReadMailSettings")
-    assert answer["projects"] == [
-        {"id": "inbox-p", "display_name": "Inbox", "inbox": True},
-        {"id": "work-p", "display_name": "Work"},
-    ]
-    assert stack.todoist.calls == ["projects"]
-    assert "categories" not in answer and "destination" not in answer
+    assert answer["destination"] == inbox
+    assert answer["projects"] == [{"id": "inbox-p", "display_name": "Inbox", "inbox": True}]
+    assert stack.todoist.calls == ["projects"] and "categories" not in answer
+    # A destination an older extension saved is not answered here, and no Inbox answers none.
+    save_destination(stack, "work-p")
+    assert stack.call("ReadMailSettings")["destination"] == inbox
+    stack.todoist.project_rows[0]["inbox_project"] = False
+    assert stack.call("ReadMailSettings") == {"etag": stack.call("ReadMailSettings")["etag"]}
+    # Nor when the mail project would be the Inbox (filing would move nothing).
+    stack.todoist.project_rows[1]["inbox_project"] = True
+    assert "destination" not in stack.call("ReadMailSettings")
+
+
+def save_destination(stack: Stack, destination: str) -> None:
+    """The binding with the destination an extension before protocol 6 saved."""
+    row = stack.d1.db.execute("SELECT value FROM plan_settings WHERE key = 'todoist.mail'").fetchone()
+    value = {**json.loads(row[0] if row else '{"categories": []}'), "destination": destination}
+    stack.d1.db.execute("INSERT OR REPLACE INTO plan_settings VALUES ('todoist.mail', ?, 1)", (json.dumps(value),))
+    stack.d1.db.commit()
 
 
 # ---- UpdateMailSettings ---------------------------------------------------------------------------------------
@@ -247,7 +263,7 @@ def test_settings_list_the_inbox_first_and_never_the_mail_project_or_an_archived
 def test_categories_are_saved_kept_by_label_and_priority_and_replayed_by_value(stack):
     saved = stack.settings(("office", "p2"), ("quick", "p4"))
     first = [category["id"] for category in saved["categories"]]
-    assert saved["destination"] == {"provider": "todoist", "external_id": "work-p"}
+    assert "destination" not in saved and "projects" not in stack.todoist.calls
     assert [
         row[1:]
         for row in stack.d1.db.execute("SELECT id, name, priority, sort_order, archived_at FROM plan_categories")
@@ -258,16 +274,16 @@ def test_categories_are_saved_kept_by_label_and_priority_and_replayed_by_value(s
     binding = json.loads(
         stack.d1.db.execute("SELECT value FROM plan_settings WHERE key = 'todoist.mail'").fetchone()[0]
     )
-    assert binding["destination"] == "work-p" and [entry["label_id"] for entry in binding["categories"]] == [
+    assert binding["destination"] == "" and [entry["label_id"] for entry in binding["categories"]] == [
         "id-office",
         "id-quick",
     ]
-    # The same settings again, with any etag: the saved ones, no write.
+    # The same categories again, with any etag and any destination: the saved ones, no write.
     statements = len(stack.d1.statements)
     again = stack.call(
         "UpdateMailSettings",
         categories=[{"label": c["label"], "priority": c["priority"]} for c in saved["categories"]],
-        destination=saved["destination"],
+        destination={"provider": "todoist", "external_id": "work-p"},
         etag="stale",
     )
     assert again == saved and not any(s.startswith(("INSERT", "UPDATE")) for s in stack.d1.statements[statements:])
@@ -276,8 +292,34 @@ def test_categories_are_saved_kept_by_label_and_priority_and_replayed_by_value(s
     assert changed["categories"][1]["id"] == first[1] and changed["categories"][0]["id"] not in first
     assert stack.d1.db.execute("SELECT count(*) FROM plan_categories WHERE archived_at IS NOT NULL").fetchone()[0] == 1
     assert stack.call("LookupMailItems", task_ids=[])["categories"] == changed["categories"]
-    assert stack.call("UpdateMailSettings", categories=[], destination=saved["destination"], etag=saved["etag"]) == {
+    ignored = {"provider": "todoist", "external_id": "inbox"}
+    assert stack.call("UpdateMailSettings", categories=[], destination=ignored, etag=saved["etag"]) == {
         "error": "ETAG_MISMATCH"
+    }
+    # No category at all is a valid save.
+    cleared = stack.call("UpdateMailSettings", categories=[], destination=ignored, etag=changed["etag"])
+    assert "categories" not in cleared and cleared["etag"] == MailSettings().etag
+    assert "projects" not in stack.todoist.calls
+
+
+def test_the_destination_is_ignored_and_one_saved_before_stays(stack):
+    save_destination(stack, "work-p")
+    before = stack.call("LookupMailItems", task_ids=[])["categories_etag"]
+    stack.todoist.calls.clear()
+    # Any well-formed reference, even the mail project or one that never existed; never checked against Todoist.
+    for destination in (INBOX, "inbox", "no-such-project"):
+        saved = stack.settings(("deep", "p3"), destination=destination)
+        assert saved["destination"] == {"provider": "todoist", "external_id": "work-p"}
+        assert saved["etag"] != before
+    assert "projects" not in stack.todoist.calls
+    binding = json.loads(
+        stack.d1.db.execute("SELECT value FROM plan_settings WHERE key = 'todoist.mail'").fetchone()[0]
+    )
+    assert binding["destination"] == "work-p"
+    current = stack.call("ReadMailSettings")
+    malformed = {"provider": "linear", "external_id": "inbox"}
+    assert stack.call("UpdateMailSettings", categories=[], destination=malformed, etag=current["etag"]) == {
+        "error": "BAD_REQUEST"
     }
 
 
@@ -288,8 +330,6 @@ def test_categories_are_saved_kept_by_label_and_priority_and_replayed_by_value(s
         pytest.param([("lead_1w", "p1")], "work-p", "ACTION_NOT_ALLOWED", id="lead_label"),
         pytest.param([("active", "p1")], "work-p", "ACTION_NOT_ALLOWED", id="in_progress_label"),
         pytest.param([("gone", "p1")], "work-p", "ACTION_NOT_ALLOWED", id="no_such_label"),
-        pytest.param([("deep", "p1")], INBOX, "ACTION_NOT_ALLOWED", id="the_mail_project"),
-        pytest.param([("deep", "p1")], "old-p", "ACTION_NOT_ALLOWED", id="archived_project"),
         pytest.param([("deep", "p1"), ("deep", "p1")], "work-p", "BAD_REQUEST", id="twice"),
         pytest.param([("deep", "unspecified")], "work-p", "BAD_REQUEST", id="no_priority"),
         pytest.param([(f"x{index}", "p1") for index in range(5)], "work-p", "BAD_REQUEST", id="five"),
@@ -323,10 +363,10 @@ def test_filing_is_one_sync_of_label_priority_and_move_under_a_receipt(stack):
     request_id = str(uuid.uuid4())
     answer = filed(stack, "t1", saved["categories"][0], saved["etag"], request_id)
     task = stack.todoist.tasks["t1"]
-    assert (task["labels"], task["priority"], task["project_id"]) == (["context", "office"], 3, "work-p")
-    assert answer["task"]["project_id"] == "work-p" and answer["task"]["area"] == "work"
-    # One label sync, the destination checked, the task read, one Sync with both commands, the confirming read.
-    assert stack.todoist.calls[-5:] == ["metadata", "projects", "task", "sync:2", "task"]
+    assert (task["labels"], task["priority"], task["project_id"]) == (["context", "office"], 3, "inbox-p")
+    assert answer["task"]["project_id"] == "inbox-p" and answer["task"]["area"] == "work"
+    # One label sync, the Inbox looked up, the task read, one Sync with both commands, the confirming read.
+    assert stack.todoist.calls[-5:] == ["metadata:fresh", "projects", "task", "sync:2", "task"]
     assert stack.receipts() == [("FileMailItem", "done", None, '{"task_id":"t1"}')]
     assert stack.journal == ["storage.sync"]  # the receipt was durable before the Sync went out
 
@@ -348,7 +388,7 @@ def test_a_lost_answer_is_finished_by_the_same_request_and_runs_nothing_twice(st
     calls = len(stack.todoist.calls)
     answer = stack.call("FileMailItem", **request)
     assert answer["task"]["labels"] == ["quick"] and len(stack.todoist.applied) == 2
-    assert stack.todoist.calls[calls:] == ["metadata", "task"]
+    assert stack.todoist.calls[calls:] == ["metadata:fresh", "task"]
     assert stack.receipts()[0][1] == "done"
     assert stack.call("FileMailItem", **request)["task"]["id"] == "t1"
     assert stack.call("FileMailItem", **{**request, "category_id": "999"}) == {"error": "BAD_REQUEST"}
@@ -400,7 +440,7 @@ def test_a_partial_filing_is_finished_by_the_same_request(stack, monkeypatch):
     monkeypatch.setattr(stack.runtime.todoist, "commands", real)
     # The task as it is now (its own label already written) builds the frozen commands: they go again.
     answer = stack.call("FileMailItem", **request)
-    assert answer["task"]["project_id"] == "work-p" and stack.todoist.tasks["t1"]["priority"] == 4
+    assert answer["task"]["project_id"] == "inbox-p" and stack.todoist.tasks["t1"]["priority"] == 4
     assert len(stack.todoist.applied) == 2
 
 
@@ -424,13 +464,61 @@ def test_a_filing_retry_never_resends_labels_chosen_before_a_change(stack, monke
     assert task["task"]["labels"] == (["deep-work"] if change == "renamed" else ["context", "deep"])
 
 
-def test_filing_never_moves_mail_into_a_project_archived_since_the_settings_were_saved(stack, monkeypatch):
-    request = a_filing(stack)
-    next(row for row in stack.todoist.project_rows if row["id"] == "work-p")["is_archived"] = True
+def test_filing_to_the_inbox_alone_is_one_move_without_a_label_sync(stack, monkeypatch):
+    stack.mail(E1, "t1", received=AT)
+    stack.todoist.tasks["t1"].update(labels=["context"], priority=2)
     sent: list[dict[str, Any]] = []
     monkeypatch.setattr(stack.runtime.todoist, "commands", recorded(stack, sent))
-    assert stack.call("FileMailItem", **request) == {"error": "ACTION_NOT_ALLOWED"}
+    request = dict(task_id="t1", etag=stack.task("t1")["etag"], category_id="", categories_etag="any")
+    request["request_id"] = str(uuid.uuid4())
+    stack.todoist.calls.clear()
+    # No category is saved: the categories etag is not checked, and labels and priority stay.
+    answer = stack.call("FileMailItem", **request)
+    assert answer["task"]["project_id"] == "inbox-p" and answer["task"]["labels"] == ["context"]
+    assert stack.todoist.tasks["t1"]["priority"] == 2
+    move = {"id": "t1", "project_id": "inbox-p"}
+    command_id = stack.runtime.todoist.plus.command_id(request["request_id"], 1)
+    assert sent == [{"type": "item_move", "uuid": command_id, "args": move}]
+    assert stack.todoist.calls == ["metadata", "projects", "task", "sync:1", "task"]  # the cached labels
+    assert stack.receipts() == [("FileMailItem", "done", None, '{"task_id":"t1"}')]
+    # Done: the same request reads the task alone.
+    calls = len(stack.todoist.calls)
+    assert stack.call("FileMailItem", **request)["task"]["project_id"] == "inbox-p"
+    assert stack.todoist.calls[calls:] == ["metadata", "task"] and len(sent) == 1
+    # A task changed since it was shown is still refused.
+    stack.mail(E2, "t2", received=AT)
+    stale = {**request, "task_id": "t2", "etag": "stale", "request_id": str(uuid.uuid4())}
+    assert stack.call("FileMailItem", **stale) == {"error": "ETAG_MISMATCH"}
+
+
+def test_a_lost_inbox_filing_is_finished_without_a_second_move(stack):
+    stack.mail(E1, "t1", received=AT)
+    request = dict(task_id="t1", etag=stack.task("t1")["etag"], category_id="", categories_etag="")
+    request["request_id"] = str(uuid.uuid4())
+    stack.todoist.lose_answer = True
+    assert stack.call("FileMailItem", **request) == {"error": "UNAVAILABLE"}
+    calls = len(stack.todoist.calls)
+    assert stack.call("FileMailItem", **request)["task"]["project_id"] == "inbox-p"
+    assert stack.todoist.calls[calls:] == ["metadata", "task"] and len(stack.todoist.applied) == 1
+
+
+def test_filing_ignores_a_saved_destination_and_refuses_without_an_account_inbox(stack, monkeypatch):
+    request = a_filing(stack)
+    save_destination(stack, "work-p")  # what an older extension chose; the categories etag changes with it
+    request["categories_etag"] = stack.call("LookupMailItems", task_ids=[])["categories_etag"]
+    sent: list[dict[str, Any]] = []
+    monkeypatch.setattr(stack.runtime.todoist, "commands", recorded(stack, sent))
+    inbox = stack.todoist.project_rows[0]
+    for missing in ({"inbox_project": False}, {"id": INBOX}):
+        # Todoist lists no Inbox, or the mail project is the Inbox: nothing to move into.
+        original = dict(inbox)
+        inbox.update(missing)
+        assert stack.call("FileMailItem", **request) == {"error": "ACTION_NOT_ALLOWED"}
+        inbox.clear()
+        inbox.update(original)
     assert sent == [] and stack.receipts() == []
+    assert stack.call("FileMailItem", **request)["task"]["project_id"] == "inbox-p"
+    assert [command["args"].get("project_id") for command in sent] == [None, "inbox-p"]
 
 
 @pytest.mark.parametrize(

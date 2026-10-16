@@ -114,40 +114,49 @@ every Mailbox query repeats), so the imported archive is never listed. Since 202
 deletes no summary (owner decision; it used to delete the delivered ones after 90 days): a summary is the
 Mailbox's mail, and only the owner deletes mail. Delete all is the owner's way to: the mail it deletes loses
 its `summaries` row (subject, summary and brief), and `mail_events`, the ledger of IDs and states, keeps its
-row. A mail task deleted in Todoist itself keeps its summary. The six RPCs (`runtime/plus_mail.py`, under
-`plus_lock` like every Plus call):
+row. A mail task deleted in Todoist itself keeps its summary. Filed mail always moves to the account's Todoist
+Inbox (owner decision of 2026-10-17): categories are optional, and the destination an extension before planning
+protocol 6 chose is kept in the binding and ignored. The six RPCs (`runtime/plus_mail.py`, under `plus_lock` like
+every Plus call):
 
 - `LookupMailItems` (`POST /api/plus/v1/mailItems:lookup`, at most 200 task IDs; none answers the categories
   alone): one D1 batch, no Todoist call. A read sent as POST for its body, it goes on in maintenance like the
   GET reads (the gateway's `POST_READS`, the core's `READ_METHODS`). It answers the IDs Todofy knows as mail with each one's brief and
   receive time (the ledger row's `created_at`), whether its summary is there, and the categories with their
-  etag and the destination. Other tasks of the mail project are left out; the extension counts them.
+  etag (and a destination an older extension saved, deprecated). Other tasks of the mail project are left out;
+  the extension counts them.
 - `ReadMailSummary` (`GET /api/plus/v1/mailItems:readMailSummary?id=`): one primary-key read of the full
   summary, plain text the extension never interprets; empty when there is none.
-- `ReadMailSettings` (`GET /api/plus/v1/mailSettings:read`): the categories, their etag, the destination and
-  the projects to choose it from (one `GET /api/v1/projects` page: the Inbox first, then the active projects,
-  never the mail project; names are passed on, never stored).
-- `UpdateMailSettings` (`POST /api/plus/v1/mailSettings:updateMailSettings`): at most four categories, each
-  one current label (any but a planning stage's, the retired Bets', a lead window's or `active`; the two area
-  labels may) and a priority P1-P4, no pair twice, and one destination (required; no default). The saved
-  settings sent again answer as saved, whatever the etag (no request ID, no receipt); otherwise a stale etag
-  is `ETAG_MISMATCH` and a label or project gone is `ACTION_NOT_ALLOWED`. One D1 batch replaces the set:
-  `plan_categories` rows of scheme `mail` (a pair kept keeps its ID; a removed one is archived, never
-  deleted, so an ID is never reused) and the Todoist adapter's document `plan_settings` `todoist.mail`
-  (each category's label ID and name, and the destination's project ID). The name is generated from the
-  label and the priority (`office · P2`); the extension shows the area labels by their domain names.
+- `ReadMailSettings` (`GET /api/plus/v1/mailSettings:read`): the categories and their etag. For extensions
+  before planning protocol 6, whose categories dialog still asks for a destination, it also answers the account
+  Inbox as the destination and the only project (one `GET /api/v1/projects` page, the project Todoist marks
+  `inbox_project`; its name is passed on, never stored), or neither when Todoist lists no Inbox or it is the mail
+  project. The next Plus release drops that compatibility answer and the read.
+- `UpdateMailSettings` (`POST /api/plus/v1/mailSettings:updateMailSettings`): at most four categories (none is a
+  valid set), each one current label (any but a planning stage's, the retired Bets', a lead window's or
+  `active`; the two area labels may) and a priority P1-P4, no pair twice. The destination is still REQUIRED on
+  the wire (the profile forbids relaxing it; the extension sends `{todoist, "inbox"}`) but only checked to be a
+  well-formed reference: it is never compared with Todoist's projects, and the saved one stays as it is. The
+  saved categories sent again answer as saved, whatever the etag and the destination (no request ID, no
+  receipt); otherwise a stale etag is `ETAG_MISMATCH` and a label gone is `ACTION_NOT_ALLOWED`. It makes no
+  Todoist call but the label Sync. One D1 batch replaces the set: `plan_categories` rows of scheme `mail` (a
+  pair kept keeps its ID; a removed one is archived, never deleted, so an ID is never reused) and the Todoist
+  adapter's document `plan_settings` `todoist.mail` (each category's label ID and name, and the saved
+  destination). The name is generated from the label and the priority (`office · P2`); the extension shows the
+  area labels by their domain names.
 - `FileMailItem` (`POST /api/plus/v1/mailItems:fileMailItem`, `{task_id, etag, category_id, categories_etag,
-  request_id}`): one Todoist write under a [receipt](#receipts). It syncs the labels first, checks the
-  categories etag, that the destination is still an active project (one `GET /api/v1/projects` page; one
-  archived or deleted since it was chosen is `ACTION_NOT_ALLOWED`, and the extension opens the categories),
-  the task's etag and that the task is still a top-level task of the mail project, then freezes two commands
-  in one Sync: `item_update` (every label the task has plus the category's; an area label replaces the other
-  area label; priority `5 - P`) and `item_move` to the destination. A label gone is `ACTION_NOT_ALLOWED`:
-  Plus never creates a label. It answers the task read again. A repeat of a started receipt reads the task
-  first: once it has left the mail project the filing is done (the receipt finishes, nothing is sent);
-  otherwise the frozen commands go again only if the task, the category's label and the destination as they
-  are now build the same commands. A label renamed since (the plan etag covers only the role labels) or one
-  the owner added is `ETAG_MISMATCH`, so a retry never writes a name Todoist no longer has, which Todoist
+  request_id}`): one Todoist write under a [receipt](#receipts) that moves the mail task into the account's
+  Inbox (one `GET /api/v1/projects` page; none listed, or the mail project itself, is `ACTION_NOT_ALLOWED`).
+  With `category_id` empty that is the whole write: one `item_move` (UUID index 1), from the cached labels, with
+  `categories_etag` not checked and no label or priority changed. With a category it syncs the labels first,
+  checks the categories etag and the category's label, and the Sync carries `item_update` first (every label
+  the task has plus the category's; an area label replaces the other area label; priority `5 - P`). Either way
+  it checks the task's etag and that the task is still a top-level task of the mail project. A label gone is
+  `ACTION_NOT_ALLOWED`: Plus never creates a label. It answers the task read again. A repeat of a started
+  receipt reads the task first: once it has left the mail project the filing is done (the receipt finishes,
+  nothing is sent); otherwise the frozen commands go again only if the task, the category's label and the Inbox
+  as they are now build the same commands. A label renamed since (the plan etag covers only the role labels) or
+  one the owner added is `ETAG_MISMATCH`, so a retry never writes a name Todoist no longer has, which Todoist
   would create, nor drops the owner's label; the extension's next choice is a new request.
 - `DeleteMailItems` (`POST /api/plus/v1/mailItems:deleteMailItems`, 1-200 task IDs and a request ID): a
   permanent deletion of exactly the tasks the owner saw listed and left untouched. Todofy reads the mail
@@ -478,10 +487,11 @@ runtime Plus suite binds the retired label in its saved setup, as the owner's pr
 The Mailbox has its own, synthetic mail only: `tests/unit/test_mailbox.py` (`brief_of` on new and old
 summaries, notices, headers, heading-like lines, English mail, length and empty answers; the generated names,
 kept IDs and etag of the categories; the membership, filing and untouched rules), `test_plus_mailbox.py` (the
-six RPCs through `plus_api.handle` on host CPython: D1-only reads, settings replayed by value and refused when
-a label or project is gone, one Sync for a filing under a receipt, a lost answer finished by the same request,
-a partial filing finished, a retry refused after a label rename or a label added, no move into a project
-archived since; Delete all's every keep rule, a repeat that reads the frozen tasks again and keeps one the
+six RPCs through `plus_api.handle` on host CPython: D1-only reads, the account Inbox answered to older
+extensions, settings replayed by value and refused when a label is gone, any destination ignored and the saved
+one kept, one Sync for a filing under a receipt, always into the account Inbox, a move alone without a label
+Sync for an Inbox filing, none without an Inbox, a lost answer finished by the same request, a partial filing
+finished, a retry refused after a label rename or a label added; Delete all's every keep rule, a repeat that reads the frozen tasks again and keeps one the
 owner labelled, commented on, re-prioritised, dated, moved or gave a step to since the first try, a mail an
 unfinished Plus write is changing, a mail already gone counted as deleted, the deleted mail's summaries
 gone with their ledger rows kept, the bounds, maintenance, and no mail text in the logs or receipts),

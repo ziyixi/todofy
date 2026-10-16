@@ -57,7 +57,7 @@ METHODS = (
 )
 # Methods that write labels or bind them sync Todoist's labels first, so a label renamed in Todoist is never
 # written back under its old name; every other call reads the metadata the object synced in the last five
-# minutes (plus_todoist.metadata).
+# minutes (plus_todoist.metadata). FileMailItem syncs only when it files by a category (handle).
 LABEL_WRITES = frozenset(
     {"SetTaskPlan", "SetTaskLead", "UpdatePlanLabels", "ConfirmPlanMapping", "FileMailItem", "UpdateMailSettings"}
 )
@@ -594,7 +594,9 @@ async def handle(coordinator: Any, method: str, text: str, *, owner: bool, diges
                 current = await require_ready(coordinator, await plan(coordinator, fresh=True), synced=True)
                 response = await plus_mail.update_settings(coordinator, request, current)
             elif method == "FileMailItem":
-                current = await require_ready(coordinator, await plan(coordinator, fresh=True), synced=True)
+                # Only a category writes a label: a move to the Inbox alone uses the cached metadata.
+                fresh = bool(request.get("category_id"))
+                current = await require_ready(coordinator, await plan(coordinator, fresh=fresh), synced=fresh)
                 response = await plus_mail.file(coordinator, request, current)
             elif method == "DeleteMailItems":
                 await require_ready(coordinator)

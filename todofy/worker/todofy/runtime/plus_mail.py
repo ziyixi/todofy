@@ -2,9 +2,11 @@
 
 A mail item is a completed Mail Hero event's summaries row; the extension asks about the mail project tasks it
 already holds. The categories are planning-store facts (runtime/plan_store.py), their labels the Todoist adapter's
-(core/plus.py). The two writes that change Todoist take a receipt (runtime/plus_receipts.py), as every other one
-does: FileMailItem's one Sync (labels and priority, then the move) and DeleteMailItems' frozen deletions, sent at
-most SYNC_COMMANDS a request, after which the deleted mail's summaries go too (the owner's one way to delete them).
+(core/plus.py); they are optional, since filed mail always moves to the account's Todoist Inbox (owner decision of
+2026-10-17; the destination an extension before planning protocol 6 saved is kept and ignored). The two writes that
+change Todoist take a receipt (runtime/plus_receipts.py), as every other one does: FileMailItem's one Sync (with a
+category its label and priority, then always the move) and DeleteMailItems' frozen deletions, sent at most
+SYNC_COMMANDS a request, after which the deleted mail's summaries go too (the owner's one way to delete them).
 UpdateMailSettings writes D1 alone and replays by value. Logs carry no mail content.
 
 ``current`` is the caller's plan (plus_api.plan): the label mapping, the available labels and the account's day.
@@ -26,7 +28,6 @@ from todofy.runtime.interop import now_s
 MAX_TASKS = 200
 PRIORITIES = {"p1": 1, "p2": 2, "p3": 3, "p4": 4}
 WIRE_PRIORITIES = {value: name for name, value in PRIORITIES.items()}
-MAX_PROJECTS = 200
 
 
 def _ref(external_id: str) -> dict[str, str]:
@@ -59,10 +60,20 @@ def _settings_answer(settings: MailSettings) -> dict[str, Any]:
     return answer
 
 
-def _inbox(core: Any) -> str:
-    inbox = var(core.env, "TODOIST_DEFAULT_PROJECT_ID")
-    if not inbox:
+def _mail_project(core: Any) -> str:
+    """The project Todofy creates mail tasks in."""
+    project = var(core.env, "TODOIST_DEFAULT_PROJECT_ID")
+    if not project:
         raise todoist.PlusError("ACTION_NOT_ALLOWED")
+    return project
+
+
+async def _account_inbox(core: Any) -> dict[str, Any] | None:
+    """The account's Todoist Inbox, where filed mail goes: one projects page. None when Todoist lists none, or when
+    it is the mail project itself (filing would move nothing)."""
+    inbox = next((row for row in await todoist.projects(core) if row.get("inbox_project") and row.get("id")), None)
+    if inbox is None or str(inbox["id"]) == var(core.env, "TODOIST_DEFAULT_PROJECT_ID"):
+        return None
     return inbox
 
 
@@ -98,32 +109,27 @@ async def read_summary(core: Any, request: dict[str, Any]) -> dict[str, Any]:
     return {"summary": dict(row)["summary"] if row is not None else ""}
 
 
-async def _projects(core: Any) -> list[dict[str, Any]]:
-    """The projects filed mail may go to: the Inbox first, then the active ones in Todoist's order, never the mail
-    project. Names are only passed on, never stored."""
-    inbox = var(core.env, "TODOIST_DEFAULT_PROJECT_ID")
-    projects = [
-        {"id": str(row["id"]), "display_name": str(row.get("name") or ""), "inbox": bool(row.get("inbox_project"))}
-        for row in await todoist.projects(core)
-        if row.get("id") and not row.get("is_archived") and not row.get("is_deleted") and str(row["id"]) != inbox
-    ]
-    return sorted(projects, key=lambda project: not project["inbox"])[:MAX_PROJECTS]
-
-
 async def read_settings(core: Any) -> dict[str, Any]:
-    """ReadMailSettings: D1 and one Todoist read of the projects."""
-    settings = await plan_store.mail_settings(core.env.DB)
-    return {**_settings_answer(settings), "projects": await _projects(core)}
+    """ReadMailSettings: D1 and one Todoist read of the projects. It answers the account Inbox as the destination
+    and the only project (none when Todoist lists none) for extensions before planning protocol 6, whose categories
+    dialog asks for a destination; drop that in the next Plus release. Its name is passed on, never stored."""
+    answer = _settings_answer(await plan_store.mail_settings(core.env.DB))
+    answer.pop("destination", None)
+    inbox = await _account_inbox(core)
+    if inbox is None:
+        return {**answer, "projects": []}
+    project = {"id": str(inbox["id"]), "display_name": str(inbox.get("name") or ""), "inbox": True}
+    return {**answer, "destination": _ref(project["id"]), "projects": [project]}
 
 
 # ---- writes ---------------------------------------------------------------------------------------------------
 
 
 async def update_settings(core: Any, request: dict[str, Any], current: dict[str, Any]) -> dict[str, Any]:
-    """UpdateMailSettings: the whole set in one D1 batch, by etag; the saved settings sent again are a replay.
+    """UpdateMailSettings: the whole set in one D1 batch, by etag; the saved categories sent again are a replay.
 
-    Each label must be a current one a category may use (core/plus.mail_label), the destination an active project
-    other than the mail project; a label or project gone since the owner chose it is ACTION_NOT_ALLOWED."""
+    Each label must be a current one a category may use (core/plus.mail_label); one gone since the owner chose it is
+    ACTION_NOT_ALLOWED. The destination is still REQUIRED on the wire but ignored: the saved one stays as it is."""
     db = core.env.DB
     requested = []
     for category in request.get("categories", []):
@@ -131,9 +137,9 @@ async def update_settings(core: Any, request: dict[str, Any], current: dict[str,
         if priority is None:
             raise todoist.PlusError("BAD_REQUEST")
         requested.append((_todoist_id(category.get("label")), priority))
-    destination = _todoist_id(request.get("destination"))
+    _todoist_id(request.get("destination"))  # well-formed, and unused
     settings = await plan_store.mail_settings(db)
-    if [(c.label_id, c.priority) for c in settings.categories] == requested and settings.destination == destination:
+    if [(c.label_id, c.priority) for c in settings.categories] == requested:
         return _settings_answer(settings)
     if request.get("etag") != settings.etag:
         raise todoist.PlusError("ETAG_MISMATCH")
@@ -142,14 +148,12 @@ async def update_settings(core: Any, request: dict[str, Any], current: dict[str,
         label_id not in labels or not plus.mail_label(labels[label_id], current["labels"]) for label_id, _ in requested
     ):
         raise todoist.PlusError("ACTION_NOT_ALLOWED")
-    if destination not in {project["id"] for project in await _projects(core)}:
-        raise todoist.PlusError("ACTION_NOT_ALLOWED")
     saved, archived = mailbox.replace_categories(
         list(settings.categories),
         [(label_id, labels[label_id]["label"], priority) for label_id, priority in requested],
         await plan_store.next_category_id(db),
     )
-    updated = MailSettings(tuple(saved), destination)
+    updated = MailSettings(tuple(saved), settings.destination)
     await plan_store.save_mail_settings(db, settings, updated, archived, now_s())
     return _settings_answer(updated)
 
@@ -157,44 +161,49 @@ async def update_settings(core: Any, request: dict[str, Any], current: dict[str,
 async def _filing(
     core: Any, request: dict[str, Any], current: dict[str, Any], task: dict[str, Any] | None = None
 ) -> list[dict[str, Any]]:
-    """FileMailItem's two Sync commands, from the categories, the label, the destination and the task as they are
-    now. ``task``: the one a retry has just read, whose etag its own first try may have changed."""
+    """FileMailItem's Sync commands, from the category, its label, the Inbox and the task as they are now: with a
+    category, item_update (its label and priority); always item_move to the account's Inbox. ``task``: the one a
+    retry has just read, whose etag its own first try may have changed."""
     request_id, task_id = request["request_id"], plus.check_id(request.get("task_id", ""))
-    settings = await plan_store.mail_settings(core.env.DB)
-    if request.get("categories_etag") != settings.etag:
-        raise todoist.PlusError("ETAG_MISMATCH")
-    category = next((c for c in settings.categories if str(c.id) == request.get("category_id")), None)
-    if category is None:
-        raise todoist.PlusError("BAD_REQUEST")
-    label = next((label for label in current["available_labels"] if label["id"] == category.label_id), None)
-    if label is None or not plus.mail_label(label, current["labels"]) or not settings.destination:
-        # Todoist would create a label for a name it does not know; Plus never creates one.
-        raise todoist.PlusError("ACTION_NOT_ALLOWED")
-    if settings.destination not in {project["id"] for project in await _projects(core)}:
-        # Archived or deleted since the owner chose it: the Mailbox opens the categories to choose again.
+    filed: tuple[str, int] | None = None  # the category's label name and priority
+    if request.get("category_id"):
+        settings = await plan_store.mail_settings(core.env.DB)
+        if request.get("categories_etag") != settings.etag:
+            raise todoist.PlusError("ETAG_MISMATCH")
+        category = next((c for c in settings.categories if str(c.id) == request["category_id"]), None)
+        if category is None:
+            raise todoist.PlusError("BAD_REQUEST")
+        label = next((label for label in current["available_labels"] if label["id"] == category.label_id), None)
+        if label is None or not plus.mail_label(label, current["labels"]):
+            # Todoist would create a label for a name it does not know; Plus never creates one.
+            raise todoist.PlusError("ACTION_NOT_ALLOWED")
+        filed = label["label"], category.priority
+    inbox = await _account_inbox(core)
+    if inbox is None:
         raise todoist.PlusError("ACTION_NOT_ALLOWED")
     if task is None:
         task = await todoist.task(core, task_id)
         if request.get("etag") != plus.task_etag(task, current["labels"]):
             raise todoist.PlusError("ETAG_MISMATCH")
-    if str(task.get("project_id") or "") != _inbox(core) or task.get("parent_id"):
+    if str(task.get("project_id") or "") != _mail_project(core) or task.get("parent_id"):
         raise todoist.PlusError("ACTION_NOT_ALLOWED")
-    labels = plus.filed_labels(task, label["label"], current["labels"])
-    update = {"id": task_id, "labels": labels, "priority": plus.api_priority(category.priority)}
-    move = {"id": task_id, "project_id": settings.destination}
-    return [
-        {"type": "item_update", "uuid": plus.command_id(request_id, 0), "args": update},
-        {"type": "item_move", "uuid": plus.command_id(request_id, 1), "args": move},
-    ]
+    commands = []
+    if filed is not None:
+        name, priority = filed
+        update = {"id": task_id, "labels": plus.filed_labels(task, name, current["labels"])}
+        update["priority"] = plus.api_priority(priority)
+        commands.append({"type": "item_update", "uuid": plus.command_id(request_id, 0), "args": update})
+    move = {"id": task_id, "project_id": str(inbox["id"])}
+    return [*commands, {"type": "item_move", "uuid": plus.command_id(request_id, 1), "args": move}]
 
 
 async def file(core: Any, request: dict[str, Any], current: dict[str, Any]) -> dict[str, Any]:
     """FileMailItem: one Sync under its receipt, then the task read again; a done receipt reads the task alone.
 
     A started receipt reads the task first. Once it has left the mail project the filing is done. Otherwise the
-    frozen commands go again (Todoist runs each UUID once) only if the task, the category's label and the
-    destination as they are now build the same ones: a label renamed or added since, or a binding changed, is
-    ETAG_MISMATCH, so a retry never writes a label name Todoist no longer has nor drops one the owner added."""
+    frozen commands go again (Todoist runs each UUID once) only if the task, the category's label and the Inbox as
+    they are now build the same ones: a label renamed or added since, or a binding changed, is ETAG_MISMATCH, so a
+    retry never writes a label name Todoist no longer has nor drops one the owner added."""
     request_id = request["request_id"]
     digest = plus.fingerprint(["FileMailItem", request])
     previous = await receipts.find(core, request_id)
@@ -208,7 +217,7 @@ async def file(core: Any, request: dict[str, Any], current: dict[str, Any]) -> d
         if previous.plan_etag != current["etag"]:
             raise todoist.PlusError("ETAG_MISMATCH")
         task = await todoist.task(core, request["task_id"])
-        if str(task.get("project_id") or "") != _inbox(core):
+        if str(task.get("project_id") or "") != _mail_project(core):
             receipts.finish(core.sql, request_id, {"task_id": request["task_id"]})
             return {"task": plus.task_view(task, current["today"], current["labels"])}
         if await _filing(core, request, current, task) != previous.commands:
@@ -228,8 +237,8 @@ async def _deletions(core: Any, ids: list[str]) -> tuple[set[str], set[str]]:
     elsewhere, or no longer active). Deletable are the active top-level mail tasks the owner has not touched in
     Todoist (core/plus.untouched) that no dependency names and no unfinished Plus write changes (a started receipt,
     whose label, step or move may not be in Todoist yet)."""
-    db, inbox = core.env.DB, _inbox(core)
-    tasks = {str(task["id"]): task for task in await todoist.project_tasks(core, inbox)}
+    db, project = core.env.DB, _mail_project(core)
+    tasks = {str(task["id"]): task for task in await todoist.project_tasks(core, project)}
     parents = {str(task["parent_id"]) for task in tasks.values() if task.get("parent_id")}
     bound = json.dumps(ids)
     mail, linked = await db.batch(
@@ -242,7 +251,7 @@ async def _deletions(core: Any, ids: list[str]) -> tuple[set[str], set[str]]:
         task_id
         for task_id in ids
         if (task := tasks.get(task_id)) is not None
-        and str(task.get("project_id") or "") == inbox
+        and str(task.get("project_id") or "") == project
         and not task.get("parent_id")
         and task_id in mail_ids
         and task_id not in linked_ids
