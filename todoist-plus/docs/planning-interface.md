@@ -96,12 +96,12 @@ Plus 只按已知真实对象 ID 隐藏被替代项。收藏项目保留，其�
 
 ### 主题
 
-2026-10-15 owner 批准。Todoist 把主题写成 `<html>` 上的类，主题 token（`--product-library-*`）和 color-scheme 继承进每个 Shadow DOM。`styles.css` 开头的一处桥接让每个 `--plus-*` 颜色读取 Todoist 赋予同一角色的 token；不再用脚本复制颜色，主题切换在同一次样式计算中生效。
+2026-10-15 owner 批准。Todoist 把主题写成 `<html>` 上的类，主题 token（`--product-library-*`）和 color-scheme 继承进每个 Shadow DOM。`styles.css` 开头的一处桥接让每个 `--plus-*` 颜色读取 Todoist 赋予同一角色的 token；不再用脚本复制颜色，主题切换在同一次样式计算中生效。选中底色上的所有文字（含次要文字和今天的日期数字）都用 `selected-text`，强调色只放在页面、列和卡片底色上。
 
 | `--plus-*`                    | Todoist token                                                                        | 用途                                  |
 | ----------------------------- | ------------------------------------------------------------------------------------ | ------------------------------------- |
-| `accent`                      | `actionable-tertiary-idle-tint`                                                      | 文字链接、焦点框                      |
-| `accent-fill` ／ `on-accent`  | `actionable-primary-idle-fill` ／ `-on-idle-tint`                                    | 主按钮、插入线、投放目标及其上的文字  |
+| `accent`                      | `actionable-tertiary-idle-tint`                                                      | 文字链接、焦点框、插入线、投放边框    |
+| `accent-fill` ／ `on-accent`  | `actionable-primary-idle-fill` ／ `-on-idle-tint`                                    | 主按钮、复选框及其上的文字            |
 | `selected` ／ `selected-text` | `selectable-secondary-selected-fill` ／ `-on-selected-tint`                          | 选中的导航、过滤、日期和当前 Focus 卡 |
 | `bg` ／ `surface` ／ `text`   | `background-base-primary` ／ `-tertiary`，`display-primary-idle-tint`                | 页面、列与日期列、正文                |
 | `muted` ／ `line` ／ `hover`  | `display-secondary-idle-tint`，`divider-primary`，`actionable-quaternary-hover-fill` | 次要文字、分隔线、悬停层              |
@@ -109,24 +109,24 @@ Plus 只按已知真实对象 ID 隐藏被替代项。收藏项目保留，其�
 | `p1`–`p4`                     | `priorities-pN-primary-idle-tint`（API 的 4 是 P1）                                  | Review 与 Focus 的优先级圆圈          |
 | `overlay`、`shadow-1`–`3`     | `background-overlay`，`shadow-raised-1`–`3`                                          | 弹窗背景、卡片／浮动条／弹窗阴影      |
 
-每项保留原值作后备，原有浅色和深色值用 `light-dark()`，由继承的 color-scheme 选择；扩展设置页声明 `light dark`，跟随系统。任务详情里的“步骤与时间”背景透明，显示 Todoist 弹窗自身的底色。字体读 `--td-ui-font-family`。只有导航行的宽度和字号在挂载时测量。
+每项保留原值作后备，原有浅色和深色值用 `light-dark()`，由继承的 color-scheme 选择；扩展设置页声明 `light dark`，跟随系统。真实页面只确认了 Kale 的 color-scheme 为 `light`，所以保留一处后备：`<html>` 的主题类变化时（只在变化时）读一次原生正文颜色，文字偏亮就给各宿主加 `data-theme="dark"`，`:host([data-theme="dark"])` 设为 `color-scheme: dark`，表单控件、滚动条和后备色不会在深色页面上保持浅色。`surface` 是 Todoist 的第三层背景，各主题都带自己的色调（Default 与 Dark 偏暖，Kale 偏绿，Blueberry 偏蓝），Dark 中的暖棕色 `#322f2a` 来自 Todoist 的 token 本身，不是中性灰。任务详情里的“步骤与时间”背景透明，显示 Todoist 弹窗自身的底色。字体读 `--td-ui-font-family`。只有导航行的宽度和字号在挂载时测量。
 
-`@doist/product-libraries-tokens` 1.4.2（MIT，只含 CSS）是固定版本的开发依赖，只用于测试，不进入构建包。单元测试拒绝 src 中该包没有定义的 token 名，例外只有在真实页面确认过的 `shadow-raised-1`–`3`；浏览器测试用它的公开主题 CSS 检查默认、Kale、Dark、Blueberry、Tangerine 五个主题。公开值与真实 Todoist 可能略有不同，所以断言比较页面自身的 token，而不是写死的颜色。Vite 的 CSS 目标为 Chrome 123，保留 `light-dark()`。
+`@doist/product-libraries-tokens` 1.4.2（MIT，只含 CSS）是固定版本的开发依赖，只用于测试，不进入构建包。单元测试拒绝 src 中该包没有定义的 token 名，例外只有在真实页面确认过的 `shadow-raised-1`–`3`；`--td-ui-*` 只允许同一次核对见过的 `font-family` 和 `button-normal-height`，运行时拼接的名称同样拒绝。浏览器测试用它的公开主题 CSS 检查全部九个主题：Plus 实际组合的文字对比度至少 4.5:1，焦点框、插入线和投放边框至少 3:1，并在 Week 中实测今天的日期数字和选中事项的次要文字；还检查 Dark 不带 color-scheme 时宿主仍为深色。公开值与真实 Todoist 可能略有不同，所以断言比较页面自身的 token，而不是写死的颜色。Vite 的 CSS 目标为 Chrome 123，保留 `light-dark()`。
 
 ### 恢复
 
 Plus 隐藏原生界面的前提是替代界面已挂载，失败路径都恢复原生 Todoist：
 
-- 任务详情只取选择列表的第一行，没有列表时才取其他行；页面地址是任务链接（`…/task/<id>`）时必须指向同一任务，否则不挂载“步骤与时间”，不会写到别的任务。
+- 任务详情先取包含任务正文区域的行，再取选择列表的第一行（它也可能是小步骤列表），没有列表时才取其他行；页面地址是任务链接（`…/task/<id>`）时必须指向同一任务，否则不挂载“步骤与时间”，不会写到别的任务。真实弹窗的结构待发布前核对，见[验证](verification.md#发布前页面核对)。
 - Todoist 重建 `#content` 或侧栏时，Plan／Focus 视图和导航重新挂载，每分钟最多 10 次；视图未挂载期间不隐藏任何原生项，其他视图收藏只在 Other views 开关挂好后收起。挂载失败不会卡住后续挂载。Todoist 加入 `#content` 的对话框、提示和 toast（role 为 dialog、alertdialog、alert、status 或 aria-modal）保持可见。
-- 渲染出错时只显示一行“返回 Todoist / 重新加载”；返回会去掉视图参数并恢复原生页面。
-- 页面观察每帧最多运行一次；30 秒内超过 1,500 次视为循环，Plus 卸下并恢复原生页面。每次运行、回到标签页和窗口获得焦点时检查扩展是否已停用或重新加载，是则立即恢复，无需刷新；加载新版本仍需刷新页面。
+- 渲染出错时只显示一行“返回 Todoist / 重新加载”；返回会去掉视图参数并恢复原生页面，切换到另一个视图会重新尝试渲染。页面检测在下一次成功渲染后才清除“显示出错”，侧栏重建不会清除。重建次数达到上限后，点击 Plan 或 Focus 会在上限窗口过后重新挂载。
+- 页面观察每帧最多运行一次；只有 Plus 自己改动了页面（隐藏、恢复、渲染或宿主显示）的那次运行才计数，30 秒内超过 1,500 次视为反馈循环，Plus 卸下并恢复原生页面。Todoist 自身的滚动和拖动不计数，无论持续多久。每次运行、回到标签页和窗口获得焦点时检查扩展是否已停用或重新加载，是则立即恢复，无需刷新；加载新版本仍需刷新页面。
 
 所有 Todoist 选择器集中在 `src/anchors.ts` 的一张表中，每项按表中顺序逐个尝试；Todoist 更新后只改这一处。
 
 ### 页面检测
 
-扩展设置页显示一行最近的页面检测，语言跟随 Todoist：“Todoist 页面检测：全部正常”，或例如“步骤与时间已关闭（任务 ID 与页面链接不一致）”。content script 只在状态变化时发送固定集合中的键：增强项（计划和专注、步骤与时间）及原因（找不到侧栏、主内容区、任务详情区域或任务行，任务 ID 不一致，重建过多，页面持续变化，显示出错）。background 拒绝含其他键或值的记录，只把最新一条存入 storage.local，只给设置页读取；不含任务内容、ID 或网址，也不离开浏览器。
+扩展设置页显示一行最近的页面检测，语言跟随 Todoist：“Todoist 页面检测：全部正常”，或例如“步骤与时间已关闭（任务 ID 与页面链接不一致）”。content script 只在状态变化时发送固定集合中的键：增强项（计划和专注、步骤与时间）及原因（找不到侧栏、主内容区、任务详情区域或任务行，任务 ID 不一致，重建过多，页面持续变化，显示出错）。启动 15 秒后仍未挂载时只报告确实缺少的锚点；后台标签页不运行动画帧，等它显示后再重新计时。background 拒绝含其他键或值的记录，只把最新一条存入 storage.local，只给设置页读取；不含任务内容、ID 或网址，也不离开浏览器。
 
 ## 写入与读取
 

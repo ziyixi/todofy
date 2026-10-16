@@ -474,38 +474,59 @@ content-free probe of the live page that day (Kale): `actionable-primary-idle-ti
 `actionable-primary-selected-fill`, which Plus read, are missing there; the tokens the bridge now reads
 are present, and `color-scheme` on `<html>` is `light`.
 
-- Safety: the task tools take the selection list's first row and attach nothing when a task link names
-  another task; Plan/Focus and the nav re-mount after Todoist re-creates `#content` or the sidebar (ten
-  mounts a minute); nothing native stays hidden while Plus is detached; a rejected mount no longer blocks
-  later ones; Todoist dialogs and toasts in `#content` stay visible; disabling or reloading the extension
-  restores native Todoist on the next pass, tab return or window focus; a render error leaves one "Back to
-  Todoist / Reload" line; the observer runs at most once a frame and tears Plus down after 1,500 passes in
-  30 s. Selectors live in one ordered table (`anchors.ts`); the dead `#left_menu` is gone.
+- Safety: the task tools take the row that holds the task's own content, else the selection list's
+  first row, and attach nothing when a task link names another task; Plan/Focus and the nav re-mount
+  after Todoist re-creates `#content` or the sidebar (ten mounts a minute); nothing native stays hidden
+  while Plus is detached; a rejected mount no longer blocks later ones; Todoist dialogs and toasts in
+  `#content` stay visible; disabling or reloading the extension restores native Todoist on the next
+  pass, tab return or window focus; a render error leaves one "Back to Todoist / Reload" line, and the
+  other view tries again; the observer runs at most once a frame and tears Plus down after 1,500 passes
+  in 30 s in which Plus itself changed the page, so Todoist's own scrolling never counts. Selectors
+  live in one ordered table (`anchors.ts`); the dead `#left_menu` is gone.
 - Theme: one `--plus-*` bridge reads Todoist's tokens by role with the old values as `light-dark()`
-  fallbacks; `applyTheme`'s per-mutation colour copy is removed. The options page follows the system.
-  Vite's CSS target is Chrome 123: the default had turned every `light-dark()` fallback transparent.
+  fallbacks; `applyTheme`'s per-mutation colour copy is removed. Until the live Dark theme confirms
+  its `color-scheme`, a class change on `<html>` that turns the native text light marks each Plus host
+  dark. All text on the selected fill uses Todoist's selected text colour; drag indicators use the
+  accent. The options page follows the system. Vite's CSS target is Chrome 123: the default had
+  turned every `light-dark()` fallback transparent.
 - Polish: Paused state, step counts, one "Planning labels" name, 需要关注, priority checkboxes,
   calendar-clock, chevrons, no inert '+', a centred timer bar, week-number dates, 600 weights, 12 px
   minimum, one 1.5 px icon stroke, 32 px controls.
 - Status line: the options page shows "Todoist 页面检测：全部正常" or which enhancement is off and why,
   from closed key sets that the background validates; it stays in `storage.local`.
 
-Local checks: types, lint, Prettier on changed files, production build, 130 unit/component cases (was
+Local checks: types, lint, Prettier on changed files, production build, 138 unit/component cases (was
 104) and 19 built-MV3 Chromium cases (was 16). The new jsdom mount suite fails against the previous
 `mount.tsx` in all eight safety cases; the new browser cases for the wrong-task binding, re-created
 containers, the theme matrix and the timer bar fail against the previous build. The theme matrix loads
 the public CSS of `@doist/product-libraries-tokens` 1.4.2 (MIT, an exact-pinned devDependency; nothing
-from it is in the build output) for Default, Kale, Dark, Blueberry and Tangerine, switches the `<html>`
-class and, in the same task, checks every `--plus-*` colour against its token, the elements that use them
-and 4.5:1 text contrast, then the no-token fallbacks in light and dark. A unit case fails on any
+from it is in the build output) for all nine themes, switches the `<html>` class and, in the same task,
+checks every `--plus-*` colour against its token, the elements that use them, 4.5:1 for each text pair
+Plus composes and 3:1 for indicator lines; in Week it measures today's number and the selected
+outcome's metadata where they are drawn; it checks that Dark without its own `color-scheme` still makes
+the hosts dark, then the no-token fallbacks in light and dark. A unit case fails on any
 `--product-library-*` name the package does not define (only `shadow-raised-1`..`3`, seen live, are
-allowed); against the previous CSS it reports exactly the two dead names.
+allowed), on a `--td-ui-*` name outside the two seen live and on any name built at runtime; against the
+previous CSS it reports exactly the two dead names.
 
-The content script is 377,239 bytes (119,603 with `gzip -9`), against 374,657 (118,802) before; its CSS
-32,161 bytes against 29,856; the background 136,746 against 136,055. No runtime dependency, budget or
+A review of the branch the same day found, and this branch fixes: the loop breaker counting Todoist's
+own passes; the task lookup that would bind to the first sub-task if the selection list holds sub-tasks;
+favourites left hidden when the plan read fails while the Other views toggle loads; a startup report
+from background tabs; a crash line and page check that outlived a view change; a capped view that a
+click could not bring back; the token check missing built names; today's number, muted text on selected
+fills, the error links and Tangerine drag lines below contrast targets; and the removed dark
+`color-scheme` fallback. Each behaviour fix has a unit case that fails without it; the theme matrix
+fails on the previous CSS at today's number and on the previous `mount.tsx` at the dark hosts, while
+the error links and drag lines are covered by its token pairs.
+
+The content script is 378,250 bytes (119,946 with `gzip -9`), against 374,657 (118,802) before; its CSS
+32,306 bytes against 29,856; the background 136,746 against 136,055. No runtime dependency, budget or
 service changed. Before/after captures in Kale (English and Chinese), Default, Blueberry, Dark and
 Tangerine were reviewed locally and are not committed.
 
 Not verified: the live Todoist DOM and theme values (public token values can differ a little), the
-live task-modal URL form that the task-link check relies on (without a task link it keeps the old
-lookup), the Dark theme's `color-scheme` on the live page, the installed extension, branch CI and release.
+live task modal's shape and URL form that the task lookup relies on, the Dark theme's `color-scheme` and
+`shadow-raised-*` values, the nav label offset, the installed extension, branch CI and release. Before
+the same-SHA release the owner runs the two content-free console lines in
+`todoist-plus/docs/verification.md` (theme in Kale and Dark; a task with sub-tasks and one of its
+sub-tasks) and records the results here.

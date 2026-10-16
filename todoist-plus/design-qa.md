@@ -77,7 +77,8 @@ a prototype; the checks below used the real MV3 build, synthetic tasks and Doist
   Todoist theme defines. Every colour now reads the token with Todoist's own role (accent text, primary
   fill with its on-colour, selected row with its text, surfaces, muted, lines, hover, warning, priorities,
   overlay, shadows). Kale looks nearly the same; Default, Blueberry, Dark and Tangerine now match their own
-  sidebar. Text, muted, links, warning, button and selection text keep 4.5:1 in those five themes.
+  sidebar. Every text pair Plus composes keeps 4.5:1 and every indicator line 3:1 in all nine public
+  themes (review follow-up below).
 - Copy and icons: "Paused" is a state and "Pause" a button; "1 step"; natural Chinese counts; one
   "Planning labels" name; 需要关注; a calendar-clock for the start window (the flag means priority in
   Todoist); chevrons on expandable rows; no inert '+' under planned days.
@@ -91,3 +92,15 @@ Before/after captures (Kale in English and Chinese, Default, Blueberry, Dark and
 week, focus, collapsed sidebar, weekly review, task editor, native details and options) were reviewed
 locally and stay outside Git. No horizontal overflow or console errors were seen; the live Todoist page
 was not opened.
+
+Review follow-up, same day. Measured on the nine public themes, these were below target and are fixed:
+today's day number in Week was accent text on the selected fill (3.83:1 in Blueberry); muted text on
+selected cards and the selected day heading was 4.42:1 in Moonstone; the error line's links were accent
+on the lane surface (4.10:1 in Dark). All text on the selected fill now uses Todoist's selected text
+colour, and the error links use the body text with their underline. Drag indicators (insert line, drop
+borders) use the accent instead of the primary fill, which was 1.65:1 in Tangerine. Kept on purpose: the
+focus ring stays on the accent rather than Todoist's focus token (about 2:1 in Dark); the warm Dark
+lanes are Todoist's own tinted tertiary background, as every theme's is; P2 orange and P4 grey rings
+(2.41–2.85:1 on light themes) are Todoist's own priority colours. The Plan/Focus label offset seen in
+one review fixture came from a native gap that fixture added; the live check in docs/verification.md
+reads the real offset.

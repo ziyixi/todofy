@@ -16,7 +16,7 @@ Bet 独立于规划范围。已有多个或未分类 Bet 保留并提示，由�
 
 ## 界面
 
-WXT + React 的三个 Shadow DOM 挂载点提供侧边导航、Plan/Focus 主内容和原生任务详情的“步骤与时间”。字体和颜色读取 Todoist 当前主题的 token，主题切换只经 CSS 生效，见[主题](planning-interface.md#主题)。DOM 用于挂载、取得真实 task ID 和暂时隐藏已替代项，选择器集中在 `src/anchors.ts`；替代界面未挂载时不隐藏原生项，见[恢复](planning-interface.md#恢复)。业务数据使用根 proto 的类型化 API。任务身份不依赖标题或 Todoist 的 React 内部状态。
+WXT + React 的三个 Shadow DOM 挂载点提供侧边导航、Plan/Focus 主内容和原生任务详情的“步骤与时间”。字体和颜色读取 Todoist 当前主题的 token，主题切换只经 CSS 生效，见[主题](planning-interface.md#主题)。焦点框有意使用文字强调色 `actionable-tertiary-idle-tint`，不用 Todoist 的 `actionable-focus-tint`：前者在九个公开主题中与背景至少 4.5:1，后者在 Dark 约 2:1，低于非文字元素的 3:1；Todoist 自身焦点框实际用哪种颜色待真实页面核对。DOM 用于挂载、取得真实 task ID 和暂时隐藏已替代项，选择器集中在 `src/anchors.ts`；替代界面未挂载时不隐藏原生项，见[恢复](planning-interface.md#恢复)。业务数据使用根 proto 的类型化 API。任务身份不依赖标题或 Todoist 的 React 内部状态。
 
 Plan 顶部是 Work／Personal 两组本周目标。Review 在四列中显示紧凑的事项卡，优先显示任务标题，下面显示工作／生活上下文、步骤数和已排程数。优先级使用 Todoist 原值。Week 展示本周承诺总览，选中一个事项后出现其小步骤，再把步骤安排到具体日期。
 

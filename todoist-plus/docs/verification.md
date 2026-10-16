@@ -51,8 +51,28 @@ Plan／Focus 导航图形缩至 18px，保留原生的 24px 布局槽和文字�
 
 owner 批准的安全（C1–C6）、主题（A1–A6）和细节（B1–B6）已在本地分支完成，未推送、无分支 CI 或发布。全部使用合成数据和公开主题 CSS，未打开真实 Todoist。
 
-- 单元／交互：jsdom 驱动 `mountTodoist` 与合成页面，覆盖重建 `#content` 和侧栏后重新挂载、挂载被拒后恢复、Todoist 对话框保持可见、停用扩展立即恢复、渲染出错的一行回退、重建次数上限和观察循环上限；任务详情的面包屑与链接不一致；锚点表顺序；页面检测的固定键与拒绝未知键；token 名检查。
-- 实际 MV3 构建包：任务工具不绑定面包屑或链接不符的任务，设置页说明原因；重建内容区和侧栏后 Plan／Focus 恢复；五个公开主题只靠 CSS 切换且 `--plus-*` 等于对应 token、文字对比度至少 4.5:1；无 token 时浅色／深色后备；侧栏收起后计时条仍居中。
+- 单元／交互：jsdom 驱动 `mountTodoist` 与合成页面，覆盖重建 `#content` 和侧栏后重新挂载、挂载被拒后恢复、Todoist 对话框保持可见、停用扩展立即恢复、渲染出错的一行回退与切换视图后重试、重建次数上限及其后的点击恢复、观察循环上限（Plus 与页面互相改动时卸下，Todoist 自身持续变化时不卸下）、计划读取失败时其他收藏保持可见、后台标签页的启动检测、深色后备；任务详情的面包屑、小步骤列表与链接不一致；锚点表顺序；页面检测的固定键与拒绝未知键；token 名检查（含运行时拼接的名称和 `--td-ui-*`）。
+- 实际 MV3 构建包：任务工具不绑定面包屑或链接不符的任务，设置页说明原因；重建内容区和侧栏后 Plan／Focus 恢复；九个公开主题只靠 CSS 切换且 `--plus-*` 等于对应 token，Plus 组合的文字对比度至少 4.5:1、线条至少 3:1，Week 中今天的数字和选中事项的次要文字实测通过；Dark 不带 color-scheme 时宿主仍为深色；无 token 时浅色／深色后备；侧栏收起后计时条仍居中。
+
+### 发布前页面核对
+
+同一 SHA 发布前，owner 在真实 Todoist 的 DevTools 控制台运行下面两行只读脚本，把结果记入根验收记录后再发布。它们只返回主题类名、CSS 值、布尔值和像素差，不读取任务内容。
+
+1. 主题，在 Today 等原生页面上，Kale 与 Dark 各一次：
+
+   ```
+   (()=>{const h=document.documentElement,s=getComputedStyle(h),v=n=>s.getPropertyValue('--product-library-'+n).trim()||null,side=document.querySelector('[data-testid=app-sidebar-scrollable-container]'),nav=document.querySelector('todoist-plus-navigation'),rgb=c=>{const e=document.body.appendChild(document.createElement('i'));e.style.color=c;const r=getComputedStyle(e).color;e.remove();return r},left=e=>{const t=e&&document.createTreeWalker(e,NodeFilter.SHOW_TEXT).nextNode(),r=t&&document.createRange();if(!r)return null;r.selectNodeContents(t);return Math.round(r.getBoundingClientRect().left)},up=left(side?.querySelector('a[href$="/upcoming"]')),plan=left(nav?.shadowRoot?.querySelector('button')),cur=side?.querySelector('[aria-current=page]')??side?.querySelector('li.current > a'),c=cur&&getComputedStyle(cur);return JSON.stringify({theme:h.className.match(/theme_\w+/g)||[],colorScheme:s.colorScheme,plusDark:nav?.dataset.theme==='dark',shadows:[1,2,3].map(i=>v('shadow-raised-'+i)),focusTint:v('actionable-focus-tint'),selectedRowMatches:c?c.backgroundColor===rgb('var(--product-library-selectable-secondary-selected-fill)')&&c.color===rgb('var(--product-library-selectable-secondary-on-selected-tint)'):null,navLabelShift:up!==null&&plan!==null?up-plan:null})})()
+   ```
+
+   通过条件：Dark 中 `colorScheme` 为 `dark`，或 `plusDark` 为 `true`；`shadows` 三项都是阴影（含 `px`），不是单个颜色，否则 Plus 的卡片阴影会消失；`selectedRowMatches` 为 `true`，即 Todoist 选中的侧栏行确实使用 Plus 读取的选中底色和文字色（测试夹具只是这样假设）；`navLabelShift` 为 0，否则 Plan／Focus 的文字比 Upcoming 靠左这么多像素，需调整导航槽。另看 Todoist 自己的焦点框是否为 `focusTint`，记录即可，Plus 的焦点框有意不用它（见[设计](design.md#界面)）。
+
+2. 任务弹窗，先打开一个有小步骤的任务，再从它打开一个小步骤，各运行一次：
+
+   ```
+   (()=>{const m=document.querySelector('[data-testid=task-details-modal]');if(!m)return'no task modal';const own=m.querySelector('[data-testid=task-main-content-container]')?.closest('[data-item-id]'),inside=!!own&&m.contains(own),row=inside?own:m.querySelector('[data-testid=task-selection-list-container] [data-item-id]')??m.querySelector('[data-item-id]'),id=row?.getAttribute('data-item-id'),p=location.pathname.replace(/\/$/,'');return JSON.stringify({taskLink:/\/task\/[^/]+$/.test(p),from:inside?'own row':row?'list':'none',matchesLink:!!id&&(p.endsWith('/'+id)||p.endsWith('-'+id))})})()
+   ```
+
+   通过条件：两次都是 `taskLink: true` 和 `matchesLink: true`。`matchesLink` 为 `false` 时 Plus 不挂载“步骤与时间”，设置页显示任务 ID 不一致，应先修改 `src/anchors.ts`；`taskLink` 为 `false` 时 Plus 无法用地址交叉核对，须用下面第 4 步目视确认后才能发布。
 
 ### 更新后六步核对
 
