@@ -205,8 +205,8 @@ content; Todoist stays the task store. `plan_settings` holds three JSON document
 the week in effect, the Todoist binding), `plan_tasks` Todofy's task IDs with their `(provider,
 external_id)` reference (never deleted, IDs never reused), `plan_marks` week marks, `plan_edges`
 dependencies, `plan_notes` the owner's text per period and `plan_categories` the Mailbox triage
-categories; `summaries` gains `category_id` and `triaged_at`. Nothing reads or writes them yet: the
-migration is additive, so a code rollback leaves them idle. Never run its down DDL in production (dropping
+categories; `summaries` gains `category_id` and `triaged_at`. Only [dependencies](#dependencies) write
+them so far (`plan_tasks` and `plan_edges`): the migration is additive, so a code rollback leaves them idle. Never run its down DDL in production (dropping
 the columns rewrites every summaries row). The vocabularies and limits the CHECKs leave open are in
 `core/plan.py`; only `runtime/plan_store.py` touches the tables. No retention deletes their rows.
 
@@ -234,6 +234,59 @@ build does not know, and limits exceeded). An absent count is zero: right after 
 `{}`, and after a restore every `*_row_count` equals its table's rows in the manifest while every other
 count is absent. It is one D1 statement over the six small tables.
 
+## Dependencies
+
+One task can wait for others: `SetTaskDependency` (`POST /api/plus/v1/tasks:setTaskDependency`) adds or removes
+that `task_id` waits for `prerequisite_id`. The dependency lives only in the planning store, as a `plan_edges` row
+of kind `waits_for` between two `plan_tasks` IDs (each task's Todofy ID, created the first time it takes part);
+nothing is written to Todoist, so no title, description, comment, label or `updated_at` changes, and the
+dependency is invisible to Todoist's own apps. The wire keeps Todoist task IDs; `runtime/plan_store.py`
+translates at the boundary, and `core/sql/plan.py` takes the provider as a bound value. Adding reads both
+tasks once (`GET /api/v1/tasks?ids=`, never a Sync) to confirm they are active and to take the prerequisite's
+`completed_count` as `baseline_count`; removing reads nothing. Both are value writes under `plus_lock`
+without a receipt: adding an existing dependency answers it unchanged (its first baseline stays), removing a
+missing one answers the same list. A task waits for at most 5 tasks, there are at most 300 dependencies, and
+a cycle (the prerequisite already waits for the task, directly or not, or the task itself) is refused with
+`ACTION_NOT_ALLOWED` before any Todoist read (`core/plan.py dependency_refusal`; the extension greys such a
+task out first). A task that is not active is `NOT_FOUND`. They need only Plus enabled in D1: no metadata
+sync, no week check. Maintenance and the backup lease hold them like every other write.
+
+Recurring prerequisites follow Todoist's documented counter: the v1 Task object (ItemSyncView, which
+`GET /api/v1/tasks` and the Sync API return) has a required `completed_count`, which the official API reference
+(checked on 2026-10-16) describes as going up with every completion, recurring occurrences and re-completions
+included, and down when a recurring completion is undone. A recurring task never leaves the active list, so the next completion after the
+dependency was added satisfies it: `completed_count > baseline_count` (an undone completion makes it wait
+again). `PlanningTask` carries `recurring` (`due.is_recurring`) and `completed_count` (absent when Todoist
+leaves it out); a recurring task without the counter cannot be chosen, and the server refuses it with
+`ACTION_NOT_ALLOWED`. Nothing is rescheduled or relabelled when a dependency is satisfied: the extension only
+shows the waiting task as ready.
+
+Every FULL Plan answer (ReadPlan without `view: BASIC`, ConfirmPlanMapping, UpdatePlanLabels) carries every
+dependency, IDs only, as one more statement in the review batch (`plan_store.EDGES`: one scan of at most 300
+`plan_edges` rows and two rowid lookups each); `done` says Todofy confirmed the prerequisite completed, not
+deleted (`plan_tasks.closed_as`). The extension trusts the active list first: a prerequisite missing from a
+complete read is satisfied at once, whichever way it closed, and a listed one (reopened) waits again.
+
+`CompleteTask` in Plus records the task `closed_as = 'completed'` after Todoist confirms the close, one D1
+statement, so its waiters are settled without an activity read. It does not drop what the task itself waited
+for: a recurring task stays active and keeps its dependencies; a closed one's go at the next check.
+
+`ResolveDependencies` (`POST /api/plus/v1/tasks:resolveDependencies`) is that check. After a complete read,
+the extension's Plan or Focus names (at most 20) tasks that dependencies mention but the read did not list;
+native pages never call it. The server keeps those with a dependency, confirms in one `GET /api/v1/tasks?ids=`
+that they are not active (a stale or partial read changes nothing; an incomplete answer fails the call), then
+removes what a gone task waited for, and settles each gone prerequisite whose closing is not recorded from its
+activity log (`GET /api/v1/activities?object_type=item&object_id=…&object_event_types=["item:completed",
+"item:uncompleted","item:deleted"]`, the documented JSON form; the answer is also filtered by task and event):
+the newest event a completion records `completed`; a deletion, or no completion at all (such as beyond the
+plan's log retention), records `deleted` and removes every dependency on it, and its waiters come back in
+`dropped_task_ids` for a one-time notice. At most 10 activity reads per call (with the ID read, 11 external
+subrequests of Workers Free's 50); a failed one leaves that prerequisite and the rest for the next check. The
+activity log depends on the Todoist plan, so its 403 does not start the six-hour Todoist block that a 403
+elsewhere does (`plus_todoist.call(forbidden_blocks=False)`). D1: the settings read, one roles read and one batch of
+at most six statements, eight in all, under the 50 per invocation. There is no receipt: settling twice
+gives the same rows.
+
 ## Local verification
 
 `tests/unit/test_plus.py` covers classification and filter semantics, the Sunday rule and the
@@ -246,6 +299,13 @@ responses, recurring completion, week rollover (Sunday choices kept, earlier com
 unable to move a choice back) and shared pause/auth controls. The gateway CPU suite
 includes full 200-task Plus and FlowDay-proxy pages. Production and browser acceptance are recorded
 separately in the extension's verification document; a local test result is not production evidence.
+
+Dependencies: `tests/unit/test_plus_dependencies.py` runs the cycle and limit rules and both RPCs on host
+CPython (the activity log through the real `plus_todoist.call`, so its 403 is seen not to block Todoist, D1
+statement counts per call), `test_plan_store.py` the dependency statements and the edge read's query plan, and
+`tests/runtime/test_plus_dependencies.py` the same paths through the gateway with the extension token in
+workerd: no Sync command, `plan_edges` by Todofy IDs, a recurring prerequisite's counter, settling from the
+activity log, a 403 or 503 log. The PlusFake answers `ids` lookups and the activity log.
 
 The planning store and the object's caches and receipts have their own tests, synthetic data only:
 `tests/unit/test_plan_store.py` (0007's CHECKs, the partial Mailbox index's plan, `VerifyPlanStore`'s counts)

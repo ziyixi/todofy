@@ -11,6 +11,7 @@ from pyodide.ffi import JsException
 from ziyixi_proto.todofy.ui.v1 import plus_service_pb as pb
 from ziyixi_proto.wire_json import WireJsonError, from_wire, to_wire
 
+from todofy.core import plan as planning
 from todofy.core import plus
 from todofy.core.sql import gtd as gtd_sql
 from todofy.core.sql import plus as sql
@@ -32,8 +33,13 @@ OWNER_METHODS = frozenset(
 )
 READ_METHODS = frozenset({"ReadPlan", "ListPlanningTasks", "ReadExtensionConnections", "VerifyPlanStore"})
 PLAN_METHODS = frozenset({"ReadPlan", "ConfirmPlanMapping", "UpdatePlanLabels"})
+# Writes of Todofy's planning store only, by value: no receipt, no Todoist write (set_dependency, resolve).
+DEPENDENCY_METHODS = frozenset({"SetTaskDependency", "ResolveDependencies"})
 METHODS = (
-    READ_METHODS | OWNER_METHODS | {"SetTaskPlan", "SetTaskLead", "AppendTaskSteps", "CompleteTask", "UpdatePlanLabels"}
+    READ_METHODS
+    | OWNER_METHODS
+    | DEPENDENCY_METHODS
+    | {"SetTaskPlan", "SetTaskLead", "AppendTaskSteps", "CompleteTask", "UpdatePlanLabels"}
 )
 # Methods that write labels or bind them sync Todoist's labels first, so a label renamed in Todoist is never
 # written back under its old name; every other call reads the metadata the object synced in the last five
@@ -42,6 +48,9 @@ LABEL_WRITES = frozenset({"SetTaskPlan", "SetTaskLead", "UpdatePlanLabels", "Con
 # How long the object trusts its copy of the non-revoked connection digests; Issue and Revoke drop it at once
 # (_change_connections).
 CONNECTIONS_MAX_AGE = 10 * 60
+# ResolveDependencies: the task IDs one call may name, and the prerequisites whose activity log it reads.
+RESOLVE_IDS = 20
+RESOLVE_ACTIVITY_READS = 10
 
 
 def account_day(timezone: str) -> str:
@@ -73,13 +82,15 @@ async def plan(core: Any, metadata: dict[str, Any] | None = None, *, fresh: bool
 async def review_targets(env: Any, week: str) -> dict[str, Any]:
     """The weekly review's IDs, read with each Plan answer rather than with every task page or write:
     Todofy's mail project, the newest review task it created (this or the previous ISO week; the
-    extension sees whether it is still open) and the choices already kept for next week."""
+    extension sees whether it is still open), the choices already kept for next week and every dependency."""
     monday = date.fromisoformat(week)
     statements = [
         env.DB.prepare(gtd_sql.REVIEW_WEEK.sql).bind("{:04d}-W{:02d}".format(*day.isocalendar()[:2]))
         for day in (monday, monday - timedelta(days=7))
     ]
-    *reviews, chosen = await env.DB.batch([*statements, env.DB.prepare(sql.NEXT_WEEK).bind(week)])
+    *reviews, chosen, edges = await env.DB.batch(
+        [*statements, env.DB.prepare(sql.NEXT_WEEK).bind(week), plan_store.edges(env.DB)]
+    )
     created = [
         str(row["task_id"])
         for result in reviews
@@ -90,6 +101,7 @@ async def review_targets(env: Any, week: str) -> dict[str, Any]:
         "inbox_project_id": var(env, "TODOIST_DEFAULT_PROJECT_ID"),
         "review_task_id": created[0] if created else "",
         "next_week_task_ids": [str(dict(row)["task_id"]) for row in chosen.results],
+        "dependencies": plan_store.dependency_rows(edges),
     }
 
 
@@ -248,6 +260,82 @@ async def connections(core: Any, method: str, request: dict[str, Any]) -> dict[s
     return {"connection": {"id": request["request_id"], "display_name": display_name, "revoked": False}, "token": token}
 
 
+async def _dependencies_enabled(env: Any) -> None:
+    """Dependency writes need only Plus enabled: they change no Todoist label, so they neither sync labels nor
+    wait for the week's reset."""
+    settings = await store.settings(env.DB)
+    if not settings or not settings["enabled"]:
+        raise todoist.PlusError("ACTION_NOT_ALLOWED")
+
+
+async def set_dependency(core: Any, request: dict[str, Any]) -> dict[str, Any]:
+    """SetTaskDependency, under plus_lock. Adding reads both tasks once, to confirm they are active and to take
+    the prerequisite's completed_count as the baseline; removing reads nothing. Either is a value write: an edge
+    that is already there (or already gone) is answered without a write."""
+    env = core.env
+    await _dependencies_enabled(env)
+    task_id, prerequisite_id = plus.check_id(request["task_id"]), plus.check_id(request["prerequisite_id"])
+    if not request.get("waits"):
+        return {"dependencies": await plan_store.remove_dependency(env.DB, plus.PROVIDER, task_id, prerequisite_id)}
+    current = await plan_store.dependencies(env.DB)
+    pairs = [(edge["task_id"], edge["prerequisite_id"]) for edge in current]
+    if (task_id, prerequisite_id) in pairs:
+        return {"dependencies": [edge for edge in current if edge["task_id"] == task_id]}
+    # The extension greys out a cycle and stops at the limits; this is the check that holds across tabs.
+    if planning.dependency_refusal(pairs, task_id, prerequisite_id):
+        raise todoist.PlusError("ACTION_NOT_ALLOWED")
+    tasks = await todoist.active(core, [task_id, prerequisite_id])
+    if task_id not in tasks or prerequisite_id not in tasks:
+        raise todoist.PlusError("NOT_FOUND")
+    prerequisite = tasks[prerequisite_id]
+    baseline = plus.completed_count(prerequisite)
+    if baseline is None and plus.recurring(prerequisite):
+        # Only the counter tells a recurring task's next completion apart: it never leaves the active list.
+        raise todoist.PlusError("ACTION_NOT_ALLOWED")
+    dependencies = await plan_store.add_dependency(
+        env.DB, plus.PROVIDER, task_id, prerequisite_id, baseline or 0, now_s()
+    )
+    return {"dependencies": dependencies}
+
+
+async def resolve_dependencies(core: Any, request: dict[str, Any]) -> dict[str, Any]:
+    """ResolveDependencies, under plus_lock: settles tasks that a complete read no longer listed, once Todoist
+    confirms in one read that they are not active (a stale or partial read of the extension changes nothing).
+    A prerequisite whose closing is not recorded costs one activity-log read, at most RESOLVE_ACTIVITY_READS per
+    call; a failed one leaves it and the rest for the next check."""
+    env = core.env
+    await _dependencies_enabled(env)
+    task_ids = list(dict.fromkeys(plus.check_id(task_id) for task_id in request.get("task_ids", [])))
+    if not 1 <= len(task_ids) <= RESOLVE_IDS:
+        raise todoist.PlusError("BAD_REQUEST")
+    linked = await plan_store.dependency_roles(env.DB, plus.PROVIDER, task_ids)
+    listed = await todoist.active(core, [row["id"] for row in linked]) if linked else {}
+    gone = [row for row in linked if row["id"] not in listed]
+    deleted = [row["id"] for row in gone if row["awaited"] and row["closed_as"] == planning.DELETED]
+    completed: list[str] = []
+    unknown = [row["id"] for row in gone if row["awaited"] and row["closed_as"] is None]
+    for task_id in unknown[:RESOLVE_ACTIVITY_READS]:
+        try:
+            closed = await todoist.closed_as(core, task_id)
+        except todoist.PlusError:
+            break
+        (completed if closed == planning.COMPLETED else deleted).append(task_id)
+    dependencies, waiters = await plan_store.settle(
+        env.DB,
+        plus.PROVIDER,
+        now_s(),
+        gone=[row["id"] for row in gone if row["waits"]],
+        completed=completed,
+        deleted=deleted,
+    )
+    # A task that is gone itself needs no notice.
+    gone_ids = {row["id"] for row in gone}
+    return {
+        "dependencies": dependencies,
+        "dropped_task_ids": [task_id for task_id in waiters if task_id not in gone_ids],
+    }
+
+
 async def build_commands(
     core: Any, method: str, request: dict[str, Any], mapping: list[dict[str, Any]]
 ) -> list[dict[str, Any]]:
@@ -346,6 +434,10 @@ async def mutate(core: Any, method: str, request: dict[str, Any]) -> dict[str, A
         else:
             await store.run(env.DB, sql.FORGET_TASK, request["task_id"])
     if method == "CompleteTask":
+        # Completed, not deleted, for every dependency on the task. A recurring task stays active, and the views
+        # trust the active list first; what a completed task waited for goes once a complete read no longer
+        # lists it (ResolveDependencies), so a recurring one keeps its dependencies.
+        await plan_store.close_tasks(env.DB, plus.PROVIDER, [request["task_id"]], planning.COMPLETED, now_s())
         response = kept = {"task_id": request["task_id"]}
     elif method == "AppendTaskSteps":
         ids = result.get("temp_id_mapping", {})
@@ -395,6 +487,10 @@ async def handle(coordinator: Any, method: str, text: str, *, owner: bool, diges
                 response = await confirm(coordinator, request)
             elif method == "UpdatePlanLabels":
                 response = await update_labels(coordinator, request)
+            elif method == "SetTaskDependency":
+                response = await set_dependency(coordinator, request)
+            elif method == "ResolveDependencies":
+                response = await resolve_dependencies(coordinator, request)
             elif method == "ListPlanningTasks":
                 current = await plan(coordinator)
                 size = request.get("page_size", 0) or 100

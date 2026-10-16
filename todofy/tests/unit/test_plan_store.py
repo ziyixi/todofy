@@ -178,3 +178,50 @@ def test_verify_counts_rows_and_every_broken_rule(db):
         [(2000 + n, a) for n in range(plan.MAX_EDGES)],
     )
     assert counts(db)["limit_violation_count"] == 3  # and the total
+
+
+# ---- dependencies (core/sql/plan.py; the runtime path is test_plus_dependencies.py) ----------------------------
+
+
+def test_closed_as_is_the_vocabulary_of_core_plan(db):
+    columns = db.execute("SELECT sql FROM sqlite_master WHERE name = 'plan_tasks'").fetchone()[0]
+    assert re.findall(r"'(\w+)'", re.search(r"closed_as IN \(([^)]*)\)", columns).group(1)) == [
+        plan.COMPLETED,
+        plan.DELETED,
+    ]
+
+
+def test_every_dependency_is_one_scan_of_the_edges_and_rowid_lookups(db):
+    steps = [row[3] for row in db.execute(f"EXPLAIN QUERY PLAN {sql.EDGES}")]
+    assert steps == [
+        "SCAN e",
+        "SEARCH w USING INTEGER PRIMARY KEY (rowid=?)",
+        "SEARCH p USING INTEGER PRIMARY KEY (rowid=?)",
+    ]
+
+
+def test_dependency_statements_keep_the_store_consistent(db):
+    def run(query, *args):
+        return db.execute(query.sql, args).fetchall()
+
+    run(sql.ADD_TASKS, "todoist", NOW, '["A", "B", "C"]')
+    run(sql.ADD_EDGE, 2, NOW, "todoist", "A", "todoist", "B")
+    run(sql.ADD_EDGE, 9, NOW, "todoist", "A", "todoist", "B")  # an existing edge keeps its first baseline
+    run(sql.ADD_EDGE, 0, NOW + 1, "todoist", "C", "todoist", "B")
+    run(sql.ADD_EDGE, 0, NOW, "todoist", "A", "todoist", "missing")  # no identity, no edge
+    assert db.execute(sql.EDGES).fetchall() == [("A", "B", 2, 0), ("C", "B", 0, 0)]
+    assert run(sql.TASK_EDGES, "todoist", "A") == [("A", "B", 2, 0)]
+    assert run(sql.WAITERS, "todoist", '["B"]') == [("A",), ("C",)]
+    run(sql.CLOSE_TASKS, NOW, plan.COMPLETED, "todoist", '["B"]')
+    run(sql.CLOSE_TASKS, NOW, plan.DELETED, "todoist", '["B"]')  # the first answer stays
+    assert [row[3] for row in db.execute(sql.EDGES)] == [1, 1]
+    # Registering a task the store confirmed active opens it again.
+    run(sql.ADD_TASKS, "todoist", NOW, '["B"]')
+    assert db.execute("SELECT closed_at, closed_as FROM plan_tasks WHERE external_id = 'B'").fetchone() == (None, None)
+    run(sql.FORGET_WAITS, "todoist", '["C"]')
+    assert db.execute(sql.EDGES).fetchall() == [("A", "B", 2, 0)]
+    run(sql.REMOVE_EDGE, "todoist", "A", "todoist", "B")
+    run(sql.ADD_EDGE, 0, NOW, "todoist", "C", "todoist", "A")
+    run(sql.FORGET_PREREQUISITES, "todoist", '["A"]')
+    assert db.execute(sql.EDGES).fetchall() == [] and anomalies(db) == {}
+    assert counts(db)["task_row_count"] == 3  # identities are never deleted

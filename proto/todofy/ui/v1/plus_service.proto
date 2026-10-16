@@ -96,6 +96,26 @@ service PlusService {
       body: "*"
     };
   }
+  // Adds or removes one dependency between two tasks. Kept only in Todofy's planning store: Todoist is never
+  // written, so no title, description, comment, label or update time changes. A value write without a
+  // receipt: adding a dependency that exists keeps it as it is.
+  // (-- api-linter: core::0134::synonyms=disabled
+  //     aip.dev/not-precedent: adds or removes one link between two external tasks, not a stored resource. --)
+  rpc SetTaskDependency(SetTaskDependencyRequest) returns (SetTaskDependencyResponse) {
+    option (google.api.http) = {
+      post: "/api/plus/v1/tasks:setTaskDependency"
+      body: "*"
+    };
+  }
+  // Settles the dependencies of tasks that a complete task read no longer lists, after Todoist confirms they
+  // are not active: a task that waited has its dependencies removed; a prerequisite is recorded as completed,
+  // or, when it was deleted, the dependencies on it are removed. Todofy's store only; Todoist is only read.
+  rpc ResolveDependencies(ResolveDependenciesRequest) returns (ResolveDependenciesResponse) {
+    option (google.api.http) = {
+      post: "/api/plus/v1/tasks:resolveDependencies"
+      body: "*"
+    };
+  }
   // Owner-only: counts that check the planning store after a restore or a migration, never its content.
   rpc VerifyPlanStore(VerifyPlanStoreRequest) returns (VerifyPlanStoreResponse) {
     option (google.api.http) = {get: "/api/plus/v1/plan:verifyPlanStore"};
@@ -151,6 +171,22 @@ message Plan {
   // At most 100 tasks recorded for the next week: a commitment or Bet chosen on this
   // week's last day, which the coming Monday reset leaves in place.
   repeated string next_week_task_ids = 13;
+  // Every dependency, at most 300, IDs only. Left out of the BASIC view.
+  repeated TaskDependency dependencies = 14;
+}
+// One task waits for another: task_id should not start before prerequisite_id is done. IDs are in the ID space
+// of the service that answers (PlusService: Todoist task IDs); Todofy stores the link by its own task IDs.
+message TaskDependency {
+  // The task that waits.
+  string task_id = 1;
+  // The task it waits for.
+  string prerequisite_id = 2;
+  // The prerequisite's completed_count when the dependency was added: a recurring prerequisite, which stays
+  // active, satisfies it with its next completion (a count above this one).
+  int32 baseline_completed_count = 3;
+  // Todofy confirmed that the prerequisite was completed, not deleted. The active task list comes first: a
+  // prerequisite listed there is not done, whatever this says.
+  bool done = 4;
 }
 // An active Todoist task with derived planning fields. No description is fetched for display.
 message PlanningTask {
@@ -189,6 +225,12 @@ message PlanningTask {
   // Todoist's last change to the task, in whole seconds; absent when Todoist does not say.
   // Any edit resets it, so it means untouched since, not waiting since.
   google.protobuf.Timestamp update_time = 17 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Whether the scheduled date repeats (Todoist's due.is_recurring): completing it advances the date and keeps
+  // the task and its ID.
+  bool recurring = 18;
+  // Todoist's completion counter, which counts every completed recurrence and goes down when one is undone;
+  // absent when Todoist does not say.
+  optional int32 completed_count = 19;
 }
 // Reads the singleton plan.
 message ReadPlanRequest {
@@ -303,6 +345,44 @@ message CompleteTaskRequest {
 message CompleteTaskResponse {
   // The task whose close command succeeded.
   string task_id = 1;
+}
+// Adds or removes one dependency between two active tasks.
+message SetTaskDependencyRequest {
+  // The task that waits.
+  string task_id = 1 [(google.api.field_behavior) = REQUIRED];
+  // The task it waits for: another active task, not one that already waits for task_id, directly or through
+  // others. A recurring prerequisite needs Todoist's completed_count.
+  string prerequisite_id = 2 [(google.api.field_behavior) = REQUIRED];
+  // True adds the dependency, false (the default) removes it. A task waits for at most 5 tasks, and there
+  // are at most 300 dependencies in all.
+  bool waits = 3 [(google.api.field_behavior) = OPTIONAL];
+  // Stable action UUID, for the transport; a dependency write is idempotent by value.
+  string request_id = 4 [
+    (google.api.field_behavior) = OPTIONAL,
+    (google.api.field_info).format = UUID4
+  ];
+}
+// The dependencies of task_id after the write.
+message SetTaskDependencyResponse {
+  // What the task waits for now.
+  repeated TaskDependency dependencies = 1;
+}
+// Tasks a complete read of the active tasks did not list, which appear in dependencies.
+message ResolveDependenciesRequest {
+  // Stable action UUID, for the transport; settling is idempotent by value.
+  string request_id = 1 [
+    (google.api.field_behavior) = OPTIONAL,
+    (google.api.field_info).format = UUID4
+  ];
+  // At most 20 Todoist task IDs.
+  repeated string task_ids = 2 [(google.api.field_behavior) = REQUIRED];
+}
+// Every dependency after settling, and the tasks that no longer wait because what they waited for was deleted.
+message ResolveDependenciesResponse {
+  // Every dependency, as in Plan.dependencies.
+  repeated TaskDependency dependencies = 1;
+  // Tasks whose dependency on a deleted task was removed in this call, for a one-time notice.
+  repeated string dropped_task_ids = 2;
 }
 // Replaces this bounded role set. Quarter may be omitted to leave it unbound.
 // (-- api-linter: core::0134=disabled
@@ -426,8 +506,8 @@ message VerifyPlanStoreResponse {
 enum PlanView {
   // FULL, the answer before views existed (extension builds that send no view).
   PLAN_VIEW_UNSPECIFIED = 0;
-  // The mapping and dates only, for a native Todoist page: inbox_project_id, review_task_id and
-  // next_week_task_ids are left out, which saves the weekly review's D1 read.
+  // The mapping and dates only, for a native Todoist page: inbox_project_id, review_task_id,
+  // next_week_task_ids and dependencies are left out, which saves the weekly review's D1 read.
   PLAN_VIEW_BASIC = 1;
   // Every field.
   PLAN_VIEW_FULL = 2;

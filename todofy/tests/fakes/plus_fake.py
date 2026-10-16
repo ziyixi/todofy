@@ -2,6 +2,8 @@
 
 A metadata Sync answers sync_token "*" (or a token this fake never issued) in full and an issued token with the
 labels and filters that changed since it, deleted ones with is_deleted, as Todoist's incremental Sync does.
+Tasks carry completed_count: closing a task adds one, and a recurring task stays active. The activity log
+answers ``activity[task_id]`` (completed, uncompleted and deleted events), or ``activity_status`` when set.
 """
 
 import json
@@ -38,9 +40,12 @@ class PlusFake(FakeServer):
         self.closed = {}
         self.fail_commands_once = False
         self.sync_tokens = {}  # token -> (labels, filters) by ID as they were when it was issued
+        self.activity = {}  # task ID -> its activity log events
+        self.activity_status = 200
         self.route("POST", r"/api/v1/sync", self.sync)
         self.route("GET", r"/api/v1/tasks", self.list_tasks)
         self.route("GET", r"/api/v1/tasks/([a-zA-Z0-9_-]+)", self.get_task)
+        self.route("GET", r"/api/v1/activities", self.activities)
 
     def add(self, task_id, **fields):
         self.tasks[task_id] = {
@@ -52,6 +57,7 @@ class PlusFake(FakeServer):
             "parent_id": None,
             "due": None,
             "deadline": None,
+            "completed_count": 0,
             **fields,
         }
 
@@ -72,6 +78,7 @@ class PlusFake(FakeServer):
                 elif command["type"] == "item_close":
                     task_id = args["id"]
                     self.closed[task_id] = self.closed.get(task_id, 0) + 1
+                    self.tasks[task_id]["completed_count"] += 1
                     if not (self.tasks[task_id].get("due") or {}).get("is_recurring"):
                         del self.tasks[task_id]
                     self.receipts[identity] = True
@@ -120,6 +127,12 @@ class PlusFake(FakeServer):
         return [form.get("sync_token", ["*"])[0] for form in forms if "commands" not in form]
 
     def list_tasks(self, request: Recorded, _match):
+        if request.param("ids") is not None:
+            # A lookup by ID is one page of the active tasks among them.
+            ids = request.param("ids").split(",")
+            return Reply(
+                200, {"results": [deepcopy(self.tasks[i]) for i in ids if i in self.tasks], "next_cursor": None}
+            )
         start = int(request.param("cursor") or "0")
         limit = min(int(request.param("limit") or 200), 2)
         tasks = list(self.tasks.values())
@@ -127,6 +140,13 @@ class PlusFake(FakeServer):
         return Reply(
             200, {"results": deepcopy(tasks[start:end]), "next_cursor": str(end) if end < len(tasks) else None}
         )
+
+    def activities(self, request: Recorded, _match):
+        if self.activity_status != 200:
+            return Reply(self.activity_status, {"error": "synthetic activity log refusal"})
+        assert request.param("object_type") == "item"
+        assert json.loads(request.param("object_event_types")) == ["item:completed", "item:uncompleted", "item:deleted"]
+        return Reply(200, {"results": deepcopy(self.activity.get(request.param("object_id"), [])), "next_cursor": None})
 
     def get_task(self, _request, match):
         task = self.tasks.get(match[1])

@@ -350,9 +350,10 @@ def test_query_uses_its_index(db, name):
         used = re.search(r"INDEX (\w+)", step)
         bounded = used is not None and used.group(1) in partial
         # A SCAN reads a whole table or index (not the one constant row of a SELECT without
-        # FROM). source_id is a constant, so a search on it alone does too, unless LIMIT stops
-        # an in-order walk.
-        if (step.startswith("SCAN") and step != "SCAN CONSTANT ROW") or (
+        # FROM, nor json_each over one bound JSON text, an IN list of the caller's values).
+        # source_id is a constant, so a search on it alone does too, unless LIMIT stops an
+        # in-order walk.
+        if (step.startswith("SCAN") and step != "SCAN CONSTANT ROW" and not step.startswith("SCAN json_each")) or (
             step.endswith("(source_id=?)") and "LIMIT" not in sql
         ):
             assert bounded, plan

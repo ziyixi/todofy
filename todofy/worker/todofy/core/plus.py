@@ -48,6 +48,8 @@ REPLACED_FILTER_QUERIES = {
 }
 # The owner's literal in-progress label, as the in-progress deadline query names it. Plus never creates it.
 ACTIVE = "active"
+# plan_tasks.provider of a Todoist task ID (core/plan.py PROVIDERS).
+PROVIDER = "todoist"
 
 
 MAX_METADATA_ITEMS = 500
@@ -240,6 +242,17 @@ def task_etag(task: dict[str, Any], mapping: list[dict[str, Any]] | None = None)
     return fingerprint(values)
 
 
+def recurring(task: dict[str, Any]) -> bool:
+    return bool((task.get("due") or {}).get("is_recurring"))
+
+
+def completed_count(task: dict[str, Any]) -> int | None:
+    """Todoist's completion counter (completed_count), which counts every completed recurrence and goes down when
+    one is undone; None when the task does not carry it."""
+    count = task.get("completed_count")
+    return count if isinstance(count, int) and not isinstance(count, bool) and 0 <= count < 2**31 else None
+
+
 def label_stage(labels: set[str], names: dict[str, str]) -> str:
     """The stage a task's planning labels give, the highest first; a Quick task is never weekly or monthly."""
     if names.get("committed") in labels:
@@ -304,7 +317,11 @@ def task_view(task: dict[str, Any], today: str, mapping: list[dict[str, Any]] | 
         "must_start": start,
         "missing_lead": bool(deadline and not leads and not labels.intersection({"parked", "active"})),
         "priority": int(task.get("priority", 1)),
+        "recurring": recurring(task),
     }
+    count = completed_count(task)
+    if count is not None:
+        result["completed_count"] = count
     duration = task.get("duration")
     if duration and duration.get("amount"):
         result["estimated_minutes"] = int(duration["amount"]) * (480 if duration.get("unit") == "day" else 1)

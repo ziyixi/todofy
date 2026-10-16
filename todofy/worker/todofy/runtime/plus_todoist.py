@@ -4,7 +4,7 @@ import json
 from typing import Any
 from urllib.parse import urlencode
 
-from todofy.core import plus
+from todofy.core import plan, plus
 from todofy.runtime import plus_cache
 from todofy.runtime.config import flag, integer, var
 from todofy.runtime.interop import fetch_with_timeout, now_s
@@ -18,6 +18,8 @@ FULL_SYNC_WINDOW = 15 * 60
 FULL_SYNC_LIMIT = 20
 # A client error on an incremental Sync other than authentication (the 6-hour block) and the rate limit.
 REFUSED_TOKEN = frozenset(range(400, 500)) - {401, 403, 429}
+# The activity log's events that say how a task left the active list; the newest one decides (closed_as).
+CLOSING_EVENTS = ("completed", "uncompleted", "deleted")
 
 
 class PlusError(Exception):
@@ -27,7 +29,11 @@ class PlusError(Exception):
         super().__init__(reason)
 
 
-async def call(core: Any, path: str, data: dict[str, Any] | None = None) -> dict[str, Any]:
+async def call(
+    core: Any, path: str, data: dict[str, Any] | None = None, *, forbidden_blocks: bool = True
+) -> dict[str, Any]:
+    """One Todoist call. A 401, or a 403 unless ``forbidden_blocks`` is False, blocks Todoist calls for six
+    hours (core.block_todoist): a read that the account's plan may not allow passes False."""
     env = core.env
     key = var(env, "TODOIST_API_KEY")
     if not key:
@@ -52,7 +58,8 @@ async def call(core: Any, path: str, data: dict[str, Any] | None = None) -> dict
     if result.status == 404:
         raise PlusError("NOT_FOUND", result.status)
     if result.status in (401, 403):
-        core.block_todoist(now_s())
+        if result.status == 401 or forbidden_blocks:
+            core.block_todoist(now_s())
         raise PlusError("ACTION_NOT_ALLOWED", result.status)
     if not result.outcome().ok:
         raise PlusError(
@@ -135,6 +142,44 @@ async def tasks(core: Any, limit: int = 200, cursor: str = "") -> tuple[list[dic
 
 async def task(core: Any, task_id: str) -> dict[str, Any]:
     return await call(core, "/api/v1/tasks/" + task_id)
+
+
+async def active(core: Any, task_ids: list[str]) -> dict[str, dict[str, Any]]:
+    """The tasks among ``task_ids`` (at most 200) that Todoist lists as active, by ID, in one read. An incomplete
+    answer raises: a task missing from it would look closed."""
+    value = await call(core, "/api/v1/tasks?" + urlencode({"ids": ",".join(task_ids), "limit": len(task_ids)}))
+    result = value.get("results")
+    if not isinstance(result, list) or value.get("next_cursor"):
+        raise PlusError("UNAVAILABLE")
+    wanted = set(task_ids)
+    return {str(item["id"]): item for item in result if isinstance(item, dict) and str(item.get("id")) in wanted}
+
+
+async def closed_as(core: Any, task_id: str) -> str:
+    """How a task Todoist no longer lists as active closed: 'completed' when the newest of its completion,
+    reopening and deletion events in the activity log is a completion, else 'deleted' (also when the log holds
+    none of them, such as after the plan's log retention). Each event names its task, so the answer is filtered
+    here too. An account whose plan has no activity log gets a 403, which raises without blocking other calls."""
+    query = {
+        "object_type": "item",
+        "object_id": task_id,
+        # The documented form: a JSON array of "object_type:event_type".
+        "object_event_types": json.dumps([f"item:{event}" for event in CLOSING_EVENTS]),
+        "limit": 20,
+    }
+    value = await call(core, "/api/v1/activities?" + urlencode(query), forbidden_blocks=False)
+    results = value.get("results")
+    if not isinstance(results, list):
+        raise PlusError("UNAVAILABLE")
+    events = [
+        event
+        for event in results
+        if isinstance(event, dict)
+        and str(event.get("object_id")) == task_id
+        and event.get("event_type") in CLOSING_EVENTS
+    ]
+    newest = max(events, key=lambda event: str(event.get("event_date") or ""), default=None)
+    return plan.COMPLETED if newest is not None and newest["event_type"] == "completed" else plan.DELETED
 
 
 async def commands(core: Any, commands: list[dict[str, Any]]) -> dict[str, Any]:
