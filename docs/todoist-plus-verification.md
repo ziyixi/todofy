@@ -776,3 +776,44 @@ ready state after the prerequisite completes.
 Not done: the native popup's collapsed Steps & timing suffix (`planMarks`, plus-next §4 v2). Not verified:
 branch CI, the release, a real account's `completed_count` and activity-log answers, the installed extension
 on real Todoist, and the owner's review.
+
+### Review fixes (October 16)
+
+The review of the branch found that done dependencies could not be removed and still filled the 5-per-task limit
+and closed cycles (a recurring waiter kept its 「所等的任务都已完成」 line for good, and a satisfied recurring
+prerequisite could not be picked again); that the one-time deletion notice could be used up in Focus or Week
+where nothing shows it; that settling could starve past the first 20 IDs and left a prerequisite unknown forever
+when the activity log failed for good; that a completion recorded in Plus outlived a reopening; that a missing log
+event was told as a deletion; that a failed D1 record made a done CompleteTask answer an error; that the refusal
+message guessed its cause; that a long prerequisite title overflowed or wrapped a card; and four small layout
+points (the notice above the board moved it, the remove button was 28px and a confirmed row grew, the picker
+highlighted a greyed option, a title gave no hover cue). Fixed on the branch:
+
+- Todofy: only dependencies that still hold count. `SetTaskDependency` reads Todoist once (both tasks, what the
+  task waits for and every task the prerequisite waits for) and tells holding ones by `core/plus.py holds`;
+  `core/plan.py check_dependency` refuses a cycle or a sixth one by them, and at the store's limits the task's
+  oldest done dependency gives way in the same batch; adding a done one starts it over from the current count.
+  `ResolveDependencies` opens again a task recorded closed that Todoist lists, records `deleted` only for an
+  explicit deletion event, and releases (removes with a neutral notice, `released_task_ids`, nothing recorded) a
+  prerequisite the log does not explain or a plan without the log answers 403 for. CompleteTask's record is best
+  effort.
+- Extension: the details' done line has a hover-only remove action; the picker offers a satisfied recurring task
+  again, greys a cycle only by holding dependencies and starts its highlight on the first option that can be
+  chosen; only the Review board settles, once per complete read, gone waiters first and none it asked in the visit,
+  and tells it under the lanes; the card's quoted title ends in an ellipsis inside its marks, its part on one line;
+  rows are 32px saved or pending, the remove buttons 24px, and a title underlines on hover or focus; the refusal
+  reads `Not added: this dependency cannot be added now. Refresh and try again.` Localising API errors, which are
+  English throughout, is left as it is.
+
+Local checks after the fixes, all passing: Todofy ruff and 1,961 host tests (one existing skip), among them the
+review cases (a done dependency giving way and closing no cycle, a recurring re-pick, a reopened then deleted
+prerequisite, a released one, a 403 log, a failed completion record); all 576 real-workerd runtime cases (574 in
+four processes, then the serial `test_alarm.py`), seven of them dependency cases; the gateway's lint, types, 134
+unit cases and CPU suite; both production dry-runs (gateway 82.9 KiB gzip of 86 KiB); proto format, lint,
+api-linter (69 files), breaking against `1e8e6863` and the branch head, deterministic generation, schemas and both
+codecs (495 TypeScript, 113 Python); `.github/scripts` (453, one existing skip); the owner UI's types and 93 tests;
+the extension's lint, types, 186 unit cases, build and 32 built-MV3 Chromium cases on the synthetic Kale page (the
+dependency ones now also check the notice leaving the board in place, a recurring re-pick, row heights, hover cues
+and long Chinese and English titles at 1600 and 1440 px). The screenshots for the owner's review were retaken
+(Kale, light, synthetic Chinese titles, not in the repository), with the done line's hover action, the notice
+under the lanes and long titles added.

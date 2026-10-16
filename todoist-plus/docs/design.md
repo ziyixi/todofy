@@ -42,7 +42,7 @@ Must Start 的 `deadline before` 使用严格上界。提前 N 天标签的实�
 
 ## 依赖
 
-一个任务可以等其他任务完成（2026-10-16 owner 定稿）。依赖只存在 Todofy 的规划库里，是两个 Todofy 任务 ID 之间的边，对外仍用 Todoist 任务 ID；不写 Todoist 的标题、描述、评论或标签，也不镜像 `@blocked`，所以只有装了 Plus 的桌面 Chrome 看得到。`src/dependencies.ts` 在完整读取之后推导：所等的任务在活动列表里就在等，不在就算满足；循环任务以 Todoist 的 `completed_count` 为准，建立依赖之后的下一次完成算满足。满足只改变显示，不改日期或标签。任务详情有“依赖”段和内联的即时搜索选择框，会形成循环的任务灰色并写明原因；在等而没有自己规划标签的任务进“等待中”，卡片的那一句状态写 `等「B」`。完整读取后，Plan／Focus 让 Todofy 核对读取里消失的任务，区分完成和删除；因删除而不再等待的任务在本次访问提示一次。见[依赖](planning-interface.md#依赖)和 [Todofy 文档](../../todofy/docs/todoist-plus.md#dependencies)。
+一个任务可以等其他任务完成（2026-10-16 owner 定稿）。依赖只存在 Todofy 的规划库里，是两个 Todofy 任务 ID 之间的边，对外仍用 Todoist 任务 ID；不写 Todoist 的标题、描述、评论或标签，也不镜像 `@blocked`，所以只有装了 Plus 的桌面 Chrome 看得到。`src/dependencies.ts` 在完整读取之后推导：所等的任务在活动列表里就在等，不在就算满足；循环任务以 Todoist 的 `completed_count` 为准，建立依赖之后的下一次完成算满足。满足只改变显示，不改日期或标签。任务详情有“依赖”段和内联的即时搜索选择框，会形成循环的任务灰色并写明原因；在等而没有自己规划标签的任务进“等待中”，卡片的那一句状态写 `等「B」`。已满足的依赖不构成环、不占 5 项，给新依赖让位，也可在详情里移除；已满足的循环任务可以再选一次，等它的下一次完成。Review 看板显示完整读取后让 Todofy 核对读取里消失的任务，区分完成、删除和说不出的情况；因此不再等待的任务在看板各列下方提示一次，Focus 和 Week 不核对，不会用掉这次提示。见[依赖](planning-interface.md#依赖)和 [Todofy 文档](../../todofy/docs/todoist-plus.md#dependencies)。
 
 ## API 与状态更新
 
