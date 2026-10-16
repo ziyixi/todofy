@@ -1,7 +1,8 @@
 /*
  * Task details' "依赖 / Depends on" section (TaskDependencies.tsx) and the Review board's one-time notice.
- * The section reads like "Next steps": a 13px title per row, 12px muted notes, one text action; the row's
- * remove button appears on hover or keyboard focus only. No icon, badge or colour of its own.
+ * The section reads like "Next steps": a 13px title per row, 12px muted notes, one text action; the
+ * remove buttons of a row and of the done line appear on hover or keyboard focus only. No icon, badge or
+ * colour of its own.
  */
 .plus-dependencies h3:focus {
   outline: none;
@@ -11,12 +12,13 @@
   padding: 0;
   margin: 0;
 }
+/* 32px with its line, whether it holds the 24px remove button (saved) or the pending mark. */
 .plus-dependency {
   display: flex;
   align-items: center;
   gap: 12px;
   min-height: 32px;
-  padding: 4px 0;
+  padding: 3px 0;
   border-bottom: 1px solid var(--plus-line);
 }
 .plus-dependency-title {
@@ -27,31 +29,50 @@
   font-size: 13px !important;
   overflow-wrap: anywhere;
 }
+/* A title opens that task, here or in Todoist: the underline says so, on hover or keyboard focus only. */
+button.plus-dependency-title:hover,
+button.plus-dependency-title:focus-visible {
+  text-decoration: underline;
+}
 .plus-dependency > .plus-muted {
   flex: 0 0 auto;
 }
 .plus-dependency.is-pending .plus-dependency-title {
   color: var(--plus-muted);
 }
-.plus-dependency-remove {
+/* Two classes, so that .plus-icon's 28px, which comes later, does not apply. */
+.plus-dependencies .plus-dependency-remove {
   width: 24px;
   height: 24px;
   opacity: 0;
   transition: opacity 120ms ease;
 }
 .plus-dependency:hover .plus-dependency-remove,
-.plus-dependency:focus-within .plus-dependency-remove {
+.plus-dependency:focus-within .plus-dependency-remove,
+.plus-dependency-done:hover .plus-dependency-remove,
+.plus-dependency-done:focus-within .plus-dependency-remove {
   opacity: 1;
 }
 /* Without hover, the remove buttons stay visible. */
 @media (hover: none) {
-  .plus-dependency-remove {
+  .plus-dependencies .plus-dependency-remove {
     opacity: 1;
   }
 }
 .plus-dependency-note {
   margin: 8px 0 0;
   line-height: 1.5;
+}
+/* The line for what is done, with its remove action at the end, as on a row. */
+.plus-dependency-done {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 4px;
+}
+.plus-dependency-done > .plus-dependency-note {
+  flex: 1;
+  margin: 0;
 }
 .plus-dependency-add {
   margin-top: 10px;
@@ -109,8 +130,10 @@
   color: var(--plus-muted);
   font-size: 12px;
 }
-.planning-dependency-notice > p {
-  margin: 0 0 10px;
+/* Under the board's lanes, so that the board does not move when a notice comes. */
+.review-board-notices > p {
+  margin: 10px 0 0;
   color: var(--plus-muted);
   font-size: 12px;
+  line-height: 1.5;
 }

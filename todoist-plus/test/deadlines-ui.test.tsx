@@ -117,7 +117,8 @@ const cards = (name: string) =>
   );
 /** The board's status region, beside the lanes; dnd-kit adds another for drags. */
 const announced = () =>
-  document.querySelector('.review-board > [role="status"]')!.textContent;
+  document.querySelector('.review-board > .plus-sr-only[role="status"]')!
+    .textContent;
 
 it("puts Start now and then Waiting left of the four stage lanes, with nothing stacked under the board", async () => {
   const { props } = await setup();
@@ -167,8 +168,8 @@ it("puts Start now and then Waiting left of the four stage lanes, with nothing s
     expect(
       screen.queryByRole("button", { name: new RegExp(`^${title}`, "u") }),
     ).toBeNull();
-  // Nothing is stacked under the board or the Week calendar: only the reset note follows. Above the
-  // board, the dependencies' one-time notice is an empty status region until it has a line.
+  // Nothing is stacked under the board or the Week calendar: only the reset note follows. Under the
+  // lanes, the dependencies' one-time notice is an empty status region until it has a line.
   const sections = () =>
     [...document.querySelector(".planning-view")!.children]
       .filter((child) => !child.hasAttribute("data-dnd-overlay"))
@@ -176,12 +177,11 @@ it("puts Start now and then Waiting left of the four stage lanes, with nothing s
   expect(sections()).toEqual([
     "planning-toolbar",
     "planning-area-filter",
-    "planning-dependency-notice",
     "review-board",
     "planning-reset-note",
   ]);
   expect(
-    document.querySelector(".planning-dependency-notice")!.children,
+    document.querySelector(".review-board-notices")!.children,
   ).toHaveLength(0);
   fireEvent.click(screen.getByRole("tab", { name: "Week" }));
   expect(sections()).toEqual([

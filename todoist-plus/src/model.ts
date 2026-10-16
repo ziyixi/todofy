@@ -81,6 +81,8 @@ export interface DependencyResult {
   dependencies: TaskDependency[];
   /** Tasks that stopped waiting because what they waited for was deleted. */
   dropped?: string[];
+  /** Tasks that stopped waiting because what they waited for left the list, Todoist not saying how. */
+  released?: string[];
 }
 /** A write's server-confirmed result; void means only a re-read can show it. */
 export type Confirmed =

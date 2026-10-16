@@ -13,6 +13,7 @@ import {
 import { words } from "./i18n";
 import { PendingMark } from "./StatusMarks";
 import type {
+  DependencyResult,
   Language,
   PlanningTask,
   PlusActions,
@@ -37,9 +38,10 @@ interface Props {
 
 /**
  * Task details' "依赖 / Depends on" section, after the deadline, in Plan's editor and the native
- * Steps & timing: what the task still waits for, one line for what is done, who waits for it, and
- * an inline picker that searches the loaded tasks as you type. Each change is one confirm-first
- * SetTaskDependency; Todoist is never written.
+ * Steps & timing: what the task still waits for, one line for what is done (its remove action takes
+ * the done ones away), who waits for it, and an inline picker that searches the loaded tasks as you
+ * type. Each change is confirm-first SetTaskDependency; Todoist is never written. Only what still
+ * holds fills the 5: a done dependency gives way to a new one.
  */
 export function TaskDependencies({
   task,
@@ -56,14 +58,15 @@ export function TaskDependencies({
   const plan = { tasks, dependencies };
   const index = dependencyIndex(plan);
   const open = index.waitingFor.get(task.id) ?? [];
-  const done = index.done.get(task.id) ?? 0;
+  const done = index.done.get(task.id) ?? [];
   const waiters = index.waiters.get(task.id) ?? [];
   const full =
-    dependencies.filter((dependency) => dependency.taskId === task.id).length >=
-      MAX_DEPENDENCIES || dependencies.length >= MAX_ALL_DEPENDENCIES;
+    open.length >= MAX_DEPENDENCIES ||
+    (dependencies.length >= MAX_ALL_DEPENDENCIES && !done.length);
   const [picking, setPicking] = useState(false);
   const [query, setQuery] = useState("");
-  const [active, setActive] = useState(0);
+  // The highlighted option, by task ID; a greyed one is never highlighted.
+  const [activeId, setActiveId] = useState("");
   // The chosen task, shown pending until Todofy confirms it.
   const [adding, setAdding] = useState<PlanningTask>();
   // After a change, focus returns to "Add a dependency" once write controls are enabled again.
@@ -72,6 +75,10 @@ export function TaskDependencies({
   const addButton = useRef<HTMLButtonElement>(null);
   const listId = useId();
   const matches = picking ? candidates(plan, task, query) : [];
+  const choosable = matches.filter((match) => !match.refusal);
+  const current =
+    choosable.find((match) => match.task.id === activeId) ?? choosable[0];
+  const active = current ? matches.indexOf(current) : -1;
   useEffect(() => {
     if (!returnFocus || busy || picking) return;
     (addButton.current?.disabled
@@ -105,18 +112,34 @@ export function TaskDependencies({
       announce(`${text.removedDependency}: ${title}`);
     setReturnFocus(true);
   }
+  /** Removes every done dependency in one queued write; the last answer lists what is left. */
+  async function removeDone() {
+    const removed = await run(async () => {
+      let result: DependencyResult | undefined;
+      for (const dependency of done)
+        result = await actions.setDependency(
+          task.id,
+          dependency.prerequisiteId,
+          false,
+        );
+      return result;
+    });
+    if (removed) announce(text.removedDoneDependencies);
+    setReturnFocus(true);
+  }
   function onKeyDown(event: KeyboardEvent<HTMLInputElement>) {
     if (event.key === "ArrowDown" || event.key === "ArrowUp") {
       event.preventDefault();
-      if (!matches.length) return;
+      // Arrows move among the options that can be chosen; the greyed ones stay visible with why.
+      if (!current) return;
       const step = event.key === "ArrowDown" ? 1 : -1;
-      setActive(
-        (current) => (current + step + matches.length) % matches.length,
+      const at = choosable.indexOf(current);
+      setActiveId(
+        choosable[(at + step + choosable.length) % choosable.length]!.task.id,
       );
     } else if (event.key === "Enter") {
       event.preventDefault();
-      const match = matches[active];
-      if (match) void choose(match);
+      if (current) void choose(current);
     } else if (event.key === "Escape") {
       // Only the picker closes, not Plan's dialog or Todoist's task modal around it.
       event.preventDefault();
@@ -169,10 +192,21 @@ export function TaskDependencies({
           )}
         </ul>
       )}
-      {done > 0 && (
-        <p className="plus-muted plus-dependency-note">
-          {doneText(done, open.length + (adding ? 1 : 0), language)}
-        </p>
+      {done.length > 0 && (
+        <div className="plus-dependency-done">
+          <p className="plus-muted plus-dependency-note">
+            {doneText(done.length, open.length + (adding ? 1 : 0), language)}
+          </p>
+          <button
+            className="plus-icon plus-dependency-remove"
+            aria-label={text.removeDoneDependencies}
+            title={text.removeDoneDependencies}
+            disabled={busy}
+            onClick={() => void removeDone()}
+          >
+            <X size={14} />
+          </button>
+        </div>
       )}
       {waiters.length > 0 && (
         <p className="plus-muted plus-dependency-note">
@@ -197,7 +231,7 @@ export function TaskDependencies({
               value={query}
               onChange={(event) => {
                 setQuery(event.target.value);
-                setActive(0);
+                setActiveId("");
               }}
               onKeyDown={onKeyDown}
             />
@@ -222,7 +256,9 @@ export function TaskDependencies({
                   className={position === active ? "is-active" : undefined}
                   // The search field keeps focus, so arrows and Enter keep working.
                   onMouseDown={(event) => event.preventDefault()}
-                  onMouseEnter={() => setActive(position)}
+                  onMouseEnter={() => {
+                    if (!match.refusal) setActiveId(match.task.id);
+                  }}
                   onClick={() => void choose(match)}
                 >
                   <span className="plus-dependency-option-title">
@@ -250,7 +286,7 @@ export function TaskDependencies({
           disabled={busy || full}
           title={full ? text.dependencyLimit : undefined}
           onClick={() => {
-            setActive(0);
+            setActiveId("");
             setPicking(true);
           }}
         >

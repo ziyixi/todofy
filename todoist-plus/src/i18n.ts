@@ -94,6 +94,8 @@ const en = {
   removeDependency: "Remove dependency",
   addedDependency: "Added dependency",
   removedDependency: "Removed dependency",
+  removeDoneDependencies: "Remove the done dependencies",
+  removedDoneDependencies: "Removed the done dependencies",
   weeklyReview: "Weekly review",
   sundayRule:
     "Commitments and goals chosen in Plus on Sunday stay for next week, with both marks of that task; the rest reset on Monday as usual.",
@@ -191,6 +193,8 @@ const zh: typeof en = {
   removeDependency: "移除依赖",
   addedDependency: "已添加依赖",
   removedDependency: "已移除依赖",
+  removeDoneDependencies: "移除已完成的依赖",
+  removedDoneDependencies: "已移除已完成的依赖",
   weeklyReview: "周回顾",
   sundayRule:
     "在 Plus 中周日选的承诺和目标会留到下周，该任务的承诺和目标标记都保留；其余的周一照常重置。",

@@ -79,7 +79,11 @@ it("sends one dependency write and one settling check, IDs only", async () => {
     "/api/plus/v1/tasks:setTaskDependency": () =>
       Response.json({ dependencies: [{ task_id: "a", prerequisite_id: "b" }] }),
     "/api/plus/v1/tasks:resolveDependencies": () =>
-      Response.json({ dependencies: [], dropped_task_ids: ["a"] }),
+      Response.json({
+        dependencies: [],
+        dropped_task_ids: ["a"],
+        released_task_ids: ["d"],
+      }),
   });
   expect(await api.setDependency("a", "b", true)).toEqual({
     forTask: "a",
@@ -90,6 +94,7 @@ it("sends one dependency write and one settling check, IDs only", async () => {
   expect(await api.resolveDependencies(["b", "c"])).toEqual({
     dependencies: [],
     dropped: ["a"],
+    released: ["d"],
   });
   expect(
     requests.map(({ path, body }) => [
@@ -108,12 +113,13 @@ it("sends one dependency write and one settling check, IDs only", async () => {
   ]);
 });
 
-it("says why Todofy did not add a dependency", async () => {
+it("says why Todofy did not add a dependency, claiming no cause the refusal does not carry", async () => {
   for (const [reason, status, message] of [
+    // A cycle or the limit from another tab, Plus disabled, or Todoist paused or blocked alike.
     [
       "ACTION_NOT_ALLOWED",
       400,
-      "Not added: these tasks would wait on each other, or this task already waits for 5.",
+      "Not added: this dependency cannot be added now. Refresh and try again.",
     ],
     [
       "NOT_FOUND",

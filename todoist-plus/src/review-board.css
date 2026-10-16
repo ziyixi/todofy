@@ -185,6 +185,8 @@
 .planning-outcome-meta.has-status {
   flex-wrap: wrap;
   row-gap: 2px;
+  /* Never wider than the card: a status's quoted title gives way instead (.has-quoted). */
+  min-width: 0;
 }
 .planning-outcome-meta.has-status .planning-outcome-context {
   flex: 1 0 auto;
@@ -218,6 +220,26 @@
 }
 .planning-outcome-status.is-row > :first-child {
   padding-left: 1em;
+}
+/*
+ * A prerequisite's title in the status (等「…」): a long one ends in an ellipsis inside its marks, and
+ * the part that holds it stays on one line, the title giving way first; a two-part status still wraps
+ * between its parts where the card is narrow. After the row's rules, which let a part wrap.
+ */
+.planning-outcome-status > span.has-quoted {
+  display: inline-flex;
+  box-sizing: border-box;
+  max-width: 100%;
+  min-width: 0;
+  white-space: nowrap;
+}
+.planning-outcome-quoted {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 7em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .planning-outcome-separator {
   display: inline-block;

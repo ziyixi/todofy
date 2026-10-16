@@ -5,7 +5,11 @@ import {
   startStatus,
   type StatusText,
 } from "./deadlines";
-import { dependencyIndex, waitingForText, waitingTasks } from "./dependencies";
+import {
+  dependencyIndex,
+  waitingForStatus,
+  waitingTasks,
+} from "./dependencies";
 import { isDateCandidate, planningOutcomes } from "./planning-outcomes";
 import { untouchedText, waits } from "./weekly-review";
 import type { Language, PlanState, PlanningTask, Stage } from "./model";
@@ -91,19 +95,26 @@ export function cardStatus(
 ): StatusText[] {
   if (state === "start") return [startStatus(task.deadline, today, language)];
   const untouched = waitsFor.length
-    ? waitingForText(waitsFor, language)
-    : untouchedText(task, language);
+    ? waitingForStatus(waitsFor, language)
+    : { text: untouchedText(task, language) };
   const deadline =
     task.deadline && task.deadline < today
       ? startStatus(task.deadline, today, language)
       : deadlineStatus(task, today, language);
   return [
-    ...(untouched ? [{ text: untouched }] : []),
+    ...(untouched.text ? [untouched] : []),
     ...(deadline ? [deadline] : []),
   ];
 }
 
-/** The status as one line of text, for an accessible name. */
+/** The status as one line of text, for an accessible name: every title in full. */
 export function statusLine(parts: readonly StatusText[]): string {
-  return parts.map((part) => part.text + (part.danger ?? "")).join(" · ");
+  return parts
+    .map(
+      (part) =>
+        part.text +
+        (part.quoted ? part.quoted.title + part.quoted.close : "") +
+        (part.danger ?? ""),
+    )
+    .join(" · ");
 }

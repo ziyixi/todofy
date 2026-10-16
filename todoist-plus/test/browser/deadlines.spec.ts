@@ -40,7 +40,7 @@ const titles = (page: Page, name: string) =>
   lane(page, name).locator(".planning-outcome-title");
 /** The board's status region, beside the lanes; dnd-kit adds another for drags. */
 const announced = (page: Page) =>
-  page.locator('.review-board > [role="status"]');
+  page.locator('.review-board > .plus-sr-only[role="status"]');
 const card = (page: Page, title: string) =>
   page.locator(".review-draggable", {
     has: page.getByRole("button", { name: new RegExp(`^${title},`, "u") }),

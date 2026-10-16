@@ -33,8 +33,13 @@ export interface PlanViewProps {
   onWeekChange: (weekStart: string) => void;
   onLabels?: () => void;
   completeReview: (task: PlanningTask) => Promise<boolean>;
-  /** One line per task that no longer waits because what it waited for was deleted, this visit. */
+  /** One line per task that no longer waits because what it waited for was deleted or left the list. */
   dependencyNotices?: readonly string[];
+  /**
+   * Called while the Review board is shown, which is where Todofy's settling is told: the only view
+   * that asks Todofy to settle dependencies.
+   */
+  onReviewShown?: (plan: PlanState) => void;
   /** Opened from the review task's link: start with the weekly review. */
   reviewing?: boolean;
   /** Opened from Focus's quiet line: Review, with Start now focused. */
@@ -76,7 +81,10 @@ export function PlanView(props: PlanViewProps) {
     setArea("all");
     setJump(lane);
   }
-  const { showStart, onStartShown } = props;
+  const { showStart, onStartShown, onReviewShown } = props;
+  useEffect(() => {
+    if (mode === "review") onReviewShown?.(plan);
+  }, [mode, plan, onReviewShown]);
   useEffect(() => {
     if (!showStart) return;
     showLane("start");
@@ -200,11 +208,6 @@ export function PlanView(props: PlanViewProps) {
                     : "All"
                   : text[value]}
               </button>
-            ))}
-          </div>
-          <div className="planning-dependency-notice" role="status">
-            {props.dependencyNotices?.map((notice) => (
-              <p key={notice}>{notice}</p>
             ))}
           </div>
           <ReviewBoard {...props} lanes={lanes} area={area} />

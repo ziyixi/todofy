@@ -7,14 +7,20 @@ import {
   doneText,
   droppedText,
   holds,
+  releasedText,
   unsettled,
   waitersText,
-  waitingForText,
+  waitingForStatus,
   waitingTasks,
   waitsThrough,
 } from "../src/dependencies";
 import { applyConfirmed, rereadsAfter } from "../src/plan-updates";
-import { boardLanes, cardState, cardStatus } from "../src/review-lanes";
+import {
+  boardLanes,
+  cardState,
+  cardStatus,
+  statusLine,
+} from "../src/review-lanes";
 import { createPrototype } from "../design/fixture";
 import type { PlanningTask, TaskDependency } from "../src/model";
 
@@ -102,7 +108,18 @@ it("indexes what each active task waits for, what is done and who waits", () => 
   expect(index.waitingFor.get("invite")?.map((item) => item.id)).toEqual([
     "venue",
   ]);
-  expect(index.done.get("invite")).toBe(2);
+  expect(
+    index.done.get("invite")?.map((dependency) => dependency.prerequisiteId),
+  ).toEqual(["gone", "weekly"]);
+  expect(
+    index.holding.map((dependency) => [
+      dependency.taskId,
+      dependency.prerequisiteId,
+    ]),
+  ).toEqual([
+    ["invite", "venue"],
+    ["budget", "venue"],
+  ]);
   expect(index.waiters.get("venue")?.map((item) => item.id)).toEqual([
     "invite",
     "budget",
@@ -180,8 +197,39 @@ it("offers matching tasks by title or parent, never the task's own family or a l
   expect(candidates(plan, tasks[0]!, "e", 2)).toHaveLength(2);
 });
 
-it("names the tasks a complete read misses for Todofy to settle, at most twenty", () => {
-  const tasks = [task("invite"), task("venue")];
+it("offers a recurring prerequisite again once completed, and greys a cycle only by dependencies that hold", () => {
+  const tasks = [
+    task("report", { title: "Weekly report" }),
+    task("sync", { title: "Team sync", recurring: true, completedCount: 5 }),
+    task("draft", { title: "Draft notes" }),
+  ];
+  const report = tasks[0]!;
+  const shown = (dependencies: TaskDependency[], who = report, query = "") =>
+    candidates({ tasks, dependencies }, who, query || "t").map((item) => [
+      item.task.id,
+      item.refusal ?? "",
+    ]);
+  // The sync's count passed the baseline: done, so it can be chosen to wait for its next completion.
+  expect(shown([waitsFor("report", "sync", { baselineCount: 4 })])).toEqual([
+    ["sync", ""],
+    ["draft", ""],
+  ]);
+  expect(shown([waitsFor("report", "sync", { baselineCount: 5 })])).toEqual([
+    ["draft", ""],
+  ]);
+  // The draft once waited for the report through the sync, which is done: no cycle any more.
+  const through = [
+    waitsFor("draft", "sync", { baselineCount: 4 }),
+    waitsFor("sync", "report"),
+  ];
+  expect(shown(through, report, "dra")).toEqual([["draft", ""]]);
+  expect(shown([waitsFor("draft", "report")], report, "dra")).toEqual([
+    ["draft", "cycle"],
+  ]);
+});
+
+it("names the tasks a complete read misses for Todofy to settle, gone waiters first, at most twenty", () => {
+  const tasks = [task("invite"), task("venue"), task("reopened")];
   expect(
     unsettled({
       tasks,
@@ -190,20 +238,33 @@ it("names the tasks a complete read misses for Todofy to settle, at most twenty"
         waitsFor("invite", "completed", { done: true }),
         waitsFor("invite", "deleted"),
         waitsFor("finished", "venue"),
+        // Recorded completed, yet listed again: reopened, so that a later deletion is settled too.
+        waitsFor("invite", "reopened", { done: true }),
       ],
     }),
-  ).toEqual(["deleted", "finished"]);
+  ).toEqual(["finished", "deleted", "reopened"]);
   const many = Array.from({ length: 25 }, (_, n) => waitsFor(`w${n}`, "venue"));
   expect(unsettled({ tasks, dependencies: many })).toHaveLength(20);
+  // Review finding: the ones asked already in this visit leave room for the rest, so none starves.
+  const stuck = Array.from({ length: 21 }, (_, n) =>
+    waitsFor("invite", `gone-${n}`),
+  );
+  const first = unsettled({ tasks, dependencies: stuck });
+  expect(unsettled({ tasks, dependencies: stuck }, new Set(first))).toEqual([
+    "gone-20",
+  ]);
 });
 
 it("writes the quiet texts in both languages", () => {
   const venue = task("venue", { title: "Book the venue" });
   const invite = task("invite", { title: "Send invitations" });
-  expect(waitingForText([venue], "zh")).toBe("等「Book the venue」");
-  expect(waitingForText([venue, invite], "zh")).toBe("等 2 项");
-  expect(waitingForText([venue], "en")).toBe("Waiting for “Book the venue”");
-  expect(waitingForText([venue, invite], "en")).toBe("Waiting for 2 tasks");
+  const waiting = (prerequisites: PlanningTask[], language: "zh" | "en") =>
+    statusLine([waitingForStatus(prerequisites, language)]);
+  expect(waiting([venue], "zh")).toBe("等「Book the venue」");
+  expect(waitingForStatus([venue], "zh").quoted?.title).toBe("Book the venue");
+  expect(waiting([venue, invite], "zh")).toBe("等 2 项");
+  expect(waiting([venue], "en")).toBe("Waiting for “Book the venue”");
+  expect(waiting([venue, invite], "en")).toBe("Waiting for 2 tasks");
   expect(doneText(1, 1, "zh")).toBe("另有 1 项已完成");
   expect(doneText(2, 1, "en")).toBe("2 more are done");
   expect(doneText(1, 0, "zh")).toBe("所等的任务都已完成，可以开始了");
@@ -222,6 +283,12 @@ it("writes the quiet texts in both languages", () => {
   );
   expect(droppedText(invite, "en")).toBe(
     "“Send invitations” no longer waits — the task it waited for was deleted.",
+  );
+  expect(releasedText(invite, "zh")).toBe(
+    "「Send invitations」等的任务已不在待办中，不再等待。",
+  );
+  expect(releasedText(invite, "en")).toBe(
+    "“Send invitations” no longer waits — the task it waited for is no longer active.",
   );
 });
 
@@ -257,8 +324,8 @@ it("puts a task that waits only for another task in Waiting, and one with a stag
   });
   expect(cardState(invite, TODAY, [venue])).toBe("waiting");
   expect(
-    cardStatus(invite, "waiting", TODAY, "zh", [venue]).map(
-      (part) => part.text,
+    cardStatus(invite, "waiting", TODAY, "zh", [venue]).map((part) =>
+      statusLine([part]),
     ),
   ).toEqual(["等「Book the venue」", "10月20日截止"]);
   // An explicit stage label keeps its lane, saying what it waits for.

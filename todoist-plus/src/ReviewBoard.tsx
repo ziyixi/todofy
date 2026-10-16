@@ -95,9 +95,20 @@ export function OutcomeCard({
       title={task.deadline ? deadlineTitle(task.deadline, language) : undefined}
     >
       {status.map((part, index) => (
-        <span key={index}>
+        <span key={index} className={part.quoted ? "has-quoted" : undefined}>
           {index > 0 && <span className="planning-outcome-separator"> · </span>}
           {part.text}
+          {part.quoted && (
+            <>
+              <span
+                className="planning-outcome-quoted"
+                title={part.quoted.title}
+              >
+                {part.quoted.title}
+              </span>
+              {part.quoted.close}
+            </>
+          )}
           {part.danger && (
             <span className="planning-danger-text">{part.danger}</span>
           )}
@@ -162,6 +173,11 @@ interface Props {
   run: RunOperation;
   editTask: (task: PlanningTask) => void;
   onLabels?: () => void;
+  /**
+   * One quiet line each, under the lanes so that nothing above them moves: a task that no longer waits
+   * because what it waited for was deleted or left the list, told once.
+   */
+  dependencyNotices?: readonly string[];
 }
 /**
  * Start now, Waiting and the four stage lanes, with the same lanes and cards. Start now and
@@ -182,6 +198,7 @@ export function ReviewBoard({
   run,
   editTask,
   onLabels,
+  dependencyNotices = [],
 }: Props) {
   const text = words(language);
   const board = useRef<HTMLDivElement>(null);
@@ -293,6 +310,11 @@ export function ReviewBoard({
         <p className="plus-sr-only" role="status">
           {announcement}
         </p>
+        <div className="review-board-notices" role="status">
+          {dependencyNotices.map((notice) => (
+            <p key={notice}>{notice}</p>
+          ))}
+        </div>
       </div>
       <DragOverlay dropAnimation={{ duration: 160, easing: "ease-out" }}>
         {(source) => {

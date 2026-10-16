@@ -110,14 +110,15 @@ function taskDependency(dependency: ApiTaskDependency): TaskDependency {
   };
 }
 /**
- * Todofy refuses a dependency the extension had allowed only when another tab changed them meanwhile
- * (a cycle or the limit), or when a task is no longer active; the message says which.
+ * Todofy refuses a dependency the extension had allowed when another tab changed them meanwhile (a
+ * cycle or the limit), and for reasons the same refusal also carries (Plus or Todoist paused or
+ * blocked): the message names none of them. A task that is no longer active is said so.
  */
 function dependencyError(error: unknown): unknown {
   if (!(error instanceof RpcStatusError)) return error;
   if (error.status.reason === "ACTION_NOT_ALLOWED")
     return new DependencyNotAddedError(
-      "Not added: these tasks would wait on each other, or this task already waits for 5.",
+      "Not added: this dependency cannot be added now. Refresh and try again.",
     );
   if (error.status.reason === "NOT_FOUND")
     return new DependencyNotAddedError(
@@ -431,6 +432,7 @@ export function createApi(
       return {
         dependencies: result.dependencies.map(taskDependency),
         dropped: result.droppedTaskIds,
+        released: result.releasedTaskIds,
       };
     },
     async addToDay(taskId, date) {

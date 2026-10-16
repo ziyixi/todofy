@@ -1,5 +1,9 @@
 import { expect, test, type Page, type Worker } from "@playwright/test";
-import { addDependencyTasks, launchPlanner } from "./planner-setup";
+import {
+  addDependencyTasks,
+  controlWrites,
+  launchPlanner,
+} from "./planner-setup";
 
 type DependencyState = {
   tasks: Record<string, unknown>[];
@@ -106,10 +110,17 @@ test("a task that waits for another is in Waiting or keeps its lane saying so, a
       .getByRole("button", { name: "Add a dependency" })
       .press("Enter");
     await section.getByRole("combobox").fill("venue");
+    // The pending row and the saved one have the same height: confirming moves nothing.
+    await controlWrites(worker, { hold: true });
     await section.getByRole("combobox").press("Enter");
+    const row = section.locator(".plus-dependency");
+    await expect(row).toHaveClass(/is-pending/u);
+    const pending = (await row.boundingBox())!.height;
+    await controlWrites(worker, { hold: false, release: true });
     await expect(
       section.getByRole("button", { name: "Book the venue", exact: true }),
     ).toBeVisible();
+    expect((await row.boundingBox())!.height).toBe(pending);
     expect(await writes(worker, "/tasks:setTaskDependency")).toEqual([
       expect.objectContaining({
         task_id: "invite",
@@ -123,8 +134,19 @@ test("a task that waits for another is in Waiting or keeps its lane saying so, a
     });
     await page.mouse.move(2, 2);
     await expect(remove).toHaveCSS("opacity", "0");
+    const title = section.getByRole("button", {
+      name: "Book the venue",
+      exact: true,
+    });
+    await expect(title).toHaveCSS("text-decoration-line", "none");
     await section.locator(".plus-dependency").hover();
     await expect(remove).toHaveCSS("opacity", "1");
+    expect(
+      await remove.evaluate((button) => button.getBoundingClientRect().height),
+    ).toBe(24);
+    // The title opens that task: on hover it says so with an underline.
+    await title.hover();
+    await expect(title).toHaveCSS("text-decoration-line", "underline");
     // Nothing changed in Todoist: no Sync-shaped write, only the dependency.
     expect((await writes(worker, "/tasks:setTaskPlan")).length).toBe(0);
     await page.keyboard.press("Escape");
@@ -162,13 +184,24 @@ test("a task that waits for another is in Waiting or keeps its lane saying so, a
         "Everything it waits for is done — ready to start",
       ),
     ).toBeVisible();
+    // The done line's remove action shows on hover or keyboard focus only, as a row's does.
+    const clear = dependencies(page).getByRole("button", {
+      name: "Remove the done dependencies",
+    });
+    await page.mouse.move(2, 2);
+    await expect(clear).toHaveCSS("opacity", "0");
+    await dependencies(page).locator(".plus-dependency-done").hover();
+    await expect(clear).toHaveCSS("opacity", "1");
+    expect(
+      await clear.evaluate((button) => button.getBoundingClientRect().height),
+    ).toBe(24);
     expect((await writes(worker, "/tasks:setTaskPlan")).length).toBe(0);
   } finally {
     await context.close();
   }
 });
 
-test("a recurring prerequisite waits for its next completion; a deleted one is told once in Review", async () => {
+test("a recurring prerequisite waits for its next completion and can be chosen again; a deleted one is told once under the lanes", async () => {
   const { context, worker } = await launchPlanner();
   try {
     await addDependencyTasks(worker);
@@ -196,12 +229,16 @@ test("a recurring prerequisite waits for its next completion; a deleted one is t
     // Completed once in Todoist: the counter rises and the task stays; then the venue is deleted.
     await inTodoist(worker, { counted: ["weekly", 5] });
     await inTodoist(worker, { deleted: "venue" });
+    const board = page.locator(".review-lanes");
+    const before = (await board.boundingBox())!;
     await page.getByRole("button", { name: "Refresh" }).click();
-    const notice = page.locator(".planning-dependency-notice");
+    const notice = page.locator(".review-board-notices");
     await expect(notice).toHaveText(
       "“Plan the launch program” no longer waits — the task it waited for was deleted.",
     );
     await expect(notice).toHaveAttribute("role", "status");
+    // It comes under the lanes: nothing above them moves.
+    expect((await board.boundingBox())!.y).toBe(before.y);
     await expect(
       card(page, "Send the invitations").locator(".planning-outcome-counts"),
     ).toHaveText("1 step · 0 planned");
@@ -213,6 +250,32 @@ test("a recurring prerequisite waits for its next completion; a deleted one is t
     await expect(lane(page, "Committed")).toBeVisible();
     await expect(notice).toHaveText("");
     expect(await writes(worker, "/tasks:resolveDependencies")).toHaveLength(1);
+    // The weekly sync was completed since: the picker offers it again, to wait for its next completion.
+    await page.getByRole("button", { name: /^Send the invitations,/u }).click();
+    await section.getByRole("button", { name: "Add a dependency" }).click();
+    await section.getByRole("combobox").fill("sync");
+    await expect(section.getByRole("option")).toHaveText([
+      "Weekly launch sync",
+    ]);
+    await section.getByRole("combobox").press("Enter");
+    await expect(section.locator(".plus-dependency")).toHaveText([
+      "Weekly launch syncAfter its next completion",
+    ]);
+    expect(
+      await worker.evaluate(() =>
+        (
+          globalThis as unknown as { plannerState: DependencyState }
+        ).plannerState.dependencies.filter(
+          (dependency) => dependency.prerequisite_id === "weekly",
+        ),
+      ),
+    ).toEqual([
+      {
+        task_id: "invite",
+        prerequisite_id: "weekly",
+        baseline_completed_count: 5,
+      },
+    ]);
   } finally {
     await context.close();
   }
@@ -282,6 +345,90 @@ test("the native Steps & timing has the same section, and a prerequisite opens i
     await page.waitForURL("https://app.todoist.com/app/task/venue");
     // Native pages never settle dependencies.
     expect(await writes(worker, "/tasks:resolveDependencies")).toEqual([]);
+  } finally {
+    await context.close();
+  }
+});
+
+test("a long prerequisite title ends in an ellipsis inside its marks, and its part of the status keeps one line", async () => {
+  const { context, worker } = await launchPlanner();
+  try {
+    const long = "订场地并确认所有嘉宾的餐饮住宿与交通接送安排";
+    await addDependencyTasks(worker, {
+      venue: long,
+      invite: "发邀请函",
+      program: "年度活动方案",
+      shelf: "整理书架",
+      weekly: "周例会",
+    });
+    await worker.evaluate(() =>
+      (
+        globalThis as unknown as { plannerState: DependencyState }
+      ).plannerState.dependencies.push({
+        task_id: "invite",
+        prerequisite_id: "venue",
+      }),
+    );
+    const page = await context.newPage();
+    const measure = () =>
+      page.locator(".planning-outcome-card").evaluateAll((cards) =>
+        cards
+          .filter((card) => card.querySelector(".planning-outcome-quoted"))
+          .map((card) => {
+            const status = card.querySelector(".planning-outcome-status")!;
+            const quoted = card.querySelector<HTMLElement>(
+              ".planning-outcome-quoted",
+            )!;
+            const line = (element: Element) =>
+              Math.round(element.getBoundingClientRect().height / 16);
+            return {
+              title: card.querySelector(".planning-outcome-title")!.textContent,
+              inside:
+                status.getBoundingClientRect().right <=
+                card.getBoundingClientRect().right,
+              cut: quoted.scrollWidth > quoted.clientWidth,
+              quotedLines: line(quoted.parentElement!),
+              // A two-part status may wrap between its parts on a narrow card, never inside them.
+              wrapsInside: line(status) > status.children.length,
+              tooltip: quoted.title,
+            };
+          }),
+      );
+    // Five lanes in one row (Waiting and the four stages), then four-column lanes.
+    for (const [width, height] of [
+      [1600, 1000],
+      [1440, 900],
+    ] as const) {
+      await page.setViewportSize({ width, height });
+      await page.goto("https://app.todoist.com/app/today?todoist-plus=plan");
+      for (const language of ["zh", "en"]) {
+        await page.evaluate(
+          (language) => (document.documentElement.lang = language),
+          language,
+        );
+        await expect(page.locator(".planning-outcome-quoted")).toHaveCount(3);
+        expect(await measure(), `${width} ${language}`).toEqual(
+          [
+            ["年度活动方案", long],
+            ["整理书架", "发邀请函"],
+            ["发邀请函", long],
+          ].map(([title, prerequisite]) => ({
+            title,
+            inside: true,
+            cut: prerequisite === long,
+            quotedLines: 1,
+            wrapsInside: false,
+            tooltip: prerequisite,
+          })),
+        );
+        // The full title stays in the card's accessible name.
+        await expect(
+          page.getByRole("button", {
+            name: new RegExp(`^发邀请函,.*${long}`, "u"),
+          }),
+        ).toHaveCount(1);
+      }
+    }
   } finally {
     await context.close();
   }

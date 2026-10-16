@@ -9,7 +9,7 @@ import {
 import { afterEach, beforeAll, expect, it, vi } from "vitest";
 import { App } from "../src/App";
 import { createPrototype } from "../design/fixture";
-import type { PlusActions } from "../src/model";
+import type { PlusActions, TaskDependency } from "../src/model";
 
 // The fixture's tasks are synthetic; today is Tuesday 2026-10-13.
 beforeAll(() => {
@@ -65,7 +65,16 @@ it("adds a dependency from the search field with the keyboard, greys a cycle and
   });
   expect(cycle.getAttribute("aria-disabled")).toBe("true");
   expect(within(cycle).getByText("Would wait on each other")).toBeTruthy();
-  fireEvent.keyDown(search, { key: "Enter" });
+  // The highlight starts on the first option that can be chosen, and neither the arrows nor the
+  // pointer ever put it on the greyed one, which stays listed with why.
+  const shared = own.getByRole("option", { name: /Shared notes for Friday/u });
+  expect(shared.getAttribute("aria-selected")).toBe("true");
+  expect(search.getAttribute("aria-activedescendant")).toBe(shared.id);
+  fireEvent.keyDown(search, { key: "ArrowDown" });
+  fireEvent.keyDown(search, { key: "ArrowUp" });
+  fireEvent.mouseEnter(cycle);
+  expect(cycle.getAttribute("aria-selected")).toBe("false");
+  expect(shared.getAttribute("aria-selected")).toBe("true");
   fireEvent.click(cycle);
   expect(set).not.toHaveBeenCalled();
   // Escape closes only the picker: neither Plan's dialog nor Todoist's modal hears it.
@@ -155,6 +164,131 @@ it("says when what it waits for is done, and stops at five", async () => {
   }) as HTMLButtonElement;
   expect(add.disabled).toBe(true);
   expect(add.title).toBe("Up to 5");
+});
+
+it("leaves room for a new dependency once five are done, and removes the done ones on request", async () => {
+  const actions = createPrototype();
+  const ids = ["copy", "layout", "notes", "reading", "walk"];
+  for (const id of ids) await actions.setDependency("release", id, true);
+  for (const id of ids)
+    await actions.completeTask(
+      (await actions.load()).plan.tasks.find((task) => task.id === id)!,
+      `r-${id}`,
+      "",
+    );
+  const set = vi.spyOn(actions, "setDependency");
+  const editor = await details(actions, "release");
+  const own = within(section(editor));
+  expect(
+    own.getByText("Everything it waits for is done — ready to start"),
+  ).toBeTruthy();
+  // Only what still holds fills the five: a done one gives way to a new one (Todofy does so too).
+  const add = own.getByRole("button", {
+    name: "Add a dependency",
+  }) as HTMLButtonElement;
+  expect(add.disabled).toBe(false);
+  // The done line's one action takes the done dependencies away, in one queued write.
+  fireEvent.click(
+    own.getByRole("button", { name: "Remove the done dependencies" }),
+  );
+  await waitFor(() =>
+    expect(editor.getByRole("status").textContent).toBe(
+      "Removed the done dependencies",
+    ),
+  );
+  expect(set.mock.calls).toEqual(ids.map((id) => ["release", id, false]));
+  expect(
+    within(section(editor)).queryByText(
+      "Everything it waits for is done — ready to start",
+    ),
+  ).toBeNull();
+});
+
+it("settles only while the Review board is shown, and tells it under the lanes", async () => {
+  const actions = createPrototype();
+  await actions.setDependency("notes", "venue", true);
+  await actions.setDependency("notes", "walk", true);
+  const completed = async (id: string) =>
+    actions.completeTask(
+      (await actions.load()).plan.tasks.find((task) => task.id === id)!,
+      `r-${id}`,
+      "",
+    );
+  await completed("venue");
+  const resolve = vi
+    .spyOn(actions, "resolveDependencies")
+    .mockResolvedValue({ released: ["notes"], dependencies: [] });
+  const load = vi.spyOn(actions, "load");
+  // Focus shows no notice, so it never asks: the one-time answer is kept for the board.
+  render(
+    <App
+      actions={actions}
+      view="focus"
+      language="zh"
+      onOpenTask={vi.fn()}
+      onSettings={vi.fn()}
+    />,
+  );
+  await waitFor(() => expect(load).toHaveBeenCalledOnce());
+  await screen.findAllByRole("heading");
+  expect(resolve).not.toHaveBeenCalled();
+  cleanup();
+  render(
+    <App
+      actions={actions}
+      view="plan"
+      language="zh"
+      onOpenTask={vi.fn()}
+      onSettings={vi.fn()}
+    />,
+  );
+  // Plan opens on Review: the board asks, and the line comes under its lanes.
+  const notice = await screen.findByText(
+    "「Organize the experiment notes」等的任务已不在待办中，不再等待。",
+  );
+  expect(notice.closest(".review-board-notices")).toBeTruthy();
+  expect(resolve).toHaveBeenCalledExactlyOnceWith(["venue"]);
+  // A read while Week is shown does not ask; going back to Review does.
+  fireEvent.click(screen.getByRole("tab", { name: "一周安排" }));
+  await completed("walk");
+  const reads = load.mock.calls.length;
+  fireEvent.click(screen.getByRole("button", { name: "刷新" }));
+  await waitFor(() => expect(load).toHaveBeenCalledTimes(reads + 1));
+  expect(resolve).toHaveBeenCalledOnce();
+  fireEvent.click(screen.getByRole("tab", { name: "回顾" }));
+  await waitFor(() => expect(resolve).toHaveBeenLastCalledWith(["walk"]));
+});
+
+it("asks about every unsettled task in turn, when the first twenty stay unsettled", async () => {
+  const actions = createPrototype();
+  const base = await actions.load();
+  const stuck: TaskDependency[] = Array.from({ length: 21 }, (_, n) => ({
+    taskId: "release",
+    prerequisiteId: `gone-${n}`,
+    baselineCount: 0,
+    done: false,
+  }));
+  vi.spyOn(actions, "load").mockImplementation(async () => ({
+    ...structuredClone(base),
+    plan: { ...structuredClone(base.plan), dependencies: stuck },
+  }));
+  // Todofy cannot say yet how these closed (a failing activity log, say): nothing settles.
+  const resolve = vi
+    .spyOn(actions, "resolveDependencies")
+    .mockResolvedValue({ dependencies: stuck });
+  render(
+    <App
+      actions={actions}
+      view="plan"
+      language="en"
+      onOpenTask={vi.fn()}
+      onSettings={vi.fn()}
+    />,
+  );
+  await waitFor(() => expect(resolve).toHaveBeenCalledOnce());
+  fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+  await waitFor(() => expect(resolve).toHaveBeenCalledTimes(2));
+  expect(resolve.mock.calls[1]![0]).toEqual(["gone-20"]);
 });
 
 it("settles what a complete read misses once per visit and tells a deletion once in Review", async () => {

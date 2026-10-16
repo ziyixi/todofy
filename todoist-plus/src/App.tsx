@@ -10,7 +10,7 @@ import {
 } from "lucide-react";
 import { displayedTitle, taskIndex } from "./domain";
 import { canMarkActive } from "./deadlines";
-import { droppedText, unsettled } from "./dependencies";
+import { droppedText, releasedText, unsettled } from "./dependencies";
 import { words } from "./i18n";
 import { readableDate, weekLabel } from "./PlanningCalendar";
 import {
@@ -134,22 +134,33 @@ export function App({
     }),
     [actions],
   );
-  // After a complete read, Todofy settles the tasks dependencies name that the read did not list, each
-  // once in this visit; a failed check is asked again by the next read. Tasks that no longer wait
-  // because what they waited for was deleted are told once, for this visit only.
+  // Once per complete read that the Review board shows, Todofy settles the tasks dependencies name that
+  // the read did not list (dependencies.ts unsettled), each once in this visit; a failed check is asked
+  // again by the next read. Only the board asks, so a task that no longer waits because what it
+  // waited for was deleted or left the list is told there, once: under its lanes, for this visit.
   const settleAsked = useRef(new Set<string>());
-  const [dropped, setDropped] = useState<readonly string[]>([]);
+  const [told, setTold] = useState<
+    readonly { taskId: string; deleted: boolean }[]
+  >([]);
   const settle = useCallback(
     async (plan: PlanState) => {
-      const ids = unsettled(plan).filter((id) => !settleAsked.current.has(id));
+      const ids = unsettled(plan, settleAsked.current);
       if (!plan.configured || !ids.length) return;
       for (const id of ids) settleAsked.current.add(id);
       const settled = writes.current.settled;
       try {
         const result = await actions.resolveDependencies(ids);
-        const told = result.dropped ?? [];
-        if (told.length)
-          setDropped((current) => [...new Set([...current, ...told])]);
+        const notices = [
+          ...(result.dropped ?? []).map((taskId) => ({
+            taskId,
+            deleted: true,
+          })),
+          ...(result.released ?? []).map((taskId) => ({
+            taskId,
+            deleted: false,
+          })),
+        ];
+        if (notices.length) setTold((current) => [...current, ...notices]);
         // A write confirmed meanwhile may be missing from the answer; the next read shows both.
         if (settled === writes.current.settled)
           setConfirmed((current) => current && applyConfirmed(current, result));
@@ -158,6 +169,16 @@ export function App({
       }
     },
     [actions],
+  );
+  // The complete read the board last asked about: not a remembered board, nor again for a write.
+  const settledRead = useRef(0);
+  const onReviewShown = useCallback(
+    (plan: PlanState) => {
+      if (stale || settledRead.current === reads.current.shown) return;
+      settledRead.current = reads.current.shown;
+      void settle(plan);
+    },
+    [stale, settle],
   );
   const load = useCallback(async (): Promise<boolean> => {
     const request = ++weekRequest.current;
@@ -181,7 +202,6 @@ export function App({
       setStale(false);
       setCompleting(new Set());
       onReady?.(next.plan);
-      void settle(next.plan);
       return true;
     } catch (failure) {
       onReady?.();
@@ -189,7 +209,7 @@ export function App({
     } finally {
       if (request === weekRequest.current) setWeekLoading(false);
     }
-  }, [actions, onReady, settle]);
+  }, [actions, onReady]);
   // Reads never wait for writes or disable controls.
   const revalidate = useCallback(async () => {
     setReading((count) => count + 1);
@@ -347,11 +367,17 @@ export function App({
     });
   }
   const selected = data?.plan.tasks.find((task) => task.id === selectedId);
-  const droppedNotices = data
-    ? dropped.flatMap((id) => {
-        const task = taskIndex(data.plan.tasks).get(id);
-        return task ? [droppedText(task, language)] : [];
-      })
+  // One line per task and reason, even when two checks drop two of its dependencies.
+  const dependencyNotices = data
+    ? [
+        ...new Set(
+          told.flatMap(({ taskId, deleted }) => {
+            const task = taskIndex(data.plan.tasks).get(taskId);
+            if (!task) return [];
+            return [(deleted ? droppedText : releasedText)(task, language)];
+          }),
+        ),
+      ]
     : [];
   // A task whose stage drag waits still carries its old etag, so its editor waits too.
   const selectedPending = Boolean(
@@ -455,7 +481,8 @@ export function App({
                 editTask={openTask}
                 onLabels={() => setSelectedId("board-labels")}
                 completeReview={(task) => complete(task, "")}
-                dependencyNotices={droppedNotices}
+                dependencyNotices={dependencyNotices}
+                onReviewShown={onReviewShown}
                 reviewing={review}
                 showStart={showStart}
                 onStartShown={() => setShowStart(false)}

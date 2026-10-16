@@ -1,3 +1,4 @@
+import { holds } from "../src/dependencies";
 import { STAGE_ROLES } from "../src/planning-outcomes";
 import type {
   FocusState,
@@ -376,7 +377,8 @@ export function createPrototype(
           : day,
       );
     },
-    // As Todofy keeps them: by ID only, a repeated add changing nothing.
+    // As Todofy keeps them: by ID only, adding one that holds changing nothing and one that is done
+    // starting it over (the limits are left out).
     async setDependency(taskId, prerequisiteId, waits) {
       const others = plan.dependencies.filter(
         (item) =>
@@ -385,21 +387,23 @@ export function createPrototype(
       const prerequisite = plan.tasks.find(
         (task) => task.id === prerequisiteId,
       );
+      const existing = plan.dependencies.find(
+        (item) =>
+          item.taskId === taskId && item.prerequisiteId === prerequisiteId,
+      );
       plan = {
         ...plan,
         dependencies: waits
           ? [
               ...others,
-              plan.dependencies.find(
-                (item) =>
-                  item.taskId === taskId &&
-                  item.prerequisiteId === prerequisiteId,
-              ) ?? {
-                taskId,
-                prerequisiteId,
-                baselineCount: prerequisite?.completedCount ?? 0,
-                done: false,
-              },
+              existing && holds(existing, prerequisite)
+                ? existing
+                : {
+                    taskId,
+                    prerequisiteId,
+                    baselineCount: prerequisite?.completedCount ?? 0,
+                    done: false,
+                  },
             ]
           : others,
       };

@@ -272,15 +272,24 @@ async function setupPlanner(context: BrowserContext, worker: Worker) {
         const prerequisite = state.tasks.find(
           (task) => task.id === body.prerequisite_id,
         );
+        // As Todofy: one that holds stays as it is; a recurring one completed since starts over.
+        const existing = state.dependencies.find(same);
+        const done =
+          prerequisite?.recurring &&
+          Number(prerequisite.completed_count ?? 0) >
+            Number(existing?.baseline_completed_count ?? 0);
         state.dependencies = [
           ...state.dependencies.filter((dependency) => !same(dependency)),
           ...(body.waits
             ? [
-                state.dependencies.find(same) ?? {
-                  task_id: body.task_id,
-                  prerequisite_id: body.prerequisite_id,
-                  baseline_completed_count: prerequisite?.completed_count ?? 0,
-                },
+                existing && !done
+                  ? existing
+                  : {
+                      task_id: body.task_id,
+                      prerequisite_id: body.prerequisite_id,
+                      baseline_completed_count:
+                        prerequisite?.completed_count ?? 0,
+                    },
               ]
             : []),
         ];

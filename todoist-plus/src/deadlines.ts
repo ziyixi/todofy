@@ -109,6 +109,8 @@ export interface StatusText {
   text: string;
   /** Appended after the text in --plus-danger. */
   danger?: string;
+  /** A task's title after the text, then its closing mark: a narrow card cuts the title with an ellipsis. */
+  quoted?: { title: string; close: string };
 }
 
 function daysWord(days: number, language: Language) {
