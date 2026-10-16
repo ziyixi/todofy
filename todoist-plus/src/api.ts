@@ -7,6 +7,7 @@ import {
   PlusService,
   type Plan as ApiPlan,
   type PlanningTask as ApiPlanningTask,
+  type TaskDependency as ApiTaskDependency,
 } from "@ziyixi/proto/todofy/ui/v1/plus_service_pb";
 import {
   CommandTimerRequest_Action,
@@ -25,6 +26,7 @@ import type {
   PlanMetadata,
   PlanningTask,
   PlusActions,
+  TaskDependency,
   TimerSnapshot,
 } from "./model";
 
@@ -51,9 +53,15 @@ export function validOrigin(input: string): string {
   return url.origin;
 }
 class FlowdaySyncPendingError extends Error {}
+/** Todofy did not add a dependency; the message says why. */
+class DependencyNotAddedError extends Error {}
 
 export function publicError(error: unknown): string {
-  if (error instanceof FlowdaySyncPendingError) return error.message;
+  if (
+    error instanceof FlowdaySyncPendingError ||
+    error instanceof DependencyNotAddedError
+  )
+    return error.message;
   // The gateway refuses an unknown or revoked extension token with a 401 Status body.
   if (
     (error instanceof RpcStatusError && error.status.httpStatus === 401) ||
@@ -89,7 +97,33 @@ export function planningTask(task: ApiPlanningTask): PlanningTask {
     updatedAt:
       task.updateTime &&
       new Date(Number(task.updateTime.seconds) * 1000).toISOString(),
+    recurring: task.recurring,
+    completedCount: task.completedCount,
   };
+}
+function taskDependency(dependency: ApiTaskDependency): TaskDependency {
+  return {
+    taskId: dependency.taskId,
+    prerequisiteId: dependency.prerequisiteId,
+    baselineCount: dependency.baselineCompletedCount,
+    done: dependency.done,
+  };
+}
+/**
+ * Todofy refuses a dependency the extension had allowed only when another tab changed them meanwhile
+ * (a cycle or the limit), or when a task is no longer active; the message says which.
+ */
+function dependencyError(error: unknown): unknown {
+  if (!(error instanceof RpcStatusError)) return error;
+  if (error.status.reason === "ACTION_NOT_ALLOWED")
+    return new DependencyNotAddedError(
+      "Not added: these tasks would wait on each other, or this task already waits for 5.",
+    );
+  if (error.status.reason === "NOT_FOUND")
+    return new DependencyNotAddedError(
+      "Not added: one of these tasks is no longer active. Refresh and try again.",
+    );
+  return error;
 }
 function planMetadata(plan: ApiPlan): PlanMetadata {
   return {
@@ -112,6 +146,7 @@ function planMetadata(plan: ApiPlan): PlanMetadata {
     inboxProjectId: plan.inboxProjectId,
     reviewTaskId: plan.reviewTaskId,
     nextWeekTaskIds: plan.nextWeekTaskIds,
+    dependencies: plan.dependencies.map(taskDependency),
   };
 }
 function timerSnapshot(session: TimerSession): TimerSnapshot {
@@ -371,6 +406,32 @@ export function createApi(
     },
     async completeTask(task, requestId, flowDate) {
       await plus.completeTask({ taskId: task.id, requestId, flowDate });
+    },
+    async setDependency(taskId, prerequisiteId, waits) {
+      try {
+        const result = await plus.setTaskDependency({
+          taskId,
+          prerequisiteId,
+          waits,
+          requestId: crypto.randomUUID(),
+        });
+        return {
+          forTask: taskId,
+          dependencies: result.dependencies.map(taskDependency),
+        };
+      } catch (error) {
+        throw waits ? dependencyError(error) : error;
+      }
+    },
+    async resolveDependencies(taskIds) {
+      const result = await plus.resolveDependencies({
+        taskIds,
+        requestId: crypto.randomUUID(),
+      });
+      return {
+        dependencies: result.dependencies.map(taskDependency),
+        dropped: result.droppedTaskIds,
+      };
     },
     async addToDay(taskId, date) {
       await ensureSynced([taskId]);

@@ -3,6 +3,7 @@ import { ACTIVE_LABEL, isLastDay } from "./weekly-review";
 import type {
   Area,
   Confirmed,
+  DependencyResult,
   FlowDayPlan,
   PlanState,
   PlanningTask,
@@ -37,6 +38,21 @@ function withTasks(data: PlusData, tasks: PlanningTask[]): PlusData {
   };
 }
 
+/** One task's dependencies replace its old ones; an answer without a task replaces them all. */
+function withDependencies(data: PlusData, result: DependencyResult): PlusData {
+  const { forTask } = result;
+  const dependencies =
+    forTask === undefined
+      ? result.dependencies
+      : [
+          ...data.plan.dependencies.filter(
+            (dependency) => dependency.taskId !== forTask,
+          ),
+          ...result.dependencies,
+        ];
+  return { ...data, plan: { ...data.plan, dependencies } };
+}
+
 /** Shows a write's confirmed server result without reading everything again. */
 export function applyConfirmed(data: PlusData, confirmed: Confirmed): PlusData {
   if (!confirmed) return data;
@@ -60,6 +76,7 @@ export function applyConfirmed(data: PlusData, confirmed: Confirmed): PlusData {
       },
     };
   if ("id" in confirmed) return withTasks(data, [confirmed]);
+  if (!("managedLabels" in confirmed)) return withDependencies(data, confirmed);
   return { ...data, plan: { ...confirmed, tasks: data.plan.tasks } };
 }
 

@@ -39,16 +39,21 @@ export function untouchedText(task: PlanningTask, language: Language): string {
     : "Changed within a day";
 }
 
+/** Tasks untouched the longest first; unknown ages come last. */
+export function byUntouched(tasks: readonly PlanningTask[]): PlanningTask[] {
+  const changed = (task: PlanningTask) =>
+    task.updatedAt ? Date.parse(task.updatedAt) : Infinity;
+  return [...tasks].sort((a, b) => changed(a) - changed(b) || 0);
+}
+
 /** Tasks carrying any of the labels, untouched the longest first; unknown ages come last. */
 export function oldestUntouched(
   tasks: readonly PlanningTask[],
   labels: readonly string[],
 ): PlanningTask[] {
-  const changed = (task: PlanningTask) =>
-    task.updatedAt ? Date.parse(task.updatedAt) : Infinity;
-  return tasks
-    .filter((task) => task.labels.some((label) => labels.includes(label)))
-    .sort((a, b) => changed(a) - changed(b) || 0);
+  return byUntouched(
+    tasks.filter((task) => task.labels.some((label) => labels.includes(label))),
+  );
 }
 
 /**

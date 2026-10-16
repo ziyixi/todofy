@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { ExternalLink, ListChecks, X } from "lucide-react";
 import { displayedTitle, taskIndex, todoistProjectUrl } from "./domain";
 import { deadlineStatus } from "./deadlines";
+import { waitingTasks } from "./dependencies";
 import { words } from "./i18n";
 import { pendingTask } from "./plan-updates";
 import { LeadSelect } from "./TaskEditor";
@@ -17,7 +18,6 @@ import {
   unscheduledCommitments,
   untouchedDays,
   untouchedText,
-  WAITING_LABELS,
   weekChoices,
   withoutLead,
   type ReviewProgress,
@@ -95,7 +95,7 @@ export function WeeklyReview({
     busy || (pending?.has(pendingTask(task.id)) ?? false);
 
   const inbox = inboxToClarify(plan);
-  const waiting = oldestUntouched(plan.tasks, WAITING_LABELS);
+  const waiting = waitingTasks(plan);
   const oldestWait = waiting[0] && untouchedDays(waiting[0]);
   const noLead = withoutLead(plan.tasks);
   const unscheduled = unscheduledCommitments(plan, days);

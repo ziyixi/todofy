@@ -1,8 +1,15 @@
+import { dependencyIndex, isWaiting } from "./dependencies";
 import { startDate, taskIndex } from "./domain";
 import { words } from "./i18n";
 import { monthDay, readableDate, shortDay } from "./PlanningCalendar";
-import { ACTIVE_LABEL, waits } from "./weekly-review";
-import type { FlowDayPlan, Language, PlanState, PlanningTask } from "./model";
+import { ACTIVE_LABEL } from "./weekly-review";
+import type {
+  FlowDayPlan,
+  Language,
+  PlanState,
+  PlanningTask,
+  TaskDependency,
+} from "./model";
 
 /**
  * Where a task with a deadline stands in its life: in progress, past its deadline, in its start
@@ -54,13 +61,14 @@ export function canMarkActive(plan: Pick<PlanState, "availableLabels">) {
 
 /**
  * Tasks that should start, as the Review board's cards say, with nothing open planned in these
- * queues: neither the task nor any of its steps. A waiting task past its deadline waits there, so
- * it is not counted. Each task is counted once.
+ * queues: neither the task nor any of its steps. A waiting task past its deadline waits there, by
+ * label or by dependency, so it is not counted. Each task is counted once.
  */
 export function unplannedDue(
   tasks: readonly PlanningTask[],
   days: readonly FlowDayPlan[],
   today: string,
+  dependencies: readonly TaskDependency[] = [],
 ): { past: number; window: number } {
   const scheduled = new Set(
     days.flatMap((day) =>
@@ -82,9 +90,15 @@ export function unplannedDue(
     }
   }
   const counts = { past: 0, window: 0 };
+  const index = dependencyIndex({ tasks, dependencies });
   for (const task of tasks) {
     const state = deadlineState(task, today);
-    if (state && isDue(state) && !waits(task) && !planned.has(task.id))
+    if (
+      state &&
+      isDue(state) &&
+      !isWaiting(task, index) &&
+      !planned.has(task.id)
+    )
       counts[state.kind as "past" | "window"]++;
   }
   return counts;

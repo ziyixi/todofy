@@ -47,7 +47,7 @@ const task = (id: string, value: Partial<PlanningTask> = {}): PlanningTask => ({
 });
 /** Each lane's task IDs. */
 function laneIds(tasks: PlanningTask[]) {
-  const lanes = boardLanes({ tasks, managedLabels }, TODAY);
+  const lanes = boardLanes({ tasks, managedLabels, dependencies: [] }, TODAY);
   return Object.fromEntries(
     Object.entries(lanes).map(([lane, cards]) => [
       lane,
@@ -251,7 +251,7 @@ it("shows every task the API marks for a replaced deadline or waiting filter on 
                 missingLead,
               });
               const lanes = boardLanes(
-                { tasks: [outcome, item], managedLabels },
+                { tasks: [outcome, item], managedLabels, dependencies: [] },
                 TODAY,
               );
               const shown = Object.values(lanes).filter((cards) =>

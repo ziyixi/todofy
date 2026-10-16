@@ -167,7 +167,8 @@ it("puts Start now and then Waiting left of the four stage lanes, with nothing s
     expect(
       screen.queryByRole("button", { name: new RegExp(`^${title}`, "u") }),
     ).toBeNull();
-  // Nothing is stacked under the board or the Week calendar: only the reset note follows.
+  // Nothing is stacked under the board or the Week calendar: only the reset note follows. Above the
+  // board, the dependencies' one-time notice is an empty status region until it has a line.
   const sections = () =>
     [...document.querySelector(".planning-view")!.children]
       .filter((child) => !child.hasAttribute("data-dnd-overlay"))
@@ -175,9 +176,13 @@ it("puts Start now and then Waiting left of the four stage lanes, with nothing s
   expect(sections()).toEqual([
     "planning-toolbar",
     "planning-area-filter",
+    "planning-dependency-notice",
     "review-board",
     "planning-reset-note",
   ]);
+  expect(
+    document.querySelector(".planning-dependency-notice")!.children,
+  ).toHaveLength(0);
   fireEvent.click(screen.getByRole("tab", { name: "Week" }));
   expect(sections()).toEqual([
     "planning-toolbar",
@@ -495,6 +500,7 @@ it("says where a deadline stands in task details and marks it in progress there"
       key={task.labels.join()}
       task={task}
       tasks={data.plan.tasks}
+      dependencies={data.plan.dependencies}
       language="en"
       busy={false}
       run={run}

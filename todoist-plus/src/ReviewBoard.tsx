@@ -8,6 +8,7 @@ import {
 import { GripVertical } from "lucide-react";
 import { displayedTitle, effectiveArea } from "./domain";
 import { canMarkActive, deadlineTitle, spokenDeadline } from "./deadlines";
+import { dependencyIndex } from "./dependencies";
 import {
   outcomeArea,
   outcomeColor,
@@ -50,6 +51,8 @@ export interface OutcomeCardProps {
   selected?: boolean;
   /** Its stage change is shown but not yet confirmed. */
   pending?: boolean;
+  /** On the Review board: the tasks it waits for that are not done (dependencies.ts). */
+  waitsFor?: readonly PlanningTask[];
   onClick: () => void;
 }
 /**
@@ -66,6 +69,7 @@ export function OutcomeCard({
   language,
   selected = false,
   pending = false,
+  waitsFor,
   onClick,
 }: OutcomeCardProps) {
   const steps = outcomeSteps(task, tasks, managedLabels);
@@ -77,8 +81,9 @@ export function OutcomeCard({
         ? "未设优先级"
         : "No priority";
   const title = displayedTitle(task.title);
-  const state = today ? cardState(task, today) : undefined;
-  const status = today && state ? cardStatus(task, state, today, language) : [];
+  const state = today ? cardState(task, today, waitsFor) : undefined;
+  const status =
+    today && state ? cardStatus(task, state, today, language, waitsFor) : [];
   const line = statusLine(status);
   // Screen readers hear the status with the part of the deadline it does not already say.
   const spoken = line
@@ -305,6 +310,7 @@ export function ReviewBoard({
                 scheduledIds={scheduledIds}
                 today={currentDate}
                 language={language}
+                waitsFor={dependencyIndex(plan).waitingFor.get(task.id)}
                 onClick={() => {}}
               />
             </div>
@@ -446,7 +452,8 @@ function DraggableOutcome({
   });
   const text = words(language);
   const title = displayedTitle(task.title);
-  const state = cardState(task, today);
+  const waitsFor = dependencyIndex(plan).waitingFor.get(task.id);
+  const state = cardState(task, today, waitsFor);
   // Start marks the task in progress, which only an account with the literal label can.
   const startable = state === "start" && onStart;
   return (
@@ -475,6 +482,7 @@ function DraggableOutcome({
         today={today}
         language={language}
         pending={pending}
+        waitsFor={waitsFor}
         onClick={() => editTask(task)}
       />
       {startable && (

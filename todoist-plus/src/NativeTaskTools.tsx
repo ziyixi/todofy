@@ -146,6 +146,7 @@ export function NativeTaskTools({
             <TaskEditor
               task={task}
               tasks={data.plan.tasks}
+              dependencies={data.plan.dependencies}
               language={language}
               busy={busy || stale}
               run={run}

@@ -8,8 +8,9 @@ import {
   Settings,
   Square,
 } from "lucide-react";
-import { displayedTitle } from "./domain";
+import { displayedTitle, taskIndex } from "./domain";
 import { canMarkActive } from "./deadlines";
+import { droppedText, unsettled } from "./dependencies";
 import { words } from "./i18n";
 import { readableDate, weekLabel } from "./PlanningCalendar";
 import {
@@ -133,6 +134,31 @@ export function App({
     }),
     [actions],
   );
+  // After a complete read, Todofy settles the tasks dependencies name that the read did not list, each
+  // once in this visit; a failed check is asked again by the next read. Tasks that no longer wait
+  // because what they waited for was deleted are told once, for this visit only.
+  const settleAsked = useRef(new Set<string>());
+  const [dropped, setDropped] = useState<readonly string[]>([]);
+  const settle = useCallback(
+    async (plan: PlanState) => {
+      const ids = unsettled(plan).filter((id) => !settleAsked.current.has(id));
+      if (!plan.configured || !ids.length) return;
+      for (const id of ids) settleAsked.current.add(id);
+      const settled = writes.current.settled;
+      try {
+        const result = await actions.resolveDependencies(ids);
+        const told = result.dropped ?? [];
+        if (told.length)
+          setDropped((current) => [...new Set([...current, ...told])]);
+        // A write confirmed meanwhile may be missing from the answer; the next read shows both.
+        if (settled === writes.current.settled)
+          setConfirmed((current) => current && applyConfirmed(current, result));
+      } catch {
+        for (const id of ids) settleAsked.current.delete(id);
+      }
+    },
+    [actions],
+  );
   const load = useCallback(async (): Promise<boolean> => {
     const request = ++weekRequest.current;
     const read = ++reads.current.started;
@@ -155,6 +181,7 @@ export function App({
       setStale(false);
       setCompleting(new Set());
       onReady?.(next.plan);
+      void settle(next.plan);
       return true;
     } catch (failure) {
       onReady?.();
@@ -162,7 +189,7 @@ export function App({
     } finally {
       if (request === weekRequest.current) setWeekLoading(false);
     }
-  }, [actions, onReady]);
+  }, [actions, onReady, settle]);
   // Reads never wait for writes or disable controls.
   const revalidate = useCallback(async () => {
     setReading((count) => count + 1);
@@ -320,6 +347,12 @@ export function App({
     });
   }
   const selected = data?.plan.tasks.find((task) => task.id === selectedId);
+  const droppedNotices = data
+    ? dropped.flatMap((id) => {
+        const task = taskIndex(data.plan.tasks).get(id);
+        return task ? [droppedText(task, language)] : [];
+      })
+    : [];
   // A task whose stage drag waits still carries its old etag, so its editor waits too.
   const selectedPending = Boolean(
     selected && pendingCards.has(pendingTask(selected.id)),
@@ -422,6 +455,7 @@ export function App({
                 editTask={openTask}
                 onLabels={() => setSelectedId("board-labels")}
                 completeReview={(task) => complete(task, "")}
+                dependencyNotices={droppedNotices}
                 reviewing={review}
                 showStart={showStart}
                 onStartShown={() => setShowStart(false)}
@@ -536,6 +570,7 @@ export function App({
             key={`${selected.id}:${selectedPending}`}
             task={selected}
             tasks={data.plan.tasks}
+            dependencies={data.plan.dependencies}
             language={language}
             busy={busy || selectedPending}
             pending={selectedPending}
@@ -546,6 +581,7 @@ export function App({
             canMarkActive={canMarkActive(data.plan)}
             addFocus={(id) => void addFocus(id, data.focus)}
             onOpenTask={onOpenTask}
+            onOpenDependency={setSelectedId}
             onClose={() => {
               dialog.current?.close();
               setSelectedId("");

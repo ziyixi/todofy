@@ -2,6 +2,7 @@
 @import "./focus.css";
 @import "./planning-board.css";
 @import "./weekly-goals.css";
+@import "./dependencies.css";
 
 .plus-root.plus-root-plan {
   max-width: 1900px;

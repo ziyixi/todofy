@@ -126,7 +126,7 @@ function planRender(tasks: PlanningTask[]) {
   for (const area of ["work", "personal", "unassigned"] as const)
     topLevelBets(tasks, area);
   const outcomes = planningOutcomes(tasks, labels);
-  boardLanes({ tasks, managedLabels: labels }, "2026-10-13");
+  boardLanes({ tasks, managedLabels: labels, dependencies: [] }, "2026-10-13");
   unplannedDue(tasks, [], "2026-10-13");
   tasks.some((task) => effectiveArea(task, tasks) === "unassigned");
   for (const outcome of outcomes) {

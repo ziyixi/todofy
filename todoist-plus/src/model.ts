@@ -22,6 +22,21 @@ export interface PlanningTask {
   missingLead: boolean;
   /** Todoist's last change to the task (ISO time); absent when Todoist does not say. */
   updatedAt?: string;
+  /** Its scheduled date repeats: completing it advances the date and keeps the task. */
+  recurring?: boolean;
+  /** Todoist's count of its completions, recurrences included; absent when Todoist does not say. */
+  completedCount?: number;
+}
+/** One task waits for another; kept only in Todofy, never in Todoist (dependencies.ts). */
+export interface TaskDependency {
+  /** The task that waits. */
+  taskId: string;
+  /** The task it waits for. */
+  prerequisiteId: string;
+  /** The prerequisite's completedCount when added: a recurring one is done once it is higher. */
+  baselineCount: number;
+  /** Todofy confirmed the prerequisite completed, not deleted; the active list comes first. */
+  done: boolean;
 }
 export interface PlanState {
   tasks: PlanningTask[];
@@ -40,6 +55,8 @@ export interface PlanState {
   reviewTaskId: string;
   /** Commitments and Bets chosen on this week's Sunday, which Monday's reset keeps. */
   nextWeekTaskIds: string[];
+  /** Every dependency, IDs only. */
+  dependencies: TaskDependency[];
 }
 /** Account planning settings without the task list. */
 export type PlanMetadata = Omit<PlanState, "tasks">;
@@ -57,6 +74,14 @@ export interface FlowDayPlan {
   taskIds: string[];
   completedTaskIds: string[];
 }
+/** A dependency write's confirmed result. */
+export interface DependencyResult {
+  /** The task whose dependencies these are; absent when they are every dependency. */
+  forTask?: string;
+  dependencies: TaskDependency[];
+  /** Tasks that stopped waiting because what they waited for was deleted. */
+  dropped?: string[];
+}
 /** A write's server-confirmed result; void means only a re-read can show it. */
 export type Confirmed =
   | void
@@ -64,6 +89,7 @@ export type Confirmed =
   | PlanningTask
   | PlanningTask[]
   | PlanMetadata
+  | DependencyResult
   | TimerSnapshot;
 /**
  * A write shown before it is confirmed. Only the named cards wait, dimmed and fixed in place,
@@ -144,6 +170,14 @@ export interface PlusActions {
     requestId: string,
     flowDate: string,
   ): Promise<void>;
+  /** Adds (`waits`) or removes that `taskId` waits for `prerequisiteId`; Todoist is not written. */
+  setDependency(
+    taskId: string,
+    prerequisiteId: string,
+    waits: boolean,
+  ): Promise<DependencyResult>;
+  /** Settles tasks that dependencies name and a complete read no longer lists (at most 20). */
+  resolveDependencies(taskIds: string[]): Promise<DependencyResult>;
   /**
    * Adds or removes one step in the day's current FlowDay queue, not in the copy on screen:
    * UpdateFlow replaces the whole queue without an etag.

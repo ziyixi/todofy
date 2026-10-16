@@ -156,6 +156,10 @@ export function registerBackground() {
             return client.updateLead(...message.args);
           case "completeTask":
             return client.completeTask(...message.args);
+          case "setDependency":
+            return client.setDependency(...message.args);
+          case "resolveDependencies":
+            return client.resolveDependencies(...message.args);
           case "addToDay":
             return client.addToDay(...message.args);
           case "removeFromDay":

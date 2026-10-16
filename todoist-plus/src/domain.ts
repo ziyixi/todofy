@@ -95,7 +95,7 @@ export function displayedTitle(title: string): string {
 
 export function taskAncestors(
   task: PlanningTask,
-  tasks: PlanningTask[],
+  tasks: readonly PlanningTask[],
 ): PlanningTask[] {
   const byId = taskIndex(tasks);
   const result: PlanningTask[] = [];

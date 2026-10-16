@@ -124,6 +124,11 @@ async function setupPlanner(context: BrowserContext, worker: Worker) {
       >,
       // Weekly review IDs that ReadPlan adds to the plan (none by default).
       review: {} as Record<string, unknown>,
+      // Todofy's dependencies, as the wire names them, and the prerequisites deleted in Todoist,
+      // which a check removes; any other prerequisite a check names and no task list holds was
+      // completed.
+      dependencies: [] as Record<string, unknown>[],
+      deleted: [] as string[],
       // While set, writes wait until a test releases them; failWrite rejects the next one.
       holdWrites: false,
       heldWrites: [] as (() => void)[],
@@ -177,6 +182,7 @@ async function setupPlanner(context: BrowserContext, worker: Worker) {
               ({ id, label }) => ({ id, label }),
             ),
             hidden_filter_ids: [],
+            dependencies: state.dependencies,
             ...state.review,
           },
         });
@@ -253,7 +259,60 @@ async function setupPlanner(context: BrowserContext, worker: Worker) {
       }
       if (url.pathname.endsWith("/tasks:completeTask")) {
         state.tasks = state.tasks.filter((task) => task.id !== body.task_id);
+        // Todofy records the completion for what waits for the task.
+        for (const dependency of state.dependencies)
+          if (dependency.prerequisite_id === body.task_id)
+            dependency.done = true;
         return json({ task_id: body.task_id });
+      }
+      if (url.pathname.endsWith("/tasks:setTaskDependency")) {
+        const same = (dependency: Record<string, unknown>) =>
+          dependency.task_id === body.task_id &&
+          dependency.prerequisite_id === body.prerequisite_id;
+        const prerequisite = state.tasks.find(
+          (task) => task.id === body.prerequisite_id,
+        );
+        state.dependencies = [
+          ...state.dependencies.filter((dependency) => !same(dependency)),
+          ...(body.waits
+            ? [
+                state.dependencies.find(same) ?? {
+                  task_id: body.task_id,
+                  prerequisite_id: body.prerequisite_id,
+                  baseline_completed_count: prerequisite?.completed_count ?? 0,
+                },
+              ]
+            : []),
+        ];
+        return json({
+          dependencies: state.dependencies.filter(
+            (dependency) => dependency.task_id === body.task_id,
+          ),
+        });
+      }
+      if (url.pathname.endsWith("/tasks:resolveDependencies")) {
+        // As Todofy settles them: a gone waiter's dependencies go, a deleted prerequisite's go and
+        // its waiters are told, any other gone prerequisite is done.
+        const asked = (body.task_ids as string[]).filter(
+          (id) => !state.tasks.some((task) => task.id === id),
+        );
+        const deleted = (dependency: Record<string, unknown>) =>
+          asked.includes(String(dependency.prerequisite_id)) &&
+          state.deleted.includes(String(dependency.prerequisite_id));
+        const dropped = state.dependencies
+          .filter(deleted)
+          .map((dependency) => String(dependency.task_id));
+        state.dependencies = state.dependencies.filter(
+          (dependency) =>
+            !deleted(dependency) && !asked.includes(String(dependency.task_id)),
+        );
+        for (const dependency of state.dependencies)
+          if (asked.includes(String(dependency.prerequisite_id)))
+            dependency.done = true;
+        return json({
+          dependencies: state.dependencies,
+          dropped_task_ids: dropped,
+        });
       }
       if (url.pathname.endsWith("/plan:updatePlanLabels")) {
         state.labels = body.labels as {
@@ -477,4 +536,57 @@ export async function addDeadlineTasks(
     );
     state.extraLabels = [{ id: "synthetic-active", label: "active" }];
   }, only);
+}
+
+type DependencyTasksState = {
+  tasks: Record<string, unknown>[];
+  dependencies: Record<string, unknown>[];
+};
+/** The synthetic titles of addDependencyTasks, by task ID. */
+export const DEPENDENCY_TITLES = {
+  venue: "Book the venue",
+  invite: "Send the invitations",
+  program: "Plan the launch program",
+  shelf: "Tidy the bookshelf",
+  weekly: "Weekly launch sync",
+};
+/**
+ * Synthetic tasks with dependencies; today is 2026-10-13. The program (no stage label, its start
+ * window open) waits for the venue, and the shelf for the invitations, a commitment. The weekly sync
+ * repeats, with Todoist's counter at 4.
+ */
+export async function addDependencyTasks(
+  worker: Worker,
+  titles: Record<keyof typeof DEPENDENCY_TITLES, string> = DEPENDENCY_TITLES,
+) {
+  await worker.evaluate((titles) => {
+    const state = (
+      globalThis as unknown as { plannerState: DependencyTasksState }
+    ).plannerState;
+    const task = (id: keyof typeof titles, fields = {}) => ({
+      id,
+      title: titles[id],
+      area: "work",
+      stage: "none",
+      etag: `${id}-1`,
+      ...fields,
+    });
+    state.tasks.push(
+      task("venue", { update_time: "2026-10-05T09:00:00Z" }),
+      task("invite", { stage: "committed", labels: ["committed"] }),
+      task("program", {
+        deadline: "2026-10-20",
+        lead_days: 7,
+        labels: ["lead_1w"],
+        must_start: true,
+        update_time: "2026-10-08T09:00:00Z",
+      }),
+      task("shelf", { area: "personal" }),
+      task("weekly", { recurring: true, completed_count: 4 }),
+    );
+    state.dependencies.push(
+      { task_id: "program", prerequisite_id: "venue" },
+      { task_id: "shelf", prerequisite_id: "invite" },
+    );
+  }, titles);
 }

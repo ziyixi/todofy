@@ -68,6 +68,7 @@ export function createPrototype(
     inboxProjectId: "synthetic-mail",
     reviewTaskId: "weekly-review",
     nextWeekTaskIds: [],
+    dependencies: [],
     tasks: [
       task("release", "Ship the small website refresh", {
         stage: "committed",
@@ -374,6 +375,43 @@ export function createPrototype(
             }
           : day,
       );
+    },
+    // As Todofy keeps them: by ID only, a repeated add changing nothing.
+    async setDependency(taskId, prerequisiteId, waits) {
+      const others = plan.dependencies.filter(
+        (item) =>
+          item.taskId !== taskId || item.prerequisiteId !== prerequisiteId,
+      );
+      const prerequisite = plan.tasks.find(
+        (task) => task.id === prerequisiteId,
+      );
+      plan = {
+        ...plan,
+        dependencies: waits
+          ? [
+              ...others,
+              plan.dependencies.find(
+                (item) =>
+                  item.taskId === taskId &&
+                  item.prerequisiteId === prerequisiteId,
+              ) ?? {
+                taskId,
+                prerequisiteId,
+                baselineCount: prerequisite?.completedCount ?? 0,
+                done: false,
+              },
+            ]
+          : others,
+      };
+      return structuredClone({
+        forTask: taskId,
+        dependencies: plan.dependencies.filter(
+          (item) => item.taskId === taskId,
+        ),
+      });
+    },
+    async resolveDependencies() {
+      return structuredClone({ dependencies: plan.dependencies });
     },
     async addToDay(id, date) {
       days = days.map((day) =>

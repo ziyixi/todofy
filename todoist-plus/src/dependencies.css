@@ -1,0 +1,116 @@
+/*
+ * Task details' "依赖 / Depends on" section (TaskDependencies.tsx) and the Review board's one-time notice.
+ * The section reads like "Next steps": a 13px title per row, 12px muted notes, one text action; the row's
+ * remove button appears on hover or keyboard focus only. No icon, badge or colour of its own.
+ */
+.plus-dependencies h3:focus {
+  outline: none;
+}
+.plus-dependency-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.plus-dependency {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 32px;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--plus-line);
+}
+.plus-dependency-title {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  text-align: left;
+  font-size: 13px !important;
+  overflow-wrap: anywhere;
+}
+.plus-dependency > .plus-muted {
+  flex: 0 0 auto;
+}
+.plus-dependency.is-pending .plus-dependency-title {
+  color: var(--plus-muted);
+}
+.plus-dependency-remove {
+  width: 24px;
+  height: 24px;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+.plus-dependency:hover .plus-dependency-remove,
+.plus-dependency:focus-within .plus-dependency-remove {
+  opacity: 1;
+}
+/* Without hover, the remove buttons stay visible. */
+@media (hover: none) {
+  .plus-dependency-remove {
+    opacity: 1;
+  }
+}
+.plus-dependency-note {
+  margin: 8px 0 0;
+  line-height: 1.5;
+}
+.plus-dependency-add {
+  margin-top: 10px;
+}
+.plus-dependency-picker {
+  margin-top: 8px;
+}
+.plus-dependency-search {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.plus-dependency-search input {
+  flex: 1;
+}
+.plus-dependency-options {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 4px 0;
+  border: 1px solid var(--plus-line);
+  border-radius: 6px;
+  background: var(--plus-bg);
+}
+.plus-dependency-options > li {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  min-height: 28px;
+  padding: 5px 10px;
+  box-sizing: border-box;
+  font-size: 13px;
+  cursor: pointer;
+}
+.plus-dependency-options > li.is-active {
+  background: var(--plus-hover);
+}
+/* A task that would wait for this one in turn, or repeats without a count: shown, never chosen. */
+.plus-dependency-options > li[aria-disabled="true"] {
+  color: var(--plus-muted);
+  cursor: default;
+}
+.plus-dependency-option-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.plus-dependency-option-note {
+  flex: 0 1 auto;
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--plus-muted);
+  font-size: 12px;
+}
+.planning-dependency-notice > p {
+  margin: 0 0 10px;
+  color: var(--plus-muted);
+  font-size: 12px;
+}

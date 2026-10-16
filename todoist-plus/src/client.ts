@@ -37,6 +37,10 @@ export const extensionActions: PlusActions = {
   updateLead: (...args) => call({ kind: "action", method: "updateLead", args }),
   completeTask: (...args) =>
     call({ kind: "action", method: "completeTask", args }),
+  setDependency: (...args) =>
+    call({ kind: "action", method: "setDependency", args }),
+  resolveDependencies: (...args) =>
+    call({ kind: "action", method: "resolveDependencies", args }),
   addToDay: (...args) => call({ kind: "action", method: "addToDay", args }),
   removeFromDay: (...args) =>
     call({ kind: "action", method: "removeFromDay", args }),

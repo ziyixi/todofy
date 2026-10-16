@@ -2,6 +2,7 @@ import { useRef, useState } from "react";
 import { Check, ExternalLink, Plus, X } from "lucide-react";
 import { displayedTitle, formattedMinutes } from "./domain";
 import { detailStatus } from "./deadlines";
+import { TaskDependencies } from "./TaskDependencies";
 import { words } from "./i18n";
 import { PendingMark } from "./StatusMarks";
 import { ACTIVE_LABEL } from "./weekly-review";
@@ -11,6 +12,7 @@ import type {
   PlusActions,
   RunOperation,
   StepDraft,
+  TaskDependency,
 } from "./model";
 
 /** The start-ahead choice: not set, or 1, 3, 7, 14 or 30 days (Todofy's lead labels). */
@@ -50,6 +52,8 @@ export function LeadSelect({
 interface Props {
   task: PlanningTask;
   tasks: PlanningTask[];
+  /** Every dependency, for the "Depends on" section. */
+  dependencies: readonly TaskDependency[];
   language: Language;
   busy: boolean;
   /** The task's own drag is not yet confirmed. */
@@ -63,12 +67,15 @@ interface Props {
   canMarkActive: boolean;
   addFocus: (id: string) => void;
   onOpenTask: (id: string) => void;
+  /** Opens a task the "Depends on" section names; its Todoist page (onOpenTask) when absent. */
+  onOpenDependency?: (id: string) => void;
   onClose?: () => void;
 }
 
 export function TaskEditor({
   task,
   tasks,
+  dependencies,
   language,
   busy,
   pending = false,
@@ -79,6 +86,7 @@ export function TaskEditor({
   canMarkActive,
   addFocus,
   onOpenTask,
+  onOpenDependency,
   onClose,
 }: Props) {
   const text = words(language);
@@ -367,6 +375,17 @@ export function TaskEditor({
           )}
         </p>
       )}
+      <TaskDependencies
+        task={task}
+        tasks={tasks}
+        dependencies={dependencies}
+        language={language}
+        busy={busy}
+        run={run}
+        actions={actions}
+        onOpen={onOpenDependency ?? onOpenTask}
+        announce={setAnnouncement}
+      />
       <p className="plus-sr-only" role="status">
         {announcement}
       </p>

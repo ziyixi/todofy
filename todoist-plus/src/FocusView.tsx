@@ -63,7 +63,7 @@ export function FocusView({
   let stepLabel = language === "zh" ? "个步骤" : "steps";
   if (language === "en" && queue.length === 1) stepLabel = "step";
   // A hint only: something that should have started has nothing planned this week.
-  const due = unplannedDue(plan.tasks, days, focus.date);
+  const due = unplannedDue(plan.tasks, days, focus.date, plan.dependencies);
   const openPlan = (
     <button className="plus-button" onClick={onOpenPlan}>
       <ArrowLeft size={15} />
