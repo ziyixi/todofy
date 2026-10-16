@@ -1,5 +1,4 @@
 import {
-  act,
   cleanup,
   fireEvent,
   render,
@@ -7,6 +6,7 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
+import { useState } from "react";
 import { afterEach, beforeAll, beforeEach, expect, it, vi } from "vitest";
 import { App } from "../src/App";
 import { createApi } from "../src/api";
@@ -60,11 +60,6 @@ async function props(
     }),
     editTask: vi.fn(),
     onWeekChange: vi.fn(),
-    todayTaskIds: focus.taskIds,
-    addFocus: vi.fn(),
-    addStep: vi.fn(),
-    chooseLead: vi.fn(),
-    onOpenTask: vi.fn(),
     completeReview: vi.fn(async () => true),
   };
 }
@@ -129,43 +124,154 @@ it("derives the review lines from loaded data only", async () => {
   ]);
 });
 
-it("lists waiting tasks oldest first behind one collapsed row, with the owner's own actions", async () => {
+it("draws waiting tasks as cards in the lane left of the stage lanes, oldest untouched first, and writes nothing", async () => {
   const data = await props();
-  render(<PlanView {...data} todayTaskIds={["access"]} />);
-  const row = screen.getByText("Waiting · 2").closest("details")!;
-  expect(row.open).toBe(false);
-  fireEvent.click(screen.getByText("Waiting · 2"));
-  const list = within(screen.getByRole("list", { name: "Waiting" }));
-  const items = list.getAllByRole("listitem");
-  expect(items.map((item) => item.textContent)).toEqual([
-    expect.stringContaining("Hear back about the venue quoteUntouched 11 days"),
-    expect.stringContaining("Lab access approvalUntouched 3 days"),
+  render(<PlanView {...data} />);
+  const lanes = [...document.querySelectorAll(".review-lane")].map((lane) =>
+    lane.getAttribute("aria-label"),
+  );
+  expect(lanes.slice(lanes.indexOf("Waiting"))).toEqual([
+    "Waiting",
+    "Quarter",
+    "Month",
+    "Week",
+    "Committed",
   ]);
-  fireEvent.click(
-    list.getByRole("button", {
-      name: "Add follow-up step: Hear back about the venue quote",
-    }),
-  );
-  expect(data.addStep).toHaveBeenCalledWith(
-    expect.objectContaining({ id: "venue" }),
-  );
-  fireEvent.click(
-    list.getByRole("button", {
-      name: "Add to today: Hear back about the venue quote",
-    }),
-  );
-  expect(data.addFocus).toHaveBeenCalledWith("venue");
+  const waiting = within(screen.getByRole("region", { name: "Waiting" }));
   expect(
-    list.getByRole("button", { name: "In today: Lab access approval" }),
-  ).toHaveProperty("disabled", true);
+    waiting
+      .getAllByRole("button", { name: /, No priority/u })
+      .map((card) => card.getAttribute("aria-label")),
+  ).toEqual([
+    "Hear back about the venue quote, No priority, Untouched 11 days",
+    "Lab access approval, No priority, Untouched 3 days",
+  ]);
+  // A card opens the task's details; nothing was written: no label is removed and nobody is
+  // contacted.
   fireEvent.click(
-    list.getByRole("button", {
-      name: "Open in Todoist: Lab access approval",
-    }),
+    waiting.getByRole("button", { name: /^Lab access approval,/u }),
   );
-  expect(data.onOpenTask).toHaveBeenCalledWith("access");
-  // Nothing was written: no label is removed and nobody is contacted.
+  expect(data.editTask).toHaveBeenCalledWith(
+    expect.objectContaining({ id: "access" }),
+  );
   expect(data.run).not.toHaveBeenCalled();
+});
+
+it("keeps unclarified mail as the first line only, never as cards on the board", async () => {
+  const data = await props();
+  render(<PlanView {...data} />);
+  expect(inboxToClarify(data.plan).map((task) => task.id)).toEqual([
+    "mail-register",
+    "mail-notes",
+  ]);
+  for (const title of [
+    "Fwd: Conference registration opens",
+    "Re: Shared notes for Friday",
+  ])
+    expect(
+      screen.queryByRole("button", { name: new RegExp(`^${title}`, "u") }),
+    ).toBeNull();
+  const review = openReview();
+  expect(line(review, "Mail to clarify").textContent).toContain("2");
+});
+
+it("lists deadlines without a start-ahead choice in one line, with the editor's lead control", async () => {
+  const actions = createPrototype();
+  // Todofy's confirmed task: the lead chosen, so no longer missing one.
+  const lead = vi
+    .spyOn(actions, "updateLead")
+    .mockImplementation(async (task, deadline, leadDays) => ({
+      ...task,
+      deadline,
+      leadDays,
+      missingLead: false,
+    }));
+  const data = await props(actions);
+  const template = data.plan.tasks[0]!;
+  data.plan.tasks.push(
+    {
+      ...template,
+      id: "insurance",
+      title: "Renew the car insurance",
+      stage: "none",
+      bet: false,
+      deadline: "2026-11-30",
+      leadDays: 0,
+      missingLead: true,
+    },
+    {
+      ...template,
+      id: "permit",
+      title: "Collect the parking permit",
+      stage: "none",
+      bet: false,
+      deadline: "2026-10-11",
+      leadDays: 0,
+      missingLead: true,
+      mustStart: true,
+    },
+  );
+  // As the App does: each confirmed task merged into the list.
+  function Visit() {
+    const [tasks, setTasks] = useState(data.plan.tasks);
+    return (
+      <PlanView
+        {...data}
+        plan={{ ...data.plan, tasks }}
+        run={async (operation) => {
+          const saved = (await operation()) as PlanningTask;
+          setTasks((current) =>
+            current.map((task) => (task.id === saved.id ? saved : task)),
+          );
+          return true;
+        }}
+      />
+    );
+  }
+  render(<Visit />);
+  const review = openReview();
+  const missing = within(line(review, "2 deadlines have no start-ahead set"));
+  // Folded until asked for, then earliest deadline first.
+  expect(missing.queryAllByRole("listitem")).toHaveLength(0);
+  fireEvent.click(missing.getByRole("button", { name: "Show" }));
+  expect(
+    missing.getAllByRole("listitem").map((item) => item.textContent),
+  ).toEqual([
+    expect.stringMatching(/^Collect the parking permit2 days past deadline/u),
+    expect.stringMatching(/^Renew the car insurance.*Deadline Nov 30/u),
+  ]);
+  const select = missing.getByRole("combobox", {
+    name: "Start ahead: Collect the parking permit",
+  });
+  expect(
+    [...select.querySelectorAll("option")].map((option) => option.textContent),
+  ).toEqual(["Not set", "1 day", "3 days", "7 days", "14 days", "30 days"]);
+  fireEvent.change(select, { target: { value: "7" } });
+  await waitFor(() =>
+    expect(review.getByRole("status").textContent).toBe(
+      "Start ahead set: Collect the parking permit",
+    ),
+  );
+  expect(lead.mock.calls[0]).toEqual([
+    expect.objectContaining({ id: "permit" }),
+    "2026-10-11",
+    7,
+  ]);
+  // The line counts what is left, and focus moves to the next select.
+  const next = within(
+    line(review, "1 deadline has no start-ahead set"),
+  ).getByRole("combobox", { name: "Start ahead: Renew the car insurance" });
+  await waitFor(() => expect(document.activeElement).toBe(next));
+  // Once every deadline has a lead the line is gone, and focus returns to the heading.
+  fireEvent.change(next, { target: { value: "14" } });
+  await waitFor(() =>
+    expect(
+      review.queryByRole("checkbox", { name: /no start-ahead set$/u }),
+    ).toBeNull(),
+  );
+  expect(document.activeElement).toBe(
+    review.getByRole("heading", { name: "Weekly review" }),
+  );
 });
 
 it("counts the five review lines and keeps ticks for this ISO week only", async () => {
@@ -272,16 +378,21 @@ it("reviews someday items oldest first: keeping or moving one leaves the list an
   expect(update).toHaveBeenCalledOnce();
 });
 
-it("jumps to the Waiting row and to Week's first unplanned commitment, with focus", async () => {
+it("jumps to the Waiting lane and to Week's first unplanned commitment, with focus", async () => {
   const data = await props();
   render(<PlanView {...data} />);
   const review = openReview();
+  // From another area, the jump shows every area so that the lane is on the board.
+  fireEvent.click(screen.getByRole("tab", { name: "Personal" }));
+  expect(screen.queryByRole("region", { name: "Waiting" })).toBeNull();
   fireEvent.click(
     within(line(review, "Waiting")).getByRole("button", { name: "Show" }),
   );
-  expect(screen.getByText("Waiting · 2").closest("details")!.open).toBe(true);
+  expect(
+    screen.getByRole("tab", { name: "All" }).getAttribute("aria-selected"),
+  ).toBe("true");
   expect(document.activeElement).toBe(
-    screen.getByText("Waiting · 2").closest("summary"),
+    screen.getByRole("region", { name: "Waiting" }),
   );
   fireEvent.click(
     within(line(review, "Commitments not planned")).getByRole("button", {
@@ -444,26 +555,6 @@ it("completes the review task only when Finish review is clicked, outside Focus"
   );
 });
 
-it("opens a waiting task's step editor empty, ready for a follow-up step", async () => {
-  const actions = createPrototype();
-  renderApp(actions);
-  fireEvent.click(await screen.findByText("Waiting · 2"));
-  await act(async () => {
-    fireEvent.click(
-      screen.getByRole("button", {
-        name: "Add follow-up step: Lab access approval",
-      }),
-    );
-  });
-  const editor = screen.getByRole("region", { name: "Steps & timing" });
-  expect(within(editor).getByRole("heading", { level: 2 }).textContent).toBe(
-    "Lab access approval",
-  );
-  const entry = editor.querySelector("textarea")!;
-  expect(entry.value).toBe("");
-  expect(document.activeElement).toBe(entry);
-});
-
 it("maps Todoist's last change and the review IDs from the API", async () => {
   const api = createApi(
     { apiOrigin: "https://api.example.test", token: "synthetic" },
@@ -508,35 +599,4 @@ it("maps Todoist's last change and the review IDs from the API", async () => {
     "2026-10-01T16:00:00.000Z",
     undefined,
   ]);
-});
-
-it("focuses the follow-up step entry once a running write no longer disables it", async () => {
-  const actions = createPrototype();
-  // Adding another task to today stays unconfirmed until released.
-  let release = () => {};
-  const released = new Promise<void>((resolve) => (release = resolve));
-  const addToDay = actions.addToDay.bind(actions);
-  vi.spyOn(actions, "addToDay").mockImplementation(async (id, date) => {
-    await released;
-    return addToDay(id, date);
-  });
-  renderApp(actions);
-  fireEvent.click(await screen.findByText("Waiting · 2"));
-  fireEvent.click(
-    screen.getByRole("button", {
-      name: "Add to today: Hear back about the venue quote",
-    }),
-  );
-  fireEvent.click(
-    screen.getByRole("button", {
-      name: "Add follow-up step: Lab access approval",
-    }),
-  );
-  const entry = screen
-    .getByRole("region", { name: "Steps & timing" })
-    .querySelector("textarea")!;
-  expect(entry.disabled).toBe(true);
-  expect(document.activeElement).not.toBe(entry);
-  await act(async () => release());
-  await waitFor(() => expect(document.activeElement).toBe(entry));
 });

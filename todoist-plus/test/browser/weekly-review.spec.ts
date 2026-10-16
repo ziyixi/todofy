@@ -75,12 +75,16 @@ test("the review task's link opens the checklist; ticks survive a reload and onl
       .getByRole("button", { name: "Show" })
       .first()
       .click();
-    const waiting = page.getByRole("list", { name: "Waiting" });
-    await expect(waiting).toBeVisible();
-    await expect(waiting.getByRole("listitem")).toHaveText([
-      /^Synthetic old blocker/u,
-      /^Synthetic recent wait/u,
+    // The Waiting lane, oldest untouched first; the mail task is no card.
+    const waiting = page.getByRole("region", { name: "Waiting", exact: true });
+    await expect(waiting).toBeFocused();
+    await expect(waiting.locator(".planning-outcome-title")).toHaveText([
+      "Synthetic old blocker",
+      "Synthetic recent wait",
     ]);
+    await expect(
+      page.locator(".review-board").getByText("Synthetic mail subject"),
+    ).toHaveCount(0);
     expect(await writes(worker)).toEqual([]);
     await page
       .getByRole("region", { name: "Weekly review" })
@@ -171,9 +175,14 @@ test("keyboard focus stays in the review after its actions, and Sunday's keep wr
         },
       },
     ]);
-    // The Waiting jump focuses the opened row; closing returns to the toolbar button.
+    // The Waiting jump focuses the Waiting lane, with the keyboard's ring; closing returns to the
+    // toolbar button.
     await review.getByRole("button", { name: "Show" }).first().press("Enter");
-    await expect(page.locator(".planning-waiting > summary")).toBeFocused();
+    const waiting = page.getByRole("region", { name: "Waiting" });
+    await expect(waiting).toBeFocused();
+    expect(
+      await waiting.evaluate((lane) => getComputedStyle(lane).outlineStyle),
+    ).toBe("solid");
     await review.getByRole("button", { name: "Close" }).click();
     await expect(
       page.getByRole("button", { name: "Weekly review" }),

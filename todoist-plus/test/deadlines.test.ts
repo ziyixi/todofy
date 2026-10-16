@@ -1,18 +1,14 @@
 import { expect, it } from "vitest";
 import {
-  cardTitle,
-  deadlineRows,
   deadlineState,
+  deadlineStatus,
   detailStatus,
-  isDue,
-  rowStatus,
   spokenDeadline,
+  startStatus,
   unplannedDue,
   unplannedText,
-  waitingDeadline,
 } from "../src/deadlines";
 import { addDays, displayedTitle } from "../src/domain";
-import { oldestUntouched, WAITING_LABELS } from "../src/weekly-review";
 import type { PlanningTask } from "../src/model";
 
 // The design's synthetic "today", a Thursday.
@@ -65,76 +61,24 @@ it("gives each task with a deadline the first matching state, from Todofy's flag
   });
 });
 
-it("lists deadlines earliest first, then by priority, with one short status each", () => {
-  const tasks = [
-    task("insurance", { deadline: on(46), missingLead: true }),
-    task("move", { deadline: on(12), labels: ["active"] }),
-    task("visa", { deadline: on(5), leadDays: 7, mustStart: true }),
-    task("claim", { deadline: on(1), leadDays: 3, mustStart: true }),
-    task("claimP1", {
-      deadline: on(1),
-      leadDays: 3,
-      mustStart: true,
-      priority: 4,
-    }),
-    task("report", { deadline: on(-2), leadDays: 7, mustStart: true }),
-    task("later", { deadline: on(20), leadDays: 7 }),
-  ];
-  const rows = deadlineRows(tasks, TODAY);
-  expect(rows.map((row) => row.task.id)).toEqual([
-    "report",
-    "claimP1",
-    "claim",
-    "visa",
-    "move",
-    "insurance",
+it("says how long a task that should start has left, only days past in the danger colour", () => {
+  const statuses = [on(-2), TODAY, on(1), on(5)].map((deadline) => [
+    startStatus(deadline, TODAY, "zh"),
+    startStatus(deadline, TODAY, "en"),
   ]);
-  expect(rows.map((row) => rowStatus(row, TODAY, "zh"))).toEqual([
-    { text: "", danger: "已过 2 天" },
-    { text: "明天截止" },
-    { text: "明天截止" },
-    { text: "还剩 5 天" },
-    { text: "进行中 · 还剩 12 天" },
-    { text: "11月30日截止" },
+  expect(statuses).toEqual([
+    [
+      { text: "", danger: "已过 2 天" },
+      { text: "", danger: "2 days past" },
+    ],
+    [{ text: "今天截止" }, { text: "Deadline today" }],
+    [{ text: "明天截止" }, { text: "Deadline tomorrow" }],
+    [{ text: "还剩 5 天" }, { text: "5 days left" }],
   ]);
-  expect(rows.map((row) => rowStatus(row, TODAY, "en"))).toEqual([
-    { text: "", danger: "2 days past" },
-    { text: "Deadline tomorrow" },
-    { text: "Deadline tomorrow" },
-    { text: "5 days left" },
-    { text: "In progress · 12 days left" },
-    { text: "Deadline Nov 30" },
-  ]);
-  // Only "days past" is in the danger colour, also when in progress.
-  const late = task("late", { deadline: on(-3), labels: ["active"] });
-  expect(
-    rowStatus({ task: late, state: deadlineState(late, TODAY)! }, TODAY, "zh"),
-  ).toEqual({ text: "进行中 · ", danger: "已过 3 天" });
-  const today = task("today", {
-    deadline: TODAY,
-    leadDays: 1,
-    mustStart: true,
+  expect(startStatus(on(-1), TODAY, "en")).toEqual({
+    text: "",
+    danger: "1 day past",
   });
-  expect(
-    rowStatus(
-      { task: today, state: deadlineState(today, TODAY)! },
-      TODAY,
-      "en",
-    ),
-  ).toEqual({ text: "Deadline today" });
-  // A @blocked task past its deadline without a lead says so, as past rows do.
-  const blocked = task("blocked", {
-    deadline: on(-2),
-    labels: ["blocked"],
-    missingLead: true,
-  });
-  expect(
-    rowStatus(
-      { task: blocked, state: deadlineState(blocked, TODAY)! },
-      TODAY,
-      "zh",
-    ),
-  ).toEqual({ text: "", danger: "已过 2 天" });
 });
 
 it("tells screen readers only the part of the deadline a status does not say", () => {
@@ -170,32 +114,19 @@ it("says in task details where the deadline stands, from the fields as shown", (
   });
 });
 
-it("names the start window of a due card only", () => {
-  const mark = (item: PlanningTask, language: "zh" | "en") => {
-    const state = deadlineState(item, TODAY);
-    return state && isDue(state) ? cardTitle(state, language) : "";
-  };
+it("names a deadline's date, today and tomorrow in words, and days past in the danger colour", () => {
+  expect(deadlineStatus(task("plain"), TODAY, "zh")).toBeUndefined();
   expect(
-    mark(task("visa", { deadline: on(5), leadDays: 7, mustStart: true }), "zh"),
-  ).toBe("已到启动窗口 · 还剩 5 天");
-  expect(mark(task("late", { deadline: on(-2), mustStart: true }), "en")).toBe(
-    "2 days past deadline",
-  );
-  expect(
-    mark(task("move", { deadline: on(3), labels: ["active"] }), "en"),
-  ).toBe("");
-});
-
-it("adds the deadline to Waiting rows, past deadlines in the danger colour", () => {
-  expect(waitingDeadline(task("plain"), TODAY, "zh")).toBeUndefined();
-  expect(
-    waitingDeadline(task("contract", { deadline: on(7) }), TODAY, "zh"),
+    deadlineStatus(task("contract", { deadline: on(7) }), TODAY, "zh"),
   ).toEqual({ text: "10月22日截止" });
   expect(
-    waitingDeadline(task("contract", { deadline: on(7) }), TODAY, "en"),
+    deadlineStatus(task("contract", { deadline: on(7) }), TODAY, "en"),
   ).toEqual({ text: "Deadline Oct 22" });
   expect(
-    waitingDeadline(task("late", { deadline: on(-2) }), TODAY, "zh"),
+    deadlineStatus(task("soon", { deadline: on(1) }), TODAY, "zh"),
+  ).toEqual({ text: "明天截止" });
+  expect(
+    deadlineStatus(task("late", { deadline: on(-2) }), TODAY, "zh"),
   ).toEqual({ text: "", danger: "已过截止 2 天" });
 });
 
@@ -233,40 +164,6 @@ it("counts due tasks once, unless the task or an open step is planned in these q
   expect(unplannedText({ past: 0, window: 2 }, "en")).toBe(
     "2 in their start window, not planned this week",
   );
-});
-
-/**
- * The client half of the filter consistency gate (Todofy's tests/unit/test_plus.py checks the
- * server half): from the API's fields alone, Plus lists a task in Deadlines when it has a deadline,
- * is not parked and is in progress (`active` without `blocked`), must start or misses a lead; and in
- * Waiting when it has a `waiting` or `blocked` label.
- */
-it("lists every task the API marks for a replaced deadline or waiting filter", () => {
-  const marks = ["waiting", "blocked", "active", "parked"];
-  for (let combination = 0; combination < 1 << marks.length; combination++)
-    for (const deadline of ["", on(-3), TODAY, on(5), on(40)])
-      for (const mustStart of [false, true])
-        for (const missingLead of [false, true]) {
-          const item = task("grid", {
-            labels: marks.filter((_, bit) => (combination >> bit) & 1),
-            deadline,
-            mustStart,
-            missingLead,
-          });
-          const labels = new Set(item.labels);
-          const deadlines =
-            Boolean(deadline) &&
-            !labels.has("parked") &&
-            ((labels.has("active") && !labels.has("blocked")) ||
-              mustStart ||
-              missingLead);
-          const waiting = labels.has("waiting") || labels.has("blocked");
-          const name = JSON.stringify(item);
-          expect(deadlineRows([item], TODAY).length > 0, name).toBe(deadlines);
-          expect(oldestUntouched([item], WAITING_LABELS).length > 0, name).toBe(
-            waiting,
-          );
-        }
 });
 
 it("hides legacy key suffixes with spaces in Plus's own views", () => {

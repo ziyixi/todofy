@@ -30,11 +30,6 @@ async function planProps(language: Language): Promise<PlanViewProps> {
     editTask: vi.fn(),
     onWeekChange: vi.fn(),
     onLabels: vi.fn(),
-    todayTaskIds: focus.taskIds,
-    addFocus: vi.fn(),
-    addStep: vi.fn(),
-    chooseLead: vi.fn(),
-    onOpenTask: vi.fn(),
     completeReview: vi.fn(),
   };
 }
@@ -137,15 +132,42 @@ it("names a paused timer as a state, colours checkboxes by priority and keeps Fl
   );
 });
 
-it("gives the labels dialog one name and marks expandable rows with a chevron", async () => {
-  const { rerender } = render(<PlanView {...await planProps("en")} />);
+it("gives the labels dialog one name and names Start now and Waiting in both languages, in words only", async () => {
+  // With one task in its start window.
+  const props = async (language: Language) => {
+    const result = await planProps(language);
+    result.plan.tasks.push({
+      ...result.plan.tasks[0]!,
+      id: "claim",
+      title: "Submit the expense claim",
+      stage: "none",
+      bet: false,
+      deadline: "2026-10-14",
+      leadDays: 3,
+      mustStart: true,
+    });
+    return result;
+  };
+  const { rerender } = render(<PlanView {...await props("en")} />);
   expect(screen.getByRole("button", { name: "Planning labels" })).toBeTruthy();
-  const deadlines = screen.getByText(/^Deadlines · \d+$/u);
-  expect(deadlines.querySelector("svg.lucide-chevron-right")).toBeTruthy();
-  expect(deadlines.querySelector("svg.lucide-flag")).toBeNull();
-  rerender(<PlanView {...await planProps("zh")} />);
+  expect(screen.getByRole("region", { name: "Start now" })).toBeTruthy();
+  expect(screen.getByRole("region", { name: "Waiting" })).toBeTruthy();
+  // No new icons: a card that should start says so in its status, without the old calendar clock.
+  expect(
+    document.querySelector(".review-board svg.lucide-calendar-clock"),
+  ).toBe(null);
+  rerender(<PlanView {...await props("zh")} />);
   expect(screen.getByRole("button", { name: "计划标签" })).toBeTruthy();
-  expect(screen.getByText(/^截止日期 · \d+$/u)).toBeTruthy();
+  expect(screen.getByRole("region", { name: "该开始" })).toBeTruthy();
+  expect(screen.getByRole("region", { name: "等待中" })).toBeTruthy();
+  expect(
+    screen.getByRole("button", {
+      name: "Submit the expense claim, 未设优先级, 明天截止，10月14日周三",
+    }),
+  ).toBeTruthy();
+  expect(
+    screen.getByRole("button", { name: "开始: Submit the expense claim" }),
+  ).toBeTruthy();
 });
 
 it("leaves the drop zone under a planned day blank and dates the weekly review", async () => {

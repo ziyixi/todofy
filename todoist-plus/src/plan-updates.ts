@@ -1,4 +1,5 @@
-import { isLastDay } from "./weekly-review";
+import { STAGE_ROLES } from "./planning-outcomes";
+import { ACTIVE_LABEL, isLastDay } from "./weekly-review";
 import type {
   Area,
   Confirmed,
@@ -107,17 +108,42 @@ export function pendingStep(date: string, taskId: string): string {
   return `${date}:${taskId}`;
 }
 
-/** Shows a stage drag at once; the confirmed task (labels, etag) replaces it. */
-export function predictStage(taskId: string, stage: Stage) {
-  return (data: PlusData): PlusData => ({
-    ...data,
-    plan: {
-      ...data.plan,
-      tasks: data.plan.tasks.map((task) =>
-        task.id === taskId ? { ...task, stage } : task,
-      ),
-    },
-  });
+/**
+ * Shows a stage drag at once with the labels Todofy writes (core/plus.py plan_labels): the stage's
+ * label in place of the other planning labels, and with `active` the in-progress label, after which
+ * the task no longer needs to start. The confirmed task (labels, etag) replaces it.
+ */
+export function predictStage(taskId: string, stage: Stage, active = false) {
+  return (data: PlusData): PlusData => {
+    const names = new Map(
+      data.plan.managedLabels.map((binding) => [binding.role, binding.label]),
+    );
+    const planning = Object.values(STAGE_ROLES).map((role) => names.get(role));
+    const added = [
+      stage !== "none" && names.get(STAGE_ROLES[stage]),
+      active && ACTIVE_LABEL,
+    ].filter((label): label is string => Boolean(label));
+    const predicted = (task: PlanningTask): PlanningTask => ({
+      ...task,
+      stage,
+      labels: [
+        ...task.labels.filter(
+          (label) => !planning.includes(label) && !added.includes(label),
+        ),
+        ...added,
+      ],
+      ...(active ? { mustStart: false, missingLead: false } : {}),
+    });
+    return {
+      ...data,
+      plan: {
+        ...data.plan,
+        tasks: data.plan.tasks.map((task) =>
+          task.id === taskId ? predicted(task) : task,
+        ),
+      },
+    };
+  };
 }
 
 /**

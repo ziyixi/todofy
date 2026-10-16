@@ -1,10 +1,12 @@
 import { addDays, topLevelBets } from "./domain";
 import { outcomeSteps, planningOutcomes } from "./planning-outcomes";
-import type { FlowDayPlan, PlanState, PlanningTask } from "./model";
+import type { FlowDayPlan, Language, PlanState, PlanningTask } from "./model";
 
 // The literal label names Todofy's filters already use (Must Start, Candidate If); never created here.
 export const WAITING_LABELS = ["waiting", "blocked"];
 export const SOMEDAY_LABELS = ["parked", "onhold"];
+/** The owner's in-progress label, as Todofy's in-progress deadline query names it. */
+export const ACTIVE_LABEL = "active";
 const CLARIFIED_LABELS = [...WAITING_LABELS, ...SOMEDAY_LABELS, "quick"];
 const DAY_MS = 86_400_000;
 
@@ -17,6 +19,19 @@ export function untouchedDays(
   return Number.isFinite(changed)
     ? Math.max(0, Math.floor((now - changed) / DAY_MS))
     : undefined;
+}
+
+/**
+ * "12 天未变动", in whole 24-hour periods: any Todoist edit resets it, so it never claims how
+ * long the wait has been.
+ */
+export function untouchedText(task: PlanningTask, language: Language): string {
+  const days = untouchedDays(task);
+  if (days === undefined) return "";
+  if (language === "zh") return days ? `${days} 天未变动` : "1 天内有变动";
+  return days
+    ? `Untouched ${days} ${days === 1 ? "day" : "days"}`
+    : "Changed within a day";
 }
 
 /** Tasks carrying any of the labels, untouched the longest first; unknown ages come last. */
@@ -46,6 +61,13 @@ export function inboxToClarify(plan: PlanState): PlanningTask[] {
       task.id !== plan.reviewTaskId &&
       !task.labels.some((label) => CLARIFIED_LABELS.includes(label)),
   );
+}
+
+/** Tasks with a deadline but no start-ahead choice (Todofy's missing_lead), earliest deadline first. */
+export function withoutLead(tasks: readonly PlanningTask[]): PlanningTask[] {
+  return tasks
+    .filter((task) => task.missingLead)
+    .sort((a, b) => a.deadline.localeCompare(b.deadline));
 }
 
 /** Commitments with nothing open scheduled in these days: neither the outcome nor any of its steps. */

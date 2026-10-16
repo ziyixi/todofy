@@ -25,11 +25,6 @@ async function props(): Promise<PlanViewProps> {
     editTask: vi.fn(),
     onWeekChange: vi.fn(),
     onLabels: vi.fn(),
-    todayTaskIds: focus.taskIds,
-    addFocus: vi.fn(),
-    addStep: vi.fn(),
-    chooseLead: vi.fn(),
-    onOpenTask: vi.fn(),
     completeReview: vi.fn(),
   };
 }

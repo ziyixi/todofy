@@ -1,11 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { effectiveArea } from "./domain";
-import { canMarkActive } from "./deadlines";
-import { DeadlineList } from "./DeadlineList";
 import { planningOutcomes } from "./planning-outcomes";
+import { boardLanes } from "./review-lanes";
 import { ReviewBoard } from "./ReviewBoard";
 import { PlanningWeek } from "./PlanningWeek";
-import { WaitingList } from "./WaitingList";
 import { WeeklyReview } from "./WeeklyReview";
 import { words } from "./i18n";
 import type {
@@ -34,77 +32,67 @@ export interface PlanViewProps {
   editTask: (task: PlanningTask) => void;
   onWeekChange: (weekStart: string) => void;
   onLabels?: () => void;
-  todayTaskIds: readonly string[];
-  addFocus: (id: string) => void;
-  /** Opens the task's step editor, empty, for a follow-up step. */
-  addStep: (task: PlanningTask) => void;
-  /** Opens the task's editor at its start-ahead choice. */
-  chooseLead: (task: PlanningTask) => void;
-  onOpenTask: (id: string) => void;
   completeReview: (task: PlanningTask) => Promise<boolean>;
   /** Opened from the review task's link: start with the weekly review. */
   reviewing?: boolean;
-  /** The owner's open or closed choice for Deadlines this visit; undefined follows the default. */
-  deadlinesOpen?: boolean;
-  onDeadlinesToggle?: (open: boolean) => void;
-  /** Opened from Focus's quiet line: Review, with Deadlines open and focused. */
-  showDeadlines?: boolean;
-  onDeadlinesShown?: () => void;
+  /** Opened from Focus's quiet line: Review, with Start now focused. */
+  showStart?: boolean;
+  onStartShown?: () => void;
 }
+/**
+ * Where a jump lands: a lane of the Review board, or else the first card there in that state
+ * (its own stage lane keeps it); Week's runway line.
+ */
+const JUMPS = {
+  start: [
+    '.review-lane[data-lane="start"]',
+    '.review-draggable[data-state="start"] .planning-outcome-card',
+  ],
+  waiting: [
+    '.review-lane[data-lane="waiting"]',
+    '.review-draggable[data-state="waiting"] .planning-outcome-card',
+  ],
+  runway: [".planning-runway"],
+};
 export function PlanView(props: PlanViewProps) {
   const { plan, language, editTask, onLabels } = props;
   const [mode, setMode] = useState<"review" | "week">("review");
   const [area, setArea] = useState<Area | "all">("all");
   const [reviewing, setReviewing] = useState(Boolean(props.reviewing));
-  const [waitingOpen, setWaitingOpen] = useState(false);
-  // A review jump focuses its target and scrolls it into view once; Week mounts at the first
-  // unplanned commitment.
-  const [jump, setJump] = useState<"waiting" | "runway" | "deadlines">();
+  // A jump focuses its target and scrolls it into view once; Week mounts at the first unplanned
+  // commitment.
+  const [jump, setJump] = useState<keyof typeof JUMPS>();
   const section = useRef<HTMLElement>(null);
   const reviewButton = useRef<HTMLButtonElement>(null);
   const text = words(language);
   useEffect(() => {
     if (props.reviewing) setReviewing(true);
   }, [props.reviewing]);
-  const { showDeadlines, onDeadlinesShown } = props;
-  useEffect(() => {
-    if (!showDeadlines) return;
+  /** Review with every area shown, so the lane a jump looks for is on the board. */
+  function showLane(lane: "start" | "waiting") {
     setMode("review");
-    setJump("deadlines");
-    onDeadlinesShown?.();
-  }, [showDeadlines, onDeadlinesShown]);
+    setArea("all");
+    setJump(lane);
+  }
+  const { showStart, onStartShown } = props;
+  useEffect(() => {
+    if (!showStart) return;
+    showLane("start");
+    onStartShown?.();
+  }, [showStart, onStartShown]);
   useEffect(() => {
     if (!jump) return;
-    const target = section.current?.querySelector<HTMLElement>(
-      {
-        waiting: ".planning-waiting > summary",
-        runway: ".planning-runway",
-        deadlines: ".planning-deadlines > summary",
-      }[jump],
-    );
+    const target = JUMPS[jump]
+      .map((selector) => section.current?.querySelector<HTMLElement>(selector))
+      .find(Boolean);
     target?.focus({ preventScroll: true });
     // jsdom has no layout, and so no scrollIntoView.
     target?.scrollIntoView?.({ block: "nearest" });
     setJump(undefined);
   }, [jump]);
+  const lanes = boardLanes(plan, props.currentDate);
   const commitments = planningOutcomes(plan.tasks, plan.managedLabels).filter(
     (task) => task.stage === "committed",
-  );
-  const deadlines = (
-    <DeadlineList
-      tasks={plan.tasks}
-      today={props.currentDate}
-      language={language}
-      busy={props.busy}
-      pending={props.pending}
-      run={props.run}
-      actions={props.actions}
-      canMarkActive={canMarkActive(plan)}
-      open={props.deadlinesOpen}
-      onToggle={(open) => props.onDeadlinesToggle?.(open)}
-      editTask={editTask}
-      chooseLead={props.chooseLead}
-    />
   );
   const count = (area: Area) =>
     commitments.filter((task) => effectiveArea(task, plan.tasks) === area)
@@ -166,11 +154,7 @@ export function PlanView(props: PlanViewProps) {
           actions={props.actions}
           editTask={editTask}
           completeReview={props.completeReview}
-          onShowWaiting={() => {
-            setMode("review");
-            setWaitingOpen(true);
-            setJump("waiting");
-          }}
+          onShowWaiting={() => showLane("waiting")}
           onShowRunway={() => {
             setMode("week");
             setJump("runway");
@@ -193,10 +177,10 @@ export function PlanView(props: PlanViewProps) {
                 "all",
                 "work",
                 "personal",
-                ...(plan.tasks.some(
-                  (task) =>
-                    task.stage !== "none" &&
-                    effectiveArea(task, plan.tasks) === "unassigned",
+                ...(Object.values(lanes).some((cards) =>
+                  cards.some(
+                    (task) => effectiveArea(task, plan.tasks) === "unassigned",
+                  ),
                 )
                   ? ["unassigned"]
                   : []),
@@ -216,28 +200,10 @@ export function PlanView(props: PlanViewProps) {
               </button>
             ))}
           </div>
-          <ReviewBoard {...props} area={area} />
-          {/* Daily first: Deadlines above the weekly Waiting row. */}
-          {deadlines}
-          <WaitingList
-            tasks={plan.tasks}
-            today={props.currentDate}
-            language={language}
-            busy={props.busy}
-            todayTaskIds={props.todayTaskIds}
-            open={waitingOpen}
-            onToggle={setWaitingOpen}
-            editTask={editTask}
-            addStep={props.addStep}
-            addFocus={props.addFocus}
-            onOpenTask={props.onOpenTask}
-          />
+          <ReviewBoard {...props} lanes={lanes} area={area} />
         </>
       ) : (
-        <>
-          <PlanningWeek {...props} startAtUnplanned={jump === "runway"} />
-          {deadlines}
-        </>
+        <PlanningWeek {...props} startAtUnplanned={jump === "runway"} />
       )}
       <p className="planning-reset-note">{text.reset}</p>
     </section>

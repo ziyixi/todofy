@@ -23,7 +23,14 @@ type Drop = (event: {
     target?: { data?: Record<string, unknown> };
   };
 }) => void;
-const drops = vi.hoisted(() => ({ latest: undefined as Drop | undefined }));
+const drops = vi.hoisted(() => ({
+  latest: undefined as Drop | undefined,
+  // The latest options of each drop target, by ID.
+  targets: new Map<
+    string,
+    { disabled?: boolean; data?: Record<string, unknown> }
+  >(),
+}));
 vi.mock("@dnd-kit/react", () => ({
   DragDropProvider: ({
     children,
@@ -41,7 +48,14 @@ vi.mock("@dnd-kit/react", () => ({
     handleRef: () => {},
     isDragSource: false,
   }),
-  useDroppable: () => ({ ref: () => {}, isDropTarget: false }),
+  useDroppable: (input: {
+    id: string;
+    disabled?: boolean;
+    data?: Record<string, unknown>;
+  }) => {
+    drops.targets.set(input.id, input);
+    return { ref: () => {}, isDropTarget: false };
+  },
 }));
 beforeAll(() => {
   HTMLDialogElement.prototype.showModal = function () {
@@ -260,13 +274,34 @@ it("predicts moves like moveTaskToDay, including today's Focus queue, and stage 
   expect(
     added.days.find((item) => item.date === "2026-10-14")?.taskIds,
   ).toEqual(["cleanup", "measure"]);
-  const staged = predictStage("tools", "committed")(data);
+  // A stage drag shows the stage's label in place of the other planning labels, as Todofy writes it;
+  // from Start now also the in-progress label, after which the task no longer needs to start.
+  const tools = data.plan.tasks.find((task) => task.id === "tools")!;
   const changed = (tasks: PlanningTask[]) =>
     tasks.filter((task, index) => task !== data.plan.tasks[index]);
+  const staged = predictStage(
+    "tools",
+    "committed",
+  )({
+    ...data,
+    plan: {
+      ...data.plan,
+      tasks: data.plan.tasks.map((task) =>
+        task === tools ? { ...tools, labels: ["focus", "office"] } : task,
+      ),
+    },
+  });
   expect(changed(staged.plan.tasks)).toEqual([
+    { ...tools, stage: "committed", labels: ["office", "committed"] },
+  ]);
+  const started = predictStage("tools", "weekly", true)(data);
+  expect(changed(started.plan.tasks)).toEqual([
     {
-      ...data.plan.tasks.find((task) => task.id === "tools")!,
-      stage: "committed",
+      ...tools,
+      stage: "weekly",
+      labels: ["focus", "active"],
+      mustStart: false,
+      missingLead: false,
     },
   ]);
 });
@@ -396,21 +431,129 @@ it("keeps a pending card's details and weekly goal read-only until its drag sett
   );
 });
 
-it("keeps a pending card's Mark in progress in Deadlines disabled until its drag settles", async () => {
+it("keeps a pending card's Start disabled until its drag settles", async () => {
   const actions = createPrototype();
   const writes = hold(actions, "updateTask");
   await mountPlan(actions);
   const research = (await actions.load()).plan.tasks.find(
     (task) => task.id === "research",
   )!;
-  const mark = () =>
+  const start = () =>
     screen.getByRole("button", {
-      name: "Mark in progress: Prepare the next research check-in",
+      name: "Start: Prepare the next research check-in",
     }) as HTMLButtonElement;
-  expect(mark().disabled).toBe(false);
-  await drop({ task: research }, { stage: "weekly" });
+  expect(start().disabled).toBe(false);
+  await drop({ task: research, lane: "committed" }, { stage: "weekly" });
   // Its etag is the one from before the drag, so the write would be refused.
-  expect(mark().disabled).toBe(true);
+  expect(start().disabled).toBe(true);
   await act(async () => writes[0]!.confirm());
-  await waitFor(() => expect(mark().disabled).toBe(false));
+  await waitFor(() => expect(start().disabled).toBe(false));
+});
+
+/** The cards of a lane, by title. */
+function laneTitles(name: string) {
+  return within(screen.getByRole("region", { name }))
+    .queryAllByRole("button", { name: /, (No priority|P\d)/u })
+    .map((card) => card.getAttribute("aria-label")!.split(",")[0]);
+}
+
+it("acknowledges a Start now card by dragging it into a stage lane: its stage and in progress in one write", async () => {
+  // The full preview board has two tasks in Start now.
+  const actions = createPrototype(true);
+  const writes = hold(actions, "updateTask");
+  await mountPlan(actions);
+  expect(laneTitles("Start now")).toEqual([
+    "Renew the passport",
+    "Submit the travel expense claim",
+  ]);
+  const claim = (await actions.load()).plan.tasks.find(
+    (task) => task.id === "claim",
+  )!;
+  await drop({ task: claim, lane: "start" }, { stage: "committed" });
+  expect(writes.map((write) => write.args[1])).toEqual([
+    { stage: "committed", active: true },
+  ]);
+  // Shown at once in its lane and waiting there; Start now keeps only the other card.
+  expect(laneTitles("Start now")).toEqual(["Renew the passport"]);
+  const card = within(screen.getByRole("region", { name: "Committed" }))
+    .getByText("Submit the travel expense claim")
+    .closest<HTMLElement>(".review-draggable")!;
+  expect(card.getAttribute("aria-busy")).toBe("true");
+  // In progress, it no longer says it should start.
+  expect(card.querySelector(".planning-outcome-status")).toBeNull();
+  await act(() => writes[0]!.confirm());
+  expect(card.getAttribute("aria-busy")).toBeNull();
+  expect(laneTitles("Committed")).toContain("Submit the travel expense claim");
+  // The last Start now card leaves the lane, which is then hidden.
+  const passport = (await actions.load()).plan.tasks.find(
+    (task) => task.id === "passport",
+  )!;
+  await drop({ task: passport, lane: "start" }, { stage: "weekly" });
+  expect(screen.queryByRole("region", { name: "Start now" })).toBeNull();
+  // A failed write puts the card back where it was.
+  await act(async () => writes[1]!.fail());
+  expect(laneTitles("Start now")).toEqual(["Renew the passport"]);
+  expect(screen.getByRole("alert").textContent).toContain(
+    "Change not saved; restored.",
+  );
+});
+
+it("moves a Waiting card into a stage lane with its stage only, keeping its waiting label", async () => {
+  const actions = createPrototype();
+  const writes = hold(actions, "updateTask");
+  await mountPlan(actions);
+  const venue = (await actions.load()).plan.tasks.find(
+    (task) => task.id === "venue",
+  )!;
+  await drop({ task: venue, lane: "waiting" }, { stage: "weekly" });
+  expect(writes.map((write) => write.args[1])).toEqual([{ stage: "weekly" }]);
+  expect(laneTitles("Week")).toContain("Hear back about the venue quote");
+  expect(laneTitles("Waiting")).toEqual(["Lab access approval"]);
+  await act(() => writes[0]!.confirm());
+  const saved = (await actions.load()).plan.tasks.find(
+    (task) => task.id === "venue",
+  )!;
+  expect(saved.labels).toEqual(["waiting", "office", "focus"]);
+  // In its stage lane the card still says it waits.
+  expect(
+    within(screen.getByRole("region", { name: "Week" }))
+      .getByRole("button", { name: /^Hear back about the venue quote,/u })
+      .getAttribute("aria-label"),
+  ).toMatch(
+    /^Hear back about the venue quote, No priority, Untouched \d+ days$/u,
+  );
+});
+
+it("drags Start now with the stage only without the active label; a drop on Start now or Waiting changes nothing", async () => {
+  const actions = createPrototype(true);
+  const load = actions.load.bind(actions);
+  vi.spyOn(actions, "load").mockImplementation(async (week) => {
+    const data = await load(week);
+    data.plan.availableLabels = data.plan.availableLabels.filter(
+      (label) => label.label !== "active",
+    );
+    return data;
+  });
+  const writes = hold(actions, "updateTask");
+  await mountPlan(actions);
+  const claim = (await load()).plan.tasks.find((task) => task.id === "claim")!;
+  await drop({ task: claim, lane: "start" }, { stage: "committed" });
+  expect(writes.map((write) => write.args[1])).toEqual([
+    { stage: "committed" },
+  ]);
+  // Start now and Waiting catch a card let go over them, with no stage: it goes back, unwritten.
+  for (const lane of ["start", "waiting"])
+    expect(drops.targets.get(`review-lane:${lane}`)).toMatchObject({
+      disabled: false,
+      data: { stage: undefined },
+    });
+  const passport = (await load()).plan.tasks.find(
+    (task) => task.id === "passport",
+  )!;
+  await drop({ task: passport, lane: "start" }, { stage: undefined });
+  const venue = (await load()).plan.tasks.find((task) => task.id === "venue")!;
+  await drop({ task: venue, lane: "waiting" }, { stage: undefined });
+  expect(writes).toHaveLength(1);
+  expect(laneTitles("Start now")).toEqual(["Renew the passport"]);
+  expect(laneTitles("Waiting")).toContain("Hear back about the venue quote");
 });

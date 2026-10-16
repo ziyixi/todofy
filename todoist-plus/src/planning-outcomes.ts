@@ -20,7 +20,8 @@ function childIndex(tasks: readonly PlanningTask[]) {
   return children;
 }
 
-function isDateCandidate(
+/** A Week candidate only by Todofy's 7-day date rule (Candidate If): it has no Week label of its own. */
+export function isDateCandidate(
   task: PlanningTask,
   labels: PlanState["managedLabels"],
 ): boolean {
@@ -122,29 +123,37 @@ export function outcomeColor(outcome: PlanningTask): string {
   return colors[hash % colors.length]!;
 }
 
+/** The label role of each planning stage, as Todofy maps them (core/plus.py STAGES). */
+export const STAGE_ROLES = {
+  quarterly: "quarter",
+  monthly: "candiate",
+  weekly: "focus",
+  committed: "committed",
+} as const;
+
 export function reviewLanes(
   language: Language,
-): { stage: Stage; title: string; role: string }[] {
+): { stage: Exclude<Stage, "none">; title: string; role: string }[] {
   return [
     {
       stage: "quarterly",
       title: language === "zh" ? "本季度" : "Quarter",
-      role: "quarter",
+      role: STAGE_ROLES.quarterly,
     },
     {
       stage: "monthly",
       title: language === "zh" ? "本月" : "Month",
-      role: "candiate",
+      role: STAGE_ROLES.monthly,
     },
     {
       stage: "weekly",
       title: language === "zh" ? "本周" : "Week",
-      role: "focus",
+      role: STAGE_ROLES.weekly,
     },
     {
       stage: "committed",
       title: language === "zh" ? "本周承诺" : "Committed",
-      role: "committed",
+      role: STAGE_ROLES.committed,
     },
   ];
 }

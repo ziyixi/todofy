@@ -17,8 +17,8 @@ interface Props {
   focus: FocusState;
   /** The queues the quiet deadline line looks in: this week's, or only today's. */
   days?: readonly FlowDayPlan[];
-  /** Opens Plan's Review with Deadlines open. */
-  onShowDeadlines?: () => void;
+  /** Opens Plan › Review with Start now focused. */
+  onShowStart?: () => void;
   language: Language;
   busy: boolean;
   /** Day cards whose queue write is not yet confirmed. */
@@ -38,7 +38,7 @@ export function FocusView({
   plan,
   focus,
   days = [focus],
-  onShowDeadlines,
+  onShowStart,
   language,
   busy,
   pending,
@@ -88,7 +88,7 @@ export function FocusView({
         <button
           className="planning-runway plus-focus-runway"
           title={text.showInPlan}
-          onClick={onShowDeadlines}
+          onClick={onShowStart}
         >
           {unplannedText(due, language)}
         </button>

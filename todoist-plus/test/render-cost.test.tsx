@@ -7,7 +7,7 @@ import {
 } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { App } from "../src/App";
-import { deadlineRows, unplannedDue } from "../src/deadlines";
+import { unplannedDue } from "../src/deadlines";
 import { effectiveArea, taskAncestors, topLevelBets } from "../src/domain";
 import {
   outcomeArea,
@@ -15,12 +15,14 @@ import {
   outcomeSteps,
   planningOutcomes,
 } from "../src/planning-outcomes";
+import { boardLanes } from "../src/review-lanes";
 import {
   inboxToClarify,
   oldestUntouched,
   SOMEDAY_LABELS,
   unscheduledCommitments,
   WAITING_LABELS,
+  withoutLead,
 } from "../src/weekly-review";
 import { createPrototype } from "../design/fixture";
 import type { PlanState, PlanningTask } from "../src/model";
@@ -116,20 +118,17 @@ function counted(tasks: PlanningTask[]) {
   return { list, reads };
 }
 /**
- * What one Plan render derives: goals, Review lanes and cards, Week cards, a goal search, the
- * Deadlines and Waiting rows, Week's runway line and the weekly review's lines; and Focus's
+ * What one Plan render derives: goals, the Review board's lanes (Start now and Waiting too) and
+ * cards, Week cards, a goal search, Week's runway line and the weekly review's lines; and Focus's
  * quiet deadline line.
  */
 function planRender(tasks: PlanningTask[]) {
   for (const area of ["work", "personal", "unassigned"] as const)
     topLevelBets(tasks, area);
   const outcomes = planningOutcomes(tasks, labels);
-  deadlineRows(tasks, "2026-10-13");
+  boardLanes({ tasks, managedLabels: labels }, "2026-10-13");
   unplannedDue(tasks, [], "2026-10-13");
-  tasks.some(
-    (task) =>
-      task.stage !== "none" && effectiveArea(task, tasks) === "unassigned",
-  );
+  tasks.some((task) => effectiveArea(task, tasks) === "unassigned");
   for (const outcome of outcomes) {
     outcomeSteps(outcome, tasks, labels);
     outcomeArea(outcome, tasks, "en");
@@ -151,6 +150,7 @@ function planRender(tasks: PlanningTask[]) {
   oldestUntouched(tasks, WAITING_LABELS);
   oldestUntouched(tasks, SOMEDAY_LABELS);
   inboxToClarify(plan);
+  withoutLead(tasks);
   unscheduledCommitments(plan, []);
 }
 

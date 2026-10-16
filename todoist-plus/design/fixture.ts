@@ -1,3 +1,4 @@
+import { STAGE_ROLES } from "../src/planning-outcomes";
 import type {
   FocusState,
   FlowDayPlan,
@@ -162,6 +163,8 @@ export function createPrototype(
           : item.id === "desk"
             ? "personal-goal"
             : item.parentId,
+      // A waiting task with its deadline.
+      ...(item.id === "venue" ? { deadline: "2026-10-22" } : {}),
     }));
     plan.tasks.push(
       task("work-goal", "Make the next release easy to use", { bet: true }),
@@ -205,6 +208,26 @@ export function createPrototype(
         parentId: "home",
         area: "personal",
         estimatedMinutes: 30,
+      }),
+      // Start now: in the start window, and past the deadline.
+      task("claim", "Submit the travel expense claim", {
+        labels: ["lead_3d"],
+        deadline: "2026-10-14",
+        leadDays: 3,
+        mustStart: true,
+      }),
+      task("passport", "Renew the passport", {
+        area: "personal",
+        labels: ["lead_1w"],
+        deadline: "2026-10-11",
+        leadDays: 7,
+        mustStart: true,
+      }),
+      // A deadline without a start-ahead choice: only the weekly review's line.
+      task("insurance", "Renew the car insurance", {
+        area: "personal",
+        deadline: "2026-11-30",
+        missingLead: true,
       }),
     );
   }
@@ -254,8 +277,20 @@ export function createPrototype(
       return metadata as PlanMetadata;
     },
     async updateTask(item, { active, ...update }) {
-      // In progress is the literal label; Todofy then lists the task neither as must start nor
-      // as missing a lead.
+      // As Todofy writes them: a stage's label replaces the other planning labels (the fixture's
+      // label names are its roles), and in progress is the literal label, after which Todofy
+      // lists the task neither as must start nor as missing a lead.
+      const planning: string[] = Object.values(STAGE_ROLES);
+      const staged = (task: PlanningTask): PlanningTask =>
+        update.stage === undefined
+          ? task
+          : {
+              ...task,
+              labels: [
+                ...task.labels.filter((label) => !planning.includes(label)),
+                ...(update.stage === "none" ? [] : [STAGE_ROLES[update.stage]]),
+              ],
+            };
       const marked = (task: PlanningTask): PlanningTask =>
         active === undefined
           ? task
@@ -270,7 +305,7 @@ export function createPrototype(
       plan = {
         ...plan,
         tasks: plan.tasks.map((task) =>
-          task.id === item.id ? marked({ ...task, ...update }) : task,
+          task.id === item.id ? marked(staged({ ...task, ...update })) : task,
         ),
       };
       return structuredClone(plan.tasks.find((task) => task.id === item.id)!);

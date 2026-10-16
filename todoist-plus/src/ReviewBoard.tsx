@@ -1,21 +1,33 @@
-import type { CSSProperties } from "react";
+import {
+  Fragment,
+  useEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+} from "react";
 import {
   DragDropProvider,
   DragOverlay,
   useDraggable,
   useDroppable,
 } from "@dnd-kit/react";
-import { CalendarClock, GripVertical } from "lucide-react";
+import { GripVertical } from "lucide-react";
 import { displayedTitle, effectiveArea } from "./domain";
-import { cardTitle, deadlineState, isDue } from "./deadlines";
+import { canMarkActive, deadlineTitle, spokenDeadline } from "./deadlines";
 import {
   outcomeArea,
   outcomeColor,
   outcomeSteps,
-  planningOutcomes,
   reviewLanes,
 } from "./planning-outcomes";
 import { pendingTask, predictStage } from "./plan-updates";
+import {
+  cardState,
+  cardStatus,
+  statusLine,
+  type BoardLanes,
+  type LaneId,
+} from "./review-lanes";
 import { PendingMark } from "./StatusMarks";
 import { words } from "./i18n";
 import type {
@@ -34,14 +46,20 @@ export interface OutcomeCardProps {
   tasks: PlanningTask[];
   managedLabels: PlanState["managedLabels"];
   scheduledIds: Set<string>;
-  /** The account's today, for the start-window mark. */
+  /** The account's today, for the card's status. */
   today: string;
   language: Language;
   selected?: boolean;
   /** Its stage change is shown but not yet confirmed. */
   pending?: boolean;
+  /** The hover action shown over the card; the title row keeps its room free. */
+  action?: string;
   onClick: () => void;
 }
+/**
+ * Title, area, and the step counts or, when the task waits or should start, one muted status in
+ * their place. Only days past a deadline are drawn in --plus-danger.
+ */
 export function OutcomeCard({
   task,
   tasks,
@@ -51,6 +69,7 @@ export function OutcomeCard({
   language,
   selected = false,
   pending = false,
+  action,
   onClick,
 }: OutcomeCardProps) {
   const steps = outcomeSteps(task, tasks, managedLabels);
@@ -62,8 +81,13 @@ export function OutcomeCard({
         ? "未设优先级"
         : "No priority";
   const title = displayedTitle(task.title);
-  const state = deadlineState(task, today);
-  const mark = state && isDue(state) ? cardTitle(state, language) : "";
+  const state = cardState(task, today);
+  const status = state ? cardStatus(task, state, today, language) : [];
+  const line = statusLine(status);
+  // Screen readers hear the status with the part of the deadline it does not already say.
+  const spoken = line
+    ? `, ${line}${task.deadline ? spokenDeadline({ text: line }, task.deadline, language) : ""}`
+    : "";
   return (
     <button
       type="button"
@@ -71,8 +95,8 @@ export function OutcomeCard({
       style={{ "--outcome-color": outcomeColor(task) } as CSSProperties}
       data-outcome-id={task.id}
       onClick={onClick}
-      // The name replaces the content, so it carries the start window and pending state too.
-      aria-label={`${title}, ${priority}${mark ? `, ${mark}` : ""}${pending ? `, ${words(language).updating}` : ""}`}
+      // The name replaces the content, so it carries the status and pending state too.
+      aria-label={`${title}, ${priority}${spoken}${pending ? `, ${words(language).updating}` : ""}`}
     >
       <span
         className="planning-priority-circle"
@@ -86,21 +110,48 @@ export function OutcomeCard({
             {title}
           </strong>
           {pending && <PendingMark language={language} />}
-          {mark && (
-            <span className="planning-outcome-start" title={mark}>
-              <CalendarClock size={13} aria-hidden="true" />
+          {action && (
+            <span className="planning-outcome-action-room" aria-hidden="true">
+              {action}
             </span>
           )}
         </span>
-        <span className="planning-outcome-meta">
+        <span className={`planning-outcome-meta ${state ? "has-status" : ""}`}>
           <span className="planning-outcome-context">
             {outcomeArea(task, tasks, language)}
           </span>
-          <span className="planning-outcome-counts">
-            {language === "zh"
-              ? `${steps.length} 个步骤 · 已安排 ${planned}`
-              : `${steps.length} ${steps.length === 1 ? "step" : "steps"} · ${planned} planned`}
-          </span>
+          {state ? (
+            <span
+              className="planning-outcome-status"
+              title={
+                task.deadline
+                  ? deadlineTitle(task.deadline, language)
+                  : undefined
+              }
+            >
+              {/* Each part stays whole; a long status wraps between them. */}
+              {status.map((part, index) => (
+                <Fragment key={index}>
+                  {index > 0 && " "}
+                  <span>
+                    {part.text}
+                    {part.danger && (
+                      <span className="planning-danger-text">
+                        {part.danger}
+                      </span>
+                    )}
+                    {index < status.length - 1 && " ·"}
+                  </span>
+                </Fragment>
+              ))}
+            </span>
+          ) : (
+            <span className="planning-outcome-counts">
+              {language === "zh"
+                ? `${steps.length} 个步骤 · 已安排 ${planned}`
+                : `${steps.length} ${steps.length === 1 ? "step" : "steps"} · ${planned} planned`}
+            </span>
+          )}
         </span>
       </span>
     </button>
@@ -109,6 +160,8 @@ export function OutcomeCard({
 
 interface Props {
   plan: PlanState;
+  /** Each task's one lane, from boardLanes. */
+  lanes: BoardLanes;
   days: FlowDayPlan[];
   area: Area | "all";
   currentDate: string;
@@ -120,8 +173,15 @@ interface Props {
   editTask: (task: PlanningTask) => void;
   onLabels?: () => void;
 }
+/**
+ * Start now, Waiting and the four stage lanes, with the same lanes and cards. Start now and
+ * Waiting show only when they have cards and take no drops: a card dragged from Start now into a
+ * stage lane takes that stage and is marked in progress in one write; one from Waiting takes only
+ * the stage.
+ */
 export function ReviewBoard({
   plan,
+  lanes,
   days,
   area,
   currentDate,
@@ -133,53 +193,109 @@ export function ReviewBoard({
   editTask,
   onLabels,
 }: Props) {
+  const text = words(language);
+  const board = useRef<HTMLDivElement>(null);
+  const [announcement, setAnnouncement] = useState("");
+  // After a confirmed Start, focus moves on to the next card that can start, or to the board.
+  const [focusAfter, setFocusAfter] = useState<{ id: string; next: string }>();
   const scheduledIds = new Set(
     days.flatMap((day) =>
       day.taskIds.filter((id) => !day.completedTaskIds.includes(id)),
     ),
   );
-  const outcomes = planningOutcomes(plan.tasks, plan.managedLabels).filter(
-    (task) => area === "all" || effectiveArea(task, plan.tasks) === area,
-  );
+  const marks = canMarkActive(plan);
+  const shown = (id: LaneId) =>
+    lanes[id].filter(
+      (task) => area === "all" || effectiveArea(task, plan.tasks) === area,
+    );
+  const columns = [
+    { id: "start" as LaneId, title: text.startNow },
+    { id: "waiting" as LaneId, title: text.waiting },
+    ...reviewLanes(language).map((lane) => ({
+      id: lane.stage as LaneId,
+      title: lane.title,
+      stage: lane.stage,
+      label: plan.managedLabels.find((label) => label.role === lane.role)
+        ?.label,
+    })),
+  ].filter((column) => "stage" in column || shown(column.id).length);
+  // Once write controls are enabled again: the next card's Start, any Start, the started card
+  // where it stays (in its stage lane) or the first card.
+  useEffect(() => {
+    if (!focusAfter || busy || !board.current) return;
+    const starts = [
+      ...board.current.querySelectorAll<HTMLElement>(".review-card-action"),
+    ];
+    const cards = [
+      ...board.current.querySelectorAll<HTMLElement>(".planning-outcome-card"),
+    ];
+    (
+      starts.find((start) => start.dataset.startId === focusAfter.next) ??
+      starts[0] ??
+      cards.find((card) => card.dataset.outcomeId === focusAfter.id) ??
+      cards[0]
+    )?.focus();
+    setFocusAfter(undefined);
+  }, [focusAfter, busy]);
+
+  async function start(task: PlanningTask) {
+    // The next card that can start, in the board's order now.
+    const ids = [
+      ...(board.current?.querySelectorAll<HTMLElement>(".review-card-action") ??
+        []),
+    ].map((element) => element.dataset.startId);
+    const next = ids[ids.indexOf(task.id) + 1] ?? "";
+    if (await run(() => actions.updateTask(task, { active: true }))) {
+      setAnnouncement(`${text.markedActive}: ${displayedTitle(task.title)}`);
+      setFocusAfter({ id: task.id, next });
+    }
+  }
   return (
     <DragDropProvider
       onDragEnd={({ canceled, operation }) => {
         if (canceled) return;
         const task = operation.source?.data?.task as PlanningTask | undefined;
+        const from = operation.source?.data?.lane as LaneId | undefined;
         const stage = operation.target?.data?.stage as Stage | undefined;
+        if (!task || !stage || from === stage) return;
+        // Start now is acknowledged by the drag: the stage and the in-progress label in one write.
+        const active = from === "start" && marks;
         // The card moves at once and waits in its new lane until Todoist confirms.
-        if (task && stage && task.stage !== stage)
-          void run(() => actions.updateTask(task, { stage }), {
+        void run(
+          () =>
+            actions.updateTask(task, active ? { stage, active } : { stage }),
+          {
             pending: [pendingTask(task.id)],
-            predict: predictStage(task.id, stage),
-          });
+            predict: predictStage(task.id, stage, active),
+          },
+        );
       }}
     >
-      <div className="review-board">
-        <div className="review-lanes">
-          {reviewLanes(language).map((lane) => {
-            const label = plan.managedLabels.find(
-              (label) => label.role === lane.role,
-            )?.label;
-            return (
-              <ReviewLane
-                key={lane.stage}
-                stage={lane.stage}
-                title={lane.title}
-                label={label}
-                tasks={outcomes.filter((task) => task.stage === lane.stage)}
-                plan={plan}
-                scheduledIds={scheduledIds}
-                today={currentDate}
-                language={language}
-                busy={busy}
-                pending={pending}
-                editTask={editTask}
-                onLabels={onLabels}
-              />
-            );
-          })}
+      <div className="review-board" ref={board}>
+        <div className="review-lanes" data-lanes={columns.length}>
+          {columns.map((column) => (
+            <ReviewLane
+              key={column.id}
+              lane={column.id}
+              stage={"stage" in column ? column.stage : undefined}
+              title={column.title}
+              label={"label" in column ? column.label : undefined}
+              tasks={shown(column.id)}
+              plan={plan}
+              scheduledIds={scheduledIds}
+              today={currentDate}
+              language={language}
+              busy={busy}
+              pending={pending}
+              editTask={editTask}
+              onStart={marks ? (task) => void start(task) : undefined}
+              onLabels={onLabels}
+            />
+          ))}
         </div>
+        <p className="plus-sr-only" role="status">
+          {announcement}
+        </p>
       </div>
       <DragOverlay dropAnimation={{ duration: 160, easing: "ease-out" }}>
         {(source) => {
@@ -204,6 +320,7 @@ export function ReviewBoard({
 }
 
 function ReviewLane({
+  lane,
   stage,
   title,
   label,
@@ -215,9 +332,12 @@ function ReviewLane({
   busy,
   pending,
   editTask,
+  onStart,
   onLabels,
 }: {
-  stage: Stage;
+  lane: LaneId;
+  /** A stage lane's stage; a drop on Start now or Waiting changes nothing. */
+  stage?: Exclude<Stage, "none">;
   title: string;
   label?: string;
   tasks: PlanningTask[];
@@ -228,20 +348,25 @@ function ReviewLane({
   busy: boolean;
   pending?: ReadonlySet<string>;
   editTask: Props["editTask"];
+  onStart?: (task: PlanningTask) => void;
   onLabels?: () => void;
 }) {
   const { ref, isDropTarget } = useDroppable({
-    id: `review-lane:${stage}`,
+    id: `review-lane:${lane}`,
     accept: "review-outcome",
-    disabled: busy || !label,
+    // Start now and Waiting catch a drop without a stage, which changes nothing, so that a card
+    // let go over them goes back instead of into the lane its preview overlaps.
+    disabled: busy || Boolean(stage && !label),
     data: { stage },
   });
   return (
     <section
       ref={ref}
-      className={`review-lane ${isDropTarget ? "is-over" : ""}`}
+      className={`review-lane ${isDropTarget && stage ? "is-over" : ""}`}
       aria-label={title}
-      data-lane={stage}
+      data-lane={lane}
+      // A jump from Focus or the weekly review focuses the lane.
+      tabIndex={-1}
     >
       <header className="review-lane-header">
         <h2>{title}</h2>
@@ -254,7 +379,7 @@ function ReviewLane({
           </small>
         )}
       </header>
-      {!label && (
+      {stage && !label && (
         <div className="review-missing-label">
           <p>
             {language === "zh"
@@ -273,6 +398,7 @@ function ReviewLane({
           <DraggableOutcome
             key={task.id}
             task={task}
+            lane={lane}
             plan={plan}
             scheduledIds={scheduledIds}
             today={today}
@@ -280,6 +406,7 @@ function ReviewLane({
             busy={busy}
             pending={pending?.has(pendingTask(task.id)) ?? false}
             editTask={editTask}
+            onStart={onStart}
           />
         ))}
         {!tasks.length && label && (
@@ -294,6 +421,7 @@ function ReviewLane({
 
 function DraggableOutcome({
   task,
+  lane,
   plan,
   scheduledIds,
   today,
@@ -301,8 +429,10 @@ function DraggableOutcome({
   busy,
   pending,
   editTask,
+  onStart,
 }: {
   task: PlanningTask;
+  lane: LaneId;
   plan: PlanState;
   scheduledIds: Set<string>;
   today: string;
@@ -310,17 +440,24 @@ function DraggableOutcome({
   busy: boolean;
   pending: boolean;
   editTask: Props["editTask"];
+  onStart?: (task: PlanningTask) => void;
 }) {
   const { ref, handleRef, isDragSource } = useDraggable({
     id: `review-outcome:${task.id}`,
     type: "review-outcome",
     disabled: busy || pending,
-    data: { task },
+    data: { task, lane },
   });
+  const text = words(language);
+  const title = displayedTitle(task.title);
+  const state = cardState(task, today);
+  // Start marks the task in progress, which only an account with the literal label can.
+  const startable = state === "start" && onStart;
   return (
     <div
       ref={ref}
       className={`review-draggable ${isDragSource ? "is-dragging" : ""} ${pending ? "is-pending" : ""}`}
+      data-state={state}
       aria-busy={pending || undefined}
     >
       <button
@@ -330,7 +467,7 @@ function DraggableOutcome({
         // A waiting handle stays focusable, so a keyboard drop keeps focus on the moved card.
         disabled={busy}
         aria-disabled={pending || undefined}
-        aria-label={`${language === "zh" ? "移动事项" : "Move outcome"}: ${displayedTitle(task.title)}${pending ? `, ${words(language).updating}` : ""}`}
+        aria-label={`${language === "zh" ? "移动事项" : "Move outcome"}: ${title}${pending ? `, ${text.updating}` : ""}`}
       >
         <GripVertical size={14} />
       </button>
@@ -342,8 +479,22 @@ function DraggableOutcome({
         today={today}
         language={language}
         pending={pending}
+        action={startable ? text.start : undefined}
         onClick={() => editTask(task)}
       />
+      {startable && (
+        <button
+          type="button"
+          className="review-card-action"
+          data-start-id={task.id}
+          // A card whose drag waits still carries its old etag, so its write waits too.
+          disabled={busy || pending}
+          aria-label={`${text.start}: ${title}`}
+          onClick={() => onStart(task)}
+        >
+          {text.start}
+        </button>
+      )}
     </div>
   );
 }

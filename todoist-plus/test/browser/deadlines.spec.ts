@@ -5,7 +5,12 @@ import {
   type Page,
   type Worker,
 } from "@playwright/test";
-import { addDeadlineTasks, launchPlanner } from "./planner-setup";
+import {
+  addDeadlineTasks,
+  controlWrites,
+  dragPlanner,
+  launchPlanner,
+} from "./planner-setup";
 
 type DeadlineState = {
   calls: { path: string; method: string; body: Record<string, unknown> }[];
@@ -28,87 +33,160 @@ async function reads(worker: Worker) {
 }
 const opacity = (locator: Locator) =>
   locator.evaluate((element) => getComputedStyle(element).opacity);
-/** Deadlines' own status region, beside the list so that it is read even while the list is closed. */
+const lane = (page: Page, name: string) =>
+  page.getByRole("region", { name, exact: true });
+/** A lane's card titles, in order. */
+const titles = (page: Page, name: string) =>
+  lane(page, name).locator(".planning-outcome-title");
+/** The board's status region, beside the lanes; dnd-kit adds another for drags. */
 const announced = (page: Page) =>
-  page.locator('.planning-deadlines + [role="status"]');
-const right = async (locator: Locator) => {
-  const box = (await locator.boundingBox())!;
-  return box.x + box.width;
-};
+  page.locator('.review-board > [role="status"]');
+const card = (page: Page, title: string) =>
+  page.locator(".review-draggable", {
+    has: page.getByRole("button", { name: new RegExp(`^${title},`, "u") }),
+  });
 
-test("Deadlines lists each status at rest, shows its one action on hover or focus, and marks a task in progress", async () => {
+test("Start now and Waiting lead the four stage lanes with the same cards, and Start marks a task in progress", async () => {
   const { context, worker } = await launchPlanner();
   try {
     await addDeadlineTasks(worker);
     const page = await context.newPage();
     await page.goto("https://app.todoist.com/app/today?todoist-plus=plan");
-    const deadlines = page.locator(".planning-deadlines");
-    await expect(deadlines.locator("summary")).toHaveText("Deadlines · 5");
-    // Open by itself: something is past its deadline or in its start window.
-    await expect(deadlines).toHaveAttribute("open", "");
-    const list = page.getByRole("list", { name: "Deadlines" });
-    await expect(list.locator(".planning-row-title")).toHaveText([
+    await expect(page.locator(".review-lane")).toHaveCount(6);
+    expect(
+      await page
+        .locator(".review-lane")
+        .evaluateAll((lanes) =>
+          lanes.map((item) => item.getAttribute("aria-label")),
+        ),
+    ).toEqual([
+      "Start now",
+      "Waiting",
+      "Quarter",
+      "Month",
+      "Week",
+      "Committed",
+    ]);
+    // One row of lanes at this width, all of the same width.
+    const boxes = await page
+      .locator(".review-lane")
+      .evaluateAll((lanes) =>
+        lanes.map((item) => item.getBoundingClientRect().toJSON()),
+      );
+    for (const box of boxes) {
+      expect(Math.abs(box.top - boxes[0]!.top)).toBeLessThan(1);
+      expect(Math.abs(box.width - boxes[0]!.width)).toBeLessThan(1);
+    }
+    await expect(titles(page, "Start now")).toHaveText([
       "Quarterly report draft",
       "Submit the expense claim",
+    ]);
+    await expect(
+      lane(page, "Start now").locator(".planning-outcome-status"),
+    ).toHaveText(["2 days past", "Deadline tomorrow"]);
+    await expect(titles(page, "Committed")).toHaveText([
+      "Synthetic weekly outcome",
       "Prepare the visa documents",
-      "Move house",
-      "Renew the car insurance",
     ]);
-    await expect(list.locator(".planning-row-status")).toHaveText([
-      /^2 days past/u,
-      /^Deadline tomorrow/u,
-      /^5 days left/u,
-      /^In progress · 12 days left/u,
-      /^Deadline Nov 30/u,
+    await expect(
+      card(page, "Prepare the visa documents").locator(
+        ".planning-outcome-status",
+      ),
+    ).toHaveText("5 days left");
+    await expect(titles(page, "Waiting")).toHaveText([
+      "Contract signature",
+      "Quote reply",
     ]);
-    // At rest a row is its title and one status: the actions keep their place but are not shown.
-    const rows = list.getByRole("listitem");
-    const actions = rows.locator(".planning-row-actions");
-    await page.mouse.move(0, 0);
-    for (const index of [0, 1, 2, 3, 4])
-      expect(await opacity(actions.nth(index))).toBe("0");
-    await rows.nth(0).hover();
-    expect(await opacity(actions.nth(0))).toBe("1");
-    expect(await opacity(actions.nth(1))).toBe("0");
-    // Keyboard: Tab from the title reaches the row's action, which then shows.
-    await page.mouse.move(0, 0);
-    await rows
-      .nth(4)
-      .getByRole("button", { name: "Renew the car insurance", exact: true })
-      .focus();
-    await page.keyboard.press("Tab");
-    const choose = list.getByRole("button", {
-      name: "Choose when to start: Renew the car insurance",
-    });
-    await expect(choose).toBeFocused();
-    expect(await opacity(actions.nth(4))).toBe("1");
-    // The one colour is the days past.
-    const danger = await list
-      .locator(".planning-danger-text")
-      .evaluateAll((elements) =>
-        elements.map((element) => element.textContent),
-      );
-    expect(danger).toEqual(["2 days past"]);
-
-    const before = await reads(worker);
-    await list
-      .getByRole("button", {
-        name: "Mark in progress: Submit the expense claim",
-      })
-      .click();
-    await expect(list.locator(".planning-row-status").nth(1)).toHaveText(
-      /^In progress · Deadline tomorrow/u,
+    // The untouched age follows the real clock; the deadline follows the plan's today.
+    await expect(
+      lane(page, "Waiting").locator(".planning-outcome-status"),
+    ).toHaveText([
+      /^Untouched \d+ days · Deadline Oct 20$/u,
+      /^Untouched \d+ days$/u,
+    ]);
+    // Cards never widen their lane, also with the longest English status: it wraps between its
+    // parts instead.
+    expect(
+      await page
+        .locator(".review-lane")
+        .evaluateAll((lanes) =>
+          lanes.flatMap((item) =>
+            [...item.querySelectorAll(".planning-outcome-card")].filter(
+              (card) =>
+                card.getBoundingClientRect().right >
+                item.getBoundingClientRect().right + 0.5,
+            ),
+          ),
+        ),
+    ).toHaveLength(0);
+    // The same card everywhere: Start now's cards look like Committed's.
+    const look = (locator: Locator) =>
+      locator.evaluate((element) => {
+        const style = getComputedStyle(element);
+        return [
+          style.borderRadius,
+          style.backgroundColor,
+          style.boxShadow,
+          style.minHeight,
+          style.paddingLeft,
+          Math.round(element.getBoundingClientRect().width),
+        ];
+      });
+    expect(
+      await look(
+        card(page, "Submit the expense claim").locator(
+          ".planning-outcome-card",
+        ),
+      ),
+    ).toEqual(
+      await look(
+        card(page, "Synthetic weekly outcome").locator(
+          ".planning-outcome-card",
+        ),
+      ),
     );
+    // The one colour is the days past.
+    expect(
+      await page
+        .locator(".review-board .planning-danger-text")
+        .evaluateAll((elements) =>
+          elements.map((element) => element.textContent),
+        ),
+    ).toEqual(["2 days past"]);
+    // Nothing is stacked under the board.
+    await expect(page.locator(".planning-view details")).toHaveCount(0);
+    // Start is hidden at rest, shows on hover without moving the title or the status, and is
+    // reached by Tab from the card.
+    const claim = card(page, "Submit the expense claim");
+    const start = claim.getByRole("button", {
+      name: "Start: Submit the expense claim",
+    });
+    await page.mouse.move(0, 0);
+    expect(await opacity(start)).toBe("0");
+    const at = async () =>
+      [
+        await claim.locator(".planning-outcome-title").boundingBox(),
+        await claim.locator(".planning-outcome-status").boundingBox(),
+      ].map((box) => box && [box.x, box.y, box.width, box.height]);
+    const before = await at();
+    await claim.hover();
+    expect(await opacity(start)).toBe("1");
+    expect(await at()).toEqual(before);
+    await page.mouse.move(0, 0);
+    await claim.locator(".planning-outcome-card").focus();
+    await page.keyboard.press("Tab");
+    await expect(start).toBeFocused();
+    expect(await opacity(start)).toBe("1");
+
+    const read = await reads(worker);
+    await page.keyboard.press("Enter");
     await expect(announced(page)).toHaveText(
       "Marked in progress: Submit the expense claim",
     );
-    const next = list.getByRole("button", {
-      name: "Mark in progress: Prepare the visa documents",
-    });
-    await expect(next).toBeFocused();
-    // After a click, the focus left on the next row does not keep its action shown.
-    await page.mouse.move(0, 0);
-    expect(await opacity(actions.nth(2))).toBe("0");
+    // In progress and without a stage, it leaves the board.
+    await expect(titles(page, "Start now")).toHaveText([
+      "Quarterly report draft",
+    ]);
     expect(await writes(worker)).toEqual([
       {
         path: "/api/plus/v1/tasks:setTaskPlan",
@@ -121,92 +199,125 @@ test("Deadlines lists each status at rest, shows its one action on hover or focu
         },
       },
     ]);
-    // The confirmed task is merged; nothing is read again.
-    expect(await reads(worker)).toBe(before);
+    // The confirmed task is merged; nothing is read again. Focus moves to the next Start.
+    expect(await reads(worker)).toBe(read);
+    await expect(
+      page.getByRole("button", { name: "Start: Prepare the visa documents" }),
+    ).toBeFocused();
 
-    // Waiting rows carry the deadline; their actions show on hover as well.
-    await page.getByText("Waiting · 2").click();
-    const waiting = page.getByRole("list", { name: "Waiting" });
-    await expect(waiting.locator(".planning-row-status")).toHaveText([
-      // The untouched age follows the real clock; the deadline follows the plan's today.
-      /^Untouched \d+ days · Deadline Oct 20, Tue$/u,
-      /^Untouched \d+ days$/u,
-    ]);
-    // At rest every status ends against the edge, in both lists alike.
-    for (const rows of [list, waiting]) {
-      const edge = await right(rows);
-      for (const status of await rows.locator(".planning-row-status").all())
-        expect(Math.abs((await right(status)) - edge)).toBeLessThan(1);
-    }
-    expect(
-      await opacity(waiting.locator(".planning-row-actions").first()),
-    ).toBe("0");
-    await waiting.getByRole("listitem").first().hover();
-    expect(
-      await opacity(waiting.locator(".planning-row-actions").first()),
-    ).toBe("1");
-
-    // Week keeps Deadlines below the calendar; task details say where the deadline stands.
+    // Week has nothing under its calendar either.
     await page.getByRole("tab", { name: "Week", exact: true }).click();
-    const calendar = (await page.locator(".planning-calendar").boundingBox())!;
-    const below = (await page.locator(".planning-deadlines").boundingBox())!;
-    expect(below.y).toBeGreaterThan(calendar.y + calendar.height);
-    await list
-      .getByRole("button", { name: "Prepare the visa documents", exact: true })
-      .click();
-    const editor = page.getByRole("region", { name: "Steps & timing" });
-    await expect(
-      editor.getByText("Start window open · 5 days left"),
-    ).toBeVisible();
-    await expect(
-      editor.getByRole("button", { name: "Mark in progress" }),
-    ).toBeVisible();
-    await expect(editor.getByLabel("Start ahead").locator("option")).toHaveText(
-      ["Not set", "1 day", "3 days", "7 days", "14 days", "30 days"],
-    );
+    await expect(page.locator(".planning-calendar")).toBeVisible();
+    await expect(page.locator(".planning-view details")).toHaveCount(0);
+    expect(
+      await page.locator(".planning-week").evaluate((week) => {
+        // Past the drag overlay dnd-kit keeps beside the week.
+        let next = week.nextElementSibling;
+        while (next?.hasAttribute("data-dnd-overlay"))
+          next = next.nextElementSibling;
+        return next?.className ?? "";
+      }),
+    ).toBe("planning-reset-note");
   } finally {
     await context.close();
   }
 });
 
-test("marking the last due row by keyboard keeps Deadlines open, with focus and the result announced", async () => {
+test("dragging a Start now card into Committed sets the stage and in progress in one write, shown at once", async () => {
   const { context, worker } = await launchPlanner();
   try {
-    // One row in its start window and one without a lead: the list opens by itself.
-    await addDeadlineTasks(worker, ["claim", "insurance"]);
+    await addDeadlineTasks(worker);
     const page = await context.newPage();
     await page.goto("https://app.todoist.com/app/today?todoist-plus=plan");
-    const deadlines = page.locator(".planning-deadlines");
-    await expect(deadlines).toHaveAttribute("open", "");
-    const list = page.getByRole("list", { name: "Deadlines" });
-    await list
-      .getByRole("button", { name: "Submit the expense claim", exact: true })
-      .focus();
-    await page.keyboard.press("Tab");
-    await page.keyboard.press("Enter");
-    await expect(list.locator(".planning-row-status").first()).toHaveText(
-      /^In progress · Deadline tomorrow/u,
+    await expect(titles(page, "Start now")).toHaveCount(2);
+    await controlWrites(worker, { hold: true });
+    const draft = card(page, "Quarterly report draft");
+    await dragPlanner(
+      page,
+      draft.locator(".review-drag-handle"),
+      lane(page, "Committed"),
     );
-    // Nothing is due any more; the list stays open and focus moves to the next row's action,
-    // which shows, as keyboard focus does.
-    await expect(deadlines).toHaveAttribute("open", "");
-    const next = list.getByRole("button", {
-      name: "Choose when to start: Renew the car insurance",
+    // Shown at once in Committed, waiting there; Start now keeps the other card.
+    const moved = lane(page, "Committed").locator(".review-draggable", {
+      hasText: "Quarterly report draft",
     });
-    await expect(next).toBeFocused();
-    expect(await opacity(list.locator(".planning-row-actions").nth(1))).toBe(
-      "1",
+    await expect(moved).toHaveAttribute("aria-busy", "true");
+    await expect(titles(page, "Start now")).toHaveText([
+      "Submit the expense claim",
+    ]);
+    // In progress, it no longer says it should start.
+    await expect(moved.locator(".planning-outcome-status")).toHaveCount(0);
+    expect(await writes(worker)).toEqual([
+      {
+        path: "/api/plus/v1/tasks:setTaskPlan",
+        method: "POST",
+        body: {
+          task_id: "draft",
+          etag: "draft-1",
+          request_id: expect.any(String),
+          stage: "committed",
+          active: true,
+        },
+      },
+    ]);
+    await controlWrites(worker, { hold: false, release: true });
+    await expect(moved).not.toHaveAttribute("aria-busy", "true");
+    await expect(titles(page, "Committed")).toHaveText([
+      "Synthetic weekly outcome",
+      "Quarterly report draft",
+      "Prepare the visa documents",
+    ]);
+  } finally {
+    await context.close();
+  }
+});
+
+test("dragging a Waiting card into Week sets only its stage; Start now and Waiting take no drops", async () => {
+  const { context, worker } = await launchPlanner();
+  try {
+    await addDeadlineTasks(worker);
+    const page = await context.newPage();
+    await page.goto("https://app.todoist.com/app/today?todoist-plus=plan");
+    await expect(titles(page, "Waiting")).toHaveCount(2);
+    await dragPlanner(
+      page,
+      card(page, "Contract signature").locator(".review-drag-handle"),
+      lane(page, "Week"),
     );
-    await expect(announced(page)).toHaveText(
-      "Marked in progress: Submit the expense claim",
-    );
+    await expect(titles(page, "Week")).toContainText(["Contract signature"]);
+    await expect(titles(page, "Waiting")).toHaveText(["Quote reply"]);
+    // In its stage lane, the card still says it waits.
+    await expect(
+      card(page, "Contract signature").locator(".planning-outcome-status"),
+    ).toHaveText(/^Untouched \d+ days · Deadline Oct 20$/u);
+    await expect
+      .poll(async () => (await writes(worker)).map((call) => call.body))
+      .toEqual([
+        {
+          task_id: "contract",
+          etag: "contract-1",
+          request_id: expect.any(String),
+          stage: "weekly",
+        },
+      ]);
+    // A drop on Start now or Waiting changes nothing.
+    for (const name of ["Waiting", "Start now"]) {
+      await dragPlanner(
+        page,
+        card(page, "Prepare the visa documents").locator(".review-drag-handle"),
+        lane(page, name),
+      );
+      await expect(titles(page, "Committed")).toContainText([
+        "Prepare the visa documents",
+      ]);
+    }
     expect(await writes(worker)).toHaveLength(1);
   } finally {
     await context.close();
   }
 });
 
-test("Focus's quiet line opens Review with Deadlines open and its summary focused", async () => {
+test("Focus's quiet line opens Review with Start now focused", async () => {
   const { context, worker } = await launchPlanner();
   try {
     await addDeadlineTasks(worker);
@@ -218,12 +329,7 @@ test("Focus's quiet line opens Review with Deadlines open and its summary focuse
     await expect(line).toHaveAttribute("title", "Show in Plan");
     await line.click();
     await expect(page).toHaveURL(/todoist-plus=plan/u);
-    const summary = page.locator(".planning-deadlines > summary");
-    await expect(summary).toBeFocused();
-    await expect(page.locator(".planning-deadlines")).toHaveAttribute(
-      "open",
-      "",
-    );
+    await expect(lane(page, "Start now")).toBeFocused();
     await expect(
       page.getByRole("tab", { name: "Review", exact: true }),
     ).toHaveAttribute("aria-selected", "true");
@@ -233,7 +339,53 @@ test("Focus's quiet line opens Review with Deadlines open and its summary focuse
   }
 });
 
-test("narrow Deadlines rows wrap their status and action under the title without overflowing", async () => {
+test("the weekly review lists a deadline without a lead and sets it with the editor's control", async () => {
+  const { context, worker } = await launchPlanner();
+  try {
+    await addDeadlineTasks(worker);
+    const page = await context.newPage();
+    await page.goto("https://app.todoist.com/app/today?todoist-plus=review");
+    const review = page.getByRole("region", { name: "Weekly review" });
+    const missing = review.locator("li", {
+      has: page.getByRole("checkbox", {
+        name: "Reviewed: 1 deadline has no start-ahead set",
+      }),
+    });
+    await missing.getByRole("button", { name: "Show" }).click();
+    const select = missing.getByRole("combobox", {
+      name: "Start ahead: Renew the car insurance",
+    });
+    await expect(missing.getByRole("listitem")).toContainText(
+      "Deadline Nov 30",
+    );
+    await select.selectOption("14");
+    await expect(review.getByRole("status")).toHaveText(
+      "Start ahead set: Renew the car insurance",
+    );
+    // The line is gone once every deadline has a lead; focus returns to the heading.
+    await expect(missing).toHaveCount(0);
+    await expect(
+      review.getByRole("heading", { name: "Weekly review" }),
+    ).toBeFocused();
+    expect(await writes(worker)).toEqual([
+      {
+        path: "/api/plus/v1/tasks:setTaskLead",
+        method: "POST",
+        body: {
+          task_id: "insurance",
+          etag: "insurance-1",
+          request_id: expect.any(String),
+          deadline: "2026-11-30",
+          lead_days: 14,
+        },
+      },
+    ]);
+  } finally {
+    await context.close();
+  }
+});
+
+test("narrow lanes stack, and cards keep their title, area and status without overflowing", async () => {
   const { context, worker } = await launchPlanner();
   try {
     await addDeadlineTasks(worker);
@@ -241,16 +393,15 @@ test("narrow Deadlines rows wrap their status and action under the title without
     // Under the 650px breakpoint, as in a narrow window.
     await page.setViewportSize({ width: 640, height: 900 });
     await page.goto("https://app.todoist.com/app/today?todoist-plus=plan");
-    const list = page.getByRole("list", { name: "Deadlines" });
-    const row = list.getByRole("listitem").first();
-    await expect(row).toBeVisible();
-    const title = (await row.locator(".planning-row-title").boundingBox())!;
-    const status = (await row.locator(".planning-row-status").boundingBox())!;
-    const action = (await row.locator(".planning-row-action").boundingBox())!;
-    expect(status.y).toBeGreaterThanOrEqual(title.y + title.height - 1);
-    expect(Math.abs(action.y - status.y)).toBeLessThan(4);
+    const board = page.locator(".review-board");
+    await expect(lane(page, "Start now")).toBeVisible();
+    const start = (await lane(page, "Start now").boundingBox())!;
+    const quarter = (await lane(page, "Quarter").boundingBox())!;
+    expect(quarter.y).toBeGreaterThan(start.y + start.height - 1);
+    const claim = card(page, "Submit the expense claim");
+    await expect(claim.locator(".planning-outcome-status")).toBeVisible();
     expect(
-      await list.evaluate(
+      await board.evaluate(
         (element) => element.scrollWidth <= element.clientWidth,
       ),
     ).toBe(true);

@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { ExternalLink, ListChecks, X } from "lucide-react";
 import { displayedTitle, taskIndex, todoistProjectUrl } from "./domain";
+import { deadlineStatus } from "./deadlines";
 import { words } from "./i18n";
 import { pendingTask } from "./plan-updates";
-import { untouchedText } from "./WaitingList";
+import { LeadSelect } from "./TaskEditor";
 import { weekLabel } from "./PlanningCalendar";
 import {
   inboxToClarify,
@@ -15,8 +16,10 @@ import {
   SOMEDAY_LABELS,
   unscheduledCommitments,
   untouchedDays,
+  untouchedText,
   WAITING_LABELS,
   weekChoices,
+  withoutLead,
   type ReviewProgress,
 } from "./weekly-review";
 import type {
@@ -49,9 +52,9 @@ interface Props {
 }
 
 /**
- * Five weekly review lines with counts and jump targets. It only guides: every write is one of
- * the owner's existing single-task actions, made when clicked. Ticks are kept per ISO week in
- * this browser.
+ * Five weekly review lines with counts and jump targets, and a sixth while deadlines lack a
+ * start-ahead choice. It only guides: every write is one of the owner's existing single-task
+ * actions, made when clicked. Ticks are kept per ISO week in this browser.
  */
 export function WeeklyReview({
   plan,
@@ -94,6 +97,7 @@ export function WeeklyReview({
   const inbox = inboxToClarify(plan);
   const waiting = oldestUntouched(plan.tasks, WAITING_LABELS);
   const oldestWait = waiting[0] && untouchedDays(waiting[0]);
+  const noLead = withoutLead(plan.tasks);
   const unscheduled = unscheduledCommitments(plan, days);
   // Still to look at this week: neither kept nor already in this month.
   const someday = oldestUntouched(plan.tasks, SOMEDAY_LABELS).filter(
@@ -118,16 +122,25 @@ export function WeeklyReview({
       return;
     }
     const row = review.querySelector(`[data-review-line="${focusAt.line}"]`);
+    // An item's own action, or its start-ahead select.
     const items = [
-      ...(row?.querySelectorAll<HTMLButtonElement>("[data-review-action]") ??
-        []),
+      ...(row?.querySelectorAll<HTMLButtonElement | HTMLSelectElement>(
+        "[data-review-action], .plus-lead-select",
+      ) ?? []),
     ];
     const target =
       items[Math.min(focusAt.index, items.length - 1)] ??
       row?.querySelector<HTMLElement>(".weekly-review-jump") ??
-      row?.querySelector<HTMLElement>("input");
+      row?.querySelector<HTMLElement>("input") ??
+      // A line with nothing left to do is gone.
+      heading.current;
     // A running write disables the actions: focus moves once it settles.
-    if (target instanceof HTMLButtonElement && target.disabled) return;
+    if (
+      (target instanceof HTMLButtonElement ||
+        target instanceof HTMLSelectElement) &&
+      target.disabled
+    )
+      return;
     target?.focus();
     setFocusAt(undefined);
   }, [focusAt, busy, plan, progress]);
@@ -238,6 +251,65 @@ export function WeeklyReview({
             )}
           </>,
         )}
+        {/* Line 6, kept apart from the stored numbers 1-5: only while a deadline has no lead. */}
+        {noLead.length > 0 &&
+          line(
+            6,
+            zh
+              ? `${noLead.length} 项截止还没设提前量`
+              : `${noLead.length} ${noLead.length === 1 ? "deadline has" : "deadlines have"} no start-ahead set`,
+            <>
+              {toggle(6, zh ? "查看" : "Show")}
+              {shown.has(6) && (
+                <ul
+                  className="weekly-review-items"
+                  aria-label={zh ? "截止还没设提前量" : "No start-ahead set"}
+                >
+                  {noLead.map((task, index) => {
+                    const title = displayedTitle(task.title);
+                    const deadline = deadlineStatus(task, today, language)!;
+                    return (
+                      <li key={task.id}>
+                        <button
+                          className="weekly-review-title"
+                          onClick={() => editTask(task)}
+                        >
+                          {title}
+                        </button>
+                        <span>
+                          {deadline.text}
+                          {deadline.danger && (
+                            <span className="planning-danger-text">
+                              {deadline.danger}
+                            </span>
+                          )}
+                        </span>
+                        {/* Choosing writes the lead at once, as the editor's estimate does. */}
+                        <LeadSelect
+                          value={task.leadDays}
+                          language={language}
+                          disabled={waits(task)}
+                          label={`${text.lead}: ${title}`}
+                          onChange={async (days) => {
+                            if (
+                              await run(() =>
+                                actions.updateLead(task, task.deadline, days),
+                              )
+                            )
+                              done(
+                                6,
+                                index,
+                                `${zh ? "已设提前量" : "Start ahead set"}: ${title}`,
+                              );
+                          }}
+                        />
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </>,
+          )}
         {line(
           3,
           zh ? "承诺未安排" : "Commitments not planned",

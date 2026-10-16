@@ -59,7 +59,7 @@ it("commits a candidate in one action and moves it into the committed group", as
   expect(update.mock.calls[0]?.[1]).toEqual({ stage: "committed" });
   expect(load).toHaveBeenCalledOnce();
 });
-it("preserves a child deadline in Deadlines when its parent occupies the commitment quota", async () => {
+it("shows a step's own start window in Start now while its parent occupies the commitment quota", async () => {
   const actions = createPrototype();
   const { plan, focus, days } = await actions.load();
   const child = plan.tasks.find((task) => task.id === "copy")!;
@@ -79,18 +79,17 @@ it("preserves a child deadline in Deadlines when its parent occupies the commitm
       actions={actions}
       run={vi.fn()}
       editTask={vi.fn()}
-      todayTaskIds={focus.taskIds}
-      addFocus={vi.fn()}
-      addStep={vi.fn()}
-      chooseLead={vi.fn()}
-      onOpenTask={vi.fn()}
       completeReview={vi.fn()}
     />,
   );
-  // Open by itself: something is in its start window.
-  const list = within(screen.getByRole("list", { name: "Deadlines" }));
-  expect(list.getByText("Write the introduction")).toBeTruthy();
-  expect(list.getByText("Deadline tomorrow")).toBeTruthy();
+  const start = within(screen.getByRole("region", { name: "Start now" }));
+  expect(
+    start.getByRole("button", {
+      name: "Write the introduction, No priority, Deadline tomorrow, Wed, Oct 14",
+    }),
+  ).toBeTruthy();
+  // Its area comes from its parent.
+  expect(start.getByText("Work")).toBeTruthy();
   expect(screen.getByText(/3\/5 work/)).toBeTruthy();
 });
 it("stopping a session preserves the task and queue; checkbox completes it", async () => {

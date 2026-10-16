@@ -1,9 +1,10 @@
 import { useRef, useState } from "react";
 import { Check, ExternalLink, Plus, X } from "lucide-react";
 import { displayedTitle, formattedMinutes } from "./domain";
-import { ACTIVE_LABEL, detailStatus } from "./deadlines";
+import { detailStatus } from "./deadlines";
 import { words } from "./i18n";
 import { PendingMark } from "./StatusMarks";
+import { ACTIVE_LABEL } from "./weekly-review";
 import type {
   Language,
   PlanningTask,
@@ -11,6 +12,40 @@ import type {
   RunOperation,
   StepDraft,
 } from "./model";
+
+/** The start-ahead choice: not set, or 1, 3, 7, 14 or 30 days (Todofy's lead labels). */
+export function LeadSelect({
+  value,
+  language,
+  disabled,
+  label,
+  onChange,
+}: {
+  value: number;
+  language: Language;
+  disabled: boolean;
+  /** The accessible name where no visible label wraps it. */
+  label?: string;
+  onChange: (days: number) => void;
+}) {
+  return (
+    <select
+      className="plus-lead-select"
+      aria-label={label}
+      value={value}
+      onChange={(event) => onChange(Number(event.target.value))}
+      disabled={disabled}
+    >
+      {[0, 1, 3, 7, 14, 30].map((days) => (
+        <option key={days} value={days}>
+          {days
+            ? `${days} ${language === "zh" ? "天" : days === 1 ? "day" : "days"}`
+            : words(language).noLead}
+        </option>
+      ))}
+    </select>
+  );
+}
 
 interface Props {
   task: PlanningTask;
@@ -295,20 +330,12 @@ export function TaskEditor({
         </label>
         <label>
           {text.lead}
-          <select
-            className="plus-lead-select"
+          <LeadSelect
             value={lead}
-            onChange={(event) => setLead(Number(event.target.value))}
+            language={language}
             disabled={busy}
-          >
-            {[0, 1, 3, 7, 14, 30].map((value) => (
-              <option key={value} value={value}>
-                {value
-                  ? `${value} ${language === "zh" ? "天" : value === 1 ? "day" : "days"}`
-                  : text.noLead}
-              </option>
-            ))}
-          </select>
+            onChange={setLead}
+          />
         </label>
         <button
           className="plus-button"

@@ -1,11 +1,18 @@
 .review-board {
   container: review / inline-size;
 }
+/* Four stage lanes, with Start now and Waiting only when they have cards. */
 .review-lanes {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 12px;
   align-items: start;
+}
+.review-lanes[data-lanes="5"] {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+.review-lanes[data-lanes="6"] {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
 }
 .review-lane {
   min-width: 0;
@@ -17,6 +24,14 @@
   transition:
     border-color 160ms ease,
     background-color 160ms ease;
+}
+/* Focused by a jump from Focus or the weekly review; the ring shows for the keyboard only. */
+.review-lane:focus {
+  outline: none;
+}
+.review-lane:focus-visible {
+  outline: 2px solid var(--plus-accent);
+  outline-offset: 2px;
 }
 .review-lane.is-over {
   border-color: var(--plus-accent);
@@ -54,6 +69,8 @@
 }
 .review-lane-cards {
   display: grid;
+  /* Cards never widen their lane, whatever their text. */
+  grid-template-columns: minmax(0, 1fr);
   gap: 7px;
 }
 .planning-outcome-card {
@@ -139,11 +156,12 @@
   overflow: hidden;
   overflow-wrap: anywhere;
 }
-.planning-outcome-start {
-  display: flex;
-  color: var(--plus-warning);
+/* Free room for the hover action drawn over it (.review-card-action), so the title never moves. */
+.planning-outcome-action-room {
   flex: 0 0 auto;
-  margin-top: 3px;
+  visibility: hidden;
+  font-size: 12px;
+  line-height: 19.5px;
 }
 .planning-outcome-meta {
   display: flex;
@@ -163,6 +181,26 @@
 .planning-outcome-counts {
   flex: 0 0 auto;
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+/*
+ * A status keeps the whole area name: in a narrow lane it moves under it, still at the right, and
+ * a long one wraps between its parts, never inside one.
+ */
+.planning-outcome-meta.has-status {
+  flex-wrap: wrap;
+  row-gap: 2px;
+}
+.planning-outcome-meta.has-status .planning-outcome-context {
+  flex: 1 0 auto;
+}
+.planning-outcome-status {
+  margin-left: auto;
+  min-width: 0;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.planning-outcome-status > span {
   white-space: nowrap;
 }
 .review-draggable {
@@ -194,6 +232,43 @@
   opacity: 0.45;
   cursor: default;
 }
+/*
+ * Start, in the title row's free room at the card's top right (its border and padding, 9px in).
+ * As on Todoist's own task rows it shows on hover or keyboard focus only; hidden by opacity alone,
+ * it stays in the tab order and the accessibility tree.
+ */
+.plus-root .review-card-action {
+  position: absolute;
+  top: 9px;
+  right: 9px;
+  padding: 0;
+  font-size: 12px;
+  line-height: 19.5px;
+  color: var(--plus-accent);
+  white-space: nowrap;
+  opacity: 0;
+}
+.plus-root .review-card-action:disabled {
+  opacity: 0;
+}
+.plus-root
+  .review-draggable:is(:hover, :has(:focus-visible))
+  .review-card-action {
+  opacity: 1;
+}
+.plus-root
+  .review-draggable:is(:hover, :has(:focus-visible))
+  .review-card-action:disabled {
+  opacity: 0.45;
+}
+.plus-root .review-card-action:hover {
+  text-decoration: underline;
+}
+@media (hover: none) {
+  .plus-root .review-card-action:enabled {
+    opacity: 1;
+  }
+}
 .review-lane-empty {
   margin: 4px 0;
   padding: 12px 4px;
@@ -205,13 +280,24 @@
   pointer-events: none;
   box-shadow: var(--plus-shadow-2);
 }
+/* Five or six lanes wrap into three columns until each lane has about 200px. */
+@container review (max-width: 1260px) {
+  .review-lanes[data-lanes="6"] {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+@container review (max-width: 1050px) {
+  .review-lanes[data-lanes="5"] {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
 @container review (max-width: 800px) {
-  .review-lanes {
+  .review-lanes[data-lanes] {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 @container review (max-width: 430px) {
-  .review-lanes {
+  .review-lanes[data-lanes] {
     grid-template-columns: minmax(0, 1fr);
   }
 }

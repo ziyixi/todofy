@@ -221,6 +221,36 @@ async function setupPlanner(context: BrowserContext, worker: Worker) {
         task.etag = `${String(task.id)}-2`;
         return json({ task });
       }
+      if (url.pathname.endsWith("/tasks:setTaskLead")) {
+        const task = state.tasks.find((task) => task.id === body.task_id);
+        if (!task || task.etag !== body.etag)
+          return new Response(
+            JSON.stringify({
+              error: { status: "ABORTED", message: "Synthetic task changed" },
+            }),
+            { status: 409, headers: { "Content-Type": "application/json" } },
+          );
+        // Todofy's lead labels; a chosen lead is no longer missing.
+        const leads: Record<number, string> = {
+          1: "lead_1d",
+          3: "lead_3d",
+          7: "lead_1w",
+          14: "lead_2w",
+          30: "lead_1m",
+        };
+        const days = Number(body.lead_days ?? 0);
+        task.labels = [
+          ...((task.labels as string[]) ?? []).filter(
+            (label) => !Object.values(leads).includes(label),
+          ),
+          ...(leads[days] ? [leads[days]!] : []),
+        ];
+        task.deadline = body.deadline;
+        task.lead_days = days;
+        task.missing_lead = Boolean(body.deadline) && !days;
+        task.etag = `${String(task.id)}-2`;
+        return json({ task });
+      }
       if (url.pathname.endsWith("/tasks:completeTask")) {
         state.tasks = state.tasks.filter((task) => task.id !== body.task_id);
         return json({ task_id: body.task_id });
@@ -380,8 +410,9 @@ type DeadlineTasksState = {
   extraLabels: { id: string; label: string }[];
 };
 /**
- * Synthetic tasks for each Deadlines status and Waiting rows with deadlines, or `only` those IDs;
- * today is 2026-10-13.
+ * Synthetic deadline and waiting tasks, or `only` those IDs; today is 2026-10-13. Start now gets
+ * the draft (past) and the claim, Committed the visa; the move is in progress, the insurance has
+ * no lead, and Waiting gets the contract (with a deadline) and the quote.
  */
 export async function addDeadlineTasks(
   worker: Worker,

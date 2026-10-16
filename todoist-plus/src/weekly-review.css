@@ -1,4 +1,4 @@
-/* Weekly review checklist, the Waiting row and Week's runway line: quiet text, no card marks. */
+/* Weekly review checklist and Week's runway line: quiet text, no card marks. */
 .weekly-review {
   border: 1px solid var(--plus-line);
   border-radius: 7px;
@@ -117,13 +117,17 @@
   font-size: 12px;
   white-space: nowrap;
 }
+/* The start-ahead select, compact in its row like the text actions. */
+.plus-root .weekly-review-items .plus-lead-select {
+  height: 26px;
+  margin-block: -4px;
+  padding-inline: 6px;
+  font-size: 12px;
+}
 .weekly-review > footer {
   display: flex;
   justify-content: flex-end;
   margin-top: 10px;
-}
-.planning-waiting {
-  margin-top: 16px;
 }
 .plus-root .planning-runway {
   display: block;

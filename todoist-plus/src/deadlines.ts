@@ -1,10 +1,8 @@
 import { startDate, taskIndex } from "./domain";
 import { words } from "./i18n";
 import { monthDay, readableDate, shortDay } from "./PlanningCalendar";
+import { ACTIVE_LABEL } from "./weekly-review";
 import type { FlowDayPlan, Language, PlanState, PlanningTask } from "./model";
-
-/** The owner's literal in-progress label, as Todofy's in-progress deadline query names it; never created. */
-export const ACTIVE_LABEL = "active";
 
 /**
  * Where a task with a deadline stands in its life: in progress, past its deadline, in its start
@@ -29,8 +27,8 @@ const inProgress = (task: PlanningTask) =>
   task.labels.includes(ACTIVE_LABEL) && !task.labels.includes("blocked");
 
 /**
- * The first matching row of the design's table (§1.1): undefined for no deadline, a parked task,
- * or one whose start window has not opened yet, which only its details mention.
+ * The first matching rule (design §1.1): undefined for no deadline, a parked task, or one whose
+ * start window has not opened yet, which only its details mention.
  */
 export function deadlineState(
   task: PlanningTask,
@@ -42,27 +40,6 @@ export function deadlineState(
   if (task.mustStart) return { kind: days < 0 ? "past" : "window", days };
   if (task.missingLead) return { kind: "noLead", days };
   return undefined;
-}
-
-export interface DeadlineRow {
-  task: PlanningTask;
-  state: DeadlineState;
-}
-/** The Deadlines list: earliest deadline first, then the higher priority (the API's 4 is P1). */
-export function deadlineRows(
-  tasks: readonly PlanningTask[],
-  today: string,
-): DeadlineRow[] {
-  const rows: DeadlineRow[] = [];
-  for (const task of tasks) {
-    const state = deadlineState(task, today);
-    if (state) rows.push({ task, state });
-  }
-  return rows.sort(
-    (a, b) =>
-      a.task.deadline.localeCompare(b.task.deadline) ||
-      b.task.priority - a.task.priority,
-  );
 }
 
 /** Something that should have started: past its deadline or in its start window. */
@@ -168,21 +145,31 @@ function deadlineDateText(
     : `Deadline ${monthDay(deadline, language)}`;
 }
 
-/** One row's status in the Deadlines list. */
-export function rowStatus(
-  { task, state }: DeadlineRow,
+/** A card that should start: "还剩 5 天", "明天截止", "今天截止", or "已过 2 天" in --plus-danger. */
+export function startStatus(
+  deadline: string,
   today: string,
   language: Language,
 ): StatusText {
-  if (state.kind === "past")
-    return { text: "", danger: pastText(state.days, language) };
-  if (state.kind === "window") return { text: leftText(state.days, language) };
-  // A @blocked task can be past its deadline without a start-ahead choice.
-  if (state.kind === "noLead")
-    return state.days < 0
-      ? { text: "", danger: pastText(state.days, language) }
-      : { text: deadlineDateText(task.deadline, today, language) };
-  return activeStatus(state.days, language);
+  const days = daysUntil(deadline, today);
+  return days < 0
+    ? { text: "", danger: pastText(days, language) }
+    : { text: leftText(days, language) };
+}
+
+/**
+ * "10月22日截止" (today and tomorrow in words), or "已过截止 2 天" in --plus-danger once past: in
+ * a waiting card's status and the weekly review's start-ahead line.
+ */
+export function deadlineStatus(
+  task: PlanningTask,
+  today: string,
+  language: Language,
+): StatusText | undefined {
+  if (!task.deadline) return undefined;
+  const days = daysUntil(task.deadline, today);
+  if (days < 0) return { text: "", danger: pastDeadlineText(days, language) };
+  return { text: deadlineDateText(task.deadline, today, language) };
 }
 
 /** The deadline's full date, for a status's tooltip: "截止日期：10月20日周二". */
@@ -210,18 +197,6 @@ export function spokenDeadline(
   return (language === "zh" ? "，" : ", ") + date;
 }
 
-/** "12 天未变动 · 10月22日截止" in Waiting, or "已过截止 2 天" in --plus-danger once past. */
-export function waitingDeadline(
-  task: PlanningTask,
-  today: string,
-  language: Language,
-): StatusText | undefined {
-  if (!task.deadline) return undefined;
-  const days = daysUntil(task.deadline, today);
-  if (days < 0) return { text: "", danger: pastDeadlineText(days, language) };
-  return { text: deadlineDateText(task.deadline, today, language) };
-}
-
 /**
  * The sentence under a task's deadline fields, from the values shown there: the start window's
  * date before it opens, then how long is left, past or in progress. None without a deadline, or
@@ -245,15 +220,6 @@ export function detailStatus(
       text: `${words(language).starts}: ${readableDate(start, language)}`,
     };
   return { text: windowText(days, language) };
-}
-
-/**
- * A due card's start-window mark, which its icon's tooltip and the end of its accessible name say:
- * "已到启动窗口 · 还剩 5 天" or "已过截止 2 天".
- */
-export function cardTitle(state: DeadlineState, language: Language): string {
-  if (state.kind === "past") return pastDeadlineText(state.days, language);
-  return windowText(state.days, language);
 }
 
 /** The quiet Focus line: "1 项已过截止、1 项已到启动窗口，这周还没有安排". */
