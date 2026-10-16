@@ -111,6 +111,8 @@ export async function mountTodoist(ctx: ContentScriptContext) {
   let detailHost: HTMLElement | undefined;
   let detailCleanup: (() => void) | undefined;
   let detailPending = false;
+  // A pass that found a mount in flight; the mount re-checks the current modal when it settles.
+  let detailAgain = false;
   let detailsReady = false;
   // The task whose tools failed to render stays native until its modal closes.
   let detailFailed = "";
@@ -584,7 +586,11 @@ export async function mountTodoist(ctx: ContentScriptContext) {
       note("taskTools", task.off ?? "detailMain");
     const id = task.id;
     if (!id || !anchor || id === detailFailed) return removeDetails();
-    if (detailPending || (detailId === id && detailHost?.isConnected)) return;
+    if (detailPending) {
+      detailAgain = true;
+      return;
+    }
+    if (detailId === id && detailHost?.isConnected) return;
     detailCleanup?.();
     detailPending = true;
     detailsReady = false;
@@ -629,7 +635,13 @@ export async function mountTodoist(ctx: ContentScriptContext) {
     } finally {
       detailPending = false;
     }
-    if (disposed || !anchor.isConnected) return;
+    if (disposed) return;
+    if (detailAgain || !anchor.isConnected) {
+      // Todoist replaced the modal while the UI was being created: check the modal now on the page.
+      detailAgain = false;
+      detailId = "";
+      return mountDetails();
+    }
     ui.mount();
     note("taskTools");
     detailHost = ui.shadowHost;
