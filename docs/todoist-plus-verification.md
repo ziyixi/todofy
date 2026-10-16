@@ -1005,6 +1005,11 @@ built and tested:
   the 300 dependencies (first runs 0.47-0.86 ms, warm medians 0.70-0.71 ms in three isolates), `core/plan.py`
   takes ruff's blank line, and the PlusFake's `ids` filter on paged reads, unreachable after the one-page
   lookup, is gone.
+- Found by the independent check of the rebase: the Mailbox's Delete all counted a mail that a dependency
+  names (either way) as deletable, because its `touched` rule predates the extension holding the
+  dependencies; Todofy kept such mail, so the confirmed count could exceed what was deleted. `src/mail.ts`
+  `touched` now keeps it too and the dialog lists it among the kept (a unit case in `test/mail.test.ts`);
+  Todofy's own check is unchanged.
 
 Local checks after the rebase, all passing, for every job `.github/scripts/ci_changes.py` selects against
 `6a465bee` (it deploys Todofy and publishes the extension; the proto change re-checks every app that uses the

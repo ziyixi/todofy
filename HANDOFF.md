@@ -65,8 +65,8 @@ reaches the extension and that the activity log answers for a completed and a de
 
 Todoist Plus text Bets and the Mailbox (the owner-approved October 16 Bets and Mailbox design, with the
 same-day review fixes) are one commit on local branch `claude/plus-bets-mailbox`, rebased on 2026-10-16 onto
-`origin/main` `6a465bee`: they build on the released dependencies and change none of them; not pushed, no
-branch CI or release. The week's Work and Personal Bets are one line of the owner's text each (at most 160
+`origin/main` `6a465bee`: they build on the released dependencies and change none of them; a second commit
+makes Delete all keep a mail a dependency names, as Todofy already did; not pushed, no branch CI or release. The week's Work and Personal Bets are one line of the owner's text each (at most 160
 UTF-16 units) in the planning store (`plan_notes`, kind `bets`), never in Todoist: the additive
 `SetWeeklyBet` writes D1 only (compare-and-set on the row's rev; the saved text answers as a replay; only
 this and next account week), with no Todoist call and no receipt, and every FULL Plan answer carries

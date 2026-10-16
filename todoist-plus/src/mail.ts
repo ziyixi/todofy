@@ -9,6 +9,7 @@ import type {
   MailItem,
   PlanState,
   PlanningTask,
+  TaskDependency,
 } from "./model";
 
 /** Task IDs per LookupMailItems and per DeleteMailItems request, Todofy's bound. */
@@ -63,13 +64,15 @@ export interface PlanContext {
   focus: FocusState;
   /** Cards with a write not yet confirmed (App's pending set). */
   pending: ReadonlySet<string>;
+  /** Every dependency of the last complete read (ReadPlan's FULL view). */
+  dependencies: readonly TaskDependency[];
 }
 
 /**
  * Whether the owner changed or planned a mail task, so that Delete all keeps it: any label, a
- * priority above P4, a date, deadline or estimate, a step, a place in a FlowDay day queue, a
- * running Focus timer, or a write still on its way. Todofy checks again on a fresh read, with the
- * comments and dependencies it alone sees.
+ * priority above P4, a date, deadline or estimate, a step, a dependency either way, a place in a
+ * FlowDay day queue, a running Focus timer, or a write still on its way. Todofy checks again on a
+ * fresh read, with the comments it alone sees and the dependencies as it holds them.
  */
 export function touched(task: PlanningTask, context: PlanContext): boolean {
   return (
@@ -77,6 +80,9 @@ export function touched(task: PlanningTask, context: PlanContext): boolean {
     task.priority !== apiPriority(4) ||
     Boolean(task.due || task.deadline || task.estimatedMinutes) ||
     context.tasks.some((other) => other.parentId === task.id) ||
+    context.dependencies.some(
+      (link) => link.taskId === task.id || link.prerequisiteId === task.id,
+    ) ||
     [context.focus, ...context.days].some((day) =>
       day.taskIds.includes(task.id),
     ) ||

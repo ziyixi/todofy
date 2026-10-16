@@ -89,6 +89,7 @@ const idle = (fields: Partial<PlanContext> = {}): PlanContext => ({
     flowTasks: {},
   },
   pending: new Set(),
+  dependencies: [],
   ...fields,
 });
 
@@ -131,6 +132,33 @@ it("keeps a mail on Delete all once the owner changed or planned it in any way",
     [{ deadline: "2026-10-30" }, {}],
     [{ estimatedMinutes: 15 }, {}],
     [{}, { tasks: [task("child", { parentId: "plain" })] }],
+    // A dependency either way, done or not, as Todofy keeps it (plan_edges).
+    [
+      {},
+      {
+        dependencies: [
+          {
+            taskId: "plain",
+            prerequisiteId: "other",
+            baselineCount: 0,
+            done: false,
+          },
+        ],
+      },
+    ],
+    [
+      {},
+      {
+        dependencies: [
+          {
+            taskId: "other",
+            prerequisiteId: "plain",
+            baselineCount: 0,
+            done: true,
+          },
+        ],
+      },
+    ],
     [
       {},
       {

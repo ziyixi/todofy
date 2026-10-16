@@ -162,6 +162,7 @@ export function Mailbox({
           days: data.days,
           focus: data.focus,
           pending,
+          dependencies: data.plan.dependencies,
         })
       : true;
   const deletable = rows.filter((row) => !isTouched(row.task));
