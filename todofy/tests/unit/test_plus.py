@@ -1,6 +1,8 @@
 """Personal planning behavior, using synthetic tasks only."""
 
+import re
 import sqlite3
+from datetime import date, timedelta
 from pathlib import Path
 
 import pytest
@@ -27,6 +29,30 @@ def test_stage_change_retains_unrelated_labels_and_bet_does_not_promote():
     assert plus.plan_labels(source, {"stage": "monthly"}) == ["bets", "candiate", "deep", "lead_2w", "office"]
     assert plus.plan_labels(task(), {"bet": True}) == ["bets", "deep", "office"]
     assert plus.plan_labels(source, {"area": "personal"}) == ["bets", "committed", "deep", "focus", "home", "lead_2w"]
+
+
+def test_in_progress_adds_or_removes_only_the_literal_active_label():
+    source = task(labels=["committed", "office", "lead_1w", "bets"], deadline={"date": TODAY})
+    assert plus.plan_labels(source, {"active": True}) == ["active", "bets", "committed", "lead_1w", "office"]
+    assert plus.plan_labels(task(labels=["active", "office"]), {"active": False}) == ["office"]
+    # Configured names never rename it, and it is no planning mark.
+    assert plus.plan_labels(task(labels=["custom-committed"]), {"active": True}, mapping()) == [
+        "active",
+        "custom-committed",
+    ]
+    view = plus.task_view(task(labels=["active", "lead_1w"], deadline={"date": TODAY}), TODAY)
+    assert not view["must_start"] and not view["missing_lead"]
+
+
+def test_in_progress_never_moves_a_kept_sunday_choice():
+    week, sunday = "2026-10-12", "2026-10-18"
+    assert plus.membership_week(sunday, week, {"active": True}) == week
+    db = sqlite3.connect(":memory:")
+    db.executescript((Path(__file__).resolve().parents[2] / "migrations/0006_todoist_plus.sql").read_text())
+    db.execute(sql.REMEMBER_WEEK, ("task1", "2026-10-19", 1, 0))
+    # Marking it in progress that Sunday records its marks under the ending week, which never moves it back.
+    db.execute(sql.REMEMBER_WEEK, ("task1", plus.membership_week(sunday, week, {"active": True}), 1, 0))
+    assert db.execute("SELECT week_start FROM plus_weeks WHERE task_id='task1'").fetchone() == ("2026-10-19",)
 
 
 def test_choosing_the_stage_a_task_already_shows_removes_no_label():
@@ -184,16 +210,107 @@ def test_only_replaced_filter_queries_are_hidden():
         for index, query in enumerate(plus.REPLACED_FILTER_QUERIES)
     ]
     assert len(plus.replaced_filters(filters)) == len(plus.REPLACED_FILTER_QUERIES)
-    assert (
-        plus.replaced_filters(
-            [
-                {"id": "waiting", "query": "@blocked"},
-                {"id": "unfamiliar", "query": "@bets | @custom"},
-            ]
-        )
-        == []
-    )
+    assert plus.replaced_filters(
+        [
+            {"id": "waiting", "query": "@blocked"},
+            {"id": "unfamiliar", "query": "@bets | @custom"},
+        ]
+    ) == ["waiting"]
+    # Quick / Ops and Parked stay native, in Other views.
     assert plus.replaced_filters([{"id": "quick", "query": "@quick & (no date | 3 days)"}]) == []
+    assert plus.replaced_filters([{"id": "parked", "query": "@parked"}]) == []
+
+
+def todoist_filter(query: str, task: dict, today: str) -> bool:
+    """The subset of Todoist's filter syntax the replaced deadline and waiting views use; `,` lists views."""
+    day = date.fromisoformat(today)
+    deadline = (task.get("deadline") or {}).get("date")
+    labels = set(task.get("labels") or [])
+
+    def term(word: str) -> bool:
+        if word.startswith("@"):
+            return word[1:] in labels
+        if word == "nodeadline":
+            return not deadline
+        before = re.fullmatch(r"deadlinebefore:(today|in(\d+)days?)", word)
+        if before:
+            bound = day + timedelta(days=int(before[2] or 0))
+            return bool(deadline) and date.fromisoformat(deadline) < bound
+        if word == "deadlineafter:yesterday":
+            return bool(deadline) and date.fromisoformat(deadline) > day - timedelta(days=1)
+        raise AssertionError("unsupported filter term " + word)
+
+    tokens = re.findall(r"[()&|!]|[^()&|!]+", query)
+
+    def either() -> bool:
+        value = both()
+        while tokens and tokens[0] == "|":
+            tokens.pop(0)
+            value = both() | value
+        return value
+
+    def both() -> bool:
+        value = negated()
+        while tokens and tokens[0] == "&":
+            tokens.pop(0)
+            value = negated() & value
+        return value
+
+    def negated() -> bool:
+        token = tokens.pop(0)
+        if token == "!":
+            return not negated()
+        if token == "(":
+            value = either()
+            assert tokens.pop(0) == ")"
+            return value
+        return term(token)
+
+    results = []
+    for view in query.split(","):
+        tokens = re.findall(r"[()&|!]|[^()&|!]+", view)
+        results.append(either())
+        assert not tokens
+    return any(results)
+
+
+def listed_by_plus(view: dict) -> bool:
+    """Where the extension lists a task (todoist-plus src/deadlines.ts and WaitingList), from the API's fields.
+
+    Deadlines: a deadline, not parked, and in progress (`active` without `blocked`), must start or
+    missing a lead. Waiting: any `waiting` or `blocked` label.
+    """
+    labels = set(view["labels"])
+    in_progress = "active" in labels and "blocked" not in labels
+    deadlines = bool(view["deadline"]) and "parked" not in labels
+    deadlines = deadlines and (in_progress or view["must_start"] or view["missing_lead"])
+    return deadlines or bool(labels & {"waiting", "blocked"})
+
+
+def test_every_task_a_hidden_deadline_or_waiting_filter_shows_is_listed_in_plus():
+    """Consistency gate: a replaced filter is hidden only while Plus lists every task it would show."""
+    queries = [query for query in plus.REPLACED_FILTER_QUERIES if "deadline" in query or "blocked" in query]
+    # Must Start, Missing Lead, Wait but with ddl (two spellings), Waiting / Blocked and Active Deadlines.
+    assert len(queries) == 6
+    marks = ["waiting", "blocked", "active", "parked"]
+
+    def deadline(offset):
+        return None if offset is None else {"date": (date.fromisoformat(TODAY) + timedelta(days=offset)).isoformat()}
+
+    tasks = [
+        task(
+            labels=[mark for bit, mark in enumerate(marks) if combination >> bit & 1] + leads,
+            deadline=deadline(offset),
+        )
+        for combination in range(1 << len(marks))
+        for leads in ([], *[[role] for role in plus.LEADS], ["lead_1d", "lead_1m"])
+        for offset in (None, -9, -1, 0, 1, 2, 3, 6, 7, 13, 14, 29, 30, 45)
+    ]
+    for query in queries:
+        shown = [source for source in tasks if todoist_filter(query, source, TODAY)]
+        assert shown, query
+        missing = [source for source in shown if not listed_by_plus(plus.task_view(source, TODAY))]
+        assert missing == [], query
 
 
 def mapping():

@@ -39,7 +39,14 @@ REPLACED_FILTER_QUERIES = {
         f"{'day' if days == 1 else 'days'}&!@active&!@waiting&!@blocked&!@parked)"
         for label, days in LEADS.items()
     ),
+    # Wait but with ddl, Waiting / Blocked and Active Deadlines: the extension's Waiting and Deadlines lists.
+    "!nodeadline&(@blocked)&!@parked",
+    "!nodeadline&@blocked&!@parked",
+    "@blocked",
+    "@active&!nodeadline&!@blocked&!@parked",
 }
+# The owner's literal in-progress label, as the Active Deadlines filter names it. Plus never creates it.
+ACTIVE = "active"
 
 
 def replaced_filters(filters: list[dict[str, Any]], mapping: list[dict[str, Any]] | None = None) -> list[str]:
@@ -275,6 +282,10 @@ def plan_labels(
         labels.discard(names["bets"])
         if request["bet"]:
             labels.add(names["bets"])
+    if "active" in request:
+        labels.discard(ACTIVE)
+        if request["active"]:
+            labels.add(ACTIVE)
     return sorted(labels)
 
 

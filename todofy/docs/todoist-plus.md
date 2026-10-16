@@ -23,7 +23,14 @@ The extension background calls these routes using host permission; page CORS is 
 
 ## Planning and completion
 
-`ReadPlan` returns mapping, account-local dates and IDs of exactly matching replaced filter queries.
+`ReadPlan` returns mapping, account-local dates and IDs of exactly matching replaced filter queries
+(`REPLACED_FILTER_QUERIES`, normalized without spaces and with `%` as `@`; generic label semantics only).
+Besides the planning views, Must Start and Missing Lead, they include Wait but with ddl
+(`!nodeadline&(@blocked)&!@parked`, also without the parentheses), Waiting / Blocked (`@blocked`) and Active
+Deadlines (`@active&!nodeadline&!@blocked&!@parked`), whose tasks the extension's Deadlines and Waiting lists
+show. Quick / Ops and Parked are not replaced. A query joins the set only with the consistency case in
+`tests/unit/test_plus.py`, which rebuilds each deadline or waiting query's task set over synthetic tasks
+and requires every task to be listed by the extension's rule, stated in API fields.
 Every Plan answer (ReadPlan, ConfirmPlanMapping, UpdatePlanLabels) also carries the weekly review's IDs:
 the mail project (`TODOIST_DEFAULT_PROJECT_ID`), the newest review task the GTD ledger created for this or
 the previous ISO week (`gtd_reviews`, open or not) and at most 100 tasks already recorded for next week.
@@ -36,6 +43,11 @@ The extension builds native links as `https://app.todoist.com/app/task/<v2_id>` 
 API v1 no longer returns a task URL. See the official [Task URLs contract](https://developer.todoist.com/api/v1/).
 
 Set-plan and lead changes check the displayed etag and retain unrelated labels and the scheduled date.
+SetTaskPlan's optional `active` adds or removes only the literal `active` label (the extension's "Mark in
+progress"). It is never created: adding it while the account has no label of that exact name is refused
+with `ACTION_NOT_ALLOWED` before any Sync write, because Todoist would create a label for an unknown
+name. It is no planning mark, so it never moves a Sunday choice (`REMEMBER_WEEK` keeps the later week).
+The `must_start` and `missing_lead` rules are unchanged; an `active` task is neither.
 The date-driven candidate view uses scheduled date, or deadline when no scheduled date exists.
 Lead windows retain the existing filter's exclusive upper boundary; `lead_1m` remains 30 days.
 One Todoist duration day is 480 estimated work minutes, matching FlowDay. Unknown estimates are absent.
@@ -94,7 +106,9 @@ Every Plus Todoist call shares `FORCE_PAUSE_TODOIST`, auth blocking and the exis
 ## Local verification
 
 `tests/unit/test_plus.py` covers classification and filter semantics, the Sunday rule and the
-never-backwards membership in SQLite. Gateway tests cover credential,
+never-backwards membership in SQLite, the literal `active` label and the replaced-filter consistency gate.
+`tests/runtime/test_plus.py` also checks that `active` is refused without the label (no Sync write) and
+written and removed with it, keeping a Sunday choice's week. Gateway tests cover credential,
 CSRF, bounded proxy and frozen settlement behavior. `tests/runtime/test_plus.py` exercises the real
 gateway, Python Durable Object and D1 against synthetic Todoist Sync/REST responses, including lost
 responses, recurring completion, week rollover (Sunday choices kept, earlier commitments reset, scans

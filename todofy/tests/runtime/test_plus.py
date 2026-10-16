@@ -276,6 +276,34 @@ def test_a_plus_commitment_waits_for_the_week_it_was_chosen_for(stack):
     assert stack.weeks()["chosen"] == {"week_start": expected, "committed": 1, "bet": 0}
 
 
+def test_mark_in_progress_writes_only_an_existing_active_label_and_keeps_a_sunday_choice(stack):
+    stack.upstream.add("deadline", labels=["office", "committed", "lead_1w", "deep"], deadline={"date": "2026-10-20"})
+    task = next(task for task in stack.tasks() if task["id"] == "deadline")
+    week = stack.plan()["week_start"]
+    # Kept on Sunday for next week.
+    stack.worker.d1(f"INSERT OR REPLACE INTO plus_weeks VALUES ('deadline', '{shifted(week, 7)}', 1, 0)")
+    before = len(stack.upstream.commands())
+    # The account has no `active` label yet: nothing is written, and no label is created.
+    refused = stack.write("setTaskPlan", task_id="deadline", etag=task["etag"], active=True)
+    assert reason(refused) == "ACTION_NOT_ALLOWED"
+    assert len(stack.upstream.commands()) == before
+    stack.upstream.labels.append({"id": "active-label", "name": "active"})
+    try:
+        marked = stack.write("setTaskPlan", task_id="deadline", etag=task["etag"], active=True)
+        assert marked.status_code == 200, marked.text
+        assert stack.upstream.tasks["deadline"]["labels"] == ["active", "committed", "deep", "lead_1w", "office"]
+        assert stack.upstream.tasks["deadline"]["deadline"] == {"date": "2026-10-20"}
+        view = marked.json()["task"]
+        assert "active" in view["labels"] and not view.get("must_start") and not view.get("missing_lead")
+        assert stack.weeks()["deadline"] == {"week_start": shifted(week, 7), "committed": 1, "bet": 0}
+        cleared = stack.write("setTaskPlan", task_id="deadline", etag=view["etag"], active=False)
+        assert cleared.status_code == 200, cleared.text
+        assert stack.upstream.tasks["deadline"]["labels"] == ["committed", "deep", "lead_1w", "office"]
+        assert stack.weeks()["deadline"]["week_start"] == shifted(week, 7)
+    finally:
+        stack.upstream.labels.pop()
+
+
 def test_revocation_stops_only_this_extension_connection(stack):
     [connection] = stack.worker.owner.get("/api/plus/v1/connections:read").json()["connections"]
     assert (

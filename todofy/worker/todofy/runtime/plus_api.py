@@ -254,6 +254,9 @@ async def mutate(core: Any, method: str, request: dict[str, Any]) -> dict[str, A
     if previous:
         commands = json.loads(previous["commands"])
     else:
+        if request.get("active") and not any(label["label"] == plus.ACTIVE for label in current["available_labels"]):
+            # Todoist would create a label for an unknown name; Plus never creates one.
+            raise todoist.PlusError("ACTION_NOT_ALLOWED")
         commands = await build_commands(core, method, request, current["labels"])
         await store.start_action(env.DB, request_id, digest, commands)
     result = await todoist.commands(core, commands)

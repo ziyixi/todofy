@@ -224,6 +224,9 @@ message SetTaskPlanRequest {
   optional string area = 5;
   // Adds/removes Bets without changing stage unless stage is also provided.
   optional bool bet = 6;
+  // Adds or removes the literal `active` label (in progress). It is never created: adding
+  // it fails while the account has no label of that exact name.
+  optional bool active = 7;
 }
 // The task after a successful planning change.
 message SetTaskPlanResponse {
