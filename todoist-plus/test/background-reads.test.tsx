@@ -325,7 +325,8 @@ it("shows only the error when the first read after re-entry fails, and forgets t
   mount(actions, "plan", { data, readAt: 0 }, keep);
   await screen.findByRole("alert");
   expect(screen.queryByRole("region", { name: "Committed" })).toBeNull();
-  expect(keep).toHaveBeenLastCalledWith(undefined);
+  // App reports the snapshot from an effect, which can run after the alert renders.
+  await waitFor(() => expect(keep).toHaveBeenLastCalledWith(undefined));
 });
 
 it("never lets an older overlapping read replace a newer one", async () => {
