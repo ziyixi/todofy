@@ -482,7 +482,7 @@ test("native task detail keeps work labels, hides replaced labels only with cont
   }
 });
 
-test("task tools bind to the edited task, never a breadcrumb or a task the link does not name", async () => {
+test("task tools bind to the edited task, never a breadcrumb or a task the link does not name; Options says why they are off", async () => {
   const extensionPath = resolve(".output/chrome-mv3");
   const context = await chromium.launchPersistentContext("", {
     channel: "chromium",
@@ -529,6 +529,25 @@ test("task tools bind to the edited task, never a breadcrumb or a task the link 
       page.getByRole("button", { name: "Steps & timing", exact: true }),
     ).toHaveCount(0);
     await expect(page.locator("todoist-plus-task-tools")).toHaveCount(0);
+    // The options page says which enhancement is off and why, in closed keys only.
+    const options = await context.newPage();
+    await options.goto(
+      `chrome-extension://${new URL(worker.url()).host}/options.html`,
+    );
+    await expect(
+      options.getByText(
+        "Todoist page check: Steps & timing is off (the task ID did not match the page link)",
+      ),
+    ).toBeVisible();
+    await page.evaluate(() =>
+      history.replaceState(null, "", "/app/task/child"),
+    );
+    await openModal();
+    await expect(page.locator("todoist-plus-task-tools")).toHaveCount(1);
+    await options.reload();
+    await expect(
+      options.getByText("Todoist page check: all good"),
+    ).toBeVisible();
   } finally {
     await context.close();
   }

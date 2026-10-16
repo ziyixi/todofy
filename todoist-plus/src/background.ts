@@ -12,10 +12,12 @@ import {
   type Result,
 } from "./messages";
 import { planConfig } from "./domain";
+import { pageStatus } from "./page-status";
 import type { PlanConfig, PlanMetadata, PlusActions } from "./model";
 const storageKey = "connection";
 const knownKey = "knownFlowTasks";
 const configKey = "planConfig";
+const statusKey = "pageStatus";
 let api: PlusActions | undefined;
 // Session storage outlives an idle-stopped worker, not the browser session.
 const knownTasks: KnownTaskStore = {
@@ -76,6 +78,17 @@ export function registerBackground() {
         if (message.kind === "planConfig") {
           const saved = await browser.storage.local.get(configKey);
           return (saved[configKey] as PlanConfig | undefined) ?? null;
+        }
+        // Only keys from closed sets are kept; anything else is refused, not stored.
+        if (message.kind === "reportPage" && todoist) {
+          const status = pageStatus(message.status);
+          if (!status) throw new Error("Unsupported extension operation.");
+          await browser.storage.local.set({ [statusKey]: status });
+          return null;
+        }
+        if (message.kind === "pageStatus" && options) {
+          const saved = await browser.storage.local.get(statusKey);
+          return pageStatus(saved[statusKey]) ?? null;
         }
         if (message.kind === "connection" && options) {
           const saved = await browser.storage.local.get(storageKey);

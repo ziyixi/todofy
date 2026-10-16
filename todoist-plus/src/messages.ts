@@ -1,5 +1,6 @@
 import type { Connection } from "./api";
 import type { PlusActions } from "./model";
+import type { PageStatus } from "./page-status";
 export const PLANNING_PROTOCOL = 3;
 export type ActionName = keyof PlusActions;
 export type ActionMessage = {
@@ -16,6 +17,8 @@ export type BackgroundMessage =
   | { kind: "connection" }
   | { kind: "disconnect" }
   | { kind: "options" }
-  | { kind: "planConfig" };
+  | { kind: "planConfig" }
+  | { kind: "reportPage"; status: PageStatus }
+  | { kind: "pageStatus" };
 export type Result<T = unknown> =
   { ok: true; value: T } | { ok: false; error: string };

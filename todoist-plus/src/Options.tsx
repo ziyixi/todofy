@@ -2,12 +2,14 @@ import { useEffect, useState } from "react";
 import { browser } from "wxt/browser";
 import { validOrigin } from "./api";
 import type { Result } from "./messages";
+import { statusLine, type PageStatus } from "./page-status";
 export function Options() {
   const [origin, setOrigin] = useState("");
   const [token, setToken] = useState("");
   const [connected, setConnected] = useState(false);
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
+  const [page, setPage] = useState<PageStatus | null>();
   useEffect(() => {
     void browser.runtime
       .sendMessage({ kind: "connection" })
@@ -16,6 +18,11 @@ export function Options() {
           setOrigin(result.value.apiOrigin);
           setConnected(result.value.connected);
         }
+      });
+    void browser.runtime
+      .sendMessage({ kind: "pageStatus" })
+      .then((result: Result<PageStatus | null>) => {
+        if (result.ok) setPage(result.value);
       });
   }, []);
   async function save() {
@@ -113,6 +120,11 @@ export function Options() {
         </div>
       </form>
       {message && <p role="status">{message}</p>}
+      {page !== undefined && (
+        <p className="plus-muted" style={{ marginTop: 35 }}>
+          {statusLine(page ?? undefined)}
+        </p>
+      )}
       <p className="plus-muted" style={{ marginTop: 35 }}>
         The extension keeps the connection token in its background storage.
         Todoist’s page never receives it. Your existing Todoist labels and

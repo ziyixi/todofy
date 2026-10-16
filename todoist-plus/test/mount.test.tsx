@@ -3,6 +3,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { ContentScriptContext } from "wxt/utils/content-script-context";
 import { mountTodoist } from "../src/mount";
 import type { PlanConfig } from "../src/model";
+import type { PageStatus } from "../src/page-status";
 
 // A synthetic Todoist shell; the real built extension runs in the packaged browser tests.
 const state = vi.hoisted(() => ({
@@ -10,6 +11,8 @@ const state = vi.hoisted(() => ({
   crash: false,
   rejectMounts: 0,
   mounted: [] as string[],
+  reports: [] as PageStatus[],
+  timers: [] as (() => void)[],
 }));
 vi.mock("wxt/utils/content-script-ui/shadow-root", () => ({
   createShadowRootUi: async (
@@ -55,6 +58,7 @@ vi.mock("../src/client", () => ({
     readPlan: () => new Promise(() => {}),
   },
   openOptions: () => {},
+  reportPage: (status: PageStatus) => state.reports.push(status),
 }));
 vi.mock("../src/App", () => ({
   App: ({ view }: { view: string }) => {
@@ -79,6 +83,11 @@ function context() {
     },
     addEventListener(target: EventTarget, type: string, handler: () => void) {
       target.addEventListener(type, handler);
+    },
+    // Run by the test, as if the time had passed.
+    setTimeout(handler: () => void) {
+      state.timers.push(handler);
+      return 1;
     },
   };
   const created = {
@@ -123,6 +132,8 @@ beforeEach(() => {
     crash: false,
     rejectMounts: 0,
     mounted: [],
+    reports: [],
+    timers: [],
   });
   history.replaceState(null, "", "/app/today");
   shell();
@@ -262,4 +273,50 @@ it("stops and restores Todoist when its own passes never end", async () => {
   expect(document.querySelector("todoist-plus-view")).toBeNull();
   expect(visible("#native")).toBe(true);
   expect(visible("#replaced")).toBe(true);
+});
+
+it("reports which enhancement is off and why, in closed keys only", async () => {
+  const { ctx } = context();
+  const removed = document.querySelector("aside")!;
+  removed.remove();
+  void mountTodoist(ctx);
+  await settle();
+  for (const timer of state.timers.splice(0)) timer();
+  expect(state.reports.at(-1)).toEqual({
+    language: "en",
+    off: { views: "sidebar" },
+  });
+  document.body.prepend(removed);
+  await settle();
+  expect(state.reports.at(-1)).toEqual({ language: "en", off: {} });
+
+  const open = (html: string, path: string) => {
+    history.replaceState(null, "", path);
+    document.querySelector("[data-testid=task-details-modal]")?.remove();
+    document
+      .querySelector("#content")!
+      .insertAdjacentHTML(
+        "beforeend",
+        `<section data-testid="task-details-modal">${html}</section>`,
+      );
+  };
+  const list = `<div data-testid="task-selection-list-container"><div data-item-id="child"></div></div>`;
+  open(list, "/app/task/child");
+  await settle();
+  expect(state.reports.at(-1)!.off.taskTools).toBe("detailMain");
+  open(
+    `${list}<div data-testid="task-main-content-container"></div>`,
+    "/app/task/other",
+  );
+  await settle();
+  expect(state.reports.at(-1)!.off.taskTools).toBe("taskIdMismatch");
+  expect(document.querySelector("todoist-plus-task-tools")).toBeNull();
+  open(
+    `${list}<div data-testid="task-main-content-container"></div>`,
+    "/app/task/child",
+  );
+  await settle();
+  expect(document.querySelector("todoist-plus-task-tools")).toBeTruthy();
+  expect(state.reports.at(-1)).toEqual({ language: "en", off: {} });
+  expect(JSON.stringify(state.reports)).not.toMatch(/child|other|task\//u);
 });

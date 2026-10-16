@@ -7,6 +7,8 @@ interface Props {
   className: string;
   /** Leaves Plus and shows native Todoist again. */
   onBack: () => void;
+  /** Told that it happened, never what: for the options page's status line. */
+  onError?: () => void;
   children: ReactNode;
 }
 
@@ -15,6 +17,9 @@ export class PlusBoundary extends Component<Props, { failed: boolean }> {
   override state = { failed: false };
   static getDerivedStateFromError() {
     return { failed: true };
+  }
+  override componentDidCatch() {
+    this.props.onError?.();
   }
   override render() {
     if (!this.state.failed) return this.props.children;

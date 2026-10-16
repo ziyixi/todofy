@@ -1,6 +1,7 @@
 import { browser } from "wxt/browser";
 import { PLANNING_PROTOCOL, type ActionMessage, type Result } from "./messages";
 import type { PlanConfig, PlusActions } from "./model";
+import type { PageStatus } from "./page-status";
 async function call<T>(message: Omit<ActionMessage, "protocol">): Promise<T> {
   let response: Result<T>;
   try {
@@ -60,4 +61,14 @@ export async function cachedPlanConfig(): Promise<PlanConfig | undefined> {
 }
 export function openOptions() {
   void browser.runtime.sendMessage({ kind: "options" });
+}
+/** Which enhancement is off on this page, for the options page; a closed set of keys only. */
+export function reportPage(status: PageStatus) {
+  try {
+    void browser.runtime
+      .sendMessage({ kind: "reportPage", status })
+      .catch(() => {});
+  } catch {
+    // A disabled or reloaded extension has nowhere to report to.
+  }
 }

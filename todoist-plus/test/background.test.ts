@@ -6,6 +6,7 @@ import {
 } from "../src/messages";
 import { registerBackground } from "../src/background";
 import type { KnownTaskStore } from "../src/api";
+import type { PageStatus } from "../src/page-status";
 
 const mocks = vi.hoisted(() => {
   const local = new Map<string, unknown>();
@@ -178,4 +179,30 @@ it("does not store a read that finishes after a disconnect", async () => {
   await mocks.store!.write(["synthetic-task"]);
   expect(mocks.local.has("planConfig")).toBe(false);
   expect(mocks.sessionSet).not.toHaveBeenCalled();
+});
+
+it("keeps only a closed-set page status from Todoist and shows it to the options page", async () => {
+  const status: PageStatus = {
+    language: "en",
+    off: { taskTools: "detailMain" },
+  };
+  expect(await send({ kind: "reportPage", status })).toEqual({
+    ok: true,
+    value: null,
+  });
+  expect(mocks.local.get("pageStatus")).toEqual(status);
+  const refused = await send({
+    kind: "reportPage",
+    status: { ...status, title: "Synthetic task title" } as PageStatus,
+  });
+  expect(refused.ok).toBe(false);
+  expect(mocks.local.get("pageStatus")).toEqual(status);
+  // Only the options page reads it, and only Todoist pages report it.
+  expect((await send({ kind: "pageStatus" })).ok).toBe(false);
+  const options = "chrome-extension://synthetic/options.html";
+  expect((await send({ kind: "reportPage", status }, options)).ok).toBe(false);
+  expect(await send({ kind: "pageStatus" }, options)).toEqual({
+    ok: true,
+    value: status,
+  });
 });
