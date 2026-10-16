@@ -13,8 +13,8 @@ Todoist Plus deadlines, version 1 of the owner-approved design (start window, fa
 `SetTaskPlan.active`), is on local branch `claude/plus-deadlines`, based on `60309fac`; not pushed, no branch CI
 or release. "Deadlines · N" replaces "Needs a look" (Review above Waiting, Week below the calendar), Waiting
 rows show deadlines, Focus has one quiet line, task details say where a deadline stands and can mark it in
-progress (the literal `active` label, never created), and Todofy also hides Wait but with ddl, Waiting /
-Blocked and Active Deadlines behind a consistency test. Row actions show on hover or keyboard focus only (owner
+progress (the literal `active` label, never created), and Todofy also hides the three waiting and in-progress
+deadline filters, by exact query, behind a consistency test. Row actions show on hover or keyboard focus only (owner
 decision); `--plus-danger` now reads Todoist's overdue colour, because the attention tint misses 4.5:1 as text.
 Other views remembers open or closed. Dependencies, native row marks and `@blocked` mirroring are not built.
 Review fixes are in: Deadlines stays open once a row is acted on, statuses end at the right edge, a pending

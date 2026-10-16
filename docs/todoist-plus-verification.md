@@ -575,8 +575,9 @@ synthetic; Todoist, FlowDay and Cloudflare accounts were not touched.
   about 6.1:1 (dark). The error edge, the only other use, follows it.
 - Backend: additive `SetTaskPlanRequest.active` (field 7). `plan_labels` adds or removes only `active`; Todofy
   refuses `active: true` with `ACTION_NOT_ALLOWED` before any Sync write while the account has no label of that
-  exact name. `REPLACED_FILTER_QUERIES` adds Wait but with ddl (two spellings), Waiting / Blocked and Active
-  Deadlines; Quick / Ops and Parked stay native. No table, migration, dependency or budget change.
+  exact name. `REPLACED_FILTER_QUERIES` adds the waiting-with-deadline query (two spellings), `@blocked` and the
+  in-progress deadline query; the quick-task and parked filters stay native. No table, migration, dependency or
+  budget change.
 
 Local checks: proto format/lint, api-linter (69 files), breaking against `origin/main` `60309fac`, the rules
 self-test, deterministic generation (151 files), the schema check, 495 TypeScript and 113 Python codec cases.

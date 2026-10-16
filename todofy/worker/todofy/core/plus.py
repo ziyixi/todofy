@@ -39,13 +39,14 @@ REPLACED_FILTER_QUERIES = {
         f"{'day' if days == 1 else 'days'}&!@active&!@waiting&!@blocked&!@parked)"
         for label, days in LEADS.items()
     ),
-    # Wait but with ddl, Waiting / Blocked and Active Deadlines: the extension's Waiting and Deadlines lists.
+    # Waiting with a deadline (two spellings), all waiting and in progress with a deadline: the extension's
+    # Waiting and Deadlines lists.
     "!nodeadline&(@blocked)&!@parked",
     "!nodeadline&@blocked&!@parked",
     "@blocked",
     "@active&!nodeadline&!@blocked&!@parked",
 }
-# The owner's literal in-progress label, as the Active Deadlines filter names it. Plus never creates it.
+# The owner's literal in-progress label, as the in-progress deadline query names it. Plus never creates it.
 ACTIVE = "active"
 
 

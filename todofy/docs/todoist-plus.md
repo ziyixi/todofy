@@ -25,12 +25,12 @@ The extension background calls these routes using host permission; page CORS is 
 
 `ReadPlan` returns mapping, account-local dates and IDs of exactly matching replaced filter queries
 (`REPLACED_FILTER_QUERIES`, normalized without spaces and with `%` as `@`; generic label semantics only).
-Besides the planning views, Must Start and Missing Lead, they include Wait but with ddl
-(`!nodeadline&(@blocked)&!@parked`, also without the parentheses), Waiting / Blocked (`@blocked`) and Active
-Deadlines (`@active&!nodeadline&!@blocked&!@parked`), whose tasks the extension's Deadlines and Waiting lists
-show. Quick / Ops and Parked are not replaced. A query joins the set only with the consistency case in
-`tests/unit/test_plus.py`, which rebuilds each deadline or waiting query's task set over synthetic tasks
-and requires every task to be listed by the extension's rule, stated in API fields.
+Besides the planning, must-start and missing-lead views, they include waiting with a deadline
+(`!nodeadline&(@blocked)&!@parked`, also without the parentheses), all waiting (`@blocked`) and in progress
+with a deadline (`@active&!nodeadline&!@blocked&!@parked`), whose tasks the extension's Deadlines and Waiting
+lists show. The quick-task and parked views are not replaced. A query joins the set only with the
+consistency case in `tests/unit/test_plus.py`, which rebuilds each deadline or waiting query's task set over
+synthetic tasks and requires every task to be listed by the extension's rule, stated in API fields.
 Every Plan answer (ReadPlan, ConfirmPlanMapping, UpdatePlanLabels) also carries the weekly review's IDs:
 the mail project (`TODOIST_DEFAULT_PROJECT_ID`), the newest review task the GTD ledger created for this or
 the previous ISO week (`gtd_reviews`, open or not) and at most 100 tasks already recorded for next week.

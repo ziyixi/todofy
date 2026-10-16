@@ -216,7 +216,7 @@ def test_only_replaced_filter_queries_are_hidden():
             {"id": "unfamiliar", "query": "@bets | @custom"},
         ]
     ) == ["waiting"]
-    # Quick / Ops and Parked stay native, in Other views.
+    # The quick-task and parked views stay native, in Other views.
     assert plus.replaced_filters([{"id": "quick", "query": "@quick & (no date | 3 days)"}]) == []
     assert plus.replaced_filters([{"id": "parked", "query": "@parked"}]) == []
 
@@ -290,7 +290,7 @@ def listed_by_plus(view: dict) -> bool:
 def test_every_task_a_hidden_deadline_or_waiting_filter_shows_is_listed_in_plus():
     """Consistency gate: a replaced filter is hidden only while Plus lists every task it would show."""
     queries = [query for query in plus.REPLACED_FILTER_QUERIES if "deadline" in query or "blocked" in query]
-    # Must Start, Missing Lead, Wait but with ddl (two spellings), Waiting / Blocked and Active Deadlines.
+    # Must start, missing lead, waiting with a deadline (two spellings), all waiting and in progress with a deadline.
     assert len(queries) == 6
     marks = ["waiting", "blocked", "active", "parked"]
 

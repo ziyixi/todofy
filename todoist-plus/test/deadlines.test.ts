@@ -42,7 +42,7 @@ it("gives each task with a deadline the first matching state, from Todofy's flag
     task("none", { mustStart: true }),
     task("parked", { deadline: on(-2), labels: ["parked"], mustStart: true }),
     task("active", { deadline: on(12), labels: ["active"] }),
-    // @active with @blocked is not in progress: Todofy's Active Deadlines excludes it.
+    // @active with @blocked is not in progress: Todofy's in-progress deadline query excludes it.
     task("blockedActive", {
       deadline: on(3),
       labels: ["active", "blocked"],

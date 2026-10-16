@@ -3,7 +3,7 @@ import { words } from "./i18n";
 import { monthDay, readableDate, shortDay } from "./PlanningCalendar";
 import type { FlowDayPlan, Language, PlanState, PlanningTask } from "./model";
 
-/** The owner's literal in-progress label, as Todofy's Active Deadlines filter names it; never created. */
+/** The owner's literal in-progress label, as Todofy's in-progress deadline query names it; never created. */
 export const ACTIVE_LABEL = "active";
 
 /**
