@@ -45,12 +45,11 @@ const API_INIT = "GET /api/v1/serviceStatus as the isolate's first API request";
 const LEGACY = 'GET /api/v1/legacyTexts/{id} (1.9 MB of ASCII with escapes)';
 const REPORTS = 'GET /api/v1/latestReports (every report at its limits)';
 const PLUS = 'GET /api/plus/v1/tasks (200 tasks, token authenticated)';
-const FOCUS = 'GET /api/plus/flowday/api/v1/tasks (200 tasks, generated proxy)';
-// The generated FlowDay client decodes and the proxy re-encodes a full page. Its measured
-// 200-task page with 2,000-char titles and descriptions was 6.85 ms cold / 4.70 ms warm.
+const FOCUS = 'GET /api/plus/flowday/api/v1/tasks (100 tasks, the proxy\'s largest page)';
+// The generated FlowDay client decodes and the proxy re-encodes a full page. A 200-task page with 2,000-char titles
+// and descriptions reached 10.2 ms cold in CI, so the proxy caps a page at 100 tasks (plus.ts FOCUS_PAGE_MAX).
 // Keep this path's growth decision separate from the existing API ratchets and the Free 10 ms limit.
-// Full-page CI cold samples reached 8.16 ms; keep startup headroom under the unchanged Free limit.
-const FOCUS_COLD_BOUND_MS = 0.95 * FREE_CPU_MS;
+const FOCUS_COLD_BOUND_MS = 0.8 * FREE_CPU_MS;
 const FOCUS_BOUND_MS = 0.6 * FREE_CPU_MS;
 const PASSED_THROUGH = new Set([LEGACY, REPORTS]);
 
@@ -92,7 +91,7 @@ interface GatewayIsolate extends Isolate {
 async function startIsolate(): Promise<GatewayIsolate> {
   const h = await startHarness({
     answers: ANSWERS,
-    focusTasks: { tasks: Array.from({ length: 200 }, (_, n) => ({
+    focusTasks: { tasks: Array.from({ length: 100 }, (_, n) => ({
       name: `tasks/task-${String(n)}`, todoist_id: `task-${String(n)}`,
       title: 'Synthetic Focus task '.repeat(100).slice(0, 2000), description: 'Synthetic description. '.repeat(100).slice(0, 2000),
       project_display_name: 'Synthetic project', project_color: '#00ff00', priority: 4,
@@ -157,7 +156,7 @@ async function session({ h, meter }: GatewayIsolate): Promise<Measurement[]> {
   ];
   const measured: Measurement[] = [init];
   for (const [label, path, options] of requests) measured.push(await meter.measure(label, () => expectOk(h, path, options), RUNS));
-  for (const [label, path] of [[PLUS, '/api/plus/v1/tasks?page_size=200'], [FOCUS, '/api/plus/flowday/api/v1/tasks?page_size=200']]) {
+  for (const [label, path] of [[PLUS, '/api/plus/v1/tasks?page_size=200'], [FOCUS, '/api/plus/flowday/api/v1/tasks?page_size=100']]) {
     measured.push(await meter.measure(label ?? '', async () => {
       const response = await h.mf.dispatchFetch(`https://todofy-hooks.example.com${path ?? ''}`, {
         headers: { authorization: `Bearer todofy_plus_${'a'.repeat(43)}` },

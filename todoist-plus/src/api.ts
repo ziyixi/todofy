@@ -242,8 +242,9 @@ export function createApi(
     const estimates: Record<string, number> = {};
     const flowTasks: FocusState["flowTasks"] = {};
     let pageToken = "";
-    for (let page = 0; page < 10; page++) {
-      const result = await flowday.listTasks({ pageSize: 200, pageToken });
+    // The gateway caps a FlowDay page at 100 tasks; FlowDay syncs at most 1,000 Todoist tasks plus local ones.
+    for (let page = 0; page < 20; page++) {
+      const result = await flowday.listTasks({ pageSize: 100, pageToken });
       for (const task of result.tasks) {
         const id = task.name.slice("tasks/".length);
         flowTasks[id] = {

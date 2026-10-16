@@ -87,6 +87,19 @@ describe('Todoist Plus transport boundaries', () => {
     expect(forwarded).toEqual([expect.objectContaining({ destination: 'flows/2026-10-14', task_ids: ['step'] })]);
     expect(core.filter(call => call.method === 'plus_ui')).toHaveLength(0);
   });
+  it('caps a proxied FlowDay task page at 100 tasks', async () => {
+    const forwarded: string[] = [];
+    const { env } = fakes({}, () => true);
+    const connected = { ...env, FLOWDAY_FOCUS: { fetch: (request: Request) => {
+      forwarded.push(new URL(request.url).searchParams.get('page_size') ?? '');
+      return Promise.resolve(Response.json({ tasks: [] }));
+    } } as unknown as Fetcher };
+    for (const size of ['200', '50', '']) {
+      const query = size ? `?page_size=${size}` : '';
+      expect((await hooks(connected, `/api/plus/flowday/api/v1/tasks${query}`, { method: 'GET', headers: HEADERS })).status).toBe(200);
+    }
+    expect(forwarded).toEqual(['100', '50', '100']);
+  });
   it('rejects invalid completion day before issuing the Todoist command', async () => {
     const { env, core } = fakes({}, () => true);
     expect((await hooks(env, '/api/plus/v1/tasks:completeTask', api('POST', { ...COMPLETE, flow_date: '2026-02-30' }))).status).toBe(400);
