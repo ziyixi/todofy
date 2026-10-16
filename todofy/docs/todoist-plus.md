@@ -286,8 +286,8 @@ core refuses the unknown field), so until a later extension release every native
 FULL answer.
 
 The core's GitHub variable `TODOFY_PLUS_METADATA` is the rollback: `full` turns both caches off, so every
-metadata read is a full Sync and every extension token is checked in D1, as before them; `cache` (the value
-deployed while the variable is unset) turns them on. A label write on a Monday syncs once in either mode: the
+metadata read is a full Sync and every extension token is checked in D1, as before them; `cache` (bootstrap's
+value; a deploy refuses the variable unset, as for every switch) turns them on. A label write on a Monday syncs once in either mode: the
 Sync it starts with also serves the week reset that runs first. Under `full` two costs differ from the release
 before: a repeated `ConfirmPlanMapping` syncs once instead of twice, and a replayed planning write costs a full
 Sync and a task read (see [receipts](#receipts)). Change it like the other switches

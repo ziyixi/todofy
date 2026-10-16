@@ -95,7 +95,7 @@ vars, as is `BUILD_SHA`):
 | `TODOFY_PROCESSING_PAUSED` | `true` / `false` (required); core |
 | `TODOFY_FORCE_PAUSE_TODOIST` | `true` / `false` (required); core |
 | `TODOFY_GTD_REVIEW_ENABLED` | `true` / `false` (required); core. The Sunday review task ([gtd-features.md](gtd-features.md) §7); `false` stops it without a code change. The daily snapshot itself is committed (`GTD_COLLECT_UTC`) |
-| `TODOFY_PLUS_METADATA` | `cache` / `full` (optional, unset deploys `cache`); core. `full` is the rollback of Todoist Plus's caches ([todoist-plus.md](todoist-plus.md#caches)) |
+| `TODOFY_PLUS_METADATA` | `cache` / `full` (set like every switch; bootstrap sets `cache`, and a deploy refuses it unset); core. `full` is the rollback of Todoist Plus's caches ([todoist-plus.md](todoist-plus.md#caches)) |
 
 Every other setting is committed in the two production configs (top level = production; the repository
 is public, so nothing personal or secret goes there), and changing one is a commit:
