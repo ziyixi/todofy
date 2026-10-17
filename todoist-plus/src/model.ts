@@ -5,6 +5,8 @@ export type BetArea = Exclude<Area, "unassigned">;
 export type Stage = "none" | "quarterly" | "monthly" | "weekly" | "committed";
 export type View = "plan" | "focus" | "mailbox";
 export type Language = "en" | "zh";
+/** The Review board's lanes, left to right: Start now, Waiting, Parked, the four planning stages. */
+export type LaneId = "start" | "waiting" | "parked" | Exclude<Stage, "none">;
 export interface PlanningTask {
   id: string;
   title: string;
@@ -27,6 +29,13 @@ export interface PlanningTask {
   recurring?: boolean;
   /** Todoist's count of its completions, recurrences included; absent when Todoist does not say. */
   completedCount?: number;
+  /**
+   * Todoist's legacy position among its siblings (same project, section and parent); absent when
+   * Todoist does not say.
+   */
+  childOrder?: number;
+  /** Todoist's order key among the same siblings, compared bytewise; absent until Todoist has one. */
+  orderKey?: string;
 }
 /** One task waits for another; kept only in Todofy, never in Todoist (dependencies.ts). */
 export interface TaskDependency {
@@ -60,6 +69,11 @@ export interface PlanState {
   dependencies: TaskDependency[];
   /** The Bets saved for last, this and next week; a week and area with none is absent. */
   weeklyBets: WeeklyBet[];
+  /**
+   * The Review lanes the owner arranged, each first to last by Todoist ID, kept in Todofy's
+   * planning store; a lane never arranged is absent.
+   */
+  laneOrders: Partial<Record<LaneId, string[]>>;
 }
 /**
  * One week's Work or Personal Bet: the owner's own line of text, kept in Todofy's planning store
@@ -105,6 +119,13 @@ export interface DependencyResult {
   /** Tasks that stopped waiting because what they waited for left the list, Todoist not saying how. */
   released?: string[];
 }
+/** A reorder's confirmed result. */
+export interface ReorderResult {
+  /** The tasks as Todoist lists them now; only their order and update time are new. */
+  reordered: PlanningTask[];
+  /** The lane's saved order; absent when only Todoist's order changed. */
+  lane?: { lane: LaneId; taskIds: string[] };
+}
 /** A write's server-confirmed result; void means only a re-read can show it. */
 export type Confirmed =
   | void
@@ -116,7 +137,8 @@ export type Confirmed =
   | TimerSnapshot
   | WeeklyBet
   | WeeklyBet[]
-  | MailDeletion;
+  | MailDeletion
+  | ReorderResult;
 /**
  * A write shown before it is confirmed. Only the named cards wait, dimmed and fixed in place,
  * with the predicted change if any; a failure drops it again.
@@ -209,10 +231,13 @@ export interface PlusActions {
   load(weekStart?: string): Promise<PlusData>;
   readPlan(): Promise<PlanMetadata>;
   loadDays(weekStart: string): Promise<FlowDayPlan[]>;
-  /** `active` adds or removes the literal in-progress label, which the account must have. */
+  /**
+   * `active` adds or removes the literal in-progress label, and `parked` the literal set-aside
+   * label (adding it removes every planning label and `active`); the account must have the label.
+   */
   updateTask(
     task: PlanningTask,
-    update: { stage?: Stage; area?: Area; active?: boolean },
+    update: { stage?: Stage; area?: Area; active?: boolean; parked?: boolean },
   ): Promise<PlanningTask>;
   /**
    * Saves a Bet's text over the one with `bet.etag`. Rejects with BetNotSaved when Todofy says it
@@ -291,4 +316,15 @@ export interface PlusActions {
    * read; a repeat with the same request ID finishes the rest and deletes nothing twice.
    */
   deleteMail(taskIds: string[], requestId: string): Promise<MailDeletion>;
+  /**
+   * Puts these tasks in this order, at most 100: `lane`'s order in Todofy's planning store, or
+   * none for "". In Todoist, the siblings of `movedId` among them (same project, section and
+   * parent) swap their positions into this order; Waiting and Parked never change Todoist.
+   */
+  reorderTasks(
+    taskIds: string[],
+    movedId: string,
+    lane: LaneId | "",
+    requestId: string,
+  ): Promise<ReorderResult>;
 }

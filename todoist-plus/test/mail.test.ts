@@ -76,6 +76,7 @@ const plan = (tasks: PlanningTask[]): PlanState => ({
   nextWeekTaskIds: [],
   dependencies: [],
   weeklyBets: [],
+  laneOrders: {},
 });
 const idle = (fields: Partial<PlanContext> = {}): PlanContext => ({
   tasks: [],

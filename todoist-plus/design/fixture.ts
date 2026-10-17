@@ -3,6 +3,7 @@ import { BetNotSaved, betText, weeklyBet, withBets } from "../src/bets";
 import { addDays } from "../src/domain";
 import { apiPriority } from "../src/mail";
 import { STAGE_ROLES } from "../src/planning-outcomes";
+import { withLaneOrder } from "../src/plan-updates";
 import type {
   FocusState,
   FlowDayPlan,
@@ -73,6 +74,7 @@ export function createPrototype(
     reviewTaskId: "weekly-review",
     nextWeekTaskIds: [],
     dependencies: [],
+    laneOrders: {},
     // This week's Work Bet; the Personal one is empty, so last week's is offered to keep.
     weeklyBets: [
       {
@@ -247,6 +249,14 @@ export function createPrototype(
       }),
     );
   }
+  // Todoist's position of each task among its siblings, in the order listed here.
+  const siblings = new Map<string, number>();
+  plan.tasks = plan.tasks.map((item) => {
+    const group = `${item.projectId}|${item.parentId}`;
+    const childOrder = (siblings.get(group) ?? 0) + 1;
+    siblings.set(group, childOrder);
+    return { ...item, childOrder };
+  });
   // Todofy's mail: each mail task Mail Hero created, by task ID, and its summary by mail ID
   // (synthetic text only).
   const mail = new Map<string, MailItem>(
@@ -389,12 +399,20 @@ export function createPrototype(
       return metadata as PlanMetadata;
     },
     async createSteps(item, drafts) {
-      const created = drafts.map((draft) =>
+      // As Todoist appends sub-tasks: after the parent's other children.
+      const last = Math.max(
+        0,
+        ...plan.tasks
+          .filter((task) => task.parentId === item.id)
+          .map((task) => task.childOrder ?? 0),
+      );
+      const created = drafts.map((draft, index) =>
         task(crypto.randomUUID(), draft.title, {
           parentId: item.id,
           projectId: item.projectId,
           area: item.area,
           estimatedMinutes: draft.estimatedMinutes,
+          childOrder: last + index + 1,
         }),
       );
       plan = { ...plan, tasks: [...plan.tasks, ...created] };
@@ -640,6 +658,45 @@ export function createPrototype(
         deletedTaskIds: deleted,
         keptTaskIds: taskIds.filter((id) => !deleted.includes(id)),
       };
+    },
+    async reorderTasks(taskIds, movedId, lane) {
+      // As Todofy reorders: the moved task's siblings among these take their existing positions in
+      // this order (never in Waiting or Parked), and the lane keeps the order of those still active.
+      const listed = taskIds.flatMap(
+        (id) => plan.tasks.find((task) => task.id === id) ?? [],
+      );
+      const moved = listed.find((task) => task.id === movedId);
+      const group = listed.filter(
+        (task) =>
+          task.projectId === moved?.projectId &&
+          task.parentId === moved?.parentId,
+      );
+      const orders = group.map((task) => task.childOrder ?? NaN);
+      if (
+        lane !== "waiting" &&
+        lane !== "parked" &&
+        orders.every(Number.isInteger) &&
+        new Set(orders).size === orders.length
+      ) {
+        const sorted = [...orders].sort((a, b) => a - b);
+        const positions = new Map(
+          group.map((task, index) => [task.id, sorted[index]]),
+        );
+        plan = {
+          ...plan,
+          tasks: plan.tasks.map((task) =>
+            positions.has(task.id)
+              ? { ...task, childOrder: positions.get(task.id) }
+              : task,
+          ),
+        };
+      }
+      const ids = listed.map((task) => task.id);
+      if (lane) plan = withLaneOrder(plan, lane, ids);
+      return structuredClone({
+        reordered: ids.map((id) => plan.tasks.find((task) => task.id === id)!),
+        ...(lane ? { lane: { lane, taskIds: ids } } : {}),
+      });
     },
   };
 }

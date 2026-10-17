@@ -22,13 +22,13 @@ import {
   cardStatus,
   statusLine,
   type BoardLanes,
-  type LaneId,
 } from "./review-lanes";
 import { PendingMark } from "./StatusMarks";
 import { words } from "./i18n";
 import type {
   Area,
   FlowDayPlan,
+  LaneId,
   Language,
   PlanState,
   PlanningTask,

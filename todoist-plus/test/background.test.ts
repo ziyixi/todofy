@@ -25,6 +25,7 @@ const mocks = vi.hoisted(() => {
     readPlan: vi.fn(),
     setWeeklyBet: vi.fn(),
     deleteMail: vi.fn(),
+    reorderTasks: vi.fn(),
     sessionSet: vi.fn(),
     store: undefined as KnownTaskStore | undefined,
   };
@@ -59,6 +60,7 @@ vi.mock("../src/api", () => ({
       readPlan: mocks.readPlan,
       setWeeklyBet: mocks.setWeeklyBet,
       deleteMail: mocks.deleteMail,
+      reorderTasks: mocks.reorderTasks,
     };
   },
   publicError: (error: unknown) =>
@@ -354,4 +356,31 @@ it("passes a Mailbox action to Todofy with its arguments and answers its result"
     ["m1"],
     "11111111-1111-4111-8111-111111111111",
   );
+});
+
+it("passes a reorder to Todofy with the moved task and its lane, and answers the saved order", async () => {
+  mocks.local.set("connection", {
+    apiOrigin: "https://api.example.test",
+    token: "synthetic",
+  });
+  const result = {
+    reordered: [],
+    lane: { lane: "parked", taskIds: ["b", "a"] },
+  };
+  mocks.reorderTasks.mockResolvedValue(result);
+  const args = [
+    ["b", "a"],
+    "b",
+    "parked",
+    "33333333-3333-4333-8333-333333333333",
+  ];
+  expect(
+    await send({
+      kind: "action",
+      protocol: PLANNING_PROTOCOL,
+      method: "reorderTasks",
+      args,
+    }),
+  ).toEqual({ ok: true, value: result });
+  expect(mocks.reorderTasks).toHaveBeenCalledWith(...args);
 });

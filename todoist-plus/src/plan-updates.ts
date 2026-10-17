@@ -6,9 +6,11 @@ import type {
   Confirmed,
   DependencyResult,
   FlowDayPlan,
+  LaneId,
   PlanState,
   PlanningTask,
   PlusData,
+  ReorderResult,
   Stage,
   WeeklyBet,
 } from "./model";
@@ -63,6 +65,54 @@ function withWeeklyBets(data: PlusData, bets: WeeklyBet[]): PlusData {
   };
 }
 
+/**
+ * A lane's new order as Todofy saves it: its tasks leave every other lane's order, and a lane left
+ * with none is removed.
+ */
+export function withLaneOrder(
+  plan: PlanState,
+  lane: LaneId,
+  taskIds: readonly string[],
+): PlanState {
+  const ordered = new Set(taskIds);
+  const laneOrders: PlanState["laneOrders"] = {};
+  for (const [other, ids] of Object.entries(plan.laneOrders) as [
+    LaneId,
+    string[],
+  ][]) {
+    const kept = ids.filter((id) => !ordered.has(id));
+    if (other !== lane && kept.length) laneOrders[other] = kept;
+  }
+  if (taskIds.length) laneOrders[lane] = [...taskIds];
+  return { ...plan, laneOrders };
+}
+
+/**
+ * A confirmed reorder: only Todoist's new positions and update times are merged (estimates come
+ * from FlowDay), and the lane's saved order.
+ */
+function withReorder(data: PlusData, result: ReorderResult): PlusData {
+  const saved = new Map(result.reordered.map((task) => [task.id, task]));
+  const tasks = data.plan.tasks.map((task) => {
+    const next = saved.get(task.id);
+    return next
+      ? {
+          ...task,
+          childOrder: next.childOrder,
+          orderKey: next.orderKey,
+          updatedAt: next.updatedAt,
+        }
+      : task;
+  });
+  const plan = { ...data.plan, tasks };
+  return {
+    ...data,
+    plan: result.lane
+      ? withLaneOrder(plan, result.lane.lane, result.lane.taskIds)
+      : plan,
+  };
+}
+
 /** Shows a write's confirmed server result without reading everything again. */
 export function applyConfirmed(data: PlusData, confirmed: Confirmed): PlusData {
   if (!confirmed) return data;
@@ -99,6 +149,7 @@ export function applyConfirmed(data: PlusData, confirmed: Confirmed): PlusData {
       },
     };
   }
+  if ("reordered" in confirmed) return withReorder(data, confirmed);
   if ("id" in confirmed) return withTasks(data, [confirmed]);
   if (!("managedLabels" in confirmed)) return withDependencies(data, confirmed);
   return { ...data, plan: { ...confirmed, tasks: data.plan.tasks } };
@@ -111,7 +162,7 @@ export function applyConfirmed(data: PlusData, confirmed: Confirmed): PlusData {
  */
 export function withNextWeek(
   data: PlusData,
-  update: { stage?: Stage; area?: Area; active?: boolean },
+  update: { stage?: Stage; area?: Area; active?: boolean; parked?: boolean },
   saved: PlanningTask,
 ): PlusData {
   const { plan } = data;

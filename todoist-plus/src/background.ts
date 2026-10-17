@@ -229,6 +229,8 @@ export function registerBackground() {
             return client.fileMail(...message.args);
           case "deleteMail":
             return client.deleteMail(...message.args);
+          case "reorderTasks":
+            return client.reorderTasks(...message.args);
           default:
             throw new Error("Unsupported extension operation.");
         }

@@ -5,6 +5,7 @@ import {
 } from "@ziyixi/proto/http-client";
 import {
   PlusService,
+  type LaneOrder as ApiLaneOrder,
   type MailCategory as ApiMailCategory,
   type Plan as ApiPlan,
   type PlanningTask as ApiPlanningTask,
@@ -29,12 +30,14 @@ import type {
   BetArea,
   FlowDayPlan,
   FocusState,
+  LaneId,
   MailCategories,
   MailCategory,
   MailLookup,
   PlanMetadata,
   PlanningTask,
   PlusActions,
+  ReorderResult,
   TaskDependency,
   TimerSnapshot,
   WeeklyBet,
@@ -108,6 +111,8 @@ export function planningTask(task: ApiPlanningTask): PlanningTask {
       new Date(Number(task.updateTime.seconds) * 1000).toISOString(),
     recurring: task.recurring,
     completedCount: task.completedCount,
+    childOrder: task.childOrder,
+    orderKey: task.orderKey,
   };
 }
 function taskDependency(dependency: ApiTaskDependency): TaskDependency {
@@ -169,6 +174,22 @@ function mailCategories(answer: {
     ),
   };
 }
+/** The lanes Todofy keeps an order for (core/plan.py LANES). */
+const LANES: readonly string[] = [
+  "start",
+  "waiting",
+  "parked",
+  "quarterly",
+  "monthly",
+  "weekly",
+  "committed",
+];
+/** A lane's saved order; undefined for a lane this build does not know. */
+function laneOrder(order: ApiLaneOrder): ReorderResult["lane"] {
+  return LANES.includes(order.lane)
+    ? { lane: order.lane as LaneId, taskIds: order.taskIds }
+    : undefined;
+}
 function planMetadata(plan: ApiPlan): PlanMetadata {
   return {
     week: plan.weekStart,
@@ -192,6 +213,12 @@ function planMetadata(plan: ApiPlan): PlanMetadata {
     nextWeekTaskIds: plan.nextWeekTaskIds,
     dependencies: plan.dependencies.map(taskDependency),
     weeklyBets: plan.weeklyBets.flatMap((bet) => weeklyBet(bet) ?? []),
+    laneOrders: Object.fromEntries(
+      plan.laneOrders.flatMap((order) => {
+        const saved = laneOrder(order);
+        return saved ? [[saved.lane, saved.taskIds]] : [];
+      }),
+    ),
   };
 }
 function timerSnapshot(session: TimerSession): TimerSnapshot {
@@ -657,6 +684,18 @@ export function createApi(
       return {
         deletedTaskIds: result.deletedTaskIds,
         keptTaskIds: result.keptTaskIds,
+      };
+    },
+    async reorderTasks(taskIds, movedId, lane, requestId) {
+      const result = await plus.reorderTasks({
+        requestId,
+        taskIds,
+        taskId: movedId,
+        lane,
+      });
+      return {
+        reordered: result.tasks.map(planningTask),
+        lane: result.laneOrder && laneOrder(result.laneOrder),
       };
     },
   };

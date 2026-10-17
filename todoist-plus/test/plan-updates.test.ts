@@ -124,3 +124,57 @@ it("drops the mail tasks a confirmed deletion removed, and only those, without a
   expect(after.plan.weeklyBets).toBe(data.plan.weeklyBets);
   expect(rereadsAfter(deletion)).toBe(false);
 });
+
+it("merges a confirmed reorder's Todoist positions and the lane's saved order, and nothing else", async () => {
+  const data = await createPrototype().load();
+  const before = (id: string) =>
+    data.plan.tasks.find((task) => task.id === id)!;
+  const planned = {
+    ...data,
+    plan: { ...data.plan, laneOrders: { weekly: ["copy", "tools"] } },
+  };
+  // Todoist's answer carries no FlowDay estimate and a stale title; only the order fields count.
+  const after = applyConfirmed(planned, {
+    reordered: [
+      {
+        ...before("layout"),
+        title: "Not merged",
+        estimatedMinutes: undefined,
+        childOrder: 1,
+        orderKey: "a0",
+        updatedAt: "2026-10-13T08:00:00.000Z",
+      },
+      { ...before("copy"), childOrder: 2 },
+    ],
+    lane: { lane: "committed", taskIds: ["layout", "copy"] },
+  });
+  const task = (id: string) => after.plan.tasks.find((item) => item.id === id)!;
+  expect(task("layout")).toEqual({
+    ...before("layout"),
+    childOrder: 1,
+    orderKey: "a0",
+    updatedAt: "2026-10-13T08:00:00.000Z",
+  });
+  expect(task("copy")).toEqual({ ...before("copy"), childOrder: 2 });
+  // As Todofy saves it, the lane's tasks leave every other lane's order.
+  expect(after.plan.laneOrders).toEqual({
+    weekly: ["tools"],
+    committed: ["layout", "copy"],
+  });
+  expect(after.days).toBe(data.days);
+  expect(rereadsAfter({ reordered: [] })).toBe(false);
+  // Only Todoist's order: no lane is saved, and a lane left empty goes.
+  const unlaned = applyConfirmed(planned, { reordered: [] });
+  expect(unlaned.plan.laneOrders).toBe(planned.plan.laneOrders);
+  expect(
+    applyConfirmed(planned, {
+      reordered: [],
+      lane: { lane: "weekly", taskIds: [] },
+    }).plan.laneOrders,
+  ).toEqual({});
+  // A dependency result is not a reorder.
+  expect(
+    applyConfirmed(planned, { forTask: "copy", dependencies: [] }).plan
+      .laneOrders,
+  ).toBe(planned.plan.laneOrders);
+});

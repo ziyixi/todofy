@@ -311,3 +311,103 @@ it("answers the new steps' IDs, and after one FlowDay sync knows every task the 
   );
   expect(syncs).toBe(2);
 });
+
+it("maps Todoist's sibling order and the saved lane orders, and sends a reorder with the moved task", async () => {
+  const requests: { path: string; body: Record<string, unknown> }[] = [];
+  const api = createApi(
+    { apiOrigin: "https://api.example.test", token: "synthetic" },
+    async (input, init) => {
+      const path = new URL(String(input)).pathname;
+      const body = init?.body
+        ? (JSON.parse(String(init.body)) as Record<string, unknown>)
+        : {};
+      requests.push({ path, body });
+      if (path === "/api/plus/v1/plan:read")
+        return Response.json({
+          plan: {
+            week_start: "2026-10-12",
+            today: "2026-10-13",
+            timezone: "UTC",
+            enabled: true,
+            // A lane a later Todofy might add is not this build's.
+            lane_orders: [
+              { lane: "committed", task_ids: ["b", "a"] },
+              { lane: "someday", task_ids: ["c"] },
+            ],
+          },
+        });
+      if (path === "/api/plus/v1/tasks:reorder")
+        return Response.json({
+          tasks: [
+            {
+              id: "b",
+              title: "Synthetic b",
+              child_order: -3,
+              order_key: "a0",
+              update_time: "2026-10-13T08:00:00Z",
+            },
+            { id: "a", title: "Synthetic a", child_order: 4 },
+          ],
+          lane_order: { lane: "committed", task_ids: ["b", "a"] },
+        });
+      throw new Error(`Unexpected request: ${path}`);
+    },
+  );
+  expect((await api.readPlan()).laneOrders).toEqual({ committed: ["b", "a"] });
+  const result = await api.reorderTasks(
+    ["b", "a"],
+    "b",
+    "committed",
+    "22222222-2222-4222-8222-222222222222",
+  );
+  expect(requests.at(-1)).toEqual({
+    path: "/api/plus/v1/tasks:reorder",
+    body: {
+      request_id: "22222222-2222-4222-8222-222222222222",
+      task_ids: ["b", "a"],
+      task_id: "b",
+      lane: "committed",
+    },
+  });
+  expect(
+    result.reordered.map(({ id, childOrder, orderKey, updatedAt }) => ({
+      id,
+      childOrder,
+      orderKey,
+      updatedAt,
+    })),
+  ).toEqual([
+    {
+      id: "b",
+      childOrder: -3,
+      orderKey: "a0",
+      updatedAt: "2026-10-13T08:00:00.000Z",
+    },
+    { id: "a", childOrder: 4, orderKey: undefined, updatedAt: undefined },
+  ]);
+  expect(result.lane).toEqual({ lane: "committed", taskIds: ["b", "a"] });
+});
+
+it("sends a parked change as SetTaskPlan's parked field", async () => {
+  const bodies: Record<string, unknown>[] = [];
+  const api = createApi(
+    { apiOrigin: "https://api.example.test", token: "synthetic" },
+    async (_input, init) => {
+      bodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+      return Response.json({ task: { id: "a", title: "Synthetic a" } });
+    },
+  );
+  const task = { id: "a", etag: "a-1" } as Parameters<typeof api.updateTask>[0];
+  await api.updateTask(task, { parked: true });
+  await api.updateTask(task, { stage: "monthly", parked: false });
+  expect(bodies).toEqual([
+    { task_id: "a", etag: "a-1", request_id: expect.any(String), parked: true },
+    {
+      task_id: "a",
+      etag: "a-1",
+      request_id: expect.any(String),
+      stage: "monthly",
+      parked: false,
+    },
+  ]);
+});

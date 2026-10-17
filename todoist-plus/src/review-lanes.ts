@@ -12,10 +12,9 @@ import {
 } from "./dependencies";
 import { isDateCandidate, planningOutcomes } from "./planning-outcomes";
 import { untouchedText, waits } from "./weekly-review";
-import type { Language, PlanState, PlanningTask, Stage } from "./model";
+import type { LaneId, Language, PlanState, PlanningTask, Stage } from "./model";
 
-/** The Review board's lanes, left to right: Start now, Waiting, the four planning stages. */
-export type LaneId = "start" | "waiting" | Exclude<Stage, "none">;
+export type { LaneId } from "./model";
 export type BoardLanes = Record<LaneId, PlanningTask[]>;
 
 /** What a card says besides its title and area: that it waits, or that it should start. */
@@ -52,6 +51,7 @@ export function boardLanes(
   const lanes: BoardLanes = {
     start: [],
     waiting: [],
+    parked: [],
     quarterly: [],
     monthly: [],
     weekly: [],

@@ -78,6 +78,8 @@ export const extensionActions: PlusActions = {
     call({ kind: "action", method: "updateMailSettings", args }),
   fileMail: (...args) => call({ kind: "action", method: "fileMail", args }),
   deleteMail: (...args) => call({ kind: "action", method: "deleteMail", args }),
+  reorderTasks: (...args) =>
+    call({ kind: "action", method: "reorderTasks", args }),
 };
 /** The last confirmed ID-only configuration, read from disk without a network request. */
 export async function cachedPlanConfig(): Promise<PlanConfig | undefined> {

@@ -318,7 +318,7 @@ Plus 隐藏原生界面的前提是替代界面已挂载，失败路径都恢复
 | 全部删除             | DeleteMailItems：全新读取后只删未动过的，`item_delete` 先冻结进回执，每次 Sync 至多 100 条       | 删除和保留的任务 ID；删除的任务直接从计划中去掉       |
 | 邮件归类             | ReadMailSettings、UpdateMailSettings（整组替换，只写 D1，可为空；`destination` 固定发 `inbox`）  | 保存后的归类和 etag；不再读取去处和项目               |
 
-background 持有连接口令，content script 只发送封闭的类型化消息。升级沿用原目录和 storage.local 的 connection，不重置口令。Plan 的视图状态用非操作消息 `planView`（`src/plan-view-state.ts`）：不带 patch 时读取，带 patch 时只合并改动的字段并返回合并结果；background 依次合并，两个标签页改不同字段互不覆盖，形状和上限之外的（未知字段、不是 ID 的值、超过 6 行或 200 个保留项）一律拒绝，只接受 Todoist 页面发来的消息。当前内部操作消息使用 planning protocol 6（3：写入返回确认结果，新增 ReadPlan，加入今天与移出日期改为单项操作；4：本周目标改为文字的 setWeeklyBet，不再发送 `bet`；没有保存的目标以 `{notSaved}` 值跨过消息边界，页面再抛出 BetNotSaved；5：邮件页的六个操作；6：邮件归入收件箱，不再选去处，归类可以为空）；旧脚本收到明确刷新提示，刷新 Todoist 后使用新语义。初次读取并行获取独立数据；切周只读七天队列。App 合并确认任务、标签映射、队列和计时响应，原有读取序号保护正在查看的周，Plan／Focus 切换不扫描所有任务。离开自定义页面进入原生 Todoist 后卸载，返回时先显示内存中的上次确认数据，再后台重新读取；读取完成前不开放写入。
+background 持有连接口令，content script 只发送封闭的类型化消息。升级沿用原目录和 storage.local 的 connection，不重置口令。Plan 的视图状态用非操作消息 `planView`（`src/plan-view-state.ts`）：不带 patch 时读取，带 patch 时只合并改动的字段并返回合并结果；background 依次合并，两个标签页改不同字段互不覆盖，形状和上限之外的（未知字段、不是 ID 的值、超过 6 行或 200 个保留项）一律拒绝，只接受 Todoist 页面发来的消息。当前内部操作消息使用 planning protocol 6（3：写入返回确认结果，新增 ReadPlan，加入今天与移出日期改为单项操作；4：本周目标改为文字的 setWeeklyBet，不再发送 `bet`；没有保存的目标以 `{notSaved}` 值跨过消息边界，页面再抛出 BetNotSaved；5：邮件页的六个操作；6：邮件归入收件箱，不再选去处，归类可以为空；搁置、列内与下一步排序（ReorderTasks））；旧脚本收到明确刷新提示，刷新 Todoist 后使用新语义。初次读取并行获取独立数据；切周只读七天队列。App 合并确认任务、标签映射、队列和计时响应，原有读取序号保护正在查看的周，Plan／Focus 切换不扫描所有任务。离开自定义页面进入原生 Todoist 后卸载，返回时先显示内存中的上次确认数据，再后台重新读取；读取完成前不开放写入。
 
 ## 实现文件
 

@@ -104,6 +104,7 @@ it("gives every task at most one lane: its own stage, then Waiting, then Start n
   ];
   expect(laneIds(tasks)).toEqual({
     start: ["past", "dated-start", "step"],
+    parked: [],
     quarterly: [],
     monthly: ["staged-wait"],
     weekly: ["dated", "week"],
