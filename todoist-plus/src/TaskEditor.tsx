@@ -4,6 +4,7 @@ import { displayedTitle, formattedMinutes } from "./domain";
 import { detailStatus } from "./deadlines";
 import { TaskDependencies } from "./TaskDependencies";
 import { words } from "./i18n";
+import { PARKED_LABEL } from "./planning-outcomes";
 import { PendingMark } from "./StatusMarks";
 import { ACTIVE_LABEL } from "./weekly-review";
 import type {
@@ -111,6 +112,9 @@ export function TaskEditor({
   // From the fields as shown, so a date being chosen already says where it stands.
   const status = detailStatus(task, deadline, lead, today, language);
   const active = task.labels.includes(ACTIVE_LABEL);
+  // Set aside: a stage or "in progress" chosen here takes it out of Parked too, as a drag out of
+  // that lane does; otherwise the card would stay there, whatever its stage.
+  const parked = task.labels.includes(PARKED_LABEL);
   const estimateValues = [
     ...new Set([
       15,
@@ -125,7 +129,9 @@ export function TaskEditor({
 
   async function toggleActive() {
     const title = displayedTitle(task.title);
-    if (await run(() => actions.updateTask(task, { active: !active })))
+    const update =
+      parked && !active ? { active: true, parked: false } : { active: !active };
+    if (await run(() => actions.updateTask(task, update)))
       setAnnouncement(
         `${active ? text.unmarkedActive : text.markedActive}: ${title}`,
       );
@@ -229,6 +235,9 @@ export function TaskEditor({
             void run(() =>
               actions.updateTask(task, {
                 ...(stage !== task.stage ? { stage } : {}),
+                ...(stage !== task.stage && stage !== "none" && parked
+                  ? { parked: false }
+                  : {}),
                 ...(area !== task.area ? { area } : {}),
               }),
             )

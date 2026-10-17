@@ -603,6 +603,76 @@ it("says where a deadline stands in task details and marks it in progress there"
   await act(async () => {});
 });
 
+it("takes a parked task out of Parked when its details save a stage or mark it in progress", async () => {
+  const actions = createPrototype();
+  const update = vi
+    .spyOn(actions, "updateTask")
+    .mockImplementation(async (task) => task);
+  const { data } = await setup(undefined, actions);
+  const garden = data.plan.tasks.find((task) => task.id === "garden")!;
+  const visa = data.plan.tasks.find((task) => task.id === "visa")!;
+  const run = vi.fn(async (operation: () => Promise<unknown>) => {
+    await operation();
+    return true;
+  });
+  const editor = (task: PlanningTask) => (
+    <TaskEditor
+      key={task.id}
+      task={task}
+      tasks={data.plan.tasks}
+      dependencies={data.plan.dependencies}
+      language="en"
+      busy={false}
+      run={run}
+      actions={actions}
+      todayTaskIds={[]}
+      today={TODAY}
+      canMarkActive
+      addFocus={vi.fn()}
+      onOpenTask={vi.fn()}
+    />
+  );
+  // The planning row's Save, not the deadline's.
+  const saveButton = () =>
+    within(
+      document.querySelector<HTMLElement>(".plus-editor-planning")!,
+    ).getByRole("button", { name: "Save" });
+  const save = (stage: string) => {
+    fireEvent.change(screen.getByLabelText("Planning"), {
+      target: { value: stage },
+    });
+    fireEvent.click(saveButton());
+  };
+  const { rerender } = render(editor(garden));
+  save("committed");
+  await waitFor(() => expect(update).toHaveBeenCalledOnce());
+  expect(update.mock.calls[0]![1]).toEqual({
+    stage: "committed",
+    parked: false,
+  });
+  // An area alone leaves it where it is.
+  fireEvent.change(screen.getByLabelText("Planning"), {
+    target: { value: "none" },
+  });
+  fireEvent.change(screen.getByLabelText("Work / Personal"), {
+    target: { value: "work" },
+  });
+  fireEvent.click(saveButton());
+  await waitFor(() => expect(update).toHaveBeenCalledTimes(2));
+  expect(update.mock.calls[1]![1]).toEqual({ area: "work" });
+  // A task not set aside sends no `parked`.
+  rerender(editor(visa));
+  save("monthly");
+  await waitFor(() => expect(update).toHaveBeenCalledTimes(3));
+  expect(update.mock.calls[2]![1]).toEqual({ stage: "monthly" });
+  // Marked in progress, a parked task with a deadline leaves Parked as well.
+  rerender(editor({ ...garden, deadline: on(9), leadDays: 7 }));
+  fireEvent.click(screen.getByRole("button", { name: "Mark in progress" }));
+  await waitFor(() => expect(update).toHaveBeenCalledTimes(4));
+  expect(update.mock.calls[3]![1]).toEqual({ active: true, parked: false });
+  await act(async () => {});
+});
+
 it("tells screen readers how to drag in the page's language, on Review and on Week", async () => {
   const { props } = await setup();
   render(<PlanView {...props} language="zh" />);
