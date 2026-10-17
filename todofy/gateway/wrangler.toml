@@ -62,10 +62,17 @@ binding = "FLOWDAY_FOCUS"
 service = "flowday"
 entrypoint = "FocusEntrypoint"
 
+[[services]]
+binding = "FLOWDAY_NATIVE_FOCUS"
+service = "flowday"
+entrypoint = "NativeFocusEntrypoint"
+
 [triggers]
 crons = ["*/10 * * * *"]
 
 [vars]
+TASK_SOURCE = "tasks"
+TASKS_PUBLIC_URL = "https://tasks.ziyixi.science"
 TODOFY_PUBLIC_HOST = "todofy.ziyixi.science"
 FLOWDAY_PUBLIC_URL = "https://flowday.ziyixi.science"
 TODOFY_HOOKS_HOSTS = "todofy-hooks.ziyixi.science,daily.ziyixi.science"

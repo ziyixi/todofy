@@ -231,6 +231,11 @@
           "name": "PUBLIC_HOST",
           "type": "plain_text",
           "source": "config"
+        },
+        {
+          "name": "TASKS",
+          "type": "service",
+          "source": "config"
         }
       ],
       "personal": []
@@ -763,13 +768,38 @@
           "source": "config"
         },
         {
+          "name": "ACCESS_OWNER",
+          "type": "secret_text",
+          "source": "deploy"
+        },
+        {
+          "name": "ACCESS_OWNER_ALIASES",
+          "type": "secret_text",
+          "source": "deploy"
+        },
+        {
           "name": "ASSETS",
           "type": "assets",
           "source": "config"
         },
         {
+          "name": "BUILD_SHA",
+          "type": "plain_text",
+          "source": "deploy"
+        },
+        {
+          "name": "CSRF_SIGNING_KEY",
+          "type": "secret_text",
+          "source": "deploy"
+        },
+        {
           "name": "DB",
           "type": "d1",
+          "source": "config"
+        },
+        {
+          "name": "PLANNING",
+          "type": "service",
           "source": "config"
         },
         {
@@ -845,6 +875,11 @@
           "source": "config"
         },
         {
+          "name": "FLOWDAY_NATIVE_FOCUS",
+          "type": "service",
+          "source": "config"
+        },
+        {
           "name": "FLOWDAY_PUBLIC_URL",
           "type": "plain_text",
           "source": "config"
@@ -874,6 +909,16 @@
           "name": "REPORT_BASIC_AUTH_SHA256",
           "type": "secret_text",
           "source": "manual"
+        },
+        {
+          "name": "TASKS_PUBLIC_URL",
+          "type": "plain_text",
+          "source": "config"
+        },
+        {
+          "name": "TASK_SOURCE",
+          "type": "plain_text",
+          "source": "config"
         },
         {
           "name": "TODOFY_HOOKS_HOSTS",
@@ -1003,6 +1048,21 @@
         },
         {
           "name": "REPORT_PRECOMPUTE_UTC",
+          "type": "plain_text",
+          "source": "config"
+        },
+        {
+          "name": "TASKS",
+          "type": "service",
+          "source": "config"
+        },
+        {
+          "name": "TASKS_PUBLIC_URL",
+          "type": "plain_text",
+          "source": "config"
+        },
+        {
+          "name": "TASK_SOURCE",
           "type": "plain_text",
           "source": "config"
         },

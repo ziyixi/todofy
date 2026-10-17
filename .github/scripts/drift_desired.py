@@ -62,6 +62,7 @@ WRAPPERS = {
     "dashboard": {"language": "js", "file": "dashboard/deploy/deploy-vars.mjs", "vars": "home", "secrets": "home"},
     "flowday": {"language": "js", "file": "flowday/deploy/deploy-vars.mjs", "vars": "flowday", "secrets": "flowday"},
     "links": {"language": "js", "file": "links/deploy/deploy-vars.mjs", "vars": "links", "secrets": "links"},
+    "tasks": {"language": "js", "file": "tasks/deploy/deploy-vars.mjs", "vars": "tasks", "secrets": "tasks"},
     "watch": {"language": "js", "file": "watch/deploy/deploy-vars.mjs", "vars": "watch", "secrets": "watch"},
     "fleet": {"language": "js", "file": "fleet/deploy/deploy-vars.mjs", "vars": "fleet", "secrets": "fleet"},
     "mailsort": {"language": "js", "file": "mailsort/deploy/deploy-vars.mjs", "vars": "mailsort", "secrets": "mailsort"},
@@ -161,6 +162,9 @@ def config_bindings(worker: str, config: dict) -> list[dict]:
 # Placeholder inputs for a wrapper's secrets function, by input name: the same kind of synthetic values the CI
 # dry-runs use. Only the names of the returned secrets are kept.
 def _placeholder(name: str) -> str:
+    bundle = next((spec for spec in SECRET_SPECS.values() if spec["github_secret"] == name), None)
+    if bundle is not None:
+        return json.dumps({binding: _placeholder(binding) for binding in bundle["required"]})
     if name.endswith("_ALIASES"):
         return ""
     if "OWNER" in name or "ADDRESS" in name or name.endswith(("_MAIL_FROM", "_MAIL_TO")):

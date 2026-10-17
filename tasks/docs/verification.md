@@ -102,3 +102,36 @@ task order. A real D1/browser case reproduced the reversed headings before the f
 all 12 UI unit cases, types, lint and build pass.
 
 The final complete Tasks browser run passes all 11 cases against ephemeral workerd/D1 and disposable Chromium.
+
+## Staged main release
+
+[Full branch CI 39074838356](https://github.com/ziyixi/todofy/actions/runs/39074838356) passed on `7eae7465`.
+[Same-SHA main 39075576241](https://github.com/ziyixi/todofy/actions/runs/39075576241) uploaded Worker
+`734fd419-398f-4d70-8feb-4e08e42636f0`; migration, provider build identity and unauthenticated Access probes
+passed. The final configuration check correctly refused four undeclared fields because the drift generator
+had not enrolled the Tasks deployment wrapper. Adding those standard declarations makes an independent live
+comparison report zero differences; the next normal Actions release must record the verified deployment.
+The same main run also failed its automatically triggered VPS release with `UNAVAILABLE`. This is separate
+from the Cloudflare task-source cutover, and the entire main run is not green.
+
+Todofy confirms the staged SHA and all three existing migration pauses, with no active work or reserved
+tokens. The final read-only source export is running. Native source activation and live migration acceptance
+remain pending.
+
+## Final production import
+
+The final paused read-only export passed coverage/reference/date/filter checks and a subsequent source Sync
+delta contained no changes. The prepared file's largest statement is 4,774 bytes. The locked Wrangler file
+import completed against the confirmed empty Tasks D1, with diagnostics kept privately.
+
+Separate production queries exactly match the frozen import digest and every expected identifier: 22
+projects, 3 sections, 27 labels (including 2 recovered historical names), 12 filters, 2,644 task resources
+and 2,824 completion occurrences. Parent/project orphan counts and non-import request counts are zero.
+The final planning metadata dry run reports zero matched rows and zero issues, so no provider SQL was run.
+All active FlowDay external IDs are included; its 55 distinct queue and 28 distinct timing task references
+match the earlier baseline. Preexisting historical references without cached task rows are retained.
+
+The seven-way compound identity query was refused by real D1 (`too many terms in compound SELECT`); separate
+per-table reads pass. The runbook uses the seven separately verified locked-Wrangler commands, with every
+result kept privately. The loopback exporter was stopped and its in-memory credential released. No original
+Todoist task was modified. Native consumer activation and post-switch acceptance remain pending.

@@ -53,7 +53,15 @@ renamed_classes = [{ from = "TodofyCoordinator", to = "TodofyCore" }]
 binding = "METRICS"
 dataset = "todofy_metrics"
 
+[[services]]
+binding = "TASKS"
+service = "tasks"
+entrypoint = "TasksApi"
+props = { consumer = "todofy" }
+
 [vars]
+TASK_SOURCE = "tasks"
+TASKS_PUBLIC_URL = "https://tasks.ziyixi.science"
 # Fixed upstreams, never variables, so a bad setting cannot send the API keys elsewhere (tests pin them).
 GEMINI_API_BASE = "https://generativelanguage.googleapis.com"
 TODOIST_API_BASE = "https://api.todoist.com"

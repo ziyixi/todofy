@@ -4,7 +4,7 @@ Personal task management for the Todofy cloud. Tasks owns tasks, projects, secti
 
 ## Development status
 
-Implementation is on `codex/tasks-native`. The private source export passes import preflight and a local SQLite import/replay check. Tasks' empty production D1 and owner Access application are provisioned; the follow-up infrastructure plan reports 41 no-ops. The independent deployment secret is configured. No real data has been imported into production and no task writer has switched from Todoist. Full CI, release and live migration acceptance remain pending.
+Implementation is on `codex/tasks-native`. Full branch CI passed and the staged Worker is deployed behind owner Access. The final private source snapshot has been imported into Tasks D1; all imported IDs and the frozen digest match. Todofy remains paused on the original source until the activation configuration passes CI and is released. Native Plan/Focus, FlowDay synchronization and PWA acceptance are still pending. See the [verification record](docs/verification.md) for the failed first deployment-record check and its correction.
 
 ## First release
 

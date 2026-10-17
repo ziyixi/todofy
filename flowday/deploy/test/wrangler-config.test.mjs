@@ -14,7 +14,7 @@ const wrangler = await import(pathToFileURL(require.resolve('wrangler')).href)
 const config = JSON.parse(JSON.stringify(wrangler.experimental_readRawConfig({ config: CONFIG }).rawConfig))
 
 // Every key the Worker "flowday" uses; a new one must be added here on purpose (and checked below).
-const KEYS = ['name', 'account_id', 'main', 'compatibility_date', 'workers_dev', 'preview_urls', 'routes', 'observability', 'assets', 'd1_databases', 'vars']
+const KEYS = ['name', 'account_id', 'main', 'compatibility_date', 'workers_dev', 'preview_urls', 'routes', 'observability', 'assets', 'd1_databases', 'services', 'vars']
 // The production host (F4), taken over from the old container; the F3 staging host is gone.
 const HOST = 'flowday.ziyixi.science'
 
@@ -50,6 +50,10 @@ test('entry, static assets (the Next.js export) and the D1 binding with the real
   assert.match(id, /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/)
   assert.notEqual(id, '00000000-0000-0000-0000-000000000000')
   assert.ok(existsSync(new URL('migrations/0001_init.sql', APP)))
+})
+
+test('native Tasks is the read-only service source for the existing mirror', () => {
+  assert.deepEqual(config.services, [{ binding: 'TASKS', service: 'tasks', entrypoint: 'TasksApi', props: { consumer: 'flowday' } }])
 })
 
 test('vars: the production host, the public Access issuer and the real AUD; nothing injected, secret or for development', () => {

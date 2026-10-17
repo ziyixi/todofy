@@ -14,24 +14,34 @@ Its old waiting lists and release identities are historical, not instructions to
 Branch `codex/tasks-native`, isolated checkout `/private/tmp/todofy-tasks-impl`. The desktop app includes a
 Todoist-style task editor, installable PWA, generated task/history API, shared Plan/Focus/Mail, Home status
 and inactive native adapters for Todofy/FlowDay. See [Tasks](tasks/README.md), [design](tasks/docs/design.md)
-and [verification](tasks/docs/verification.md). The last pushed checkpoint is `9c21f623`.
+and [verification](tasks/docs/verification.md). The staged implementation is `7eae7465` on main; the activation diff is still on `codex/tasks-native`.
 
 Private source export, reference/filter/recurrence preflight and a local SQLite import/replay pass. FlowDay's
 active external IDs are all included; its queue and time rows remain untouched. The owner chose February's
 last day for `every 30th`, returning to day 30 in other months; this is implemented and tested. Private files
 and temporary tools stay outside GitHub. No real tasks were imported into production or changed in Todoist.
 
-Tasks' empty D1 and owner Access app are registered; bootstrap created only these two resources and the
-following plan returned 41 no-ops. `TASKS_WORKER_SECRETS` is configured independently. Full branch CI remains
-required: the third run 39073230100 passed all app checks except a proven extension preference-load race,
-and proto Python had two stale app-list assertions. Both have local fixes, including 62 actual extension
-browser cases and 113 proto Python cases. The next checkpoint also persists native Plan view preferences.
+Tasks' D1 and owner Access app are registered. Full branch CI [39074838356](https://github.com/ziyixi/todofy/actions/runs/39074838356)
+passed on `7eae7465`. Same-SHA main [39075576241](https://github.com/ziyixi/todofy/actions/runs/39075576241)
+uploaded Tasks `734fd419-398f-4d70-8feb-4e08e42636f0`; D1 migrations, build and Access probes passed.
+The final declaration check failed because Tasks' deploy wrapper was omitted from the drift generator,
+leaving four standard deployed fields undeclared. Independent comparison with these declarations has zero
+differences; fix the generator and let the next normal Actions release record success. That main run also
+reported VPS `UNAVAILABLE`; do not describe the entire run as green or change Newsletter to fix this task.
 
-Next: pass full CI, publish the same SHA, stage all named entrypoints, pause/drain task writers, take a fresh
-private source snapshot, verify/import data and identities, and activate Tasks in core/gateway/FlowDay
-configs together. Do not switch only one binding or use Todoist fallback. Existing Todoist remains
-authoritative. Remove Tasks' first-deploy inventory/reconcile exceptions only after its Worker is verified.
-Sync the original local checkout after the release; it was clean at `ca5c309e` when last checked.
+Migration is in progress: production Todofy is `7eae7465`, and its existing maintenance, processing and source
+write pauses are all true. Live active counts and reserved tokens are zero. Original values are in the
+private operator file outside GitHub. The final read-only export completed and its post-read Sync delta was empty. Production import now has
+2,644 task resources and 2,824 completion occurrences, with exact ID/digest matches and no orphan parent or
+project references. Fresh planning identity preflight matches zero rows, so no provider SQL was run. Todoist
+data is unchanged. Resume original pause values only after checked import,
+consumer activation and bounded FlowDay synchronization.
+
+Next: complete final private export/preflight/import and identity checks; pass the activation branch gate;
+release that same SHA through Actions. Bind in order Tasks → FlowDay → Todofy → Home, with source pauses
+retained. Prime FlowDay to `SYNCED`, restore the previous pause values and redeploy Todofy, then verify native
+UI/PWA/Plan/Focus/Mail. No Todoist fallback. Sync the original checkout after release; it was clean at
+`ca5c309e` when last checked.
 
 The owner requested stopping both old acceptance reminders. The app confirmed deletion of heartbeat IDs
 `automation` (website cron evidence) and `todofy` (email-model scheduler evidence) on 2026-10-17. Their missing

@@ -900,13 +900,14 @@ jobs:
 
   flowday-deploy:
     name: FlowDay deploy
-    needs: [changes, flowday-checks, gate]
+    needs: [changes, flowday-checks, gate, tasks-deploy]
     # Explicit status function and results, as for Todofy deploy (implicit success() and skipped ancestors).
     if: >-
       ${{ !cancelled()
       && needs.changes.result == 'success'
       && (needs.flowday-checks.result == 'success' || (needs.changes.outputs.checks_reused == 'true' && needs.flowday-checks.result == 'skipped'))
       && needs.gate.result == 'success'
+      && (needs.tasks-deploy.result == 'success' || needs.tasks-deploy.result == 'skipped')
       && github.ref == 'refs/heads/main'
       && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
       && needs.changes.outputs.flowday_deploy == 'true' }}

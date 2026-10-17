@@ -52,6 +52,12 @@ database_name = "flowday"
 database_id = "df104e83-7183-47e3-b2f9-638dc7502c13"
 migrations_dir = "migrations"
 
+[[services]]
+binding = "TASKS"
+service = "tasks"
+entrypoint = "TasksApi"
+props = { consumer = "flowday" }
+
 [vars]
 # The only origin a mutation may come from (CSRF): the production host since the F4 cutover.
 PUBLIC_HOST = "flowday.ziyixi.science"

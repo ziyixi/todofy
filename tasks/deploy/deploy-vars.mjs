@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+// deploy-vars-inputs exec: GITHUB_SHA
+// deploy-vars-inputs secrets: TASKS_WORKER_SECRETS
 import { mergeWorkerSecrets } from '../../tools/cloud-config/worker-secrets.mjs'
 import { spawnSync } from 'node:child_process'
 import { readFileSync, realpathSync, writeFileSync } from 'node:fs'

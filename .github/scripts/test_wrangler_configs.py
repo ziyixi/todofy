@@ -71,6 +71,7 @@ WRAPPERS = {
     "dashboard": ("dashboard/deploy/deploy-vars.mjs", r"deploy-vars\.mjs (exec|secrets)\b", ["home"]),
     "flowday": ("flowday/deploy/deploy-vars.mjs", r"deploy-vars\.mjs (exec|secrets)\b", ["flowday"]),
     "links": ("links/deploy/deploy-vars.mjs", r"deploy-vars\.mjs (exec|secrets)\b", ["links"]),
+    "tasks": ("tasks/deploy/deploy-vars.mjs", r"deploy-vars\.mjs (exec|secrets)\b", ["tasks"]),
     "watch": ("watch/deploy/deploy-vars.mjs", r"deploy-vars\.mjs (exec|secrets)\b", ["watch"]),
     "fleet": ("fleet/deploy/deploy-vars.mjs", r"deploy-vars\.mjs (exec|secrets)\b", ["fleet"]),
     "mailsort": ("mailsort/deploy/deploy-vars.mjs", r"deploy-vars\.mjs (exec|secrets)\b", ["mailsort"]),
@@ -444,6 +445,30 @@ class Files(unittest.TestCase):
             load(PRODUCTION["watch"])["services"],
             [{"binding": "TODOFY", "service": "todofy", "entrypoint": "Intents", "props": {"source": "watch"}}],
         )
+
+    def test_native_task_bindings_select_the_matching_source_and_consumer(self):
+        tasks = load(PRODUCTION["tasks"])
+        core = load(PRODUCTION["todofy-core"])
+        gateway = load(PRODUCTION["todofy"])
+        flowday = load(PRODUCTION["flowday"])
+        self.assertEqual(tasks["services"], [{
+            "binding": "PLANNING", "service": "todofy", "entrypoint": "Planning", "props": {"source": "tasks"},
+        }])
+        self.assertEqual(core["services"], [{
+            "binding": "TASKS", "service": "tasks", "entrypoint": "TasksApi", "props": {"consumer": "todofy"},
+        }])
+        self.assertEqual(flowday["services"], [{
+            "binding": "TASKS", "service": "tasks", "entrypoint": "TasksApi", "props": {"consumer": "flowday"},
+        }])
+        self.assertIn({
+            "binding": "FLOWDAY_NATIVE_FOCUS", "service": "flowday", "entrypoint": "NativeFocusEntrypoint",
+        }, gateway["services"])
+        self.assertIn({
+            "binding": "FLOWDAY_FOCUS", "service": "flowday", "entrypoint": "FocusEntrypoint",
+        }, gateway["services"])
+        for config in (core, gateway):
+            self.assertEqual(config["vars"]["TASK_SOURCE"], "tasks")
+            self.assertEqual(config["vars"]["TASKS_PUBLIC_URL"], "https://" + tasks["vars"]["PUBLIC_HOST"])
 
 
 class Undeployed(unittest.TestCase):

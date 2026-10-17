@@ -140,6 +140,7 @@ class DesiredState(unittest.TestCase):
                 ("ASSETS", "assets"),
                 ("DB", "d1"),
                 ("PUBLIC_HOST", "plain_text"),
+                ("TASKS", "service"),
             },
         )
         self.assertNotIn("flowday", drift_desired.MANUAL_SECRETS)
@@ -174,6 +175,17 @@ class DesiredState(unittest.TestCase):
         self.assertEqual((worker["workers_dev"], worker["preview_urls"], worker["crons"]), (False, False, []))
         self.assertEqual(worker["custom_domains"], ["s.ziyixi.science"])
         self.assertEqual((worker["routes"], worker["personal"]), ([], []))
+
+    def test_tasks_enrolls_its_complete_owner_secret_map_and_verified_build(self):
+        bindings = {binding["name"]: binding for binding in self.state["workers"]["tasks"]["bindings"]}
+        secrets = {"ACCESS_OWNER", "ACCESS_OWNER_ALIASES", "CSRF_SIGNING_KEY"}
+        self.assertEqual({name for name, binding in bindings.items() if binding["source"] == "deploy"},
+                         secrets | {"BUILD_SHA"})
+        for name in secrets:
+            self.assertEqual(bindings[name], {"name": name, "type": "secret_text", "source": "deploy"})
+        self.assertEqual(bindings["BUILD_SHA"], {"name": "BUILD_SHA", "type": "plain_text", "source": "deploy"})
+        self.assertNotIn("TASKS_WORKER_SECRETS", bindings)
+        self.assertNotIn("tasks", drift_desired.MANUAL_SECRETS)
 
     def test_the_generator_refuses_an_unknown_binding_section(self):
         with self.assertRaises(drift_desired.GeneratorError):

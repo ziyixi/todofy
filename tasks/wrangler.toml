@@ -26,6 +26,12 @@ database_name = "tasks"
 database_id = "79a1f345-1183-46c3-bc6a-651be106f90c"
 migrations_dir = "migrations"
 
+[[services]]
+binding = "PLANNING"
+service = "todofy"
+entrypoint = "Planning"
+props = { source = "tasks" }
+
 [vars]
 PUBLIC_HOST = "tasks.ziyixi.science"
 TIME_ZONE = "America/Los_Angeles"

@@ -1391,6 +1391,7 @@ class DeployConditions(unittest.TestCase):
         ("dashboard-deploy", "website-relay-deploy"),
         ("watch-deploy", "todofy-deploy"),
         ("todofy-deploy", "flowday-deploy"),
+        ("flowday-deploy", "tasks-deploy"),
         ("todoist-plus-release", "todofy-deploy"),
         ("todoist-plus-release", "flowday-deploy"),
     }
@@ -1503,6 +1504,7 @@ class DeployConditions(unittest.TestCase):
         self.assertLessEqual({"todofy-deploy", "mail-hero-deploy", "watch-deploy", "fleet-deploy", "mailsort-deploy", "recall-deploy", "brief-deploy"},
                              set(self.needs(block)))
         self.assertIn("group: dashboard-production", block)
+
         # The only token: the one Todofy deploy uses; no other secret reaches wrangler's environment.
         # (the hostname guard's step and the deploy step).
         self.assertIn("CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}", block)
@@ -1511,6 +1513,13 @@ class DeployConditions(unittest.TestCase):
         # deploy-vars.mjs compares (never writes) the deploy token, to warn when it is the analytics token.
         secrets = block.split("- name: Write the Worker secrets file\n", 1)[1].split("\n      - ", 1)[0]
         self.assertIn("CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}", secrets)
+
+    def test_native_task_release_order_has_no_reverse_planning_dependency(self):
+        jobs = self.jobs()
+        self.assertIn("tasks-deploy", self.needs(jobs["flowday-deploy"]))
+        self.assertIn("flowday-deploy", self.needs(jobs["todofy-deploy"]))
+        self.assertIn("tasks-deploy", self.needs(jobs["dashboard-deploy"]))
+        self.assertNotIn("todofy-deploy", self.needs(jobs["tasks-deploy"]))
 
     def test_every_production_job_has_its_own_concurrency_group(self):
         blocks = self.jobs()
