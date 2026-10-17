@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { addDays } from "../src/domain";
 import { committedOutcomes } from "../src/planning-outcomes";
+import { quickTasks } from "../src/weekly-review";
 import {
   boardLanes,
   cardState,
@@ -345,4 +346,44 @@ it("shows every task the API marks for a replaced deadline, waiting or parked fi
                   );
                 }
               }
+});
+
+/**
+ * The client half of the Quick / Ops gate: Week's Quick tasks are exactly the ones Todofy's
+ * quick_visible selects over the same grid (marks, due offsets -2, 0, 2, 3 and 8 as a date, a
+ * floating time and fixed-zone times near both local midnights, deadlines none or today, in Los
+ * Angeles), so hiding the native filter loses no task.
+ */
+it("lists as Quick tasks exactly what Todofy's gate reads the hidden Quick / Ops filter to show", () => {
+  const timezone = "America/Los_Angeles";
+  const marks = ["waiting", "blocked", "active", "parked", "quick"];
+  // Each form with its local day; Los Angeles is UTC-7 on these days.
+  const forms = (offset: number) =>
+    [
+      on(offset),
+      `${on(offset)}T09:00:00`,
+      `${on(offset)}T07:30:00Z`,
+      `${on(offset + 1)}T06:30:00Z`,
+    ].map((due) => ({ due, day: on(offset) }));
+  const dues = [{ due: "", day: "" }, ...[-2, 0, 2, 3, 8].flatMap(forms)];
+  const tasks: PlanningTask[] = [];
+  const expected: string[] = [];
+  for (let combination = 0; combination < 1 << marks.length; combination++)
+    for (const { due, day } of dues)
+      for (const deadline of ["", TODAY]) {
+        const labels = marks.filter((_, bit) => (combination >> bit) & 1);
+        const id = `grid-${tasks.length}`;
+        tasks.push(task(id, { labels, due, deadline }));
+        if (
+          labels.includes("quick") &&
+          (!due || day <= on(2) || (Boolean(deadline) && deadline <= on(2)))
+        )
+          expected.push(id);
+      }
+  expect(
+    quickTasks({ tasks, timezone }, TODAY)
+      .map((item) => item.id)
+      .sort(),
+  ).toEqual(expected.sort());
+  expect(expected.length).toBeGreaterThan(0);
 });

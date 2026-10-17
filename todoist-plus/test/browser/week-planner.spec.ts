@@ -733,3 +733,71 @@ test("Add steps adds two sub-tasks one after another, with the input kept open a
     await context.close();
   }
 });
+
+test("a quick card under Next steps drags into a day like a step, with one FlowDay queue write", async () => {
+  const { context, worker } = await launchPlanner();
+  try {
+    await worker.evaluate(() => {
+      (
+        globalThis as unknown as {
+          plannerState: { tasks: Record<string, unknown>[] };
+        }
+      ).plannerState.tasks.push({
+        id: "quick-one",
+        title: "Synthetic quick errand",
+        area: "work",
+        stage: "none",
+        labels: ["quick"],
+        etag: "quick-one-1",
+      });
+    });
+    const page = await context.newPage();
+    await page.goto("https://app.todoist.com/app/today");
+    await openWeek(page);
+    const quick = page.getByRole("region", { name: "Quick tasks" });
+    const card = quick.locator(".planning-quick-card");
+    await expect(card).toHaveText("Synthetic quick errand");
+    // A quiet one-line card, under the steps and above the calendar.
+    expect((await card.boundingBox())!.height).toBeLessThanOrEqual(28);
+    const thursday = page.locator(
+      '.planning-calendar-day[data-date="2026-10-15"]',
+    );
+    await dragPlanner(
+      page,
+      quick.getByRole("button", {
+        name: "Drag quick task: Synthetic quick errand",
+      }),
+      thursday.locator(".planning-day-end"),
+    );
+    await expect.poll(() => cardIds(thursday)).toEqual(["quick-one"]);
+    await expect(page.locator("[aria-busy=true]")).toHaveCount(0);
+    // Planned, it is in the calendar and leaves the Quick line.
+    await expect(quick).toHaveCount(0);
+    const writes = await worker.evaluate(() =>
+      (
+        globalThis as unknown as {
+          plannerState: {
+            calls: {
+              path: string;
+              method: string;
+              body: Record<string, unknown>;
+            }[];
+          };
+        }
+      ).plannerState.calls.filter((call) => call.method !== "GET"),
+    );
+    expect(
+      writes
+        .filter((call) => !call.path.endsWith("/tasks:sync"))
+        .map(({ path, method, body }) => ({ path, method, body })),
+    ).toEqual([
+      {
+        path: "/api/plus/flowday/api/v1/flows/2026-10-15",
+        method: "PATCH",
+        body: expect.objectContaining({ task_ids: ["quick-one"] }),
+      },
+    ]);
+  } finally {
+    await context.close();
+  }
+});

@@ -709,3 +709,42 @@ it("writes nothing for a parked step dropped into its outcome's lane, where it w
     "Outline three questions for the check-in",
   );
 });
+
+it("plans a quick task by dropping its card into a day, exactly as a step", async () => {
+  const actions = createPrototype();
+  const load = actions.load.bind(actions);
+  vi.spyOn(actions, "load").mockImplementation(async (week) => {
+    const data = await load(week);
+    const receipt = data.plan.tasks.find((task) => task.id === "receipt")!;
+    data.plan.tasks.push({
+      ...receipt,
+      id: "renew",
+      title: "Renew the library card",
+    });
+    return data;
+  });
+  const moves = hold(actions, "moveTaskToDay");
+  await mountPlan(actions);
+  fireEvent.click(screen.getByRole("tab", { name: "Week" }));
+  const quick = screen.getByRole("region", { name: "Quick tasks" });
+  expect(
+    within(quick).getByRole("button", { name: "Renew the library card" }),
+  ).toBeTruthy();
+  await drop(
+    { taskId: "renew", title: "Renew the library card" },
+    { date: "2026-10-15", beforeId: undefined },
+  );
+  expect(moves.map((move) => move.args)).toEqual([
+    [
+      "renew",
+      undefined,
+      expect.objectContaining({ date: "2026-10-15" }),
+      undefined,
+    ],
+  ]);
+  expect(ids("2026-10-15")).toEqual(["renew"]);
+  expect(day("2026-10-15").querySelector("[aria-busy=true]")).toBeTruthy();
+  await act(() => moves[0]!.confirm());
+  // In the calendar now, it leaves the Quick line, which then has nothing to show.
+  expect(screen.queryByRole("region", { name: "Quick tasks" })).toBeNull();
+});

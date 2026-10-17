@@ -18,7 +18,8 @@ import {
   outcomeSteps,
 } from "./planning-outcomes";
 import { pendingStep, predictMove } from "./plan-updates";
-import { unscheduledCommitments } from "./weekly-review";
+import { QuickTasks } from "./QuickTasks";
+import { quickTray, unscheduledCommitments } from "./weekly-review";
 import { words } from "./i18n";
 import type {
   Area,
@@ -289,6 +290,13 @@ export function PlanningWeek(props: Props) {
                 : "Choose an outcome above to arrange its next steps."}
           </p>
         )}
+        <QuickTasks
+          tasks={quickTray(plan, currentDate, days, steps)}
+          timer={timer}
+          language={language}
+          busy={busy}
+          editTask={editTask}
+        />
         <PlanningCalendar
           plan={plan}
           days={days}
@@ -331,7 +339,10 @@ export function PlanningWeek(props: Props) {
               <strong>
                 {taskTitle(id, task?.title ?? flowTasks[id]?.title, language)}
               </strong>
-              {outcome && <small>{displayedTitle(outcome.title)}</small>}
+              {/* A quick task or a lone commitment is its own outcome: no second line. */}
+              {outcome && outcome.id !== id && (
+                <small>{displayedTitle(outcome.title)}</small>
+              )}
             </div>
           );
         }}

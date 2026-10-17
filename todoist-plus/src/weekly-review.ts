@@ -1,6 +1,8 @@
 import { addDays } from "./domain";
+import { localDate } from "./mail";
 import {
   committedOutcomes,
+  isParked,
   outcomeSteps,
   PARKED_LABEL,
 } from "./planning-outcomes";
@@ -11,7 +13,9 @@ export const WAITING_LABELS = ["waiting", "blocked"];
 export const SOMEDAY_LABELS = [PARKED_LABEL, "onhold"];
 /** The owner's in-progress label, as Todofy's in-progress deadline query names it. */
 export const ACTIVE_LABEL = "active";
-const CLARIFIED_LABELS = [...WAITING_LABELS, ...SOMEDAY_LABELS, "quick"];
+/** The owner's quick-task label, as the native Quick / Ops filter names it. */
+export const QUICK_LABEL = "quick";
+const CLARIFIED_LABELS = [...WAITING_LABELS, ...SOMEDAY_LABELS, QUICK_LABEL];
 const DAY_MS = 86_400_000;
 
 /** A task that waits: it has a `waiting` or `blocked` label. */
@@ -105,6 +109,60 @@ export function unscheduledCommitments(
 /** This week's commitments, the choices Sunday's review can keep for next week. */
 export function weekChoices(plan: PlanState): PlanningTask[] {
   return committedOutcomes(plan);
+}
+
+/**
+ * The tasks the native Quick / Ops filter (@quick & (no date | 3 days)) shows, read as widely as
+ * Todofy's gate does before it hides that filter: the literal `quick` label, and no due date, or a
+ * due day or a deadline at most two days after `today` (the account's date), overdue included. A
+ * due time in a fixed zone (ending in Z) counts on its day in the account's time zone. Dated ones
+ * first, by day, then the undated; the higher priority first within each.
+ */
+export function quickTasks(
+  plan: Pick<PlanState, "tasks" | "timezone">,
+  today: string,
+): PlanningTask[] {
+  const last = addDays(today, 2);
+  const dueDay = (due: string) =>
+    due.endsWith("Z") ? localDate(due, plan.timezone) : due.slice(0, 10);
+  return plan.tasks
+    .filter(
+      (task) =>
+        task.labels.includes(QUICK_LABEL) &&
+        (!task.due ||
+          dueDay(task.due) <= last ||
+          (Boolean(task.deadline) && task.deadline <= last)),
+    )
+    .map((task) => ({ task, day: task.due ? dueDay(task.due) : "" }))
+    .sort(
+      (a, b) =>
+        Number(!a.day) - Number(!b.day) ||
+        a.day.localeCompare(b.day) ||
+        b.task.priority - a.task.priority,
+    )
+    .map(({ task }) => task);
+}
+
+/**
+ * Week's Quick tasks: none already queued open in a shown day (the calendar has it), among the
+ * next steps shown above, or set aside (Review's Parked lane has it).
+ */
+export function quickTray(
+  plan: Pick<PlanState, "tasks" | "timezone" | "availableLabels">,
+  today: string,
+  days: readonly FlowDayPlan[],
+  steps: readonly PlanningTask[],
+): PlanningTask[] {
+  const queued = new Set(
+    days.flatMap((day) =>
+      day.taskIds.filter((id) => !day.completedTaskIds.includes(id)),
+    ),
+  );
+  const shown = new Set(steps.map((task) => task.id));
+  return quickTasks(plan, today).filter(
+    (task) =>
+      !queued.has(task.id) && !shown.has(task.id) && !isParked(task, plan),
+  );
 }
 
 /** Whether `today` is the last day of the account week starting on `week`. */

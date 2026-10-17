@@ -149,6 +149,10 @@ function localParts(iso: string, timezone: string) {
     time: `${parts.hour}:${parts.minute}`,
   };
 }
+/** The day (YYYY-MM-DD) of an instant in the account's time zone. */
+export function localDate(iso: string, timezone: string): string {
+  return localParts(iso, timezone).date;
+}
 const ZH_DAYS = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
 const EN_DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const EN_MONTHS = [
