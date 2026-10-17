@@ -172,21 +172,14 @@ export interface MailCategory {
   /** The domain's order, 1 the most urgent; PlanningTask.priority is Todoist's API value instead. */
   priority: number;
 }
-/** The categories, their etag (which a filing sends back) and the project filed mail goes to ("" until chosen). */
+/** The categories and their etag, which a filing with a category sends back. */
 export interface MailCategories {
   categories: MailCategory[];
   etag: string;
-  destination: string;
 }
 /** The mail among some mail project tasks, and the categories to file it by. */
 export interface MailLookup extends MailCategories {
   items: MailItem[];
-}
-/** A project filed mail may go to: the Inbox or an active project; its name is never stored. */
-export interface MailProject {
-  id: string;
-  name: string;
-  inbox: boolean;
 }
 /** DeleteMailItems' answer: the tasks now gone, and the ones Todofy kept on its own check. */
 export interface MailDeletion {
@@ -275,21 +268,20 @@ export interface PlusActions {
   lookupMail(taskIds: string[]): Promise<MailLookup>;
   /** One mail's full Todofy summary, as plain text; empty when it is no longer available. */
   readMailSummary(id: string): Promise<string>;
-  /** The categories, the destination and the projects to choose it from (read for the dialog). */
-  readMailSettings(): Promise<MailCategories & { projects: MailProject[] }>;
-  /** Replaces the categories and the destination saved with `etag`; answers them as saved. */
+  /** The categories (read for the dialog). */
+  readMailSettings(): Promise<MailCategories>;
+  /** Replaces the categories saved with `etag`, none included; answers them as saved. */
   updateMailSettings(
     categories: Omit<MailCategory, "id">[],
-    destination: string,
     etag: string,
   ): Promise<MailCategories>;
   /**
-   * Files a mail task in one Todoist write: the category's label and priority, and a move to the
-   * destination. The task as saved, no longer in the mail project.
+   * Files a mail task in one Todoist write: a category's label and priority, if one is given, and
+   * always a move to the account's Todoist Inbox. The task as saved, no longer in the mail project.
    */
   fileMail(
     task: PlanningTask,
-    category: MailCategory,
+    category: MailCategory | undefined,
     categoriesEtag: string,
     requestId: string,
   ): Promise<PlanningTask>;

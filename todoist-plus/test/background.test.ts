@@ -91,6 +91,18 @@ it("rejects an old planning script before reading its connection or writing task
     ok: false,
     error: "Extension updated. Reload Todoist to continue.",
   });
+  // A page left open from before protocol 6 sends the mail methods' old arguments.
+  expect(
+    await send({
+      kind: "action",
+      protocol: 5,
+      method: "updateMailSettings",
+      args: [[], "synthetic-project", "mail-0"],
+    }),
+  ).toEqual({
+    ok: false,
+    error: "Extension updated. Reload Todoist to continue.",
+  });
   expect(mocks.get).not.toHaveBeenCalled();
   expect(mocks.load).not.toHaveBeenCalled();
 });

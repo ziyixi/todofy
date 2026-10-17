@@ -132,17 +132,13 @@ async function setupPlanner(context: BrowserContext, worker: Worker) {
       // WeeklyBets as Todofy keeps them (wire JSON), which SetWeeklyBet writes.
       bets: [] as Record<string, unknown>[],
       // Todofy's mail, as LookupMailItems answers it (wire JSON), each mail's summary by its ID,
-      // the mail settings and the projects ReadMailSettings lists.
+      // and the mail settings. Filed mail always moves to the account's Inbox.
       mail: [] as Record<string, unknown>[],
       summaries: {} as Record<string, string>,
       mailSettings: { categories: [], etag: "mail-0" } as Record<
         string,
         unknown
       >,
-      projects: [
-        { id: "account-inbox", display_name: "Inbox", inbox: true },
-        { id: "work-project", display_name: "Synthetic work" },
-      ],
       // While set, writes wait until a test releases them; failWrite rejects the next one.
       holdWrites: false,
       heldWrites: [] as (() => void)[],
@@ -332,21 +328,30 @@ async function setupPlanner(context: BrowserContext, worker: Worker) {
           summary: state.summaries[url.searchParams.get("id") ?? ""] ?? "",
         });
       if (url.pathname.endsWith("/mailSettings:read"))
-        return json({ ...state.mailSettings, projects: state.projects });
+        // Todofy still answers the account Inbox for builds before protocol 6, which this one ignores.
+        return json({
+          ...state.mailSettings,
+          destination: { provider: "todoist", external_id: "account-inbox" },
+          projects: [
+            { id: "account-inbox", display_name: "Inbox", inbox: true },
+          ],
+        });
       if (url.pathname.endsWith("/mailSettings:updateMailSettings")) {
+        // As Todofy saves: the categories alone; the destination is kept as saved and ignored.
         const categories = (body.categories as Record<string, unknown>[]) ?? [];
         state.mailSettings = {
+          ...state.mailSettings,
           categories: categories.map((category, index) => ({
             id: `category-${index + 1}`,
             ...category,
           })),
           etag: `mail-${Number(String(state.mailSettings.etag).slice(5)) + 1}`,
-          destination: body.destination,
         };
         return json(state.mailSettings);
       }
       if (url.pathname.endsWith("/mailItems:fileMailItem")) {
-        // As Todofy files: the category's label and priority, and the move, in one write.
+        // As Todofy files, in one write: with a category its label and priority, and always the
+        // move to the account's Inbox. Without one the categories' etag is not checked.
         const task = state.tasks.find((task) => task.id === body.task_id);
         const category = (
           state.mailSettings.categories as Record<string, unknown>[]
@@ -357,18 +362,22 @@ async function setupPlanner(context: BrowserContext, worker: Worker) {
             (category?.label as { external_id: string } | undefined)
               ?.external_id,
         );
-        if (!task || !category || !label || task.etag !== body.etag)
+        if (
+          !task ||
+          task.etag !== body.etag ||
+          (body.category_id !== "" && (!category || !label))
+        )
           return new Response(
             JSON.stringify({
               error: { status: "ABORTED", message: "Synthetic task changed" },
             }),
             { status: 409, headers: { "Content-Type": "application/json" } },
           );
-        task.labels = [...((task.labels as string[]) ?? []), label.label];
-        task.priority = 5 - Number(String(category.priority).slice(1));
-        task.project_id = (
-          state.mailSettings.destination as { external_id: string }
-        ).external_id;
+        if (category && label) {
+          task.labels = [...((task.labels as string[]) ?? []), label.label];
+          task.priority = 5 - Number(String(category.priority).slice(1));
+        }
+        task.project_id = "account-inbox";
         task.etag = `${String(task.id)}-2`;
         return json({ task });
       }

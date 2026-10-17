@@ -15,6 +15,7 @@ import {
   categoryLabels,
   categoryName,
   deletionBatch,
+  MAX_CATEGORIES,
   mailboxCandidates,
   mailboxRows,
   mailTime,
@@ -68,6 +69,11 @@ interface Lookup {
   items: ReadonlyMap<string, MailItem | null>;
   categories: MailCategories;
 }
+/** A category the rows offer, whose label still exists, with its name. */
+interface Choice {
+  category: MailCategory;
+  name: string;
+}
 /** Delete all's frozen batch, from the confirmation's opening to its end. */
 interface Deletion {
   taskIds: string[];
@@ -85,8 +91,9 @@ type Summary =
 /**
  * Plus's Mailbox: the mail Todofy turned into tasks that is still to clarify, newest first, as a
  * quiet list of title, brief and time. A row expands in place to the full Todofy summary (plain
- * text); its one action, File, shows on hover or focus. Delete all permanently deletes the
- * untouched mail listed when its confirmation opened. Mail text stays in this page's memory.
+ * text); its filing buttons, one per category and Inbox, show on hover or focus and file at one
+ * click, always into the Todoist Inbox. Delete all permanently deletes the untouched mail listed
+ * when its confirmation opened. Mail text stays in this page's memory.
  */
 export function Mailbox({
   data,
@@ -114,7 +121,6 @@ export function Mailbox({
   const [summaries, setSummaries] = useState<ReadonlyMap<string, Summary>>(
     new Map(),
   );
-  const [menuFor, setMenuFor] = useState("");
   // What the last write did (filed, deleted, the categories saved): shown, and read out, until the
   // next result replaces it. Its line is always there, so neither moves the list.
   const [status, setStatus] = useAnnouncement();
@@ -127,8 +133,8 @@ export function Mailbox({
   const emptyLine = useRef<HTMLParagraphElement>(null);
   const dialogRef = useRef<HTMLDialogElement>(null);
   const cancelRef = useRef<HTMLButtonElement>(null);
-  // The button that opened the Mail categories, which focus goes back to when they close.
-  const categoriesOpener = useRef<HTMLElement | null>(null);
+  // The header's Mail categories button, which opens them and takes focus when they close.
+  const gearRef = useRef<HTMLButtonElement>(null);
   const hintId = useId();
 
   const candidates = useMemo(
@@ -148,13 +154,13 @@ export function Mailbox({
     [plan, text.work, text.personal],
   );
   const categories = lookup?.categories;
-  // A category whose label is gone is not offered; without a destination none is.
-  const usable = categories?.destination
-    ? categories.categories.flatMap((category) => {
-        const name = categoryName(category, labels);
-        return name ? [{ category, name }] : [];
-      })
-    : [];
+  // A category whose label is gone is not offered.
+  const usable: Choice[] = (categories?.categories ?? [])
+    .flatMap((category) => {
+      const name = categoryName(category, labels);
+      return name ? [{ category, name }] : [];
+    })
+    .slice(0, MAX_CATEGORIES);
   const isTouched = (task: PlanningTask) =>
     data
       ? touched(task, {
@@ -190,12 +196,8 @@ export function Mailbox({
           const items = new Map(fresh || !current ? [] : current.items);
           for (const id of ids) items.set(id, null);
           for (const item of answer.items) items.set(item.taskId, item);
-          const { categories, etag, destination } = answer;
-          return {
-            readAt,
-            items,
-            categories: { categories, etag, destination },
-          };
+          const { categories, etag } = answer;
+          return { readAt, items, categories: { categories, etag } };
         });
         setLookupFailed(false);
         setAsking(false);
@@ -244,7 +246,6 @@ export function Mailbox({
     const row = rows[at];
     if (!row) return;
     setActive(row.task.id);
-    setMenuFor("");
     rowButtons()[at]?.focus();
   }
   function rowKeys(event: KeyboardEvent<HTMLButtonElement>, index: number) {
@@ -265,7 +266,6 @@ export function Mailbox({
     }
   }
   function toggle(row: MailRow) {
-    setMenuFor("");
     setActive(row.task.id);
     if (expanded === row.task.id) return setExpanded("");
     setExpanded(row.task.id);
@@ -280,20 +280,10 @@ export function Mailbox({
       () => show({ state: "failed" }),
     );
   }
-  function openCategories(opener: HTMLElement | null | undefined) {
-    categoriesOpener.current = opener ?? null;
-    setDialog("categories");
-  }
-  /** A row's File button, which the menu's Mail categories… item stands in for once it closes. */
-  function fileButton(taskId: string) {
-    return [...(list.current?.children ?? [])]
-      .find((item) => (item as HTMLElement).dataset.mailTask === taskId)
-      ?.querySelector<HTMLButtonElement>(".plus-mailbox-file");
-  }
-  async function file(row: MailRow, category: MailCategory, name: string) {
+  /** Files a mail into the Todoist Inbox, with a category's label and priority if one is given. */
+  async function file(row: MailRow, choice?: Choice) {
     if (!categories) return;
-    setMenuFor("");
-    const key = `${row.task.id}:${category.id}`;
+    const key = `${row.task.id}:${choice?.category.id || "inbox"}`;
     const requestId = fileRequests.current.get(key) ?? crypto.randomUUID();
     fileRequests.current.set(key, requestId);
     const index = rows.indexOf(row);
@@ -303,7 +293,7 @@ export function Mailbox({
       async () => {
         const task = await actions.fileMail(
           row.task,
-          category,
+          choice?.category,
           categories.etag,
           requestId,
         );
@@ -312,29 +302,13 @@ export function Mailbox({
       },
       { pending: [pendingTask(row.task.id)] },
     );
-    // Focus goes to the row now in its place, or back to this one when it stays.
+    // Focus goes to the row now in its place, or back to this one when it stays; App's error
+    // line says when the filing was not saved.
     setFocusAt(index);
-    if (confirmed) setStatus(mail.filed(name, title));
-    else void destinationGone(row.task.id);
-  }
-  /**
-   * After a filing Todofy did not confirm: when the project filed mail goes to has been archived
-   * or deleted since it was chosen, the Mail categories open, which say so and ask again.
-   */
-  async function destinationGone(taskId: string) {
-    try {
-      const settings = await actions.readMailSettings();
-      if (
-        settings.destination &&
-        !settings.projects.some(
-          (project) => project.id === settings.destination,
-        ) &&
-        !dialogRef.current?.open
-      )
-        openCategories(fileButton(taskId));
-    } catch {
-      // App's error line already says the filing was not saved.
-    }
+    if (confirmed)
+      setStatus(
+        choice ? mail.filed(choice.name, title) : mail.movedInbox(title),
+      );
   }
   function openDeletion() {
     const batch = deletionBatch(rows, isTouched);
@@ -399,11 +373,10 @@ export function Mailbox({
     setFocusAt(0);
   }
   function closeDialog() {
-    const opener = dialog === "categories" ? categoriesOpener.current : null;
+    const categoriesClosed = dialog === "categories";
     setDialog(undefined);
     setDeletion(undefined);
-    categoriesOpener.current = null;
-    if (opener?.isConnected) opener.focus();
+    if (categoriesClosed) gearRef.current?.focus();
   }
 
   const spinning = refreshing || asking;
@@ -442,11 +415,12 @@ export function Mailbox({
             <RefreshCw size={17} className={spinning ? "plus-spin" : ""} />
           </button>
           <button
+            ref={gearRef}
             className="plus-icon"
             aria-label={mail.categories}
             title={mail.categories}
             disabled={!plan?.configured}
-            onClick={(event) => openCategories(event.currentTarget)}
+            onClick={() => setDialog("categories")}
           >
             <Settings size={17} />
           </button>
@@ -508,7 +482,26 @@ export function Mailbox({
                         : mail.summaryGone;
                 const waits = pending.has(pendingTask(row.task.id));
                 const current = row.task.id === activeId;
-                const menuOpen = menuFor === row.task.id;
+                // One click files: by a category, or into the Inbox alone.
+                const fileButton = (choice?: Choice) => {
+                  const name = choice
+                    ? mail.fileAs(choice.name, title)
+                    : mail.moveInbox(title);
+                  return (
+                    <button
+                      key={choice?.category.id ?? "inbox"}
+                      className="plus-mailbox-action"
+                      aria-label={name}
+                      title={name}
+                      tabIndex={current ? 0 : -1}
+                      disabled={busy}
+                      onFocus={() => setActive(row.task.id)}
+                      onClick={() => void file(row, choice)}
+                    >
+                      {choice?.name ?? mail.inbox}
+                    </button>
+                  );
+                };
                 return (
                   <li
                     key={row.task.id}
@@ -584,44 +577,13 @@ export function Mailbox({
                       {waits ? (
                         <PendingMark language={language} />
                       ) : (
-                        <button
-                          className="plus-mailbox-file"
-                          aria-haspopup={usable.length ? "menu" : "dialog"}
-                          aria-expanded={usable.length ? menuOpen : undefined}
-                          aria-label={
-                            usable.length ? mail.fileName(title) : mail.setUp
-                          }
-                          tabIndex={current ? 0 : -1}
-                          disabled={busy}
-                          onFocus={() => setActive(row.task.id)}
-                          onClick={(event) => {
-                            if (!usable.length)
-                              return openCategories(event.currentTarget);
-                            setMenuFor(menuOpen ? "" : row.task.id);
-                          }}
-                        >
-                          {usable.length ? mail.file : mail.setUp}
-                        </button>
+                        // The categories in their saved order, then Inbox at the right edge.
+                        <span className="plus-mailbox-actions">
+                          {usable.map((choice) => fileButton(choice))}
+                          {fileButton()}
+                        </span>
                       )}
                     </span>
-                    {menuOpen && (
-                      <FileMenu
-                        label={mail.fileName(title)}
-                        items={usable.map(({ category, name }) => ({
-                          key: category.id,
-                          name,
-                          choose: () => void file(row, category, name),
-                        }))}
-                        settings={{
-                          name: mail.setUpMenu,
-                          choose: () => {
-                            setMenuFor("");
-                            openCategories(fileButton(row.task.id));
-                          },
-                        }}
-                        onClose={() => setMenuFor("")}
-                      />
-                    )}
                   </li>
                 );
               })}
@@ -735,93 +697,6 @@ export function Mailbox({
           />
         )}
       </dialog>
-    </div>
-  );
-}
-
-interface MenuItem {
-  key: string;
-  name: string;
-  choose: () => void;
-}
-
-/**
- * A row's File menu: the usable categories, a separator and Mail categories…. ↑↓ (and Home,
- * End) move, Enter chooses, Esc closes back to File; leaving it closes it too.
- */
-function FileMenu({
-  label,
-  items,
-  settings,
-  onClose,
-}: {
-  label: string;
-  items: MenuItem[];
-  settings: Omit<MenuItem, "key">;
-  onClose: () => void;
-}) {
-  const menu = useRef<HTMLDivElement>(null);
-  const buttons = () => [
-    ...(menu.current?.querySelectorAll<HTMLButtonElement>(
-      '[role="menuitem"]',
-    ) ?? []),
-  ];
-  useEffect(() => {
-    buttons()[0]?.focus();
-  }, []);
-  function keys(event: KeyboardEvent<HTMLDivElement>) {
-    const all = buttons();
-    const at = all.indexOf(event.target as HTMLButtonElement);
-    const next: Record<string, number> = {
-      ArrowDown: (at + 1) % all.length,
-      ArrowUp: (at - 1 + all.length) % all.length,
-      Home: 0,
-      End: all.length - 1,
-    };
-    if (event.key in next) {
-      event.preventDefault();
-      all[next[event.key]!]?.focus();
-    } else if (event.key === "Escape") {
-      event.preventDefault();
-      event.stopPropagation();
-      const file = menu.current
-        ?.closest("li")
-        ?.querySelector<HTMLButtonElement>(".plus-mailbox-file");
-      onClose();
-      file?.focus();
-    } else if (event.key === "Tab") onClose();
-  }
-  return (
-    <div
-      ref={menu}
-      className="plus-menu"
-      role="menu"
-      aria-label={label}
-      onKeyDown={keys}
-      onBlur={(event) => {
-        if (!menu.current?.contains(event.relatedTarget as Node | null))
-          onClose();
-      }}
-    >
-      {items.map((item) => (
-        <button
-          key={item.key}
-          role="menuitem"
-          tabIndex={-1}
-          onClick={item.choose}
-        >
-          {item.name}
-        </button>
-      ))}
-      <div role="separator" />
-      <button
-        role="menuitem"
-        tabIndex={-1}
-        className="is-quiet"
-        onClick={settings.choose}
-      >
-        {settings.name}
-      </button>
     </div>
   );
 }

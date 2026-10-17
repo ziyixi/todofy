@@ -25,7 +25,7 @@ it("marks new action messages so a stale content script cannot use changed plann
   await extensionActions.loadDays("2026-10-19");
   expect(sendMessage).toHaveBeenCalledWith({
     kind: "action",
-    protocol: 5,
+    protocol: 6,
     method: "loadDays",
     args: ["2026-10-19"],
   });
@@ -51,7 +51,7 @@ it("throws a Bet the background could not save again as BetNotSaved, with its re
   expect(refused).toMatchObject({ reason: "ended" });
   expect(sendMessage).toHaveBeenLastCalledWith({
     kind: "action",
-    protocol: 5,
+    protocol: 6,
     method: "setWeeklyBet",
     args: [bet],
   });

@@ -3,7 +3,7 @@ import type { BetNotSaved } from "./bets";
 import type { PlusActions } from "./model";
 import type { PageStatus } from "./page-status";
 import type { PlanViewPatch } from "./plan-view-state";
-export const PLANNING_PROTOCOL = 5;
+export const PLANNING_PROTOCOL = 6;
 export type ActionName = keyof PlusActions;
 export type ActionMessage = {
   [Key in ActionName]: {

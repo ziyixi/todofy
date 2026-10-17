@@ -6,7 +6,6 @@ import type {
   Language,
   MailCategories,
   MailCategory,
-  MailProject,
   PlusActions,
 } from "./model";
 
@@ -28,9 +27,9 @@ const PRIORITIES = [1, 2, 3, 4];
 
 /**
  * The Mail categories dialog, laid out as Planning labels: each category is one existing label
- * and a priority (at most four, names generated), and one project, chosen here before the first
- * filing, takes all filed mail. It reads the settings and the projects when it opens; a save
- * writes Todofy alone, and the dialog closes, as Planning labels does.
+ * and a priority (at most four, names generated, none at all is fine). Filing adds them, and the
+ * task always moves to the Todoist Inbox. It reads the settings when it opens; a save writes
+ * Todofy alone, and the dialog closes, as Planning labels does.
  */
 export function MailCategoriesDialog({
   headingId,
@@ -44,12 +43,9 @@ export function MailCategoriesDialog({
 }: Props) {
   const text = words(language);
   const mail = mailWords(language);
-  const [saved, setSaved] = useState<
-    MailCategories & { projects: MailProject[] }
-  >();
+  const [saved, setSaved] = useState<MailCategories>();
   const [failed, setFailed] = useState(false);
   const [drafts, setDrafts] = useState<Draft[]>([]);
-  const [destination, setDestination] = useState("");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const keys = useRef(0);
@@ -63,7 +59,6 @@ export function MailCategoriesDialog({
         priority,
       })),
     );
-    setDestination(settings.destination);
   }
   useEffect(() => {
     mounted.current = true;
@@ -83,9 +78,6 @@ export function MailCategoriesDialog({
   }, [actions]);
 
   const known = (id: string) => labels.some((label) => label.id === id);
-  const destinationGone =
-    Boolean(destination) &&
-    !saved?.projects.some((project) => project.id === destination);
   function change(key: number, update: Partial<Draft>) {
     setDrafts((current) =>
       current.map((draft) =>
@@ -101,8 +93,6 @@ export function MailCategoriesDialog({
       drafts.map((draft) => `${draft.labelId}:${draft.priority}`),
     );
     if (pairs.size !== drafts.length) return mail.duplicate;
-    if (!destination) return mail.needDestination;
-    if (destinationGone) return mail.projectGone;
     return "";
   }
   async function save() {
@@ -113,7 +103,6 @@ export function MailCategoriesDialog({
     try {
       const next = await actions.updateMailSettings(
         drafts.map(({ labelId, priority }) => ({ labelId, priority })),
-        destination,
         saved.etag,
       );
       if (mounted.current) onSaved(next);
@@ -227,29 +216,6 @@ export function MailCategoriesDialog({
             <Plus size={13} />
             {mail.add}
           </button>
-          <label className="plus-mail-destination">
-            <span>{mail.destination}</span>
-            <select
-              value={destinationGone ? "" : destination}
-              disabled={saving}
-              onChange={(event) => {
-                setDestination(event.target.value);
-                setError("");
-              }}
-            >
-              <option value="" disabled>
-                {mail.chooseProject}
-              </option>
-              {saved.projects.map((project) => (
-                <option key={project.id} value={project.id}>
-                  {project.inbox ? mail.inbox : project.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          {destinationGone && (
-            <p className="plus-warning">{mail.projectGone}</p>
-          )}
           {error && (
             <p role="alert" className="plus-error">
               {error}

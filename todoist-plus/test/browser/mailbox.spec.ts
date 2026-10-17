@@ -20,7 +20,8 @@ const page = `<!doctype html><html lang="en" class="theme_kale"><head><style id=
 
 /**
  * Five tasks in the mail project, today 2026-10-13 (UTC): four mail Todofy summarised, one of
- * them in a FlowDay queue and one labelled, and the owner's own task. One category is saved.
+ * them in a FlowDay queue and one labelled, and the owner's own task. One category is saved, and
+ * the project an older build chose, which filing now ignores.
  */
 async function seed(worker: Worker) {
   await worker.evaluate(() => {
@@ -102,6 +103,16 @@ async function launchMailbox() {
   await seed(launched.worker);
   return launched;
 }
+/** Where a task is now in the synthetic Todoist. */
+async function projectOf(worker: Worker, id: string) {
+  return worker.evaluate(
+    (id) =>
+      (
+        globalThis as unknown as { plannerState: MailState }
+      ).plannerState.tasks.find((task) => task.id === id)?.project_id,
+    id,
+  );
+}
 async function calls(worker: Worker, method: string) {
   return worker.evaluate(
     (method) =>
@@ -167,59 +178,79 @@ test("Mail opens the Mailbox under Plan and Focus, and the mail project's favour
   }
 });
 
-test("File shows on hover or focus only; filing by keyboard writes once and focus moves on", async () => {
+test("Category and Inbox buttons show on hover or focus only; one click files at once and focus moves on", async () => {
   const { context, worker } = await launchMailbox();
   try {
     const tab = await context.newPage();
     await tab.goto("https://app.todoist.com/app/today?todoist-plus=mailbox");
     const list = tab.getByRole("list", { name: "Mail" });
     const first = list.getByRole("listitem").first();
-    const file = first.getByRole("button", {
-      name: "File: Synthetic cloud bill",
+    const group = first.locator(".plus-mailbox-actions");
+    const category = first.getByRole("button", {
+      name: "File as “Work · P2”: Synthetic cloud bill",
     });
-    const opacity = () =>
-      file.evaluate((button) => getComputedStyle(button).opacity);
-    const timeShown = () =>
-      first
+    const inbox = first.getByRole("button", {
+      name: "Move to Todoist Inbox: Synthetic cloud bill",
+    });
+    const side = first.locator(".plus-mailbox-side");
+    const shown = async () => ({
+      buttons: await group.evaluate(
+        (element) => getComputedStyle(element).opacity,
+      ),
+      time: await first
         .locator("time")
-        .evaluate((time) => getComputedStyle(time).visibility);
+        .evaluate((time) => getComputedStyle(time).visibility),
+      fade: await side.evaluate(
+        (element) => getComputedStyle(element, "::before").visibility,
+      ),
+    });
     await tab.mouse.move(5, 860);
-    expect(await opacity()).toBe("0");
-    expect(await timeShown()).toBe("visible");
+    expect(await shown()).toEqual({
+      buttons: "0",
+      time: "visible",
+      fade: "hidden",
+    });
     await first.hover();
-    expect(await opacity()).toBe("1");
-    expect(await timeShown()).toBe("hidden");
+    expect(await shown()).toEqual({
+      buttons: "1",
+      time: "hidden",
+      fade: "visible",
+    });
+    // The categories first, Inbox at the right edge, with 4px between them.
+    await expect(group.getByRole("button")).toHaveText(["Work · P2", "Inbox"]);
+    const [left, right] = [
+      (await category.boundingBox())!,
+      (await inbox.boundingBox())!,
+    ];
+    expect(Math.round(right.x - (left.x + left.width))).toBe(4);
+    // A click on the title's faded end opens the row; it never files.
+    const slot = (await side.boundingBox())!;
+    await tab.mouse.click(slot.x - 12, slot.y + slot.height / 2);
+    const rows = list.locator(".plus-mailbox-row");
+    await expect(rows.first()).toHaveAttribute("aria-expanded", "true");
+    await tab.keyboard.press("Escape");
+    await expect(rows.first()).toHaveAttribute("aria-expanded", "false");
     await tab.mouse.move(5, 860);
 
     const keys = await listenOnTodoist(tab);
-    const rows = list.locator(".plus-mailbox-row");
     await rows.first().focus();
     await tab.keyboard.press("j");
     await expect(rows.nth(1)).toBeFocused();
     await tab.keyboard.press("k");
     await expect(rows.first()).toBeFocused();
     await tab.keyboard.press("Tab");
-    await expect(file).toBeFocused();
-    expect(await opacity()).toBe("1");
-    await tab.keyboard.press("Enter");
-    const menu = tab.getByRole("menu", { name: "File: Synthetic cloud bill" });
-    await expect(menu.getByRole("menuitem")).toHaveText([
-      "Work · P2",
-      "Mail categories…",
-    ]);
-    await expect(
-      menu.getByRole("menuitem", { name: "Work · P2" }),
-    ).toBeFocused();
-    await tab.keyboard.press("Escape");
-    await expect(menu).toBeHidden();
-    await expect(file).toBeFocused();
-    await tab.keyboard.press("Enter");
+    await expect(category).toBeFocused();
+    expect((await shown()).buttons).toBe("1");
+    await tab.keyboard.press("Tab");
+    await expect(inbox).toBeFocused();
     await tab.keyboard.press("Enter");
     await expect(list.getByText("Synthetic cloud bill")).toHaveCount(0);
+    await expect(tab.getByRole("menu")).toHaveCount(0);
     await expect(tab.locator(".plus-mailbox-status")).toHaveText(
-      "Filed as “Work · P2”: Synthetic cloud bill",
+      "Moved to Todoist Inbox: Synthetic cloud bill",
     );
     await expect(rows.first()).toBeFocused();
+    // One write without a category; the project an older build chose plays no part.
     expect(
       (await calls(worker, "mailItems:fileMailItem")).map((call) => call.body),
     ).toEqual([
@@ -227,10 +258,11 @@ test("File shows on hover or focus only; filing by keyboard writes once and focu
         task_id: "m-bill",
         etag: "m-bill-1",
         request_id: expect.any(String),
-        category_id: "category-1",
+        category_id: "",
         categories_etag: "mail-1",
       },
     ]);
+    expect(await projectOf(worker, "m-bill")).toBe("account-inbox");
     // j, k, Tab and Enter stayed in Plus: Todoist's shortcuts never saw them.
     expect(await keys()).toEqual([]);
   } finally {
@@ -323,7 +355,7 @@ test("Delete all confirms the count with focus on Cancel, and deletes exactly th
   }
 });
 
-test("Mail categories saves one label and a priority per category and the destination", async () => {
+test("Mail categories saves labels and priorities, with no destination", async () => {
   const { context, worker } = await launchMailbox();
   try {
     const tab = await context.newPage();
@@ -331,13 +363,16 @@ test("Mail categories saves one label and a priority per category and the destin
     const opener = tab.getByRole("button", { name: "Mail categories" });
     await opener.click();
     const dialog = tab.getByRole("dialog", { name: "Mail categories" });
-    const destination = dialog.getByRole("combobox", {
-      name: "Filed mail goes to",
-    });
-    await expect(destination).toHaveValue("work-project");
     await expect(dialog.getByRole("combobox", { name: "Label 1" })).toHaveValue(
       "synthetic-office",
     );
+    // A label and a priority per category: nothing asks where filed mail goes.
+    await expect(dialog.getByRole("combobox")).toHaveCount(2);
+    await expect(
+      dialog.getByText(
+        "Each category is one existing Todoist label and a priority. Filing adds them and moves the task to the Todoist Inbox.",
+      ),
+    ).toBeVisible();
     await dialog.getByRole("button", { name: "Add a category" }).click();
     const label = dialog.getByRole("combobox", { name: "Label 2" });
     await expect(label.locator("option")).toHaveText([
@@ -351,7 +386,7 @@ test("Mail categories saves one label and a priority per category and the destin
       .selectOption("3");
     await dialog.getByRole("button", { name: "Save" }).click();
     // Saved: the dialog closes, as Planning labels does, the status line says so, and focus is
-    // back on the button that opened it.
+    // back on the header's button.
     await expect(dialog).toBeHidden();
     await expect(tab.locator(".plus-mailbox-status")).toHaveText(
       "Mail categories saved",
@@ -373,7 +408,8 @@ test("Mail categories saves one label and a priority per category and the destin
             priority: "p3",
           },
         ],
-        destination: { provider: "todoist", external_id: "work-project" },
+        // REQUIRED on the wire, and ignored.
+        destination: { provider: "todoist", external_id: "inbox" },
         etag: "mail-1",
       },
     ]);
@@ -382,12 +418,22 @@ test("Mail categories saves one label and a priority per category and the destin
       .getByRole("listitem")
       .first();
     await first.hover();
-    await first.getByRole("button", { name: /^File: / }).click();
-    await expect(tab.getByRole("menu").getByRole("menuitem")).toHaveText([
-      "Work · P2",
-      "Personal · P3",
-      "Mail categories…",
-    ]);
+    await expect(
+      first.locator(".plus-mailbox-actions").getByRole("button"),
+    ).toHaveText(["Work · P2", "Personal · P3", "Inbox"]);
+    // Filing by a category: its label and priority, and the move to the account's Inbox.
+    await first
+      .getByRole("button", { name: /^File as “Personal · P3”/u })
+      .click();
+    await expect(tab.locator(".plus-mailbox-status")).toHaveText(
+      "Filed as “Personal · P3”: Synthetic cloud bill",
+    );
+    expect(
+      (await calls(worker, "mailItems:fileMailItem")).map(
+        (call) => call.body.category_id,
+      ),
+    ).toEqual(["category-2"]);
+    expect(await projectOf(worker, "m-bill")).toBe("account-inbox");
   } finally {
     await context.close();
   }
@@ -408,12 +454,13 @@ test("the list keeps its place through consecutive filings, and the result line 
     const fileFirst = async () => {
       const first = list.getByRole("listitem").first();
       await first.hover();
-      await first.getByRole("button", { name: /^File: / }).click();
-      await tab.getByRole("menuitem", { name: "Work · P2" }).click();
+      await first
+        .getByRole("button", { name: /^Move to Todoist Inbox: / })
+        .click();
     };
     await fileFirst();
     await expect(status).toHaveText(
-      "Filed as “Work · P2”: Synthetic cloud bill",
+      "Moved to Todoist Inbox: Synthetic cloud bill",
     );
     expect(await top()).toBe(start);
     await controlWrites(worker, { hold: true });
@@ -422,15 +469,20 @@ test("the list keeps its place through consecutive filings, and the result line 
     // While the next filing waits, the last result stays and nothing above the list moves.
     expect(await top()).toBe(start);
     await expect(status).toHaveText(
-      "Filed as “Work · P2”: Synthetic cloud bill",
+      "Moved to Todoist Inbox: Synthetic cloud bill",
     );
-    // The other rows can still be filed.
+    // The waiting row shows the mark in place of its buttons; the other rows can still be filed.
+    await expect(
+      list.locator(".plus-mailbox-item.is-pending .plus-mailbox-action"),
+    ).toHaveCount(0);
     const other = list.getByRole("listitem").nth(1);
     await other.hover();
-    await expect(other.getByRole("button", { name: /^File: / })).toBeEnabled();
+    await expect(
+      other.getByRole("button", { name: /^Move to Todoist Inbox: / }),
+    ).toBeEnabled();
     await controlWrites(worker, { hold: false, release: true });
     await expect(status).toHaveText(
-      "Filed as “Work · P2”: Synthetic hike sign-up",
+      "Moved to Todoist Inbox: Synthetic hike sign-up",
     );
     expect(await top()).toBe(start);
   } finally {

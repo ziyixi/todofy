@@ -260,7 +260,7 @@ export function betWords(
 /** One Bet line's copy (betWords). */
 export type BetWords = ReturnType<typeof betWords>;
 
-/** The Mailbox's copy: the page, a row's File menu, Delete all and the Mail categories dialog. */
+/** The Mailbox's copy: the page, a row's filing buttons, Delete all and the Mail categories dialog. */
 export function mailWords(language: Language) {
   if (language === "zh")
     return {
@@ -273,10 +273,10 @@ export function mailWords(language: Language) {
       noProject: "Todofy 没有设置邮件项目",
       failed: "暂时读不到邮件。",
       others: (n: number) => `邮件项目里还有 ${n} 个其他任务`,
-      file: "归入",
-      fileName: (title: string) => `归入：${title}`,
-      setUp: "设置归类",
-      setUpMenu: "设置归类…",
+      inbox: "收件箱",
+      moveInbox: (title: string) => `移到 Todoist 收件箱：${title}`,
+      fileAs: (name: string, title: string) => `归入「${name}」：${title}`,
+      movedInbox: (title: string) => `已移到 Todoist 收件箱：${title}`,
       filed: (name: string, title: string) => `已归入「${name}」：${title}`,
       received: (time: string) => `${time} 收到`,
       summaryLoading: "正在读取摘要…",
@@ -295,7 +295,7 @@ export function mailWords(language: Language) {
       deletedSome: (deleted: number, kept: number) =>
         `已删除 ${deleted} 封；${kept} 封有改动，已保留`,
       settingsHelp:
-        "每个归类是一个现有 Todoist 标签加一个优先级。归入后，任务移到下面选的项目。",
+        "每个归类是一个现有 Todoist 标签加一个优先级。归入时任务带上它们，并移到 Todoist 收件箱。",
       label: "标签",
       priority: "优先级",
       chooseLabel: "选择标签",
@@ -303,15 +303,10 @@ export function mailWords(language: Language) {
       remove: (name: string) => `删除归类：${name}`,
       add: "添加归类",
       addLimit: "最多 4 个",
-      destination: "归入后移到",
-      chooseProject: "选择项目",
-      inbox: "收件箱",
-      settingsLoading: "正在读取项目…",
+      settingsLoading: "正在读取归类…",
       settingsFailed: "暂时读不到邮件归类。",
       duplicate: "已有相同的归类。",
       labelGone: "这个标签已不存在，请重新选择。",
-      projectGone: "这个项目已不存在，请重新选择。",
-      needDestination: "选择归入后要移到的项目。",
       saved: "已保存邮件归类",
     };
   const emails = (n: number) => `${n} ${n === 1 ? "email" : "emails"}`;
@@ -326,10 +321,10 @@ export function mailWords(language: Language) {
     failed: "Couldn't read your mail.",
     others: (n: number) =>
       `${n} other ${n === 1 ? "task" : "tasks"} in the mail project`,
-    file: "File",
-    fileName: (title: string) => `File: ${title}`,
-    setUp: "Set up categories",
-    setUpMenu: "Mail categories…",
+    inbox: "Inbox",
+    moveInbox: (title: string) => `Move to Todoist Inbox: ${title}`,
+    fileAs: (name: string, title: string) => `File as “${name}”: ${title}`,
+    movedInbox: (title: string) => `Moved to Todoist Inbox: ${title}`,
     filed: (name: string, title: string) => `Filed as “${name}”: ${title}`,
     received: (time: string) => `Received ${time}`,
     summaryLoading: "Loading the summary…",
@@ -352,7 +347,7 @@ export function mailWords(language: Language) {
     deletedSome: (deleted: number, kept: number) =>
       `Deleted ${deleted}; ${kept} had changes and ${kept === 1 ? "was" : "were"} kept`,
     settingsHelp:
-      "Each category is one existing Todoist label and a priority. Filed mail moves to the project chosen below.",
+      "Each category is one existing Todoist label and a priority. Filing adds them and moves the task to the Todoist Inbox.",
     label: "Label",
     priority: "Priority",
     chooseLabel: "Choose a label",
@@ -360,15 +355,10 @@ export function mailWords(language: Language) {
     remove: (name: string) => `Remove category: ${name}`,
     add: "Add a category",
     addLimit: "Up to 4",
-    destination: "Filed mail goes to",
-    chooseProject: "Choose a project",
-    inbox: "Inbox",
-    settingsLoading: "Loading your projects…",
+    settingsLoading: "Loading the categories…",
     settingsFailed: "Couldn't read the mail categories.",
     duplicate: "That category already exists.",
     labelGone: "That label no longer exists. Choose another.",
-    projectGone: "That project no longer exists. Choose another.",
-    needDestination: "Choose where filed mail goes.",
     saved: "Mail categories saved",
   };
 }

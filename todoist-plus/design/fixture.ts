@@ -8,7 +8,6 @@ import type {
   FlowDayPlan,
   MailCategories,
   MailItem,
-  MailProject,
   PlanMetadata,
   PlanState,
   PlanningTask,
@@ -273,15 +272,9 @@ export function createPrototype(
       "Registration is open; the early price ends Oct 20.\n\n**Details**\n- The early price is 30% lower\n- Add dietary needs on the form",
     "event-notes": "Friday's shared notes were updated; add your part.",
   };
-  let mailSettings: MailCategories = {
-    categories: [],
-    etag: "mail-0",
-    destination: "",
-  };
-  const projects: MailProject[] = [
-    { id: "synthetic-inbox", name: "Inbox", inbox: true },
-    { id: "synthetic", name: "Synthetic projects", inbox: false },
-  ];
+  let mailSettings: MailCategories = { categories: [], etag: "mail-0" };
+  // The account's Todoist Inbox, where filed mail goes.
+  const inboxProject = "synthetic-inbox";
   let focus: FocusState = {
     date: today,
     timerEtag: "fixture",
@@ -564,19 +557,18 @@ export function createPrototype(
       return summaries[id] ?? "";
     },
     async readMailSettings() {
-      return structuredClone({ ...mailSettings, projects });
+      return structuredClone(mailSettings);
     },
-    async updateMailSettings(categories, destination, etag) {
-      // As Todofy answers: the saved settings are a replay; a category keeps its ID by its pair.
+    async updateMailSettings(categories, etag) {
+      // As Todofy answers: the saved categories are a replay; a category keeps its ID by its pair.
       const same =
-        destination === mailSettings.destination &&
         JSON.stringify(categories) ===
-          JSON.stringify(
-            mailSettings.categories.map(({ labelId, priority }) => ({
-              labelId,
-              priority,
-            })),
-          );
+        JSON.stringify(
+          mailSettings.categories.map(({ labelId, priority }) => ({
+            labelId,
+            priority,
+          })),
+        );
       if (same) return structuredClone(mailSettings);
       if (etag !== mailSettings.etag)
         throw new Error("Synthetic categories changed");
@@ -590,38 +582,44 @@ export function createPrototype(
                 saved.priority === category.priority,
             )?.id ?? crypto.randomUUID(),
         })),
-        destination,
         etag: crypto.randomUUID(),
       };
       return structuredClone(mailSettings);
     },
     async fileMail(item, category, etag) {
-      if (etag !== mailSettings.etag)
-        throw new Error("Synthetic categories changed");
-      const label = plan.availableLabels.find(
-        (choice) => choice.id === category.labelId,
-      )?.label;
-      if (!label) throw new Error("Synthetic label gone");
-      // The category's label; an area label replaces the other area label.
-      const areas = { office: "work", home: "personal" } as const;
-      const area = areas[label as keyof typeof areas];
+      // As Todofy files: a category's label and priority, if one is given, and always the move
+      // to the Inbox.
+      let filed = (task: PlanningTask) => ({
+        ...task,
+        projectId: inboxProject,
+      });
+      if (category) {
+        if (etag !== mailSettings.etag)
+          throw new Error("Synthetic categories changed");
+        const label = plan.availableLabels.find(
+          (choice) => choice.id === category.labelId,
+        )?.label;
+        if (!label) throw new Error("Synthetic label gone");
+        // The category's label; an area label replaces the other area label.
+        const areas = { office: "work", home: "personal" } as const;
+        const area = areas[label as keyof typeof areas];
+        filed = (task) => ({
+          ...task,
+          labels: [
+            ...task.labels.filter(
+              (name) => !(area && name in areas) && name !== label,
+            ),
+            label,
+          ],
+          area: area ?? task.area,
+          priority: apiPriority(category.priority),
+          projectId: inboxProject,
+        });
+      }
       plan = {
         ...plan,
         tasks: plan.tasks.map((task) =>
-          task.id === item.id
-            ? {
-                ...task,
-                labels: [
-                  ...task.labels.filter(
-                    (name) => !(area && name in areas) && name !== label,
-                  ),
-                  label,
-                ],
-                area: area ?? task.area,
-                priority: apiPriority(category.priority),
-                projectId: mailSettings.destination,
-              }
-            : task,
+          task.id === item.id ? filed(task) : task,
         ),
       };
       return structuredClone(plan.tasks.find((task) => task.id === item.id)!);

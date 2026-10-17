@@ -68,6 +68,7 @@ it("asks about mail 200 tasks a request, and once with none for the categories a
         },
       ],
       categories_etag: "categories-1",
+      // Todofy still answers an old build's destination, which filing no longer uses.
       destination: { provider: "todoist", external_id: "project-work" },
     };
   });
@@ -91,26 +92,22 @@ it("asks about mail 200 tasks a request, and once with none for the categories a
   expect(lookup.categories).toEqual([
     { id: "7", labelId: "label-office", priority: 2 },
   ]);
-  expect([lookup.etag, lookup.destination]).toEqual([
-    "categories-1",
-    "project-work",
-  ]);
+  expect(lookup.etag).toBe("categories-1");
+  expect(lookup).not.toHaveProperty("destination");
   calls.length = 0;
   await api.lookupMail([]);
   expect(calls.map((call) => call.body)).toEqual([{ task_ids: [] }]);
 });
 
-it("reads one summary by mail ID, and the settings with their projects", async () => {
+it("reads one summary by mail ID, and the categories without the Inbox Todofy answers old builds", async () => {
   const { api, calls } = client(({ path }) =>
     path.endsWith(":readMailSummary")
       ? { summary: "Line one.\n\nLine two." }
       : {
           categories: [],
           etag: "settings-0",
-          projects: [
-            { id: "inbox", display_name: "Inbox", inbox: true },
-            { id: "work", display_name: "Work" },
-          ],
+          destination: { provider: "todoist", external_id: "inbox-1" },
+          projects: [{ id: "inbox-1", display_name: "Inbox", inbox: true }],
         },
   );
   expect(await api.readMailSummary("event-1")).toBe("Line one.\n\nLine two.");
@@ -122,15 +119,10 @@ it("reads one summary by mail ID, and the settings with their projects", async (
   expect(await api.readMailSettings()).toEqual({
     categories: [],
     etag: "settings-0",
-    destination: "",
-    projects: [
-      { id: "inbox", name: "Inbox", inbox: true },
-      { id: "work", name: "Work", inbox: false },
-    ],
   });
 });
 
-it("saves settings, files and deletes with Todofy's references, priorities and request IDs", async () => {
+it("saves categories, files by a category or into the Inbox alone, and deletes, with Todofy's references and request IDs", async () => {
   const { api, calls } = client(({ path, body }) => {
     if (path.endsWith(":updateMailSettings"))
       return {
@@ -142,33 +134,42 @@ it("saves settings, files and deletes with Todofy's references, priorities and r
           },
         ],
         etag: "settings-2",
-        destination: (body as { destination: unknown }).destination,
+        // The destination an old build saved, which Todofy keeps and ignores.
+        destination: { provider: "todoist", external_id: "project-old" },
       };
     if (path.endsWith(":fileMailItem"))
-      return {
-        task: {
-          id: "mail-1",
-          title: "Synthetic mail",
-          project_id: "project-home",
-          labels: ["home"],
-          area: "personal",
-          priority: 4,
-          etag: "task-2",
-        },
-      };
+      return (body as { category_id: string }).category_id
+        ? {
+            task: {
+              id: "mail-1",
+              title: "Synthetic mail",
+              project_id: "account-inbox",
+              labels: ["home"],
+              area: "personal",
+              priority: 4,
+              etag: "task-2",
+            },
+          }
+        : {
+            task: {
+              id: "mail-2",
+              title: "Another synthetic mail",
+              project_id: "account-inbox",
+              etag: "task-3",
+            },
+          };
     return { deleted_task_ids: ["mail-1"], kept_task_ids: ["mail-2"] };
   });
   expect(
     await api.updateMailSettings(
       [{ labelId: "label-home", priority: 1 }],
-      "project-home",
       "settings-1",
     ),
   ).toEqual({
     categories: [{ id: "3", labelId: "label-home", priority: 1 }],
     etag: "settings-2",
-    destination: "project-home",
   });
+  // The destination is still REQUIRED on the wire; Todofy ignores it since protocol 6.
   expect(calls[0]!.body).toEqual({
     categories: [
       {
@@ -176,7 +177,7 @@ it("saves settings, files and deletes with Todofy's references, priorities and r
         priority: "p1",
       },
     ],
-    destination: { provider: "todoist", external_id: "project-home" },
+    destination: { provider: "todoist", external_id: "inbox" },
     etag: "settings-1",
   });
   const filed = await api.fileMail(
@@ -197,19 +198,37 @@ it("saves settings, files and deletes with Todofy's references, priorities and r
   });
   // Todoist's API priority 4 is P1; FlowDay's estimate stays the one shown.
   expect(filed).toMatchObject({
-    projectId: "project-home",
+    projectId: "account-inbox",
     area: "personal",
     priority: 4,
     estimatedMinutes: 15,
     etag: "task-2",
   });
+  // Without a category: an empty category ID, which Todofy files as a move alone.
+  const moved = await api.fileMail(
+    { ...task, id: "mail-2", etag: "task-1b" },
+    undefined,
+    "settings-2",
+    "33333333-3333-4333-8333-333333333333",
+  );
+  expect(calls[2]).toMatchObject({
+    path: "/api/plus/v1/mailItems:fileMailItem",
+    body: {
+      task_id: "mail-2",
+      etag: "task-1b",
+      request_id: "33333333-3333-4333-8333-333333333333",
+      category_id: "",
+      categories_etag: "settings-2",
+    },
+  });
+  expect(moved).toMatchObject({ id: "mail-2", projectId: "account-inbox" });
   expect(
     await api.deleteMail(
       ["mail-1", "mail-2"],
       "22222222-2222-4222-8222-222222222222",
     ),
   ).toEqual({ deletedTaskIds: ["mail-1"], keptTaskIds: ["mail-2"] });
-  expect(calls[2]).toMatchObject({
+  expect(calls[3]).toMatchObject({
     path: "/api/plus/v1/mailItems:deleteMailItems",
     body: {
       request_id: "22222222-2222-4222-8222-222222222222",

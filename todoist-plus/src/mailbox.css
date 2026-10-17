@@ -77,7 +77,7 @@
   white-space: nowrap;
   text-overflow: ellipsis;
 }
-/* The time and the row's one action share a slot on a solid background, so nothing reflows. */
+/* The time and the row's filing buttons share a slot on a solid background, so nothing reflows. */
 .plus-mailbox-side {
   position: absolute;
   top: 10px;
@@ -99,39 +99,77 @@
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
-.plus-root .plus-mailbox-file {
-  height: 24px;
-  padding: 0 6px;
+.plus-mailbox-actions {
+  display: flex;
+  gap: 4px;
   margin-right: -6px;
+  opacity: 0;
+  pointer-events: none;
+}
+.plus-root .plus-mailbox-action {
+  height: 24px;
+  max-width: 12ch;
+  padding: 0 6px;
   border-radius: 4px;
   font-size: 12px;
   color: var(--plus-muted);
   white-space: nowrap;
-  opacity: 0;
-  pointer-events: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
-.plus-root .plus-mailbox-file:hover:not(:disabled),
-.plus-root .plus-mailbox-file[aria-expanded="true"] {
+.plus-root .plus-mailbox-action:hover:not(:disabled) {
   color: var(--plus-text);
   background: var(--plus-hover);
 }
-/* File shows in place of the time where the pointer or focus is, and always without hover. */
-.plus-mailbox-item:hover .plus-mailbox-file,
-.plus-mailbox-item:focus-within .plus-mailbox-file {
+/* The buttons show in place of the time where the pointer or focus is. They may cover the end of
+   the title, which fades out under them; a click on the faded text still opens the row. */
+.plus-mailbox-side::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 100%;
+  width: 24px;
+  height: 100%;
+  background: linear-gradient(to right, transparent, var(--plus-bg));
+  pointer-events: none;
+  visibility: hidden;
+}
+.plus-mailbox-item:hover .plus-mailbox-actions,
+.plus-mailbox-item:focus-within .plus-mailbox-actions {
   opacity: 1;
   pointer-events: auto;
 }
-.plus-mailbox-item:hover .plus-mailbox-time:has(+ .plus-mailbox-file),
-.plus-mailbox-item:focus-within .plus-mailbox-time:has(+ .plus-mailbox-file) {
+.plus-mailbox-item:hover .plus-mailbox-side:has(.plus-mailbox-actions)::before,
+.plus-mailbox-item:focus-within
+  .plus-mailbox-side:has(.plus-mailbox-actions)::before {
+  visibility: visible;
+}
+.plus-mailbox-item:hover .plus-mailbox-time:has(+ .plus-mailbox-actions),
+.plus-mailbox-item:focus-within
+  .plus-mailbox-time:has(+ .plus-mailbox-actions) {
   visibility: hidden;
 }
+/* Without hover the buttons always show, on their own line under the brief, covering nothing. */
 @media (hover: none) {
-  .plus-root .plus-mailbox-file {
+  .plus-root .plus-mailbox-row {
+    padding-right: 0;
+  }
+  .plus-mailbox-side {
+    position: static;
+    height: auto;
+    padding: 0 0 10px;
+    justify-items: start;
+  }
+  .plus-mailbox-side::before {
+    display: none;
+  }
+  .plus-mailbox-actions {
+    margin: 0 0 0 -6px;
     opacity: 1;
     pointer-events: auto;
   }
-  .plus-mailbox-time:has(+ .plus-mailbox-file) {
-    visibility: hidden;
+  .plus-mailbox-time:has(+ .plus-mailbox-actions) {
+    display: none;
   }
 }
 /* A filing on its way: the row dims, and the mark takes the time's place. */
@@ -179,47 +217,6 @@
 }
 .plus-mailbox .plus-empty:focus {
   outline: none;
-}
-/* The File menu: Plus's dialog surface at menu size. */
-.plus-menu {
-  position: absolute;
-  z-index: 3;
-  top: 34px;
-  right: -6px;
-  min-width: 188px;
-  margin: 0;
-  padding: 4px;
-  border: 1px solid var(--plus-line);
-  border-radius: 7px;
-  background: var(--plus-bg);
-  box-shadow: var(--plus-shadow-2);
-}
-.plus-root .plus-menu button {
-  display: flex;
-  align-items: center;
-  width: 100%;
-  min-height: 32px;
-  padding: 0 10px;
-  border-radius: 5px;
-  font-size: 13px;
-  text-align: left;
-  white-space: nowrap;
-}
-.plus-root .plus-menu button:hover,
-.plus-root .plus-menu button:focus-visible {
-  background: var(--plus-hover);
-}
-.plus-root .plus-menu button:focus-visible {
-  outline-offset: -2px;
-}
-.plus-menu [role="separator"] {
-  height: 1px;
-  margin: 4px 6px;
-  background: var(--plus-line);
-}
-.plus-root .plus-menu button.is-quiet {
-  color: var(--plus-muted);
-  font-size: 12px;
 }
 /* Delete all's confirmation: the ordinary dialog and two neutral buttons. */
 .plus-dialog.plus-confirm-dialog {
@@ -269,9 +266,6 @@
 }
 .plus-root .plus-mail-category-add {
   justify-self: start;
-}
-.plus-board-labels .plus-mail-destination {
-  margin-top: 4px;
 }
 .plus-board-labels > p.plus-muted {
   margin: 10px 0 0;

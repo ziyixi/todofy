@@ -151,6 +151,8 @@ function todoistId(ref: { provider: string; externalId: string } | undefined) {
 function todoistRef(id: string) {
   return { provider: "todoist", externalId: id };
 }
+/** REQUIRED on the wire and ignored since protocol 6: filed mail always goes to the Inbox. */
+const IGNORED_DESTINATION = "inbox";
 function mailCategory(category: ApiMailCategory): MailCategory | undefined {
   const labelId = todoistId(category.label);
   // Priority's numbers are the domain's P1 (1) to P4 (4).
@@ -160,13 +162,11 @@ function mailCategory(category: ApiMailCategory): MailCategory | undefined {
 }
 function mailCategories(answer: {
   categories: ApiMailCategory[];
-  destination?: { provider: string; externalId: string };
 }): Omit<MailCategories, "etag"> {
   return {
     categories: answer.categories.flatMap(
       (category) => mailCategory(category) ?? [],
     ),
-    destination: todoistId(answer.destination),
   };
 }
 function planMetadata(plan: ApiPlan): PlanMetadata {
@@ -574,12 +574,7 @@ export function createApi(
       return timerSnapshot(confirmed);
     },
     async lookupMail(taskIds) {
-      const lookup: MailLookup = {
-        items: [],
-        categories: [],
-        etag: "",
-        destination: "",
-      };
+      const lookup: MailLookup = { items: [], categories: [], etag: "" };
       const batches: string[][] = [];
       for (let start = 0; start < taskIds.length; start += MAIL_BATCH)
         batches.push(taskIds.slice(start, start + MAIL_BATCH));
@@ -616,33 +611,26 @@ export function createApi(
     },
     async readMailSettings() {
       const result = await plus.readMailSettings({});
-      return {
-        ...mailCategories(result),
-        etag: result.etag,
-        projects: result.projects.map((project) => ({
-          id: project.id,
-          name: project.displayName,
-          inbox: project.inbox,
-        })),
-      };
+      return { ...mailCategories(result), etag: result.etag };
     },
-    async updateMailSettings(categories, destination, etag) {
+    async updateMailSettings(categories, etag) {
       const result = await plus.updateMailSettings({
         categories: categories.map((category) => ({
           label: todoistRef(category.labelId),
           priority: category.priority as Priority,
         })),
-        destination: todoistRef(destination),
+        destination: todoistRef(IGNORED_DESTINATION),
         etag,
       });
       return { ...mailCategories(result), etag: result.etag };
     },
     async fileMail(task, category, categoriesEtag, requestId) {
+      // Without a category, Todofy only moves the task to the Inbox.
       const result = await plus.fileMailItem({
         taskId: task.id,
         etag: task.etag,
         requestId,
-        categoryId: category.id,
+        categoryId: category?.id ?? "",
         categoriesEtag,
       });
       if (!result.task) throw new Error("The filed task could not be read.");

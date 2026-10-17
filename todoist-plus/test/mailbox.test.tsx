@@ -98,24 +98,21 @@ const rowButtons = () =>
     .getAllByRole("listitem")
     .map((item) => item.querySelector<HTMLButtonElement>(".plus-mailbox-row")!);
 
-/** Saves one category, Work · P2, and the destination, through the Mail categories dialog. */
+/** Saves one category, Work · P2, through the Mail categories dialog. */
 async function setUpCategories() {
   fireEvent.click(screen.getByRole("button", { name: "Mail categories" }));
   const dialog = within(
     await screen.findByRole("dialog", { name: "Mail categories" }),
   );
-  await dialog.findByRole("combobox", { name: "Filed mail goes to" });
-  fireEvent.click(dialog.getByRole("button", { name: "Add a category" }));
+  fireEvent.click(
+    await dialog.findByRole("button", { name: "Add a category" }),
+  );
   fireEvent.change(dialog.getByRole("combobox", { name: "Label 1" }), {
     target: { value: "synthetic-office" },
   });
   fireEvent.change(dialog.getByRole("combobox", { name: "Priority 1" }), {
     target: { value: "2" },
   });
-  fireEvent.change(
-    dialog.getByRole("combobox", { name: "Filed mail goes to" }),
-    { target: { value: "synthetic" } },
-  );
   fireEvent.click(dialog.getByRole("button", { name: "Save" }));
   // Saved, the dialog closes and the Mailbox's status line says so.
   await screen.findByText("Mail categories saved");
@@ -166,7 +163,7 @@ it("lists the mail to clarify newest first: title, brief and time, and the other
   expect(screen.queryByText(/unread|sender/iu)).toBeNull();
 });
 
-it("moves between rows with the arrows, j/k, Home and End, and lets Tab reach only the current row's File", async () => {
+it("moves between rows with the arrows, j/k, Home and End, and lets Tab reach only the current row's filing buttons", async () => {
   const actions = withMail(
     [mailTask("third")],
     [
@@ -180,11 +177,36 @@ it("moves between rows with the arrows, j/k, Home and End, and lets Tab reach on
     ],
   );
   await renderMailbox(actions);
+  await setUpCategories();
   const rows = rowButtons();
   expect(rows.map((row) => row.tabIndex)).toEqual([0, -1, -1]);
+  // After its row button, each row has its categories, then Inbox: Tab reaches them in that order.
   const files = () =>
-    screen.getAllByRole("button", { name: /^Set up categories$/u });
-  expect(files().map((button) => button.tabIndex)).toEqual([0, -1, -1]);
+    screen
+      .getAllByRole("listitem")
+      .map((item) =>
+        [...item.querySelectorAll("button")].map((button) => [
+          button.textContent,
+          button.tabIndex,
+        ]),
+      );
+  expect(files()).toEqual([
+    [
+      [rows[0]!.textContent, 0],
+      ["Work · P2", 0],
+      ["Inbox", 0],
+    ],
+    [
+      [rows[1]!.textContent, -1],
+      ["Work · P2", -1],
+      ["Inbox", -1],
+    ],
+    [
+      [rows[2]!.textContent, -1],
+      ["Work · P2", -1],
+      ["Inbox", -1],
+    ],
+  ]);
   rows[0]!.focus();
   fireEvent.keyDown(rows[0]!, { key: "ArrowDown" });
   expect(document.activeElement).toBe(rows[1]);
@@ -199,7 +221,11 @@ it("moves between rows with the arrows, j/k, Home and End, and lets Tab reach on
   await waitFor(() =>
     expect(rowButtons().map((row) => row.tabIndex)).toEqual([-1, -1, 0]),
   );
-  expect(files().map((button) => button.tabIndex)).toEqual([-1, -1, 0]);
+  expect(files().map((buttons) => buttons.map(([, tab]) => tab))).toEqual([
+    [-1, -1, -1],
+    [-1, -1, -1],
+    [0, 0, 0],
+  ]);
   // A row without a brief shows its title alone.
   expect(
     screen.getAllByRole("listitem")[2]!.querySelector(".plus-mailbox-brief"),
@@ -253,80 +279,24 @@ it("says when a summary is no longer available, keeping the brief and the Todois
   expect(detail.getByRole("link", { name: "在 Todoist 中打开" })).toBeTruthy();
 });
 
-it("asks for categories before the first filing, then files by the menu and moves focus on", async () => {
+it("moves a mail into the Todoist Inbox at one click when no category is saved, and moves focus on", async () => {
   const actions = createPrototype();
   const fileMail = vi.spyOn(actions, "fileMail");
-  const update = vi.spyOn(actions, "updateMailSettings");
-  await renderMailbox(actions);
-  // Without categories the row's action opens the settings.
-  fireEvent.click(
-    screen.getAllByRole("button", { name: "Set up categories" })[0]!,
-  );
-  const dialog = within(
-    await screen.findByRole("dialog", { name: "Mail categories" }),
-  );
-  const destination = await dialog.findByRole("combobox", {
-    name: "Filed mail goes to",
-  });
-  // No project is chosen for the owner.
-  expect((destination as HTMLSelectElement).value).toBe("");
-  fireEvent.click(dialog.getByRole("button", { name: "Add a category" }));
-  const label = dialog.getByRole("combobox", { name: "Label 1" });
-  // The two area labels by their names; never a stage, lead or the in-progress label.
+  await renderMailbox(actions, "zh");
+  // No category: the row offers Inbox alone, and nothing asks for a setup first.
+  const [item] = screen.getAllByRole("listitem");
   expect(
-    within(label)
-      .getAllByRole("option")
-      .map((option) => option.textContent),
-  ).toEqual(["Choose a label", "Work", "Personal"]);
-  fireEvent.change(label, { target: { value: "synthetic-office" } });
-  fireEvent.change(dialog.getByRole("combobox", { name: "Priority 1" }), {
-    target: { value: "2" },
-  });
-  fireEvent.click(dialog.getByRole("button", { name: "Save" }));
-  expect((await dialog.findByRole("alert")).textContent).toBe(
-    "Choose where filed mail goes.",
-  );
-  fireEvent.click(dialog.getByRole("button", { name: "Add a category" }));
-  fireEvent.change(dialog.getByRole("combobox", { name: "Label 2" }), {
-    target: { value: "synthetic-office" },
-  });
-  fireEvent.change(dialog.getByRole("combobox", { name: "Priority 2" }), {
-    target: { value: "2" },
-  });
-  fireEvent.change(destination, { target: { value: "synthetic" } });
-  fireEvent.click(dialog.getByRole("button", { name: "Save" }));
-  expect((await dialog.findByRole("alert")).textContent).toBe(
-    "That category already exists.",
-  );
+    within(item!)
+      .getAllByRole("button")
+      .slice(1)
+      .map((button) => button.textContent),
+  ).toEqual(["收件箱"]);
+  expect(screen.queryByText(/设置归类/u)).toBeNull();
   fireEvent.click(
-    dialog.getAllByRole("button", { name: "Remove category: Work · P2" })[1]!,
+    within(item!).getByRole("button", {
+      name: `移到 Todoist 收件箱：${REGISTER}`,
+    }),
   );
-  fireEvent.click(dialog.getByRole("button", { name: "Save" }));
-  // Saved: the dialog closes, the status line says so, and focus is back on the row's action,
-  // which now files.
-  await screen.findByText("Mail categories saved");
-  expect(screen.queryByRole("dialog")).toBeNull();
-  expect(update.mock.calls).toEqual([
-    [[{ labelId: "synthetic-office", priority: 2 }], "synthetic", "mail-0"],
-  ]);
-  const file = screen.getAllByRole("button", { name: `File: ${REGISTER}` })[0]!;
-  expect(document.activeElement).toBe(file);
-  expect(file.getAttribute("aria-haspopup")).toBe("menu");
-  fireEvent.click(file);
-  const menu = within(screen.getByRole("menu", { name: `File: ${REGISTER}` }));
-  const items = menu.getAllByRole("menuitem");
-  expect(items.map((item) => item.textContent)).toEqual([
-    "Work · P2",
-    "Mail categories…",
-  ]);
-  expect(document.activeElement).toBe(items[0]);
-  fireEvent.keyDown(items[0]!, { key: "ArrowDown" });
-  expect(document.activeElement).toBe(items[1]);
-  fireEvent.keyDown(items[1]!, { key: "Escape" });
-  expect(screen.queryByRole("menu")).toBeNull();
-  expect(document.activeElement).toBe(file);
-  fireEvent.click(file);
-  fireEvent.click(screen.getByRole("menuitem", { name: "Work · P2" }));
   await waitFor(() =>
     expect(
       rowButtons().map(
@@ -334,16 +304,135 @@ it("asks for categories before the first filing, then files by the menu and move
       ),
     ).toEqual([NOTES]),
   );
-  expect(fileMail).toHaveBeenCalledOnce();
-  expect(fileMail.mock.calls[0]!.slice(0, 2)).toEqual([
-    expect.objectContaining({ id: "mail-register", etag: "fixture" }),
-    expect.objectContaining({ labelId: "synthetic-office", priority: 2 }),
+  // No menu and no confirmation: one write, without a category.
+  expect(screen.queryByRole("menu")).toBeNull();
+  expect(fileMail.mock.calls).toEqual([
+    [
+      expect.objectContaining({ id: "mail-register", etag: "fixture" }),
+      undefined,
+      "mail-0",
+      expect.any(String),
+    ],
   ]);
-  expect(
-    screen.getByText(`Filed as “Work · P2”: ${REGISTER}`).getAttribute("role"),
-  ).toBe("status");
+  expect(statusLine().textContent).toBe(`已移到 Todoist 收件箱：${REGISTER}`);
   // Focus moved to the row now in its place.
   await waitFor(() => expect(document.activeElement).toBe(rowButtons()[0]));
+});
+
+it("files by a category at one click: its label and priority, then the move to the Inbox", async () => {
+  const actions = createPrototype();
+  const fileMail = vi.spyOn(actions, "fileMail");
+  const load = vi.spyOn(actions, "load");
+  await renderMailbox(actions);
+  await setUpCategories();
+  fireEvent.click(
+    screen.getByRole("button", { name: `File as “Work · P2”: ${REGISTER}` }),
+  );
+  await waitFor(() => expect(rowButtons()).toHaveLength(1));
+  expect(fileMail.mock.calls[0]!.slice(0, 3)).toEqual([
+    expect.objectContaining({ id: "mail-register" }),
+    expect.objectContaining({ labelId: "synthetic-office", priority: 2 }),
+    expect.any(String),
+  ]);
+  expect(statusLine().textContent).toBe(`Filed as “Work · P2”: ${REGISTER}`);
+  // As Todofy answers: labelled, P2, and in the account's Inbox.
+  const filed = await fileMail.mock.results[0]!.value;
+  expect(filed).toMatchObject({
+    labels: ["office"],
+    priority: 3,
+    projectId: "synthetic-inbox",
+  });
+  // The filed task is merged as Todofy answered it; nothing is read again.
+  expect(load).toHaveBeenCalledOnce();
+});
+
+it("offers the saved categories in order, at most four and none whose label is gone, then Inbox", async () => {
+  const actions = createPrototype();
+  const lookup = actions.lookupMail.bind(actions);
+  vi.spyOn(actions, "lookupMail").mockImplementation(async (ids) => ({
+    ...(await lookup(ids)),
+    categories: [
+      { id: "c1", labelId: "synthetic-home", priority: 1 },
+      { id: "c2", labelId: "synthetic-gone", priority: 2 },
+      { id: "c3", labelId: "synthetic-office", priority: 2 },
+      { id: "c4", labelId: "synthetic-office", priority: 4 },
+      { id: "c5", labelId: "synthetic-home", priority: 3 },
+      { id: "c6", labelId: "synthetic-office", priority: 1 },
+    ],
+  }));
+  await renderMailbox(actions, "zh");
+  const actionsOf = (item: HTMLElement) =>
+    [...item.querySelectorAll(".plus-mailbox-actions button")].map((button) => [
+      button.textContent,
+      button.getAttribute("aria-label"),
+      button.getAttribute("title"),
+    ]);
+  expect(actionsOf(screen.getAllByRole("listitem")[1]!)).toEqual([
+    ["生活 · P1", `归入「生活 · P1」：${NOTES}`, `归入「生活 · P1」：${NOTES}`],
+    ["工作 · P2", `归入「工作 · P2」：${NOTES}`, `归入「工作 · P2」：${NOTES}`],
+    ["工作 · P4", `归入「工作 · P4」：${NOTES}`, `归入「工作 · P4」：${NOTES}`],
+    ["生活 · P3", `归入「生活 · P3」：${NOTES}`, `归入「生活 · P3」：${NOTES}`],
+    [
+      "收件箱",
+      `移到 Todoist 收件箱：${NOTES}`,
+      `移到 Todoist 收件箱：${NOTES}`,
+    ],
+  ]);
+});
+
+it("edits the categories from the header alone: no destination, none at all is fine, and focus returns to the gear", async () => {
+  const actions = createPrototype();
+  const update = vi.spyOn(actions, "updateMailSettings");
+  await renderMailbox(actions);
+  await setUpCategories();
+  const gear = screen.getByRole("button", { name: "Mail categories" });
+  expect(document.activeElement).toBe(gear);
+  // No row opens the dialog: a row's buttons only file.
+  expect(screen.queryAllByRole("button", { name: /categor/iu }).length).toBe(1);
+  fireEvent.click(gear);
+  const dialog = within(
+    await screen.findByRole("dialog", { name: "Mail categories" }),
+  );
+  await dialog.findByRole("button", {
+    name: "Remove category: Work · P2",
+  });
+  expect(
+    dialog.getByText(
+      "Each category is one existing Todoist label and a priority. Filing adds them and moves the task to the Todoist Inbox.",
+    ),
+  ).toBeTruthy();
+  // A label and a priority per category, and nothing else to choose.
+  expect(
+    dialog
+      .getAllByRole("combobox")
+      .map((box) => box.getAttribute("aria-label")),
+  ).toEqual(["Label 1", "Priority 1"]);
+  fireEvent.click(
+    dialog.getByRole("button", { name: "Remove category: Work · P2" }),
+  );
+  fireEvent.click(dialog.getByRole("button", { name: "Save" }));
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  expect(update.mock.calls.at(-1)).toEqual([[], expect.any(String)]);
+  // The same words as the first save, read out again.
+  await waitFor(() =>
+    expect(statusLine().textContent).toBe("Mail categories saved"),
+  );
+  expect(document.activeElement).toBe(gear);
+  // Without categories each row offers Inbox alone.
+  expect(
+    within(screen.getAllByRole("listitem")[0]!)
+      .getAllByRole("button")
+      .slice(1)
+      .map((button) => button.textContent),
+  ).toEqual(["Inbox"]);
+  // Closed without saving, focus goes back to the gear as well.
+  fireEvent.click(gear);
+  fireEvent.click(
+    within(
+      await screen.findByRole("dialog", { name: "Mail categories" }),
+    ).getByRole("button", { name: "Close" }),
+  );
+  expect(document.activeElement).toBe(gear);
 });
 
 it("keeps a row whose filing was not confirmed, and resends the same request", async () => {
@@ -353,20 +442,24 @@ it("keeps a row whose filing was not confirmed, and resends the same request", a
     .mockRejectedValueOnce(new Error("Synthetic Todoist unavailable"));
   await renderMailbox(actions);
   await setUpCategories();
-  const file = () =>
-    screen.getAllByRole<HTMLButtonElement>("button", {
-      name: `File: ${REGISTER}`,
-    })[0]!;
-  fireEvent.click(file());
-  fireEvent.click(screen.getByRole("menuitem", { name: "Work · P2" }));
+  const inbox = () =>
+    screen.getByRole<HTMLButtonElement>("button", {
+      name: `Move to Todoist Inbox: ${REGISTER}`,
+    });
+  fireEvent.click(inbox());
   await screen.findByText(/Synthetic Todoist unavailable/u);
   expect(rowButtons()).toHaveLength(2);
-  expect(screen.queryByText(/Filed as/u)).toBeNull();
-  await waitFor(() => expect(file().disabled).toBe(false));
-  fireEvent.click(file());
-  fireEvent.click(screen.getByRole("menuitem", { name: "Work · P2" }));
+  expect(statusLine().textContent).not.toMatch(/Moved/u);
+  await waitFor(() => expect(inbox().disabled).toBe(false));
+  fireEvent.click(inbox());
   await waitFor(() => expect(rowButtons()).toHaveLength(1));
   expect(fileMail.mock.calls[1]![3]).toBe(fileMail.mock.calls[0]![3]);
+  // A category is another request: filing the other mail by it asks under a new ID.
+  fireEvent.click(
+    screen.getByRole("button", { name: `File as “Work · P2”: ${NOTES}` }),
+  );
+  await waitFor(() => expect(fileMail).toHaveBeenCalledTimes(3));
+  expect(fileMail.mock.calls[2]![3]).not.toBe(fileMail.mock.calls[0]![3]);
 });
 
 it("deletes all the untouched mail listed, after a confirmation that names the count and keeps the rest", async () => {
@@ -506,11 +599,10 @@ it("keeps the last result in the status line while the next filing waits, then r
   await renderMailbox(actions);
   await setUpCategories();
   const file = (title: string) =>
-    screen.getAllByRole<HTMLButtonElement>("button", {
-      name: `File: ${title}`,
-    })[0]!;
+    screen.getByRole<HTMLButtonElement>("button", {
+      name: `File as “Work · P2”: ${title}`,
+    });
   fireEvent.click(file(REGISTER));
-  fireEvent.click(screen.getByRole("menuitem", { name: "Work · P2" }));
   await waitFor(() =>
     expect(statusLine().textContent).toBe(`Filed as “Work · P2”: ${REGISTER}`),
   );
@@ -522,7 +614,6 @@ it("keeps the last result in the status line while the next filing waits, then r
   });
   await waitFor(() => expect(file(NOTES).disabled).toBe(false));
   fireEvent.click(file(NOTES));
-  fireEvent.click(screen.getByRole("menuitem", { name: "Work · P2" }));
   await waitFor(() =>
     expect(
       document.querySelector(".plus-mailbox-item.is-pending"),
@@ -674,55 +765,4 @@ it("reads a permanent deletion's warning and what it keeps out with the confirma
     "有改动或已排进计划的 1 封会保留：Synthetic mail labelled。",
   ]);
   expect(document.activeElement?.textContent).toBe("取消");
-});
-
-it("returns focus to what opened the Mail categories, the menu's item standing in for its row's File", async () => {
-  const actions = createPrototype();
-  await renderMailbox(actions);
-  await setUpCategories();
-  // Opened from the header's button: Esc goes back to it.
-  const header = screen.getByRole("button", { name: "Mail categories" });
-  fireEvent.click(header);
-  const dialog = await screen.findByRole("dialog", { name: "Mail categories" });
-  fireEvent.click(within(dialog).getByRole("button", { name: "Close" }));
-  expect(document.activeElement).toBe(header);
-  // Opened from a row's menu, which closes: back to that row's File.
-  const file = screen.getAllByRole("button", { name: `File: ${NOTES}` })[0]!;
-  fireEvent.click(file);
-  fireEvent.click(screen.getByRole("menuitem", { name: "Mail categories…" }));
-  const again = await screen.findByRole("dialog", { name: "Mail categories" });
-  await within(again).findByRole("combobox", { name: "Filed mail goes to" });
-  fireEvent.click(within(again).getByRole("button", { name: "Save" }));
-  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-  expect(document.activeElement).toBe(file);
-});
-
-it("opens the Mail categories after a refused filing when its project is gone", async () => {
-  const actions = createPrototype();
-  await renderMailbox(actions);
-  await setUpCategories();
-  // Archived in Todoist since it was chosen: Todofy refuses the move; the projects no longer list it.
-  vi.spyOn(actions, "fileMail").mockRejectedValueOnce(
-    new Error("Synthetic action not allowed"),
-  );
-  const settings = actions.readMailSettings.bind(actions);
-  vi.spyOn(actions, "readMailSettings").mockImplementation(async () => {
-    const current = await settings();
-    return {
-      ...current,
-      projects: current.projects.filter(
-        (project) => project.id !== "synthetic",
-      ),
-    };
-  });
-  fireEvent.click(
-    screen.getAllByRole("button", { name: `File: ${REGISTER}` })[0]!,
-  );
-  fireEvent.click(screen.getByRole("menuitem", { name: "Work · P2" }));
-  const dialog = within(
-    await screen.findByRole("dialog", { name: "Mail categories" }),
-  );
-  await dialog.findByText("That project no longer exists. Choose another.");
-  // The row stays in the list.
-  expect(document.querySelectorAll(".plus-mailbox-item")).toHaveLength(2);
 });
