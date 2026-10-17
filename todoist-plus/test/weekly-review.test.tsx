@@ -414,7 +414,7 @@ it("reviews someday items oldest first: keeping or moving one leaves the list an
   expect(update).toHaveBeenCalledOnce();
 });
 
-it("jumps to the Waiting lane and to Week's first unplanned commitment, with focus", async () => {
+it("jumps to the Waiting lane, and to the Add steps input of Week's first unplanned commitment", async () => {
   const data = await props();
   render(<PlanView {...data} />);
   const review = openReview();
@@ -438,21 +438,30 @@ it("jumps to the Waiting lane and to Week's first unplanned commitment, with foc
   expect(
     screen.getByRole("tab", { name: "Week" }).getAttribute("aria-selected"),
   ).toBe("true");
-  expect(
+  const tray = within(
     screen.getByRole("region", {
       name: "Next steps: Organize the experiment notes",
     }),
-  ).toBeTruthy();
-  // One quiet line, no per-card mark; each click selects the next one.
+  );
+  // Its Add steps input is open and focused, ready for the first step.
+  expect(document.activeElement).toBe(
+    tray.getByRole("textbox", { name: "New step" }),
+  );
+  // One quiet line, no per-card mark; each click selects the next one, which closes the input.
   const runway = screen.getByRole("button", {
     name: "2 commitments have nothing planned in these 7 days",
   });
-  expect(document.activeElement).toBe(runway);
   expect(runway.title).toBe("Select the next one");
   fireEvent.click(runway);
-  expect(
+  const next = within(
     screen.getByRole("region", {
       name: "Next steps: Make the home desk comfortable",
+    }),
+  );
+  expect(next.queryByRole("textbox")).toBeNull();
+  expect(
+    next.getByRole("button", {
+      name: "Add steps to “Make the home desk comfortable”",
     }),
   ).toBeTruthy();
   // Closing the checklist returns focus to the toolbar button that opened it.
@@ -462,12 +471,12 @@ it("jumps to the Waiting lane and to Week's first unplanned commitment, with foc
   );
 });
 
-it("Plan steps also works while Week is open on another commitment and area", async () => {
+it("Plan steps also works while Week is open, folded, on another commitment and area", async () => {
   const data = await props();
   render(<PlanView {...data} />);
   fireEvent.click(screen.getByRole("tab", { name: "Week" }));
   const weekArea = within(
-    screen.getByRole("tablist", { name: "Commitment area" }),
+    screen.getByRole("tablist", { name: "Commitment area", hidden: true }),
   );
   fireEvent.click(weekArea.getByRole("tab", { name: "Personal" }));
   expect(
@@ -475,25 +484,27 @@ it("Plan steps also works while Week is open on another commitment and area", as
       name: "Next steps: Make the home desk comfortable",
     }),
   ).toBeTruthy();
+  const toggle = screen.getByRole("button", { name: "Committed" });
+  fireEvent.click(toggle);
+  expect(toggle.getAttribute("aria-expanded")).toBe("false");
   const review = openReview();
   fireEvent.click(
     within(line(review, "Commitments not planned")).getByRole("button", {
       name: "Plan steps",
     }),
   );
-  // Every area again, so that the first unplanned commitment's card is in the grid.
+  // Unfolded with every area again, so that the first unplanned commitment's card is in the grid.
+  expect(toggle.getAttribute("aria-expanded")).toBe("true");
   expect(
     weekArea.getByRole("tab", { name: "All" }).getAttribute("aria-selected"),
   ).toBe("true");
-  expect(
+  const tray = within(
     screen.getByRole("region", {
       name: "Next steps: Organize the experiment notes",
     }),
-  ).toBeTruthy();
+  );
   expect(document.activeElement).toBe(
-    screen.getByRole("button", {
-      name: "2 commitments have nothing planned in these 7 days",
-    }),
+    tray.getByRole("textbox", { name: "New step" }),
   );
 });
 

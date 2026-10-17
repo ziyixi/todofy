@@ -60,7 +60,7 @@ export interface PlanViewProps {
 }
 /**
  * Where a jump lands: a lane of the Review board, or else the first card there in that state
- * (its own stage lane keeps it); Week's runway line.
+ * (its own stage lane keeps it); Week's runway line, or its Add steps input.
  */
 const JUMPS = {
   start: [
@@ -72,6 +72,7 @@ const JUMPS = {
     '.review-draggable[data-state="waiting"] .planning-outcome-card',
   ],
   runway: [".planning-runway"],
+  addStep: [".planning-add-step-input"],
 };
 /** The remembered view as this week shows it: another week's review starts closed and empty. */
 function seededView(stored: PlanViewState, week: string): PlanViewState {
@@ -101,6 +102,8 @@ export function PlanView(props: PlanViewProps) {
   const [weekArea, setWeekArea] = useState<Area | "all">("all");
   // Week's Committed folded to its heading line.
   const [folded, setFolded] = useState(seeded.committedFolded);
+  // Week's Add steps input is open (not remembered).
+  const [addingStep, setAddingStep] = useState(false);
   // A jump focuses its target and scrolls it into view once.
   const [jump, setJump] = useState<keyof typeof JUMPS>();
   const section = useRef<HTMLElement>(null);
@@ -109,19 +112,32 @@ export function PlanView(props: PlanViewProps) {
   useEffect(() => {
     if (props.reviewing) setReviewing(true);
   }, [props.reviewing]);
+  /** Another tab, or Week at another commitment, closes the Add steps input. */
+  function showMode(next: "review" | "week") {
+    setMode(next);
+    setAddingStep(false);
+  }
+  function selectCommitment(id: string) {
+    setCommitment(id);
+    setAddingStep(false);
+  }
   /** Review with every area shown, so the lane a jump looks for is on the board. */
   function showLane(lane: "start" | "waiting") {
-    setMode("review");
+    showMode("review");
     setArea("all");
     setJump(lane);
   }
-  /** Week at one commitment, unfolded with every area shown, so its card is in the grid. */
+  /**
+   * Week at one commitment, unfolded with every area shown, so its card is in the grid, and its
+   * Add steps input open.
+   */
   function planSteps(id: string) {
     setMode("week");
     setWeekArea("all");
     setCommitment(id);
     setFolded(false);
-    setJump("runway");
+    setAddingStep(true);
+    setJump("addStep");
   }
   const { showStart, onStartShown, onReviewShown } = props;
   useEffect(() => {
@@ -201,7 +217,7 @@ export function PlanView(props: PlanViewProps) {
               key={value}
               role="tab"
               aria-selected={mode === value}
-              onClick={() => setMode(value)}
+              onClick={() => showMode(value)}
             >
               {language === "zh"
                 ? value === "review"
@@ -284,11 +300,13 @@ export function PlanView(props: PlanViewProps) {
         <PlanningWeek
           {...props}
           selectedId={commitment}
-          onSelect={setCommitment}
+          onSelect={selectCommitment}
           area={weekArea}
           onArea={setWeekArea}
           folded={folded}
           onFold={setFolded}
+          addingStep={addingStep}
+          onAddingStep={setAddingStep}
         />
       )}
       <p className="planning-reset-note">{text.reset}</p>

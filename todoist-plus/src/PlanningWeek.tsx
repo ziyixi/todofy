@@ -7,6 +7,7 @@ import {
   formattedMinutes,
   taskIndex,
 } from "./domain";
+import { AddStep } from "./AddStep";
 import { OutcomeCard } from "./ReviewBoard";
 import { PlanningCalendar, shortDay, taskTitle } from "./PlanningCalendar";
 import {
@@ -51,6 +52,9 @@ interface Props {
   /** Committed folded to its heading line; Next steps stays. */
   folded: boolean;
   onFold: (folded: boolean) => void;
+  /** Next steps' Add steps input is open, which the weekly review's Plan steps also opens. */
+  addingStep: boolean;
+  onAddingStep: (open: boolean) => void;
 }
 export function PlanningWeek(props: Props) {
   const {
@@ -72,6 +76,8 @@ export function PlanningWeek(props: Props) {
     onArea,
     folded,
     onFold,
+    addingStep,
+    onAddingStep,
   } = props;
   const gridId = useId();
   const committed = planningOutcomes(plan.tasks, plan.managedLabels).filter(
@@ -87,6 +93,9 @@ export function PlanningWeek(props: Props) {
   const shown = committed.filter(
     (task) => area === "all" || effectiveArea(task, plan.tasks) === area,
   );
+  const steps = selected
+    ? outcomeSteps(selected, plan.tasks, plan.managedLabels)
+    : [];
   const scheduledIds = new Set(
     days.flatMap((day) =>
       day.taskIds.filter((id) => !day.completedTaskIds.includes(id)),
@@ -237,27 +246,37 @@ export function PlanningWeek(props: Props) {
                 {words(language).details}
               </button>
             </header>
-            <div className="planning-tray-steps">
-              {outcomeSteps(selected, plan.tasks, plan.managedLabels).map(
-                (task) => (
-                  <TrayStep
-                    key={task.id}
-                    task={task}
-                    days={days}
-                    timer={timer}
-                    language={language}
-                    busy={busy}
-                    editTask={editTask}
-                  />
-                ),
-              )}
-            </div>
-            {outcomeSteps(selected, plan.tasks, plan.managedLabels).length ===
-              0 && (
+            {/* Every child has a stage of its own: none is a step here yet. */}
+            {steps.length === 0 && (
               <p className="planning-step-tray-empty">
                 {words(language).noChildren}
               </p>
             )}
+            <div className="planning-tray-steps">
+              {steps.map((task) => (
+                <TrayStep
+                  key={task.id}
+                  task={task}
+                  days={days}
+                  timer={timer}
+                  language={language}
+                  busy={busy}
+                  editTask={editTask}
+                />
+              ))}
+              {/* Keyed by the commitment: another one's selection closes it and drops the draft. */}
+              <AddStep
+                key={selected.id}
+                outcome={selected}
+                open={addingStep}
+                onOpenChange={onAddingStep}
+                busy={busy}
+                run={run}
+                actions={actions}
+                tasks={plan.tasks}
+                language={language}
+              />
+            </div>
           </section>
         ) : (
           <p className="planning-step-tray-empty">

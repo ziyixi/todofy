@@ -218,3 +218,36 @@ test("keyboard focus stays in the review after its actions, and Sunday's keep wr
     await context.close();
   }
 });
+
+test("Plan steps opens Week at the first unplanned commitment with its Add steps input focused", async () => {
+  const { context, worker } = await launchPlanner();
+  try {
+    await worker.evaluate(() => {
+      (
+        globalThis as unknown as { plannerState: ReviewState }
+      ).plannerState.tasks.push({
+        id: "unplanned",
+        title: "Synthetic unplanned commitment",
+        area: "personal",
+        stage: "committed",
+        etag: "unplanned-1",
+      });
+    });
+    const page = await context.newPage();
+    await page.goto("https://app.todoist.com/app/today?todoist-plus=review");
+    const review = page.getByRole("region", { name: "Weekly review" });
+    await review.getByRole("button", { name: "Plan steps" }).click();
+    await expect(
+      page.getByRole("tab", { name: "Week", exact: true }),
+    ).toHaveAttribute("aria-selected", "true");
+    const input = page
+      .getByRole("region", {
+        name: "Next steps: Synthetic unplanned commitment",
+      })
+      .getByRole("textbox", { name: "New step" });
+    await expect(input).toBeFocused();
+    await expect(input).toBeInViewport();
+  } finally {
+    await context.close();
+  }
+});

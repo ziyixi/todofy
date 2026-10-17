@@ -49,7 +49,7 @@ interface Props {
   progress: ReviewProgress;
   onProgress: (progress: ReviewProgress) => void;
   onShowWaiting: () => void;
-  /** Week at this commitment, the first with nothing planned. */
+  /** Week at this commitment, the first with nothing planned, with its Add steps input open. */
   onPlanSteps: (commitmentId: string) => void;
   completeReview: (task: PlanningTask) => Promise<boolean>;
   /** Opens Plus's Mailbox, which lists the mail of line 1. */

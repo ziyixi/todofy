@@ -652,3 +652,84 @@ test("the Week tab, its commitment and the fold survive Mail and Back, and a rel
     await context.close();
   }
 });
+
+test("Add steps adds two sub-tasks one after another, with the input kept open and every keystroke kept", async () => {
+  const { context, worker } = await launchPlanner();
+  try {
+    const page = await context.newPage();
+    await page.goto("https://app.todoist.com/app/today");
+    await openWeek(page);
+    const tray = page.getByRole("region", {
+      name: "Next steps: Synthetic weekly outcome",
+    });
+    const button = tray.getByRole("button", {
+      name: "Add steps to “Synthetic weekly outcome”",
+    });
+    // Todoist's own Add task row: muted text after an accent plus, 32px tall, the steps' last cell.
+    expect((await button.boundingBox())!.height).toBe(32);
+    await button.click();
+    const input = tray.getByRole("textbox", { name: "New step" });
+    await expect(input).toBeFocused();
+    expect((await input.boundingBox())!.height).toBe(32);
+    await controlWrites(worker, { hold: true });
+    await input.pressSequentially("Synthetic third step");
+    await input.press("Enter");
+    // Cleared at once and still open; the title waits as a dimmed card.
+    await expect(input).toHaveValue("");
+    await expect(input).toBeFocused();
+    const waiting = tray.locator(".planning-tray-step.is-pending");
+    await expect(waiting).toHaveText("Synthetic third step");
+    // Typing goes on while the first step saves; Enter waits for it.
+    await input.pressSequentially("Synthetic fourth step");
+    await expect(input).toHaveAttribute("aria-disabled", "true");
+    await input.press("Enter");
+    await expect(input).toHaveValue("Synthetic fourth step");
+    await controlWrites(worker, { hold: false, release: true });
+    // The re-read lists the new sub-task: its card takes the waiting card's place.
+    await expect(
+      tray.locator(".planning-tray-step:not(.is-pending)", {
+        hasText: "Synthetic third step",
+      }),
+    ).toBeVisible();
+    await expect(waiting).toHaveCount(0);
+    await expect(input).not.toHaveAttribute("aria-disabled");
+    await input.press("Enter");
+    await expect(input).toHaveValue("");
+    await expect(
+      tray.locator(".planning-tray-step:not(.is-pending)", {
+        hasText: "Synthetic fourth step",
+      }),
+    ).toBeVisible();
+    await expect(input).toBeFocused();
+    const appended = await worker.evaluate(() =>
+      (
+        globalThis as unknown as {
+          plannerState: {
+            calls: { path: string; body: Record<string, unknown> }[];
+          };
+        }
+      ).plannerState.calls.filter((call) =>
+        call.path.endsWith("/tasks:appendTaskSteps"),
+      ),
+    );
+    expect(appended.map((call) => call.body)).toEqual([
+      {
+        parent_id: "parent",
+        request_id: expect.any(String),
+        steps: [{ title: "Synthetic third step" }],
+      },
+      {
+        parent_id: "parent",
+        request_id: expect.any(String),
+        steps: [{ title: "Synthetic fourth step" }],
+      },
+    ]);
+    expect(appended[0]!.body.request_id).not.toBe(appended[1]!.body.request_id);
+    // Esc closes it and goes back to the row.
+    await input.press("Escape");
+    await expect(input).toHaveCount(0);
+    await expect(button).toBeFocused();
+  } finally {
+    await context.close();
+  }
+});

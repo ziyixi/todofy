@@ -238,6 +238,47 @@ async function setupPlanner(context: BrowserContext, worker: Worker) {
         task.etag = `${String(task.id)}-2`;
         return json({ task });
       }
+      if (url.pathname.endsWith("/tasks:appendTaskSteps")) {
+        // As Todoist appends sub-tasks: in the parent's project, after its other children (the
+        // next child_order, and an order key that sorts after theirs).
+        const parent = state.tasks.find((task) => task.id === body.parent_id);
+        if (!parent)
+          return new Response(
+            JSON.stringify({
+              error: { status: "NOT_FOUND", message: "Synthetic parent gone" },
+            }),
+            { status: 404, headers: { "Content-Type": "application/json" } },
+          );
+        const siblings = state.tasks.filter(
+          (task) => task.parent_id === parent.id,
+        );
+        const lastOrder = Math.max(
+          siblings.length - 1,
+          ...siblings.map((task) => Number(task.child_order ?? -1)),
+        );
+        const lastKey =
+          siblings
+            .map((task) => String(task.order_key ?? ""))
+            .sort()
+            .at(-1) || "a";
+        const steps = (body.steps as { title: string }[] | undefined) ?? [];
+        const ids = steps.map((step, index) => {
+          const id = `${String(parent.id)}-step-${state.tasks.length + 1}`;
+          state.tasks.push({
+            id,
+            title: step.title,
+            parent_id: parent.id,
+            project_id: parent.project_id,
+            area: "unassigned",
+            stage: "none",
+            etag: `${id}-1`,
+            child_order: lastOrder + 1 + index,
+            order_key: lastKey + "V".repeat(index + 1),
+          });
+          return id;
+        });
+        return json({ task_ids: ids });
+      }
       if (url.pathname.endsWith("/tasks:setTaskLead")) {
         const task = state.tasks.find((task) => task.id === body.task_id);
         if (!task || task.etag !== body.etag)
