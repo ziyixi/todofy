@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Check, ExternalLink, Plus, X } from "lucide-react";
 import { displayedTitle, formattedMinutes } from "./domain";
 import { detailStatus } from "./deadlines";
@@ -93,10 +93,57 @@ export function TaskEditor({
   const text = words(language);
   const [lines, setLines] = useState("");
   const [minutes, setMinutes] = useState("");
-  const [deadline, setDeadline] = useState(task.deadline);
-  const [lead, setLead] = useState(task.leadDays);
-  const [stage, setStage] = useState(task.stage);
-  const [area, setArea] = useState(task.area);
+  // Only edited fields have drafts. Everything else follows the refreshed task.
+  const [planning, setPlanning] = useState<{
+    base: PlanningTask;
+    stage?: PlanningTask["stage"];
+    area?: PlanningTask["area"];
+  }>();
+  const [timing, setTiming] = useState<{
+    base: PlanningTask;
+    deadline?: string;
+    leadDays?: number;
+  }>();
+  const stage = planning?.stage ?? task.stage;
+  const area = planning?.area ?? task.area;
+  const deadline = timing?.deadline ?? task.deadline;
+  const lead = timing?.leadDays ?? task.leadDays;
+  const planningChanged = stage !== task.stage || area !== task.area;
+  const timingChanged = deadline !== task.deadline || lead !== task.leadDays;
+  const planningConflict = Boolean(
+    planning &&
+    ((stage !== task.stage && planning.base.stage !== task.stage) ||
+      (area !== task.area && planning.base.area !== task.area)),
+  );
+  const timingConflict = Boolean(
+    timing &&
+    ((deadline !== task.deadline && timing.base.deadline !== task.deadline) ||
+      (lead !== task.leadDays && timing.base.leadDays !== task.leadDays)),
+  );
+  // A read may already contain the owner's choice. Once confirmed, it is no longer a draft.
+  useEffect(() => {
+    setPlanning((current) => {
+      if (!current || current.base.id !== task.id) return undefined;
+      const stage = current.stage === task.stage ? undefined : current.stage;
+      const area = current.area === task.area ? undefined : current.area;
+      if (stage === current.stage && area === current.area) return current;
+      return stage === undefined && area === undefined
+        ? undefined
+        : { ...current, stage, area };
+    });
+    setTiming((current) => {
+      if (!current || current.base.id !== task.id) return undefined;
+      const deadline =
+        current.deadline === task.deadline ? undefined : current.deadline;
+      const leadDays =
+        current.leadDays === task.leadDays ? undefined : current.leadDays;
+      if (deadline === current.deadline && leadDays === current.leadDays)
+        return current;
+      return deadline === undefined && leadDays === undefined
+        ? undefined
+        : { ...current, deadline, leadDays };
+    });
+  }, [task.id, task.stage, task.area, task.deadline, task.leadDays]);
   const [announcement, setAnnouncement] = useState("");
   const requestId = useRef(crypto.randomUUID());
   const children = tasks.filter((item) => item.parentId === task.id);
@@ -126,6 +173,65 @@ export function TaskEditor({
       ...(task.estimatedMinutes ? [task.estimatedMinutes] : []),
     ]),
   ].sort((a, b) => a - b);
+
+  function changePlanning(change: {
+    stage?: PlanningTask["stage"];
+    area?: PlanningTask["area"];
+  }) {
+    const next = {
+      ...planning,
+      base: {
+        ...(planning?.base ?? task),
+        // A field first edited after a refresh starts from what the owner now sees.
+        ...(planning?.stage === undefined ? { stage: task.stage } : {}),
+        ...(planning?.area === undefined ? { area: task.area } : {}),
+      },
+      ...change,
+    };
+    if (next.stage === task.stage) delete next.stage;
+    if (next.area === task.area) delete next.area;
+    setPlanning(
+      next.stage === undefined && next.area === undefined ? undefined : next,
+    );
+  }
+  function changeTiming(change: { deadline?: string; leadDays?: number }) {
+    const next = {
+      ...timing,
+      base: {
+        ...(timing?.base ?? task),
+        ...(timing?.deadline === undefined ? { deadline: task.deadline } : {}),
+        ...(timing?.leadDays === undefined ? { leadDays: task.leadDays } : {}),
+      },
+      ...change,
+    };
+    if (next.deadline === task.deadline) delete next.deadline;
+    if (next.leadDays === task.leadDays) delete next.leadDays;
+    setTiming(
+      next.deadline === undefined && next.leadDays === undefined
+        ? undefined
+        : next,
+    );
+  }
+  async function savePlanning() {
+    if (busy || !planningChanged || planningConflict) return;
+    if (
+      await run(() =>
+        actions.updateTask(task, {
+          ...(stage !== task.stage ? { stage } : {}),
+          ...(stage !== task.stage && stage !== "none" && parked
+            ? { parked: false }
+            : {}),
+          ...(area !== task.area ? { area } : {}),
+        }),
+      )
+    )
+      setPlanning(undefined);
+  }
+  async function saveTiming() {
+    if (busy || !timingChanged || timingConflict) return;
+    if (await run(() => actions.updateLead(task, deadline, lead)))
+      setTiming(undefined);
+  }
 
   async function toggleActive() {
     const title = displayedTitle(task.title);
@@ -181,7 +287,9 @@ export function TaskEditor({
           {text.mode}
           <select
             value={stage}
-            onChange={(event) => setStage(event.target.value as typeof stage)}
+            onChange={(event) =>
+              changePlanning({ stage: event.target.value as typeof stage })
+            }
             disabled={busy}
           >
             {(
@@ -197,7 +305,9 @@ export function TaskEditor({
           {text.work} / {text.personal}
           <select
             value={area}
-            onChange={(event) => setArea(event.target.value as typeof area)}
+            onChange={(event) =>
+              changePlanning({ area: event.target.value as typeof area })
+            }
             disabled={busy}
           >
             {(["unassigned", "work", "personal"] as const).map((value) => (
@@ -229,23 +339,33 @@ export function TaskEditor({
         </label>
         <button
           className="plus-button"
-          disabled={busy || (stage === task.stage && area === task.area)}
-          // Only what changed: a stage left as shown is not written again with a new area.
-          onClick={() =>
-            void run(() =>
-              actions.updateTask(task, {
-                ...(stage !== task.stage ? { stage } : {}),
-                ...(stage !== task.stage && stage !== "none" && parked
-                  ? { parked: false }
-                  : {}),
-                ...(area !== task.area ? { area } : {}),
-              }),
-            )
-          }
+          disabled={busy || !planningChanged || planningConflict}
+          onClick={() => void savePlanning()}
         >
           {text.save}
         </button>
       </div>
+      {planningConflict && (
+        <div role="alert" className="plus-muted">
+          <p>{text.taskChanged}</p>
+          <button
+            className="plus-button"
+            disabled={busy}
+            onClick={() =>
+              setPlanning((current) => current && { ...current, base: task })
+            }
+          >
+            {text.keepMyChanges}
+          </button>{" "}
+          <button
+            className="plus-button"
+            disabled={busy}
+            onClick={() => setPlanning(undefined)}
+          >
+            {text.useLatestValues}
+          </button>
+        </div>
+      )}
       <div className="plus-section-title">
         <h3>{text.steps}</h3>
         <span>
@@ -346,7 +466,7 @@ export function TaskEditor({
             type="date"
             value={deadline}
             disabled={busy}
-            onChange={(event) => setDeadline(event.target.value)}
+            onChange={(event) => changeTiming({ deadline: event.target.value })}
           />
         </label>
         <label>
@@ -355,17 +475,13 @@ export function TaskEditor({
             value={lead}
             language={language}
             disabled={busy}
-            onChange={setLead}
+            onChange={(leadDays) => changeTiming({ leadDays })}
           />
         </label>
         <button
           className="plus-button"
-          disabled={
-            busy || (deadline === task.deadline && lead === task.leadDays)
-          }
-          onClick={() =>
-            void run(() => actions.updateLead(task, deadline, lead))
-          }
+          disabled={busy || !timingChanged || timingConflict}
+          onClick={() => void saveTiming()}
         >
           {text.save}
         </button>
@@ -380,6 +496,27 @@ export function TaskEditor({
           </button>
         )}
       </div>
+      {timingConflict && (
+        <div role="alert" className="plus-muted">
+          <p>{text.taskChanged}</p>
+          <button
+            className="plus-button"
+            disabled={busy}
+            onClick={() =>
+              setTiming((current) => current && { ...current, base: task })
+            }
+          >
+            {text.keepMyChanges}
+          </button>{" "}
+          <button
+            className="plus-button"
+            disabled={busy}
+            onClick={() => setTiming(undefined)}
+          >
+            {text.useLatestValues}
+          </button>
+        </div>
+      )}
       {status && (
         <p className="plus-muted">
           {status.text}

@@ -323,3 +323,28 @@ it("settles what a complete read misses once per visit and tells a deletion once
   await waitFor(() => expect(load).toHaveBeenCalledTimes(2));
   expect(resolve).toHaveBeenCalledOnce();
 });
+
+it("leaves composing Enter and arrow keys to the input method before selecting a dependency", async () => {
+  const actions = createPrototype();
+  const set = vi.spyOn(actions, "setDependency");
+  const editor = await details(actions, "release");
+  const own = within(section(editor));
+  fireEvent.click(own.getByRole("button", { name: "Add a dependency" }));
+  const search = own.getByRole("combobox");
+  fireEvent.change(search, { target: { value: "check-in" } });
+  const selected = search.getAttribute("aria-activedescendant");
+  fireEvent.compositionStart(search);
+  for (const key of ["ArrowDown", "ArrowUp", "Enter", "Escape"]) {
+    expect(fireEvent.keyDown(search, { key, isComposing: true })).toBe(true);
+    expect(search.getAttribute("aria-activedescendant")).toBe(selected);
+    expect(own.queryByRole("combobox")).toBe(search);
+  }
+  // Chromium can report the final composition key as 229 without isComposing.
+  expect(fireEvent.keyDown(search, { key: "Enter", keyCode: 229 })).toBe(true);
+  expect(set).not.toHaveBeenCalled();
+  fireEvent.compositionEnd(search);
+  fireEvent.keyDown(search, { key: "Enter" });
+  await waitFor(() =>
+    expect(set).toHaveBeenCalledExactlyOnceWith("release", "research", true),
+  );
+});

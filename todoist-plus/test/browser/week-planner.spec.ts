@@ -48,6 +48,50 @@ async function cardIds(day: Locator) {
     );
 }
 
+test("eight commitments leave the seven-day schedule usable on a desktop without horizontal overflow", async () => {
+  const { context, worker } = await launchPlanner();
+  try {
+    await worker.evaluate(() => {
+      const state = (
+        globalThis as unknown as {
+          plannerState: { tasks: Record<string, unknown>[] };
+        }
+      ).plannerState;
+      state.tasks.push(
+        ...Array.from({ length: 7 }, (_, index) => ({
+          id: `commitment-${index}`,
+          title: `Synthetic additional commitment ${index + 1}`,
+          area: index < 4 ? "work" : "personal",
+          stage: "committed",
+          labels: ["committed"],
+          etag: `commitment-${index}-1`,
+        })),
+      );
+    });
+    const page = await context.newPage();
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto("https://app.todoist.com/app/today");
+    await openWeek(page);
+    await expect(
+      page.locator(".planning-commitment-grid [data-outcome-id]"),
+    ).toHaveCount(8);
+    await expect(page.locator(".planning-calendar-day:visible")).toHaveCount(7);
+    const firstScheduled = (await page
+      .locator(".planning-calendar-step")
+      .first()
+      .boundingBox())!;
+    expect(firstScheduled.y + firstScheduled.height).toBeLessThan(900);
+    const overflow = () =>
+      page.evaluate(() => document.documentElement.scrollWidth > innerWidth);
+    expect(await overflow()).toBe(false);
+    await page.setViewportSize({ width: 1024, height: 800 });
+    await expect(page.locator(".planning-calendar-day:visible")).toHaveCount(3);
+    expect(await overflow()).toBe(false);
+  } finally {
+    await context.close();
+  }
+});
+
 test("Review moves an explicit outcome between mapped stages using its identity and etag", async () => {
   const { context, worker } = await launchPlanner();
   try {

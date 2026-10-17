@@ -276,6 +276,17 @@ export function PlanningWeek(props: Props) {
                   ? "outcome"
                   : "outcomes"}
             </span>
+            {unplanned.length > 0 && (
+              <button
+                className="planning-runway"
+                title={language === "zh" ? "选中下一个" : "Select the next one"}
+                onClick={selectNextUnplanned}
+              >
+                {language === "zh"
+                  ? `${unplanned.length} 项承诺这 7 天还没有安排`
+                  : `${unplanned.length} ${unplanned.length === 1 ? "commitment has" : "commitments have"} nothing planned in these 7 days`}
+              </button>
+            )}
           </div>
           {/* Folded, the filter and the grid stay mounted, so aria-controls always resolves. */}
           <div
@@ -311,17 +322,6 @@ export function PlanningWeek(props: Props) {
             ))}
           </div>
         </header>
-        {unplanned.length > 0 && (
-          <button
-            className="planning-runway"
-            title={language === "zh" ? "选中下一个" : "Select the next one"}
-            onClick={selectNextUnplanned}
-          >
-            {language === "zh"
-              ? `${unplanned.length} 项承诺这 7 天还没有安排`
-              : `${unplanned.length} ${unplanned.length === 1 ? "commitment has" : "commitments have"} nothing planned in these 7 days`}
-          </button>
-        )}
         <div id={gridId} className="planning-commitment-grid" hidden={folded}>
           {shown.map((task) => (
             <OutcomeCard

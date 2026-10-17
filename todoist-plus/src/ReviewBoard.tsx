@@ -15,7 +15,7 @@ import {
 import { useSortable } from "@dnd-kit/react/sortable";
 import { SortableKeyboardPlugin } from "@dnd-kit/dom/sortable";
 import { pointerIntersection } from "@dnd-kit/collision";
-import { GripVertical } from "lucide-react";
+import { Flag, GripVertical } from "lucide-react";
 import { displayedTitle, effectiveArea } from "./domain";
 import { canMarkActive, deadlineTitle, spokenDeadline } from "./deadlines";
 import { dependencyIndex } from "./dependencies";
@@ -164,12 +164,14 @@ export function OutcomeCard({
       // The name replaces the content, so it carries the status and pending state too.
       aria-label={`${title}, ${priority}${spoken}${pending ? `, ${words(language).updating}` : ""}`}
     >
-      <span
-        className="planning-priority-circle"
+      <Flag
+        size={14}
+        className="planning-priority-mark"
         data-priority={task.priority}
-        title={priority}
         aria-hidden="true"
-      />
+      >
+        <title>{priority}</title>
+      </Flag>
       <span className="planning-outcome-content">
         <span className="planning-outcome-title-row">
           <strong className="planning-outcome-title" title={title}>

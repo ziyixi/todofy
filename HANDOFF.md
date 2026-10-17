@@ -9,6 +9,15 @@ Its old waiting lists and release identities are historical, not instructions to
 
 ## Current work
 
+`codex/plus-ui-refinement` implements the approved UI review follow-up: TaskEditor refresh/dirty-field
+correctness, IME-safe dependency selection, a compact Week with seven days on a typical desktop, flat
+outcome cards with priority flags, and outside-click dismissal for Mail categories. No backend, protocol,
+real-task, account-setting or budget changes. Local types/lint/build, 307 units and 62 built-extension browser
+checks pass. Chrome synthetic verification confirms eight commitments plus seven date targets at 1440×900,
+pointer scheduling into Friday, three-day layout without horizontal overflow at 1024×800 and category backdrop
+dismissal. Independent review found no blocking issue or useful additional abstraction. Pending: full branch
+CI, same-SHA release and local ZIP update. [Evidence](docs/todoist-plus-verification.md#ui-refinement-october-17).
+
 Todoist Plus work of October 15-17 is all released. Each row passed full branch CI and the same-SHA main
 release (Todofy deploy first, then the extension ZIP); the latest ZIP is installed in the owner's unpacked
 folder with its digest checked and its manifest permissions unchanged. The backend is described in

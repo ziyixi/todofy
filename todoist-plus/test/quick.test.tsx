@@ -153,7 +153,6 @@ it("shows Week's quick tasks as a quiet line of one-line cards under Next steps,
       .map((child) => child.className.split(" ")[0]),
   ).toEqual([
     "planning-commitment-heading",
-    "planning-runway",
     "planning-commitment-grid",
     "planning-step-tray",
     "planning-quick",

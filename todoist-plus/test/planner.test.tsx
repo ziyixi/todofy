@@ -256,7 +256,9 @@ it("folds Committed to its heading line and keeps the runway line and Next steps
   expect(grid()?.hidden).toBe(true);
   expect(filter.hidden).toBe(true);
   // The heading line keeps the count and never repeats the selected title: the tray names it.
-  expect(toggle.closest("div")!.textContent).toBe("Committed4 outcomes");
+  expect(toggle.closest("div")!.textContent).toBe(
+    "Committed4 outcomes2 commitments have nothing planned in these 7 days",
+  );
   expect(
     screen.getByRole("region", {
       name: "Next steps: Ship the small website refresh",
@@ -278,7 +280,9 @@ it("folds Committed to its heading line and keeps the runway line and Next steps
   expect(toggle.getAttribute("aria-expanded")).toBe("true");
   expect(grid()?.hidden).toBe(false);
   expect(filter.hidden).toBe(false);
-  expect(toggle.closest("div")!.textContent).toBe("Committed4 outcomes");
+  expect(toggle.closest("div")!.textContent).toBe(
+    "Committed4 outcomes2 commitments have nothing planned in these 7 days",
+  );
   // With nothing selected, folded Week says where to choose one.
   fireEvent.click(
     document.querySelector<HTMLElement>(".planning-outcome-card.is-selected")!,

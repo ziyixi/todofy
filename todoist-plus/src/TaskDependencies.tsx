@@ -128,6 +128,7 @@ export function TaskDependencies({
     setReturnFocus(true);
   }
   function onKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+    if (event.nativeEvent.isComposing || event.keyCode === 229) return;
     if (event.key === "ArrowDown" || event.key === "ArrowUp") {
       event.preventDefault();
       // Arrows move among the options that can be chosen; the greyed ones stay visible with why.

@@ -19,13 +19,16 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  margin: 0 0 12px;
+  margin: 0 0 8px;
 }
 .planning-commitment-heading > div:first-child {
   display: flex;
   gap: 12px;
   align-items: baseline;
   flex-wrap: wrap;
+}
+.plus-root .planning-commitment-heading .planning-runway {
+  margin: 0;
 }
 .planning-commitment-heading h2 {
   margin: 0;
@@ -89,20 +92,20 @@
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 10px;
-  margin-bottom: 18px;
+  margin-bottom: 10px;
 }
 .planning-step-tray {
   border-top: 1px solid var(--plus-line);
   border-bottom: 1px solid var(--plus-line);
-  padding: 12px 0;
-  margin-bottom: 22px;
+  padding: 8px 0;
+  margin-bottom: 12px;
 }
 .planning-step-tray > header {
   display: flex;
   justify-content: space-between;
   align-items: center;
   gap: 12px;
-  margin-bottom: 10px;
+  margin-bottom: 6px;
 }
 .planning-step-tray > header > div {
   display: flex;
@@ -556,7 +559,7 @@
     bottom: -8px;
   }
 }
-@container planning-calendar (max-width:1280px) {
+@container planning-calendar (max-width:960px) {
   .planning-compact-days {
     display: grid;
   }

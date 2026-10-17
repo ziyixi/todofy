@@ -1,11 +1,11 @@
 .plus-root.plus-root-plan {
   max-width: 1580px;
   width: calc(100% - 64px);
-  padding-top: 40px;
+  padding-top: 24px;
   container: plus-plan / inline-size;
 }
 .plus-root-plan .plus-page-header {
-  margin-bottom: 22px;
+  margin-bottom: 12px;
 }
 .plus-task-breadcrumb {
   display: -webkit-box;

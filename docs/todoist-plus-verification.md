@@ -1203,3 +1203,37 @@ the weekly review still open with its tick after Open, Mail and Back; a native T
 only another project (the mail project's, Quick/Ops and Parked hidden; My projects keeps the mail project).
 
 Not verified: branch CI, the release, the installed extension and everything listed as unverified above.
+## UI refinement (October 17)
+
+The owner approved the UI audit follow-up on `codex/plus-ui-refinement`, based on `aab36547`.
+This change is limited to the extension and its documentation; it needs no backend or protocol change.
+
+- TaskEditor keeps drafts only for fields the owner edits. Untouched fields follow refreshed tasks. A field
+  changed elsewhere keeps its draft with an explicit choice, and Save stays disabled until that choice.
+  Keeping a draft accepts the current baseline but does not itself save. Later edits to a different field
+  start from its newly displayed value. Plan saves only changed fields; lead/deadline keep their existing API.
+- Dependency search leaves composing Enter, arrows and Escape to the IME. Targeted regressions failed on
+  the original implementation and pass after the correction. No real tasks were used.
+- Week uses seven days above 960px of calendar content, three down to 420px and one below that. Reduced
+  padding and the unplanned count inside the commitment heading keep all eight commitments visible while
+  bringing the calendar into the first desktop screen. Static outcome cards have borders and priority flags;
+  the existing drag overlay retains its shadow.
+- Mail categories supports backdrop dismissal, returning focus to its entry. Clicking its contents does not
+  close it. Deletion dialogs retain their separate restrictions.
+
+Local typecheck, lint, build, **307 units** and **62 built-MV3 browser cases** pass. The browser checks include
+the new eight-commitment desktop result, 1024px overflow check, light-theme priority colours and category
+backdrop/focus behavior, alongside existing pointer/keyboard scheduling, ordering, timer, mailbox and restore
+checks. The few old heading-text/child-order assertions were updated for the count's intentional move into
+the header. Independent correctness and simplification reviews found no remaining blocker; the two local
+drafts match two existing save operations and were not expanded into a generic draft mechanism.
+
+In owner Chrome, the existing production-component preview used synthetic tasks and no production API:
+at 1440×900 it displayed eight commitments, all seven days, the calendar around 593px and the first scheduled
+card around 708px. A real pointer drop added an unscheduled synthetic step to Friday. At 1024×800 it kept
+three days with no horizontal page overflow. A real outside click dismissed Mail categories. The screenshot
+in [the interface guide](../todoist-plus/docs/planning-interface.md#验收与截图) is from this exact preview.
+These checks do not claim real-account task writes or production latency. User task data, credentials,
+account settings, budgets and installed browser connection state were not changed during verification.
+
+Full branch CI, same-SHA publication and published ZIP installation remain pending at this implementation commit.

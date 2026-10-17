@@ -1,8 +1,8 @@
 .plus-weekly-goals {
   border: 1px solid var(--plus-line);
   border-radius: 7px;
-  padding: 10px 14px;
-  margin-bottom: 16px;
+  padding: 8px 12px;
+  margin-bottom: 12px;
 }
 .plus-weekly-goals > header,
 .plus-weekly-goals h2 {
@@ -11,7 +11,7 @@
   gap: 7px;
 }
 .plus-weekly-goals > header {
-  margin-bottom: 9px;
+  margin-bottom: 4px;
 }
 .plus-weekly-goals > header > span {
   color: var(--plus-muted);

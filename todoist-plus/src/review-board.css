@@ -91,7 +91,6 @@
   color: var(--plus-text);
   text-align: left;
   cursor: pointer;
-  box-shadow: var(--plus-shadow-1);
   transition:
     border-color 120ms ease,
     background-color 120ms ease;
@@ -113,27 +112,21 @@
   outline: 2px solid var(--plus-accent);
   outline-offset: 2px;
 }
-.planning-priority-circle {
+.planning-priority-mark {
   flex: 0 0 14px;
   width: 14px;
   height: 14px;
   margin-top: 2px;
-  border: 1px solid var(--plus-priority);
-  border-radius: 50%;
+  color: var(--plus-priority);
   --plus-priority: var(--plus-p4);
 }
-.planning-priority-circle[data-priority="4"],
-.planning-priority-circle[data-priority="3"],
-.planning-priority-circle[data-priority="2"] {
-  background: color-mix(in srgb, var(--plus-priority) 8%, transparent);
-}
-.planning-priority-circle[data-priority="4"] {
+.planning-priority-mark[data-priority="4"] {
   --plus-priority: var(--plus-p1);
 }
-.planning-priority-circle[data-priority="3"] {
+.planning-priority-mark[data-priority="3"] {
   --plus-priority: var(--plus-p2);
 }
-.planning-priority-circle[data-priority="2"] {
+.planning-priority-mark[data-priority="2"] {
   --plus-priority: var(--plus-p3);
 }
 .planning-outcome-content {

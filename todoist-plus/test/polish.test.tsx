@@ -198,7 +198,9 @@ it("folds Committed with a chevron button named in words, in both languages", as
   fireEvent.click(toggle);
   expect(toggle.querySelector("svg.lucide-chevron-right")).toBeTruthy();
   expect(screen.getByText("展开“本周承诺”，选择一个事项。")).toBeTruthy();
-  expect(toggle.closest("div")!.textContent).toBe("本周承诺4 项");
+  expect(toggle.closest("div")!.textContent).toBe(
+    "本周承诺4 项2 项承诺这 7 天还没有安排",
+  );
   rerender(<PlanView {...await planProps("en")} />);
   expect(
     screen

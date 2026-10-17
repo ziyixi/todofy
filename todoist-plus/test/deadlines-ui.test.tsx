@@ -732,3 +732,175 @@ it("tells screen readers how to drag in the page's language, on Review and on We
   await waitFor(() => expect(instructions()).toContain(en));
   expect(instructions()).not.toContain(zh);
 });
+
+/** The same open editor receiving a refreshed task, as App and the native task tools do. */
+async function refreshedEditor() {
+  const actions = createPrototype();
+  const data = await actions.load();
+  const task: PlanningTask = {
+    ...data.plan.tasks[0]!,
+    stage: "monthly",
+    area: "work",
+    deadline: on(10),
+    leadDays: 7,
+    etag: "before-refresh",
+  };
+  const update = vi
+    .spyOn(actions, "updateTask")
+    .mockImplementation(async (value) => value);
+  const lead = vi
+    .spyOn(actions, "updateLead")
+    .mockImplementation(async (value) => value);
+  const run = async (operation: () => Promise<unknown>) => {
+    await operation();
+    return true;
+  };
+  const editor = (value: PlanningTask) => (
+    <TaskEditor
+      task={value}
+      tasks={data.plan.tasks}
+      dependencies={[]}
+      language="en"
+      busy={false}
+      run={run}
+      actions={actions}
+      todayTaskIds={[]}
+      today={TODAY}
+      canMarkActive={true}
+      addFocus={vi.fn()}
+      onOpenTask={vi.fn()}
+    />
+  );
+  const view = render(editor(task));
+  const refresh = (value: PlanningTask) => view.rerender(editor(value));
+  return { task, update, lead, refresh };
+}
+
+it("refreshes untouched editor fields without creating edits or dropping new-step drafts", async () => {
+  const { task, update, lead, refresh } = await refreshedEditor();
+  const draft = screen.getByRole("textbox", { name: "Add steps" });
+  fireEvent.change(draft, { target: { value: "A synthetic new step" } });
+  const latest = {
+    ...task,
+    stage: "committed" as const,
+    area: "personal" as const,
+    deadline: on(20),
+    leadDays: 3,
+    etag: "after-refresh",
+  };
+  refresh(latest);
+  expect((screen.getByLabelText("Planning") as HTMLSelectElement).value).toBe(
+    "committed",
+  );
+  expect(
+    (screen.getByLabelText("Work / Personal") as HTMLSelectElement).value,
+  ).toBe("personal");
+  expect((screen.getByLabelText("Deadline") as HTMLInputElement).value).toBe(
+    on(20),
+  );
+  expect(
+    (screen.getByLabelText("Start ahead") as HTMLSelectElement).value,
+  ).toBe("3");
+  expect((draft as HTMLTextAreaElement).value).toBe("A synthetic new step");
+  for (const button of screen.getAllByRole("button", { name: "Save" })) {
+    expect((button as HTMLButtonElement).disabled).toBe(true);
+  }
+  expect(update).not.toHaveBeenCalled();
+  expect(lead).not.toHaveBeenCalled();
+});
+
+it("keeps local edits on refresh and requires a choice before saving over changed fields", async () => {
+  const { task, update, lead, refresh } = await refreshedEditor();
+  fireEvent.change(screen.getByLabelText("Planning"), {
+    target: { value: "weekly" },
+  });
+  fireEvent.change(screen.getByLabelText("Deadline"), {
+    target: { value: on(20) },
+  });
+  const latest = {
+    ...task,
+    stage: "committed" as const,
+    area: "personal" as const,
+    deadline: on(12),
+    leadDays: 3,
+    etag: "after-refresh",
+  };
+  refresh(latest);
+  expect((screen.getByLabelText("Planning") as HTMLSelectElement).value).toBe(
+    "weekly",
+  );
+  expect(
+    (screen.getByLabelText("Work / Personal") as HTMLSelectElement).value,
+  ).toBe("personal");
+  expect((screen.getByLabelText("Deadline") as HTMLInputElement).value).toBe(
+    on(20),
+  );
+  expect(
+    (screen.getByLabelText("Start ahead") as HTMLSelectElement).value,
+  ).toBe("3");
+  expect(screen.getAllByRole("alert")).toHaveLength(2);
+  for (const button of screen.getAllByRole("button", { name: "Save" })) {
+    expect((button as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(button);
+  }
+  expect(update).not.toHaveBeenCalled();
+  expect(lead).not.toHaveBeenCalled();
+  fireEvent.click(
+    screen.getAllByRole("button", { name: "Use latest values" })[0]!,
+  );
+  expect((screen.getByLabelText("Planning") as HTMLSelectElement).value).toBe(
+    "committed",
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Keep my changes" }));
+  expect(screen.queryByRole("alert")).toBeNull();
+  fireEvent.click(screen.getAllByRole("button", { name: "Save" })[1]!);
+  await waitFor(() =>
+    expect(lead).toHaveBeenCalledExactlyOnceWith(latest, on(20), 3),
+  );
+  expect(update).not.toHaveBeenCalled();
+});
+
+it("saves only edited planning fields after unrelated refreshes and forgets an edit once it is current", async () => {
+  const { task, update, refresh } = await refreshedEditor();
+  fireEvent.change(screen.getByLabelText("Planning"), {
+    target: { value: "weekly" },
+  });
+  const latest = { ...task, area: "personal" as const, etag: "after-refresh" };
+  refresh(latest);
+  expect(screen.queryByRole("alert")).toBeNull();
+  fireEvent.click(screen.getAllByRole("button", { name: "Save" })[0]!);
+  await waitFor(() =>
+    expect(update).toHaveBeenCalledExactlyOnceWith(latest, { stage: "weekly" }),
+  );
+  // A successful write's re-read shows the chosen value; a later external change should follow.
+  refresh({ ...latest, stage: "weekly", etag: "saved" });
+  refresh({ ...latest, stage: "committed", etag: "later-change" });
+  expect((screen.getByLabelText("Planning") as HTMLSelectElement).value).toBe(
+    "committed",
+  );
+  expect(
+    (screen.getAllByRole("button", { name: "Save" })[0] as HTMLButtonElement)
+      .disabled,
+  ).toBe(true);
+});
+
+it("starts editing another field from its newly refreshed value", async () => {
+  const { task, update, refresh } = await refreshedEditor();
+  fireEvent.change(screen.getByLabelText("Planning"), {
+    target: { value: "weekly" },
+  });
+  const latest = { ...task, area: "personal" as const, etag: "after-refresh" };
+  refresh(latest);
+  // Area was not being edited during the refresh; changing it now starts from Personal.
+  fireEvent.change(screen.getByLabelText("Work / Personal"), {
+    target: { value: "unassigned" },
+  });
+  expect(screen.queryByRole("alert")).toBeNull();
+  fireEvent.click(screen.getAllByRole("button", { name: "Save" })[0]!);
+  await waitFor(() =>
+    expect(update).toHaveBeenCalledExactlyOnceWith(latest, {
+      stage: "weekly",
+      area: "unassigned",
+    }),
+  );
+});

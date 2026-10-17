@@ -520,6 +520,26 @@ test("Mail categories saves labels and priorities, with no destination", async (
   }
 });
 
+test("Mail categories closes from the backdrop and returns focus to its entry", async () => {
+  const { context } = await launchMailbox();
+  try {
+    const tab = await context.newPage();
+    await tab.goto("https://app.todoist.com/app/today?todoist-plus=mailbox");
+    const settings = tab.getByRole("button", { name: "Mail categories", exact: true });
+    await settings.click();
+    const dialog = tab.getByRole("dialog", { name: "Mail categories" });
+    await expect(dialog).toBeVisible();
+    await dialog.getByRole("heading", { name: "Mail categories" }).click();
+    await expect(dialog).toBeVisible();
+    const bounds = (await dialog.boundingBox())!;
+    await tab.mouse.click(bounds.x - 20, bounds.y + bounds.height / 2);
+    await expect(dialog).toBeHidden();
+    await expect(settings).toBeFocused();
+  } finally {
+    await context.close();
+  }
+});
+
 test("the list keeps its place through consecutive filings, and the result line is there from the start", async () => {
   const { context, worker } = await launchMailbox();
   try {

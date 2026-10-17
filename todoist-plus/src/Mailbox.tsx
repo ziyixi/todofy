@@ -648,6 +648,10 @@ export function Mailbox({
           // Esc cancels, but never a deletion on its way.
           if (deletion?.state === "deleting") event.preventDefault();
         }}
+        onClick={(event) => {
+          if (dialog === "categories" && event.target === event.currentTarget)
+            event.currentTarget.close();
+        }}
         onClose={closeDialog}
       >
         {dialog === "delete" && deletion && (

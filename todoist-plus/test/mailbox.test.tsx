@@ -122,6 +122,20 @@ async function setUpCategories() {
 const statusLine = () =>
   document.querySelector<HTMLElement>(".plus-mailbox-status")!;
 
+it("dismisses Mail categories from its backdrop, but not from its contents", async () => {
+  await renderMailbox();
+  const settings = screen.getByRole("button", { name: "Mail categories" });
+  fireEvent.click(settings);
+  const dialog = await screen.findByRole("dialog", { name: "Mail categories" });
+  fireEvent.click(within(dialog).getByRole("heading", { name: "Mail categories" }));
+  expect(dialog.hasAttribute("open")).toBe(true);
+  fireEvent.click(dialog);
+  await waitFor(() =>
+    expect(screen.queryByRole("dialog", { name: "Mail categories" })).toBeNull(),
+  );
+  expect(document.activeElement).toBe(settings);
+});
+
 it("lists the mail to clarify newest first: title, brief and time, and the other tasks below", async () => {
   const actions = withMail([mailTask("own")], []);
   const list = await renderMailbox(actions);

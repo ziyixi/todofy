@@ -101,8 +101,7 @@ test("Plus follows every light Todoist theme through CSS alone, with readable te
             lane: style(".review-lane").backgroundColor,
             muted: style(".review-lane-header > span").color,
             link: style(".planning-label-button").color,
-            ring: style('.planning-priority-circle[data-priority="4"]')
-              .borderTopColor,
+            priority: style('.planning-priority-mark[data-priority="4"]').color,
             primary: [
               style(".plus-primary").backgroundColor,
               style(".plus-primary").color,
@@ -127,7 +126,7 @@ test("Plus follows every light Todoist theme through CSS alone, with readable te
       expect(seen.lane).toBe(todoist("surface"));
       expect(seen.muted).toBe(todoist("muted"));
       expect(seen.link).toBe(todoist("accent"));
-      expect(seen.ring).toBe(todoist("p1"));
+      expect(seen.priority).toBe(todoist("p1"));
       expect(seen.primary).toEqual([
         todoist("accent-fill"),
         todoist("on-accent"),
