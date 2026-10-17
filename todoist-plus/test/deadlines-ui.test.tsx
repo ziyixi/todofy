@@ -602,3 +602,33 @@ it("says where a deadline stands in task details and marks it in progress there"
   expect(screen.queryByRole("button", { name: /in progress/iu })).toBeNull();
   await act(async () => {});
 });
+
+it("tells screen readers how to drag in the page's language, on Review and on Week", async () => {
+  const { props } = await setup();
+  render(<PlanView {...props} language="zh" />);
+  const instructions = () =>
+    [...document.body.querySelectorAll(":scope > div[id]")].map(
+      (element) => element.textContent,
+    );
+  await waitFor(() =>
+    expect(instructions()).toContain(
+      "按空格或回车拿起，方向键移动，空格或回车放下，Esc 取消。",
+    ),
+  );
+  fireEvent.click(screen.getByRole("tab", { name: "一周安排" }));
+  await waitFor(() =>
+    expect(
+      instructions().filter(
+        (text) =>
+          text === "按空格或回车拿起，方向键移动，空格或回车放下，Esc 取消。",
+      ),
+    ).not.toHaveLength(0),
+  );
+  // dnd-kit's own English, which names items by their internal IDs, is not used.
+  expect(instructions().join(" ")).not.toMatch(/draggable item/u);
+  const handle = screen.getAllByRole("button", { name: /^拖动步骤: /u })[0]!;
+  expect(
+    document.getElementById(handle.getAttribute("aria-describedby")!)
+      ?.textContent,
+  ).toBe("按空格或回车拿起，方向键移动，空格或回车放下，Esc 取消。");
+});

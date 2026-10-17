@@ -5,7 +5,21 @@ const childIndexes = new WeakMap<
   readonly PlanningTask[],
   Map<string, PlanningTask[]>
 >();
-/** Children by parent ID, built once per task list like `taskIndex`. */
+/**
+ * Todoist's order of one parent's children: by order key, compared bytewise, when every one has
+ * one, else by position, unknown positions last; ties keep the list's order.
+ */
+function inTodoistOrder(siblings: PlanningTask[]): PlanningTask[] {
+  if (siblings.every((task) => task.orderKey !== undefined))
+    return siblings.sort((a, b) =>
+      a.orderKey! < b.orderKey! ? -1 : a.orderKey! > b.orderKey! ? 1 : 0,
+    );
+  const position = (task: PlanningTask) => task.childOrder ?? Infinity;
+  return siblings.sort((a, b) =>
+    position(a) === position(b) ? 0 : position(a) - position(b),
+  );
+}
+/** Children by parent ID, in Todoist's order, built once per task list like `taskIndex`. */
 function childIndex(tasks: readonly PlanningTask[]) {
   let children = childIndexes.get(tasks);
   if (!children) {
@@ -15,9 +29,18 @@ function childIndex(tasks: readonly PlanningTask[]) {
       siblings.push(task);
       children.set(task.parentId, siblings);
     }
+    for (const siblings of children.values()) inTodoistOrder(siblings);
     childIndexes.set(tasks, children);
   }
   return children;
+}
+
+/** A sub-task's siblings in Todoist's order, itself included; none for a top-level task. */
+export function stepSiblings(
+  task: PlanningTask,
+  tasks: readonly PlanningTask[],
+): PlanningTask[] {
+  return task.parentId ? (childIndex(tasks).get(task.parentId) ?? []) : [];
 }
 
 /** The literal set-aside label, as the native @parked filter names it; never created here. */

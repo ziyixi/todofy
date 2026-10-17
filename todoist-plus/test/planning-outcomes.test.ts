@@ -3,6 +3,7 @@ import {
   outcomeForTask,
   outcomeSteps,
   planningOutcomes,
+  stepSiblings,
 } from "../src/planning-outcomes";
 import type { PlanningTask } from "../src/model";
 
@@ -101,4 +102,51 @@ it("keeps a dated child with its commitment while an explicitly weekly child sta
     independent.id,
     datedRoot.id,
   ]);
+});
+
+it("lists next steps depth first in Todoist's order of each parent's children", () => {
+  const outcome = task("outcome", { stage: "committed" });
+  const ids = (tasks: PlanningTask[]) =>
+    outcomeSteps(outcome, tasks).map((item) => item.id);
+  // Listed out of order: Todoist's positions decide, at every depth.
+  const tasks = [
+    outcome,
+    task("b", { parentId: "outcome", childOrder: 2 }),
+    task("b2", { parentId: "b", childOrder: 9 }),
+    task("b1", { parentId: "b", childOrder: 4 }),
+    task("a", { parentId: "outcome", childOrder: 1 }),
+    task("c", { parentId: "outcome", childOrder: 3 }),
+  ];
+  expect(ids(tasks)).toEqual(["a", "b1", "b2", "c"]);
+  expect(stepSiblings(tasks[5]!, tasks).map((item) => item.id)).toEqual([
+    "a",
+    "b",
+    "c",
+  ]);
+  expect(stepSiblings(outcome, tasks)).toEqual([]);
+  // Order keys, compared bytewise, win when every sibling has one.
+  const keyed = tasks.map((item) =>
+    item.parentId === "outcome"
+      ? {
+          ...item,
+          orderKey: { a: "a2", b: "a1", c: "a10" }[item.id as "a" | "b" | "c"],
+        }
+      : item,
+  );
+  expect(ids(keyed)).toEqual(["b1", "b2", "c", "a"]);
+  // One sibling without a key: positions again, for that group only.
+  const partly = keyed.map((item) =>
+    item.id === "c" ? { ...item, orderKey: undefined } : item,
+  );
+  expect(ids(partly)).toEqual(["a", "b1", "b2", "c"]);
+  // Without positions the list's order stays; an unknown position comes last.
+  const unknown = tasks.map((item) => ({ ...item, childOrder: undefined }));
+  expect(ids(unknown)).toEqual(["b2", "b1", "a", "c"]);
+  expect(
+    ids(
+      tasks.map((item) =>
+        item.id === "a" ? { ...item, childOrder: undefined } : item,
+      ),
+    ),
+  ).toEqual(["b1", "b2", "c", "a"]);
 });

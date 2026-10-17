@@ -3,6 +3,7 @@ import { createPrototype } from "../design/fixture";
 import {
   applyConfirmed,
   moved,
+  predictChildOrder,
   predictLaneOrder,
   rereadsAfter,
   withNextWeek,
@@ -248,4 +249,53 @@ it("moves an item as a sortable list does, and predicts a lane's order as Todofy
     monthly: ["walk", "reading"],
   });
   expect(predicted.plan.tasks).toBe(planned.plan.tasks);
+});
+
+it("predicts a reorder of siblings with their own positions and keys, or not at all", async () => {
+  const data = await createPrototype().load();
+  const base = data.plan.tasks.find((task) => task.id === "copy")!;
+  const sibling = (id: string, childOrder?: number, orderKey?: string) => ({
+    ...base,
+    id,
+    childOrder,
+    orderKey,
+  });
+  const withTasks = (tasks: (typeof base)[]) => ({
+    ...data,
+    plan: { ...data.plan, tasks },
+  });
+  const tasks = [
+    sibling("a", 1, "a1"),
+    sibling("b", 5, "a3"),
+    sibling("c", 3, "a2"),
+  ];
+  const predict = predictChildOrder(tasks, ["c", "a", "b"])!;
+  expect(
+    predict(withTasks(tasks)).plan.tasks.map(({ id, childOrder, orderKey }) => [
+      id,
+      childOrder,
+      orderKey,
+    ]),
+  ).toEqual([
+    ["a", 3, "a2"],
+    ["b", 5, "a3"],
+    ["c", 1, "a1"],
+  ]);
+  // Without every key, only the positions move.
+  const unkeyed = [sibling("a", 1, "a1"), sibling("b", 2)];
+  expect(
+    predictChildOrder(unkeyed, ["b", "a"])!(withTasks(unkeyed)).plan.tasks.map(
+      ({ childOrder, orderKey }) => [childOrder, orderKey],
+    ),
+  ).toEqual([
+    [2, "a1"],
+    [1, undefined],
+  ]);
+  // A missing or repeated position is written by no one.
+  expect(
+    predictChildOrder([sibling("a", 1), sibling("b")], ["b", "a"]),
+  ).toBeUndefined();
+  expect(
+    predictChildOrder([sibling("a", 2), sibling("b", 2)], ["b", "a"]),
+  ).toBeUndefined();
 });

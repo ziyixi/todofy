@@ -1029,3 +1029,99 @@ test("the keyboard moves a card card by card in its lane, Escape puts it back, a
     await context.close();
   }
 });
+
+/** The outcome's two steps, Todoist siblings at child_order 1 and 2. */
+async function numberSteps(worker: Worker) {
+  await worker.evaluate(() => {
+    const state = (
+      globalThis as unknown as {
+        plannerState: { tasks: Record<string, unknown>[] };
+      }
+    ).plannerState;
+    state.tasks.find((task) => task.id === "child")!.child_order = 1;
+    state.tasks.find((task) => task.id === "second")!.child_order = 2;
+  });
+}
+async function trayOrder(page: Page) {
+  return page
+    .locator(".planning-tray-step[data-task-id]")
+    .evaluateAll((steps) =>
+      steps.map((step) => step.getAttribute("data-task-id")),
+    );
+}
+
+test("a Next step dragged onto its sibling takes its place at once and writes Todoist's order once", async () => {
+  const { context, worker } = await launchPlanner();
+  try {
+    await numberSteps(worker);
+    const page = await context.newPage();
+    await page.goto("https://app.todoist.com/app/today");
+    await openWeek(page);
+    const tray = page.getByRole("region", {
+      name: "Next steps: Synthetic weekly outcome",
+    });
+    await expect.poll(() => trayOrder(page)).toEqual(["child", "second"]);
+    await controlWrites(worker, { hold: true });
+    await dragPlanner(
+      page,
+      tray.getByRole("button", { name: "Drag step: Synthetic second step" }),
+      tray.locator('.planning-tray-step[data-task-id="child"]'),
+    );
+    await expect.poll(() => trayOrder(page)).toEqual(["second", "child"]);
+    await expect(
+      tray.locator('.planning-tray-step[aria-busy="true"]'),
+    ).toHaveAttribute("data-task-id", "second");
+    await controlWrites(worker, { hold: false, release: true });
+    await expect(page.locator("[aria-busy=true]")).toHaveCount(0);
+    expect(
+      (await plannerWrites(worker)).map(({ path, body }) => ({ path, body })),
+    ).toEqual([
+      {
+        // No lane: only Todoist's order changes (the wire leaves an empty string out).
+        path: "/api/plus/v1/tasks:reorder",
+        body: {
+          request_id: expect.stringMatching(/^[0-9a-f-]{36}$/u),
+          task_ids: ["second", "child"],
+          task_id: "second",
+        },
+      },
+    ]);
+    expect(await childOrders(worker)).toMatchObject({ second: 1, child: 2 });
+    // Next steps follows Todoist's order after a fresh read too.
+    await page.reload();
+    await openWeek(page);
+    await expect.poll(() => trayOrder(page)).toEqual(["second", "child"]);
+  } finally {
+    await context.close();
+  }
+});
+
+test("a Next step picked up by keyboard drops into a day with the arrows", async () => {
+  const { context, worker } = await launchPlanner();
+  try {
+    const page = await context.newPage();
+    await page.goto("https://app.todoist.com/app/today");
+    await openWeek(page);
+    const tray = page.getByRole("region", {
+      name: "Next steps: Synthetic weekly outcome",
+    });
+    await tray
+      .getByRole("button", { name: "Drag step: Synthetic second step" })
+      .focus();
+    await page.keyboard.press("Space");
+    await page.keyboard.press("ArrowDown");
+    await page.keyboard.press("Space");
+    await expect(
+      page.locator('.planning-calendar [data-task-id="second"]'),
+    ).toHaveCount(1);
+    await expect(page.locator("[aria-busy=true]")).toHaveCount(0);
+    const writes = await plannerWrites(worker);
+    expect(writes).toHaveLength(1);
+    expect(writes[0]!.path).toMatch(
+      /^\/api\/plus\/flowday\/api\/v1\/flows\/2026-10-1\d$/u,
+    );
+    expect(writes[0]!.body.task_ids).toContain("second");
+  } finally {
+    await context.close();
+  }
+});

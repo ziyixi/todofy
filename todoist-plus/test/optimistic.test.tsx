@@ -881,3 +881,77 @@ it("lets Start now and Waiting cards take only their own lane's cards", async ()
     ).toEqual([lane]);
   expect(accepts("cleanup", "start")).toBe(true);
 });
+
+/** The website refresh with a third child that has a step of its own, so it is no leaf. */
+function withNestedStep(actions: PlusActions) {
+  const load = actions.load.bind(actions);
+  vi.spyOn(actions, "load").mockImplementation(async (week) => {
+    const data = await load(week);
+    const copy = data.plan.tasks.find((task) => task.id === "copy")!;
+    data.plan.tasks.push(
+      { ...copy, id: "assets", title: "Gather the images", childOrder: 3 },
+      {
+        ...copy,
+        id: "crop",
+        title: "Crop the hero image",
+        parentId: "assets",
+        childOrder: 1,
+      },
+    );
+    return data;
+  });
+}
+/** Next steps' titles, in order. */
+function trayTitles() {
+  return [...document.querySelectorAll(".planning-tray-step")].map(
+    (step) => step.querySelector(".planning-step-title span")?.textContent,
+  );
+}
+
+it("reorders a next step among its siblings at once, with one ReorderTasks of the parent's children", async () => {
+  const actions = createPrototype();
+  withNestedStep(actions);
+  const reorders = hold(actions, "reorderTasks");
+  const moves = hold(actions, "moveTaskToDay");
+  await mountPlan(actions);
+  fireEvent.click(screen.getByRole("tab", { name: "Week" }));
+  expect(trayTitles()).toEqual([
+    "Write the introduction",
+    "Check the layout on a phone",
+    "Crop the hero image",
+  ]);
+  const step = (id: string) => drops.sortables.get(`tray:${id}`)!.data!;
+  // A step of another parent is no sibling: nothing is written.
+  await drop(step("copy"), step("crop"));
+  expect(reorders).toHaveLength(0);
+  // Onto its sibling's place: the parent's three children, the one with its own step too.
+  await drop(step("copy"), step("layout"));
+  expect(reorders.map((call) => call.args)).toEqual([
+    [
+      ["layout", "copy", "assets"],
+      "copy",
+      "",
+      expect.stringMatching(/^[0-9a-f-]{36}$/u),
+    ],
+  ]);
+  expect(trayTitles()).toEqual([
+    "Check the layout on a phone",
+    "Write the introduction",
+    "Crop the hero image",
+  ]);
+  const moved = document.querySelector<HTMLElement>(
+    '.planning-tray-step[data-task-id="copy"]',
+  )!;
+  expect(moved.getAttribute("aria-busy")).toBe("true");
+  expect(
+    within(moved).getByRole("button", {
+      name: "Drag step: Write the introduction, Updating…",
+    }),
+  ).toBeTruthy();
+  await act(() => reorders[0]!.confirm());
+  expect(moved.getAttribute("aria-busy")).toBeNull();
+  expect(trayTitles()[1]).toBe("Write the introduction");
+  // A drop on a day still plans the step there.
+  await drop(step("layout"), { date: "2026-10-16" });
+  expect(moves.map((call) => call.args[0])).toEqual(["layout"]);
+});

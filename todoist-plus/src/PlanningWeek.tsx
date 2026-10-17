@@ -1,5 +1,12 @@
-import { useId, type CSSProperties } from "react";
-import { DragDropProvider, DragOverlay, useDraggable } from "@dnd-kit/react";
+import { useId, useMemo, useRef, type CSSProperties } from "react";
+import {
+  DragDropProvider,
+  DragOverlay,
+  useDragOperation,
+} from "@dnd-kit/react";
+import { useSortable } from "@dnd-kit/react/sortable";
+import { SortableKeyboardPlugin } from "@dnd-kit/dom/sortable";
+import { pointerIntersection } from "@dnd-kit/collision";
 import { ChevronDown, ChevronRight, GripVertical } from "lucide-react";
 import {
   displayedTitle,
@@ -8,16 +15,26 @@ import {
   taskIndex,
 } from "./domain";
 import { AddStep } from "./AddStep";
+import { spokenDrags } from "./drag-announcements";
 import { OutcomeCard } from "./ReviewBoard";
 import { PlanningCalendar, shortDay, taskTitle } from "./PlanningCalendar";
 import {
   committedOutcomes,
   isParked,
+  MAX_LANE_TASKS,
   outcomeColor,
   outcomeForTask,
   outcomeSteps,
+  stepSiblings,
 } from "./planning-outcomes";
-import { pendingStep, predictMove } from "./plan-updates";
+import {
+  moved,
+  pendingStep,
+  pendingTask,
+  predictChildOrder,
+  predictMove,
+} from "./plan-updates";
+import { PendingMark } from "./StatusMarks";
 import { QuickTasks } from "./QuickTasks";
 import { quickTray, unscheduledCommitments } from "./weekly-review";
 import { words } from "./i18n";
@@ -82,6 +99,22 @@ export function PlanningWeek(props: Props) {
     onAddingStep,
   } = props;
   const gridId = useId();
+  // A reorder's request ID, reused when the same reorder is tried again.
+  const reorderRequests = useRef(new Map<string, string>());
+  // A drag speaks of step titles, their places and days.
+  const plugins = useMemo(
+    () =>
+      spokenDrags(language, (data, as) => {
+        if (as === "target" && typeof data?.date === "string")
+          return shortDay(data.date, language);
+        if (as === "target" && typeof data?.position === "number")
+          return language === "zh"
+            ? `第 ${data.position + 1} 步`
+            : `step ${data.position + 1}`;
+        return typeof data?.title === "string" ? data.title : undefined;
+      }),
+    [language],
+  );
   const committed = committedOutcomes(plan);
   // One quiet line, not a mark per card: commitments with nothing in these seven days.
   const unplanned = unscheduledCommitments(plan, days);
@@ -123,14 +156,71 @@ export function PlanningWeek(props: Props) {
           ?.id ?? "",
       );
   }
+  /**
+   * Moves a step from `from` to `to` among its siblings, in Todoist's order: one ReorderTasks
+   * with the parent's children, which Todofy writes as their positions.
+   */
+  function reorderStep(id: string, from: number, to: number) {
+    const task = taskIndex(plan.tasks).get(id);
+    if (!task) return;
+    const siblings = stepSiblings(task, plan.tasks);
+    const ids = siblings.map((item) => item.id);
+    const next = moved(ids, from, to);
+    if (next.every((item, index) => item === ids[index])) return;
+    // Without every position, or with more children than one request takes, Todoist keeps its
+    // order, so nothing is written.
+    const predict = predictChildOrder(plan.tasks, next);
+    if (!predict || next.length > MAX_LANE_TASKS) return;
+    const key = [
+      id,
+      next.join(","),
+      siblings.map((item) => item.childOrder).join(","),
+    ].join("|");
+    const requestId = reorderRequests.current.get(key) ?? crypto.randomUUID();
+    reorderRequests.current.set(key, requestId);
+    void run(
+      async () => {
+        const result = await actions.reorderTasks(next, id, "", requestId);
+        reorderRequests.current.delete(key);
+        return result;
+      },
+      { pending: [pendingTask(id)], predict },
+    );
+  }
   return (
     <DragDropProvider
+      plugins={plugins}
       onDragEnd={({ canceled, operation }) => {
         if (canceled) return;
         const source = operation.source?.data as
-          { taskId?: string; sourceDate?: string } | undefined;
+          | {
+              taskId?: string;
+              sourceDate?: string;
+              siblings?: string;
+              position?: number;
+            }
+          | undefined;
         const target = operation.target?.data as
-          { date?: string; beforeId?: string } | undefined;
+          | {
+              date?: string;
+              beforeId?: string;
+              taskId?: string;
+              siblings?: string;
+              position?: number;
+            }
+          | undefined;
+        // A step dropped on a sibling takes its place; its sortable accepts no other step.
+        if (target?.siblings) {
+          if (
+            source?.taskId &&
+            source.position !== undefined &&
+            target.position !== undefined &&
+            source.taskId !== target.taskId &&
+            source.siblings === target.siblings
+          )
+            reorderStep(source.taskId, source.position, target.position);
+          return;
+        }
         const day = days.find((day) => day.date === target?.date);
         if (!source?.taskId || !day || source.taskId === target?.beforeId)
           return;
@@ -256,14 +346,17 @@ export function PlanningWeek(props: Props) {
               </p>
             )}
             <div className="planning-tray-steps">
-              {steps.map((task) => (
+              {steps.map((task, index) => (
                 <TrayStep
                   key={task.id}
                   task={task}
+                  index={index}
+                  position={stepSiblings(task, plan.tasks).indexOf(task)}
                   days={days}
                   timer={timer}
                   language={language}
                   busy={busy}
+                  pending={pending?.has(pendingTask(task.id)) ?? false}
                   editTask={editTask}
                 />
               ))}
@@ -351,28 +444,66 @@ export function PlanningWeek(props: Props) {
   );
 }
 
+/**
+ * One next step: a drag into a day plans it there, and one onto a sibling (the same parent and
+ * project) puts it in that place in Todoist's order.
+ */
 function TrayStep({
   task,
+  index,
+  position,
   days,
   timer,
   language,
   busy,
+  pending,
   editTask,
 }: {
   task: PlanningTask;
+  /** Its place among the steps shown. */
+  index: number;
+  /** Its place among its parent's children, which a reorder writes. */
+  position: number;
   days: FlowDayPlan[];
   timer?: FocusState["timer"];
   language: Language;
   busy: boolean;
+  /** Its reorder is shown but not yet confirmed. */
+  pending: boolean;
   editTask: Props["editTask"];
 }) {
   const timing = timer?.taskId === task.id;
-  const { ref, handleRef, isDragSource } = useDraggable({
+  const title = displayedTitle(task.title);
+  // A commitment that is its own one step has no sibling to trade places with.
+  const siblings = task.parentId
+    ? `${task.parentId}|${task.projectId}`
+    : undefined;
+  const { ref, handleRef, isDragSource } = useSortable({
     id: `tray:${task.id}`,
+    index,
+    group: `steps:${task.parentId}`,
     type: "planning-step",
-    disabled: busy || timing,
-    data: { taskId: task.id },
+    accept: (source) => Boolean(siblings) && source.data?.siblings === siblings,
+    // As in Review: the arrows step between targets, and nothing moves the DOM while dragging.
+    plugins: [SortableKeyboardPlugin],
+    collisionDetector: pointerIntersection,
+    collisionPriority: 2,
+    disabled: busy || timing || pending,
+    data: { taskId: task.id, title, siblings, position },
   });
+  // A sibling dragged over this step draws the line where it will land: before it moving
+  // earlier, after it moving later.
+  const { source, target } = useDragOperation();
+  const from = source?.data?.position as number | undefined;
+  const insert =
+    target?.id === `tray:${task.id}` &&
+    source?.id !== target.id &&
+    source?.data?.siblings === siblings &&
+    from !== undefined
+      ? position < from
+        ? "before"
+        : "after"
+      : undefined;
   const scheduled = days.filter(
     (day) =>
       day.taskIds.includes(task.id) && !day.completedTaskIds.includes(task.id),
@@ -381,13 +512,16 @@ function TrayStep({
   return (
     <article
       ref={ref}
-      className={`planning-tray-step ${isDragSource ? "is-dragging" : ""}`}
+      className={`planning-tray-step ${isDragSource ? "is-dragging" : ""} ${pending ? "is-pending" : ""} ${insert ? `is-insert-${insert}` : ""}`}
       data-task-id={task.id}
+      aria-busy={pending || undefined}
     >
       <button
         ref={handleRef}
         className="planning-drag-handle"
+        // A waiting handle stays focusable, so a keyboard reorder keeps focus on the step.
         disabled={busy || timing}
+        aria-disabled={pending || undefined}
         title={
           timing
             ? language === "zh"
@@ -395,12 +529,12 @@ function TrayStep({
               : "Stop the current session before moving this step"
             : undefined
         }
-        aria-label={`${language === "zh" ? "拖动步骤" : "Drag step"}: ${displayedTitle(task.title)}`}
+        aria-label={`${language === "zh" ? "拖动步骤" : "Drag step"}: ${title}${pending ? `, ${text.updating}` : ""}`}
       >
         <GripVertical size={14} />
       </button>
       <button className="planning-step-title" onClick={() => editTask(task)}>
-        <span>{displayedTitle(task.title)}</span>
+        <span>{title}</span>
         <small>
           {task.estimatedMinutes === undefined
             ? text.unknown
@@ -413,6 +547,7 @@ function TrayStep({
             <small className="planning-step-warning">{text.longStep}</small>
           )}
       </button>
+      {pending && <PendingMark language={language} />}
     </article>
   );
 }

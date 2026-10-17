@@ -287,11 +287,12 @@ function CalendarStep({
     ? outcomeForTask(task, plan.tasks, plan.managedLabels)
     : undefined;
   const timing = timer?.taskId === id && timer.flowDate === day.date;
+  const title = taskTitle(id, task?.title ?? flowTask?.title, language);
   const { ref, handleRef, isDragSource } = useDraggable({
     id: `week-step:${day.date}:${id}`,
     type: "planning-step",
     disabled: busy || timing || pending,
-    data: { taskId: id, sourceDate: day.date },
+    data: { taskId: id, sourceDate: day.date, title },
   });
   const { ref: dropRef, isDropTarget } = useDroppable({
     id: `week-before:${day.date}:${id}`,
@@ -300,7 +301,6 @@ function CalendarStep({
     collisionPriority: 2,
     data: { date: day.date, beforeId: id },
   });
-  const title = taskTitle(id, task?.title ?? flowTask?.title, language);
   const minutes = task?.estimatedMinutes ?? flowTask?.estimatedMinutes;
   const parent = outcome
     ? outcome.id === id

@@ -1,4 +1,5 @@
 import { withBets } from "./bets";
+import { taskIndex } from "./domain";
 import { PARKED_LABEL, STAGE_ROLES } from "./planning-outcomes";
 import { ACTIVE_LABEL, isLastDay } from "./weekly-review";
 import type {
@@ -259,6 +260,49 @@ export function predictLaneOrder(lane: LaneId, ids: readonly string[]) {
   return (data: PlusData): PlusData => ({
     ...data,
     plan: withLaneOrder(data.plan, lane, ids),
+  });
+}
+
+/**
+ * Shows a reorder of Next steps at once, as Todofy writes it: the siblings' own positions,
+ * smallest first, in the new order, and their order keys likewise when every one has one.
+ * Undefined when a position is missing or repeated, where Todofy writes nothing either.
+ */
+export function predictChildOrder(
+  tasks: readonly PlanningTask[],
+  ids: readonly string[],
+) {
+  const byId = taskIndex(tasks);
+  const group = ids.flatMap((id) => byId.get(id) ?? []);
+  const orders = group.map((task) => task.childOrder);
+  if (
+    group.length !== ids.length ||
+    orders.some((order) => order === undefined) ||
+    new Set(orders).size !== orders.length
+  )
+    return undefined;
+  const positions = [...(orders as number[])].sort((a, b) => a - b);
+  const keys = group.every((task) => task.orderKey !== undefined)
+    ? group.map((task) => task.orderKey!).sort()
+    : undefined;
+  const placed = new Map(
+    ids.map((id, index) => [
+      id,
+      {
+        childOrder: positions[index],
+        ...(keys ? { orderKey: keys[index] } : {}),
+      },
+    ]),
+  );
+  return (data: PlusData): PlusData => ({
+    ...data,
+    plan: {
+      ...data.plan,
+      tasks: data.plan.tasks.map((task) => {
+        const place = placed.get(task.id);
+        return place ? { ...task, ...place } : task;
+      }),
+    },
   });
 }
 
