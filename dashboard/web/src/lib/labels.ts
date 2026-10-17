@@ -373,6 +373,8 @@ export function modeInfo(name: string, value: boolean): { label: string; usual: 
 
 type CounterKind = 'count' | 'seconds' | 'bytes' | 'tokens' | 'days' | 'percent' | 'usd_cents'
 const COUNTERS: Readonly<Record<string, { label: string; kind: CounterKind }>> = {
+  database_ready: { label: '数据库可用', kind: 'count' },
+  change_sequence: { label: '最近变更序号', kind: 'count' },
   // Fleet and Newsletter
   heartbeat_age_seconds: { label: '距主机报告', kind: 'seconds' },
   disk_used_percent: { label: '磁盘使用率', kind: 'percent' },

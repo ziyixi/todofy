@@ -83,6 +83,7 @@ from todofy.runtime import (
     ledger,
     mail_briefs,
     metrics,
+    native_tasks,
     ops,
     plus_api,
     plus_cache,
@@ -218,7 +219,16 @@ class TodofyCore(DurableObject):
     async def plus_ui(self, method: str, request: str, owner: bool, digest: str | None = None) -> dict[str, Any]:
         """One PlusService rpc: for the Access owner, or for the extension token whose SHA-256 is ``digest``,
         which this checks (plus_api.handle). The gateway before this release sent no digest."""
+        if not owner and native_tasks.enabled(self.env):
+            # An old gateway/extension must not write Tasks while displaying the old Todoist account.
+            return {"error": "ACTION_NOT_ALLOWED"}
         return await plus_api.handle(self, method, request, owner=owner, digest=digest)
+
+    async def plus_native_ui(self, method: str, request: str) -> dict[str, Any]:
+        """Tasks' private owner entrypoint refuses a partially deployed source switch."""
+        if not native_tasks.enabled(self.env) or getattr(self.env, "TASKS", None) is None:
+            return {"error": "UNAVAILABLE"}
+        return await plus_api.handle(self, method, request, owner=True)
 
     async def plus_focus_claim(self, action_id: str, value: str | None, replace_etag: str | None) -> str | None:
         """Freeze one FlowDay settlement request in its Todoist completion's receipt (plus_receipts.settle)."""
@@ -576,6 +586,8 @@ class TodofyCore(DurableObject):
         """The next alarm and the Gemini/Todoist budgets, in the Overview's API shape."""
         now = now_s()
         usage = self._usage(now)
+        if native_tasks.enabled(self.env):
+            return None
         blocked_until = self._control()["todoist_blocked_until"]
         alarm = await self.ctx.storage.getAlarm()
         return {
@@ -695,6 +707,8 @@ class TodofyCore(DurableObject):
 
     def _count_todoist_calls(self, calls: int, now: int) -> None:
         """Count calls against Todoist's 1000 per 15 minutes before making them (an upper bound)."""
+        if native_tasks.enabled(self.env):
+            return
         self.sql.exec(
             "INSERT INTO todoist_calls (minute_bucket, count) VALUES (?, ?)"
             " ON CONFLICT (minute_bucket) DO UPDATE SET count = count + excluded.count",

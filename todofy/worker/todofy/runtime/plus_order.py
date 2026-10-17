@@ -12,7 +12,7 @@ from typing import Any
 
 from todofy.core import plan as planning
 from todofy.core import plus
-from todofy.runtime import plan_store
+from todofy.runtime import native_tasks, plan_store
 from todofy.runtime import plus_receipts as receipts
 from todofy.runtime import plus_todoist as todoist
 from todofy.runtime.interop import now_s
@@ -40,10 +40,29 @@ async def reorder(core: Any, request: dict[str, Any], current: dict[str, Any]) -
         raise todoist.PlusError("BAD_REQUEST")
     found = await todoist.active(core, ids)
     items = [] if lane in plus.UNTOUCHED_LANES else plus.reorder_items([found[i] for i in ids if i in found], moved)
+    if native_tasks.enabled(core.env) and lane not in plus.UNTOUCHED_LANES and moved in found:
+        selected = found[moved]
+        siblings = [
+            found[i]
+            for i in ids
+            if i in found
+            and all(found[i].get(field) == selected.get(field) for field in ("project_id", "section_id", "parent_id"))
+        ]
+        orders = sorted(row["sort_order"] for row in siblings)
+        items = [
+            {"id": row["id"], "child_order": order}
+            for row, order in zip(siblings, orders, strict=True)
+            if row["sort_order"] != order
+        ]
     commands = [plus.reorder_command(request_id, items)] if items else []
+    if commands and native_tasks.enabled(core.env):
+        commands[0]["_native_etags"] = {i: row["_native_etag"] for i, row in found.items()}
     started = previous is not None and previous.result is None
     if previous is not None and not started:
         commands = []
+    elif started and native_tasks.enabled(core.env):
+        # Exact native requests keep their source etags and per-operation receipts after partial upstream failure.
+        commands = previous.commands
     elif started and commands and commands != previous.commands:
         raise todoist.PlusError("ETAG_MISMATCH")
     if commands:
@@ -56,7 +75,7 @@ async def reorder(core: Any, request: dict[str, Any], current: dict[str, Any]) -
     if lane:
         # Only tasks just confirmed active get a Todofy ID (plan_store ADD_TASKS' rule).
         saved = await plan_store.save_lane_order(
-            core.env.DB, plus.PROVIDER, lane, [i for i in ids if i in found], now_s()
+            core.env.DB, todoist.provider(core), lane, [i for i in ids if i in found], now_s()
         )
         answer["lane_order"] = {"lane": lane, "task_ids": saved}
     if commands or started:

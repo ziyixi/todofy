@@ -20,12 +20,12 @@ from cloud_api import (
 )
 from fresh_collisions import refuse_conflicts
 from generate import bootstrap_infra_files
-from inventory import exported_resources, import_hcl, known_imports
+from bootstrap_inventory import exported_resources, import_hcl, known_imports
 from private_input import BootstrapError
 from state_imports import adopt as import_state
 
 
-def bootstrap_gate(plan: dict, mode: str) -> None:
+def bootstrap_gate(plan: dict, mode: str, create_addresses: tuple[str, ...] = ()) -> None:
     """Bootstrap may read imports or create missing objects; it never edits an existing object."""
     if plan.get("_flowday_include_errors"):
         raise BootstrapError("BOOTSTRAP_FLOWDAY_INCLUDE_MISMATCH")
@@ -47,6 +47,8 @@ def bootstrap_gate(plan: dict, mode: str) -> None:
             raise BootstrapError("BOOTSTRAP_EXISTING_RESOURCE_CHANGE", {"changes": changes})
         if mode == "adopt" and actions == ["create"]:
             raise BootstrapError("ADOPT_RESOURCE_NOT_FOUND")
+        if mode == "extend" and actions == ["create"] and item.get("address") not in create_addresses:
+            raise BootstrapError("EXTEND_UNEXPECTED_CREATE")
         if mode == "fresh" and change.get("importing"):
             raise BootstrapError("FRESH_ADOPTION_NOT_ALLOWED")
     if not plan.get("resource_changes"):
@@ -82,6 +84,10 @@ def run(private: dict, profile: dict, resources: dict, mode: str, parent: Path,
         raise BootstrapError("INFRA_PRIVATE_INPUT_INVALID") from None
     if not isinstance(token, str) or not token or not isinstance(phrase, str) or len(phrase) < 16:
         raise BootstrapError("INFRA_PRIVATE_INPUT_INVALID")
+    creates = private.get("create_addresses", [])
+    if mode == "extend" and (not isinstance(creates, list) or not 1 <= len(creates) <= 10
+                             or not all(isinstance(address, str) for address in creates)):
+        raise BootstrapError("EXTEND_CREATE_ADDRESSES_REQUIRED")
     if values["account_id"] != resources["account_id"]:
         raise BootstrapError("INFRA_ACCOUNT_MISMATCH")
     ensure_workers_subdomain(token, values["account_id"], profile["workers_dev_subdomain"], mode == "fresh" and not check_only, fetch)
@@ -97,28 +103,32 @@ def run(private: dict, profile: dict, resources: dict, mode: str, parent: Path,
     for relative, text in bootstrap_infra_files(infra_state.REPO).items():
         (config / Path(relative).name).write_text(text)
     shutil.copyfile(infra_state.INFRA / ".terraform.lock.hcl", config / ".terraform.lock.hcl")
-    imports = known_imports(resources, values, private.get("adopt_ids")) if mode == "adopt" else {}
+    imports = known_imports(resources, values, private.get("adopt_ids")) if mode in ("adopt", "extend") else {}
     if imports:
         (config / "imports.tf").write_text(import_hcl(imports))
     session = None
     try:
         session = session_factory(environment="production", values=values, work=session_work, env=env, directory=config)
-        if check_only:
+        if check_only or mode == "extend":
             status, _ = session.s3("HEAD", "")
             if status != 200:
                 raise BootstrapError("ADOPT_STATE_BUCKET_NOT_AVAILABLE")
         else:
             ensure_bucket(session, lambda: _create_bucket(token, values["account_id"], fetch))
         existed = state_exists(session, "production")
+        if mode == "extend" and not existed:
+            raise BootstrapError("EXTEND_EXISTING_STATE_REQUIRED")
         session.tofu.init("production")
         if mode == "adopt" and not check_only:
             import_state(session, imports, existed, env)
         code, summary, _, plan = session.plan_full("bootstrap")
-        bootstrap_gate(plan, mode)
-        if mode == "fresh":
+        bootstrap_gate(plan, mode, tuple(creates))
+        if mode in ("fresh", "extend"):
             refuse_conflicts(plan, token, values["account_id"], resources["zone_id"], page_fetch=page_fetch)
         if check_only:
-            return {"actions": dict(infra_state.counts(summary)), "state_exists": existed}, {}
+            return {"actions": dict(infra_state.counts(summary)), "state_exists": existed,
+                    "creates": sorted(item["address"] for item in plan.get("resource_changes", [])
+                                      if item.get("change", {}).get("actions") == ["create"])}, {}
         if code != 0:
             if existed:
                 infra_state.backup_state(session, "production", env)
@@ -126,11 +136,13 @@ def run(private: dict, profile: dict, resources: dict, mode: str, parent: Path,
         code, summary, _, plan = session.plan_full("verify")
         if code or infra_state.drift_exit(summary):
             raise BootstrapError("BOOTSTRAP_VERIFY_NOT_IN_SYNC")
-        bootstrap_gate(plan, mode)
+        bootstrap_gate(plan, mode, tuple(creates))
         status, state = session.s3("GET", infra_state.state_key("production"))
         if status != 200 or not infra_state.encrypted_state(state):
             raise BootstrapError("BOOTSTRAP_STATE_NOT_VERIFIED")
         inventory = exported_resources(resources, plan, fresh=mode == "fresh")
+        if mode == "extend":
+            return inventory, {}
         credentials = output(session, "platform_bootstrap")
         connector = fetch(token, "/accounts/" + values["account_id"] + "/cfd_tunnel/" + credentials["tunnel_id"] + "/token")
         if not isinstance(connector, str) or not connector:

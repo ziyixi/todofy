@@ -63,11 +63,15 @@ def expect(
     brief_deploy=False,
     todoist_plus_check=False,
     todoist_plus_publish=False,
+    tasks_check=False,
+    tasks_deploy=False,
 ):
     # The bootstrap mask (ci_changes.outputs): an app in CHECK_ONLY never deploys, and neither does Home while an app it
     # binds is one. Mailsort was CHECK_ONLY until its Access application existed (mailsort/docs/design.md §12), recall
     # until its Access applications and bucket existed (recall/docs/design.md §11), the brief until its Access
     # applications existed (brief/docs/design.md §18).
+    if "tasks" in ci_changes.CHECK_ONLY:
+        tasks_deploy = False
     if "mailsort" in ci_changes.CHECK_ONLY:
         mailsort_deploy = False
     if "recall" in ci_changes.CHECK_ONLY:
@@ -112,13 +116,15 @@ def expect(
         "brief_deploy": brief_deploy,
         "todoist_plus_check": todoist_plus_check,
         "todoist_plus_publish": todoist_plus_publish,
+        "tasks_check": tasks_check,
+        "tasks_deploy": tasks_deploy,
     }
 
 
 # Every app checked (a contracts/ or .github/ change, FlowDay, the links app and the watch app included); the dashboard
 # checked and deployed; the edge-auth apps (the website compiles in no package) are todofy and mail-hero plus
 # EDGE_AUTH; every app with the website Worker (the relay Worker is added where a test expects it).
-ALL_CHECKED = {"dashboard_check": True, "website_check": True, "flowday_check": True, "links_check": True, "watch_check": True, "newsletter_check": True, "fleet_check": True, "platform_check": True, "mailsort_check": True, "recall_check": True, "brief_check": True, "todoist_plus_check": True}
+ALL_CHECKED = {"dashboard_check": True, "website_check": True, "flowday_check": True, "links_check": True, "watch_check": True, "newsletter_check": True, "fleet_check": True, "platform_check": True, "mailsort_check": True, "recall_check": True, "brief_check": True, "todoist_plus_check": True, "tasks_check": True}
 DASH = {"dashboard_check": True, "dashboard_deploy": True}
 FLOWDAY = {"flowday_check": True, "flowday_deploy": True}
 LINKS = {"links_check": True, "links_deploy": True}
@@ -132,8 +138,8 @@ VPS = {**PLATFORM, "newsletter_check": True, "newsletter_deploy": True}
 ALL = {**DASH}
 # Every app that compiles in packages/edge-auth besides Todofy and Mail Hero: the dashboard, FlowDay, the links app,
 # the watch app, Fleet, mailsort, recall and the brief, each checked and deployed.
-EDGE_AUTH = {**ALL, **FLOWDAY, **LINKS, **WATCH, **FLEET, **MAILSORT, **RECALL, **BRIEF}
-EVERY = {**ALL, "todoist_plus_check": True, "todoist_plus_publish": True, "website_check": True, "website_deploy": True, **FLOWDAY, **LINKS, **WATCH, **FLEET, **MAILSORT, **RECALL, **BRIEF, **PLATFORM, "newsletter_check": True, "newsletter_deploy": True}
+EDGE_AUTH = {"tasks_check": True, "tasks_deploy": True, **ALL, **FLOWDAY, **LINKS, **WATCH, **FLEET, **MAILSORT, **RECALL, **BRIEF}
+EVERY = {"tasks_check": True, "tasks_deploy": True, **ALL, "todoist_plus_check": True, "todoist_plus_publish": True, "website_check": True, "website_deploy": True, **FLOWDAY, **LINKS, **WATCH, **FLEET, **MAILSORT, **RECALL, **BRIEF, **PLATFORM, "newsletter_check": True, "newsletter_deploy": True}
 
 
 def push(paths, ref=MAIN, last_success=BASE, ancestor=True, merge_base=BASE):
@@ -282,9 +288,7 @@ class Classify(unittest.TestCase):
                 self.assertEqual(push([path], ref=BRANCH), expect(F, F, F, F, F, **FLOWDAY))
 
     def test_every_app_has_stable_check_and_deploy_outputs_during_bootstrap(self):
-        """CHECK_ONLY suppresses deployment, never the output that the workflow consumes. No app is in it since "Infra
-        apply" created the brief's Access applications (2026-10-11, brief/docs/design.md section 18); a new app joins it
-        until its resources are ready."""
+        """All declared apps have resource identities; checks and deploy outputs remain explicit."""
         self.assertEqual(ci_changes.CHECK_ONLY, set())
         for app in ci_changes.APPS:
             with self.subTest(app=app):
@@ -500,7 +504,7 @@ class Classify(unittest.TestCase):
 
     def test_contract_code_the_workers_bundle_deploys_every_app_that_bundles_it(self):
         """OPS_LIMITS and friends ship inside all three Workers, so a change must redeploy each."""
-        bundled = expect(T, T, T, T, T, **ALL, website_check=T, flowday_check=T, links_check=T, **WATCH, newsletter_check=T, fleet_check=T, platform_check=T, **MAILSORT, recall_check=T, **BRIEF, proto=T, todoist_plus_check=T)
+        bundled = expect(T, T, T, T, T, **ALL, website_check=T, flowday_check=T, links_check=T, **WATCH, newsletter_check=T, fleet_check=T, platform_check=T, **MAILSORT, recall_check=T, **BRIEF, proto=T, todoist_plus_check=T, tasks_check=T)
         self.assertEqual(push(["contracts/ops-v1/ops-v1.ts"]), bundled)
         self.assertEqual(push(["contracts/ops-v1/ops-v1.ts", "todofy/gateway/src/ops.ts"]), bundled)
         self.assertEqual(push(["contracts/ops-v1/ops-v1.ts"], ref=BRANCH), bundled)
@@ -523,6 +527,7 @@ class Classify(unittest.TestCase):
             "recall": [REPO / "recall" / "worker" / "src", REPO / "recall" / "web" / "src", REPO / "recall" / "shared"],
             "brief": [REPO / "brief" / "worker" / "src", REPO / "brief" / "web" / "src"],
             "todoist-plus": [REPO / "todoist-plus" / "src"],
+            "tasks": [REPO / "tasks" / "worker" / "src", REPO / "tasks" / "web" / "src"],
         }
         self.assertEqual(set(roots), set(ci_changes.APPS))
         importers = {}
@@ -594,11 +599,12 @@ class Classify(unittest.TestCase):
                 "recall": ("ts",),
                 "brief": ("ts",),
                 "todoist-plus": ("ts",),
+                "tasks": ("ts",),
             },
         )
         # Todofy is both: todofy-core vendors the Python package, its gateway and UI bundle the TypeScript
         # (todofy.ui.v1).
-        ts, python = {"mail-hero", "dashboard", "flowday", "links", "watch", "todofy", "fleet", "website", "mailsort", "recall", "brief", "todoist-plus"}, {"todofy", "platform"}
+        ts, python = {"mail-hero", "dashboard", "flowday", "links", "watch", "todofy", "fleet", "website", "mailsort", "recall", "brief", "todoist-plus", "tasks"}, {"todofy", "platform"}
         every, none = ts | python, set()
         cases = {
             # task-intent-v1, bundled by the watch app's TypeScript and todofy-core's Python.
@@ -607,13 +613,13 @@ class Classify(unittest.TestCase):
             # todofy.ui.v1's answers.
             "proto/todofy/report/v1/report.proto": {"todofy"},
             # Todofy's owner API: its core answers it, its gateway serves it and its UI calls it.
-            "proto/todofy/ui/v1/todofy_ui_service.proto": {"todofy", "todoist-plus"},
-            "proto/todofy/ui/v1/mail_event.proto": {"todofy", "todoist-plus"},
+            "proto/todofy/ui/v1/todofy_ui_service.proto": {"todofy", "todoist-plus", "tasks"},
+            "proto/todofy/ui/v1/mail_event.proto": {"todofy", "todoist-plus", "tasks"},
             # ops-v1: the Ops entrypoints that bundle its generated code (Todofy's gateway takes its types only, its
             # core reads ops.v1 in Python).
-            "proto/ops/v1/ops.proto": {"mail-hero", "todofy", "dashboard", "watch", "website", "mailsort", "recall", "brief"},
+            "proto/ops/v1/ops.proto": {"mail-hero", "todofy", "dashboard", "watch", "website", "mailsort", "recall", "brief", "tasks"},
             # OpsStatus embeds WebsiteSyncStatus; every Ops descriptor brings this package too.
-            "proto/website/sync/v1/sync.proto": {"mail-hero", "todofy", "dashboard", "watch", "website", "mailsort", "recall", "brief"},
+            "proto/website/sync/v1/sync.proto": {"mail-hero", "todofy", "dashboard", "watch", "website", "mailsort", "recall", "brief", "tasks"},
             # mailsort's owner API: its Worker serves it, its UI calls it.
             "proto/mailsort/ui/v2/mailsort_ui_service.proto": {"mailsort"},
             # recall's owner API, the extension's upload and the archive feed: its Worker serves all three.
@@ -625,8 +631,8 @@ class Classify(unittest.TestCase):
             # mail.received.v1: Mail Hero builds every event, todofy-core reads every body.
             "proto/mailhero/webhook/v1/mail_received.proto": {"mail-hero", "todofy"},
             # FlowDay's UI API reaches only FlowDay.
-            "proto/flowday/ui/v1/flowday_ui_service.proto": {"flowday", "todofy", "todoist-plus"},
-            "proto/flowday/ui/v1/task.proto": {"flowday", "todofy", "todoist-plus"},
+            "proto/flowday/ui/v1/flowday_ui_service.proto": {"flowday", "todofy", "todoist-plus", "tasks"},
+            "proto/flowday/ui/v1/task.proto": {"flowday", "todofy", "todoist-plus", "tasks"},
             # The links app's UI API reaches only the links app.
             "proto/links/ui/v1/links_ui_service.proto": {"links"},
             # The watch app's UI API reaches only the watch app.
@@ -715,6 +721,8 @@ class Classify(unittest.TestCase):
                 recall_deploy="recall" in deployed,
                 brief_check=T,
                 brief_deploy="brief" in deployed,
+                tasks_check=T,
+                tasks_deploy="tasks" in deployed,
                 todoist_plus_check=T,
                 todoist_plus_publish="todoist-plus" in deployed,
             )
@@ -729,7 +737,7 @@ class Classify(unittest.TestCase):
             checked_and({"todofy", "links", "platform"}),
         )
         self.assertEqual(ci_changes.proto_deploys("proto/ts/http-transcoder.ts"), ts)
-        self.assertEqual(ci_changes.proto_deploys("proto/flowday/ui/v1/flow.proto"), {"flowday", "todofy", "todoist-plus"})
+        self.assertEqual(ci_changes.proto_deploys("proto/flowday/ui/v1/flow.proto"), {"flowday", "todofy", "todoist-plus", "tasks"})
         self.assertEqual(ci_changes.proto_deploys("proto/links/ui/v1/link.proto"), {"links"})
         self.assertEqual(ci_changes.proto_deploys("proto/watch/ui/v1/watch.proto"), {"watch"})
         self.assertEqual(ci_changes.proto_deploys("proto/fleet/ui/v1/fleet_ui_service.proto"), {"fleet"})
@@ -819,12 +827,12 @@ class Classify(unittest.TestCase):
             ["packages/edge-auth/docs/notes.md"],
         ):
             with self.subTest(paths=paths):
-                self.assertEqual(push(paths), expect(T, T, T, F, F, packages=T, dashboard_check=T, flowday_check=T, links_check=T, watch_check=T, fleet_check=T, mailsort_check=T, recall_check=T, brief_check=T))
+                self.assertEqual(push(paths), expect(T, T, T, F, F, packages=T, dashboard_check=T, flowday_check=T, links_check=T, watch_check=T, fleet_check=T, mailsort_check=T, recall_check=T, brief_check=T, tasks_check=T))
         # With the package's code, or with one app, the usual rules apply.
         paths = ["packages/edge-auth/SPEC.md", "packages/edge-auth/src/csrf.ts"]
         self.assertEqual(push(paths), expect(T, T, T, T, T, packages=T, **EDGE_AUTH))
         paths = ["packages/edge-auth/SPEC.md", "dashboard/docs/design.md"]
-        self.assertEqual(push(paths), expect(T, T, T, F, F, packages=T, **DASH, flowday_check=T, links_check=T, watch_check=T, fleet_check=T, mailsort_check=T, recall_check=T, brief_check=T))
+        self.assertEqual(push(paths), expect(T, T, T, F, F, packages=T, **DASH, flowday_check=T, links_check=T, watch_check=T, fleet_check=T, mailsort_check=T, recall_check=T, brief_check=T, tasks_check=T))
         # An unregistered package's documents are checked by every app, deployed by none.
         self.assertEqual(push(["packages/new-kit/README.md"]), expect(T, T, T, F, F, packages=T, **ALL_CHECKED))
 
@@ -843,7 +851,7 @@ class Classify(unittest.TestCase):
         ]
         self.assertEqual(
             push(paths),
-            expect(T, T, T, F, F, packages=T, infra=T, proto=T, **DASH, website_check=T, flowday_check=T, links_check=T, watch_check=T, newsletter_check=T, fleet_check=T, platform_check=T, mailsort_check=T, recall_check=T, brief_check=T, todoist_plus_check=T),
+            expect(T, T, T, F, F, packages=T, infra=T, proto=T, **DASH, website_check=T, flowday_check=T, links_check=T, watch_check=T, newsletter_check=T, fleet_check=T, platform_check=T, mailsort_check=T, recall_check=T, brief_check=T, todoist_plus_check=T, tasks_check=T),
         )
 
     def test_a_package_change_with_one_app_still_deploys_every_user(self):
@@ -1142,7 +1150,7 @@ class RealGit(unittest.TestCase):
         p3 = self.commit("mail-hero/docs/b.md")
         outputs = self.main_run(p3, p0)
         expected = {**dict.fromkeys(ci_changes.KEYS, "true"), "packages": "false", "infra": "false", "proto": "false"}
-        expected.update(dashboard_check="false", dashboard_deploy="false", todoist_plus_check="false", todoist_plus_publish="false")
+        expected.update(dashboard_check="false", dashboard_deploy="false", todoist_plus_check="false", todoist_plus_publish="false", tasks_check="false", tasks_deploy="false")
         expected.update(website_check="false", website_deploy="false", website_relay_deploy="false")
         expected.update(flowday_check="false", flowday_deploy="false", links_check="false", links_deploy="false", watch_check="false", watch_deploy="false", newsletter_check="false", newsletter_deploy="false", fleet_check="false", fleet_deploy="false", platform_check="false", platform_publish="false", platform_deploy="false", mailsort_check="false", mailsort_deploy="false", recall_check="false", recall_deploy="false", recall_extension_publish="false", brief_check="false", brief_deploy="false")
         self.assertEqual(outputs, expected)
@@ -1379,6 +1387,7 @@ class DeployConditions(unittest.TestCase):
         ("dashboard-deploy", "mailsort-deploy"),
         ("dashboard-deploy", "recall-deploy"),
         ("dashboard-deploy", "brief-deploy"),
+        ("dashboard-deploy", "tasks-deploy"),
         ("dashboard-deploy", "website-relay-deploy"),
         ("watch-deploy", "todofy-deploy"),
         ("todofy-deploy", "flowday-deploy"),
@@ -1389,6 +1398,7 @@ class DeployConditions(unittest.TestCase):
     # Check jobs a deploy may also find skipped, but only when this push to main reuses a green branch run of
     # the same commit (ci_changes.py find_reusable); "changes" and "gate" must always succeed.
     CHECK_JOBS = {
+        "tasks-checks",
         "todofy-static",
         "todofy-runtime",
         "todofy-checks",
@@ -1432,6 +1442,7 @@ class DeployConditions(unittest.TestCase):
                 "website-relay-deploy",
                 "flowday-deploy",
                 "links-deploy",
+                "tasks-deploy",
                 "watch-deploy",
                 "newsletter-deploy",
                 "fleet-deploy",
@@ -1518,6 +1529,7 @@ class DeployConditions(unittest.TestCase):
                 "website-relay-deploy": "website-relay-production",
                 "flowday-deploy": "flowday-production",
                 "links-deploy": "links-production",
+                "tasks-deploy": "tasks-production",
                 "watch-deploy": "watch-production",
                 "newsletter-deploy": "newsletter-production",
                 "fleet-deploy": "fleet-production",
@@ -2964,6 +2976,7 @@ class Reuse(unittest.TestCase):
             "Recall checks",
             "Brief checks",
             "Todoist Plus checks",
+            "Tasks checks",
             "Platform checks",
             "Newsletter checks",
             "Newsletter image checks",

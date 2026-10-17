@@ -600,3 +600,45 @@ FlowDay proxy page with 2,000-character title and description per row at 6.85 ms
 The new proxy uses its own 9.5 ms cold / 6 ms warm regression bounds; existing route bounds and the
 Workers Free 10 ms limit remain unchanged. These are local reference-machine measurements, not
 Cloudflare production timings or a guarantee for arbitrarily large remote descriptions.
+
+## Native Tasks source
+
+`TASK_SOURCE=tasks` selects the private `TASKS` binding; the default remains Todoist until the account import
+and coordinated cutover. `plus_native_ui` independently checks the core's source and binding before accepting
+the Tasks application's owner requests. A gateway deployed ahead of its core cannot send those requests to
+Todoist. In the opposite partial deployment, a native core refuses legacy extension calls before dispatch.
+Disable the old Plus extension after cutover; the native application is its replacement. Native source failures
+never fall back to the old account.
+
+The existing planning rules still receive a small local projection of tasks and metadata. That projection
+preserves original IDs, names, priority meaning, completion counters and source revisions; it is not a public
+Todoist HTTP API. Native ordering is numeric and may be fractional, so `PlanningTask.sort_order` is separate
+from Todoist's integer `child_order` and string `order_key`. Shared UI sorting, drag prediction and confirmed
+reorders use the appropriate field without rounding.
+
+Native Plus writes use generated Tasks messages. Mail filing combines the category change and Inbox move into
+one UpdateTask. Existing action receipts keep their logical commands. A small `native_task_requests` table in
+the same DO stores each exact native request before it is sent, including the original etag; uncertain responses
+replay those bytes with the same ID. Confirmation clears the request body and keeps only its task ID. An owner
+edit after an uncertain response therefore cannot cause the adapter to refresh an etag and overwrite newer data.
+The task service's own D1 receipt is the final replay authority. No new scheduler or retry queue is added.
+
+An operation expands to at most 200 native requests, checked before writes. Requests use internal service
+bindings; Cloudflare documents a separate Free allowance of 1,000 internal service subrequests per invocation,
+with 50 for external subrequests. The existing personal batch sizes fit that boundary; no paid plan is enabled.
+[Cloudflare subrequest limits](https://developers.cloudflare.com/changelog/post/2026-02-11-subrequests-limit/).
+
+Planning identities use provider `tasks` after migration while retaining their internal IDs and external IDs.
+Mail refs use the selected provider explicitly. Old frozen events are not rewritten. Started old Todoist writes
+must be resolved before cutover; a receipt without a native source revision cannot become a native update.
+The old task-pause switch remains effective, while obsolete Todoist rate/auth blocks do not block native calls.
+
+GTD reads native task and completion pages, preserving the original bounded snapshot workflow. Native review
+tasks require the configured HTTPS origin `TASKS_PUBLIC_URL`; new links open Tasks' task detail and weekly review.
+Historical review descriptions remain frozen. Native snapshots and completion totals are separate from the
+synthetic runtime evidence below.
+
+Local evidence on 2026-10-17: existing Plus and plan-store host regressions pass, native request tests cover
+lost responses, concurrent edits, mailbox filing, step replay, bounds and mixed-source deployment rejection.
+The actual Python DO → TasksApi → D1 test covers filing, replay, fractional order and stale etag rejection.
+These are synthetic local checks; this implementation has not switched the production task source.

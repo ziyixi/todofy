@@ -1,11 +1,12 @@
 # FlowDay
 
-FlowDay is a daily execution board for solo work: it shows your Todoist tasks, lets you pick what
+FlowDay is a daily execution board for solo work: it shows tasks from your configured task store, lets you pick what
 belongs in today, order it as a queue, run a timer on one task at a time (time blocks, Pomodoro,
 misc time), and review what actually happened.
 
-Todoist is read-only for FlowDay. It never writes to Todoist; in this repository Todofy is the only
-Todoist writer. Local tasks can be added without Todoist.
+Task sources are read-only for FlowDay. Native Tasks uses the private service binding; Todoist remains the
+default while that binding is absent. Local tasks, queues, estimates and time records belong to FlowDay.
+The native adapter is implemented but this change does not switch the production source.
 
 ![FlowDay showing a planned day with arranged tasks, a task pool, and completed work](docs/readme/flowday-main.png)
 

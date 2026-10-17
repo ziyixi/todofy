@@ -443,6 +443,19 @@ def test_the_review_body_is_counts_trends_and_links():
         "Todofy GTD：https://todofy.example/gtd   Plus 周回顾：https://app.todoist.com/app/today?todoist-plus=review\n"
     )
 
+    native = gtd.review_body(
+        replace(
+            moved,
+            plus_review=True,
+            task_url="https://tasks.example/?task=",
+            plus_review_url="https://tasks.example/?review=1#/plan",
+        ),
+        NOW,
+    )
+    assert "https://tasks.example/?task=abc_123-Z" in native
+    assert "周回顾：https://tasks.example/?review=1#/plan" in native
+    assert "Todoist" not in native and "app.todoist.com" not in native
+
 
 def test_a_review_without_a_snapshot_or_completions_says_so():
     facts = gtd.ReviewFacts("2026-W40", None, None, None, None, None, None, None, None, "", None)

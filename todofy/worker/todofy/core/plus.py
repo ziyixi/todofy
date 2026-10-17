@@ -375,6 +375,8 @@ def task_view(task: dict[str, Any], today: str, mapping: list[dict[str, Any]] | 
     count = completed_count(task)
     if count is not None:
         result["completed_count"] = count
+    if task.get("_native_etag") and isinstance(order := task.get("sort_order"), (int, float)):
+        result["sort_order"] = order
     if (order := child_order(task)) is not None:
         result["child_order"] = order
     if isinstance(key := task.get("order_key"), str) and ORDER_KEY.fullmatch(key):

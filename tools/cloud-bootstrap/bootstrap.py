@@ -16,7 +16,7 @@ import infra_state  # noqa: E402
 from cloud_profile import ProfileError, load_profile, load_resources, owner_machine_secrets, worker_secret_specs  # noqa: E402
 from github_config import initialize as initialize_github
 from github_secrets import set_production, worker_secret_values  # noqa: E402
-from inventory import write_resources  # noqa: E402
+from bootstrap_inventory import write_resources  # noqa: E402
 from private_input import BootstrapError, generated_secrets, read_document, read_private, update_private, vps_credentials, write_private  # noqa: E402
 from tofu_bootstrap import run as cloud_bootstrap  # noqa: E402
 from finalize import namespaces  # noqa: E402
@@ -49,7 +49,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=("prepare", "check", "plan", "cloud", "secrets", "finalize"))
     parser.add_argument("--private-file", type=Path, required=True)
-    parser.add_argument("--mode", choices=("fresh", "adopt"), default="fresh")
+    parser.add_argument("--mode", choices=("fresh", "adopt", "extend"), default="fresh")
     parser.add_argument("--output", type=Path, help="prepare: new owner-only JSON; secrets: new VPS private JSON")
     parser.add_argument("--resources-output", type=Path, default=REPO / "config/resources.toml")
     parser.add_argument("--work-dir", type=Path, default=Path.home() / ".cache/todofy-infra")
@@ -87,6 +87,9 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "cloud":
             inventory, credentials = cloud_bootstrap(private, profile, resources, args.mode, args.work_dir)
             export_inventory(args.resources_output, inventory)
+            if args.mode == "extend":
+                event("cloud_in_sync", inventory_updated=True)
+                return 0
             configured = private.get("github_secrets", {})
             if not isinstance(configured, dict):
                 raise BootstrapError("GITHUB_SECRETS_INVALID")

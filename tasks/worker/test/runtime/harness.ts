@@ -1,0 +1,158 @@
+import { mkdtemp, readFile, rm, readdir } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { resolve, join, dirname, extname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { build } from 'esbuild';
+import { Miniflare, convertV4MiniflareOptions } from 'miniflare';
+
+const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
+let script: Promise<string> | undefined;
+function bundle() {
+  script ??= build({
+    entryPoints: [join(ROOT, 'src/index.ts')],
+    bundle: true,
+    format: 'esm',
+    platform: 'neutral',
+    target: 'es2024',
+    mainFields: ['module', 'main'],
+    conditions: ['workerd', 'worker', 'import'],
+    external: ['cloudflare:workers'],
+    write: false,
+    logLevel: 'silent',
+  }).then((r) => {
+    const output = r.outputFiles[0];
+    if (!output) throw new Error('Missing bundle');
+    return output.text;
+  });
+  return script;
+}
+const mime: Record<string, string> = {
+  '.html': 'text/html',
+  '.js': 'application/javascript',
+  '.css': 'text/css',
+  '.svg': 'image/svg+xml',
+  '.png': 'image/png',
+  '.woff2': 'font/woff2',
+  '.webmanifest': 'application/manifest+json',
+};
+async function asset(request: Request): Promise<Response> {
+  const root = resolve(ROOT, '../web/dist');
+  const candidate = resolve(root, `.${new URL(request.url).pathname}`);
+  if (!candidate.startsWith(`${root}/`) && candidate !== root) return new Response(null, { status: 404 });
+  try {
+    return new Response(await readFile(candidate), {
+      headers: {
+        'content-type': mime[extname(candidate)] ?? 'application/octet-stream',
+      },
+    });
+  } catch {
+    try {
+      return new Response(await readFile(join(root, 'index.html')), {
+        headers: { 'content-type': 'text/html' },
+      });
+    } catch {
+      return new Response('Synthetic Tasks assets', {
+        headers: { 'content-type': 'text/plain' },
+      });
+    }
+  }
+}
+export async function startHarness(
+  options: { port?: number; bypass?: boolean; inspectorPort?: number; jwks?: unknown; ownerToken?: string } = {},
+) {
+  const temp = await mkdtemp(join(tmpdir(), 'tasks-d1-'));
+  const mf = new Miniflare(
+    convertV4MiniflareOptions({
+      host: '127.0.0.1',
+      port: options.port ?? 0,
+      resourcePersistencePath: temp,
+      ...(options.inspectorPort === undefined ? {} : { inspectorPort: options.inspectorPort }),
+      workers: [
+        {
+          name: 'tasks',
+          modules: true,
+          script: await bundle(),
+          compatibilityDate: '2026-09-08',
+          d1Databases: { DB: 'tasks-test' },
+          serviceBindings: { ASSETS: asset },
+          bindings: {
+            PUBLIC_HOST: 'tasks.example.test',
+            TIME_ZONE: 'America/Los_Angeles',
+            ACCESS_OWNER: 'owner@example.test',
+            ACCESS_ISSUER: 'https://synthetic.cloudflareaccess.com',
+            ACCESS_AUDIENCE: 'b'.repeat(64),
+            CSRF_SIGNING_KEY: 'cd'.repeat(32),
+            DEV_AUTH_BYPASS: options.bypass === false ? 'false' : 'true',
+          },
+          outboundService: (request: Request) =>
+            options.jwks && request.url === 'https://synthetic.cloudflareaccess.com/cdn-cgi/access/certs'
+              ? Response.json(options.jwks)
+              : new Response('No external requests allowed', { status: 599 }),
+        },
+        {
+          name: 'tasks-ops',
+          modules: true,
+          compatibilityDate: '2026-09-08',
+          script: `export default {async fetch(request,env){try{return Response.json(await (new URL(request.url).pathname==='/guard'?env.OPS.setGuard({level:'shed'}):env.OPS.status()));}catch(error){return Response.json({error:error.message},{status:400});}}}`,
+          serviceBindings: { OPS: { name: 'tasks', entrypoint: 'Ops' } },
+        },
+        ...['todofy', 'flowday', 'unknown'].map((consumer) => ({
+          name: `tasks-${consumer}`,
+          modules: true,
+          compatibilityDate: '2026-09-08',
+          script: `export default {async fetch(request,env){if(new URL(request.url).pathname==='/rpc'){const data=await request.json();return Response.json(await env.TASKS.call(data.method,data.body));}return env.TASKS.fetch(request);}}`,
+          serviceBindings: { TASKS: { name: 'tasks', entrypoint: 'TasksApi', props: { consumer } } },
+        })),
+      ],
+    }),
+  );
+  const url = await mf.ready;
+  const db = await mf.getD1Database('DB', 'tasks');
+  const migrations = resolve(ROOT, '../migrations');
+  for (const file of (await readdir(migrations)).filter((f) => f.endsWith('.sql')).sort()) {
+    const sql = (await readFile(join(migrations, file), 'utf8')).replace(/--[^\n]*/g, '');
+    for (const statement of sql.split(/;\s*(?=(?:CREATE|PRAGMA)\b)/i))
+      if (statement.trim()) await db.prepare(statement).run();
+  }
+  const fetch = (path: string, init?: RequestInit) =>
+    mf.dispatchFetch(new URL(path, url).href, {
+      ...init,
+      headers: {
+        ...(options.ownerToken ? { 'cf-access-jwt-assertion': options.ownerToken } : {}),
+        ...Object.fromEntries(new Headers(init?.headers).entries()),
+      },
+    } as never) as unknown as Promise<Response>;
+  let csrf: { token: string; cookie: string } | undefined;
+  async function mutate(method: string, path: string, body?: unknown) {
+    if (!csrf) {
+      const response = await fetch('/api/tasks/csrf');
+      const data = await response.json<{ token: string }>();
+      csrf = {
+        token: data.token,
+        cookie: (response.headers.get('set-cookie') ?? '').split(';')[0] ?? '',
+      };
+    }
+    return fetch(path, {
+      method,
+      headers: {
+        'content-type': 'application/json',
+        origin: url.origin,
+        'x-csrf-token': csrf.token,
+        cookie: csrf.cookie,
+      },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    });
+  }
+  return {
+    mf,
+    db,
+    url,
+    fetch,
+    mutate,
+    async dispose() {
+      await mf.dispose();
+      await rm(temp, { recursive: true, force: true });
+    },
+  };
+}
+export type Harness = Awaited<ReturnType<typeof startHarness>>;

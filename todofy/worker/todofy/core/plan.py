@@ -16,7 +16,7 @@ from typing import Any
 # ID in one lane at most (arrange_lane).
 SETTING_KEYS = ("account", "week", "todoist", "todoist.mail", "board")
 # plan_tasks.provider: the task store an external_id belongs to.
-PROVIDERS = ("todoist",)
+PROVIDERS = ("todoist", "tasks")
 # plan_marks.kind: committed and bet are a week's last-day choices, kept a someday task kept in a weekly review.
 MARK_KINDS = ("committed", "bet", "kept")
 # plan_edges.kind. waits_for, a dependency: task_id should not start before prerequisite_id is done.

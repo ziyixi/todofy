@@ -12,6 +12,8 @@ locals {
     "owner"         = "018f1a13-1a1b-4cf6-a470-c865c4577851"
     "github_owner"  = "eea00ced-7de7-4094-a705-c9741d835b7c"
     "fleet_receipt" = "fb3608f4-bf0e-4db8-8983-5fb1340f20d5"
+    "brief_feedback" = "402ed2c7-f548-44e1-8b6c-e46424554ae2"
+    "recall_machine" = "dcd778e7-e901-4638-8ced-bfe119a470c6"
   }
   mail_hero_backup_app_id = "dafc6e08-7b1b-461f-8735-2cfa668a0ce0"
   fleet_receipt_app_id    = "e468db67-b8aa-4be4-9961-6965a5fced5d"
@@ -27,6 +29,7 @@ locals {
     "mailsort" = "3d8f08e0-1327-4408-99c8-2431abed5892"
     "recall"   = "abe1f041-0786-4a3d-9ce5-72ce418627a5"
     "brief"    = "6005b0c0-ddc3-4812-8b28-322f3601a95a"
+    "tasks"     = "1cf91393-a308-4b4a-bcb0-962bc2840ea3"
   }
   flowday_app_ids = {
     "flowday"        = "3d956afb-07ea-4b5e-802e-27fd29ca4587"
@@ -37,5 +40,6 @@ locals {
     "todofy"    = "151c1306-3885-4679-9592-08887b30ae68"
     "flowday"   = "df104e83-7183-47e3-b2f9-638dc7502c13"
     "links"     = "2f8c5331-06ce-4347-8c0a-90fe51c82260"
+    "tasks"     = "79a1f345-1183-46c3-bc6a-651be106f90c"
   }
 }

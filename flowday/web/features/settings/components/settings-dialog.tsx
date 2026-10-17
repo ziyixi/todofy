@@ -14,7 +14,11 @@ import { ExportDialog } from "./export-dialog";
 import { useIdlePermissionStatus } from "../hooks/use-idle-permission-status";
 import { useTodoistStore } from "@/features/todoist/store";
 import { useFlowStore } from "@/features/flow/store";
-import { loadSettings, saveDayCapacity, saveTodoistKey } from "@/lib/client/flowday-api";
+import {
+  loadSettings,
+  saveDayCapacity,
+  saveTodoistKey,
+} from "@/lib/client/flowday-api";
 import { cn } from "@/lib/utils";
 
 interface SettingsDialogProps {
@@ -25,6 +29,7 @@ interface SettingsDialogProps {
 export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
   const [apiKey, setApiKey] = useState("");
   const [hasExistingKey, setHasExistingKey] = useState(false);
+  const [taskSource, setTaskSource] = useState<"todoist" | "tasks">("todoist");
   const [saving, setSaving] = useState(false);
   const [capacityHours, setCapacityHours] = useState("6");
   const [savingCapacity, setSavingCapacity] = useState(false);
@@ -50,6 +55,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
     void loadSettings().then((data) => {
       if (!data) return;
       setHasExistingKey(data.hasApiKey);
+      setTaskSource(data.taskSource);
       setCapacityHours(String(data.dayCapacityMins / 60));
     });
   }, [open]);
@@ -123,50 +129,71 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
         </DialogHeader>
 
         <div className="space-y-4">
-          <div className="rounded-md border border-border/60 bg-background/25 p-3">
-            <label className="text-sm font-medium text-foreground">
-              Todoist API Key
-            </label>
-            <p className="text-xs text-muted-foreground">
-              Find your API key at{" "}
-              <span className="font-medium">Settings → Integrations → Developer</span>{" "}
-              in Todoist. FlowDay only reads your tasks and never writes to Todoist.
-            </p>
-            <div className="flex gap-2">
-              <Input
-                data-testid="settings-api-key-input"
-                type="password"
-                placeholder={
-                  hasExistingKey ? "••••••••  (key saved)" : "Enter your API key"
-                }
-                value={apiKey}
-                onChange={(event) => setApiKey(event.target.value)}
-                className="flex-1"
-              />
-              <Button
-                data-testid="settings-save-api-key"
-                onClick={handleSave}
-                disabled={saving}
-              >
-                Save
-              </Button>
+          {taskSource === "tasks" ? (
+            <div className="rounded-md border border-border/60 bg-background/25 p-3">
+              <p className="text-sm font-medium text-foreground">
+                Tasks connected
+              </p>
+              <p className="text-xs text-muted-foreground">
+                FlowDay reads Tasks automatically. No API key is needed.
+              </p>
             </div>
-          </div>
+          ) : (
+            <div className="rounded-md border border-border/60 bg-background/25 p-3">
+              <label className="text-sm font-medium text-foreground">
+                Todoist API Key
+              </label>
+              <p className="text-xs text-muted-foreground">
+                Find your API key at{" "}
+                <span className="font-medium">
+                  Settings → Integrations → Developer
+                </span>{" "}
+                in Todoist. FlowDay only reads your tasks and never writes to
+                Todoist.
+              </p>
+              <div className="flex gap-2">
+                <Input
+                  data-testid="settings-api-key-input"
+                  type="password"
+                  placeholder={
+                    hasExistingKey
+                      ? "••••••••  (key saved)"
+                      : "Enter your API key"
+                  }
+                  value={apiKey}
+                  onChange={(event) => setApiKey(event.target.value)}
+                  className="flex-1"
+                />
+                <Button
+                  data-testid="settings-save-api-key"
+                  onClick={handleSave}
+                  disabled={saving}
+                >
+                  Save
+                </Button>
+              </div>
+            </div>
+          )}
 
           <div className="rounded-md border border-border/60 bg-background/25 p-3">
             <div className="flex items-center justify-between">
               <label className="text-sm font-medium text-foreground">
-                Todoist Sync
+                {taskSource === "tasks" ? "Tasks Sync" : "Todoist Sync"}
               </label>
               <Button
                 data-testid="settings-sync-now"
                 variant="outline"
                 size="sm"
                 onClick={handleSync}
-                disabled={isSyncing || !hasExistingKey}
+                disabled={
+                  isSyncing || (taskSource !== "tasks" && !hasExistingKey)
+                }
               >
                 <RefreshCw
-                  className={cn("mr-1.5 h-3.5 w-3.5", isSyncing && "animate-spin")}
+                  className={cn(
+                    "mr-1.5 h-3.5 w-3.5",
+                    isSyncing && "animate-spin",
+                  )}
                 />
                 Sync Now
               </Button>
@@ -176,13 +203,14 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                 Last synced: {new Date(lastSyncAt).toLocaleString()}
               </p>
             )}
-            {!hasExistingKey && (
+            {taskSource !== "tasks" && !hasExistingKey && (
               <p className="text-xs text-muted-foreground/60">
                 Save an API key to enable syncing.
               </p>
             )}
             <p className="text-xs text-muted-foreground/60">
-              Tasks sync automatically every minute when an API key is set.
+              Tasks sync while this page is visible. The server spaces automatic
+              checks five minutes apart.
             </p>
           </div>
 
@@ -223,16 +251,19 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                 Auto-pause when idle
               </label>
               <p className="text-xs text-muted-foreground">
-                Allow FlowDay to detect screen lock or long inactivity so running
-                timers can backdate the pause point precisely.
+                Allow FlowDay to detect screen lock or long inactivity so
+                running timers can backdate the pause point precisely.
               </p>
               <div className="flex items-center gap-2">
                 {idleStatus === "granted" && (
-                  <span className="text-xs font-medium text-green-600">Enabled</span>
+                  <span className="text-xs font-medium text-green-600">
+                    Enabled
+                  </span>
                 )}
                 {idleStatus === "denied" && (
                   <span className="text-xs text-muted-foreground">
-                    Denied — re-enable this from your browser&apos;s site settings.
+                    Denied — re-enable this from your browser&apos;s site
+                    settings.
                   </span>
                 )}
                 {idleStatus === "prompt" && (
@@ -250,7 +281,9 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
           )}
 
           <div className="rounded-md border border-border/60 bg-background/25 p-3">
-            <label className="text-sm font-medium text-foreground">Export Data</label>
+            <label className="text-sm font-medium text-foreground">
+              Export Data
+            </label>
             <p className="text-xs text-muted-foreground">
               Download your time entries or flow history as CSV or JSON.
             </p>
@@ -271,7 +304,9 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
             <p
               className={cn(
                 "text-xs",
-                message.type === "success" ? "text-green-600" : "text-destructive"
+                message.type === "success"
+                  ? "text-green-600"
+                  : "text-destructive",
               )}
             >
               {message.text}

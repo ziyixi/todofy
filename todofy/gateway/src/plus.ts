@@ -19,7 +19,7 @@ import { withPrivateHeaders, type Context } from './http.ts';
 import { API_DOMAIN, isReason, uiError } from './ui.ts';
 
 /** The Access owner, or null for the extension, whose token's SHA-256 is `digest`. */
-interface PlusContext { env: Env; owner: string | null; digest: string | null }
+interface PlusContext { env: Env; owner: string | null; digest: string | null; internal?: boolean }
 const OWNER_METHODS = new Set(['ConfirmPlanMapping', 'IssueExtensionConnection', 'ReadExtensionConnections', 'RevokeExtensionConnection', 'VerifyPlanStore']);
 /** Reads sent as POST for their body of task IDs: like the GET reads, they go on in maintenance (core READ_METHODS). */
 const POST_READS = new Set(['LookupMailItems']);
@@ -37,11 +37,15 @@ function handlers(): ServiceHandlers<ShapeOf<typeof PlusService>, PlusContext> {
       if (idempotent && wire['request_id'] === undefined) wire['request_id'] = crypto.randomUUID();
       if (method.name === 'CompleteTask' && wire['flow_date'] && !validDay(wire['flow_date'])) throw uiError('BAD_REQUEST');
       let answer;
-      try { answer = await coordinator(ctx.env).plus_ui(method.name, JSON.stringify(wire), ctx.owner !== null, ctx.digest); }
+      try {
+        answer = ctx.internal
+          ? await coordinator(ctx.env).plus_native_ui(method.name, JSON.stringify(wire))
+          : await coordinator(ctx.env).plus_ui(method.name, JSON.stringify(wire), ctx.owner !== null, ctx.digest);
+      }
       catch { throw uiError('UNAVAILABLE'); }
       if ('error' in answer) throw uiError(isReason(answer.error) ? answer.error : 'INTERNAL');
       if (method.name === 'CompleteTask' && typeof wire['flow_date'] === 'string' && wire['flow_date']) {
-        try { await settleCompleted(ctx.env, wire as { request_id: string; task_id: string; flow_date: string }); }
+        try { await settleCompleted(ctx.env, wire as { request_id: string; task_id: string; flow_date: string }, ctx.internal); }
         catch (error) { throw error instanceof RpcError ? error : uiError('UNAVAILABLE'); }
       }
       if (method.name === 'ReadPlan' || method.name === 'ConfirmPlanMapping' || method.name === 'UpdatePlanLabels') {
@@ -60,7 +64,7 @@ const api = new HttpTranscoder(PlusService, handlers(), {
   maxBodyBytes: 32 * 1024,
   authorize: async (request, route, ctx) => {
     if (!route.safe) {
-      if (ctx.owner !== null) await verifyCsrf(request, ctx.env, ctx.owner);
+      if (ctx.owner !== null && !ctx.internal) await verifyCsrf(request, ctx.env, ctx.owner);
       if (flag(ctx.env, 'MAINTENANCE_MODE') && !POST_READS.has(route.method.name)) throw uiError('MAINTENANCE');
     }
   },
@@ -77,6 +81,10 @@ export async function plusOwner(ctx: Context, owner: string | null, digest: stri
 
 export async function plusExtension(ctx: Context): Promise<Response> {
   try {
+    if (variable(ctx.env, 'TASK_SOURCE') === 'tasks') {
+      throw new RpcError(Code.FAILED_PRECONDITION, 'ACTION_NOT_ALLOWED',
+        `Todoist Plus has moved to Tasks. Open ${variable(ctx.env, 'TASKS_PUBLIC_URL')} to continue.`);
+    }
     // Browsers call through the extension background's host permission. We do not grant page CORS.
     const match = /^Bearer (todofy_plus_[A-Za-z0-9_-]{43})$/.exec(ctx.request.headers.get('authorization') ?? '');
     if (!match) throw uiError('UNAUTHORIZED');
@@ -103,11 +111,12 @@ function validDay(value: unknown): value is string {
   return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
 }
 
-function focusClient(env: Env) {
+function focusClient(env: Env, native = false) {
   return createHttpClient(FlowDayUiService, async call => {
-    if (!env.FLOWDAY_FOCUS) throw uiError('UNAVAILABLE');
+    const binding = native ? env.FLOWDAY_NATIVE_FOCUS : env.FLOWDAY_FOCUS;
+    if (!binding) throw uiError('UNAVAILABLE');
     try {
-      return await env.FLOWDAY_FOCUS.fetch(new Request(`https://flowday.internal${call.url}`, {
+      return await binding.fetch(new Request(`https://flowday.internal${call.url}`, {
         method: call.httpMethod, headers: { 'content-type': 'application/json' },
         ...(call.body === undefined ? {} : { body: call.body }),
       }));
@@ -116,8 +125,8 @@ function focusClient(env: Env) {
 }
 
 /** Only a persisted successful Todoist close can create a frozen settlement. */
-async function settleCompleted(env: Env, input: { request_id: string; task_id: string; flow_date: string }): Promise<void> {
-  const client = focusClient(env);
+async function settleCompleted(env: Env, input: { request_id: string; task_id: string; flow_date: string }, native = false): Promise<void> {
+  const client = focusClient(env, native);
   const core = coordinator(env);
   let frozen = await core.plus_focus_claim(input.request_id, null, null);
   for (let attempt = 0; attempt < 2; attempt++) {
@@ -158,7 +167,7 @@ function focusHandlers(): ServiceHandlers<ShapeOf<typeof FlowDayUiService>, Plus
         const paths = (input as { updateMask?: { paths: string[] } }).updateMask?.paths;
         if (paths?.length !== 1 || paths[0] !== 'estimated_minutes') throw uiError('ACTION_NOT_ALLOWED');
       }
-      const client = focusClient(ctx.env);
+      const client = focusClient(ctx.env, ctx.internal);
       // The two services use the same generated descriptor; no hand-written DTO or raw body forwarding.
       const call = client[method.localName as keyof typeof client] as (request: typeof input) => Promise<typeof input>;
       try { return await call(input); }
@@ -182,4 +191,19 @@ async function proxyFocus(ctx: Context): Promise<Response> {
   const request = new Request(`https://flowday.internal${path}${ctx.url.search}`, ctx.request);
   const result = await focusApi.handle(request, { env: ctx.env, owner: null, digest: null }, ctx.requestId);
   return result?.response ?? api.errorResponse(uiError('NOT_FOUND'), ctx.requestId);
+}
+
+/** Called only by the named Planning service binding, after its binding identity and source checks. */
+export async function nativePlanning(request: Request, env: Env): Promise<Response> {
+  const url = new URL(request.url);
+  const requestId = crypto.randomUUID();
+  if (!plusPath(url.pathname)) return api.errorResponse(uiError('NOT_FOUND'), requestId);
+  const context: PlusContext = { env, owner: 'tasks-service', digest: null, internal: true };
+  if (url.pathname.startsWith(`${FLOW_PREFIX}/`)) {
+    const target = new Request(`https://flowday.internal${url.pathname.slice(FLOW_PREFIX.length)}${url.search}`, request);
+    const result = await focusApi.handle(target, context, requestId);
+    return result?.response ?? api.errorResponse(uiError('NOT_FOUND'), requestId);
+  }
+  const result = await api.handle(request, context, requestId);
+  return result?.response ?? api.errorResponse(uiError('NOT_FOUND'), requestId);
 }

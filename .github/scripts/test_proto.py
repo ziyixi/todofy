@@ -85,6 +85,22 @@ def app_of(path: Path) -> str:
     return path.relative_to(REPO).parts[0]
 
 
+def consuming_apps(manifest: Path) -> set[str]:
+    """A shared package's descriptors ship in its file: consumers, not in a separate deployed app."""
+    if app_of(manifest) != "packages":
+        return {app_of(manifest)}
+    result = set()
+    for candidate in tracked("*package.json"):
+        if app_of(candidate) in {"packages", "proto"}:
+            continue
+        dependencies = json.loads(candidate.read_text()).get("dependencies", {})
+        for spec in dependencies.values():
+            if isinstance(spec, str) and spec.startswith("file:"):
+                if (candidate.parent / spec[5:]).resolve() == manifest.parent.resolve():
+                    result.add(app_of(candidate))
+    return result
+
+
 def ts_users() -> dict[Path, dict]:
     """package.json (outside proto/) -> its data, for every manifest that depends on @ziyixi/proto."""
     found = {}
@@ -217,7 +233,8 @@ def value_importers() -> dict[str, set[str]]:
         for source in production_sources(manifest):
             for specifier, type_only in ts_proto_imports(source.read_text()):
                 if not type_only:
-                    found.setdefault(app_of(manifest), set()).update({"ts", f"proto/{specifier.removeprefix(TS_PACKAGE + '/')}"})
+                    for app in consuming_apps(manifest):
+                        found.setdefault(app, set()).update({"ts", f"proto/{specifier.removeprefix(TS_PACKAGE + '/')}"})
     for pyproject, data in py_users().items():
         if not py_bundled(data):
             continue
@@ -470,7 +487,7 @@ class Users(unittest.TestCase):
         # and UI (the client) bundle the TypeScript runtime and generated code.
         for manifest in (REPO / "todofy" / "gateway" / "package.json", REPO / "todofy" / "web" / "package.json"):
             self.assertIn(TS_PACKAGE, json.loads(manifest.read_text())["dependencies"])
-        users = {app_of(path) for path in [*ts_users(), *py_users()]}
+        users = {app for path in [*ts_users(), *py_users()] for app in consuming_apps(path)}
         imports = value_importers()
         derived = {app: {lang for lang in imports.get(app, set()) if lang in ("ts", "python")} for app in users}
         self.assertEqual(derived, {app: set(languages) for app, languages in ci_changes.PROTO_USERS.items()})
@@ -530,7 +547,7 @@ class Users(unittest.TestCase):
     def test_ops_descriptors_include_the_embedded_website_sync_package(self):
         imports = value_importers()
         users = {app for app, paths in imports.items() if any(path.startswith("proto/ops/") for path in paths)}
-        self.assertEqual(users, {"mail-hero", "todofy", "dashboard", "watch", "website", "mailsort", "recall", "brief"})
+        self.assertEqual(users, {"mail-hero", "todofy", "dashboard", "watch", "website", "mailsort", "recall", "brief", "tasks"})
         for app in users:
             with self.subTest(app=app):
                 self.assertIn("proto/website/sync/v1/sync.proto", imports[app])

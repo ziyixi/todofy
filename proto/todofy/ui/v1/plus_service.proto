@@ -345,6 +345,8 @@ message PlanningTask {
   // Todoist's fractional order key among the same siblings, compared bytewise; absent for a task
   // Todoist has not migrated. Not part of etag.
   optional string order_key = 21;
+  // Native Tasks position, including fractional midpoint ordering; absent for Todoist.
+  optional double sort_order = 22;
 }
 // Reads the singleton plan.
 message ReadPlanRequest {

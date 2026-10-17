@@ -11,6 +11,7 @@ export const RESOURCE_IDENTITIES: Readonly<Record<string, string | null>> = {
   "mail-hero-db": "6c13e4c3-e239-42fb-a7a4-96810fa8d7dc",
   "mailsort-state": "7dd130a08de1451cab2931db6a7d178d",
   "recall-state": "7186ddeb99e748d19325e1e217470199",
+  "tasks-db": "79a1f345-1183-46c3-bc6a-651be106f90c",
   "todofy-core-do": "a013ef9fa45048d4b4f7bfcc641b57ea",
   "todofy-db": "151c1306-3885-4679-9592-08887b30ae68",
   "watch-state": "d58e1bdabacb4d14bbba1887f169c8b4",

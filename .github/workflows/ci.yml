@@ -22,7 +22,7 @@ on:
         description: App to check and (on main) deploy
         type: choice
         # both = Todofy and Mail Hero (as before the dashboard existed); all = every app.
-        options: [both, all, todofy, mail-hero, dashboard, website, flowday, links, watch, newsletter, fleet, platform, mailsort, recall, brief, todoist-plus]
+        options: [both, all, todofy, mail-hero, dashboard, website, flowday, links, watch, newsletter, fleet, platform, mailsort, recall, brief, todoist-plus, tasks]
         default: both
       resume_vps_release:
         description: Explicitly resume a held VPS release after investigating its safe error
@@ -67,6 +67,8 @@ jobs:
       mailsort_check: ${{ steps.decide.outputs.mailsort_check }}
       recall_check: ${{ steps.decide.outputs.recall_check }}
       brief_check: ${{ steps.decide.outputs.brief_check }}
+      tasks_check: ${{ steps.decide.outputs.tasks_check }}
+      tasks_deploy: ${{ steps.decide.outputs.tasks_deploy }}
       todoist_plus_check: ${{ steps.decide.outputs.todoist_plus_check }}
       contracts: ${{ steps.decide.outputs.contracts }}
       packages: ${{ steps.decide.outputs.packages }}
@@ -296,6 +298,18 @@ jobs:
           persist-credentials: false
       - name: Run flowday-checks steps
         uses: ./.github/actions/check-flowday
+
+  tasks-checks:
+    name: Tasks checks
+    needs: changes
+    if: needs.changes.outputs.tasks_check == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/check-tasks
 
   todoist-plus-checks:
     name: Todoist Plus checks
@@ -608,7 +622,7 @@ jobs:
 
   gate:
     name: CI gate
-    needs: [changes, shared-packages, todofy-static, todofy-runtime, todofy-checks, mail-hero-checks, dashboard-checks, website-checks, flowday-checks, todoist-plus-checks, links-checks, watch-checks, fleet-checks, mailsort-checks, recall-checks, brief-checks, newsletter-checks, newsletter-image, platform-checks, contracts, infra-checks, proto-checks]
+    needs: [changes, shared-packages, todofy-static, todofy-runtime, todofy-checks, mail-hero-checks, dashboard-checks, website-checks, flowday-checks, tasks-checks, todoist-plus-checks, links-checks, watch-checks, fleet-checks, mailsort-checks, recall-checks, brief-checks, newsletter-checks, newsletter-image, platform-checks, contracts, infra-checks, proto-checks]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -624,6 +638,7 @@ jobs:
           DASHBOARD: ${{ needs.dashboard-checks.result }}
           WEBSITE: ${{ needs.website-checks.result }}
           FLOWDAY: ${{ needs.flowday-checks.result }}
+          TASKS: ${{ needs.tasks-checks.result }}
           TODOIST_PLUS: ${{ needs.todoist-plus-checks.result }}
           LINKS: ${{ needs.links-checks.result }}
           WATCH: ${{ needs.watch-checks.result }}
@@ -652,7 +667,7 @@ jobs:
           for pair in "Changes=$CHANGES" "Shared packages=$PACKAGES" "Todofy static checks=$TODOFY_STATIC" \
             "Todofy runtime=$TODOFY_RUNTIME" "Todofy checks=$TODOFY" "Mail Hero checks=$MAIL_HERO" \
             "Dashboard checks=$DASHBOARD" "Website checks=$WEBSITE" "FlowDay checks=$FLOWDAY" "Links checks=$LINKS" "Watch checks=$WATCH" "Fleet checks=$FLEET" "Mailsort checks=$MAILSORT" \
-            "Recall checks=$RECALL" "Brief checks=$BRIEF" "Todoist Plus checks=$TODOIST_PLUS" \
+            "Tasks checks=$TASKS" "Recall checks=$RECALL" "Brief checks=$BRIEF" "Todoist Plus checks=$TODOIST_PLUS" \
             "Newsletter checks=$NEWSLETTER" "Newsletter image checks=$NEWSLETTER_IMAGE" "Platform checks=$PLATFORM" \
             "Contracts=$CONTRACTS" "Infra checks=$INFRA" "Proto checks=$PROTO"; do
             echo "$pair"
@@ -855,7 +870,7 @@ jobs:
     # After the app deploys: the service bindings MAIL_HERO, TODOFY, WATCH, FLEET, MAILSORT, RECALL and BRIEF name their "Ops"
     # entrypoints, which must be live first. An app deploy that did not run (nothing of that app changed) is fine; one that
     # failed or was cancelled stops this job.
-    needs: [changes, dashboard-checks, gate, todofy-deploy, mail-hero-deploy, watch-deploy, fleet-deploy, mailsort-deploy, recall-deploy, brief-deploy, website-relay-deploy]
+    needs: [changes, dashboard-checks, gate, todofy-deploy, mail-hero-deploy, watch-deploy, fleet-deploy, mailsort-deploy, recall-deploy, brief-deploy, tasks-deploy, website-relay-deploy]
     # Explicit status function and results, as for Todofy deploy (implicit success() and skipped ancestors).
     if: >-
       ${{ !cancelled()
@@ -869,6 +884,7 @@ jobs:
       && (needs.mailsort-deploy.result == 'success' || needs.mailsort-deploy.result == 'skipped')
       && (needs.recall-deploy.result == 'success' || needs.recall-deploy.result == 'skipped')
       && (needs.brief-deploy.result == 'success' || needs.brief-deploy.result == 'skipped')
+      && (needs.tasks-deploy.result == 'success' || needs.tasks-deploy.result == 'skipped')
       && (needs.website-relay-deploy.result == 'success' || needs.website-relay-deploy.result == 'skipped')
       && github.ref == 'refs/heads/main'
       && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
@@ -921,6 +937,28 @@ jobs:
     uses: ./.github/workflows/worker-release.yml
     with:
       app: links
+      source_sha: ${{ github.sha }}
+    secrets: inherit
+
+
+  tasks-deploy:
+    name: Tasks deploy
+    needs: [changes, tasks-checks, gate]
+    # Explicit status function and results, as for Todofy deploy (implicit success() and skipped ancestors).
+    if: >-
+      ${{ !cancelled()
+      && needs.changes.result == 'success'
+      && (needs.tasks-checks.result == 'success' || (needs.changes.outputs.checks_reused == 'true' && needs.tasks-checks.result == 'skipped'))
+      && needs.gate.result == 'success'
+      && github.ref == 'refs/heads/main'
+      && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+      && needs.changes.outputs.tasks_deploy == 'true' }}
+    permissions:
+      contents: read
+      deployments: write
+    uses: ./.github/workflows/worker-release.yml
+    with:
+      app: tasks
       source_sha: ${{ github.sha }}
     secrets: inherit
 

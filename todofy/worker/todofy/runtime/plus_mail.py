@@ -19,7 +19,7 @@ from todofy.core import mailbox, plus
 from todofy.core.gtd import rfc3339
 from todofy.core.mailbox import MailSettings
 from todofy.core.sql import mailbox as sql
-from todofy.runtime import plan_store
+from todofy.runtime import native_plus, plan_store
 from todofy.runtime import plus_receipts as receipts
 from todofy.runtime import plus_todoist as todoist
 from todofy.runtime.config import source_id, var
@@ -30,12 +30,12 @@ PRIORITIES = {"p1": 1, "p2": 2, "p3": 3, "p4": 4}
 WIRE_PRIORITIES = {value: name for name, value in PRIORITIES.items()}
 
 
-def _ref(external_id: str) -> dict[str, str]:
-    return {"provider": "todoist", "external_id": external_id}
+def _ref(external_id: str, provider: str = "todoist") -> dict[str, str]:
+    return {"provider": provider, "external_id": external_id}
 
 
-def _todoist_id(ref: dict[str, Any] | None) -> str:
-    if not ref or ref.get("provider") != "todoist":
+def _todoist_id(ref: dict[str, Any] | None, provider: str = "todoist") -> str:
+    if not ref or ref.get("provider") != provider:
         raise todoist.PlusError("BAD_REQUEST")
     return plus.check_id(ref.get("external_id", ""))
 
@@ -47,16 +47,20 @@ def _task_ids(request: dict[str, Any], *, least: int = 0) -> list[str]:
     return [plus.check_id(task_id) for task_id in ids]
 
 
-def _settings_answer(settings: MailSettings) -> dict[str, Any]:
+def _settings_answer(settings: MailSettings, provider: str = "todoist") -> dict[str, Any]:
     answer: dict[str, Any] = {
         "categories": [
-            {"id": str(category.id), "label": _ref(category.label_id), "priority": WIRE_PRIORITIES[category.priority]}
+            {
+                "id": str(category.id),
+                "label": _ref(category.label_id, provider),
+                "priority": WIRE_PRIORITIES[category.priority],
+            }
             for category in settings.categories
         ],
         "etag": settings.etag,
     }
     if settings.destination:
-        answer["destination"] = _ref(settings.destination)
+        answer["destination"] = _ref(settings.destination, provider)
     return answer
 
 
@@ -89,14 +93,14 @@ async def lookup(core: Any, request: dict[str, Any]) -> dict[str, Any]:
     items = [
         {
             "id": row["event_id"],
-            "task": _ref(row["task_id"]),
+            "task": _ref(row["task_id"], todoist.provider(core)),
             "brief": row["brief"] or mailbox.brief_of(row["head"] or ""),
             "receive_time": rfc3339(int(row["received_at"])),
             "has_summary": bool(row["has_summary"]),
         }
         for row in (dict(item) for item in rows.results)
     ]
-    settings = _settings_answer(plan_store.mail_settings_of(*saved))
+    settings = _settings_answer(plan_store.mail_settings_of(*saved), todoist.provider(core))
     answer = {"items": items, "categories": settings["categories"], "categories_etag": settings["etag"]}
     if "destination" in settings:
         answer["destination"] = settings["destination"]
@@ -113,13 +117,13 @@ async def read_settings(core: Any) -> dict[str, Any]:
     """ReadMailSettings: D1 and one Todoist read of the projects. It answers the account Inbox as the destination
     and the only project (none when Todoist lists none) for extensions before planning protocol 6, whose categories
     dialog asks for a destination; drop that in the next Plus release. Its name is passed on, never stored."""
-    answer = _settings_answer(await plan_store.mail_settings(core.env.DB))
+    answer = _settings_answer(await plan_store.mail_settings(core.env.DB), todoist.provider(core))
     answer.pop("destination", None)
     inbox = await _account_inbox(core)
     if inbox is None:
         return {**answer, "projects": []}
     project = {"id": str(inbox["id"]), "display_name": str(inbox.get("name") or ""), "inbox": True}
-    return {**answer, "destination": _ref(project["id"]), "projects": [project]}
+    return {**answer, "destination": _ref(project["id"], todoist.provider(core)), "projects": [project]}
 
 
 # ---- writes ---------------------------------------------------------------------------------------------------
@@ -138,11 +142,11 @@ async def update_settings(core: Any, request: dict[str, Any], current: dict[str,
         priority = PRIORITIES.get(category.get("priority", ""))
         if priority is None:
             raise todoist.PlusError("BAD_REQUEST")
-        requested.append((_todoist_id(category.get("label")), priority))
-    destination = _todoist_id(request.get("destination"))
+        requested.append((_todoist_id(category.get("label"), todoist.provider(core)), priority))
+    destination = _todoist_id(request.get("destination"), todoist.provider(core))
     settings = await plan_store.mail_settings(db)
     if [(c.label_id, c.priority) for c in settings.categories] == requested:
-        return _settings_answer(settings)
+        return _settings_answer(settings, todoist.provider(core))
     if request.get("etag") != settings.etag:
         raise todoist.PlusError("ETAG_MISMATCH")
     labels = {label["id"]: label for label in current["available_labels"]}
@@ -157,7 +161,7 @@ async def update_settings(core: Any, request: dict[str, Any], current: dict[str,
     )
     updated = MailSettings(tuple(saved), destination)
     await plan_store.save_mail_settings(db, settings, updated, archived, now_s())
-    return _settings_answer(updated)
+    return _settings_answer(updated, todoist.provider(core))
 
 
 async def _filing(
@@ -194,9 +198,14 @@ async def _filing(
         name, priority = filed
         update = {"id": task_id, "labels": plus.filed_labels(task, name, current["labels"])}
         update["priority"] = plus.api_priority(priority)
-        commands.append({"type": "item_update", "uuid": plus.command_id(request_id, 0), "args": update})
+        commands.append(
+            {"type": "item_update", "uuid": plus.command_id(request_id, 0), "args": update, **native_plus.etag(task)}
+        )
     move = {"id": task_id, "project_id": str(inbox["id"])}
-    return [*commands, {"type": "item_move", "uuid": plus.command_id(request_id, 1), "args": move}]
+    return [
+        *commands,
+        {"type": "item_move", "uuid": plus.command_id(request_id, 1), "args": move, **native_plus.etag(task)},
+    ]
 
 
 async def file(core: Any, request: dict[str, Any], current: dict[str, Any]) -> dict[str, Any]:
@@ -222,7 +231,9 @@ async def file(core: Any, request: dict[str, Any], current: dict[str, Any]) -> d
         if str(task.get("project_id") or "") != _mail_project(core):
             receipts.finish(core.sql, request_id, {"task_id": request["task_id"]})
             return {"task": plus.task_view(task, current["today"], current["labels"])}
-        if await _filing(core, request, current, task) != previous.commands:
+        if native_plus.comparable(await _filing(core, request, current, task)) != native_plus.comparable(
+            previous.commands
+        ):
             raise todoist.PlusError("ETAG_MISMATCH")
         commands = previous.commands
     if commands is not None:
@@ -234,7 +245,7 @@ async def file(core: Any, request: dict[str, Any], current: dict[str, Any]) -> d
     return {"task": plus.task_view(task, current["today"], current["labels"])}
 
 
-async def _deletions(core: Any, ids: list[str]) -> tuple[set[str], set[str]]:
+async def _deletions(core: Any, ids: list[str]) -> tuple[set[str], set[str], dict[str, dict[str, str]]]:
     """From a fresh read of the mail project: which of ``ids`` may be deleted, and which it does not hold (moved
     elsewhere, or no longer active). Deletable are the active top-level mail tasks the owner has not touched in
     Todoist (core/plus.untouched) that no dependency names and no unfinished Plus write changes (a started receipt,
@@ -260,7 +271,7 @@ async def _deletions(core: Any, ids: list[str]) -> tuple[set[str], set[str]]:
         and task_id not in writing
         and plus.untouched(task, parents)
     }
-    return deletable, set(ids) - set(tasks)
+    return deletable, set(ids) - set(tasks), {task_id: native_plus.etag(tasks[task_id]) for task_id in deletable}
 
 
 async def delete(core: Any, request: dict[str, Any]) -> dict[str, Any]:
@@ -283,16 +294,21 @@ async def delete(core: Any, request: dict[str, Any]) -> dict[str, Any]:
         kept = {ids[index] for index in previous.result["kept"]}
     else:
         if previous is None:
-            deletable, absent = await _deletions(core, ids)
+            deletable, absent, native_etags = await _deletions(core, ids)
             commands = [
-                {"type": "item_delete", "uuid": plus.command_id(request_id, index), "args": {"id": task_id}}
+                {
+                    "type": "item_delete",
+                    "uuid": plus.command_id(request_id, index),
+                    "args": {"id": task_id},
+                    **native_etags.get(task_id, {}),
+                }
                 for index, task_id in enumerate(ids)
                 if task_id in deletable
             ]
             await receipts.start(core, request_id, "DeleteMailItems", digest, commands)
         else:
             frozen = [command["args"]["id"] for command in previous.commands]
-            deletable, absent = await _deletions(core, frozen)
+            deletable, absent, _ = await _deletions(core, frozen)
             commands = [command for command in previous.commands if command["args"]["id"] in deletable]
         for offset in range(0, len(commands), todoist.SYNC_COMMANDS):
             await todoist.commands(core, commands[offset : offset + todoist.SYNC_COMMANDS], gone_ok=True)

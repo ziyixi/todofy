@@ -230,7 +230,7 @@ export type CanaryState = Omit<CanaryView, 'id'>;
  * is open on the wire (an app may join within ops-v1), so the generated type of `app` is a string; this dashboard knows
  * exactly the apps it binds.
  */
-export type OpsApp = 'mail-hero' | 'todofy' | 'watch' | 'fleet' | 'newsletter' | 'notion-publish' | 'mailsort' | 'recall' | 'brief';
+export type OpsApp = 'mail-hero' | 'todofy' | 'watch' | 'fleet' | 'newsletter' | 'notion-publish' | 'mailsort' | 'recall' | 'brief' | 'tasks';
 
 // ---- transport outside the service --------------------------------------------------------------------------
 
@@ -331,10 +331,10 @@ export const VIEW_ROWS_READ: Readonly<Record<ViewId, number>> = { home: 40, flow
 export const VIEW_ROWS_READ_MAX = 320;
 
 /**
- * Outbound calls one tick may make, computed from the registry (tested). Free: 50 subrequests. Brief adds one status() and one possible setGuard() call
- * (9 status, 3 probes, 1 GraphQL, 5 setGuard, 2 canary, 1 reportOps, 12 drift).
+ * Outbound calls one tick may make, computed from the registry (tested). Free: 50 subrequests. Tasks adds one read-only status() call.
+ * (10 status, 3 probes, 1 GraphQL, 5 setGuard, 2 canary, 1 reportOps, 12 drift).
  */
-export const MAX_OUTBOUND_PER_TICK = 33;
+export const MAX_OUTBOUND_PER_TICK = 34;
 /** Outbound calls one owner refresh may make (tested). */
 export const MAX_OUTBOUND_PER_REFRESH = 20;
 

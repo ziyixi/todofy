@@ -321,10 +321,11 @@ export function sessionMessage(session: TimerSessionRecord | null): TimerSession
   });
 }
 
-async function readSettings(db: Db): Promise<Settings> {
+async function readSettings(db: Db, native = false): Promise<Settings> {
   const values = await getSettings(db, [KEY_API_KEY, KEY_LAST_SYNC_AT, 'day_capacity_mins']);
   return create(SettingsSchema, {
     name: 'settings',
+    taskSource: native ? 'tasks' : 'todoist',
     // Only a sealed key counts (a plaintext one from an older copy is never used).
     todoistApiKeySet: isSealed(values.get(KEY_API_KEY)),
     dayCapacityMinutes: dayCapacity(values.get('day_capacity_mins') ?? null),
@@ -432,7 +433,7 @@ export const handlers: ServiceHandlers<ShapeOf<typeof FlowDayUiService>, ApiCont
 
   async syncTasks(request, { db, env, fetcher, now }) {
     const mode = request.mode === SyncTasksRequest_Mode.MANUAL ? 'manual' : 'auto';
-    const outcome = await runSync({ db, mode, credentialKey: env.CREDENTIAL_KEY, fetcher, now: now() });
+    const outcome = await runSync({ db, mode, credentialKey: env.CREDENTIAL_KEY, fetcher, now: now(), tasks: env.TASKS });
     switch (outcome.kind) {
       case 'ok': {
         const result = outcome.response;
@@ -451,6 +452,8 @@ export const handlers: ServiceHandlers<ShapeOf<typeof FlowDayUiService>, ApiCont
         throw flowdayError('TODOIST_KEY_UNREADABLE');
       case 'not_configured':
         throw flowdayError('NOT_CONFIGURED');
+      case 'tasks':
+        throw flowdayError('TASKS_UNAVAILABLE');
       case 'todoist':
         throw flowdayError(outcome.failure === 'unauthorized' ? 'TODOIST_UNAUTHORIZED' : 'TODOIST_UNAVAILABLE');
     }
@@ -639,18 +642,19 @@ export const handlers: ServiceHandlers<ShapeOf<typeof FlowDayUiService>, ApiCont
 
   // ---- settings ----
 
-  async getSettings(request, { db }) {
+  async getSettings(request, { db, env }) {
     if (request.name !== 'settings') notFound();
-    return readSettings(db);
+    return readSettings(db, Boolean(env.TASKS));
   },
 
   async updateSettings(request, { db, env }) {
     const input = request.settings ?? bad();
     if (input.name !== 'settings') notFound();
-    const mask = maskOf(request.updateMask, ['todoist_api_key', 'day_capacity_minutes'], ['name', 'todoist_api_key_set', 'last_sync_time']).fields;
+    const mask = maskOf(request.updateMask, ['todoist_api_key', 'day_capacity_minutes'], ['name', 'todoist_api_key_set', 'last_sync_time', 'task_source']).fields;
     const writes = [];
     if (mask.has('day_capacity_minutes') && (input.dayCapacityMinutes < 0 || input.dayCapacityMinutes > MAX_DAY_CAPACITY_MINUTES)) bad();
     if (mask.has('todoist_api_key')) {
+      if (env.TASKS) bad(); // The active service binding owns the source; a key cannot silently switch it.
       const key = input.todoistApiKey.trim();
       if (key === '' || key.length > MAX_TODOIST_KEY) bad();
       // The key is stored only sealed under CREDENTIAL_KEY (./credentials.ts); saving the same key writes nothing.
@@ -667,7 +671,7 @@ export const handlers: ServiceHandlers<ShapeOf<typeof FlowDayUiService>, ApiCont
     if (mask.has('day_capacity_minutes')) writes.push(setSettingQuery(db, 'day_capacity_mins', String(input.dayCapacityMinutes)));
     const [first, ...rest] = writes;
     if (first !== undefined) await db.batch([first, ...rest]);
-    return readSettings(db);
+    return readSettings(db, Boolean(env.TASKS));
   },
 
   // ---- analytics ----

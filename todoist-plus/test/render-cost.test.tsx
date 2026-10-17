@@ -28,7 +28,7 @@ import { createPrototype } from "../design/fixture";
 import type { PlanState, PlanningTask } from "../src/model";
 
 const planViewRenders = vi.hoisted(() => ({ count: 0 }));
-vi.mock("../src/PlanView", async (original) => {
+vi.mock("@ziyixi/planning-ui/PlanView", async (original) => {
   const actual = await original<typeof import("../src/PlanView")>();
   return {
     ...actual,

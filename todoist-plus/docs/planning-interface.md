@@ -337,30 +337,32 @@ background 持有连接口令，content script 只发送封闭的类型化消息
 
 ## 实现文件
 
+正式组件现由 [planning-ui](../../packages/planning-ui/README.md) 共享。扩展 `src/` 保留薄转出入口；WXT 挂载、口令、background 消息及 HTTP 鉴权仍属于扩展。Tasks 通过自己的传输和导航使用同一组件。
+
 | 责任                  | 文件                                                                            |
 | --------------------- | ------------------------------------------------------------------------------- |
-| 整体页面与确认状态    | `src/App.tsx`                                                                   |
-| 确认结果与预期变化    | `src/plan-updates.ts`                                                           |
-| 计时与等待标记        | `src/StatusMarks.tsx`                                                           |
-| 本周目标（文字）      | `src/WeeklyGoals.tsx`、`src/BetText.tsx`、`src/bets.ts`、`src/weekly-goals.css` |
-| Review 与事项卡       | `src/ReviewBoard.tsx`、`src/review-board.css`、`src/drag-announcements.ts`      |
-| Week 事项总览与小步骤 | `src/PlanningWeek.tsx`、`src/AddStep.tsx`、`src/QuickTasks.tsx`                 |
-| 日期队列与投放位置    | `src/PlanningCalendar.tsx`、`src/planning-week.css`                             |
-| 所属事项与色标        | `src/planning-outcomes.ts`                                                      |
-| 计划标签              | `src/BoardLabels.tsx`                                                           |
-| 今日执行与计时按钮    | `src/FocusView.tsx`、`src/FocusBlock.tsx`、`src/focus.css`                      |
-| 用户调用及服务端协议  | `src/api.ts`、`src/client.ts`、`src/background.ts`                              |
+| 整体页面与确认状态    | `../../packages/planning-ui/src/App.tsx`                                                                   |
+| 确认结果与预期变化    | `../../packages/planning-ui/src/plan-updates.ts`                                                           |
+| 计时与等待标记        | `../../packages/planning-ui/src/StatusMarks.tsx`                                                           |
+| 本周目标（文字）      | `../../packages/planning-ui/src/WeeklyGoals.tsx`、`../../packages/planning-ui/src/BetText.tsx`、`../../packages/planning-ui/src/bets.ts`、`../../packages/planning-ui/src/weekly-goals.css` |
+| Review 与事项卡       | `../../packages/planning-ui/src/ReviewBoard.tsx`、`../../packages/planning-ui/src/review-board.css`、`../../packages/planning-ui/src/drag-announcements.ts`      |
+| Week 事项总览与小步骤 | `../../packages/planning-ui/src/PlanningWeek.tsx`、`../../packages/planning-ui/src/AddStep.tsx`、`../../packages/planning-ui/src/QuickTasks.tsx`                 |
+| 日期队列与投放位置    | `../../packages/planning-ui/src/PlanningCalendar.tsx`、`../../packages/planning-ui/src/planning-week.css`                             |
+| 所属事项与色标        | `../../packages/planning-ui/src/planning-outcomes.ts`                                                      |
+| 计划标签              | `../../packages/planning-ui/src/BoardLabels.tsx`                                                           |
+| 今日执行与计时按钮    | `../../packages/planning-ui/src/FocusView.tsx`、`../../packages/planning-ui/src/FocusBlock.tsx`、`../../packages/planning-ui/src/focus.css`                      |
+| 用户调用及服务端协议  | `../../packages/planning-ui/src/api.ts`（操作映射）、`src/api.ts`（扩展鉴权）、`src/client.ts`、`src/background.ts`                              |
 | 原生 Todoist 挂载     | `src/mount.tsx`、`src/PlusBoundary.tsx`                                         |
 | Todoist 页面锚点      | `src/anchors.ts`                                                                |
 | 页面检测              | `src/page-status.ts`、`src/Options.tsx`                                         |
-| 主题桥接              | `src/styles.css` 开头                                                           |
-| 该开始与等待中的列    | `src/review-lanes.ts`                                                           |
-| 截止日期状态与文字    | `src/deadlines.ts`                                                              |
-| 周回顾与推导          | `src/WeeklyReview.tsx`、`src/weekly-review.ts`、`src/weekly-review.css`         |
-| Plan 视图的记忆       | `src/plan-view-state.ts`                                                        |
-| 邮件页                | `src/Mailbox.tsx`、`src/MailCategories.tsx`、`src/mail.ts`、`src/mailbox.css`   |
-| 依赖的规则与文字      | `src/dependencies.ts`                                                           |
-| 任务详情的“依赖”段    | `src/TaskDependencies.tsx`、`src/dependencies.css`                              |
+| 主题桥接              | `../../packages/planning-ui/src/styles.css` 开头                                                           |
+| 该开始与等待中的列    | `../../packages/planning-ui/src/review-lanes.ts`                                                           |
+| 截止日期状态与文字    | `../../packages/planning-ui/src/deadlines.ts`                                                              |
+| 周回顾与推导          | `../../packages/planning-ui/src/WeeklyReview.tsx`、`../../packages/planning-ui/src/weekly-review.ts`、`../../packages/planning-ui/src/weekly-review.css`         |
+| Plan 视图的记忆       | `../../packages/planning-ui/src/plan-view-state.ts`                                                        |
+| 邮件页                | `../../packages/planning-ui/src/Mailbox.tsx`、`../../packages/planning-ui/src/MailCategories.tsx`、`../../packages/planning-ui/src/mail.ts`、`../../packages/planning-ui/src/mailbox.css`   |
+| 依赖的规则与文字      | `../../packages/planning-ui/src/dependencies.ts`                                                           |
+| 任务详情的“依赖”段    | `../../packages/planning-ui/src/TaskDependencies.tsx`、`../../packages/planning-ui/src/dependencies.css`                              |
 
 ## 验收与截图
 

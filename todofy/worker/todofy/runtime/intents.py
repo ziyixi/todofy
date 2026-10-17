@@ -284,7 +284,9 @@ class _Step:
         await self.core.arm_watchdog()
         self.core.count_todoist_calls(LOOKUP_MAX_PAGES, now_s())
         started = now_ms()
-        found = await todoist.find_tasks(self.env, lambda description: rules.has_footer(description, footer))
+        found = await todoist.find_tasks(
+            self.env, lambda description: rules.has_footer(description, footer), query=footer
+        )
         after = rules.after_lookup(task, found, now_s(), backoff_base=self.core.backoff_base())
         await self._write(task, after)
         code = "lookup_failed" if found is None else ("" if found else "lookup_not_found")

@@ -15,7 +15,10 @@ TABLES = {
     "flowday_app_ids": "cloudflare_zero_trust_access_application.flowday",
     "d1_databases": "cloudflare_d1_database.app",
 }
-POLICY_KEYS = {"github-owner": "github_owner", "fleet-receipt": "fleet_receipt"}
+POLICY_KEYS = {
+    "github-owner": "github_owner", "fleet-receipt": "fleet_receipt",
+    "brief-feedback": "brief_feedback", "recall-machine": "recall_machine",
+}
 STANDALONE = {
     "fleet-receipt": "cloudflare_zero_trust_access_application.fleet_receipt",
     "mail-hero-backup": "cloudflare_zero_trust_access_application.mail_hero_backup",

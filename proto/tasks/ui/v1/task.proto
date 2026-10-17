@@ -1,0 +1,204 @@
+// (-- api-linter: core::0142::time-field-type=disabled
+//     aip.dev/not-precedent: scheduled days and deadlines are calendar date text; due_datetime is the
+//     date module's RFC3339 text paired with an IANA timezone, shared with browser previews. --)
+// (-- api-linter: core::0148::use-uid=disabled
+//     aip.dev/not-precedent: id preserves imported provider IDs referenced by existing planning and time
+//     ledgers; it is not a new service-generated UID. The canonical resource identifier is name. --)
+syntax = "proto3";
+
+package tasks.ui.v1;
+
+import "google/api/field_behavior.proto";
+import "google/api/resource.proto";
+import "google/protobuf/timestamp.proto";
+
+option java_multiple_files = true;
+option java_outer_classname = "TaskProto";
+option java_package = "science.ziyixi.tasks.ui.v1";
+
+// The owner's task.
+message Task {
+  option (google.api.resource) = {
+    singular: "task"
+    plural: "tasks"
+    type: "tasks.ziyixi.science/Task"
+    pattern: "tasks/{task}"
+  };
+
+  // Resource name tasks/{id}.
+  string name = 1 [(google.api.field_behavior) = IDENTIFIER];
+  // Stable ID; imported IDs are preserved.
+  string id = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Title, at most 500 characters.
+  string title = 3 [(google.api.field_behavior) = OPTIONAL];
+  // Plain text or Markdown, at most 16000 characters.
+  string description = 4 [(google.api.field_behavior) = OPTIONAL];
+  // Project ID; empty means Inbox.
+  string project_id = 5 [(google.api.field_behavior) = OPTIONAL];
+  // Section ID, within the project.
+  string section_id = 6 [(google.api.field_behavior) = OPTIONAL];
+  // Parent task ID, in the same project; empty means root.
+  string parent_id = 7 [(google.api.field_behavior) = OPTIONAL];
+  // At most 30 label IDs.
+  repeated string label_ids = 8 [(google.api.field_behavior) = OPTIONAL];
+  // 1 is highest, 4 is normal; zero on create means normal.
+  int32 priority = 9 [(google.api.field_behavior) = OPTIONAL];
+  // Finite position among siblings. Omitted on create appends to the sibling list.
+  optional double sort_order = 10 [(google.api.field_behavior) = OPTIONAL];
+  // Local date YYYY-MM-DD; empty means unscheduled.
+  string due_date = 11 [(google.api.field_behavior) = OPTIONAL];
+  // RFC3339 instant; empty means all-day.
+  string due_datetime = 12 [(google.api.field_behavior) = OPTIONAL];
+  // IANA zone for a timed date, otherwise empty.
+  string due_timezone = 13 [(google.api.field_behavior) = OPTIONAL];
+  // Real deadline YYYY-MM-DD, independent of the scheduled date.
+  string deadline = 14 [(google.api.field_behavior) = OPTIONAL];
+  // Estimated minutes, 0 means unset; at most 10080.
+  int32 duration_minutes = 15 [(google.api.field_behavior) = OPTIONAL];
+  // Supported English recurrence or RFC5545 RRULE; empty means once.
+  string recurrence = 16 [(google.api.field_behavior) = OPTIONAL];
+  // Whether a non-recurring task is complete.
+  bool completed = 17 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Number of direct non-deleted children.
+  int32 child_count = 18 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Completed direct children.
+  int32 completed_child_count = 19 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Most recent completion time.
+  google.protobuf.Timestamp complete_time = 20 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Opaque current revision, required for updates and destructive actions.
+  string etag = 21 [(google.api.field_behavior) = OPTIONAL];
+  // Creation time.
+  google.protobuf.Timestamp create_time = 22 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Last modification time.
+  google.protobuf.Timestamp update_time = 23 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Total completed occurrences, including recurring tasks.
+  int32 completed_count = 25 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // True when this task belongs to an archived project or its descendant.
+  bool archived = 26 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Current parent title for cross-project date views.
+  string parent_title = 27 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // First 240 characters for list rows; GetTask returns the full description.
+  string description_preview = 28 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// The owner's project.
+message Project {
+  option (google.api.resource) = {
+    singular: "project"
+    plural: "projects"
+    type: "tasks.ziyixi.science/Project"
+    pattern: "projects/{project}"
+  };
+
+  // Resource name projects/{id}.
+  string name = 1 [(google.api.field_behavior) = IDENTIFIER];
+  // Stable ID; imported IDs are preserved.
+  string id = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Project name, at most 200 characters.
+  string title = 3 [(google.api.field_behavior) = OPTIONAL];
+  // Parent project ID, empty for a root.
+  string parent_id = 4 [(google.api.field_behavior) = OPTIONAL];
+  // Hex color, empty means the default.
+  string color = 5 [(google.api.field_behavior) = OPTIONAL];
+  // Show in favorites.
+  bool favorite = 6 [(google.api.field_behavior) = OPTIONAL];
+  // Archived projects are hidden from active task views.
+  bool archived = 7 [(google.api.field_behavior) = OPTIONAL];
+  // Finite sidebar position.
+  double sort_order = 8 [(google.api.field_behavior) = OPTIONAL];
+  // Opaque current revision, required for updates and destructive actions.
+  string etag = 9 [(google.api.field_behavior) = OPTIONAL];
+  // Creation time.
+  google.protobuf.Timestamp create_time = 10 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Last modification time.
+  google.protobuf.Timestamp update_time = 11 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The preserved Inbox project identity; only one may be marked.
+  bool inbox = 20 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// The owner's section.
+message Section {
+  option (google.api.resource) = {
+    singular: "section"
+    plural: "sections"
+    type: "tasks.ziyixi.science/Section"
+    pattern: "sections/{section}"
+  };
+
+  // Resource name sections/{id}.
+  string name = 1 [(google.api.field_behavior) = IDENTIFIER];
+  // Stable ID; imported IDs are preserved.
+  string id = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Section name, at most 200 characters.
+  string title = 3 [(google.api.field_behavior) = OPTIONAL];
+  // Owning project ID.
+  string project_id = 4 [(google.api.field_behavior) = OPTIONAL];
+  // Finite position within the project.
+  double sort_order = 5 [(google.api.field_behavior) = OPTIONAL];
+  // Opaque current revision, required for updates and destructive actions.
+  string etag = 6 [(google.api.field_behavior) = OPTIONAL];
+  // Creation time.
+  google.protobuf.Timestamp create_time = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Last modification time.
+  google.protobuf.Timestamp update_time = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Archived sections are hidden from active views.
+  bool archived = 20 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// The owner's label.
+message Label {
+  option (google.api.resource) = {
+    singular: "label"
+    plural: "labels"
+    type: "tasks.ziyixi.science/Label"
+    pattern: "labels/{label}"
+  };
+
+  // Resource name labels/{id}.
+  string name = 1 [(google.api.field_behavior) = IDENTIFIER];
+  // Stable ID; imported IDs are preserved.
+  string id = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Label name, at most 100 characters.
+  string title = 3 [(google.api.field_behavior) = OPTIONAL];
+  // Hex color, empty means the default.
+  string color = 4 [(google.api.field_behavior) = OPTIONAL];
+  // Show in favorites.
+  bool favorite = 5 [(google.api.field_behavior) = OPTIONAL];
+  // Finite list position.
+  double sort_order = 6 [(google.api.field_behavior) = OPTIONAL];
+  // Opaque current revision, required for updates and destructive actions.
+  string etag = 7 [(google.api.field_behavior) = OPTIONAL];
+  // Creation time.
+  google.protobuf.Timestamp create_time = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Last modification time.
+  google.protobuf.Timestamp update_time = 9 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// The owner's savedfilter.
+message SavedFilter {
+  option (google.api.resource) = {
+    singular: "savedFilter"
+    plural: "filters"
+    type: "tasks.ziyixi.science/SavedFilter"
+    pattern: "filters/{saved_filter}"
+  };
+
+  // Resource name filters/{id}.
+  string name = 1 [(google.api.field_behavior) = IDENTIFIER];
+  // Stable ID; imported IDs are preserved.
+  string id = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Saved filter name, at most 100 characters.
+  string title = 3 [(google.api.field_behavior) = OPTIONAL];
+  // Task filter query, at most 1000 characters.
+  string query = 4 [(google.api.field_behavior) = OPTIONAL];
+  // Show in favorites.
+  bool favorite = 5 [(google.api.field_behavior) = OPTIONAL];
+  // Finite list position.
+  double sort_order = 6 [(google.api.field_behavior) = OPTIONAL];
+  // Opaque current revision, required for updates and destructive actions.
+  string etag = 7 [(google.api.field_behavior) = OPTIONAL];
+  // Creation time.
+  google.protobuf.Timestamp create_time = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Last modification time.
+  google.protobuf.Timestamp update_time = 9 [(google.api.field_behavior) = OUTPUT_ONLY];
+}

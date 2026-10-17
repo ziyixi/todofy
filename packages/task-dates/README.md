@@ -1,0 +1,9 @@
+# Task dates
+
+The Tasks Worker and its import tool use this package to parse scheduled dates and advance supported
+recurrence rules. It wraps the pinned `chrono-node` and `rrule` packages with the app's calendar-date and
+timezone semantics. It owns no storage, network calls or scheduler.
+
+`previewDate` produces an explicit date, optional instant/timezone and recurrence; `nextOccurrence` advances
+that schedule after completion. Unsupported rules reject instead of silently changing a task's meaning.
+Run `npm ci`, `npm run typecheck` and `npm test` in this directory.

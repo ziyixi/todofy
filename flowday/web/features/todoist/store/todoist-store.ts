@@ -32,6 +32,7 @@ export const useTodoistStore = create<TodoistState>()((set, get) => ({
   isSyncing: false,
   lastSyncAt: null,
   hasApiKey: false,
+  taskSource: "todoist",
   nextAutoSyncAt: 0,
   searchQuery: "",
 
@@ -97,7 +98,7 @@ export const useTodoistStore = create<TodoistState>()((set, get) => ({
         set({ tasks });
       }
       if (settings) {
-        set({ lastSyncAt: settings.lastSyncAt, hasApiKey: settings.hasApiKey });
+        set({ lastSyncAt: settings.lastSyncAt, hasApiKey: settings.hasApiKey, taskSource: settings.taskSource });
       }
     } catch {
       // Hydration failures leave the current cache intact until the next sync succeeds.

@@ -331,6 +331,7 @@ const handlers: ServiceHandlers<ShapeOf<typeof FlowDayUiService>, Context> = {
     return create(SettingsSchema, {
       name: "settings",
       todoistApiKeySet: fake.settings.has("todoist_api_key"),
+      taskSource: fake.settings.get("task_source") ?? "",
       dayCapacityMinutes: Number(fake.settings.get("day_capacity_mins") ?? "360"),
       lastSyncTime: at(fake.settings.get("last_sync_at") ?? null),
     });

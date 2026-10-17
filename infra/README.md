@@ -72,10 +72,10 @@ Nothing unrelated is imported, declared, read or modelled, not even read-only.
 [`test_infra_guard.py`](../.github/scripts/test_infra_guard.py) tests the guard itself against
 configurations built to slip past it.
 
-### Managed here (39 objects)
+### Managed here (41 objects)
 
-This is the maximum declared count. Fresh bootstrap creates 37 objects before the first Worker release,
-then adds its exact mail rule (38). An adopted account retains the frozen legacy backup app (39).
+This is the maximum declared count. Fresh bootstrap creates 39 objects before the first Worker release,
+then adds its exact mail rule (40). An adopted account retains the frozen legacy backup app (41).
 Objects being retired ([Retiring an app](#retiring-an-app)) are not counted: [`retired.tf`](retired.tf) moves them
 out of the managed addresses so that the next apply deletes them.
 Older private inputs can temporarily keep the existing external IdP references; bootstrap captures and

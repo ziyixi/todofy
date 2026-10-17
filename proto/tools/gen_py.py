@@ -58,6 +58,7 @@ PYTHON_PACKAGES = {
     "website.sync.v1": True,
     "mailhero.webhook.v1": True,
     "todofy.ui.v1": True,
+    "tasks.ui.v1": True,
     "platform.runtime.v1": True,
     "fleet.telemetry.v1": True,
     "common.errors.v1": True,

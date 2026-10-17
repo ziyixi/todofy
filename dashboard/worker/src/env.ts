@@ -25,6 +25,8 @@ export interface Env {
   readonly RECALL: Service<WatchOpsEntrypoint>;
   /** Brief's Ops entrypoint: status and the guard for embedding, learning and source probes. */
   readonly BRIEF: Service<WatchOpsEntrypoint>;
+  /** Native Tasks health; no user content and no operational guard. */
+  readonly TASKS: Service<WatchOpsEntrypoint>;
   readonly HOME: DurableObjectNamespace<HomeState>;
   readonly ASSETS: Fetcher;
 

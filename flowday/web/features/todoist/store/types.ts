@@ -6,7 +6,8 @@ export interface TodoistState {
   isLoading: boolean;
   isSyncing: boolean;
   lastSyncAt: string | null;
-  /** A Todoist key is stored: the automatic sync runs only then. */
+  taskSource: "todoist" | "tasks";
+  /** Whether a Todoist key is stored; native Tasks uses the service binding instead. */
   hasApiKey: boolean;
   /** Earliest time (epoch ms) the server accepts another automatic sync; 0 = now. */
   nextAutoSyncAt: number;

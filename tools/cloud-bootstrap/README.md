@@ -45,7 +45,7 @@ bootstrap 不启用 R2 计费或改收信子域 DNS；这些是主手册中的�
 | `worker_secrets` | 示例里的外部 token 必填；自动生成其余应用 key | 可省略未掌握的既有 map，既有 Worker secrets 保留 |
 | `github_secrets` | 可选，提供已有标量 key 来复用 | 只填自己已有明文的 key；不要求导出无法读取的生产 secret |
 | `vps` | 示例启动一个明确的空 mock Newsletter | 可以完整复制已有 VPS 私有 JSON；原环境、共享 key 和路径保留 |
-| `adopt_ids` | 不需要 | 固定 HCL address → 已有公开 ID；允许地址见 `inventory.py` |
+| `adopt_ids` | 不需要 | 固定 HCL address → 已有公开 ID；允许地址见 `bootstrap_inventory.py` |
 
 `prepare` 自动生成应用加密/CSRF/HMAC/共享认证 key，并把同一值用于相关消费者。Mail Hero webhook token、Newsletter 向 Todofy 报告的账号密码保存在私有 `integration_credentials`，对应 SHA256 写入 Todofy 配置。需要在各应用的首次接入设置中使用这些值时，只从本机私有文件读取。
 
@@ -129,3 +129,18 @@ FlowDay 的 `include` 有已确认的 provider 导入缺陷，因此由精确的
 检查输出 `state`、`expect`、`plan_key`。敏感变更经 `infra-review` 审核后，只应用该 SHA 的原始加密计划； apply 前再次比较实际变化的 HMAC。正常邮件写入造成的无变更 D1 大小差异不影响审核。根域邮件 DNS、其他 tunnel、其他账号资源不进入修复范围。
 
 出现权限错误时，在正规 Cloudflare/GitHub 登录页补足对应权限后重新运行原命令，不要把 token 发到聊天，也不要继续尝试绕过。输出只含固定错误码、缺失名称、状态和公开 PR URL；它不证明新账户的真实邮件、Codex 登录或端到端业务已验收。
+
+
+## 向现有账户新增应用
+
+`extend` 复用既有加密 state，只允许显式列出的新资源被创建。私有输入沿用 `adopt` 的值，增加
+`create_addresses`，例如 Tasks 的两个地址：
+
+```json
+["cloudflare_d1_database.app[\"tasks\"]", "cloudflare_zero_trust_access_application.owner[\"tasks\"]"]
+```
+
+先运行 `bootstrap.py plan --mode extend --private-file <文件>`，核对 `creates` 只有预期地址，再以相同输入
+运行 `cloud --mode extend`。已有资源的更新、删除、替换仍被拒绝；没有原 state 也会停止。不会生成或读取
+VPS 的 connector 材料，不修改其他应用的秘密。新应用的 Worker 继续保持 CI check-only，直到记录了真实
+数据库和 Access 身份，并完成自己的发布准备。

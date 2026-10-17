@@ -18,6 +18,7 @@ WORKERS = {
     "dashboard": ["dashboard/wrangler.toml"],
     "flowday": ["flowday/wrangler.toml"],
     "links": ["links/wrangler.toml"],
+    "tasks": ["tasks/wrangler.toml"],
     "watch": ["watch/wrangler.toml"],
     "fleet": ["fleet/wrangler.toml"],
     "mailsort": ["mailsort/wrangler.toml"],

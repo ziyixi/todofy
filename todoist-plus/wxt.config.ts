@@ -11,6 +11,7 @@ const date = new Date(
 const version = `${date.getUTCFullYear()}.${(date.getUTCMonth() + 1) * 100 + date.getUTCDate()}.${date.getUTCHours() * 60 + date.getUTCMinutes()}.${parseInt(sha.slice(0, 4), 16)}`;
 export default defineConfig({
   modules: ["@wxt-dev/module-react"],
+  vite: () => ({ resolve: { dedupe: ["react", "react-dom"] } }),
   manifest: {
     name: "Todoist Plus",
     version,

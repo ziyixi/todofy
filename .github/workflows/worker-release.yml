@@ -151,6 +151,14 @@ jobs:
           dashboard-access-owner-aliases: ${{ secrets.DASHBOARD_ACCESS_OWNER_ALIASES }}
           links-csrf-signing-key: ${{ secrets.LINKS_CSRF_SIGNING_KEY }}
           links-worker-secrets: ${{ secrets.LINKS_WORKER_SECRETS }}
+      - name: Release tasks
+        id: tasks
+        if: inputs.app == 'tasks' && steps.preflight.outputs.required == 'true'
+        uses: ./.github/actions/release-tasks
+        with:
+          required: ${{ steps.preflight.outputs.required }}
+          cf-api-token: ${{ secrets.CF_API_TOKEN }}
+          tasks-worker-secrets: ${{ secrets.TASKS_WORKER_SECRETS }}
       - name: Release watch
         id: watch
         if: inputs.app == 'watch' && steps.preflight.outputs.required == 'true'

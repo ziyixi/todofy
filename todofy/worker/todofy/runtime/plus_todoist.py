@@ -4,8 +4,8 @@ import json
 from typing import Any
 from urllib.parse import urlencode
 
-from todofy.core import plan, plus
-from todofy.runtime import plus_cache
+from todofy.core import native_task_view, plan, plus
+from todofy.runtime import native_plus, native_tasks, plus_cache
 from todofy.runtime.config import flag, integer, var
 from todofy.runtime.interop import fetch_with_timeout, now_s
 
@@ -29,6 +29,22 @@ class PlusError(Exception):
         self.reason = reason
         self.status = status  # Todoist's HTTP status when it answered
         super().__init__(reason)
+
+
+def provider(core: Any) -> str:
+    return "tasks" if native_tasks.enabled(core.env) else "todoist"
+
+
+async def _native(awaitable: Any) -> Any:
+    try:
+        return await awaitable
+    except native_tasks.NativeTasksError as error:
+        reason = (
+            "UNAVAILABLE"
+            if error.status >= 500
+            else {404: "NOT_FOUND", 409: "ETAG_MISMATCH"}.get(error.status, "ACTION_NOT_ALLOWED")
+        )
+        raise PlusError(reason, error.status) from error
 
 
 async def call(
@@ -87,6 +103,8 @@ async def metadata(core: Any, *, fresh: bool = False) -> dict[str, Any]:
     was kept under another list of replaced queries. Under PLUS_METADATA=full, a full Sync every call, as before
     the cache.
     """
+    if native_tasks.enabled(core.env):
+        return native_task_view.metadata(await _native(native_tasks.catalog(core.env)))
     if not plus_cache.enabled(core.env):
         answer = await call(core, "/api/v1/sync", {"sync_token": "*", "resource_types": RESOURCES})
         return plus.metadata_view(_merged(None, answer))
@@ -143,6 +161,16 @@ SYNC_COMMANDS = 100
 
 async def tasks(core: Any, limit: int = 200, cursor: str = "", **filters: str) -> tuple[list[dict[str, Any]], str]:
     """One page of active tasks; ``filters`` are Todoist's own (project_id, ids)."""
+    if native_tasks.enabled(core.env):
+        return await _native(
+            native_tasks.page(
+                core.env,
+                cursor=cursor,
+                limit=limit,
+                project_id=filters.get("project_id", ""),
+                ids=filters.get("ids", "").split(",") if filters.get("ids") else [],
+            )
+        )
     query: dict[str, Any] = {**filters, "limit": limit}
     if cursor:
         query["cursor"] = cursor
@@ -159,7 +187,7 @@ async def project_tasks(core: Any, project_id: str) -> list[dict[str, Any]]:
     partial read cannot say which tasks have sub-tasks."""
     result: list[dict[str, Any]] = []
     cursor = ""
-    for _ in range(PROJECT_PAGES):
+    for _ in range(PROJECT_PAGES * (2 if native_tasks.enabled(core.env) else 1)):
         page, cursor = await tasks(core, cursor=cursor, project_id=project_id)
         result.extend(page)
         if not cursor:
@@ -171,6 +199,8 @@ async def active_ids(core: Any, ids: list[str]) -> set[str]:
     """Which of at most 200 task IDs are still active: one read of 200, at most PROJECT_PAGES if Todoist pages it."""
     if not ids:
         return set()
+    if native_tasks.enabled(core.env):
+        return set(await active(core, ids))
     found: set[str] = set()
     cursor = ""
     for _ in range(PROJECT_PAGES):
@@ -183,6 +213,8 @@ async def active_ids(core: Any, ids: list[str]) -> set[str]:
 
 async def projects(core: Any) -> list[dict[str, Any]]:
     """The account's projects, one page of at most 200."""
+    if native_tasks.enabled(core.env):
+        return native_task_view.projects(await _native(native_tasks.catalog(core.env)))
     value = await call(core, "/api/v1/projects?" + urlencode({"limit": 200}))
     result = value.get("results")
     if not isinstance(result, list):
@@ -191,12 +223,22 @@ async def projects(core: Any) -> list[dict[str, Any]]:
 
 
 async def task(core: Any, task_id: str) -> dict[str, Any]:
+    if native_tasks.enabled(core.env):
+        return await _native(native_tasks.task(core.env, task_id))
     return await call(core, "/api/v1/tasks/" + task_id)
 
 
 async def active(core: Any, task_ids: list[str]) -> dict[str, dict[str, Any]]:
     """The tasks among ``task_ids`` (at most ACTIVE_READ) that Todoist lists as active, by ID, in one read. An
     incomplete answer raises: a task missing from it would look closed."""
+    if native_tasks.enabled(core.env):
+        result: dict[str, dict[str, Any]] = {}
+        for start in range(0, len(task_ids), 100):
+            page, following = await _native(native_tasks.page(core.env, ids=task_ids[start : start + 100]))
+            if following:
+                raise PlusError("UNAVAILABLE")
+            result.update({item["id"]: item for item in page})
+        return result
     value = await call(core, "/api/v1/tasks?" + urlencode({"ids": ",".join(task_ids), "limit": len(task_ids)}))
     result = value.get("results")
     if not isinstance(result, list) or value.get("next_cursor"):
@@ -211,6 +253,14 @@ async def closed_as(core: Any, task_id: str) -> str | None:
     task in an archived project or after the plan's log retention, or a reopening). Each event names its task, so
     the answer is filtered here too. An account whose plan has no activity log gets a 403, which raises without
     blocking other calls."""
+    if native_tasks.enabled(core.env):
+        try:
+            current = await task(core, task_id)
+        except PlusError as error:
+            if error.reason == "NOT_FOUND":
+                return plan.DELETED
+            raise
+        return plan.COMPLETED if current.get("checked") else None
     query = {
         "object_type": "item",
         "object_id": task_id,
@@ -238,6 +288,8 @@ async def closed_as(core: Any, task_id: str) -> str | None:
 async def commands(core: Any, commands: list[dict[str, Any]], *, gone_ok: bool = False) -> dict[str, Any]:
     """One Sync request; every command must answer "ok". ``gone_ok`` (deletions only) also takes Todoist's
     ITEM_NOT_FOUND, which its documentation calls not retryable: the task is gone, whoever deleted it."""
+    if native_tasks.enabled(core.env):
+        return await _native(native_plus.commands(core, commands, gone_ok=gone_ok))
     response = await call(core, "/api/v1/sync", {"commands": commands, "resource_types": []})
     status = response.get("sync_status", {})
 

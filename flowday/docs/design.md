@@ -546,3 +546,33 @@ under Python 3.12, including the SQLite expression-limit test. Existing estimate
 overrides even when `0004` ran before the insert; verification still compares every original column exactly and
 checks the added state explicitly. Changed hierarchy, deadline, estimate ownership, timer version or timer command
 rows cause verification and reset without `--confirm-database flowday` to stop.
+
+
+## Native Tasks source
+
+An optional `TASKS` service binding to Tasks' named `TasksApi` entrypoint, with `props.consumer = "flowday"`,
+selects native Tasks. Without it, the existing Todoist path is unchanged. This implementation does not add that
+binding to production; source cutover follows the complete Tasks import and identity checks.
+
+The native adapter uses generated `TasksUiService` GET requests, at most 100 changes per invocation, and a
+catalog refresh only on first use or a catalog-change notification. The service entrypoint separately denies
+writes. `tasks_sync_cursor`, `tasks_sync_catalog` and `tasks_sync_pending` are separate from Todoist's cursor;
+existing atomic throttling and failure backoff are shared. A page and its cursor commit in one D1 batch.
+An empty page updates only the claim and last successful check time. Responses are bounded to 2 MiB. The mirror reads the bounded description preview; full task text stays in Tasks.
+
+Imported IDs keep their existing FlowDay primary keys and legacy `todoist_id`/`todoist_project_id` columns;
+these columns remain compatibility storage, not evidence that the external API is still used. Queues, estimates,
+timers and past time entries keep their references. Completed, deleted or archived source tasks are concealed
+by the existing sync-deletion marker; they are not physically deleted. Reopening or restoring a task makes it
+visible again. Explicit FlowDay estimates remain authoritative. Source durations that are absent retain the
+previous estimate, matching the existing source adapter.
+
+Tasks emits task changes for project archive/restore and label updates. That allows this mirror to update only
+changed rows, without a second snapshot state machine. Native source failures report `TASKS_UNAVAILABLE` and
+never trigger a Todoist fallback. Settings returns `task_source` so native sync works without asking for an API
+key; an older response without that field remains Todoist. A native deployment rejects writes to the obsolete
+Todoist-key setting, while keeping ordinary capacity settings editable.
+
+The synthetic native runtime tests cover ID preservation, unchanged-page write counts, paging, source failures,
+archive/restore and existing queue/timer/estimate retention. The dedicated CPU test measures the real owner
+handler with a 100-task synthetic page; it does not claim every possible 2 MiB payload has the same CPU cost.

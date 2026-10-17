@@ -37,4 +37,7 @@ message Settings {
   int32 day_capacity_minutes = 4 [(google.api.field_behavior) = OPTIONAL];
   // When the last sync with Todoist read and applied an answer; unset before the first one.
   google.protobuf.Timestamp last_sync_time = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Current read-only task source: tasks via a service binding, or todoist via the stored key.
+  // Older replies omit this field; clients treat that as todoist.
+  string task_source = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
 }

@@ -1,0 +1,15 @@
+# Tasks
+
+Read the root rules, [README](README.md), [design](docs/design.md) and [verification](docs/verification.md).
+
+- The web app uses the generated Tasks UI client. The Worker owns D1, validation and recurrence advancement.
+- Tasks owns task content; Todofy owns planning/mail and FlowDay owns queues/timing. Share code only through
+  `packages/` and contracts through root `proto/`. Never import another app's implementation.
+- The installed PWA uses online task data. Do not add offline writes or private-data caching without a real need.
+- Keep native source activation separate from deployment. Import coverage and planning/FlowDay identities
+  must be checked before switching writers. Never fall back to Todoist after a native operation fails.
+- Preserve imported IDs, archived state, history and source completion counts. API access and a green build
+  do not prove complete migration. Keep private snapshots outside the public repository.
+- Use synthetic tasks for tests/screenshots. The local preview has ephemeral D1; do not use `--remote` for development.
+- Follow the existing independent Actions release. Branch checks do not deploy. Record actual evidence and
+  remaining cutover work in HANDOFF.

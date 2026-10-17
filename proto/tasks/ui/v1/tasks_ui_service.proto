@@ -1,0 +1,608 @@
+// (-- api-linter: core::0142::time-field-type=disabled
+//     aip.dev/not-precedent: date fields are calendar-day text in the shared wire profile. --)
+// (-- api-linter: core::0155::request-id-format=disabled
+//     aip.dev/not-precedent: existing planning commands use UUIDv5; runtime accepts UUIDv4 and UUIDv5,
+//     preserving frozen retry identities instead of replacing them with random IDs. --)
+// Native Tasks owner API. Access is verified before reading a body; mutations also require same-origin
+// Origin and the signed tasks_csrf token. The separate TasksEntrypoint service binding uses the same
+// protobuf messages without exposing a machine-auth route. Bodies are bounded to 64 KiB.
+// Every mutation requires a UUIDv4 or UUIDv5 request_id. Exact replays return the original response; reusing it for
+// different input is rejected. Updates require the current etag and an explicit update_mask.
+syntax = "proto3";
+
+package tasks.ui.v1;
+
+import "google/api/annotations.proto";
+import "google/api/client.proto";
+import "google/api/field_behavior.proto";
+import "google/api/resource.proto";
+import "google/protobuf/empty.proto";
+import "google/protobuf/field_mask.proto";
+import "google/protobuf/timestamp.proto";
+import "tasks/ui/v1/task.proto";
+
+option java_multiple_files = true;
+option java_outer_classname = "TasksUiServiceProto";
+option java_package = "science.ziyixi.tasks.ui.v1";
+
+// The owner's tasks and task organization.
+// (-- api-linter: core::0121::resource-must-support-get=disabled
+//     aip.dev/not-precedent: the four small catalog resource kinds are read together by GetCatalog. --)
+// (-- api-linter: core::0121::resource-must-support-list=disabled
+//     aip.dev/not-precedent: GetCatalog is one bounded read of the personal catalog, rather than four lists. --)
+service TasksUiService {
+  option (google.api.default_host) = "tasks.ziyixi.science";
+  // Catalog metadata, bounded to 500 entries per kind; larger stores fail explicitly.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc GetCatalog(GetCatalogRequest) returns (Catalog) {
+    option (google.api.http) = {get: "/api/tasks/v1/{name=catalog}"};
+    option (google.api.method_signature) = "name";
+  }
+  // A keyset-paginated task view, at most 100 rows per page.
+  rpc ListTasks(ListTasksRequest) returns (ListTasksResponse) {
+    option (google.api.http) = {get: "/api/tasks/v1/tasks"};
+  }
+  // A single task, including direct child counts.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc GetTask(GetTaskRequest) returns (Task) {
+    option (google.api.http) = {get: "/api/tasks/v1/{name=tasks/*}"};
+    option (google.api.method_signature) = "name";
+  }
+  // Create a task.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc CreateTask(CreateTaskRequest) returns (Task) {
+    option (google.api.http) = {
+      post: "/api/tasks/v1/tasks"
+      body: "task"
+    };
+    option (google.api.method_signature) = "task,task_id";
+  }
+  // Update a task.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc UpdateTask(UpdateTaskRequest) returns (Task) {
+    option (google.api.http) = {
+      patch: "/api/tasks/v1/{task.name=tasks/*}"
+      body: "task"
+    };
+    option (google.api.method_signature) = "task,update_mask";
+  }
+  // Delete a task.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc DeleteTask(DeleteTaskRequest) returns (google.protobuf.Empty) {
+    option (google.api.http) = {delete: "/api/tasks/v1/{name=tasks/*}"};
+    option (google.api.method_signature) = "name";
+  }
+  // Create a project.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc CreateProject(CreateProjectRequest) returns (Project) {
+    option (google.api.http) = {
+      post: "/api/tasks/v1/projects"
+      body: "project"
+    };
+    option (google.api.method_signature) = "project,project_id";
+  }
+  // Update a project.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc UpdateProject(UpdateProjectRequest) returns (Project) {
+    option (google.api.http) = {
+      patch: "/api/tasks/v1/{project.name=projects/*}"
+      body: "project"
+    };
+    option (google.api.method_signature) = "project,update_mask";
+  }
+  // Delete a project.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc DeleteProject(DeleteProjectRequest) returns (google.protobuf.Empty) {
+    option (google.api.http) = {delete: "/api/tasks/v1/{name=projects/*}"};
+    option (google.api.method_signature) = "name";
+  }
+  // Create a section.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc CreateSection(CreateSectionRequest) returns (Section) {
+    option (google.api.http) = {
+      post: "/api/tasks/v1/sections"
+      body: "section"
+    };
+    option (google.api.method_signature) = "section,section_id";
+  }
+  // Update a section.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc UpdateSection(UpdateSectionRequest) returns (Section) {
+    option (google.api.http) = {
+      patch: "/api/tasks/v1/{section.name=sections/*}"
+      body: "section"
+    };
+    option (google.api.method_signature) = "section,update_mask";
+  }
+  // Delete a section.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc DeleteSection(DeleteSectionRequest) returns (google.protobuf.Empty) {
+    option (google.api.http) = {delete: "/api/tasks/v1/{name=sections/*}"};
+    option (google.api.method_signature) = "name";
+  }
+  // Create a label.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc CreateLabel(CreateLabelRequest) returns (Label) {
+    option (google.api.http) = {
+      post: "/api/tasks/v1/labels"
+      body: "label"
+    };
+    option (google.api.method_signature) = "label,label_id";
+  }
+  // Update a label.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc UpdateLabel(UpdateLabelRequest) returns (Label) {
+    option (google.api.http) = {
+      patch: "/api/tasks/v1/{label.name=labels/*}"
+      body: "label"
+    };
+    option (google.api.method_signature) = "label,update_mask";
+  }
+  // Delete a label.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc DeleteLabel(DeleteLabelRequest) returns (google.protobuf.Empty) {
+    option (google.api.http) = {delete: "/api/tasks/v1/{name=labels/*}"};
+    option (google.api.method_signature) = "name";
+  }
+  // Create a savedfilter.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc CreateSavedFilter(CreateSavedFilterRequest) returns (SavedFilter) {
+    option (google.api.http) = {
+      post: "/api/tasks/v1/filters"
+      body: "saved_filter"
+    };
+    option (google.api.method_signature) = "saved_filter,saved_filter_id";
+  }
+  // Update a savedfilter.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc UpdateSavedFilter(UpdateSavedFilterRequest) returns (SavedFilter) {
+    option (google.api.http) = {
+      patch: "/api/tasks/v1/{saved_filter.name=filters/*}"
+      body: "saved_filter"
+    };
+    option (google.api.method_signature) = "saved_filter,update_mask";
+  }
+  // Delete a savedfilter.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc DeleteSavedFilter(DeleteSavedFilterRequest) returns (google.protobuf.Empty) {
+    option (google.api.http) = {delete: "/api/tasks/v1/{name=filters/*}"};
+    option (google.api.method_signature) = "name";
+  }
+  // Completes a task and its ordinary descendants, or advances a recurring task once.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc CompleteTask(CompleteTaskRequest) returns (Task) {
+    option (google.api.http) = {
+      post: "/api/tasks/v1/{name=tasks/*}:complete"
+      body: "*"
+    };
+  }
+  // Reopens the task; historical completion records remain available.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc ReopenTask(ReopenTaskRequest) returns (Task) {
+    option (google.api.http) = {
+      post: "/api/tasks/v1/{name=tasks/*}:reopen"
+      body: "*"
+    };
+  }
+  // A bounded incremental feed. Catalog changes tell readers to refresh GetCatalog.
+  rpc ListChanges(ListChangesRequest) returns (ListChangesResponse) {
+    option (google.api.http) = {get: "/api/tasks/v1/changes"};
+  }
+  // Completion occurrences, independent of a recurring task's current state.
+  rpc ListCompletions(ListCompletionsRequest) returns (ListCompletionsResponse) {
+    option (google.api.http) = {get: "/api/tasks/v1/completions"};
+  }
+  // Parses a date or recurrence without writing anything.
+  rpc PreviewDate(PreviewDateRequest) returns (PreviewDateResponse) {
+    option (google.api.http) = {
+      post: "/api/tasks/v1/dates:previewDate"
+      body: "*"
+    };
+  }
+}
+
+// Catalog request.
+message GetCatalogRequest {
+  // Always catalog.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "tasks.ziyixi.science/Catalog"
+  ];
+}
+// All project organization, with a hard bound rather than a silently truncated result.
+// (-- api-linter: core::0122::embedded-resource=disabled
+//     aip.dev/not-precedent: this owner-only bounded catalog is the single read surface for its four small resource lists. --)
+message Catalog {
+  option (google.api.resource) = {
+    type: "tasks.ziyixi.science/Catalog"
+    pattern: "catalog"
+    singular: "catalog"
+    plural: "catalogs"
+  };
+  // Always catalog.
+  string name = 6 [(google.api.field_behavior) = IDENTIFIER];
+  // Projects, including archived projects.
+  repeated Project projects = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Sections.
+  repeated Section sections = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Labels.
+  repeated Label labels = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Saved filters.
+  repeated SavedFilter filters = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The account's calendar zone.
+  string time_zone = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+// (-- api-linter: core::0132::request-unknown-fields=disabled
+//     aip.dev/not-precedent: these indexed personal task views use explicit typed selectors, not an unbounded query language. --)
+// List a view. Inbox/project default to root tasks; parent_id selects direct children.
+message ListTasksRequest {
+  // inbox, today, upcoming, project, label, filter, search, all or completed.
+  // all includes active tasks across projects; archived tasks remain readable in project and completed views.
+  string view = 1 [(google.api.field_behavior) = OPTIONAL];
+  // Project ID for project view.
+  string project_id = 2 [(google.api.field_behavior) = OPTIONAL];
+  // Direct children of this task, taking precedence over view.
+  string parent_id = 3 [(google.api.field_behavior) = OPTIONAL];
+  // Search text or an explicit filter expression.
+  string query = 4 [(google.api.field_behavior) = OPTIONAL];
+  // Label ID for label view.
+  string label_id = 5 [(google.api.field_behavior) = OPTIONAL];
+  // Saved filter ID for filter view.
+  string filter_id = 6 [(google.api.field_behavior) = OPTIONAL];
+  // Default 50, maximum 100.
+  int32 page_size = 7 [(google.api.field_behavior) = OPTIONAL];
+  // Previous page token with identical query parameters.
+  string page_token = 8 [(google.api.field_behavior) = OPTIONAL];
+  // Local reference date YYYY-MM-DD; absent uses the account zone's current day.
+  string date = 9 [(google.api.field_behavior) = OPTIONAL];
+  // sort_order (default), title, priority or due_date, optionally followed by desc.
+  string order_by = 10 [(google.api.field_behavior) = OPTIONAL];
+  // Include completed tasks in ordinary views; child queries already include them.
+  bool include_completed = 11 [(google.api.field_behavior) = OPTIONAL];
+  // Include full descriptions; caps page size at 20. Default lists return description_preview only.
+  bool include_description = 12 [(google.api.field_behavior) = OPTIONAL];
+  // At most 100 exact task IDs, for bounded internal consumers.
+  repeated string task_ids = 13 [(google.api.field_behavior) = OPTIONAL];
+}
+// One task page, in sort_order then ID order.
+message ListTasksResponse {
+  // Tasks in this page.
+  repeated Task tasks = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Empty at the end.
+  string next_page_token = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+// Get a task.
+message GetTaskRequest {
+  // tasks/{id}.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "tasks.ziyixi.science/Task"
+  ];
+}
+
+// Input to CreateTask.
+message CreateTaskRequest {
+  // Resource values.
+  Task task = 1 [(google.api.field_behavior) = REQUIRED];
+  // Optional imported ID; absent generates a UUID.
+  string task_id = 2 [(google.api.field_behavior) = OPTIONAL];
+  // One UUIDv4 or UUIDv5 for this user action.
+  string request_id = 3 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// Input to UpdateTask.
+message UpdateTaskRequest {
+  // Resource values.
+  Task task = 1 [(google.api.field_behavior) = REQUIRED];
+  // Explicit fields to change, including fields to clear.
+  google.protobuf.FieldMask update_mask = 2 [(google.api.field_behavior) = OPTIONAL];
+  // One UUIDv4 or UUIDv5 for this user action.
+  string request_id = 3 [(google.api.field_behavior) = OPTIONAL];
+  // Current resource etag, separate from the fields being updated.
+  // (-- api-linter: core::0134::request-unknown-fields=disabled
+  //     aip.dev/not-precedent: this concurrency token stays outside the masked resource body. --)
+  // (-- api-linter: core::0154::no-duplicate-etag=disabled
+  //     aip.dev/not-precedent: the shared HTTP client masks resource bodies; this token must survive an update_mask. --)
+  string etag = 4 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// Input to DeleteTask.
+message DeleteTaskRequest {
+  // Resource name.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "tasks.ziyixi.science/Task"
+  ];
+  // Current etag.
+  string etag = 2 [(google.api.field_behavior) = OPTIONAL];
+  // One UUIDv4 or UUIDv5 for this user action.
+  string request_id = 3 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// Input to CreateProject.
+message CreateProjectRequest {
+  // Resource values.
+  Project project = 1 [(google.api.field_behavior) = REQUIRED];
+  // Optional imported ID; absent generates a UUID.
+  string project_id = 2 [(google.api.field_behavior) = OPTIONAL];
+  // One UUIDv4 or UUIDv5 for this user action.
+  string request_id = 3 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// Input to UpdateProject.
+message UpdateProjectRequest {
+  // Resource values.
+  Project project = 1 [(google.api.field_behavior) = REQUIRED];
+  // Explicit fields to change, including fields to clear.
+  google.protobuf.FieldMask update_mask = 2 [(google.api.field_behavior) = OPTIONAL];
+  // One UUIDv4 or UUIDv5 for this user action.
+  string request_id = 3 [(google.api.field_behavior) = OPTIONAL];
+  // Current resource etag, separate from the fields being updated.
+  // (-- api-linter: core::0134::request-unknown-fields=disabled
+  //     aip.dev/not-precedent: this concurrency token stays outside the masked resource body. --)
+  // (-- api-linter: core::0154::no-duplicate-etag=disabled
+  //     aip.dev/not-precedent: the shared HTTP client masks resource bodies; this token must survive an update_mask. --)
+  string etag = 4 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// Input to DeleteProject.
+message DeleteProjectRequest {
+  // Resource name.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "tasks.ziyixi.science/Project"
+  ];
+  // Current etag.
+  string etag = 2 [(google.api.field_behavior) = OPTIONAL];
+  // One UUIDv4 or UUIDv5 for this user action.
+  string request_id = 3 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// Input to CreateSection.
+message CreateSectionRequest {
+  // Resource values.
+  Section section = 1 [(google.api.field_behavior) = REQUIRED];
+  // Optional imported ID; absent generates a UUID.
+  string section_id = 2 [(google.api.field_behavior) = OPTIONAL];
+  // One UUIDv4 or UUIDv5 for this user action.
+  string request_id = 3 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// Input to UpdateSection.
+message UpdateSectionRequest {
+  // Resource values.
+  Section section = 1 [(google.api.field_behavior) = REQUIRED];
+  // Explicit fields to change, including fields to clear.
+  google.protobuf.FieldMask update_mask = 2 [(google.api.field_behavior) = OPTIONAL];
+  // One UUIDv4 or UUIDv5 for this user action.
+  string request_id = 3 [(google.api.field_behavior) = OPTIONAL];
+  // Current resource etag, separate from the fields being updated.
+  // (-- api-linter: core::0134::request-unknown-fields=disabled
+  //     aip.dev/not-precedent: this concurrency token stays outside the masked resource body. --)
+  // (-- api-linter: core::0154::no-duplicate-etag=disabled
+  //     aip.dev/not-precedent: the shared HTTP client masks resource bodies; this token must survive an update_mask. --)
+  string etag = 4 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// Input to DeleteSection.
+message DeleteSectionRequest {
+  // Resource name.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "tasks.ziyixi.science/Section"
+  ];
+  // Current etag.
+  string etag = 2 [(google.api.field_behavior) = OPTIONAL];
+  // One UUIDv4 or UUIDv5 for this user action.
+  string request_id = 3 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// Input to CreateLabel.
+message CreateLabelRequest {
+  // Resource values.
+  Label label = 1 [(google.api.field_behavior) = REQUIRED];
+  // Optional imported ID; absent generates a UUID.
+  string label_id = 2 [(google.api.field_behavior) = OPTIONAL];
+  // One UUIDv4 or UUIDv5 for this user action.
+  string request_id = 3 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// Input to UpdateLabel.
+message UpdateLabelRequest {
+  // Resource values.
+  Label label = 1 [(google.api.field_behavior) = REQUIRED];
+  // Explicit fields to change, including fields to clear.
+  google.protobuf.FieldMask update_mask = 2 [(google.api.field_behavior) = OPTIONAL];
+  // One UUIDv4 or UUIDv5 for this user action.
+  string request_id = 3 [(google.api.field_behavior) = OPTIONAL];
+  // Current resource etag, separate from the fields being updated.
+  // (-- api-linter: core::0134::request-unknown-fields=disabled
+  //     aip.dev/not-precedent: this concurrency token stays outside the masked resource body. --)
+  // (-- api-linter: core::0154::no-duplicate-etag=disabled
+  //     aip.dev/not-precedent: the shared HTTP client masks resource bodies; this token must survive an update_mask. --)
+  string etag = 4 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// Input to DeleteLabel.
+message DeleteLabelRequest {
+  // Resource name.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "tasks.ziyixi.science/Label"
+  ];
+  // Current etag.
+  string etag = 2 [(google.api.field_behavior) = OPTIONAL];
+  // One UUIDv4 or UUIDv5 for this user action.
+  string request_id = 3 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// Input to CreateSavedFilter.
+message CreateSavedFilterRequest {
+  // Resource values.
+  SavedFilter saved_filter = 1 [(google.api.field_behavior) = REQUIRED];
+  // Optional imported ID; absent generates a UUID.
+  string saved_filter_id = 2 [(google.api.field_behavior) = OPTIONAL];
+  // One UUIDv4 or UUIDv5 for this user action.
+  string request_id = 3 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// Input to UpdateSavedFilter.
+message UpdateSavedFilterRequest {
+  // Resource values.
+  SavedFilter saved_filter = 1 [(google.api.field_behavior) = REQUIRED];
+  // Explicit fields to change, including fields to clear.
+  google.protobuf.FieldMask update_mask = 2 [(google.api.field_behavior) = OPTIONAL];
+  // One UUIDv4 or UUIDv5 for this user action.
+  string request_id = 3 [(google.api.field_behavior) = OPTIONAL];
+  // Current resource etag, separate from the fields being updated.
+  // (-- api-linter: core::0134::request-unknown-fields=disabled
+  //     aip.dev/not-precedent: this concurrency token stays outside the masked resource body. --)
+  // (-- api-linter: core::0154::no-duplicate-etag=disabled
+  //     aip.dev/not-precedent: the shared HTTP client masks resource bodies; this token must survive an update_mask. --)
+  string etag = 4 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// Input to DeleteSavedFilter.
+message DeleteSavedFilterRequest {
+  // Resource name.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "tasks.ziyixi.science/SavedFilter"
+  ];
+  // Current etag.
+  string etag = 2 [(google.api.field_behavior) = OPTIONAL];
+  // One UUIDv4 or UUIDv5 for this user action.
+  string request_id = 3 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// Input to CompleteTask.
+message CompleteTaskRequest {
+  // tasks/{id}.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "tasks.ziyixi.science/Task"
+  ];
+  // Current etag.
+  string etag = 2 [(google.api.field_behavior) = REQUIRED];
+  // Stable identity for this completion occurrence.
+  string request_id = 3 [(google.api.field_behavior) = OPTIONAL];
+}
+// Input to ReopenTask.
+message ReopenTaskRequest {
+  // tasks/{id}.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "tasks.ziyixi.science/Task"
+  ];
+  // Current etag.
+  string etag = 2 [(google.api.field_behavior) = REQUIRED];
+  // Stable identity for this action.
+  string request_id = 3 [(google.api.field_behavior) = OPTIONAL];
+}
+// Read changes after a previously acknowledged cursor; empty starts at the beginning.
+message ListChangesRequest {
+  // Opaque cursor.
+  string page_token = 1 [(google.api.field_behavior) = OPTIONAL];
+  // Default and maximum 100.
+  int32 page_size = 2 [(google.api.field_behavior) = OPTIONAL];
+}
+// One current resource reached by a change, or its tombstone.
+// (-- api-linter: core::0123::resource-annotation=disabled
+//     aip.dev/not-precedent: this is a feed record of another resource, not independently addressable. --)
+message TaskChange {
+  // Monotonic sequence, encoded as decimal text.
+  string cursor = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Resource name.
+  string name = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // True if the resource has been deleted.
+  bool deleted = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Current task, absent for deletion or catalog changes.
+  Task task = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+// (-- api-linter: core::0132::response-unknown-fields=disabled
+//     aip.dev/not-precedent: an incremental cursor remains present when caught up; has_more and catalog_changed tell a mirror what to refresh. --)
+// Incremental page. Persist the cursor only after consuming the whole page.
+message ListChangesResponse {
+  // Up to 100 changes.
+  repeated TaskChange changes = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Position after this page, also when caught up.
+  string next_page_token = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // More pages are currently available.
+  bool has_more = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Refresh catalog when true.
+  bool catalog_changed = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+// Completion history page.
+// (-- api-linter: core::0132::request-unknown-fields=disabled
+//     aip.dev/not-precedent: the optional task_id selects a completion-history index. --)
+message ListCompletionsRequest {
+  // Optional task ID.
+  string task_id = 1 [(google.api.field_behavior) = OPTIONAL];
+  // Default 50, maximum 100.
+  int32 page_size = 2 [(google.api.field_behavior) = OPTIONAL];
+  // Previous page token.
+  string page_token = 3 [(google.api.field_behavior) = OPTIONAL];
+}
+// A completion occurrence. Reopening a task does not erase it.
+message Completion {
+  // Stable completion ID.
+  string id = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Task ID.
+  string task_id = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Title at completion.
+  string title = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Date completed.
+  google.protobuf.Timestamp complete_time = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The occurrence's scheduled local date.
+  string due_date = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Project identity at completion, even if the task later moves.
+  string project_id = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Original task creation timestamp used by existing completion-window reports.
+  google.protobuf.Timestamp task_create_time = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+// History response.
+message ListCompletionsResponse {
+  // Newest first.
+  repeated Completion completions = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Empty at the end.
+  string next_page_token = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+// A date input with an explicit reference day for reproducible previews.
+message PreviewDateRequest {
+  // English date or recurrence, at most 200 characters.
+  string text = 1 [(google.api.field_behavior) = REQUIRED];
+  // Local YYYY-MM-DD; absent uses today's date in time_zone.
+  string reference_date = 2 [(google.api.field_behavior) = OPTIONAL];
+  // IANA zone; absent uses the account zone.
+  string time_zone = 3 [(google.api.field_behavior) = OPTIONAL];
+}
+// Parsed date shown to the owner before saving.
+message PreviewDateResponse {
+  // YYYY-MM-DD.
+  string due_date = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // RFC3339 instant for timed input, otherwise empty.
+  string due_datetime = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // IANA timezone.
+  string due_timezone = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Recurrence text, empty for one-time input.
+  string recurrence = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+}

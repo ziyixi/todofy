@@ -22,12 +22,12 @@ import secrets
 from dataclasses import asdict, dataclass, field
 from datetime import date
 from typing import Any
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit
 
 from todofy.core import gtd as rules
 from todofy.core import ops as ops_rules
 from todofy.core.backoff import DAY, REMINDER_CHECK_INTERVAL, TODOIST_MAX_ATTEMPTS, TODOIST_STEP_BUDGET
-from todofy.core.classify import TaskResult, TaskVerdict
+from todofy.core.classify import HttpOutcome, TaskResult, TaskVerdict
 from todofy.core.gtd import GtdCode, Scope, SnapshotStatus
 from todofy.core.metrics import Step, StepPoint
 from todofy.core.request_id import todoist_request_id
@@ -36,7 +36,7 @@ from todofy.core.sql import plus as plus_sql
 from todofy.core.sql import reminders as reminder_sql
 from todofy.core.todoist_request import TASKS_PATH, build_task_request, parse_task_page
 from todofy.core.vocab import ATTENTION_AGE_SECONDS, ReminderState
-from todofy.runtime import metrics, ops, todoist
+from todofy.runtime import metrics, native_tasks, ops, todoist
 from todofy.runtime.config import flag, integer, source_id, var
 from todofy.runtime.interop import fetch_with_timeout, now_ms
 
@@ -259,16 +259,24 @@ async def _task_page(env: Any, coordinator: Any, state: State, now: int, offset:
     if state.cursor:
         query["cursor"] = state.cursor
     started = now_ms()
-    upstream = await _get(env, coordinator, TASKS_PATH, query, now)
-    outcome = upstream.outcome()
     code = ""
-    if not outcome.ok:
-        code = _failure(outcome.status)
-    else:
+    if native_tasks.enabled(env):
         try:
-            tasks, cursor = parse_task_page(upstream.body)
-        except ValueError:
-            code = GtdCode.MALFORMED_PAGE
+            tasks, cursor = await native_tasks.page(env, cursor=state.cursor, limit=100)
+            outcome = HttpOutcome(status=200)
+        except native_tasks.NativeTasksError as error:
+            outcome = HttpOutcome(status=error.status)
+            code = _failure(error.status)
+    else:
+        upstream = await _get(env, coordinator, TASKS_PATH, query, now)
+        outcome = upstream.outcome()
+        if not outcome.ok:
+            code = _failure(outcome.status)
+        else:
+            try:
+                tasks, cursor = parse_task_page(upstream.body)
+            except ValueError:
+                code = GtdCode.MALFORMED_PAGE
     coordinator.record_step(_point(code, started), now)
     if code:
         retry = now + max(rules.COLLECT_RETRY, int(outcome.retry_after))
@@ -282,7 +290,7 @@ async def _task_page(env: Any, coordinator: Any, state: State, now: int, offset:
         await env.DB.prepare(sql.WRITE_PAGE.sql).bind(state.day, json.dumps(rows, ensure_ascii=False)).run()
     state.pages += 1
     state.skipped += skipped
-    if cursor and state.pages >= rules.MAX_TASK_PAGES:
+    if cursor and state.pages >= rules.MAX_TASK_PAGES * (2 if native_tasks.enabled(env) else 1):
         state.partial = True
     if not cursor or state.partial:
         state.phase, state.cursor = COMPLETED, ""
@@ -304,16 +312,41 @@ async def _completed_page(env: Any, coordinator: Any, state: State, now: int) ->
     if state.cursor:
         query["cursor"] = state.cursor
     started = now_ms()
-    upstream = await _get(env, coordinator, COMPLETED_PATH, query, now)
-    outcome = upstream.outcome()
-    code = "" if outcome.ok else _failure(outcome.status)
     items: list[dict[str, Any]] = []
-    cursor = ""
-    if not code:
+    cursor, code = "", ""
+    if native_tasks.enabled(env):
         try:
-            items, cursor = rules.parse_completed_page(upstream.body)
+            page = await native_tasks.call(env, "ListCompletions", {"page_token": state.cursor, "page_size": 100})
+            older = False
+            for item in page.get("completions", []):
+                completed = rules.parse_instant(item.get("complete_time"))
+                if completed is None:
+                    raise ValueError("completion time missing")
+                if completed < since:
+                    older = True
+                elif completed <= state.started:
+                    items.append(
+                        {
+                            "task_id": item["task_id"],
+                            "project_id": item.get("project_id", ""),
+                            "completed_at": item["complete_time"],
+                            "added_at": item.get("task_create_time"),
+                        }
+                    )
+            cursor = "" if older else page.get("next_page_token", "")
+        except native_tasks.NativeTasksError as error:
+            code = _failure(error.status)
         except ValueError:
             code = GtdCode.MALFORMED_PAGE
+    else:
+        upstream = await _get(env, coordinator, COMPLETED_PATH, query, now)
+        outcome = upstream.outcome()
+        code = "" if outcome.ok else _failure(outcome.status)
+        if not code:
+            try:
+                items, cursor = rules.parse_completed_page(upstream.body)
+            except ValueError:
+                code = GtdCode.MALFORMED_PAGE
     coordinator.record_step(_point(code, started), now)
     if code:
         # Completions are then unknown (completed_source 'none'); the snapshot itself still counts. Even
@@ -327,7 +360,7 @@ async def _completed_page(env: Any, coordinator: Any, state: State, now: int) ->
     review_ids = [task_id for _, task_id in state.watched]
     tally = rules.tally_completed(tally, items, since=since, inbox=inbox, review_ids=review_ids)
     state.completed_pages += 1
-    if cursor and state.completed_pages < rules.MAX_COMPLETED_PAGES:
+    if cursor and state.completed_pages < rules.MAX_COMPLETED_PAGES * (2 if native_tasks.enabled(env) else 1):
         state.tally, state.cursor = tally.dumps(), cursor
         return
     # More than MAX_COMPLETED_PAGES pages of completions: a count cut short would read as fact.
@@ -542,6 +575,21 @@ async def _review_body(env: Any, coordinator: Any, state: State, week: str, now:
         oldest = tuple(str(row["task_id"]) for row in found.results)
     report = coordinator.latest_ops_report()
     digest = ops_rules.digest(report, now)
+    task_url = review_url = None
+    if native_tasks.enabled(env):
+        origin = var(env, "TASKS_PUBLIC_URL").rstrip("/")
+        parsed = urlsplit(origin)
+        if (
+            parsed.scheme != "https"
+            or not parsed.hostname
+            or parsed.username
+            or parsed.password
+            or parsed.path
+            or parsed.query
+            or parsed.fragment
+        ):
+            raise ValueError("TASKS_PUBLIC_URL must be an HTTPS origin in native mode")
+        task_url, review_url = origin + "/?task=", origin + "/?review=1#/plan"
     facts = rules.ReviewFacts(
         week=week,
         snapshot_day=picked["day"],
@@ -556,6 +604,8 @@ async def _review_body(env: Any, coordinator: Any, state: State, week: str, now:
         dashboard_url=None if report is None else report.dashboard_url,
         oldest_inbox=oldest,
         plus_review=any(dict(row)["enabled"] for row in plus.results),
+        task_url=task_url,
+        plus_review_url=review_url,
     )
     return rules.review_body(facts, now)
 

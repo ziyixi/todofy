@@ -139,7 +139,7 @@ CHECK_ONLY: set[str] = set()
 BROWSER_APPS = {"todoist-plus"}  # Published as tested ZIPs; no cloud deployment.
 # Apps whose Ops entrypoint Home binds (dashboard/wrangler.toml): while one of them is CHECK_ONLY its Worker does not
 # exist yet, so Home's deploy (whose binding would name a missing service) waits too.
-HOME_BOUND = {"fleet", "mailsort", "recall", "brief"}
+HOME_BOUND = {"fleet", "mailsort", "recall", "brief", "tasks"}
 KEYS = (
     "todofy_check",
     "mail_hero_check",
@@ -155,6 +155,7 @@ KEYS = (
     "recall_check",
     "brief_check",
     "todoist_plus_check",
+    "tasks_check",
     "contracts",
     "packages",
     "infra",
@@ -176,6 +177,7 @@ KEYS = (
     "recall_extension_publish",
     "brief_deploy",
     "todoist_plus_publish",
+    "tasks_deploy",
 )
 DISPATCH = {
     "both": ("todofy", "mail-hero"),
@@ -194,6 +196,7 @@ DISPATCH = {
     "recall": ("recall",),
     "brief": ("brief",),
     "todoist-plus": ("todoist-plus",),
+    "tasks": ("tasks",),
 }
 # The website's Notion relay Worker deploys on its own (website_relay_deploy).
 RELAY = "website/relay/"
@@ -227,9 +230,11 @@ APP_TEST_DIRECTORIES = (
     "mailsort/worker/test/",
     "recall/worker/test/",
     "brief/worker/test/",
+    "tasks/worker/test/",
+    "tasks/tools/test/",
 )
 # packages/<name>/ -> the apps whose Workers compile it in (a "file:../../packages/<name>" dependency).
-PACKAGE_USERS = {"edge-auth": ("todofy", "mail-hero", "dashboard", "flowday", "links", "watch", "fleet", "mailsort", "recall", "brief")}
+PACKAGE_USERS = {"edge-auth": ("todofy", "mail-hero", "dashboard", "flowday", "links", "watch", "fleet", "mailsort", "recall", "brief", "tasks"), "planning-ui": ("todoist-plus", "tasks"), "task-dates": ("tasks",)}
 # The protobuf IDL (proto/README.md): app -> the languages ("ts", "python") whose generated code and runtime
 # its production bundles compile in; () for a user whose bundles take nothing from it (types only, tests
 # only). test_proto.py derives this map from the apps' manifests and sources.
@@ -248,6 +253,7 @@ PROTO_USERS: dict[str, tuple[str, ...]] = {
     "recall": ("ts",),
     "brief": ("ts",),
     "todoist-plus": ("ts",),
+    "tasks": ("ts",),
 }
 # The hand-written runtimes and generators: a change reaches every user of each language listed. The wire
 # profile's own options (common/wire/v1: value rules, map order, binding arguments) are part of both runtimes:
@@ -270,8 +276,9 @@ PROTO_PACKAGES: dict[str, tuple[str, ...]] = {
     "proto/todofy/report/": ("todofy",),
     # Todofy's owner API (todofy.ui.v1): todofy-core writes every answer with it, the gateway serves it through the
     # shared transcoder and Todofy's UI calls it through the shared client.
-    "proto/todofy/ui/": ("todofy", "todoist-plus"),
-    "proto/flowday/ui/": ("flowday", "todofy", "todoist-plus"),
+    "proto/todofy/ui/": ("todofy", "todoist-plus", "tasks"),
+    "proto/flowday/ui/": ("flowday", "todofy", "todoist-plus", "tasks"),
+    "proto/tasks/ui/": ("tasks", "todofy", "flowday"),
     "proto/links/ui/": ("links",),
     "proto/watch/ui/": ("watch",),
     # mailsort's owner API (mailsort.ui.v2, after v1): its Worker serves it, its UI calls it.
@@ -286,8 +293,8 @@ PROTO_PACKAGES: dict[str, tuple[str, ...]] = {
     # CommonReason: Platform bundles Python error aliases.
     "proto/common/errors/": ("platform",),
     # ops-v1 (contracts/ops-v1): every app's Ops entrypoint and the dashboard that calls them.
-    "proto/ops/": ("mail-hero", "todofy", "dashboard", "watch", "website", "mailsort", "recall", "brief"),
-    "proto/website/sync/": ("mail-hero", "todofy", "dashboard", "watch", "website", "mailsort", "recall", "brief"),
+    "proto/ops/": ("mail-hero", "todofy", "dashboard", "watch", "website", "mailsort", "recall", "brief", "tasks"),
+    "proto/website/sync/": ("mail-hero", "todofy", "dashboard", "watch", "website", "mailsort", "recall", "brief", "tasks"),
     # mail.received.v1 (contracts/mail-received-v1's schema is generated from it): Mail Hero builds every event,
     # todofy-core reads every webhook body.
     "proto/mailhero/webhook/": ("mail-hero", "todofy"),
@@ -370,6 +377,7 @@ CHECK_JOBS = {
     "recall_check": ("Recall checks",),
     "brief_check": ("Brief checks",),
     "todoist_plus_check": ("Todoist Plus checks",),
+    "tasks_check": ("Tasks checks",),
     "contracts": ("Contracts",),
     "packages": ("Shared packages",),
     "infra": ("Infra checks",),

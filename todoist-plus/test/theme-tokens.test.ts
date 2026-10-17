@@ -65,7 +65,10 @@ function unknownNames(file: string, text: string): string[] {
 
 it("names only Todoist tokens that exist, so a typo or a removed token fails here", () => {
   expect(
-    sources("../src/").flatMap(({ file, text }) => unknownNames(file, text)),
+    [
+      ...sources("../src/"),
+      ...sources("../../packages/planning-ui/src/"),
+    ].flatMap(({ file, text }) => unknownNames(file, text)),
   ).toEqual([]);
   // The two names that once kept every theme Kale green would be caught.
   expect(published.has("actionable-primary-idle-tint")).toBe(false);
@@ -88,6 +91,7 @@ it("never imports the token package into the extension", () => {
   for (const { file, text } of [
     ...sources("../src/"),
     ...sources("../entrypoints/"),
+    ...sources("../../packages/planning-ui/src/"),
   ])
     expect(text, file).not.toContain("product-libraries-tokens");
 });

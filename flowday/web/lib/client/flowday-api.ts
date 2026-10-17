@@ -185,13 +185,14 @@ export async function syncTasks(mode: SyncMode): Promise<SyncResult> {
 
 /** The settings as the UI shows them (the key itself is never answered). */
 export interface SettingsView {
+  taskSource: "todoist" | "tasks";
   hasApiKey: boolean;
   lastSyncAt: string | null;
   dayCapacityMins: number;
 }
 
 function settingsFromMessage(settings: Settings): SettingsView {
-  return { hasApiKey: settings.todoistApiKeySet, lastSyncAt: iso(settings.lastSyncTime), dayCapacityMins: settings.dayCapacityMinutes };
+  return { taskSource: settings.taskSource === "tasks" ? "tasks" : "todoist", hasApiKey: settings.todoistApiKeySet, lastSyncAt: iso(settings.lastSyncTime), dayCapacityMins: settings.dayCapacityMinutes };
 }
 
 /** The settings; null when they could not be read. */

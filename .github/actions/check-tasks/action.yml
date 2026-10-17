@@ -1,0 +1,47 @@
+name: check-tasks
+description: Verify the native Tasks API, real D1 persistence and desktop UI.
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+      with:
+        node-version: '26'
+        cache: npm
+        cache-dependency-path: |
+          tasks/worker/package-lock.json
+          tasks/web/package-lock.json
+          packages/planning-ui/package-lock.json
+          packages/task-dates/package-lock.json
+          proto/package-lock.json
+    - name: Install locked dependencies
+      working-directory: .
+      shell: bash -e {0}
+      run: |
+        npm ci --prefix packages/planning-ui --no-audit --no-fund
+        npm ci --prefix packages/task-dates --no-audit --no-fund
+        npm ci --prefix tasks/worker --no-audit --no-fund
+        npm ci --prefix tasks/web --no-audit --no-fund
+    - name: Verify API and persistence
+      working-directory: tasks/worker
+      shell: bash -e {0}
+      run: |
+        npm run lint
+        npm run typecheck
+        npm test
+        npm run test:runtime
+    - name: Verify desktop UI
+      working-directory: tasks/web
+      shell: bash -e {0}
+      run: |
+        npm run lint
+        npm run typecheck
+        npm test
+        npm run build
+        npx --no-install playwright install --with-deps chromium
+        npm run test:browser
+    - name: Verify migration export behavior
+      working-directory: .
+      shell: bash -e {0}
+      run: |
+        node --test tasks/tools/test/*.test.mjs
+        node --test tasks/deploy/test/*.test.mjs

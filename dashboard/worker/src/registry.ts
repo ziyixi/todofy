@@ -261,6 +261,20 @@ const ENTRIES: readonly EntryDef[] = [
     app_only_signals: [],
     order: 11,
   },
+  {
+    id: 'tasks',
+    name: 'Tasks',
+    description: '个人任务与规划',
+    group: 'apps',
+    icon: 'list-checks',
+    accent: 'green',
+    url: 'https://tasks.ziyixi.science/',
+    access: true,
+    status: { type: 'ops_v1', binding: 'TASKS', guard: false },
+    tile_metric: null,
+    app_only_signals: [],
+    order: 30,
+  },
   // END service-catalog entries
   {
     // Not a monorepo app: the self-hosted VPS and home server keep their backups in the account's R2
@@ -296,6 +310,7 @@ const WORKERS: readonly WorkerDef[] = [
   { script: 'mailsort', entry: 'mailsort', role: 'Gmail 分拣与 UI' },
   { script: 'recall', entry: 'recall', role: '浏览记录、搜索与归档' },
   { script: 'brief', entry: 'brief', role: '每日简报、深读与归档' },
+  { script: 'tasks', entry: 'tasks', role: '任务存储与桌面规划' },
   // END service-catalog workers
 ];
 
@@ -315,6 +330,7 @@ const RESOURCES: readonly ResourceDef[] = [
   { id: 'links-db', kind: 'd1', name: 'links 短链接库', entry: 'links', match: RESOURCE_IDENTITIES['links-db'] ?? null },
   // FlowDay's database (flowday/wrangler.toml, managed by infra/ since IaC P4).
   { id: 'flowday-db', kind: 'd1', name: 'flowday 主库', entry: 'flowday', match: RESOURCE_IDENTITIES['flowday-db'] ?? null },
+  { id: 'tasks-db', kind: 'd1', name: 'Tasks 任务库', entry: 'tasks', match: RESOURCE_IDENTITIES['tasks-db'] ?? null },
   // Created by the watch app's first deploy (W2, 2026-10-02); id read from the account's Durable Object namespace list.
   { id: 'watch-state', kind: 'do', name: 'WatchState', entry: 'watch', script: 'watch', match: RESOURCE_IDENTITIES['watch-state'] ?? null },
   // IDs read from the account's D1, Durable Object namespace and R2 bucket lists (2026-09-30).

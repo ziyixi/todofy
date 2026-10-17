@@ -11,6 +11,7 @@ APPS = {
     "dashboard",
     "flowday",
     "links",
+    "tasks",
     "watch",
     "fleet",
     "mailsort",

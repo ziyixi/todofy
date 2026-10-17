@@ -75,7 +75,7 @@ describe('the registry', () => {
 
   it('registers the entries of the design, in their groups and order', () => {
     const byGroup = (group: string) => REGISTRY.entries.filter((e) => e.group === group).sort((a, b) => a.order - b.order).map((e) => e.id);
-    expect(byGroup('apps')).toEqual(['mail-hero', 'todofy', 'flowday', 'links', 'watch', 'fleet', 'mailsort', 'recall', 'brief']);
+    expect(byGroup('apps')).toEqual(['mail-hero', 'todofy', 'flowday', 'links', 'watch', 'fleet', 'mailsort', 'recall', 'brief', 'tasks']);
     expect(byGroup('sites')).toEqual(['website']);
     expect(byGroup('services')).toEqual(['notion-publish', 'newsletter']);
     expect(byGroup('hidden')).toEqual(['home', 'self-hosted', 'platform-runtime']);
@@ -93,6 +93,7 @@ describe('the registry', () => {
       mailsort: 'ops_v1',
       recall: 'ops_v1',
       brief: 'ops_v1',
+      tasks: 'ops_v1',
       home: 'self',
       'self-hosted': 'none',
       'platform-runtime': 'none',
@@ -156,9 +157,9 @@ describe('the registry', () => {
 
   it('keeps the tick within the Workers Free subrequest budget', () => {
     // 9 status() + 3 probes (website, FlowDay, links) + 1 GraphQL + 5 setGuard + 2 canary calls + 1 reportOps + 12 drift calls.
-    expect(outboundPerTick()).toBe(33);
+    expect(outboundPerTick()).toBe(34);
     expect(outboundPerTick()).toBeLessThanOrEqual(MAX_OUTBOUND_PER_TICK);
-    expect(outboundPerRefresh()).toBe(12);
+    expect(outboundPerRefresh()).toBe(13);
   });
 
   it('serves a public view without bindings or probe URLs, within its budget', () => {

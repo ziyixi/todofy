@@ -39,6 +39,7 @@ async function defaults(app: StubApp): Promise<Record<string, unknown>> {
   }
   if (app === 'notion-publish') return { status: await fixture('OpsStatus/notion-publish-ok.json') };
   // recall has no guard: its setGuard always refuses, and Home never calls it.
+  if (app === 'tasks') return { status: await fixture('OpsStatus/tasks-ok.json') };
   if (app === 'recall') return { status: await fixture('OpsStatus/recall-ok.json') };
   if (app === 'fleet' || app === 'newsletter') {
     return { status: await fixture(`OpsStatus/${app}-ok.json`), setGuard: await fixture('GuardState/normal.json') };
@@ -132,7 +133,7 @@ export interface Harness {
 export async function startHarness(options: HarnessOptions = {}): Promise<Harness> {
   const temp = options.persist ?? (await mkdtemp(join(tmpdir(), 'home-dashboard-')));
   const outbound: Outbound = options.outbound ?? (() => new Response('no outbound fetch expected', { status: 599 }));
-  const scripts = { home: await bundle(), 'mail-hero': await stubScript('mail-hero'), todofy: await stubScript('todofy'), watch: await stubScript('watch'), fleet: await stubScript('fleet'), newsletter: await stubScript('newsletter'), 'notion-publish': await stubScript('notion-publish'), mailsort: await stubScript('mailsort'), recall: await stubScript('recall'), brief: await stubScript('brief') };
+  const scripts = { home: await bundle(), 'mail-hero': await stubScript('mail-hero'), todofy: await stubScript('todofy'), watch: await stubScript('watch'), fleet: await stubScript('fleet'), newsletter: await stubScript('newsletter'), 'notion-publish': await stubScript('notion-publish'), mailsort: await stubScript('mailsort'), recall: await stubScript('recall'), brief: await stubScript('brief'), tasks: await stubScript('tasks') };
   const configure = (bindings: Record<string, string>): ConstructorParameters<typeof Miniflare>[0] =>
     convertV4MiniflareOptions({
       host: '127.0.0.1',
@@ -157,6 +158,7 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
             MAILSORT: { name: 'mailsort', entrypoint: 'Ops' },
             RECALL: { name: 'recall', entrypoint: 'Ops' },
             BRIEF: { name: 'brief', entrypoint: 'Ops' },
+            TASKS: { name: 'tasks', entrypoint: 'Ops' },
             ASSETS: () => new Response('<!doctype html><title>home</title>', { headers: { 'content-type': 'text/html' } }),
           },
           bindings,
@@ -171,6 +173,7 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
         { name: 'mailsort', modules: true, script: scripts.mailsort, compatibilityDate: '2026-09-08' },
         { name: 'recall', modules: true, script: scripts.recall, compatibilityDate: '2026-09-08' },
         { name: 'brief', modules: true, script: scripts.brief, compatibilityDate: '2026-09-08' },
+        { name: 'tasks', modules: true, script: scripts.tasks, compatibilityDate: '2026-09-08' },
         // Calls a stub's Ops method over the same kind of binding "home" has (tests of the stubs).
         {
           name: 'ops-probe',
@@ -178,7 +181,7 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
           compatibilityDate: '2026-09-08',
           script: `export default { async fetch(request, env) {
             const { app, method, args } = await request.json()
-            const target = app === 'mail-hero' ? env.MAIL_HERO : app === 'watch' ? env.WATCH : app === 'fleet' ? env.FLEET : app === 'newsletter' ? env.NEWSLETTER : app === 'notion-publish' ? env.WEBSITE_SYNC : app === 'mailsort' ? env.MAILSORT : app === 'recall' ? env.RECALL : app === 'brief' ? env.BRIEF : env.TODOFY
+            const target = app === 'mail-hero' ? env.MAIL_HERO : app === 'watch' ? env.WATCH : app === 'fleet' ? env.FLEET : app === 'newsletter' ? env.NEWSLETTER : app === 'notion-publish' ? env.WEBSITE_SYNC : app === 'mailsort' ? env.MAILSORT : app === 'recall' ? env.RECALL : app === 'brief' ? env.BRIEF : app === 'tasks' ? env.TASKS : env.TODOFY
             try { return Response.json({ ok: await target[method](...args) }) }
             catch (error) { return Response.json({ error: error instanceof Error ? error.message : 'not_an_error' }) }
           } }`,
@@ -192,6 +195,7 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
             MAILSORT: { name: 'mailsort', entrypoint: 'Ops' },
             RECALL: { name: 'recall', entrypoint: 'Ops' },
             BRIEF: { name: 'brief', entrypoint: 'Ops' },
+            TASKS: { name: 'tasks', entrypoint: 'Ops' },
           },
         },
       ],

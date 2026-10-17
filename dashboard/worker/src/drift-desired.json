@@ -343,6 +343,11 @@
           "source": "config"
         },
         {
+          "name": "TASKS",
+          "type": "service",
+          "source": "config"
+        },
+        {
           "name": "TODOFY",
           "type": "service",
           "source": "config"
@@ -732,6 +737,49 @@
         {
           "name": "STORE",
           "type": "r2_bucket",
+          "source": "config"
+        }
+      ],
+      "personal": []
+    },
+    "tasks": {
+      "config": "tasks/wrangler.toml",
+      "workers_dev": false,
+      "preview_urls": false,
+      "custom_domains": [
+        "tasks.ziyixi.science"
+      ],
+      "routes": [],
+      "crons": [],
+      "bindings": [
+        {
+          "name": "ACCESS_AUDIENCE",
+          "type": "plain_text",
+          "source": "config"
+        },
+        {
+          "name": "ACCESS_ISSUER",
+          "type": "plain_text",
+          "source": "config"
+        },
+        {
+          "name": "ASSETS",
+          "type": "assets",
+          "source": "config"
+        },
+        {
+          "name": "DB",
+          "type": "d1",
+          "source": "config"
+        },
+        {
+          "name": "PUBLIC_HOST",
+          "type": "plain_text",
+          "source": "config"
+        },
+        {
+          "name": "TIME_ZONE",
+          "type": "plain_text",
           "source": "config"
         }
       ],

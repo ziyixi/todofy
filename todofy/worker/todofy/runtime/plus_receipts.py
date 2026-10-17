@@ -25,12 +25,14 @@ from typing import Any, NamedTuple
 
 from todofy.core.backoff import DAY
 from todofy.core.sql import plus as sql
+from todofy.runtime import native_plus
 from todofy.runtime import plus_store as store
 from todofy.runtime.interop import now_s
 
 MAX_AGE = 30 * DAY
 
 DO_SCHEMA = (
+    native_plus.SCHEMA,
     "CREATE TABLE IF NOT EXISTS plus_receipts (request_id TEXT PRIMARY KEY, method TEXT NOT NULL,"
     " request_hash TEXT NOT NULL, state TEXT NOT NULL CHECK (state IN ('started', 'done')), commands TEXT,"
     " plan_etag TEXT, result TEXT CHECK (result IS NULL OR length(result) <= 4096), created_at INTEGER NOT NULL,"

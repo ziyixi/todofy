@@ -222,7 +222,9 @@ jobs:
       fail-fast: false
       max-parallel: 3
       matrix:
-        app: [todofy, mail-hero, dashboard, flowday, links, watch, fleet, mailsort, recall, brief, website-relay]
+        app: [todofy, mail-hero, dashboard, flowday, links, watch, fleet, mailsort, recall, brief, tasks, website-relay]
+        exclude:
+          - app: tasks
     permissions:
       contents: read
       deployments: write

@@ -15,7 +15,7 @@ from todofy.core import plan as planning
 from todofy.core import plus
 from todofy.core.sql import gtd as gtd_sql
 from todofy.core.sql import plus as sql
-from todofy.runtime import backup, plan_store, plus_cache, plus_mail, plus_order, plus_week
+from todofy.runtime import backup, native_plus, native_tasks, plan_store, plus_cache, plus_mail, plus_order, plus_week
 from todofy.runtime import plus_receipts as receipts
 from todofy.runtime import plus_store as store
 from todofy.runtime import plus_todoist as todoist
@@ -350,7 +350,9 @@ async def set_dependency(core: Any, request: dict[str, Any]) -> dict[str, Any]:
     await _dependencies_enabled(env)
     task_id, prerequisite_id = plus.check_id(request["task_id"]), plus.check_id(request["prerequisite_id"])
     if not request.get("waits"):
-        return {"dependencies": await plan_store.remove_dependency(env.DB, plus.PROVIDER, task_id, prerequisite_id)}
+        return {
+            "dependencies": await plan_store.remove_dependency(env.DB, todoist.provider(core), task_id, prerequisite_id)
+        }
     current = await plan_store.dependencies(env.DB)
     edges = [(edge["task_id"], edge["prerequisite_id"]) for edge in current]
     wanted = [task_id, prerequisite_id, *(waited for waiter, waited in edges if waiter == task_id)]
@@ -372,7 +374,7 @@ async def set_dependency(core: Any, request: dict[str, Any]) -> dict[str, Any]:
     if refusal:
         raise todoist.PlusError("ACTION_NOT_ALLOWED")
     dependencies = await plan_store.add_dependency(
-        env.DB, plus.PROVIDER, task_id, prerequisite_id, baseline or 0, now_s(), replaced
+        env.DB, todoist.provider(core), task_id, prerequisite_id, baseline or 0, now_s(), replaced
     )
     return {"dependencies": dependencies}
 
@@ -390,7 +392,7 @@ async def resolve_dependencies(core: Any, request: dict[str, Any]) -> dict[str, 
     task_ids = list(dict.fromkeys(plus.check_id(task_id) for task_id in request.get("task_ids", [])))
     if not 1 <= len(task_ids) <= RESOLVE_IDS:
         raise todoist.PlusError("BAD_REQUEST")
-    linked = await plan_store.dependency_roles(env.DB, plus.PROVIDER, task_ids)
+    linked = await plan_store.dependency_roles(env.DB, todoist.provider(core), task_ids)
     listed = await todoist.active(core, [row["id"] for row in linked]) if linked else {}
     gone = [row for row in linked if row["id"] not in listed]
     deleted = [row["id"] for row in gone if row["awaited"] and row["closed_as"] == planning.DELETED]
@@ -413,7 +415,7 @@ async def resolve_dependencies(core: Any, request: dict[str, Any]) -> dict[str, 
             released.append(task_id)
     dependencies, dropped, left = await plan_store.settle(
         env.DB,
-        plus.PROVIDER,
+        todoist.provider(core),
         now_s(),
         gone=[row["id"] for row in gone if row["waits"]],
         completed=completed,
@@ -439,7 +441,15 @@ async def build_commands(
         flow_date = request.get("flow_date", "")
         if flow_date and date.fromisoformat(flow_date).isoformat() != flow_date:
             raise todoist.PlusError("BAD_REQUEST")
-        return [{"type": "item_close", "uuid": plus.command_id(request_id), "args": {"id": task_id}}]
+        source = await todoist.task(core, task_id) if native_tasks.enabled(core.env) else {}
+        return [
+            {
+                "type": "item_close",
+                "uuid": plus.command_id(request_id),
+                "args": {"id": task_id},
+                **native_plus.etag(source),
+            }
+        ]
     task = await todoist.task(core, task_id)
     if method == "AppendTaskSteps":
         steps = request.get("steps", [])
@@ -475,7 +485,14 @@ async def build_commands(
         if method == "SetTaskPlan"
         else plus.lead_args(task, request.get("deadline", ""), request.get("lead_days", 0), mapping)
     )
-    return [{"type": "item_update", "uuid": plus.command_id(request_id), "args": {"id": task_id, **args}}]
+    return [
+        {
+            "type": "item_update",
+            "uuid": plus.command_id(request_id),
+            "args": {"id": task_id, **args},
+            **native_plus.etag(task),
+        }
+    ]
 
 
 async def replayed(core: Any, method: str, result: dict[str, Any]) -> dict[str, Any]:
@@ -535,7 +552,9 @@ async def mutate(core: Any, method: str, request: dict[str, Any]) -> dict[str, A
         # lists it (ResolveDependencies), so a recurring one keeps its dependencies. Todoist has closed the task
         # already, so the record is best effort: without it, ResolveDependencies reads the activity log.
         try:
-            await plan_store.close_tasks(env.DB, plus.PROVIDER, [request["task_id"]], planning.COMPLETED, now_s())
+            await plan_store.close_tasks(
+                env.DB, todoist.provider(core), [request["task_id"]], planning.COMPLETED, now_s()
+            )
         except Exception as error:
             print(json.dumps({"plus": "completion_unrecorded", "error_type": type(error).__name__}))
         response = kept = {"task_id": request["task_id"]}

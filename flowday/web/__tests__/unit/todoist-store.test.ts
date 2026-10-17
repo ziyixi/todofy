@@ -72,6 +72,8 @@ function resetTodoistStore() {
     isLoading: false,
     isSyncing: false,
     lastSyncAt: null,
+    hasApiKey: false,
+    taskSource: "todoist",
     searchQuery: "",
   });
 }
@@ -111,6 +113,23 @@ describe("todoist store", () => {
     resetFlowStore();
     resetTodoistStore();
     resetTimerStore();
+  });
+
+  it("hydrates a native task source without pretending a Todoist key exists, then syncs normally", async () => {
+    setSetting("task_source", "tasks");
+    upsertTasks([makeTask()]);
+    vi.stubGlobal("fetch", fakeFetch);
+    await useTodoistStore.getState().hydrate();
+    expect(useTodoistStore.getState()).toMatchObject({ taskSource: "tasks", hasApiKey: false });
+    expect(await useTodoistStore.getState().sync("auto")).toBe(true);
+    expect(useTodoistStore.getState().tasks).toHaveLength(1);
+  });
+
+  it("treats older settings with no task_source as Todoist", async () => {
+    setSetting("todoist_api_key", "synthetic");
+    vi.stubGlobal("fetch", fakeFetch);
+    await useTodoistStore.getState().hydrate();
+    expect(useTodoistStore.getState()).toMatchObject({ taskSource: "todoist", hasApiKey: true });
   });
 
   it("sync toggles syncing state, refreshes tasks, and preserves lastSyncAt", async () => {

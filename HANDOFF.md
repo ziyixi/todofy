@@ -9,6 +9,28 @@ Its old waiting lists and release identities are historical, not instructions to
 
 ## Current work
 
+### Native Tasks replacement — implementation started 2026-10-17
+
+Branch `codex/tasks-native`, isolated checkout `/private/tmp/todofy-tasks-impl`. The owner approved a desktop
+Todoist replacement with the existing Plan/Focus/Mail experience, clean frontend/backend boundaries and
+Workers Free limits. [Tasks](tasks/README.md) records the scope and migration acceptance criteria. Work is
+split into the native task API/storage, desktop UI and shared planning UI; CI and consumer integration follow.
+The local implementation now includes generated CRUD/history APIs, a compact Todoist-style editor,
+an installable desktop PWA, shared Plan/Focus/Mail, inactive native adapters for Todofy/FlowDay and Home
+monitoring. [Local verification](tasks/docs/verification.md) records the actual checks; [design](tasks/docs/design.md)
+describes boundaries. Ordinary/concurrent create ordering, section/parent moves, timed date preservation,
+completed subtasks and planning invalidation have targeted regressions. Branch CI and a real source export
+are next; source coverage and identity verification must precede activation. No production UI release yet.
+Tasks' empty D1 database and owner Access application are now registered in `config/resources.toml`. Bootstrap
+created exactly those two resources; the follow-up read-only plan reports 41 no-ops. `TASKS_WORKER_SECRETS`
+was added to this repository's production environment; other credentials were preserved. No real task data has
+been imported, source-account settings changed or production task writer switched. Do not switch task writers
+until import, identity checks and UI acceptance are complete. Existing Todoist Plus remains live.
+
+The owner requested stopping both old acceptance reminders. The app confirmed deletion of heartbeat IDs
+`automation` (website cron evidence) and `todofy` (email-model scheduler evidence) on 2026-10-17. Their missing
+historical log evidence is not treated as a successful verification.
+
 Todoist Plus UI refinement is released at `b79180283db375757f2cc8d29e481e55a6935c40`.
 [Full branch CI 39013842528](https://github.com/ziyixi/todofy/actions/runs/39013842528) and
 [same-SHA main 39014147662](https://github.com/ziyixi/todofy/actions/runs/39014147662) pass. Only the Plus

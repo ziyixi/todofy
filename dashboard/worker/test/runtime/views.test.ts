@@ -105,7 +105,7 @@ describe('GetRegistry', () => {
     const first = await h.view<Registry>('registry');
     expect(first).toMatchObject({ status: 200, etag: '"test"' });
     expect(first.bytes).toBeLessThanOrEqual(VIEW_BODY_BUDGET.registry);
-    expect(first.body?.entries.map((e) => e.id)).toEqual(['mail-hero', 'todofy', 'flowday', 'links', 'watch', 'website', 'notion-publish', 'newsletter', 'home', 'fleet', 'platform-runtime', 'mailsort', 'recall', 'brief', 'self-hosted']);
+    expect(first.body?.entries.map((e) => e.id)).toEqual(['mail-hero', 'todofy', 'flowday', 'links', 'watch', 'website', 'notion-publish', 'newsletter', 'home', 'fleet', 'platform-runtime', 'mailsort', 'recall', 'brief', 'tasks', 'self-hosted']);
     const text = JSON.stringify(first.body);
     for (const url of Object.values(PROBES)) expect(text).not.toContain(new URL(url).pathname);
     expect(text).not.toContain('MAIL_HERO');
@@ -134,6 +134,7 @@ describe('GetHomeView and RefreshHomeView', () => {
       mailsort: ['unknown', 'never_checked'],
       recall: ['unknown', 'never_checked'],
       brief: ['unknown', 'never_checked'],
+      tasks: ['unknown', 'never_checked'],
     });
     expect(home.cloudflare).toMatchObject({ usage_status: 'unavailable', quota: [], workers: 0, errors_today: 0 });
     expect(h.outboundLog).toEqual([]);
@@ -402,6 +403,7 @@ describe('GetFlowsView, GetOpsView and the mutations', () => {
       ['mailsort', true, 'mailsort'],
       ['recall', true, 'recall'],
       ['brief', true, 'brief'],
+      ['tasks', true, 'tasks'],
     ]);
     expect(ops.canary).toMatchObject({ id: 'mail-todofy', enabled: true, manual_limit: 3 });
     expect(ops.digest.enabled).toBe(true);

@@ -2,11 +2,37 @@ import { describe, expect, it } from 'vitest';
 import { CommandTimerRequest_Action } from '@ziyixi/proto/flowday/ui/v1/flowday_ui_service_pb';
 import { fakes, hooks, owner, uiOk, uiRefusal } from './helpers.ts';
 import type { Env } from '../src/env.ts';
+import { nativePlanning } from '../src/plus.ts';
 
 const TOKEN = `todofy_plus_${'a'.repeat(43)}`;
 const HEADERS = { authorization: `Bearer ${TOKEN}`, 'content-type': 'application/json' };
 const ID = '80a84747-6794-442a-8fb0-82c2910b54ab';
 const COMPLETE = { task_id: 'task-one', request_id: ID, flow_date: '2026-10-13' };
+
+describe('Native Tasks planning transport', () => {
+  it('refuses the retired extension after cutover before reaching either task source', async () => {
+    const { env, core } = fakes({ TASK_SOURCE: 'tasks', TASKS_PUBLIC_URL: 'https://tasks.example.test' });
+    const response = await hooks(env, '/api/plus/v1/plan:read', { headers: HEADERS });
+    expect(response.status).toBe(400);
+    expect(await response.text()).toContain('https://tasks.example.test');
+    expect(core).toHaveLength(0);
+  });
+  it('uses the core entrypoint that verifies the native source itself', async () => {
+    const { env, core } = fakes({}, () => uiOk({ plan: {} }));
+    const response = await nativePlanning(new Request('https://planning.internal/api/plus/v1/plan:read'), env);
+    expect(response.status).toBe(200);
+    expect(core.map(call => call.method)).toEqual(['plus_native_ui']);
+  });
+  it('does not fall back to the legacy FlowDay binding during a partial cutover', async () => {
+    let calls = 0;
+    const { env } = fakes();
+    const legacy = { fetch: () => { calls++; return Promise.resolve(Response.json({})); } } as unknown as Fetcher;
+    const response = await nativePlanning(new Request('https://planning.internal/api/plus/flowday/api/v1/timerSession'),
+      { ...env, FLOWDAY_FOCUS: legacy });
+    expect(response.status).toBe(503);
+    expect(calls).toBe(0);
+  });
+});
 
 function api(method: string, body: unknown) { return { method, headers: HEADERS, body: JSON.stringify(body) }; }
 

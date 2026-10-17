@@ -606,6 +606,9 @@ class ReviewFacts:
     oldest_inbox: tuple[str, ...] = ()
     # Todoist Plus is set up (plus_settings): link its weekly review checklist.
     plus_review: bool = False
+    # Native Tasks supplies its configured origin; None keeps legacy Todoist links.
+    task_url: str | None = None
+    plus_review_url: str | None = None
 
 
 REVIEW_OLDEST_LINKS = 3
@@ -651,11 +654,12 @@ def review_body(facts: ReviewFacts, now: int) -> str:
     links (the oldest inbox tasks by ID only), never a task title."""
     lines: list[str] = []
     focus: list[str] = []
+    source = "Tasks" if facts.task_url else "Todoist"
     if facts.all is None or facts.snapshot_day is None:
-        lines.append("快照：本周没有可用的 Todoist 快照（只含计数，稍后可在 Todofy 查看）。")
+        lines.append(f"快照：本周没有可用的 {source} 快照（只含计数，稍后可在 Todofy 查看）。")
     else:
         partial = "" if facts.all.complete else "；任务过多，快照不完整"
-        lines.append(f"快照 {facts.snapshot_day}（Todoist 元数据，只含计数{partial}）")
+        lines.append(f"快照 {facts.snapshot_day}（{source} 元数据，只含计数{partial}）")
         inbox, inbox_before = facts.inbox, facts.inbox_week_ago
         if inbox is not None:
             oldest = _trend(inbox.oldest_days, _value(inbox_before, "oldest_days"))
@@ -679,7 +683,9 @@ def review_body(facts: ReviewFacts, now: int) -> str:
         if every.mail_open is not None:
             lines.append(f"邮件任务：1–14 天前收到、仍开着 {every.mail_open}（晨报最多带入 {CARRYOVER_MAX_ROWS} 条）")
         focus = _focus(every, inbox, before, inbox_before)
-        oldest_links = [f"{TASK_URL}{task_id}" for task_id in facts.oldest_inbox if TASK_ID.fullmatch(task_id)]
+        oldest_links = [
+            f"{facts.task_url or TASK_URL}{task_id}" for task_id in facts.oldest_inbox if TASK_ID.fullmatch(task_id)
+        ]
         if oldest_links:
             lines.append("收件箱最老的任务：" + "  ".join(oldest_links[:REVIEW_OLDEST_LINKS]))
     todofy = "不可用" if facts.attention_events is None else str(facts.attention_events)
@@ -706,7 +712,9 @@ def review_body(facts: ReviewFacts, now: int) -> str:
     if facts.public_host:
         links.append(f"Todofy GTD：https://{facts.public_host}/gtd")
     if facts.plus_review:
-        links.append(f"Plus 周回顾：{PLUS_REVIEW_URL}")
+        links.append(
+            f"{'周回顾' if facts.plus_review_url else 'Plus 周回顾'}：{facts.plus_review_url or PLUS_REVIEW_URL}"
+        )
     if links:
         lines.append("   ".join(links))
     body = "\n".join(lines) + "\n"

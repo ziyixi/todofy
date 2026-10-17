@@ -2,6 +2,7 @@
 
 import json
 import stat
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -15,13 +16,28 @@ import adopt_metadata
 import cloud_api
 import github_config
 import github_secrets
-import inventory
+import bootstrap_inventory as inventory
 import private_input
 import state_imports
 import tofu_bootstrap
 from private_input import BootstrapError
 
 ACCOUNT, ZONE = "a" * 32, "b" * 32
+
+
+class CommandLine(unittest.TestCase):
+    def test_help_imports_in_a_fresh_process_without_private_input(self):
+        result = subprocess.run(
+            [sys.executable, str(ROOT / "tools/cloud-bootstrap/bootstrap.py"), "--help"],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("--private-file", result.stdout)
+        self.assertIn("fresh,adopt,extend", result.stdout)
 
 
 class PrivateInput(unittest.TestCase):
@@ -219,6 +235,18 @@ class Cloud(unittest.TestCase):
             with self.assertRaises(BootstrapError):
                 tofu_bootstrap.bootstrap_gate(plan, "adopt")
 
+    def test_extend_creates_only_explicit_new_resources_and_never_updates_existing(self):
+        address = 'cloudflare_d1_database.app["tasks"]'
+        plan = {"resource_changes": [{"mode": "managed", "type": "cloudflare_d1_database",
+                "address": address, "change": {"actions": ["create"]}}]}
+        tofu_bootstrap.bootstrap_gate(plan, "extend", (address,))
+        with self.assertRaisesRegex(BootstrapError, "EXTEND_UNEXPECTED_CREATE"):
+            tofu_bootstrap.bootstrap_gate(plan, "extend", ('cloudflare_d1_database.app["other"]',))
+        for actions in (["update"], ["delete"], ["delete", "create"]):
+            plan["resource_changes"][0]["change"]["actions"] = actions
+            with self.assertRaisesRegex(BootstrapError, "EXISTING_RESOURCE_CHANGE"):
+                tofu_bootstrap.bootstrap_gate(plan, "extend", (address,))
+
     def test_adopt_plan_never_writes_state_or_creates_account_resources(self):
         plan = {"resource_changes": [{"mode": "managed", "type": "cloudflare_zero_trust_access_policy",
                 "address": "cloudflare_zero_trust_access_policy.owner", "change": {"actions": ["no-op"]}}]}
@@ -249,7 +277,7 @@ class Cloud(unittest.TestCase):
                 mock.patch.object(tofu_bootstrap, "prepare"), mock.patch.object(tofu_bootstrap, "ensure_workers_subdomain") as workers:
             report, credentials = tofu_bootstrap.run(private, {"zone": "example.invalid", "workers_dev_subdomain": "desired"},
                                                      resources, "adopt", Path(directory), session_factory=Session, check_only=True)
-            self.assertEqual(report, {"actions": {"no-op": 1}, "state_exists": True})
+            self.assertEqual(report, {"actions": {"no-op": 1}, "state_exists": True, "creates": []})
             self.assertFalse(credentials)
             self.assertEqual(workers.call_args.args[3], False)
             self.assertEqual(list(Path(directory).iterdir()), [])

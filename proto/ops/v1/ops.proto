@@ -173,7 +173,8 @@ message OpsStatus {
         "notion-publish",
         "mailsort",
         "recall",
-        "brief"
+        "brief",
+        "tasks"
       ]
       open: true
     }

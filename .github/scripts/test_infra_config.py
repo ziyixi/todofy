@@ -78,6 +78,7 @@ PRODUCTION = {
     "mailsort": "mailsort/wrangler.toml",
     "recall": "recall/wrangler.toml",
     "brief": "brief/wrangler.toml",
+    "tasks": "tasks/wrangler.toml",
 }
 from cloud_profile import load_profile, load_resources  # noqa: E402
 
@@ -91,6 +92,8 @@ _spec.loader.exec_module(generate)
 # The activation commit records the real Access IDs/AUD and removes CHECK_ONLY in the same change.
 AHEAD_OF_DEPLOY = ({"fleet": load_profile(REPO)["platform_hostname"]}
                   if "fleet" in test_wrangler_configs.ci_changes.CHECK_ONLY else {})
+if "tasks" in test_wrangler_configs.ci_changes.CHECK_ONLY:
+    AHEAD_OF_DEPLOY["tasks"] = "tasks." + load_profile(REPO)["zone"]
 # Hosts an Access application may still list although no wrangler.toml declares them. Empty since FlowDay's F3
 # staging host left both FlowDay applications after the F4 cutover (README.md "FlowDay"); a rollback that adds a host
 # back to an application adds it here in the same commit (test_retiring_hosts_are_exact).
@@ -291,7 +294,7 @@ class MatchesTheApps(unittest.TestCase):
         flowday = self.flowday_apps(code)
         self.assertEqual(set(flowday), {"flowday", "flowday-bypass"})
         destinations.update({key: value for key, value in flowday.items()})
-        self.assertEqual(set(owner), {"mail-hero", "todofy", "home", "links", "watch", "fleet", "mailsort", "recall", "brief"})
+        self.assertEqual(set(owner), {"mail-hero", "todofy", "home", "links", "watch", "fleet", "mailsort", "recall", "brief", "tasks"})
         for key, uris in destinations.items():
             worker = "flowday" if key.startswith("flowday") else key
             if worker in AHEAD_OF_DEPLOY:

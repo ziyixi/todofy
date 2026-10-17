@@ -4,12 +4,12 @@ import { useEffect } from "react";
 import { useTodoistStore } from "@/features/todoist/store";
 import { startAutoSync } from "./auto-sync";
 
-/** Runs the visibility-aware automatic Todoist sync (./auto-sync.ts) while a Todoist key is stored. */
+/** Runs the visibility-aware automatic Todoist sync (./auto-sync.ts) while a task source is configured. */
 export function useAutoSync() {
-  const hasApiKey = useTodoistStore((s) => s.hasApiKey);
+  const configured = useTodoistStore((s) => s.taskSource === "tasks" || s.hasApiKey);
 
   useEffect(() => {
-    if (!hasApiKey) return;
+    if (!configured) return;
     const autoSync = startAutoSync({
       now: () => Date.now(),
       isVisible: () => document.visibilityState === "visible",
@@ -23,5 +23,5 @@ export function useAutoSync() {
       document.removeEventListener("visibilitychange", onVisibility);
       autoSync.stop();
     };
-  }, [hasApiKey]);
+  }, [configured]);
 }

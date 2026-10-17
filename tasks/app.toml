@@ -1,0 +1,39 @@
+version = 1
+id = "tasks"
+target = "cloudflare"
+
+[[workers]]
+config = "tasks/wrangler.toml"
+personal_secrets = ["ACCESS_OWNER", "ACCESS_OWNER_ALIASES", "CSRF_SIGNING_KEY"]
+manual_secrets = []
+optional_secrets = ["ACCESS_OWNER_ALIASES"]
+hosts = ["tasks"]
+entry = "tasks"
+role = "任务存储与桌面规划"
+position = 30
+
+[[entries]]
+id = "tasks"
+name = "Tasks"
+description = "个人任务与规划"
+group = "apps"
+icon = "list-checks"
+accent = "green"
+access = true
+app_only_signals = []
+order = 30
+worker = "tasks"
+url_path = "/"
+position = 30
+[entries.status]
+type = "ops_v1"
+binding = "TASKS"
+guard = false
+
+[[access]]
+key = "tasks"
+kind = "owner"
+worker = "tasks"
+name = "tasks"
+paths = [""]
+session = "168h"

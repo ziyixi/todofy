@@ -9,6 +9,7 @@ export const OWNER = 'owner@example.com';
 export const CSRF_KEY = 'ab'.repeat(32);
 
 const CORE_METHODS = [
+  'plus_native_ui',
   'plus_auth',
   'plus_ui',
   'plus_focus_claim',
@@ -94,7 +95,7 @@ export function spaAssets(request: Request): Response {
   return new Response('<!doctype html>', { headers: { 'content-type': 'text/html' } });
 }
 
-export type Vars = { [Name in Exclude<keyof Env, 'ASSETS' | 'COORDINATOR' | 'FLOWDAY_FOCUS' | 'METRICS'>]?: string | undefined };
+export type Vars = { [Name in Exclude<keyof Env, 'ASSETS' | 'COORDINATOR' | 'FLOWDAY_FOCUS' | 'FLOWDAY_NATIVE_FOCUS' | 'METRICS'>]?: string | undefined };
 
 /** A gateway env with fake bindings; the core answers 204 unless `reply` says otherwise. */
 export function fakes(vars: Vars = {}, reply: CoreReply = () => NO_CONTENT): Fakes {

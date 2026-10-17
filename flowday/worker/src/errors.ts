@@ -38,6 +38,7 @@ export const REASONS: Readonly<Record<Reason, { readonly code: Code; readonly me
   },
   TODOIST_UNAUTHORIZED: { code: Code.FAILED_PRECONDITION, message: 'Todoist refused the stored API key', copy: 'Todoist rejected the API key. Check it in Settings.' },
   TODOIST_UNAVAILABLE: { code: Code.UNAVAILABLE, message: 'Todoist failed or could not be reached', copy: 'Todoist could not be reached. FlowDay will try again later.' },
+  TASKS_UNAVAILABLE: { code: Code.UNAVAILABLE, message: 'the native task source failed or could not be read', copy: 'Tasks could not be reached. FlowDay will try again later.' },
   TIMER_CONFLICT: { code: Code.ABORTED, message: 'timer version changed', copy: 'The timer changed in another window. Refresh it before continuing.' },
   RELOAD_REQUIRED: { code: Code.FAILED_PRECONDITION, message: 'reload required for timer commands', copy: 'FlowDay has been updated. Reload to use the shared timer.' },
   TASK_NOT_DELETED: { code: Code.ALREADY_EXISTS, message: 'the task is not deleted', copy: 'This task is not in the trash.' },

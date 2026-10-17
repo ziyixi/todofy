@@ -887,6 +887,30 @@
       "ops_digest"
     ]
   },
+  "read/OpsStatus/tasks-ok.json": {
+    "version": "ops-v1",
+    "app": "tasks",
+    "generated_at": "2026-10-10T14:00:00Z",
+    "health": "ok",
+    "modes": {
+      "maintenance": false
+    },
+    "guard": {
+      "level": "normal",
+      "reason": null,
+      "until": null,
+      "set_at": null,
+      "deferred": []
+    },
+    "signals": [],
+    "counters": {
+      "database_ready": 1,
+      "change_sequence": 0
+    },
+    "last_backup_at": null,
+    "ui_url": "https://tasks.example.org/",
+    "capabilities": []
+  },
   "read/OpsStatus/todofy-degraded.json": {
     "version": "ops-v1",
     "app": "todofy",

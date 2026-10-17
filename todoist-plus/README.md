@@ -34,6 +34,7 @@
 需要 Node.js 26 和根 proto 工具链。进入此目录运行：
 
 ```sh
+npm ci --prefix ../packages/planning-ui
 npm ci
 npm run prototype     # 原型 /；正式组件合成预览 /production.html
 npm run typecheck
@@ -46,3 +47,5 @@ npm run zip
 ```
 
 构建目录为 `.output/chrome-mv3`。浏览器测试不会访问个人 Chrome profile 或真实 Todoist 数据。发布与后端复用 monorepo 的 CI，详情见[架构](docs/design.md)、[界面与接口说明](docs/planning-interface.md)和[验收记录](docs/verification.md)。
+
+正式 Plan／Focus／邮件组件和确认状态处理位于 [planning-ui](../packages/planning-ui/README.md)，扩展保留 WXT 挂载、连接和传输；与独立 Tasks 共用界面，不共用浏览器凭据。

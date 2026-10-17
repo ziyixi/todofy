@@ -1,0 +1,676 @@
+@import "./planner.css";
+@import "./focus.css";
+@import "./planning-board.css";
+@import "./weekly-goals.css";
+@import "./dependencies.css";
+@import "./mailbox.css";
+
+.plus-root.plus-root-plan {
+  max-width: 1900px;
+}
+
+/*
+ * The one colour bridge. Todoist's theme tokens inherit from <html> into every shadow root, so
+ * each colour reads the token with the role Todoist gives it; the fallbacks keep the earlier
+ * light look on a page without tokens. There is no dark mode of its own.
+ */
+:host,
+.plus-prototype,
+.planning-ui {
+  --plus-bg: var(--product-library-background-base-primary, #fff);
+  /* Lanes, day columns and the tab track. */
+  --plus-surface: var(--product-library-background-base-tertiary, #f7f7f3);
+  --plus-text: var(--product-library-display-primary-idle-tint, #202020);
+  --plus-muted: var(--product-library-display-secondary-idle-tint, #77766f);
+  --plus-line: var(--product-library-divider-primary, #ecece6);
+  /* A translucent layer over whatever is underneath. */
+  --plus-hover: var(
+    --product-library-actionable-quaternary-hover-fill,
+    #f7f7f3
+  );
+  /* Text, links, focus rings and drag indicators (insert lines, drop borders). */
+  --plus-accent: var(--product-library-actionable-tertiary-idle-tint, #557921);
+  /* Primary buttons and checkboxes; text on them is --plus-on-accent. */
+  --plus-accent-fill: var(
+    --product-library-actionable-primary-idle-fill,
+    #557921
+  );
+  --plus-on-accent: var(
+    --product-library-actionable-primary-on-idle-tint,
+    #fff
+  );
+  /* Todoist's selected sidebar row; all text on it, muted too, is --plus-selected-text. */
+  --plus-selected: var(
+    --product-library-selectable-secondary-selected-fill,
+    #f0f6df
+  );
+  --plus-selected-text: var(
+    --product-library-selectable-secondary-on-selected-tint,
+    #557921
+  );
+  /* The nav row copies the native sidebar exactly: on the live page Todoist's selected row text is this token (checked
+     in Kale on 2026-10-16). Board text on the selected fill keeps the darker --plus-selected-text for 4.5:1. */
+  --plus-nav-selected-text: var(
+    --product-library-selectable-secondary-on-selected-fill,
+    #4c7a45
+  );
+  --plus-warning: var(
+    --product-library-info-warning-primary-on-idle-tint,
+    #a56e21
+  );
+  /* Todoist's own overdue-date colour: days past a deadline (12px text, 4.5:1 in every public
+     theme, which the attention tint misses) and the error edge. */
+  --plus-danger: var(--product-library-schedule-overdue-tint, #c25546);
+  /* Todoist's priorities; the API's priority 4 is P1. */
+  --plus-p1: var(--product-library-priorities-p1-primary-idle-tint, #d1453b);
+  --plus-p2: var(--product-library-priorities-p2-primary-idle-tint, #eb8909);
+  --plus-p3: var(--product-library-priorities-p3-primary-idle-tint, #246fe0);
+  --plus-p4: var(--product-library-priorities-p4-primary-idle-tint, #aaa);
+  --plus-overlay: var(--product-library-background-overlay, #0005);
+  /* Resting cards and tabs, floating bars and drag previews, dialogs. */
+  --plus-shadow-1: var(--product-library-shadow-raised-1, 0 1px 3px #00000012);
+  --plus-shadow-2: var(--product-library-shadow-raised-2, 0 4px 20px #0001);
+  --plus-shadow-3: var(--product-library-shadow-raised-3, 0 16px 55px #0003);
+  font-family: var(
+    --td-ui-font-family,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    "Noto Sans",
+    system-ui,
+    sans-serif
+  );
+  font-size: 14px;
+  color: var(--plus-text);
+}
+/* The options page has no Todoist theme and uses the light fallbacks. */
+body.planning-ui {
+  background: var(--plus-bg);
+}
+:host *,
+.planning-ui *,
+.plus-prototype * {
+  box-sizing: border-box;
+}
+/* One line weight for every icon, at any size, near Todoist's thin icons. */
+:is(.plus-root, .plus-extension-nav, .plus-prototype) svg.lucide {
+  stroke-width: 1.5px;
+}
+:is(.plus-root, .plus-extension-nav, .plus-prototype) svg.lucide > * {
+  vector-effect: non-scaling-stroke;
+}
+.plus-root {
+  background: var(--plus-bg);
+  min-height: 100%;
+  padding: 64px 0 120px;
+  width: 100%;
+  max-width: 800px;
+  margin: auto;
+  line-height: 1.5;
+}
+.plus-root button,
+.plus-root input,
+.plus-root textarea,
+.plus-root select,
+.plus-prototype button {
+  font: inherit;
+  color: inherit;
+}
+.plus-root button,
+.plus-prototype button {
+  cursor: pointer;
+  background: none;
+  border: 0;
+}
+.plus-root button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.plus-root button:focus-visible,
+.plus-root input:focus-visible,
+.plus-root select:focus-visible,
+.plus-root textarea:focus-visible {
+  outline: 2px solid var(--plus-accent);
+  outline-offset: 3px;
+}
+.plus-root h1 {
+  margin: 0;
+  font-size: 26px;
+  line-height: 35px;
+  font-weight: 700;
+  letter-spacing: -0.6px;
+}
+.plus-root h2,
+.plus-root h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+.plus-page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 27px;
+}
+.plus-subtitle {
+  color: var(--plus-muted);
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 5px;
+}
+.plus-header-actions {
+  display: flex;
+  gap: 7px;
+}
+.plus-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  border-radius: 5px;
+  padding: 0;
+  color: var(--plus-muted) !important;
+}
+.plus-icon:hover {
+  background: var(--plus-hover);
+  color: var(--plus-text) !important;
+}
+.plus-muted {
+  color: var(--plus-muted);
+  font-size: 12px;
+}
+.plus-section-title {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 27px 0 7px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--plus-line);
+}
+.plus-section-title > span,
+.plus-disclosure > span {
+  color: var(--plus-muted);
+  font-size: 12px;
+  font-weight: 400;
+}
+.plus-task-list,
+.plus-steps {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.plus-task-main {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  text-align: left;
+  min-width: 0;
+  flex: 1;
+  padding: 10px 0;
+}
+.plus-task-main > span {
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+.plus-task-main small {
+  font-size: 12px;
+  color: var(--plus-muted);
+  margin-top: 5px;
+  line-height: 1.4;
+  text-wrap: pretty;
+}
+.plus-disclosure {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0;
+  width: 100%;
+  text-align: left;
+}
+.plus-footer-note {
+  color: var(--plus-muted);
+  font-size: 12px;
+  margin: 32px 0 0;
+}
+.plus-empty {
+  padding: 12px 0;
+  color: var(--plus-muted);
+  font-size: 13px;
+}
+.plus-warning {
+  color: var(--plus-warning) !important;
+  font-size: 12px;
+}
+.plus-content-fieldset {
+  min-width: 0;
+  border: 0;
+  padding: 0;
+  margin: 0;
+}
+.plus-error {
+  border-left: 3px solid var(--plus-danger);
+  padding: 10px 14px;
+  margin: 15px 0;
+  color: var(--plus-text);
+  background: var(--plus-surface);
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.plus-error > span {
+  flex: 1;
+}
+/* Accent text would be too faint on the lane surface in some themes; the underline marks it. */
+.plus-error button {
+  color: var(--plus-text);
+  text-decoration: underline;
+}
+/* The one line a render failure leaves: back to Todoist, or reload. */
+.plus-crash button {
+  padding: 0;
+  text-decoration: underline;
+}
+.plus-dialog {
+  border: 1px solid var(--plus-line);
+  border-radius: 10px;
+  background: var(--plus-bg);
+  color: var(--plus-text);
+  padding: 0;
+  width: min(650px, calc(100vw - 40px));
+  max-height: 85vh;
+  box-shadow: var(--plus-shadow-3);
+}
+.plus-dialog::backdrop {
+  background: var(--plus-overlay, #0005);
+}
+.plus-task-editor {
+  padding: 25px 28px;
+}
+.plus-editor-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 20px;
+  justify-content: space-between;
+}
+.plus-editor-header h2 {
+  font-size: 20px;
+  line-height: 1.4;
+  letter-spacing: -0.2px;
+}
+.plus-editor-header h2 .plus-pending-mark {
+  margin-left: 8px;
+  vertical-align: middle;
+}
+.plus-native-note {
+  margin: 12px 0 21px;
+  line-height: 1.8;
+}
+.plus-text-button {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+  color: var(--plus-accent) !important;
+  padding: 0;
+  font-size: 12px !important;
+}
+.plus-text-button:hover {
+  text-decoration: underline;
+}
+.plus-editor-planning,
+.plus-deadline-fields {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+}
+/* In a narrow editor the buttons keep one line and move under the fields instead. */
+.plus-deadline-fields {
+  flex-wrap: wrap;
+}
+.plus-deadline-fields .plus-button {
+  white-space: nowrap;
+}
+.plus-task-editor label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  color: var(--plus-muted);
+  font-size: 12px;
+  flex: 1;
+}
+.plus-root input,
+.plus-root select,
+.plus-root textarea {
+  border: 1px solid var(--plus-line);
+  border-radius: 5px;
+  background: var(--plus-bg);
+  padding: 7px 9px;
+  min-width: 0;
+}
+/* One control height, so fields and buttons in a row line up; lists, checkboxes and the
+   compact estimate chips keep their own size. */
+.plus-root input:not([type="checkbox"], .plus-custom-minutes),
+.plus-root select:not([size]) {
+  height: var(--td-ui-button-normal-height, 32px);
+  padding-block: 0;
+}
+.plus-task-editor textarea {
+  width: 100%;
+  resize: vertical;
+  margin-top: 12px;
+  font-size: 13px;
+}
+.plus-button {
+  height: var(--td-ui-button-normal-height, 32px);
+  padding: 0 11px !important;
+  border: 1px solid var(--plus-line) !important;
+  border-radius: 5px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  font-size: 12px !important;
+  font-weight: 600 !important;
+}
+.plus-primary {
+  background: var(--plus-accent-fill) !important;
+  color: var(--plus-on-accent) !important;
+  border-color: var(--plus-accent-fill) !important;
+}
+.plus-steps li {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--plus-line);
+}
+.plus-child-title {
+  flex: 1;
+  text-align: left;
+  padding: 0;
+  font-size: 13px !important;
+}
+.plus-steps .plus-muted {
+  font-size: 12px;
+}
+.plus-estimate-presets {
+  display: flex;
+  gap: 5px;
+  align-items: center;
+  margin: 8px 0;
+  color: var(--plus-muted);
+  flex-wrap: wrap;
+  font-size: 12px;
+}
+.plus-estimate-presets button {
+  border: 1px solid var(--plus-line);
+  border-radius: 5px;
+  padding: 3px 6px;
+  font-size: 12px;
+}
+.plus-estimate-presets button.selected {
+  border-color: var(--plus-accent);
+  color: var(--plus-accent);
+}
+.plus-custom-minutes {
+  width: 62px;
+  padding: 3px 5px !important;
+  font-size: 12px !important;
+}
+.plus-editor-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin: 12px 0;
+}
+/* Todoist's checkbox: the priority's ring with a light tint, plain grey for P4. */
+.plus-checkbox {
+  --plus-priority: var(--plus-p4);
+  width: 18px;
+  height: 18px;
+  color: var(--plus-priority);
+  border: 1px solid var(--plus-priority) !important;
+  border-radius: 50%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 0;
+  flex: 0 0 auto;
+}
+.plus-checkbox svg {
+  opacity: 0;
+}
+.plus-checkbox:hover svg {
+  opacity: 1;
+}
+.plus-checkbox[data-priority="4"],
+.plus-checkbox[data-priority="3"],
+.plus-checkbox[data-priority="2"] {
+  background: color-mix(
+    in srgb,
+    var(--plus-priority) 8%,
+    transparent
+  ) !important;
+}
+.plus-checkbox[data-priority="4"] {
+  --plus-priority: var(--plus-p1);
+}
+.plus-checkbox[data-priority="3"] {
+  --plus-priority: var(--plus-p2);
+}
+.plus-checkbox[data-priority="2"] {
+  --plus-priority: var(--plus-p3);
+}
+.plus-checkbox-slot {
+  flex: 0 0 18px;
+}
+.plus-play {
+  color: var(--plus-accent) !important;
+}
+.plus-timer-bar {
+  position: fixed;
+  z-index: 2;
+  bottom: 24px;
+  /* Centred on the Plus column, which mount.tsx measures as the sidebar moves. */
+  left: var(--plus-content-center, calc(50% + 140px));
+  transform: translateX(-50%);
+  width: min(570px, calc(var(--plus-content-width, 100vw - 280px) - 80px));
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  border: 1px solid var(--plus-line);
+  background: var(--plus-bg);
+  box-shadow: var(--plus-shadow-2);
+  border-radius: 8px;
+  padding: 10px 15px;
+}
+.plus-timer-bar > div {
+  flex: 1;
+  min-width: 0;
+}
+.plus-timer-bar small {
+  display: block;
+  font-size: 12px;
+  color: var(--plus-accent);
+}
+.plus-timer-bar strong {
+  display: block;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 12px;
+  font-weight: 500;
+}
+.plus-timer-bar output {
+  font-variant-numeric: tabular-nums;
+  font-size: 18px;
+  letter-spacing: 0.5px;
+}
+.plus-spin {
+  animation: plus-spin 1s linear infinite;
+}
+@keyframes plus-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+/* A card waiting for its write, or for the re-read after it, stays visible but dimmed. */
+.plus-root .is-pending {
+  opacity: 0.6;
+}
+.plus-pending-mark {
+  flex: none;
+  color: var(--plus-muted);
+}
+/* The dimmed card still shows that it waits. */
+@media (prefers-reduced-motion: reduce) {
+  .plus-pending-mark {
+    animation: none;
+  }
+}
+.plus-sr-only {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  margin: -1px !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+  clip: rect(0, 0, 0, 0) !important;
+  white-space: nowrap !important;
+  border: 0 !important;
+}
+.plus-board-labels {
+  padding: 24px 28px;
+}
+.plus-board-labels header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+.plus-board-labels header h2 {
+  font-size: 20px;
+}
+.plus-board-labels form {
+  display: grid;
+  gap: 12px;
+  margin-top: 20px;
+}
+.plus-board-labels label {
+  display: grid;
+  grid-template-columns: 120px minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+  font-size: 14px;
+}
+.plus-board-labels select {
+  width: 100%;
+}
+.plus-board-labels footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  border-top: 1px solid var(--plus-line);
+  padding-top: 16px;
+  margin-top: 8px;
+}
+@media (max-width: 1000px) {
+  .plus-root {
+    padding: 30px 27px 110px;
+  }
+}
+@media (max-width: 650px) {
+  .plus-root {
+    padding: 25px 18px 110px;
+  }
+  .plus-timer-bar {
+    left: 50%;
+    width: calc(100vw - 35px);
+  }
+  .plus-subtitle > span {
+    display: none;
+  }
+  .plus-task-editor {
+    padding: 20px;
+  }
+}
+.plus-extension-nav {
+  display: grid;
+  margin: 0;
+  width: var(--plus-nav-width, 100%);
+  font-family: inherit;
+  font-size: 13px;
+  color: inherit;
+}
+.plus-extension-nav button {
+  border: 0;
+  border-radius: 5px;
+  min-height: 34px;
+  padding: 5px;
+  display: flex;
+  align-items: center;
+  gap: 0;
+  background: none;
+  color: inherit;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+}
+.plus-extension-nav svg {
+  flex: 0 0 24px;
+}
+.plus-nav-icon {
+  flex: 0 0 24px;
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+}
+.plus-extension-nav .plus-nav-icon svg {
+  flex: none;
+  width: 18px;
+  height: 18px;
+}
+.plus-extension-nav button:hover {
+  background: var(--plus-hover);
+}
+.plus-extension-nav button[aria-current="page"] {
+  background: var(--plus-selected);
+  color: var(--plus-nav-selected-text);
+}
+.plus-other-views button {
+  width: 100%;
+  color: var(--plus-muted);
+}
+.plus-other-count {
+  margin-left: auto;
+  padding-right: 5px;
+  font-size: 12px;
+  color: var(--plus-muted);
+}
+/* Inside Todoist's task modal the panel shows the modal's own surface. */
+.plus-native-tools.plus-root,
+.plus-native-tools input,
+.plus-native-tools select,
+.plus-native-tools textarea {
+  background: transparent;
+}
+.plus-native-tools.plus-root {
+  padding: 15px 0;
+  max-width: none;
+  min-height: 0;
+  border-top: 1px solid var(--plus-line);
+  margin-top: 16px;
+}
+.plus-native-tools .plus-task-editor {
+  padding: 15px 0;
+}
+.plus-native-tools .plus-editor-header,
+.plus-native-tools .plus-native-note {
+  display: none;
+}

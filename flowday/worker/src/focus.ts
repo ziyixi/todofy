@@ -43,3 +43,13 @@ export class FocusEntrypoint extends WorkerEntrypoint<Env> {
     return result?.response ?? focusApi.errorResponse(flowdayError('NOT_FOUND'), crypto.randomUUID());
   }
 }
+
+/** Native Tasks must never synchronize against the legacy Todoist source during a staged deployment. */
+export class NativeFocusEntrypoint extends FocusEntrypoint {
+  override async fetch(request: Request): Promise<Response> {
+    if (!this.env.TASKS) {
+      return focusApi.errorResponse(flowdayError('TASKS_UNAVAILABLE'), crypto.randomUUID());
+    }
+    return super.fetch(request);
+  }
+}

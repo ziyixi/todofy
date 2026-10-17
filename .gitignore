@@ -1,4 +1,7 @@
 # Each app keeps its own .gitignore (mail-hero/.gitignore, todofy/.gitignore).
 .DS_Store
 node_modules/
+.wrangler/
+tasks/web/dist/
+tasks/web/test-results/
 __pycache__/

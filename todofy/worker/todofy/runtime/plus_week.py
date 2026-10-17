@@ -5,6 +5,7 @@ from typing import Any
 
 from todofy.core import plus
 from todofy.core.sql import plus as sql
+from todofy.runtime import native_plus
 from todofy.runtime import plus_receipts as receipts
 from todofy.runtime import plus_store as store
 from todofy.runtime import plus_todoist as todoist
@@ -45,7 +46,12 @@ async def reset_ended(core: Any, week: str, mapping: list[dict[str, Any]]) -> bo
                 await store.run(env.DB, sql.FORGET_WEEK, task_id, record["week_start"])
                 continue
             commands = [
-                {"type": "item_update", "uuid": plus.command_id(request_id), "args": {"id": task_id, "labels": labels}}
+                {
+                    "type": "item_update",
+                    "uuid": plus.command_id(request_id),
+                    "args": {"id": task_id, "labels": labels},
+                    **native_plus.etag(task),
+                }
             ]
         await receipts.start(core, request_id, "WeekReset", plus.fingerprint(record), commands)
         await todoist.commands(core, commands)

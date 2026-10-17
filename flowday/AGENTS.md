@@ -2,8 +2,9 @@
 
 The root [`AGENTS.md`](../AGENTS.md) applies here too. FlowDay-specific rules:
 
-- **Read-only Todoist.** FlowDay only reads Todoist (tasks and projects). Never add a Todoist write;
-  Todofy is the only Todoist writer in this repository.
+- **Read-only task source.** FlowDay reads native Tasks through its optional `TASKS` binding, or Todoist when
+  the binding is absent. It never writes either task store. Source selection is deployment-owned; a failed native
+  read never falls back to Todoist. Todofy remains the only Todoist writer in this repository.
 - **Public repository.** Never commit a database file, a Todoist token, an owner email, a real task
   title or a screenshot of real data. Tests, seeds, README figures and goldens use synthetic data only.
   The Todoist key is stored only sealed (AES-GCM under the `CREDENTIAL_KEY` secret, `worker/src/credentials.ts`);

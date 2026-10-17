@@ -1,0 +1,46 @@
+{
+  "name": "@ziyixi/tasks-web",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "engines": {
+    "node": ">=26"
+  },
+  "scripts": {
+    "postinstall": "node ../../proto/tools/ensure.mjs",
+    "predev": "node ../../proto/tools/ensure.mjs",
+    "dev": "vite --host 127.0.0.1",
+    "prebuild": "node ../../proto/tools/ensure.mjs",
+    "build": "tsc --noEmit && vite build",
+    "pretypecheck": "node ../../proto/tools/ensure.mjs",
+    "typecheck": "tsc --noEmit",
+    "pretest": "node ../../proto/tools/ensure.mjs",
+    "test": "vitest run",
+    "lint": "eslint .",
+    "test:browser": "playwright test",
+    "prelint": "node ../../proto/tools/ensure.mjs",
+    "pretest:browser": "node ../../proto/tools/ensure.mjs"
+  },
+  "dependencies": {
+    "@ziyixi/planning-ui": "file:../../packages/planning-ui",
+    "@ziyixi/proto": "file:../../proto/ts",
+    "lucide-react": "1.8.0",
+    "react": "19.2.4",
+    "react-dom": "19.2.4"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@playwright/test": "1.63.0",
+    "@testing-library/react": "16.3.2",
+    "@types/node": "26.6.3",
+    "@types/react": "19.2.14",
+    "@types/react-dom": "19.2.3",
+    "@vitejs/plugin-react": "6.1.2",
+    "eslint": "10.11.0",
+    "jsdom": "29.1.1",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.71.0",
+    "vite": "8.3.4",
+    "vitest": "4.1.11"
+  }
+}

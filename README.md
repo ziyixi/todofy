@@ -13,6 +13,7 @@ Home is the daily starting point. Services run and release independently, sharin
 | Home | 查看服务、业务链路和配额 / Service health, flows and quotas | Cloudflare Worker + DO | [dashboard/](dashboard/README.md) |
 | Mail Hero | 收件箱与可靠 webhook / Inbox and reliable webhooks | Cloudflare Worker + D1 + R2 + DO | [mail-hero/](mail-hero/README.md) |
 | Todofy | 邮件转任务、摘要和提醒 / Mail to tasks, summaries and reminders | Cloudflare TS gateway + Python core + D1/DO | [todofy/](todofy/README.md) |
+| Tasks | 原生任务、子任务与规划，迁移中 / Native tasks and planning, migration in progress | Cloudflare Worker + D1, desktop PWA | [tasks/](tasks/README.md) |
 | Todoist Plus | Todoist 内的周计划、拆步骤和执行 / Weekly choices, task steps and focus inside Todoist | Chrome extension; existing Todofy + FlowDay | [todoist-plus/](todoist-plus/README.md) |
 | FlowDay | 时间块、计时与回顾 / Time blocks, timers and reviews | Cloudflare Worker + D1 | [flowday/](flowday/README.md) |
 | Links | 私人短链接 / Personal short links | Cloudflare Worker + D1 | [links/](links/README.md) |

@@ -49,4 +49,6 @@ enum ErrorReason {
   ERROR_REASON_TIMER_CONFLICT = 6;
   // FAILED_PRECONDITION (400): an older client must reload before editing the timer.
   ERROR_REASON_RELOAD_REQUIRED = 7;
+  // UNAVAILABLE (503): the native Tasks binding failed or returned an invalid bounded page.
+  ERROR_REASON_TASKS_UNAVAILABLE = 8;
 }

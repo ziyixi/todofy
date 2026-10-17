@@ -1,0 +1,283 @@
+import { expect, test, type APIRequestContext } from "@playwright/test";
+
+test("retrying Quick Add after a lost response keeps one persisted task", async ({ page, request }) => {
+  const title = "Synthetic retry keeps one task";
+  await page.goto("/#/inbox");
+  await expect(page.getByRole("heading", { name: "Inbox", exact: true })).toBeVisible();
+  let dropped = false;
+  await page.route("**/api/tasks/v1/tasks?*", async (route) => {
+    if (route.request().method() !== "POST" || dropped) return route.continue();
+    dropped = true;
+    const response = await route.fetch();
+    expect(response.status()).toBe(200);
+    await route.abort("failed");
+  });
+  await page.keyboard.press("q");
+  const dialog = page.getByRole("dialog", { name: "Add task" });
+  await dialog.getByRole("textbox", { name: "Task name", exact: true }).fill(title);
+  await dialog.getByRole("button", { name: "Add task", exact: true }).click();
+  await expect(dialog.getByRole("alert")).toBeVisible();
+  await dialog.getByRole("button", { name: "Add task", exact: true }).click();
+  await expect(dialog).not.toBeVisible();
+  const result = await request.get(`/api/tasks/v1/tasks?view=search&query=${encodeURIComponent(title)}`);
+  expect(result.status()).toBe(200);
+  const body = await result.json();
+  expect(body.tasks.filter((task: { title: string }) => task.title === title)).toHaveLength(1);
+});
+
+async function createTask(
+  request: APIRequestContext,
+  title: string,
+  fields: Record<string, unknown> = {},
+) {
+  const csrf = await request.get("/api/tasks/csrf");
+  const { token } = await csrf.json();
+  const result = await request.post(
+    `/api/tasks/v1/tasks?request_id=${crypto.randomUUID()}`,
+    {
+      headers: { "x-csrf-token": token, origin: "http://127.0.0.1:8798" },
+      data: { title, ...fields },
+    },
+  );
+  expect(result.status()).toBe(200);
+  return result.json();
+}
+
+test("quick add, edit, complete and reopen persist through page reload", async ({
+  page,
+}) => {
+  await page.goto("/#/today");
+  await expect(
+    page.getByRole("heading", { name: "Today", exact: true }),
+  ).toBeVisible();
+  await page.keyboard.press("q");
+  const dialog = page.getByRole("dialog", { name: "Add task" });
+  await expect(
+    dialog.getByRole("textbox", { name: "Task name", exact: true }),
+  ).toBeFocused();
+  await page.keyboard.type("Synthetic task for the weekly review");
+  await dialog
+    .getByRole("textbox", { name: "Description", exact: true })
+    .fill("Check the saved fields after a reload.");
+  await dialog
+    .getByRole("combobox", { name: "Priority", exact: true })
+    .selectOption("1");
+  await dialog.getByRole("button", { name: "Add task", exact: true }).click();
+  await expect(dialog).not.toBeVisible();
+  await page.reload();
+  await page
+    .getByRole("button")
+    .filter({ hasText: "Synthetic task for the weekly review" })
+    .first()
+    .click();
+  const details = page.getByRole("dialog", { name: "Task details" });
+  await expect(
+    details.getByRole("combobox", { name: "Priority", exact: true }),
+  ).toHaveValue("1");
+  await details
+    .getByRole("textbox", { name: "Task name", exact: true })
+    .fill("Synthetic edited review task");
+  await details.getByRole("button", { name: "Save changes" }).click();
+  await page
+    .getByRole("button", {
+      name: "Complete Synthetic edited review task",
+      exact: true,
+    })
+    .click();
+  await expect(
+    page.getByText("Synthetic edited review task", { exact: true }),
+  ).not.toBeVisible();
+  await page
+    .getByRole("link", { name: "Completed tasks", exact: true })
+    .click();
+  await page
+    .getByRole("button", {
+      name: "Reopen Synthetic edited review task",
+      exact: true,
+    })
+    .click();
+  await page.getByRole("link", { name: "Inbox", exact: true }).click();
+  await expect(
+    page.getByText("Synthetic edited review task", { exact: true }),
+  ).toBeVisible();
+});
+
+test("nested subtasks remain attached and natural-date preview keeps deadline independent", async ({
+  page,
+  request,
+}) => {
+  const parent = await createTask(request, "Synthetic parent commitment");
+  await page.goto(`/?task=${parent.id}#/inbox`);
+  const dialog = page.getByRole("dialog", { name: "Task details" });
+  await dialog
+    .getByRole("textbox", { name: "New subtask" })
+    .fill("Synthetic step under two hours");
+  await dialog.getByRole("button", { name: "Add", exact: true }).click();
+  await dialog
+    .getByRole("button", {
+      name: "Synthetic step under two hours",
+      exact: true,
+    })
+    .click();
+  await expect(
+    dialog.getByRole("button", { name: "Open parent task" }),
+  ).toBeVisible();
+  await dialog.getByText("Schedule options", { exact: true }).click();
+  await dialog.getByLabel("Schedule", { exact: true }).fill("every Tuesday");
+  await dialog.getByRole("button", { name: "Preview date" }).click();
+  await expect(dialog.getByLabel("Date", { exact: true })).not.toHaveValue("");
+  await dialog.getByLabel("Deadline", { exact: true }).fill("2026-12-31");
+  await dialog.getByLabel("Time", { exact: true }).fill("14:15");
+  await dialog.getByRole("button", { name: "Save changes" }).click();
+  await expect(dialog).not.toBeVisible();
+  await page.reload();
+  await dialog
+    .getByRole("button", {
+      name: "Synthetic step under two hours",
+      exact: true,
+    })
+    .click();
+  await expect(dialog.getByLabel("Deadline", { exact: true })).toHaveValue(
+    "2026-12-31",
+  );
+  await expect(dialog.getByLabel("Time", { exact: true })).toHaveValue("14:15");
+  await expect(dialog.getByLabel("Repeat", { exact: true })).toHaveValue(
+    /Tuesday/i,
+  );
+});
+
+test("moving a timed date preserves the local clock time across daylight saving", async ({page, request}) => {
+  const task = await createTask(request, "Synthetic timed date", {
+    due_date: "2026-10-27", due_datetime: "2026-10-27T18:00:00Z", due_timezone: "America/Los_Angeles",
+  });
+  await page.goto(`/?task=${task.id}#/inbox`);
+  const dialog = page.getByRole("dialog", {name: "Task details"});
+  await expect(dialog.getByLabel("Time", {exact: true})).toHaveValue("11:00");
+  await dialog.getByLabel("Date", {exact: true}).fill("2026-11-03");
+  await expect(dialog.getByRole("button", {name: "Save changes"})).toBeEnabled();
+  await dialog.getByRole("button", {name: "Save changes"}).click();
+  await expect(dialog).not.toBeVisible();
+  const saved = await (await request.get(`/api/tasks/v1/${task.name}`)).json();
+  expect(saved.due_date).toBe("2026-11-03");
+  expect(saved.due_datetime).toBe("2026-11-03T19:00:00.000Z");
+  expect(saved.due_timezone).toBe("America/Los_Angeles");
+});
+
+test("project and label edits appear in task picker and filter views", async ({
+  page,
+}) => {
+  await page.goto("/#/catalog");
+  await page
+    .getByRole("button", { name: "Add project", exact: true })
+    .last()
+    .click();
+  let dialog = page.getByRole("dialog", { name: "Add project" });
+  await dialog
+    .getByLabel("Name", { exact: true })
+    .fill("Synthetic studio project");
+  await dialog.getByRole("button", { name: "Save", exact: true }).click();
+  await page.getByRole("button", { name: "Add label", exact: true }).click();
+  dialog = page.getByRole("dialog", { name: "Add label" });
+  await dialog.getByLabel("Name", { exact: true }).fill("SyntheticFocus");
+  await dialog.getByLabel("Add to favorites").check();
+  await dialog.getByRole("button", { name: "Save", exact: true }).click();
+  await page
+    .getByRole("link", { name: "Synthetic studio project", exact: true })
+    .first()
+    .click();
+  await page.keyboard.press("q");
+  dialog = page.getByRole("dialog", { name: "Add task" });
+  await dialog
+    .getByLabel("Task name", { exact: true })
+    .fill("Synthetic labelled task");
+  await dialog.getByText("More details", { exact: false }).click();
+  await dialog.getByText("Add labels", { exact: true }).click();
+  await dialog.getByLabel("SyntheticFocus", { exact: true }).check();
+  await dialog.getByRole("button", { name: "Add task", exact: true }).click();
+  await page.getByRole("link", { name: "SyntheticFocus", exact: true }).click();
+  await expect(
+    page.getByText("Synthetic labelled task", { exact: true }),
+  ).toBeVisible();
+});
+
+test("dense desktop layout and escape keep the page usable at 1024 pixels", async ({
+  page,
+  request,
+}) => {
+  await createTask(
+    request,
+    "Synthetic long title that stays readable on a compact desktop without pushing the controls off the screen",
+  );
+  await page.setViewportSize({ width: 1024, height: 800 });
+  await page.goto("/#/inbox");
+  await expect(
+    page.getByText(
+      "Synthetic long title that stays readable on a compact desktop without pushing the controls off the screen",
+      { exact: true },
+    ),
+  ).toBeVisible();
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= window.innerWidth,
+    ),
+  ).toBe(true);
+  await page.keyboard.press("q");
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog")).not.toBeVisible();
+});
+
+test("dragging custom order persists and selected tasks complete as a group", async ({
+  page,
+  request,
+}) => {
+  await createTask(request, "Synthetic ordered Alpha");
+  await createTask(request, "Synthetic ordered Beta");
+  await page.goto("/#/inbox");
+  const alpha = page.locator(".task-row").filter({
+    has: page.getByText("Synthetic ordered Alpha", { exact: true }),
+  });
+  const beta = page
+    .locator(".task-row")
+    .filter({ has: page.getByText("Synthetic ordered Beta", { exact: true }) });
+  await beta.hover();
+  const persisted = page.waitForResponse(
+    (response) =>
+      response.request().method() === "PATCH" &&
+      response.url().includes("/api/tasks/v1/tasks/"),
+  );
+  await beta
+    .getByRole("button", { name: "Drag Synthetic ordered Beta", exact: true })
+    .dragTo(alpha);
+  expect((await persisted).status()).toBe(200);
+  await page.reload();
+  await expect(
+    page.getByText("Synthetic ordered Beta", { exact: true }),
+  ).toBeVisible();
+  const ordered = await page.locator(".task-title").allTextContents();
+  expect(ordered.indexOf("Synthetic ordered Beta")).toBeLessThan(
+    ordered.indexOf("Synthetic ordered Alpha"),
+  );
+  await alpha.hover();
+  await page
+    .getByRole("checkbox", {
+      name: "Select Synthetic ordered Alpha",
+      exact: true,
+    })
+    .check();
+  await beta.hover();
+  await page
+    .getByRole("checkbox", {
+      name: "Select Synthetic ordered Beta",
+      exact: true,
+    })
+    .check();
+  await expect(page.getByText("2 selected", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Complete", exact: true }).click();
+  await expect(
+    page.getByText("Synthetic ordered Alpha", { exact: true }),
+  ).not.toBeVisible();
+  await expect(
+    page.getByText("Synthetic ordered Beta", { exact: true }),
+  ).not.toBeVisible();
+});

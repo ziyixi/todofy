@@ -57,16 +57,16 @@ describe('the daily drift check', () => {
     expect(tick.length).toBeLessThanOrEqual(outboundPerTick());
     expect((await view<CloudflareView>(h, 'cloudflare')).drift).toMatchObject({ status: 'never_checked', checked_at: null });
 
-    // Four Workers twice, then the last three (three calls each).
+    // Four Workers in each remaining tick (three calls each).
     await h.tick(start + 30 * MIN);
     expect(driftRequests(h)).toBe(DRIFT_CALLS_PER_TICK);
     expect((await view<CloudflareView>(h, 'cloudflare')).drift).toMatchObject({ status: 'never_checked', checked_at: null });
     await h.tick(start + 60 * MIN);
     expect(driftRequests(h)).toBe(DRIFT_CALLS_PER_TICK);
     await h.tick(start + 90 * MIN);
-    expect(driftRequests(h)).toBe(9);
+    expect(driftRequests(h)).toBe(DRIFT_CALLS_PER_TICK);
     const cloudflare = await view<CloudflareView>(h, 'cloudflare');
-    expect(cloudflare.drift).toMatchObject({ status: 'ok', in_progress: false, desired_workers: 13, findings: [], findings_omitted: 0, last_error: null });
+    expect(cloudflare.drift).toMatchObject({ status: 'ok', in_progress: false, desired_workers: 14, findings: [], findings_omitted: 0, last_error: null });
     expect(cloudflare.drift).not.toHaveProperty('audit_unchecked');
     expect(cloudflare.drift.checked_at).toBe(new Date(start + 90 * MIN).toISOString());
     const ops = await view<OpsView>(h, 'ops');

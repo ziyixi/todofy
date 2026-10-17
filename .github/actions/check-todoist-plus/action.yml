@@ -10,10 +10,13 @@ runs:
         cache-dependency-path: |
           todoist-plus/package-lock.json
           proto/package-lock.json
+          packages/planning-ui/package-lock.json
     - name: Install dependencies
       working-directory: todoist-plus
       shell: bash -e {0}
-      run: npm ci --no-audit --no-fund
+      run: |
+        npm ci --prefix ../packages/planning-ui --no-audit --no-fund
+        npm ci --no-audit --no-fund
     - name: Verify and build Todoist Plus
       working-directory: todoist-plus
       shell: bash -e {0}

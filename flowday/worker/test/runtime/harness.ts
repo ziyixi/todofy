@@ -264,6 +264,8 @@ export interface Harness {
 }
 
 export interface HarnessOptions {
+  /** Synthetic native Tasks service; no public source credentials. */
+  readonly tasks?: (request: Request) => Promise<Response>;
   readonly bindings?: Record<string, string>;
   /** Extra outbound routes (e.g. the Access certs endpoint), by URL. */
   readonly routes?: Map<string, () => Response>;
@@ -307,7 +309,7 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
           script,
           compatibilityDate: '2026-09-08',
           d1Databases: { DB: 'flowday-test' },
-          serviceBindings: { ASSETS: (request: Request) => assets(request) },
+          serviceBindings: { ASSETS: (request: Request) => assets(request), ...(options.tasks ? { TASKS: options.tasks } : {}) },
           bindings: { ...SYNTHETIC_BINDINGS, ...options.bindings },
           outboundService: (request: Request) => outbound(request),
         },

@@ -50,6 +50,7 @@ describe('操作与记录', () => {
       '邮件分拣',
       '浏览记录',
       '简报',
+      'Tasks',
       '个人网站',
       '网站同步',
       'Newsletter',
@@ -76,11 +77,13 @@ describe('操作与记录', () => {
     // Brief's status and guard are available through its own Ops binding.
     expect(rows[8]).toHaveTextContent('ops-v1 状态接口')
     expect(within(rows[8] as HTMLElement).getAllByRole('cell').at(-1)).toHaveTextContent('brief')
-    expect(rows[9]).toHaveTextContent('公开地址探测')
-    expect(rows[11]).toHaveTextContent('ops-v1 状态接口')
+    expect(rows[9]).toHaveTextContent('ops-v1 状态接口')
+    expect(within(rows[9] as HTMLElement).getAllByRole('cell').at(-1)).toHaveTextContent('tasks')
+    expect(rows[10]).toHaveTextContent('公开地址探测')
+    expect(rows[12]).toHaveTextContent('ops-v1 状态接口')
     // Hidden, with no Worker: it only names the self-hosted servers' backup bucket.
-    expect(rows[13]).toHaveTextContent('未接入监控')
-    expect(within(rows[13] as HTMLElement).getAllByRole('cell').at(-1)).toHaveTextContent('—')
+    expect(rows[14]).toHaveTextContent('未接入监控')
+    expect(within(rows[14] as HTMLElement).getAllByRole('cell').at(-1)).toHaveTextContent('—')
   })
 
   it('names a link-only entry of the registry as such', async () => {

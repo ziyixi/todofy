@@ -20,6 +20,9 @@
  * mid-request) doubles the automatic interval, up to 32 times. A failing full sync therefore cannot repeat every
  * 5 minutes all day. "Sync now" keeps its 30 seconds.
  */
+import { runNativeSync } from './native-tasks.ts';
+import { AUTO_SYNC_MIN_INTERVAL_MS, MANUAL_SYNC_MIN_INTERVAL_MS, KEY_CLAIMED_AT, KEY_LAST_SYNC_AT, autoInterval, parseClaim, claimSync, type SyncMode } from './sync-control.ts';
+export * from './sync-control.ts';
 import type { SyncResult } from './model.ts';
 import { importCredentialKey, openCredential } from './credentials.ts';
 import { batchSql, type Db } from './db.ts';
@@ -28,29 +31,23 @@ import { UPSERT_CHUNK, hideProjectsStatement, hideStatement, orphanStatement, pr
 import { FULL_SYNC_TOKEN, fetchSync, itemToRow, todoistColorToHex, type ProjectInfo, type SyncAnswer, type TodoistItem } from './todoist.ts';
 import { sql, type SQL } from 'drizzle-orm';
 
-export const AUTO_SYNC_MIN_INTERVAL_MS = 5 * 60_000;
-export const MANUAL_SYNC_MIN_INTERVAL_MS = 30_000;
-/** The automatic interval doubles after each failed sync, up to 2^5 = 32 times (160 minutes). */
-export const MAX_BACKOFF_STEPS = 5;
 /** Items applied per request (one upsert statement). */
 export const SYNC_CHUNK = UPSERT_CHUNK;
 
 export const KEY_API_KEY = 'todoist_api_key';
 export const KEY_SYNC_TOKEN = 'todoist_sync_token';
 export const KEY_PROJECTS = 'todoist_projects';
-export const KEY_CLAIMED_AT = 'sync_claimed_at';
-export const KEY_LAST_SYNC_AT = 'last_sync_at';
 export const KEY_PENDING = 'todoist_sync_pending';
 /** One-shot migration refresh; 'running' means the pending full pass used the new parser. */
 export const KEY_HIERARCHY_REFRESH = 'todoist_hierarchy_refresh';
 
-export type SyncMode = 'auto' | 'manual';
 
 export type SyncOutcome =
   | { kind: 'ok'; response: SyncResult }
   | { kind: 'no_key' }
   | { kind: 'key_unreadable' }
   | { kind: 'not_configured' }
+  | { kind: 'tasks' }
   | { kind: 'todoist'; failure: 'unauthorized' | 'unavailable' | 'invalid_answer' | 'too_large' };
 
 // ---- stored state ----------------------------------------------------------------------------------------------
@@ -78,22 +75,6 @@ export function serializeProjects(projects: ReadonlyMap<string, ProjectInfo>): s
   return JSON.stringify(Object.fromEntries(ids.map((id) => [id, [projects.get(id)?.name ?? '', projects.get(id)?.color ?? '']])));
 }
 
-/** `sync_claimed_at`: "<epoch ms>" or "<epoch ms>:<failed syncs before it>". */
-export interface Claim {
-  at: number;
-  failures: number;
-}
-
-export function parseClaim(raw: string | null | undefined): Claim | null {
-  const match = /^(\d{1,16})(?::(\d{1,2}))?$/.exec(raw ?? '');
-  if (match === null) return null;
-  return { at: Number(match[1]), failures: Number(match[2] ?? '0') };
-}
-
-export function claimValue(claim: Claim): string {
-  return claim.failures === 0 ? String(claim.at) : `${String(claim.at)}:${String(claim.failures)}`;
-}
-
 /**
  * A pass that is being applied over several requests: `base` is the token to ask Todoist with ("*" for a full
  * pass), `token` the sync token of the pass's first answer (stored when the pass ends; null until the first answer
@@ -115,23 +96,6 @@ export function parsePending(raw: string | null | undefined): Pending | null {
   } catch {
     return null;
   }
-}
-
-/** The automatic interval after `failures` failed syncs in a row. */
-export function autoInterval(failures: number): number {
-  return AUTO_SYNC_MIN_INTERVAL_MS * 2 ** Math.min(failures, MAX_BACKOFF_STEPS);
-}
-
-/**
- * Claims the right to sync now: a compare-and-set against the claim read before (`previous`, null when there was
- * none) that also requires it to be at least `minIntervalMs` old. Atomic, one row; false when another request
- * claimed first or the interval has not passed.
- */
-export async function claimSync(db: Db, previous: string | null, next: Claim, minIntervalMs: number): Promise<boolean> {
-  const result = await db.run(sql`INSERT INTO settings (key, value) VALUES (${KEY_CLAIMED_AT}, ${claimValue(next)})
-    ON CONFLICT(key) DO UPDATE SET value = excluded.value
-    WHERE settings.value IS ${previous} AND CAST(settings.value AS INTEGER) <= ${next.at - minIntervalMs}`);
-  return result.meta.changes === 1;
 }
 
 // ---- one chunk of an answer -------------------------------------------------------------------------------------
@@ -231,9 +195,12 @@ export interface SyncRequest {
   credentialKey: string | undefined;
   now?: Date;
   fetcher?: typeof fetch;
+  /** Set only after native Tasks cutover; no stored Todoist key is read in this mode. */
+  tasks?: Pick<Fetcher, 'fetch'> | undefined;
 }
 
-export async function runSync({ db, mode, credentialKey, now = new Date(), fetcher = fetch }: SyncRequest): Promise<SyncOutcome> {
+export async function runSync({ db, mode, credentialKey, now = new Date(), fetcher = fetch, tasks }: SyncRequest): Promise<SyncOutcome> {
+  if (tasks) return runNativeSync({ db, mode, source: tasks, now });
   const nowMs = now.getTime();
   const nowIso = now.toISOString();
   const stored = await getSettings(db, [KEY_API_KEY, KEY_SYNC_TOKEN, KEY_PROJECTS, KEY_CLAIMED_AT, KEY_LAST_SYNC_AT, KEY_PENDING, KEY_HIERARCHY_REFRESH]);
