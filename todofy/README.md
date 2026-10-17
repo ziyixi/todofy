@@ -130,10 +130,10 @@ existing ten-minute cron returns recorded previous-week commitments to weekly ca
 00:00 in the account timezone, and removes the retired Bets label from tasks while a setup still binds
 it. This continues when the browser is closed.
 
-Plus's Mailbox lists the mail tasks still to clarify, each with its one-sentence brief. Filing one writes
-its category's label and priority and moves it in one Sync; Delete all permanently deletes the listed mail
-the owner left untouched, after Todofy has read it again (and again on a retry), with its summary. Nothing
-else deletes a summary.
+Plus's Mailbox lists the mail tasks still to clarify, each with its one-sentence brief. Filing one moves it
+to the account's Todoist Inbox in one Sync, with its category's label and priority when one is chosen;
+Delete all permanently deletes the listed mail the owner left untouched, after Todofy has read it again (and
+again on a retry), with its summary. Nothing else deletes a summary.
 
 The [backend contract](docs/todoist-plus.md) covers setup, pause controls and retry behavior.
 

@@ -115,8 +115,10 @@ Todoist close precedes FlowDay settlement, with a stable request identity across
 The first mapping confirmation enables weekly rollover in the existing coordinator. Unfinished
 previous-week commitments return to weekly candidates (and the retired Bets label leaves the tasks that
 still carry it). The weekly Work and Personal Bets are text in Todofy's D1 planning store, kept per week
-and never reset. The Mailbox page lists the mail tasks still to clarify from Todofy's own ledger and
-summaries, files one by an owner category (a label, a priority and a move, in one Todoist write) and can
+and never reset. The owner's order of each Review lane is planning-store data too; a reorder in Start now,
+a stage lane or Week's Next steps also writes Todoist's own sibling order (`item_reorder`). The Mailbox page
+lists the mail tasks still to clarify from Todofy's own ledger and summaries, files one into the account's
+Todoist Inbox, with an optional owner category's label and priority, in one Todoist write, and can
 permanently delete the untouched ones, with their summaries. Counts remain soft limits. Native labels/filters remain available without the extension, and their UI is hidden only
 where a connected replacement is present. See the [extension guide](../todoist-plus/README.md).
 
