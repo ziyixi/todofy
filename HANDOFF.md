@@ -9,7 +9,7 @@ Its old waiting lists and release identities are historical, not instructions to
 
 ## Current work
 
-Todoist Plus work of October 15-16 is all released. Each row passed full branch CI and the same-SHA main
+Todoist Plus work of October 15-17 is all released. Each row passed full branch CI and the same-SHA main
 release (Todofy deploy first, then the extension ZIP); the latest ZIP is installed in the owner's unpacked
 folder with its digest checked and its manifest permissions unchanged. The backend is described in
 [todoist-plus.md](todofy/docs/todoist-plus.md), the interface in
@@ -23,6 +23,7 @@ folder with its digest checked and its manifest permissions unchanged. The backe
 | `todoist-plus-v2026.1016.834.7822` | `1e8e6863` | Planning store M1-M3: migration `0007`, Todoist metadata cached in the core, write receipts in the object | [store](docs/todoist-plus-verification.md#planning-store-caches-and-receipts-local-checks-october-16) |
 | `todoist-plus-v2026.1016.1027.27206` | `6a465bee` | Task dependencies as `plan_edges`, never in Todoist text or labels | [dependencies](docs/todoist-plus-verification.md#dependencies-local-checks-october-16) |
 | `todoist-plus-v2026.1016.1224.9770` | `262ad007` | Text Work and Personal Bets in `plan_notes`, the Mailbox, migration `0008` and the one-time brief backfill | [Bets](docs/todoist-plus-verification.md#text-weekly-bets-local-checks-october-16), [Mailbox](docs/todoist-plus-verification.md#mailbox-review-fixes-local-checks-october-16) |
+| `todoist-plus-v2026.1017.254.57066` | `deea01c9` | The owner's eight fixes D1-D8: the mail favourite hidden on every page, one-click filing into the Todoist Inbox, Add steps, Plan's view remembered, Week's Quick line and the Parked lane, reordering inside Review lanes and Next steps, Committed folds; planning protocol 6, no migration | [owner fixes](docs/todoist-plus-verification.md#owner-fixes-d1-d8-local-checks-october-17), [final](docs/todoist-plus-verification.md#final-local-verification-october-17) |
 
 Constraints that stay in force:
 
@@ -36,10 +37,11 @@ Constraints that stay in force:
   label while the binding remains, and the Bets filter stays hidden. The three replaced deadline and waiting
   filters are hidden by exact query, behind a consistency test.
 
-Owner steps: Reload Todoist Plus in Chrome's extension manager and refresh Todoist (planning protocol 5; an
-old page asks for the reload); type this week's two Bets in Plan; in the Mailbox settings choose the mail
-categories and the one destination project (there are no defaults); confirm the account has an `active`
-label; run the six-step list in [todoist-plus/docs/verification.md](todoist-plus/docs/verification.md).
+Owner steps: Reload Todoist Plus in Chrome's extension manager and refresh Todoist (planning protocol 6; a
+page left open asks for the reload); type this week's two Bets in Plan; mail categories are optional and
+filing always moves to the Todoist Inbox; confirm the account has `active` and `parked` labels; the Quick/Ops
+and Parked favourite filters disappear after Todofy's first full Sync; then the ten checks in
+[the extension's verification](todoist-plus/docs/verification.md#owner-反馈修正2026-10-17本地).
 Owner decisions: confirm that Delete all should delete summaries (built that way); M8/M9 of the data-layer
 design drop the legacy `plus_*` tables and are irreversible, so they wait for the owner; a deleted bound
 Quarter label still disables Plus with no in-product recovery.
@@ -55,43 +57,16 @@ Not done: data-layer steps M4-M6 and M10, the extension sending `ReadPlanRequest
 every native page's `ReadPlan` costs the FULL answer), the native popup's collapsed Steps & timing suffix
 (plus-next §4 v2), and research items 6 (backend metadata reads) and 7 (native observer).
 
-### In flight: Todoist Plus owner fixes D1-D8 (`claude/plus-owner-fixes`, local)
+### Notes on the owner fixes D1-D8 (released 2026-10-17)
 
-The owner's eight reports on `todoist-plus-v2026.1016.1224.9770`, decided as D1-D8 on 2026-10-17, built on a
-local branch from `e2ff3da1`: not pushed, no branch CI, no release. The four slices ship as one release, never
-one at a time (slice A already changes what an old extension's categories dialog reads, and slice C brings
-planning protocol 6).
-
-| Slice | Commits | Contents |
-| --- | --- | --- |
-| A, proto and Todofy | `8a8118d8`-`5c5d7d0c` | Additive proto; filing always into the account's Todoist Inbox, categories optional; `SetTaskPlan.parked`; the Quick/Ops and Parked filters replaced by exact query (a cache fingerprint forces one full Sync); `ReorderTasks` (`tasks:reorder`) with the lane order in `plan_settings` `board`, no migration |
-| B, extension | `a6e1da14`-`1344e2c8` | D1 the mail project's favourite hidden on every page; D4 Plan's view kept in `storage.local`; D8 Committed folds |
-| C, extension | `1f62fec1`-`2d5cca15` | D2 one-click filing into the Inbox; D3 Add steps and the weekly review's Plan steps; planning protocol 6 |
-| D, extension | `984d8516`-`ca7ac86c` and the records | D5 the Parked lane and Week's Quick line; D6 reordering inside every Review lane; D7 reordering Next steps |
-| Review fixes | `11ae2b48`-`bb86efae` and the records | Todofy stores the destination a categories save sends (an old Mailbox then offers its categories); the Mailbox's hidden buttons no longer cover titles, a long label keeps its priority, an Inbox filing sends no categories etag; a stage saved in a parked task's details unparks it; Add steps stays with its commitment; seven lanes fit at 1854px, Parked shows 3 and is a thin strip when alone and empty; drag instructions inside the shadow root, in the page's language; tests for the area filter and the 100-ID caps; the overviews |
-
+Branch CI [39001803330](https://github.com/ziyixi/todofy/actions/runs/39001803330) and same-SHA main
+[39002425165](https://github.com/ziyixi/todofy/actions/runs/39002425165) passed; Todofy deployed (no
+migration), then `todoist-plus-v2026.1017.254.57066` was published and installed in the owner's folder. The
+lane order lives in `plan_settings` `board`; `ReorderTasks` (`tasks:reorder`) permutes only the moved task's
+Todoist siblings, and Waiting and Parked keep their order in Todofy only. The first branch run failed one
+browser case that measured cards while a language switch remounted the board; the measure now polls.
 Interface: [planning-interface.md](todoist-plus/docs/planning-interface.md); backend:
-[reordering](todofy/docs/todoist-plus.md#reordering); local evidence:
-[owner fixes](docs/todoist-plus-verification.md#owner-fixes-d1-d8-local-checks-october-17),
-[their review fixes](docs/todoist-plus-verification.md#review-fixes-october-17) and
-[the final local verification](docs/todoist-plus-verification.md#final-local-verification-october-17).
-
-Every job `ci_changes.py` selects for the branch passed locally on the final tree, from the workflow's own
-steps: Todofy (static, all 592 runtime cases, completeness), Proto, Contracts, the extension and every app that
-uses the IDL (Mail Hero, Home, FlowDay, links, watch, mailsort, recall, brief, Fleet, Platform, the website).
-Only CI runs Platform's Linux `kubectl`, AppArmor compile, runtime image and isolated k3s, and Mail Hero's GPG
-round trip.
-
-Next: push the branch, wait for the complete branch CI, then promote the same green SHA. The release deploys
-Todofy first (no migration), then publishes the extension. Between the two, and until the owner reloads, an old
-extension's filing already moves mail to the Inbox and its categories dialog still saves; Todofy stores the
-Inbox that dialog sends as the destination, so its rows offer the categories.
-
-Owner steps after that release, replacing the ones above: reload Todoist Plus and refresh Todoist (planning
-protocol 6; a page left open asks for the reload); mail categories are optional and filing always moves to the
-Todoist Inbox (each categories save still stores a destination, never used for filing); the Quick/Ops and
-Parked favourite filters disappear after Todofy's first full Sync, and Other views with them when nothing else
-is in it; then the ten checks in [the extension's verification](todoist-plus/docs/verification.md#owner-反馈修正2026-10-17本地).
+[reordering](todofy/docs/todoist-plus.md#reordering).
 
 Follow-ups:
 
