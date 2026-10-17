@@ -162,6 +162,13 @@ test('authentication failure exposes status but neither body nor token', async (
   );
 });
 
+test('raw unsafe numeric source IDs retain their exact decimal identity', async () => {
+  const page = await todoistRead('synthetic-secret', '/activities', {
+    fetcher: async () => new Response('{"results":[{"id":9007199254740993123},{"id":9007199254740993124},{"id":42}],"next_cursor":null}'),
+  });
+  assert.deepEqual(page.results.map((event) => event.id), ['9007199254740993123', '9007199254740993124', 42]);
+});
+
 test('Sync uses the official form transport without mutation commands', async () => {
   let request;
   await todoistRead('synthetic-secret', '/sync', {

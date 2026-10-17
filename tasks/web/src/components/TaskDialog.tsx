@@ -23,7 +23,7 @@ export function TaskDialog({
   onSave: (draft: TaskDraft, original?: Task, requestId?: string) => Promise<void>;
   onDelete: (task: Task) => Promise<void>;
   onOpen: (id: string) => void;
-  onComplete: (task: Task) => Promise<boolean>;
+  onComplete: (task: Task) => Promise<string | undefined>;
   onChildAdded: () => void;
 }) {
   const [draft, setDraft] = useState<TaskDraft>(() => ({
@@ -201,8 +201,11 @@ export function TaskDialog({
   async function finish() {
     if (!task) return;
     setBusy(true);
+    setError("");
     try {
-      if (await onComplete(task)) onClose();
+      const message = await onComplete(task);
+      if (message) setError(message);
+      else onClose();
     } finally {
       setBusy(false);
     }

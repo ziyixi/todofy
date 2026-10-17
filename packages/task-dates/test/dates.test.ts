@@ -52,3 +52,18 @@ test('Todoist every week follows completion day while named weekdays remain fixe
     '2026-10-26',
   );
 });
+
+test('annual ordinal dates preview and return to the fixed calendar date after completion', () => {
+  const preview = previewDate('every 1st Jan', '2026-10-17', 'UTC');
+  expect(preview.dueDate).toBe('2027-01-01');
+  expect(preview.recurrence).toBe('every 1st Jan');
+  expect(nextOccurrence(preview, Date.parse('2027-01-03T12:00:00Z'), 'UTC').dueDate).toBe('2028-01-01');
+});
+
+test('a named weekday anchors a biweekly schedule rather than the day it was entered', () => {
+  const preview = previewDate('every 2 weeks Tue', '2026-10-17', 'UTC');
+  expect(preview.dueDate).toBe('2026-10-20');
+  expect(nextOccurrence(preview, Date.parse('2026-10-20T12:00:00Z'), 'UTC').dueDate).toBe('2026-11-03');
+  expect(nextOccurrence(preview, Date.parse('2026-10-22T12:00:00Z'), 'UTC').dueDate).toBe('2026-11-03');
+  expect(nextOccurrence(preview, Date.parse('2026-11-04T12:00:00Z'), 'UTC').dueDate).toBe('2026-11-17');
+});

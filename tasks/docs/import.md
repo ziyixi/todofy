@@ -34,6 +34,8 @@ Recurring completions come from `/activities`, separately from task snapshots. [
 
 The live activity endpoint rejected a full account-age date range with HTTP 400 and accepted a seven-day query. Its requests use complete UTC days; the exporter then filters to the exact requested start and export time and deduplicates boundary events by source ID. This keeps the last partial day without claiming events after the snapshot time.
 
+Activity IDs can exceed JavaScript's safe integer range. The Node 26 exporter preserves their original decimal text while parsing the HTTP response, before numeric rounding can merge distinct events.
+
 Coverage fields describe the validated reads in this export. They do not replace the source/destination count and identity comparison before cutover. The live account has not been queried by the synthetic tests below.
 
 The final read also needs a controlled window with the owner and project-owned writers paused. Separate API calls do not provide a cross-endpoint snapshot. Keep the original Todoist data until the imported state has been checked.
@@ -47,7 +49,11 @@ node tasks/tools/prepare-import.ts \
 
 This dry run checks task values using the same validator as the Worker, resolves label identities, validates parent/project/section relationships and checks supported date and filter expressions. It prints resource counts, issue counts and coverage gaps.
 
-Missing parents, unknown labels and invalid fields stop the import. They are not flattened, dropped or converted into new identities. Unsupported recurrence or filter input remains in the private source snapshot for review.
+Missing parents, unknown labels on current tasks and invalid fields stop the import. Unsupported recurrence or filter input remains in the private source snapshot for review.
+
+The account's `N days` filters cover today through day `N-1`; overdue tasks require an explicit `overdue` term. Unprefixed `today`, `overdue` and these ranges use the scheduled date, falling back to the deadline when the task has no scheduled date. `no date` checks only the scheduled date. Built-in Today and Upcoming also follow scheduled dates, as [Todoist documents](https://www.todoist.com/help/todoist/get-started/plan-your-day-with-the-today-view-UVUXaiSs); a deadline alone does not place a task in those views.
+
+Historical task snapshots can still name labels that were deleted from Todoist's current catalog. The importer recreates those names as ordinary native labels, with deterministic `imported-label-<SHA256 of name>` IDs and no favorite flag. The original deleted label IDs are unavailable; these are new native identities. Current labels retain their original source IDs, and current tasks cannot use this recovery to bypass an unresolved label. The dry-run count `recovered_historical_labels` reports how many labels were recovered. Repeating the same snapshot produces the same IDs.
 
 Generate a file for a disposable local preview:
 
@@ -68,7 +74,7 @@ The prepared SQL requires an empty target or the same frozen snapshot's unfinish
 - Task creation/update timestamps, descriptions, hierarchy, priority, dates, deadlines, duration and label associations.
 - Relative order, using provider `order_key` where available and the legacy numeric order otherwise.
 - Archived project and section state for resources actually included in the snapshot.
-- Each fetched completion's available title, project, creation time, completion time and due date. Activity events retain their source event identity. An activity event replaces an overlapping task snapshot at the same task/time; distinct activity IDs remain separate even when their timestamps match. Activity-only history for an unavailable task does not create a task object; fields unavailable from the source remain absent.
+- Closed-task descriptions and final state, including their source completion timestamp, remain task resources. Completion history uses all activity occurrences for each task ID covered by the activity feed. Only task IDs absent from that feed get snapshot-backed history rows. This avoids counting final task state as an extra occurrence when its timestamp differs from the activity event. Distinct activity IDs remain separate even when their timestamps match. Activity-only history for an unavailable task does not create a task object; unavailable fields remain absent.
 - Recurring lifetime counts, using the provider's `completed_count` as the imported baseline. Imported history is marked separately and does not increment this baseline again. This matters when a historical recurring completion was later undone: the source counter remains authoritative. New completions in Tasks increment it normally. A recurring task missing its source count creates an explicit import coverage gap.
 
 Catalog creation timestamps that the provider does not supply use the snapshot time. The private source file retains the original provider records.
@@ -82,7 +88,7 @@ node --test tasks/tools/test/*.test.mjs
 npm run test:runtime --prefix tasks/worker
 ```
 
-The synthetic D1 roundtrip checks preserved IDs, Unicode and quoting, archived visibility, completion history and lifetime counts, identical replay, and refusal after an owner write. A 120-occurrence shuffled-history case checks the latest 100 rows, the next 20, activity/snapshot deduplication, history for an unavailable task, and a new native completion increasing only the source baseline. Separate tests cover full-project identity mismatches, limited account history, pagination failures, form-encoded Sync, unresolved relationships and unsupported rules. No real account export or production data import has been performed by these tests.
+The synthetic D1 roundtrip checks preserved IDs, Unicode and quoting, archived visibility, completion history and lifetime counts, identical replay, and refusal after an owner write. A case with 120 task snapshots and 120 differently timed activity occurrences checks that history has 120 rows, with the latest 100 followed by the next 20. It also checks history for an unavailable task and a new native completion increasing only the source baseline. Separate tests cover full-project identity mismatches, limited account history, pagination failures, form-encoded Sync, unresolved relationships and unsupported rules. No real account export or production data import has been performed by these tests.
 
 ## Keep planning identities during cutover
 

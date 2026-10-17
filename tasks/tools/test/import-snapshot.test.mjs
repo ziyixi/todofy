@@ -112,6 +112,34 @@ test('unresolved hierarchy or label identities are never flattened or silently d
   assert.throws(() => prepareImport(label), /LABEL_IDENTITY_UNRESOLVED/);
 });
 
+test('historical deleted label names get stable native IDs while current unknown labels still refuse import', async () => {
+  const source = fixture();
+  source.completed.push(
+    { ...source.completed[0], id: 'former-task-one', labels: ['Former Sprint', 'Former Context'] },
+    { ...source.completed[0], id: 'former-task-two', labels: ['Former Sprint'] },
+  );
+  const plan = prepareImport(source);
+  const again = prepareImport(structuredClone(source));
+  assert.equal(plan.recoveredHistoricalLabels, 2);
+  assert.equal(plan.labels.find((label) => label.title === 'next').id, 'label-next');
+  const former = plan.labels.find((label) => label.title === 'Former Sprint');
+  assert.match(former.id, /^imported-label-[a-f0-9]{64}$/);
+  assert.equal(former.favorite, 0);
+  assert.deepEqual(plan.labels, again.labels);
+  const harness = await startHarness();
+  try {
+    for (const sql of importStatements(plan)) await harness.db.prepare(sql).run();
+    for (const sql of importStatements(again)) await harness.db.prepare(sql).run();
+    const catalog = await (await harness.fetch('/api/tasks/v1/catalog')).json();
+    assert.equal(catalog.labels.filter((label) => label.title.startsWith('Former')).length, 2);
+    const task = await (await harness.fetch('/api/tasks/v1/tasks/former-task-one')).json();
+    assert.deepEqual(new Set(task.label_ids), new Set(plan.labels.filter((label) => label.title.startsWith('Former')).map((label) => label.id)));
+  } finally { await harness.dispose(); }
+  const invalidCurrent = structuredClone(source);
+  invalidCurrent.tasks[0].labels = ['Former Sprint'];
+  assert.throws(() => prepareImport(invalidCurrent), /LABEL_IDENTITY_UNRESOLVED/);
+});
+
 test('shuffled imported history pages stay chronological without inflating lifetime counts after undo', async () => {
   const snapshot = fixture();
   const completed = Array.from({ length: 120 }, (_, index) => ({
@@ -122,13 +150,13 @@ test('shuffled imported history pages stay chronological without inflating lifet
   // Emulate several provider windows, each returned newest first, then concatenated.
   snapshot.completed = [completed.slice(80).reverse(), completed.slice(0, 40).reverse(), completed.slice(40, 80).reverse()].flat();
   snapshot.completion_events = [
+    ...completed.map((row, index) => ({
+      id: 1234 + index, object_id: 'repeat', object_type: 'item', event_type: 'completed',
+      event_date: new Date(Date.parse(row.completed_at) - 60_000).toISOString(), parent_project_id: 'inbox',
+      extra_data: { content: index ? row.content : 'Activity title for the same completion' },
+    })),
     {
-      id: 1234, object_id: 'repeat', object_type: 'item', event_type: 'completed',
-      event_date: completed[0].completed_at, parent_project_id: 'inbox',
-      extra_data: { content: 'Activity title for the same completion' },
-    },
-    {
-      id: 1235, object_id: 'deleted-source-task', object_type: 'item', event_type: 'completed',
+      id: 9999, object_id: 'deleted-source-task', object_type: 'item', event_type: 'completed',
       event_date: '2025-02-01T10:00:00Z', parent_project_id: 'old-unavailable-project',
       extra_data: { content: 'Accessible historical task, now deleted' },
     },
@@ -178,8 +206,28 @@ test('distinct source activity IDs survive the same timestamp while duplicate ev
   };
   source.completion_events = [event, { ...event, id: 2, extra_data: { content: 'Second source event' } }, event];
   const plan = prepareImport(source);
-  assert.equal(plan.completions.length, 3);
-  assert.equal(new Set(plan.completions.map((row) => row.id)).size, 3);
+  assert.equal(plan.completions.length, 2);
+  assert.equal(new Set(plan.completions.map((row) => row.id)).size, 2);
   assert.ok(plan.completions.some((row) => row.title === 'First source event'));
   assert.ok(plan.completions.some((row) => row.title === 'Second source event'));
+});
+
+test('activity occurrences replace task-state history by task ID without timestamp guessing', () => {
+  const source = fixture();
+  source.completed = [
+    { ...source.completed[0], id: 'closed-with-activity', description: 'Keep the complete closed-task description' },
+    { ...source.completed[1], id: 'snapshot-only', content: 'Snapshot fallback for unavailable activity' },
+  ];
+  source.completion_events = [{
+    id: 5001, object_id: 'closed-with-activity', object_type: 'item', event_type: 'completed',
+    event_date: '2026-10-06T10:12:00Z', parent_project_id: 'inbox',
+    extra_data: { content: 'Actual completion occurrence' },
+  }];
+  const plan = prepareImport(source);
+  assert.equal(plan.completions.length, 2);
+  assert.equal(plan.completions.find((row) => row.task_id === 'closed-with-activity').completed_at, Date.parse('2026-10-06T10:12:00Z'));
+  assert.equal(plan.completions.find((row) => row.task_id === 'snapshot-only').title, 'Snapshot fallback for unavailable activity');
+  const closed = plan.tasks.find((row) => row.id === 'closed-with-activity');
+  assert.equal(closed.description, 'Keep the complete closed-task description');
+  assert.equal(closed.completed_at, Date.parse('2026-10-06T10:00:00Z'));
 });

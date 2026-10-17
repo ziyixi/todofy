@@ -1212,17 +1212,70 @@ h1 {
   align-self: end;
   margin: 0 0 3px;
 }
-.description-links {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-  margin: 8px 0;
-  font-size: 12px;
+.task-description-detail {
+  margin-top: 8px;
 }
-.description-links a {
+.description-preview {
+  font-size: 13px;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+.description-preview > * + * {
+  margin-top: 8px;
+}
+.description-preview p {
+  white-space: pre-wrap;
+}
+.description-preview ul,
+.description-preview ol {
+  padding-left: 22px;
+  margin-bottom: 0;
+}
+.description-preview a {
   color: var(--accent);
   text-decoration: underline;
-  overflow-wrap: anywhere;
+  text-underline-offset: 2px;
+}
+.description-preview code {
+  border-radius: 3px;
+  padding: 1px 4px;
+  background: #f1f2ed;
+  font-size: 12px;
+}
+.description-preview pre {
+  max-width: 100%;
+  overflow-x: auto;
+  padding: 8px;
+  border-radius: 5px;
+  background: #f1f2ed;
+}
+.description-preview blockquote {
+  margin-left: 0;
+  padding-left: 12px;
+  border-left: 2px solid #d9dfd1;
+  color: var(--muted);
+}
+.description-preview h1,
+.description-preview h2,
+.description-preview h3 {
+  font-size: 14px;
+}
+.description-loading {
+  white-space: pre-wrap;
+}
+.task-description-detail .description-input {
+  min-height: 100px;
+  margin-top: 0;
+}
+.description-edit,
+.description-done {
+  font-size: 12px;
+  color: var(--muted);
+  padding: 5px 0;
+  margin-top: 4px;
+}
+.description-done {
+  color: var(--accent);
 }
 
 .task-edit-main .subtasks {
@@ -1230,8 +1283,7 @@ h1 {
   margin-top: 10px;
   border-top: 1px solid var(--line);
 }
-.task-dialog:not(.quick-add-dialog) .description-input,
-.task-dialog:not(.quick-add-dialog) .description-links,
+.task-dialog:not(.quick-add-dialog) .task-description-detail,
 .task-dialog:not(.quick-add-dialog) .subtasks {
   width: calc(100% - 32px);
   margin-left: 32px;

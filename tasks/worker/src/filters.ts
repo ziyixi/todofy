@@ -4,6 +4,7 @@ export interface SqlFilter {
   sql: string;
   values: (string | number)[];
 }
+const effectiveDueDate = "COALESCE(NULLIF(t.due_date,''),t.deadline)";
 
 /** Small parser for the owner's existing Todoist filter vocabulary; no eval and all values are bound. */
 export function taskFilter(query: string, today: string): SqlFilter {
@@ -41,8 +42,11 @@ export function taskFilter(query: string, today: string): SqlFilter {
     if (lower === 'subtask') return "t.parent_id<>''";
     if (lower === 'no date') return "t.due_date=''";
     if (lower === 'no deadline') return "t.deadline=''";
-    if (lower === 'today') return `t.due_date=${bound(today)}`;
-    if (lower === 'overdue') return `(t.due_date<>'' AND t.due_date<${bound(today)})`;
+    if (lower === 'today') return `${effectiveDueDate}=${bound(today)}`;
+    if (lower === 'overdue') return `(${effectiveDueDate}<>'' AND ${effectiveDueDate}<${bound(today)})`;
+    const nextDays = /^(?:next )?([1-9]\d{0,2}) days?$/.exec(lower);
+    if (nextDays)
+      return `(${effectiveDueDate} BETWEEN ${bound(today)} AND ${bound(addDays(today, Number(nextDays[1]) - 1))})`;
     if (/^p[1-4]$/.test(lower)) return `t.priority=${bound(Number(lower[1]))}`;
     const comparison = /^(deadline|due)(?: (before|after))?:\s*(.+)$/.exec(lower);
     if (comparison) {

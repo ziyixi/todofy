@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { Check, ChevronRight } from "lucide-react";
 import type { Catalog, Task, TaskDraft } from "../api";
 import { LabelPicker } from "./LabelPicker";
+import { TaskDescription } from "./TaskDescription";
 interface Props {
   children?: ReactNode;
   task?: Task;
@@ -41,9 +42,6 @@ export function TaskFields({
   const sections = catalog.sections.filter(
     (section) => section.projectId === draft.projectId,
   );
-  const links = [
-    ...new Set(draft.description.match(/https?:\/\/[^\s<>\])]+/gu) ?? []),
-  ];
   const dateField = (
     <label>
       Date
@@ -114,25 +112,26 @@ export function TaskFields({
             required
           />
         </div>
-        <label className="visually-hidden" htmlFor="task-description">
-          Description
-        </label>
-        <textarea
-          id="task-description"
-          className="description-input"
-          placeholder="Description"
-          value={draft.description}
-          onChange={(event) => patch("description", event.target.value)}
-          rows={task ? 4 : 2}
-        />
-        {task && links.length > 0 && (
-          <div className="description-links">
-            {links.map((url) => (
-              <a key={url} href={url} target="_blank" rel="noopener noreferrer">
-                {url}
-              </a>
-            ))}
-          </div>
+        {task ? (
+          <TaskDescription
+            value={draft.description}
+            onChange={(value) => patch("description", value)}
+            busy={busy}
+          />
+        ) : (
+          <>
+            <label className="visually-hidden" htmlFor="task-description">
+              Description
+            </label>
+            <textarea
+              id="task-description"
+              className="description-input"
+              placeholder="Description"
+              value={draft.description}
+              onChange={(event) => patch("description", event.target.value)}
+              rows={2}
+            />
+          </>
         )}
         {children}
       </div>

@@ -50,7 +50,7 @@ export function useTaskActions(
     list.remove(task.id);
     setNotice("Task deleted");
   }
-  async function complete(task: Task) {
+  async function complete(task: Task): Promise<string | undefined> {
     setBusyIds((current) => new Set([...current, task.id]));
     setNotice("");
     try {
@@ -73,10 +73,11 @@ export function useTaskActions(
             ? "Occurrence completed · next date scheduled"
             : "Task completed",
       );
-      return true;
+      return undefined;
     } catch (reason) {
-      setNotice(describeError(reason));
-      return false;
+      const message = describeError(reason);
+      setNotice(message);
+      return message;
     } finally {
       setBusyIds(
         (current) => new Set([...current].filter((id) => id !== task.id)),

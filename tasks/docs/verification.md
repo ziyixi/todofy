@@ -63,3 +63,21 @@ Activity request returned 400; an otherwise identical seven-day request returned
 uses bounded windows and includes separately archived-section tasks. No real source task was changed. A
 complete private snapshot and its import validation are still pending; successful endpoint reads do not
 establish migration completion.
+
+## Second branch CI and source preflight
+
+[Run 39071963810](https://github.com/ziyixi/todofy/actions/runs/39071963810) checked `865ac940`.
+Every application check, all Python runtime shards, infrastructure and contracts passed. The remaining
+failure was one explicit app list in the proto test, now extended with Tasks and verified by its 20 cases.
+The complete gate must pass on the next SHA before release.
+
+A private source snapshot was saved locally with owner-only permissions; the one-off loopback exporter was
+stopped afterwards. Its original API values and all data remain outside GitHub. Preflight now preserves two
+historical label names whose original IDs are no longer available, supports the actual next-N-days filters,
+and treats completed state snapshots separately from Activity occurrences to avoid duplicate history.
+Unsafe numeric Activity IDs are read losslessly using Node's native JSON parser context.
+
+All reference, filter and coverage checks now pass. One actual monthly recurrence remains pending the owner's
+choice for February (`every 30th`); no real data has been imported or source switched. Two other observed
+recurrence forms have focused date-package regressions. Tasks UI now passes ten actual browser scenarios;
+Markdown renders in a separate 46.41 KiB gzip chunk, and the initial application bundle remains about 117 KiB.

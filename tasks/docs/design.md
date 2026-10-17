@@ -30,6 +30,10 @@ are in a narrow property rail. Label search opens on demand; additional time, du
 sit under Schedule options. Completed subtasks remain visible. Moving a timed date retains the local
 clock time in the task's timezone, including daylight-saving changes.
 
+Existing descriptions render Markdown and bare links; Edit description opens the draft and Done returns to
+the preview. Save changes persists the draft. The renderer loads in its own chunk, omits remote images and
+raw HTML, and opens links only on a user click. A failed completion shows its reason inside the open editor.
+
 Quick Add opens with `Q`; `Ctrl/Cmd+Enter` saves, Escape and backdrop close the dialog. Create actions retain
 their request identity after a lost response. Lists support selection, batch completion/move and custom
 order. A normal new task appends to its sibling list inside the D1 transaction; explicit positions remain

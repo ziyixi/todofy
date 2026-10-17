@@ -33,6 +33,7 @@ export interface ImportPlan {
   filters: CatalogRow[];
   tasks: ImportedTask[];
   completions: CompletionRow[];
+  recoveredHistoricalLabels: number;
   issues: ImportIssue[];
   gaps: string[];
 }
@@ -247,12 +248,31 @@ export function prepareImport(value: unknown): ImportPlan {
   const projects = topological(catalog('projects'));
   const sections = catalog('sections');
   const labels = catalog('labels');
+  const sourceLabels = [...labels];
   const filters = catalog('filters');
   if (projects.filter((p) => p.inbox === 1).length !== 1) throw new ImportError('EXACTLY_ONE_INBOX_REQUIRED');
-  for (const [kind, rows] of Object.entries({ projects, sections, labels, filters }))
-    if (rows.length > 500) issue('CATALOG_CAPACITY_EXCEEDED', kind, '');
   const active = unique(collection(source, 'tasks'));
   const histories = collection(source, 'completed');
+  for (const history of histories) {
+    const values = history.labels ?? [];
+    if (!Array.isArray(values)) throw new ImportError('TASK_LABELS_INVALID');
+    for (const value of values) {
+      const name = text(value);
+      if (labels.some((label) => label.id === name || label.title === name)) continue;
+      if (labels.some((label) => label.title.toLowerCase() === name.toLowerCase()))
+        throw new ImportError('HISTORICAL_LABEL_NAME_CONFLICT');
+      const recovered = catalogRow({
+        id: `imported-label-${createHash('sha256').update(name).digest('hex')}`,
+        name, is_favorite: false,
+      }, 'labels', exportedAt);
+      recovered.sort_order = Math.max(0, ...labels.map((label) => label.sort_order)) + 1;
+      try { validateCatalogFields('labels', recovered); }
+      catch { issue('CATALOG_VALUE_INVALID', 'labels', recovered.id); }
+      labels.push(recovered);
+    }
+  }
+  for (const [kind, rows] of Object.entries({ projects, sections, labels, filters }))
+    if (rows.length > 500) issue('CATALOG_CAPACITY_EXCEEDED', kind, '');
   const activeIds = new Set(active.map((task) => text(task.id)));
   const current = new Map(active.map((row) => [text(row.id), { row, complete: Boolean(row.checked) }]));
   for (const row of [...histories].sort((a, b) => timestamp(a.completed_at) - timestamp(b.completed_at))) {
@@ -265,7 +285,7 @@ export function prepareImport(value: unknown): ImportPlan {
   );
   const tasks = topological(
     [...current.values()].map(({ row, complete }) => {
-      const task = taskRow(row, labels, complete, timeZone);
+      const task = taskRow(row, activeIds.has(text(row.id)) ? sourceLabels : labels, complete, timeZone);
       task.sort_order = taskPositions.get(task.id) ?? 0;
       try {
         validateTaskFields(task);
@@ -287,13 +307,16 @@ export function prepareImport(value: unknown): ImportPlan {
     if (task.parent_id && taskById.get(task.parent_id)?.project_id !== task.project_id)
       throw new ImportError('TASK_PARENT_PROJECT_MISMATCH');
   }
-  const completionsByTime = new Map<string, CompletionRow>();
+  const events = source.completion_events === undefined ? [] : collection(source, 'completion_events');
+  const activityTaskIds = new Set(events.map((event) => checkedId(text(event.object_id))));
+  const completionRows = new Map<string, CompletionRow>();
   for (const row of histories) {
     const taskId = checkedId(text(row.id));
+    if (activityTaskIds.has(taskId)) continue;
     const completedAt = timestamp(row.completed_at);
     const identity = `${taskId}:${String(completedAt)}`;
-    if (completionsByTime.has(identity)) continue;
-    completionsByTime.set(identity, {
+    if (completionRows.has(identity)) continue;
+    completionRows.set(identity, {
       id: `todoist-${createHash('sha256').update(identity).digest('hex')}`,
       task_id: taskId,
       title: text(row.content),
@@ -304,8 +327,6 @@ export function prepareImport(value: unknown): ImportPlan {
       imported: 1,
     });
   }
-  const snapshotCompletions = new Map(completionsByTime);
-  const events = source.completion_events === undefined ? [] : collection(source, 'completion_events');
   const eventIdentities = new Map<string, string>();
   for (const event of events) {
     if (event.object_type !== 'item' || event.event_type !== 'completed')
@@ -321,23 +342,21 @@ export function prepareImport(value: unknown): ImportPlan {
     const previous = eventIdentities.get(eventId);
     if (previous && previous !== identity) throw new ImportError('COMPLETION_EVENT_IDENTITY_CONFLICT');
     eventIdentities.set(eventId, identity);
-    const existing = snapshotCompletions.get(identity);
     const currentTask = taskById.get(taskId);
     const extra = event.extra_data ? object(event.extra_data) : {};
     const due = text(extra.due_date).slice(0, 10);
-    completionsByTime.delete(identity);
-    completionsByTime.set(`activity:${eventId}`, {
+    completionRows.set(`activity:${eventId}`, {
       id: `todoist-${createHash('sha256').update(`activity:${eventId}`).digest('hex')}`,
       task_id: taskId,
-      title: text(extra.content, existing?.title ?? currentTask?.title ?? ''),
+      title: text(extra.content, currentTask?.title ?? ''),
       completed_at: completedAt,
-      due_date: validDate(due) ? due : (existing?.due_date ?? ''),
-      project_id: text(event.parent_project_id, existing?.project_id ?? ''),
-      task_created_at: existing?.task_created_at ?? currentTask?.created_at ?? 0,
+      due_date: validDate(due) ? due : '',
+      project_id: text(event.parent_project_id),
+      task_created_at: currentTask?.created_at ?? 0,
       imported: 1,
     });
   }
-  const completions = [...completionsByTime.values()].sort((a, b) =>
+  const completions = [...completionRows.values()].sort((a, b) =>
     a.completed_at - b.completed_at || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
   );
   const occurrenceCounts = new Map<string, number>();
@@ -363,6 +382,7 @@ export function prepareImport(value: unknown): ImportPlan {
     filters,
     tasks,
     completions,
+    recoveredHistoricalLabels: labels.length - sourceLabels.length,
     issues,
     gaps,
   };

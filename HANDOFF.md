@@ -37,6 +37,13 @@ installs, Ops fixture enrollment, Home deployment assertion, native startup deco
 and generated HCL alignment. Native controls and calendar projections now have regressions; all 1,994 Python
 units pass. Real-source export remains read-only and incomplete while protocol coverage is verified. The
 private loopback tools and any private snapshots are outside the repository and must not be committed.
+Second branch CI 39071963810 (`865ac940`) passed every app/runtime/infra/contract job; only a stale proto
+test app-list assertion failed and is now corrected locally. Private export and reference/filter coverage
+preflight are complete. One monthly-date policy question (`every 30th` in February) is waiting for the owner;
+do not silently choose it or activate/import around the unsupported row. Current UI adds formatted
+descriptions through a lazy shared-library renderer and shows completion errors inside the dialog; ten real
+browser scenarios pass. The next checkpoint needs full CI, staged service release, private import/identity
+checks and the coordinated source activation. Existing Todoist remains authoritative.
 
 Todoist Plus UI refinement is released at `b79180283db375757f2cc8d29e481e55a6935c40`.
 [Full branch CI 39013842528](https://github.com/ziyixi/todofy/actions/runs/39013842528) and

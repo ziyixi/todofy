@@ -32,7 +32,11 @@ export async function todoistRead(token, path, { fetcher = fetch, body } = {}) {
     redirect: 'error',
   });
   if (!response.ok) throw new ExportError(`TODOIST_READ_HTTP_${response.status}`);
-  return response.json();
+  return JSON.parse(await response.text(), (key, value, context) => {
+    if (key === 'id' && typeof value === 'number' && !Number.isSafeInteger(value) && /^\d+$/.test(context.source))
+      return context.source;
+    return value;
+  });
 }
 
 export async function readPages(read, path, parameters = {}, collection = 'results') {

@@ -30,6 +30,7 @@ async function main() {
         filters: plan.filters.length,
         tasks: plan.tasks.length,
         completions: plan.completions.length,
+        recovered_historical_labels: plan.recoveredHistoricalLabels,
       },
       issue_count: plan.issues.length,
       issue_codes: [...new Set(plan.issues.map((issue) => issue.code))],

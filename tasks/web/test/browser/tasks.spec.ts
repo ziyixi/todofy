@@ -281,3 +281,58 @@ test("dragging custom order persists and selected tasks complete as a group", as
     page.getByText("Synthetic ordered Beta", { exact: true }),
   ).not.toBeVisible();
 });
+
+test("completing a parent with a recurring subtask shows the reason inside its open editor", async ({ page, request }) => {
+  const parent = await createTask(request, "Synthetic parent with recurring work");
+  await createTask(request, "Synthetic daily recurring child", {
+    parent_id: parent.id,
+    due_date: "2030-01-01",
+    recurrence: "every day",
+  });
+  await page.goto(`/?task=${parent.id}#/inbox`);
+  const dialog = page.getByRole("dialog", { name: "Task details" });
+  await expect(dialog.getByRole("button", { name: "Synthetic daily recurring child", exact: true })).toBeVisible();
+  await dialog.getByRole("button", { name: "Complete task", exact: true }).click();
+  await expect(dialog.getByRole("alert")).toHaveText("Complete recurring subtasks separately before completing their parent");
+  await expect(dialog).toBeVisible();
+  const saved = await request.get(`/api/tasks/v1/tasks/${parent.id}`);
+  expect(saved.status()).toBe(200);
+  expect((await saved.json()).completed ?? false).toBe(false);
+});
+
+
+test("task descriptions render Markdown, edit and persist without loading remote images", async ({ page, request }) => {
+  const parent = await createTask(request, "Synthetic formatted description", {
+    description: "Read [the guide](https://example.org/guide). Plain source: https://example.org/source?id=123&view=full.\n\n- First step\n- Second step\n\n![Reference image](https://example.org/private-image.png)\n\n<script>window.descriptionUnsafe = true</script>",
+  });
+  const remoteRequests: string[] = [];
+  page.on("request", (incoming) => {
+    if (incoming.url().startsWith("https://example.org/")) remoteRequests.push(incoming.url());
+  });
+  await page.goto(`/?task=${parent.id}#/inbox`);
+  const dialog = page.getByRole("dialog", { name: "Task details" });
+  const description = dialog.getByRole("region", { name: "Task description" });
+  const guide = description.getByRole("link", { name: "the guide", exact: true });
+  await expect(guide).toHaveAttribute("href", "https://example.org/guide");
+  await expect(guide).toHaveAttribute("target", "_blank");
+  const bareLink = description.getByRole("link", { name: "https://example.org/source?id=123&view=full", exact: true });
+  await expect(bareLink).toHaveAttribute("href", "https://example.org/source?id=123&view=full");
+  await expect(bareLink).toHaveAttribute("target", "_blank");
+  expect(remoteRequests).toEqual([]);
+  await expect(description.getByRole("listitem")).toHaveCount(2);
+  await expect(description.locator("img, script")).toHaveCount(0);
+  await expect(description.getByRole("textbox")).toHaveCount(0);
+  await description.getByRole("button", { name: "Edit description", exact: true }).click();
+  const editor = description.getByRole("textbox", { name: "Description", exact: true });
+  await expect(editor).toHaveValue(/\[the guide\]/);
+  await editor.fill("Updated [the guide](https://example.org/updated).\n\n- Saved step");
+  await description.getByRole("button", { name: "Done", exact: true }).click();
+  await expect(description.getByRole("link", { name: "the guide", exact: true })).toHaveAttribute("href", "https://example.org/updated");
+  await dialog.getByRole("button", { name: "Save changes", exact: true }).click();
+  await expect(dialog).not.toBeVisible();
+  await page.goto(`/?task=${parent.id}#/inbox`);
+  await page.reload();
+  await expect(description.getByRole("link", { name: "the guide", exact: true })).toHaveAttribute("href", "https://example.org/updated");
+  await expect(description.getByRole("listitem")).toHaveText(["Saved step"]);
+  expect(remoteRequests).toEqual([]);
+});

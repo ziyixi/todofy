@@ -29,6 +29,7 @@ const weekdays = {
   sat: RRule.SA,
   sun: RRule.SU,
 } as const;
+const months = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
 
 export function validDate(value: string): boolean {
   return (
@@ -93,6 +94,7 @@ export function recurrenceRule(text: string, start: string): { rule: RecurrenceR
   const normalized = aliases[raw] ?? raw;
   const afterCompletion = normalized.startsWith('every!') || normalized === 'every day' || normalized === 'every week';
   const plain = normalized.replace(/^every!/, 'every');
+  let ruleStart = calendar(start);
   let options: Partial<Options>;
   if (/^rrule:/i.test(text)) {
     if (
@@ -109,9 +111,10 @@ export function recurrenceRule(text: string, start: string): { rule: RecurrenceR
   } else {
     const interval = /^every (?:(\d{1,3}) )?(day|days|week|weeks|month|months|year|years)$/.exec(plain);
     const weekday =
-      /^every (mon(?:day)?|tue(?:sday)?|wed(?:nesday)?|thu(?:rsday)?|fri(?:day)?|sat(?:urday)?|sun(?:day)?)$/.exec(
+      /^every (?:(\d{1,3}) weeks? )?(mon(?:day)?|tue(?:sday)?|wed(?:nesday)?|thu(?:rsday)?|fri(?:day)?|sat(?:urday)?|sun(?:day)?)$/.exec(
         plain,
       );
+    const annual = /^every (\d{1,2})(?:st|nd|rd|th) (jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)$/.exec(plain);
     if (interval) {
       const frequencies = {
         day: RRule.DAILY,
@@ -123,16 +126,27 @@ export function recurrenceRule(text: string, start: string): { rule: RecurrenceR
       options = { freq: frequencies[unit], interval: Number(interval[1] ?? 1) };
     } else if (weekday) {
       if (afterCompletion) throw new TaskDateError('Completion-based weekday rules are not supported');
+      const byweekday = weekdays[weekday[2]!.slice(0, 3) as keyof typeof weekdays];
       options = {
         freq: RRule.WEEKLY,
-        byweekday: [weekdays[weekday[1]!.slice(0, 3) as keyof typeof weekdays]],
+        interval: Number(weekday[1] ?? 1),
+        byweekday: [byweekday],
       };
+      // A newly entered biweekly rule starts on the next named weekday, then repeats every N weeks.
+      ruleStart = new RRule({ freq: RRule.WEEKLY, byweekday: [byweekday], dtstart: ruleStart }, true).after(ruleStart, true)!;
+    } else if (annual) {
+      if (afterCompletion) throw new TaskDateError('Completion-based calendar dates are not supported');
+      const month = months.indexOf(annual[2]!.slice(0, 3)) + 1;
+      const day = Number(annual[1]);
+      if (!validDate(`2000-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`))
+        throw new TaskDateError('Invalid annual calendar date');
+      options = { freq: RRule.YEARLY, bymonth: month, bymonthday: day };
     } else throw new TaskDateError('Unsupported recurrence; choose an explicit supported rule');
   }
   if ((options.interval ?? 1) < 1 || (options.interval ?? 1) > 365)
     throw new TaskDateError('Recurrence interval out of range');
   return {
-    rule: new RRule({ ...options, dtstart: calendar(start) }, true),
+    rule: new RRule({ ...options, dtstart: ruleStart }, true),
     afterCompletion,
   };
 }
