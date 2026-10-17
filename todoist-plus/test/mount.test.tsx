@@ -4,6 +4,11 @@ import type { ContentScriptContext } from "wxt/utils/content-script-context";
 import { mountTodoist } from "../src/mount";
 import type { PlanConfig } from "../src/model";
 import type { PageStatus } from "../src/page-status";
+import {
+  DEFAULT_PLAN_VIEW,
+  type PlanViewPatch,
+  type PlanViewState,
+} from "../src/plan-view-state";
 
 // A synthetic Todoist shell; the real built extension runs in the packaged browser tests.
 const state = vi.hoisted(() => ({
@@ -20,6 +25,17 @@ const state = vi.hoisted(() => ({
   savedOtherViews: [] as boolean[],
   reports: [] as PageStatus[],
   timers: [] as (() => void)[],
+  // Plan's stored view (or why it cannot be read), the patches saved, and App's last props.
+  planView: undefined as PlanViewState | Error | undefined,
+  savedPlanView: [] as PlanViewPatch[],
+  app: undefined as
+    | {
+        view: string;
+        review?: boolean;
+        planView?: PlanViewState;
+        onPlanView?: (patch: PlanViewPatch) => void;
+      }
+    | undefined,
 }));
 vi.mock("wxt/utils/content-script-ui/shadow-root", () => ({
   createShadowRootUi: async (
@@ -69,11 +85,18 @@ vi.mock("../src/client", () => ({
   readOtherViews: async () => state.otherViews,
   saveOtherViews: (open: boolean) => state.savedOtherViews.push(open),
   reportPage: (status: PageStatus) => state.reports.push(status),
+  readPlanView: async () => {
+    if (state.planView instanceof Error) throw state.planView;
+    return state.planView;
+  },
+  savePlanView: (patch: PlanViewPatch) => state.savedPlanView.push(patch),
 }));
 vi.mock("../src/App", () => ({
-  App: ({ view }: { view: string }) => {
-    if (state.crash.includes(view)) throw new Error("Synthetic render failure");
-    return <p className="synthetic-app">{view}</p>;
+  App: (props: NonNullable<typeof state.app>) => {
+    state.app = props;
+    if (state.crash.includes(props.view))
+      throw new Error("Synthetic render failure");
+    return <p className="synthetic-app">{props.view}</p>;
   },
 }));
 
@@ -148,6 +171,9 @@ beforeEach(() => {
     savedOtherViews: [],
     reports: [],
     timers: [],
+    planView: undefined,
+    savedPlanView: [],
+    app: undefined,
   });
   history.replaceState(null, "", "/app/today");
   shell();
@@ -598,4 +624,69 @@ it("reads a configuration cached before the Mailbox as one with no project to hi
   await settle();
   expect(visible("#mail-project")).toBe(true);
   expect(visible("#replaced")).toBe(false);
+});
+
+it("hands Plan's remembered view to App and keeps its changes for the next visit", async () => {
+  const stored: PlanViewState = {
+    ...DEFAULT_PLAN_VIEW,
+    tab: "week",
+    committedFolded: true,
+  };
+  state.planView = stored;
+  history.replaceState(null, "", "/app/today?todoist-plus=plan");
+  const { ctx } = context();
+  await act(() => mountTodoist(ctx));
+  await screen.findByText("plan");
+  expect(state.app!.planView).toEqual(stored);
+  act(() => state.app!.onPlanView!({ commitment: "outcome-2" }));
+  expect(state.savedPlanView).toEqual([{ commitment: "outcome-2" }]);
+  // Mail and back to Plan: it mounts again with the change, which was sent once.
+  fireEvent.click(screen.getByRole("button", { name: "Mail" }));
+  await screen.findByText("mailbox");
+  fireEvent.click(screen.getByRole("button", { name: "Plan" }));
+  await screen.findByText("plan");
+  expect(state.app!.planView).toEqual({ ...stored, commitment: "outcome-2" });
+  expect(state.savedPlanView).toHaveLength(1);
+});
+
+it("starts Plan from the default view when the stored one cannot be read, and sends only changes", async () => {
+  state.planView = new Error("Synthetic storage failure");
+  history.replaceState(null, "", "/app/today?todoist-plus=plan");
+  const { ctx } = context();
+  await act(() => mountTodoist(ctx));
+  await screen.findByText("plan");
+  expect(state.app!.planView).toEqual(DEFAULT_PLAN_VIEW);
+  expect(state.savedPlanView).toEqual([]);
+  act(() => state.app!.onPlanView!({ committedFolded: true }));
+  expect(state.savedPlanView).toEqual([{ committedFolded: true }]);
+});
+
+it("opens the checklist from the review link once, so Back after a close keeps it closed", async () => {
+  history.replaceState(null, "", "/app/today?todoist-plus=review");
+  const { ctx } = context();
+  await act(() => mountTodoist(ctx));
+  await screen.findByText("plan");
+  expect(state.app!.review).toBe(true);
+  const review = { week: "2026-10-12", open: true, lines: [], kept: [] };
+  act(() => state.app!.onPlanView!({ review }));
+  // Once its open state is stored, the link's parameter says plan.
+  expect(new URL(location.href).searchParams.get("todoist-plus")).toBe("plan");
+  act(() =>
+    state.app!.onPlanView!({ review: { ...review, open: false, lines: [1] } }),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Mail" }));
+  await screen.findByText("mailbox");
+  await act(async () => {
+    history.back();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  });
+  await settle();
+  expect(location.search).toBe("?todoist-plus=plan");
+  expect(await screen.findByText("plan")).toBeTruthy();
+  expect(state.app!.review).toBe(false);
+  expect(state.app!.planView!.review).toEqual({
+    ...review,
+    open: false,
+    lines: [1],
+  });
 });

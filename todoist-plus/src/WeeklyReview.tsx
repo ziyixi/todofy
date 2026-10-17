@@ -13,10 +13,7 @@ import { weekLabel } from "./PlanningCalendar";
 import {
   inboxToClarify,
   isLastDay,
-  isoWeek,
   oldestUntouched,
-  readProgress,
-  saveProgress,
   SOMEDAY_LABELS,
   unscheduledCommitments,
   untouchedDays,
@@ -48,6 +45,9 @@ interface Props {
   run: RunOperation;
   actions: PlusActions;
   editTask: (task: PlanningTask) => void;
+  /** This week's ticked lines and kept someday tasks, which PlanView remembers. */
+  progress: ReviewProgress;
+  onProgress: (progress: ReviewProgress) => void;
   onShowWaiting: () => void;
   /** Week at this commitment, the first with nothing planned. */
   onPlanSteps: (commitmentId: string) => void;
@@ -60,8 +60,7 @@ interface Props {
 /**
  * Five weekly review lines with counts and jump targets, and a sixth while deadlines lack a
  * start-ahead choice. It only guides: every write is one of the owner's existing single-task
- * actions, made when clicked, or on Sunday next week's two Bets. Ticks are kept per ISO week in
- * this browser.
+ * actions, made when clicked, or on Sunday next week's two Bets.
  */
 export function WeeklyReview({
   plan,
@@ -73,6 +72,8 @@ export function WeeklyReview({
   run,
   actions,
   editTask,
+  progress,
+  onProgress,
   onShowWaiting,
   onPlanSteps,
   completeReview,
@@ -81,10 +82,6 @@ export function WeeklyReview({
 }: Props) {
   const text = words(language);
   const zh = language === "zh";
-  const week = isoWeek(plan.week);
-  const [progress, setProgress] = useState<ReviewProgress>(() =>
-    readProgress(week),
-  );
   const [reviewDone, setReviewDone] = useState(false);
   // The two item lists stay folded until asked for.
   const [shown, setShown] = useState<ReadonlySet<number>>(new Set());
@@ -95,10 +92,6 @@ export function WeeklyReview({
   const [focusAt, setFocusAt] = useState<{ line: number; index: number }>();
   const section = useRef<HTMLElement>(null);
   const heading = useRef<HTMLHeadingElement>(null);
-  function update(next: ReviewProgress) {
-    setProgress(next);
-    saveProgress(week, next);
-  }
   const waits = (task: PlanningTask) =>
     busy || (pending?.has(pendingTask(task.id)) ?? false);
 
@@ -188,7 +181,7 @@ export function WeeklyReview({
           checked={ticked}
           aria-label={`${zh ? "已看完" : "Reviewed"}: ${title}`}
           onChange={() =>
-            update({
+            onProgress({
               ...progress,
               lines: ticked
                 ? progress.lines.filter((value) => value !== index)
@@ -373,7 +366,7 @@ export function WeeklyReview({
                         data-review-action
                         aria-label={`${keep}: ${title}`}
                         onClick={() => {
-                          update({
+                          onProgress({
                             ...progress,
                             kept: [...progress.kept, task.id],
                           });

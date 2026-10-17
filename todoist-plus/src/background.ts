@@ -15,13 +15,22 @@ import {
 } from "./messages";
 import { planConfig } from "./domain";
 import { pageStatus } from "./page-status";
+import {
+  DEFAULT_PLAN_VIEW,
+  mergePlanView,
+  planViewPatch,
+  planViewState,
+} from "./plan-view-state";
 import type { PlanConfig, PlanMetadata, PlusActions } from "./model";
 const storageKey = "connection";
 const knownKey = "knownFlowTasks";
 const configKey = "planConfig";
 const statusKey = "pageStatus";
 const otherViewsKey = "otherViewsOpen";
+const planViewKey = "planView";
 let api: PlusActions | undefined;
+// Plan view patches are merged one at a time, so two tabs never lose each other's fields.
+let planViewWrites: Promise<unknown> = Promise.resolve();
 // Session storage outlives an idle-stopped worker, not the browser session.
 const knownTasks: KnownTaskStore = {
   async read() {
@@ -57,7 +66,12 @@ function rememberPlan(client: PlusActions, plan: PlanMetadata) {
 async function forgetConnection() {
   // Cleared first, so a call still running cannot store its results after the removal.
   api = undefined;
-  await browser.storage.local.remove([storageKey, configKey, otherViewsKey]);
+  await browser.storage.local.remove([
+    storageKey,
+    configKey,
+    otherViewsKey,
+    planViewKey,
+  ]);
   await browser.storage.session.remove(knownKey);
 }
 export function registerBackground() {
@@ -92,6 +106,29 @@ export function registerBackground() {
             throw new Error("Unsupported extension operation.");
           await browser.storage.local.set({ [otherViewsKey]: message.open });
           return null;
+        }
+        // Plan's view, IDs and line numbers only; a patch outside its bounds is refused.
+        if (message.kind === "planView" && todoist) {
+          if (message.patch === undefined) {
+            const saved = await browser.storage.local.get(planViewKey);
+            return planViewState(saved[planViewKey]) ?? null;
+          }
+          const patch = planViewPatch(message.patch);
+          if (!patch) throw new Error("Unsupported extension operation.");
+          const write = planViewWrites.then(async () => {
+            const saved = await browser.storage.local.get(planViewKey);
+            const merged = planViewState(
+              mergePlanView(
+                planViewState(saved[planViewKey]) ?? DEFAULT_PLAN_VIEW,
+                patch,
+              ),
+            );
+            if (!merged) throw new Error("Unsupported extension operation.");
+            await browser.storage.local.set({ [planViewKey]: merged });
+            return merged;
+          });
+          planViewWrites = write.catch(() => {});
+          return write;
         }
         // Only keys from closed sets are kept; anything else is refused, not stored.
         if (message.kind === "reportPage" && todoist) {

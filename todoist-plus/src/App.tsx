@@ -28,6 +28,7 @@ import { TaskEditor } from "./TaskEditor";
 import { BoardLabels } from "./BoardLabels";
 import { WeeklyGoals } from "./WeeklyGoals";
 import { Mailbox } from "./Mailbox";
+import type { PlanViewPatch, PlanViewState } from "./plan-view-state";
 import type {
   Language,
   PendingChange,
@@ -55,6 +56,9 @@ interface Props {
   onSnapshot?: (snapshot?: PlusSnapshot) => void;
   /** Opened from the weekly review task's link: Plan starts with the review checklist. */
   review?: boolean;
+  /** Plan's remembered view, and where its changes go. */
+  planView?: PlanViewState;
+  onPlanView?: (patch: PlanViewPatch) => void;
 }
 export function App({
   actions,
@@ -68,6 +72,8 @@ export function App({
   snapshot,
   onSnapshot,
   review,
+  planView,
+  onPlanView,
 }: Props) {
   // What the server confirmed, from reads and writes. Pending drags are drawn on top of it.
   const [confirmed, setConfirmed] = useState<PlusData | undefined>(
@@ -567,6 +573,8 @@ export function App({
                 onReviewShown={onReviewShown}
                 onOpenMailbox={() => onViewChange?.("mailbox")}
                 reviewing={review}
+                planView={planView}
+                onPlanView={onPlanView}
                 showStart={showStart}
                 onStartShown={() => setShowStart(false)}
               />

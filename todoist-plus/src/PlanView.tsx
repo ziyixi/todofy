@@ -6,6 +6,12 @@ import { ReviewBoard } from "./ReviewBoard";
 import { PlanningWeek } from "./PlanningWeek";
 import { WeeklyReview } from "./WeeklyReview";
 import { words } from "./i18n";
+import {
+  DEFAULT_PLAN_VIEW,
+  type PlanViewPatch,
+  type PlanViewState,
+} from "./plan-view-state";
+import type { ReviewProgress } from "./weekly-review";
 import type {
   RunOperation,
   Area,
@@ -47,6 +53,10 @@ export interface PlanViewProps {
   /** Opened from Focus's quiet line: Review, with Start now focused. */
   showStart?: boolean;
   onStartShown?: () => void;
+  /** Plan's remembered view, read once when Plan mounts. */
+  planView?: PlanViewState;
+  /** Called with the fields of the view that changed, each time the owner changes one. */
+  onPlanView?: (patch: PlanViewPatch) => void;
 }
 /**
  * Where a jump lands: a lane of the Review board, or else the first card there in that state
@@ -63,16 +73,34 @@ const JUMPS = {
   ],
   runway: [".planning-runway"],
 };
+/** The remembered view as this week shows it: another week's review starts closed and empty. */
+function seededView(stored: PlanViewState, week: string): PlanViewState {
+  return stored.review.week === week
+    ? stored
+    : { ...stored, review: { week, open: false, lines: [], kept: [] } };
+}
 export function PlanView(props: PlanViewProps) {
-  const { plan, language, editTask, onLabels } = props;
-  const [mode, setMode] = useState<"review" | "week">("review");
-  const [area, setArea] = useState<Area | "all">("all");
-  const [reviewing, setReviewing] = useState(Boolean(props.reviewing));
+  const { plan, language, editTask, onLabels, onPlanView } = props;
+  // Seeded once from the remembered view; the review link and the jumps below apply after it.
+  const [seeded] = useState(() =>
+    seededView(props.planView ?? DEFAULT_PLAN_VIEW, plan.week),
+  );
+  const [mode, setMode] = useState(seeded.tab);
+  const [area, setArea] = useState(seeded.area);
+  const [reviewing, setReviewing] = useState(
+    seeded.review.open || Boolean(props.reviewing),
+  );
+  // The review's ticks and kept items, of the week they were made in.
+  const [progress, setProgress] = useState({
+    week: seeded.review.week,
+    lines: seeded.review.lines,
+    kept: seeded.review.kept,
+  });
   // Week's selected commitment (absent: the first one) and its own area filter.
-  const [commitment, setCommitment] = useState<string>();
+  const [commitment, setCommitment] = useState(seeded.commitment);
   const [weekArea, setWeekArea] = useState<Area | "all">("all");
   // Week's Committed folded to its heading line.
-  const [folded, setFolded] = useState(false);
+  const [folded, setFolded] = useState(seeded.committedFolded);
   // A jump focuses its target and scrolls it into view once.
   const [jump, setJump] = useState<keyof typeof JUMPS>();
   const section = useRef<HTMLElement>(null);
@@ -114,7 +142,46 @@ export function PlanView(props: PlanViewProps) {
     target?.scrollIntoView?.({ block: "nearest" });
     setJump(undefined);
   }, [jump]);
+  const weekProgress: ReviewProgress =
+    progress.week === plan.week
+      ? { lines: progress.lines, kept: progress.kept }
+      : { lines: [], kept: [] };
+  // What the owner sees now; only the fields that differ from the last ones sent are stored.
+  const view: PlanViewState = {
+    tab: mode,
+    area,
+    review: { week: plan.week, open: reviewing, ...weekProgress },
+    ...(commitment === undefined ? {} : { commitment }),
+    committedFolded: folded,
+  };
+  const lastSent = useRef(seeded);
+  // Compared by value: a re-render that shows the same view sends nothing.
+  const viewKey = JSON.stringify(view);
+  useEffect(() => {
+    const sent = lastSent.current;
+    const patch: PlanViewPatch = Object.fromEntries(
+      Object.entries(view).filter(
+        ([key, value]) =>
+          JSON.stringify(value) !==
+          JSON.stringify(sent[key as keyof PlanViewState]),
+      ),
+    );
+    lastSent.current = view;
+    if (Object.keys(patch).length) onPlanView?.(patch);
+  }, [viewKey]);
   const lanes = boardLanes(plan, props.currentDate);
+  const areas: (Area | "all")[] = [
+    "all",
+    "work",
+    "personal",
+    ...(Object.values(lanes).some((cards) =>
+      cards.some((task) => effectiveArea(task, plan.tasks) === "unassigned"),
+    )
+      ? (["unassigned"] as const)
+      : []),
+  ];
+  // A remembered area the filter no longer offers shows every area.
+  const shownArea = areas.includes(area) ? area : "all";
   const commitments = planningOutcomes(plan.tasks, plan.managedLabels).filter(
     (task) => task.stage === "committed",
   );
@@ -168,6 +235,8 @@ export function PlanView(props: PlanViewProps) {
         <WeeklyReview
           // Ticks belong to one week; a Monday rollover starts the next week's list.
           key={plan.week}
+          progress={weekProgress}
+          onProgress={(next) => setProgress({ week: plan.week, ...next })}
           plan={plan}
           days={props.days}
           today={props.currentDate}
@@ -194,24 +263,11 @@ export function PlanView(props: PlanViewProps) {
             role="tablist"
             aria-label={language === "zh" ? "事项范围" : "Outcome area"}
           >
-            {(
-              [
-                "all",
-                "work",
-                "personal",
-                ...(Object.values(lanes).some((cards) =>
-                  cards.some(
-                    (task) => effectiveArea(task, plan.tasks) === "unassigned",
-                  ),
-                )
-                  ? ["unassigned"]
-                  : []),
-              ] as (Area | "all")[]
-            ).map((value) => (
+            {areas.map((value) => (
               <button
                 key={value}
                 role="tab"
-                aria-selected={area === value}
+                aria-selected={shownArea === value}
                 onClick={() => setArea(value)}
               >
                 {value === "all"
@@ -222,7 +278,7 @@ export function PlanView(props: PlanViewProps) {
               </button>
             ))}
           </div>
-          <ReviewBoard {...props} lanes={lanes} area={area} />
+          <ReviewBoard {...props} lanes={lanes} area={shownArea} />
         </>
       ) : (
         <PlanningWeek

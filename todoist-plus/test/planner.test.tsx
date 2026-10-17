@@ -7,6 +7,12 @@ import {
 } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { PlanView, type PlanViewProps } from "../src/PlanView";
+import {
+  DEFAULT_PLAN_VIEW,
+  mergePlanView,
+  type PlanViewPatch,
+  type PlanViewState,
+} from "../src/plan-view-state";
 import { createPrototype } from "../design/fixture";
 
 afterEach(cleanup);
@@ -30,6 +36,18 @@ async function props(): Promise<PlanViewProps> {
 }
 function openWeek() {
   fireEvent.click(screen.getByRole("tab", { name: /^Week$/u }));
+}
+/** A store like the extension's: every patch PlanView sends, merged into one view. */
+function viewStore(initial: PlanViewState = DEFAULT_PLAN_VIEW) {
+  const store = {
+    view: initial,
+    patches: [] as PlanViewPatch[],
+    onPlanView: (patch: PlanViewPatch) => {
+      store.patches.push(patch);
+      store.view = mergePlanView(store.view, patch);
+    },
+  };
+  return store;
 }
 
 it("opens Review with four real stages and keeps an unplanned task outside the commitment count", async () => {
@@ -272,4 +290,110 @@ it("folds Committed to its heading line and keeps the runway line and Next steps
   expect(
     screen.getByText("Expand Committed to choose an outcome."),
   ).toBeTruthy();
+});
+
+it("remembers Week, its commitment and fold, and this week's review when Plan mounts again", async () => {
+  const data = await props();
+  const store = viewStore();
+  const first = render(
+    <PlanView {...data} planView={store.view} onPlanView={store.onPlanView} />,
+  );
+  // A mount alone stores nothing.
+  expect(store.patches).toEqual([]);
+  openWeek();
+  fireEvent.click(
+    screen.getByRole("button", {
+      name: /^Prepare the next research check-in,/u,
+    }),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Committed" }));
+  fireEvent.click(screen.getByRole("button", { name: "Weekly review" }));
+  fireEvent.click(screen.getByRole("checkbox", { name: "Reviewed: Waiting" }));
+  const review = { week: "2026-10-12", open: true, lines: [], kept: [] };
+  // Each change sends only its own field.
+  expect(store.patches).toEqual([
+    { tab: "week" },
+    { commitment: "research" },
+    { committedFolded: true },
+    { review },
+    { review: { ...review, lines: [2] } },
+  ]);
+  first.unmount();
+
+  render(
+    <PlanView {...data} planView={store.view} onPlanView={store.onPlanView} />,
+  );
+  expect(store.patches).toHaveLength(5);
+  expect(
+    screen.getByRole("tab", { name: "Week" }).getAttribute("aria-selected"),
+  ).toBe("true");
+  expect(
+    screen.getByRole("region", {
+      name: "Next steps: Prepare the next research check-in",
+    }),
+  ).toBeTruthy();
+  expect(
+    screen
+      .getByRole("button", { name: "Committed" })
+      .getAttribute("aria-expanded"),
+  ).toBe("false");
+  expect(
+    screen.getByRole("checkbox", { name: "Reviewed: Waiting" }),
+  ).toHaveProperty("checked", true);
+});
+
+it("falls back from a remembered view that no longer fits, writing nothing for it", async () => {
+  const data = await props();
+  const store = viewStore({
+    tab: "week",
+    area: "unassigned",
+    // Moved out of Committed since.
+    commitment: "gone",
+    // Last week's checklist was left open.
+    review: { week: "2026-10-05", open: true, lines: [1], kept: [] },
+    committedFolded: false,
+  });
+  render(
+    <PlanView {...data} planView={store.view} onPlanView={store.onPlanView} />,
+  );
+  expect(
+    screen.getByRole("region", {
+      name: "Next steps: Ship the small website refresh",
+    }),
+  ).toBeTruthy();
+  // A new week starts closed.
+  expect(screen.queryByRole("region", { name: "Weekly review" })).toBeNull();
+  fireEvent.click(screen.getByRole("tab", { name: "Review" }));
+  // No unassigned outcome is on the board, so the filter shows every area.
+  expect(screen.queryByRole("tab", { name: "Unassigned" })).toBeNull();
+  expect(
+    screen.getByRole("tab", { name: "All" }).getAttribute("aria-selected"),
+  ).toBe("true");
+  expect(store.patches).toEqual([{ tab: "review" }]);
+  // This week's checklist starts empty.
+  fireEvent.click(screen.getByRole("button", { name: "Weekly review" }));
+  expect(
+    screen.getByRole("checkbox", { name: "Reviewed: Mail to clarify" }),
+  ).toHaveProperty("checked", false);
+});
+
+it("opens the checklist from the review link even when it was left closed, and stores that", async () => {
+  const data = await props();
+  const review = { week: "2026-10-12", open: false, lines: [3], kept: [] };
+  const store = viewStore({ ...DEFAULT_PLAN_VIEW, review });
+  render(
+    <PlanView
+      {...data}
+      reviewing
+      planView={store.view}
+      onPlanView={store.onPlanView}
+    />,
+  );
+  expect(screen.getByRole("region", { name: "Weekly review" })).toBeTruthy();
+  expect(
+    screen.getByRole("checkbox", {
+      name: "Reviewed: Commitments not planned",
+    }),
+  ).toHaveProperty("checked", true);
+  expect(store.patches).toEqual([{ review: { ...review, open: true } }]);
 });

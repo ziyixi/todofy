@@ -1,5 +1,5 @@
 import { expect, test, type Worker } from "@playwright/test";
-import { launchPlanner } from "./planner-setup";
+import { launchPlanner, storedPlanView } from "./planner-setup";
 
 type ReviewState = {
   tasks: Record<string, unknown>[];
@@ -14,7 +14,7 @@ async function writes(worker: Worker) {
   );
 }
 
-test("the review task's link opens the checklist; ticks survive a reload and only Finish review completes the task", async () => {
+test("the review task's link opens the checklist; ticks survive a reload and Mail and Back, and only Finish review completes the task", async () => {
   const { context, worker } = await launchPlanner();
   try {
     await worker.evaluate(() => {
@@ -63,6 +63,14 @@ test("the review task's link opens the checklist; ticks survive a reload and onl
     // The mail line opens Plus's Mailbox, not the native project (checked at the end).
     await expect(review.getByRole("link")).toHaveCount(0);
     await inbox.check();
+    // The extension keeps the open checklist and its tick (line numbers only), and the link's
+    // parameter becomes plan, so that Back never reopens a checklist closed since.
+    await expect
+      .poll(() => storedPlanView(worker))
+      .toMatchObject({
+        review: { week: "2026-10-12", open: true, lines: [1], kept: [] },
+      });
+    await expect(page).toHaveURL(/todoist-plus=plan$/u);
     await page.reload();
     await expect(
       page
@@ -109,6 +117,14 @@ test("the review task's link opens the checklist; ticks survive a reload and onl
     await expect(
       page.getByRole("heading", { name: "Mail", level: 1 }),
     ).toBeFocused();
+    // Back to Plan: the checklist is still open, with its tick.
+    await page.goBack();
+    await expect(page).toHaveURL(/todoist-plus=plan$/u);
+    await expect(
+      page
+        .getByRole("region", { name: "Weekly review" })
+        .getByRole("checkbox", { name: "Reviewed: Mail to clarify" }),
+    ).toBeChecked();
   } finally {
     await context.close();
   }

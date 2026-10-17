@@ -21,9 +21,17 @@ import {
   extensionActions,
   openOptions,
   readOtherViews,
+  readPlanView,
   reportPage,
   saveOtherViews,
+  savePlanView,
 } from "./client";
+import {
+  DEFAULT_PLAN_VIEW,
+  mergePlanView,
+  type PlanViewPatch,
+  type PlanViewState,
+} from "./plan-view-state";
 import type { Enhancement, PageStatus, Reason } from "./page-status";
 import { words } from "./i18n";
 import type {
@@ -112,6 +120,7 @@ export async function mountTodoist(ctx: ContentScriptContext) {
   // Started before the sidebar exists, so mounting rarely waits for them.
   const savedConfig = cachedPlanConfig().catch(() => undefined);
   const savedOtherViews = readOtherViews().catch(() => false);
+  const savedPlanView = readPlanView().catch(() => undefined);
   let view: View | undefined;
   let language = languageOf(document);
   let disposed = false;
@@ -130,6 +139,8 @@ export async function mountTodoist(ctx: ContentScriptContext) {
   let detailFailed = "";
   // The owner's last open or closed choice, kept in storage.local; read once, at the first mount.
   let otherViewsOpen: boolean | undefined;
+  // Plan's view as stored, with this page's own changes merged in; read once, at the first mount.
+  let planView: PlanViewState | undefined;
   let favoritesRoot: Root | undefined;
   let favoritesHost: HTMLElement | undefined;
   let favoritesCleanup: (() => void) | undefined;
@@ -423,12 +434,25 @@ export async function mountTodoist(ctx: ContentScriptContext) {
             snapshot={snapshot}
             onSnapshot={keepSnapshot}
             review={viewValue() === "review"}
+            planView={planView}
+            onPlanView={rememberPlanView}
           />
         </PlusBoundary>,
       );
     }
     hideReplaced();
     navUpdate?.();
+  }
+  /** Keeps a change of Plan's view for the next visit: in this page's copy, and in storage.local. */
+  function rememberPlanView(patch: PlanViewPatch) {
+    planView = mergePlanView(planView ?? DEFAULT_PLAN_VIEW, patch);
+    savePlanView(patch);
+    // The review task's link opens the checklist once; Back later restores what is stored.
+    if (patch.review && viewValue() === "review") {
+      const url = new URL(location.href);
+      url.searchParams.set(viewParam, "plan");
+      history.replaceState(history.state, "", url);
+    }
   }
   function navigate(next: View) {
     const url = new URL(location.href);
@@ -561,6 +585,7 @@ export async function mountTodoist(ctx: ContentScriptContext) {
       if (nav) await mountNav(nav);
       config ??= await savedConfig;
       otherViewsOpen ??= await savedOtherViews;
+      planView ??= (await savedPlanView) ?? DEFAULT_PLAN_VIEW;
     } finally {
       mounting = false;
     }

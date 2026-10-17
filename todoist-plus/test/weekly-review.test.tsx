@@ -19,6 +19,12 @@ import {
   untouchedDays,
   WAITING_LABELS,
 } from "../src/weekly-review";
+import {
+  DEFAULT_PLAN_VIEW,
+  mergePlanView,
+  type PlanViewPatch,
+  type PlanViewState,
+} from "../src/plan-view-state";
 import { createPrototype } from "../design/fixture";
 import type { PlanningTask, PlusActions } from "../src/model";
 
@@ -67,7 +73,10 @@ function openReview() {
   fireEvent.click(screen.getByRole("button", { name: "Weekly review" }));
   return within(screen.getByRole("region", { name: "Weekly review" }));
 }
-function renderApp(actions: PlusActions) {
+function renderApp(
+  actions: PlusActions,
+  onPlanView?: (patch: PlanViewPatch) => void,
+) {
   render(
     <App
       actions={actions}
@@ -75,6 +84,7 @@ function renderApp(actions: PlusActions) {
       language="en"
       onOpenTask={() => {}}
       onSettings={() => {}}
+      onPlanView={onPlanView}
     />,
   );
 }
@@ -274,14 +284,25 @@ it("lists deadlines without a start-ahead choice in one line, with the editor's 
   );
 });
 
-it("counts the five review lines and keeps ticks for this ISO week only", async () => {
-  window.localStorage.setItem(
-    "todoist-plus:review:2026-W41",
-    JSON.stringify({ lines: [1], kept: [] }),
-  );
+it("counts the five review lines and keeps ticks through Plan's view, for this account week only", async () => {
+  // Last week's ticks, as the extension stored them.
+  let stored: PlanViewState = {
+    ...DEFAULT_PLAN_VIEW,
+    review: { week: "2026-10-05", open: false, lines: [1], kept: [] },
+  };
+  const onPlanView = vi.fn((patch: PlanViewPatch) => {
+    stored = mergePlanView(stored, patch);
+  });
   const data = await props();
   const onOpenMailbox = vi.fn();
-  const view = render(<PlanView {...data} onOpenMailbox={onOpenMailbox} />);
+  const view = render(
+    <PlanView
+      {...data}
+      planView={stored}
+      onPlanView={onPlanView}
+      onOpenMailbox={onOpenMailbox}
+    />,
+  );
   let review = openReview();
   expect(line(review, "Mail to clarify").textContent).toContain("2");
   // Open shows Plus's Mailbox, which lists this line's mail, rather than the native project.
@@ -311,27 +332,33 @@ it("counts the five review lines and keeps ticks for this ISO week only", async 
     ),
   ).toBeTruthy();
   expect(review.queryByRole("list", { name: "Next week's goals" })).toBeNull();
+  // Another week's ticks show as none.
   const tick = review.getByRole("checkbox", {
     name: "Reviewed: Mail to clarify",
   });
   expect(tick).toHaveProperty("checked", false);
   fireEvent.click(tick);
-  expect(
-    JSON.parse(window.localStorage.getItem("todoist-plus:review:2026-W42")!),
-  ).toEqual({ lines: [1], kept: [] });
-  // Older weeks' ticks are dropped; only IDs and line numbers are stored.
-  expect(
-    window.localStorage.getItem("todoist-plus:review:2026-W41"),
-  ).toBeNull();
+  // Only line numbers go to the extension, with this account week; the page's storage is not used.
+  expect(onPlanView).toHaveBeenLastCalledWith({
+    review: { week: "2026-10-12", open: true, lines: [1], kept: [] },
+  });
+  expect(window.localStorage).toHaveLength(0);
   view.unmount();
-  render(<PlanView {...data} />);
-  review = openReview();
+  render(<PlanView {...data} planView={stored} onPlanView={onPlanView} />);
+  review = within(screen.getByRole("region", { name: "Weekly review" }));
   expect(
     review.getByRole("checkbox", { name: "Reviewed: Mail to clarify" }),
   ).toHaveProperty("checked", true);
-  // A week later the list starts again.
+  // A week later the list starts again, closed.
   cleanup();
-  render(<PlanView {...data} plan={{ ...data.plan, week: "2026-10-19" }} />);
+  render(
+    <PlanView
+      {...data}
+      plan={{ ...data.plan, week: "2026-10-19" }}
+      planView={stored}
+      onPlanView={onPlanView}
+    />,
+  );
   review = openReview();
   expect(
     review.getByRole("checkbox", { name: "Reviewed: Mail to clarify" }),
@@ -341,7 +368,8 @@ it("counts the five review lines and keeps ticks for this ISO week only", async 
 it("reviews someday items oldest first: keeping or moving one leaves the list and moves focus on", async () => {
   const actions = createPrototype();
   const update = vi.spyOn(actions, "updateTask");
-  renderApp(actions);
+  const onPlanView = vi.fn();
+  renderApp(actions, onPlanView);
   await screen.findByRole("region", { name: "Committed" });
   const review = openReview();
   const someday = within(line(review, "Someday"));
@@ -380,10 +408,9 @@ it("reviews someday items oldest first: keeping or moving one leaves the list an
   expect(document.activeElement).toBe(
     review.getByRole("checkbox", { name: "Reviewed: Someday" }),
   );
-  expect(
-    JSON.parse(window.localStorage.getItem("todoist-plus:review:2026-W42")!)
-      .kept,
-  ).toEqual(["course"]);
+  expect(onPlanView).toHaveBeenLastCalledWith({
+    review: { week: "2026-10-12", open: true, lines: [], kept: ["course"] },
+  });
   expect(update).toHaveBeenCalledOnce();
 });
 

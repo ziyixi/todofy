@@ -126,44 +126,8 @@ export function isoWeek(date: string): string {
   return `${year}-W${String(week).padStart(2, "0")}`;
 }
 
-/** Review progress of one ISO week, kept per browser: ticked lines and someday items kept. */
+/** Review progress of one account week: ticked lines and someday items kept. IDs only. */
 export interface ReviewProgress {
   lines: number[];
   kept: string[];
-}
-const PROGRESS_PREFIX = "todoist-plus:review:";
-
-export function readProgress(week: string): ReviewProgress {
-  try {
-    const saved = JSON.parse(
-      window.localStorage.getItem(PROGRESS_PREFIX + week) ?? "null",
-    ) as Partial<ReviewProgress> | null;
-    return {
-      lines: Array.isArray(saved?.lines)
-        ? saved.lines.filter((line) => typeof line === "number")
-        : [],
-      kept: Array.isArray(saved?.kept)
-        ? saved.kept.filter((id) => typeof id === "string")
-        : [],
-    };
-  } catch {
-    return { lines: [], kept: [] };
-  }
-}
-
-/** Saves this week's progress (IDs and line numbers only) and drops older weeks'. */
-export function saveProgress(week: string, progress: ReviewProgress) {
-  try {
-    for (let index = window.localStorage.length - 1; index >= 0; index--) {
-      const key = window.localStorage.key(index);
-      if (key?.startsWith(PROGRESS_PREFIX) && key !== PROGRESS_PREFIX + week)
-        window.localStorage.removeItem(key);
-    }
-    window.localStorage.setItem(
-      PROGRESS_PREFIX + week,
-      JSON.stringify(progress),
-    );
-  } catch {
-    // Storage may be unavailable; the review still works for this visit.
-  }
 }

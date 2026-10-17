@@ -10,6 +10,7 @@ import {
   dragPlanner,
   launchPlanner,
   plannerDays,
+  storedPlanView,
 } from "./planner-setup";
 async function openWeek(page: Page) {
   await page.getByRole("button", { name: "Plan", exact: true }).click();
@@ -582,6 +583,71 @@ test("Committed folds to its heading line behind Todoist's quiet chevron, and Ne
     await toggle.press("Enter");
     await expect(toggle).toHaveAttribute("aria-expanded", "true");
     await expect(page.locator(".planning-commitment-grid")).toBeVisible();
+  } finally {
+    await context.close();
+  }
+});
+
+test("the Week tab, its commitment and the fold survive Mail and Back, and a reload", async () => {
+  const { context, worker } = await launchPlanner();
+  try {
+    await worker.evaluate(() => {
+      (
+        globalThis as unknown as {
+          plannerState: { tasks: Record<string, unknown>[] };
+        }
+      ).plannerState.tasks.push({
+        id: "other-outcome",
+        title: "Synthetic second commitment",
+        area: "personal",
+        stage: "committed",
+        etag: "other-outcome-1",
+      });
+    });
+    const page = await context.newPage();
+    await page.goto("https://app.todoist.com/app/today");
+    await openWeek(page);
+    await page
+      .locator(".planning-commitment-grid")
+      .getByRole("button", { name: /^Synthetic second commitment/u })
+      .click();
+    const toggle = page.getByRole("button", { name: "Committed", exact: true });
+    await toggle.click();
+    await expect
+      .poll(() => storedPlanView(worker))
+      .toMatchObject({
+        tab: "week",
+        commitment: "other-outcome",
+        committedFolded: true,
+      });
+    const restored = async () => {
+      await expect(
+        page.getByRole("tab", { name: "Week", exact: true }),
+      ).toHaveAttribute("aria-selected", "true");
+      await expect(
+        page.getByRole("region", {
+          name: "Next steps: Synthetic second commitment",
+        }),
+      ).toBeVisible();
+      await expect(toggle).toHaveAttribute("aria-expanded", "false");
+      await expect(page.locator(".planning-commitment-grid")).toBeHidden();
+    };
+    await page.getByRole("button", { name: "Mail", exact: true }).click();
+    await expect(page).toHaveURL(/todoist-plus=mailbox/u);
+    await page.goBack();
+    await expect(page).toHaveURL(/todoist-plus=plan$/u);
+    await restored();
+    await page.reload();
+    await restored();
+    // Nothing of it reached Todofy or Todoist: the view is the extension's own.
+    const writes = await worker.evaluate(() =>
+      (
+        globalThis as unknown as {
+          plannerState: { calls: { method: string }[] };
+        }
+      ).plannerState.calls.filter((call) => call.method !== "GET"),
+    );
+    expect(writes).toEqual([]);
   } finally {
     await context.close();
   }

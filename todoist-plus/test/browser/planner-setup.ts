@@ -560,6 +560,22 @@ export async function plannerDays(worker: Worker) {
   );
 }
 
+/** Plan's view as the extension stored it in storage.local. */
+export async function storedPlanView(worker: Worker) {
+  return worker.evaluate(async () => {
+    const local = (
+      globalThis as unknown as {
+        chrome: {
+          storage: {
+            local: { get(key: string): Promise<Record<string, unknown>> };
+          };
+        };
+      }
+    ).chrome.storage.local;
+    return (await local.get("planView")).planView;
+  });
+}
+
 export async function dragPlanner(
   page: Page,
   handle: Locator,

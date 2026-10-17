@@ -8,6 +8,11 @@ import {
 } from "./messages";
 import type { PlanConfig, PlusActions, WeeklyBet } from "./model";
 import type { PageStatus } from "./page-status";
+import {
+  planViewState,
+  type PlanViewPatch,
+  type PlanViewState,
+} from "./plan-view-state";
 async function call<T>(message: Omit<ActionMessage, "protocol">): Promise<T> {
   let response: Result<T>;
   try {
@@ -103,6 +108,23 @@ export function saveOtherViews(open: boolean) {
       .catch(() => {});
   } catch {
     // A disabled or reloaded extension keeps no preference.
+  }
+}
+/** Plan's remembered view; undefined when there is none or it cannot be read. */
+export async function readPlanView(): Promise<PlanViewState | undefined> {
+  const response = (await browser.runtime.sendMessage({
+    kind: "planView",
+  })) as Result<unknown> | undefined;
+  return response?.ok ? planViewState(response.value) : undefined;
+}
+/** Stores only the fields that changed, so another tab's fields are kept. */
+export function savePlanView(patch: PlanViewPatch) {
+  try {
+    void browser.runtime
+      .sendMessage({ kind: "planView", patch })
+      .catch(() => {});
+  } catch {
+    // A disabled or reloaded extension keeps no view; the page still works.
   }
 }
 export function openOptions() {

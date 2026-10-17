@@ -7,6 +7,7 @@ import {
 import { registerBackground } from "../src/background";
 import type { KnownTaskStore } from "../src/api";
 import type { PageStatus } from "../src/page-status";
+import { DEFAULT_PLAN_VIEW } from "../src/plan-view-state";
 
 const mocks = vi.hoisted(() => {
   const local = new Map<string, unknown>();
@@ -245,6 +246,53 @@ it("keeps only Other views' open state, for Todoist pages, and forgets it on dis
     "chrome-extension://synthetic/options.html",
   );
   expect(mocks.local.has("otherViewsOpen")).toBe(false);
+});
+
+it("keeps Plan's view for Todoist pages as merged patches, and forgets it on disconnect", async () => {
+  expect(await send({ kind: "planView" })).toEqual({ ok: true, value: null });
+  const review = { week: "2026-10-12", open: true, lines: [1], kept: [] };
+  expect(await send({ kind: "planView", patch: { review } })).toEqual({
+    ok: true,
+    value: { ...DEFAULT_PLAN_VIEW, review },
+  });
+  // Two tabs change two fields at once: neither loses the other's.
+  const [week, folded] = await Promise.all([
+    send({ kind: "planView", patch: { tab: "week" } }),
+    send({ kind: "planView", patch: { committedFolded: true } }),
+  ]);
+  expect([week.ok, folded.ok]).toEqual([true, true]);
+  const stored = {
+    ...DEFAULT_PLAN_VIEW,
+    tab: "week",
+    review,
+    committedFolded: true,
+  };
+  expect(mocks.local.get("planView")).toEqual(stored);
+  expect(await send({ kind: "planView" })).toEqual({
+    ok: true,
+    value: stored,
+  });
+  // Anything outside the closed shape is refused and nothing is stored.
+  for (const patch of [
+    { tab: "focus" },
+    { review: { ...review, kept: ["Synthetic task title"] } },
+    { title: "Synthetic task title" },
+  ])
+    expect(
+      await send({ kind: "planView", patch } as Record<string, unknown>),
+    ).toMatchObject({ ok: false, error: "Unsupported extension operation." });
+  expect(mocks.local.get("planView")).toEqual(stored);
+  // Only Todoist pages read or write it.
+  const options = "chrome-extension://synthetic/options.html";
+  expect(await send({ kind: "planView" }, options)).toMatchObject({
+    ok: false,
+  });
+  expect(
+    await send({ kind: "planView", patch: { tab: "review" } }, options),
+  ).toMatchObject({ ok: false });
+  expect(mocks.local.get("planView")).toEqual(stored);
+  await send({ kind: "disconnect" }, options);
+  expect(mocks.local.has("planView")).toBe(false);
 });
 
 it("passes a refused Bet to the page as a value, which an Error could not carry", async () => {
