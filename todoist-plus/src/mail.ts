@@ -259,13 +259,22 @@ export function categoryLabels(
   return [...areaLabels, ...others];
 }
 
+/** A category's label name and priority, "Work" and "P2"; undefined once its label is gone. */
+export function categoryParts(
+  category: Pick<MailCategory, "labelId" | "priority">,
+  labels: readonly { id: string; name: string }[],
+): { label: string; priority: string } | undefined {
+  const label = labels.find((choice) => choice.id === category.labelId);
+  return label && { label: label.name, priority: `P${category.priority}` };
+}
+
 /** A category's generated name, "Work · P2" or "quick · P4"; undefined once its label is gone. */
 export function categoryName(
   category: Pick<MailCategory, "labelId" | "priority">,
   labels: readonly { id: string; name: string }[],
 ): string | undefined {
-  const label = labels.find((choice) => choice.id === category.labelId);
-  return label && `${label.name} · P${category.priority}`;
+  const parts = categoryParts(category, labels);
+  return parts && `${parts.label} · ${parts.priority}`;
 }
 
 /**

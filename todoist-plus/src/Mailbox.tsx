@@ -14,6 +14,7 @@ import { mailWords, words } from "./i18n";
 import {
   categoryLabels,
   categoryName,
+  categoryParts,
   deletionBatch,
   MAX_CATEGORIES,
   mailboxCandidates,
@@ -69,10 +70,12 @@ interface Lookup {
   items: ReadonlyMap<string, MailItem | null>;
   categories: MailCategories;
 }
-/** A category the rows offer, whose label still exists, with its name. */
+/** A category the rows offer, whose label still exists, with its name and the two parts of it. */
 interface Choice {
   category: MailCategory;
   name: string;
+  label: string;
+  priority: string;
 }
 /** Delete all's frozen batch, from the confirmation's opening to its end. */
 interface Deletion {
@@ -158,7 +161,8 @@ export function Mailbox({
   const usable: Choice[] = (categories?.categories ?? [])
     .flatMap((category) => {
       const name = categoryName(category, labels);
-      return name ? [{ category, name }] : [];
+      const parts = categoryParts(category, labels);
+      return name && parts ? [{ category, name, ...parts }] : [];
     })
     .slice(0, MAX_CATEGORIES);
   const isTouched = (task: PlanningTask) =>
@@ -283,7 +287,13 @@ export function Mailbox({
   /** Files a mail into the Todoist Inbox, with a category's label and priority if one is given. */
   async function file(row: MailRow, choice?: Choice) {
     if (!categories) return;
-    const key = `${row.task.id}:${choice?.category.id || "inbox"}`;
+    // The task's etag, and a category's etag, are part of the key: once either changed, so that
+    // Todofy refuses the old request, the read that follows makes the next click a new one.
+    const key = [
+      row.task.id,
+      row.task.etag,
+      choice ? `${choice.category.id}:${categories.etag}` : "inbox",
+    ].join("|");
     const requestId = fileRequests.current.get(key) ?? crypto.randomUUID();
     fileRequests.current.set(key, requestId);
     const index = rows.indexOf(row);
@@ -498,7 +508,18 @@ export function Mailbox({
                       onFocus={() => setActive(row.task.id)}
                       onClick={() => void file(row, choice)}
                     >
-                      {choice?.name ?? mail.inbox}
+                      {choice ? (
+                        <>
+                          <span className="plus-mailbox-action-label">
+                            {choice.label}
+                          </span>
+                          <span className="plus-mailbox-action-priority">
+                            {` · ${choice.priority}`}
+                          </span>
+                        </>
+                      ) : (
+                        mail.inbox
+                      )}
                     </button>
                   );
                 };

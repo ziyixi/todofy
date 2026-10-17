@@ -665,13 +665,14 @@ export function createApi(
       return { ...mailCategories(result), etag: result.etag };
     },
     async fileMail(task, category, categoriesEtag, requestId) {
-      // Without a category, Todofy only moves the task to the Inbox.
+      // Without a category, Todofy only moves the task to the Inbox and ignores the categories'
+      // etag, so none is sent: a later categories edit leaves the request as it was.
       const result = await plus.fileMailItem({
         taskId: task.id,
         etag: task.etag,
         requestId,
         categoryId: category?.id ?? "",
-        categoriesEtag,
+        categoriesEtag: category ? categoriesEtag : "",
       });
       if (!result.task) throw new Error("The filed task could not be read.");
       return {

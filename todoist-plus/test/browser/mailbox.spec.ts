@@ -192,7 +192,6 @@ test("Category and Inbox buttons show on hover or focus only; one click files at
     const inbox = first.getByRole("button", {
       name: "Move to Todoist Inbox: Synthetic cloud bill",
     });
-    const side = first.locator(".plus-mailbox-side");
     const shown = async () => ({
       buttons: await group.evaluate(
         (element) => getComputedStyle(element).opacity,
@@ -200,22 +199,18 @@ test("Category and Inbox buttons show on hover or focus only; one click files at
       time: await first
         .locator("time")
         .evaluate((time) => getComputedStyle(time).visibility),
-      fade: await side.evaluate(
-        (element) => getComputedStyle(element, "::before").visibility,
-      ),
     });
     await tab.mouse.move(5, 860);
-    expect(await shown()).toEqual({
-      buttons: "0",
-      time: "visible",
-      fade: "hidden",
-    });
+    expect(await shown()).toEqual({ buttons: "0", time: "visible" });
     await first.hover();
-    expect(await shown()).toEqual({
-      buttons: "1",
-      time: "hidden",
-      fade: "visible",
-    });
+    expect(await shown()).toEqual({ buttons: "1", time: "hidden" });
+    // The title fades out under the buttons, in the 24px left of them.
+    expect(
+      await group.evaluate((element) => {
+        const fade = getComputedStyle(element, "::before");
+        return [fade.width, fade.backgroundImage.startsWith("linear-gradient")];
+      }),
+    ).toEqual(["24px", true]);
     // The categories first, Inbox at the right edge, with 4px between them.
     await expect(group.getByRole("button")).toHaveText(["Work · P2", "Inbox"]);
     const [left, right] = [
@@ -224,8 +219,8 @@ test("Category and Inbox buttons show on hover or focus only; one click files at
     ];
     expect(Math.round(right.x - (left.x + left.width))).toBe(4);
     // A click on the title's faded end opens the row; it never files.
-    const slot = (await side.boundingBox())!;
-    await tab.mouse.click(slot.x - 12, slot.y + slot.height / 2);
+    const buttons = (await group.boundingBox())!;
+    await tab.mouse.click(buttons.x - 12, buttons.y + buttons.height / 2);
     const rows = list.locator(".plus-mailbox-row");
     await expect(rows.first()).toHaveAttribute("aria-expanded", "true");
     await tab.keyboard.press("Escape");
@@ -259,12 +254,98 @@ test("Category and Inbox buttons show on hover or focus only; one click files at
         etag: "m-bill-1",
         request_id: expect.any(String),
         category_id: "",
-        categories_etag: "mail-1",
+        // Ignored without a category, so not sent: a categories edit leaves the request as it was.
+        categories_etag: "",
       },
     ]);
     expect(await projectOf(worker, "m-bill")).toBe("account-inbox");
     // j, k, Tab and Enter stayed in Plus: Todoist's shortcuts never saw them.
     expect(await keys()).toEqual([]);
+  } finally {
+    await context.close();
+  }
+});
+
+test("at rest the time alone takes the row's side, whatever the categories; a long label keeps its priority", async () => {
+  const { context, worker } = await launchMailbox();
+  try {
+    await worker.evaluate(() => {
+      const state = (
+        globalThis as unknown as {
+          plannerState: MailState & {
+            extraLabels: { id: string; label: string }[];
+          };
+        }
+      ).plannerState;
+      state.extraLabels.push({
+        id: "synthetic-reading",
+        label: "reading-list-for-the-weekend",
+      });
+      state.tasks.find((task) => task.id === "m-bill")!.title =
+        "Synthetic cloud bill for October, with every service listed one after another and a note on the next billing period";
+      const category = (id: string, label: string, priority: string) => ({
+        id,
+        label: { provider: "todoist", external_id: label },
+        priority,
+      });
+      // Four, the most a Mailbox offers: the same long label twice, with two priorities.
+      state.mailSettings.categories = [
+        category("category-1", "synthetic-office", "p2"),
+        category("category-2", "synthetic-reading", "p4"),
+        category("category-3", "synthetic-reading", "p1"),
+        category("category-4", "synthetic-home", "p3"),
+      ];
+    });
+    const tab = await context.newPage();
+    await tab.setViewportSize({ width: 1280, height: 900 });
+    await tab.goto("https://app.todoist.com/app/today?todoist-plus=mailbox");
+    const first = tab
+      .getByRole("list", { name: "Mail" })
+      .getByRole("listitem")
+      .first();
+    await expect(first.locator(".plus-mailbox-action")).toHaveCount(5);
+    await tab.mouse.move(5, 860);
+    const box = async (selector: string) =>
+      (await first.locator(selector).first().boundingBox())!;
+    const side = await box(".plus-mailbox-side");
+    const time = await box("time");
+    const title = await box(".plus-mailbox-title");
+    // The time and the slot's 12px padding, inside the row's 112px reserve: the title's own
+    // ellipsis ends before it, so the slot's background covers none of the title.
+    expect(Math.round(side.width)).toBe(Math.round(time.width + 12));
+    expect(side.width).toBeLessThan(112);
+    expect(side.x).toBeGreaterThanOrEqual(title.x + title.width);
+    expect(
+      await first
+        .locator(".plus-mailbox-title")
+        .evaluate((element) => element.scrollWidth > element.clientWidth),
+    ).toBe(true);
+    // On hover the buttons cover the title's end. A long label ends in an ellipsis; every
+    // priority shows in full, inside its button, with the space before its "·" as rendered.
+    await first.hover();
+    const parts = await first
+      .locator(".plus-mailbox-action")
+      .evaluateAll((buttons) =>
+        buttons.slice(0, 4).map((button) => {
+          const label = button.querySelector(".plus-mailbox-action-label")!;
+          const priority = button.querySelector<HTMLElement>(
+            ".plus-mailbox-action-priority",
+          )!;
+          return {
+            clipped: label.scrollWidth > label.clientWidth,
+            priority: priority.innerText,
+            inside:
+              priority.getBoundingClientRect().right <=
+              button.getBoundingClientRect().right,
+          };
+        }),
+      );
+    expect(parts).toEqual([
+      { clipped: false, priority: " · P2", inside: true },
+      { clipped: true, priority: " · P4", inside: true },
+      { clipped: true, priority: " · P1", inside: true },
+      { clipped: false, priority: " · P3", inside: true },
+    ]);
   } finally {
     await context.close();
   }

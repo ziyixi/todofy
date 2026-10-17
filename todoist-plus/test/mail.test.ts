@@ -3,6 +3,7 @@ import {
   apiPriority,
   categoryLabels,
   categoryName,
+  categoryParts,
   deletionBatch,
   MAIL_BATCH,
   mailboxCandidates,
@@ -288,6 +289,14 @@ it("offers the area labels by their names first, never one Plus writes by other 
   );
   expect(
     categoryName({ labelId: "gone", priority: 1 }, labels),
+  ).toBeUndefined();
+  // Its two parts, which a filing button shows apart.
+  expect(categoryParts({ labelId: "l-reading", priority: 3 }, labels)).toEqual({
+    label: "reading",
+    priority: "P3",
+  });
+  expect(
+    categoryParts({ labelId: "gone", priority: 1 }, labels),
   ).toBeUndefined();
 });
 

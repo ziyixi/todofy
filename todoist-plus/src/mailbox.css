@@ -77,7 +77,7 @@
   white-space: nowrap;
   text-overflow: ellipsis;
 }
-/* The time and the row's filing buttons share a slot on a solid background, so nothing reflows. */
+/* The time, or a filing's mark in its place, in a slot on a solid background, so nothing reflows. */
 .plus-mailbox-side {
   position: absolute;
   top: 10px;
@@ -99,14 +99,26 @@
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
+/*
+ * The row's filing buttons, on the same solid background, take no part in the slot's size: at rest
+ * the slot is only as wide as the time, and covers none of the title.
+ */
 .plus-mailbox-actions {
+  position: absolute;
+  top: 50%;
+  right: 0;
+  translate: 0 -50%;
   display: flex;
   gap: 4px;
   margin-right: -6px;
+  background: var(--plus-bg);
   opacity: 0;
   pointer-events: none;
 }
+/* A long label gives way to an ellipsis; its priority always shows, so no two buttons look alike. */
 .plus-root .plus-mailbox-action {
+  display: inline-flex;
+  align-items: center;
   height: 24px;
   max-width: 12ch;
   padding: 0 6px;
@@ -114,8 +126,16 @@
   font-size: 12px;
   color: var(--plus-muted);
   white-space: nowrap;
+}
+.plus-mailbox-action-label {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+/* Its own flex item: `pre` keeps the space before the "·", which would start its line. */
+.plus-mailbox-action-priority {
+  flex: none;
+  white-space: pre;
 }
 .plus-root .plus-mailbox-action:hover:not(:disabled) {
   color: var(--plus-text);
@@ -123,7 +143,7 @@
 }
 /* The buttons show in place of the time where the pointer or focus is. They may cover the end of
    the title, which fades out under them; a click on the faded text still opens the row. */
-.plus-mailbox-side::before {
+.plus-mailbox-actions::before {
   content: "";
   position: absolute;
   top: 0;
@@ -132,17 +152,11 @@
   height: 100%;
   background: linear-gradient(to right, transparent, var(--plus-bg));
   pointer-events: none;
-  visibility: hidden;
 }
 .plus-mailbox-item:hover .plus-mailbox-actions,
 .plus-mailbox-item:focus-within .plus-mailbox-actions {
   opacity: 1;
   pointer-events: auto;
-}
-.plus-mailbox-item:hover .plus-mailbox-side:has(.plus-mailbox-actions)::before,
-.plus-mailbox-item:focus-within
-  .plus-mailbox-side:has(.plus-mailbox-actions)::before {
-  visibility: visible;
 }
 .plus-mailbox-item:hover .plus-mailbox-time:has(+ .plus-mailbox-actions),
 .plus-mailbox-item:focus-within
@@ -160,13 +174,15 @@
     padding: 0 0 10px;
     justify-items: start;
   }
-  .plus-mailbox-side::before {
-    display: none;
-  }
   .plus-mailbox-actions {
+    position: static;
+    translate: none;
     margin: 0 0 0 -6px;
     opacity: 1;
     pointer-events: auto;
+  }
+  .plus-mailbox-actions::before {
+    display: none;
   }
   .plus-mailbox-time:has(+ .plus-mailbox-actions) {
     display: none;

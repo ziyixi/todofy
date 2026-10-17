@@ -380,6 +380,57 @@ it("offers the saved categories in order, at most four and none whose label is g
   ]);
 });
 
+it("keeps a long label's priority apart from it, so two of its categories never look alike", async () => {
+  const actions = createPrototype();
+  const load = actions.load.bind(actions);
+  vi.spyOn(actions, "load").mockImplementation(async (week) => {
+    const data = await load(week);
+    data.plan.availableLabels.push({
+      id: "synthetic-reading",
+      label: "reading-list-for-the-weekend",
+    });
+    return data;
+  });
+  const lookup = actions.lookupMail.bind(actions);
+  vi.spyOn(actions, "lookupMail").mockImplementation(async (ids) => ({
+    ...(await lookup(ids)),
+    categories: [
+      { id: "c1", labelId: "synthetic-reading", priority: 4 },
+      { id: "c2", labelId: "synthetic-reading", priority: 1 },
+    ],
+  }));
+  await renderMailbox(actions);
+  const buttons = [
+    ...screen
+      .getAllByRole("listitem")[0]!
+      .querySelectorAll(".plus-mailbox-action"),
+  ];
+  // Only the label's part may end in an ellipsis; the priority is a part of its own after it.
+  expect(
+    buttons.map((button) =>
+      [...button.children].map((part) => [part.className, part.textContent]),
+    ),
+  ).toEqual([
+    [
+      ["plus-mailbox-action-label", "reading-list-for-the-weekend"],
+      ["plus-mailbox-action-priority", " · P4"],
+    ],
+    [
+      ["plus-mailbox-action-label", "reading-list-for-the-weekend"],
+      ["plus-mailbox-action-priority", " · P1"],
+    ],
+    [],
+  ]);
+  expect(buttons.map((button) => button.textContent)).toEqual([
+    "reading-list-for-the-weekend · P4",
+    "reading-list-for-the-weekend · P1",
+    "Inbox",
+  ]);
+  expect(buttons[1]!.getAttribute("aria-label")).toBe(
+    `File as “reading-list-for-the-weekend · P1”: ${REGISTER}`,
+  );
+});
+
 it("edits the categories from the header alone: no destination, none at all is fine, and focus returns to the gear", async () => {
   const actions = createPrototype();
   const update = vi.spyOn(actions, "updateMailSettings");
@@ -460,6 +511,45 @@ it("keeps a row whose filing was not confirmed, and resends the same request", a
   );
   await waitFor(() => expect(fileMail).toHaveBeenCalledTimes(3));
   expect(fileMail.mock.calls[2]![3]).not.toBe(fileMail.mock.calls[0]![3]);
+});
+
+it("asks under a new request once the categories changed after a filing by one was not confirmed", async () => {
+  const actions = createPrototype();
+  const fileMail = vi
+    .spyOn(actions, "fileMail")
+    .mockRejectedValueOnce(new Error("Synthetic Todoist unavailable"));
+  await renderMailbox(actions);
+  await setUpCategories();
+  const work = () =>
+    screen.getByRole<HTMLButtonElement>("button", {
+      name: `File as “Work · P2”: ${REGISTER}`,
+    });
+  fireEvent.click(work());
+  await screen.findByText(/Synthetic Todoist unavailable/u);
+  await waitFor(() => expect(work().disabled).toBe(false));
+  // Another category saved: Work · P2 keeps its ID, and the categories a new etag.
+  fireEvent.click(screen.getByRole("button", { name: "Mail categories" }));
+  const dialog = within(
+    await screen.findByRole("dialog", { name: "Mail categories" }),
+  );
+  fireEvent.click(
+    await dialog.findByRole("button", { name: "Add a category" }),
+  );
+  fireEvent.change(dialog.getByRole("combobox", { name: "Label 2" }), {
+    target: { value: "synthetic-home" },
+  });
+  fireEvent.change(dialog.getByRole("combobox", { name: "Priority 2" }), {
+    target: { value: "3" },
+  });
+  fireEvent.click(dialog.getByRole("button", { name: "Save" }));
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  fireEvent.click(work());
+  await waitFor(() => expect(rowButtons()).toHaveLength(1));
+  const [first, second] = fileMail.mock.calls;
+  expect(second![1]!.id).toBe(first![1]!.id);
+  expect(second![2]).not.toBe(first![2]);
+  // Todofy refuses another body under the first request's ID.
+  expect(second![3]).not.toBe(first![3]);
 });
 
 it("deletes all the untouched mail listed, after a confirmation that names the count and keeps the rest", async () => {
