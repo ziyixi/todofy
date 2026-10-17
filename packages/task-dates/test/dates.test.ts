@@ -67,3 +67,15 @@ test('a named weekday anchors a biweekly schedule rather than the day it was ent
   expect(nextOccurrence(preview, Date.parse('2026-10-22T12:00:00Z'), 'UTC').dueDate).toBe('2026-11-03');
   expect(nextOccurrence(preview, Date.parse('2026-11-04T12:00:00Z'), 'UTC').dueDate).toBe('2026-11-17');
 });
+
+test('the 30th clamps to February month-end and then returns to March 30', () => {
+  expect(previewDate('every 30th', '2027-02-01', 'UTC').dueDate).toBe('2027-02-28');
+  for (const [year, february] of [[2027, '2027-02-28'], [2028, '2028-02-29']] as const) {
+    const january = previewDate('every 30th', `${year}-01-30`, 'UTC');
+    expect(january.dueDate).toBe(`${year}-01-30`);
+    const next = nextOccurrence(january, Date.parse(`${year}-01-30T12:00:00Z`), 'UTC');
+    expect(next.dueDate).toBe(february);
+    expect(nextOccurrence(next, Date.parse(`${february}T12:00:00Z`), 'UTC').dueDate).toBe(`${year}-03-30`);
+    expect(nextOccurrence(january, Date.parse(`${year}-03-01T12:00:00Z`), 'UTC').dueDate).toBe(`${year}-03-30`);
+  }
+});

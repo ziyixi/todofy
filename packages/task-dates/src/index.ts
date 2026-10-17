@@ -134,6 +134,10 @@ export function recurrenceRule(text: string, start: string): { rule: RecurrenceR
       };
       // A newly entered biweekly rule starts on the next named weekday, then repeats every N weeks.
       ruleStart = new RRule({ freq: RRule.WEEKLY, byweekday: [byweekday], dtstart: ruleStart }, true).after(ruleStart, true)!;
+    } else if (plain === 'every 30th') {
+      if (afterCompletion) throw new TaskDateError('Completion-based calendar dates are not supported');
+      // Owner's monthly rule: the 30th, or February's last day, without changing the next month's target.
+      options = { freq: RRule.MONTHLY, bymonthday: [30, -1], bysetpos: 1 };
     } else if (annual) {
       if (afterCompletion) throw new TaskDateError('Completion-based calendar dates are not supported');
       const month = months.indexOf(annual[2]!.slice(0, 3)) + 1;

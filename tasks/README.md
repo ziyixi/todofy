@@ -4,7 +4,7 @@ Personal task management for the Todofy cloud. Tasks owns tasks, projects, secti
 
 ## Development status
 
-Implementation is in progress on `codex/tasks-native`. Tasks' empty D1 database and owner Access application have been created through the infrastructure bootstrap; the follow-up plan reports 41 no-ops. The independent Tasks deployment secret is configured. No real task data has been imported and no task writer has switched from Todoist. Release and migration acceptance are still pending.
+Implementation is on `codex/tasks-native`. The private source export passes import preflight and a local SQLite import/replay check. Tasks' empty production D1 and owner Access application are provisioned; the follow-up infrastructure plan reports 41 no-ops. The independent deployment secret is configured. No real data has been imported into production and no task writer has switched from Todoist. Full CI, release and live migration acceptance remain pending.
 
 ## First release
 

@@ -9,41 +9,33 @@ Its old waiting lists and release identities are historical, not instructions to
 
 ## Current work
 
-### Native Tasks replacement — implementation started 2026-10-17
+### Native Tasks replacement (2026-10-17)
 
-Branch `codex/tasks-native`, isolated checkout `/private/tmp/todofy-tasks-impl`. The owner approved a desktop
-Todoist replacement with the existing Plan/Focus/Mail experience, clean frontend/backend boundaries and
-Workers Free limits. [Tasks](tasks/README.md) records the scope and migration acceptance criteria. Work is
-split into the native task API/storage, desktop UI and shared planning UI; CI and consumer integration follow.
-The local implementation now includes generated CRUD/history APIs, a compact Todoist-style editor,
-an installable desktop PWA, shared Plan/Focus/Mail, inactive native adapters for Todofy/FlowDay and Home
-monitoring. [Local verification](tasks/docs/verification.md) records the actual checks; [design](tasks/docs/design.md)
-describes boundaries. Ordinary/concurrent create ordering, section/parent moves, timed date preservation,
-completed subtasks and planning invalidation have targeted regressions. Branch CI and a real source export
-are next; source coverage and identity verification must precede activation. No production UI release yet.
-Tasks' empty D1 database and owner Access application are now registered in `config/resources.toml`. Bootstrap
-created exactly those two resources; the follow-up read-only plan reports 41 no-ops. `TASKS_WORKER_SECRETS`
-was added to this repository's production environment; other credentials were preserved. No real task data has
-been imported, source-account settings changed or production task writer switched. Do not switch task writers
-until import, identity checks and UI acceptance are complete. Existing Todoist Plus remains live.
+Branch `codex/tasks-native`, isolated checkout `/private/tmp/todofy-tasks-impl`. The desktop app includes a
+Todoist-style task editor, installable PWA, generated task/history API, shared Plan/Focus/Mail, Home status
+and inactive native adapters for Todofy/FlowDay. See [Tasks](tasks/README.md), [design](tasks/docs/design.md)
+and [verification](tasks/docs/verification.md). The last pushed checkpoint is `9c21f623`.
+
+Private source export, reference/filter/recurrence preflight and a local SQLite import/replay pass. FlowDay's
+active external IDs are all included; its queue and time rows remain untouched. The owner chose February's
+last day for `every 30th`, returning to day 30 in other months; this is implemented and tested. Private files
+and temporary tools stay outside GitHub. No real tasks were imported into production or changed in Todoist.
+
+Tasks' empty D1 and owner Access app are registered; bootstrap created only these two resources and the
+following plan returned 41 no-ops. `TASKS_WORKER_SECRETS` is configured independently. Full branch CI remains
+required: the third run 39073230100 passed all app checks except a proven extension preference-load race,
+and proto Python had two stale app-list assertions. Both have local fixes, including 62 actual extension
+browser cases and 113 proto Python cases. The next checkpoint also persists native Plan view preferences.
+
+Next: pass full CI, publish the same SHA, stage all named entrypoints, pause/drain task writers, take a fresh
+private source snapshot, verify/import data and identities, and activate Tasks in core/gateway/FlowDay
+configs together. Do not switch only one binding or use Todoist fallback. Existing Todoist remains
+authoritative. Remove Tasks' first-deploy inventory/reconcile exceptions only after its Worker is verified.
+Sync the original local checkout after the release; it was clean at `ca5c309e` when last checked.
 
 The owner requested stopping both old acceptance reminders. The app confirmed deletion of heartbeat IDs
 `automation` (website cron evidence) and `todofy` (email-model scheduler evidence) on 2026-10-17. Their missing
 historical log evidence is not treated as a successful verification.
-
-Checkpoint `4895d4a5` is pushed. Full branch CI 39070976415 failed on integration enrollment and CI-specific
-setup/cold decoding, while Tasks' own checks passed. Local corrections include the missing runtime dependency
-installs, Ops fixture enrollment, Home deployment assertion, native startup decoding, proto self-test anchors
-and generated HCL alignment. Native controls and calendar projections now have regressions; all 1,994 Python
-units pass. Real-source export remains read-only and incomplete while protocol coverage is verified. The
-private loopback tools and any private snapshots are outside the repository and must not be committed.
-Second branch CI 39071963810 (`865ac940`) passed every app/runtime/infra/contract job; only a stale proto
-test app-list assertion failed and is now corrected locally. Private export and reference/filter coverage
-preflight are complete. One monthly-date policy question (`every 30th` in February) is waiting for the owner;
-do not silently choose it or activate/import around the unsupported row. Current UI adds formatted
-descriptions through a lazy shared-library renderer and shows completion errors inside the dialog; ten real
-browser scenarios pass. The next checkpoint needs full CI, staged service release, private import/identity
-checks and the coordinated source activation. Existing Todoist remains authoritative.
 
 Todoist Plus UI refinement is released at `b79180283db375757f2cc8d29e481e55a6935c40`.
 [Full branch CI 39013842528](https://github.com/ziyixi/todofy/actions/runs/39013842528) and

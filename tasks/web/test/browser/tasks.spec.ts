@@ -336,3 +336,21 @@ test("task descriptions render Markdown, edit and persist without loading remote
   await expect(description.getByRole("listitem")).toHaveText(["Saved step"]);
   expect(remoteRequests).toEqual([]);
 });
+
+test("Upcoming keeps dates chronological while preserving each day's custom task order", async ({ page, request }) => {
+  await createTask(request, "Synthetic later day first in custom order", { due_date: "2040-06-07", sort_order: 10 });
+  await createTask(request, "Synthetic earlier day second task", { due_date: "2040-06-05", sort_order: 40 });
+  await createTask(request, "Synthetic earlier day first task", { due_date: "2040-06-05", sort_order: 20 });
+  await page.clock.setFixedTime(new Date("2040-06-04T12:00:00"));
+  await page.goto("/#/upcoming");
+  const headings = page.locator(".task-group-heading");
+  await expect(headings).toHaveCount(2);
+  await expect(headings.nth(0)).toContainText("Jun 5");
+  await expect(headings.nth(1)).toContainText("Jun 7");
+  const days = page.locator(".task-groups > section");
+  await expect(days.nth(0).locator(".task-title")).toHaveText([
+    "Synthetic earlier day first task",
+    "Synthetic earlier day second task",
+  ]);
+  await expect(days.nth(1).locator(".task-title")).toHaveText(["Synthetic later day first in custom order"]);
+});

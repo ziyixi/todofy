@@ -54,7 +54,16 @@ export function TaskList({
             : "";
       result.set(key, [...(result.get(key) ?? []), task]);
     }
-    return [...result];
+    const groups = [...result];
+    if (groupBy === "date") {
+      groups.sort(([left], [right]) => {
+        if (left === right) return 0;
+        if (left === "No date") return 1;
+        if (right === "No date") return -1;
+        return left.localeCompare(right);
+      });
+    }
+    return groups;
   }, [tasks, groupBy]);
   function heading(key: string): string {
     if (groupBy === "section")

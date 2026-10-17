@@ -17,6 +17,7 @@ const state = vi.hoisted(() => ({
   crash: [] as string[],
   // While set, the Other views toggle waits for it (its CSS still loading).
   holdOtherViews: undefined as Promise<void> | undefined,
+  holdPlanView: undefined as Promise<void> | undefined,
   readPlan: undefined as Promise<never> | undefined,
   rejectMounts: 0,
   mounted: [] as string[],
@@ -86,6 +87,7 @@ vi.mock("../src/client", () => ({
   saveOtherViews: (open: boolean) => state.savedOtherViews.push(open),
   reportPage: (status: PageStatus) => state.reports.push(status),
   readPlanView: async () => {
+    if (state.holdPlanView) await state.holdPlanView;
     if (state.planView instanceof Error) throw state.planView;
     return state.planView;
   },
@@ -164,6 +166,7 @@ beforeEach(() => {
     config: { configured: true, hiddenFilterIds: ["f1"], labelIds: [] },
     crash: [],
     holdOtherViews: undefined,
+    holdPlanView: undefined,
     readPlan: undefined,
     rejectMounts: 0,
     mounted: [],
@@ -647,6 +650,30 @@ it("hands Plan's remembered view to App and keeps its changes for the next visit
   await screen.findByText("plan");
   expect(state.app!.planView).toEqual({ ...stored, commitment: "outcome-2" });
   expect(state.savedPlanView).toHaveLength(1);
+});
+
+it("keeps native content until the saved checklist is ready despite mount-time DOM changes", async () => {
+  state.planView = {
+    ...DEFAULT_PLAN_VIEW,
+    review: { week: "2026-10-12", open: true, lines: [1], kept: [] },
+  };
+  let release!: () => void;
+  state.holdPlanView = new Promise<void>((resolve) => { release = resolve; });
+  history.replaceState(null, "", "/app/today?todoist-plus=plan");
+  const { ctx } = context();
+  let mounting!: Promise<void>;
+  await act(async () => { mounting = mountTodoist(ctx); });
+  try {
+    await waitFor(() => expect(document.querySelector("todoist-plus-view")).toBeTruthy());
+    document.querySelector("#content")!.append(document.createElement("span"));
+    await settle();
+    expect(state.app).toBeUndefined();
+    expect(visible("#native")).toBe(true);
+  } finally {
+    await act(async () => { release(); await mounting; });
+  }
+  await screen.findByText("plan");
+  expect(state.app!.planView?.review).toEqual(state.planView.review);
 });
 
 it("starts Plan from the default view when the stored one cannot be read, and sends only changes", async () => {

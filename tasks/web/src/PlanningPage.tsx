@@ -3,14 +3,11 @@ import {
   PlanningApp,
   createPlanningActions,
   type PlusSnapshot,
-  type PlanViewState,
-  type PlanViewPatch,
   type PlanState,
-  DEFAULT_PLAN_VIEW,
-  mergePlanView,
 } from "@ziyixi/planning-ui";
 import "@ziyixi/planning-ui/styles.css";
 import { send } from "./api";
+import { usePlanView } from "./usePlanView";
 
 export default function PlanningPage({
   page,
@@ -39,7 +36,7 @@ export default function PlanningPage({
     [],
   );
   const [snapshot, setSnapshot] = useState<PlusSnapshot>();
-  const [planView, setPlanView] = useState<PlanViewState>(DEFAULT_PLAN_VIEW);
+  const [planView, updatePlanView] = usePlanView();
   return (
     <div className="planning-ui">
       <PlanningApp
@@ -65,9 +62,7 @@ export default function PlanningPage({
         snapshot={snapshot}
         onSnapshot={setSnapshot}
         planView={planView}
-        onPlanView={(patch: PlanViewPatch) =>
-          setPlanView((current) => mergePlanView(current, patch))
-        }
+        onPlanView={updatePlanView}
       />
     </div>
   );

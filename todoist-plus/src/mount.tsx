@@ -399,7 +399,8 @@ export async function mountTodoist(ctx: ContentScriptContext) {
     hideReplaced();
   };
   function render() {
-    if (!content || !mainRoot || !mainHost) return;
+    // DOM changes during mounting must not seed Plan before its saved view arrives.
+    if (!content || !mainRoot || !mainHost || !planView) return;
     writes++;
     restore();
     const nextView = currentView();

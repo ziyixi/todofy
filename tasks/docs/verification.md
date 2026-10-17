@@ -77,7 +77,28 @@ historical label names whose original IDs are no longer available, supports the 
 and treats completed state snapshots separately from Activity occurrences to avoid duplicate history.
 Unsafe numeric Activity IDs are read losslessly using Node's native JSON parser context.
 
-All reference, filter and coverage checks now pass. One actual monthly recurrence remains pending the owner's
-choice for February (`every 30th`); no real data has been imported or source switched. Two other observed
+Reference, filter and coverage checks pass. The February policy for `every 30th` was subsequently resolved
+by the owner and verified below. No real data has been imported or source switched. Two other observed
 recurrence forms have focused date-package regressions. Tasks UI now passes ten actual browser scenarios;
 Markdown renders in a separate 46.41 KiB gzip chunk, and the initial application bundle remains about 117 KiB.
+
+## Final source preflight
+
+The owner selected February's last day for `every 30th`, returning to day 30 in other months. Preview,
+leap-year and advancement cases pass. The private snapshot now has zero import issues and zero coverage
+gaps. Its prepared SQL imports into a private local SQLite database, repeats without duplicates and has no
+orphan parent references. This is a local data check, not production D1 acceptance. Plan identity preflight
+also reports no issues; all currently active FlowDay external IDs are included in the imported identities.
+
+The earlier pending date-policy question is resolved. Source data remains unchanged and production is not
+switched. A fresh snapshot is still required in the controlled final migration window. The extension's CI
+reload failure was a real early-render race: delayed preferences now load before the first Plan render.
+Its deterministic mount regression and all 62 packaged browser cases pass. Native Plan view/checklist state
+also persists locally using the shared bounded validator. Proto's remaining Python app-list assertions were
+updated; all 113 Python cases pass.
+
+Upcoming date headings now sort chronologically, with undated groups last and each day retaining the chosen
+task order. A real D1/browser case reproduced the reversed headings before the fix, then passed after it;
+all 12 UI unit cases, types, lint and build pass.
+
+The final complete Tasks browser run passes all 11 cases against ephemeral workerd/D1 and disposable Chromium.
