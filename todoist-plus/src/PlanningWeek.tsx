@@ -1,6 +1,6 @@
-import type { CSSProperties } from "react";
+import { useId, type CSSProperties } from "react";
 import { DragDropProvider, DragOverlay, useDraggable } from "@dnd-kit/react";
-import { GripVertical } from "lucide-react";
+import { ChevronDown, ChevronRight, GripVertical } from "lucide-react";
 import {
   displayedTitle,
   effectiveArea,
@@ -48,6 +48,9 @@ interface Props {
   /** Week's own area filter, which the weekly review's "Plan steps" resets. */
   area: Area | "all";
   onArea: (area: Area | "all") => void;
+  /** Committed folded to its heading line; Next steps stays. */
+  folded: boolean;
+  onFold: (folded: boolean) => void;
 }
 export function PlanningWeek(props: Props) {
   const {
@@ -67,7 +70,10 @@ export function PlanningWeek(props: Props) {
     onSelect,
     area,
     onArea,
+    folded,
+    onFold,
   } = props;
+  const gridId = useId();
   const committed = planningOutcomes(plan.tasks, plan.managedLabels).filter(
     (task) => task.stage === "committed",
   );
@@ -131,15 +137,36 @@ export function PlanningWeek(props: Props) {
       >
         <header className="planning-commitment-heading">
           <div>
-            <h2>{words(language).committed}</h2>
+            <h2>
+              <button
+                className="planning-committed-toggle"
+                aria-expanded={!folded}
+                aria-controls={gridId}
+                onClick={() => onFold(!folded)}
+              >
+                {folded ? (
+                  <ChevronRight size={16} />
+                ) : (
+                  <ChevronDown size={16} />
+                )}
+                {words(language).committed}
+              </button>
+            </h2>
             <span>
-              {committed.length} {language === "zh" ? "项" : "outcomes"}
+              {committed.length}{" "}
+              {language === "zh"
+                ? "项"
+                : committed.length === 1
+                  ? "outcome"
+                  : "outcomes"}
             </span>
           </div>
+          {/* Folded, the filter and the grid stay mounted, so aria-controls always resolves. */}
           <div
             className="planning-area-filter"
             role="tablist"
             aria-label={language === "zh" ? "承诺范围" : "Commitment area"}
+            hidden={folded}
           >
             {(
               [
@@ -179,7 +206,7 @@ export function PlanningWeek(props: Props) {
               : `${unplanned.length} ${unplanned.length === 1 ? "commitment has" : "commitments have"} nothing planned in these 7 days`}
           </button>
         )}
-        <div className="planning-commitment-grid">
+        <div id={gridId} className="planning-commitment-grid" hidden={folded}>
           {shown.map((task) => (
             <OutcomeCard
               key={task.id}
@@ -234,9 +261,11 @@ export function PlanningWeek(props: Props) {
           </section>
         ) : (
           <p className="planning-step-tray-empty">
-            {language === "zh"
-              ? "选择上面的事项，安排它的小步骤。"
-              : "Choose an outcome above to arrange its next steps."}
+            {folded
+              ? words(language).expandToChoose
+              : language === "zh"
+                ? "选择上面的事项，安排它的小步骤。"
+                : "Choose an outcome above to arrange its next steps."}
           </p>
         )}
         <PlanningCalendar

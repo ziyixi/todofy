@@ -32,6 +32,40 @@
   font-size: 15px;
   font-weight: 600;
 }
+/* The chevron sits in the gutter, as in Todoist's sections, so the title stays on the cards' edge. */
+.planning-week .planning-committed-toggle {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: -20px;
+  padding: 2px 6px 2px 2px;
+  border-radius: 5px;
+}
+.planning-week .planning-committed-toggle:hover {
+  background: var(--plus-hover);
+}
+.planning-committed-toggle svg {
+  flex: 0 0 auto;
+  color: var(--plus-muted);
+}
+/* Like Todoist's section toggle: expanded, the chevron shows only on hover or focus. */
+.planning-committed-toggle[aria-expanded="true"] svg {
+  opacity: 0;
+}
+.planning-commitment-heading
+  > div:first-child:hover
+  .planning-committed-toggle
+  svg,
+.planning-committed-toggle:focus-visible svg {
+  opacity: 1;
+}
+/* Folded, the grid takes no space and the unseen filter keeps the heading line where it was. */
+.planning-commitment-grid[hidden] {
+  display: none;
+}
+.planning-commitment-heading .planning-area-filter[hidden] {
+  visibility: hidden;
+}
 .planning-commitment-heading span {
   font-size: 12px;
   color: var(--plus-muted);

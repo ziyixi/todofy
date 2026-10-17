@@ -71,6 +71,8 @@ export function PlanView(props: PlanViewProps) {
   // Week's selected commitment (absent: the first one) and its own area filter.
   const [commitment, setCommitment] = useState<string>();
   const [weekArea, setWeekArea] = useState<Area | "all">("all");
+  // Week's Committed folded to its heading line.
+  const [folded, setFolded] = useState(false);
   // A jump focuses its target and scrolls it into view once.
   const [jump, setJump] = useState<keyof typeof JUMPS>();
   const section = useRef<HTMLElement>(null);
@@ -85,11 +87,12 @@ export function PlanView(props: PlanViewProps) {
     setArea("all");
     setJump(lane);
   }
-  /** Week at one commitment, with every area shown so that its card is in the grid. */
+  /** Week at one commitment, unfolded with every area shown, so its card is in the grid. */
   function planSteps(id: string) {
     setMode("week");
     setWeekArea("all");
     setCommitment(id);
+    setFolded(false);
     setJump("runway");
   }
   const { showStart, onStartShown, onReviewShown } = props;
@@ -228,6 +231,8 @@ export function PlanView(props: PlanViewProps) {
           onSelect={setCommitment}
           area={weekArea}
           onArea={setWeekArea}
+          folded={folded}
+          onFold={setFolded}
         />
       )}
       <p className="planning-reset-note">{text.reset}</p>

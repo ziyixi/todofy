@@ -537,3 +537,52 @@ test("drops show at once while saves run in order, and a failed save rolls every
     await context.close();
   }
 });
+
+test("Committed folds to its heading line behind Todoist's quiet chevron, and Next steps stays", async () => {
+  const { context } = await launchPlanner();
+  try {
+    const page = await context.newPage();
+    await page.goto("https://app.todoist.com/app/today");
+    await openWeek(page);
+    const toggle = page.getByRole("button", { name: "Committed", exact: true });
+    const opacity = () =>
+      toggle.locator("svg").evaluate((icon) => getComputedStyle(icon).opacity);
+    const tray = page.getByRole("region", {
+      name: "Next steps: Synthetic weekly outcome",
+    });
+    await expect(toggle).toHaveAttribute("aria-expanded", "true");
+    // Expanded, the chevron shows only while the heading is hovered or the toggle focused.
+    expect(await opacity()).toBe("0");
+    await toggle.hover();
+    expect(await opacity()).toBe("1");
+    // The chevron sits in the gutter, as in Todoist's sections: the title keeps the cards' edge.
+    const chevron = (await toggle.locator("svg").boundingBox())!;
+    const grid = (await page
+      .locator(".planning-commitment-grid")
+      .boundingBox())!;
+    expect(chevron.x + chevron.width).toBeLessThanOrEqual(grid.x);
+    const heading = await toggle.boundingBox();
+    const expanded = (await tray.boundingBox())!;
+    await toggle.click();
+    await expect(toggle).toHaveAttribute("aria-expanded", "false");
+    await expect(page.locator(".planning-commitment-grid")).toBeHidden();
+    await expect(
+      page.getByRole("tablist", { name: "Commitment area" }),
+    ).toBeHidden();
+    await expect(toggle.locator("xpath=../..")).toHaveText(
+      "Committed1 outcome",
+    );
+    // The heading line itself does not move.
+    expect(await toggle.boundingBox()).toEqual(heading);
+    // Next steps moves up under the heading, with nothing else changed.
+    await expect(tray).toBeVisible();
+    expect((await tray.boundingBox())!.y).toBeLessThan(expanded.y);
+    await page.mouse.move(5, 5);
+    expect(await opacity()).toBe("1");
+    await toggle.press("Enter");
+    await expect(toggle).toHaveAttribute("aria-expanded", "true");
+    await expect(page.locator(".planning-commitment-grid")).toBeVisible();
+  } finally {
+    await context.close();
+  }
+});

@@ -219,3 +219,57 @@ it("keeps timed steps readable while preventing their move, and warns rather tha
     ).disabled,
   ).toBe(true);
 });
+
+it("folds Committed to its heading line and keeps the runway line and Next steps", async () => {
+  const data = await props();
+  render(<PlanView {...data} />);
+  openWeek();
+  const toggle = screen.getByRole("button", { name: "Committed" });
+  const filter = screen.getByRole("tablist", { name: "Commitment area" });
+  // The grid it controls is there whether it is folded or not.
+  const grid = () =>
+    document.getElementById(toggle.getAttribute("aria-controls")!);
+  expect(toggle.getAttribute("aria-expanded")).toBe("true");
+  expect(grid()?.classList.contains("planning-commitment-grid")).toBe(true);
+  expect(grid()?.hidden).toBe(false);
+
+  fireEvent.click(toggle);
+  expect(toggle.getAttribute("aria-expanded")).toBe("false");
+  expect(grid()?.hidden).toBe(true);
+  expect(filter.hidden).toBe(true);
+  // The heading line keeps the count and never repeats the selected title: the tray names it.
+  expect(toggle.closest("div")!.textContent).toBe("Committed4 outcomes");
+  expect(
+    screen.getByRole("region", {
+      name: "Next steps: Ship the small website refresh",
+    }),
+  ).toBeTruthy();
+  // The runway line still selects the next unplanned commitment.
+  fireEvent.click(
+    screen.getByRole("button", {
+      name: "2 commitments have nothing planned in these 7 days",
+    }),
+  );
+  expect(
+    screen.getByRole("region", {
+      name: "Next steps: Organize the experiment notes",
+    }),
+  ).toBeTruthy();
+
+  fireEvent.click(toggle);
+  expect(toggle.getAttribute("aria-expanded")).toBe("true");
+  expect(grid()?.hidden).toBe(false);
+  expect(filter.hidden).toBe(false);
+  expect(toggle.closest("div")!.textContent).toBe("Committed4 outcomes");
+  // With nothing selected, folded Week says where to choose one.
+  fireEvent.click(
+    document.querySelector<HTMLElement>(".planning-outcome-card.is-selected")!,
+  );
+  expect(
+    screen.getByText("Choose an outcome above to arrange its next steps."),
+  ).toBeTruthy();
+  fireEvent.click(toggle);
+  expect(
+    screen.getByText("Expand Committed to choose an outcome."),
+  ).toBeTruthy();
+});

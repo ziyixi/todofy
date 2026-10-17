@@ -185,3 +185,24 @@ it("leaves the drop zone under a planned day blank and dates the weekly review",
   expect(ends).toContain("");
   expect(ends).not.toContain("+");
 });
+
+it("folds Committed with a chevron button named in words, in both languages", async () => {
+  const { rerender } = render(<PlanView {...await planProps("zh")} />);
+  fireEvent.click(screen.getByRole("tab", { name: "一周安排" }));
+  const toggle = screen.getByRole("button", { name: "本周承诺" });
+  expect(toggle.closest("h2")).toBeTruthy();
+  expect(toggle.querySelector("svg.lucide-chevron-down")).toBeTruthy();
+  fireEvent.click(
+    document.querySelector<HTMLElement>(".planning-outcome-card.is-selected")!,
+  );
+  fireEvent.click(toggle);
+  expect(toggle.querySelector("svg.lucide-chevron-right")).toBeTruthy();
+  expect(screen.getByText("展开“本周承诺”，选择一个事项。")).toBeTruthy();
+  expect(toggle.closest("div")!.textContent).toBe("本周承诺4 项");
+  rerender(<PlanView {...await planProps("en")} />);
+  expect(
+    screen
+      .getByRole("button", { name: "Committed" })
+      .getAttribute("aria-expanded"),
+  ).toBe("false");
+});
