@@ -9,14 +9,20 @@ Its old waiting lists and release identities are historical, not instructions to
 
 ## Current work
 
-`codex/plus-ui-refinement` implements the approved UI review follow-up: TaskEditor refresh/dirty-field
-correctness, IME-safe dependency selection, a compact Week with seven days on a typical desktop, flat
-outcome cards with priority flags, and outside-click dismissal for Mail categories. No backend, protocol,
-real-task, account-setting or budget changes. Local types/lint/build, 307 units and 62 built-extension browser
-checks pass. Chrome synthetic verification confirms eight commitments plus seven date targets at 1440×900,
-pointer scheduling into Friday, three-day layout without horizontal overflow at 1024×800 and category backdrop
-dismissal. Independent review found no blocking issue or useful additional abstraction. Pending: full branch
-CI, same-SHA release and local ZIP update. [Evidence](docs/todoist-plus-verification.md#ui-refinement-october-17).
+Todoist Plus UI refinement is released at `b79180283db375757f2cc8d29e481e55a6935c40`.
+[Full branch CI 39013842528](https://github.com/ziyixi/todofy/actions/runs/39013842528) and
+[same-SHA main 39014147662](https://github.com/ziyixi/todofy/actions/runs/39014147662) pass. Only the Plus
+extension published; backend, other apps, images and VPS releases skipped. Version `2026.1017.449.46993`
+was downloaded from its public release; all seven files match the green CI artifact and the owner's existing
+`~/Documents/chrome_extensions/todoist-plus` folder. Two obsolete generated files were removed. Permissions
+and Chrome-stored connection state were unchanged. Owner step: Reload Todoist Plus, then refresh Todoist.
+
+The repair covers refreshed TaskEditor drafts, IME-safe dependency selection, desktop seven-day Week,
+flat priority-flag cards and category backdrop dismissal. Local types/lint/build, 307 units and 62 actual
+extension browser cases pass. Chrome synthetic checks confirm eight commitments and seven date targets
+at 1440×900, pointer scheduling into Friday, and no horizontal overflow at 1024×800. No real tasks or account
+settings changed. `codex/plus-ui-refinement-verification` only closes root docs, without another ZIP release.
+[Evidence](docs/todoist-plus-verification.md#ui-refinement-october-17).
 
 Todoist Plus work of October 15-17 is all released. Each row passed full branch CI and the same-SHA main
 release (Todofy deploy first, then the extension ZIP); the latest ZIP is installed in the owner's unpacked
@@ -33,6 +39,7 @@ folder with its digest checked and its manifest permissions unchanged. The backe
 | `todoist-plus-v2026.1016.1027.27206` | `6a465bee` | Task dependencies as `plan_edges`, never in Todoist text or labels | [dependencies](docs/todoist-plus-verification.md#dependencies-local-checks-october-16) |
 | `todoist-plus-v2026.1016.1224.9770` | `262ad007` | Text Work and Personal Bets in `plan_notes`, the Mailbox, migration `0008` and the one-time brief backfill | [Bets](docs/todoist-plus-verification.md#text-weekly-bets-local-checks-october-16), [Mailbox](docs/todoist-plus-verification.md#mailbox-review-fixes-local-checks-october-16) |
 | `todoist-plus-v2026.1017.254.57066` | `deea01c9` | The owner's eight fixes D1-D8: the mail favourite hidden on every page, one-click filing into the Todoist Inbox, Add steps, Plan's view remembered, Week's Quick line and the Parked lane, reordering inside Review lanes and Next steps, Committed folds; planning protocol 6, no migration | [owner fixes](docs/todoist-plus-verification.md#owner-fixes-d1-d8-local-checks-october-17), [final](docs/todoist-plus-verification.md#final-local-verification-october-17) |
+| `todoist-plus-v2026.1017.449.46993` | `b7918028` | TaskEditor refresh and IME correctness, desktop seven-day Week, flat cards with priority flags, category backdrop dismissal | [UI refinement](docs/todoist-plus-verification.md#ui-refinement-october-17) |
 
 Constraints that stay in force:
 

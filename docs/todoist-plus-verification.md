@@ -1236,4 +1236,17 @@ in [the interface guide](../todoist-plus/docs/planning-interface.md#验收与截
 These checks do not claim real-account task writes or production latency. User task data, credentials,
 account settings, budgets and installed browser connection state were not changed during verification.
 
-Full branch CI, same-SHA publication and published ZIP installation remain pending at this implementation commit.
+[Full branch CI 39013842528](https://github.com/ziyixi/todofy/actions/runs/39013842528) and
+[same-SHA main release 39014147662](https://github.com/ziyixi/todofy/actions/runs/39014147662) pass for
+`b79180283db375757f2cc8d29e481e55a6935c40`. Main reused the green branch artifact and only published the Plus
+extension; no Worker, other application, image or VPS release ran.
+
+[Version 2026.1017.449.46993](https://github.com/ziyixi/todofy/releases/tag/todoist-plus-v2026.1017.449.46993)
+targets that exact SHA. Its actual public ZIP was downloaded and all seven file names and contents matched
+the original green CI artifact byte for byte. ZIP SHA-256
+`d2166f498d2f4cce196116e51fdb51f9e901dbfbb09fe42e033cb05d55eea6eb` matches GitHub's asset digest.
+Those same files were installed into the existing `~/Documents/chrome_extensions/todoist-plus` folder,
+replacing `2026.1017.254.57066`; two obsolete generated assets were removed. Manifest permissions match
+the previous version, the folder identity is retained and no Chrome-stored connection was read or changed.
+Reload in Chrome's extension manager and refresh Todoist are still needed before this build runs in the
+owner's existing page. This documentation closure does not rebuild or publish another extension.
