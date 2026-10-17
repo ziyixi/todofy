@@ -15,7 +15,11 @@ import {
   taskIndex,
 } from "./domain";
 import { AddStep } from "./AddStep";
-import { spokenDrags } from "./drag-announcements";
+import {
+  dragHandle,
+  dragInstructions,
+  spokenDrags,
+} from "./drag-announcements";
 import { OutcomeCard } from "./ReviewBoard";
 import { PlanningCalendar, shortDay, taskTitle } from "./PlanningCalendar";
 import {
@@ -102,6 +106,8 @@ export function PlanningWeek(props: Props) {
     onAddingStep,
   } = props;
   const gridId = useId();
+  // The drag instructions every handle names, in Week's own shadow root.
+  const hintId = useId();
   // A reorder's request ID, reused when the same reorder is tried again.
   const reorderRequests = useRef(new Map<string, string>());
   // A drag speaks of step titles, their places and days.
@@ -192,6 +198,7 @@ export function PlanningWeek(props: Props) {
   }
   return (
     <DragDropProvider
+      key={language}
       plugins={plugins}
       onDragEnd={({ canceled, operation }) => {
         if (canceled) return;
@@ -240,6 +247,10 @@ export function PlanningWeek(props: Props) {
         className="planning-week"
         aria-label={language === "zh" ? "一周安排" : "Weekly planning"}
       >
+        {/* Hidden, like dnd-kit's own: read only as the handles' description. */}
+        <span id={hintId} hidden>
+          {dragInstructions(language)}
+        </span>
         <header className="planning-commitment-heading">
           <div>
             <h2>
@@ -360,6 +371,7 @@ export function PlanningWeek(props: Props) {
                   language={language}
                   busy={busy}
                   pending={pending?.has(pendingTask(task.id)) ?? false}
+                  dragHint={hintId}
                   editTask={editTask}
                 />
               ))}
@@ -393,6 +405,7 @@ export function PlanningWeek(props: Props) {
           timer={timer}
           language={language}
           busy={busy}
+          dragHint={hintId}
           editTask={editTask}
         />
         <PlanningCalendar
@@ -404,6 +417,7 @@ export function PlanningWeek(props: Props) {
           language={language}
           busy={busy}
           pending={pending}
+          dragHint={hintId}
           editTask={editTask}
           onWeekChange={onWeekChange}
           onRemove={(day, id) =>
@@ -462,6 +476,7 @@ function TrayStep({
   language,
   busy,
   pending,
+  dragHint,
   editTask,
 }: {
   task: PlanningTask;
@@ -475,6 +490,8 @@ function TrayStep({
   busy: boolean;
   /** Its reorder is shown but not yet confirmed. */
   pending: boolean;
+  /** The ID of the drag instructions, which every handle names. */
+  dragHint: string;
   editTask: Props["editTask"];
 }) {
   const timing = timer?.taskId === task.id;
@@ -524,6 +541,7 @@ function TrayStep({
       <button
         ref={handleRef}
         className="planning-drag-handle"
+        {...dragHandle(language, dragHint)}
         // A waiting handle stays focusable, so a keyboard reorder keeps focus on the step.
         disabled={busy || timing}
         aria-disabled={pending || undefined}

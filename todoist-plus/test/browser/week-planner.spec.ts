@@ -1132,3 +1132,54 @@ test("a Next step picked up by keyboard drops into a day with the arrows", async
     await context.close();
   }
 });
+
+test("a drag handle's description is the page's own instructions, from inside Plus's shadow root, in its language", async () => {
+  const { context } = await launchPlanner();
+  try {
+    const page = await context.newPage();
+    await page.goto("https://app.todoist.com/app/today?todoist-plus=plan");
+    const cdp = await context.newCDPSession(page);
+    /**
+     * The handle's description, as Chrome's accessibility tree has it, and its role description
+     * (read from the DOM: CDP hands non-Latin attribute strings back mis-decoded).
+     */
+    const read = async (handle: Locator) => {
+      await expect(handle).toBeVisible();
+      const name = (await handle.getAttribute("aria-label"))!;
+      const { root } = await cdp.send("DOM.getDocument", {
+        depth: -1,
+        pierce: true,
+      });
+      const { nodes } = await cdp.send("Accessibility.queryAXTree", {
+        backendNodeId: root.backendNodeId,
+        accessibleName: name,
+      });
+      return [
+        nodes.map((node) => node.description?.value),
+        await handle.getAttribute("aria-roledescription"),
+      ];
+    };
+    expect(await read(page.locator(".review-drag-handle").first())).toEqual([
+      [
+        "Press Space or Enter to pick it up, the arrow keys to move it, Space or Enter to drop it, and Escape to cancel.",
+      ],
+      "draggable",
+    ]);
+    // Todoist switched to Chinese: Plus follows without a reload, and so do the handles.
+    await page.evaluate(() => (document.documentElement.lang = "zh-CN"));
+    await page.getByRole("tab", { name: "一周安排" }).click();
+    const zh = [
+      ["按空格或回车拿起，方向键移动，空格或回车放下，Esc 取消。"],
+      "可拖动",
+    ];
+    expect(
+      await read(
+        page.locator(".planning-tray-step .planning-drag-handle").first(),
+      ),
+    ).toEqual(zh);
+    await page.getByRole("tab", { name: "回顾" }).click();
+    expect(await read(page.locator(".review-drag-handle").first())).toEqual(zh);
+  } finally {
+    await context.close();
+  }
+});

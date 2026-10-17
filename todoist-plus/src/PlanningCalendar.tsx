@@ -2,6 +2,7 @@ import { useState, type CSSProperties } from "react";
 import { useDraggable, useDroppable } from "@dnd-kit/react";
 import { ChevronLeft, ChevronRight, GripVertical, X } from "lucide-react";
 import { displayedTitle, formattedMinutes, taskIndex } from "./domain";
+import { dragHandle } from "./drag-announcements";
 import { outcomeArea, outcomeColor, outcomeForTask } from "./planning-outcomes";
 import { pendingStep } from "./plan-updates";
 import { PendingMark } from "./StatusMarks";
@@ -23,6 +24,8 @@ interface Props {
   language: Language;
   busy: boolean;
   pending?: ReadonlySet<string>;
+  /** The ID of the drag instructions, which every handle names. */
+  dragHint: string;
   editTask: (task: PlanningTask) => void;
   onWeekChange: (week: string) => void;
   onRemove: (day: FlowDayPlan, id: string) => void;
@@ -36,6 +39,7 @@ export function PlanningCalendar({
   language,
   busy,
   pending,
+  dragHint,
   editTask,
   onWeekChange,
   onRemove,
@@ -127,6 +131,7 @@ export function PlanningCalendar({
             language={language}
             busy={busy}
             pending={pending}
+            dragHint={dragHint}
             editTask={editTask}
             onSelect={() => setSelectedDate(day.date)}
             onRemove={(id) => onRemove(day, id)}
@@ -183,6 +188,7 @@ function CalendarDay({
   language,
   busy,
   pending,
+  dragHint,
   editTask,
   onSelect,
   onRemove,
@@ -197,6 +203,7 @@ function CalendarDay({
   language: Language;
   busy: boolean;
   pending?: ReadonlySet<string>;
+  dragHint: string;
   editTask: Props["editTask"];
   onSelect: () => void;
   onRemove: (id: string) => void;
@@ -243,6 +250,7 @@ function CalendarDay({
             language={language}
             busy={busy}
             pending={pending?.has(pendingStep(day.date, id)) ?? false}
+            dragHint={dragHint}
             editTask={editTask}
             onRemove={onRemove}
           />
@@ -267,6 +275,7 @@ function CalendarStep({
   language,
   busy,
   pending,
+  dragHint,
   editTask,
   onRemove,
 }: {
@@ -279,6 +288,7 @@ function CalendarStep({
   busy: boolean;
   /** Its move or removal is shown but not yet confirmed. */
   pending: boolean;
+  dragHint: string;
   editTask: Props["editTask"];
   onRemove: (id: string) => void;
 }) {
@@ -328,6 +338,7 @@ function CalendarStep({
         <button
           ref={handleRef}
           className="planning-drag-handle"
+          {...dragHandle(language, dragHint)}
           // A waiting handle stays focusable, so a keyboard reorder keeps focus on the card.
           disabled={busy || timing}
           aria-disabled={pending || undefined}

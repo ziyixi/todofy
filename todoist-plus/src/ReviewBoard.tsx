@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useId,
   useMemo,
   useRef,
   useState,
@@ -18,7 +19,11 @@ import { GripVertical } from "lucide-react";
 import { displayedTitle, effectiveArea } from "./domain";
 import { canMarkActive, deadlineTitle, spokenDeadline } from "./deadlines";
 import { dependencyIndex } from "./dependencies";
-import { spokenDrags } from "./drag-announcements";
+import {
+  dragHandle,
+  dragInstructions,
+  spokenDrags,
+} from "./drag-announcements";
 import {
   canPark,
   MAX_LANE_TASKS,
@@ -251,6 +256,8 @@ export function ReviewBoard({
   const [focusMoved, setFocusMoved] = useState<string>();
   // A reorder's request ID, reused when the same reorder is tried again.
   const reorderRequests = useRef(new Map<string, string>());
+  // The drag instructions every handle names, in the board's own shadow root.
+  const hintId = useId();
   // A drag speaks of card titles, lane names and positions.
   const plugins = useMemo(() => {
     const { startNow, waiting, parked } = words(language);
@@ -395,6 +402,7 @@ export function ReviewBoard({
   }
   return (
     <DragDropProvider
+      key={language}
       plugins={plugins}
       onDragEnd={({ canceled, operation }) => {
         if (canceled) return;
@@ -443,6 +451,10 @@ export function ReviewBoard({
       }}
     >
       <div className="review-board" ref={board}>
+        {/* Hidden, like dnd-kit's own: read only as the handles' description. */}
+        <span id={hintId} hidden>
+          {dragInstructions(language)}
+        </span>
         <div className="review-lanes" data-lanes={columns.length}>
           {columns.map((column) => (
             <ReviewLane
@@ -461,6 +473,7 @@ export function ReviewBoard({
               language={language}
               busy={busy}
               pending={pending}
+              dragHint={hintId}
               editTask={editTask}
               onStart={marks ? (task) => void start(task) : undefined}
               onLabels={onLabels}
@@ -516,6 +529,7 @@ function ReviewLane({
   language,
   busy,
   pending,
+  dragHint,
   editTask,
   onStart,
   onLabels,
@@ -536,6 +550,8 @@ function ReviewLane({
   language: Language;
   busy: boolean;
   pending?: ReadonlySet<string>;
+  /** The ID of the drag instructions, which every handle names. */
+  dragHint: string;
   editTask: Props["editTask"];
   onStart?: (task: PlanningTask) => void;
   onLabels?: () => void;
@@ -621,6 +637,7 @@ function ReviewLane({
             language={language}
             busy={busy}
             pending={pending?.has(pendingTask(task.id)) ?? false}
+            dragHint={dragHint}
             editTask={editTask}
             onStart={onStart}
           />
@@ -661,6 +678,7 @@ function DraggableOutcome({
   language,
   busy,
   pending,
+  dragHint,
   editTask,
   onStart,
 }: {
@@ -678,6 +696,7 @@ function DraggableOutcome({
   language: Language;
   busy: boolean;
   pending: boolean;
+  dragHint: string;
   editTask: Props["editTask"];
   onStart?: (task: PlanningTask) => void;
 }) {
@@ -718,6 +737,7 @@ function DraggableOutcome({
         ref={handleRef}
         type="button"
         className="review-drag-handle"
+        {...dragHandle(language, dragHint)}
         // A waiting handle stays focusable, so a keyboard drop keeps focus on the moved card.
         disabled={busy}
         aria-disabled={pending || undefined}

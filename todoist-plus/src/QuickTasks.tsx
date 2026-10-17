@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useDraggable } from "@dnd-kit/react";
 import { GripVertical } from "lucide-react";
 import { displayedTitle } from "./domain";
+import { dragHandle } from "./drag-announcements";
 import { words } from "./i18n";
 import type { FocusState, Language, PlanningTask } from "./model";
 
@@ -14,13 +15,22 @@ interface Props {
   timer?: FocusState["timer"];
   language: Language;
   busy: boolean;
+  /** The ID of the drag instructions, which every handle names. */
+  dragHint: string;
   editTask: (task: PlanningTask) => void;
 }
 /**
  * The native Quick / Ops filter's tasks, as a quiet line under Next steps: one-line cards on the
  * step cards' surface that drag into a day exactly as a step does. Nothing shows without one.
  */
-export function QuickTasks({ tasks, timer, language, busy, editTask }: Props) {
+export function QuickTasks({
+  tasks,
+  timer,
+  language,
+  busy,
+  dragHint,
+  editTask,
+}: Props) {
   const text = words(language);
   // Shown in full only on request, for this visit.
   const [expanded, setExpanded] = useState(false);
@@ -40,6 +50,7 @@ export function QuickTasks({ tasks, timer, language, busy, editTask }: Props) {
             timing={timer?.taskId === task.id}
             language={language}
             busy={busy}
+            dragHint={dragHint}
             editTask={editTask}
           />
         ))}
@@ -63,6 +74,7 @@ function QuickCard({
   timing,
   language,
   busy,
+  dragHint,
   editTask,
 }: {
   task: PlanningTask;
@@ -70,6 +82,7 @@ function QuickCard({
   timing: boolean;
   language: Language;
   busy: boolean;
+  dragHint: string;
   editTask: Props["editTask"];
 }) {
   const title = displayedTitle(task.title);
@@ -87,6 +100,7 @@ function QuickCard({
       <button
         ref={handleRef}
         className="planning-drag-handle"
+        {...dragHandle(language, dragHint)}
         disabled={busy || timing}
         title={
           timing

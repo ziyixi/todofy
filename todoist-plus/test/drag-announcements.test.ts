@@ -1,6 +1,11 @@
 import { Accessibility, defaultPreset } from "@dnd-kit/dom";
 import { expect, it } from "vitest";
-import { spokenDrags, type SpokenName } from "../src/drag-announcements";
+import {
+  dragHandle,
+  dragInstructions,
+  spokenDrags,
+  type SpokenName,
+} from "../src/drag-announcements";
 
 type Options = NonNullable<ConstructorParameters<typeof Accessibility>[1]>;
 type Event = Record<string, unknown>;
@@ -76,6 +81,19 @@ it("speaks a drag in the page's language from titles and places", () => {
       say("dragend")({ operation: { source, target }, canceled: true }),
     ]).toEqual(texts);
     expect(instructions).toMatch(language === "zh" ? /空格或回车/u : /Space/u);
+  }
+});
+
+it("gives a handle the instructions its provider renders and a role in the page's language", () => {
+  for (const language of ["en", "zh"] as const) {
+    // The same words dnd-kit's own (unreachable) text has, so nothing differs but where.
+    expect(dragInstructions(language)).toBe(
+      spoken(language, name).instructions,
+    );
+    expect(dragHandle(language, "hint-1")).toEqual({
+      "aria-describedby": "hint-1",
+      "aria-roledescription": language === "zh" ? "可拖动" : "draggable",
+    });
   }
 });
 

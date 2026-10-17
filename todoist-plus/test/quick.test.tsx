@@ -147,7 +147,10 @@ it("shows Week's quick tasks as a quiet line of one-line cards under Next steps,
   // After the steps tray and before the calendar.
   const week = document.querySelector(".planning-week")!;
   expect(
-    [...week.children].map((child) => child.className.split(" ")[0]),
+    [...week.children]
+      // The drag instructions, which only the handles' description reads.
+      .filter((child) => !(child as HTMLElement).hidden)
+      .map((child) => child.className.split(" ")[0]),
   ).toEqual([
     "planning-commitment-heading",
     "planning-runway",

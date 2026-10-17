@@ -17,10 +17,30 @@ export type SpokenName = (
   as: "source" | "target",
 ) => string | undefined;
 
+/** How to drag with the keyboard, in the page's language: every drag handle's description. */
+export function dragInstructions(language: Language): string {
+  return language === "zh"
+    ? "按空格或回车拿起，方向键移动，空格或回车放下，Esc 取消。"
+    : "Press Space or Enter to pick it up, the arrow keys to move it, Space or Enter to drop it, and Escape to cancel.";
+}
+
+/**
+ * A drag handle's description and role description, in the page's language. dnd-kit's
+ * Accessibility plugin adds both only to a handle without them, and its own cannot work here:
+ * its description is in document.body, which an ID inside Plus's shadow root cannot name, and its
+ * role description is English. `hintId` names the instructions the handle's provider renders.
+ */
+export function dragHandle(language: Language, hintId: string) {
+  return {
+    "aria-describedby": hintId,
+    "aria-roledescription": language === "zh" ? "可拖动" : "draggable",
+  };
+}
+
 /**
  * DragDropProvider's plugins, with dnd-kit's Accessibility plugin speaking the page's language:
  * titles, lane names and days, never internal IDs. The plugin reads them once, when its provider
- * starts, so build them once per language.
+ * starts, so another language needs a new provider: key it by the language.
  */
 export function spokenDrags(
   language: Language,
@@ -52,11 +72,7 @@ export function spokenDrags(
       return zh ? `已放下：${source}` : `Dropped: ${source}`;
     },
   };
-  const screenReaderInstructions = {
-    draggable: zh
-      ? "按空格或回车拿起，方向键移动，空格或回车放下，Esc 取消。"
-      : "Press Space or Enter to pick it up, the arrow keys to move it, Space or Enter to drop it, and Escape to cancel.",
-  };
+  const screenReaderInstructions = { draggable: dragInstructions(language) };
   return defaultPreset.plugins.map((plugin) =>
     plugin === Accessibility
       ? {

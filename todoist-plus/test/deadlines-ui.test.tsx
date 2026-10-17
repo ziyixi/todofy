@@ -685,30 +685,50 @@ it("takes a parked task out of Parked when its details save a stage or mark it i
 
 it("tells screen readers how to drag in the page's language, on Review and on Week", async () => {
   const { props } = await setup();
-  render(<PlanView {...props} language="zh" />);
+  const view = render(<PlanView {...props} language="zh" />);
+  const zh = "按空格或回车拿起，方向键移动，空格或回车放下，Esc 取消。";
+  const en =
+    "Press Space or Enter to pick it up, the arrow keys to move it, Space or Enter to drop it, and Escape to cancel.";
+  /** dnd-kit's own instructions, which it adds to the body. */
   const instructions = () =>
     [...document.body.querySelectorAll(":scope > div[id]")].map(
       (element) => element.textContent,
     );
-  await waitFor(() =>
-    expect(instructions()).toContain(
-      "按空格或回车拿起，方向键移动，空格或回车放下，Esc 取消。",
-    ),
-  );
-  fireEvent.click(screen.getByRole("tab", { name: "一周安排" }));
-  await waitFor(() =>
-    expect(
-      instructions().filter(
-        (text) =>
-          text === "按空格或回车拿起，方向键移动，空格或回车放下，Esc 取消。",
+  /** What every handle found by `selector` is described by, and its role. */
+  const described = (selector: string) => {
+    const handles = [...document.querySelectorAll<HTMLElement>(selector)];
+    expect(handles.length).toBeGreaterThan(0);
+    const ids = new Set(
+      handles.map((handle) => handle.getAttribute("aria-describedby")),
+    );
+    expect(ids.size).toBe(1);
+    const hint = document.getElementById([...ids][0]!)!;
+    // In Plan's own tree, which in the page is the handles' shadow root: an ID there cannot
+    // name dnd-kit's text in the body.
+    expect(hint.closest(".planning-view")).not.toBeNull();
+    return [
+      hint.textContent,
+      new Set(
+        handles.map((handle) => handle.getAttribute("aria-roledescription")),
       ),
-    ).not.toHaveLength(0),
-  );
+    ];
+  };
+  expect(described(".review-drag-handle")).toEqual([zh, new Set(["可拖动"])]);
   // dnd-kit's own English, which names items by their internal IDs, is not used.
+  await waitFor(() => expect(instructions()).toContain(zh));
   expect(instructions().join(" ")).not.toMatch(/draggable item/u);
-  const handle = screen.getAllByRole("button", { name: /^拖动步骤: /u })[0]!;
-  expect(
-    document.getElementById(handle.getAttribute("aria-describedby")!)
-      ?.textContent,
-  ).toBe("按空格或回车拿起，方向键移动，空格或回车放下，Esc 取消。");
+  fireEvent.click(screen.getByRole("tab", { name: "一周安排" }));
+  // Steps, quick cards and scheduled steps alike.
+  expect(described(".planning-week .planning-drag-handle")).toEqual([
+    zh,
+    new Set(["可拖动"]),
+  ]);
+  // Another language is another provider: the handles and dnd-kit's announcements follow it.
+  view.rerender(<PlanView {...props} language="en" />);
+  expect(described(".planning-week .planning-drag-handle")).toEqual([
+    en,
+    new Set(["draggable"]),
+  ]);
+  await waitFor(() => expect(instructions()).toContain(en));
+  expect(instructions()).not.toContain(zh);
 });
