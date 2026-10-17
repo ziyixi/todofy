@@ -260,6 +260,22 @@
 .review-draggable.is-dragging {
   opacity: 0.35;
 }
+/* Where a card moved inside its lane will land: the calendar's 3px line, in the 7px gap. */
+.review-draggable:is(.is-insert-before, .is-insert-after)::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--plus-accent);
+}
+.review-draggable.is-insert-before::before {
+  top: -5px;
+}
+.review-draggable.is-insert-after::before {
+  bottom: -5px;
+}
 .review-drag-handle {
   position: absolute;
   inset: 0 auto 0 4px;

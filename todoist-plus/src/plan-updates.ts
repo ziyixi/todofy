@@ -243,6 +243,25 @@ export function withStage(
   };
 }
 
+/** `ids` with the one at `from` moved to `to`, as a sortable list moves it. */
+export function moved(
+  ids: readonly string[],
+  from: number,
+  to: number,
+): string[] {
+  const next = [...ids];
+  next.splice(to, 0, ...next.splice(from, 1));
+  return next;
+}
+
+/** Shows a reorder inside a Review lane at once; the confirmed order replaces it. */
+export function predictLaneOrder(lane: LaneId, ids: readonly string[]) {
+  return (data: PlusData): PlusData => ({
+    ...data,
+    plan: withLaneOrder(data.plan, lane, ids),
+  });
+}
+
 /** Shows a stage drag at once (withStage); the confirmed task (labels, etag) replaces it. */
 export function predictStage(
   taskId: string,

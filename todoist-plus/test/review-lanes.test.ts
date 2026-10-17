@@ -9,7 +9,7 @@ import {
   statusLine,
   type LaneId,
 } from "../src/review-lanes";
-import type { PlanningTask } from "../src/model";
+import type { PlanState, PlanningTask } from "../src/model";
 
 // A synthetic Thursday; "now" is its noon.
 const TODAY = "2026-10-15";
@@ -48,10 +48,14 @@ const task = (id: string, value: Partial<PlanningTask> = {}): PlanningTask => ({
 });
 /** The account's labels with a literal `parked`, which Parked needs. */
 const parkable = [{ id: "parked-id", label: "parked" }];
-/** Each lane's task IDs. */
-function laneIds(tasks: PlanningTask[], availableLabels: typeof parkable = []) {
+/** Each lane's task IDs, in their order. */
+function laneIds(
+  tasks: PlanningTask[],
+  availableLabels: typeof parkable = [],
+  laneOrders: PlanState["laneOrders"] = {},
+) {
   const lanes = boardLanes(
-    { tasks, managedLabels, dependencies: [], availableLabels },
+    { tasks, managedLabels, dependencies: [], availableLabels, laneOrders },
     TODAY,
   );
   return Object.fromEntries(
@@ -209,14 +213,56 @@ it("lists the commitments Review's Committed lane shows, none of them parked", (
     task("week", { stage: "weekly", labels: ["focus"] }),
   ];
   for (const availableLabels of [[], parkable]) {
-    const plan = { tasks, managedLabels, dependencies: [], availableLabels };
+    const plan = {
+      tasks,
+      managedLabels,
+      dependencies: [],
+      availableLabels,
+      laneOrders: {},
+    };
     expect(committedOutcomes(plan)).toEqual(boardLanes(plan, TODAY).committed);
   }
   expect(
-    committedOutcomes({ tasks, managedLabels, availableLabels: parkable }).map(
-      (item) => item.id,
-    ),
+    committedOutcomes({
+      tasks,
+      managedLabels,
+      availableLabels: parkable,
+      laneOrders: {},
+    }).map((item) => item.id),
   ).toEqual(["kept", "waits"]);
+});
+
+it("lists each lane in the owner's stored order first, the rest after it in the lane's own order", () => {
+  const tasks = [
+    task("claim", { deadline: on(1), mustStart: true }),
+    task("report", { deadline: on(-2), mustStart: true }),
+    task("visa", { deadline: on(5), mustStart: true }),
+    task("quote", { labels: ["waiting"], updatedAt: "2026-10-10T09:00:00Z" }),
+    task("contract", {
+      labels: ["waiting"],
+      updatedAt: "2026-10-01T09:00:00Z",
+    }),
+    task("idea", { labels: ["parked"], updatedAt: "2026-10-12T09:00:00Z" }),
+    task("plan", { labels: ["parked"], updatedAt: "2026-09-12T09:00:00Z" }),
+    ...["one", "two", "three"].map((id) =>
+      task(id, { stage: "committed", labels: ["committed"] }),
+    ),
+  ];
+  expect(
+    laneIds(tasks, parkable, {
+      // A task no longer in the lane is skipped; one never arranged follows the arranged ones.
+      committed: ["three", "gone", "one"],
+      waiting: ["quote"],
+      parked: ["idea", "plan"],
+      // In Start now the rest come first: a task that has just become due is its news.
+      start: ["visa", "claim"],
+    }),
+  ).toMatchObject({
+    committed: ["three", "one", "two"],
+    waiting: ["quote", "contract"],
+    parked: ["idea", "plan"],
+    start: ["report", "visa", "claim"],
+  });
 });
 
 it("says each card's one status: how long is left, or how long untouched with the deadline", () => {
@@ -325,6 +371,7 @@ it("shows every task the API marks for a replaced deadline, waiting or parked fi
                     managedLabels,
                     dependencies: [],
                     availableLabels,
+                    laneOrders: {},
                   },
                   TODAY,
                 );

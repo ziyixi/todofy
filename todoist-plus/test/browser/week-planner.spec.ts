@@ -6,10 +6,12 @@ import {
   type Worker,
 } from "@playwright/test";
 import {
+  addCommitments,
   controlWrites,
   dragPlanner,
   launchPlanner,
   plannerDays,
+  plannerWrites,
   storedPlanView,
 } from "./planner-setup";
 async function openWeek(page: Page) {
@@ -138,14 +140,11 @@ test("a keyboard drop leaves focus on the moved card, which says that it waits",
       name: "Move outcome: Synthetic quarter outcome",
     });
     await expect(handle).toBeEnabled();
-    const from = (await handle.boundingBox())!;
-    const to = (await month.boundingBox())!;
     await controlWrites(worker, { hold: true });
     await handle.focus();
     await page.keyboard.press("Space");
-    // Shift+arrow moves the dragged card 50 px at a time.
-    for (let step = 0; step * 50 < to.x - from.x; step++)
-      await page.keyboard.press("Shift+ArrowRight");
+    // One arrow press moves the card to the next lane over.
+    await page.keyboard.press("ArrowRight");
     await page.keyboard.press("Space");
     const moved = month.getByRole("button", {
       name: "Move outcome: Synthetic quarter outcome, Updating…",
@@ -797,6 +796,235 @@ test("a quick card under Next steps drags into a day like a step, with one FlowD
         body: expect.objectContaining({ task_ids: ["quick-one"] }),
       },
     ]);
+  } finally {
+    await context.close();
+  }
+});
+
+/** The card IDs of a Review lane, top to bottom, as the DOM has them. */
+async function laneOrder(page: Page, name: string) {
+  return page
+    .getByRole("region", { name, exact: true })
+    .locator("[data-outcome-id]")
+    .evaluateAll((cards) =>
+      cards.map((card) => card.getAttribute("data-outcome-id")),
+    );
+}
+async function childOrders(worker: Worker) {
+  return worker.evaluate(() =>
+    Object.fromEntries(
+      (
+        globalThis as unknown as {
+          plannerState: { tasks: Record<string, unknown>[] };
+        }
+      ).plannerState.tasks.map((task) => [task.id, task.child_order]),
+    ),
+  );
+}
+
+test("a card dropped on another card of its lane takes its place at once, writes the lane and Todoist's order once, and keeps it", async () => {
+  const { context, worker } = await launchPlanner();
+  try {
+    await addCommitments(worker);
+    const page = await context.newPage();
+    await page.goto("https://app.todoist.com/app/today");
+    await page.getByRole("button", { name: "Plan", exact: true }).click();
+    const committed = page.getByRole("region", {
+      name: "Committed",
+      exact: true,
+    });
+    await expect
+      .poll(() => laneOrder(page, "Committed"))
+      .toEqual(["parent", "launch", "audit"]);
+    await controlWrites(worker, { hold: true });
+    const handle = committed.getByRole("button", {
+      name: "Move outcome: Synthetic weekly outcome",
+    });
+    const from = (await handle.boundingBox())!;
+    const to = (await committed
+      .locator('[data-outcome-id="audit"]')
+      .boundingBox())!;
+    await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(from.x + from.width / 2 + 8, from.y + 8, {
+      steps: 3,
+    });
+    await page.mouse.move(to.x + to.width / 2, to.y + to.height / 2, {
+      steps: 18,
+    });
+    // Over the audit card, moving down: the line is under it, and nothing in the DOM has moved.
+    await expect(committed.locator(".is-insert-after")).toHaveCount(1);
+    await expect(
+      committed.locator(".is-insert-after [data-outcome-id]"),
+    ).toHaveAttribute("data-outcome-id", "audit");
+    expect(await laneOrder(page, "Committed")).toEqual([
+      "parent",
+      "launch",
+      "audit",
+    ]);
+    await page.mouse.up();
+    await expect
+      .poll(() => laneOrder(page, "Committed"))
+      .toEqual(["launch", "audit", "parent"]);
+    await expect(
+      committed.locator('.review-draggable[aria-busy="true"]'),
+    ).toHaveCount(1);
+    await controlWrites(worker, { hold: false, release: true });
+    await expect(page.locator("[aria-busy=true]")).toHaveCount(0);
+    expect(
+      (await plannerWrites(worker)).map(({ path, body }) => ({ path, body })),
+    ).toEqual([
+      {
+        path: "/api/plus/v1/tasks:reorder",
+        body: {
+          request_id: expect.stringMatching(/^[0-9a-f-]{36}$/u),
+          task_ids: ["launch", "audit", "parent"],
+          task_id: "parent",
+          lane: "committed",
+        },
+      },
+    ]);
+    // The three are siblings in Todoist, which now orders them the same way.
+    expect(await childOrders(worker)).toMatchObject({
+      launch: 1,
+      audit: 2,
+      parent: 3,
+    });
+    await page.reload();
+    await page.getByRole("button", { name: "Plan", exact: true }).click();
+    await expect
+      .poll(() => laneOrder(page, "Committed"))
+      .toEqual(["launch", "audit", "parent"]);
+    // Week's overview follows the lane.
+    await page.getByRole("tab", { name: "Week", exact: true }).click();
+    await expect
+      .poll(() =>
+        page
+          .locator(".planning-commitment-grid [data-outcome-id]")
+          .evaluateAll((cards) =>
+            cards.map((card) => card.getAttribute("data-outcome-id")),
+          ),
+      )
+      .toEqual(["launch", "audit", "parent"]);
+  } finally {
+    await context.close();
+  }
+});
+
+test("a card let go in the gap between two cards of its lane moves nothing and writes nothing", async () => {
+  const { context, worker } = await launchPlanner();
+  try {
+    await addCommitments(worker);
+    const page = await context.newPage();
+    await page.goto("https://app.todoist.com/app/today");
+    await page.getByRole("button", { name: "Plan", exact: true }).click();
+    const committed = page.getByRole("region", {
+      name: "Committed",
+      exact: true,
+    });
+    await expect
+      .poll(() => laneOrder(page, "Committed"))
+      .toEqual(["parent", "launch", "audit"]);
+    const handle = committed.getByRole("button", {
+      name: "Move outcome: Synthetic weekly outcome",
+    });
+    const from = (await handle.boundingBox())!;
+    const above = (await committed
+      .locator('.review-draggable:has([data-outcome-id="launch"])')
+      .boundingBox())!;
+    const below = (await committed
+      .locator('.review-draggable:has([data-outcome-id="audit"])')
+      .boundingBox())!;
+    // The middle of the 7px gap between the two cards.
+    const gap = (above.y + above.height + below.y) / 2;
+    expect(below.y - (above.y + above.height)).toBeCloseTo(7, 0);
+    await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(from.x + from.width / 2 + 8, from.y + 8, {
+      steps: 3,
+    });
+    await page.mouse.move(above.x + above.width / 2, gap, { steps: 18 });
+    await expect(committed.locator(".is-insert-after")).toHaveCount(0);
+    await expect(committed.locator(".is-insert-before")).toHaveCount(0);
+    await page.mouse.up();
+    await expect(
+      page.locator("[data-dnd-overlay][data-dnd-dragging]"),
+    ).toHaveCount(0);
+    expect(await laneOrder(page, "Committed")).toEqual([
+      "parent",
+      "launch",
+      "audit",
+    ]);
+    expect(await plannerWrites(worker)).toEqual([]);
+  } finally {
+    await context.close();
+  }
+});
+
+test("the keyboard moves a card card by card in its lane, Escape puts it back, and an arrow across lanes stages it", async () => {
+  const { context, worker } = await launchPlanner();
+  try {
+    await addCommitments(worker);
+    const page = await context.newPage();
+    await page.goto("https://app.todoist.com/app/today");
+    await page.getByRole("button", { name: "Plan", exact: true }).click();
+    const committed = page.getByRole("region", {
+      name: "Committed",
+      exact: true,
+    });
+    const handle = committed.getByRole("button", {
+      name: /^Move outcome: Synthetic weekly outcome/u,
+    });
+    await expect
+      .poll(() => laneOrder(page, "Committed"))
+      .toEqual(["parent", "launch", "audit"]);
+    // Picked up, moved and put back with Escape: nothing changes, and focus stays.
+    await handle.focus();
+    await page.keyboard.press("Space");
+    await page.keyboard.press("ArrowDown");
+    await page.keyboard.press("Escape");
+    // The next drag starts once this one's drop animation is over.
+    await expect(
+      page.locator("[data-dnd-overlay][data-dnd-dragging]"),
+    ).toHaveCount(0);
+    await expect(handle).toBeFocused();
+    expect(await laneOrder(page, "Committed")).toEqual([
+      "parent",
+      "launch",
+      "audit",
+    ]);
+    expect(await plannerWrites(worker)).toEqual([]);
+    // Down two, up one, dropped: on the launch card's place, with focus still on its handle.
+    await page.keyboard.press("Space");
+    await page.keyboard.press("ArrowDown");
+    await page.keyboard.press("ArrowDown");
+    await page.keyboard.press("ArrowUp");
+    await page.keyboard.press("Space");
+    await expect
+      .poll(() => laneOrder(page, "Committed"))
+      .toEqual(["launch", "parent", "audit"]);
+    await expect(page.locator("[aria-busy=true]")).toHaveCount(0);
+    await expect(handle).toBeFocused();
+    expect(
+      (await plannerWrites(worker)).map((call) => call.body.task_ids),
+    ).toEqual([["launch", "parent", "audit"]]);
+    await expect(
+      page.locator("[data-dnd-overlay][data-dnd-dragging]"),
+    ).toHaveCount(0);
+    // An arrow toward the next lane moves a card there: its stage.
+    const week = page.getByRole("region", { name: "Week", exact: true });
+    await week
+      .getByRole("button", { name: "Move outcome: Synthetic week candidate" })
+      .focus();
+    await page.keyboard.press("Space");
+    await page.keyboard.press("ArrowRight");
+    await page.keyboard.press("Space");
+    await expect(
+      committed.locator('[data-outcome-id="candidate"]'),
+    ).toBeVisible();
+    await expect
+      .poll(async () => (await plannerWrites(worker)).at(-1)?.body)
+      .toMatchObject({ task_id: "candidate", stage: "committed" });
   } finally {
     await context.close();
   }

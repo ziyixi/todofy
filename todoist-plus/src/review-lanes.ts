@@ -11,6 +11,7 @@ import {
   waitingTasks,
 } from "./dependencies";
 import {
+  inLaneOrder,
   isDateCandidate,
   isParked,
   planningOutcomes,
@@ -46,14 +47,18 @@ export function cardState(
  * Otherwise a waiting task (a label, or a dependency that holds) is in Waiting and one that should
  * start is in Start now, also when only the 7-day date rule made it a Week candidate; the other
  * date-rule candidates stay in Week. A step has no card in its outcome's lane, even with the same
- * stage label, so one that waits or should start has its own card in Waiting or Start now. Start
- * now lists the earliest deadline first, then the higher priority; Waiting and Parked the longest
- * untouched first.
+ * stage label, so one that waits or should start has its own card in Waiting or Start now. Each
+ * lane follows the owner's stored order (inLaneOrder), and otherwise Start now lists the earliest
+ * deadline first, then the higher priority; Waiting and Parked the longest untouched first.
  */
 export function boardLanes(
   plan: Pick<
     PlanState,
-    "tasks" | "managedLabels" | "dependencies" | "availableLabels"
+    | "tasks"
+    | "managedLabels"
+    | "dependencies"
+    | "availableLabels"
+    | "laneOrders"
   >,
   today: string,
 ): BoardLanes {
@@ -92,6 +97,8 @@ export function boardLanes(
     .sort(
       (a, b) => a.deadline.localeCompare(b.deadline) || b.priority - a.priority,
     );
+  for (const lane of Object.keys(lanes) as LaneId[])
+    lanes[lane] = inLaneOrder(lane, lanes[lane], plan.laneOrders[lane]);
   return lanes;
 }
 

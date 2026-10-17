@@ -2,6 +2,8 @@ import { expect, it } from "vitest";
 import { createPrototype } from "../design/fixture";
 import {
   applyConfirmed,
+  moved,
+  predictLaneOrder,
   rereadsAfter,
   withNextWeek,
   withStage,
@@ -222,4 +224,28 @@ it("predicts setting a task aside, and back, with the labels Todofy's plan_label
   expect(
     predicted(["parked", "deep", "waiting"], "weekly", false).labels,
   ).toEqual(["deep", "focus", "waiting"]);
+});
+
+it("moves an item as a sortable list does, and predicts a lane's order as Todofy saves it", async () => {
+  const ids = ["a", "b", "c", "d"];
+  // Down, the item lands after the one it was dropped on; up, before it.
+  expect(moved(ids, 0, 2)).toEqual(["b", "c", "a", "d"]);
+  expect(moved(ids, 3, 1)).toEqual(["a", "d", "b", "c"]);
+  expect(moved(ids, 3, 3)).toEqual(ids);
+  expect(ids).toEqual(["a", "b", "c", "d"]);
+  const data = await createPrototype().load();
+  const planned = {
+    ...data,
+    plan: {
+      ...data.plan,
+      laneOrders: { weekly: ["tools", "walk"], committed: ["desk"] },
+    },
+  };
+  const predicted = predictLaneOrder("monthly", ["walk", "reading"])(planned);
+  expect(predicted.plan.laneOrders).toEqual({
+    weekly: ["tools"],
+    committed: ["desk"],
+    monthly: ["walk", "reading"],
+  });
+  expect(predicted.plan.tasks).toBe(planned.plan.tasks);
 });

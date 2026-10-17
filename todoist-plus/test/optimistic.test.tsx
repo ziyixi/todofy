@@ -23,13 +23,19 @@ type Drop = (event: {
     target?: { data?: Record<string, unknown> };
   };
 }) => void;
+type Sortable = {
+  accept?: string | ((source: { data?: Record<string, unknown> }) => boolean);
+  data?: Record<string, unknown>;
+  plugins?: unknown[];
+};
 const drops = vi.hoisted(() => ({
   latest: undefined as Drop | undefined,
-  // The latest options of each drop target, by ID.
+  // The latest options of each drop target, and of each sortable card, by ID.
   targets: new Map<
     string,
     { disabled?: boolean; data?: Record<string, unknown> }
   >(),
+  sortables: new Map<string, Sortable>(),
 }));
 vi.mock("@dnd-kit/react", () => ({
   DragDropProvider: ({
@@ -56,6 +62,13 @@ vi.mock("@dnd-kit/react", () => ({
     drops.targets.set(input.id, input);
     return { ref: () => {}, isDropTarget: false };
   },
+  useDragOperation: () => ({ source: null, target: null }),
+}));
+vi.mock("@dnd-kit/react/sortable", () => ({
+  useSortable: (input: Sortable & { id: string }) => {
+    drops.sortables.set(input.id, input);
+    return { ref: () => {}, handleRef: () => {}, isDragSource: false };
+  },
 }));
 beforeAll(() => {
   HTMLDialogElement.prototype.showModal = function () {
@@ -66,7 +79,12 @@ afterEach(cleanup);
 
 /** Holds one action's calls until the test answers them. */
 function hold<
-  Name extends "updateTask" | "moveTaskToDay" | "addToDay" | "removeFromDay",
+  Name extends
+    | "updateTask"
+    | "moveTaskToDay"
+    | "addToDay"
+    | "removeFromDay"
+    | "reorderTasks",
 >(actions: PlusActions, name: Name) {
   const original = actions[name] as (...args: unknown[]) => Promise<unknown>;
   const calls: {
@@ -747,4 +765,119 @@ it("plans a quick task by dropping its card into a day, exactly as a step", asyn
   await act(() => moves[0]!.confirm());
   // In the calendar now, it leaves the Quick line, which then has nothing to show.
   expect(screen.queryByRole("region", { name: "Quick tasks" })).toBeNull();
+});
+
+/** A Review card's drag data, as its sortable has it now. */
+function cardData(id: string) {
+  return drops.sortables.get(`review-outcome:${id}`)!.data!;
+}
+
+it("reorders a card inside its lane at once, with one ReorderTasks of the whole lane", async () => {
+  const actions = createPrototype();
+  const reorders = hold(actions, "reorderTasks");
+  const updates = hold(actions, "updateTask");
+  await mountPlan(actions);
+  expect(laneTitles("Committed")).toEqual([
+    "Ship the small website refresh",
+    "Prepare the next research check-in",
+    "Organize the experiment notes",
+    "Make the home desk comfortable",
+  ]);
+  // Arrow keys step from card to card, and dnd-kit's optimistic sorting never moves the DOM.
+  expect(drops.sortables.get("review-outcome:research")!.plugins).toHaveLength(
+    1,
+  );
+  // Dropped on the desk's card, the research card takes its place.
+  await drop(cardData("research"), cardData("desk"));
+  expect(reorders.map((call) => call.args)).toEqual([
+    [
+      ["release", "notes", "desk", "research"],
+      "research",
+      "committed",
+      expect.stringMatching(/^[0-9a-f-]{36}$/u),
+    ],
+  ]);
+  expect(laneTitles("Committed")).toEqual([
+    "Ship the small website refresh",
+    "Organize the experiment notes",
+    "Make the home desk comfortable",
+    "Prepare the next research check-in",
+  ]);
+  const card = within(screen.getByRole("region", { name: "Committed" }))
+    .getByText("Prepare the next research check-in")
+    .closest<HTMLElement>(".review-draggable")!;
+  expect(card.getAttribute("aria-busy")).toBe("true");
+  // Not saved: it goes back, and the same move again is the same request.
+  await act(async () => reorders[0]!.fail());
+  await waitFor(() =>
+    expect(laneTitles("Committed")[1]).toBe(
+      "Prepare the next research check-in",
+    ),
+  );
+  await drop(cardData("research"), cardData("desk"));
+  expect(reorders[1]!.args).toEqual(reorders[0]!.args);
+  await act(() => reorders[1]!.confirm());
+  expect(laneTitles("Committed").at(-1)).toBe(
+    "Prepare the next research check-in",
+  );
+  expect(card.getAttribute("aria-busy")).toBeNull();
+  // Week's overview follows the lane's order.
+  fireEvent.click(screen.getByRole("tab", { name: "Week" }));
+  expect(
+    [
+      ...document.querySelectorAll(
+        ".planning-commitment-grid .planning-outcome-card",
+      ),
+    ].map((item) => item.getAttribute("data-outcome-id")),
+  ).toEqual(["release", "notes", "desk", "research"]);
+  expect(updates).toHaveLength(0);
+});
+
+it("moves nothing for a drop on its own lane or its own place, and stages a drop on another lane's card", async () => {
+  const actions = createPrototype();
+  const reorders = hold(actions, "reorderTasks");
+  const updates = hold(actions, "updateTask");
+  await mountPlan(actions);
+  await drop(cardData("research"), { lane: "committed", stage: "committed" });
+  await drop(cardData("research"), cardData("research"));
+  expect(reorders).toHaveLength(0);
+  // On a card of Week, it takes Week's stage, as on the lane.
+  await drop(cardData("research"), cardData("cleanup"));
+  expect(updates.map((call) => call.args[1])).toEqual([{ stage: "weekly" }]);
+  expect(reorders).toHaveLength(0);
+});
+
+it("sends the whole lane's order when an area filter hides some of its cards", async () => {
+  const actions = createPrototype();
+  const reorders = hold(actions, "reorderTasks");
+  await mountPlan(actions);
+  fireEvent.click(screen.getByRole("tab", { name: "Work" }));
+  expect(laneTitles("Committed")).toHaveLength(3);
+  await drop(cardData("notes"), cardData("release"));
+  expect(reorders[0]!.args.slice(0, 3)).toEqual([
+    ["notes", "release", "research", "desk"],
+    "notes",
+    "committed",
+  ]);
+});
+
+it("lets Start now and Waiting cards take only their own lane's cards", async () => {
+  const actions = createPrototype(true);
+  await mountPlan(actions);
+  const accepts = (id: string, lane: string) => {
+    const accept = drops.sortables.get(`review-outcome:${id}`)!.accept!;
+    return typeof accept === "function"
+      ? accept({ data: { lane } })
+      : accept === "review-outcome";
+  };
+  for (const [id, lane] of [
+    ["claim", "start"],
+    ["venue", "waiting"],
+  ] as const)
+    expect(
+      ["start", "waiting", "weekly", "committed"].filter((from) =>
+        accepts(id, from),
+      ),
+    ).toEqual([lane]);
+  expect(accepts("cleanup", "start")).toBe(true);
 });

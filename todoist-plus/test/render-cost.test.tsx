@@ -113,15 +113,37 @@ function counted(tasks: PlanningTask[]) {
   });
   return { list, reads };
 }
+/** Every lane arranged in full: Todofy's 100 IDs each, from the plan's own tasks. */
+const laneOrders = Object.fromEntries(
+  [
+    "start",
+    "waiting",
+    "parked",
+    "quarterly",
+    "monthly",
+    "weekly",
+    "committed",
+  ].map((lane, index) => [
+    lane,
+    Array.from({ length: 100 }, (_, n) => `other-${index * 100 + n}`),
+  ]),
+);
 /**
- * What one Plan render derives from the tasks: the Review board's lanes (Start now and Waiting
- * too) and cards, Week cards, Week's runway line and the weekly review's lines; and Focus's quiet
- * deadline line. The Bets are text and read no task.
+ * What one Plan render derives from the tasks: the Review board's lanes (Start now, Waiting and
+ * Parked too, each in a stored order) and cards, Week cards, Week's runway line and the weekly
+ * review's lines; and Focus's quiet deadline line. The Bets are text and read no task.
  */
 function planRender(tasks: PlanningTask[]) {
   const outcomes = planningOutcomes(tasks, labels);
+  const availableLabels = [{ id: "parked", label: "parked" }];
   boardLanes(
-    { tasks, managedLabels: labels, dependencies: [], availableLabels: [] },
+    {
+      tasks,
+      managedLabels: labels,
+      dependencies: [],
+      availableLabels,
+      laneOrders,
+    },
     "2026-10-13",
   );
   unplannedDue(tasks, [], "2026-10-13");
@@ -141,6 +163,8 @@ function planRender(tasks: PlanningTask[]) {
   const plan = {
     tasks,
     managedLabels: labels,
+    availableLabels,
+    laneOrders,
     inboxProjectId: "synthetic",
     reviewTaskId: "",
   } as unknown as PlanState;

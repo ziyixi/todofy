@@ -131,6 +131,8 @@ async function setupPlanner(context: BrowserContext, worker: Worker) {
       deleted: [] as string[],
       // WeeklyBets as Todofy keeps them (wire JSON), which SetWeeklyBet writes.
       bets: [] as Record<string, unknown>[],
+      // The Review lanes' saved orders, which ReorderTasks writes and ReadPlan answers.
+      laneOrders: {} as Record<string, string[]>,
       // Todofy's mail, as LookupMailItems answers it (wire JSON), each mail's summary by its ID,
       // and the mail settings. Filed mail always moves to the account's Inbox.
       mail: [] as Record<string, unknown>[],
@@ -194,6 +196,9 @@ async function setupPlanner(context: BrowserContext, worker: Worker) {
             hidden_filter_ids: [],
             dependencies: state.dependencies,
             weekly_bets: state.bets,
+            lane_orders: Object.entries(state.laneOrders).map(
+              ([lane, ids]) => ({ lane, task_ids: ids }),
+            ),
             ...state.review,
           },
         });
@@ -298,6 +303,45 @@ async function setupPlanner(context: BrowserContext, worker: Worker) {
           return id;
         });
         return json({ task_ids: ids });
+      }
+      if (url.pathname.endsWith("/tasks:reorder")) {
+        // As Todofy reorders: the moved task's siblings among these (same project, section and
+        // parent) take their own child_order values in this order, unless one is missing or
+        // repeated, and never for Waiting or Parked; a lane keeps the order, its tasks leaving
+        // every other lane's.
+        const ids = body.task_ids as string[];
+        const lane = String(body.lane ?? "");
+        const listed = ids.flatMap<Record<string, unknown>>(
+          (id) => state.tasks.find((task) => task.id === id) ?? [],
+        );
+        const moved = listed.find((task) => task.id === body.task_id);
+        const group = listed.filter((task) =>
+          ["project_id", "section_id", "parent_id"].every(
+            (key) => (task[key] ?? "") === (moved?.[key] ?? ""),
+          ),
+        );
+        const orders = group.map((task) => task.child_order as number);
+        if (
+          !["waiting", "parked"].includes(lane) &&
+          orders.every(Number.isInteger) &&
+          new Set(orders).size === orders.length
+        ) {
+          const sorted = [...orders].sort((a, b) => a - b);
+          group.forEach((task, index) => (task.child_order = sorted[index]));
+        }
+        if (lane) {
+          for (const other of Object.keys(state.laneOrders))
+            state.laneOrders[other] = state.laneOrders[other]!.filter(
+              (id) => !ids.includes(id),
+            );
+          state.laneOrders[lane] = listed.map((task) => String(task.id));
+        }
+        return json({
+          tasks: listed,
+          ...(lane
+            ? { lane_order: { lane, task_ids: state.laneOrders[lane] } }
+            : {}),
+        });
       }
       if (url.pathname.endsWith("/tasks:setTaskLead")) {
         const task = state.tasks.find((task) => task.id === body.task_id);
@@ -825,4 +869,58 @@ export async function addDependencyTasks(
       { task_id: "shelf", prerequisite_id: "invite" },
     );
   }, titles);
+}
+
+/** The plan's calls to Todofy and FlowDay that write, in order. */
+export async function plannerWrites(worker: Worker) {
+  return worker.evaluate(() =>
+    (
+      globalThis as unknown as {
+        plannerState: {
+          calls: {
+            path: string;
+            method: string;
+            body: Record<string, unknown>;
+          }[];
+        };
+      }
+    ).plannerState.calls.filter(
+      (call) => call.method !== "GET" && !call.path.endsWith("/tasks:sync"),
+    ),
+  );
+}
+
+/**
+ * Two more synthetic commitments after the weekly outcome, all three top-level siblings in
+ * Todoist (child_order 1 to 3), so Committed has three cards to reorder.
+ */
+export async function addCommitments(worker: Worker) {
+  await worker.evaluate(() => {
+    const state = (
+      globalThis as unknown as {
+        plannerState: { tasks: Record<string, unknown>[] };
+      }
+    ).plannerState;
+    state.tasks.find((task) => task.id === "parent")!.child_order = 1;
+    state.tasks.push(
+      {
+        id: "launch",
+        title: "Synthetic launch outcome",
+        area: "work",
+        stage: "committed",
+        labels: ["committed"],
+        etag: "launch-1",
+        child_order: 2,
+      },
+      {
+        id: "audit",
+        title: "Synthetic audit outcome",
+        area: "work",
+        stage: "committed",
+        labels: ["committed"],
+        etag: "audit-1",
+        child_order: 3,
+      },
+    );
+  });
 }

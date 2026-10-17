@@ -1,23 +1,40 @@
-import { useEffect, useRef, useState, type CSSProperties } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+} from "react";
 import {
   DragDropProvider,
   DragOverlay,
-  useDraggable,
+  useDragOperation,
   useDroppable,
 } from "@dnd-kit/react";
+import { useSortable } from "@dnd-kit/react/sortable";
+import { SortableKeyboardPlugin } from "@dnd-kit/dom/sortable";
+import { pointerIntersection } from "@dnd-kit/collision";
 import { GripVertical } from "lucide-react";
 import { displayedTitle, effectiveArea } from "./domain";
 import { canMarkActive, deadlineTitle, spokenDeadline } from "./deadlines";
 import { dependencyIndex } from "./dependencies";
+import { spokenDrags } from "./drag-announcements";
 import {
   canPark,
+  MAX_LANE_TASKS,
   outcomeArea,
   outcomeColor,
   outcomeSteps,
   PARKED_LABEL,
   reviewLanes,
 } from "./planning-outcomes";
-import { pendingTask, predictStage, withStage } from "./plan-updates";
+import {
+  moved,
+  pendingTask,
+  predictLaneOrder,
+  predictStage,
+  withStage,
+} from "./plan-updates";
 import {
   boardLanes,
   cardState,
@@ -206,6 +223,8 @@ const PARKED_SHOWN = 10;
  * a stage lane takes that stage and is marked in progress in one write; one from Waiting takes only
  * the stage. Parked, while the account has the label, always shows and takes any card: it sets the
  * card aside, and a card dragged out of it into a stage lane takes that stage without the label.
+ * Inside every lane a card dropped on another card takes its place: the lane keeps that order in
+ * Todofy, and Todoist's order of the moved card's siblings follows (not for Waiting and Parked).
  */
 export function ReviewBoard({
   plan,
@@ -227,6 +246,31 @@ export function ReviewBoard({
   const [announcement, setAnnouncement] = useState("");
   // After a confirmed Start, focus moves on to the next card that can start, or to the board.
   const [focusAfter, setFocusAfter] = useState<{ id: string; next: string }>();
+  // A card reordered in its lane keeps keyboard focus on its handle, though React moves its node.
+  const [focusMoved, setFocusMoved] = useState<string>();
+  // A reorder's request ID, reused when the same reorder is tried again.
+  const reorderRequests = useRef(new Map<string, string>());
+  // A drag speaks of card titles, lane names and positions.
+  const plugins = useMemo(() => {
+    const { startNow, waiting, parked } = words(language);
+    const laneTitles: Record<string, string> = {
+      start: startNow,
+      waiting,
+      parked,
+      ...Object.fromEntries(
+        reviewLanes(language).map((lane) => [lane.stage, lane.title]),
+      ),
+    };
+    return spokenDrags(language, (data, as) => {
+      const lane = laneTitles[String(data?.lane)];
+      const task = data?.task as PlanningTask | undefined;
+      if (task && as === "source") return displayedTitle(task.title);
+      if (typeof data?.position !== "number") return lane;
+      return language === "zh"
+        ? `${lane}第 ${data.position + 1} 项`
+        : `${lane}, position ${data.position + 1}`;
+    });
+  }, [language]);
   const scheduledIds = new Set(
     days.flatMap((day) =>
       day.taskIds.filter((id) => !day.completedTaskIds.includes(id)),
@@ -280,6 +324,61 @@ export function ReviewBoard({
     )?.focus();
     setFocusAfter(undefined);
   }, [focusAfter, busy]);
+  useEffect(() => {
+    if (!focusMoved || !board.current) return;
+    setFocusMoved(undefined);
+    // Only where focus was lost or is still on the board; never pulled back from elsewhere.
+    const active = (board.current.getRootNode() as Document | ShadowRoot)
+      .activeElement;
+    if (active && active !== document.body && !board.current.contains(active))
+      return;
+    [...board.current.querySelectorAll<HTMLElement>(".planning-outcome-card")]
+      .find((card) => card.dataset.outcomeId === focusMoved)
+      ?.parentElement?.querySelector<HTMLElement>(".review-drag-handle")
+      ?.focus();
+  }, [focusMoved]);
+
+  /**
+   * Moves a card from `from` to `to` in its lane, both positions in the whole lane: one
+   * ReorderTasks with the lane's new order, at most Todofy's 100.
+   */
+  function reorder(task: PlanningTask, lane: LaneId, from: number, to: number) {
+    const ids = lanes[lane].map((item) => item.id);
+    let next = moved(ids, from, to);
+    if (next.every((id, index) => id === ids[index])) return;
+    if (next.length > MAX_LANE_TASKS) {
+      if (next.indexOf(task.id) >= MAX_LANE_TASKS) return;
+      next = next.slice(0, MAX_LANE_TASKS);
+    }
+    // Todoist's current positions are part of the key: once they changed elsewhere, so that
+    // Todofy refuses the old request, the read that follows makes the next drop a new one.
+    const key = [
+      lane,
+      task.id,
+      next.join(","),
+      lanes[lane].map((item) => item.childOrder).join(","),
+    ].join("|");
+    const requestId = reorderRequests.current.get(key) ?? crypto.randomUUID();
+    reorderRequests.current.set(key, requestId);
+    setFocusMoved(task.id);
+    // The card shows in its new place at once and waits there until Todofy confirms.
+    void run(
+      async () => {
+        const result = await actions.reorderTasks(
+          next,
+          task.id,
+          lane,
+          requestId,
+        );
+        reorderRequests.current.delete(key);
+        return result;
+      },
+      {
+        pending: [pendingTask(task.id)],
+        predict: predictLaneOrder(lane, next),
+      },
+    );
+  }
 
   async function start(task: PlanningTask) {
     // The next card that can start, in the board's order now.
@@ -295,13 +394,23 @@ export function ReviewBoard({
   }
   return (
     <DragDropProvider
+      plugins={plugins}
       onDragEnd={({ canceled, operation }) => {
         if (canceled) return;
         const task = operation.source?.data?.task as PlanningTask | undefined;
         const from = operation.source?.data?.lane as LaneId | undefined;
         const to = operation.target?.data?.lane as LaneId | undefined;
+        if (!task || !from || !to) return;
+        // In its own lane a card moves only when dropped on another card, not on the lane.
+        if (from === to) {
+          const start = operation.source?.data?.position as number | undefined;
+          const end = operation.target?.data?.position as number | undefined;
+          if (start !== undefined && end !== undefined)
+            reorder(task, from, start, end);
+          return;
+        }
         const column = columns.find((item) => item.id === to);
-        if (!task || !from || !to || from === to || !column?.label) return;
+        if (!column?.label) return;
         const parking = to === "parked";
         const stage: Stage = column.stage ?? "none";
         // Start now is acknowledged by the drag: the stage and the in-progress label in one write.
@@ -342,6 +451,9 @@ export function ReviewBoard({
               title={column.title}
               label={column.label}
               tasks={shown(column.id)}
+              positions={
+                new Map(lanes[column.id].map((task, index) => [task.id, index]))
+              }
               plan={plan}
               scheduledIds={scheduledIds}
               today={currentDate}
@@ -396,6 +508,7 @@ function ReviewLane({
   title,
   label,
   tasks,
+  positions,
   plan,
   scheduledIds,
   today,
@@ -412,7 +525,10 @@ function ReviewLane({
   title: string;
   /** The label a drop writes; a drop on Start now or Waiting changes nothing. */
   label?: string;
+  /** The cards shown, which an area filter may leave out. */
   tasks: PlanningTask[];
+  /** Each card's position in the whole lane, which a reorder writes. */
+  positions: ReadonlyMap<string, number>;
   plan: PlanState;
   scheduledIds: Set<string>;
   today: string;
@@ -423,14 +539,32 @@ function ReviewLane({
   onStart?: (task: PlanningTask) => void;
   onLabels?: () => void;
 }) {
-  const { ref, isDropTarget } = useDroppable({
+  const { ref } = useDroppable({
     id: `review-lane:${lane}`,
     accept: "review-outcome",
     // Start now and Waiting catch a drop without a label, which changes nothing, so that a card
     // let go over them goes back instead of into the lane its preview overlaps.
     disabled: busy || Boolean(stage && !label),
+    // Below its cards, which are the targets wherever the pointer is on one.
+    collisionPriority: 1,
     data: { stage, lane },
   });
+  // A card of another lane over this one lights it, if it takes drops; one of this lane over
+  // another of its cards draws the line where it will land: before it moving up, after it down.
+  const { source, target } = useDragOperation();
+  const over = target?.data?.lane === lane;
+  const ownCard = source?.data?.lane === lane;
+  const lit = over && !ownCard && Boolean(label);
+  const from = source?.data?.position as number | undefined;
+  const to = target?.data?.position as number | undefined;
+  const insert = (task: PlanningTask) =>
+    over && ownCard && from !== undefined && to !== from
+      ? positions.get(task.id) !== to
+        ? undefined
+        : to! < from
+          ? "before"
+          : "after"
+      : undefined;
   const text = words(language);
   // Parked shows its first cards; the rest wait behind "more".
   const [expanded, setExpanded] = useState(false);
@@ -440,7 +574,7 @@ function ReviewLane({
   return (
     <section
       ref={ref}
-      className={`review-lane ${isDropTarget && label ? "is-over" : ""}`}
+      className={`review-lane ${lit ? "is-over" : ""}`}
       aria-label={title}
       data-lane={lane}
       // A jump from Focus or the weekly review focuses the lane.
@@ -472,11 +606,14 @@ function ReviewLane({
         </div>
       )}
       <div className="review-lane-cards">
-        {cards.map((task) => (
+        {cards.map((task, index) => (
           <DraggableOutcome
             key={task.id}
             task={task}
             lane={lane}
+            index={index}
+            position={positions.get(task.id)!}
+            insert={insert(task)}
             plan={plan}
             scheduledIds={scheduledIds}
             today={today}
@@ -514,6 +651,9 @@ function ReviewLane({
 function DraggableOutcome({
   task,
   lane,
+  index,
+  position,
+  insert,
   plan,
   scheduledIds,
   today,
@@ -525,6 +665,12 @@ function DraggableOutcome({
 }: {
   task: PlanningTask;
   lane: LaneId;
+  /** Its place among the cards shown. */
+  index: number;
+  /** Its place in the whole lane. */
+  position: number;
+  /** Where a card of this lane dragged over it would land. */
+  insert?: "before" | "after";
   plan: PlanState;
   scheduledIds: Set<string>;
   today: string;
@@ -534,11 +680,25 @@ function DraggableOutcome({
   editTask: Props["editTask"];
   onStart?: (task: PlanningTask) => void;
 }) {
-  const { ref, handleRef, isDragSource } = useDraggable({
+  const { ref, handleRef, isDragSource } = useSortable({
     id: `review-outcome:${task.id}`,
+    index,
+    group: lane,
     type: "review-outcome",
+    // Start now and Waiting take no drops from other lanes, only their own cards' moves.
+    accept:
+      lane === "start" || lane === "waiting"
+        ? (source) => source.data?.lane === lane
+        : "review-outcome",
+    // The arrow keys step from card to card. Without dnd-kit's optimistic sorting nothing moves
+    // the DOM during a drag: the order on screen is the data's, so a drop that writes nothing
+    // leaves it as it was.
+    plugins: [SortableKeyboardPlugin],
+    // A card is the target only under the pointer: a drop in a gap moves nothing.
+    collisionDetector: pointerIntersection,
+    collisionPriority: 2,
     disabled: busy || pending,
-    data: { task, lane },
+    data: { task, lane, position },
   });
   const text = words(language);
   const title = displayedTitle(task.title);
@@ -549,7 +709,7 @@ function DraggableOutcome({
   return (
     <div
       ref={ref}
-      className={`review-draggable ${isDragSource ? "is-dragging" : ""} ${pending ? "is-pending" : ""}`}
+      className={`review-draggable ${isDragSource ? "is-dragging" : ""} ${pending ? "is-pending" : ""} ${insert ? `is-insert-${insert}` : ""}`}
       data-state={state}
       aria-busy={pending || undefined}
     >

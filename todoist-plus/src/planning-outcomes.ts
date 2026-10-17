@@ -1,5 +1,5 @@
 import { effectiveArea, taskAncestors } from "./domain";
-import type { Language, PlanState, PlanningTask, Stage } from "./model";
+import type { LaneId, Language, PlanState, PlanningTask, Stage } from "./model";
 
 const childIndexes = new WeakMap<
   readonly PlanningTask[],
@@ -34,6 +34,27 @@ export function isParked(
   plan: Pick<PlanState, "availableLabels">,
 ): boolean {
   return task.labels.includes(PARKED_LABEL) && canPark(plan);
+}
+
+/** Todofy keeps at most this many tasks of one lane's order (core/plan.py MAX_LANE_TASKS). */
+export const MAX_LANE_TASKS = 100;
+
+/**
+ * A lane's tasks in the owner's order: the ones in the stored order first, as stored (IDs no
+ * longer in the lane are skipped), then the rest in the lane's own order. In Start now the rest
+ * come first instead: a task that has just become due is its newest news.
+ */
+export function inLaneOrder(
+  lane: LaneId,
+  tasks: readonly PlanningTask[],
+  stored: readonly string[] = [],
+): PlanningTask[] {
+  const positions = new Map(stored.map((id, index) => [id, index]));
+  const arranged = tasks
+    .filter((task) => positions.has(task.id))
+    .sort((a, b) => positions.get(a.id)! - positions.get(b.id)!);
+  const rest = tasks.filter((task) => !positions.has(task.id));
+  return lane === "start" ? [...rest, ...arranged] : [...arranged, ...rest];
 }
 
 /** A Week candidate only by Todofy's 7-day date rule (Candidate If): it has no Week label of its own. */
@@ -80,14 +101,21 @@ export function planningOutcomes(
 }
 
 /**
- * This week's commitments as Review's Committed lane lists them, none set aside: Week's overview,
- * the toolbar's counts and the weekly review all use this one list.
+ * This week's commitments as Review's Committed lane lists them, in its order and none set aside:
+ * Week's overview, the toolbar's counts and the weekly review all use this one list.
  */
 export function committedOutcomes(
-  plan: Pick<PlanState, "tasks" | "managedLabels" | "availableLabels">,
+  plan: Pick<
+    PlanState,
+    "tasks" | "managedLabels" | "availableLabels" | "laneOrders"
+  >,
 ): PlanningTask[] {
-  return planningOutcomes(plan.tasks, plan.managedLabels).filter(
-    (task) => task.stage === "committed" && !isParked(task, plan),
+  return inLaneOrder(
+    "committed",
+    planningOutcomes(plan.tasks, plan.managedLabels).filter(
+      (task) => task.stage === "committed" && !isParked(task, plan),
+    ),
+    plan.laneOrders.committed,
   );
 }
 
