@@ -435,6 +435,41 @@ it("jumps to the Waiting lane and to Week's first unplanned commitment, with foc
   );
 });
 
+it("Plan steps also works while Week is open on another commitment and area", async () => {
+  const data = await props();
+  render(<PlanView {...data} />);
+  fireEvent.click(screen.getByRole("tab", { name: "Week" }));
+  const weekArea = within(
+    screen.getByRole("tablist", { name: "Commitment area" }),
+  );
+  fireEvent.click(weekArea.getByRole("tab", { name: "Personal" }));
+  expect(
+    screen.getByRole("region", {
+      name: "Next steps: Make the home desk comfortable",
+    }),
+  ).toBeTruthy();
+  const review = openReview();
+  fireEvent.click(
+    within(line(review, "Commitments not planned")).getByRole("button", {
+      name: "Plan steps",
+    }),
+  );
+  // Every area again, so that the first unplanned commitment's card is in the grid.
+  expect(
+    weekArea.getByRole("tab", { name: "All" }).getAttribute("aria-selected"),
+  ).toBe("true");
+  expect(
+    screen.getByRole("region", {
+      name: "Next steps: Organize the experiment notes",
+    }),
+  ).toBeTruthy();
+  expect(document.activeElement).toBe(
+    screen.getByRole("button", {
+      name: "2 commitments have nothing planned in these 7 days",
+    }),
+  );
+});
+
 it("keeps this week's commitments for next week only on Sunday, when clicked", async () => {
   const actions = createPrototype(false, "2026-10-18");
   const update = vi.spyOn(actions, "updateTask");

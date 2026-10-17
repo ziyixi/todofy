@@ -49,7 +49,8 @@ interface Props {
   actions: PlusActions;
   editTask: (task: PlanningTask) => void;
   onShowWaiting: () => void;
-  onShowRunway: () => void;
+  /** Week at this commitment, the first with nothing planned. */
+  onPlanSteps: (commitmentId: string) => void;
   completeReview: (task: PlanningTask) => Promise<boolean>;
   /** Opens Plus's Mailbox, which lists the mail of line 1. */
   onOpenMailbox?: () => void;
@@ -73,7 +74,7 @@ export function WeeklyReview({
   actions,
   editTask,
   onShowWaiting,
-  onShowRunway,
+  onPlanSteps,
   completeReview,
   onOpenMailbox,
   onClose,
@@ -320,7 +321,10 @@ export function WeeklyReview({
           <>
             <span className="weekly-review-count">{unscheduled.length}</span>
             {unscheduled.length > 0 && (
-              <button className="weekly-review-jump" onClick={onShowRunway}>
+              <button
+                className="weekly-review-jump"
+                onClick={() => onPlanSteps(unscheduled[0]!.id)}
+              >
                 {zh ? "去安排" : "Plan steps"}
               </button>
             )}

@@ -68,8 +68,10 @@ export function PlanView(props: PlanViewProps) {
   const [mode, setMode] = useState<"review" | "week">("review");
   const [area, setArea] = useState<Area | "all">("all");
   const [reviewing, setReviewing] = useState(Boolean(props.reviewing));
-  // A jump focuses its target and scrolls it into view once; Week mounts at the first unplanned
-  // commitment.
+  // Week's selected commitment (absent: the first one) and its own area filter.
+  const [commitment, setCommitment] = useState<string>();
+  const [weekArea, setWeekArea] = useState<Area | "all">("all");
+  // A jump focuses its target and scrolls it into view once.
   const [jump, setJump] = useState<keyof typeof JUMPS>();
   const section = useRef<HTMLElement>(null);
   const reviewButton = useRef<HTMLButtonElement>(null);
@@ -82,6 +84,13 @@ export function PlanView(props: PlanViewProps) {
     setMode("review");
     setArea("all");
     setJump(lane);
+  }
+  /** Week at one commitment, with every area shown so that its card is in the grid. */
+  function planSteps(id: string) {
+    setMode("week");
+    setWeekArea("all");
+    setCommitment(id);
+    setJump("runway");
   }
   const { showStart, onStartShown, onReviewShown } = props;
   useEffect(() => {
@@ -168,10 +177,7 @@ export function PlanView(props: PlanViewProps) {
           completeReview={props.completeReview}
           onOpenMailbox={props.onOpenMailbox}
           onShowWaiting={() => showLane("waiting")}
-          onShowRunway={() => {
-            setMode("week");
-            setJump("runway");
-          }}
+          onPlanSteps={planSteps}
           onClose={() => {
             setReviewing(false);
             reviewButton.current?.focus();
@@ -216,7 +222,13 @@ export function PlanView(props: PlanViewProps) {
           <ReviewBoard {...props} lanes={lanes} area={area} />
         </>
       ) : (
-        <PlanningWeek {...props} startAtUnplanned={jump === "runway"} />
+        <PlanningWeek
+          {...props}
+          selectedId={commitment}
+          onSelect={setCommitment}
+          area={weekArea}
+          onArea={setWeekArea}
+        />
       )}
       <p className="planning-reset-note">{text.reset}</p>
     </section>

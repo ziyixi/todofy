@@ -1,4 +1,4 @@
-import { useState, type CSSProperties } from "react";
+import type { CSSProperties } from "react";
 import { DragDropProvider, DragOverlay, useDraggable } from "@dnd-kit/react";
 import { GripVertical } from "lucide-react";
 import {
@@ -42,8 +42,12 @@ interface Props {
   run: RunOperation;
   editTask: (task: PlanningTask) => void;
   onWeekChange: (week: string) => void;
-  /** Opened from the weekly review: start at the first commitment with nothing planned. */
-  startAtUnplanned?: boolean;
+  /** The selected commitment: absent for the first one, "" for none. PlanView keeps it. */
+  selectedId?: string;
+  onSelect: (id: string) => void;
+  /** Week's own area filter, which the weekly review's "Plan steps" resets. */
+  area: Area | "all";
+  onArea: (area: Area | "all") => void;
 }
 export function PlanningWeek(props: Props) {
   const {
@@ -59,18 +63,21 @@ export function PlanningWeek(props: Props) {
     run,
     editTask,
     onWeekChange,
-    startAtUnplanned,
+    selectedId,
+    onSelect,
+    area,
+    onArea,
   } = props;
   const committed = planningOutcomes(plan.tasks, plan.managedLabels).filter(
     (task) => task.stage === "committed",
   );
   // One quiet line, not a mark per card: commitments with nothing in these seven days.
   const unplanned = unscheduledCommitments(plan, days);
-  const [area, setArea] = useState<Area | "all">("all");
-  const [selectedId, setSelectedId] = useState(
-    (startAtUnplanned ? unplanned[0]?.id : undefined) ?? committed[0]?.id ?? "",
-  );
-  const selected = committed.find((task) => task.id === selectedId);
+  // A remembered commitment that is no longer committed falls back to the first one.
+  const selected =
+    selectedId === ""
+      ? undefined
+      : (committed.find((task) => task.id === selectedId) ?? committed[0]);
   const shown = committed.filter(
     (task) => area === "all" || effectiveArea(task, plan.tasks) === area,
   );
@@ -80,20 +87,20 @@ export function PlanningWeek(props: Props) {
     ),
   );
   function selectNextUnplanned() {
-    const index = unplanned.findIndex((task) => task.id === selectedId);
+    const index = unplanned.findIndex((task) => task.id === selected?.id);
     const next = unplanned[(index + 1) % unplanned.length]!;
     if (area !== "all" && effectiveArea(next, plan.tasks) !== area)
-      setArea("all");
-    setSelectedId(next.id);
+      onArea("all");
+    onSelect(next.id);
   }
   function selectArea(next: Area | "all") {
-    setArea(next);
+    onArea(next);
     if (
       next !== "all" &&
       selected &&
       effectiveArea(selected, plan.tasks) !== next
     )
-      setSelectedId(
+      onSelect(
         committed.find((task) => effectiveArea(task, plan.tasks) === next)
           ?.id ?? "",
       );
@@ -182,9 +189,7 @@ export function PlanningWeek(props: Props) {
               scheduledIds={scheduledIds}
               language={language}
               selected={selected?.id === task.id}
-              onClick={() =>
-                setSelectedId(selectedId === task.id ? "" : task.id)
-              }
+              onClick={() => onSelect(selected?.id === task.id ? "" : task.id)}
             />
           ))}
         </div>
