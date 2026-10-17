@@ -1,6 +1,6 @@
 # Handoff
 
-Updated 2026-10-16. Keep this file focused on active work, open acceptance and dated compatibility constraints.
+Updated 2026-10-17. Keep this file focused on active work, open acceptance and dated compatibility constraints.
 Move completed rollout detail to a dated record and link it here. Repository rules are in [AGENTS](AGENTS.md);
 service entry points are in [README](README.md). Never put private content, credentials or raw production output here.
 
@@ -54,6 +54,45 @@ briefs; drag feel. The unverified Todoist answers are listed in the
 Not done: data-layer steps M4-M6 and M10, the extension sending `ReadPlanRequest.view: BASIC` (until then
 every native page's `ReadPlan` costs the FULL answer), the native popup's collapsed Steps & timing suffix
 (plus-next §4 v2), and research items 6 (backend metadata reads) and 7 (native observer).
+
+### In flight: Todoist Plus owner fixes D1-D8 (`claude/plus-owner-fixes`, local)
+
+The owner's eight reports on `todoist-plus-v2026.1016.1224.9770`, decided as D1-D8 on 2026-10-17, built on a
+local branch from `e2ff3da1`: not pushed, no branch CI, no release. The four slices ship as one release, never
+one at a time (slice A already changes what an old extension's categories dialog reads, and slice C brings
+planning protocol 6).
+
+| Slice | Commits | Contents |
+| --- | --- | --- |
+| A, proto and Todofy | `8a8118d8`-`5c5d7d0c` | Additive proto; filing always into the account's Todoist Inbox, categories optional; `SetTaskPlan.parked`; the Quick/Ops and Parked filters replaced by exact query (a cache fingerprint forces one full Sync); `ReorderTasks` (`tasks:reorder`) with the lane order in `plan_settings` `board`, no migration |
+| B, extension | `a6e1da14`-`1344e2c8` | D1 the mail project's favourite hidden on every page; D4 Plan's view kept in `storage.local`; D8 Committed folds |
+| C, extension | `1f62fec1`-`2d5cca15` | D2 one-click filing into the Inbox; D3 Add steps and the weekly review's Plan steps; planning protocol 6 |
+| D, extension | `984d8516`-`ca7ac86c` and the records | D5 the Parked lane and Week's Quick line; D6 reordering inside every Review lane; D7 reordering Next steps |
+
+Interface: [planning-interface.md](todoist-plus/docs/planning-interface.md); backend:
+[reordering](todofy/docs/todoist-plus.md#reordering); local evidence:
+[owner fixes](docs/todoist-plus-verification.md#owner-fixes-d1-d8-local-checks-october-17).
+
+Next: push the branch, wait for the complete branch CI (it selects Todofy, proto, contracts, the extension and
+every proto user; locally only Todofy, proto, contracts and the extension ran), then promote the same green SHA.
+The release deploys Todofy first (no migration), then publishes the extension. Between the two, and until the
+owner reloads, an old extension's filing already moves mail to the Inbox and its categories dialog still saves.
+
+Owner steps after that release, replacing the ones above: reload Todoist Plus and refresh Todoist (planning
+protocol 6; a page left open asks for the reload); mail categories are optional and filing always moves to the
+Todoist Inbox (the destination saved before is kept but ignored); the Quick/Ops and Parked favourite filters
+disappear after Todofy's first full Sync, and Other views with them when nothing else is in it; then the ten
+checks in [the extension's verification](todoist-plus/docs/verification.md#owner-反馈修正2026-10-17本地).
+
+Follow-ups:
+
+- `item_reorder` is deprecated by Todoist. If the owner's check shows it does not move tasks that have an
+  `order_key`, switch `core/plus.reorder_command` to `item_update` with `order_key`.
+- If the owner's check shows `item_reorder` does not bump `updated_at`, Waiting and Parked may mirror their order
+  to Todoist too (`core/plus.UNTOUCHED_LANES`).
+- Next Plus release: `ReadMailSettings` stops answering the compatibility Inbox, kept only for extensions before
+  planning protocol 6.
+- Optional: retake `todoist-plus/docs/images/mailbox-file-menu.jpg`, which still shows the removed File menu.
 
 Recall's mobile queue correction is released at `eb2c9187095f22eeac4ef2ae1e7e886b2e9076f3`.
 [Full branch CI 38683400263](https://github.com/ziyixi/todofy/actions/runs/38683400263) and

@@ -1027,3 +1027,75 @@ before: no GPG here, so Mail Hero's crypto round-trip is skipped, and Platform's
 compiler, AppArmor, image build, k3s) did not run. The interface images were not retaken: the synthetic page
 has no dependency, so the board and the weekly review look as they did. Not verified: branch CI, the release
 and the owner's review.
+
+## Owner fixes D1-D8, local checks (October 17)
+
+The owner reported eight problems with `todoist-plus-v2026.1016.1224.9770`; the decisions D1-D8 of
+2026-10-17 are built on the local branch `claude/plus-owner-fixes` from `e2ff3da1`, in sixteen commits and
+four slices that ship as one release: A (`8a8118d8`-`5c5d7d0c`) proto and Todofy, B (`a6e1da14`-`1344e2c8`),
+C (`1f62fec1`-`2d5cca15`) and D (`984d8516`-`ca7ac86c`, then these records) the extension. Not pushed, no
+branch CI, no release; synthetic data only. Production D1, the Durable Object, real Todoist, FlowDay,
+Cloudflare and the owner's Chrome were not touched by this work.
+
+- D1: the mail project's favourite is hidden on every Todoist page while Plus is attached and configured,
+  and comes back on teardown without a refresh.
+- D2: filing always moves the mail task to the account's Todoist Inbox (the `inbox_project` of one projects
+  read); categories are optional; a row's hover shows one button per category and Inbox, one click each.
+  `FileMailItemRequest.category_id` empty means the move alone; `UpdateMailSettings` still sends its REQUIRED
+  destination, which Todofy ignores; `ReadMailSettings` still answers the Inbox for builds before protocol 6.
+- D3: Next steps ends with Add steps, one confirm-first `AppendTaskSteps` per Enter; the weekly review's Plan
+  steps opens it.
+- D4: Plan's tab, Review's area, the weekly review (open, ticks, kept), Week's commitment and Committed's
+  fold are kept in `storage.local` through the background, merged by field.
+- D5: Quick/Ops (`@quick&(nodate|3days)`) and Parked (`@parked`, only while the account has a label named
+  `parked`) join the replaced filters, behind the consistency gate and a cache fingerprint that forces one
+  full Sync. Week shows a quiet Quick line; Review a Parked lane, always shown while the label exists, which
+  `SetTaskPlan.parked` writes.
+- D6: `ReorderTasks` (`POST /api/plus/v1/tasks:reorder`) keeps each Review lane's order in `plan_settings`
+  `board` (no migration) and permutes the moved card's Todoist siblings' `child_order` by one `item_reorder`
+  under a receipt (not for Waiting and Parked). Cards are dnd-kit sortables with only the keyboard plugin.
+- D7: Next steps follow Todoist's sibling order (`order_key` when every sibling has one, else
+  `child_order`) and reorder through the same RPC without a lane.
+- D8: Committed folds behind Todoist's section chevron, remembered.
+- Planning protocol 6 (slice C); slice D's `reorderTasks` and `parked` join it.
+
+Local checks, all passing:
+
+- Slice A, from the workflow's own steps: Proto by hand (format and lint, api-linter with no problems in 69
+  files, breaking against `e2ff3da1`: none, the rule self-test, deterministic generation, the schemas, 495
+  TypeScript and 113 Python codec tests); Todofy static (ruff, 2,121 host tests with one existing skip, the
+  gateway's lint, types, 136 unit cases and its CPU suite, where `plan:read` with 700 lane order IDs ran 0.84
+  ms first and 0.70 ms warm, the owner UI's types, 93 tests and build, both production dry-runs, the gateway at
+  84.4 KiB gzip of 86.0 KiB); all 592 runtime cases (590 in four processes, then `test_alarm.py` alone), each
+  exactly once; Contracts.
+- The extension after each slice: B 252 unit and 45 built-MV3 Chromium cases, C 262 and 47.
+- The final tree (`ca7ac86c` with these records): the extension's lint, types, 294 unit cases in 41 files,
+  build and 56 built-MV3 Chromium cases (`plus.sh`, the steps of `check-todoist-plus`). Slice D's new cases:
+  Parked placement, the label condition, the drops in and out of Parked and the landing check, the seven-lane
+  layout at 1854, 1300, 1000 and 700 px with the empty Parked lane in place before a drag; the Quick window and
+  its order, the Quick line and a card dragged into a day; reordering inside a lane by pointer (one request
+  with the whole lane, the DOM unchanged during the drag, kept after a reload), a drop in the 7 px gap that
+  writes nothing, the keyboard down-up-drop, Escape and a cross-lane arrow; Next steps in Todoist's order,
+  reordered by pointer, and a step dropped into a day by keyboard; the spoken drag texts in both languages.
+  Nothing outside `todoist-plus/` changed after slice A, and the backend jobs ran again on this tree, with
+  slice A's results: Proto by hand (api-linter with no problems in 69 files, breaking against `e2ff3da1`:
+  none, the rule self-test, deterministic generation of 151 files, the schemas, 495 TypeScript and 113 Python
+  codec tests); Todofy static (2,121 host tests with one existing skip, 136 gateway unit cases and its CPU
+  suite, the owner UI's 93 tests at 179.1 KiB gzip, both dry-runs, the gateway at 84.4 KiB gzip); all 592
+  runtime cases, each exactly once; Contracts (882, 26, 69, 71, 6, 6 and 54 cases). `ci_changes.py` selects
+  only the extension's check and publication for slice D's diff; for the branch against `e2ff3da1` it also
+  selects Todofy, proto, contracts and every app that uses the IDL (Mail Hero, Home, FlowDay, links, watch,
+  mailsort, recall, brief, Fleet, Platform and the website), whose own checks did not run here.
+
+Mutation checks: the Quick twin fails when a fixed-zone due date counts on its UTC day; the gap test fails
+when a card is a target by shape instead of under the pointer (the drag preview overlaps the cards around
+the gap).
+
+Not verified against real Todoist (owner checks after the release): whether `item_reorder` changes the order
+Todoist shows for tasks that have an `order_key`; whether it bumps `updated_at`, and on which tasks (the
+reordered ones, or every task of the project), which decides whether Waiting and Parked may mirror their order
+too; that `/projects` marks the account's Inbox with `inbox_project`; the native Quick/Ops filter's `3 days`
+boundaries and its reading of fixed-timezone due dates. Also not verified: branch CI, the release, the
+installed extension, a screen reader's reading of the drag announcements (checked through the DOM only; the
+instructions dnd-kit links with `aria-describedby` sit outside Plus's shadow root, as before this change), and
+the feel of the drags.
