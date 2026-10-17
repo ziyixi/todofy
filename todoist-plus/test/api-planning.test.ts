@@ -209,3 +209,27 @@ it("persists same-day sorting, cross-day movement and pool placement only in Flo
     ),
   ).toBe(true);
 });
+
+it("reads the FULL plan for the sidebar, which names the mail project to hide", async () => {
+  const urls: URL[] = [];
+  const api = createApi(
+    { apiOrigin: "https://api.example.test", token: "synthetic" },
+    async (input) => {
+      urls.push(new URL(String(input)));
+      return Response.json({
+        plan: {
+          week_start: "2026-10-12",
+          today: "2026-10-13",
+          timezone: "UTC",
+          enabled: true,
+          inbox_project_id: "mail-project",
+        },
+      });
+    },
+  );
+  // The mail project's ID comes only with the FULL view, which a request without `view` asks for.
+  expect((await api.readPlan()).inboxProjectId).toBe("mail-project");
+  expect(urls.map((url) => [url.pathname, url.search])).toEqual([
+    ["/api/plus/v1/plan:read", ""],
+  ]);
+});

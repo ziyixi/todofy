@@ -159,7 +159,7 @@ export function planConfig(
     labelIds: plan.managedLabels
       .filter((label) => !["office", "home"].includes(label.role))
       .map((label) => label.id),
-    // The Mailbox replaces the mail project's favourite while a Plus page is open.
+    // The Mailbox replaces the mail project's favourite while Plus is attached.
     hiddenProjectIds: plan.inboxProjectId ? [plan.inboxProjectId] : [],
   };
 }

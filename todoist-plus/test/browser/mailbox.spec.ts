@@ -124,15 +124,16 @@ async function listenOnTodoist(tab: Page) {
     );
 }
 
-test("Mail opens the Mailbox under Plan and Focus, and the mail project's favourite hides only there", async () => {
+test("Mail opens the Mailbox under Plan and Focus, and the mail project's favourite hides on every page", async () => {
   const { context } = await launchMailbox();
   try {
     const tab = await context.newPage();
     await tab.goto("https://app.todoist.com/app/today");
     const nav = tab.getByRole("navigation", { name: "Todoist Plus" });
     await expect(nav.getByRole("button")).toHaveText(["Plan", "Focus", "Mail"]);
-    // A native page keeps the favourite.
-    await expect(tab.locator("#fav-mail")).toBeVisible();
+    // A native page hides the favourite too; My projects keeps the project.
+    await expect(tab.locator("#fav-mail")).toBeHidden();
+    await expect(tab.locator("#projects #my-mail")).toBeVisible();
     await nav.getByRole("button", { name: "Mail" }).click();
     await expect(tab).toHaveURL(/todoist-plus=mailbox/u);
     const heading = tab.getByRole("heading", { name: "Mail", level: 1 });
@@ -152,7 +153,15 @@ test("Mail opens the Mailbox under Plan and Focus, and the mail project's favour
       tab.getByText("1 other task in the mail project"),
     ).toBeVisible();
     await tab.goBack();
-    await expect(tab.locator("#fav-mail")).toBeVisible();
+    await expect(nav.getByRole("button", { name: "Mail" })).not.toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+    await expect(
+      tab.getByRole("heading", { name: "Native list" }),
+    ).toBeVisible();
+    await expect(tab.locator("#fav-mail")).toBeHidden();
+    await expect(tab.locator("#projects #my-mail")).toBeVisible();
   } finally {
     await context.close();
   }

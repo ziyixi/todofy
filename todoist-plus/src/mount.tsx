@@ -345,9 +345,9 @@ export async function mountTodoist(ctx: ContentScriptContext) {
     const extras: HTMLElement[] = [];
     for (const { row, link, kind, slug } of favoriteRows()) {
       if (kind === "project") {
-        // Only while a Plus page is open does the Mailbox replace the mail project's favourite;
+        // The Mailbox replaces the mail project's favourite on every page while Plus is attached;
         // every other project favourite stays where it is, and none folds into Other views.
-        if (view && matchesId(slug, config.hiddenProjectIds ?? [])) hide(row);
+        if (matchesId(slug, config.hiddenProjectIds ?? [])) hide(row);
         continue;
       }
       if (

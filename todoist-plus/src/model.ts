@@ -85,8 +85,8 @@ export interface PlanConfig {
   hiddenFilterIds: string[];
   labelIds: string[];
   /**
-   * Favourite projects a Plus page replaces while it is open: Todofy's mail project, which the
-   * Mailbox lists. A configuration cached by an earlier build has none.
+   * Favourite projects Plus replaces while attached: Todofy's mail project, which the Mailbox
+   * lists. A configuration cached by an earlier build has none.
    */
   hiddenProjectIds?: string[];
 }

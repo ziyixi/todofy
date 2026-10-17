@@ -505,7 +505,8 @@ it("keeps unrelated favourites visible when the plan read fails while their togg
   ).toBe("none");
 });
 
-it("adds Mail under Plan and Focus, and hides the mail project's favourite only while a Plus page is open", async () => {
+/** Todofy's mail project in Favourites and My projects, beside another project favourite. */
+function mailProject() {
   state.config = {
     configured: true,
     hiddenFilterIds: ["f1"],
@@ -524,19 +525,25 @@ it("adds Mail under Plan and Focus, and hides the mail project's favourite only 
       "beforeend",
       `<ul id="projects"><li id="my-mail-project"><a href="/app/project/email-inbox-mailp">Email Inbox</a></li></ul>`,
     );
-  const { ctx } = context();
+}
+
+it("hides the mail project's favourite on native pages too, and shows it again when Plus is torn down", async () => {
+  mailProject();
+  const { ctx, invalidate } = context();
   await act(() => mountTodoist(ctx));
   await settle();
   const nav = screen.getByRole("navigation", { name: "Todoist Plus" });
   expect(
     [...nav.querySelectorAll("button")].map((button) => button.textContent),
   ).toEqual(["Plan", "Focus", "Mail"]);
-  // A native page shows the favourite; a project favourite never folds into Other views.
-  expect(visible("#mail-project")).toBe(true);
+  // A native page hides it too; another project favourite stays and never folds into Other views.
+  expect(visible("#mail-project")).toBe(false);
   expect(visible("#other-project")).toBe(true);
   expect(screen.getByRole("button", { name: /Other views/u }).textContent).toBe(
     "Other views1",
   );
+  // My projects keeps it.
+  expect(visible("#my-mail-project")).toBe(true);
 
   fireEvent.click(screen.getByRole("button", { name: "Mail" }));
   expect(await screen.findByText("mailbox")).toBeTruthy();
@@ -549,11 +556,29 @@ it("adds Mail under Plan and Focus, and hides the mail project's favourite only 
   ).toBe("page");
   expect(visible("#mail-project")).toBe(false);
   expect(visible("#other-project")).toBe(true);
-  // My projects keeps it.
   expect(visible("#my-mail-project")).toBe(true);
 
   history.pushState(null, "", "/app/today");
   window.dispatchEvent(new PopStateEvent("popstate"));
+  await settle();
+  expect(visible("#mail-project")).toBe(false);
+  // A disabled or reloaded extension gives it back at once, without a refresh.
+  invalidate();
+  window.dispatchEvent(new Event("focus"));
+  expect(visible("#mail-project")).toBe(true);
+  expect(visible("#my-mail-project")).toBe(true);
+});
+
+it("shows the mail project's favourite again when the plan read fails", async () => {
+  mailProject();
+  let fail!: (error: Error) => void;
+  state.readPlan = new Promise<never>((_, reject) => (fail = reject));
+  const { ctx } = context();
+  await act(() => mountTodoist(ctx));
+  await settle();
+  expect(visible("#mail-project")).toBe(false);
+  // Offline or a revoked token: Plus is off and the favourite shows again.
+  fail(new Error("Synthetic network failure"));
   await settle();
   expect(visible("#mail-project")).toBe(true);
 });
