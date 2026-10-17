@@ -20,7 +20,9 @@ from todofy.core.sql import plan as sql
 # The Todoist adapter's binding of the Mailbox:
 #   {"categories": [{"id": <plan_categories.id>, "label_id": "<Todoist label ID>", "label": "<its name when saved>"}],
 #    "destination": "<Todoist project ID>"}
-# The destination is what an extension before planning protocol 6 chose; filed mail goes to the Inbox since then.
+# The destination is the one sent with the last change, never used for filing: filed mail goes to the account's
+# Inbox since planning protocol 6, which sends the literal "inbox"; an extension before it sends the Inbox that
+# ReadMailSettings answers.
 MAIL_KEY = "todoist.mail"
 # The owner's order of the Review lanes (core/plan.py arrange_lane).
 BOARD_KEY = "board"

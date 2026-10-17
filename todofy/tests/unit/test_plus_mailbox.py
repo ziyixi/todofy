@@ -263,7 +263,9 @@ def save_destination(stack: Stack, destination: str) -> None:
 def test_categories_are_saved_kept_by_label_and_priority_and_replayed_by_value(stack):
     saved = stack.settings(("office", "p2"), ("quick", "p4"))
     first = [category["id"] for category in saved["categories"]]
-    assert "destination" not in saved and "projects" not in stack.todoist.calls
+    # The destination is stored as sent, and never checked against Todoist.
+    assert saved["destination"] == {"provider": "todoist", "external_id": "inbox"}
+    assert "projects" not in stack.todoist.calls
     assert [
         row[1:]
         for row in stack.d1.db.execute("SELECT id, name, priority, sort_order, archived_at FROM plan_categories")
@@ -274,7 +276,7 @@ def test_categories_are_saved_kept_by_label_and_priority_and_replayed_by_value(s
     binding = json.loads(
         stack.d1.db.execute("SELECT value FROM plan_settings WHERE key = 'todoist.mail'").fetchone()[0]
     )
-    assert binding["destination"] == "" and [entry["label_id"] for entry in binding["categories"]] == [
+    assert binding["destination"] == "inbox" and [entry["label_id"] for entry in binding["categories"]] == [
         "id-office",
         "id-quick",
     ]
@@ -298,24 +300,30 @@ def test_categories_are_saved_kept_by_label_and_priority_and_replayed_by_value(s
     }
     # No category at all is a valid save.
     cleared = stack.call("UpdateMailSettings", categories=[], destination=ignored, etag=changed["etag"])
-    assert "categories" not in cleared and cleared["etag"] == MailSettings().etag
+    assert "categories" not in cleared and cleared["etag"] == MailSettings((), "inbox").etag
     assert "projects" not in stack.todoist.calls
 
 
-def test_the_destination_is_ignored_and_one_saved_before_stays(stack):
+def test_a_sent_destination_is_stored_unchecked_in_place_of_one_saved_before(stack):
+    """An extension before protocol 6 offers its categories only while a destination is saved: the account Inbox
+    ReadMailSettings answered, which it sends, is stored as sent. So is any well-formed reference, even one that
+    never existed: it is never checked against Todoist, and filing never reads it."""
     save_destination(stack, "work-p")
     before = stack.call("LookupMailItems", task_ids=[])["categories_etag"]
     stack.todoist.calls.clear()
-    # Any well-formed reference, even the mail project or one that never existed; never checked against Todoist.
-    for destination in (INBOX, "inbox", "no-such-project"):
-        saved = stack.settings(("deep", "p3"), destination=destination)
-        assert saved["destination"] == {"provider": "todoist", "external_id": "work-p"}
-        assert saved["etag"] != before
+    saved = stack.settings(("deep", "p3"), destination="no-such-project")
+    assert saved["destination"] == {"provider": "todoist", "external_id": "no-such-project"}
+    assert saved["etag"] != before
+    # The same categories again are a replay, whatever the destination: nothing is written.
+    assert stack.settings(("deep", "p3"), destination=INBOX) == saved
+    changed = stack.settings(("deep", "p3"), ("quick", "p4"), destination="inbox-p")
+    assert changed["destination"] == {"provider": "todoist", "external_id": "inbox-p"}
+    assert stack.call("LookupMailItems", task_ids=[])["destination"] == changed["destination"]
     assert "projects" not in stack.todoist.calls
     binding = json.loads(
         stack.d1.db.execute("SELECT value FROM plan_settings WHERE key = 'todoist.mail'").fetchone()[0]
     )
-    assert binding["destination"] == "work-p"
+    assert binding["destination"] == "inbox-p"
     current = stack.call("ReadMailSettings")
     malformed = {"provider": "linear", "external_id": "inbox"}
     assert stack.call("UpdateMailSettings", categories=[], destination=malformed, etag=current["etag"]) == {

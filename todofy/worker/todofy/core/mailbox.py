@@ -93,7 +93,8 @@ class Category:
 
 @dataclass(frozen=True, slots=True)
 class MailSettings:
-    """The saved categories, in their order, and the ID of the project filed mail goes to ("" until chosen)."""
+    """The saved categories, in their order, and the destination sent with the last change ("" until one was),
+    never used for filing (runtime/plan_store.py MAIL_KEY)."""
 
     categories: tuple[Category, ...] = ()
     destination: str = ""

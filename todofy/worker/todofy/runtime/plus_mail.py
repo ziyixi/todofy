@@ -129,7 +129,9 @@ async def update_settings(core: Any, request: dict[str, Any], current: dict[str,
     """UpdateMailSettings: the whole set in one D1 batch, by etag; the saved categories sent again are a replay.
 
     Each label must be a current one a category may use (core/plus.mail_label); one gone since the owner chose it is
-    ACTION_NOT_ALLOWED. The destination is still REQUIRED on the wire but ignored: the saved one stays as it is."""
+    ACTION_NOT_ALLOWED. The destination is still REQUIRED on the wire: a well-formed one is stored as sent, never
+    checked against Todoist and never used for filing. An extension before planning protocol 6 sends the account
+    Inbox ReadMailSettings answered, and offers its categories only while a destination is saved."""
     db = core.env.DB
     requested = []
     for category in request.get("categories", []):
@@ -137,7 +139,7 @@ async def update_settings(core: Any, request: dict[str, Any], current: dict[str,
         if priority is None:
             raise todoist.PlusError("BAD_REQUEST")
         requested.append((_todoist_id(category.get("label")), priority))
-    _todoist_id(request.get("destination"))  # well-formed, and unused
+    destination = _todoist_id(request.get("destination"))
     settings = await plan_store.mail_settings(db)
     if [(c.label_id, c.priority) for c in settings.categories] == requested:
         return _settings_answer(settings)
@@ -153,7 +155,7 @@ async def update_settings(core: Any, request: dict[str, Any], current: dict[str,
         [(label_id, labels[label_id]["label"], priority) for label_id, priority in requested],
         await plan_store.next_category_id(db),
     )
-    updated = MailSettings(tuple(saved), settings.destination)
+    updated = MailSettings(tuple(saved), destination)
     await plan_store.save_mail_settings(db, settings, updated, archived, now_s())
     return _settings_answer(updated)
 

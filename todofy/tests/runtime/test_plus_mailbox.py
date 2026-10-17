@@ -137,11 +137,8 @@ def test_lookup_and_summary_read_d1_alone(stack):
     assert stack.call("mailItems:lookup", {"task_ids": ["x"] * 201}) == "BAD_REQUEST"
 
 
-IGNORED = {"provider": "todoist", "external_id": "inbox"}  # what the extension sends since planning protocol 6
-
-
 def test_settings_are_saved_in_the_planning_store_and_filing_is_one_sync(stack):
-    # For an extension before protocol 6, the account Inbox is the only destination to choose.
+    # For an extension before protocol 6, the account Inbox is the only destination to choose, and it sends it.
     settings = stack.call("mailSettings:read")
     assert [project["id"] for project in settings["projects"]] == ["account-inbox"]
     assert settings["destination"] == {"provider": "todoist", "external_id": "account-inbox"}
@@ -153,22 +150,25 @@ def test_settings_are_saved_in_the_planning_store_and_filing_is_one_sync(stack):
                 {"label": {"provider": "todoist", "external_id": "1"}, "priority": "p2"},
                 {"label": {"provider": "todoist", "external_id": "40"}, "priority": "p4"},
             ],
-            "destination": IGNORED,
+            "destination": settings["destination"],
             "etag": settings["etag"],
         },
     )
-    assert [category["priority"] for category in saved["categories"]] == ["p2", "p4"] and "destination" not in saved
+    assert [category["priority"] for category in saved["categories"]] == ["p2", "p4"]
+    assert saved["destination"] == settings["destination"]  # stored as sent, so an older Mailbox offers them
     assert len(stack.upstream.received("GET", "/api/v1/projects")) == calls  # the destination is never checked
     assert stack.worker.d1("SELECT name, priority FROM plan_categories ORDER BY sort_order") == [
         {"name": "office · P2", "priority": 2},
         {"name": "quick · P4", "priority": 4},
     ]
     [binding] = stack.worker.d1("SELECT value FROM plan_settings WHERE key = 'todoist.mail'")
-    assert json.loads(binding["value"])["destination"] == ""
-    # A lookup of no task answers the categories alone (the Mailbox with nothing to ask about).
+    assert json.loads(binding["value"])["destination"] == "account-inbox"
+    # A lookup of no task answers the categories alone, with the deprecated destination (the Mailbox with nothing
+    # to ask about).
     assert stack.call("mailItems:lookup", {"task_ids": []}) == {
         "categories": saved["categories"],
         "categories_etag": saved["etag"],
+        "destination": saved["destination"],
     }
     # The saved categories sent again are a replay, whatever the etag and the destination.
     replay = {
