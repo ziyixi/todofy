@@ -235,6 +235,26 @@ async function setupPlanner(context: BrowserContext, worker: Worker) {
           task.labels = body.active ? [...labels, "active"] : labels;
           if (body.active) task.must_start = task.missing_lead = false;
         }
+        // Set aside, last as in Todofy: the literal label, with no planning label and not in
+        // progress; false takes only the label off.
+        if (body.parked !== undefined) {
+          const labels = ((task.labels as string[]) ?? []).filter(
+            (label) =>
+              label !== "parked" &&
+              !(
+                body.parked &&
+                [
+                  "quarter",
+                  "candiate",
+                  "focus",
+                  "committed",
+                  "active",
+                ].includes(label)
+              ),
+          );
+          task.labels = body.parked ? [...labels, "parked"] : labels;
+          if (body.parked) task.stage = "none";
+        }
         task.etag = `${String(task.id)}-2`;
         return json({ task });
       }

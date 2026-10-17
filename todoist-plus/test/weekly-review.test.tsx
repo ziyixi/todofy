@@ -388,9 +388,10 @@ it("reviews someday items oldest first: keeping or moving one leaves the list an
     }),
   );
   await waitFor(() => expect(someday.getAllByRole("listitem")).toHaveLength(1));
+  // Into this month takes the parked label off too, or Parked would keep it.
   expect(update.mock.calls[0]).toEqual([
     expect.objectContaining({ id: "garden" }),
-    { stage: "monthly" },
+    { stage: "monthly", parked: false },
   ]);
   expect(line(review, "Someday").textContent).toContain("Someday1");
   const status = review.getByRole("status");
@@ -412,6 +413,60 @@ it("reviews someday items oldest first: keeping or moving one leaves the list an
     review: { week: "2026-10-12", open: true, lines: [], kept: ["course"] },
   });
   expect(update).toHaveBeenCalledOnce();
+});
+
+it("moves an on-hold task into this month with its stage alone", async () => {
+  const actions = createPrototype();
+  const update = vi.spyOn(actions, "updateTask");
+  render(<PlanView {...await props(actions)} />);
+  const someday = within(line(openReview(), "Someday"));
+  fireEvent.click(someday.getByRole("button", { name: "Show" }));
+  fireEvent.click(
+    someday.getByRole("button", {
+      name: "Move to this month: Look into an evening course",
+    }),
+  );
+  await waitFor(() => expect(update).toHaveBeenCalledOnce());
+  expect(update.mock.calls[0]![1]).toEqual({ stage: "monthly" });
+});
+
+it("counts neither a parked task as waiting nor a parked commitment as unplanned, while Parked exists", async () => {
+  const data = await props();
+  const task = (id: string) => data.plan.tasks.find((item) => item.id === id)!;
+  // A waiting task and a commitment set aside as well.
+  task("venue").labels = [...task("venue").labels, "parked"];
+  task("notes").labels = ["committed", "parked"];
+  const counts = () => {
+    const review = openReview();
+    const result = [
+      line(review, "Waiting").textContent,
+      line(review, "Commitments not planned").textContent,
+    ];
+    fireEvent.click(screen.getByRole("button", { name: "Weekly review" }));
+    return result;
+  };
+  const view = render(<PlanView {...data} />);
+  // Without an account label named parked, the label sets nothing aside.
+  expect(counts()).toEqual([
+    "Waiting2oldest untouched 11 daysShow",
+    "Commitments not planned2Plan steps",
+  ]);
+  view.unmount();
+  const parkable = {
+    ...data.plan,
+    availableLabels: [
+      ...data.plan.availableLabels,
+      { id: "synthetic-parked", label: "parked" },
+    ],
+  };
+  render(<PlanView {...data} plan={parkable} />);
+  expect(counts()).toEqual([
+    "Waiting1oldest untouched 3 daysShow",
+    "Commitments not planned1Plan steps",
+  ]);
+  expect(unscheduledCommitments(parkable, data.days).map((t) => t.id)).toEqual([
+    "desk",
+  ]);
 });
 
 it("jumps to the Waiting lane, and to the Add steps input of Week's first unplanned commitment", async () => {

@@ -4,7 +4,9 @@ import {
   applyConfirmed,
   rereadsAfter,
   withNextWeek,
+  withStage,
 } from "../src/plan-updates";
+import type { Stage } from "../src/model";
 
 it("merges confirmed flows, tasks, Bets, plan settings and timer without a re-read", async () => {
   const data = await createPrototype().load();
@@ -177,4 +179,47 @@ it("merges a confirmed reorder's Todoist positions and the lane's saved order, a
     applyConfirmed(planned, { forTask: "copy", dependencies: [] }).plan
       .laneOrders,
   ).toBe(planned.plan.laneOrders);
+});
+
+it("predicts setting a task aside, and back, with the labels Todofy's plan_labels writes", async () => {
+  const data = await createPrototype().load();
+  const predicted = (labels: string[], stage: Stage, parked: boolean) => {
+    const plan = {
+      ...data.plan,
+      tasks: [{ ...data.plan.tasks[0]!, labels }],
+    };
+    const [task] = withStage(
+      plan,
+      plan.tasks[0]!.id,
+      stage,
+      false,
+      parked,
+    ).tasks;
+    return { labels: [...task!.labels].sort(), stage: task!.stage };
+  };
+  // The cases of todofy/tests/unit/test_plus.py, with the fixture's names: parked wins over every
+  // planning label, in progress and a stage sent with it, also where Quick makes focus or candiate
+  // no stage at all.
+  const full = ["committed", "quarter", "focus", "active", "office", "deep"];
+  expect(predicted(full, "none", true)).toEqual({
+    labels: ["deep", "office", "parked"],
+    stage: "none",
+  });
+  for (const planning of ["focus", "candiate"])
+    expect(predicted(["quick", planning], "none", true).labels).toEqual([
+      "parked",
+      "quick",
+    ]);
+  expect(predicted(["office"], "committed", true)).toEqual({
+    labels: ["office", "parked"],
+    stage: "none",
+  });
+  // Out of Parked into a stage lane: the stage's label, and parked goes.
+  expect(predicted(["parked", "office"], "monthly", false)).toEqual({
+    labels: ["candiate", "office"],
+    stage: "monthly",
+  });
+  expect(
+    predicted(["parked", "deep", "waiting"], "weekly", false).labels,
+  ).toEqual(["deep", "focus", "waiting"]);
 });

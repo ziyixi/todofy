@@ -1,10 +1,14 @@
 import { addDays } from "./domain";
-import { outcomeSteps, planningOutcomes } from "./planning-outcomes";
+import {
+  committedOutcomes,
+  outcomeSteps,
+  PARKED_LABEL,
+} from "./planning-outcomes";
 import type { FlowDayPlan, Language, PlanState, PlanningTask } from "./model";
 
 // The literal label names Todofy's filters already use (Must Start, Candidate If); never created here.
 export const WAITING_LABELS = ["waiting", "blocked"];
-export const SOMEDAY_LABELS = ["parked", "onhold"];
+export const SOMEDAY_LABELS = [PARKED_LABEL, "onhold"];
 /** The owner's in-progress label, as Todofy's in-progress deadline query names it. */
 export const ACTIVE_LABEL = "active";
 const CLARIFIED_LABELS = [...WAITING_LABELS, ...SOMEDAY_LABELS, "quick"];
@@ -89,9 +93,8 @@ export function unscheduledCommitments(
       day.taskIds.filter((id) => !day.completedTaskIds.includes(id)),
     ),
   );
-  return planningOutcomes(plan.tasks, plan.managedLabels).filter(
+  return committedOutcomes(plan).filter(
     (task) =>
-      task.stage === "committed" &&
       !scheduled.has(task.id) &&
       !outcomeSteps(task, plan.tasks, plan.managedLabels).some((step) =>
         scheduled.has(step.id),
@@ -101,9 +104,7 @@ export function unscheduledCommitments(
 
 /** This week's commitments, the choices Sunday's review can keep for next week. */
 export function weekChoices(plan: PlanState): PlanningTask[] {
-  return planningOutcomes(plan.tasks, plan.managedLabels).filter(
-    (task) => task.stage === "committed",
-  );
+  return committedOutcomes(plan);
 }
 
 /** Whether `today` is the last day of the account week starting on `week`. */

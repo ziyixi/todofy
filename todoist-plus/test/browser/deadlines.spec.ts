@@ -544,3 +544,168 @@ test("narrow lanes stack, and cards keep their title, area and status without ov
     await context.close();
   }
 });
+
+/** The account's `parked` label, and a synthetic task set aside with it unless `empty`. */
+async function addParked(worker: Worker, empty = false) {
+  await worker.evaluate((empty) => {
+    const state = (
+      globalThis as unknown as {
+        plannerState: {
+          tasks: Record<string, unknown>[];
+          extraLabels: { id: string; label: string }[];
+        };
+      }
+    ).plannerState;
+    state.extraLabels.push({ id: "synthetic-parked", label: "parked" });
+    if (!empty)
+      state.tasks.push({
+        id: "idea",
+        title: "Synthetic parked idea",
+        area: "work",
+        stage: "none",
+        labels: ["parked"],
+        etag: "idea-1",
+        update_time: "2026-09-01T09:00:00Z",
+      });
+  }, empty);
+}
+/** Each lane's name and box, left to right. */
+const laneBoxes = (page: Page) =>
+  page.locator(".review-lane").evaluateAll((lanes) =>
+    lanes.map((element) => {
+      const { x, y, width } = element.getBoundingClientRect();
+      return { name: element.getAttribute("aria-label"), x, y, width };
+    }),
+  );
+
+test("Parked sits between Waiting and the stages; a drag in sets a card aside, one out takes a stage", async () => {
+  const { context, worker } = await launchPlanner();
+  try {
+    await addDeadlineTasks(worker);
+    await addParked(worker);
+    const page = await context.newPage();
+    await page.goto("https://app.todoist.com/app/today?todoist-plus=plan");
+    await expect(titles(page, "Parked")).toHaveText(["Synthetic parked idea"]);
+    expect((await laneBoxes(page)).map((box) => box.name)).toEqual([
+      "Start now",
+      "Waiting",
+      "Parked",
+      "Quarter",
+      "Month",
+      "Week",
+      "Committed",
+    ]);
+    await expect(
+      lane(page, "Parked").locator(".review-lane-header small"),
+    ).toHaveText("@parked");
+    await dragPlanner(
+      page,
+      card(page, "Synthetic month outcome").locator(".review-drag-handle"),
+      lane(page, "Parked"),
+    );
+    await expect(titles(page, "Parked")).toContainText([
+      "Synthetic month outcome",
+    ]);
+    await expect(titles(page, "Month")).toHaveCount(0);
+    await expect(page.locator("[aria-busy=true]")).toHaveCount(0);
+    await dragPlanner(
+      page,
+      card(page, "Synthetic parked idea").locator(".review-drag-handle"),
+      lane(page, "Month"),
+    );
+    await expect(titles(page, "Month")).toHaveText(["Synthetic parked idea"]);
+    await expect
+      .poll(async () => (await writes(worker)).map((call) => call.body))
+      .toEqual([
+        {
+          task_id: "month",
+          etag: "month-1",
+          request_id: expect.any(String),
+          parked: true,
+        },
+        {
+          task_id: "idea",
+          etag: "idea-1",
+          request_id: expect.any(String),
+          stage: "monthly",
+          parked: false,
+        },
+      ]);
+  } finally {
+    await context.close();
+  }
+});
+
+test("seven lanes keep one row while wide, then put the side lanes above the stages, pair and stack them", async () => {
+  const { context, worker } = await launchPlanner();
+  try {
+    await addDeadlineTasks(worker);
+    await addParked(worker);
+    const page = await context.newPage();
+    const layout = async (width: number) => {
+      await page.setViewportSize({ width, height: 900 });
+      await page.goto("https://app.todoist.com/app/today?todoist-plus=plan");
+      await expect(page.locator(".review-lanes")).toHaveAttribute(
+        "data-lanes",
+        "7",
+      );
+      const boxes = await laneBoxes(page);
+      const rows = [...new Set(boxes.map((box) => Math.round(box.y)))];
+      return boxes.map((box) => ({
+        name: box.name,
+        row: rows.indexOf(Math.round(box.y)),
+        x: Math.round(box.x),
+      }));
+    };
+    const rows = (boxes: Awaited<ReturnType<typeof layout>>) =>
+      boxes.map((box) => box.row);
+    // Wide: one row.
+    expect(rows(await layout(1854))).toEqual([0, 0, 0, 0, 0, 0, 0]);
+    // Medium: Start now, Waiting and Parked above the four stages, so a drag goes straight down.
+    const medium = await layout(1300);
+    expect(rows(medium)).toEqual([0, 0, 0, 1, 1, 1, 1]);
+    expect(medium[0]!.x).toBe(medium[3]!.x);
+    // Two columns: the stages start a row of their own, leaving a cell beside Parked empty.
+    const pairs = await layout(1000);
+    expect(rows(pairs)).toEqual([0, 0, 1, 2, 2, 3, 3]);
+    expect(pairs[2]!.x).toBe(pairs[3]!.x);
+    // Narrow: one lane per row, with no page overflow.
+    expect(rows(await layout(700))).toEqual([0, 1, 2, 3, 4, 5, 6]);
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth > innerWidth,
+      ),
+    ).toBe(false);
+  } finally {
+    await context.close();
+  }
+});
+
+test("an empty Parked lane is in place before a drag starts, so the board never moves under it", async () => {
+  const { context, worker } = await launchPlanner();
+  try {
+    await addDeadlineTasks(worker);
+    await addParked(worker, true);
+    const page = await context.newPage();
+    await page.setViewportSize({ width: 1300, height: 900 });
+    await page.goto("https://app.todoist.com/app/today?todoist-plus=plan");
+    await expect(lane(page, "Parked")).toContainText("Drop here to park");
+    const before = await laneBoxes(page);
+    const handle = card(page, "Synthetic quarter outcome").locator(
+      ".review-drag-handle",
+    );
+    const box = (await handle.boundingBox())!;
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(box.x + 40, box.y + 30, { steps: 4 });
+    await expect(
+      page.locator("[data-dnd-overlay][data-dnd-dragging]"),
+    ).toHaveCount(1);
+    expect(await laneBoxes(page)).toEqual(before);
+    await page.keyboard.press("Escape");
+    await page.mouse.up();
+    expect(await writes(worker)).toEqual([]);
+  } finally {
+    await context.close();
+  }
+});

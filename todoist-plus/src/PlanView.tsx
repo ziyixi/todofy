@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { effectiveArea } from "./domain";
-import { planningOutcomes } from "./planning-outcomes";
+import { committedOutcomes } from "./planning-outcomes";
 import { boardLanes } from "./review-lanes";
 import { ReviewBoard } from "./ReviewBoard";
 import { PlanningWeek } from "./PlanningWeek";
@@ -198,9 +198,7 @@ export function PlanView(props: PlanViewProps) {
   ];
   // A remembered area the filter no longer offers shows every area.
   const shownArea = areas.includes(area) ? area : "all";
-  const commitments = planningOutcomes(plan.tasks, plan.managedLabels).filter(
-    (task) => task.stage === "committed",
-  );
+  const commitments = committedOutcomes(plan);
   const count = (area: Area) =>
     commitments.filter((task) => effectiveArea(task, plan.tasks) === area)
       .length;

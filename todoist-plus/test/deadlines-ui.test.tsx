@@ -220,6 +220,63 @@ it("hides Start now and Waiting while they have no cards", async () => {
   ).toBe("4");
 });
 
+it("puts Parked between Waiting and the stages while the account has the label, and shows it empty too", async () => {
+  const parkable = (data: PlusData) =>
+    data.plan.availableLabels.push({ id: "synthetic-parked", label: "parked" });
+  const { props } = await setup(parkable);
+  render(<PlanView {...props} />);
+  expect(laneNames()).toEqual([
+    "Start now",
+    "Waiting",
+    "Parked",
+    "Quarter",
+    "Month",
+    "Week",
+    "Committed",
+  ]);
+  expect(
+    document.querySelector(".review-lanes")!.getAttribute("data-lanes"),
+  ).toBe("7");
+  // It writes a label, so its header shows it, as a stage lane's does.
+  expect(
+    lane("Parked").querySelector(".review-lane-header small")!.textContent,
+  ).toBe("@parked");
+  // A parked card says how long it has been untouched in place of its step counts.
+  expect(cards("Parked")).toEqual([
+    "Plan a small balcony garden, No priority, No change in 53 days",
+  ]);
+  expect(lane("Parked").querySelector(".planning-outcome-counts")).toBeNull();
+  // Filtered empty, it stays in place as a drop target.
+  fireEvent.click(screen.getByRole("tab", { name: "Work" }));
+  expect(laneNames()).toContain("Parked");
+  expect(lane("Parked").textContent).toContain("Drop here to park");
+});
+
+it("shows Parked's first ten cards, then a quiet line for the rest", async () => {
+  const { props } = await setup((data) => {
+    data.plan.availableLabels.push({ id: "synthetic-parked", label: "parked" });
+    const template = data.plan.tasks.find((task) => task.id === "garden")!;
+    for (let index = 1; index <= 11; index++)
+      data.plan.tasks.push({
+        ...template,
+        id: `idea-${index}`,
+        title: `Synthetic idea ${index}`,
+        updatedAt: undefined,
+      });
+  });
+  render(<PlanView {...props} language="zh" />);
+  const parked = lane("搁置");
+  expect(parked.querySelectorAll(".planning-outcome-card")).toHaveLength(10);
+  const more = within(parked).getByRole("button", { name: "再显示 2 项" });
+  expect(more.getAttribute("aria-expanded")).toBe("false");
+  fireEvent.click(more);
+  expect(parked.querySelectorAll(".planning-outcome-card")).toHaveLength(12);
+  expect(more.textContent).toBe("收起");
+  expect(parked.querySelector(".review-lane-header > span")!.textContent).toBe(
+    "12",
+  );
+});
+
 it("keeps a staged task in its lane with one quiet status, and a date-rule candidate that should start in Start now", async () => {
   const { props } = await setup((data) => {
     const template = data.plan.tasks[0]!;

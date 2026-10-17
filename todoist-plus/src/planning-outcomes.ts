@@ -20,6 +20,22 @@ function childIndex(tasks: readonly PlanningTask[]) {
   return children;
 }
 
+/** The literal set-aside label, as the native @parked filter names it; never created here. */
+export const PARKED_LABEL = "parked";
+
+/** Review's Parked lane exists only while the account has a label named exactly `parked`. */
+export function canPark(plan: Pick<PlanState, "availableLabels">): boolean {
+  return plan.availableLabels.some((label) => label.label === PARKED_LABEL);
+}
+
+/** Set aside: in Review's Parked lane, and on no list of commitments or steps. */
+export function isParked(
+  task: PlanningTask,
+  plan: Pick<PlanState, "availableLabels">,
+): boolean {
+  return task.labels.includes(PARKED_LABEL) && canPark(plan);
+}
+
 /** A Week candidate only by Todofy's 7-day date rule (Candidate If): it has no Week label of its own. */
 export function isDateCandidate(
   task: PlanningTask,
@@ -60,6 +76,18 @@ export function planningOutcomes(
   });
   return (["work", "personal", "unassigned"] as const).flatMap((area) =>
     outcomes.filter((task) => effectiveArea(task, tasks) === area),
+  );
+}
+
+/**
+ * This week's commitments as Review's Committed lane lists them, none set aside: Week's overview,
+ * the toolbar's counts and the weekly review all use this one list.
+ */
+export function committedOutcomes(
+  plan: Pick<PlanState, "tasks" | "managedLabels" | "availableLabels">,
+): PlanningTask[] {
+  return planningOutcomes(plan.tasks, plan.managedLabels).filter(
+    (task) => task.stage === "committed" && !isParked(task, plan),
   );
 }
 

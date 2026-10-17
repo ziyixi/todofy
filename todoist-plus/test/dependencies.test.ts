@@ -306,6 +306,7 @@ it("puts a task that waits only for another task in Waiting, and one with a stag
     tasks,
     managedLabels,
     dependencies,
+    availableLabels: [],
   });
   const ids = (lanes: ReturnType<typeof boardLanes>) =>
     Object.fromEntries(

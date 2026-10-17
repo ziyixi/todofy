@@ -1,5 +1,5 @@
 import { withBets } from "./bets";
-import { STAGE_ROLES } from "./planning-outcomes";
+import { PARKED_LABEL, STAGE_ROLES } from "./planning-outcomes";
 import { ACTIVE_LABEL, isLastDay } from "./weekly-review";
 import type {
   Area,
@@ -204,32 +204,36 @@ export function pendingStep(date: string, taskId: string): string {
 /**
  * The plan as a stage write will leave it, with the labels Todofy writes (core/plus.py plan_labels):
  * the stage's label in place of the other planning labels, and with `active` the in-progress label,
- * after which the task no longer needs to start.
+ * after which the task no longer needs to start. `parked` comes last, as there: true sets the task
+ * aside, with no planning label and not in progress; false only takes the set-aside label off.
  */
 export function withStage(
   plan: PlanState,
   taskId: string,
   stage: Stage,
   active = false,
+  parked?: boolean,
 ): PlanState {
   const names = new Map(
     plan.managedLabels.map((binding) => [binding.role, binding.label]),
   );
   const planning = Object.values(STAGE_ROLES).map((role) => names.get(role));
-  const added = [
-    stage !== "none" && names.get(STAGE_ROLES[stage]),
-    active && ACTIVE_LABEL,
-  ].filter((label): label is string => Boolean(label));
+  const added = parked
+    ? [PARKED_LABEL]
+    : [
+        stage !== "none" && names.get(STAGE_ROLES[stage]),
+        active && ACTIVE_LABEL,
+      ].filter((label): label is string => Boolean(label));
+  const removed = (label: string) =>
+    planning.includes(label) ||
+    added.includes(label) ||
+    (parked !== undefined && label === PARKED_LABEL) ||
+    (parked === true && label === ACTIVE_LABEL);
   const predicted = (task: PlanningTask): PlanningTask => ({
     ...task,
-    stage,
-    labels: [
-      ...task.labels.filter(
-        (label) => !planning.includes(label) && !added.includes(label),
-      ),
-      ...added,
-    ],
-    ...(active ? { mustStart: false, missingLead: false } : {}),
+    stage: parked ? "none" : stage,
+    labels: [...task.labels.filter((label) => !removed(label)), ...added],
+    ...(active && !parked ? { mustStart: false, missingLead: false } : {}),
   });
   return {
     ...plan,
@@ -240,10 +244,15 @@ export function withStage(
 }
 
 /** Shows a stage drag at once (withStage); the confirmed task (labels, etag) replaces it. */
-export function predictStage(taskId: string, stage: Stage, active = false) {
+export function predictStage(
+  taskId: string,
+  stage: Stage,
+  active = false,
+  parked?: boolean,
+) {
   return (data: PlusData): PlusData => ({
     ...data,
-    plan: withStage(data.plan, taskId, stage, active),
+    plan: withStage(data.plan, taskId, stage, active, parked),
   });
 }
 

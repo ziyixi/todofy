@@ -10,8 +10,12 @@ import {
   waitingForStatus,
   waitingTasks,
 } from "./dependencies";
-import { isDateCandidate, planningOutcomes } from "./planning-outcomes";
-import { untouchedText, waits } from "./weekly-review";
+import {
+  isDateCandidate,
+  isParked,
+  planningOutcomes,
+} from "./planning-outcomes";
+import { byUntouched, untouchedText, waits } from "./weekly-review";
 import type { LaneId, Language, PlanState, PlanningTask, Stage } from "./model";
 
 export type { LaneId } from "./model";
@@ -36,16 +40,21 @@ export function cardState(
 }
 
 /**
- * Every task in at most one lane (owner, 2026-10-16). An outcome with its own stage label stays in
- * that lane, and its card says it waits or should start. Otherwise a waiting task (a label, or a
- * dependency that holds) is in Waiting and one that should start is in Start now, also when only
- * the 7-day date rule made it a Week candidate; the other date-rule candidates stay in Week. A step
- * has no card in its outcome's lane, even with the same stage label, so one that waits or should
- * start has its own card in Waiting or Start now. Start now lists the earliest deadline first, then
- * the higher priority; Waiting the longest untouched first.
+ * Every task in at most one lane (owner, 2026-10-16). First (2026-10-17), a task set aside with the
+ * literal `parked` label is in Parked whatever else it has, while the account has that label. An
+ * outcome with its own stage label stays in that lane, and its card says it waits or should start.
+ * Otherwise a waiting task (a label, or a dependency that holds) is in Waiting and one that should
+ * start is in Start now, also when only the 7-day date rule made it a Week candidate; the other
+ * date-rule candidates stay in Week. A step has no card in its outcome's lane, even with the same
+ * stage label, so one that waits or should start has its own card in Waiting or Start now. Start
+ * now lists the earliest deadline first, then the higher priority; Waiting and Parked the longest
+ * untouched first.
  */
 export function boardLanes(
-  plan: Pick<PlanState, "tasks" | "managedLabels" | "dependencies">,
+  plan: Pick<
+    PlanState,
+    "tasks" | "managedLabels" | "dependencies" | "availableLabels"
+  >,
   today: string,
 ): BoardLanes {
   const lanes: BoardLanes = {
@@ -57,7 +66,11 @@ export function boardLanes(
     weekly: [],
     committed: [],
   };
-  const outcomes = planningOutcomes(plan.tasks, plan.managedLabels);
+  const parked = (task: PlanningTask) => isParked(task, plan);
+  lanes.parked = byUntouched(plan.tasks.filter(parked));
+  const outcomes = planningOutcomes(plan.tasks, plan.managedLabels).filter(
+    (task) => !parked(task),
+  );
   const staged = new Set(
     outcomes
       .filter((task) => !isDateCandidate(task, plan.managedLabels))
@@ -70,9 +83,12 @@ export function boardLanes(
     if (staged.has(task.id) || !state(task))
       lanes[task.stage as Exclude<Stage, "none">].push(task);
   for (const task of waitingTasks(plan))
-    if (!staged.has(task.id)) lanes.waiting.push(task);
+    if (!staged.has(task.id) && !parked(task)) lanes.waiting.push(task);
   lanes.start = plan.tasks
-    .filter((task) => !staged.has(task.id) && state(task) === "start")
+    .filter(
+      (task) =>
+        !staged.has(task.id) && !parked(task) && state(task) === "start",
+    )
     .sort(
       (a, b) => a.deadline.localeCompare(b.deadline) || b.priority - a.priority,
     );

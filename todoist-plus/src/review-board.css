@@ -1,7 +1,8 @@
 .review-board {
   container: review / inline-size;
 }
-/* Four stage lanes, with Start now and Waiting only when they have cards. */
+/* Four stage lanes and Parked (while the account has the label), with Start now and Waiting only
+   when they have cards. */
 .review-lanes {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -13,6 +14,9 @@
 }
 .review-lanes[data-lanes="6"] {
   grid-template-columns: repeat(6, minmax(0, 1fr));
+}
+.review-lanes[data-lanes="7"] {
+  grid-template-columns: repeat(7, minmax(0, 1fr));
 }
 .review-lane {
   min-width: 0;
@@ -321,6 +325,16 @@
   color: var(--plus-muted);
   font-size: 12px;
 }
+/* Parked's quiet "N more" under its first cards. */
+.plus-root .review-lane-more {
+  justify-self: start;
+  padding: 2px 4px;
+  font-size: 12px;
+  color: var(--plus-accent);
+}
+.plus-root .review-lane-more:hover {
+  text-decoration: underline;
+}
 /* As wide as the dragged card: dnd-kit gives the overlay the source's size. */
 .review-drag-preview {
   position: relative;
@@ -329,16 +343,29 @@
   box-shadow: var(--plus-shadow-2);
 }
 /*
- * Five or six lanes stay in one row until each lane has about 200px. Then the four stages keep
- * their row, and Start now and Waiting share the row above it (one alone takes it whole), so a drag
- * from them into a stage goes straight down. Two columns pair them again.
+ * Five to seven lanes stay in one row until each lane has about 200px. Then the four stages keep
+ * their row, and the side lanes (Start now, Waiting, Parked) share the row above it (one alone
+ * takes it whole), so a drag from them into a stage goes straight down. Two columns pair them
+ * again, and the stages always start a row of their own.
  */
+@container review (max-width: 1470px) {
+  .review-lanes[data-lanes="7"] {
+    grid-template-columns: repeat(12, minmax(0, 1fr));
+  }
+  .review-lanes[data-lanes="7"] > .review-lane {
+    grid-column: span 3;
+  }
+  .review-lanes[data-lanes="7"]
+    > :is([data-lane="start"], [data-lane="waiting"], [data-lane="parked"]) {
+    grid-column: span 4;
+  }
+}
 @container review (max-width: 1260px) {
   .review-lanes[data-lanes="6"] {
     grid-template-columns: repeat(4, minmax(0, 1fr));
   }
   .review-lanes[data-lanes="6"]
-    > :is([data-lane="start"], [data-lane="waiting"]) {
+    > :is([data-lane="start"], [data-lane="waiting"], [data-lane="parked"]) {
     grid-column: span 2;
   }
 }
@@ -347,7 +374,7 @@
     grid-template-columns: repeat(4, minmax(0, 1fr));
   }
   .review-lanes[data-lanes="5"]
-    > :is([data-lane="start"], [data-lane="waiting"]) {
+    > :is([data-lane="start"], [data-lane="waiting"], [data-lane="parked"]) {
     grid-column: 1 / -1;
   }
 }
@@ -355,9 +382,11 @@
   .review-lanes[data-lanes] {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
-  .review-lanes[data-lanes="6"]
-    > :is([data-lane="start"], [data-lane="waiting"]) {
+  .review-lanes:is([data-lanes="6"], [data-lanes="7"]) > .review-lane {
     grid-column: auto;
+  }
+  .review-lanes[data-lanes] > [data-lane="quarterly"] {
+    grid-column-start: 1;
   }
 }
 @container review (max-width: 430px) {

@@ -10,9 +10,11 @@ import { displayedTitle, effectiveArea } from "./domain";
 import { canMarkActive, deadlineTitle, spokenDeadline } from "./deadlines";
 import { dependencyIndex } from "./dependencies";
 import {
+  canPark,
   outcomeArea,
   outcomeColor,
   outcomeSteps,
+  PARKED_LABEL,
   reviewLanes,
 } from "./planning-outcomes";
 import { pendingTask, predictStage, withStage } from "./plan-updates";
@@ -24,6 +26,7 @@ import {
   type BoardLanes,
 } from "./review-lanes";
 import { PendingMark } from "./StatusMarks";
+import { untouchedText } from "./weekly-review";
 import { words } from "./i18n";
 import type {
   Area,
@@ -53,12 +56,15 @@ export interface OutcomeCardProps {
   pending?: boolean;
   /** On the Review board: the tasks it waits for that are not done (dependencies.ts). */
   waitsFor?: readonly PlanningTask[];
+  /** In Parked: how long Todoist has not changed it, in place of the step counts. */
+  untouched?: boolean;
   onClick: () => void;
 }
 /**
  * Title, area, and the step counts or, when the task waits or should start, one muted status in
- * their place: beside the area, or in a row of its own when it has two parts. Only days past a
- * deadline are drawn in --plus-danger.
+ * their place: beside the area, or in a row of its own when it has two parts. A parked card says
+ * how long it has been untouched instead of its counts. Only days past a deadline are drawn in
+ * --plus-danger.
  */
 export function OutcomeCard({
   task,
@@ -70,6 +76,7 @@ export function OutcomeCard({
   selected = false,
   pending = false,
   waitsFor,
+  untouched = false,
   onClick,
 }: OutcomeCardProps) {
   const steps = outcomeSteps(task, tasks, managedLabels);
@@ -82,17 +89,26 @@ export function OutcomeCard({
         : "No priority";
   const title = displayedTitle(task.title);
   const state = today ? cardState(task, today, waitsFor) : undefined;
+  // A parked card that waits still says so; otherwise its untouched days, when Todoist says.
+  const untouchedLine =
+    untouched && !state ? untouchedText(task, language) : "";
   const status =
-    today && state ? cardStatus(task, state, today, language, waitsFor) : [];
+    today && state
+      ? cardStatus(task, state, today, language, waitsFor)
+      : untouchedLine
+        ? [{ text: untouchedLine }]
+        : [];
+  const hasStatus = Boolean(state || untouchedLine);
+  const dated = Boolean(task.deadline && state);
   const line = statusLine(status);
   // Screen readers hear the status with the part of the deadline it does not already say.
   const spoken = line
-    ? `, ${line}${task.deadline ? spokenDeadline({ text: line }, task.deadline, language) : ""}`
+    ? `, ${line}${dated ? spokenDeadline({ text: line }, task.deadline, language) : ""}`
     : "";
   const statusText = (
     <span
       className={`planning-outcome-status ${status.length > 1 ? "is-row" : ""}`}
-      title={task.deadline ? deadlineTitle(task.deadline, language) : undefined}
+      title={dated ? deadlineTitle(task.deadline, language) : undefined}
     >
       {status.map((part, index) => (
         <span key={index} className={part.quoted ? "has-quoted" : undefined}>
@@ -139,11 +155,13 @@ export function OutcomeCard({
           </strong>
           {pending && <PendingMark language={language} />}
         </span>
-        <span className={`planning-outcome-meta ${state ? "has-status" : ""}`}>
+        <span
+          className={`planning-outcome-meta ${hasStatus ? "has-status" : ""}`}
+        >
           <span className="planning-outcome-context">
             {outcomeArea(task, tasks, language)}
           </span>
-          {!state ? (
+          {!hasStatus ? (
             <span className="planning-outcome-counts">
               {language === "zh"
                 ? `${steps.length} 个步骤 · 已安排 ${planned}`
@@ -179,11 +197,15 @@ interface Props {
    */
   dependencyNotices?: readonly string[];
 }
+/** As many cards as Parked shows before "more", the weekly review's Someday count. */
+const PARKED_SHOWN = 10;
+
 /**
- * Start now, Waiting and the four stage lanes, with the same lanes and cards. Start now and
- * Waiting show only when they have cards and take no drops: a card dragged from Start now into a
- * stage lane takes that stage and is marked in progress in one write; one from Waiting takes only
- * the stage.
+ * Start now, Waiting, Parked and the four stage lanes, with the same lanes and cards. Start now
+ * and Waiting show only when they have cards and take no drops: a card dragged from Start now into
+ * a stage lane takes that stage and is marked in progress in one write; one from Waiting takes only
+ * the stage. Parked, while the account has the label, always shows and takes any card: it sets the
+ * card aside, and a card dragged out of it into a stage lane takes that stage without the label.
  */
 export function ReviewBoard({
   plan,
@@ -215,17 +237,31 @@ export function ReviewBoard({
     lanes[id].filter(
       (task) => area === "all" || effectiveArea(task, plan.tasks) === area,
     );
-  const columns = [
-    { id: "start" as LaneId, title: text.startNow },
-    { id: "waiting" as LaneId, title: text.waiting },
+  // A lane takes drops when it writes a label: Parked's, or a stage lane's bound one. Start now
+  // and Waiting take none and show only with cards; every other lane always shows.
+  const columns: {
+    id: LaneId;
+    title: string;
+    stage?: Exclude<Stage, "none">;
+    label?: string;
+  }[] = [
+    { id: "start" as const, title: text.startNow },
+    { id: "waiting" as const, title: text.waiting },
+    ...(canPark(plan)
+      ? [{ id: "parked" as const, title: text.parked, label: PARKED_LABEL }]
+      : []),
     ...reviewLanes(language).map((lane) => ({
-      id: lane.stage as LaneId,
+      id: lane.stage,
       title: lane.title,
       stage: lane.stage,
       label: plan.managedLabels.find((label) => label.role === lane.role)
         ?.label,
     })),
-  ].filter((column) => "stage" in column || shown(column.id).length);
+  ].filter(
+    (column) =>
+      (column.id !== "start" && column.id !== "waiting") ||
+      shown(column.id).length,
+  );
   // Once write controls are enabled again: the next card's Start, any Start, the started card
   // where it stays (in its stage lane) or the first card.
   useEffect(() => {
@@ -263,26 +299,37 @@ export function ReviewBoard({
         if (canceled) return;
         const task = operation.source?.data?.task as PlanningTask | undefined;
         const from = operation.source?.data?.lane as LaneId | undefined;
-        const stage = operation.target?.data?.stage as Stage | undefined;
-        if (!task || !stage || from === stage) return;
+        const to = operation.target?.data?.lane as LaneId | undefined;
+        const column = columns.find((item) => item.id === to);
+        if (!task || !from || !to || from === to || !column?.label) return;
+        const parking = to === "parked";
+        const stage: Stage = column.stage ?? "none";
         // Start now is acknowledged by the drag: the stage and the in-progress label in one write.
-        const active = from === "start" && marks;
-        // A step that takes its outcome's own stage is a step of that card, not a card there, so
-        // Waiting or Start now would show it again at once: such a drop writes nothing.
+        const active = from === "start" && marks && !parking;
+        // Parked's label goes with any move out of it; into it, the label alone does it all.
+        const parked = parking ? true : from === "parked" ? false : undefined;
+        const update = parking
+          ? { parked: true }
+          : {
+              stage,
+              ...(active ? { active } : {}),
+              ...(parked === false ? { parked } : {}),
+            };
         const after = boardLanes(
-          withStage(plan, task.id, stage, active),
+          withStage(plan, task.id, stage, active, parked),
           currentDate,
         );
-        if (from && after[from].some((item) => item.id === task.id)) return;
+        const onBoard = (lane: LaneId) =>
+          after[lane].some((item) => item.id === task.id);
+        // Acknowledged, a Start now card may leave the board, but not come straight back. Any other
+        // card must land in the lane it was dropped on: one that would come straight back, or be
+        // only a step of its outcome's card again, writes nothing.
+        if (active ? onBoard(from) : !onBoard(to)) return;
         // The card moves at once and waits in its new lane until Todoist confirms.
-        void run(
-          () =>
-            actions.updateTask(task, active ? { stage, active } : { stage }),
-          {
-            pending: [pendingTask(task.id)],
-            predict: predictStage(task.id, stage, active),
-          },
-        );
+        void run(() => actions.updateTask(task, update), {
+          pending: [pendingTask(task.id)],
+          predict: predictStage(task.id, stage, active, parked),
+        });
       }}
     >
       <div className="review-board" ref={board}>
@@ -291,9 +338,9 @@ export function ReviewBoard({
             <ReviewLane
               key={column.id}
               lane={column.id}
-              stage={"stage" in column ? column.stage : undefined}
+              stage={column.stage}
               title={column.title}
-              label={"label" in column ? column.label : undefined}
+              label={column.label}
               tasks={shown(column.id)}
               plan={plan}
               scheduledIds={scheduledIds}
@@ -360,9 +407,10 @@ function ReviewLane({
   onLabels,
 }: {
   lane: LaneId;
-  /** A stage lane's stage; a drop on Start now or Waiting changes nothing. */
+  /** A stage lane's stage. */
   stage?: Exclude<Stage, "none">;
   title: string;
+  /** The label a drop writes; a drop on Start now or Waiting changes nothing. */
   label?: string;
   tasks: PlanningTask[];
   plan: PlanState;
@@ -378,15 +426,21 @@ function ReviewLane({
   const { ref, isDropTarget } = useDroppable({
     id: `review-lane:${lane}`,
     accept: "review-outcome",
-    // Start now and Waiting catch a drop without a stage, which changes nothing, so that a card
+    // Start now and Waiting catch a drop without a label, which changes nothing, so that a card
     // let go over them goes back instead of into the lane its preview overlaps.
     disabled: busy || Boolean(stage && !label),
-    data: { stage },
+    data: { stage, lane },
   });
+  const text = words(language);
+  // Parked shows its first cards; the rest wait behind "more".
+  const [expanded, setExpanded] = useState(false);
+  const cards =
+    lane === "parked" && !expanded ? tasks.slice(0, PARKED_SHOWN) : tasks;
+  const hidden = tasks.length - PARKED_SHOWN;
   return (
     <section
       ref={ref}
-      className={`review-lane ${isDropTarget && stage ? "is-over" : ""}`}
+      className={`review-lane ${isDropTarget && label ? "is-over" : ""}`}
       aria-label={title}
       data-lane={lane}
       // A jump from Focus or the weekly review focuses the lane.
@@ -418,7 +472,7 @@ function ReviewLane({
         </div>
       )}
       <div className="review-lane-cards">
-        {tasks.map((task) => (
+        {cards.map((task) => (
           <DraggableOutcome
             key={task.id}
             task={task}
@@ -435,8 +489,22 @@ function ReviewLane({
         ))}
         {!tasks.length && label && (
           <p className="review-lane-empty">
-            {language === "zh" ? "拖入事项" : "Drop an outcome here"}
+            {lane === "parked"
+              ? text.dropToPark
+              : language === "zh"
+                ? "拖入事项"
+                : "Drop an outcome here"}
           </p>
+        )}
+        {lane === "parked" && hidden > 0 && (
+          <button
+            type="button"
+            className="review-lane-more"
+            aria-expanded={expanded}
+            onClick={() => setExpanded(!expanded)}
+          >
+            {expanded ? text.showFewer : text.moreItems(hidden)}
+          </button>
         )}
       </div>
     </section>
@@ -505,6 +573,7 @@ function DraggableOutcome({
         language={language}
         pending={pending}
         waitsFor={waitsFor}
+        untouched={lane === "parked"}
         onClick={() => editTask(task)}
       />
       {startable && (

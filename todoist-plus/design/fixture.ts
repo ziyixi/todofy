@@ -330,10 +330,11 @@ export function createPrototype(
       delete metadata.tasks;
       return metadata as PlanMetadata;
     },
-    async updateTask(item, { active, ...update }) {
+    async updateTask(item, { active, parked, ...update }) {
       // As Todofy writes them: a stage's label replaces the other planning labels (the fixture's
       // label names are its roles), and in progress is the literal label, after which Todofy
-      // lists the task neither as must start nor as missing a lead.
+      // lists the task neither as must start nor as missing a lead. Set aside comes last: the
+      // literal label, with no planning label and not in progress.
       const planning: string[] = Object.values(STAGE_ROLES);
       const staged = (task: PlanningTask): PlanningTask =>
         update.stage === undefined
@@ -356,10 +357,30 @@ export function createPrototype(
               ],
               ...(active ? { mustStart: false, missingLead: false } : {}),
             };
+      const setAside = (task: PlanningTask): PlanningTask =>
+        parked === undefined
+          ? task
+          : {
+              ...task,
+              labels: [
+                ...task.labels.filter(
+                  (label) =>
+                    label !== "parked" &&
+                    !(
+                      parked &&
+                      (planning.includes(label) || label === "active")
+                    ),
+                ),
+                ...(parked ? ["parked"] : []),
+              ],
+              ...(parked ? { stage: "none" as const } : {}),
+            };
       plan = {
         ...plan,
         tasks: plan.tasks.map((task) =>
-          task.id === item.id ? marked(staged({ ...task, ...update })) : task,
+          task.id === item.id
+            ? setAside(marked(staged({ ...task, ...update })))
+            : task,
         ),
       };
       return structuredClone(plan.tasks.find((task) => task.id === item.id)!);

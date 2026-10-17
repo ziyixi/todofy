@@ -11,10 +11,11 @@ import { AddStep } from "./AddStep";
 import { OutcomeCard } from "./ReviewBoard";
 import { PlanningCalendar, shortDay, taskTitle } from "./PlanningCalendar";
 import {
+  committedOutcomes,
+  isParked,
   outcomeColor,
   outcomeForTask,
   outcomeSteps,
-  planningOutcomes,
 } from "./planning-outcomes";
 import { pendingStep, predictMove } from "./plan-updates";
 import { unscheduledCommitments } from "./weekly-review";
@@ -80,9 +81,7 @@ export function PlanningWeek(props: Props) {
     onAddingStep,
   } = props;
   const gridId = useId();
-  const committed = planningOutcomes(plan.tasks, plan.managedLabels).filter(
-    (task) => task.stage === "committed",
-  );
+  const committed = committedOutcomes(plan);
   // One quiet line, not a mark per card: commitments with nothing in these seven days.
   const unplanned = unscheduledCommitments(plan, days);
   // A remembered commitment that is no longer committed falls back to the first one.
@@ -93,8 +92,11 @@ export function PlanningWeek(props: Props) {
   const shown = committed.filter(
     (task) => area === "all" || effectiveArea(task, plan.tasks) === area,
   );
+  // A step set aside is in Review's Parked lane, not among the next steps.
   const steps = selected
-    ? outcomeSteps(selected, plan.tasks, plan.managedLabels)
+    ? outcomeSteps(selected, plan.tasks, plan.managedLabels).filter(
+        (task) => !isParked(task, plan),
+      )
     : [];
   const scheduledIds = new Set(
     days.flatMap((day) =>

@@ -128,7 +128,7 @@ it("shows a stage drag at once as one pending card, then the confirmed task", as
   const cleanupTask = (await actions.load()).plan.tasks.find(
     (task) => task.id === "cleanup",
   )!;
-  await drop({ task: cleanupTask }, { stage: "committed" });
+  await drop({ task: cleanupTask, lane: "weekly" }, { lane: "committed" });
   const committed = within(screen.getByRole("region", { name: "Committed" }));
   const card = committed
     .getByText("Clear out the old development branch")
@@ -387,7 +387,7 @@ it("keeps a pending card's details read-only until its drag settles, and the Bet
   const release = (await actions.load()).plan.tasks.find(
     (task) => task.id === "release",
   )!;
-  await drop({ task: release }, { stage: "weekly" });
+  await drop({ task: release, lane: "committed" }, { lane: "weekly" });
   const goals = within(screen.getByRole("region", { name: "Weekly goals" }));
   // A Bet is text tied to no task, so a pending drag holds none of its writes.
   expect(
@@ -436,7 +436,7 @@ it("keeps a pending card's Start disabled until its drag settles", async () => {
       name: "Start: Prepare the next research check-in",
     }) as HTMLButtonElement;
   expect(start().disabled).toBe(false);
-  await drop({ task: research, lane: "committed" }, { stage: "weekly" });
+  await drop({ task: research, lane: "committed" }, { lane: "weekly" });
   // Its etag is the one from before the drag, so the write would be refused.
   expect(start().disabled).toBe(true);
   await act(async () => writes[0]!.confirm());
@@ -462,7 +462,7 @@ it("acknowledges a Start now card by dragging it into a stage lane: its stage an
   const claim = (await actions.load()).plan.tasks.find(
     (task) => task.id === "claim",
   )!;
-  await drop({ task: claim, lane: "start" }, { stage: "committed" });
+  await drop({ task: claim, lane: "start" }, { lane: "committed" });
   expect(writes.map((write) => write.args[1])).toEqual([
     { stage: "committed", active: true },
   ]);
@@ -481,7 +481,7 @@ it("acknowledges a Start now card by dragging it into a stage lane: its stage an
   const passport = (await actions.load()).plan.tasks.find(
     (task) => task.id === "passport",
   )!;
-  await drop({ task: passport, lane: "start" }, { stage: "weekly" });
+  await drop({ task: passport, lane: "start" }, { lane: "weekly" });
   expect(screen.queryByRole("region", { name: "Start now" })).toBeNull();
   // A failed write puts the card back where it was.
   await act(async () => writes[1]!.fail());
@@ -498,7 +498,7 @@ it("moves a Waiting card into a stage lane with its stage only, keeping its wait
   const venue = (await actions.load()).plan.tasks.find(
     (task) => task.id === "venue",
   )!;
-  await drop({ task: venue, lane: "waiting" }, { stage: "weekly" });
+  await drop({ task: venue, lane: "waiting" }, { lane: "weekly" });
   expect(writes.map((write) => write.args[1])).toEqual([{ stage: "weekly" }]);
   expect(laneTitles("Week")).toContain("Hear back about the venue quote");
   expect(laneTitles("Waiting")).toEqual(["Lab access approval"]);
@@ -530,11 +530,11 @@ it("drags Start now with the stage only without the active label; a drop on Star
   const writes = hold(actions, "updateTask");
   await mountPlan(actions);
   const claim = (await load()).plan.tasks.find((task) => task.id === "claim")!;
-  await drop({ task: claim, lane: "start" }, { stage: "committed" });
+  await drop({ task: claim, lane: "start" }, { lane: "committed" });
   expect(writes.map((write) => write.args[1])).toEqual([
     { stage: "committed" },
   ]);
-  // Start now and Waiting catch a card let go over them, with no stage: it goes back, unwritten.
+  // Start now and Waiting catch a card let go over them, with no label: it goes back, unwritten.
   for (const lane of ["start", "waiting"])
     expect(drops.targets.get(`review-lane:${lane}`)).toMatchObject({
       disabled: false,
@@ -543,9 +543,9 @@ it("drags Start now with the stage only without the active label; a drop on Star
   const passport = (await load()).plan.tasks.find(
     (task) => task.id === "passport",
   )!;
-  await drop({ task: passport, lane: "start" }, { stage: undefined });
+  await drop({ task: passport, lane: "start" }, { lane: "start" });
   const venue = (await load()).plan.tasks.find((task) => task.id === "venue")!;
-  await drop({ task: venue, lane: "waiting" }, { stage: undefined });
+  await drop({ task: venue, lane: "waiting" }, { lane: "waiting" });
   expect(writes).toHaveLength(1);
   expect(laneTitles("Start now")).toEqual(["Renew the passport"]);
   expect(laneTitles("Waiting")).toContain("Hear back about the venue quote");
@@ -592,7 +592,7 @@ it("writes nothing for a step dropped into its outcome's lane, where it would co
   // With Committed's label it would still be a step of the research card, so it would still wait.
   await drop(
     { task: await step("reply"), lane: "waiting" },
-    { stage: "committed" },
+    { lane: "committed" },
   );
   expect(writes).toHaveLength(0);
   expect(laneTitles("Waiting")).toContain("Hear back from the reviewer");
@@ -600,7 +600,7 @@ it("writes nothing for a step dropped into its outcome's lane, where it would co
   expect(laneTitles("Start now")).toEqual(["Draft the check-in slides"]);
   await drop(
     { task: await step("slides"), lane: "start" },
-    { stage: "committed" },
+    { lane: "committed" },
   );
   expect(writes.map((write) => write.args[1])).toEqual([
     { stage: "committed", active: true },
@@ -609,7 +609,7 @@ it("writes nothing for a step dropped into its outcome's lane, where it would co
   // Into another stage, the waiting step becomes a card of its own there, queued after the first.
   await drop(
     { task: await step("reply"), lane: "waiting" },
-    { stage: "weekly" },
+    { lane: "weekly" },
   );
   expect(laneTitles("Week")).toContain("Hear back from the reviewer");
   expect(laneTitles("Waiting")).not.toContain("Hear back from the reviewer");
@@ -627,7 +627,85 @@ it("writes nothing for a step that should start dropped into its outcome's lane 
   const slides = (await actions.load()).plan.tasks.find(
     (task) => task.id === "slides",
   )!;
-  await drop({ task: slides, lane: "start" }, { stage: "committed" });
+  await drop({ task: slides, lane: "start" }, { lane: "committed" });
   expect(writes).toHaveLength(0);
   expect(laneTitles("Start now")).toEqual(["Draft the check-in slides"]);
+});
+
+/** The account has a label named parked, so Review has its Parked lane; `change` edits each read. */
+function withParked(actions: PlusActions, change?: (data: PlusData) => void) {
+  const load = actions.load.bind(actions);
+  vi.spyOn(actions, "load").mockImplementation(async (week) => {
+    const data = await load(week);
+    data.plan.availableLabels.push({ id: "synthetic-parked", label: "parked" });
+    change?.(data);
+    return data;
+  });
+}
+
+it("sets a card aside by dragging it into Parked, and takes one out into a stage lane", async () => {
+  const actions = createPrototype();
+  withParked(actions);
+  const writes = hold(actions, "updateTask");
+  await mountPlan(actions);
+  const task = async (id: string) =>
+    (await actions.load()).plan.tasks.find((item) => item.id === id)!;
+  expect(laneTitles("Parked")).toEqual(["Plan a small balcony garden"]);
+  await drop({ task: await task("tools"), lane: "weekly" }, { lane: "parked" });
+  // The set-aside label alone: Todofy takes the planning labels off with it.
+  expect(writes.map((write) => write.args[1])).toEqual([{ parked: true }]);
+  const card = within(screen.getByRole("region", { name: "Parked" }))
+    .getByText("Try the new charting library")
+    .closest<HTMLElement>(".review-draggable")!;
+  expect(card.getAttribute("aria-busy")).toBe("true");
+  expect(laneTitles("Week")).not.toContain("Try the new charting library");
+  await act(() => writes[0]!.confirm());
+  expect(laneTitles("Parked")).toEqual([
+    "Plan a small balcony garden",
+    "Try the new charting library",
+  ]);
+  // Out of Parked into a stage lane: that stage, and the label goes.
+  await drop(
+    { task: await task("garden"), lane: "parked" },
+    { lane: "monthly" },
+  );
+  expect(writes[1]!.args[1]).toEqual({ stage: "monthly", parked: false });
+  expect(laneTitles("Month")).toContain("Plan a small balcony garden");
+  await act(() => writes[1]!.confirm());
+  expect((await task("garden")).labels).toEqual(["home", "candiate"]);
+  // Waiting takes no drops, from Parked as from anywhere.
+  await drop(
+    { task: await task("tools"), lane: "parked" },
+    { lane: "waiting" },
+  );
+  expect(writes).toHaveLength(2);
+  expect(laneTitles("Parked")).toEqual(["Try the new charting library"]);
+});
+
+it("writes nothing for a parked step dropped into its outcome's lane, where it would be a step again", async () => {
+  const actions = createPrototype();
+  withParked(actions, (data) => {
+    data.plan.tasks.find((task) => task.id === "outline")!.labels = ["parked"];
+  });
+  const writes = hold(actions, "updateTask");
+  await mountPlan(actions);
+  const outline = (await actions.load()).plan.tasks.find(
+    (task) => task.id === "outline",
+  )!;
+  expect(laneTitles("Parked")).toContain(
+    "Outline three questions for the check-in",
+  );
+  await drop({ task: outline, lane: "parked" }, { lane: "committed" });
+  expect(writes).toHaveLength(0);
+  expect(laneTitles("Parked")).toContain(
+    "Outline three questions for the check-in",
+  );
+  // Into another stage it becomes a card of its own there.
+  await drop({ task: outline, lane: "parked" }, { lane: "weekly" });
+  expect(writes.map((write) => write.args[1])).toEqual([
+    { stage: "weekly", parked: false },
+  ]);
+  expect(laneTitles("Week")).toContain(
+    "Outline three questions for the check-in",
+  );
 });

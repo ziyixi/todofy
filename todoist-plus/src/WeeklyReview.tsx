@@ -8,6 +8,7 @@ import { deadlineStatus } from "./deadlines";
 import { waitingTasks } from "./dependencies";
 import { betWords, words } from "./i18n";
 import { pendingTask } from "./plan-updates";
+import { isParked, PARKED_LABEL } from "./planning-outcomes";
 import { LeadSelect } from "./TaskEditor";
 import { weekLabel } from "./PlanningCalendar";
 import {
@@ -96,7 +97,8 @@ export function WeeklyReview({
     busy || (pending?.has(pendingTask(task.id)) ?? false);
 
   const inbox = inboxToClarify(plan);
-  const waiting = waitingTasks(plan);
+  // As Review's Waiting lane: a task set aside is in Parked.
+  const waiting = waitingTasks(plan).filter((task) => !isParked(task, plan));
   const oldestWait = waiting[0] && untouchedDays(waiting[0]);
   const noLead = withoutLead(plan.tasks);
   const unscheduled = unscheduledCommitments(plan, days);
@@ -352,11 +354,11 @@ export function WeeklyReview({
                         disabled={waits(task)}
                         aria-label={`${move}: ${title}`}
                         onClick={async () => {
-                          if (
-                            await run(() =>
-                              actions.updateTask(task, { stage: "monthly" }),
-                            )
-                          )
+                          // Into this month takes a parked task out of Parked too.
+                          const update = task.labels.includes(PARKED_LABEL)
+                            ? { stage: "monthly" as const, parked: false }
+                            : { stage: "monthly" as const };
+                          if (await run(() => actions.updateTask(task, update)))
                             done(4, index, `${moved}: ${title}`);
                         }}
                       >
