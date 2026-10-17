@@ -252,11 +252,11 @@ it("puts Parked between Waiting and the stages while the account has the label, 
   expect(lane("Parked").textContent).toContain("Drop here to park");
 });
 
-it("shows Parked's first ten cards, then a quiet line for the rest", async () => {
+it("shows Parked's first three cards, then a quiet line for the rest", async () => {
   const { props } = await setup((data) => {
     data.plan.availableLabels.push({ id: "synthetic-parked", label: "parked" });
     const template = data.plan.tasks.find((task) => task.id === "garden")!;
-    for (let index = 1; index <= 11; index++)
+    for (let index = 1; index <= 4; index++)
       data.plan.tasks.push({
         ...template,
         id: `idea-${index}`,
@@ -266,14 +266,24 @@ it("shows Parked's first ten cards, then a quiet line for the rest", async () =>
   });
   render(<PlanView {...props} language="zh" />);
   const parked = lane("搁置");
-  expect(parked.querySelectorAll(".planning-outcome-card")).toHaveLength(10);
+  // The most untouched first: the fixture's garden, unchanged for 53 days, then those Todoist
+  // gave no time.
+  expect(
+    [...parked.querySelectorAll(".planning-outcome-title")].map(
+      (title) => title.textContent,
+    ),
+  ).toEqual([
+    "Plan a small balcony garden",
+    "Synthetic idea 1",
+    "Synthetic idea 2",
+  ]);
   const more = within(parked).getByRole("button", { name: "再显示 2 项" });
   expect(more.getAttribute("aria-expanded")).toBe("false");
   fireEvent.click(more);
-  expect(parked.querySelectorAll(".planning-outcome-card")).toHaveLength(12);
+  expect(parked.querySelectorAll(".planning-outcome-card")).toHaveLength(5);
   expect(more.textContent).toBe("收起");
   expect(parked.querySelector(".review-lane-header > span")!.textContent).toBe(
-    "12",
+    "5",
   );
 });
 

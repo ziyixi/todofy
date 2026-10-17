@@ -162,38 +162,34 @@
   overflow: hidden;
   overflow-wrap: anywhere;
 }
+/*
+ * The area keeps its whole name: in a narrow lane (seven lanes at about 205px) the step counts or
+ * the status move under it, still at the right, and a long status wraps between its parts, never
+ * inside one.
+ */
 .planning-outcome-meta {
   display: flex;
-  gap: 7px;
+  flex-wrap: wrap;
+  gap: 2px 7px;
   align-items: center;
+  /* Never wider than the card: a status's quoted title gives way instead (.has-quoted). */
+  min-width: 0;
   color: var(--plus-muted);
   font-size: 12px;
   line-height: 16px;
 }
 .planning-outcome-context {
-  flex: 1;
-  min-width: 0;
+  flex: 1 0 auto;
+  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .planning-outcome-counts {
   flex: 0 0 auto;
+  margin-left: auto;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
-}
-/*
- * A status keeps the whole area name: in a narrow lane it moves under it, still at the right, and
- * a long one wraps between its parts, never inside one.
- */
-.planning-outcome-meta.has-status {
-  flex-wrap: wrap;
-  row-gap: 2px;
-  /* Never wider than the card: a status's quoted title gives way instead (.has-quoted). */
-  min-width: 0;
-}
-.planning-outcome-meta.has-status .planning-outcome-context {
-  flex: 1 0 auto;
 }
 .planning-outcome-status {
   margin-left: auto;
@@ -392,6 +388,15 @@
   .review-lanes[data-lanes="5"]
     > :is([data-lane="start"], [data-lane="waiting"], [data-lane="parked"]) {
     grid-column: 1 / -1;
+  }
+  /* Parked alone and empty is a thin strip over the stages, not a tall empty row: its header and
+     one line saying where to drop. It stays in place, so a drag start moves nothing. */
+  .review-lanes[data-lanes="5"] > [data-lane="parked"]:has(.review-lane-empty) {
+    min-height: 0;
+  }
+  .review-lanes[data-lanes="5"] > [data-lane="parked"] .review-lane-empty {
+    margin: 0;
+    padding: 0 4px;
   }
 }
 @container review (max-width: 800px) {

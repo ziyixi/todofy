@@ -172,9 +172,7 @@ export function OutcomeCard({
           </strong>
           {pending && <PendingMark language={language} />}
         </span>
-        <span
-          className={`planning-outcome-meta ${hasStatus ? "has-status" : ""}`}
-        >
+        <span className="planning-outcome-meta">
           <span className="planning-outcome-context">
             {outcomeArea(task, tasks, language)}
           </span>
@@ -214,8 +212,11 @@ interface Props {
    */
   dependencyNotices?: readonly string[];
 }
-/** As many cards as Parked shows before "more", the weekly review's Someday count. */
-const PARKED_SHOWN = 10;
+/**
+ * As many cards as Parked shows before "more", the most untouched: few, so that where the side
+ * lanes sit above the stages a someday pile never pushes the stages out of view.
+ */
+const PARKED_SHOWN = 3;
 
 /**
  * Start now, Waiting, Parked and the four stage lanes, with the same lanes and cards. Start now

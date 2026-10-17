@@ -6,6 +6,7 @@ import {
   type Worker,
 } from "@playwright/test";
 import {
+  addCommitments,
   addDeadlineTasks,
   controlWrites,
   dragPlanner,
@@ -681,6 +682,68 @@ test("seven lanes keep one row while wide, then put the side lanes above the sta
   }
 });
 
+/** Every part of a card whose right edge is past the card's own, as "lane: text". */
+const overflowing = (page: Page) =>
+  page.locator(".planning-outcome-card").evaluateAll((cards) =>
+    cards.flatMap((card) => {
+      const edge = card.getBoundingClientRect().right;
+      return [...card.querySelectorAll("span, strong")]
+        .filter((part) => part.getBoundingClientRect().right > edge + 0.5)
+        .map(
+          (part) =>
+            `${card.closest("[data-lane]")?.getAttribute("data-lane")}: ${part.textContent}`,
+        );
+    }),
+  );
+
+test("seven lanes in one row keep every card's text inside the card, in English and in Chinese", async () => {
+  const { context, worker } = await launchPlanner();
+  try {
+    await addDeadlineTasks(worker);
+    await addCommitments(worker);
+    await addParked(worker);
+    // Eleven more steps under the weekly outcome: two-digit counts.
+    await worker.evaluate(() => {
+      const state = (
+        globalThis as unknown as {
+          plannerState: { tasks: Record<string, unknown>[] };
+        }
+      ).plannerState;
+      for (let index = 0; index < 11; index++)
+        state.tasks.push({
+          id: `extra-${index}`,
+          title: `Synthetic extra step ${index}`,
+          parent_id: "parent",
+          area: "unassigned",
+          stage: "none",
+          etag: `extra-${index}-1`,
+        });
+    });
+    const page = await context.newPage();
+    // The owner's window: every lane about 205px wide.
+    await page.setViewportSize({ width: 1854, height: 900 });
+    await page.goto("https://app.todoist.com/app/today?todoist-plus=plan");
+    await expect(page.locator(".review-lanes")).toHaveAttribute(
+      "data-lanes",
+      "7",
+    );
+    const rows = new Set(
+      (await laneBoxes(page)).map((box) => Math.round(box.y)),
+    );
+    expect(rows.size).toBe(1);
+    await expect(page.locator(".planning-outcome-counts")).not.toHaveCount(0);
+    expect(await overflowing(page)).toEqual([]);
+    await page.evaluate(() => (document.documentElement.lang = "zh-CN"));
+    await expect(lane(page, "搁置")).toBeVisible();
+    await expect(
+      page.locator(".planning-outcome-counts", { hasText: /^1\d 个步骤/u }),
+    ).not.toHaveCount(0);
+    expect(await overflowing(page)).toEqual([]);
+  } finally {
+    await context.close();
+  }
+});
+
 test("an empty Parked lane is in place before a drag starts, so the board never moves under it", async () => {
   const { context, worker } = await launchPlanner();
   try {
@@ -705,6 +768,38 @@ test("an empty Parked lane is in place before a drag starts, so the board never 
     await page.keyboard.press("Escape");
     await page.mouse.up();
     expect(await writes(worker)).toEqual([]);
+  } finally {
+    await context.close();
+  }
+});
+
+test("alone and empty above the stages, Parked is a thin strip, not a tall empty row", async () => {
+  const { context, worker } = await launchPlanner();
+  try {
+    await addParked(worker, true);
+    const page = await context.newPage();
+    // Without Start now and Waiting: five lanes, Parked over the four stages.
+    for (const width of [1150, 1000]) {
+      await page.setViewportSize({ width, height: 900 });
+      await page.goto("https://app.todoist.com/app/today?todoist-plus=plan");
+      await expect(page.locator(".review-lanes")).toHaveAttribute(
+        "data-lanes",
+        "5",
+      );
+      await expect(lane(page, "Parked")).toContainText("Drop here to park");
+      const parked = (await lane(page, "Parked").boundingBox())!;
+      const quarter = (await lane(page, "Quarter").boundingBox())!;
+      expect(parked.y + parked.height).toBeLessThan(quarter.y);
+      expect(parked.width).toBeGreaterThan(quarter.width * 1.5);
+      expect(parked.height).toBeLessThan(90);
+    }
+    // In one row with the stages it is a lane like theirs.
+    await page.setViewportSize({ width: 1854, height: 900 });
+    await page.goto("https://app.todoist.com/app/today?todoist-plus=plan");
+    await expect(lane(page, "Parked")).toContainText("Drop here to park");
+    expect((await lane(page, "Parked").boundingBox())!.height).toBeGreaterThan(
+      169,
+    );
   } finally {
     await context.close();
   }

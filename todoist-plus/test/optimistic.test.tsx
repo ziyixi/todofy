@@ -955,3 +955,69 @@ it("reorders a next step among its siblings at once, with one ReorderTasks of th
   await drop(step("layout"), { date: "2026-10-16" });
   expect(moves.map((call) => call.args[0])).toEqual(["layout"]);
 });
+
+/** The fixture with this many more tasks like `template`, from `fields`. */
+function withMore(
+  actions: PlusActions,
+  template: string,
+  count: number,
+  fields: (index: number) => Partial<PlanningTask>,
+) {
+  const load = actions.load.bind(actions);
+  vi.spyOn(actions, "load").mockImplementation(async (week) => {
+    const data = await load(week);
+    const like = data.plan.tasks.find((task) => task.id === template)!;
+    for (let index = 0; index < count; index++)
+      data.plan.tasks.push({ ...like, id: `extra-${index}`, ...fields(index) });
+    return data;
+  });
+}
+
+it("keeps at most Todofy's 100 IDs of a lane's order, and writes nothing for a drop past them", async () => {
+  const actions = createPrototype();
+  // 101 cards in Committed: the fixture's four and 97 more.
+  withMore(actions, "desk", 97, (index) => ({
+    title: `Synthetic outcome ${index}`,
+  }));
+  const reorders = hold(actions, "reorderTasks");
+  // Only this board's cards.
+  drops.sortables.clear();
+  await mountPlan(actions);
+  const lane = [...drops.sortables.values()]
+    .map((sortable) => sortable.data!)
+    .filter((data) => data.lane === "committed")
+    .sort((a, b) => Number(a.position) - Number(b.position));
+  const ids = lane.map((data) => (data.task as PlanningTask).id);
+  expect(ids).toHaveLength(101);
+  // Within the first 100: the first 100 of the new order.
+  await drop(lane[0]!, lane[1]!);
+  expect(reorders.map((call) => call.args.slice(0, 3))).toEqual([
+    [[ids[1], ids[0], ...ids.slice(2, 100)], ids[0], "committed"],
+  ]);
+  await act(() => reorders[0]!.confirm());
+  // To the 101st place: nothing a request could keep, so nothing is sent.
+  await drop(lane[2]!, lane[100]!);
+  expect(reorders).toHaveLength(1);
+});
+
+it("writes no Next steps order for more than 100 siblings, which one request cannot take", async () => {
+  const step = (id: string) => drops.sortables.get(`tray:${id}`)!.data!;
+  // The website refresh's two steps and 98 more: 100 siblings, each with its own position.
+  for (const [more, sent] of [
+    [98, 1],
+    [99, 0],
+  ] as const) {
+    const actions = createPrototype();
+    withMore(actions, "copy", more, (index) => ({
+      title: `Synthetic step ${index}`,
+      childOrder: index + 3,
+    }));
+    const reorders = hold(actions, "reorderTasks");
+    await mountPlan(actions);
+    fireEvent.click(screen.getByRole("tab", { name: "Week" }));
+    await drop(step("copy"), step("layout"));
+    expect(reorders).toHaveLength(sent);
+    if (sent) expect(reorders[0]!.args[0]).toHaveLength(100);
+    cleanup();
+  }
+});
