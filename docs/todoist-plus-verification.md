@@ -1099,3 +1099,58 @@ boundaries and its reading of fixed-timezone due dates. Also not verified: branc
 installed extension, a screen reader's reading of the drag announcements (checked through the DOM only; the
 instructions dnd-kit links with `aria-describedby` sit outside Plus's shadow root, as before this change), and
 the feel of the drags.
+
+### Review fixes (October 17)
+
+A review of the branch confirmed sixteen findings, fixed in `11ae2b48`-`bb86efae` on the same local branch (not
+pushed, no branch CI, no release; synthetic data only):
+
+- Todofy: `UpdateMailSettings` stores the well-formed destination it is sent (still never checked against
+  Todoist or used for filing; the replay check stays categories-only), so an extension before planning protocol
+  6 that saves its categories dialog, which sends the Inbox `ReadMailSettings` answers, then offers the
+  categories on its rows instead of "Set up categories" until it is reloaded.
+- Mailbox: the transparent filing buttons no longer size the time's slot, whose solid background covered every
+  title's end (about 256px of each row with four categories at 1280px); they are positioned out of it with their
+  own background and fade. A category button ellipsizes only its label, so " · P2" always shows. An Inbox filing
+  sends an empty categories etag (Todofy ignores it without a category), and a filing's request key carries the
+  task's etag and, for a category, the categories' etag.
+- Saving a stage in a parked task's details, or marking it in progress, also sends `parked: false`.
+- Add steps is open only for the commitment it was opened for, so a selection that changes on its own (a read
+  shows the commitment no longer committed) closes it without taking focus; the waiting step card has the step
+  card's two lines, so the swap keeps the row's height. The unreachable `runway` jump is gone.
+- Review: every outcome card's meta row wraps (at 1854px with seven lanes, 205px each, the counts ran past the
+  card's border); Parked shows three cards before "more" (ten pushed the stages below the fold wherever the side
+  lanes sit above them); an empty Parked lane alone above the stages is a strip of about 70px instead of 170px.
+- Drags: each provider renders its own hidden instructions in the shadow root and every handle names them, with
+  a localized role description; Chrome's accessibility tree had given the handles no description, because the
+  ID dnd-kit sets points into `document.body`. Both providers are keyed by the language, so the announcements
+  follow a language change.
+- Tests for D4's remembered Review area and for the 100-ID caps of a lane's order and a Next steps reorder; the
+  extension's README, `design.md`, `docs/architecture.md` and Todofy's README describe D1-D8.
+
+Local checks on the final tree, all passing:
+
+- The extension (`plus.sh`, the steps of `check-todoist-plus`): lint, types, 301 unit cases in 41 files, the
+  build and 60 built-MV3 Chromium cases. New browser cases: the Mailbox's slot at rest is the time's width plus
+  12px with four categories and a long title, and on hover each priority shows whole inside its button; the
+  seven-lane board at 1854px keeps every part inside its card in English and in Chinese with two-digit counts;
+  the lone empty Parked lane is under 90px at 1150 and 1000px; Chrome's accessibility tree (CDP
+  `Accessibility.queryAXTree`) gives a Review handle and a Next steps handle the instructions as description in
+  English, then in Chinese after `<html lang>` changes. The Add steps case also compares the waiting card's
+  title block with the step card that replaces it.
+- Todofy static (ruff, 2,121 host tests with one existing skip, the gateway's lint, types, 136 unit cases and
+  CPU suite, the owner UI's 93 tests and build at 179.1 KiB gzip, both production dry-runs, the gateway at
+  84.4 KiB gzip of 86.0 KiB); all 592 runtime cases (590 in four processes, then `test_alarm.py`), each exactly
+  once; Contracts (882, 26, 69, 71, 6, 6 and 54 cases). Proto did not change. `ci_changes.py` selects Todofy,
+  the contracts and the extension for this round's diff.
+
+Mutation checks, each failing its new test: the Mailbox's old slot CSS (the slot measured 399px against the
+expected 46px); the old review board CSS (about two dozen parts past their cards at 1854px, and a 170px empty Parked);
+the Mailbox request key without the categories etag; Add steps open for any selected commitment; a one-line
+waiting card (a 19.6px title block against the step card's 40.4px); `DragDropProvider` without the language
+key; the Review handle without its own description (Chrome's tree then has none); and each 100-ID guard
+removed.
+
+Not verified: a real screen reader's reading of the new descriptions (Chrome's tree only); the touch layout of
+the Mailbox (`hover: none` could not be emulated here; its rules are those of before, with the buttons static
+again); and everything listed as unverified above.

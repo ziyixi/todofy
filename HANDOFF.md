@@ -68,21 +68,24 @@ planning protocol 6).
 | B, extension | `a6e1da14`-`1344e2c8` | D1 the mail project's favourite hidden on every page; D4 Plan's view kept in `storage.local`; D8 Committed folds |
 | C, extension | `1f62fec1`-`2d5cca15` | D2 one-click filing into the Inbox; D3 Add steps and the weekly review's Plan steps; planning protocol 6 |
 | D, extension | `984d8516`-`ca7ac86c` and the records | D5 the Parked lane and Week's Quick line; D6 reordering inside every Review lane; D7 reordering Next steps |
+| Review fixes | `11ae2b48`-`bb86efae` and the records | Todofy stores the destination a categories save sends (an old Mailbox then offers its categories); the Mailbox's hidden buttons no longer cover titles, a long label keeps its priority, an Inbox filing sends no categories etag; a stage saved in a parked task's details unparks it; Add steps stays with its commitment; seven lanes fit at 1854px, Parked shows 3 and is a thin strip when alone and empty; drag instructions inside the shadow root, in the page's language; tests for the area filter and the 100-ID caps; the overviews |
 
 Interface: [planning-interface.md](todoist-plus/docs/planning-interface.md); backend:
 [reordering](todofy/docs/todoist-plus.md#reordering); local evidence:
-[owner fixes](docs/todoist-plus-verification.md#owner-fixes-d1-d8-local-checks-october-17).
+[owner fixes](docs/todoist-plus-verification.md#owner-fixes-d1-d8-local-checks-october-17) and
+[their review fixes](docs/todoist-plus-verification.md#review-fixes-october-17).
 
 Next: push the branch, wait for the complete branch CI (it selects Todofy, proto, contracts, the extension and
 every proto user; locally only Todofy, proto, contracts and the extension ran), then promote the same green SHA.
 The release deploys Todofy first (no migration), then publishes the extension. Between the two, and until the
-owner reloads, an old extension's filing already moves mail to the Inbox and its categories dialog still saves.
+owner reloads, an old extension's filing already moves mail to the Inbox and its categories dialog still saves;
+Todofy stores the Inbox that dialog sends as the destination, so its rows offer the categories.
 
 Owner steps after that release, replacing the ones above: reload Todoist Plus and refresh Todoist (planning
 protocol 6; a page left open asks for the reload); mail categories are optional and filing always moves to the
-Todoist Inbox (the destination saved before is kept but ignored); the Quick/Ops and Parked favourite filters
-disappear after Todofy's first full Sync, and Other views with them when nothing else is in it; then the ten
-checks in [the extension's verification](todoist-plus/docs/verification.md#owner-反馈修正2026-10-17本地).
+Todoist Inbox (each categories save still stores a destination, never used for filing); the Quick/Ops and
+Parked favourite filters disappear after Todofy's first full Sync, and Other views with them when nothing else
+is in it; then the ten checks in [the extension's verification](todoist-plus/docs/verification.md#owner-反馈修正2026-10-17本地).
 
 Follow-ups:
 
