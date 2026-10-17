@@ -467,6 +467,7 @@ DEPLOYMENT_MODES = {
     "mailsort": ["maintenance", "mode_limited"],
     "recall": ["maintenance"],
     "brief": ["maintenance", "mode_limited"],
+    "tasks": ["maintenance"],
 }
 
 

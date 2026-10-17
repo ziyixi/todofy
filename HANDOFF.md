@@ -31,6 +31,13 @@ The owner requested stopping both old acceptance reminders. The app confirmed de
 `automation` (website cron evidence) and `todofy` (email-model scheduler evidence) on 2026-10-17. Their missing
 historical log evidence is not treated as a successful verification.
 
+Checkpoint `4895d4a5` is pushed. Full branch CI 39070976415 failed on integration enrollment and CI-specific
+setup/cold decoding, while Tasks' own checks passed. Local corrections include the missing runtime dependency
+installs, Ops fixture enrollment, Home deployment assertion, native startup decoding, proto self-test anchors
+and generated HCL alignment. Native controls and calendar projections now have regressions; all 1,994 Python
+units pass. Real-source export remains read-only and incomplete while protocol coverage is verified. The
+private loopback tools and any private snapshots are outside the repository and must not be committed.
+
 Todoist Plus UI refinement is released at `b79180283db375757f2cc8d29e481e55a6935c40`.
 [Full branch CI 39013842528](https://github.com/ziyixi/todofy/actions/runs/39013842528) and
 [same-SHA main 39014147662](https://github.com/ziyixi/todofy/actions/runs/39014147662) pass. Only the Plus

@@ -34,7 +34,7 @@ def projects(catalog: dict[str, Any]) -> list[dict[str, Any]]:
 def task(row: dict[str, Any], catalog: dict[str, Any]) -> dict[str, Any]:
     names = {label["id"]: label["title"] for label in catalog.get("labels", [])}
     inbox = next((project["id"] for project in catalog.get("projects", []) if project.get("inbox")), "")
-    due = row.get("due_datetime") or row.get("due_date") or ""
+    due = row.get("due_date") or ""
     position = float(row.get("sort_order", 0))
     return {
         "id": row["id"],
@@ -50,6 +50,7 @@ def task(row: dict[str, Any], catalog: dict[str, Any]) -> dict[str, Any]:
         "_native_etag": row["etag"],
         "due": {
             "date": due,
+            "datetime": row.get("due_datetime") or None,
             "is_recurring": bool(row.get("recurrence")),
             "string": row.get("recurrence", ""),
             "timezone": row.get("due_timezone") or None,

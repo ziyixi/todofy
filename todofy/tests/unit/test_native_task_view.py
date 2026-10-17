@@ -36,3 +36,29 @@ def test_native_metadata_uses_imported_timezone_and_label_ids():
     assert view.metadata(CATALOG)["timezone"] == "America/Los_Angeles"
     assert view.metadata(CATALOG)["labels"] == [{"id": "l1", "name": "committed"}]
     assert view.projects(CATALOG)[0]["inbox_project"] is True
+
+
+def test_evening_timed_task_keeps_local_plan_day_and_exact_overdue_instant():
+    from datetime import UTC, datetime
+
+    from todofy.core import gtd, plus
+
+    projected = view.task(
+        {
+            "id": "evening-step",
+            "etag": "3",
+            "title": "Synthetic evening step",
+            "due_date": "2026-10-20",
+            "due_datetime": "2026-10-21T04:00:00Z",
+            "due_timezone": "America/Los_Angeles",
+        },
+        CATALOG,
+    )
+    assert projected["due"]["date"] == "2026-10-20"
+    assert projected["due"]["datetime"] == "2026-10-21T04:00:00Z"
+    assert plus.task_view(projected, "2026-10-20")["due"] == "2026-10-20"
+    snapshot = gtd.snapshot_row(projected, bytes(32))
+    due_at = int(datetime(2026, 10, 21, 4, tzinfo=UTC).timestamp())
+    assert snapshot["due_at"] == due_at
+    assert not gtd.is_overdue(snapshot, due_at - 1, "2026-10-21")
+    assert gtd.is_overdue(snapshot, due_at + 1, "2026-10-21")

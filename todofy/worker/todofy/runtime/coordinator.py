@@ -371,7 +371,7 @@ class TodofyCore(DurableObject):
             maintenance=flag(env, "MAINTENANCE_MODE"),
             processing_paused=flag(env, "PROCESSING_PAUSED"),
             force_pause=flag(env, "FORCE_PAUSE_TODOIST"),
-            blocked_until=self._control()["todoist_blocked_until"],
+            blocked_until=self._todoist_blocked_until(),
             backup_active=backup.holds_ledger(env, self.sql, now),
             now=now,
         )
@@ -399,7 +399,7 @@ class TodofyCore(DurableObject):
         return {
             **usage,
             "token_budget": self._token_budget(),
-            "todoist_blocked_until": self._control()["todoist_blocked_until"],
+            "todoist_blocked_until": self._todoist_blocked_until(),
             "todoist_window_calls": self._todoist_window_calls(now),
             "todoist_window_limit": TODOIST_WINDOW_LIMIT,
         }
@@ -586,9 +586,7 @@ class TodofyCore(DurableObject):
         """The next alarm and the Gemini/Todoist budgets, in the Overview's API shape."""
         now = now_s()
         usage = self._usage(now)
-        if native_tasks.enabled(self.env):
-            return None
-        blocked_until = self._control()["todoist_blocked_until"]
+        blocked_until = self._todoist_blocked_until()
         alarm = await self.ctx.storage.getAlarm()
         return {
             "next_alarm_at": None if alarm is None else api.timestamp(int(alarm) // 1000),
@@ -717,6 +715,8 @@ class TodofyCore(DurableObject):
         )
 
     def _todoist_window_calls(self, now: int) -> int:
+        if native_tasks.enabled(self.env):
+            return 0
         first = (now - TODOIST_WINDOW) // MINUTE + 1
         self.sql.exec("DELETE FROM todoist_calls WHERE minute_bucket < ?", first)
         rows = self.sql.exec("SELECT coalesce(sum(count), 0) AS n FROM todoist_calls").toArray()
@@ -737,11 +737,16 @@ class TodofyCore(DurableObject):
         row = self.sql.exec("SELECT * FROM control WHERE id = 1").toArray()[0]
         return {name: int(getattr(row, name)) for name in (*TICK_COLUMNS, "todoist_blocked_until")}
 
+    def _todoist_blocked_until(self) -> int:
+        return 0 if native_tasks.enabled(self.env) else self._control()["todoist_blocked_until"]
+
     def _todoist_wait(self, now: int) -> int | None:
         """None when Todoist may be called now; otherwise when to look again (0: at the next wake-up)."""
         if flag(self.env, "FORCE_PAUSE_TODOIST"):
             return 0
-        blocked_until = self._control()["todoist_blocked_until"]
+        if native_tasks.enabled(self.env):
+            return None
+        blocked_until = self._todoist_blocked_until()
         if blocked_until > now:
             return blocked_until
         if self._todoist_window_calls(now) + TODOIST_STEP_CALLS > TODOIST_WINDOW_LIMIT:

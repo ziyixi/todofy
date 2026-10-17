@@ -128,8 +128,10 @@ def inventory_map(text: str, field: str, values: dict[str, str]) -> str:
     require(len(matches) == 1, "infra inventory " + field)
     match = matches[0]
     body = match.group(2)
-    row = re.compile(r'(?m)^(\s*)"([^"\n]+)"(\s*=\s*)"[^"\n]+"([^\n]*\n?)')
+    row = re.compile(r'(?m)^([ \t]*)"([^"\n]+)"([ \t]*=[ \t]*)"[^"\n]+"([^\n]*\n?)')
     seen = set()
+
+    width = max((len(json.dumps(name)) for name in values), default=0)
 
     def replace(item):
         name = item.group(2)
@@ -140,9 +142,16 @@ def inventory_map(text: str, field: str, values: dict[str, str]) -> str:
         return item.group(1) + json.dumps(name) + item.group(3) + json.dumps(values[name]) + item.group(4)
 
     body = row.sub(replace, body)
-    width = max((len(json.dumps(name)) for name in values), default=0)
     body += "".join("    " + json.dumps(name).ljust(width) + " = " + json.dumps(values[name]) + "\n"
                     for name in sorted(set(values) - seen))
+    # HCL aligns contiguous entries; comments split the alignment groups.
+    def align_group(group):
+        lines = [line.split("=", 1) for line in group.group().splitlines()]
+        width = max(len(key.strip()) for key, _ in lines)
+        return "".join("    " + key.strip().ljust(width) + " = " + value.lstrip() + "\n"
+                       for key, value in lines)
+
+    body = re.sub(r'(?m)(?:^    "[^"\n]+"[ \t]*=[^\n]*\n)+', align_group, body)
     return text[:match.start(2)] + body + text[match.end(2):]
 
 

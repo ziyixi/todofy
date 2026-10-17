@@ -45,3 +45,21 @@ credentials were retained. No task schema or real task data has been imported in
 5. Verify normal task, planning, timing and mail behavior without rewriting original Todoist data.
 
 No source fallback or production cutover is implied by the new service's presence in the registry.
+
+## First branch CI
+
+[Run 39070976415](https://github.com/ziyixi/todofy/actions/runs/39070976415) checked `4895d4a5`.
+Tasks and the shared UI consumers passed their own checks. The full gate failed on missing fixture/deployment
+enrollment, two outdated proto self-test edit anchors, HCL alignment, native test dependency installation and
+FlowDay's first native decode CPU. These have local fixes and need a new full CI run. The CPU test keeps the
+same 100-task workload and limit; the existing startup warm-up now includes the native read codecs.
+
+Further native regressions found and fixed an incorrectly placed budget bypass, stale Todoist auth/throttle
+state affecting native operations, and loss of the local date for late-evening tasks. The final Python unit
+run passed 1,994 cases. Root guards passed 453 with one skip; proto self-tests report zero unexpected verdicts.
+
+Read-only real-source preparation validated full-project and archived-section response shapes. A full-span
+Activity request returned 400; an otherwise identical seven-day request returned a paged result. Export now
+uses bounded windows and includes separately archived-section tasks. No real source task was changed. A
+complete private snapshot and its import validation are still pending; successful endpoint reads do not
+establish migration completion.

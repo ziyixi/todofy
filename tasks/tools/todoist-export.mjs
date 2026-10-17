@@ -59,13 +59,26 @@ export async function readPages(read, path, parameters = {}, collection = 'resul
   return items;
 }
 
-export function completionWindows(since, until) {
+export async function readArchivedSections(read, projectId) {
+  const query = new URLSearchParams({ project_id: projectId, limit: '200' });
+  const page = await read(`/sections/archived?${query}`);
+  if (!page || !Array.isArray(page.sections) || typeof page.has_more !== 'boolean' ||
+    !Number.isSafeInteger(page.total) || page.total < 0 ||
+    page.sections.some((row) => !row || typeof row.id !== 'string' || !row.id || row.project_id !== projectId))
+    throw new ExportError('TODOIST_ARCHIVED_SECTION_PAGE_INVALID');
+  if (page.has_more) throw new ExportError('TODOIST_ARCHIVED_SECTION_PAGINATION_UNVERIFIED');
+  if (page.sections.length !== page.total) throw new ExportError('TODOIST_ARCHIVED_SECTION_PAGE_INCOMPLETE');
+  return page.sections;
+}
+
+export function completionWindows(since, until, days = 28) {
   let start = Date.parse(since);
   const end = Date.parse(until);
-  if (!Number.isFinite(start) || !Number.isFinite(end) || start >= end) throw new ExportError('HISTORY_RANGE_INVALID');
+  if (!Number.isFinite(start) || !Number.isFinite(end) || start >= end || !Number.isInteger(days) || days < 1)
+    throw new ExportError('HISTORY_RANGE_INVALID');
   const windows = [];
   while (start < end) {
-    const stop = Math.min(start + 28 * DAY, end);
+    const stop = Math.min(start + days * DAY, end);
     windows.push({ since: new Date(start).toISOString(), until: new Date(stop).toISOString() });
     start = stop;
   }
@@ -92,12 +105,12 @@ function projectContents(value, projectId) {
   return value;
 }
 
-function completionEventId(event, since, until) {
+function completionEventId(event) {
   const time = Date.parse(event.event_date);
   if (
     event.object_type !== 'item' || event.event_type !== 'completed' ||
     typeof event.object_id !== 'string' || !event.object_id ||
-    !Number.isFinite(time) || time < Date.parse(since) || time >= Date.parse(until) ||
+    !Number.isFinite(time) ||
     (event.id !== null && event.id !== undefined && typeof event.id !== 'string' && !Number.isSafeInteger(event.id))
   ) throw new ExportError('TODOIST_COMPLETION_EVENT_INVALID');
   return event.id === null || event.id === undefined
@@ -126,19 +139,31 @@ export async function exportSnapshot(read, since, now = new Date()) {
     projects.push(full.project);
     tasks.push(...full.tasks);
     sections.push(...full.sections);
-    sections.push(...(await readPages(read, '/sections/archived', { project_id: project.id })));
+    const archivedSections = await readArchivedSections(read, project.id);
+    sections.push(...archivedSections);
+    for (const section of archivedSections) {
+      const archivedTasks = await readPages(read, '/tasks', { section_id: section.id });
+      if (archivedTasks.some((task) => typeof task.id !== 'string' || !task.id || task.project_id !== project.id))
+        throw new ExportError('TODOIST_ARCHIVED_SECTION_TASK_INVALID');
+      tasks.push(...archivedTasks);
+    }
   }
   const completed = [];
   for (const range of completionWindows(since, now.toISOString())) {
     completed.push(...(await readPages(read, '/tasks/completed/by_completion_date', range, 'items')));
   }
-  const completionEvents = await readPages(async (path) => {
-    const page = await read(path);
-    if (!page || !Object.hasOwn(page, 'next_cursor')) throw new ExportError('TODOIST_ACTIVITY_PAGE_INCOMPLETE');
-    return page;
-  }, '/activities', {
-    object_type: 'item', event_type: 'completed', date_from: new Date(since).toISOString(), date_to: now.toISOString(),
-  });
+  const completionEvents = [];
+  const activityStart = new Date(Math.floor(Date.parse(since) / DAY) * DAY).toISOString();
+  const activityEnd = new Date(Math.ceil(now.getTime() / DAY) * DAY).toISOString();
+  for (const range of completionWindows(activityStart, activityEnd, 7)) {
+    completionEvents.push(...await readPages(async (path) => {
+      const page = await read(path);
+      if (!page || !Object.hasOwn(page, 'next_cursor')) throw new ExportError('TODOIST_ACTIVITY_PAGE_INCOMPLETE');
+      return page;
+    }, '/activities', {
+      object_type: 'item', event_type: 'completed', date_from: range.since.slice(0, 10), date_to: range.until.slice(0, 10),
+    }));
+  }
   const fullHistory = snapshot.user?.is_premium === true ||
     ['current_personal_plan', 'legacy_personal_plan', 'teams_business_member'].includes(snapshot.user?.premium_status);
   return {
@@ -157,7 +182,9 @@ export async function exportSnapshot(read, since, now = new Date()) {
       if (!item.id || !item.completed_at) throw new ExportError('TODOIST_COMPLETION_IDENTITY_MISSING');
       return `${item.id}:${item.completed_at}`;
     }),
-    completion_events: uniqueObjects(completionEvents, (event) => completionEventId(event, since, now.toISOString())),
+    completion_events: uniqueObjects(completionEvents, completionEventId).filter((event) =>
+      Date.parse(event.event_date) >= Date.parse(since) && Date.parse(event.event_date) < now.getTime(),
+    ),
     archived_contents_verified: true,
     history_access: fullHistory ? 'full' : 'limited_or_unknown',
     recurring_history_verified: fullHistory || Date.parse(since) >= now.getTime() - 7 * DAY,

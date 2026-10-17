@@ -5,7 +5,7 @@
  * - each list's D1 query as the store builds it (drizzle's query builder), and drizzle's mapping of D1's raw rows to
  *   records, through a stub binding that is never called (`prepare()` only; mapAllResult maps rows given here);
  * - the records-to-messages mapping of ./api.ts and the wire JSON writer (proto/ts/wire-json.ts) of every list's
- *   answer.
+ *   answer, and the generated Catalog/ListChanges readers used by native Tasks sync.
  *
  * Without it an isolate's first list answer runs that code interpreted, row by row: a page of 200 tasks cost about
  * 3 ms more CPU than a warm one in drizzle's mapping alone, and as much again in the messages and the writer
@@ -22,7 +22,8 @@ import {
   QueryAnalyticsResponseSchema,
 } from '@ziyixi/proto/flowday/ui/v1/flowday_ui_service_pb';
 import { create } from '@ziyixi/proto/protobuf';
-import { toWire } from '@ziyixi/proto/wire-json';
+import { fromWire, toWire } from '@ziyixi/proto/wire-json';
+import { CatalogSchema, ListChangesResponseSchema } from '@ziyixi/proto/tasks/ui/v1/tasks_ui_service_pb';
 import { flowMessage, noteMessage, taskMessage, timeEntryMessage } from './api.ts';
 import type { Db } from './db.ts';
 import type { FlowTaskRow, NoteRecord, TaskRecord, TimeEntryRecord } from './model.ts';
@@ -42,6 +43,22 @@ const BATCH = 5;
 export const WARMUP_ROUNDS = 100;
 
 const DAY = '2026-01-01';
+const NATIVE_CATALOG = {
+  projects: [{ id: 'warmup-project', name: 'projects/warmup-project', title: 'Warm-up project', color: '#808080' }],
+  labels: [{ id: 'warmup-label', name: 'labels/warmup-label', title: 'warm' }],
+};
+const NATIVE_CHANGES = {
+  changes: Array.from({ length: BATCH }, (_, index) => ({
+    cursor: String(index + 1), name: 'tasks/warmup-task',
+    task: {
+      id: 'warmup-task', name: 'tasks/warmup-task', title: 'Warm-up task',
+      description_preview: 'Warm-up description', project_id: 'warmup-project',
+      label_ids: ['warmup-label'], priority: 2, duration_minutes: 30,
+      due_date: DAY, create_time: '2026-01-01T00:00:00Z',
+    },
+  })),
+  next_page_token: String(BATCH),
+};
 
 /** A task row as D1 stores it (every column set), keyed by drizzle's column names. */
 const TASK_ROW: typeof tasksTable.$inferSelect = {
@@ -158,5 +175,10 @@ function writeAnswers(rows: WarmedRows): void {
 /** Runs `rounds` rounds of every list's queries and answers. */
 export function warmUp(rounds: number = WARMUP_ROUNDS): void {
   const db = stubDb();
-  for (let round = 0; round < rounds; round += 1) writeAnswers(warmQueries(db));
+  for (let round = 0; round < rounds; round += 1) {
+    writeAnswers(warmQueries(db));
+    // Native sync reads these generated codecs; keep their cold compilation outside request CPU too.
+    fromWire(CatalogSchema, NATIVE_CATALOG);
+    fromWire(ListChangesResponseSchema, NATIVE_CHANGES);
+  }
 }
