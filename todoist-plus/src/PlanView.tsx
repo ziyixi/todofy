@@ -60,7 +60,7 @@ export interface PlanViewProps {
 }
 /**
  * Where a jump lands: a lane of the Review board, or else the first card there in that state
- * (its own stage lane keeps it); Week's runway line, or its Add steps input.
+ * (its own stage lane keeps it); Week's Add steps input.
  */
 const JUMPS = {
   start: [
@@ -71,7 +71,6 @@ const JUMPS = {
     '.review-lane[data-lane="waiting"]',
     '.review-draggable[data-state="waiting"] .planning-outcome-card',
   ],
-  runway: [".planning-runway"],
   addStep: [".planning-add-step-input"],
 };
 /** The remembered view as this week shows it: another week's review starts closed and empty. */
@@ -102,8 +101,9 @@ export function PlanView(props: PlanViewProps) {
   const [weekArea, setWeekArea] = useState<Area | "all">("all");
   // Week's Committed folded to its heading line.
   const [folded, setFolded] = useState(seeded.committedFolded);
-  // Week's Add steps input is open (not remembered).
-  const [addingStep, setAddingStep] = useState(false);
+  // The commitment whose Add steps input is open (not remembered): when the selection changes
+  // without the owner, say a re-read shows that commitment no longer committed, none is open.
+  const [addingStep, setAddingStep] = useState<string>();
   // A jump focuses its target and scrolls it into view once.
   const [jump, setJump] = useState<keyof typeof JUMPS>();
   const section = useRef<HTMLElement>(null);
@@ -115,11 +115,11 @@ export function PlanView(props: PlanViewProps) {
   /** Another tab, or Week at another commitment, closes the Add steps input. */
   function showMode(next: "review" | "week") {
     setMode(next);
-    setAddingStep(false);
+    setAddingStep(undefined);
   }
   function selectCommitment(id: string) {
     setCommitment(id);
-    setAddingStep(false);
+    setAddingStep(undefined);
   }
   /** Review with every area shown, so the lane a jump looks for is on the board. */
   function showLane(lane: "start" | "waiting") {
@@ -136,7 +136,7 @@ export function PlanView(props: PlanViewProps) {
     setWeekArea("all");
     setCommitment(id);
     setFolded(false);
-    setAddingStep(true);
+    setAddingStep(id);
     setJump("addStep");
   }
   const { showStart, onStartShown, onReviewShown } = props;

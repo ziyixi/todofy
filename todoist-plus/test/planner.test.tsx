@@ -300,6 +300,9 @@ it("remembers Week, its commitment and fold, and this week's review when Plan mo
   );
   // A mount alone stores nothing.
   expect(store.patches).toEqual([]);
+  const areas = () =>
+    within(screen.getByRole("tablist", { name: "Outcome area" }));
+  fireEvent.click(areas().getByRole("tab", { name: "Work" }));
   openWeek();
   fireEvent.click(
     screen.getByRole("button", {
@@ -312,6 +315,7 @@ it("remembers Week, its commitment and fold, and this week's review when Plan mo
   const review = { week: "2026-10-12", open: true, lines: [], kept: [] };
   // Each change sends only its own field.
   expect(store.patches).toEqual([
+    { area: "work" },
     { tab: "week" },
     { commitment: "research" },
     { committedFolded: true },
@@ -323,7 +327,7 @@ it("remembers Week, its commitment and fold, and this week's review when Plan mo
   render(
     <PlanView {...data} planView={store.view} onPlanView={store.onPlanView} />,
   );
-  expect(store.patches).toHaveLength(5);
+  expect(store.patches).toHaveLength(6);
   expect(
     screen.getByRole("tab", { name: "Week" }).getAttribute("aria-selected"),
   ).toBe("true");
@@ -340,6 +344,50 @@ it("remembers Week, its commitment and fold, and this week's review when Plan mo
   expect(
     screen.getByRole("checkbox", { name: "Reviewed: Waiting" }),
   ).toHaveProperty("checked", true);
+  // Review's area filter is back as it was left.
+  fireEvent.click(screen.getByRole("tab", { name: "Review" }));
+  expect(
+    areas().getByRole("tab", { name: "Work" }).getAttribute("aria-selected"),
+  ).toBe("true");
+});
+
+it("closes Add steps when the selected commitment changes on its own, and takes no focus", async () => {
+  const data = await props();
+  const { rerender } = render(<PlanView {...data} />);
+  openWeek();
+  fireEvent.click(
+    screen.getByRole("button", {
+      name: "Add steps to “Ship the small website refresh”",
+    }),
+  );
+  fireEvent.change(screen.getByRole("textbox", { name: "New step" }), {
+    target: { value: "Synthetic draft" },
+  });
+  // Left with a draft, it stays open.
+  const tab = screen.getByRole("tab", { name: "Week" });
+  tab.focus();
+  expect(screen.getByRole("textbox", { name: "New step" })).toBeTruthy();
+  // A read shows the commitment re-staged elsewhere: Week selects the first one left.
+  rerender(
+    <PlanView
+      {...data}
+      plan={{
+        ...data.plan,
+        tasks: data.plan.tasks.map((task) =>
+          task.id === "release" ? { ...task, stage: "monthly" } : task,
+        ),
+      }}
+    />,
+  );
+  const tray = screen.getByRole("region", { name: /^Next steps: /u });
+  expect(tray.getAttribute("aria-label")).not.toBe(
+    "Next steps: Ship the small website refresh",
+  );
+  expect(within(tray).queryByRole("textbox")).toBeNull();
+  expect(
+    within(tray).getByRole("button", { name: /^Add steps to “/u }),
+  ).toBeTruthy();
+  expect(document.activeElement).toBe(tab);
 });
 
 it("falls back from a remembered view that no longer fits, writing nothing for it", async () => {

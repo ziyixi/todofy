@@ -67,11 +67,11 @@ function gate() {
   const passed = new Promise<void>((resolve) => (open = resolve));
   return { passed, open };
 }
-/** The waiting step cards: each title, and what its mark says. */
+/** The waiting step cards: each title, and what its mark and its second line say. */
 const pendingCards = () =>
   [...document.querySelectorAll(".planning-tray-step.is-pending")].map(
     (card) =>
-      `${card.textContent} (${card.querySelector(".plus-pending-mark")?.getAttribute("aria-label")})`,
+      `${card.querySelector(".planning-step-title > span")?.textContent} (${card.querySelector(".plus-pending-mark")?.getAttribute("aria-label")}; ${card.querySelector(".planning-step-title > small")?.textContent})`,
   );
 const statusLine = () =>
   document.querySelector(".planning-add-step-cell [role=status]")!;
@@ -124,7 +124,9 @@ it("adds a step at Enter, clears at once for the next, and shows it waiting unti
   expect(input.value).toBe("");
   expect(document.activeElement).toBe(input);
   expect(input.readOnly).toBe(false);
-  expect(pendingCards()).toEqual(["Draft the release note (Updating…)"]);
+  expect(pendingCards()).toEqual([
+    "Draft the release note (Updating…; Updating…)",
+  ]);
   expect(
     document
       .querySelector(".planning-tray-step.is-pending")!
@@ -147,7 +149,9 @@ it("adds a step at Enter, clears at once for the next, and shows it waiting unti
     expect(statusLine().textContent).toBe("Step added: Draft the release note"),
   );
   // Saved, but no read lists it yet: it still waits.
-  expect(pendingCards()).toEqual(["Draft the release note (Updating…)"]);
+  expect(pendingCards()).toEqual([
+    "Draft the release note (Updating…; Updating…)",
+  ]);
   read.open();
   await waitFor(() => expect(pendingCards()).toEqual([]));
   expect(

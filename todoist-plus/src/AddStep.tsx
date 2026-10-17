@@ -155,7 +155,12 @@ export function AddStep({
           aria-busy="true"
         >
           <PendingMark language={language} />
-          <span className="planning-step-title">{step.title}</span>
+          {/* Two lines like a step card's, so the swap to it keeps the row's height; the mark
+              already says the second one. */}
+          <span className="planning-step-title">
+            <span>{step.title}</span>
+            <small aria-hidden="true">{text.updating}</small>
+          </span>
         </article>
       ))}
       <div className="planning-add-step-cell">

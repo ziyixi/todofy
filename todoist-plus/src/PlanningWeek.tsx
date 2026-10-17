@@ -71,9 +71,12 @@ interface Props {
   /** Committed folded to its heading line; Next steps stays. */
   folded: boolean;
   onFold: (folded: boolean) => void;
-  /** Next steps' Add steps input is open, which the weekly review's Plan steps also opens. */
-  addingStep: boolean;
-  onAddingStep: (open: boolean) => void;
+  /**
+   * The commitment whose Add steps input is open, which the weekly review's Plan steps also opens;
+   * any other selected commitment shows it closed.
+   */
+  addingStep?: string;
+  onAddingStep: (id: string | undefined) => void;
 }
 export function PlanningWeek(props: Props) {
   const {
@@ -364,8 +367,10 @@ export function PlanningWeek(props: Props) {
               <AddStep
                 key={selected.id}
                 outcome={selected}
-                open={addingStep}
-                onOpenChange={onAddingStep}
+                open={addingStep === selected.id}
+                onOpenChange={(open) =>
+                  onAddingStep(open ? selected.id : undefined)
+                }
                 busy={busy}
                 run={run}
                 actions={actions}

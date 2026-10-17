@@ -677,19 +677,26 @@ test("Add steps adds two sub-tasks one after another, with the input kept open a
     await expect(input).toHaveValue("");
     await expect(input).toBeFocused();
     const waiting = tray.locator(".planning-tray-step.is-pending");
-    await expect(waiting).toHaveText("Synthetic third step");
+    await expect(waiting.locator(".planning-step-title > span")).toHaveText(
+      "Synthetic third step",
+    );
+    // Two lines like a step card's, so the card that takes its place keeps the row's height,
+    // also when it starts a row of its own (in a shared row the grid stretches it anyway).
+    const height = async (card: typeof waiting) =>
+      (await card.locator(".planning-step-title").boundingBox())!.height;
+    const waitingHeight = await height(waiting);
     // Typing goes on while the first step saves; Enter waits for it.
     await input.pressSequentially("Synthetic fourth step");
     await expect(input).toHaveAttribute("aria-disabled", "true");
     await input.press("Enter");
     await expect(input).toHaveValue("Synthetic fourth step");
     await controlWrites(worker, { hold: false, release: true });
-    // The re-read lists the new sub-task: its card takes the waiting card's place.
-    await expect(
-      tray.locator(".planning-tray-step:not(.is-pending)", {
-        hasText: "Synthetic third step",
-      }),
-    ).toBeVisible();
+    // The re-read lists the new sub-task: its card takes the waiting card's place, as tall.
+    const third = tray.locator(".planning-tray-step:not(.is-pending)", {
+      hasText: "Synthetic third step",
+    });
+    await expect(third).toBeVisible();
+    expect(await height(third)).toBe(waitingHeight);
     await expect(waiting).toHaveCount(0);
     await expect(input).not.toHaveAttribute("aria-disabled");
     await input.press("Enter");
