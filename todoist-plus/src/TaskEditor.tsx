@@ -133,7 +133,11 @@ export function TaskEditor({
 
   async function addSteps() {
     if (!drafts.length) return;
-    if (await run(() => actions.createSteps(task, drafts, requestId.current))) {
+    // Only App's re-read shows the new steps: the write confirms nothing to merge.
+    const saved = await run(async () => {
+      await actions.createSteps(task, drafts, requestId.current);
+    });
+    if (saved) {
       setLines("");
       requestId.current = crypto.randomUUID();
     }

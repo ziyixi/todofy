@@ -389,19 +389,16 @@ export function createPrototype(
       return metadata as PlanMetadata;
     },
     async createSteps(item, drafts) {
-      plan = {
-        ...plan,
-        tasks: [
-          ...plan.tasks,
-          ...drafts.map((draft) =>
-            task(crypto.randomUUID(), draft.title, {
-              parentId: item.id,
-              area: item.area,
-              estimatedMinutes: draft.estimatedMinutes,
-            }),
-          ),
-        ],
-      };
+      const created = drafts.map((draft) =>
+        task(crypto.randomUUID(), draft.title, {
+          parentId: item.id,
+          projectId: item.projectId,
+          area: item.area,
+          estimatedMinutes: draft.estimatedMinutes,
+        }),
+      );
+      plan = { ...plan, tasks: [...plan.tasks, ...created] };
+      return created.map((step) => step.id);
     },
     async updateLead(item, deadline, leadDays) {
       plan = {

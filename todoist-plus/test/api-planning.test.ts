@@ -233,3 +233,81 @@ it("reads the FULL plan for the sidebar, which names the mail project to hide", 
     ["/api/plus/v1/plan:read", ""],
   ]);
 });
+
+it("answers the new steps' IDs, and after one FlowDay sync knows every task the latest read listed", async () => {
+  const requests: { path: string; body: Record<string, unknown> }[] = [];
+  // Todoist lists two new steps; FlowDay has neither yet and throttles a second manual sync.
+  let listed = ["outcome", "step-1", "step-2"];
+  let syncs = 0;
+  const api = createApi(
+    { apiOrigin: "https://api.example.test", token: "synthetic" },
+    async (input, init) => {
+      const path = new URL(String(input)).pathname;
+      const body = init?.body
+        ? (JSON.parse(String(init.body)) as Record<string, unknown>)
+        : {};
+      requests.push({ path, body });
+      const reply = (value: unknown) => Response.json(value);
+      if (path === "/api/plus/v1/plan:read")
+        return reply({
+          plan: {
+            week_start: "2026-10-12",
+            today: "2026-10-13",
+            timezone: "UTC",
+            enabled: true,
+          },
+        });
+      if (path === "/api/plus/v1/tasks:appendTaskSteps")
+        return reply({ task_ids: ["step-1"] });
+      if (path === "/api/plus/v1/tasks")
+        return reply({
+          planning_tasks: listed.map((id) => ({
+            id,
+            title: `Synthetic ${id}`,
+          })),
+        });
+      if (path.endsWith("/tasks:sync"))
+        return reply({ state: syncs++ ? "throttled" : "synced" });
+      if (path.endsWith("/timerSession"))
+        return reply({ name: "timerSession", etag: "0" });
+      if (path.endsWith("/api/v1/tasks"))
+        return reply({
+          tasks: [{ name: "tasks/outcome", todoist_id: "outcome", title: "x" }],
+        });
+      const day = path.match(/\/flows\/(\d{4}-\d{2}-\d{2})/u)?.[1];
+      if (!day) throw new Error(`Unexpected request: ${path}`);
+      return reply({
+        name: `flows/${day}`,
+        task_ids: (body.task_ids as string[] | undefined) ?? [],
+      });
+    },
+  );
+  const outcome = (await api.load()).plan.tasks[0]!;
+  expect(
+    await api.createSteps(
+      outcome,
+      [{ title: "Synthetic step 1" }],
+      "11111111-1111-4111-8111-111111111111",
+    ),
+  ).toEqual(["step-1"]);
+  expect(requests.at(-1)).toEqual({
+    path: "/api/plus/v1/tasks:appendTaskSteps",
+    body: {
+      parent_id: "outcome",
+      request_id: "11111111-1111-4111-8111-111111111111",
+      steps: [{ title: "Synthetic step 1" }],
+    },
+  });
+  await api.load();
+  // The first new step syncs FlowDay, which imports the second one in the same sync.
+  await api.addToDay("step-1", "2026-10-13");
+  await api.addToDay("step-2", "2026-10-14");
+  expect(syncs).toBe(1);
+  // A step that only a later read lists may be newer than that sync: it asks again.
+  listed = [...listed, "step-3"];
+  await api.load();
+  await expect(api.addToDay("step-3", "2026-10-15")).rejects.toThrow(
+    "FlowDay just synced",
+  );
+  expect(syncs).toBe(2);
+});

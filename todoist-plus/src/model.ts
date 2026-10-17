@@ -223,11 +223,12 @@ export interface PlusActions {
     labels: { role: string; id: string; label: string }[],
     etag: string,
   ): Promise<PlanMetadata>;
+  /** Appends sub-tasks under `task`; answers their Todoist IDs, in the entered order. */
   createSteps(
     task: PlanningTask,
     steps: StepDraft[],
     requestId: string,
-  ): Promise<void>;
+  ): Promise<string[]>;
   updateLead(
     task: PlanningTask,
     deadline: string,

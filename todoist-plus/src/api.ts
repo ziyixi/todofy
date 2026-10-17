@@ -259,6 +259,9 @@ export function createApi(
   // Tasks FlowDay already has, so queue and estimate writes skip its manual Todoist sync,
   // which FlowDay throttles to one every 30 seconds.
   let knownFlowTasks = new Set<string>();
+  // Every task the latest complete planning read listed: Todoist had them all, so FlowDay's next
+  // manual sync imports them too, such as a second step added just before it.
+  let plannedIds: string[] = [];
   const restored = (knownStore?.read() ?? Promise.resolve([]))
     .then((ids) => {
       for (const id of ids) knownFlowTasks.add(id);
@@ -286,12 +289,14 @@ export function createApi(
       )
     )
       return;
+    // Read before the sync starts: a task listed only by a later read may be newer than it.
+    const planned = plannedIds;
     for (let page = 0; page < 10; page++) {
       const result = await flowday.syncTasks({
         mode: SyncTasksRequest_Mode.MANUAL,
       });
       if (result.state === SyncTasksResponse_State.SYNCED) {
-        await remember(ids);
+        await remember([...ids, ...planned]);
         return;
       }
       if (result.state === SyncTasksResponse_State.THROTTLED)
@@ -314,7 +319,10 @@ export function createApi(
       const result = await plus.listPlanningTasks({ pageSize: 200, pageToken });
       tasks.push(...result.planningTasks.map(planningTask));
       pageToken = result.nextPageToken;
-      if (!pageToken) return tasks;
+      if (!pageToken) {
+        plannedIds = tasks.map((task) => task.id);
+        return tasks;
+      }
     }
     throw new Error("Task list is incomplete. Counts have not been shown.");
   }
@@ -449,7 +457,12 @@ export function createApi(
       return planMetadata(result.plan);
     },
     async createSteps(task, steps, requestId) {
-      await plus.appendTaskSteps({ parentId: task.id, steps, requestId });
+      const result = await plus.appendTaskSteps({
+        parentId: task.id,
+        steps,
+        requestId,
+      });
+      return result.taskIds;
     },
     async updateLead(task, deadline, leadDays) {
       const result = await plus.setTaskLead({

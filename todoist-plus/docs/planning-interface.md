@@ -274,7 +274,7 @@ Plus 隐藏原生界面的前提是替代界面已挂载，失败路径都恢复
 - 完成任务后仍重新读取，不在本地删除：Todoist 关闭循环任务时会推进到下一次。读取完成前该步骤等待，不能再次完成。
 - 离开 Plan／Focus 时，上次确认的数据只留在当前页面内存中；返回时立即显示，再后台读取。它可能早于一次完成或跨过午夜，所以本次读取完成前不开放写入；这次读取失败时只显示错误，并丢弃这份内存数据。离开时显示本周的，返回后跟随服务端的当前周（含周一轮换）。
 - 原生页面只调用 ReadPlan。background 把 `{configured, hiddenFilterIds, labelIds}` 只按 ID 存入 storage.local，不含任务内容；下次打开 Todoist 时侧栏立即按缓存整理。连接缺失或失效时（包括网关对未知或已撤销口令的 401）清除缓存并提示打开连接设置；断开或换连接后仍在进行的请求不再写回缓存或 FlowDay ID。原生任务详情使用一分钟内读取、且包含该任务的内存数据时只调用 ReadPlan；更旧的或缺少该任务的先显示，完整读取完成前不开放写入。保存失败（例如任务已在 Todoist 中修改）后完整重读，不再复用旧数据。
-- FlowDay 手动同步成功后记住请求的任务 ID，并只把 ID 镜像到 chrome.storage.session；后台 worker 被 Chrome 停止后仍可跳过重复同步，避免 30 秒节流内失败。
+- FlowDay 手动同步成功后记住请求的任务 ID，以及同步开始前最近一次完整读取列出的全部任务（Todoist 当时已有它们，这次同步一并导入；所以接连添加的两个步骤先后拖进日期，只同步一次），并只把 ID 镜像到 chrome.storage.session；后台 worker 被 Chrome 停止后仍可跳过重复同步，避免 30 秒节流内失败。
 
 ## 数据与接口边界
 
@@ -288,7 +288,7 @@ Plus 隐藏原生界面的前提是替代界面已挂载，失败路径都恢复
 | 标为／取消进行中     | SetTaskPlan 的 `active`：一次 `item_update`，只增删字面标签 `active`，从不创建它                 | 当前 PlanningTask，合并单任务；账户无该标签时拒绝     |
 | 保存、清空、沿用目标 | SetWeeklyBet：`{week_start, area, text, etag}`，只写 D1 `plan_notes`，0 次 Todoist               | 返回的 WeeklyBet 直接合并；冲突时重读一次 ReadPlan    |
 | 保存列标签           | UpdatePlanLabels                                                                                 | 带 etag 的精确标签映射，任务标签不改；后台重读投影    |
-| 创建小步骤           | AppendTaskSteps                                                                                  | 原 Todoist 父 ID 下的新步骤，后台再读取               |
+| 创建小步骤           | AppendTaskSteps                                                                                  | 原父任务下新步骤的 ID（按输入顺序），后台再读取       |
 | 同日队列             | UpdateFlow                                                                                       | 确认后的目标 FlowDayPlan，直接合并                    |
 | 移出日期／加入今天   | GetFlow 读取当前队列，再 UpdateFlow 只增删一项                                                   | 确认后的该日 FlowDayPlan，直接合并                    |
 | 跨日队列             | RolloverFlow，再 UpdateFlow 排列插入位置                                                         | 确认后的源／目标 FlowDayPlan，直接合并                |
