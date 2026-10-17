@@ -407,7 +407,9 @@ test("a long prerequisite title ends in an ellipsis inside its marks, and its pa
           language,
         );
         await expect(page.locator(".planning-outcome-quoted")).toHaveCount(3);
-        expect(await measure(), `${width} ${language}`).toEqual(
+        // A language switch mounts the board again (its drag instructions follow the language), so
+        // the measure waits for the new cards rather than reading the old ones on their way out.
+        await expect.poll(measure, { message: `${width} ${language}` }).toEqual(
           [
             ["年度活动方案", long],
             ["整理书架", "发邀请函"],
