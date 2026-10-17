@@ -72,14 +72,20 @@ planning protocol 6).
 
 Interface: [planning-interface.md](todoist-plus/docs/planning-interface.md); backend:
 [reordering](todofy/docs/todoist-plus.md#reordering); local evidence:
-[owner fixes](docs/todoist-plus-verification.md#owner-fixes-d1-d8-local-checks-october-17) and
-[their review fixes](docs/todoist-plus-verification.md#review-fixes-october-17).
+[owner fixes](docs/todoist-plus-verification.md#owner-fixes-d1-d8-local-checks-october-17),
+[their review fixes](docs/todoist-plus-verification.md#review-fixes-october-17) and
+[the final local verification](docs/todoist-plus-verification.md#final-local-verification-october-17).
 
-Next: push the branch, wait for the complete branch CI (it selects Todofy, proto, contracts, the extension and
-every proto user; locally only Todofy, proto, contracts and the extension ran), then promote the same green SHA.
-The release deploys Todofy first (no migration), then publishes the extension. Between the two, and until the
-owner reloads, an old extension's filing already moves mail to the Inbox and its categories dialog still saves;
-Todofy stores the Inbox that dialog sends as the destination, so its rows offer the categories.
+Every job `ci_changes.py` selects for the branch passed locally on the final tree, from the workflow's own
+steps: Todofy (static, all 592 runtime cases, completeness), Proto, Contracts, the extension and every app that
+uses the IDL (Mail Hero, Home, FlowDay, links, watch, mailsort, recall, brief, Fleet, Platform, the website).
+Only CI runs Platform's Linux `kubectl`, AppArmor compile, runtime image and isolated k3s, and Mail Hero's GPG
+round trip.
+
+Next: push the branch, wait for the complete branch CI, then promote the same green SHA. The release deploys
+Todofy first (no migration), then publishes the extension. Between the two, and until the owner reloads, an old
+extension's filing already moves mail to the Inbox and its categories dialog still saves; Todofy stores the
+Inbox that dialog sends as the destination, so its rows offer the categories.
 
 Owner steps after that release, replacing the ones above: reload Todoist Plus and refresh Todoist (planning
 protocol 6; a page left open asks for the reload); mail categories are optional and filing always moves to the

@@ -1154,3 +1154,52 @@ removed.
 Not verified: a real screen reader's reading of the new descriptions (Chrome's tree only); the touch layout of
 the Mailbox (`hover: none` could not be emulated here; its rules are those of before, with the buttons static
 again); and everything listed as unverified above.
+
+### Final local verification (October 17)
+
+The final tree (`0029a2d3` and this record; no code changed in this pass) went through every job that
+`ci_changes.py` selects for a push of the branch, each run locally from the workflow's own steps with the local
+composite actions expanded. External actions (checkout, setup, caches, artifact upload and download) did not
+run. Synthetic data only; nothing pushed, deployed or published.
+
+- Selection (`EVENT_NAME=push`, the branch ref, base the merge base `e2ff3da1`, 91 files): Todofy (static, the
+  three runtime shards and Todofy checks), Proto, Contracts, the extension and every app that uses the IDL:
+  Mail Hero, Home, FlowDay, links, watch, mailsort, recall, brief, Fleet, Platform and the website. Not
+  Newsletter, Shared packages or Infra. On `main` the same diff deploys Todofy and publishes the extension
+  only.
+- Proto, as the job runs it for the first time on this branch: format and lint, api-linter (no problems in 69
+  files), no breaking change against `e2ff3da1` (retired elements, buf FILE, the wire profile and HTTP rules),
+  the rule self-test, deterministic generation (151 files from 71 `.proto`), the schemas, 495 TypeScript and 113
+  Python codec tests.
+- Todofy: static (ruff, 2,121 host tests with one existing skip, the gateway's lint, types, 136 unit cases and
+  CPU suite, the owner UI's 93 tests and build at 179.1 KiB gzip, both production dry-runs, the gateway at 84.4
+  KiB gzip of 86.0 KiB); all 592 runtime cases (590 in four processes, then `test_alarm.py` alone), each exactly
+  once by `pytest_completeness.py` over one local shard; the shard planner splits the 48 files 14, 15 and 18
+  (with `test_alarm.py`) over the three CI shards, each file once.
+- Contracts: Mail Hero 38, Todofy 882, then 26, 69, 71, 6, 6 and 54 cases.
+- The extension (`plus.sh`, the steps of `check-todoist-plus`): lint, types, 301 unit cases in 41 files, the
+  build and 60 built-MV3 Chromium cases.
+- The IDL's other users, each job passing with its bundle inside its budget: Mail Hero (21 deploy and 40 backup
+  tests, 204 Worker cases with workerd bindings, 11 CPU bounds, 81 UI tests, 247.0 KiB gzip); Home (17, 267
+  Worker, 97 runtime, 158 UI); FlowDay (11, 38 import tool, 21 Worker, 127 runtime with D1, 119 UI); links (14,
+  34, 58 runtime, 29 UI); watch (14, 179, 101 runtime, 22 UI); mailsort (26, 122, 88 runtime, 97 UI, the smoke
+  run); recall (18, 158, 107 runtime, 146 UI, the smoke run, 166 extension tests and 16 WebKit cases on the
+  Orion build); brief (20, 107, 41 runtime, 47 UI); Fleet (12, 64, 9 runtime, 12 UI); Platform (ruff, format,
+  240 tests); the website (298 unit tests, the static export with 22 and 30 Playwright cases for the empty and
+  fixture content, 2 deployment cases, both Worker dry-runs).
+
+Not run here, left to branch CI: Platform's pinned Linux `kubectl`, the AppArmor policy compile, the runtime
+image build and the isolated k3s server-side apply (no Docker daemon and no AppArmor on macOS; its k3s
+acceptance test skipped); Mail Hero's GPG round trip (no GPG; one backup test skipped). The website's export
+tests ran on port 4183 instead of 4173, which another local process held; nothing else in the job changed.
+
+Screenshots of each changed view, from the built extension over the browser suite's synthetic fixtures in
+Todoist's light Kale theme, kept out of the repository: Review with the Parked lane (three cards and "2
+more"), a Committed card dragged over another with the insertion line and, after the drop, the new order with
+focus on the moved card; Week with Committed expanded and folded to its heading line (Next steps and the Quick
+tasks line move up); Next steps with a saved new step, a waiting step and Add steps still open with the next
+title typed, above the Quick tasks line; a Mailbox row on hover with two categories and Inbox at the right edge;
+the weekly review still open with its tick after Open, Mail and Back; a native Today page whose favourites keep
+only another project (the mail project's, Quick/Ops and Parked hidden; My projects keeps the mail project).
+
+Not verified: branch CI, the release, the installed extension and everything listed as unverified above.
