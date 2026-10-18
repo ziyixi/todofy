@@ -11,7 +11,8 @@ ordinary task editor. Its release and acceptance evidence is tracked in [refinem
 
 ## Interface
 
-- Desktop Inbox, Today, Upcoming, search, nested projects, sections, labels and saved filters.
+- Desktop Inbox, Today, Upcoming, search, nested projects, sections, labels and saved filters. In a filter,
+  `#Inbox` matches tasks with no project as well as tasks in the Inbox project.
 - Task editing, separate Subtask and Step lists, priority, dates, deadlines, structured repeat and completion history.
 - Visible planning stage, context, task options, start-ahead window and Deep/Shallow effort in task details.
 - Plan and Focus reuse the existing planning components; Mail is a separate inbox that creates tasks only on request.
@@ -30,7 +31,14 @@ or select Standalone action to schedule the Task itself. Only these executable i
 and estimate. A Step cannot contain children. Task details can add, complete, reopen or delete either kind
 of child. A dependency names its prerequisite; Blocked is derived from unfinished prerequisites.
 
+Completing a task completes its open children, recurring ones included. Completing a recurring task records
+one occurrence, moves its date and deadline to the next one and reopens its Subtasks and Steps for that cycle,
+as Todoist does. Reopening a child also reopens its completed parents; a child under a completed parent stays
+editable.
+
 Repeat uses frequency, interval and calendar controls; imported custom rules remain intact until replaced.
+A monthly or yearly rule anchored after the 28th uses the month's last day when that date does not exist, and
+task rows show every rule in words.
 Date keeps Time and Repeat collapsed until selected; existing settings remain visible as compact summaries.
 Start ahead uses days or weeks before the real Deadline and places the task in Plan Review's Start now lane.
 It does not send a timed notification. Effort is a task property, so it needs no technical label.
